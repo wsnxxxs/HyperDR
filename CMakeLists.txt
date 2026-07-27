@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(HyperDR VERSION 0.2.0 LANGUAGES CXX)
+project(HyperDR VERSION 0.2.1 LANGUAGES CXX)
 
 if(NOT WIN32 OR NOT MSVC)
   message(FATAL_ERROR "HyperDR requires Windows with MSVC")
@@ -87,7 +87,7 @@ install(DIRECTORY apps/panel/ DESTINATION apps/panel COMPONENT Runtime
   PATTERN "*.pyc" EXCLUDE)
 # The panel derives its settings vocabulary from this file, so it ships too.
 install(FILES schema/settings.json schema/report.json DESTINATION schema COMPONENT Runtime)
-install(FILES "启动界面.bat" DESTINATION . COMPONENT Runtime)
+install(FILES Start.bat DESTINATION . COMPONENT Runtime)
 install(FILES scripts/start_hyperdr_lan.ps1 DESTINATION scripts COMPONENT Runtime)
 install(FILES LICENSE THIRD_PARTY_NOTICES.md CHANGELOG.md DESTINATION . COMPONENT Runtime)
 install(FILES docs/iphone-lan.md DESTINATION docs COMPONENT Runtime)

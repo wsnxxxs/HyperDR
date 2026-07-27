@@ -6,14 +6,14 @@ import { role } from "../core/dom.js";
 const STORAGE_KEY = "hyperdr.theme";
 const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
 
-const resolved = () =>
+export const resolvedTheme = () =>
   document.documentElement.dataset.theme || (systemDark.matches ? "dark" : "light");
 
 export function mountTheme() {
   const button = role("theme-toggle");
 
   function reflect() {
-    const dark = resolved() === "dark";
+    const dark = resolvedTheme() === "dark";
     const label = dark ? "切换到浅色模式" : "切换到深色模式";
     button.setAttribute("aria-pressed", String(dark));
     button.setAttribute("aria-label", label);
@@ -21,7 +21,7 @@ export function mountTheme() {
   }
 
   button.addEventListener("click", () => {
-    const next = resolved() === "dark" ? "light" : "dark";
+    const next = resolvedTheme() === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = next;
     try { localStorage.setItem(STORAGE_KEY, next); } catch (_) {}
     reflect();

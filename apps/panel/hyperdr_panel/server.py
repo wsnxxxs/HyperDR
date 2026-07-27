@@ -1,6 +1,6 @@
 """Starting the panel: ports, TLS, addresses, and the background cleanup.
 
-The service is meant to be started by double-clicking `启动界面.bat` and stopped by
+The service is meant to be started by double-clicking `Start.bat` and stopped by
 closing the window, so everything here optimises for that: it picks a free port
 rather than failing, prints the phone-reachable URL, and cleans up its own
 workspace on a timer.

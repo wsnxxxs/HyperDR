@@ -13,7 +13,6 @@ import { mountControls } from "./settings/controls.js";
 import { createCurve } from "./preview/curve.js";
 import { mountStage } from "./preview/stage.js";
 import { mountRunner } from "./run/runner.js";
-import { mountCommand } from "./ui/command.js";
 import { createToast } from "./ui/toast.js";
 import { mountTheme } from "./ui/theme.js";
 
@@ -49,8 +48,7 @@ const stage = mountStage(store, { curve, toast });
 
 mountControls(store);
 
-const showCommand = mountCommand(store);
-mountRunner(store, { toast, showCommand });
+mountRunner(store, { toast });
 
 /** Service availability. Failure here is informational: the panel still runs
  *  offline as a look at the interface, it simply cannot convert anything. */

@@ -116,8 +116,26 @@ jobs:
       fail-fast: false
       matrix:
         avx2: [false, true]
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/.vcpkg
     steps:
       - uses: actions/checkout@v4
+
+      # Hosted Windows images may ship a shallow or otherwise incomplete vcpkg
+      # repository. Check out the manifest baseline explicitly so cache misses
+      # remain reproducible instead of depending on runner image state.
+      - name: Check out the pinned vcpkg baseline
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: 43643e1f5cf73db40d0d4bd610183348eb09b24e
+          path: .vcpkg
+
+      - name: Bootstrap vcpkg
+        run: ./.vcpkg/bootstrap-vcpkg.bat -disableMetrics
+
+      - name: Activate the MSVC build environment
+        uses: ilammy/msvc-dev-cmd@v1
 
       - name: Cache vcpkg binaries
         uses: actions/cache@v4
@@ -134,7 +152,7 @@ jobs:
         run: >
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
           -DVCPKG_TARGET_TRIPLET=x64-windows
           -DHYPERDR_ENABLE_AVX2=${{ matrix.avx2 && 'ON' || 'OFF' }}
 
@@ -145,7 +163,7 @@ jobs:
         run: >
           powershell -NoProfile -ExecutionPolicy Bypass
           -File scripts/prepare_x265_multibit.ps1
-          -VcpkgRoot "$env:VCPKG_INSTALLATION_ROOT"
+          -VcpkgRoot "$env:VCPKG_ROOT"
           -BuildDirectory ./build -Configuration Release
 
       - name: Test

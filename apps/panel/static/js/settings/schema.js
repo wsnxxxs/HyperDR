@@ -104,7 +104,7 @@ export const CONTROLS = [
 
 export const CONTROLS_BY_KEY = new Map(CONTROLS.map((control) => [control.key, control]));
 
-/** Keys that appear in the object sent to /api/run, /api/command and /api/curve. */
+/** Keys that appear in the object sent to /api/run and /api/curve. */
 export const OPTION_KEYS = ["encoding", ...CONTROLS.map((control) => control.key)];
 
 export function defaultSettings() {

@@ -32,7 +32,7 @@ For a packaged Windows release:
 
 1. Extract the ZIP to a writable directory.
 2. Install Python 3.11 or newer if you want the browser panel.
-3. Double-click `启动界面.bat`, or run `bin\HyperDR.exe --help` for command-line use.
+3. Double-click `Start.bat`, or run `bin\HyperDR.exe --help` for command-line use.
 
 The release process converts and self-verifies a generated test image in all six
 output encodings after extracting the archive. See
@@ -364,7 +364,7 @@ GPU encoding remains outside this project's scope.
 
 The browser panel supports authenticated LAN uploads, isolated conversion jobs,
 WebGPU extended-range live preview, exact Adaptive HDR result preview, and HEIC/
-Ultra HDR JPEG download. Start `启动界面.bat` and open the printed tokenized iPhone URL. Plain HTTP
+Ultra HDR JPEG download. Start `Start.bat` and open the printed tokenized iPhone URL. Plain HTTP
 supports upload and conversion; trusted HTTPS is required for WebGPU on a LAN
 origin. See `docs/iphone-lan.md` for certificate setup and iPhone instructions.
 

@@ -70,14 +70,9 @@
               <button class="button" type="button" data-role="cancel" hidden>取消</button>
             </div>
           </div>
+          <p class="run-progress" data-role="run-progress" role="status"
+             aria-live="polite" aria-atomic="true" hidden></p>
           <a class="button is-result" data-role="download" hidden download>保存到设备</a>
-        </div>
-        <div class="command-preview">
-          <div class="command-preview-head">
-            <span class="note">将要执行的命令</span>
-            <button class="button is-compact" type="button" data-role="command-copy">复制</button>
-          </div>
-          <code data-role="command" aria-live="polite">—</code>
         </div>
       </section>
     </aside>
@@ -114,6 +109,8 @@
           <span class="hdr-status" data-role="hdr-status"></span>
           <span class="viewer-divider" aria-hidden="true"></span>
           <span data-role="viewer-caption">选择一张图片</span>
+          <button class="pill-toggle zoom-toggle" type="button"
+                  data-role="zoom-toggle" disabled>检查 100%</button>
           <button class="pill-toggle preview-toggle" type="button" aria-pressed="false"
                   data-role="mobile-hdr" disabled>查看原图</button>
         </p>
@@ -124,12 +121,12 @@
              accept="image/*,.arw,.dng,.jpg,.jpeg,.png,.heic,.heif">
 
       <div class="stage" data-role="stage" tabindex="0" role="button" aria-busy="false" aria-pressed="false">
-        <div class="stage-frame">
+        <div class="stage-frame" data-role="stage-frame">
           <canvas data-role="canvas-hdr" hidden aria-label="WebGPU 真 HDR 预览"></canvas>
           <canvas data-role="canvas-sdr" hidden aria-label="SDR 回退预览"></canvas>
           <canvas class="stage-zebra" data-role="canvas-zebra" hidden aria-hidden="true"></canvas>
-          <span class="stage-badge" data-role="hdr-badge" hidden>HDR</span>
         </div>
+        <span class="stage-badge" data-role="hdr-badge" hidden>HDR</span>
         <div class="stage-empty" data-role="stage-empty">
           <span class="stage-plus" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
@@ -140,25 +137,34 @@
         </div>
       </div>
 
-      <div class="scope" data-role="scope">
-        <div class="scope-bar">
-          <span class="scope-label">源亮度分布</span>
-          <div class="segmented is-small" role="group" aria-label="直方图模式" data-role="hist-mode"></div>
+      <details class="scope" data-role="scope" open>
+        <summary class="scope-summary">
+          <span class="scope-label">直方图与裁切</span>
+          <span class="scope-summary-readings">
+            <span>高光 <b data-role="clip-hot-summary">0.0%</b></span>
+            <span>暗部 <b data-role="clip-cold-summary">0.0%</b></span>
+          </span>
+        </summary>
+        <div class="scope-body">
+          <div class="scope-bar">
+            <span class="scope-label">源亮度分布</span>
+            <div class="segmented is-small" role="group" aria-label="直方图模式" data-role="hist-mode"></div>
+          </div>
+          <canvas class="scope-graph" data-role="histogram" width="720" height="84"></canvas>
+          <div class="scope-clip">
+            <button class="chip is-hot" type="button" data-role="clip-hot">
+              <span class="chip-swatch"></span>高光裁切 <b data-role="clip-hot-value">0.0%</b>
+            </button>
+            <button class="chip is-cold" type="button" data-role="clip-cold">
+              <span class="chip-swatch"></span>暗部裁切 <b data-role="clip-cold-value">0.0%</b>
+            </button>
+            <span class="scope-spacer"></span>
+            <button class="switch" type="button" role="switch" aria-checked="false" data-role="zebra-toggle">
+              <span class="switch-track" aria-hidden="true"></span><span>斑马纹</span>
+            </button>
+          </div>
         </div>
-        <canvas class="scope-graph" data-role="histogram" width="720" height="84"></canvas>
-        <div class="scope-clip">
-          <button class="chip is-hot" type="button" data-role="clip-hot">
-            <span class="chip-swatch"></span>高光裁切 <b data-role="clip-hot-value">0.0%</b>
-          </button>
-          <button class="chip is-cold" type="button" data-role="clip-cold">
-            <span class="chip-swatch"></span>暗部裁切 <b data-role="clip-cold-value">0.0%</b>
-          </button>
-          <span class="scope-spacer"></span>
-          <button class="switch" type="button" role="switch" aria-checked="false" data-role="zebra-toggle">
-            <span class="switch-track" aria-hidden="true"></span><span>斑马纹</span>
-          </button>
-        </div>
-      </div>
+      </details>
     </section>
 
   </main>

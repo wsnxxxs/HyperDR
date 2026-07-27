@@ -16,19 +16,26 @@ import { role, setText } from "../core/dom.js";
 import { toOptions } from "../settings/schema.js";
 
 const POLL_INTERVAL_MS = 400;
+const MAX_CONSECUTIVE_POLL_FAILURES = 8;
 const desktopLayout = window.matchMedia("(min-width: 641px)");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export function mountRunner(store, { toast, showCommand }) {
+export function mountRunner(store, { toast }) {
   const runButton = role("run");
   const cancelButton = role("cancel");
   const pickButton = role("pick-output");
   const pickLabel = role("pick-output-label");
   const download = role("download");
+  const progress = role("run-progress");
 
   let activeJobId = "";
   let isRunning = false;
+
+  function setProgress(message = "") {
+    setText(progress, message);
+    progress.hidden = !message;
+  }
 
   function syncRunAvailability() {
     runButton.disabled =
@@ -41,7 +48,10 @@ export function mountRunner(store, { toast, showCommand }) {
     setText(runButton, running ? "转换中…" : "开始转换");
     cancelButton.hidden = !running;
     cancelButton.disabled = false;
-    if (!running) activeJobId = "";
+    if (!running) {
+      activeJobId = "";
+      setProgress();
+    }
   }
 
   /** Resolves with the finished job record, or `{abandoned}` if superseded. */
@@ -53,14 +63,27 @@ export function mountRunner(store, { toast, showCommand }) {
   async function followJob(jobId) {
     let offset = 0;
     let log = "";
+    let pollFailures = 0;
     for (;;) {
       await sleep(POLL_INTERVAL_MS);
       if (activeJobId !== jobId) return { abandoned: true };
       let update;
-      try { update = await api.log(jobId, offset); }
-      catch (_) { continue; }  // A dropped poll is not a failed job.
+      try {
+        update = await api.log(jobId, offset);
+        pollFailures = 0;
+      } catch (error) {
+        pollFailures++;
+        if (pollFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
+          return { pollFailed: true, error, log };
+        }
+        continue;  // A single dropped poll is not a failed job.
+      }
       if (update.offset != null) offset = update.offset;
-      if (typeof update.text === "string") log += update.text;
+      if (typeof update.text === "string") {
+        log += update.text;
+        const line = lastLine(log);
+        if (line) setProgress(line);
+      }
       if (update.done) return { ...update, log };
     }
   }
@@ -125,6 +148,7 @@ export function mountRunner(store, { toast, showCommand }) {
     if (!store.value("file")) { toast("请先选择图片。", true); return; }
 
     setRunning(true);
+    setProgress("正在启动转换…");
     store.set({ resultUrl: "" });
 
     let started;
@@ -136,13 +160,15 @@ export function mountRunner(store, { toast, showCommand }) {
       return;
     }
 
-    if (typeof started.command === "string") showCommand(started.command);
     activeJobId = started.jobId;
+    setProgress("转换已启动，等待处理日志…");
 
     const result = await followJob(started.jobId);
     if (result.abandoned) return;
 
-    if (result.cancelled) {
+    if (result.pollFailed) {
+      toast("无法继续读取转换进度：" + result.error.message, true);
+    } else if (result.cancelled) {
       toast("已取消转换");
     } else if (result.timedOut) {
       toast("转换超时已终止", true);

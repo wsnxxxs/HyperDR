@@ -6,6 +6,7 @@
  */
 
 import { role, setPressed, setText } from "../core/dom.js";
+import { resolvedTheme } from "../ui/theme.js";
 
 /** One pass over the source: luma + per-channel counts, clipping, zebra mask. */
 export function analyse(source) {
@@ -59,7 +60,9 @@ export function analyse(source) {
  * background: overlapping RGB channels are combined with `lighter` on a dark
  * graph and `multiply` on a light one, since either one alone washes the
  * channels out on the wrong surface. */
-const PALETTE_KEYS = ["grid", "luma", "red", "green", "blue", "marker", "blend"];
+const PALETTE_KEYS = ["grid", "luma", "red", "green", "blue", "marker"];
+const MOBILE_SCOPE = "(max-width: 640px)";
+const SCOPE_OPEN_KEY = "hyperdr.mobileScopeOpen";
 
 function readPalette(canvas) {
   const style = getComputedStyle(canvas);
@@ -67,6 +70,7 @@ function readPalette(canvas) {
   for (const key of PALETTE_KEYS) {
     palette[key] = style.getPropertyValue(`--hist-${key}`).trim();
   }
+  palette.blend = resolvedTheme() === "dark" ? "lighter" : "multiply";
   return palette;
 }
 
@@ -96,11 +100,26 @@ export function mountScope(store, { analysis }) {
   const zebraToggle = role("zebra-toggle");
   const hotChip = role("clip-hot");
   const coldChip = role("clip-cold");
+  const hotSummary = role("clip-hot-summary");
+  const coldSummary = role("clip-cold-summary");
+  const mobileScope = window.matchMedia(MOBILE_SCOPE);
+
+  function savedMobileOpen() {
+    try {
+      const value = localStorage.getItem(SCOPE_OPEN_KEY);
+      return value == null ? false : value === "true";
+    } catch (_) {
+      return false;
+    }
+  }
+
+  container.open = mobileScope.matches ? savedMobileOpen() : true;
 
   const toggleZebra = () => store.set({ zebra: !store.value("zebra") });
   for (const node of [zebraToggle, hotChip, coldChip]) node.addEventListener("click", toggleZebra);
 
   function draw() {
+    if (!container.open) return;
     const data = analysis.current;
     if (!data) return;
     const context = canvas.getContext("2d");
@@ -150,6 +169,17 @@ export function mountScope(store, { analysis }) {
 
   store.watch(["histMode", "expansionStart"], draw);
 
+  container.addEventListener("toggle", () => {
+    if (mobileScope.matches) {
+      try { localStorage.setItem(SCOPE_OPEN_KEY, String(container.open)); } catch (_) {}
+    }
+    if (container.open) draw();
+  });
+  mobileScope.addEventListener?.("change", () => {
+    container.open = mobileScope.matches ? savedMobileOpen() : true;
+    if (container.open) draw();
+  });
+
   // Canvas pixels are not restyled by a theme flip the way the DOM is, so the
   // graph is repainted whenever the resolved theme could have changed: the
   // toggle writes `data-theme`, and with no stored choice the system does.
@@ -174,11 +204,17 @@ export function mountScope(store, { analysis }) {
       canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
       setText(role("clip-hot-value"), "0.0%");
       setText(role("clip-cold-value"), "0.0%");
+      setText(hotSummary, "0.0%");
+      setText(coldSummary, "0.0%");
       zebraCanvas.hidden = true;
       return;
     }
-    setText(role("clip-hot-value"), `${(data.clipping.hot * 100).toFixed(1)}%`);
-    setText(role("clip-cold-value"), `${(data.clipping.cold * 100).toFixed(1)}%`);
+    const hot = `${(data.clipping.hot * 100).toFixed(1)}%`;
+    const cold = `${(data.clipping.cold * 100).toFixed(1)}%`;
+    setText(role("clip-hot-value"), hot);
+    setText(role("clip-cold-value"), cold);
+    setText(hotSummary, hot);
+    setText(coldSummary, cold);
     draw();
     paintZebra();
   };

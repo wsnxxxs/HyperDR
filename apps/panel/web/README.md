@@ -25,21 +25,26 @@ web/
 ├── css/
 │   ├── tokens.css      唯一写字面颜色/圆角/时长的地方
 │   ├── base.css        reset 与元素默认样式
-│   └── shell.css       应用框架布局
+│   ├── shell.css       应用框架布局
+│   └── components.css  各区域组件（舞台、直方图、控件、dock、结果卡）
 └── js/
-    ├── main.js         入口：启动，然后把每个区域交给对应屏幕
-    └── core/
-        ├── api.js      全部 HTTP 调用
-        └── store.js    唯一的可观察状态
+    ├── main.js         组合根：启动，然后把每个区域交给对应模块
+    ├── core/           api.js（全部 HTTP 调用）、store.js（唯一可观察状态）、dom.js
+    ├── settings/       schema.js（控件单一声明）与 controls.js（控件构建）
+    ├── preview/        stage.js（摄入/渲染器阶梯/分割对照）、scope.js（双分布直方图）、
+    │                   mask.js（滑杆作用遮罩）、curve.js、cpu/gpu/sdr-gpu 渲染器、session.js
+    ├── run/            runner.js（轮询、阶段进度、结果卡、导出）
+    └── ui/             toast.js、theme.js
 ```
 
 ## 规矩
 
 1. **服务端契约是冻结的。** 见 `docs/panel-api-contract.md`。需要新字段就先在 `main` 上改服务端和契约，再把 `main` 合并回来。
-2. **颜色只写在 `tokens.css`。** 别处一律引用变量。旧样式表 1251 行里同一个灰写了四十多遍、还有三个略微不同的值，面板因此从来没和自己对齐过。
+2. **颜色只写在 `tokens.css`。** 别处一律引用变量。旧样式表 1251 行里同一个灰写了四十多遍、还有三个略微不同的值，面板因此从来没和自己对齐过。画布像素要用的颜色（直方图、斑马纹、遮罩）以 `@property <color>` 注册后由 JS 用 `getComputedStyle` 读回，值仍然只住在 tokens.css。
 3. **状态只放在 `store.js`。** 视图订阅它，本身不持有状态。
 4. **不用 `<base>` 标签。** 面板的 CSP 设了 `base-uri 'none'`。资源用相对路径引用，这样这棵树也能直接从磁盘打开。
 5. **区域可以是空的。** 没写完的地方保留占位符，去和 `/` 上的旧面板对比，而不是先塞一个半成品进去。
+6. **`data-role` 用字面量查找。** `scripts/check_panel_roles.py` 对两棵树做双向检查（声明 ↔ 读取），变量拼出来的角色名它看不见。
 
 ## 切换默认（cutover 时做，现在别做）
 

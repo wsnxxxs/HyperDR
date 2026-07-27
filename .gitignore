@@ -31,7 +31,9 @@ __pycache__/
 /output/playwright/
 /.playwright-cli/
 /dist/
+/dist-release-*/
 /release-stage/
+/.workbuddy/
 
 # Resume sidecars and decode caches live beside conversion output.
 .hyperdr/

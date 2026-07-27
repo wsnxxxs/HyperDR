@@ -30,9 +30,13 @@ suite. For a map of the repository and its single sources of truth, see
 
 For a packaged Windows release:
 
-1. Extract the ZIP to a writable directory.
+1. Extract the ZIP to a writable directory. Any location works; nothing is
+   stored next to the program.
 2. Install Python 3.11 or newer if you want the browser panel.
-3. Double-click `Start.bat`, or run `bin\HyperDR.exe --help` for command-line use.
+3. Double-click `Setup-HTTPS.bat` once if you want the iPhone HDR preview; it
+   issues a certificate authority unique to this computer and prints the two
+   iPhone trust steps.
+4. Double-click `Start.bat`, or run `bin\HyperDR.exe --help` for command-line use.
 
 The release process converts and self-verifies a generated test image in all six
 output encodings after extracting the archive. See
@@ -366,7 +370,16 @@ The browser panel supports authenticated LAN uploads, isolated conversion jobs,
 WebGPU extended-range live preview, exact Adaptive HDR result preview, and HEIC/
 Ultra HDR JPEG download. Start `Start.bat` and open the printed tokenized iPhone URL. Plain HTTP
 supports upload and conversion; trusted HTTPS is required for WebGPU on a LAN
-origin. See `docs/iphone-lan.md` for certificate setup and iPhone instructions.
+origin, because a browser exposes WebGPU only in a secure context and
+dismissing a certificate warning does not create one.
+
+`Setup-HTTPS.bat` handles that once per computer: it installs `mkcert` through
+winget when needed, creates a certificate authority belonging to that machine
+alone, issues the server certificate into `%LOCALAPPDATA%\HyperDR\tls`, and
+exports the public root certificate for the phone. No authority and no private
+key is ever shipped in a release archive. When the router later assigns a new
+address, `Start.bat` re-issues the server certificate from the same authority
+automatically and the phone needs no changes. See `docs/iphone-lan.md`.
 
 ## Contributing and security
 

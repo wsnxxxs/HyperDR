@@ -134,6 +134,9 @@ jobs:
       - name: Bootstrap vcpkg
         run: ./.vcpkg/bootstrap-vcpkg.bat -disableMetrics
 
+      - name: Activate the MSVC build environment
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Cache vcpkg binaries
         uses: actions/cache@v4
         with:

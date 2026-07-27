@@ -5,7 +5,7 @@ HyperDR 现在可以由 Windows 电脑在局域网内提供服务。iPhone 负�
 ## 快速启动（HTTP）
 
 1. 确认 iPhone 与电脑连接到同一个可信 Wi-Fi。
-2. 双击项目根目录的 `启动界面.bat`。
+2. 双击项目根目录的 `Start.bat`。
 3. Windows 防火墙询问时，只允许“专用网络”。
 4. 启动窗口会打印一个带临时访问口令的 `iPhone 地址`，例如：
 
@@ -50,7 +50,8 @@ Safari 应使用启动窗口打印的 `https://局域网地址:端口/?token=...
 ## HDR 预览层级
 
 - 滑块拖动：在受信任 HTTPS、HDR 屏幕和 Safari 26+ 环境中使用 WebGPU `rgba16float` 扩展 Display P3 输出；其他环境明确回退到 WebGL2 GPU 加速的 SDR 示意。
-- iPhone 会直接向后端请求最长边 960 像素的预览，桌面端请求 1280 像素；后端按尺寸分别缓存，避免手机先下载 2048 像素图再缩放。
+- 面板按预览框与设备像素比在 960 / 1440 / 2048 三档中请求；不具备 WebGPU HDR
+  前置条件时最长边不超过 1280 像素，避免纯 JavaScript CPU 回退拖慢滑杆。
 - 状态栏与画面角标会明确显示“真 HDR”“SDR 预览”或“原图”，不会再用 `HDR ON` 混淆真实渲染能力。
 - “精确 HDR 预览”：调用与正式转换相同的 RAW、高光恢复、色调和增益图管线，生成 Adaptive HDR HEIC。Safari 26+ 可在网页内显示；不支持 HEIC 网页显示的浏览器会保留下载按钮。
 - “开始转换”：按所选 Adaptive/Ultra HDR/PQ/HLG 模式生成最终文件。对 iPhone 预览和分享，优先使用“增益图”。

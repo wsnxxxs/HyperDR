@@ -7,7 +7,7 @@ the source tree or tests.
    `C:\Apps\HyperDR`.
 2. Install Python 3.11 or newer from python.org, including `tkinter` and the
    option to add Python to `PATH`.
-3. Double-click `启动界面.bat`.
+3. Double-click `Start.bat`.
 
 The application starts a local HyperDR panel and prints a temporary LAN URL.
 Keep the terminal open while using the panel. See `docs\iphone-lan.md` for

@@ -1,0 +1,46 @@
+/build*/
+/.vs/
+/.vscode/
+/.sync_probe
+.idea/
+.clangd/
+*.heic
+*.ARW
+*.arw
+*.tif
+*.tiff
+*.jsonl
+
+# Local configuration, credentials, and development certificates.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+*.crt
+*.cer
+secrets/
+
+
+__pycache__/
+*.pyc
+/.pytest_cache/
+/hdr-workspace/
+/output/playwright/
+/.playwright-cli/
+/dist/
+/release-stage/
+
+# Resume sidecars and decode caches live beside conversion output.
+.hyperdr/
+*.hdrcache
+
+# Local test fixtures and generated conversion reports.
+/test-data/
+/reports/
+*.report.json
+
+# Agent worktrees and local agent state.
+.claude/

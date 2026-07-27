@@ -1,0 +1,20 @@
+﻿{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "hyperdr",
+  "version-string": "0.2.0",
+  "builtin-baseline": "43643e1f5cf73db40d0d4bd610183348eb09b24e",
+  "dependencies": [
+    "libraw",
+    {
+      "name": "libavif",
+      "features": [ "aom" ]
+    },
+    "libjpeg-turbo",
+    "libpng",
+    "lcms",
+    {
+      "name": "libheif",
+      "features": [ "hevc" ]
+    }
+  ]
+}

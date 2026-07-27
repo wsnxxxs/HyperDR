@@ -1,0 +1,214 @@
+{
+  "schema": 1,
+  "tool": "0.2.0",
+  "settings": [
+    {
+      "key": "encoding",
+      "flag": "--encoding",
+      "kind": "enum",
+      "choices": [
+        "adaptive",
+        "ultrahdr",
+        "pq",
+        "hlg",
+        "avif-pq",
+        "avif-hlg"
+      ],
+      "affects_output_bytes": true,
+      "help": "Output representation",
+      "default": "adaptive"
+    },
+    {
+      "key": "look",
+      "flag": "--look",
+      "kind": "enum",
+      "choices": [
+        "photographic",
+        "neutral"
+      ],
+      "affects_output_bytes": true,
+      "help": "Renderer; neutral is the legacy fallback",
+      "default": "photographic"
+    },
+    {
+      "key": "highlight_recovery",
+      "flag": "--highlight-recovery",
+      "kind": "enum",
+      "choices": [
+        "blend",
+        "reconstruct",
+        "clip",
+        "unclip"
+      ],
+      "affects_output_bytes": true,
+      "help": "RAW clipped-highlight handling",
+      "default": "blend"
+    },
+    {
+      "key": "contrast",
+      "flag": "--contrast",
+      "kind": "number",
+      "minimum": 0.8,
+      "maximum": 1.35,
+      "affects_output_bytes": true,
+      "help": "Photographic mid-tone slope",
+      "default": 1.080000043
+    },
+    {
+      "key": "vibrance",
+      "flag": "--vibrance",
+      "kind": "number",
+      "minimum": -0.5,
+      "maximum": 0.5,
+      "affects_output_bytes": true,
+      "help": "Photographic saturation of unsaturated colours",
+      "default": 0.1199999973
+    },
+    {
+      "key": "pop",
+      "flag": "--pop",
+      "kind": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "affects_output_bytes": true,
+      "help": "Photographic EDR strength boost",
+      "default": 0
+    },
+    {
+      "key": "headroom_max",
+      "flag": "--headroom-max",
+      "kind": "number",
+      "minimum": 0,
+      "maximum": 4,
+      "affects_output_bytes": true,
+      "help": "Photographic auto-headroom ceiling, in stops",
+      "default": 4
+    },
+    {
+      "key": "expansion_start",
+      "flag": "--expansion-start",
+      "kind": "number",
+      "minimum": 0.18,
+      "maximum": 0.75,
+      "affects_output_bytes": true,
+      "help": "Linear SDR level where HDR expansion begins",
+      "default": 0.4799999893
+    },
+    {
+      "key": "area_coverage",
+      "flag": "--area-coverage",
+      "kind": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "affects_output_bytes": true,
+      "help": "Bright-region coverage, local highlights to broad tones",
+      "default": 0.349999994
+    },
+    {
+      "key": "gain_strength",
+      "flag": "--gain-strength",
+      "kind": "number",
+      "minimum": 0,
+      "maximum": 2,
+      "affects_output_bytes": true,
+      "help": "Gain-map scale; photographic values above 1 are capped",
+      "default": 1
+    },
+    {
+      "key": "exposure_bias",
+      "flag": "--exposure-bias",
+      "kind": "number",
+      "minimum": 0,
+      "maximum": 2,
+      "affects_output_bytes": true,
+      "help": "Creative offset applied after exposure selection",
+      "default": 1
+    },
+    {
+      "key": "exposure",
+      "flag": "--exposure",
+      "kind": "auto_or_number",
+      "minimum": -10,
+      "maximum": 10,
+      "affects_output_bytes": true,
+      "help": "Exposure selection",
+      "default": "auto"
+    },
+    {
+      "key": "headroom",
+      "flag": "--headroom",
+      "kind": "auto_or_number",
+      "minimum": 0,
+      "maximum": 4,
+      "affects_output_bytes": true,
+      "help": "HDR headroom target",
+      "default": "auto"
+    },
+    {
+      "key": "quality",
+      "flag": "--quality",
+      "kind": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "affects_output_bytes": true,
+      "help": "Encoder quality",
+      "default": 90
+    },
+    {
+      "key": "depth",
+      "flag": "--depth",
+      "kind": "integer",
+      "minimum": 8,
+      "maximum": 10,
+      "affects_output_bytes": true,
+      "help": "HEIC base depth; Ultra HDR JPEG requires 8",
+      "default": 8
+    },
+    {
+      "key": "preview_max_edge",
+      "flag": "--preview-max-edge",
+      "kind": "integer",
+      "minimum": 0,
+      "maximum": 8192,
+      "affects_output_bytes": true,
+      "help": "Bound resolution before look processing",
+      "default": 0
+    },
+    {
+      "key": "recursive",
+      "flag": "--recursive",
+      "kind": "boolean",
+      "flag_sets_false": false,
+      "affects_output_bytes": false,
+      "help": "Scan subdirectories",
+      "default": false
+    },
+    {
+      "key": "verify_output",
+      "flag": "--no-verify",
+      "kind": "boolean",
+      "flag_sets_false": true,
+      "affects_output_bytes": false,
+      "help": "Skip post-encode decode verification",
+      "default": true
+    },
+    {
+      "key": "overwrite",
+      "flag": "--overwrite",
+      "kind": "boolean",
+      "flag_sets_false": false,
+      "affects_output_bytes": false,
+      "help": "Replace existing outputs",
+      "default": false
+    },
+    {
+      "key": "skip_existing",
+      "flag": "--skip-existing",
+      "kind": "boolean",
+      "flag_sets_false": false,
+      "affects_output_bytes": false,
+      "help": "Skip outputs already rendered from the same input and settings",
+      "default": false
+    }
+  ]
+}

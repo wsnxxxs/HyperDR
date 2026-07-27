@@ -1,0 +1,6 @@
+hyperdr_add_test(gain_map_test LINK HyperDR::gainmap)
+hyperdr_add_test(gain_gamma_test LINK HyperDR::gainmap)
+hyperdr_add_test(local_gain_test LINK HyperDR::gainmap)
+hyperdr_add_test(look_pipeline_test LINK HyperDR::gainmap)
+hyperdr_add_test(pop_parallel_test LINK HyperDR::gainmap)
+hyperdr_add_test(render_regression_test LINK HyperDR::gainmap)

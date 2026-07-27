@@ -1,0 +1,179 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The dependency-free Windows core carries the renderer and almost all tests.
+  core:
+    name: Core (Windows, ${{ matrix.build_type }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake -S . -B build-core
+          -DHYPERDR_WITH_CODECS=OFF
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+      - name: Build
+        run: cmake --build build-core --config ${{ matrix.build_type }} --parallel
+
+      - name: Test
+        run: ctest --test-dir build-core -C ${{ matrix.build_type }} --output-on-failure
+
+      # schema/settings.json is generated output that the browser panel reads at
+      # import time. If a setting changed and it was not regenerated, the panel
+      # would validate against a vocabulary the converter no longer has.
+      - name: Check the checked-in settings schema is current
+        shell: bash
+        run: |
+          "$(find build-core -maxdepth 3 -name 'HyperDR.exe' | head -1)" schema > /tmp/schema.json
+          diff -u schema/settings.json /tmp/schema.json
+
+      - name: Parse the report JSON Schema
+        run: python -m json.tool schema/report.json NUL
+
+  panel:
+    name: Panel (Python ${{ matrix.python }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip pytest
+
+      - name: Test
+        run: python -m pytest tests/python -q
+
+      # The panel derives its settings vocabulary from schema/settings.json, so
+      # the file has to parse and cover every key the panel can store.
+      - name: Check the panel reads the settings schema
+        run: python -c "import sys; sys.path.insert(0, 'apps/panel'); from hyperdr_panel import schema; print(len(schema.SETTINGS), 'settings from', schema.TOOL_VERSION)"
+
+      - name: Byte-compile the panel
+        run: python -m compileall -q apps/panel
+
+  frontend:
+    name: Front-end syntax
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # The panel ships as static files with no build step, so a parse check is
+      # the whole of the available static verification. Every file is checked as
+      # a module: they use import/export, which `node --check` rejects by
+      # default, so a plain check would pass for the wrong reason.
+      - name: Check every front-end module parses
+        shell: bash
+        run: |
+          set -e
+          found=0
+          for file in $(find apps/panel/static/js -name '*.js'); do
+            node --input-type=module --check < "$file" || { echo "FAILED: $file"; exit 1; }
+            found=$((found + 1))
+          done
+          test "$found" -gt 0 || { echo "no front-end modules found"; exit 1; }
+          echo "$found modules parsed"
+
+      # Markup and modules are wired by data-role. A typo in either is invisible
+      # until the panel is opened, so the two sides are compared here instead.
+      - name: Check every data-role a module reads exists in the markup
+        run: python scripts/check_panel_roles.py
+
+  # The full configuration: LibRaw, libheif, libavif, libultrahdr and the x265
+  # Main10 runtime. This is the build that produces shippable binaries, so it
+  # runs last and is allowed to be slow.
+  codecs:
+    name: Codecs (Windows, ${{ matrix.avx2 && 'AVX2' || 'SSE' }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        avx2: [false, true]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache vcpkg binaries
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/vcpkg-cache
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: vcpkg-${{ runner.os }}-
+
+      - uses: lukka/get-cmake@latest
+
+      - name: Configure
+        env:
+          VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/vcpkg-cache,readwrite
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=x64-windows
+          -DHYPERDR_ENABLE_AVX2=${{ matrix.avx2 && 'ON' || 'OFF' }}
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Prepare the Main10 x265 runtime
+        run: >
+          powershell -NoProfile -ExecutionPolicy Bypass
+          -File scripts/prepare_x265_multibit.ps1
+          -VcpkgRoot "$env:VCPKG_INSTALLATION_ROOT"
+          -BuildDirectory ./build -Configuration Release
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Package the runtime
+        run: cpack --config build/CPackConfig.cmake -G ZIP -B dist -C Release
+
+      - name: Smoke-test the unpacked release
+        shell: pwsh
+        run: |
+          $archive = Get-ChildItem -LiteralPath dist -Filter "HyperDR-*-windows-x64.zip" |
+            Select-Object -First 1
+          if (-not $archive) { throw "CPack did not produce a release archive." }
+          ./packaging/test-release.ps1 -Archive $archive.FullName
+
+      - name: Upload the AVX2 release
+        if: success() && matrix.avx2
+        uses: actions/upload-artifact@v4
+        with:
+          name: HyperDR-windows-x64-avx2
+          path: dist/HyperDR-*-windows-x64.zip
+          if-no-files-found: warn
+
+      - name: Upload the SSE release
+        if: success() && !matrix.avx2
+        uses: actions/upload-artifact@v4
+        with:
+          name: HyperDR-windows-x64
+          path: dist/HyperDR-*-windows-x64.zip
+          if-no-files-found: warn

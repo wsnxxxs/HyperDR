@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>面板滑杆性能自测</title>
+<link rel="stylesheet" href="./styles.css">
+<style>
+  body { padding: 24px; max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .lede { opacity: .72; font-size: 13px; line-height: 1.7; margin: 0 0 20px; }
+  section { border: 1px solid var(--border, #2a3138); border-radius: 10px;
+            padding: 16px 18px; margin-bottom: 16px; }
+  section h2 { font-size: 15px; margin: 0 0 6px; }
+  section p.why { font-size: 12.5px; opacity: .68; line-height: 1.65; margin: 0 0 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px;
+          font-variant-numeric: tabular-nums; margin-top: 12px; }
+  th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid rgba(128,140,150,.18); }
+  th:first-child, td:first-child { text-align: left; }
+  th { font-weight: 600; opacity: .7; font-size: 12px; }
+  td.win { color: #4ec98a; font-weight: 600; }
+  td.loss { color: #e0616b; font-weight: 600; }
+  .run { padding: 7px 14px; border-radius: 7px; cursor: pointer;
+         border: 1px solid var(--accent-strong, #4a90c2); background: transparent;
+         color: inherit; font: inherit; }
+  .run:disabled { opacity: .5; cursor: default; }
+  .verdict { margin-top: 12px; font-size: 13px; line-height: 1.7; }
+  .live { display: grid; gap: 10px; margin-top: 14px; }
+  .live .field-head { display: flex; justify-content: space-between; font-size: 13px; }
+  .meter { font-size: 12.5px; opacity: .8; font-variant-numeric: tabular-nums; line-height: 1.8; }
+  #hidden-controls { position: absolute; left: -9999px; top: 0; width: 320px; }
+  code { font-size: 12px; opacity: .85; }
+</style>
+</head>
+<body>
+
+<h1>面板滑杆性能自测</h1>
+<p class="lede">
+  对本次「交互层修复」的三处改动做改前 / 改后对照。改前的实现按原样复制到本页，
+  改后的路径直接调用 <code>js/</code> 下的真实模块，两者跑同一组输入。<br>
+  需要通过面板服务打开（<code>http://…/perf.html</code>），ES module 不能用 file:// 加载。
+  测量结果与机器和浏览器相关，关掉 DevTools 再跑数值更干净。
+</p>
+
+<section>
+  <h2>1. 曲线表重建（curve.js · refreshTable）</h2>
+  <p class="why">
+    一次拖动里，只有 6 个参数会改变曲线形状。改动 HDR 扩展强度、按住看原图、切换直方图模式
+    都不属于这 6 个，但改前的代码仍然每帧走 257 次 <code>Math.pow</code>。
+    这里模拟一次拖动中「形状参数不变」的绝大多数帧。
+  </p>
+  <button class="run" data-bench="curve">运行</button>
+  <div data-out="curve"></div>
+</section>
+
+<section>
+  <h2>2. 画布上下文（cpu.js · willReadFrequently）</h2>
+  <p class="why">
+    显示画布只被写入，从不 <code>getImageData</code>。改前请求了 <code>willReadFrequently</code>，
+    浏览器因此把画面留在系统内存里用软件合成。这里对同尺寸的两块画布做同样次数的
+    <code>putImageData</code> 加一次合成绘制。
+  </p>
+  <button class="run" data-bench="canvas">运行</button>
+  <div data-out="canvas"></div>
+</section>
+
+<section>
+  <h2>3. 滑杆回写（controls.js · apply）</h2>
+  <p class="why">
+    拖动时 <code>apply</code> 会把值写回正在被手指按住的 <code>input</code>，并每帧重设
+    <code>max</code> 与 <code>--fill</code>。这里对一个真实 range 元素跑两种 apply，
+    每帧强制读一次布局，把样式重算的代价计进来。耗时之外，改前那条路径还会在拖动中
+    重新落位滑块——这一点是手感问题，数字量不出来，见下方第 5 节。
+  </p>
+  <button class="run" data-bench="apply">运行</button>
+  <div data-out="apply"></div>
+</section>
+
+<section>
+  <h2>4. 完整设置流水线（真实 store + 真实 controls）</h2>
+  <p class="why">
+    挂载真实的 <code>mountControls</code>，模拟连续拖动 HDR 扩展强度：每帧
+    <code>store.set</code> → 微任务 flush → 所有 watcher 的 <code>apply</code> → 强制布局。
+    测的是一次滑杆输入在预览渲染之前要付的固定成本。
+  </p>
+  <button class="run" data-bench="pipeline">运行</button>
+  <div data-out="pipeline"></div>
+</section>
+
+<section>
+  <h2>5. 手感实测（需要你亲手拖）</h2>
+  <p class="why">
+    用真实滑杆测「输入 → 上屏」延迟：记录每个 <code>input</code> 事件到下一帧渲染回调的间隔，
+    以及相邻两帧的间隔。桌面端目标是 p95 延迟 &lt; 20ms、掉帧 0；触屏上重点看
+    <code>touch-action</code> 是否消掉了起手的那一下停顿——横向拖应当立刻跟手。
+  </p>
+  <div class="live">
+    <div class="field field-range">
+      <div class="field-head"><b>拖我</b><span data-role="live-value">0.40</span></div>
+      <input data-role="live-range" type="range" min="0" max="1" step="0.005" value="0.4">
+    </div>
+    <div class="meter" data-out="live">尚未开始拖动。</div>
+    <button class="run" data-bench="live-reset">清零</button>
+  </div>
+</section>
+
+<div id="hidden-controls">
+  <div data-role="encoding"></div><span data-role="encoding-hint"></span>
+  <div data-role="hist-mode"></div>
+  <div data-role="group-tone"></div>
+  <div data-role="group-region"></div>
+  <div data-role="group-advanced"></div>
+</div>
+
+<script type="module">
+import { createStore } from "./js/core/store.js";
+import { createCurve, LUT_SIZE } from "./js/preview/curve.js";
+import { defaultSettings, encodingById } from "./js/settings/schema.js";
+import { mountControls } from "./js/settings/controls.js";
+
+/* ── statistics ──────────────────────────────────────────────────────── */
+
+const quantile = (sorted, q) => sorted[Math.min(sorted.length - 1,
+  Math.max(0, Math.round((sorted.length - 1) * q)))];
+
+function summarise(samples) {
+  const sorted = Float64Array.from(samples).sort();
+  const sum = samples.reduce((a, b) => a + b, 0);
+  return {
+    mean: sum / samples.length,
+    p50: quantile(sorted, 0.5),
+    p95: quantile(sorted, 0.95),
+    max: sorted[sorted.length - 1],
+  };
+}
+
+/** Time `fn` over `frames` iterations, one measurement per iteration. */
+function bench(frames, fn) {
+  for (let i = 0; i < Math.min(200, frames); i++) fn(i);   // warm the JIT
+  const samples = new Array(frames);
+  for (let i = 0; i < frames; i++) {
+    const start = performance.now();
+    fn(i);
+    samples[i] = performance.now() - start;
+  }
+  return summarise(samples);
+}
+
+const ms = (value) => value < 0.01 ? value.toFixed(4) : value.toFixed(3);
+
+function report(target, rows, note) {
+  const head = `<table><thead><tr><th>指标</th><th>改前</th><th>改后</th><th>倍数</th></tr></thead><tbody>`;
+  const body = rows.map(([label, before, after]) => {
+    const ratio = after > 0 ? before / after : Infinity;
+    const cls = ratio >= 1.15 ? "win" : ratio <= 0.87 ? "loss" : "";
+    const shown = !Number.isFinite(ratio) ? "∞" : `${ratio.toFixed(1)}×`;
+    return `<tr><td>${label}</td><td>${ms(before)} ms</td><td>${ms(after)} ms</td>` +
+           `<td class="${cls}">${shown}</td></tr>`;
+  }).join("");
+  document.querySelector(`[data-out="${target}"]`).innerHTML =
+    head + body + "</tbody></table>" + (note ? `<p class="verdict">${note}</p>` : "");
+}
+
+/* ── 1. curve table ──────────────────────────────────────────────────── */
+
+const clamp01 = (v) => Math.min(1, Math.max(0, v));
+const smoothstep = (a, b, x) => {
+  const t = clamp01((x - a) / (b - a));
+  return t * t * (3 - 2 * t);
+};
+
+/** Verbatim copy of the pre-change refreshTable body (no cache, always walks). */
+function oldRefreshTable(table, state) {
+  for (let i = 0; i < LUT_SIZE; i++) {
+    const y = i / (LUT_SIZE - 1);
+    table[i] = y <= state.expansionStart ? 0
+      : state.hdrRange * Math.pow(smoothstep(state.expansionStart, 1, y),
+                                  1.3 - 0.75 * state.areaCoverage);
+  }
+  return table;
+}
+
+const BENCHMARKS = {};
+
+BENCHMARKS.curve = () => {
+  const state = { ...defaultSettings(), look: undefined };
+  const store = { get: () => state, value: (k) => state[k] };
+  const curve = createCurve(store, { onChange: () => {} });
+  const scratch = new Float32Array(LUT_SIZE);
+
+  const FRAMES = 4000;
+  // Only hdrStrength moves -- the curve's shape is untouched, which is the
+  // common case during a drag of the strength or brightness slider.
+  const before = bench(FRAMES, (i) => {
+    state.hdrStrength = 0.4 + (i % 100) / 500;
+    oldRefreshTable(scratch, state);
+  });
+  const after = bench(FRAMES, (i) => {
+    state.hdrStrength = 0.4 + (i % 100) / 500;
+    curve.refreshTable(state);
+  });
+  report("curve", [["每帧均值", before.mean, after.mean],
+                   ["p95", before.p95, after.p95],
+                   ["最坏帧", before.max, after.max]],
+    "缓存命中时 refreshTable 变成一次字符串比较。形状参数确实改变的那些帧仍会完整重建，" +
+    "代价与改前相同——省掉的是被白白重算的那部分。");
+};
+
+/* ── 2. canvas context ───────────────────────────────────────────────── */
+
+BENCHMARKS.canvas = () => {
+  const W = 1280, H = 854;
+  const make = (attrs) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = W; canvas.height = H;
+    return { canvas, context: canvas.getContext("2d", attrs) };
+  };
+  const before = make({ willReadFrequently: true });
+  const after = make(undefined);
+
+  const pixels = new ImageData(W, H);
+  const view = new Uint32Array(pixels.data.buffer);
+  for (let i = 0; i < view.length; i++) view[i] = 0xff000000 | (i * 2654435761 >>> 8);
+
+  // Compositing is what the hint actually penalises, so each frame ends with a
+  // draw of the surface into a small on-screen-sized target.
+  const sink = document.createElement("canvas");
+  sink.width = 640; sink.height = 427;
+  const sinkContext = sink.getContext("2d");
+
+  const step = (target) => (i) => {
+    pixels.data[(i % 1000) * 4] = i & 255;         // defeat any caching
+    target.context.putImageData(pixels, 0, 0);
+    sinkContext.drawImage(target.canvas, 0, 0, 640, 427);
+  };
+
+  const FRAMES = 120;
+  const a = bench(FRAMES, step(before));
+  const b = bench(FRAMES, step(after));
+  report("canvas", [["每帧均值", a.mean, b.mean],
+                    ["p95", a.p95, b.p95],
+                    ["最坏帧", a.max, b.max]],
+    "差距大小取决于 GPU 与浏览器：有的实现对两者一视同仁，此时倍数接近 1.0，" +
+    "改动也就只是去掉一个无意义的提示；有的实现会让带提示的画布整条路径走软件合成。");
+};
+
+/* ── 3. slider writeback ─────────────────────────────────────────────── */
+
+BENCHMARKS.apply = () => {
+  const host = document.getElementById("hidden-controls");
+  const build = () => {
+    const readout = document.createElement("span");
+    const input = document.createElement("input");
+    input.type = "range"; input.min = "0"; input.max = "3"; input.step = "0.1";
+    host.append(readout, input);
+    return { readout, input };
+  };
+  const beforeNodes = build();
+  const afterNodes = build();
+  const control = { key: "hdrRange", min: 0, max: 3, format: (v) => v.toFixed(1) };
+
+  // Verbatim pre-change apply: max and --fill written unconditionally, value
+  // written back to the element the pointer is holding.
+  const oldApply = ({ readout, input }, value, max) => {
+    input.max = String(max);
+    if (input.value !== String(value)) input.value = String(value);
+    readout.textContent = control.format(value);
+    const fill = ((value - control.min) / (max - control.min)) * 100;
+    input.style.setProperty("--fill", `${clamp01(fill / 100) * 100}%`);
+  };
+
+  let lastFill = "", lastMax = "";
+  const newApply = ({ readout, input }, value, max) => {
+    const maxText = String(max);
+    if (lastMax !== maxText) { lastMax = maxText; input.max = maxText; }
+    // dragging === true, so the value writeback is skipped entirely
+    const text = control.format(value);
+    if (readout.textContent !== text) readout.textContent = text;
+    const fill = ((value - control.min) / (max - control.min)) * 100;
+    const fillText = `${(clamp01(fill / 100) * 100).toFixed(1)}%`;
+    if (lastFill !== fillText) { lastFill = fillText; input.style.setProperty("--fill", fillText); }
+  };
+
+  const max = encodingById("adaptive").maxRange;
+  const FRAMES = 3000;
+  const value = (i) => Math.round((1 + 2 * Math.abs(((i % 200) / 100) - 1)) * 10) / 10;
+
+  const a = bench(FRAMES, (i) => { oldApply(beforeNodes, value(i), max); void beforeNodes.input.offsetWidth; });
+  const b = bench(FRAMES, (i) => { newApply(afterNodes, value(i), max); void afterNodes.input.offsetWidth; });
+
+  beforeNodes.input.remove(); beforeNodes.readout.remove();
+  afterNodes.input.remove(); afterNodes.readout.remove();
+
+  report("apply", [["每帧均值", a.mean, b.mean],
+                   ["p95", a.p95, b.p95],
+                   ["最坏帧", a.max, b.max]],
+    "注意 step 是 0.1，所以 --fill 只有约 1/20 的帧真正改变——省下的是重复的样式失效。" +
+    "更重要的收益不在这张表里：改后拖动期间不再从脚本重新落位滑块。");
+};
+
+/* ── 4. real pipeline ────────────────────────────────────────────────── */
+
+const nextTick = () => new Promise((resolve) => queueMicrotask(resolve));
+
+BENCHMARKS.pipeline = async () => {
+  const store = createStore({
+    ...defaultSettings(),
+    sessionId: "", file: null, uploading: false, resultUrl: "",
+    ready: false, nativePicker: false, outputSelectionId: "", outputDirectory: "",
+    comparing: false, hdrOn: true, zebra: false, histMode: "luma",
+  });
+  mountControls(store);
+
+  const probe = document.querySelector('#hidden-controls [data-role="group-tone"] input[type="range"]');
+  const FRAMES = 1500;
+  const samples = new Array(FRAMES);
+
+  for (let i = 0; i < FRAMES; i++) {
+    const value = Math.round((0.05 + 0.9 * Math.abs(((i % 200) / 100) - 1)) * 20) / 20;
+    const start = performance.now();
+    store.set({ hdrStrength: value });
+    await nextTick();               // the store coalesces into a microtask
+    void probe.offsetWidth;         // force style + layout, as a real frame would
+    samples[i] = performance.now() - start;
+  }
+
+  const now = summarise(samples);
+  const out = document.querySelector('[data-out="pipeline"]');
+  out.innerHTML =
+    `<table><thead><tr><th>指标</th><th>当前实现</th><th>60fps 预算占比</th></tr></thead><tbody>` +
+    [["每帧均值", now.mean], ["p50", now.p50], ["p95", now.p95], ["最坏帧", now.max]]
+      .map(([label, v]) =>
+        `<tr><td>${label}</td><td>${ms(v)} ms</td><td>${(v / 16.67 * 100).toFixed(1)}%</td></tr>`)
+      .join("") +
+    `</tbody></table><p class="verdict">这是一次滑杆输入在预览渲染<em>之前</em>的固定开销。` +
+    `只要它远小于 16.7ms，剩下的卡顿就都来自渲染本身——也就是没有选的 B / C 两项。</p>`;
+};
+
+/* ── 5. live drag meter ──────────────────────────────────────────────── */
+
+(function mountLive() {
+  const input = document.querySelector('[data-role="live-range"]');
+  const readout = document.querySelector('[data-role="live-value"]');
+  const out = document.querySelector('[data-out="live"]');
+  const latencies = [];
+  const gaps = [];
+  let pending = 0;
+  let lastFrame = 0;
+  let frame = 0;
+
+  const paint = () => {
+    frame = 0;
+    const now = performance.now();
+    if (pending) { latencies.push(now - pending); pending = 0; }
+    if (lastFrame) gaps.push(now - lastFrame);
+    lastFrame = now;
+    if (latencies.length % 5 === 0) show();
+  };
+
+  input.addEventListener("input", () => {
+    if (!pending) pending = performance.now();
+    readout.textContent = Number(input.value).toFixed(2);
+    input.style.setProperty("--fill", `${Number(input.value) * 100}%`);
+    if (!frame) frame = requestAnimationFrame(paint);
+  });
+
+  const reset = () => {
+    latencies.length = 0; gaps.length = 0; lastFrame = 0; pending = 0;
+    out.textContent = "尚未开始拖动。";
+  };
+  document.querySelector('[data-bench="live-reset"]').addEventListener("click", reset);
+
+  function show() {
+    if (!latencies.length) return;
+    const lat = summarise(latencies);
+    const dropped = gaps.filter((g) => g > 24).length;
+    out.innerHTML =
+      `样本 ${latencies.length} 帧 · ` +
+      `输入→上屏 p50 <b>${lat.p50.toFixed(1)}ms</b> / p95 <b>${lat.p95.toFixed(1)}ms</b> / ` +
+      `最坏 <b>${lat.max.toFixed(1)}ms</b><br>` +
+      `帧间隔 &gt;24ms（掉帧）：<b>${dropped}</b> / ${gaps.length}` +
+      (dropped === 0 ? " — 全程跟手" : " — 仍有掉帧，说明瓶颈在渲染而不在交互层");
+  }
+})();
+
+/* ── wiring ──────────────────────────────────────────────────────────── */
+
+for (const button of document.querySelectorAll("[data-bench]")) {
+  const name = button.dataset.bench;
+  if (!BENCHMARKS[name]) continue;
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    button.textContent = "测量中…";
+    await new Promise((r) => setTimeout(r, 30));
+    try { await BENCHMARKS[name](); }
+    catch (error) {
+      document.querySelector(`[data-out="${name}"]`).textContent = "失败：" + (error.message || error);
+    }
+    button.disabled = false;
+    button.textContent = "重新运行";
+  });
+}
+</script>
+</body>
+</html>

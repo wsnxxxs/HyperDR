@@ -15,6 +15,7 @@
   color: var(--ink-strong);
   font-size: var(--text);
   text-decoration: none;
+  box-shadow: var(--shadow-sm);
   transition: background var(--duration) var(--ease);
 }
 .button:hover:not(:disabled) { background: var(--surface-hover); }
@@ -43,8 +44,9 @@
   width: 32px; height: 32px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
-  background: none;
+  background: var(--surface-panel);
   color: var(--ink-muted);
+  box-shadow: var(--shadow-sm);
 }
 .theme-icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
 .theme-icon--sun { display: none; }
@@ -54,6 +56,43 @@
   :root:not([data-theme="light"]) .theme-icon--sun { display: block; }
   :root:not([data-theme="light"]) .theme-icon--moon { display: none; }
 }
+
+/* -- wordmark ------------------------------------------------------------ */
+/* Carried over from the old panel unchanged: the mark is the one piece of the
+   interface that is not about the photograph, and it is the product's face. */
+
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px var(--space-4) 6px 6px;
+  border-radius: 999px;
+  background: var(--surface-panel);
+  box-shadow: inset 0 0 0 1px var(--line), var(--shadow-md);
+  font-size: var(--text-lg);
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  line-height: 1;
+  white-space: nowrap;
+}
+.wordmark-mark {
+  flex: none;
+  width: 32px; height: 32px;
+  padding: 2px;
+  border-radius: 10px;
+  background: var(--surface-sunken);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--ink);
+  overflow: visible;
+}
+.wordmark-frame { fill: none; stroke: currentColor; stroke-width: 1.7; }
+.wordmark-frame.is-back { opacity: 0.24; }
+.wordmark-frame.is-front { opacity: 0.68; }
+.wordmark-glow { fill: none; stroke: var(--accent); stroke-width: 2.4; stroke-linecap: round; }
+.wordmark-spark { fill: var(--accent); stroke: var(--surface-sunken); stroke-width: 1.5; }
+.wordmark-text { display: inline-flex; align-items: baseline; }
+.wordmark-name { color: var(--ink-strong); font-weight: 500; }
+.wordmark-accent { color: var(--accent); font-weight: 700; }
 
 /* -- header extras ------------------------------------------------------ */
 
@@ -87,6 +126,7 @@
   overflow: hidden;
   border-radius: var(--radius-lg);
   background: var(--preview-backdrop);
+  box-shadow: var(--shadow-lg);
 }
 .stage-frame canvas {
   grid-area: 1 / 1;
@@ -129,8 +169,10 @@
   background: var(--overlay);
   color: var(--overlay-ink);
   font-size: var(--text-sm);
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(8px);
 }
-.chip b { font-weight: 600; }
+.chip b { font-weight: 600; font-variant-numeric: tabular-nums; }
 .chip[aria-pressed="true"] { border-color: var(--overlay-ink); }
 .chip-swatch { width: 10px; height: 10px; border-radius: 3px; }
 .chip--hot .chip-swatch { background: var(--zebra-hot); }
@@ -159,7 +201,15 @@
   width: 26px; height: 26px;
   border-radius: 50%;
   background: var(--overlay-ink);
+  box-shadow: var(--shadow-md);
+  transition: scale var(--duration) var(--ease);
 }
+/* The handle is the one control the hand grabs rather than clicks, so it is
+   the one that answers to the cursor before it is pressed. */
+.stage-divider { cursor: grab; }
+.stage-divider:active { cursor: grabbing; }
+.stage-divider:hover .stage-divider-handle,
+.stage-divider:focus-visible .stage-divider-handle { scale: 1.12; }
 .stage-divider-handle::before,
 .stage-divider-handle::after {
   content: "";
@@ -198,7 +248,7 @@
   width: min(240px, 60%);
   height: 4px;
   border-radius: 999px;
-  background: rgb(255 255 255 / 0.18);
+  background: var(--overlay-track);
   overflow: hidden;
   visibility: hidden;
 }
@@ -211,7 +261,12 @@
   transition: width var(--duration) var(--ease);
 }
 .stage.is-uploading .stage-progress { visibility: visible; }
-.stage-progress-text { min-height: 1.2em; font-size: var(--text-sm); opacity: 0.8; }
+.stage-progress-text {
+  min-height: 1.2em;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
 
 /* -- scope (histogram strip) -------------------------------------------- */
 
@@ -222,6 +277,7 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--surface-panel);
+  box-shadow: var(--shadow-sm);
 }
 .scope-bar {
   display: flex;
@@ -273,6 +329,7 @@
   border-color: var(--line-strong);
   color: var(--ink-strong);
   font-weight: 600;
+  box-shadow: var(--shadow-sm);
 }
 
 /* -- settings rail ---------------------------------------------------------- */
@@ -325,12 +382,18 @@
 }
 .field-title { display: inline-flex; align-items: center; gap: var(--space-1); }
 .field-title b { font-weight: 500; color: var(--ink); }
-.field-value { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--ink-strong); }
+.field-value {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-strong);
+}
 .field-scale {
   display: flex;
   justify-content: space-between;
   color: var(--ink-muted);
   font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
 }
 .field-hint {
   margin: var(--space-1) 0 0;
@@ -473,6 +536,7 @@
   border: 1px solid var(--hdr);
   border-radius: var(--radius-lg);
   background: var(--hdr-soft);
+  box-shadow: var(--shadow-md);
 }
 .result[hidden] { display: none; }
 .result-info {
@@ -483,7 +547,11 @@
   min-width: 0;
 }
 .result-name { color: var(--ink-strong); }
-.result-meta { color: var(--ink-muted); font-size: var(--text-sm); }
+.result-meta {
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
 .result-warn { color: var(--danger); font-size: var(--text-sm); }
 .result-stale {
   padding: 1px var(--space-2);
@@ -508,6 +576,7 @@
   background: var(--surface-panel);
   color: var(--ink-strong);
   font-size: var(--text-sm);
+  box-shadow: var(--shadow-lg);
   opacity: 0;
   pointer-events: none;
   transition: translate var(--duration) var(--ease), opacity var(--duration) var(--ease);

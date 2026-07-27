@@ -18,33 +18,33 @@
    ════════════════════════════════════════════════════════════════════ */
 
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
 
   /* Four steps of surface, ordered by how far each sits from the page:
      sunk (tracks, wells) → bg (page) → soft (inputs) → surface (cards). */
-  --bg: #f7f7f8;
-  --surface: #ffffff;
-  --surface-soft: #f4f4f6;
-  --surface-sunk: #e9e9ec;
+  --bg: light-dark(#f7f7f8, #0b0d10);
+  --surface: light-dark(#ffffff, #171a1f);
+  --surface-soft: light-dark(#f4f4f6, #20242a);
+  --surface-sunk: light-dark(#e9e9ec, #2a3037);
 
-  --ink: #131316;
-  --ink-soft: #3a3a40;
-  --muted: #77777f;
-  --faint: #a3a3ab;
+  --ink: light-dark(#131316, #f5f7fa);
+  --ink-soft: light-dark(#3a3a40, #d9dee4);
+  --muted: light-dark(#77777f, #aab4bd);
+  --faint: light-dark(#a3a3ab, #8d99a3);
 
   /* Alpha, not opaque greys, so a hairline reads the same over a card and
      over the page without a second token per surface. */
-  --line: rgba(0, 0, 0, .07);
-  --line-strong: rgba(0, 0, 0, .13);
+  --line: light-dark(rgba(0, 0, 0, .07), rgba(255, 255, 255, .10));
+  --line-strong: light-dark(rgba(0, 0, 0, .13), rgba(255, 255, 255, .19));
 
   --accent: #72bce7;
-  --on-accent: #ffffff;
+  --on-accent: light-dark(#ffffff, #123448);
 
-  --ok: #4eaad9;
-  --warn: #e0a548;
-  --bad: #e36d6d;
+  --ok: light-dark(#4eaad9, #48c37c);
+  --warn: light-dark(#e0a548, #d9a441);
+  --bad: light-dark(#e36d6d, #ef6b66);
 
-  --stage: #0b0b0d;
+  --stage: light-dark(#0b0b0d, #111419);
   /* Shape of the preview frame, held constant regardless of what is loaded,
      and its widest -- in px, not vh, so window height never affects it. */
   --stage-ratio: 4 / 3;
@@ -57,14 +57,14 @@
   /* Two-layer shadows: a tight contact shadow that seats the element, plus a
      wide diffuse one that lifts it. A single blur reads as a smudge. */
   --shadow-sm:
-    0 1px 2px rgba(16, 18, 24, .05),
-    0 1px 1px rgba(16, 18, 24, .03);
+    0 1px 2px light-dark(rgba(16, 18, 24, .05), rgba(0, 0, 0, .5)),
+    0 1px 1px light-dark(rgba(16, 18, 24, .03), transparent);
   --shadow-md:
-    0 1px 2px rgba(16, 18, 24, .05),
-    0 10px 28px -8px rgba(16, 18, 24, .12);
+    0 1px 2px light-dark(rgba(16, 18, 24, .05), rgba(0, 0, 0, .5)),
+    0 10px 28px -8px light-dark(rgba(16, 18, 24, .12), rgba(0, 0, 0, .6));
   --shadow-lg:
-    0 2px 4px rgba(16, 18, 24, .05),
-    0 24px 60px -16px rgba(16, 18, 24, .16);
+    0 2px 4px light-dark(rgba(16, 18, 24, .05), rgba(0, 0, 0, .5)),
+    0 24px 60px -16px light-dark(rgba(16, 18, 24, .16), rgba(0, 0, 0, .7));
 
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text",
     "Segoe UI", Inter, system-ui, "PingFang SC", "HarmonyOS Sans SC",
@@ -76,57 +76,11 @@
   --pad: 22px;
 }
 
-/* The dark palette, applied by system preference unless a choice is stored,
-   and by the stored choice otherwise. The two blocks are identical on purpose:
-   CSS cannot express "either of these selectors" across a media query boundary
-   without duplicating either the palette or every rule that reads it. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme]) {
-    color-scheme: dark;
-    --bg: #0b0d10;
-    --surface: #171a1f;
-    --surface-soft: #20242a;
-    --surface-sunk: #2a3037;
-    --ink: #f5f7fa;
-    --ink-soft: #d9dee4;
-    --muted: #aab4bd;
-    --faint: #8d99a3;
-    --line: rgba(255, 255, 255, .10);
-    --line-strong: rgba(255, 255, 255, .19);
-    --accent: #72bce7;
-    --on-accent: #123448;
-    --ok: #48c37c;
-    --warn: #d9a441;
-    --bad: #ef6b66;
-    --stage: #111419;
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, .5);
-    --shadow-md: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 24px -6px rgba(0, 0, 0, .6);
-    --shadow-lg: 0 2px 4px rgba(0, 0, 0, .5), 0 24px 60px -14px rgba(0, 0, 0, .7);
-  }
-}
-
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --bg: #0b0d10;
-  --surface: #171a1f;
-  --surface-soft: #20242a;
-  --surface-sunk: #2a3037;
-  --ink: #f5f7fa;
-  --ink-soft: #d9dee4;
-  --muted: #aab4bd;
-  --faint: #8d99a3;
-  --line: rgba(255, 255, 255, .10);
-  --line-strong: rgba(255, 255, 255, .19);
-  --accent: #72bce7;
-  --on-accent: #123448;
-  --ok: #48c37c;
-  --warn: #d9a441;
-  --bad: #ef6b66;
-  --stage: #111419;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .5);
-  --shadow-md: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 24px -6px rgba(0, 0, 0, .6);
-  --shadow-lg: 0 2px 4px rgba(0, 0, 0, .5), 0 24px 60px -14px rgba(0, 0, 0, .7);
-}
+/* With no stored choice the root follows the system. A stored choice narrows
+   the supported scheme to one value, so every light-dark() token resolves to
+   the explicit theme without duplicating the palette. */
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 
 /* ════════════════════════════════════════════════════════════════════
    Base
@@ -328,6 +282,8 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+/* light-dark() only selects typed colour/image values. Theme-dependent display
+   remains two small selector blocks, as does Canvas's blend-mode choice in JS. */
 .icon-moon { display: none; }
 :root[data-theme="dark"] .icon-sun { display: none; }
 :root[data-theme="dark"] .icon-moon { display: block; }
@@ -427,6 +383,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   white-space: nowrap;
 }
 .preview-toggle { display: none; }
+.zoom-toggle { flex: none; }
 
 .lamp {
   width: 6px;
@@ -486,6 +443,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   max-width: 100%;
   max-height: 100%;
   line-height: 0;
+  transform-origin: center;
 }
 .stage-frame canvas {
   display: block;
@@ -519,6 +477,12 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .stage.is-comparing .stage-badge {
   background: rgba(20, 24, 32, .68);
 }
+.stage.is-zoomed {
+  cursor: grab;
+  touch-action: none;
+}
+.stage.is-panning { cursor: grabbing; }
+.stage.is-zoomed .stage-frame { will-change: transform; }
 
 .stage-empty {
   display: flex;
@@ -582,11 +546,83 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 
 /* --- scope --- */
 
+/* scope.js reads these values through getComputedStyle(). Registering them as
+   colours makes light-dark() resolve before JavaScript hands them to Canvas. */
+@property --hist-grid {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+@property --hist-luma {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+@property --hist-red {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+@property --hist-green {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+@property --hist-blue {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+@property --hist-marker {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+
 .scope {
-  padding: 14px 16px 16px;
+  padding: 0;
   background: var(--surface);
   border-radius: var(--radius);
   box-shadow: inset 0 0 0 1px var(--line), var(--shadow-sm);
+  overflow: clip;
+}
+
+.scope-summary {
+  min-height: 44px;
+  padding: 0 16px;
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+}
+.scope-summary::-webkit-details-marker { display: none; }
+.scope-summary::after {
+  content: "";
+  width: 5px;
+  height: 5px;
+  margin-left: 2px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg) translate(-2px, -2px);
+  transition: transform .2s ease;
+}
+.scope[open] > .scope-summary::after { transform: rotate(-135deg); }
+.scope-summary-readings {
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+  font-size: .7rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.scope-summary-readings b { color: var(--ink-soft); font-weight: 600; }
+.scope-body { padding: 0 16px 16px; }
+
+@media (min-width: 641px) {
+  .scope-summary { display: none; }
+  .scope-body { padding-top: 14px; }
 }
 
 .scope-bar {
@@ -608,42 +644,18 @@ button:disabled { cursor: not-allowed; opacity: .55; }
    `getComputedStyle` -- so the graph's palette lives here with every other
    colour instead of being hard-coded in the module. */
 .scope-graph {
-  --hist-grid: rgba(0, 0, 0, .06);
-  --hist-luma: rgba(19, 19, 22, .28);
-  --hist-red: #f0565e;
-  --hist-green: #34b26a;
-  --hist-blue: #4a7ec4;
-  --hist-marker: rgba(19, 19, 22, .42);
-  /* On a light graph, overlapping channels have to get darker where they
-     coincide; `lighter` would drive the overlap to white and erase it. */
-  --hist-blend: multiply;
+  --hist-grid: light-dark(rgba(0, 0, 0, .06), rgba(255, 255, 255, .07));
+  --hist-luma: light-dark(rgba(19, 19, 22, .28), rgba(226, 226, 232, .62));
+  --hist-red: light-dark(#f0565e, rgba(230, 70, 80, .55));
+  --hist-green: light-dark(#34b26a, rgba(70, 190, 110, .55));
+  --hist-blue: light-dark(#4a7ec4, rgba(70, 130, 235, .6));
+  --hist-marker: light-dark(rgba(19, 19, 22, .42), rgba(244, 244, 246, .6));
 
   display: block;
   width: 100%;
   height: 84px;
   background: var(--surface-soft);
   border-radius: 8px;
-}
-
-:root[data-theme="dark"] .scope-graph {
-  --hist-grid: rgba(255, 255, 255, .07);
-  --hist-luma: rgba(226, 226, 232, .62);
-  --hist-red: rgba(230, 70, 80, .55);
-  --hist-green: rgba(70, 190, 110, .55);
-  --hist-blue: rgba(70, 130, 235, .6);
-  --hist-marker: rgba(244, 244, 246, .6);
-  --hist-blend: lighter;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme]) .scope-graph {
-    --hist-grid: rgba(255, 255, 255, .07);
-    --hist-luma: rgba(226, 226, 232, .62);
-    --hist-red: rgba(230, 70, 80, .55);
-    --hist-green: rgba(70, 190, 110, .55);
-    --hist-blue: rgba(70, 130, 235, .6);
-    --hist-marker: rgba(244, 244, 246, .6);
-    --hist-blend: lighter;
-  }
 }
 
 .scope-clip {
@@ -773,40 +785,16 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .conversion-row .action-row,
 .conversion-row .button { width: 100%; }
 
-.command-preview {
-  display: grid;
-  gap: .55rem;
-  margin-top: 1rem;
-  min-width: 0;
-}
-
-.command-preview-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: .75rem;
-}
-
-.command-preview code {
-  display: block;
-  max-height: 7.5rem;
-  overflow: auto;
-  padding: .75rem;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface-sunk);
+.run-progress {
+  min-height: 1.35em;
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: var(--muted);
   font-family: var(--mono);
-  font-size: .72rem;
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
-
-.button.is-compact {
-  width: auto;
-  min-height: 2rem;
-  padding: .35rem .65rem;
-  font-size: .75rem;
+  font-size: .7rem;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Quiet tier: a disclosure is a place to go, not a thing to look at, so it
@@ -1219,7 +1207,6 @@ input[type="range"]::-moz-range-thumb {
   .conversion-controls { order: 1; }
   .viewer { order: 2; }
   .settings-controls { order: 3; }
-  .scope { display: none; }
   .masthead { height: auto; flex-wrap: wrap; padding: 8px 0 12px; }
   .wordmark { min-height: 44px; padding-inline: 15px; }
   .masthead-actions { margin-left: auto; }

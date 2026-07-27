@@ -49,9 +49,6 @@ export const api = {
 
   newSession: () => post("/api/session", {}, "无法创建上传任务。"),
 
-  command: (options, preview = false) =>
-    post("/api/command", { options, preview }, "无法生成命令。"),
-
   curve: (options, samples) => post("/api/curve", { options, samples }, "无法获取色调曲线。"),
 
   run: (sessionId, options, preview = false) =>

@@ -8,6 +8,16 @@
 
 :root {
   color-scheme: light dark;
+}
+
+/* Without these two rules the toggle sets data-theme, the icon swaps, and every
+   light-dark() in the file keeps resolving off the *system* preference: the
+   theme button appeared to do nothing. color-scheme is what light-dark() reads;
+   data-theme alone is just an attribute. */
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"]  { color-scheme: dark; }
+
+:root {
 
   /* -- surfaces ------------------------------------------------------ */
   --surface-page:    light-dark(#f6f6f7, #16171a);
@@ -29,7 +39,9 @@
      interface's one loud colour, and a saturated UI blue fights it. Light mode
      darkens it because the accent is used as ink, not as a fill. */
   --accent:          light-dark(#2f83b0, #72bce7);
-  --accent-ink:      #ffffff;
+  /* Dark ink on the light-mode fill, light ink on the dark-mode fill: the
+     accent changes lightness between schemes, so its ink has to as well. */
+  --accent-ink:      light-dark(#ffffff, #10293a);
   --danger:          light-dark(#c0392b, #ef6b5c);
   --success:         light-dark(#1f7a4d, #3fbf84);
 
@@ -42,6 +54,13 @@
   /* Zebra overlays and the slider mask are painted into canvases by JS, which
      cannot see these variables at paint time; scope.js and mask.js read them
      back with getComputedStyle, so the values still live here and only here. */
+  /* Sliders track in the accent, not the amber. Amber means "extended range"
+     -- the badge, the run button, the simulated output, the mask -- and a rail
+     of seven amber bars spent that meaning on ordinary parameters. */
+  --control-track:   light-dark(#dcdee3, #34383f);
+  --control-thumb:   #ffffff;
+  --control-ring:    light-dark(rgb(16 18 24 / 0.28), rgb(0 0 0 / 0.55));
+
   --zebra-hot:       light-dark(#d64541, #ef6b5c);
   --zebra-cold:      light-dark(#3b82f6, #6ba3f8);
   --mask-tint:       light-dark(#b97708, #f2b64b);
@@ -78,14 +97,15 @@
   --space-5: 24px;
   --space-6: 32px;
 
-  /* Widest the photograph's well is allowed to get, so its shape stays put
-     instead of tracking the window. In px, not vw. */
-  --stage-cap: 1000px;
 
   /* -- elevation ----------------------------------------------------- */
   /* Two layers each: a tight contact shadow that seats the element on the
      page, and a wide diffuse one that lifts it. A single blur reads as a
      smudge. Colour lives here because everything else references it. */
+  /* A shadow is invisible against a dark page: on dark, elevation is carried
+     by a lit top edge instead, and both are applied together. */
+  --edge: light-dark(transparent, rgb(255 255 255 / 0.07));
+
   --shadow-sm:
     0 1px 2px light-dark(rgb(16 18 24 / 0.05), rgb(0 0 0 / 0.5)),
     0 1px 1px light-dark(rgb(16 18 24 / 0.03), transparent);
@@ -104,6 +124,7 @@
     "Segoe UI", Inter, system-ui, "PingFang SC", "HarmonyOS Sans SC",
     "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
   --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --text-xs: 0.75rem;
   --text-sm: 0.8125rem;
   --text:    0.9375rem;
   --text-lg: 1.125rem;

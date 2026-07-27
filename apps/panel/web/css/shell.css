@@ -5,15 +5,21 @@
  * than a second set of components.
  */
 
+/* Every region is a rounded block floating on the page, separated by the grid
+   gap rather than by a shared border. Nothing is flush with the window edge,
+   so no two surfaces meet along a seam. */
 .app {
   display: grid;
   grid-template-areas:
     "header header"
     "stage  settings"
-    "run    run";
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+    "run    settings";
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
   grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: var(--space-3);
   height: 100dvh;
+  padding: var(--space-3);
+  background: var(--surface-page);
 }
 
 .app__header {
@@ -21,9 +27,11 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-5);
-  border-bottom: 1px solid var(--line);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
   background: var(--surface-panel);
+  box-shadow: inset 0 1px 0 var(--edge), var(--shadow-sm);
 }
 
 /* The mark sizes itself; the status line takes the slack instead, so the
@@ -31,49 +39,28 @@
 .app__title { flex: none; }
 .app__header .service-state { margin-left: auto; }
 
-.app__badge {
-  padding: 2px var(--space-2);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--surface-sunken);
-  color: var(--ink-muted);
-  font-size: var(--text-sm);
-}
-
 .app__stage {
   grid-area: stage;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  gap: var(--space-4);
-  justify-items: center;
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
-  padding: var(--space-5);
-  background: var(--surface-sunken);
-}
-
-/* Both the well and the histogram stop at the same width, so a wide window
-   grows the margins rather than restretching the photograph every time. */
-.app__stage > * {
-  width: 100%;
-  max-width: var(--stage-cap);
 }
 
 .app__settings {
   grid-area: settings;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--space-5);
-  border-left: 1px solid var(--line);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
   background: var(--surface-panel);
+  box-shadow: inset 0 1px 0 var(--edge), var(--shadow-sm);
 }
 
 .app__run {
   grid-area: run;
   display: grid;
   gap: var(--space-3);
-  padding: var(--space-4) var(--space-5);
-  border-top: 1px solid var(--line);
-  background: var(--surface-panel);
 }
 
 /* One column below the split: the settings column at 360px leaves the preview
@@ -83,15 +70,13 @@
     grid-template-areas:
       "header"
       "stage"
-      "settings"
-      "run";
+      "run"
+      "settings";
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(200px, 40dvh) minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(200px, 40dvh) auto minmax(0, 1fr);
   }
-  .app__settings { border-left: 0; border-top: 1px solid var(--line); }
-  .app__header, .app__run { padding-inline: var(--space-4); }
-  .app__stage { padding: var(--space-3); }
-  .app__settings { padding: var(--space-4); }
+  .app { padding: var(--space-2); gap: var(--space-2); }
+  .app__header { padding-inline: var(--space-3); }
 }
 
 /* -- boot / error banner ---------------------------------------------- */

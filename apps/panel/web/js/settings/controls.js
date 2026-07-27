@@ -209,26 +209,28 @@ const BUILDERS = {
 /* ── encoding select (lives in the dock, wired here with the settings) ── */
 
 function mountEncoding() {
-  const select = role("encoding-select");
+  const container = role("encoding");
   const hint = role("encoding-hint");
+  const buttons = new Map();
+
   for (const entry of ENCODINGS) {
-    select.append(el("option", { value: entry.id }, entry.label));
-  }
-  select.addEventListener("change", () => {
-    const entry = encodingById(select.value);
-    store.set({
+    const button = el("button", { type: "button", "aria-pressed": "false" }, entry.label);
+    button.addEventListener("click", () => store.set({
       encoding: entry.id,
       // Clamped here rather than in the slider so the stored value and the
       // command line agree the moment the format changes.
       hdrRange: Math.min(store.get().hdrRange, entry.maxRange),
-    });
-  });
+    }));
+    buttons.set(entry.id, button);
+    container.append(button);
+  }
 
   store.watch("encoding", (id) => {
     const active = encodingById(id);
-    if (select.value !== active.id) select.value = active.id;
+    for (const [key, button] of buttons) {
+      button.setAttribute("aria-pressed", String(key === active.id));
+    }
     setText(hint, active.hint);
-    hint.title = active.hint;
   }, { immediate: true });
 }
 

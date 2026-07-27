@@ -135,6 +135,33 @@ def build_server(host: str, port: int, token: str, scheme: str) -> PanelServer:
     return server
 
 
+def load_tls_context(certificate: str, key: str) -> ssl.SSLContext | None:
+    """Build the TLS context, or explain in plain language why it cannot be.
+
+    A broken certificate must never surface as a traceback: the panel is
+    started by double-clicking, so the window is the only place the person will
+    ever look for an explanation.
+    """
+    missing = [path for path in (certificate, key) if not Path(path).is_file()]
+    if missing:
+        print("警告：TLS 证书文件不存在，本次以 HTTP 启动。")
+        for path in missing:
+            print(f"  找不到：{path}")
+        return None
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    try:
+        context.load_cert_chain(certificate, key)
+    except (ssl.SSLError, OSError, ValueError) as error:
+        print("警告：TLS 证书无法加载，本次以 HTTP 启动。")
+        print(f"  证书：{certificate}")
+        print(f"  私钥：{key}")
+        print(f"  原因：{error}")
+        print("  常见原因是证书与私钥不是同一对，或私钥被口令保护。")
+        print("  重新签发一对证书即可，iPhone 上已安装的根证书无需重装。")
+        return None
+    return context
+
+
 def serve() -> None:
     host = os.environ.get("HYPERDR_HOST", "0.0.0.0")
     port = find_free_port(host, int(os.environ.get("HYPERDR_PORT", PREFERRED_PORT)))
@@ -142,13 +169,15 @@ def serve() -> None:
         os.environ.get("HYPERDR_ACCESS_TOKEN") or security.make_token())
     certificate = os.environ.get("HYPERDR_TLS_CERT", "")
     key = os.environ.get("HYPERDR_TLS_KEY", "")
-    scheme = "https" if certificate and key else "http"
+
+    # The scheme has to be decided before the server is built, because the
+    # cookie and secure-context policies are derived from it.
+    tls_context = load_tls_context(certificate, key) if certificate and key else None
+    scheme = "https" if tls_context else "http"
 
     server = build_server(host, port, token, scheme)
-    if scheme == "https":
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        context.load_cert_chain(certificate, key)
-        server.socket = context.wrap_socket(server.socket, server_side=True)
+    if tls_context is not None:
+        server.socket = tls_context.wrap_socket(server.socket, server_side=True)
 
     removed = cleanup_expired_sessions()
     cleanup_minutes = max(1, min(1440, int(os.environ.get("HYPERDR_CLEANUP_MINUTES", "15"))))

@@ -26,6 +26,29 @@ try {
         }
     }
 
+    # Shipping key material would be a security failure, not a packaging typo:
+    # a shared authority lets anyone holding it impersonate any site for every
+    # phone that installed it. Fail the release rather than publish one.
+    $keyMaterial = Get-ChildItem -LiteralPath $workRoot -Recurse -File |
+        Where-Object { $_.Extension -in ".pem", ".key", ".pfx", ".p12", ".crt", ".cer" }
+    if ($keyMaterial) {
+        $names = ($keyMaterial | ForEach-Object { $_.Name }) -join ", "
+        throw "Release archive contains certificate or key material: $names"
+    }
+
+    # Trusted HTTPS is how the iPhone gets true HDR, so its setup must survive
+    # packaging. Both launchers depend on the shared TLS helper.
+    $root = $executable.Directory.Parent.FullName
+    foreach ($required in @(
+            "Start.bat", "Setup-HTTPS.bat",
+            "scripts\start_hyperdr_lan.ps1",
+            "scripts\setup_hyperdr_https.ps1",
+            "scripts\hyperdr_tls.ps1")) {
+        if (-not (Test-Path -LiteralPath (Join-Path $root $required) -PathType Leaf)) {
+            throw "Release archive is missing a required launcher file: $required"
+        }
+    }
+
     # A deterministic 32x32 RGB gradient. Keeping the fixture in the script
     # makes the smoke test independent of private photographs or repository
     # test data.

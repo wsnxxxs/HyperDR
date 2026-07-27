@@ -1,0 +1,63 @@
+/* Design tokens: the only place a literal colour, radius or duration is written.
+ *
+ * The old stylesheet was 1251 lines with the same greys spelled out forty-odd
+ * times in three slightly different values, which is why the panel never quite
+ * matched itself. Rules elsewhere reference these variables and never hard-code
+ * a colour -- that constraint is the point of the file, not the palette.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* -- surfaces ------------------------------------------------------ */
+  --surface-page:    light-dark(#f6f6f7, #16171a);
+  --surface-panel:   light-dark(#ffffff, #1e2024);
+  --surface-sunken:  light-dark(#eceef1, #131417);
+  --surface-hover:   light-dark(#00000009, #ffffff0f);
+
+  /* -- ink ----------------------------------------------------------- */
+  --ink-strong:      light-dark(#14161a, #f2f3f5);
+  --ink:             light-dark(#3a3f47, #c8cbd1);
+  --ink-muted:       light-dark(#6b7280, #8b919b);
+
+  /* -- lines --------------------------------------------------------- */
+  --line:            light-dark(#00000014, #ffffff1a);
+  --line-strong:     light-dark(#0000002e, #ffffff33);
+
+  /* -- accents ------------------------------------------------------- */
+  --accent:          light-dark(#2f6feb, #4d8bf5);
+  --accent-ink:      #ffffff;
+  --danger:          light-dark(#c0392b, #ef6b5c);
+  --success:         light-dark(#1f7a4d, #3fbf84);
+
+  /* Preview canvases sit on neutral grey at both schemes: an HDR image judged
+     against a white or black field reads as the wrong exposure. */
+  --preview-backdrop: #2a2a2c;
+
+  /* -- geometry ------------------------------------------------------ */
+  --radius-sm: 4px;
+  --radius:    8px;
+  --radius-lg: 14px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* -- type ---------------------------------------------------------- */
+  --font-ui: system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --text-sm: 0.8125rem;
+  --text:    0.9375rem;
+  --text-lg: 1.125rem;
+
+  /* -- motion -------------------------------------------------------- */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --duration: 160ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --duration: 0ms; }
+}

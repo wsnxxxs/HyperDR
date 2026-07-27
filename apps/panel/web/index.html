@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HyperDR 控制面板</title>
+<!-- Relative hrefs, so this tree also opens from disk. The server redirects
+     bare /next to /next/ for the same reason; the panel's CSP sets
+     base-uri 'none', so a <base> tag is not available as an alternative. -->
+<link rel="stylesheet" href="./css/tokens.css">
+<link rel="stylesheet" href="./css/base.css">
+<link rel="stylesheet" href="./css/shell.css">
+</head>
+<body>
+<div class="app">
+  <header class="app__header">
+    <h1 class="app__title">HyperDR</h1>
+    <span class="app__badge">重写预览</span>
+  </header>
+
+  <main class="app__stage" id="stage" aria-label="预览">
+    <p class="placeholder">预览区域。</p>
+  </main>
+
+  <aside class="app__settings" id="settings" aria-label="转换设置">
+    <p class="banner" id="banner" hidden></p>
+    <p class="placeholder">设置区域。</p>
+  </aside>
+
+  <footer class="app__run" id="run" aria-label="转换">
+    <p class="placeholder">运行区域。</p>
+  </footer>
+</div>
+
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>

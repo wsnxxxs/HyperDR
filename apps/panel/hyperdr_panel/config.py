@@ -19,4 +19,12 @@ LAUNCHER = GUI_DIR / "hyperdr_gui.py"
 # (double-click static/index.html) for an offline look at the interface.
 STATIC_DIR = GUI_DIR / "static"
 
+# The rewritten front-end, served at /next while it is built beside the panel
+# above rather than on top of it. Two roots in one process is what lets the
+# rewrite be compared against the interface it replaces at every step, and what
+# keeps a half-finished /next from blocking a release. At cutover this becomes
+# the only root and STATIC_DIR goes away in a single commit.
+WEB_DIR = GUI_DIR / "web"
+WEB_ROUTE_PREFIX = "/next"
+
 PREFERRED_PORT = 8756

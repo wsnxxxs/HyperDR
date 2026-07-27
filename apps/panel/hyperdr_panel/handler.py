@@ -14,7 +14,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from . import api, security
-from .config import STATIC_DIR
+from .config import STATIC_DIR, WEB_DIR, WEB_ROUTE_PREFIX
 from .session import save_upload
 
 _CONTENT_TYPES = {
@@ -139,11 +139,11 @@ class Handler(BaseHTTPRequestHandler):
             while chunk := source.read(1024 * 1024):
                 self.wfile.write(chunk)
 
-    def _serve_static(self, route: str) -> bool:
-        relative = "index.html" if route in ("/", "/index.html") else route.lstrip("/")
+    def _serve_from(self, root: Path, relative: str) -> bool:
+        """Send a file below `root`, refusing anything that escapes it."""
         try:
-            target = (STATIC_DIR / relative).resolve()
-            target.relative_to(STATIC_DIR.resolve())
+            target = (root / relative).resolve()
+            target.relative_to(root.resolve())
         except (ValueError, OSError):
             return False
         if not target.is_file():
@@ -153,6 +153,21 @@ class Handler(BaseHTTPRequestHandler):
             content_type=_CONTENT_TYPES.get(target.suffix.lower(),
                                             "application/octet-stream")))
         return True
+
+    def _serve_static(self, route: str) -> bool:
+        relative = "index.html" if route in ("/", "/index.html") else route.lstrip("/")
+        return self._serve_from(STATIC_DIR, relative)
+
+    def _serve_web(self, route: str) -> bool:
+        """The rewritten front-end, mounted under `WEB_ROUTE_PREFIX`.
+
+        Its pages reference assets relatively so the tree also opens from disk;
+        that only holds below a trailing slash, which is why bare `/next` is
+        redirected rather than served. A `<base>` tag would be the other fix,
+        and the panel's CSP sets `base-uri 'none'` precisely to forbid it.
+        """
+        relative = route[len(WEB_ROUTE_PREFIX):].lstrip("/") or "index.html"
+        return self._serve_from(WEB_DIR, relative)
 
     def _read_json(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
@@ -180,6 +195,14 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path.startswith("/api/"):
             self._send(api.error("not found", status=404))
+            return
+        if parsed.path == WEB_ROUTE_PREFIX:
+            self._send(api.Response(status=301, body=b"", content_type="text/plain",
+                                    headers={"Location": WEB_ROUTE_PREFIX + "/"}))
+            return
+        if parsed.path.startswith(WEB_ROUTE_PREFIX + "/"):
+            if not self._serve_web(parsed.path):
+                self._send(api.error("not found", status=404))
             return
         if not self._serve_static(parsed.path):
             self._send(api.error("not found", status=404))

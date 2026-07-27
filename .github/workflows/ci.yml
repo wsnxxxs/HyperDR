@@ -94,7 +94,10 @@ jobs:
         run: |
           set -e
           found=0
-          for file in $(find apps/panel/static/js -name '*.js'); do
+          # Both front-ends: the shipping panel and the rewrite served at
+          # /next. The rewrite is checked from its first commit rather than at
+          # cutover, when a parse error would be found by a user instead.
+          for file in $(find apps/panel/static/js apps/panel/web/js -name '*.js'); do
             node --input-type=module --check < "$file" || { echo "FAILED: $file"; exit 1; }
             found=$((found + 1))
           done

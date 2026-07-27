@@ -24,7 +24,19 @@
 <div class="app">
 
   <header class="app__header">
-    <h1 class="app__title">HyperDR</h1>
+    <h1 class="app__title wordmark" aria-label="HyperDR">
+      <!-- Offset exposure frames converge on one bright image: a compact
+           visual shorthand for the wider luminance range HyperDR creates. -->
+      <svg class="wordmark-mark" viewBox="0 0 32 32" aria-hidden="true">
+        <rect class="wordmark-frame is-back" x="4.5" y="7.5" width="17" height="17" rx="5"/>
+        <rect class="wordmark-frame is-front" x="10.5" y="4.5" width="17" height="17" rx="5"/>
+        <path class="wordmark-glow" d="M8 18.5h16"/>
+        <circle class="wordmark-spark" cx="24" cy="18.5" r="2.25"/>
+      </svg>
+      <span class="wordmark-text" aria-hidden="true">
+        <span class="wordmark-accent">H</span><span class="wordmark-name">yper</span><span class="wordmark-accent">DR</span>
+      </span>
+    </h1>
     <span class="app__badge">重写预览</span>
     <p class="service-state">
       <span class="service-dot" data-role="service-dot"></span>

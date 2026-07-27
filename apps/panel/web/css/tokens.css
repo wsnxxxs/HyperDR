@@ -25,7 +25,10 @@
   --line-strong:     light-dark(#0000002e, #ffffff33);
 
   /* -- accents ------------------------------------------------------- */
-  --accent:          light-dark(#2f6feb, #4d8bf5);
+  /* A photographic blue rather than a system blue: the amber below is the
+     interface's one loud colour, and a saturated UI blue fights it. Light mode
+     darkens it because the accent is used as ink, not as a fill. */
+  --accent:          light-dark(#2f83b0, #72bce7);
   --accent-ink:      #ffffff;
   --danger:          light-dark(#c0392b, #ef6b5c);
   --success:         light-dark(#1f7a4d, #3fbf84);
@@ -61,11 +64,12 @@
   --preview-backdrop: #2a2a2c;
   --overlay:         rgb(18 18 20 / 0.72);
   --overlay-ink:     #f2f3f5;
+  --overlay-track:   rgb(255 255 255 / 0.18);
 
   /* -- geometry ------------------------------------------------------ */
-  --radius-sm: 4px;
-  --radius:    8px;
-  --radius-lg: 14px;
+  --radius-sm: 6px;
+  --radius:    12px;
+  --radius-lg: 18px;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -74,8 +78,31 @@
   --space-5: 24px;
   --space-6: 32px;
 
+  /* Widest the photograph's well is allowed to get, so its shape stays put
+     instead of tracking the window. In px, not vw. */
+  --stage-cap: 1000px;
+
+  /* -- elevation ----------------------------------------------------- */
+  /* Two layers each: a tight contact shadow that seats the element on the
+     page, and a wide diffuse one that lifts it. A single blur reads as a
+     smudge. Colour lives here because everything else references it. */
+  --shadow-sm:
+    0 1px 2px light-dark(rgb(16 18 24 / 0.05), rgb(0 0 0 / 0.5)),
+    0 1px 1px light-dark(rgb(16 18 24 / 0.03), transparent);
+  --shadow-md:
+    0 1px 2px light-dark(rgb(16 18 24 / 0.05), rgb(0 0 0 / 0.5)),
+    0 10px 28px -8px light-dark(rgb(16 18 24 / 0.12), rgb(0 0 0 / 0.6));
+  --shadow-lg:
+    0 2px 4px light-dark(rgb(16 18 24 / 0.05), rgb(0 0 0 / 0.5)),
+    0 24px 60px -16px light-dark(rgb(16 18 24 / 0.16), rgb(0 0 0 / 0.7));
+
   /* -- type ---------------------------------------------------------- */
-  --font-ui: system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+  /* Named ahead of system-ui so Windows picks the variable-weight Segoe and
+     recent Chinese faces before it falls back to Microsoft YaHei, which is
+     heavier and sits lower than the Latin next to it. */
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text",
+    "Segoe UI", Inter, system-ui, "PingFang SC", "HarmonyOS Sans SC",
+    "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
   --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
   --text-sm: 0.8125rem;
   --text:    0.9375rem;

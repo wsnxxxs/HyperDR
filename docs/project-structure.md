@@ -21,8 +21,12 @@ HyperDR/
 ├── docs/               # User guides, validation notes, and this map
 ├── packaging/          # Release building, unpacked-archive smoke test, and install guide
 ├── schema/             # Settings vocabulary and report JSON Schema
-├── scripts/            # Windows setup, LAN, firewall, and codec helpers
+├── scripts/            # Windows setup, LAN, TLS, firewall, and codec helpers
+│                         hyperdr_tls.ps1 holds the certificate paths and
+│                         issuing logic shared by both launchers
 ├── tests/python/       # Tests for the browser panel
+├── Start.bat           # Double-click entry point for the browser panel
+├── Setup-HTTPS.bat     # One-time trusted-HTTPS setup for iPhone true HDR
 ├── CMakeLists.txt      # Options, module list, install and packaging
 ├── vcpkg.json          # Native dependency manifest
 ├── CHANGELOG.md        # User-visible changes by release
@@ -70,6 +74,7 @@ still runs almost the whole test suite.
 | Panel visual design | `apps/panel/static/` |
 | Build options, warnings, or test registration | `cmake/` |
 | Windows and LAN setup | `scripts/` and `docs/iphone-lan.md` |
+| Certificate paths, issuing, and re-issuing | `scripts/hyperdr_tls.ps1` |
 | Release packaging, six-format smoke test, and install instructions | `packaging/` |
 
 `hyperdr` is the internal C++/Python identifier. `HyperDR` is the public product

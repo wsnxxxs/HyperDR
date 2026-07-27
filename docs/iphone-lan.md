@@ -2,6 +2,12 @@
 
 HyperDR 现在可以由 Windows 电脑在局域网内提供服务。iPhone 负责选择和上传照片、调节参数、查看预览以及下载结果；RAW 解码和 HEIC 编码仍在电脑上完成。
 
+## 首次使用
+
+想要 iPhone 上的**真 HDR 实时预览**，先双击一次 `Setup-HTTPS.bat`，按它打印的两步在 iPhone 上安装并信任根证书，之后每次双击 `Start.bat` 即可。详见下方“配置受信任 HTTPS”。
+
+只想上传、转换、下载，不需要实时 HDR 预览的，可以跳过这一步，直接用下面的 HTTP 模式。
+
 ## 快速启动（HTTP）
 
 1. 确认 iPhone 与电脑连接到同一个可信 Wi-Fi。
@@ -21,23 +27,60 @@ HTTP 模式可以上传、转换、下载并查看 SDR 示意预览。Safari 的
 
 ## 配置受信任 HTTPS
 
-建议使用 `mkcert` 创建一个由本地 CA 签发的证书。不要依赖 Safari 的临时证书警告例外，因为 WebGPU 需要真正的安全上下文。
+Safari 的 WebGPU 只在安全上下文中开放，所以真 HDR 需要一张**受信任的**证书。点“继续访问”忽略警告没有用：例外不构成安全上下文。
 
-先确认电脑当前的局域网 IPv4 地址，然后在项目外的安全目录生成证书（下面以 `192.168.31.87` 为例）：
+### 推荐做法：Setup-HTTPS.bat
+
+双击项目根目录的 `Setup-HTTPS.bat`，它会自动完成：
+
+1. 检测 `mkcert`，缺失时通过 winget 安装；
+2. 创建（或复用）**只属于这台电脑**的本地根证书颁发机构；
+3. 按当前局域网 IPv4 签发服务器证书，写入 `%LOCALAPPDATA%\HyperDR\tls`，并把私钥权限收紧为仅当前 Windows 用户；
+4. 把根证书导出到桌面，文件名 `HyperDR-rootCA.crt`。
+
+然后把桌面上的 `HyperDR-rootCA.crt` 传到 iPhone（隔空投送、邮件、聊天工具均可，它只含公钥），在 iPhone 上完成**两步**：
+
+1. 打开文件并安装描述文件：设置 → 已下载描述文件 → 安装；
+2. 设置 → 通用 → 关于本机 → 证书信任设置，找到这个证书，打开“启用完全信任”。
+
+**只做第 1 步而不做第 2 步，Safari 仍会报证书错误。** 这是最常见的失败原因。
+
+配置完成后双击 `Start.bat` 即可，不需要任何参数。
+
+发布包里不包含任何根证书或私钥。每台电脑都必须生成自己的 CA——如果所有安装共享同一个根 CA 私钥，任何拿到它的人都能对信任了该 CA 的手机伪造任意网站的证书。
+
+### 手动做法
+
+如果不想用向导，也可以自己生成。证书**不要**放在程序目录或其附近；启动脚本固定从下面这个位置读取，与发布包解压到哪里无关：
+
+```text
+%LOCALAPPDATA%\HyperDR\tls\hyperdr.pem
+%LOCALAPPDATA%\HyperDR\tls\hyperdr-key.pem
+```
+
+先确认电脑当前的局域网 IPv4 地址（下面以 `192.168.31.87` 为例），然后生成证书：
 
 ```powershell
 mkcert -install
-mkcert -cert-file hyperdr.pem -key-file hyperdr-key.pem 192.168.31.87 127.0.0.1 localhost
+mkdir "$env:LOCALAPPDATA\HyperDR\tls" -Force
+mkcert -cert-file "$env:LOCALAPPDATA\HyperDR\tls\hyperdr.pem" `
+       -key-file  "$env:LOCALAPPDATA\HyperDR\tls\hyperdr-key.pem" `
+       192.168.31.87 127.0.0.1 localhost
 mkcert -CAROOT
 ```
 
-把 `mkcert -CAROOT` 所在目录中的 `rootCA.pem` 安全地传到 iPhone：
+把 `mkcert -CAROOT` 所在目录中的 `rootCA.pem` 按上面的两步传到 iPhone 并信任。
 
-1. 在 iPhone 上安装该描述文件；
-2. 打开“设置 → 通用 → 关于本机 → 证书信任设置”；
-3. 对这个本地根证书启用完全信任。
+### 证书查找顺序
 
-然后在项目根目录运行：
+启动脚本按下面的顺序取第一个可用的证书对：
+
+1. `-Certificate` / `-PrivateKey` 命令行参数
+2. `HYPERDR_TLS_CERT` / `HYPERDR_TLS_KEY` 环境变量
+3. `%LOCALAPPDATA%\HyperDR\tls\`
+4. `文档\HyperDR-Cert\`（0.2.2 之前的位置，仅在首次启动时自动复制到 3，不会删除原文件）
+
+如果只想临时指定一对证书：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\start_hyperdr_lan.ps1 `
@@ -45,7 +88,31 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\start_hyperdr_lan.ps
   -PrivateKey C:\安全目录\hyperdr-key.pem
 ```
 
-Safari 应使用启动窗口打印的 `https://局域网地址:端口/?token=...`。证书中的 IP 必须与访问地址一致。私钥不要复制到 iPhone，也不要提交到版本库。
+### IP 变化后
+
+证书里的 IP 必须与 iPhone 访问的地址一致。路由器重新分配 IP 后，`Start.bat` 会检测到当前地址不在证书覆盖范围内，**用同一个本地 CA 自动重新签发**服务器证书并在窗口中说明。只有服务器证书被替换，iPhone 上已安装的根证书无需任何操作。
+
+自动重签只作用于 `%LOCALAPPDATA%\HyperDR\tls` 下由 HyperDR 管理的那对证书。通过 `-Certificate` / `-PrivateKey` 或环境变量手动指定的证书只会被检查并提示，不会被改动。
+
+如果这台电脑上找不到 `mkcert`，启动窗口会提示运行 `Setup-HTTPS.bat`。也可以手动重签：
+
+```powershell
+mkcert -cert-file "$env:LOCALAPPDATA\HyperDR\tls\hyperdr.pem" `
+       -key-file  "$env:LOCALAPPDATA\HyperDR\tls\hyperdr-key.pem" `
+       新的IP 127.0.0.1 localhost
+```
+
+想彻底避免这件事，请在路由器里为这台电脑设置 DHCP 保留或静态 IP。
+
+证书临近过期（剩余不足 30 天）时同样会自动重签。
+
+### 备份与安全
+
+根 CA 的私钥（`mkcert -CAROOT` 目录中的 `rootCA-key.pem`）是整套配置里**唯一不可再生**的文件。丢失后必须重新生成 CA，并在每一台 iPhone 上重装根证书。建议离线备份，且不要放进会被云端同步的目录——这也是证书不再存放于“文档”的原因之一，那里可能被 OneDrive 重定向。
+
+服务器私钥 `hyperdr-key.pem` 的权限被收紧为仅当前 Windows 用户可访问。私钥不要复制到 iPhone，也不要提交到版本库；仓库的 `.gitignore` 已排除 `*.pem`、`*.key`、`*.pfx`、`*.crt`、`*.cer`。
+
+Safari 应使用启动窗口打印的 `https://局域网地址:端口/?token=...`，证书中的 IP 必须与访问地址一致。
 
 ## HDR 预览层级
 

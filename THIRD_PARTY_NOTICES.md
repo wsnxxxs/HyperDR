@@ -15,6 +15,13 @@ resolves the dependencies below through vcpkg or CMake `FetchContent`.
 | libpng | PNG input decoding | libpng-2.0 |
 | Google libultrahdr 1.4.0 | Ultra HDR JPEG/R reference codec | Apache-2.0 or MIT |
 
+`Setup-HTTPS.bat` offers to install [mkcert](https://github.com/FiloSottile/mkcert)
+(BSD-3-Clause) through winget, and later invokes it to issue the local
+certificate. mkcert is neither redistributed in this repository nor included in
+any release archive; it is installed on, and remains owned by, the end user's
+machine. The certificate authority it creates is generated per computer and is
+never shipped.
+
 The exact dependency versions and feature choices are defined in
 [`vcpkg.json`](vcpkg.json) and [`CMakeLists.txt`](CMakeLists.txt). Consult the
 license files distributed with each dependency; this notice is an aid, not a

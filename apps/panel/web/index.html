@@ -3,34 +3,174 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
 <title>HyperDR 控制面板</title>
+<script>
+  /* Painted before first paint, so a stored choice never flashes the wrong theme. */
+  try {
+    var t = localStorage.getItem("hyperdr.theme");
+    if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+  } catch (e) {}
+</script>
 <!-- Relative hrefs, so this tree also opens from disk. The server redirects
      bare /next to /next/ for the same reason; the panel's CSP sets
      base-uri 'none', so a <base> tag is not available as an alternative. -->
 <link rel="stylesheet" href="./css/tokens.css">
 <link rel="stylesheet" href="./css/base.css">
 <link rel="stylesheet" href="./css/shell.css">
+<link rel="stylesheet" href="./css/components.css">
 </head>
 <body>
 <div class="app">
+
   <header class="app__header">
     <h1 class="app__title">HyperDR</h1>
     <span class="app__badge">重写预览</span>
+    <p class="service-state">
+      <span class="service-dot" data-role="service-dot"></span>
+      <span data-role="service-text">正在检测…</span>
+    </p>
+    <button class="icon-button" type="button" data-role="theme-toggle" aria-pressed="false">
+      <svg class="theme-icon theme-icon--sun" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></svg>
+      <svg class="theme-icon theme-icon--moon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20.2 15.3A8.5 8.5 0 0 1 8.7 3.8a8.5 8.5 0 1 0 11.5 11.5Z"/></svg>
+    </button>
   </header>
 
   <main class="app__stage" id="stage" aria-label="预览">
-    <p class="placeholder">预览区域。</p>
+
+    <!-- One photograph at a time; picking another replaces it. -->
+    <div class="stage" data-role="stage" tabindex="0" role="button" aria-busy="false">
+      <div class="stage-frame">
+        <canvas data-role="canvas-hdr" hidden aria-label="WebGPU 真 HDR 预览"></canvas>
+        <canvas data-role="canvas-sdr" hidden aria-label="SDR 回退预览"></canvas>
+        <canvas data-role="canvas-original" hidden aria-hidden="true"></canvas>
+        <canvas data-role="canvas-zebra-hot" hidden aria-hidden="true"></canvas>
+        <canvas data-role="canvas-zebra-cold" hidden aria-hidden="true"></canvas>
+        <canvas data-role="canvas-mask" hidden aria-hidden="true"></canvas>
+        <div class="stage-divider" data-role="divider" hidden
+             role="slider" tabindex="0" aria-label="分割位置"
+             aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
+          <span class="stage-divider-line"></span>
+          <span class="stage-divider-handle"></span>
+        </div>
+        <span class="stage-badge" data-role="hdr-badge" hidden>HDR</span>
+        <div class="stage-chips">
+          <button class="chip chip--hot" type="button" data-role="clip-hot" aria-pressed="false">
+            <span class="chip-swatch" aria-hidden="true"></span>高光裁切 <b data-role="clip-hot-value">0.0%</b>
+          </button>
+          <button class="chip chip--cold" type="button" data-role="clip-cold" aria-pressed="false">
+            <span class="chip-swatch" aria-hidden="true"></span>暗部裁切 <b data-role="clip-cold-value">0.0%</b>
+          </button>
+        </div>
+      </div>
+      <div class="stage-empty" data-role="stage-empty">
+        <span class="stage-plus" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        </span>
+        <strong data-role="stage-title">点击选择或拖放图片</strong>
+        <span class="stage-support">一次一张；拖放到这里也可以</span>
+        <span class="stage-progress" aria-hidden="true"><span class="stage-progress-fill" data-role="upload-bar"></span></span>
+        <span class="stage-progress-text" data-role="upload-progress" aria-live="polite"></span>
+      </div>
+      <input type="file" data-role="file-input" hidden
+             accept="image/*,.arw,.dng,.jpg,.jpeg,.png,.heic,.heif">
+    </div>
+
+    <div class="scope">
+      <div class="scope-bar">
+        <div class="segmented segmented--small" role="group" aria-label="视图" data-role="view-mode"></div>
+        <span class="scope-status" data-role="hdr-status" aria-live="polite"></span>
+        <div class="segmented segmented--small" role="group" aria-label="直方图模式" data-role="hist-mode"></div>
+      </div>
+      <canvas class="scope-graph" data-role="histogram" width="720" height="72"></canvas>
+      <p class="scope-legend">
+        <span class="swatch swatch--source" aria-hidden="true"></span>源分布
+        <span class="swatch swatch--output" aria-hidden="true"></span>扩展后（模拟）
+        <span class="scope-legend-note">虚线为扩展起点；裁切色块开关在照片上</span>
+      </p>
+    </div>
+
   </main>
 
-  <aside class="app__settings" id="settings" aria-label="转换设置">
+  <aside class="app__settings" id="settings" aria-label="调整">
     <p class="banner" id="banner" hidden></p>
-    <p class="placeholder">设置区域。</p>
+
+    <div class="rail-head">
+      <h2>调整</h2>
+      <button class="link-button" type="button" data-role="settings-reset">重置全部</button>
+    </div>
+    <div class="presets" role="group" aria-label="预设" data-role="preset-list"></div>
+
+    <section class="group">
+      <div class="group-head">
+        <h3>曝光与扩展</h3>
+        <button class="link-button" type="button" data-role="reset-tone">重置</button>
+      </div>
+      <div data-role="group-tone"></div>
+    </section>
+
+    <section class="group">
+      <div class="group-head">
+        <h3>扩展作用区域</h3>
+        <button class="link-button" type="button" data-role="reset-region">重置</button>
+      </div>
+      <p class="group-note">悬停滑杆时，照片上会显示该参数作用的区域。</p>
+      <div data-role="group-region"></div>
+    </section>
+
+    <details class="group group--advanced">
+      <summary>高级参数</summary>
+      <div class="group-body">
+        <div class="group-head">
+          <span class="group-note">对比度、鲜艳度与 RAW 高光恢复。</span>
+          <button class="link-button" type="button" data-role="reset-advanced">重置</button>
+        </div>
+        <div data-role="group-advanced"></div>
+      </div>
+    </details>
   </aside>
 
-  <footer class="app__run" id="run" aria-label="转换">
-    <p class="placeholder">运行区域。</p>
+  <footer class="app__run" id="run" aria-label="输出">
+    <div class="dock">
+      <div class="dock-field dock-field--encoding">
+        <span class="dock-label">输出格式</span>
+        <select class="dock-select" data-role="encoding-select" aria-label="输出格式"></select>
+        <p class="dock-hint" data-role="encoding-hint"></p>
+      </div>
+      <div class="dock-field dock-field--quality" data-role="group-quality"></div>
+      <ol class="phases" aria-label="流程进度">
+        <li class="phase" data-role="phase-upload"><span class="phase-dot" aria-hidden="true"></span>上传</li>
+        <li class="phase" data-role="phase-convert"><span class="phase-dot" aria-hidden="true"></span>转换</li>
+        <li class="phase" data-role="phase-deliver"><span class="phase-dot" aria-hidden="true"></span>交付</li>
+      </ol>
+      <div class="dock-actions">
+        <button class="button" type="button" data-role="cancel" hidden>取消</button>
+        <button class="button button--primary" type="button" data-role="run">开始转换</button>
+      </div>
+    </div>
+
+    <details class="dock-command">
+      <summary>查看命令行</summary>
+      <code data-role="command-line">HyperDR …</code>
+    </details>
+
+    <div class="result" data-role="result" hidden>
+      <div class="result-info">
+        <strong class="result-name" data-role="result-name"></strong>
+        <span class="result-meta" data-role="result-meta"></span>
+        <span class="result-warn" data-role="result-warn" hidden></span>
+        <span class="result-stale" data-role="result-stale" hidden>设置已变更，需重新转换</span>
+      </div>
+      <div class="result-actions">
+        <button class="button" type="button" data-role="export" hidden>导出到文件夹</button>
+        <a class="button button--primary" data-role="download" download>保存到设备</a>
+      </div>
+    </div>
   </footer>
+
 </div>
+
+<div class="toast" data-role="toast" role="status" aria-live="polite"></div>
 
 <script type="module" src="./js/main.js"></script>
 </body>

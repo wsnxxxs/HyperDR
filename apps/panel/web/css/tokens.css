@@ -30,9 +30,37 @@
   --danger:          light-dark(#c0392b, #ef6b5c);
   --success:         light-dark(#1f7a4d, #3fbf84);
 
+  /* HDR amber: reserved for things that are *about* extended range -- the
+     badge, the run button, the simulated-output histogram, the mask tint. */
+  --hdr:             light-dark(#b97708, #f2b64b);
+  --hdr-ink:         #241a05;
+  --hdr-soft:        light-dark(#fdf3dd, #3a2c12);
+
+  /* Zebra overlays and the slider mask are painted into canvases by JS, which
+     cannot see these variables at paint time; scope.js and mask.js read them
+     back with getComputedStyle, so the values still live here and only here. */
+  --zebra-hot:       light-dark(#d64541, #ef6b5c);
+  --zebra-cold:      light-dark(#3b82f6, #6ba3f8);
+  --mask-tint:       light-dark(#b97708, #f2b64b);
+
+  /* Histogram palette, read back from the canvas the same way. The output
+     series is the HDR amber; the source series stays neutral so the eye
+     compares shape rather than colour. */
+  --hist-grid:       light-dark(#00000012, #ffffff16);
+  --hist-luma:       light-dark(#7d838d, #9aa3b2);
+  --hist-red:        light-dark(#d64541, #ef6b5c);
+  --hist-green:      light-dark(#3d9e57, #4ec77e);
+  --hist-blue:       light-dark(#3b82f6, #6ba3f8);
+  --hist-marker:     var(--hdr);
+  --hist-output:     var(--hdr);
+
   /* Preview canvases sit on neutral grey at both schemes: an HDR image judged
-     against a white or black field reads as the wrong exposure. */
+     against a white or black field reads as the wrong exposure. Overlay chips
+     and the wipe handle float on the photograph itself, so they keep a dark
+     surface at both schemes too. */
   --preview-backdrop: #2a2a2c;
+  --overlay:         rgb(18 18 20 / 0.72);
+  --overlay-ink:     #f2f3f5;
 
   /* -- geometry ------------------------------------------------------ */
   --radius-sm: 4px;
@@ -61,3 +89,19 @@
 @media (prefers-reduced-motion: reduce) {
   :root { --duration: 0ms; }
 }
+
+/* Registered as <color> so that light-dark() resolves at computed-value time:
+ * scope.js and mask.js read these back with getComputedStyle to paint canvases,
+ * and an unregistered property would hand them the literal "light-dark(...)"
+ * text instead of a colour. The initial values are the dark-scheme variants,
+ * which is also what a browser without @property support would fall back to. */
+@property --hist-grid   { syntax: "<color>"; inherits: true; initial-value: #ffffff16; }
+@property --hist-luma   { syntax: "<color>"; inherits: true; initial-value: #9aa3b2; }
+@property --hist-red    { syntax: "<color>"; inherits: true; initial-value: #ef6b5c; }
+@property --hist-green  { syntax: "<color>"; inherits: true; initial-value: #4ec77e; }
+@property --hist-blue   { syntax: "<color>"; inherits: true; initial-value: #6ba3f8; }
+@property --hist-marker { syntax: "<color>"; inherits: true; initial-value: #f2b64b; }
+@property --hist-output { syntax: "<color>"; inherits: true; initial-value: #f2b64b; }
+@property --zebra-hot   { syntax: "<color>"; inherits: true; initial-value: #ef6b5c; }
+@property --zebra-cold  { syntax: "<color>"; inherits: true; initial-value: #6ba3f8; }
+@property --mask-tint   { syntax: "<color>"; inherits: true; initial-value: #f2b64b; }

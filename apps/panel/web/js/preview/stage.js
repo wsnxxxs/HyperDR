@@ -1,0 +1,482 @@
+/* The preview stage: file intake, gestures, renderer selection, and the wipe.
+ *
+ * The stage owns the decoded image and nothing else does. Renderers are chosen
+ * once per image and swapped wholesale, so the fallback path never has to ask
+ * whether a GPU device happens to exist right now.
+ *
+ * Comparing against the source is a first-class mode, not a hidden gesture:
+ * a segmented control offers effect / original / split, where split stacks a
+ * clipped 2D copy of the source over the live renderer with a draggable wipe
+ * between them. Press-and-hold still works on the desktop because hands learn
+ * it once and use it forever.
+ */
+
+import { api } from "../core/api.js";
+import { store } from "../core/store.js";
+import { role, setText, setPressed, clamp } from "../core/dom.js";
+import { renderSdr } from "./cpu.js";
+import { createHdrRenderer } from "./gpu.js";
+import { createSdrGpuRenderer } from "./sdr-gpu.js";
+import { analyse, mountScope } from "./scope.js";
+import { createUploader } from "./session.js";
+
+const hdrDisplayQuery = window.matchMedia("(dynamic-range: high)");
+const touchQuery = window.matchMedia(
+  "(max-width: 640px), (max-width: 1024px) and (hover: none) and (pointer: coarse)");
+
+/* Preview sizes are quantised: the server's preview cache keys on the edge and
+ * holds eight entries, so a continuous "how wide is the stage right now" would
+ * evict on every window drag. Three tiers cover phone to desktop, clamped to
+ * what the server says it can decode. */
+const PREVIEW_TIERS = [960, 1280, 2048];
+
+const TOUCH_HINT = "点击添加或更换图片；用视图切换对照原图";
+const MOUSE_HINT = "点击添加图片；已有图片时轻点更换，按住查看原图";
+
+const VIEW_MODES = [["original", "原图"], ["split", "分割"], ["effect", "效果"]];
+
+function decodeBlob(blob) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const image = new Image();
+    image.onload = () => resolve({ image, url });
+    image.onerror = () => { URL.revokeObjectURL(url); reject(new Error("无法解码内嵌 JPEG 预览。")); };
+    image.src = url;
+  });
+}
+
+export function mountStage({ curve, toast }) {
+  const stage = role("stage");
+  const frame = stage.querySelector(".stage-frame");
+  const empty = role("stage-empty");
+  const emptyTitle = role("stage-title");
+  const progressText = role("upload-progress");
+  const progressBar = role("upload-bar");
+  const hdrStatus = role("hdr-status");
+  const badge = role("hdr-badge");
+  const fileInput = role("file-input");
+  const divider = role("divider");
+  const hdrCanvas = role("canvas-hdr");
+  const originalCanvas = role("canvas-original");
+  const viewModeGroup = role("view-mode");
+  let sdrCanvas = role("canvas-sdr");
+
+  /** Decoded image + derived buffers. Replaced wholesale, never patched. */
+  const image = { source: null, output: null, bitmap: null, label: "" };
+  const analysis = { current: null };
+  const refreshScope = mountScope({ curve, analysis });
+
+  let renderer = null;        // WebGPU/WebGL renderer, or null for the CPU path
+  let frame_ = 0;
+  let loadToken = 0;
+
+  /* ── view mode segmented ──────────────────────────────────────────── */
+
+  const modeButtons = VIEW_MODES.map(([id, label]) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.setAttribute("aria-pressed", "false");
+    button.textContent = label;
+    button.addEventListener("click", () => store.set({ viewMode: id }));
+    viewModeGroup.append(button);
+    return [id, button];
+  });
+
+  const showingOriginal = () => {
+    const state = store.get();
+    return state.viewMode === "original" || (state.comparing && state.viewMode !== "split");
+  };
+
+  /* ── the wipe ─────────────────────────────────────────────────────── */
+
+  /** The effect canvas's displayed rectangle, in frame coordinates. */
+  function imageRect() {
+    const canvas = renderer?.kind === "hdr" ? hdrCanvas : sdrCanvas;
+    const c = canvas.getBoundingClientRect();
+    const f = frame.getBoundingClientRect();
+    return { left: c.left - f.left, top: c.top - f.top, width: c.width, height: c.height, clientLeft: c.left };
+  }
+
+  function positionDivider() {
+    const state = store.get();
+    if (state.viewMode !== "split" || !image.source) return;
+    const rect = imageRect();
+    divider.style.left = `${rect.left + state.splitRatio * rect.width}px`;
+    divider.style.top = `${rect.top}px`;
+    divider.style.height = `${rect.height}px`;
+    divider.setAttribute("aria-valuenow", String(Math.round(state.splitRatio * 100)));
+  }
+
+  function syncView() {
+    const state = store.get();
+    const hasImage = Boolean(image.source);
+    const split = state.viewMode === "split" && hasImage;
+    const original = showingOriginal();
+
+    originalCanvas.hidden = !split;
+    divider.hidden = !split;
+    if (split) {
+      originalCanvas.style.clipPath = `inset(0 ${((1 - state.splitRatio) * 100).toFixed(2)}% 0 0)`;
+      positionDivider();
+    }
+
+    setText(badge, original ? "SDR" : "HDR");
+    badge.hidden = !hasImage || renderer?.kind !== "hdr";
+    stage.classList.toggle("is-comparing", original);
+    stage.setAttribute("aria-pressed", String(original));
+    for (const [id, button] of modeButtons) setPressed(button, id === state.viewMode);
+  }
+
+  let dividerPointer = null;
+  divider.addEventListener("pointerdown", (event) => {
+    // The stage would read this as the start of a tap-to-replace.
+    event.stopPropagation();
+    event.preventDefault();
+    dividerPointer = event.pointerId;
+    divider.setPointerCapture(event.pointerId);
+  });
+  divider.addEventListener("pointermove", (event) => {
+    if (dividerPointer !== event.pointerId) return;
+    const rect = imageRect();
+    store.set({ splitRatio: clamp((event.clientX - rect.clientLeft) / rect.width, 0.05, 0.95) });
+  });
+  const endDividerDrag = (event) => {
+    if (dividerPointer !== event.pointerId) return;
+    dividerPointer = null;
+  };
+  divider.addEventListener("pointerup", endDividerDrag);
+  divider.addEventListener("pointercancel", endDividerDrag);
+  divider.addEventListener("keydown", (event) => {
+    const delta = { ArrowLeft: -0.05, ArrowRight: 0.05 }[event.key];
+    if (!delta) return;
+    event.preventDefault();
+    store.set({ splitRatio: clamp(store.get().splitRatio + delta, 0.05, 0.95) });
+  });
+
+  new ResizeObserver(() => positionDivider()).observe(frame);
+
+  /* ── capability reporting ─────────────────────────────────────────── */
+
+  function setCapability(message, ok) {
+    setText(hdrStatus, message);
+    hdrStatus.classList.toggle("is-ok", Boolean(ok));
+    stage.dataset.previewMode = renderer?.kind || "sdr-cpu";
+  }
+
+  function reportInitialCapability() {
+    if (!hdrDisplayQuery.matches) setCapability("SDR 显示模式", false);
+    else if (!window.isSecureContext) setCapability("HDR 需要受信任的 HTTPS", false);
+    else if (!navigator.gpu) setCapability("此浏览器无法启用 WebGPU HDR", false);
+    else setCapability("HDR 能力就绪", true);
+  }
+
+  /* ── rendering ────────────────────────────────────────────────────── */
+
+  function draw() {
+    frame_ = 0;
+    if (!image.source) return;
+    const state = store.get();
+    curve.refreshTable(state);
+    const original = showingOriginal();
+    if (renderer) {
+      renderer.draw(curve.table, {
+        strength: state.hdrStrength, headroom: state.hdrRange,
+        original, expansionStart: state.expansionStart,
+        areaCoverage: state.areaCoverage, exposureBias: state.brightness,
+      });
+    } else {
+      renderSdr(sdrCanvas, {
+        source: image.source, output: image.output, curve,
+        settings: state, original,
+      });
+    }
+  }
+
+  function schedule() {
+    if (!image.source) return;
+    if (frame_) cancelAnimationFrame(frame_);
+    frame_ = requestAnimationFrame(draw);
+  }
+
+  function showCanvas(mode) {
+    hdrCanvas.hidden = mode !== "hdr";
+    sdrCanvas.hidden = mode !== "sdr";
+  }
+
+  function chooseSdrRenderer(reason) {
+    renderer?.destroy();
+    renderer = null;
+    try {
+      renderer = createSdrGpuRenderer(sdrCanvas);
+      renderer.upload(image.bitmap);
+      showCanvas("sdr");
+      setCapability(`${reason} · GPU SDR 示意`, false);
+    } catch (error) {
+      renderer = null;
+      // A canvas that has successfully created a WebGL context cannot later
+      // switch to 2D. Replace it before entering the last-resort CPU path if
+      // WebGL setup failed after context creation.
+      const replacement = sdrCanvas.cloneNode(false);
+      replacement.width = sdrCanvas.width;
+      replacement.height = sdrCanvas.height;
+      sdrCanvas.replaceWith(replacement);
+      sdrCanvas = replacement;
+      showCanvas("sdr");
+      setCapability(`${reason} · 兼容 SDR 示意`, false);
+    }
+    syncView();
+    schedule();
+  }
+
+  async function chooseRenderer() {
+    renderer?.destroy();
+    renderer = null;
+
+    if (!hdrDisplayQuery.matches) {
+      chooseSdrRenderer("当前屏幕为 SDR");
+    } else if (!window.isSecureContext) {
+      chooseSdrRenderer("HTTP 模式");
+    } else if (!navigator.gpu) {
+      chooseSdrRenderer("当前浏览器没有可用的 WebGPU");
+    } else {
+      try {
+        renderer = await createHdrRenderer(hdrCanvas, () => {
+          chooseSdrRenderer("HDR 图形设备已断开");
+        });
+        renderer.upload(image.bitmap);
+        showCanvas("hdr");
+        const gamut = renderer.outputColorSpace === "display-p3" ? "Display P3" : "扩展 sRGB";
+        setCapability(`真 HDR · ${gamut} · 16-bit 浮点`, true);
+      } catch (error) {
+        chooseSdrRenderer("WebGPU HDR 初始化失败");
+      }
+    }
+    syncView();
+    schedule();
+  }
+
+  /* ── loading ──────────────────────────────────────────────────────── */
+
+  function previewTier() {
+    const ceiling = Number(store.get().capabilities?.previewMaxEdge) || 2048;
+    const allowed = PREVIEW_TIERS.filter((tier) => tier <= ceiling);
+    const list = allowed.length ? allowed : [ceiling];
+    const box = frame.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const want = Math.max(box.width, box.height, 640) * dpr;
+    for (const tier of list) if (tier >= want) return tier;
+    return list[list.length - 1];
+  }
+
+  function clear(message = "点击选择或拖放图片") {
+    loadToken++;
+    image.bitmap?.close();
+    Object.assign(image, { source: null, output: null, bitmap: null, label: "" });
+    analysis.current = null;
+    renderer?.destroy();
+    renderer = null;
+    store.set({ comparing: false, maskKey: null });
+    stage.classList.remove("has-image", "is-comparing");
+    for (const canvas of [sdrCanvas, hdrCanvas, originalCanvas]) {
+      canvas.hidden = true;
+      canvas.width = 0;
+      canvas.height = 0;
+    }
+    divider.hidden = true;
+    empty.style.display = "flex";
+    setText(emptyTitle, message);
+    refreshScope();
+    syncView();
+  }
+
+  async function load() {
+    const sessionId = store.get().sessionId;
+    const token = ++loadToken;
+    if (!sessionId) { clear(); reportInitialCapability(); return; }
+    setText(emptyTitle, "正在生成可调节预览…");
+
+    try {
+      const state = store.get();
+      const preview = await api.preview(sessionId, {
+        highlightRecovery: state.highlightRecovery,
+        maxEdge: previewTier(),
+      });
+      const { image: decoded, url } = await decodeBlob(preview.blob);
+      if (token !== loadToken) { URL.revokeObjectURL(url); return; }
+
+      // The contract says to trust the headers over re-measuring the bitmap.
+      const width = preview.width || decoded.naturalWidth;
+      const height = preview.height || decoded.naturalHeight;
+
+      const scratch = document.createElement("canvas");
+      scratch.width = width;
+      scratch.height = height;
+      const context = scratch.getContext("2d", { willReadFrequently: true });
+      context.drawImage(decoded, 0, 0, width, height);
+      URL.revokeObjectURL(url);
+
+      image.bitmap?.close();
+      image.bitmap = await createImageBitmap(scratch);
+      image.source = context.getImageData(0, 0, width, height);
+      image.output = context.createImageData(width, height);
+      image.label = state.file?.name || "图片";
+
+      for (const canvas of [sdrCanvas, hdrCanvas, originalCanvas]) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      originalCanvas.getContext("2d").putImageData(image.source, 0, 0);
+      analysis.current = analyse(image.source);
+
+      empty.style.display = "none";
+      stage.classList.add("has-image");
+      store.set({ comparing: false });
+      refreshScope();
+      await chooseRenderer();
+    } catch (error) {
+      if (token !== loadToken) return;
+      clear(error.message || "无法载入预览。");
+    }
+  }
+
+  const upload = createUploader({
+    onProgress: (fraction) => {
+      progressBar.style.width = `${Math.round(fraction * 100)}%`;
+      setText(progressText, fraction > 0 && fraction < 1
+        ? `上传中 · ${Math.round(fraction * 100)}%` : "");
+    },
+    onReady: load,
+    onError: (message) => { clear(message); toast(message, true); },
+  });
+
+  /* ── input wiring ─────────────────────────────────────────────────── */
+
+  const openPicker = () => { if (!store.get().uploading) fileInput.click(); };
+  fileInput.addEventListener("change", (event) => {
+    upload(event.target.files);
+    fileInput.value = "";
+  });
+
+  const gesture = { pointerId: null, at: 0, x: 0, y: 0, timer: 0 };
+
+  function beginCompare(event) {
+    if (!image.source || store.get().comparing || store.get().viewMode === "split") return;
+    event?.preventDefault();
+    store.set({ comparing: true });
+    if (event?.pointerId != null) { try { stage.setPointerCapture(event.pointerId); } catch (_) {} }
+  }
+
+  function endCompare(event) {
+    if (!store.get().comparing) return;
+    store.set({ comparing: false });
+    if (event?.pointerId != null) {
+      try { if (stage.hasPointerCapture(event.pointerId)) stage.releasePointerCapture(event.pointerId); }
+      catch (_) {}
+    }
+  }
+
+  function cancelGesture(event) {
+    clearTimeout(gesture.timer);
+    gesture.timer = 0;
+    gesture.pointerId = null;
+    endCompare(event);
+  }
+
+  stage.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || store.get().uploading) return;
+    gesture.pointerId = event.pointerId;
+    gesture.at = performance.now();
+    gesture.x = event.clientX;
+    gesture.y = event.clientY;
+    clearTimeout(gesture.timer);
+    // Press-and-hold compares against the original; a tap opens the picker.
+    // Touch devices get the segmented control instead, since a long press
+    // there already means "select".
+    if (image.source && !touchQuery.matches) {
+      gesture.timer = setTimeout(() => beginCompare(event), 240);
+    }
+  });
+
+  stage.addEventListener("pointerup", (event) => {
+    const isActive = gesture.pointerId === event.pointerId;
+    const elapsed = performance.now() - gesture.at;
+    const moved = Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y);
+    const wasComparing = store.get().comparing;
+    cancelGesture(event);
+    if (isActive && !wasComparing && elapsed < 320 && moved < 12) openPicker();
+  });
+
+  stage.addEventListener("pointercancel", cancelGesture);
+  stage.addEventListener("lostpointercapture", cancelGesture);
+  stage.addEventListener("blur", cancelGesture);
+  window.addEventListener("blur", cancelGesture);
+
+  for (const type of ["dragover", "dragenter"]) {
+    stage.addEventListener(type, (event) => {
+      event.preventDefault();
+      stage.classList.add("is-drop-target");
+    });
+  }
+  stage.addEventListener("dragleave", (event) => {
+    if (!stage.contains(event.relatedTarget)) stage.classList.remove("is-drop-target");
+  });
+  stage.addEventListener("drop", (event) => {
+    event.preventDefault();
+    stage.classList.remove("is-drop-target");
+    if (event.dataTransfer.files.length) upload(event.dataTransfer.files);
+  });
+
+  stage.addEventListener("contextmenu", (event) => { if (image.source) event.preventDefault(); });
+  stage.addEventListener("selectstart", (event) => { if (touchQuery.matches) event.preventDefault(); });
+  stage.addEventListener("keydown", (event) => {
+    if ((event.key === " " || event.key === "Enter") && !event.repeat) {
+      event.preventDefault();
+      openPicker();
+    } else if (event.key === "Escape") cancelGesture(event);
+  });
+
+  /* ── reactions ────────────────────────────────────────────────────── */
+
+  store.watchAny(["viewMode", "comparing", "splitRatio"], () => { syncView(); schedule(); }, { immediate: true });
+  store.watchAny(["uploading"], (state) => {
+    stage.classList.toggle("is-uploading", state.uploading);
+    stage.setAttribute("aria-busy", String(state.uploading));
+    if (state.uploading) setText(emptyTitle, "正在上传…");
+  });
+  store.watchAny(
+    ["brightness", "hdrStrength", "hdrRange", "expansionStart", "areaCoverage", "encoding", "contrast"],
+    (state) => { curve.schedule(state); schedule(); });
+
+  /* Every other control acts on the decoded pixels the browser already holds,
+   * so a redraw is enough. Highlight recovery acts *during* the RAW decode, so
+   * the pixels themselves are stale and the preview has to be fetched again. */
+  let decodedWith = store.get().highlightRecovery;
+  store.watch("highlightRecovery", (mode) => {
+    if (mode === decodedWith) return;
+    decodedWith = mode;
+    if (store.get().sessionId) load();
+  });
+
+  hdrDisplayQuery.addEventListener?.("change", () => {
+    reportInitialCapability();
+    if (image.source) chooseRenderer();
+  });
+
+  const applyPointerHint = () =>
+    stage.setAttribute("aria-label", touchQuery.matches ? TOUCH_HINT : MOUSE_HINT);
+  touchQuery.addEventListener?.("change", () => {
+    applyPointerHint();
+    store.set({ comparing: false });
+  });
+
+  applyPointerHint();
+  reportInitialCapability();
+
+  return {
+    redraw: schedule,
+    reload: load,
+    clear,
+    /** The decoded preview pixels, for the mask overlay. Null before upload. */
+    getSource: () => image.source,
+  };
+}

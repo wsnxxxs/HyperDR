@@ -40,10 +40,25 @@ export function createStore(initial) {
     }, options && { immediate: options.immediate });
   }
 
-  return { get: () => state, set, subscribe, watch };
+  /** Subscribe to several keys; the listener gets the state and the subset of
+   *  `keys` that moved. Most views care about more than one key, and writing
+   *  this filter out each time is how a key quietly gets missed. */
+  function watchAny(keys, listener, options) {
+    const wanted = new Set(keys);
+    return subscribe((next, previous, changed) => {
+      const moved = changed.filter((key) => wanted.has(key));
+      if (moved.length) listener(next, previous, moved);
+    }, options && { immediate: options.immediate });
+  }
+
+  return { get: () => state, set, subscribe, watch, watchAny };
 }
 
-/** The panel's state, in one place. Extend as screens land. */
+/** The panel's state, in one place. Extend as screens land.
+ *
+ * The settings keys (encoding, hdrStrength, …) are not listed here: they are
+ * declared once in settings/schema.js and merged in by main.js at boot, so the
+ * store never has to be edited when a control is. */
 export const store = createStore({
   /** @type {"booting"|"ready"|"unavailable"} */
   phase: "booting",
@@ -55,4 +70,29 @@ export const store = createStore({
   jobId: null,
   /** Last error surfaced to the user, or null. */
   error: null,
+
+  /* -- session ------------------------------------------------------- */
+  /** @type {{name: string, size: number} | null} */
+  file: null,
+  uploading: false,
+  /** Upload progress, 0..1. */
+  uploadProgress: 0,
+  /** The settings snapshot a successful run used, for the stale badge. */
+  result: null,
+  outputSelectionId: "",
+  outputDirectory: "",
+
+  /* -- viewer ---------------------------------------------------------- */
+  /** @type {"effect"|"original"|"split"} */
+  viewMode: "effect",
+  /** Wipe position in split mode, 0..1 of the image's displayed width. */
+  splitRatio: 0.5,
+  /** Transient press-and-hold compare; never persisted. */
+  comparing: false,
+  zebraHot: false,
+  zebraCold: false,
+  /** @type {"luma"|"rgb"} */
+  histMode: "luma",
+  /** Settings key whose mask is on the photograph, or null. */
+  maskKey: null,
 });

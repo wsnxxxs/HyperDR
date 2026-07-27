@@ -87,8 +87,16 @@ install(DIRECTORY apps/panel/ DESTINATION apps/panel COMPONENT Runtime
   PATTERN "*.pyc" EXCLUDE)
 # The panel derives its settings vocabulary from this file, so it ships too.
 install(FILES schema/settings.json schema/report.json DESTINATION schema COMPONENT Runtime)
-install(FILES Start.bat DESTINATION . COMPONENT Runtime)
-install(FILES scripts/start_hyperdr_lan.ps1 DESTINATION scripts COMPONENT Runtime)
+install(FILES Start.bat Setup-HTTPS.bat DESTINATION . COMPONENT Runtime)
+# Safari's WebGPU HDR canvas needs a real secure context, so the HTTPS setup is
+# part of installing HyperDR rather than an optional extra. Both launchers share
+# hyperdr_tls.ps1, so it can never be omitted from a package.
+install(FILES
+  scripts/start_hyperdr_lan.ps1
+  scripts/setup_hyperdr_https.ps1
+  scripts/hyperdr_tls.ps1
+  scripts/configure_hyperdr_firewall.ps1
+  DESTINATION scripts COMPONENT Runtime)
 install(FILES LICENSE THIRD_PARTY_NOTICES.md CHANGELOG.md DESTINATION . COMPONENT Runtime)
 install(FILES docs/iphone-lan.md DESTINATION docs COMPONENT Runtime)
 install(FILES packaging/INSTALL.md DESTINATION . RENAME INSTALL.md COMPONENT Runtime)

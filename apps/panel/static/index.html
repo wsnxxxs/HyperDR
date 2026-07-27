@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>HyperDR — HDR 编码工作台</title>
+<link rel="icon" href="data:,">
+<script>
+  try {
+    var t = localStorage.getItem("hyperdr.theme");
+    if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+  } catch (e) {}
+</script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip-link" href="#workspace">跳到工作区</a>
+
+<div class="app">
+
+  <header class="masthead">
+    <div class="masthead-brand">
+      <h1 class="wordmark" aria-label="HyperDR">
+        <!-- Offset exposure frames converge on one bright image: a compact
+             visual shorthand for the wider luminance range HyperDR creates. -->
+        <svg class="wordmark-mark" viewBox="0 0 32 32" aria-hidden="true">
+          <rect class="wordmark-frame is-back" x="4.5" y="7.5" width="17" height="17" rx="5"/>
+          <rect class="wordmark-frame is-front" x="10.5" y="4.5" width="17" height="17" rx="5"/>
+          <path class="wordmark-glow" d="M8 18.5h16"/>
+          <circle class="wordmark-spark" cx="24" cy="18.5" r="2.25"/>
+        </svg>
+        <span class="wordmark-text" aria-hidden="true">
+          <span class="wordmark-accent">H</span><span class="wordmark-name">yper</span><span class="wordmark-accent">DR</span>
+        </span>
+      </h1>
+    </div>
+    <div class="masthead-actions">
+      <p class="service-state" data-role="service-state" hidden>
+        <span class="dot" data-role="service-dot"></span>
+        <span data-role="service-text">正在检测…</span>
+      </p>
+      <button class="icon-button" type="button" data-role="theme-toggle" aria-pressed="false">
+        <svg class="icon icon-sun" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></svg>
+        <svg class="icon icon-moon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20.2 15.3A8.5 8.5 0 0 1 8.7 3.8a8.5 8.5 0 1 0 11.5 11.5Z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="workspace" id="workspace">
+
+    <!-- ── Conversion ──────────────────────────────────────────────── -->
+    <aside class="controls conversion-controls" aria-labelledby="conversion-heading">
+      <div class="column-bar">
+        <h2 class="column-heading" id="conversion-heading">转换设置</h2>
+      </div>
+
+      <section class="panel is-action">
+        <h2 class="panel-heading">输出格式</h2>
+        <div class="segmented is-wrap" role="group" aria-label="输出编码" data-role="encoding"></div>
+        <p class="note" data-role="encoding-hint"></p>
+        <div class="panel-actions">
+          <button class="button" type="button" data-role="pick-output" hidden>
+            <span data-role="pick-output-label">选择导出文件夹</span>
+          </button>
+          <div class="conversion-row">
+            <div class="quality-slot" data-role="group-quality"></div>
+            <div class="action-row">
+              <button class="button is-primary" type="button" data-role="run">开始转换</button>
+              <button class="button" type="button" data-role="cancel" hidden>取消</button>
+            </div>
+          </div>
+          <a class="button is-result" data-role="download" hidden download>保存到设备</a>
+        </div>
+        <div class="command-preview">
+          <div class="command-preview-head">
+            <span class="note">将要执行的命令</span>
+            <button class="button is-compact" type="button" data-role="command-copy">复制</button>
+          </div>
+          <code data-role="command" aria-live="polite">—</code>
+        </div>
+      </section>
+    </aside>
+
+    <!-- ── Image settings ──────────────────────────────────────────── -->
+    <aside class="controls settings-controls" aria-label="画面设置">
+      <section class="panel is-core">
+        <div class="panel-head">
+          <h2 class="panel-heading">画面设置</h2>
+        </div>
+        <div data-role="group-tone"></div>
+        <div class="panel-subsection">
+          <h3 class="panel-subheading">扩展作用区域</h3>
+          <p class="note">调整扩展起点与覆盖范围；暗部与噪声保护始终启用。</p>
+          <div class="grid-2" data-role="group-region"></div>
+        </div>
+      </section>
+
+      <details class="panel panel-advanced">
+        <summary class="panel-heading">高级参数</summary>
+        <div class="grid-2" data-role="group-advanced"></div>
+      </details>
+    </aside>
+
+    <!-- ── Viewer ──────────────────────────────────────────────────── -->
+    <section class="viewer" aria-labelledby="viewer-heading">
+      <div class="column-bar">
+        <h2 class="column-heading" id="viewer-heading">画面预览</h2>
+        <p class="viewer-state" aria-live="polite">
+          <span class="lamp is-pending" data-role="hdr-lamp" role="status"></span>
+          <!-- The capability message stage.js computes. Without this node
+               setText() silently no-ops and the message is discarded, which is
+               how "SDR 显示模式" came to be calculated and never shown. -->
+          <span class="hdr-status" data-role="hdr-status"></span>
+          <span class="viewer-divider" aria-hidden="true"></span>
+          <span data-role="viewer-caption">选择一张图片</span>
+          <button class="pill-toggle preview-toggle" type="button" aria-pressed="false"
+                  data-role="mobile-hdr" disabled>查看原图</button>
+        </p>
+      </div>
+
+      <!-- One photograph at a time; picking another replaces it. -->
+      <input type="file" data-role="file-input" hidden
+             accept="image/*,.arw,.dng,.jpg,.jpeg,.png,.heic,.heif">
+
+      <div class="stage" data-role="stage" tabindex="0" role="button" aria-busy="false" aria-pressed="false">
+        <div class="stage-frame">
+          <canvas data-role="canvas-hdr" hidden aria-label="WebGPU 真 HDR 预览"></canvas>
+          <canvas data-role="canvas-sdr" hidden aria-label="SDR 回退预览"></canvas>
+          <canvas class="stage-zebra" data-role="canvas-zebra" hidden aria-hidden="true"></canvas>
+          <span class="stage-badge" data-role="hdr-badge" hidden>HDR</span>
+        </div>
+        <div class="stage-empty" data-role="stage-empty">
+          <span class="stage-plus" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          </span>
+          <strong data-role="stage-title">点击选择或拖放图片</strong>
+          <span class="stage-support">也可以将照片拖放到这里</span>
+          <span class="stage-progress" data-role="upload-progress" aria-live="polite"></span>
+        </div>
+      </div>
+
+      <div class="scope" data-role="scope">
+        <div class="scope-bar">
+          <span class="scope-label">源亮度分布</span>
+          <div class="segmented is-small" role="group" aria-label="直方图模式" data-role="hist-mode"></div>
+        </div>
+        <canvas class="scope-graph" data-role="histogram" width="720" height="84"></canvas>
+        <div class="scope-clip">
+          <button class="chip is-hot" type="button" data-role="clip-hot">
+            <span class="chip-swatch"></span>高光裁切 <b data-role="clip-hot-value">0.0%</b>
+          </button>
+          <button class="chip is-cold" type="button" data-role="clip-cold">
+            <span class="chip-swatch"></span>暗部裁切 <b data-role="clip-cold-value">0.0%</b>
+          </button>
+          <span class="scope-spacer"></span>
+          <button class="switch" type="button" role="switch" aria-checked="false" data-role="zebra-toggle">
+            <span class="switch-track" aria-hidden="true"></span><span>斑马纹</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <div class="toast" data-role="toast" role="status" aria-live="polite"></div>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,463 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HyperDR conversion report schema 6",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "tool",
+    "settings",
+    "files"
+  ],
+  "properties": {
+    "schema": {
+      "const": 6
+    },
+    "tool": {
+      "type": "string"
+    },
+    "settings": {
+      "$ref": "#/$defs/settings"
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/file"
+      }
+    }
+  },
+  "$defs": {
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "encoding",
+        "look",
+        "highlight_recovery",
+        "contrast",
+        "vibrance",
+        "pop",
+        "headroom_max",
+        "expansion_start",
+        "area_coverage",
+        "gain_strength",
+        "exposure_bias",
+        "exposure",
+        "headroom",
+        "quality",
+        "depth",
+        "preview_max_edge",
+        "recursive",
+        "verify_output",
+        "overwrite",
+        "skip_existing",
+        "half_size",
+        "toe_end",
+        "toe_output_ratio",
+        "positive_exposure_limit",
+        "output_depth"
+      ],
+      "properties": {
+        "encoding": {
+          "enum": [
+            "adaptive",
+            "ultrahdr",
+            "pq",
+            "hlg",
+            "avif-pq",
+            "avif-hlg"
+          ]
+        },
+        "look": {
+          "enum": [
+            "photographic",
+            "neutral"
+          ]
+        },
+        "highlight_recovery": {
+          "enum": [
+            "blend",
+            "reconstruct",
+            "clip",
+            "unclip"
+          ]
+        },
+        "contrast": {
+          "type": "number"
+        },
+        "vibrance": {
+          "type": "number"
+        },
+        "pop": {
+          "type": "number"
+        },
+        "headroom_max": {
+          "type": "number"
+        },
+        "expansion_start": {
+          "type": "number"
+        },
+        "area_coverage": {
+          "type": "number"
+        },
+        "gain_strength": {
+          "type": "number"
+        },
+        "exposure_bias": {
+          "type": "number"
+        },
+        "exposure": {
+          "oneOf": [
+            {
+              "const": "auto"
+            },
+            {
+              "type": "number"
+            }
+          ]
+        },
+        "headroom": {
+          "oneOf": [
+            {
+              "const": "auto"
+            },
+            {
+              "type": "number"
+            }
+          ]
+        },
+        "quality": {
+          "type": "integer"
+        },
+        "depth": {
+          "enum": [
+            8,
+            10
+          ]
+        },
+        "preview_max_edge": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recursive": {
+          "type": "boolean"
+        },
+        "verify_output": {
+          "type": "boolean"
+        },
+        "overwrite": {
+          "type": "boolean"
+        },
+        "skip_existing": {
+          "type": "boolean"
+        },
+        "half_size": {
+          "type": "boolean"
+        },
+        "toe_end": {
+          "type": "number"
+        },
+        "toe_output_ratio": {
+          "type": "number"
+        },
+        "positive_exposure_limit": {
+          "type": "number"
+        },
+        "output_depth": {
+          "enum": [
+            8,
+            10
+          ]
+        }
+      }
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input",
+        "output",
+        "success",
+        "skipped",
+        "self_verified",
+        "message",
+        "sensor_width",
+        "sensor_height",
+        "target_width",
+        "target_height",
+        "decoded_width",
+        "decoded_height",
+        "target_dimensions_applied",
+        "default_crop_present",
+        "decode_degraded",
+        "decode_degradation_reasons",
+        "width",
+        "height",
+        "exposure_ev",
+        "headroom_stops",
+        "gain_min",
+        "gain_max",
+        "decode_ms",
+        "process_ms",
+        "encode_ms",
+        "look",
+        "render",
+        "gain_map"
+      ],
+      "properties": {
+        "input": {
+          "type": "string"
+        },
+        "output": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "skipped": {
+          "type": "boolean"
+        },
+        "self_verified": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        },
+        "sensor_width": {
+          "$ref": "#/$defs/dimension"
+        },
+        "sensor_height": {
+          "$ref": "#/$defs/dimension"
+        },
+        "target_width": {
+          "$ref": "#/$defs/dimension"
+        },
+        "target_height": {
+          "$ref": "#/$defs/dimension"
+        },
+        "decoded_width": {
+          "$ref": "#/$defs/dimension"
+        },
+        "decoded_height": {
+          "$ref": "#/$defs/dimension"
+        },
+        "target_dimensions_applied": {
+          "type": "boolean"
+        },
+        "default_crop_present": {
+          "type": "boolean"
+        },
+        "decode_degraded": {
+          "type": "boolean"
+        },
+        "decode_degradation_reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "width": {
+          "$ref": "#/$defs/dimension"
+        },
+        "height": {
+          "$ref": "#/$defs/dimension"
+        },
+        "exposure_ev": {
+          "type": "number"
+        },
+        "headroom_stops": {
+          "type": "number"
+        },
+        "gain_min": {
+          "type": "number"
+        },
+        "gain_max": {
+          "type": "number"
+        },
+        "decode_ms": {
+          "$ref": "#/$defs/duration"
+        },
+        "process_ms": {
+          "$ref": "#/$defs/duration"
+        },
+        "encode_ms": {
+          "$ref": "#/$defs/duration"
+        },
+        "look": {
+          "$ref": "#/$defs/look"
+        },
+        "render": {
+          "$ref": "#/$defs/render"
+        },
+        "gain_map": {
+          "$ref": "#/$defs/gain_map"
+        }
+      }
+    },
+    "dimension": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "duration": {
+      "type": "number",
+      "minimum": 0
+    },
+    "look": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "exposure_ev",
+        "ev100",
+        "target_middle_gray"
+      ],
+      "properties": {
+        "exposure_ev": {
+          "type": "number"
+        },
+        "ev100": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "target_middle_gray": {
+          "type": "number"
+        }
+      }
+    },
+    "render": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "headroom_stops",
+        "headroom_linear",
+        "rendered_peak",
+        "headroom_utilization",
+        "below_knee_relative_difference_max",
+        "wide_gamut_fraction",
+        "wide_gamut_pixels",
+        "wide_gamut_eligible_pixels",
+        "wide_gamut_luminance_threshold"
+      ],
+      "properties": {
+        "headroom_stops": {
+          "type": "number"
+        },
+        "headroom_linear": {
+          "type": "number"
+        },
+        "rendered_peak": {
+          "type": "number"
+        },
+        "headroom_utilization": {
+          "type": "number"
+        },
+        "below_knee_relative_difference_max": {
+          "type": "number"
+        },
+        "wide_gamut_fraction": {
+          "type": "number"
+        },
+        "wide_gamut_pixels": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "wide_gamut_eligible_pixels": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "wide_gamut_luminance_threshold": {
+          "type": "number"
+        }
+      }
+    },
+    "gain_map": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gamma",
+        "min_stops",
+        "max_stops",
+        "percentiles_stops",
+        "fraction_gt_0_5",
+        "fraction_gt_1_0",
+        "fraction_gt_2_0",
+        "clipped_fraction",
+        "local_weight_mean",
+        "local_weight_p95"
+      ],
+      "properties": {
+        "gamma": {
+          "type": "number"
+        },
+        "min_stops": {
+          "type": "number"
+        },
+        "max_stops": {
+          "type": "number"
+        },
+        "percentiles_stops": {
+          "$ref": "#/$defs/percentiles"
+        },
+        "fraction_gt_0_5": {
+          "type": "number"
+        },
+        "fraction_gt_1_0": {
+          "type": "number"
+        },
+        "fraction_gt_2_0": {
+          "type": "number"
+        },
+        "clipped_fraction": {
+          "type": "number"
+        },
+        "local_weight_mean": {
+          "type": "number"
+        },
+        "local_weight_p95": {
+          "type": "number"
+        }
+      }
+    },
+    "percentiles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "p50",
+        "p75",
+        "p90",
+        "p95",
+        "p99",
+        "p99_9",
+        "p99_99",
+        "max"
+      ],
+      "properties": {
+        "p50": {
+          "type": "number"
+        },
+        "p75": {
+          "type": "number"
+        },
+        "p90": {
+          "type": "number"
+        },
+        "p95": {
+          "type": "number"
+        },
+        "p99": {
+          "type": "number"
+        },
+        "p99_9": {
+          "type": "number"
+        },
+        "p99_99": {
+          "type": "number"
+        },
+        "max": {
+          "type": "number"
+        }
+      }
+    }
+  }
+}

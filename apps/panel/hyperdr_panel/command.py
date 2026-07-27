@@ -1,0 +1,147 @@
+"""Translating panel controls into a HyperDR command line.
+
+This is the only command builder in the project. The front-end used to assemble
+a second copy purely for display and the two had already drifted apart, so the
+command shown to the user was not the command that ran. The panel renders
+whatever this module returns.
+
+Panel controls are camelCase and deliberately fewer than the converter's
+settings: one slider drives two settings in a couple of places. The translation
+runs in one direction only. Named presets used to make it a round trip -- the
+panel wrote a settings file, then read it back into the controls -- and that
+reverse path is gone with them.
+
+Five settings the panel used to expose are gone, and their absence is the point:
+
+``--recursive`` and ``--threads`` only meant something when a run could cover a
+folder. ``--skip-existing`` only meant something when that folder might already
+hold output from an earlier pass. ``--overwrite`` never meant anything at all --
+the session's output directory is emptied before every run, so there was nothing
+there to overwrite, and the export step copies with ``shutil.copy2``, which
+overwrites regardless.
+
+``--no-verify`` is gone for a different reason: it is not a preference. The
+converter verifies by decoding what it just encoded *before* writing it, so a
+structurally broken gain map yields no file rather than a file that silently
+opens as SDR on a phone. That is the failure this tool exists to prevent, and it
+is not worth one decode to skip.
+"""
+from __future__ import annotations
+
+from .schema import validate as validate_settings
+
+
+def fmt_num(value) -> str:
+    text = ("%.3f" % float(value)).rstrip("0").rstrip(".")
+    return text if text else "0"
+
+
+#: The single place that knows how a panel control maps onto a converter
+#: setting, and the value used when the browser omits one.
+PANEL_DEFAULTS = {
+    "encoding": "adaptive",
+    "highlightRecovery": "blend",
+    "contrast": 1.08,
+    "vibrance": 0.12,
+    "hdrStrength": 0.4,
+    "hdrRange": 2.5,
+    "brightness": 1.0,
+    "expansionStart": 0.25,
+    "areaCoverage": 1.0,
+    "quality": 90,
+}
+
+#: Formats whose standard 1000-nit mapping cannot carry more than this.
+_HLG_ENCODINGS = frozenset({"hlg", "avif-hlg"})
+_HLG_MAX_STOPS = 2.3
+
+#: Only the gain-map formats have a selectable base depth; BT.2100 is 10-bit.
+_EIGHT_BIT_ENCODINGS = frozenset({"adaptive", "ultrahdr"})
+
+
+def _headroom(options: dict, encoding: str):
+    value = options.get(
+        "hdrRange",
+        _HLG_MAX_STOPS if encoding in _HLG_ENCODINGS else PANEL_DEFAULTS["hdrRange"])
+    if encoding in _HLG_ENCODINGS and isinstance(value, (int, float)) and value > _HLG_MAX_STOPS:
+        raise ValueError("HLG 动态范围不能超过 %s stops。" % _HLG_MAX_STOPS)
+    return value
+
+
+def options_to_settings(options: dict) -> dict:
+    """Translate panel controls into the converter's settings vocabulary."""
+    def value(key):
+        return options.get(key, PANEL_DEFAULTS[key])
+
+    # One panel knob drives two converter settings in each of these pairs:
+    # strength sets both the local gain and the EDR "pop", and the range slider
+    # is both the auto-headroom ceiling and the explicit target, which is what
+    # keeps a slider move deterministic rather than content-dependent.
+    strength = value("hdrStrength")
+    encoding = value("encoding")
+    headroom = _headroom(options, encoding)
+    return validate_settings({
+        "encoding": encoding,
+        # Not a panel control. `neutral` is the converter's legacy renderer: it
+        # ignores contrast, vibrance and pop, clamps headroom to three stops,
+        # and /api/curve reports the photographic curve for it, so the preview
+        # would disagree with the export. It stays reachable from `--look`.
+        "look": "photographic",
+        "highlight_recovery": value("highlightRecovery"),
+        "contrast": value("contrast"),
+        "vibrance": value("vibrance"),
+        "gain_strength": strength,
+        "pop": strength,
+        "headroom_max": headroom,
+        "headroom": headroom,
+        "exposure": "auto",
+        "exposure_bias": value("brightness"),
+        "expansion_start": value("expansionStart"),
+        "area_coverage": value("areaCoverage"),
+        "quality": value("quality"),
+    })
+
+
+def build_argv(exe: str, options: dict) -> list[str]:
+    """Build the `HyperDR convert` command line for one image."""
+    settings = options_to_settings(options)
+    encoding = settings["encoding"]
+    return [
+        exe, "convert", options["input"], "--output", options["output"],
+        "--encoding", encoding,
+        "--look", settings["look"],
+        "--contrast", fmt_num(settings["contrast"]),
+        "--vibrance", fmt_num(settings["vibrance"]),
+        "--gain-strength", fmt_num(settings["gain_strength"]),
+        "--headroom-max", fmt_num(settings["headroom_max"]),
+        "--pop", fmt_num(settings["pop"]),
+        "--exposure-bias", fmt_num(settings["exposure_bias"]),
+        "--expansion-start", fmt_num(settings["expansion_start"]),
+        "--area-coverage", fmt_num(settings["area_coverage"]),
+        "--exposure", "auto",
+        "--headroom", fmt_num(settings["headroom"]),
+        "--highlight-recovery", settings["highlight_recovery"],
+        "--quality", str(settings["quality"]),
+        "--depth", "8" if encoding in _EIGHT_BIT_ENCODINGS else "10",
+        "--report", options["report"],
+    ]
+
+
+def build_curve_argv(exe: str, options: dict, samples: int = 257) -> list[str]:
+    """Command line for the converter's own tone-curve export."""
+    settings = options_to_settings(options)
+    return [
+        exe, "curve",
+        "--encoding", settings["encoding"],
+        "--look", settings["look"],
+        "--contrast", fmt_num(settings["contrast"]),
+        "--vibrance", fmt_num(settings["vibrance"]),
+        "--pop", fmt_num(settings["pop"]),
+        "--gain-strength", fmt_num(settings["gain_strength"]),
+        "--exposure-bias", fmt_num(settings["exposure_bias"]),
+        "--expansion-start", fmt_num(settings["expansion_start"]),
+        "--area-coverage", fmt_num(settings["area_coverage"]),
+        "--headroom-max", fmt_num(settings["headroom_max"]),
+        "--headroom", fmt_num(settings["headroom"]),
+        "--samples", str(int(samples)),
+    ]

@@ -14,7 +14,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from . import api, job, security
-from .config import STATIC_DIR, WEB_DIR, WEB_ROUTE_PREFIX
+from .config import STATIC_DIR
 from .session import save_upload
 
 _CONTENT_TYPES = {
@@ -61,8 +61,7 @@ class Handler(BaseHTTPRequestHandler):
     def _accept_login(self, parsed) -> bool:
         """Exchange ?token=... for a cookie. True when the request was handled."""
         supplied = parse_qs(parsed.query).get("token", [""])[0]
-        login_paths = {"/", WEB_ROUTE_PREFIX, WEB_ROUTE_PREFIX + "/"}
-        if parsed.path not in login_paths or not supplied:
+        if parsed.path != "/" or not supplied:
             return False
         client_ip = self.client_address[0]
         retry_after = self.server.login_throttle.retry_after(client_ip)
@@ -76,8 +75,7 @@ class Handler(BaseHTTPRequestHandler):
             return True
         self.server.login_throttle.clear(client_ip)
         self.send_response(303)
-        destination = WEB_ROUTE_PREFIX + "/" if parsed.path.startswith(WEB_ROUTE_PREFIX) else "/"
-        self.send_header("Location", destination)
+        self.send_header("Location", "/")
         self.send_header("Set-Cookie", security.cookie_attributes(
             self.server.access_token, self.server.cookie_secure))
         for name, value in security.SECURITY_HEADERS.items():
@@ -160,17 +158,6 @@ class Handler(BaseHTTPRequestHandler):
         relative = "index.html" if route in ("/", "/index.html") else route.lstrip("/")
         return self._serve_from(STATIC_DIR, relative)
 
-    def _serve_web(self, route: str) -> bool:
-        """The rewritten front-end, mounted under `WEB_ROUTE_PREFIX`.
-
-        Its pages reference assets relatively so the tree also opens from disk;
-        that only holds below a trailing slash, which is why bare `/next` is
-        redirected rather than served. A `<base>` tag would be the other fix,
-        and the panel's CSP sets `base-uri 'none'` precisely to forbid it.
-        """
-        relative = route[len(WEB_ROUTE_PREFIX):].lstrip("/") or "index.html"
-        return self._serve_from(WEB_DIR, relative)
-
     def _read_json(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
         if length < 0 or length > MAX_BODY_BYTES:
@@ -197,14 +184,6 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path.startswith("/api/"):
             self._send(api.error("not found", status=404))
-            return
-        if parsed.path == WEB_ROUTE_PREFIX:
-            self._send(api.Response(status=301, body=b"", content_type="text/plain",
-                                    headers={"Location": WEB_ROUTE_PREFIX + "/"}))
-            return
-        if parsed.path.startswith(WEB_ROUTE_PREFIX + "/"):
-            if not self._serve_web(parsed.path):
-                self._send(api.error("not found", status=404))
             return
         if not self._serve_static(parsed.path):
             self._send(api.error("not found", status=404))

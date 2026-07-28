@@ -5,6 +5,35 @@ semantic versioning; dates use ISO 8601.
 
 ## Unreleased
 
+## 0.3.0 - 2026-07-28
+
+- **Breaking.** Replaced the panel's front-end. The rewritten interface that
+  was served at `/next` while it was built is now the panel itself, at `/`. The
+  previous front-end is gone, and so is the `/next` route: a bookmark to it now
+  returns 404 rather than a second copy of the panel. Nothing else about
+  running HyperDR changes — the same address, the same access token, the same
+  conversion behaviour and the same settings vocabulary.
+- Rebuilt the interface as a darkroom: the image is the only lit surface, and
+  the masthead, settings rail and output dock float around it as separate cards
+  rather than sitting inside one full-width panel.
+- Added a wipe comparison that drags between the original and the converted
+  render, a result card that names what was written and warns when it has gone
+  stale, and a dual-distribution histogram that shows the expansion alongside
+  the source.
+- Added a mask that shows which pixels a slider is currently acting on, so an
+  adjustment that appears to do nothing can be seen to be acting outside the
+  visible range rather than being broken.
+- Fixed the theme toggle, which showed a sun in dark mode, and made the stored
+  choice paint before first render so a reload no longer flashes the wrong
+  theme.
+- Hardened the panel's async lifecycles: an upload that is replaced mid-flight,
+  a preview that returns after its image is dismissed, and a conversion polled
+  across a reconnect no longer leave the interface reporting the previous
+  image's state.
+- Dropped the adjustment presets and the upload/convert/deliver phase strip.
+  The presets wrote the same values the sliders already carry, and the phase
+  strip repeated what the progress bar beside it was already showing.
+
 ## 0.2.2 - 2026-07-27
 
 - Moved the TLS certificate pair to `%LOCALAPPDATA%\HyperDR\tls`, so a release

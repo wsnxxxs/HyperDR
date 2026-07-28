@@ -12,8 +12,7 @@
     if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
   } catch (e) {}
 </script>
-<!-- Relative hrefs, so this tree also opens from disk. The server redirects
-     bare /next to /next/ for the same reason; the panel's CSP sets
+<!-- Relative hrefs, so this tree also opens from disk. The panel's CSP sets
      base-uri 'none', so a <base> tag is not available as an alternative. -->
 <link rel="stylesheet" href="./css/tokens.css">
 <link rel="stylesheet" href="./css/base.css">

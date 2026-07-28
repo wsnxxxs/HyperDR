@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(HyperDR VERSION 0.2.2 LANGUAGES CXX)
+project(HyperDR VERSION 0.3.0 LANGUAGES CXX)
 
 if(NOT WIN32 OR NOT MSVC)
   message(FATAL_ERROR "HyperDR requires Windows with MSVC")

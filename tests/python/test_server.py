@@ -12,7 +12,7 @@ from apps.panel.hyperdr_panel.server import PanelServer
 
 
 class ServerBoundaryTests(unittest.TestCase):
-    def test_next_login_keeps_the_user_on_the_new_panel(self):
+    def test_login_lands_on_the_panel_root(self):
         handler = Handler.__new__(Handler)
         handler.client_address = ("127.0.0.1", 1234)
         handler.server = SimpleNamespace(
@@ -27,10 +27,10 @@ class ServerBoundaryTests(unittest.TestCase):
         handler.send_header = mock.Mock()
         handler.end_headers = mock.Mock()
 
-        self.assertTrue(handler._accept_login(urlparse("/next/?token=secret")))
+        self.assertTrue(handler._accept_login(urlparse("/?token=secret")))
         handler.send_response.assert_called_once_with(303)
         self.assertIn(
-            mock.call("Location", "/next/"),
+            mock.call("Location", "/"),
             handler.send_header.call_args_list,
         )
 

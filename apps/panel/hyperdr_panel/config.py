@@ -16,15 +16,8 @@ REPO_ROOT = GUI_DIR.parent.parent
 LAUNCHER = GUI_DIR / "hyperdr_gui.py"
 
 # Web root: a single source of truth for the front-end, also openable directly
-# (double-click static/index.html) for an offline look at the interface.
-STATIC_DIR = GUI_DIR / "static"
-
-# The rewritten front-end, served at /next while it is built beside the panel
-# above rather than on top of it. Two roots in one process is what lets the
-# rewrite be compared against the interface it replaces at every step, and what
-# keeps a half-finished /next from blocking a release. At cutover this becomes
-# the only root and STATIC_DIR goes away in a single commit.
-WEB_DIR = GUI_DIR / "web"
-WEB_ROUTE_PREFIX = "/next"
+# (double-click web/index.html) for an offline look at the interface, which is
+# why its pages reference assets relatively and the CSP forbids `<base>`.
+STATIC_DIR = GUI_DIR / "web"
 
 PREFERRED_PORT = 8756

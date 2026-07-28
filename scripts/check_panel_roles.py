@@ -7,11 +7,6 @@ mismatch is not a parse error: the lookup simply returns null and the panel
 fails at the first click, which a syntax check cannot see. This closes that gap
 cheaply enough to run on every push.
 
-Both front-ends are checked: the shipping panel in `static/` and the rewrite
-in `web/` (served at /next). The rewrite is held to the contract from its
-first commit rather than at cutover, when a mismatch would be found by a user
-instead.
-
 Roles that are looked up through a variable -- the settings groups, which come
 from a table in `controls.js` -- cannot be found by reading the source, so they
 are listed here explicitly rather than reported as dead markup.
@@ -24,14 +19,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-#: Each tree's markup is checked against its own modules. The dynamic roles
+#: The tree's markup is checked against its own modules. The dynamic roles
 #: are the containers `settings/controls.js` fills from GROUP_CONTAINERS,
 #: looked up via a variable rather than a literal.
 TREES = [
-    (
-        REPO_ROOT / "apps" / "panel" / "static",
-        {"group-tone", "group-region", "group-quality", "group-advanced"},
-    ),
     (
         REPO_ROOT / "apps" / "panel" / "web",
         {"group-tone", "group-region", "group-quality", "group-advanced"},

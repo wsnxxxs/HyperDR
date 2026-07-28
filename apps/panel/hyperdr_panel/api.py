@@ -281,10 +281,9 @@ def run(_context: Context, body: dict) -> Response:
     })
 
 
-def upload_is_allowed(_session_id: str) -> None:
-    """Replacing the image mid-run would change the input under the converter."""
-    if job.is_running():
-        raise ValueError("转换进行期间不能更换图片。")
+def upload_is_allowed(_session_id: str):
+    """Reserve upload admission until the replacement has been published."""
+    return job.upload_slot()
 
 
 GET_ROUTES = {

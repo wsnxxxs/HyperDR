@@ -102,7 +102,8 @@ export function mountRunner({ toast }) {
 
   function syncRunAvailability(state) {
     runButton.disabled =
-      starting || Boolean(state.jobId) || !state.capabilities?.ready || !state.file;
+      starting || state.uploading || Boolean(state.jobId)
+      || !state.capabilities?.ready || !state.file;
   }
 
   /* ── the run itself ───────────────────────────────────────────────── */
@@ -305,7 +306,7 @@ export function mountRunner({ toast }) {
     }
   }
 
-  download.addEventListener("click", markDelivered);
+  download.addEventListener("click", () => markDelivered());
 
   exportButton.addEventListener("click", async () => {
     const state = store.get();
@@ -341,11 +342,17 @@ export function mountRunner({ toast }) {
 
   store.watchAny(["uploading", "file", "jobId", "result"], syncPhases, { immediate: true });
   store.watchAny(["result", "capabilities"], syncResult, { immediate: true });
-  store.watchAny(["file", "jobId", "capabilities"], syncRunAvailability, { immediate: true });
-  store.watchAny(OPTION_KEYS, (state) => {
+  store.watchAny(
+    ["uploading", "file", "jobId", "capabilities"],
+    syncRunAvailability,
+    { immediate: true },
+  );
+  store.watchAny([...OPTION_KEYS, "result"], (state, _previous, changed) => {
     syncStale(state);
-    commandSeq++;
-    refreshCommand();
+    if (changed.some((key) => OPTION_KEYS.includes(key))) {
+      commandSeq++;
+      refreshCommand();
+    }
   });
   desktopLayout.addEventListener?.("change", () => syncResult(store.get()));
 }

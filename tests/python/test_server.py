@@ -3,6 +3,8 @@ from __future__ import annotations
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import SimpleNamespace
+from urllib.parse import urlparse
 from unittest import mock
 
 from apps.panel.hyperdr_panel.handler import Handler, READ_TIMEOUT_SECONDS
@@ -10,6 +12,28 @@ from apps.panel.hyperdr_panel.server import PanelServer
 
 
 class ServerBoundaryTests(unittest.TestCase):
+    def test_next_login_keeps_the_user_on_the_new_panel(self):
+        handler = Handler.__new__(Handler)
+        handler.client_address = ("127.0.0.1", 1234)
+        handler.server = SimpleNamespace(
+            access_token="secret",
+            cookie_secure=False,
+            login_throttle=mock.Mock(
+                retry_after=mock.Mock(return_value=0),
+                clear=mock.Mock(),
+            ),
+        )
+        handler.send_response = mock.Mock()
+        handler.send_header = mock.Mock()
+        handler.end_headers = mock.Mock()
+
+        self.assertTrue(handler._accept_login(urlparse("/next/?token=secret")))
+        handler.send_response.assert_called_once_with(303)
+        self.assertIn(
+            mock.call("Location", "/next/"),
+            handler.send_header.call_args_list,
+        )
+
     def test_handler_sets_read_timeout_on_accepted_socket(self):
         handler = Handler.__new__(Handler)
         handler.connection = mock.Mock()

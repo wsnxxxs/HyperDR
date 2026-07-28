@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import api, security
+from . import api, job, security
 from .config import STATIC_DIR, WEB_DIR, WEB_ROUTE_PREFIX
 from .session import save_upload
 
@@ -61,7 +61,8 @@ class Handler(BaseHTTPRequestHandler):
     def _accept_login(self, parsed) -> bool:
         """Exchange ?token=... for a cookie. True when the request was handled."""
         supplied = parse_qs(parsed.query).get("token", [""])[0]
-        if parsed.path != "/" or not supplied:
+        login_paths = {"/", WEB_ROUTE_PREFIX, WEB_ROUTE_PREFIX + "/"}
+        if parsed.path not in login_paths or not supplied:
             return False
         client_ip = self.client_address[0]
         retry_after = self.server.login_throttle.retry_after(client_ip)
@@ -75,7 +76,8 @@ class Handler(BaseHTTPRequestHandler):
             return True
         self.server.login_throttle.clear(client_ip)
         self.send_response(303)
-        self.send_header("Location", "/")
+        destination = WEB_ROUTE_PREFIX + "/" if parsed.path.startswith(WEB_ROUTE_PREFIX) else "/"
+        self.send_header("Location", destination)
         self.send_header("Set-Cookie", security.cookie_attributes(
             self.server.access_token, self.server.cookie_secure))
         for name, value in security.SECURITY_HEADERS.items():
@@ -250,10 +252,10 @@ class Handler(BaseHTTPRequestHandler):
         session_id = query.get("id", [""])[0]
         filename = unquote(query.get("name", [""])[0])
         try:
-            api.upload_is_allowed(session_id)
-            length = int(self.headers.get("Content-Length", "0"))
-            target, written = save_upload(session_id, filename, self.rfile, length)
-        except (OSError, ValueError) as exc:
+            with api.upload_is_allowed(session_id):
+                length = int(self.headers.get("Content-Length", "0"))
+                target, written = save_upload(session_id, filename, self.rfile, length)
+        except (job.Busy, OSError, ValueError) as exc:
             # The body may be unread, so the connection cannot be reused.
             self.close_connection = True
             self._send(api.error(exc))

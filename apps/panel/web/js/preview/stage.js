@@ -284,7 +284,9 @@ export function mountStage({ curve, toast }) {
   /* ── loading ──────────────────────────────────────────────────────── */
 
   function previewTier() {
-    const ceiling = Number(store.get().capabilities?.previewMaxEdge) || 2048;
+    const ceiling = Number(store.get().capabilities?.previewMaxEdge);
+    // Before /api/state resolves, let the server apply its configured maximum.
+    if (!Number.isFinite(ceiling) || ceiling <= 0) return null;
     const allowed = PREVIEW_TIERS.filter((tier) => tier <= ceiling);
     const list = allowed.length ? allowed : [ceiling];
     const box = frame.getBoundingClientRect();
@@ -377,12 +379,22 @@ export function mountStage({ curve, toast }) {
         ? `上传中 · ${Math.round(fraction * 100)}%` : "");
     },
     onReady: load,
-    onError: (message) => { clear(message); toast(message, true); },
+    onError: (message, { preserveCurrent } = {}) => {
+      if (!preserveCurrent) clear(message);
+      toast(message, true);
+    },
   });
 
   /* ── input wiring ─────────────────────────────────────────────────── */
 
-  const openPicker = () => { if (!store.get().uploading) fileInput.click(); };
+  const canReplace = () => {
+    const state = store.get();
+    return !state.uploading && !state.jobId;
+  };
+  const openPicker = () => { if (canReplace()) fileInput.click(); };
+  const isStageControl = (target) =>
+    target instanceof Element
+    && Boolean(target.closest("button, a, input, select, textarea, [role='slider']"));
   fileInput.addEventListener("change", (event) => {
     upload(event.target.files);
     fileInput.value = "";
@@ -414,7 +426,7 @@ export function mountStage({ curve, toast }) {
   }
 
   stage.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0 || store.get().uploading) return;
+    if (event.button !== 0 || !canReplace() || isStageControl(event.target)) return;
     gesture.pointerId = event.pointerId;
     gesture.at = performance.now();
     gesture.x = event.clientX;
@@ -434,7 +446,8 @@ export function mountStage({ curve, toast }) {
     const moved = Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y);
     const wasComparing = store.get().comparing;
     cancelGesture(event);
-    if (isActive && !wasComparing && elapsed < 320 && moved < 12) openPicker();
+    if (isActive && !wasComparing && !isStageControl(event.target)
+        && elapsed < 320 && moved < 12) openPicker();
   });
 
   stage.addEventListener("pointercancel", cancelGesture);
@@ -454,13 +467,14 @@ export function mountStage({ curve, toast }) {
   stage.addEventListener("drop", (event) => {
     event.preventDefault();
     stage.classList.remove("is-drop-target");
-    if (event.dataTransfer.files.length) upload(event.dataTransfer.files);
+    if (canReplace() && event.dataTransfer.files.length) upload(event.dataTransfer.files);
   });
 
   stage.addEventListener("contextmenu", (event) => { if (image.source) event.preventDefault(); });
   stage.addEventListener("selectstart", (event) => { if (touchQuery.matches) event.preventDefault(); });
   stage.addEventListener("keydown", (event) => {
-    if ((event.key === " " || event.key === "Enter") && !event.repeat) {
+    if (event.target === stage
+        && (event.key === " " || event.key === "Enter") && !event.repeat) {
       event.preventDefault();
       openPicker();
     } else if (event.key === "Escape") cancelGesture(event);

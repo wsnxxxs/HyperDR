@@ -18,9 +18,11 @@ export function createUploader({ onProgress, onReady, onError }) {
 
   return async function upload(fileList) {
     const file = Array.from(fileList || [])[0];
-    if (!file || inFlight) return;
+    const previous = store.get();
+    if (!file || inFlight || previous.uploading || previous.jobId) return;
     inFlight = true;
-    store.set({ uploading: true, uploadProgress: 0, file: null, result: null });
+    // Keep the current image/result until the replacement is accepted.
+    store.set({ uploading: true, uploadProgress: 0 });
     onProgress(0);
 
     try {
@@ -30,13 +32,18 @@ export function createUploader({ onProgress, onReady, onError }) {
         onProgress(fraction);
       });
       await request.promise;
-      store.set({ sessionId, file: { name: file.name, size: file.size } });
+      store.set({
+        sessionId,
+        file: { name: file.name, size: file.size },
+        result: null,
+      });
       await onReady();
     } catch (error) {
-      // The session may still be usable -- the failure could be this one file --
-      // but nothing is loaded, so the viewer must not keep showing the old image.
-      store.set({ file: null });
-      onError(error.message || "上传失败。");
+      // The session may still be usable -- the failure could be this one file.
+      // Keep any previously published image visible and current in the store.
+      onError(error.message || "上传失败。", {
+        preserveCurrent: Boolean(previous.file),
+      });
     } finally {
       inFlight = false;
       store.set({ uploading: false });

@@ -252,7 +252,7 @@ function mountPresets() {
   });
   container.append(group);
 
-  store.watchAny(["hdrStrength", "hdrRange"], (state) => {
+  store.watchAny(["hdrStrength", "hdrRange", "encoding"], (state) => {
     for (const [preset, button] of buttons) {
       const active = state.hdrStrength === preset.patch.hdrStrength
         && state.hdrRange === Math.min(preset.patch.hdrRange, encodingById(state.encoding).maxRange);

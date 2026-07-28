@@ -58,6 +58,7 @@ class JobTests(unittest.TestCase):
         with job._LOCK:
             job._JOB = None
             job._ACCEPTING = True
+            job._UPLOAD_IN_PROGRESS = False
 
     def _wait_done(self, job_id, timeout=5.0):
         deadline = time.monotonic() + timeout
@@ -92,6 +93,24 @@ class JobTests(unittest.TestCase):
             second = job.start(["exe"], ".", "", "s")
             self._wait_done(second)
         self.assertNotEqual(first, second)
+
+    def test_conversion_cannot_start_until_a_streamed_upload_finishes(self):
+        with job.upload_slot():
+            with self.assertRaises(job.Busy):
+                job.start(["exe"], ".", "", "s")
+        with mock.patch.object(job.subprocess, "Popen", return_value=FakeProcess()):
+            self._wait_done(job.start(["exe"], ".", "", "s"))
+
+    def test_upload_cannot_replace_the_input_while_conversion_runs(self):
+        release = threading.Event()
+        with mock.patch.object(job.subprocess, "Popen",
+                               return_value=FakeProcess(block=release)):
+            job_id = job.start(["exe"], ".", "", "s")
+            with self.assertRaises(job.Busy):
+                with job.upload_slot():
+                    pass
+            release.set()
+            self._wait_done(job_id)
 
     def test_starting_replaces_the_previous_job_record(self):
         """Only the current job is readable; the old id stops resolving."""

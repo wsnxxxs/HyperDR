@@ -13,6 +13,7 @@ times a second.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 import os
 import subprocess
@@ -23,6 +24,7 @@ import uuid
 _LOCK = threading.Lock()
 _JOB: dict | None = None
 _ACCEPTING = True
+_UPLOAD_IN_PROGRESS = False
 
 TIMEOUT_SECONDS = max(1, int(os.environ.get("HYPERDR_JOB_TIMEOUT_SECONDS", "3600")))
 TERMINATE_GRACE_SECONDS = max(1, int(os.environ.get("HYPERDR_TERMINATE_GRACE_SECONDS", "5")))
@@ -34,6 +36,25 @@ MAX_REPORT_BYTES = max(4096, int(os.environ.get("HYPERDR_MAX_REPORT_BYTES", "419
 
 class Busy(RuntimeError):
     """A conversion is already running."""
+
+
+@contextmanager
+def upload_slot():
+    """Reserve the input for the full streamed-upload replacement."""
+    global _UPLOAD_IN_PROGRESS
+    with _LOCK:
+        if not _ACCEPTING:
+            raise Busy("服务正在关闭。")
+        if _JOB is not None and not _JOB.get("done"):
+            raise Busy("转换进行期间不能更换图片。")
+        if _UPLOAD_IN_PROGRESS:
+            raise Busy("已有图片正在上传。")
+        _UPLOAD_IN_PROGRESS = True
+    try:
+        yield
+    finally:
+        with _LOCK:
+            _UPLOAD_IN_PROGRESS = False
 
 
 def _append_locked(job: dict, text: str) -> None:
@@ -129,6 +150,8 @@ def start(argv: list[str], cwd: str, report_path: str, session_id: str) -> str:
     with _LOCK:
         if not _ACCEPTING:
             raise Busy("服务正在关闭。")
+        if _UPLOAD_IN_PROGRESS:
+            raise Busy("图片上传完成前不能开始转换。")
         if _JOB is not None and not _JOB.get("done"):
             raise Busy("已有转换正在进行。")
         job = {

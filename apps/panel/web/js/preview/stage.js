@@ -49,6 +49,7 @@ export function mountStage({ curve, toast }) {
   const stage = role("stage");
   const frame = stage.querySelector(".stage-frame");
   const empty = role("stage-empty");
+  const selectButton = role("stage-select");
   const emptyTitle = role("stage-title");
   const progressText = role("upload-progress");
   const progressBar = role("upload-bar");
@@ -296,7 +297,7 @@ export function mountStage({ curve, toast }) {
     return list[list.length - 1];
   }
 
-  function clear(message = "点击选择或拖放图片") {
+  function clear(message = "选择图片") {
     invalidateImage();
     invalidateRenderer();
     image.bitmap?.close();
@@ -307,6 +308,8 @@ export function mountStage({ curve, toast }) {
     renderer = null;
     store.set({ comparing: false, maskKey: null });
     stage.classList.remove("has-image", "is-comparing");
+    stage.removeAttribute("role");
+    stage.removeAttribute("tabindex");
     for (const canvas of [sdrCanvas, hdrCanvas, originalCanvas]) {
       canvas.hidden = true;
       canvas.width = 0;
@@ -363,6 +366,8 @@ export function mountStage({ curve, toast }) {
 
       empty.style.display = "none";
       stage.classList.add("has-image");
+      stage.setAttribute("role", "button");
+      stage.tabIndex = 0;
       store.set({ comparing: false });
       refreshScope();
       await chooseRenderer();
@@ -392,6 +397,7 @@ export function mountStage({ curve, toast }) {
     return !state.uploading && !state.jobId;
   };
   const openPicker = () => { if (canReplace()) fileInput.click(); };
+  selectButton.addEventListener("click", openPicker);
   const isStageControl = (target) =>
     target instanceof Element
     && Boolean(target.closest("button, a, input, select, textarea, [role='slider']"));
@@ -486,7 +492,7 @@ export function mountStage({ curve, toast }) {
   store.watchAny(["uploading"], (state) => {
     stage.classList.toggle("is-uploading", state.uploading);
     stage.setAttribute("aria-busy", String(state.uploading));
-    if (state.uploading) setText(emptyTitle, "正在上传…");
+    selectButton.disabled = state.uploading;
   });
   store.watchAny(
     ["brightness", "hdrStrength", "hdrRange", "expansionStart", "areaCoverage", "encoding", "contrast", "vibrance"],

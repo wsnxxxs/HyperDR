@@ -1,4 +1,4 @@
-/* The app frame: header, the three regions, and the boot banner.
+/* The app frame: the header and the three regions it presides over.
  *
  * Regions are named grid areas so a screen can be built without knowing where
  * it sits, and so the phone layout is a different `grid-template-areas` rather
@@ -14,58 +14,147 @@
     "header header"
     "stage  settings"
     "run    settings";
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+  grid-template-columns:
+    minmax(0, 1fr)
+    minmax(320px, clamp(320px, 22vw, 460px));
   grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: var(--space-3);
+  gap: var(--region-gap);
+  width: 100%;
+  max-width: 1760px;
   height: 100dvh;
-  padding: var(--space-3);
+  margin-inline: auto;
+  padding-block: var(--page-pad) calc(var(--page-pad) + var(--space-2));
+  padding-inline: var(--page-pad);
   background: var(--surface-page);
 }
 
+/* No background of its own: the masthead is the page. A band in a different
+   tone has to stop somewhere, and wherever it stopped read as a rule drawn
+   across the window -- which is the opposite of what a masthead is for. */
 .app__header {
   grid-area: header;
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-4);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--surface-panel);
-  box-shadow: inset 0 1px 0 var(--edge), var(--shadow-sm);
+  gap: var(--space-2);
+  min-height: 66px;
 }
-
-/* The mark sizes itself; the status line takes the slack instead, so the
-   badge stays beside the name it qualifies rather than across the header. */
-.app__title { flex: none; }
-.app__header .service-state { margin-left: auto; }
+/* The pre-refactor masthead used three independent floating controls instead
+   of wrapping the whole row in a panel. */
+.app__title {
+  flex: none;
+  min-height: 50px;
+  margin: 0;
+  padding: 7px 17px 7px 8px;
+  border-radius: 17px;
+  background: var(--surface-panel);
+  box-shadow: inset 0 0 0 1px var(--line), var(--shadow-md);
+}
+.app__header .service-state {
+  height: 40px;
+  margin-left: auto;
+  padding-inline: var(--space-4);
+  border-radius: 999px;
+  background: var(--surface-panel);
+  box-shadow: inset 0 0 0 1px var(--line), var(--shadow-sm);
+}
+/* A blocked service is the one state the panel cannot work around, so its ring
+   is tinted as well as its label. The warning tone is left neutral: an offline
+   preview still previews. */
+.app__header .service-state[data-tone="is-bad"] {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--danger) 45%, transparent),
+    var(--shadow-sm);
+}
+.app__header > [data-role="theme-toggle"] {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+}
+.app__header .theme-icon {
+  width: 18px;
+  height: 18px;
+}
 
 .app__stage {
   grid-area: stage;
   display: grid;
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-content: end;
+  gap: var(--space-1);
+  min-height: 0;
+  container-type: size;
+}
+.stage-heading {
+  margin: 0;
+  color: var(--ink-strong);
+  font-size: var(--text-base);
+  font-weight: 600;
+  line-height: 1.25;
+}
+.stage-viewport {
+  display: grid;
+  place-items: center;
   min-height: 0;
 }
 
+/* Not a panel. The groups inside it are already cards, and wrapping them in a
+   second bordered surface stacked four rounded rectangles across a 340px
+   column while spending 32px of that column on padding the sliders needed.
+   The scroll container keeps a little inline padding only so the cards' own
+   shadows are not clipped -- overflow-y: auto forces overflow-x to auto too. */
 .app__settings {
   grid-area: settings;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
   min-height: 0;
   overflow-y: auto;
-  padding: var(--space-4);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--surface-panel);
-  box-shadow: inset 0 1px 0 var(--edge), var(--shadow-sm);
+  padding: 2px var(--space-1);
+}
+.app__settings.is-disabled {
+  opacity: 0.48;
+  filter: saturate(0.45);
 }
 
 .app__run {
   grid-area: run;
   display: grid;
   gap: var(--space-3);
+  margin-top: calc(-1 * var(--space-2));
+}
+
+/* On a tall desktop, a width-limited 4:3 preview no longer needs the whole
+   flexible middle row. Keep the heading, frame and output dock together under
+   the masthead and let the remaining height fall below the dock. Shorter
+   windows retain the height-fitted layout above so persistent controls never
+   leave the viewport. */
+@media (width >= 2000px) and (height >= 1180px) {
+  .app {
+    grid-template-areas:
+      "header header"
+      "stage  settings"
+      "run    settings"
+      ".      settings";
+    grid-template-rows: auto auto auto minmax(0, 1fr);
+  }
+  .app__stage {
+    align-content: start;
+    container-type: inline-size;
+  }
+  .app__stage .stage {
+    width: 100%;
+  }
 }
 
 /* One column below the split: the settings column at 360px leaves the preview
    unusably narrow on a phone, which is the layout the old panel shipped. */
 @media (width < 860px) {
+  :root {
+    --page-pad: var(--space-3);
+    --region-gap: var(--space-2);
+  }
+
   .app {
     grid-template-areas:
       "header"
@@ -77,23 +166,30 @@
     height: auto;
     min-height: 100dvh;
   }
-  .app { padding: var(--space-2); gap: var(--space-2); }
-  .app__header { padding-inline: var(--space-3); }
-  .app__settings { overflow-y: visible; }
+  .app__header {
+    min-height: 60px;
+  }
+  .app__title {
+    min-height: 44px;
+    padding-inline: 8px 14px;
+  }
+  .app__header .service-state {
+    max-width: 154px;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .app__settings {
+    display: block;
+    overflow-y: visible;
+  }
+  .app__run {
+    margin-top: 0;
+  }
 }
 
-/* -- boot / error banner ---------------------------------------------- */
-
-.banner {
-  margin: 0 0 var(--space-4);
-  padding: var(--space-3);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius);
-  color: var(--ink-muted);
-  font-size: var(--text-sm);
-}
-.banner[data-tone="error"] { border-color: var(--danger); color: var(--danger); }
-.banner[hidden] { display: none; }
+/* The boot banner used to live here. Service state is reported once, by the
+   header pill; a card in the rail repeating it cost the rail its first 80px
+   to say what the pill was already saying two inches above. */
 
 .placeholder {
   color: var(--ink-muted);

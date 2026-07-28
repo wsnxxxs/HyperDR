@@ -37,7 +37,10 @@
         <span class="wordmark-accent">H</span><span class="wordmark-name">yper</span><span class="wordmark-accent">DR</span>
       </span>
     </h1>
-    <p class="service-state">
+    <!-- The only place service state is reported. The rail used to repeat it
+         as a banner, which spent a card on saying twice what the dot and its
+         label already said once. -->
+    <p class="service-state" data-role="service-state" aria-live="polite">
       <span class="service-dot" data-role="service-dot"></span>
       <span data-role="service-text">正在检测…</span>
     </p>
@@ -48,53 +51,56 @@
   </header>
 
   <main class="app__stage" id="stage" aria-label="预览">
+    <h2 class="stage-heading">画面预览</h2>
 
-    <!-- One photograph at a time; picking another replaces it. -->
-    <div class="stage" data-role="stage" tabindex="0" role="button" aria-busy="false">
-      <div class="stage-frame">
-        <canvas data-role="canvas-hdr" hidden aria-label="WebGPU 真 HDR 预览"></canvas>
-        <canvas data-role="canvas-sdr" hidden aria-label="SDR 回退预览"></canvas>
-        <canvas data-role="canvas-original" hidden aria-hidden="true"></canvas>
-        <canvas data-role="canvas-zebra-hot" hidden aria-hidden="true"></canvas>
-        <canvas data-role="canvas-zebra-cold" hidden aria-hidden="true"></canvas>
-        <canvas data-role="canvas-mask" hidden aria-hidden="true"></canvas>
-        <div class="stage-divider" data-role="divider" hidden
-             role="slider" tabindex="0" aria-label="分割位置"
-             aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
-          <span class="stage-divider-line"></span>
-          <span class="stage-divider-handle"></span>
+    <div class="stage-viewport">
+      <!-- One photograph at a time; picking another replaces it. -->
+      <div class="stage" data-role="stage" aria-busy="false">
+        <div class="stage-frame">
+          <canvas data-role="canvas-hdr" hidden aria-label="WebGPU 真 HDR 预览"></canvas>
+          <canvas data-role="canvas-sdr" hidden aria-label="SDR 回退预览"></canvas>
+          <canvas data-role="canvas-original" hidden aria-hidden="true"></canvas>
+          <canvas data-role="canvas-zebra-hot" hidden aria-hidden="true"></canvas>
+          <canvas data-role="canvas-zebra-cold" hidden aria-hidden="true"></canvas>
+          <canvas data-role="canvas-mask" hidden aria-hidden="true"></canvas>
+          <div class="stage-divider" data-role="divider" hidden
+               role="slider" tabindex="0" aria-label="分割位置"
+               aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
+            <span class="stage-divider-line"></span>
+            <span class="stage-divider-handle"></span>
+          </div>
+          <div class="stage-views">
+            <div class="segmented segmented--overlay" role="group" aria-label="视图" data-role="view-mode"></div>
+          </div>
+          <span class="stage-badge" data-role="hdr-badge" hidden>HDR</span>
+          <div class="stage-chips">
+            <button class="chip chip--hot" type="button" data-role="clip-hot" aria-pressed="false">
+              <span class="chip-swatch" aria-hidden="true"></span>高光裁切 <b data-role="clip-hot-value">0.0%</b>
+            </button>
+            <button class="chip chip--cold" type="button" data-role="clip-cold" aria-pressed="false">
+              <span class="chip-swatch" aria-hidden="true"></span>暗部裁切 <b data-role="clip-cold-value">0.0%</b>
+            </button>
+          </div>
         </div>
-        <div class="stage-views">
-          <div class="segmented segmented--overlay" role="group" aria-label="视图" data-role="view-mode"></div>
-        </div>
-        <span class="stage-badge" data-role="hdr-badge" hidden>HDR</span>
-        <div class="stage-chips">
-          <button class="chip chip--hot" type="button" data-role="clip-hot" aria-pressed="false">
-            <span class="chip-swatch" aria-hidden="true"></span>高光裁切 <b data-role="clip-hot-value">0.0%</b>
+        <div class="stage-empty" data-role="stage-empty">
+          <button class="icon-button stage-select" type="button"
+                  data-role="stage-select" aria-label="选择图片"
+                  aria-describedby="stage-drop-hint">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
           </button>
-          <button class="chip chip--cold" type="button" data-role="clip-cold" aria-pressed="false">
-            <span class="chip-swatch" aria-hidden="true"></span>暗部裁切 <b data-role="clip-cold-value">0.0%</b>
-          </button>
+          <span class="visually-hidden" data-role="stage-title">选择图片</span>
+          <span class="stage-support" id="stage-drop-hint">或将图片拖放到此处</span>
+          <span class="stage-progress" aria-hidden="true"><span class="stage-progress-fill" data-role="upload-bar"></span></span>
+          <span class="stage-progress-text" data-role="upload-progress" aria-live="polite"></span>
         </div>
+        <input type="file" data-role="file-input" hidden
+               accept="image/*,.arw,.dng,.jpg,.jpeg,.png,.heic,.heif">
       </div>
-      <div class="stage-empty" data-role="stage-empty">
-        <span class="stage-plus" aria-hidden="true">
-          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-        </span>
-        <strong data-role="stage-title">点击选择或拖放图片</strong>
-        <span class="stage-support">一次一张；拖放到这里也可以</span>
-        <span class="stage-progress" aria-hidden="true"><span class="stage-progress-fill" data-role="upload-bar"></span></span>
-        <span class="stage-progress-text" data-role="upload-progress" aria-live="polite"></span>
-      </div>
-      <input type="file" data-role="file-input" hidden
-             accept="image/*,.arw,.dng,.jpg,.jpeg,.png,.heic,.heif">
     </div>
 
   </main>
 
   <aside class="app__settings" id="settings" aria-label="调整">
-    <p class="banner" id="banner" hidden></p>
-
     <!-- The histogram reads as a measurement of the settings below it rather
          than as furniture under the photograph, so it heads the rail. -->
     <section class="scope">
@@ -114,12 +120,10 @@
       <h2>调整</h2>
       <button class="link-button" type="button" data-role="settings-reset">重置全部</button>
     </div>
-    <div class="presets" role="group" aria-label="预设" data-role="preset-list"></div>
 
     <section class="group">
       <div class="group-head">
         <h3>曝光与扩展</h3>
-        <button class="link-button" type="button" data-role="reset-tone">重置</button>
       </div>
       <div data-role="group-tone"></div>
     </section>
@@ -127,7 +131,6 @@
     <section class="group">
       <div class="group-head">
         <h3>扩展作用区域</h3>
-        <button class="link-button" type="button" data-role="reset-region">重置</button>
       </div>
       <p class="group-note">悬停滑杆时，照片上会显示该参数作用的区域。</p>
       <div data-role="group-region"></div>
@@ -138,7 +141,6 @@
       <div class="group-body">
         <div class="group-head">
           <span class="group-note">对比度、鲜艳度与 RAW 高光恢复。</span>
-          <button class="link-button" type="button" data-role="reset-advanced">重置</button>
         </div>
         <div data-role="group-advanced"></div>
       </div>
@@ -163,11 +165,6 @@
       </div>
       <p class="dock-hint" data-role="encoding-hint"></p>
       <div class="dock-meta">
-        <ol class="phases" aria-label="流程进度">
-          <li class="phase" data-role="phase-upload"><span class="phase-dot" aria-hidden="true"></span>上传</li>
-          <li class="phase" data-role="phase-convert"><span class="phase-dot" aria-hidden="true"></span>转换</li>
-          <li class="phase" data-role="phase-deliver"><span class="phase-dot" aria-hidden="true"></span>交付</li>
-        </ol>
         <details class="dock-command">
           <summary>查看命令行</summary>
           <code data-role="command-line">HyperDR …</code>

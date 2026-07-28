@@ -97,6 +97,12 @@
   --space-5: 24px;
   --space-6: 32px;
 
+  /* Layout rhythm is semantic rather than borrowing a component spacing
+     token: the page edge must remain more generous than the gaps between its
+     floating regions. */
+  --page-pad: clamp(16px, 1.6vw, 32px);
+  --region-gap: var(--space-4);
+
 
   /* -- elevation ----------------------------------------------------- */
   /* Two layers each: a tight contact shadow that seats the element on the

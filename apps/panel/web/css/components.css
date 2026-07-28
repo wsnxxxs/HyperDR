@@ -48,13 +48,13 @@
   color: var(--ink-muted);
   box-shadow: inset 0 1px 0 var(--edge), var(--shadow-sm);
 }
-.theme-icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
-.theme-icon--sun { display: none; }
-[data-theme="dark"] .theme-icon--sun { display: block; }
-[data-theme="dark"] .theme-icon--moon { display: none; }
+.theme-icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
+.theme-icon--moon { display: none; }
+[data-theme="dark"] .theme-icon--sun { display: none; }
+[data-theme="dark"] .theme-icon--moon { display: block; }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .theme-icon--sun { display: block; }
-  :root:not([data-theme="light"]) .theme-icon--moon { display: none; }
+  :root:not([data-theme]) .theme-icon--sun { display: none; }
+  :root:not([data-theme]) .theme-icon--moon { display: block; }
 }
 
 /* -- wordmark ------------------------------------------------------------ */
@@ -64,7 +64,7 @@
 .wordmark {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: 10px;
   font-size: var(--text-lg);
   font-weight: 500;
   letter-spacing: -0.035em;
@@ -73,9 +73,9 @@
 }
 .wordmark-mark {
   flex: none;
-  width: 32px; height: 32px;
+  width: 36px; height: 36px;
   padding: 2px;
-  border-radius: 10px;
+  border-radius: 11px;
   background: var(--surface-sunken);
   box-shadow: inset 0 0 0 1px var(--line);
   color: var(--ink);
@@ -93,23 +93,36 @@
 /* -- header extras ------------------------------------------------------ */
 
 .service-state {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: var(--space-2);
   margin: 0;
   color: var(--ink-muted);
   font-size: var(--text-sm);
 }
-.service-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-muted); }
+.service-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-muted); }
 .service-dot.is-ok { background: var(--success); }
 .service-dot.is-warn { background: var(--hdr); }
 .service-dot.is-bad { background: var(--danger); }
+
+/* This pill is now the only report of service state, so the label takes the
+   tone too: a 6px dot is thin evidence on its own for "conversion is
+   unavailable". The detail sentence rides on the pill's title. */
+.service-state[data-tone="is-warn"] { color: var(--hdr); }
+.service-state[data-tone="is-bad"] { color: var(--danger); }
+.service-state[title] { cursor: help; }
 
 /* -- stage --------------------------------------------------------------- */
 
 .stage {
   position: relative;
   display: grid;
+  /* The nearest size container also includes the heading and its 4px gap.
+     Reserve their combined vertical footprint before fitting the 4:3 frame,
+     so any spare height sits above the heading instead of between the label
+     and the preview. */
+  width: min(100%, calc(133.333cqh - 31px));
+  aspect-ratio: 4 / 3;
   min-height: 0;
   border-radius: var(--radius-lg);
   outline-offset: 3px;
@@ -250,18 +263,28 @@
   justify-content: center;
   gap: var(--space-2);
   border-radius: var(--radius-lg);
-  background: var(--preview-backdrop);
-  color: var(--overlay-ink);
+  background: var(--surface-sunken);
+  color: var(--ink);
   text-align: center;
 }
 .stage.has-image .stage-empty { display: none; }
-.stage-plus svg {
-  width: 40px; height: 40px;
-  fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round;
-  opacity: 0.7;
+.stage-select {
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius);
+  color: var(--ink-strong);
+  box-shadow: var(--shadow-md);
 }
-.stage-empty strong { font-size: var(--text-lg); font-weight: 600; }
-.stage-support { color: var(--overlay-ink); opacity: 0.65; font-size: var(--text-sm); }
+.stage-select:hover:not(:disabled) { background: var(--surface-hover); }
+.stage-select svg {
+  width: 28px;
+  height: 28px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+.stage-support { color: var(--ink-muted); font-size: var(--text-sm); }
 .stage-progress {
   width: min(240px, 60%);
   height: 4px;
@@ -288,13 +311,20 @@
 
 /* -- scope (histogram strip) -------------------------------------------- */
 
+/* The rail's cards sit directly on the page, so they carry the same surface,
+   border and radius as the dock and the header pills rather than the recessed
+   grey they used when a panel still enclosed them. */
 .scope {
   display: grid;
+  flex: 1 0 160px;
+  grid-template-rows: auto minmax(56px, 1fr) auto auto;
   gap: var(--space-2);
-  margin-bottom: var(--space-3);
+  min-height: 160px;
   padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius);
-  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-panel);
+  box-shadow: inset 0 1px 0 var(--edge), var(--shadow-sm);
 }
 .scope-bar {
   display: flex;
@@ -309,7 +339,12 @@
   font-size: var(--text-xs);
 }
 .scope-status:empty { display: none; }
-.scope-graph { width: 100%; height: 56px; display: block; }
+.scope-graph {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 56px;
+}
 .scope-legend {
   display: flex;
   align-items: center;
@@ -355,28 +390,28 @@
 
 /* -- settings rail ---------------------------------------------------------- */
 
+/* Indented to the cards' text, not to the scroll container: the heading names
+   the stack below it, so a flush-left heading over inset card text read as a
+   misalignment rather than as a deliberate outdent. */
 .rail-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  margin-bottom: var(--space-3);
+  padding-inline: var(--space-4);
 }
-.presets {
-  display: flex;
-  gap: var(--space-2);
-  margin-bottom: var(--space-4);
-}
-.presets .segmented { width: 100%; }
-.presets .segmented button { flex: 1; }
-
 /* Each group is a block, not a band between two hairlines: the rail now reads
    as a stack of cards like the rest of the interface, and the group heading no
-   longer competes with the rail's own heading for size. */
+   longer competes with the rail's own heading for size.
+ *
+ * Spacing runs 24 / 12 / 4 -- group, control, row inside a control. It was 12
+ * at every level, and gaps that are all the same size stop the eye chunking
+ * the column into groups, which is most of why the rail felt crowded. */
 .group {
-  margin-bottom: var(--space-3);
   padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius);
-  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-panel);
+  box-shadow: inset 0 1px 0 var(--edge), var(--shadow-sm);
 }
 .group-head {
   display: flex;
@@ -400,8 +435,11 @@
 }
 .group--advanced .group-body { padding-top: var(--space-3); }
 
-/* A control, as built by settings/controls.js from schema.js. */
-.field { display: grid; gap: var(--space-1); padding: var(--space-2) 0; }
+/* A control, as built by settings/controls.js from schema.js. The 4px padding
+   plus the 4px sibling margin puts 12px between two controls and 4px between
+   the rows inside one, which is the middle and bottom of the rail's 24/12/4. */
+.field { display: grid; gap: var(--space-1); padding: var(--space-1) 0; }
+.field + .field { margin-top: var(--space-1); }
 .field-head {
   display: flex;
   align-items: baseline;
@@ -423,11 +461,14 @@
   font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
 }
+/* Recessed now that the group around it is the panel surface: the hint used
+   the panel colour back when the group was the sunken one, and swapping the
+   group without swapping this would have made the hint invisible. */
 .field-hint {
   margin: var(--space-1) 0 0;
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
-  background: var(--surface-panel);
+  background: var(--surface-sunken);
   color: var(--ink-muted);
   font-size: var(--text-xs);
   line-height: 1.45;
@@ -559,26 +600,6 @@
 .dock-label { color: var(--ink-muted); font-size: var(--text-sm); }
 .dock-actions { display: flex; align-items: center; gap: var(--space-2); }
 
-.phases {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  color: var(--ink-muted);
-  font-size: var(--text-xs);
-}
-.phase { display: inline-flex; align-items: center; gap: var(--space-2); }
-.phase-dot {
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  background: var(--line-strong);
-}
-.phase[data-state="active"] { color: var(--ink-strong); }
-.phase[data-state="active"] .phase-dot { background: var(--hdr); }
-.phase[data-state="done"] .phase-dot { background: var(--success); }
-
 .dock-command summary {
   width: max-content;
   cursor: pointer;
@@ -663,9 +684,16 @@
 /* -- small screens ------------------------------------------------------------- */
 
 @media (width < 860px) {
+  .scope,
+  .group,
+  .rail-head { margin-bottom: var(--space-3); }
+  .scope {
+    grid-template-rows: auto 56px auto auto;
+    min-height: auto;
+  }
+  .scope-graph { height: 56px; }
   .dock-actions { width: 100%; }
   .dock-actions .button { flex: 1; }
-  .phases { order: 3; width: 100%; }
   .result-actions { margin-left: 0; width: 100%; }
   .result-actions .button { flex: 1; }
 }

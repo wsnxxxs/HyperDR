@@ -28,25 +28,12 @@ export function mountRunner({ toast }) {
   const download = role("download");
   const exportButton = role("export");
   const resultCard = role("result");
-  const phases = {
-    upload: role("phase-upload"),
-    convert: role("phase-convert"),
-    deliver: role("phase-deliver"),
-  };
   const commandLine = role("command-line");
 
   let activeJobId = "";
   let starting = false;
   let trackingInterrupted = false;
   let commandSeq = 0;
-
-  /* ── phases ───────────────────────────────────────────────────────── */
-
-  function syncPhases(state) {
-    phases.upload.dataset.state = state.uploading ? "active" : state.file ? "done" : "";
-    phases.convert.dataset.state = state.jobId ? "active" : state.result ? "done" : "";
-    phases.deliver.dataset.state = state.result?.delivered ? "done" : state.result ? "active" : "";
-  }
 
   /* ── result card ──────────────────────────────────────────────────── */
 
@@ -340,7 +327,6 @@ export function mountRunner({ toast }) {
 
   /* ── wiring ───────────────────────────────────────────────────────── */
 
-  store.watchAny(["uploading", "file", "jobId", "result"], syncPhases, { immediate: true });
   store.watchAny(["result", "capabilities"], syncResult, { immediate: true });
   store.watchAny(
     ["uploading", "file", "jobId", "capabilities"],

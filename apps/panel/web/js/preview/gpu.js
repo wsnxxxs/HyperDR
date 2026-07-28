@@ -10,7 +10,7 @@ import { LUT_SIZE } from "./curve.js";
 const SHADER = /* wgsl */ `
 struct Params {
   strength: f32, headroom: f32, original: f32, expansionStart: f32,
-  areaCoverage: f32, exposureBias: f32, lutSize: f32, padding: f32,
+  areaCoverage: f32, exposureBias: f32, lutSize: f32, vibrance: f32,
 }
 @group(0) @binding(0) var imageSampler: sampler;
 @group(0) @binding(1) var imageTexture: texture_2d<f32>;
@@ -55,7 +55,11 @@ fn hdrGainStops(y: f32, strength: f32) -> f32 {
   let luma = vec3f(0.2289746, 0.6917385, 0.0792869);
   if (params.original > 0.5) { return vec4f(encodeExtendedSrgb(p3), 1.0); }
   p3 *= exp2(params.exposureBias);
-  let y = dot(p3, luma);
+  var y = dot(p3, luma);
+  let sourceSaturation = max(max(abs(p3.r - y), abs(p3.g - y)), abs(p3.b - y)) / max(y, 0.000001);
+  let vibranceAmount = params.vibrance * (1.0 - smoothstep(0.15, 1.0, sourceSaturation));
+  p3 = max(vec3f(y) + (p3 - vec3f(y)) * (1.0 + vibranceAmount), vec3f(0.0));
+  y = dot(p3, luma);
   let gain = hdrGainStops(y, params.strength);
   var expanded = p3 * exp2(gain);
   let ye = dot(expanded, luma);
@@ -98,6 +102,7 @@ export async function createHdrRenderer(canvas, onDeviceLost) {
 
   let texture = null;
   let bindGroup = null;
+  let destroyed = false;
   device.lost.then(() => onDeviceLost?.());
 
   return {
@@ -105,6 +110,7 @@ export async function createHdrRenderer(canvas, onDeviceLost) {
     outputColorSpace: configuration.colorSpace || "srgb",
 
     upload(bitmap) {
+      if (destroyed) return;
       texture?.destroy();
       texture = device.createTexture({
         size: [bitmap.width, bitmap.height],
@@ -126,11 +132,11 @@ export async function createHdrRenderer(canvas, onDeviceLost) {
     },
 
     draw(table, params) {
-      if (!bindGroup) return;
+      if (destroyed || !bindGroup) return;
       device.queue.writeBuffer(lut, 0, table);
       device.queue.writeBuffer(uniform, 0, new Float32Array([
         params.strength, params.headroom, params.original ? 1 : 0, params.expansionStart,
-        params.areaCoverage, params.exposureBias, LUT_SIZE, 0,
+        params.areaCoverage, params.exposureBias, LUT_SIZE, params.vibrance,
       ]));
       const encoder = device.createCommandEncoder();
       const pass = encoder.beginRenderPass({
@@ -146,6 +152,14 @@ export async function createHdrRenderer(canvas, onDeviceLost) {
       device.queue.submit([encoder.finish()]);
     },
 
-    destroy() { texture?.destroy(); texture = null; bindGroup = null; },
+    destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      texture?.destroy();
+      uniform.destroy();
+      lut.destroy();
+      texture = null;
+      bindGroup = null;
+    },
   };
 }

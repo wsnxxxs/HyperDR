@@ -11,12 +11,13 @@
  * a `setInterval` whose handle had to be cleared from four branches.
  */
 
-import { api } from "../core/api.js";
+import { api, ApiError } from "../core/api.js";
 import { store } from "../core/store.js";
 import { role, setText, debounce } from "../core/dom.js";
 import { toOptions, OPTION_KEYS } from "../settings/schema.js";
 
 const POLL_INTERVAL_MS = 400;
+const TRACKING_INTERRUPTED_MS = 15_000;
 const desktopLayout = window.matchMedia("(min-width: 641px)");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -35,6 +36,9 @@ export function mountRunner({ toast }) {
   const commandLine = role("command-line");
 
   let activeJobId = "";
+  let starting = false;
+  let trackingInterrupted = false;
+  let commandSeq = 0;
 
   /* ── phases ───────────────────────────────────────────────────────── */
 
@@ -84,11 +88,12 @@ export function mountRunner({ toast }) {
   const refreshCommand = debounce(async () => {
     const details = commandLine.closest("details");
     if (!details.open) return;
+    const seq = ++commandSeq;
     try {
       const body = await api.command(toOptions(store.get()));
-      setText(commandLine, body.command || "");
+      if (seq === commandSeq) setText(commandLine, body.command || "");
     } catch (_) {
-      setText(commandLine, "当前无法生成命令行。");
+      if (seq === commandSeq) setText(commandLine, "当前无法生成命令行。");
     }
   }, 300);
   commandLine.closest("details").addEventListener("toggle", refreshCommand);
@@ -97,21 +102,44 @@ export function mountRunner({ toast }) {
 
   function syncRunAvailability(state) {
     runButton.disabled =
-      Boolean(state.jobId) || !state.capabilities?.ready || !state.file;
+      starting || Boolean(state.jobId) || !state.capabilities?.ready || !state.file;
   }
 
   /* ── the run itself ───────────────────────────────────────────────── */
+
+  function setTrackingInterrupted(jobId, interrupted) {
+    if (activeJobId !== jobId || trackingInterrupted === interrupted) return;
+    trackingInterrupted = interrupted;
+    setText(runButton, interrupted ? "连接中断，正在重试…" : "转换中…");
+    setText(cancelButton, interrupted ? "放弃跟踪" : "取消");
+    cancelButton.disabled = false;
+  }
 
   /** Resolves with the finished job record, or `{abandoned}` if superseded. */
   async function followJob(jobId) {
     let offset = 0;
     let log = "";
+    let transientFailures = 0;
+    let disconnectedAt = 0;
     for (;;) {
-      await sleep(POLL_INTERVAL_MS);
+      await sleep(POLL_INTERVAL_MS * Math.min(1 + transientFailures, 5));
       if (activeJobId !== jobId) return { abandoned: true };
       let update;
-      try { update = await api.log(jobId, offset); }
-      catch (_) { continue; }  // A dropped poll is not a failed job.
+      try {
+        update = await api.log(jobId, offset);
+        if (activeJobId !== jobId) return { abandoned: true };
+        transientFailures = 0;
+        disconnectedAt = 0;
+        setTrackingInterrupted(jobId, false);
+      } catch (error) {
+        if (error instanceof ApiError && [401, 403, 404].includes(error.status)) throw error;
+        if (!disconnectedAt) disconnectedAt = performance.now();
+        if (performance.now() - disconnectedAt >= TRACKING_INTERRUPTED_MS) {
+          setTrackingInterrupted(jobId, true);
+        }
+        transientFailures++;
+        continue;
+      }
       if (update.offset != null) offset = update.offset;
       if (typeof update.text === "string") log += update.text;
       if (update.done) return { ...update, log };
@@ -157,6 +185,17 @@ export function mountRunner({ toast }) {
     };
   }
 
+  function resetRunningUi(jobId) {
+    if (activeJobId !== jobId) return;
+    activeJobId = "";
+    trackingInterrupted = false;
+    store.set({ jobId: null });
+    setText(runButton, "开始转换");
+    setText(cancelButton, "取消");
+    cancelButton.hidden = true;
+    cancelButton.disabled = false;
+  }
+
   async function start() {
     const state = store.get();
     if (!state.capabilities?.ready) { toast("转换程序尚未就绪。", true); return; }
@@ -164,35 +203,41 @@ export function mountRunner({ toast }) {
 
     const optionsKey = JSON.stringify(toOptions(state));
     let started;
+    starting = true;
+    syncRunAvailability(store.get());
     try {
       started = await api.run(state.sessionId, toOptions(state));
     } catch (error) {
       toast(error.message, true);
       return;
+    } finally {
+      starting = false;
+      syncRunAvailability(store.get());
     }
 
     activeJobId = started.jobId;
+    trackingInterrupted = false;
     store.set({ jobId: started.jobId, result: null });
     setText(runButton, "转换中…");
     cancelButton.hidden = false;
     cancelButton.disabled = false;
 
-    const outcome = await followJob(started.jobId);
-    if (outcome.abandoned) return;
+    try {
+      const outcome = await followJob(started.jobId);
+      if (outcome.abandoned) return;
 
-    if (outcome.cancelled) {
-      toast("已取消转换");
-    } else if (outcome.timedOut) {
-      toast("转换超时已终止", true);
-    } else if (outcome.rc !== 0) {
-      const detail = lastLine(outcome.log);
-      toast(detail ? "转换失败：" + detail : "转换失败，请重试或检查服务日志", true);
-    } else {
-      const summary = summarizeReport(outcome.report);
-      // Cache-busted: the same URL serves a different file after the next run.
-      const downloadUrl = `${api.resultUrl(state.sessionId, { download: true })}&t=${Date.now()}`;
-      store.set({
-        result: {
+      if (outcome.cancelled) {
+        toast("已取消转换");
+      } else if (outcome.timedOut) {
+        toast("转换超时已终止", true);
+      } else if (outcome.rc !== 0) {
+        const detail = lastLine(outcome.log);
+        toast(detail ? "转换失败：" + detail : "转换失败，请重试或检查服务日志", true);
+      } else {
+        const summary = summarizeReport(outcome.report);
+        // Cache-busted: the same URL serves a different file after the next run.
+        const downloadUrl = `${api.resultUrl(state.sessionId, { download: true })}&t=${Date.now()}`;
+        const completedResult = {
           name: summary.name || state.file.name,
           width: summary.width,
           height: summary.height,
@@ -203,46 +248,58 @@ export function mountRunner({ toast }) {
           optionsKey,
           downloadUrl,
           delivered: false,
-        },
-      });
-      toast(summary.degradedNote
-        ? "转换成功，但" + summary.degradedNote
-        : "转换成功", Boolean(summary.degradedNote));
-      await deliver(state.sessionId);
+        };
+        store.set({ result: completedResult });
+        toast(summary.degradedNote
+          ? "转换成功，但" + summary.degradedNote
+          : "转换成功", Boolean(summary.degradedNote));
+        if (activeJobId === started.jobId && store.get().result === completedResult) {
+          await deliver(state.sessionId, completedResult);
+        }
+      }
+    } catch (error) {
+      toast(error.message || "转换任务状态已丢失。", true);
+    } finally {
+      resetRunningUi(started.jobId);
     }
-
-    activeJobId = "";
-    store.set({ jobId: null });
-    setText(runButton, "开始转换");
-    cancelButton.hidden = true;
   }
 
   runButton.addEventListener("click", start);
 
   cancelButton.addEventListener("click", async () => {
-    if (!activeJobId) return;
+    const jobId = activeJobId;
+    if (!jobId) return;
+    if (trackingInterrupted) {
+      resetRunningUi(jobId);
+      toast("已放弃跟踪；服务端任务可能仍在运行。", true);
+      return;
+    }
     cancelButton.disabled = true;
-    try { await api.cancel(activeJobId); }
+    try { await api.cancel(jobId); }
     catch (error) { toast(error.message, true); cancelButton.disabled = false; }
   });
 
   /* ── delivery ─────────────────────────────────────────────────────── */
 
-  function markDelivered() {
+  function markDelivered(expected = store.get().result) {
     const result = store.get().result;
-    if (result && !result.delivered) store.set({ result: { ...result, delivered: true } });
+    if (result && result === expected && !result.delivered) {
+      store.set({ result: { ...result, delivered: true } });
+    }
   }
 
   /* The desktop flow: a chosen folder means the file lands there on its own,
    * without a click on the card. The phone flow stays the download link. */
-  async function deliver(sessionId) {
+  async function deliver(sessionId, expectedResult) {
     const selectionId = store.get().outputSelectionId;
     if (!selectionId) return;
     try {
       const body = await api.export(sessionId, selectionId);
+      if (store.get().result !== expectedResult) return;
       toast(`已导出到 ${body.path}`);
-      markDelivered();
+      markDelivered(expectedResult);
     } catch (error) {
+      if (store.get().result !== expectedResult) return;
       store.set({ outputSelectionId: "", outputDirectory: "" });
       toast("导出到文件夹失败：" + error.message, true);
     }
@@ -264,8 +321,9 @@ export function mountRunner({ toast }) {
       }
       try {
         const body = await api.export(state.sessionId, selectionId);
+        if (store.get().result !== state.result) return;
         toast(`已导出到 ${body.path}`);
-        markDelivered();
+        markDelivered(state.result);
       } catch (error) {
         // A stale selection (process restarted, folder deleted) is a 400:
         // drop it so the next click opens the picker again.
@@ -284,6 +342,10 @@ export function mountRunner({ toast }) {
   store.watchAny(["uploading", "file", "jobId", "result"], syncPhases, { immediate: true });
   store.watchAny(["result", "capabilities"], syncResult, { immediate: true });
   store.watchAny(["file", "jobId", "capabilities"], syncRunAvailability, { immediate: true });
-  store.watchAny(OPTION_KEYS, (state) => { syncStale(state); refreshCommand(); });
+  store.watchAny(OPTION_KEYS, (state) => {
+    syncStale(state);
+    commandSeq++;
+    refreshCommand();
+  });
   desktopLayout.addEventListener?.("change", () => syncResult(store.get()));
 }

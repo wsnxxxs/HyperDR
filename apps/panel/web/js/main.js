@@ -31,33 +31,38 @@ mountMask({ curve, stage });
 mountRunner({ toast });
 curve.subscribe(stage.redraw);
 
-const banner = document.getElementById("banner");
+const settings = document.getElementById("settings");
 
-function showBanner(message, tone = "info") {
-  banner.textContent = message;
-  banner.dataset.tone = tone;
-  banner.hidden = !message;
+store.watch("file", (file) => {
+  const disabled = !file;
+  settings.classList.toggle("is-disabled", disabled);
+  settings.inert = disabled;
+  settings.setAttribute("aria-disabled", String(disabled));
+}, { immediate: true });
+
+/** The header pill is the whole report: a dot for tone, a short label, and the
+ *  full sentence on the pill's `title` for the failure cases where the label
+ *  alone does not say what went wrong. */
+function showService(tone, label, detail = "") {
+  const pill = role("service-state");
+  role("service-dot").classList.add(tone);
+  setText(role("service-text"), label);
+  pill.dataset.tone = tone;
+  if (detail) pill.title = detail; else pill.removeAttribute("title");
 }
 
 /** Read capabilities once. Everything downstream branches on the store, not on
  *  its own probe of the server. */
 async function boot() {
-  const dot = role("service-dot");
-  const text = role("service-text");
   try {
     const capabilities = await api.state();
     store.set({ capabilities, phase: "ready", error: null });
-    dot.classList.add(capabilities.ready ? "is-ok" : "is-bad");
-    setText(text, capabilities.ready ? "本地处理服务已就绪" : "未找到 HyperDR");
-    if (!capabilities.ready) {
-      showBanner("未找到 HyperDR 可执行文件，转换不可用。", "error");
-    }
+    if (capabilities.ready) showService("is-ok", "本地处理服务已就绪");
+    else showService("is-bad", "未找到 HyperDR", "未找到 HyperDR 可执行文件，转换不可用。");
   } catch (error) {
     const message = error instanceof ApiError ? error.message : "面板启动失败。";
     store.set({ phase: "unavailable", error: message });
-    dot.classList.add("is-warn");
-    setText(text, "后端未响应（离线预览）");
-    showBanner(message, "error");
+    showService("is-warn", "后端未响应（离线预览）", message);
   }
 }
 

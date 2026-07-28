@@ -7,7 +7,7 @@
 
 import { el, role, setPressed, setText, clamp } from "../core/dom.js";
 import { store } from "../core/store.js";
-import { CONTROLS, ENCODINGS, PRESETS, encodingById } from "./schema.js";
+import { CONTROLS, ENCODINGS, encodingById } from "./schema.js";
 
 const GROUP_CONTAINERS = {
   tone: "group-tone",
@@ -15,9 +15,6 @@ const GROUP_CONTAINERS = {
   advanced: "group-advanced",
   quality: "group-quality",
 };
-
-const GROUP_KEYS = (group) =>
-  CONTROLS.filter((control) => control.group === group).map((control) => control.key);
 
 const hdrRangeCeiling = () =>
   encodingById(store.get().encoding).maxRange;
@@ -234,39 +231,11 @@ function mountEncoding() {
   }, { immediate: true });
 }
 
-/* ── presets & resets ───────────────────────────────────────────────── */
-
-function mountPresets() {
-  const container = role("preset-list");
-  const group = el("div", { class: "segmented", role: "group", "aria-label": "预设" });
-  const buttons = PRESETS.map((preset) => {
-    const button = el("button", { type: "button", "aria-pressed": "false" }, preset.label);
-    button.addEventListener("click", () => {
-      store.set({
-        ...preset.patch,
-        hdrRange: Math.min(preset.patch.hdrRange, hdrRangeCeiling()),
-      });
-    });
-    group.append(button);
-    return [preset, button];
-  });
-  container.append(group);
-
-  store.watchAny(["hdrStrength", "hdrRange", "encoding"], (state) => {
-    for (const [preset, button] of buttons) {
-      const active = state.hdrStrength === preset.patch.hdrStrength
-        && state.hdrRange === Math.min(preset.patch.hdrRange, encodingById(state.encoding).maxRange);
-      setPressed(button, active);
-    }
-  }, { immediate: true });
-}
+/* ── reset ──────────────────────────────────────────────────────────── */
 
 function mountResets() {
   const wire = (button, keys) =>
     button.addEventListener("click", () => store.set(defaultsFor(keys)));
-  wire(role("reset-tone"), GROUP_KEYS("tone"));
-  wire(role("reset-region"), GROUP_KEYS("region"));
-  wire(role("reset-advanced"), GROUP_KEYS("advanced"));
   /* "重置全部" covers the image controls, not the output format: the encoding
    * is a workflow decision (where will this file be shown?), not part of the
    * look being dialled in. */
@@ -277,7 +246,6 @@ function mountResets() {
 
 export function mountControls() {
   mountEncoding();
-  mountPresets();
   mountResets();
 
   const containers = new Map(

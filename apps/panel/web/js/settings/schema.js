@@ -41,16 +41,6 @@ export const ENCODINGS = [
 export const encodingById = (id) =>
   ENCODINGS.find((entry) => entry.id === id) || ENCODINGS[0];
 
-/* A preset is just a named pair of the two expansion controls; the moment the
- * user moves either one off the pair, no preset is active -- there is no
- * "custom" pill to maintain. Ranges are clamped to the encoding's ceiling at
- * apply time (HLG cannot carry 3 stops). */
-export const PRESETS = [
-  { id: "natural", label: "自然", patch: { hdrStrength: 0.25, hdrRange: 1.5 } },
-  { id: "standard", label: "标准", patch: { hdrStrength: 0.4, hdrRange: 2.5 } },
-  { id: "vivid", label: "鲜明", patch: { hdrStrength: 0.6, hdrRange: 3.0 } },
-];
-
 const ev = (value) => `${value > 0 ? "+" : ""}${value.toFixed(2)} EV`;
 const signed = (value) => `${value > 0 ? "+" : ""}${value.toFixed(2)}`;
 const percent = (value) => `${Math.round(value * 100)}%`;

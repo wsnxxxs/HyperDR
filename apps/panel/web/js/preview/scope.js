@@ -193,6 +193,19 @@ export function mountScope({ curve, analysis }) {
     requestAnimationFrame(() => { drawQueued = false; draw(); });
   }
 
+  /* The scope is allowed to absorb spare rail height on wide screens. Keep
+   * the canvas backing store matched to that rendered size so the graph gains
+   * detail instead of stretching a fixed 720 × 56 bitmap. */
+  new ResizeObserver(() => {
+    const scale = Math.min(window.devicePixelRatio || 1, 2);
+    const width = Math.max(1, Math.round(canvas.clientWidth * scale));
+    const height = Math.max(1, Math.round(canvas.clientHeight * scale));
+    if (canvas.width === width && canvas.height === height) return;
+    canvas.width = width;
+    canvas.height = height;
+    scheduleDraw();
+  }).observe(canvas);
+
   function paintZebra() {
     const data = analysis.current;
     const state = store.get();

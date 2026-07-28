@@ -23,12 +23,13 @@ store.set(defaultSettings());
 const toast = createToast();
 mountTheme();
 
-const curve = createCurve({ onChange: () => stage.redraw() });
+const curve = createCurve();
 const stage = mountStage({ curve, toast });
 
 mountControls();
 mountMask({ curve, stage });
 mountRunner({ toast });
+curve.subscribe(stage.redraw);
 
 const banner = document.getElementById("banner");
 

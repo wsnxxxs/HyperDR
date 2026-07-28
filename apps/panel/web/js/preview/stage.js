@@ -63,12 +63,20 @@ export function mountStage({ curve, toast }) {
 
   /** Decoded image + derived buffers. Replaced wholesale, never patched. */
   const image = { source: null, output: null, bitmap: null, label: "" };
+  const sourceListeners = new Set();
+  const notifySource = () => { for (const listener of [...sourceListeners]) listener(); };
   const analysis = { current: null };
   const refreshScope = mountScope({ curve, analysis });
 
   let renderer = null;        // WebGPU/WebGL renderer, or null for the CPU path
   let frame_ = 0;
-  let loadToken = 0;
+  let imageGeneration = 0;
+  let rendererGeneration = 0;
+
+  const isCurrentImage = (epoch) => epoch === imageGeneration;
+  const invalidateImage = () => ++imageGeneration;
+  const isCurrentRenderer = (epoch) => epoch === rendererGeneration;
+  const invalidateRenderer = () => ++rendererGeneration;
 
   /* ── view mode segmented ──────────────────────────────────────────── */
 
@@ -183,6 +191,7 @@ export function mountStage({ curve, toast }) {
         strength: state.hdrStrength, headroom: state.hdrRange,
         original, expansionStart: state.expansionStart,
         areaCoverage: state.areaCoverage, exposureBias: state.brightness,
+        vibrance: state.vibrance,
       });
     } else {
       renderSdr(sdrCanvas, {
@@ -203,11 +212,19 @@ export function mountStage({ curve, toast }) {
     sdrCanvas.hidden = mode !== "sdr";
   }
 
-  function chooseSdrRenderer(reason) {
+  function chooseSdrRenderer(reason, epoch = rendererGeneration, forceCpu = false) {
+    if (!isCurrentRenderer(epoch) || !image.bitmap) return;
     renderer?.destroy();
     renderer = null;
     try {
-      renderer = createSdrGpuRenderer(sdrCanvas);
+      if (forceCpu) throw new Error("WebGL context lost");
+      let created = null;
+      created = createSdrGpuRenderer(sdrCanvas, () => {
+        if (isCurrentRenderer(epoch) && renderer === created) {
+          chooseSdrRenderer("SDR 图形设备已断开", epoch, true);
+        }
+      });
+      renderer = created;
       renderer.upload(image.bitmap);
       showCanvas("sdr");
       setCapability(`${reason} · GPU SDR 示意`, false);
@@ -228,29 +245,38 @@ export function mountStage({ curve, toast }) {
     schedule();
   }
 
-  async function chooseRenderer() {
+  async function chooseRenderer(epoch = invalidateRenderer()) {
+    if (!isCurrentRenderer(epoch) || !image.bitmap) return;
     renderer?.destroy();
     renderer = null;
 
     if (!hdrDisplayQuery.matches) {
-      chooseSdrRenderer("当前屏幕为 SDR");
+      chooseSdrRenderer("当前屏幕为 SDR", epoch);
     } else if (!window.isSecureContext) {
-      chooseSdrRenderer("HTTP 模式");
+      chooseSdrRenderer("HTTP 模式", epoch);
     } else if (!navigator.gpu) {
-      chooseSdrRenderer("当前浏览器没有可用的 WebGPU");
+      chooseSdrRenderer("当前浏览器没有可用的 WebGPU", epoch);
     } else {
+      let created = null;
       try {
-        renderer = await createHdrRenderer(hdrCanvas, () => {
-          chooseSdrRenderer("HDR 图形设备已断开");
+        created = await createHdrRenderer(hdrCanvas, () => {
+          if (isCurrentRenderer(epoch) && renderer === created) {
+            chooseSdrRenderer("HDR 图形设备已断开", epoch);
+          }
         });
+        if (!isCurrentRenderer(epoch) || !image.bitmap) { created.destroy(); return; }
+        renderer = created;
         renderer.upload(image.bitmap);
         showCanvas("hdr");
         const gamut = renderer.outputColorSpace === "display-p3" ? "Display P3" : "扩展 sRGB";
         setCapability(`真 HDR · ${gamut} · 16-bit 浮点`, true);
       } catch (error) {
-        chooseSdrRenderer("WebGPU HDR 初始化失败");
+        created?.destroy();
+        if (!isCurrentRenderer(epoch)) return;
+        chooseSdrRenderer("WebGPU HDR 初始化失败", epoch);
       }
     }
+    if (!isCurrentRenderer(epoch)) return;
     syncView();
     schedule();
   }
@@ -269,9 +295,11 @@ export function mountStage({ curve, toast }) {
   }
 
   function clear(message = "点击选择或拖放图片") {
-    loadToken++;
+    invalidateImage();
+    invalidateRenderer();
     image.bitmap?.close();
     Object.assign(image, { source: null, output: null, bitmap: null, label: "" });
+    notifySource();
     analysis.current = null;
     renderer?.destroy();
     renderer = null;
@@ -291,7 +319,7 @@ export function mountStage({ curve, toast }) {
 
   async function load() {
     const sessionId = store.get().sessionId;
-    const token = ++loadToken;
+    const epoch = invalidateImage();
     if (!sessionId) { clear(); reportInitialCapability(); return; }
     setText(emptyTitle, "正在生成可调节预览…");
 
@@ -302,7 +330,7 @@ export function mountStage({ curve, toast }) {
         maxEdge: previewTier(),
       });
       const { image: decoded, url } = await decodeBlob(preview.blob);
-      if (token !== loadToken) { URL.revokeObjectURL(url); return; }
+      if (!isCurrentImage(epoch)) { URL.revokeObjectURL(url); return; }
 
       // The contract says to trust the headers over re-measuring the bitmap.
       const width = preview.width || decoded.naturalWidth;
@@ -315,11 +343,14 @@ export function mountStage({ curve, toast }) {
       context.drawImage(decoded, 0, 0, width, height);
       URL.revokeObjectURL(url);
 
+      const bitmap = await createImageBitmap(scratch);
+      if (!isCurrentImage(epoch)) { bitmap.close(); return; }
       image.bitmap?.close();
-      image.bitmap = await createImageBitmap(scratch);
+      image.bitmap = bitmap;
       image.source = context.getImageData(0, 0, width, height);
       image.output = context.createImageData(width, height);
       image.label = state.file?.name || "图片";
+      notifySource();
 
       for (const canvas of [sdrCanvas, hdrCanvas, originalCanvas]) {
         canvas.width = width;
@@ -334,7 +365,7 @@ export function mountStage({ curve, toast }) {
       refreshScope();
       await chooseRenderer();
     } catch (error) {
-      if (token !== loadToken) return;
+      if (!isCurrentImage(epoch)) return;
       clear(error.message || "无法载入预览。");
     }
   }
@@ -444,7 +475,7 @@ export function mountStage({ curve, toast }) {
     if (state.uploading) setText(emptyTitle, "正在上传…");
   });
   store.watchAny(
-    ["brightness", "hdrStrength", "hdrRange", "expansionStart", "areaCoverage", "encoding", "contrast"],
+    ["brightness", "hdrStrength", "hdrRange", "expansionStart", "areaCoverage", "encoding", "contrast", "vibrance"],
     (state) => { curve.schedule(state); schedule(); });
 
   /* Every other control acts on the decoded pixels the browser already holds,
@@ -478,5 +509,9 @@ export function mountStage({ curve, toast }) {
     clear,
     /** The decoded preview pixels, for the mask overlay. Null before upload. */
     getSource: () => image.source,
+    onSourceChange(listener) {
+      sourceListeners.add(listener);
+      return () => sourceListeners.delete(listener);
+    },
   };
 }

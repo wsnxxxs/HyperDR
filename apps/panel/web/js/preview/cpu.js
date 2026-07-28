@@ -8,7 +8,7 @@
 
 import { clamp } from "../core/dom.js";
 
-const P3_LUMA = [0.2289746, 0.6917385, 0.0792869]; // linear Display P3 D65
+const SRGB_LUMA = [0.2126, 0.7152, 0.0722]; // linear sRGB D65
 
 // sRGB transfer, also valid for Display P3, which shares the curve.
 const SRGB_TO_LINEAR = new Float32Array(256);
@@ -21,6 +21,11 @@ function linearToSrgb8(value) {
   const v = clamp(value, 0, 1);
   const encoded = v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
   return Math.round(encoded * 255);
+}
+
+function smoothstep(a, b, value) {
+  const t = clamp((value - a) / (b - a), 0, 1);
+  return t * t * (3 - 2 * t);
 }
 
 /** Soft shoulder folding an expanded value (which may exceed 1) back into SDR. */
@@ -55,19 +60,28 @@ export function renderSdr(canvas, { source, output, curve, settings, original })
 
   const from = source.data;
   const to = output.data;
-  const { hdrStrength: strength, expansionStart, brightness } = settings;
+  const { hdrStrength: strength, expansionStart, brightness, vibrance } = settings;
   const exposure = Math.pow(2, brightness);
 
   for (let i = 0; i < from.length; i += 4) {
     const r = SRGB_TO_LINEAR[from[i]] * exposure;
     const g = SRGB_TO_LINEAR[from[i + 1]] * exposure;
     const b = SRGB_TO_LINEAR[from[i + 2]] * exposure;
-    const y = P3_LUMA[0] * r + P3_LUMA[1] * g + P3_LUMA[2] * b;
-    const gain = Math.pow(2, curve.gainStops(y, strength));
-
-    let R = r * gain, G = g * gain, B = b * gain;
-    const ye = P3_LUMA[0] * R + P3_LUMA[1] * G + P3_LUMA[2] * B;
-    const sat = curve.saturation(y, strength, expansionStart);
+    const y = SRGB_LUMA[0] * r + SRGB_LUMA[1] * g + SRGB_LUMA[2] * b;
+    let R = r, G = g, B = b;
+    const sourceSaturation = Math.max(Math.abs(r - y), Math.abs(g - y), Math.abs(b - y))
+      / Math.max(y, 1e-6);
+    const vibranceAmount = vibrance * (1 - smoothstep(0.15, 1, sourceSaturation));
+    R = Math.max(0, y + (R - y) * (1 + vibranceAmount));
+    G = Math.max(0, y + (G - y) * (1 + vibranceAmount));
+    B = Math.max(0, y + (B - y) * (1 + vibranceAmount));
+    const adjustedY = SRGB_LUMA[0] * R + SRGB_LUMA[1] * G + SRGB_LUMA[2] * B;
+    const gain = Math.pow(2, curve.gainStops(adjustedY, strength));
+    R *= gain;
+    G *= gain;
+    B *= gain;
+    const ye = SRGB_LUMA[0] * R + SRGB_LUMA[1] * G + SRGB_LUMA[2] * B;
+    const sat = curve.saturation(adjustedY, strength, expansionStart);
     R = ye + (R - ye) * sat;
     G = ye + (G - ye) * sat;
     B = ye + (B - ye) * sat;
@@ -83,4 +97,4 @@ export function renderSdr(canvas, { source, output, curve, settings, original })
 /* The pieces the histogram's simulated-output series needs, exported so the
  * scope walks 256 bins through the exact maths the pixels walk through --
  * a second, diverging implementation is how the graph starts lying. */
-export const __math = { SRGB_TO_LINEAR, linearToSrgb8, shoulder, P3_LUMA };
+export const __math = { SRGB_TO_LINEAR, linearToSrgb8, shoulder, SRGB_LUMA };

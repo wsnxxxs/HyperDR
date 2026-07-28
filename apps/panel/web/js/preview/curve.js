@@ -33,12 +33,13 @@ const keyOf = (state) => [
   state.hdrRange, state.expansionStart, state.areaCoverage,
 ].join("\0");
 
-export function createCurve({ onChange } = {}) {
+export function createCurve() {
   const table = new Float32Array(LUT_SIZE);
+  const listeners = new Set();
   let fetched = null;
   let fetchedKey = "";
-  let pendingKey = "";
   let timer = 0;
+  let requestSeq = 0;
   let tableKey = "";
 
   /** Rebuild the table for the current settings; called once per render.
@@ -80,31 +81,36 @@ export function createCurve({ onChange } = {}) {
   const saturation = (y, strength, expansionStart) =>
     1 + 0.12 * strength * smoothstep(expansionStart, 1, y);
 
-  async function fetchCurve(state) {
+  async function fetchCurve(state, seq) {
     const key = keyOf(state);
-    if (key === fetchedKey || key === pendingKey) return;
-    pendingKey = key;
+    if (key === fetchedKey) return;
     try {
       const body = await api.curve(toOptions(state), LUT_SIZE);
+      if (seq !== requestSeq) return;
       if (!Array.isArray(body.gain_stops) || body.gain_stops.length !== LUT_SIZE) {
         throw new Error("unexpected curve length");
       }
       fetched = Float32Array.from(body.gain_stops);
       fetchedKey = key;
-      tableKey = "";        // force the next render to adopt the fetched curve
-      onChange?.();
+      tableKey = "";        // force every dependent view to adopt this curve
+      for (const listener of [...listeners]) listener();
     } catch (_) {
       // Offline or an older binary: the approximation keeps the panel usable
       // and the exported file is unaffected either way.
-    } finally {
-      if (pendingKey === key) pendingKey = "";
     }
   }
 
   function schedule(state) {
     clearTimeout(timer);
-    timer = setTimeout(() => fetchCurve(state), 150);
+    const seq = ++requestSeq;
+    timer = setTimeout(() => fetchCurve(state, seq), 150);
   }
 
-  return { table, refreshTable, gainStops, saturation, schedule, LUT_SIZE };
+  /** @returns {() => void} unsubscribe */
+  function subscribe(listener) {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
+  }
+
+  return { table, refreshTable, gainStops, saturation, schedule, subscribe, LUT_SIZE };
 }

@@ -15,7 +15,7 @@ import { role, readColor, clamp } from "../core/dom.js";
 import { store } from "../core/store.js";
 import { CONTROLS_BY_KEY } from "../settings/schema.js";
 
-const P3_LUMA = [0.2289746, 0.6917385, 0.0792869];
+const SRGB_LUMA = [0.2126, 0.7152, 0.0722];
 const SRGB_TO_LINEAR = new Float32Array(256);
 for (let i = 0; i < 256; i++) {
   const c = i / 255;
@@ -70,14 +70,15 @@ export function mountMask({ curve, stage }) {
     if (canvas.height !== source.height) canvas.height = source.height;
 
     curve.refreshTable(state);
+    const exposure = Math.pow(2, state.brightness);
     const tint = readColor("--mask-tint");
     const output = canvas.getContext("2d").createImageData(source.width, source.height);
     const from = source.data;
     const to = output.data;
     for (let p = 0; p < from.length; p += 4) {
-      const y = P3_LUMA[0] * SRGB_TO_LINEAR[from[p]]
-              + P3_LUMA[1] * SRGB_TO_LINEAR[from[p + 1]]
-              + P3_LUMA[2] * SRGB_TO_LINEAR[from[p + 2]];
+      const y = (SRGB_LUMA[0] * SRGB_TO_LINEAR[from[p]]
+               + SRGB_LUMA[1] * SRGB_TO_LINEAR[from[p + 1]]
+               + SRGB_LUMA[2] * SRGB_TO_LINEAR[from[p + 2]]) * exposure;
       const w = weightAt(y, control.mask, state, curve);
       if (w <= 0.01) continue;
       to[p] = tint.r;
@@ -97,9 +98,10 @@ export function mountMask({ curve, stage }) {
 
   /* Repaint on mask changes and on any setting that bends the weight field.
    * The canvas is hidden (and stays cheap) whenever no slider is touched. */
+  stage.onSourceChange(schedule);
   store.watchAny(
     ["maskKey", "hdrStrength", "hdrRange", "expansionStart", "areaCoverage",
-     "encoding", "contrast", "file"],
+     "brightness", "encoding", "contrast", "file"],
     schedule,
     { immediate: true });
 }

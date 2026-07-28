@@ -25,11 +25,12 @@ uniform sampler2D gainTexture;
 uniform float strength;
 uniform float exposureBias;
 uniform float expansionStart;
+uniform float vibrance;
 uniform float original;
 in vec2 uv;
 out vec4 color;
 
-const vec3 luma = vec3(0.2289746, 0.6917385, 0.0792869);
+const vec3 luma = vec3(0.2126, 0.7152, 0.0722);
 
 vec3 encodeSrgb(vec3 linear) {
   vec3 value = max(linear, vec3(0.0));
@@ -63,10 +64,15 @@ void main() {
   }
   linear *= exp2(exposureBias);
   float y = dot(linear, luma);
+  float sourceSaturation = max(max(abs(linear.r - y), abs(linear.g - y)), abs(linear.b - y))
+    / max(y, 0.000001);
+  float vibranceAmount = vibrance *
+    (1.0 - smoothstep(0.15, 1.0, sourceSaturation));
+  linear = max(vec3(y) + (linear - vec3(y)) * (1.0 + vibranceAmount), vec3(0.0));
+  y = dot(linear, luma);
   vec3 expanded = linear * exp2(gainStops(y));
   float ye = dot(expanded, luma);
-  float saturation = 1.0 + 0.12 * strength *
-    smoothstep(expansionStart, 1.0, y);
+  float saturation = 1.0 + 0.12 * strength * smoothstep(expansionStart, 1.0, y);
   expanded = max(vec3(ye) + (expanded - vec3(ye)) * saturation, vec3(0.0));
   color = vec4(encodeSrgb(vec3(
     shoulder(expanded.r), shoulder(expanded.g), shoulder(expanded.b))), 1.0);
@@ -84,7 +90,12 @@ function compile(gl, type, source) {
   return shader;
 }
 
-export function createSdrGpuRenderer(canvas) {
+export function createSdrGpuRenderer(canvas, onContextLost) {
+  const handleContextLost = (event) => {
+    event.preventDefault();
+    onContextLost?.();
+  };
+  canvas.addEventListener("webglcontextlost", handleContextLost, { once: true });
   const gl = canvas.getContext("webgl2", {
     alpha: false, antialias: false, depth: false, stencil: false,
     powerPreference: "high-performance",
@@ -133,6 +144,7 @@ export function createSdrGpuRenderer(canvas) {
     strength: gl.getUniformLocation(program, "strength"),
     exposureBias: gl.getUniformLocation(program, "exposureBias"),
     expansionStart: gl.getUniformLocation(program, "expansionStart"),
+    vibrance: gl.getUniformLocation(program, "vibrance"),
     original: gl.getUniformLocation(program, "original"),
   };
 
@@ -166,11 +178,13 @@ export function createSdrGpuRenderer(canvas) {
       gl.uniform1f(locations.strength, params.strength);
       gl.uniform1f(locations.exposureBias, params.exposureBias);
       gl.uniform1f(locations.expansionStart, params.expansionStart);
+      gl.uniform1f(locations.vibrance, params.vibrance);
       gl.uniform1f(locations.original, params.original ? 1 : 0);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
     },
 
     destroy() {
+      canvas.removeEventListener("webglcontextlost", handleContextLost);
       gl.deleteTexture(imageTexture);
       gl.deleteTexture(gainTexture);
       gl.deleteBuffer(buffer);

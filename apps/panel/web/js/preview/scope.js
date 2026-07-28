@@ -67,10 +67,12 @@ export function analyse(source) {
   };
 }
 
-/* Fold the source luma histogram through the same maths the SDR renderer
- * applies per pixel: exposure, the exporter's curve at the current strength,
- * then the display shoulder. 256 bins instead of a pixel walk, which is why
- * the answer can be redrawn on every frame of a drag. */
+/* Fold the source luma histogram through the same luminance maths the SDR
+ * renderer applies: exposure, the exporter's curve at the current strength,
+ * then the display shoulder. Vibrance is deliberately absent: it moves chroma
+ * around the same luma axis, and a one-dimensional luma histogram has no hue or
+ * saturation data from which to model the rare gamut-clamp correction. 256 bins
+ * instead of a pixel walk keeps this cheap enough to redraw during a drag. */
 function simulateOutput(luma, state, curve) {
   const { SRGB_TO_LINEAR, linearToSrgb8, shoulder } = __math;
   const out = new Float32Array(256);

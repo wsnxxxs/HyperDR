@@ -48,6 +48,7 @@ function decodeBlob(blob) {
 export function mountStage({ curve, toast }) {
   const stage = role("stage");
   const frame = stage.querySelector(".stage-frame");
+  const viewport = stage.closest(".stage-viewport");
   const empty = role("stage-empty");
   const selectButton = role("stage-select");
   const emptyTitle = role("stage-title");
@@ -116,6 +117,31 @@ export function mountStage({ curve, toast }) {
     divider.setAttribute("aria-valuenow", String(Math.round(state.splitRatio * 100)));
   }
 
+  /* Fit the visible frame to the decoded image without ever cropping it.
+   * Empty state sizing remains in CSS; loaded images use exact pixel geometry
+   * so portrait, landscape, and panoramic sources all carry their own border. */
+  function fitStageToImage() {
+    if (!image.source || !viewport) {
+      stage.style.removeProperty("width");
+      stage.style.removeProperty("height");
+      return;
+    }
+    const bounds = viewport.getBoundingClientRect();
+    const gutter = Number.parseFloat(
+      getComputedStyle(viewport).getPropertyValue("--stage-gutter")) || 0;
+    const availableWidth = Math.max(0, bounds.width - 2 * gutter);
+    const availableHeight = Math.max(0, bounds.height - 2 * gutter);
+    const aspect = image.source.width / image.source.height;
+    let width = Math.min(availableWidth, availableHeight * aspect);
+    let height = width / aspect;
+    if (height > availableHeight) {
+      height = availableHeight;
+      width = height * aspect;
+    }
+    stage.style.width = `${width}px`;
+    stage.style.height = `${height}px`;
+  }
+
   function syncView() {
     const state = store.get();
     const hasImage = Boolean(image.source);
@@ -162,7 +188,10 @@ export function mountStage({ curve, toast }) {
     store.set({ splitRatio: clamp(store.get().splitRatio + delta, 0.05, 0.95) });
   });
 
-  new ResizeObserver(() => positionDivider()).observe(frame);
+  new ResizeObserver(() => {
+    fitStageToImage();
+    positionDivider();
+  }).observe(viewport);
 
   /* ── capability reporting ─────────────────────────────────────────── */
 
@@ -308,6 +337,7 @@ export function mountStage({ curve, toast }) {
     renderer = null;
     store.set({ comparing: false, maskKey: null });
     stage.classList.remove("has-image", "is-comparing");
+    fitStageToImage();
     stage.removeAttribute("role");
     stage.removeAttribute("tabindex");
     for (const canvas of [sdrCanvas, hdrCanvas, originalCanvas]) {
@@ -366,6 +396,7 @@ export function mountStage({ curve, toast }) {
 
       empty.style.display = "none";
       stage.classList.add("has-image");
+      fitStageToImage();
       stage.setAttribute("role", "button");
       stage.tabIndex = 0;
       store.set({ comparing: false });
@@ -496,7 +527,8 @@ export function mountStage({ curve, toast }) {
   });
   store.watchAny(
     ["brightness", "hdrStrength", "hdrRange", "expansionStart", "areaCoverage", "encoding", "contrast", "vibrance"],
-    (state) => { curve.schedule(state); schedule(); });
+    (state) => { curve.validateOnce(state); schedule(); },
+    { immediate: true });
 
   /* Every other control acts on the decoded pixels the browser already holds,
    * so a redraw is enough. Highlight recovery acts *during* the RAW decode, so

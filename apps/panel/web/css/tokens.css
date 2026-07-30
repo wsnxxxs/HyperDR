@@ -46,7 +46,7 @@
   --success:         light-dark(#1f7a4d, #3fbf84);
 
   /* HDR amber: reserved for things that are *about* extended range -- the
-     badge, the run button, the simulated-output histogram, the mask tint. */
+     badge, the run button, and the simulated-output histogram. */
   --hdr:             light-dark(#b97708, #f2b64b);
   --hdr-ink:         #241a05;
   --hdr-soft:        light-dark(#fdf3dd, #3a2c12);
@@ -55,7 +55,7 @@
      cannot see these variables at paint time; scope.js and mask.js read them
      back with getComputedStyle, so the values still live here and only here. */
   /* Sliders track in the accent, not the amber. Amber means "extended range"
-     -- the badge, the run button, the simulated output, the mask -- and a rail
+     -- the badge, the run button, and the simulated output -- and a rail
      of seven amber bars spent that meaning on ordinary parameters. */
   --control-track:   light-dark(#dcdee3, #34383f);
   --control-thumb:   #ffffff;
@@ -63,7 +63,9 @@
 
   --zebra-hot:       light-dark(#d64541, #ef6b5c);
   --zebra-cold:      light-dark(#3b82f6, #6ba3f8);
-  --mask-tint:       light-dark(#b97708, #f2b64b);
+  /* A diagnostic magenta rather than HDR amber: warm highlights, skin and
+     sunsets must not swallow the adjustment-region overlay. */
+  --mask-tint:       light-dark(#b832c7, #f06ad9);
 
   /* Histogram palette, read back from the canvas the same way. The output
      series is the HDR amber; the source series stays neutral so the eye
@@ -158,4 +160,4 @@
 @property --hist-output { syntax: "<color>"; inherits: true; initial-value: #f2b64b; }
 @property --zebra-hot   { syntax: "<color>"; inherits: true; initial-value: #ef6b5c; }
 @property --zebra-cold  { syntax: "<color>"; inherits: true; initial-value: #6ba3f8; }
-@property --mask-tint   { syntax: "<color>"; inherits: true; initial-value: #f2b64b; }
+@property --mask-tint   { syntax: "<color>"; inherits: true; initial-value: #f06ad9; }

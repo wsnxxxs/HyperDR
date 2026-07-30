@@ -60,7 +60,12 @@ fn hdrGainStops(y: f32, strength: f32) -> f32 {
   let vibranceAmount = params.vibrance * (1.0 - smoothstep(0.15, 1.0, sourceSaturation));
   p3 = max(vec3f(y) + (p3 - vec3f(y)) * (1.0 + vibranceAmount), vec3f(0.0));
   y = dot(p3, luma);
-  let gain = hdrGainStops(y, params.strength);
+  var gain = hdrGainStops(y, params.strength);
+  let diffuseFloor = clamp(params.areaCoverage + 0.20 * params.strength, 0.0, 1.0);
+  let highlight = smoothstep(params.expansionStart, 1.0, y);
+  let absolute = smoothstep(0.70, 1.50, y * exp2(gain));
+  let coverage = diffuseFloor + (1.0 - diffuseFloor) * highlight * absolute;
+  gain *= coverage;
   var expanded = p3 * exp2(gain);
   let ye = dot(expanded, luma);
   let sat = 1.0 + 0.12 * params.strength * smoothstep(params.expansionStart, 1.0, y);

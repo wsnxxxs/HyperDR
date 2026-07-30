@@ -117,12 +117,13 @@
 .stage {
   position: relative;
   display: grid;
-  /* The nearest size container also includes the heading and its 4px gap.
-     Reserve their combined vertical footprint before fitting the 4:3 frame,
-     so any spare height sits above the heading instead of between the label
-     and the preview. */
-  width: min(100%, calc(133.333cqh - 31px));
-  aspect-ratio: 4 / 3;
+  /* Empty state keeps a quiet gutter inside the outer preview panel. Once an
+     image is decoded, stage.js fits these dimensions to the image's real
+     aspect ratio while preserving the same gutter. */
+  width: calc(100% - var(--stage-gutter) - var(--stage-gutter));
+  height: calc(100% - var(--stage-gutter) - var(--stage-gutter));
+  max-width: 100%;
+  max-height: 100%;
   min-height: 0;
   border-radius: var(--radius-lg);
   outline-offset: 3px;
@@ -316,10 +317,10 @@
    grey they used when a panel still enclosed them. */
 .scope {
   display: grid;
-  flex: 1 0 160px;
-  grid-template-rows: auto minmax(56px, 1fr) auto auto;
+  flex: none;
+  grid-template-rows: auto auto auto auto;
   gap: var(--space-2);
-  min-height: 160px;
+  min-height: 0;
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
@@ -342,8 +343,10 @@
 .scope-graph {
   display: block;
   width: 100%;
-  height: 100%;
-  min-height: 56px;
+  height: auto;
+  aspect-ratio: 5 / 2;
+  min-height: 96px;
+  max-height: 144px;
 }
 .scope-legend {
   display: flex;
@@ -386,6 +389,41 @@
   color: var(--ink-strong);
   font-weight: 600;
   box-shadow: inset 0 1px 0 var(--edge), var(--shadow-sm);
+}
+
+/* Histogram mode is a view state, not a quiet preference. Give it a stronger
+   selected treatment than the generic segmented control so the plotted
+   channels are unambiguous at a glance in either theme. */
+.segmented--small {
+  padding: 3px;
+  border: 1px solid var(--line);
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.08);
+}
+.segmented--small button {
+  position: relative;
+  min-width: 62px;
+  padding-inline: var(--space-3);
+  transition:
+    background var(--duration) var(--ease),
+    color var(--duration) var(--ease),
+    box-shadow var(--duration) var(--ease);
+}
+.segmented--small button[aria-pressed="true"] {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: var(--shadow-sm);
+}
+.segmented--small button[aria-pressed="true"]::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  translate: 0 -50%;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 /* -- settings rail ---------------------------------------------------------- */
@@ -684,6 +722,10 @@
 /* -- small screens ------------------------------------------------------------- */
 
 @media (width < 860px) {
+  .stage {
+    width: calc(100% - var(--stage-gutter) - var(--stage-gutter));
+    height: calc(100% - var(--stage-gutter) - var(--stage-gutter));
+  }
   .scope,
   .group,
   .rail-head { margin-bottom: var(--space-3); }

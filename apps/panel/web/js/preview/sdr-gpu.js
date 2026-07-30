@@ -25,6 +25,7 @@ uniform sampler2D gainTexture;
 uniform float strength;
 uniform float exposureBias;
 uniform float expansionStart;
+uniform float areaCoverage;
 uniform float vibrance;
 uniform float original;
 in vec2 uv;
@@ -70,7 +71,12 @@ void main() {
     (1.0 - smoothstep(0.15, 1.0, sourceSaturation));
   linear = max(vec3(y) + (linear - vec3(y)) * (1.0 + vibranceAmount), vec3(0.0));
   y = dot(linear, luma);
-  vec3 expanded = linear * exp2(gainStops(y));
+  float gain = gainStops(y);
+  float diffuseFloor = clamp(areaCoverage + 0.20 * strength, 0.0, 1.0);
+  float highlight = smoothstep(expansionStart, 1.0, y);
+  float absolute = smoothstep(0.70, 1.50, y * exp2(gain));
+  float coverage = diffuseFloor + (1.0 - diffuseFloor) * highlight * absolute;
+  vec3 expanded = linear * exp2(gain * coverage);
   float ye = dot(expanded, luma);
   float saturation = 1.0 + 0.12 * strength * smoothstep(expansionStart, 1.0, y);
   expanded = max(vec3(ye) + (expanded - vec3(ye)) * saturation, vec3(0.0));
@@ -144,6 +150,7 @@ export function createSdrGpuRenderer(canvas, onContextLost) {
     strength: gl.getUniformLocation(program, "strength"),
     exposureBias: gl.getUniformLocation(program, "exposureBias"),
     expansionStart: gl.getUniformLocation(program, "expansionStart"),
+    areaCoverage: gl.getUniformLocation(program, "areaCoverage"),
     vibrance: gl.getUniformLocation(program, "vibrance"),
     original: gl.getUniformLocation(program, "original"),
   };
@@ -178,6 +185,7 @@ export function createSdrGpuRenderer(canvas, onContextLost) {
       gl.uniform1f(locations.strength, params.strength);
       gl.uniform1f(locations.exposureBias, params.exposureBias);
       gl.uniform1f(locations.expansionStart, params.expansionStart);
+      gl.uniform1f(locations.areaCoverage, params.areaCoverage);
       gl.uniform1f(locations.vibrance, params.vibrance);
       gl.uniform1f(locations.original, params.original ? 1 : 0);
       gl.drawArrays(gl.TRIANGLES, 0, 6);

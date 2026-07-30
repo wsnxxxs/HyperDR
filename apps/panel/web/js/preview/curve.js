@@ -1,16 +1,18 @@
-/* The exporter's own tone curve, fetched rather than reimplemented.
+/* The exporter's own tone curve, rebuilt synchronously in the browser.
  *
- * `HyperDR curve --json` samples the global curve the encoder will use, so the
- * canvas and WGSL renderers interpolate one table instead of each carrying a
- * hand-written approximation -- which is how a preview quietly stops matching
- * the file that gets written. The local, spatial part of the highlight weight
- * cannot be expressed in one dimension and is deliberately absent; the run
- * report's `rendered_peak` stays authoritative.
+ * curve-math.js is a direct port of the C++ implementation. Rebuilding 257
+ * samples locally keeps range/start drags on one exact curve instead of showing
+ * an approximation and replacing it with a fetched curve after the gesture.
+ * `/api/curve` remains a startup drift check, never a visible render source.
  */
 
 import { api } from "../core/api.js";
 import { clamp } from "../core/dom.js";
 import { toOptions } from "../settings/schema.js";
+import {
+  fillPhotographicGainLut,
+  previewCoverageWeight,
+} from "./curve-math.js";
 
 export const LUT_SIZE = 257;
 
@@ -19,49 +21,23 @@ const smoothstep = (a, b, x) => {
   return t * t * (3 - 2 * t);
 };
 
-/** Used until the first curve arrives, and whenever the converter is offline. */
-function approximate(y, rangeStops, expansionStart, areaCoverage) {
-  if (y <= expansionStart) return 0;
-  const t = smoothstep(expansionStart, 1, y);
-  return rangeStops * Math.pow(t, 1.3 - 0.75 * areaCoverage);
-}
-
 /** Only the settings that change the curve's shape belong in its cache key.
- *  `look` is not one: the panel always renders `photographic`. */
+ * `areaCoverage` is spatial and must not invalidate the global curve. */
 const keyOf = (state) => [
-  state.encoding, state.contrast,
-  state.hdrRange, state.expansionStart, state.areaCoverage,
+  state.contrast, state.hdrRange, state.expansionStart,
 ].join("\0");
 
 export function createCurve() {
   const table = new Float32Array(LUT_SIZE);
-  const listeners = new Set();
-  let fetched = null;
-  let fetchedKey = "";
-  let timer = 0;
-  let requestSeq = 0;
   let tableKey = "";
+  let validationStarted = false;
 
-  /** Rebuild the table for the current settings; called once per render.
-   *
-   * A drag fires `input` far faster than the curve's shape actually changes:
-   * moving --gain-strength leaves every one of the key's inputs untouched, yet
-   * the old code still walked 257 entries through `Math.pow` on each frame.
-   * The stamp records both the settings and which source filled the table, so
-   * a refetch landing under an unchanged key still invalidates. */
+  /** Rebuild once for each coalesced render frame whose curve inputs changed. */
   function refreshTable(state) {
     const key = keyOf(state);
-    const usable = fetchedKey === key ? fetched : null;
-    const stamp = usable ? `f\0${key}` : `a\0${key}`;
-    if (stamp === tableKey) return table;
-    tableKey = stamp;
-    for (let i = 0; i < LUT_SIZE; i++) {
-      const y = i / (LUT_SIZE - 1);
-      table[i] = usable
-        ? usable[i]
-        : approximate(y, state.hdrRange, state.expansionStart, state.areaCoverage);
-    }
-    return table;
+    if (key === tableKey) return table;
+    tableKey = key;
+    return fillPhotographicGainLut(table, state);
   }
 
   function sample(y) {
@@ -75,42 +51,43 @@ export function createCurve() {
    * does in the exporter, so the strength knob stays meaningful over a LUT. */
   const gainStops = (y, strength) => (strength <= 0 ? 0 : sample(y) * strength);
 
+  const previewGainStops = (y, state) => {
+    const global = gainStops(y, state.hdrStrength);
+    return global * previewCoverageWeight(
+      y, global, state.hdrStrength, state.areaCoverage, state.expansionStart);
+  };
+
   /* Highlight saturation retention: keep sunset and lamp colour vivid instead
    * of letting expansion wash it toward white. Anchored to the curve's own
    * shoulder so it cannot drift from where expansion actually begins. */
   const saturation = (y, strength, expansionStart) =>
     1 + 0.12 * strength * smoothstep(expansionStart, 1, y);
 
-  async function fetchCurve(state, seq) {
-    const key = keyOf(state);
-    if (key === fetchedKey) return;
+  /** Compare the JS port with one C++ sampling at startup. A mismatch is
+   * diagnostic only: an asynchronous response never replaces the visible LUT. */
+  async function validateOnce(state) {
+    if (validationStarted) return;
+    validationStarted = true;
     try {
       const body = await api.curve(toOptions(state), LUT_SIZE);
-      if (seq !== requestSeq) return;
       if (!Array.isArray(body.gain_stops) || body.gain_stops.length !== LUT_SIZE) {
         throw new Error("unexpected curve length");
       }
-      fetched = Float32Array.from(body.gain_stops);
-      fetchedKey = key;
-      tableKey = "";        // force every dependent view to adopt this curve
-      for (const listener of [...listeners]) listener();
+      const reference = new Float32Array(LUT_SIZE);
+      fillPhotographicGainLut(reference, state);
+      let maximumError = 0;
+      for (let i = 0; i < LUT_SIZE; i++) {
+        maximumError = Math.max(maximumError, Math.abs(reference[i] - body.gain_stops[i]));
+      }
+      if (maximumError > 2e-5) {
+        console.warn(`HyperDR curve port drifted from C++ (max error ${maximumError})`);
+      }
     } catch (_) {
-      // Offline or an older binary: the approximation keeps the panel usable
-      // and the exported file is unaffected either way.
+      // Offline and older binaries do not block the fully local live preview.
     }
   }
 
-  function schedule(state) {
-    clearTimeout(timer);
-    const seq = ++requestSeq;
-    timer = setTimeout(() => fetchCurve(state, seq), 150);
-  }
-
-  /** @returns {() => void} unsubscribe */
-  function subscribe(listener) {
-    listeners.add(listener);
-    return () => listeners.delete(listener);
-  }
-
-  return { table, refreshTable, gainStops, saturation, schedule, subscribe, LUT_SIZE };
+  return {
+    table, refreshTable, gainStops, previewGainStops, saturation, validateOnce, LUT_SIZE,
+  };
 }

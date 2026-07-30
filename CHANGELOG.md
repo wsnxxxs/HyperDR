@@ -5,6 +5,22 @@ semantic versioning; dates use ISO 8601.
 
 ## Unreleased
 
+## 0.3.1 - 2026-07-30
+
+- Fixed adjustment-region masks so they refresh when the converter's exact
+  curve arrives, stay off the original side of comparison views, and trigger
+  only while the matching help question mark is hovered. Slider adjustment now
+  remains an unobstructed live preview. The mask uses a lighter diagnostic
+  magenta that remains visible over warm highlights.
+- Fixed the histogram's brightness/RGB switch never reflecting its active
+  state, and strengthened the selected capsule in both themes.
+- Reduced mask-rendering overhead by caching the preview's linear luminance and
+  reusing its image buffer. The panel labels the mask as an estimate because
+  the final export also considers local contrast and noise.
+- Fitted the preview frame to the decoded image's real aspect ratio, tightened
+  the desktop settings rail, and made the histogram retain a stable readable
+  height.
+
 ## 0.3.0 - 2026-07-28
 
 - **Breaking.** Replaced the panel's front-end. The rewritten interface that

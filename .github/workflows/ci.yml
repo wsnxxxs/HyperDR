@@ -35,6 +35,22 @@ jobs:
       - name: Test
         run: ctest --test-dir build-core -C ${{ matrix.build_type }} --output-on-failure
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Range/start drags rebuild the C++ photographic curve locally in JS.
+      # Compare every one of the 257 samples against this job's freshly built
+      # converter so either side changing alone is a hard failure.
+      - name: Check the browser curve port against C++
+        shell: pwsh
+        run: |
+          $converter = Get-ChildItem build-core -Recurse -Filter HyperDR.exe |
+            Select-Object -First 1
+          if (-not $converter) { throw "built HyperDR.exe not found" }
+          $env:HYPERDR_EXECUTABLE = $converter.FullName
+          python tests/python/test_curve_port.py
+
       # schema/settings.json is generated output that the browser panel reads at
       # import time. If a setting changed and it was not regenerated, the panel
       # would validate against a vocabulary the converter no longer has.

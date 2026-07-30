@@ -33,18 +33,17 @@ function defaultsFor(keys) {
 
 /* ── mask hover: the stage reads `maskKey` and paints the overlay ────── */
 
-function wireMask(node, control) {
-  if (!control.mask) return;
+function wireMask(trigger, control) {
+  if (!trigger || !control.mask) return;
   const show = () => store.set({ maskKey: control.key });
   const hide = () => {
     if (store.get().maskKey === control.key) store.set({ maskKey: null });
   };
-  node.addEventListener("pointerenter", show);
-  node.addEventListener("pointerleave", hide);
-  node.addEventListener("focusin", show);
-  node.addEventListener("focusout", (event) => {
-    if (!node.contains(event.relatedTarget)) hide();
-  });
+  // Keep the overlay purely explanatory: the question mark teaches the
+  // control's footprint, while the slider remains an unobstructed live preview.
+  trigger.addEventListener("pointerenter", show);
+  trigger.addEventListener("pointerleave", hide);
+  window.addEventListener("blur", hide);
 }
 
 /* ── individual widgets ─────────────────────────────────────────────── */
@@ -53,6 +52,7 @@ function helpButton(control, hintNode) {
   const button = el("button", {
     class: "field-help", type: "button", "aria-expanded": "false",
     "aria-label": `查看${control.label}说明`,
+    title: control.mask ? "悬停显示预计作用区域；点击查看说明" : null,
   }, "?");
   button.addEventListener("click", () => {
     const open = hintNode.hidden;
@@ -76,10 +76,11 @@ function buildRange(control) {
     "aria-label": control.label,
   });
   const hint = control.help ? el("p", { class: "field-hint", hidden: true }, control.help) : null;
+  const help = hint ? helpButton(control, hint) : null;
 
   const title = el("span", { class: "field-title" },
     el("b", {}, control.label),
-    hint ? helpButton(control, hint) : null);
+    help);
 
   const node = el("div", { class: "field field--range" },
     el("div", { class: "field-head" }, title, readout),
@@ -147,7 +148,7 @@ function buildRange(control) {
     const fillText = `${Math.min(100, Math.max(0, fill)).toFixed(1)}%`;
     if (lastFill !== fillText) { lastFill = fillText; input.style.setProperty("--fill", fillText); }
   };
-  wireMask(node, control);
+  wireMask(help, control);
   return { node, apply, watches: [control.key, "encoding"] };
 }
 

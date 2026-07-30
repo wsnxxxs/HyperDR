@@ -74,12 +74,81 @@ function Get-HyperDRCertificateSan {
     catch { return "" }
     foreach ($extension in $cert.Extensions) {
         if ($extension.Oid.Value -eq "2.5.29.17") {
-            # Format() is localised, but the address literals inside are not, so
-            # a substring test works on any Windows display language.
+            # Format() localises the labels but not the address literals. The
+            # parser below extracts those literals and compares canonical IPs.
             return $extension.Format($false)
         }
     }
     return ""
+}
+
+
+function Get-HyperDRSanIpAddressFromText {
+    param([string]$San)
+    if (-not $San) { return @() }
+
+    $addresses = @()
+    $ipv4Pattern = '(?<![0-9])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9])'
+    foreach ($match in [regex]::Matches($San, $ipv4Pattern)) {
+        $parsed = $null
+        if ([Net.IPAddress]::TryParse($match.Value, [ref]$parsed)) {
+            $addresses += $parsed.ToString()
+        }
+    }
+
+    $ipv6Pattern = '(?<![0-9A-Fa-f:])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?![0-9A-Fa-f:])'
+    foreach ($match in [regex]::Matches($San, $ipv6Pattern)) {
+        $parsed = $null
+        if ([Net.IPAddress]::TryParse($match.Value, [ref]$parsed)) {
+            $addresses += $parsed.ToString()
+        }
+    }
+    return @($addresses | Select-Object -Unique)
+}
+
+
+function Get-HyperDRCertificateSanIpAddress {
+    <#
+        .SYNOPSIS
+        Return canonical IP-address entries from a certificate SAN.
+
+        .DESCRIPTION
+        X509Extension.Format() localises the labels but leaves address literals
+        unchanged. Extracting and parsing those literals gives callers exact,
+        canonical values instead of the unsafe substring matching previously
+        used against the whole formatted extension.
+    #>
+    param([string]$CertPath)
+    $san = Get-HyperDRCertificateSan -CertPath $CertPath
+    return @(Get-HyperDRSanIpAddressFromText -San $san)
+}
+
+
+function Test-HyperDRAddressCovered {
+    param([string[]]$CertificateAddresses, [string[]]$CurrentAddresses)
+    $covered = @{}
+    foreach ($address in $CertificateAddresses) {
+        $parsed = $null
+        if ([Net.IPAddress]::TryParse($address, [ref]$parsed)) {
+            $covered[$parsed.ToString()] = $true
+        }
+    }
+    foreach ($address in $CurrentAddresses) {
+        $parsed = $null
+        if ([Net.IPAddress]::TryParse($address, [ref]$parsed) -and
+            $covered.ContainsKey($parsed.ToString())) {
+            return $true
+        }
+    }
+    return $false
+}
+
+
+function Test-HyperDRCertificateCoversAddress {
+    param([string]$CertPath, [string[]]$Addresses)
+    $certificateAddresses = @(Get-HyperDRCertificateSanIpAddress -CertPath $CertPath)
+    return Test-HyperDRAddressCovered -CertificateAddresses $certificateAddresses `
+        -CurrentAddresses $Addresses
 }
 
 
@@ -106,11 +175,20 @@ function Protect-HyperDRPrivateKey {
         later re-issue after the router changes the computer's address.
     #>
     param([string]$KeyPath)
-    if (-not (Test-Path -LiteralPath $KeyPath -PathType Leaf)) { return }
+    if (-not (Test-Path -LiteralPath $KeyPath -PathType Leaf)) { return $false }
     try {
-        icacls "$KeyPath" /inheritance:r /grant:r "$($env:USERNAME):(F)" 2>&1 | Out-Null
+        $account = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+        icacls "$KeyPath" /inheritance:r /grant:r "${account}:(F)" 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "无法限制私钥权限（icacls 退出码 $LASTEXITCODE）：$KeyPath"
+            return $false
+        }
+        return $true
     }
-    catch { }
+    catch {
+        Write-Warning ("无法限制私钥权限：" + $_.Exception.Message)
+        return $false
+    }
 }
 
 
@@ -272,6 +350,8 @@ function New-HyperDRServerCertificate {
         return $false
     }
 
-    Protect-HyperDRPrivateKey -KeyPath $HyperDRPrivateKey
+    if (-not (Protect-HyperDRPrivateKey -KeyPath $HyperDRPrivateKey)) {
+        return $false
+    }
     return $true
 }

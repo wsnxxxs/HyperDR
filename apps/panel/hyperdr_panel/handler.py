@@ -11,7 +11,7 @@ import os
 from http import cookies
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
-from urllib.parse import parse_qs, quote, unquote, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 from . import api, job, security
 from .config import STATIC_DIR
@@ -53,10 +53,17 @@ class Handler(BaseHTTPRequestHandler):
             super().log_message(fmt, *args)
 
     # -- authentication ------------------------------------------------- #
-    def _authorized(self) -> bool:
+    def _cookie_token(self) -> str:
         jar = cookies.SimpleCookie(self.headers.get("Cookie", ""))
         value = jar.get(security.COOKIE_NAME)
-        return bool(value) and security.tokens_match(value.value, self.server.access_token)
+        return value.value if value else ""
+
+    def _lockout_response(self, retry_after: float) -> api.Response:
+        return api.Response(
+            status=429,
+            payload={"error": "尝试次数过多，请稍后再试。"},
+            headers={"Retry-After": str(int(retry_after) + 1)},
+        )
 
     def _accept_login(self, parsed) -> bool:
         """Exchange ?token=... for a cookie. True when the request was handled."""
@@ -64,28 +71,40 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path != "/" or not supplied:
             return False
         client_ip = self.client_address[0]
+        if security.tokens_match(supplied, self.server.access_token):
+            self.server.login_throttle.clear(client_ip)
+            self.send_response(303)
+            self.send_header("Location", "/")
+            self.send_header("Set-Cookie", security.cookie_attributes(
+                self.server.access_token, self.server.cookie_secure))
+            for name, value in security.SECURITY_HEADERS.items():
+                self.send_header(name, value)
+            self.end_headers()
+            return True
         retry_after = self.server.login_throttle.retry_after(client_ip)
         if retry_after > 0:
-            self._send(api.Response(status=429, payload={"error": "尝试次数过多，请稍后再试。"},
-                                    headers={"Retry-After": str(int(retry_after) + 1)}))
+            self._send(self._lockout_response(retry_after))
             return True
-        if not security.tokens_match(supplied, self.server.access_token):
-            self.server.login_throttle.record_failure(client_ip)
-            self._send(api.Response(status=403, payload={"error": "访问口令无效。"}))
-            return True
-        self.server.login_throttle.clear(client_ip)
-        self.send_response(303)
-        self.send_header("Location", "/")
-        self.send_header("Set-Cookie", security.cookie_attributes(
-            self.server.access_token, self.server.cookie_secure))
-        for name, value in security.SECURITY_HEADERS.items():
-            self.send_header(name, value)
-        self.end_headers()
+        self.server.login_throttle.record_failure(client_ip)
+        self._send(api.Response(status=403, payload={"error": "访问口令无效。"}))
         return True
 
     def _require_authorized(self) -> bool:
-        if self._authorized():
+        supplied = self._cookie_token()
+        if not supplied:
+            self._send(api.Response(status=401, payload={
+                "error": "需要访问口令。请使用启动窗口显示的完整地址。"}))
+            return False
+
+        client_ip = self.client_address[0]
+        if security.tokens_match(supplied, self.server.access_token):
+            self.server.login_throttle.clear(client_ip)
             return True
+        retry_after = self.server.login_throttle.retry_after(client_ip)
+        if retry_after > 0:
+            self._send(self._lockout_response(retry_after))
+            return False
+        self.server.login_throttle.record_failure(client_ip)
         self._send(api.Response(status=401, payload={
             "error": "需要访问口令。请使用启动窗口显示的完整地址。"}))
         return False
@@ -229,7 +248,7 @@ class Handler(BaseHTTPRequestHandler):
         """Streamed rather than buffered: an upload is up to a few hundred MB."""
         query = parse_qs(urlparse(self.path).query)
         session_id = query.get("id", [""])[0]
-        filename = unquote(query.get("name", [""])[0])
+        filename = query.get("name", [""])[0]
         try:
             with api.upload_is_allowed(session_id):
                 length = int(self.headers.get("Content-Length", "0"))

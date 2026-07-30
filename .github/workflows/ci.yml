@@ -83,6 +83,10 @@ jobs:
       - name: Test
         run: python -m pytest tests/python -q
 
+      - name: Test the shared HTTPS helpers
+        shell: pwsh
+        run: ./tests/powershell/test_hyperdr_tls.ps1
+
       # The panel derives its settings vocabulary from schema/settings.json, so
       # the file has to parse and cover every key the panel can store.
       - name: Check the panel reads the settings schema

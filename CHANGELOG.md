@@ -5,6 +5,21 @@ semantic versioning; dates use ISO 8601.
 
 ## Unreleased
 
+## 0.3.2 - 2026-07-31
+
+- Fixed managed HTTPS certificate checks to compare complete SAN IP addresses,
+  so a previous address such as `192.168.1.100` cannot be mistaken for the
+  current `192.168.1.10`. Certificate setup now also reports and stops on a
+  failed private-key permission restriction instead of claiming it succeeded.
+- Hardened panel access-token handling: newly generated tokens carry 128 bits
+  of entropy, malformed non-ASCII credentials fail normally, and invalid cookie
+  credentials share the login throttle without counting requests that supplied
+  no credential.
+- Fixed percent-encoded upload names being decoded twice.
+- Made `thumbnail --quality` reject values outside its documented `1..100`
+  range instead of silently clamping them.
+- Aligned package and generated-schema version metadata with 0.3.2.
+
 ## 0.3.1 - 2026-07-30
 
 - Fixed adjustment-region masks so they refresh when the converter's exact

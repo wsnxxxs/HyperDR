@@ -79,8 +79,8 @@ if (-not $addresses) {
 }
 Write-Host "  检测到的局域网地址：$($addresses -join '、')"
 
-$san = Get-HyperDRCertificateSan -CertPath $HyperDRCertificate
-$covered = $san -and ($addresses | Where-Object { $san -match [regex]::Escape($_) })
+$covered = Test-HyperDRCertificateCoversAddress `
+    -CertPath $HyperDRCertificate -Addresses $addresses
 if ($covered -and -not $Force) {
     Write-Host "  现有证书已覆盖当前网络，跳过签发。加 -Force 可强制重新签发。" -ForegroundColor Green
 }

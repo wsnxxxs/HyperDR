@@ -77,7 +77,7 @@ export const CONTROLS = [
     key: "areaCoverage", kind: "range", group: "region", label: "区域覆盖",
     min: 0, max: 1, step: 0.05, default: 1, format: percent,
     scale: ["局部亮点", "均匀亮部"], mask: "coverage",
-    help: "扩展偏向镜面亮点，还是覆盖更大面积的明亮色调。",
+    help: "扩展偏向镜面亮点，还是覆盖更大面积的明亮色调。照片遮罩是亮度范围估算；最终导出还会分析局部对比度与噪声。",
   },
   {
     key: "highlightRecovery", kind: "segmented", group: "advanced", label: "高光恢复",

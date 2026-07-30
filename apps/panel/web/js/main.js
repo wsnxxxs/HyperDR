@@ -29,7 +29,6 @@ const stage = mountStage({ curve, toast });
 mountControls();
 mountMask({ curve, stage });
 mountRunner({ toast });
-curve.subscribe(stage.redraw);
 
 const settings = document.getElementById("settings");
 

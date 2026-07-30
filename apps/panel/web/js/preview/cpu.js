@@ -76,7 +76,7 @@ export function renderSdr(canvas, { source, output, curve, settings, original })
     G = Math.max(0, y + (G - y) * (1 + vibranceAmount));
     B = Math.max(0, y + (B - y) * (1 + vibranceAmount));
     const adjustedY = SRGB_LUMA[0] * R + SRGB_LUMA[1] * G + SRGB_LUMA[2] * B;
-    const gain = Math.pow(2, curve.gainStops(adjustedY, strength));
+    const gain = Math.pow(2, curve.previewGainStops(adjustedY, settings));
     R *= gain;
     G *= gain;
     B *= gain;

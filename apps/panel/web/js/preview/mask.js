@@ -1,14 +1,15 @@
 /* The slider mask: while a control is hovered or focused, the photograph shows
- * which pixels that control is about to move.
+ * the global luminance region that control is expected to move.
  *
  * "扩展起点 25%" is a number; what it means is *these pixels, not those*. The
  * old panel made you learn that mapping by nudging the slider and watching the
  * histogram. The mask teaches it directly on the image, in the HDR amber the
  * tokens reserve for expansion.
  *
- * Masks are computed from the decoded preview the stage already holds, so they
- * cost one pixel walk per settings change while visible -- never during a drag
- * of an unrelated slider, because unrelated sliders clear `maskKey` first.
+ * The exporter also applies local contrast and noise analysis, so this remains
+ * a preview estimate rather than a promise about each output pixel. Masks are
+ * computed from the decoded preview the stage already holds and cache its
+ * linear luminance, keeping visible-slider updates to one lightweight walk.
  */
 
 import { role, readColor, clamp } from "../core/dom.js";
@@ -53,40 +54,78 @@ function weightAt(y, kind, state, curve) {
   }
 }
 
-const MAX_ALPHA = 150;
+const MAX_ALPHA = 120;
 
 export function mountMask({ curve, stage }) {
   const canvas = role("canvas-mask");
+  const context = canvas.getContext("2d");
   let queued = false;
+  let cachedSource = null;
+  let sourceLuma = null;
+  let output = null;
+
+  function syncPresentation(state = store.get()) {
+    const control = CONTROLS_BY_KEY.get(state.maskKey);
+    const visible = Boolean(control?.mask && stage.getSource()
+      && state.viewMode !== "original" && !state.comparing);
+    if (!visible) {
+      canvas.hidden = true;
+      return false;
+    }
+    canvas.style.clipPath = state.viewMode === "split"
+      ? `inset(0 0 0 ${(state.splitRatio * 100).toFixed(2)}%)`
+      : "";
+    return true;
+  }
+
+  /* Decode transfer and luminance once per thumbnail. Slider motion then only
+   * walks a compact float buffer and reuses the same ImageData, avoiding three
+   * table lookups plus a large allocation on every input frame. */
+  function prepareSource(source) {
+    if (source === cachedSource && sourceLuma && output) return;
+    cachedSource = source;
+    if (!source) {
+      sourceLuma = null;
+      output = null;
+      return;
+    }
+    if (canvas.width !== source.width) canvas.width = source.width;
+    if (canvas.height !== source.height) canvas.height = source.height;
+    sourceLuma = new Float32Array(source.width * source.height);
+    const from = source.data;
+    for (let p = 0, pixel = 0; p < from.length; p += 4, pixel++) {
+      sourceLuma[pixel] = SRGB_LUMA[0] * SRGB_TO_LINEAR[from[p]]
+        + SRGB_LUMA[1] * SRGB_TO_LINEAR[from[p + 1]]
+        + SRGB_LUMA[2] * SRGB_TO_LINEAR[from[p + 2]];
+    }
+    output = context.createImageData(source.width, source.height);
+  }
 
   function paint() {
     queued = false;
     const state = store.get();
     const control = CONTROLS_BY_KEY.get(state.maskKey);
     const source = stage.getSource();
-    if (!control?.mask || !source) { canvas.hidden = true; return; }
+    if (!control?.mask || !source) {
+      canvas.hidden = true;
+      return;
+    }
+    if (!syncPresentation(state)) return;
 
-    if (canvas.width !== source.width) canvas.width = source.width;
-    if (canvas.height !== source.height) canvas.height = source.height;
-
+    prepareSource(source);
     curve.refreshTable(state);
     const exposure = Math.pow(2, state.brightness);
     const tint = readColor("--mask-tint");
-    const output = canvas.getContext("2d").createImageData(source.width, source.height);
-    const from = source.data;
     const to = output.data;
-    for (let p = 0; p < from.length; p += 4) {
-      const y = (SRGB_LUMA[0] * SRGB_TO_LINEAR[from[p]]
-               + SRGB_LUMA[1] * SRGB_TO_LINEAR[from[p + 1]]
-               + SRGB_LUMA[2] * SRGB_TO_LINEAR[from[p + 2]]) * exposure;
+    for (let pixel = 0, p = 0; pixel < sourceLuma.length; pixel++, p += 4) {
+      const y = sourceLuma[pixel] * exposure;
       const w = weightAt(y, control.mask, state, curve);
-      if (w <= 0.01) continue;
       to[p] = tint.r;
       to[p + 1] = tint.g;
       to[p + 2] = tint.b;
-      to[p + 3] = Math.round(w * MAX_ALPHA);
+      to[p + 3] = w <= 0.01 ? 0 : Math.round(w * MAX_ALPHA);
     }
-    canvas.getContext("2d").putImageData(output, 0, 0);
+    context.putImageData(output, 0, 0);
     canvas.hidden = false;
   }
 
@@ -98,10 +137,17 @@ export function mountMask({ curve, stage }) {
 
   /* Repaint on mask changes and on any setting that bends the weight field.
    * The canvas is hidden (and stays cheap) whenever no slider is touched. */
-  stage.onSourceChange(schedule);
+  stage.onSourceChange(() => {
+    cachedSource = null;
+    schedule();
+  });
   store.watchAny(
     ["maskKey", "hdrStrength", "hdrRange", "expansionStart", "areaCoverage",
      "brightness", "encoding", "contrast", "file"],
     schedule,
+    { immediate: true });
+  store.watchAny(
+    ["viewMode", "comparing", "splitRatio"],
+    syncPresentation,
     { immediate: true });
 }

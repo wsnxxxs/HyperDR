@@ -81,7 +81,7 @@ function simulateOutput(luma, state, curve) {
     const count = luma[i];
     if (!count) continue;
     const y = SRGB_TO_LINEAR[i] * exposure;
-    const gained = y * Math.pow(2, curve.gainStops(y, state.hdrStrength));
+    const gained = y * Math.pow(2, curve.previewGainStops(y, state));
     out[linearToSrgb8(shoulder(gained))] += count;
   }
   return out;
@@ -225,6 +225,9 @@ export function mountScope({ curve, analysis }) {
     ["histMode", "expansionStart", "hdrStrength", "hdrRange", "areaCoverage",
      "brightness", "encoding", "contrast"],
     scheduleDraw);
+  store.watch("histMode", (mode) => {
+    for (const [id, button] of modeButtons) setPressed(button, id === mode);
+  }, { immediate: true });
   store.watchAny(["zebraHot", "zebraCold"], (state) => {
     setPressed(hotChip, state.zebraHot);
     setPressed(coldChip, state.zebraCold);

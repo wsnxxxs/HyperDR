@@ -237,6 +237,9 @@ int thumbnail_command(int argc, char** argv) {
       max_edge = integer<std::uint32_t>(next_value(i, argc, argv, arg), "preview max edge");
     } else if (arg == "--quality") {
       quality = integer<int>(next_value(i, argc, argv, arg), "preview quality");
+      if (quality < 1 || quality > 100) {
+        throw std::invalid_argument("preview quality must be in [1,100]");
+      }
     } else if (arg == "--highlight-recovery") {
       const std::string name(next_value(i, argc, argv, arg));
       const auto mode = highlight_recovery_from_name(name);

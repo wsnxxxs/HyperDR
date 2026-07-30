@@ -30,7 +30,10 @@ function Import-LegacyCertificate {
         Write-Warning ("旧证书迁移失败：" + $_.Exception.Message)
         return $false
     }
-    Protect-HyperDRPrivateKey -KeyPath $HyperDRPrivateKey
+    if (-not (Protect-HyperDRPrivateKey -KeyPath $HyperDRPrivateKey)) {
+        Write-Warning "旧证书已复制，但私钥权限未能收紧；不会启用迁移后的证书。"
+        return $false
+    }
     Write-Host ""
     Write-Host "已将旧版证书迁移到用户配置目录：" -ForegroundColor Green
     Write-Host "  来源：$HyperDRLegacyRoot"
@@ -120,8 +123,9 @@ function Confirm-Certificate {
     if (-not $addresses) { return }
     $san = Get-HyperDRCertificateSan -CertPath $CertPath
     if (-not $san) { return }
-    $matched = @($addresses | Where-Object { $san -match [regex]::Escape($_) })
-    if ($matched) { return }
+    if (Test-HyperDRCertificateCoversAddress -CertPath $CertPath -Addresses $addresses) {
+        return
+    }
 
     $reason = "当前局域网地址 $($addresses -join '、') 不在证书覆盖范围内。"
     if ($Managed) {
@@ -227,8 +231,14 @@ if ($AccessToken) { $env:HYPERDR_ACCESS_TOKEN = $AccessToken }
 if ($certificateSource) {
     Write-Host "TLS 证书来源：$certificateSource" -ForegroundColor DarkGray
     Confirm-Certificate -CertPath $Certificate -Managed:$certificateIsManaged
-    $env:HYPERDR_TLS_CERT = (Resolve-Path -LiteralPath $Certificate).Path
-    $env:HYPERDR_TLS_KEY = (Resolve-Path -LiteralPath $PrivateKey).Path
+    if ($certificateIsManaged -and
+        -not (Protect-HyperDRPrivateKey -KeyPath $PrivateKey)) {
+        Write-Warning "受管私钥权限不安全，本次不会启用 HTTPS。请运行 Setup-HTTPS.bat 修复。"
+    }
+    else {
+        $env:HYPERDR_TLS_CERT = (Resolve-Path -LiteralPath $Certificate).Path
+        $env:HYPERDR_TLS_KEY = (Resolve-Path -LiteralPath $PrivateKey).Path
+    }
 }
 elseif (-not $NoTls) {
     Show-MissingCertificateHelp

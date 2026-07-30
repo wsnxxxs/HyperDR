@@ -70,12 +70,37 @@ void test_preview_intent_is_explicit_and_order_independent() {
           "preview intent depends on argument order");
 }
 
+void test_thumbnail_rejects_quality_outside_documented_range() {
+  char program[] = "HyperDR";
+  char command[] = "thumbnail";
+  char input[] = "missing-quality-test.jpg";
+  char output[] = "--output";
+  char destination[] = "preview.jpg";
+  char quality[] = "--quality";
+  char low[] = "0";
+  char high[] = "101";
+
+  char* low_argv[] =
+      {program, command, input, output, destination, quality, low};
+  char* high_argv[] =
+      {program, command, input, output, destination, quality, high};
+  const auto low_error =
+      failure([&] { static_cast<void>(hyperdr::run_cli(7, low_argv)); });
+  const auto high_error =
+      failure([&] { static_cast<void>(hyperdr::run_cli(7, high_argv)); });
+  require(low_error.find("[1,100]") != std::string::npos,
+          "thumbnail accepted quality zero");
+  require(high_error.find("[1,100]") != std::string::npos,
+          "thumbnail accepted quality above 100");
+}
+
 }  // namespace
 
 int main() {
   try {
     test_thumbnail_rejects_identical_input_and_output();
     test_preview_intent_is_explicit_and_order_independent();
+    test_thumbnail_rejects_quality_outside_documented_range();
     std::cout << "cli tests passed\n";
     return 0;
   } catch (const std::exception& error) {

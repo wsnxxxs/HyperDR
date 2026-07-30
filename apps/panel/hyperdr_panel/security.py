@@ -34,7 +34,7 @@ COOKIE_NAME = "hyperdr_access"
 
 
 def make_token() -> str:
-    return secrets.token_urlsafe(8)
+    return secrets.token_urlsafe(16)
 
 
 def check_token_format(token: str) -> str:
@@ -47,6 +47,8 @@ def check_token_format(token: str) -> str:
 
 def tokens_match(supplied: str, expected: str) -> bool:
     # Constant time: the comparison is against a secret.
+    if not TOKEN_PATTERN.fullmatch(supplied):
+        return False
     return hmac.compare_digest(supplied, expected)
 
 

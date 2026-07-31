@@ -35,14 +35,27 @@ function defaultsFor(keys) {
 
 function wireMask(trigger, control) {
   if (!trigger || !control.mask) return;
+  trigger.maskMouseHovered = false;
   const show = () => store.set({ maskKey: control.key });
   const hide = () => {
     if (store.get().maskKey === control.key) store.set({ maskKey: null });
   };
-  // Keep the overlay purely explanatory: the question mark teaches the
-  // control's footprint, while the slider remains an unobstructed live preview.
-  trigger.addEventListener("pointerenter", show);
-  trigger.addEventListener("pointerleave", hide);
+  // Mouse users get a transient preview on hover. Touch and keyboard users
+  // keep it visible by opening the explanation with the same button.
+  trigger.addEventListener("pointerenter", (event) => {
+    if (event.pointerType !== "mouse") return;
+    trigger.maskMouseHovered = true;
+    show();
+  });
+  trigger.addEventListener("pointerleave", (event) => {
+    if (event.pointerType !== "mouse") return;
+    trigger.maskMouseHovered = false;
+    if (trigger.getAttribute("aria-expanded") !== "true") hide();
+  });
+  trigger.addEventListener("focus", show);
+  trigger.addEventListener("blur", () => {
+    if (trigger.getAttribute("aria-expanded") !== "true") hide();
+  });
   window.addEventListener("blur", hide);
 }
 
@@ -56,6 +69,7 @@ function helpButton(control, hintNode) {
   }, "?");
   button.addEventListener("click", () => {
     const open = hintNode.hidden;
+    if (store.get().maskKey) store.set({ maskKey: null });
     // Only one explanation at a time: several open at once pushed the sliders
     // off screen on a phone.
     for (const other of document.querySelectorAll(".field-help[aria-expanded='true']")) {
@@ -64,6 +78,9 @@ function helpButton(control, hintNode) {
     }
     hintNode.hidden = !open;
     button.setAttribute("aria-expanded", String(open));
+    const keepMask = open || button.maskMouseHovered === true ||
+      button.matches(":focus-visible");
+    if (control.mask && keepMask) store.set({ maskKey: control.key });
   });
   button.nextHint = hintNode;
   return button;

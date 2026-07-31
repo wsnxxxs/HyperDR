@@ -23,6 +23,7 @@ import { createUploader } from "./session.js";
 const hdrDisplayQuery = window.matchMedia("(dynamic-range: high)");
 const touchQuery = window.matchMedia(
   "(max-width: 640px), (max-width: 1024px) and (hover: none) and (pointer: coarse)");
+const mobileLayout = window.matchMedia("(max-width: 859px)");
 
 /* Preview sizes are quantised: the server's preview cache keys on the edge and
  * holds eight entries, so a continuous "how wide is the stage right now" would
@@ -61,10 +62,18 @@ export function mountStage({ curve, toast }) {
   const hdrCanvas = role("canvas-hdr");
   const originalCanvas = role("canvas-original");
   const viewModeGroup = role("view-mode");
+  const expandButton = role("stage-expand");
   let sdrCanvas = role("canvas-sdr");
 
   /** Decoded image + derived buffers. Replaced wholesale, never patched. */
-  const image = { source: null, output: null, bitmap: null, label: "" };
+  const image = {
+    source: null,
+    output: null,
+    bitmap: null,
+    label: "",
+    previewRequestEdge: 0,
+  };
+  let expanded = false;
   const sourceListeners = new Set();
   const notifySource = () => { for (const listener of [...sourceListeners]) listener(); };
   const analysis = { current: null };
@@ -122,6 +131,15 @@ export function mountStage({ curve, toast }) {
    * so portrait, landscape, and panoramic sources all carry their own border. */
   function fitStageToImage() {
     if (!image.source || !viewport) {
+      stage.style.removeProperty("--stage-aspect");
+      stage.style.removeProperty("width");
+      stage.style.removeProperty("height");
+      return;
+    }
+    stage.style.setProperty(
+      "--stage-aspect",
+      `${image.source.width} / ${image.source.height}`);
+    if (mobileLayout.matches || expanded) {
       stage.style.removeProperty("width");
       stage.style.removeProperty("height");
       return;
@@ -189,7 +207,7 @@ export function mountStage({ curve, toast }) {
   });
 
   new ResizeObserver(() => {
-    fitStageToImage();
+    if (!mobileLayout.matches && !expanded) fitStageToImage();
     positionDivider();
   }).observe(viewport);
 
@@ -326,11 +344,59 @@ export function mountStage({ curve, toast }) {
     return list[list.length - 1];
   }
 
+  let nativeFullscreenActive = false;
+
+  function updateExpandedState(next, { exitNative = true } = {}) {
+    expanded = Boolean(next && image.source && mobileLayout.matches);
+    viewport.classList.toggle("is-expanded", expanded);
+    document.documentElement.classList.toggle("preview-expanded", expanded);
+    expandButton.setAttribute("aria-pressed", String(expanded));
+    expandButton.setAttribute("aria-label", expanded ? "退出全屏查看" : "全屏查看");
+
+    if (!expanded) {
+      if (exitNative && document.fullscreenElement === viewport) {
+        document.exitFullscreen?.().catch(() => {});
+      }
+      return;
+    }
+
+    // CSS expansion is the dependable path on every mobile browser. Native
+    // fullscreen is only an enhancement and must be requested while this click
+    // still owns user activation.
+    if (!document.fullscreenElement && typeof viewport.requestFullscreen === "function") {
+      viewport.requestFullscreen().catch(() => {});
+    }
+
+    // Let the fixed overlay acquire its final dimensions, then ask for a
+    // higher cached preview tier only when the existing decode is too small.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (!expanded) return;
+      const wanted = previewTier();
+      if (wanted && wanted > image.previewRequestEdge) load();
+    }));
+  }
+
+  document.addEventListener("fullscreenchange", () => {
+    if (document.fullscreenElement === viewport) {
+      nativeFullscreenActive = true;
+    } else if (nativeFullscreenActive) {
+      nativeFullscreenActive = false;
+      updateExpandedState(false, { exitNative: false });
+    }
+  });
+
   function clear(message = "选择图片") {
     invalidateImage();
     invalidateRenderer();
+    updateExpandedState(false);
     image.bitmap?.close();
-    Object.assign(image, { source: null, output: null, bitmap: null, label: "" });
+    Object.assign(image, {
+      source: null,
+      output: null,
+      bitmap: null,
+      label: "",
+      previewRequestEdge: 0,
+    });
     notifySource();
     analysis.current = null;
     renderer?.destroy();
@@ -360,9 +426,10 @@ export function mountStage({ curve, toast }) {
 
     try {
       const state = store.get();
+      const requestedEdge = previewTier();
       const preview = await api.preview(sessionId, {
         highlightRecovery: state.highlightRecovery,
-        maxEdge: previewTier(),
+        maxEdge: requestedEdge,
       });
       const { image: decoded, url } = await decodeBlob(preview.blob);
       if (!isCurrentImage(epoch)) { URL.revokeObjectURL(url); return; }
@@ -385,6 +452,7 @@ export function mountStage({ curve, toast }) {
       image.source = context.getImageData(0, 0, width, height);
       image.output = context.createImageData(width, height);
       image.label = state.file?.name || "图片";
+      image.previewRequestEdge = requestedEdge || Math.max(width, height);
       notifySource();
 
       for (const canvas of [sdrCanvas, hdrCanvas, originalCanvas]) {
@@ -429,6 +497,10 @@ export function mountStage({ curve, toast }) {
   };
   const openPicker = () => { if (canReplace()) fileInput.click(); };
   selectButton.addEventListener("click", openPicker);
+  expandButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    updateExpandedState(!expanded);
+  });
   const isStageControl = (target) =>
     target instanceof Element
     && Boolean(target.closest("button, a, input, select, textarea, [role='slider']"));
@@ -510,7 +582,10 @@ export function mountStage({ curve, toast }) {
   stage.addEventListener("contextmenu", (event) => { if (image.source) event.preventDefault(); });
   stage.addEventListener("selectstart", (event) => { if (touchQuery.matches) event.preventDefault(); });
   stage.addEventListener("keydown", (event) => {
-    if (event.target === stage
+    if (event.key === "Escape" && expanded) {
+      event.preventDefault();
+      updateExpandedState(false);
+    } else if (event.target === stage
         && (event.key === " " || event.key === "Enter") && !event.repeat) {
       event.preventDefault();
       openPicker();
@@ -550,6 +625,10 @@ export function mountStage({ curve, toast }) {
   touchQuery.addEventListener?.("change", () => {
     applyPointerHint();
     store.set({ comparing: false });
+  });
+  mobileLayout.addEventListener?.("change", () => {
+    fitStageToImage();
+    positionDivider();
   });
 
   applyPointerHint();

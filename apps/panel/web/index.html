@@ -80,6 +80,15 @@
               <span class="chip-swatch" aria-hidden="true"></span>暗部裁切 <b data-role="clip-cold-value">0.0%</b>
             </button>
           </div>
+          <button class="icon-button stage-expand" type="button"
+                  data-role="stage-expand" aria-label="全屏查看" aria-pressed="false">
+            <svg class="stage-expand-icon--open" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"/>
+            </svg>
+            <svg class="stage-expand-icon--close" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 9h5V4M20 9h-5V4M4 15h5v5M20 15h-5v5"/>
+            </svg>
+          </button>
         </div>
         <div class="stage-empty" data-role="stage-empty">
           <button class="icon-button stage-select" type="button"
@@ -88,9 +97,11 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
           </button>
           <span class="visually-hidden" data-role="stage-title">选择图片</span>
-          <span class="stage-support" id="stage-drop-hint">或将图片拖放到此处</span>
-          <span class="stage-progress" aria-hidden="true"><span class="stage-progress-fill" data-role="upload-bar"></span></span>
-          <span class="stage-progress-text" data-role="upload-progress" aria-live="polite"></span>
+          <span class="stage-empty-meta">
+            <span class="stage-support" id="stage-drop-hint">或将图片拖放到此处</span>
+            <span class="stage-progress" aria-hidden="true"><span class="stage-progress-fill" data-role="upload-bar"></span></span>
+            <span class="stage-progress-text" data-role="upload-progress" aria-live="polite"></span>
+          </span>
         </div>
         <input type="file" data-role="file-input" hidden
                accept="image/*,.arw,.dng,.jpg,.jpeg,.png,.heic,.heif">
@@ -131,7 +142,7 @@
       <div class="group-head">
         <h3>扩展作用区域</h3>
       </div>
-      <p class="group-note">将鼠标放在参数旁的“?”上可查看预计作用区域；拖动滑杆时只显示实时效果。</p>
+      <p class="group-note">点击或将指针停在参数旁的“?”上可查看预计作用区域；拖动滑杆时只显示实时效果。</p>
       <div data-role="group-region"></div>
     </section>
 

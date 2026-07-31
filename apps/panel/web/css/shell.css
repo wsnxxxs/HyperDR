@@ -162,10 +162,10 @@
     grid-template-areas:
       "header"
       "stage"
-      "run"
-      "settings";
+      "settings"
+      "run";
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(200px, 40dvh) auto auto;
+    grid-template-rows: auto auto auto auto;
     height: auto;
     min-height: 100dvh;
   }
@@ -177,22 +177,53 @@
     padding-inline: 8px 14px;
   }
   .app__header .service-state {
+    min-width: 0;
     max-width: 154px;
-    overflow: hidden;
     white-space: nowrap;
+  }
+  .app__header [data-role="service-text"] {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .app__settings {
     display: block;
+    margin-top: calc(-1 * var(--space-1));
     overflow-y: visible;
     padding: 2px var(--space-1);
   }
   .app__run {
     margin-top: 0;
   }
-  .stage-viewport {
-    place-items: center;
-    container-type: size;
+  .app__stage {
+    grid-template-rows: minmax(0, 1fr);
+    gap: 0;
   }
+  .app__stage:has(.stage.has-image) {
+    margin-inline: calc(-1 * var(--page-pad));
+    border-inline: 0;
+    border-radius: 0;
+  }
+  .stage-heading {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .stage-viewport {
+    --stage-gutter: 0;
+    place-items: center;
+    container-type: inline-size;
+  }
+}
+
+@media (width < 360px) {
+  .app__header .wordmark-text { display: none; }
+  .app__title { padding-inline: 8px; }
 }
 
 /* The boot banner used to live here. Service state is reported once, by the

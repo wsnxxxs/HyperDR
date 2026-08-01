@@ -384,10 +384,9 @@ automatically and the phone needs no changes. See `docs/iphone-lan.md`.
 ## Contributing and security
 
 Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
-For security reports, follow [SECURITY.md](SECURITY.md) rather than opening a
-public issue. The release-preparation checklist is available in
-[docs/open-source-readiness.md](docs/open-source-readiness.md), and user-visible
-changes are recorded in [CHANGELOG.md](CHANGELOG.md).
+[SECURITY.md](SECURITY.md) records the panel's threat model and how certificates
+and private keys are handled. User-visible changes are recorded in
+[CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

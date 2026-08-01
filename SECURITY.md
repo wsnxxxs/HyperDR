@@ -1,23 +1,19 @@
-# Security policy
+# Security notes
 
 ## Supported versions
 
 Security fixes are applied to the latest version on the default branch.
 
-## Reporting a vulnerability
+## Threat model
 
-Please do not open a public issue for a suspected vulnerability. This source
-snapshot does not yet publish a private reporting address, so it must not be
-presented as having an active security intake channel. Before making the
-repository public, the owner must enable GitHub private vulnerability reporting
-and replace this paragraph with the repository's exact private-reporting link.
+HyperDR converts local files. The one component with an attack surface is the
+browser panel, which accepts uploads over the LAN and can optionally serve them
+over TLS. Treat it as a local, trusted-network tool: do not expose it directly
+to the public internet, and do not port-forward its port on a router.
 
-Include the affected version, platform, reproduction steps, and potential impact
-in a private report. The project targets an acknowledgement within seven days
-once that channel is active.
-
-The LAN panel accepts files and can optionally use TLS. Treat it as a local,
-trusted-network tool: do not expose it directly to the public internet.
+The panel refuses client-supplied Windows paths, output directories, and
+executable paths; uploads and outputs are confined to a randomly named job
+directory. See `docs/iphone-lan.md` for the full boundary.
 
 ## Certificates
 
@@ -33,6 +29,7 @@ Documents, which may be redirected into a cloud-synced folder. The server
 private key is restricted to the current Windows user. The authority's own key
 stays where `mkcert` puts it and is never read or copied by HyperDR.
 
-Report any release archive found to contain a `.pem`, `.key`, `.pfx`, `.crt`, or
-`.cer` file through the private channel above; the packaging test treats that as
-a release blocker.
+A release archive containing a `.pem`, `.key`, `.pfx`, `.p12`, `.crt`, or `.cer`
+file is a defect, not a convenience. `packaging/package-release.ps1` unpacks
+every archive it builds and fails the run if it finds one, so key material
+cannot reach a published package by accident.

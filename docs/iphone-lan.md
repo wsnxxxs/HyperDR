@@ -110,7 +110,7 @@ mkcert -cert-file "$env:LOCALAPPDATA\HyperDR\tls\hyperdr.pem" `
 
 根 CA 的私钥（`mkcert -CAROOT` 目录中的 `rootCA-key.pem`）是整套配置里**唯一不可再生**的文件。丢失后必须重新生成 CA，并在每一台 iPhone 上重装根证书。建议离线备份，且不要放进会被云端同步的目录——这也是证书不再存放于“文档”的原因之一，那里可能被 OneDrive 重定向。
 
-服务器私钥 `hyperdr-key.pem` 的权限被收紧为仅当前 Windows 用户可访问。私钥不要复制到 iPhone，也不要提交到版本库；仓库的 `.gitignore` 已排除 `*.pem`、`*.key`、`*.pfx`、`*.crt`、`*.cer`。
+服务器私钥 `hyperdr-key.pem` 的权限被收紧为仅当前 Windows 用户可访问。私钥不要复制到 iPhone，也不要提交到版本库；仓库的 `.gitignore` 已排除 `*.pem`、`*.key`、`*.pfx`、`*.p12`、`*.crt`、`*.cer`。
 
 Safari 应使用启动窗口打印的 `https://局域网地址:端口/?token=...`，证书中的 IP 必须与访问地址一致。
 

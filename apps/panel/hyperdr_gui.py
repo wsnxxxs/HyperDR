@@ -26,7 +26,7 @@ The implementation lives in the ``hyperdr_panel`` package next to this file:
     security    - tokens, login throttling, response headers
     handler     - HTTP request handling and routing
     server      - ports, TLS, addresses, startup
-The front-end is a single source of truth in ``static/``.
+The front-end is a single source of truth in ``web/``.
 """
 from __future__ import annotations
 

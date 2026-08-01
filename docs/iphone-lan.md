@@ -16,7 +16,7 @@ HyperDR 现在可以由 Windows 电脑在局域网内提供服务。iPhone 负�
 4. 启动窗口会打印一个带临时访问口令的 `iPhone 地址`，例如：
 
    ```text
-   http://192.168.31.87:8756/?token=xxxxxxxx
+   http://<LAN_IP>:8756/?token=xxxxxxxx
    ```
 
 5. 在 iPhone Safari 中打开完整地址。首次成功登录后，地址栏中的口令会自动移除。
@@ -58,14 +58,14 @@ Safari 的 WebGPU 只在安全上下文中开放，所以真 HDR 需要一张**�
 %LOCALAPPDATA%\HyperDR\tls\hyperdr-key.pem
 ```
 
-先确认电脑当前的局域网 IPv4 地址（下面以 `192.168.31.87` 为例），然后生成证书：
+先确认电脑当前的局域网 IPv4 地址（下面记作 `<LAN_IP>`），然后生成证书：
 
 ```powershell
 mkcert -install
 mkdir "$env:LOCALAPPDATA\HyperDR\tls" -Force
 mkcert -cert-file "$env:LOCALAPPDATA\HyperDR\tls\hyperdr.pem" `
        -key-file  "$env:LOCALAPPDATA\HyperDR\tls\hyperdr-key.pem" `
-       192.168.31.87 127.0.0.1 localhost
+       <LAN_IP> 127.0.0.1 localhost
 mkcert -CAROOT
 ```
 

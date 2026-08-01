@@ -43,24 +43,11 @@ apps/panel/
     security.py         口令、登录限流、响应头策略
     handler.py          HTTP 请求处理与路由
     server.py           端口、TLS、地址、启动
-  static/               前端唯一来源（原生 ES modules，无构建步骤）
-    index.html          结构；只用 data-role 标记挂载点，无内联事件
-    styles.css          令牌 → 原语 → 组件 → 布局 → 响应式
-    js/
-      main.js           组合根：唯一知道整个面板形状的地方
-      core/store.js     可观察状态，取代原来的全局可变对象
-      core/api.js       全部 HTTP 端点，统一错误处理
-      core/dom.js       DOM 小工具
-      settings/schema.js    控件声明（唯一定义处）
-      settings/controls.js  由声明生成控件并与 store 双向同步
-      preview/curve.js      向转换器索取色调曲线，构建 LUT
-      preview/gpu.js        WebGPU 真 HDR 渲染（线性 P3 / rgba16float）
-      preview/cpu.js        SDR 回退渲染
-      preview/scope.js      直方图、裁切统计、斑马纹
-      preview/session.js    上传（换图即替换）
-      preview/stage.js      预览台：取图、手势、渲染器选择与循环
-      run/runner.js     启动、轮询、取消、导出
-      ui/theme.js  ui/toast.js
+  web/                  前端唯一来源（原生 ES modules，无构建步骤）
+    index.html          外壳；只用 data-role 标记挂载点，无内联事件
+    css/                tokens / base / shell / components
+    js/                 main.js 组合根，以及 core、settings、preview、run、ui
+                        逐文件的说明见 web/README.md
 ```
 
 前端的每个模块都是一个 `mount*` 函数，接收 store 和它需要的协作者，

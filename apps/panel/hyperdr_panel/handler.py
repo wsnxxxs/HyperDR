@@ -14,7 +14,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
 
 from . import api, job, security
-from .config import STATIC_DIR
+from .config import WEB_ROOT
 from .session import save_upload
 
 _CONTENT_TYPES = {
@@ -175,7 +175,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _serve_static(self, route: str) -> bool:
         relative = "index.html" if route in ("/", "/index.html") else route.lstrip("/")
-        return self._serve_from(STATIC_DIR, relative)
+        return self._serve_from(WEB_ROOT, relative)
 
     def _read_json(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))

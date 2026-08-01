@@ -18,6 +18,6 @@ LAUNCHER = GUI_DIR / "hyperdr_gui.py"
 # Web root: a single source of truth for the front-end, also openable directly
 # (double-click web/index.html) for an offline look at the interface, which is
 # why its pages reference assets relatively and the CSP forbids `<base>`.
-STATIC_DIR = GUI_DIR / "web"
+WEB_ROOT = GUI_DIR / "web"
 
 PREFERRED_PORT = 8756

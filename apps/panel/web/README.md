@@ -38,7 +38,7 @@ web/
 
 ## 规矩
 
-1. **服务端契约是冻结的。** 见 `docs/panel-api-contract.md`。需要新字段就先在 `main` 上改服务端和契约，再把 `main` 合并回来。
+1. **服务端和前端一起维护。** 需要新增或调整接口时，同时更新 `apps/panel/hyperdr_panel/` 与 `apps/panel/web/js/core/api.js`，并用面板测试验证实际行为。
 2. **颜色只写在 `tokens.css`。** 别处一律引用变量。旧样式表 1251 行里同一个灰写了四十多遍、还有三个略微不同的值，面板因此从来没和自己对齐过。画布像素要用的颜色（直方图、斑马纹、遮罩）以 `@property <color>` 注册后由 JS 用 `getComputedStyle` 读回，值仍然只住在 tokens.css。
 3. **状态只放在 `store.js`。** 视图订阅它，本身不持有状态。
 4. **不用 `<base>` 标签。** 面板的 CSP 设了 `base-uri 'none'`。资源用相对路径引用，这样这棵树也能直接从磁盘打开。

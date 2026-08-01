@@ -1,11 +1,6 @@
-/* Every call to the panel's HTTP API, in one module.
- *
- * The endpoint list is the contract in docs/panel-api-contract.md, which is
- * frozen for the duration of the rewrite: this file is allowed to change how
- * the front-end talks, never what the server answers. If a screen here needs a
- * shape the server does not send, the contract gets amended first, on `main`,
- * with the old panel still passing -- otherwise the rewrite quietly turns into
- * a rewrite of the backend too, and neither half can be released alone.
+/* Every call to the panel's HTTP API, in one module. Keep this module and the
+ * server implementation in apps/panel/hyperdr_panel/ in sync when the API
+ * changes.
  */
 
 export class ApiError extends Error {

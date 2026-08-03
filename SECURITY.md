@@ -4,6 +4,15 @@
 
 Security fixes are applied to the latest version on the default branch.
 
+## Reporting
+
+Report vulnerabilities by email to w1135766898@gmail.com. Reports are
+acknowledged within three business days and kept confidential until a fix for
+the latest version is released. Please include the version or commit you
+tested, the input that triggered the issue, and what you observed.
+
+That address is for vulnerabilities only; use the issue tracker for questions.
+
 ## Threat model
 
 HyperDR converts local files. The one component with an attack surface is the

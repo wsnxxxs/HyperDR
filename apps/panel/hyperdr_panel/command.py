@@ -28,6 +28,8 @@ is not worth one decode to skip.
 """
 from __future__ import annotations
 
+import os
+
 from .schema import validate as validate_settings
 
 
@@ -106,6 +108,31 @@ def build_argv(exe: str, options: dict) -> list[str]:
     """Build the `HyperDR convert` command line for one image."""
     settings = options_to_settings(options)
     encoding = settings["encoding"]
+    external_gain = options.get("external_gain")
+    external_report = options.get("external_gain_report")
+    if external_gain or external_report:
+        if not external_gain or not external_report:
+            raise ValueError("external gain requires both raw grid and JSON report")
+        # An external model grid is the complete rendition. Do not emit
+        # mathematical look controls that are bypassed by the renderer.
+        argv = [
+            exe, "convert", options["input"], "--output", options["output"],
+            "--encoding", encoding,
+            "--gain-strength", fmt_num(settings["gain_strength"]),
+            "--highlight-recovery", settings["highlight_recovery"],
+            "--quality", str(settings["quality"]),
+            "--depth", "8" if encoding in _EIGHT_BIT_ENCODINGS else "10",
+            "--report", options["report"],
+            "--external-gain", str(external_gain),
+            "--external-gain-report", str(external_report),
+        ]
+        legacy_env = {
+            os.environ.get("HYPERDR_ALLOW_LEGACY_EXTERNAL_GAIN", ""),
+            os.environ.get("HYPERDR_MODEL_ALLOW_LEGACY_LABEL_SCHEMA", ""),
+        }
+        if any(value.strip().lower() in {"1", "true", "yes", "on"} for value in legacy_env):
+            argv.append("--allow-legacy-external-gain")
+        return argv
     return [
         exe, "convert", options["input"], "--output", options["output"],
         "--encoding", encoding,

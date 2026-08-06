@@ -11,6 +11,7 @@ import { CONTROLS, ENCODINGS, encodingById } from "./schema.js";
 
 const GROUP_CONTAINERS = {
   tone: "group-tone",
+  model: "group-model",
   region: "group-region",
   advanced: "group-advanced",
   quality: "group-quality",
@@ -205,6 +206,13 @@ function buildNumber(control) {
     if (!Number.isFinite(parsed)) { input.value = String(store.get()[control.key]); return; }
     store.set({ [control.key]: clamp(Math.round(parsed), control.min, control.max) });
   };
+  // Keep the command preview and the run payload in sync while a value is
+  // typed, not only after the field loses focus. Empty/bad intermediate input
+  // is left alone until the browser emits `change`, so editing remains natural.
+  input.addEventListener("input", () => {
+    if (input.value === "" || input.validity.badInput) return;
+    commit();
+  });
   input.addEventListener("change", commit);
   const node = el("label", { class: "field field--inline" },
     el("span", { class: "field-label" }, control.label), input);
@@ -253,7 +261,12 @@ function mountEncoding() {
 
 function mountResets() {
   const wire = (button, keys) =>
-    button.addEventListener("click", () => store.set(defaultsFor(keys)));
+    button.addEventListener("click", () => store.set({
+      ...defaultsFor(keys),
+      // Reset returns to the mathematical defaults, but deliberately keeps the
+      // current image's inferred gain cached for an instant comparison.
+      previewOptimized: false,
+    }));
   /* "重置全部" covers the image controls, not the output format: the encoding
    * is a workflow decision (where will this file be shown?), not part of the
    * look being dialled in. */
@@ -276,4 +289,24 @@ export function mountControls() {
     container.append(widget.node);
     store.watchAny(widget.watches, widget.apply, { immediate: true });
   }
+
+  // In pure model mode the .f32 grid is the complete grade. Keep the controls
+  // visible so the switch in behaviour is legible, but make it impossible to
+  // imply that exposure, tone, coverage, contrast or vibrance still contribute.
+  const modelControlled = ["tone", "region", "advanced"]
+    .map((group) => containers.get(group))
+    .filter(Boolean);
+  const modelControls = containers.get("model");
+  store.watch("previewOptimized", (active) => {
+    for (const container of modelControlled) {
+      container.inert = active;
+      container.setAttribute("aria-disabled", String(active));
+      container.classList.toggle("is-model-controlled", active);
+    }
+    if (modelControls) {
+      modelControls.hidden = !active;
+      modelControls.inert = !active;
+      modelControls.setAttribute("aria-disabled", String(!active));
+    }
+  }, { immediate: true });
 }

@@ -42,11 +42,32 @@ void test_invalid_tmap_metadata() {
   require(rejected, "invalid tmap gain range was accepted");
 }
 
+void test_common_denominator_round_trip() {
+  hyperdr::GainMapMetadata metadata;
+  metadata.common_denominator = true;
+  metadata.base_headroom = {0, 1000000};
+  metadata.alternate_headroom = {1807617, 1000000};
+  metadata.gain_min = {-83801, 1000000};
+  metadata.gain_max = {1807617, 1000000};
+  metadata.gamma = {819824, 1000000};
+  metadata.base_offset = {10, 1000000};
+  metadata.alternate_offset = {10, 1000000};
+  const auto payload = hyperdr::serialize_tmap_payload(metadata);
+  require(payload.size() == 38, "common-denominator payload has wrong size");
+  const auto decoded = hyperdr::parse_tmap_payload(payload);
+  require(decoded.common_denominator, "common-denominator flag was lost");
+  require(decoded.gain_min.numerator == metadata.gain_min.numerator &&
+              decoded.gain_max.numerator == metadata.gain_max.numerator &&
+              decoded.gamma.numerator == metadata.gamma.numerator,
+          "common-denominator numerators changed");
+}
+
 }  // namespace
 
 int main() {
   try {
     test_invalid_tmap_metadata();
+    test_common_denominator_round_trip();
     std::cout << "ISO gain-map metadata tests passed\n";
     return 0;
   } catch (const std::exception& e) {

@@ -71,6 +71,7 @@ still runs almost the whole test suite.
 | HEIF structure, Exif, or gain-map metadata | `modules/container/` |
 | JSON, file IO, or the thread pool | `modules/foundation/` |
 | Browser panel behaviour | `apps/panel/hyperdr_panel/` |
+| HyperDR_Model inference orchestration | `apps/panel/hyperdr_panel/model.py` and `docs/model-integration.md` |
 | Panel visual design | `apps/panel/web/` |
 | Build options, warnings, or test registration | `cmake/` |
 | Windows and LAN setup | `scripts/` and `docs/iphone-lan.md` |

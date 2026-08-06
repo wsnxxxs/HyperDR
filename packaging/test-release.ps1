@@ -49,6 +49,17 @@ try {
         }
     }
 
+    # The model itself ships, while PyTorch deliberately comes from the user's
+    # existing Windows Python environment.
+    foreach ($required in @(
+            "HyperDR_Model\infer_gain.py",
+            "HyperDR_Model\checkpoints\best.pt",
+            "HyperDR_Model\dataset\assets\display-p3.icc")) {
+        if (-not (Test-Path -LiteralPath (Join-Path $root $required) -PathType Leaf)) {
+            throw "Release archive is missing a model inference file: $required"
+        }
+    }
+
     # A deterministic 32x32 RGB gradient. Keeping the fixture in the script
     # makes the smoke test independent of private photographs or repository
     # test data.

@@ -40,6 +40,12 @@ struct ConvertOptions {
   RawDecodeOptions raw;
   GainMapOptions gain;
   std::filesystem::path report_path;
+  // Optional raw gain-grid output from an external model. The JSON sidecar is
+  // required because the raw file carries neither dimensions nor scale.
+  std::filesystem::path external_gain_path;
+  std::filesystem::path external_gain_report;
+  // Explicitly re-enable the frozen v1 normalized sidecar contract.
+  bool allow_legacy_external_gain{false};
   // Optional directory for cached decoded buffers. Interactive preview reruns
   // change only post-decode look controls, so caching the decode turns each
   // slider move from a full RAW read into a file copy.

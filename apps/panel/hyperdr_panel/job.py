@@ -144,8 +144,64 @@ def _pump(job: dict, argv: list[str], cwd: str) -> None:
             job["finished_at"] = time.time()
 
 
-def start(argv: list[str], cwd: str, report_path: str, session_id: str) -> str:
-    """Launch a conversion. Raises `Busy` if one is already running."""
+def _pump_pipeline(job: dict, argv: list[str], cwd: str,
+                   pre_commands: list[list[str]]) -> None:
+    """Run model preparation commands before the final HyperDR command."""
+    proc: subprocess.Popen | None = None
+    report = None
+    commands = list(pre_commands) + [argv]
+    try:
+        for index, command in enumerate(commands):
+            with _LOCK:
+                if job.get("cancelled"):
+                    _append_locked(job, "job cancelled before pipeline step\n")
+                    return
+            proc = subprocess.Popen(
+                command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace", bufsize=1,
+            )
+            with _LOCK:
+                job["proc"] = proc
+            finished = threading.Event()
+            threading.Thread(target=_watch_timeout, args=(job, proc, finished),
+                             name="hyperdr-timeout", daemon=True).start()
+            for line in proc.stdout:
+                with _LOCK:
+                    _append_locked(job, line)
+            proc.wait()
+            finished.set()
+            if proc.returncode != 0 or job.get("cancelled"):
+                if proc.returncode != 0 and index < len(commands) - 1:
+                    with _LOCK:
+                        _append_locked(job, "model pipeline step failed; conversion was not started\n")
+                break
+
+        path = job.get("report_path")
+        if proc is not None and proc.returncode == 0 and path and os.path.isfile(path):
+            try:
+                if os.path.getsize(path) > MAX_REPORT_BYTES:
+                    raise ValueError("report exceeds %d bytes" % MAX_REPORT_BYTES)
+                with open(path, "r", encoding="utf-8") as handle:
+                    report = json.load(handle)
+            except Exception as exc:  # noqa: BLE001 - reported, not fatal
+                with _LOCK:
+                    _append_locked(job, "(report read failed: %s)\n" % exc)
+    except Exception as exc:  # noqa: BLE001 - the boundary is the point
+        if proc is not None:
+            _stop(proc)
+        with _LOCK:
+            _append_locked(job, "unable to run HyperDR model pipeline: %s\n" % exc)
+    finally:
+        with _LOCK:
+            job["done"] = True
+            job["rc"] = proc.returncode if proc is not None else -1
+            job["report"] = report
+            job["finished_at"] = time.time()
+
+
+def start(argv: list[str], cwd: str, report_path: str, session_id: str,
+          pre_commands: list[list[str]] | None = None) -> str:
+    """Launch a conversion, optionally after model preprocessing commands."""
     global _JOB
     with _LOCK:
         if not _ACCEPTING:
@@ -162,7 +218,9 @@ def start(argv: list[str], cwd: str, report_path: str, session_id: str) -> str:
         }
         _JOB = job
     try:
-        threading.Thread(target=_pump, args=(job, argv, cwd), daemon=True).start()
+        target = _pump_pipeline if pre_commands else _pump
+        args = (job, argv, cwd, pre_commands) if pre_commands else (job, argv, cwd)
+        threading.Thread(target=target, args=args, daemon=True).start()
     except Exception:
         with _LOCK:
             if _JOB is job:

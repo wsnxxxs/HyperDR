@@ -63,6 +63,8 @@ export function mountStage({ curve, toast }) {
   const originalCanvas = role("canvas-original");
   const viewModeGroup = role("view-mode");
   const expandButton = role("stage-expand");
+  const mathModeButton = role("math-mode");
+  const optimizeButton = role("optimize");
   let sdrCanvas = role("canvas-sdr");
 
   /** Decoded image + derived buffers. Replaced wholesale, never patched. */
@@ -76,10 +78,11 @@ export function mountStage({ curve, toast }) {
   let expanded = false;
   const sourceListeners = new Set();
   const notifySource = () => { for (const listener of [...sourceListeners]) listener(); };
-  const analysis = { current: null };
+  const analysis = { current: null, modelGain: null };
   const refreshScope = mountScope({ curve, analysis });
 
   let renderer = null;        // WebGPU/WebGL renderer, or null for the CPU path
+  let modelGain = null;
   let frame_ = 0;
   let imageGeneration = 0;
   let rendererGeneration = 0;
@@ -240,11 +243,14 @@ export function mountStage({ curve, toast }) {
         original, expansionStart: state.expansionStart,
         areaCoverage: state.areaCoverage, exposureBias: state.brightness,
         vibrance: state.vibrance,
+        modelGain: state.previewOptimized ? modelGain : null,
+        modelStrength: state.modelStrength,
       });
     } else {
       renderSdr(sdrCanvas, {
         source: image.source, output: image.output, curve,
         settings: state, original,
+        modelGain: state.previewOptimized ? modelGain : null,
       });
     }
   }
@@ -274,6 +280,7 @@ export function mountStage({ curve, toast }) {
       });
       renderer = created;
       renderer.upload(image.bitmap);
+      if (modelGain) renderer.uploadGainMap(modelGain);
       showCanvas("sdr");
       setCapability(`${reason} · GPU SDR 示意`, false);
     } catch (error) {
@@ -315,6 +322,7 @@ export function mountStage({ curve, toast }) {
         if (!isCurrentRenderer(epoch) || !image.bitmap) { created.destroy(); return; }
         renderer = created;
         renderer.upload(image.bitmap);
+        if (modelGain) renderer.uploadGainMap(modelGain);
         showCanvas("hdr");
         const gamut = renderer.outputColorSpace === "display-p3" ? "Display P3" : "扩展 sRGB";
         setCapability(`真 HDR · ${gamut} · 16-bit 浮点`, true);
@@ -401,7 +409,12 @@ export function mountStage({ curve, toast }) {
     analysis.current = null;
     renderer?.destroy();
     renderer = null;
-    store.set({ comparing: false, maskKey: null });
+    modelGain = null;
+    analysis.modelGain = null;
+    store.set({
+      comparing: false, maskKey: null,
+      previewOptimized: false, modelGainReady: false, optimizing: false,
+    });
     stage.classList.remove("has-image", "is-comparing");
     fitStageToImage();
     stage.removeAttribute("role");
@@ -482,7 +495,14 @@ export function mountStage({ curve, toast }) {
       setText(progressText, fraction > 0 && fraction < 1
         ? `上传中 · ${Math.round(fraction * 100)}%` : "");
     },
-    onReady: load,
+    onReady: async () => {
+      modelGain = null;
+      analysis.modelGain = null;
+      store.set({
+        previewOptimized: false, modelGainReady: false, optimizing: false,
+      });
+      await load();
+    },
     onError: (message, { preserveCurrent } = {}) => {
       if (!preserveCurrent) clear(message);
       toast(message, true);
@@ -493,7 +513,7 @@ export function mountStage({ curve, toast }) {
 
   const canReplace = () => {
     const state = store.get();
-    return !state.uploading && !state.jobId;
+    return !state.uploading && !state.optimizing && !state.jobId;
   };
   const openPicker = () => { if (canReplace()) fileInput.click(); };
   selectButton.addEventListener("click", openPicker);
@@ -601,7 +621,8 @@ export function mountStage({ curve, toast }) {
     selectButton.disabled = state.uploading;
   });
   store.watchAny(
-    ["brightness", "hdrStrength", "hdrRange", "expansionStart", "areaCoverage", "encoding", "contrast", "vibrance"],
+    ["brightness", "hdrStrength", "hdrRange", "expansionStart", "areaCoverage",
+     "encoding", "contrast", "vibrance", "previewOptimized", "modelStrength"],
     (state) => { curve.validateOnce(state); schedule(); },
     { immediate: true });
 
@@ -612,8 +633,65 @@ export function mountStage({ curve, toast }) {
   store.watch("highlightRecovery", (mode) => {
     if (mode === decodedWith) return;
     decodedWith = mode;
+    modelGain = null;
+    analysis.modelGain = null;
+    store.set({ previewOptimized: false, modelGainReady: false });
     if (store.get().sessionId) load();
   });
+
+  async function optimize() {
+    const state = store.get();
+    if (state.previewOptimized || state.optimizing) return;
+    if (modelGain) {
+      store.set({ previewOptimized: true, modelGainReady: true });
+      return;
+    }
+    if (!state.sessionId || !state.capabilities?.model?.ready) return;
+    store.set({ optimizing: true });
+    try {
+      const gain = await api.modelPreview(state.sessionId, state.highlightRecovery);
+      if (store.get().sessionId !== state.sessionId || store.get().file !== state.file
+          || store.get().highlightRecovery !== state.highlightRecovery) return;
+      modelGain = gain;
+      analysis.modelGain = gain;
+      renderer?.uploadGainMap(gain);
+      store.set({ previewOptimized: true, modelGainReady: true });
+      schedule();
+      toast("模型优化已应用");
+    } catch (error) {
+      modelGain = null;
+      analysis.modelGain = null;
+      store.set({ previewOptimized: false, modelGainReady: false });
+      toast(error.message || "模型优化失败。", true);
+    } finally {
+      store.set({ optimizing: false });
+    }
+  }
+
+  mathModeButton.addEventListener("click", () => {
+    if (!store.get().optimizing) store.set({ previewOptimized: false });
+  });
+  optimizeButton.addEventListener("click", optimize);
+  store.watchAny(
+    ["file", "capabilities", "optimizing", "previewOptimized", "modelGainReady", "jobId"],
+    (state) => {
+      const ready = Boolean(state.capabilities?.model?.ready);
+      const locked = state.optimizing || Boolean(state.jobId);
+      mathModeButton.disabled = !state.file || locked;
+      optimizeButton.disabled =
+        !state.file || locked || (!ready && !state.modelGainReady);
+      mathModeButton.setAttribute("aria-pressed", String(!state.previewOptimized));
+      optimizeButton.setAttribute("aria-pressed", String(state.previewOptimized));
+      setText(optimizeButton, state.optimizing ? "优化中…" : "优化");
+      optimizeButton.title = state.previewOptimized
+        ? "当前正在显示模型优化效果"
+        : state.modelGainReady
+        ? "切换到已缓存的模型优化效果"
+        : ready ? "使用机器模型生成当前图片的增益图"
+        : (state.capabilities?.model?.reason || "模型尚未就绪");
+    },
+    { immediate: true },
+  );
 
   hdrDisplayQuery.addEventListener?.("change", () => {
     reportInitialCapability();

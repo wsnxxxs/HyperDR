@@ -501,6 +501,29 @@
   margin-bottom: var(--space-2);
 }
 .group-head h3 { font-size: var(--text-sm); letter-spacing: 0; }
+.group [data-role^="group-"].is-model-controlled {
+  opacity: 0.42;
+}
+.model-controls {
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--line);
+}
+.optimize-toggle {
+  flex: 0 0 auto;
+  padding: 2px;
+  border: 1px solid var(--line);
+}
+.optimize-toggle button {
+  min-width: 48px;
+  padding: 3px 10px;
+  font-size: var(--text-xs);
+}
+.optimize-toggle button[data-role="optimize"][aria-pressed="true"] {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.optimize-toggle button:disabled { opacity: 0.45; }
 .group-note {
   margin: 0 0 var(--space-2);
   color: var(--ink-muted);
@@ -655,12 +678,14 @@
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-2) var(--space-3);
+  min-width: 0;
 }
 .dock-side {
   grid-area: side;
   display: flex;
   align-items: center;
   gap: var(--space-4);
+  min-width: 0;
 }
 .dock-hint {
   grid-area: hint;
@@ -668,6 +693,7 @@
   color: var(--ink-muted);
   font-size: var(--text-xs);
   line-height: 1.4;
+  min-width: 0;
 }
 .dock-meta {
   grid-area: meta;
@@ -675,20 +701,21 @@
   align-items: center;
   justify-content: flex-end;
   gap: var(--space-4);
+  min-width: 0;
 }
 .dock-field { display: flex; align-items: center; gap: var(--space-2); }
 .dock-label { color: var(--ink-muted); font-size: var(--text-sm); }
 .dock-actions { display: flex; align-items: center; gap: var(--space-2); }
 
+.dock-command {
+  min-width: 0;
+  max-width: 100%;
+}
 .dock-command summary {
   width: max-content;
   cursor: pointer;
   color: var(--ink-muted);
   font-size: var(--text-xs);
-}
-.dock-command[open] {
-  grid-area: hint;
-  grid-column: 1 / -1;
 }
 .dock-command summary:hover { color: var(--ink); }
 .dock-command code {
@@ -699,7 +726,28 @@
   background: var(--surface-sunken);
   color: var(--ink);
   white-space: pre-wrap;
-  word-break: break-all;
+  overflow-wrap: anywhere;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+/* The command is nested in .dock-meta so it can share the compact second row
+   while closed. Once opened it needs its own full-width row; otherwise the
+   long command becomes the auto column's min-content width and squeezes the
+   format controls down to a vertical strip. */
+.dock:has(.dock-command[open]) {
+  grid-template-areas:
+    "main side"
+    "hint meta"
+    "command command";
+}
+.dock:has(.dock-command[open]) .dock-meta {
+  grid-area: command;
+  justify-content: stretch;
+  width: 100%;
+}
+.dock:has(.dock-command[open]) .dock-command {
+  width: 100%;
 }
 
 /* -- result card ------------------------------------------------------------ */
@@ -815,6 +863,13 @@
     align-items: stretch;
     gap: var(--space-3);
     padding: var(--space-3);
+  }
+  .dock:has(.dock-command[open]) {
+    grid-template-areas:
+      "main"
+      "hint"
+      "side"
+      "command";
   }
   .dock-main {
     display: grid;

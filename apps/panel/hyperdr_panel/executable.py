@@ -14,6 +14,7 @@ from .config import IS_WINDOWS, REPO_ROOT
 # Where a build lands, in the order a developer is most likely to want.
 _SEARCH_SUBDIRECTORIES = (
     "bin",
+    "build-release/Release",
     "build-codecs-win/Release",
     "build-codecs-win/modules/app/Release",
     "build-codecs-win/modules/app",

@@ -11,12 +11,14 @@ const SHADER = /* wgsl */ `
 struct Params {
   strength: f32, headroom: f32, original: f32, expansionStart: f32,
   areaCoverage: f32, exposureBias: f32, lutSize: f32, vibrance: f32,
+  modelEnabled: f32, modelMaxStops: f32, modelStrength: f32, padding0: f32,
 }
 @group(0) @binding(0) var imageSampler: sampler;
 @group(0) @binding(1) var imageTexture: texture_2d<f32>;
 @group(0) @binding(2) var<uniform> params: Params;
 // The exporter's tone curve, uploaded verbatim by the host each frame.
 @group(0) @binding(3) var<storage, read> gainLut: array<f32>;
+@group(0) @binding(4) var modelGainTexture: texture_2d<f32>;
 
 struct VertexOutput { @builtin(position) position: vec4f, @location(0) uv: vec2f, }
 
@@ -45,6 +47,26 @@ fn hdrGainStops(y: f32, strength: f32) -> f32 {
   return mix(gainLut[low], gainLut[high], x - f32(low)) * strength;
 }
 
+fn modelGainStops(uv: vec2f) -> f32 {
+  let dimensions = textureDimensions(modelGainTexture);
+  let size = vec2f(dimensions);
+  let position = clamp(uv * size - vec2f(0.5), vec2f(0.0), size - vec2f(1.0));
+  let low = vec2u(floor(position));
+  let high = min(low + vec2u(1u), dimensions - vec2u(1u));
+  let lowI = vec2i(i32(low.x), i32(low.y));
+  let highI = vec2i(i32(high.x), i32(high.y));
+  let fraction = position - vec2f(low);
+  let top = mix(
+    textureLoad(modelGainTexture, lowI, 0).r,
+    textureLoad(modelGainTexture, vec2i(highI.x, lowI.y), 0).r,
+    fraction.x);
+  let bottom = mix(
+    textureLoad(modelGainTexture, vec2i(lowI.x, highI.y), 0).r,
+    textureLoad(modelGainTexture, highI, 0).r,
+    fraction.x);
+  return mix(top, bottom, fraction.y) * params.modelMaxStops * params.modelStrength;
+}
+
 @fragment fn fragmentMain(input: VertexOutput) -> @location(0) vec4f {
   let srgbLinear = textureSample(imageTexture, imageSampler, input.uv).rgb;
   let srgbToP3 = mat3x3f(
@@ -54,6 +76,10 @@ fn hdrGainStops(y: f32, strength: f32) -> f32 {
   var p3 = max(srgbToP3 * srgbLinear, vec3f(0.0));
   let luma = vec3f(0.2289746, 0.6917385, 0.0792869);
   if (params.original > 0.5) { return vec4f(encodeExtendedSrgb(p3), 1.0); }
+  if (params.modelEnabled > 0.5) {
+    let modelExpanded = p3 * exp2(modelGainStops(input.uv));
+    return vec4f(encodeExtendedSrgb(modelExpanded), 1.0);
+  }
   p3 *= exp2(params.exposureBias);
   var y = dot(p3, luma);
   let sourceSaturation = max(max(abs(p3.r - y), abs(p3.g - y)), abs(p3.b - y)) / max(y, 0.000001);
@@ -92,8 +118,22 @@ export async function createHdrRenderer(canvas, onDeviceLost) {
   catch (_) { delete configuration.colorSpace; context.configure(configuration); }
 
   const module = device.createShaderModule({ code: SHADER });
+  const bindGroupLayout = device.createBindGroupLayout({
+    entries: [
+      { binding: 0, visibility: GPUShaderStage.FRAGMENT,
+        sampler: { type: "filtering" } },
+      { binding: 1, visibility: GPUShaderStage.FRAGMENT,
+        texture: { sampleType: "float" } },
+      { binding: 2, visibility: GPUShaderStage.FRAGMENT,
+        buffer: { type: "uniform" } },
+      { binding: 3, visibility: GPUShaderStage.FRAGMENT,
+        buffer: { type: "read-only-storage" } },
+      { binding: 4, visibility: GPUShaderStage.FRAGMENT,
+        texture: { sampleType: "unfilterable-float" } },
+    ],
+  });
   const pipeline = await device.createRenderPipelineAsync({
-    layout: "auto",
+    layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
     vertex: { module, entryPoint: "vertexMain" },
     fragment: { module, entryPoint: "fragmentMain", targets: [{ format: "rgba16float" }] },
     primitive: { topology: "triangle-list" },
@@ -101,11 +141,19 @@ export async function createHdrRenderer(canvas, onDeviceLost) {
 
   const sampler = device.createSampler({ magFilter: "linear", minFilter: "linear" });
   const uniform = device.createBuffer({
-    size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   const lut = device.createBuffer({
     size: LUT_SIZE * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
 
   let texture = null;
+  let modelTexture = device.createTexture({
+    size: [1, 1], format: "r32float",
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+  });
+  device.queue.writeTexture(
+    { texture: modelTexture }, new Float32Array([0]),
+    { bytesPerRow: 4 }, [1, 1],
+  );
   let bindGroup = null;
   let destroyed = false;
   device.lost.then(() => onDeviceLost?.());
@@ -126,14 +174,52 @@ export async function createHdrRenderer(canvas, onDeviceLost) {
       device.queue.copyExternalImageToTexture(
         { source: bitmap }, { texture }, [bitmap.width, bitmap.height]);
       bindGroup = device.createBindGroup({
-        layout: pipeline.getBindGroupLayout(0),
+        layout: bindGroupLayout,
         entries: [
           { binding: 0, resource: sampler },
           { binding: 1, resource: texture.createView() },
           { binding: 2, resource: { buffer: uniform } },
           { binding: 3, resource: { buffer: lut } },
+          { binding: 4, resource: modelTexture.createView() },
         ],
       });
+    },
+
+    uploadGainMap(gain) {
+      if (destroyed) return;
+      modelTexture.destroy();
+      modelTexture = device.createTexture({
+        size: [gain.width, gain.height], format: "r32float",
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+      });
+      const rowBytes = gain.width * 4;
+      const bytesPerRow = Math.ceil(rowBytes / 256) * 256;
+      let source = gain.values;
+      if (bytesPerRow !== rowBytes) {
+        const padded = new Uint8Array(bytesPerRow * gain.height);
+        const input = new Uint8Array(
+          gain.values.buffer, gain.values.byteOffset, gain.values.byteLength);
+        for (let y = 0; y < gain.height; y++) {
+          padded.set(input.subarray(y * rowBytes, (y + 1) * rowBytes), y * bytesPerRow);
+        }
+        source = padded;
+      }
+      device.queue.writeTexture(
+        { texture: modelTexture }, source,
+        { bytesPerRow, rowsPerImage: gain.height }, [gain.width, gain.height],
+      );
+      if (texture) {
+        bindGroup = device.createBindGroup({
+          layout: bindGroupLayout,
+          entries: [
+            { binding: 0, resource: sampler },
+            { binding: 1, resource: texture.createView() },
+            { binding: 2, resource: { buffer: uniform } },
+            { binding: 3, resource: { buffer: lut } },
+            { binding: 4, resource: modelTexture.createView() },
+          ],
+        });
+      }
     },
 
     draw(table, params) {
@@ -142,6 +228,8 @@ export async function createHdrRenderer(canvas, onDeviceLost) {
       device.queue.writeBuffer(uniform, 0, new Float32Array([
         params.strength, params.headroom, params.original ? 1 : 0, params.expansionStart,
         params.areaCoverage, params.exposureBias, LUT_SIZE, params.vibrance,
+        params.modelGain ? 1 : 0, params.modelGain?.maxStops || 0,
+        params.modelStrength ?? 1, 0,
       ]));
       const encoder = device.createCommandEncoder();
       const pass = encoder.beginRenderPass({
@@ -161,6 +249,7 @@ export async function createHdrRenderer(canvas, onDeviceLost) {
       if (destroyed) return;
       destroyed = true;
       texture?.destroy();
+      modelTexture.destroy();
       uniform.destroy();
       lut.destroy();
       texture = null;

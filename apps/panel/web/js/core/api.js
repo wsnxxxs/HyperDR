@@ -123,6 +123,32 @@ export const api = {
     };
   },
 
+  /** Run the optional model and return its raw little-endian float32 gain grid. */
+  async modelPreview(sessionId, highlightRecovery) {
+    let response;
+    try {
+      response = await fetch("/api/model-preview", {
+        method: "POST",
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ sessionId, highlightRecovery }),
+      });
+    } catch { throw OFFLINE(); }
+    if (!response.ok) {
+      let message = "无法生成模型预览。";
+      try { const body = await response.json(); if (body.error) message = body.error; } catch {}
+      throw new ApiError(message, response.status);
+    }
+    const width = Number(response.headers.get("X-Gain-Width"));
+    const height = Number(response.headers.get("X-Gain-Height"));
+    const maxStops = Number(response.headers.get("X-Gain-Max-Stops"));
+    const values = new Float32Array(await response.arrayBuffer());
+    if (!Number.isInteger(width) || width <= 0 || !Number.isInteger(height) || height <= 0
+        || values.length !== width * height || !Number.isFinite(maxStops)) {
+      throw new ApiError("模型返回了无效的增益图。", 500);
+    }
+    return { values, width, height, maxStops };
+  },
+
   /* -- upload -------------------------------------------------------- */
 
   /** XMLHttpRequest rather than fetch: fetch still cannot report request

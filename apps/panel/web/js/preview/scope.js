@@ -12,7 +12,7 @@
 
 import { role, setPressed, setText, readColor } from "../core/dom.js";
 import { store } from "../core/store.js";
-import { __math } from "./cpu.js";
+import { __math, sampleModelGain } from "./cpu.js";
 
 /* One pass over the source: luma + per-channel counts, clipping, zebra masks.
  * The masks are painted with the token colours read at call time, so a theme
@@ -60,6 +60,7 @@ export function analyse(source) {
   }
 
   return {
+    source,
     histogram: { luma, red, green, blue, total },
     clipping: { hot: hot / total, cold: cold / total },
     zebraHot,
@@ -85,6 +86,40 @@ function simulateOutput(luma, state, curve) {
     out[linearToSrgb8(shoulder(gained))] += count;
   }
   return out;
+}
+
+/* A model gain is spatial, so it cannot be folded through the 256 source bins
+ * like the mathematical curve. Sample the actual pixels and the same bilinear
+ * gain grid as the renderers. A bounded stride keeps slider motion responsive
+ * for 2K previews while preserving the distribution's shape. */
+function simulateModelOutput(source, modelGain, strength) {
+  const { SRGB_TO_LINEAR, linearToSrgb8, shoulder, SRGB_LUMA } = __math;
+  const output = {
+    luma: new Float32Array(256),
+    red: new Float32Array(256),
+    green: new Float32Array(256),
+    blue: new Float32Array(256),
+  };
+  const pixelCount = source.width * source.height;
+  const stride = Math.max(1, Math.ceil(pixelCount / 250_000));
+  for (let pixel = 0; pixel < pixelCount; pixel += stride) {
+    const offset = pixel * 4;
+    const x = pixel % source.width;
+    const y = Math.floor(pixel / source.width);
+    const gain = Math.pow(
+      2,
+      sampleModelGain(modelGain, x, y, source.width, source.height) * strength,
+    );
+    const r = linearToSrgb8(shoulder(SRGB_TO_LINEAR[source.data[offset]] * gain));
+    const g = linearToSrgb8(shoulder(SRGB_TO_LINEAR[source.data[offset + 1]] * gain));
+    const b = linearToSrgb8(shoulder(SRGB_TO_LINEAR[source.data[offset + 2]] * gain));
+    const luma = Math.round(SRGB_LUMA[0] * r + SRGB_LUMA[1] * g + SRGB_LUMA[2] * b);
+    output.red[r]++;
+    output.green[g]++;
+    output.blue[b]++;
+    output.luma[Math.min(255, Math.max(0, luma))]++;
+  }
+  return output;
 }
 
 const PALETTE_KEYS = ["grid", "luma", "red", "green", "blue", "marker", "output"];
@@ -163,27 +198,36 @@ export function mountScope({ curve, analysis }) {
     }
 
     const { histogram } = data;
+    const modelOutput = state.previewOptimized && analysis.modelGain
+      ? simulateModelOutput(data.source, analysis.modelGain, state.modelStrength)
+      : null;
     if (state.histMode === "rgb") {
-      // RGB mode shows the channels' separation, so the simulated line would
-      // only repeat the luma graph on top of them; it stays luma-only.
-      drawSeries(context, histogram.red, palette.red, "lighter", width, height, true);
-      drawSeries(context, histogram.green, palette.green, "lighter", width, height, true);
-      drawSeries(context, histogram.blue, palette.blue, "lighter", width, height, true);
+      // Once model mode is active, RGB describes the current model rendition
+      // rather than continuing to show the unchanged source channels.
+      const channels = modelOutput || histogram;
+      drawSeries(context, channels.red, palette.red, "lighter", width, height, true);
+      drawSeries(context, channels.green, palette.green, "lighter", width, height, true);
+      drawSeries(context, channels.blue, palette.blue, "lighter", width, height, true);
     } else {
       drawSeries(context, histogram.luma, palette.luma, null, width, height, true);
-      drawSeries(context, simulateOutput(histogram.luma, state, curve),
+      const output = modelOutput
+        ? modelOutput.luma
+        : simulateOutput(histogram.luma, state, curve);
+      drawSeries(context, output,
                  palette.output, null, width, height, false);
     }
 
-    // Where the broad highlight lift begins.
-    const marker = (state.expansionStart * width) | 0;
-    context.strokeStyle = palette.marker;
-    context.setLineDash([3, 3]);
-    context.beginPath();
-    context.moveTo(marker + 0.5, 0);
-    context.lineTo(marker + 0.5, height);
-    context.stroke();
-    context.setLineDash([]);
+    if (!state.previewOptimized) {
+      // Where the mathematical broad-highlight lift begins.
+      const marker = (state.expansionStart * width) | 0;
+      context.strokeStyle = palette.marker;
+      context.setLineDash([3, 3]);
+      context.beginPath();
+      context.moveTo(marker + 0.5, 0);
+      context.lineTo(marker + 0.5, height);
+      context.stroke();
+      context.setLineDash([]);
+    }
   }
 
   let drawQueued = false;
@@ -223,7 +267,8 @@ export function mountScope({ curve, analysis }) {
 
   store.watchAny(
     ["histMode", "expansionStart", "hdrStrength", "hdrRange", "areaCoverage",
-     "brightness", "encoding", "contrast"],
+     "brightness", "encoding", "contrast", "previewOptimized", "modelGainReady",
+     "modelStrength"],
     scheduleDraw);
   store.watch("histMode", (mode) => {
     for (const [id, button] of modeButtons) setPressed(button, id === mode);

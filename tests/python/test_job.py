@@ -183,6 +183,20 @@ class JobTests(unittest.TestCase):
         self.assertEqual(job.read(job_id, record["offset"])["text"], "")
         self.assertEqual(job.read(job_id, 4)["text"], "two\n")
 
+    def test_model_pipeline_runs_before_converter(self):
+        processes = [FakeProcess(lines=["model\n"]), FakeProcess(lines=["convert\n"])]
+        with mock.patch.object(
+            job.subprocess, "Popen",
+            side_effect=lambda *args, **kwargs: processes.pop(0),
+        ) as popen:
+            job_id = job.start(["converter"], ".", "", "s",
+                               pre_commands=[["model"]])
+            record = self._wait_done(job_id)
+        self.assertEqual(record["rc"], 0)
+        self.assertIn("model\nconvert\n", record["text"])
+        self.assertEqual([call.args[0] for call in popen.call_args_list],
+                         [["model"], ["converter"]])
+
     def test_the_active_session_is_reported_only_while_running(self):
         release = threading.Event()
         with mock.patch.object(job.subprocess, "Popen",

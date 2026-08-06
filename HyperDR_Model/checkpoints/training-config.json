@@ -1,0 +1,18 @@
+{
+  "dataset_root": "/home/ryan/datasets/hyperdr-apple",
+  "output_dir": "/home/ryan/runs/hyperdr/xmp-fixed3-baseline-fixes-20260804",
+  "label_subset": "xmp",
+  "target_mode": "fixed_3stops",
+  "architecture": "baseline",
+  "epochs": 80,
+  "batch_size": 8,
+  "learning_rate": 0.0003,
+  "weight_decay": 0.0001,
+  "base_channels": 24,
+  "num_workers": 4,
+  "seed": 20260812,
+  "compile_model": false,
+  "highlight_weight": 6.0,
+  "initialize_output_bias": true,
+  "resume": null
+}

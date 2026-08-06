@@ -95,26 +95,48 @@ heif_color_profile_nclx bt2100_nclx(HdrEncoding encoding) {
 void validate_base_profile(const heif_image_handle* handle) {
   heif_color_profile_nclx* nclx = nullptr;
   const auto error = heif_image_handle_get_nclx_color_profile(handle, &nclx);
-  const bool valid = error.code == heif_error_Ok && nclx &&
-                     nclx->color_primaries == heif_color_primaries_SMPTE_EG_432_1 &&
-                     nclx->transfer_characteristics ==
-                         heif_transfer_characteristic_IEC_61966_2_1 &&
-                     nclx->matrix_coefficients == heif_matrix_coefficients_ITU_R_BT_709_5 &&
-                     nclx->full_range_flag == 1 &&
-                     heif_image_handle_get_raw_color_profile_size(handle) > 0;
+  const bool has_icc = heif_image_handle_get_raw_color_profile_size(handle) > 0;
+  const bool has_nclx = nclx != nullptr;
+  const bool valid_nclx = error.code == heif_error_Ok && nclx &&
+                          (nclx->color_primaries == heif_color_primaries_SMPTE_EG_432_1 ||
+                           nclx->color_primaries == heif_color_primaries_ITU_R_BT_709_5 ||
+                           nclx->color_primaries == heif_color_primaries_unspecified) &&
+                          (nclx->transfer_characteristics ==
+                               heif_transfer_characteristic_IEC_61966_2_1 ||
+                           nclx->transfer_characteristics ==
+                               heif_transfer_characteristic_ITU_R_BT_709_5 ||
+                           nclx->transfer_characteristics ==
+                               heif_transfer_characteristic_unspecified) &&
+                          (nclx->matrix_coefficients == heif_matrix_coefficients_ITU_R_BT_709_5 ||
+                           nclx->matrix_coefficients == heif_matrix_coefficients_unspecified) &&
+                          nclx->full_range_flag == 1;
   if (nclx) heif_nclx_color_profile_free(nclx);
-  if (!valid) throw std::runtime_error("SDR base lacks Display P3 ICC/nclx");
+  // Apple files in the wild use either an ICC-only Display-P3 profile or an
+  // nclx-only BT.709/sRGB profile. Both are valid SDR bases for the verified
+  // single-channel forward subset; HyperDR-produced files still carry both.
+  // A nclx-only Apple base may be exposed by libheif as an unavailable
+  // profile (the property is attached through ipma). The HEIF structural
+  // inspection has already validated the item graph, so absence of an ICC is
+  // not grounds to reject that legal source. When an ICC is present, however,
+  // an explicitly present nclx must still be internally consistent.
+  if (has_icc && has_nclx && !valid_nclx) {
+    throw std::runtime_error("SDR base lacks a usable ICC or nclx SDR profile");
+  }
 }
 
 void validate_gain_profile(const heif_image_handle* handle) {
   heif_color_profile_nclx* nclx = nullptr;
   const auto error = heif_image_handle_get_nclx_color_profile(handle, &nclx);
-  const bool valid = error.code == heif_error_Ok && nclx &&
-                     nclx->color_primaries == heif_color_primaries_unspecified &&
-                     nclx->transfer_characteristics ==
-                         heif_transfer_characteristic_unspecified &&
-                     nclx->matrix_coefficients == heif_matrix_coefficients_ITU_R_BT_709_5 &&
-                     nclx->full_range_flag == 1;
+  // Apple's gain-map item is often deliberately unprofiled; the metadata
+  // carries the ISO interpretation and the image is an 8-bit luma plane.
+  // HyperDR-produced files do carry the strict unspecified/BT.709 nclx below,
+  // so an explicitly present profile is still checked rather than ignored.
+  const bool valid = error.code != heif_error_Ok || nclx == nullptr ||
+                     (nclx->color_primaries == heif_color_primaries_unspecified &&
+                      nclx->transfer_characteristics ==
+                          heif_transfer_characteristic_unspecified &&
+                      nclx->matrix_coefficients == heif_matrix_coefficients_ITU_R_BT_709_5 &&
+                      nclx->full_range_flag == 1);
   if (nclx) heif_nclx_color_profile_free(nclx);
   if (!valid) throw std::runtime_error("Gain Map lacks required nclx 2/2/1/full");
 }

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -16,6 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "apps" / "panel"))
 
 from hyperdr_panel import schema  # noqa: E402
+from hyperdr_panel import model  # noqa: E402
 from hyperdr_panel.executable import detect_exe  # noqa: E402
 from hyperdr_panel.command import (  # noqa: E402
     build_argv,
@@ -123,6 +125,54 @@ class BuildArgvTest(unittest.TestCase):
         self.assertEqual(found["--headroom"], "3")
         self.assertEqual(found["--expansion-start"], "0.55")
         self.assertEqual(found["--samples"], "129")
+
+    def test_external_gain_pair_reaches_converter(self):
+        found = flags(build_argv(
+            "HyperDR", dict(BASE, external_gain="out/gain.f32",
+                             external_gain_report="out/gain.json")))
+        self.assertEqual(found["--external-gain"], "out/gain.f32")
+        self.assertEqual(found["--external-gain-report"], "out/gain.json")
+        self.assertEqual(found["--gain-strength"], "0.4")
+        for flag in ("--look", "--contrast", "--vibrance", "--pop",
+                     "--headroom-max", "--exposure-bias", "--expansion-start",
+                     "--area-coverage", "--exposure", "--headroom"):
+            self.assertNotIn(flag, found, flag)
+
+    def test_external_gain_requires_both_files(self):
+        with self.assertRaises(ValueError):
+            build_argv("HyperDR", dict(BASE, external_gain="out/gain.f32"))
+
+
+class ModelIntegrationTest(unittest.TestCase):
+    def test_raster_input_runs_inference_directly(self):
+        config = model.ModelConfig(
+            root=Path("model"), python="python", script=Path("model/infer_gain.py"),
+            checkpoint=Path("model/best.pt"), dataset_root=Path("dataset"),
+            device="cpu", long_side=1024,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            commands, gain, report = model.build_commands(
+                config, Path("photo.jpg"), Path(directory) / ".model", "HyperDR")
+        self.assertEqual(len(commands), 1)
+        self.assertIn("infer_gain.py", commands[0][1])
+        self.assertEqual(commands[0][commands[0].index("--gain-output") + 1], str(gain))
+        self.assertEqual(commands[0][commands[0].index("--report") + 1], str(report))
+
+    def test_raw_input_is_prepared_by_hyperdr_thumbnail(self):
+        config = model.ModelConfig(
+            root=Path("model"), python="python", script=Path("model/infer_gain.py"),
+            checkpoint=Path("model/best.pt"), dataset_root=Path("dataset"),
+            device="cpu", long_side=1024,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            commands, _, _ = model.build_commands(
+                config, Path("photo.arw"), Path(directory) / ".model", "HyperDR",
+                "reconstruct")
+        self.assertEqual(commands[0][0:2], ["HyperDR", "thumbnail"])
+        self.assertIn("--highlight-recovery", commands[0])
+        self.assertEqual(commands[0][commands[0].index("--highlight-recovery") + 1],
+                         "reconstruct")
+        self.assertEqual(commands[1][0], "python")
 
 
 class SettingsContractTest(unittest.TestCase):

@@ -21,6 +21,10 @@ const TRACKING_INTERRUPTED_MS = 15_000;
 const desktopLayout = window.matchMedia("(min-width: 641px)");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const runOptionsFor = (state) => ({
+  ...toOptions(state),
+  useModel: Boolean(state.previewOptimized),
+});
 
 export function mountRunner({ toast }) {
   const runButton = role("run");
@@ -67,7 +71,7 @@ export function mountRunner({ toast }) {
   function syncStale(state) {
     const result = state.result;
     role("result-stale").hidden = !result
-      || JSON.stringify(toOptions(state)) === result.optionsKey;
+      || JSON.stringify(runOptionsFor(state)) === result.optionsKey;
   }
 
   /* ── command line ─────────────────────────────────────────────────── */
@@ -77,7 +81,7 @@ export function mountRunner({ toast }) {
     if (!details.open) return;
     const seq = ++commandSeq;
     try {
-      const body = await api.command(toOptions(store.get()));
+      const body = await api.command(runOptionsFor(store.get()));
       if (seq === commandSeq) setText(commandLine, body.command || "");
     } catch (_) {
       if (seq === commandSeq) setText(commandLine, "当前无法生成命令行。");
@@ -89,7 +93,7 @@ export function mountRunner({ toast }) {
 
   function syncRunAvailability(state) {
     runButton.disabled =
-      starting || state.uploading || Boolean(state.jobId)
+      starting || state.uploading || state.optimizing || Boolean(state.jobId)
       || !state.capabilities?.ready || !state.file;
   }
 
@@ -189,12 +193,13 @@ export function mountRunner({ toast }) {
     if (!state.capabilities?.ready) { toast("转换程序尚未就绪。", true); return; }
     if (!state.file) { toast("请先选择图片。", true); return; }
 
-    const optionsKey = JSON.stringify(toOptions(state));
+    const runOptions = runOptionsFor(state);
+    const optionsKey = JSON.stringify(runOptions);
     let started;
     starting = true;
     syncRunAvailability(store.get());
     try {
-      started = await api.run(state.sessionId, toOptions(state));
+      started = await api.run(state.sessionId, runOptions);
     } catch (error) {
       toast(error.message, true);
       return;
@@ -329,13 +334,13 @@ export function mountRunner({ toast }) {
 
   store.watchAny(["result", "capabilities"], syncResult, { immediate: true });
   store.watchAny(
-    ["uploading", "file", "jobId", "capabilities"],
+    ["uploading", "optimizing", "file", "jobId", "capabilities"],
     syncRunAvailability,
     { immediate: true },
   );
-  store.watchAny([...OPTION_KEYS, "result"], (state, _previous, changed) => {
+  store.watchAny([...OPTION_KEYS, "previewOptimized", "result"], (state, _previous, changed) => {
     syncStale(state);
-    if (changed.some((key) => OPTION_KEYS.includes(key))) {
+    if (changed.some((key) => OPTION_KEYS.includes(key) || key === "previewOptimized")) {
       commandSeq++;
       refreshCommand();
     }

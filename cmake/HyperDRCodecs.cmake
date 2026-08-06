@@ -24,6 +24,9 @@ function(hyperdr_fetch_libultrahdr)
   set(UHDR_BUILD_PACKAGING OFF)
   set(UHDR_ENABLE_INSTALL OFF)
   set(UHDR_ENABLE_GLES OFF)
+  # Keep a finite allocation guard, but allow current high-resolution cameras
+  # whose full-width output exceeds libultrahdr's conservative 8192 default.
+  set(UHDR_MAX_DIMENSION 12800)
   # Android recommends carrying both packets for maximum compatibility.
   set(UHDR_WRITE_XMP ON)
   set(UHDR_WRITE_ISO ON)

@@ -5,6 +5,21 @@ semantic versioning; dates use ISO 8601.
 
 ## Unreleased
 
+## 1.0.0 - 2026-08-06
+
+- Added an explicit mathematical/model preview switch. The first model use
+  performs inference, while later comparisons reuse the cached gain map
+  instantly until the image or its decode changes.
+- Added a model-only optimization-strength control and matched its effect in
+  SDR, HDR and exported output without re-enabling mathematical look controls.
+- Made the output histogram follow the spatial model gain and optimization
+  strength, and removed the mathematical expansion marker in model mode.
+- Smoothed model-preview gain sampling to remove visible grid blocks while
+  keeping the external `.f32` model path independent from the mathematical
+  exposure, tone, contrast and vibrance pipeline.
+- Kept PyTorch outside the Windows package; model inference uses the configured
+  Python installation and its existing CUDA/PyTorch environment.
+
 ## 0.3.2 - 2026-07-31
 
 - Fixed managed HTTPS certificate checks to compare complete SAN IP addresses,

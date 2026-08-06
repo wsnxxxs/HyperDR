@@ -59,6 +59,21 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.payload["argv"][0], "HyperDR")
         self.assertIn("--contrast", response.payload["command"])
 
+    def test_model_command_preview_uses_model_strength_and_external_gain(self):
+        response = api.command_preview(self.context, {"options": {
+            "useModel": True,
+            "modelStrength": 1.0,
+            "hdrStrength": 0.4,
+        }})
+        argv = response.payload["argv"]
+        self.assertEqual(argv[argv.index("--gain-strength") + 1], "1")
+        self.assertIn("--external-gain", argv)
+        self.assertIn("--external-gain-report", argv)
+        for flag in ("--look", "--contrast", "--vibrance", "--pop",
+                     "--headroom-max", "--exposure-bias", "--expansion-start",
+                     "--area-coverage", "--exposure", "--headroom"):
+            self.assertNotIn(flag, argv, flag)
+
     def test_run_reports_a_missing_executable_rather_than_failing_later(self):
         session_id = self._session_with_image()
         with mock.patch.object(api, "detect_exe", return_value=""):
@@ -81,6 +96,69 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.payload["argv"][0], "HyperDR")
         self.assertNotIn("/opt/secret", " ".join(response.payload["argv"]))
         self.assertNotIn("/opt/secret", response.payload["command"])
+
+    def test_run_keeps_the_mathematical_path_until_model_is_requested(self):
+        session_id = self._session_with_image()
+        with mock.patch.object(api, "detect_exe", return_value="HyperDR"), \
+                mock.patch.object(api.model, "load_config") as load_model, \
+                mock.patch.object(job, "start", return_value="job-1"):
+            response = api.run(self.context, {
+                "sessionId": session_id,
+                "options": {"useModel": False},
+            })
+        self.assertEqual(response.status, 200)
+        load_model.assert_not_called()
+
+    def test_run_uses_model_only_after_explicit_optimization(self):
+        session_id = self._session_with_image()
+        output = session.session_dir(session_id, "output")
+        gain = output / ".model" / "model-gain.f32"
+        report = output / ".model" / "model-gain.json"
+        with mock.patch.object(api, "detect_exe", return_value="HyperDR"), \
+                mock.patch.object(api.model, "load_config", return_value=object()), \
+                mock.patch.object(
+                    api.model, "build_commands",
+                    return_value=([["model"]], gain, report),
+                ) as build_model, \
+                mock.patch.object(job, "start", return_value="job-1") as start:
+            response = api.run(self.context, {
+                "sessionId": session_id,
+                "options": {"useModel": True, "modelStrength": 0.65},
+            })
+        self.assertEqual(response.status, 200)
+        build_model.assert_called_once()
+        self.assertEqual(start.call_args.kwargs["pre_commands"], [["model"]])
+        argv = start.call_args.args[0]
+        self.assertEqual(argv[argv.index("--gain-strength") + 1], "0.65")
+
+    def test_model_strength_is_bounded(self):
+        session_id = self._session_with_image()
+        with mock.patch.object(api, "detect_exe", return_value="HyperDR"):
+            response = api.run(self.context, {
+                "sessionId": session_id,
+                "options": {"useModel": True, "modelStrength": 1.5},
+            })
+        self.assertEqual(response.status, 400)
+
+    def test_model_preview_returns_the_float_grid_contract(self):
+        session_id = self._session_with_image()
+        gain = b"\x00\x00\x00\x00" * 6
+        report = {
+            "gain_grid_size": [3, 2],
+            "metadata_gain_max_stops": 3.0,
+        }
+        with mock.patch.object(api, "detect_exe", return_value="HyperDR"), \
+                mock.patch.object(api.model, "load_config", return_value=object()), \
+                mock.patch.object(api.model, "infer_preview", return_value=(gain, report)):
+            response = api.model_preview(self.context, {
+                "sessionId": session_id,
+                "highlightRecovery": "blend",
+            })
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.body, gain)
+        self.assertEqual(response.headers["X-Gain-Width"], "3")
+        self.assertEqual(response.headers["X-Gain-Height"], "2")
+        self.assertEqual(response.headers["X-Gain-Max-Stops"], "3.0")
 
     def test_a_busy_converter_is_reported_as_too_many_requests(self):
         session_id = self._session_with_image()

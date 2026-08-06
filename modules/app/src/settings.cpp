@@ -30,6 +30,26 @@ void validate_convert_options(const ConvertOptions& options) {
     throw std::invalid_argument(
         "HLG headroom cannot exceed 2.3 stops at 203-nit diffuse white");
   }
+  const bool has_external_gain = !options.external_gain_path.empty();
+  const bool has_external_gain_report = !options.external_gain_report.empty();
+  if (has_external_gain != has_external_gain_report) {
+    throw std::invalid_argument(
+        "external gain requires both --external-gain and --external-gain-report");
+  }
+  if (has_external_gain && options.recursive) {
+    throw std::invalid_argument(
+        "external gain is supported for one input at a time, not recursive batches");
+  }
+  if (has_external_gain) {
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(options.external_gain_path, ec) || ec) {
+      throw std::invalid_argument("external gain file does not exist");
+    }
+    ec.clear();
+    if (!std::filesystem::is_regular_file(options.external_gain_report, ec) || ec) {
+      throw std::invalid_argument("external gain report does not exist");
+    }
+  }
   // Ranges for the individual settings are enforced by the schema on the way in;
   // this catches the internal look parameters and the renderer's own invariants.
   validate_gain_map_options(options.gain);

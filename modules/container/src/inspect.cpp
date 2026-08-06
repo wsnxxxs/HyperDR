@@ -138,7 +138,8 @@ HeifInspection inspect_heif(const Bytes& bytes) {
       result.has_altr_group =
           has_valid_tmap_altr(bytes, references.tmap_id, result.primary_item_id);
       if (!result.has_altr_group) throw std::runtime_error("missing tmap altr group");
-      (void)parse_tmap_payload(extract_tmap_payload(bytes));
+      result.tmap_metadata = parse_tmap_payload(extract_tmap_payload(bytes));
+      result.has_tmap_metadata = true;
     }
     result.structurally_valid = true;
   } catch (const std::exception& e) { result.errors.push_back(e.what()); }
@@ -156,8 +157,33 @@ std::string inspection_json(const HeifInspection& inspection) {
       .member("altr", inspection.has_altr_group)
       .member("exif", inspection.has_exif)
       .member("xmp", inspection.has_xmp)
+      .member("tmap_metadata_present", inspection.has_tmap_metadata)
       .member("primary_item", inspection.primary_item_id)
-      .begin_array("errors");
+      ;
+  if (inspection.has_tmap_metadata) {
+    writer.begin_object("tmap_metadata")
+        .member("minimum_version", inspection.tmap_metadata.minimum_version)
+        .member("writer_version", inspection.tmap_metadata.writer_version)
+        .member("flags", inspection.tmap_metadata.flags)
+        .member("use_base_color_space", inspection.tmap_metadata.use_base_color_space)
+        .member("backward_direction", inspection.tmap_metadata.backward_direction)
+        .member("common_denominator", inspection.tmap_metadata.common_denominator);
+    const auto write_rational = [&](std::string_view key, const Rational& value) {
+      writer.begin_object(key)
+          .member("numerator", value.numerator)
+          .member("denominator", value.denominator)
+          .end_object();
+    };
+    write_rational("base_headroom", inspection.tmap_metadata.base_headroom);
+    write_rational("alternate_headroom", inspection.tmap_metadata.alternate_headroom);
+    write_rational("gain_min", inspection.tmap_metadata.gain_min);
+    write_rational("gain_max", inspection.tmap_metadata.gain_max);
+    write_rational("gamma", inspection.tmap_metadata.gamma);
+    write_rational("base_offset", inspection.tmap_metadata.base_offset);
+    write_rational("alternate_offset", inspection.tmap_metadata.alternate_offset);
+    writer.end_object();
+  }
+  writer.begin_array("errors");
   for (const auto& error : inspection.errors) writer.element(error);
   writer.end_array().begin_array("boxes");
   for (const auto& box : inspection.boxes) {

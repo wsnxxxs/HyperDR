@@ -22,12 +22,16 @@ precision highp sampler2D;
 
 uniform sampler2D imageTexture;
 uniform sampler2D gainTexture;
+uniform sampler2D modelGainTexture;
 uniform float strength;
 uniform float exposureBias;
 uniform float expansionStart;
 uniform float areaCoverage;
 uniform float vibrance;
 uniform float original;
+uniform float modelEnabled;
+uniform float modelMaxStops;
+uniform float modelStrength;
 in vec2 uv;
 out vec4 color;
 
@@ -50,6 +54,25 @@ float gainStops(float y) {
   return mix(a, b, x - float(low)) * strength;
 }
 
+float modelGainStops(vec2 coordinates) {
+  ivec2 dimensions = textureSize(modelGainTexture, 0);
+  vec2 position = clamp(
+    coordinates * vec2(dimensions) - vec2(0.5),
+    vec2(0.0), vec2(dimensions - ivec2(1)));
+  ivec2 low = ivec2(floor(position));
+  ivec2 high = min(low + ivec2(1), dimensions - ivec2(1));
+  vec2 fraction = position - vec2(low);
+  float top = mix(
+    texelFetch(modelGainTexture, low, 0).r,
+    texelFetch(modelGainTexture, ivec2(high.x, low.y), 0).r,
+    fraction.x);
+  float bottom = mix(
+    texelFetch(modelGainTexture, ivec2(low.x, high.y), 0).r,
+    texelFetch(modelGainTexture, high, 0).r,
+    fraction.x);
+  return mix(top, bottom, fraction.y) * modelMaxStops * modelStrength;
+}
+
 float shoulder(float value) {
   const float knee = 0.8;
   if (value <= knee) return value;
@@ -61,6 +84,14 @@ void main() {
   vec3 linear = texture(imageTexture, uv).rgb;
   if (original > 0.5) {
     color = vec4(encodeSrgb(linear), 1.0);
+    return;
+  }
+  if (modelEnabled > 0.5) {
+    vec3 modelExpanded = linear * exp2(modelGainStops(uv));
+    color = vec4(encodeSrgb(vec3(
+      shoulder(modelExpanded.r),
+      shoulder(modelExpanded.g),
+      shoulder(modelExpanded.b))), 1.0);
     return;
   }
   linear *= exp2(exposureBias);
@@ -76,7 +107,8 @@ void main() {
   float highlight = smoothstep(expansionStart, 1.0, y);
   float absolute = smoothstep(0.70, 1.50, y * exp2(gain));
   float coverage = diffuseFloor + (1.0 - diffuseFloor) * highlight * absolute;
-  vec3 expanded = linear * exp2(gain * coverage);
+  gain *= coverage;
+  vec3 expanded = linear * exp2(gain);
   float ye = dot(expanded, luma);
   float saturation = 1.0 + 0.12 * strength * smoothstep(expansionStart, 1.0, y);
   expanded = max(vec3(ye) + (expanded - vec3(ye)) * saturation, vec3(0.0));
@@ -143,16 +175,30 @@ export function createSdrGpuRenderer(canvas, onContextLost) {
     gl.TEXTURE_2D, 0, gl.R32F, LUT_SIZE, 1, 0, gl.RED, gl.FLOAT,
     new Float32Array(LUT_SIZE));
 
+  const modelGainTexture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, modelGainTexture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(
+    gl.TEXTURE_2D, 0, gl.R32F, 1, 1, 0, gl.RED, gl.FLOAT,
+    new Float32Array([0]));
+
   const locations = {
     position: gl.getAttribLocation(program, "position"),
     imageTexture: gl.getUniformLocation(program, "imageTexture"),
     gainTexture: gl.getUniformLocation(program, "gainTexture"),
+    modelGainTexture: gl.getUniformLocation(program, "modelGainTexture"),
     strength: gl.getUniformLocation(program, "strength"),
     exposureBias: gl.getUniformLocation(program, "exposureBias"),
     expansionStart: gl.getUniformLocation(program, "expansionStart"),
     areaCoverage: gl.getUniformLocation(program, "areaCoverage"),
     vibrance: gl.getUniformLocation(program, "vibrance"),
     original: gl.getUniformLocation(program, "original"),
+    modelEnabled: gl.getUniformLocation(program, "modelEnabled"),
+    modelMaxStops: gl.getUniformLocation(program, "modelMaxStops"),
+    modelStrength: gl.getUniformLocation(program, "modelStrength"),
   };
 
   gl.useProgram(program);
@@ -161,6 +207,7 @@ export function createSdrGpuRenderer(canvas, onContextLost) {
   gl.vertexAttribPointer(locations.position, 2, gl.FLOAT, false, 0, 0);
   gl.uniform1i(locations.imageTexture, 0);
   gl.uniform1i(locations.gainTexture, 1);
+  gl.uniform1i(locations.modelGainTexture, 2);
 
   return {
     kind: "sdr-gpu",
@@ -174,6 +221,14 @@ export function createSdrGpuRenderer(canvas, onContextLost) {
       gl.viewport(0, 0, canvas.width, canvas.height);
     },
 
+    uploadGainMap(gain) {
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, modelGainTexture);
+      gl.texImage2D(
+        gl.TEXTURE_2D, 0, gl.R32F, gain.width, gain.height, 0,
+        gl.RED, gl.FLOAT, gain.values);
+    },
+
     draw(table, params) {
       gl.useProgram(program);
       gl.activeTexture(gl.TEXTURE0);
@@ -182,12 +237,17 @@ export function createSdrGpuRenderer(canvas, onContextLost) {
       gl.bindTexture(gl.TEXTURE_2D, gainTexture);
       gl.texSubImage2D(
         gl.TEXTURE_2D, 0, 0, 0, LUT_SIZE, 1, gl.RED, gl.FLOAT, table);
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, modelGainTexture);
       gl.uniform1f(locations.strength, params.strength);
       gl.uniform1f(locations.exposureBias, params.exposureBias);
       gl.uniform1f(locations.expansionStart, params.expansionStart);
       gl.uniform1f(locations.areaCoverage, params.areaCoverage);
       gl.uniform1f(locations.vibrance, params.vibrance);
       gl.uniform1f(locations.original, params.original ? 1 : 0);
+      gl.uniform1f(locations.modelEnabled, params.modelGain ? 1 : 0);
+      gl.uniform1f(locations.modelMaxStops, params.modelGain?.maxStops || 0);
+      gl.uniform1f(locations.modelStrength, params.modelStrength ?? 1);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
     },
 
@@ -195,6 +255,7 @@ export function createSdrGpuRenderer(canvas, onContextLost) {
       canvas.removeEventListener("webglcontextlost", handleContextLost);
       gl.deleteTexture(imageTexture);
       gl.deleteTexture(gainTexture);
+      gl.deleteTexture(modelGainTexture);
       gl.deleteBuffer(buffer);
       gl.deleteProgram(program);
     },

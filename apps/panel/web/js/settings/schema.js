@@ -68,6 +68,12 @@ export const CONTROLS = [
     help: "高于 SDR 参考白的亮度余量；强度与范围共同决定最终峰值。上限随输出格式变化。",
   },
   {
+    key: "modelStrength", kind: "range", group: "model", label: "优化强度",
+    min: 0, max: 1, step: 0.05, default: 1, format: percent,
+    scale: ["原始亮度", "完整优化"], mask: null,
+    help: "缩放模型生成的增益图。0% 保留原始亮度，100% 完整应用模型结果。",
+  },
+  {
     key: "expansionStart", kind: "range", group: "region", label: "扩展起点",
     min: 0.18, max: 0.75, step: 0.01, default: 0.25, format: percent,
     scale: ["中间调", "极亮高光"], mask: "participation",

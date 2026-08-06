@@ -172,9 +172,15 @@ def clear_output(session_id: str) -> int:
 
 
 def result_path(session_id: str) -> Path:
-    """The converted image, or FileNotFoundError if this run produced none."""
+    """The converted image, or FileNotFoundError if this run produced none.
+
+    Model inference keeps its thumbnails and gain-grid files in dotted
+    subdirectories of ``output``.  Those are intermediate artifacts, not
+    downloadable results, so only a file directly under ``output`` can be the
+    converted image.
+    """
     folder = session_dir(session_id, "output")
-    for item in sorted(folder.rglob("*"), key=lambda p: str(p).lower()):
+    for item in sorted(folder.iterdir(), key=lambda p: str(p).lower()):
         if item.is_file() and item.suffix.lower() in RESULT_EXTENSIONS:
             target = item.resolve()
             target.relative_to(folder.resolve())

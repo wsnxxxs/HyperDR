@@ -35,6 +35,20 @@ function shoulder(value) {
   return knee + (1 - knee) * (1 - Math.exp(-(value - knee) / (1 - knee)));
 }
 
+export function sampleModelGain(modelGain, x, y, width, height) {
+  const gx = clamp((x + 0.5) * modelGain.width / width - 0.5, 0, modelGain.width - 1);
+  const gy = clamp((y + 0.5) * modelGain.height / height - 0.5, 0, modelGain.height - 1);
+  const x0 = Math.floor(gx), y0 = Math.floor(gy);
+  const x1 = Math.min(x0 + 1, modelGain.width - 1);
+  const y1 = Math.min(y0 + 1, modelGain.height - 1);
+  const tx = gx - x0, ty = gy - y0;
+  const top = modelGain.values[y0 * modelGain.width + x0] * (1 - tx)
+    + modelGain.values[y0 * modelGain.width + x1] * tx;
+  const bottom = modelGain.values[y1 * modelGain.width + x0] * (1 - tx)
+    + modelGain.values[y1 * modelGain.width + x1] * tx;
+  return (top * (1 - ty) + bottom * ty) * modelGain.maxStops;
+}
+
 /* This canvas is only ever written to -- the pixel walk reads `source`, an
  * ImageData the stage already holds. Asking for `willReadFrequently` therefore
  * bought nothing and cost the accelerated backing store: the browser keeps the
@@ -54,14 +68,15 @@ function contextFor(canvas) {
   return context;
 }
 
-export function renderSdr(canvas, { source, output, curve, settings, original }) {
+export function renderSdr(canvas, { source, output, curve, settings, original, modelGain }) {
   const context = contextFor(canvas);
   if (original) { context.putImageData(source, 0, 0); return; }
 
   const from = source.data;
   const to = output.data;
   const { hdrStrength: strength, expansionStart, brightness, vibrance } = settings;
-  const exposure = Math.pow(2, brightness);
+  const exposure = modelGain ? 1 : Math.pow(2, brightness);
+  const outputWidth = source.width;
 
   for (let i = 0; i < from.length; i += 4) {
     const r = SRGB_TO_LINEAR[from[i]] * exposure;
@@ -71,17 +86,26 @@ export function renderSdr(canvas, { source, output, curve, settings, original })
     let R = r, G = g, B = b;
     const sourceSaturation = Math.max(Math.abs(r - y), Math.abs(g - y), Math.abs(b - y))
       / Math.max(y, 1e-6);
-    const vibranceAmount = vibrance * (1 - smoothstep(0.15, 1, sourceSaturation));
+    const vibranceAmount = modelGain
+      ? 0
+      : vibrance * (1 - smoothstep(0.15, 1, sourceSaturation));
     R = Math.max(0, y + (R - y) * (1 + vibranceAmount));
     G = Math.max(0, y + (G - y) * (1 + vibranceAmount));
     B = Math.max(0, y + (B - y) * (1 + vibranceAmount));
     const adjustedY = SRGB_LUMA[0] * R + SRGB_LUMA[1] * G + SRGB_LUMA[2] * B;
-    const gain = Math.pow(2, curve.previewGainStops(adjustedY, settings));
+    const pixel = i / 4;
+    const x = pixel % outputWidth;
+    const yPixel = Math.floor(pixel / outputWidth);
+    const stops = modelGain
+      ? sampleModelGain(modelGain, x, yPixel, outputWidth, source.height)
+        * settings.modelStrength
+      : curve.previewGainStops(adjustedY, settings);
+    const gain = Math.pow(2, stops);
     R *= gain;
     G *= gain;
     B *= gain;
     const ye = SRGB_LUMA[0] * R + SRGB_LUMA[1] * G + SRGB_LUMA[2] * B;
-    const sat = curve.saturation(adjustedY, strength, expansionStart);
+    const sat = modelGain ? 1 : curve.saturation(adjustedY, strength, expansionStart);
     R = ye + (R - ye) * sat;
     G = ye + (G - ye) * sat;
     B = ye + (B - ye) * sat;

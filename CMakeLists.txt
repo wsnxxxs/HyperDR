@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(HyperDR VERSION 0.3.2 LANGUAGES CXX)
+project(HyperDR VERSION 1.0.0 LANGUAGES CXX)
 
 if(NOT WIN32 OR NOT MSVC)
   message(FATAL_ERROR "HyperDR requires Windows with MSVC")
@@ -85,6 +85,21 @@ endif()
 install(DIRECTORY apps/panel/ DESTINATION apps/panel COMPONENT Runtime
   PATTERN "__pycache__" EXCLUDE
   PATTERN "*.pyc" EXCLUDE)
+# The panel's opt-in “优化” action ships its inference code and checkpoint, but
+# deliberately reuses the user's existing PyTorch environment instead of
+# embedding a second CPU/CUDA runtime in every release archive.
+install(FILES
+  HyperDR_Model/infer_gain.py
+  HyperDR_Model/LICENSE
+  DESTINATION HyperDR_Model COMPONENT Runtime)
+install(DIRECTORY HyperDR_Model/hyperdr_ml/
+  DESTINATION HyperDR_Model/hyperdr_ml COMPONENT Runtime
+  PATTERN "__pycache__" EXCLUDE
+  PATTERN "*.pyc" EXCLUDE)
+install(FILES HyperDR_Model/checkpoints/best.pt
+  DESTINATION HyperDR_Model/checkpoints COMPONENT Runtime)
+install(FILES HyperDR_Model/dataset/assets/display-p3.icc
+  DESTINATION HyperDR_Model/dataset/assets COMPONENT Runtime)
 # The panel derives its settings vocabulary from this file, so it ships too.
 install(FILES schema/settings.json schema/report.json DESTINATION schema COMPONENT Runtime)
 install(FILES Start.bat Setup-HTTPS.bat DESTINATION . COMPONENT Runtime)

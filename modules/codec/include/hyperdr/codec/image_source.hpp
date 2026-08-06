@@ -49,6 +49,10 @@ struct RawDecodeOptions {
   // Full export callers leave this false; the decoder never enables it
   // automatically in response to an internal memory estimate.
   bool half_size{false};
+  // When an external canonical gain grid is supplied, decode only the SDR
+  // base of an embedded Apple/Ultra HDR container. Applying the embedded map
+  // first would double-count the same gain before the external grid is used.
+  bool ignore_embedded_gain_map{false};
 };
 
 struct DecodeInfo {

@@ -13,12 +13,13 @@ compatibility guarantees.
 from __future__ import annotations
 
 import json
+import math
 import secrets
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import job, session
+from . import job, model, session
 from .command import build_argv
 from .concurrency import Busy
 from .config import IS_WINDOWS, REPO_ROOT
@@ -76,6 +77,28 @@ def _display_command(argv: list[str]) -> str:
     return " ".join(f'"{part}"' if " " in part else part for part in argv)
 
 
+def _prepare_model_options(raw_options: dict | None, *, preview: bool = False):
+    """Apply the model slider to the command before it is built."""
+    options = dict(raw_options or {})
+    use_model = options.pop("useModel", False)
+    if not isinstance(use_model, bool):
+        raise ValueError("useModel must be a boolean")
+    model_strength = options.pop("modelStrength", 1.0)
+    if (isinstance(model_strength, bool)
+            or not isinstance(model_strength, (int, float))
+            or not math.isfinite(model_strength)
+            or not 0 <= model_strength <= 1):
+        raise ValueError("modelStrength must be a number in [0, 1]")
+    if use_model:
+        # hdrStrength is the mathematical-mode control. In model mode it is
+        # only the plumbing slot used by the external-gain renderer.
+        options["hdrStrength"] = model_strength
+        if preview:
+            options["external_gain"] = "<任务输出>/.model/model-gain.f32"
+            options["external_gain_report"] = "<任务输出>/.model/model-gain.json"
+    return options, use_model
+
+
 def _first(query: dict, key: str, default: str = "") -> str:
     values = query.get(key) or [default]
     return values[0]
@@ -94,6 +117,7 @@ def state(context: Context, _query: dict) -> Response:
         "hdrPreviewRequiresSecureContext": True,
         "previewMaxEdge": MAX_EDGE,
         "maxUploadMB": session.MAX_UPLOAD_BYTES // (1024 * 1024),
+        "model": model.status(),
     })
 
 
@@ -171,7 +195,7 @@ def command_preview(_context: Context, body: dict) -> Response:
     displayed command truthful.
     """
     try:
-        options = dict(body.get("options") or {})
+        options, _ = _prepare_model_options(body.get("options"), preview=True)
         options.update({
             "input": "<已上传图片>",
             "output": "<任务输出>",
@@ -198,6 +222,40 @@ def curve(_context: Context, body: dict) -> Response:
     except Busy as exc:
         return error(exc, status=exc.status)
     except REQUEST_ERRORS as exc:
+        return error(exc)
+
+
+def model_preview(_context: Context, body: dict) -> Response:
+    """Generate the spatial model gain only after the user requests it."""
+    try:
+        session_id = str(body.get("sessionId") or "")
+        source = session.input_path(session_id)
+        highlight_recovery = str(
+            body.get("highlightRecovery") or DEFAULT_HIGHLIGHT_RECOVERY
+        )
+        if highlight_recovery not in _HIGHLIGHT_RECOVERY_CHOICES:
+            raise ValueError("unknown highlight recovery: %s" % highlight_recovery)
+        exe = detect_exe()
+        if not exe:
+            raise ValueError("找不到 HyperDR 可执行文件。")
+        config = model.load_config()
+        if config is None:
+            raise ValueError("模型尚未启用。")
+        model_dir = session.session_dir(session_id, "output") / ".model-preview"
+        gain, report = model.infer_preview(
+            config, source, model_dir, exe, highlight_recovery
+        )
+        width, height = report["gain_grid_size"]
+        return Response(
+            body=gain,
+            content_type="application/octet-stream",
+            headers={
+                "X-Gain-Width": str(width),
+                "X-Gain-Height": str(height),
+                "X-Gain-Max-Stops": str(report["metadata_gain_max_stops"]),
+            },
+        )
+    except (OSError, ValueError, RuntimeError) as exc:
         return error(exc)
 
 
@@ -256,16 +314,27 @@ def run(_context: Context, body: dict) -> Response:
         # encoding cannot leave a stale file under its old extension, and a run
         # that fails before writing a report cannot be handed its predecessor's.
         session.clear_output(session_id)
-        options = dict(body.get("options") or {})
+        options, use_model = _prepare_model_options(body.get("options"))
         options["input"] = str(source)
         options["output"] = str(output)
         options["report"] = str(output / ("hyperdr-report-%s.json" % secrets.token_hex(8)))
+        model_commands = []
+        model_config = model.load_config() if use_model else None
+        if model_config is not None:
+            model_dir = output / ".model"
+            model_commands, gain_path, gain_report = model.build_commands(
+                model_config, source, model_dir, exe,
+                str(options.get("highlightRecovery") or DEFAULT_HIGHLIGHT_RECOVERY),
+            )
+            options["external_gain"] = str(gain_path)
+            options["external_gain_report"] = str(gain_report)
         argv = build_argv(exe, options)
     except REQUEST_ERRORS as exc:
         return error(exc)
 
     try:
-        job_id = job.start(argv, str(REPO_ROOT), options["report"], session_id)
+        job_id = job.start(argv, str(REPO_ROOT), options["report"], session_id,
+                           pre_commands=model_commands)
     except job.Busy as exc:
         return error(exc, status=429)
 
@@ -300,5 +369,6 @@ POST_ROUTES = {
     "/api/run": run,
     "/api/command": command_preview,
     "/api/curve": curve,
+    "/api/model-preview": model_preview,
     "/api/cancel": cancel,
 }

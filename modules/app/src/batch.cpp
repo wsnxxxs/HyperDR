@@ -8,6 +8,7 @@
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/foundation/file_io.hpp"
+#include "hyperdr/gainmap/external.hpp"
 #include "hyperdr/gainmap/gain_map.hpp"
 #include "hyperdr/image/resample.hpp"
 
@@ -15,6 +16,7 @@
 #include <chrono>
 #include <iostream>
 #include <new>
+#include <optional>
 #include <set>
 #include <utility>
 
@@ -37,6 +39,7 @@ std::string decode_variant(const ConvertOptions& options,
   return std::string(intent) + '/' +
          highlight_recovery_name(raw.highlight_recovery) + '/' +
          (raw.half_size ? "half" : "full") + '/' +
+         (raw.ignore_embedded_gain_map ? "base-only" : "embedded-gain") + '/' +
          std::to_string(options.preview_max_edge);
 }
 
@@ -68,6 +71,7 @@ Staged decode_stage(const std::filesystem::path& path,
     const auto start = Clock::now();
     staged.input_stamp = input_stamp(path);
     auto raw = options.raw;
+    raw.ignore_embedded_gain_map = !options.external_gain_path.empty();
 
     std::filesystem::path cache_file;
     if (!options.decode_cache_directory.empty()) {
@@ -130,7 +134,18 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
   try {
     const auto decoded = Clock::now();
     require_decode_resolution(options, staged.image.decode);
-    auto gain = make_gain_map(staged.image.linear_p3, options.gain, staged.image.capture);
+    std::optional<ExternalGainMap> external;
+    if (!options.external_gain_path.empty()) {
+      external = read_external_gain_map(options.external_gain_path,
+                                         options.external_gain_report,
+                                         options.allow_legacy_external_gain);
+    }
+    auto gain = external.has_value()
+                    ? make_external_gain_map(staged.image.linear_p3,
+                                             std::move(*external),
+                                             options.gain.gain_strength)
+                    : make_gain_map(staged.image.linear_p3, options.gain,
+                                    staged.image.capture);
     result.sensor_width = staged.image.decode.sensor_width;
     result.sensor_height = staged.image.decode.sensor_height;
     result.target_width = staged.image.decode.target_width;

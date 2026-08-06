@@ -1,0 +1,16 @@
+# HyperDR-ML dependencies (tested with Python 3.12 on Ubuntu WSL2).
+#
+# Install PyTorch with CUDA from the PyTorch index first, matching your GPU,
+# e.g. for the cu128 build this pipeline was validated with:
+#
+#   pip install --index-url https://download.pytorch.org/whl/cu128 torch==2.11.0
+#
+# then install the rest from PyPI:
+#
+#   pip install -r requirements.txt
+
+torch>=2.7
+numpy>=2.0
+Pillow>=11
+pillow-heif>=1.3
+opencv-python>=4.10

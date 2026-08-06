@@ -17,6 +17,9 @@
 namespace hyperdr {
 
 struct GainMapMetadata {
+  std::uint16_t minimum_version{0};
+  std::uint16_t writer_version{0};
+  std::uint8_t flags{0x40};
   Rational gain_min{0, 1};
   Rational gain_max{1, 1};
   Rational gamma{1, 1};
@@ -27,6 +30,8 @@ struct GainMapMetadata {
   Rational base_headroom{0, 1};
   Rational alternate_headroom{1, 1};
   bool use_base_color_space{true};
+  bool backward_direction{false};
+  bool common_denominator{false};
 };
 
 [[nodiscard]] std::vector<std::uint8_t> serialize_tmap_payload(

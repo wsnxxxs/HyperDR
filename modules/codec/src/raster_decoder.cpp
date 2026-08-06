@@ -814,7 +814,8 @@ DecodedImage decode_heif_rgb_handle(const heif_image_handle* handle, std::string
 }
 
 DecodedImage decode_adaptive_heic(const std::vector<std::uint8_t>& bytes,
-                                heif_context* context) {
+                                heif_context* context,
+                                bool base_only) {
   const auto inspection = inspect_heif(bytes);
   if (!inspection.structurally_valid || !inspection.has_tmap_brand ||
       !inspection.has_tmap_item || !inspection.has_dimg_reference) {
@@ -828,6 +829,7 @@ DecodedImage decode_adaptive_heic(const std::vector<std::uint8_t>& bytes,
              "get Adaptive HDR base image");
   std::unique_ptr<heif_image_handle, HandleDeleter> base_handle(base_handle_raw);
   auto result = decode_heif_rgb_handle(base_handle.get(), "HEIC Adaptive HDR");
+  if (base_only) return result;
 
   heif_image_handle* gain_handle_raw = nullptr;
   check_heif(heif_context_get_image_handle(context, references.gain_id, &gain_handle_raw),
@@ -875,7 +877,8 @@ DecodedImage decode_adaptive_heic(const std::vector<std::uint8_t>& bytes,
   return result;
 }
 
-DecodedImage decode_heic(const std::filesystem::path& path) {
+DecodedImage decode_heic(const std::filesystem::path& path,
+                         bool base_only) {
   const auto bytes = read_binary_file(path);
   std::unique_ptr<heif_context, ContextDeleter> context(heif_context_alloc());
   if (!context) throw std::runtime_error("cannot allocate HEIC decoder");
@@ -883,7 +886,7 @@ DecodedImage decode_heic(const std::filesystem::path& path) {
              "HEIC open");
   const auto inspection = inspect_heif(bytes);
   if (inspection.has_tmap_brand || inspection.has_tmap_item) {
-    return decode_adaptive_heic(bytes, context.get());
+    return decode_adaptive_heic(bytes, context.get(), base_only);
   }
   heif_image_handle* handle_raw = nullptr;
   check_heif(heif_context_get_primary_image_handle(context.get(), &handle_raw),
@@ -911,7 +914,9 @@ DecodedImage decode_image(const std::filesystem::path& path, const RawDecodeOpti
     return decode_jpeg(path);
   }
   if (ext == ".png") return decode_png(path);
-  if (ext == ".heic" || ext == ".heif") return decode_heic(path);
+  if (ext == ".heic" || ext == ".heif") {
+    return decode_heic(path, options.ignore_embedded_gain_map);
+  }
   throw std::invalid_argument("unsupported input format: " + ext);
 }
 

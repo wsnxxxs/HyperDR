@@ -31,6 +31,7 @@ void usage() {
          "  HyperDR thumbnail <image> --output <preview.jpg> [--max-edge <pixels>]\n"
          "                            [--quality <1..100>] [--half-size]\n"
          "                            [--highlight-recovery blend|reconstruct|clip|unclip]\n"
+         "                            [--base-only]\n"
          "  HyperDR curve [look options] [--samples <N>]   Emit the tone curve as JSON\n"
          "  HyperDR schema                                 Emit the settings schema as JSON\n\n"
          "Convert settings:\n"
@@ -38,6 +39,9 @@ void usage() {
       << "\nConvert plumbing:\n"
          "  --output <directory>               Where converted images are written\n"
          "  --report <file.json>               Write a structured run report\n"
+         "  --external-gain <file.f32>         Use an external canonical gain grid\n"
+         "  --external-gain-report <file.json> Required sidecar for that gain grid\n"
+         "  --allow-legacy-external-gain      Allow frozen v1 normalized sidecars\n"
          "  --decode-cache <directory>         Reuse decoded buffers across look-only reruns\n"
          "  --fast-preview                     Explicitly allow RAW half-size decoding\n";
   if (!kCodecsAvailable) {
@@ -96,6 +100,12 @@ void parse_settings(int argc, char** argv, int first, ConvertOptions& options,
       options.output_directory = next_value(i, argc, argv, arg);
     } else if (arg == "--report") {
       options.report_path = next_value(i, argc, argv, arg);
+    } else if (arg == "--external-gain") {
+      options.external_gain_path = next_value(i, argc, argv, arg);
+    } else if (arg == "--external-gain-report") {
+      options.external_gain_report = next_value(i, argc, argv, arg);
+    } else if (arg == "--allow-legacy-external-gain") {
+      options.allow_legacy_external_gain = true;
     } else if (arg == "--decode-cache") {
       options.decode_cache_directory = next_value(i, argc, argv, arg);
     } else {
@@ -249,6 +259,8 @@ int thumbnail_command(int argc, char** argv) {
       // The preview is bounded by --max-edge anyway, so half-size demosaic
       // costs nothing visible and roughly quarters the decode.
       raw.half_size = true;
+    } else if (arg == "--base-only") {
+      raw.ignore_embedded_gain_map = true;
     } else {
       throw std::invalid_argument("unknown thumbnail option: " + std::string(arg));
     }

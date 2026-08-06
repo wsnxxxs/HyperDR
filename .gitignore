@@ -46,3 +46,7 @@ __pycache__/
 
 # Agent worktrees and local agent state.
 .claude/
+
+# Bundled local ML runtime and private trained weights are machine-local.
+/HyperDR_Model/.venv/
+/HyperDR_Model/checkpoints/*.pt

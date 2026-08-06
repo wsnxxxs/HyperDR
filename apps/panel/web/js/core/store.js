@@ -95,4 +95,9 @@ export const store = createStore({
   histMode: "luma",
   /** Settings key whose mask is on the photograph, or null. */
   maskKey: null,
+  /** Whether the preview/export is currently using the model gain. */
+  previewOptimized: false,
+  /** Whether the current image already has a reusable model gain in memory. */
+  modelGainReady: false,
+  optimizing: false,
 });

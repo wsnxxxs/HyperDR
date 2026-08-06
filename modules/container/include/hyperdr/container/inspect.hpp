@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+#include "hyperdr/container/iso_gain_map.hpp"
+
 namespace hyperdr {
 
 struct BoxInfo {
@@ -29,6 +31,8 @@ struct HeifInspection {
   bool has_altr_group{false};
   bool has_exif{false};
   bool has_xmp{false};
+  bool has_tmap_metadata{false};
+  GainMapMetadata tmap_metadata{};
   std::uint32_t primary_item_id{};
   std::vector<BoxInfo> boxes;
   std::vector<std::string> errors;

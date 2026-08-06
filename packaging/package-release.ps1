@@ -4,7 +4,8 @@ param(
     [string]$BuildDirectory = "build-release",
     [string]$OutputDirectory = "dist",
     [ValidateSet("Release")]
-    [string]$Configuration = "Release"
+    [string]$Configuration = "Release",
+    [switch]$SkipBuild
 )
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -17,19 +18,23 @@ if (-not (Test-Path -LiteralPath $toolchain)) {
 $buildPath = Join-Path $projectRoot $BuildDirectory
 $outputPath = Join-Path $projectRoot $OutputDirectory
 
-cmake -S $projectRoot -B $buildPath `
-    "-DCMAKE_TOOLCHAIN_FILE=$toolchain" `
-    "-DVCPKG_TARGET_TRIPLET=x64-windows" `
-    "-DHYPERDR_BUILD_TESTS=OFF"
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if (-not $SkipBuild) {
+    cmake -S $projectRoot -B $buildPath `
+        "-DCMAKE_TOOLCHAIN_FILE=$toolchain" `
+        "-DVCPKG_TARGET_TRIPLET=x64-windows" `
+        "-DHYPERDR_BUILD_TESTS=OFF"
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-cmake --build $buildPath --config $Configuration
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    cmake --build $buildPath --config $Configuration
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
 
-powershell -NoProfile -ExecutionPolicy Bypass `
-    -File (Join-Path $projectRoot "scripts\prepare_x265_multibit.ps1") `
-    -VcpkgRoot $VcpkgRoot -BuildDirectory $buildPath -Configuration $Configuration
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if (-not $SkipBuild) {
+    powershell -NoProfile -ExecutionPolicy Bypass `
+        -File (Join-Path $projectRoot "scripts\prepare_x265_multibit.ps1") `
+        -VcpkgRoot $VcpkgRoot -BuildDirectory $buildPath -Configuration $Configuration
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
 
 New-Item -ItemType Directory -Path $outputPath -Force | Out-Null
 cpack --config (Join-Path $buildPath "CPackConfig.cmake") `

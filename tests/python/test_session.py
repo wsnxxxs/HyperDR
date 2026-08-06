@@ -114,6 +114,18 @@ class SessionTests(unittest.TestCase):
             (session.WORK_ROOT / session_id / "output" / name).write_bytes(b"result")
             self.assertEqual(session.result_path(session_id).name, name)
 
+    def test_result_ignores_model_intermediate_images(self):
+        session_id = session.create_session()
+        output = session.WORK_ROOT / session_id / "output"
+        for directory in (".model", ".model-preview"):
+            intermediate = output / directory
+            intermediate.mkdir()
+            (intermediate / "model-input.jpg").write_bytes(b"thumbnail")
+        result = output / "photo.jpg"
+        result.write_bytes(b"ultra hdr result")
+
+        self.assertEqual(session.result_path(session_id), result)
+
     def test_result_cannot_escape_the_session(self):
         session_id = session.create_session()
         outside = session.WORK_ROOT / "outside.heic"

@@ -25,7 +25,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 TREES = [
     (
         REPO_ROOT / "apps" / "panel" / "web",
-        {"group-tone", "group-region", "group-quality", "group-advanced"},
+        {"group-tone", "group-model", "group-region", "group-quality",
+         "group-advanced"},
     ),
 ]
 

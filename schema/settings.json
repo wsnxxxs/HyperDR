@@ -23,11 +23,10 @@
       "flag": "--look",
       "kind": "enum",
       "choices": [
-        "photographic",
-        "neutral"
+        "photographic"
       ],
       "affects_output_bytes": true,
-      "help": "Renderer; neutral is the legacy fallback",
+      "help": "Renderer",
       "default": "photographic"
     },
     {

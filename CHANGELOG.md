@@ -5,6 +5,18 @@ semantic versioning; dates use ISO 8601.
 
 ## Unreleased
 
+- Fixed conversion failing on images whose peak gain does not coincide with
+  their brightest pixel. The ISO gain-map reader had begun requiring `gain_max`
+  to equal the declared alternate headroom, which are different quantities, and
+  because the encoder verifies the file it has just written the conversion
+  aborted with an unrelated "failed semantic structure verification" message.
+  Files written by 1.0.0 also began reporting as structurally invalid.
+- Removed the `neutral` renderer. `--look` now accepts only `photographic`;
+  `--look neutral` is rejected rather than silently mapped onto the survivor, so
+  a stored preset or script that names it fails loudly. `--contrast`,
+  `--vibrance`, `--pop` and `--headroom-max` are no longer silently ignored by a
+  second renderer, and the note explaining that has been removed.
+
 ## 1.0.0 - 2026-08-06
 
 - Added an explicit mathematical/model preview switch. The first model use

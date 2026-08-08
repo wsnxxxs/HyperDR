@@ -14,7 +14,7 @@ namespace {
 
 constexpr std::array<std::string_view, 6> kEncodingChoices{
     "adaptive", "ultrahdr", "pq", "hlg", "avif-pq", "avif-hlg"};
-constexpr std::array<std::string_view, 2> kLookChoices{"photographic", "neutral"};
+constexpr std::array<std::string_view, 1> kLookChoices{"photographic"};
 constexpr std::array<std::string_view, 4> kHighlightRecoveryChoices{
     "blend", "reconstruct", "clip", "unclip"};
 
@@ -79,8 +79,8 @@ const std::array<Setting, 24>& table() {
        [](std::string_view name) { return hdr_encoding_from_name(name).has_value(); },
        apply_encoding, read_encoding},
       {"look", "--look", SettingKind::kEnum, 0, 0, kLookChoices,
-       "photographic|neutral",
-       "Renderer; neutral is the legacy fallback", false, true, nullptr, apply_look,
+       "photographic",
+       "Renderer", false, true, nullptr, apply_look,
        read_look},
       {"highlight_recovery", "--highlight-recovery", SettingKind::kEnum, 0, 0,
        kHighlightRecoveryChoices, "blend|reconstruct|clip|unclip",

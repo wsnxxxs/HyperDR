@@ -46,7 +46,6 @@ void validate_photographic_controls(const LookOptions& look) {
 
 const char* look_mode_name(LookMode mode) {
   switch (mode) {
-    case LookMode::kNeutral: return "neutral";
     case LookMode::kPhotographic: return "photographic";
   }
   return "unknown";
@@ -54,12 +53,11 @@ const char* look_mode_name(LookMode mode) {
 
 std::optional<LookMode> look_mode_from_name(std::string_view name) {
   if (name == "photographic") return LookMode::kPhotographic;
-  if (name == "neutral") return LookMode::kNeutral;
   return std::nullopt;
 }
 
 void validate_look_options(const LookOptions& options) {
-  if (options.mode == LookMode::kPhotographic) validate_photographic_controls(options);
+  validate_photographic_controls(options);
 }
 
 }  // namespace hyperdr

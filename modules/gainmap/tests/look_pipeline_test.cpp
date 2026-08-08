@@ -64,18 +64,6 @@ int main() {
       }
     }
 
-    hyperdr::GainMapOptions neutral = photographic;
-    neutral.look.mode = hyperdr::LookMode::kNeutral;
-    const auto baseline = hyperdr::make_gain_map(source, neutral);
-    neutral.look.contrast = 0.80F;
-    neutral.look.vibrance = -0.50F;
-    neutral.look.headroom_max_stops = 0.0F;
-    const auto ignored = hyperdr::make_gain_map(source, neutral);
-    require(baseline.base_linear.pixels == ignored.base_linear.pixels &&
-                baseline.gain_map.pixels == ignored.gain_map.pixels &&
-                baseline.metadata.gain_min.numerator == ignored.metadata.gain_min.numerator &&
-                baseline.metadata.gain_max.numerator == ignored.metadata.gain_max.numerator,
-            "neutral path was affected by photographic controls");
     require(hyperdr::rational_value(hdr.metadata.gamma) > 0.0F, "photographic gamma metadata is invalid");
 
     // Complete capture metadata is used only when all three values are valid;

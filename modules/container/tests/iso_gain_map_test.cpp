@@ -62,12 +62,42 @@ void test_common_denominator_round_trip() {
           "common-denominator numerators changed");
 }
 
+// The reader briefly required gain_max == alternate_headroom. Both renderers
+// violate that for ordinary scenes, and because verify_heic_decodable parses
+// the file it has just written, conversion failed outright -- reported as
+// "failed semantic structure verification", because inspect_heif turns a parse
+// error into structurally_valid = false.
+void test_gain_range_is_independent_of_declared_headroom() {
+  hyperdr::GainMapMetadata metadata;
+  // A flat bright field: 2.03 stops of coding range against 2.00 stops of
+  // requested headroom, which is what the photographic renderer produces.
+  metadata.alternate_headroom = {2000000, 1000000};
+  metadata.gain_max = {2031690, 1000000};
+  metadata.gain_min = {0, 1000000};
+  const auto decoded =
+      hyperdr::parse_tmap_payload(hyperdr::serialize_tmap_payload(metadata));
+  require(decoded.gain_max.numerator == metadata.gain_max.numerator &&
+              decoded.alternate_headroom.numerator ==
+                  metadata.alternate_headroom.numerator,
+          "a gain range wider than the declared headroom was not preserved");
+
+  // And the saturated low-luminance case: chroma-limited gain with no
+  // luminance headroom at all.
+  metadata.alternate_headroom = {0, 1000000};
+  metadata.gain_max = {487600, 1000000};
+  const auto saturated =
+      hyperdr::parse_tmap_payload(hyperdr::serialize_tmap_payload(metadata));
+  require(saturated.gain_max.numerator == 487600,
+          "gain range with zero declared headroom was not preserved");
+}
+
 }  // namespace
 
 int main() {
   try {
     test_invalid_tmap_metadata();
     test_common_denominator_round_trip();
+    test_gain_range_is_independent_of_declared_headroom();
     std::cout << "ISO gain-map metadata tests passed\n";
     return 0;
   } catch (const std::exception& e) {

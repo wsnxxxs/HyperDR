@@ -154,9 +154,16 @@ GainMapMetadata parse_tmap_payload(const std::vector<std::uint8_t>& payload) {
   if (gain_max < gain_min || std::abs(gain_min) > 64.0F || std::abs(gain_max) > 64.0F) {
     throw std::invalid_argument("invalid gain-map range");
   }
-  if (std::abs(gain_max - alternate_headroom) > 1.0e-6F) {
-    throw std::invalid_argument("gain_max conflicts with alternate headroom");
-  }
+  // gain_max and alternate_headroom are not the same quantity and must not be
+  // cross-checked here. gain_max is the coding range of the stored map -- the
+  // largest per-pixel gain it can express -- while alternate_headroom is the
+  // display headroom the whole rendition asks for. They coincide only when the
+  // brightest pixel is also the most-gained one. Requiring equality rejected
+  // the converter's own output: `verify_heic_decodable` parses the file it just
+  // wrote, so a flat bright field (gain_max 2.03 against 2.00 stops of
+  // headroom) failed conversion outright, and previously valid files began
+  // reporting "structurally invalid". The v2 sidecar path keeps the equality
+  // check in external.cpp, where the model constructs both from one number.
   if (!(gamma > 0.0F) || gamma > 64.0F) throw std::invalid_argument("invalid gain-map gamma");
   if (std::abs(base_offset) > 64.0F || std::abs(alternate_offset) > 64.0F) {
     throw std::invalid_argument("invalid gain-map offset");

@@ -4,7 +4,6 @@ hyperdr_add_module(gainmap
     src/coding.cpp
     src/external.cpp
     src/gain_map.cpp
-    src/neutral.cpp
     src/photographic.cpp
     src/reconstruct.cpp
     src/render.cpp

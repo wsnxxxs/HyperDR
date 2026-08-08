@@ -95,10 +95,14 @@ void test_parsing_enforces_ranges_and_types() {
           "an unknown encoding was accepted");
 
   const auto* look = hyperdr::find_setting_by_key("look");
-  require(hyperdr::parse_setting_text(*look, "neutral").string() == "neutral",
+  require(hyperdr::parse_setting_text(*look, "photographic").string() == "photographic",
           "a valid enum name was not parsed");
   require(throws([&] { hyperdr::parse_setting_text(*look, "cinematic"); }),
           "an unknown enum name was accepted");
+  // The removed renderer must be rejected by name rather than quietly mapped
+  // onto the survivor, so a preset that asked for it fails loudly.
+  require(throws([&] { hyperdr::parse_setting_text(*look, "neutral"); }),
+          "the removed neutral look was still accepted");
 
   // "auto" is a distinct state, not a sentinel number.
   const auto* headroom = hyperdr::find_setting_by_key("headroom");
@@ -137,9 +141,9 @@ void test_presets_reject_anything_unexpected() {
   const auto apply = [&](const std::string& text) {
     hyperdr::apply_preset_document(hyperdr::json::parse(text), options);
   };
-  apply(R"({"contrast":1.2,"look":"neutral","headroom":"auto","recursive":true})");
+  apply(R"({"contrast":1.2,"look":"photographic","headroom":"auto","recursive":true})");
   require(options.gain.look.contrast == 1.2F, "a preset value was not applied");
-  require(options.gain.look.mode == hyperdr::LookMode::kNeutral, "look was not applied");
+  require(options.gain.look.mode == hyperdr::LookMode::kPhotographic, "look was not applied");
   require(options.gain.auto_headroom, "auto headroom was not applied");
   require(options.recursive, "a boolean preset value was not applied");
 

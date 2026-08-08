@@ -45,7 +45,8 @@ void check_render_options_change_the_fingerprint() {
   require(changed([](auto& o) { o.gain.look.headroom_max_stops = 2.0F; }), "headroom max");
   require(changed([](auto& o) { o.gain.look.shoulder_start = 0.6F; }), "expansion start");
   require(changed([](auto& o) { o.gain.look.diffuse_gain_floor = 0.7F; }), "area coverage");
-  require(changed([](auto& o) { o.gain.look.mode = hyperdr::LookMode::kNeutral; }), "look");
+  // LookMode has one value, so there is no second look to flip here. The
+  // fingerprint still reads the mode; restore this case when a look is added.
   require(changed([](auto& o) { o.gain.gain_strength = 0.5F; }), "gain strength");
   require(changed([](auto& o) { o.gain.exposure_bias_ev = 0.0F; }), "exposure bias");
   require(changed([](auto& o) { o.gain.auto_exposure = false; }), "auto exposure");

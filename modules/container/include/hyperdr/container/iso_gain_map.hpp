@@ -24,7 +24,6 @@ struct GainMapMetadata {
   Rational gain_max{1, 1};
   Rational gamma{1, 1};
   // Zero offsets are required for a strict common-RGB-scale reconstruction.
-  // The neutral renderer explicitly retains its historical 1/64 offsets.
   Rational base_offset{0, 1};
   Rational alternate_offset{0, 1};
   Rational base_headroom{0, 1};

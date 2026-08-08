@@ -12,11 +12,11 @@ An Ultra HDR JPEG given as *input* is read through its gain map rather than
 through its backward-compatible SDR primary, so re-exporting one no longer
 discards the captured highlight range.
 
-The default `photographic` look uses a photographic toe, a shared linear middle,
-and a smooth HDR shoulder. It keeps SDR and HDR identical below the shoulder,
-puts qualified highlights into HDR headroom, and applies shared chroma processing
-before the two luminance outputs split. `neutral` is the previous renderer and is
-kept as a stable comparison and rollback path.
+The `photographic` look uses a photographic toe, a shared linear middle, and a
+smooth HDR shoulder. It keeps SDR and HDR identical below the shoulder, puts
+qualified highlights into HDR headroom, and applies shared chroma processing
+before the two luminance outputs split. It is the only renderer; the earlier
+`neutral` one has been removed, and `--look neutral` is now rejected.
 
 The code is organised as seven layered modules under `modules/` — foundation,
 image, look, container, gainmap, codec, app — each publishing headers from its own
@@ -87,7 +87,7 @@ across normal rebuilds.
 ```text
 HyperDR convert <file-or-directory> --output <directory>
     [--recursive] [--encoding adaptive|ultrahdr|pq|hlg|avif-pq|avif-hlg]
-    [--look photographic|neutral]
+    [--look photographic]
     [--contrast <0.80..1.35>] [--vibrance <-0.50..0.50>] [--pop <0..1>]
     [--headroom-max <0..4>] [--exposure auto|<EV>]
     [--exposure-bias <0..2>]
@@ -226,16 +226,11 @@ automatic exposure is capped at `+1.5 EV`.
 `--pop <0..1>` (default `0`) boosts EDR strength: it raises the diffuse gain
 floor, lets auto-headroom reach a little higher, and keeps more colour in bright
 highlights. A soft eligibility taper allows a small, bounded transition around
-the shoulder instead of erasing highlight edges. `neutral` ignores it.
+the shoulder instead of erasing highlight edges.
 
-In photographic mode, a manual `--headroom` must be within
-`0..--headroom-max`; validation happens before RAW decoding.
-
-`neutral` runs the legacy renderer unchanged, including its historical 1/64
-gain-map offsets. `--contrast`, `--vibrance`, and `--headroom-max` are accepted
-but ignored in that mode and the CLI prints one note. In photographic mode,
-`--gain-strength` can attenuate local HDR gain; values above `1` are capped at
-the global curve target so output cannot exceed it.
+A manual `--headroom` must be within `0..--headroom-max`; validation happens
+before RAW decoding. `--gain-strength` can attenuate local HDR gain; values
+above `1` are capped at the global curve target so output cannot exceed it.
 
 ## Rendering and compatibility guarantees
 
@@ -245,9 +240,8 @@ the global curve target so output cannot exceed it.
 - A single-channel gain map can only reconstruct a common RGB multiplier. Shared
   vibrance, highlight-to-white convergence, and hue-preserving gamut compression
   therefore happen before the SDR/HDR luminance split.
-- Photographic gain maps write zero base and alternate offsets, preserving common
-  RGB ratios during ISO 21496-1 reconstruction. The neutral path retains its
-  original offsets for output compatibility.
+- Gain maps write zero base and alternate offsets, preserving common RGB ratios
+  during ISO 21496-1 reconstruction.
 - Gain-map gamma is chosen by simulating 8-bit encode/decode error. Stored values
   use `pow(q, gamma)` and decoders use `pow(code, 1/gamma)`.
 - `2^headroom_stops` is the nominal global-curve target. Local highlight
@@ -325,9 +319,9 @@ with `verify`, then test the file on a compatible HDR device. Use at least these
    whole scene into daytime, and black surroundings stay free of gain pumping.
 
 The automated suite covers curve continuity/monotonicity, gamma round trips,
-local gain behaviour, common-RGB reconstruction, neutral compatibility, and
-HEIC/TMAP and Ultra HDR JPEG/R encode/decode. Visual device review remains the final display-specific
-acceptance gate.
+local gain behaviour, common-RGB reconstruction, ISO gain-map metadata round
+trips, and HEIC/TMAP and Ultra HDR JPEG/R encode/decode. Visual device review
+remains the final display-specific acceptance gate.
 
 ## Converting a folder
 

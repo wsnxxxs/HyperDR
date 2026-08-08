@@ -72,7 +72,6 @@ std::string next_value(int& i, int argc, char** argv, std::string_view option) {
 // Settings come from the schema; only the plumbing is listed here.
 void parse_settings(int argc, char** argv, int first, ConvertOptions& options,
                     unsigned* curve_samples = nullptr) {
-  bool photographic_setting_seen = false;
   for (int i = first; i < argc; ++i) {
     const std::string_view arg = argv[i];
     if (const Setting* setting = find_setting_by_flag(arg)) {
@@ -80,10 +79,6 @@ void parse_settings(int argc, char** argv, int first, ConvertOptions& options,
                                    ? std::string{}
                                    : next_value(i, argc, argv, arg);
       setting->apply(options, parse_setting_text(*setting, text));
-      photographic_setting_seen = photographic_setting_seen ||
-                                  arg == "--contrast" || arg == "--vibrance" ||
-                                  arg == "--pop" || arg == "--headroom-max" ||
-                                  arg == "--expansion-start" || arg == "--area-coverage";
       continue;
     }
     if (arg == "--fast-preview" && curve_samples == nullptr) {
@@ -111,9 +106,6 @@ void parse_settings(int argc, char** argv, int first, ConvertOptions& options,
     } else {
       throw std::invalid_argument("unknown option: " + std::string(arg));
     }
-  }
-  if (options.gain.look.mode == LookMode::kNeutral && photographic_setting_seen) {
-    std::cerr << "note: photographic look controls are ignored by --look neutral\n";
   }
   if (is_hlg_encoding(options.encoding)) {
     // HLG's range above diffuse white is fixed by the standard, so a higher

@@ -84,10 +84,11 @@ def options_to_settings(options: dict) -> dict:
     headroom = _headroom(options, encoding)
     return validate_settings({
         "encoding": encoding,
-        # Not a panel control. `neutral` is the converter's legacy renderer: it
-        # ignores contrast, vibrance and pop, clamps headroom to three stops,
-        # and /api/curve reports the photographic curve for it, so the preview
-        # would disagree with the export. It stays reachable from `--look`.
+        # Not a panel control, and pinned rather than passed through: the
+        # renderer decides what /api/curve draws, so a client that could choose
+        # it could make the preview disagree with the export. `photographic` is
+        # currently the only look, which does not make sending it pointless --
+        # this is the line that keeps a second one from arriving from a client.
         "look": "photographic",
         "highlight_recovery": value("highlightRecovery"),
         "contrast": value("contrast"),

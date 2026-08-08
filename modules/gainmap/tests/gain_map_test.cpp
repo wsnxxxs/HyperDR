@@ -29,7 +29,6 @@ void test_gain_map_and_metadata() {
     }
   }
   hyperdr::GainMapOptions options;
-  options.look.mode = hyperdr::LookMode::kNeutral;
   options.auto_exposure = false;
   options.auto_headroom = false;
   options.headroom_stops = 2.0F;
@@ -55,7 +54,6 @@ void test_gain_map_and_metadata() {
 
 void test_color_preservation_and_headroom() {
   hyperdr::GainMapOptions options;
-  options.look.mode = hyperdr::LookMode::kNeutral;
   options.auto_exposure = false;
   options.auto_headroom = false;
   options.headroom_stops = 3.0F;
@@ -75,27 +73,41 @@ void test_color_preservation_and_headroom() {
   const float r = saturated_result.base_linear.pixels[0];
   const float g = saturated_result.base_linear.pixels[1];
   const float b = saturated_result.base_linear.pixels[2];
-  require(std::abs(r / g - 10.0F) < 1.0e-4F &&
-              std::abs(r / b - 10.0F) < 1.0e-4F,
-          "base gamut mapping changed chromaticity");
+  // Photographic compresses this 10:1 input towards white on purpose, so the
+  // input ratio is not preserved -- what must survive is the hue. The two equal
+  // input channels have to stay exactly equal, red has to stay dominant, and the
+  // compression must not run so far that the colour is flattened or inverted.
+  require(g == b, "gamut compression split two equal channels apart");
+  require(r > g, "gamut compression did not keep red dominant");
+  const float ratio = r / g;
+  require(ratio > 1.5F && ratio < 4.0F,
+          "gamut compression left the saturated patch flat or over-saturated");
   const float gain_max =
       static_cast<float>(saturated_result.metadata.gain_max.numerator) /
       saturated_result.metadata.gain_max.denominator;
   const float headroom =
       static_cast<float>(saturated_result.metadata.alternate_headroom.numerator) /
       saturated_result.metadata.alternate_headroom.denominator;
-  require(gain_max > 0.5F && std::abs(headroom) < 1.0e-5F,
+  // The threshold only has to separate "a real coding range" from zero. The
+  // reader must not cross-check these two against each other; see
+  // iso_gain_map_test.
+  require(gain_max > 0.1F && std::abs(headroom) < 1.0e-5F,
           "gain range was incorrectly reused as alternate headroom");
 
-  // A neutral HDR patch has positive luminance headroom and should round-trip.
-  hyperdr::FloatImage neutral(2, 2, 3);
-  std::fill(neutral.pixels.begin(), neutral.pixels.end(), 1.0F);
-  const auto neutral_result = hyperdr::make_gain_map(neutral, options);
+  // An achromatic HDR patch has positive luminance headroom and should
+  // round-trip. Every pixel is the brightest one, so reconstructing at the
+  // declared headroom must reproduce the peak the renderer reports rather than
+  // a constant copied out of one renderer's arithmetic.
+  hyperdr::FloatImage achromatic(2, 2, 3);
+  std::fill(achromatic.pixels.begin(), achromatic.pixels.end(), 1.0F);
+  const auto flat = hyperdr::make_gain_map(achromatic, options);
   const auto reconstructed = hyperdr::reconstruct_gain_map(
-      neutral_result.base_linear, neutral_result.gain_map,
-      neutral_result.metadata, neutral_result.headroom_stops);
+      flat.base_linear, flat.gain_map, flat.metadata, flat.headroom_stops);
+  require(flat.stats.rendered_peak > 1.0F,
+          "an achromatic HDR patch produced no expansion at all");
   for (const float value : reconstructed.pixels) {
-    require(std::abs(value - 2.0F) < 1.0e-4F, "neutral HDR round trip failed");
+    require(std::abs(value - flat.stats.rendered_peak) < 1.0e-3F,
+            "achromatic HDR round trip did not reproduce the rendered peak");
   }
 }
 
@@ -127,11 +139,11 @@ void test_black_and_nan_guards() {
   for (const float value : result.gain_map.pixels) require(std::isfinite(value), "NaN reached gain output");
 }
 
-// The neutral renderer's alternate_headroom used to be measured before the
-// percentile trim, so it could promise highlights the encoded gain map had no
-// way to reproduce. This is the reported reproduction: a single hot pixel in a
-// flat field, which the 99.9th-percentile trim discards entirely.
-void test_neutral_encoded_headroom_matches_the_gain_map() {
+// alternate_headroom used to be measured before the percentile trim, so it
+// could promise highlights the encoded gain map had no way to reproduce. This
+// is the reported reproduction: a single hot pixel in a flat field, which the
+// 99.9th-percentile trim discards entirely.
+void test_encoded_headroom_matches_the_gain_map() {
   hyperdr::FloatImage source(100, 100, 3);
   for (std::size_t i = 0; i < source.pixels.size(); ++i) source.pixels[i] = 0.1F;
   source.at(99, 99, 0) = 100.0F;
@@ -139,7 +151,6 @@ void test_neutral_encoded_headroom_matches_the_gain_map() {
   source.at(99, 99, 2) = 100.0F;
 
   hyperdr::GainMapOptions options;
-  options.look.mode = hyperdr::LookMode::kNeutral;
   options.auto_exposure = false;
   options.exposure_ev = 0.0F;
   options.exposure_bias_ev = 0.0F;
@@ -177,12 +188,14 @@ void test_neutral_encoded_headroom_matches_the_gain_map() {
   }
 }
 
-// `--headroom 4 --look neutral` used to be accepted, reported as four, and
-// rendered as three.
-void test_neutral_rejects_headroom_above_its_ceiling() {
+// A manual headroom above the configured ceiling used to be accepted, reported
+// at the requested value, and then rendered at the ceiling -- so the file
+// disagreed with everything describing it. Rejecting is the only answer that
+// leaves the request and the result the same number.
+void test_manual_headroom_above_the_ceiling_is_rejected() {
   hyperdr::GainMapOptions options;
-  options.look.mode = hyperdr::LookMode::kNeutral;
   options.auto_headroom = false;
+  options.look.headroom_max_stops = 3.0F;
   options.headroom_stops = 4.0F;
   bool threw = false;
   try {
@@ -190,16 +203,15 @@ void test_neutral_rejects_headroom_above_its_ceiling() {
   } catch (const std::invalid_argument&) {
     threw = true;
   }
-  require(threw, "neutral must reject a headroom above its own ceiling");
+  require(threw, "a headroom above headroom-max must be rejected");
 
-  options.headroom_stops = hyperdr::kNeutralHeadroomStops;
+  options.headroom_stops = options.look.headroom_max_stops;
   hyperdr::validate_gain_map_options(options);
 
+  // Under auto-headroom the nominal value is the configured ceiling itself.
   options.auto_headroom = true;
-  options.look.headroom_max_stops = 4.0F;
-  require(std::abs(hyperdr::nominal_headroom_stops(options) -
-                   hyperdr::kNeutralHeadroomStops) < 1.0e-6F,
-          "the nominal headroom reported for neutral is its own ceiling");
+  require(std::abs(hyperdr::nominal_headroom_stops(options) - 3.0F) < 1.0e-6F,
+          "the nominal headroom reported is the configured ceiling");
 }
 
 }  // namespace
@@ -210,8 +222,8 @@ int main() {
     test_color_preservation_and_headroom();
     test_bilinear_gain_sampling();
     test_black_and_nan_guards();
-    test_neutral_encoded_headroom_matches_the_gain_map();
-    test_neutral_rejects_headroom_above_its_ceiling();
+    test_encoded_headroom_matches_the_gain_map();
+    test_manual_headroom_above_the_ceiling_is_rejected();
     std::cout << "gain-map tests passed\n";
     return 0;
   } catch (const std::exception& e) {

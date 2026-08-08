@@ -168,17 +168,6 @@ int main() {
       }
     }
 
-    // Neutral must ignore pop, like the other photographic controls.
-    GainMapOptions neutral = base_options;
-    neutral.look.mode = LookMode::kNeutral;
-    const auto neutral_base = make_gain_map(src, neutral);
-    GainMapOptions neutral_pop = neutral;
-    neutral_pop.look.pop = 1.0F;
-    const auto neutral_ignored = make_gain_map(src, neutral_pop);
-    require(neutral_base.base_linear.pixels == neutral_ignored.base_linear.pixels &&
-                neutral_base.gain_map.pixels == neutral_ignored.gain_map.pixels,
-            "neutral path was affected by pop");
-
     require(first.stats.wide_gamut_fraction > 0.0F &&
                 first.stats.wide_gamut_fraction <= 1.0F,
             "wide_gamut_fraction is not a valid fraction");
@@ -189,9 +178,8 @@ int main() {
             "wide-gamut input metric is not deterministic");
     require(first.stats.wide_gamut_fraction == popped.stats.wide_gamut_fraction &&
                 first.stats.wide_gamut_pixels == popped.stats.wide_gamut_pixels &&
-                first.stats.wide_gamut_eligible_pixels == popped.stats.wide_gamut_eligible_pixels &&
-                first.stats.wide_gamut_fraction == neutral_base.stats.wide_gamut_fraction,
-            "wide-gamut input metric was affected by look or pop");
+                first.stats.wide_gamut_eligible_pixels == popped.stats.wide_gamut_eligible_pixels,
+            "wide-gamut input metric was affected by pop");
     std::cout << "pop/parallel tests passed\n";
     return 0;
   } catch (const std::exception& error) {

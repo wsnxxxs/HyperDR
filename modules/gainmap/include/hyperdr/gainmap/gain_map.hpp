@@ -2,10 +2,10 @@
 
 // Rendering a linear Display-P3 image into an SDR base plus a gain map.
 //
-// Two renderers implement this: `kPhotographic` (the default perceptual
-// pipeline) and `kNeutral` (the earlier renderer, kept as a stable comparison
-// and rollback path). Both produce the same result type, so nothing downstream
-// -- encoder, verifier, or report -- knows which one ran.
+// One renderer implements this: the photographic perceptual pipeline. Nothing
+// downstream -- encoder, verifier, or report -- depends on which look produced
+// a result, which is what let the earlier `kNeutral` renderer be removed
+// without touching them.
 
 #include "hyperdr/gainmap/types.hpp"
 
@@ -15,12 +15,10 @@ namespace hyperdr {
                                           const GainMapOptions& options,
                                           const CaptureMetadata& capture = {});
 
-// The two renderers, exposed for direct comparison in tests and for callers
-// that have already decided which one they want.
+// Exposed separately from make_gain_map for callers and tests that want the
+// renderer without the shared input measurement around it.
 [[nodiscard]] GainMapResult make_photographic_gain_map(
     const FloatImage& linear_p3, const GainMapOptions& options,
     const CaptureMetadata& capture);
-[[nodiscard]] GainMapResult make_neutral_gain_map(const FloatImage& linear_p3,
-                                                  const GainMapOptions& options);
 
 }  // namespace hyperdr

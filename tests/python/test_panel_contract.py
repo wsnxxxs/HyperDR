@@ -72,9 +72,12 @@ class BuildArgvTest(unittest.TestCase):
                 options_to_settings(options)
 
     def test_the_renderer_is_fixed_and_a_stale_client_cannot_change_it(self):
-        """`neutral` ignores contrast/vibrance/pop and mismatches the preview."""
+        """The renderer decides what /api/curve draws, so a client cannot pick it."""
         self.assertEqual(flags(build_argv("HyperDR", dict(BASE)))["--look"],
                          "photographic")
+        # `neutral` was the second look until it was removed; a stale client
+        # still asking for it must be pinned, not passed through to the CLI,
+        # which would now reject the name outright.
         found = flags(build_argv("HyperDR", dict(BASE, look="neutral")))
         self.assertEqual(found["--look"], "photographic")
 

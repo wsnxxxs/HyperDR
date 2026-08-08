@@ -76,60 +76,6 @@ void check_sample_bounds() {
   require(threw, "a sample count below two must be rejected");
 }
 
-// The neutral look has its own curve. Exporting the photographic one for it
-// meant the panel previewed maths the neutral renderer never runs.
-void check_neutral_curve_is_neutral() {
-  hyperdr::LookOptions neutral;
-  neutral.mode = hyperdr::LookMode::kNeutral;
-  const auto curve = hyperdr::build_look_curve(neutral, 3.0F, 257);
-
-  require(std::abs(curve.shoulder_output - hyperdr::kNeutralKnee) < 1.0e-6F,
-          "the neutral curve's shoulder is the neutral knee");
-
-  const auto photographic = hyperdr::build_look_curve(hyperdr::LookOptions{}, 3.0F, 257);
-  require(std::abs(photographic.shoulder_output - curve.shoulder_output) > 1.0e-3F,
-          "the two looks must not export the same curve");
-
-  // Below the knee the neutral base is the identity, so the sampled scene
-  // luminance equals the SDR level exactly.
-  for (std::size_t i = 0; i < curve.sdr.size(); ++i) {
-    if (curve.sdr[i] > hyperdr::kNeutralKnee) break;
-    require(std::abs(curve.scene[i] - curve.sdr[i]) < 1.0e-5F,
-            "neutral is the identity below its knee");
-  }
-
-  // Above the knee it is the renderer's compression, reproduced here so the
-  // test fails if either side changes alone.
-  for (std::size_t i = 0; i < curve.sdr.size(); ++i) {
-    const float level = curve.sdr[i];
-    if (level <= hyperdr::kNeutralKnee || level > 0.99F) continue;
-    const float u = (curve.scene[i] - hyperdr::kNeutralKnee) /
-                    (1.0F - hyperdr::kNeutralKnee);
-    const float rendered = hyperdr::kNeutralKnee +
-                           (1.0F - hyperdr::kNeutralKnee) * u / (1.0F + u);
-    require(std::abs(rendered - level) < 1.0e-4F,
-            "the neutral curve must invert the neutral renderer's knee");
-  }
-
-  for (const float gain : curve.gain_stops) {
-    require(gain >= -1.0e-6F && gain <= curve.headroom_stops + 1.0e-3F,
-            "neutral gain stays within its own headroom");
-  }
-}
-
-// The renderer clamps to three stops. A curve that reported four described a
-// rendition the exporter would never produce.
-void check_neutral_headroom_ceiling() {
-  hyperdr::LookOptions neutral;
-  neutral.mode = hyperdr::LookMode::kNeutral;
-  const auto curve = hyperdr::build_look_curve(neutral, 4.0F, 65);
-  require(std::abs(curve.headroom_stops - hyperdr::kNeutralHeadroomStops) < 1.0e-6F,
-          "neutral curve headroom is capped at the renderer's ceiling");
-  require(std::abs(curve.headroom_linear -
-                   std::exp2(hyperdr::kNeutralHeadroomStops)) < 1.0e-4F,
-          "linear headroom follows the cap");
-}
-
 }  // namespace
 
 int main() {
@@ -138,8 +84,6 @@ int main() {
     check_scene_inversion();
     check_no_headroom_means_no_gain();
     check_sample_bounds();
-    check_neutral_curve_is_neutral();
-    check_neutral_headroom_ceiling();
   } catch (const std::exception& e) {
     std::cerr << "look_curve_test failed: " << e.what() << '\n';
     return 1;

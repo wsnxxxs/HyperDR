@@ -12,33 +12,20 @@
 namespace hyperdr {
 
 // The rendering mode is deliberately separate from the ISO gain-map metadata.
-// `kNeutral` preserves the legacy renderer for reproducible comparison and
-// rollback, while `kPhotographic` uses the perceptual HDR pipeline.
+// Only the perceptual HDR pipeline remains. The enum stays because `look` is
+// still recorded in the report and accepted by the CLI and the settings schema,
+// so a second renderer can be added later without reintroducing the concept.
 enum class LookMode {
-  kNeutral,
   kPhotographic,
 };
 
-// The neutral renderer's fixed contract, named once.
-//
-// Neutral compresses highlights with a hard-coded knee and clamps its own
-// headroom, and those two numbers used to live only inside the renderer. The
-// curve export therefore described the photographic curve while the renderer
-// used this one, and `--headroom 4` was accepted, reported, and then silently
-// rendered at 3 -- so the panel's HDR preview, built from the exported curve,
-// could not match the file it was previewing. Everything that has an opinion
-// about the neutral look now reads these.
-inline constexpr float kNeutralKnee = 0.75F;
-inline constexpr float kNeutralHeadroomStops = 3.0F;
-
 // The strongest expansion the given look can represent, before any content
-// dependent selection narrows it.
-[[nodiscard]] constexpr float look_headroom_ceiling_stops(LookMode mode,
+// dependent selection narrows it. Photographic imposes no ceiling of its own,
+// so this is the configured headroom-max; the parameter is kept so a future
+// look with a fixed ceiling has somewhere to state it.
+[[nodiscard]] constexpr float look_headroom_ceiling_stops(LookMode,
                                                           float configured) {
-  return mode == LookMode::kNeutral
-             ? (configured < kNeutralHeadroomStops ? configured
-                                                   : kNeutralHeadroomStops)
-             : configured;
+  return configured;
 }
 
 [[nodiscard]] const char* look_mode_name(LookMode mode);
@@ -79,9 +66,7 @@ struct LookOptions {
 };
 
 // Rejects out-of-range creative controls before anything is decoded or
-// allocated. Neutral mode ignores the photographic tuning controls, so their
-// ranges are only enforced for the look that reads them; the structural
-// invariants the tone curve needs are checked for both.
+// allocated.
 void validate_look_options(const LookOptions& options);
 
 }  // namespace hyperdr

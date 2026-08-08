@@ -70,8 +70,7 @@
         },
         "look": {
           "enum": [
-            "photographic",
-            "neutral"
+            "photographic"
           ]
         },
         "highlight_recovery": {

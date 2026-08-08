@@ -171,12 +171,8 @@ int main(int argc, char** argv) {
     auto options = photographic_defaults();
     const auto photographic = render(options);
 
-    options.look.mode = hyperdr::LookMode::kNeutral;
-    const auto neutral = render(options);
-
     if (print_only) {
       print("photographic", photographic);
-      print("neutral", neutral);
       return 0;
     }
 
@@ -194,15 +190,6 @@ int main(int argc, char** argv) {
     // but the specular disc must still reach well past diffuse white.
     require(photographic.rendered_peak > 4.0,
             "the specular highlight should reach into the HDR headroom");
-
-    close_to(neutral.base_mean, 0.210281, 0.004, "neutral base mean");
-    close_to(neutral.gain_mean, 0.075224, 0.004, "neutral gain mean");
-    close_to(neutral.headroom_stops, 3.000000, 0.020, "neutral headroom");
-
-    // The two looks must stay distinguishable; collapsing them would mean the
-    // rollback path silently stopped being a rollback path.
-    require(std::abs(photographic.base_mean - neutral.base_mean) > 0.005,
-            "photographic and neutral renders should not be identical");
 
     check_determinism(photographic_defaults());
   } catch (const std::exception& e) {

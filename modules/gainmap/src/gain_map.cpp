@@ -72,23 +72,12 @@ void validate_gain_map_options(const GainMapOptions& options) {
   }
   validate_look_options(options.look);
   if (options.auto_headroom) return;
-  if (options.look.mode == LookMode::kPhotographic) {
-    // The photographic renderer treats headroom-max as a hard ceiling, so an
-    // explicit target above it would silently be clamped instead of honoured.
-    if (!(std::isfinite(options.headroom_stops) && options.headroom_stops >= 0.0F &&
-          options.headroom_stops <= options.look.headroom_max_stops)) {
-      throw std::invalid_argument(
-          "manual photographic headroom must be in [0, headroom-max]");
-    }
-  } else if (!(std::isfinite(options.headroom_stops) &&
-               options.headroom_stops >= 0.0F &&
-               options.headroom_stops <= kNeutralHeadroomStops)) {
-    // The neutral renderer clamps to three stops. It used to accept a higher
-    // target, report it, and then render three -- so `--headroom 4` produced a
-    // file that disagreed with everything describing it. Rejecting is the only
-    // answer that leaves the request and the result the same number.
+  // The photographic renderer treats headroom-max as a hard ceiling, so an
+  // explicit target above it would silently be clamped instead of honoured.
+  if (!(std::isfinite(options.headroom_stops) && options.headroom_stops >= 0.0F &&
+        options.headroom_stops <= options.look.headroom_max_stops)) {
     throw std::invalid_argument(
-        "manual neutral headroom must be in [0, 3] stops");
+        "manual photographic headroom must be in [0, headroom-max]");
   }
 }
 
@@ -102,13 +91,11 @@ GainMapResult make_gain_map(const FloatImage& source, const GainMapOptions& opti
                             const CaptureMetadata& capture) {
   validate_gain_map_options(options);
   if (source.channels != 3) throw std::invalid_argument("gain-map input must be RGB");
-  // Measure the decoded P3 source before exposure or either look path mutates
-  // its colour. This makes the report a property of the capture rather than of
-  // the grade.
+  // Measure the decoded P3 source before exposure or the renderer mutates its
+  // colour. This makes the report a property of the capture rather than of the
+  // grade.
   const auto wide_gamut = measure_wide_gamut_input(source);
-  auto result = options.look.mode == LookMode::kPhotographic
-                    ? make_photographic_gain_map(source, options, capture)
-                    : make_neutral_gain_map(source, options);
+  auto result = make_photographic_gain_map(source, options, capture);
   set_wide_gamut_stats(result.stats, wide_gamut);
   return result;
 }

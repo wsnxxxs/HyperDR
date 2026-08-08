@@ -28,7 +28,7 @@ __pycache__/
 *.pyc
 /.pytest_cache/
 /hdr-workspace/
-/output/playwright/
+/output/
 /.playwright-cli/
 /dist/
 /dist-release-*/
@@ -43,9 +43,11 @@ __pycache__/
 /test-data/
 /reports/
 *.report.json
+/.tmp-*/
 
 # Agent worktrees and local agent state.
 .claude/
+/.codex-remote-attachments/
 
 # Bundled local ML runtime and private trained weights are machine-local.
 /HyperDR_Model/.venv/

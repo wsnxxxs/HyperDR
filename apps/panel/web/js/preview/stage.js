@@ -14,6 +14,7 @@
 import { api } from "../core/api.js";
 import { store } from "../core/store.js";
 import { role, setText, setPressed, clamp } from "../core/dom.js";
+import { mobileLayout, touchQuery } from "../core/media.js";
 import { renderSdr } from "./cpu.js";
 import { createHdrRenderer } from "./gpu.js";
 import { createSdrGpuRenderer } from "./sdr-gpu.js";
@@ -21,9 +22,6 @@ import { analyse, mountScope } from "./scope.js";
 import { createUploader } from "./session.js";
 
 const hdrDisplayQuery = window.matchMedia("(dynamic-range: high)");
-const touchQuery = window.matchMedia(
-  "(max-width: 640px), (max-width: 1024px) and (hover: none) and (pointer: coarse)");
-const mobileLayout = window.matchMedia("(max-width: 859px)");
 
 /* Preview sizes are quantised: the server's preview cache keys on the edge and
  * holds eight entries, so a continuous "how wide is the stage right now" would

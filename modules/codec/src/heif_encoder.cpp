@@ -21,6 +21,7 @@
 #include <memory>
 #include <numeric>
 #include <stdexcept>
+#include <string>
 
 namespace hyperdr {
 namespace {
@@ -472,7 +473,25 @@ void verify_heic_decodable(const std::vector<std::uint8_t>& bytes) {
   if (!inspection.structurally_valid || !inspection.has_heic_brand ||
       !inspection.has_tmap_brand || !inspection.has_tmap_item ||
       !inspection.has_dimg_reference || !inspection.has_altr_group) {
-    throw std::runtime_error("Adaptive HDR HEIC failed semantic structure verification");
+    // inspect_heif reports a failed check as a cleared flag and puts the reason
+    // in `errors`, so a message built only from the flags describes the symptom
+    // and hides the cause. A rejected gain-map payload, for instance, clears
+    // structurally_valid and used to surface as nothing but "failed semantic
+    // structure verification" -- true, and no help at all in finding out why.
+    std::string reason = "Adaptive HDR HEIC failed semantic structure verification:";
+    const auto note = [&reason](bool ok, const char* what) {
+      if (!ok) reason += std::string(" no ") + what + ";";
+    };
+    note(inspection.has_heic_brand, "heic brand");
+    note(inspection.has_tmap_brand, "tmap brand");
+    note(inspection.has_tmap_item, "tmap item");
+    note(inspection.has_dimg_reference, "dimg reference");
+    note(inspection.has_altr_group, "altr group");
+    for (const auto& error : inspection.errors) reason += " " + error + ";";
+    if (inspection.errors.empty() && inspection.structurally_valid) {
+      reason += " no further detail was reported";
+    }
+    throw std::runtime_error(reason);
   }
   (void)parse_tmap_payload(extract_tmap_payload(bytes));
   const auto references = find_tmap_references(bytes);

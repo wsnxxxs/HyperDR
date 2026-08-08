@@ -847,6 +847,23 @@
   .rail-head { margin-bottom: var(--space-3); }
   .rail-head { margin-bottom: var(--space-2); }
   .group { padding-block: 10px; }
+
+  /* On a desktop the mode toggle is a pair of 20px chips sharing the group's
+     heading row. On a phone `.segmented button` gives every mode switch a 44px
+     touch target, which turns that row into a band and pulls the h3 off the
+     baseline it is aligned to. Wrap the toggle onto the row below the heading
+     and let the two modes split it -- the same treatment the dock's segmented
+     controls already get, and "优化" is the one control here worth a full row. */
+  .group-head { flex-wrap: wrap; }
+  .optimize-toggle {
+    display: flex;
+    flex-basis: 100%;
+  }
+  .optimize-toggle button {
+    flex: 1;
+    padding-inline: var(--space-3);
+    font-size: var(--text-sm);
+  }
   .scope {
     grid-template-rows: auto 56px auto auto;
     min-height: auto;

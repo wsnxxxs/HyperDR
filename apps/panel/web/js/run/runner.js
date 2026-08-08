@@ -14,11 +14,11 @@
 import { api, ApiError } from "../core/api.js";
 import { store } from "../core/store.js";
 import { role, setText, debounce } from "../core/dom.js";
+import { touchQuery } from "../core/media.js";
 import { toOptions, OPTION_KEYS } from "../settings/schema.js";
 
 const POLL_INTERVAL_MS = 400;
 const TRACKING_INTERRUPTED_MS = 15_000;
-const desktopLayout = window.matchMedia("(min-width: 641px)");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const runOptionsFor = (state) => ({
@@ -63,7 +63,10 @@ export function mountRunner({ toast }) {
     warn.hidden = !result.degradedNote;
     setText(warn, result.degradedNote || "");
     if (download.href !== result.downloadUrl) download.href = result.downloadUrl;
-    exportButton.hidden = !(state.capabilities?.nativeOutputPicker && desktopLayout.matches);
+    /* "Export" opens the OS save dialog. The capability flag says the browser
+     * has one; `touchQuery` says whether the hand holding the device wants it
+     * over the plain download, which on a phone or tablet it does not. */
+    exportButton.hidden = !(state.capabilities?.nativeOutputPicker && !touchQuery.matches);
   }
 
   /* Touching any setting after a run makes the card's file describe settings
@@ -345,5 +348,5 @@ export function mountRunner({ toast }) {
       refreshCommand();
     }
   });
-  desktopLayout.addEventListener?.("change", () => syncResult(store.get()));
+  touchQuery.addEventListener?.("change", () => syncResult(store.get()));
 }

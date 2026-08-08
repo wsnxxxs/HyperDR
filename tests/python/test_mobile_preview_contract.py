@@ -19,6 +19,14 @@ INDEX = (REPO_ROOT / "apps" / "panel" / "web" / "index.html").read_text(
 CONTROLS = (
     REPO_ROOT / "apps" / "panel" / "web" / "js" / "settings" / "controls.js"
 ).read_text(encoding="utf-8")
+RUNNER = (
+    REPO_ROOT / "apps" / "panel" / "web" / "js" / "run" / "runner.js"
+).read_text(encoding="utf-8")
+MEDIA = (REPO_ROOT / "apps" / "panel" / "web" / "js" / "core" / "media.js").read_text(
+    encoding="utf-8")
+
+#: Everything below the marker is inside `@media (width < 860px)`.
+MOBILE_CSS = COMPONENTS[COMPONENTS.index("/* -- small screens"):]
 
 
 class MobilePreviewContractTest(unittest.TestCase):
@@ -65,6 +73,35 @@ class MobilePreviewContractTest(unittest.TestCase):
         self.assertIn("trigger.maskMouseHovered = true;", CONTROLS)
         self.assertIn("trigger.maskMouseHovered = false;", CONTROLS)
         self.assertIn("open || button.maskMouseHovered === true", CONTROLS)
+
+    def test_mode_toggle_takes_its_own_row_rather_than_the_heading(self):
+        # `.segmented button` makes every mode switch a 44px touch target, so
+        # the toggle cannot share the group's baseline-aligned heading row.
+        self.assertIn(".segmented button { min-height: 44px; }", MOBILE_CSS)
+        self.assertIn(".group-head { flex-wrap: wrap; }", MOBILE_CSS)
+        toggle = MOBILE_CSS.split(".optimize-toggle {", 1)[1].split("}", 1)[0]
+        self.assertIn("display: flex", toggle)
+        self.assertIn("flex-basis: 100%", toggle)
+        # A height here would opt the toggle back out of the 44px target.
+        self.assertNotIn("height", toggle)
+        buttons = MOBILE_CSS.split(".optimize-toggle button {", 1)[1].split("}", 1)[0]
+        self.assertIn("flex: 1", buttons)
+
+    def test_viewport_queries_are_defined_once_and_match_the_stylesheet(self):
+        self.assertIn('matchMedia("(width < 860px)")', MEDIA)
+        self.assertIn("@media (width < 860px)", COMPONENTS)
+        self.assertIn("@media (width < 860px)", SHELL)
+        for source in (STAGE, RUNNER):
+            self.assertIn('from "../core/media.js"', source)
+            self.assertNotIn("width: 859px", source)
+            self.assertNotIn("min-width: 641px", source)
+
+    def test_native_save_dialog_is_offered_by_pointer_not_by_width(self):
+        self.assertIn(
+            "state.capabilities?.nativeOutputPicker && !touchQuery.matches",
+            RUNNER,
+        )
+        self.assertIn('touchQuery.addEventListener?.("change"', RUNNER)
 
 
 if __name__ == "__main__":

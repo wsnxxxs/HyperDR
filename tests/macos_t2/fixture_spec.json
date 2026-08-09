@@ -41,6 +41,18 @@
     {"id": "gamma-1-control", "filename": "fixtures/gamma-1-control.heic", "gamma": {"numerator": 1, "denominator": 1}},
     {"id": "gamma-2-probe", "filename": "fixtures/gamma-2-probe.heic", "gamma": {"numerator": 2, "denominator": 1}}
   ],
+  "harness_scope_note": "The registered acceptance object below judges the path where this harness resamples the gain map itself and hands Core Image a full-resolution code image. That path settles the interpolation order by construction — codes are interpolated here and decoded there — so it tests the decode formula, the interval mapping and the weight semantics, and it cannot answer which order Apple's decoder uses. The question T2 was registered to settle is only asked by the path where Core Image receives the native-resolution gain map and does the upsampling. That path is rendered and recorded as core_image_upsampled_gain, and its decision rule is registered below, before any such data exists.",
+  "core_image_upsampled_gain_acceptance": {
+    "registered_utc": "2026-08-10",
+    "registered_before_any_observation": "No run has ever produced this measurement: the first three macOS runs stopped before Core Image rendered anything, and the path itself did not exist until this revision.",
+    "comparison": "At each registered headroom, compare core_image_upsampled_gain.rgb against the two C++ hypotheses already emitted for that node, code_domain_rgb and decoded_domain_first_rgb.",
+    "code_domain_mean_absolute_error_max": 0.001,
+    "code_domain_max_absolute_error_max": 0.003,
+    "alternative_mean_absolute_error_min": 0.004,
+    "code_to_alternative_mae_ratio_max": 0.25,
+    "verdict_rule": "Apple interpolates in the code domain if the code-domain errors clear both maxima and the alternative is at least four times worse at every registered headroom; Apple interpolates in the decoded domain if the same holds with the two hypotheses exchanged; anything else is unresolved and must be reported as unresolved rather than resolved by the closer of two poor fits.",
+    "kernel_confound": "A failure of both hypotheses does not adjudicate the order. It says Apple's upsampling differs from bilinear-with-edge-clamping in kernel or convention, and separating that needs a fixture whose interpolated values are kernel-independent, which this one is not."
+  },
   "physical_headroom_stops": [0.5, 1.0, 1.5],
   "core_image_headroom_rule": "Pass 2^H to CIImage.applyingGainMap(_:headroom:); Core Image's API uses a linear ratio while the registered independent variable H is in stops.",
   "acceptance": {

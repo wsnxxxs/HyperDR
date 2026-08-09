@@ -235,7 +235,16 @@ func run() throws {
             a: scaleX, b: 0, c: 0, d: scaleY,
             tx: translationX, ty: translationY
         )
-        let scaledGain = gain.samplingLinear().transformed(by: transform)
+        // clampedToExtent before sampling: outside its extent a CIImage is
+        // transparent black, so an unclamped bilinear tap at the border blends
+        // gain code zero into the edge row and column, while reconstruct.cpp
+        // clamps to the edge sample. A border disagreement caused by that would
+        // be charged to the interpolation question it has nothing to do with.
+        let scaledGain = gain
+            .clampedToExtent()
+            .samplingLinear()
+            .transformed(by: transform)
+            .cropped(to: base.extent)
         guard scaledGain.extent == base.extent else {
             throw HarnessError.message("scaled gain extent does not match the SDR base")
         }
@@ -252,12 +261,58 @@ func run() throws {
                 colorSpace: linearP3,
                 label: "Core Image rendered output"
             )
+
+            // The judged path above hands Core Image a gain map this harness has
+            // already resampled, which settles the interpolation order by
+            // construction: codes are interpolated here, then decoded there. It
+            // can confirm the decode formula and the weight semantics; it cannot
+            // say what Apple's decoder does when Apple is the one upsampling.
+            // This second path hands over the native-resolution gain map, which
+            // is the only way the registered question gets asked at all. It is
+            // recorded and never judged here: no decision rule for it has been
+            // registered, and inventing one after seeing the numbers is exactly
+            // what pre-registration exists to prevent.
+            var nativeRecord: [String: Any]
+            let nativeRendered = base.applyingGainMap(gain, headroom: linearHeadroom)
+            if nativeRendered.extent != base.extent {
+                nativeRecord = [
+                    "available": false,
+                    "reason": "rendered extent \(nativeRendered.extent) is not the base extent",
+                ]
+            } else if let nativePixels = try? renderRGB(
+                nativeRendered, context: context, colorSpace: linearP3,
+                label: "Core Image native-gain output"
+            ) {
+                nativeRecord = ["available": true, "rgb": nativePixels.map(Double.init)]
+            } else {
+                nativeRecord = ["available": false, "reason": "render failed"]
+            }
+
             nodes.append([
                 "physical_headroom_stops": Double(stops),
                 "linear_headroom_passed_to_core_image": Double(linearHeadroom),
                 "rgb": pixels.map(Double.init),
+                "core_image_upsampled_gain": nativeRecord,
             ])
         }
+
+        // A third path with no harness geometry in it at all: ask ImageIO and
+        // Core Image to expand the file themselves. Whatever comes out is
+        // Apple's pipeline end to end, at the headroom the file declares.
+        var expandedRecord: [String: Any] = [
+            "available": false,
+            "reason": "expandToHDR did not yield a base-sized image",
+        ]
+        if let hdr = CIImage(
+            contentsOf: fileURL,
+            options: [.applyOrientationProperty: false, .expandToHDR: true]
+        ), hdr.extent == base.extent,
+           let hdrPixels = try? renderRGB(
+               hdr, context: context, colorSpace: linearP3, label: "expandToHDR output"
+           ) {
+            expandedRecord = ["available": true, "rgb": hdrPixels.map(Double.init)]
+        }
+
         fixtureReports.append([
             "id": fixture.id,
             "gamma": Double(fixture.gamma.numerator) / Double(fixture.gamma.denominator),
@@ -270,6 +325,7 @@ func run() throws {
             "gain_height": gainHeight,
             "decoded_input_bundle": bundleName,
             "nodes": nodes,
+            "expand_to_hdr": expandedRecord,
         ])
     }
     let report: [String: Any] = [

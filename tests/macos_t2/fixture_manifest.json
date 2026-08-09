@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "protocol_id": "hyperdr.display-domain/v1/T2",
-  "generated_from_git_commit": "5b80df4c735a2cfffb3aad0ef3a60e9ada808fe7",
+  "generated_from_git_commit": "d5f023fcb6903243683fd9d02251723e50de7809",
   "generator_executable": {
     "path_recorded_for_provenance_only": "C:\\Users\\Ryan\\Desktop\\HyperDR_display_gates\\build-t2-codecs\\Release\\HyperDR.exe",
     "sha256": "2063298cb6b250bc17ef0a35bf0a1b0f3bd3392a544fd2d5aa664f05520a3793"
@@ -12,7 +12,7 @@
     "modules/container/src/iso_gain_map.cpp": "c2b69935a6e5b264a405462139eedfc84d7783ee703fecbd851af6cab224b58e",
     "modules/gainmap/src/reconstruct.cpp": "b429de7bb0cfac2111377559bbc227ea80cbba4e40896951681c47291a367791",
     "tests/macos_t2/generate_fixtures.py": "907fda133ee895ff36315e3ec3f8547f83a7a9e5eaaea139f4455b215c356a51",
-    "tests/macos_t2/fixture_spec.json": "0161e1ddc343f0c4f59e310f294ea9f3f485a1d6ed88ed7f88966976350088b1"
+    "tests/macos_t2/fixture_spec.json": "ae9e2c0f7cb49488da2c0269cbf72249cf27ac0ee0dfaaeb4b2b845334b08d2d"
   },
   "fixtures": [
     {
@@ -23,7 +23,7 @@
         "denominator": 1
       },
       "byte_length": 14343,
-      "sha256": "f3c0118e6b84c77f45adbb06b32a04356e8e9901e47224bd363687140ba4dd12"
+      "sha256": "eafc27fdc779a6735fecb977494062df8d1e311744b3fbacc10f75c1c4f27a56"
     },
     {
       "id": "gamma-2-probe",
@@ -33,7 +33,7 @@
         "denominator": 1
       },
       "byte_length": 14343,
-      "sha256": "d2b7f80cad3bb5c35929a2bcee4b60102cb9778693e5a00094b56c8e031cc991"
+      "sha256": "0f9b5795a1ca2dfedae3ede0c447f9244713e036748fad2c77e2c66812ef3450"
     }
   ],
   "pair_invariant": {

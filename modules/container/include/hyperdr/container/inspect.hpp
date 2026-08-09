@@ -31,6 +31,13 @@ struct HeifInspection {
   bool has_altr_group{false};
   bool has_exif{false};
   bool has_xmp{false};
+  bool has_data_information{false};
+  bool gain_map_has_auxl_reference{false};
+  // The auxiliary type URN the gain-map item declares, empty when the item is
+  // not an auxiliary image at all. Reported rather than judged: Apple's own
+  // captures declare a private URN here, so a fixed expected value belongs in a
+  // writer's self-check, not in inspection.
+  std::string gain_map_auxiliary_type;
   bool has_tmap_metadata{false};
   GainMapMetadata tmap_metadata{};
   std::uint32_t primary_item_id{};

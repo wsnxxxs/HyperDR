@@ -101,7 +101,7 @@ printf '\n== Ask ImageIO what it sees in each file ==\n'
 # Positional parameters rather than an array: /bin/bash on macOS is 3.2, where an
 # empty array expanded under `set -u` aborts the script.
 set --
-for candidate in tests/macos_t2/fixtures-prerepair/* tests/macos_t2/reference/*; do
+for candidate in tests/macos_t2/fixtures-prerepair/* tests/macos_t2/probes/* tests/macos_t2/reference/*; do
   case "$candidate" in
     *.heic|*.HEIC|*.heif|*.HEIF|*.jpg|*.JPG|*.jpeg|*.JPEG)
       [ -f "$candidate" ] && set -- "$@" "$candidate" ;;

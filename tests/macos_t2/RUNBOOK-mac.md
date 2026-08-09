@@ -90,41 +90,26 @@ bash tests/macos_t2/run_t2_local.sh
 | `ImageIO did not expose the ISO gain map` | 见下面「Core Image 拒收时怎么归因」 | 取决于参照文件的表现 |
 | 预检退出码 2 | 机器不合格，没产出证据 | 否，换机器 |
 
-### Core Image 拒收时怎么归因
+### 这次预期会跑完，怎么读
 
-打开 `t2-output/imageio-diagnostic.txt`，只看每个**路径**下面的 `ISOGainMap:` 一行
-（诊断器打印完整路径，因为几个探针故意重名）。
+前三次都停在 Core Image 那一步，原因已查明并**不是写入器的问题**：夹具是 8×4，
+任一边小于 64 像素就会被补成 64×64 再由 essential 的 `clap` 裁回，ImageIO 不认。
+未经任何容器修复的 512×384 输出，macOS 读得好好的。夹具现在改成 128×128 / gain 64×64。
 
-前两次运行已经确立：Apple 与 Adobe Indigo 的文件被接受，我们的 8×4 文件被拒，
-补 `dinf`/`auxC`/`auxl` 之后仍被拒。所以这次要读的是**五格矩阵**：
+所以这次**预期会走完全程**并产出 `t2-report.json`，`status:` 那一行就是插值顺序的裁定。
 
-| 路径 | 是什么 | 预期 | 若不符 |
-|---|---|---|---|
-| `reference/IMG_3841.HEIC` | Apple 写的 | `PRESENT` | 诊断器本身有问题，整轮作废 |
-| `reference/idg_….jpg` | Adobe 写的 | `PRESENT` | 同上 |
-| `fixtures-prerepair/…` | 修复前 8×4 | `absent` | 变的不是文件，这轮不可比 |
-| `probes/tiny-8x4-auxrepair-only.heic` | 只补了 aux 的 8×4 | `absent` | 同上 |
-| **`fixtures/…`** | 两轮修复齐全的 8×4 | ？ | — |
-| **`probes/normal-512x384-repaired.heic`** | 两轮修复齐全的正常尺寸 | ？ | — |
-| `probes/normal-512x384-prerepair.heic` | 修复前正常尺寸 | ？ | — |
+同时诊断里有五个对照，它们必须复现已知行为，否则这轮不可比：
 
-**结论落在最后三行**：
+| 路径 | 预期 |
+|---|---|
+| `fixtures-prerepair/*`、`probes/tiny-8x4-auxrepair-only.heic` | `absent`（8×4，已知被拒） |
+| `probes/normal-512x384-*.heic` | `PRESENT`（正常尺寸，已知被接受） |
+| `reference/*` | `PRESENT` |
 
-- `normal-512x384-repaired` **PRESENT** 而 `fixtures` **absent** → 普通路径一直没问题，
-  是 8×4 夹具的尺寸路径在捣鬼，回去把夹具做大重来；
-- 两者都 **PRESENT** → 两轮修复正是 macOS 要的，脚本会自己继续跑判据，插值顺序当场裁定；
-- 两者都 **absent** → 两轮修复都不够，剩下的差异在别处，回去要考虑放弃手写 tmap 注入；
-- `normal-512x384-prerepair` 与 `-repaired` 的差异，直接告诉你修复本身有没有作用。
+**两个 8×4 对照仍然失败、而 128×128 夹具成功**——这一条同时出现，才把"夹具几何是原因"
+从推测变成测量。
 
-前四行是**对照**，它们必须复现已知结果，最后三行才可读。任何一行反常就把整份带回来，
-别现场改文件重跑。
-
-一个必须记住的限制：Indigo 是 **JPEG/MPF**，我们的文件是 **HEIC**，
-所以"Indigo 行、我们不行"里混着容器格式的差异。干净的对照需要一个非 Apple 写的
-HEIC ISO gain map，本项目手上没有。
-
-`HDRGainMap:` 那一行是 Apple 私有的旧类型，用来判断 Apple 是不是把这个文件
-当成了另一种 gain map；两个夹具在它上面也 `absent` 才说明是彻底没认。
+若 `fixtures/` 仍是 `absent`：几何不是全部原因，把整份带回来，别在现场改夹具。
 
 **四条铁律**：
 

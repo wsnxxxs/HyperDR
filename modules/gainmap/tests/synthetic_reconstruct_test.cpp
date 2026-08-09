@@ -150,6 +150,50 @@ void test_gamma_interpolation_order_is_code_domain() {
   }
 }
 
+void test_clamp_statistics_are_reported() {
+  // A render with nothing to clamp must say so, or a zero clamp count means
+  // "not measured" and "measured zero" at the same time.
+  hyperdr::ReconstructionStats quiet{};
+  (void)hyperdr::reconstruct_gain_map(base_image(1.0F), gain_image(0.5F),
+                                      positive_metadata(), 1.0F, &quiet);
+  require(quiet.total_values == 3 && quiet.total_pixels == 1,
+          "totals were not reported for an unclamped render");
+  require(quiet.clamp_values == 0 && quiet.clamp_pixels == 0,
+          "an unclamped render reported clamped samples");
+
+  // Only the red channel goes negative. Counting values and pixels separately
+  // is what makes that visible: both pixels are affected, but only two of the
+  // six channel samples are. Collapsing the two counts would let a wholly
+  // clamped render and a one-channel clip report the same number, and the
+  // protocol compares clamp rates between arms at every headroom.
+  auto metadata = positive_metadata();
+  metadata.flags |= 0x80U;
+  metadata.channels = {
+      {{-1, 1}, {-1, 1}, {1, 1}, {0, 1}, {2, 1}},
+      {{0, 1}, {1, 1}, {1, 1}, {0, 1}, {0, 1}},
+      {{0, 1}, {1, 1}, {1, 1}, {0, 1}, {0, 1}},
+  };
+  hyperdr::FloatImage base(2, 1, 3);
+  for (float& sample : base.pixels) sample = 1.0F;
+  hyperdr::FloatImage gain(2, 1, 3);
+  for (float& code : gain.pixels) code = 1.0F;
+
+  hyperdr::ReconstructionStats stats{};
+  const auto rendered =
+      hyperdr::reconstruct_gain_map(base, gain, metadata, 2.0F, &stats);
+  require_close(rendered.pixels[0], 0.0F, 1.0e-6F,
+                "the negative red channel was not clamped");
+  require_close(rendered.pixels[1], 2.0F, 1.0e-6F,
+                "green was affected by red's clamp");
+  require_close(rendered.pixels[2], 2.0F, 1.0e-6F,
+                "blue was affected by red's clamp");
+  require(stats.total_values == 6 && stats.total_pixels == 2,
+          "totals did not match the image size");
+  require(stats.clamp_values == 2, "clamped channel samples were miscounted");
+  require(stats.clamp_pixels == 2,
+          "pixels with a clamped channel were miscounted");
+}
+
 void test_three_channel_reconstruction_uses_each_channel() {
   auto metadata = positive_metadata();
   metadata.flags |= 0x80U;
@@ -209,6 +253,7 @@ int main() {
     test_negative_gain_clamp();
     test_reverse_headroom_direction();
     test_gamma_interpolation_order_is_code_domain();
+    test_clamp_statistics_are_reported();
     test_three_channel_reconstruction_uses_each_channel();
     test_channel_mismatch_is_rejected();
     std::cout << "synthetic reconstruction tests passed\n";

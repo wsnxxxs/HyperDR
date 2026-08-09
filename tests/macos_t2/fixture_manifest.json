@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "protocol_id": "hyperdr.display-domain/v1/T2",
-  "generated_from_git_commit": "4aebde4e2197ac9c5d4de6d9d815aa94f003ed09",
+  "generated_from_git_commit": "5b80df4c735a2cfffb3aad0ef3a60e9ada808fe7",
   "generator_executable": {
     "path_recorded_for_provenance_only": "C:\\Users\\Ryan\\Desktop\\HyperDR_display_gates\\build-t2-codecs\\Release\\HyperDR.exe",
     "sha256": "2063298cb6b250bc17ef0a35bf0a1b0f3bd3392a544fd2d5aa664f05520a3793"
@@ -11,8 +11,8 @@
     "modules/gainmap/src/external.cpp": "cb6f7590b997cfd2417fedb9c5a664d848fdf34561ab8e10c58ff37cfeb841df",
     "modules/container/src/iso_gain_map.cpp": "c2b69935a6e5b264a405462139eedfc84d7783ee703fecbd851af6cab224b58e",
     "modules/gainmap/src/reconstruct.cpp": "b429de7bb0cfac2111377559bbc227ea80cbba4e40896951681c47291a367791",
-    "tests/macos_t2/generate_fixtures.py": "42041cb9e50a8f2fc6b4fd107dfcc18d3c379251586af915bde7878e2ee55459",
-    "tests/macos_t2/fixture_spec.json": "bb75efaff946ba49f4ff7b200b2d914009d253c5b08c7ed31ecdc386c2fa20ea"
+    "tests/macos_t2/generate_fixtures.py": "907fda133ee895ff36315e3ec3f8547f83a7a9e5eaaea139f4455b215c356a51",
+    "tests/macos_t2/fixture_spec.json": "0161e1ddc343f0c4f59e310f294ea9f3f485a1d6ed88ed7f88966976350088b1"
   },
   "fixtures": [
     {
@@ -22,8 +22,8 @@
         "numerator": 1,
         "denominator": 1
       },
-      "byte_length": 4286,
-      "sha256": "2a6f22cf787a929bca5fab80dd24c298a5dbdc19ea0f6942427b51e9f81db543"
+      "byte_length": 14343,
+      "sha256": "f3c0118e6b84c77f45adbb06b32a04356e8e9901e47224bd363687140ba4dd12"
     },
     {
       "id": "gamma-2-probe",
@@ -32,19 +32,19 @@
         "numerator": 2,
         "denominator": 1
       },
-      "byte_length": 4286,
-      "sha256": "bb3844c0e09c51097fc3bd940b162539305e8790568b87c06116ba11f670e735"
+      "byte_length": 14343,
+      "sha256": "d2b7f80cad3bb5c35929a2bcee4b60102cb9778693e5a00094b56c8e031cc991"
     }
   ],
   "pair_invariant": {
     "same_byte_length": true,
     "differing_byte_count": 1,
     "differing_absolute_offsets": [
-      4265
+      14322
     ],
     "control_byte_hex": "01",
     "probe_byte_hex": "02",
-    "tmap_payload_absolute_offset": 4224,
+    "tmap_payload_absolute_offset": 14281,
     "gamma_numerator_last_byte_offset_within_payload": 41,
     "statement": "The files differ only in the final byte of the big-endian gamma numerator (1 versus 2)."
   }

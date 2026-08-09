@@ -66,6 +66,24 @@ def write_png(path: pathlib.Path, width: int, height: int, rgb: list[int]) -> No
     path.write_bytes(data)
 
 
+def gain_samples(spec: dict) -> list[float]:
+    """Row-major canonical log2 gain for the whole grid.
+
+    Written as a pattern rather than a literal grid: the geometry has to clear
+    the encoder's 64-pixel padding threshold, and four thousand numbers spelled
+    out in the spec would hide what the fixture actually is."""
+    gain = spec["gain"]
+    pattern = gain["pattern"]
+    if pattern["type"] != "alternating_columns":
+        raise ValueError(f"unsupported gain pattern: {pattern['type']}")
+    values = pattern["canonical_log2_stops"]
+    return [
+        float(values[x % len(values)])
+        for _ in range(gain["height"])
+        for x in range(gain["width"])
+    ]
+
+
 def rational_payload(spec: dict, gamma_numerator: int) -> bytes:
     metadata = spec["metadata_common"]
     payload = struct.pack(
@@ -139,10 +157,7 @@ def regenerate(hyperdr: pathlib.Path) -> None:
             spec["base"]["rgb8"],
         )
         gain_path.write_bytes(
-            struct.pack(
-                "<" + "f" * len(spec["gain"]["canonical_log2_stops_row_major"]),
-                *spec["gain"]["canonical_log2_stops_row_major"],
-            )
+            struct.pack("<" + "f" * len(gain_samples(spec)), *gain_samples(spec))
         )
         sidecar_path.write_text(
             json.dumps(external_sidecar(spec, gain_path), indent=2) + "\n",

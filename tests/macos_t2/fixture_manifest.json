@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
   "protocol_id": "hyperdr.display-domain/v1/T2",
-  "generated_from_git_commit": "7a97fc54afd3dd50c28bd69708ca71e90b57a75c",
+  "generated_from_git_commit": "4aebde4e2197ac9c5d4de6d9d815aa94f003ed09",
   "generator_executable": {
     "path_recorded_for_provenance_only": "C:\\Users\\Ryan\\Desktop\\HyperDR_display_gates\\build-t2-codecs\\Release\\HyperDR.exe",
-    "sha256": "049c2f98d5669e67b5c0228c19257172d42c4cf22eaf26b7fea6a84396f33311"
+    "sha256": "2063298cb6b250bc17ef0a35bf0a1b0f3bd3392a544fd2d5aa664f05520a3793"
   },
   "source_sha256": {
     "modules/codec/src/heif_encoder.cpp": "8e9e590f7eddb86139fc33c82398fff9374ef94a48096924625e1384c003cd46",
@@ -22,8 +22,8 @@
         "numerator": 1,
         "denominator": 1
       },
-      "byte_length": 4285,
-      "sha256": "cb0879b0d1200e8b69d63f3a845f7657bb2fb2a6f260fce6cd6670878e835b07"
+      "byte_length": 4286,
+      "sha256": "2a6f22cf787a929bca5fab80dd24c298a5dbdc19ea0f6942427b51e9f81db543"
     },
     {
       "id": "gamma-2-probe",
@@ -32,19 +32,19 @@
         "numerator": 2,
         "denominator": 1
       },
-      "byte_length": 4285,
-      "sha256": "228e7e20b2339077bf6bbdd2c5c1990da8cafe5d8e7c23e8bd3d8e3e4bad69c3"
+      "byte_length": 4286,
+      "sha256": "bb3844c0e09c51097fc3bd940b162539305e8790568b87c06116ba11f670e735"
     }
   ],
   "pair_invariant": {
     "same_byte_length": true,
     "differing_byte_count": 1,
     "differing_absolute_offsets": [
-      4264
+      4265
     ],
     "control_byte_hex": "01",
     "probe_byte_hex": "02",
-    "tmap_payload_absolute_offset": 4223,
+    "tmap_payload_absolute_offset": 4224,
     "gamma_numerator_last_byte_offset_within_payload": 41,
     "statement": "The files differ only in the final byte of the big-endian gamma numerator (1 versus 2)."
   }

@@ -238,7 +238,17 @@ Bytes rebuild_iprp(std::span<const std::uint8_t> original, std::uint32_t primary
   for (const auto& assoc : all) {
     if (assoc.index == 0 || assoc.index > props.size()) continue;
     const auto& type = props[assoc.index - 1].type;
-    if (type == "ispe" || type == "pixi" || type == "colr" || type == "clli") selected.push_back(assoc);
+    // Descriptive properties describe the derived output, so the tmap repeats
+    // them. Transformative ones have to be repeated as well: without them the
+    // tmap claims the coded size while the base displays the cropped or rotated
+    // size, and a derived item whose dimensions disagree with its inputs is
+    // inconsistent. A small base is coded padded and cropped back by clap, so
+    // dropping clap here made exactly that mismatch. Apple's own captures show
+    // the same repetition: their base carries irot and their tmap repeats it.
+    if (type == "ispe" || type == "pixi" || type == "colr" || type == "clli" ||
+        type == "clap" || type == "irot" || type == "imir") {
+      selected.push_back(assoc);
+    }
   }
   if (std::none_of(selected.begin(), selected.end(), [&](const Association& a) { return props[a.index - 1].type == "ispe"; }))
     throw std::runtime_error("primary item lacks mandatory ispe property");

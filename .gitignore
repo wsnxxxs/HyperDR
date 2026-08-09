@@ -6,8 +6,9 @@
 .clangd/
 *.heic
 !tests/macos_t2/fixtures/*.heic
-# The pair a real macOS run refused: evidence, kept as the control arm.
+# Files a real macOS run refused, and the offline probes that attribute it.
 !tests/macos_t2/fixtures-prerepair/*.heic
+!tests/macos_t2/probes/*.heic
 # Third-party captures used only to attribute a decoder refusal. They are other
 # people's pixels carrying their original EXIF, and one is a dataset original, so
 # they are hand-carried in the transfer bundle and never committed.

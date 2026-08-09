@@ -37,7 +37,9 @@ func describeAuxiliary(_ source: CGImageSource, _ index: Int) {
 
 for path in CommandLine.arguments.dropFirst() {
     let url = URL(fileURLWithPath: path)
-    print("=== \(url.lastPathComponent)")
+    // The full path, not the last component: several probes deliberately share a
+    // file name and differ only in which directory they came from.
+    print("=== \(path)")
     guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
         print("  ImageIO rejected the file outright")
         continue

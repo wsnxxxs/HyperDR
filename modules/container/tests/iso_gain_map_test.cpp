@@ -172,6 +172,27 @@ void test_registered_profiles_against_corpus_payloads() {
             indigo_payload, hyperdr::GainMapWriterProfile::apple_strict);
       },
       "apple_strict accepted the registered Indigo payload");
+
+  // Every Indigo capture carries two APP2 segments under the ISO 21496-1 URN:
+  // this five-zero-byte stub on the primary image, and the real payload on the
+  // gain map. Callers pick between them by parseability, so the stub being
+  // rejected is what keeps that selection honest -- if it ever parsed, the
+  // extractor would silently prefer the primary image's placeholder.
+  // Measured across all 109 Indigo captures on 2026-08-10: byte-identical
+  // stub, always the first candidate, never accepted under either profile.
+  const auto indigo_primary_stub = bytes_from_hex("0000000000");
+  require_invalid(
+      [&] {
+        (void)hyperdr::parse_tmap_payload(
+            indigo_primary_stub, hyperdr::GainMapWriterProfile::iso_generic);
+      },
+      "iso_generic accepted the Indigo primary-image stub");
+  require_invalid(
+      [&] {
+        (void)hyperdr::parse_tmap_payload(
+            indigo_primary_stub, hyperdr::GainMapWriterProfile::apple_strict);
+      },
+      "apple_strict accepted the Indigo primary-image stub");
 }
 
 // The reader briefly required gain_max == alternate_headroom. Both renderers

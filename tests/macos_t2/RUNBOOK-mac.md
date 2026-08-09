@@ -92,20 +92,36 @@ bash tests/macos_t2/run_t2_local.sh
 
 ### Core Image 拒收时怎么归因
 
-打开 `t2-output/imageio-diagnostic.txt`，只看每个文件下面的 `ISOGainMap:` 一行。
-包里有两个参照：`IMG_3841.HEIC`（Apple 自己写的）与
-`idg_a8d59bf1077d1452826f.jpg`（Adobe Indigo，合规第三方写入器）。
+打开 `t2-output/imageio-diagnostic.txt`，只看每个**路径**下面的 `ISOGainMap:` 一行
+（诊断器打印完整路径，因为几个探针故意重名）。
 
-| Apple | Indigo | 我们的夹具 | 结论 |
+前两次运行已经确立：Apple 与 Adobe Indigo 的文件被接受，我们的 8×4 文件被拒，
+补 `dinf`/`auxC`/`auxl` 之后仍被拒。所以这次要读的是**五格矩阵**：
+
+| 路径 | 是什么 | 预期 | 若不符 |
 |---|---|---|---|
-| `PRESENT` | `PRESENT` | `absent` | **我们的容器有缺陷**，Apple 读得了别人写的 ISO gain map，就是读不了我们的。最强证据 |
-| `PRESENT` | `absent` | `absent` | Apple 只认自家文件——**对我们的写入器什么也没证明**，需换别的路子（如用 Apple 自己的 API 写一份对照文件） |
-| `PRESENT` | 任意 | `PRESENT` | 拒收发生在更后面，看错误原文与 CIImage 各路 extent |
-| `absent` | `absent` | `absent` | **harness 的查询方式不对**，这次什么也没说明；回去改 harness 再来 |
+| `reference/IMG_3841.HEIC` | Apple 写的 | `PRESENT` | 诊断器本身有问题，整轮作废 |
+| `reference/idg_….jpg` | Adobe 写的 | `PRESENT` | 同上 |
+| `fixtures-prerepair/…` | 修复前 8×4 | `absent` | 变的不是文件，这轮不可比 |
+| `probes/tiny-8x4-auxrepair-only.heic` | 只补了 aux 的 8×4 | `absent` | 同上 |
+| **`fixtures/…`** | 两轮修复齐全的 8×4 | ？ | — |
+| **`probes/normal-512x384-repaired.heic`** | 两轮修复齐全的正常尺寸 | ？ | — |
+| `probes/normal-512x384-prerepair.heic` | 修复前正常尺寸 | ？ | — |
 
-一个必须记住的限制：Indigo 是 **JPEG/MPF**，我们的夹具是 **HEIC**，
-所以"Indigo 行、我们不行"里混着容器格式的差异，不是纯粹的合规性差异。
-干净的对照需要一个非 Apple 写的 HEIC ISO gain map，本项目手上没有。
+**结论落在最后三行**：
+
+- `normal-512x384-repaired` **PRESENT** 而 `fixtures` **absent** → 普通路径一直没问题，
+  是 8×4 夹具的尺寸路径在捣鬼，回去把夹具做大重来；
+- 两者都 **PRESENT** → 两轮修复正是 macOS 要的，脚本会自己继续跑判据，插值顺序当场裁定；
+- 两者都 **absent** → 两轮修复都不够，剩下的差异在别处，回去要考虑放弃手写 tmap 注入；
+- `normal-512x384-prerepair` 与 `-repaired` 的差异，直接告诉你修复本身有没有作用。
+
+前四行是**对照**，它们必须复现已知结果，最后三行才可读。任何一行反常就把整份带回来，
+别现场改文件重跑。
+
+一个必须记住的限制：Indigo 是 **JPEG/MPF**，我们的文件是 **HEIC**，
+所以"Indigo 行、我们不行"里混着容器格式的差异。干净的对照需要一个非 Apple 写的
+HEIC ISO gain map，本项目手上没有。
 
 `HDRGainMap:` 那一行是 Apple 私有的旧类型，用来判断 Apple 是不是把这个文件
 当成了另一种 gain map；两个夹具在它上面也 `absent` 才说明是彻底没认。

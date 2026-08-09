@@ -167,10 +167,13 @@ printf 'diagnostic: %s\n' "$OUTPUT/imageio-diagnostic.txt"
 printf 'evidence:   %s\n' "$BUNDLE"
 if [ "$RENDER_STATUS" -ne 0 ]; then
   printf 'status:     Core Image refused the fixtures; T2 did not adjudicate anything.\n'
-  printf 'In imageio-diagnostic.txt read the ISOGainMap line of each file:\n'
-  printf '  Apple PRESENT, Indigo PRESENT, fixtures absent -> our container is defective\n'
-  printf '  Apple PRESENT, Indigo absent,  fixtures absent -> Apple surfaces only its own; nothing shown about our writer\n'
-  printf '  all absent                                     -> the harness queries the wrong way\n'
+  printf 'That is a third refusal, so the probe matrix is the result. In\n'
+  printf 'imageio-diagnostic.txt read the ISOGainMap line of each path:\n'
+  printf '  probes/normal-512x384-repaired  PRESENT -> the ordinary path is fine and the 8x4 fixture is the problem\n'
+  printf '  probes/normal-512x384-repaired  absent  -> the writer is wrong beyond both repairs\n'
+  printf '  fixtures-prerepair and tiny-8x4-auxrepair-only must stay absent; if either turned\n'
+  printf '  PRESENT, something other than the file changed and the run is not comparable\n'
+  printf '  reference/ must stay PRESENT for both captures, or the diagnostic itself is suspect\n'
 elif [ "$VALIDATOR_STATUS" -eq 0 ]; then
   printf 'report:     %s\n' "$OUTPUT/t2-report.json"
   printf 'status:     pass — Core Image matches code-domain interpolation at every registered headroom\n'

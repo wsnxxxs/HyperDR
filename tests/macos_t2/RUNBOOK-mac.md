@@ -109,7 +109,20 @@ bash tests/macos_t2/run_t2_local.sh
 **两个 8×4 对照仍然失败、而 128×128 夹具成功**——这一条同时出现，才把"夹具几何是原因"
 从推测变成测量。
 
-若 `fixtures/` 仍是 `absent`：几何不是全部原因，把整份带回来，别在现场改夹具。
+若 `fixtures/` 仍是 `absent`：几何不是全部原因。看 `probes/normal-128x128-ordinary-path.heic`——
+同样 128×128 但走普通编码路径、元数据由编码器自算。它若 `PRESENT`，问题在夹具的元数据
+（gamma / 端点 / offset 全为手工设定）而不在尺寸。别在现场改夹具，把整份带回来。
+
+### 这次多了一份产物
+
+`t2-output/native-gain-analysis.json`。冻结判据判的是 harness 自己把 gain 图放大后交给
+Core Image 的那条路——**那条路的插值顺序是 harness 写死的**，它能验解码公式，验不了顺序。
+新增的一条路把**原分辨率** gain 图交给 Core Image、由 Apple 自己上采样，才真正问出 T2 注册的问题。
+它的判据已于 2026-08-10 写进 `fixture_spec.json`（`core_image_upsampled_gain_acceptance`），
+**在任何此类数据存在之前**。这份分析失败不会让整轮失败。
+
+`verdict` 取值：`code_domain`（Apple 与我们同序）/ `decoded_domain`（Apple 先解码后插值，
+要改 `reconstruct.cpp`）/ `unresolved`（两个假设都不贴合，多半是上采样核不同，需要另设夹具）。
 
 **四条铁律**：
 

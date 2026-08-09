@@ -32,7 +32,16 @@ as controls that the machine still behaves as it did:
 | `tiny-8x4-auxrepair-only.heic` | absent — 8×4, aux repair only | same |
 | `normal-512x384-prerepair.heic` | present — ordinary size, no repair at all | same |
 | `normal-512x384-repaired.heic` | present — ordinary size, repaired | same |
+| `normal-128x128-ordinary-path.heic` | present — the fixture's size through the ordinary path | see below |
 | `../reference/*` | present — Apple and Adobe captures | the diagnostic itself is suspect |
+
+`normal-128x128-ordinary-path.heic` separates two things the fixture confounds.
+The fixture is 128×128 *and* is written through `--external-gain` with hand-set
+metadata: gamma exactly 1 or 2, `gain_min` 0, `gain_max` 2, both offsets 0. This
+probe is the same 128×128 geometry through the ordinary conversion path, with
+metadata the encoder computed for itself. If the fixture is refused and this
+probe is read, the cause is the metadata or the external-gain path, not the
+size — which is the one attribution the geometry change alone cannot make.
 
 The two 8×4 controls are what keeps "the fixture geometry was the problem" a
 measurement rather than an assumption: they have to keep failing in the same run

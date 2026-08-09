@@ -157,6 +157,19 @@ else
     --output "$OUTPUT/t2-report.json"
   VALIDATOR_STATUS=$?
   set -e
+
+  printf '\n== Apply the registered rule for the Core-Image-upsampled path ==\n'
+  # Diagnostic, not the gate: this is the only path that asks the registered
+  # interpolation-order question at all, and its rule was registered before the
+  # measurement existed. A failure here does not fail the run.
+  set +e
+  python3 tests/macos_t2/analyze_native_gain.py \
+    --spec tests/macos_t2/fixture_spec.json \
+    --core-image "$OUTPUT/core-image-report.json" \
+    --cpp "$OUTPUT/gamma-1-control-cpp.json" \
+    --cpp "$OUTPUT/gamma-2-probe-cpp.json" \
+    --output "$OUTPUT/native-gain-analysis.json"
+  set -e
 fi
 
 BUNDLE="$OUTPUT/../t2-evidence-$(date -u +%Y%m%dT%H%M%SZ).zip"

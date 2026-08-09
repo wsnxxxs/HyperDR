@@ -22,6 +22,7 @@ using container::fullbox_version;
 using container::parse_iinf;
 using container::parse_pitm;
 using container::read_box;
+using container::read_n;
 
 bool container_type(std::string_view type) {
   static const std::set<std::string_view> types{"meta", "iprp", "ipco", "iref", "grpl"};
@@ -104,6 +105,79 @@ bool has_valid_tmap_altr(std::span<const std::uint8_t> bytes,
   return found;
 }
 
+bool meta_has_data_information(std::span<const std::uint8_t> bytes) {
+  for (const auto& top : children(bytes, 0, bytes.size())) {
+    if (top.type != "meta") continue;
+    const auto meta = bytes.subspan(top.offset, top.size);
+    for (const auto& box : children(meta, 12, meta.size())) {
+      if (box.type == "dinf") return true;
+    }
+  }
+  return false;
+}
+
+// Whether the gain-map item points at the base image as its master, and which
+// auxiliary type it declares. macOS ImageIO exposed no ISO gain map for a file
+// carrying neither (gate T2, 2026-08-09), which is why both are now reported.
+void describe_gain_map_auxiliary(std::span<const std::uint8_t> bytes, std::uint32_t gain_id,
+                                 std::uint32_t base_id, HeifInspection& result) {
+  for (const auto& top : children(bytes, 0, bytes.size())) {
+    if (top.type != "meta") continue;
+    const auto meta = bytes.subspan(top.offset, top.size);
+    for (const auto& box : children(meta, 12, meta.size())) {
+      if (box.type == "iref") {
+        const auto iref = meta.subspan(box.offset, box.size);
+        const unsigned id_size = fullbox_version(iref) == 0 ? 2U : 4U;
+        for (const auto& ref : children(iref, 12, iref.size())) {
+          if (ref.type != "auxl") continue;
+          std::size_t p = ref.offset + 8;
+          const auto from = static_cast<std::uint32_t>(read_n(iref, p, id_size));
+          const auto count = read_n(iref, p, 2);
+          if (from != gain_id) continue;
+          for (std::uint64_t i = 0; i < count; ++i) {
+            if (static_cast<std::uint32_t>(read_n(iref, p, id_size)) == base_id) {
+              result.gain_map_has_auxl_reference = true;
+            }
+          }
+        }
+      } else if (box.type == "iprp") {
+        const auto iprp = meta.subspan(box.offset, box.size);
+        Box ipco{}, ipma{};
+        for (const auto& child : children(iprp, 8, iprp.size())) {
+          if (child.type == "ipco") ipco = child;
+          else if (child.type == "ipma") ipma = child;
+        }
+        if (ipco.size == 0 || ipma.size == 0) continue;
+        const auto props = children(iprp, ipco.offset + ipco.header, ipco.offset + ipco.size);
+        const auto ipma_view = iprp.subspan(ipma.offset, ipma.size);
+        const auto version = fullbox_version(ipma_view);
+        const auto flags = (static_cast<std::uint32_t>(ipma_view[9]) << 16) |
+                           (static_cast<std::uint32_t>(ipma_view[10]) << 8) | ipma_view[11];
+        std::size_t p = 12;
+        const auto entries = be32(ipma_view, p); p += 4;
+        for (std::uint32_t entry = 0; entry < entries; ++entry) {
+          const auto id = static_cast<std::uint32_t>(read_n(ipma_view, p, version < 1 ? 2 : 4));
+          if (p >= ipma_view.size()) throw std::runtime_error("truncated ipma");
+          const auto n = ipma_view[p++];
+          for (unsigned a = 0; a < n; ++a) {
+            const std::uint64_t raw = read_n(ipma_view, p, (flags & 1U) ? 2 : 1);
+            const std::size_t index =
+                static_cast<std::size_t>(raw & ((flags & 1U) ? 0x7FFFU : 0x7FU));
+            if (id != gain_id || index == 0 || index > props.size()) continue;
+            const auto& property = props[index - 1];
+            if (property.type != "auxC" || property.size <= property.header + 4) continue;
+            const auto start = property.offset + property.header + 4;
+            const auto stop = property.offset + property.size;
+            const auto* text = reinterpret_cast<const char*>(iprp.data() + start);
+            const auto length = static_cast<std::size_t>(stop - start);
+            result.gain_map_auxiliary_type.assign(text, std::find(text, text + length, '\0'));
+          }
+        }
+      }
+    }
+  }
+}
+
 }  // namespace
 
 HeifInspection inspect_heif(const Bytes& bytes) {
@@ -125,6 +199,7 @@ HeifInspection inspect_heif(const Bytes& bytes) {
       note_brand(p);
     }
     walk_boxes(bytes, 0, bytes.size(), 0, result);
+    result.has_data_information = meta_has_data_information(bytes);
     // Grid images also use dimg, so bind both checks to the actual tmap item
     // instead of accepting any unrelated dimg/altr box.
     result.has_dimg_reference = false;
@@ -138,6 +213,7 @@ HeifInspection inspect_heif(const Bytes& bytes) {
       result.has_altr_group =
           has_valid_tmap_altr(bytes, references.tmap_id, result.primary_item_id);
       if (!result.has_altr_group) throw std::runtime_error("missing tmap altr group");
+      describe_gain_map_auxiliary(bytes, references.gain_id, references.base_id, result);
       result.tmap_metadata = parse_tmap_payload(extract_tmap_payload(bytes));
       result.has_tmap_metadata = true;
     }
@@ -157,6 +233,9 @@ std::string inspection_json(const HeifInspection& inspection) {
       .member("altr", inspection.has_altr_group)
       .member("exif", inspection.has_exif)
       .member("xmp", inspection.has_xmp)
+      .member("dinf", inspection.has_data_information)
+      .member("gain_map_auxl", inspection.gain_map_has_auxl_reference)
+      .member("gain_map_auxiliary_type", inspection.gain_map_auxiliary_type)
       .member("tmap_metadata_present", inspection.has_tmap_metadata)
       .member("primary_item", inspection.primary_item_id)
       ;

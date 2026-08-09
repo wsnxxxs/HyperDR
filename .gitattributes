@@ -2,6 +2,10 @@
 * text=auto
 *.bat text eol=crlf
 *.ps1 text eol=crlf
+# bash refuses a script whose lines end in CRLF, and the T2 runner is executed
+# from a Windows checkout copied onto a Mac.
+*.sh text eol=lf
 *.png binary
+*.heic binary
 *.ARW binary
 *.arw binary

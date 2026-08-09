@@ -157,48 +157,83 @@ Bytes rebuild_iloc(std::span<const std::uint8_t> original, std::uint32_t tmap_id
 }
 
 struct Association { bool essential{}; std::uint16_t index{}; };
+struct IpmaEntry { std::uint32_t id{}; std::vector<Association> associations; };
 
-std::vector<Association> primary_associations(std::span<const std::uint8_t> ipma, std::uint32_t primary_id) {
+// ISO/IEC 21496-1 gain maps carried in HEIF: the gain-map image item is an
+// auxiliary image whose AuxiliaryTypeProperty carries this URN. macOS ImageIO
+// exposes no ISO gain map for a file that omits it, which is what gate T2
+// measured on 2026-08-09 (HyperDR_Model/reports/macos-t2-container-finding.md).
+constexpr std::string_view kIsoGainMapAuxType = "urn:iso:std:iso:ts:21496:-1";
+
+std::vector<IpmaEntry> parse_ipma(std::span<const std::uint8_t> ipma) {
   const auto version = fullbox_version(ipma);
   const auto flags = (static_cast<std::uint32_t>(ipma[9]) << 16) | (static_cast<std::uint32_t>(ipma[10]) << 8) | ipma[11];
   std::size_t p = 12;
   const auto count = be32(ipma, p); p += 4;
+  std::vector<IpmaEntry> entries;
+  entries.reserve(count);
   for (std::uint32_t i = 0; i < count; ++i) {
-    const auto id = static_cast<std::uint32_t>(read_n(ipma, p, version < 1 ? 2 : 4));
+    IpmaEntry entry;
+    entry.id = static_cast<std::uint32_t>(read_n(ipma, p, version < 1 ? 2 : 4));
     if (p >= ipma.size()) throw std::runtime_error("truncated ipma");
     const auto n = ipma[p++];
-    std::vector<Association> associations;
     for (unsigned a = 0; a < n; ++a) {
       const auto raw = read_n(ipma, p, (flags & 1U) ? 2 : 1);
-      associations.push_back({(raw & ((flags & 1U) ? 0x8000U : 0x80U)) != 0,
-                              static_cast<std::uint16_t>(raw & ((flags & 1U) ? 0x7FFFU : 0x7FU))});
+      entry.associations.push_back({(raw & ((flags & 1U) ? 0x8000U : 0x80U)) != 0,
+                                    static_cast<std::uint16_t>(raw & ((flags & 1U) ? 0x7FFFU : 0x7FU))});
     }
-    if (id == primary_id) return associations;
+    entries.push_back(std::move(entry));
   }
-  throw std::runtime_error("primary item has no ipma association");
+  if (p != ipma.size()) throw std::runtime_error("unexpected ipma trailing bytes");
+  return entries;
 }
 
-Bytes append_ipma_entry(Bytes ipma, std::uint32_t item_id, const std::vector<Association>& associations) {
-  const auto version = fullbox_version(ipma);
-  const auto flags = (static_cast<std::uint32_t>(ipma[9]) << 16) | (static_cast<std::uint32_t>(ipma[10]) << 8) | ipma[11];
-  set32(ipma, 12, be32(ipma, 12) + 1);
-  if (version < 1) put16(ipma, static_cast<std::uint16_t>(item_id)); else put32(ipma, item_id);
-  ipma.push_back(static_cast<std::uint8_t>(associations.size()));
-  for (const auto& a : associations) {
-    if (flags & 1U) put16(ipma, static_cast<std::uint16_t>((a.essential ? 0x8000U : 0U) | a.index));
-    else ipma.push_back(static_cast<std::uint8_t>((a.essential ? 0x80U : 0U) | a.index));
-  }
-  set32(ipma, 0, static_cast<std::uint32_t>(ipma.size()));
-  return ipma;
+const std::vector<Association>& associations_of(const std::vector<IpmaEntry>& entries, std::uint32_t item_id) {
+  const auto it = std::find_if(entries.begin(), entries.end(),
+                               [&](const IpmaEntry& e) { return e.id == item_id; });
+  if (it == entries.end()) throw std::runtime_error("item has no ipma association");
+  return it->associations;
 }
 
-Bytes rebuild_iprp(std::span<const std::uint8_t> original, std::uint32_t primary_id, std::uint32_t tmap_id) {
+Bytes serialize_ipma(std::span<const std::uint8_t> original, const std::vector<IpmaEntry>& entries) {
+  const auto version = static_cast<std::uint8_t>(fullbox_version(original));
+  auto flags = (static_cast<std::uint32_t>(original[9]) << 16) | (static_cast<std::uint32_t>(original[10]) << 8) | original[11];
+  // A property index past 127 no longer fits the one-byte association form, so the
+  // box is promoted to the two-byte form rather than silently truncating an index.
+  for (const auto& entry : entries)
+    for (const auto& a : entry.associations)
+      if (a.index > 0x7F) flags |= 1U;
+  Bytes payload{version, static_cast<std::uint8_t>((flags >> 16) & 0xFF),
+                static_cast<std::uint8_t>((flags >> 8) & 0xFF), static_cast<std::uint8_t>(flags & 0xFF)};
+  put32(payload, static_cast<std::uint32_t>(entries.size()));
+  for (const auto& entry : entries) {
+    if (version < 1) put16(payload, static_cast<std::uint16_t>(entry.id)); else put32(payload, entry.id);
+    if (entry.associations.size() > 0xFF) throw std::runtime_error("too many item properties");
+    payload.push_back(static_cast<std::uint8_t>(entry.associations.size()));
+    for (const auto& a : entry.associations) {
+      if (flags & 1U) put16(payload, static_cast<std::uint16_t>((a.essential ? 0x8000U : 0U) | a.index));
+      else payload.push_back(static_cast<std::uint8_t>((a.essential ? 0x80U : 0U) | a.index));
+    }
+  }
+  return make_box("ipma", payload);
+}
+
+Bytes make_auxC(std::string_view aux_type) {
+  Bytes payload{0, 0, 0, 0};
+  payload.insert(payload.end(), aux_type.begin(), aux_type.end());
+  payload.push_back(0);
+  return make_box("auxC", payload);
+}
+
+Bytes rebuild_iprp(std::span<const std::uint8_t> original, std::uint32_t primary_id,
+                   std::uint32_t gain_id, std::uint32_t tmap_id) {
   const auto kids = children(original, 8, original.size());
   Box ipco{}, ipma{};
   for (const auto& b : kids) { if (b.type == "ipco") ipco = b; else if (b.type == "ipma") ipma = b; }
   if (ipco.size == 0 || ipma.size == 0) throw std::runtime_error("iprp lacks ipco/ipma");
   const auto props = children(original, ipco.offset + ipco.header, ipco.offset + ipco.size);
-  const auto all = primary_associations(original.subspan(ipma.offset, ipma.size), primary_id);
+  auto entries = parse_ipma(original.subspan(ipma.offset, ipma.size));
+  const auto& all = associations_of(entries, primary_id);
   std::vector<Association> selected;
   for (const auto& assoc : all) {
     if (assoc.index == 0 || assoc.index > props.size()) continue;
@@ -207,10 +242,41 @@ Bytes rebuild_iprp(std::span<const std::uint8_t> original, std::uint32_t primary
   }
   if (std::none_of(selected.begin(), selected.end(), [&](const Association& a) { return props[a.index - 1].type == "ispe"; }))
     throw std::runtime_error("primary item lacks mandatory ispe property");
+
+  // Declare the gain map as an ISO 21496-1 auxiliary image. The property is
+  // appended, so every index already recorded in ipma keeps its meaning, and it
+  // is marked essential because a reader that does not understand the auxiliary
+  // type must not present the item as a picture.
+  const auto gain_properties = associations_of(entries, gain_id);
+  const bool already_auxiliary =
+      std::any_of(gain_properties.begin(), gain_properties.end(), [&](const Association& a) {
+        return a.index >= 1 && a.index <= props.size() && props[a.index - 1].type == "auxC";
+      });
+  const auto aux_index = static_cast<std::uint16_t>(props.size() + 1);
+  if (!already_auxiliary) {
+    if (props.size() >= 0x7FFF) throw std::runtime_error("no room for the auxiliary type property");
+    for (auto& entry : entries)
+      if (entry.id == gain_id) entry.associations.push_back({true, aux_index});
+  }
+  entries.push_back({tmap_id, selected});
+
   Bytes payload;
   for (const auto& b : kids) {
-    auto data = slice(original, b);
-    if (b.type == "ipma") data = append_ipma_entry(std::move(data), tmap_id, selected);
+    if (b.type == "ipma") {
+      const auto rebuilt = serialize_ipma(original.subspan(ipma.offset, ipma.size), entries);
+      payload.insert(payload.end(), rebuilt.begin(), rebuilt.end());
+      continue;
+    }
+    if (b.type == "ipco" && !already_auxiliary) {
+      Bytes ipco_payload(original.begin() + static_cast<std::ptrdiff_t>(b.offset + b.header),
+                         original.begin() + static_cast<std::ptrdiff_t>(b.offset + b.size));
+      const auto auxc = make_auxC(kIsoGainMapAuxType);
+      ipco_payload.insert(ipco_payload.end(), auxc.begin(), auxc.end());
+      const auto rebuilt = make_box("ipco", ipco_payload);
+      payload.insert(payload.end(), rebuilt.begin(), rebuilt.end());
+      continue;
+    }
+    const auto data = slice(original, b);
     payload.insert(payload.end(), data.begin(), data.end());
   }
   return make_box("iprp", payload);
@@ -227,6 +293,14 @@ Bytes rebuild_iref(std::optional<std::span<const std::uint8_t>> original,
   else { put32(ref, tmap_id); put16(ref, 2); put32(ref, base_id); put32(ref, gain_id); }
   const auto dimg = make_box("dimg", ref);
   payload.insert(payload.end(), dimg.begin(), dimg.end());
+  // The auxiliary image states which master image it belongs to. Without it the
+  // auxC property alone leaves the gain map unattached, and a reader looking for
+  // an auxiliary image of the base finds none.
+  Bytes aux;
+  if (version == 0) { put16(aux, gain_id); put16(aux, 1); put16(aux, base_id); }
+  else { put32(aux, gain_id); put16(aux, 1); put32(aux, base_id); }
+  const auto auxl = make_box("auxl", aux);
+  payload.insert(payload.end(), auxl.begin(), auxl.end());
   return make_box("iref", payload);
 }
 
@@ -242,6 +316,17 @@ Bytes rebuild_grpl(std::optional<std::span<const std::uint8_t>> original,
   return make_box("grpl", payload);
 }
 
+// A self-contained DataInformationBox: one dref entry whose `url ` flag says the
+// media data lives in this same file. HEIF requires the meta box to carry it, and
+// libheif's output does not, so the rewrite supplies it when it is missing.
+Bytes make_self_contained_dinf() {
+  const auto url = make_box("url ", Bytes{0, 0, 0, 1});
+  Bytes dref{0, 0, 0, 0};
+  put32(dref, 1);
+  dref.insert(dref.end(), url.begin(), url.end());
+  return make_box("dinf", make_box("dref", dref));
+}
+
 Bytes build_meta(std::span<const std::uint8_t> original, std::uint16_t primary_id,
                  std::uint16_t gain_id, std::uint16_t tmap_id,
                  std::uint64_t payload_offset, std::uint64_t payload_length,
@@ -249,6 +334,8 @@ Bytes build_meta(std::span<const std::uint8_t> original, std::uint16_t primary_i
   const auto kids = children(original, 12, original.size());
   std::optional<Box> old_iref;
   std::optional<Box> old_grpl;
+  const bool has_dinf = std::any_of(kids.begin(), kids.end(),
+                                    [](const Box& b) { return b.type == "dinf"; });
   Bytes payload{0, 0, 0, 0};
   for (const auto& b : kids) {
     if (b.type == "iref") { old_iref = b; continue; }
@@ -261,9 +348,13 @@ Bytes build_meta(std::span<const std::uint8_t> original, std::uint16_t primary_i
     const auto view = original.subspan(b.offset, b.size);
     if (b.type == "iinf") data = rebuild_iinf(view, gain_id, tmap_id);
     else if (b.type == "iloc") data = rebuild_iloc(view, tmap_id, payload_offset, payload_length, extent_shift);
-    else if (b.type == "iprp") data = rebuild_iprp(view, primary_id, tmap_id);
+    else if (b.type == "iprp") data = rebuild_iprp(view, primary_id, gain_id, tmap_id);
     else data.assign(view.begin(), view.end());
     payload.insert(payload.end(), data.begin(), data.end());
+    if (b.type == "hdlr" && !has_dinf) {
+      const auto dinf = make_self_contained_dinf();
+      payload.insert(payload.end(), dinf.begin(), dinf.end());
+    }
   }
   const auto iref = rebuild_iref(old_iref ? std::optional(original.subspan(old_iref->offset, old_iref->size)) : std::nullopt,
                                  tmap_id, primary_id, gain_id);

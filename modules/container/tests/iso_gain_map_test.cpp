@@ -16,6 +16,28 @@ void require(bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
 }
 
+std::vector<std::uint8_t> bytes_from_hex(const std::string& hex) {
+  if (hex.size() % 2 != 0) throw std::runtime_error("odd hex fixture length");
+  std::vector<std::uint8_t> bytes;
+  bytes.reserve(hex.size() / 2);
+  for (std::size_t index = 0; index < hex.size(); index += 2) {
+    bytes.push_back(static_cast<std::uint8_t>(
+        std::stoul(hex.substr(index, 2), nullptr, 16)));
+  }
+  return bytes;
+}
+
+template <typename Function>
+void require_invalid(Function&& function, const char* message) {
+  bool rejected = false;
+  try {
+    function();
+  } catch (const std::invalid_argument&) {
+    rejected = true;
+  }
+  require(rejected, message);
+}
+
 void test_invalid_tmap_metadata() {
   hyperdr::GainMapMetadata metadata;
   const auto valid = hyperdr::serialize_tmap_payload(metadata);
@@ -62,6 +84,96 @@ void test_common_denominator_round_trip() {
           "common-denominator numerators changed");
 }
 
+void test_multichannel_round_trip() {
+  hyperdr::GainMapMetadata metadata;
+  metadata.flags |= 0x80U;
+  metadata.alternate_headroom = {3, 1};
+  metadata.channels = {
+      {{-1, 1}, {2, 1}, {1, 1}, {0, 1}, {0, 1}},
+      {{0, 1}, {3, 1}, {2, 1}, {1, 100}, {2, 100}},
+      {{-2, 1}, {1, 1}, {1, 2}, {-1, 100}, {0, 1}},
+  };
+
+  const auto payload = hyperdr::serialize_tmap_payload(metadata);
+  require(payload.size() == 142,
+          "three-channel non-common payload has wrong size");
+  const auto decoded = hyperdr::parse_tmap_payload(
+      payload, hyperdr::GainMapWriterProfile::iso_generic);
+  require(hyperdr::gain_map_channel_count(decoded) == 3,
+          "multichannel flag or channel axis was lost");
+  require(hyperdr::gain_map_channel(decoded, 0).gain_min.numerator == -1 &&
+              hyperdr::gain_map_channel(decoded, 1).gamma.numerator == 2 &&
+              hyperdr::gain_map_channel(decoded, 2).gain_max.numerator == 1,
+          "per-channel metadata changed during round trip");
+  require(hyperdr::serialize_tmap_payload(decoded) == payload,
+          "multichannel payload was not byte-stable");
+}
+
+void test_writer_profiles_are_explicit() {
+  hyperdr::GainMapMetadata apple;
+  hyperdr::validate_gain_map_metadata(
+      apple, hyperdr::GainMapWriterProfile::apple_strict);
+
+  auto generic_single = apple;
+  generic_single.gain_max = {2, 1};
+  hyperdr::validate_gain_map_metadata(
+      generic_single, hyperdr::GainMapWriterProfile::iso_generic);
+  require_invalid(
+      [&] {
+        hyperdr::validate_gain_map_metadata(
+            generic_single, hyperdr::GainMapWriterProfile::apple_strict);
+      },
+      "apple_strict accepted a non-Apple gain/headroom relationship");
+
+  auto generic_rgb = apple;
+  generic_rgb.flags |= 0x80U;
+  generic_rgb.channels = {
+      {{0, 1}, {1, 1}, {1, 1}, {0, 1}, {0, 1}},
+      {{0, 1}, {2, 1}, {1, 1}, {0, 1}, {0, 1}},
+      {{-1, 1}, {1, 1}, {1, 1}, {0, 1}, {0, 1}},
+  };
+  hyperdr::validate_gain_map_metadata(
+      generic_rgb, hyperdr::GainMapWriterProfile::iso_generic);
+  require_invalid(
+      [&] {
+        hyperdr::validate_gain_map_metadata(
+            generic_rgb, hyperdr::GainMapWriterProfile::apple_strict);
+      },
+      "apple_strict accepted three-channel ISO metadata");
+}
+
+void test_registered_profiles_against_corpus_payloads() {
+  // Raw ToneMapImage payloads from the frozen corpora. Keeping the payloads,
+  // rather than private image files, makes the regression deterministic while
+  // preserving exactly the writer flags and rationals under test.
+  // Apple: apl_00df38e01131375a5553 (62-byte, one-channel payload).
+  const auto apple_payload = bytes_from_hex(
+      "00000000004000000000000f4240002a595f000f4240fff310d8000f4240"
+      "002a595f000f42400012abd1000f42400000000a000f42400000000a000f4240");
+  const auto apple = hyperdr::parse_tmap_payload(
+      apple_payload, hyperdr::GainMapWriterProfile::apple_strict);
+  require(hyperdr::gain_map_channel_count(apple) == 1,
+          "apple_strict rejected the registered Apple payload");
+
+  // Indigo: idg_cf30ade95612ba79b755 (142-byte, three-channel payload).
+  const auto indigo_payload = bytes_from_hex(
+      "0000000000c000000000000000010000000400000001fffffae500000100"
+      "000007f500000200000000010000000100000001000000400000000100000040"
+      "fffffb3100000200000007c90000020000000001000000010000000100000040"
+      "0000000100000040fffffbd900000100000007f5000002000000000100000001"
+      "00000001000000400000000100000040");
+  const auto indigo = hyperdr::parse_tmap_payload(
+      indigo_payload, hyperdr::GainMapWriterProfile::iso_generic);
+  require(hyperdr::gain_map_channel_count(indigo) == 3,
+          "iso_generic rejected the registered Indigo payload");
+  require_invalid(
+      [&] {
+        (void)hyperdr::parse_tmap_payload(
+            indigo_payload, hyperdr::GainMapWriterProfile::apple_strict);
+      },
+      "apple_strict accepted the registered Indigo payload");
+}
+
 // The reader briefly required gain_max == alternate_headroom. Both renderers
 // violate that for ordinary scenes, and because verify_heic_decodable parses
 // the file it has just written, conversion failed outright -- reported as
@@ -97,6 +209,9 @@ int main() {
   try {
     test_invalid_tmap_metadata();
     test_common_denominator_round_trip();
+    test_multichannel_round_trip();
+    test_writer_profiles_are_explicit();
+    test_registered_profiles_against_corpus_payloads();
     test_gain_range_is_independent_of_declared_headroom();
     std::cout << "ISO gain-map metadata tests passed\n";
     return 0;

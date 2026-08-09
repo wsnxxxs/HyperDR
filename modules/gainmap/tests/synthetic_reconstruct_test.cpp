@@ -119,6 +119,57 @@ void test_gamma_interpolation_order_is_not_assumed() {
                 "gamma fixture changed the one-code endpoint");
 }
 
+void test_three_channel_reconstruction_uses_each_channel() {
+  auto metadata = positive_metadata();
+  metadata.flags |= 0x80U;
+  metadata.channels = {
+      {{0, 1}, {0, 1}, {1, 1}, {0, 1}, {0, 1}},
+      {{0, 1}, {1, 1}, {1, 1}, {0, 1}, {0, 1}},
+      {{0, 1}, {2, 1}, {1, 1}, {0, 1}, {0, 1}},
+  };
+  hyperdr::FloatImage gain(1, 1, 3);
+  for (float& code : gain.pixels) code = 1.0F;
+
+  const auto rendered = hyperdr::reconstruct_gain_map(
+      base_image(1.0F), gain, metadata, 2.0F);
+  require_close(rendered.pixels[0], 1.0F, 1.0e-6F,
+                "red reconstruction did not use red metadata");
+  require_close(rendered.pixels[1], 2.0F, 1.0e-6F,
+                "green reconstruction fell back to channel zero");
+  require_close(rendered.pixels[2], 4.0F, 1.0e-6F,
+                "blue reconstruction fell back to channel zero");
+}
+
+void test_channel_mismatch_is_rejected() {
+  auto metadata = positive_metadata();
+  metadata.flags |= 0x80U;
+  metadata.channels = {
+      {{0, 1}, {1, 1}, {1, 1}, {0, 1}, {0, 1}},
+      {{0, 1}, {1, 1}, {1, 1}, {0, 1}, {0, 1}},
+      {{0, 1}, {1, 1}, {1, 1}, {0, 1}, {0, 1}},
+  };
+  bool rejected = false;
+  try {
+    (void)hyperdr::reconstruct_gain_map(
+        base_image(1.0F), gain_image(1.0F), metadata, 1.0F);
+  } catch (const std::invalid_argument&) {
+    rejected = true;
+  }
+  require(rejected,
+          "three-channel metadata silently consumed a one-channel gain map");
+
+  hyperdr::FloatImage rgb_gain(1, 1, 3);
+  rejected = false;
+  try {
+    (void)hyperdr::reconstruct_gain_map(
+        base_image(1.0F), rgb_gain, positive_metadata(), 1.0F);
+  } catch (const std::invalid_argument&) {
+    rejected = true;
+  }
+  require(rejected,
+          "one-channel metadata silently consumed a three-channel gain map");
+}
+
 }  // namespace
 
 int main() {
@@ -127,6 +178,8 @@ int main() {
     test_negative_gain_clamp();
     test_reverse_headroom_direction();
     test_gamma_interpolation_order_is_not_assumed();
+    test_three_channel_reconstruction_uses_each_channel();
+    test_channel_mismatch_is_rejected();
     std::cout << "synthetic reconstruction tests passed\n";
     return 0;
   } catch (const std::exception& error) {

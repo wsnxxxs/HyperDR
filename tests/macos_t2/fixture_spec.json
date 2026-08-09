@@ -8,15 +8,20 @@
     "requirement": "Independent macOS ImageIO/Core Image comparison at two distinct EDR headrooms; adjudicate code-domain versus decoded-domain interpolation when gamma != 1."
   },
   "purpose": "Adjudicate code-domain versus decoded-domain gain-map interpolation with gamma != 1 using an independent macOS Core Image renderer.",
+  "geometry_note": "The pair was 8x4 over a 2x2 gain map until 2026-08-10. macOS ImageIO exposed no ISO gain map for any file of that size across three runs, because an image below 64 pixels in either dimension is coded as a padded 64x64 HEVC frame and cropped back by an essential clap; an ordinary-size file from the same writer is read normally, including before any container repair. 128x128 over 64x64 is the smallest tested geometry that avoids the padding path entirely. The acceptance object below is unchanged, and the separation it has to detect is larger at this geometry than at the old one: mean |code-domain minus decoded-domain| is 0.017056 at H=0.5, 0.041077 at H=1.0 and 0.074619 at H=1.5, against a floor of 0.004. Evidence: HyperDR_Model/reports/macos-t2-container-finding.{json,md}.",
   "base": {
-    "width": 8,
-    "height": 4,
+    "width": 128,
+    "height": 128,
     "rgb8": [96, 128, 160]
   },
   "gain": {
-    "width": 2,
-    "height": 2,
-    "canonical_log2_stops_row_major": [0.0, 2.0, 0.0, 2.0]
+    "width": 64,
+    "height": 64,
+    "pattern": {
+      "type": "alternating_columns",
+      "canonical_log2_stops": [0.0, 2.0],
+      "note": "Column x carries canonical_log2_stops[x % 2]. Adjacent samples differ by the full interval, so every interpolated output pixel separates the two interpolation orders, and the endpoint codes 0 and 255 both occur as the validator requires."
+    }
   },
   "metadata_common": {
     "minimum_version": 0,

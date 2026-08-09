@@ -100,23 +100,54 @@ void test_reverse_headroom_direction() {
                 "reverse headroom did not apply a negative weight");
 }
 
-void test_gamma_interpolation_order_is_not_assumed() {
+void test_gamma_interpolation_order_is_code_domain() {
   auto metadata = positive_metadata();
   metadata.gamma = {2, 1};
   hyperdr::FloatImage gain(2, 1, 1);
   gain.pixels[0] = 0.0F;
   gain.pixels[1] = 1.0F;
-  hyperdr::FloatImage base(2, 1, 3);
+  hyperdr::FloatImage base(4, 1, 3);
   for (float& sample : base.pixels) sample = 1.0F;
 
-  // This fixture records the unresolved T2 question rather than choosing a
-  // decoder convention: endpoint samples test gamma, while cross-pixel
-  // interpolation order requires an independent decoder comparison.
-  const auto left = hyperdr::reconstruct_gain_map(base, gain, metadata, 2.0F);
-  require_close(left.pixels[0], 1.0F, 1.0e-6F,
+  // T2 was adjudicated on 2026-08-09: macOS 26 Core Image, handed the
+  // native-resolution gain map so that it performs the upsampling itself,
+  // matches code-domain interpolation to floating-point noise, while the
+  // decoded-domain hypothesis is four orders of magnitude worse at every
+  // registered headroom. The order is no longer a convention this fixture
+  // declines to choose; it is decoder behaviour the renderer is held to.
+  // Verdict, competing hypothesis and scope:
+  // HyperDR_Model/reports/macos-t2-interpolation-verdict.json.
+  //
+  // A four-wide base over a two-wide gain map puts the sample centres at codes
+  // 0, 0.25, 0.75 and 1. Only the interior pair discriminates; the endpoints
+  // agree under either order because there is nothing there to interpolate.
+  const auto rendered =
+      hyperdr::reconstruct_gain_map(base, gain, metadata, 2.0F);
+  require_close(rendered.pixels[0], 1.0F, 1.0e-6F,
                 "gamma fixture changed the zero-code endpoint");
-  require_close(left.pixels[3], 4.0F, 1.0e-6F,
+  require_close(rendered.pixels[9], 4.0F, 1.0e-6F,
                 "gamma fixture changed the one-code endpoint");
+
+  for (const auto& [pixel, code] : {
+           std::pair{1U, 0.25F},
+           std::pair{2U, 0.75F},
+       }) {
+    // Interpolate codes, then invert the gamma: log_gain = 2 * sqrt(code).
+    const float code_domain = std::exp2(2.0F * std::sqrt(code));
+    // The registered alternative, as implemented in tests/macos_t2/
+    // cpp_reference.cpp: invert the gamma at each gain sample first, then
+    // interpolate, then map into [gain_min, gain_max].
+    const float decoded_domain = std::exp2(2.0F * code);
+
+    require_close(rendered.pixels[pixel * 3U], code_domain, 1.0e-6F,
+                  "interior pixel did not follow code-domain interpolation");
+    // Guard the fixture, not only the renderer. The endpoint-only version of
+    // this test could not have answered the question it was named after; if a
+    // future geometry change stops the two orders from disagreeing here, this
+    // fails loudly instead of passing vacuously.
+    require(std::abs(code_domain - decoded_domain) > 0.4F,
+            "fixture no longer separates the two interpolation orders");
+  }
 }
 
 void test_three_channel_reconstruction_uses_each_channel() {
@@ -177,7 +208,7 @@ int main() {
     test_physical_headroom_weight();
     test_negative_gain_clamp();
     test_reverse_headroom_direction();
-    test_gamma_interpolation_order_is_not_assumed();
+    test_gamma_interpolation_order_is_code_domain();
     test_three_channel_reconstruction_uses_each_channel();
     test_channel_mismatch_is_rejected();
     std::cout << "synthetic reconstruction tests passed\n";

@@ -94,21 +94,22 @@ xcrun clang++ -std=c++20 -O2 -pthread \
   -o "$WORK/cpp-t2-reference"
 
 printf '\n== Ask ImageIO what it sees in each file ==\n'
-# The frozen fixtures first, then any Apple-written reference file. A reference
-# file is the only thing that separates "Apple rejects our container" from
-# "this harness asks the wrong way", so its absence is called out loudly.
+# Four kinds of file, so that an absence is attributable: the frozen fixtures,
+# the pre-repair pair that macOS refused on 2026-08-09, and third-party captures
+# written by Apple and by Adobe. Missing third-party references are called out
+# loudly, because without them a refusal cannot be attributed at all.
 # Positional parameters rather than an array: /bin/bash on macOS is 3.2, where an
 # empty array expanded under `set -u` aborts the script.
 set --
-for candidate in tests/macos_t2/reference/*; do
+for candidate in tests/macos_t2/fixtures-prerepair/* tests/macos_t2/reference/*; do
   case "$candidate" in
     *.heic|*.HEIC|*.heif|*.HEIF|*.jpg|*.JPG|*.jpeg|*.JPEG)
       [ -f "$candidate" ] && set -- "$@" "$candidate" ;;
   esac
 done
 if [ "$#" -eq 0 ]; then
-  printf 'WARNING: no Apple-written reference file under tests/macos_t2/reference/.\n'
-  printf 'A gain-map absence will not be attributable without one.\n'
+  printf 'WARNING: no reference or pre-repair file found; a gain-map absence will\n'
+  printf 'not be attributable.\n'
 fi
 "$WORK/imageio-diagnostic" \
   tests/macos_t2/fixtures/gamma-1-control.heic \

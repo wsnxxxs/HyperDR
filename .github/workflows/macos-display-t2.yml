@@ -1,0 +1,87 @@
+name: macOS display-domain T2 (manual)
+
+"on":
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-display-t2-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  t2:
+    name: Core Image interpolation adjudication
+    runs-on: macos-15
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Record the hosted macOS toolchain
+        run: |
+          mkdir -p t2-output
+          sw_vers > t2-output/toolchain.txt
+          uname -m >> t2-output/toolchain.txt
+          xcodebuild -version >> t2-output/toolchain.txt
+          xcrun swiftc --version >> t2-output/toolchain.txt
+
+      - name: Verify the frozen only-gamma fixture pair
+        run: python3 tests/macos_t2/generate_fixtures.py verify
+
+      - name: Compile the independent Core Image harness
+        run: >-
+          xcrun swiftc -O tests/macos_t2/CoreImageT2.swift
+          -framework CoreImage -framework CoreGraphics -framework ImageIO
+          -o "$RUNNER_TEMP/core-image-t2"
+
+      - name: Compile the checked-in C++ reconstruction reference
+        run: >-
+          xcrun clang++ -std=c++20 -O2 -pthread
+          -I modules/gainmap/include
+          -I modules/container/include
+          -I modules/foundation/include
+          -I modules/image/include
+          tests/macos_t2/cpp_reference.cpp
+          modules/gainmap/src/reconstruct.cpp
+          modules/container/src/iso_gain_map.cpp
+          -o "$RUNNER_TEMP/cpp-t2-reference"
+
+      - name: Render two physical headrooms with ImageIO and Core Image
+        run: |
+          "$RUNNER_TEMP/core-image-t2" \
+            tests/macos_t2/fixture_manifest.json \
+            tests/macos_t2/fixture_spec.json \
+            t2-output \
+            t2-output/core-image-report.json
+
+      - name: Render the same decoded inputs with the C++ implementation
+        run: |
+          "$RUNNER_TEMP/cpp-t2-reference" \
+            t2-output/gamma-1-control-decoded-input.bin \
+            t2-output/gamma-1-control-cpp.json \
+            1 0.5 1.0 1.5 gamma-1-control
+          "$RUNNER_TEMP/cpp-t2-reference" \
+            t2-output/gamma-2-probe-decoded-input.bin \
+            t2-output/gamma-2-probe-cpp.json \
+            2 0.5 1.0 1.5 gamma-2-probe
+
+      - name: Apply the frozen pixelwise decision rule
+        run: >-
+          python3 tests/macos_t2/validate_t2.py
+          --spec tests/macos_t2/fixture_spec.json
+          --manifest tests/macos_t2/fixture_manifest.json
+          --core-image t2-output/core-image-report.json
+          --cpp t2-output/gamma-1-control-cpp.json
+          --cpp t2-output/gamma-2-probe-cpp.json
+          --schema tests/macos_t2/report.schema.json
+          --output t2-output/t2-report.json
+
+      - name: Upload the auditable T2 evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-display-t2-${{ github.run_id }}
+          path: t2-output/
+          if-no-files-found: error
+          retention-days: 30

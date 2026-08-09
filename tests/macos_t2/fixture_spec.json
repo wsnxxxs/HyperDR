@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "protocol_id": "hyperdr.display-domain/v1/T2",
+  "protocol_registration": {
+    "repository": "HyperDR_Model",
+    "path": "reports/display-domain-protocol-registration.json",
+    "sha256": "9247b3cd0c140a4da7731700c3a05e08bc82b60d67ee30ebd2a36eafcb07390c",
+    "requirement": "Independent macOS ImageIO/Core Image comparison at two distinct EDR headrooms; adjudicate code-domain versus decoded-domain interpolation when gamma != 1."
+  },
+  "purpose": "Adjudicate code-domain versus decoded-domain gain-map interpolation with gamma != 1 using an independent macOS Core Image renderer.",
+  "base": {
+    "width": 8,
+    "height": 4,
+    "rgb8": [96, 128, 160]
+  },
+  "gain": {
+    "width": 2,
+    "height": 2,
+    "canonical_log2_stops_row_major": [0.0, 2.0, 0.0, 2.0]
+  },
+  "metadata_common": {
+    "minimum_version": 0,
+    "writer_version": 0,
+    "flags": 64,
+    "use_base_color_space": true,
+    "backward_direction": false,
+    "common_denominator": false,
+    "base_headroom": {"numerator": 0, "denominator": 1},
+    "alternate_headroom": {"numerator": 2, "denominator": 1},
+    "gain_min": {"numerator": 0, "denominator": 1},
+    "gain_max": {"numerator": 2, "denominator": 1},
+    "base_offset": {"numerator": 0, "denominator": 1},
+    "alternate_offset": {"numerator": 0, "denominator": 1}
+  },
+  "fixtures": [
+    {"id": "gamma-1-control", "filename": "fixtures/gamma-1-control.heic", "gamma": {"numerator": 1, "denominator": 1}},
+    {"id": "gamma-2-probe", "filename": "fixtures/gamma-2-probe.heic", "gamma": {"numerator": 2, "denominator": 1}}
+  ],
+  "physical_headroom_stops": [0.5, 1.0, 1.5],
+  "core_image_headroom_rule": "Pass 2^H to CIImage.applyingGainMap(_:headroom:); Core Image's API uses a linear ratio while the registered independent variable H is in stops.",
+  "acceptance": {
+    "code_domain_mean_absolute_error_max": 0.001,
+    "code_domain_max_absolute_error_max": 0.003,
+    "probe_alternative_mean_absolute_error_min": 0.004,
+    "probe_code_to_alternative_mae_ratio_max": 0.25,
+    "rationale": "The absolute floor is below the analytically generated H=0.5 separation (~0.009 for a 0.25 linear base) but above the C++ agreement tolerance; the ratio gate independently requires a fourfold preference for code-domain interpolation."
+  }
+}

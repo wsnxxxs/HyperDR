@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "protocol_id": "hyperdr.display-domain/v1/T2",
+  "generated_from_git_commit": "646eb3a4d25211ec0f4079582ba73b7832413322",
+  "generator_executable": {
+    "path_recorded_for_provenance_only": "C:\\Users\\Ryan\\Desktop\\HyperDR_display_gates\\build-t2-codecs\\Release\\HyperDR.exe",
+    "sha256": "1a88a97555c7e25e4aca0359f02cad90a26468c52b80365c411abab26ff9b2cc"
+  },
+  "source_sha256": {
+    "modules/codec/src/heif_encoder.cpp": "c0ce6e5a925fb82ad244eef0f93a4708f122c20b68167479f1299f4d7833b0dc",
+    "modules/gainmap/src/external.cpp": "cb6f7590b997cfd2417fedb9c5a664d848fdf34561ab8e10c58ff37cfeb841df",
+    "modules/container/src/iso_gain_map.cpp": "c2b69935a6e5b264a405462139eedfc84d7783ee703fecbd851af6cab224b58e",
+    "modules/gainmap/src/reconstruct.cpp": "b429de7bb0cfac2111377559bbc227ea80cbba4e40896951681c47291a367791",
+    "tests/macos_t2/generate_fixtures.py": "42041cb9e50a8f2fc6b4fd107dfcc18d3c379251586af915bde7878e2ee55459",
+    "tests/macos_t2/fixture_spec.json": "bb75efaff946ba49f4ff7b200b2d914009d253c5b08c7ed31ecdc386c2fa20ea"
+  },
+  "fixtures": [
+    {
+      "id": "gamma-1-control",
+      "path": "fixtures/gamma-1-control.heic",
+      "gamma": {
+        "numerator": 1,
+        "denominator": 1
+      },
+      "byte_length": 4194,
+      "sha256": "bd314f1c12507d7249162f1e777f73c81539e12696ebcc437efa65f18b345436"
+    },
+    {
+      "id": "gamma-2-probe",
+      "path": "fixtures/gamma-2-probe.heic",
+      "gamma": {
+        "numerator": 2,
+        "denominator": 1
+      },
+      "byte_length": 4194,
+      "sha256": "2d44743efc0ecb38b4ab933ea7317af2fdcf2be4e40c54a148e26c26b4b6f984"
+    }
+  ],
+  "pair_invariant": {
+    "same_byte_length": true,
+    "differing_byte_count": 1,
+    "differing_absolute_offsets": [
+      4173
+    ],
+    "control_byte_hex": "01",
+    "probe_byte_hex": "02",
+    "tmap_payload_absolute_offset": 4132,
+    "gamma_numerator_last_byte_offset_within_payload": 41,
+    "statement": "The files differ only in the final byte of the big-endian gamma numerator (1 versus 2)."
+  }
+}

@@ -469,10 +469,20 @@ std::vector<std::uint8_t> encode_hdr_heic(const GainMapResult& images,
 }
 
 void verify_heic_decodable(const std::vector<std::uint8_t>& bytes) {
+  // Every check below already passed on a file that macOS ImageIO refused to
+  // recognise as carrying a gain map at all (gate T2, 2026-08-09,
+  // HyperDR_Model/reports/macos-t2-container-finding.md). Structural
+  // self-consistency was never the same property as being readable by an
+  // independent decoder, so the three conformance requirements that file lacked
+  // are gated here as well, where they constrain what this writer emits.
   const auto inspection = inspect_heif(bytes);
+  const bool auxiliary_declared =
+      inspection.gain_map_auxiliary_type == "urn:iso:std:iso:ts:21496:-1";
   if (!inspection.structurally_valid || !inspection.has_heic_brand ||
       !inspection.has_tmap_brand || !inspection.has_tmap_item ||
-      !inspection.has_dimg_reference || !inspection.has_altr_group) {
+      !inspection.has_dimg_reference || !inspection.has_altr_group ||
+      !inspection.has_data_information || !inspection.gain_map_has_auxl_reference ||
+      !auxiliary_declared) {
     // inspect_heif reports a failed check as a cleared flag and puts the reason
     // in `errors`, so a message built only from the flags describes the symptom
     // and hides the cause. A rejected gain-map payload, for instance, clears
@@ -487,6 +497,9 @@ void verify_heic_decodable(const std::vector<std::uint8_t>& bytes) {
     note(inspection.has_tmap_item, "tmap item");
     note(inspection.has_dimg_reference, "dimg reference");
     note(inspection.has_altr_group, "altr group");
+    note(inspection.has_data_information, "dinf box");
+    note(inspection.gain_map_has_auxl_reference, "auxl reference from the gain map");
+    note(auxiliary_declared, "ISO 21496-1 auxiliary type on the gain map");
     for (const auto& error : inspection.errors) reason += " " + error + ";";
     if (inspection.errors.empty() && inspection.structurally_valid) {
       reason += " no further detail was reported";

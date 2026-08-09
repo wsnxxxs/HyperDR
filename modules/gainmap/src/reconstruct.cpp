@@ -13,13 +13,15 @@ namespace hyperdr {
 FloatImage reconstruct_gain_map(const FloatImage& base, const FloatImage& gain,
                                 const GainMapMetadata& metadata,
                                 float display_headroom_stops) {
-  if (base.channels != 3 || gain.channels != 1) throw std::invalid_argument("invalid reconstruction images");
+  validate_gain_map_metadata(metadata);
+  const auto metadata_channels = gain_map_channel_count(metadata);
+  if (base.channels != 3 ||
+      (gain.channels != 1 && gain.channels != 3) ||
+      gain.channels != metadata_channels) {
+    throw std::invalid_argument(
+        "reconstruction requires matching one- or three-channel gain metadata");
+  }
   FloatImage output(base.width, base.height, 3);
-  const float min_gain = rational_value(metadata.gain_min);
-  const float max_gain = rational_value(metadata.gain_max);
-  const float gamma = rational_value(metadata.gamma);
-  const float base_offset = rational_value(metadata.base_offset);
-  const float alt_offset = rational_value(metadata.alternate_offset);
   const float base_headroom = rational_value(metadata.base_headroom);
   const float alt_headroom = rational_value(metadata.alternate_headroom);
   const float denominator = alt_headroom - base_headroom;
@@ -41,14 +43,29 @@ FloatImage reconstruct_gain_map(const FloatImage& base, const FloatImage& gain,
       const auto x0 = static_cast<std::uint32_t>(std::floor(gx));
       const auto x1 = std::min(x0 + 1, gain.width - 1);
       const float wx = gx - static_cast<float>(x0);
-      const float top = std::lerp(gain.at(x0, y0, 0), gain.at(x1, y0, 0), wx);
-      const float bottom = std::lerp(gain.at(x0, y1, 0), gain.at(x1, y1, 0), wx);
-      const float encoded = clamp_finite(std::lerp(top, bottom, wy), 0.0F, 1.0F);
-      const float log_gain = std::lerp(min_gain, max_gain,
-                                       std::pow(encoded, 1.0F / std::max(gamma, 1.0e-6F)));
       for (unsigned c = 0; c < 3; ++c) {
-        output.at(x, y, c) = std::max(0.0F, (base.at(x, y, c) + base_offset) *
-                                                   std::exp2(log_gain * weight) - alt_offset);
+        const auto gain_channel = gain.channels == 1 ? 0U : c;
+        const auto channel = gain_map_channel(metadata, gain_channel);
+        const float top =
+            std::lerp(gain.at(x0, y0, gain_channel),
+                      gain.at(x1, y0, gain_channel), wx);
+        const float bottom =
+            std::lerp(gain.at(x0, y1, gain_channel),
+                      gain.at(x1, y1, gain_channel), wx);
+        const float encoded =
+            clamp_finite(std::lerp(top, bottom, wy), 0.0F, 1.0F);
+        const float min_gain = rational_value(channel.gain_min);
+        const float max_gain = rational_value(channel.gain_max);
+        const float gamma = rational_value(channel.gamma);
+        const float base_offset = rational_value(channel.base_offset);
+        const float alt_offset = rational_value(channel.alternate_offset);
+        const float log_gain =
+            std::lerp(min_gain, max_gain,
+                      std::pow(encoded,
+                               1.0F / std::max(gamma, 1.0e-6F)));
+        output.at(x, y, c) =
+            std::max(0.0F, (base.at(x, y, c) + base_offset) *
+                                   std::exp2(log_gain * weight) - alt_offset);
       }
     }
   });

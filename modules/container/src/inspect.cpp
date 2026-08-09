@@ -176,11 +176,29 @@ std::string inspection_json(const HeifInspection& inspection) {
     };
     write_rational("base_headroom", inspection.tmap_metadata.base_headroom);
     write_rational("alternate_headroom", inspection.tmap_metadata.alternate_headroom);
-    write_rational("gain_min", inspection.tmap_metadata.gain_min);
-    write_rational("gain_max", inspection.tmap_metadata.gain_max);
-    write_rational("gamma", inspection.tmap_metadata.gamma);
-    write_rational("base_offset", inspection.tmap_metadata.base_offset);
-    write_rational("alternate_offset", inspection.tmap_metadata.alternate_offset);
+    const auto channel_count =
+        gain_map_channel_count(inspection.tmap_metadata);
+    if (channel_count == 1) {
+      const auto channel = gain_map_channel(inspection.tmap_metadata, 0);
+      write_rational("gain_min", channel.gain_min);
+      write_rational("gain_max", channel.gain_max);
+      write_rational("gamma", channel.gamma);
+      write_rational("base_offset", channel.base_offset);
+      write_rational("alternate_offset", channel.alternate_offset);
+    } else {
+      writer.begin_array("channels");
+      for (std::size_t index = 0; index < channel_count; ++index) {
+        const auto channel = gain_map_channel(inspection.tmap_metadata, index);
+        writer.begin_object();
+        write_rational("gain_min", channel.gain_min);
+        write_rational("gain_max", channel.gain_max);
+        write_rational("gamma", channel.gamma);
+        write_rational("base_offset", channel.base_offset);
+        write_rational("alternate_offset", channel.alternate_offset);
+        writer.end_object();
+      }
+      writer.end_array();
+    }
     writer.end_object();
   }
   writer.begin_array("errors");

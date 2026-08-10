@@ -52,4 +52,30 @@ void verify_avif_decodable(const std::vector<std::uint8_t>& bytes);
 void reconstruct_heic_to_tiff(const std::filesystem::path& input,
                               const std::filesystem::path& output);
 
+struct DisplayCurvePoint {
+  float headroom_stops{};
+  double mae_linear_p3{};
+  double mse_linear_p3{};
+  double max_abs_error_linear_p3{};
+  std::uint64_t total_values{};
+  std::uint64_t reference_clamp_values{};
+  std::uint64_t candidate_clamp_values{};
+  std::uint64_t total_pixels{};
+  std::uint64_t reference_clamp_pixels{};
+  std::uint64_t candidate_clamp_pixels{};
+};
+
+struct DisplayCurveResult {
+  std::vector<DisplayCurvePoint> points;
+};
+
+// Decode two Adaptive HDR HEIC files once and compare their linear Display-P3
+// reconstructions at each caller-supplied physical display headroom. This is
+// intentionally a metric-only path: it does not write a second container or
+// alter either input file.
+[[nodiscard]] DisplayCurveResult compare_gain_map_heic_curve(
+    const std::filesystem::path& reference,
+    const std::filesystem::path& candidate,
+    const std::vector<float>& display_headroom_stops);
+
 }  // namespace hyperdr

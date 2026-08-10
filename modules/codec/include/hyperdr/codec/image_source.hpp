@@ -17,6 +17,7 @@
 #include <stdexcept>
 #include <string_view>
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <vector>
@@ -40,6 +41,32 @@ enum class HighlightRecovery {
 [[nodiscard]] std::optional<HighlightRecovery> highlight_recovery_from_name(
     std::string_view name);
 
+// The four common 2x2 Bayer arrangements. The value is the sensor-coordinate
+// arrangement, not the orientation of the rendered RGB image.
+enum class BayerPattern {
+  Unknown,
+  RGGB,
+  BGGR,
+  GRBG,
+  GBRG,
+};
+
+[[nodiscard]] const char* bayer_pattern_name(BayerPattern pattern);
+
+// A calibrated, single-sample-per-site RAW mosaic. Samples are returned after
+// LibRaw's metadata-driven black subtraction and are normalized by the
+// post-black white level. Thus `black_level` is zero in this returned domain,
+// `white_level` is the corresponding post-black saturation level, and values
+// above 1.0 remain possible after an explicit digital gain.
+struct RawMosaic {
+  FloatImage samples;
+  BayerPattern pattern{BayerPattern::Unknown};
+  std::array<float, 4> black_level{};
+  std::array<float, 4> white_level{};
+  std::uint32_t bit_depth{};
+  bool black_level_corrected{false};
+};
+
 struct RawDecodeOptions {
   // LibRaw's unclip mode can leave strongly magenta clipped highlights when
   // sensor channels saturate at different levels. Blend is the conservative
@@ -53,6 +80,26 @@ struct RawDecodeOptions {
   // base of an embedded Apple/Ultra HDR container. Applying the embedded map
   // first would double-count the same gain before the external grid is used.
   bool ignore_embedded_gain_map{false};
+  // Optional dcraw/LibRaw bad-pixel coordinate map. LibRaw interpolates the
+  // listed sites from neighbouring CFA samples before demosaic.
+  std::filesystem::path bad_pixel_map;
+  // Optional dark-frame PGM accepted by LibRaw. It is subtracted before the
+  // normal black-level correction.
+  std::filesystem::path dark_frame;
+  // Optional text LUT for sensor-code linearization. Format: one integer N,
+  // followed by N output samples; values are code values unless all are in
+  // [0,1], in which case they are interpreted as normalized code values.
+  std::filesystem::path linearization_lut;
+  // Optional text lens-shading map. Format: `width height channels` followed
+  // by row-major gains; channels may be 1, 3 (RGB), or 4 (R,G1,B,G2).
+  std::filesystem::path lens_shading_map;
+  // Conservative opt-in detector for saturated hot pixels and zero/dead
+  // pixels. It only replaces extreme outliers using same-CFA neighbours.
+  bool auto_bad_pixel_correction{false};
+  // Sensor-domain digital gain, applied after RAW calibration and retained as
+  // scene-linear headroom. The normal renderer's --exposure is intentionally a
+  // later photographic exposure decision.
+  float digital_gain{1.0F};
 };
 
 struct DecodeInfo {
@@ -102,15 +149,72 @@ struct DecodedImage {
   PhotoMetadata metadata;
   CaptureMetadata capture;
   DecodeInfo decode;
+  // How far above diffuse white this input's *format* can carry detail, as a
+  // linear multiple of 1.0. HLG is 1000/203, PQ up to 10000/203, a gain-map
+  // input whatever its metadata declares, and everything else exactly 1.
+  //
+  // This is a property of the encoding, not a measurement of the pixels, and
+  // the distinction is the point. A RAW routinely decodes to values above 1.0 --
+  // that is white-balance normalisation headroom, which auto-exposure brings
+  // back down -- and treating those as HDR highlights would make a scene-referred
+  // input behave like a display-referred one. Consumers that need to know
+  // whether an input is genuinely HDR must branch on this rather than on a
+  // percentile of the image.
+  float hdr_headroom{1.0F};
 };
 
 [[nodiscard]] DecodedImage decode_image(const std::filesystem::path& path,
                                         const RawDecodeOptions& options = {});
 
+// Decode a Bayer RAW without demosaicing. This is the RAW-domain entry point
+// for denoising, HDR fusion, low-light enhancement, and neural-network input.
+// The returned raster is the visible sensor raster in sensor coordinates; it
+// is not rotated or DefaultCrop-trimmed. Non-Bayer/X-Trans inputs are rejected
+// rather than silently packed as if they were RGGB.
+[[nodiscard]] RawMosaic decode_raw_mosaic(
+    const std::filesystem::path& path, const RawDecodeOptions& options = {});
+
+// Repack a calibrated Bayer raster to H/2 x W/2 x 4 in the fixed order
+// R, Gr, Gb, B. The operation requires even dimensions and a known 2x2 CFA.
+[[nodiscard]] FloatImage pack_bayer(const RawMosaic& mosaic);
+
 // Ultra HDR JPEG/R input: applies the embedded gain map and returns the linear
 // HDR rendition instead of the SDR primary image.
 [[nodiscard]] bool is_ultrahdr_jpeg_file(const std::filesystem::path& path);
 [[nodiscard]] DecodedImage decode_ultrahdr(const std::filesystem::path& path);
+
+// AVIF input, including the 10-bit BT.2100 PQ and HLG renditions this project
+// writes. `is_avif_file` reads the container signature rather than the name, so
+// a mislabelled file is rejected instead of being handed to the wrong decoder.
+[[nodiscard]] bool is_avif_file(const std::filesystem::path& path);
+[[nodiscard]] DecodedImage decode_avif(const std::filesystem::path& path);
+
+struct PreviewJpeg {
+  std::vector<std::uint8_t> bytes;
+  // What the linear image was divided by before it was encoded. A consumer
+  // recovers scene-linear values by decoding the JPEG to linear and multiplying
+  // by this, and one means the image fitted in the display range untouched.
+  //
+  // It exists because an 8-bit sRGB JPEG cannot represent an HDR input: an HLG
+  // or PQ still keeps the whole point of the photograph -- its specular
+  // highlights, at up to 4.9x and 49x diffuse white -- above 1.0, and the panel
+  // was showing them as flat white and then trying to expand a highlight it no
+  // longer had.
+  //
+  // Only `hdr_headroom > 1` inputs are ever divided. Scene-referred ones are
+  // not, however bright they measure: a RAW decodes above 1.0 whenever
+  // white-balance normalisation leaves headroom there, and dividing for that
+  // would spend a quarter of the preview's code values on range auto-exposure
+  // is about to remove -- inconsistently, on some frames of a shoot but not
+  // others.
+  float scale{1.0F};
+  // Scene-referred inputs also need an exposure anchor before they can be
+  // compared with a camera JPEG. This is the automatic exposure selected from
+  // the decoded RAW scene, before the user's brightness bias. Display-referred
+  // inputs report zero. It is separate from `scale`: scale is an 8-bit
+  // transport divisor, while this value is a photographic rendering decision.
+  float exposure_ev{0.0F};
+};
 
 // A bounded 8-bit preview of any supported input, for the browser panel.
 //
@@ -119,8 +223,13 @@ struct DecodedImage {
 // is a preview of a different image, which is exactly how the panel came to
 // show a picture that no setting could change. The caller owns the speed/detail
 // trade-off through `options.half_size`.
-[[nodiscard]] std::vector<std::uint8_t> encode_preview_jpeg(
+// `apply_scene_exposure` is reserved for model inputs: it turns a RAW's
+// scene-linear values into the exposure-normalized SDR domain expected by the
+// external gain model. Browser previews keep it false and apply the returned
+// exposure anchor in their linear renderer instead.
+[[nodiscard]] PreviewJpeg encode_preview_jpeg(
     const std::filesystem::path& path, std::uint32_t max_edge = 2048,
-    int quality = 85, const RawDecodeOptions& options = {});
+    int quality = 85, const RawDecodeOptions& options = {},
+    bool apply_scene_exposure = false);
 
 }  // namespace hyperdr

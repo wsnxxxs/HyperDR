@@ -73,7 +73,7 @@ def _safe_filename(value: str) -> str:
         raise ValueError("文件名无效。")
     suffix = Path(name).suffix.lower()
     if suffix not in SUPPORTED_EXTENSIONS:
-        raise ValueError("不支持此格式；请选择 ARW、DNG、JPEG、PNG、HEIC 或 HEIF。")
+        raise ValueError("不支持此格式；请选择 ARW、DNG、JPEG、PNG、HEIC、HEIF 或 AVIF。")
     stem = re.sub(r"[^\w\-. ()\u4e00-\u9fff]", "_", Path(name).stem, flags=re.UNICODE)
     stem = stem[:120].strip(". ") or "image"
     return stem + suffix
@@ -87,7 +87,9 @@ def _matches_declared_format(path: Path) -> bool:
         return header.startswith(b"\xff\xd8")
     if suffix == ".png":
         return header.startswith(b"\x89PNG\r\n\x1a\n")
-    if suffix in {".heic", ".heif"}:
+    if suffix in {".heic", ".heif", ".avif"}:
+        # All three are ISO base media containers; which codec sits inside is
+        # the decoder's business, not this guard's.
         return len(header) >= 12 and header[4:8] == b"ftyp"
     if suffix in {".arw", ".dng"}:
         return header.startswith((b"II*\x00", b"MM\x00*"))

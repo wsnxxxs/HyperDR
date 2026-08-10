@@ -143,7 +143,7 @@ std::vector<std::uint8_t> make_minimal_exif(const PhotoMetadata& m) {
   }
 
   std::vector<Entry> ifd0_entries;
-  ifd0_entries.push_back(ascii(0x010F, m.make));
+  if (!m.make.empty()) ifd0_entries.push_back(ascii(0x010F, m.make));
   if (!m.model.empty()) ifd0_entries.push_back(ascii(0x0110, m.model));
   ifd0_entries.push_back(short_value(0x0112, std::clamp<std::uint16_t>(m.orientation, 1, 8)));
   if (!m.date_time.empty()) ifd0_entries.push_back(ascii(0x0132, m.date_time));
@@ -248,45 +248,204 @@ std::string make_xmp(const PhotoMetadata& m, float headroom_stops) {
   return out.str();
 }
 
-std::optional<std::uint16_t> read_exif_orientation(const std::uint8_t* data,
-                                                   std::size_t size) {
-  // A TIFF header is 8 bytes and IFD0 needs at least a 2-byte entry count.
-  if (data == nullptr || size < 10) return std::nullopt;
-  bool big_endian = false;
-  if (data[0] == 'M' && data[1] == 'M') big_endian = true;
-  else if (!(data[0] == 'I' && data[1] == 'I')) return std::nullopt;
+namespace {
 
-  const auto u16 = [&](std::size_t offset) -> std::uint16_t {
-    return big_endian ? static_cast<std::uint16_t>((data[offset] << 8) | data[offset + 1])
-                      : static_cast<std::uint16_t>(data[offset] |
-                                                   (data[offset + 1] << 8));
-  };
-  const auto u32 = [&](std::size_t offset) -> std::uint32_t {
+// --- Reading a TIFF/Exif block ---------------------------------------------
+//
+// One bounds-checked walker, shared by everything that reads Exif. These are
+// attacker-controlled bytes: every offset is computed in 64 bits and compared
+// against the block size before it is used, and an entry that does not add up
+// is reported as absent rather than guessed at. Nothing here throws, so a
+// malformed block costs the caller a field, not the conversion.
+
+struct TiffBlock {
+  const std::uint8_t* data{};
+  std::size_t size{};
+  bool big_endian{};
+  std::uint64_t ifd0{};
+
+  [[nodiscard]] std::uint16_t u16(std::size_t offset) const {
+    return big_endian
+               ? static_cast<std::uint16_t>((data[offset] << 8) | data[offset + 1])
+               : static_cast<std::uint16_t>(data[offset] | (data[offset + 1] << 8));
+  }
+  [[nodiscard]] std::uint32_t u32(std::size_t offset) const {
     const auto a = static_cast<std::uint32_t>(data[offset]);
     const auto b = static_cast<std::uint32_t>(data[offset + 1]);
     const auto c = static_cast<std::uint32_t>(data[offset + 2]);
     const auto d = static_cast<std::uint32_t>(data[offset + 3]);
     return big_endian ? (a << 24) | (b << 16) | (c << 8) | d
                       : (d << 24) | (c << 16) | (b << 8) | a;
-  };
+  }
+};
 
-  if (u16(2) != 42) return std::nullopt;
-  const std::uint64_t ifd0 = u32(4);
-  // Every arithmetic step below stays in 64 bits and is compared against the
-  // block size, so a hostile offset or entry count cannot walk off the buffer.
-  if (ifd0 + 2 > size) return std::nullopt;
-  const std::uint32_t entries = u16(static_cast<std::size_t>(ifd0));
-  if (ifd0 + 2 + static_cast<std::uint64_t>(entries) * 12 > size) return std::nullopt;
-  for (std::uint32_t i = 0; i < entries; ++i) {
-    const auto entry = static_cast<std::size_t>(ifd0 + 2 + static_cast<std::uint64_t>(i) * 12);
-    if (u16(entry) != 0x0112) continue;
-    // SHORT, one value, stored inline in the first two bytes of the value field.
-    if (u16(entry + 2) != 3 || u32(entry + 4) != 1) return std::nullopt;
-    const std::uint16_t orientation = u16(entry + 8);
-    if (orientation < 1 || orientation > 8) return std::nullopt;
-    return orientation;
+struct TiffEntry {
+  std::uint16_t type{};
+  std::uint32_t count{};
+  // Where the values actually are: inline in the entry when they fit in the
+  // four-byte value field, otherwise at the offset that field holds.
+  std::uint64_t value_offset{};
+};
+
+std::size_t tiff_type_size(std::uint16_t type) {
+  switch (type) {
+    case 1: case 2: case 6: case 7: return 1;  // BYTE, ASCII, SBYTE, UNDEFINED
+    case 3: case 8: return 2;                  // SHORT, SSHORT
+    case 4: case 9: case 11: return 4;         // LONG, SLONG, FLOAT
+    case 5: case 10: case 12: return 8;        // RATIONAL, SRATIONAL, DOUBLE
+    default: return 0;
+  }
+}
+
+std::optional<TiffBlock> open_tiff(const std::uint8_t* data, std::size_t size) {
+  if (data == nullptr) return std::nullopt;
+  // A HEIF Exif item is prefixed with a four-byte offset to the TIFF header,
+  // and some writers leave the JPEG "Exif\0\0" signature in place even when the
+  // caller was supposed to strip it. Rather than teach every caller which
+  // preamble its container uses, find the byte-order mark within a short
+  // window; a block with no header in the first 16 bytes is not Exif.
+  std::size_t start = 0;
+  while (start + 8 <= size && start <= 16) {
+    const bool motorola = data[start] == 'M' && data[start + 1] == 'M';
+    const bool intel = data[start] == 'I' && data[start + 1] == 'I';
+    if (motorola || intel) {
+      TiffBlock block{data + start, size - start, motorola, 0};
+      if (block.u16(2) != 42) return std::nullopt;
+      block.ifd0 = block.u32(4);
+      // IFD0 needs at least a two-byte entry count.
+      if (block.ifd0 + 2 > block.size) return std::nullopt;
+      return block;
+    }
+    ++start;
   }
   return std::nullopt;
+}
+
+std::optional<TiffEntry> find_entry(const TiffBlock& block, std::uint64_t ifd,
+                                    std::uint16_t tag) {
+  if (ifd + 2 > block.size) return std::nullopt;
+  const std::uint32_t entries = block.u16(static_cast<std::size_t>(ifd));
+  if (ifd + 2 + static_cast<std::uint64_t>(entries) * 12 > block.size) {
+    return std::nullopt;
+  }
+  for (std::uint32_t i = 0; i < entries; ++i) {
+    const auto at = static_cast<std::size_t>(ifd + 2 + static_cast<std::uint64_t>(i) * 12);
+    if (block.u16(at) != tag) continue;
+    TiffEntry entry;
+    entry.type = block.u16(at + 2);
+    entry.count = block.u32(at + 4);
+    const std::size_t unit = tiff_type_size(entry.type);
+    if (unit == 0 || entry.count == 0) return std::nullopt;
+    const std::uint64_t bytes = static_cast<std::uint64_t>(unit) * entry.count;
+    entry.value_offset = bytes <= 4 ? at + 8 : block.u32(at + 8);
+    if (entry.value_offset + bytes > block.size) return std::nullopt;
+    return entry;
+  }
+  return std::nullopt;
+}
+
+std::optional<std::uint32_t> read_unsigned(const TiffBlock& block, std::uint64_t ifd,
+                                           std::uint16_t tag) {
+  const auto entry = find_entry(block, ifd, tag);
+  if (!entry) return std::nullopt;
+  const auto at = static_cast<std::size_t>(entry->value_offset);
+  if (entry->type == 3) return block.u16(at);
+  if (entry->type == 4) return block.u32(at);
+  return std::nullopt;
+}
+
+// Exif defines Orientation as a single SHORT, and this stays stricter than
+// read_unsigned on purpose: a tag of another type in that slot is a malformed
+// file, and quietly rotating a photograph on the strength of it is worse than
+// leaving it alone.
+std::optional<std::uint16_t> read_orientation(const TiffBlock& block,
+                                              std::uint64_t ifd) {
+  const auto entry = find_entry(block, ifd, 0x0112);
+  if (!entry || entry->type != 3 || entry->count != 1) return std::nullopt;
+  const auto value = block.u16(static_cast<std::size_t>(entry->value_offset));
+  if (value < 1 || value > 8) return std::nullopt;
+  return value;
+}
+
+std::optional<double> read_rational(const TiffBlock& block, std::uint64_t ifd,
+                                    std::uint16_t tag) {
+  const auto entry = find_entry(block, ifd, tag);
+  if (!entry || (entry->type != 5 && entry->type != 10)) return std::nullopt;
+  const auto at = static_cast<std::size_t>(entry->value_offset);
+  const auto numerator = block.u32(at);
+  const auto denominator = block.u32(at + 4);
+  if (denominator == 0) return std::nullopt;
+  if (entry->type == 10) {
+    return static_cast<double>(static_cast<std::int32_t>(numerator)) /
+           static_cast<double>(static_cast<std::int32_t>(denominator));
+  }
+  return static_cast<double>(numerator) / static_cast<double>(denominator);
+}
+
+std::string read_ascii(const TiffBlock& block, std::uint64_t ifd, std::uint16_t tag) {
+  const auto entry = find_entry(block, ifd, tag);
+  if (!entry || entry->type != 2) return {};
+  const auto at = static_cast<std::size_t>(entry->value_offset);
+  // A conforming value is NUL-terminated; a truncated one simply ends. Cap the
+  // length so a hostile 4 GB count cannot turn a tag into an allocation.
+  constexpr std::uint32_t kMaxAscii = 512;
+  const std::uint32_t count = std::min(entry->count, kMaxAscii);
+  std::string value(reinterpret_cast<const char*>(block.data + at), count);
+  const auto terminator = value.find('\0');
+  if (terminator != std::string::npos) value.resize(terminator);
+  while (!value.empty() && (value.back() == ' ' || value.back() == '\t')) {
+    value.pop_back();
+  }
+  return value;
+}
+
+}  // namespace
+
+ExifRead read_exif(const std::uint8_t* data, std::size_t size) {
+  ExifRead result;
+  const auto block = open_tiff(data, size);
+  if (!block) return result;
+
+  auto& m = result.metadata;
+  m.make = read_ascii(*block, block->ifd0, 0x010F);
+  m.model = read_ascii(*block, block->ifd0, 0x0110);
+  m.date_time = read_ascii(*block, block->ifd0, 0x0132);
+  m.artist = read_ascii(*block, block->ifd0, 0x013B);
+  m.copyright = read_ascii(*block, block->ifd0, 0x8298);
+  if (const auto orientation = read_orientation(*block, block->ifd0)) {
+    result.orientation = *orientation;
+    m.orientation = *orientation;
+  }
+
+  // Capture settings live in the Exif sub-IFD that IFD0 points at. No pointer
+  // means no capture settings, which is a normal state for a rendered file.
+  const auto exif_ifd = read_unsigned(*block, block->ifd0, 0x8769);
+  if (!exif_ifd) return result;
+  const std::uint64_t sub = *exif_ifd;
+
+  // ISO is SHORT in most files but LONG in a few; PhotographicSensitivity
+  // (0x8827) is the tag both spellings use.
+  if (const auto iso = read_unsigned(*block, sub, 0x8827)) m.iso = *iso;
+  if (const auto seconds = read_rational(*block, sub, 0x829A)) {
+    if (*seconds > 0.0) m.exposure_seconds = *seconds;
+  }
+  if (const auto aperture = read_rational(*block, sub, 0x829D)) {
+    if (*aperture > 0.0) m.aperture = *aperture;
+  }
+  if (const auto focal = read_rational(*block, sub, 0x920A)) {
+    if (*focal > 0.0) m.focal_length_mm = *focal;
+  }
+  if (const auto focal35 = read_unsigned(*block, sub, 0xA405)) {
+    m.focal_length_35mm = static_cast<double>(*focal35);
+  }
+  m.lens = read_ascii(*block, sub, 0xA434);
+  m.lens_make = read_ascii(*block, sub, 0xA433);
+  return result;
+}
+
+std::optional<std::uint16_t> read_exif_orientation(const std::uint8_t* data,
+                                                   std::size_t size) {
+  return read_exif(data, size).orientation;
 }
 
 }  // namespace hyperdr

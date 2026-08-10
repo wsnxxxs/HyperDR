@@ -98,7 +98,9 @@ has exactly one authority; adding a second copy of any of them is a regression.
 | Luminance, smoothstep, percentiles, rationals | `foundation/math.hpp`, `foundation/rational.hpp`, `image/color.hpp` | the whole renderer |
 | Version string | `foundation/version.hpp` | CLI banner, Exif Software tag, resume fingerprint, decode-cache key, report, schema |
 | Resolution bounding | `modules/image/src/resample.cpp` | `--preview-max-edge` and `thumbnail` |
-| BT.2100 transfer functions | `modules/image/include/hyperdr/image/transfer.hpp` | the HEIF and AVIF encoders |
+| BT.2100 transfer functions, both directions | `modules/image/include/hyperdr/image/transfer.hpp` | the HEIF and AVIF encoders, and the decoders that read those files back |
+| CICP decoding: transfer, primaries, the ICC path | `modules/codec/src/internal/cicp.hpp` | the JPEG, PNG, HEIF and AVIF decoders |
+| Exif read onto a decoded image | `read_exif` in `modules/container` plus `modules/codec/src/internal/metadata.hpp` | the JPEG, HEIF, AVIF and Ultra HDR decoders |
 | Codec availability | `modules/codec/include/hyperdr/codec/availability.hpp` and `src/unavailable.cpp` | every caller, none of which contains a `#if` |
 
 ## Tests

@@ -1,16 +1,26 @@
 # HyperDR
 
-`HyperDR` is a C++20 command-line converter for ARW, DNG, JPEG, PNG, HEIC, and
-HEIF images, developed on Windows. It exports six real HDR representations:
-Apple-compatible Adaptive HDR HEIC (a Display P3 SDR base plus an ISO 21496-1
-single-channel gain map), Google Ultra HDR JPEG/R, 10-bit ITU-R BT.2100 PQ and
-HLG HEIC, and the same two BT.2100 renditions as 10-bit AVIF. PQ, HLG and AVIF
-are rendered from the reconstructed linear HDR image; SDR samples are never
-merely relabelled HDR.
+`HyperDR` is a C++20 command-line converter for ARW, DNG, JPEG, PNG, HEIC,
+HEIF, and AVIF images, developed on Windows. It exports six real HDR
+representations: Apple-compatible Adaptive HDR HEIC (a Display P3 SDR base plus
+an ISO 21496-1 single-channel gain map), Google Ultra HDR JPEG/R, 10-bit ITU-R
+BT.2100 PQ and HLG HEIC, and the same two BT.2100 renditions as 10-bit AVIF. PQ,
+HLG and AVIF are rendered from the reconstructed linear HDR image; SDR samples
+are never merely relabelled HDR.
 
-An Ultra HDR JPEG given as *input* is read through its gain map rather than
-through its backward-compatible SDR primary, so re-exporting one no longer
-discards the captured highlight range.
+**Every encoding HyperDR writes, it also reads.** An HDR photograph given as
+*input* keeps its highlight range: an Ultra HDR JPEG is read through its gain
+map rather than through its backward-compatible SDR primary, an Adaptive HDR
+HEIC through its `tmap` gain map, and a BT.2100 PQ or HLG file -- HEIC or AVIF,
+4:2:0, 4:2:2 or 4:4:4, which is what cameras such as Sony's write -- through the
+exact inverse of the transfer function this project encodes with. All of them
+land in the same linear Display P3 working space as a RAW, so the look controls,
+the preview and the six exports behave the same whatever the input was.
+
+Camera, lens and capture settings are read from the input's Exif and carried to
+the output. ISO is not merely copied: the gain map weighs local expansion
+against sensor noise with it, so a high-ISO HEIC is rendered as the high-ISO
+photograph it is.
 
 The `photographic` look uses a photographic toe, a shared linear middle, and a
 smooth HDR shoulder. It keeps SDR and HDR identical below the shoulder, puts
@@ -143,9 +153,20 @@ carrying its own copy of the maths, which is what keeps preview and export in
 step.
 
 Input discovery is case-insensitive and accepts `.arw`, `.dng`, `.jpg`,
-`.jpeg`, `.png`, `.heic`, and `.heif`. ARW/DNG files retain the RAW highlight
-recovery controls; raster and HEIC inputs are normalized into the same linear
-Display-P3 processing space.
+`.jpeg`, `.png`, `.heic`, `.heif`, and `.avif`. ARW/DNG files retain the RAW
+highlight recovery controls; every other input is normalized into the same
+linear Display-P3 processing space, HDR ones included -- diffuse white sits at
+1.0 and the highlights above it are kept rather than clipped.
+
+The browser panel's preview is an 8-bit JPEG, which cannot hold those
+highlights, so `HyperDR thumbnail` divides an HDR input by a power of two and
+reports the divisor as JSON on stdout (`{"scale":8,"exposure":0}`). The panel
+multiplies it back before applying the curve. RAW is scene-linear rather than
+display-referred, so ARW/DNG also report the automatic photographic exposure
+anchor (`exposure`, in EV) that the panel applies before the user's brightness
+bias. Whether an input is HDR is decided by its format, never by how bright
+its pixels measure, so ARW, DNG, JPEG, PNG and any SDR HEIC or AVIF always
+report `{"scale":1}` and their previews are unchanged.
 
 Recommended photographic conversion:
 
@@ -184,15 +205,15 @@ work, `--no-verify` skips that final self-check; reports then record
 
 `--skip-existing` makes interrupted recursive batches resumable. It compares a
 fingerprint, not a timestamp: after each successful conversion HyperDR records
-the input's size and modification time together with a hash of every setting
-that can change the encoded bytes, in a hidden `.hyperdr/` folder mirroring the
-output tree. A file is skipped only when all three still match, so re-running
-with a different look correctly regenerates instead of silently keeping the
-previous render, and an output with no recorded provenance is always treated as
-stale. Options that cannot change the bytes -- `--no-verify`, `--report`, and
-`--overwrite` -- are excluded from the fingerprint, so toggling them
-does not force needless work. The fingerprint is derived from the settings table,
-so it now covers every setting rather than a hand-maintained subset; sidecars
+the input's size, modification time, and SHA-256 content digest together with a
+hash of every setting that can change the encoded bytes, in a hidden `.hyperdr/`
+folder mirroring the output tree. A file is skipped only when the input content,
+metadata, settings, and output hash still match, so replacing a RAW in place
+cannot silently keep the previous render. An output with no recorded provenance
+is always treated as stale. Options that cannot change the bytes -- `--no-verify`,
+`--report`, and `--overwrite` -- are excluded from the fingerprint, so toggling
+them does not force needless work. The fingerprint is derived from the settings
+table, so it covers every setting rather than a hand-maintained subset; sidecars
 written by earlier builds no longer match, which means the first resumed batch
 after upgrading re-renders once and every batch after that skips normally.
 
@@ -252,12 +273,36 @@ above `1` are capped at the global curve target so output cannot exceed it.
   gain cells survive Adaptive HEIC decoding exactly. Ultra HDR stores the map as
   a grayscale JPEG at quality 85 or higher, as recommended for JPEG/R; the
   requested quality still controls the SDR base.
-- RAW is decoded via CIE XYZ (LibRaw `output_color` 5) into linear Display P3, which
-  avoids Rec.709 pre-clipping. Values outside Display P3 still land on the P3
-  boundary. `render.wide_gamut_fraction` is measured on the decoded, linear-P3
-  input before exposure or look processing: among pixels with P3 luminance at least
-  `0.02`, it is the fraction outside Rec.709. The report also records its
-  numerator, denominator, and threshold.
+- RAW is decoded via LibRaw's linear ProPhoto RGB output (`output_color` 4) into
+  linear Display P3, avoiding Rec.709 pre-clipping. Out-of-P3 float components
+  remain available to the renderer until the output-specific gamut handling.
+  `render.wide_gamut_fraction` is measured on the decoded, linear-P3 input before
+  exposure or look processing: among pixels with P3 luminance at least `0.02`,
+  it is the fraction outside Rec.709. The report also records its numerator,
+  denominator, and threshold.
+- RAW calibration is now configurable before demosaic. LibRaw applies the
+  metadata black level, camera white balance, optional bad-pixel coordinate map
+  (`--raw-bad-pixels`), and dark-frame PGM (`--raw-dark-frame`); Phase One's
+  metadata linearization/defect correction is enabled explicitly. An external
+  dark frame is also the supported fixed-pattern-noise path: row/column bias is
+  removed when it is present in that measured frame; no scene-derived row/column
+  estimator is enabled by default because it would confuse real image gradients
+  with sensor noise.
+  A code LUT can be supplied with `--raw-linearization-lut`: its text format is
+  `N` followed by `N` samples, either raw code values or normalized `[0,1]`
+  values. A lens-shading map can be supplied with
+  `--raw-lens-shading`; its format is `width height channels` followed by
+  row-major gains, with 1, 3 (RGB), or 4 (R,G1,B,G2) channels. The opt-in
+  `--raw-auto-bad-pixels` detector only replaces extreme zero/saturated outliers
+  with same-CFA neighbours, so a supplied calibration map remains preferred for
+  scientific work. `--raw-gain` is a sensor-domain digital gain and is included
+  in the decode cache and resume fingerprint.
+- RAW-domain consumers can call `decode_raw_mosaic()` and `pack_bayer()`. The
+  former returns black-corrected, white-level-normalized Bayer samples in sensor
+  coordinates; the latter produces `H/2 x W/2 x 4` in fixed `R,Gr,Gb,B` order.
+  X-Trans and other non-2x2 CFAs are rejected instead of being silently labelled
+  RGGB. The normal export path still demosaics through LibRaw because its
+  downstream contract is linear Display P3 RGB.
 - The SDR base is quantized with deterministic TPDF dithering, suppressing sky and
   gradient banding that the multiplicative gain map would otherwise amplify.
 - The HEIF/BMFF item topology, `tmap` payload layout, and structural verifier are
@@ -269,8 +314,10 @@ above `1` are capped at the global curve target so output cannot exceed it.
 `--report` writes schema 6. Its `settings` block is generated from the settings
 table, so it records every setting by its canonical name — not the handful someone
 remembered to add — plus `output_depth`, the depth actually encoded (BT.2100 is
-always 10-bit regardless of `--depth`). Each file carries flat result fields and
-`look`, `render`, and `gain_map` objects. These record EV100 (or
+always 10-bit regardless of `--depth`). The top-level `raw_processing` block
+records the calibration files, auto bad-pixel mode, and sensor digital gain used
+for the run. Each file carries flat result fields and `look`, `render`, and
+`gain_map` objects. These record EV100 (or
 `null`), selected/linear headroom, rendered peak, utilization, gamma, gain
 percentiles, high-gain fractions, clipping, and local-weight diagnostics.
 The global `settings.pop` and per-file input-domain

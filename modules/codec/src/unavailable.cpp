@@ -27,15 +27,25 @@ DecodedImage decode_image(const std::filesystem::path&, const RawDecodeOptions&)
   fail_without_codecs("image decoding");
 }
 
+RawMosaic decode_raw_mosaic(const std::filesystem::path&,
+                            const RawDecodeOptions&) {
+  fail_without_codecs("RAW mosaic decoding");
+}
+
 bool is_ultrahdr_jpeg_file(const std::filesystem::path&) { return false; }
 
 DecodedImage decode_ultrahdr(const std::filesystem::path&) {
   fail_without_codecs("Ultra HDR JPEG decoding");
 }
 
-std::vector<std::uint8_t> encode_preview_jpeg(const std::filesystem::path&,
-                                              std::uint32_t, int,
-                                              const RawDecodeOptions&) {
+bool is_avif_file(const std::filesystem::path&) { return false; }
+
+DecodedImage decode_avif(const std::filesystem::path&) {
+  fail_without_codecs("AVIF decoding");
+}
+
+PreviewJpeg encode_preview_jpeg(const std::filesystem::path&, std::uint32_t, int,
+                                const RawDecodeOptions&, bool) {
   fail_without_codecs("thumbnail generation");
 }
 

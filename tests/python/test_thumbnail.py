@@ -9,6 +9,7 @@ mode the converter does not have -- because each one failed silently.
 """
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import unittest
@@ -36,7 +37,8 @@ class ThumbnailCommandTests(unittest.TestCase):
         output.write_bytes(
             b"\xff\xd8\xff\xc0\x00\x11\x08\x00\x01\x00\x01"
             + b"\x03\x01\x22\x00\x02\x11\x01\x03\x11\x01\xff\xd9")
-        return mock.Mock(returncode=0, stderr=b"")
+        return mock.Mock(returncode=0, stderr=b"",
+                         stdout=b'{"scale":1,"exposure":0.75}\n')
 
     def _thumbnail(self, name: str, mode: str) -> list[str]:
         self.calls.clear()
@@ -59,6 +61,15 @@ class ThumbnailCommandTests(unittest.TestCase):
     def test_non_raw_previews_do_not_ask_for_half_size(self):
         self.assertNotIn("--half-size", self._thumbnail("photo.jpg", "blend"))
 
+    def test_converter_metadata_reaches_the_thumbnail_result(self):
+        with mock.patch.object(thumbnail, "detect_exe", lambda: "HyperDR"), \
+                mock.patch.object(thumbnail.subprocess, "run", self._fake_run):
+            _, dimensions, scale, exposure = thumbnail._converter_thumbnail(
+                Path("photo.arw"), "blend", 960)
+        self.assertEqual(dimensions, (1, 1))
+        self.assertEqual(scale, 1.0)
+        self.assertEqual(exposure, 0.75)
+
 
 class ThumbnailCacheTests(unittest.TestCase):
     """Two modes are two images, and the cache has to know it."""
@@ -76,7 +87,8 @@ class ThumbnailCacheTests(unittest.TestCase):
 
     def _build(self, source, highlight_recovery, max_edge):
         self.modes.append(highlight_recovery)
-        return b"jpeg-" + highlight_recovery.encode() + str(max_edge).encode(), (4, 4)
+        return (b"jpeg-" + highlight_recovery.encode() + str(max_edge).encode(),
+                (4, 4), 1.0, 0.0)
 
     def test_each_highlight_mode_gets_its_own_cache_entry(self):
         with mock.patch.object(thumbnail, "_converter_thumbnail", self._build):
@@ -102,6 +114,16 @@ class ThumbnailCacheTests(unittest.TestCase):
         self.assertEqual(again[0], small[0])
         self.assertEqual(self.modes, ["blend", "blend"])
 
+    def test_same_size_timestamp_preserved_replacement_invalidates_cache(self):
+        original_stat = self.source.stat()
+        with mock.patch.object(thumbnail, "_converter_thumbnail", self._build):
+            thumbnail.thumbnail_for(self.source, "blend")
+            self.source.write_bytes(b"\x01" * 32)
+            os.utime(self.source, ns=(original_stat.st_atime_ns,
+                                      original_stat.st_mtime_ns))
+            thumbnail.thumbnail_for(self.source, "blend")
+        self.assertEqual(self.modes, ["blend", "blend"])
+
 
 class PreviewEndpointTests(unittest.TestCase):
     """What the browser is allowed to ask for."""
@@ -124,7 +146,7 @@ class PreviewEndpointTests(unittest.TestCase):
         def fake(source, highlight_recovery, max_edge):
             seen["mode"] = highlight_recovery
             seen["edge"] = max_edge
-            return b"jpeg", (2, 2), "image/jpeg"
+            return b"jpeg", (2, 2), "image/jpeg", 1.0, 0.0
 
         with mock.patch.object(api, "thumbnail_for", fake):
             response = api.preview(self.context, {
@@ -138,7 +160,7 @@ class PreviewEndpointTests(unittest.TestCase):
 
         def fake(source, highlight_recovery, max_edge):
             seen["mode"] = highlight_recovery
-            return b"jpeg", (2, 2), "image/jpeg"
+            return b"jpeg", (2, 2), "image/jpeg", 1.0, 0.0
 
         with mock.patch.object(api, "thumbnail_for", fake):
             api.preview(self.context, {"id": [self.session_id]})
@@ -155,11 +177,31 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertEqual(response.status, 400)
         self.assertIn("preview edge", response.payload["error"])
 
+    def test_the_headroom_scale_reaches_the_browser(self):
+        # An HDR input's preview is divided down to fit in eight bits, and the
+        # browser cannot undo that without being told by how much.
+        with mock.patch.object(api, "thumbnail_for",
+                               lambda source, mode, edge: (b"jpeg", (2, 2),
+                                                           "image/jpeg", 8.0, 1.5)):
+            response = api.preview(self.context, {"id": [self.session_id]})
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.headers["X-Preview-Scale"], "8")
+        self.assertEqual(response.headers["X-Preview-Exposure"], "1.5")
+
+    def test_an_sdr_preview_reports_no_scaling(self):
+        with mock.patch.object(api, "thumbnail_for",
+                               lambda source, mode, edge: (b"jpeg", (2, 2),
+                                                           "image/jpeg", 1.0, 0.0)):
+            response = api.preview(self.context, {"id": [self.session_id]})
+        self.assertEqual(response.headers["X-Preview-Scale"], "1")
+        self.assertEqual(response.headers["X-Preview-Exposure"], "0")
+
     def test_every_converter_mode_is_accepted(self):
         # Validated against the converter's own schema, so a mode added to the
         # C++ enum cannot be left rejected here.
         with mock.patch.object(api, "thumbnail_for",
-                               lambda source, mode, edge: (b"jpeg", (2, 2), "image/jpeg")):
+                               lambda source, mode, edge: (b"jpeg", (2, 2),
+                                                           "image/jpeg", 1.0, 0.0)):
             for mode in api._HIGHLIGHT_RECOVERY_CHOICES:
                 response = api.preview(self.context, {"id": [self.session_id], "hr": [mode]})
                 self.assertEqual(response.status, 200, mode)
@@ -167,3 +209,28 @@ class PreviewEndpointTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ScaleParsingTests(unittest.TestCase):
+    """What the converter says about the preview's headroom, and what is ignored."""
+
+    def test_a_reported_scale_is_read(self):
+        self.assertEqual(thumbnail._parse_scale(b'{"scale":8}\n'), 8.0)
+
+    def test_silence_means_no_scaling(self):
+        # A converter predating the field leaves the preview clipped exactly as
+        # it used to be, rather than being multiplied by a number nobody sent.
+        self.assertEqual(thumbnail._parse_scale(b""), 1.0)
+        self.assertEqual(thumbnail._parse_scale(b"not json"), 1.0)
+        self.assertEqual(thumbnail._parse_scale(b"{}"), 1.0)
+
+    def test_an_implausible_scale_is_refused(self):
+        self.assertEqual(thumbnail._parse_scale(b'{"scale":0}'), 1.0)
+        self.assertEqual(thumbnail._parse_scale(b'{"scale":1e9}'), 1.0)
+        self.assertEqual(thumbnail._parse_scale(b'{"scale":"eight"}'), 1.0)
+
+    def test_raw_exposure_is_read_and_bounded(self):
+        self.assertEqual(thumbnail._parse_exposure(b'{"exposure":1.5}'), 1.5)
+        self.assertEqual(thumbnail._parse_exposure(b'{"exposure":-2}'), -2.0)
+        self.assertEqual(thumbnail._parse_exposure(b'{"exposure":99}'), 0.0)
+        self.assertEqual(thumbnail._parse_exposure(b'{"exposure":"auto"}'), 0.0)

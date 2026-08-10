@@ -652,6 +652,121 @@ void verify_heic_decodable(const std::filesystem::path& input) {
   }
 }
 
+namespace {
+
+struct DecodedGainMapHeic {
+  FloatImage base;
+  FloatImage gain;
+  GainMapMetadata metadata;
+};
+
+DecodedGainMapHeic decode_gain_map_heic_components(
+    const std::filesystem::path& input) {
+  const auto bytes = read_binary_file(input);
+  const auto metadata = parse_tmap_payload(extract_tmap_payload(bytes));
+  std::unique_ptr<heif_context, ContextDeleter> context(heif_context_alloc());
+  if (!context) throw std::runtime_error("cannot allocate libheif context");
+  check_heif(heif_context_read_from_memory_without_copy(
+                 context.get(), bytes.data(), bytes.size(), nullptr),
+             "read Adaptive HDR HEIC");
+
+  heif_image_handle* primary_raw = nullptr;
+  check_heif(heif_context_get_primary_image_handle(context.get(), &primary_raw),
+             "get primary image");
+  std::unique_ptr<heif_image_handle, HandleDeleter> primary(primary_raw);
+  validate_base_profile(primary.get());
+  const bool wide_base = heif_image_handle_get_luma_bits_per_pixel(primary.get()) > 8;
+  heif_image* base_raw = nullptr;
+  check_heif(heif_decode_image(
+                 primary.get(), &base_raw, heif_colorspace_RGB,
+                 wide_base ? heif_chroma_interleaved_RRGGBB_LE
+                           : heif_chroma_interleaved_RGB,
+                 nullptr),
+             "decode SDR base");
+  std::unique_ptr<heif_image, ImageDeleter> base_image(base_raw);
+
+  // The Gain Map is the second dimg reference of the tmap item; scanning for
+  // any decodable non-primary item can select a hidden grid tile instead.
+  const auto references = find_tmap_references(bytes);
+  heif_image_handle* gain_handle_raw = nullptr;
+  check_heif(heif_context_get_image_handle(context.get(), references.gain_id,
+                                           &gain_handle_raw),
+             "get Gain Map image handle");
+  std::unique_ptr<heif_image_handle, HandleDeleter> gain_handle(gain_handle_raw);
+  validate_gain_profile(gain_handle.get());
+  heif_image* gain_raw = nullptr;
+  check_heif(heif_decode_image(gain_handle.get(), &gain_raw,
+                               heif_colorspace_undefined, heif_chroma_undefined,
+                               nullptr),
+             "decode Gain Map");
+  std::unique_ptr<heif_image, ImageDeleter> gain_image(gain_raw);
+
+  const auto width = static_cast<std::uint32_t>(
+      heif_image_get_width(base_image.get(), heif_channel_interleaved));
+  const auto height = static_cast<std::uint32_t>(
+      heif_image_get_height(base_image.get(), heif_channel_interleaved));
+  const auto gain_width = static_cast<std::uint32_t>(
+      heif_image_get_width(gain_image.get(), heif_channel_Y));
+  const auto gain_height = static_cast<std::uint32_t>(
+      heif_image_get_height(gain_image.get(), heif_channel_Y));
+  FloatImage base(width, height, 3), gain(gain_width, gain_height, 1);
+  int base_stride = 0;
+  int gain_stride = 0;
+  const auto* base_plane = heif_image_get_plane_readonly(
+      base_image.get(), heif_channel_interleaved, &base_stride);
+  const auto* gain_plane = heif_image_get_plane_readonly(
+      gain_image.get(), heif_channel_Y, &gain_stride);
+  if (!base_plane || !gain_plane) {
+    throw std::runtime_error("decoded HEIC plane is missing");
+  }
+  const int base_bits = heif_image_get_bits_per_pixel_range(
+      base_image.get(), heif_channel_interleaved);
+  const int gain_bits = heif_image_get_bits_per_pixel_range(
+      gain_image.get(), heif_channel_Y);
+  const float base_max =
+      static_cast<float>((1U << std::min(base_bits, 16)) - 1U);
+  const float gain_max =
+      static_cast<float>((1U << std::min(gain_bits, 16)) - 1U);
+  for (std::uint32_t y = 0; y < height; ++y) {
+    if (base_bits > 8) {
+      const auto* row = reinterpret_cast<const std::uint16_t*>(
+          base_plane + static_cast<std::size_t>(y) * base_stride);
+      for (std::uint32_t x = 0; x < width; ++x) {
+        for (unsigned c = 0; c < 3; ++c) {
+          base.at(x, y, c) =
+              srgb_eotf(row[x * 3 + c] / base_max);
+        }
+      }
+    } else {
+      const auto* row =
+          base_plane + static_cast<std::size_t>(y) * base_stride;
+      for (std::uint32_t x = 0; x < width; ++x) {
+        for (unsigned c = 0; c < 3; ++c) {
+          base.at(x, y, c) = srgb_eotf(row[x * 3 + c] / base_max);
+        }
+      }
+    }
+  }
+  for (std::uint32_t y = 0; y < gain_height; ++y) {
+    if (gain_bits <= 8) {
+      for (std::uint32_t x = 0; x < gain_width; ++x) {
+        gain.at(x, y, 0) =
+            gain_plane[static_cast<std::size_t>(y) * gain_stride + x] /
+            gain_max;
+      }
+    } else {
+      const auto* row = reinterpret_cast<const std::uint16_t*>(
+          gain_plane + static_cast<std::size_t>(y) * gain_stride);
+      for (std::uint32_t x = 0; x < gain_width; ++x) {
+        gain.at(x, y, 0) = row[x] / gain_max;
+      }
+    }
+  }
+  return {std::move(base), std::move(gain), metadata};
+}
+
+}  // namespace
+
 void reconstruct_heic_to_tiff(const std::filesystem::path& input,
                               const std::filesystem::path& output) {
   const auto bytes = read_binary_file(input);
@@ -773,5 +888,69 @@ void reconstruct_heic_to_tiff(const std::filesystem::path& input,
     le32(tiff, std::bit_cast<std::uint32_t>(finite));
   }
   write_binary_file_atomic(output, tiff, true);
+}
+
+DisplayCurveResult compare_gain_map_heic_curve(
+    const std::filesystem::path& reference,
+    const std::filesystem::path& candidate,
+    const std::vector<float>& display_headroom_stops) {
+  if (display_headroom_stops.empty()) {
+    throw std::invalid_argument("display curve requires at least one headroom");
+  }
+  auto reference_components = decode_gain_map_heic_components(reference);
+  auto candidate_components = decode_gain_map_heic_components(candidate);
+  if (reference_components.base.width != candidate_components.base.width ||
+      reference_components.base.height != candidate_components.base.height ||
+      reference_components.base.channels != candidate_components.base.channels) {
+    throw std::invalid_argument("reference and candidate base images disagree");
+  }
+
+  DisplayCurveResult result;
+  result.points.reserve(display_headroom_stops.size());
+  for (const float headroom : display_headroom_stops) {
+    if (!std::isfinite(headroom) || headroom < 0.0F) {
+      throw std::invalid_argument("display headroom must be finite and non-negative");
+    }
+    ReconstructionStats reference_stats{};
+    ReconstructionStats candidate_stats{};
+    const auto reference_render = reconstruct_gain_map(
+        reference_components.base, reference_components.gain,
+        reference_components.metadata, headroom, &reference_stats);
+    const auto candidate_render = reconstruct_gain_map(
+        candidate_components.base, candidate_components.gain,
+        candidate_components.metadata, headroom, &candidate_stats);
+    if (reference_render.pixels.size() != candidate_render.pixels.size()) {
+      throw std::invalid_argument("reference and candidate render sizes disagree");
+    }
+    long double sum = 0.0L;
+    long double squared_sum = 0.0L;
+    double maximum = 0.0;
+    for (std::size_t index = 0; index < reference_render.pixels.size(); ++index) {
+      const float reference_value = reference_render.pixels[index];
+      const float candidate_value = candidate_render.pixels[index];
+      if (!std::isfinite(reference_value) || !std::isfinite(candidate_value)) {
+        throw std::runtime_error("display reconstruction produced non-finite pixels");
+      }
+      const double difference =
+          std::abs(static_cast<double>(candidate_value) - reference_value);
+      sum += difference;
+      squared_sum += difference * difference;
+      maximum = std::max(maximum, difference);
+    }
+    const auto count = static_cast<long double>(reference_render.pixels.size());
+    DisplayCurvePoint point;
+    point.headroom_stops = headroom;
+    point.mae_linear_p3 = static_cast<double>(sum / count);
+    point.mse_linear_p3 = static_cast<double>(squared_sum / count);
+    point.max_abs_error_linear_p3 = maximum;
+    point.total_values = reference_stats.total_values;
+    point.reference_clamp_values = reference_stats.clamp_values;
+    point.candidate_clamp_values = candidate_stats.clamp_values;
+    point.total_pixels = reference_stats.total_pixels;
+    point.reference_clamp_pixels = reference_stats.clamp_pixels;
+    point.candidate_clamp_pixels = candidate_stats.clamp_pixels;
+    result.points.push_back(point);
+  }
+  return result;
 }
 }  // namespace hyperdr

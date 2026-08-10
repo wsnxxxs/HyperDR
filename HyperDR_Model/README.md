@@ -192,6 +192,13 @@ PYTHONPATH=. .venv/bin/python infer_gain.py \
   --device auto
 ```
 
+The model input contract is linear Display-P3 SDR with diffuse white at 1.0.
+The HyperDR panel prepares non-raster inputs through its native thumbnail
+command; RAW/DNG model thumbnails use `--model-input`, which applies the shared
+automatic photographic exposure before JPEG encoding. The matching external
+gain export applies the same anchor to the decoded RAW base before clamping it
+to the SDR range.
+
 Evaluation streams error sums and pixel counts, so batches with different
 padding shapes are never concatenated. Evaluation and inference use CUDA when
 available and otherwise support CPU.

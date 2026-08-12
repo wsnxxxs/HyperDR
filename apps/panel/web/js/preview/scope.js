@@ -12,12 +12,11 @@
 
 import { role, setPressed, setText, readColor } from "../core/dom.js";
 import { store } from "../core/store.js";
-import { __math, sampleModelGain } from "./cpu.js";
 
 /* One pass over the source: luma + per-channel counts, clipping, zebra masks.
  * The masks are painted with the token colours read at call time, so a theme
  * flip between images cannot leave yesterday's red on today's photo. */
-export function analyse(source, scene = source, sceneScale = 1) {
+export function analyse(source, rendered = null) {
   const data = source.data;
   const sceneData = scene.data;
   const { width } = source;
@@ -69,6 +68,7 @@ export function analyse(source, scene = source, sceneScale = 1) {
     target[o + 3] = 235;
   }
 
+  const renderedHistogram = rendered ? analyse(rendered).histogram : null;
   return {
     source,
     scene,
@@ -78,6 +78,7 @@ export function analyse(source, scene = source, sceneScale = 1) {
     clipping: { hot: hot / total, cold: cold / total },
     zebraHot,
     zebraCold,
+    renderedHistogram,
   };
 }
 
@@ -169,7 +170,7 @@ function drawSeries(context, counts, style, blend, width, height, fill) {
   }
 }
 
-export function mountScope({ curve, analysis }) {
+export function mountScope({ analysis }) {
   const canvas = role("histogram");
   const zebraHotCanvas = role("canvas-zebra-hot");
   const zebraColdCanvas = role("canvas-zebra-cold");
@@ -195,7 +196,6 @@ export function mountScope({ curve, analysis }) {
     const data = analysis.current;
     if (!data) return;
     const state = store.get();
-    curve.refreshTable(state);
     const context = canvas.getContext("2d");
     const { width, height } = canvas;
     const palette = readPalette();
@@ -212,22 +212,14 @@ export function mountScope({ curve, analysis }) {
     }
 
     const { histogram } = data;
-    const modelOutput = state.previewOptimized && analysis.modelGain
-      ? simulateModelOutput(data.scene, analysis.modelGain, state.modelStrength,
-                            data.sceneScale)
-      : null;
     if (state.histMode === "rgb") {
-      // Once model mode is active, RGB describes the current model rendition
-      // rather than continuing to show the unchanged source channels.
-      const channels = modelOutput || histogram;
+      const channels = data.renderedHistogram || histogram;
       drawSeries(context, channels.red, palette.red, "lighter", width, height, true);
       drawSeries(context, channels.green, palette.green, "lighter", width, height, true);
       drawSeries(context, channels.blue, palette.blue, "lighter", width, height, true);
     } else {
       drawSeries(context, histogram.luma, palette.luma, null, width, height, true);
-      const output = modelOutput
-        ? modelOutput.luma
-        : simulateOutput(data.sceneLuma, state, curve, data.sceneScale);
+      const output = data.renderedHistogram?.luma || histogram.luma;
       drawSeries(context, output,
                  palette.output, null, width, height, false);
     }

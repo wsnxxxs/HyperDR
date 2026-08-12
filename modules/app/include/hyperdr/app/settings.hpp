@@ -69,6 +69,12 @@ struct FileResult {
   std::uint32_t target_height{};
   std::uint32_t decoded_width{};
   std::uint32_t decoded_height{};
+  // Unambiguous crop vocabulary for model bindings. target_*/decoded_* remain
+  // as compatibility aliases in schema 7.
+  std::uint32_t requested_crop_width{};
+  std::uint32_t requested_crop_height{};
+  std::uint32_t delivered_crop_width{};
+  std::uint32_t delivered_crop_height{};
   // See DecodeInfo: target_dimensions_applied is the only one of these a
   // consumer may branch on, and the reasons are presentation only.
   bool target_dimensions_applied{true};

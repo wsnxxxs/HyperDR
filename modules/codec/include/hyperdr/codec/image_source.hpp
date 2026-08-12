@@ -120,6 +120,13 @@ struct DecodeInfo {
   // data -- which a DNG container can, not just a RAF.
   std::uint32_t target_width{};
   std::uint32_t target_height{};
+  // Sensor-coordinate origins for the metadata request and the CFA-aligned
+  // crop LibRaw actually used. Dimensions above/below are orientation-aware;
+  // origins deliberately are not and are paired with metadata.orientation.
+  std::uint32_t requested_crop_left{};
+  std::uint32_t requested_crop_top{};
+  std::uint32_t delivered_crop_left{};
+  std::uint32_t delivered_crop_top{};
   // Pixels actually returned by the decoder, before any preview resampling.
   std::uint32_t decoded_width{};
   std::uint32_t decoded_height{};
@@ -183,40 +190,21 @@ struct DecodedImage {
 [[nodiscard]] bool is_ultrahdr_jpeg_file(const std::filesystem::path& path);
 [[nodiscard]] DecodedImage decode_ultrahdr(const std::filesystem::path& path);
 
-// AVIF input, including the 10-bit BT.2100 PQ and HLG renditions this project
-// writes. `is_avif_file` reads the container signature rather than the name, so
-// a mislabelled file is rejected instead of being handed to the wrong decoder.
+// AVIF input, including BT.2100 PQ and HLG renditions. The signature check is
+// authoritative because AVIF and HEIF share the same container family.
 [[nodiscard]] bool is_avif_file(const std::filesystem::path& path);
 [[nodiscard]] DecodedImage decode_avif(const std::filesystem::path& path);
 
 struct PreviewJpeg {
   std::vector<std::uint8_t> bytes;
-  // What the linear image was divided by before it was encoded. A consumer
-  // recovers scene-linear values by decoding the JPEG to linear and multiplying
-  // by this, and one means the image fitted in the display range untouched.
-  //
-  // It exists because an 8-bit sRGB JPEG cannot represent an HDR input: an HLG
-  // or PQ still keeps the whole point of the photograph -- its specular
-  // highlights, at up to 4.9x and 49x diffuse white -- above 1.0, and the panel
-  // was showing them as flat white and then trying to expand a highlight it no
-  // longer had.
-  //
-  // Only `hdr_headroom > 1` inputs are ever divided. Scene-referred ones are
-  // not, however bright they measure: a RAW decodes above 1.0 whenever
-  // white-balance normalisation leaves headroom there, and dividing for that
-  // would spend a quarter of the preview's code values on range auto-exposure
-  // is about to remove -- inconsistently, on some frames of a shoot but not
-  // others.
+  // Transport divisor for display-referred HDR inputs. Scene-referred RAW
+  // remains unscaled and carries its photographic exposure separately.
   float scale{1.0F};
-  // Scene-referred inputs also need an exposure anchor before they can be
-  // compared with a camera JPEG. This is the automatic exposure selected from
-  // the decoded RAW scene, before the user's brightness bias. Display-referred
-  // inputs report zero. It is separate from `scale`: scale is an 8-bit
-  // transport divisor, while this value is a photographic rendering decision.
   float exposure_ev{0.0F};
 };
 
-// A bounded 8-bit preview of any supported input, for the browser panel.
+// A bounded 8-bit compatibility thumbnail. The browser panel uses the native
+// float `preview-frame` command instead; this remains a public CLI utility.
 //
 // `options` is the same RAW decode configuration the conversion uses, and it
 // has to be: a preview built with different highlight recovery than the export

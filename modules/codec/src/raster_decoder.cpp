@@ -251,14 +251,38 @@ DecodedImage decode_jpeg(const std::filesystem::path& path) {
   result.decode.resolution_reduced =
       output.scale_num != output.scale_denom;
 
+  // Carry the portable photographic fields forward before normalising
+  // orientation. The old path kept only Orientation and silently replaced
+  // camera, lens, exposure, authorship and GPS with an almost-empty Exif block.
   if (output.exif_size != 0) {
-    const auto exif_read = read_exif(exif.get(), output.exif_size);
-    apply_exif(result, exif_read);
-    // Orientation is normalised into the pixels rather than carried forward: a
-    // phone's landscape-stored portrait used to be exported with orientation 1
-    // and never rotated, so both the preview and the exported file were on
-    // their side and the reported width and height were the wrong way round.
-    if (exif_read.orientation) normalize_orientation(result, *exif_read.orientation);
+    if (auto parsed = read_photo_metadata(exif.get(), output.exif_size)) {
+      result.metadata = std::move(*parsed);
+      if (result.metadata.iso > 0) {
+        result.capture.iso = static_cast<float>(result.metadata.iso);
+      }
+      if (result.metadata.exposure_seconds > 0.0) {
+        result.capture.exposure_time_seconds =
+            static_cast<float>(result.metadata.exposure_seconds);
+      }
+      if (result.metadata.aperture > 0.0) {
+        result.capture.aperture_f_number =
+            static_cast<float>(result.metadata.aperture);
+      }
+    }
+  }
+
+  // Orientation is normalised into the pixels rather than carried forward: a
+  // phone's landscape-stored portrait used to be exported with orientation 1
+  // and never rotated, so both the preview and the exported file were on
+  // their side and the reported width and height were the wrong way round.
+  const auto orientation = result.metadata.orientation >= 1 &&
+                                   result.metadata.orientation <= 8
+                               ? std::optional<std::uint16_t>{
+                                     result.metadata.orientation}
+                               : std::nullopt;
+  if (orientation && *orientation != 1) {
+    result.linear_p3 = apply_exif_orientation(std::move(result.linear_p3),
+                                              *orientation);
   }
   return result;
 }
@@ -548,26 +572,30 @@ struct DecodingOptionsDeleter {
   }
 };
 
-// The camera and capture settings a HEIF carries, if any.
-//
-// libheif exposes metadata items by type; "Exif" is the one the standard names
-// and the one this project's own encoder writes. The payload begins with a
-// four-byte offset to the TIFF header, which read_exif skips for us.
-ExifRead read_heif_exif(const heif_image_handle* handle) {
-  heif_item_id id = 0;
-  if (heif_image_handle_get_list_of_metadata_block_IDs(handle, "Exif", &id, 1) != 1) {
-    return {};
+std::optional<PhotoMetadata> read_heif_photo_metadata(
+    const heif_image_handle* handle) {
+  const int count =
+      heif_image_handle_get_number_of_metadata_blocks(handle, "Exif");
+  if (count <= 0 || count > 64) return std::nullopt;
+  std::vector<heif_item_id> ids(static_cast<std::size_t>(count));
+  const int written = heif_image_handle_get_list_of_metadata_block_IDs(
+      handle, "Exif", ids.data(), count);
+  if (written <= 0) return std::nullopt;
+  constexpr std::size_t kMaximumExifBytes = 16U << 20U;
+  for (int index = 0; index < written; ++index) {
+    const std::size_t size =
+        heif_image_handle_get_metadata_size(handle, ids[index]);
+    if (size == 0 || size > kMaximumExifBytes) continue;
+    std::vector<std::uint8_t> bytes(size);
+    if (heif_image_handle_get_metadata(handle, ids[index], bytes.data()).code !=
+        heif_error_Ok) {
+      continue;
+    }
+    if (auto metadata = read_photo_metadata(bytes.data(), bytes.size())) {
+      return metadata;
+    }
   }
-  const std::size_t size = heif_image_handle_get_metadata_size(handle, id);
-  // A still's Exif is kilobytes. Anything past a megabyte is not metadata this
-  // decoder needs to honour, and reading it would just be someone else's
-  // allocation budget.
-  if (size < 8 || size > (1U << 20U)) return {};
-  std::vector<std::uint8_t> block(size);
-  if (heif_image_handle_get_metadata(handle, id, block.data()).code != heif_error_Ok) {
-    return {};
-  }
-  return read_exif(block.data(), block.size());
+  return std::nullopt;
 }
 
 DecodedImage decode_heif_rgb_handle(const heif_image_handle* handle) {
@@ -656,14 +684,25 @@ DecodedImage decode_heif_rgb_handle(const heif_image_handle* handle) {
       static_cast<std::uint32_t>(height),
       static_cast<std::size_t>(stride), bits, color);
   result.decode.resolution_reduced = resolution_reduced;
-  // An ICC-described HEIF is SDR; a CICP-described one is HDR exactly when its
-  // transfer function says so.
-  result.hdr_headroom = color.icc.empty() ? transfer_headroom(color.transfer) : 1.0F;
-  // Only the camera and capture settings: libheif has already applied the
-  // container's own `irot`/`imir` to these pixels, and HEIF makes those
-  // authoritative over any Exif Orientation the file also happens to carry.
-  // Rotating again here would put an upright photograph on its side.
-  apply_exif(result, read_heif_exif(handle));
+  result.hdr_headroom =
+      color.icc.empty() ? transfer_headroom(color.transfer) : 1.0F;
+  if (auto metadata = read_heif_photo_metadata(handle)) {
+    result.metadata = std::move(*metadata);
+    if (result.metadata.iso > 0) {
+      result.capture.iso = static_cast<float>(result.metadata.iso);
+    }
+    if (result.metadata.exposure_seconds > 0.0) {
+      result.capture.exposure_time_seconds =
+          static_cast<float>(result.metadata.exposure_seconds);
+    }
+    if (result.metadata.aperture > 0.0) {
+      result.capture.aperture_f_number =
+          static_cast<float>(result.metadata.aperture);
+    }
+  }
+  // libheif applies item transformations to the decoded pixels. Do not carry
+  // an Exif orientation alongside already-normalised output.
+  result.metadata.orientation = 1;
   return result;
 }
 
@@ -761,11 +800,19 @@ DecodedImage decode_image(const std::filesystem::path& path, const RawDecodeOpti
     // A JPEG/R carries an SDR primary plus a gain map. Reading only the primary
     // would discard the captured highlight range before any look decision, so
     // the gain map is applied first and the plain-JPEG path is the fallback.
-    if (is_ultrahdr_jpeg_file(path)) {
+    if (!options.ignore_embedded_gain_map && is_ultrahdr_jpeg_file(path)) {
       try {
         return decode_ultrahdr(path);
       } catch (const std::exception&) {
-        // A malformed gain map must not make an otherwise valid JPEG unusable.
+        // Keep the backward-compatible primary usable, but never pretend that
+        // losing the advertised HDR rendition was an ordinary successful
+        // decode.  Export/report callers already surface DecodeInfo degraded
+        // state and the panel carries it in the native preview contract.
+        auto fallback = decode_jpeg(path);
+        fallback.decode.degraded = true;
+        fallback.decode.degradation_reasons.push_back(
+            "ultrahdr_decode_failed_sdr_fallback");
+        return fallback;
       }
     }
     return decode_jpeg(path);

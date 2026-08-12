@@ -114,8 +114,8 @@ def build_argv(exe: str, options: dict) -> list[str]:
     if external_gain or external_report:
         if not external_gain or not external_report:
             raise ValueError("external gain requires both raw grid and JSON report")
-        # An external model grid is the complete rendition. Do not emit
-        # mathematical look controls that are bypassed by the renderer.
+        # The sidecar freezes the photographic development used for inference;
+        # the converter validates and replays it before replacing only Gain.
         argv = [
             exe, "convert", options["input"], "--output", options["output"],
             "--encoding", encoding,
@@ -173,3 +173,36 @@ def build_curve_argv(exe: str, options: dict, samples: int = 257) -> list[str]:
         "--headroom", fmt_num(settings["headroom"]),
         "--samples", str(int(samples)),
     ]
+
+
+def build_preview_frame_argv(
+    exe: str, source, output, options: dict, max_edge: int,
+) -> list[str]:
+    """Build the native float-preview command from the export settings."""
+    settings = options_to_settings(options)
+    argv = [
+        exe, "preview-frame", str(source), "--output", str(output),
+        "--preview-max-edge", str(int(max_edge)),
+        "--encoding", settings["encoding"],
+        "--look", settings["look"],
+        "--contrast", fmt_num(settings["contrast"]),
+        "--vibrance", fmt_num(settings["vibrance"]),
+        "--gain-strength", fmt_num(settings["gain_strength"]),
+        "--headroom-max", fmt_num(settings["headroom_max"]),
+        "--pop", fmt_num(settings["pop"]),
+        "--exposure-bias", fmt_num(settings["exposure_bias"]),
+        "--expansion-start", fmt_num(settings["expansion_start"]),
+        "--area-coverage", fmt_num(settings["area_coverage"]),
+        "--exposure", "auto", "--headroom", fmt_num(settings["headroom"]),
+        "--highlight-recovery", settings["highlight_recovery"],
+    ]
+    if str(source).lower().endswith((".arw", ".dng")):
+        argv.append("--fast-preview")
+    external_gain = options.get("external_gain")
+    external_report = options.get("external_gain_report")
+    if external_gain or external_report:
+        if not external_gain or not external_report:
+            raise ValueError("external gain requires both raw grid and JSON report")
+        argv.extend(["--external-gain", str(external_gain),
+                     "--external-gain-report", str(external_report)])
+    return argv

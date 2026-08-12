@@ -3,6 +3,7 @@
 // Running one conversion, and running many sequentially.
 
 #include "hyperdr/app/settings.hpp"
+#include "hyperdr/gainmap/external.hpp"
 
 #include <vector>
 
@@ -12,6 +13,13 @@ namespace hyperdr {
 // output allocation begins. Public so the invariant has a fixture-free test.
 void require_decode_resolution(const ConvertOptions& options,
                                const DecodeInfo& decode);
+
+// Validates a model sidecar against the current file/decode and returns the
+// frozen photographic recipe to replay. Public for fixture-free stale-grid
+// regression tests.
+[[nodiscard]] GainMapOptions replay_external_development(
+    const ExternalGainMap& external, const std::filesystem::path& input,
+    const DecodedImage& image, const ConvertOptions& options);
 
 // Decodes, renders, encodes, verifies and publishes one file. Never throws for a
 // per-file failure: the reason lands in the result so a batch can continue.

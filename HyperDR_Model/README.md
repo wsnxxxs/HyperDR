@@ -194,7 +194,8 @@ PYTHONPATH=. .venv/bin/python evaluate_absolute.py \
   --output <test-report.json>
 
 PYTHONPATH=. .venv/bin/python infer_gain.py \
-  --input <sdr.jpg> \
+  --input <linear-p3.f32> \
+  --input-report <model-input.json> \
   --checkpoint <best.pt> \
   --gain-output <grid.f32> \
   --report <grid.json> \
@@ -212,6 +213,13 @@ to the SDR range.
 Evaluation streams error sums and pixel counts, so batches with different
 padding shapes are never concatenated. Evaluation and inference use CUDA when
 available and otherwise support CPU.
+
+The panel/native RAW path supplies HWC little-endian float32 linear Display P3
+with relative SDR white at 1.0. It is the downsampled HyperDR photographic SDR
+base described by `hyperdr.model-input/v1`; inference validates its byte length,
+SHA-256, colour/layout declaration and stride-16 geometry, and performs no ICC,
+sRGB, JPEG or second resize step. Ordinary ICC-tagged raster input remains a
+legacy command-line compatibility path.
 
 The v2 gain interchange remains compatible with HyperDR's raw `.f32` consumer,
 but it is a required file pair:

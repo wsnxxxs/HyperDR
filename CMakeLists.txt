@@ -97,6 +97,9 @@ install(DIRECTORY HyperDR_Model/hyperdr_ml/
   PATTERN "__pycache__" EXCLUDE
   PATTERN "*.pyc" EXCLUDE)
 install(FILES HyperDR_Model/checkpoints/best.pt
+              HyperDR_Model/checkpoints/production-v3.pt
+              HyperDR_Model/checkpoints/production-v3.json
+              HyperDR_Model/checkpoints/production-v3-training.patch
   DESTINATION HyperDR_Model/checkpoints COMPONENT Runtime)
 install(FILES HyperDR_Model/dataset/assets/display-p3.icc
   DESTINATION HyperDR_Model/dataset/assets COMPONENT Runtime)

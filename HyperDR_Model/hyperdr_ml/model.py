@@ -7,6 +7,7 @@ from torch import nn
 import torch.nn.functional as F
 
 Architecture = Literal["baseline", "global_conditioning", "dilation_pyramid"]
+OutputMode = Literal["normalized_v1", "signed_stops_v2"]
 
 DIRECT_GAINMAPNET_ID = "hyperdr.direct-fixed-incumbent/v3"
 DEFAULT_ARCHITECTURE: Architecture = "baseline"
@@ -109,6 +110,7 @@ class DirectGainMapNet(nn.Module):
         self,
         base_channels: int = DEFAULT_BASE_CHANNELS,
         architecture: Architecture = DEFAULT_ARCHITECTURE,
+        output_mode: OutputMode = "normalized_v1",
     ) -> None:
         super().__init__()
         if base_channels <= 0:
@@ -140,7 +142,10 @@ class DirectGainMapNet(nn.Module):
             self.context = DilationPyramid(channels[3])
         else:
             raise ValueError(f"Unknown architecture {architecture!r}")
+        if output_mode not in ("normalized_v1", "signed_stops_v2"):
+            raise ValueError(f"Unknown output mode {output_mode!r}")
         self.architecture = architecture
+        self.output_mode = output_mode
         self.skip3 = nn.Conv2d(channels[2], channels[3], 1)
         self.head = nn.Sequential(
             nn.Conv2d(channels[3], channels[2], 3, padding=1),
@@ -170,7 +175,10 @@ class DirectGainMapNet(nn.Module):
         x4 = self.context(x4)
         skip = F.adaptive_avg_pool2d(x3, output_size=x4.shape[-2:])
         x4 = x4 + self.skip3(skip)
-        return torch.sigmoid(self.head(x4))
+        prediction = self.head(x4)
+        if self.output_mode == "signed_stops_v2":
+            return prediction
+        return torch.sigmoid(prediction)
 
     def initialize_output_bias(self, target_mean: float) -> float:
         clipped = min(max(float(target_mean), 1e-4), 1.0 - 1e-4)

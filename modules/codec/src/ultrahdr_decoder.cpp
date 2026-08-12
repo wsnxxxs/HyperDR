@@ -21,9 +21,9 @@
 #include <ultrahdr_api.h>
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstdint>
-#include <cstring>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -47,7 +47,7 @@ void check_uhdr(const uhdr_error_info_t& status, const char* operation) {
 // IEEE 754 binary16 -> binary32. libultrahdr's linear output format is
 // 64bppRGBAHalfFloat, and the conversion is short enough that pulling in a
 // dependency for it would cost more than it saves.
-float half_to_float(std::uint16_t half) {
+constexpr float half_to_float(std::uint16_t half) {
   const std::uint32_t sign = static_cast<std::uint32_t>(half & 0x8000U) << 16U;
   const std::uint32_t exponent = (half >> 10U) & 0x1FU;
   const std::uint32_t mantissa = half & 0x3FFU;
@@ -62,7 +62,7 @@ float half_to_float(std::uint16_t half) {
         ++adjust;
       }
       shifted &= 0x3FFU;
-      bits = ((127U - 15U - adjust) << 23U) | (shifted << 13U);
+      bits = ((127U - 14U - adjust) << 23U) | (shifted << 13U);
     }
   } else if (exponent == 0x1FU) {
     bits = 0x7F800000U | (mantissa << 13U);
@@ -70,10 +70,11 @@ float half_to_float(std::uint16_t half) {
     bits = ((exponent + 127U - 15U) << 23U) | (mantissa << 13U);
   }
   bits |= sign;
-  float value = 0.0F;
-  std::memcpy(&value, &bits, sizeof(value));
-  return value;
+  return std::bit_cast<float>(bits);
 }
+
+static_assert(half_to_float(0x0001U) == 0x1p-24F);
+static_assert(half_to_float(0x03FFU) == 0x1.ff8p-15F);
 
 std::array<float, 3> to_linear_p3(uhdr_color_gamut_t gamut, float r, float g, float b) {
   switch (gamut) {

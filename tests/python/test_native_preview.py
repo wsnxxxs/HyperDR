@@ -8,6 +8,12 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "apps" / "panel"))
+STAGE = (
+    REPO_ROOT / "apps" / "panel" / "web" / "js" / "preview" / "stage.js"
+).read_text(encoding="utf-8")
+SCOPE = (
+    REPO_ROOT / "apps" / "panel" / "web" / "js" / "preview" / "scope.js"
+).read_text(encoding="utf-8")
 
 from hyperdr_panel.native_preview import parse_packet  # noqa: E402
 
@@ -44,6 +50,21 @@ class NativePreviewContractTests(unittest.TestCase):
     def test_truncated_planes_are_rejected(self):
         with self.assertRaisesRegex(ValueError, "truncated"):
             parse_packet(packet()[:-4])
+
+
+class NativePreviewFrontendContractTests(unittest.TestCase):
+    def test_native_float_planes_do_not_use_retired_sdr_display_buffers(self):
+        self.assertIn("image.frame = preview;", STAGE)
+        self.assertIn("image.source = planeToImageData(preview.base", STAGE)
+        for retired in ("displayMapped(", "image.display", "image.output"):
+            self.assertNotIn(retired, STAGE)
+
+    def test_histogram_compares_native_base_and_rendered_planes(self):
+        self.assertIn("export function analyse(source, rendered = null)", SCOPE)
+        self.assertIn("rendered ? analyse(rendered).histogram : null", SCOPE)
+        for retired in ("scene.data", "sceneScale", "simulateOutput(",
+                        "simulateModelOutput("):
+            self.assertNotIn(retired, SCOPE)
 
 
 if __name__ == "__main__":

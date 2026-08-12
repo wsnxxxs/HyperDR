@@ -18,15 +18,8 @@ import { store } from "../core/store.js";
  * flip between images cannot leave yesterday's red on today's photo. */
 export function analyse(source, rendered = null) {
   const data = source.data;
-  const sceneData = scene.data;
   const { width } = source;
   const luma = new Uint32Array(256);
-  // A second luma histogram over the *unscaled* preview codes. `source` is the
-  // SDR rendition -- clipped at white, which is what the drawn input series and
-  // the zebras want -- but the simulated output series has to start from the
-  // scene, or an HDR input's highlights would be modelled as already blown and
-  // the graph would show no expansion where the picture plainly has some.
-  const sceneLuma = new Uint32Array(256);
   const red = new Uint32Array(256);
   const green = new Uint32Array(256);
   const blue = new Uint32Array(256);
@@ -44,9 +37,6 @@ export function analyse(source, rendered = null) {
     red[r]++; green[g]++; blue[b]++;
     const y = Math.round(0.2126 * r + 0.7152 * g + 0.0722 * b);
     luma[y < 0 ? 0 : y > 255 ? 255 : y]++;
-    const sy = Math.round(0.2126 * sceneData[p] + 0.7152 * sceneData[p + 1]
-      + 0.0722 * sceneData[p + 2]);
-    sceneLuma[sy < 0 ? 0 : sy > 255 ? 255 : sy]++;
 
     const peak = Math.max(r, g, b);
     const isHot = peak >= 250;
@@ -71,70 +61,12 @@ export function analyse(source, rendered = null) {
   const renderedHistogram = rendered ? analyse(rendered).histogram : null;
   return {
     source,
-    scene,
-    sceneScale,
-    sceneLuma,
     histogram: { luma, red, green, blue, total },
     clipping: { hot: hot / total, cold: cold / total },
     zebraHot,
     zebraCold,
     renderedHistogram,
   };
-}
-
-/* Fold the source luma histogram through the same luminance maths the SDR
- * renderer applies: exposure, the exporter's curve at the current strength,
- * then the display shoulder. Vibrance is deliberately absent: it moves chroma
- * around the same luma axis, and a one-dimensional luma histogram has no hue or
- * saturation data from which to model the rare gamut-clamp correction. 256 bins
- * instead of a pixel walk keeps this cheap enough to redraw during a drag. */
-function simulateOutput(luma, state, curve, sceneScale = 1) {
-  const { SRGB_TO_LINEAR, linearToSrgb8, shoulder } = __math;
-  const out = new Float32Array(256);
-  const exposure = Math.pow(2, state.brightness) * sceneScale;
-  for (let i = 0; i < 256; i++) {
-    const count = luma[i];
-    if (!count) continue;
-    const y = SRGB_TO_LINEAR[i] * exposure;
-    const gained = y * Math.pow(2, curve.previewGainStops(y, state));
-    out[linearToSrgb8(shoulder(gained))] += count;
-  }
-  return out;
-}
-
-/* A model gain is spatial, so it cannot be folded through the 256 source bins
- * like the mathematical curve. Sample the actual pixels and the same bilinear
- * gain grid as the renderers. A bounded stride keeps slider motion responsive
- * for 2K previews while preserving the distribution's shape. */
-function simulateModelOutput(source, modelGain, strength, sceneScale = 1) {
-  const { SRGB_TO_LINEAR, linearToSrgb8, shoulder, SRGB_LUMA } = __math;
-  const output = {
-    luma: new Float32Array(256),
-    red: new Float32Array(256),
-    green: new Float32Array(256),
-    blue: new Float32Array(256),
-  };
-  const pixelCount = source.width * source.height;
-  const stride = Math.max(1, Math.ceil(pixelCount / 250_000));
-  for (let pixel = 0; pixel < pixelCount; pixel += stride) {
-    const offset = pixel * 4;
-    const x = pixel % source.width;
-    const y = Math.floor(pixel / source.width);
-    const gain = Math.pow(
-      2,
-      sampleModelGain(modelGain, x, y, source.width, source.height) * strength,
-    );
-    const scaled = gain * sceneScale;
-    const r = linearToSrgb8(shoulder(SRGB_TO_LINEAR[source.data[offset]] * scaled));
-    const g = linearToSrgb8(shoulder(SRGB_TO_LINEAR[source.data[offset + 1]] * scaled));
-    const b = linearToSrgb8(shoulder(SRGB_TO_LINEAR[source.data[offset + 2]] * scaled));
-    const luma = Math.round(SRGB_LUMA[0] * r + SRGB_LUMA[1] * g + SRGB_LUMA[2] * b);
-    output.red[r]++;
-    output.green[g]++;
-    output.blue[b]++;
-    output.luma[Math.min(255, Math.max(0, luma))]++;
-  }
-  return output;
 }
 
 const PALETTE_KEYS = ["grid", "luma", "red", "green", "blue", "marker", "output"];

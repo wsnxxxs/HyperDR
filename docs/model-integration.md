@@ -1,6 +1,10 @@
 # HyperDR_Model integration
 
-`HyperDR_Model` is connected as an optional inference stage in the local panel:
+`HyperDR_Model` is an optional inference stage in the local panel. The normal
+HyperDR path stays the default even when the model runtime is enabled: in the
+panel, inference starts only when the user clicks “优化”, and the `.f32` grid it
+produces then drives both the live preview and the next conversion. Importing or
+replacing an image returns to the mathematical preview.
 
 ```text
 input image
@@ -15,95 +19,92 @@ input image
   -> HDR output
 ```
 
-The normal HyperDR path remains the default even when the model runtime is
-enabled. In the panel, inference starts only when the user clicks “优化”; the
-generated `.f32` grid then drives both the live preview and the next conversion.
-Importing or replacing an image returns to the mathematical preview. The model
-project is expected to provide a trained checkpoint and a dataset root whose
-`assets/display-p3.icc` file was built by its cache workflow.
+The repository includes a Windows runtime under `HyperDR_Model/`: the trained
+checkpoint, inference code, a Windows virtual environment, and the Display P3
+profile needed by inference. The full private training dataset stays in WSL;
+panel inference does not need it. The model project also provides a dataset root
+whose `assets/display-p3.icc` was built by its cache workflow.
 
-## Model runtime on Windows
+## Runtime configuration on Windows
 
-The bundled runtime is detected automatically. The following overrides remain
-available when using a different checkpoint or installation:
+The bundled runtime is detected automatically; the production v3 checkpoint and
+its JSON release manifest are found without any configuration. The overrides
+below exist for trying a different checkpoint or installation:
 
 ```powershell
 $env:HYPERDR_MODEL_ENABLED = "1"
-$env:HYPERDR_MODEL_ROOT = "C:\Users\Ryan\Desktop\HyperDR\HyperDR_Model"
-$env:HYPERDR_MODEL_CHECKPOINT = "C:\Users\Ryan\Desktop\HyperDR\HyperDR_Model\checkpoints\best.pt"
-$env:HYPERDR_MODEL_DATASET_ROOT = "C:\Users\Ryan\Desktop\HyperDR\HyperDR_Model\dataset"
-$env:HYPERDR_MODEL_PYTHON = "C:\Users\Ryan\Desktop\HyperDR\HyperDR_Model\.venv\Scripts\python.exe"
+$env:HYPERDR_MODEL_ROOT = "<path to HyperDR_Model>"
+$env:HYPERDR_MODEL_CHECKPOINT = "<checkpoint.pt>"
+$env:HYPERDR_MODEL_DATASET_ROOT = "<dataset root>"
+$env:HYPERDR_MODEL_PYTHON = "<python.exe inside the model venv>"
 $env:HYPERDR_MODEL_DEVICE = "auto"
-# Existing checkpoints are frozen v1 normalized labels. Explicitly opt in only
-# when reproducing that contract; native ISO v2 checkpoints do not need this.
-$env:HYPERDR_MODEL_ALLOW_LEGACY_LABEL_SCHEMA = "1"
-$env:HYPERDR_ALLOW_LEGACY_EXTERNAL_GAIN = "1"
 python apps\panel\hyperdr_gui.py
 ```
 
-The model legacy variable is also honored by the panel's HyperDR command
-builder, so an explicit v1 opt-in reaches both subprocesses; the separate
-external-gain variable remains available for direct sidecar-only workflows.
+To reproduce the retired normalized-v1 path with `best.pt`, set both
+`HYPERDR_MODEL_ALLOW_LEGACY_LABEL_SCHEMA=1` and
+`HYPERDR_ALLOW_LEGACY_EXTERNAL_GAIN=1`.
 
-The repository now includes a Windows runtime at
-`C:\Users\Ryan\Desktop\HyperDR\HyperDR_Model`, containing the trained
-checkpoint, inference code, Windows virtual environment, and the Display P3
-profile needed by inference. The full private training dataset remains in WSL;
-it is not needed for panel inference.
+## How a model run works
 
-The panel exposes model readiness through `/api/state`. An optimized run logs
+The panel reports model readiness through `/api/state`. An optimized run logs
 the model subprocess, writes intermediate files under the session's hidden
-`.model` directory, and passes the validated pair to HyperDR. A model failure
-stops the conversion before an output file is written.
+`.model` directory, and passes the validated pair to HyperDR. If the model
+fails, the conversion stops before an output file is written.
 
-There is no sRGB JPEG intermediary. `HyperDR model-input` develops the SDR base
-first, resamples that base using the native area-then-bilinear convention, and
-writes little-endian HWC float32 linear Display P3 directly for PyTorch. This
-preserves P3 colours and avoids JPEG quantisation. RAW model preparation uses
-LibRaw's fixed half-size demosaic; the chosen exposure and full photographic
-recipe are written once and replayed during the later full-size export instead
-of being estimated again.
+There is no sRGB JPEG in between. `HyperDR model-input` develops the SDR base
+first, resamples it with the native area-then-bilinear convention, and writes
+little-endian HWC float32 linear Display P3 straight to PyTorch, keeping P3
+colours intact and skipping JPEG quantisation. For RAW, preparation uses
+LibRaw's fixed half-size demosaic, and the chosen exposure plus the full
+photographic recipe are written down once and replayed during the later
+full-size export instead of being estimated again. Model preparation and
+ordinary RAW previews share one process-wide RAW memory admission pool.
 
-The gain report carries `hyperdr.model-gain-binding/v1`: source SHA-256,
+The gain report carries a `hyperdr.model-gain-binding/v1` record so HyperDR can
+tell whether a grid still matches the photo it was computed for: source hash,
 highlight recovery, sensor raster, requested and delivered crop, orientation,
-developed/tensor/grid sizes, resize convention, model version and checkpoint
-SHA-256. HyperDR rejects a stale grid before rendering if any current source or
-decode property disagrees. Model preparation and ordinary RAW previews also use
-one shared process-wide RAW memory admission pool.
+developed/tensor/grid sizes, resize convention, and the model version and
+checkpoint hash. If any current source or decode property disagrees, the
+conversion stops rather than rendering from a stale grid.
 
-For direct CLI use, generate the direct-float input and pair first, then run:
+For direct CLI use, generate the direct-float input and its report first, then
+run:
 
 ```powershell
 HyperDR model-input photo.ARW --output out\model-input.f32 `
   --report out\model-input.json --long-side 1024 --half-size
 python HyperDR_Model\infer_gain.py --input out\model-input.f32 `
-  --input-report out\model-input.json --checkpoint checkpoints\best.pt `
+  --input-report out\model-input.json `
+  --checkpoint HyperDR_Model\checkpoints\production-v3.pt `
   --gain-output out\model-gain.f32 --report out\model-gain.json `
-  --dataset-root dataset --allow-legacy-label-schema
+  --dataset-root HyperDR_Model\dataset
 HyperDR convert photo.ARW --output out `
   --external-gain out\model-gain.f32 `
-  --external-gain-report out\model-gain.json `
-  --allow-legacy-external-gain
+  --external-gain-report out\model-gain.json
 ```
 
-Phase A v2 sidecars declare `label_contract_id=hyperdr.apple-gain-label/v2`
-and store signed canonical `log2(linear gain)` together with exact ISO
-rationals. The converter accepts frozen v1 normalized sidecars only when
-`--allow-legacy-external-gain` is supplied; the panel mirrors that gate with
-`HYPERDR_ALLOW_LEGACY_EXTERNAL_GAIN=1`.
+## Gain-map labels
 
-When the input itself is an Apple gain-map HEIC, an external v2 grid selects
-the embedded SDR base item instead of applying the embedded gain first. This
-prevents the source map from being double-counted before the model grid is
-encoded.
+Phase A v2 sidecars declare `label_contract_id=hyperdr.apple-gain-label/v2` and
+store signed canonical `log2(linear gain)` with exact ISO rationals. The
+converter accepts frozen v1 normalized sidecars only with
+`--allow-legacy-external-gain`; the panel mirrors that gate with
+`HYPERDR_ALLOW_LEGACY_EXTERNAL_GAIN=1`. The label contract itself is documented
+once, in [HyperDR_Model/README.md](../HyperDR_Model/README.md).
+
+When the input is an Apple gain-map HEIC, an external v2 grid selects the
+embedded SDR base item instead of applying the embedded gain first, so the
+source map is not counted twice before the model grid is encoded.
 
 ## Experimental RAW model limitations
 
-The current checkpoint was trained from Apple-rendered SDR rather than generic
-camera RAW. Camera colour, noise and exposure distributions can therefore shift
-predictions. The frozen v1 head predicts only normalized positive gain in the
-fixed 0–3 stop range; it cannot emit negative gain or native signed ISO v2, and
-it does not consume ISO, shutter, aperture or camera-model metadata. LibRaw
-highlight recovery is not Apple's SDR/HDR processing. The unified base and
-binding contract remove the previous reference-image error, but they do not
-remove these model-domain limitations or make quality uniform across cameras.
+The production v3 checkpoint was trained from Apple-rendered ISO-native SDR
+rather than generic camera RAW, so camera colour, noise and exposure
+distributions can shift its predictions. Its direct head emits raw signed log2
+gain and the inference stage writes native v2 sidecars, but the network still
+does not consume ISO, shutter, aperture or camera-model metadata; per-image ISO
+metadata is conservatively derived from the prediction. LibRaw highlight
+recovery is not Apple's SDR/HDR processing. The unified base and binding
+contract removed the earlier reference-image error. These model-domain
+limitations remain, and quality is not uniform across cameras.

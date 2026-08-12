@@ -1,0 +1,146 @@
+# Apply to HyperDR_Model commit 46a4ce098304e3b79608bdaf54b7fe0be999ddb1.
+diff --git a/train.py b/train.py
+index 9627abb..c572638 100644
+--- a/train.py
++++ b/train.py
+@@ -81,6 +81,7 @@ class Config:
+     resume: str | None
+     fold: int | None
+     selection_fold: int | None
++    production_selection_fold: int | None
+     batch_by_shape: bool
+     allow_legacy_label_schema: bool
+ 
+@@ -142,7 +143,7 @@ def split_file_hashes(config: Config) -> dict[str, str]:
+     which train/selection/judgment membership is derived.
+     """
+     names = {"train.json", "validation.json", "groups.json"}
+-    if config.fold is not None:
++    if config.fold is not None or config.production_selection_fold is not None:
+         names.add(CV_FOLDS_NAME)
+     directory = Path(config.dataset_root) / "splits"
+     result = {name: sha256_file(directory / name) for name in sorted(names)}
+@@ -248,6 +249,15 @@ def parse_args() -> Config:
+             "reach a choice"
+         ),
+     )
++    parser.add_argument(
++        "--production-selection-fold",
++        type=int,
++        help=(
++            "fit one deployable model on every registered development fold except "
++            "this checkpoint-selection fold. Unlike --fold/--selection-fold, no "
++            "outer judgment fold is withheld or scored by this run"
++        ),
++    )
+     parser.add_argument(
+         "--no-batch-by-shape",
+         action="store_false",
+@@ -312,6 +322,15 @@ def parse_args() -> Config:
+             "--selection-fold must differ from --fold; selecting on the judgment "
+             "fold is exactly the contamination the split exists to prevent"
+         )
++    if values.production_selection_fold is not None and (
++        values.fold is not None or values.selection_fold is not None
++    ):
++        parser.error(
++            "--production-selection-fold is mutually exclusive with "
++            "--fold/--selection-fold"
++        )
++    if values.production_selection_fold is not None and values.production_selection_fold < 0:
++        parser.error("--production-selection-fold must be non-negative")
+     return Config(**vars(values))
+ 
+ 
+@@ -350,12 +369,18 @@ def make_loader(config: Config, split: str, augment: bool) -> DataLoader:
+     # In fold mode the training set drops BOTH the judgment fold and the
+     # selection fold, and the scored split is the selection fold. The judgment
+     # fold is not loaded anywhere in this process.
+-    fold = config.selection_fold if split == "holdout" else None
+-    exclude = (
+-        (config.fold, config.selection_fold)
+-        if split == "train" and config.fold is not None
+-        else ()
++    holdout_fold = (
++        config.production_selection_fold
++        if config.production_selection_fold is not None
++        else config.selection_fold
+     )
++    fold = holdout_fold if split == "holdout" else None
++    if split == "train" and config.production_selection_fold is not None:
++        exclude = (config.production_selection_fold,)
++    elif split == "train" and config.fold is not None:
++        exclude = (config.fold, config.selection_fold)
++    else:
++        exclude = ()
+     dataset = AppleGainMapDataset(
+         config.dataset_root,
+         split,
+@@ -614,7 +639,7 @@ def restore_rng_state(state: dict[str, Any], loader: DataLoader) -> None:
+ 
+ def cv_fold_identity(config: Config) -> dict[str, str]:
+     """Freeze id and hash of the fold partition a run was cut against."""
+-    if config.fold is None:
++    if config.fold is None and config.production_selection_fold is None:
+         return {}
+     path = Path(config.dataset_root) / "splits" / CV_FOLDS_NAME
+     return {
+@@ -703,6 +728,7 @@ def validate_resume_config(
+         "seed",
+         "fold",
+         "selection_fold",
++        "production_selection_fold",
+         "highlight_weight",
+         "batch_by_shape",
+         "lambda_gain_min",
+@@ -720,6 +746,7 @@ def validate_resume_config(
+         "model": "map_only",
+         "fold": None,
+         "selection_fold": None,
++        "production_selection_fold": None,
+         "batch_by_shape": False,
+         "lambda_gain_min": 1.0,
+         "lambda_gain_max": 1.0,
+@@ -851,7 +878,11 @@ def main() -> None:
+     # fold. Everything this run chooses -- epoch, best.pt -- is chosen on data
+     # that is not in the judgment set.
+     validation_loader = make_loader(
+-        config, "holdout" if config.fold is not None else "validation", augment=False
++        config,
++        "holdout"
++        if config.fold is not None or config.production_selection_fold is not None
++        else "validation",
++        augment=False,
+     )
+     if config.fold is not None:
+         # Structural guard rather than a convention: if the judgment fold ever
+@@ -879,6 +910,29 @@ def main() -> None:
+                     f"{len(overlap)} judgment-fold sample(s) leaked into the {name} "
+                     f"split (first: {sorted(overlap)[0]})"
+                 )
++    if config.production_selection_fold is not None:
++        train_ids = {str(row["sample_id"]) for row in train_loader.dataset.rows}
++        selection_ids = {
++            str(row["sample_id"]) for row in validation_loader.dataset.rows
++        }
++        overlap = train_ids & selection_ids
++        if overlap:
++            raise SystemExit(
++                "production training overlaps its checkpoint-selection fold "
++                f"(first: {sorted(overlap)[0]})"
++            )
++        from hyperdr_ml.protocol import AppleProtocolCorpus
++
++        registered_selection = set(
++            AppleProtocolCorpus(Path(config.dataset_root)).ids_for_folds(
++                [config.production_selection_fold], domain=config.label_subset
++            )
++        )
++        if selection_ids != registered_selection:
++            raise SystemExit(
++                "production checkpoint-selection membership does not match the "
++                "frozen CV registry"
++            )
+     train_audit = target_statistics(train_loader.dataset)
+     validation_audit = target_statistics(validation_loader.dataset)
+     target_policy = {

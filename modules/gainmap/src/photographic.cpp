@@ -40,7 +40,115 @@ namespace {
   return static_cast<std::uint32_t>(std::min<std::uint64_t>(edge, extent));
 }
 
+struct ExposureInputs {
+  SceneStatistics scene_stats;
+  CaptureMetadata capture;
+  std::optional<float> ev100;
+  float target_middle_gray{0.18F};
+  GainGridDimensions dimensions;
+  std::vector<float> cell_mean;
+  std::vector<float> cell_peak;
+};
+
+ExposureInputs build_exposure_inputs(const FloatImage& source,
+                                     const CaptureMetadata& capture) {
+  ExposureInputs inputs;
+  inputs.capture = capture;
+  inputs.scene_stats = compute_luminance_statistics(source);
+  inputs.ev100 = estimate_ev100(capture);
+  inputs.target_middle_gray = compute_target_middle_gray(inputs.ev100);
+  inputs.dimensions = choose_gain_dimensions(source);
+  const std::size_t count = static_cast<std::size_t>(inputs.dimensions.width) *
+                            inputs.dimensions.height;
+  inputs.cell_mean.assign(count, 0.0F);
+  inputs.cell_peak.assign(count, 0.0F);
+  parallel_for_rows(inputs.dimensions.height, [&](const std::uint32_t gy) {
+    const std::uint32_t y0 =
+        grid_cell_edge(gy, source.height, inputs.dimensions.height);
+    const std::uint32_t y1 = std::min(
+        source.height,
+        std::max(y0 + 1U,
+                 grid_cell_edge(gy + 1U, source.height,
+                                inputs.dimensions.height)));
+    for (std::uint32_t gx = 0; gx < inputs.dimensions.width; ++gx) {
+      const std::uint32_t x0 =
+          grid_cell_edge(gx, source.width, inputs.dimensions.width);
+      const std::uint32_t x1 = std::min(
+          source.width,
+          std::max(x0 + 1U,
+                   grid_cell_edge(gx + 1U, source.width,
+                                  inputs.dimensions.width)));
+      double total = 0.0;
+      float peak = 0.0F;
+      std::size_t samples = 0;
+      for (std::uint32_t y = y0; y < y1; ++y) {
+        for (std::uint32_t x = x0; x < x1; ++x) {
+          const std::size_t index =
+              (static_cast<std::size_t>(y) * source.width + x) * 3;
+          const float value =
+              p3_luminance(positive_finite(source.pixels[index]),
+                           positive_finite(source.pixels[index + 1]),
+                           positive_finite(source.pixels[index + 2]));
+          total += value;
+          peak = std::max(peak, value);
+          ++samples;
+        }
+      }
+      const std::size_t index =
+          static_cast<std::size_t>(gy) * inputs.dimensions.width + gx;
+      inputs.cell_mean[index] =
+          samples == 0 ? 0.0F : static_cast<float>(total / samples);
+      inputs.cell_peak[index] = peak;
+    }
+  });
+  return inputs;
+}
+
+float select_exposure_ev(const ExposureInputs& inputs,
+                         const GainMapOptions& options,
+                         const ToneCurveParameters& curve) {
+  const float pop = std::clamp(options.look.pop, 0.0F, 1.0F);
+  float exposure_ev = 0.0F;
+  if (options.auto_exposure) {
+    const float base_ev =
+        std::log2(inputs.target_middle_gray /
+                  std::max(inputs.scene_stats.log_average, kEpsilon));
+    const float provisional_exposure_ev = clamp_finite(base_ev, -6.0F, 6.0F);
+    const float provisional_exposure = std::exp2(provisional_exposure_ev);
+    const float provisional_stops =
+        options.auto_headroom
+            ? choose_headroom_stops(
+                  inputs.scene_stats, provisional_exposure, inputs.capture,
+                  options.look.headroom_max_stops, inputs.cell_mean,
+                  inputs.cell_peak, inputs.dimensions.width,
+                  inputs.dimensions.height, pop)
+            : std::clamp(options.headroom_stops, 0.0F,
+                         options.look.headroom_max_stops);
+    const float highlight_limit = highlight_limited_exposure(
+        inputs.scene_stats.p995, std::exp2(provisional_stops), curve);
+    exposure_ev = std::min(provisional_exposure_ev, highlight_limit);
+    if (inputs.ev100 && *inputs.ev100 < 8.0F) {
+      exposure_ev =
+          std::min(exposure_ev, options.look.positive_exposure_limit_ev);
+    }
+    exposure_ev = clamp_finite(exposure_ev, -6.0F, 6.0F);
+  } else {
+    exposure_ev = clamp_finite(options.exposure_ev, -10.0F, 10.0F);
+  }
+  return clamp_finite(exposure_ev + options.exposure_bias_ev, -10.0F, 10.0F);
+}
+
 }  // namespace
+
+float photographic_exposure_ev(const FloatImage& source,
+                               const GainMapOptions& options,
+                               const CaptureMetadata& capture) {
+  if (source.channels != 3)
+    throw std::invalid_argument("photographic exposure input must be RGB");
+  validate_gain_map_options(options);
+  const auto inputs = build_exposure_inputs(source, capture);
+  return select_exposure_ev(inputs, options, build_tone_curve(options.look));
+}
 
 GainMapResult make_photographic_gain_map(const FloatImage& source,
                                          const GainMapOptions& options,
@@ -54,84 +162,21 @@ GainMapResult make_photographic_gain_map(const FloatImage& source,
   const float diffuse_floor =
       std::clamp(options.look.diffuse_gain_floor + 0.20F * pop, 0.0F, 1.0F);
 
-  // --- Scene analysis ---
-  const SceneStatistics scene_stats = compute_luminance_statistics(source);
-
-  // --- Exposure estimation ---
-  const std::optional<float> ev100 = estimate_ev100(capture);
-  const float target_middle_gray = compute_target_middle_gray(ev100);
-
-  // --- Gain grid computation ---
-  const GainGridDimensions dimensions = choose_gain_dimensions(source);
+  // --- Scene analysis, exposure metadata, and gain-grid sampling ---
+  auto inputs = build_exposure_inputs(source, capture);
+  const auto& scene_stats = inputs.scene_stats;
+  const auto& ev100 = inputs.ev100;
+  const float target_middle_gray = inputs.target_middle_gray;
+  const GainGridDimensions dimensions = inputs.dimensions;
   const std::size_t gain_count =
       static_cast<std::size_t>(dimensions.width) * dimensions.height;
-  std::vector<float> scene_luma(gain_count, 0.0F);
-  std::vector<float> highlight_peak(gain_count, 0.0F);
-  parallel_for_rows(dimensions.height, [&](const std::uint32_t gy) {
-    const std::uint32_t y0 = grid_cell_edge(gy, source.height, dimensions.height);
-    const std::uint32_t y1 = std::min(
-        source.height,
-        std::max(y0 + 1U,
-                 grid_cell_edge(gy + 1U, source.height, dimensions.height)));
-    for (std::uint32_t gx = 0; gx < dimensions.width; ++gx) {
-      const std::uint32_t x0 = grid_cell_edge(gx, source.width, dimensions.width);
-      const std::uint32_t x1 = std::min(
-          source.width,
-          std::max(x0 + 1U,
-                   grid_cell_edge(gx + 1U, source.width, dimensions.width)));
-      double total = 0.0;
-      float peak = 0.0F;
-      std::size_t samples = 0;
-      for (std::uint32_t y = y0; y < y1; ++y) {
-        for (std::uint32_t x = x0; x < x1; ++x) {
-          const std::size_t index =
-              (static_cast<std::size_t>(y) * source.width + x) * 3;
-          const float value =
-              p3_luminance(positive_finite(source.pixels[index]),
-                                positive_finite(source.pixels[index + 1]),
-                                positive_finite(source.pixels[index + 2]));
-          total += value;
-          peak = std::max(peak, value);
-          ++samples;
-        }
-      }
-      const std::size_t idx =
-          static_cast<std::size_t>(gy) * dimensions.width + gx;
-      scene_luma[idx] =
-          samples == 0 ? 0.0F : static_cast<float>(total / samples);
-      highlight_peak[idx] = peak;
-    }
-  });
 
   // --- Exposure selection ---
-  float exposure_ev = 0.0F;
-  if (options.auto_exposure) {
-    const float base_ev =
-        std::log2(target_middle_gray /
-                  std::max(scene_stats.log_average, kEpsilon));
-    const float provisional_exposure_ev = clamp_finite(base_ev, -6.0F, 6.0F);
-    const float provisional_exposure = std::exp2(provisional_exposure_ev);
-    const float provisional_stops =
-        options.auto_headroom
-            ? choose_headroom_stops(
-                  scene_stats, provisional_exposure, capture,
-                  options.look.headroom_max_stops, scene_luma, highlight_peak,
-                  dimensions.width, dimensions.height, pop)
-            : std::clamp(options.headroom_stops, 0.0F,
-                         options.look.headroom_max_stops);
-    const float highlight_limit = highlight_limited_exposure(
-        scene_stats.p995, std::exp2(provisional_stops), curve);
-    exposure_ev = std::min(provisional_exposure_ev, highlight_limit);
-    if (ev100 && *ev100 < 8.0F) {
-      exposure_ev =
-          std::min(exposure_ev, options.look.positive_exposure_limit_ev);
-    }
-    exposure_ev = clamp_finite(exposure_ev, -6.0F, 6.0F);
-  } else {
-    exposure_ev = clamp_finite(options.exposure_ev, -10.0F, 10.0F);
-  }
-  exposure_ev =
-      clamp_finite(exposure_ev + options.exposure_bias_ev, -10.0F, 10.0F);
+  const float exposure_ev = select_exposure_ev(inputs, options, curve);
+
+  // The cell means and peaks are reused by the headroom and gain-map stages.
+  std::vector<float> scene_luma = std::move(inputs.cell_mean);
+  std::vector<float> highlight_peak = std::move(inputs.cell_peak);
   const float exposure = std::exp2(exposure_ev);
 
   // --- Headroom selection ---

@@ -26,6 +26,9 @@ they are part of the answer.
 """
 from __future__ import annotations
 
+import json
+import hashlib
+import math
 import os
 import subprocess
 import tempfile
@@ -35,7 +38,8 @@ from pathlib import Path
 from .concurrency import Budget, SingleFlight
 from .executable import detect_exe
 
-SUPPORTED_EXTENSIONS = frozenset({".arw", ".dng", ".jpg", ".jpeg", ".png", ".heic", ".heif"})
+SUPPORTED_EXTENSIONS = frozenset(
+    {".arw", ".dng", ".jpg", ".jpeg", ".png", ".heic", ".heif", ".avif"})
 RAW_EXTENSIONS = frozenset({".arw", ".dng"})
 
 #: The RAW decode settings the preview honours, and the value used when the
@@ -43,7 +47,8 @@ RAW_EXTENSIONS = frozenset({".arw", ".dng"})
 #: `command` so that a preview request can be validated on its own.
 DEFAULT_HIGHLIGHT_RECOVERY = "blend"
 
-_CACHE: dict[tuple[str, int, int, str, int], tuple[bytes, tuple[int, int], str]] = {}
+_CACHE: dict[tuple[str, int, int, str, str, int],
+             tuple[bytes, tuple[int, int], str, float, float]] = {}
 _CACHE_LOCK = threading.Lock()
 # One entry per decode setting per image, so flipping between two highlight
 # modes to compare them does not re-decode on every flip.
@@ -93,10 +98,45 @@ def jpeg_dimensions(data: bytes) -> tuple[int, int] | None:
     return None
 
 
+def _parse_scale(stdout: bytes) -> float:
+    """The headroom divisor the converter applied, or 1 if it said nothing.
+
+    An HDR input does not fit in an 8-bit JPEG, so `thumbnail` divides by a
+    power of two and reports it. Falling back to 1 keeps a converter that
+    predates the field working: the preview is then clipped exactly as it used
+    to be rather than being scaled by a number nobody sent.
+    """
+    try:
+        value = float(json.loads(stdout.decode("utf-8", errors="replace"))["scale"])
+    except (ValueError, KeyError, TypeError):
+        return 1.0
+    # A scale outside this range is not something this panel knows how to undo,
+    # and multiplying by a wild number would be worse than not scaling at all.
+    if not 1.0 <= value <= 64.0:
+        return 1.0
+    return value
+
+
+def _parse_exposure(stdout: bytes) -> float:
+    """The automatic scene exposure the RAW preview needs, in EV.
+
+    This is deliberately a separate field from the HDR transport divisor:
+    scene exposure is a rendering decision, and zero is the correct fallback
+    for older converters or display-referred inputs.
+    """
+    try:
+        value = float(json.loads(stdout.decode("utf-8", errors="replace"))["exposure"])
+    except (ValueError, KeyError, TypeError):
+        return 0.0
+    if not math.isfinite(value) or not -6.0 <= value <= 6.0:
+        return 0.0
+    return value
+
+
 def _converter_thumbnail(
     source: Path, highlight_recovery: str = DEFAULT_HIGHLIGHT_RECOVERY,
     max_edge: int = MAX_EDGE,
-) -> tuple[bytes, tuple[int, int]]:
+) -> tuple[bytes, tuple[int, int], float, float]:
     """Decode and resize through the native codec pipeline."""
     exe = detect_exe()
     if not exe:
@@ -132,23 +172,24 @@ def _converter_thumbnail(
         dimensions = jpeg_dimensions(data)
         if not dimensions:
             raise ValueError("转换器生成了无效的 JPEG 预览。")
-        return data, dimensions
+        return data, dimensions, _parse_scale(completed.stdout), _parse_exposure(completed.stdout)
     finally:
         output.unlink(missing_ok=True)
 
 
 def _build(
     source: Path, key: tuple, highlight_recovery: str, max_edge: int,
-) -> tuple[bytes, tuple[int, int], str]:
+) -> tuple[bytes, tuple[int, int], str, float, float]:
     """Produce one thumbnail while holding a slot in the process budget."""
     with _BUDGET.hold(timeout=1.0):
         with _CACHE_LOCK:
             cached = _CACHE.get(key)
         if cached:
             return cached
-        data, dimensions = _converter_thumbnail(source, highlight_recovery, max_edge)
+        data, dimensions, scale, exposure = _converter_thumbnail(
+            source, highlight_recovery, max_edge)
 
-    entry = (data, dimensions, "image/jpeg")
+    entry = (data, dimensions, "image/jpeg", scale, exposure)
     with _CACHE_LOCK:
         if len(_CACHE) >= _CACHE_LIMIT:
             _CACHE.pop(next(iter(_CACHE)))
@@ -159,17 +200,27 @@ def _build(
 def thumbnail_for(
     source: Path, highlight_recovery: str = DEFAULT_HIGHLIGHT_RECOVERY,
     max_edge: int = MAX_EDGE,
-) -> tuple[bytes, tuple[int, int], str]:
-    """Return (JPEG bytes, dimensions, MIME type) for one image file.
+) -> tuple[bytes, tuple[int, int], str, float, float]:
+    """Return (JPEG bytes, dimensions, MIME type, scale, exposure) for one image.
 
-    Keyed on path plus mtime and size, so replacing the session's image with a
-    different file of the same name cannot serve the previous thumbnail, and on
-    the decode settings, because two highlight-recovery modes are two different
-    images and serving one for the other is the bug this key exists to prevent.
+    The scale and exposure are part of the answer, not details of it: the JPEG
+    holds the picture divided by the scale, and a RAW is still scene-linear
+    until the reported automatic exposure is applied in the browser.
+
+    Keyed on path, metadata and content digest, so replacing the session's image
+    with a different file of the same name cannot serve the previous thumbnail,
+    even when a copy operation preserves size and timestamps. Decode settings
+    are also part of the key because two highlight-recovery modes are two
+    different images.
     """
     stat = source.stat()
+    digest = hashlib.sha256()
+    with source.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
     edge = max(320, min(MAX_EDGE, int(max_edge)))
-    key = (str(source), stat.st_mtime_ns, stat.st_size, highlight_recovery, edge)
+    key = (str(source), stat.st_mtime_ns, stat.st_size, digest.hexdigest(),
+           highlight_recovery, edge)
     with _CACHE_LOCK:
         cached = _CACHE.get(key)
     if cached:

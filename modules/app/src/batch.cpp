@@ -8,6 +8,8 @@
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/foundation/file_io.hpp"
+#include "hyperdr/foundation/hash.hpp"
+#include "hyperdr/foundation/json.hpp"
 #include "hyperdr/gainmap/external.hpp"
 #include "hyperdr/gainmap/gain_map.hpp"
 #include "hyperdr/image/resample.hpp"
@@ -36,11 +38,28 @@ std::string decode_variant(const ConvertOptions& options,
   const char* intent = options.decode_intent == DecodeIntent::Preview
                            ? "preview"
                            : "export";
-  return std::string(intent) + '/' +
+  std::string variant = std::string(intent) + '/' +
          highlight_recovery_name(raw.highlight_recovery) + '/' +
          (raw.half_size ? "half" : "full") + '/' +
          (raw.ignore_embedded_gain_map ? "base-only" : "embedded-gain") + '/' +
-         std::to_string(options.preview_max_edge);
+         std::to_string(options.preview_max_edge) + "/gain=" +
+         json::number_text(raw.digital_gain) + "/auto-bad=" +
+         (raw.auto_bad_pixel_correction ? "1" : "0");
+  const auto append_file = [&](const char* label,
+                               const std::filesystem::path& path) {
+    if (path.empty()) return;
+    variant += '/';
+    variant += label;
+    variant += '=';
+    variant += path_utf8(path);
+    variant += ':';
+    variant += sha256_file_hex(path);
+  };
+  append_file("bad", raw.bad_pixel_map);
+  append_file("dark", raw.dark_frame);
+  append_file("lut", raw.linearization_lut);
+  append_file("lsc", raw.lens_shading_map);
+  return variant;
 }
 
 // One file's work is split in two so a batch can overlap the stages. A staged
@@ -140,10 +159,25 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
                                          options.external_gain_report,
                                          options.allow_legacy_external_gain);
     }
+    float external_exposure_ev = 0.0F;
+    if (external.has_value()) {
+      const auto extension = lower_extension(result.input);
+      if (extension == ".arw" || extension == ".dng") {
+        auto exposure_options = options.gain;
+        // External model inference owns the gain map, but a RAW still needs
+        // the same automatic scene exposure that was applied to its model
+        // thumbnail. The panel's creative brightness is deliberately not part
+        // of the external model contract.
+        exposure_options.exposure_bias_ev = 0.0F;
+        external_exposure_ev = photographic_exposure_ev(
+            staged.image.linear_p3, exposure_options, staged.image.capture);
+      }
+    }
     auto gain = external.has_value()
                     ? make_external_gain_map(staged.image.linear_p3,
                                              std::move(*external),
-                                             options.gain.gain_strength)
+                                             options.gain.gain_strength,
+                                             external_exposure_ev)
                     : make_gain_map(staged.image.linear_p3, options.gain,
                                     staged.image.capture);
     result.sensor_width = staged.image.decode.sensor_width;

@@ -17,6 +17,7 @@ HyperDR/
 │                        src/                       implementation (+ src/internal/)
 │                        tests/                     that module's tests
 ├── apps/panel/         # Local browser control panel (Python, standard library only)
+├── HyperDR_Model/      # Optional ML training, evaluation, and gain-map inference
 ├── cmake/              # Build helpers: compiler settings, module and test registration, codecs
 ├── docs/               # User guides, validation notes, and this map
 ├── packaging/          # Release building, unpacked-archive smoke test, and install guide
@@ -24,7 +25,7 @@ HyperDR/
 ├── scripts/            # Windows setup, LAN, TLS, firewall, and codec helpers
 │                         hyperdr_tls.ps1 holds the certificate paths and
 │                         issuing logic shared by both launchers
-├── tests/python/       # Tests for the browser panel
+├── tests/              # Cross-component Python, JavaScript, and PowerShell tests
 ├── Start.bat           # Double-click entry point for the browser panel
 ├── Setup-HTTPS.bat     # One-time trusted-HTTPS setup for iPhone true HDR
 ├── CMakeLists.txt      # Options, module list, install and packaging
@@ -81,6 +82,19 @@ still runs almost the whole test suite.
 `hyperdr` is the internal C++/Python identifier. `HyperDR` is the public product
 name and command-line executable.
 
+## Local and generated files
+
+The repository root should contain source, documentation, and launch files only.
+CMake build trees (`build*`), packaged releases (`dist/`), test caches,
+`__pycache__` directories, `.tmp-*` diagnostics, and compiler objects are local,
+reproducible output and are ignored by Git. They can be deleted when no build or
+diagnostic process is using them.
+
+`HyperDR_Model/.venv/`, trained `*.pt` checkpoints, datasets, and generated
+`HyperDR_Model/reports/` are also machine-local. Treat these as potentially
+expensive or private assets: normal workspace cleanup preserves them even though
+Git ignores them.
+
 ## Single sources of truth
 
 Several things used to exist in more than one copy and drifted apart. Each now
@@ -98,7 +112,9 @@ has exactly one authority; adding a second copy of any of them is a regression.
 | Luminance, smoothstep, percentiles, rationals | `foundation/math.hpp`, `foundation/rational.hpp`, `image/color.hpp` | the whole renderer |
 | Version string | `foundation/version.hpp` | CLI banner, Exif Software tag, resume fingerprint, decode-cache key, report, schema |
 | Resolution bounding | `modules/image/src/resample.cpp` | `--preview-max-edge` and `thumbnail` |
-| BT.2100 transfer functions | `modules/image/include/hyperdr/image/transfer.hpp` | the HEIF and AVIF encoders |
+| BT.2100 transfer functions, both directions | `modules/image/include/hyperdr/image/transfer.hpp` | the HEIF and AVIF encoders, and the decoders that read those files back |
+| CICP decoding: transfer, primaries, the ICC path | `modules/codec/src/internal/cicp.hpp` | the JPEG, PNG, HEIF and AVIF decoders |
+| Exif read onto a decoded image | `read_exif` in `modules/container` plus `modules/codec/src/internal/metadata.hpp` | the JPEG, HEIF, AVIF and Ultra HDR decoders |
 | Codec availability | `modules/codec/include/hyperdr/codec/availability.hpp` and `src/unavailable.cpp` | every caller, none of which contains a `#if` |
 
 ## Tests

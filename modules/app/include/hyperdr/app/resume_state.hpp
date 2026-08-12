@@ -18,6 +18,7 @@ namespace hyperdr {
 struct InputStamp {
   std::uint64_t size{};
   std::int64_t modified_ns{};
+  std::string content_sha256;
   friend bool operator==(const InputStamp&, const InputStamp&) = default;
 };
 

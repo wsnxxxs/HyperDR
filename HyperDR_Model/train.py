@@ -25,7 +25,7 @@ from hyperdr_ml.data import (
     target_statistics,
 )
 from hyperdr_ml.loss import gain_loss
-from hyperdr_ml.model import Architecture, GainMapNet
+from hyperdr_ml.model import Architecture, DirectGainMapNet
 from hyperdr_ml.phase_a_labels import LABEL_CONTRACT_ID, sha256_file
 
 
@@ -71,8 +71,8 @@ def parse_args() -> Config:
         choices=("baseline", "global_conditioning", "dilation_pyramid"),
         default="baseline",
     )
-    parser.add_argument("--epochs", type=int, default=60)
-    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--epochs", type=int, default=80)
+    parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--base-channels", type=int, default=24)
@@ -343,7 +343,7 @@ def main() -> None:
         json.dumps(target_audit, indent=2) + "\n"
     )
 
-    raw_model = GainMapNet(config.base_channels, config.architecture).to(device)
+    raw_model = DirectGainMapNet(config.base_channels, config.architecture).to(device)
     initial_output_bias = None
     checkpoint = None
     if config.resume:

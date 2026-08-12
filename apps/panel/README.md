@@ -75,7 +75,9 @@ PQ / HLG 需要 Main10 x265；首次完整构建后按项目根 `README.md` 运�
 
 ## 能做什么
 
-- 拖拽或点选一张 ARW、DNG、JPG、PNG、HEIC/HEIF 照片。再选一张会替换掉它。
+- 拖拽或点选一张 ARW、DNG、JPG、PNG、HEIC/HEIF、AVIF 照片。再选一张会替换掉它。
+  HDR 输入（HLG/PQ 的 HEIC 与 AVIF、Ultra HDR JPEG）的高光会保留下来：预览用一个
+  2 的幂把线性值压进 8 位 JPEG，并通过 `X-Preview-Scale` 告诉浏览器乘回去。
 - 六种导出格式：**Apple Adaptive HDR、Google Ultra HDR、PQ (HDR10)、HLG、AVIF PQ、AVIF HLG**。
 - **整体亮度**在自动曝光之后做 0～+2 EV 偏移，默认 +1 EV，同时作用于 SDR 底图与 HDR 输出。
 - **HDR 扩展强度**与 **HDR 扩展范围**；范围是实际亮度余量，Adaptive HDR 最高 3 stops，

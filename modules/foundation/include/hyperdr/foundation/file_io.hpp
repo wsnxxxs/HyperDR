@@ -10,6 +10,7 @@
 // which had to agree for `--reconstruct` refusing to overwrite its input to
 // actually hold.
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -18,6 +19,16 @@
 namespace hyperdr {
 
 [[nodiscard]] std::vector<std::uint8_t> read_binary_file(const std::filesystem::path& path);
+
+// The first `max_bytes` of a file, or all of it if it is shorter.
+//
+// For deciding what a file *is*. A container signature lives in the first few
+// dozen bytes, and sniffing one used to mean reading the whole image -- twice
+// over for a 50 MB HEIC, once to identify it and once to decode it. A file that
+// cannot be opened yields an empty vector rather than throwing, because the
+// answer to "is this an AVIF" is "no" either way.
+[[nodiscard]] std::vector<std::uint8_t> read_binary_prefix(
+    const std::filesystem::path& path, std::size_t max_bytes);
 
 // Writes to a uniquely named temporary in the destination directory and then
 // renames it into place, so an interrupted run never leaves a half-written

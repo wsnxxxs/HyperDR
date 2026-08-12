@@ -34,7 +34,7 @@ the three required packages.
 Safari renders the real HDR preview through WebGPU, which browsers expose only
 in a secure context. Over plain HTTP the panel still uploads, converts and
 downloads correctly, and the final HEIC is still HDR in Photos, but the live
-preview falls back to an SDR approximation. Dismissing a certificate warning is
+preview presents the same native float HDR plane folded into SDR. Dismissing a certificate warning is
 not a substitute: an exception does not create a secure context.
 
 `Setup-HTTPS.bat` installs `mkcert` through winget if needed, generates a

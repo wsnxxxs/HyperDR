@@ -15,11 +15,12 @@ import { api } from "../core/api.js";
 import { store } from "../core/store.js";
 import { role, setText, setPressed, clamp } from "../core/dom.js";
 import { mobileLayout, touchQuery } from "../core/media.js";
-import { renderSdr, __math } from "./cpu.js";
+import { renderSdr, planeToImageData } from "./cpu.js";
 import { createHdrRenderer } from "./gpu.js";
 import { createSdrGpuRenderer } from "./sdr-gpu.js";
 import { analyse, mountScope } from "./scope.js";
 import { createUploader } from "./session.js";
+import { toOptions } from "../settings/schema.js";
 
 const hdrDisplayQuery = window.matchMedia("(dynamic-range: high)");
 
@@ -34,45 +35,7 @@ const MOUSE_HINT = "点击添加图片；已有图片时轻点更换，按住查
 
 const VIEW_MODES = [["original", "原图"], ["split", "分割"], ["effect", "效果"]];
 
-/* The SDR rendition of the preview source.
- *
- * The JPEG holds an HDR input divided by `scale`, which is right for the
- * renderers -- they multiply it back -- and wrong for everything that shows the
- * source as it is: the original view, the histogram and the zebras all want the
- * picture an SDR screen would display, which is the linear value times the
- * scale, clipped at white. At scale 1 that is the identity, so the very same
- * ImageData is handed back and an SDR photograph is untouched down to the byte.
- */
-function displayMapped(source, scale) {
-  if (!(scale > 1)) return source;
-  const { SRGB_TO_LINEAR, linearToSrgb8 } = __math;
-  const table = new Uint8ClampedArray(256);
-  for (let i = 0; i < 256; i++) {
-    table[i] = linearToSrgb8(Math.min(1, SRGB_TO_LINEAR[i] * scale));
-  }
-  const mapped = new ImageData(source.width, source.height);
-  const from = source.data;
-  const to = mapped.data;
-  for (let i = 0; i < from.length; i += 4) {
-    to[i] = table[from[i]];
-    to[i + 1] = table[from[i + 1]];
-    to[i + 2] = table[from[i + 2]];
-    to[i + 3] = from[i + 3];
-  }
-  return mapped;
-}
-
-function decodeBlob(blob) {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(blob);
-    const image = new Image();
-    image.onload = () => resolve({ image, url });
-    image.onerror = () => { URL.revokeObjectURL(url); reject(new Error("无法解码内嵌 JPEG 预览。")); };
-    image.src = url;
-  });
-}
-
-export function mountStage({ curve, toast }) {
+export function mountStage({ toast }) {
   const stage = role("stage");
   const frame = stage.querySelector(".stage-frame");
   const viewport = stage.closest(".stage-viewport");
@@ -98,7 +61,7 @@ export function mountStage({ curve, toast }) {
     source: null,
     display: null,
     output: null,
-    bitmap: null,
+    frame: null,
     label: "",
     previewRequestEdge: 0,
     // What the server divided the linear image by to fit it in the JPEG. Every
@@ -114,7 +77,7 @@ export function mountStage({ curve, toast }) {
   const sourceListeners = new Set();
   const notifySource = () => { for (const listener of [...sourceListeners]) listener(); };
   const analysis = { current: null, modelGain: null };
-  const refreshScope = mountScope({ curve, analysis });
+  const refreshScope = mountScope({ analysis });
 
   let renderer = null;        // WebGPU/WebGL renderer, or null for the CPU path
   let modelGain = null;
@@ -269,26 +232,11 @@ export function mountStage({ curve, toast }) {
   function draw() {
     frame_ = 0;
     if (!image.source) return;
-    const state = store.get();
-    curve.refreshTable(state);
     const original = showingOriginal();
     if (renderer) {
-      renderer.draw(curve.table, {
-        strength: state.hdrStrength, headroom: state.hdrRange,
-        original, expansionStart: state.expansionStart,
-        areaCoverage: state.areaCoverage, exposureBias: state.brightness,
-        vibrance: state.vibrance, sourceScale: image.scale,
-        sourceExposure: image.exposureEv,
-        modelGain: state.previewOptimized ? modelGain : null,
-        modelStrength: state.modelStrength,
-      });
+      renderer.draw(null, { original });
     } else {
-      renderSdr(sdrCanvas, {
-        source: image.source, display: image.display, output: image.output, curve,
-        settings: state, original, sourceScale: image.scale,
-        sourceExposure: image.exposureEv,
-        modelGain: state.previewOptimized ? modelGain : null,
-      });
+      renderSdr(sdrCanvas, { frame: image.frame, original });
     }
   }
 
@@ -304,7 +252,7 @@ export function mountStage({ curve, toast }) {
   }
 
   function chooseSdrRenderer(reason, epoch = rendererGeneration, forceCpu = false) {
-    if (!isCurrentRenderer(epoch) || !image.bitmap) return;
+    if (!isCurrentRenderer(epoch) || !image.frame) return;
     renderer?.destroy();
     renderer = null;
     try {
@@ -316,8 +264,7 @@ export function mountStage({ curve, toast }) {
         }
       });
       renderer = created;
-      renderer.upload(image.bitmap);
-      if (modelGain) renderer.uploadGainMap(modelGain);
+      renderer.upload(image.frame);
       showCanvas("sdr");
       setCapability(`${reason} · GPU SDR 示意`, false);
     } catch (error) {
@@ -338,7 +285,7 @@ export function mountStage({ curve, toast }) {
   }
 
   async function chooseRenderer(epoch = invalidateRenderer()) {
-    if (!isCurrentRenderer(epoch) || !image.bitmap) return;
+    if (!isCurrentRenderer(epoch) || !image.frame) return;
     renderer?.destroy();
     renderer = null;
 
@@ -356,10 +303,9 @@ export function mountStage({ curve, toast }) {
             chooseSdrRenderer("HDR 图形设备已断开", epoch);
           }
         });
-        if (!isCurrentRenderer(epoch) || !image.bitmap) { created.destroy(); return; }
+        if (!isCurrentRenderer(epoch) || !image.frame) { created.destroy(); return; }
         renderer = created;
-        renderer.upload(image.bitmap);
-        if (modelGain) renderer.uploadGainMap(modelGain);
+        renderer.upload(image.frame);
         showCanvas("hdr");
         const gamut = renderer.outputColorSpace === "display-p3" ? "Display P3" : "扩展 sRGB";
         setCapability(`真 HDR · ${gamut} · 16-bit 浮点`, true);
@@ -434,12 +380,11 @@ export function mountStage({ curve, toast }) {
     invalidateImage();
     invalidateRenderer();
     updateExpandedState(false);
-    image.bitmap?.close();
     Object.assign(image, {
       source: null,
       display: null,
       output: null,
-      bitmap: null,
+      frame: null,
       label: "",
       previewRequestEdge: 0,
       scale: 1,
@@ -481,29 +426,20 @@ export function mountStage({ curve, toast }) {
       const state = store.get();
       const requestedEdge = previewTier();
       const preview = await api.preview(sessionId, {
+        options: {
+          ...toOptions(state),
+          useModel: Boolean(state.previewOptimized),
+        },
         highlightRecovery: state.highlightRecovery,
         maxEdge: requestedEdge,
       });
-      const { image: decoded, url } = await decodeBlob(preview.blob);
-      if (!isCurrentImage(epoch)) { URL.revokeObjectURL(url); return; }
-
-      // The contract says to trust the headers over re-measuring the bitmap.
-      const width = preview.width || decoded.naturalWidth;
-      const height = preview.height || decoded.naturalHeight;
-
-      const scratch = document.createElement("canvas");
-      scratch.width = width;
-      scratch.height = height;
-      const context = scratch.getContext("2d", { willReadFrequently: true });
-      context.drawImage(decoded, 0, 0, width, height);
-      URL.revokeObjectURL(url);
-
-      const bitmap = await createImageBitmap(scratch);
-      if (!isCurrentImage(epoch)) { bitmap.close(); return; }
-      image.bitmap?.close();
-      image.bitmap = bitmap;
-      image.source = context.getImageData(0, 0, width, height);
-      image.output = context.createImageData(width, height);
+      if (!isCurrentImage(epoch)) return;
+      const { width, height } = preview;
+      image.frame = preview;
+      // Diagnostics receive an SDR display copy. Preview rendering consumes
+      // only the untouched native float planes above.
+      image.source = planeToImageData(preview.base, width, height);
+      image.output = null;
       image.label = state.file?.name || "图片";
       image.previewRequestEdge = requestedEdge || Math.max(width, height);
       image.scale = preview.scale || 1;
@@ -515,10 +451,11 @@ export function mountStage({ curve, toast }) {
         canvas.width = width;
         canvas.height = height;
       }
-      originalCanvas.getContext("2d").putImageData(image.display, 0, 0);
+      const originalContext = originalCanvas.getContext(
+        "2d", { colorSpace: "display-p3" }) || originalCanvas.getContext("2d");
+      originalContext.putImageData(image.source, 0, 0);
       analysis.current = analyse(
-        image.display, image.source,
-        image.scale * Math.pow(2, image.exposureEv));
+        image.source, planeToImageData(preview.hdr, width, height, true));
 
       empty.style.display = "none";
       stage.classList.add("has-image");
@@ -527,6 +464,10 @@ export function mountStage({ curve, toast }) {
       stage.tabIndex = 0;
       store.set({ comparing: false });
       refreshScope();
+      if (preview.metadata.status === "degraded") {
+        const reasons = (preview.metadata.degradationReasons || []).join(", ");
+        toast(`预览已降级：${reasons || "原生 HDR 解码失败"}`, true);
+      }
       await chooseRenderer();
     } catch (error) {
       if (!isCurrentImage(epoch)) return;
@@ -665,10 +606,15 @@ export function mountStage({ curve, toast }) {
     stage.setAttribute("aria-busy", String(state.uploading));
     selectButton.disabled = state.uploading;
   });
+  let nativeReloadTimer = 0;
   store.watchAny(
     ["brightness", "hdrStrength", "hdrRange", "expansionStart", "areaCoverage",
      "encoding", "contrast", "vibrance", "previewOptimized", "modelStrength"],
-    (state) => { curve.validateOnce(state); schedule(); },
+    () => {
+      if (!store.get().sessionId) return;
+      clearTimeout(nativeReloadTimer);
+      nativeReloadTimer = setTimeout(load, 120);
+    },
     { immediate: true });
 
   /* Every other control acts on the decoded pixels the browser already holds,
@@ -763,13 +709,7 @@ export function mountStage({ curve, toast }) {
     clear,
     /** The decoded preview pixels, for the mask overlay. Null before upload. */
     getSource: () => image.source,
-    /** What those pixels were divided by, so the mask reads the same scene
-     *  luminance the renderers do. */
-    getSourceScale: () => image.scale,
-    /** The automatic scene exposure, in EV, before the user's brightness bias. */
-    getSourceExposure: () => image.exposureEv,
-    /** The complete linear multiplier used for masks and histogram simulation. */
-    getSourceSceneScale: () => image.scale * Math.pow(2, image.exposureEv),
+    getFrame: () => image.frame,
     onSourceChange(listener) {
       sourceListeners.add(listener);
       return () => sourceListeners.delete(listener);

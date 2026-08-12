@@ -34,10 +34,10 @@ apps/panel/
     executable.py       可执行文件探测
     session.py          一张图进、一个结果出，以及过期清理
     job.py              正在运行的那个转换进程，与浏览器轮询的日志
-    thumbnail.py        实时预览所依据的那张小 JPEG（RAW 走 LibRaw 半尺寸解码，
-                        随高光恢复模式变化，不再取机内嵌入 JPEG）
-    curve.py            向转换器索取色调曲线
-    concurrency.py      curve 与 thumbnail 共用的进程准入控制
+    native_preview.py   调用 preview-frame，校验并缓存线性 P3 float32 原生预览包
+    thumbnail.py        旧 thumbnail/JPEG 命令的兼容封装
+    curve.py            色调曲线诊断接口的兼容封装
+    concurrency.py      预览与模型进程共用的解码准入控制
     picker.py           原生 tkinter 文件夹对话框（独立子进程）
     api.py              HTTP 端点，写成可直接单测的纯函数
     security.py         口令、登录限流、响应头策略
@@ -76,8 +76,8 @@ PQ / HLG 需要 Main10 x265；首次完整构建后按项目根 `README.md` 运�
 ## 能做什么
 
 - 拖拽或点选一张 ARW、DNG、JPG、PNG、HEIC/HEIF、AVIF 照片。再选一张会替换掉它。
-  HDR 输入（HLG/PQ 的 HEIC 与 AVIF、Ultra HDR JPEG）的高光会保留下来：预览用一个
-  2 的幂把线性值压进 8 位 JPEG，并通过 `X-Preview-Scale` 告诉浏览器乘回去。
+  HDR 输入（HLG/PQ 的 HEIC 与 AVIF、Ultra HDR JPEG）的高光会保留下来：转换器直接
+  返回线性 Display P3 float32 的 SDR 底图与重建 HDR，不经过 8 位 JPEG 中间层。
 - 六种导出格式：**Apple Adaptive HDR、Google Ultra HDR、PQ (HDR10)、HLG、AVIF PQ、AVIF HLG**。
 - **整体亮度**在自动曝光之后做 0～+2 EV 偏移，默认 +1 EV，同时作用于 SDR 底图与 HDR 输出。
 - **HDR 扩展强度**与 **HDR 扩展范围**；范围是实际亮度余量，Adaptive HDR 最高 3 stops，
@@ -93,21 +93,22 @@ PQ / HLG 需要 Main10 x265；首次完整构建后按项目根 `README.md` 运�
 - **导出后校验**——它不是偏好。转换器在写盘*之前*把刚编码的字节解码回来验一遍，
   校验不过就不写文件。它拦的正是「文件能打开、但到手机上是普通 SDR」这类
   增益图引用写坏的错误，所以始终开启。
-- **画面风格（渲染器）**——渲染器决定 `/api/curve` 画出来的曲线，能选它就能让预览和
-  导出对不上。`photographic` 目前是唯一的渲染器（旧的 `neutral` 已删除），面板固定跑
-  `--look photographic`，不把这个值交给客户端。
+- **画面风格（渲染器）**——预览与导出都调用同一套摄影底图、真实增益图与 HDR 重建代码。
+  `photographic` 目前是唯一的渲染器（旧的 `neutral` 已删除），面板固定使用它，不把这个
+  值交给客户端。
 - **命名预设**——预设是「一整套参数的快照」，而面板一次只处理一张图，
   每张图值得动滑块的地方本就不同；需要一套参数复用到一批图，那是命令行的活。
 
 ## 界面与实时预览
 
 - 图像优先布局：左侧大幅预览，右侧粘性控制栏，拖动滑块时预览始终可见。
-- RAW 预览由转换器通过 LibRaw 做固定半尺寸解码，再按视口与设备像素比量化到
-  960 / 1440 / 2048 像素；纯 JavaScript CPU 回退固定不超过 1280 像素。
+- RAW 预览由转换器通过 LibRaw 做固定半尺寸解码，再按视口与设备像素比缩放到
+  960 / 1440 / 2048 像素；纯 JavaScript CPU 呈现回退固定不超过 1280 像素。
   它不使用相机内嵌 JPEG，因此高光恢复设置会真实反映在预览中。
 - **WebGPU 真 HDR** 通道（`rgba16float` + 扩展 Display P3），在 HDR 屏 + 受信任 HTTPS 下
   直接以超过参考白的亮度呈现；条件不满足时回退到 SDR 示意，并在指示灯上说明原因。
-- 色调曲线由 `HyperDR curve` 提供，预览与编码器用的是同一条，不存在两份各自实现的近似。
+- `HyperDR preview-frame` 直接提供摄影 SDR 底图、真实增益图和重建 HDR 平面；浏览器只负责
+  呈现，不再维护一份色调曲线或增益图近似。
 - **直方图**（亮度 / RGB 可切换）叠加扩展起点标记，配合**高光/暗部裁切**读数与**斑马纹**；
   手机端默认折叠但保留裁切摘要。
   裁切是源画面的属性，只在载入时算一次。

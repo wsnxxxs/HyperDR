@@ -95,7 +95,7 @@ export const api = {
 
   /* -- preview ------------------------------------------------------- */
 
-  /** The small image the live preview is built from.
+  /** Native float32 linear-Display-P3 SDR base and reconstructed HDR planes.
    *
    *  `highlightRecovery` is part of the request because it changes the RAW
    *  decode: the same file at two modes is two different previews. The decoded
@@ -110,8 +110,9 @@ export const api = {
    *  @returns {Promise<{blob: Blob, width: number, height: number, scale: number,
    *                    exposure: number}>}
    */
-  async preview(sessionId, { highlightRecovery, maxEdge } = {}) {
+  async preview(sessionId, { options = {}, highlightRecovery, maxEdge } = {}) {
     const query = new URLSearchParams({ id: sessionId });
+    query.set("options", JSON.stringify(options));
     if (highlightRecovery) query.set("hr", highlightRecovery);
     if (maxEdge) query.set("edge", String(maxEdge));
 
@@ -122,19 +123,36 @@ export const api = {
       try { const body = await response.json(); if (body.error) message = body.error; } catch {}
       throw new ApiError(message, response.status);
     }
-    const scale = Number(response.headers.get("X-Preview-Scale"));
-    const exposure = Number(response.headers.get("X-Preview-Exposure"));
+    const buffer = await response.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    const magic = new TextDecoder().decode(bytes.subarray(0, 8));
+    if (magic !== "HYPREV1\n" || bytes.length < 12) {
+      throw new ApiError("原生预览数据无效。", 500);
+    }
+    const jsonSize = new DataView(buffer).getUint32(8, true);
+    let metadata;
+    try {
+      metadata = JSON.parse(new TextDecoder().decode(bytes.subarray(12, 12 + jsonSize)));
+    } catch (_) { throw new ApiError("原生预览元数据无效。", 500); }
+    const width = Number(metadata.width), height = Number(metadata.height);
+    const count = width * height * 3;
+    const offset = 12 + jsonSize;
+    if (!Number.isInteger(width) || width <= 0 || !Number.isInteger(height) || height <= 0
+        || offset + count * 8 !== bytes.length || offset % 4 !== 0) {
+      // Float32Array requires aligned storage. C++ JSON length is not naturally
+      // aligned, so copy the two payloads into aligned browser-owned buffers.
+      if (!Number.isInteger(width) || width <= 0 || !Number.isInteger(height) || height <= 0
+          || offset + count * 8 !== bytes.length) {
+        throw new ApiError("原生预览像素数据无效。", 500);
+      }
+    }
+    const copyPlane = (start) => {
+      const copy = bytes.slice(start, start + count * 4);
+      return new Float32Array(copy.buffer, copy.byteOffset, count);
+    };
     return {
-      blob: await response.blob(),
-      width: Number(response.headers.get("X-Preview-Width")) || 0,
-      height: Number(response.headers.get("X-Preview-Height")) || 0,
-      // A missing or nonsensical header means "not scaled", never "scale by
-      // NaN", which would blank the canvas.
-      scale: Number.isFinite(scale) && scale >= 1 && scale <= 64 ? scale : 1,
-      // Missing or malformed exposure means a display-referred source (or an
-      // older converter), so it must not move the image unexpectedly.
-      exposure: Number.isFinite(exposure) && exposure >= -6 && exposure <= 6
-        ? exposure : 0,
+      width, height, metadata,
+      base: copyPlane(offset), hdr: copyPlane(offset + count * 4),
     };
   },
 

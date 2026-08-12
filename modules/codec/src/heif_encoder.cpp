@@ -422,7 +422,8 @@ std::vector<std::uint8_t> encode_adaptive_heic(const GainMapResult& images,
 
   const auto exif = make_minimal_exif(metadata);
   check_heif(heif_context_add_exif_metadata(context.get(), base_handle.get(), exif.data(), static_cast<int>(exif.size())), "add Exif");
-  const auto xmp = make_xmp(metadata, images.headroom_stops);
+  const auto xmp = make_xmp(metadata, images.headroom_stops,
+                            /*has_gain_map=*/true);
   check_heif(heif_context_add_XMP_metadata(context.get(), base_handle.get(), xmp.data(), static_cast<int>(xmp.size())), "add XMP");
 
   std::vector<std::uint8_t> intermediate;
@@ -458,7 +459,8 @@ std::vector<std::uint8_t> encode_hdr_heic(const GainMapResult& images,
   check_heif(heif_context_add_exif_metadata(context.get(), handle.get(), exif.data(),
                                              static_cast<int>(exif.size())),
              "add HDR Exif");
-  const auto xmp = make_xmp(metadata, images.headroom_stops);
+  const auto xmp = make_xmp(metadata, images.headroom_stops,
+                            /*has_gain_map=*/false);
   check_heif(heif_context_add_XMP_metadata(context.get(), handle.get(), xmp.data(),
                                             static_cast<int>(xmp.size())),
              "add HDR XMP");

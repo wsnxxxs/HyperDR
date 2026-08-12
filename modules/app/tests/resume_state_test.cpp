@@ -8,6 +8,7 @@
 #include "hyperdr/app/batch.hpp"
 #include "hyperdr/app/fingerprint.hpp"
 #include "hyperdr/app/resume_state.hpp"
+#include "hyperdr/foundation/hash.hpp"
 
 #include <cstdint>
 #include <filesystem>
@@ -136,6 +137,10 @@ void check_decode_cache_roundtrip() {
   value.decode.target_height = 6336;
   value.decode.decoded_width = 4752;
   value.decode.decoded_height = 3168;
+  value.decode.requested_crop_left = 48;
+  value.decode.requested_crop_top = 32;
+  value.decode.delivered_crop_left = 48;
+  value.decode.delivered_crop_top = 32;
   value.decode.resolution_reduced = true;
   value.decode.default_crop_present = true;
   value.decode.target_dimensions_applied = true;
@@ -154,6 +159,9 @@ void check_decode_cache_roundtrip() {
   require(loaded.capture.aperture_f_number.has_value(), "optional capture value");
   require(loaded.decode.target_width == 9504, "decode target must round-trip");
   require(loaded.decode.decoded_width == 4752, "decode output must round-trip");
+  require(loaded.decode.requested_crop_left == 48 &&
+              loaded.decode.delivered_crop_top == 32,
+          "crop origins must round-trip");
   require(loaded.decode.resolution_reduced,
           "resolution reduction must round-trip");
   require(loaded.decode.degraded, "decode degradation must round-trip");
@@ -216,6 +224,89 @@ void check_export_rejects_reduced_resolution() {
   hyperdr::require_decode_resolution(base_options(), full);
 }
 
+void check_model_binding_rejects_stale_gain() {
+  const auto source = std::filesystem::temp_directory_path() /
+                      "hyperdr-model-binding-source.arw";
+  { std::ofstream output(source, std::ios::binary); output << "raw-a"; }
+
+  hyperdr::ExternalGainMap external;
+  hyperdr::ExternalGainBinding binding;
+  binding.source_sha256 = hyperdr::sha256_file_hex(source);
+  binding.highlight_recovery = "blend";
+  binding.orientation = 1;
+  binding.sensor_width = 96;
+  binding.sensor_height = 80;
+  binding.requested_crop_width = 64;
+  binding.requested_crop_height = 80;
+  binding.delivered_crop_width = 32;
+  binding.delivered_crop_height = 40;
+  binding.raw_half_size = true;
+  binding.model_width = 1024;
+  binding.model_height = 1280;
+  binding.gain_width = 64;
+  binding.gain_height = 80;
+  binding.resize_convention = "half-pixel-centres/area-then-bilinear";
+  binding.model_version = "baseline@epoch-1";
+  binding.checkpoint_sha256 = std::string(64, 'a');
+  binding.recipe.exposure_ev = 0.72F;
+  binding.recipe.headroom_stops = 3.0F;
+  binding.recipe.contrast = 1.08F;
+  binding.recipe.vibrance = 0.12F;
+  binding.recipe.pop = 0.0F;
+  binding.recipe.toe_end = 0.08F;
+  binding.recipe.toe_output_ratio = 2.0F / 3.0F;
+  binding.recipe.shoulder_start = 0.48F;
+  binding.recipe.positive_exposure_limit_ev = 1.5F;
+  binding.recipe.diffuse_gain_floor = 0.35F;
+  external.binding = binding;
+
+  hyperdr::DecodedImage image;
+  image.metadata.orientation = 1;
+  image.decode.sensor_width = 96;
+  image.decode.sensor_height = 80;
+  image.decode.target_width = 64;
+  image.decode.target_height = 80;
+  image.decode.decoded_width = 64;
+  image.decode.decoded_height = 80;
+  auto options = base_options();
+  options.gain.gain_strength = 0.6F;
+  const auto replay = hyperdr::replay_external_development(
+      external, source, image, options);
+  require(!replay.auto_exposure && replay.exposure_ev == 0.72F &&
+              replay.exposure_bias_ev == 0.0F,
+          "model recipe exposure was not frozen");
+  require(replay.gain_strength == 0.6F && replay.look.contrast == 1.08F &&
+              replay.look.vibrance == 0.12F,
+          "model recipe look was not replayed");
+
+  const auto rejected = [&](const auto& mutate) {
+    auto stale_external = external;
+    auto stale_image = image;
+    auto stale_options = options;
+    mutate(stale_external, stale_image, stale_options);
+    try {
+      static_cast<void>(hyperdr::replay_external_development(
+          stale_external, source, stale_image, stale_options));
+    } catch (const std::invalid_argument&) {
+      return true;
+    }
+    return false;
+  };
+  require(rejected([](auto& gain, auto&, auto&) {
+            gain.binding->source_sha256 = std::string(64, '0');
+          }),
+          "gain from a different RAW hash was accepted");
+  require(rejected([](auto&, auto&, auto& current) {
+            current.raw.highlight_recovery = hyperdr::HighlightRecovery::Reconstruct;
+          }),
+          "gain from a different highlight recovery was accepted");
+  require(rejected([](auto&, auto& current, auto&) {
+            current.decode.decoded_width = 62;
+          }),
+          "gain from a different delivered crop was accepted");
+  std::filesystem::remove(source);
+}
+
 void check_prune_respects_the_budget() {
   const auto directory = std::filesystem::temp_directory_path() / "hyperdr-prune-test";
   std::filesystem::remove_all(directory);
@@ -244,6 +335,7 @@ int main() {
     check_decode_cache_roundtrip();
     check_decode_cache_key_varies();
     check_export_rejects_reduced_resolution();
+    check_model_binding_rejects_stale_gain();
     check_prune_respects_the_budget();
   } catch (const std::exception& e) {
     std::cerr << "resume_state_test failed: " << e.what() << '\n';

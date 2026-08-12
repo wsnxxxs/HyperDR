@@ -1,6 +1,8 @@
 #include "hyperdr/gainmap/external.hpp"
 
 #include "hyperdr/foundation/rational.hpp"
+#include "hyperdr/gainmap/gain_map.hpp"
+#include "hyperdr/image/resample.hpp"
 
 #include <bit>
 #include <cstdint>
@@ -79,41 +81,33 @@ void test_external_gain_round_trip() {
   hyperdr::ExternalGainMap pure_external{
       hyperdr::FloatImage(1, 1, 1), 3.0F};
   pure_external.gain_map.pixels[0] = 0.5F;
-  const auto pure =
-      hyperdr::make_external_gain_map(source, std::move(pure_external));
-  require(pure.exposure_ev == 0.0F,
-          "pure external mode applied exposure");
-  require(pure.base_linear.pixels[0] == 0.2F &&
-              pure.base_linear.pixels[1] == 0.4F &&
-              pure.base_linear.pixels[2] == 0.6F,
-          "pure external mode changed legal source pixels");
-  require(pure.base_linear.pixels[3] == 1.0F &&
-              pure.base_linear.pixels[4] == 0.0F,
-          "pure external mode did not clamp the SDR base");
+  hyperdr::GainMapOptions development;
+  development.auto_headroom = false;
+  development.headroom_stops = 3.0F;
+  const auto expected_base = hyperdr::make_gain_map(source, development);
+  const auto pure = hyperdr::make_external_gain_map(
+      source, std::move(pure_external), development);
+  require(pure.exposure_ev == expected_base.exposure_ev,
+          "external mode did not reuse photographic exposure");
+  require(pure.base_linear.pixels == expected_base.base_linear.pixels,
+          "external mode did not reuse the mathematical SDR base");
+  require(hyperdr::resample_to(pure.base_linear, 16, 16).pixels ==
+              hyperdr::resample_to(expected_base.base_linear, 16, 16).pixels,
+          "model input is not the downsampled final SDR base");
   require(pure.gain_map.pixels[0] == 0.5F,
           "pure external mode changed the model gain");
-
-  hyperdr::ExternalGainMap exposed_external{
-      hyperdr::FloatImage(1, 1, 1), 3.0F};
-  exposed_external.gain_map.pixels[0] = 0.5F;
-  const auto exposed = hyperdr::make_external_gain_map(
-      source, std::move(exposed_external), 1.0F, 1.0F);
-  require(exposed.exposure_ev == 1.0F &&
-              exposed.stats.exposure_ev == 1.0F,
-          "external exposure anchor was not reported");
-  require(exposed.base_linear.pixels[0] == 0.4F &&
-              exposed.base_linear.pixels[1] == 0.8F &&
-              exposed.base_linear.pixels[2] == 1.0F,
-          "external exposure anchor was not applied before clamping");
 
   hyperdr::ExternalGainMap half_external{
       hyperdr::FloatImage(1, 1, 1), 3.0F};
   half_external.gain_map.pixels[0] = 0.5F;
-  const auto half =
-      hyperdr::make_external_gain_map(source, std::move(half_external), 0.5F);
+  development.gain_strength = 0.5F;
+  const auto half = hyperdr::make_external_gain_map(
+      source, std::move(half_external), development);
   require(hyperdr::rational_value(half.metadata.gain_max) == 1.5F &&
               half.stats.gain_percentiles[7] == 0.75F,
           "external strength did not scale model gain stops");
+  require(half.base_linear.pixels == expected_base.base_linear.pixels,
+          "model strength changed the SDR base");
   std::filesystem::remove_all(root);
 }
 

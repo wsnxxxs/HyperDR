@@ -20,11 +20,6 @@ struct GpsPosition {
 };
 
 struct PhotoMetadata {
-  // Empty means "the input did not say". It used to default to "SONY" and the
-  // raster decoders overwrote it with the container's name, so a converted HEIC
-  // was exported claiming a camera manufacturer of "HEIC". Every producer now
-  // either reads a real value out of the input's Exif or leaves this blank, and
-  // a blank one writes no Make tag at all.
   std::string make;
   std::string model;
   std::string lens;
@@ -44,7 +39,26 @@ struct PhotoMetadata {
 };
 
 [[nodiscard]] std::vector<std::uint8_t> make_minimal_exif(const PhotoMetadata& metadata);
-[[nodiscard]] std::string make_xmp(const PhotoMetadata& metadata, float headroom_stops);
+
+// `has_gain_map` controls the private Adaptive HDR declaration. PQ/HLG HEIC
+// and AVIF carry a rendered HDR image, not an ISO 21496-1 gain map, and must
+// not advertise themselves as gain-map containers merely because the same
+// in-memory GainMapResult was used to render them.
+[[nodiscard]] std::string make_xmp(const PhotoMetadata& metadata,
+                                   float headroom_stops, bool has_gain_map);
+
+// Parses the safe, portable subset emitted by make_minimal_exif from an Exif
+// block. The block may start directly at its TIFF header, carry the JPEG
+// "Exif\0\0" prefix, or use the HEIF four-byte TIFF-offset prefix. Unknown
+// tags (including maker notes and embedded thumbnails) are intentionally
+// ignored because they cannot be copied safely after the pixels change.
+[[nodiscard]] std::optional<PhotoMetadata> read_photo_metadata(
+    const std::uint8_t* data, std::size_t size);
+
+// Finds the first Exif APP1 segment in a JPEG stream and parses it with the
+// same bounds-checked reader. This is shared by plain JPEG and JPEG/R input.
+[[nodiscard]] std::optional<PhotoMetadata> read_jpeg_photo_metadata(
+    const std::uint8_t* data, std::size_t size);
 
 // What an input's Exif block says about the photograph.
 //

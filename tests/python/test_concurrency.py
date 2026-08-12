@@ -18,11 +18,17 @@ from unittest import mock
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "apps" / "panel"))
 
-from hyperdr_panel import api, curve, thumbnail  # noqa: E402
-from hyperdr_panel.concurrency import Budget, Busy, SingleFlight  # noqa: E402
+from hyperdr_panel import api, curve, model, thumbnail  # noqa: E402
+from hyperdr_panel.concurrency import (  # noqa: E402
+    Budget, Busy, RAW_DECODE_BUDGET, SingleFlight,
+)
 
 
 class BudgetTests(unittest.TestCase):
+    def test_raw_and_model_previews_share_one_total_memory_budget(self):
+        self.assertIs(thumbnail._BUDGET, RAW_DECODE_BUDGET)
+        self.assertIs(model.RAW_DECODE_BUDGET, RAW_DECODE_BUDGET)
+
     def test_refuses_beyond_the_limit_instead_of_queueing(self):
         budget = Budget(2)
         held = []

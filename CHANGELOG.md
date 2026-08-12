@@ -11,23 +11,19 @@ semantic versioning; dates use ISO 8601.
   functions used to write them. 4:2:2 and 4:4:4 chroma are read as well as
   4:2:0, so an HLG 4:2:2 HEIF of the kind Sony's cameras produce converts to any
   of the six outputs with its highlight range intact.
-- Added Exif import for HEIC, AVIF and Ultra HDR inputs. Camera, lens, date and
-  capture settings were previously discarded and the exported file recorded a
-  manufacturer of "HEIC"; they are now read and carried through. ISO in
-  particular feeds the gain map's noise weighting, so a high-ISO HEIC no longer
-  renders as if its sensitivity were unknown. A file that states no
-  manufacturer now writes no Make tag rather than claiming a default one.
-- Fixed the browser panel clipping HDR inputs. The preview JPEG is 8-bit and an
-  HLG or PQ photograph keeps its specular highlights above the display range, so
-  they used to arrive as flat white with nothing left for the HDR expansion to
-  work on. `HyperDR thumbnail` now reports the divisor it applied and the panel
-  multiplies it back, in the preview, the histogram and the adjustment masks
-  alike. Whether an input is HDR is decided by its format and never by how
-  bright its pixels measure, so RAW and SDR previews are unchanged.
+- Added safe Exif import for JPEG, HEIC, AVIF and Ultra HDR inputs. Camera, lens,
+  date, capture settings and orientation are carried through without inventing
+  fallback Make tags. ISO in particular feeds the gain map's noise weighting.
 - Fixed a rotated JPEG reporting its pre-rotation dimensions in the run report
   while the converted image used the rotated ones.
 - Fixed 10-bit HEIC and AVIF images whose colour is described only by an ICC
   profile decoding around 64 times too dark.
+- Replaced the panel's 8-bit sRGB JPEG preview intermediate with native
+  linear-Display-P3 float32 SDR/HDR planes. Preview generation now calls the
+  same photographic base, gain-map, and reconstruction code as export; the
+  browser performs presentation only. Ultra HDR decode fallback is explicitly
+  reported as degraded with `ultrahdr_decode_failed_sdr_fallback` instead of
+  silently becoming an ordinary JPEG decode.
 - Fixed conversion failing on images whose peak gain does not coincide with
   their brightest pixel. The ISO gain-map reader had begun requiring `gain_max`
   to equal the declared alternate headroom, which are different quantities, and

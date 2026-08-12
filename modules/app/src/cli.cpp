@@ -8,11 +8,19 @@
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/container/inspect.hpp"
 #include "hyperdr/foundation/file_io.hpp"
+#include "hyperdr/foundation/hash.hpp"
+#include "hyperdr/foundation/json.hpp"
 #include "hyperdr/foundation/version.hpp"
+#include "hyperdr/gainmap/gain_map.hpp"
+#include "hyperdr/gainmap/external.hpp"
+#include "hyperdr/gainmap/reconstruct.hpp"
+#include "hyperdr/image/resample.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <charconv>
 #include <cmath>
+#include <cstdint>
 #include <iomanip>
 #include <iostream>
 #include <stdexcept>
@@ -37,7 +45,11 @@ void usage() {
          "  HyperDR thumbnail <image> --output <preview.jpg> [--max-edge <pixels>]\n"
          "                            [--quality <1..100>] [--half-size]\n"
          "                            [--highlight-recovery blend|reconstruct|clip|unclip]\n"
-         "                            [--base-only] [--model-input]\n"
+         "                            [--base-only]\n"
+         "  HyperDR preview-frame <image> --output <preview.hpf> [look options]\n"
+         "                            [--preview-max-edge <pixels>] [--fast-preview]\n"
+         "  HyperDR model-input <image> --output <linear-p3.f32> --report <recipe.json>\n"
+         "                            [--long-side <pixels>] [--half-size] [look options]\n"
          "  HyperDR curve [look options] [--samples <N>]   Emit the tone curve as JSON\n"
          "  HyperDR schema                                 Emit the settings schema as JSON\n\n"
          "Convert settings:\n"
@@ -368,6 +380,242 @@ int thumbnail_command(int argc, char** argv) {
   return 0;
 }
 
+void append_u32_le(std::vector<std::uint8_t>& bytes, std::uint32_t value) {
+  bytes.push_back(static_cast<std::uint8_t>(value));
+  bytes.push_back(static_cast<std::uint8_t>(value >> 8U));
+  bytes.push_back(static_cast<std::uint8_t>(value >> 16U));
+  bytes.push_back(static_cast<std::uint8_t>(value >> 24U));
+}
+
+void append_float_image(std::vector<std::uint8_t>& bytes,
+                        const FloatImage& image) {
+  bytes.reserve(bytes.size() + image.pixels.size() * sizeof(float));
+  for (const float value : image.pixels) {
+    if (!std::isfinite(value)) {
+      throw std::runtime_error("native preview contains a non-finite pixel");
+    }
+    append_u32_le(bytes, std::bit_cast<std::uint32_t>(value));
+  }
+}
+
+std::vector<std::uint8_t> native_preview_packet(const GainMapResult& result,
+                                                const DecodeInfo& decode) {
+  // Wire format v1: magic, JSON byte length, UTF-8 JSON, then two tightly
+  // packed little-endian HWC RGB float32 planes (SDR base, reconstructed HDR).
+  // JSON makes status/geometry extensible while the pixel payload stays
+  // directly uploadable to GPU textures without an 8-bit colour conversion.
+  auto hdr = reconstruct_gain_map(result.base_linear, result.gain_map,
+                                  result.metadata, result.headroom_stops);
+  json::Writer writer;
+  writer.begin_object()
+      .member("schema", "hyperdr.native-preview/v1")
+      .member("width", result.base_linear.width)
+      .member("height", result.base_linear.height)
+      .member("channels", 3)
+      .member("layout", "HWC")
+      .member("sampleType", "float32-le")
+      .member("colorSpace", "linear-display-p3")
+      .member("relativeSdrWhite", 1.0F)
+      .member("headroomStops", result.headroom_stops)
+      .member("status", decode.degraded ? "degraded" : "ok")
+      .begin_array("degradationReasons");
+  for (const auto& reason : decode.degradation_reasons) writer.element(reason);
+  writer.end_array().end_object();
+  const std::string metadata = writer.take();
+
+  std::vector<std::uint8_t> bytes{
+      'H', 'Y', 'P', 'R', 'E', 'V', '1', '\n'};
+  append_u32_le(bytes, static_cast<std::uint32_t>(metadata.size()));
+  bytes.insert(bytes.end(), metadata.begin(), metadata.end());
+  append_float_image(bytes, result.base_linear);
+  append_float_image(bytes, hdr);
+  return bytes;
+}
+
+int preview_frame_command(int argc, char** argv) {
+  if (argc < 3) throw std::invalid_argument("preview-frame requires one input image");
+  ConvertOptions options;
+  options.input = argv[2];
+  parse_settings(argc, argv, 3, options);
+  if (options.output_directory.empty()) {
+    throw std::invalid_argument("preview-frame --output is required");
+  }
+  if (options.preview_max_edge == 0) options.preview_max_edge = 2048;
+  if (same_path(options.input, options.output_directory)) {
+    throw std::invalid_argument("preview-frame output must differ from input image");
+  }
+  validate_gain_map_options(options.gain);
+  options.raw.ignore_embedded_gain_map = !options.external_gain_path.empty();
+  auto decoded = decode_image(options.input, options.raw);
+  decoded.linear_p3 = resample_to_max_edge(
+      std::move(decoded.linear_p3), options.preview_max_edge);
+  GainMapResult result;
+  if (!options.external_gain_path.empty()) {
+    auto external = read_external_gain_map(
+        options.external_gain_path, options.external_gain_report,
+        options.allow_legacy_external_gain);
+    const auto development = replay_external_development(
+        external, options.input, decoded, options);
+    result = make_external_gain_map(decoded.linear_p3, std::move(external),
+                                    development, decoded.capture);
+  } else {
+    result = make_gain_map(decoded.linear_p3, options.gain, decoded.capture);
+  }
+  write_binary_file_atomic(options.output_directory,
+                           native_preview_packet(result, decoded.decode), true);
+  return 0;
+}
+
+std::pair<std::uint32_t, std::uint32_t> model_tensor_size(
+    std::uint32_t width, std::uint32_t height, std::uint32_t long_side) {
+  if (width == 0 || height == 0 || long_side < 16 || long_side > 8192) {
+    throw std::invalid_argument("invalid model input dimensions");
+  }
+  const double scale = std::min(
+      1.0, static_cast<double>(long_side) / std::max(width, height));
+  const auto align = [](std::uint32_t value) {
+    return std::max<std::uint32_t>(16, ((value + 15U) / 16U) * 16U);
+  };
+  const auto scaled_width = std::max<std::uint32_t>(
+      1, static_cast<std::uint32_t>(std::lround(width * scale)));
+  const auto scaled_height = std::max<std::uint32_t>(
+      1, static_cast<std::uint32_t>(std::lround(height * scale)));
+  return {align(scaled_width), align(scaled_height)};
+}
+
+std::vector<std::uint8_t> float32_le_bytes(const FloatImage& image) {
+  std::vector<std::uint8_t> bytes(image.pixels.size() * sizeof(float));
+  for (std::size_t index = 0; index < image.pixels.size(); ++index) {
+    const float value = image.pixels[index];
+    if (!std::isfinite(value) || value < 0.0F || value > 1.0F) {
+      throw std::runtime_error("developed model input is outside linear SDR [0,1]");
+    }
+    const auto bits = std::bit_cast<std::uint32_t>(value);
+    const auto offset = index * 4U;
+    bytes[offset] = static_cast<std::uint8_t>(bits);
+    bytes[offset + 1] = static_cast<std::uint8_t>(bits >> 8U);
+    bytes[offset + 2] = static_cast<std::uint8_t>(bits >> 16U);
+    bytes[offset + 3] = static_cast<std::uint8_t>(bits >> 24U);
+  }
+  return bytes;
+}
+
+std::string model_input_report(const std::filesystem::path& input,
+                               const std::filesystem::path& output,
+                               const DecodedImage& decoded,
+                               const GainMapResult& developed,
+                               const GainMapOptions& gain,
+                               const RawDecodeOptions& raw,
+                               const FloatImage& tensor) {
+  const auto& d = decoded.decode;
+  json::Writer writer(json::Writer::Style::kIndented);
+  writer.begin_object()
+      .member("schema", "hyperdr.model-input/v1")
+      .member("source", path_utf8(input))
+      .member("source_sha256", sha256_file_hex(input))
+      .member("highlight_recovery", highlight_recovery_name(raw.highlight_recovery))
+      .member("orientation", decoded.metadata.orientation)
+      .begin_array("sensor_size").element(d.sensor_width).element(d.sensor_height).end_array()
+      .begin_array("requested_crop").element(d.target_width).element(d.target_height).end_array()
+      .begin_array("delivered_crop").element(d.decoded_width).element(d.decoded_height).end_array()
+      .begin_array("requested_crop_origin_sensor")
+          .element(d.requested_crop_left).element(d.requested_crop_top).end_array()
+      .begin_array("delivered_crop_origin_sensor")
+          .element(d.delivered_crop_left).element(d.delivered_crop_top).end_array()
+      .member("raw_half_size", raw.half_size)
+      .member("default_crop_present", d.default_crop_present)
+      .member("requested_crop_applied", d.target_dimensions_applied)
+      .begin_object("development_recipe")
+      .member("id", "photographic-v1")
+      .member("exposure_ev", developed.exposure_ev)
+      .member("headroom_stops", developed.stats.headroom_stops)
+      .member("contrast", gain.look.contrast)
+      .member("vibrance", gain.look.vibrance)
+      .member("pop", gain.look.pop)
+      .member("toe_end", gain.look.toe_end)
+      .member("toe_output_ratio", gain.look.toe_output_ratio)
+      .member("shoulder_start", gain.look.shoulder_start)
+      .member("positive_exposure_limit_ev", gain.look.positive_exposure_limit_ev)
+      .member("diffuse_gain_floor", gain.look.diffuse_gain_floor)
+      .end_object()
+      .begin_object("geometry")
+      .begin_array("developed_size").element(developed.base_linear.width)
+          .element(developed.base_linear.height).end_array()
+      .begin_array("model_tensor_size").element(tensor.width).element(tensor.height).end_array()
+      .member("resize_convention", "half-pixel-centres/area-then-bilinear")
+      .member("model_stride", 16)
+      .end_object()
+      .begin_object("pixel_file")
+      .member("path", path_utf8(output))
+      .member("format", "raw_float32")
+      .member("endianness", "little")
+      .member("layout", "HWC")
+      .member("color_space", "linear Display P3")
+      .member("relative_sdr_white", 1.0F)
+      .member("width", tensor.width)
+      .member("height", tensor.height)
+      .member("channels", tensor.channels)
+      .member("byte_length", tensor.pixels.size() * sizeof(float))
+      .member("sha256", sha256_file_hex(output))
+      .end_object()
+      .end_object();
+  return writer.take() + "\n";
+}
+
+int model_input_command(int argc, char** argv) {
+  if (argc < 3) throw std::invalid_argument("model-input requires one input image");
+  ConvertOptions options;
+  std::filesystem::path output;
+  std::filesystem::path report;
+  std::uint32_t long_side = 1024;
+  for (int i = 3; i < argc; ++i) {
+    const std::string_view arg = argv[i];
+    if (const Setting* setting = find_setting_by_flag(arg)) {
+      const std::string text = setting->kind == SettingKind::kBoolean
+                                   ? std::string{}
+                                   : next_value(i, argc, argv, arg);
+      setting->apply(options, parse_setting_text(*setting, text));
+    } else if (arg == "--output") {
+      output = next_value(i, argc, argv, arg);
+    } else if (arg == "--report") {
+      report = next_value(i, argc, argv, arg);
+    } else if (arg == "--long-side") {
+      long_side = integer<std::uint32_t>(next_value(i, argc, argv, arg),
+                                         "model long side");
+    } else if (arg == "--half-size") {
+      options.raw.half_size = true;
+    } else {
+      throw std::invalid_argument("unknown model-input option: " + std::string(arg));
+    }
+  }
+  if (output.empty() || report.empty()) {
+    throw std::invalid_argument("model-input requires --output and --report");
+  }
+  const std::filesystem::path input = argv[2];
+  if (same_path(input, output) || same_path(input, report) || same_path(output, report)) {
+    throw std::invalid_argument("model-input source, pixels and report must be distinct");
+  }
+  validate_gain_map_options(options.gain);
+  options.raw.ignore_embedded_gain_map = true;
+  auto decoded = decode_image(input, options.raw);
+  // The SDR base is developed before any model resampling.  This is the same
+  // make_gain_map call used by final export; only its generated gain grid is
+  // discarded here.
+  auto development_options = options.gain;
+  development_options.gain_strength = 1.0F;
+  auto developed = make_gain_map(decoded.linear_p3, development_options,
+                                 decoded.capture);
+  const auto [width, height] = model_tensor_size(
+      developed.base_linear.width, developed.base_linear.height, long_side);
+  auto tensor = resample_to(developed.base_linear, width, height);
+  write_binary_file_atomic(output, float32_le_bytes(tensor), true);
+  write_text_file_atomic(report,
+                         model_input_report(input, output, decoded, developed,
+                                            development_options, options.raw, tensor),
+                         true);
+  return 0;
+}
+
 }  // namespace
 
 int run_cli(int argc, char** argv) {
@@ -384,6 +632,8 @@ int run_cli(int argc, char** argv) {
   if (command == "inspect") return inspect_command(argc, argv);
   if (command == "verify") return verify_command(argc, argv);
   if (command == "thumbnail") return thumbnail_command(argc, argv);
+  if (command == "preview-frame") return preview_frame_command(argc, argv);
+  if (command == "model-input") return model_input_command(argc, argv);
   throw std::invalid_argument("unknown command: " + std::string(command));
 }
 

@@ -9,7 +9,6 @@ import { store } from "./core/store.js";
 import { role, setText } from "./core/dom.js";
 import { defaultSettings } from "./settings/schema.js";
 import { mountControls } from "./settings/controls.js";
-import { createCurve } from "./preview/curve.js";
 import { mountStage } from "./preview/stage.js";
 import { mountMask } from "./preview/mask.js";
 import { mountRunner } from "./run/runner.js";
@@ -23,11 +22,10 @@ store.set(defaultSettings());
 const toast = createToast();
 mountTheme();
 
-const curve = createCurve();
-const stage = mountStage({ curve, toast });
+const stage = mountStage({ toast });
 
 mountControls();
-mountMask({ curve, stage });
+mountMask({ stage });
 mountRunner({ toast });
 
 const settings = document.getElementById("settings");

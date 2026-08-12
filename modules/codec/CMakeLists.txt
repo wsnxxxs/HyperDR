@@ -9,6 +9,7 @@ set(HYPERDR_CODEC_SOURCES
 
 if(HYPERDR_WITH_CODECS)
   list(APPEND HYPERDR_CODEC_SOURCES
+    src/avif_decoder.cpp
     src/avif_encoder.cpp
     src/heif_encoder.cpp
     src/raster_decoder.cpp

@@ -21,4 +21,11 @@ namespace hyperdr {
     const FloatImage& linear_p3, const GainMapOptions& options,
     const CaptureMetadata& capture);
 
+// Selects the same content-aware exposure that the photographic renderer uses
+// before it builds the gain map. Callers that need an exposure anchor without
+// the user's creative bias should pass options.exposure_bias_ev = 0.
+[[nodiscard]] float photographic_exposure_ev(
+    const FloatImage& linear_p3, const GainMapOptions& options,
+    const CaptureMetadata& capture = {});
+
 }  // namespace hyperdr

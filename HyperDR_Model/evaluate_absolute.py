@@ -15,7 +15,7 @@ from hyperdr_ml.data import (
     AppleGainMapDataset,
     collate_gain_maps,
 )
-from hyperdr_ml.model import GainMapNet
+from hyperdr_ml.model import DirectGainMapNet
 from hyperdr_ml.phase_a_labels import LABEL_CONTRACT_ID, sha256_file
 
 
@@ -93,7 +93,7 @@ def main() -> None:
         train_count += float(batch["mask"].sum())
     train_mean_stops = train_sum / train_count * FIXED_GAIN_STOPS
 
-    model = GainMapNet(
+    model = DirectGainMapNet(
         config["base_channels"], config.get("architecture", "baseline")
     ).to(device)
     model.load_state_dict(checkpoint["model"])

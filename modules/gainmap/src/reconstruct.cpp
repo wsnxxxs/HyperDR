@@ -7,14 +7,18 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <vector>
 
 namespace hyperdr {
 
 FloatImage reconstruct_gain_map(const FloatImage& base, const FloatImage& gain,
                                 const GainMapMetadata& metadata,
-                                float display_headroom_stops) {
+                                float display_headroom_stops,
+                                ReconstructionStats* stats) {
   if (base.channels != 3 || gain.channels != 1) throw std::invalid_argument("invalid reconstruction images");
   FloatImage output(base.width, base.height, 3);
+  std::vector<std::uint64_t> row_clamp_values(base.height, 0);
+  std::vector<std::uint64_t> row_clamp_pixels(base.height, 0);
   const float min_gain = rational_value(metadata.gain_min);
   const float max_gain = rational_value(metadata.gain_max);
   const float gamma = rational_value(metadata.gamma);
@@ -46,12 +50,28 @@ FloatImage reconstruct_gain_map(const FloatImage& base, const FloatImage& gain,
       const float encoded = clamp_finite(std::lerp(top, bottom, wy), 0.0F, 1.0F);
       const float log_gain = std::lerp(min_gain, max_gain,
                                        std::pow(encoded, 1.0F / std::max(gamma, 1.0e-6F)));
+      bool pixel_clamped = false;
       for (unsigned c = 0; c < 3; ++c) {
-        output.at(x, y, c) = std::max(0.0F, (base.at(x, y, c) + base_offset) *
-                                                   std::exp2(log_gain * weight) - alt_offset);
+        const float reconstructed =
+            (base.at(x, y, c) + base_offset) * std::exp2(log_gain * weight) -
+            alt_offset;
+        if (reconstructed < 0.0F) {
+          ++row_clamp_values[y];
+          pixel_clamped = true;
+        }
+        output.at(x, y, c) = std::max(0.0F, reconstructed);
       }
+      if (pixel_clamped) ++row_clamp_pixels[y];
     }
   });
+  if (stats != nullptr) {
+    stats->total_values = static_cast<std::uint64_t>(base.width) * base.height * 3U;
+    stats->total_pixels = static_cast<std::uint64_t>(base.width) * base.height;
+    stats->clamp_values = 0;
+    stats->clamp_pixels = 0;
+    for (const auto value : row_clamp_values) stats->clamp_values += value;
+    for (const auto value : row_clamp_pixels) stats->clamp_pixels += value;
+  }
   return output;
 }
 

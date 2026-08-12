@@ -20,6 +20,7 @@
 
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/foundation/file_io.hpp"
+#include "hyperdr/gainmap/gain_map.hpp"
 #include "hyperdr/image/color.hpp"
 
 #include <algorithm>
@@ -93,7 +94,7 @@ unsigned cfa_channel(std::uint32_t x, std::uint32_t y) {
   return 1;
 }
 
-std::vector<std::uint8_t> synthetic_cfa() {
+std::vector<std::uint8_t> synthetic_cfa(std::uint16_t black_level = 0) {
   // Deliberately dark, so that "the modes disagree only in the highlights" is a
   // statement about a small bright region rather than about most of the frame.
   constexpr std::array<double, 3> kSceneGain{1.0, 0.75, 0.45};
@@ -112,8 +113,9 @@ std::vector<std::uint8_t> synthetic_cfa() {
       const double dx = static_cast<double>(x) - centre_x;
       const double dy = static_cast<double>(y) - centre_y;
       const bool blown = dx * dx + dy * dy < radius * radius;
-      const double value = blown ? kBlown[channel]
-                                 : (600.0 + 110.0 * x) * kSceneGain[channel];
+      const double value = black_level +
+                           (blown ? kBlown[channel]
+                                   : (600.0 + 110.0 * x) * kSceneGain[channel]);
       const auto clamped = static_cast<std::uint16_t>(
           std::clamp(value, 0.0, static_cast<double>(kWhiteLevel)));
       put16(raster, clamped);
@@ -135,8 +137,11 @@ struct Field {
 // it defaults.
 void write_synthetic_dng(const std::filesystem::path& path,
                          std::uint32_t crop_width = kCropWidth,
-                         std::uint32_t crop_height = kCropHeight) {
-  const auto raster = synthetic_cfa();
+                         std::uint32_t crop_height = kCropHeight,
+                         std::uint32_t crop_left = kCropLeft,
+                         std::uint32_t crop_top = kCropTop,
+                         std::uint16_t black_level = 0) {
+  const auto raster = synthetic_cfa(black_level);
   const std::string model = "HyperDR Synthetic";
 
   std::vector<std::uint8_t> colour_matrix;
@@ -171,11 +176,11 @@ void write_synthetic_dng(const std::filesystem::path& path,
       {50706, 1, 4, {1, 4, 0, 0}, false},                   // DNGVersion
       {50707, 1, 4, {1, 1, 0, 0}, false},                   // DNGBackwardVersion
       {50708, 2, static_cast<std::uint32_t>(model_ascii.size()), model_ascii, false},
-      {50714, 3, 1, bytes16(0), false},                     // BlackLevel
+      {50714, 3, 1, bytes16(black_level), false},           // BlackLevel
       {50717, 4, 1, bytes32(kWhiteLevel), false},           // WhiteLevel
-      {50719, 4, 2, [] {
-         auto v = bytes32(kCropLeft);
-         append(v, bytes32(kCropTop));
+      {50719, 4, 2, [crop_left, crop_top] {
+         auto v = bytes32(crop_left);
+         append(v, bytes32(crop_top));
          return v;
        }(), false},                                         // DefaultCropOrigin
       {50720, 4, 2, [crop_width, crop_height] {
@@ -340,6 +345,10 @@ int main(int argc, char** argv) {
   }
 
   const auto path = std::filesystem::temp_directory_path() / "hyperdr-highlight-fixture.dng";
+  const auto lut_path = std::filesystem::temp_directory_path() /
+                        "hyperdr-linearization-fixture.txt";
+  const auto lsc_path = std::filesystem::temp_directory_path() /
+                        "hyperdr-lens-shading-fixture.txt";
   try {
     write_synthetic_dng(path);
 
@@ -416,10 +425,26 @@ int main(int argc, char** argv) {
             std::fabs(std::log2(medians[i] / medians[j]));
         require(difference_ev < 0.05F,
                 std::string("synthetic RAW exposure differs by ") +
-                    std::to_string(difference_ev) + " EV: " +
-                    kModes[i].first + " vs " + kModes[j].first);
+                      std::to_string(difference_ev) + " EV: " +
+                      kModes[i].first + " vs " + kModes[j].first);
       }
     }
+
+    // The preview must carry the same automatic exposure anchor as the
+    // export path. The fixture is deliberately scene-dark, so a zero anchor
+    // would put it straight back into the regression where RAW looked grey and
+    // underexposed before the user touched the brightness control.
+    const auto preview = hyperdr::encode_preview_jpeg(path, 256, 85);
+    require(std::isfinite(preview.exposure_ev) && preview.exposure_ev > 0.0F,
+            "scene-linear RAW preview did not report an automatic exposure");
+    auto exposure_options = hyperdr::GainMapOptions{};
+    exposure_options.exposure_bias_ev = 0.0F;
+    const auto decoded_for_exposure = hyperdr::decode_image(path);
+    const auto expected_preview_exposure = hyperdr::photographic_exposure_ev(
+        decoded_for_exposure.linear_p3, exposure_options,
+        decoded_for_exposure.capture);
+    require(std::fabs(preview.exposure_ev - expected_preview_exposure) < 1.0e-5F,
+            "RAW preview exposure diverged from photographic exposure selection");
 
     // 4. The maxcrop guard rejects implausibly small metadata. That fallback is
     //    allowed, but it must never be silent, and the rejected target must not
@@ -447,13 +472,94 @@ int main(int argc, char** argv) {
                 rejected.linear_p3.height == kWidth,
             "rejected DefaultCrop did not fall back to the visible area");
 
+    // Bounds validation must reject a crop that is positive and within the
+    // maxcrop ratio but still extends beyond the sensor raster.
+    write_synthetic_dng(path, kCropWidth, kCropHeight, kWidth - 8, kCropTop);
+    const auto out_of_bounds = hyperdr::decode_image(path);
+    // LibRaw may discard an obviously invalid crop before exposing it through
+    // raw_inset_crops. If it does expose it, HyperDR must reject it explicitly;
+    // either way the visible raster, never the malformed crop, is delivered.
+    if (out_of_bounds.decode.default_crop_present) {
+      require(out_of_bounds.decode.degraded &&
+                  out_of_bounds.decode.degradation_reasons.size() == 1 &&
+                  out_of_bounds.decode.degradation_reasons.front() ==
+                      "default_crop_out_of_bounds",
+              "out-of-bounds DefaultCrop was not rejected explicitly");
+      require(!out_of_bounds.decode.target_dimensions_applied,
+              "out-of-bounds DefaultCrop claimed to be applied");
+    } else {
+      require(!out_of_bounds.decode.degraded,
+              "LibRaw-discarded DefaultCrop was reported as a different degradation");
+    }
+    require(out_of_bounds.linear_p3.width == kHeight &&
+                out_of_bounds.linear_p3.height == kWidth,
+            "out-of-bounds DefaultCrop did not fall back to visible area");
+
+    // RAW-domain callers get the calibrated Bayer raster without the rendered
+    // crop/orientation path. Packing must preserve the physical RGGB order and
+    // produce the four planes used by neural-network pipelines.
+    write_synthetic_dng(path);
+    const auto mosaic = hyperdr::decode_raw_mosaic(path);
+    require(mosaic.pattern == hyperdr::BayerPattern::RGGB,
+            "RAW mosaic CFA was not detected as RGGB");
+    require(mosaic.black_level_corrected,
+            "RAW mosaic did not report black-level correction");
+    require(mosaic.samples.width == kWidth && mosaic.samples.height == kHeight,
+            "RAW mosaic unexpectedly applied crop or orientation");
+    const auto packed = hyperdr::pack_bayer(mosaic);
+    require(packed.width == kWidth / 2 && packed.height == kHeight / 2 &&
+                packed.channels == 4,
+            "Bayer packing did not produce H/2 x W/2 x 4");
+    require(std::fabs(packed.at(0, 0, 0) - mosaic.samples.at(0, 0, 0)) < 1.0e-5F &&
+                std::fabs(packed.at(0, 0, 3) - mosaic.samples.at(1, 1, 0)) <
+                    1.0e-5F,
+            "RGGB packing plane order is incorrect");
+
+    // External linearization is applied to sensor codes before black-level
+    // subtraction. A [0, 0.5] normalized LUT therefore halves this low-code
+    // scene, while a 2x lens grid doubles it in the pre-demosaic callback.
+    hyperdr::write_text_file_atomic(lut_path, "2\n0\n0.5\n", true);
+    hyperdr::RawDecodeOptions lut_options;
+    lut_options.linearization_lut = lut_path;
+    const auto linearized = hyperdr::decode_raw_mosaic(path, lut_options);
+    require(linearized.samples.at(0, 0, 0) < mosaic.samples.at(0, 0, 0) * 0.60F,
+            "RAW linearization LUT was not applied before normalization");
+
+    hyperdr::write_text_file_atomic(lsc_path, "2 2 1\n2 2 2 2\n", true);
+    hyperdr::RawDecodeOptions lsc_options;
+    lsc_options.lens_shading_map = lsc_path;
+    const auto shaded = hyperdr::decode_raw_mosaic(path, lsc_options);
+    require(shaded.samples.at(0, 0, 0) > mosaic.samples.at(0, 0, 0) * 1.9F,
+            "RAW lens-shading gain map was not applied before demosaic");
+
+    hyperdr::RawDecodeOptions gain_options;
+    gain_options.digital_gain = 2.0F;
+    const auto gained = hyperdr::decode_raw_mosaic(path, gain_options);
+    require(std::fabs(gained.samples.at(0, 0, 0) -
+                      mosaic.samples.at(0, 0, 0) * 2.0F) < 1.0e-4F,
+            "RAW digital gain was not retained in normalized mosaic values");
+
+    // A non-zero DNG BlackLevel must be removed before normalization. The
+    // first red site contains 512 black code values plus 600 scene values;
+    // seeing roughly 600/white proves the subtraction happened in the RAW
+    // domain rather than merely dividing the stored code by 65535.
+    write_synthetic_dng(path, kCropWidth, kCropHeight, kCropLeft, kCropTop, 512);
+    const auto black_corrected = hyperdr::decode_raw_mosaic(path);
+    const float first_red = black_corrected.samples.at(0, 0, 0);
+    require(first_red > 0.008F && first_red < 0.011F,
+            "DNG BlackLevel was not subtracted before RAW normalization");
+
     std::filesystem::remove(path);
+    std::filesystem::remove(lut_path);
+    std::filesystem::remove(lsc_path);
     std::cout << "RAW highlight recovery test passed (four distinct decodes, "
                  "stable exposure, oriented DefaultCrop)\n";
     return 0;
   } catch (const std::exception& e) {
     std::error_code ignored;
     std::filesystem::remove(path, ignored);
+    std::filesystem::remove(lut_path, ignored);
+    std::filesystem::remove(lsc_path, ignored);
     std::cerr << "RAW highlight recovery test failure: " << e.what() << '\n';
     return 1;
   }

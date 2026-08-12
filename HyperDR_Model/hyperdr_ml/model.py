@@ -8,6 +8,11 @@ import torch.nn.functional as F
 
 Architecture = Literal["baseline", "global_conditioning", "dilation_pyramid"]
 
+DIRECT_GAINMAPNET_ID = "hyperdr.direct-fixed-incumbent/v3"
+DEFAULT_ARCHITECTURE: Architecture = "baseline"
+DEFAULT_BASE_CHANNELS = 24
+MODEL_STRIDE = 16
+
 
 def group_count(channels: int, maximum: int = 8) -> int:
     if channels <= 0:
@@ -97,13 +102,13 @@ class DilationPyramid(nn.Module):
         return self.project(torch.cat([branch(reduced) for branch in self.branches], 1))
 
 
-class GainMapNet(nn.Module):
-    """Predict a normalized stride-16 gain grid from linear-P3 SDR."""
+class DirectGainMapNet(nn.Module):
+    """Direct v3: predict a single-channel stride-16 gain map from linear P3 SDR."""
 
     def __init__(
         self,
-        base_channels: int = 24,
-        architecture: Architecture = "baseline",
+        base_channels: int = DEFAULT_BASE_CHANNELS,
+        architecture: Architecture = DEFAULT_ARCHITECTURE,
     ) -> None:
         super().__init__()
         if base_channels <= 0:
@@ -144,6 +149,11 @@ class GainMapNet(nn.Module):
         )
 
     def forward(self, linear_p3: torch.Tensor) -> torch.Tensor:
+        if linear_p3.ndim != 4 or linear_p3.shape[1] != 3:
+            raise ValueError(
+                "DirectGainMapNet expects a BCHW linear Display-P3 tensor with "
+                f"three channels, got {tuple(linear_p3.shape)}"
+            )
         luminance = (
             0.22897456 * linear_p3[:, 0:1]
             + 0.69173852 * linear_p3[:, 1:2]
@@ -170,3 +180,9 @@ class GainMapNet(nn.Module):
             raise RuntimeError("Gain-map head has no initializable output bias")
         nn.init.constant_(output.bias, bias)
         return bias
+
+
+# Checkpoint keys and downstream imports used the shorter name before the
+# Direct-v3 model identity was frozen. Keep it as an alias rather than a
+# wrapper so state_dict keys and isinstance behavior remain unchanged.
+GainMapNet = DirectGainMapNet

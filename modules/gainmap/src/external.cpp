@@ -343,12 +343,16 @@ void apply_external_gain_map(GainMapResult& result, ExternalGainMap external) {
 
 GainMapResult make_external_gain_map(const FloatImage& source,
                                      ExternalGainMap external,
-                                     float strength) {
+                                     float strength, float exposure_ev) {
   if (source.channels != 3) {
     throw std::invalid_argument("external gain input must be RGB");
   }
   if (!std::isfinite(strength) || strength < 0.0F || strength > 1.0F) {
     throw std::invalid_argument("external gain strength must be in [0, 1]");
+  }
+  if (!std::isfinite(exposure_ev) || exposure_ev < -10.0F ||
+      exposure_ev > 10.0F) {
+    throw std::invalid_argument("external gain exposure must be in [-10, 10]");
   }
   // Scale in canonical log2 space before quantising to the ISO code range.
   if (external.canonical_log2) {
@@ -369,12 +373,14 @@ GainMapResult make_external_gain_map(const FloatImage& source,
   }
   GainMapResult result;
   result.base_linear = FloatImage(source.width, source.height, 3);
+  const float exposure = std::exp2(exposure_ev);
   for (std::size_t index = 0; index < source.pixels.size(); ++index) {
     const float value = source.pixels[index];
     result.base_linear.pixels[index] =
-        std::isfinite(value) ? std::clamp(value, 0.0F, 1.0F) : 0.0F;
+        std::isfinite(value) ? std::clamp(value * exposure, 0.0F, 1.0F) : 0.0F;
   }
-  result.exposure_ev = 0.0F;
+  result.exposure_ev = exposure_ev;
+  result.stats.exposure_ev = exposure_ev;
   apply_external_gain_map(result, std::move(external));
   return result;
 }

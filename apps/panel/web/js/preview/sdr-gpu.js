@@ -32,6 +32,8 @@ uniform float original;
 uniform float modelEnabled;
 uniform float modelMaxStops;
 uniform float modelStrength;
+uniform float sourceScale;
+uniform float sourceExposure;
 in vec2 uv;
 out vec4 color;
 
@@ -81,11 +83,15 @@ float shoulder(float value) {
 }
 
 void main() {
-  vec3 linear = texture(imageTexture, uv).rgb;
+  // The preview texture holds scene-linear divided by sourceScale, so an HDR
+  // input's highlights are only above 1.0 again after this multiply. RAW also
+  // carries an automatic scene-exposure anchor for the look path.
+  vec3 linear = texture(imageTexture, uv).rgb * sourceScale;
   if (original > 0.5) {
     color = vec4(encodeSrgb(linear), 1.0);
     return;
   }
+  linear *= exp2(sourceExposure);
   if (modelEnabled > 0.5) {
     vec3 modelExpanded = linear * exp2(modelGainStops(uv));
     color = vec4(encodeSrgb(vec3(
@@ -199,6 +205,8 @@ export function createSdrGpuRenderer(canvas, onContextLost) {
     modelEnabled: gl.getUniformLocation(program, "modelEnabled"),
     modelMaxStops: gl.getUniformLocation(program, "modelMaxStops"),
     modelStrength: gl.getUniformLocation(program, "modelStrength"),
+    sourceScale: gl.getUniformLocation(program, "sourceScale"),
+    sourceExposure: gl.getUniformLocation(program, "sourceExposure"),
   };
 
   gl.useProgram(program);
@@ -248,6 +256,8 @@ export function createSdrGpuRenderer(canvas, onContextLost) {
       gl.uniform1f(locations.modelEnabled, params.modelGain ? 1 : 0);
       gl.uniform1f(locations.modelMaxStops, params.modelGain?.maxStops || 0);
       gl.uniform1f(locations.modelStrength, params.modelStrength ?? 1);
+      gl.uniform1f(locations.sourceScale, params.sourceScale ?? 1);
+      gl.uniform1f(locations.sourceExposure, params.sourceExposure ?? 0);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
     },
 

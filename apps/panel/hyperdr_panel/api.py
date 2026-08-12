@@ -138,7 +138,7 @@ def preview(_context: Context, query: dict) -> Response:
     if not 320 <= requested_edge <= MAX_EDGE:
         return error("preview edge must be between 320 and %s" % MAX_EDGE)
     try:
-        data, dimensions, mime = thumbnail_for(
+        data, dimensions, mime, scale, exposure = thumbnail_for(
             session.input_path(_first(query, "id")), highlight_recovery, requested_edge)
     except Busy as exc:
         # Distinct from a missing or broken image: the request was refused, not
@@ -150,6 +150,14 @@ def preview(_context: Context, query: dict) -> Response:
         "X-Preview-Width": str(dimensions[0]),
         "X-Preview-Height": str(dimensions[1]),
         "X-Preview-Max-Edge": str(requested_edge),
+        # What the linear image was divided by to fit in eight bits. One for any
+        # SDR input; an HLG or PQ photograph needs the browser to multiply it
+        # back before the curve, or its highlights are a flat white that no
+        # amount of HDR expansion can bring back.
+        "X-Preview-Scale": ("%g" % scale),
+        # RAW is scene-linear. This is the automatic photographic exposure
+        # before the browser's user-controlled brightness bias.
+        "X-Preview-Exposure": ("%g" % exposure),
     })
 
 

@@ -15,7 +15,7 @@ import { api } from "../core/api.js";
 import { store } from "../core/store.js";
 import { role, setText, setPressed, clamp } from "../core/dom.js";
 import { mobileLayout, touchQuery } from "../core/media.js";
-import { renderSdr } from "./cpu.js";
+import { renderSdr, __math } from "./cpu.js";
 import { createHdrRenderer } from "./gpu.js";
 import { createSdrGpuRenderer } from "./sdr-gpu.js";
 import { analyse, mountScope } from "./scope.js";
@@ -33,6 +33,34 @@ const TOUCH_HINT = "点击添加或更换图片；用视图切换对照原图";
 const MOUSE_HINT = "点击添加图片；已有图片时轻点更换，按住查看原图";
 
 const VIEW_MODES = [["original", "原图"], ["split", "分割"], ["effect", "效果"]];
+
+/* The SDR rendition of the preview source.
+ *
+ * The JPEG holds an HDR input divided by `scale`, which is right for the
+ * renderers -- they multiply it back -- and wrong for everything that shows the
+ * source as it is: the original view, the histogram and the zebras all want the
+ * picture an SDR screen would display, which is the linear value times the
+ * scale, clipped at white. At scale 1 that is the identity, so the very same
+ * ImageData is handed back and an SDR photograph is untouched down to the byte.
+ */
+function displayMapped(source, scale) {
+  if (!(scale > 1)) return source;
+  const { SRGB_TO_LINEAR, linearToSrgb8 } = __math;
+  const table = new Uint8ClampedArray(256);
+  for (let i = 0; i < 256; i++) {
+    table[i] = linearToSrgb8(Math.min(1, SRGB_TO_LINEAR[i] * scale));
+  }
+  const mapped = new ImageData(source.width, source.height);
+  const from = source.data;
+  const to = mapped.data;
+  for (let i = 0; i < from.length; i += 4) {
+    to[i] = table[from[i]];
+    to[i + 1] = table[from[i + 1]];
+    to[i + 2] = table[from[i + 2]];
+    to[i + 3] = from[i + 3];
+  }
+  return mapped;
+}
 
 function decodeBlob(blob) {
   return new Promise((resolve, reject) => {
@@ -68,10 +96,19 @@ export function mountStage({ curve, toast }) {
   /** Decoded image + derived buffers. Replaced wholesale, never patched. */
   const image = {
     source: null,
+    display: null,
     output: null,
     bitmap: null,
     label: "",
     previewRequestEdge: 0,
+    // What the server divided the linear image by to fit it in the JPEG. Every
+    // renderer multiplies by this after linearising, so an HDR input's
+    // highlights are present to be expanded rather than already clipped white.
+    scale: 1,
+    // Automatic scene exposure selected by the native RAW decoder. The
+    // brightness control is an additional user bias and stays separate so the
+    // original comparison view remains an untreated source view.
+    exposureEv: 0,
   };
   let expanded = false;
   const sourceListeners = new Set();
@@ -240,14 +277,16 @@ export function mountStage({ curve, toast }) {
         strength: state.hdrStrength, headroom: state.hdrRange,
         original, expansionStart: state.expansionStart,
         areaCoverage: state.areaCoverage, exposureBias: state.brightness,
-        vibrance: state.vibrance,
+        vibrance: state.vibrance, sourceScale: image.scale,
+        sourceExposure: image.exposureEv,
         modelGain: state.previewOptimized ? modelGain : null,
         modelStrength: state.modelStrength,
       });
     } else {
       renderSdr(sdrCanvas, {
-        source: image.source, output: image.output, curve,
-        settings: state, original,
+        source: image.source, display: image.display, output: image.output, curve,
+        settings: state, original, sourceScale: image.scale,
+        sourceExposure: image.exposureEv,
         modelGain: state.previewOptimized ? modelGain : null,
       });
     }
@@ -398,10 +437,13 @@ export function mountStage({ curve, toast }) {
     image.bitmap?.close();
     Object.assign(image, {
       source: null,
+      display: null,
       output: null,
       bitmap: null,
       label: "",
       previewRequestEdge: 0,
+      scale: 1,
+      exposureEv: 0,
     });
     notifySource();
     analysis.current = null;
@@ -464,14 +506,19 @@ export function mountStage({ curve, toast }) {
       image.output = context.createImageData(width, height);
       image.label = state.file?.name || "图片";
       image.previewRequestEdge = requestedEdge || Math.max(width, height);
+      image.scale = preview.scale || 1;
+      image.exposureEv = preview.exposure || 0;
+      image.display = displayMapped(image.source, image.scale);
       notifySource();
 
       for (const canvas of [sdrCanvas, hdrCanvas, originalCanvas]) {
         canvas.width = width;
         canvas.height = height;
       }
-      originalCanvas.getContext("2d").putImageData(image.source, 0, 0);
-      analysis.current = analyse(image.source);
+      originalCanvas.getContext("2d").putImageData(image.display, 0, 0);
+      analysis.current = analyse(
+        image.display, image.source,
+        image.scale * Math.pow(2, image.exposureEv));
 
       empty.style.display = "none";
       stage.classList.add("has-image");
@@ -716,6 +763,13 @@ export function mountStage({ curve, toast }) {
     clear,
     /** The decoded preview pixels, for the mask overlay. Null before upload. */
     getSource: () => image.source,
+    /** What those pixels were divided by, so the mask reads the same scene
+     *  luminance the renderers do. */
+    getSourceScale: () => image.scale,
+    /** The automatic scene exposure, in EV, before the user's brightness bias. */
+    getSourceExposure: () => image.exposureEv,
+    /** The complete linear multiplier used for masks and histogram simulation. */
+    getSourceSceneScale: () => image.scale * Math.pow(2, image.exposureEv),
     onSourceChange(listener) {
       sourceListeners.add(listener);
       return () => sourceListeners.delete(listener);

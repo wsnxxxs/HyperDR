@@ -10,6 +10,7 @@
 *.tif
 *.tiff
 *.jsonl
+*.obj
 
 # Local configuration, credentials, and development certificates.
 .env
@@ -52,3 +53,4 @@ __pycache__/
 # Bundled local ML runtime and private trained weights are machine-local.
 /HyperDR_Model/.venv/
 /HyperDR_Model/checkpoints/*.pt
+/HyperDR_Model/reports/

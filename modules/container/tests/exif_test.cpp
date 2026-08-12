@@ -18,6 +18,7 @@ void require(bool condition, const char* message) {
 
 void test_exif() {
   hyperdr::PhotoMetadata metadata;
+  metadata.make = "Sony";
   metadata.model = "ILCE-7RM5";
   metadata.lens = "FE 24-70mm F2.8 GM II";
   metadata.date_time = "2026:07:16 12:34:56";
@@ -27,8 +28,13 @@ void test_exif() {
   metadata.focal_length_mm = 35.0;
   const auto exif = hyperdr::make_minimal_exif(metadata);
   require(exif.size() > 32 && exif[0] == 'I' && exif[1] == 'I', "Exif TIFF construction failed");
-  const auto xmp = hyperdr::make_xmp(metadata, 2.5F);
+  const auto xmp = hyperdr::make_xmp(metadata, 2.5F, true);
   require(xmp.find("ISO-21496-1:2025") != std::string::npos, "XMP marker missing");
+  const auto rendered_xmp = hyperdr::make_xmp(metadata, 2.5F, false);
+  require(rendered_xmp.find("ISO-21496-1") == std::string::npos &&
+              rendered_xmp.find("AdaptiveHDR") == std::string::npos &&
+              rendered_xmp.find("RenderedHDR='true'") != std::string::npos,
+          "rendered HDR XMP must not claim that a gain map is present");
 
   metadata.iso = 102400;
   const auto high_iso_exif = hyperdr::make_minimal_exif(metadata);
@@ -39,9 +45,73 @@ void test_exif() {
                       iso_sentinel.begin(), iso_sentinel.end()) !=
               high_iso_exif.end(),
           "high ISO Exif sentinel missing");
-  const auto high_iso_xmp = hyperdr::make_xmp(metadata, 2.5F);
+  const auto high_iso_xmp = hyperdr::make_xmp(metadata, 2.5F, true);
   require(high_iso_xmp.find("<rdf:li>102400</rdf:li>") != std::string::npos,
           "high ISO value missing from XMP sequence");
+}
+
+void test_portable_metadata_round_trip() {
+  hyperdr::PhotoMetadata source;
+  source.make = "Camera & Co";
+  source.model = "Model X";
+  source.lens = "35mm Prime";
+  source.lens_make = "Lens Co";
+  source.artist = "Photographer";
+  source.copyright = "Copyright 2026";
+  source.date_time = "2026:08:12 10:11:12";
+  source.orientation = 6;
+  source.iso = 800;
+  source.exposure_seconds = 1.0 / 250.0;
+  source.aperture = 4.0;
+  source.focal_length_mm = 35.0;
+  source.focal_length_35mm = 35.0;
+  source.gps = hyperdr::GpsPosition{-27.4698, 153.0251, -4.5};
+
+  const auto tiff = hyperdr::make_minimal_exif(source);
+  const auto parsed = hyperdr::read_photo_metadata(tiff.data(), tiff.size());
+  require(parsed.has_value(), "generated Exif must be parseable");
+  require(parsed->make == source.make && parsed->model == source.model &&
+              parsed->lens == source.lens &&
+              parsed->lens_make == source.lens_make &&
+              parsed->artist == source.artist &&
+              parsed->copyright == source.copyright &&
+              parsed->date_time == source.date_time,
+          "portable Exif strings did not round trip");
+  require(parsed->orientation == 6 && parsed->iso == 800 &&
+              std::abs(parsed->exposure_seconds - source.exposure_seconds) < 1.0e-5 &&
+              std::abs(parsed->aperture - source.aperture) < 1.0e-5 &&
+              std::abs(parsed->focal_length_mm - source.focal_length_mm) < 1.0e-5 &&
+              parsed->focal_length_35mm == source.focal_length_35mm,
+          "portable Exif numeric fields did not round trip");
+  require(parsed->gps.has_value() &&
+              std::abs(parsed->gps->latitude_degrees -
+                       source.gps->latitude_degrees) < 1.0e-5 &&
+              std::abs(parsed->gps->longitude_degrees -
+                       source.gps->longitude_degrees) < 1.0e-5 &&
+              parsed->gps->altitude_metres.has_value() &&
+              std::abs(*parsed->gps->altitude_metres + 4.5) < 1.0e-5,
+          "GPS Exif did not round trip");
+
+  // HEIF metadata prefixes the TIFF payload with a four-byte TIFF offset.
+  std::vector<std::uint8_t> heif_exif{0, 0, 0, 0};
+  heif_exif.insert(heif_exif.end(), tiff.begin(), tiff.end());
+  require(hyperdr::read_photo_metadata(heif_exif.data(), heif_exif.size())
+              .has_value(),
+          "HEIF-prefixed Exif was not parsed");
+
+  // JPEG uses an APP1 marker containing Exif\0\0 followed by the TIFF block.
+  const std::size_t app1_size = 2 + 6 + tiff.size();
+  require(app1_size <= 65535, "test Exif exceeds one JPEG APP1 segment");
+  std::vector<std::uint8_t> jpeg{0xFF, 0xD8, 0xFF, 0xE1,
+                                 static_cast<std::uint8_t>(app1_size >> 8),
+                                 static_cast<std::uint8_t>(app1_size)};
+  jpeg.insert(jpeg.end(), {'E', 'x', 'i', 'f', 0, 0});
+  jpeg.insert(jpeg.end(), tiff.begin(), tiff.end());
+  jpeg.insert(jpeg.end(), {0xFF, 0xD9});
+  const auto jpeg_parsed =
+      hyperdr::read_jpeg_photo_metadata(jpeg.data(), jpeg.size());
+  require(jpeg_parsed.has_value() && jpeg_parsed->model == source.model,
+          "JPEG Exif APP1 was not parsed");
 }
 
 // The reader parses attacker-controlled bytes, so "malformed" must mean
@@ -213,6 +283,7 @@ void test_preamble_is_skipped() {
 int main() {
   try {
     test_exif();
+    test_portable_metadata_round_trip();
     test_orientation_reader();
     test_round_trip();
     test_preamble_is_skipped();

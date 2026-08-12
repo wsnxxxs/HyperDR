@@ -46,22 +46,15 @@ void check_raw(int code, const char* operation) {
 
 std::string safe_string(const char* value) { return value ? std::string(value) : std::string{}; }
 
-constexpr std::uint64_t kEstimatedPipelineBytesPerPixel = 32;
 constexpr std::uint64_t kSystemReserveBytes =
     512ULL * 1024ULL * 1024ULL;
 
-std::uint64_t estimated_pipeline_bytes(std::uint64_t width,
-                                       std::uint64_t height) {
-  // The overlapping LibRaw mosaic (4 x uint16), processed RGB
-  // (3 x uint16), and linear working image (3 x float) need 26 bytes/pixel.
-  // Use 32 bytes/pixel to leave room for allocator and row overhead before
-  // admitting the RAW decode.
-  const auto pixels = width * height;  // already bounded by raw_input_budget_ok
-  return pixels * kEstimatedPipelineBytesPerPixel;
-}
-
-void check_raw_memory_admission(std::uint64_t width, std::uint64_t height) {
-  const auto required = estimated_pipeline_bytes(width, height);
+void check_raw_memory_admission(std::uint64_t raw_width,
+                                std::uint64_t raw_height,
+                                std::uint64_t output_width,
+                                std::uint64_t output_height) {
+  const auto required = codec::raw_pipeline_bytes(
+      raw_width, raw_height, output_width, output_height);
   const auto available = available_memory_bytes();
   if (available != 0 &&
       (available <= kSystemReserveBytes ||
@@ -71,7 +64,7 @@ void check_raw_memory_admission(std::uint64_t width, std::uint64_t height) {
     };
     throw RawMemoryError(
         "insufficient memory for requested RAW decode " +
-        std::to_string(width) + "x" + std::to_string(height) +
+        std::to_string(output_width) + "x" + std::to_string(output_height) +
         " (approximately " + std::to_string(mib(required)) +
         " MiB required, " + std::to_string(mib(available)) +
         " MiB currently available)");
@@ -516,25 +509,33 @@ DecodedImage decode_raw(const std::filesystem::path& path,
   const auto& sizes = raw.imgdata.sizes;
   const std::uint64_t full_width = sizes.width;
   const std::uint64_t full_height = sizes.height;
-  if (!raw_input_budget_ok(full_width, full_height)) {
+  const std::uint64_t sensor_width =
+      sizes.raw_width ? sizes.raw_width : sizes.width;
+  const std::uint64_t sensor_height =
+      sizes.raw_height ? sizes.raw_height : sizes.height;
+  if (!raw_input_budget_ok(sensor_width, sensor_height) ||
+      !raw_input_budget_ok(full_width, full_height)) {
     throw std::runtime_error(
-        "RAW image " + std::to_string(full_width) + "x" +
-        std::to_string(full_height) +
+        "RAW sensor raster " + std::to_string(sensor_width) + "x" +
+        std::to_string(sensor_height) +
         " exceeds the supported 240869376-pixel input limit");
   }
   const std::uint64_t decode_width =
       params.half_size ? (full_width + 1U) / 2U : full_width;
   const std::uint64_t decode_height =
       params.half_size ? (full_height + 1U) / 2U : full_height;
-  check_raw_memory_admission(decode_width, decode_height);
+  check_raw_memory_admission(sensor_width, sensor_height,
+                             decode_width, decode_height);
   const bool swaps_axes = (sizes.flip & 4) != 0;
   DecodeInfo decode;
-  decode.sensor_width = sizes.raw_width ? sizes.raw_width : sizes.width;
-  decode.sensor_height = sizes.raw_height ? sizes.raw_height : sizes.height;
+  decode.sensor_width = static_cast<std::uint32_t>(sensor_width);
+  decode.sensor_height = static_cast<std::uint32_t>(sensor_height);
   decode.target_width = static_cast<std::uint32_t>(
       swaps_axes ? full_height : full_width);
   decode.target_height = static_cast<std::uint32_t>(
       swaps_axes ? full_width : full_height);
+  decode.requested_crop_left = sizes.left_margin;
+  decode.requested_crop_top = sizes.top_margin;
   decode.resolution_reduced = params.half_size != 0;
   const auto mark_degraded = [&](std::string_view reason) {
     decode.degraded = true;
@@ -572,6 +573,8 @@ DecodedImage decode_raw(const std::filesystem::path& path,
       default_crop.cleft != 0xffff && default_crop.ctop != 0xffff &&
       default_crop.cwidth > 0 && default_crop.cheight > 0;
   if (decode.default_crop_present) {
+    decode.requested_crop_left = default_crop.cleft;
+    decode.requested_crop_top = default_crop.ctop;
     decode.target_width =
         swaps_axes ? default_crop.cheight : default_crop.cwidth;
     decode.target_height =
@@ -636,6 +639,8 @@ DecodedImage decode_raw(const std::filesystem::path& path,
   DecodedImage result;
   decode.decoded_width = processed->width;
   decode.decoded_height = processed->height;
+  decode.delivered_crop_left = raw.imgdata.sizes.left_margin;
+  decode.delivered_crop_top = raw.imgdata.sizes.top_margin;
   result.decode = std::move(decode);
   result.linear_p3 = FloatImage(processed->width, processed->height, 3);
   const auto* pixels = reinterpret_cast<const std::uint16_t*>(processed->data);
@@ -769,7 +774,7 @@ RawMosaic decode_raw_mosaic(const std::filesystem::path& path,
         "RAW image " + std::to_string(width) + "x" + std::to_string(height) +
         " exceeds the supported 240869376-pixel input limit");
   }
-  check_raw_memory_admission(width, height);
+  check_raw_memory_admission(width, height, width, height);
   check_raw(raw.unpack(), "LibRaw unpack RAW mosaic");
   apply_linearization_lut(raw, linearization_lut);
   if (options.auto_bad_pixel_correction) correct_auto_bad_pixels(raw);

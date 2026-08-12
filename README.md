@@ -131,6 +131,10 @@ HyperDR verify <file.heic|file.jpg> [--reconstruct <preview.tiff>]
 HyperDR thumbnail <image> --output <preview.jpg> [--max-edge <pixels>]
                           [--quality <1..100>] [--half-size]
                           [--highlight-recovery blend|reconstruct|clip|unclip]
+HyperDR preview-frame <image> --output <preview.hpf> [look options]
+                          [--preview-max-edge <pixels>] [--fast-preview]
+HyperDR model-input <image> --output <linear-p3.f32> --report <recipe.json>
+                          [--long-side <pixels>] [--half-size] [look options]
 HyperDR curve [look options] [--samples <N>]
 HyperDR schema
 ```
@@ -164,11 +168,10 @@ Diagnostics and per-file status are written to stderr. Machine consumers should
 use `--report` for conversion results rather than parse those human-readable
 lines.
 
-`curve` prints the exporter's own global tone curve as JSON: a uniform grid of
-SDR output levels with the HDR gain, in stops, that the look applies at each
-one. The browser panel's live preview interpolates this table instead of
-carrying its own copy of the maths, which is what keeps preview and export in
-step.
+`curve` prints the exporter's own global tone curve as JSON for diagnostics and
+regression tests. The browser preview does not reimplement that curve: C++
+produces the photographic SDR base, real gain map, and reconstructed HDR plane,
+then sends both planes as linear Display-P3 float32 data.
 
 Input discovery is case-insensitive and accepts `.arw`, `.dng`, `.jpg`,
 `.jpeg`, `.png`, `.heic`, `.heif`, and `.avif`. ARW/DNG files retain the RAW
@@ -176,15 +179,12 @@ highlight recovery controls; every other input is normalized into the same
 linear Display-P3 processing space, HDR ones included -- diffuse white sits at
 1.0 and the highlights above it are kept rather than clipped.
 
-The browser panel's preview is an 8-bit JPEG, which cannot hold those
-highlights, so `HyperDR thumbnail` divides an HDR input by a power of two and
-reports the divisor as JSON on stdout (`{"scale":8,"exposure":0}`). The panel
-multiplies it back before applying the curve. RAW is scene-linear rather than
-display-referred, so ARW/DNG also report the automatic photographic exposure
-anchor (`exposure`, in EV) that the panel applies before the user's brightness
-bias. Whether an input is HDR is decided by its format, never by how bright
-its pixels measure, so ARW, DNG, JPEG, PNG and any SDR HEIC or AVIF always
-report `{"scale":1}` and their previews are unchanged.
+The browser panel requests `HyperDR preview-frame`, whose packet contains the
+photographic SDR base, the real gain map, and reconstructed HDR as linear
+Display-P3 float32 planes. The browser only presents those planes; it no longer
+compresses HDR into an 8-bit JPEG and then tries to recreate the exporter's
+tone and gain-map maths. When an Ultra HDR source cannot be decoded through the
+native path, the packet explicitly reports a degraded SDR fallback.
 
 Recommended photographic conversion:
 
@@ -291,30 +291,32 @@ above `1` are capped at the global curve target so output cannot exceed it.
   gain cells survive Adaptive HEIC decoding exactly. Ultra HDR stores the map as
   a grayscale JPEG at quality 85 or higher, as recommended for JPEG/R; the
   requested quality still controls the SDR base.
-- RAW is decoded via LibRaw's linear ProPhoto RGB output (`output_color` 4) into
-  linear Display P3, avoiding Rec.709 pre-clipping. Out-of-P3 float components
-  remain available to the renderer until the output-specific gamut handling.
-  `render.wide_gamut_fraction` is measured on the decoded, linear-P3 input before
-  exposure or look processing: among pixels with P3 luminance at least `0.02`,
-  it is the fraction outside Rec.709. The report also records its numerator,
-  denominator, and threshold.
-- RAW calibration is now configurable before demosaic. LibRaw applies the
-  metadata black level, camera white balance, optional bad-pixel coordinate map
+- RAW is decoded through LibRaw's linear ProPhoto output (`output_color` 4), then
+  transformed in float to linear Display P3. ProPhoto is intentional: XYZ
+  (`output_color` 5) can clip neutral highlights in its Z channel before the
+  float conversion because that matrix row sums above one. Neither path passes
+  through Rec.709/sRGB, and out-of-P3 float components remain available until
+  output-specific gamut handling. `render.wide_gamut_fraction` is measured on the decoded, linear-P3
+  input before exposure or look processing: among pixels with P3 luminance at least
+  `0.02`, it is the fraction outside Rec.709. The report also records its
+  numerator, denominator, and threshold.
+- RAW calibration is configurable before demosaic. LibRaw applies the metadata
+  black level, camera white balance, optional bad-pixel coordinate map
   (`--raw-bad-pixels`), and dark-frame PGM (`--raw-dark-frame`); Phase One's
   metadata linearization/defect correction is enabled explicitly. An external
   dark frame is also the supported fixed-pattern-noise path: row/column bias is
-  removed when it is present in that measured frame; no scene-derived row/column
-  estimator is enabled by default because it would confuse real image gradients
-  with sensor noise.
+  removed when it is present in that measured frame; no scene-derived
+  row/column estimator is enabled by default because it could confuse real
+  image gradients with sensor noise.
   A code LUT can be supplied with `--raw-linearization-lut`: its text format is
   `N` followed by `N` samples, either raw code values or normalized `[0,1]`
-  values. A lens-shading map can be supplied with
-  `--raw-lens-shading`; its format is `width height channels` followed by
-  row-major gains, with 1, 3 (RGB), or 4 (R,G1,B,G2) channels. The opt-in
-  `--raw-auto-bad-pixels` detector only replaces extreme zero/saturated outliers
-  with same-CFA neighbours, so a supplied calibration map remains preferred for
-  scientific work. `--raw-gain` is a sensor-domain digital gain and is included
-  in the decode cache and resume fingerprint.
+  values. A lens-shading map can be supplied with `--raw-lens-shading`; its
+  format is `width height channels` followed by row-major gains, with 1, 3
+  (RGB), or 4 (R,G1,B,G2) channels. The opt-in `--raw-auto-bad-pixels` detector
+  only replaces extreme zero/saturated outliers with same-CFA neighbours, so a
+  supplied calibration map remains preferred for scientific work. `--raw-gain`
+  is a sensor-domain digital gain and is included in the decode cache and resume
+  fingerprint.
 - RAW-domain consumers can call `decode_raw_mosaic()` and `pack_bayer()`. The
   former returns black-corrected, white-level-normalized Bayer samples in sensor
   coordinates; the latter produces `H/2 x W/2 x 4` in fixed `R,Gr,Gb,B` order.
@@ -327,9 +329,9 @@ above `1` are capped at the global curve target so output cannot exceed it.
   unchanged. Ultra HDR JPEG/R output uses Google's reference container writer.
   Every output is decoded and semantically verified before publication.
 
-## Report schema 6
+## Report schema 7
 
-`--report` writes schema 6. Its `settings` block is generated from the settings
+`--report` writes schema 7. Its `settings` block is generated from the settings
 table, so it records every setting by its canonical name — not the handful someone
 remembered to add — plus `output_depth`, the depth actually encoded (BT.2100 is
 always 10-bit regardless of `--depth`). The top-level `raw_processing` block
@@ -341,7 +343,10 @@ percentiles, high-gain fractions, clipping, and local-weight diagnostics.
 The global `settings.pop` and per-file input-domain
 `render.wide_gamut_fraction` are also recorded.
 
-Schema 6 adds the per-file sensor raster, DefaultCrop target, actual decoded
+Schema 7 retains the compatibility fields `target_*` / `decoded_*` and adds the
+unambiguous aliases `requested_crop_*` / `delivered_crop_*`. The latter pair is
+the geometry contract used by model sidecars, including odd/CFA-aligned crops.
+It also records the per-file sensor raster, DefaultCrop request, actual decoded
 dimensions, `decode_degraded`, and `decode_degradation_reasons`. This makes an
 unapplied DefaultCrop visible instead of presenting an uncropped result as an
 ordinary success; the converter also prints a `warning:` line for each degraded
@@ -362,7 +367,7 @@ consumer should branch on its contents.
 
 The machine-readable JSON Schema is
 [`schema/report.json`](schema/report.json). It defines every required object,
-field, type, enum, and nullable value in a schema-6 report. Update it together
+field, type, enum, and nullable value in a schema-7 report. Update it together
 with `modules/app/src/report.cpp` whenever the report version or shape changes.
 
 The flat `files[].headroom_stops` is the actual rendered peak (and is written to

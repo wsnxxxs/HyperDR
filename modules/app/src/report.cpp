@@ -80,7 +80,7 @@ void write_stats(json::Writer& writer, const RenderStats& s) {
 std::string run_report_json(const std::vector<FileResult>& results,
                             const ConvertOptions& options) {
   json::Writer writer(json::Writer::Style::kIndented);
-  writer.begin_object().member("schema", 6).member("tool", kVersion);
+  writer.begin_object().member("schema", 7).member("tool", kVersion);
   write_settings(writer, options);
   writer.begin_array("files");
   for (const auto& result : results) {
@@ -97,6 +97,10 @@ std::string run_report_json(const std::vector<FileResult>& results,
         .member("target_height", result.target_height)
         .member("decoded_width", result.decoded_width)
         .member("decoded_height", result.decoded_height)
+        .member("requested_crop_width", result.requested_crop_width)
+        .member("requested_crop_height", result.requested_crop_height)
+        .member("delivered_crop_width", result.delivered_crop_width)
+        .member("delivered_crop_height", result.delivered_crop_height)
         .member("target_dimensions_applied", result.target_dimensions_applied)
         .member("default_crop_present", result.default_crop_present)
         .member("decode_degraded", result.decode_degraded);

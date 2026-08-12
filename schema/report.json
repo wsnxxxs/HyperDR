@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "HyperDR conversion report schema 6",
+  "title": "HyperDR conversion report schema 7",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,7 +12,7 @@
   ],
   "properties": {
     "schema": {
-      "const": 6
+      "const": 7
     },
     "tool": {
       "type": "string"
@@ -242,6 +242,10 @@
         "target_height",
         "decoded_width",
         "decoded_height",
+        "requested_crop_width",
+        "requested_crop_height",
+        "delivered_crop_width",
+        "delivered_crop_height",
         "target_dimensions_applied",
         "default_crop_present",
         "decode_degraded",
@@ -294,6 +298,18 @@
           "$ref": "#/$defs/dimension"
         },
         "decoded_height": {
+          "$ref": "#/$defs/dimension"
+        },
+        "requested_crop_width": {
+          "$ref": "#/$defs/dimension"
+        },
+        "requested_crop_height": {
+          "$ref": "#/$defs/dimension"
+        },
+        "delivered_crop_width": {
+          "$ref": "#/$defs/dimension"
+        },
+        "delivered_crop_height": {
           "$ref": "#/$defs/dimension"
         },
         "target_dimensions_applied": {

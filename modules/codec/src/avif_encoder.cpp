@@ -127,7 +127,8 @@ std::vector<std::uint8_t> encode_avif(const GainMapResult& images,
   const auto exif = make_minimal_exif(metadata);
   check_avif(avifImageSetMetadataExif(image.get(), exif.data(), exif.size()),
              "attach AVIF Exif");
-  const auto xmp = make_xmp(metadata, images.headroom_stops);
+  const auto xmp = make_xmp(metadata, images.headroom_stops,
+                            /*has_gain_map=*/false);
   check_avif(avifImageSetMetadataXMP(image.get(),
                                      reinterpret_cast<const std::uint8_t*>(xmp.data()),
                                      xmp.size()),

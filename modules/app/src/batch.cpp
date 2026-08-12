@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <iostream>
 #include <new>
 #include <optional>
@@ -72,6 +73,80 @@ struct Staged {
   bool decoded{false};
   double decode_ms{};
 };
+
+bool half_size_matches_full(std::uint32_t half, std::uint32_t full) {
+  return half != 0 && full != 0 &&
+         (full == half * 2U || full + 1U == half * 2U);
+}
+
+}  // namespace
+
+GainMapOptions replay_external_development(
+    const ExternalGainMap& external, const std::filesystem::path& input,
+    const DecodedImage& image, const ConvertOptions& options) {
+  if (!external.binding) return options.gain;
+  const auto& binding = *external.binding;
+  const auto& decoded = image.decode;
+  const auto reject = [](std::string_view reason) {
+    throw std::invalid_argument("external gain model binding mismatch: " +
+                                std::string(reason));
+  };
+  if (sha256_file_hex(input) != binding.source_sha256) {
+    reject("source sha256");
+  }
+  if (binding.highlight_recovery !=
+      highlight_recovery_name(options.raw.highlight_recovery)) {
+    reject("highlight recovery");
+  }
+  if (binding.orientation != image.metadata.orientation) {
+    reject("orientation");
+  }
+  if (binding.sensor_width != decoded.sensor_width ||
+      binding.sensor_height != decoded.sensor_height) {
+    reject("sensor raster");
+  }
+  if (binding.requested_crop_width != decoded.target_width ||
+      binding.requested_crop_height != decoded.target_height ||
+      binding.requested_crop_left != decoded.requested_crop_left ||
+      binding.requested_crop_top != decoded.requested_crop_top) {
+    reject("requested crop");
+  }
+  if (binding.delivered_crop_left != decoded.delivered_crop_left ||
+      binding.delivered_crop_top != decoded.delivered_crop_top) {
+    reject("delivered crop origin");
+  }
+  const bool delivered_matches = binding.raw_half_size
+      ? half_size_matches_full(binding.delivered_crop_width,
+                               decoded.decoded_width) &&
+            half_size_matches_full(binding.delivered_crop_height,
+                                   decoded.decoded_height)
+      : binding.delivered_crop_width == decoded.decoded_width &&
+            binding.delivered_crop_height == decoded.decoded_height;
+  if (!delivered_matches) reject("delivered crop");
+
+  GainMapOptions replay = options.gain;
+  replay.auto_exposure = false;
+  replay.exposure_ev = binding.recipe.exposure_ev;
+  replay.exposure_bias_ev = 0.0F;
+  replay.auto_headroom = false;
+  replay.headroom_stops = binding.recipe.headroom_stops;
+  // make_external_gain_map saves this value for the external grid, then uses
+  // unity for the mathematical pass that reproduces the SDR base.
+  replay.gain_strength = options.gain.gain_strength;
+  replay.look.contrast = binding.recipe.contrast;
+  replay.look.vibrance = binding.recipe.vibrance;
+  replay.look.pop = binding.recipe.pop;
+  replay.look.toe_end = binding.recipe.toe_end;
+  replay.look.toe_output_ratio = binding.recipe.toe_output_ratio;
+  replay.look.shoulder_start = binding.recipe.shoulder_start;
+  replay.look.positive_exposure_limit_ev =
+      binding.recipe.positive_exposure_limit_ev;
+  replay.look.diffuse_gain_floor = binding.recipe.diffuse_gain_floor;
+  validate_gain_map_options(replay);
+  return replay;
+}
+
+namespace {
 
 Staged decode_stage(const std::filesystem::path& path,
                     const ConvertOptions& options,
@@ -159,25 +234,15 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
                                          options.external_gain_report,
                                          options.allow_legacy_external_gain);
     }
-    float external_exposure_ev = 0.0F;
-    if (external.has_value()) {
-      const auto extension = lower_extension(result.input);
-      if (extension == ".arw" || extension == ".dng") {
-        auto exposure_options = options.gain;
-        // External model inference owns the gain map, but a RAW still needs
-        // the same automatic scene exposure that was applied to its model
-        // thumbnail. The panel's creative brightness is deliberately not part
-        // of the external model contract.
-        exposure_options.exposure_bias_ev = 0.0F;
-        external_exposure_ev = photographic_exposure_ev(
-            staged.image.linear_p3, exposure_options, staged.image.capture);
-      }
-    }
+    const auto external_development = external.has_value()
+                                          ? replay_external_development(
+                                                *external, staged.result.input,
+                                                staged.image, options)
+                                          : options.gain;
     auto gain = external.has_value()
-                    ? make_external_gain_map(staged.image.linear_p3,
-                                             std::move(*external),
-                                             options.gain.gain_strength,
-                                             external_exposure_ev)
+                    ? make_external_gain_map(
+                          staged.image.linear_p3, std::move(*external),
+                          external_development, staged.image.capture)
                     : make_gain_map(staged.image.linear_p3, options.gain,
                                     staged.image.capture);
     result.sensor_width = staged.image.decode.sensor_width;
@@ -186,6 +251,10 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     result.target_height = staged.image.decode.target_height;
     result.decoded_width = staged.image.decode.decoded_width;
     result.decoded_height = staged.image.decode.decoded_height;
+    result.requested_crop_width = staged.image.decode.target_width;
+    result.requested_crop_height = staged.image.decode.target_height;
+    result.delivered_crop_width = staged.image.decode.decoded_width;
+    result.delivered_crop_height = staged.image.decode.decoded_height;
     result.target_dimensions_applied =
         staged.image.decode.target_dimensions_applied;
     result.default_crop_present = staged.image.decode.default_crop_present;

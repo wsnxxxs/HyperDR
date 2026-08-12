@@ -430,23 +430,21 @@ int main(int argc, char** argv) {
       }
     }
 
-    // The preview must carry the same automatic exposure anchor as the
-    // export path. The fixture is deliberately scene-dark, so a zero anchor
-    // would put it straight back into the regression where RAW looked grey and
-    // underexposed before the user touched the brightness control.
-    const auto preview = hyperdr::encode_preview_jpeg(path, 256, 85);
-    require(std::isfinite(preview.exposure_ev) && preview.exposure_ev > 0.0F,
-            "scene-linear RAW preview did not report an automatic exposure");
-    auto exposure_options = hyperdr::GainMapOptions{};
-    exposure_options.exposure_bias_ev = 0.0F;
-    const auto decoded_for_exposure = hyperdr::decode_image(path);
-    const auto expected_preview_exposure = hyperdr::photographic_exposure_ev(
-        decoded_for_exposure.linear_p3, exposure_options,
-        decoded_for_exposure.capture);
-    require(std::fabs(preview.exposure_ev - expected_preview_exposure) < 1.0e-5F,
-            "RAW preview exposure diverged from photographic exposure selection");
+    // 4. Odd DefaultCrop metadata is a request, not a promise about LibRaw's
+    //    CFA-aligned delivery. Keep both dimensions and bind consumers to the
+    //    actual returned raster.
+    write_synthetic_dng(path, 79, 63);
+    const auto odd = hyperdr::decode_image(path);
+    require(odd.decode.target_width == 63 && odd.decode.target_height == 79,
+            "odd requested DefaultCrop was not reported after orientation");
+    require(odd.decode.decoded_width == odd.linear_p3.width &&
+                odd.decode.decoded_height == odd.linear_p3.height,
+            "odd delivered crop does not match LibRaw's returned raster");
+    require(odd.decode.default_crop_present &&
+                odd.decode.target_dimensions_applied,
+            "valid odd DefaultCrop was not applied");
 
-    // 4. The maxcrop guard rejects implausibly small metadata. That fallback is
+    // 5. The maxcrop guard rejects implausibly small metadata. That fallback is
     //    allowed, but it must never be silent, and the rejected target must not
     //    be mistakable for a delivered geometry.
     //

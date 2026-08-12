@@ -152,7 +152,7 @@ export function mountRunner({ toast }) {
 
   const basename = (path) => String(path || "").split(/[\\/]/).filter(Boolean).pop() || "输出文件";
 
-  // Report schema 6. Only the single success file is read; the reasons are
+  // Report schema 7. Only the single success file is read; the reasons are
   // joined for display and never inspected, so a new reason needs no change here.
   function summarizeReport(report) {
     const files = report && Array.isArray(report.files) ? report.files : [];

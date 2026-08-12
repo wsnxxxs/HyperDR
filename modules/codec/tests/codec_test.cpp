@@ -16,6 +16,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -35,6 +36,12 @@ hyperdr::FloatImage make_synthetic(std::uint32_t width, std::uint32_t height) {
 
 void require(bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
+}
+
+bool contains_text(const std::vector<std::uint8_t>& bytes,
+                   std::string_view text) {
+  return std::search(bytes.begin(), bytes.end(), text.begin(), text.end()) !=
+         bytes.end();
 }
 
 float mean_luminance(const hyperdr::FloatImage& image) {
@@ -572,6 +579,9 @@ int main() {
     metadata.model = "ILCE-7RM5";
     metadata.lens = "Synthetic test lens";
     metadata.iso = 100;
+    metadata.exposure_seconds = 1.0 / 125.0;
+    metadata.aperture = 2.8;
+    metadata.date_time = "2026:08:12 10:11:12";
 
     // Default 8-bit output through the grid path (wider than one 2048 tile), with a
     // full decode and gain-map reconstruction regression, not just structure checks.
@@ -596,8 +606,13 @@ int main() {
     const auto expected_ultrahdr = hyperdr::reconstruct_gain_map(
         small_gain.base_linear, small_gain.gain_map, small_gain.metadata,
         small_gain.headroom_stops);
-    require_linear_round_trip(decode_ultrahdr_input(ultrahdr),
-                              expected_ultrahdr,
+    const auto decoded_ultrahdr = decode_ultrahdr_input(ultrahdr);
+    require(decoded_ultrahdr.metadata.model == metadata.model &&
+                decoded_ultrahdr.metadata.lens == metadata.lens &&
+                decoded_ultrahdr.metadata.iso == metadata.iso &&
+                decoded_ultrahdr.metadata.orientation == 1,
+            "Ultra HDR input did not preserve portable Exif");
+    require_linear_round_trip(decoded_ultrahdr, expected_ultrahdr,
                               "Ultra HDR input did not reconstruct its Gain Map");
     // AVIF is the encoding this project could write but not read, so unlike the
     // other five it had no input round trip: `verify_avif_decodable` only ever
@@ -610,6 +625,9 @@ int main() {
       const bool pq = encoding == hyperdr::HdrEncoding::AvifPq;
       const auto avif = hyperdr::encode_avif(small_gain, metadata, 80, encoding);
       require(avif.size() > 32, "AVIF encoder produced an implausibly small file");
+      require(!contains_text(avif, "AdaptiveHDR") &&
+                  !contains_text(avif, "ISO-21496-1"),
+              "rendered AVIF incorrectly claims to carry a Gain Map");
       hyperdr::verify_avif_decodable(avif);
       const auto decoded =
           decode_encoded_input(avif, pq ? "avif-pq" : "avif-hlg", ".avif");
@@ -639,8 +657,16 @@ int main() {
     const auto expected_adaptive = hyperdr::reconstruct_gain_map(
         lossless_probe.base_linear, lossless_probe.gain_map,
         lossless_probe.metadata, lossless_probe.headroom_stops);
-    require_linear_round_trip(decode_encoded_input(small8, "adaptive"),
-                              expected_adaptive,
+    require(contains_text(small8, "AdaptiveHDR") &&
+                contains_text(small8, "ISO-21496-1:2025"),
+            "Adaptive HEIC is missing its Gain Map XMP declaration");
+    const auto decoded_adaptive = decode_encoded_input(small8, "adaptive");
+    require(decoded_adaptive.metadata.model == metadata.model &&
+                decoded_adaptive.metadata.lens == metadata.lens &&
+                decoded_adaptive.metadata.iso == metadata.iso &&
+                decoded_adaptive.metadata.orientation == 1,
+            "Adaptive HEIC input did not preserve portable Exif");
+    require_linear_round_trip(decoded_adaptive, expected_adaptive,
                               "Adaptive HDR input did not reconstruct its Gain Map");
     // What makes an input HDR is its format, not a percentile of its pixels.
     //
@@ -674,6 +700,9 @@ int main() {
                     !inspection.has_tmap_brand && !inspection.has_tmap_item &&
                     inspection.has_exif && inspection.has_xmp,
                 "BT.2100 export has incorrect HEIF topology");
+        require(!contains_text(hdr_bytes, "AdaptiveHDR") &&
+                    !contains_text(hdr_bytes, "ISO-21496-1"),
+                "rendered BT.2100 HEIC incorrectly claims to carry a Gain Map");
         hyperdr::verify_heic_decodable(hdr_bytes, encoding);
         const auto expected_hdr = hyperdr::reconstruct_gain_map(
             small_gain.base_linear, small_gain.gain_map, small_gain.metadata,

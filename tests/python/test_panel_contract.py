@@ -147,7 +147,7 @@ class BuildArgvTest(unittest.TestCase):
 
 
 class ModelIntegrationTest(unittest.TestCase):
-    def test_raster_input_runs_inference_directly(self):
+    def test_raster_input_uses_native_photographic_base(self):
         config = model.ModelConfig(
             root=Path("model"), python="python", script=Path("model/infer_gain.py"),
             checkpoint=Path("model/best.pt"), dataset_root=Path("dataset"),
@@ -156,12 +156,15 @@ class ModelIntegrationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             commands, gain, report = model.build_commands(
                 config, Path("photo.jpg"), Path(directory) / ".model", "HyperDR")
-        self.assertEqual(len(commands), 1)
-        self.assertIn("infer_gain.py", commands[0][1])
-        self.assertEqual(commands[0][commands[0].index("--gain-output") + 1], str(gain))
-        self.assertEqual(commands[0][commands[0].index("--report") + 1], str(report))
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(commands[0][0:2], ["HyperDR", "model-input"])
+        self.assertNotIn("--half-size", commands[0])
+        self.assertTrue(commands[0][commands[0].index("--output") + 1].endswith(".f32"))
+        self.assertIn("--input-report", commands[1])
+        self.assertEqual(commands[1][commands[1].index("--gain-output") + 1], str(gain))
+        self.assertEqual(commands[1][commands[1].index("--report") + 1], str(report))
 
-    def test_raw_input_is_prepared_by_hyperdr_thumbnail(self):
+    def test_raw_input_is_developed_at_half_size_without_jpeg(self):
         config = model.ModelConfig(
             root=Path("model"), python="python", script=Path("model/infer_gain.py"),
             checkpoint=Path("model/best.pt"), dataset_root=Path("dataset"),
@@ -171,11 +174,12 @@ class ModelIntegrationTest(unittest.TestCase):
             commands, _, _ = model.build_commands(
                 config, Path("photo.arw"), Path(directory) / ".model", "HyperDR",
                 "reconstruct")
-        self.assertEqual(commands[0][0:2], ["HyperDR", "thumbnail"])
+        self.assertEqual(commands[0][0:2], ["HyperDR", "model-input"])
         self.assertIn("--highlight-recovery", commands[0])
         self.assertEqual(commands[0][commands[0].index("--highlight-recovery") + 1],
                          "reconstruct")
-        self.assertIn("--model-input", commands[0])
+        self.assertIn("--half-size", commands[0])
+        self.assertNotIn(".jpg", " ".join(part for command in commands for part in command))
         self.assertEqual(commands[1][0], "python")
 
 

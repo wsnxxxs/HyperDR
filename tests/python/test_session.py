@@ -120,7 +120,8 @@ class SessionTests(unittest.TestCase):
         for directory in (".model", ".model-preview"):
             intermediate = output / directory
             intermediate.mkdir()
-            (intermediate / "model-input.jpg").write_bytes(b"thumbnail")
+            (intermediate / "model-input-linear-p3.f32").write_bytes(b"tensor")
+            (intermediate / "model-input.json").write_text("{}", encoding="utf-8")
         result = output / "photo.jpg"
         result.write_bytes(b"ultra hdr result")
 

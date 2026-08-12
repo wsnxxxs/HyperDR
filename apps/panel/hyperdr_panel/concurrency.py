@@ -24,6 +24,7 @@ caller that actually runs the work needs a slot.
 from __future__ import annotations
 
 import contextlib
+import os
 import threading
 
 
@@ -122,3 +123,16 @@ class SingleFlight:
     def in_flight(self) -> int:
         with self._lock:
             return len(self._calls)
+
+
+# Shared by thumbnail generation and model-input preparation.
+# Endpoint-local limits did not bound their combined LibRaw resident set. One
+# memory-heavy RAW decode at a time is the conservative default; operators may
+# raise the total allowance explicitly on machines with measured headroom.
+RAW_DECODE_MEMORY_SLOTS = max(
+    1, int(os.environ.get("HYPERDR_RAW_DECODE_MEMORY_SLOTS", "1"))
+)
+RAW_DECODE_BUDGET = Budget(
+    RAW_DECODE_MEMORY_SLOTS,
+    "RAW 解码内存额度正被占用，请稍后再试。",
+)

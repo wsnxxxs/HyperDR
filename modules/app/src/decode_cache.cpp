@@ -84,6 +84,10 @@ std::string metadata_json(const DecodedImage& value) {
       .member("decode_sensor_height", d.sensor_height)
       .member("decode_target_width", d.target_width)
       .member("decode_target_height", d.target_height)
+      .member("decode_requested_crop_left", d.requested_crop_left)
+      .member("decode_requested_crop_top", d.requested_crop_top)
+      .member("decode_delivered_crop_left", d.delivered_crop_left)
+      .member("decode_delivered_crop_top", d.delivered_crop_top)
       .member("decode_decoded_width", d.decoded_width)
       .member("decode_decoded_height", d.decoded_height)
       .member("decode_resolution_reduced", d.resolution_reduced)
@@ -162,6 +166,14 @@ void apply_metadata_json(const std::string& text, DecodedImage& out) {
       static_cast<std::uint32_t>(number_at("decode_target_width"));
   out.decode.target_height =
       static_cast<std::uint32_t>(number_at("decode_target_height"));
+  out.decode.requested_crop_left =
+      static_cast<std::uint32_t>(number_at("decode_requested_crop_left"));
+  out.decode.requested_crop_top =
+      static_cast<std::uint32_t>(number_at("decode_requested_crop_top"));
+  out.decode.delivered_crop_left =
+      static_cast<std::uint32_t>(number_at("decode_delivered_crop_left"));
+  out.decode.delivered_crop_top =
+      static_cast<std::uint32_t>(number_at("decode_delivered_crop_top"));
   out.decode.decoded_width =
       static_cast<std::uint32_t>(number_at("decode_decoded_width"));
   out.decode.decoded_height =

@@ -14,9 +14,10 @@ import subprocess
 import sys
 
 from .config import IS_WINDOWS, REPO_ROOT
+from .concurrency import RAW_DECODE_BUDGET
 
 
-RASTER_INPUT_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png"})
+RAW_INPUT_EXTENSIONS = frozenset({".arw", ".dng"})
 MODEL_ROOT_DEFAULT = (REPO_ROOT / "HyperDR_Model").resolve()
 INFERENCE_TIMEOUT_SECONDS = max(
     10, int(os.environ.get("HYPERDR_MODEL_TIMEOUT_SECONDS", "300"))
@@ -184,31 +185,29 @@ def status() -> dict[str, object]:
 
 def build_commands(config: ModelConfig, source: Path, model_dir: Path,
                    converter_exe: str, highlight_recovery: str = "blend") -> tuple[list[list[str]], Path, Path]:
-    """Build optional thumbnail/model steps and return gain paths.
-
-    Pillow inference accepts raster inputs directly. RAW/HEIC inputs first pass
-    through HyperDR's own thumbnail decoder, so the model can still participate
-    in the same panel flow without teaching the training project about camera
-    codecs. RAW model thumbnails use ``--model-input`` to apply the shared
-    automatic exposure anchor before the JPEG is handed to the linear-P3 SDR
-    inference path.
-    """
+    """Build native SDR development plus direct-float inference commands."""
     model_dir.mkdir(parents=True, exist_ok=True)
     gain_path = model_dir / "model-gain.f32"
     report_path = model_dir / "model-gain.json"
-    commands: list[list[str]] = []
-    model_input = source
-    if source.suffix.lower() not in RASTER_INPUT_EXTENSIONS:
-        model_input = model_dir / "model-input.jpg"
-        commands.append([
-            converter_exe, "thumbnail", str(source), "--output", str(model_input),
-            "--max-edge", str(config.long_side), "--quality", "100",
-            "--highlight-recovery", highlight_recovery,
-            "--base-only", "--model-input",
-        ])
+    model_input = model_dir / "model-input-linear-p3.f32"
+    input_report = model_dir / "model-input.json"
+    prepare = [
+        converter_exe, "model-input", str(source),
+        "--output", str(model_input),
+        "--report", str(input_report),
+        "--long-side", str(config.long_side),
+        "--highlight-recovery", highlight_recovery,
+    ]
+    # LibRaw's fixed half-size demosaic is selected before unpack.  The recipe
+    # and delivered geometry it produces are frozen into input_report and
+    # checked against the later full-resolution export.
+    if source.suffix.lower() in RAW_INPUT_EXTENSIONS:
+        prepare.append("--half-size")
+    commands: list[list[str]] = [prepare]
     commands.append([
         config.python, str(config.script),
         "--input", str(model_input),
+        "--input-report", str(input_report),
         "--checkpoint", str(config.checkpoint),
         "--gain-output", str(gain_path),
         "--report", str(report_path),
@@ -228,17 +227,18 @@ def infer_preview(config: ModelConfig, source: Path, model_dir: Path,
     commands, gain_path, report_path = build_commands(
         config, source, model_dir, converter_exe, highlight_recovery
     )
-    for command in commands:
-        try:
-            completed = subprocess.run(
-                command, cwd=str(config.root), capture_output=True,
-                timeout=INFERENCE_TIMEOUT_SECONDS, check=False,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            raise RuntimeError("unable to run model inference: %s" % exc) from exc
-        if completed.returncode != 0:
-            detail = completed.stderr.decode("utf-8", errors="replace").strip()
-            raise RuntimeError(detail or "model inference failed")
+    with RAW_DECODE_BUDGET.hold(timeout=1.0):
+        for command in commands:
+            try:
+                completed = subprocess.run(
+                    command, cwd=str(config.root), capture_output=True,
+                    timeout=INFERENCE_TIMEOUT_SECONDS, check=False,
+                )
+            except (OSError, subprocess.SubprocessError) as exc:
+                raise RuntimeError("unable to run model inference: %s" % exc) from exc
+            if completed.returncode != 0:
+                detail = completed.stderr.decode("utf-8", errors="replace").strip()
+                raise RuntimeError(detail or "model inference failed")
 
     report = json.loads(report_path.read_text(encoding="utf-8"))
     grid = report.get("gain_grid_size")

@@ -35,6 +35,7 @@ def write_gain_f32(path: str | Path, gain: np.ndarray) -> dict[str, int | str]:
         "width": int(little_endian.shape[1]),
         "height": int(little_endian.shape[0]),
         "byte_length": actual_bytes,
+        "sha256": sha256_file(output),
     }
 
 

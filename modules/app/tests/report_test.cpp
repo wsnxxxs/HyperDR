@@ -156,6 +156,10 @@ void test_run_report_is_parseable_and_complete() {
   ok.target_height = 6336;
   ok.decoded_width = 4752;
   ok.decoded_height = 3168;
+  ok.requested_crop_width = 9504;
+  ok.requested_crop_height = 6336;
+  ok.delivered_crop_width = 4752;
+  ok.delivered_crop_height = 3168;
   ok.target_dimensions_applied = true;
   ok.default_crop_present = true;
   ok.decode_degraded = true;
@@ -169,7 +173,7 @@ void test_run_report_is_parseable_and_complete() {
 
   const auto document = hyperdr::json::parse(
       hyperdr::run_report_json({ok, failed}, options));
-  require(document.find("schema")->number() == 6, "report schema version missing");
+  require(document.find("schema")->number() == 7, "report schema version missing");
   const auto* settings = document.find("settings");
   require(settings != nullptr, "report has no settings block");
   // Generated from the table, so every setting is present without anyone
@@ -190,6 +194,9 @@ void test_run_report_is_parseable_and_complete() {
           "DefaultCrop target dimensions missing");
   require(files[0].find("decoded_width")->number() == 4752,
           "actual decode dimensions missing");
+  require(files[0].find("requested_crop_width")->number() == 9504 &&
+              files[0].find("delivered_crop_width")->number() == 4752,
+          "requested and delivered crop dimensions were not distinguished");
   require(files[0].find("decode_degraded")->boolean(),
           "decode degradation was not reported");
   // Types are pinned, not just values: the panel branches on

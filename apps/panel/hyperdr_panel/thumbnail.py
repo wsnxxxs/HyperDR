@@ -35,7 +35,7 @@ import tempfile
 import threading
 from pathlib import Path
 
-from .concurrency import Budget, SingleFlight
+from .concurrency import RAW_DECODE_BUDGET, SingleFlight
 from .executable import detect_exe
 
 SUPPORTED_EXTENSIONS = frozenset(
@@ -56,9 +56,7 @@ _CACHE_LIMIT = 8
 
 MAX_EDGE = max(512, min(4096, int(os.environ.get("HYPERDR_PREVIEW_MAX_EDGE", "2048"))))
 TIMEOUT_SECONDS = max(1, int(os.environ.get("HYPERDR_PREVIEW_TIMEOUT_SECONDS", "180")))
-MAX_PROCESSES = max(1, int(os.environ.get("HYPERDR_MAX_PREVIEW_PROCESSES", "2")))
-
-_BUDGET = Budget(MAX_PROCESSES, "预览服务繁忙，请稍后再试。")
+_BUDGET = RAW_DECODE_BUDGET
 _INFLIGHT = SingleFlight()
 
 # Start-of-frame markers that carry image dimensions.

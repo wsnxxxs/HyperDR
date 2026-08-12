@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 
 namespace hyperdr::codec {
 
@@ -25,6 +26,32 @@ inline constexpr std::uint64_t kMaxRawPixels =
 [[nodiscard]] inline bool raw_input_budget_ok(std::uint64_t width,
                                               std::uint64_t height) {
   return pixel_count_ok(width, height, kMaxRawPixels);
+}
+
+// LibRaw always unpacks the complete sensor mosaic, including margins.  Its
+// half-size option reduces demosaic/output allocations only; treating the
+// entire working set as quarter-sized admits exactly the large-margin files
+// most likely to exhaust memory.
+[[nodiscard]] inline std::uint64_t raw_pipeline_bytes(
+    std::uint64_t raw_width, std::uint64_t raw_height,
+    std::uint64_t output_width, std::uint64_t output_height) {
+  if (!pixel_count_ok(raw_width, raw_height, kMaxRawPixels) ||
+      !pixel_count_ok(output_width, output_height, kMaxRawPixels)) {
+    return std::numeric_limits<std::uint64_t>::max();
+  }
+  constexpr std::uint64_t kMosaicBytesPerPixel = 8;
+  constexpr std::uint64_t kOutputBytesPerPixel = 24;
+  const auto mosaic_pixels = raw_width * raw_height;
+  const auto output_pixels = output_width * output_height;
+  if (mosaic_pixels > std::numeric_limits<std::uint64_t>::max() /
+                          kMosaicBytesPerPixel ||
+      output_pixels > (std::numeric_limits<std::uint64_t>::max() -
+                       mosaic_pixels * kMosaicBytesPerPixel) /
+                          kOutputBytesPerPixel) {
+    return std::numeric_limits<std::uint64_t>::max();
+  }
+  return mosaic_pixels * kMosaicBytesPerPixel +
+         output_pixels * kOutputBytesPerPixel;
 }
 
 // Keep this non-throwing so it is also safe to use at the C decoder boundaries

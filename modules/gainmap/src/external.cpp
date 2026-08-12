@@ -5,6 +5,7 @@
 #include "hyperdr/foundation/json.hpp"
 #include "hyperdr/foundation/math.hpp"
 #include "hyperdr/foundation/rational.hpp"
+#include "hyperdr/gainmap/gain_map.hpp"
 
 #include <algorithm>
 #include <array>
@@ -49,6 +50,150 @@ float finite_number(const json::Value& value, std::string_view name) {
                                 std::string(name));
   }
   return static_cast<float>(value.number());
+}
+
+void require_string(const json::Value& object, std::string_view key,
+                    std::string_view expected);
+
+bool required_bool(const json::Value& object, std::string_view key) {
+  const auto& value = required_member(object, key);
+  if (!value.is_bool()) {
+    throw std::invalid_argument("external gain report has invalid " +
+                                std::string(key));
+  }
+  return value.boolean();
+}
+
+std::string required_string(const json::Value& object, std::string_view key) {
+  const auto& value = required_member(object, key);
+  if (!value.is_string() || value.string().empty()) {
+    throw std::invalid_argument("external gain report has invalid " +
+                                std::string(key));
+  }
+  return value.string();
+}
+
+std::array<std::uint32_t, 2> dimensions_member(const json::Value& object,
+                                                std::string_view key) {
+  const auto& value = required_member(object, key);
+  if (!value.is_array() || value.array().size() != 2) {
+    throw std::invalid_argument("external gain report has invalid " +
+                                std::string(key));
+  }
+  return {positive_dimension(value.array()[0], std::string(key) + " width"),
+          positive_dimension(value.array()[1], std::string(key) + " height")};
+}
+
+std::array<std::uint32_t, 2> origin_member(const json::Value& object,
+                                           std::string_view key) {
+  const auto& value = required_member(object, key);
+  if (!value.is_array() || value.array().size() != 2) {
+    throw std::invalid_argument("external gain report has invalid " +
+                                std::string(key));
+  }
+  std::array<std::uint32_t, 2> result{};
+  for (std::size_t index = 0; index < result.size(); ++index) {
+    const auto& item = value.array()[index];
+    if (!item.is_number() || !std::isfinite(item.number()) ||
+        item.number() < 0.0 || item.number() > 131072.0 ||
+        std::floor(item.number()) != item.number()) {
+      throw std::invalid_argument("external gain report has invalid " +
+                                  std::string(key));
+    }
+    result[index] = static_cast<std::uint32_t>(item.number());
+  }
+  return result;
+}
+
+ExternalGainBinding read_model_binding(const json::Value& value,
+                                       std::uint32_t gain_width,
+                                       std::uint32_t gain_height) {
+  if (!value.is_object()) {
+    throw std::invalid_argument("external gain report has invalid model_binding");
+  }
+  require_string(value, "contract", "hyperdr.model-gain-binding/v1");
+  const auto& source = required_member(value, "source");
+  const auto& recipe = required_member(value, "development_recipe");
+  const auto& geometry = required_member(value, "geometry");
+  const auto& model = required_member(value, "model");
+  if (!source.is_object() || !recipe.is_object() || !geometry.is_object() ||
+      !model.is_object()) {
+    throw std::invalid_argument("external model binding contains a non-object section");
+  }
+
+  ExternalGainBinding binding;
+  binding.source_sha256 = required_string(source, "sha256");
+  if (binding.source_sha256.size() != 64) {
+    throw std::invalid_argument("external model binding has invalid source sha256");
+  }
+  binding.highlight_recovery = required_string(source, "highlight_recovery");
+  binding.orientation = positive_dimension(required_member(source, "orientation"),
+                                           "source orientation");
+  const auto sensor = dimensions_member(source, "sensor_size");
+  const auto requested = dimensions_member(source, "requested_crop");
+  const auto delivered = dimensions_member(source, "delivered_crop");
+  const auto requested_origin = origin_member(
+      source, "requested_crop_origin_sensor");
+  const auto delivered_origin = origin_member(
+      source, "delivered_crop_origin_sensor");
+  binding.sensor_width = sensor[0];
+  binding.sensor_height = sensor[1];
+  binding.requested_crop_width = requested[0];
+  binding.requested_crop_height = requested[1];
+  binding.requested_crop_left = requested_origin[0];
+  binding.requested_crop_top = requested_origin[1];
+  binding.delivered_crop_width = delivered[0];
+  binding.delivered_crop_height = delivered[1];
+  binding.delivered_crop_left = delivered_origin[0];
+  binding.delivered_crop_top = delivered_origin[1];
+  binding.raw_half_size = required_bool(source, "raw_half_size");
+
+  require_string(recipe, "id", "photographic-v1");
+  binding.recipe.exposure_ev =
+      finite_number(required_member(recipe, "exposure_ev"), "recipe exposure_ev");
+  binding.recipe.headroom_stops = finite_number(
+      required_member(recipe, "headroom_stops"), "recipe headroom_stops");
+  binding.recipe.contrast =
+      finite_number(required_member(recipe, "contrast"), "recipe contrast");
+  binding.recipe.vibrance =
+      finite_number(required_member(recipe, "vibrance"), "recipe vibrance");
+  binding.recipe.pop = finite_number(required_member(recipe, "pop"), "recipe pop");
+  binding.recipe.toe_end =
+      finite_number(required_member(recipe, "toe_end"), "recipe toe_end");
+  binding.recipe.toe_output_ratio = finite_number(
+      required_member(recipe, "toe_output_ratio"), "recipe toe_output_ratio");
+  binding.recipe.shoulder_start = finite_number(
+      required_member(recipe, "shoulder_start"), "recipe shoulder_start");
+  binding.recipe.positive_exposure_limit_ev = finite_number(
+      required_member(recipe, "positive_exposure_limit_ev"),
+      "recipe positive_exposure_limit_ev");
+  binding.recipe.diffuse_gain_floor = finite_number(
+      required_member(recipe, "diffuse_gain_floor"), "recipe diffuse_gain_floor");
+
+  const auto developed = dimensions_member(geometry, "developed_size");
+  const auto tensor = dimensions_member(geometry, "model_tensor_size");
+  const auto grid = dimensions_member(geometry, "gain_grid_size");
+  if (developed[0] != binding.delivered_crop_width ||
+      developed[1] != binding.delivered_crop_height ||
+      grid[0] != gain_width || grid[1] != gain_height ||
+      tensor[0] % 16U != 0 || tensor[1] % 16U != 0 ||
+      grid[0] != tensor[0] / 16U || grid[1] != tensor[1] / 16U) {
+    throw std::invalid_argument("external model binding geometry is inconsistent");
+  }
+  binding.model_width = tensor[0];
+  binding.model_height = tensor[1];
+  binding.gain_width = grid[0];
+  binding.gain_height = grid[1];
+  binding.resize_convention = required_string(geometry, "resize_convention");
+  if (binding.resize_convention != "half-pixel-centres/area-then-bilinear") {
+    throw std::invalid_argument("external model binding has unsupported resize convention");
+  }
+  binding.model_version = required_string(model, "version");
+  binding.checkpoint_sha256 = required_string(model, "checkpoint_sha256");
+  if (binding.checkpoint_sha256.size() != 64) {
+    throw std::invalid_argument("external model binding has invalid checkpoint sha256");
+  }
+  return binding;
 }
 
 void require_string(const json::Value& object, std::string_view key,
@@ -256,6 +401,9 @@ ExternalGainMap read_external_gain_map(const std::filesystem::path& gain_path,
   result.metadata = metadata;
   result.canonical_log2 = v2;
   result.legacy_schema = !v2;
+  if (const auto* binding = document.find("model_binding")) {
+    result.binding = read_model_binding(*binding, width, height);
+  }
   for (std::size_t index = 0; index < pixel_count; ++index) {
     const auto offset = index * sizeof(float);
     const auto bits = static_cast<std::uint32_t>(bytes[offset]) |
@@ -275,7 +423,27 @@ ExternalGainMap read_external_gain_map(const std::filesystem::path& gain_path,
   return result;
 }
 
-void apply_external_gain_map(GainMapResult& result, ExternalGainMap external) {
+void apply_external_gain_map(GainMapResult& result, ExternalGainMap external,
+                             float strength) {
+  if (!std::isfinite(strength) || strength < 0.0F || strength > 2.0F) {
+    throw std::invalid_argument("external gain strength must be in [0, 2]");
+  }
+  // Strength is a gain-domain control.  It must never feed back into the SDR
+  // development that already populated result.base_linear.
+  if (external.canonical_log2) {
+    for (float& value : external.gain_map.pixels) value *= strength;
+    external.metadata.gain_min = rational_from_float(
+        rational_value(external.metadata.gain_min) * strength);
+    external.metadata.gain_max = rational_from_float(
+        rational_value(external.metadata.gain_max) * strength);
+    external.metadata.base_headroom = rational_from_float(
+        rational_value(external.metadata.base_headroom) * strength);
+    external.metadata.alternate_headroom = rational_from_float(
+        rational_value(external.metadata.alternate_headroom) * strength);
+    external.max_stops = rational_value(external.metadata.gain_max);
+  } else {
+    external.max_stops *= strength;
+  }
   const bool canonical = external.canonical_log2;
   const float max_stops = canonical
                               ? rational_value(external.metadata.gain_max)
@@ -318,6 +486,11 @@ void apply_external_gain_map(GainMapResult& result, ExternalGainMap external) {
   stats.gain_min_stops = rational_value(result.metadata.gain_min);
   stats.gain_max_stops = rational_value(result.metadata.gain_max);
   stats.gain_gamma = rational_value(result.metadata.gamma);
+  stats.gain_percentiles.fill(0.0F);
+  stats.gain_fraction_gt_0_5 = 0.0F;
+  stats.gain_fraction_gt_1_0 = 0.0F;
+  stats.gain_fraction_gt_2_0 = 0.0F;
+  stats.gain_clipped_fraction = 0.0F;
 
   const auto count = static_cast<float>(stops.size());
   if (count == 0.0F) return;
@@ -343,45 +516,16 @@ void apply_external_gain_map(GainMapResult& result, ExternalGainMap external) {
 
 GainMapResult make_external_gain_map(const FloatImage& source,
                                      ExternalGainMap external,
-                                     float strength, float exposure_ev) {
+                                     const GainMapOptions& options,
+                                     const CaptureMetadata& capture) {
   if (source.channels != 3) {
     throw std::invalid_argument("external gain input must be RGB");
   }
-  if (!std::isfinite(strength) || strength < 0.0F || strength > 1.0F) {
-    throw std::invalid_argument("external gain strength must be in [0, 1]");
-  }
-  if (!std::isfinite(exposure_ev) || exposure_ev < -10.0F ||
-      exposure_ev > 10.0F) {
-    throw std::invalid_argument("external gain exposure must be in [-10, 10]");
-  }
-  // Scale in canonical log2 space before quantising to the ISO code range.
-  if (external.canonical_log2) {
-    for (float& value : external.gain_map.pixels) value *= strength;
-    if (std::abs(strength - 1.0F) > 1.0e-7F) {
-      external.metadata.gain_min = rational_from_float(
-          rational_value(external.metadata.gain_min) * strength);
-      external.metadata.gain_max = rational_from_float(
-          rational_value(external.metadata.gain_max) * strength);
-      external.metadata.base_headroom = rational_from_float(
-          rational_value(external.metadata.base_headroom) * strength);
-      external.metadata.alternate_headroom = rational_from_float(
-          rational_value(external.metadata.alternate_headroom) * strength);
-    }
-    external.max_stops = rational_value(external.metadata.gain_max);
-  } else {
-    external.max_stops *= strength;
-  }
-  GainMapResult result;
-  result.base_linear = FloatImage(source.width, source.height, 3);
-  const float exposure = std::exp2(exposure_ev);
-  for (std::size_t index = 0; index < source.pixels.size(); ++index) {
-    const float value = source.pixels[index];
-    result.base_linear.pixels[index] =
-        std::isfinite(value) ? std::clamp(value * exposure, 0.0F, 1.0F) : 0.0F;
-  }
-  result.exposure_ev = exposure_ev;
-  result.stats.exposure_ev = exposure_ev;
-  apply_external_gain_map(result, std::move(external));
+  auto development = options;
+  const float strength = development.gain_strength;
+  development.gain_strength = 1.0F;
+  auto result = make_gain_map(source, development, capture);
+  apply_external_gain_map(result, std::move(external), strength);
   return result;
 }
 

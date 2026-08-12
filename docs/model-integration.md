@@ -4,9 +4,13 @@
 
 ```text
 input image
-  -> HyperDR thumbnail (RAW/HEIC only)
+  -> HyperDR photographic SDR development
+     (RAW uses LibRaw half-size; auto exposure + photographic-v1 tone/look)
+  -> stride-16 linear Display P3 HWC float32
   -> HyperDR_Model/infer_gain.py
-  -> model-gain.f32 + model-gain.json
+  -> model-gain.f32 + bound model-gain.json
+  -> full-resolution decode + replay the frozen development recipe
+  -> replace only the mathematical Gain Map
   -> HyperDR --external-gain ...
   -> HDR output
 ```
@@ -52,12 +56,34 @@ the model subprocess, writes intermediate files under the session's hidden
 `.model` directory, and passes the validated pair to HyperDR. A model failure
 stops the conversion before an output file is written.
 
-For direct CLI use, generate the pair first and then run:
+There is no sRGB JPEG intermediary. `HyperDR model-input` develops the SDR base
+first, resamples that base using the native area-then-bilinear convention, and
+writes little-endian HWC float32 linear Display P3 directly for PyTorch. This
+preserves P3 colours and avoids JPEG quantisation. RAW model preparation uses
+LibRaw's fixed half-size demosaic; the chosen exposure and full photographic
+recipe are written once and replayed during the later full-size export instead
+of being estimated again.
+
+The gain report carries `hyperdr.model-gain-binding/v1`: source SHA-256,
+highlight recovery, sensor raster, requested and delivered crop, orientation,
+developed/tensor/grid sizes, resize convention, model version and checkpoint
+SHA-256. HyperDR rejects a stale grid before rendering if any current source or
+decode property disagrees. Model preparation and ordinary RAW previews also use
+one shared process-wide RAW memory admission pool.
+
+For direct CLI use, generate the direct-float input and pair first, then run:
 
 ```powershell
-HyperDR convert photo.jpg --output out `
+HyperDR model-input photo.ARW --output out\model-input.f32 `
+  --report out\model-input.json --long-side 1024 --half-size
+python HyperDR_Model\infer_gain.py --input out\model-input.f32 `
+  --input-report out\model-input.json --checkpoint checkpoints\best.pt `
+  --gain-output out\model-gain.f32 --report out\model-gain.json `
+  --dataset-root dataset --allow-legacy-label-schema
+HyperDR convert photo.ARW --output out `
   --external-gain out\model-gain.f32 `
-  --external-gain-report out\model-gain.json
+  --external-gain-report out\model-gain.json `
+  --allow-legacy-external-gain
 ```
 
 Phase A v2 sidecars declare `label_contract_id=hyperdr.apple-gain-label/v2`
@@ -70,3 +96,14 @@ When the input itself is an Apple gain-map HEIC, an external v2 grid selects
 the embedded SDR base item instead of applying the embedded gain first. This
 prevents the source map from being double-counted before the model grid is
 encoded.
+
+## Experimental RAW model limitations
+
+The current checkpoint was trained from Apple-rendered SDR rather than generic
+camera RAW. Camera colour, noise and exposure distributions can therefore shift
+predictions. The frozen v1 head predicts only normalized positive gain in the
+fixed 0–3 stop range; it cannot emit negative gain or native signed ISO v2, and
+it does not consume ISO, shutter, aperture or camera-model metadata. LibRaw
+highlight recovery is not Apple's SDR/HDR processing. The unified base and
+binding contract remove the previous reference-image error, but they do not
+remove these model-domain limitations or make quality uniform across cameras.

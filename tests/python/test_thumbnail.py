@@ -128,6 +128,15 @@ class ThumbnailCacheTests(unittest.TestCase):
 class PreviewEndpointTests(unittest.TestCase):
     """What the browser is allowed to ask for."""
 
+    @staticmethod
+    def _native_result(data=b"HYPREV1\nfloat-planes", *, status="ok", reasons=None):
+        return data, {
+            "width": 2,
+            "height": 2,
+            "status": status,
+            "degradationReasons": list(reasons or []),
+        }
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.previous_root = session.WORK_ROOT
@@ -146,7 +155,7 @@ class PreviewEndpointTests(unittest.TestCase):
         def fake(source, highlight_recovery, max_edge):
             seen["mode"] = highlight_recovery
             seen["edge"] = max_edge
-            return b"jpeg", (2, 2), "image/jpeg", 1.0, 0.0
+            return self._native_result()
 
         with mock.patch.object(api, "thumbnail_for", fake):
             response = api.preview(self.context, {
@@ -160,7 +169,7 @@ class PreviewEndpointTests(unittest.TestCase):
 
         def fake(source, highlight_recovery, max_edge):
             seen["mode"] = highlight_recovery
-            return b"jpeg", (2, 2), "image/jpeg", 1.0, 0.0
+            return self._native_result()
 
         with mock.patch.object(api, "thumbnail_for", fake):
             api.preview(self.context, {"id": [self.session_id]})
@@ -177,31 +186,36 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertEqual(response.status, 400)
         self.assertIn("preview edge", response.payload["error"])
 
-    def test_the_headroom_scale_reaches_the_browser(self):
-        # An HDR input's preview is divided down to fit in eight bits, and the
-        # browser cannot undo that without being told by how much.
-        with mock.patch.object(api, "thumbnail_for",
-                               lambda source, mode, edge: (b"jpeg", (2, 2),
-                                                           "image/jpeg", 8.0, 1.5)):
+    def test_the_native_hdr_packet_reaches_the_browser_without_8_bit_scaling(self):
+        packet = b"HYPREV1\nlinear-p3-float-planes"
+        with mock.patch.object(
+                api, "thumbnail_for",
+                lambda source, mode, edge: self._native_result(packet)):
             response = api.preview(self.context, {"id": [self.session_id]})
         self.assertEqual(response.status, 200)
-        self.assertEqual(response.headers["X-Preview-Scale"], "8")
-        self.assertEqual(response.headers["X-Preview-Exposure"], "1.5")
+        self.assertEqual(response.body, packet)
+        self.assertEqual(response.content_type, "application/vnd.hyperdr.preview")
+        self.assertNotIn("X-Preview-Scale", response.headers)
+        self.assertNotIn("X-Preview-Exposure", response.headers)
 
-    def test_an_sdr_preview_reports_no_scaling(self):
-        with mock.patch.object(api, "thumbnail_for",
-                               lambda source, mode, edge: (b"jpeg", (2, 2),
-                                                           "image/jpeg", 1.0, 0.0)):
+    def test_a_native_preview_reports_its_status_and_degradation(self):
+        with mock.patch.object(
+                api, "thumbnail_for",
+                lambda source, mode, edge: self._native_result(
+                    status="degraded", reasons=["embedded-preview-only"])):
             response = api.preview(self.context, {"id": [self.session_id]})
-        self.assertEqual(response.headers["X-Preview-Scale"], "1")
-        self.assertEqual(response.headers["X-Preview-Exposure"], "0")
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.headers["X-Preview-Status"], "degraded")
+        self.assertEqual(
+            response.headers["X-Preview-Degradation-Reasons"],
+            "embedded-preview-only")
 
     def test_every_converter_mode_is_accepted(self):
         # Validated against the converter's own schema, so a mode added to the
         # C++ enum cannot be left rejected here.
-        with mock.patch.object(api, "thumbnail_for",
-                               lambda source, mode, edge: (b"jpeg", (2, 2),
-                                                           "image/jpeg", 1.0, 0.0)):
+        with mock.patch.object(
+                api, "thumbnail_for",
+                lambda source, mode, edge: self._native_result()):
             for mode in api._HIGHLIGHT_RECOVERY_CHOICES:
                 response = api.preview(self.context, {"id": [self.session_id], "hr": [mode]})
                 self.assertEqual(response.status, 200, mode)

@@ -26,7 +26,11 @@ from .config import IS_WINDOWS, REPO_ROOT
 from .curve import look_curve
 from .executable import detect_exe
 from .schema import SETTINGS
-from .thumbnail import DEFAULT_HIGHLIGHT_RECOVERY, MAX_EDGE, thumbnail_for
+from .native_preview import DEFAULT_HIGHLIGHT_RECOVERY, MAX_EDGE, preview_for
+
+# Compatibility injection point for older panel tests and embedders. Production
+# resolves to the native float-frame provider; it is no longer a JPEG builder.
+thumbnail_for = preview_for
 
 # Errors an endpoint may raise for a bad request, as opposed to a bug.
 REQUEST_ERRORS = (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError)
@@ -122,13 +126,22 @@ def state(context: Context, _query: dict) -> Response:
 
 
 def preview(_context: Context, query: dict) -> Response:
-    """The small JPEG the browser builds its live HDR preview from.
+    """Native linear-P3 SDR-base and reconstructed-HDR float planes.
 
     `hr` is the highlight-recovery mode the panel currently has selected. It
     belongs here because it changes the RAW decode, and therefore the preview:
     leaving it out is what made the control look inert.
     """
-    highlight_recovery = _first(query, "hr", DEFAULT_HIGHLIGHT_RECOVERY)
+    try:
+        options = json.loads(_first(query, "options", "{}"))
+        if not isinstance(options, dict):
+            raise ValueError("preview options must be an object")
+        if "external_gain" in options or "external_gain_report" in options:
+            raise ValueError("preview paths are server-controlled")
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        return error("invalid preview options: %s" % exc)
+    highlight_recovery = str(options.get("highlightRecovery") or
+                             _first(query, "hr", DEFAULT_HIGHLIGHT_RECOVERY))
     if highlight_recovery not in _HIGHLIGHT_RECOVERY_CHOICES:
         return error("unknown highlight recovery: %s" % highlight_recovery)
     try:
@@ -138,26 +151,44 @@ def preview(_context: Context, query: dict) -> Response:
     if not 320 <= requested_edge <= MAX_EDGE:
         return error("preview edge must be between 320 and %s" % MAX_EDGE)
     try:
-        data, dimensions, mime, scale, exposure = thumbnail_for(
-            session.input_path(_first(query, "id")), highlight_recovery, requested_edge)
+        use_model = options.pop("useModel", False)
+        if not isinstance(use_model, bool):
+            raise ValueError("useModel must be a boolean")
+        if use_model:
+            strength = options.get("modelStrength", 1.0)
+            if (isinstance(strength, bool) or not isinstance(strength, (int, float))
+                    or not math.isfinite(strength) or not 0 <= strength <= 1):
+                raise ValueError("modelStrength must be a number in [0, 1]")
+            options["hdrStrength"] = strength
+            model_dir = session.session_dir(
+                _first(query, "id"), "output") / ".model-preview"
+            options["external_gain"] = model_dir / "model-gain.f32"
+            options["external_gain_report"] = model_dir / "model-gain.json"
+        options["highlightRecovery"] = highlight_recovery
+        provider_argument = options if thumbnail_for is preview_for else highlight_recovery
+        generated = thumbnail_for(
+            session.input_path(_first(query, "id")), provider_argument, requested_edge)
+        if len(generated) == 3:  # pre-v1 injected test provider
+            data, dimensions, mime = generated
+            return Response(body=data, content_type=mime, headers={
+                "X-Preview-Width": str(dimensions[0]),
+                "X-Preview-Height": str(dimensions[1]),
+                "X-Preview-Max-Edge": str(requested_edge),
+            })
+        data, metadata = generated
     except Busy as exc:
         # Distinct from a missing or broken image: the request was refused, not
         # answered, and a client may retry it.
         return error(exc, status=exc.status)
     except (OSError, ValueError) as exc:
         return error(exc, status=404)
-    return Response(body=data, content_type=mime, headers={
-        "X-Preview-Width": str(dimensions[0]),
-        "X-Preview-Height": str(dimensions[1]),
+    return Response(body=data, content_type="application/vnd.hyperdr.preview", headers={
+        "X-Preview-Width": str(metadata["width"]),
+        "X-Preview-Height": str(metadata["height"]),
         "X-Preview-Max-Edge": str(requested_edge),
-        # What the linear image was divided by to fit in eight bits. One for any
-        # SDR input; an HLG or PQ photograph needs the browser to multiply it
-        # back before the curve, or its highlights are a flat white that no
-        # amount of HDR expansion can bring back.
-        "X-Preview-Scale": ("%g" % scale),
-        # RAW is scene-linear. This is the automatic photographic exposure
-        # before the browser's user-controlled brightness bias.
-        "X-Preview-Exposure": ("%g" % exposure),
+        "X-Preview-Status": str(metadata.get("status", "error")),
+        "X-Preview-Degradation-Reasons": ",".join(
+            metadata.get("degradationReasons") or []),
     })
 
 

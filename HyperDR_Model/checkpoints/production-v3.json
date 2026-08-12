@@ -1,0 +1,114 @@
+{
+  "schema": "hyperdr.model-release/v1",
+  "model_id": "hyperdr.direct-fixed-incumbent/v3-production",
+  "status": "production",
+  "released_at": "2026-08-13T03:04:28+10:00",
+  "label_contract_id": "hyperdr.apple-gain-label/v2",
+  "checkpoint": {
+    "file": "production-v3.pt",
+    "sha256": "286024d47db090f321d3cf31ad6b3a7b405557da41b0eac84e38824adfdf97d6",
+    "size_bytes": 7686794,
+    "epoch": 4
+  },
+  "model": {
+    "family": "DirectGainMapNet",
+    "architecture": "baseline",
+    "base_channels": 24,
+    "parameters": 635113,
+    "input": "linear Display-P3 SDR, BCHW, three channels",
+    "output": "single-channel raw signed log2 gain in stops",
+    "target_mode": "signed_stops"
+  },
+  "selection_validation": {
+    "fold": 4,
+    "samples": 92,
+    "capture_groups": 50,
+    "primary_metric": "canonical-G MAE in stops, capture-group equal weighted",
+    "primary_value": 0.23068173145369764,
+    "pixel_mae_stops": 0.22360150192094885,
+    "absolute_highlight_mae_stops": 0.27122855056077244,
+    "selection_role": "checkpoint and epoch selection; not a fresh blind test"
+  },
+  "development_oof_reference": {
+    "run": "/home/ryan/runs/hyperdr/direct-fixed-incumbent-v3-r2",
+    "folds": 4,
+    "seeds_per_fold": 3,
+    "primary_mean": 0.2370973630263435,
+    "ci95": [
+      0.21754105991040246,
+      0.25821035345906634
+    ]
+  },
+  "training": {
+    "run": "/home/ryan/runs/hyperdr/direct-production-v3-20260813-r1",
+    "source_repository": "https://github.com/w1135766898/HyperDR_Model.git",
+    "source_commit": "46a4ce098304e3b79608bdaf54b7fe0be999ddb1",
+    "source_patch": "production-v3-training.patch",
+    "source_patch_sha256": "714aad92bcd70a3a82883390d87de0d8ddef5273f819bf106698123698fc5ec9",
+    "source_files_sha256": {
+      "train.py": "c795e8c20fbf83cdfc28ce3b7940b77ba0731d1a16660412e6d05e59752cdb3b",
+      "hyperdr_ml/model.py": "045a14703cde6036bf8407f7283ca74283a639288407435f4932fc8381f6e3ed",
+      "hyperdr_ml/data.py": "c7d08574b0e6409622c3e4cd09d3d27e5a6b11458153f1bd3905eec97d4d7afd",
+      "hyperdr_ml/loss.py": "88f4754c22989b1d06461384e8766c2ebe18c79694be4d13f1a9551809850aa0"
+    },
+    "config_sha256": "090fd1912a9038a8b6ce2cfe67115c78b0ee90969f7d17ca7c029d9f5ce13d4c",
+    "config_file_sha256": "31de21f68201d402d3f7fcda355bb85d97c03c92228a256125db8c3e4210a89f",
+    "history_sha256": "f38f9cc4a22c718deafdd63f9482d29a13bbac7643f1390f20b3caad5613efbf",
+    "seed": 20260730,
+    "seed_policy": "first preregistered development seed; no seed cherry-picking",
+    "epochs": 80,
+    "batch_size": 8,
+    "learning_rate": 0.0003,
+    "weight_decay": 0.0001,
+    "lambda_gradient": 0.2,
+    "lambda_global_mean": 0.1,
+    "highlight_weight": 0.0,
+    "label_subset": "iso_native",
+    "train_folds": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "selection_fold": 4,
+    "train_samples": 326,
+    "selection_samples": 92,
+    "manifest_sha256": "fba4dc31c8d06e5fc98aa9658a186d1310f8c67358669221663b4b7ed0570612",
+    "cv_folds_sha256": "9d11bbec05aa4c503c4bb6a25caa1ca3dcfdf67c0a8c66d5d4e5d3a6258014c6",
+    "train_source_digest": "740387cc33656142f8ec2574a14aa73af13eade07de52ca433bc6eb42a5793db",
+    "selection_source_digest": "61544f6386a450ca08b666446a5275ba5cff94c025bd0f8345dc51ee8bdded5b"
+  },
+  "deployment": {
+    "gain_scale": "signed_log2_gain",
+    "gain_sidecar_contract": "hyperdr.apple-gain-label/v2",
+    "checkpoint_selection": "explicit production-v3.pt; legacy best.pt retained only as fallback",
+    "rollback_checkpoint": "best.pt"
+  },
+  "deployment_validation": {
+    "validated_at": "2026-08-13T03:07:27+10:00",
+    "platform": "Windows CPU inference plus native HyperDR converter",
+    "fixture": "tests/macos_t2/probes/normal-512x384-repaired.heic",
+    "fixture_sha256": "c45bb3422630cbda932f0e13a5848e1e1fcd5ae97ee8d52b0b628b2eda537027",
+    "model_tensor_size": [
+      256,
+      192
+    ],
+    "gain_grid_size": [
+      16,
+      12
+    ],
+    "predicted_gain_stops": {
+      "min": 0.3779596984386444,
+      "mean": 0.8046050071716309,
+      "max": 1.1478195190429688
+    },
+    "native_conversion_success": true,
+    "native_output_self_verified": true,
+    "gain_clipped_fraction": 0.0
+  },
+  "limitations": [
+    "The selection-fold score was used to choose the epoch and is not an untouched blind-test estimate.",
+    "Training data is Apple-rendered ISO-native SDR and does not cover every camera or rendering pipeline.",
+    "The deployed model predicts gain only; ISO gain-map metadata is conservatively derived from each prediction."
+  ]
+}

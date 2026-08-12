@@ -81,6 +81,29 @@ void check_energy_is_not_lost() {
           "resampling must approximately preserve total energy");
 }
 
+void check_single_axis_downscale_is_antialiased() {
+  hyperdr::FloatImage horizontal(16, 1, 1);
+  for (std::uint32_t x = 0; x < horizontal.width; ++x) {
+    horizontal.at(x, 0, 0) = static_cast<float>(x % 2U);
+  }
+  const auto horizontal_reduced =
+      hyperdr::resample_to(std::move(horizontal), 5, 1);
+  for (std::uint32_t x = 0; x < horizontal_reduced.width; ++x) {
+    require(std::abs(horizontal_reduced.at(x, 0, 0) - 0.5F) < 1.0e-6F,
+            "horizontal-only downscale must low-pass high frequencies");
+  }
+
+  hyperdr::FloatImage vertical(1, 16, 1);
+  for (std::uint32_t y = 0; y < vertical.height; ++y) {
+    vertical.at(0, y, 0) = static_cast<float>(y % 2U);
+  }
+  const auto vertical_reduced = hyperdr::resample_to(std::move(vertical), 1, 5);
+  for (std::uint32_t y = 0; y < vertical_reduced.height; ++y) {
+    require(std::abs(vertical_reduced.at(0, y, 0) - 0.5F) < 1.0e-6F,
+            "vertical-only downscale must low-pass high frequencies");
+  }
+}
+
 void check_exact_size() {
   const auto exact = hyperdr::resample_to(constant_image(1000, 500, 1.0F), 333, 111);
   require(exact.width == 333 && exact.height == 111, "resample_to must honour its size");
@@ -126,6 +149,7 @@ int main() {
     check_no_upscale_and_passthrough();
     check_linear_light_is_preserved();
     check_energy_is_not_lost();
+    check_single_axis_downscale_is_antialiased();
     check_exact_size();
     check_large_coordinate_precision();
     check_size_overflow_is_rejected();

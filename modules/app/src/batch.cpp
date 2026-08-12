@@ -115,13 +115,16 @@ GainMapOptions replay_external_development(
       binding.delivered_crop_top != decoded.delivered_crop_top) {
     reject("delivered crop origin");
   }
+  const bool same_delivered_size =
+      binding.delivered_crop_width == decoded.decoded_width &&
+      binding.delivered_crop_height == decoded.decoded_height;
   const bool delivered_matches = binding.raw_half_size
-      ? half_size_matches_full(binding.delivered_crop_width,
-                               decoded.decoded_width) &&
-            half_size_matches_full(binding.delivered_crop_height,
-                                   decoded.decoded_height)
-      : binding.delivered_crop_width == decoded.decoded_width &&
-            binding.delivered_crop_height == decoded.decoded_height;
+      ? (options.decode_intent == DecodeIntent::Preview && same_delivered_size) ||
+            (half_size_matches_full(binding.delivered_crop_width,
+                                    decoded.decoded_width) &&
+             half_size_matches_full(binding.delivered_crop_height,
+                                    decoded.decoded_height))
+      : same_delivered_size;
   if (!delivered_matches) reject("delivered crop");
 
   GainMapOptions replay = options.gain;

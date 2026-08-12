@@ -40,10 +40,22 @@ export async function createHdrRenderer(canvas, onDeviceLost) {
   if (!adapter) throw new Error("No WebGPU adapter");
   const device = await adapter.requestDevice();
   const context = canvas.getContext("webgpu");
+  if (!context) { device.destroy(); throw new Error("No WebGPU canvas context"); }
   const configuration = { device, format: "rgba16float", colorSpace: "display-p3",
     alphaMode: "opaque", toneMapping: { mode: "extended" } };
-  try { context.configure(configuration); }
-  catch (_) { delete configuration.colorSpace; context.configure(configuration); }
+  try {
+    context.configure(configuration);
+    const actual = context.getConfiguration?.();
+    if (actual?.format !== configuration.format ||
+        actual?.colorSpace !== configuration.colorSpace ||
+        actual?.toneMapping?.mode !== configuration.toneMapping.mode) {
+      throw new Error("WebGPU canvas did not apply the requested HDR configuration");
+    }
+  } catch (error) {
+    context.unconfigure?.();
+    device.destroy();
+    throw error;
+  }
   const module = device.createShaderModule({ code: SHADER });
   const pipeline = await device.createRenderPipelineAsync({
     layout: "auto", vertex: { module, entryPoint: "vertexMain" },
@@ -69,7 +81,7 @@ export async function createHdrRenderer(canvas, onDeviceLost) {
   };
 
   return {
-    kind: "hdr", outputColorSpace: configuration.colorSpace || "srgb",
+    kind: "hdr", outputColorSpace: configuration.colorSpace,
     upload(next) {
       textures.forEach((t) => t.destroy()); frame = next;
       textures = [uploadPlane(next.base, next.width, next.height), uploadPlane(next.hdr, next.width, next.height)];
@@ -88,6 +100,10 @@ export async function createHdrRenderer(canvas, onDeviceLost) {
       pass.setPipeline(pipeline); pass.setBindGroup(0, bindGroup); pass.draw(3); pass.end();
       device.queue.submit([encoder.finish()]);
     },
-    destroy() { destroyed = true; textures.forEach((t) => t.destroy()); uniform.destroy(); bindGroup = null; },
+    destroy() {
+      if (destroyed) return;
+      destroyed = true; textures.forEach((t) => t.destroy()); uniform.destroy(); bindGroup = null;
+      context.unconfigure?.(); device.destroy();
+    },
   };
 }

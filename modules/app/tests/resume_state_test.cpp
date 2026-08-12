@@ -279,6 +279,17 @@ void check_model_binding_rejects_stale_gain() {
               replay.look.vibrance == 0.12F,
           "model recipe look was not replayed");
 
+  // The model input and the fast RAW preview are both decoded at half size.
+  // A final export below still has to match the binding at exactly 2x.
+  auto preview_image = image;
+  preview_image.decode.decoded_width = 32;
+  preview_image.decode.decoded_height = 40;
+  auto preview_options = options;
+  preview_options.decode_intent = hyperdr::DecodeIntent::Preview;
+  preview_options.raw.half_size = true;
+  static_cast<void>(hyperdr::replay_external_development(
+      external, source, preview_image, preview_options));
+
   const auto rejected = [&](const auto& mutate) {
     auto stale_external = external;
     auto stale_image = image;
@@ -301,9 +312,21 @@ void check_model_binding_rejects_stale_gain() {
           }),
           "gain from a different highlight recovery was accepted");
   require(rejected([](auto&, auto& current, auto&) {
-            current.decode.decoded_width = 62;
-          }),
+             current.decode.decoded_width = 62;
+           }),
           "gain from a different delivered crop was accepted");
+  require(rejected([](auto&, auto& current, auto&) {
+            current.decode.decoded_width = 32;
+            current.decode.decoded_height = 40;
+          }),
+          "final export accepted the model's half-size delivered crop");
+  require(rejected([](auto&, auto& current, auto& current_options) {
+            current.decode.decoded_width = 31;
+            current.decode.decoded_height = 40;
+            current_options.decode_intent = hyperdr::DecodeIntent::Preview;
+            current_options.raw.half_size = true;
+          }),
+          "half-size preview accepted a different delivered crop");
   std::filesystem::remove(source);
 }
 

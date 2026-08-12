@@ -498,6 +498,68 @@ void reconstruct_and_check(const std::vector<std::uint8_t>& bytes, const char* l
   std::filesystem::remove(temp_tiff);
 }
 
+// The display curve is a difference between two renders, so the one case whose
+// answer is known without a second implementation is a file against itself:
+// every headroom must report exactly zero error and identical clamping in both
+// arms. That is a weak claim about accuracy and a strong one about wiring - it
+// fails if the two arms are decoded or rendered differently, if the statistics
+// are read from the wrong arm, or if they are never populated at all.
+void display_curve_identity_check(const std::vector<std::uint8_t>& bytes, const char* label) {
+  const auto temp_heic = std::filesystem::temp_directory_path() / "hyperdr-display-curve-test.heic";
+  hyperdr::write_binary_file_atomic(temp_heic, bytes, true);
+  const std::vector<float> headrooms{0.0F, 1.0F, 2.5F};
+  const auto result = hyperdr::compare_gain_map_heic_curve(temp_heic, temp_heic, headrooms);
+  std::filesystem::remove(temp_heic);
+
+  require(result.points.size() == headrooms.size(),
+          "display curve did not report one point per requested headroom");
+  for (std::size_t index = 0; index < result.points.size(); ++index) {
+    const auto& point = result.points[index];
+    const std::string where =
+        std::string(label) + " at headroom " + std::to_string(headrooms[index]);
+    require(point.headroom_stops == headrooms[index],
+            (where + ": headroom was not echoed back").c_str());
+    require(point.mae_linear_p3 == 0.0 && point.mse_linear_p3 == 0.0 &&
+                point.max_abs_error_linear_p3 == 0.0,
+            (where + ": a file compared against itself reported nonzero error").c_str());
+    // Measured zeros, not absent counts: the totals have to be populated for the
+    // clamp rates the protocol compares between arms to mean anything.
+    require(point.total_values > 0 && point.total_pixels > 0,
+            (where + ": clamp statistics were not populated").c_str());
+    require(point.reference_clamp_values == point.candidate_clamp_values &&
+                point.reference_clamp_pixels == point.candidate_clamp_pixels,
+            (where + ": identical inputs clamped by different amounts").c_str());
+  }
+}
+
+// The identity check above passes vacuously if the comparison reports zero for
+// everything, so one pair that must differ is measured too: the same base with a
+// perturbed Gain Map. This asserts only that the difference is seen and that the
+// summaries are mutually consistent; how large it should be is what T6 measures.
+void display_curve_difference_check(const std::vector<std::uint8_t>& reference_bytes,
+                                    const std::vector<std::uint8_t>& candidate_bytes,
+                                    const char* label) {
+  const auto directory = std::filesystem::temp_directory_path();
+  const auto reference = directory / "hyperdr-display-curve-reference.heic";
+  const auto candidate = directory / "hyperdr-display-curve-candidate.heic";
+  hyperdr::write_binary_file_atomic(reference, reference_bytes, true);
+  hyperdr::write_binary_file_atomic(candidate, candidate_bytes, true);
+  const auto result =
+      hyperdr::compare_gain_map_heic_curve(reference, candidate, {0.0F, 1.0F, 2.5F});
+  std::filesystem::remove(reference);
+  std::filesystem::remove(candidate);
+
+  require(result.points.size() == 3, "display curve dropped a requested headroom");
+  for (const auto& point : result.points) {
+    const std::string where =
+        std::string(label) + " at headroom " + std::to_string(point.headroom_stops);
+    require(point.max_abs_error_linear_p3 >= point.mae_linear_p3,
+            (where + ": maximum error fell below the mean").c_str());
+  }
+  require(result.points.back().mae_linear_p3 > 0.0,
+          (std::string(label) + ": a perturbed Gain Map reported no difference at all").c_str());
+}
+
 }  // namespace
 
 int main() {
@@ -522,6 +584,7 @@ int main() {
     check_semantic_rejections(bytes8);
     hyperdr::verify_heic_decodable(bytes8);
     reconstruct_and_check(bytes8, "8-bit grid");
+    display_curve_identity_check(bytes8, "8-bit grid");
 
     // Single-tile 8-bit output.
     const auto small = make_synthetic(64, 32);
@@ -591,6 +654,16 @@ int main() {
     check_input_headroom(small8, "adaptive-headroom", ".heic");
 
 
+    // Same base, compressed the same way; only the Gain Map codes move, so any
+    // difference the curve reports has to come from the gain path.
+    auto perturbed_probe = lossless_probe;
+    for (auto& code : perturbed_probe.gain_map.pixels) {
+      code = std::min(1.0F, code * 0.5F + 0.25F);
+    }
+    const auto perturbed8 = hyperdr::encode_adaptive_heic(perturbed_probe, metadata, 80, 8);
+    display_curve_identity_check(small8, "8-bit single");
+    display_curve_difference_check(small8, perturbed8, "8-bit single, perturbed Gain Map");
+
     // Single-image BT.2100 exports must be Main10, carry the requested transfer
     // function, remain distinct from gain-map topology, and decode end-to-end.
     try {
@@ -656,6 +729,7 @@ int main() {
       check_structure(bytes10, "10-bit single");
       decode_and_check(bytes10, 64, 32);
       reconstruct_and_check(bytes10, "10-bit single");
+      display_curve_identity_check(bytes10, "10-bit single");
       std::cout << "10-bit Main10 round trip passed\n";
     } catch (const std::exception& e) {
       if (std::string(e.what()).find("Bit depth not supported") == std::string::npos) {

@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "protocol_id": "hyperdr.display-domain/v1/T2",
+  "protocol_registration": {
+    "repository": "HyperDR_Model",
+    "path": "reports/display-domain-protocol-registration.json",
+    "sha256": "9247b3cd0c140a4da7731700c3a05e08bc82b60d67ee30ebd2a36eafcb07390c",
+    "requirement": "Independent macOS ImageIO/Core Image comparison at two distinct EDR headrooms; adjudicate code-domain versus decoded-domain interpolation when gamma != 1."
+  },
+  "purpose": "Adjudicate code-domain versus decoded-domain gain-map interpolation with gamma != 1 using an independent macOS Core Image renderer.",
+  "geometry_note": "The pair was 8x4 over a 2x2 gain map until 2026-08-10. macOS ImageIO exposed no ISO gain map for any file of that size across three runs, because an image below 64 pixels in either dimension is coded as a padded 64x64 HEVC frame and cropped back by an essential clap; an ordinary-size file from the same writer is read normally, including before any container repair. 128x128 over 64x64 is the smallest tested geometry that avoids the padding path entirely. The acceptance object below is unchanged, and the separation it has to detect is larger at this geometry than at the old one: mean |code-domain minus decoded-domain| is 0.017056 at H=0.5, 0.041077 at H=1.0 and 0.074619 at H=1.5, against a floor of 0.004. Evidence: HyperDR_Model/reports/macos-t2-container-finding.{json,md}.",
+  "base": {
+    "width": 128,
+    "height": 128,
+    "rgb8": [96, 128, 160]
+  },
+  "gain": {
+    "width": 64,
+    "height": 64,
+    "pattern": {
+      "type": "alternating_columns",
+      "canonical_log2_stops": [0.0, 2.0],
+      "note": "Column x carries canonical_log2_stops[x % 2]. Adjacent samples differ by the full interval, so every interpolated output pixel separates the two interpolation orders, and the endpoint codes 0 and 255 both occur as the validator requires."
+    }
+  },
+  "metadata_common": {
+    "minimum_version": 0,
+    "writer_version": 0,
+    "flags": 64,
+    "use_base_color_space": true,
+    "backward_direction": false,
+    "common_denominator": false,
+    "base_headroom": {"numerator": 0, "denominator": 1},
+    "alternate_headroom": {"numerator": 2, "denominator": 1},
+    "gain_min": {"numerator": 0, "denominator": 1},
+    "gain_max": {"numerator": 2, "denominator": 1},
+    "base_offset": {"numerator": 0, "denominator": 1},
+    "alternate_offset": {"numerator": 0, "denominator": 1}
+  },
+  "fixtures": [
+    {"id": "gamma-1-control", "filename": "fixtures/gamma-1-control.heic", "gamma": {"numerator": 1, "denominator": 1}},
+    {"id": "gamma-2-probe", "filename": "fixtures/gamma-2-probe.heic", "gamma": {"numerator": 2, "denominator": 1}}
+  ],
+  "harness_scope_note": "The registered acceptance object below judges the path where this harness resamples the gain map itself and hands Core Image a full-resolution code image. That path settles the interpolation order by construction — codes are interpolated here and decoded there — so it tests the decode formula, the interval mapping and the weight semantics, and it cannot answer which order Apple's decoder uses. The question T2 was registered to settle is only asked by the path where Core Image receives the native-resolution gain map and does the upsampling. That path is rendered and recorded as core_image_upsampled_gain, and its decision rule is registered below, before any such data exists.",
+  "core_image_upsampled_gain_acceptance": {
+    "registered_utc": "2026-08-10",
+    "registered_before_any_observation": "No run has ever produced this measurement: the first three macOS runs stopped before Core Image rendered anything, and the path itself did not exist until this revision.",
+    "comparison": "At each registered headroom, compare core_image_upsampled_gain.rgb against the two C++ hypotheses already emitted for that node, code_domain_rgb and decoded_domain_first_rgb.",
+    "code_domain_mean_absolute_error_max": 0.001,
+    "code_domain_max_absolute_error_max": 0.003,
+    "alternative_mean_absolute_error_min": 0.004,
+    "code_to_alternative_mae_ratio_max": 0.25,
+    "verdict_rule": "Apple interpolates in the code domain if the code-domain errors clear both maxima and the alternative is at least four times worse at every registered headroom; Apple interpolates in the decoded domain if the same holds with the two hypotheses exchanged; anything else is unresolved and must be reported as unresolved rather than resolved by the closer of two poor fits.",
+    "kernel_confound": "A failure of both hypotheses does not adjudicate the order. It says Apple's upsampling differs from bilinear-with-edge-clamping in kernel or convention, and separating that needs a fixture whose interpolated values are kernel-independent, which this one is not."
+  },
+  "physical_headroom_stops": [0.5, 1.0, 1.5],
+  "core_image_headroom_rule": "Pass 2^H to CIImage.applyingGainMap(_:headroom:); Core Image's API uses a linear ratio while the registered independent variable H is in stops.",
+  "acceptance": {
+    "code_domain_mean_absolute_error_max": 0.001,
+    "code_domain_max_absolute_error_max": 0.003,
+    "probe_alternative_mean_absolute_error_min": 0.004,
+    "probe_code_to_alternative_mae_ratio_max": 0.25,
+    "rationale": "The absolute floor is below the analytically generated H=0.5 separation (~0.009 for a 0.25 linear base) but above the C++ agreement tolerance; the ratio gate independently requires a fourfold preference for code-domain interpolation."
+  }
+}

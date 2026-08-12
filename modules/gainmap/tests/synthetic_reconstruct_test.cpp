@@ -100,23 +100,149 @@ void test_reverse_headroom_direction() {
                 "reverse headroom did not apply a negative weight");
 }
 
-void test_gamma_interpolation_order_is_not_assumed() {
+void test_gamma_interpolation_order_is_code_domain() {
   auto metadata = positive_metadata();
   metadata.gamma = {2, 1};
   hyperdr::FloatImage gain(2, 1, 1);
   gain.pixels[0] = 0.0F;
   gain.pixels[1] = 1.0F;
-  hyperdr::FloatImage base(2, 1, 3);
+  hyperdr::FloatImage base(4, 1, 3);
   for (float& sample : base.pixels) sample = 1.0F;
 
-  // This fixture records the unresolved T2 question rather than choosing a
-  // decoder convention: endpoint samples test gamma, while cross-pixel
-  // interpolation order requires an independent decoder comparison.
-  const auto left = hyperdr::reconstruct_gain_map(base, gain, metadata, 2.0F);
-  require_close(left.pixels[0], 1.0F, 1.0e-6F,
+  // T2 was adjudicated on 2026-08-09: macOS 26 Core Image, handed the
+  // native-resolution gain map so that it performs the upsampling itself,
+  // matches code-domain interpolation to floating-point noise, while the
+  // decoded-domain hypothesis is four orders of magnitude worse at every
+  // registered headroom. The order is no longer a convention this fixture
+  // declines to choose; it is decoder behaviour the renderer is held to.
+  // Verdict, competing hypothesis and scope:
+  // HyperDR_Model/reports/macos-t2-interpolation-verdict.json.
+  //
+  // A four-wide base over a two-wide gain map puts the sample centres at codes
+  // 0, 0.25, 0.75 and 1. Only the interior pair discriminates; the endpoints
+  // agree under either order because there is nothing there to interpolate.
+  const auto rendered =
+      hyperdr::reconstruct_gain_map(base, gain, metadata, 2.0F);
+  require_close(rendered.pixels[0], 1.0F, 1.0e-6F,
                 "gamma fixture changed the zero-code endpoint");
-  require_close(left.pixels[3], 4.0F, 1.0e-6F,
+  require_close(rendered.pixels[9], 4.0F, 1.0e-6F,
                 "gamma fixture changed the one-code endpoint");
+
+  for (const auto& [pixel, code] : {
+           std::pair{1U, 0.25F},
+           std::pair{2U, 0.75F},
+       }) {
+    // Interpolate codes, then invert the gamma: log_gain = 2 * sqrt(code).
+    const float code_domain = std::exp2(2.0F * std::sqrt(code));
+    // The registered alternative, as implemented in tests/macos_t2/
+    // cpp_reference.cpp: invert the gamma at each gain sample first, then
+    // interpolate, then map into [gain_min, gain_max].
+    const float decoded_domain = std::exp2(2.0F * code);
+
+    require_close(rendered.pixels[pixel * 3U], code_domain, 1.0e-6F,
+                  "interior pixel did not follow code-domain interpolation");
+    // Guard the fixture, not only the renderer. The endpoint-only version of
+    // this test could not have answered the question it was named after; if a
+    // future geometry change stops the two orders from disagreeing here, this
+    // fails loudly instead of passing vacuously.
+    require(std::abs(code_domain - decoded_domain) > 0.4F,
+            "fixture no longer separates the two interpolation orders");
+  }
+}
+
+void test_clamp_statistics_are_reported() {
+  // A render with nothing to clamp must say so, or a zero clamp count means
+  // "not measured" and "measured zero" at the same time.
+  hyperdr::ReconstructionStats quiet{};
+  (void)hyperdr::reconstruct_gain_map(base_image(1.0F), gain_image(0.5F),
+                                      positive_metadata(), 1.0F, &quiet);
+  require(quiet.total_values == 3 && quiet.total_pixels == 1,
+          "totals were not reported for an unclamped render");
+  require(quiet.clamp_values == 0 && quiet.clamp_pixels == 0,
+          "an unclamped render reported clamped samples");
+
+  // Only the red channel goes negative. Counting values and pixels separately
+  // is what makes that visible: both pixels are affected, but only two of the
+  // six channel samples are. Collapsing the two counts would let a wholly
+  // clamped render and a one-channel clip report the same number, and the
+  // protocol compares clamp rates between arms at every headroom.
+  auto metadata = positive_metadata();
+  metadata.flags |= 0x80U;
+  metadata.channels = {
+      {{-1, 1}, {-1, 1}, {1, 1}, {0, 1}, {2, 1}},
+      {{0, 1}, {1, 1}, {1, 1}, {0, 1}, {0, 1}},
+      {{0, 1}, {1, 1}, {1, 1}, {0, 1}, {0, 1}},
+  };
+  hyperdr::FloatImage base(2, 1, 3);
+  for (float& sample : base.pixels) sample = 1.0F;
+  hyperdr::FloatImage gain(2, 1, 3);
+  for (float& code : gain.pixels) code = 1.0F;
+
+  hyperdr::ReconstructionStats stats{};
+  const auto rendered =
+      hyperdr::reconstruct_gain_map(base, gain, metadata, 2.0F, &stats);
+  require_close(rendered.pixels[0], 0.0F, 1.0e-6F,
+                "the negative red channel was not clamped");
+  require_close(rendered.pixels[1], 2.0F, 1.0e-6F,
+                "green was affected by red's clamp");
+  require_close(rendered.pixels[2], 2.0F, 1.0e-6F,
+                "blue was affected by red's clamp");
+  require(stats.total_values == 6 && stats.total_pixels == 2,
+          "totals did not match the image size");
+  require(stats.clamp_values == 2, "clamped channel samples were miscounted");
+  require(stats.clamp_pixels == 2,
+          "pixels with a clamped channel were miscounted");
+}
+
+void test_three_channel_reconstruction_uses_each_channel() {
+  auto metadata = positive_metadata();
+  metadata.flags |= 0x80U;
+  metadata.channels = {
+      {{0, 1}, {0, 1}, {1, 1}, {0, 1}, {0, 1}},
+      {{0, 1}, {1, 1}, {1, 1}, {0, 1}, {0, 1}},
+      {{0, 1}, {2, 1}, {1, 1}, {0, 1}, {0, 1}},
+  };
+  hyperdr::FloatImage gain(1, 1, 3);
+  for (float& code : gain.pixels) code = 1.0F;
+
+  const auto rendered = hyperdr::reconstruct_gain_map(
+      base_image(1.0F), gain, metadata, 2.0F);
+  require_close(rendered.pixels[0], 1.0F, 1.0e-6F,
+                "red reconstruction did not use red metadata");
+  require_close(rendered.pixels[1], 2.0F, 1.0e-6F,
+                "green reconstruction fell back to channel zero");
+  require_close(rendered.pixels[2], 4.0F, 1.0e-6F,
+                "blue reconstruction fell back to channel zero");
+}
+
+void test_channel_mismatch_is_rejected() {
+  auto metadata = positive_metadata();
+  metadata.flags |= 0x80U;
+  metadata.channels = {
+      {{0, 1}, {1, 1}, {1, 1}, {0, 1}, {0, 1}},
+      {{0, 1}, {1, 1}, {1, 1}, {0, 1}, {0, 1}},
+      {{0, 1}, {1, 1}, {1, 1}, {0, 1}, {0, 1}},
+  };
+  bool rejected = false;
+  try {
+    (void)hyperdr::reconstruct_gain_map(
+        base_image(1.0F), gain_image(1.0F), metadata, 1.0F);
+  } catch (const std::invalid_argument&) {
+    rejected = true;
+  }
+  require(rejected,
+          "three-channel metadata silently consumed a one-channel gain map");
+
+  hyperdr::FloatImage rgb_gain(1, 1, 3);
+  rejected = false;
+  try {
+    (void)hyperdr::reconstruct_gain_map(
+        base_image(1.0F), rgb_gain, positive_metadata(), 1.0F);
+  } catch (const std::invalid_argument&) {
+    rejected = true;
+  }
+  require(rejected,
+          "one-channel metadata silently consumed a three-channel gain map");
 }
 
 }  // namespace
@@ -126,7 +252,10 @@ int main() {
     test_physical_headroom_weight();
     test_negative_gain_clamp();
     test_reverse_headroom_direction();
-    test_gamma_interpolation_order_is_not_assumed();
+    test_gamma_interpolation_order_is_code_domain();
+    test_clamp_statistics_are_reported();
+    test_three_channel_reconstruction_uses_each_channel();
+    test_channel_mismatch_is_rejected();
     std::cout << "synthetic reconstruction tests passed\n";
     return 0;
   } catch (const std::exception& error) {

@@ -20,7 +20,12 @@ struct GpsPosition {
 };
 
 struct PhotoMetadata {
-  std::string make{"SONY"};
+  // Empty means "the input did not say". It used to default to "SONY" and the
+  // raster decoders overwrote it with the container's name, so a converted HEIC
+  // was exported claiming a camera manufacturer of "HEIC". Every producer now
+  // either reads a real value out of the input's Exif or leaves this blank, and
+  // a blank one writes no Make tag at all.
+  std::string make;
   std::string model;
   std::string lens;
   std::string lens_make;
@@ -41,14 +46,31 @@ struct PhotoMetadata {
 [[nodiscard]] std::vector<std::uint8_t> make_minimal_exif(const PhotoMetadata& metadata);
 [[nodiscard]] std::string make_xmp(const PhotoMetadata& metadata, float headroom_stops);
 
-// Reads the Orientation tag (IFD0, 0x0112) out of a TIFF/Exif block: the
-// payload of a JPEG APP1 marker with its "Exif\0\0" prefix already removed, or
-// a standalone Exif item from a container.
+// What an input's Exif block says about the photograph.
 //
-// Returns nullopt when the block is absent, truncated, malformed, or simply
-// carries no Orientation, so a caller can distinguish "no tag" from an
-// explicit orientation 1. Every offset is bounds-checked against `size`: this
-// parses attacker-controlled bytes.
+// The camera, the lens and the capture settings are read, not invented: every
+// field a producer cannot find is left at its default, and `orientation` is
+// nullopt rather than 1 when the block carries no Orientation tag, so a caller
+// can tell "no tag" from an explicit "already upright". `metadata.orientation`
+// mirrors it when one is present.
+//
+// The block may be the payload of a JPEG APP1 marker, a HEIF `Exif` item with
+// its four-byte offset prefix still attached, or libavif's Exif payload: the
+// reader finds the TIFF byte-order mark within a short leading window rather
+// than making each caller know its container's preamble.
+//
+// Every offset is bounds-checked against `size` and nothing here throws: this
+// parses attacker-controlled bytes, and a malformed block costs a field rather
+// than the conversion.
+struct ExifRead {
+  PhotoMetadata metadata;
+  std::optional<std::uint16_t> orientation;
+};
+
+[[nodiscard]] ExifRead read_exif(const std::uint8_t* data, std::size_t size);
+
+// Just the Orientation tag, for callers that normalise rotation and want
+// nothing else. A thin call into read_exif, so there is one parser.
 [[nodiscard]] std::optional<std::uint16_t> read_exif_orientation(
     const std::uint8_t* data, std::size_t size);
 

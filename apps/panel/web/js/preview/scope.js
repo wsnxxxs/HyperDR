@@ -17,10 +17,17 @@ import { __math, sampleModelGain } from "./cpu.js";
 /* One pass over the source: luma + per-channel counts, clipping, zebra masks.
  * The masks are painted with the token colours read at call time, so a theme
  * flip between images cannot leave yesterday's red on today's photo. */
-export function analyse(source) {
+export function analyse(source, scene = source, sceneScale = 1) {
   const data = source.data;
+  const sceneData = scene.data;
   const { width } = source;
   const luma = new Uint32Array(256);
+  // A second luma histogram over the *unscaled* preview codes. `source` is the
+  // SDR rendition -- clipped at white, which is what the drawn input series and
+  // the zebras want -- but the simulated output series has to start from the
+  // scene, or an HDR input's highlights would be modelled as already blown and
+  // the graph would show no expansion where the picture plainly has some.
+  const sceneLuma = new Uint32Array(256);
   const red = new Uint32Array(256);
   const green = new Uint32Array(256);
   const blue = new Uint32Array(256);
@@ -38,6 +45,9 @@ export function analyse(source) {
     red[r]++; green[g]++; blue[b]++;
     const y = Math.round(0.2126 * r + 0.7152 * g + 0.0722 * b);
     luma[y < 0 ? 0 : y > 255 ? 255 : y]++;
+    const sy = Math.round(0.2126 * sceneData[p] + 0.7152 * sceneData[p + 1]
+      + 0.0722 * sceneData[p + 2]);
+    sceneLuma[sy < 0 ? 0 : sy > 255 ? 255 : sy]++;
 
     const peak = Math.max(r, g, b);
     const isHot = peak >= 250;
@@ -61,6 +71,9 @@ export function analyse(source) {
 
   return {
     source,
+    scene,
+    sceneScale,
+    sceneLuma,
     histogram: { luma, red, green, blue, total },
     clipping: { hot: hot / total, cold: cold / total },
     zebraHot,
@@ -74,10 +87,10 @@ export function analyse(source) {
  * around the same luma axis, and a one-dimensional luma histogram has no hue or
  * saturation data from which to model the rare gamut-clamp correction. 256 bins
  * instead of a pixel walk keeps this cheap enough to redraw during a drag. */
-function simulateOutput(luma, state, curve) {
+function simulateOutput(luma, state, curve, sceneScale = 1) {
   const { SRGB_TO_LINEAR, linearToSrgb8, shoulder } = __math;
   const out = new Float32Array(256);
-  const exposure = Math.pow(2, state.brightness);
+  const exposure = Math.pow(2, state.brightness) * sceneScale;
   for (let i = 0; i < 256; i++) {
     const count = luma[i];
     if (!count) continue;
@@ -92,7 +105,7 @@ function simulateOutput(luma, state, curve) {
  * like the mathematical curve. Sample the actual pixels and the same bilinear
  * gain grid as the renderers. A bounded stride keeps slider motion responsive
  * for 2K previews while preserving the distribution's shape. */
-function simulateModelOutput(source, modelGain, strength) {
+function simulateModelOutput(source, modelGain, strength, sceneScale = 1) {
   const { SRGB_TO_LINEAR, linearToSrgb8, shoulder, SRGB_LUMA } = __math;
   const output = {
     luma: new Float32Array(256),
@@ -110,9 +123,10 @@ function simulateModelOutput(source, modelGain, strength) {
       2,
       sampleModelGain(modelGain, x, y, source.width, source.height) * strength,
     );
-    const r = linearToSrgb8(shoulder(SRGB_TO_LINEAR[source.data[offset]] * gain));
-    const g = linearToSrgb8(shoulder(SRGB_TO_LINEAR[source.data[offset + 1]] * gain));
-    const b = linearToSrgb8(shoulder(SRGB_TO_LINEAR[source.data[offset + 2]] * gain));
+    const scaled = gain * sceneScale;
+    const r = linearToSrgb8(shoulder(SRGB_TO_LINEAR[source.data[offset]] * scaled));
+    const g = linearToSrgb8(shoulder(SRGB_TO_LINEAR[source.data[offset + 1]] * scaled));
+    const b = linearToSrgb8(shoulder(SRGB_TO_LINEAR[source.data[offset + 2]] * scaled));
     const luma = Math.round(SRGB_LUMA[0] * r + SRGB_LUMA[1] * g + SRGB_LUMA[2] * b);
     output.red[r]++;
     output.green[g]++;
@@ -199,7 +213,8 @@ export function mountScope({ curve, analysis }) {
 
     const { histogram } = data;
     const modelOutput = state.previewOptimized && analysis.modelGain
-      ? simulateModelOutput(data.source, analysis.modelGain, state.modelStrength)
+      ? simulateModelOutput(data.scene, analysis.modelGain, state.modelStrength,
+                            data.sceneScale)
       : null;
     if (state.histMode === "rgb") {
       // Once model mode is active, RGB describes the current model rendition
@@ -212,7 +227,7 @@ export function mountScope({ curve, analysis }) {
       drawSeries(context, histogram.luma, palette.luma, null, width, height, true);
       const output = modelOutput
         ? modelOutput.luma
-        : simulateOutput(histogram.luma, state, curve);
+        : simulateOutput(data.sceneLuma, state, curve, data.sceneScale);
       drawSeries(context, output,
                  palette.output, null, width, height, false);
     }

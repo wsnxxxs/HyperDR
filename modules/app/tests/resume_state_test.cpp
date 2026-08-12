@@ -90,6 +90,15 @@ void check_resume_rejects_damaged_output() {
       output, input, hyperdr::input_stamp(input), options, fingerprint);
   require(hyperdr::output_is_current(output, input, options, fingerprint),
           "fresh output did not match its resume state");
+  const auto original_input_time = std::filesystem::last_write_time(input);
+  { std::ofstream file(input, std::ios::binary | std::ios::trunc); file << "other"; }
+  std::filesystem::last_write_time(input, original_input_time);
+  require(!hyperdr::output_is_current(output, input, options, fingerprint),
+          "same-size replaced input matched stale resume state");
+  { std::ofstream file(input, std::ios::binary | std::ios::trunc); file << "input"; }
+  std::filesystem::last_write_time(input, original_input_time);
+  require(hyperdr::output_is_current(output, input, options, fingerprint),
+          "restored input did not match its resume state");
   { std::ofstream file(output, std::ios::binary | std::ios::trunc); file << "result-two"; }
   require(!hyperdr::output_is_current(output, input, options, fingerprint),
           "same-size replaced output matched stale resume state");

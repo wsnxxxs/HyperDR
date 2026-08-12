@@ -22,6 +22,17 @@ void write_settings(json::Writer& writer, const ConvertOptions& options) {
   // The encoded depth, as opposed to the requested one: BT.2100 is always 10-bit.
   writer.member("output_depth", is_bt2100_encoding(options.encoding) ? 10 : options.depth);
   writer.end_object();
+  writer.begin_object("raw_processing")
+      .member("black_level_correction", "LibRaw metadata")
+      .member("white_balance", "camera WB")
+      .member("digital_gain", options.raw.digital_gain)
+      .member("auto_bad_pixel_correction",
+              options.raw.auto_bad_pixel_correction)
+      .member("bad_pixel_map", path_utf8(options.raw.bad_pixel_map))
+      .member("dark_frame", path_utf8(options.raw.dark_frame))
+      .member("linearization_lut", path_utf8(options.raw.linearization_lut))
+      .member("lens_shading_map", path_utf8(options.raw.lens_shading_map))
+      .end_object();
 }
 
 void write_stats(json::Writer& writer, const RenderStats& s) {

@@ -175,6 +175,16 @@ The diagnostic refuses to inspect test unless `--allow-test` is explicit.
 Architecture and seed selection should use validation only; evaluate test once
 after selection.
 
+The code-level incumbent is `DirectGainMapNet` (`GainMapNet` remains a
+checkpoint-compatible alias). Direct v3 freezes `baseline`, 24 base channels,
+and 80 epochs; its development OOF canonical-G MAE is 0.2371 stops. See
+`reports/direct-incumbent-v3.json`. That number summarizes the complete
+4-fold x 3-seed OOF matrix and must not be attached to the bundled legacy
+`checkpoints/best.pt`; a production checkpoint has not yet been selected.
+The `reports/` directory contains generated local evaluation results and is
+ignored by Git; preserve any result needed for comparison or regenerate it from
+the recorded run inputs.
+
 ## Evaluation and inference
 
 ```bash
@@ -191,6 +201,13 @@ PYTHONPATH=. .venv/bin/python infer_gain.py \
   --dataset-root ~/datasets/hyperdr-apple \
   --device auto
 ```
+
+The model input contract is linear Display-P3 SDR with diffuse white at 1.0.
+The HyperDR panel prepares non-raster inputs through its native thumbnail
+command; RAW/DNG model thumbnails use `--model-input`, which applies the shared
+automatic photographic exposure before JPEG encoding. The matching external
+gain export applies the same anchor to the decoded RAW base before clamping it
+to the SDR range.
 
 Evaluation streams error sums and pixel counts, so batches with different
 padding shapes are never concatenated. Evaluation and inference use CUDA when

@@ -93,6 +93,19 @@ void test_external_gain_round_trip() {
   require(pure.gain_map.pixels[0] == 0.5F,
           "pure external mode changed the model gain");
 
+  hyperdr::ExternalGainMap exposed_external{
+      hyperdr::FloatImage(1, 1, 1), 3.0F};
+  exposed_external.gain_map.pixels[0] = 0.5F;
+  const auto exposed = hyperdr::make_external_gain_map(
+      source, std::move(exposed_external), 1.0F, 1.0F);
+  require(exposed.exposure_ev == 1.0F &&
+              exposed.stats.exposure_ev == 1.0F,
+          "external exposure anchor was not reported");
+  require(exposed.base_linear.pixels[0] == 0.4F &&
+              exposed.base_linear.pixels[1] == 0.8F &&
+              exposed.base_linear.pixels[2] == 1.0F,
+          "external exposure anchor was not applied before clamping");
+
   hyperdr::ExternalGainMap half_external{
       hyperdr::FloatImage(1, 1, 1), 3.0F};
   half_external.gain_map.pixels[0] = 0.5F;

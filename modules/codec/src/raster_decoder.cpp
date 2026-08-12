@@ -6,11 +6,15 @@
 #include "hyperdr/foundation/parallel.hpp"
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/image_source.hpp"
+#include "hyperdr/gainmap/gain_map.hpp"
 #include "hyperdr/container/inspect.hpp"
 #include "hyperdr/container/iso_gain_map.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/gainmap/reconstruct.hpp"
+#include "hyperdr/look/analysis.hpp"
 #include "internal/budget.hpp"
+#include "internal/cicp.hpp"
+#include "internal/metadata.hpp"
 #include "internal/raw.hpp"
 #include "hyperdr/image/resample.hpp"
 #include "hyperdr/image/transfer.hpp"
@@ -42,7 +46,12 @@ namespace hyperdr {
 namespace {
 
 using codec::decode_raw;
+using codec::apply_exif;
+using codec::interleaved_rgb_to_linear_p3;
+using codec::normalize_orientation;
 using codec::raster_budget_ok;
+using codec::transfer_headroom;
+using codec::SourceColor;
 
 void check_raster_budget(std::uint32_t width, std::uint32_t height) {
   if (!raster_budget_ok(width, height)) {
@@ -56,205 +65,24 @@ struct FreeDeleter {
 using MallocBytes = std::unique_ptr<unsigned char, FreeDeleter>;
 
 // --- Colour management -----------------------------------------------------
-
-// How a decoded buffer describes its own colour. An embedded ICC profile wins
-// when present: it is the only description that can carry an arbitrary set of
-// primaries, and JPEG and PNG in the wild use it for exactly that. The CICP
-// pair is the fallback, and is what HEIF carries natively.
-struct SourceColor {
-  std::vector<std::uint8_t> icc;
-  heif_color_primaries primaries{heif_color_primaries_ITU_R_BT_709_5};
-  heif_transfer_characteristics transfer{heif_transfer_characteristic_IEC_61966_2_1};
-};
-
-struct ProfileDeleter {
-  void operator()(void* p) const { cmsCloseProfile(p); }
-};
-struct TransformDeleter {
-  void operator()(void* p) const { cmsDeleteTransform(p); }
-};
-using ProfileHandle = std::unique_ptr<void, ProfileDeleter>;
-using TransformHandle = std::unique_ptr<void, TransformDeleter>;
-
-// The working space: Display P3 primaries, D65, linear. Every decoder path
-// lands here, which is what lets the look, the gain map and the encoders
-// assume one colour space without asking where the pixels came from.
-ProfileHandle linear_display_p3_profile() {
-  cmsCIExyY white{0.3127, 0.3290, 1.0};
-  cmsCIExyYTRIPLE primaries{
-      {0.680, 0.320, 1.0}, {0.265, 0.690, 1.0}, {0.150, 0.060, 1.0}};
-  cmsToneCurve* curve = cmsBuildGamma(nullptr, 1.0);
-  if (!curve) throw std::runtime_error("cannot build a linear tone curve");
-  cmsToneCurve* curves[]{curve, curve, curve};
-  ProfileHandle profile(cmsCreateRGBProfile(&white, &primaries, curves));
-  cmsFreeToneCurve(curve);
-  if (!profile) throw std::runtime_error("cannot build the linear Display P3 profile");
-  return profile;
-}
-
-float decode_transfer(float encoded, heif_transfer_characteristics transfer) {
-  // CICP 0 is reserved and is also what a zero-initialised nclx box yields.
-  // Treat it exactly like an explicit "unspecified" rather than falling into
-  // the rejection below.
-  if (static_cast<int>(transfer) == 0) return srgb_eotf(encoded);
-  switch (transfer) {
-    case heif_transfer_characteristic_linear:
-      return encoded;
-    case heif_transfer_characteristic_ITU_R_BT_2100_0_PQ: {
-      constexpr float m1 = 2610.0F / 16384.0F;
-      constexpr float m2 = 2523.0F / 32.0F;
-      constexpr float c1 = 3424.0F / 4096.0F;
-      constexpr float c2 = 2413.0F / 128.0F;
-      constexpr float c3 = 2392.0F / 128.0F;
-      const float p = std::pow(encoded, 1.0F / m2);
-      const float normalized_10000_nits =
-          std::pow(std::max(p - c1, 0.0F) / std::max(c2 - c3 * p, 1.0e-6F),
-                   1.0F / m1);
-      return normalized_10000_nits * 10000.0F / kReferenceWhiteNits;
-    }
-    case heif_transfer_characteristic_ITU_R_BT_2100_0_HLG: {
-      constexpr float a = 0.17883277F;
-      constexpr float b = 0.28466892F;
-      constexpr float c = 0.55991073F;
-      constexpr float kNominalPeakNits = 1000.0F;
-      constexpr float kSystemGamma = 1.2F;
-      const float scene = encoded <= 0.5F
-                              ? (encoded * encoded) / 3.0F
-                              : (std::exp((encoded - c) / a) + b) / 12.0F;
-      const float display = std::pow(std::max(scene, 0.0F), kSystemGamma);
-      return display * kNominalPeakNits / kReferenceWhiteNits;
-    }
-    case heif_transfer_characteristic_IEC_61966_2_1:
-      return srgb_eotf(encoded);
-    // The four SDR broadcast curves are one function, and it is not sRGB.
-    case heif_transfer_characteristic_ITU_R_BT_709_5:
-    case heif_transfer_characteristic_ITU_R_BT_601_6:
-    case heif_transfer_characteristic_ITU_R_BT_2020_2_10bit:
-    case heif_transfer_characteristic_ITU_R_BT_2020_2_12bit:
-    // xvYCC and BT.1361 are the same curve with an extended range.
-    case heif_transfer_characteristic_IEC_61966_2_4:
-    case heif_transfer_characteristic_ITU_R_BT_1361:
-      return bt709_inverse_oetf(encoded);
-    case heif_transfer_characteristic_ITU_R_BT_470_6_System_M:
-      return std::pow(std::max(0.0F, encoded), 2.2F);
-    case heif_transfer_characteristic_ITU_R_BT_470_6_System_B_G:
-      return std::pow(std::max(0.0F, encoded), 2.8F);
-    // 0 and 2 mean "not stated". sRGB is the documented assumption for an
-    // 8-bit still image, and saying so here beats a silent default buried in
-    // a fallthrough.
-    case heif_transfer_characteristic_unspecified:
-      return srgb_eotf(encoded);
-    default:
-      break;
-  }
-  throw std::runtime_error("unsupported CICP transfer characteristic " +
-                           std::to_string(static_cast<int>(transfer)));
-}
-
-std::array<float, 3> encoded_to_linear_p3(float r, float g, float b,
-                                          heif_color_primaries primaries,
-                                          heif_transfer_characteristics transfer) {
-  const float R = decode_transfer(r, transfer);
-  const float G = decode_transfer(g, transfer);
-  const float B = decode_transfer(b, transfer);
-  if (static_cast<int>(primaries) == 0) return rec709_to_linear_p3(R, G, B);
-  switch (primaries) {
-    case heif_color_primaries_SMPTE_EG_432_1:  // Display P3, D65
-      return {std::max(0.0F, R), std::max(0.0F, G), std::max(0.0F, B)};
-    case heif_color_primaries_ITU_R_BT_2020_2_and_2100_0:
-      return rec2020_to_linear_p3(R, G, B);
-    case heif_color_primaries_ITU_R_BT_709_5:
-    case heif_color_primaries_unspecified:
-      return rec709_to_linear_p3(R, G, B);
-    default:
-      break;
-  }
-  // Explicit dispatch, not a Rec.709 catch-all: silently treating unknown
-  // primaries as Rec.709 is how a wide-gamut capture loses its saturation
-  // without anything in the log saying so.
-  throw std::runtime_error("unsupported CICP colour primaries " +
-                           std::to_string(static_cast<int>(primaries)));
-}
-
-// Converts an interleaved 8- or 16-bit RGB buffer through an embedded ICC
-// profile into linear Display P3. Little CMS applies the profile's transfer
-// curves and primaries in one step, which is the whole point: a Display P3
-// JPEG's pure red must land near (1, 0, 0), not at the (0.82, 0.03, 0.02) that
-// decoding it as Rec.709 produces.
-void convert_rows_with_icc(const std::uint8_t* pixels, std::uint32_t width,
-                           std::uint32_t height, std::size_t stride, int bits,
-                           const std::vector<std::uint8_t>& icc,
-                           FloatImage& out) {
-  ProfileHandle source(
-      cmsOpenProfileFromMem(icc.data(), static_cast<cmsUInt32Number>(icc.size())));
-  if (!source) throw std::runtime_error("embedded ICC profile is unreadable");
-  if (cmsGetColorSpace(source.get()) != cmsSigRgbData) {
-    throw std::runtime_error("embedded ICC profile is not an RGB profile");
-  }
-  const ProfileHandle destination = linear_display_p3_profile();
-  const TransformHandle transform(cmsCreateTransform(
-      source.get(), bits > 8 ? TYPE_RGB_16 : TYPE_RGB_8, destination.get(),
-      TYPE_RGB_FLT, INTENT_RELATIVE_COLORIMETRIC, 0));
-  if (!transform) throw std::runtime_error("cannot build the ICC colour transform");
-
-  // cmsDoTransform is documented as safe to call concurrently on one
-  // transform, so the rows parallelise exactly like the matrix path.
-  auto* handle = transform.get();
-  parallel_for_rows(height, [&](const std::uint32_t y) {
-    const auto* row = pixels + static_cast<std::size_t>(y) * stride;
-    float* target = out.pixels.data() + static_cast<std::size_t>(y) * width * 3;
-    cmsDoTransform(handle, row, target, width);
-    for (std::size_t i = 0; i < static_cast<std::size_t>(width) * 3; ++i) {
-      // Out-of-gamut inputs can come back very slightly negative.
-      target[i] = std::max(0.0F, target[i]);
-    }
-  });
-}
+//
+// The transfer functions, the primaries matrices and the ICC path all live in
+// internal/cicp.hpp, which the AVIF decoder shares. Only the bookkeeping around
+// them is here.
 
 DecodedImage from_interleaved_rgb(const std::uint8_t* pixels,
                                   std::uint32_t width, std::uint32_t height,
-                                  std::size_t stride, int bits, std::string make,
+                                  std::size_t stride, int bits,
                                   const SourceColor& color = {}) {
-  if (!width || !height) throw std::runtime_error("decoded image has invalid dimensions");
-  if (!pixels || bits < 1 || bits > 16) {
-    throw std::runtime_error("decoded image has invalid RGB depth");
-  }
   DecodedImage result;
-  result.linear_p3 = FloatImage(width, height, 3);
+  result.linear_p3 =
+      interleaved_rgb_to_linear_p3(pixels, width, height, stride, bits, color);
   result.decode.sensor_width = width;
   result.decode.sensor_height = height;
   result.decode.target_width = width;
   result.decode.target_height = height;
   result.decode.decoded_width = width;
   result.decode.decoded_height = height;
-
-  if (!color.icc.empty()) {
-    convert_rows_with_icc(pixels, width, height, stride, bits, color.icc,
-                          result.linear_p3);
-  } else {
-    const bool wide = bits > 8;
-    const float max_code = static_cast<float>((1U << bits) - 1U);
-    parallel_for_rows(height, [&](const std::uint32_t y) {
-      const auto* row = pixels + static_cast<std::size_t>(y) * stride;
-      for (std::uint32_t x = 0; x < width; ++x) {
-        std::array<float, 3> encoded{};
-        for (unsigned c = 0; c < 3; ++c) {
-          if (wide) {
-            const std::size_t offset = (static_cast<std::size_t>(x) * 3 + c) * 2;
-            const auto code = static_cast<std::uint16_t>(
-                row[offset] | (static_cast<std::uint16_t>(row[offset + 1]) << 8));
-            encoded[c] = code / max_code;
-          } else {
-            encoded[c] = row[static_cast<std::size_t>(x) * 3 + c] / max_code;
-          }
-        }
-        const auto p3 = encoded_to_linear_p3(encoded[0], encoded[1], encoded[2],
-                                             color.primaries, color.transfer);
-        for (unsigned c = 0; c < 3; ++c) result.linear_p3.at(x, y, c) = p3[c];
-      }
-    });
-  }
-  result.metadata.make = std::move(make);
   result.metadata.orientation = 1;
   return result;
 }
@@ -419,23 +247,19 @@ DecodedImage decode_jpeg(const std::filesystem::path& path) {
   }
   auto result = from_interleaved_rgb(
       rgb.get(), output.width, output.height,
-      static_cast<std::size_t>(output.width) * 3, 8, "JPEG", color);
+      static_cast<std::size_t>(output.width) * 3, 8, color);
   result.decode.resolution_reduced =
       output.scale_num != output.scale_denom;
 
-  // Orientation is normalised into the pixels rather than carried forward: a
-  // phone's landscape-stored portrait used to be exported with orientation 1
-  // and never rotated, so both the preview and the exported file were on
-  // their side and the reported width and height were the wrong way round.
-  const auto orientation =
-      output.exif_size == 0
-          ? std::nullopt
-          : read_exif_orientation(exif.get(), output.exif_size);
-  if (orientation && *orientation != 1) {
-    result.linear_p3 = apply_exif_orientation(std::move(result.linear_p3),
-                                              *orientation);
+  if (output.exif_size != 0) {
+    const auto exif_read = read_exif(exif.get(), output.exif_size);
+    apply_exif(result, exif_read);
+    // Orientation is normalised into the pixels rather than carried forward: a
+    // phone's landscape-stored portrait used to be exported with orientation 1
+    // and never rotated, so both the preview and the exported file were on
+    // their side and the reported width and height were the wrong way round.
+    if (exif_read.orientation) normalize_orientation(result, *exif_read.orientation);
   }
-  result.metadata.orientation = 1;
   return result;
 }
 
@@ -701,7 +525,7 @@ DecodedImage decode_png(const std::filesystem::path& path) {
   const std::size_t stride =
       static_cast<std::size_t>(output.width) * 3 * (output.bits == 16 ? 2U : 1U);
   auto result = from_interleaved_rgb(rgb.get(), output.width, output.height,
-                                     stride, output.bits, "PNG", color);
+                                     stride, output.bits, color);
   result.decode.resolution_reduced = output.downscale > 1;
   return result;
 }
@@ -724,7 +548,29 @@ struct DecodingOptionsDeleter {
   }
 };
 
-DecodedImage decode_heif_rgb_handle(const heif_image_handle* handle, std::string make) {
+// The camera and capture settings a HEIF carries, if any.
+//
+// libheif exposes metadata items by type; "Exif" is the one the standard names
+// and the one this project's own encoder writes. The payload begins with a
+// four-byte offset to the TIFF header, which read_exif skips for us.
+ExifRead read_heif_exif(const heif_image_handle* handle) {
+  heif_item_id id = 0;
+  if (heif_image_handle_get_list_of_metadata_block_IDs(handle, "Exif", &id, 1) != 1) {
+    return {};
+  }
+  const std::size_t size = heif_image_handle_get_metadata_size(handle, id);
+  // A still's Exif is kilobytes. Anything past a megabyte is not metadata this
+  // decoder needs to honour, and reading it would just be someone else's
+  // allocation budget.
+  if (size < 8 || size > (1U << 20U)) return {};
+  std::vector<std::uint8_t> block(size);
+  if (heif_image_handle_get_metadata(handle, id, block.data()).code != heif_error_Ok) {
+    return {};
+  }
+  return read_exif(block.data(), block.size());
+}
+
+DecodedImage decode_heif_rgb_handle(const heif_image_handle* handle) {
   SourceColor color;
   heif_color_profile_nclx* profile_raw = nullptr;
   const auto profile_error = heif_image_handle_get_nclx_color_profile(handle, &profile_raw);
@@ -808,8 +654,16 @@ DecodedImage decode_heif_rgb_handle(const heif_image_handle* handle, std::string
   auto result = from_interleaved_rgb(
       rgb, static_cast<std::uint32_t>(width),
       static_cast<std::uint32_t>(height),
-      static_cast<std::size_t>(stride), bits, std::move(make), color);
+      static_cast<std::size_t>(stride), bits, color);
   result.decode.resolution_reduced = resolution_reduced;
+  // An ICC-described HEIF is SDR; a CICP-described one is HDR exactly when its
+  // transfer function says so.
+  result.hdr_headroom = color.icc.empty() ? transfer_headroom(color.transfer) : 1.0F;
+  // Only the camera and capture settings: libheif has already applied the
+  // container's own `irot`/`imir` to these pixels, and HEIF makes those
+  // authoritative over any Exif Orientation the file also happens to carry.
+  // Rotating again here would put an upright photograph on its side.
+  apply_exif(result, read_heif_exif(handle));
   return result;
 }
 
@@ -828,7 +682,7 @@ DecodedImage decode_adaptive_heic(const std::vector<std::uint8_t>& bytes,
   check_heif(heif_context_get_image_handle(context, references.base_id, &base_handle_raw),
              "get Adaptive HDR base image");
   std::unique_ptr<heif_image_handle, HandleDeleter> base_handle(base_handle_raw);
-  auto result = decode_heif_rgb_handle(base_handle.get(), "HEIC Adaptive HDR");
+  auto result = decode_heif_rgb_handle(base_handle.get());
   if (base_only) return result;
 
   heif_image_handle* gain_handle_raw = nullptr;
@@ -874,6 +728,9 @@ DecodedImage decode_adaptive_heic(const std::vector<std::uint8_t>& bytes,
       static_cast<float>(metadata.alternate_headroom.denominator);
   result.linear_p3 = reconstruct_gain_map(result.linear_p3, gain, metadata,
                                           alternate_headroom);
+  // The base is a Display P3 SDR image, so the headroom is entirely whatever
+  // the gain map was written to add. `alternate_headroom` is in stops.
+  result.hdr_headroom = std::max(1.0F, std::exp2(alternate_headroom));
   return result;
 }
 
@@ -892,7 +749,7 @@ DecodedImage decode_heic(const std::filesystem::path& path,
   check_heif(heif_context_get_primary_image_handle(context.get(), &handle_raw),
              "HEIC primary image");
   std::unique_ptr<heif_image_handle, HandleDeleter> handle(handle_raw);
-  return decode_heif_rgb_handle(handle.get(), "HEIC");
+  return decode_heif_rgb_handle(handle.get());
 }
 
 }  // namespace
@@ -914,25 +771,96 @@ DecodedImage decode_image(const std::filesystem::path& path, const RawDecodeOpti
     return decode_jpeg(path);
   }
   if (ext == ".png") return decode_png(path);
+  if (ext == ".avif") return decode_avif(path);
   if (ext == ".heic" || ext == ".heif") {
+    // An AVIF is occasionally handed over under a HEIF name -- both are the
+    // same container family and .heic is what a phone gallery exports as. The
+    // signature decides, because libheif would otherwise reject an AV1 payload
+    // with an error about the codec rather than simply reading it.
+    if (is_avif_file(path)) return decode_avif(path);
     return decode_heic(path, options.ignore_embedded_gain_map);
   }
   throw std::invalid_argument("unsupported input format: " + ext);
 }
 
-std::vector<std::uint8_t> encode_preview_jpeg(const std::filesystem::path& path,
-                                              std::uint32_t max_edge,
-                                              int quality,
-                                              const RawDecodeOptions& options) {
+// How far above the display range this preview has to reach.
+//
+// A power of two, so the consumer's multiply is exact and a small change in the
+// picture cannot make the preview shift brightness. The ceiling is a real
+// trade-off rather than a round number: the preview is 8-bit, and dividing by
+// the scale pushes diffuse white down the code range with it -- at 8, SDR white
+// lands on code 71 of 255 and the shadows start to band. Eight covers the whole
+// of HLG (1000/203 = 4.93) and clips only the extreme specular end of PQ, which
+// is the better half of the bargain. An SDR input measures at or below 1 and
+// gets a scale of 1, so its preview is byte-for-byte what it always was.
+constexpr float kMaxPreviewScale = 8.0F;
+
+// Whether to divide, and by how much.
+//
+// The gate is the input *format*, not the pixels. Choosing this from a
+// percentile alone was wrong: a RAW decodes to values above 1.0 whenever
+// white-balance normalisation leaves headroom there, so some frames in a shoot
+// were scaled and others were not, and the ones that were spent a quarter of
+// their preview code values on range that auto-exposure was about to bring back
+// down anyway. Scene-referred and SDR inputs are therefore never scaled, and
+// their previews are byte-for-byte what they always were.
+//
+// The magnitude still comes from the content, because a PQ file that happens to
+// hold an SDR-range picture should not be darkened for headroom it does not
+// use.
+float preview_scale_for(const FloatImage& source, float hdr_headroom) {
+  if (!(hdr_headroom > 1.0F)) return 1.0F;
+  const SceneStatistics stats = compute_luminance_statistics(source);
+  const float ceiling = std::min(kMaxPreviewScale, hdr_headroom);
+  float scale = 1.0F;
+  while (scale * 2.0F <= ceiling && stats.p9999 > scale) scale *= 2.0F;
+  return scale;
+}
+
+// RAW is scene-referred, while the browser controls (and the exported SDR
+// base) are display-referred. The old preview only performed the first half of
+// that conversion: it decoded linear RAW values and sent them through sRGB
+// without the automatic exposure that the gain-map renderer applies later.
+// That made the same file look dark in the panel even though the export had
+// already been lifted to the photographic middle grey. Return only the
+// automatic part here; the browser's brightness slider remains the user's
+// exposure bias and therefore continues to match the export.
+float raw_preview_exposure_ev(const std::filesystem::path& path,
+                              const FloatImage& source,
+                              const CaptureMetadata& capture) {
+  const auto ext = lower_extension(path);
+  if (ext != ".arw" && ext != ".dng") return 0.0F;
+  GainMapOptions options;
+  // The panel applies the user's brightness separately. The model input and
+  // the renderer therefore need the automatic anchor without that bias.
+  options.exposure_bias_ev = 0.0F;
+  return photographic_exposure_ev(source, options, capture);
+}
+
+PreviewJpeg encode_preview_jpeg(const std::filesystem::path& path,
+                                std::uint32_t max_edge, int quality,
+                                const RawDecodeOptions& options,
+                                bool apply_scene_exposure) {
   if (max_edge == 0 || max_edge > 8192) {
     throw std::invalid_argument("preview max edge must be in [1,8192]");
   }
   auto decoded = decode_image(path, options);
+  // Measure before resampling so the exposure anchor is not a function of the
+  // requested preview size. Half-size RAW callers still intentionally trade
+  // demosaic detail for speed, but the exposure algorithm is shared with the
+  // formal photographic renderer.
+  const float exposure_ev =
+      raw_preview_exposure_ev(path, decoded.linear_p3, decoded.capture);
   // Identical policy to the --preview-max-edge conversion path: repeated 2x2
   // area reduction in linear light, then one bilinear step to the exact size.
   auto source = resample_to_max_edge(std::move(decoded.linear_p3), max_edge);
   const auto width = source.width;
   const auto height = source.height;
+  const float scale = preview_scale_for(source, decoded.hdr_headroom);
+  const float inverse_scale = 1.0F / scale;
+  const float scene_exposure = apply_scene_exposure
+                                   ? std::exp2(exposure_ev)
+                                   : 1.0F;
 
   std::vector<std::uint8_t> rgb(static_cast<std::size_t>(width) * height * 3);
   parallel_for_rows(height, [&](const std::uint32_t y) {
@@ -946,7 +874,8 @@ std::vector<std::uint8_t> encode_preview_jpeg(const std::filesystem::path& path,
       const auto pixel = (static_cast<std::size_t>(y) * width + x) * 3;
       for (unsigned c = 0; c < 3; ++c) {
         rgb[pixel + c] = static_cast<std::uint8_t>(std::lround(
-            std::clamp(srgb_oetf(srgb[c]), 0.0F, 1.0F) * 255.0F));
+            std::clamp(srgb_oetf(srgb[c] * scene_exposure * inverse_scale),
+                       0.0F, 1.0F) * 255.0F));
       }
     }
   });
@@ -981,7 +910,7 @@ std::vector<std::uint8_t> encode_preview_jpeg(const std::filesystem::path& path,
   std::vector<std::uint8_t> result(output, output + output_size);
   jpeg_destroy_compress(&info);
   std::free(output);
-  return result;
+  return {std::move(result), scale, exposure_ev};
 }
 
 }  // namespace hyperdr

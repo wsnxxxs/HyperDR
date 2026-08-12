@@ -57,6 +57,15 @@ int main() {
     require(nested.size() == 2 && contains(nested, raw) && contains(nested, jpeg),
             "recursive discovery included its nested output directory");
 
+    // AVIF is an input as well as an output. It was the one encoding this tool
+    // could write but not read, so a folder of its own results was invisible to
+    // it -- and `discover_input_files` is the list that decides.
+    const auto avif = input / "nested" / "scene.avif";
+    touch(avif);
+    const auto with_avif = hyperdr::discover_input_files(options);
+    require(contains(with_avif, avif), "discovery did not accept an AVIF input");
+    require(hyperdr::is_supported_input(avif), "AVIF is not a supported input");
+
     const auto same_directory_output = input / "photo-hyperdr.heic";
     touch(same_directory_output);
     options.output_directory = input;

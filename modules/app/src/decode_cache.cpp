@@ -22,7 +22,7 @@ constexpr std::array<char, 8> kMagic{'H', 'D', 'R', 'C', 'A', 'C', 'H', '3'};
 // build that started writing a new field would silently read old entries that
 // lacked it -- which is how a cache hit came to produce different Exif from
 // the decode that filled it.
-constexpr std::uint32_t kCacheSchema = 5;
+constexpr std::uint32_t kCacheSchema = 6;
 
 // x86-64 and arm64, the only targets this project builds for, are both little
 // endian; the cache is a local scratch format and is never transported.
@@ -54,8 +54,9 @@ std::optional<float> read_optional(const json::Value& parent, std::string_view k
 // software, focal_length_35mm and GPS on the floor, so the same input produced
 // different Exif and XMP depending on whether the decode had been cached --
 // a difference that only appears on the second run and never in a single-run
-// test. A field added to PhotoMetadata must be added here too; the schema
-// number above exists so that forgetting is a miss rather than a silent loss.
+// test. A field added to PhotoMetadata, CaptureMetadata, DecodeInfo or
+// DecodedImage itself must be added here too; the schema number above exists so
+// that forgetting is a miss rather than a silent loss.
 std::string metadata_json(const DecodedImage& value) {
   const auto& m = value.metadata;
   const auto& c = value.capture;
@@ -89,6 +90,10 @@ std::string metadata_json(const DecodedImage& value) {
       .member("decode_target_dimensions_applied", d.target_dimensions_applied)
       .member("decode_default_crop_present", d.default_crop_present)
       .member("decode_degraded", d.degraded)
+      // Not metadata about the photograph but about its encoding, and the
+      // preview divides by it: a cache hit that lost it would serve an HDR
+      // input's thumbnail unscaled and the panel would clip it.
+      .member("hdr_headroom", value.hdr_headroom)
       .member("has_gps", m.gps.has_value());
   writer.begin_array("decode_degradation_reasons");
   for (const auto& reason : d.degradation_reasons) {
@@ -144,6 +149,7 @@ void apply_metadata_json(const std::string& text, DecodedImage& out) {
     }
     out.metadata.gps = gps;
   }
+  out.hdr_headroom = read_optional(document, "hdr_headroom").value_or(1.0F);
   out.capture.iso = read_optional(document, "capture_iso");
   out.capture.exposure_time_seconds =
       read_optional(document, "capture_exposure_time_seconds");

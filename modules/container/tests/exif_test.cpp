@@ -129,12 +129,93 @@ void test_orientation_reader() {
           "an out-of-range IFD offset is rejected");
 }
 
+// The writer and the reader, checked against each other.
+//
+// Container inputs used to arrive with no camera and no capture settings at
+// all, and the exported file claimed a manufacturer of "HEIC". Reading Exif
+// back is what fixed that, and holding it to what make_minimal_exif emits is
+// the only check that cannot drift: if either side changes its mind about a
+// tag, this fails.
+void test_round_trip() {
+  hyperdr::PhotoMetadata written;
+  written.make = "SONY";
+  written.model = "ILCE-7RM5";
+  written.lens = "FE 24-70mm F2.8 GM II";
+  written.lens_make = "SONY";
+  written.artist = "A Photographer";
+  written.copyright = "All rights reserved";
+  written.date_time = "2026:08:08 12:34:56";
+  written.orientation = 6;
+  written.iso = 12800;
+  written.exposure_seconds = 1.0 / 250.0;
+  written.aperture = 2.8;
+  written.focal_length_mm = 35.0;
+  written.focal_length_35mm = 35.0;
+
+  const auto block = hyperdr::make_minimal_exif(written);
+  const auto read = hyperdr::read_exif(block.data(), block.size());
+  const auto& m = read.metadata;
+  require(m.make == written.make, "Make did not survive the round trip");
+  require(m.model == written.model, "Model did not survive the round trip");
+  require(m.lens == written.lens, "LensModel did not survive the round trip");
+  require(m.lens_make == written.lens_make, "LensMake did not survive the round trip");
+  require(m.artist == written.artist, "Artist did not survive the round trip");
+  require(m.copyright == written.copyright, "Copyright did not survive the round trip");
+  require(m.iso == written.iso, "ISO did not survive the round trip");
+  require(std::abs(m.exposure_seconds - written.exposure_seconds) < 1.0e-4,
+          "ExposureTime did not survive the round trip");
+  require(std::abs(m.aperture - written.aperture) < 1.0e-4,
+          "FNumber did not survive the round trip");
+  require(std::abs(m.focal_length_mm - written.focal_length_mm) < 1.0e-3,
+          "FocalLength did not survive the round trip");
+  require(m.focal_length_35mm == written.focal_length_35mm,
+          "FocalLengthIn35mmFilm did not survive the round trip");
+  require(read.orientation.has_value() && *read.orientation == 6,
+          "Orientation did not survive the round trip");
+
+  // An empty Make writes no tag rather than an empty one, and reads back empty.
+  hyperdr::PhotoMetadata anonymous;
+  anonymous.model = "Unnamed";
+  const auto blank = hyperdr::make_minimal_exif(anonymous);
+  const auto blank_read = hyperdr::read_exif(blank.data(), blank.size());
+  require(blank_read.metadata.make.empty(), "an absent Make must read back empty");
+  require(blank_read.metadata.model == "Unnamed", "Model is independent of Make");
+  require(!blank_read.orientation.has_value() || *blank_read.orientation == 1,
+          "a default orientation reads back as upright");
+}
+
+// A HEIF `Exif` item prefixes the TIFF header with a four-byte offset. The
+// reader finds the byte-order mark instead of making every container's caller
+// know its own preamble, so both shapes have to work.
+void test_preamble_is_skipped() {
+  hyperdr::PhotoMetadata written;
+  written.model = "Prefixed";
+  written.iso = 400;
+  const auto tiff = hyperdr::make_minimal_exif(written);
+
+  std::vector<std::uint8_t> prefixed{0, 0, 0, 0};
+  prefixed.insert(prefixed.end(), tiff.begin(), tiff.end());
+  const auto read = hyperdr::read_exif(prefixed.data(), prefixed.size());
+  require(read.metadata.model == "Prefixed",
+          "a HEIF Exif item's offset prefix must be skipped");
+  require(read.metadata.iso == 400, "capture settings survive the prefix");
+
+  // Not Exif at all: no byte-order mark anywhere in the leading window.
+  const std::vector<std::uint8_t> noise(64, 0x7F);
+  require(hyperdr::read_exif(noise.data(), noise.size()).metadata.model.empty(),
+          "a block with no TIFF header yields nothing");
+  require(hyperdr::read_exif(nullptr, 0).metadata.model.empty(),
+          "an absent block yields nothing");
+}
+
 }  // namespace
 
 int main() {
   try {
     test_exif();
     test_orientation_reader();
+    test_round_trip();
+    test_preamble_is_skipped();
     std::cout << "Exif tests passed\n";
     return 0;
   } catch (const std::exception& e) {

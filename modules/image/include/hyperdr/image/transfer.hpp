@@ -1,14 +1,20 @@
 #pragma once
 
-// Every transfer function the pipeline encodes through: sRGB/Display-P3 for the
-// SDR base and the gain map, PQ and HLG for the BT.2100 renditions, plus the
-// P3 -> Rec.2020 primaries matrix those two share.
+// Every transfer function the pipeline encodes and decodes through:
+// sRGB/Display-P3 for the SDR base and the gain map, PQ and HLG for the BT.2100
+// renditions, plus the P3 -> Rec.2020 primaries matrix those two share.
 //
 // PQ and HLG were private to the HEIF encoder until AVIF needed exactly the same
 // maths. Sharing them keeps a PQ AVIF and a PQ HEIC bit-identical in their
 // sample values, which is the only way the two containers can be described as
 // the same rendition. sRGB arrived here from the gain-map renderer for the same
 // reason: the base image and the file's own verification pass have to agree.
+//
+// The BT.2100 *inverses* live here too, beside the functions they undo. They
+// used to be written out a second time inside the raster decoder, which meant
+// reading back a PQ or HLG file this project had just written relied on two
+// independent transcriptions of the same standard agreeing. They are each
+// other's inverse by construction now, and transfer_test holds them to it.
 
 #include <algorithm>
 #include <array>
@@ -68,6 +74,18 @@ inline constexpr float kReferenceWhiteNits = 203.0F;
   return std::pow((c1 + c2 * p) / (1.0F + c3 * p), m2);
 }
 
+[[nodiscard]] inline float pq_eotf(float encoded) {
+  constexpr float m1 = 2610.0F / 16384.0F;
+  constexpr float m2 = 2523.0F / 32.0F;
+  constexpr float c1 = 3424.0F / 4096.0F;
+  constexpr float c2 = 2413.0F / 128.0F;
+  constexpr float c3 = 2392.0F / 128.0F;
+  const float p = std::pow(std::max(0.0F, encoded), 1.0F / m2);
+  const float normalized_10000_nits =
+      std::pow(std::max(p - c1, 0.0F) / std::max(c2 - c3 * p, 1.0e-6F), 1.0F / m1);
+  return normalized_10000_nits * 10000.0F / kReferenceWhiteNits;
+}
+
 [[nodiscard]] inline float hlg_oetf(float relative_linear) {
   constexpr float kNominalPeakNits = 1000.0F;
   constexpr float kSystemGamma = 1.2F;
@@ -81,6 +99,19 @@ inline constexpr float kReferenceWhiteNits = 203.0F;
   const float scene = std::pow(display, 1.0F / kSystemGamma);
   return scene <= 1.0F / 12.0F ? std::sqrt(3.0F * scene)
                                : a * std::log(12.0F * scene - b) + c;
+}
+
+[[nodiscard]] inline float hlg_inverse_oetf(float encoded) {
+  constexpr float kNominalPeakNits = 1000.0F;
+  constexpr float kSystemGamma = 1.2F;
+  constexpr float a = 0.17883277F;
+  constexpr float b = 0.28466892F;
+  constexpr float c = 0.55991073F;
+  const float signal = std::max(0.0F, encoded);
+  const float scene = signal <= 0.5F ? (signal * signal) / 3.0F
+                                     : (std::exp((signal - c) / a) + b) / 12.0F;
+  const float display = std::pow(std::max(scene, 0.0F), kSystemGamma);
+  return display * kNominalPeakNits / kReferenceWhiteNits;
 }
 
 }  // namespace hyperdr

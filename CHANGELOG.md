@@ -5,6 +5,29 @@ semantic versioning; dates use ISO 8601.
 
 ## Unreleased
 
+- Added HDR input support, so every encoding HyperDR writes it can now also
+  read. AVIF joins ARW, DNG, JPEG, PNG, HEIC and HEIF as an input format, and
+  BT.2100 PQ and HLG files are decoded through the exact inverse of the transfer
+  functions used to write them. 4:2:2 and 4:4:4 chroma are read as well as
+  4:2:0, so an HLG 4:2:2 HEIF of the kind Sony's cameras produce converts to any
+  of the six outputs with its highlight range intact.
+- Added Exif import for HEIC, AVIF and Ultra HDR inputs. Camera, lens, date and
+  capture settings were previously discarded and the exported file recorded a
+  manufacturer of "HEIC"; they are now read and carried through. ISO in
+  particular feeds the gain map's noise weighting, so a high-ISO HEIC no longer
+  renders as if its sensitivity were unknown. A file that states no
+  manufacturer now writes no Make tag rather than claiming a default one.
+- Fixed the browser panel clipping HDR inputs. The preview JPEG is 8-bit and an
+  HLG or PQ photograph keeps its specular highlights above the display range, so
+  they used to arrive as flat white with nothing left for the HDR expansion to
+  work on. `HyperDR thumbnail` now reports the divisor it applied and the panel
+  multiplies it back, in the preview, the histogram and the adjustment masks
+  alike. Whether an input is HDR is decided by its format and never by how
+  bright its pixels measure, so RAW and SDR previews are unchanged.
+- Fixed a rotated JPEG reporting its pre-rotation dimensions in the run report
+  while the converted image used the rotated ones.
+- Fixed 10-bit HEIC and AVIF images whose colour is described only by an ICC
+  profile decoding around 64 times too dark.
 - Fixed conversion failing on images whose peak gain does not coincide with
   their brightest pixel. The ISO gain-map reader had begun requiring `gain_max`
   to equal the declared alternate headroom, which are different quantities, and

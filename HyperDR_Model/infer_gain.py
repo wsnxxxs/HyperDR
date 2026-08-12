@@ -14,7 +14,7 @@ from PIL import Image, ImageCms
 from hyperdr_ml.gain_io import write_gain_f32
 from hyperdr_ml.phase_a_labels import LABEL_CONTRACT_ID, sha256_file
 from hyperdr_ml.geometry import aligned_long_side_size
-from hyperdr_ml.model import GainMapNet
+from hyperdr_ml.model import DirectGainMapNet
 
 
 def srgb_eotf(encoded: np.ndarray) -> np.ndarray:
@@ -117,7 +117,7 @@ def main() -> None:
         .to(device)
     )
 
-    model = GainMapNet(
+    model = DirectGainMapNet(
         config["base_channels"], config.get("architecture", "baseline")
     ).to(device)
     model.load_state_dict(checkpoint["model"])
@@ -133,6 +133,10 @@ def main() -> None:
         "input": str(args.input),
         "checkpoint": str(args.checkpoint),
         "checkpoint_epoch": checkpoint["epoch"],
+        "model_family": "DirectGainMapNet",
+        "checkpoint_model_id": config.get(
+            "model_id", "hyperdr.direct-gainmapnet/legacy-unversioned"
+        ),
         "device": str(device),
         "source_size": [source_width, source_height],
         "input_profile": input_profile_name,

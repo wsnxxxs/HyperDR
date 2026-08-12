@@ -15,6 +15,7 @@ InputStamp input_stamp(const std::filesystem::path& path) {
   stamp.size = static_cast<std::uint64_t>(std::filesystem::file_size(path));
   stamp.modified_ns = static_cast<std::int64_t>(
       std::filesystem::last_write_time(path).time_since_epoch().count());
+  stamp.content_sha256 = sha256_file_hex(path);
   return stamp;
 }
 
@@ -37,7 +38,7 @@ bool output_is_current(const std::filesystem::path& output,
     const auto document = json::parse(std::string_view(
         reinterpret_cast<const char*>(bytes.data()), bytes.size()));
     const auto* schema = document.find("schema");
-    if (schema == nullptr || !schema->is_number() || schema->number() != 2) return false;
+    if (schema == nullptr || !schema->is_number() || schema->number() != 3) return false;
     const auto* stored = document.find("fingerprint");
     if (stored == nullptr || !stored->is_string() || stored->string() != fingerprint) {
       return false;
@@ -54,6 +55,11 @@ bool output_is_current(const std::filesystem::path& output,
     const auto* modified = document.find("input_modified_ns");
     if (modified == nullptr || !modified->is_string() ||
         modified->string() != std::to_string(stamp.modified_ns)) {
+      return false;
+    }
+    const auto* content = document.find("input_sha256");
+    if (content == nullptr || !content->is_string() ||
+        content->string() != stamp.content_sha256) {
       return false;
     }
     const auto output_size = static_cast<std::uint64_t>(std::filesystem::file_size(output));
@@ -81,11 +87,12 @@ void write_resume_state(const std::filesystem::path& output,
     const auto output_hash = sha256_file_hex(output);
     json::Writer writer;
     const auto text = writer.begin_object()
-                          .member("schema", 2)
+                          .member("schema", 3)
                           .member("fingerprint", fingerprint)
                           .member("input", path_utf8(input))
                           .member("input_size", stamp.size)
                           .member("input_modified_ns", std::to_string(stamp.modified_ns))
+                          .member("input_sha256", stamp.content_sha256)
                           .member("output_size", output_size)
                           .member("output_sha256", output_hash)
                           .member("tool", kVersion)

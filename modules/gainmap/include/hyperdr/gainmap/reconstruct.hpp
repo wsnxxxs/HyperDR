@@ -10,11 +10,21 @@
 #include "hyperdr/container/iso_gain_map.hpp"
 #include "hyperdr/image/image.hpp"
 
+#include <cstdint>
+
 namespace hyperdr {
+
+struct ReconstructionStats {
+  std::uint64_t total_values{};
+  std::uint64_t clamp_values{};
+  std::uint64_t total_pixels{};
+  std::uint64_t clamp_pixels{};
+};
 
 [[nodiscard]] FloatImage reconstruct_gain_map(const FloatImage& base,
                                               const FloatImage& gain,
                                               const GainMapMetadata& metadata,
-                                              float display_headroom_stops);
+                                              float display_headroom_stops,
+                                              ReconstructionStats* stats = nullptr);
 
 }  // namespace hyperdr

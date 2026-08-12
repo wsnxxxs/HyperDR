@@ -189,7 +189,9 @@ def build_commands(config: ModelConfig, source: Path, model_dir: Path,
     Pillow inference accepts raster inputs directly. RAW/HEIC inputs first pass
     through HyperDR's own thumbnail decoder, so the model can still participate
     in the same panel flow without teaching the training project about camera
-    codecs.
+    codecs. RAW model thumbnails use ``--model-input`` to apply the shared
+    automatic exposure anchor before the JPEG is handed to the linear-P3 SDR
+    inference path.
     """
     model_dir.mkdir(parents=True, exist_ok=True)
     gain_path = model_dir / "model-gain.f32"
@@ -202,7 +204,7 @@ def build_commands(config: ModelConfig, source: Path, model_dir: Path,
             converter_exe, "thumbnail", str(source), "--output", str(model_input),
             "--max-edge", str(config.long_side), "--quality", "100",
             "--highlight-recovery", highlight_recovery,
-            "--base-only",
+            "--base-only", "--model-input",
         ])
     commands.append([
         config.python, str(config.script),

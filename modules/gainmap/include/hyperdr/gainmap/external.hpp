@@ -29,11 +29,12 @@ struct ExternalGainMap {
     bool allow_legacy_external_gain = false);
 
 // Builds a pure external-model rendition. The SDR base is the decoded source
-// clamped to its legal range; exposure, tone curve, local contrast, vibrance
-// and every generated-gain parameter are deliberately bypassed.
+// multiplied by the caller-supplied exposure anchor and clamped to its legal
+// range; tone curve, local contrast, vibrance and every generated-gain
+// parameter are deliberately bypassed.
 [[nodiscard]] GainMapResult make_external_gain_map(
     const FloatImage& source, ExternalGainMap external,
-    float strength = 1.0F);
+    float strength = 1.0F, float exposure_ev = 0.0F);
 
 // Replaces an existing result's gain map and metadata. Kept for callers that
 // intentionally prepared their own base before applying an external grid.

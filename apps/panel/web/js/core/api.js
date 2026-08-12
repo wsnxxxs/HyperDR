@@ -102,7 +102,13 @@ export const api = {
    *  size comes back in headers and is returned with the blob -- the old panel
    *  dropped it and re-measured off the bitmap, which cost a decode per frame.
    *
-   *  @returns {Promise<{blob: Blob, width: number, height: number}>}
+   *  `scale` is what the converter divided the linear image by to fit it in
+   *  eight bits. It is 1 for anything SDR, and the renderers multiply by it
+   *  after linearising, which is the only way an HLG or PQ input's highlights
+   *  survive the trip through a JPEG.
+   *
+   *  @returns {Promise<{blob: Blob, width: number, height: number, scale: number,
+   *                    exposure: number}>}
    */
   async preview(sessionId, { highlightRecovery, maxEdge } = {}) {
     const query = new URLSearchParams({ id: sessionId });
@@ -116,10 +122,19 @@ export const api = {
       try { const body = await response.json(); if (body.error) message = body.error; } catch {}
       throw new ApiError(message, response.status);
     }
+    const scale = Number(response.headers.get("X-Preview-Scale"));
+    const exposure = Number(response.headers.get("X-Preview-Exposure"));
     return {
       blob: await response.blob(),
       width: Number(response.headers.get("X-Preview-Width")) || 0,
       height: Number(response.headers.get("X-Preview-Height")) || 0,
+      // A missing or nonsensical header means "not scaled", never "scale by
+      // NaN", which would blank the canvas.
+      scale: Number.isFinite(scale) && scale >= 1 && scale <= 64 ? scale : 1,
+      // Missing or malformed exposure means a display-referred source (or an
+      // older converter), so it must not move the image unexpectedly.
+      exposure: Number.isFinite(exposure) && exposure >= -6 && exposure <= 6
+        ? exposure : 0,
     };
   },
 

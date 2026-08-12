@@ -44,6 +44,25 @@
       "default": "blend"
     },
     {
+      "key": "raw_gain",
+      "flag": "--raw-gain",
+      "kind": "number",
+      "minimum": 0.125,
+      "maximum": 64,
+      "affects_output_bytes": true,
+      "help": "Sensor-domain RAW digital gain",
+      "default": 1
+    },
+    {
+      "key": "raw_auto_bad_pixels",
+      "flag": "--raw-auto-bad-pixels",
+      "kind": "boolean",
+      "flag_sets_false": false,
+      "affects_output_bytes": true,
+      "help": "Conservative RAW hot/dead pixel correction",
+      "default": false
+    },
+    {
       "key": "contrast",
       "flag": "--contrast",
       "kind": "number",

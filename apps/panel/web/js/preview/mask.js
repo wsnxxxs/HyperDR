@@ -81,7 +81,7 @@ export function mountMask({ curve, stage }) {
   /* Decode transfer and luminance once per thumbnail. Slider motion then only
    * walks a compact float buffer and reuses the same ImageData, avoiding three
    * table lookups plus a large allocation on every input frame. */
-  function prepareSource(source) {
+  function prepareSource(source, sceneScale) {
     if (source === cachedSource && sourceLuma && output) return;
     cachedSource = source;
     if (!source) {
@@ -93,10 +93,16 @@ export function mountMask({ curve, stage }) {
     if (canvas.height !== source.height) canvas.height = source.height;
     sourceLuma = new Float32Array(source.width * source.height);
     const from = source.data;
+    // The transport scale and the RAW automatic exposure are folded in here
+    // rather than at paint time because they belong to the decoded thumbnail,
+    // not to the sliders: the mask has to read the same scene luminance the
+    // renderers do, or it marks the wrong pixels on an HDR/RAW input.
+    // The cache is keyed on the source buffer, which is replaced whenever the
+    // scale can change.
     for (let p = 0, pixel = 0; p < from.length; p += 4, pixel++) {
-      sourceLuma[pixel] = SRGB_LUMA[0] * SRGB_TO_LINEAR[from[p]]
+      sourceLuma[pixel] = (SRGB_LUMA[0] * SRGB_TO_LINEAR[from[p]]
         + SRGB_LUMA[1] * SRGB_TO_LINEAR[from[p + 1]]
-        + SRGB_LUMA[2] * SRGB_TO_LINEAR[from[p + 2]];
+        + SRGB_LUMA[2] * SRGB_TO_LINEAR[from[p + 2]]) * sceneScale;
     }
     output = context.createImageData(source.width, source.height);
   }
@@ -112,7 +118,8 @@ export function mountMask({ curve, stage }) {
     }
     if (!syncPresentation(state)) return;
 
-    prepareSource(source);
+    prepareSource(source, stage.getSourceSceneScale?.()
+      ?? stage.getSourceScale?.() ?? 1);
     curve.refreshTable(state);
     const exposure = Math.pow(2, state.brightness);
     const tint = readColor("--mask-tint");

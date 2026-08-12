@@ -7,12 +7,15 @@
 // libultrahdr can apply the gain map itself and hand back a linear HDR
 // rendition, which is exactly the working space this pipeline wants.
 
+#include "hyperdr/container/exif.hpp"
 #include "hyperdr/container/heif_tmap.hpp"
 #include "hyperdr/image/color.hpp"
+#include "hyperdr/image/orientation.hpp"
 #include "hyperdr/foundation/parallel.hpp"
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/foundation/file_io.hpp"
+#include "internal/metadata.hpp"
 
 #include <ultrahdr_api.h>
 
@@ -159,10 +162,31 @@ DecodedImage decode_ultrahdr(const std::filesystem::path& path) {
       result.linear_p3.at(x, y, 2) = p3[2];
     }
   });
-  // Exif is not re-parsed here: the pipeline rebuilds compact metadata on
-  // output, and fabricating capture settings the container did not state would
-  // feed the automatic exposure selector values the camera never recorded.
+  // The gain map states how far above diffuse white it is meant to reach, and
+  // that -- not a measurement of the reconstructed pixels -- is what makes this
+  // input HDR. `hdr_capacity_max` is in stops.
+  if (const uhdr_gainmap_metadata_t* gain = uhdr_dec_get_gainmap_metadata(decoder.get());
+      gain != nullptr && std::isfinite(gain->hdr_capacity_max)) {
+    result.hdr_headroom = std::clamp(std::exp2(gain->hdr_capacity_max), 1.0F, 64.0F);
+  }
+
+  // Exif used to be skipped here on the grounds that fabricating capture
+  // settings would mislead the automatic exposure selector. Reading the ones
+  // the file actually states is the opposite of fabricating them, and without
+  // it a JPEG/R lost its camera, its lens and the ISO the gain map weighs
+  // noise against.
   result.metadata.orientation = 1;
+  if (const uhdr_mem_block_t* exif = uhdr_dec_get_exif(decoder.get());
+      exif != nullptr && exif->data != nullptr && exif->data_sz >= 8 &&
+      exif->data_sz <= (1U << 20U)) {
+    const auto read = read_exif(static_cast<const std::uint8_t*>(exif->data),
+                                exif->data_sz);
+    codec::apply_exif(result, read);
+    // Unlike HEIF, a JPEG carries its rotation only in Exif and libultrahdr
+    // does not apply it, so this path normalises it into the pixels exactly as
+    // the plain-JPEG decoder does.
+    if (read.orientation) codec::normalize_orientation(result, *read.orientation);
+  }
   return result;
 }
 

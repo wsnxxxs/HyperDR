@@ -71,8 +71,8 @@ json::Value read_headroom(const ConvertOptions& o) {
                               : json::Value::from_number(o.gain.headroom_stops);
 }
 
-const std::array<Setting, 24>& table() {
-  static const std::array<Setting, 24> kSettings{{
+const std::array<Setting, 26>& table() {
+  static const std::array<Setting, 26> kSettings{{
       {"encoding", "--encoding", SettingKind::kEnum, 0, 0, kEncodingChoices,
        "adaptive|ultrahdr|pq|hlg|avif-pq|avif-hlg", "Output representation", false,
        true,
@@ -86,6 +86,23 @@ const std::array<Setting, 24>& table() {
        kHighlightRecoveryChoices, "blend|reconstruct|clip|unclip",
        "RAW clipped-highlight handling", false, true, nullptr,
        apply_highlight_recovery, read_highlight_recovery},
+      {"raw_gain", "--raw-gain", SettingKind::kNumber, 0.125, 64.0, {},
+       "<0.125..64>", "Sensor-domain RAW digital gain", false, true, nullptr,
+       [](ConvertOptions& o, const json::Value& v) {
+         o.raw.digital_gain = as_float(v);
+       },
+       [](const ConvertOptions& o) {
+         return json::Value::from_number(o.raw.digital_gain);
+       }},
+      {"raw_auto_bad_pixels", "--raw-auto-bad-pixels", SettingKind::kBoolean,
+       0, 0, {}, {}, "Conservative RAW hot/dead pixel correction", false, true,
+       nullptr,
+       [](ConvertOptions& o, const json::Value& v) {
+         o.raw.auto_bad_pixel_correction = v.boolean();
+       },
+       [](const ConvertOptions& o) {
+         return json::Value::from_bool(o.raw.auto_bad_pixel_correction);
+       }},
 
       {"contrast", "--contrast", SettingKind::kNumber, 0.80, 1.35, {},
        "<0.80..1.35>", "Photographic mid-tone slope", false, true, nullptr,

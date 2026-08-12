@@ -3,6 +3,7 @@
 #include "hyperdr/codec/availability.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 
 namespace hyperdr {
@@ -50,6 +51,22 @@ void validate_convert_options(const ConvertOptions& options) {
       throw std::invalid_argument("external gain report does not exist");
     }
   }
+  if (!(std::isfinite(options.raw.digital_gain) &&
+        options.raw.digital_gain > 0.0F && options.raw.digital_gain <= 64.0F)) {
+    throw std::invalid_argument("RAW digital gain must be finite and in (0,64]");
+  }
+  const auto validate_raw_file = [](const std::filesystem::path& path,
+                                    const char* label) {
+    if (path.empty()) return;
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(path, ec) || ec) {
+      throw std::invalid_argument(std::string(label) + " does not exist");
+    }
+  };
+  validate_raw_file(options.raw.bad_pixel_map, "RAW bad-pixel map");
+  validate_raw_file(options.raw.dark_frame, "RAW dark frame");
+  validate_raw_file(options.raw.linearization_lut, "RAW linearization LUT");
+  validate_raw_file(options.raw.lens_shading_map, "RAW lens-shading map");
   // Ranges for the individual settings are enforced by the schema on the way in;
   // this catches the internal look parameters and the renderer's own invariants.
   validate_gain_map_options(options.gain);

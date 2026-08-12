@@ -12,10 +12,13 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cmath>
+#include <iomanip>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace hyperdr {
 namespace {
@@ -23,15 +26,18 @@ namespace {
 void usage() {
   std::cout
       << "HyperDR " << kVersion
-      << " - ARW/DNG/JPEG/PNG/HEIC/Ultra HDR to Adaptive HDR, Ultra HDR, PQ, HLG, AVIF\n\n"
+      << " - ARW/DNG/JPEG/PNG/HEIC/AVIF/Ultra HDR to Adaptive HDR, Ultra HDR,"
+         " PQ, HLG, AVIF\n\n"
          "Usage:\n"
          "  HyperDR convert <file-or-directory> --output <directory> [options]\n"
          "  HyperDR inspect <file.heic> [--json]\n"
          "  HyperDR verify <file.heic|file.jpg> [--reconstruct <preview.tiff>]\n"
+         "  HyperDR display-curve <reference.heic> <candidate.heic>\n"
+         "                         --headroom <stops> [--headroom <stops> ...]\n"
          "  HyperDR thumbnail <image> --output <preview.jpg> [--max-edge <pixels>]\n"
          "                            [--quality <1..100>] [--half-size]\n"
          "                            [--highlight-recovery blend|reconstruct|clip|unclip]\n"
-         "                            [--base-only]\n"
+         "                            [--base-only] [--model-input]\n"
          "  HyperDR curve [look options] [--samples <N>]   Emit the tone curve as JSON\n"
          "  HyperDR schema                                 Emit the settings schema as JSON\n\n"
          "Convert settings:\n"
@@ -41,9 +47,13 @@ void usage() {
          "  --report <file.json>               Write a structured run report\n"
          "  --external-gain <file.f32>         Use an external canonical gain grid\n"
          "  --external-gain-report <file.json> Required sidecar for that gain grid\n"
-         "  --allow-legacy-external-gain      Allow frozen v1 normalized sidecars\n"
-         "  --decode-cache <directory>         Reuse decoded buffers across look-only reruns\n"
-         "  --fast-preview                     Explicitly allow RAW half-size decoding\n";
+          "  --allow-legacy-external-gain      Allow frozen v1 normalized sidecars\n"
+          "  --decode-cache <directory>         Reuse decoded buffers across look-only reruns\n"
+          "  --fast-preview                     Explicitly allow RAW half-size decoding\n"
+          "  --raw-bad-pixels <file>             LibRaw bad-pixel coordinate map\n"
+          "  --raw-dark-frame <file>              LibRaw dark-frame PGM\n"
+          "  --raw-linearization-lut <file>      N code-to-code LUT for RAW linearization\n"
+          "  --raw-lens-shading <file>           Text gain map: width height channels + gains\n";
   if (!kCodecsAvailable) {
     std::cout << "\nThis build was configured with HYPERDR_WITH_CODECS=OFF: the renderer\n"
                  "and its self-tests are present, but no format can be read or written.\n";
@@ -58,6 +68,17 @@ T integer(std::string_view text, const char* name) {
     throw std::invalid_argument(std::string("invalid ") + name);
   }
   return value;
+}
+
+float real(std::string_view text, const char* name) {
+  try {
+    std::size_t used = 0;
+    const double value = std::stod(std::string(text), &used);
+    if (used != text.size() || !std::isfinite(value)) throw std::invalid_argument("bad");
+    return static_cast<float>(value);
+  } catch (const std::exception&) {
+    throw std::invalid_argument(std::string("invalid ") + name);
+  }
 }
 
 std::string next_value(int& i, int argc, char** argv, std::string_view option) {
@@ -103,6 +124,18 @@ void parse_settings(int argc, char** argv, int first, ConvertOptions& options,
       options.allow_legacy_external_gain = true;
     } else if (arg == "--decode-cache") {
       options.decode_cache_directory = next_value(i, argc, argv, arg);
+    } else if (arg == "--raw-bad-pixels") {
+      options.raw.bad_pixel_map = next_value(i, argc, argv, arg);
+    } else if (arg == "--raw-dark-frame") {
+      options.raw.dark_frame = next_value(i, argc, argv, arg);
+    } else if (arg == "--raw-linearization-lut") {
+      options.raw.linearization_lut = next_value(i, argc, argv, arg);
+    } else if (arg == "--raw-lens-shading") {
+      options.raw.lens_shading_map = next_value(i, argc, argv, arg);
+    } else if (arg == "--raw-auto-bad-pixels") {
+      options.raw.auto_bad_pixel_correction = true;
+    } else if (arg == "--raw-gain") {
+      options.raw.digital_gain = real(next_value(i, argc, argv, arg), "RAW digital gain");
     } else {
       throw std::invalid_argument("unknown option: " + std::string(arg));
     }
@@ -142,6 +175,49 @@ int schema_command(int argc, char** argv) {
     }
   }
   std::cout << schema_json();
+  return 0;
+}
+
+int display_curve_command(int argc, char** argv) {
+  if (argc < 5) {
+    throw std::invalid_argument(
+        "display-curve requires reference, candidate, and --headroom");
+  }
+  const std::filesystem::path reference = argv[2];
+  const std::filesystem::path candidate = argv[3];
+  std::vector<float> headrooms;
+  for (int i = 4; i < argc; ++i) {
+    const std::string_view arg = argv[i];
+    if (arg == "--headroom") {
+      headrooms.push_back(real(next_value(i, argc, argv, arg),
+                               "display headroom"));
+    } else {
+      throw std::invalid_argument("unknown display-curve option: " +
+                                  std::string(arg));
+    }
+  }
+  const auto result = compare_gain_map_heic_curve(reference, candidate, headrooms);
+  std::cout << std::setprecision(10) << "{\"points\":[";
+  for (std::size_t index = 0; index < result.points.size(); ++index) {
+    if (index != 0) std::cout << ',';
+    const auto& point = result.points[index];
+    std::cout << "{\"headroom_stops\":" << point.headroom_stops
+              << ",\"mae_linear_p3\":" << point.mae_linear_p3
+              << ",\"mse_linear_p3\":" << point.mse_linear_p3
+              << ",\"max_abs_error_linear_p3\":"
+              << point.max_abs_error_linear_p3
+              << ",\"total_values\":" << point.total_values
+              << ",\"reference_clamp_values\":"
+              << point.reference_clamp_values
+              << ",\"candidate_clamp_values\":"
+              << point.candidate_clamp_values
+              << ",\"total_pixels\":" << point.total_pixels
+              << ",\"reference_clamp_pixels\":"
+              << point.reference_clamp_pixels
+              << ",\"candidate_clamp_pixels\":"
+              << point.candidate_clamp_pixels << '}';
+  }
+  std::cout << "]}\n";
   return 0;
 }
 
@@ -229,6 +305,7 @@ int thumbnail_command(int argc, char** argv) {
   std::filesystem::path output;
   std::uint32_t max_edge = 2048;
   int quality = 85;
+  bool model_input = false;
   // A preview that ignores the RAW decode settings is a preview of a different
   // photograph, so the caller passes the ones it is about to convert with.
   RawDecodeOptions raw;
@@ -253,6 +330,20 @@ int thumbnail_command(int argc, char** argv) {
       raw.half_size = true;
     } else if (arg == "--base-only") {
       raw.ignore_embedded_gain_map = true;
+    } else if (arg == "--model-input") {
+      model_input = true;
+    } else if (arg == "--raw-bad-pixels") {
+      raw.bad_pixel_map = next_value(i, argc, argv, arg);
+    } else if (arg == "--raw-dark-frame") {
+      raw.dark_frame = next_value(i, argc, argv, arg);
+    } else if (arg == "--raw-linearization-lut") {
+      raw.linearization_lut = next_value(i, argc, argv, arg);
+    } else if (arg == "--raw-lens-shading") {
+      raw.lens_shading_map = next_value(i, argc, argv, arg);
+    } else if (arg == "--raw-auto-bad-pixels") {
+      raw.auto_bad_pixel_correction = true;
+    } else if (arg == "--raw-gain") {
+      raw.digital_gain = real(next_value(i, argc, argv, arg), "RAW digital gain");
     } else {
       throw std::invalid_argument("unknown thumbnail option: " + std::string(arg));
     }
@@ -262,7 +353,18 @@ int thumbnail_command(int argc, char** argv) {
   if (same_path(input, output)) {
     throw std::invalid_argument("thumbnail output must differ from input image");
   }
-  write_binary_file_atomic(output, encode_preview_jpeg(input, max_edge, quality, raw), true);
+  const auto preview =
+      encode_preview_jpeg(input, max_edge, quality, raw, model_input);
+  write_binary_file_atomic(output, preview.bytes, true);
+  // The JPEG alone is not the whole answer for an HDR input: it holds the
+  // picture divided by `scale`, and a viewer that multiplies back by it sees the
+  // highlights the file actually contains instead of a clipped white. Reported
+  // on stdout as JSON for the same reason `curve` and `schema` are -- the file
+  // is the output, so anything about it belongs in the stream beside it. RAW
+  // also reports the automatic scene exposure that the browser must apply
+  // before the user's brightness bias.
+  std::cout << "{\"scale\":" << preview.scale
+            << ",\"exposure\":" << preview.exposure_ev << "}\n";
   return 0;
 }
 
@@ -278,6 +380,7 @@ int run_cli(int argc, char** argv) {
   if (command == "convert") return convert_command(argc, argv);
   if (command == "curve") return curve_command(argc, argv);
   if (command == "schema") return schema_command(argc, argv);
+  if (command == "display-curve") return display_curve_command(argc, argv);
   if (command == "inspect") return inspect_command(argc, argv);
   if (command == "verify") return verify_command(argc, argv);
   if (command == "thumbnail") return thumbnail_command(argc, argv);

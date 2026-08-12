@@ -38,7 +38,7 @@ def run_picker(kind: str) -> int:
         path = filedialog.askopenfilename(
             title="Select an input image",
             filetypes=[
-                ("Supported images", "*.ARW *.arw *.DNG *.dng *.JPG *.jpg *.JPEG *.jpeg *.PNG *.png *.HEIC *.heic *.HEIF *.heif"),
+                ("Supported images", "*.ARW *.arw *.DNG *.dng *.JPG *.jpg *.JPEG *.jpeg *.PNG *.png *.HEIC *.heic *.HEIF *.heif *.AVIF *.avif"),
                 ("All files", "*.*"),
             ],
         )

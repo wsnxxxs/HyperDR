@@ -68,14 +68,25 @@ function contextFor(canvas) {
   return context;
 }
 
-export function renderSdr(canvas, { source, output, curve, settings, original, modelGain }) {
+export function renderSdr(canvas,
+    { source, display, output, curve, settings, original, modelGain,
+      sourceScale = 1, sourceExposure = 0 }) {
   const context = contextFor(canvas);
-  if (original) { context.putImageData(source, 0, 0); return; }
+  // `display` is the source already brought back up by the scale and clipped,
+  // which is what "original" means for an HDR input: the picture as an SDR
+  // screen would show it, not the divided-down buffer the renderer works from.
+  if (original) { context.putImageData(display || source, 0, 0); return; }
 
   const from = source.data;
   const to = output.data;
   const { hdrStrength: strength, expansionStart, brightness, vibrance } = settings;
-  const exposure = modelGain ? 1 : Math.pow(2, brightness);
+  // The preview JPEG holds scene-linear divided by `sourceScale`, so undoing it
+  // here is what puts an HLG input's highlights back above 1.0 where the curve
+  // can act on them. RAW additionally reports the automatic scene exposure;
+  // the user's brightness slider is applied on top of it. Both are one/zero
+  // for ordinary display-referred inputs.
+  const sceneExposure = sourceScale * Math.pow(2, sourceExposure);
+  const exposure = sceneExposure * (modelGain ? 1 : Math.pow(2, brightness));
   const outputWidth = source.width;
 
   for (let i = 0; i < from.length; i += 4) {

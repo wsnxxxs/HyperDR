@@ -175,6 +175,7 @@ class ModelIntegrationTest(unittest.TestCase):
         self.assertIn("--highlight-recovery", commands[0])
         self.assertEqual(commands[0][commands[0].index("--highlight-recovery") + 1],
                          "reconstruct")
+        self.assertIn("--model-input", commands[0])
         self.assertEqual(commands[1][0], "python")
 
 

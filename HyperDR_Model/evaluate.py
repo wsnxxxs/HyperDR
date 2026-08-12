@@ -10,7 +10,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from hyperdr_ml.data import AppleGainMapDataset, collate_gain_maps
-from hyperdr_ml.model import GainMapNet
+from hyperdr_ml.model import DirectGainMapNet
 
 
 def autocast_context(device: torch.device):
@@ -45,7 +45,7 @@ def main() -> None:
         or (args.device == "auto" and torch.cuda.is_available())
         else "cpu"
     )
-    model = GainMapNet(
+    model = DirectGainMapNet(
         config["base_channels"], config.get("architecture", "baseline")
     ).to(device)
     model.load_state_dict(checkpoint["model"])

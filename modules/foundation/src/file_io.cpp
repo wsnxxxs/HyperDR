@@ -87,6 +87,17 @@ std::vector<std::uint8_t> read_binary_file(const std::filesystem::path& path) {
   return bytes;
 }
 
+std::vector<std::uint8_t> read_binary_prefix(const std::filesystem::path& path,
+                                             std::size_t max_bytes) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in) return {};
+  std::vector<std::uint8_t> bytes(max_bytes);
+  in.read(reinterpret_cast<char*>(bytes.data()),
+          static_cast<std::streamsize>(max_bytes));
+  bytes.resize(static_cast<std::size_t>(in.gcount()));
+  return bytes;
+}
+
 void write_binary_file_atomic(const std::filesystem::path& path,
                               const std::vector<std::uint8_t>& bytes,
                               bool overwrite) {

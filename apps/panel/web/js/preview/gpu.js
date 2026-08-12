@@ -11,7 +11,8 @@ const SHADER = /* wgsl */ `
 struct Params {
   strength: f32, headroom: f32, original: f32, expansionStart: f32,
   areaCoverage: f32, exposureBias: f32, lutSize: f32, vibrance: f32,
-  modelEnabled: f32, modelMaxStops: f32, modelStrength: f32, padding0: f32,
+  modelEnabled: f32, modelMaxStops: f32, modelStrength: f32, sourceScale: f32,
+  sourceExposure: f32, _padding0: f32, _padding1: f32, _padding2: f32,
 }
 @group(0) @binding(0) var imageSampler: sampler;
 @group(0) @binding(1) var imageTexture: texture_2d<f32>;
@@ -68,14 +69,20 @@ fn modelGainStops(uv: vec2f) -> f32 {
 }
 
 @fragment fn fragmentMain(input: VertexOutput) -> @location(0) vec4f {
-  let srgbLinear = textureSample(imageTexture, imageSampler, input.uv).rgb;
+  // The preview texture holds scene-linear divided by sourceScale, so an HDR
+  // input's highlights are only above 1.0 again after this multiply. RAW also
+  // carries an automatic scene-exposure anchor; keep it out of the original
+  // comparison view but apply it before the look and model paths.
+  let sourceLinear = textureSample(imageTexture, imageSampler, input.uv).rgb
+    * params.sourceScale;
   let srgbToP3 = mat3x3f(
     vec3f(0.82259287, 0.03319951, 0.01708535),
     vec3f(0.17753395, 0.96678350, 0.07239572),
     vec3f(0.00000000, 0.00000000, 0.91030148));
-  var p3 = max(srgbToP3 * srgbLinear, vec3f(0.0));
+  var p3 = max(srgbToP3 * sourceLinear, vec3f(0.0));
   let luma = vec3f(0.2289746, 0.6917385, 0.0792869);
   if (params.original > 0.5) { return vec4f(encodeExtendedSrgb(p3), 1.0); }
+  p3 *= exp2(params.sourceExposure);
   if (params.modelEnabled > 0.5) {
     let modelExpanded = p3 * exp2(modelGainStops(input.uv));
     return vec4f(encodeExtendedSrgb(modelExpanded), 1.0);
@@ -141,7 +148,7 @@ export async function createHdrRenderer(canvas, onDeviceLost) {
 
   const sampler = device.createSampler({ magFilter: "linear", minFilter: "linear" });
   const uniform = device.createBuffer({
-    size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   const lut = device.createBuffer({
     size: LUT_SIZE * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
 
@@ -229,7 +236,8 @@ export async function createHdrRenderer(canvas, onDeviceLost) {
         params.strength, params.headroom, params.original ? 1 : 0, params.expansionStart,
         params.areaCoverage, params.exposureBias, LUT_SIZE, params.vibrance,
         params.modelGain ? 1 : 0, params.modelGain?.maxStops || 0,
-        params.modelStrength ?? 1, 0,
+        params.modelStrength ?? 1, params.sourceScale ?? 1,
+        params.sourceExposure ?? 0, 0, 0, 0,
       ]));
       const encoder = device.createCommandEncoder();
       const pass = encoder.beginRenderPass({

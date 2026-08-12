@@ -36,6 +36,23 @@ std::string settings_signature(const ConvertOptions& options) {
     out += "|allow_legacy_external_gain=";
     out += options.allow_legacy_external_gain ? "1" : "0";
   }
+  const auto append_raw_file = [&](const char* key,
+                                   const std::filesystem::path& path) {
+    if (path.empty()) return;
+    out += '|';
+    out += key;
+    out += '=';
+    out += path_utf8(path);
+    out += ':';
+    out += sha256_file_hex(path);
+  };
+  // Calibration files are external inputs, not schema scalar settings. Their
+  // paths and contents still belong in the resume fingerprint: changing a
+  // dark frame or lens grid must never be hidden by --skip-existing.
+  append_raw_file("raw_bad_pixel_map", options.raw.bad_pixel_map);
+  append_raw_file("raw_dark_frame", options.raw.dark_frame);
+  append_raw_file("raw_linearization_lut", options.raw.linearization_lut);
+  append_raw_file("raw_lens_shading_map", options.raw.lens_shading_map);
   return out;
 }
 

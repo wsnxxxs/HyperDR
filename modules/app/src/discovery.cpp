@@ -10,8 +10,8 @@
 namespace hyperdr {
 namespace {
 
-constexpr std::array<std::string_view, 7> kExtensions{
-    ".arw", ".dng", ".jpg", ".jpeg", ".png", ".heic", ".heif"};
+constexpr std::array<std::string_view, 8> kExtensions{
+    ".arw", ".dng", ".jpg", ".jpeg", ".png", ".heic", ".heif", ".avif"};
 
 // This converter's own outputs end in "-hyperdr". When the output directory is
 // the input directory, skipping them is what stops a second run from converting
@@ -73,7 +73,7 @@ std::vector<std::filesystem::path> discover_input_files(const ConvertOptions& op
   std::sort(files.begin(), files.end());
   if (files.empty()) {
     throw std::runtime_error(
-        "no supported images found (ARW, DNG, JPG, JPEG, PNG, HEIC, HEIF)");
+        "no supported images found (ARW, DNG, JPG, JPEG, PNG, HEIC, HEIF, AVIF)");
   }
   return files;
 }

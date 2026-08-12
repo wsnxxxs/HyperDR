@@ -7,6 +7,7 @@
     "schema",
     "tool",
     "settings",
+    "raw_processing",
     "files"
   ],
   "properties": {
@@ -18,6 +19,9 @@
     },
     "settings": {
       "$ref": "#/$defs/settings"
+    },
+    "raw_processing": {
+      "$ref": "#/$defs/raw_processing"
     },
     "files": {
       "type": "array",
@@ -34,6 +38,8 @@
         "encoding",
         "look",
         "highlight_recovery",
+        "raw_gain",
+        "raw_auto_bad_pixels",
         "contrast",
         "vibrance",
         "pop",
@@ -80,6 +86,14 @@
             "clip",
             "unclip"
           ]
+        },
+        "raw_gain": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 64
+        },
+        "raw_auto_bad_pixels": {
+          "type": "boolean"
         },
         "contrast": {
           "type": "number"
@@ -167,6 +181,48 @@
             8,
             10
           ]
+        }
+      }
+    },
+    "raw_processing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "black_level_correction",
+        "white_balance",
+        "digital_gain",
+        "auto_bad_pixel_correction",
+        "bad_pixel_map",
+        "dark_frame",
+        "linearization_lut",
+        "lens_shading_map"
+      ],
+      "properties": {
+        "black_level_correction": {
+          "const": "LibRaw metadata"
+        },
+        "white_balance": {
+          "const": "camera WB"
+        },
+        "digital_gain": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 64
+        },
+        "auto_bad_pixel_correction": {
+          "type": "boolean"
+        },
+        "bad_pixel_map": {
+          "type": "string"
+        },
+        "dark_frame": {
+          "type": "string"
+        },
+        "linearization_lut": {
+          "type": "string"
+        },
+        "lens_shading_map": {
+          "type": "string"
         }
       }
     },

@@ -59,19 +59,8 @@ export function mountStage({ toast }) {
   /** Decoded image + derived buffers. Replaced wholesale, never patched. */
   const image = {
     source: null,
-    display: null,
-    output: null,
     frame: null,
-    label: "",
     previewRequestEdge: 0,
-    // What the server divided the linear image by to fit it in the JPEG. Every
-    // renderer multiplies by this after linearising, so an HDR input's
-    // highlights are present to be expanded rather than already clipped white.
-    scale: 1,
-    // Automatic scene exposure selected by the native RAW decoder. The
-    // brightness control is an additional user bias and stays separate so the
-    // original comparison view remains an untreated source view.
-    exposureEv: 0,
   };
   let expanded = false;
   const sourceListeners = new Set();
@@ -382,13 +371,8 @@ export function mountStage({ toast }) {
     updateExpandedState(false);
     Object.assign(image, {
       source: null,
-      display: null,
-      output: null,
       frame: null,
-      label: "",
       previewRequestEdge: 0,
-      scale: 1,
-      exposureEv: 0,
     });
     notifySource();
     analysis.current = null;
@@ -439,12 +423,7 @@ export function mountStage({ toast }) {
       // Diagnostics receive an SDR display copy. Preview rendering consumes
       // only the untouched native float planes above.
       image.source = planeToImageData(preview.base, width, height);
-      image.output = null;
-      image.label = state.file?.name || "图片";
       image.previewRequestEdge = requestedEdge || Math.max(width, height);
-      image.scale = preview.scale || 1;
-      image.exposureEv = preview.exposure || 0;
-      image.display = displayMapped(image.source, image.scale);
       notifySource();
 
       for (const canvas of [sdrCanvas, hdrCanvas, originalCanvas]) {

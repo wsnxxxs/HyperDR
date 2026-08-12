@@ -1,7 +1,10 @@
 # HyperDR-ML
 
 Training workspace for predicting Apple-style perceptual HDR gain maps from SDR
-photographs. The ML project owns extraction, target construction, training,
+photographs. HyperDR already derives a gain map from image content; this project
+learns to predict Apple-style gain maps from a corpus of Apple-rendered SDR
+photographs, and the panel can swap the learned grid in place of the
+mathematical one. The ML project owns extraction, target construction, training,
 evaluation, and inference; the separate HyperDR project owns final encoding.
 
 ## Setup
@@ -62,13 +65,13 @@ sidecar. The corpus lock is `reports/phase-a-corpus-lock.json`; it records the
 423 native ISO `tmap` and 388 legacy Apple samples. The old normalized/f16
 labels are not silently mixed into v2 training or inference.
 
-`headroom == 1` is a valid all-zero absolute target but is explicitly marked
-ineligible for `per_image` normalization. The dataset loader also rejects
+`headroom == 1` is a valid all-zero absolute target but is marked ineligible
+for `per_image` normalization. The dataset loader also rejects
 non-positive or non-finite per-image scales and all non-finite tensors.
 
-`fixed_3stops` intentionally clips log2 gain above 3 stops. Every training run
-writes `target-audit.json` with the affected sample and pixel fractions; this
-makes the clipping policy visible instead of silently changing labels.
+`fixed_3stops` clips log2 gain above 3 stops by design. Every training run
+writes `target-audit.json` with the affected sample and pixel fractions, so the
+clipping policy stays visible instead of changing labels silently.
 
 `build_training_cache.py` prebuilds
 `assets/display-p3.icc` inside the dataset. Inference loads this fixed resource
@@ -131,20 +134,21 @@ PYTHONPATH=. .venv/bin/python train.py \
   --batch-size 8
 ```
 
-Important behavior:
+Some behaviors worth knowing:
 
-- `xmp` uses explicit XMP headroom labels; `all` also includes reverse-engineered
-  legacy MakerNote estimates.
-- Reconstruction, gradient, and global-mean terms are computed per image and
-  then averaged. Epoch metrics use the same image-weighted aggregation.
-- In `fixed_3stops`, the reported highlight metric is
-  `absolute_highlight_mae_stops`. In `per_image`, it is
-  `relative_high_gain_mae`; their meanings are not mixed.
-- The final sigmoid bias is initialized from the masked training-target mean.
-- Checkpoints contain model, optimizer, scheduler, epoch, best metrics, Python,
-  NumPy, PyTorch, CUDA, and DataLoader-generator RNG states.
-- `learning_rate` is the rate used for the recorded epoch;
-  `next_learning_rate` is the post-scheduler rate.
+- `xmp` uses the explicit XMP headroom labels; `all` also includes the
+  reverse-engineered legacy MakerNote estimates.
+- Loss terms (reconstruction, gradient, global mean) are computed per image and
+  then averaged; epoch metrics use the same image-weighted aggregation.
+- The reported highlight metric follows the target mode:
+  `absolute_highlight_mae_stops` for `fixed_3stops`,
+  `relative_high_gain_mae` for `per_image`. The two are never mixed.
+- The final sigmoid bias starts from the masked training-target mean.
+- Checkpoints save the full run state — model, optimizer, scheduler, epoch,
+  best metrics, and the Python, NumPy, PyTorch, CUDA, and DataLoader-generator
+  RNG states — so a resumed run continues where it stopped.
+- `learning_rate` records the rate for that epoch; `next_learning_rate` is the
+  post-scheduler rate.
 - CUDA peak memory is reset at the start of every epoch.
 
 Resume an interrupted run with the original training arguments:
@@ -156,10 +160,10 @@ PYTHONPATH=. .venv/bin/python train.py \
 ```
 
 The loader currently applies only paired horizontal flips. Photometric or
-exposure augmentation is deliberately absent because changing SDR exposure
-requires an explicit, label-consistent gain transformation. Overfitting should
-be assessed with multiple seeds and validation curves rather than adding an
-unjustified exposure transform.
+exposure augmentation is absent on purpose: changing SDR exposure would need a
+matching, label-consistent gain transformation, and none is implemented. Assess
+overfitting with multiple seeds and validation curves instead of adding an
+exposure transform the labels cannot back up.
 
 Architectures `baseline`, `global_conditioning`, and `dilation_pyramid` have
 controlled parameter counts and can be compared on validation with:
@@ -180,7 +184,12 @@ checkpoint-compatible alias). Direct v3 freezes `baseline`, 24 base channels,
 and 80 epochs; its development OOF canonical-G MAE is 0.2371 stops. See
 `reports/direct-incumbent-v3.json`. That number summarizes the complete
 4-fold x 3-seed OOF matrix and must not be attached to the bundled legacy
-`checkpoints/best.pt`; a production checkpoint has not yet been selected.
+`checkpoints/best.pt`. The deployable `checkpoints/production-v3.pt` uses the
+first preregistered seed, fits folds 0-3, and selects epoch 4 on fold 4 at
+0.23068 capture-group-weighted MAE. That selection-fold value is not a fresh
+blind-test estimate; full release provenance is in
+`checkpoints/production-v3.json`.
+
 The `reports/` directory contains generated local evaluation results and is
 ignored by Git; preserve any result needed for comparison or regenerate it from
 the recorded run inputs.
@@ -189,14 +198,14 @@ the recorded run inputs.
 
 ```bash
 PYTHONPATH=. .venv/bin/python evaluate_absolute.py \
-  --checkpoint <best.pt> \
+  --checkpoint checkpoints/production-v3.pt \
   --split test \
   --output <test-report.json>
 
 PYTHONPATH=. .venv/bin/python infer_gain.py \
   --input <linear-p3.f32> \
   --input-report <model-input.json> \
-  --checkpoint <best.pt> \
+  --checkpoint checkpoints/production-v3.pt \
   --gain-output <grid.f32> \
   --report <grid.json> \
   --dataset-root ~/datasets/hyperdr-apple \
@@ -228,8 +237,8 @@ but it is a required file pair:
 - JSON report: width, height, byte length, endianness, scale, contract ID,
   SHA-256 and exact ISO rational metadata.
 
-The old v1 normalized `[0,1] + max_stops` sidecar is accepted only with an
-explicit `--allow-legacy-label-schema` / `--allow-legacy-external-gain` gate.
+The old v1 normalized `[0,1] + max_stops` sidecar is only accepted through the
+`--allow-legacy-label-schema` / `--allow-legacy-external-gain` gate.
 
 The writer verifies the byte length after writing. Any reader must supply both
 width and height and reject a file whose length is not `width * height * 4`.

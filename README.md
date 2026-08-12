@@ -50,7 +50,7 @@ suite. For a map of the repository and its single sources of truth, see
   Windows setup, and release tooling.
 
 Generated build trees, release archives, caches, local model reports, and
-temporary diagnostics are intentionally not part of the source tree. See the
+temporary diagnostics are not part of the source tree. See the
 [project structure guide](docs/project-structure.md) for ownership and cleanup
 conventions.
 
@@ -196,9 +196,9 @@ HyperDR convert photo.ARW --output out --look photographic --depth 10 `
 `--encoding avif-pq` and `--encoding avif-hlg` write 10-bit BT.2100 AVIF using
 the same reconstructed HDR image, the same Rec.2020 matrix, and the same
 transfer functions as the HEIC paths, so they differ only in container and
-codec. Gain-map AVIF is deliberately not implemented: libavif's support for it
-is still behind an experimental build flag, and Adaptive HEIC and Ultra HDR
-JPEG already cover the gain-map case.
+codec. There is no gain-map AVIF: libavif's support for it is still behind an
+experimental build flag, and Adaptive HEIC and Ultra HDR JPEG already cover
+that case.
 
 `--encoding adaptive` is the compatibility-first default. `pq` and `hlg` always
 write 10-bit HEVC Main10 with Rec.2020 primaries and the matching BT.2100 transfer
@@ -221,19 +221,20 @@ Conversions decode-verify their output by default. For trusted high-volume batch
 work, `--no-verify` skips that final self-check; reports then record
 `self_verified: false` independently of conversion success.
 
-`--skip-existing` makes interrupted recursive batches resumable. It compares a
-fingerprint, not a timestamp: after each successful conversion HyperDR records
-the input's size, modification time, and SHA-256 content digest together with a
-hash of every setting that can change the encoded bytes, in a hidden `.hyperdr/`
-folder mirroring the output tree. A file is skipped only when the input content,
-metadata, settings, and output hash still match, so replacing a RAW in place
-cannot silently keep the previous render. An output with no recorded provenance
-is always treated as stale. Options that cannot change the bytes -- `--no-verify`,
-`--report`, and `--overwrite` -- are excluded from the fingerprint, so toggling
-them does not force needless work. The fingerprint is derived from the settings
-table, so it covers every setting rather than a hand-maintained subset; sidecars
-written by earlier builds no longer match, which means the first resumed batch
-after upgrading re-renders once and every batch after that skips normally.
+`--skip-existing` makes interrupted recursive batches resumable. After each
+successful conversion HyperDR records a fingerprint in a hidden `.hyperdr/`
+folder mirroring the output tree: the input's size, modification time, and
+SHA-256 digest, plus a hash of every setting that can change the encoded bytes.
+A file is skipped only when all of that — and the output hash — still matches,
+so replacing a RAW in place cannot silently keep the previous render. An output
+with no recorded provenance is always treated as stale.
+
+The fingerprint comes from the settings table rather than a hand-maintained
+subset, and options that cannot change the bytes (`--no-verify`, `--report`,
+`--overwrite`) are excluded, so toggling them never forces needless work. One
+consequence of covering every setting: sidecars written by earlier builds no
+longer match, so the first batch after an upgrade re-renders once and every
+batch after that skips normally.
 
 `--decode-cache <dir>` stores the decoded, bounded linear image so that manual
 CLI runs differing only in look controls can skip the RAW decode entirely.
@@ -405,10 +406,10 @@ decoder is touched, and anything rendered with *different* settings is
 regenerated. Re-running after a card copy therefore converges on whatever is
 actually on disk.
 
-The graphical panel deliberately does not do this. It converts one photograph at
-a time, because the settings worth reaching for a slider over are the ones that
-differ per image; a folder that should share one look is what the command line
-above is for.
+The graphical panel does not do this. It converts one photograph at a time,
+because the settings worth reaching for over a slider are the ones that differ
+per image; a folder that should share one look is what the command line above
+is for.
 
 ## Continuous integration
 
@@ -430,20 +431,12 @@ GPU encoding remains outside this project's scope.
 
 ## iPhone LAN panel
 
-The browser panel supports authenticated LAN uploads, isolated conversion jobs,
-WebGPU extended-range live preview, exact Adaptive HDR result preview, and HEIC/
-Ultra HDR JPEG download. Start `Start.bat` and open the printed tokenized iPhone URL. Plain HTTP
-supports upload and conversion; trusted HTTPS is required for WebGPU on a LAN
-origin, because a browser exposes WebGPU only in a secure context and
-dismissing a certificate warning does not create one.
-
-`Setup-HTTPS.bat` handles that once per computer: it installs `mkcert` through
-winget when needed, creates a certificate authority belonging to that machine
-alone, issues the server certificate into `%LOCALAPPDATA%\HyperDR\tls`, and
-exports the public root certificate for the phone. No authority and no private
-key is ever shipped in a release archive. When the router later assigns a new
-address, `Start.bat` re-issues the server certificate from the same authority
-automatically and the phone needs no changes. See `docs/iphone-lan.md`.
+Double-click `Start.bat` and open the printed tokenized iPhone URL to upload
+photos, tune settings with a live preview, and download the converted HEIC or
+Ultra HDR JPEG. Plain HTTP covers upload and conversion; the true-HDR WebGPU
+preview needs trusted HTTPS, which `Setup-HTTPS.bat` sets up once per computer.
+The full guide, covering the two iPhone trust steps, manual certificate setup,
+and security notes, is in [docs/iphone-lan.md](docs/iphone-lan.md).
 
 ## Contributing and security
 

@@ -9,15 +9,21 @@
 namespace hyperdr {
 namespace {
 
-FloatImage halve(const FloatImage& source) {
-  FloatImage reduced(source.width / 2U + source.width % 2U,
-                     source.height / 2U + source.height % 2U, source.channels);
+FloatImage halve(const FloatImage& source, bool reduce_width,
+                 bool reduce_height) {
+  FloatImage reduced(reduce_width ? source.width / 2U + source.width % 2U
+                                  : source.width,
+                     reduce_height ? source.height / 2U + source.height % 2U
+                                   : source.height,
+                     source.channels);
   parallel_for_rows(reduced.height, [&](const std::uint32_t y) {
-    const std::uint32_t y0 = y * 2U;
-    const std::uint32_t y1 = std::min(source.height, y0 + 2U);
+    const std::uint32_t y0 = reduce_height ? y * 2U : y;
+    const std::uint32_t y1 =
+        std::min(source.height, y0 + (reduce_height ? 2U : 1U));
     for (std::uint32_t x = 0; x < reduced.width; ++x) {
-      const std::uint32_t x0 = x * 2U;
-      const std::uint32_t x1 = std::min(source.width, x0 + 2U);
+      const std::uint32_t x0 = reduce_width ? x * 2U : x;
+      const std::uint32_t x1 =
+          std::min(source.width, x0 + (reduce_width ? 2U : 1U));
       const float count = static_cast<float>((x1 - x0) * (y1 - y0));
       for (std::uint32_t c = 0; c < source.channels; ++c) {
         float sum = 0.0F;
@@ -38,9 +44,11 @@ FloatImage resample_to(FloatImage source, std::uint32_t width, std::uint32_t hei
   if (source.width == width && source.height == height) return source;
 
   // Low-pass first so the bilinear step below never undersamples.
-  while (source.width / 2U > width && source.height / 2U > height &&
-         source.width > 1U && source.height > 1U) {
-    source = halve(source);
+  while (true) {
+    const bool reduce_width = source.width > 1U && source.width / 2U > width;
+    const bool reduce_height = source.height > 1U && source.height / 2U > height;
+    if (!reduce_width && !reduce_height) break;
+    source = halve(source, reduce_width, reduce_height);
   }
   if (source.width == width && source.height == height) return source;
 

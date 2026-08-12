@@ -147,6 +147,17 @@ class BuildArgvTest(unittest.TestCase):
 
 
 class ModelIntegrationTest(unittest.TestCase):
+    def test_production_checkpoint_is_preferred_over_legacy_best(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            checkpoints = root / "checkpoints"
+            checkpoints.mkdir()
+            legacy = checkpoints / "best.pt"
+            production = checkpoints / "production-v3.pt"
+            legacy.write_bytes(b"legacy")
+            production.write_bytes(b"production")
+            self.assertEqual(model._find_checkpoint(root), production.resolve())
+
     def test_raster_input_uses_native_photographic_base(self):
         config = model.ModelConfig(
             root=Path("model"), python="python", script=Path("model/infer_gain.py"),

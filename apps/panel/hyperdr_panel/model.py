@@ -38,6 +38,8 @@ class ModelConfig:
     device: str
     long_side: int
     allow_legacy_label_schema: bool = False
+    label_contract_id: str = "hyperdr.apple-gain-label/v1"
+    model_id: str = ""
 
 
 def _enabled() -> bool:
@@ -53,6 +55,14 @@ def _enabled() -> bool:
 
 
 def _find_checkpoint(root: Path) -> Path | None:
+    # Production is an explicit release artifact. Never let an experimental
+    # run directory win merely because its path sorts first.
+    for candidate in (
+        root / "checkpoints" / "production-v3.pt",
+        root / "checkpoints" / "best.pt",
+    ):
+        if candidate.is_file():
+            return candidate.resolve()
     for folder_name in ("runs", "checkpoints"):
         folder = root / folder_name
         if not folder.is_dir():
@@ -61,6 +71,17 @@ def _find_checkpoint(root: Path) -> Path | None:
         if candidates:
             return candidates[0].resolve()
     return None
+
+
+def _checkpoint_metadata(checkpoint: Path) -> dict[str, object]:
+    sidecar = checkpoint.with_suffix(".json")
+    if not sidecar.is_file():
+        return {}
+    try:
+        value = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
 
 
 def _python_runtime(root: Path) -> str:
@@ -128,8 +149,20 @@ def load_config() -> ModelConfig | None:
     if not (dataset_root / "assets" / "display-p3.icc").is_file():
         missing.append(f"Display P3 profile {dataset_root / 'assets' / 'display-p3.icc'}")
     allow_legacy = os.environ.get("HYPERDR_MODEL_ALLOW_LEGACY_LABEL_SCHEMA", "").strip().lower() in {"1", "true", "yes", "on"}
-    declared_contract = os.environ.get("HYPERDR_MODEL_LABEL_CONTRACT", "v1").strip().lower()
-    if declared_contract != "v2" and not allow_legacy:
+    metadata = _checkpoint_metadata(checkpoint)
+    configured_contract = os.environ.get("HYPERDR_MODEL_LABEL_CONTRACT", "").strip().lower()
+    declared_contract = configured_contract or str(
+        metadata.get("label_contract_id", "hyperdr.apple-gain-label/v1")
+    ).strip().lower()
+    if declared_contract == "v1":
+        declared_contract = "hyperdr.apple-gain-label/v1"
+    elif declared_contract == "v2":
+        declared_contract = "hyperdr.apple-gain-label/v2"
+    if declared_contract not in {
+        "hyperdr.apple-gain-label/v1", "hyperdr.apple-gain-label/v2"
+    }:
+        missing.append("checkpoint sidecar has an unknown label contract")
+    if declared_contract != "hyperdr.apple-gain-label/v2" and not allow_legacy:
         missing.append("legacy checkpoint requires HYPERDR_MODEL_ALLOW_LEGACY_LABEL_SCHEMA=1")
     if missing:
         raise ModelConfigurationError(
@@ -147,6 +180,8 @@ def load_config() -> ModelConfig | None:
         device=device,
         long_side=_long_side(),
         allow_legacy_label_schema=allow_legacy,
+        label_contract_id=declared_contract,
+        model_id=str(metadata.get("model_id", "")),
     )
 
 
@@ -180,7 +215,8 @@ def status() -> dict[str, object]:
             "reason": "configured Python does not provide PyTorch, NumPy and Pillow",
         }
     return {"enabled": True, "ready": True, "device": config.device,
-            "longSide": config.long_side}
+            "longSide": config.long_side, "labelContract": config.label_contract_id,
+            "modelId": config.model_id}
 
 
 def build_commands(config: ModelConfig, source: Path, model_dir: Path,
@@ -243,10 +279,22 @@ def infer_preview(config: ModelConfig, source: Path, model_dir: Path,
     report = json.loads(report_path.read_text(encoding="utf-8"))
     grid = report.get("gain_grid_size")
     max_stops = report.get("metadata_gain_max_stops")
+    contract = report.get("label_contract_id")
+    gain_file = report.get("gain_file")
+    expected_scale = (
+        "signed_log2_gain"
+        if contract == "hyperdr.apple-gain-label/v2"
+        else "normalized_log2_gain_0_to_1"
+    )
     if (not isinstance(grid, list) or len(grid) != 2
             or not all(isinstance(value, int) and value > 0 for value in grid)
             or not isinstance(max_stops, (int, float))
-            or not 0 <= float(max_stops) <= 4):
+            or not -64 <= float(max_stops) <= 64
+            or contract not in {
+                "hyperdr.apple-gain-label/v1", "hyperdr.apple-gain-label/v2"
+            }
+            or not isinstance(gain_file, dict)
+            or gain_file.get("scale") != expected_scale):
         raise ValueError("model inference produced an invalid gain report")
     gain = gain_path.read_bytes()
     if len(gain) != grid[0] * grid[1] * 4:

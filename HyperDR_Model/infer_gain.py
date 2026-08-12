@@ -5,13 +5,14 @@ import argparse
 from contextlib import nullcontext
 import io
 import json
+import math
 from pathlib import Path
 
 import numpy as np
 import torch
 from PIL import Image, ImageCms
 
-from hyperdr_ml.gain_io import write_gain_f32
+from hyperdr_ml.gain_io import write_gain_f32, write_gain_f32_v2
 from hyperdr_ml.phase_a_labels import LABEL_CONTRACT_ID, sha256_file
 from hyperdr_ml.geometry import aligned_long_side_size
 from hyperdr_ml.model import DirectGainMapNet
@@ -37,6 +38,52 @@ def autocast_context(device: torch.device):
     if device.type == "cuda":
         return torch.autocast("cuda", dtype=torch.bfloat16)
     return nullcontext()
+
+
+_RATIONAL_DENOMINATOR = 1_000_000
+
+
+def _rational_envelope(minimum: float, maximum: float) -> tuple[dict[str, int], dict[str, int]]:
+    """Quantize outward so ISO metadata always contains every predicted stop."""
+    minimum_numerator = math.floor(minimum * _RATIONAL_DENOMINATOR)
+    maximum_numerator = math.ceil(maximum * _RATIONAL_DENOMINATOR)
+    if maximum_numerator <= minimum_numerator:
+        maximum_numerator = minimum_numerator + 1
+    return (
+        {"numerator": minimum_numerator, "denominator": _RATIONAL_DENOMINATOR},
+        {"numerator": maximum_numerator, "denominator": _RATIONAL_DENOMINATOR},
+    )
+
+
+def _prediction_metadata(gain_stops: np.ndarray) -> tuple[dict[str, object], float]:
+    minimum = float(np.min(gain_stops))
+    maximum = float(np.max(gain_stops))
+    if not math.isfinite(minimum) or not math.isfinite(maximum):
+        raise RuntimeError("Model produced a non-finite signed-gain interval")
+    if minimum < -64.0 or maximum > 64.0 or maximum < 0.0:
+        raise RuntimeError("Model produced signed gains outside the ISO safety envelope")
+    gain_min, gain_max = _rational_envelope(minimum, maximum)
+    zero = {"numerator": 0, "denominator": _RATIONAL_DENOMINATOR}
+    one = {
+        "numerator": _RATIONAL_DENOMINATOR,
+        "denominator": _RATIONAL_DENOMINATOR,
+    }
+    metadata = {
+        "minimum_version": 0,
+        "writer_version": 0,
+        "flags": 64,
+        "use_base_color_space": True,
+        "backward_direction": False,
+        "common_denominator": False,
+        "base_headroom": zero,
+        "alternate_headroom": gain_max,
+        "gain_min": gain_min,
+        "gain_max": gain_max,
+        "gamma": one,
+        "base_offset": zero,
+        "alternate_offset": zero,
+    }
+    return metadata, gain_max["numerator"] / gain_max["denominator"]
 
 
 def main() -> None:
@@ -67,6 +114,26 @@ def main() -> None:
 
     checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     config = checkpoint["config"]
+    release_metadata: dict[str, object] = {}
+    release_sidecar = args.checkpoint.with_suffix(".json")
+    if release_sidecar.is_file():
+        try:
+            loaded_release_metadata = json.loads(
+                release_sidecar.read_text(encoding="utf-8")
+            )
+            if isinstance(loaded_release_metadata, dict):
+                release_metadata = loaded_release_metadata
+        except (OSError, json.JSONDecodeError):
+            pass
+    checkpoint_model_id = str(
+        config.get("model_id")
+        or release_metadata.get("model_id")
+        or (
+            "hyperdr.direct-fixed-incumbent/v3"
+            if not args.allow_legacy_label_schema
+            else "hyperdr.direct-gainmapnet/legacy-unversioned"
+        )
+    )
     expected_contract = "hyperdr.apple-gain-label/v1" if args.allow_legacy_label_schema else LABEL_CONTRACT_ID
     actual_contract = checkpoint.get("label_contract_id", "hyperdr.apple-gain-label/v1")
     if actual_contract != expected_contract:
@@ -75,15 +142,19 @@ def main() -> None:
             "only for an explicitly frozen v1 model"
         )
     manifest_path = args.dataset_root / "manifests" / "samples.jsonl"
-    if "manifest_sha256" in checkpoint and checkpoint.get("manifest_sha256") != sha256_file(manifest_path):
+    # Release packages intentionally contain the color-profile asset but not
+    # the private training corpus.  Verify the frozen manifest when a corpus is
+    # supplied for audit/reproduction, while keeping ordinary inference
+    # independent of training data.
+    if ("manifest_sha256" in checkpoint and manifest_path.is_file()
+            and checkpoint.get("manifest_sha256") != sha256_file(manifest_path)):
         raise SystemExit("checkpoint manifest hash does not match --dataset-root")
-    if not args.allow_legacy_label_schema:
-        raise SystemExit(
-            "the current model head emits normalized v1 gains; native ISO v2 inference "
-            "is intentionally blocked until a v2-trained model exists"
-        )
-    if config.get("target_mode") != "fixed_3stops":
-        raise SystemExit("Checkpoint does not predict fixed-scale absolute gain")
+    legacy_schema = actual_contract == "hyperdr.apple-gain-label/v1"
+    if legacy_schema:
+        if config.get("target_mode") != "fixed_3stops":
+            raise SystemExit("Legacy checkpoint does not predict fixed-scale absolute gain")
+    elif config.get("model") != "direct" or config.get("target_mode") != "signed_stops":
+        raise SystemExit("Native v2 inference requires a direct signed-stops checkpoint")
 
     model_input_descriptor = None
     if args.input_report is not None:
@@ -164,35 +235,54 @@ def main() -> None:
     )
 
     model = DirectGainMapNet(
-        config["base_channels"], config.get("architecture", "baseline")
+        config["base_channels"],
+        config.get("architecture", "baseline"),
+        "normalized_v1" if legacy_schema else "signed_stops_v2",
     ).to(device)
     model.load_state_dict(checkpoint["model"])
     model.eval()
     with torch.inference_mode(), autocast_context(device):
-        encoded_gain = model(tensor).float().clamp(0.0, 1.0)[0, 0].cpu().numpy()
-    if not np.isfinite(encoded_gain).all():
+        prediction = model(tensor).float()[0, 0].cpu().numpy()
+    if not np.isfinite(prediction).all():
         raise RuntimeError("Model produced non-finite gain")
 
-    gain_file = write_gain_f32(args.gain_output, encoded_gain)
-    gain_stops = encoded_gain * 3.0
+    if legacy_schema:
+        encoded_gain = np.clip(prediction, 0.0, 1.0)
+        gain_stops = encoded_gain * 3.0
+        gain_file = write_gain_f32(args.gain_output, encoded_gain)
+        report = {
+            "gain_grid_size": [int(encoded_gain.shape[1]), int(encoded_gain.shape[0])],
+            "gain_file": gain_file,
+            "metadata_gain_max_stops": 3.0,
+            "label_contract_id": "hyperdr.apple-gain-label/v1",
+            "legacy_schema": True,
+        }
+    else:
+        gain_stops = np.asarray(prediction, dtype=np.float32)
+        metadata, metadata_gain_max = _prediction_metadata(gain_stops)
+        report = write_gain_f32_v2(
+            args.gain_output,
+            gain_stops,
+            metadata=metadata,
+            source_type="hyperdr_direct_model",
+            confidence="model_prediction",
+            formula_version="hyperdr.direct-signed-g/v3",
+        )
+        report.update({
+            "metadata_gain_max_stops": metadata_gain_max,
+            "legacy_schema": False,
+        })
     checkpoint_hash = sha256_file(args.checkpoint)
-    report = {
+    report.update({
         "input": str(args.input),
         "checkpoint": str(args.checkpoint),
         "checkpoint_epoch": checkpoint["epoch"],
         "model_family": "DirectGainMapNet",
-        "checkpoint_model_id": config.get(
-            "model_id", "hyperdr.direct-gainmapnet/legacy-unversioned"
-        ),
+        "checkpoint_model_id": checkpoint_model_id,
         "device": str(device),
         "source_size": [source_width, source_height],
         "input_profile": input_profile_name,
         "model_size": [model_width, model_height],
-        "gain_grid_size": [int(encoded_gain.shape[1]), int(encoded_gain.shape[0])],
-        "gain_file": gain_file,
-        "metadata_gain_max_stops": 3.0,
-        "label_contract_id": "hyperdr.apple-gain-label/v1",
-        "legacy_schema": True,
         "predicted_gain_stops": {
             "min": float(gain_stops.min()),
             "mean": float(gain_stops.mean()),
@@ -200,9 +290,9 @@ def main() -> None:
             "p95": float(np.percentile(gain_stops, 95)),
             "max": float(gain_stops.max()),
         },
-    }
+    })
     if model_input_descriptor is not None:
-        gain_size = [int(encoded_gain.shape[1]), int(encoded_gain.shape[0])]
+        gain_size = [int(gain_stops.shape[1]), int(gain_stops.shape[0])]
         report["model_binding"] = {
             "contract": "hyperdr.model-gain-binding/v1",
             "source": {
@@ -229,7 +319,8 @@ def main() -> None:
             },
             "model": {
                 "version": "%s@epoch-%s" % (
-                    config.get("architecture", "baseline"), checkpoint["epoch"]
+                    checkpoint_model_id,
+                    checkpoint["epoch"],
                 ),
                 "checkpoint_sha256": checkpoint_hash,
             },

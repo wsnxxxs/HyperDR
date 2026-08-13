@@ -1,5 +1,6 @@
 hyperdr_add_test(cli_test LINK HyperDR::app)
 hyperdr_add_test(discovery_test LINK HyperDR::app)
+target_compile_definitions(discovery_test PRIVATE HYPERDR_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 hyperdr_add_test(resume_state_test LINK HyperDR::app)
 hyperdr_add_test(schema_test LINK HyperDR::app)
 hyperdr_add_test(report_test LINK HyperDR::app)

@@ -35,7 +35,6 @@ apps/panel/
     session.py          一张图进、一个结果出，以及过期清理
     job.py              正在运行的那个转换进程，与浏览器轮询的日志
     native_preview.py   调用 preview-frame，校验并缓存线性 P3 float32 原生预览包
-    thumbnail.py        旧 thumbnail/JPEG 命令的兼容封装
     curve.py            色调曲线诊断接口的兼容封装
     concurrency.py      预览与模型进程共用的解码准入控制
     picker.py           原生 tkinter 文件夹对话框（独立子进程）
@@ -106,7 +105,9 @@ PQ / HLG 需要 Main10 x265；首次完整构建后按项目根 `README.md` 运�
   960 / 1440 / 2048 像素；纯 JavaScript CPU 呈现回退固定不超过 1280 像素。
   它不使用相机内嵌 JPEG，因此高光恢复设置会真实反映在预览中。
 - **WebGPU 真 HDR** 通道（`rgba16float` + 扩展 Display P3），在 HDR 屏 + 受信任 HTTPS 下
-  直接以超过参考白的亮度呈现；条件不满足时回退到 SDR 示意，并在指示灯上说明原因。
+  直接以超过参考白的亮度呈现。启用前会在当前浏览器中用正式 shader 渲染一组已知线性
+  Display P3 像素并从浮点画布读回，只有配置确认为 `extended`、传递函数误差合格且红通道
+  实际保留大于 1 的值时才启用；否则回退到 SDR 示意，并在指示灯上说明原因。
 - `HyperDR preview-frame` 直接提供摄影 SDR 底图、真实增益图和重建 HDR 平面；浏览器只负责
   呈现，不再维护一份色调曲线或增益图近似。
 - **直方图**（亮度 / RGB 可切换）叠加扩展起点标记，配合**高光/暗部裁切**读数与**斑马纹**；

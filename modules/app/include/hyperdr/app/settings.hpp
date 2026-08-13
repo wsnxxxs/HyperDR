@@ -56,6 +56,11 @@ struct ConvertOptions {
 // Rejects combinations no encoder can honour, before any file is opened.
 void validate_convert_options(const ConvertOptions& options);
 
+// Rejects a rendered peak that the selected transfer function cannot encode.
+// This second boundary matters for external gain maps: their authoritative
+// metadata is not known when ConvertOptions is first validated.
+void validate_encoding_headroom(HdrEncoding encoding, float headroom_stops);
+
 struct FileResult {
   std::filesystem::path input;
   std::filesystem::path output;

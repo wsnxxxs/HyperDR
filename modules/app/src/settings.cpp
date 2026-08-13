@@ -8,6 +8,15 @@
 
 namespace hyperdr {
 
+void validate_encoding_headroom(HdrEncoding encoding, float headroom_stops) {
+  if (is_hlg_encoding(encoding) &&
+      (!(std::isfinite(headroom_stops)) ||
+       headroom_stops > kHlgHeadroomStops + 1.0e-5F)) {
+    throw std::invalid_argument(
+        "HLG rendered headroom cannot exceed 2.3 stops at 203-nit diffuse white");
+  }
+}
+
 void validate_convert_options(const ConvertOptions& options) {
   if (options.output_directory.empty()) {
     throw std::invalid_argument("--output is required");

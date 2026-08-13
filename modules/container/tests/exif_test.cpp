@@ -260,6 +260,7 @@ void test_round_trip() {
 void test_preamble_is_skipped() {
   hyperdr::PhotoMetadata written;
   written.model = "Prefixed";
+  written.orientation = 6;
   written.iso = 400;
   const auto tiff = hyperdr::make_minimal_exif(written);
 
@@ -269,6 +270,8 @@ void test_preamble_is_skipped() {
   require(read.metadata.model == "Prefixed",
           "a HEIF Exif item's offset prefix must be skipped");
   require(read.metadata.iso == 400, "capture settings survive the prefix");
+  require(read.orientation && *read.orientation == 6,
+          "orientation survives the HEIF Exif prefix");
 
   // Not Exif at all: no byte-order mark anywhere in the leading window.
   const std::vector<std::uint8_t> noise(64, 0x7F);

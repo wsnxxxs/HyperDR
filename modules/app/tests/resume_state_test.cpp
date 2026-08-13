@@ -184,6 +184,27 @@ void check_decode_cache_roundtrip() {
   require(!hyperdr::read_decode_cache(directory / "absent.hdrcache", broken),
           "an absent cache must be a miss");
 
+  // A tiny hostile file used to advertise the maximum 64 GiB payload and make
+  // the reader allocate it before discovering that no pixels followed.
+  const auto oversized = directory / "oversized-header.hdrcache";
+  {
+    const auto put_u32 = [](std::ofstream& stream, std::uint32_t number) {
+      const char bytes[4]{
+          static_cast<char>(number), static_cast<char>(number >> 8U),
+          static_cast<char>(number >> 16U), static_cast<char>(number >> 24U)};
+      stream.write(bytes, sizeof(bytes));
+    };
+    std::ofstream output(oversized, std::ios::binary);
+    output.write("HDRCACH3", 8);
+    put_u32(output, 6);
+    put_u32(output, 131072);
+    put_u32(output, 131072);
+    put_u32(output, 1);
+    put_u32(output, 0);
+  }
+  require(!hyperdr::read_decode_cache(oversized, broken),
+          "cache reader trusted an advertised payload absent from the file");
+
   std::filesystem::remove_all(directory);
 }
 

@@ -20,6 +20,7 @@
 #include "hyperdr/image/transfer.hpp"
 
 #include <libheif/heif.h>
+#include <libheif/heif_properties.h>
 #include <jpeglib.h>
 #include <lcms2.h>
 #include <png.h>
@@ -255,34 +256,9 @@ DecodedImage decode_jpeg(const std::filesystem::path& path) {
   // orientation. The old path kept only Orientation and silently replaced
   // camera, lens, exposure, authorship and GPS with an almost-empty Exif block.
   if (output.exif_size != 0) {
-    if (auto parsed = read_photo_metadata(exif.get(), output.exif_size)) {
-      result.metadata = std::move(*parsed);
-      if (result.metadata.iso > 0) {
-        result.capture.iso = static_cast<float>(result.metadata.iso);
-      }
-      if (result.metadata.exposure_seconds > 0.0) {
-        result.capture.exposure_time_seconds =
-            static_cast<float>(result.metadata.exposure_seconds);
-      }
-      if (result.metadata.aperture > 0.0) {
-        result.capture.aperture_f_number =
-            static_cast<float>(result.metadata.aperture);
-      }
-    }
-  }
-
-  // Orientation is normalised into the pixels rather than carried forward: a
-  // phone's landscape-stored portrait used to be exported with orientation 1
-  // and never rotated, so both the preview and the exported file were on
-  // their side and the reported width and height were the wrong way round.
-  const auto orientation = result.metadata.orientation >= 1 &&
-                                   result.metadata.orientation <= 8
-                               ? std::optional<std::uint16_t>{
-                                     result.metadata.orientation}
-                               : std::nullopt;
-  if (orientation && *orientation != 1) {
-    result.linear_p3 = apply_exif_orientation(std::move(result.linear_p3),
-                                              *orientation);
+    const auto read = read_exif(exif.get(), output.exif_size);
+    apply_exif(result, read);
+    if (read.orientation) normalize_orientation(result, *read.orientation);
   }
   return result;
 }
@@ -572,7 +548,7 @@ struct DecodingOptionsDeleter {
   }
 };
 
-std::optional<PhotoMetadata> read_heif_photo_metadata(
+std::optional<ExifRead> read_heif_exif(
     const heif_image_handle* handle) {
   const int count =
       heif_image_handle_get_number_of_metadata_blocks(handle, "Exif");
@@ -591,14 +567,29 @@ std::optional<PhotoMetadata> read_heif_photo_metadata(
         heif_error_Ok) {
       continue;
     }
-    if (auto metadata = read_photo_metadata(bytes.data(), bytes.size())) {
-      return metadata;
-    }
+    // Orientation parsing is intentionally independent of the broader photo
+    // metadata parser: one malformed optional Exif field must not prevent a
+    // valid IFD0 Orientation tag from being normalised.
+    return read_exif(bytes.data(), bytes.size());
   }
   return std::nullopt;
 }
 
-DecodedImage decode_heif_rgb_handle(const heif_image_handle* handle) {
+bool has_heif_orientation_transform(const heif_context* context,
+                                    const heif_image_handle* handle) {
+  const auto id = heif_image_handle_get_item_id(handle);
+  return heif_item_get_properties_of_type(
+             context, id, heif_item_property_type_transform_rotation,
+             nullptr, 0) > 0 ||
+         heif_item_get_properties_of_type(
+             context, id, heif_item_property_type_transform_mirror,
+             nullptr, 0) > 0;
+}
+
+DecodedImage decode_heif_rgb_handle(const heif_context* context,
+                                    const heif_image_handle* handle,
+                                    bool normalize_exif = true,
+                                    std::uint16_t* exif_orientation = nullptr) {
   SourceColor color;
   heif_color_profile_nclx* profile_raw = nullptr;
   const auto profile_error = heif_image_handle_get_nclx_color_profile(handle, &profile_raw);
@@ -686,23 +677,17 @@ DecodedImage decode_heif_rgb_handle(const heif_image_handle* handle) {
   result.decode.resolution_reduced = resolution_reduced;
   result.hdr_headroom =
       color.icc.empty() ? transfer_headroom(color.transfer) : 1.0F;
-  if (auto metadata = read_heif_photo_metadata(handle)) {
-    result.metadata = std::move(*metadata);
-    if (result.metadata.iso > 0) {
-      result.capture.iso = static_cast<float>(result.metadata.iso);
-    }
-    if (result.metadata.exposure_seconds > 0.0) {
-      result.capture.exposure_time_seconds =
-          static_cast<float>(result.metadata.exposure_seconds);
-    }
-    if (result.metadata.aperture > 0.0) {
-      result.capture.aperture_f_number =
-          static_cast<float>(result.metadata.aperture);
-    }
-  }
-  // libheif applies item transformations to the decoded pixels. Do not carry
-  // an Exif orientation alongside already-normalised output.
-  result.metadata.orientation = 1;
+  ExifRead exif;
+  if (auto read = read_heif_exif(handle)) exif = std::move(*read);
+  apply_exif(result, exif);
+  // libheif applies irot/imir properties, but it does not apply an independent
+  // Exif Orientation tag. Prefer the container transform when both exist so a
+  // producer that duplicated the orientation cannot rotate the image twice.
+  const auto orientation = has_heif_orientation_transform(context, handle)
+                               ? std::uint16_t{1}
+                               : exif.orientation.value_or(1);
+  if (exif_orientation != nullptr) *exif_orientation = orientation;
+  if (normalize_exif) normalize_orientation(result, orientation);
   return result;
 }
 
@@ -721,8 +706,16 @@ DecodedImage decode_adaptive_heic(const std::vector<std::uint8_t>& bytes,
   check_heif(heif_context_get_image_handle(context, references.base_id, &base_handle_raw),
              "get Adaptive HDR base image");
   std::unique_ptr<heif_image_handle, HandleDeleter> base_handle(base_handle_raw);
-  auto result = decode_heif_rgb_handle(base_handle.get());
-  if (base_only) return result;
+  // Reconstruct in the stored raster coordinate system, then apply an
+  // Exif-only orientation to the complete HDR result. Rotating the base before
+  // sampling the gain grid would attach gain to the wrong parts of the image.
+  std::uint16_t exif_orientation = 1;
+  auto result = decode_heif_rgb_handle(context, base_handle.get(), false,
+                                       &exif_orientation);
+  if (base_only) {
+    normalize_orientation(result, exif_orientation);
+    return result;
+  }
 
   heif_image_handle* gain_handle_raw = nullptr;
   check_heif(heif_context_get_image_handle(context, references.gain_id, &gain_handle_raw),
@@ -770,6 +763,7 @@ DecodedImage decode_adaptive_heic(const std::vector<std::uint8_t>& bytes,
   // The base is a Display P3 SDR image, so the headroom is entirely whatever
   // the gain map was written to add. `alternate_headroom` is in stops.
   result.hdr_headroom = std::max(1.0F, std::exp2(alternate_headroom));
+  normalize_orientation(result, exif_orientation);
   return result;
 }
 
@@ -788,7 +782,7 @@ DecodedImage decode_heic(const std::filesystem::path& path,
   check_heif(heif_context_get_primary_image_handle(context.get(), &handle_raw),
              "HEIC primary image");
   std::unique_ptr<heif_image_handle, HandleDeleter> handle(handle_raw);
-  return decode_heif_rgb_handle(handle.get());
+  return decode_heif_rgb_handle(context.get(), handle.get());
 }
 
 }  // namespace

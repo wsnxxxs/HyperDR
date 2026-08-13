@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import struct
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "apps" / "panel"))
@@ -15,6 +18,7 @@ SCOPE = (
     REPO_ROOT / "apps" / "panel" / "web" / "js" / "preview" / "scope.js"
 ).read_text(encoding="utf-8")
 
+from hyperdr_panel import native_preview  # noqa: E402
 from hyperdr_panel.native_preview import parse_packet  # noqa: E402
 
 
@@ -33,6 +37,12 @@ def packet(status="ok", reasons=()):
 
 
 class NativePreviewContractTests(unittest.TestCase):
+    def setUp(self):
+        native_preview._CACHE.clear()
+
+    def tearDown(self):
+        native_preview._CACHE.clear()
+
     def test_float_packet_preserves_linear_hdr_samples(self):
         data = packet()
         metadata = parse_packet(data)
@@ -51,6 +61,61 @@ class NativePreviewContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "truncated"):
             parse_packet(packet()[:-4])
 
+    def test_same_size_timestamp_preserved_replacement_invalidates_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "photo.jpg"
+            source.write_bytes(b"first")
+            original_stat = source.stat()
+            builds = []
+
+            def build(path, _options, _edge):
+                builds.append(path.read_bytes())
+                return packet(), {"width": 2, "height": 1}
+
+            with mock.patch.object(native_preview, "_build", build):
+                native_preview.preview_for(source, {}, 960)
+                source.write_bytes(b"other")
+                os.utime(source, ns=(original_stat.st_atime_ns,
+                                     original_stat.st_mtime_ns))
+                native_preview.preview_for(source, {}, 960)
+            self.assertEqual(builds, [b"first", b"other"])
+
+    def test_failed_cli_removes_atomic_temporary_artifacts(self):
+        seen_output = None
+
+        def failed(argv, **_kwargs):
+            nonlocal seen_output
+            seen_output = Path(argv[argv.index("--output") + 1])
+            Path(str(seen_output) + ".tmp.123.0").write_bytes(b"partial")
+            return mock.Mock(returncode=1, stderr=b"failed")
+
+        with mock.patch.object(native_preview, "detect_exe", return_value="HyperDR"), \
+                mock.patch.object(native_preview.subprocess, "run", failed):
+            with self.assertRaisesRegex(ValueError, "failed"):
+                native_preview._build(Path("photo.jpg"), {}, 960)
+        self.assertIsNotNone(seen_output)
+        self.assertFalse(seen_output.exists())
+        self.assertEqual(list(seen_output.parent.glob(seen_output.name + ".tmp.*")), [])
+
+    def test_old_crash_orphans_are_swept_without_touching_live_preview(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            orphan = folder / "hyperdr-preview-old.hpf.tmp.12.0"
+            live = folder / "hyperdr-preview-live.hpf"
+            unrelated = folder / "somebody-else.hpf"
+            for path in (orphan, live, unrelated):
+                path.write_bytes(b"x")
+            now = 10_000.0
+            old = now - native_preview._ORPHAN_MAX_AGE_SECONDS - 1
+            os.utime(orphan, (old, old))
+            os.utime(unrelated, (old, old))
+            with mock.patch.object(native_preview.tempfile, "gettempdir",
+                                   return_value=temporary):
+                native_preview._cleanup_orphaned_previews(now)
+            self.assertFalse(orphan.exists())
+            self.assertTrue(live.exists())
+            self.assertTrue(unrelated.exists())
+
 
 class NativePreviewFrontendContractTests(unittest.TestCase):
     def test_native_float_planes_do_not_use_retired_sdr_display_buffers(self):
@@ -65,6 +130,12 @@ class NativePreviewFrontendContractTests(unittest.TestCase):
         for retired in ("scene.data", "sceneScale", "simulateOutput(",
                         "simulateModelOutput("):
             self.assertNotIn(retired, SCOPE)
+
+    def test_transient_preview_failures_keep_the_last_valid_frame(self):
+        self.assertIn("if (error.status === 404)", STAGE)
+        self.assertIn("if (!image.frame)", STAGE)
+        self.assertIn("toast(message, true)", STAGE)
+        self.assertIn("error.status === 409", STAGE)
 
 
 if __name__ == "__main__":

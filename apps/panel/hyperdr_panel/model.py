@@ -7,6 +7,7 @@ inference to HyperDR's external gain-grid input.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -256,26 +257,15 @@ def build_commands(config: ModelConfig, source: Path, model_dir: Path,
     return commands, gain_path, report_path
 
 
-def infer_preview(config: ModelConfig, source: Path, model_dir: Path,
-                  converter_exe: str,
-                  highlight_recovery: str = "blend") -> tuple[bytes, dict]:
-    """Run inference now and return the validated browser-preview gain grid."""
-    commands, gain_path, report_path = build_commands(
-        config, source, model_dir, converter_exe, highlight_recovery
-    )
-    with RAW_DECODE_BUDGET.hold(timeout=1.0):
-        for command in commands:
-            try:
-                completed = subprocess.run(
-                    command, cwd=str(config.root), capture_output=True,
-                    timeout=INFERENCE_TIMEOUT_SECONDS, check=False,
-                )
-            except (OSError, subprocess.SubprocessError) as exc:
-                raise RuntimeError("unable to run model inference: %s" % exc) from exc
-            if completed.returncode != 0:
-                detail = completed.stderr.decode("utf-8", errors="replace").strip()
-                raise RuntimeError(detail or "model inference failed")
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
+
+def _validated_inference_files(gain_path: Path, report_path: Path) -> tuple[bytes, dict]:
     report = json.loads(report_path.read_text(encoding="utf-8"))
     grid = report.get("gain_grid_size")
     max_stops = report.get("metadata_gain_max_stops")
@@ -299,4 +289,61 @@ def infer_preview(config: ModelConfig, source: Path, model_dir: Path,
     gain = gain_path.read_bytes()
     if len(gain) != grid[0] * grid[1] * 4:
         raise ValueError("model gain byte length does not match its report")
+    expected_digest = gain_file.get("sha256")
+    if (expected_digest is not None
+            and (not isinstance(expected_digest, str)
+                 or _sha256(gain_path) != expected_digest)):
+        raise ValueError("model gain content does not match its report")
     return gain, report
+
+
+def cached_inference(config: ModelConfig, source: Path, model_dir: Path,
+                     highlight_recovery: str = "blend") -> tuple[bytes, dict] | None:
+    """Return a preview inference only when its full provenance still matches."""
+    gain_path = model_dir / "model-gain.f32"
+    report_path = model_dir / "model-gain.json"
+    if not gain_path.is_file() or not report_path.is_file():
+        return None
+    try:
+        gain, report = _validated_inference_files(gain_path, report_path)
+        binding = report["model_binding"]
+        source_binding = binding["source"]
+        model_binding = binding["model"]
+        tensor_size = binding["geometry"]["model_tensor_size"]
+        expected_long_side = ((config.long_side + 15) // 16) * 16
+        if (source_binding.get("sha256") != _sha256(source)
+                or source_binding.get("highlight_recovery") != highlight_recovery
+                or model_binding.get("checkpoint_sha256") != _sha256(config.checkpoint)
+                or report.get("label_contract_id") != config.label_contract_id
+                or not isinstance(tensor_size, list) or len(tensor_size) != 2
+                or max(tensor_size) != expected_long_side):
+            return None
+        return gain, report
+    except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def infer_preview(config: ModelConfig, source: Path, model_dir: Path,
+                  converter_exe: str,
+                  highlight_recovery: str = "blend") -> tuple[bytes, dict]:
+    """Run inference now and return the validated browser-preview gain grid."""
+    cached = cached_inference(config, source, model_dir, highlight_recovery)
+    if cached is not None:
+        return cached
+    commands, gain_path, report_path = build_commands(
+        config, source, model_dir, converter_exe, highlight_recovery
+    )
+    with RAW_DECODE_BUDGET.hold(timeout=1.0):
+        for command in commands:
+            try:
+                completed = subprocess.run(
+                    command, cwd=str(config.root), capture_output=True,
+                    timeout=INFERENCE_TIMEOUT_SECONDS, check=False,
+                )
+            except (OSError, subprocess.SubprocessError) as exc:
+                raise RuntimeError("unable to run model inference: %s" % exc) from exc
+            if completed.returncode != 0:
+                detail = completed.stderr.decode("utf-8", errors="replace").strip()
+                raise RuntimeError(detail or "model inference failed")
+
+    return _validated_inference_files(gain_path, report_path)

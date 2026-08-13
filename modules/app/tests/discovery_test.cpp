@@ -2,6 +2,7 @@
 #include "hyperdr/app/discovery.hpp"
 #include "hyperdr/app/fingerprint.hpp"
 #include "hyperdr/app/resume_state.hpp"
+#include "hyperdr/codec/availability.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -134,6 +135,25 @@ int main() {
             "changing the look must change the fingerprint");
     require(hyperdr::run_conversion(restyled) != 0,
             "an output rendered with different settings must not be skipped");
+
+    // Exercise the publish half with a real, checked-in image. Once an exact
+    // render becomes stale, --skip-existing must replace it without requiring
+    // the unrelated --overwrite switch as well. The fixture is HEIC, so the
+    // dependency-free configuration skips this block.
+    if (hyperdr::kCodecsAvailable) {
+      hyperdr::ConvertOptions real_resume;
+      real_resume.input = std::filesystem::path(HYPERDR_SOURCE_DIR) /
+                          "tests/macos_t2/fixtures/gamma-2-probe.heic";
+      real_resume.output_directory = root / "real-resume-output";
+      real_resume.report_path = root / "real-resume-report.json";
+      real_resume.skip_existing = true;
+      real_resume.verify_output = false;
+      require(hyperdr::run_conversion(real_resume) == 0,
+              "initial resumable render failed");
+      real_resume.gain.look.contrast = 1.25F;
+      require(hyperdr::run_conversion(real_resume) == 0,
+              "--skip-existing could not replace a stale output");
+    }
 
     std::filesystem::remove_all(root);
     std::cout << "pipeline discovery tests passed\n";

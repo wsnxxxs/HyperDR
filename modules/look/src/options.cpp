@@ -36,7 +36,8 @@ void validate_photographic_controls(const LookOptions& look) {
   }
   if (!(std::isfinite(look.toe_end) && std::isfinite(look.toe_output_ratio) &&
         std::isfinite(look.positive_exposure_limit_ev) && look.toe_end > 0.0F &&
-        look.toe_output_ratio > 0.0F && look.toe_output_ratio < 1.0F &&
+        look.toe_output_ratio >= 1.0F / 3.0F &&
+        look.toe_output_ratio < 1.0F &&
         look.positive_exposure_limit_ev >= 0.0F)) {
     throw std::invalid_argument("invalid internal photographic-look parameters");
   }

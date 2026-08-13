@@ -1,5 +1,7 @@
 #include "hyperdr/gainmap/reconstruct.hpp"
+#include "hyperdr/look/grid.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -89,15 +91,15 @@ void test_negative_gain_clamp() {
   }
 }
 
-void test_reverse_headroom_direction() {
+void test_reverse_headroom_order_uses_the_same_endpoint_weight() {
   auto metadata = positive_metadata();
   metadata.base_headroom = {2, 1};
   metadata.alternate_headroom = {0, 1};
 
   const auto rendered = hyperdr::reconstruct_gain_map(
       base_image(1.0F), gain_image(1.0F), metadata, 1.0F);
-  require_close(rendered.pixels[0], 0.5F, 1.0e-6F,
-                "reverse headroom did not apply a negative weight");
+  require_close(rendered.pixels[0], 2.0F, 1.0e-6F,
+                "reverse headroom order inverted the interpolation weight");
 }
 
 void test_gamma_interpolation_order_is_code_domain() {
@@ -245,17 +247,40 @@ void test_channel_mismatch_is_rejected() {
           "one-channel metadata silently consumed a three-channel gain map");
 }
 
+void test_large_image_uses_shared_double_precision_coordinates() {
+  constexpr std::uint32_t kWidth = 1'500'000;
+  constexpr std::uint32_t kGainWidth = 3068;
+  hyperdr::FloatImage base(kWidth, 1, 3);
+  std::fill(base.pixels.begin(), base.pixels.end(), 1.0F);
+  hyperdr::FloatImage gain(kGainWidth, 1, 1);
+  for (std::uint32_t x = 0; x < kGainWidth; ++x) {
+    gain.at(x, 0, 0) = static_cast<float>(x) /
+                       static_cast<float>(kGainWidth - 1U);
+  }
+  const auto rendered = hyperdr::reconstruct_gain_map(
+      base, gain, positive_metadata(), 2.0F);
+  for (const std::uint32_t x : {1'000'013U, 1'234'567U, kWidth - 1U}) {
+    const auto c = hyperdr::bilinear_grid_coordinates(
+        kGainWidth, 1, kWidth, 1, x, 0);
+    const float code = std::lerp(gain.at(c.x0, 0, 0),
+                                 gain.at(c.x1, 0, 0), c.tx);
+    require_close(rendered.at(x, 0, 0), std::exp2(2.0F * code), 2.0e-5F,
+                  "reconstruction diverged from shared large-image coordinates");
+  }
+}
+
 }  // namespace
 
 int main() {
   try {
     test_physical_headroom_weight();
     test_negative_gain_clamp();
-    test_reverse_headroom_direction();
+    test_reverse_headroom_order_uses_the_same_endpoint_weight();
     test_gamma_interpolation_order_is_code_domain();
     test_clamp_statistics_are_reported();
     test_three_channel_reconstruction_uses_each_channel();
     test_channel_mismatch_is_rejected();
+    test_large_image_uses_shared_double_precision_coordinates();
     std::cout << "synthetic reconstruction tests passed\n";
     return 0;
   } catch (const std::exception& error) {

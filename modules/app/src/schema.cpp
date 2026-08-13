@@ -85,7 +85,7 @@ const std::array<Setting, 26>& table() {
       {"highlight_recovery", "--highlight-recovery", SettingKind::kEnum, 0, 0,
        kHighlightRecoveryChoices, "blend|reconstruct|clip|unclip",
        "RAW clipped-highlight handling", false, true, nullptr,
-       apply_highlight_recovery, read_highlight_recovery},
+       apply_highlight_recovery, read_highlight_recovery, true},
       {"raw_gain", "--raw-gain", SettingKind::kNumber, 0.125, 64.0, {},
        "<0.125..64>", "Sensor-domain RAW digital gain", false, true, nullptr,
        [](ConvertOptions& o, const json::Value& v) {
@@ -93,7 +93,7 @@ const std::array<Setting, 26>& table() {
        },
        [](const ConvertOptions& o) {
          return json::Value::from_number(o.raw.digital_gain);
-       }},
+       }, true},
       {"raw_auto_bad_pixels", "--raw-auto-bad-pixels", SettingKind::kBoolean,
        0, 0, {}, {}, "Conservative RAW hot/dead pixel correction", false, true,
        nullptr,
@@ -102,7 +102,7 @@ const std::array<Setting, 26>& table() {
        },
        [](const ConvertOptions& o) {
          return json::Value::from_bool(o.raw.auto_bad_pixel_correction);
-       }},
+       }, true},
 
       {"contrast", "--contrast", SettingKind::kNumber, 0.80, 1.35, {},
        "<0.80..1.35>", "Photographic mid-tone slope", false, true, nullptr,
@@ -161,7 +161,8 @@ const std::array<Setting, 26>& table() {
        [](ConvertOptions& o, const json::Value& v) {
          o.preview_max_edge = static_cast<std::uint32_t>(v.number());
        },
-       [](const ConvertOptions& o) { return json::Value::from_number(o.preview_max_edge); }},
+       [](const ConvertOptions& o) { return json::Value::from_number(o.preview_max_edge); },
+       true},
 
       {"recursive", "--recursive", SettingKind::kBoolean, 0, 0, {}, {},
        "Scan subdirectories", false, false, nullptr,
@@ -184,7 +185,8 @@ const std::array<Setting, 26>& table() {
       {"half_size", {}, SettingKind::kBoolean, 0, 0, {}, {},
        "RAW half-size demosaic (set by the preview path)", false, true, nullptr,
        nullptr,
-       [](const ConvertOptions& o) { return json::Value::from_bool(o.raw.half_size); }},
+       [](const ConvertOptions& o) { return json::Value::from_bool(o.raw.half_size); },
+       true},
       {"toe_end", {}, SettingKind::kNumber, 0.0, 1.0, {}, {},
        "Scene luminance where the toe ends", false, true, nullptr, nullptr,
        [](const ConvertOptions& o) { return json::Value::from_number(o.gain.look.toe_end); }},

@@ -25,7 +25,10 @@ import uuid
 from pathlib import Path
 
 from .config import REPO_ROOT
-from .thumbnail import SUPPORTED_EXTENSIONS
+
+
+SUPPORTED_EXTENSIONS = frozenset(
+    {".arw", ".dng", ".jpg", ".jpeg", ".png", ".heic", ".heif", ".avif"})
 
 WORK_ROOT = Path(os.environ.get("HYPERDR_WORK_ROOT", REPO_ROOT / "hdr-workspace")).resolve()
 MAX_UPLOAD_BYTES = int(os.environ.get("HYPERDR_MAX_UPLOAD_MB", "256")) * 1024 * 1024

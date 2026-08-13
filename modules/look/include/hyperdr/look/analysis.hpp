@@ -24,7 +24,6 @@ struct SceneStatistics {
   // Geometric mean over the trimmed range, i.e. the scene's middle grey.
   float log_average{0.18F};
   float p995{0.0F};
-  float p999{0.0F};
   float p9999{0.0F};
 };
 

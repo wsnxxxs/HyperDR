@@ -28,10 +28,6 @@ from .executable import detect_exe
 from .schema import SETTINGS
 from .native_preview import DEFAULT_HIGHLIGHT_RECOVERY, MAX_EDGE, preview_for
 
-# Compatibility injection point for older panel tests and embedders. Production
-# resolves to the native float-frame provider; it is no longer a JPEG builder.
-thumbnail_for = preview_for
-
 # Errors an endpoint may raise for a bad request, as opposed to a bug.
 REQUEST_ERRORS = (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError)
 
@@ -150,6 +146,14 @@ def preview(_context: Context, query: dict) -> Response:
         return error("invalid preview edge")
     if not 320 <= requested_edge <= MAX_EDGE:
         return error("preview edge must be between 320 and %s" % MAX_EDGE)
+
+    # A missing session is the one preview failure that invalidates the frame
+    # already on the stage. Resolve it separately so the browser can
+    # distinguish expiry from a transient decoder/model failure.
+    try:
+        source = session.input_path(_first(query, "id"))
+    except (OSError, ValueError) as exc:
+        return error(exc, status=404)
     try:
         use_model = options.pop("useModel", False)
         if not isinstance(use_model, bool):
@@ -164,24 +168,17 @@ def preview(_context: Context, query: dict) -> Response:
                 _first(query, "id"), "output") / ".model-preview"
             options["external_gain"] = model_dir / "model-gain.f32"
             options["external_gain_report"] = model_dir / "model-gain.json"
+            if (not options["external_gain"].is_file()
+                    or not options["external_gain_report"].is_file()):
+                return error("模型预览已失效，请重新优化。", status=409)
         options["highlightRecovery"] = highlight_recovery
-        provider_argument = options if thumbnail_for is preview_for else highlight_recovery
-        generated = thumbnail_for(
-            session.input_path(_first(query, "id")), provider_argument, requested_edge)
-        if len(generated) == 3:  # pre-v1 injected test provider
-            data, dimensions, mime = generated
-            return Response(body=data, content_type=mime, headers={
-                "X-Preview-Width": str(dimensions[0]),
-                "X-Preview-Height": str(dimensions[1]),
-                "X-Preview-Max-Edge": str(requested_edge),
-            })
-        data, metadata = generated
+        data, metadata = preview_for(source, options, requested_edge)
     except Busy as exc:
         # Distinct from a missing or broken image: the request was refused, not
         # answered, and a client may retry it.
         return error(exc, status=exc.status)
     except (OSError, ValueError) as exc:
-        return error(exc, status=404)
+        return error(exc, status=422)
     return Response(body=data, content_type="application/vnd.hyperdr.preview", headers={
         "X-Preview-Width": str(metadata["width"]),
         "X-Preview-Height": str(metadata["height"]),
@@ -360,11 +357,18 @@ def run(_context: Context, body: dict) -> Response:
         model_commands = []
         model_config = model.load_config() if use_model else None
         if model_config is not None:
-            model_dir = output / ".model"
-            model_commands, gain_path, gain_report = model.build_commands(
-                model_config, source, model_dir, exe,
-                str(options.get("highlightRecovery") or DEFAULT_HIGHLIGHT_RECOVERY),
-            )
+            highlight_recovery = str(
+                options.get("highlightRecovery") or DEFAULT_HIGHLIGHT_RECOVERY)
+            preview_model_dir = output / ".model-preview"
+            cached_model = model.cached_inference(
+                model_config, source, preview_model_dir, highlight_recovery)
+            if cached_model is not None:
+                gain_path = preview_model_dir / "model-gain.f32"
+                gain_report = preview_model_dir / "model-gain.json"
+            else:
+                model_dir = output / ".model"
+                model_commands, gain_path, gain_report = model.build_commands(
+                    model_config, source, model_dir, exe, highlight_recovery)
             options["external_gain"] = str(gain_path)
             options["external_gain_report"] = str(gain_report)
         argv = build_argv(exe, options)

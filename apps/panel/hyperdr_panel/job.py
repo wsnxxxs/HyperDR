@@ -13,13 +13,15 @@ times a second.
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import json
 import os
 import subprocess
 import threading
 import time
 import uuid
+
+from .concurrency import RAW_DECODE_BUDGET
 
 _LOCK = threading.Lock()
 _JOB: dict | None = None
@@ -156,20 +158,28 @@ def _pump_pipeline(job: dict, argv: list[str], cwd: str,
                 if job.get("cancelled"):
                     _append_locked(job, "job cancelled before pipeline step\n")
                     return
-            proc = subprocess.Popen(
-                command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, encoding="utf-8", errors="replace", bufsize=1,
-            )
-            with _LOCK:
-                job["proc"] = proc
-            finished = threading.Event()
-            threading.Thread(target=_watch_timeout, args=(job, proc, finished),
-                             name="hyperdr-timeout", daemon=True).start()
-            for line in proc.stdout:
+            # The first model pipeline step is HyperDR model-input and can
+            # decode a full RAW. Share the same resident-memory budget as live
+            # previews so those two paths cannot demosaic concurrently.
+            decode_slot = (RAW_DECODE_BUDGET.hold(timeout=1.0)
+                           if index == 0 else nullcontext())
+            with decode_slot:
+                proc = subprocess.Popen(
+                    command, cwd=cwd, stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                    errors="replace", bufsize=1,
+                )
                 with _LOCK:
-                    _append_locked(job, line)
-            proc.wait()
-            finished.set()
+                    job["proc"] = proc
+                finished = threading.Event()
+                threading.Thread(target=_watch_timeout,
+                                 args=(job, proc, finished),
+                                 name="hyperdr-timeout", daemon=True).start()
+                for line in proc.stdout:
+                    with _LOCK:
+                        _append_locked(job, line)
+                proc.wait()
+                finished.set()
             if proc.returncode != 0 or job.get("cancelled"):
                 if proc.returncode != 0 and index < len(commands) - 1:
                     with _LOCK:

@@ -10,7 +10,7 @@ namespace hyperdr {
 ToneCurveParameters build_tone_curve(const LookOptions& options) {
   if (!(std::isfinite(options.toe_end) && std::isfinite(options.toe_output_ratio) &&
         std::isfinite(options.contrast) && std::isfinite(options.shoulder_start) &&
-        options.toe_end > 0.0F && options.toe_output_ratio > 0.0F &&
+        options.toe_end > 0.0F && options.toe_output_ratio >= 1.0F / 3.0F &&
         options.toe_output_ratio < 1.0F && options.contrast > 0.0F &&
         options.shoulder_start > 0.0F && options.shoulder_start < 1.0F)) {
     throw std::invalid_argument("invalid photographic tone-curve parameters");

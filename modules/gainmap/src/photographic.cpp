@@ -275,7 +275,13 @@ GainMapResult make_photographic_gain_map(const FloatImage& source,
   const float target_headroom_stops =
       requested_headroom_stops * photographic_strength;
   const float target_peak = std::exp2(target_headroom_stops);
-  const float maximum_calibrated_gain = target_headroom_stops + 1.5F;
+  // Apple's ISO gain-map writer convention uses one ceiling for the encoded
+  // log-gain range and the alternate rendition's headroom. Allowing a darker
+  // SDR cell to demand another 1.5 stops made otherwise valid files diverge
+  // from that convention and render differently in Apple decoders. Preserve
+  // the requested endpoint by limiting the ratio the SDR/HDR pair asks the map
+  // to carry.
+  const float maximum_calibrated_gain = target_headroom_stops;
 
   if (target_headroom_stops <= kEpsilon) {
     std::fill(gain.begin(), gain.end(), 0.0F);
@@ -349,11 +355,12 @@ GainMapResult make_photographic_gain_map(const FloatImage& source,
   result.metadata.base_offset = {0, 1};
   result.metadata.alternate_offset = {0, 1};
   result.metadata.base_headroom = {0, 1};
-  result.metadata.alternate_headroom =
-      rational_from_float(std::log2(std::max(result.stats.rendered_peak, 1.0F)));
+  // Keep HyperDR's Apple-targeted output in the same single-channel profile as
+  // the native Apple corpus. Generic ISO readers still accept independent
+  // fields, but our writer never emits that less-interoperable form.
+  result.metadata.alternate_headroom = stored_gain_max_metadata;
   result.exposure_ev = exposure_ev;
-  result.headroom_stops =
-      std::log2(std::max(result.stats.rendered_peak, 1.0F));
+  result.headroom_stops = stored_gain_max;
 
   auto& stats = result.stats;
   stats.exposure_ev = exposure_ev;

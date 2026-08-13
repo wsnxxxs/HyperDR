@@ -116,7 +116,10 @@ Safari 应使用启动窗口打印的 `https://局域网地址:端口/?token=...
 
 ## HDR 预览层级
 
-- 滑块拖动：在受信任 HTTPS、HDR 屏幕和 Safari 26+ 环境中使用 WebGPU `rgba16float` 扩展 Display P3 输出；其他环境明确回退到 WebGL2 GPU 加速的 SDR 示意。
+- 滑块拖动：在受信任 HTTPS、HDR 屏幕和 Safari 26+ 环境中使用 WebGPU `rgba16float`
+  扩展 Display P3 输出。每次建立 HDR 渲染器都会在浏览器 GPU 上用正式 shader 做一次像素读回，
+  验证非线性 P3 编码及大于 1 的扩展值未被画布截断；不通过时明确回退到 WebGL2 GPU
+  加速的 SDR 示意。该门禁验证浏览器画布像素，物理屏幕的峰值亮度仍由系统 EDR 与面板能力决定。
 - 面板按预览框与设备像素比在 960 / 1440 / 2048 三档中请求；不具备 WebGPU HDR
   前置条件时最长边不超过 1280 像素，避免纯 JavaScript CPU 回退拖慢滑杆。
 - 状态栏与画面角标会明确显示“真 HDR”“SDR 预览”或“原图”，不会再用 `HDR ON` 混淆真实渲染能力。

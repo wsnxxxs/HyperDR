@@ -122,6 +122,9 @@ int main() {
     const auto hot = hyperdr::make_gain_map(hot_pixel, {}, high_iso);
     require(hot.stats.headroom_stops < 0.01F,
             "isolated high-ISO hot pixel incorrectly requested HDR headroom");
+    const auto low_iso_hot = hyperdr::make_gain_map(hot_pixel, {}, low_iso);
+    require(low_iso_hot.stats.headroom_stops < 0.01F,
+            "isolated low-ISO hot pixel incorrectly requested HDR headroom");
     std::cout << "look pipeline tests passed\n";
     return 0;
   } catch (const std::exception& error) {

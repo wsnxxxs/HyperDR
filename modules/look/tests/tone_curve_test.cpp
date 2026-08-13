@@ -1,3 +1,4 @@
+#include "hyperdr/look/analysis.hpp"
 #include "hyperdr/look/tone_curve.hpp"
 
 #include <cmath>
@@ -59,6 +60,25 @@ int main() {
     }
     check_curve(1.0F, curve);
     check_curve(8.0F, curve);
+
+    auto non_monotonic = options;
+    non_monotonic.toe_output_ratio = 0.25F;
+    bool rejected = false;
+    try {
+      static_cast<void>(hyperdr::build_tone_curve(non_monotonic));
+    } catch (const std::invalid_argument&) {
+      rejected = true;
+    }
+    require(rejected, "a toe with a negative initial slope was accepted");
+
+    hyperdr::FloatImage grayscale(2, 2, 1);
+    rejected = false;
+    try {
+      static_cast<void>(hyperdr::compute_luminance_statistics(grayscale));
+    } catch (const std::invalid_argument&) {
+      rejected = true;
+    }
+    require(rejected, "scene statistics accepted a non-RGB image");
     std::cout << "tone curve tests passed\n";
     return 0;
   } catch (const std::exception& error) {

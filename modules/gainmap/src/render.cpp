@@ -54,11 +54,15 @@ std::array<float, 3> render_common_chroma(float r, float g, float b,
     }
   }
   alpha_limit = std::clamp(alpha_limit, 0.0F, 1.0F);
-  const float alpha =
-      alpha_limit >= 1.0F
-          ? 1.0F
-          : alpha_limit *
-                std::tanh(1.0F / std::max(alpha_limit, kEpsilon));
+  // `alpha_limit` is the largest common-chroma fraction that keeps both the
+  // SDR and HDR renditions inside their channel bounds.  The old tanh softener
+  // was discontinuous at exactly one: values just below one were multiplied
+  // by tanh(1) (~0.76), while one and above were left untouched.  A smooth sky
+  // crossing that boundary therefore produced a visible contour.  The limit
+  // itself is already a hue-preserving gamut compression, and using it
+  // directly keeps the mapping continuous while never allowing a channel to
+  // exceed the bound it was computed for.
+  const float alpha = alpha_limit;
   std::array<float, 3> common{source_y + alpha * chroma[0],
                                source_y + alpha * chroma[1],
                                source_y + alpha * chroma[2]};

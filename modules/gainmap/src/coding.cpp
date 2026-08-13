@@ -1,6 +1,7 @@
 #include "hyperdr/gainmap/coding.hpp"
 
 #include "hyperdr/foundation/math.hpp"
+#include "hyperdr/image/color.hpp"
 
 #include <algorithm>
 #include <array>
@@ -24,6 +25,24 @@ float decode_gain_code(float encoded_gain, float gamma) {
   }
   return std::pow(std::clamp(clamp_finite(encoded_gain, 0.0F, 1.0F), 0.0F, 1.0F),
                   1.0F / gamma);
+}
+
+float quantize_gain_code_dithered(float encoded_gain, std::uint32_t x,
+                                  std::uint32_t y) {
+  const float code = clamp_finite(encoded_gain, 0.0F, 1.0F);
+  if (code <= 0.0F) return 0.0F;
+  if (code >= 1.0F) return 1.0F;
+  // Preserve the zero-gain invariant around the knee. Because the grid is
+  // bilinearly upsampled, also keep the first represented code stable: moving
+  // 1 -> 2 LSBs can leak a visible gain into a below-knee sample. TPDF remains
+  // active for the rest of the code range, where it breaks up smooth bands.
+  const long baseline = std::lround(code * 255.0F);
+  if (baseline <= 1L) {
+    return static_cast<float>(std::clamp<long>(baseline, 0L, 255L)) /
+           255.0F;
+  }
+  return static_cast<float>(quantize_dithered(code, 255U, x, y, 0U)) /
+         255.0F;
 }
 
 float choose_gain_gamma(const std::vector<float>& normalized_gains) {

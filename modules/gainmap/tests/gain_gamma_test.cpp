@@ -2,6 +2,7 @@
 #include "hyperdr/gainmap/gain_map.hpp"
 
 #include <cmath>
+#include <cstdint>
 #include <iostream>
 #include <stdexcept>
 #include <vector>
@@ -36,6 +37,30 @@ int main() {
     require(hyperdr::encode_gain_code(0.04F, 0.50F) >
                 hyperdr::encode_gain_code(0.04F, 1.0F),
             "gamma below one did not expand the low-gain code range");
+
+    require(hyperdr::quantize_gain_code_dithered(0.0F, 7, 3) == 0.0F &&
+                hyperdr::quantize_gain_code_dithered(0.49F / 255.0F, 7, 3) == 0.0F &&
+                hyperdr::quantize_gain_code_dithered(1.0F, 7, 3) == 1.0F,
+            "dithered gain quantization did not preserve endpoints");
+    const float midpoint =
+        hyperdr::quantize_gain_code_dithered(0.5F, 7, 3);
+    bool saw_different_position_code = false;
+    for (std::uint32_t x = 0; x < 64; ++x) {
+      if (hyperdr::quantize_gain_code_dithered(0.5F, x, 3) != midpoint) {
+        saw_different_position_code = true;
+        break;
+      }
+    }
+    require(saw_different_position_code,
+            "dithered gain quantization did not decorrelate positions");
+    for (const float code : {0.001F, 0.25F, 0.5F, 0.75F, 0.999F}) {
+      const float quantized =
+          hyperdr::quantize_gain_code_dithered(code, 7, 3);
+      require(quantized >= 0.0F && quantized <= 1.0F &&
+                  std::abs(quantized * 255.0F -
+                           std::round(quantized * 255.0F)) < 1.0e-6F,
+              "dithered gain quantization left 8-bit code space");
+    }
 
     std::vector<float> values;
     for (int i = 0; i < 2000; ++i) values.push_back(static_cast<float>(i) / 1999.0F);

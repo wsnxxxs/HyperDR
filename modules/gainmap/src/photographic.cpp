@@ -322,7 +322,7 @@ GainMapResult make_photographic_gain_map(const FloatImage& source,
       const float code =
           encode_gain_code(normalized_gains[index], stored_gamma);
       result.gain_map.at(x, y, 0) =
-          std::round(255.0F * code) / 255.0F;
+          quantize_gain_code_dithered(code, x, y);
     }
   }
 

@@ -1,6 +1,8 @@
 #include "hyperdr/gainmap/gain_map.hpp"
 #include "hyperdr/gainmap/reconstruct.hpp"
+#include "hyperdr/gainmap/render.hpp"
 #include "hyperdr/container/iso_gain_map.hpp"
+#include "hyperdr/image/color.hpp"
 
 #include <algorithm>
 #include <array>
@@ -108,6 +110,36 @@ void test_color_preservation_and_headroom() {
   for (const float value : reconstructed.pixels) {
     require(std::abs(value - flat.stats.rendered_peak) < 1.0e-3F,
             "achromatic HDR round trip did not reproduce the rendered peak");
+  }
+}
+
+void test_common_chroma_is_continuous_at_gamut_boundary() {
+  hyperdr::LookOptions look;
+  look.vibrance = 0.0F;
+  look.pop = 0.0F;
+
+  // This saturated green ramp crosses the alpha_limit == 1 boundary used by
+  // render_common_chroma.  The previous tanh softener dropped alpha to tanh(1)
+  // immediately before the boundary, making adjacent pixels differ by about
+  // 0.35 in RGB and leaving a contour in smooth skies.
+  std::array<float, 3> previous{};
+  bool have_previous = false;
+  for (int step = 0; step <= 100; ++step) {
+    const float red = 0.23F + 0.00025F * static_cast<float>(step);
+    const float source_y = hyperdr::p3_luminance(red, 1.0F, 0.02F);
+    const auto current = hyperdr::render_common_chroma(
+        red, 1.0F, 0.02F, source_y, 0.75F, 1.5F, 2.5F, look);
+    if (have_previous) {
+      const float jump = std::max({
+          std::abs(current[0] - previous[0]),
+          std::abs(current[1] - previous[1]),
+          std::abs(current[2] - previous[2]),
+      });
+      require(jump < 0.01F,
+              "common-chroma gamut compression has a visible discontinuity");
+    }
+    previous = current;
+    have_previous = true;
   }
 }
 
@@ -225,6 +257,7 @@ int main() {
   try {
     test_gain_map_and_metadata();
     test_color_preservation_and_headroom();
+    test_common_chroma_is_continuous_at_gamut_boundary();
     test_bilinear_gain_sampling();
     test_black_and_nan_guards();
     test_encoded_headroom_matches_the_gain_map();

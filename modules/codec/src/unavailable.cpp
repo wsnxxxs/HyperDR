@@ -98,6 +98,12 @@ void reconstruct_heic_to_tiff(const std::filesystem::path&,
   fail_without_codecs("gain-map reconstruction");
 }
 
+DisplayCurveResult compare_gain_map_heic_curve(
+    const std::filesystem::path&, const std::filesystem::path&,
+    const std::vector<float>&) {
+  fail_without_codecs("display-curve comparison");
+}
+
 #endif  // !HYPERDR_WITH_CODECS
 
 }  // namespace hyperdr

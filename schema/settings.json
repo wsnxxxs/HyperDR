@@ -140,7 +140,7 @@
       "maximum": 2,
       "affects_output_bytes": true,
       "help": "Creative offset applied after exposure selection",
-      "default": 1
+      "default": 0
     },
     {
       "key": "exposure",

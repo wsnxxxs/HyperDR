@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "HyperDR conversion report schema 7",
+  "title": "HyperDR conversion report schema 8",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,7 +12,7 @@
   ],
   "properties": {
     "schema": {
-      "const": 7
+      "const": 8
     },
     "tool": {
       "type": "string"
@@ -250,6 +250,8 @@
         "default_crop_present",
         "decode_degraded",
         "decode_degradation_reasons",
+        "input_domain",
+        "input_headroom",
         "width",
         "height",
         "exposure_ev",
@@ -320,6 +322,19 @@
         },
         "decode_degraded": {
           "type": "boolean"
+        },
+        "input_domain": {
+          "type": "string",
+          "enum": [
+            "scene-referred",
+            "display-referred-sdr",
+            "display-referred-hdr",
+            "unknown"
+          ]
+        },
+        "input_headroom": {
+          "type": "number",
+          "minimum": 1
         },
         "decode_degradation_reasons": {
           "type": "array",

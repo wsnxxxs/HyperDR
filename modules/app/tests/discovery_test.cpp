@@ -67,6 +67,16 @@ int main() {
     require(contains(with_avif, avif), "discovery did not accept an AVIF input");
     require(hyperdr::is_supported_input(avif), "AVIF is not a supported input");
 
+    // LibRaw handles more than the original ARW/DNG pair. These are discovery
+    // filters only; the codec still validates their actual contents.
+    for (const auto extension : {".cr2", ".cr3", ".nef", ".raf", ".orf",
+                                 ".rw2", ".pef"}) {
+      const auto candidate = input / ("nested/raw" + std::string(extension));
+      touch(candidate);
+      require(hyperdr::is_supported_input(candidate),
+              "a common LibRaw extension was not accepted");
+    }
+
     const auto same_directory_output = input / "photo-hyperdr.heic";
     touch(same_directory_output);
     options.output_directory = input;

@@ -200,6 +200,15 @@ class ApiTests(unittest.TestCase):
             })
         self.assertEqual(failed.status, 422)
 
+    def test_preview_cancellation_is_not_reported_as_a_decode_failure(self):
+        session_id = self._session_with_image()
+        with mock.patch.object(api, "preview_for",
+                               side_effect=api.PreviewCancelled("superseded")):
+            cancelled = api.preview(self.context, {
+                "id": [session_id], "edge": ["512"],
+            })
+        self.assertEqual(cancelled.status, 499)
+
     def test_preview_reports_missing_model_artifacts_as_conflict(self):
         session_id = self._session_with_image()
         response = api.preview(self.context, {

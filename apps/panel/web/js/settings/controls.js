@@ -182,9 +182,12 @@ function buildSegmented(control) {
     picker.append(button);
     return [value, button];
   });
+  const hint = control.help ? el("p", { class: "field-hint", hidden: true }, control.help) : null;
+  const help = hint ? helpButton(control, hint) : null;
   const node = el("div", { class: "field" },
-    el("span", { class: "field-label" }, control.label),
-    picker);
+    el("span", { class: "field-label field-title" }, control.label, help),
+    picker,
+    hint);
   return {
     node,
     apply: (state) => {
@@ -231,19 +234,24 @@ const BUILDERS = {
 
 /* ── encoding select (lives in the dock, wired here with the settings) ── */
 
-function mountEncoding() {
+function mountEncoding({ toast } = {}) {
   const container = role("encoding");
   const hint = role("encoding-hint");
   const buttons = new Map();
 
   for (const entry of ENCODINGS) {
     const button = el("button", { type: "button", "aria-pressed": "false" }, entry.label);
-    button.addEventListener("click", () => store.set({
-      encoding: entry.id,
+    button.addEventListener("click", () => {
+      const current = store.get().hdrRange;
       // Clamped here rather than in the slider so the stored value and the
       // command line agree the moment the format changes.
-      hdrRange: Math.min(store.get().hdrRange, entry.maxRange),
-    }));
+      const clamped = Math.min(current, entry.maxRange);
+      store.set({ encoding: entry.id, hdrRange: clamped });
+      // A silent clamp reads as the panel losing the user's setting.
+      if (clamped < current) {
+        toast?.(`HDR 扩展范围已按 ${entry.label} 上限调整为 ${clamped.toFixed(1)} 档`);
+      }
+    });
     buttons.set(entry.id, button);
     container.append(button);
   }
@@ -259,25 +267,46 @@ function mountEncoding() {
 
 /* ── reset ──────────────────────────────────────────────────────────── */
 
-function mountResets() {
-  const wire = (button, keys) =>
-    button.addEventListener("click", () => store.set({
+function mountResets({ toast } = {}) {
+  /* "重置全部" covers the image controls, not the output format: the encoding
+   * is a workflow decision (where will this file be shown?), not part of the
+   * look being dialled in. */
+  const button = role("settings-reset");
+  const keys = CONTROLS.map((control) => control.key);
+  let armed = false;
+  let armTimer = 0;
+  const disarm = () => {
+    armed = false;
+    clearTimeout(armTimer);
+    button.classList.remove("is-armed");
+    button.textContent = "重置全部";
+  };
+  button.addEventListener("click", () => {
+    // Two-step confirm: a stray click on a text button must not wipe a grade.
+    if (!armed) {
+      armed = true;
+      button.classList.add("is-armed");
+      button.textContent = "确认重置？";
+      armTimer = setTimeout(disarm, 3000);
+      return;
+    }
+    disarm();
+    store.set({
       ...defaultsFor(keys),
       // Reset returns to the mathematical defaults, but deliberately keeps the
       // current image's inferred gain cached for an instant comparison.
       previewOptimized: false,
-    }));
-  /* "重置全部" covers the image controls, not the output format: the encoding
-   * is a workflow decision (where will this file be shown?), not part of the
-   * look being dialled in. */
-  wire(role("settings-reset"), CONTROLS.map((control) => control.key));
+    });
+    toast?.("已重置全部画面调整");
+  });
+  button.addEventListener("blur", disarm);
 }
 
 /* ── entry point ────────────────────────────────────────────────────── */
 
-export function mountControls() {
-  mountEncoding();
-  mountResets();
+export function mountControls({ toast } = {}) {
+  mountEncoding({ toast });
+  mountResets({ toast });
 
   const containers = new Map(
     Object.entries(GROUP_CONTAINERS).map(([group, name]) => [group, role(name)]));

@@ -57,6 +57,44 @@ std::optional<LookMode> look_mode_from_name(std::string_view name) {
   return std::nullopt;
 }
 
+const char* input_domain_name(InputDomain domain) {
+  switch (domain) {
+    case InputDomain::kSceneReferred: return "scene-referred";
+    case InputDomain::kDisplayReferredSdr: return "display-referred-sdr";
+    case InputDomain::kDisplayReferredHdr: return "display-referred-hdr";
+    case InputDomain::kUnknown: return "unknown";
+  }
+  return "unknown";
+}
+
+std::optional<InputDomain> input_domain_from_name(std::string_view name) {
+  if (name == "scene-referred") return InputDomain::kSceneReferred;
+  if (name == "display-referred-sdr") return InputDomain::kDisplayReferredSdr;
+  if (name == "display-referred-hdr") return InputDomain::kDisplayReferredHdr;
+  if (name == "unknown") return InputDomain::kUnknown;
+  return std::nullopt;
+}
+
+void validate_input_description(const InputDescription& input) {
+  if (input.domain == InputDomain::kUnknown) {
+    throw std::invalid_argument("input domain is unknown");
+  }
+  if (!std::isfinite(input.headroom) || input.headroom < 1.0F) {
+    throw std::invalid_argument("input headroom must be finite and at least 1");
+  }
+  // A display-referred HDR input with unit headroom has no range to split, and
+  // the log-domain shoulder would divide by a zero span. Callers that cannot
+  // prove headroom > 1 must describe the input as SDR instead.
+  if (input.domain == InputDomain::kDisplayReferredHdr && input.headroom <= 1.0F) {
+    throw std::invalid_argument(
+        "a display-referred HDR input must declare headroom above 1");
+  }
+  if (input.domain != InputDomain::kDisplayReferredHdr && input.headroom != 1.0F) {
+    throw std::invalid_argument(
+        "only a display-referred HDR input may declare headroom");
+  }
+}
+
 void validate_look_options(const LookOptions& options) {
   validate_photographic_controls(options);
 }

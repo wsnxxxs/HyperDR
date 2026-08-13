@@ -12,7 +12,7 @@ export class ApiError extends Error {
 }
 
 /** Every failure the panel can show reaches the UI as one of these. */
-const OFFLINE = () => new ApiError("无法连接本地服务。", 0);
+const OFFLINE = () => new ApiError("无法连接本地服务，请确认处理程序仍在运行后重试。", 0);
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
 
@@ -118,13 +118,13 @@ export const api = {
     const bytes = new Uint8Array(buffer);
     const magic = new TextDecoder().decode(bytes.subarray(0, 8));
     if (magic !== "HYPREV1\n" || bytes.length < 12) {
-      throw new ApiError("原生预览数据无效。", 500);
+      throw new ApiError("预览数据异常，请重试。", 500);
     }
     const jsonSize = new DataView(buffer).getUint32(8, true);
     let metadata;
     try {
       metadata = JSON.parse(new TextDecoder().decode(bytes.subarray(12, 12 + jsonSize)));
-    } catch (_) { throw new ApiError("原生预览元数据无效。", 500); }
+    } catch (_) { throw new ApiError("预览信息异常，请重试。", 500); }
     const width = Number(metadata.width), height = Number(metadata.height);
     const count = width * height * 3;
     const offset = 12 + jsonSize;
@@ -134,7 +134,7 @@ export const api = {
       // aligned, so copy the two payloads into aligned browser-owned buffers.
       if (!Number.isInteger(width) || width <= 0 || !Number.isInteger(height) || height <= 0
           || offset + count * 8 !== bytes.length) {
-        throw new ApiError("原生预览像素数据无效。", 500);
+        throw new ApiError("预览像素数据异常，请重试。", 500);
       }
     }
     const copyPlane = (start) => {
@@ -168,7 +168,7 @@ export const api = {
     const values = new Float32Array(await response.arrayBuffer());
     if (!Number.isInteger(width) || width <= 0 || !Number.isInteger(height) || height <= 0
         || values.length !== width * height || !Number.isFinite(maxStops)) {
-      throw new ApiError("模型返回了无效的增益图。", 500);
+      throw new ApiError("模型返回了无效的增益图，请重试。", 500);
     }
     return { values, width, height, maxStops };
   },

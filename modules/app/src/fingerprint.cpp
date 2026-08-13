@@ -33,9 +33,12 @@ std::array<RawDecodeResource, 4> raw_decode_resources(
 }
 
 std::string settings_signature(const ConvertOptions& options) {
-  // The version is part of the signature: a renderer change with identical
-  // settings still produces different bytes, and a resumed batch must notice.
-  std::string out = std::string("hyperdr:") + kVersion;
+  // Both the public version and the renderer revision are part of the
+  // signature. The latter invalidates sidecars from a rendering fix without
+  // forcing a product-version change just to protect --skip-existing.
+  std::string out = std::string("hyperdr:") + kVersion +
+                    "|render_pipeline=" +
+                    std::to_string(kRenderPipelineRevision);
   for (const auto& setting : settings()) {
     if (!setting.affects_output_bytes) continue;
     const json::Value value = setting.read(options);

@@ -70,11 +70,13 @@ then sends both planes as linear Display-P3 float32 data.
 
 ## Input handling
 
-Input discovery is case-insensitive and accepts `.arw`, `.dng`, `.jpg`,
-`.jpeg`, `.png`, `.heic`, `.heif`, and `.avif`. ARW/DNG files retain the RAW
-highlight recovery controls; every other input is normalized into the same
-linear Display-P3 processing space, HDR ones included -- diffuse white sits at
-1.0 and the highlights above it are kept rather than clipped.
+Input discovery is case-insensitive and accepts the common LibRaw RAW
+extensions (including `.arw`, `.cr2`, `.cr3`, `.dng`, `.nef`, `.raf`, `.orf`,
+`.rw2`, and `.pef`), plus `.jpg`, `.jpeg`, `.png`, `.heic`, `.heif`, and
+`.avif`. RAW files retain the RAW highlight recovery controls; every other
+input is normalized into the same linear Display-P3 processing space, HDR ones
+included -- diffuse white sits at 1.0 and the highlights above it are kept
+rather than clipped.
 
 The browser panel requests `HyperDR preview-frame`, whose packet contains the
 photographic SDR base, the real gain map, and reconstructed HDR as linear
@@ -143,9 +145,16 @@ CLI runs differing only in look controls can skip the RAW decode entirely.
 ## Look controls
 
 The GUI separates whole-image brightness, **HDR brightness headroom**, and
-**tone-region coverage**. Overall brightness defaults to +1 EV and ranges from
+**tone-region coverage**. Overall brightness defaults to 0 EV and ranges from
 0..+2 EV in both the UI and `--exposure-bias`; it is applied after exposure selection to
-both the SDR base and HDR rendition. The other primary controls are photographic
+both the SDR base and HDR rendition. It defaults to 0 in the CLI too: the option
+used to default to +1 EV in the code while this page said 0, so a bare
+`HyperDR convert` brightened every file by a stop that the panel, which always
+passes the flag explicitly, never showed.
+`--exposure auto` is honoured for RAW only. A JPEG, PNG or HDR input is already
+a finished photograph, so automatic exposure would re-measure someone else's
+grade; a manual `--exposure <EV>` is still applied to them. See
+[rendering.md](rendering.md#input-domains). The other primary controls are photographic
 expansion strength (`--gain-strength`, effective range 0..1; the CLI accepts up
 to 2 for external gain maps) and expansion range (`--headroom`, a direct target:
 Adaptive 0..3, Ultra HDR/PQ 0..4, HLG 0..2.3 stops).

@@ -1,4 +1,5 @@
 hyperdr_add_test(gain_map_test LINK HyperDR::gainmap)
+hyperdr_add_test(display_referred_test LINK HyperDR::gainmap)
 hyperdr_add_test(external_gain_test LINK HyperDR::gainmap)
 hyperdr_add_test(gain_gamma_test LINK HyperDR::gainmap)
 hyperdr_add_test(local_gain_test LINK HyperDR::gainmap)

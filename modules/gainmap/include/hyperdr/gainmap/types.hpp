@@ -19,10 +19,21 @@ struct GainMapOptions {
   float exposure_ev{0.0F};
   // Creative offset applied after automatic or manual exposure selection.
   // Unlike HDR gain controls, this moves the SDR base and HDR rendition together.
-  float exposure_bias_ev{1.0F};
+  //
+  // Zero, which is what the documentation has always said and what the panel
+  // has always sent explicitly. It defaulted to +1 EV here, so a bare
+  // `HyperDR convert` brightened every file by a stop that nothing in the run
+  // reported as a decision -- least visibly on a display-referred input, where
+  // it also pushed diffuse white into the top codes of the SDR base.
+  float exposure_bias_ev{0.0F};
   bool auto_headroom{true};
   float headroom_stops{3.0F};
   float gain_strength{1.0F};
+  // Optional cap used only when an external/model gain map is replayed. It is
+  // deliberately separate from `headroom_stops`: the model's development
+  // recipe must remain intact so its SDR base stays reproducible, while the
+  // selected output format may still impose a lower display ceiling.
+  float output_headroom_limit_stops{-1.0F};
   LookOptions look{};
 };
 

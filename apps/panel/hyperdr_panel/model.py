@@ -6,6 +6,7 @@ inference to HyperDR's external gain-grid input.
 """
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 import hashlib
 import json
@@ -16,9 +17,9 @@ import sys
 
 from .config import IS_WINDOWS, REPO_ROOT
 from .concurrency import RAW_DECODE_BUDGET
+from .formats import RAW_INPUT_EXTENSIONS
 
 
-RAW_INPUT_EXTENSIONS = frozenset({".arw", ".dng"})
 MODEL_ROOT_DEFAULT = (REPO_ROOT / "HyperDR_Model").resolve()
 INFERENCE_TIMEOUT_SECONDS = max(
     10, int(os.environ.get("HYPERDR_MODEL_TIMEOUT_SECONDS", "300"))
@@ -309,10 +310,17 @@ def cached_inference(config: ModelConfig, source: Path, model_dir: Path,
         binding = report["model_binding"]
         source_binding = binding["source"]
         model_binding = binding["model"]
+        recipe = report["development_recipe"]
+        if not isinstance(recipe, dict):
+            return None
         tensor_size = binding["geometry"]["model_tensor_size"]
         expected_long_side = ((config.long_side + 15) // 16) * 16
         if (source_binding.get("sha256") != _sha256(source)
                 or source_binding.get("highlight_recovery") != highlight_recovery
+                # Reports created before the neutral model-label fix did not
+                # record this field; reject them so an old +1 EV tensor cannot
+                # be silently reused by the panel.
+                or float(recipe.get("exposure_bias_ev")) != 0.0
                 or model_binding.get("checkpoint_sha256") != _sha256(config.checkpoint)
                 or report.get("label_contract_id") != config.label_contract_id
                 or not isinstance(tensor_size, list) or len(tensor_size) != 2
@@ -333,8 +341,16 @@ def infer_preview(config: ModelConfig, source: Path, model_dir: Path,
     commands, gain_path, report_path = build_commands(
         config, source, model_dir, converter_exe, highlight_recovery
     )
-    with RAW_DECODE_BUDGET.hold(timeout=1.0):
-        for command in commands:
+    # Only LibRaw camera files need the shared resident-memory slot. A raster
+    # model input is already display-referred and must remain independent from
+    # a concurrent RAW preview or model decode.
+    raw_input = source.suffix.lower() in RAW_INPUT_EXTENSIONS
+    for index, command in enumerate(commands):
+        # Release the LibRaw slot as soon as native model-input preparation
+        # ends; the Python inference step no longer owns camera decode memory.
+        decode_slot = (RAW_DECODE_BUDGET.hold(timeout=1.0)
+                       if index == 0 and raw_input else nullcontext())
+        with decode_slot:
             try:
                 completed = subprocess.run(
                     command, cwd=str(config.root), capture_output=True,

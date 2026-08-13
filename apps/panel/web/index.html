@@ -63,13 +63,18 @@
           <canvas data-role="canvas-zebra-cold" hidden aria-hidden="true"></canvas>
           <canvas data-role="canvas-mask" hidden aria-hidden="true"></canvas>
           <div class="stage-divider" data-role="divider" hidden
-               role="slider" tabindex="0" aria-label="分割位置"
+               role="slider" tabindex="0" aria-label="对比分割位置"
                aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
             <span class="stage-divider-line"></span>
             <span class="stage-divider-handle"></span>
           </div>
           <div class="stage-views">
             <div class="segmented segmented--overlay" role="group" aria-label="视图" data-role="view-mode"></div>
+          </div>
+          <div class="stage-hint" data-role="stage-hint" hidden></div>
+          <div class="stage-upload" data-role="stage-upload" hidden>
+            <span data-role="stage-upload-text"></span>
+            <button class="stage-upload-cancel" type="button" data-role="upload-cancel">取消上传</button>
           </div>
           <span class="stage-badge" data-role="hdr-badge" hidden>HDR</span>
           <div class="stage-chips">
@@ -96,15 +101,16 @@
                   aria-describedby="stage-drop-hint">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
           </button>
-          <span class="visually-hidden" data-role="stage-title">选择图片</span>
           <span class="stage-empty-meta">
-            <span class="stage-support" id="stage-drop-hint">或将图片拖放到此处</span>
+            <span class="stage-empty-title" data-role="stage-title">选择图片</span>
+            <span class="stage-support" id="stage-drop-hint">或将图片拖放到此处，支持 LibRaw RAW、HEIC、JPEG、PNG、AVIF</span>
+            <span class="stage-privacy">所有处理均在本机完成，图片不会离开这台设备</span>
             <span class="stage-progress" aria-hidden="true"><span class="stage-progress-fill" data-role="upload-bar"></span></span>
             <span class="stage-progress-text" data-role="upload-progress" aria-live="polite"></span>
           </span>
         </div>
         <input type="file" data-role="file-input" hidden
-               accept="image/*,.arw,.dng,.jpg,.jpeg,.png,.heic,.heif,.avif">
+               accept="image/*,.3fr,.arw,.bay,.cap,.cr2,.cr3,.crw,.dcr,.dng,.erf,.fff,.gpr,.iiq,.k25,.kdc,.mef,.mos,.mrw,.nef,.nrw,.orf,.pef,.raf,.raw,.rwl,.rw2,.sr2,.srf,.srw,.x3f,.jpg,.jpeg,.png,.heic,.heif,.avif">
       </div>
     </div>
 
@@ -115,7 +121,7 @@
          than as furniture under the photograph, so it heads the rail. -->
     <section class="scope">
       <div class="scope-bar">
-        <h2 class="scope-title">分布</h2>
+        <h2 class="scope-title">亮度分布</h2>
         <div class="segmented segmented--small" role="group" aria-label="直方图模式" data-role="hist-mode"></div>
       </div>
       <canvas class="scope-graph" data-role="histogram" width="720" height="56"></canvas>
@@ -128,26 +134,30 @@
 
     <div class="rail-head">
       <h2>调整</h2>
-      <button class="link-button" type="button" data-role="settings-reset">重置全部</button>
+      <button class="link-button" type="button" data-role="settings-reset"
+              title="仅重置画面调整参数，不影响输出格式。">重置全部</button>
     </div>
 
     <section class="group">
       <div class="group-head">
         <h3>曝光与扩展</h3>
         <div class="segmented optimize-toggle" role="group" aria-label="预览处理方式">
-          <button type="button" data-role="math-mode" aria-pressed="true">数学</button>
-          <button type="button" data-role="optimize" aria-pressed="false">优化</button>
+          <button type="button" data-role="math-mode" aria-pressed="true">手动</button>
+          <button type="button" data-role="optimize" aria-pressed="false">AI 优化</button>
         </div>
       </div>
+      <p class="group-note" data-role="optimize-note" hidden></p>
       <div data-role="group-tone"></div>
-      <div class="model-controls" data-role="group-model" hidden></div>
+      <div class="model-controls" data-role="group-model" hidden>
+        <p class="group-note">AI 优化已接管画面调整：曝光、区域与高级参数暂不生效，仅“优化强度”可调。</p>
+      </div>
     </section>
 
     <section class="group">
       <div class="group-head">
         <h3>扩展作用区域</h3>
       </div>
-      <p class="group-note">点击或将指针停在参数旁的“?”上可查看预计作用区域；拖动滑杆时只显示实时效果。</p>
+      <p class="group-note">悬停参数旁的“?”可在画面上预览作用区域；双击滑杆恢复默认值，Shift+方向键大步调节。</p>
       <div data-role="group-region"></div>
     </section>
 
@@ -179,10 +189,14 @@
         </div>
       </div>
       <p class="dock-hint" data-role="encoding-hint"></p>
+      <p class="dock-progress" data-role="run-progress" hidden aria-live="polite"></p>
       <div class="dock-meta">
         <details class="dock-command">
           <summary>查看命令行</summary>
-          <code data-role="command-line">HyperDR …</code>
+          <div class="dock-command-popover">
+            <code data-role="command-line">HyperDR …</code>
+            <button class="link-button dock-command-copy" type="button" data-role="command-copy">复制</button>
+          </div>
         </details>
       </div>
     </div>
@@ -195,7 +209,7 @@
         <span class="result-stale" data-role="result-stale" hidden>设置已变更，需重新转换</span>
       </div>
       <div class="result-actions">
-        <button class="button" type="button" data-role="export" hidden>导出到文件夹</button>
+        <button class="button" type="button" data-role="export" hidden>导出到文件夹…</button>
         <a class="button button--primary" data-role="download" download>保存到设备</a>
       </div>
     </div>

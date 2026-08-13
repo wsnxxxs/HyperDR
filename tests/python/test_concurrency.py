@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import unittest
@@ -227,6 +228,12 @@ class CurveSingleFlightTests(unittest.TestCase):
 
 
 class PreviewSingleFlightTests(unittest.TestCase):
+    def setUp(self):
+        native_preview._CACHE.clear()
+
+    def tearDown(self):
+        native_preview._CACHE.clear()
+
     def test_a_native_preview_timeout_is_converted_to_a_value_error(self):
         # TimeoutExpired is a SubprocessError, which no endpoint catches: it
         # escaped as a traceback and the browser saw the connection drop.
@@ -237,6 +244,21 @@ class PreviewSingleFlightTests(unittest.TestCase):
                 mock.patch.object(native_preview.subprocess, "run", fake_run):
             with self.assertRaises(ValueError):
                 native_preview._build(Path("nonexistent.jpg"), {}, 960)
+
+    def test_raster_preview_does_not_consume_raw_decode_slot(self):
+        replacement = Budget(1, "raw busy")
+
+        def fake_build(*_args):
+            return b"packet", {"width": 1, "height": 1}
+
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(native_preview, "RAW_DECODE_BUDGET", replacement), \
+                mock.patch.object(native_preview, "_build", fake_build):
+            source = Path(directory) / "photo.jpg"
+            source.write_bytes(b"jpeg")
+            with replacement.hold():
+                result = native_preview.preview_for(source, {}, 960)
+        self.assertEqual(result[0], b"packet")
 
 
 if __name__ == "__main__":

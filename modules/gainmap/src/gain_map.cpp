@@ -2,6 +2,7 @@
 
 #include "hyperdr/foundation/math.hpp"
 #include "hyperdr/foundation/parallel.hpp"
+#include "hyperdr/gainmap/display_referred.hpp"
 #include "hyperdr/image/color.hpp"
 
 #include <cmath>
@@ -63,6 +64,12 @@ void validate_gain_map_options(const GainMapOptions& options) {
         options.gain_strength <= 2.0F)) {
     throw std::invalid_argument("gain strength must be in [0, 2]");
   }
+  if (!std::isfinite(options.output_headroom_limit_stops) ||
+      (options.output_headroom_limit_stops >= 0.0F &&
+       options.output_headroom_limit_stops > 4.0F)) {
+    throw std::invalid_argument(
+        "output headroom limit must be negative or in [0, 4]");
+  }
   if (!options.auto_exposure && !std::isfinite(options.exposure_ev)) {
     throw std::invalid_argument("manual exposure must be finite");
   }
@@ -88,14 +95,35 @@ float nominal_headroom_stops(const GainMapOptions& options) {
 }
 
 GainMapResult make_gain_map(const FloatImage& source, const GainMapOptions& options,
-                            const CaptureMetadata& capture) {
+                            const CaptureMetadata& capture,
+                            const InputDescription& input) {
   validate_gain_map_options(options);
+  validate_input_description(input);
   if (source.channels != 3) throw std::invalid_argument("gain-map input must be RGB");
   // Measure the decoded P3 source before exposure or the renderer mutates its
   // colour. This makes the report a property of the capture rather than of the
   // grade.
   const auto wide_gamut = measure_wide_gamut_input(source);
-  auto result = make_photographic_gain_map(source, options, capture);
+  // The one place the three domains part company. The photographic renderer
+  // below is scene-referred throughout -- it chooses an exposure from the
+  // scene's log average and lands on a toe/linear/shoulder curve -- and running
+  // it over a finished photograph re-develops someone else's picture. Which
+  // renderer applies is decided by what the decoder produced, never by the
+  // file's extension.
+  auto result = [&]() -> GainMapResult {
+    switch (input.domain) {
+      case InputDomain::kDisplayReferredSdr:
+        return make_display_referred_sdr_result(source, options);
+      case InputDomain::kDisplayReferredHdr:
+        return make_display_referred_hdr_gain_map(source, options,
+                                                  input.headroom);
+      case InputDomain::kSceneReferred:
+        break;
+      case InputDomain::kUnknown:
+        throw std::invalid_argument("cannot render an unknown input domain");
+    }
+    return make_photographic_gain_map(source, options, capture);
+  }();
   set_wide_gamut_stats(result.stats, wide_gamut);
   return result;
 }

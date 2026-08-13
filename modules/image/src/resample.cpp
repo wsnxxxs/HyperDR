@@ -45,8 +45,14 @@ FloatImage resample_to(FloatImage source, std::uint32_t width, std::uint32_t hei
 
   // Low-pass first so the bilinear step below never undersamples.
   while (true) {
-    const bool reduce_width = source.width > 1U && source.width / 2U > width;
-    const bool reduce_height = source.height > 1U && source.height / 2U > height;
+    // Compare in 64 bits. Integer division made 3201 -> 1600 look like an
+    // exact 2:1 step and skipped the box filter even though it undersamples.
+    const bool reduce_width = source.width > 1U &&
+        static_cast<std::uint64_t>(source.width) >
+            static_cast<std::uint64_t>(width) * 2U;
+    const bool reduce_height = source.height > 1U &&
+        static_cast<std::uint64_t>(source.height) >
+            static_cast<std::uint64_t>(height) * 2U;
     if (!reduce_width && !reduce_height) break;
     source = halve(source, reduce_width, reduce_height);
   }

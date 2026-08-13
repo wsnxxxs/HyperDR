@@ -6,6 +6,7 @@ sends versus the one the converter accepts.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -192,6 +193,47 @@ class ModelIntegrationTest(unittest.TestCase):
         self.assertIn("--half-size", commands[0])
         self.assertNotIn(".jpg", " ".join(part for command in commands for part in command))
         self.assertEqual(commands[1][0], "python")
+
+    def test_matching_preview_inference_is_reusable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "photo.jpg"
+            checkpoint = root / "model.pt"
+            model_dir = root / ".model-preview"
+            model_dir.mkdir()
+            source.write_bytes(b"source")
+            checkpoint.write_bytes(b"checkpoint")
+            gain = model_dir / "model-gain.f32"
+            gain.write_bytes(b"\x00\x00\x00\x00")
+            digest = lambda value: hashlib.sha256(value).hexdigest()
+            report = {
+                "gain_grid_size": [1, 1],
+                "metadata_gain_max_stops": 1.0,
+                "label_contract_id": "hyperdr.apple-gain-label/v2",
+                "gain_file": {
+                    "scale": "signed_log2_gain",
+                    "sha256": digest(gain.read_bytes()),
+                },
+                "model_binding": {
+                    "source": {
+                        "sha256": digest(source.read_bytes()),
+                        "highlight_recovery": "blend",
+                    },
+                    "model": {"checkpoint_sha256": digest(checkpoint.read_bytes())},
+                    "geometry": {"model_tensor_size": [32, 16]},
+                },
+            }
+            (model_dir / "model-gain.json").write_text(
+                json.dumps(report), encoding="utf-8")
+            config = model.ModelConfig(
+                root=root, python="python", script=root / "infer_gain.py",
+                checkpoint=checkpoint, dataset_root=root, device="cpu",
+                long_side=17, label_contract_id="hyperdr.apple-gain-label/v2")
+            cached = model.cached_inference(config, source, model_dir, "blend")
+            self.assertIsNotNone(cached)
+            self.assertEqual(cached[0], gain.read_bytes())
+            self.assertIsNone(
+                model.cached_inference(config, source, model_dir, "reconstruct"))
 
 
 class SettingsContractTest(unittest.TestCase):

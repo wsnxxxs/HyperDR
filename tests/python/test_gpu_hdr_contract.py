@@ -1,4 +1,4 @@
-"""WebGPU HDR preview must verify what the canvas actually configured."""
+"""Static guard for WebGPU HDR setup; production also runs a GPU pixel probe."""
 from __future__ import annotations
 
 import shutil

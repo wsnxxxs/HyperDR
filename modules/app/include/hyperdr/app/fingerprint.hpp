@@ -11,9 +11,23 @@
 
 #include "hyperdr/app/settings.hpp"
 
+#include <array>
+#include <filesystem>
 #include <string>
+#include <string_view>
 
 namespace hyperdr {
+
+struct RawDecodeResource {
+  std::string_view key;
+  std::filesystem::path path;
+};
+
+// External calibration inputs used by both the decode cache and the resumable
+// output fingerprint. Keeping this list here prevents those two identities
+// from drifting when another RAW resource is introduced.
+[[nodiscard]] std::array<RawDecodeResource, 4> raw_decode_resources(
+    const RawDecodeOptions& options);
 
 // Human-readable, and the exact input to the hash. Recorded in the sidecar so a
 // stale skip can be diagnosed by reading it.

@@ -461,6 +461,7 @@ int preview_frame_command(int argc, char** argv) {
   } else {
     result = make_gain_map(decoded.linear_p3, options.gain, decoded.capture);
   }
+  validate_encoding_headroom(options.encoding, result.headroom_stops);
   write_binary_file_atomic(options.output_directory,
                            native_preview_packet(result, decoded.decode), true);
   return 0;

@@ -5,6 +5,7 @@
 
 #include "hyperdr/app/fingerprint.hpp"
 
+#include <cmath>
 #include <functional>
 #include <iostream>
 #include <set>
@@ -182,6 +183,38 @@ void test_fingerprint_covers_exactly_the_byte_affecting_settings() {
   plumbing.overwrite = true;
   require(hyperdr::settings_fingerprint(plumbing) == baseline,
           "a setting that cannot change the bytes invalidated the fingerprint");
+
+  auto adjacent_one = base;
+  auto adjacent_two = base;
+  adjacent_one.gain.look.contrast = std::nextafter(1.0F, 2.0F);
+  adjacent_two.gain.look.contrast =
+      std::nextafter(adjacent_one.gain.look.contrast, 2.0F);
+  require(hyperdr::settings_fingerprint(adjacent_one) !=
+              hyperdr::settings_fingerprint(adjacent_two),
+          "distinct float settings collapsed to one fingerprint");
+}
+
+void test_decode_cache_controls_are_declared_in_the_settings_table() {
+  const std::set<std::string> expected{
+      "half_size", "highlight_recovery", "preview_max_edge", "raw_gain",
+      "raw_auto_bad_pixels"};
+  std::set<std::string> actual;
+  for (const auto& setting : hyperdr::settings()) {
+    if (setting.affects_decoded_pixels) actual.insert(std::string(setting.key));
+  }
+  require(actual == expected,
+          "decode-cache setting classification drifted from the decoder");
+}
+
+void test_rendered_hlg_headroom_is_bounded() {
+  hyperdr::validate_encoding_headroom(hyperdr::HdrEncoding::Hlg, 2.3F);
+  hyperdr::validate_encoding_headroom(hyperdr::HdrEncoding::AvifHlg, 2.3F);
+  require(throws([] {
+            hyperdr::validate_encoding_headroom(hyperdr::HdrEncoding::Hlg,
+                                                2.5F);
+          }),
+          "HLG accepted a rendered peak above its transfer-function ceiling");
+  hyperdr::validate_encoding_headroom(hyperdr::HdrEncoding::Pq, 4.0F);
 }
 
 void test_schema_document_describes_every_settable_option() {
@@ -220,6 +253,8 @@ int main() {
     test_parsing_enforces_ranges_and_types();
     test_presets_reject_anything_unexpected();
     test_fingerprint_covers_exactly_the_byte_affecting_settings();
+    test_decode_cache_controls_are_declared_in_the_settings_table();
+    test_rendered_hlg_headroom_is_bounded();
     test_schema_document_describes_every_settable_option();
     test_usage_text_lists_every_flag();
     std::cout << "settings schema tests passed\n";

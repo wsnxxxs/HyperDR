@@ -18,9 +18,9 @@ The implementation lives in the ``hyperdr_panel`` package next to this file:
     executable  - finding the built converter
     session     - one image in, one result out, and their expiry
     job         - the running conversion and the log the browser polls
-    thumbnail   - the small JPEG the live preview is computed from
+    native_preview - validated linear-P3 float preview packets and their cache
     curve       - the exporter's tone curve, fetched from the binary
-    concurrency - process admission control shared by curve and thumbnail
+    concurrency - process admission control shared by preview, model, and curve
     picker      - native tkinter folder dialog (spawned as a subprocess)
     api         - the HTTP endpoints, as plain testable functions
     security    - tokens, login throttling, response headers

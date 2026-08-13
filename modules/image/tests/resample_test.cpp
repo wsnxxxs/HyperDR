@@ -104,6 +104,21 @@ void check_single_axis_downscale_is_antialiased() {
   }
 }
 
+void check_just_over_two_to_one_is_antialiased() {
+  hyperdr::FloatImage image(3201, 1, 1);
+  for (std::uint32_t x = 0; x < image.width; ++x) {
+    image.at(x, 0, 0) = static_cast<float>(x % 2U);
+  }
+  const auto reduced = hyperdr::resample_to(std::move(image), 1600, 1);
+  double deviation = 0.0;
+  for (std::uint32_t x = 8; x + 8 < reduced.width; ++x) {
+    deviation += std::abs(reduced.at(x, 0, 0) - 0.5F);
+  }
+  deviation /= static_cast<double>(reduced.width - 16U);
+  require(deviation < 1.0e-4,
+          "a just-over-2:1 downscale skipped its low-pass filter");
+}
+
 void check_exact_size() {
   const auto exact = hyperdr::resample_to(constant_image(1000, 500, 1.0F), 333, 111);
   require(exact.width == 333 && exact.height == 111, "resample_to must honour its size");
@@ -150,6 +165,7 @@ int main() {
     check_linear_light_is_preserved();
     check_energy_is_not_lost();
     check_single_axis_downscale_is_antialiased();
+    check_just_over_two_to_one_is_antialiased();
     check_exact_size();
     check_large_coordinate_precision();
     check_size_overflow_is_rejected();

@@ -59,8 +59,8 @@ void test_color_preservation_and_headroom() {
   options.headroom_stops = 3.0F;
 
   // Low-luminance saturated HDR values force gamut limiting but must keep a
-  // common RGB scale. gain_max is nonzero while luminance headroom remains zero,
-  // proving that the two metadata concepts are independent.
+  // common RGB scale. HyperDR's Apple-targeted writer uses the gain interval as
+  // its alternate capacity even when the measured luminance peak stays at SDR.
   hyperdr::FloatImage saturated(2, 2, 3);
   for (std::size_t i = 0; i < 4; ++i) {
     // The default +1 EV brightness offset maps this patch to the historical
@@ -88,11 +88,8 @@ void test_color_preservation_and_headroom() {
   const float headroom =
       static_cast<float>(saturated_result.metadata.alternate_headroom.numerator) /
       saturated_result.metadata.alternate_headroom.denominator;
-  // The threshold only has to separate "a real coding range" from zero. The
-  // reader must not cross-check these two against each other; see
-  // iso_gain_map_test.
-  require(gain_max > 0.1F && std::abs(headroom) < 1.0e-5F,
-          "gain range was incorrectly reused as alternate headroom");
+  require(gain_max > 0.1F && std::abs(headroom - gain_max) < 1.0e-6F,
+          "photographic output violated Apple's gain/headroom convention");
 
   // An achromatic HDR patch has positive luminance headroom and should
   // round-trip. Every pixel is the brightest one, so reconstructing at the
@@ -164,6 +161,11 @@ void test_encoded_headroom_matches_the_gain_map() {
       static_cast<float>(result.metadata.alternate_headroom.denominator);
   require(std::abs(declared - result.headroom_stops) < 1.0e-4F,
           "the metadata and the result must report one headroom");
+  require(std::abs(declared - hyperdr::rational_value(result.metadata.gain_max)) <
+              1.0e-6F,
+          "Apple-targeted output must use one gain/headroom ceiling");
+  require(declared <= options.headroom_stops + 1.0e-5F,
+          "gain metadata exceeded the requested headroom");
 
   // What the gain map can actually reconstruct, computed independently of the
   // renderer: the largest stored code applied to the brightest base pixel.

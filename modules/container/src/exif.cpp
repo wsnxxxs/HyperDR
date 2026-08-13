@@ -520,8 +520,12 @@ std::optional<PhotoMetadata> read_jpeg_photo_metadata(
 
 std::optional<std::uint16_t> read_exif_orientation(const std::uint8_t* data,
                                                    std::size_t size) {
+  const auto start = tiff_start(data, size);
+  if (!start || *start > size) return std::nullopt;
+  data += *start;
+  size -= *start;
   // A TIFF header is 8 bytes and IFD0 needs at least a 2-byte entry count.
-  if (data == nullptr || size < 10) return std::nullopt;
+  if (size < 10) return std::nullopt;
   bool big_endian = false;
   if (data[0] == 'M' && data[1] == 'M') big_endian = true;
   else if (!(data[0] == 'I' && data[1] == 'I')) return std::nullopt;

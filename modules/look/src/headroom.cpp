@@ -23,7 +23,10 @@ float choose_content_headroom_stops(const SceneStatistics& stats,
                                     const CaptureMetadata& capture,
                                     float maximum_stops, float pop) {
   if (stats.samples.empty() || !(exposure > 0.0F)) return 0.0F;
-  const float high = std::max(stats.p999 * exposure, stats.p9999 * exposure);
+  // P99.99 is always at least P99.9 under the nearest-rank definition. Keeping
+  // both made the max look like two independent pieces of evidence even though
+  // the P99.9 arm could never win.
+  const float high = stats.p9999 * exposure;
   if (!(std::isfinite(high) && high > 1.0F)) return 0.0F;
 
   std::size_t bright_count = 0;
@@ -139,11 +142,11 @@ HighlightEvidence find_local_highlight_evidence(
         }
       }
     }
-    const bool multi_cell = cells >= 2 && best_quality >= 0.10F;
-    const bool exceptional_single = cells == 1 && peak >= 4.0F &&
-                                    best_contrast >= 2.0F &&
-                                    best_quality >= 0.50F;
-    if (!(multi_cell || exceptional_single)) continue;
+    // A single cell can be one defective sensor site: cell_peak deliberately
+    // retains that site even when the cell mean and P99.99 reject it. Require
+    // spatial support unconditionally; a genuine tiny lamp still spans
+    // adjacent cells at the half-resolution gain-grid sampling used here.
+    if (cells < 2 || best_quality < 0.10F) continue;
     const float area_merit =
         0.60F +
         0.40F * smoothstep(1.0F, 8.0F, static_cast<float>(cells));

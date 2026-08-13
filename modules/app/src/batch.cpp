@@ -5,6 +5,7 @@
 #include "hyperdr/app/fingerprint.hpp"
 #include "hyperdr/app/report.hpp"
 #include "hyperdr/app/resume_state.hpp"
+#include "hyperdr/app/schema.hpp"
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/foundation/file_io.hpp"
@@ -32,34 +33,36 @@ double milliseconds(Clock::time_point begin, Clock::time_point end) {
   return std::chrono::duration<double, std::milli>(end - begin).count();
 }
 
-// The decode-cache variant string has to name every option that changes decoded
-// pixels, and nothing else: naming too much makes every slider move a miss.
+// Scalar decode controls come from the settings table. Only derived state and
+// external calibration resources remain here because neither is a setting.
 std::string decode_variant(const ConvertOptions& options,
                            const RawDecodeOptions& raw) {
   const char* intent = options.decode_intent == DecodeIntent::Preview
                            ? "preview"
                            : "export";
+  auto reflected = options;
+  reflected.raw = raw;
   std::string variant = std::string(intent) + '/' +
-         highlight_recovery_name(raw.highlight_recovery) + '/' +
-         (raw.half_size ? "half" : "full") + '/' +
-         (raw.ignore_embedded_gain_map ? "base-only" : "embedded-gain") + '/' +
-         std::to_string(options.preview_max_edge) + "/gain=" +
-         json::number_text(raw.digital_gain) + "/auto-bad=" +
-         (raw.auto_bad_pixel_correction ? "1" : "0");
-  const auto append_file = [&](const char* label,
-                               const std::filesystem::path& path) {
-    if (path.empty()) return;
+      (raw.ignore_embedded_gain_map ? "base-only" : "embedded-gain");
+  for (const auto& setting : settings()) {
+    if (!setting.affects_decoded_pixels) continue;
+    const auto value = setting.read(reflected);
     variant += '/';
-    variant += label;
+    variant += setting.key;
     variant += '=';
-    variant += path_utf8(path);
+    if (value.is_string()) variant += value.string();
+    else if (value.is_bool()) variant += value.boolean() ? "1" : "0";
+    else variant += json::number_text(value.number());
+  }
+  for (const auto& resource : raw_decode_resources(raw)) {
+    if (resource.path.empty()) continue;
+    variant += '/';
+    variant += resource.key;
+    variant += '=';
+    variant += path_utf8(resource.path);
     variant += ':';
-    variant += sha256_file_hex(path);
-  };
-  append_file("bad", raw.bad_pixel_map);
-  append_file("dark", raw.dark_frame);
-  append_file("lut", raw.linearization_lut);
-  append_file("lsc", raw.lens_shading_map);
+    variant += sha256_file_hex(resource.path);
+  }
   return variant;
 }
 
@@ -248,6 +251,10 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
                           external_development, staged.image.capture)
                     : make_gain_map(staged.image.linear_p3, options.gain,
                                     staged.image.capture);
+    // Validate the peak the renderer actually produced. External model
+    // metadata arrives after the initial option validation and can otherwise
+    // bypass HLG's 1000-nit ceiling.
+    validate_encoding_headroom(options.encoding, gain.headroom_stops);
     result.sensor_width = staged.image.decode.sensor_width;
     result.sensor_height = staged.image.decode.sensor_height;
     result.target_width = staged.image.decode.target_width;
@@ -284,7 +291,11 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     if (input_stamp(result.input) != staged.input_stamp) {
       throw std::runtime_error("input changed during conversion");
     }
-    write_binary_file_atomic(result.output, bytes, options.overwrite);
+    // --skip-existing means "keep this exact render if current, otherwise
+    // replace it". A stale or provenance-less output must therefore be
+    // publishable even when the user did not also spell --overwrite.
+    write_binary_file_atomic(result.output, bytes,
+                             options.overwrite || options.skip_existing);
     const auto encoded = Clock::now();
     result.decode_ms = staged.decode_ms;
     result.process_ms = milliseconds(decoded, processed);

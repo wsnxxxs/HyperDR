@@ -161,6 +161,11 @@ void test_v2_signed_canonical_sidecar() {
   hyperdr::apply_external_gain_map(result, std::move(external));
   require(hyperdr::rational_value(result.metadata.gain_min) == -1.0F,
           "v2 gain_min metadata was not applied");
+  require(result.metadata.gain_min.numerator == -1000000 &&
+              result.metadata.gain_min.denominator == 1000000 &&
+              result.metadata.alternate_headroom.numerator == 2000000 &&
+              result.metadata.alternate_headroom.denominator == 1000000,
+          "identity strength rewrote exact v2 rational metadata");
   require(result.gain_map.pixels[0] > 0.0F && result.gain_map.pixels[1] > result.gain_map.pixels[0],
           "v2 canonical gain was not quantized to ISO code space");
   std::filesystem::remove_all(root);

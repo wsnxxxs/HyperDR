@@ -1,17 +1,17 @@
 {
   "schema_version": 1,
   "protocol_id": "hyperdr.display-domain/v1/T2",
-  "generated_from_git_commit": "604cfed7f7625783eec13bec96244e5de6d8dd67",
+  "generated_from_git_commit": "7bc94820964827e18f7e7f8e51847e73ed4fd4d1",
   "generator_executable": {
-    "path_recorded_for_provenance_only": "C:\\Users\\Ryan\\AppData\\Local\\Temp\\HyperDR-unified-604cfed\\Release\\HyperDR.exe",
-    "sha256": "5b012670df4a51fc2f203890c030592c68f9804d818ac0207084c2fdbb3f7a84"
+    "path_recorded_for_provenance_only": "C:\\Users\\Ryan\\Desktop\\HyperDR\\build-recovery\\Release\\HyperDR.exe",
+    "sha256": "6a24ae8348e3fdcde71b4b2ec364895aecdb8068fe8895c18d9e4578e3a1288c"
   },
   "source_sha256": {
-    "modules/codec/src/heif_encoder.cpp": "24c02df717dbbce053b258dff821251de4a47996d02142ad286d741ab13b16c4",
-    "modules/gainmap/src/external.cpp": "089ec14a4ab8a7a066f588c544f06a5928d4a800085e4999a04c54dd81624410",
+    "modules/codec/src/heif_encoder.cpp": "39728cecc0ca581d02209f3f722bd576536b68d7d3388a11a6a8bd570a79f8bb",
+    "modules/gainmap/src/external.cpp": "92be9fc6cb5b427126386c5486fe1320c2ad92d829c93851c5e153e3171ff06d",
     "modules/container/src/iso_gain_map.cpp": "c2b69935a6e5b264a405462139eedfc84d7783ee703fecbd851af6cab224b58e",
-    "modules/gainmap/src/reconstruct.cpp": "9a851e7799dba9bee2ac1d50c7b96e600a8a632647a9a045af7634c1f3256ceb",
-    "tests/macos_t2/generate_fixtures.py": "907fda133ee895ff36315e3ec3f8547f83a7a9e5eaaea139f4455b215c356a51",
+    "modules/gainmap/src/reconstruct.cpp": "d2f31732d4cc8a3c34c1fd2fb6e5054b765fd90ec8d512cfc8267cb16711b806",
+    "tests/macos_t2/generate_fixtures.py": "89e33a27d31c889630ad036055b3464564acec5af441c07a9e28106f9056e5ad",
     "tests/macos_t2/fixture_spec.json": "ae9e2c0f7cb49488da2c0269cbf72249cf27ac0ee0dfaaeb4b2b845334b08d2d"
   },
   "fixtures": [
@@ -22,8 +22,8 @@
         "numerator": 1,
         "denominator": 1
       },
-      "byte_length": 14328,
-      "sha256": "55017933c04ca1af416a23a333f410a3811052e6dee3576e8594bc77576b5387"
+      "byte_length": 13998,
+      "sha256": "e8d23d500c17190f73b117a73a2a7c2cea8dc180088b21e8fce0fc750296488d"
     },
     {
       "id": "gamma-2-probe",
@@ -32,19 +32,19 @@
         "numerator": 2,
         "denominator": 1
       },
-      "byte_length": 14328,
-      "sha256": "1aa34ded7fdd7f4045782bbe071c937dc80a9d040f2dbcfcc989fa119094bf2d"
+      "byte_length": 13998,
+      "sha256": "1648a43b9e8d279422c5739a27a7db9ee0eff8a55bcc793c382b8a03b8827c3d"
     }
   ],
   "pair_invariant": {
     "same_byte_length": true,
     "differing_byte_count": 1,
     "differing_absolute_offsets": [
-      14307
+      13977
     ],
     "control_byte_hex": "01",
     "probe_byte_hex": "02",
-    "tmap_payload_absolute_offset": 14266,
+    "tmap_payload_absolute_offset": 13936,
     "gamma_numerator_last_byte_offset_within_payload": 41,
     "statement": "The files differ only in the final byte of the big-endian gamma numerator (1 versus 2)."
   }

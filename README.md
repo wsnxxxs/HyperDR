@@ -242,8 +242,10 @@ CLI runs differing only in look controls can skip the RAW decode entirely.
 The GUI separates whole-image brightness, **HDR brightness headroom**, and
 **tone-region coverage**. Overall brightness defaults to +1 EV and ranges from
 0..+2 EV in both the UI and `--exposure-bias`; it is applied after exposure selection to
-both the SDR base and HDR rendition. The other primary controls are expansion strength (`--gain-strength`, 0..1), expansion
-range (`--headroom`, a direct target: Adaptive 0..3, Ultra HDR/PQ 0..4, HLG 0..2.3 stops).
+both the SDR base and HDR rendition. The other primary controls are photographic
+expansion strength (`--gain-strength`, effective range 0..1; the CLI accepts up
+to 2 for external gain maps) and expansion range (`--headroom`, a direct target:
+Adaptive 0..3, Ultra HDR/PQ 0..4, HLG 0..2.3 stops).
 The expansion region has its own section: expansion start (`--expansion-start`)
 and local-to-diffuse area coverage (`--area-coverage`). **Advanced** exposes
 contrast, vibrance, highlight recovery and encode quality; the renderer itself
@@ -269,8 +271,10 @@ highlights. A soft eligibility taper allows a small, bounded transition around
 the shoulder instead of erasing highlight edges.
 
 A manual `--headroom` must be within `0..--headroom-max`; validation happens
-before RAW decoding. `--gain-strength` can attenuate local HDR gain; values
-above `1` are capped at the global curve target so output cannot exceed it.
+before RAW decoding. `--gain-strength` can attenuate local HDR gain. The
+photographic renderer caps values above `1` at the global curve target so its
+output cannot exceed that target; external gain maps retain the documented
+`0..2` scale for controlled amplification.
 
 ## Rendering and compatibility guarantees
 

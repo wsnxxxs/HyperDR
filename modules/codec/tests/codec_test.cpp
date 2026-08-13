@@ -1,4 +1,5 @@
 #include "hyperdr/container/heif_tmap.hpp"
+#include "hyperdr/container/exif.hpp"
 #include "hyperdr/container/inspect.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/gainmap/gain_map.hpp"
@@ -8,6 +9,7 @@
 #include "hyperdr/image/transfer.hpp"
 
 #include <libheif/heif.h>
+#include <libheif/heif_properties.h>
 
 #include <algorithm>
 #include <cmath>
@@ -599,6 +601,109 @@ int main() {
     // Single-tile 8-bit output.
     const auto small = make_synthetic(64, 32);
     const auto small_gain = hyperdr::make_gain_map(small, options);
+
+    // JPEG and HEIC can both carry an Exif-only phone orientation. The pixels,
+    // metadata and reported decode geometry must all become upright together;
+    // otherwise an export is either sideways or rotated a second time by its
+    // viewer. These exercise the real container decoders rather than only the
+    // orientation pixel primitive.
+    auto portrait_metadata = metadata;
+    portrait_metadata.orientation = 6;
+    hyperdr::RawDecodeOptions base_only;
+    base_only.ignore_embedded_gain_map = true;
+    const auto oriented_jpeg_bytes =
+        hyperdr::encode_ultrahdr_jpeg(small_gain, portrait_metadata, 90);
+    const auto oriented_jpeg_path = std::filesystem::temp_directory_path() /
+                                    "hyperdr-codec-oriented-jpeg.jpg";
+    hyperdr::write_binary_file_atomic(oriented_jpeg_path, oriented_jpeg_bytes,
+                                      true);
+    const auto oriented_jpeg =
+        hyperdr::decode_image(oriented_jpeg_path, base_only);
+    std::filesystem::remove(oriented_jpeg_path);
+    require(oriented_jpeg.linear_p3.width == 32 &&
+                oriented_jpeg.linear_p3.height == 64 &&
+                oriented_jpeg.decode.target_width == 32 &&
+                oriented_jpeg.decode.target_height == 64 &&
+                oriented_jpeg.decode.decoded_width == 32 &&
+                oriented_jpeg.decode.decoded_height == 64 &&
+                oriented_jpeg.metadata.orientation == 1,
+            "JPEG Exif orientation did not normalize pixels, geometry and metadata");
+
+    // libheif's writer normalises Exif orientation on output, so make an
+    // Exif-only input fixture by changing that one TIFF value after encoding.
+    // This mirrors phones whose pixels are landscape-stored without adding an
+    // irot/imir property that would make the container authoritative.
+    auto oriented_heic_bytes =
+        hyperdr::encode_adaptive_heic(small_gain, metadata, 90, 8);
+    const auto upright_exif = hyperdr::make_minimal_exif(metadata);
+    const auto portrait_exif = hyperdr::make_minimal_exif(portrait_metadata);
+    const auto exif_position = std::search(oriented_heic_bytes.begin(),
+                                           oriented_heic_bytes.end(),
+                                           upright_exif.begin(), upright_exif.end());
+    require(exif_position != oriented_heic_bytes.end(),
+            "encoded HEIC does not contain its Exif payload");
+    std::vector<std::size_t> exif_differences;
+    for (std::size_t index = 0; index < upright_exif.size(); ++index) {
+      if (upright_exif[index] != portrait_exif[index]) {
+        exif_differences.push_back(index);
+      }
+    }
+    require(exif_differences.size() == 1,
+            "orientation changed more than one Exif payload byte");
+    *(exif_position + static_cast<std::ptrdiff_t>(exif_differences.front())) =
+        portrait_exif[exif_differences.front()];
+    const auto patched_orientation = hyperdr::read_exif_orientation(
+        &*exif_position, upright_exif.size());
+    require(patched_orientation && *patched_orientation == 6,
+            "raw HEIC Exif patch did not produce orientation 6");
+    {
+      std::unique_ptr<heif_context, TestContextDeleter> context(
+          heif_context_alloc());
+      require_heif(heif_context_read_from_memory_without_copy(
+                       context.get(), oriented_heic_bytes.data(),
+                       oriented_heic_bytes.size(), nullptr),
+                   "open oriented HEIC fixture");
+      heif_image_handle* raw_handle = nullptr;
+      require_heif(heif_context_get_primary_image_handle(
+                       context.get(), &raw_handle),
+                   "get oriented HEIC primary");
+      std::unique_ptr<heif_image_handle, TestHandleDeleter> handle(raw_handle);
+      const auto id = heif_image_handle_get_item_id(handle.get());
+      require(heif_item_get_properties_of_type(
+                  context.get(), id,
+                  heif_item_property_type_transform_rotation, nullptr, 0) == 0 &&
+                  heif_item_get_properties_of_type(
+                  context.get(), id,
+                  heif_item_property_type_transform_mirror, nullptr, 0) == 0,
+              "Exif-only HEIC fixture unexpectedly has a container orientation");
+      const int count = heif_image_handle_get_number_of_metadata_blocks(
+          handle.get(), "Exif");
+      std::vector<heif_item_id> ids(static_cast<std::size_t>(count));
+      require(count > 0 && heif_image_handle_get_list_of_metadata_block_IDs(
+                               handle.get(), "Exif", ids.data(), count) > 0,
+              "oriented HEIC fixture has no Exif item");
+      const auto size =
+          heif_image_handle_get_metadata_size(handle.get(), ids.front());
+      std::vector<std::uint8_t> exif(size);
+      require_heif(heif_image_handle_get_metadata(
+                       handle.get(), ids.front(), exif.data()),
+                   "read oriented HEIC Exif");
+      const auto orientation =
+          hyperdr::read_exif_orientation(exif.data(), exif.size());
+      require(orientation && *orientation == 6,
+              "oriented HEIC fixture lost its Exif orientation");
+    }
+    const auto oriented_heic = decode_encoded_input(oriented_heic_bytes,
+                                                     "oriented-heic");
+    require(oriented_heic.linear_p3.width == 32 &&
+                oriented_heic.linear_p3.height == 64 &&
+                oriented_heic.decode.target_width == 32 &&
+                oriented_heic.decode.target_height == 64 &&
+                oriented_heic.decode.decoded_width == 32 &&
+                oriented_heic.decode.decoded_height == 64 &&
+                oriented_heic.metadata.orientation == 1,
+            "HEIC Exif orientation did not normalize pixels, geometry and metadata");
+
     const auto ultrahdr = hyperdr::encode_ultrahdr_jpeg(small_gain, metadata, 90);
     require(ultrahdr.size() > 512 && ultrahdr[0] == 0xFF && ultrahdr[1] == 0xD8,
             "Ultra HDR output is not a JPEG/R stream");

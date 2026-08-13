@@ -102,13 +102,8 @@ export const api = {
    *  size comes back in headers and is returned with the blob -- the old panel
    *  dropped it and re-measured off the bitmap, which cost a decode per frame.
    *
-   *  `scale` is what the converter divided the linear image by to fit it in
-   *  eight bits. It is 1 for anything SDR, and the renderers multiply by it
-   *  after linearising, which is the only way an HLG or PQ input's highlights
-   *  survive the trip through a JPEG.
-   *
-   *  @returns {Promise<{blob: Blob, width: number, height: number, scale: number,
-   *                    exposure: number}>}
+   *  @returns {Promise<{width: number, height: number, metadata: object,
+   *                    base: Float32Array, hdr: Float32Array}>}
    */
   async preview(sessionId, { options = {}, highlightRecovery, maxEdge } = {}) {
     const query = new URLSearchParams({ id: sessionId });

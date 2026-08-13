@@ -258,6 +258,10 @@ bool read_decode_cache(const std::filesystem::path& file, DecodedImage& out) {
   const auto pixel_count =
       static_cast<std::uint64_t>(width) * height * channels;
   if (pixel_count > (1ULL << 34U)) return false;
+  const auto expected_size = static_cast<std::uint64_t>(header.size()) +
+                             json_length + pixel_count * sizeof(float);
+  const auto actual_size = std::filesystem::file_size(file, ec);
+  if (ec || static_cast<std::uint64_t>(actual_size) != expected_size) return false;
 
   std::string metadata_text(json_length, '\0');
   if (json_length != 0) {

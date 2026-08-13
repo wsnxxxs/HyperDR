@@ -450,7 +450,24 @@ export function mountStage({ toast }) {
       await chooseRenderer();
     } catch (error) {
       if (!isCurrentImage(epoch)) return;
-      clear(error.message || "无法载入预览。");
+      const message = error.message || "无法载入预览。";
+      if (error.status === 404) {
+        clear(message);
+        return;
+      }
+      // A model artifact can disappear after a server restart or cleanup.
+      // Fall back to the mathematical frame; the state change schedules that
+      // reload while this catch keeps the last valid pixels visible.
+      if (error.status === 409 && store.get().previewOptimized) {
+        modelGain = null;
+        analysis.modelGain = null;
+        store.set({ previewOptimized: false, modelGainReady: false });
+      }
+      if (!image.frame) {
+        clear(message);
+        return;
+      }
+      toast(message, true);
     }
   }
 

@@ -72,6 +72,11 @@ struct Setting {
   void (*apply)(ConvertOptions&, const json::Value&){nullptr};
   json::Value (*read)(const ConvertOptions&){nullptr};
 
+  // True only when this scalar changes the decoded/resampled pixel buffer.
+  // The decode cache derives its variant from this table, so adding a decode
+  // control cannot silently leave a separate hand-written cache key stale.
+  bool affects_decoded_pixels{false};
+
   [[nodiscard]] bool presetable() const { return !flag.empty(); }
 };
 

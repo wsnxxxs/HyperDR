@@ -131,6 +131,32 @@ class ApiTests(unittest.TestCase):
         argv = start.call_args.args[0]
         self.assertEqual(argv[argv.index("--gain-strength") + 1], "0.65")
 
+    def test_run_reuses_matching_preview_inference(self):
+        session_id = self._session_with_image()
+        output = session.session_dir(session_id, "output")
+        preview_model = output / ".model-preview"
+        preview_model.mkdir()
+        gain = preview_model / "model-gain.f32"
+        report = preview_model / "model-gain.json"
+        gain.write_bytes(b"gain")
+        report.write_text("{}", encoding="utf-8")
+        with mock.patch.object(api, "detect_exe", return_value="HyperDR"), \
+                mock.patch.object(api.model, "load_config", return_value=object()), \
+                mock.patch.object(api.model, "cached_inference",
+                                  return_value=(b"gain", {})), \
+                mock.patch.object(api.model, "build_commands") as build_model, \
+                mock.patch.object(job, "start", return_value="job-1") as start:
+            response = api.run(self.context, {
+                "sessionId": session_id,
+                "options": {"useModel": True},
+            })
+        self.assertEqual(response.status, 200)
+        build_model.assert_not_called()
+        self.assertEqual(start.call_args.kwargs["pre_commands"], [])
+        argv = start.call_args.args[0]
+        self.assertEqual(Path(argv[argv.index("--external-gain") + 1]), gain)
+        self.assertEqual(Path(argv[argv.index("--external-gain-report") + 1]), report)
+
     def test_model_strength_is_bounded(self):
         session_id = self._session_with_image()
         with mock.patch.object(api, "detect_exe", return_value="HyperDR"):
@@ -159,6 +185,28 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.headers["X-Gain-Width"], "3")
         self.assertEqual(response.headers["X-Gain-Height"], "2")
         self.assertEqual(response.headers["X-Gain-Max-Stops"], "3.0")
+
+    def test_preview_distinguishes_expired_session_from_render_failure(self):
+        expired = api.preview(self.context, {
+            "id": ["0" * 32], "edge": ["512"],
+        })
+        self.assertEqual(expired.status, 404)
+
+        session_id = self._session_with_image()
+        with mock.patch.object(api, "preview_for",
+                               side_effect=ValueError("decode failed")):
+            failed = api.preview(self.context, {
+                "id": [session_id], "edge": ["512"],
+            })
+        self.assertEqual(failed.status, 422)
+
+    def test_preview_reports_missing_model_artifacts_as_conflict(self):
+        session_id = self._session_with_image()
+        response = api.preview(self.context, {
+            "id": [session_id], "edge": ["512"],
+            "options": ['{"useModel":true}'],
+        })
+        self.assertEqual(response.status, 409)
 
     def test_a_busy_converter_is_reported_as_too_many_requests(self):
         session_id = self._session_with_image()

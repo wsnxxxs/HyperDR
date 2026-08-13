@@ -387,6 +387,11 @@ heif_error write_callback(heif_context*, const void* data, size_t size, void* us
 std::vector<std::uint8_t> encode_adaptive_heic(const GainMapResult& images,
                                                const PhotoMetadata& metadata, int quality,
                                                int depth) {
+  // Adaptive HEIC is the Apple-interoperable writer. Keep this check at the
+  // codec boundary as well as in the renderer so a future alternate producer
+  // cannot silently emit generic ISO metadata through this path.
+  validate_gain_map_metadata(images.metadata,
+                             GainMapWriterProfile::apple_strict);
   std::unique_ptr<heif_context, ContextDeleter> context(heif_context_alloc());
   if (!context) throw std::runtime_error("cannot allocate libheif context");
   heif_encoder* encoder_raw = nullptr;

@@ -188,8 +188,10 @@ def regenerate(hyperdr: pathlib.Path) -> None:
         if not encoded.is_file():
             raise RuntimeError("HyperDR did not create the expected HEIC")
 
-        probe_path = fixtures_dir / "gamma-2-probe.heic"
-        control_path = fixtures_dir / "gamma-1-control.heic"
+        # Validate the complete pair before touching the checked-in fixtures.
+        # A failed regeneration must not leave one half of the frozen pair new.
+        probe_path = work / "gamma-2-probe.heic"
+        control_path = work / "gamma-1-control.heic"
         shutil.copyfile(encoded, probe_path)
         probe = probe_path.read_bytes()
         probe_payload = rational_payload(spec, 2)
@@ -209,6 +211,22 @@ def regenerate(hyperdr: pathlib.Path) -> None:
             raise RuntimeError("probe gamma was not preserved")
         if control_metadata["gamma"] != {"numerator": 1, "denominator": 1}:
             raise RuntimeError("control gamma patch was not accepted")
+
+        staged = []
+        try:
+            for source, name in (
+                (control_path, "gamma-1-control.heic"),
+                (probe_path, "gamma-2-probe.heic"),
+            ):
+                target = fixtures_dir / name
+                temporary_target = fixtures_dir / f".{name}.new"
+                shutil.copyfile(source, temporary_target)
+                staged.append((temporary_target, target))
+            for temporary_target, target in staged:
+                temporary_target.replace(target)
+        finally:
+            for temporary_target, _ in staged:
+                temporary_target.unlink(missing_ok=True)
 
     differing_offsets = [
         index

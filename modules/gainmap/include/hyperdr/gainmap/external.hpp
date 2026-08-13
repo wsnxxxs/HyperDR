@@ -77,17 +77,25 @@ struct ExternalGainMap {
     const std::filesystem::path& report_path,
     bool allow_legacy_external_gain = false);
 
-// Builds the normal photographic rendition first and then replaces only its
-// gain grid.  The mathematical path therefore remains the single owner of the
-// SDR base, exposure, tone curve, gamut mapping, contrast and vibrance.
+// Builds the normal rendition first and then replaces only its gain grid.  The
+// mathematical path therefore remains the single owner of the SDR base,
+// exposure, tone curve, gamut mapping, contrast and vibrance.
+//
+// `input` picks which of those renderers runs, exactly as it does for
+// make_gain_map. A model grid trained on scene-referred development is only
+// meaningful over a scene-referred base, so a caller that supplies a grid for a
+// display-referred input gets that input's own base underneath it rather than a
+// re-developed one.
 [[nodiscard]] GainMapResult make_external_gain_map(
     const FloatImage& source, ExternalGainMap external,
     const GainMapOptions& options = {},
-    const CaptureMetadata& capture = {});
+    const CaptureMetadata& capture = {},
+    const InputDescription& input = {});
 
 // Replaces an existing result's gain map and metadata. Kept for callers that
 // intentionally prepared their own base before applying an external grid.
 void apply_external_gain_map(GainMapResult& result, ExternalGainMap external,
-                             float strength = 1.0F);
+                             float strength = 1.0F,
+                             float output_headroom_limit_stops = -1.0F);
 
 }  // namespace hyperdr

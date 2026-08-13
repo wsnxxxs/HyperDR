@@ -25,21 +25,6 @@
 namespace hyperdr {
 namespace {
 
-// Cell boundaries have to be computed in 64 bits. `index * extent` is a
-// uint32 x uint32 product in the source, and it wraps for large images:
-// 2,864 x 1,500,000 exceeds UINT32_MAX, which collapsed that cell to a single
-// pixel and rewound the following cell to near the top of the image. The
-// result was not a memory error but a deterministically wrong gain grid --
-// the tail of the image never sampled, the head sampled twice -- which then
-// propagated into scene statistics, exposure, headroom and the gain map.
-[[nodiscard]] std::uint32_t grid_cell_edge(std::uint32_t index,
-                                           std::uint32_t extent,
-                                           std::uint32_t divisions) {
-  if (divisions == 0) return 0;
-  const auto edge = (static_cast<std::uint64_t>(index) * extent) / divisions;
-  return static_cast<std::uint32_t>(std::min<std::uint64_t>(edge, extent));
-}
-
 struct ExposureInputs {
   SceneStatistics scene_stats;
   CaptureMetadata capture;

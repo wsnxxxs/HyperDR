@@ -17,6 +17,9 @@ STAGE = (
 SCOPE = (
     REPO_ROOT / "apps" / "panel" / "web" / "js" / "preview" / "scope.js"
 ).read_text(encoding="utf-8")
+GPU = (
+    REPO_ROOT / "apps" / "panel" / "web" / "js" / "preview" / "gpu.js"
+).read_text(encoding="utf-8")
 
 from hyperdr_panel import native_preview  # noqa: E402
 from hyperdr_panel.native_preview import parse_packet  # noqa: E402
@@ -126,7 +129,8 @@ class NativePreviewFrontendContractTests(unittest.TestCase):
 
     def test_histogram_compares_native_base_and_rendered_planes(self):
         self.assertIn("export function analyse(source, rendered = null)", SCOPE)
-        self.assertIn("rendered ? analyse(rendered).histogram : null", SCOPE)
+        self.assertIn("histogramFromPlane(frame.base", SCOPE)
+        self.assertIn("histogramFromPlane(frame.hdr", SCOPE)
         for retired in ("scene.data", "sceneScale", "simulateOutput(",
                         "simulateModelOutput("):
             self.assertNotIn(retired, SCOPE)
@@ -136,6 +140,17 @@ class NativePreviewFrontendContractTests(unittest.TestCase):
         self.assertIn("if (!image.frame)", STAGE)
         self.assertIn("toast(message, true)", STAGE)
         self.assertIn("error.status === 409", STAGE)
+
+    def test_original_comparison_layer_is_cached_across_look_reloads(self):
+        self.assertIn("original: null", STAGE)
+        self.assertIn("if (resetOriginal || !image.original)", STAGE)
+        self.assertIn("originalContext.putImageData(image.original", STAGE)
+        self.assertIn("renderer.draw(null, { original: false })", STAGE)
+
+    def test_hdr_capability_probe_never_targets_the_visible_swap_chain(self):
+        self.assertIn("const probeTexture = device.createTexture", GPU)
+        self.assertIn("view: probeTexture.createView()", GPU)
+        self.assertNotIn("const canvasTexture = context.getCurrentTexture()", GPU)
 
 
 if __name__ == "__main__":

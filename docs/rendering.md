@@ -5,11 +5,71 @@ has to pass. For the options that drive it see
 [cli-reference.md](cli-reference.md); for what a run records see
 [report-schema.md](report-schema.md).
 
+## Input domains
+
+Three kinds of input reach the renderer, and they are not interchangeable. The
+decoder records which one it produced, in `DecodedImage::domain`; the report
+carries it as `input_domain`. Nothing branches on the file extension.
+
+| Domain | Produced by | What 1.0 means | Renderer |
+| --- | --- | --- | --- |
+| `scene-referred` | RAW through LibRaw | wherever white balance landed | photographic curve, automatic exposure |
+| `display-referred-sdr` | JPEG, PNG, SDR HEIC/AVIF, an Ultra HDR JPEG that fell back to its primary | diffuse white, and the ceiling | identity, zero gain map |
+| `display-referred-hdr` | PQ/HLG HEIC and AVIF, Ultra HDR, a gain-map HEIC | diffuse white, with real detail above it | log-domain shoulder, split at the declared headroom |
+
+- **A scene-referred input** is developed: the photographic curve below chooses
+  an exposure from the scene's log average and selects headroom from content.
+- **A display-referred SDR input** is already a finished photograph, so it is
+  passed through unchanged and its gain map is zero. HyperDR does not
+  manufacture highlight range from an input that never carried any. Exposure
+  controls still apply — a manual `--exposure` and `--exposure-bias` both scale
+  the image — and when that scaling would push the picture past 1.0 the excess
+  is rolled off by the shoulder rather than clipped. Automatic exposure is not
+  consulted: its input is the scene's log average, which on a graded picture
+  measures the grade.
+- **A display-referred HDR input** is split rather than re-developed. Both
+  renditions come from one shoulder in the log domain: identity below the knee
+  (`--expansion-start`), slope exactly 1 at the knee, and asymptotic above it.
+  The ceiling is the only difference between the two. Each ceiling is *solved*
+  so the input's declared peak lands exactly on its target — 1.0 for the base,
+  the output headroom for the rendition — because a shoulder only approaches
+  its ceiling, and assuming it instead rendered a 1.06-stop input at 0.42 stops.
+  When the output budget covers everything the input declared, the rendition is
+  the input, unmodified.
+- The output headroom is the input's declared headroom capped by
+  `--headroom`/`--headroom-max` and scaled by `--gain-strength`, so an
+  over-range input is attenuated deliberately instead of being flattened
+  against the format ceiling. Because ISO 21496-1 metadata declares the gain
+  interval as the alternate headroom, this is also what makes re-export stable:
+  a gain-map HEIC round-trips at 2.08x across passes, drifting only by 8-bit
+  gain quantization, where it previously lost roughly a third of its range each
+  time.
+- The gain a cell carries is the mean of the gain its own pixels ask for, with
+  below-knee pixels contributing zero — the gain map downsampled, rather than
+  the gain of the downsampled image, so a small specular is not averaged away
+  before it is ever restored. Because the grid is then sampled bilinearly, a
+  shadow pixel bordering a bright cell still receives a little gain; the report
+  measures exactly how much as `render.below_knee_relative_difference_max`.
+
+Working in the log domain is what makes a large input headroom usable. A
+linear-domain shoulder asymptotic to 1.0 spends nearly its whole output range
+on the first two stops: a PQ input reaching 49x diffuse white arrived at the
+8-bit base with everything above roughly 1.5x sharing the top two code values.
+The log-domain shoulder spreads the same 5.6 stops across roughly 26 codes at
+the default knee, and leaves everything below the knee bit-exact.
+
+The headroom the split uses is the one the *container declared*, never a
+percentile of the pixels. An HDR file whose colour is described by an ICC
+profile rather than by CICP therefore reports SDR and is passed through: an ICC
+profile cannot state a headroom, and rendering such a file faithfully is better
+than inventing a range for it.
+
 ## Guarantees
 
 - The photographic path uses a shared toe and middle segment for SDR and HDR.
   Their exponential shoulders asymptote to `1` and `2^headroom_stops` rather
-  than hard-clipping highlights.
+  than hard-clipping highlights. It runs for scene-referred input only; see
+  **Input domains** above for what the other two get.
 - A single-channel gain map can only reconstruct a common RGB multiplier. Shared
   vibrance, highlight-to-white convergence, and hue-preserving gamut compression
   therefore happen before the SDR/HDR luminance split.

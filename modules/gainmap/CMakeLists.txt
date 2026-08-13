@@ -2,6 +2,7 @@
 hyperdr_add_module(gainmap
   SOURCES
     src/coding.cpp
+    src/display_referred.cpp
     src/external.cpp
     src/gain_map.cpp
     src/photographic.cpp

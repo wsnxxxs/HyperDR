@@ -1,5 +1,6 @@
 #include "hyperdr/app/discovery.hpp"
 
+#include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 
 #include <algorithm>
@@ -10,8 +11,8 @@
 namespace hyperdr {
 namespace {
 
-constexpr std::array<std::string_view, 8> kExtensions{
-    ".arw", ".dng", ".jpg", ".jpeg", ".png", ".heic", ".heif", ".avif"};
+constexpr std::array<std::string_view, 6> kRasterExtensions{
+    ".jpg", ".jpeg", ".png", ".heic", ".heif", ".avif"};
 
 // This converter's own outputs end in "-hyperdr". When the output directory is
 // the input directory, skipping them is what stops a second run from converting
@@ -26,13 +27,20 @@ bool has_generated_output_name(const std::filesystem::path& path) {
 }  // namespace
 
 std::vector<std::string_view> supported_input_extensions() {
-  return {kExtensions.begin(), kExtensions.end()};
+  std::vector<std::string_view> extensions;
+  extensions.reserve(kRawInputExtensions.size() + kRasterExtensions.size());
+  extensions.insert(extensions.end(), kRawInputExtensions.begin(),
+                    kRawInputExtensions.end());
+  extensions.insert(extensions.end(), kRasterExtensions.begin(),
+                    kRasterExtensions.end());
+  return extensions;
 }
 
 bool is_supported_input(const std::filesystem::path& path) {
   const auto extension = lower_extension(path);
-  return std::find(kExtensions.begin(), kExtensions.end(), extension) !=
-         kExtensions.end();
+  return is_raw_extension(extension) ||
+         std::find(kRasterExtensions.begin(), kRasterExtensions.end(), extension) !=
+             kRasterExtensions.end();
 }
 
 std::vector<std::filesystem::path> discover_input_files(const ConvertOptions& options) {
@@ -73,7 +81,7 @@ std::vector<std::filesystem::path> discover_input_files(const ConvertOptions& op
   std::sort(files.begin(), files.end());
   if (files.empty()) {
     throw std::runtime_error(
-        "no supported images found (ARW, DNG, JPG, JPEG, PNG, HEIC, HEIF, AVIF)");
+        "no supported images found (LibRaw RAW, JPG, JPEG, PNG, HEIC, HEIF, AVIF)");
   }
   return files;
 }

@@ -96,8 +96,10 @@ install(DIRECTORY HyperDR_Model/hyperdr_ml/
   DESTINATION HyperDR_Model/hyperdr_ml COMPONENT Runtime
   PATTERN "__pycache__" EXCLUDE
   PATTERN "*.pyc" EXCLUDE)
-install(FILES HyperDR_Model/checkpoints/best.pt
-              HyperDR_Model/checkpoints/production-v3.pt
+# Only the deployable checkpoint ships. The retired normalized-v1 `best.pt` is
+# a local rollback artefact, is not in version control, and a release that
+# installed it could not be built from a clean checkout.
+install(FILES HyperDR_Model/checkpoints/production-v3.pt
               HyperDR_Model/checkpoints/production-v3.json
               HyperDR_Model/checkpoints/production-v3-training.patch
   DESTINATION HyperDR_Model/checkpoints COMPONENT Runtime)

@@ -11,9 +11,14 @@
 
 namespace hyperdr {
 
+// `input` is what the decoder produced, and it selects the renderer: only a
+// scene-referred input gets the photographic curve and its automatic exposure.
+// It defaults to scene-referred so that the renderer's own tests, which build
+// synthetic sensor-linear images, keep describing exactly what they mean.
 [[nodiscard]] GainMapResult make_gain_map(const FloatImage& linear_p3,
                                           const GainMapOptions& options,
-                                          const CaptureMetadata& capture = {});
+                                          const CaptureMetadata& capture = {},
+                                          const InputDescription& input = {});
 
 // Exposed separately from make_gain_map for callers and tests that want the
 // renderer without the shared input measurement around it.

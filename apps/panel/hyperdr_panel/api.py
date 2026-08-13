@@ -26,7 +26,12 @@ from .config import IS_WINDOWS, REPO_ROOT
 from .curve import look_curve
 from .executable import detect_exe
 from .schema import SETTINGS
-from .native_preview import DEFAULT_HIGHLIGHT_RECOVERY, MAX_EDGE, preview_for
+from .native_preview import (
+    DEFAULT_HIGHLIGHT_RECOVERY,
+    MAX_EDGE,
+    PreviewCancelled,
+    preview_for,
+)
 
 # Errors an endpoint may raise for a bad request, as opposed to a bug.
 REQUEST_ERRORS = (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError)
@@ -177,6 +182,10 @@ def preview(_context: Context, query: dict) -> Response:
         # Distinct from a missing or broken image: the request was refused, not
         # answered, and a client may retry it.
         return error(exc, status=exc.status)
+    except PreviewCancelled as exc:
+        # The browser immediately requested a newer slider state. This is a
+        # normal lifecycle event, not an invalid image and not a red toast.
+        return error(exc, status=499)
     except (OSError, ValueError) as exc:
         return error(exc, status=422)
     return Response(body=data, content_type="application/vnd.hyperdr.preview", headers={
@@ -291,6 +300,8 @@ def model_preview(_context: Context, body: dict) -> Response:
                 "X-Gain-Max-Stops": str(report["metadata_gain_max_stops"]),
             },
         )
+    except Busy as exc:
+        return error(exc, status=exc.status)
     except (OSError, ValueError, RuntimeError) as exc:
         return error(exc)
 

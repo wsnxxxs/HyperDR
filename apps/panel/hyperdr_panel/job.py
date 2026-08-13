@@ -20,8 +20,10 @@ import subprocess
 import threading
 import time
 import uuid
+from pathlib import Path
 
 from .concurrency import RAW_DECODE_BUDGET
+from .formats import RAW_INPUT_EXTENSIONS
 
 _LOCK = threading.Lock()
 _JOB: dict | None = None
@@ -34,6 +36,13 @@ TERMINATE_GRACE_SECONDS = max(1, int(os.environ.get("HYPERDR_TERMINATE_GRACE_SEC
 # warning loop can, and its output is held in memory until the job is replaced.
 MAX_LOG_CHARS = max(4096, int(os.environ.get("HYPERDR_MAX_JOB_LOG_CHARS", "200000")))
 MAX_REPORT_BYTES = max(4096, int(os.environ.get("HYPERDR_MAX_REPORT_BYTES", "4194304")))
+
+
+def _uses_raw_model_input(command: list[str]) -> bool:
+    """Whether a model-input pipeline command will enter LibRaw."""
+    return (len(command) >= 3
+            and str(command[1]).lower() == "model-input"
+            and Path(command[2]).suffix.lower() in RAW_INPUT_EXTENSIONS)
 
 
 class Busy(RuntimeError):
@@ -162,7 +171,8 @@ def _pump_pipeline(job: dict, argv: list[str], cwd: str,
             # decode a full RAW. Share the same resident-memory budget as live
             # previews so those two paths cannot demosaic concurrently.
             decode_slot = (RAW_DECODE_BUDGET.hold(timeout=1.0)
-                           if index == 0 else nullcontext())
+                           if index == 0 and _uses_raw_model_input(command)
+                           else nullcontext())
             with decode_slot:
                 proc = subprocess.Popen(
                     command, cwd=cwd, stdout=subprocess.PIPE,

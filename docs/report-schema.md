@@ -1,15 +1,15 @@
-# Report schema 7
+# Report schema 8
 
 What `--report` writes. The machine-readable JSON Schema is
 [`schema/report.json`](../schema/report.json): it defines every required object,
-field, type, enum, and nullable value in a schema-7 report. The emitter is
+field, type, enum, and nullable value in a schema-8 report. The emitter is
 `modules/app/src/report.cpp`, and `report_test` checks emitted reports against
 the schema. Update all three together whenever the report version or shape
 changes.
 
 ## Contents
 
-`--report` writes schema 7. Its `settings` block is generated from the settings
+`--report` writes schema 8. Its `settings` block is generated from the settings
 table, so it records every setting by its canonical name — not the handful someone
 remembered to add — plus `output_depth`, the depth actually encoded (BT.2100 is
 always 10-bit regardless of `--depth`). The top-level `raw_processing` block
@@ -21,9 +21,35 @@ percentiles, high-gain fractions, clipping, and local-weight diagnostics.
 The global `settings.pop` and per-file input-domain
 `render.wide_gamut_fraction` are also recorded.
 
+## Input domain
+
+Schema 8 adds `input_domain` and `input_headroom` to each file. `input_domain`
+is one of `scene-referred`, `display-referred-sdr`, `display-referred-hdr`, or
+`unknown`. It is the decoder's answer, not a guess from the file extension: an
+Ultra HDR JPEG that fell back to its SDR primary reports
+`display-referred-sdr`. A skipped or failed file reports `unknown` because it
+never reached a decoder.
+
+Read it first, because it decides what the rest of the record means. Only a
+scene-referred file gets automatic exposure, so its `exposure_ev` is a decision
+the renderer made about the scene; for the other two it is nothing but the
+creative offset the caller asked for. Only a scene-referred file gets
+content-selected headroom; a display-referred HDR file's `headroom_stops` is
+its `input_headroom` capped by `--headroom`/`--headroom-max` and scaled by
+`--gain-strength`, and a display-referred SDR file's is always zero, because an
+SDR input is never given highlight range it did not arrive with.
+
+For `unknown`, `input_headroom` is the schema-safe sentinel `1` and must not
+be interpreted. Otherwise, `input_headroom` is the linear multiple of diffuse white the input's container
+declared. It is 1 for both other domains. It is a property of the encoding
+rather than a measurement, so an HDR file whose colour is described by an ICC
+profile rather than by CICP reports 1 and the SDR domain: an ICC profile cannot
+state a headroom, and rendering such a file faithfully beats inventing a range
+for it.
+
 ## Geometry fields
 
-Schema 7 retains the compatibility fields `target_*` / `decoded_*` and adds the
+Schema 8 retains the compatibility fields `target_*` / `decoded_*` and adds the
 unambiguous aliases `requested_crop_*` / `delivered_crop_*`. The latter pair is
 the geometry contract used by model sidecars, including odd/CFA-aligned crops.
 It also records the per-file sensor raster, DefaultCrop request, actual decoded

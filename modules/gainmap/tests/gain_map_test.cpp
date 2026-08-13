@@ -61,13 +61,16 @@ void test_color_preservation_and_headroom() {
   // Low-luminance saturated HDR values force gamut limiting but must keep a
   // common RGB scale. HyperDR's Apple-targeted writer uses the gain interval as
   // its alternate capacity even when the measured luminance peak stays at SDR.
+  // Written at the values the renderer is meant to see, with the creative
+  // offset pinned off. This used to be 1.0 / 0.1 / 0.1 and relied on
+  // exposure_bias_ev defaulting to +1 EV to double it, so the case silently
+  // measured something else the moment that default was corrected to 0.
+  options.exposure_bias_ev = 0.0F;
   hyperdr::FloatImage saturated(2, 2, 3);
   for (std::size_t i = 0; i < 4; ++i) {
-    // The default +1 EV brightness offset maps this patch to the historical
-    // 2.0 / 0.2 / 0.2 values exercised by this metadata test.
-    saturated.pixels[i * 3] = 1.0F;
-    saturated.pixels[i * 3 + 1] = 0.1F;
-    saturated.pixels[i * 3 + 2] = 0.1F;
+    saturated.pixels[i * 3] = 2.0F;
+    saturated.pixels[i * 3 + 1] = 0.2F;
+    saturated.pixels[i * 3 + 2] = 0.2F;
   }
   const auto saturated_result = hyperdr::make_gain_map(saturated, options);
   const float r = saturated_result.base_linear.pixels[0];

@@ -31,6 +31,7 @@ from __future__ import annotations
 import os
 
 from .schema import validate as validate_settings
+from .formats import RAW_INPUT_EXTENSIONS
 
 
 def fmt_num(value) -> str:
@@ -47,7 +48,10 @@ PANEL_DEFAULTS = {
     "vibrance": 0.12,
     "hdrStrength": 0.4,
     "hdrRange": 2.5,
-    "brightness": 1.0,
+    # Raster inputs are already display-referred and RAW automatic exposure
+    # supplies its own anchor. A neutral bias avoids lifting both paths by a
+    # hidden extra stop before the user touches the control.
+    "brightness": 0.0,
     "expansionStart": 0.25,
     "areaCoverage": 1.0,
     "quality": 90,
@@ -196,7 +200,7 @@ def build_preview_frame_argv(
         "--exposure", "auto", "--headroom", fmt_num(settings["headroom"]),
         "--highlight-recovery", settings["highlight_recovery"],
     ]
-    if str(source).lower().endswith((".arw", ".dng")):
+    if str(source).lower().endswith(tuple(RAW_INPUT_EXTENSIONS)):
         argv.append("--fast-preview")
     external_gain = options.get("external_gain")
     external_report = options.get("external_gain_report")

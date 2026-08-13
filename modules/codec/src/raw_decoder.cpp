@@ -642,6 +642,10 @@ DecodedImage decode_raw(const std::filesystem::path& path,
   decode.delivered_crop_left = raw.imgdata.sizes.left_margin;
   decode.delivered_crop_top = raw.imgdata.sizes.top_margin;
   result.decode = std::move(decode);
+  // The one scene-referred producer in the codebase. Nothing below has applied
+  // a rendering intent, so 1.0 here is wherever white balance happened to land
+  // rather than diffuse white, and the renderer owns the exposure decision.
+  result.domain = InputDomain::kSceneReferred;
   result.linear_p3 = FloatImage(processed->width, processed->height, 3);
   const auto* pixels = reinterpret_cast<const std::uint16_t*>(processed->data);
   parallel_for_rows(processed->height, [&](const std::uint32_t y) {

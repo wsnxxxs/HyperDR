@@ -33,6 +33,8 @@ export function mountRunner({ toast }) {
   const exportButton = role("export");
   const resultCard = role("result");
   const commandLine = role("command-line");
+  const commandCopy = role("command-copy");
+  const runProgress = role("run-progress");
 
   let activeJobId = "";
   let starting = false;
@@ -44,7 +46,7 @@ export function mountRunner({ toast }) {
   function peakClause(peakLinear) {
     if (!Number.isFinite(peakLinear) || peakLinear <= 1) return "";
     const stops = Math.log2(peakLinear);
-    return `实测峰值 ×${peakLinear.toFixed(2)}（+${stops.toFixed(1)} stops）`;
+    return `实测峰值 ×${peakLinear.toFixed(2)}（+${stops.toFixed(1)} 档）`;
   }
 
   function syncResult(state) {
@@ -71,10 +73,21 @@ export function mountRunner({ toast }) {
 
   /* Touching any setting after a run makes the card's file describe settings
    * it was not converted with -- say so instead of letting it pass as current. */
+  function isStale(state) {
+    return Boolean(state.result)
+      && JSON.stringify(runOptionsFor(state)) !== state.result.optionsKey;
+  }
+
+  /* The primary button doubles as the way back to a current result: when the
+   * card has gone stale it says so by offering to "重新转换". */
+  function syncRunLabel() {
+    if (activeJobId || starting) return;
+    setText(runButton, isStale(store.get()) ? "重新转换" : "开始转换");
+  }
+
   function syncStale(state) {
-    const result = state.result;
-    role("result-stale").hidden = !result
-      || JSON.stringify(runOptionsFor(state)) === result.optionsKey;
+    role("result-stale").hidden = !isStale(state);
+    syncRunLabel();
   }
 
   /* ── command line ─────────────────────────────────────────────────── */
@@ -92,6 +105,29 @@ export function mountRunner({ toast }) {
   }, 300);
   commandLine.closest("details").addEventListener("toggle", refreshCommand);
 
+  commandCopy.addEventListener("click", async () => {
+    const text = commandLine.textContent.trim();
+    if (!text) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        // HTTP mode has no async clipboard; fall back to the selection API.
+        const area = document.createElement("textarea");
+        area.value = text;
+        area.style.position = "fixed";
+        area.style.opacity = "0";
+        document.body.append(area);
+        area.select();
+        document.execCommand("copy");
+        area.remove();
+      }
+      toast("已复制命令行");
+    } catch (_) {
+      toast("复制失败，请手动选择文本复制。", true);
+    }
+  });
+
   /* ── availability ─────────────────────────────────────────────────── */
 
   function syncRunAvailability(state) {
@@ -106,7 +142,7 @@ export function mountRunner({ toast }) {
     if (activeJobId !== jobId || trackingInterrupted === interrupted) return;
     trackingInterrupted = interrupted;
     setText(runButton, interrupted ? "连接中断，正在重试…" : "转换中…");
-    setText(cancelButton, interrupted ? "放弃跟踪" : "取消");
+    setText(cancelButton, interrupted ? "停止等待" : "取消");
     cancelButton.disabled = false;
   }
 
@@ -137,6 +173,10 @@ export function mountRunner({ toast }) {
       }
       if (update.offset != null) offset = update.offset;
       if (typeof update.text === "string") log += update.text;
+      // The converter narrates its stages on stdout; the last line is the
+      // closest thing a long RAW conversion has to a progress bar.
+      const line = lastLine(log, 80);
+      if (line) setText(runProgress, line);
       if (update.done) return { ...update, log };
     }
   }
@@ -152,7 +192,7 @@ export function mountRunner({ toast }) {
 
   const basename = (path) => String(path || "").split(/[\\/]/).filter(Boolean).pop() || "输出文件";
 
-  // Report schema 7. Only the single success file is read; the reasons are
+  // Report schema 8. Only the single success file is read; the reasons are
   // joined for display and never inspected, so a new reason needs no change here.
   function summarizeReport(report) {
     const files = report && Array.isArray(report.files) ? report.files : [];
@@ -166,8 +206,8 @@ export function mountRunner({ toast }) {
       const actual = `${file.decoded_width}×${file.decoded_height}`;
       const target = `${file.target_width}×${file.target_height}`;
       degradedNote = file.target_dimensions_applied === false
-        ? `解码被降级：已忽略记录的 ${target} 裁切，实际输出 ${actual}${reasons ? `（${reasons}）` : ""}`
-        : `解码被降级：实际输出 ${actual}，而非 ${target}${reasons ? `（${reasons}）` : ""}`;
+        ? `已忽略记录的 ${target} 裁切，实际输出 ${actual}${reasons ? `（${reasons}）` : ""}`
+        : `实际输出 ${actual}，而非预期的 ${target}${reasons ? `（${reasons}）` : ""}`;
     }
     return {
       name: basename(file.output),
@@ -185,7 +225,8 @@ export function mountRunner({ toast }) {
     activeJobId = "";
     trackingInterrupted = false;
     store.set({ jobId: null });
-    setText(runButton, "开始转换");
+    runProgress.hidden = true;
+    syncRunLabel();
     setText(cancelButton, "取消");
     cancelButton.hidden = true;
     cancelButton.disabled = false;
@@ -215,6 +256,8 @@ export function mountRunner({ toast }) {
     trackingInterrupted = false;
     store.set({ jobId: started.jobId, result: null });
     setText(runButton, "转换中…");
+    setText(runProgress, "正在启动转换…");
+    runProgress.hidden = false;
     cancelButton.hidden = false;
     cancelButton.disabled = false;
 
@@ -267,7 +310,7 @@ export function mountRunner({ toast }) {
     if (!jobId) return;
     if (trackingInterrupted) {
       resetRunningUi(jobId);
-      toast("已放弃跟踪；服务端任务可能仍在运行。", true);
+      toast("已停止等待；服务端任务可能仍在后台运行。", true);
       return;
     }
     cancelButton.disabled = true;

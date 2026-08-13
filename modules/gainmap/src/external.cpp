@@ -424,7 +424,8 @@ ExternalGainMap read_external_gain_map(const std::filesystem::path& gain_path,
 }
 
 void apply_external_gain_map(GainMapResult& result, ExternalGainMap external,
-                             float strength) {
+                             float strength,
+                             float output_headroom_limit_stops) {
   if (!std::isfinite(strength) || strength < 0.0F || strength > 2.0F) {
     throw std::invalid_argument("external gain strength must be in [0, 2]");
   }
@@ -450,19 +451,32 @@ void apply_external_gain_map(GainMapResult& result, ExternalGainMap external,
     external.max_stops *= strength;
   }
   const bool canonical = external.canonical_log2;
-  const float max_stops = canonical
-                              ? rational_value(external.metadata.gain_max)
-                              : external.max_stops;
+  float max_stops = canonical
+                        ? rational_value(external.metadata.gain_max)
+                        : external.max_stops;
+  if (std::isfinite(output_headroom_limit_stops) &&
+      output_headroom_limit_stops >= 0.0F) {
+    max_stops = std::min(max_stops, output_headroom_limit_stops);
+    if (canonical) {
+      external.metadata.gain_max = rational_from_float(max_stops);
+      external.metadata.alternate_headroom = rational_from_float(max_stops);
+    }
+  }
   std::vector<float> stops;
   stops.reserve(external.gain_map.pixels.size());
   if (canonical) {
     result.metadata = external.metadata;
-    const float min_gain = rational_value(result.metadata.gain_min);
+    float min_gain = rational_value(result.metadata.gain_min);
     const float max_gain = rational_value(result.metadata.gain_max);
+    if (min_gain > max_stops) {
+      min_gain = max_stops;
+      result.metadata.gain_min = rational_from_float(min_gain);
+    }
     const float gamma = std::max(rational_value(result.metadata.gamma), 1.0e-6F);
     result.gain_map = FloatImage(external.gain_map.width, external.gain_map.height, 1);
     for (std::size_t index = 0; index < external.gain_map.pixels.size(); ++index) {
-      const float log_gain = external.gain_map.pixels[index];
+      const float log_gain = std::clamp(external.gain_map.pixels[index],
+                                        min_gain, max_stops);
       stops.push_back(log_gain);
       const float fraction = std::abs(max_gain - min_gain) < 1.0e-8F
                                  ? 0.0F
@@ -522,15 +536,17 @@ void apply_external_gain_map(GainMapResult& result, ExternalGainMap external,
 GainMapResult make_external_gain_map(const FloatImage& source,
                                      ExternalGainMap external,
                                      const GainMapOptions& options,
-                                     const CaptureMetadata& capture) {
+                                     const CaptureMetadata& capture,
+                                     const InputDescription& input) {
   if (source.channels != 3) {
     throw std::invalid_argument("external gain input must be RGB");
   }
   auto development = options;
   const float strength = development.gain_strength;
   development.gain_strength = 1.0F;
-  auto result = make_gain_map(source, development, capture);
-  apply_external_gain_map(result, std::move(external), strength);
+  auto result = make_gain_map(source, development, capture, input);
+  apply_external_gain_map(result, std::move(external), strength,
+                          options.output_headroom_limit_stops);
   return result;
 }
 

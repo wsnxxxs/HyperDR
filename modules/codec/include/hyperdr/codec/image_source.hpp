@@ -3,8 +3,8 @@
 // Decoding any supported input into the pipeline's one working space: linear
 // Display P3, 32-bit float, unbounded above 1.
 //
-// ARW/DNG go through LibRaw; JPEG, PNG and HEIC through their own codecs; an
-// Ultra HDR JPEG is read through its gain map rather than through its
+// Common RAW extensions go through LibRaw; JPEG, PNG and HEIC through their own
+// codecs; an Ultra HDR JPEG is read through its gain map rather than through its
 // backward-compatible SDR primary, so re-exporting one does not discard the
 // captured highlight range. Everything downstream sees one image type and does
 // not know which path produced it.
@@ -18,12 +18,29 @@
 #include <string_view>
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <vector>
 #include <string>
 
 namespace hyperdr {
+
+// These are filename filters for discovery/UI only. LibRaw remains the
+// authority on the file contents, so accepting an extension here does not make
+// a malformed or unsupported file decode successfully.
+inline constexpr std::array<std::string_view, 30> kRawInputExtensions{
+    ".3fr", ".arw", ".bay", ".cap", ".cr2", ".cr3", ".crw", ".dcr",
+    ".dng", ".erf", ".fff", ".gpr", ".iiq", ".k25", ".kdc", ".mef",
+    ".mos", ".mrw", ".nef", ".nrw", ".orf", ".pef", ".raf", ".raw",
+    ".rwl", ".rw2", ".sr2", ".srf", ".srw", ".x3f"};
+
+[[nodiscard]] inline constexpr bool is_raw_extension(std::string_view extension) {
+  for (const auto candidate : kRawInputExtensions) {
+    if (candidate == extension) return true;
+  }
+  return false;
+}
 
 class RawMemoryError : public std::runtime_error {
  public:
@@ -168,7 +185,46 @@ struct DecodedImage {
   // whether an input is genuinely HDR must branch on this rather than on a
   // percentile of the image.
   float hdr_headroom{1.0F};
+  // Which domain `linear_p3` lives in, set by the decoder that produced it.
+  // This and `hdr_headroom` are the two things the renderer needs in order to
+  // know what its tone curve means; `describe_input()` bundles them.
+  //
+  // The pair is deliberately redundant so that each stays readable on its own,
+  // and `describe_input()` is the one place that reconciles them. In
+  // particular an HDR-encoded file whose colour is described by an ICC profile
+  // rather than by CICP decodes with `hdr_headroom == 1`, because an ICC
+  // profile cannot state a headroom; such a file is reported as SDR, which
+  // renders it faithfully rather than inventing a range nothing declared.
+  InputDomain domain{InputDomain::kDisplayReferredSdr};
+
+  [[nodiscard]] InputDescription describe_input() const {
+    // An HDR domain that did not survive with a usable headroom -- a cache
+    // entry written before the field existed, a container that declared PQ but
+    // whose gain metadata was missing -- is reported as SDR rather than handed
+    // to a renderer that would divide by a zero log span.
+    if (domain == InputDomain::kUnknown) {
+      // Unknown is a report sentinel, never a decoder result. Keep this
+      // defensive fallback display-referred so a malformed cache cannot route
+      // pixels through the photographic renderer.
+      return {InputDomain::kDisplayReferredSdr, 1.0F};
+    }
+    if (domain != InputDomain::kDisplayReferredHdr) return {domain, 1.0F};
+    if (!(hdr_headroom > 1.0F) || !std::isfinite(hdr_headroom)) {
+      return {InputDomain::kDisplayReferredSdr, 1.0F};
+    }
+    return {InputDomain::kDisplayReferredHdr, hdr_headroom};
+  }
 };
+
+// The domain a display-referred raster decode lands in, given the headroom its
+// container declared. One helper so every front-end answers the question the
+// same way and "declared no headroom" cannot drift apart from "declared SDR".
+// RAW does not go through this: it is scene-referred regardless of headroom.
+[[nodiscard]] inline InputDomain display_referred_domain(float headroom) {
+  return std::isfinite(headroom) && headroom > 1.0F
+             ? InputDomain::kDisplayReferredHdr
+             : InputDomain::kDisplayReferredSdr;
+}
 
 [[nodiscard]] DecodedImage decode_image(const std::filesystem::path& path,
                                         const RawDecodeOptions& options = {});

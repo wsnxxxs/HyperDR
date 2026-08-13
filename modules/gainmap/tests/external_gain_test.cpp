@@ -76,6 +76,17 @@ void test_external_gain_round_trip() {
   require(result.stats.gain_percentiles[7] == 3.0F,
           "external gain statistics were not applied");
 
+  // A model recipe may carry more headroom than the selected output format.
+  // The external grid is attenuated to that format ceiling instead of making
+  // the replay fail validation with a manual-headroom error.
+  auto capped_external = hyperdr::read_external_gain_map(raw, report, true);
+  hyperdr::GainMapResult capped_result;
+  hyperdr::apply_external_gain_map(capped_result, std::move(capped_external),
+                                   1.0F, 1.0F);
+  require(hyperdr::rational_value(capped_result.metadata.gain_max) == 1.0F &&
+              capped_result.headroom_stops == 1.0F,
+          "external output headroom cap was not applied");
+
   hyperdr::FloatImage source(2, 1, 3);
   source.pixels = {0.2F, 0.4F, 0.6F, 1.4F, -0.2F, 0.8F};
   hyperdr::ExternalGainMap pure_external{

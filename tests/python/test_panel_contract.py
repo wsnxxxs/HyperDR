@@ -65,6 +65,7 @@ class BuildArgvTest(unittest.TestCase):
         found = flags(build_argv("HyperDR", dict(BASE)))
         self.assertEqual(found["--gain-strength"], "0.4")
         self.assertEqual(found["--pop"], "0.4")
+        self.assertEqual(found["--exposure-bias"], "0")
 
     def test_panel_options_are_not_silently_coerced(self):
         for options in ({"quality": 90.9}, {"contrast": "1.2"},
@@ -214,6 +215,7 @@ class ModelIntegrationTest(unittest.TestCase):
                     "scale": "signed_log2_gain",
                     "sha256": digest(gain.read_bytes()),
                 },
+                "development_recipe": {"exposure_bias_ev": 0.0},
                 "model_binding": {
                     "source": {
                         "sha256": digest(source.read_bytes()),

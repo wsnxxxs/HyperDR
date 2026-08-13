@@ -166,13 +166,17 @@ DecodedImage decode_ultrahdr(const std::filesystem::path& path) {
     }
   });
   // The gain-map declaration, rather than measured pixels, defines how far
-  // above diffuse white this display-referred input can reach.
+  // above diffuse white this display-referred input can reach. When the
+  // metadata is absent the headroom stays 1 and the domain below reads SDR:
+  // libultrahdr still handed back a valid picture, and rendering it as a
+  // finished SDR image is right, because nothing in the file says otherwise.
   if (const uhdr_gainmap_metadata_t* gain =
           uhdr_dec_get_gainmap_metadata(decoder.get());
       gain != nullptr && std::isfinite(gain->hdr_capacity_max)) {
     result.hdr_headroom =
         std::clamp(std::exp2(gain->hdr_capacity_max), 1.0F, 64.0F);
   }
+  result.domain = display_referred_domain(result.hdr_headroom);
 
   result.metadata.orientation = 1;
   // libultrahdr exposes the authoritative Exif payload. The shared reader now

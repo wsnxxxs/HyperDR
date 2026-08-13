@@ -164,6 +164,8 @@ void test_run_report_is_parseable_and_complete() {
   ok.default_crop_present = true;
   ok.decode_degraded = true;
   ok.decode_degradation_reasons = {"default_crop_rejected"};
+  ok.input_domain = hyperdr::InputDomain::kDisplayReferredHdr;
+  ok.input_headroom = 4.93F;
   ok.width = 8192;
   ok.height = 5464;
   ok.stats.rendered_peak = 3.5F;
@@ -173,7 +175,7 @@ void test_run_report_is_parseable_and_complete() {
 
   const auto document = hyperdr::json::parse(
       hyperdr::run_report_json({ok, failed}, options));
-  require(document.find("schema")->number() == 7, "report schema version missing");
+  require(document.find("schema")->number() == 8, "report schema version missing");
   const auto* settings = document.find("settings");
   require(settings != nullptr, "report has no settings block");
   // Generated from the table, so every setting is present without anyone
@@ -197,6 +199,14 @@ void test_run_report_is_parseable_and_complete() {
   require(files[0].find("requested_crop_width")->number() == 9504 &&
               files[0].find("delivered_crop_width")->number() == 4752,
           "requested and delivered crop dimensions were not distinguished");
+  // Which renderer ran is not derivable from anything else in the record, so a
+  // reader that wants to compare two runs has to be able to read it back.
+  require(files[0].find("input_domain")->string() == "display-referred-hdr",
+          "the renderer's input domain was not reported");
+  require(files[0].find("input_headroom")->number() > 4.9,
+          "the declared input headroom was not reported");
+  require(files[1].find("input_domain")->string() == "unknown",
+          "a file that never decoded should report an unknown domain");
   require(files[0].find("decode_degraded")->boolean(),
           "decode degradation was not reported");
   // Types are pinned, not just values: the panel branches on

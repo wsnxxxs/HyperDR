@@ -31,7 +31,9 @@ web/
     ├── core/           api.js（全部 HTTP 调用）、store.js（唯一可观察状态）、dom.js
     ├── settings/       schema.js（控件单一声明）与 controls.js（控件构建）
     ├── preview/        stage.js（摄入/渲染器阶梯/分割对照）、scope.js（双分布直方图）、
-    │                   mask.js（滑杆作用遮罩）、curve.js、cpu/gpu/sdr-gpu 渲染器、session.js
+    │                   mask.js（滑杆作用遮罩）、cpu/gpu/sdr-gpu 渲染器、session.js
+    │                   curve-math.js 是 C++ 色调曲线的移植，当前只被
+    │                   tests/js/curve_math_runner.mjs 使用，不参与实时渲染
     ├── run/            runner.js（轮询、阶段进度、结果卡、导出）
     └── ui/             toast.js、theme.js
 ```

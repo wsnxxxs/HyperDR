@@ -19,13 +19,15 @@ HyperDR/
 ├── apps/panel/         # Local browser control panel (Python, standard library only)
 ├── HyperDR_Model/      # Optional ML training, evaluation, and gain-map inference
 ├── cmake/              # Build helpers: compiler settings, module and test registration, codecs
-├── docs/               # User guides, validation notes, and this map
+├── docs/               # Every guide and reference, indexed by docs/README.md
+│                         audits/ holds dated point-in-time reports
 ├── packaging/          # Release building, unpacked-archive smoke test, and install guide
 ├── schema/             # Settings vocabulary and report JSON Schema
 ├── scripts/            # Windows setup, LAN, TLS, firewall, and codec helpers
 │                         hyperdr_tls.ps1 holds the certificate paths and
 │                         issuing logic shared by both launchers
-├── tests/              # Cross-component Python, JavaScript, and PowerShell tests
+├── tests/              # Cross-component tests: python/, js/, powershell/,
+│                         display_gates/ (C++ CTest), macos_t2/ (Swift + Python)
 ├── Start.bat           # Double-click entry point for the browser panel
 ├── Setup-HTTPS.bat     # One-time trusted-HTTPS setup for iPhone true HDR
 ├── CMakeLists.txt      # Options, module list, install and packaging
@@ -93,7 +95,25 @@ diagnostic process is using them.
 `HyperDR_Model/.venv/`, trained `*.pt` checkpoints, datasets, and generated
 `HyperDR_Model/reports/` are also machine-local. Treat these as potentially
 expensive or private assets: normal workspace cleanup preserves them even though
-Git ignores them.
+Git ignores them. `hdr-workspace/` is the panel's own session storage and holds
+the photographs you fed it, so it is cleanup-preserved for the same reason.
+
+### Build directories
+
+`build*` is gitignored, so any name works — which is how three abandoned trees
+once accumulated at the root. Four names are already known to the tooling; use
+one of them and a later reader can tell what a tree was for.
+
+| Directory | Configuration | Who expects it |
+| --- | --- | --- |
+| `build/` | Codec-enabled, the shippable one | README, the CI codecs job, `executable.py` |
+| `build-core/` | `-DHYPERDR_WITH_CODECS=OFF` | CONTRIBUTING, the CI core job, `executable.py` |
+| `build-release/` | Codec-enabled, for packaging | `packaging/package-release.ps1` default |
+| `build-codecs-win/` | Codec-enabled, for the LAN panel | `scripts/start_hyperdr_lan.ps1` |
+
+`apps/panel/hyperdr_panel/executable.py` searches all four plus `bin/` and
+`PATH`, so a build in one of them is found by the panel without configuration.
+Anything else needs `HYPERDR_EXECUTABLE` set by hand.
 
 ## Single sources of truth
 
@@ -127,4 +147,13 @@ on failure — no framework to install:
 ctest --test-dir build --output-on-failure
 ctest --test-dir build -R schema        # one module's worth
 python -m pytest tests/python -q        # the browser panel
+./tests/powershell/test_hyperdr_tls.ps1 # the shared HTTPS helpers
 ```
+
+`tests/` holds what cannot live beside a single module. `tests/python/` is the
+panel suite and also drives the two Node runners in `tests/js/` — the C++/JS
+tone-curve port and the WebGPU HDR contract — so those need no separate command.
+`tests/display_gates/` is registered with CTest like a module's tests.
+`tests/macos_t2/` is the manual macOS Core Image adjudication: it runs from
+`.github/workflows/macos-display-t2.yml` or, on a borrowed Mac, from
+[its own runbook](../tests/macos_t2/RUNBOOK-mac.md).

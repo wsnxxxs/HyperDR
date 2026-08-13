@@ -28,6 +28,7 @@
 apps/panel/
   hyperdr_gui.py        启动器（处理 --pick 子进程、启动服务）
   hyperdr_panel/        后端包
+    app.py              入口分派：--pick 子进程，或启动服务
     config.py           路径与平台标志
     schema.py           设置词表，读取 schema/settings.json（由转换器生成）
     command.py          面板控件 → HyperDR 命令行（全项目唯一的命令拼装处）
@@ -35,6 +36,7 @@ apps/panel/
     session.py          一张图进、一个结果出，以及过期清理
     job.py              正在运行的那个转换进程，与浏览器轮询的日志
     native_preview.py   调用 preview-frame，校验并缓存线性 P3 float32 原生预览包
+    model.py            可选的 HyperDR_Model 增益图推理（见 docs/model-integration.md）
     curve.py            色调曲线诊断接口的兼容封装
     concurrency.py      预览与模型进程共用的解码准入控制
     picker.py           原生 tkinter 文件夹对话框（独立子进程）

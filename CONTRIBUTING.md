@@ -3,7 +3,8 @@
 Thanks for considering a contribution.
 
 See [docs/project-structure.md](docs/project-structure.md) for a map of the
-repository before choosing where to make a change.
+repository before choosing where to make a change, and
+[docs/README.md](docs/README.md) for an index of every guide and reference.
 
 ## Before you start
 

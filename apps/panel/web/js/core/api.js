@@ -62,10 +62,6 @@ export const api = {
    *  runner uses -- which is the only reason the displayed command is true. */
   command: (options) => post("/api/command", { options }, "无法生成命令行。"),
 
-  /** Tone curve samples for the current look. */
-  curve: (options, samples = 257) =>
-    post("/api/curve", { options, samples }, "无法获取色调曲线。"),
-
   /* -- run ----------------------------------------------------------- */
 
   run: (sessionId, options) =>

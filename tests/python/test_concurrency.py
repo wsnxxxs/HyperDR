@@ -18,7 +18,7 @@ from unittest import mock
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "apps" / "panel"))
 
-from hyperdr_panel import api, curve, model, thumbnail  # noqa: E402
+from hyperdr_panel import api, curve, job, model, native_preview  # noqa: E402
 from hyperdr_panel.concurrency import (  # noqa: E402
     Budget, Busy, RAW_DECODE_BUDGET, SingleFlight,
 )
@@ -26,8 +26,9 @@ from hyperdr_panel.concurrency import (  # noqa: E402
 
 class BudgetTests(unittest.TestCase):
     def test_raw_and_model_previews_share_one_total_memory_budget(self):
-        self.assertIs(thumbnail._BUDGET, RAW_DECODE_BUDGET)
+        self.assertIs(native_preview.RAW_DECODE_BUDGET, RAW_DECODE_BUDGET)
         self.assertIs(model.RAW_DECODE_BUDGET, RAW_DECODE_BUDGET)
+        self.assertIs(job.RAW_DECODE_BUDGET, RAW_DECODE_BUDGET)
 
     def test_refuses_beyond_the_limit_instead_of_queueing(self):
         budget = Budget(2)
@@ -225,17 +226,17 @@ class CurveSingleFlightTests(unittest.TestCase):
         self.assertIn("busy", response.payload["error"])
 
 
-class ThumbnailSingleFlightTests(unittest.TestCase):
-    def test_a_thumbnail_timeout_is_converted_to_a_value_error(self):
+class PreviewSingleFlightTests(unittest.TestCase):
+    def test_a_native_preview_timeout_is_converted_to_a_value_error(self):
         # TimeoutExpired is a SubprocessError, which no endpoint catches: it
         # escaped as a traceback and the browser saw the connection drop.
         def fake_run(argv, **kwargs):
             raise subprocess.TimeoutExpired(argv, 180)
 
-        with mock.patch.object(thumbnail, "detect_exe", lambda: "HyperDR"), \
-                mock.patch.object(thumbnail.subprocess, "run", fake_run):
+        with mock.patch.object(native_preview, "detect_exe", lambda: "HyperDR"), \
+                mock.patch.object(native_preview.subprocess, "run", fake_run):
             with self.assertRaises(ValueError):
-                thumbnail._converter_thumbnail(Path("nonexistent.jpg"))
+                native_preview._build(Path("nonexistent.jpg"), {}, 960)
 
 
 if __name__ == "__main__":

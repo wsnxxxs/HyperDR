@@ -7,11 +7,16 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <stdexcept>
 #include <vector>
 
 namespace hyperdr {
 
 SceneStatistics compute_luminance_statistics(const FloatImage& source) {
+  source.require_consistent("scene-statistics input");
+  if (source.channels != 3) {
+    throw std::invalid_argument("scene-statistics input must be RGB");
+  }
   SceneStatistics stats;
   const std::size_t pixel_count =
       static_cast<std::size_t>(source.width) * source.height;
@@ -37,7 +42,6 @@ SceneStatistics compute_luminance_statistics(const FloatImage& source) {
   stats.log_average =
       static_cast<float>(std::exp(log_sum / stats.samples.size()));
   stats.p995 = percentile(stats.samples, 0.995F);
-  stats.p999 = percentile(stats.samples, 0.999F);
   stats.p9999 = percentile(stats.samples, 0.9999F);
   return stats;
 }

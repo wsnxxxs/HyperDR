@@ -5,7 +5,7 @@ Three endpoints start a HyperDR process: ``/api/run`` through ``job.py``,
 The other two looked bounded because both keep a cache, but a cache bounds
 *finished* work and says nothing about work in flight: N concurrent misses on
 the same key were N separate processes, each doing the same thing. For preview
-that meant N whole-file reads of a RAW, N embedded-JPEG scans, N temporary
+that meant N whole-file reads of a RAW, N native decodes, N temporary
 files and N runs of a CLI with a 180-second timeout, all producing one answer.
 
 Two mechanisms, deliberately separate because they solve different halves:

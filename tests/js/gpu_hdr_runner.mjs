@@ -1,6 +1,8 @@
 /* Node regression harness for the WebGPU canvas configuration guard.
  * The production module is imported through a data URL because the panel does
  * not need a package.json merely to declare its browser files as ES modules.
+ * A successfully configured browser additionally has to pass the live shader
+ * pixel readback in createHdrRenderer(); that GPU path cannot be faked here.
  */
 
 import fs from "node:fs";
@@ -14,6 +16,11 @@ const modulePath = path.join(
 const source = fs.readFileSync(modulePath, "utf8");
 const { createHdrRenderer } = await import(
   `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
+
+Object.defineProperty(globalThis, "GPUTextureUsage", {
+  configurable: true,
+  value: { COPY_SRC: 1, RENDER_ATTACHMENT: 16 },
+});
 
 async function expectRejectedConfiguration(getConfiguration) {
   let requested = null;

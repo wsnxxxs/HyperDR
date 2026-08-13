@@ -432,14 +432,19 @@ void apply_external_gain_map(GainMapResult& result, ExternalGainMap external,
   // development that already populated result.base_linear.
   if (external.canonical_log2) {
     for (float& value : external.gain_map.pixels) value *= strength;
-    external.metadata.gain_min = rational_from_float(
-        rational_value(external.metadata.gain_min) * strength);
-    external.metadata.gain_max = rational_from_float(
-        rational_value(external.metadata.gain_max) * strength);
-    external.metadata.base_headroom = rational_from_float(
-        rational_value(external.metadata.base_headroom) * strength);
-    external.metadata.alternate_headroom = rational_from_float(
-        rational_value(external.metadata.alternate_headroom) * strength);
+    // Preserve a v2 producer's exact rational representation for the identity
+    // setting. Besides avoiding needless metadata churn, this is required by
+    // frozen protocol fixtures that distinguish equivalent encodings bytewise.
+    if (strength != 1.0F) {
+      external.metadata.gain_min = rational_from_float(
+          rational_value(external.metadata.gain_min) * strength);
+      external.metadata.gain_max = rational_from_float(
+          rational_value(external.metadata.gain_max) * strength);
+      external.metadata.base_headroom = rational_from_float(
+          rational_value(external.metadata.base_headroom) * strength);
+      external.metadata.alternate_headroom = rational_from_float(
+          rational_value(external.metadata.alternate_headroom) * strength);
+    }
     external.max_stops = rational_value(external.metadata.gain_max);
   } else {
     external.max_stops *= strength;

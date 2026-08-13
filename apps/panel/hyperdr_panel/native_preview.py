@@ -1,11 +1,13 @@
 """Native linear-P3 preview frames produced by the C++ render pipeline."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 from .command import build_preview_frame_argv
@@ -20,6 +22,48 @@ _CACHE: dict[tuple, tuple[bytes, dict]] = {}
 _CACHE_LOCK = threading.Lock()
 _CACHE_LIMIT = 8
 _INFLIGHT = SingleFlight()
+_ORPHAN_MAX_AGE_SECONDS = max(3600, TIMEOUT_SECONDS * 2)
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _remove_output_artifacts(output: Path) -> None:
+    """Remove the requested packet and atomic-write debris from an interrupted CLI."""
+    output.unlink(missing_ok=True)
+    # HyperDR's atomic writer appends `.tmp.<pid>.<sequence>`. The random
+    # mkstemp basename belongs exclusively to this invocation, so no other
+    # preview can own a matching sibling.
+    for candidate in output.parent.glob(output.name + ".tmp.*"):
+        try:
+            if candidate.is_file() or candidate.is_symlink():
+                candidate.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _cleanup_orphaned_previews(now: float | None = None) -> None:
+    """Remove preview packets left by a process that could not run ``finally``."""
+    cutoff = (time.time() if now is None else now) - _ORPHAN_MAX_AGE_SECONDS
+    try:
+        candidates = Path(tempfile.gettempdir()).glob("hyperdr-preview-*.hpf*")
+        for candidate in candidates:
+            try:
+                # A live preview cannot legitimately exceed the CLI timeout by
+                # this margin. Never touch directories or a recently active
+                # file, so parallel panel processes remain independent.
+                if ((candidate.is_file() or candidate.is_symlink())
+                        and candidate.stat().st_mtime < cutoff):
+                    candidate.unlink(missing_ok=True)
+            except OSError:
+                pass
+    except OSError:
+        pass
 
 
 def parse_packet(data: bytes) -> dict:
@@ -46,13 +90,14 @@ def parse_packet(data: bytes) -> dict:
 
 
 def _build(source: Path, options: dict, max_edge: int) -> tuple[bytes, dict]:
+    _cleanup_orphaned_previews()
     exe = detect_exe()
     if not exe:
         raise ValueError("HyperDR executable was not found")
     handle, name = tempfile.mkstemp(prefix="hyperdr-preview-", suffix=".hpf")
     os.close(handle)
     output = Path(name)
-    output.unlink(missing_ok=True)
+    _remove_output_artifacts(output)
     try:
         argv = build_preview_frame_argv(exe, source, output, options, max_edge)
         try:
@@ -67,16 +112,23 @@ def _build(source: Path, options: dict, max_edge: int) -> tuple[bytes, dict]:
         data = output.read_bytes()
         return data, parse_packet(data)
     finally:
-        output.unlink(missing_ok=True)
+        _remove_output_artifacts(output)
 
 
 def preview_for(source: Path, options: dict, max_edge: int = MAX_EDGE) -> tuple[bytes, dict]:
     """Return an exact native SDR-base/HDR float frame and its metadata."""
     edge = max(320, min(MAX_EDGE, int(max_edge)))
     stat = source.stat()
+    source_digest = _sha256(source)
     stable_options = json.dumps(
         options, sort_keys=True, separators=(",", ":"), default=str)
-    key = (str(source), stat.st_mtime_ns, stat.st_size, stable_options, edge)
+    external_digests = tuple(
+        (name, _sha256(Path(options[name])))
+        for name in ("external_gain", "external_gain_report")
+        if options.get(name)
+    )
+    key = (str(source), stat.st_mtime_ns, stat.st_size, source_digest,
+           stable_options, external_digests, edge)
     with _CACHE_LOCK:
         cached = _CACHE.get(key)
     if cached:

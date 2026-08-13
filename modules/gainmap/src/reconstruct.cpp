@@ -3,6 +3,7 @@
 #include "hyperdr/foundation/math.hpp"
 #include "hyperdr/foundation/parallel.hpp"
 #include "hyperdr/foundation/rational.hpp"
+#include "hyperdr/look/grid.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -35,33 +36,31 @@ FloatImage reconstruct_gain_map(const FloatImage& base, const FloatImage& gain,
   const float fraction = std::abs(denominator) < 1.0e-8F
                              ? 0.0F
                              : std::clamp((display_headroom_stops - base_headroom) / denominator, 0.0F, 1.0F);
-  const float weight = std::copysign(fraction, denominator);
+  // The division already accounts for a reverse base/alternate ordering: both
+  // numerator and denominator are negative between the endpoints. Applying
+  // the denominator's sign a second time inverted the gain map.
+  const float weight = fraction;
   parallel_for_rows(base.height, [&](const std::uint32_t y) {
-    const float gy = std::clamp(
-        (static_cast<float>(y) + 0.5F) * gain.height / base.height - 0.5F,
-        0.0F, static_cast<float>(gain.height - 1));
-    const auto y0 = static_cast<std::uint32_t>(std::floor(gy));
-    const auto y1 = std::min(y0 + 1, gain.height - 1);
-    const float wy = gy - static_cast<float>(y0);
     for (std::uint32_t x = 0; x < base.width; ++x) {
-      const float gx = std::clamp(
-          (static_cast<float>(x) + 0.5F) * gain.width / base.width - 0.5F,
-          0.0F, static_cast<float>(gain.width - 1));
-      const auto x0 = static_cast<std::uint32_t>(std::floor(gx));
-      const auto x1 = std::min(x0 + 1, gain.width - 1);
-      const float wx = gx - static_cast<float>(x0);
+      // Share the renderer's double-precision coordinate path. The former
+      // inline float arithmetic selected a different gain cell once an image
+      // was wider than float's exact-integer range.
+      const auto coordinates = bilinear_grid_coordinates(
+          gain.width, gain.height, base.width, base.height, x, y);
       bool pixel_clamped = false;
       for (unsigned c = 0; c < 3; ++c) {
         const auto gain_channel = gain.channels == 1 ? 0U : c;
         const auto channel = gain_map_channel(metadata, gain_channel);
         const float top =
-            std::lerp(gain.at(x0, y0, gain_channel),
-                      gain.at(x1, y0, gain_channel), wx);
+            std::lerp(gain.at(coordinates.x0, coordinates.y0, gain_channel),
+                      gain.at(coordinates.x1, coordinates.y0, gain_channel),
+                      coordinates.tx);
         const float bottom =
-            std::lerp(gain.at(x0, y1, gain_channel),
-                      gain.at(x1, y1, gain_channel), wx);
+            std::lerp(gain.at(coordinates.x0, coordinates.y1, gain_channel),
+                      gain.at(coordinates.x1, coordinates.y1, gain_channel),
+                      coordinates.tx);
         const float encoded =
-            clamp_finite(std::lerp(top, bottom, wy), 0.0F, 1.0F);
+            clamp_finite(std::lerp(top, bottom, coordinates.ty), 0.0F, 1.0F);
         const float min_gain = rational_value(channel.gain_min);
         const float max_gain = rational_value(channel.gain_max);
         const float gamma = rational_value(channel.gamma);

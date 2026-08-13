@@ -167,8 +167,9 @@ QuantizedGrid quantize_grid(const std::vector<float>& gain_stops,
   quantized.decoded_stops.assign(count, 0.0F);
   for (std::size_t i = 0; i < count; ++i) {
     const float code = encode_gain_code(normalized[i], quantized.stored_gamma);
-    const float stored =
-        std::round(255.0F * std::clamp(code, 0.0F, 1.0F)) / 255.0F;
+    const auto x = static_cast<std::uint32_t>(i % dimensions.width);
+    const auto y = static_cast<std::uint32_t>(i / dimensions.width);
+    const float stored = quantize_gain_code_dithered(code, x, y);
     quantized.codes.pixels[i] = stored;
     quantized.decoded_stops[i] =
         quantized.stored_gain_max *
@@ -400,6 +401,12 @@ GainMapResult make_display_referred_hdr_gain_map(const FloatImage& source,
   const auto pixel_gain = [&](const float luminance) {
     if (!(luminance > kMinimumLuminance)) return 0.0F;
     const float sdr = sdr_of(luminance);
+    // The display-referred contract is exact below the knee: the base and
+    // alternate rendition are the same function there. Before gain-map
+    // dithering, the tiny values produced by the transition were merely
+    // rounded away; make the invariant explicit so dithering cannot turn
+    // them into a visible one-code gain.
+    if (sdr <= knee_level) return 0.0F;
     const float gain =
         std::max(0.0F, std::log2((hdr_of(luminance) + kEpsilon) / (sdr + kEpsilon)));
     return std::min(gain, output_stops) *

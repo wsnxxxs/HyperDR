@@ -5,6 +5,7 @@
 #include "hyperdr/image/resample.hpp"
 
 #include <bit>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -67,14 +68,29 @@ void test_external_gain_round_trip() {
   require(external.max_stops == 3.0F, "external headroom was not read");
 
   hyperdr::GainMapResult result;
-  result.base_linear = hyperdr::FloatImage(4, 4, 3);
+  result.base_linear = hyperdr::FloatImage(8, 6, 3);
   hyperdr::apply_external_gain_map(result, std::move(external));
+  require(result.gain_map.width == 4 && result.gain_map.height == 3,
+          "coarse external gain was not lifted to the output grid");
+  require(result.gain_map.at(0, 0, 0) == 0.0F &&
+              result.gain_map.at(0, 2, 0) == 1.0F,
+          "external gain resampling changed the endpoint codes");
   require(hyperdr::rational_value(result.metadata.gain_max) == 3.0F,
           "external gain metadata was not applied");
   require(result.headroom_stops == 3.0F,
           "external headroom was not applied");
   require(result.stats.gain_percentiles[7] == 3.0F,
           "external gain statistics were not applied");
+
+  hyperdr::ExternalGainMap fine_external{
+      hyperdr::FloatImage(8, 6, 1), 3.0F};
+  fine_external.gain_map.pixels.front() = 0.125F;
+  hyperdr::GainMapResult fine_result;
+  fine_result.base_linear = hyperdr::FloatImage(4, 4, 3);
+  hyperdr::apply_external_gain_map(fine_result, std::move(fine_external));
+  require(fine_result.gain_map.width == 8 && fine_result.gain_map.height == 6 &&
+              fine_result.gain_map.pixels.front() == 0.125F,
+          "finer external gain was unexpectedly downsampled");
 
   // A model recipe may carry more headroom than the selected output format.
   // The external grid is attenuated to that format ceiling instead of making
@@ -169,7 +185,16 @@ void test_v2_signed_canonical_sidecar() {
   require(external.gain_map.pixels[0] == -0.5F,
           "signed canonical gain was not preserved");
   hyperdr::GainMapResult result;
+  result.base_linear = hyperdr::FloatImage(8, 6, 3);
   hyperdr::apply_external_gain_map(result, std::move(external));
+  require(result.gain_map.width == 4 && result.gain_map.height == 3,
+          "canonical external gain was not lifted to the output grid");
+  // With gamma=1, the source codes are 1/6 and 5/12. At output x=1 the
+  // half-pixel bilinear coordinate is 0.25, so code-domain interpolation is
+  // 1/6 + (5/12 - 1/6) * 0.25 = 11/48. Interpolating canonical log2 values
+  // before encoding would produce a different value.
+  require(std::abs(result.gain_map.at(1, 0, 0) - 11.0F / 48.0F) < 1.0e-6F,
+          "canonical gain was not resampled in encoded code space");
   require(hyperdr::rational_value(result.metadata.gain_min) == -1.0F,
           "v2 gain_min metadata was not applied");
   require(result.metadata.gain_min.numerator == -1000000 &&

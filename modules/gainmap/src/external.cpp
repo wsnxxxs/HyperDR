@@ -6,6 +6,8 @@
 #include "hyperdr/foundation/math.hpp"
 #include "hyperdr/foundation/rational.hpp"
 #include "hyperdr/gainmap/gain_map.hpp"
+#include "hyperdr/image/resample.hpp"
+#include "hyperdr/look/grid.hpp"
 
 #include <algorithm>
 #include <array>
@@ -212,6 +214,32 @@ std::vector<float> decoded_stops(const FloatImage& gain, float max_stops) {
     values.push_back(std::clamp(code, 0.0F, 1.0F) * max_stops);
   }
   return values;
+}
+
+void lift_external_gain_map(GainMapResult& result) {
+  // The model grid is a prediction contract. The encoded gain map is a
+  // container contract, and must be at least as fine as the grid used by the
+  // built-in renderer. Keep an already finer external grid intact; only lift
+  // a coarse model grid so its tensor resolution does not leak into the
+  // output container.
+  if (result.base_linear.width == 0 || result.base_linear.height == 0 ||
+      result.gain_map.width == 0 || result.gain_map.height == 0) {
+    return;
+  }
+  const auto preferred = choose_gain_dimensions(result.base_linear);
+  const auto target_width = std::max(preferred.width, result.gain_map.width);
+  const auto target_height = std::max(preferred.height, result.gain_map.height);
+  if (result.gain_map.width == target_width &&
+      result.gain_map.height == target_height) {
+    return;
+  }
+
+  // result.gain_map is already in the stored ISO code domain here. Resampling
+  // that domain preserves the same half-pixel/bilinear semantics used by the
+  // decoder instead of interpolating canonical log2 gains and encoding them
+  // again with a different curve.
+  result.gain_map = resample_to(std::move(result.gain_map), target_width,
+                                target_height);
 }
 
 Rational rational_member(const json::Value& object, std::string_view key) {
@@ -495,6 +523,7 @@ void apply_external_gain_map(GainMapResult& result, ExternalGainMap external,
     result.metadata.use_base_color_space = true;
     stops = decoded_stops(result.gain_map, max_stops);
   }
+  lift_external_gain_map(result);
   result.headroom_stops = rational_value(result.metadata.alternate_headroom);
 
   auto& stats = result.stats;

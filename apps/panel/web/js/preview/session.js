@@ -15,12 +15,15 @@ import { store } from "../core/store.js";
 
 export function createUploader({ onProgress, onReady, onError }) {
   let inFlight = false;
+  let currentRequest = null;
+  let aborted = false;
 
-  return async function upload(fileList) {
+  async function start(fileList) {
     const file = Array.from(fileList || [])[0];
     const previous = store.get();
     if (!file || inFlight || previous.uploading || previous.jobId) return;
     inFlight = true;
+    aborted = false;
     // Keep the current image/result until the replacement is accepted.
     store.set({ uploading: true, uploadProgress: 0 });
     onProgress(0);
@@ -31,6 +34,7 @@ export function createUploader({ onProgress, onReady, onError }) {
         store.set({ uploadProgress: fraction });
         onProgress(fraction);
       });
+      currentRequest = request;
       await request.promise;
       store.set({
         sessionId,
@@ -41,12 +45,26 @@ export function createUploader({ onProgress, onReady, onError }) {
     } catch (error) {
       // The session may still be usable -- the failure could be this one file.
       // Keep any previously published image visible and current in the store.
-      onError(error.message || "上传失败。", {
+      // A user-aborted upload is not an error and must not clear the stage.
+      onError(aborted ? "已取消上传。" : error.message || "上传失败。", {
         preserveCurrent: Boolean(previous.file),
+        cancelled: aborted,
       });
     } finally {
       inFlight = false;
+      currentRequest = null;
       store.set({ uploading: false });
     }
+  }
+
+  return {
+    start,
+    /* Wired to the cancel button: the old panel had no way to stop a 300 MB
+     * upload once the user had picked the wrong file. */
+    abort() {
+      if (!currentRequest) return;
+      aborted = true;
+      currentRequest.abort();
+    },
   };
 }

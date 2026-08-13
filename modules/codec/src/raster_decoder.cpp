@@ -675,8 +675,13 @@ DecodedImage decode_heif_rgb_handle(const heif_context* context,
       static_cast<std::uint32_t>(height),
       static_cast<std::size_t>(stride), bits, color);
   result.decode.resolution_reduced = resolution_reduced;
+  // An ICC profile cannot state a headroom, so an ICC-described HEIC is read as
+  // SDR. That is the conservative answer rather than the complete one: it
+  // renders such a file faithfully instead of inventing a range nothing in the
+  // container declared.
   result.hdr_headroom =
       color.icc.empty() ? transfer_headroom(color.transfer) : 1.0F;
+  result.domain = display_referred_domain(result.hdr_headroom);
   ExifRead exif;
   if (auto read = read_heif_exif(handle)) exif = std::move(*read);
   apply_exif(result, exif);
@@ -763,6 +768,9 @@ DecodedImage decode_adaptive_heic(const std::vector<std::uint8_t>& bytes,
   // The base is a Display P3 SDR image, so the headroom is entirely whatever
   // the gain map was written to add. `alternate_headroom` is in stops.
   result.hdr_headroom = std::max(1.0F, std::exp2(alternate_headroom));
+  // A tmap file whose gain map adds nothing is an SDR picture in an HDR
+  // container, and saying so keeps it out of the highlight-splitting renderer.
+  result.domain = display_referred_domain(result.hdr_headroom);
   normalize_orientation(result, exif_orientation);
   return result;
 }
@@ -789,7 +797,7 @@ DecodedImage decode_heic(const std::filesystem::path& path,
 
 DecodedImage decode_image(const std::filesystem::path& path, const RawDecodeOptions& options) {
   const auto ext = lower_extension(path);
-  if (ext == ".arw" || ext == ".dng") return decode_raw(path, options);
+  if (is_raw_extension(ext)) return decode_raw(path, options);
   if (ext == ".jpg" || ext == ".jpeg") {
     // A JPEG/R carries an SDR primary plus a gain map. Reading only the primary
     // would discard the captured highlight range before any look decision, so
@@ -802,6 +810,12 @@ DecodedImage decode_image(const std::filesystem::path& path, const RawDecodeOpti
         // losing the advertised HDR rendition was an ordinary successful
         // decode.  Export/report callers already surface DecodeInfo degraded
         // state and the panel carries it in the native preview contract.
+        //
+        // decode_jpeg leaves the domain at display-referred SDR, which is what
+        // this fallback actually produced. That is the whole reason the domain
+        // is set by the decoder: the file name still says ".jpg" and still
+        // advertises a gain map, and a name-based classifier would have handed
+        // these SDR pixels to the highlight-splitting renderer.
         auto fallback = decode_jpeg(path);
         fallback.decode.degraded = true;
         fallback.decode.degradation_reasons.push_back(
@@ -870,7 +884,7 @@ float raw_preview_exposure_ev(const std::filesystem::path& path,
                               const FloatImage& source,
                               const CaptureMetadata& capture) {
   const auto ext = lower_extension(path);
-  if (ext != ".arw" && ext != ".dng") return 0.0F;
+  if (!is_raw_extension(ext)) return 0.0F;
   GainMapOptions options;
   // The panel applies the user's brightness separately. The model input and
   // the renderer therefore need the automatic anchor without that bias.

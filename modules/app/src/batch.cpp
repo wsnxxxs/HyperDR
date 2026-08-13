@@ -16,6 +16,7 @@
 #include "hyperdr/image/resample.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <iostream>
@@ -84,6 +85,12 @@ bool half_size_matches_full(std::uint32_t half, std::uint32_t full) {
 
 }  // namespace
 
+GainMapResult render_decoded_image(const DecodedImage& image,
+                                   const GainMapOptions& options) {
+  return make_gain_map(image.linear_p3, options, image.capture,
+                       image.describe_input());
+}
+
 GainMapOptions replay_external_development(
     const ExternalGainMap& external, const std::filesystem::path& input,
     const DecodedImage& image, const ConvertOptions& options) {
@@ -136,6 +143,15 @@ GainMapOptions replay_external_development(
   replay.exposure_bias_ev = 0.0F;
   replay.auto_headroom = false;
   replay.headroom_stops = binding.recipe.headroom_stops;
+  // The recipe's headroom belongs to the model's SDR development and may be
+  // higher than the current panel/output ceiling. Keep that recipe valid for
+  // replay, then let the external renderer attenuate the gain map to the
+  // selected format limit.
+  replay.look.headroom_max_stops = std::max(
+      replay.look.headroom_max_stops, binding.recipe.headroom_stops);
+  replay.output_headroom_limit_stops = options.gain.auto_headroom
+      ? options.gain.look.headroom_max_stops
+      : options.gain.headroom_stops;
   // make_external_gain_map saves this value for the external grid, then uses
   // unity for the mathematical pass that reproduces the SDR base.
   replay.gain_strength = options.gain.gain_strength;
@@ -248,9 +264,9 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     auto gain = external.has_value()
                     ? make_external_gain_map(
                           staged.image.linear_p3, std::move(*external),
-                          external_development, staged.image.capture)
-                    : make_gain_map(staged.image.linear_p3, options.gain,
-                                    staged.image.capture);
+                          external_development, staged.image.capture,
+                          staged.image.describe_input())
+                    : render_decoded_image(staged.image, options.gain);
     // Validate the peak the renderer actually produced. External model
     // metadata arrives after the initial option validation and can otherwise
     // bypass HLG's 1000-nit ceiling.
@@ -271,6 +287,9 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     result.decode_degraded = staged.image.decode.degraded;
     result.decode_degradation_reasons =
         staged.image.decode.degradation_reasons;
+    const auto described = staged.image.describe_input();
+    result.input_domain = described.domain;
+    result.input_headroom = described.headroom;
     result.width = gain.base_linear.width;
     result.height = gain.base_linear.height;
     result.exposure_ev = gain.exposure_ev;

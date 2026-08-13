@@ -86,6 +86,17 @@ struct FileResult {
   bool default_crop_present{false};
   bool decode_degraded{false};
   std::vector<std::string> decode_degradation_reasons;
+  // Which renderer ran, and the headroom it was told the input carried. These
+  // are the two facts that decide what every other number in this record means:
+  // `exposure_ev` is an automatic scene decision for a scene-referred input and
+  // a pure creative offset for the other two, and `headroom_stops` is content
+  // dependent for the first and bounded by `input_headroom` for the third.
+  // Unknown means the file was skipped or failed before a decoder could state
+  // which renderer it would have used. It is not a rendering domain.
+  InputDomain input_domain{InputDomain::kUnknown};
+  // 1.0 is a schema-safe sentinel when input_domain is unknown; consumers must
+  // read input_domain before interpreting this value.
+  float input_headroom{1.0F};
   std::uint32_t width{};
   std::uint32_t height{};
   double exposure_ev{};

@@ -163,6 +163,9 @@ void test_presets_reject_anything_unexpected() {
 void test_fingerprint_covers_exactly_the_byte_affecting_settings() {
   const hyperdr::ConvertOptions base;
   const auto baseline = hyperdr::settings_fingerprint(base);
+  require(hyperdr::settings_signature(base).find("|render_pipeline=") !=
+              std::string::npos,
+          "the renderer revision is missing from the resume signature");
   for (const auto& setting : hyperdr::settings()) {
     if (setting.affects_output_bytes) {
       require(hyperdr::settings_signature(base).find(std::string(setting.key) + "=") !=

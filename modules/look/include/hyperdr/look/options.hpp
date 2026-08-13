@@ -33,6 +33,51 @@ enum class LookMode {
 // caller's error to report rather than a silent fallback to photographic.
 [[nodiscard]] std::optional<LookMode> look_mode_from_name(std::string_view name);
 
+// Which domain a decoded image's float samples live in.
+//
+// The renderer cannot decide what its tone curve means without this. It used to
+// be inferred from the file name -- ".arw" or ".dng" meant scene-referred and
+// everything else meant display-referred -- which is wrong in both directions:
+// an Ultra HDR JPEG whose gain map failed to decode is a display-referred SDR
+// image while its extension still says ".jpg", and a PQ HEIC and an sRGB HEIC
+// share an extension while living two very different distances above diffuse
+// white. It is a property of what the decoder produced, so the decoder sets it.
+enum class InputDomain {
+  // Sensor-linear and unbounded, with no rendering intent applied yet. 1.0 is
+  // a white-balance normalisation artefact rather than diffuse white, which is
+  // why this is the only domain that gets automatic photographic exposure.
+  kSceneReferred,
+  // A finished SDR rendition: 1.0 is diffuse white and also the ceiling.
+  kDisplayReferredSdr,
+  // A finished HDR rendition: 1.0 is diffuse white and everything above it is
+  // real highlight detail, up to the input's declared headroom.
+  kDisplayReferredHdr,
+  // Report-only value used when a file was skipped or failed before decoding.
+  // It must never be passed to a renderer as an InputDescription.
+  kUnknown,
+};
+
+[[nodiscard]] const char* input_domain_name(InputDomain domain);
+// Returns nullopt for an unrecognised name rather than guessing: picking the
+// wrong domain silently re-develops a finished photograph.
+[[nodiscard]] std::optional<InputDomain> input_domain_from_name(
+    std::string_view name);
+
+// What the decoder produced, as opposed to what the user asked for. Neither
+// field is a setting, which is why they travel beside GainMapOptions rather
+// than inside it: they are facts about the file, already covered by the input
+// hash, and must not enter the settings fingerprint.
+struct InputDescription {
+  InputDomain domain{InputDomain::kSceneReferred};
+  // How far above diffuse white the input's *encoding* can carry detail, as a
+  // linear multiple. Only read for kDisplayReferredHdr, where it exceeds 1.
+  float headroom{1.0F};
+};
+
+// Rejects a description whose headroom contradicts its domain before any
+// renderer divides by it.
+void validate_input_description(const InputDescription& input);
+
 // These values are intentionally optional: a missing EXIF field must not be
 // silently replaced with a plausible-looking capture setting.
 struct CaptureMetadata {

@@ -457,9 +457,10 @@ int preview_frame_command(int argc, char** argv) {
     const auto development = replay_external_development(
         external, options.input, decoded, options);
     result = make_external_gain_map(decoded.linear_p3, std::move(external),
-                                    development, decoded.capture);
+                                    development, decoded.capture,
+                                    decoded.describe_input());
   } else {
-    result = make_gain_map(decoded.linear_p3, options.gain, decoded.capture);
+    result = render_decoded_image(decoded, options.gain);
   }
   validate_encoding_headroom(options.encoding, result.headroom_stops);
   write_binary_file_atomic(options.output_directory,
@@ -528,6 +529,7 @@ std::string model_input_report(const std::filesystem::path& input,
       .member("requested_crop_applied", d.target_dimensions_applied)
       .begin_object("development_recipe")
       .member("id", "photographic-v1")
+      .member("exposure_bias_ev", gain.exposure_bias_ev)
       .member("exposure_ev", developed.exposure_ev)
       .member("headroom_stops", developed.stats.headroom_stops)
       .member("contrast", gain.look.contrast)
@@ -603,9 +605,17 @@ int model_input_command(int argc, char** argv) {
   // make_gain_map call used by final export; only its generated gain grid is
   // discarded here.
   auto development_options = options.gain;
+  // Model labels are SDR development inputs, so the creative offset is pinned
+  // rather than inherited: a recipe recorded here has to stay reproducible even
+  // if the CLI's own default ever moves again.
+  development_options.exposure_bias_ev = 0.0F;
   development_options.gain_strength = 1.0F;
+  // The domain still comes from the decode. With embedded gain maps ignored
+  // above, a gain-map container arrives as its display-referred SDR base, which
+  // is exactly the developed image a model label wants; a RAW arrives
+  // scene-referred and is developed by the photographic renderer as before.
   auto developed = make_gain_map(decoded.linear_p3, development_options,
-                                 decoded.capture);
+                                 decoded.capture, decoded.describe_input());
   const auto [width, height] = model_tensor_size(
       developed.base_linear.width, developed.base_linear.height, long_side);
   auto tensor = resample_to(developed.base_linear, width, height);

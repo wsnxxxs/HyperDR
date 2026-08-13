@@ -80,7 +80,7 @@ void write_stats(json::Writer& writer, const RenderStats& s) {
 std::string run_report_json(const std::vector<FileResult>& results,
                             const ConvertOptions& options) {
   json::Writer writer(json::Writer::Style::kIndented);
-  writer.begin_object().member("schema", 7).member("tool", kVersion);
+  writer.begin_object().member("schema", 8).member("tool", kVersion);
   write_settings(writer, options);
   writer.begin_array("files");
   for (const auto& result : results) {
@@ -103,7 +103,14 @@ std::string run_report_json(const std::vector<FileResult>& results,
         .member("delivered_crop_height", result.delivered_crop_height)
         .member("target_dimensions_applied", result.target_dimensions_applied)
         .member("default_crop_present", result.default_crop_present)
-        .member("decode_degraded", result.decode_degraded);
+        .member("decode_degraded", result.decode_degraded)
+        // Which of the three renderers this file took, and the headroom it was
+        // told the input carried. Recorded because nothing else in the record
+        // distinguishes them, and the same settings mean different things in
+        // each: an exposure_ev of 0 is a scene decision in one and the absence
+        // of a creative offset in the others.
+        .member("input_domain", input_domain_name(result.input_domain))
+        .member("input_headroom", result.input_headroom);
     writer.begin_array("decode_degradation_reasons");
     for (const auto& reason : result.decode_degradation_reasons) {
       writer.element(reason);

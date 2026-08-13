@@ -13,16 +13,74 @@
 import { role, setPressed, setText, readColor } from "../core/dom.js";
 import { store } from "../core/store.js";
 
-/* One pass over the source: luma + per-channel counts, clipping, zebra masks.
- * The masks are painted with the token colours read at call time, so a theme
+const P3_LUMA = [0.2289746, 0.6917385, 0.0792869];
+const HISTOGRAM_BINS = 256;
+
+function clampBin(value) {
+  return Math.max(0, Math.min(HISTOGRAM_BINS - 1, Math.round(value)));
+}
+
+function decodeDisplaySample(value) {
+  const v = value / 255;
+  return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+}
+
+function emptyHistogram(total = 0) {
+  return {
+    luma: new Uint32Array(HISTOGRAM_BINS),
+    red: new Uint32Array(HISTOGRAM_BINS),
+    green: new Uint32Array(HISTOGRAM_BINS),
+    blue: new Uint32Array(HISTOGRAM_BINS),
+    total,
+  };
+}
+
+function histogramFromPlane(values, width, height, rangeLinear) {
+  const total = width * height;
+  const histogram = emptyHistogram(total);
+  const scale = 255 / Math.max(rangeLinear, 1e-6);
+  for (let p = 0; p < values.length; p += 3) {
+    const r = Math.max(0, Number.isFinite(values[p]) ? values[p] : 0);
+    const g = Math.max(0, Number.isFinite(values[p + 1]) ? values[p + 1] : 0);
+    const b = Math.max(0, Number.isFinite(values[p + 2]) ? values[p + 2] : 0);
+    histogram.red[clampBin(r * scale)]++;
+    histogram.green[clampBin(g * scale)]++;
+    histogram.blue[clampBin(b * scale)]++;
+    histogram.luma[clampBin((P3_LUMA[0] * r + P3_LUMA[1] * g + P3_LUMA[2] * b) * scale)]++;
+  }
+  return histogram;
+}
+
+function histogramFromDisplayImage(source, rangeLinear) {
+  const data = source.data;
+  const histogram = emptyHistogram(data.length / 4);
+  const scale = 255 / Math.max(rangeLinear, 1e-6);
+  for (let p = 0; p < data.length; p += 4) {
+    const r = decodeDisplaySample(data[p]);
+    const g = decodeDisplaySample(data[p + 1]);
+    const b = decodeDisplaySample(data[p + 2]);
+    histogram.red[clampBin(r * scale)]++;
+    histogram.green[clampBin(g * scale)]++;
+    histogram.blue[clampBin(b * scale)]++;
+    histogram.luma[clampBin((P3_LUMA[0] * r + P3_LUMA[1] * g + P3_LUMA[2] * b) * scale)]++;
+  }
+  return histogram;
+}
+
+/* One pass over the source plus the native output planes: luma + per-channel
+ * counts, clipping, zebra masks. The histogram is deliberately computed from
+ * the linear Float32 contract, never from the browser's folded 8-bit display
+ * copy. The masks are painted with token colours read at call time, so a theme
  * flip between images cannot leave yesterday's red on today's photo. */
 export function analyse(source, rendered = null) {
+  // Keep the original two-argument export shape for small integrations while
+  // accepting the native frame and its linear display range as optional
+  // trailing arguments from the stage.
+  const frame = arguments[2] || null;
+  const rangeLinear = Number.isFinite(arguments[3]) ? arguments[3] : 1;
   const data = source.data;
   const { width } = source;
-  const luma = new Uint32Array(256);
-  const red = new Uint32Array(256);
-  const green = new Uint32Array(256);
-  const blue = new Uint32Array(256);
+  const height = source.height;
   const zebraHot = new ImageData(width, source.height);
   const zebraCold = new ImageData(width, source.height);
   const hotColor = readColor("--zebra-hot");
@@ -34,13 +92,17 @@ export function analyse(source, rendered = null) {
 
   for (let p = 0, i = 0; p < data.length; p += 4, i++) {
     const r = data[p], g = data[p + 1], b = data[p + 2];
-    red[r]++; green[g]++; blue[b]++;
-    const y = Math.round(0.2126 * r + 0.7152 * g + 0.0722 * b);
-    luma[y < 0 ? 0 : y > 255 ? 255 : y]++;
-
-    const peak = Math.max(r, g, b);
-    const isHot = peak >= 250;
-    const isCold = peak <= 4;
+    const output = frame?.hdr;
+    const outputPeak = output
+      ? Math.max(output[i * 3], output[i * 3 + 1], output[i * 3 + 2])
+      : Math.max(r, g, b) / 255;
+    const outputLuma = output
+      ? P3_LUMA[0] * output[i * 3]
+        + P3_LUMA[1] * output[i * 3 + 1]
+        + P3_LUMA[2] * output[i * 3 + 2]
+      : (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+    const isHot = outputPeak >= Math.max(1, rangeLinear) * 0.999;
+    const isCold = outputLuma <= 1e-6;
     if (isHot) hot++;
     if (isCold) cold++;
     if (!isHot && !isCold) continue;
@@ -58,14 +120,20 @@ export function analyse(source, rendered = null) {
     target[o + 3] = 235;
   }
 
-  const renderedHistogram = rendered ? analyse(rendered).histogram : null;
+  const histogram = frame?.base
+    ? histogramFromPlane(frame.base, frame.width, frame.height, rangeLinear)
+    : histogramFromDisplayImage(source, rangeLinear);
+  const renderedHistogram = frame?.hdr
+    ? histogramFromPlane(frame.hdr, frame.width, frame.height, rangeLinear)
+    : rendered ? histogramFromDisplayImage(rendered, rangeLinear) : null;
   return {
     source,
-    histogram: { luma, red, green, blue, total },
+    histogram,
     clipping: { hot: hot / total, cold: cold / total },
     zebraHot,
     zebraCold,
     renderedHistogram,
+    rangeLinear: Math.max(rangeLinear, 1),
   };
 }
 
@@ -77,9 +145,9 @@ function readPalette() {
   return palette;
 }
 
-function drawSeries(context, counts, style, blend, width, height, fill) {
-  let max = 0;
-  for (let i = 1; i < 255; i++) if (counts[i] > max) max = counts[i]; // ignore 0/255 spikes
+function drawSeries(context, counts, style, blend, width, height, fill, maxCount = 0) {
+  let max = maxCount;
+  if (!(max > 0)) for (let i = 0; i < 256; i++) if (counts[i] > max) max = counts[i];
   max = Math.max(max, 1);
   context.beginPath();
   context.moveTo(0, height);
@@ -145,20 +213,34 @@ export function mountScope({ analysis }) {
 
     const { histogram } = data;
     if (state.histMode === "rgb") {
-      const channels = data.renderedHistogram || histogram;
-      drawSeries(context, channels.red, palette.red, "lighter", width, height, true);
-      drawSeries(context, channels.green, palette.green, "lighter", width, height, true);
-      drawSeries(context, channels.blue, palette.blue, "lighter", width, height, true);
+      const sourceChannels = histogram;
+      const outputChannels = data.renderedHistogram || histogram;
+      const max = Math.max(
+        ...[sourceChannels.red, sourceChannels.green, sourceChannels.blue,
+          outputChannels.red, outputChannels.green, outputChannels.blue]
+          .map((series) => Math.max(...series)));
+      context.globalAlpha = 0.28;
+      drawSeries(context, sourceChannels.red, palette.red, "lighter", width, height, true, max);
+      drawSeries(context, sourceChannels.green, palette.green, "lighter", width, height, true, max);
+      drawSeries(context, sourceChannels.blue, palette.blue, "lighter", width, height, true, max);
+      context.globalAlpha = 1;
+      if (data.renderedHistogram) {
+        drawSeries(context, outputChannels.red, palette.red, null, width, height, false, max);
+        drawSeries(context, outputChannels.green, palette.green, null, width, height, false, max);
+        drawSeries(context, outputChannels.blue, palette.blue, null, width, height, false, max);
+      }
     } else {
-      drawSeries(context, histogram.luma, palette.luma, null, width, height, true);
       const output = data.renderedHistogram?.luma || histogram.luma;
-      drawSeries(context, output,
-                 palette.output, null, width, height, false);
+      const max = Math.max(Math.max(...histogram.luma), Math.max(...output));
+      drawSeries(context, histogram.luma, palette.luma, null, width, height, true, max);
+      if (data.renderedHistogram) {
+        drawSeries(context, output, palette.output, null, width, height, false, max);
+      }
     }
 
     if (!state.previewOptimized) {
       // Where the mathematical broad-highlight lift begins.
-      const marker = (state.expansionStart * width) | 0;
+      const marker = (state.expansionStart / Math.max(data.rangeLinear, 1)) * width;
       context.strokeStyle = palette.marker;
       context.setLineDash([3, 3]);
       context.beginPath();

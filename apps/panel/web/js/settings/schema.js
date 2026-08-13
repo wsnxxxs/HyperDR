@@ -13,7 +13,7 @@
 
 export const ENCODINGS = [
   {
-    id: "adaptive", label: "增益图", maxRange: 3,
+    id: "adaptive", label: "Adaptive HDR", maxRange: 3,
     hint: "Apple Adaptive HDR：Display P3 SDR 底图 + ISO 21496-1 增益图，最适合系统相册与分享。",
   },
   {
@@ -22,7 +22,7 @@ export const ENCODINGS = [
   },
   {
     id: "hlg", label: "HLG", maxRange: 2.3,
-    hint: "HLG：BT.2100 HLG 10-bit HEIC，适合广播级 HDR 工作流；标准 1000-nit 映射最多约 2.3 stops。",
+    hint: "HLG：BT.2100 HLG 10-bit HEIC，适合广播级 HDR 工作流；标准 1000-nit 映射最多约 2.3 档。",
   },
   {
     id: "ultrahdr", label: "Ultra HDR", maxRange: 4,
@@ -34,7 +34,7 @@ export const ENCODINGS = [
   },
   {
     id: "avif-hlg", label: "AVIF HLG", maxRange: 2.3,
-    hint: "AVIF (HLG)：BT.2100 HLG 10-bit AVIF；同样最多约 2.3 stops。",
+    hint: "AVIF (HLG)：BT.2100 HLG 10-bit AVIF；同样最多约 2.3 档。",
   },
 ];
 
@@ -45,13 +45,14 @@ const ev = (value) => `${value > 0 ? "+" : ""}${value.toFixed(2)} EV`;
 const signed = (value) => `${value > 0 ? "+" : ""}${value.toFixed(2)}`;
 const percent = (value) => `${Math.round(value * 100)}%`;
 const fixed = (digits) => (value) => value.toFixed(digits);
+const stops = (digits) => (value) => `${value.toFixed(digits)} 档`;
 
 /* `group` selects the container the control renders into; `kind` selects the
  * widget. `key` is both the store key and the name sent to /api/run. */
 export const CONTROLS = [
   {
     key: "brightness", kind: "range", group: "tone", label: "整体亮度",
-    min: 0, max: 2, step: 0.05, default: 1, format: ev,
+    min: 0, max: 2, step: 0.05, default: 0, format: ev,
     scale: ["0 EV", "+2 EV"], mask: null,
     help: "在自动曝光基础上偏移整张画面，同时作用于 SDR 底图与 HDR 输出。",
   },
@@ -63,8 +64,8 @@ export const CONTROLS = [
   },
   {
     key: "hdrRange", kind: "range", group: "tone", label: "HDR 扩展范围",
-    min: 0, max: 3, step: 0.1, default: 2.5, format: fixed(1),
-    scale: ["0 stop", "最大余量"], mask: "gainFull",
+    min: 0, max: 3, step: 0.1, default: 2.5, format: stops(1),
+    scale: ["0 档", "最大余量"], mask: "gainFull",
     help: "高于 SDR 参考白的亮度余量；强度与范围共同决定最终峰值。上限随输出格式变化。",
   },
   {
@@ -88,6 +89,7 @@ export const CONTROLS = [
   {
     key: "highlightRecovery", kind: "segmented", group: "advanced", label: "高光恢复",
     default: "blend", mask: null,
+    help: "RAW 解码阶段的高光处理。切换方式会重新解码文件，预览需要重新载入。",
     choices: [["blend", "混合"], ["reconstruct", "重建"], ["clip", "裁切"], ["unclip", "不裁切"]],
   },
   {

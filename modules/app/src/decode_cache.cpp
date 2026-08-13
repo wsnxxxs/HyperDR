@@ -22,7 +22,7 @@ constexpr std::array<char, 8> kMagic{'H', 'D', 'R', 'C', 'A', 'C', 'H', '3'};
 // build that started writing a new field would silently read old entries that
 // lacked it -- which is how a cache hit came to produce different Exif from
 // the decode that filled it.
-constexpr std::uint32_t kCacheSchema = 6;
+constexpr std::uint32_t kCacheSchema = 7;
 
 // x86-64 and arm64, the only targets this project builds for, are both little
 // endian; the cache is a local scratch format and is never transported.
@@ -98,6 +98,11 @@ std::string metadata_json(const DecodedImage& value) {
       // preview divides by it: a cache hit that lost it would serve an HDR
       // input's thumbnail unscaled and the panel would clip it.
       .member("hdr_headroom", value.hdr_headroom)
+      // Which renderer the decoded pixels are owed. A cache hit that lost this
+      // would hand a display-referred HDR buffer to the scene-referred
+      // photographic curve -- the exact bug the domain exists to prevent, and
+      // one that would appear only on the second run of a batch.
+      .member("input_domain", input_domain_name(value.domain))
       .member("has_gps", m.gps.has_value());
   writer.begin_array("decode_degradation_reasons");
   for (const auto& reason : d.degradation_reasons) {
@@ -154,6 +159,13 @@ void apply_metadata_json(const std::string& text, DecodedImage& out) {
     out.metadata.gps = gps;
   }
   out.hdr_headroom = read_optional(document, "hdr_headroom").value_or(1.0F);
+  // kCacheSchema was bumped for this field, so an entry that predates it is
+  // already a miss and never reaches here. The fallback covers only a name this
+  // build does not recognise, and it points at display-referred SDR because
+  // that renders the cached pixels as the finished picture they may well be
+  // rather than re-developing them.
+  out.domain = input_domain_from_name(string_at("input_domain"))
+                   .value_or(InputDomain::kDisplayReferredSdr);
   out.capture.iso = read_optional(document, "capture_iso");
   out.capture.exposure_time_seconds =
       read_optional(document, "capture_exposure_time_seconds");

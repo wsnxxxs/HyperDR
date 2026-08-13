@@ -53,7 +53,7 @@ try {
     # existing Windows Python environment.
     foreach ($required in @(
             "HyperDR_Model\infer_gain.py",
-            "HyperDR_Model\checkpoints\best.pt",
+            "HyperDR_Model\checkpoints\production-v3.pt",
             "HyperDR_Model\dataset\assets\display-p3.icc")) {
         if (-not (Test-Path -LiteralPath (Join-Path $root $required) -PathType Leaf)) {
             throw "Release archive is missing a model inference file: $required"
@@ -67,6 +67,19 @@ try {
     $inputImage = Join-Path $workRoot "gradient.png"
     [IO.File]::WriteAllBytes($inputImage, [Convert]::FromBase64String($pngBase64))
 
+    # The expected report version comes from the schema the archive itself
+    # ships, not from a number written here: a second copy is exactly how this
+    # check came to demand schema 6 long after the converter had moved to 7.
+    $reportSchema = Join-Path $root "schema\report.json"
+    if (-not (Test-Path -LiteralPath $reportSchema -PathType Leaf)) {
+        throw "Release archive is missing schema\report.json."
+    }
+    $expectedSchema = (Get-Content -Raw -LiteralPath $reportSchema |
+        ConvertFrom-Json).properties.schema.const
+    if (-not $expectedSchema) {
+        throw "schema\report.json does not pin a report version."
+    }
+
     foreach ($encoding in @("adaptive", "ultrahdr", "pq", "hlg", "avif-pq", "avif-hlg")) {
         $output = Join-Path $workRoot ("output-" + $encoding)
         $report = Join-Path $workRoot ("report-" + $encoding + ".json")
@@ -77,7 +90,11 @@ try {
             throw "Packaged conversion failed for encoding '$encoding' (exit $LASTEXITCODE)."
         }
         $document = Get-Content -Raw -LiteralPath $report | ConvertFrom-Json
-        if ($document.schema -ne 6 -or $document.files.Count -ne 1 -or
+        if ($document.schema -ne $expectedSchema) {
+            throw ("Packaged report for encoding '$encoding' is schema " +
+                "$($document.schema); schema\report.json pins $expectedSchema.")
+        }
+        if ($document.files.Count -ne 1 -or
             -not $document.files[0].success -or -not $document.files[0].self_verified) {
             throw "Packaged conversion did not self-verify for encoding '$encoding'."
         }

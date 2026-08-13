@@ -10,6 +10,8 @@
 #include "hyperdr/app/resume_state.hpp"
 #include "hyperdr/foundation/hash.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -49,7 +51,8 @@ void check_render_options_change_the_fingerprint() {
   // LookMode has one value, so there is no second look to flip here. The
   // fingerprint still reads the mode; restore this case when a look is added.
   require(changed([](auto& o) { o.gain.gain_strength = 0.5F; }), "gain strength");
-  require(changed([](auto& o) { o.gain.exposure_bias_ev = 0.0F; }), "exposure bias");
+  // Not 0.0F: that is the default now, so it would probe nothing.
+  require(changed([](auto& o) { o.gain.exposure_bias_ev = 0.5F; }), "exposure bias");
   require(changed([](auto& o) { o.gain.auto_exposure = false; }), "auto exposure");
   require(changed([](auto& o) { o.gain.auto_headroom = false; }), "auto headroom");
   require(changed([](auto& o) { o.quality = 80; }), "quality");
@@ -146,6 +149,8 @@ void check_decode_cache_roundtrip() {
   value.decode.target_dimensions_applied = true;
   value.decode.degraded = true;
   value.decode.degradation_reasons = {"default_crop_rejected"};
+  value.domain = hyperdr::InputDomain::kDisplayReferredHdr;
+  value.hdr_headroom = 4.93F;
 
   const auto file = hyperdr::decode_cache_path(directory, "roundtrip");
   require(hyperdr::write_decode_cache(file, value), "cache write should succeed");
@@ -172,7 +177,10 @@ void check_decode_cache_roundtrip() {
   require(loaded.decode.degradation_reasons.size() == 1 &&
               loaded.decode.degradation_reasons.front() ==
                   "default_crop_rejected",
-          "decode degradation reasons must round-trip");
+           "decode degradation reasons must round-trip");
+  require(loaded.domain == hyperdr::InputDomain::kDisplayReferredHdr &&
+              std::abs(loaded.hdr_headroom - 4.93F) < 1.0e-6F,
+          "input domain and HDR headroom must round-trip");
 
   // A truncated file is a miss, never a crash or a half-filled image.
   {
@@ -291,13 +299,16 @@ void check_model_binding_rejects_stale_gain() {
   image.decode.decoded_height = 80;
   auto options = base_options();
   options.gain.gain_strength = 0.6F;
+  options.gain.look.headroom_max_stops = 2.5F;
   const auto replay = hyperdr::replay_external_development(
       external, source, image, options);
   require(!replay.auto_exposure && replay.exposure_ev == 0.72F &&
               replay.exposure_bias_ev == 0.0F,
           "model recipe exposure was not frozen");
   require(replay.gain_strength == 0.6F && replay.look.contrast == 1.08F &&
-              replay.look.vibrance == 0.12F,
+              replay.look.vibrance == 0.12F &&
+              replay.look.headroom_max_stops == 3.0F &&
+              replay.output_headroom_limit_stops == 2.5F,
           "model recipe look was not replayed");
 
   // The model input and the fast RAW preview are both decoded at half size.
@@ -369,6 +380,47 @@ void check_prune_respects_the_budget() {
   std::filesystem::remove_all(directory);
 }
 
+// The routing decision now reads the decoder's domain, so this checks it
+// through the pixels rather than through a file name. A flat mid-grey frame is
+// enough: only a scene-referred render moves it, because only that path runs
+// automatic exposure.
+hyperdr::DecodedImage flat_image(hyperdr::InputDomain domain, float value,
+                                 float headroom) {
+  hyperdr::DecodedImage image;
+  image.linear_p3 = hyperdr::FloatImage(16, 16, 3);
+  std::fill(image.linear_p3.pixels.begin(), image.linear_p3.pixels.end(), value);
+  image.domain = domain;
+  image.hdr_headroom = headroom;
+  return image;
+}
+
+void check_input_domain_routing() {
+  hyperdr::GainMapOptions options;
+  options.auto_exposure = true;
+  options.exposure_bias_ev = 0.0F;
+
+  const auto sdr = hyperdr::render_decoded_image(
+      flat_image(hyperdr::InputDomain::kDisplayReferredSdr, 0.25F, 1.0F), options);
+  require(sdr.headroom_stops == 0.0F,
+          "an SDR-domain input must not be given HDR headroom");
+  require(sdr.exposure_ev == 0.0F,
+          "an SDR-domain input must not be automatically re-exposed");
+  require(std::abs(sdr.base_linear.at(3, 3, 1) - 0.25F) < 1.0e-6F,
+          "an SDR-domain input must reach the base unchanged");
+
+  const auto raw = hyperdr::render_decoded_image(
+      flat_image(hyperdr::InputDomain::kSceneReferred, 0.25F, 1.0F), options);
+  require(raw.exposure_ev != 0.0F,
+          "a scene-referred input must still get automatic exposure");
+
+  // The extension is no longer consulted at all: the same pixels described as
+  // HDR take the splitting renderer, and described as SDR do not.
+  const auto hdr = hyperdr::render_decoded_image(
+      flat_image(hyperdr::InputDomain::kDisplayReferredHdr, 0.25F, 4.0F), options);
+  require(hdr.stats.headroom_stops > 0.0F,
+          "a display-referred HDR input must keep its declared headroom");
+}
+
 }  // namespace
 
 int main() {
@@ -381,6 +433,7 @@ int main() {
     check_export_rejects_reduced_resolution();
     check_model_binding_rejects_stale_gain();
     check_prune_respects_the_budget();
+    check_input_domain_routing();
   } catch (const std::exception& e) {
     std::cerr << "resume_state_test failed: " << e.what() << '\n';
     return 1;

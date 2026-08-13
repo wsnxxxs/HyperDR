@@ -174,7 +174,10 @@ DecodedImage decode_avif(const std::filesystem::path& path) {
   result.decode.decoded_height = rgb.height;
   result.decode.resolution_reduced = resolution_reduced;
   result.metadata.orientation = 1;
+  // As in the HEIF path: an ICC profile carries no headroom, so an ICC-tagged
+  // AVIF is read as SDR and rendered faithfully rather than speculatively.
   result.hdr_headroom = color.icc.empty() ? transfer_headroom(color.transfer) : 1.0F;
+  result.domain = display_referred_domain(result.hdr_headroom);
 
   // The container's own transforms are authoritative when present, which is
   // what the HEIF family says and what libavif's encoder assumes when it folds

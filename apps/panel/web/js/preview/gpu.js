@@ -48,14 +48,26 @@ function displayP3Encode(value) {
   return v <= 0.0031308 ? 12.92 * v : 1.055 * v ** (1 / 2.4) - 0.055;
 }
 
-async function verifyExtendedCanvasPixels(device, context, pipeline, uniform, uploadPlane) {
-  // getConfiguration() catches ignored dictionary members; this readback catches
-  // implementations which report extended mode but clamp the float canvas.  It
-  // deliberately runs through the production shader, including the nonlinear
-  // Display-P3 transfer expected by an extended canvas.
+async function verifyExtendedFloatPixels(device, pipeline, uniform, uploadPlane) {
+  // getConfiguration() catches ignored swap-chain dictionary members; this
+  // readback catches a device that cannot render the requested float target.
+  // It deliberately runs through the production shader, including the
+  // nonlinear Display-P3 transfer expected by an extended output.
   const linearProbe = new Float32Array([4.0, 0.18, 0.0]);
   const base = uploadPlane(linearProbe, 1, 1);
   const hdr = uploadPlane(linearProbe, 1, 1);
+  // Never use the swap-chain texture for the probe.  `createHdrRenderer()` is
+  // also called when a slider publishes a new frame, while the HDR canvas may
+  // still be the visible canvas from the previous renderer.  Drawing the
+  // red/green test pixel into `context.getCurrentTexture()` therefore leaked
+  // the capability check to the user as a full-frame red flash.  An ordinary
+  // renderable float texture exercises the same shader and readback path while
+  // remaining completely off-screen.
+  const probeTexture = device.createTexture({
+    size: [1, 1, 1],
+    format: "rgba16float",
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
+  });
   const readback = device.createBuffer({
     size: 256,
     usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
@@ -69,9 +81,8 @@ async function verifyExtendedCanvasPixels(device, context, pipeline, uniform, up
     ] });
     device.queue.writeBuffer(uniform, 0, new Float32Array([0, 1, 1, 0]));
     const encoder = device.createCommandEncoder();
-    const canvasTexture = context.getCurrentTexture();
     const pass = encoder.beginRenderPass({ colorAttachments: [{
-      view: canvasTexture.createView(),
+      view: probeTexture.createView(),
       clearValue: { r: 0, g: 0, b: 0, a: 1 },
       loadOp: "clear",
       storeOp: "store",
@@ -81,7 +92,7 @@ async function verifyExtendedCanvasPixels(device, context, pipeline, uniform, up
     pass.draw(3);
     pass.end();
     encoder.copyTextureToBuffer(
-      { texture: canvasTexture },
+      { texture: probeTexture },
       { buffer: readback, bytesPerRow: 256, rowsPerImage: 1 },
       [1, 1, 1],
     );
@@ -98,6 +109,7 @@ async function verifyExtendedCanvasPixels(device, context, pipeline, uniform, up
   } finally {
     if (mapped) readback.unmap();
     readback.destroy();
+    probeTexture.destroy();
     base.destroy();
     hdr.destroy();
   }
@@ -150,7 +162,7 @@ export async function createHdrRenderer(canvas, onDeviceLost) {
       fragment: { module, entryPoint: "fragmentMain", targets: [{ format: "rgba16float" }] },
     });
     uniform = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    await verifyExtendedCanvasPixels(device, context, pipeline, uniform, uploadPlane);
+    await verifyExtendedFloatPixels(device, pipeline, uniform, uploadPlane);
   } catch (error) {
     uniform?.destroy();
     context.unconfigure?.();

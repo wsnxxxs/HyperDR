@@ -6,8 +6,10 @@
  */
 import { api, ApiError } from "./core/api.js";
 import { store } from "./core/store.js";
-import { role, setText } from "./core/dom.js";
-import { defaultSettings } from "./settings/schema.js";
+import { role, setText, debounce } from "./core/dom.js";
+import {
+  CONTROLS, OPTION_KEYS, defaultSettings, encodingById,
+} from "./settings/schema.js";
 import { mountControls } from "./settings/controls.js";
 import { mountStage } from "./preview/stage.js";
 import { mountMask } from "./preview/mask.js";
@@ -19,12 +21,63 @@ import { mountTheme } from "./ui/theme.js";
 // know a control's name -- the dependency points settings -> core, not back.
 store.set(defaultSettings());
 
+/* A tuned grade should survive a page refresh: the option keys are mirrored
+ * to localStorage (theme already is) and restored on boot, validated against
+ * the schema so a stale or hand-edited snapshot cannot inject nonsense. */
+const SETTINGS_KEY = "hyperdr.settings.v2";
+const LEGACY_SETTINGS_KEY = "hyperdr.settings";
+
+function restoreSettings() {
+  let saved;
+  let legacy = false;
+  try {
+    const current = localStorage.getItem(SETTINGS_KEY);
+    legacy = !current;
+    saved = JSON.parse(current || localStorage.getItem(LEGACY_SETTINGS_KEY) || "null");
+  }
+  catch (_) { return; }
+  if (!saved || typeof saved !== "object") return;
+  const patch = {};
+  for (const control of CONTROLS) {
+    const value = saved[control.key];
+    if (value === undefined) continue;
+    if (control.kind === "segmented") {
+      if (control.choices.some(([id]) => id === value)) patch[control.key] = value;
+    } else if (Number.isFinite(value)) {
+      patch[control.key] = Math.min(control.max, Math.max(control.min, value));
+    }
+  }
+  patch.encoding = encodingById(saved.encoding).id;
+  // The restored range must respect the restored encoding's ceiling.
+  patch.hdrRange = Math.min(
+    Number.isFinite(patch.hdrRange) ? patch.hdrRange : store.get().hdrRange,
+    encodingById(patch.encoding).maxRange);
+  // The panel used to persist its implicit +1 EV default. Migrate that exact
+  // old default once; a new v2 key means later refreshes cannot resurrect it.
+  if (legacy && saved.brightness === 1) patch.brightness = 0;
+  store.set(patch);
+  if (legacy) {
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...saved, ...patch })); }
+    catch (_) { /* persistence is optional */ }
+  }
+}
+
+const persistSettings = debounce(() => {
+  const state = store.get();
+  const snapshot = {};
+  for (const key of OPTION_KEYS) snapshot[key] = state[key];
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(snapshot)); } catch (_) {}
+}, 400);
+
+restoreSettings();
+store.watchAny(OPTION_KEYS, persistSettings);
+
 const toast = createToast();
 mountTheme();
 
 const stage = mountStage({ toast });
 
-mountControls();
+mountControls({ toast });
 mountMask({ stage });
 mountRunner({ toast });
 
@@ -59,7 +112,7 @@ async function boot() {
   } catch (error) {
     const message = error instanceof ApiError ? error.message : "面板启动失败。";
     store.set({ phase: "unavailable", error: message });
-    showService("is-warn", "后端未响应（离线预览）", message);
+    showService("is-warn", "服务未响应 · 无法转换", message);
   }
 }
 

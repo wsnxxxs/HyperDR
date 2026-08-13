@@ -6,12 +6,21 @@
 // directions and the gamma search here makes the convention directly testable,
 // and means the encoder and the verifier cannot disagree about it.
 
+#include <cstdint>
 #include <vector>
 
 namespace hyperdr {
 
 [[nodiscard]] float encode_gain_code(float normalized_gain, float gamma);
 [[nodiscard]] float decode_gain_code(float encoded_gain, float gamma);
+
+// Quantizes an already gamma-encoded gain value into the normalized 8-bit
+// gain-map code space. The zero code bucket and the first represented code
+// stay stable: bilinear upsampling must not turn a near-knee value into a
+// visible shadow gain just because of dithering. The maximum code remains 1.
+[[nodiscard]] float quantize_gain_code_dithered(float encoded_gain,
+                                                std::uint32_t x,
+                                                std::uint32_t y);
 
 // Picks the gamma that minimises weighted 8-bit round-trip error over the
 // grid's own distribution, preferring 1 when the difference is immaterial so

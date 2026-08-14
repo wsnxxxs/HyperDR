@@ -54,6 +54,39 @@ void test_gain_map_and_metadata() {
   for (const float value : reconstructed.pixels) require(std::isfinite(value) && value >= 0.0F, "reconstruction range failed");
 }
 
+void test_photographic_calibration_preserves_gain_shape() {
+  hyperdr::FloatImage source(128, 64, 3);
+  for (std::uint32_t y = 0; y < source.height; ++y) {
+    for (std::uint32_t x = 0; x < source.width; ++x) {
+      const float value =
+          0.05F + 3.5F * x / static_cast<float>(source.width - 1);
+      source.at(x, y, 0) = value;
+      source.at(x, y, 1) = value;
+      source.at(x, y, 2) = value;
+    }
+  }
+
+  hyperdr::GainMapOptions options;
+  options.auto_exposure = false;
+  options.exposure_ev = 0.0F;
+  options.exposure_bias_ev = 0.0F;
+  options.auto_headroom = false;
+  options.headroom_stops = 2.0F;
+  options.gain_strength = 0.4F;
+  const auto result = hyperdr::make_gain_map(source, options);
+
+  const float expected_headroom =
+      options.headroom_stops * options.gain_strength;
+  require(std::abs(result.headroom_stops - expected_headroom) < 1.0e-5F,
+          "photographic calibration changed the requested headroom");
+  require(result.stats.gain_percentiles[1] <
+              result.stats.gain_max_stops * 0.95F,
+          "photographic calibration collapsed a smooth gain field into a plateau");
+  require(result.stats.gain_percentiles[7] <=
+              result.stats.gain_max_stops + 1.0e-5F,
+          "photographic calibration exceeded the gain ceiling");
+}
+
 void test_color_preservation_and_headroom() {
   hyperdr::GainMapOptions options;
   options.auto_exposure = false;
@@ -256,6 +289,7 @@ void test_manual_headroom_above_the_ceiling_is_rejected() {
 int main() {
   try {
     test_gain_map_and_metadata();
+    test_photographic_calibration_preserves_gain_shape();
     test_color_preservation_and_headroom();
     test_common_chroma_is_continuous_at_gamut_boundary();
     test_bilinear_gain_sampling();

@@ -260,35 +260,29 @@ GainMapResult make_photographic_gain_map(const FloatImage& source,
   const float target_headroom_stops =
       requested_headroom_stops * photographic_strength;
   const float target_peak = std::exp2(target_headroom_stops);
-  // Apple's ISO gain-map writer convention uses one ceiling for the encoded
-  // log-gain range and the alternate rendition's headroom. Allowing a darker
-  // SDR cell to demand another 1.5 stops made otherwise valid files diverge
-  // from that convention and render differently in Apple decoders. Preserve
-  // the requested endpoint by limiting the ratio the SDR/HDR pair asks the map
-  // to carry.
-  const float maximum_calibrated_gain = target_headroom_stops;
-
   if (target_headroom_stops <= kEpsilon) {
     std::fill(gain.begin(), gain.end(), 0.0F);
   } else {
-    float gain_scale = std::numeric_limits<float>::infinity();
-    for (std::size_t i = 0; i < gain_count; ++i) {
-      if (!(scene_luma[i] > 0.0F)) continue;
-      const float required_gain =
-          target_headroom_stops - std::log2(scene_luma[i]);
-      if (required_gain <= 0.0F) {
-        gain_scale = 0.0F;
-        break;
-      }
-      if (gain[i] > 0.0F && required_gain <= maximum_calibrated_gain) {
-        gain_scale = std::min(gain_scale, required_gain / gain[i]);
-      }
+    // scene_luma is the SDR tone-mapped guide used by the filter above. It is
+    // strictly below one, so it cannot be reused here as an unbounded scene
+    // luminance when deriving a per-cell required gain. That made the old
+    // calibration leave gain_scale at its fallback value of 32 and clamp most
+    // cells to the same ceiling, destroying the smooth gain structure.
+    //
+    // The guided gain is already a continuous, non-negative field. Normalize
+    // that field once so its actual peak reaches the requested headroom. This
+    // preserves its shape, keeps the encoded gain/headroom ceilings equal for
+    // Apple-targeted output, and avoids introducing a large hard-clipped
+    // plateau.
+    float peak_gain = 0.0F;
+    for (const float value : gain) {
+      peak_gain = std::max(peak_gain, std::max(0.0F, value));
     }
-    gain_scale = std::isfinite(gain_scale)
-                     ? std::clamp(gain_scale, 0.0F, 32.0F)
-                     : 32.0F;
-    for (float& value : gain) {
-      value = std::min(value * gain_scale, maximum_calibrated_gain);
+    if (peak_gain > kEpsilon) {
+      const float gain_scale = target_headroom_stops / peak_gain;
+      for (float& value : gain) {
+        value = std::max(0.0F, value) * gain_scale;
+      }
     }
   }
 

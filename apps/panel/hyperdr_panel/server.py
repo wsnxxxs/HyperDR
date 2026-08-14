@@ -162,8 +162,10 @@ def load_tls_context(certificate: str, key: str) -> ssl.SSLContext | None:
     return context
 
 
-def serve() -> None:
-    host = os.environ.get("HYPERDR_HOST", "0.0.0.0")
+def serve(*, desktop: bool = False) -> None:
+    # A desktop WebView only needs loopback. LAN mode keeps the historical
+    # 0.0.0.0 default and is still started explicitly by Start.bat.
+    host = os.environ.get("HYPERDR_HOST", "127.0.0.1" if desktop else "0.0.0.0")
     port = find_free_port(host, int(os.environ.get("HYPERDR_PORT", PREFERRED_PORT)))
     token = security.check_token_format(
         os.environ.get("HYPERDR_ACCESS_TOKEN") or security.make_token())
@@ -188,15 +190,20 @@ def serve() -> None:
     cleanup_thread.start()
 
     local_url = f"{scheme}://127.0.0.1:{port}/?token={quote(token)}"
+    if desktop:
+        # Tauri reads this ASCII prefix from the sidecar's stdout and opens
+        # the existing HTTP panel at the announced tokenised URL.
+        print(f"HYPERDR_READY {local_url}", flush=True)
     print("HyperDR 已启动。关闭此窗口即可停止服务。")
     print(f"本机地址：{local_url}")
-    for ip in lan_addresses():
-        print(f"iPhone 地址：{scheme}://{ip}:{port}/?token={quote(token)}")
-    if scheme == "http":
+    if not desktop:
+        for ip in lan_addresses():
+            print(f"iPhone 地址：{scheme}://{ip}:{port}/?token={quote(token)}")
+    if not desktop and scheme == "http":
         print("提示：局域网 HTTP 可以上传和转换，但 Safari WebGPU HDR 需要受信任的 HTTPS。")
     if removed:
         print(f"已清理 {removed} 个过期任务。")
-    if os.environ.get("HYPERDR_NO_BROWSER") != "1":
+    if not desktop and os.environ.get("HYPERDR_NO_BROWSER") != "1":
         try:
             webbrowser.open(local_url)
         except Exception:

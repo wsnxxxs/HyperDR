@@ -60,6 +60,16 @@ class MobilePreviewContractTest(unittest.TestCase):
         self.assertIn("wanted > image.previewRequestEdge", STAGE)
         self.assertIn("const PREVIEW_TIERS = [960, 1280, 2048];", STAGE)
 
+    def test_preview_zoom_has_fixed_levels_and_preserves_pan_contract(self):
+        self.assertIn('data-role="zoom-controls"', INDEX)
+        self.assertIn('["fit", "Fit", 0]', STAGE)
+        self.assertIn('["100", "100%", 1]', STAGE)
+        self.assertIn('["200", "200%", 2]', STAGE)
+        self.assertIn('["400", "400%", 4]', STAGE)
+        self.assertIn('stage.addEventListener("wheel", zoomFromWheel, { passive: false });', STAGE)
+        self.assertIn('stage.addEventListener("dblclick"', STAGE)
+        self.assertIn('stage.is-zoomed .stage-frame { touch-action: none; cursor: grab; }', COMPONENTS)
+
     def test_empty_state_keeps_select_centered_and_meta_in_normal_flow(self):
         self.assertIn('<span class="stage-empty-meta">', INDEX)
         self.assertIn(".stage-empty-meta {", COMPONENTS)

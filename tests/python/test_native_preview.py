@@ -14,6 +14,12 @@ sys.path.insert(0, str(REPO_ROOT / "apps" / "panel"))
 STAGE = (
     REPO_ROOT / "apps" / "panel" / "web" / "js" / "preview" / "stage.js"
 ).read_text(encoding="utf-8")
+MAIN = (
+    REPO_ROOT / "apps" / "panel" / "web" / "js" / "main.js"
+).read_text(encoding="utf-8")
+SETTINGS_SCHEMA = (
+    REPO_ROOT / "apps" / "panel" / "web" / "js" / "settings" / "schema.js"
+).read_text(encoding="utf-8")
 SCOPE = (
     REPO_ROOT / "apps" / "panel" / "web" / "js" / "preview" / "scope.js"
 ).read_text(encoding="utf-8")
@@ -121,6 +127,13 @@ class NativePreviewContractTests(unittest.TestCase):
 
 
 class NativePreviewFrontendContractTests(unittest.TestCase):
+    def test_image_adjustments_reset_to_point_six_ev_without_persistence(self):
+        self.assertIn("export const DEFAULT_BRIGHTNESS_EV = 0.6;", SETTINGS_SCHEMA)
+        self.assertIn("default: DEFAULT_BRIGHTNESS_EV", SETTINGS_SCHEMA)
+        self.assertIn('export const PERSISTED_OPTION_KEYS = ["encoding"];', SETTINGS_SCHEMA)
+        self.assertIn("store.watchAny(PERSISTED_OPTION_KEYS, persistSettings)", MAIN)
+        self.assertIn("...defaultSettings(store.get().encoding)", STAGE)
+
     def test_native_float_planes_do_not_use_retired_sdr_display_buffers(self):
         self.assertIn("image.frame = preview;", STAGE)
         self.assertIn("image.source = planeToImageData(preview.base", STAGE)

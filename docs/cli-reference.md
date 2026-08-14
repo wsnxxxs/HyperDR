@@ -145,12 +145,11 @@ CLI runs differing only in look controls can skip the RAW decode entirely.
 ## Look controls
 
 The GUI separates whole-image brightness, **HDR brightness headroom**, and
-**tone-region coverage**. Overall brightness defaults to 0 EV and ranges from
-0..+2 EV in both the UI and `--exposure-bias`; it is applied after exposure selection to
-both the SDR base and HDR rendition. It defaults to 0 in the CLI too: the option
-used to default to +1 EV in the code while this page said 0, so a bare
-`HyperDR convert` brightened every file by a stop that the panel, which always
-passes the flag explicitly, never showed.
+**tone-region coverage**. The panel starts whole-image brightness at +0.6 EV
+and ranges from 0..+2 EV; it is applied after exposure selection to both the SDR
+base and HDR rendition. The panel resets all image-scoped adjustments whenever
+a new photo is opened. The standalone CLI remains neutral at 0 EV unless
+`--exposure-bias` is supplied.
 `--exposure auto` is honoured for RAW only. A JPEG, PNG or HDR input is already
 a finished photograph, so automatic exposure would re-measure someone else's
 grade; a manual `--exposure <EV>` is still applied to them. See

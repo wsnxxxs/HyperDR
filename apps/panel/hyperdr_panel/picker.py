@@ -50,8 +50,11 @@ def run_picker(kind: str) -> int:
 def pick_via_subprocess(kind: str) -> tuple[str, str]:
     """Return (path, error). Runs the launcher in --pick mode."""
     try:
+        command = [sys.executable, "--pick", kind] if getattr(sys, "frozen", False) else [
+            sys.executable, str(LAUNCHER), "--pick", kind,
+        ]
         result = subprocess.run(
-            [sys.executable, str(LAUNCHER), "--pick", kind],
+            command,
             capture_output=True, text=True, timeout=300,
         )
     except Exception as exc:

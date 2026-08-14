@@ -65,7 +65,7 @@ class BuildArgvTest(unittest.TestCase):
         found = flags(build_argv("HyperDR", dict(BASE)))
         self.assertEqual(found["--gain-strength"], "0.4")
         self.assertEqual(found["--pop"], "0.4")
-        self.assertEqual(found["--exposure-bias"], "0")
+        self.assertEqual(found["--exposure-bias"], "0.6")
 
     def test_panel_options_are_not_silently_coerced(self):
         for options in ({"quality": 90.9}, {"contrast": "1.2"},

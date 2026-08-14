@@ -8,7 +8,7 @@ import { api, ApiError } from "./core/api.js";
 import { store } from "./core/store.js";
 import { role, setText, debounce } from "./core/dom.js";
 import {
-  CONTROLS, OPTION_KEYS, defaultSettings, encodingById,
+  CONTROLS, PERSISTED_OPTION_KEYS, defaultSettings, encodingById,
 } from "./settings/schema.js";
 import { mountControls } from "./settings/controls.js";
 import { mountStage } from "./preview/stage.js";
@@ -21,11 +21,18 @@ import { mountTheme } from "./ui/theme.js";
 // know a control's name -- the dependency points settings -> core, not back.
 store.set(defaultSettings());
 
-/* A tuned grade should survive a page refresh: the option keys are mirrored
- * to localStorage (theme already is) and restored on boot, validated against
- * the schema so a stale or hand-edited snapshot cannot inject nonsense. */
+/* Output format is a workflow choice and may survive a page refresh. Image
+ * adjustment controls are intentionally not persisted: every new photo starts
+ * from the schema defaults. The persisted value is still validated against the
+ * schema so a stale or hand-edited snapshot cannot inject nonsense. */
 const SETTINGS_KEY = "hyperdr.settings.v2";
 const LEGACY_SETTINGS_KEY = "hyperdr.settings";
+
+function settingsSnapshot(state) {
+  const snapshot = {};
+  for (const key of PERSISTED_OPTION_KEYS) snapshot[key] = state[key];
+  return snapshot;
+}
 
 function restoreSettings() {
   let saved;
@@ -39,6 +46,7 @@ function restoreSettings() {
   if (!saved || typeof saved !== "object") return;
   const patch = {};
   for (const control of CONTROLS) {
+    if (!PERSISTED_OPTION_KEYS.includes(control.key)) continue;
     const value = saved[control.key];
     if (value === undefined) continue;
     if (control.kind === "segmented") {
@@ -48,29 +56,28 @@ function restoreSettings() {
     }
   }
   patch.encoding = encodingById(saved.encoding).id;
-  // The restored range must respect the restored encoding's ceiling.
+  // The fresh default range must respect the restored encoding's ceiling.
   patch.hdrRange = Math.min(
     Number.isFinite(patch.hdrRange) ? patch.hdrRange : store.get().hdrRange,
     encodingById(patch.encoding).maxRange);
-  // The panel used to persist its implicit +1 EV default. Migrate that exact
-  // old default once; a new v2 key means later refreshes cannot resurrect it.
-  if (legacy && saved.brightness === 1) patch.brightness = 0;
   store.set(patch);
-  if (legacy) {
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...saved, ...patch })); }
-    catch (_) { /* persistence is optional */ }
-  }
+  // Rewrite both legacy and current snapshots without image-scoped adjustment
+  // keys, so an old grade cannot be resurrected later.
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settingsSnapshot(store.get())));
+    if (legacy) localStorage.removeItem(LEGACY_SETTINGS_KEY);
+  } catch (_) { /* persistence is optional */ }
 }
 
 const persistSettings = debounce(() => {
   const state = store.get();
-  const snapshot = {};
-  for (const key of OPTION_KEYS) snapshot[key] = state[key];
-  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(snapshot)); } catch (_) {}
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settingsSnapshot(state)));
+  } catch (_) {}
 }, 400);
 
 restoreSettings();
-store.watchAny(OPTION_KEYS, persistSettings);
+store.watchAny(PERSISTED_OPTION_KEYS, persistSettings);
 
 const toast = createToast();
 mountTheme();

@@ -47,12 +47,14 @@ const percent = (value) => `${Math.round(value * 100)}%`;
 const fixed = (digits) => (value) => value.toFixed(digits);
 const stops = (digits) => (value) => `${value.toFixed(digits)} 档`;
 
+export const DEFAULT_BRIGHTNESS_EV = 0.6;
+
 /* `group` selects the container the control renders into; `kind` selects the
  * widget. `key` is both the store key and the name sent to /api/run. */
 export const CONTROLS = [
   {
     key: "brightness", kind: "range", group: "tone", label: "整体亮度",
-    min: 0, max: 2, step: 0.05, default: 0, format: ev,
+    min: 0, max: 2, step: 0.05, default: DEFAULT_BRIGHTNESS_EV, format: ev,
     scale: ["0 EV", "+2 EV"], mask: null,
     help: "在自动曝光基础上偏移整张画面，同时作用于 SDR 底图与 HDR 输出。",
   },
@@ -111,9 +113,14 @@ export const CONTROLS_BY_KEY = new Map(CONTROLS.map((control) => [control.key, c
 /** Keys that appear in the object sent to /api/run and /api/curve. */
 export const OPTION_KEYS = ["encoding", ...CONTROLS.map((control) => control.key)];
 
-export function defaultSettings() {
-  const values = { encoding: ENCODINGS[0].id };
+/** The output format is a workflow choice; image adjustments are per-image. */
+export const PERSISTED_OPTION_KEYS = ["encoding"];
+
+export function defaultSettings(encoding = ENCODINGS[0].id) {
+  const activeEncoding = encodingById(encoding);
+  const values = { encoding: activeEncoding.id };
   for (const control of CONTROLS) values[control.key] = control.default;
+  values.hdrRange = Math.min(values.hdrRange, activeEncoding.maxRange);
   return values;
 }
 

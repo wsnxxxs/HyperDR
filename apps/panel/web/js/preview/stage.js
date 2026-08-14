@@ -20,7 +20,7 @@ import { createHdrRenderer } from "./gpu.js";
 import { createSdrGpuRenderer } from "./sdr-gpu.js";
 import { analyse, mountScope } from "./scope.js";
 import { createUploader } from "./session.js";
-import { toOptions } from "../settings/schema.js";
+import { defaultSettings, toOptions } from "../settings/schema.js";
 
 const hdrDisplayQuery = window.matchMedia("(dynamic-range: high)");
 
@@ -551,6 +551,10 @@ export function mountStage({ toast }) {
       analysis.modelGain = null;
       image.original = null;
       store.set({
+        // All image adjustments are image-scoped. Do not carry a previous
+        // photograph's grade into a newly uploaded image. Keep the selected
+        // output format, which is a workflow choice rather than a grade.
+        ...defaultSettings(store.get().encoding),
         previewOptimized: false, modelGainReady: false, optimizing: false,
       });
       await load({ resetOriginal: true });

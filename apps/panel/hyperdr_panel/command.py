@@ -48,10 +48,10 @@ PANEL_DEFAULTS = {
     "vibrance": 0.12,
     "hdrStrength": 0.4,
     "hdrRange": 2.5,
-    # Raster inputs are already display-referred and RAW automatic exposure
-    # supplies its own anchor. A neutral bias avoids lifting both paths by a
-    # hidden extra stop before the user touches the control.
-    "brightness": 0.0,
+    # The panel starts with a modest +0.6 EV lift after the renderer's
+    # automatic exposure decision. The browser resets this image-scoped value
+    # for every new upload.
+    "brightness": 0.6,
     "expansionStart": 0.25,
     "areaCoverage": 1.0,
     "quality": 90,

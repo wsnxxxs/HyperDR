@@ -33,10 +33,17 @@ const PREVIEW_TIERS = [960, 1280, 2048];
 /* Shown on the photograph itself (see .stage-hint), so the gestures are
  * discoverable by sighted users too -- an aria-label alone only speaks to
  * screen readers. */
-const TOUCH_HINT = "轻点更换图片 · 用上方视图切换对照原图";
-const MOUSE_HINT = "轻点更换图片 · 按住查看原图";
+const TOUCH_HINT = "轻点更换图片 · 缩放后拖动平移";
+const MOUSE_HINT = "轻点更换图片 · 按住查看原图 · 滚轮缩放";
 
 const VIEW_MODES = [["original", "原图"], ["split", "对比"], ["effect", "HDR 效果"]];
+const ZOOM_LEVELS = [
+  ["fit", "Fit", 0],
+  ["100", "100%", 1],
+  ["200", "200%", 2],
+  ["400", "400%", 4],
+];
+const ZOOM_SHORTCUTS = { "0": "fit", "1": "100", "2": "200", "4": "400" };
 
 export function mountStage({ toast }) {
   const stage = role("stage");
@@ -58,6 +65,7 @@ export function mountStage({ toast }) {
   const hdrCanvas = role("canvas-hdr");
   const originalCanvas = role("canvas-original");
   const viewModeGroup = role("view-mode");
+  const zoomControls = role("zoom-controls");
   const expandButton = role("stage-expand");
   const mathModeButton = role("math-mode");
   const optimizeButton = role("optimize");
@@ -85,6 +93,8 @@ export function mountStage({ toast }) {
   let frame_ = 0;
   let imageGeneration = 0;
   let rendererGeneration = 0;
+  let panGesture = null;
+  let spacePan = false;
 
   const isCurrentImage = (epoch) => epoch === imageGeneration;
   const invalidateImage = () => ++imageGeneration;
@@ -103,10 +113,92 @@ export function mountStage({ toast }) {
     return [id, button];
   });
 
+  const zoomButtons = ZOOM_LEVELS.map(([id, label, pixels]) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.setAttribute("aria-pressed", "false");
+    button.setAttribute("aria-label", id === "fit"
+      ? "适合窗口"
+      : `${label} 预览像素缩放`);
+    button.title = id === "fit" ? "适合窗口" : `${label}（预览像素）`;
+    button.textContent = label;
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      setZoomLevel(id);
+    });
+    zoomControls.append(button);
+    return [id, pixels, button];
+  });
+
   const showingOriginal = () => {
     const state = store.get();
     return state.viewMode === "original" || (state.comparing && state.viewMode !== "split");
   };
+
+  const zoomCanvases = () => [
+    hdrCanvas, sdrCanvas, originalCanvas,
+    role("canvas-zebra-hot"), role("canvas-zebra-cold"), role("canvas-mask"),
+  ].filter(Boolean);
+
+  function zoomMetrics(state = store.get(), level = state.zoomLevel) {
+    if (!image.source || !frame) return null;
+    const frameWidth = frame.clientWidth || frame.getBoundingClientRect().width;
+    const frameHeight = frame.clientHeight || frame.getBoundingClientRect().height;
+    const fitScale = Math.min(
+      frameWidth / image.source.width,
+      frameHeight / image.source.height);
+    if (!(fitScale > 0)) return null;
+    const pixels = ZOOM_LEVELS.find(([id]) => id === level)?.[2] || 0;
+    const imageScale = pixels > 0 ? pixels : fitScale;
+    const scale = imageScale / fitScale;
+    return {
+      scale,
+      maxPanX: Math.max(0, (image.source.width * imageScale - frameWidth) / 2),
+      maxPanY: Math.max(0, (image.source.height * imageScale - frameHeight) / 2),
+    };
+  }
+
+  function applyZoom() {
+    const state = store.get();
+    const metrics = zoomMetrics(state);
+    const panX = metrics ? clamp(Number(state.panX) || 0, -metrics.maxPanX, metrics.maxPanX) : 0;
+    const panY = metrics ? clamp(Number(state.panY) || 0, -metrics.maxPanY, metrics.maxPanY) : 0;
+    if (panX !== state.panX || panY !== state.panY) {
+      store.set({ panX, panY });
+      return;
+    }
+    const transform = metrics
+      ? `translate3d(${panX}px, ${panY}px, 0) scale(${metrics.scale})`
+      : "";
+    for (const canvas of zoomCanvases()) canvas.style.transform = transform;
+    const zoomed = Boolean(metrics && state.zoomLevel !== "fit");
+    stage.classList.toggle("is-zoomed", zoomed);
+    stage.classList.toggle("is-panning", Boolean(panGesture));
+    for (const [id, _pixels, button] of zoomButtons) setPressed(button, id === state.zoomLevel);
+  }
+
+  function setZoomLevel(level, anchor = null) {
+    if (!ZOOM_LEVELS.some(([id]) => id === level)) return;
+    const current = store.get();
+    const before = zoomMetrics(current, current.zoomLevel);
+    const after = zoomMetrics(current, level);
+    let panX = level === "fit" ? 0 : current.panX;
+    let panY = level === "fit" ? 0 : current.panY;
+    if (anchor && before && after) {
+      const rect = frame.getBoundingClientRect();
+      const offsetX = anchor.clientX - (rect.left + rect.width / 2);
+      const offsetY = anchor.clientY - (rect.top + rect.height / 2);
+      const imageX = (offsetX - current.panX) / before.scale;
+      const imageY = (offsetY - current.panY) / before.scale;
+      panX = offsetX - imageX * after.scale;
+      panY = offsetY - imageY * after.scale;
+    }
+    if (after) {
+      panX = clamp(panX, -after.maxPanX, after.maxPanX);
+      panY = clamp(panY, -after.maxPanY, after.maxPanY);
+    }
+    store.set({ zoomLevel: level, panX, panY });
+  }
 
   /* ── the wipe ─────────────────────────────────────────────────────── */
 
@@ -222,6 +314,7 @@ export function mountStage({ toast }) {
 
   new ResizeObserver(() => {
     if (!mobileLayout.matches && !expanded) fitStageToImage();
+    applyZoom();
     positionDivider();
   }).observe(viewport);
 
@@ -382,6 +475,9 @@ export function mountStage({ toast }) {
       if (exitNative && document.fullscreenElement === viewport) {
         document.exitFullscreen?.().catch(() => {});
       }
+      fitStageToImage();
+      applyZoom();
+      positionDivider();
       return;
     }
 
@@ -396,6 +492,8 @@ export function mountStage({ toast }) {
     // higher cached preview tier only when the existing decode is too small.
     requestAnimationFrame(() => requestAnimationFrame(() => {
       if (!expanded) return;
+      applyZoom();
+      positionDivider();
       const wanted = previewTier();
       if (wanted && wanted > image.previewRequestEdge) load();
     }));
@@ -428,6 +526,7 @@ export function mountStage({ toast }) {
     analysis.modelGain = null;
     store.set({
       comparing: false, maskKey: null,
+      zoomLevel: "fit", panX: 0, panY: 0,
       previewOptimized: false, modelGainReady: false, optimizing: false,
     });
     stage.classList.remove("has-image", "is-comparing");
@@ -498,6 +597,7 @@ export function mountStage({ toast }) {
       empty.style.display = "none";
       stage.classList.add("has-image");
       fitStageToImage();
+      applyZoom();
       stage.setAttribute("role", "button");
       stage.tabIndex = 0;
       store.set({ comparing: false });
@@ -555,6 +655,7 @@ export function mountStage({ toast }) {
         // photograph's grade into a newly uploaded image. Keep the selected
         // output format, which is a workflow choice rather than a grade.
         ...defaultSettings(store.get().encoding),
+        zoomLevel: "fit", panX: 0, panY: 0,
         previewOptimized: false, modelGainReady: false, optimizing: false,
       });
       await load({ resetOriginal: true });
@@ -598,6 +699,46 @@ export function mountStage({ toast }) {
 
   const gesture = { pointerId: null, at: 0, x: 0, y: 0, timer: 0 };
 
+  function beginPan(event) {
+    if (!image.source || isStageControl(event.target)) return false;
+    const zoomed = store.get().zoomLevel !== "fit";
+    const wantsPan = event.button === 1 || (event.button === 0 && (zoomed || spacePan));
+    if (!wantsPan) return false;
+    event.preventDefault();
+    panGesture = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      panX: store.get().panX,
+      panY: store.get().panY,
+    };
+    stage.classList.add("is-panning");
+    try { stage.setPointerCapture(event.pointerId); } catch (_) {}
+    return true;
+  }
+
+  function endPan(event) {
+    if (!panGesture) return false;
+    if (event?.pointerId != null && panGesture.pointerId !== event.pointerId) return false;
+    const pointerId = panGesture.pointerId;
+    panGesture = null;
+    stage.classList.remove("is-panning");
+    try {
+      if (stage.hasPointerCapture(pointerId)) stage.releasePointerCapture(pointerId);
+    } catch (_) {}
+    return true;
+  }
+
+  function zoomFromWheel(event) {
+    if (!image.source || isStageControl(event.target)) return;
+    event.preventDefault();
+    const current = store.get().zoomLevel;
+    const index = Math.max(0, ZOOM_LEVELS.findIndex(([id]) => id === current));
+    const nextIndex = clamp(index + (event.deltaY < 0 ? 1 : -1), 0, ZOOM_LEVELS.length - 1);
+    const next = ZOOM_LEVELS[nextIndex][0];
+    if (next !== current) setZoomLevel(next, event);
+  }
+
   function beginCompare(event) {
     if (!image.source || store.get().comparing || store.get().viewMode === "split") return;
     event?.preventDefault();
@@ -618,10 +759,12 @@ export function mountStage({ toast }) {
     clearTimeout(gesture.timer);
     gesture.timer = 0;
     gesture.pointerId = null;
+    endPan(event);
     endCompare(event);
   }
 
   stage.addEventListener("pointerdown", (event) => {
+    if (beginPan(event)) return;
     if (event.button !== 0 || !canReplace() || isStageControl(event.target)) return;
     gesture.pointerId = event.pointerId;
     gesture.at = performance.now();
@@ -637,6 +780,7 @@ export function mountStage({ toast }) {
   });
 
   stage.addEventListener("pointerup", (event) => {
+    if (endPan(event)) return;
     const isActive = gesture.pointerId === event.pointerId;
     const elapsed = performance.now() - gesture.at;
     const moved = Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y);
@@ -646,10 +790,29 @@ export function mountStage({ toast }) {
         && elapsed < 320 && moved < 12) openPicker();
   });
 
+  stage.addEventListener("pointermove", (event) => {
+    if (!panGesture || panGesture.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    const metrics = zoomMetrics();
+    if (!metrics) return;
+    store.set({
+      panX: clamp(panGesture.panX + event.clientX - panGesture.startX,
+        -metrics.maxPanX, metrics.maxPanX),
+      panY: clamp(panGesture.panY + event.clientY - panGesture.startY,
+        -metrics.maxPanY, metrics.maxPanY),
+    });
+  });
+
+  stage.addEventListener("wheel", zoomFromWheel, { passive: false });
+  stage.addEventListener("dblclick", (event) => {
+    if (store.get().zoomLevel === "fit" || isStageControl(event.target)) return;
+    event.preventDefault();
+    setZoomLevel("fit");
+  });
+
   stage.addEventListener("pointercancel", cancelGesture);
   stage.addEventListener("lostpointercapture", cancelGesture);
   stage.addEventListener("blur", cancelGesture);
-  window.addEventListener("blur", cancelGesture);
 
   for (const type of ["dragover", "dragenter"]) {
     stage.addEventListener(type, (event) => {
@@ -667,21 +830,39 @@ export function mountStage({ toast }) {
   });
 
   stage.addEventListener("contextmenu", (event) => { if (image.source) event.preventDefault(); });
-  stage.addEventListener("selectstart", (event) => { if (touchQuery.matches) event.preventDefault(); });
+  stage.addEventListener("selectstart", (event) => {
+    if (touchQuery.matches || store.get().zoomLevel !== "fit") event.preventDefault();
+  });
   stage.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && expanded) {
       event.preventDefault();
       updateExpandedState(false);
-    } else if (event.target === stage
-        && (event.key === " " || event.key === "Enter") && !event.repeat) {
+    } else if (event.target === stage && event.code === "Space" && image.source) {
+      event.preventDefault();
+      spacePan = true;
+    } else if (event.target === stage && !event.repeat && ZOOM_SHORTCUTS[event.key]) {
+      event.preventDefault();
+      setZoomLevel(ZOOM_SHORTCUTS[event.key]);
+    } else if (event.target === stage && event.key === "Enter" && !event.repeat) {
       event.preventDefault();
       openPicker();
     } else if (event.key === "Escape") cancelGesture(event);
+  });
+  window.addEventListener("keyup", (event) => {
+    if (event.code === "Space") spacePan = false;
+  });
+  window.addEventListener("blur", (event) => {
+    spacePan = false;
+    cancelGesture(event);
   });
 
   /* ── reactions ────────────────────────────────────────────────────── */
 
   store.watchAny(["viewMode", "comparing", "splitRatio"], () => { syncView(); schedule(); }, { immediate: true });
+  store.watchAny(["zoomLevel", "panX", "panY"], () => {
+    applyZoom();
+    positionDivider();
+  }, { immediate: true });
   store.watchAny(["uploading"], (state) => {
     stage.classList.toggle("is-uploading", state.uploading);
     stage.setAttribute("aria-busy", String(state.uploading));
@@ -803,6 +984,7 @@ export function mountStage({ toast }) {
   });
   mobileLayout.addEventListener?.("change", () => {
     fitStageToImage();
+    applyZoom();
     positionDivider();
   });
 

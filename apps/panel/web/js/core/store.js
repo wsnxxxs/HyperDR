@@ -87,6 +87,11 @@ export const store = createStore({
   viewMode: "effect",
   /** Wipe position in split mode, 0..1 of the image's displayed width. */
   splitRatio: 0.5,
+  /** @type {"fit"|"100"|"200"|"400"} */
+  zoomLevel: "fit",
+  /** Pan offset in CSS pixels from the centered image position. */
+  panX: 0,
+  panY: 0,
   /** Transient press-and-hold compare; never persisted. */
   comparing: false,
   zebraHot: false,

@@ -13,5 +13,9 @@ def main(argv: list[str] | None = None) -> None:
     if len(argv) >= 3 and argv[1] == "--pick":
         from .picker import run_picker
         raise SystemExit(run_picker(argv[2]))
+    if len(argv) >= 2 and argv[1] == "--desktop":
+        from .server import serve
+        serve(desktop=True)
+        return
     from .server import serve
     serve()

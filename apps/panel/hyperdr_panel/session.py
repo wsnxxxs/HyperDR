@@ -24,11 +24,21 @@ import time
 import uuid
 from pathlib import Path
 
-from .config import REPO_ROOT
+from .config import IS_FROZEN, REPO_ROOT
 from .formats import RAW_INPUT_EXTENSIONS, SUPPORTED_EXTENSIONS
 
 
-WORK_ROOT = Path(os.environ.get("HYPERDR_WORK_ROOT", REPO_ROOT / "hdr-workspace")).resolve()
+
+
+def _default_work_root() -> Path:
+    """Use a writable per-user directory for frozen desktop installations."""
+    if IS_FROZEN:
+        app_data = Path(os.environ.get("LOCALAPPDATA", Path.home()))
+        return app_data / "HyperDR" / "hdr-workspace"
+    return REPO_ROOT / "hdr-workspace"
+
+
+WORK_ROOT = Path(os.environ.get("HYPERDR_WORK_ROOT", _default_work_root())).resolve()
 MAX_UPLOAD_BYTES = int(os.environ.get("HYPERDR_MAX_UPLOAD_MB", "256")) * 1024 * 1024
 SESSION_TTL_SECONDS = int(os.environ.get("HYPERDR_SESSION_HOURS", "24")) * 3600
 

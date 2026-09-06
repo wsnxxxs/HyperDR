@@ -29,8 +29,8 @@ function connectionState(connected) {
 function availability() {
   const ready = online && snapshot?.enabled && snapshot.desktopConnected && capabilities?.ready;
   const busy = transfer || snapshot?.upload || snapshot?.pending || snapshot?.current?.busy;
-  $("pick-photos").disabled = $("pick-files").disabled = !ready || Boolean(busy);
-  $("pick-label").textContent = snapshot?.current?.file ? "换一张照片" : "从相册选择";
+  $("pick-photos").disabled = !ready || Boolean(busy);
+  $("pick-label").textContent = snapshot?.current?.file ? "换一张照片" : "选择照片";
   $("import-hint").textContent = snapshot && !snapshot.enabled ? "请在电脑上重新开启连接，并扫描新的二维码。"
     : !online ? "连接恢复后，照片和调整会自动同步。"
     : !snapshot?.desktopConnected ? "请在电脑上打开手机连接工作台。"
@@ -254,8 +254,7 @@ $("cancel-upload").addEventListener("click", async () => {
   }
 });
 $("pick-photos").addEventListener("click", () => $("photos-input").click());
-$("pick-files").addEventListener("click", () => $("files-input").click());
-for (const id of ["photos-input", "files-input"]) $(id).addEventListener("change", (event) => { upload(event.target.files[0]); event.target.value = ""; });
+$("photos-input").addEventListener("change", (event) => { upload(event.target.files[0]); event.target.value = ""; });
 
 let events = null;
 function subscribe() {
@@ -272,7 +271,7 @@ window.addEventListener("pageshow", (event) => { if (event.persisted) subscribe(
 async function boot() {
   try {
     capabilities = await request("/api/state");
-    $("files-input").accept = capabilities.inputExtensions.join(",");
+    $("photos-input").accept = ["image/*", ...capabilities.inputExtensions].join(",");
     applySnapshot(await request("/api/phone/state")); subscribe();
   } catch { notice("连接暂时不可用。请在电脑上开启手机连接工作台，扫描新的二维码。"); connectionState(false); }
 }

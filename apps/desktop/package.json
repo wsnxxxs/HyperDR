@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "description": "Tauri 2 desktop shell for HyperDR",
   "scripts": {
+    "icons": "powershell -NoProfile -ExecutionPolicy Bypass -File ../../packaging/update-icons.ps1",
     "tauri": "tauri",
     "dev": "tauri dev",
     "build": "tauri build"

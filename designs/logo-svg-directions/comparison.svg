@@ -1,0 +1,298 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="930" viewBox="0 0 1440 930" role="img" aria-labelledby="board-title">
+<title id="board-title">HyperDR 三种 SVG 标识设计方向</title>
+<rect width="1440" height="930" fill="#f2f1ed"/>
+<g font-family="Microsoft YaHei,Segoe UI,sans-serif">
+<text x="64" y="65" fill="#607786" font-size="13" letter-spacing="3">HYPERDR / IDENTITY EXPLORATION</text>
+<text x="64" y="125" fill="#20262a" font-size="40" font-weight="600">把光学质感，变成可记住的符号。</text>
+<text x="66" y="161" fill="#687078" font-size="17">延续炭黑、银白与蓝灰；用轮廓区分方向，用小尺寸检验辨识度。</text>
+<rect x="64" y="202" width="424" height="600" rx="24" fill="#fcfcfa"/>
+<text x="92" y="247" fill="#20262a" font-size="23" font-weight="600">01 / 叠光</text>
+<text x="92" y="278" fill="#727b82" font-size="15">保留现版气质，建立完整轮廓</text>
+<svg x="142" y="307" width="268" height="268" viewBox="0 0 512 512">
+  <title id="c0hero-title">HyperDR — 叠光</title>
+  <desc id="c0hero-desc">深炭黑圆角底，两片向右上方倾斜的银白与蓝灰光学薄片，完整轮廓与中央暗缝形成鲜明标识。</desc>
+  <defs>
+    <linearGradient id="c0hero-bg" x2="1" y2="1"><stop stop-color="#23272b"/><stop offset="1" stop-color="#101215"/></linearGradient>
+    <linearGradient id="c0hero-silver" x1="0" y1="0" x2=".8" y2="1"><stop stop-color="#ffffff"/><stop offset=".48" stop-color="#e6edf2"/><stop offset="1" stop-color="#95a9b7"/></linearGradient>
+    <linearGradient id="c0hero-blue" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#acd7e8"/><stop offset=".48" stop-color="#6dabc9"/><stop offset="1" stop-color="#3f6c93"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#c0hero-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".12"/>
+  <g transform="rotate(-38 256 256)">
+    <rect x="98" y="267" width="316" height="100" rx="34" fill="#000" opacity=".22"/>
+    <rect x="98" y="259" width="316" height="100" rx="34" fill="url(#c0hero-blue)"/>
+    <path d="M132 260H380" fill="none" stroke="#cee9f4" stroke-opacity=".55" stroke-width="2"/>
+    <rect x="98" y="145" width="316" height="100" rx="34" fill="url(#c0hero-silver)"/>
+    <path d="M132 146H380" fill="none" stroke="#fff" stroke-opacity=".8" stroke-width="2"/>
+  </g>
+</svg>
+
+<text x="276" y="612" text-anchor="middle" fill="#54616a" font-size="15">两片光学薄片 · 银白 / 蓝灰</text>
+<path d="M92 640H460" stroke="#e8e9e5"/>
+<text x="92" y="679" fill="#81878b" font-size="11" letter-spacing="1.5">ACTUAL SIZE</text>
+<svg x="226.0" y="672.0" width="16" height="16" viewBox="0 0 512 512">
+  <title id="c0s16-title">HyperDR — 叠光</title>
+  <desc id="c0s16-desc">深炭黑圆角底，两片向右上方倾斜的银白与蓝灰光学薄片，完整轮廓与中央暗缝形成鲜明标识。</desc>
+  <defs>
+    <linearGradient id="c0s16-bg" x2="1" y2="1"><stop stop-color="#23272b"/><stop offset="1" stop-color="#101215"/></linearGradient>
+    <linearGradient id="c0s16-silver" x1="0" y1="0" x2=".8" y2="1"><stop stop-color="#ffffff"/><stop offset=".48" stop-color="#e6edf2"/><stop offset="1" stop-color="#95a9b7"/></linearGradient>
+    <linearGradient id="c0s16-blue" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#acd7e8"/><stop offset=".48" stop-color="#6dabc9"/><stop offset="1" stop-color="#3f6c93"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#c0s16-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".12"/>
+  <g transform="rotate(-38 256 256)">
+    <rect x="98" y="267" width="316" height="100" rx="34" fill="#000" opacity=".22"/>
+    <rect x="98" y="259" width="316" height="100" rx="34" fill="url(#c0s16-blue)"/>
+    <path d="M132 260H380" fill="none" stroke="#cee9f4" stroke-opacity=".55" stroke-width="2"/>
+    <rect x="98" y="145" width="316" height="100" rx="34" fill="url(#c0s16-silver)"/>
+    <path d="M132 146H380" fill="none" stroke="#fff" stroke-opacity=".8" stroke-width="2"/>
+  </g>
+</svg>
+
+<text x="234" y="727" text-anchor="middle" fill="#8b9296" font-size="11">16</text>
+<svg x="278.0" y="668.0" width="24" height="24" viewBox="0 0 512 512">
+  <title id="c0s24-title">HyperDR — 叠光</title>
+  <desc id="c0s24-desc">深炭黑圆角底，两片向右上方倾斜的银白与蓝灰光学薄片，完整轮廓与中央暗缝形成鲜明标识。</desc>
+  <defs>
+    <linearGradient id="c0s24-bg" x2="1" y2="1"><stop stop-color="#23272b"/><stop offset="1" stop-color="#101215"/></linearGradient>
+    <linearGradient id="c0s24-silver" x1="0" y1="0" x2=".8" y2="1"><stop stop-color="#ffffff"/><stop offset=".48" stop-color="#e6edf2"/><stop offset="1" stop-color="#95a9b7"/></linearGradient>
+    <linearGradient id="c0s24-blue" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#acd7e8"/><stop offset=".48" stop-color="#6dabc9"/><stop offset="1" stop-color="#3f6c93"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#c0s24-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".12"/>
+  <g transform="rotate(-38 256 256)">
+    <rect x="98" y="267" width="316" height="100" rx="34" fill="#000" opacity=".22"/>
+    <rect x="98" y="259" width="316" height="100" rx="34" fill="url(#c0s24-blue)"/>
+    <path d="M132 260H380" fill="none" stroke="#cee9f4" stroke-opacity=".55" stroke-width="2"/>
+    <rect x="98" y="145" width="316" height="100" rx="34" fill="url(#c0s24-silver)"/>
+    <path d="M132 146H380" fill="none" stroke="#fff" stroke-opacity=".8" stroke-width="2"/>
+  </g>
+</svg>
+
+<text x="290" y="727" text-anchor="middle" fill="#8b9296" font-size="11">24</text>
+<svg x="330.0" y="664.0" width="32" height="32" viewBox="0 0 512 512">
+  <title id="c0s32-title">HyperDR — 叠光</title>
+  <desc id="c0s32-desc">深炭黑圆角底，两片向右上方倾斜的银白与蓝灰光学薄片，完整轮廓与中央暗缝形成鲜明标识。</desc>
+  <defs>
+    <linearGradient id="c0s32-bg" x2="1" y2="1"><stop stop-color="#23272b"/><stop offset="1" stop-color="#101215"/></linearGradient>
+    <linearGradient id="c0s32-silver" x1="0" y1="0" x2=".8" y2="1"><stop stop-color="#ffffff"/><stop offset=".48" stop-color="#e6edf2"/><stop offset="1" stop-color="#95a9b7"/></linearGradient>
+    <linearGradient id="c0s32-blue" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#acd7e8"/><stop offset=".48" stop-color="#6dabc9"/><stop offset="1" stop-color="#3f6c93"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#c0s32-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".12"/>
+  <g transform="rotate(-38 256 256)">
+    <rect x="98" y="267" width="316" height="100" rx="34" fill="#000" opacity=".22"/>
+    <rect x="98" y="259" width="316" height="100" rx="34" fill="url(#c0s32-blue)"/>
+    <path d="M132 260H380" fill="none" stroke="#cee9f4" stroke-opacity=".55" stroke-width="2"/>
+    <rect x="98" y="145" width="316" height="100" rx="34" fill="url(#c0s32-silver)"/>
+    <path d="M132 146H380" fill="none" stroke="#fff" stroke-opacity=".8" stroke-width="2"/>
+  </g>
+</svg>
+
+<text x="346" y="727" text-anchor="middle" fill="#8b9296" font-size="11">32</text>
+<svg x="378.0" y="656.0" width="48" height="48" viewBox="0 0 512 512">
+  <title id="c0s48-title">HyperDR — 叠光</title>
+  <desc id="c0s48-desc">深炭黑圆角底，两片向右上方倾斜的银白与蓝灰光学薄片，完整轮廓与中央暗缝形成鲜明标识。</desc>
+  <defs>
+    <linearGradient id="c0s48-bg" x2="1" y2="1"><stop stop-color="#23272b"/><stop offset="1" stop-color="#101215"/></linearGradient>
+    <linearGradient id="c0s48-silver" x1="0" y1="0" x2=".8" y2="1"><stop stop-color="#ffffff"/><stop offset=".48" stop-color="#e6edf2"/><stop offset="1" stop-color="#95a9b7"/></linearGradient>
+    <linearGradient id="c0s48-blue" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#acd7e8"/><stop offset=".48" stop-color="#6dabc9"/><stop offset="1" stop-color="#3f6c93"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#c0s48-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".12"/>
+  <g transform="rotate(-38 256 256)">
+    <rect x="98" y="267" width="316" height="100" rx="34" fill="#000" opacity=".22"/>
+    <rect x="98" y="259" width="316" height="100" rx="34" fill="url(#c0s48-blue)"/>
+    <path d="M132 260H380" fill="none" stroke="#cee9f4" stroke-opacity=".55" stroke-width="2"/>
+    <rect x="98" y="145" width="316" height="100" rx="34" fill="url(#c0s48-silver)"/>
+    <path d="M132 146H380" fill="none" stroke="#fff" stroke-opacity=".8" stroke-width="2"/>
+  </g>
+</svg>
+
+<text x="402" y="727" text-anchor="middle" fill="#8b9296" font-size="11">48</text>
+<text x="92" y="773" fill="#426b7d" font-size="14">推荐 · 最自然的品牌演进</text>
+<rect x="508" y="202" width="424" height="600" rx="24" fill="#fcfcfa"/>
+<text x="536" y="247" fill="#20262a" font-size="23" font-weight="600">02 / 光桥</text>
+<text x="536" y="278" fill="#727b82" font-size="15">把 HyperDR 的 H 藏进光线</text>
+<svg x="586" y="307" width="268" height="268" viewBox="0 0 512 512">
+  <title id="c1hero-title">HyperDR — 光桥</title>
+  <desc id="c1hero-desc">银白和蓝灰的双立柱，以向上倾斜的光桥连接成 H，表达从暗部通往高光。</desc>
+  <defs>
+    <linearGradient id="c1hero-bg" x2="1" y2="1"><stop stop-color="#23272b"/><stop offset="1" stop-color="#101215"/></linearGradient>
+    <linearGradient id="c1hero-silver" x2="1" y2="1"><stop stop-color="#fff"/><stop offset="1" stop-color="#a9bac8"/></linearGradient>
+    <linearGradient id="c1hero-blue" x2=".2" y2="1"><stop stop-color="#afd7e9"/><stop offset="1" stop-color="#467396"/></linearGradient>
+    <linearGradient id="c1hero-bridge" x2="1" y2="0"><stop stop-color="#bdcdd7"/><stop offset="1" stop-color="#f8fcff"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#c1hero-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".12"/>
+  <rect x="306" y="116" width="78" height="280" rx="28" fill="url(#c1hero-blue)"/>
+  <path d="M162 261 345 192V263L162 332Z" fill="#05090c" opacity=".28" transform="translate(0 8)"/>
+  <path d="M162 255 345 186V257L162 326Z" fill="url(#c1hero-bridge)"/>
+  <rect x="128" y="116" width="78" height="280" rx="28" fill="url(#c1hero-silver)"/>
+  <path d="M207 238 344 187" fill="none" stroke="#fff" stroke-opacity=".7" stroke-width="2"/>
+</svg>
+
+<text x="720" y="612" text-anchor="middle" fill="#54616a" font-size="15">双立柱与斜桥 · 字母辨识</text>
+<path d="M536 640H904" stroke="#e8e9e5"/>
+<text x="536" y="679" fill="#81878b" font-size="11" letter-spacing="1.5">ACTUAL SIZE</text>
+<svg x="670.0" y="672.0" width="16" height="16" viewBox="0 0 512 512">
+  <title id="c1s16-title">HyperDR — 光桥</title>
+  <desc id="c1s16-desc">银白和蓝灰的双立柱，以向上倾斜的光桥连接成 H，表达从暗部通往高光。</desc>
+  <defs>
+    <linearGradient id="c1s16-bg" x2="1" y2="1"><stop stop-color="#23272b"/><stop offset="1" stop-color="#101215"/></linearGradient>
+    <linearGradient id="c1s16-silver" x2="1" y2="1"><stop stop-color="#fff"/><stop offset="1" stop-color="#a9bac8"/></linearGradient>
+    <linearGradient id="c1s16-blue" x2=".2" y2="1"><stop stop-color="#afd7e9"/><stop offset="1" stop-color="#467396"/></linearGradient>
+    <linearGradient id="c1s16-bridge" x2="1" y2="0"><stop stop-color="#bdcdd7"/><stop offset="1" stop-color="#f8fcff"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#c1s16-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".12"/>
+  <rect x="306" y="116" width="78" height="280" rx="28" fill="url(#c1s16-blue)"/>
+  <path d="M162 261 345 192V263L162 332Z" fill="#05090c" opacity=".28" transform="translate(0 8)"/>
+  <path d="M162 255 345 186V257L162 326Z" fill="url(#c1s16-bridge)"/>
+  <rect x="128" y="116" width="78" height="280" rx="28" fill="url(#c1s16-silver)"/>
+  <path d="M207 238 344 187" fill="none" stroke="#fff" stroke-opacity=".7" stroke-width="2"/>
+</svg>
+
+<text x="678" y="727" text-anchor="middle" fill="#8b9296" font-size="11">16</text>
+<svg x="722.0" y="668.0" width="24" height="24" viewBox="0 0 512 512">
+  <title id="c1s24-title">HyperDR — 光桥</title>
+  <desc id="c1s24-desc">银白和蓝灰的双立柱，以向上倾斜的光桥连接成 H，表达从暗部通往高光。</desc>
+  <defs>
+    <linearGradient id="c1s24-bg" x2="1" y2="1"><stop stop-color="#23272b"/><stop offset="1" stop-color="#101215"/></linearGradient>
+    <linearGradient id="c1s24-silver" x2="1" y2="1"><stop stop-color="#fff"/><stop offset="1" stop-color="#a9bac8"/></linearGradient>
+    <linearGradient id="c1s24-blue" x2=".2" y2="1"><stop stop-color="#afd7e9"/><stop offset="1" stop-color="#467396"/></linearGradient>
+    <linearGradient id="c1s24-bridge" x2="1" y2="0"><stop stop-color="#bdcdd7"/><stop offset="1" stop-color="#f8fcff"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#c1s24-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".12"/>
+  <rect x="306" y="116" width="78" height="280" rx="28" fill="url(#c1s24-blue)"/>
+  <path d="M162 261 345 192V263L162 332Z" fill="#05090c" opacity=".28" transform="translate(0 8)"/>
+  <path d="M162 255 345 186V257L162 326Z" fill="url(#c1s24-bridge)"/>
+  <rect x="128" y="116" width="78" height="280" rx="28" fill="url(#c1s24-silver)"/>
+  <path d="M207 238 344 187" fill="none" stroke="#fff" stroke-opacity=".7" stroke-width="2"/>
+</svg>
+
+<text x="734" y="727" text-anchor="middle" fill="#8b9296" font-size="11">24</text>
+<svg x="774.0" y="664.0" width="32" height="32" viewBox="0 0 512 512">
+  <title id="c1s32-title">HyperDR — 光桥</title>
+  <desc id="c1s32-desc">银白和蓝灰的双立柱，以向上倾斜的光桥连接成 H，表达从暗部通往高光。</desc>
+  <defs>
+    <linearGradient id="c1s32-bg" x2="1" y2="1"><stop stop-color="#23272b"/><stop offset="1" stop-color="#101215"/></linearGradient>
+    <linearGradient id="c1s32-silver" x2="1" y2="1"><stop stop-color="#fff"/><stop offset="1" stop-color="#a9bac8"/></linearGradient>
+    <linearGradient id="c1s32-blue" x2=".2" y2="1"><stop stop-color="#afd7e9"/><stop offset="1" stop-color="#467396"/></linearGradient>
+    <linearGradient id="c1s32-bridge" x2="1" y2="0"><stop stop-color="#bdcdd7"/><stop offset="1" stop-color="#f8fcff"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#c1s32-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".12"/>
+  <rect x="306" y="116" width="78" height="280" rx="28" fill="url(#c1s32-blue)"/>
+  <path d="M162 261 345 192V263L162 332Z" fill="#05090c" opacity=".28" transform="translate(0 8)"/>
+  <path d="M162 255 345 186V257L162 326Z" fill="url(#c1s32-bridge)"/>
+  <rect x="128" y="116" width="78" height="280" rx="28" fill="url(#c1s32-silver)"/>
+  <path d="M207 238 344 187" fill="none" stroke="#fff" stroke-opacity=".7" stroke-width="2"/>
+</svg>
+
+<text x="790" y="727" text-anchor="middle" fill="#8b9296" font-size="11">32</text>
+<svg x="822.0" y="656.0" width="48" height="48" viewBox="0 0 512 512">
+  <title id="c1s48-title">HyperDR — 光桥</title>
+  <desc id="c1s48-desc">银白和蓝灰的双立柱，以向上倾斜的光桥连接成 H，表达从暗部通往高光。</desc>
+  <defs>
+    <linearGradient id="c1s48-bg" x2="1" y2="1"><stop stop-color="#23272b"/><stop offset="1" stop-color="#101215"/></linearGradient>
+    <linearGradient id="c1s48-silver" x2="1" y2="1"><stop stop-color="#fff"/><stop offset="1" stop-color="#a9bac8"/></linearGradient>
+    <linearGradient id="c1s48-blue" x2=".2" y2="1"><stop stop-color="#afd7e9"/><stop offset="1" stop-color="#467396"/></linearGradient>
+    <linearGradient id="c1s48-bridge" x2="1" y2="0"><stop stop-color="#bdcdd7"/><stop offset="1" stop-color="#f8fcff"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#c1s48-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".12"/>
+  <rect x="306" y="116" width="78" height="280" rx="28" fill="url(#c1s48-blue)"/>
+  <path d="M162 261 345 192V263L162 332Z" fill="#05090c" opacity=".28" transform="translate(0 8)"/>
+  <path d="M162 255 345 186V257L162 326Z" fill="url(#c1s48-bridge)"/>
+  <rect x="128" y="116" width="78" height="280" rx="28" fill="url(#c1s48-silver)"/>
+  <path d="M207 238 344 187" fill="none" stroke="#fff" stroke-opacity=".7" stroke-width="2"/>
+</svg>
+
+<text x="846" y="727" text-anchor="middle" fill="#8b9296" font-size="11">48</text>
+<text x="536" y="773" fill="#6c747a" font-size="14">更强调品牌名称</text>
+<rect x="952" y="202" width="424" height="600" rx="24" fill="#fcfcfa"/>
+<text x="980" y="247" fill="#20262a" font-size="23" font-weight="600">03 / 光域</text>
+<text x="980" y="278" fill="#727b82" font-size="15">让高光越过画面的边界</text>
+<svg x="1030" y="307" width="268" height="268" viewBox="0 0 512 512">
+  <title id="c2hero-title">HyperDR — 光域</title>
+  <desc id="c2hero-desc">蓝灰色取景边框在右上角打开，一枚银白光片延伸至边框之外，表达 HDR 高光范围的扩展。</desc>
+  <defs>
+    <linearGradient id="c2hero-bg" x2="1" y2="1"><stop stop-color="#23272b"/><stop offset="1" stop-color="#101215"/></linearGradient>
+    <linearGradient id="c2hero-frame" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#497191"/><stop offset="1" stop-color="#a6c9db"/></linearGradient>
+    <linearGradient id="c2hero-light" x2="1" y2="0"><stop stop-color="#a9bdca"/><stop offset=".65" stop-color="#edf5fa"/><stop offset="1" stop-color="#fff"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#c2hero-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".12"/>
+  <path d="M262 143H174Q138 143 138 179V340Q138 376 174 376H335Q371 376 371 340V252" fill="none" stroke="url(#c2hero-frame)" stroke-width="44" stroke-linecap="round"/>
+  <rect x="206" y="145" width="216" height="76" rx="27" fill="url(#c2hero-light)" transform="rotate(-38 314 183)"/>
+</svg>
+
+<text x="1164" y="612" text-anchor="middle" fill="#54616a" font-size="15">开放取景框 · 高光延伸</text>
+<path d="M980 640H1348" stroke="#e8e9e5"/>
+<text x="980" y="679" fill="#81878b" font-size="11" letter-spacing="1.5">ACTUAL SIZE</text>
+<svg x="1114.0" y="672.0" width="16" height="16" viewBox="0 0 512 512">
+  <title id="c2s16-title">HyperDR — 光域</title>
+  <desc id="c2s16-desc">蓝灰色取景边框在右上角打开，一枚银白光片延伸至边框之外，表达 HDR 高光范围的扩展。</desc>
+  <defs>
+    <linearGradient id="c2s16-bg" x2="1" y2="1"><stop stop-color="#23272b"/><stop offset="1" stop-color="#101215"/></linearGradient>
+    <linearGradient id="c2s16-frame" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#497191"/><stop offset="1" stop-color="#a6c9db"/></linearGradient>
+    <linearGradient id="c2s16-light" x2="1" y2="0"><stop stop-color="#a9bdca"/><stop offset=".65" stop-color="#edf5fa"/><stop offset="1" stop-color="#fff"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#c2s16-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".12"/>
+  <path d="M262 143H174Q138 143 138 179V340Q138 376 174 376H335Q371 376 371 340V252" fill="none" stroke="url(#c2s16-frame)" stroke-width="44" stroke-linecap="round"/>
+  <rect x="206" y="145" width="216" height="76" rx="27" fill="url(#c2s16-light)" transform="rotate(-38 314 183)"/>
+</svg>
+
+<text x="1122" y="727" text-anchor="middle" fill="#8b9296" font-size="11">16</text>
+<svg x="1166.0" y="668.0" width="24" height="24" viewBox="0 0 512 512">
+  <title id="c2s24-title">HyperDR — 光域</title>
+  <desc id="c2s24-desc">蓝灰色取景边框在右上角打开，一枚银白光片延伸至边框之外，表达 HDR 高光范围的扩展。</desc>
+  <defs>
+    <linearGradient id="c2s24-bg" x2="1" y2="1"><stop stop-color="#23272b"/><stop offset="1" stop-color="#101215"/></linearGradient>
+    <linearGradient id="c2s24-frame" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#497191"/><stop offset="1" stop-color="#a6c9db"/></linearGradient>
+    <linearGradient id="c2s24-light" x2="1" y2="0"><stop stop-color="#a9bdca"/><stop offset=".65" stop-color="#edf5fa"/><stop offset="1" stop-color="#fff"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#c2s24-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".12"/>
+  <path d="M262 143H174Q138 143 138 179V340Q138 376 174 376H335Q371 376 371 340V252" fill="none" stroke="url(#c2s24-frame)" stroke-width="44" stroke-linecap="round"/>
+  <rect x="206" y="145" width="216" height="76" rx="27" fill="url(#c2s24-light)" transform="rotate(-38 314 183)"/>
+</svg>
+
+<text x="1178" y="727" text-anchor="middle" fill="#8b9296" font-size="11">24</text>
+<svg x="1218.0" y="664.0" width="32" height="32" viewBox="0 0 512 512">
+  <title id="c2s32-title">HyperDR — 光域</title>
+  <desc id="c2s32-desc">蓝灰色取景边框在右上角打开，一枚银白光片延伸至边框之外，表达 HDR 高光范围的扩展。</desc>
+  <defs>
+    <linearGradient id="c2s32-bg" x2="1" y2="1"><stop stop-color="#23272b"/><stop offset="1" stop-color="#101215"/></linearGradient>
+    <linearGradient id="c2s32-frame" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#497191"/><stop offset="1" stop-color="#a6c9db"/></linearGradient>
+    <linearGradient id="c2s32-light" x2="1" y2="0"><stop stop-color="#a9bdca"/><stop offset=".65" stop-color="#edf5fa"/><stop offset="1" stop-color="#fff"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#c2s32-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".12"/>
+  <path d="M262 143H174Q138 143 138 179V340Q138 376 174 376H335Q371 376 371 340V252" fill="none" stroke="url(#c2s32-frame)" stroke-width="44" stroke-linecap="round"/>
+  <rect x="206" y="145" width="216" height="76" rx="27" fill="url(#c2s32-light)" transform="rotate(-38 314 183)"/>
+</svg>
+
+<text x="1234" y="727" text-anchor="middle" fill="#8b9296" font-size="11">32</text>
+<svg x="1266.0" y="656.0" width="48" height="48" viewBox="0 0 512 512">
+  <title id="c2s48-title">HyperDR — 光域</title>
+  <desc id="c2s48-desc">蓝灰色取景边框在右上角打开，一枚银白光片延伸至边框之外，表达 HDR 高光范围的扩展。</desc>
+  <defs>
+    <linearGradient id="c2s48-bg" x2="1" y2="1"><stop stop-color="#23272b"/><stop offset="1" stop-color="#101215"/></linearGradient>
+    <linearGradient id="c2s48-frame" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#497191"/><stop offset="1" stop-color="#a6c9db"/></linearGradient>
+    <linearGradient id="c2s48-light" x2="1" y2="0"><stop stop-color="#a9bdca"/><stop offset=".65" stop-color="#edf5fa"/><stop offset="1" stop-color="#fff"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#c2s48-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".12"/>
+  <path d="M262 143H174Q138 143 138 179V340Q138 376 174 376H335Q371 376 371 340V252" fill="none" stroke="url(#c2s48-frame)" stroke-width="44" stroke-linecap="round"/>
+  <rect x="206" y="145" width="216" height="76" rx="27" fill="url(#c2s48-light)" transform="rotate(-38 314 183)"/>
+</svg>
+
+<text x="1290" y="727" text-anchor="middle" fill="#8b9296" font-size="11">48</text>
+<text x="980" y="773" fill="#6c747a" font-size="14">更强调影像与 HDR 概念</text>
+<text x="66" y="855" fill="#4c585f" font-size="17">设计取向：先让形状成立，再用少量渐变表达材质。</text>
+<text x="66" y="886" fill="#858c90" font-size="13">SVG 矢量原稿 · 大图与 16 / 24 / 32 / 48 px 同页展示 · 候选设计</text>
+</g></svg>

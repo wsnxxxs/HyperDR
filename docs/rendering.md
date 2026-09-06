@@ -59,6 +59,10 @@ carries it as `input_domain`. Nothing branches on the file extension.
   before it is ever restored. Because the grid is then sampled bilinearly, a
   shadow pixel bordering a bright cell still receives a little gain; the report
   measures exactly how much as `render.below_knee_relative_difference_max`.
+  Manual rendering retains this pixel selection through LUT grading. For
+  gain-map output, peak, utilization and below-knee difference are measured
+  from the final quantized, bilinearly reconstructed map, before JPEG/HEVC
+  compression; they are not measurements of the codec's additional loss.
 
 Working in the log domain is what makes a large input headroom usable. A
 linear-domain shoulder asymptotic to 1.0 spends nearly its whole output range

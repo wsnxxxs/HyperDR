@@ -1,0 +1,378 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="930" viewBox="0 0 1440 930" role="img" aria-labelledby="board-title">
+<title id="board-title">HyperDR 月光与流动弧面的结合</title>
+<rect width="1440" height="930" fill="#f2f1ed"/>
+<g font-family="Microsoft YaHei,Segoe UI,sans-serif">
+<text x="64" y="65" fill="#607786" font-size="13" letter-spacing="3">HYPERDR / MOONLIGHT STUDIES 04</text>
+<text x="64" y="125" fill="#20262a" font-size="40" font-weight="600">一弯流动的月光。</text>
+<text x="66" y="161" fill="#687078" font-size="17">把「掠光」的弧面融入月色：柔银亮面、冷蓝暗部，以及一缕舒展的光尾。</text>
+<rect x="64" y="202" width="424" height="600" rx="24" fill="#fcfcfa"/>
+<text x="92" y="247" fill="#20262a" font-size="23" font-weight="600">01 / 月弧</text>
+<text x="92" y="278" fill="#727b82" font-size="15">月牙更明确，光线安静地落在弧面</text>
+<svg x="142" y="307" width="268" height="268" viewBox="0 0 512 512">
+  <title id="moon-0-title">HyperDR — 月弧</title>
+  <desc id="moon-0-desc">更接近一弯斜悬的月亮，银白亮面向冷蓝暗部过渡。</desc>
+  <defs>
+    <linearGradient id="moon-0-bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#1b2330"/><stop offset=".6" stop-color="#101723"/><stop offset="1" stop-color="#0c111b"/></linearGradient>
+    <linearGradient id="moon-0-body" x1=".15" y1=".05" x2=".72" y2="1"><stop stop-color="#e3edf8"/><stop offset=".3" stop-color="#acc4e0"/><stop offset=".68" stop-color="#6683b0"/><stop offset="1" stop-color="#344966"/></linearGradient>
+    <linearGradient id="moon-0-face" x1=".2" y1=".15" x2=".8" y2="1"><stop stop-color="#fffdf2"/><stop offset=".35" stop-color="#eef1f3"/><stop offset=".65" stop-color="#c9d8eb"/><stop offset="1" stop-color="#748eaf"/></linearGradient>
+    <linearGradient id="moon-0-rim" x1=".3" y1="0" x2=".4" y2="1"><stop stop-color="#fffdf1" stop-opacity=".95"/><stop offset=".5" stop-color="#e8efff" stop-opacity=".45"/><stop offset="1" stop-color="#a9c5ff" stop-opacity="0"/></linearGradient>
+    <radialGradient id="moon-0-halo"><stop offset=".35" stop-color="#98b2e7" stop-opacity=".12"/><stop offset=".65" stop-color="#7a98d3" stop-opacity=".055"/><stop offset="1" stop-color="#7799d6" stop-opacity="0"/></radialGradient>
+    <radialGradient id="moon-0-moon-disc" cx=".28" cy=".34" r=".8"><stop stop-color="#859bbe" stop-opacity=".13"/><stop offset=".8" stop-color="#667d9e" stop-opacity=".035"/><stop offset="1" stop-color="#586b85" stop-opacity=".01"/></radialGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#moon-0-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#d8e4ff" stroke-opacity=".12"/>
+  <ellipse cx="235" cy="268" rx="166" ry="163" fill="url(#moon-0-halo)" opacity=".35"/>
+  <path d="M365 133C295 103 216 124 165 182C109 244 118 327 176 367C236 408 320 377 357 307C315 350 259 349 225 315C190 280 197 225 237 186C272 151 317 143 365 133Z" fill="url(#moon-0-body)"/>
+  <path d="M365 133C295 103 216 124 165 182C109 244 118 327 176 367C236 408 320 377 357 307C306 365 233 372 190 326C151 284 163 225 205 184C249 142 308 130 365 133Z" fill="url(#moon-0-face)"/>
+  <path d="M165 182C216 124 295 103 365 133" fill="none" stroke="url(#moon-0-rim)" stroke-width="2"/>
+</svg>
+
+
+
+
+<text x="276" y="612" text-anchor="middle" fill="#54616a" font-size="15">柔银 / 冷蓝 · 更接近月牙</text>
+<path d="M92 640H460" stroke="#e8e9e5"/>
+<text x="92" y="679" fill="#81878b" font-size="11" letter-spacing="1.5">ACTUAL SIZE</text>
+<svg x="226.0" y="672.0" width="16" height="16" viewBox="0 0 512 512">
+  <title id="moon-1-title">HyperDR — 月弧</title>
+  <desc id="moon-1-desc">更接近一弯斜悬的月亮，银白亮面向冷蓝暗部过渡。</desc>
+  <defs>
+    <linearGradient id="moon-1-bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#1b2330"/><stop offset=".6" stop-color="#101723"/><stop offset="1" stop-color="#0c111b"/></linearGradient>
+    <linearGradient id="moon-1-body" x1=".15" y1=".05" x2=".72" y2="1"><stop stop-color="#e3edf8"/><stop offset=".3" stop-color="#acc4e0"/><stop offset=".68" stop-color="#6683b0"/><stop offset="1" stop-color="#344966"/></linearGradient>
+    <linearGradient id="moon-1-face" x1=".2" y1=".15" x2=".8" y2="1"><stop stop-color="#fffdf2"/><stop offset=".35" stop-color="#eef1f3"/><stop offset=".65" stop-color="#c9d8eb"/><stop offset="1" stop-color="#748eaf"/></linearGradient>
+    <linearGradient id="moon-1-rim" x1=".3" y1="0" x2=".4" y2="1"><stop stop-color="#fffdf1" stop-opacity=".95"/><stop offset=".5" stop-color="#e8efff" stop-opacity=".45"/><stop offset="1" stop-color="#a9c5ff" stop-opacity="0"/></linearGradient>
+    <radialGradient id="moon-1-halo"><stop offset=".35" stop-color="#98b2e7" stop-opacity=".12"/><stop offset=".65" stop-color="#7a98d3" stop-opacity=".055"/><stop offset="1" stop-color="#7799d6" stop-opacity="0"/></radialGradient>
+    <radialGradient id="moon-1-moon-disc" cx=".28" cy=".34" r=".8"><stop stop-color="#859bbe" stop-opacity=".13"/><stop offset=".8" stop-color="#667d9e" stop-opacity=".035"/><stop offset="1" stop-color="#586b85" stop-opacity=".01"/></radialGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#moon-1-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#d8e4ff" stroke-opacity=".12"/>
+  <ellipse cx="235" cy="268" rx="166" ry="163" fill="url(#moon-1-halo)" opacity=".35"/>
+  <path d="M365 133C295 103 216 124 165 182C109 244 118 327 176 367C236 408 320 377 357 307C315 350 259 349 225 315C190 280 197 225 237 186C272 151 317 143 365 133Z" fill="url(#moon-1-body)"/>
+  <path d="M365 133C295 103 216 124 165 182C109 244 118 327 176 367C236 408 320 377 357 307C306 365 233 372 190 326C151 284 163 225 205 184C249 142 308 130 365 133Z" fill="url(#moon-1-face)"/>
+  <path d="M165 182C216 124 295 103 365 133" fill="none" stroke="url(#moon-1-rim)" stroke-width="2"/>
+</svg>
+
+
+
+
+<text x="234" y="727" text-anchor="middle" fill="#8b9296" font-size="11">16</text>
+<svg x="278.0" y="668.0" width="24" height="24" viewBox="0 0 512 512">
+  <title id="moon-2-title">HyperDR — 月弧</title>
+  <desc id="moon-2-desc">更接近一弯斜悬的月亮，银白亮面向冷蓝暗部过渡。</desc>
+  <defs>
+    <linearGradient id="moon-2-bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#1b2330"/><stop offset=".6" stop-color="#101723"/><stop offset="1" stop-color="#0c111b"/></linearGradient>
+    <linearGradient id="moon-2-body" x1=".15" y1=".05" x2=".72" y2="1"><stop stop-color="#e3edf8"/><stop offset=".3" stop-color="#acc4e0"/><stop offset=".68" stop-color="#6683b0"/><stop offset="1" stop-color="#344966"/></linearGradient>
+    <linearGradient id="moon-2-face" x1=".2" y1=".15" x2=".8" y2="1"><stop stop-color="#fffdf2"/><stop offset=".35" stop-color="#eef1f3"/><stop offset=".65" stop-color="#c9d8eb"/><stop offset="1" stop-color="#748eaf"/></linearGradient>
+    <linearGradient id="moon-2-rim" x1=".3" y1="0" x2=".4" y2="1"><stop stop-color="#fffdf1" stop-opacity=".95"/><stop offset=".5" stop-color="#e8efff" stop-opacity=".45"/><stop offset="1" stop-color="#a9c5ff" stop-opacity="0"/></linearGradient>
+    <radialGradient id="moon-2-halo"><stop offset=".35" stop-color="#98b2e7" stop-opacity=".12"/><stop offset=".65" stop-color="#7a98d3" stop-opacity=".055"/><stop offset="1" stop-color="#7799d6" stop-opacity="0"/></radialGradient>
+    <radialGradient id="moon-2-moon-disc" cx=".28" cy=".34" r=".8"><stop stop-color="#859bbe" stop-opacity=".13"/><stop offset=".8" stop-color="#667d9e" stop-opacity=".035"/><stop offset="1" stop-color="#586b85" stop-opacity=".01"/></radialGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#moon-2-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#d8e4ff" stroke-opacity=".12"/>
+  <ellipse cx="235" cy="268" rx="166" ry="163" fill="url(#moon-2-halo)" opacity=".35"/>
+  <path d="M365 133C295 103 216 124 165 182C109 244 118 327 176 367C236 408 320 377 357 307C315 350 259 349 225 315C190 280 197 225 237 186C272 151 317 143 365 133Z" fill="url(#moon-2-body)"/>
+  <path d="M365 133C295 103 216 124 165 182C109 244 118 327 176 367C236 408 320 377 357 307C306 365 233 372 190 326C151 284 163 225 205 184C249 142 308 130 365 133Z" fill="url(#moon-2-face)"/>
+  <path d="M165 182C216 124 295 103 365 133" fill="none" stroke="url(#moon-2-rim)" stroke-width="2"/>
+</svg>
+
+
+
+
+<text x="290" y="727" text-anchor="middle" fill="#8b9296" font-size="11">24</text>
+<svg x="330.0" y="664.0" width="32" height="32" viewBox="0 0 512 512">
+  <title id="moon-3-title">HyperDR — 月弧</title>
+  <desc id="moon-3-desc">更接近一弯斜悬的月亮，银白亮面向冷蓝暗部过渡。</desc>
+  <defs>
+    <linearGradient id="moon-3-bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#1b2330"/><stop offset=".6" stop-color="#101723"/><stop offset="1" stop-color="#0c111b"/></linearGradient>
+    <linearGradient id="moon-3-body" x1=".15" y1=".05" x2=".72" y2="1"><stop stop-color="#e3edf8"/><stop offset=".3" stop-color="#acc4e0"/><stop offset=".68" stop-color="#6683b0"/><stop offset="1" stop-color="#344966"/></linearGradient>
+    <linearGradient id="moon-3-face" x1=".2" y1=".15" x2=".8" y2="1"><stop stop-color="#fffdf2"/><stop offset=".35" stop-color="#eef1f3"/><stop offset=".65" stop-color="#c9d8eb"/><stop offset="1" stop-color="#748eaf"/></linearGradient>
+    <linearGradient id="moon-3-rim" x1=".3" y1="0" x2=".4" y2="1"><stop stop-color="#fffdf1" stop-opacity=".95"/><stop offset=".5" stop-color="#e8efff" stop-opacity=".45"/><stop offset="1" stop-color="#a9c5ff" stop-opacity="0"/></linearGradient>
+    <radialGradient id="moon-3-halo"><stop offset=".35" stop-color="#98b2e7" stop-opacity=".12"/><stop offset=".65" stop-color="#7a98d3" stop-opacity=".055"/><stop offset="1" stop-color="#7799d6" stop-opacity="0"/></radialGradient>
+    <radialGradient id="moon-3-moon-disc" cx=".28" cy=".34" r=".8"><stop stop-color="#859bbe" stop-opacity=".13"/><stop offset=".8" stop-color="#667d9e" stop-opacity=".035"/><stop offset="1" stop-color="#586b85" stop-opacity=".01"/></radialGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#moon-3-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#d8e4ff" stroke-opacity=".12"/>
+  <ellipse cx="235" cy="268" rx="166" ry="163" fill="url(#moon-3-halo)" opacity=".35"/>
+  <path d="M365 133C295 103 216 124 165 182C109 244 118 327 176 367C236 408 320 377 357 307C315 350 259 349 225 315C190 280 197 225 237 186C272 151 317 143 365 133Z" fill="url(#moon-3-body)"/>
+  <path d="M365 133C295 103 216 124 165 182C109 244 118 327 176 367C236 408 320 377 357 307C306 365 233 372 190 326C151 284 163 225 205 184C249 142 308 130 365 133Z" fill="url(#moon-3-face)"/>
+  <path d="M165 182C216 124 295 103 365 133" fill="none" stroke="url(#moon-3-rim)" stroke-width="2"/>
+</svg>
+
+
+
+
+<text x="346" y="727" text-anchor="middle" fill="#8b9296" font-size="11">32</text>
+<svg x="378.0" y="656.0" width="48" height="48" viewBox="0 0 512 512">
+  <title id="moon-4-title">HyperDR — 月弧</title>
+  <desc id="moon-4-desc">更接近一弯斜悬的月亮，银白亮面向冷蓝暗部过渡。</desc>
+  <defs>
+    <linearGradient id="moon-4-bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#1b2330"/><stop offset=".6" stop-color="#101723"/><stop offset="1" stop-color="#0c111b"/></linearGradient>
+    <linearGradient id="moon-4-body" x1=".15" y1=".05" x2=".72" y2="1"><stop stop-color="#e3edf8"/><stop offset=".3" stop-color="#acc4e0"/><stop offset=".68" stop-color="#6683b0"/><stop offset="1" stop-color="#344966"/></linearGradient>
+    <linearGradient id="moon-4-face" x1=".2" y1=".15" x2=".8" y2="1"><stop stop-color="#fffdf2"/><stop offset=".35" stop-color="#eef1f3"/><stop offset=".65" stop-color="#c9d8eb"/><stop offset="1" stop-color="#748eaf"/></linearGradient>
+    <linearGradient id="moon-4-rim" x1=".3" y1="0" x2=".4" y2="1"><stop stop-color="#fffdf1" stop-opacity=".95"/><stop offset=".5" stop-color="#e8efff" stop-opacity=".45"/><stop offset="1" stop-color="#a9c5ff" stop-opacity="0"/></linearGradient>
+    <radialGradient id="moon-4-halo"><stop offset=".35" stop-color="#98b2e7" stop-opacity=".12"/><stop offset=".65" stop-color="#7a98d3" stop-opacity=".055"/><stop offset="1" stop-color="#7799d6" stop-opacity="0"/></radialGradient>
+    <radialGradient id="moon-4-moon-disc" cx=".28" cy=".34" r=".8"><stop stop-color="#859bbe" stop-opacity=".13"/><stop offset=".8" stop-color="#667d9e" stop-opacity=".035"/><stop offset="1" stop-color="#586b85" stop-opacity=".01"/></radialGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#moon-4-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#d8e4ff" stroke-opacity=".12"/>
+  <ellipse cx="235" cy="268" rx="166" ry="163" fill="url(#moon-4-halo)" opacity=".35"/>
+  <path d="M365 133C295 103 216 124 165 182C109 244 118 327 176 367C236 408 320 377 357 307C315 350 259 349 225 315C190 280 197 225 237 186C272 151 317 143 365 133Z" fill="url(#moon-4-body)"/>
+  <path d="M365 133C295 103 216 124 165 182C109 244 118 327 176 367C236 408 320 377 357 307C306 365 233 372 190 326C151 284 163 225 205 184C249 142 308 130 365 133Z" fill="url(#moon-4-face)"/>
+  <path d="M165 182C216 124 295 103 365 133" fill="none" stroke="url(#moon-4-rim)" stroke-width="2"/>
+</svg>
+
+
+
+
+<text x="402" y="727" text-anchor="middle" fill="#8b9296" font-size="11">48</text>
+<text x="92" y="773" fill="#426b7d" font-size="14">偏静谧</text>
+<rect x="508" y="202" width="424" height="600" rx="24" fill="#fcfcfa"/>
+<text x="536" y="247" fill="#20262a" font-size="23" font-weight="600">02 / 月流</text>
+<text x="536" y="278" fill="#727b82" font-size="15">让月牙舒展成一缕向上流动的光</text>
+<svg x="586" y="307" width="268" height="268" viewBox="0 0 512 512">
+  <title id="moon-5-title">HyperDR — 月流</title>
+  <desc id="moon-5-desc">舒展的月牙上端化为长光尾，下端渐入深蓝，保留掠光的斜向流动。</desc>
+  <defs>
+    <linearGradient id="moon-5-bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#1b2330"/><stop offset=".6" stop-color="#101723"/><stop offset="1" stop-color="#0c111b"/></linearGradient>
+    <linearGradient id="moon-5-body" x1=".15" y1=".05" x2=".72" y2="1"><stop stop-color="#e3edf8"/><stop offset=".3" stop-color="#acc4e0"/><stop offset=".68" stop-color="#6683b0"/><stop offset="1" stop-color="#344966"/></linearGradient>
+    <linearGradient id="moon-5-face" x1=".2" y1=".15" x2=".8" y2="1"><stop stop-color="#fffdf2"/><stop offset=".35" stop-color="#eef1f3"/><stop offset=".65" stop-color="#c9d8eb"/><stop offset="1" stop-color="#748eaf"/></linearGradient>
+    <linearGradient id="moon-5-rim" x1=".3" y1="0" x2=".4" y2="1"><stop stop-color="#fffdf1" stop-opacity=".95"/><stop offset=".5" stop-color="#e8efff" stop-opacity=".45"/><stop offset="1" stop-color="#a9c5ff" stop-opacity="0"/></linearGradient>
+    <radialGradient id="moon-5-halo"><stop offset=".35" stop-color="#98b2e7" stop-opacity=".12"/><stop offset=".65" stop-color="#7a98d3" stop-opacity=".055"/><stop offset="1" stop-color="#7799d6" stop-opacity="0"/></radialGradient>
+    <radialGradient id="moon-5-moon-disc" cx=".28" cy=".34" r=".8"><stop stop-color="#859bbe" stop-opacity=".13"/><stop offset=".8" stop-color="#667d9e" stop-opacity=".035"/><stop offset="1" stop-color="#586b85" stop-opacity=".01"/></radialGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#moon-5-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#d8e4ff" stroke-opacity=".12"/>
+  <ellipse cx="235" cy="268" rx="166" ry="163" fill="url(#moon-5-halo)" opacity=".35"/>
+  <path d="M400 123C355 161 313 161 263 182C200 209 146 248 137 299C126 360 178 399 235 385C286 373 327 331 345 287C314 330 269 345 239 324C207 301 224 263 263 232C310 195 371 178 400 123Z" fill="url(#moon-5-body)"/>
+  <path d="M400 123C355 161 313 161 263 182C200 209 146 248 137 299C126 360 178 399 235 385C186 379 168 353 177 319C189 275 239 236 282 209C332 178 373 156 400 123Z" fill="url(#moon-5-face)"/>
+  <path d="M137 299C146 248 200 209 263 182C313 161 355 161 400 123" fill="none" stroke="url(#moon-5-rim)" stroke-width="2"/>
+</svg>
+
+
+
+
+<text x="720" y="612" text-anchor="middle" fill="#54616a" font-size="15">柔银 / 夜蓝 · 月色与流动兼顾</text>
+<path d="M536 640H904" stroke="#e8e9e5"/>
+<text x="536" y="679" fill="#81878b" font-size="11" letter-spacing="1.5">ACTUAL SIZE</text>
+<svg x="670.0" y="672.0" width="16" height="16" viewBox="0 0 512 512">
+  <title id="moon-6-title">HyperDR — 月流</title>
+  <desc id="moon-6-desc">舒展的月牙上端化为长光尾，下端渐入深蓝，保留掠光的斜向流动。</desc>
+  <defs>
+    <linearGradient id="moon-6-bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#1b2330"/><stop offset=".6" stop-color="#101723"/><stop offset="1" stop-color="#0c111b"/></linearGradient>
+    <linearGradient id="moon-6-body" x1=".15" y1=".05" x2=".72" y2="1"><stop stop-color="#e3edf8"/><stop offset=".3" stop-color="#acc4e0"/><stop offset=".68" stop-color="#6683b0"/><stop offset="1" stop-color="#344966"/></linearGradient>
+    <linearGradient id="moon-6-face" x1=".2" y1=".15" x2=".8" y2="1"><stop stop-color="#fffdf2"/><stop offset=".35" stop-color="#eef1f3"/><stop offset=".65" stop-color="#c9d8eb"/><stop offset="1" stop-color="#748eaf"/></linearGradient>
+    <linearGradient id="moon-6-rim" x1=".3" y1="0" x2=".4" y2="1"><stop stop-color="#fffdf1" stop-opacity=".95"/><stop offset=".5" stop-color="#e8efff" stop-opacity=".45"/><stop offset="1" stop-color="#a9c5ff" stop-opacity="0"/></linearGradient>
+    <radialGradient id="moon-6-halo"><stop offset=".35" stop-color="#98b2e7" stop-opacity=".12"/><stop offset=".65" stop-color="#7a98d3" stop-opacity=".055"/><stop offset="1" stop-color="#7799d6" stop-opacity="0"/></radialGradient>
+    <radialGradient id="moon-6-moon-disc" cx=".28" cy=".34" r=".8"><stop stop-color="#859bbe" stop-opacity=".13"/><stop offset=".8" stop-color="#667d9e" stop-opacity=".035"/><stop offset="1" stop-color="#586b85" stop-opacity=".01"/></radialGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#moon-6-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#d8e4ff" stroke-opacity=".12"/>
+  <ellipse cx="235" cy="268" rx="166" ry="163" fill="url(#moon-6-halo)" opacity=".35"/>
+  <path d="M400 123C355 161 313 161 263 182C200 209 146 248 137 299C126 360 178 399 235 385C286 373 327 331 345 287C314 330 269 345 239 324C207 301 224 263 263 232C310 195 371 178 400 123Z" fill="url(#moon-6-body)"/>
+  <path d="M400 123C355 161 313 161 263 182C200 209 146 248 137 299C126 360 178 399 235 385C186 379 168 353 177 319C189 275 239 236 282 209C332 178 373 156 400 123Z" fill="url(#moon-6-face)"/>
+  <path d="M137 299C146 248 200 209 263 182C313 161 355 161 400 123" fill="none" stroke="url(#moon-6-rim)" stroke-width="2"/>
+</svg>
+
+
+
+
+<text x="678" y="727" text-anchor="middle" fill="#8b9296" font-size="11">16</text>
+<svg x="722.0" y="668.0" width="24" height="24" viewBox="0 0 512 512">
+  <title id="moon-7-title">HyperDR — 月流</title>
+  <desc id="moon-7-desc">舒展的月牙上端化为长光尾，下端渐入深蓝，保留掠光的斜向流动。</desc>
+  <defs>
+    <linearGradient id="moon-7-bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#1b2330"/><stop offset=".6" stop-color="#101723"/><stop offset="1" stop-color="#0c111b"/></linearGradient>
+    <linearGradient id="moon-7-body" x1=".15" y1=".05" x2=".72" y2="1"><stop stop-color="#e3edf8"/><stop offset=".3" stop-color="#acc4e0"/><stop offset=".68" stop-color="#6683b0"/><stop offset="1" stop-color="#344966"/></linearGradient>
+    <linearGradient id="moon-7-face" x1=".2" y1=".15" x2=".8" y2="1"><stop stop-color="#fffdf2"/><stop offset=".35" stop-color="#eef1f3"/><stop offset=".65" stop-color="#c9d8eb"/><stop offset="1" stop-color="#748eaf"/></linearGradient>
+    <linearGradient id="moon-7-rim" x1=".3" y1="0" x2=".4" y2="1"><stop stop-color="#fffdf1" stop-opacity=".95"/><stop offset=".5" stop-color="#e8efff" stop-opacity=".45"/><stop offset="1" stop-color="#a9c5ff" stop-opacity="0"/></linearGradient>
+    <radialGradient id="moon-7-halo"><stop offset=".35" stop-color="#98b2e7" stop-opacity=".12"/><stop offset=".65" stop-color="#7a98d3" stop-opacity=".055"/><stop offset="1" stop-color="#7799d6" stop-opacity="0"/></radialGradient>
+    <radialGradient id="moon-7-moon-disc" cx=".28" cy=".34" r=".8"><stop stop-color="#859bbe" stop-opacity=".13"/><stop offset=".8" stop-color="#667d9e" stop-opacity=".035"/><stop offset="1" stop-color="#586b85" stop-opacity=".01"/></radialGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#moon-7-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#d8e4ff" stroke-opacity=".12"/>
+  <ellipse cx="235" cy="268" rx="166" ry="163" fill="url(#moon-7-halo)" opacity=".35"/>
+  <path d="M400 123C355 161 313 161 263 182C200 209 146 248 137 299C126 360 178 399 235 385C286 373 327 331 345 287C314 330 269 345 239 324C207 301 224 263 263 232C310 195 371 178 400 123Z" fill="url(#moon-7-body)"/>
+  <path d="M400 123C355 161 313 161 263 182C200 209 146 248 137 299C126 360 178 399 235 385C186 379 168 353 177 319C189 275 239 236 282 209C332 178 373 156 400 123Z" fill="url(#moon-7-face)"/>
+  <path d="M137 299C146 248 200 209 263 182C313 161 355 161 400 123" fill="none" stroke="url(#moon-7-rim)" stroke-width="2"/>
+</svg>
+
+
+
+
+<text x="734" y="727" text-anchor="middle" fill="#8b9296" font-size="11">24</text>
+<svg x="774.0" y="664.0" width="32" height="32" viewBox="0 0 512 512">
+  <title id="moon-8-title">HyperDR — 月流</title>
+  <desc id="moon-8-desc">舒展的月牙上端化为长光尾，下端渐入深蓝，保留掠光的斜向流动。</desc>
+  <defs>
+    <linearGradient id="moon-8-bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#1b2330"/><stop offset=".6" stop-color="#101723"/><stop offset="1" stop-color="#0c111b"/></linearGradient>
+    <linearGradient id="moon-8-body" x1=".15" y1=".05" x2=".72" y2="1"><stop stop-color="#e3edf8"/><stop offset=".3" stop-color="#acc4e0"/><stop offset=".68" stop-color="#6683b0"/><stop offset="1" stop-color="#344966"/></linearGradient>
+    <linearGradient id="moon-8-face" x1=".2" y1=".15" x2=".8" y2="1"><stop stop-color="#fffdf2"/><stop offset=".35" stop-color="#eef1f3"/><stop offset=".65" stop-color="#c9d8eb"/><stop offset="1" stop-color="#748eaf"/></linearGradient>
+    <linearGradient id="moon-8-rim" x1=".3" y1="0" x2=".4" y2="1"><stop stop-color="#fffdf1" stop-opacity=".95"/><stop offset=".5" stop-color="#e8efff" stop-opacity=".45"/><stop offset="1" stop-color="#a9c5ff" stop-opacity="0"/></linearGradient>
+    <radialGradient id="moon-8-halo"><stop offset=".35" stop-color="#98b2e7" stop-opacity=".12"/><stop offset=".65" stop-color="#7a98d3" stop-opacity=".055"/><stop offset="1" stop-color="#7799d6" stop-opacity="0"/></radialGradient>
+    <radialGradient id="moon-8-moon-disc" cx=".28" cy=".34" r=".8"><stop stop-color="#859bbe" stop-opacity=".13"/><stop offset=".8" stop-color="#667d9e" stop-opacity=".035"/><stop offset="1" stop-color="#586b85" stop-opacity=".01"/></radialGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#moon-8-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#d8e4ff" stroke-opacity=".12"/>
+  <ellipse cx="235" cy="268" rx="166" ry="163" fill="url(#moon-8-halo)" opacity=".35"/>
+  <path d="M400 123C355 161 313 161 263 182C200 209 146 248 137 299C126 360 178 399 235 385C286 373 327 331 345 287C314 330 269 345 239 324C207 301 224 263 263 232C310 195 371 178 400 123Z" fill="url(#moon-8-body)"/>
+  <path d="M400 123C355 161 313 161 263 182C200 209 146 248 137 299C126 360 178 399 235 385C186 379 168 353 177 319C189 275 239 236 282 209C332 178 373 156 400 123Z" fill="url(#moon-8-face)"/>
+  <path d="M137 299C146 248 200 209 263 182C313 161 355 161 400 123" fill="none" stroke="url(#moon-8-rim)" stroke-width="2"/>
+</svg>
+
+
+
+
+<text x="790" y="727" text-anchor="middle" fill="#8b9296" font-size="11">32</text>
+<svg x="822.0" y="656.0" width="48" height="48" viewBox="0 0 512 512">
+  <title id="moon-9-title">HyperDR — 月流</title>
+  <desc id="moon-9-desc">舒展的月牙上端化为长光尾，下端渐入深蓝，保留掠光的斜向流动。</desc>
+  <defs>
+    <linearGradient id="moon-9-bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#1b2330"/><stop offset=".6" stop-color="#101723"/><stop offset="1" stop-color="#0c111b"/></linearGradient>
+    <linearGradient id="moon-9-body" x1=".15" y1=".05" x2=".72" y2="1"><stop stop-color="#e3edf8"/><stop offset=".3" stop-color="#acc4e0"/><stop offset=".68" stop-color="#6683b0"/><stop offset="1" stop-color="#344966"/></linearGradient>
+    <linearGradient id="moon-9-face" x1=".2" y1=".15" x2=".8" y2="1"><stop stop-color="#fffdf2"/><stop offset=".35" stop-color="#eef1f3"/><stop offset=".65" stop-color="#c9d8eb"/><stop offset="1" stop-color="#748eaf"/></linearGradient>
+    <linearGradient id="moon-9-rim" x1=".3" y1="0" x2=".4" y2="1"><stop stop-color="#fffdf1" stop-opacity=".95"/><stop offset=".5" stop-color="#e8efff" stop-opacity=".45"/><stop offset="1" stop-color="#a9c5ff" stop-opacity="0"/></linearGradient>
+    <radialGradient id="moon-9-halo"><stop offset=".35" stop-color="#98b2e7" stop-opacity=".12"/><stop offset=".65" stop-color="#7a98d3" stop-opacity=".055"/><stop offset="1" stop-color="#7799d6" stop-opacity="0"/></radialGradient>
+    <radialGradient id="moon-9-moon-disc" cx=".28" cy=".34" r=".8"><stop stop-color="#859bbe" stop-opacity=".13"/><stop offset=".8" stop-color="#667d9e" stop-opacity=".035"/><stop offset="1" stop-color="#586b85" stop-opacity=".01"/></radialGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#moon-9-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#d8e4ff" stroke-opacity=".12"/>
+  <ellipse cx="235" cy="268" rx="166" ry="163" fill="url(#moon-9-halo)" opacity=".35"/>
+  <path d="M400 123C355 161 313 161 263 182C200 209 146 248 137 299C126 360 178 399 235 385C286 373 327 331 345 287C314 330 269 345 239 324C207 301 224 263 263 232C310 195 371 178 400 123Z" fill="url(#moon-9-body)"/>
+  <path d="M400 123C355 161 313 161 263 182C200 209 146 248 137 299C126 360 178 399 235 385C186 379 168 353 177 319C189 275 239 236 282 209C332 178 373 156 400 123Z" fill="url(#moon-9-face)"/>
+  <path d="M137 299C146 248 200 209 263 182C313 161 355 161 400 123" fill="none" stroke="url(#moon-9-rim)" stroke-width="2"/>
+</svg>
+
+
+
+
+<text x="846" y="727" text-anchor="middle" fill="#8b9296" font-size="11">48</text>
+<text x="536" y="773" fill="#6c747a" font-size="14">建议优先细化</text>
+<rect x="952" y="202" width="424" height="600" rx="24" fill="#fcfcfa"/>
+<text x="980" y="247" fill="#20262a" font-size="23" font-weight="600">03 / 月晕</text>
+<text x="980" y="278" fill="#727b82" font-size="15">在月光背后，留下一层淡淡的月盘</text>
+<svg x="1030" y="307" width="268" height="268" viewBox="0 0 512 512">
+  <title id="moon-10-title">HyperDR — 月晕</title>
+  <desc id="moon-10-desc">微弱的月盘与柔和光晕托住一弯流动亮面，月光氛围更明显。</desc>
+  <defs>
+    <linearGradient id="moon-10-bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#1b2330"/><stop offset=".6" stop-color="#101723"/><stop offset="1" stop-color="#0c111b"/></linearGradient>
+    <linearGradient id="moon-10-body" x1=".15" y1=".05" x2=".72" y2="1"><stop stop-color="#e3edf8"/><stop offset=".3" stop-color="#acc4e0"/><stop offset=".68" stop-color="#6683b0"/><stop offset="1" stop-color="#344966"/></linearGradient>
+    <linearGradient id="moon-10-face" x1=".2" y1=".15" x2=".8" y2="1"><stop stop-color="#fffdf2"/><stop offset=".35" stop-color="#eef1f3"/><stop offset=".65" stop-color="#c9d8eb"/><stop offset="1" stop-color="#748eaf"/></linearGradient>
+    <linearGradient id="moon-10-rim" x1=".3" y1="0" x2=".4" y2="1"><stop stop-color="#fffdf1" stop-opacity=".95"/><stop offset=".5" stop-color="#e8efff" stop-opacity=".45"/><stop offset="1" stop-color="#a9c5ff" stop-opacity="0"/></linearGradient>
+    <radialGradient id="moon-10-halo"><stop offset=".35" stop-color="#98b2e7" stop-opacity=".12"/><stop offset=".65" stop-color="#7a98d3" stop-opacity=".055"/><stop offset="1" stop-color="#7799d6" stop-opacity="0"/></radialGradient>
+    <radialGradient id="moon-10-moon-disc" cx=".28" cy=".34" r=".8"><stop stop-color="#859bbe" stop-opacity=".13"/><stop offset=".8" stop-color="#667d9e" stop-opacity=".035"/><stop offset="1" stop-color="#586b85" stop-opacity=".01"/></radialGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#moon-10-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#d8e4ff" stroke-opacity=".12"/>
+  <circle cx="259" cy="264" r="179" fill="url(#moon-10-halo)"/>
+  <circle cx="261" cy="258" r="119" fill="url(#moon-10-moon-disc)"/>
+  <path d="M392 137C343 164 300 158 250 175C188 196 142 243 144 298C146 355 201 392 259 371C303 355 336 321 351 282C315 327 266 339 236 313C206 286 220 247 261 216C304 184 360 178 392 137Z" fill="url(#moon-10-body)"/>
+  <path d="M392 137C343 164 300 158 250 175C188 196 142 243 144 298C146 355 201 392 259 371C207 376 178 345 184 305C191 258 233 226 279 201C323 177 360 166 392 137Z" fill="url(#moon-10-face)"/>
+  <path d="M144 298C142 243 188 196 250 175C300 158 343 164 392 137" fill="none" stroke="url(#moon-10-rim)" stroke-width="2"/>
+</svg>
+
+
+
+
+<text x="1164" y="612" text-anchor="middle" fill="#54616a" font-size="15">淡月盘 / 微光晕 · 更有夜色氛围</text>
+<path d="M980 640H1348" stroke="#e8e9e5"/>
+<text x="980" y="679" fill="#81878b" font-size="11" letter-spacing="1.5">ACTUAL SIZE</text>
+<svg x="1114.0" y="672.0" width="16" height="16" viewBox="0 0 512 512">
+  <title id="moon-11-title">HyperDR — 月晕</title>
+  <desc id="moon-11-desc">微弱的月盘与柔和光晕托住一弯流动亮面，月光氛围更明显。</desc>
+  <defs>
+    <linearGradient id="moon-11-bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#1b2330"/><stop offset=".6" stop-color="#101723"/><stop offset="1" stop-color="#0c111b"/></linearGradient>
+    <linearGradient id="moon-11-body" x1=".15" y1=".05" x2=".72" y2="1"><stop stop-color="#e3edf8"/><stop offset=".3" stop-color="#acc4e0"/><stop offset=".68" stop-color="#6683b0"/><stop offset="1" stop-color="#344966"/></linearGradient>
+    <linearGradient id="moon-11-face" x1=".2" y1=".15" x2=".8" y2="1"><stop stop-color="#fffdf2"/><stop offset=".35" stop-color="#eef1f3"/><stop offset=".65" stop-color="#c9d8eb"/><stop offset="1" stop-color="#748eaf"/></linearGradient>
+    <linearGradient id="moon-11-rim" x1=".3" y1="0" x2=".4" y2="1"><stop stop-color="#fffdf1" stop-opacity=".95"/><stop offset=".5" stop-color="#e8efff" stop-opacity=".45"/><stop offset="1" stop-color="#a9c5ff" stop-opacity="0"/></linearGradient>
+    <radialGradient id="moon-11-halo"><stop offset=".35" stop-color="#98b2e7" stop-opacity=".12"/><stop offset=".65" stop-color="#7a98d3" stop-opacity=".055"/><stop offset="1" stop-color="#7799d6" stop-opacity="0"/></radialGradient>
+    <radialGradient id="moon-11-moon-disc" cx=".28" cy=".34" r=".8"><stop stop-color="#859bbe" stop-opacity=".13"/><stop offset=".8" stop-color="#667d9e" stop-opacity=".035"/><stop offset="1" stop-color="#586b85" stop-opacity=".01"/></radialGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#moon-11-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#d8e4ff" stroke-opacity=".12"/>
+  <circle cx="259" cy="264" r="179" fill="url(#moon-11-halo)"/>
+  <circle cx="261" cy="258" r="119" fill="url(#moon-11-moon-disc)"/>
+  <path d="M392 137C343 164 300 158 250 175C188 196 142 243 144 298C146 355 201 392 259 371C303 355 336 321 351 282C315 327 266 339 236 313C206 286 220 247 261 216C304 184 360 178 392 137Z" fill="url(#moon-11-body)"/>
+  <path d="M392 137C343 164 300 158 250 175C188 196 142 243 144 298C146 355 201 392 259 371C207 376 178 345 184 305C191 258 233 226 279 201C323 177 360 166 392 137Z" fill="url(#moon-11-face)"/>
+  <path d="M144 298C142 243 188 196 250 175C300 158 343 164 392 137" fill="none" stroke="url(#moon-11-rim)" stroke-width="2"/>
+</svg>
+
+
+
+
+<text x="1122" y="727" text-anchor="middle" fill="#8b9296" font-size="11">16</text>
+<svg x="1166.0" y="668.0" width="24" height="24" viewBox="0 0 512 512">
+  <title id="moon-12-title">HyperDR — 月晕</title>
+  <desc id="moon-12-desc">微弱的月盘与柔和光晕托住一弯流动亮面，月光氛围更明显。</desc>
+  <defs>
+    <linearGradient id="moon-12-bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#1b2330"/><stop offset=".6" stop-color="#101723"/><stop offset="1" stop-color="#0c111b"/></linearGradient>
+    <linearGradient id="moon-12-body" x1=".15" y1=".05" x2=".72" y2="1"><stop stop-color="#e3edf8"/><stop offset=".3" stop-color="#acc4e0"/><stop offset=".68" stop-color="#6683b0"/><stop offset="1" stop-color="#344966"/></linearGradient>
+    <linearGradient id="moon-12-face" x1=".2" y1=".15" x2=".8" y2="1"><stop stop-color="#fffdf2"/><stop offset=".35" stop-color="#eef1f3"/><stop offset=".65" stop-color="#c9d8eb"/><stop offset="1" stop-color="#748eaf"/></linearGradient>
+    <linearGradient id="moon-12-rim" x1=".3" y1="0" x2=".4" y2="1"><stop stop-color="#fffdf1" stop-opacity=".95"/><stop offset=".5" stop-color="#e8efff" stop-opacity=".45"/><stop offset="1" stop-color="#a9c5ff" stop-opacity="0"/></linearGradient>
+    <radialGradient id="moon-12-halo"><stop offset=".35" stop-color="#98b2e7" stop-opacity=".12"/><stop offset=".65" stop-color="#7a98d3" stop-opacity=".055"/><stop offset="1" stop-color="#7799d6" stop-opacity="0"/></radialGradient>
+    <radialGradient id="moon-12-moon-disc" cx=".28" cy=".34" r=".8"><stop stop-color="#859bbe" stop-opacity=".13"/><stop offset=".8" stop-color="#667d9e" stop-opacity=".035"/><stop offset="1" stop-color="#586b85" stop-opacity=".01"/></radialGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#moon-12-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#d8e4ff" stroke-opacity=".12"/>
+  <circle cx="259" cy="264" r="179" fill="url(#moon-12-halo)"/>
+  <circle cx="261" cy="258" r="119" fill="url(#moon-12-moon-disc)"/>
+  <path d="M392 137C343 164 300 158 250 175C188 196 142 243 144 298C146 355 201 392 259 371C303 355 336 321 351 282C315 327 266 339 236 313C206 286 220 247 261 216C304 184 360 178 392 137Z" fill="url(#moon-12-body)"/>
+  <path d="M392 137C343 164 300 158 250 175C188 196 142 243 144 298C146 355 201 392 259 371C207 376 178 345 184 305C191 258 233 226 279 201C323 177 360 166 392 137Z" fill="url(#moon-12-face)"/>
+  <path d="M144 298C142 243 188 196 250 175C300 158 343 164 392 137" fill="none" stroke="url(#moon-12-rim)" stroke-width="2"/>
+</svg>
+
+
+
+
+<text x="1178" y="727" text-anchor="middle" fill="#8b9296" font-size="11">24</text>
+<svg x="1218.0" y="664.0" width="32" height="32" viewBox="0 0 512 512">
+  <title id="moon-13-title">HyperDR — 月晕</title>
+  <desc id="moon-13-desc">微弱的月盘与柔和光晕托住一弯流动亮面，月光氛围更明显。</desc>
+  <defs>
+    <linearGradient id="moon-13-bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#1b2330"/><stop offset=".6" stop-color="#101723"/><stop offset="1" stop-color="#0c111b"/></linearGradient>
+    <linearGradient id="moon-13-body" x1=".15" y1=".05" x2=".72" y2="1"><stop stop-color="#e3edf8"/><stop offset=".3" stop-color="#acc4e0"/><stop offset=".68" stop-color="#6683b0"/><stop offset="1" stop-color="#344966"/></linearGradient>
+    <linearGradient id="moon-13-face" x1=".2" y1=".15" x2=".8" y2="1"><stop stop-color="#fffdf2"/><stop offset=".35" stop-color="#eef1f3"/><stop offset=".65" stop-color="#c9d8eb"/><stop offset="1" stop-color="#748eaf"/></linearGradient>
+    <linearGradient id="moon-13-rim" x1=".3" y1="0" x2=".4" y2="1"><stop stop-color="#fffdf1" stop-opacity=".95"/><stop offset=".5" stop-color="#e8efff" stop-opacity=".45"/><stop offset="1" stop-color="#a9c5ff" stop-opacity="0"/></linearGradient>
+    <radialGradient id="moon-13-halo"><stop offset=".35" stop-color="#98b2e7" stop-opacity=".12"/><stop offset=".65" stop-color="#7a98d3" stop-opacity=".055"/><stop offset="1" stop-color="#7799d6" stop-opacity="0"/></radialGradient>
+    <radialGradient id="moon-13-moon-disc" cx=".28" cy=".34" r=".8"><stop stop-color="#859bbe" stop-opacity=".13"/><stop offset=".8" stop-color="#667d9e" stop-opacity=".035"/><stop offset="1" stop-color="#586b85" stop-opacity=".01"/></radialGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#moon-13-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#d8e4ff" stroke-opacity=".12"/>
+  <circle cx="259" cy="264" r="179" fill="url(#moon-13-halo)"/>
+  <circle cx="261" cy="258" r="119" fill="url(#moon-13-moon-disc)"/>
+  <path d="M392 137C343 164 300 158 250 175C188 196 142 243 144 298C146 355 201 392 259 371C303 355 336 321 351 282C315 327 266 339 236 313C206 286 220 247 261 216C304 184 360 178 392 137Z" fill="url(#moon-13-body)"/>
+  <path d="M392 137C343 164 300 158 250 175C188 196 142 243 144 298C146 355 201 392 259 371C207 376 178 345 184 305C191 258 233 226 279 201C323 177 360 166 392 137Z" fill="url(#moon-13-face)"/>
+  <path d="M144 298C142 243 188 196 250 175C300 158 343 164 392 137" fill="none" stroke="url(#moon-13-rim)" stroke-width="2"/>
+</svg>
+
+
+
+
+<text x="1234" y="727" text-anchor="middle" fill="#8b9296" font-size="11">32</text>
+<svg x="1266.0" y="656.0" width="48" height="48" viewBox="0 0 512 512">
+  <title id="moon-14-title">HyperDR — 月晕</title>
+  <desc id="moon-14-desc">微弱的月盘与柔和光晕托住一弯流动亮面，月光氛围更明显。</desc>
+  <defs>
+    <linearGradient id="moon-14-bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#1b2330"/><stop offset=".6" stop-color="#101723"/><stop offset="1" stop-color="#0c111b"/></linearGradient>
+    <linearGradient id="moon-14-body" x1=".15" y1=".05" x2=".72" y2="1"><stop stop-color="#e3edf8"/><stop offset=".3" stop-color="#acc4e0"/><stop offset=".68" stop-color="#6683b0"/><stop offset="1" stop-color="#344966"/></linearGradient>
+    <linearGradient id="moon-14-face" x1=".2" y1=".15" x2=".8" y2="1"><stop stop-color="#fffdf2"/><stop offset=".35" stop-color="#eef1f3"/><stop offset=".65" stop-color="#c9d8eb"/><stop offset="1" stop-color="#748eaf"/></linearGradient>
+    <linearGradient id="moon-14-rim" x1=".3" y1="0" x2=".4" y2="1"><stop stop-color="#fffdf1" stop-opacity=".95"/><stop offset=".5" stop-color="#e8efff" stop-opacity=".45"/><stop offset="1" stop-color="#a9c5ff" stop-opacity="0"/></linearGradient>
+    <radialGradient id="moon-14-halo"><stop offset=".35" stop-color="#98b2e7" stop-opacity=".12"/><stop offset=".65" stop-color="#7a98d3" stop-opacity=".055"/><stop offset="1" stop-color="#7799d6" stop-opacity="0"/></radialGradient>
+    <radialGradient id="moon-14-moon-disc" cx=".28" cy=".34" r=".8"><stop stop-color="#859bbe" stop-opacity=".13"/><stop offset=".8" stop-color="#667d9e" stop-opacity=".035"/><stop offset="1" stop-color="#586b85" stop-opacity=".01"/></radialGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#moon-14-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#d8e4ff" stroke-opacity=".12"/>
+  <circle cx="259" cy="264" r="179" fill="url(#moon-14-halo)"/>
+  <circle cx="261" cy="258" r="119" fill="url(#moon-14-moon-disc)"/>
+  <path d="M392 137C343 164 300 158 250 175C188 196 142 243 144 298C146 355 201 392 259 371C303 355 336 321 351 282C315 327 266 339 236 313C206 286 220 247 261 216C304 184 360 178 392 137Z" fill="url(#moon-14-body)"/>
+  <path d="M392 137C343 164 300 158 250 175C188 196 142 243 144 298C146 355 201 392 259 371C207 376 178 345 184 305C191 258 233 226 279 201C323 177 360 166 392 137Z" fill="url(#moon-14-face)"/>
+  <path d="M144 298C142 243 188 196 250 175C300 158 343 164 392 137" fill="none" stroke="url(#moon-14-rim)" stroke-width="2"/>
+</svg>
+
+
+
+
+<text x="1290" y="727" text-anchor="middle" fill="#8b9296" font-size="11">48</text>
+<text x="980" y="773" fill="#6c747a" font-size="14">偏氛围</text>
+<text x="66" y="855" fill="#4c585f" font-size="17">月光来自明暗与色温，流动来自轮廓与收尾。</text>
+<text x="66" y="886" fill="#858c90" font-size="13">SVG 月光细化草案 · 16 / 24 / 32 / 48 px 对照 · 尚未替换应用图标</text>
+</g></svg>

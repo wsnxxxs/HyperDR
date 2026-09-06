@@ -1,0 +1,313 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="930" viewBox="0 0 1440 930" role="img" aria-labelledby="board-title">
+<title id="board-title">HyperDR 掠光的流动形态细化</title>
+<rect width="1440" height="930" fill="#f2f1ed"/>
+<g font-family="Microsoft YaHei,Segoe UI,sans-serif">
+<text x="64" y="65" fill="#607786" font-size="13" letter-spacing="3">HYPERDR / FLOW STUDIES 03</text>
+<text x="64" y="125" fill="#20262a" font-size="40" font-weight="600">让光流动起来。</text>
+<text x="66" y="161" fill="#687078" font-size="17">沿着「掠光」继续：拉长走势、错开两端、改变弧面宽窄，减少字母 C 的联想。</text>
+<rect x="64" y="202" width="424" height="600" rx="24" fill="#fcfcfa"/>
+<text x="92" y="247" fill="#20262a" font-size="23" font-weight="600">01 / 舒展</text>
+<text x="92" y="278" fill="#727b82" font-size="15">拉长斜向走势，让光从弧面掠过</text>
+<svg x="142" y="307" width="268" height="268" viewBox="0 0 512 512">
+  <title id="flow-0-title">HyperDR — 掠光 · 舒展</title>
+  <desc id="flow-0-desc">把圆弧拉长为斜向光带，头部向右上方伸展，尾部轻轻回收。</desc>
+  <defs>
+    <linearGradient id="flow-0-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="flow-0-body" x1=".15" y1="0" x2=".7" y2="1"><stop stop-color="#d7e6ec"/><stop offset=".32" stop-color="#83b7ce"/><stop offset=".7" stop-color="#5088ad"/><stop offset="1" stop-color="#25425f"/></linearGradient>
+    <linearGradient id="flow-0-face" x1=".2" y1="0" x2=".7" y2="1"><stop stop-color="#fff"/><stop offset=".4" stop-color="#e1eaf0"/><stop offset=".77" stop-color="#aac3d2"/><stop offset="1" stop-color="#6c9ab7"/></linearGradient>
+    <linearGradient id="flow-0-rim" x2="0" y2="1"><stop stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#c4e7f4" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#flow-0-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <path d="M399 125C352 164 313 165 269 184C201 214 149 248 139 299C126 361 184 405 246 386C293 372 330 334 345 291C315 335 269 351 240 329C210 306 226 265 264 235C309 200 370 182 399 125Z" fill="url(#flow-0-body)"/>
+  <path d="M399 125C352 164 313 165 269 184C201 214 149 248 139 299C126 361 184 405 246 386C196 383 174 355 183 320C194 276 243 241 286 213C335 181 372 164 399 125Z" fill="url(#flow-0-face)"/>
+  <path d="M139 299C149 248 201 214 269 184C313 165 352 164 399 125" fill="none" stroke="url(#flow-0-rim)" stroke-width="2"/>
+</svg>
+
+
+
+<text x="276" y="612" text-anchor="middle" fill="#54616a" font-size="15">向右上方舒展 · 保留原有弧面</text>
+<path d="M92 640H460" stroke="#e8e9e5"/>
+<text x="92" y="679" fill="#81878b" font-size="11" letter-spacing="1.5">ACTUAL SIZE</text>
+<svg x="226.0" y="672.0" width="16" height="16" viewBox="0 0 512 512">
+  <title id="flow-1-title">HyperDR — 掠光 · 舒展</title>
+  <desc id="flow-1-desc">把圆弧拉长为斜向光带，头部向右上方伸展，尾部轻轻回收。</desc>
+  <defs>
+    <linearGradient id="flow-1-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="flow-1-body" x1=".15" y1="0" x2=".7" y2="1"><stop stop-color="#d7e6ec"/><stop offset=".32" stop-color="#83b7ce"/><stop offset=".7" stop-color="#5088ad"/><stop offset="1" stop-color="#25425f"/></linearGradient>
+    <linearGradient id="flow-1-face" x1=".2" y1="0" x2=".7" y2="1"><stop stop-color="#fff"/><stop offset=".4" stop-color="#e1eaf0"/><stop offset=".77" stop-color="#aac3d2"/><stop offset="1" stop-color="#6c9ab7"/></linearGradient>
+    <linearGradient id="flow-1-rim" x2="0" y2="1"><stop stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#c4e7f4" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#flow-1-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <path d="M399 125C352 164 313 165 269 184C201 214 149 248 139 299C126 361 184 405 246 386C293 372 330 334 345 291C315 335 269 351 240 329C210 306 226 265 264 235C309 200 370 182 399 125Z" fill="url(#flow-1-body)"/>
+  <path d="M399 125C352 164 313 165 269 184C201 214 149 248 139 299C126 361 184 405 246 386C196 383 174 355 183 320C194 276 243 241 286 213C335 181 372 164 399 125Z" fill="url(#flow-1-face)"/>
+  <path d="M139 299C149 248 201 214 269 184C313 165 352 164 399 125" fill="none" stroke="url(#flow-1-rim)" stroke-width="2"/>
+</svg>
+
+
+
+<text x="234" y="727" text-anchor="middle" fill="#8b9296" font-size="11">16</text>
+<svg x="278.0" y="668.0" width="24" height="24" viewBox="0 0 512 512">
+  <title id="flow-2-title">HyperDR — 掠光 · 舒展</title>
+  <desc id="flow-2-desc">把圆弧拉长为斜向光带，头部向右上方伸展，尾部轻轻回收。</desc>
+  <defs>
+    <linearGradient id="flow-2-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="flow-2-body" x1=".15" y1="0" x2=".7" y2="1"><stop stop-color="#d7e6ec"/><stop offset=".32" stop-color="#83b7ce"/><stop offset=".7" stop-color="#5088ad"/><stop offset="1" stop-color="#25425f"/></linearGradient>
+    <linearGradient id="flow-2-face" x1=".2" y1="0" x2=".7" y2="1"><stop stop-color="#fff"/><stop offset=".4" stop-color="#e1eaf0"/><stop offset=".77" stop-color="#aac3d2"/><stop offset="1" stop-color="#6c9ab7"/></linearGradient>
+    <linearGradient id="flow-2-rim" x2="0" y2="1"><stop stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#c4e7f4" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#flow-2-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <path d="M399 125C352 164 313 165 269 184C201 214 149 248 139 299C126 361 184 405 246 386C293 372 330 334 345 291C315 335 269 351 240 329C210 306 226 265 264 235C309 200 370 182 399 125Z" fill="url(#flow-2-body)"/>
+  <path d="M399 125C352 164 313 165 269 184C201 214 149 248 139 299C126 361 184 405 246 386C196 383 174 355 183 320C194 276 243 241 286 213C335 181 372 164 399 125Z" fill="url(#flow-2-face)"/>
+  <path d="M139 299C149 248 201 214 269 184C313 165 352 164 399 125" fill="none" stroke="url(#flow-2-rim)" stroke-width="2"/>
+</svg>
+
+
+
+<text x="290" y="727" text-anchor="middle" fill="#8b9296" font-size="11">24</text>
+<svg x="330.0" y="664.0" width="32" height="32" viewBox="0 0 512 512">
+  <title id="flow-3-title">HyperDR — 掠光 · 舒展</title>
+  <desc id="flow-3-desc">把圆弧拉长为斜向光带，头部向右上方伸展，尾部轻轻回收。</desc>
+  <defs>
+    <linearGradient id="flow-3-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="flow-3-body" x1=".15" y1="0" x2=".7" y2="1"><stop stop-color="#d7e6ec"/><stop offset=".32" stop-color="#83b7ce"/><stop offset=".7" stop-color="#5088ad"/><stop offset="1" stop-color="#25425f"/></linearGradient>
+    <linearGradient id="flow-3-face" x1=".2" y1="0" x2=".7" y2="1"><stop stop-color="#fff"/><stop offset=".4" stop-color="#e1eaf0"/><stop offset=".77" stop-color="#aac3d2"/><stop offset="1" stop-color="#6c9ab7"/></linearGradient>
+    <linearGradient id="flow-3-rim" x2="0" y2="1"><stop stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#c4e7f4" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#flow-3-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <path d="M399 125C352 164 313 165 269 184C201 214 149 248 139 299C126 361 184 405 246 386C293 372 330 334 345 291C315 335 269 351 240 329C210 306 226 265 264 235C309 200 370 182 399 125Z" fill="url(#flow-3-body)"/>
+  <path d="M399 125C352 164 313 165 269 184C201 214 149 248 139 299C126 361 184 405 246 386C196 383 174 355 183 320C194 276 243 241 286 213C335 181 372 164 399 125Z" fill="url(#flow-3-face)"/>
+  <path d="M139 299C149 248 201 214 269 184C313 165 352 164 399 125" fill="none" stroke="url(#flow-3-rim)" stroke-width="2"/>
+</svg>
+
+
+
+<text x="346" y="727" text-anchor="middle" fill="#8b9296" font-size="11">32</text>
+<svg x="378.0" y="656.0" width="48" height="48" viewBox="0 0 512 512">
+  <title id="flow-4-title">HyperDR — 掠光 · 舒展</title>
+  <desc id="flow-4-desc">把圆弧拉长为斜向光带，头部向右上方伸展，尾部轻轻回收。</desc>
+  <defs>
+    <linearGradient id="flow-4-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="flow-4-body" x1=".15" y1="0" x2=".7" y2="1"><stop stop-color="#d7e6ec"/><stop offset=".32" stop-color="#83b7ce"/><stop offset=".7" stop-color="#5088ad"/><stop offset="1" stop-color="#25425f"/></linearGradient>
+    <linearGradient id="flow-4-face" x1=".2" y1="0" x2=".7" y2="1"><stop stop-color="#fff"/><stop offset=".4" stop-color="#e1eaf0"/><stop offset=".77" stop-color="#aac3d2"/><stop offset="1" stop-color="#6c9ab7"/></linearGradient>
+    <linearGradient id="flow-4-rim" x2="0" y2="1"><stop stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#c4e7f4" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#flow-4-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <path d="M399 125C352 164 313 165 269 184C201 214 149 248 139 299C126 361 184 405 246 386C293 372 330 334 345 291C315 335 269 351 240 329C210 306 226 265 264 235C309 200 370 182 399 125Z" fill="url(#flow-4-body)"/>
+  <path d="M399 125C352 164 313 165 269 184C201 214 149 248 139 299C126 361 184 405 246 386C196 383 174 355 183 320C194 276 243 241 286 213C335 181 372 164 399 125Z" fill="url(#flow-4-face)"/>
+  <path d="M139 299C149 248 201 214 269 184C313 165 352 164 399 125" fill="none" stroke="url(#flow-4-rim)" stroke-width="2"/>
+</svg>
+
+
+
+<text x="402" y="727" text-anchor="middle" fill="#8b9296" font-size="11">48</text>
+<text x="92" y="773" fill="#426b7d" font-size="14">更接近原案</text>
+<rect x="508" y="202" width="424" height="600" rx="24" fill="#fcfcfa"/>
+<text x="536" y="247" fill="#20262a" font-size="23" font-weight="600">02 / 回流</text>
+<text x="536" y="278" fill="#727b82" font-size="15">改变重心，让末端回旋并向外延伸</text>
+<svg x="586" y="307" width="268" height="268" viewBox="0 0 512 512">
+  <title id="flow-5-title">HyperDR — 掠光 · 回流</title>
+  <desc id="flow-5-desc">上窄下宽的偏心回旋，末端向左下方延伸，打破圆形字母的均匀轮廓。</desc>
+  <defs>
+    <linearGradient id="flow-5-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="flow-5-body" x1=".15" y1="0" x2=".7" y2="1"><stop stop-color="#d7e6ec"/><stop offset=".32" stop-color="#83b7ce"/><stop offset=".7" stop-color="#5088ad"/><stop offset="1" stop-color="#25425f"/></linearGradient>
+    <linearGradient id="flow-5-face" x1=".2" y1="0" x2=".7" y2="1"><stop stop-color="#fff"/><stop offset=".4" stop-color="#e1eaf0"/><stop offset=".77" stop-color="#aac3d2"/><stop offset="1" stop-color="#6c9ab7"/></linearGradient>
+    <linearGradient id="flow-5-rim" x2="0" y2="1"><stop stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#c4e7f4" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#flow-5-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <path d="M366 122C281 115 185 157 150 229C112 308 167 369 247 345C304 328 343 274 365 219C360 296 329 363 265 391C208 416 144 396 111 363C162 378 204 363 220 338C163 333 139 294 159 249C182 195 269 147 366 122Z" fill="url(#flow-5-body)"/>
+  <path d="M366 122C281 115 185 157 150 229C119 293 149 345 206 350C163 332 161 293 188 252C227 192 308 148 366 122Z" fill="url(#flow-5-face)"/>
+  <path d="M150 229C185 157 281 115 366 122" fill="none" stroke="url(#flow-5-rim)" stroke-width="2"/>
+</svg>
+
+
+
+<text x="720" y="612" text-anchor="middle" fill="#54616a" font-size="15">偏心回旋 · 更明显的转动趋势</text>
+<path d="M536 640H904" stroke="#e8e9e5"/>
+<text x="536" y="679" fill="#81878b" font-size="11" letter-spacing="1.5">ACTUAL SIZE</text>
+<svg x="670.0" y="672.0" width="16" height="16" viewBox="0 0 512 512">
+  <title id="flow-6-title">HyperDR — 掠光 · 回流</title>
+  <desc id="flow-6-desc">上窄下宽的偏心回旋，末端向左下方延伸，打破圆形字母的均匀轮廓。</desc>
+  <defs>
+    <linearGradient id="flow-6-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="flow-6-body" x1=".15" y1="0" x2=".7" y2="1"><stop stop-color="#d7e6ec"/><stop offset=".32" stop-color="#83b7ce"/><stop offset=".7" stop-color="#5088ad"/><stop offset="1" stop-color="#25425f"/></linearGradient>
+    <linearGradient id="flow-6-face" x1=".2" y1="0" x2=".7" y2="1"><stop stop-color="#fff"/><stop offset=".4" stop-color="#e1eaf0"/><stop offset=".77" stop-color="#aac3d2"/><stop offset="1" stop-color="#6c9ab7"/></linearGradient>
+    <linearGradient id="flow-6-rim" x2="0" y2="1"><stop stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#c4e7f4" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#flow-6-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <path d="M366 122C281 115 185 157 150 229C112 308 167 369 247 345C304 328 343 274 365 219C360 296 329 363 265 391C208 416 144 396 111 363C162 378 204 363 220 338C163 333 139 294 159 249C182 195 269 147 366 122Z" fill="url(#flow-6-body)"/>
+  <path d="M366 122C281 115 185 157 150 229C119 293 149 345 206 350C163 332 161 293 188 252C227 192 308 148 366 122Z" fill="url(#flow-6-face)"/>
+  <path d="M150 229C185 157 281 115 366 122" fill="none" stroke="url(#flow-6-rim)" stroke-width="2"/>
+</svg>
+
+
+
+<text x="678" y="727" text-anchor="middle" fill="#8b9296" font-size="11">16</text>
+<svg x="722.0" y="668.0" width="24" height="24" viewBox="0 0 512 512">
+  <title id="flow-7-title">HyperDR — 掠光 · 回流</title>
+  <desc id="flow-7-desc">上窄下宽的偏心回旋，末端向左下方延伸，打破圆形字母的均匀轮廓。</desc>
+  <defs>
+    <linearGradient id="flow-7-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="flow-7-body" x1=".15" y1="0" x2=".7" y2="1"><stop stop-color="#d7e6ec"/><stop offset=".32" stop-color="#83b7ce"/><stop offset=".7" stop-color="#5088ad"/><stop offset="1" stop-color="#25425f"/></linearGradient>
+    <linearGradient id="flow-7-face" x1=".2" y1="0" x2=".7" y2="1"><stop stop-color="#fff"/><stop offset=".4" stop-color="#e1eaf0"/><stop offset=".77" stop-color="#aac3d2"/><stop offset="1" stop-color="#6c9ab7"/></linearGradient>
+    <linearGradient id="flow-7-rim" x2="0" y2="1"><stop stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#c4e7f4" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#flow-7-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <path d="M366 122C281 115 185 157 150 229C112 308 167 369 247 345C304 328 343 274 365 219C360 296 329 363 265 391C208 416 144 396 111 363C162 378 204 363 220 338C163 333 139 294 159 249C182 195 269 147 366 122Z" fill="url(#flow-7-body)"/>
+  <path d="M366 122C281 115 185 157 150 229C119 293 149 345 206 350C163 332 161 293 188 252C227 192 308 148 366 122Z" fill="url(#flow-7-face)"/>
+  <path d="M150 229C185 157 281 115 366 122" fill="none" stroke="url(#flow-7-rim)" stroke-width="2"/>
+</svg>
+
+
+
+<text x="734" y="727" text-anchor="middle" fill="#8b9296" font-size="11">24</text>
+<svg x="774.0" y="664.0" width="32" height="32" viewBox="0 0 512 512">
+  <title id="flow-8-title">HyperDR — 掠光 · 回流</title>
+  <desc id="flow-8-desc">上窄下宽的偏心回旋，末端向左下方延伸，打破圆形字母的均匀轮廓。</desc>
+  <defs>
+    <linearGradient id="flow-8-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="flow-8-body" x1=".15" y1="0" x2=".7" y2="1"><stop stop-color="#d7e6ec"/><stop offset=".32" stop-color="#83b7ce"/><stop offset=".7" stop-color="#5088ad"/><stop offset="1" stop-color="#25425f"/></linearGradient>
+    <linearGradient id="flow-8-face" x1=".2" y1="0" x2=".7" y2="1"><stop stop-color="#fff"/><stop offset=".4" stop-color="#e1eaf0"/><stop offset=".77" stop-color="#aac3d2"/><stop offset="1" stop-color="#6c9ab7"/></linearGradient>
+    <linearGradient id="flow-8-rim" x2="0" y2="1"><stop stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#c4e7f4" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#flow-8-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <path d="M366 122C281 115 185 157 150 229C112 308 167 369 247 345C304 328 343 274 365 219C360 296 329 363 265 391C208 416 144 396 111 363C162 378 204 363 220 338C163 333 139 294 159 249C182 195 269 147 366 122Z" fill="url(#flow-8-body)"/>
+  <path d="M366 122C281 115 185 157 150 229C119 293 149 345 206 350C163 332 161 293 188 252C227 192 308 148 366 122Z" fill="url(#flow-8-face)"/>
+  <path d="M150 229C185 157 281 115 366 122" fill="none" stroke="url(#flow-8-rim)" stroke-width="2"/>
+</svg>
+
+
+
+<text x="790" y="727" text-anchor="middle" fill="#8b9296" font-size="11">32</text>
+<svg x="822.0" y="656.0" width="48" height="48" viewBox="0 0 512 512">
+  <title id="flow-9-title">HyperDR — 掠光 · 回流</title>
+  <desc id="flow-9-desc">上窄下宽的偏心回旋，末端向左下方延伸，打破圆形字母的均匀轮廓。</desc>
+  <defs>
+    <linearGradient id="flow-9-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="flow-9-body" x1=".15" y1="0" x2=".7" y2="1"><stop stop-color="#d7e6ec"/><stop offset=".32" stop-color="#83b7ce"/><stop offset=".7" stop-color="#5088ad"/><stop offset="1" stop-color="#25425f"/></linearGradient>
+    <linearGradient id="flow-9-face" x1=".2" y1="0" x2=".7" y2="1"><stop stop-color="#fff"/><stop offset=".4" stop-color="#e1eaf0"/><stop offset=".77" stop-color="#aac3d2"/><stop offset="1" stop-color="#6c9ab7"/></linearGradient>
+    <linearGradient id="flow-9-rim" x2="0" y2="1"><stop stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#c4e7f4" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#flow-9-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <path d="M366 122C281 115 185 157 150 229C112 308 167 369 247 345C304 328 343 274 365 219C360 296 329 363 265 391C208 416 144 396 111 363C162 378 204 363 220 338C163 333 139 294 159 249C182 195 269 147 366 122Z" fill="url(#flow-9-body)"/>
+  <path d="M366 122C281 115 185 157 150 229C119 293 149 345 206 350C163 332 161 293 188 252C227 192 308 148 366 122Z" fill="url(#flow-9-face)"/>
+  <path d="M150 229C185 157 281 115 366 122" fill="none" stroke="url(#flow-9-rim)" stroke-width="2"/>
+</svg>
+
+
+
+<text x="846" y="727" text-anchor="middle" fill="#8b9296" font-size="11">48</text>
+<text x="536" y="773" fill="#6c747a" font-size="14">更强调回旋</text>
+<rect x="952" y="202" width="424" height="600" rx="24" fill="#fcfcfa"/>
+<text x="980" y="247" fill="#20262a" font-size="23" font-weight="600">03 / 流带</text>
+<text x="980" y="278" fill="#727b82" font-size="15">两个末端反向展开，连成一条光带</text>
+<svg x="1030" y="307" width="268" height="268" viewBox="0 0 512 512">
+  <title id="flow-10-title">HyperDR — 掠光 · 流带</title>
+  <desc id="flow-10-desc">同一光带由宽变窄再展开，两个末端朝相反方向延伸，形成连续的流动曲线。</desc>
+  <defs>
+    <linearGradient id="flow-10-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="flow-10-body" x1=".15" y1="0" x2=".7" y2="1"><stop stop-color="#d7e6ec"/><stop offset=".32" stop-color="#83b7ce"/><stop offset=".7" stop-color="#5088ad"/><stop offset="1" stop-color="#25425f"/></linearGradient>
+    <linearGradient id="flow-10-face" x1=".2" y1="0" x2=".7" y2="1"><stop stop-color="#fff"/><stop offset=".4" stop-color="#e1eaf0"/><stop offset=".77" stop-color="#aac3d2"/><stop offset="1" stop-color="#6c9ab7"/></linearGradient>
+    <linearGradient id="flow-10-rim" x2="0" y2="1"><stop stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#c4e7f4" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#flow-10-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <path d="M395 130C344 164 291 163 245 186C196 211 180 242 194 273C208 303 247 307 249 332C251 356 225 380 173 396C257 395 317 355 306 310C298 277 257 264 254 241C249 207 332 198 367 168C380 157 389 144 395 130Z" fill="url(#flow-10-body)"/>
+  <path d="M395 130C344 164 291 163 245 186C196 211 180 242 194 273C208 303 247 307 249 332C251 356 225 380 173 396C231 369 225 338 208 318C183 288 157 272 169 235C191 173 313 160 395 130Z" fill="url(#flow-10-face)"/>
+  <path d="M169 235C191 173 313 160 395 130" fill="none" stroke="url(#flow-10-rim)" stroke-width="2"/>
+</svg>
+
+
+
+<text x="1164" y="612" text-anchor="middle" fill="#54616a" font-size="15">连续扭转 · 更强的流动趋势</text>
+<path d="M980 640H1348" stroke="#e8e9e5"/>
+<text x="980" y="679" fill="#81878b" font-size="11" letter-spacing="1.5">ACTUAL SIZE</text>
+<svg x="1114.0" y="672.0" width="16" height="16" viewBox="0 0 512 512">
+  <title id="flow-11-title">HyperDR — 掠光 · 流带</title>
+  <desc id="flow-11-desc">同一光带由宽变窄再展开，两个末端朝相反方向延伸，形成连续的流动曲线。</desc>
+  <defs>
+    <linearGradient id="flow-11-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="flow-11-body" x1=".15" y1="0" x2=".7" y2="1"><stop stop-color="#d7e6ec"/><stop offset=".32" stop-color="#83b7ce"/><stop offset=".7" stop-color="#5088ad"/><stop offset="1" stop-color="#25425f"/></linearGradient>
+    <linearGradient id="flow-11-face" x1=".2" y1="0" x2=".7" y2="1"><stop stop-color="#fff"/><stop offset=".4" stop-color="#e1eaf0"/><stop offset=".77" stop-color="#aac3d2"/><stop offset="1" stop-color="#6c9ab7"/></linearGradient>
+    <linearGradient id="flow-11-rim" x2="0" y2="1"><stop stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#c4e7f4" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#flow-11-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <path d="M395 130C344 164 291 163 245 186C196 211 180 242 194 273C208 303 247 307 249 332C251 356 225 380 173 396C257 395 317 355 306 310C298 277 257 264 254 241C249 207 332 198 367 168C380 157 389 144 395 130Z" fill="url(#flow-11-body)"/>
+  <path d="M395 130C344 164 291 163 245 186C196 211 180 242 194 273C208 303 247 307 249 332C251 356 225 380 173 396C231 369 225 338 208 318C183 288 157 272 169 235C191 173 313 160 395 130Z" fill="url(#flow-11-face)"/>
+  <path d="M169 235C191 173 313 160 395 130" fill="none" stroke="url(#flow-11-rim)" stroke-width="2"/>
+</svg>
+
+
+
+<text x="1122" y="727" text-anchor="middle" fill="#8b9296" font-size="11">16</text>
+<svg x="1166.0" y="668.0" width="24" height="24" viewBox="0 0 512 512">
+  <title id="flow-12-title">HyperDR — 掠光 · 流带</title>
+  <desc id="flow-12-desc">同一光带由宽变窄再展开，两个末端朝相反方向延伸，形成连续的流动曲线。</desc>
+  <defs>
+    <linearGradient id="flow-12-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="flow-12-body" x1=".15" y1="0" x2=".7" y2="1"><stop stop-color="#d7e6ec"/><stop offset=".32" stop-color="#83b7ce"/><stop offset=".7" stop-color="#5088ad"/><stop offset="1" stop-color="#25425f"/></linearGradient>
+    <linearGradient id="flow-12-face" x1=".2" y1="0" x2=".7" y2="1"><stop stop-color="#fff"/><stop offset=".4" stop-color="#e1eaf0"/><stop offset=".77" stop-color="#aac3d2"/><stop offset="1" stop-color="#6c9ab7"/></linearGradient>
+    <linearGradient id="flow-12-rim" x2="0" y2="1"><stop stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#c4e7f4" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#flow-12-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <path d="M395 130C344 164 291 163 245 186C196 211 180 242 194 273C208 303 247 307 249 332C251 356 225 380 173 396C257 395 317 355 306 310C298 277 257 264 254 241C249 207 332 198 367 168C380 157 389 144 395 130Z" fill="url(#flow-12-body)"/>
+  <path d="M395 130C344 164 291 163 245 186C196 211 180 242 194 273C208 303 247 307 249 332C251 356 225 380 173 396C231 369 225 338 208 318C183 288 157 272 169 235C191 173 313 160 395 130Z" fill="url(#flow-12-face)"/>
+  <path d="M169 235C191 173 313 160 395 130" fill="none" stroke="url(#flow-12-rim)" stroke-width="2"/>
+</svg>
+
+
+
+<text x="1178" y="727" text-anchor="middle" fill="#8b9296" font-size="11">24</text>
+<svg x="1218.0" y="664.0" width="32" height="32" viewBox="0 0 512 512">
+  <title id="flow-13-title">HyperDR — 掠光 · 流带</title>
+  <desc id="flow-13-desc">同一光带由宽变窄再展开，两个末端朝相反方向延伸，形成连续的流动曲线。</desc>
+  <defs>
+    <linearGradient id="flow-13-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="flow-13-body" x1=".15" y1="0" x2=".7" y2="1"><stop stop-color="#d7e6ec"/><stop offset=".32" stop-color="#83b7ce"/><stop offset=".7" stop-color="#5088ad"/><stop offset="1" stop-color="#25425f"/></linearGradient>
+    <linearGradient id="flow-13-face" x1=".2" y1="0" x2=".7" y2="1"><stop stop-color="#fff"/><stop offset=".4" stop-color="#e1eaf0"/><stop offset=".77" stop-color="#aac3d2"/><stop offset="1" stop-color="#6c9ab7"/></linearGradient>
+    <linearGradient id="flow-13-rim" x2="0" y2="1"><stop stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#c4e7f4" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#flow-13-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <path d="M395 130C344 164 291 163 245 186C196 211 180 242 194 273C208 303 247 307 249 332C251 356 225 380 173 396C257 395 317 355 306 310C298 277 257 264 254 241C249 207 332 198 367 168C380 157 389 144 395 130Z" fill="url(#flow-13-body)"/>
+  <path d="M395 130C344 164 291 163 245 186C196 211 180 242 194 273C208 303 247 307 249 332C251 356 225 380 173 396C231 369 225 338 208 318C183 288 157 272 169 235C191 173 313 160 395 130Z" fill="url(#flow-13-face)"/>
+  <path d="M169 235C191 173 313 160 395 130" fill="none" stroke="url(#flow-13-rim)" stroke-width="2"/>
+</svg>
+
+
+
+<text x="1234" y="727" text-anchor="middle" fill="#8b9296" font-size="11">32</text>
+<svg x="1266.0" y="656.0" width="48" height="48" viewBox="0 0 512 512">
+  <title id="flow-14-title">HyperDR — 掠光 · 流带</title>
+  <desc id="flow-14-desc">同一光带由宽变窄再展开，两个末端朝相反方向延伸，形成连续的流动曲线。</desc>
+  <defs>
+    <linearGradient id="flow-14-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="flow-14-body" x1=".15" y1="0" x2=".7" y2="1"><stop stop-color="#d7e6ec"/><stop offset=".32" stop-color="#83b7ce"/><stop offset=".7" stop-color="#5088ad"/><stop offset="1" stop-color="#25425f"/></linearGradient>
+    <linearGradient id="flow-14-face" x1=".2" y1="0" x2=".7" y2="1"><stop stop-color="#fff"/><stop offset=".4" stop-color="#e1eaf0"/><stop offset=".77" stop-color="#aac3d2"/><stop offset="1" stop-color="#6c9ab7"/></linearGradient>
+    <linearGradient id="flow-14-rim" x2="0" y2="1"><stop stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#c4e7f4" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#flow-14-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <path d="M395 130C344 164 291 163 245 186C196 211 180 242 194 273C208 303 247 307 249 332C251 356 225 380 173 396C257 395 317 355 306 310C298 277 257 264 254 241C249 207 332 198 367 168C380 157 389 144 395 130Z" fill="url(#flow-14-body)"/>
+  <path d="M395 130C344 164 291 163 245 186C196 211 180 242 194 273C208 303 247 307 249 332C251 356 225 380 173 396C231 369 225 338 208 318C183 288 157 272 169 235C191 173 313 160 395 130Z" fill="url(#flow-14-face)"/>
+  <path d="M169 235C191 173 313 160 395 130" fill="none" stroke="url(#flow-14-rim)" stroke-width="2"/>
+</svg>
+
+
+
+<text x="1290" y="727" text-anchor="middle" fill="#8b9296" font-size="11">48</text>
+<text x="980" y="773" fill="#6c747a" font-size="14">轮廓变化最大</text>
+<text x="66" y="855" fill="#4c585f" font-size="17">同一个「掠光」方向，比较三种流动程度。</text>
+<text x="66" y="886" fill="#858c90" font-size="13">SVG 细化草案 · 下方展示 16 / 24 / 32 / 48 px 尺寸 · 尚未替换应用图标</text>
+</g></svg>

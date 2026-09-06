@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title data-i18n="app.title">HyperDR — HDR 图片转换</title>
+<link rel="icon" href="./icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="./apple-touch-icon.png" sizes="180x180">
 <script>
   /* Painted before first paint, so a stored choice never flashes the wrong theme. */
   try {
@@ -127,12 +129,12 @@
         <div class="segmented segmented--small" role="group" data-role="hist-mode" data-i18n-attr="aria-label:scope.histMode"></div>
 
       </div>
-      <p class="scope-legend"><span class="swatch swatch--source" aria-hidden="true"></span><span data-i18n="scope.source">源分布</span><span class="swatch swatch--output" aria-hidden="true"></span><span data-i18n="scope.output">扩展后</span></p>
-      <div class="scope-plot">
-        <canvas class="scope-graph" data-role="histogram" width="380" height="72"></canvas>
-        <p class="scope-empty" data-i18n="scope.empty">暂无直方图数据</p>
+      <div class="scope-content" data-role="scope-content" data-empty="true">
+        <p class="scope-legend"><span class="scope-swatch scope-swatch--source" aria-hidden="true"></span><span data-i18n="scope.source">原图</span><span class="scope-swatch scope-swatch--output" aria-hidden="true"></span><span data-i18n="scope.output">当前效果</span></p>
+        <div class="scope-plot"><canvas class="scope-graph" data-role="histogram" width="380" height="144" role="img" data-i18n-attr="aria-label:scope.graph"></canvas></div>
+        <div class="scope-scale" aria-hidden="true"><span>0</span><span>SDR 100%</span><span>+2</span><span>+4 EV</span></div>
+        <p class="scope-empty" data-i18n="scope.empty">打开照片后显示亮度分布</p>
       </div>
-      <div class="scope-scale" aria-hidden="true"><span data-i18n="scope.cold">暗部</span><span data-i18n="inspector.midtones">中间调</span><span data-i18n="scope.hot">高光</span></div>
     </section>
 
     <section class="rail-welcome">

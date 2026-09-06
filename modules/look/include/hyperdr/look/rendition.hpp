@@ -4,6 +4,7 @@
 #include "hyperdr/image/image.hpp"
 #include <array>
 #include <optional>
+#include <span>
 
 namespace hyperdr {
 struct RenderOptions {
@@ -89,7 +90,11 @@ struct PhotoRenditions {
   FloatImage hdr;
   RenderStats stats;
   bool clamp_srgb{false};
+  // Selection made before creative grading; reused after gain quantization.
+  std::vector<std::uint8_t> below_knee;
 };
+void measure_rendition_stats(RenderStats& stats, const FloatImage& sdr,
+    const FloatImage& hdr, std::span<const std::uint8_t> below_knee = {});
 // Final SDR output gamut mapping, after creative colour processing.
 void fit_sdr_to_srgb(FloatImage& image);
 void validate_render_options(const RenderOptions& options);

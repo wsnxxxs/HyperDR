@@ -399,7 +399,8 @@ void append_float_image(std::vector<std::uint8_t>& bytes,
 }
 
 std::vector<std::uint8_t> native_preview_packet(const GainMapResult& result,
-                                                const DecodeInfo& decode) {
+                                                const DecodeInfo& decode,
+                                                const InputDescription& input) {
   // Wire format v1: magic, JSON byte length, UTF-8 JSON, then two tightly
   // packed little-endian HWC RGB float32 planes (SDR base, reconstructed HDR).
   // JSON makes status/geometry extensible while the pixel payload stays
@@ -417,6 +418,8 @@ std::vector<std::uint8_t> native_preview_packet(const GainMapResult& result,
       .member("colorSpace", "linear-display-p3")
       .member("relativeSdrWhite", 1.0F)
       .member("headroomStops", result.headroom_stops)
+      .member("inputDomain", input_domain_name(input.domain))
+      .member("inputHeadroomStops", std::log2(input.headroom))
       .member("status", decode.degraded ? "degraded" : "ok")
       .begin_array("degradationReasons");
   for (const auto& reason : decode.degradation_reasons) writer.element(reason);
@@ -446,7 +449,13 @@ int preview_frame_command(int argc, char** argv) {
   }
   validate_gain_map_options(options.gain);
   options.raw.ignore_embedded_gain_map = !options.external_gain_path.empty();
+  // This subcommand is a bounded preview by definition -- the edge is forced
+  // above if the caller left it out -- so the decoders may stop early rather
+  // than materialise a 48 MP raster the next line is about to shrink. RAW
+  // ignores this and keeps using --fast-preview's half_size.
+  options.raw.preview_max_edge = options.preview_max_edge;
   auto decoded = decode_image(options.input, options.raw);
+  const auto input = decoded.describe_input();
   decoded.linear_p3 = resample_to_max_edge(
       std::move(decoded.linear_p3), options.preview_max_edge);
   GainMapResult result;
@@ -464,7 +473,7 @@ int preview_frame_command(int argc, char** argv) {
   }
   validate_encoding_headroom(options.encoding, result.headroom_stops);
   write_binary_file_atomic(options.output_directory,
-                           native_preview_packet(result, decoded.decode), true);
+                           native_preview_packet(result, decoded.decode, input), true);
   return 0;
 }
 

@@ -24,17 +24,23 @@ import { defaultSettings, toOptions } from "../settings/schema.js";
 
 const hdrDisplayQuery = window.matchMedia("(dynamic-range: high)");
 
-/* Preview sizes are quantised: the server's preview cache keys on the edge and
- * holds eight entries, so a continuous "how wide is the stage right now" would
- * evict on every window drag. Three tiers cover phone to desktop, clamped to
- * what the server says it can decode. */
+/* Preview sizes are quantised so a continuous "how wide is the stage right now"
+ * does not create a new native frame on every window drag. Three tiers cover
+ * phone to desktop, clamped to what the server says it can decode. */
 const PREVIEW_TIERS = [960, 1280, 2048];
+const PREVIEW_RELOAD_DELAY_MS = 240;
 
 /* Shown on the photograph itself (see .stage-hint), so the gestures are
  * discoverable by sighted users too -- an aria-label alone only speaks to
  * screen readers. */
 const TOUCH_HINT = "轻点更换图片 · 缩放后拖动平移";
 const MOUSE_HINT = "轻点更换图片 · 按住查看原图 · 滚轮缩放";
+const INPUT_DOMAIN_LABELS = Object.freeze({
+  "display-referred-hdr": "输入：HDR",
+  "display-referred-sdr": "输入：SDR",
+  "scene-referred": "输入：RAW/场景源",
+  unknown: "输入：类型未知",
+});
 
 const VIEW_MODES = [["original", "原图"], ["split", "对比"], ["effect", "HDR 效果"]];
 const ZOOM_LEVELS = [
@@ -61,6 +67,7 @@ export function mountStage({ toast }) {
   const hdrStatus = role("hdr-status");
   const badge = role("hdr-badge");
   const fileInput = role("file-input");
+  const supportHint = role("stage-support");
   const divider = role("divider");
   const hdrCanvas = role("canvas-hdr");
   const originalCanvas = role("canvas-original");
@@ -95,6 +102,7 @@ export function mountStage({ toast }) {
   let rendererGeneration = 0;
   let panGesture = null;
   let spacePan = false;
+  let sourceDomainLabel = "";
 
   const isCurrentImage = (epoch) => epoch === imageGeneration;
   const invalidateImage = () => ++imageGeneration;
@@ -277,8 +285,12 @@ export function mountStage({ toast }) {
       originalCanvas.style.removeProperty("clip-path");
     }
 
-    setText(badge, original ? "SDR" : "HDR");
+    setText(badge, original ? "原图" : renderer?.kind === "hdr" ? "HDR 输出" : "SDR 近似");
     badge.hidden = !hasImage || renderer?.kind !== "hdr";
+    badge.title = original
+      ? "当前显示未调整的原图"
+      : "当前使用真实 HDR 输出；输入文件类型见右侧状态";
+    hdrStatus.hidden = !hasImage;
     hintEl.hidden = !hasImage;
     if (!hasImage) hintEl.classList.remove("is-visible");
     stage.classList.toggle("is-comparing", original);
@@ -321,16 +333,17 @@ export function mountStage({ toast }) {
   /* ── capability reporting ─────────────────────────────────────────── */
 
   function setCapability(message, ok) {
-    setText(hdrStatus, message);
+    setText(hdrStatus, sourceDomainLabel ? `${sourceDomainLabel} · ${message}` : message);
     hdrStatus.classList.toggle("is-ok", Boolean(ok));
-    stage.dataset.previewMode = renderer?.kind || "sdr-cpu";
+    hdrStatus.hidden = !Boolean(image.source);
+    stage.dataset.previewMode = renderer?.kind || "uninitialized";
   }
 
   function reportInitialCapability() {
-    if (!hdrDisplayQuery.matches) setCapability("SDR 屏幕 · 近似预览，导出仍是 HDR", false);
-    else if (!window.isSecureContext) setCapability("HTTP 模式 · 近似预览，导出仍是 HDR", false);
-    else if (!navigator.gpu) setCapability("无 WebGPU · 近似预览，导出仍是 HDR", false);
-    else setCapability("HDR 能力就绪", true);
+    if (!hdrDisplayQuery.matches) setCapability("SDR 屏幕预览 (导出为 HDR)", false);
+    else if (!window.isSecureContext) setCapability("HTTP 模式 (导出为 HDR)", false);
+    else if (!navigator.gpu) setCapability("无 WebGPU (导出为 HDR)", false);
+    else setCapability("等待图像 · 将在预览时验证 HDR 输出", false);
   }
 
   /* ── rendering ────────────────────────────────────────────────────── */
@@ -358,6 +371,15 @@ export function mountStage({ toast }) {
     sdrCanvas.hidden = mode !== "sdr" || showingOriginal();
   }
 
+  function prepareHdrCanvas() {
+    // Let the visible stage establish its clip before WebGPU creates the
+    // swap chain. This matters on Chromium when the canvas can become a
+    // DirectComposition overlay.
+    hdrCanvas.hidden = false;
+    sdrCanvas.hidden = true;
+    return new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+
   function canUseHdrRenderer() {
     return hdrDisplayQuery.matches && window.isSecureContext && Boolean(navigator.gpu);
   }
@@ -371,13 +393,13 @@ export function mountStage({ toast }) {
       let created = null;
       created = createSdrGpuRenderer(sdrCanvas, () => {
         if (isCurrentRenderer(epoch) && renderer === created) {
-          chooseSdrRenderer("SDR 图形设备已断开", epoch, true);
+          chooseSdrRenderer("SDR 图形设备断开", epoch, true);
         }
       });
       renderer = created;
       renderer.upload(image.frame);
       showCanvas("sdr");
-      setCapability(`${reason} · 近似预览，导出仍是 HDR`, false);
+      setCapability(`${reason} · SDR 预览 (导出为 HDR)`, false);
     } catch (error) {
       renderer = null;
       // A canvas that has successfully created a WebGL context cannot later
@@ -389,7 +411,7 @@ export function mountStage({ toast }) {
       sdrCanvas.replaceWith(replacement);
       sdrCanvas = replacement;
       showCanvas("sdr");
-      setCapability(`${reason} · 兼容近似预览，导出仍是 HDR`, false);
+      setCapability(`${reason} · SDR 兼容预览 (导出为 HDR)`, false);
     }
     syncView();
     schedule();
@@ -408,6 +430,12 @@ export function mountStage({ toast }) {
         || (!wantsHdr && renderer?.kind === "sdr-gpu")) {
       renderer.upload(image.frame);
       showCanvas(wantsHdr ? "hdr" : "sdr");
+      if (wantsHdr) {
+        const gamut = renderer.outputColorSpace === "display-p3" ? "Display P3" : "扩展 sRGB";
+        setCapability(`真 HDR · ${gamut}`, true);
+      } else {
+        setCapability("SDR 预览 (导出为 HDR)", false);
+      }
       syncView();
       schedule();
       return;
@@ -417,17 +445,20 @@ export function mountStage({ toast }) {
     renderer = null;
 
     if (!wantsHdr && !hdrDisplayQuery.matches) {
-      chooseSdrRenderer("当前屏幕为 SDR", epoch);
+      chooseSdrRenderer("SDR 屏幕", epoch);
     } else if (!wantsHdr && !window.isSecureContext) {
       chooseSdrRenderer("HTTP 模式", epoch);
     } else if (!wantsHdr && !navigator.gpu) {
-      chooseSdrRenderer("当前浏览器没有可用的 WebGPU", epoch);
+      chooseSdrRenderer("无 WebGPU 支持", epoch);
     } else {
       let created = null;
+      setCapability("验证 HDR 支持…", false);
       try {
+        await prepareHdrCanvas();
+        if (!isCurrentRenderer(epoch) || !image.frame) return;
         created = await createHdrRenderer(hdrCanvas, () => {
           if (isCurrentRenderer(epoch) && renderer === created) {
-            chooseSdrRenderer("HDR 图形设备已断开", epoch);
+            chooseSdrRenderer("HDR 设备断开", epoch);
           }
         });
         if (!isCurrentRenderer(epoch) || !image.frame) { created.destroy(); return; }
@@ -435,11 +466,13 @@ export function mountStage({ toast }) {
         renderer.upload(image.frame);
         showCanvas("hdr");
         const gamut = renderer.outputColorSpace === "display-p3" ? "Display P3" : "扩展 sRGB";
-        setCapability(`真 HDR · ${gamut} · 16-bit 浮点`, true);
+        setCapability(`真 HDR · ${gamut}`, true);
       } catch (error) {
         created?.destroy();
         if (!isCurrentRenderer(epoch)) return;
-        chooseSdrRenderer("WebGPU HDR 初始化失败", epoch);
+        const detail = error?.message ? `：${error.message}` : "";
+        console.error("HyperDR HDR renderer initialization failed", error);
+        chooseSdrRenderer(`WebGPU HDR 初始化失败${detail}`, epoch);
       }
     }
     if (!isCurrentRenderer(epoch)) return;
@@ -508,7 +541,7 @@ export function mountStage({ toast }) {
     }
   });
 
-  function clear(message = "选择图片") {
+  function clear(message = "选择图片，或拖到这里") {
     invalidateImage();
     invalidateRenderer();
     updateExpandedState(false);
@@ -522,11 +555,13 @@ export function mountStage({ toast }) {
     analysis.current = null;
     renderer?.destroy();
     renderer = null;
+    sourceDomainLabel = "";
     modelGain = null;
     analysis.modelGain = null;
     store.set({
       comparing: false, maskKey: null,
       zoomLevel: "fit", panX: 0, panY: 0,
+      previewReady: false,
       previewOptimized: false, modelGainReady: false, optimizing: false,
     });
     stage.classList.remove("has-image", "is-comparing");
@@ -541,6 +576,7 @@ export function mountStage({ toast }) {
     divider.hidden = true;
     empty.style.display = "flex";
     setText(emptyTitle, message);
+    reportInitialCapability();
     refreshScope();
     syncView();
   }
@@ -549,7 +585,7 @@ export function mountStage({ toast }) {
     const sessionId = store.get().sessionId;
     const epoch = invalidateImage();
     if (!sessionId) { clear(); reportInitialCapability(); return; }
-    setText(emptyTitle, "正在生成可调节预览…");
+    setText(emptyTitle, "正在生成预览…");
 
     try {
       const state = store.get();
@@ -565,6 +601,9 @@ export function mountStage({ toast }) {
       if (!isCurrentImage(epoch)) return;
       const { width, height } = preview;
       image.frame = preview;
+      sourceDomainLabel = INPUT_DOMAIN_LABELS[preview.metadata.inputDomain]
+        || INPUT_DOMAIN_LABELS.unknown;
+      setCapability("正在验证 HDR 输出", false);
       // Diagnostics receive an SDR display copy. Preview rendering consumes
       // only the untouched native float planes above.
       image.source = planeToImageData(preview.base, width, height);
@@ -608,12 +647,14 @@ export function mountStage({ toast }) {
         toast(`预览已降级：${reasons || "原生 HDR 解码失败"}`, true);
       }
       await chooseRenderer();
+      if (isCurrentImage(epoch)) store.set({ previewReady: true });
     } catch (error) {
       if (!isCurrentImage(epoch)) return;
       // A newer slider event may have cancelled this decode, or another
       // legitimate conversion may temporarily own the RAW budget. Neither is
       // a bad image and neither should flash the destructive red error toast.
       if (error.status === 499) return;
+      store.set({ previewReady: false });
       if (error.status === 503) {
         toast("预览正在切换，请稍候。");
         return;
@@ -656,6 +697,7 @@ export function mountStage({ toast }) {
         // output format, which is a workflow choice rather than a grade.
         ...defaultSettings(store.get().encoding),
         zoomLevel: "fit", panX: 0, panY: 0,
+        previewReady: false,
         previewOptimized: false, modelGainReady: false, optimizing: false,
       });
       await load({ resetOriginal: true });
@@ -679,6 +721,52 @@ export function mountStage({ toast }) {
     const state = store.get();
     return !state.uploading && !state.optimizing && !state.jobId;
   };
+  const nativeDropQueueKey = "__HYPERDR_NATIVE_FILE_DROPS__";
+  const consumeNativeDrop = () => {
+    const queued = globalThis[nativeDropQueueKey];
+    const capabilities = store.get().capabilities;
+    // Keep a native drop queued until the boot capability request completes;
+    // otherwise a very quick drop after launch would be mistaken for a browser
+    // page that does not support the desktop bridge.
+    if (!Array.isArray(queued) || !capabilities) return;
+    globalThis[nativeDropQueueKey] = [];
+    if (!canReplace() || !capabilities.nativePathInput) return;
+    const path = queued.find((value) => typeof value === "string" && value);
+    if (path) upload.startNativePath(path);
+  };
+  // Rust queues before dispatching, so this also handles a drop that arrived
+  // during panel initialization.
+  window.addEventListener("hyperdr:native-file-drop", consumeNativeDrop);
+  store.watch("capabilities", consumeNativeDrop);
+  consumeNativeDrop();
+  /* What the picker offers and what the hint promises both come from the
+   * converter's own extension table, served in /api/state. The markup used to
+   * carry a hand-written accept list -- the fifth copy of that list in the
+   * project, and the one most likely to be forgotten. */
+  const describeSupport = () => {
+    const capabilities = store.get().capabilities;
+    const extensions = capabilities?.inputExtensions;
+    if (!Array.isArray(extensions) || !extensions.length) return;
+    fileInput.accept = ["image/*", ...extensions].join(",");
+    setText(supportHint, "支持 RAW · HEIC · JPG · PNG · AVIF");
+    supportHint.title = extensions.join(" ");
+  };
+  store.watch("capabilities", describeSupport);
+  describeSupport();
+
+  /* One image per session, so a multiple selection is not an error -- but it is
+   * not what the user asked for either, and silently keeping the first of five
+   * files reads as the panel losing four of them. */
+  const startUpload = (files) => {
+    const list = Array.from(files || []);
+    if (!list.length) return false;
+    if (list.length > 1) {
+      toast(`一次只能处理一张图片，已选用「${list[0].name}」。`);
+    }
+    upload.start(list);
+    return true;
+  };
+
   const openPicker = () => { if (canReplace()) fileInput.click(); };
   selectButton.addEventListener("click", openPicker);
   expandButton.addEventListener("click", (event) => {
@@ -689,7 +777,7 @@ export function mountStage({ toast }) {
     target instanceof Element
     && Boolean(target.closest("button, a, input, select, textarea, [role='slider']"));
   fileInput.addEventListener("change", (event) => {
-    upload.start(event.target.files);
+    startUpload(event.target.files);
     fileInput.value = "";
   });
   uploadCancel.addEventListener("click", (event) => {
@@ -826,7 +914,25 @@ export function mountStage({ toast }) {
   stage.addEventListener("drop", (event) => {
     event.preventDefault();
     stage.classList.remove("is-drop-target");
-    if (canReplace() && event.dataTransfer.files.length) upload.start(event.dataTransfer.files);
+    if (!canReplace()) return;
+    // A folder, a link or a text selection arrives with no files at all. Doing
+    // nothing at that point looks like the drop was missed rather than refused.
+    if (!startUpload(event.dataTransfer.files)) {
+      toast("请拖入单个图片文件。", true);
+    }
+  });
+
+  /* Pasting is the sibling of dropping and was simply missing: a screenshot on
+   * the clipboard had to be saved to disk first. Ignored while a text field has
+   * focus, so pasting into an input still pastes text. */
+  document.addEventListener("paste", (event) => {
+    const target = event.target;
+    if (target instanceof Element
+        && target.closest("input, textarea, [contenteditable]")) return;
+    const files = Array.from(event.clipboardData?.files || []);
+    if (!files.length || !canReplace()) return;
+    event.preventDefault();
+    startUpload(files);
   });
 
   stage.addEventListener("contextmenu", (event) => { if (image.source) event.preventDefault(); });
@@ -876,7 +982,7 @@ export function mountStage({ toast }) {
     () => {
       if (!store.get().sessionId) return;
       clearTimeout(nativeReloadTimer);
-      nativeReloadTimer = setTimeout(load, 120);
+      nativeReloadTimer = setTimeout(load, PREVIEW_RELOAD_DELAY_MS);
     },
     { immediate: true });
 

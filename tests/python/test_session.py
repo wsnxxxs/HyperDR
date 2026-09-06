@@ -1,23 +1,41 @@
 """One session, one image.
 
 These cases pin the properties that are cheap to assert and expensive to get
-wrong: a browser-supplied name cannot escape the session, content must match the
-extension it claims, a replacement leaves nothing behind, and cleanup never
-removes files a conversion is still reading.
+wrong: a browser-supplied name cannot escape the session, contents must be a
+supported image whatever the name claims, a replacement leaves nothing behind,
+and cleanup never removes files a conversion is still reading.
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import os
 import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from apps.panel.hyperdr_panel import session
+from apps.panel.hyperdr_panel import formats, session
 
-PNG = b"\x89PNG\r\n\x1a\n" + b"x" * 32
-JPEG = b"\xff\xd8\xff\xe0" + b"y" * 32
+PNG = b"\x89PNG\r\n\x1a\n" + b"x" * 64
+JPEG = b"\xff\xd8\xff\xe0" + b"y" * 64
+HEIC = b"\x00\x00\x00\x18ftypheic" + b"z" * 64
+
+# The RAW containers the old five-entry magic table turned away. Every one of
+# these extensions is offered by the file dialog, so refusing them was a dead
+# end the user could reach by picking a normal file from a normal camera.
+RAW_HEADERS = {
+    ".arw": b"II*\x00" + b"a" * 64,
+    ".rw2": b"IIU\x00" + b"b" * 64,
+    ".crw": b"II\x1a\x00\x00\x00HEAPCCDR" + b"c" * 64,
+    ".mrw": b"\x00MRM" + b"d" * 64,
+    ".orf": b"MMOR" + b"e" * 64,
+    ".iiq": b"IIII" + b"f" * 64,
+    ".raf": b"FUJIFILMCCD-RAW" + b"g" * 64,
+    ".x3f": b"FOVb" + b"h" * 64,
+    ".cr3": b"\x00\x00\x00\x18ftypcrx " + b"i" * 64,
+}
 
 
 def upload(session_id: str, name: str, data: bytes = PNG):
@@ -36,6 +54,9 @@ class SessionTests(unittest.TestCase):
         session.WORK_ROOT = Path(self.temporary.name).resolve()
 
     def tearDown(self):
+        session._INPUT_DIGESTS.clear()
+        session._EXTERNAL_INPUTS.clear()
+        session._INPUT_PATHS.clear()
         session.WORK_ROOT = self.previous_root
         self.temporary.cleanup()
 
@@ -51,7 +72,41 @@ class SessionTests(unittest.TestCase):
     def test_rejects_disguised_content(self):
         session_id = session.create_session()
         with self.assertRaises(ValueError):
-            upload(session_id, "actually-text.png", b"not a png at all")
+            upload(session_id, "actually-text.png", b"not a png at all" * 8)
+
+    def test_accepts_every_raw_container_the_file_dialog_offers(self):
+        """The guard used to know five RAW magics and refuse the other nine."""
+        for extension, header in RAW_HEADERS.items():
+            self.assertIn(extension, formats.RAW_INPUT_EXTENSIONS, extension)
+            session_id = session.create_session()
+            target, _ = upload(session_id, "capture" + extension, header)
+            self.assertEqual(target.suffix, extension)
+
+    def test_raw_extension_still_requires_a_raw_header(self):
+        session_id = session.create_session()
+        with self.assertRaises(ValueError):
+            upload(session_id, "pretend.arw", PNG)
+
+    def test_a_misnamed_raster_is_stored_under_the_format_it_really_is(self):
+        """A phone gallery exports HEIC as .jpg; that file is not broken."""
+        session_id = session.create_session()
+        target, _ = upload(session_id, "IMG_0001.jpg", HEIC)
+        self.assertEqual(target.suffix, ".heic")
+        self.assertEqual(session.input_path(session_id), target)
+
+    def test_a_matching_raster_keeps_the_name_it_arrived_with(self):
+        for name, data in (("a.jpeg", JPEG), ("b.heif", HEIC), ("c.avif", HEIC),
+                           ("d.png", PNG)):
+            session_id = session.create_session()
+            target, _ = upload(session_id, name, data)
+            self.assertEqual(target.name, name)
+
+    def test_classification_reads_only_the_header(self):
+        """Reading the whole file to see 32 bytes cost 300 MB on a large RAW."""
+        session_id = session.create_session()
+        with mock.patch.object(Path, "read_bytes", side_effect=AssertionError):
+            target, _ = upload(session_id, "photo.png")
+        self.assertTrue(target.is_file())
 
     def test_rejects_an_unsupported_extension(self):
         session_id = session.create_session()
@@ -87,6 +142,55 @@ class SessionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             upload(session_id, "bad.png", b"not a png")
         self.assertEqual(session.input_path(session_id).name, "good.png")
+
+    def test_uploaded_digest_is_reused_until_the_input_changes(self):
+        session_id = session.create_session()
+        upload(session_id, "photo.png")
+        expected = hashlib.sha256(PNG).hexdigest()
+        with mock.patch.object(session, "_sha256", side_effect=AssertionError):
+            self.assertEqual(session.input_digest(session_id), expected)
+
+    def test_external_digest_rehashes_only_after_size_or_mtime_changes(self):
+        session_id = session.create_session()
+        source = Path(self.temporary.name) / "external.jpg"
+        source.write_bytes(JPEG)
+        session.set_external_input(session_id, str(source))
+        with mock.patch.object(session, "_sha256", wraps=session._sha256) as digest:
+            first = session.input_digest(session_id)
+            self.assertEqual(session.input_digest(session_id), first)
+            self.assertEqual(digest.call_count, 1)
+            source.write_bytes(JPEG + b"changed")
+            self.assertNotEqual(session.input_digest(session_id), first)
+            self.assertEqual(digest.call_count, 2)
+
+    def test_a_desktop_drop_names_the_format_it_found(self):
+        """Nothing here can be renamed, so the message has to be actionable."""
+        session_id = session.create_session()
+        source = Path(self.temporary.name) / "IMG_0002.jpg"
+        source.write_bytes(HEIC)
+        with self.assertRaises(ValueError) as caught:
+            session.set_external_input(session_id, str(source))
+        self.assertIn("heic", str(caught.exception))
+
+    def test_a_desktop_drop_accepts_a_truthfully_named_file(self):
+        session_id = session.create_session()
+        source = Path(self.temporary.name) / "capture.rw2"
+        source.write_bytes(RAW_HEADERS[".rw2"])
+        registered, size = session.set_external_input(session_id, str(source))
+        self.assertEqual(registered, source)
+        self.assertEqual(size, source.stat().st_size)
+
+    def test_input_path_is_remembered_rather_than_rescanned(self):
+        session_id = session.create_session()
+        target, _ = upload(session_id, "photo.png")
+        with mock.patch.object(Path, "iterdir", side_effect=AssertionError):
+            self.assertEqual(session.input_path(session_id), target)
+
+    def test_input_path_rescans_when_nothing_was_remembered(self):
+        session_id = session.create_session()
+        target, _ = upload(session_id, "photo.png")
+        session._INPUT_PATHS.clear()
+        self.assertEqual(session.input_path(session_id), target)
 
     def test_input_path_reports_an_empty_session(self):
         session_id = session.create_session()

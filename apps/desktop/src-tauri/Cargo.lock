@@ -1351,6 +1351,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-shell",
  "url",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

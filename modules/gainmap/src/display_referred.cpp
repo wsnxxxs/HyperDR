@@ -4,6 +4,7 @@
 #include "hyperdr/foundation/parallel.hpp"
 #include "hyperdr/foundation/rational.hpp"
 #include "hyperdr/gainmap/coding.hpp"
+#include "hyperdr/gainmap/gain_map.hpp"
 #include "hyperdr/image/color.hpp"
 #include "hyperdr/look/grid.hpp"
 
@@ -243,8 +244,42 @@ float display_shoulder_log2(float u, float knee, float ceiling) {
   return ceiling - span * std::exp(std::max(-(u - knee) / span, -80.0F));
 }
 
+GainMapResult make_display_referred_sdr_passthrough_result(
+    const FloatImage& source, const GainMapOptions& options);
+
 GainMapResult make_display_referred_sdr_result(const FloatImage& source,
                                                const GainMapOptions& options) {
+  if (source.channels != 3) {
+    throw std::invalid_argument("gain-map input must be RGB");
+  }
+  validate_gain_map_options(options);
+
+  // A display-referred SDR file has no encoded samples above diffuse white,
+  // so the display shoulder cannot discover an input peak the way it can for
+  // PQ, HLG, or a gain-map source. The panel still promises that its HDR
+  // strength and range controls work for an ordinary photograph. Run the
+  // same photographic expansion pipeline used for RAW, but pin exposure to
+  // the display-referred value (automatic exposure would re-expose an already
+  // finished picture). The source metadata remains SDR; the rendered
+  // alternate is the user-requested HDR enhancement.
+  const float requested_stops = options.auto_headroom
+      ? options.look.headroom_max_stops
+      : std::clamp(options.headroom_stops, 0.0F,
+                   options.look.headroom_max_stops);
+  if (!(requested_stops > kEpsilon) ||
+      !(std::min(options.gain_strength, 1.0F) > kEpsilon)) {
+    return make_display_referred_sdr_passthrough_result(source, options);
+  }
+  auto developed = options;
+  developed.auto_exposure = false;
+  developed.exposure_ev = 0.0F;
+  developed.auto_headroom = false;
+  developed.headroom_stops = requested_stops;
+  return make_photographic_gain_map(source, developed, {});
+}
+
+GainMapResult make_display_referred_sdr_passthrough_result(
+    const FloatImage& source, const GainMapOptions& options) {
   if (source.channels != 3) {
     throw std::invalid_argument("gain-map input must be RGB");
   }

@@ -22,7 +22,8 @@ MAGIC = b"HYPREV1\n"
 DEFAULT_HIGHLIGHT_RECOVERY = "blend"
 _CACHE: dict[tuple, tuple[bytes, dict]] = {}
 _CACHE_LOCK = threading.Lock()
-_CACHE_LIMIT = 8
+_CACHE_ENTRY_LIMIT = 2
+_CACHE_MAX_BYTES = 256 * 1024 * 1024
 _INFLIGHT = SingleFlight()
 _ORPHAN_MAX_AGE_SECONDS = max(3600, TIMEOUT_SECONDS * 2)
 _ACTIVE_LOCK = threading.Lock()
@@ -221,11 +222,34 @@ def _build(source: Path, options: dict, max_edge: int,
         _remove_output_artifacts(output)
 
 
-def preview_for(source: Path, options: dict, max_edge: int = MAX_EDGE) -> tuple[bytes, dict]:
+def _cache_bytes() -> int:
+    return sum(len(value[0]) for value in _CACHE.values())
+
+
+def _cache_get(key: tuple):
+    cached = _CACHE.get(key)
+    if cached is not None:
+        # Dicts preserve insertion order; moving a hit to the end keeps the
+        # two most recently used states for the current image.
+        _CACHE.pop(key)
+        _CACHE[key] = cached
+    return cached
+
+
+def _cache_put(key: tuple, value: tuple[bytes, dict]) -> None:
+    _CACHE.pop(key, None)
+    _CACHE[key] = value
+    while _CACHE and (len(_CACHE) > _CACHE_ENTRY_LIMIT
+                      or _cache_bytes() > _CACHE_MAX_BYTES):
+        _CACHE.pop(next(iter(_CACHE)))
+
+
+def preview_for(source: Path, options: dict, max_edge: int = MAX_EDGE,
+                source_digest: str | None = None) -> tuple[bytes, dict]:
     """Return an exact native SDR-base/HDR float frame and its metadata."""
     edge = max(320, min(MAX_EDGE, int(max_edge)))
     stat = source.stat()
-    source_digest = _sha256(source)
+    source_digest = source_digest or _sha256(source)
     stable_options = json.dumps(
         options, sort_keys=True, separators=(",", ":"), default=str)
     external_digests = tuple(
@@ -236,7 +260,7 @@ def preview_for(source: Path, options: dict, max_edge: int = MAX_EDGE) -> tuple[
     key = (str(source), stat.st_mtime_ns, stat.st_size, source_digest,
            stable_options, external_digests, edge)
     with _CACHE_LOCK:
-        cached = _CACHE.get(key)
+        cached = _cache_get(key)
     if cached:
         return cached
 
@@ -267,9 +291,7 @@ def preview_for(source: Path, options: dict, max_edge: int = MAX_EDGE) -> tuple[
             if call.cancel.is_set():
                 raise PreviewCancelled("preview superseded")
             with _CACHE_LOCK:
-                if len(_CACHE) >= _CACHE_LIMIT:
-                    _CACHE.pop(next(iter(_CACHE)))
-                _CACHE[key] = result
+                _cache_put(key, result)
             return result
         finally:
             _unregister_call(call)

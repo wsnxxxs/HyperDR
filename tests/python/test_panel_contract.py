@@ -17,6 +17,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "apps" / "panel"))
 
+from hyperdr_panel import formats  # noqa: E402
 from hyperdr_panel import schema  # noqa: E402
 from hyperdr_panel import model  # noqa: E402
 from hyperdr_panel.executable import detect_exe  # noqa: E402
@@ -236,6 +237,41 @@ class ModelIntegrationTest(unittest.TestCase):
             self.assertEqual(cached[0], gain.read_bytes())
             self.assertIsNone(
                 model.cached_inference(config, source, model_dir, "reconstruct"))
+
+
+class InputVocabularyTest(unittest.TestCase):
+    """The panel's formats come from the converter, not from a second copy."""
+
+    def test_extensions_and_signatures_are_derived_from_the_schema(self):
+        inputs = schema.DOCUMENT["inputs"]
+        self.assertEqual(formats.RAW_INPUT_EXTENSIONS,
+                         frozenset(inputs["extensions"]["raw"]))
+        flattened = frozenset(
+            extension
+            for family in inputs["extensions"]["raster"].values()
+            for extension in family)
+        self.assertEqual(formats.RASTER_INPUT_EXTENSIONS, flattened)
+        self.assertEqual(formats.SUPPORTED_EXTENSIONS,
+                         formats.RAW_INPUT_EXTENSIONS | flattened)
+        self.assertTrue(formats.PREFIX_BYTES >= 16)
+
+    def test_every_raster_family_has_a_canonical_extension(self):
+        for family in schema.DOCUMENT["inputs"]["extensions"]["raster"]:
+            self.assertIn(family, formats.CANONICAL_EXTENSIONS, family)
+            self.assertIn(formats.CANONICAL_EXTENSIONS[family],
+                          formats.RASTER_INPUT_EXTENSIONS, family)
+
+    def test_the_file_dialog_offers_both_cases_of_every_extension(self):
+        patterns = set(formats.picker_patterns().split())
+        for extension in formats.SUPPORTED_EXTENSIONS:
+            self.assertIn("*" + extension, patterns, extension)
+            self.assertIn("*" + extension.upper(), patterns, extension)
+
+    def test_a_raw_extension_is_never_named_by_its_signature(self):
+        """Most RAW containers are TIFF; only the extension can say which."""
+        for header in (b"II*" + bytes(1) + b"a" * 60, b"MM" + bytes(1) + b"*" + b"b" * 60):
+            self.assertIsNone(formats.detect_format(header))
+            self.assertTrue(formats.raw_signature_ok(header))
 
 
 class SettingsContractTest(unittest.TestCase):

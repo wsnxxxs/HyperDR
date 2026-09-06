@@ -4,13 +4,18 @@
 
 [hidden] { display: none !important; }
 
-html, body { height: 100%; }
+html, body { min-height: 100%; }
 
 body {
   margin: 0;
   font: var(--text) / 1.55 var(--font-ui);
   color: var(--ink);
-  background: var(--surface-page);
+  background:
+    radial-gradient(ellipse 65% 55% at 88% 12%, light-dark(rgba(0, 113, 227, 0.05), rgba(56, 189, 248, 0.05)), transparent 65%),
+    radial-gradient(ellipse 55% 50% at 12% 88%, light-dark(rgba(245, 158, 11, 0.04), rgba(251, 191, 36, 0.03)), transparent 60%),
+    radial-gradient(circle at 50% 40%, light-dark(rgba(147, 197, 253, 0.04), rgba(129, 140, 248, 0.03)), transparent 70%),
+    var(--surface-page);
+  background-attachment: fixed;
   -webkit-text-size-adjust: 100%;
 }
 
@@ -21,22 +26,35 @@ h1, h2, h3 {
   line-height: 1.3;
   /* Headings set at UI sizes track too loose by default. */
   letter-spacing: -0.015em;
+  /* A two-word heading wrapping to leave one word alone on line two is the
+     most common way this column looks unconsidered at narrow widths. */
+  text-wrap: balance;
 }
 h1 { font-size: var(--text-lg); }
 h2 { font-size: var(--text); }
 
-p { margin: 0; }
+/* The rail is full of two- and three-line explanatory notes in a 340px column,
+   where the default greedy break routinely orphans a single character onto the
+   last line. `pretty` costs nothing and is ignored where unsupported. */
+p { margin: 0; text-wrap: pretty; }
 
 code, pre, kbd { font-family: var(--font-mono); font-size: var(--text-sm); }
 
 button, input, select, textarea { font: inherit; color: inherit; }
+/* Every control in the panel is either accent-tinted or neutral; the browser
+   default focus/selection blue is the one system colour that appears in the
+   interface, and it clashes with the photographic accent next to it. */
+::selection { background: color-mix(in srgb, var(--accent) 28%, transparent); }
 button { cursor: pointer; }
 button:disabled { cursor: default; }
 
 :where(a) { color: var(--accent); }
 
+/* Reads --focus rather than --accent so a control sitting on the photograph
+   can restate the ring for its own backdrop (see .segmented--overlay, .chip,
+   .stage-divider) without redeclaring the outline itself. */
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -48,4 +66,14 @@ button:disabled { cursor: default; }
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+
+/* Reduced motion is set as a duration of 0 in tokens.css, which covers every
+   transition; these are the two things a duration cannot switch off. */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }

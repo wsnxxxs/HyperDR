@@ -46,6 +46,20 @@ Tauri window because Tauri launches it without a console window.
 The generated `binaries/` and sidecar build directories are intentionally
 ignored by Git. They are release artifacts, not source files.
 
+The build hook clears earlier HyperDR NSIS/MSI installers from the selected
+Cargo target's bundle directory before Tauri creates the new installer. Use
+`src-tauri/target/release/bundle/nsis/HyperDR_<version>_x64-setup.exe` for the
+default build. Building creates this installer; it does not update the installed
+application until you run it.
+
+The installer reuses the registered installation directory (by default
+`%LOCALAPPDATA%\HyperDR`). Reinstalling the same version replaces both the shell
+and the bundled panel. Install and uninstall hooks also check for a leftover
+panel process, using Tauri's existing close-app prompt before replacing files.
+User workspaces and TLS certificates are retained. Bump the shared release
+version for a new release; repeated `1.0.0` builds cannot be distinguished by
+Windows' installed-app version display.
+
 ## Windows desktop integrations
 
 The WebView2 instance is created with `WebGPU` and

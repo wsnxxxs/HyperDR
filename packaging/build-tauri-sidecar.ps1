@@ -72,4 +72,33 @@ if (-not (Test-Path -LiteralPath $sidecarExe -PathType Leaf)) {
 
 $targetSidecar = Join-Path $binariesRoot "hyperdr-panel-$TargetTriple.exe"
 Copy-Item -LiteralPath $sidecarExe -Destination $targetSidecar -Force
+
+# Tauri only writes the selected bundle targets; it leaves obsolete versions and
+# previously enabled formats (for example MSI) behind. Do not offer those as
+# current release installers after a rebuild, including when bundling fails.
+$cargoTargetRoot = if ($env:CARGO_TARGET_DIR) {
+    $env:CARGO_TARGET_DIR
+} else {
+    Join-Path $tauriRoot "target"
+}
+if (-not [System.IO.Path]::IsPathRooted($cargoTargetRoot)) {
+    $cargoTargetRoot = Join-Path $tauriRoot $cargoTargetRoot
+}
+$profile = if ($env:TAURI_ENV_DEBUG -eq "true") { "debug" } else { "release" }
+$profileRoots = @(
+    (Join-Path $cargoTargetRoot $profile),
+    (Join-Path (Join-Path $cargoTargetRoot $TargetTriple) $profile)
+)
+foreach ($profileRoot in $profileRoots) {
+    foreach ($bundle in @(
+        @{ Directory = "nsis"; Pattern = "HyperDR_*-setup.exe" },
+        @{ Directory = "msi"; Pattern = "HyperDR_*.msi" }
+    )) {
+        $bundleDirectory = Join-Path (Join-Path $profileRoot "bundle") $bundle.Directory
+        if (Test-Path -LiteralPath $bundleDirectory -PathType Container) {
+            Get-ChildItem -LiteralPath $bundleDirectory -Filter $bundle.Pattern -File |
+                ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force }
+        }
+    }
+}
 Write-Output $targetSidecar

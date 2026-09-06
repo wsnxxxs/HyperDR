@@ -17,8 +17,11 @@ import { mountStage } from "./preview/stage.js";
 import { mountMask } from "./preview/mask.js";
 import { mountRunner } from "./run/runner.js";
 import { createToast } from "./ui/toast.js";
+import { mountEditor } from "./ui/editor.js";
+import { mountDesktop } from "./ui/desktop.js";
 import { mountTheme } from "./ui/theme.js";
 import { mountPrefs } from "./ui/prefs.js";
+import { mountPhoneWorkbench } from "./ui/phone-workbench.js";
 import { prefs } from "./ui/prefs-schema.js";
 import { t, setLocale, applyStatic, onLocaleChange } from "./i18n/index.js";
 
@@ -122,6 +125,7 @@ prefs.watchAny(["rememberOutput", "rememberAdjustments"], () => {
 
 const toast = createToast();
 mountTheme();
+mountDesktop();
 
 const stage = mountStage({ toast });
 
@@ -129,8 +133,14 @@ mountControls({ toast });
 mountMask({ stage });
 const runner = mountRunner({ toast });
 const workspace = mountWorkspace({ stage, runner, toast });
+const phoneWorkbench = mountPhoneWorkbench({ stage, toast });
 mountHistory();
-mountPrefs({ toast });
+mountEditor({ stage });
+const preferencesPanel = mountPrefs({ toast, phoneWorkbench });
+document.getElementById("phone-connect").addEventListener("click", () => {
+  preferencesPanel.open("phone");
+  phoneWorkbench.connect();
+});
 
 /* Viewer defaults are per photograph, not per session: they are what each new
  * image should open with, which is what the preferences promise. */
@@ -188,6 +198,7 @@ async function boot() {
     if (capabilities.ready) showService("is-ok", "app.service.ready");
     else showService("is-bad", "app.service.missing", "app.service.missingDetail");
     await workspace.restore();
+    await phoneWorkbench.restore();
   } catch (error) {
     const message = error instanceof ApiError ? error.message : t("app.service.bootFailed");
     store.set({ phase: "unavailable", error: message });

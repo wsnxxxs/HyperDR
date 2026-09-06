@@ -1,9 +1,8 @@
 """Access control for a service that is deliberately reachable from the LAN.
 
-The panel binds to 0.0.0.0 by default so a phone on the same network can reach
-it, which makes the access token the only thing between a stranger and the
-photos. The token is high-entropy, but nothing upstream rate-limits guesses
-against it, so a per-source-IP lockout is worth the few lines it costs.
+The editor stays on loopback. An explicitly enabled phone listener binds to
+0.0.0.0 with a separate token and exposes only the phone workflow. Per-source
+login throttling applies to both listeners.
 """
 from __future__ import annotations
 

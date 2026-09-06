@@ -14,8 +14,6 @@ from __future__ import annotations
 
 import json
 import math
-import secrets
-import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -26,6 +24,7 @@ from .formats import SUPPORTED_EXTENSIONS
 from .config import IS_WINDOWS, REPO_ROOT
 from .executable import detect_exe
 from .schema import SETTINGS
+from .workbench import Workbench
 from .native_preview import (
     DEFAULT_HIGHLIGHT_RECOVERY,
     MAX_EDGE,
@@ -64,20 +63,15 @@ class Response:
 class Context:
     """Server state an endpoint may read or extend."""
 
-    # Folders the user picked through the native dialog, by opaque id. Paths are
-    # never accepted from the browser: only ids issued here.
-    output_selections: dict[str, Path]
     # Whether the browser transport itself is TLS. A loopback HTTP page inside
     # the desktop WebView is still a trustworthy secure context, but it is not
     # an encrypted transport, and only the transport fact is reported: the page
     # reads its own `window.isSecureContext` for the other half.
     transport_secure: bool = False
-    # Injected so the native dialog, which only exists on Windows and must run
-    # on its own thread, is not a hard dependency of the API.
-    choose_output_directory: object = None
     # Tauri's Windows shell can submit an absolute local path from its native
     # drag/drop event. Browser/LAN servers leave this disabled.
     native_path_input: bool = False
+    workbench: Workbench = field(default_factory=Workbench)
 
 
 def error(message: str, status: int = 400, code: str = "") -> Response:
@@ -181,6 +175,7 @@ def preview(_context: Context, query: dict) -> Response:
             raise ValueError("preview paths are server-controlled")
     except (json.JSONDecodeError, TypeError, ValueError) as exc:
         return error("invalid preview options: %s" % exc)
+    raw_options = dict(options)
     highlight_recovery = str(options.get("highlightRecovery") or
                              _first(query, "hr", DEFAULT_HIGHLIGHT_RECOVERY))
     if highlight_recovery not in _HIGHLIGHT_RECOVERY_CHOICES:
@@ -238,6 +233,7 @@ def preview(_context: Context, query: dict) -> Response:
         return error(exc, status=422)
     # No headers: width, height, status and degradation reasons all travel in
     # the HYPREV1 packet body, which is what the browser actually parses.
+    _context.workbench.publish_frame(session_id, raw_options, data)
     return Response(body=data, content_type="application/vnd.hyperdr.preview")
 
 
@@ -362,46 +358,6 @@ def cancel(_context: Context, body: dict) -> Response:
     return Response(payload={"cancelled": job.cancel(str(body.get("jobId") or ""))})
 
 
-def select_output(context: Context, _body: dict) -> Response:
-    try:
-        if context.choose_output_directory is None:
-            raise coded(OSError("当前系统暂不支持原生导出文件夹选择。"),
-                        "output_unsupported")
-        selected = context.choose_output_directory()
-        if not selected:
-            return Response(payload={"cancelled": True})
-        target = Path(selected).resolve()
-        if not target.is_dir():
-            raise coded(ValueError("所选导出文件夹不存在。"), "output_missing")
-        selection_id = secrets.token_urlsafe(18)
-        context.output_selections[selection_id] = target
-        return Response(payload={
-            "selectionId": selection_id,
-            "path": str(target),
-            "name": target.name or str(target),
-        })
-    except (OSError, ValueError, RuntimeError) as exc:
-        return error(exc)
-
-
-def export(context: Context, body: dict) -> Response:
-    """Copy the converted image into the folder the user picked."""
-    try:
-        session_id = str(body.get("sessionId") or "")
-        destination = context.output_selections.get(str(body.get("selectionId") or ""))
-        if destination is None or not destination.is_dir():
-            raise coded(ValueError("导出文件夹已失效，请重新选择。"), "output_stale")
-        source = renditions.result_path(session_id, str(body.get("exportId") or ""))
-        target = (destination / source.name).resolve()
-        # Re-checked after resolution: a symlink inside the session must not be
-        # able to write outside the chosen folder.
-        target.relative_to(destination.resolve())
-        shutil.copy2(source, target)
-    except REQUEST_ERRORS as exc:
-        return error(exc)
-    return Response(payload={"path": str(target), "name": target.name})
-
-
 def run(_context: Context, body: dict) -> Response:
     session_id = str(body.get("sessionId") or "")
     try:
@@ -478,8 +434,6 @@ GET_ROUTES = {
 POST_ROUTES = {
     "/api/session": new_session,
     "/api/native-input": open_native_path,
-    "/api/select-output": select_output,
-    "/api/export": export,
     "/api/run": run,
     "/api/command": command_preview,
     "/api/model-preview": model_preview,

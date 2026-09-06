@@ -222,7 +222,7 @@ class PreviewAdmissionTests(unittest.TestCase):
             source = Path(directory) / "photo.jpg"
             source.write_bytes(b"jpeg")
             with mock.patch.object(api.session, "input_path", lambda _id: source),                     mock.patch.object(api.session, "input_digest", lambda _id: "d"),                     mock.patch.object(api, "preview_for", fake_preview_for):
-                response = api.preview(api.Context(output_selections={}),
+                response = api.preview(api.Context(),
                                        {"id": ["session"], "edge": ["960"]})
         self.assertEqual(response.status, 422)
         self.assertIn("timed out", response.payload["error"])
@@ -235,7 +235,7 @@ class PreviewAdmissionTests(unittest.TestCase):
             source = Path(directory) / "photo.dng"
             source.write_bytes(b"raw")
             with mock.patch.object(api.session, "input_path", lambda _id: source),                     mock.patch.object(api.session, "input_digest", lambda _id: "d"),                     replacement.hold():
-                response = api.preview(api.Context(output_selections={}),
+                response = api.preview(api.Context(),
                                        {"id": ["session"], "edge": ["960"]})
         self.assertEqual(response.status, 503)
         self.assertIn("busy", response.payload["error"])

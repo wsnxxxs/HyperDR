@@ -10,12 +10,7 @@ body {
   margin: 0;
   font: var(--text) / 1.55 var(--font-ui);
   color: var(--ink);
-  background:
-    radial-gradient(ellipse 65% 55% at 88% 12%, light-dark(rgba(0, 113, 227, 0.05), rgba(56, 189, 248, 0.05)), transparent 65%),
-    radial-gradient(ellipse 55% 50% at 12% 88%, light-dark(rgba(245, 158, 11, 0.04), rgba(251, 191, 36, 0.03)), transparent 60%),
-    radial-gradient(circle at 50% 40%, light-dark(rgba(147, 197, 253, 0.04), rgba(129, 140, 248, 0.03)), transparent 70%),
-    var(--surface-page);
-  background-attachment: fixed;
+  background: var(--surface-page);
   -webkit-text-size-adjust: 100%;
 }
 

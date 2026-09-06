@@ -11,21 +11,16 @@ import os
 import socket
 import ssl
 import threading
+import time
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote
 
 from . import api, security
-from .config import IS_WINDOWS, PREFERRED_PORT
+from .config import PREFERRED_PORT
 from .handler import Handler
 from .job import active_session_id, shutdown
-from .picker import pick_via_subprocess
 from .session import cleanup_expired_sessions
-
-# tkinter must own the thread it runs on, so the native dialog is a subprocess
-# and only one may be open at a time.
-_FOLDER_DIALOG_LOCK = threading.Lock()
-
 
 class PanelServer(ThreadingHTTPServer):
     daemon_threads = True
@@ -63,16 +58,44 @@ class PanelServer(ThreadingHTTPServer):
     context: api.Context
     login_throttle: security.LoginThrottle
 
+    def enable_phone(self, owner: str) -> dict:
+        if not owner or len(owner) > 128:
+            raise ValueError("缺少桌面会话标识。")
+        with self.phone_lock:
+            workbench = self.context.workbench
+            if self.phone_server is None:
+                tls_dir = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "HyperDR" / "tls"
+                certificate = os.environ.get("HYPERDR_TLS_CERT", str(tls_dir / "hyperdr.pem"))
+                key = os.environ.get("HYPERDR_TLS_KEY", str(tls_dir / "hyperdr-key.pem"))
+                tls = load_tls_context(certificate, key) if Path(certificate).is_file() and Path(key).is_file() else None
+                scheme = "https" if tls else "http"
+                port = find_free_port("0.0.0.0", PREFERRED_PORT + 1)
+                phone = build_server("0.0.0.0", port, security.make_token(), scheme,
+                                     phone_only=True)
+                phone.context.workbench = workbench
+                if tls:
+                    phone.socket = tls.wrap_socket(phone.socket, server_side=True)
+                self.phone_server = phone
+                threading.Thread(target=phone.serve_forever, daemon=True,
+                                 name="hyperdr-phone").start()
+            phone = self.phone_server
+            with workbench.changed:
+                workbench.enabled = True
+                workbench.owner = owner
+                workbench.desktop_seen = time.monotonic()
+                workbench.notify()
+            urls = [f"{phone.public_scheme}://{ip}:{phone.server_port}/phone?token={quote(phone.access_token)}"
+                    for ip in lan_addresses()]
+            return {"urls": urls, "secure": phone.public_scheme == "https",
+                    **workbench.snapshot()}
 
-def choose_output_directory() -> str:
-    """Open the native folder picker on the HyperDR host computer."""
-    if not IS_WINDOWS:
-        raise OSError("当前系统暂不支持原生导出文件夹选择。")
-    with _FOLDER_DIALOG_LOCK:
-        selected, error = pick_via_subprocess("folder")
-    if error:
-        raise RuntimeError(error)
-    return selected
+    def stop_phone(self):
+        with self.phone_lock:
+            self.context.workbench.disable()
+            if self.phone_server is not None:
+                self.phone_server.shutdown()
+                self.phone_server.server_close()
+                self.phone_server = None
 
 
 def find_free_port(host: str, preferred: int = PREFERRED_PORT) -> int:
@@ -121,15 +144,17 @@ def _cleanup_forever(stop: threading.Event, interval_seconds: float) -> None:
 
 
 def build_server(host: str, port: int, token: str, scheme: str,
-                 *, desktop: bool = False) -> PanelServer:
+                 *, desktop: bool = False, phone_only: bool = False) -> PanelServer:
     server = PanelServer((host, port), Handler)
     server.access_token = token
     server.public_scheme = scheme
     server.cookie_secure = scheme == "https" or os.environ.get("HYPERDR_COOKIE_SECURE") == "1"
     server.login_throttle = security.LoginThrottle()
+    server.phone_only = phone_only
+    server.phone_server = None
+    server.phone_lock = threading.Lock()
     loopback = host.lower() in {"127.0.0.1", "localhost", "::1"}
     server.context = api.Context(
-        output_selections={},
         # TLS only. Chromium/WebView also treats a loopback HTTP origin as a
         # trustworthy secure context, but the page observes that for itself
         # through window.isSecureContext, so the server does not report it.
@@ -137,7 +162,6 @@ def build_server(host: str, port: int, token: str, scheme: str,
         # Absolute source paths are a local desktop capability; never expose
         # that route if a desktop process was deliberately rebound to LAN.
         native_path_input=desktop and loopback,
-        choose_output_directory=choose_output_directory if IS_WINDOWS else None,
     )
     return server
 
@@ -170,9 +194,8 @@ def load_tls_context(certificate: str, key: str) -> ssl.SSLContext | None:
 
 
 def serve(*, desktop: bool = False) -> None:
-    # A desktop WebView only needs loopback. LAN mode keeps the historical
-    # 0.0.0.0 default and is still started explicitly by Start.bat.
-    host = os.environ.get("HYPERDR_HOST", "127.0.0.1" if desktop else "0.0.0.0")
+    # The editor stays local. Its separate phone listener opens on demand.
+    host = os.environ.get("HYPERDR_HOST", "127.0.0.1")
     port = find_free_port(host, int(os.environ.get("HYPERDR_PORT", PREFERRED_PORT)))
     token = security.check_token_format(
         os.environ.get("HYPERDR_ACCESS_TOKEN") or security.make_token())
@@ -203,11 +226,7 @@ def serve(*, desktop: bool = False) -> None:
         print(f"HYPERDR_READY {local_url}", flush=True)
     print("HyperDR 已启动。关闭此窗口即可停止服务。")
     print(f"本机地址：{local_url}")
-    if not desktop:
-        for ip in lan_addresses():
-            print(f"iPhone 地址：{scheme}://{ip}:{port}/?token={quote(token)}")
-    if not desktop and scheme == "http":
-        print("提示：局域网 HTTP 可以上传和转换，但 Safari WebGPU HDR 需要受信任的 HTTPS。")
+    print("手机导入与预览：在编辑器中点击“连接手机”，扫描二维码。")
     if removed:
         print(f"已清理 {removed} 个过期任务。")
     try:
@@ -217,5 +236,6 @@ def serve(*, desktop: bool = False) -> None:
     finally:
         cleanup_stop.set()
         cleanup_thread.join(timeout=5)
+        server.stop_phone()
         shutdown()
         server.server_close()

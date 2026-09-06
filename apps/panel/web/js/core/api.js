@@ -3,6 +3,8 @@
  * changes.
  */
 
+import { decodePreview } from "../preview/packet.js";
+
 import { t } from "../i18n/index.js";
 
 export class ApiError extends Error {
@@ -91,13 +93,6 @@ export const api = {
 
   /* -- output -------------------------------------------------------- */
 
-  /** Opens the native folder dialog on the machine running the service.
-   *  Resolves `{cancelled: true}` when the user dismisses it. */
-  selectOutput: () => post("/api/select-output", {}, t("err.selectOutput")),
-
-  export: (sessionId, selectionId) =>
-    post("/api/export", { sessionId, selectionId }, t("err.export")),
-
   /** The converted image. `download` matters on a phone, where the native
    *  picker is not reachable and saving is the browser's job. */
   resultUrl: (sessionId, { download = false, exportId = "" } = {}) =>
@@ -131,36 +126,7 @@ export const api = {
       throw new ApiError(message, response.status);
     }
     const buffer = await response.arrayBuffer();
-    const bytes = new Uint8Array(buffer);
-    const magic = new TextDecoder().decode(bytes.subarray(0, 8));
-    if (magic !== "HYPREV1\n" || bytes.length < 12) {
-      throw new ApiError(t("err.previewData"), 500);
-    }
-    const jsonSize = new DataView(buffer).getUint32(8, true);
-    let metadata;
-    try {
-      metadata = JSON.parse(new TextDecoder().decode(bytes.subarray(12, 12 + jsonSize)));
-    } catch (_) { throw new ApiError(t("err.previewMeta"), 500); }
-    const width = Number(metadata.width), height = Number(metadata.height);
-    const count = width * height * 3;
-    const offset = 12 + jsonSize;
-    if (!Number.isInteger(width) || width <= 0 || !Number.isInteger(height) || height <= 0
-        || offset + count * 8 !== bytes.length || offset % 4 !== 0) {
-      // Float32Array requires aligned storage. C++ JSON length is not naturally
-      // aligned, so copy the two payloads into aligned browser-owned buffers.
-      if (!Number.isInteger(width) || width <= 0 || !Number.isInteger(height) || height <= 0
-          || offset + count * 8 !== bytes.length) {
-        throw new ApiError(t("err.previewPixels"), 500);
-      }
-    }
-    const copyPlane = (start) => {
-      const copy = bytes.slice(start, start + count * 4);
-      return new Float32Array(copy.buffer, copy.byteOffset, count);
-    };
-    return {
-      width, height, metadata,
-      base: copyPlane(offset), hdr: copyPlane(offset + count * 4),
-    };
+    return decodePreview(buffer);
   },
 
   /** Run the optional model and return its raw little-endian float32 gain grid. */

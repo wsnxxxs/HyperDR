@@ -308,12 +308,6 @@ class InputVocabularyTest(unittest.TestCase):
             self.assertIn(formats.CANONICAL_EXTENSIONS[family],
                           formats.RASTER_INPUT_EXTENSIONS, family)
 
-    def test_the_file_dialog_offers_both_cases_of_every_extension(self):
-        patterns = set(formats.picker_patterns().split())
-        for extension in formats.SUPPORTED_EXTENSIONS:
-            self.assertIn("*" + extension, patterns, extension)
-            self.assertIn("*" + extension.upper(), patterns, extension)
-
     def test_a_raw_header_is_never_named_as_a_raster(self):
         """Most RAW containers are TIFF; only LibRaw can validate the file."""
         for header in (b"II*" + bytes(1) + b"a" * 60, b"MM" + bytes(1) + b"*" + b"b" * 60):

@@ -1,0 +1,9 @@
+Generated with the built-in image_gen tool.
+
+Use case: photorealistic-natural
+Asset type: full photo asset for a desktop HDR photo editor interactive HTML demo
+Primary request: a striking realistic alpine lake landscape at golden hour, jagged snow-dusted mountains reflected in still turquoise lake water, dark pine forest along banks, a few weathered rocks in foreground.
+Style/medium: professional high-resolution landscape photography, real natural textures, crisp but restrained, no illustration.
+Composition/framing: landscape 3:2 frame, balanced wide-angle view, distant mountain summit near upper middle, lake reflection filling lower half; image fills entire frame.
+Lighting/mood: dramatic warm sunlight on mountain ridges and clouds contrasting with cool shadowed forest and lake; moderate SDR exposure, retained detail in bright sky and shadows, room to brighten with CSS without washing out.
+Constraints: one continuous landscape photograph only; no UI, no text, no watermark, no border, no split divider, no people or buildings, no exaggerated HDR halos.

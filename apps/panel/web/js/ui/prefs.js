@@ -1,4 +1,4 @@
-/* The preferences overlay: a full-window glass surface with a category rail.
+/* The preferences overlay: a shared dialog surface with a category rail.
  *
  * The panel had no dialog of any kind before this, and inventing a modal system
  * for one surface would have been the wrong trade. The open/close mechanics are
@@ -26,7 +26,7 @@ const focusable = (root) =>
     'button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])'))
     .filter((node) => node.offsetParent !== null);
 
-export function mountPrefs({ toast }) {
+export function mountPrefs({ toast, phoneWorkbench }) {
   const openButton = role("prefs-open");
   const panel = role("prefs");
   const closeButton = role("prefs-close");
@@ -65,10 +65,16 @@ export function mountPrefs({ toast }) {
       setText(title, t(labelKey));
       if (hint) setText(hint, t(helpKey, helpParams(pref)));
     });
+    const labelId = `pref-${pref.key}-label`;
+    title.id = labelId;
+    control.setAttribute("aria-labelledby", labelId);
+    if (hint) {
+      hint.id = `pref-${pref.key}-help`;
+      control.setAttribute("aria-describedby", hint.id);
+    }
     return el("div", { class: "field prefs-field" },
-      el("span", { class: "field-title" }, title),
-      control,
-      hint);
+      el("div", { class: "prefs-field-copy" },
+        el("span", { class: "field-title" }, title), hint), control);
   }
 
   function buildSegmented(pref) {
@@ -95,20 +101,12 @@ export function mountPrefs({ toast }) {
   }
 
   function buildToggle(pref) {
-    const button = el("button", { class: "chip prefs-toggle", type: "button",
-                                  "aria-pressed": "false" });
-    const setLabel = () => setText(button, t(`prefs.${pref.key}.label`));
-    setLabel();
-    relabels.push(setLabel);
+    const button = el("button", { class: "prefs-switch", type: "button",
+                                  role: "switch", "aria-checked": "false" });
     button.addEventListener("click", () => prefs.set({ [pref.key]: !prefs.get()[pref.key] }));
-    // The chip carries its own label, so the shell renders only the hint.
-    const helpKey = `prefs.${pref.key}.help`;
-    const hasHelp = t(helpKey) !== helpKey;
-    const hint = hasHelp
-      ? el("p", { class: "field-hint prefs-hint" }, t(helpKey, helpParams(pref))) : null;
-    if (hint) relabels.push(() => setText(hint, t(helpKey, helpParams(pref))));
-    const node = el("div", { class: "field prefs-field prefs-field--toggle" }, button, hint);
-    return { node, apply: (state) => setPressed(button, state[pref.key]) };
+    const node = fieldShell(pref, button);
+    node.classList.add("prefs-field--toggle");
+    return { node, apply: (state) => setPressed(button, state[pref.key], { aria: "aria-checked" }) };
   }
 
   const BUILDERS = { segmented: buildSegmented, toggle: buildToggle };
@@ -172,7 +170,9 @@ export function mountPrefs({ toast }) {
         hidden: group !== activeGroup,
       }, heading);
 
-      if (group === "about") {
+      if (group === "phone") {
+        section.append(phoneWorkbench.node);
+      } else if (group === "about") {
         const list = el("dl", { class: "prefs-diagnostics" });
         for (const [key, value] of diagnosticRows()) {
           const term = el("dt", {}, t(key));
@@ -207,17 +207,21 @@ export function mountPrefs({ toast }) {
     applyAll = (state) => { for (const apply of appliers) apply(state); };
     applyAll(prefs.get());
     renderNav();
+    selectGroup(activeGroup);
   }
 
   function renderNav() {
     nav.replaceChildren();
+    const icons = { appearance: "palette", preview: "monitor", output: "export",
+      adjust: "sliders-horizontal", phone: "device-mobile", about: "info" };
     for (const group of PREF_GROUPS) {
+      const label = el("span", {}, t(`prefs.group.${group}`));
       const button = el("button", {
-        type: "button", "aria-pressed": String(group === activeGroup),
-      }, t(`prefs.group.${group}`));
+        type: "button", dataset: { group }, "aria-pressed": String(group === activeGroup),
+      }, el("i", { class: `ph ph-${icons[group]}`, "aria-hidden": "true" }), label);
       button.classList.toggle("is-on", group === activeGroup);
       button.addEventListener("click", () => selectGroup(group));
-      relabels.push(() => setText(button, t(`prefs.group.${group}`)));
+      relabels.push(() => setText(label, t(`prefs.group.${group}`)));
       nav.append(button);
     }
   }
@@ -227,7 +231,12 @@ export function mountPrefs({ toast }) {
     for (const section of body.querySelectorAll(".prefs-group")) {
       section.hidden = section.dataset.group !== group;
     }
-    renderNav();
+    for (const button of nav.querySelectorAll("button")) {
+      setPressed(button, button.dataset.group === group);
+    }
+    copyButton.hidden = group !== "about";
+    resetButton.hidden = group === "phone";
+    resetButton.parentElement.hidden = group === "phone";
     body.scrollTop = 0;
   }
 
@@ -235,8 +244,9 @@ export function mountPrefs({ toast }) {
 
   const isOpen = () => !panel.hidden;
 
-  function open() {
-    if (isOpen()) return;
+  function open(group = activeGroup) {
+    if (PREF_GROUPS.includes(group)) activeGroup = group;
+    if (isOpen()) { selectGroup(activeGroup); return; }
     lastFocused = document.activeElement;
     // Diagnostics are probed at open time, so the readouts are never stale.
     render();
@@ -328,7 +338,7 @@ export function mountPrefs({ toast }) {
   });
 
   onLocaleChange(() => {
-    applyStatic();
+    applyStatic(panel);
     for (const relabel of [...relabels]) relabel();
     disarm();
   });

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark"><title>HyperDR · 暗房工作台 Demo</title>
+  <link rel="icon" href="assets/icon.svg"><link rel="stylesheet" href="assets/icons/style.css"><link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="HyperDR demo 首页"><img src="assets/icon.svg" alt=""><strong>HyperDR</strong><span class="edition">暗房</span></a>
+    <span class="separator"></span><button class="quiet" id="open-photo"><i class="ph ph-folder-open" aria-hidden="true"></i><span>打开照片</span><kbd>Ctrl O</kbd></button>
+    <div class="document-title"><span id="filename">Alpine_Lake.png</span><span class="unsaved" title="当前调整尚未导出"></span></div>
+    <div class="history-actions"><button class="icon-button" id="undo" aria-label="撤销" title="撤销 · Ctrl Z"><i class="ph ph-arrow-u-up-left"></i></button><button class="icon-button" id="redo" aria-label="重做" title="重做 · Ctrl Shift Z"><i class="ph ph-arrow-u-up-right"></i></button></div>
+    <button class="quiet" id="versions-button" aria-expanded="false"><i class="ph ph-clock-counter-clockwise"></i><span>版本</span><span class="count" id="version-count">2</span></button>
+    <button class="primary export-button" id="export-open"><i class="ph ph-export"></i>导出<span class="shortcut">Ctrl E</span></button>
+    <button class="icon-button" id="about-open" aria-label="关于此演示" title="关于此演示"><i class="ph ph-info"></i></button>
+  </header>
+
+  <main class="workspace">
+    <section class="canvas-area" aria-label="照片预览">
+      <div class="canvas-heading"><div class="photo-title"><span class="eyebrow">当前照片</span><strong id="photo-title">山湖 · 日落时分</strong></div><div class="preview-state"><span class="status-dot"></span>SDR 交互示意<button class="icon-button tiny" id="preview-info" aria-label="预览说明"><i class="ph ph-info"></i></button></div></div>
+      <div class="work-surface">
+        <div class="image-viewport" id="image-viewport">
+          <div class="image-frame" id="image-frame" data-view="compare">
+            <img id="photo-original" class="photo" src="assets/landscape.png" alt="日落时分的山峰和高山湖泊">
+            <div id="effect-layer" class="effect-layer"><img id="photo-effect" class="photo" src="assets/landscape.png" alt="当前调整预览"></div>
+            <canvas id="zebra-canvas" class="zebra-canvas" hidden></canvas>
+            <span class="image-label original-label">原图</span><span class="image-label edited-label"><span class="mint-dot"></span>当前调整</span>
+            <div class="split-line" id="split-line"><button class="split-handle" id="split-handle" role="slider" aria-label="对比分界线" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" title="拖动对比 · 方向键微调"><i class="ph ph-arrows-out-line-horizontal"></i></button></div>
+          </div>
+          <div class="drop-message" id="drop-message" hidden>松开以打开照片</div>
+        </div>
+      </div>
+      <div class="canvas-toolbar"><div class="segments view-segments" role="group" aria-label="预览模式"><button data-view="original" aria-pressed="false">原图</button><button data-view="hdr" aria-pressed="false">HDR 示意</button><button data-view="compare" aria-pressed="true"><i class="ph ph-columns"></i>对比</button></div><span class="toolbar-hint">拖动分界线，查看高光与暗部</span><div class="zoom-controls"><button class="icon-button tiny" id="zoom-out" aria-label="缩小"><i class="ph ph-minus"></i></button><select id="zoom" aria-label="预览缩放"><option value="1">适合窗口</option><option value="1.5">150%</option><option value="2">200%</option><option value="3">300%</option></select><button class="icon-button tiny" id="zoom-in" aria-label="放大"><i class="ph ph-plus"></i></button></div></div>
+      <div class="photo-metadata"><span><i class="ph ph-image"></i><span id="dimensions">正在载入示例照片</span><span class="metadata-dot">·</span>RGB</span><span id="editing-note">所有调整仅在此演示中生效</span></div>
+
+      <section class="version-drawer" id="version-drawer" hidden aria-label="照片版本">
+        <div class="drawer-heading"><div><span class="eyebrow">同一张照片，不同的表达</span><h2>版本记录</h2></div><button class="icon-button" id="versions-close" aria-label="关闭版本记录"><i class="ph ph-x"></i></button></div><div class="version-grid" id="version-grid"></div>
+      </section>
+    </section>
+
+    <aside class="inspector" aria-label="调整工作台">
+      <section class="histogram-panel" aria-label="直方图">
+        <div class="section-heading"><h2>直方图</h2><div class="segments small" role="group" aria-label="直方图模式"><button data-hist="rgb" aria-pressed="true">RGB</button><button data-hist="luma" aria-pressed="false">亮度</button></div></div>
+        <div class="histogram-plot"><canvas id="histogram" aria-label="当前 SDR 示意图的像素分布"></canvas><span class="histogram-caption">当前预览分布</span></div>
+        <div class="histogram-scale"><span>暗部</span><span>中间调</span><span>高光</span></div>
+        <div class="clipping"><button id="shadow-clip" aria-pressed="false" title="显示暗部裁切区域"><i class="ph ph-circle-half"></i>暗部 <b id="shadow-value">0.0%</b></button><button id="highlight-clip" aria-pressed="false" title="显示高光裁切区域"><i class="ph ph-sun"></i>高光 <b id="highlight-value">0.0%</b></button></div>
+      </section>
+      <div class="inspector-scroll">
+        <section class="adjustment-section">
+          <div class="section-heading"><h2>画面调整</h2><button class="text-button" id="reset">重置</button></div>
+          <div class="segments mode-segments" role="group" aria-label="调整方式"><button data-mode="manual" aria-pressed="true"><i class="ph ph-sliders-horizontal"></i>手动调整</button><button data-mode="ai" aria-pressed="false"><i class="ph ph-sparkle"></i>AI 优化示例</button></div>
+          <p class="mode-note" id="mode-note">从亮度开始，让光线自然呈现。</p>
+          <div class="control"><label for="brightness">整体亮度</label><output for="brightness" id="brightness-value">+0.60 <small>EV</small></output><input id="brightness" type="range" min="0" max="2" value="0.6" step="0.05"><div class="range-labels"><span>自然</span><span>明亮</span></div></div>
+          <div class="control"><label for="strength">HDR 扩展强度</label><output for="strength" id="strength-value">0.40</output><input id="strength" type="range" min="0" max="1" value="0.4" step="0.01"><div class="range-labels"><span>柔和</span><span>鲜明</span></div></div>
+          <div class="control"><label for="headroom">HDR 扩展范围</label><output for="headroom" id="headroom-value">2.5 <small>档</small></output><input id="headroom" type="range" min="0" max="3" value="2.5" step="0.1"><div class="range-labels"><span>0 档</span><span id="headroom-max">3 档</span></div></div>
+        </section>
+        <details class="parameter-group" open><summary><span><i class="ph ph-selection-background"></i>作用区域</span><i class="ph ph-caret-down"></i></summary><div class="details-body"><div class="control compact"><label for="threshold">扩展起点</label><output for="threshold" id="threshold-value">25%</output><input id="threshold" type="range" min="0" max="100" value="25" step="1"></div><div class="control compact"><label for="coverage">区域覆盖</label><output for="coverage" id="coverage-value">100%</output><input id="coverage" type="range" min="0" max="100" value="100" step="1"></div><p class="helper">亮度较高的区域优先获得扩展。</p></div></details>
+        <details class="parameter-group"><summary><span><i class="ph ph-sun-horizon"></i>高光恢复</span><span class="summary-value" id="recovery-label">混合<i class="ph ph-caret-down"></i></span></summary><div class="details-body"><div class="segments" role="group" aria-label="高光恢复"><button data-recovery="blend" aria-pressed="true">混合</button><button data-recovery="rebuild" aria-pressed="false">重建</button><button data-recovery="clip" aria-pressed="false">裁切</button></div><p class="helper">在演示中比较不同高光对比风格。</p></div></details>
+      </div>
+    </aside>
+  </main>
+  <footer class="statusbar"><span><span class="status-dot"></span>本地交互演示<span class="footer-divider"></span><span id="status-text">就绪</span></span><span id="save-status"><span class="unsaved"></span>当前调整尚未导出</span><button class="text-button" id="shortcuts-open">快捷键 <i class="ph ph-keyboard"></i></button></footer>
+</div>
+
+<dialog id="export-dialog" class="export-dialog"><form method="dialog"><header class="dialog-header"><div><span class="eyebrow">完成你的作品</span><h2>导出照片</h2></div><button class="icon-button" aria-label="关闭导出面板"><i class="ph ph-x"></i></button></header></form><div class="dialog-body"><div class="export-overview"><div class="export-photo"><img id="export-thumbnail" src="assets/landscape.png" alt="导出照片缩略图"><div><strong id="export-filename">Alpine_Lake.png</strong><span>当前调整</span></div></div><div class="demo-notice"><i class="ph ph-info"></i><span>这里体验导出流程，不调用 HDR 转换器。完成后可保存当前画面的 <b>SDR PNG</b> 和参数文件。</span></div></div><div class="export-config"><fieldset class="export-options"><legend>输出格式</legend><div class="format-grid"><label class="format-option"><input type="radio" name="format" value="adaptive" checked><span><strong>Adaptive HDR</strong><small>Apple</small></span></label><label class="format-option"><input type="radio" name="format" value="pq"><span><strong>PQ</strong><small>HDR10</small></span></label><label class="format-option"><input type="radio" name="format" value="hlg"><span><strong>HLG</strong><small>Hybrid Log-Gamma</small></span></label><label class="format-option"><input type="radio" name="format" value="ultra"><span><strong>Ultra HDR</strong><small>Google</small></span></label><label class="format-option"><input type="radio" name="format" value="avif-pq"><span><strong>AVIF PQ</strong><small>AVIF · PQ</small></span></label><label class="format-option"><input type="radio" name="format" value="avif-hlg"><span><strong>AVIF HLG</strong><small>AVIF · HLG</small></span></label></div></fieldset><p class="helper" id="format-note">适用于支持 Adaptive HDR 的 Apple 相册工作流。</p><fieldset class="export-options"><legend>输出色域</legend><div class="gamut-options"><label class="gamut-option"><input type="radio" name="gamut" value="current" checked><span>当前色域</span></label><label class="gamut-option"><input type="radio" name="gamut" value="srgb"><span>限缩到 sRGB</span></label></div></fieldset><div class="control export-quality"><label for="quality">编码质量</label><output for="quality" id="quality-value">90</output><input id="quality" type="range" min="50" max="100" value="90" step="1"></div><div class="export-progress" id="export-progress" hidden><progress max="100" value="0" id="progress"></progress><span id="progress-label">准备演示导出…</span></div><div class="export-success" id="export-success" hidden><i class="ph ph-check-circle"></i><div><strong>演示版本已创建</strong><span>可继续调整，或保存这次结果。</span></div></div></div></div><footer class="dialog-footer"><button class="quiet" id="save-settings"><i class="ph ph-file-code"></i>保存参数</button><button class="primary" id="export-start"><i class="ph ph-export"></i>开始演示导出</button><button class="primary" id="download-preview" hidden><i class="ph ph-download-simple"></i>保存 SDR PNG</button></footer></dialog>
+
+<dialog id="about-dialog" class="about-dialog"><form method="dialog"><header class="dialog-header"><div><span class="eyebrow">HYPERDR DARKROOM</span><h2>试着让光线多一点层次</h2></div><button class="icon-button" aria-label="关闭说明"><i class="ph ph-x"></i></button></header><div class="dialog-body"><p>这是独立的前端设计演示。直方图由当前示例图片的像素计算；滑块通过浏览器图像滤镜展示调整反馈，不代表 HyperDR 的真实 HDR 算法。</p><p>支持打开本地 JPG、PNG、WebP 等浏览器可解码图片，照片只在本机处理。AI 按钮应用一组示例参数，不会运行模型。</p><div class="shortcut-list"><span>打开照片<kbd>Ctrl O</kbd></span><span>导出面板<kbd>Ctrl E</kbd></span><span>撤销 / 重做<kbd>Ctrl Z / Ctrl Shift Z</kbd></span><span>分屏对比<kbd>C</kbd></span><span>适合窗口<kbd>F</kbd></span><span>高光斑马纹<kbd>Z</kbd></span></div><button class="primary about-done">开始体验</button></div></form></dialog>
+<input id="file-input" type="file" accept="image/jpeg,image/png,image/webp,image/avif,image/gif" hidden>
+<div class="toast" id="toast" role="status" hidden></div>
+<script src="app.js"></script>
+</body></html>

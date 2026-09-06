@@ -1,4 +1,4 @@
-/* Histogram, clipping percentages, and the zebra overlays.
+/* Histogram and the zebra overlays.
  *
  * The old graph showed only the source distribution, so a slider move was
  * answered by nothing but the pixels -- and on an SDR screen, by nothing at
@@ -102,7 +102,7 @@ function histogramFromDisplayImage(source, rangeLinear) {
 }
 
 /* One pass over the source plus the native output planes: luma + per-channel
- * counts, clipping, zebra masks. The histogram is deliberately computed from
+ * counts and zebra masks. The histogram is deliberately computed from
  * the linear Float32 contract, never from the browser's folded 8-bit display
  * copy. The masks are painted with token colours read at call time, so a theme
  * flip between images cannot leave yesterday's red on today's photo. */
@@ -120,10 +120,6 @@ export function analyse(source, rendered = null) {
   const hotColor = readColor("--zebra-hot");
   const coldColor = readColor("--zebra-cold");
 
-  const total = data.length / 4;
-  let hot = 0;
-  let cold = 0;
-
   for (let p = 0, i = 0; p < data.length; p += 4, i++) {
     const r = data[p], g = data[p + 1], b = data[p + 2];
     const output = frame?.hdr;
@@ -137,8 +133,6 @@ export function analyse(source, rendered = null) {
       : (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
     const isHot = outputPeak >= Math.max(1, rangeLinear) * 0.999;
     const isCold = outputLuma <= 1e-6;
-    if (isHot) hot++;
-    if (isCold) cold++;
     if (!isHot && !isCold) continue;
 
     // Diagonal stripes, so the overlay reads as a marking rather than a fill.
@@ -163,7 +157,6 @@ export function analyse(source, rendered = null) {
   return {
     source,
     histogram,
-    clipping: { hot: hot / total, cold: cold / total },
     zebraHot,
     zebraCold,
     renderedHistogram,
@@ -247,8 +240,6 @@ export function mountScope({ analysis }) {
   const canvas = role("histogram");
   const zebraHotCanvas = role("canvas-zebra-hot");
   const zebraColdCanvas = role("canvas-zebra-cold");
-  const hotChip = role("clip-hot");
-  const coldChip = role("clip-cold");
   const histMode = role("hist-mode");
 
   const modes = [["luma", "scope.luma"], ["rgb", "scope.rgb"]];
@@ -269,8 +260,6 @@ export function mountScope({ analysis }) {
     }
   });
 
-  hotChip.addEventListener("click", () => store.set({ zebraHot: !store.get().zebraHot }));
-  coldChip.addEventListener("click", () => store.set({ zebraCold: !store.get().zebraCold }));
 
   function draw() {
     const data = analysis.current;
@@ -382,9 +371,9 @@ export function mountScope({ analysis }) {
 
       // If rendered differs from source, draw source outline subtly
       if (data.renderedHistogram) {
-        context.globalAlpha = 0.35;
-        context.lineWidth = 1;
-        context.setLineDash([2, 2]);
+        context.globalAlpha = 0.75;
+        context.lineWidth = 1.3;
+        context.setLineDash([4, 3]);
 
         context.strokeStyle = palette.red;
         drawSmoothPath(context, ptsSrcR, false, height);
@@ -434,10 +423,12 @@ export function mountScope({ analysis }) {
 
       // 2. Source distribution outline
       context.strokeStyle = palette.luma;
-      context.globalAlpha = 0.60;
-      context.lineWidth = 1.2;
+      context.globalAlpha = 0.9;
+      context.lineWidth = 1.4;
+      context.setLineDash([4, 3]);
       drawSmoothPath(context, ptsSrc, false, height);
       context.stroke();
+      context.setLineDash([]);
 
       // 3. HDR Output distribution (Warm Amber highlight expansion)
       if (data.renderedHistogram) {
@@ -524,11 +515,7 @@ export function mountScope({ analysis }) {
   store.watch("histMode", (mode) => {
     for (const [id, button] of modeButtons) setPressed(button, id === mode);
   }, { immediate: true });
-  store.watchAny(["zebraHot", "zebraCold"], (state) => {
-    setPressed(hotChip, state.zebraHot);
-    setPressed(coldChip, state.zebraCold);
-    paintZebra();
-  }, { immediate: true });
+  store.watchAny(["zebraHot", "zebraCold"], paintZebra, { immediate: true });
 
   /* Canvas pixels are not restyled by a theme flip the way the DOM is, so the
    * graph is repainted whenever the resolved theme could have changed: the
@@ -546,14 +533,10 @@ export function mountScope({ analysis }) {
     const data = analysis.current;
     if (!data) {
       canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
-      setText(role("clip-hot-value"), "0.0%");
-      setText(role("clip-cold-value"), "0.0%");
       zebraHotCanvas.hidden = true;
       zebraColdCanvas.hidden = true;
       return;
     }
-    setText(role("clip-hot-value"), `${(data.clipping.hot * 100).toFixed(1)}%`);
-    setText(role("clip-cold-value"), `${(data.clipping.cold * 100).toFixed(1)}%`);
     draw();
     paintZebra();
   };

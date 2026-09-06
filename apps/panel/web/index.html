@@ -9,35 +9,60 @@
   /* Painted before first paint, so a stored choice never flashes the wrong theme. */
   try {
     var t = localStorage.getItem("hyperdr.theme");
-    if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+    var p = JSON.parse(localStorage.getItem("hyperdr.prefs.v1") || "null");
+    var theme = p?.theme || t || "dark";
+    if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
   } catch (e) {}
 </script>
-<!-- Relative hrefs, so this tree also opens from disk. The panel's CSP sets
-     base-uri 'none', so a <base> tag is not available as an alternative. -->
+<link rel="stylesheet" href="./assets/icons/style.css">
 <link rel="stylesheet" href="./css/tokens.css">
 <link rel="stylesheet" href="./css/base.css">
 <link rel="stylesheet" href="./css/shell.css">
 <link rel="stylesheet" href="./css/components.css">
+<link rel="stylesheet" href="./css/darkroom.css">
+<link rel="stylesheet" href="./css/phone-workbench.css">
 </head>
 <body>
-<!-- Two columns, not three bands. The photograph owns the full height of the
-     window's left side; everything the user operates -- identity, adjustment,
-     output, the run button -- is one uninterrupted top-to-bottom column on the
-     right, in the order the task is performed. -->
-<div class="app">
+<div class="app" data-workspace="empty">
+  <header class="app__header">
+    <h1 class="app__title wordmark" aria-label="HyperDR">
+      <img class="wordmark-mark" src="./icon.svg" alt="" aria-hidden="true">
+      <span class="wordmark-text" aria-hidden="true">
+        <span class="wordmark-accent">H</span><span class="wordmark-name">yper</span><span class="wordmark-accent">DR</span>
+      </span>
+    </h1>
+    <button class="button open-photo" type="button" data-role="open-photo"><i class="ph ph-folder-open" aria-hidden="true"></i><span data-i18n="editor.open">打开照片</span></button>
+    <span class="document-state" data-role="document-state"></span>
+    <div class="header-history" data-role="header-history"></div>
+    <button class="button" id="phone-connect" type="button" aria-haspopup="dialog" data-i18n-attr="title:phone.title;aria-label:phone.title"><i class="ph ph-device-mobile" aria-hidden="true"></i><span data-i18n="phone.connect">连接手机</span></button>
+    <button class="button" type="button" data-role="versions-open"><i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i><span data-i18n="workspace.versions">导出记录</span></button>
+    <button class="button button--primary" type="button" data-role="export-open"><i class="ph ph-export" aria-hidden="true"></i><span data-i18n="editor.export">导出</span></button>
 
-  <!-- The masthead is a line at the top of the control column, not a band
-       across the window: a title bar spanning the page pushed the photograph
-       down by its own height plus a region gap for no work in return. -->
+    <button class="icon-button" type="button" data-role="theme-toggle" aria-pressed="false">
+      <svg class="theme-icon theme-icon--sun" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></svg>
+      <svg class="theme-icon theme-icon--moon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20.2 15.3A8.5 8.5 0 0 1 8.7 3.8a8.5 8.5 0 1 0 11.5 11.5Z"/></svg>
+    </button>
+    <button class="icon-button" type="button" data-role="prefs-open"
+            aria-expanded="false" aria-haspopup="dialog"
+            data-i18n-attr="aria-label:prefs.open;title:prefs.open">
+      <svg class="prefs-icon" aria-hidden="true" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="3.2"/>
+        <path d="M19.6 13.4a7.7 7.7 0 0 0 0-2.8l1.9-1.5-1.9-3.3-2.3.9a7.7 7.7 0 0 0-2.4-1.4L14.5 3h-3.8l-.4 2.3a7.7 7.7 0 0 0-2.4 1.4l-2.3-.9-1.9 3.3 1.9 1.5a7.7 7.7 0 0 0 0 2.8l-1.9 1.5 1.9 3.3 2.3-.9a7.7 7.7 0 0 0 2.4 1.4l.4 2.3h3.8l.4-2.3a7.7 7.7 0 0 0 2.4-1.4l2.3.9 1.9-3.3Z"/>
+      </svg>
+    </button>
+    <div class="window-controls" data-role="window-controls" hidden>
+      <button type="button" data-role="window-minimize" data-i18n-attr="aria-label:window.minimize;title:window.minimize"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1 6.5h10"/></svg></button>
+      <button type="button" data-role="window-maximize" data-i18n-attr="aria-label:window.maximize;title:window.maximize"><svg viewBox="0 0 12 12" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9"/></svg></button>
+      <button class="window-close" type="button" data-role="window-close" data-i18n-attr="aria-label:window.close;title:window.close"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m1.5 1.5 9 9m0-9-9 9"/></svg></button>
+    </div>
+  </header>
 
-
-  <!-- Full window height. No heading: a panel containing one large photograph
-       does not need a caption saying it is the preview. -->
   <main class="app__stage" id="stage" data-i18n-attr="aria-label:stage.label">
+    <header class="canvas-head"><div class="canvas-document"><span class="eyebrow" data-i18n="workspace.currentPhoto">当前照片</span><strong class="editor-filename" data-role="editor-filename"></strong></div><span class="photo-meta" data-role="photo-meta"></span></header>
     <div class="stage-viewport">
-      <!-- One photograph at a time; picking another replaces it. -->
       <div class="stage" data-role="stage" aria-busy="false">
         <div class="stage-frame">
+          <span class="view-tag view-tag--original" data-i18n="editor.original">原图</span><span class="view-tag view-tag--edited" data-i18n="editor.currentEdit">当前调整</span>
           <canvas data-role="canvas-hdr" hidden data-i18n-attr="aria-label:stage.canvasHdr"></canvas>
           <canvas data-role="canvas-sdr" hidden data-i18n-attr="aria-label:stage.canvasSdr"></canvas>
           <canvas data-role="canvas-original" hidden aria-hidden="true"></canvas>
@@ -50,24 +75,13 @@
             <span class="stage-divider-line"></span>
             <span class="stage-divider-handle"></span>
           </div>
-          <div class="stage-hint" data-role="stage-hint" hidden></div>
           <div class="stage-upload" data-role="stage-upload" hidden>
             <span data-role="stage-upload-text"></span>
             <button class="stage-upload-cancel" type="button" data-role="upload-cancel" data-i18n="stage.uploadCancel">取消上传</button>
           </div>
           <span class="stage-badge" data-role="hdr-badge" hidden>HDR</span>
-          <button class="icon-button stage-expand" type="button"
-                  data-role="stage-expand" aria-pressed="false">
-            <svg class="stage-expand-icon--open" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"/>
-            </svg>
-            <svg class="stage-expand-icon--close" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 9h5V4M20 9h-5V4M4 15h5v5M20 15h-5v5"/>
-            </svg>
-          </button>
-          <p class="stage-status" data-role="hdr-status" aria-live="polite" hidden></p>
+
         </div>
-        <!-- The drop target is the whole panel, but the invitation is a card. -->
         <div class="stage-empty" data-role="stage-empty">
           <div class="stage-empty-card">
             <span class="stage-empty-mark" aria-hidden="true">
@@ -76,10 +90,13 @@
               </svg>
             </span>
             <span class="stage-empty-title" data-role="stage-title" data-i18n="stage.empty">拖放或选择图片</span>
+            <p class="empty-description" data-i18n="workspace.emptyDescription">打开一张照片，调整光线，保留高光的层次。</p>
             <span class="stage-support" id="stage-drop-hint" data-role="stage-support">支持 RAW · HEIC · JPG · PNG · AVIF</span>
             <button class="button button--primary stage-select" type="button"
                     data-role="stage-select" aria-describedby="stage-drop-hint"
                     data-i18n="stage.select">选择图片</button>
+            <span class="empty-shortcut"><kbd>Ctrl / ⌘ O</kbd><span data-i18n="workspace.orDrop">或将照片拖入此处</span></span>
+            <span class="empty-local" data-i18n="editor.local">照片在本机处理</span>
             <span class="stage-progress" aria-hidden="true"><span class="stage-progress-fill" data-role="upload-bar"></span></span>
             <span class="stage-progress-text" data-role="upload-progress" aria-live="polite"></span>
           </div>
@@ -88,125 +105,93 @@
                accept="image/*">
       </div>
     </div>
+    <div class="viewer-toolbar">
+      <div class="segmented viewer-modes" role="group" data-role="viewer-modes" data-i18n-attr="aria-label:editor.view"></div>
+      <p class="viewer-hint" data-role="viewer-hint"></p>
+      <div class="viewer-zoom">
+        <button class="link-button" type="button" data-role="zoom-fit" data-i18n="editor.fit">适应窗口</button>
+        <button class="icon-button" type="button" data-role="zoom-out" data-i18n-attr="aria-label:editor.zoomOut">−</button>
+        <output data-role="zoom-value" data-i18n-attr="title:editor.zoomHint">100%</output>
+        <button class="icon-button" type="button" data-role="zoom-in" data-i18n-attr="aria-label:editor.zoomIn">+</button>
+      </div>
+    </div>
   </main>
 
-  <div class="app__rail">
-  <header class="app__header">
-    <h1 class="app__title wordmark" aria-label="HyperDR">
-      <!-- Reuse the exact desktop application icon. -->
-      <img class="wordmark-mark" src="./icon.svg" alt="" aria-hidden="true">
-      <span class="wordmark-text" aria-hidden="true">
-        <span class="wordmark-accent">H</span><span class="wordmark-name">yper</span><span class="wordmark-accent">DR</span>
-      </span>
-    </h1>
-    <!-- The only place service state is reported. -->
-    <p class="service-state" data-role="service-state" aria-live="polite">
-      <span class="service-dot" data-role="service-dot"></span>
-      <span data-role="service-text" data-i18n="app.service.detecting">正在检测…</span>
-    </p>
-    <button class="icon-button" type="button" data-role="theme-toggle" aria-pressed="false">
-      <svg class="theme-icon theme-icon--sun" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></svg>
-      <svg class="theme-icon theme-icon--moon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20.2 15.3A8.5 8.5 0 0 1 8.7 3.8a8.5 8.5 0 1 0 11.5 11.5Z"/></svg>
-    </button>
-    <!-- The header is the only region main.js never marks `inert`, so a global
-         entry point belongs here rather than in the rail, which is disabled
-         until a photograph is loaded. -->
-    <button class="icon-button" type="button" data-role="prefs-open"
-            aria-expanded="false" aria-haspopup="dialog"
-            data-i18n-attr="aria-label:prefs.open;title:prefs.open">
-      <svg class="prefs-icon" aria-hidden="true" viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="3.2"/>
-        <path d="M19.6 13.4a7.7 7.7 0 0 0 0-2.8l1.9-1.5-1.9-3.3-2.3.9a7.7 7.7 0 0 0-2.4-1.4L14.5 3h-3.8l-.4 2.3a7.7 7.7 0 0 0-2.4 1.4l-2.3-.9-1.9 3.3 1.9 1.5a7.7 7.7 0 0 0 0 2.8l-1.9 1.5 1.9 3.3 2.3-.9a7.7 7.7 0 0 0 2.4 1.4l.4 2.3h3.8l.4-2.3a7.7 7.7 0 0 0 2.4-1.4l2.3.9 1.9-3.3Z"/>
-      </svg>
-    </button>
-  </header>
+  <aside class="app__rail" data-i18n-attr="aria-label:adjust.label">
 
-  <aside class="app__settings" id="settings" data-i18n-attr="aria-label:adjust.label">
-    <!-- Histogram & clipping inspection unit at the top of the rail -->
+
+
     <section class="scope" data-i18n-attr="aria-label:scope.label">
       <div class="scope-head">
+        <h2 data-i18n="editor.histogram">直方图</h2>
         <div class="segmented segmented--small" role="group" data-role="hist-mode" data-i18n-attr="aria-label:scope.histMode"></div>
-        <div class="scope-chips">
-          <button class="chip chip--hot" type="button" data-role="clip-hot" aria-pressed="false" data-i18n-attr="title:scope.hotZebra">
-            <span class="chip-swatch" aria-hidden="true"></span><span data-i18n="scope.hot">高光</span> <b data-role="clip-hot-value">0.0%</b>
-          </button>
-          <button class="chip chip--cold" type="button" data-role="clip-cold" aria-pressed="false" data-i18n-attr="title:scope.coldZebra">
-            <span class="chip-swatch" aria-hidden="true"></span><span data-i18n="scope.cold">暗部</span> <b data-role="clip-cold-value">0.0%</b>
-          </button>
-        </div>
+
       </div>
+      <p class="scope-legend"><span class="swatch swatch--source" aria-hidden="true"></span><span data-i18n="scope.source">源分布</span><span class="swatch swatch--output" aria-hidden="true"></span><span data-i18n="scope.output">扩展后</span></p>
       <div class="scope-plot">
         <canvas class="scope-graph" data-role="histogram" width="380" height="72"></canvas>
         <p class="scope-empty" data-i18n="scope.empty">暂无直方图数据</p>
       </div>
-      <div class="scope-bar">
-        <p class="scope-legend">
-          <span class="swatch swatch--source" aria-hidden="true"></span><span data-i18n="scope.source">源分布</span>
-          <span class="swatch swatch--output" aria-hidden="true"></span><span data-i18n="scope.output">扩展后</span>
-        </p>
-      </div>
+      <div class="scope-scale" aria-hidden="true"><span data-i18n="scope.cold">暗部</span><span data-i18n="inspector.midtones">中间调</span><span data-i18n="scope.hot">高光</span></div>
     </section>
 
-    <div class="group-head group-head--major">
-      <h2 data-i18n="adjust.label">调整</h2>
-      <div class="segmented optimize-toggle" role="group" data-i18n-attr="aria-label:adjust.mode">
-        <button type="button" data-role="math-mode" aria-pressed="true" data-i18n="adjust.manual">手动</button>
-        <button type="button" data-role="optimize" aria-pressed="false">AI 优化</button>
+    <section class="rail-welcome">
+      <h2 data-i18n="welcome.title">从一张照片开始</h2>
+      <p data-i18n="welcome.description">打开照片后，在这里调整光线与高光层次。</p>
+      <ol class="welcome-steps">
+        <li><span class="step-number">01</span><div><strong data-i18n="welcome.import">打开照片</strong><p data-i18n="welcome.importNote">拖入文件，或从本机选择。</p></div></li>
+        <li><span class="step-number">02</span><div><strong data-i18n="welcome.adjust">调整光线</strong><p data-i18n="welcome.adjustNote">手动微调，或使用 AI 优化。</p></div></li>
+        <li><span class="step-number">03</span><div><strong data-i18n="welcome.export">保存 HDR 照片</strong><p data-i18n="welcome.exportNote">导出时选择格式与色域。</p></div></li>
+      </ol>
+    </section>
+    <div class="app__settings" id="settings">
+      <section class="adjustment-intro">
+        <div class="group-head"><h2 data-i18n="inspector.adjustments">画面调整</h2><button class="link-button" type="button" data-role="settings-reset" data-i18n-attr="title:adjust.resetTitle">重置</button></div>
+        <div class="segmented optimize-toggle" role="group" data-i18n-attr="aria-label:adjust.mode">
+          <button type="button" data-role="math-mode" data-i18n-attr="aria-label:inspector.manual" aria-pressed="true" data-i18n="inspector.manual">手动调整</button>
+          <button type="button" data-role="optimize" data-i18n-attr="aria-label:adjust.ai" aria-pressed="false">AI 优化</button>
+        </div>
+        <p class="mode-note" data-role="mode-note"></p>
+        <p class="group-note" data-role="optimize-note" hidden></p>
+      </section>
+      <div class="settings-submenu settings-submenu--manual" data-role="submenu-manual">
+        <section class="adjustment-body"><div class="group" data-role="group-tone"></div></section>
+        <details class="parameter-group" open>
+          <summary><span><i class="ph ph-selection-background" aria-hidden="true"></i><span data-i18n="adjust.region">作用区域</span></span><i class="ph ph-caret-down" aria-hidden="true"></i></summary>
+          <div class="parameter-body"><div class="group" data-role="group-region"></div><p class="parameter-note" data-i18n="inspector.regionNote">亮度较高的区域优先获得扩展。</p></div>
+        </details>
+        <details class="parameter-group" open>
+          <summary><span><i class="ph ph-sun-horizon" aria-hidden="true"></i><span data-i18n="ctrl.highlightRecovery.label">高光恢复</span></span><span class="summary-value"><span data-role="recovery-summary"></span><i class="ph ph-caret-down" aria-hidden="true"></i></span></summary>
+          <div class="parameter-body"><div class="group" data-role="group-advanced"></div></div>
+        </details>
       </div>
-      <button class="link-button" type="button" data-role="settings-reset"
-              data-i18n-attr="title:adjust.resetTitle">重置</button>
-    </div>
-
-    <p class="group-note" data-role="optimize-note" hidden></p>
-
-    <!-- 手动调整子菜单 -->
-    <div class="settings-submenu settings-submenu--manual" data-role="submenu-manual">
-      <div class="group" data-role="group-tone"></div>
-      <h3 class="group-sub" data-i18n="adjust.region">作用区域</h3>
-      <div class="group" data-role="group-region"></div>
-      <div class="group" data-role="group-advanced"></div>
-    </div>
-
-    <!-- AI 优化子菜单 -->
-    <div class="settings-submenu settings-submenu--ai" data-role="submenu-ai" hidden>
-      <p class="group-note" data-i18n="adjust.aiNote">已启用 AI 优化；以下参数用于后置微调模型结果</p>
-      <div class="group" data-role="group-model"></div>
+      <div class="settings-submenu settings-submenu--ai" data-role="submenu-ai" hidden>
+        <section class="adjustment-body"><div class="group" data-role="group-model"></div></section>
+        <details class="parameter-group">
+          <summary><span><i class="ph ph-sliders-horizontal" aria-hidden="true"></i><span data-i18n="inspector.fineTune">细节微调</span></span><i class="ph ph-caret-down" aria-hidden="true"></i></summary>
+          <div class="parameter-body"><div class="group" data-role="group-model-detail"></div></div>
+        </details>
+      </div>
     </div>
   </aside>
 
-  <!-- Pinned to the bottom of the control column: the last decision and the
-       button that acts on it never move and never scroll away. -->
-  <footer class="app__run" id="run" data-i18n-attr="aria-label:out.label">
-    <div class="out">
-      <h2 class="out-label" data-i18n="out.format">输出格式</h2>
-      <!-- The formats are laid out, not folded into a select: there are six,
-           the choice drives the headroom ceiling below it, and a closed menu
-           hides the one decision this block exists to make. -->
-      <div class="segmented segmented--wrap out-formats" role="group"
-           data-role="encoding" data-i18n-attr="aria-label:out.encoding"></div>
-      <p class="out-hint" data-role="encoding-hint"></p>
-      <!-- Under the grid, not in the heading row. Quality is a parameter of
-           the format that was just chosen; an editable number sitting beside
-           a section title reads as part of the title. -->
-      <div class="out-quality" data-role="group-quality"></div>
 
-      <section class="out-color" aria-labelledby="out-color-label">
-        <h3 class="out-color-label" id="out-color-label" data-i18n="out.color">色彩与色域</h3>
-        <div class="out-color-row">
-          <div class="out-color-gamut">
-            <span class="out-color-title" data-i18n="out.gamutTitle">输出色域</span>
-            <div class="segmented segmented--wrap" role="group"
-                 data-role="color-gamut" data-i18n-attr="aria-label:out.gamut"></div>
-          </div>
-          <button class="chip out-color-clamp" type="button"
-                  data-role="clamp-srgb" aria-pressed="false"
-                  data-i18n="out.clampSrgb">限制在 sRGB</button>
-        </div>
-        <p class="out-hint out-color-hint" data-role="color-hint"></p>
-      </section>
+  <footer class="app__status">
+    <p class="service-state" data-role="service-state" aria-live="polite">
+      <span class="service-dot" data-role="service-dot"></span>
+      <span data-role="service-text" data-i18n="app.service.detecting">正在检测…</span>
+    </p>
+    <p class="stage-status" data-role="hdr-status" aria-live="polite" hidden></p>
+    <button class="link-button shortcuts-open" type="button" data-role="shortcuts-open"><i class="ph ph-keyboard" aria-hidden="true"></i><span data-i18n="workspace.shortcuts">快捷键</span></button>
+  </footer>
+</div>
 
+  <dialog class="export-dialog" data-role="export-dialog" aria-labelledby="export-title">
+    <header class="export-head"><div><h2 id="export-title" data-i18n="editor.exportTitle">导出照片</h2><p data-i18n="editor.exportSubtitle">选择输出格式，保存当前调整</p></div><button class="icon-button" type="button" data-role="export-close" data-i18n-attr="aria-label:editor.closeExport">×</button></header>
+    <div class="export-body">
+    <aside class="export-overview"><canvas data-role="export-thumbnail" width="300" height="200"></canvas><strong data-role="export-filename"></strong><p data-i18n="editor.currentEdit">当前调整</p><p class="export-summary" data-role="export-summary"></p>
       <div class="result" data-role="result" hidden aria-live="polite">
-        <div class="result-info">
+        <div class="result-info"><span class="result-caption" data-i18n="workspace.previousExport">上次导出</span>
           <strong class="result-name" data-role="result-name"></strong>
           <span class="result-meta" data-role="result-meta"></span>
           <span class="result-warn" data-role="result-warn" hidden></span>
@@ -217,11 +202,25 @@
         </div>
       </div>
 
-      <p class="out-progress" data-role="run-progress" hidden aria-live="polite"></p>
-      <div class="out-actions">
-        <button class="button" type="button" data-role="cancel" hidden>取消</button>
-        <button class="button button--primary button--run" type="button" data-role="run">开始转换</button>
-      </div>
+    </aside>
+    <div class="out">
+      <h2 class="out-label" data-i18n="out.format">输出格式</h2>
+      <div class="segmented segmented--wrap out-formats" role="group"
+           data-role="encoding" data-i18n-attr="aria-label:out.encoding"></div>
+      <p class="out-hint" data-role="encoding-hint"></p>
+
+
+      <section class="out-color" aria-labelledby="out-color-label">
+        <h3 class="out-color-label" id="out-color-label" data-i18n="out.gamutTitle">输出色域</h3>
+        <div class="segmented gamut-options" role="group" data-role="color-gamut" data-i18n-attr="aria-label:out.gamut"></div>
+        <p class="out-hint out-color-hint" data-role="color-hint"></p>
+      </section>
+      <div class="out-quality" data-role="group-quality"></div>
+
+
+    </div>
+    </div>
+    <footer class="export-footer">
       <details class="out-command">
         <summary data-i18n="out.command">查看命令行</summary>
         <div class="out-command-popover">
@@ -229,14 +228,14 @@
           <button class="link-button out-command-copy" type="button" data-role="command-copy" data-i18n="out.commandCopy">复制</button>
         </div>
       </details>
-    </div>
-  </footer>
-  </div>
+      <p class="out-progress" data-role="run-progress" hidden aria-live="polite"></p>
+      <div class="out-actions">
+        <button class="button" type="button" data-role="cancel" hidden>取消</button>
+        <button class="button button--primary button--run" type="button" data-role="run">开始转换</button>
+      </div>
+    </footer>
+  </dialog>
 
-</div>
-
-<!-- Application preferences. Distinct from the rail: that is 调整, per photo
-     and sent to the converter; this is 偏好设置, per device and never sent. -->
 <div class="prefs" data-role="prefs" hidden role="dialog" aria-modal="true"
      aria-labelledby="prefs-title">
   <div class="prefs-surface">
@@ -258,6 +257,19 @@
     </footer>
   </div>
 </div>
+
+<dialog class="shortcuts-dialog" data-role="shortcuts-dialog" aria-labelledby="shortcuts-title">
+  <form method="dialog"><header class="export-head"><div><h2 id="shortcuts-title" data-i18n="workspace.shortcuts">快捷键</h2><p data-i18n="workspace.shortcutNote">让注意力留在照片上。</p></div><button class="icon-button" data-i18n-attr="aria-label:workspace.closeShortcuts">×</button></header></form>
+  <div class="shortcut-grid">
+    <span data-i18n="editor.open">打开照片</span><kbd>Ctrl / ⌘ O</kbd>
+    <span data-i18n="editor.export">导出</span><kbd>Ctrl / ⌘ E</kbd>
+    <span data-i18n="edit.undo">撤销</span><kbd>Ctrl / ⌘ Z</kbd>
+    <span data-i18n="edit.redo">重做</span><kbd>Ctrl / ⌘ Shift Z</kbd>
+    <span data-i18n="editor.compare">分屏对比</span><kbd>C</kbd>
+    <span data-i18n="editor.fit">适应窗口</span><kbd>F</kbd>
+    <span data-i18n="workspace.holdOriginal">按住查看原图</span><kbd>Space</kbd>
+  </div>
+</dialog>
 
 <div class="toast" data-role="toast" role="status" aria-live="polite"></div>
 

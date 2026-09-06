@@ -18,13 +18,13 @@
 
 import { createStore } from "../core/store.js";
 
-/** `kind: "toggle"` renders a chip; `kind: "segmented"` renders a button group.
+/** `kind: "toggle"` renders a switch; `kind: "segmented"` renders a button group.
  *  `choices` are [value, labelKey] pairs -- a label key of null means the label
  *  is the value itself (language names are not translated). */
 export const PREFS = [
   /* -- appearance ---------------------------------------------------- */
   {
-    key: "theme", group: "appearance", kind: "segmented", default: "system",
+    key: "theme", group: "appearance", kind: "segmented", default: "dark",
     choices: [["system", "prefs.theme.system"], ["light", "prefs.theme.light"],
               ["dark", "prefs.theme.dark"]],
   },
@@ -73,7 +73,7 @@ export const PREFS = [
 export const PREFS_BY_KEY = new Map(PREFS.map((pref) => [pref.key, pref]));
 
 /** Render order of the groups; "about" has no preferences, only readouts. */
-export const PREF_GROUPS = ["appearance", "preview", "output", "adjust", "about"];
+export const PREF_GROUPS = ["appearance", "preview", "output", "adjust", "phone", "about"];
 
 const STORAGE_KEY = "hyperdr.prefs.v1";
 

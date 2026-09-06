@@ -1,5 +1,5 @@
 import { store } from "../core/store.js";
-import { role, setText } from "../core/dom.js";
+import { role } from "../core/dom.js";
 import { t, onLocaleChange } from "../i18n/index.js";
 import { OPTION_KEYS } from "./schema.js";
 import { createHistory } from "./history.js";
@@ -12,10 +12,15 @@ export function mountHistory() {
   const redo = document.createElement("button");
   for (const button of [undo, redo]) {
     button.type = "button";
-    button.className = "link-button";
+    button.className = "icon-button";
     group.append(button);
   }
-  role("settings-reset").closest(".group-head").after(group);
+  for (const [button, icon] of [[undo, "ph-arrow-u-up-left"], [redo, "ph-arrow-u-up-right"]]) {
+    const mark = document.createElement("i");
+    mark.className = `ph ${icon}`; mark.setAttribute("aria-hidden", "true");
+    button.append(mark);
+  }
+  role("header-history").append(group);
   const locked = () => {
     const state = store.get();
     return !state.file || state.uploading || state.restoring || state.optimizing;
@@ -23,7 +28,7 @@ export function mountHistory() {
   const sync = () => {
     undo.disabled = locked() || !history.status().canUndo;
     redo.disabled = locked() || !history.status().canRedo;
-    setText(undo, t("edit.undo")); setText(redo, t("edit.redo"));
+    undo.setAttribute("aria-label", t("edit.undo")); redo.setAttribute("aria-label", t("edit.redo"));
     undo.title = t("edit.undoHint"); redo.title = t("edit.redoHint");
   };
   history.subscribe(sync);
@@ -31,7 +36,7 @@ export function mountHistory() {
   onLocaleChange(sync);
   undo.addEventListener("click", () => history.undo());
   redo.addEventListener("click", () => history.redo());
-  const settings = document.getElementById("settings");
+  const settings = document.querySelector(".app");
   settings.addEventListener("change", history.flush);
   settings.addEventListener("pointerup", () => queueMicrotask(history.flush));
   document.addEventListener("keydown", (event) => {

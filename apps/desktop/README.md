@@ -43,3 +43,17 @@ only the Tauri window because Tauri launches it without a console window.
 
 The generated `binaries/` and sidecar build directories are intentionally
 ignored by Git. They are release artifacts, not source files.
+
+## Windows desktop integrations
+
+The WebView2 instance is created with `WebGPU` and
+`UseDisplayP3ColorSpace` enabled, so an HDR-enabled Windows display can use the
+panel's Display-P3 extended-range preview path. The Tauri shell also owns the
+Python sidecar with a Windows Job Object and a `taskkill /T /F` fallback; closing
+the window therefore tears down the PyInstaller bootstrapper and any
+`HyperDR.exe` child processes together.
+
+Windows native file drops are forwarded as absolute paths to the desktop-only
+`/api/native-input` route. The panel validates the source and keeps it as the
+session input without copying the RAW into the HTTP workspace. Browser and LAN
+servers keep the existing streamed-upload path.

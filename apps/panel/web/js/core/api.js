@@ -175,6 +175,11 @@ export const api = {
 
   /* -- upload -------------------------------------------------------- */
 
+  /** Desktop-only native path handoff. The server validates the path and keeps
+   *  it as the session source instead of receiving a byte stream. */
+  openNativePath: (sessionId, path) =>
+    post("/api/native-input", { sessionId, path }, "无法载入桌面端文件。"),
+
   /** XMLHttpRequest rather than fetch: fetch still cannot report request
    *  progress, and a 300 MB RAW with no progress bar looks like a hung panel.
    *

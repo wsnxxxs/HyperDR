@@ -14,19 +14,19 @@ carries it as `input_domain`. Nothing branches on the file extension.
 | Domain | Produced by | What 1.0 means | Renderer |
 | --- | --- | --- | --- |
 | `scene-referred` | RAW through LibRaw | wherever white balance landed | photographic curve, automatic exposure |
-| `display-referred-sdr` | JPEG, PNG, SDR HEIC/AVIF, an Ultra HDR JPEG that fell back to its primary | diffuse white, and the ceiling | identity, zero gain map |
+| `display-referred-sdr` | JPEG, PNG, SDR HEIC/AVIF, an Ultra HDR JPEG that fell back to its primary | diffuse white, and the ceiling | fixed-exposure photographic expansion |
 | `display-referred-hdr` | PQ/HLG HEIC and AVIF, Ultra HDR, a gain-map HEIC | diffuse white, with real detail above it | log-domain shoulder, split at the declared headroom |
 
 - **A scene-referred input** is developed: the photographic curve below chooses
   an exposure from the scene's log average and selects headroom from content.
-- **A display-referred SDR input** is already a finished photograph, so it is
-  passed through unchanged and its gain map is zero. HyperDR does not
-  manufacture highlight range from an input that never carried any. Exposure
-  controls still apply — a manual `--exposure` and `--exposure-bias` both scale
-  the image — and when that scaling would push the picture past 1.0 the excess
-  is rolled off by the shoulder rather than clipped. Automatic exposure is not
-  consulted: its input is the scene's log average, which on a graded picture
-  measures the grade.
+- **A display-referred SDR input** is already a finished photograph, so it does
+  not get automatic exposure or pretend that its container carried highlight
+  data. It is rendered through the photographic expansion pipeline with
+  exposure pinned to the display-referred value, which lets `--gain-strength`,
+  `--headroom`/`--headroom-max`, `--expansion-start`, and `--area-coverage`
+  create a controlled HDR alternate for ordinary JPEG/PNG photos. The source
+  remains labelled SDR; the inferred range is a creative output budget, not an
+  input measurement.
 - **A display-referred HDR input** is split rather than re-developed. Both
   renditions come from one shoulder in the log domain: identity below the knee
   (`--expansion-start`), slope exactly 1 at the knee, and asymptotic above it.
@@ -60,16 +60,17 @@ the default knee, and leaves everything below the knee bit-exact.
 
 The headroom the split uses is the one the *container declared*, never a
 percentile of the pixels. An HDR file whose colour is described by an ICC
-profile rather than by CICP therefore reports SDR and is passed through: an ICC
-profile cannot state a headroom, and rendering such a file faithfully is better
-than inventing a range for it.
+profile rather than by CICP therefore reports SDR; it has no measured input
+headroom, but the output controls may still apply the same fixed-exposure
+creative expansion as any other SDR photograph.
 
 ## Guarantees
 
 - The photographic path uses a shared toe and middle segment for SDR and HDR.
   Their exponential shoulders asymptote to `1` and `2^headroom_stops` rather
-  than hard-clipping highlights. It runs for scene-referred input only; see
-  **Input domains** above for what the other two get.
+  than hard-clipping highlights. Scene-referred input selects exposure
+  automatically; display-referred SDR uses the same expansion with exposure
+  pinned to the finished image.
 - A single-channel gain map can only reconstruct a common RGB multiplier. Shared
   vibrance, highlight-to-white convergence, and hue-preserving gamut compression
   therefore happen before the SDR/HDR luminance split.
@@ -80,9 +81,10 @@ than inventing a range for it.
 - `2^headroom_stops` is the nominal global-curve target. Local highlight
   weighting can deliberately make the final rendered peak lower; the report
   records both values.
-- Any gain-grid node that would bilinearly influence an SDR-only pixel is set to
-  zero before encoding. The 8-bit auxiliary gain image is HEVC-lossless, so zero
-  gain cells survive Adaptive HEIC decoding exactly. Ultra HDR stores the map as
+- Any gain-grid node that would bilinearly influence a shadow below the
+  expansion knee is set to zero before encoding. The 8-bit auxiliary gain image
+  is HEVC-lossless, so zero gain cells survive Adaptive HEIC decoding exactly.
+  Ultra HDR stores the map as
   a grayscale JPEG at quality 85 or higher, as recommended for JPEG/R; the
   requested quality still controls the SDR base.
 - RAW is decoded through LibRaw's linear ProPhoto output (`output_color` 4), then

@@ -10,7 +10,9 @@ use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{DragDropEvent, WebviewEvent};
 #[cfg(not(debug_assertions))]
 use tauri_plugin_shell::process::CommandChild;
 #[cfg(not(debug_assertions))]
@@ -19,15 +21,26 @@ use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 use url::Url;
 
+mod process_tree;
+use process_tree::ProcessTree;
+
 const PANEL_READY_PREFIX: &str = "HYPERDR_READY ";
 #[cfg(not(debug_assertions))]
 const PANEL_SIDECAR: &str = "hyperdr-panel";
+#[cfg(windows)]
+const WEBVIEW2_BROWSER_ARGS: &str = "--enable-features=WebGPU,UseDisplayP3ColorSpace --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection";
 
 enum PanelChild {
     #[cfg(debug_assertions)]
-    Dev(Arc<Mutex<Child>>),
+    Dev {
+        child: Arc<Mutex<Child>>,
+        process_tree: ProcessTree,
+    },
     #[cfg(not(debug_assertions))]
-    Bundled(CommandChild),
+    Bundled {
+        child: CommandChild,
+        process_tree: ProcessTree,
+    },
 }
 
 #[derive(Default)]
@@ -39,25 +52,72 @@ impl PanelProcess {
     }
 
     fn stop(&self) {
-        let child = self
-            .0
-            .lock()
-            .expect("panel process mutex poisoned")
-            .take();
+        let child = self.0.lock().expect("panel process mutex poisoned").take();
         let Some(child) = child else { return };
         match child {
             #[cfg(debug_assertions)]
-            PanelChild::Dev(child) => {
+            PanelChild::Dev {
+                child,
+                process_tree,
+            } => {
+                process_tree.terminate();
                 if let Ok(mut process) = child.lock() {
                     let _ = process.kill();
+                    let _ = process.wait();
                 }
             }
             #[cfg(not(debug_assertions))]
-            PanelChild::Bundled(child) => {
+            PanelChild::Bundled {
+                child,
+                process_tree,
+            } => {
+                process_tree.terminate();
                 let _ = child.kill();
             }
         }
     }
+}
+
+#[derive(Default)]
+struct NativeDropQueue(Mutex<Vec<String>>);
+
+impl NativeDropQueue {
+    fn append(&self, paths: Vec<String>) {
+        self.0
+            .lock()
+            .expect("native drop queue mutex poisoned")
+            .extend(paths);
+    }
+
+    fn take(&self) -> Vec<String> {
+        std::mem::take(&mut *self.0.lock().expect("native drop queue mutex poisoned"))
+    }
+
+    fn prepend(&self, mut paths: Vec<String>) {
+        let mut queue = self.0.lock().expect("native drop queue mutex poisoned");
+        paths.append(&mut *queue);
+        *queue = paths;
+    }
+}
+
+fn is_panel_url(url: &Url) -> bool {
+    matches!(url.scheme(), "http" | "https")
+        && matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "::1"))
+}
+
+fn take_native_drop_script(app: &AppHandle) -> Option<(Vec<String>, String)> {
+    let paths = app.state::<NativeDropQueue>().take();
+    if paths.is_empty() {
+        return None;
+    }
+    let Ok(paths_json) = serde_json::to_string(&paths) else {
+        app.state::<NativeDropQueue>().prepend(paths);
+        return None;
+    };
+    let script = format!(
+        "(function(paths) {{ globalThis.__HYPERDR_NATIVE_FILE_DROPS__ = (globalThis.__HYPERDR_NATIVE_FILE_DROPS__ || []).concat(paths); globalThis.dispatchEvent(new Event('hyperdr:native-file-drop')); }})({paths_json});"
+    );
+    Some((paths, script))
 }
 
 fn ready_url(line: &str) -> Option<String> {
@@ -103,9 +163,22 @@ fn create_splash_window(app: &AppHandle) -> Result<(), String> {
         .inner_size(1440.0, 900.0)
         .min_inner_size(960.0, 640.0)
         .resizable(true)
-        .build()
-        .map_err(|error| error.to_string())
-        ?;
+        .on_page_load(|window, payload| {
+            if !matches!(payload.event(), PageLoadEvent::Finished) || !is_panel_url(payload.url()) {
+                return;
+            }
+            let app = window.app_handle();
+            let Some((paths, script)) = take_native_drop_script(app) else {
+                return;
+            };
+            if let Err(error) = window.eval(&script) {
+                app.state::<NativeDropQueue>().prepend(paths);
+                eprintln!("Unable to forward queued native file drop: {error}");
+            }
+        });
+    #[cfg(windows)]
+    let window = window.additional_browser_args(WEBVIEW2_BROWSER_ARGS);
+    let window = window.build().map_err(|error| error.to_string())?;
     window.on_window_event(move |event| {
         if matches!(event, WindowEvent::CloseRequested { .. }) {
             handle.state::<PanelProcess>().stop();
@@ -150,8 +223,12 @@ fn spawn_dev_panel(app: &AppHandle) -> Result<(), String> {
         .stderr
         .take()
         .ok_or_else(|| "Python panel stderr was not captured".to_string())?;
+    let process_tree = ProcessTree::attach(child.id());
     let child = Arc::new(Mutex::new(child));
-    app.state::<PanelProcess>().replace(PanelChild::Dev(child));
+    app.state::<PanelProcess>().replace(PanelChild::Dev {
+        child,
+        process_tree,
+    });
 
     let stdout_app = app.clone();
     std::thread::spawn(move || {
@@ -177,7 +254,11 @@ fn spawn_bundled_panel(app: &AppHandle) -> Result<(), String> {
     let (mut events, child) = sidecar
         .spawn()
         .map_err(|error| format!("unable to start the Python sidecar: {error}"))?;
-    app.state::<PanelProcess>().replace(PanelChild::Bundled(child));
+    let process_tree = ProcessTree::attach(child.pid());
+    app.state::<PanelProcess>().replace(PanelChild::Bundled {
+        child,
+        process_tree,
+    });
 
     let sidecar_app = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -191,7 +272,10 @@ fn spawn_bundled_panel(app: &AppHandle) -> Result<(), String> {
                     println!("[panel] {}", line.trim_end());
                 }
                 CommandEvent::Stderr(bytes) => {
-                    eprintln!("[panel:error] {}", String::from_utf8_lossy(&bytes).trim_end());
+                    eprintln!(
+                        "[panel:error] {}",
+                        String::from_utf8_lossy(&bytes).trim_end()
+                    );
                 }
                 CommandEvent::Error(error) => eprintln!("[panel:error] {error}"),
                 CommandEvent::Terminated(payload) => {
@@ -218,7 +302,35 @@ fn spawn_panel(app: &AppHandle) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .manage(PanelProcess::default())
+        .manage(NativeDropQueue::default())
         .plugin(tauri_plugin_shell::init())
+        .on_webview_event(|webview, event| {
+            if let WebviewEvent::DragDrop(DragDropEvent::Drop { paths, .. }) = event {
+                let paths = paths
+                    .iter()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>();
+                if paths.is_empty() {
+                    return;
+                }
+                let app = webview.app_handle();
+                app.state::<NativeDropQueue>().append(paths);
+                // Splash-page drops remain in Rust until the real panel has
+                // finished navigating. Once the panel is live, deliver them
+                // immediately and remove them only after eval succeeds.
+                let panel_loaded = webview.url().map(|url| is_panel_url(&url)).unwrap_or(false);
+                if !panel_loaded {
+                    return;
+                }
+                let Some((queued, script)) = take_native_drop_script(app) else {
+                    return;
+                };
+                if let Err(error) = webview.eval(&script) {
+                    app.state::<NativeDropQueue>().prepend(queued);
+                    eprintln!("Unable to forward native file drop to the panel: {error}");
+                }
+            }
+        })
         .setup(|app| {
             create_splash_window(app.handle())?;
             spawn_panel(app.handle())?;

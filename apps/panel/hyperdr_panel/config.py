@@ -35,6 +35,8 @@ LAUNCHER = Path(sys.executable) if IS_FROZEN else GUI_DIR / "hyperdr_gui.py"
 # Web root: a single source of truth for the front-end, also openable directly
 # (double-click web/index.html) for an offline look at the interface, which is
 # why its pages reference assets relatively and the CSP forbids `<base>`.
-WEB_ROOT = RESOURCE_ROOT / "web"
+# In a source checkout the repository root is also used for executable/model
+# discovery, but the web tree lives below apps/panel rather than at repo/web.
+WEB_ROOT = GUI_DIR / "web" if not IS_FROZEN else RESOURCE_ROOT / "web"
 
 PREFERRED_PORT = 8756

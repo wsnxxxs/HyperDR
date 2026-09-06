@@ -228,5 +228,134 @@
       "help": "Skip outputs already rendered from the same input and settings",
       "default": false
     }
-  ]
+  ],
+  "inputs": {
+    "extensions": {
+      "raw": [
+        ".3fr",
+        ".arw",
+        ".bay",
+        ".cap",
+        ".cr2",
+        ".cr3",
+        ".crw",
+        ".dcr",
+        ".dng",
+        ".erf",
+        ".fff",
+        ".gpr",
+        ".iiq",
+        ".k25",
+        ".kdc",
+        ".mef",
+        ".mos",
+        ".mrw",
+        ".nef",
+        ".nrw",
+        ".orf",
+        ".pef",
+        ".raf",
+        ".raw",
+        ".rwl",
+        ".rw2",
+        ".sr2",
+        ".srf",
+        ".srw",
+        ".x3f"
+      ],
+      "raster": {
+        "jpeg": [
+          ".jpg",
+          ".jpeg"
+        ],
+        "png": [
+          ".png"
+        ],
+        "isobmff": [
+          ".heic",
+          ".heif",
+          ".avif"
+        ]
+      }
+    },
+    "signatures": {
+      "jpeg": [
+        {
+          "offset": 0,
+          "magic": "ffd8ff"
+        }
+      ],
+      "png": [
+        {
+          "offset": 0,
+          "magic": "89504e470d0a1a0a"
+        }
+      ],
+      "isobmff": [
+        {
+          "offset": 4,
+          "magic": "66747970"
+        }
+      ],
+      "raw": [
+        {
+          "offset": 0,
+          "magic": "49492a00"
+        },
+        {
+          "offset": 0,
+          "magic": "4d4d002a"
+        },
+        {
+          "offset": 0,
+          "magic": "49492b00"
+        },
+        {
+          "offset": 0,
+          "magic": "4d4d002b"
+        },
+        {
+          "offset": 0,
+          "magic": "49494949"
+        },
+        {
+          "offset": 0,
+          "magic": "49495500"
+        },
+        {
+          "offset": 0,
+          "magic": "49491a00"
+        },
+        {
+          "offset": 0,
+          "magic": "4949524f"
+        },
+        {
+          "offset": 0,
+          "magic": "49495253"
+        },
+        {
+          "offset": 0,
+          "magic": "4d4d4f52"
+        },
+        {
+          "offset": 0,
+          "magic": "004d524d"
+        },
+        {
+          "offset": 0,
+          "magic": "46554a4946494c4d4343442d524157"
+        },
+        {
+          "offset": 0,
+          "magic": "464f5662"
+        },
+        {
+          "offset": 4,
+          "magic": "66747970"
+        }
+      ]
+    },
+    "prefixBytes": 64
+  }
 }

@@ -22,6 +22,7 @@ from pathlib import Path
 from . import job, model, session
 from .command import build_argv
 from .concurrency import Busy
+from .formats import SUPPORTED_EXTENSIONS
 from .config import IS_WINDOWS, REPO_ROOT
 from .curve import look_curve
 from .executable import detect_exe
@@ -68,9 +69,16 @@ class Context:
     # never accepted from the browser: only ids issued here.
     output_selections: dict[str, Path]
     secure_context_expected: bool = False
+    # Whether the browser transport itself is TLS. A loopback HTTP page inside
+    # the desktop WebView is still a trustworthy secure context, but it is not
+    # an encrypted transport; keep those facts separate in /api/state.
+    transport_secure: bool = False
     # Injected so the native dialog, which only exists on Windows and must run
     # on its own thread, is not a hard dependency of the API.
     choose_output_directory: object = None
+    # Tauri's Windows shell can submit an absolute local path from its native
+    # drag/drop event. Browser/LAN servers leave this disabled.
+    native_path_input: bool = False
 
 
 def error(message: str, status: int = 400) -> Response:
@@ -117,11 +125,16 @@ def state(context: Context, _query: dict) -> Response:
         "ready": bool(exe) and Path(exe).is_file(),
         "os": "windows" if IS_WINDOWS else "posix",
         "nativeOutputPicker": IS_WINDOWS,
+        "nativePathInput": context.native_path_input,
         "secureContextExpected": context.secure_context_expected,
-        "transportSecure": context.secure_context_expected,
+        "transportSecure": context.transport_secure,
         "hdrPreviewRequiresSecureContext": True,
         "previewMaxEdge": MAX_EDGE,
         "maxUploadMB": session.MAX_UPLOAD_BYTES // (1024 * 1024),
+        # The browser's file picker and its drop hint are built from this rather
+        # than from a hard-coded accept attribute, so a format added to the
+        # converter reaches the page by rebuilding, not by editing HTML.
+        "inputExtensions": sorted(SUPPORTED_EXTENSIONS),
         "model": model.status(),
     })
 
@@ -177,7 +190,8 @@ def preview(_context: Context, query: dict) -> Response:
                     or not options["external_gain_report"].is_file()):
                 return error("模型预览已失效，请重新优化。", status=409)
         options["highlightRecovery"] = highlight_recovery
-        data, metadata = preview_for(source, options, requested_edge)
+        data, metadata = preview_for(
+            source, options, requested_edge, session.input_digest(_first(query, "id")))
     except Busy as exc:
         # Distinct from a missing or broken image: the request was refused, not
         # answered, and a client may retry it.
@@ -231,6 +245,29 @@ def result(_context: Context, query: dict) -> Response:
 
 def new_session(_context: Context, _body: dict) -> Response:
     return Response(status=201, payload={"sessionId": session.create_session()})
+
+
+def open_native_path(context: Context, body: dict) -> Response:
+    """Publish a local desktop path without copying the image into the session."""
+    if not context.native_path_input:
+        return error("native path input is unavailable", status=404)
+    session_id = str(body.get("sessionId") or "")
+    raw_path = body.get("path")
+    try:
+        with upload_is_allowed(session_id):
+            source, size = session.set_external_input(session_id, raw_path)
+    except Busy as exc:
+        return error(exc, status=429)
+    except (OSError, ValueError, TypeError) as exc:
+        return error(exc)
+    # Do not return the source path to the browser. The name and size are enough
+    # for the existing panel state and keep the absolute path inside the local
+    # desktop bridge/server boundary.
+    return Response(status=201, payload={
+        "name": source.name,
+        "bytes": size,
+        "direct": True,
+    })
 
 
 def command_preview(_context: Context, body: dict) -> Response:
@@ -418,6 +455,7 @@ GET_ROUTES = {
 
 POST_ROUTES = {
     "/api/session": new_session,
+    "/api/native-input": open_native_path,
     "/api/select-output": select_output,
     "/api/export": export,
     "/api/run": run,

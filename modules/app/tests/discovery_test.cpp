@@ -3,6 +3,7 @@
 #include "hyperdr/app/fingerprint.hpp"
 #include "hyperdr/app/resume_state.hpp"
 #include "hyperdr/codec/availability.hpp"
+#include "hyperdr/codec/input_format.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -75,6 +76,70 @@ int main() {
       touch(candidate);
       require(hyperdr::is_supported_input(candidate),
               "a common LibRaw extension was not accepted");
+    }
+
+    // The flat raster list every caller uses is built from the per-family ones
+    // the panel reads, so the two cannot drift into disagreeing about which
+    // files exist. Checking the sizes add up would not catch a duplicate.
+    {
+      std::vector<std::string_view> families;
+      families.insert(families.end(), hyperdr::kJpegExtensions.begin(),
+                      hyperdr::kJpegExtensions.end());
+      families.insert(families.end(), hyperdr::kPngExtensions.begin(),
+                      hyperdr::kPngExtensions.end());
+      families.insert(families.end(), hyperdr::kIsobmffExtensions.begin(),
+                      hyperdr::kIsobmffExtensions.end());
+      std::vector<std::string_view> flat(hyperdr::kRasterInputExtensions.begin(),
+                                         hyperdr::kRasterInputExtensions.end());
+      std::sort(families.begin(), families.end());
+      std::sort(flat.begin(), flat.end());
+      require(families == flat,
+              "the raster families and the flat extension list disagree");
+      for (const auto extension : flat) {
+        require(hyperdr::extension_format(extension) !=
+                    hyperdr::InputFormat::Unknown,
+                "a raster extension belongs to no family");
+        require(!hyperdr::is_raw_extension(extension),
+                "an extension is claimed by both the RAW and raster tables");
+      }
+    }
+
+    // Signature probing is the codec-free half of the dispatch, so it is pinned
+    // here rather than only in the codec tests: a wrong table would otherwise
+    // only surface as a decoder complaining about a marker.
+    {
+      const auto probe = [](std::initializer_list<std::uint8_t> head) {
+        const std::vector<std::uint8_t> bytes(head);
+        return hyperdr::probe_input_signature(bytes);
+      };
+      require(probe({0xFF, 0xD8, 0xFF, 0xE0}) == hyperdr::InputFormat::Jpeg,
+              "a JPEG signature was not recognised");
+      require(probe({0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}) ==
+                  hyperdr::InputFormat::Png,
+              "a PNG signature was not recognised");
+      require(probe({0, 0, 0, 0x18, 'f', 't', 'y', 'p', 'h', 'e', 'i', 'c'}) ==
+                  hyperdr::InputFormat::Isobmff,
+              "an ISO base media signature was not recognised");
+      require(probe({'n', 'o', 't', ' ', 'a', 'n', ' ', 'i', 'm', 'a', 'g', 'e'}) ==
+                  hyperdr::InputFormat::Unknown,
+              "prose was mistaken for an image");
+      // Truncation must be a miss, never a read past the end.
+      require(probe({0xFF}) == hyperdr::InputFormat::Unknown,
+              "a one-byte file matched a signature");
+
+      const std::vector<std::uint8_t> rw2{'I', 'I', 'U', 0};
+      const std::vector<std::uint8_t> crw{'I', 'I', 0x1A, 0};
+      const std::vector<std::uint8_t> mrw{0, 'M', 'R', 'M'};
+      const std::vector<std::uint8_t> prose{'p', 'l', 'a', 'i', 'n', ' ', 't', 'x'};
+      require(hyperdr::raw_signature_ok(rw2) && hyperdr::raw_signature_ok(crw) &&
+                  hyperdr::raw_signature_ok(mrw),
+              "a RAW container the file dialog offers was not recognised");
+      require(!hyperdr::raw_signature_ok(prose),
+              "prose was mistaken for a RAW container");
+      // RAW is never named from bytes: most of these containers are TIFF, and
+      // only the extension can say which RAW a TIFF is.
+      require(hyperdr::probe_input_signature(rw2) == hyperdr::InputFormat::Unknown,
+              "a RAW file was classified as a raster format");
     }
 
     const auto same_directory_output = input / "photo-hyperdr.heic";

@@ -121,15 +121,24 @@ def _cleanup_forever(stop: threading.Event, interval_seconds: float) -> None:
             print(f"已定时清理 {removed} 个过期任务。")
 
 
-def build_server(host: str, port: int, token: str, scheme: str) -> PanelServer:
+def build_server(host: str, port: int, token: str, scheme: str,
+                 *, desktop: bool = False) -> PanelServer:
     server = PanelServer((host, port), Handler)
     server.access_token = token
     server.public_scheme = scheme
     server.cookie_secure = scheme == "https" or os.environ.get("HYPERDR_COOKIE_SECURE") == "1"
     server.login_throttle = security.LoginThrottle()
+    loopback = host.lower() in {"127.0.0.1", "localhost", "::1"}
     server.context = api.Context(
         output_selections={},
-        secure_context_expected=scheme == "https",
+        # Chromium/WebView treats loopback origins as trustworthy even when
+        # the local panel uses HTTP. This is the same predicate the frontend
+        # observes through window.isSecureContext.
+        secure_context_expected=scheme == "https" or (desktop and loopback),
+        transport_secure=scheme == "https",
+        # Absolute source paths are a local desktop capability; never expose
+        # that route if a desktop process was deliberately rebound to LAN.
+        native_path_input=desktop and loopback,
         choose_output_directory=choose_output_directory if IS_WINDOWS else None,
     )
     return server
@@ -177,7 +186,7 @@ def serve(*, desktop: bool = False) -> None:
     tls_context = load_tls_context(certificate, key) if certificate and key else None
     scheme = "https" if tls_context else "http"
 
-    server = build_server(host, port, token, scheme)
+    server = build_server(host, port, token, scheme, desktop=desktop)
     if tls_context is not None:
         server.socket = tls_context.wrap_socket(server.socket, server_side=True)
 

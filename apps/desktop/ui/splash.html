@@ -2,24 +2,281 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>HyperDR</title>
   <style>
-    :root { color-scheme: dark; font-family: "Segoe UI", system-ui, sans-serif; }
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center;
-      background: #17181b; color: #f4f5f7; }
-    main { text-align: center; }
-    h1 { margin: 0 0 0.6rem; letter-spacing: 0.04em; }
-    p { margin: 0; color: #aeb3bd; }
-    .dot { display: inline-block; width: 0.55rem; height: 0.55rem;
-      margin-right: 0.45rem; border-radius: 50%; background: #8ce6c0;
-      box-shadow: 0 0 1rem #8ce6c0; }
+    /* HyperDR Splash Screen - Obsidian Darkroom & Liquid Glass (Style C) */
+    :root {
+      color-scheme: dark;
+      --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text",
+        "Segoe UI", Inter, system-ui, "PingFang SC", "HarmonyOS Sans SC",
+        "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+      --surface-page: #080a0f;
+      --surface-card: rgba(18, 24, 35, 0.76);
+      --surface-sunken: rgba(9, 12, 17, 0.65);
+      --line: rgba(255, 255, 255, 0.08);
+      --glass-border: rgba(255, 255, 255, 0.12);
+      --glass-edge: rgba(255, 255, 255, 0.22);
+      --ink-strong: #f8fafc;
+      --ink: #cbd5e1;
+      --ink-muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-glow: rgba(56, 189, 248, 0.35);
+      --success: #34d399;
+      --success-glow: rgba(52, 211, 153, 0.45);
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-xl: 20px;
+      --ease: cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: var(--font-ui);
+      background-color: var(--surface-page);
+      color: var(--ink-strong);
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* Ambient atmospheric background matching HDR darkroom */
+    body {
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(circle at 50% 40%, rgba(56, 189, 248, 0.09) 0%, transparent 60%),
+        radial-gradient(circle at 80% 80%, rgba(245, 158, 11, 0.04) 0%, transparent 50%),
+        radial-gradient(circle at 20% 20%, rgba(99, 102, 241, 0.05) 0%, transparent 50%),
+        var(--surface-page);
+    }
+
+    /* Floating Liquid Glass Container */
+    .splash-card {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      width: calc(100% - 48px);
+      max-width: 420px;
+      padding: 44px 36px 38px;
+      background: var(--surface-card);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-xl);
+      backdrop-filter: blur(28px) saturate(190%);
+      -webkit-backdrop-filter: blur(28px) saturate(190%);
+      box-shadow:
+        0 24px 60px -12px rgba(0, 0, 0, 0.75),
+        0 8px 24px -4px rgba(0, 0, 0, 0.5),
+        0 0 40px -8px var(--accent-glow),
+        inset 0 1px 1px 0 var(--glass-edge);
+      animation: cardAppear 500ms var(--ease) both;
+    }
+
+    /* SVG Exposure Wordmark Icon */
+    .brand-icon-wrapper {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 64px;
+      height: 64px;
+      margin-bottom: 20px;
+      padding: 8px;
+      background: var(--surface-sunken);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-md);
+      box-shadow:
+        inset 0 1px 2px rgba(0, 0, 0, 0.4),
+        0 4px 16px rgba(0, 0, 0, 0.25);
+    }
+
+    .brand-mark {
+      width: 44px;
+      height: 44px;
+      overflow: visible;
+    }
+
+    .wordmark-frame {
+      fill: none;
+      stroke: var(--ink);
+      stroke-width: 1.6;
+    }
+
+    .wordmark-frame.is-back {
+      opacity: 0.3;
+    }
+
+    .wordmark-frame.is-front {
+      opacity: 0.85;
+      stroke: var(--ink-strong);
+    }
+
+    .wordmark-glow {
+      fill: none;
+      stroke: var(--accent);
+      stroke-width: 2.4;
+      stroke-linecap: round;
+      animation: glowPulse 2.8s ease-in-out infinite alternate;
+    }
+
+    .wordmark-spark {
+      fill: var(--accent);
+      stroke: var(--surface-sunken);
+      stroke-width: 1.4;
+      animation: sparkPulse 2.8s ease-in-out infinite alternate;
+    }
+
+    /* Typography */
+    .brand-title {
+      margin: 0 0 6px;
+      font-size: 1.75rem;
+      font-weight: 700;
+      line-height: 1.15;
+      letter-spacing: -0.025em;
+      color: var(--ink-strong);
+      white-space: nowrap;
+    }
+
+    .brand-accent {
+      color: var(--accent);
+      font-weight: 800;
+    }
+
+    .brand-subtitle {
+      margin: 0 0 28px;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      color: var(--ink-muted);
+      text-transform: uppercase;
+    }
+
+    /* Status Capsule / Badge (Unified Rounded Rectangle) */
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 14px;
+      background: var(--surface-sunken);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
+    }
+
+    .status-dot {
+      flex: none;
+      width: 7px;
+      height: 7px;
+      border-radius: 2px;
+      background: var(--success);
+      box-shadow: 0 0 8px var(--success-glow);
+      animation: dotPulse 2s ease-in-out infinite;
+    }
+
+    .status-text {
+      margin: 0;
+      font-size: 0.8125rem;
+      font-weight: 450;
+      letter-spacing: 0.015em;
+      color: var(--ink);
+      white-space: nowrap;
+    }
+
+    /* Animations */
+    @keyframes cardAppear {
+      from {
+        opacity: 0;
+        transform: translateY(12px) scale(0.98);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    @keyframes dotPulse {
+      0%, 100% {
+        opacity: 1;
+        box-shadow: 0 0 6px var(--success-glow);
+        transform: scale(1);
+      }
+      50% {
+        opacity: 0.45;
+        box-shadow: 0 0 2px var(--success-glow);
+        transform: scale(0.85);
+      }
+    }
+
+    @keyframes glowPulse {
+      0%, 100% {
+        opacity: 0.75;
+        stroke: var(--accent);
+        filter: drop-shadow(0 0 2px rgba(56, 189, 248, 0.4));
+      }
+      50% {
+        opacity: 1;
+        stroke: #7dd3fc;
+        filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.8));
+      }
+    }
+
+    @keyframes sparkPulse {
+      0%, 100% {
+        transform: scale(1);
+        filter: drop-shadow(0 0 2px rgba(56, 189, 248, 0.4));
+      }
+      50% {
+        transform: scale(1.15);
+        filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.9));
+      }
+    }
+
+    /* Accessibility: Reduced Motion */
+    @media (prefers-reduced-motion: reduce) {
+      .splash-card,
+      .status-dot,
+      .wordmark-glow,
+      .wordmark-spark {
+        animation: none !important;
+        transition: none !important;
+      }
+    }
   </style>
 </head>
 <body>
-  <main>
-    <h1>HyperDR</h1>
-    <p><span class="dot"></span>正在启动本地转换引擎…</p>
+  <main class="splash-card" role="region" aria-label="HyperDR 启动界面">
+    <!-- Brand Mark: Offset Exposure Frames Converging on Luminance -->
+    <div class="brand-icon-wrapper" aria-hidden="true">
+      <svg class="brand-mark" viewBox="0 0 32 32">
+        <rect class="wordmark-frame is-back" x="4.5" y="7.5" width="17" height="17" rx="5"/>
+        <rect class="wordmark-frame is-front" x="10.5" y="4.5" width="17" height="17" rx="5"/>
+        <path class="wordmark-glow" d="M8 18.5h16"/>
+        <circle class="wordmark-spark" cx="24" cy="18.5" r="2.25"/>
+      </svg>
+    </div>
+
+    <!-- Wordmark Title & Tagline -->
+    <h1 class="brand-title" aria-label="HyperDR">
+      <span class="brand-accent">H</span>yper<span class="brand-accent">DR</span>
+    </h1>
+    <p class="brand-subtitle">HDR 图像增强与转换工具</p>
+
+    <!-- Native Engine Startup Status -->
+    <div class="status-badge" role="status" aria-live="polite">
+      <span class="status-dot" aria-hidden="true"></span>
+      <span class="status-text">正在启动本地转换引擎…</span>
+    </div>
   </main>
 </body>
 </html>

@@ -1,96 +1,99 @@
-/* Design tokens: the only place a literal colour, radius or duration is written.
- *
- * The old stylesheet was 1251 lines with the same greys spelled out forty-odd
- * times in three slightly different values, which is why the panel never quite
- * matched itself. Rules elsewhere reference these variables and never hard-code
- * a colour -- that constraint is the point of the file, not the palette.
+/* Design tokens for HyperDR (Style C: Luminous Glass / Obsidian Dark)
+ * Unified rounded-rectangle geometry system without circular/pill shapes.
  */
 
 :root {
   color-scheme: light dark;
 }
 
-/* Without these two rules the toggle sets data-theme, the icon swaps, and every
-   light-dark() in the file keeps resolving off the *system* preference: the
-   theme button appeared to do nothing. color-scheme is what light-dark() reads;
-   data-theme alone is just an attribute. */
 :root[data-theme="light"] { color-scheme: light; }
 :root[data-theme="dark"]  { color-scheme: dark; }
 
 :root {
 
   /* -- surfaces ------------------------------------------------------ */
-  --surface-page:    light-dark(#f6f6f7, #16171a);
-  --surface-panel:   light-dark(#ffffff, #1e2024);
-  --surface-sunken:  light-dark(#eceef1, #131417);
-  --surface-hover:   light-dark(#00000009, #ffffff0f);
+  --surface-page:    light-dark(#f8fafc, #080a0f);
+  --surface-panel:   light-dark(rgba(255, 255, 255, 0.72), rgba(16, 20, 28, 0.68));
+  --surface-card:    light-dark(rgba(255, 255, 255, 0.82), rgba(24, 30, 42, 0.72));
+  --surface-sunken:  light-dark(rgba(241, 245, 249, 0.65), rgba(9, 12, 17, 0.58));
+  --surface-hover:   light-dark(rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.08));
+  --surface-active:  light-dark(rgba(0, 113, 227, 0.08), rgba(56, 189, 248, 0.14));
+  --surface-glass:   light-dark(rgba(255, 255, 255, 0.55), rgba(18, 22, 32, 0.52));
 
   /* -- ink ----------------------------------------------------------- */
-  --ink-strong:      light-dark(#14161a, #f2f3f5);
-  --ink:             light-dark(#3a3f47, #c8cbd1);
-  --ink-muted:       light-dark(#6b7280, #8b919b);
+  --ink-strong:      light-dark(#0f172a, #f8fafc);
+  --ink:             light-dark(#334155, #cbd5e1);
+  --ink-muted:       light-dark(#64748b, #94a3b8);
+  --ink-disabled:    light-dark(#94a3b8, #526074);
 
-  /* -- lines --------------------------------------------------------- */
-  --line:            light-dark(#00000014, #ffffff1a);
-  --line-strong:     light-dark(#0000002e, #ffffff33);
+  /* -- lines & glass edges ------------------------------------------- */
+  --line:            light-dark(rgba(0, 0, 0, 0.05), rgba(255, 255, 255, 0.08));
+  --line-strong:     light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.14));
+  --line-focus:      light-dark(rgba(0, 113, 227, 0.45), rgba(56, 189, 248, 0.5));
+  --glass-border:    light-dark(rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.12));
+  --glass-edge:      light-dark(rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.22));
+  --glass-edge-subtle: light-dark(rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.08));
 
   /* -- accents ------------------------------------------------------- */
-  /* A photographic blue rather than a system blue: the amber below is the
-     interface's one loud colour, and a saturated UI blue fights it. Light mode
-     darkens it because the accent is used as ink, not as a fill. */
-  --accent:          light-dark(#2f83b0, #72bce7);
-  /* Dark ink on the light-mode fill, light ink on the dark-mode fill: the
-     accent changes lightness between schemes, so its ink has to as well. */
-  --accent-ink:      light-dark(#ffffff, #10293a);
-  --danger:          light-dark(#c0392b, #ef6b5c);
-  --success:         light-dark(#1f7a4d, #3fbf84);
+  --accent:          light-dark(#0071e3, #38bdf8);
+  --accent-gradient: linear-gradient(135deg, light-dark(#0077ed, #38bdf8), light-dark(#005bb5, #0284c7));
+  --accent-hover:    light-dark(#0062cc, #0ea5e9);
+  --accent-ink:      light-dark(#ffffff, #031726);
+  --accent-soft:     light-dark(rgba(0, 113, 227, 0.06), rgba(56, 189, 248, 0.1));
 
-  /* HDR amber: reserved for things that are *about* extended range -- the
-     badge, the run button, and the simulated-output histogram. */
-  --hdr:             light-dark(#b97708, #f2b64b);
-  --hdr-ink:         #241a05;
-  --hdr-soft:        light-dark(#fdf3dd, #3a2c12);
+  --selected-bg:     light-dark(rgba(0, 113, 227, 0.07), rgba(56, 189, 248, 0.12));
+  --selected-line:   light-dark(rgba(0, 113, 227, 0.22), rgba(56, 189, 248, 0.32));
+  --selected-ink:    light-dark(#0062cc, #7dd3fc);
 
-  /* Zebra overlays and the slider mask are painted into canvases by JS, which
-     cannot see these variables at paint time; scope.js and mask.js read them
-     back with getComputedStyle, so the values still live here and only here. */
-  /* Sliders track in the accent, not the amber. Amber means "extended range"
-     -- the badge, the run button, and the simulated output -- and a rail
-     of seven amber bars spent that meaning on ordinary parameters. */
-  --control-track:   light-dark(#dcdee3, #34383f);
-  --control-thumb:   #ffffff;
-  --control-ring:    light-dark(rgb(16 18 24 / 0.28), rgb(0 0 0 / 0.55));
+  --danger:          light-dark(#ef4444, #f87171);
+  --success:         light-dark(#10b981, #34d399);
+  --warn:            light-dark(#d97706, #fbbf24);
 
-  --zebra-hot:       light-dark(#d64541, #ef6b5c);
-  --zebra-cold:      light-dark(#3b82f6, #6ba3f8);
-  /* A diagnostic magenta rather than HDR amber: warm highlights, skin and
-     sunsets must not swallow the adjustment-region overlay. */
-  --mask-tint:       light-dark(#b832c7, #f06ad9);
+  /* HDR amber: reserved for things that are about extended range */
+  --hdr:             light-dark(#d97706, #f59e0b);
+  --hdr-gradient:    linear-gradient(135deg, light-dark(#f59e0b, #fbbf24), light-dark(#d97706, #f59e0b));
+  --hdr-ink:         light-dark(#ffffff, #1a1002);
+  --hdr-soft:        light-dark(rgba(254, 243, 199, 0.8), rgba(120, 53, 15, 0.35));
+  --hdr-border:      light-dark(rgba(245, 158, 11, 0.35), rgba(251, 191, 36, 0.35));
 
-  /* Histogram palette, read back from the canvas the same way. The output
-     series is the HDR amber; the source series stays neutral so the eye
-     compares shape rather than colour. */
+  /* Sliders and controls */
+  --control-track:   light-dark(rgba(203, 213, 225, 0.6), rgba(38, 44, 55, 0.65));
+  --control-thumb:   light-dark(rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.9));
+  --control-ring:    light-dark(rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.5));
+  --control-glow:    light-dark(rgba(0, 113, 227, 0.2), rgba(56, 189, 248, 0.35));
+
+  --zebra-hot:       light-dark(#ef4444, #f87171);
+  --zebra-cold:      light-dark(#3b82f6, #60a5fa);
+  --mask-tint:       light-dark(#c026d3, #e879f9);
+
+  /* Histogram palette */
   --hist-grid:       light-dark(#00000012, #ffffff16);
-  --hist-luma:       light-dark(#7d838d, #9aa3b2);
-  --hist-red:        light-dark(#d64541, #ef6b5c);
-  --hist-green:      light-dark(#3d9e57, #4ec77e);
-  --hist-blue:       light-dark(#3b82f6, #6ba3f8);
+  --hist-luma:       light-dark(#64748b, #94a3b8);
+  --hist-red:        light-dark(#ef4444, #f87171);
+  --hist-green:      light-dark(#10b981, #34d399);
+  --hist-blue:       light-dark(#3b82f6, #60a5fa);
   --hist-marker:     var(--hdr);
   --hist-output:     var(--hdr);
 
-  /* Preview canvases sit on neutral grey at both schemes: an HDR image judged
-     against a white or black field reads as the wrong exposure. Overlay chips
-     and the wipe handle float on the photograph itself, so they keep a dark
-     surface at both schemes too. */
-  --preview-backdrop: #2a2a2c;
-  --overlay:         rgb(18 18 20 / 0.72);
-  --overlay-ink:     #f2f3f5;
-  --overlay-track:   rgb(255 255 255 / 0.18);
+  /* Preview backdrop and overlays (Pro darkroom standard) */
+  --preview-backdrop: #0d1117;
+  --preview-darkroom-bg: #090c10;
+  --overlay:         rgba(15, 18, 24, 0.82);
+  --overlay-ink:     #f8fafc;
+  --overlay-track:   rgba(255, 255, 255, 0.18);
+  --overlay-hover:   rgba(255, 255, 255, 0.15);
 
-  /* -- geometry ------------------------------------------------------ */
+  /* -- focus --------------------------------------------------------- */
+  --focus:           var(--accent);
+  --focus-halo:      light-dark(rgba(255, 255, 255, 0.95), rgba(0, 0, 0, 0.65));
+
+  /* -- geometry (Rounded rectangle system) ---------------------------- */
+  --radius-xs: 4px;
   --radius-sm: 6px;
-  --radius:    12px;
+  --radius-md: 10px;
+  --radius:    14px;
   --radius-lg: 18px;
+  --radius-xl: 24px;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -99,65 +102,71 @@
   --space-5: 24px;
   --space-6: 32px;
 
-  /* Layout rhythm is semantic rather than borrowing a component spacing
-     token: the page edge must remain more generous than the gaps between its
-     floating regions. */
-  --page-pad: clamp(16px, 1.6vw, 32px);
+  --page-pad: clamp(16px, 1.8vw, 28px);
+  --page-pad-inline: max(var(--page-pad), env(safe-area-inset-left), env(safe-area-inset-right));
+  --page-pad-bottom: max(var(--page-pad), env(safe-area-inset-bottom));
   --region-gap: var(--space-4);
 
-
-  /* -- elevation ----------------------------------------------------- */
-  /* Two layers each: a tight contact shadow that seats the element on the
-     page, and a wide diffuse one that lifts it. A single blur reads as a
-     smudge. Colour lives here because everything else references it. */
-  /* A shadow is invisible against a dark page: on dark, elevation is carried
-     by a lit top edge instead, and both are applied together. */
-  --edge: light-dark(transparent, rgb(255 255 255 / 0.07));
+  /* -- elevation & liquid glassmorphism ------------------------------ */
+  --edge:            var(--glass-edge);
+  --glass-blur:      blur(24px) saturate(190%);
+  --glass-blur-sm:   blur(14px) saturate(160%);
+  --glass-blur-lg:   blur(36px) saturate(200%);
 
   --shadow-sm:
-    0 1px 2px light-dark(rgb(16 18 24 / 0.05), rgb(0 0 0 / 0.5)),
-    0 1px 1px light-dark(rgb(16 18 24 / 0.03), transparent);
+    0 1px 3px 0 light-dark(rgba(15, 23, 42, 0.04), rgba(0, 0, 0, 0.25)),
+    0 1px 2px -1px light-dark(rgba(15, 23, 42, 0.02), transparent);
   --shadow-md:
-    0 1px 2px light-dark(rgb(16 18 24 / 0.05), rgb(0 0 0 / 0.5)),
-    0 10px 28px -8px light-dark(rgb(16 18 24 / 0.12), rgb(0 0 0 / 0.6));
+    0 8px 24px -4px light-dark(rgba(15, 30, 60, 0.07), rgba(0, 0, 0, 0.45)),
+    0 2px 6px -1px light-dark(rgba(15, 30, 60, 0.04), transparent);
   --shadow-lg:
-    0 2px 4px light-dark(rgb(16 18 24 / 0.05), rgb(0 0 0 / 0.5)),
-    0 24px 60px -16px light-dark(rgb(16 18 24 / 0.16), rgb(0 0 0 / 0.7));
+    0 16px 40px -6px light-dark(rgba(15, 35, 75, 0.10), rgba(0, 0, 0, 0.65)),
+    0 4px 16px -2px light-dark(rgba(15, 35, 75, 0.05), transparent);
+  --shadow-glass:
+    0 12px 36px -4px light-dark(rgba(30, 64, 120, 0.07), rgba(0, 0, 0, 0.55)),
+    inset 0 1px 0 0 var(--glass-edge);
+  --shadow-glow:
+    0 0 24px light-dark(rgba(0, 113, 227, 0.15), rgba(56, 189, 248, 0.25));
+  --shadow-hdr:
+    0 0 24px light-dark(rgba(245, 158, 11, 0.25), rgba(251, 191, 36, 0.32));
 
-  /* -- type ---------------------------------------------------------- */
-  /* Named ahead of system-ui so Windows picks the variable-weight Segoe and
-     recent Chinese faces before it falls back to Microsoft YaHei, which is
-     heavier and sits lower than the Latin next to it. */
+  --rail-fade: light-dark(rgba(15, 23, 42, 0.06), rgba(0, 0, 0, 0.35));
+
+  /* -- typography ---------------------------------------------------- */
   --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text",
     "Segoe UI", Inter, system-ui, "PingFang SC", "HarmonyOS Sans SC",
     "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
-  --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, monospace;
   --text-xs: 0.75rem;
   --text-sm: 0.8125rem;
   --text:    0.9375rem;
   --text-lg: 1.125rem;
 
   /* -- motion -------------------------------------------------------- */
-  --ease: cubic-bezier(0.2, 0, 0, 1);
-  --duration: 160ms;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration: 200ms;
 }
 
 @media (prefers-reduced-motion: reduce) {
   :root { --duration: 0ms; }
 }
 
-/* Registered as <color> so that light-dark() resolves at computed-value time:
- * scope.js and mask.js read these back with getComputedStyle to paint canvases,
- * and an unregistered property would hand them the literal "light-dark(...)"
- * text instead of a colour. The initial values are the dark-scheme variants,
- * which is also what a browser without @property support would fall back to. */
+@media (prefers-contrast: more) {
+  :root {
+    --line:        light-dark(rgba(0, 0, 0, 0.25), rgba(255, 255, 255, 0.35));
+    --line-strong: light-dark(rgba(0, 0, 0, 0.45), rgba(255, 255, 255, 0.55));
+    --ink-muted:     light-dark(#3f4a5a, #cbd5e1);
+    --selected-line: var(--accent);
+  }
+}
+
 @property --hist-grid   { syntax: "<color>"; inherits: true; initial-value: #ffffff16; }
-@property --hist-luma   { syntax: "<color>"; inherits: true; initial-value: #9aa3b2; }
-@property --hist-red    { syntax: "<color>"; inherits: true; initial-value: #ef6b5c; }
-@property --hist-green  { syntax: "<color>"; inherits: true; initial-value: #4ec77e; }
-@property --hist-blue   { syntax: "<color>"; inherits: true; initial-value: #6ba3f8; }
-@property --hist-marker { syntax: "<color>"; inherits: true; initial-value: #f2b64b; }
-@property --hist-output { syntax: "<color>"; inherits: true; initial-value: #f2b64b; }
-@property --zebra-hot   { syntax: "<color>"; inherits: true; initial-value: #ef6b5c; }
-@property --zebra-cold  { syntax: "<color>"; inherits: true; initial-value: #6ba3f8; }
-@property --mask-tint   { syntax: "<color>"; inherits: true; initial-value: #f06ad9; }
+@property --hist-luma   { syntax: "<color>"; inherits: true; initial-value: #94a3b8; }
+@property --hist-red    { syntax: "<color>"; inherits: true; initial-value: #f87171; }
+@property --hist-green  { syntax: "<color>"; inherits: true; initial-value: #34d399; }
+@property --hist-blue   { syntax: "<color>"; inherits: true; initial-value: #60a5fa; }
+@property --hist-marker { syntax: "<color>"; inherits: true; initial-value: #f59e0b; }
+@property --hist-output { syntax: "<color>"; inherits: true; initial-value: #f59e0b; }
+@property --zebra-hot   { syntax: "<color>"; inherits: true; initial-value: #f87171; }
+@property --zebra-cold  { syntax: "<color>"; inherits: true; initial-value: #60a5fa; }
+@property --mask-tint   { syntax: "<color>"; inherits: true; initial-value: #e879f9; }

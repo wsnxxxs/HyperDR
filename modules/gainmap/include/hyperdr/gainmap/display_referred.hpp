@@ -44,15 +44,16 @@ namespace hyperdr {
 // from each other. Requires `ceiling > knee`.
 [[nodiscard]] float display_shoulder_log2(float u, float knee, float ceiling);
 
-// A finished SDR rendition: the base is the input, and the gain map is zero.
+// A finished SDR rendition, expanded into a selectable HDR alternate.
 //
 // Exposure is honoured -- a manual --exposure and --exposure-bias both scale
 // the image -- but automatic exposure is not, because a scene statistic taken
-// from an already-graded picture would re-expose someone else's decision. When
-// the scale pushes the image above 1.0 the excess is rolled off by the shared
-// shoulder rather than clipped, so brightening posterises nothing; the gain map
-// stays zero either way. An SDR input never gains highlight range it did not
-// arrive with.
+// from an already-graded picture would re-expose someone else's decision. The
+// SDR input has no measured highlights above diffuse white, so the renderer
+// pins exposure at the display-referred value and uses the requested range as
+// a creative expansion budget. This makes the panel's HDR strength/range
+// controls meaningful for ordinary JPEG/PNG photographs without claiming that
+// the source file carried HDR.
 [[nodiscard]] GainMapResult make_display_referred_sdr_result(
     const FloatImage& linear_p3, const GainMapOptions& options);
 

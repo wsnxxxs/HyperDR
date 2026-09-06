@@ -90,8 +90,8 @@ mountRunner({ toast });
 
 const settings = document.getElementById("settings");
 
-store.watch("file", (file) => {
-  const disabled = !file;
+store.watchAny(["file", "previewReady"], (state) => {
+  const disabled = !state.file || !state.previewReady;
   settings.classList.toggle("is-disabled", disabled);
   settings.inert = disabled;
   settings.setAttribute("aria-disabled", String(disabled));

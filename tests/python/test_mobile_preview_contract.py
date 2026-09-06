@@ -11,9 +11,13 @@ SHELL = (REPO_ROOT / "apps" / "panel" / "web" / "css" / "shell.css").read_text(
 COMPONENTS = (
     REPO_ROOT / "apps" / "panel" / "web" / "css" / "components.css"
 ).read_text(encoding="utf-8")
+TOKENS = (REPO_ROOT / "apps" / "panel" / "web" / "css" / "tokens.css").read_text(
+    encoding="utf-8")
 STAGE = (
     REPO_ROOT / "apps" / "panel" / "web" / "js" / "preview" / "stage.js"
 ).read_text(encoding="utf-8")
+MAIN = (REPO_ROOT / "apps" / "panel" / "web" / "js" / "main.js").read_text(
+    encoding="utf-8")
 INDEX = (REPO_ROOT / "apps" / "panel" / "web" / "index.html").read_text(
     encoding="utf-8")
 CONTROLS = (
@@ -30,6 +34,18 @@ MOBILE_CSS = COMPONENTS[COMPONENTS.index("/* -- small screens"):]
 
 
 class MobilePreviewContractTest(unittest.TestCase):
+    def test_gradient_tokens_keep_light_dark_at_color_stops(self):
+        self.assertNotIn("light-dark(linear-gradient", TOKENS)
+        self.assertIn("--accent-gradient: linear-gradient", TOKENS)
+        self.assertIn("--hdr-gradient:    linear-gradient", TOKENS)
+
+    def test_settings_and_conversion_wait_for_a_successful_preview(self):
+        self.assertIn('store.watchAny(["file", "previewReady"]', MAIN)
+        self.assertIn("!state.file || !state.previewReady", RUNNER)
+        self.assertIn("previewReady: false", STAGE)
+        self.assertIn("previewReady: true", STAGE)
+        self.assertIn("const PREVIEW_RELOAD_DELAY_MS = 240;", STAGE)
+
     def test_mobile_layout_has_no_fixed_preview_row_or_block_size_containment(self):
         self.assertIn("grid-template-rows: auto auto auto auto;", SHELL)
         self.assertIn("grid-template-rows: minmax(0, 1fr);", SHELL)
@@ -70,14 +86,33 @@ class MobilePreviewContractTest(unittest.TestCase):
         self.assertIn('stage.addEventListener("dblclick"', STAGE)
         self.assertIn('stage.is-zoomed .stage-frame { touch-action: none; cursor: grab; }', COMPONENTS)
 
-    def test_empty_state_keeps_select_centered_and_meta_in_normal_flow(self):
-        self.assertIn('<span class="stage-empty-meta">', INDEX)
-        self.assertIn(".stage-empty-meta {", COMPONENTS)
-        self.assertIn("top: calc(50% + var(--stage-select-half)", COMPONENTS)
-        support_rule = COMPONENTS.split(".stage-support {", 1)[1].split("}", 1)[0]
-        progress_rule = COMPONENTS.split(".stage-progress {", 1)[1].split("}", 1)[0]
-        self.assertNotIn("position: absolute", support_rule)
-        self.assertNotIn("position: absolute", progress_rule)
+    def test_empty_state_is_one_centred_card_in_normal_flow(self):
+        # The invitation is a bounded card centred in the drop area, not a
+        # dashed rectangle drawn around the full height of the window with an
+        # icon absolutely positioned at its midpoint.
+        self.assertIn('<div class="stage-empty-card">', INDEX)
+        empty_rule = COMPONENTS.split(".stage-empty {", 1)[1].split("}", 1)[0]
+        self.assertIn("display: flex", empty_rule)
+        self.assertIn("align-items: center", empty_rule)
+        self.assertIn("justify-content: center", empty_rule)
+        card_rule = COMPONENTS.split(chr(10) + ".stage-empty-card {", 1)[1].split("}", 1)[0]
+        self.assertNotIn("position: absolute", card_rule)
+        self.assertIn("width: min(", card_rule)
+        # Everything inside the card is in flow, so nothing can overlap.
+        for selector in (".stage-support {", ".stage-progress {",
+                         ".stage-privacy {", ".stage-empty-mark {"):
+            rule = COMPONENTS.split(selector, 1)[1].split("}", 1)[0]
+            self.assertNotIn("position: absolute", rule)
+
+    def test_empty_state_offers_a_real_button(self):
+        # An icon the user has to guess is a button is not an affordance.
+        self.assertIn('class="button button--primary stage-select"', INDEX)
+        self.assertIn(">选择图片</button>", INDEX)
+
+    def test_empty_card_sizes_the_stage_on_a_phone(self):
+        # A fixed 210-260px box would clip the card.
+        self.assertIn(".stage:not(.has-image) { height: auto; }", MOBILE_CSS)
+        self.assertIn("position: static", MOBILE_CSS.split(".stage-empty {", 1)[1].split("}", 1)[0])
 
     def test_closing_help_preserves_mouse_hover_mask(self):
         self.assertIn("trigger.maskMouseHovered = true;", CONTROLS)
@@ -101,17 +136,16 @@ class MobilePreviewContractTest(unittest.TestCase):
         self.assertIn('matchMedia("(width < 860px)")', MEDIA)
         self.assertIn("@media (width < 860px)", COMPONENTS)
         self.assertIn("@media (width < 860px)", SHELL)
-        for source in (STAGE, RUNNER):
+        for source in (STAGE,):
             self.assertIn('from "../core/media.js"', source)
             self.assertNotIn("width: 859px", source)
             self.assertNotIn("min-width: 641px", source)
 
-    def test_native_save_dialog_is_offered_by_pointer_not_by_width(self):
-        self.assertIn(
-            "state.capabilities?.nativeOutputPicker && !touchQuery.matches",
-            RUNNER,
-        )
-        self.assertIn('touchQuery.addEventListener?.("change"', RUNNER)
+    def test_result_delivery_is_a_download_on_every_platform(self):
+        self.assertIn('data-role="download"', INDEX)
+        self.assertNotIn('data-role="export"', INDEX)
+        self.assertIn('const download = role("download")', RUNNER)
+        self.assertNotIn("outputSelectionId", RUNNER)
 
 
 if __name__ == "__main__":

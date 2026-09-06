@@ -5,6 +5,31 @@ semantic versioning; dates use ISO 8601.
 
 ## Unreleased
 
+- Raster inputs are now identified by their contents rather than by their file
+  name. A HEIC exported under a `.jpg` suffix -- which is what a phone gallery
+  routinely produces -- used to be handed to the JPEG decoder and rejected for a
+  bad marker; it now decodes, and the panel stores it under the extension its
+  bytes actually are. Which files are offered at all is still decided by
+  extension, so a conversion cannot pick up something that is not an image.
+- Fixed the panel refusing several RAW formats it offered in its own file
+  dialog. Panasonic RW2, Canon CRW, Minolta MRW, two of the three Olympus ORF
+  layouts and Phase One IIQ were all rejected on upload as "contents do not
+  match the extension" because the panel's header check knew only five of the
+  fourteen RAW container signatures.
+- The list of supported input formats now has one definition, emitted by
+  `HyperDR schema` and read by the panel, the native file dialog and the
+  browser. It previously existed as five hand-maintained copies.
+- Previews of large compressed images are faster: the decoder is told the
+  preview bound and stops early instead of producing a full-resolution raster
+  that is immediately resampled. A 24 MP JPEG previewed at 2048 px decodes about
+  a quarter faster. Exports are unaffected and are byte-identical.
+- Each input file is now read once during decoding. A JPEG was previously read
+  in full twice -- once only to ask whether it carried a gain map -- and the
+  panel read a whole file into memory to inspect its first 32 bytes on every
+  upload and every desktop drop.
+- The panel accepts a pasted image, says which file it used when several are
+  dropped or selected at once, explains a drop it cannot use, and refuses an
+  unsupported or oversized file before uploading it rather than after.
 - Added HDR input support, so every encoding HyperDR writes it can now also
   read. AVIF joins ARW, DNG, JPEG, PNG, HEIC and HEIF as an input format, and
   BT.2100 PQ and HLG files are decoded through the exact inverse of the transfer

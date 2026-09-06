@@ -381,9 +381,9 @@ void check_prune_respects_the_budget() {
 }
 
 // The routing decision now reads the decoder's domain, so this checks it
-// through the pixels rather than through a file name. A flat mid-grey frame is
-// enough: only a scene-referred render moves it, because only that path runs
-// automatic exposure.
+// through the pixels rather than through a file name. A bright flat frame is
+// enough to exercise the SDR expansion while still distinguishing it from the
+// scene-referred path, which is the only path that runs automatic exposure.
 hyperdr::DecodedImage flat_image(hyperdr::InputDomain domain, float value,
                                  float headroom) {
   hyperdr::DecodedImage image;
@@ -400,13 +400,15 @@ void check_input_domain_routing() {
   options.exposure_bias_ev = 0.0F;
 
   const auto sdr = hyperdr::render_decoded_image(
-      flat_image(hyperdr::InputDomain::kDisplayReferredSdr, 0.25F, 1.0F), options);
-  require(sdr.headroom_stops == 0.0F,
-          "an SDR-domain input must not be given HDR headroom");
+      flat_image(hyperdr::InputDomain::kDisplayReferredSdr, 0.8F, 1.0F), options);
+  require(sdr.headroom_stops > 0.0F && sdr.stats.gain_max_stops > 0.0F,
+          "an SDR-domain input must receive the HDR expansion controls");
   require(sdr.exposure_ev == 0.0F,
           "an SDR-domain input must not be automatically re-exposed");
-  require(std::abs(sdr.base_linear.at(3, 3, 1) - 0.25F) < 1.0e-6F,
-          "an SDR-domain input must reach the base unchanged");
+  for (const float value : sdr.base_linear.pixels) {
+    require(value >= 0.0F && value <= 1.0F,
+            "an SDR-domain base must stay inside [0, 1]");
+  }
 
   const auto raw = hyperdr::render_decoded_image(
       flat_image(hyperdr::InputDomain::kSceneReferred, 0.25F, 1.0F), options);
@@ -414,7 +416,8 @@ void check_input_domain_routing() {
           "a scene-referred input must still get automatic exposure");
 
   // The extension is no longer consulted at all: the same pixels described as
-  // HDR take the splitting renderer, and described as SDR do not.
+  // HDR take the display-referred splitting renderer, while SDR gets the
+  // fixed-exposure photographic expansion above.
   const auto hdr = hyperdr::render_decoded_image(
       flat_image(hyperdr::InputDomain::kDisplayReferredHdr, 0.25F, 4.0F), options);
   require(hdr.stats.headroom_stops > 0.0F,

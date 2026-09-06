@@ -15,6 +15,7 @@
 #include "hyperdr/foundation/parallel.hpp"
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/image_source.hpp"
+#include "internal/decode_bytes.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "internal/metadata.hpp"
 
@@ -90,11 +91,22 @@ std::array<float, 3> to_linear_p3(uhdr_color_gamut_t gamut, float r, float g, fl
 
 }  // namespace
 
+namespace codec {
+
+bool is_ultrahdr_bytes(const std::vector<std::uint8_t>& bytes) {
+  if (bytes.size() < 4) return false;
+  return is_uhdr_image(const_cast<std::uint8_t*>(bytes.data()),
+                       static_cast<int>(bytes.size())) != 0;
+}
+
+}  // namespace codec
+
+// Kept for the CLI and the codec tests, which hold a path rather than a buffer.
+// `decode_image` no longer takes this route: it reads the file once and asks
+// `codec::is_ultrahdr_bytes` about the bytes it already has.
 bool is_ultrahdr_jpeg_file(const std::filesystem::path& path) {
   try {
-    auto bytes = read_binary_file(path);
-    if (bytes.size() < 4) return false;
-    return is_uhdr_image(bytes.data(), static_cast<int>(bytes.size())) != 0;
+    return codec::is_ultrahdr_bytes(read_binary_file(path));
   } catch (const std::exception&) {
     return false;
   }
@@ -103,14 +115,21 @@ bool is_ultrahdr_jpeg_file(const std::filesystem::path& path) {
 // Decodes the gain-map-applied HDR rendition into linear Display P3 with SDR
 // diffuse white at 1.0, which is the same normalisation the RAW path produces.
 DecodedImage decode_ultrahdr(const std::filesystem::path& path) {
-  auto bytes = read_binary_file(path);
+  return codec::decode_ultrahdr_bytes(read_binary_file(path));
+}
+
+namespace codec {
+
+DecodedImage decode_ultrahdr_bytes(const std::vector<std::uint8_t>& bytes) {
   if (bytes.empty()) throw std::runtime_error("Ultra HDR input is empty");
 
   std::unique_ptr<uhdr_codec_private_t, DecoderDeleter> decoder(uhdr_create_decoder());
   if (!decoder) throw std::runtime_error("cannot create the Ultra HDR decoder");
 
   uhdr_compressed_image_t compressed{};
-  compressed.data = bytes.data();
+  // libultrahdr's struct is the same one its encoder fills, so the pointer is
+  // non-const; the decoder only reads through it.
+  compressed.data = const_cast<std::uint8_t*>(bytes.data());
   compressed.data_sz = bytes.size();
   compressed.capacity = bytes.size();
   compressed.cg = UHDR_CG_UNSPECIFIED;
@@ -195,5 +214,7 @@ DecodedImage decode_ultrahdr(const std::filesystem::path& path) {
   }
   return result;
 }
+
+}  // namespace codec
 
 }  // namespace hyperdr

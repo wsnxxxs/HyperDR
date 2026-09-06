@@ -125,6 +125,13 @@ class NativePreviewContractTests(unittest.TestCase):
             self.assertTrue(live.exists())
             self.assertTrue(unrelated.exists())
 
+    def test_preview_cache_keeps_recent_states_with_a_byte_limit(self):
+        with mock.patch.object(native_preview, "_CACHE_MAX_BYTES", 7):
+            native_preview._cache_put(("first",), (b"123", {}))
+            native_preview._cache_put(("second",), (b"456", {}))
+            native_preview._cache_put(("third",), (b"789", {}))
+        self.assertEqual(list(native_preview._CACHE), [("second",), ("third",)])
+
 
 class NativePreviewFrontendContractTests(unittest.TestCase):
     def test_image_adjustments_reset_to_point_six_ev_without_persistence(self):
@@ -164,6 +171,13 @@ class NativePreviewFrontendContractTests(unittest.TestCase):
         self.assertIn("const probeTexture = device.createTexture", GPU)
         self.assertIn("view: probeTexture.createView()", GPU)
         self.assertNotIn("const canvasTexture = context.getCurrentTexture()", GPU)
+
+    def test_hdr_status_waits_for_real_renderer_and_labels_input_domain(self):
+        self.assertIn("INPUT_DOMAIN_LABELS", STAGE)
+        self.assertIn("inputDomain", STAGE)
+        self.assertIn("等待图像 · 将在预览时验证 HDR 输出", STAGE)
+        self.assertIn('stage.dataset.previewMode = renderer?.kind || "uninitialized"', STAGE)
+        self.assertNotIn('setCapability("HDR 能力就绪", true)', STAGE)
 
 
 if __name__ == "__main__":

@@ -163,11 +163,15 @@ function buildRange(control) {
   let lastFill = "";
   let lastMax = "";
 
-  input.addEventListener("pointerdown", () => { dragging = true; });
+  input.addEventListener("pointerdown", () => {
+    dragging = true;
+    store.set({ previewInteracting: true });
+  });
   const endDrag = () => {
     if (!dragging) return;
     dragging = false;
     apply(store.get());
+    store.set({ previewInteracting: false });
   };
   // The pointer can be released anywhere -- outside the track, outside the
   // window -- so release is watched on the window rather than the input.

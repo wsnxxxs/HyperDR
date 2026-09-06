@@ -11,6 +11,7 @@
 #include "hyperdr/image/image.hpp"
 
 #include <cstddef>
+#include <cmath>
 #include <cstdint>
 #include <vector>
 
@@ -80,6 +81,25 @@ struct BilinearGridCoordinates {
   std::uint32_t y1{};
   float tx{};
   float ty{};
+};
+
+// Reuse half-pixel coordinates across all pixels, grids and colour channels
+// of a render. Construction costs width + height, instead of width * height.
+class BilinearGridSampler {
+ public:
+  BilinearGridSampler(std::uint32_t grid_width, std::uint32_t grid_height,
+                       std::uint32_t image_width, std::uint32_t image_height);
+  [[nodiscard]] BilinearGridCoordinates coordinates(std::uint32_t x, std::uint32_t y) const {
+    return {columns_[x].x0, columns_[x].x1, rows_[y].y0, rows_[y].y1,
+            columns_[x].tx, rows_[y].ty};
+  }
+  [[nodiscard]] float sample(const GridView& grid, std::uint32_t x, std::uint32_t y) const {
+    const auto c = coordinates(x, y);
+    return std::lerp(std::lerp(grid.at(c.x0, c.y0), grid.at(c.x1, c.y0), c.tx),
+                     std::lerp(grid.at(c.x0, c.y1), grid.at(c.x1, c.y1), c.tx), c.ty);
+  }
+ private:
+  std::vector<BilinearGridCoordinates> columns_, rows_;
 };
 
 // Throws for a zero grid or image extent rather than dividing by zero and

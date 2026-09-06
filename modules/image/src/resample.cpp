@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <vector>
 
 namespace hyperdr {
 namespace {
@@ -60,6 +61,18 @@ FloatImage resample_to(FloatImage source, std::uint32_t width, std::uint32_t hei
 
   FloatImage out(width, height, source.channels);
   const auto& in = source;
+  struct Column { std::uint32_t x0, x1; float weight; };
+  std::vector<Column> columns(width);
+  for (std::uint32_t x = 0; x < width; ++x) {
+      const double sx = std::clamp(
+          (static_cast<double>(x) + 0.5) * static_cast<double>(in.width) /
+                  static_cast<double>(width) - 0.5,
+          0.0, static_cast<double>(in.width - 1U));
+      const auto x0 = std::min(static_cast<std::uint32_t>(std::floor(sx)), in.width - 1U);
+      const auto x1 = std::min(x0 + 1U, in.width - 1U);
+      const float wx = static_cast<float>(sx - static_cast<double>(x0));
+    columns[x] = {x0, x1, wx};
+  }
   parallel_for_rows(height, [&](const std::uint32_t y) {
     const double sy = std::clamp(
         (static_cast<double>(y) + 0.5) * static_cast<double>(in.height) /
@@ -69,13 +82,7 @@ FloatImage resample_to(FloatImage source, std::uint32_t width, std::uint32_t hei
     const auto y1 = std::min(y0 + 1U, in.height - 1U);
     const float wy = static_cast<float>(sy - static_cast<double>(y0));
     for (std::uint32_t x = 0; x < width; ++x) {
-      const double sx = std::clamp(
-          (static_cast<double>(x) + 0.5) * static_cast<double>(in.width) /
-                  static_cast<double>(width) - 0.5,
-          0.0, static_cast<double>(in.width - 1U));
-      const auto x0 = std::min(static_cast<std::uint32_t>(std::floor(sx)), in.width - 1U);
-      const auto x1 = std::min(x0 + 1U, in.width - 1U);
-      const float wx = static_cast<float>(sx - static_cast<double>(x0));
+      const auto [x0, x1, wx] = columns[x];
       for (std::uint32_t c = 0; c < in.channels; ++c) {
         const float top = std::lerp(in.at(x0, y0, c), in.at(x1, y0, c), wx);
         const float bottom = std::lerp(in.at(x0, y1, c), in.at(x1, y1, c), wx);

@@ -91,10 +91,9 @@ struct LookOptions {
   float contrast{1.08F};
   float vibrance{0.12F};
   float headroom_max_stops{4.0F};
-  // EDR "pop": 0 keeps the restrained photographic default; 1 pushes the
-  // HDR-only strength (diffuse gain floor, headroom bias, and coloured-
-  // highlight retention). It only affects rendering above the shoulder, so
-  // the SDR base and below-shoulder invariant are unchanged.
+  // Explicit photographic style: controls diffuse gain, headroom bias,
+  // base clarity and highlight colour. The panel pins this to zero;
+  // gain_strength alone controls the intensity of its HDR alternate.
   float pop{0.0F};
 
   // Tone-region controls. `shoulder_start` is the linear SDR-output level where

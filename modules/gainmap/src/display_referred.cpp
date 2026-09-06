@@ -1,4 +1,5 @@
 #include "hyperdr/gainmap/display_referred.hpp"
+#include "local_gain.hpp"
 
 #include "hyperdr/foundation/math.hpp"
 #include "hyperdr/foundation/parallel.hpp"
@@ -88,12 +89,14 @@ struct CellGains {
 
 template <typename PixelGain>
 CellGains measure_cell_gains(const FloatImage& source, float exposure,
-                             PixelGain gain_of) {
+                             PixelGain gain_of,
+                             std::vector<float>* luminance_guide = nullptr) {
   CellGains cells;
   cells.dimensions = choose_gain_dimensions(source);
   cells.stops.assign(static_cast<std::size_t>(cells.dimensions.width) *
                          cells.dimensions.height,
                      0.0F);
+  if (luminance_guide) luminance_guide->resize(cells.stops.size());
   parallel_for_rows(cells.dimensions.height, [&](const std::uint32_t gy) {
     const std::uint32_t y0 =
         grid_cell_edge(gy, source.height, cells.dimensions.height);
@@ -108,22 +111,27 @@ CellGains measure_cell_gains(const FloatImage& source, float exposure,
           source.width,
           std::max(x0 + 1U, grid_cell_edge(gx + 1U, source.width,
                                            cells.dimensions.width)));
-      double total = 0.0;
+      double total = 0.0, guide_total = 0.0;
       std::size_t samples = 0;
       for (std::uint32_t y = y0; y < y1; ++y) {
         for (std::uint32_t x = x0; x < x1; ++x) {
           const std::size_t index =
               (static_cast<std::size_t>(y) * source.width + x) * 3;
-          total += gain_of(
-              p3_luminance(positive_finite(source.pixels[index]),
+          const float luminance = p3_luminance(positive_finite(source.pixels[index]),
                            positive_finite(source.pixels[index + 1]),
                            positive_finite(source.pixels[index + 2])) *
-              exposure);
+              exposure;
+          total += gain_of(luminance);
+          if (luminance_guide) guide_total += luminance;
           ++samples;
         }
       }
       cells.stops[static_cast<std::size_t>(gy) * cells.dimensions.width + gx] =
           samples == 0 ? 0.0F : static_cast<float>(total / samples);
+      if (luminance_guide) {
+        (*luminance_guide)[static_cast<std::size_t>(gy) * cells.dimensions.width + gx] =
+            samples == 0 ? 0.0F : static_cast<float>(guide_total / samples);
+      }
     }
   });
   return cells;
@@ -131,7 +139,6 @@ CellGains measure_cell_gains(const FloatImage& source, float exposure,
 
 struct QuantizedGrid {
   FloatImage codes;
-  std::vector<float> decoded_stops;
   float stored_gain_max{0.0F};
   float stored_gamma{1.0F};
   Rational gain_max_metadata{0, 1};
@@ -165,16 +172,12 @@ QuantizedGrid quantize_grid(const std::vector<float>& gain_stops,
       static_cast<float>(quantized.gamma_metadata.denominator);
 
   quantized.codes = FloatImage(dimensions.width, dimensions.height, 1);
-  quantized.decoded_stops.assign(count, 0.0F);
   for (std::size_t i = 0; i < count; ++i) {
     const float code = encode_gain_code(normalized[i], quantized.stored_gamma);
     const auto x = static_cast<std::uint32_t>(i % dimensions.width);
     const auto y = static_cast<std::uint32_t>(i / dimensions.width);
     const float stored = quantize_gain_code_dithered(code, x, y);
     quantized.codes.pixels[i] = stored;
-    quantized.decoded_stops[i] =
-        quantized.stored_gain_max *
-        decode_gain_code(stored, quantized.stored_gamma);
   }
   return quantized;
 }
@@ -202,35 +205,6 @@ std::array<float, 3> fit_to_unit_cube(std::array<float, 3> rgb) {
           std::clamp(luminance + t * (rgb[2] - luminance), 0.0F, 1.0F)};
 }
 
-void fill_gain_distribution(RenderStats& stats,
-                            const std::vector<float>& decoded_stops,
-                            float ceiling_stops) {
-  if (decoded_stops.empty()) return;
-  const float count = static_cast<float>(decoded_stops.size());
-  for (const float value : decoded_stops) {
-    if (value > 0.5F) stats.gain_fraction_gt_0_5 += 1.0F;
-    if (value > 1.0F) stats.gain_fraction_gt_1_0 += 1.0F;
-    if (value > 2.0F) stats.gain_fraction_gt_2_0 += 1.0F;
-    if (ceiling_stops > kEpsilon && value >= ceiling_stops - kEpsilon) {
-      stats.gain_clipped_fraction += 1.0F;
-    }
-  }
-  stats.gain_fraction_gt_0_5 /= count;
-  stats.gain_fraction_gt_1_0 /= count;
-  stats.gain_fraction_gt_2_0 /= count;
-  stats.gain_clipped_fraction /= count;
-
-  std::vector<float> sorted = decoded_stops;
-  std::sort(sorted.begin(), sorted.end());
-  constexpr std::array<float, 8> fractions{0.50F, 0.75F, 0.90F, 0.95F,
-                                           0.99F, 0.999F, 0.9999F, 1.0F};
-  for (std::size_t i = 0; i < fractions.size(); ++i) {
-    const auto index = static_cast<std::size_t>(
-        fractions[i] * static_cast<float>(sorted.size() - 1));
-    stats.gain_percentiles[i] = sorted[index];
-  }
-}
-
 }  // namespace
 
 float display_shoulder_log2(float u, float knee, float ceiling) {
@@ -248,34 +222,91 @@ GainMapResult make_display_referred_sdr_passthrough_result(
     const FloatImage& source, const GainMapOptions& options);
 
 GainMapResult make_display_referred_sdr_result(const FloatImage& source,
-                                               const GainMapOptions& options) {
+                                               const GainMapOptions& options,
+                                               const CaptureMetadata& capture,
+                                               GainMapPreparation* preparation) {
   if (source.channels != 3) {
     throw std::invalid_argument("gain-map input must be RGB");
   }
   validate_gain_map_options(options);
 
-  // A display-referred SDR file has no encoded samples above diffuse white,
-  // so the display shoulder cannot discover an input peak the way it can for
-  // PQ, HLG, or a gain-map source. The panel still promises that its HDR
-  // strength and range controls work for an ordinary photograph. Run the
-  // same photographic expansion pipeline used for RAW, but pin exposure to
-  // the display-referred value (automatic exposure would re-expose an already
-  // finished picture). The source metadata remains SDR; the rendered
-  // alternate is the user-requested HDR enhancement.
+  // Develop the base once, identically at every gain strength. In particular,
+  // crossing zero must not switch a finished photograph to a RAW tone curve.
+  GainMapResult result;
+  if (preparation && preparation->ready) {
+    result.base_linear = preparation->base.base;
+    result.stats = preparation->base_stats;
+    result.exposure_ev = preparation->exposure_ev;
+
+  } else result = make_display_referred_sdr_passthrough_result(source, options);
   const float requested_stops = options.auto_headroom
       ? options.look.headroom_max_stops
       : std::clamp(options.headroom_stops, 0.0F,
                    options.look.headroom_max_stops);
   if (!(requested_stops > kEpsilon) ||
-      !(std::min(options.gain_strength, 1.0F) > kEpsilon)) {
-    return make_display_referred_sdr_passthrough_result(source, options);
+      (!preparation && !(std::min(options.gain_strength, 1.0F) > kEpsilon))) {
+    return result;
   }
-  auto developed = options;
-  developed.auto_exposure = false;
-  developed.exposure_ev = 0.0F;
-  developed.auto_headroom = false;
-  developed.headroom_stops = requested_stops;
-  return make_photographic_gain_map(source, developed, {});
+  const float knee = knee_linear(options);
+  GainMapPreparation owned_preparation;
+  auto& prepared = preparation ? *preparation : owned_preparation;
+  if (!prepared.ready) {
+    std::vector<float> guide;
+    const auto cells = measure_cell_gains(result.base_linear, 1.0F, [&](float luma) {
+      return requested_stops * smoothstep(knee, 1.0F, luma);
+    }, &guide);
+    auto local = weight_local_highlights(cells.stops, guide, guide,
+                                        cells.dimensions, capture, options.look);
+    prepared.width = cells.dimensions.width; prepared.height = cells.dimensions.height;
+    prepared.stops = std::move(local.stops);
+    prepared.weight_mean = local.weight_mean; prepared.weight_p95 = local.weight_p95;
+    if (preparation) prepared.base.base = result.base_linear;
+    prepared.base_stats = result.stats; prepared.exposure_ev = result.exposure_ev;
+    prepared.ready = true;
+  }
+  const GainGridDimensions dimensions{prepared.width, prepared.height};
+  auto gains = prepared.stops;
+  const float strength = std::min(options.gain_strength, 1.0F);
+  for (float& gain : gains) gain *= strength;
+  auto quantized = quantize_grid(gains, dimensions);
+  result.gain_map = std::move(quantized.codes);
+  result.metadata.gain_max = quantized.gain_max_metadata;
+  result.metadata.alternate_headroom = quantized.gain_max_metadata;
+  result.metadata.gamma = quantized.gamma_metadata;
+  result.headroom_stops = quantized.stored_gain_max;
+  auto& stats = result.stats;
+  stats.headroom_stops = requested_stops * strength;
+  stats.headroom_linear = std::exp2(stats.headroom_stops);
+  stats.gain_max_stops = quantized.stored_gain_max;
+  stats.gain_gamma = quantized.stored_gamma;
+  stats.local_weight_mean = prepared.weight_mean;
+  stats.local_weight_p95 = prepared.weight_p95;
+  const GridView gain_view(result.gain_map.pixels, dimensions.width,
+                           dimensions.height);
+  const BilinearGridSampler sampler(dimensions.width, dimensions.height,
+                                    source.width, source.height);
+  std::vector<float> peaks(source.height, 1.0F), below(source.height, 0.0F);
+  parallel_for_rows(source.height, [&](std::uint32_t y) {
+    for (std::uint32_t x = 0; x < source.width; ++x) {
+      const float sdr = p3_luminance(result.base_linear.at(x, y, 0),
+          result.base_linear.at(x, y, 1), result.base_linear.at(x, y, 2));
+      const float gain = quantized.stored_gain_max * decode_gain_code(
+          sampler.sample(gain_view, x, y),
+          quantized.stored_gamma);
+      const float hdr = sdr * std::exp2(gain);
+      peaks[y] = std::max(peaks[y], hdr);
+      if (sdr <= knee) below[y] = std::max(below[y],
+          std::abs(hdr - sdr) / std::max(sdr, kEpsilon));
+    }
+  });
+  stats.rendered_peak = *std::max_element(peaks.begin(), peaks.end());
+  stats.below_knee_relative_difference_max = *std::max_element(below.begin(), below.end());
+  stats.headroom_utilization = stats.headroom_linear > 1.0F
+      ? std::clamp((stats.rendered_peak - 1.0F) / (stats.headroom_linear - 1.0F), 0.0F, 1.0F)
+      : 0.0F;
+  measure_quantized_gain(stats, result.gain_map, quantized.stored_gain_max,
+                          quantized.stored_gamma, stats.headroom_stops);
+  return result;
 }
 
 GainMapResult make_display_referred_sdr_passthrough_result(
@@ -459,6 +490,8 @@ GainMapResult make_display_referred_hdr_gain_map(const FloatImage& source,
 
   const GridView gain_view(result.gain_map.pixels, dimensions.width,
                            dimensions.height);
+  const BilinearGridSampler sampler(dimensions.width, dimensions.height,
+                                    source.width, source.height);
   const float stored_gain_max = quantized.stored_gain_max;
   const float stored_gamma = quantized.stored_gamma;
 
@@ -488,8 +521,7 @@ GainMapResult make_display_referred_hdr_gain_map(const FloatImage& source,
 
       const float local_gain =
           stored_gain_max *
-          decode_gain_code(sample_grid_bilinear(gain_view, source.width,
-                                                source.height, x, y),
+          decode_gain_code(sampler.sample(gain_view, x, y),
                            stored_gamma);
       const float sdr = p3_luminance(fitted[0], fitted[1], fitted[2]);
       const float reconstructed = sdr * std::exp2(local_gain);
@@ -536,7 +568,7 @@ GainMapResult make_display_referred_hdr_gain_map(const FloatImage& source,
   stats.gain_gamma = stored_gamma;
   stats.local_weight_mean = 1.0F;
   stats.local_weight_p95 = 1.0F;
-  fill_gain_distribution(stats, quantized.decoded_stops, output_stops);
+  measure_quantized_gain(stats, result.gain_map, stored_gain_max, stored_gamma, output_stops);
   return result;
 }
 

@@ -2,6 +2,7 @@
 
 #include "hyperdr/app/fingerprint.hpp"
 #include "hyperdr/app/schema.hpp"
+#include "hyperdr/foundation/binary_input.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/foundation/hash.hpp"
 #include "hyperdr/foundation/json.hpp"
@@ -12,7 +13,6 @@
 #include <array>
 #include <cstdio>
 #include <cstring>
-#include <fstream>
 #include <vector>
 
 namespace hyperdr {
@@ -274,14 +274,20 @@ std::string decode_cache_variant(const ConvertOptions& options,
 
 DecodedImage decode_cached_image(const std::filesystem::path& input,
                                  const ConvertOptions& options,
-                                 const RawDecodeOptions& raw) {
+                                 const RawDecodeOptions& raw,
+                                 std::filesystem::path* analysis_cache_file) {
   std::filesystem::path cache_file;
+  if (analysis_cache_file) analysis_cache_file->clear();
   if (!options.decode_cache_directory.empty()) {
     cache_file = decode_cache_path(
         options.decode_cache_directory,
         decode_cache_key(input, decode_cache_variant(options, raw),
                          options.decode_cache_source_sha256));
     DecodedImage cached;
+    if (analysis_cache_file) {
+      *analysis_cache_file = cache_file.parent_path() /
+          (cache_file.stem().string() + ".analysis.hdrcache");
+    }
     if (read_decode_cache(cache_file, cached)) return cached;
   }
 
@@ -303,12 +309,10 @@ std::filesystem::path decode_cache_path(const std::filesystem::path& directory,
 bool read_decode_cache(const std::filesystem::path& file, DecodedImage& out) {
   std::error_code ec;
   if (!std::filesystem::is_regular_file(file, ec) || ec) return false;
-  std::ifstream input(file, std::ios::binary);
+  BinaryInput input(file);
   if (!input) return false;
   std::array<std::uint8_t, 28> header{};
-  input.read(reinterpret_cast<char*>(header.data()),
-             static_cast<std::streamsize>(header.size()));
-  if (input.gcount() != static_cast<std::streamsize>(header.size())) return false;
+  if (!input.read(header.data(), header.size())) return false;
   if (std::memcmp(header.data(), kMagic.data(), kMagic.size()) != 0) return false;
   if (get_u32(header.data() + 8) != kCacheSchema) return false;
 
@@ -331,8 +335,7 @@ bool read_decode_cache(const std::filesystem::path& file, DecodedImage& out) {
 
   std::string metadata_text(json_length, '\0');
   if (json_length != 0) {
-    input.read(metadata_text.data(), static_cast<std::streamsize>(json_length));
-    if (input.gcount() != static_cast<std::streamsize>(json_length)) return false;
+    if (!input.read(metadata_text.data(), json_length)) return false;
   }
 
   DecodedImage loaded;
@@ -342,9 +345,8 @@ bool read_decode_cache(const std::filesystem::path& file, DecodedImage& out) {
   } catch (const std::exception&) {
     return false;
   }
-  const auto bytes = static_cast<std::streamsize>(pixel_count * sizeof(float));
-  input.read(reinterpret_cast<char*>(loaded.linear_p3.pixels.data()), bytes);
-  if (input.gcount() != bytes) return false;
+  const auto bytes = static_cast<std::size_t>(pixel_count * sizeof(float));
+  if (!input.read(loaded.linear_p3.pixels.data(), bytes)) return false;
   out = std::move(loaded);
   return true;
 }

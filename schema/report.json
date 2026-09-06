@@ -286,6 +286,9 @@
         "decode_ms",
         "process_ms",
         "encode_ms",
+        "codec_ms",
+        "verify_ms",
+        "write_ms",
         "look",
         "render",
         "gain_map"
@@ -403,6 +406,15 @@
         },
         "process_ms": {
           "$ref": "#/$defs/duration"
+        },
+        "codec_ms": {
+          "type": "number"
+        },
+        "verify_ms": {
+          "type": "number"
+        },
+        "write_ms": {
+          "type": "number"
         },
         "encode_ms": {
           "$ref": "#/$defs/duration"

@@ -162,6 +162,41 @@ void test_sdr_brightening_rolls_off_instead_of_clipping() {
 
 // --- display-referred HDR --------------------------------------------------
 
+void test_sdr_strength_keeps_base_and_is_continuous() {
+  const auto source = test_image(0.02F, 1.0F, 1.0F);
+  auto options = plain_options();
+  options.auto_exposure = false;
+  options.exposure_ev = -0.25F;
+  options.exposure_bias_ev = 0.5F;
+  options.gain_strength = 0.0F;
+  const hyperdr::InputDescription input{hyperdr::InputDomain::kDisplayReferredSdr, 1.0F};
+  const auto baseline = hyperdr::make_gain_map(source, options, {}, input);
+  float previous_peak = peak_luminance(baseline.base_linear);
+  for (const float strength : {0.001F, 0.25F, 0.5F, 1.0F}) {
+    options.gain_strength = strength;
+    const auto result = hyperdr::make_gain_map(source, options, {}, input);
+    require(result.base_linear.pixels == baseline.base_linear.pixels,
+            "HDR strength must not redevelop the SDR base");
+    require(std::abs(result.exposure_ev - 0.25F) < 1.0e-6F,
+            "SDR expansion lost the explicit exposure or bias");
+    const auto hdr = hyperdr::reconstruct_gain_map(result.base_linear, result.gain_map,
+        result.metadata, result.headroom_stops);
+    const float peak = peak_luminance(hdr);
+    require(peak >= previous_peak - 1.0e-4F, "SDR strength must increase HDR continuously");
+    if (strength == 0.001F) require(peak - previous_peak < 0.01F,
+                                  "SDR strength jumps when crossing zero");
+    previous_peak = peak;
+  }
+  options.gain_strength = 1.0F;
+  hyperdr::CaptureMetadata low_iso, high_iso;
+  low_iso.iso = 100.0F;
+  high_iso.iso = 25600.0F;
+  const auto clean = hyperdr::make_gain_map(source, options, low_iso, input);
+  const auto noisy = hyperdr::make_gain_map(source, options, high_iso, input);
+  require(noisy.stats.local_weight_mean < clean.stats.local_weight_mean,
+          "SDR expansion dropped capture ISO before noise weighting");
+}
+
 void test_hdr_keeps_its_shadows_and_restores_its_peak() {
   constexpr float kHeadroom = 4.93F;  // HLG
   const auto source = test_image(0.01F, 2.0F, kHeadroom);
@@ -335,6 +370,7 @@ int main() {
     test_shoulder_shape();
     test_sdr_uses_the_hdr_controls();
     test_sdr_brightening_rolls_off_instead_of_clipping();
+    test_sdr_strength_keeps_base_and_is_continuous();
     test_hdr_keeps_its_shadows_and_restores_its_peak();
     test_hdr_round_trip_holds_its_headroom();
     test_hdr_respects_the_output_ceiling();

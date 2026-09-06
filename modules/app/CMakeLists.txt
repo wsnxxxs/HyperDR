@@ -2,11 +2,13 @@
 # reporting, and the run loop.
 hyperdr_add_module(app
   SOURCES
+    src/analysis_cache.cpp
     src/batch.cpp
     src/cli.cpp
     src/decode_cache.cpp
     src/discovery.cpp
     src/fingerprint.cpp
+    src/preview.cpp
     src/report.cpp
     src/resume_state.cpp
     src/schema.cpp

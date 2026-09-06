@@ -137,7 +137,10 @@ std::string run_report_json(const std::vector<FileResult>& results,
         .member("gain_max", result.gain_max)
         .member("decode_ms", result.decode_ms)
         .member("process_ms", result.process_ms)
-        .member("encode_ms", result.encode_ms);
+        .member("encode_ms", result.encode_ms)
+        .member("codec_ms", result.codec_ms)
+        .member("verify_ms", result.verify_ms)
+        .member("write_ms", result.write_ms);
     write_stats(writer, result.stats);
     writer.end_object();
   }

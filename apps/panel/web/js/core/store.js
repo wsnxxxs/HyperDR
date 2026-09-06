@@ -86,6 +86,8 @@ export const store = createStore({
   /** Whether the current file has a preview matching the current settings. */
   previewReady: false,
   previewError: false,
+  previewInteracting: false,
+  previewTiming: null,
 
   /* -- viewer ---------------------------------------------------------- */
   /** @type {"effect"|"original"|"split"} */

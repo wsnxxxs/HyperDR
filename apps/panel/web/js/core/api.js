@@ -6,6 +6,7 @@
 import { decodePreview } from "../preview/packet.js";
 
 import { t } from "../i18n/index.js";
+let previousPreview = null;
 
 export class ApiError extends Error {
   constructor(message, status = 0) {
@@ -114,6 +115,8 @@ export const api = {
    */
   async preview(sessionId, { options = {}, highlightRecovery, maxEdge } = {}) {
     const query = new URLSearchParams({ id: sessionId });
+    const previous = previousPreview?.sessionId === sessionId ? previousPreview.frame : null;
+    if (previous?.metadata.baseId) query.set("base", previous.metadata.baseId);
     query.set("options", JSON.stringify(options));
     if (highlightRecovery) query.set("hr", highlightRecovery);
     if (maxEdge) query.set("edge", String(maxEdge));
@@ -126,7 +129,9 @@ export const api = {
       throw new ApiError(message, response.status);
     }
     const buffer = await response.arrayBuffer();
-    return decodePreview(buffer);
+    const frame = decodePreview(buffer, previous);
+    previousPreview = { sessionId, frame };
+    return frame;
   },
 
   /** Run the optional model and return its raw little-endian float32 gain grid. */

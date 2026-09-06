@@ -123,10 +123,8 @@ def options_to_settings(options: dict) -> dict:
     def value(key):
         return effective_options.get(key, PANEL_DEFAULTS[key])
 
-    # One panel knob drives two converter settings in each of these pairs:
-    # strength sets both the local gain and the EDR "pop", and the range slider
-    # is both the auto-headroom ceiling and the explicit target, which is what
-    # keeps a slider move deterministic rather than content-dependent.
+    # Strength changes HDR gain only. Keep the photographic style fixed so
+    # adjusting HDR does not also change base clarity and highlight colour.
     strength = value("hdrStrength")
     encoding = value("encoding")
     headroom = _headroom(effective_options, encoding)
@@ -144,7 +142,7 @@ def options_to_settings(options: dict) -> dict:
         "contrast": value("contrast"),
         "vibrance": value("vibrance"),
         "gain_strength": strength,
-        "pop": strength,
+        "pop": 0.0,
         "headroom_max": headroom,
         "headroom": headroom,
         "exposure": "auto",

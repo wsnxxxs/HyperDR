@@ -18,7 +18,7 @@
 namespace hyperdr {
 
 struct SceneStatistics {
-  // A strided sample of positive luminances, capped at roughly 200k entries so
+  // A spatial reference sample of positive luminances, bounded to 512 squared so
   // the cost is independent of sensor resolution.
   std::vector<float> samples;
   // Geometric mean over the trimmed range, i.e. the scene's middle grey.

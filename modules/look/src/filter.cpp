@@ -4,6 +4,7 @@
 #include "hyperdr/foundation/parallel.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <stdexcept>
 
@@ -26,39 +27,49 @@ void box_mean(const std::vector<float>& input, std::vector<float>& output,
       integral.size() != stride * (static_cast<std::size_t>(height) + 1)) {
     throw std::invalid_argument("invalid guided-filter buffer dimensions");
   }
-  std::fill(integral.begin(), integral.begin() + static_cast<std::ptrdiff_t>(stride), 0.0);
-  // Build the summed-area table in two independent passes. Double precision is
-  // required here: a 3072-square grid can accumulate billions before four
-  // nearby table entries are subtracted to recover a small local window.
+  // Horizontal window sums, followed by vertical sliding windows. Keeping
+  // nearby columns together avoids the full-height strided scan of a summed
+  // area table. Double precision also avoids subtracting huge global totals.
   parallel_for_rows(height, [&](const std::uint32_t y) {
-    const std::size_t row = static_cast<std::size_t>(y) * width;
-    const std::size_t integral_row = static_cast<std::size_t>(y + 1) * stride;
-    integral[integral_row] = 0.0;
-    double running = 0.0;
+    const auto row = static_cast<std::size_t>(y) * width;
+    const auto value = [&](std::uint32_t x) {
+      return static_cast<double>(clamp_finite(input[row + x], -64.0F, 64.0F));
+    };
+    double sum = 0.0;
+    for (std::uint32_t x = 0; x < std::min(width, radius + 1U); ++x) sum += value(x);
     for (std::uint32_t x = 0; x < width; ++x) {
-      running += static_cast<double>(clamp_finite(input[row + x], -64.0F, 64.0F));
-      integral[integral_row + x + 1] = running;
+      integral[row + x] = sum;
+      if (x >= radius) sum -= value(x - radius);
+      if (x + radius + 1U < width) sum += value(x + radius + 1U);
     }
   });
-  parallel_for_rows(width, [&](const std::uint32_t x) {
-    const std::size_t column = static_cast<std::size_t>(x) + 1;
-    for (std::uint32_t y = 1; y <= height; ++y) {
-      integral[static_cast<std::size_t>(y) * stride + column] +=
-          integral[static_cast<std::size_t>(y - 1) * stride + column];
+  constexpr std::uint32_t tile_width = 16;
+  parallel_for_rows((width + tile_width - 1U) / tile_width, [&](std::uint32_t tile) {
+    const auto left = tile * tile_width;
+    const auto columns = std::min(tile_width, width - left);
+    std::array<double, tile_width> sums{};
+    for (std::uint32_t y = 0; y < std::min(height, radius + 1U); ++y) {
+      const auto row = static_cast<std::size_t>(y) * width + left;
+      for (std::uint32_t c = 0; c < columns; ++c) sums[c] += integral[row + c];
     }
-  });
-  parallel_for_rows(height, [&](const std::uint32_t y) {
-    const std::uint32_t y0 = y > radius ? y - radius : 0;
-    const std::uint32_t y1 = std::min(height, y + radius + 1U);
-    for (std::uint32_t x = 0; x < width; ++x) {
-      const std::uint32_t x0 = x > radius ? x - radius : 0;
-      const std::uint32_t x1 = std::min(width, x + radius + 1U);
-      const double sum = integral[static_cast<std::size_t>(y1) * stride + x1] -
-                         integral[static_cast<std::size_t>(y0) * stride + x1] -
-                         integral[static_cast<std::size_t>(y1) * stride + x0] +
-                         integral[static_cast<std::size_t>(y0) * stride + x0];
-      output[static_cast<std::size_t>(y) * width + x] =
-          static_cast<float>(sum / static_cast<double>((x1 - x0) * (y1 - y0)));
+    for (std::uint32_t y = 0; y < height; ++y) {
+      const auto y0 = y > radius ? y - radius : 0U;
+      const auto y1 = std::min(height, y + radius + 1U);
+      const auto row = static_cast<std::size_t>(y) * width + left;
+      for (std::uint32_t c = 0; c < columns; ++c) {
+        const auto x = left + c;
+        const auto x0 = x > radius ? x - radius : 0U;
+        const auto x1 = std::min(width, x + radius + 1U);
+        output[row + c] = static_cast<float>(sums[c] / static_cast<double>((x1 - x0) * (y1 - y0)));
+      }
+      if (y >= radius) {
+        const auto leaving = static_cast<std::size_t>(y - radius) * width + left;
+        for (std::uint32_t c = 0; c < columns; ++c) sums[c] -= integral[leaving + c];
+      }
+      if (y + radius + 1U < height) {
+        const auto entering = static_cast<std::size_t>(y + radius + 1U) * width + left;
+        for (std::uint32_t c = 0; c < columns; ++c) sums[c] += integral[entering + c];
+      }
     }
   });
 }

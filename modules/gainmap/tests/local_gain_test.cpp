@@ -1,5 +1,6 @@
 #include "hyperdr/gainmap/coding.hpp"
 #include "hyperdr/gainmap/gain_map.hpp"
+#include "../src/local_gain.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -41,6 +42,70 @@ float decoded_bilinear_gain(const hyperdr::GainMapResult& result,
 
 int main() {
   try {
+    // The environment can be coarse, but a fine gain request remains on its
+    // original cell. Compare two scales of the same broad scene as well.
+    std::vector<float> low_gain;
+    for (const unsigned scale : {1U, 2U}) {
+      const hyperdr::GainGridDimensions dims{768U * scale, 512U * scale};
+      const auto count = static_cast<std::size_t>(dims.width) * dims.height;
+      std::vector<float> scene(count), guide(count), global(count);
+      for (unsigned y = 0; y < dims.height; ++y) for (unsigned x = 0; x < dims.width; ++x) {
+        const auto i = static_cast<std::size_t>(y) * dims.width + x;
+        const float level = x < dims.width / 2 ? 1.2F : 0.01F;
+        scene[i] = level;
+        guide[i] = level / (1.0F + level);
+        global[i] = level > 1.0F ? 1.5F : 0.0F;
+      }
+      const auto pin = static_cast<std::size_t>(dims.height / 2) * dims.width + dims.width * 3 / 4;
+      scene[pin] = 20.0F; guide[pin] = 0.95F; global[pin] = 3.0F;
+      hyperdr::LookOptions look;
+      hyperdr::CaptureMetadata capture; capture.iso = 100.0F;
+      const auto local = hyperdr::weight_local_highlights(global, scene, guide, dims, capture, look);
+      require(local.stops[pin] > 0.01F, "coarse environment erased a fine highlight");
+      require(local.stops[pin + 32] == 0.0F, "coarse environment leaked gain into a dark field");
+      if (scale == 1) low_gain = local.stops;
+      else {
+        double difference = 0.0;
+        for (unsigned y = 16; y < 496; y += 8) for (unsigned x = 16; x < 752; x += 8) {
+          const auto low = static_cast<std::size_t>(y) * 768 + x;
+          const auto high = static_cast<std::size_t>(y * 2) * dims.width + x * 2;
+          difference += std::abs(low_gain[low] - local.stops[high]);
+        }
+        require(difference / (60 * 92) < 0.01, "coarse environment changed broad gain across preview scales");
+      }
+    }
+    // Four isolated bright samples occupy adjacent cells, each with a mean
+    // below the knee. Their real gain must survive grid reduction.
+    hyperdr::FloatImage pinlights(64, 64, 3);
+    std::fill(pinlights.pixels.begin(), pinlights.pixels.end(), 0.01F);
+    for (const auto y : {30U, 32U}) {
+      for (const auto x : {30U, 32U}) {
+        for (unsigned c = 0; c < 3; ++c) pinlights.at(x, y, c) = 1.5F;
+      }
+    }
+    hyperdr::GainMapOptions pin_options;
+    pin_options.auto_exposure = false;
+    pin_options.auto_headroom = false;
+    pin_options.headroom_stops = 3.0F;
+    pin_options.look.diffuse_gain_floor = 1.0F;
+    const auto pins = hyperdr::make_gain_map(pinlights, pin_options);
+    require(decoded_bilinear_gain(pins, 64, 64, 30, 30) > 0.001F,
+            "per-pixel specular requests were lost in the cell mean");
+    require(pins.headroom_stops < 0.5F,
+            "a weak highlight field was normalized to the entire HDR budget");
+
+    hyperdr::FloatImage diffuse(32, 32, 3);
+    std::fill(diffuse.pixels.begin(), diffuse.pixels.end(), 1.2F);
+    const auto broad = hyperdr::make_gain_map(diffuse, pin_options);
+    pin_options.look.diffuse_gain_floor = 0.2F;
+    const auto restrained = hyperdr::make_gain_map(diffuse, pin_options);
+    require(restrained.headroom_stops < broad.headroom_stops * 0.3F,
+            "peak calibration cancelled diffuse highlight attenuation");
+    pin_options.gain_strength = 0.0F;
+    const auto zero = hyperdr::make_gain_map(diffuse, pin_options);
+    require(zero.base_linear.pixels == restrained.base_linear.pixels,
+            "RAW HDR strength changed base chroma");
+
     hyperdr::FloatImage source(192, 128, 3);
     for (std::uint32_t y = 0; y < source.height; ++y) {
       for (std::uint32_t x = 0; x < source.width; ++x) {

@@ -96,14 +96,18 @@ float nominal_headroom_stops(const GainMapOptions& options) {
 
 GainMapResult make_gain_map(const FloatImage& source, const GainMapOptions& options,
                             const CaptureMetadata& capture,
-                            const InputDescription& input) {
+                            const InputDescription& input,
+                            const PhotographicAnalysis* analysis, GainMapPreparation* preparation) {
   validate_gain_map_options(options);
   validate_input_description(input);
   if (source.channels != 3) throw std::invalid_argument("gain-map input must be RGB");
   // Measure the decoded P3 source before exposure or the renderer mutates its
   // colour. This makes the report a property of the capture rather than of the
   // grade.
-  const auto wide_gamut = measure_wide_gamut_input(source);
+  const auto wide_gamut = preparation && preparation->ready
+      ? WideGamutMeasurement{preparation->base_stats.wide_gamut_pixels,
+                             preparation->base_stats.wide_gamut_eligible_pixels}
+      : measure_wide_gamut_input(source);
   // The one place the three domains part company. The photographic renderer
   // below is scene-referred throughout -- it chooses an exposure from the
   // scene's log average and lands on a toe/linear/shoulder curve -- and running
@@ -113,7 +117,7 @@ GainMapResult make_gain_map(const FloatImage& source, const GainMapOptions& opti
   auto result = [&]() -> GainMapResult {
     switch (input.domain) {
       case InputDomain::kDisplayReferredSdr:
-        return make_display_referred_sdr_result(source, options);
+        return make_display_referred_sdr_result(source, options, capture, preparation);
       case InputDomain::kDisplayReferredHdr:
         return make_display_referred_hdr_gain_map(source, options,
                                                   input.headroom);
@@ -122,9 +126,10 @@ GainMapResult make_gain_map(const FloatImage& source, const GainMapOptions& opti
       case InputDomain::kUnknown:
         throw std::invalid_argument("cannot render an unknown input domain");
     }
-    return make_photographic_gain_map(source, options, capture);
+    return make_photographic_gain_map(source, options, capture, analysis, preparation);
   }();
   set_wide_gamut_stats(result.stats, wide_gamut);
+  if (preparation) set_wide_gamut_stats(preparation->base_stats, wide_gamut);
   return result;
 }
 

@@ -1,4 +1,5 @@
 #include "hyperdr/app/batch.hpp"
+#include "hyperdr/app/analysis_cache.hpp"
 
 #include "hyperdr/app/decode_cache.hpp"
 #include "hyperdr/app/discovery.hpp"
@@ -42,6 +43,7 @@ struct Staged {
   InputStamp input_stamp{};
   bool decoded{false};
   double decode_ms{};
+  std::filesystem::path analysis_cache;
 };
 
 bool half_size_matches_full(std::uint32_t half, std::uint32_t full) {
@@ -52,7 +54,13 @@ bool half_size_matches_full(std::uint32_t half, std::uint32_t full) {
 }  // namespace
 
 GainMapResult render_decoded_image(const DecodedImage& image,
-                                   const GainMapOptions& options) {
+                                   const GainMapOptions& options,
+                                   const std::filesystem::path& analysis_cache,
+                                   std::uint64_t cache_budget_bytes) {
+  if (!analysis_cache.empty() && image.describe_input().domain == InputDomain::kSceneReferred) {
+    const auto analysis = cached_photographic_analysis(image.linear_p3, analysis_cache, cache_budget_bytes);
+    return make_gain_map(image.linear_p3, options, image.capture, image.describe_input(), &analysis);
+  }
   return make_gain_map(image.linear_p3, options, image.capture,
                        image.describe_input());
 }
@@ -194,7 +202,7 @@ Staged decode_stage(const std::filesystem::path& path,
       raw.preview_max_edge = options.preview_max_edge;
     }
 
-    staged.image = decode_cached_image(path, options, raw);
+    staged.image = decode_cached_image(path, options, raw, &staged.analysis_cache);
     staged.decode_ms = milliseconds(start, Clock::now());
     staged.decoded = true;
   } catch (const std::bad_alloc&) {
@@ -267,7 +275,8 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
                        staged.image.linear_p3, std::move(*external),
                        external_development, staged.image.capture,
                        staged.image.describe_input())
-                 : render_decoded_image(staged.image, options.gain);
+                 : render_decoded_image(staged.image, options.gain, staged.analysis_cache,
+                                        options.decode_cache_budget_bytes);
     }
     // Validate the peak the renderer actually produced. External model
     // metadata arrives after the initial option validation and can otherwise
@@ -311,11 +320,13 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     const auto processed = Clock::now();
 
     auto bytes = encode_for(gain, staged.image.metadata, options);
+    const auto codec_finished = Clock::now();
     gain = {};  // Free the float base and gain before the decoder allocates.
     if (options.verify_output) {
       verify_encoded(bytes, options);
       result.self_verified = true;
     }
+    const auto verification_finished = Clock::now();
     if (input_stamp(result.input) != staged.input_stamp) {
       throw std::runtime_error("input changed during conversion");
     }
@@ -328,6 +339,9 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     result.decode_ms = staged.decode_ms;
     result.process_ms = milliseconds(decoded, processed);
     result.encode_ms = milliseconds(processed, encoded);
+    result.codec_ms = milliseconds(processed, codec_finished);
+    result.verify_ms = milliseconds(codec_finished, verification_finished);
+    result.write_ms = milliseconds(verification_finished, encoded);
     result.success = true;
     result.message = "ok";
     write_resume_state(result.output, result.input, staged.input_stamp, options, fingerprint);

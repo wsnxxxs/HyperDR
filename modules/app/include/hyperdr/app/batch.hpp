@@ -21,7 +21,9 @@ void require_decode_resolution(const ConvertOptions& options,
 // extension, which classified an Ultra HDR JPEG that had fallen back to its SDR
 // primary as HDR and could not tell a PQ HEIC from an sRGB one at all.
 [[nodiscard]] GainMapResult render_decoded_image(const DecodedImage& image,
-                                                 const GainMapOptions& options);
+                                                 const GainMapOptions& options,
+                                                 const std::filesystem::path& analysis_cache = {},
+                                                 std::uint64_t cache_budget_bytes = 0);
 
 // Produces the exact SDR base consumed by the native model and retained by the
 // final render. Finished SDR is passed through sample-for-sample; scene-linear

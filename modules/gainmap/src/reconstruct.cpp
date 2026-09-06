@@ -6,6 +6,7 @@
 #include "hyperdr/look/grid.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <stdexcept>
 #include <vector>
@@ -40,17 +41,26 @@ FloatImage reconstruct_gain_map(const FloatImage& base, const FloatImage& gain,
   // numerator and denominator are negative between the endpoints. Applying
   // the denominator's sign a second time inverted the gain map.
   const float weight = fraction;
+  const BilinearGridSampler sampler(gain.width, gain.height, base.width, base.height);
+  struct Channel {
+    float min_gain, max_gain, inverse_gamma, base_offset, alt_offset;
+  };
+  std::array<Channel, 3> channels{};
+  for (unsigned c = 0; c < gain.channels; ++c) {
+    const auto channel = gain_map_channel(metadata, c);
+    channels[c] = {rational_value(channel.gain_min), rational_value(channel.gain_max),
+                   1.0F / std::max(rational_value(channel.gamma), 1.0e-6F),
+                   rational_value(channel.base_offset), rational_value(channel.alternate_offset)};
+  }
   parallel_for_rows(base.height, [&](const std::uint32_t y) {
     for (std::uint32_t x = 0; x < base.width; ++x) {
-      // Share the renderer's double-precision coordinate path. The former
-      // inline float arithmetic selected a different gain cell once an image
-      // was wider than float's exact-integer range.
-      const auto coordinates = bilinear_grid_coordinates(
-          gain.width, gain.height, base.width, base.height, x, y);
+      const auto coordinates = sampler.coordinates(x, y);
       bool pixel_clamped = false;
-      for (unsigned c = 0; c < 3; ++c) {
-        const auto gain_channel = gain.channels == 1 ? 0U : c;
-        const auto channel = gain_map_channel(metadata, gain_channel);
+      std::array<float, 3> multipliers{};
+      // A monochrome gain map has one multiplier shared by RGB; decode it
+      // once, while retaining the independent-channel path for imported maps.
+      for (unsigned gain_channel = 0; gain_channel < gain.channels; ++gain_channel) {
+        const auto& channel = channels[gain_channel];
         const float top =
             std::lerp(gain.at(coordinates.x0, coordinates.y0, gain_channel),
                       gain.at(coordinates.x1, coordinates.y0, gain_channel),
@@ -61,18 +71,16 @@ FloatImage reconstruct_gain_map(const FloatImage& base, const FloatImage& gain,
                       coordinates.tx);
         const float encoded =
             clamp_finite(std::lerp(top, bottom, coordinates.ty), 0.0F, 1.0F);
-        const float min_gain = rational_value(channel.gain_min);
-        const float max_gain = rational_value(channel.gain_max);
-        const float gamma = rational_value(channel.gamma);
-        const float base_offset = rational_value(channel.base_offset);
-        const float alt_offset = rational_value(channel.alternate_offset);
         const float log_gain =
-            std::lerp(min_gain, max_gain,
-                      std::pow(encoded,
-                               1.0F / std::max(gamma, 1.0e-6F)));
-        const float reconstructed = (base.at(x, y, c) + base_offset) *
-                                        std::exp2(log_gain * weight) -
-                                    alt_offset;
+            std::lerp(channel.min_gain, channel.max_gain,
+                      std::pow(encoded, channel.inverse_gamma));
+        multipliers[gain_channel] = std::exp2(log_gain * weight);
+      }
+      for (unsigned c = 0; c < 3; ++c) {
+        const auto gain_channel = gain.channels == 1 ? 0U : c;
+        const auto& channel = channels[gain_channel];
+        const float reconstructed = (base.at(x, y, c) + channel.base_offset) *
+                                        multipliers[gain_channel] - channel.alt_offset;
         if (reconstructed < 0.0F) {
           ++row_clamp_values[y];
           pixel_clamped = true;

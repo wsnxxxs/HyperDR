@@ -1799,3 +1799,15 @@ html.prefs-open body {
   .stage-status { border: 1px solid ButtonBorder; }
   :focus-visible { outline-color: Highlight; }
 }
+
+/* Editing and export history are available on both the desktop and phone rail. */
+.edit-history { display: flex; gap: 20px; padding: 0 0 14px; }
+.export-history { display: grid; gap: 10px; padding-top: 14px; }
+.export-history[hidden] { display: none; }
+.export-history label { display: grid; gap: 8px; font-size: 12px; }
+.export-history select {
+  width: 100%; min-width: 0; padding: 9px; border-radius: 8px;
+  color: inherit; background: var(--surface-card); border: 1px solid var(--line);
+  font: inherit;
+}
+.export-history .link-button { justify-self: start; }

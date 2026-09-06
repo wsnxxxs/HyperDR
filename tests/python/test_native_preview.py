@@ -160,7 +160,7 @@ class NativePreviewFrontendContractTests(unittest.TestCase):
         # Pinned controls stay out of the persisted set either way, so an
         # export cannot drift from command.py's PANEL_DEFAULTS.
         self.assertIn('control.group !== "pinned"', MAIN)
-        self.assertIn("...defaultSettings(store.get().encoding)", STAGE)
+        self.assertIn("prefs.get().rememberAdjustments ? {} : defaultSettings(store.get().encoding)", STAGE)
 
     def test_native_float_planes_do_not_use_retired_sdr_display_buffers(self):
         self.assertIn("image.frame = preview;", STAGE)

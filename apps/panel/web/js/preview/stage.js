@@ -518,6 +518,7 @@ export function mountStage({ toast }) {
   }
 
   async function load({ resetOriginal = false } = {}) {
+    clearTimeout(nativeReloadTimer);
     const sessionId = store.get().sessionId;
     const epoch = invalidateImage();
     if (!sessionId) { clear(); reportInitialCapability(); return; }
@@ -628,7 +629,7 @@ export function mountStage({ toast }) {
         // All image adjustments are image-scoped. Do not carry a previous
         // photograph's grade into a newly uploaded image. Keep the selected
         // output format, which is a workflow choice rather than a grade.
-        ...defaultSettings(store.get().encoding),
+        ...(prefs.get().rememberAdjustments ? {} : defaultSettings(store.get().encoding)),
         colorGamut: activeGamut,
         clampSrgb: activeGamut === "srgb" ? true : store.get().clampSrgb,
         previewReady: false,
@@ -653,7 +654,7 @@ export function mountStage({ toast }) {
 
   const canReplace = () => {
     const state = store.get();
-    return !state.uploading && !state.optimizing && !state.jobId;
+    return !state.restoring && !state.starting && !state.uploading && !state.optimizing && !state.jobId;
   };
   const nativeDropQueueKey = "__HYPERDR_NATIVE_FILE_DROPS__";
   const consumeNativeDrop = () => {
@@ -662,7 +663,7 @@ export function mountStage({ toast }) {
     // Keep a native drop queued until the boot capability request completes;
     // otherwise a very quick drop after launch would be mistaken for a browser
     // page that does not support the desktop bridge.
-    if (!Array.isArray(queued) || !capabilities) return;
+    if (!Array.isArray(queued) || !capabilities || store.get().restoring) return;
     globalThis[nativeDropQueueKey] = [];
     if (!canReplace() || !capabilities.nativePathInput) return;
     const path = queued.find((value) => typeof value === "string" && value);
@@ -671,7 +672,7 @@ export function mountStage({ toast }) {
   // Rust queues before dispatching, so this also handles a drop that arrived
   // during panel initialization.
   window.addEventListener("hyperdr:native-file-drop", consumeNativeDrop);
-  store.watch("capabilities", consumeNativeDrop);
+  store.watchAny(["capabilities", "restoring"], consumeNativeDrop);
   consumeNativeDrop();
   /* What the picker offers and what the hint promises both come from the
    * converter's own extension table, served in /api/state. The markup used to
@@ -834,7 +835,7 @@ export function mountStage({ toast }) {
      "colorGamut", "clampSrgb",
      ...AI_POST_KEYS],
     (state, _previous, changed) => {
-      if (!store.get().sessionId) return;
+      if (!state.sessionId || state.restoring || state.uploading) return;
       // AI post controls are independent from the mathematical mode. A hidden
       // value change must not cause a native decode while the manual preview
       // is active; once AI is selected the same controls invalidate its frame.
@@ -849,12 +850,16 @@ export function mountStage({ toast }) {
   /* Every other control acts on the decoded pixels the browser already holds,
    * so a redraw is enough. Highlight recovery acts *during* the RAW decode, so
    * the pixels themselves are stale and the preview has to be fetched again. */
-  store.watch("highlightRecovery", (mode) => {
+  store.subscribe((state, _previous, changed) => {
+    if (!changed.includes("highlightRecovery")) return;
     modelGain = null;
     analysis.modelGain = null;
     image.original = null;
-    store.set({ previewOptimized: false, modelGainReady: false });
-    if (store.get().sessionId) load({ resetOriginal: true });
+    store.set({ modelGainReady: false,
+      ...(!changed.includes("previewOptimized") && !state.restoring
+        ? { previewOptimized: false } : {}),
+    });
+    if (state.sessionId && !state.restoring && !state.uploading) load({ resetOriginal: true });
   });
 
   async function optimize() {

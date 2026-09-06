@@ -73,3 +73,14 @@ web/
     右栏那些**是**转换参数，两者不要混。
 
 11. **`group: "pinned"` 不是死代码，别删。** `schema.js` 里 `contrast` 与 `vibrance` 没有控件，但仍然进 store、进 `OPTION_KEYS`、进 `/api/run`。`curve-math.js` 拿 `contrast` 当参数，`stage/scope/mask` 都 watch 它——真删掉的话色调曲线会拿到 `undefined`。同时 `command.py` 的 `PANEL_DEFAULTS` 对这两个键的值与面板默认值一致，所以"面板不发送"和"面板发送默认值"导出结果相同；改任何一边前先对齐另一边。
+
+## Recoverable editing workflow
+
+`core/workspace.js` saves the current tab's session and validated settings and
+restores them through `/api/workspace`. `settings/history.js` owns photo-scoped
+undo/redo; `history-controls.js` binds buttons and shortcuts. `run/export-history.js`
+selects immutable exports and reapplies their settings. The runner reconnects to
+an active server job after refresh and preserves the previous result during retries.
+
+Run `node tests/js/history_test.mjs` from the repository root for the editing
+history behavior check, alongside the existing Python and frontend contract checks.

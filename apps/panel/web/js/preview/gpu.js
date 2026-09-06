@@ -160,7 +160,8 @@ export async function createHdrRenderer(canvas, onDeviceLost) {
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
     const rgba = channels === 1 ? values : rgbaPlane(values, width, height), rowBytes = width * (channels === 1 ? 4 : 16);
     const bytesPerRow = Math.ceil(rowBytes / 256) * 256;
-    let source = new Uint8Array(rgba.buffer);
+    // Compact gain planes can be views into the packet after its header/base.
+    let source = new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength);
     if (bytesPerRow !== rowBytes) {
       const padded = new Uint8Array(bytesPerRow * height);
       for (let y = 0; y < height; y++) padded.set(source.subarray(y*rowBytes,(y+1)*rowBytes), y*bytesPerRow);

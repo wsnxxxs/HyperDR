@@ -152,7 +152,10 @@ export const CONTROLS = [
     help: "ctrl.areaCoverage.help",
   },
   {
-    key: "highlightRecovery", kind: "segmented", group: "advanced", label: "ctrl.highlightRecovery.label",
+    // RAW recovery is a decode policy, not an HDR strength control. Keep Blend
+    // pinned for preview/export and normalize older saved photo settings to it.
+    // Expert overrides remain available through --highlight-recovery.
+    key: "highlightRecovery", kind: "segmented", group: "pinned", label: "ctrl.highlightRecovery.label",
     default: "blend", mask: null,
     help: "ctrl.highlightRecovery.help",
     choices: [["blend", "ctrl.highlightRecovery.blend"],

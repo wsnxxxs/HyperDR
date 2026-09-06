@@ -26,12 +26,10 @@ svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width:
 .welcome h1 span { color: var(--ink-muted); }
 .intro { margin: 14px 0 0; font-size: var(--text-xs); line-height: 1.9; color: var(--ink-muted); }
 .import-actions { display: grid; gap: 10px; padding-top: 12px; }
-.primary, .secondary { width: 100%; min-height: 48px; border-radius: var(--radius-md); border: 0; }
+.primary { width: 100%; min-height: 48px; border-radius: var(--radius-md); border: 0; }
 .primary { display: flex; align-items: center; gap: 12px; padding: 0 20px; background: var(--accent); color: var(--accent-ink); font-size: var(--text); }
 .primary svg { width: 20px; height: 20px; }
 .button-arrow { margin-left: auto; font-size: 23px; font-weight: 300; }
-.secondary { background: var(--surface-card); font-size: var(--text-xs); }
-.secondary span { margin-left: 12px; font-size: var(--text-xs); letter-spacing: .4px; color: var(--ink-muted); }
 .import-hint { margin: 3px 0 0; text-align: center; font-size: var(--text-xs); line-height: 1.8; color: var(--ink-muted); }
 .workflow { display: flex; justify-content: space-between; list-style: none; padding: 26px 2px; margin: 24px 0 0; border-top: 1px solid var(--line); }
 .workflow li { font-size: var(--text-xs); color: var(--ink-muted); }
@@ -83,10 +81,7 @@ body.fullscreen .viewer-tools { bottom: calc(14px + env(safe-area-inset-bottom))
 @media (min-width: 700px) { .phone-shell { padding: 0 38px; } .welcome { padding-top: 35px; } .empty-visual { margin-block: 18px; } }
 
 .primary:hover:not(:disabled) { background: var(--accent-hover); }
-.secondary { border: 1px solid var(--line-strong); }
-.secondary:hover:not(:disabled) { background: var(--surface-hover); }
-.primary:disabled, .secondary:disabled { background: var(--surface-sunken); color: var(--ink-disabled); border: 1px solid var(--line); }
-.secondary:disabled span { color: inherit; }
+.primary:disabled { background: var(--surface-sunken); color: var(--ink-disabled); border: 1px solid var(--line); }
 .brand { color: var(--ink-strong); letter-spacing: -.025em; }
 .brand small, .eyebrow { letter-spacing: 0; }
 .viewer-tools button:active { background: var(--accent); color: var(--accent-ink); }

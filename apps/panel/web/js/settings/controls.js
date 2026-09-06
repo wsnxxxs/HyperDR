@@ -114,17 +114,21 @@ function buildRange(control) {
   const hint = control.help ? el("p", { class: "field-hint", hidden: true }, t(control.help)) : null;
   const help = hint ? helpButton(control, hint) : null;
 
-  const name = el("b", {}, t(control.label));
-  const title = el("span", { class: "field-title" }, name, help);
+  const name = help || el("b");
+  if (help) help.classList.add("field-label-help");
+  const title = el("span", { class: "field-title" }, name);
   relabel(() => {
     setText(name, t(control.label));
     if (hint) setText(hint, t(control.help));
     input.setAttribute("aria-label", t(control.label));
   });
 
+  const scaleStart = el("span");
+  const scaleEnd = el("span");
+  const scale = control.group === "tone" || ["modelStrength", "aiBrightness", "aiHdrRange"].includes(control.key) ? el("div", { class: "range-scale", "aria-hidden": "true" }, scaleStart, scaleEnd) : null;
   const node = el("div", { class: "field field--range" },
     el("div", { class: "field-head" }, title, readout),
-    input,
+    input, scale,
     hint);
 
   input.addEventListener("input", () => store.set({ [control.key]: Number(input.value) }));
@@ -181,6 +185,13 @@ function buildRange(control) {
     if (lastMax !== maxText) { lastMax = maxText; input.max = maxText; }
     if (!dragging && input.value !== String(value)) input.value = String(value);
     setText(readout, (control.format || String)(value));
+    if (scale) {
+      const ends = control.key === "brightness" ? [t("inspector.natural"), t("inspector.bright")]
+        : control.key === "hdrStrength" ? [t("inspector.soft"), t("inspector.vivid")]
+        : control.group === "model" ? [control.format(control.min), control.format(max)]
+        : [t("unit.stops", { value: "0" }), t("unit.stops", { value: String(max) })];
+      setText(scaleStart, ends[0]); setText(scaleEnd, ends[1]);
+    }
     const fill = ((value - control.min) / (max - control.min)) * 100;
     const fillText = `${Math.min(100, Math.max(0, fill)).toFixed(1)}%`;
     if (lastFill !== fillText) { lastFill = fillText; input.style.setProperty("--fill", fillText); }
@@ -202,21 +213,27 @@ function buildSegmented(control) {
     relabel(() => setText(button, t(labelKey)));
     return [value, button];
   });
+  const recovery = control.key === "highlightRecovery";
   const hint = control.help ? el("p", { class: "field-hint", hidden: true }, t(control.help)) : null;
-  const help = hint ? helpButton(control, hint) : null;
+  const help = hint && !recovery ? helpButton(control, hint) : null;
   const name = el("b", {}, t(control.label));
   const node = el("div", { class: "field" },
-    el("span", { class: "field-title" }, name, help),
+    recovery ? null : el("span", { class: "field-title" }, name, help),
     picker,
     hint);
   relabel(() => {
     setText(name, t(control.label));
     picker.setAttribute("aria-label", t(control.label));
-    if (hint) setText(hint, t(control.help));
+    if (hint) { setText(hint, t(recovery ? "inspector.recoveryNote" : control.help)); hint.hidden = !recovery; }
   });
   return {
     node,
     apply: (state) => {
+      if (recovery) {
+        const selected = control.choices.find(([id]) => id === state[control.key]);
+        setText(role("recovery-summary"), t(selected[1]));
+        role("recovery-summary").closest("summary").title = t(control.help);
+      }
       for (const [value, button] of buttons) {
         setPressed(button, value === state[control.key]);
       }
@@ -270,7 +287,9 @@ function mountEncoding({ toast } = {}) {
   const buttons = new Map();
 
   for (const entry of ENCODINGS) {
-    const button = el("button", { type: "button", "aria-pressed": "false" }, entry.label);
+    const descriptions = { adaptive: "Apple HDR", pq: "HDR10", hlg: "BT.2100", ultrahdr: "Google HDR", "avif-pq": "AVIF · PQ", "avif-hlg": "AVIF · HLG" };
+    const button = el("button", { type: "button", "aria-pressed": "false", "aria-label": entry.label },
+      el("strong", {}, entry.label), el("small", {}, descriptions[entry.id]));
     button.addEventListener("click", () => {
       const current = store.get().hdrRange;
       const aiCurrent = store.get().aiHdrRange;
@@ -301,71 +320,24 @@ function mountEncoding({ toast } = {}) {
 
 /* ── colour and gamut choices (lives in the output block) ──────────────── */
 
-const COLOR_HINTS = {
-  srgb: "out.colorHint.srgb",
-  p3: "out.colorHint.p3",
-  p3Clamped: "out.colorHint.p3Clamped",
-  rec2020: "out.colorHint.rec2020",
-  rec2020Clamped: "out.colorHint.rec2020Clamped",
-};
-
-function resolveColorHint(colorGamut, clampSrgb) {
-  if (colorGamut === "srgb") return COLOR_HINTS.srgb;
-  if (colorGamut === "p3") return clampSrgb ? COLOR_HINTS.p3Clamped : COLOR_HINTS.p3;
-  if (colorGamut === "rec2020") return clampSrgb ? COLOR_HINTS.rec2020Clamped : COLOR_HINTS.rec2020;
-  return COLOR_HINTS.srgb;
-}
-
 function mountColorGamut() {
   const gamut = role("color-gamut");
-  const clamp = role("clamp-srgb");
   const hint = role("color-hint");
-  const buttons = new Map();
-
-  for (const entry of COLOR_GAMUTS) {
-    const button = el("button", {
-      type: "button", "aria-pressed": "false",
-      title: t(entry.hint),
-    }, entry.label);
-    relabel(() => { button.title = t(entry.hint); });
-    button.addEventListener("click", () => {
-      const current = store.get();
-      if (current.colorGamut === entry.id) return;
-      if (entry.id === "srgb") {
-        store.set({ colorGamut: "srgb", clampSrgb: true });
-      } else {
-        // When switching from sRGB to wide gamut, default to unclamped wide color
-        // so the user immediately gets the wide gamut they selected.
-        const clampSrgb = current.colorGamut === "srgb" ? false : current.clampSrgb;
-        store.set({ colorGamut: entry.id, clampSrgb });
-      }
-    });
-    buttons.set(entry.id, button);
-    gamut.append(button);
-  }
-
-  clamp.addEventListener("click", () => {
-    const state = store.get();
-    if (state.colorGamut === "srgb") return;
-    store.set({ clampSrgb: !state.clampSrgb });
-  });
-
-  const syncState = (state) => {
-    const isSrgb = state.colorGamut === "srgb";
-    for (const [id, button] of buttons) {
-      setPressed(button, id === state.colorGamut);
-    }
-    const effectivelyClamped = isSrgb || Boolean(state.clampSrgb);
-    setPressed(clamp, effectivelyClamped);
-    clamp.disabled = isSrgb;
-    clamp.title = isSrgb ? t("out.clampSrgbLocked") : t("out.clampSrgbHint");
-    if (hint) {
-      setText(hint, t(resolveColorHint(state.colorGamut, state.clampSrgb)));
-    }
+  const current = el("button", { type: "button", "aria-pressed": "false" });
+  const limited = el("button", { type: "button", "aria-pressed": "false" });
+  gamut.append(current, limited);
+  current.addEventListener("click", () => store.set({ clampSrgb: false }));
+  limited.addEventListener("click", () => store.set({ clampSrgb: true }));
+  const sync = (state) => {
+    setText(current, t("editor.currentGamut"));
+    setText(limited, t("out.clampSrgb"));
+    setPressed(current, !state.clampSrgb);
+    setPressed(limited, Boolean(state.clampSrgb));
+    const label = COLOR_GAMUTS.find(({ id }) => id === state.colorGamut)?.label || "sRGB";
+    setText(hint, state.clampSrgb ? t("editor.limitedHint") : t("editor.currentGamutHint", { gamut: label }));
   };
-
-  store.watchAny(["colorGamut", "clampSrgb"], syncState, { immediate: true });
-  relabel(() => syncState(store.get()));
+  store.watchAny(["colorGamut", "clampSrgb"], sync, { immediate: true });
+  relabel(() => sync(store.get()));
 }
 
 /* ── reset ──────────────────────────────────────────────────────────── */
@@ -403,10 +375,12 @@ export function mountControls({ toast } = {}) {
     // `pinned` controls seed the store and ride along in the run payload but
     // have no widget; see the note above CONTROLS in schema.js.
     if (control.group === "pinned") continue;
-    const container = containers.get(control.group);
+    const container = ["aiContrast", "aiShadows", "aiHighlights", "aiExpansionStart"].includes(control.key)
+      ? role("group-model-detail") : containers.get(control.group);
     if (!container) continue;
     const widget = BUILDERS[control.kind](control);
     container.append(widget.node);
+    relabels.push(() => widget.apply(store.get()));
     store.watchAny(widget.watches, widget.apply, { immediate: true });
   }
 
@@ -424,5 +398,12 @@ export function mountControls({ toast } = {}) {
     }
   }, { immediate: true });
 
+  const modeNote = role("mode-note");
+  const syncModeNote = () => setText(modeNote, store.get().previewOptimized ? t("inspector.aiNote") : t("inspector.manualNote"));
+  store.watch("previewOptimized", syncModeNote, { immediate: true });
+  relabels.push(syncModeNote);
+  for (const group of document.querySelectorAll(".parameter-group")) {
+    group.addEventListener("toggle", () => { if (!group.open) store.set({ maskKey: null }); });
+  }
   onLocaleChange(() => { for (const fn of [...relabels]) fn(); });
 }

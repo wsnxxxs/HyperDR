@@ -59,3 +59,12 @@ Windows native file drops are forwarded as absolute paths to the desktop-only
 `/api/native-input` route. The panel validates the source and keeps it as the
 session input without copying the RAW into the HTTP workspace. Browser and LAN
 servers keep the existing streamed-upload path.
+
+## Phone workbench
+
+The title-bar phone button starts a separate LAN listener on demand (8757, or
+another available port). The desktop server stays on loopback and retains its
+native-path input. The phone has its own UI, upload handoff, SSE subscription and
+result downloads. Closing the connection stops the LAN listener; closing the
+app stops both servers. Existing trusted TLS certificates are loaded from the
+HyperDR user configuration directory. See [phone workbench](../../docs/iphone-lan.md).

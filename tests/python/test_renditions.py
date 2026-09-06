@@ -18,7 +18,7 @@ class RenditionTests(unittest.TestCase):
         self.sid = session.create_session()
         data = b"\x89PNG\r\n\x1a\n" + b"x" * 64
         session.save_upload(self.sid, "photo.png", io.BytesIO(data), len(data))
-        self.context = api.Context(output_selections={})
+        self.context = api.Context()
 
     def tearDown(self):
         self.root.stop()

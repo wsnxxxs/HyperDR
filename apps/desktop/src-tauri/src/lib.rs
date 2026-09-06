@@ -177,7 +177,10 @@ fn create_splash_window(app: &AppHandle) -> Result<(), String> {
             }
         });
     #[cfg(windows)]
-    let window = window.additional_browser_args(WEBVIEW2_BROWSER_ARGS);
+    let window = window
+        .additional_browser_args(WEBVIEW2_BROWSER_ARGS)
+        .decorations(false)
+        .initialization_script("window.__HYPERDR_FRAMELESS__ = true;");
     let window = window.build().map_err(|error| error.to_string())?;
     window.on_window_event(move |event| {
         if matches!(event, WindowEvent::CloseRequested { .. }) {

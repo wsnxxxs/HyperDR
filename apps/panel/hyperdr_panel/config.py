@@ -28,10 +28,6 @@ def _frozen_resource_root() -> Path:
 RESOURCE_ROOT = _frozen_resource_root() if IS_FROZEN else GUI_DIR.parent.parent
 REPO_ROOT = RESOURCE_ROOT
 
-# The launcher is re-invoked in a subprocess for the native file picker so that
-# tkinter always owns its own main thread.
-LAUNCHER = Path(sys.executable) if IS_FROZEN else GUI_DIR / "hyperdr_gui.py"
-
 # Web root: a single source of truth for the front-end, also openable directly
 # (double-click web/index.html) for an offline look at the interface, which is
 # why its pages reference assets relatively and the CSP forbids `<base>`.

@@ -1,136 +1,80 @@
-# 在 iPhone Safari 中使用 HyperDR
+# 手机连接工作台
 
-HyperDR 现在可以由 Windows 电脑在局域网内提供服务。iPhone 负责选择和上传照片、调节参数、查看预览以及下载结果；RAW 解码和 HEIC 编码仍在电脑上完成。
+电脑负责编辑和处理，手机负责导入、同步预览和保存成品。手机使用独立的
+/phone 页面，不加载桌面编辑器的布局、调节栏或状态持久化逻辑。
 
-## 首次使用
+## 使用流程
 
-想要 iPhone 上的**真 HDR 实时预览**，先双击一次 `Setup-HTTPS.bat`，按它打印的两步在 iPhone 上安装并信任根证书，之后每次双击 `Start.bat` 即可。详见下方“配置受信任 HTTPS”。
+1. 打开 HyperDR 桌面应用，或双击 Start.bat 打开本机编辑器。
+2. 点击标题栏的 **连接手机**。手机和电脑连接同一 Wi-Fi，扫描二维码。
+   多网卡电脑可以在连接窗口里切换地址；Windows 防火墙应允许程序在专用网络通信。
+3. 手机选择 **从相册选择** 或 **从文件选择**。照片直接上传到运行 HyperDR 的电脑，
+   无需先通过其他软件传文件。上传完成后，电脑自动载入这张照片。
+4. 在电脑调整参数，手机自动显示更新后的画面。手机支持按住看原图、双指缩放、
+   拖动、适合屏幕和全屏预览。新画面就绪前保留旧画面，并明确显示更新状态。
+5. 在电脑导出。完成后手机的 **完成的照片** 列表提供 **保存到手机**。
+   保存的是正式导出的文件，不是预览截图；浏览器通常先保存到下载目录，
+   如需放进系统相册，再通过系统分享菜单保存。
+6. 手机点 **换一张照片**，或在电脑导入另一张。两端一起切换，无需再次扫码。
+   本次服务运行期间的最近 30 个成品仍可下载。
 
-只想上传、转换、下载，不需要实时 HDR 预览的，可以跳过这一步，直接用下面的 HTTP 模式。
+手机刷新或暂时离开页面后，会重新订阅当前照片和预览。电脑编辑器刷新也会恢复
+本标签页的连接。关闭连接或重启处理服务后，需使用新二维码；不会保留长期配对凭据。
+上传被打断时可以取消未完成的上传并重新选择，暂不支持断点续传。
 
-## 快速启动（HTTP）
+一次编辑一张照片。电脑导出、AI 优化或任一端上传期间暂不接受换图。
+手机只操作导入、查看和下载，画面参数由电脑统一编辑。
 
-1. 确认 iPhone 与电脑连接到同一个可信 Wi-Fi。
-2. 双击项目根目录的 `Start.bat`。
-3. Windows 防火墙询问时，只允许“专用网络”。
-4. 启动窗口会打印一个带临时访问口令的 `iPhone 地址`，例如：
+## HDR 与 HTTPS
 
-   ```text
-   http://<LAN_IP>:8756/?token=xxxxxxxx
-   ```
+普通 HTTP 连接支持手机上传、SDR 预览和成品下载。真 HDR 画布需要：
 
-5. 在 iPhone Safari 中打开完整地址。首次成功登录后，地址栏中的口令会自动移除。
+- 受信任的 HTTPS 安全上下文；
+- 支持 WebGPU HDR 的浏览器与 HDR 屏幕；
+- 运行时通过扩展 Display P3 浮点画布校验。
 
-HTTP 模式可以上传、转换、下载并查看 SDR 示意预览。Safari 的 WebGPU 真 HDR 实时画布需要受信任的 HTTPS；最终 HEIC 仍可下载并在“照片”中以 HDR 查看。
+不满足条件时，页面明确标记 **SDR 预览**，正式 HDR 导出不受影响。
 
-任务文件保存在 `hdr-workspace`，默认 24 小时后在下一次启动时清理。每个文件默认最多 256 MB，每个任务最多 1 GB；可以分别通过 `HYPERDR_MAX_UPLOAD_MB`、`HYPERDR_MAX_SESSION_MB` 和 `HYPERDR_SESSION_HOURS` 调整。
+### 首次配置
 
-## 配置受信任 HTTPS
+双击根目录的 Setup-HTTPS.bat。脚本使用 mkcert 为本电脑生成独立的 CA 和
+服务器证书，证书存放于 %LOCALAPPDATA%\HyperDR\tls，根证书导出到桌面。
+把 HyperDR-rootCA.crt 传到 iPhone 并完成两步：
 
-Safari 的 WebGPU 只在安全上下文中开放，所以真 HDR 需要一张**受信任的**证书。点“继续访问”忽略警告没有用：例外不构成安全上下文。
+1. 打开文件，在“设置 → 已下载描述文件”中安装。
+2. 在“设置 → 通用 → 关于本机 → 证书信任设置”中启用完全信任。
 
-### 推荐做法：Setup-HTTPS.bat
+只安装描述文件还不够。浏览器忽略证书警告也不能代替可信安全上下文。
+配置完成后，在电脑关闭手机连接再重新开启，然后扫描新二维码。
 
-双击项目根目录的 `Setup-HTTPS.bat`，它会自动完成：
+连接服务依次读取 HYPERDR_TLS_CERT / HYPERDR_TLS_KEY 环境变量和
+%LOCALAPPDATA%\HyperDR\tls\hyperdr.pem、hyperdr-key.pem。
+证书不可用时以 HTTP 启动，连接窗口会说明当前仅支持 SDR 预览。
 
-1. 检测 `mkcert`，缺失时通过 winget 安装；
-2. 创建（或复用）**只属于这台电脑**的本地根证书颁发机构；
-3. 按当前局域网 IPv4 签发服务器证书，写入 `%LOCALAPPDATA%\HyperDR\tls`，并把私钥权限收紧为仅当前 Windows 用户；
-4. 把根证书导出到桌面，文件名 `HyperDR-rootCA.crt`。
+### 地址变化与续期
 
-然后把桌面上的 `HyperDR-rootCA.crt` 传到 iPhone（隔空投送、邮件、聊天工具均可，它只含公钥），在 iPhone 上完成**两步**：
+证书必须覆盖二维码中的局域网 IP。IP 改变或证书临近过期时，可重新运行
+Setup-HTTPS.bat；它复用本机 CA，因此 iPhone 不必重复安装根证书。
+通过 Start.bat 启动时，已有启动脚本也会检查并维护其管理的证书。
+桌面应用的连接按钮只读取证书，不会自动安装工具或修改系统证书信任。
 
-1. 打开文件并安装描述文件：设置 → 已下载描述文件 → 安装；
-2. 设置 → 通用 → 关于本机 → 证书信任设置，找到这个证书，打开“启用完全信任”。
+也可手动使用 mkcert 签发覆盖当前局域网 IP、127.0.0.1 和 localhost 的证书，
+将证书和私钥写入上述位置。不要把 CA 私钥、服务器私钥传到手机或包含在发布包中。
+每台电脑生成自己的 CA。
 
-**只做第 1 步而不做第 2 步，Safari 仍会报证书错误。** 这是最常见的失败原因。
+## 实现结构
 
-配置完成后双击 `Start.bat` 即可，不需要任何参数。
+- 本机编辑器默认监听 127.0.0.1:8756；连接按钮按需开启独立的局域网服务，
+  优先使用 8757，占用时自动选择其他端口。关闭连接会停止该监听器。
+- hyperdr_panel/workbench.py 保存共享照片、参数、上传交接和成品记录。
+  每次只有一个桌面窗口控制工作台；另一个窗口显式连接时会接管。
+- web/js/ui/phone-workbench.js 负责桌面连接窗口、二维码、状态发布和手机照片接收。
+- web/phone/ 是独立的手机 HTML、CSS 和 JavaScript，使用 SSE 接收状态更新。
+- 手机直接领取电脑已生成的原生预览包，不发起第二次 RAW 渲染。两端只共享
+  二进制解析和 HDR / SDR 渲染底层，手机不加载桌面编辑器。
+- 手机服务使用独立口令，不能调用桌面文件路径、调参或启动转换接口；
+  下载仅限本工作台已发布的成品。
 
-发布包里不包含任何根证书或私钥。每台电脑都必须生成自己的 CA——如果所有安装共享同一个根 CA 私钥，任何拿到它的人都能对信任了该 CA 的手机伪造任意网站的证书。
-
-### 手动做法
-
-如果不想用向导，也可以自己生成。证书**不要**放在程序目录或其附近；启动脚本固定从下面这个位置读取，与发布包解压到哪里无关：
-
-```text
-%LOCALAPPDATA%\HyperDR\tls\hyperdr.pem
-%LOCALAPPDATA%\HyperDR\tls\hyperdr-key.pem
-```
-
-先确认电脑当前的局域网 IPv4 地址（下面记作 `<LAN_IP>`），然后生成证书：
-
-```powershell
-mkcert -install
-mkdir "$env:LOCALAPPDATA\HyperDR\tls" -Force
-mkcert -cert-file "$env:LOCALAPPDATA\HyperDR\tls\hyperdr.pem" `
-       -key-file  "$env:LOCALAPPDATA\HyperDR\tls\hyperdr-key.pem" `
-       <LAN_IP> 127.0.0.1 localhost
-mkcert -CAROOT
-```
-
-把 `mkcert -CAROOT` 所在目录中的 `rootCA.pem` 按上面的两步传到 iPhone 并信任。
-
-### 证书查找顺序
-
-启动脚本按下面的顺序取第一个可用的证书对：
-
-1. `-Certificate` / `-PrivateKey` 命令行参数
-2. `HYPERDR_TLS_CERT` / `HYPERDR_TLS_KEY` 环境变量
-3. `%LOCALAPPDATA%\HyperDR\tls\`
-4. `文档\HyperDR-Cert\`（0.2.2 之前的位置，仅在首次启动时自动复制到 3，不会删除原文件）
-
-如果只想临时指定一对证书：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\start_hyperdr_lan.ps1 `
-  -Certificate C:\安全目录\hyperdr.pem `
-  -PrivateKey C:\安全目录\hyperdr-key.pem
-```
-
-### IP 变化后
-
-证书里的 IP 必须与 iPhone 访问的地址一致。路由器重新分配 IP 后，`Start.bat` 会检测到当前地址不在证书覆盖范围内，**用同一个本地 CA 自动重新签发**服务器证书并在窗口中说明。只有服务器证书被替换，iPhone 上已安装的根证书无需任何操作。
-
-自动重签只作用于 `%LOCALAPPDATA%\HyperDR\tls` 下由 HyperDR 管理的那对证书。通过 `-Certificate` / `-PrivateKey` 或环境变量手动指定的证书只会被检查并提示，不会被改动。
-
-如果这台电脑上找不到 `mkcert`，启动窗口会提示运行 `Setup-HTTPS.bat`。也可以手动重签：
-
-```powershell
-mkcert -cert-file "$env:LOCALAPPDATA\HyperDR\tls\hyperdr.pem" `
-       -key-file  "$env:LOCALAPPDATA\HyperDR\tls\hyperdr-key.pem" `
-       新的IP 127.0.0.1 localhost
-```
-
-想彻底避免这件事，请在路由器里为这台电脑设置 DHCP 保留或静态 IP。
-
-证书临近过期（剩余不足 30 天）时同样会自动重签。
-
-### 备份与安全
-
-根 CA 的私钥（`mkcert -CAROOT` 目录中的 `rootCA-key.pem`）是整套配置里**唯一不可再生**的文件。丢失后必须重新生成 CA，并在每一台 iPhone 上重装根证书。建议离线备份，且不要放进会被云端同步的目录——这也是证书不再存放于“文档”的原因之一，那里可能被 OneDrive 重定向。
-
-服务器私钥 `hyperdr-key.pem` 的权限被收紧为仅当前 Windows 用户可访问。私钥不要复制到 iPhone，也不要提交到版本库；仓库的 `.gitignore` 已排除 `*.pem`、`*.key`、`*.pfx`、`*.p12`、`*.crt`、`*.cer`。
-
-Safari 应使用启动窗口打印的 `https://局域网地址:端口/?token=...`，证书中的 IP 必须与访问地址一致。
-
-## HDR 预览层级
-
-- 滑块拖动：在受信任 HTTPS、HDR 屏幕和 Safari 26+ 环境中使用 WebGPU `rgba16float`
-  扩展 Display P3 输出。每次建立 HDR 渲染器都会在浏览器 GPU 上用正式 shader 做一次像素读回，
-  验证非线性 P3 编码及大于 1 的扩展值未被画布截断；不通过时明确回退到 WebGL2 GPU
-  加速的 SDR 示意。该门禁验证浏览器画布像素，物理屏幕的峰值亮度仍由系统 EDR 与面板能力决定。
-- 面板按预览框与设备像素比在 960 / 1440 / 2048 三档中请求；不具备 WebGPU HDR
-  前置条件时最长边不超过 1280 像素，避免纯 JavaScript CPU 回退拖慢滑杆。
-- 状态栏与画面角标会明确显示“真 HDR”“SDR 预览”或“原图”，不会再用 `HDR ON` 混淆真实渲染能力。
-- “精确 HDR 预览”：调用与正式转换相同的 RAW、高光恢复、色调和增益图管线，生成 Adaptive HDR HEIC。Safari 26+ 可在网页内显示；不支持 HEIC 网页显示的浏览器会保留下载按钮。
-- “开始转换”：按所选 Adaptive/Ultra HDR/PQ/HLG 模式生成最终文件。对 iPhone 预览和分享，优先使用“增益图”。
-
-## 安全边界
-
-- 客户端不能提交 Windows 文件路径、输出目录或可执行文件路径。
-- 上传和输出限制在随机任务目录中。
-- 服务启动时生成临时访问口令；也可以通过脚本的 `-AccessToken` 固定口令。
-- 只应在可信的家庭或工作专用网络中开放端口，不要做路由器公网端口映射。
-
-如果需要手动创建 Windows 防火墙规则，请把范围限制为 TCP 8756 和“专用”配置文件；完成后也可删除该规则。
+任务文件仍存于 hdr-workspace，默认空闲 24 小时后清理。默认单文件上限
+256 MB，可通过 HYPERDR_MAX_UPLOAD_MB、HYPERDR_MAX_SESSION_MB 和
+HYPERDR_SESSION_HOURS 调整。手机列表中的过期结果需重新导出。

@@ -75,6 +75,7 @@ export const store = createStore({
   /** @type {{name: string, size: number} | null} */
   file: null,
   uploading: false,
+  phoneUploading: false,
   restoring: false,
   exports: [],
   starting: false,
@@ -84,10 +85,15 @@ export const store = createStore({
   result: null,
   /** Whether the current file has a preview matching the current settings. */
   previewReady: false,
+  previewError: false,
 
   /* -- viewer ---------------------------------------------------------- */
   /** @type {"effect"|"original"|"split"} */
   viewMode: "effect",
+  /** Zoom relative to fit-to-window; panning is measured in CSS pixels. */
+  viewerZoom: 1,
+  viewerPanX: 0,
+  viewerPanY: 0,
   /** Wipe position in split mode, 0..1 of the image's displayed width. */
   splitRatio: 0.5,
   /** Transient press-and-hold compare; never persisted. */

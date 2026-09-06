@@ -63,8 +63,13 @@ function wireMask(trigger, control) {
 /* ── individual widgets ─────────────────────────────────────────────── */
 
 function helpButton(control, hintNode) {
+  /* `aria-expanded` on its own says something is open without saying what.
+   * The key is unique per control, so it is the id, and the pairing survives
+   * a control being added or reordered in schema.js. */
+  hintNode.id = `field-hint-${control.key}`;
   const button = el("button", {
     class: "field-help", type: "button", "aria-expanded": "false",
+    "aria-controls": hintNode.id,
     "aria-label": `查看${control.label}说明`,
     title: control.mask ? "悬停显示预计作用区域；点击查看说明" : null,
   }, "?");
@@ -103,9 +108,6 @@ function buildRange(control) {
   const node = el("div", { class: "field field--range" },
     el("div", { class: "field-head" }, title, readout),
     input,
-    control.scale
-      ? el("div", { class: "field-scale" }, el("span", {}, control.scale[0]), el("span", {}, control.scale[1]))
-      : null,
     hint);
 
   input.addEventListener("input", () => store.set({ [control.key]: Number(input.value) }));
@@ -185,7 +187,7 @@ function buildSegmented(control) {
   const hint = control.help ? el("p", { class: "field-hint", hidden: true }, control.help) : null;
   const help = hint ? helpButton(control, hint) : null;
   const node = el("div", { class: "field" },
-    el("span", { class: "field-label field-title" }, control.label, help),
+    el("span", { class: "field-title" }, el("b", {}, control.label), help),
     picker,
     hint);
   return {
@@ -232,7 +234,7 @@ const BUILDERS = {
   number: buildNumber,
 };
 
-/* ── encoding select (lives in the dock, wired here with the settings) ── */
+/* ── encoding select (lives in the output block, wired here with settings) ── */
 
 function mountEncoding({ toast } = {}) {
   const container = role("encoding");
@@ -279,7 +281,7 @@ function mountResets({ toast } = {}) {
     armed = false;
     clearTimeout(armTimer);
     button.classList.remove("is-armed");
-    button.textContent = "重置全部";
+    button.textContent = "重置";
   };
   button.addEventListener("click", () => {
     // Two-step confirm: a stray click on a text button must not wipe a grade.
@@ -312,6 +314,9 @@ export function mountControls({ toast } = {}) {
     Object.entries(GROUP_CONTAINERS).map(([group, name]) => [group, role(name)]));
 
   for (const control of CONTROLS) {
+    // `pinned` controls seed the store and ride along in the run payload but
+    // have no widget; see the note above CONTROLS in schema.js.
+    if (control.group === "pinned") continue;
     const container = containers.get(control.group);
     if (!container) continue;
     const widget = BUILDERS[control.kind](control);

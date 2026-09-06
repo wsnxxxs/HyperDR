@@ -12,7 +12,9 @@
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/gainmap/reconstruct.hpp"
 #include "hyperdr/look/analysis.hpp"
+#include "hyperdr/codec/input_format.hpp"
 #include "internal/budget.hpp"
+#include "internal/decode_bytes.hpp"
 #include "internal/cicp.hpp"
 #include "internal/metadata.hpp"
 #include "internal/raw.hpp"
@@ -50,6 +52,8 @@ using codec::decode_raw;
 using codec::apply_exif;
 using codec::interleaved_rgb_to_linear_p3;
 using codec::normalize_orientation;
+using codec::keeps_preview_detail;
+using codec::preview_decode_floor;
 using codec::raster_budget_ok;
 using codec::transfer_headroom;
 using codec::SourceColor;
@@ -112,10 +116,15 @@ struct JpegDecodeOutput {
   unsigned int width{};
   unsigned int height{};
   // The reduction libjpeg actually applied, as num/denom. 8/8 means the image
-  // was decoded at full size; anything smaller means the budget forced a
-  // downscale and any dimension read from Exif no longer matches the pixels.
+  // was decoded at full size.
   unsigned int scale_num{8};
   unsigned int scale_denom{8};
+  // Whether the *budget* forced that reduction, as opposed to a preview caller
+  // asking for one. Only the first is a degradation: a preview that asked to be
+  // bounded got exactly what it asked for, and reporting it as a lost-resolution
+  // decode would make strict exports refuse ordinary files and make the panel
+  // show a degradation banner on every frame.
+  bool budget_limited{false};
   char message[JMSG_LENGTH_MAX]{};
 };
 
@@ -135,7 +144,7 @@ void set_message(char* target, std::size_t size, const char* text) {
 // Returns 0 on success. On failure `message` is populated and every buffer is
 // released.
 int jpeg_decode_rgb(const unsigned char* data, std::size_t size,
-                    JpegDecodeOutput* out) {
+                    std::uint32_t preview_max_edge, JpegDecodeOutput* out) {
   jpeg_decompress_struct info{};
   JpegError error{};
   info.err = jpeg_std_error(&error.base);
@@ -165,24 +174,45 @@ int jpeg_decode_rgb(const unsigned char* data, std::size_t size,
   // DCT gives us a cheap, exact power-of-two reduction for free. Ask libjpeg
   // for the largest 1/1, 1/2, 1/4, 1/8 scale that fits, which also shrinks the
   // decode itself -- at 1/8 libjpeg never materialises the full-size rows.
-  unsigned chosen_num = 0;
+  unsigned budget_num = 0;
   for (const unsigned num : {8U, 4U, 2U, 1U}) {
     info.scale_num = num;
     info.scale_denom = 8;
     jpeg_calc_output_dimensions(&info);
     if (raster_budget_ok(info.output_width, info.output_height)) {
-      chosen_num = num;
+      budget_num = num;
       break;
     }
   }
-  if (chosen_num == 0) {
+  if (budget_num == 0) {
     set_message(out->message, sizeof(out->message),
                 "image exceeds the pixel or memory budget even at 1/8 scale");
     jpeg_destroy_decompress(&info);
     return 1;
   }
+  // A preview caller takes the *smallest* scale that still clears the floor,
+  // never one the budget would not already have allowed. Ascending, so the
+  // first match is the cheapest decode that keeps enough detail.
+  unsigned chosen_num = budget_num;
+  const auto floor = preview_decode_floor(preview_max_edge);
+  if (floor != 0) {
+    for (const unsigned num : {1U, 2U, 4U, 8U}) {
+      if (num > budget_num) break;
+      info.scale_num = num;
+      info.scale_denom = 8;
+      jpeg_calc_output_dimensions(&info);
+      if (keeps_preview_detail(info.output_width, info.output_height, floor)) {
+        chosen_num = num;
+        break;
+      }
+    }
+  }
+  info.scale_num = chosen_num;
+  info.scale_denom = 8;
+  jpeg_calc_output_dimensions(&info);
   out->scale_num = chosen_num;
   out->scale_denom = 8;
+  out->budget_limited = budget_num != 8;
   jpeg_start_decompress(&info);
 
   const std::size_t stride = static_cast<std::size_t>(info.output_width) * 3;
@@ -230,10 +260,11 @@ int jpeg_decode_rgb(const unsigned char* data, std::size_t size,
   return 0;
 }
 
-DecodedImage decode_jpeg(const std::filesystem::path& path) {
-  const auto bytes = read_binary_file(path);
+DecodedImage decode_jpeg(const std::vector<std::uint8_t>& bytes,
+                         std::uint32_t preview_max_edge) {
   JpegDecodeOutput output{};
-  const int failed = jpeg_decode_rgb(bytes.data(), bytes.size(), &output);
+  const int failed =
+      jpeg_decode_rgb(bytes.data(), bytes.size(), preview_max_edge, &output);
   // Ownership transfers here, once the setjmp/longjmp region is behind us.
   const MallocBytes rgb(output.rgb);
   const MallocBytes icc(output.icc);
@@ -249,8 +280,7 @@ DecodedImage decode_jpeg(const std::filesystem::path& path) {
   auto result = from_interleaved_rgb(
       rgb.get(), output.width, output.height,
       static_cast<std::size_t>(output.width) * 3, 8, color);
-  result.decode.resolution_reduced =
-      output.scale_num != output.scale_denom;
+  result.decode.resolution_reduced = output.budget_limited;
 
   // Carry the portable photographic fields forward before normalising
   // orientation. The old path kept only Orientation and silently replaced
@@ -280,8 +310,11 @@ struct PngDecodeOutput {
   unsigned int height{};
   int bits{};
   // 1 when the image was decoded at full size; >1 is the integer box-average
-  // factor the raster budget forced.
+  // factor that was applied.
   std::uint32_t downscale{1};
+  // Whether the raster budget forced that factor, as opposed to a preview
+  // caller asking to be bounded. Only the first is a lost-resolution decode.
+  bool budget_limited{false};
   char message[256]{};
 };
 
@@ -306,7 +339,7 @@ void png_warn(png_structp, png_const_charp) {}
 // to 256 -- before the pipeline saw a single pixel, and no amount of 10-bit
 // output could bring the gradients back.
 int png_decode_rgb(const unsigned char* data, std::size_t size,
-                   PngDecodeOutput* out) {
+                   std::uint32_t preview_max_edge, PngDecodeOutput* out) {
   if (size < 8 || png_sig_cmp(data, 0, 8) != 0) {
     set_message(out->message, sizeof(out->message), "not a PNG file");
     return 1;
@@ -375,6 +408,17 @@ int png_decode_rgb(const unsigned char* data, std::size_t size,
       png_error(png, "budget");
     }
     ++factor;
+  }
+  out->budget_limited = factor > 1;
+  // A preview caller keeps averaging past that, but only while the result still
+  // clears the floor -- the last reduction belongs to the linear-light
+  // resampler, not to this one, which averages encoded samples.
+  if (const auto floor = preview_decode_floor(preview_max_edge); floor != 0) {
+    while (keeps_preview_detail((width + factor * 2 - 1) / (factor * 2),
+                                (height + factor * 2 - 1) / (factor * 2), floor) &&
+           factor < 64) {
+      factor *= 2;
+    }
   }
   if (factor > 1 && interlace_type != PNG_INTERLACE_NONE) {
     set_message(out->message, sizeof(out->message),
@@ -509,10 +553,11 @@ int png_decode_rgb(const unsigned char* data, std::size_t size,
   return 0;
 }
 
-DecodedImage decode_png(const std::filesystem::path& path) {
-  const auto bytes = read_binary_file(path);
+DecodedImage decode_png(const std::vector<std::uint8_t>& bytes,
+                        std::uint32_t preview_max_edge) {
   PngDecodeOutput output{};
-  const int failed = png_decode_rgb(bytes.data(), bytes.size(), &output);
+  const int failed =
+      png_decode_rgb(bytes.data(), bytes.size(), preview_max_edge, &output);
   const MallocBytes rgb(output.rgb);
   const MallocBytes icc(output.icc);
   if (failed != 0) {
@@ -526,7 +571,7 @@ DecodedImage decode_png(const std::filesystem::path& path) {
       static_cast<std::size_t>(output.width) * 3 * (output.bits == 16 ? 2U : 1U);
   auto result = from_interleaved_rgb(rgb.get(), output.width, output.height,
                                      stride, output.bits, color);
-  result.decode.resolution_reduced = output.downscale > 1;
+  result.decode.resolution_reduced = output.budget_limited;
   return result;
 }
 
@@ -588,6 +633,7 @@ bool has_heif_orientation_transform(const heif_context* context,
 
 DecodedImage decode_heif_rgb_handle(const heif_context* context,
                                     const heif_image_handle* handle,
+                                    std::uint32_t preview_max_edge,
                                     bool normalize_exif = true,
                                     std::uint16_t* exif_orientation = nullptr) {
   SourceColor color;
@@ -636,26 +682,36 @@ DecodedImage decode_heif_rgb_handle(const heif_context* context,
     // in place and release the oversized original before converting.
     const int full_width = heif_image_get_width(image.get(), heif_channel_interleaved);
     const int full_height = heif_image_get_height(image.get(), heif_channel_interleaved);
-    if (full_width > 0 && full_height > 0 &&
-        !raster_budget_ok(static_cast<std::uint64_t>(full_width),
-                          static_cast<std::uint64_t>(full_height))) {
-      std::uint32_t factor = 2;
+    if (full_width > 0 && full_height > 0) {
+      const auto wide = static_cast<std::uint64_t>(full_width);
+      const auto tall = static_cast<std::uint64_t>(full_height);
+      std::uint32_t factor = 1;
       while (factor <= 64 &&
-             !raster_budget_ok((static_cast<std::uint64_t>(full_width) + factor - 1) / factor,
-                               (static_cast<std::uint64_t>(full_height) + factor - 1) / factor)) {
+             !raster_budget_ok((wide + factor - 1) / factor, (tall + factor - 1) / factor)) {
         ++factor;
       }
       if (factor > 64) {
         throw std::runtime_error("HEIC image exceeds the pixel or memory budget");
       }
-      heif_image* scaled_raw = nullptr;
-      check_heif(heif_image_scale_image(
-                     image.get(), &scaled_raw,
-                     std::max(1, full_width / static_cast<int>(factor)),
-                     std::max(1, full_height / static_cast<int>(factor)), nullptr),
-                 "HEIC downscale");
-      image.reset(scaled_raw);
-      resolution_reduced = true;
+      // Only a budget-forced reduction is a degradation; a preview asked to be
+      // bounded got what it asked for.
+      resolution_reduced = factor > 1;
+      if (const auto floor = preview_decode_floor(preview_max_edge); floor != 0) {
+        while (factor < 64 &&
+               keeps_preview_detail((wide + factor * 2 - 1) / (factor * 2),
+                                    (tall + factor * 2 - 1) / (factor * 2), floor)) {
+          factor *= 2;
+        }
+      }
+      if (factor > 1) {
+        heif_image* scaled_raw = nullptr;
+        check_heif(heif_image_scale_image(
+                       image.get(), &scaled_raw,
+                       std::max(1, full_width / static_cast<int>(factor)),
+                       std::max(1, full_height / static_cast<int>(factor)), nullptr),
+                   "HEIC downscale");
+        image.reset(scaled_raw);
+      }
     }
   }
   int stride = 0;
@@ -715,7 +771,10 @@ DecodedImage decode_adaptive_heic(const std::vector<std::uint8_t>& bytes,
   // Exif-only orientation to the complete HDR result. Rotating the base before
   // sampling the gain grid would attach gain to the wrong parts of the image.
   std::uint16_t exif_orientation = 1;
-  auto result = decode_heif_rgb_handle(context, base_handle.get(), false,
+  // No preview reduction here: the gain grid below is rejected when it is
+  // larger than the base, and every Apple gain map is a fraction of its base's
+  // size, so shrinking the base would make an ordinary file look malformed.
+  auto result = decode_heif_rgb_handle(context, base_handle.get(), 0, false,
                                        &exif_orientation);
   if (base_only) {
     normalize_orientation(result, exif_orientation);
@@ -775,9 +834,8 @@ DecodedImage decode_adaptive_heic(const std::vector<std::uint8_t>& bytes,
   return result;
 }
 
-DecodedImage decode_heic(const std::filesystem::path& path,
-                         bool base_only) {
-  const auto bytes = read_binary_file(path);
+DecodedImage decode_heic(const std::vector<std::uint8_t>& bytes, bool base_only,
+                         std::uint32_t preview_max_edge) {
   std::unique_ptr<heif_context, ContextDeleter> context(heif_context_alloc());
   if (!context) throw std::runtime_error("cannot allocate HEIC decoder");
   check_heif(heif_context_read_from_memory_without_copy(context.get(), bytes.data(), bytes.size(), nullptr),
@@ -790,50 +848,78 @@ DecodedImage decode_heic(const std::filesystem::path& path,
   check_heif(heif_context_get_primary_image_handle(context.get(), &handle_raw),
              "HEIC primary image");
   std::unique_ptr<heif_image_handle, HandleDeleter> handle(handle_raw);
-  return decode_heif_rgb_handle(context.get(), handle.get());
+  return decode_heif_rgb_handle(context.get(), handle.get(), preview_max_edge);
 }
 
 }  // namespace
 
 DecodedImage decode_image(const std::filesystem::path& path, const RawDecodeOptions& options) {
   const auto ext = lower_extension(path);
+
+  // RAW stays name-decided, and has to. Most RAW containers *are* TIFF, so a
+  // signature cannot tell a .dng from any other TIFF, and LibRaw's memory
+  // admission works from the path rather than from a buffer we would otherwise
+  // have to hold alongside the sensor data.
   if (is_raw_extension(ext)) return decode_raw(path, options);
-  if (ext == ".jpg" || ext == ".jpeg") {
-    // A JPEG/R carries an SDR primary plus a gain map. Reading only the primary
-    // would discard the captured highlight range before any look decision, so
-    // the gain map is applied first and the plain-JPEG path is the fallback.
-    if (!options.ignore_embedded_gain_map && is_ultrahdr_jpeg_file(path)) {
-      try {
-        return decode_ultrahdr(path);
-      } catch (const std::exception&) {
-        // Keep the backward-compatible primary usable, but never pretend that
-        // losing the advertised HDR rendition was an ordinary successful
-        // decode.  Export/report callers already surface DecodeInfo degraded
-        // state and the panel carries it in the native preview contract.
-        //
-        // decode_jpeg leaves the domain at display-referred SDR, which is what
-        // this fallback actually produced. That is the whole reason the domain
-        // is set by the decoder: the file name still says ".jpg" and still
-        // advertises a gain map, and a name-based classifier would have handed
-        // these SDR pixels to the highlight-splitting renderer.
-        auto fallback = decode_jpeg(path);
-        fallback.decode.degraded = true;
-        fallback.decode.degradation_reasons.push_back(
-            "ultrahdr_decode_failed_sdr_fallback");
-        return fallback;
-      }
-    }
-    return decode_jpeg(path);
+
+  // Everything else is decided by its leading bytes. A phone gallery exports
+  // HEIC under a .jpg name routinely, and until now that file reached the plain
+  // JPEG decoder and was rejected for a bad marker -- a true statement about a
+  // file that was never a JPEG. The extension has already done its job by this
+  // point: it is what discovery and the panel's upload guard admit on.
+  const auto head = read_binary_prefix(path, kSignaturePrefixBytes);
+  const auto format = probe_input_signature(head);
+  if (format == InputFormat::Unknown) {
+    throw std::invalid_argument("unsupported input format: " + ext +
+                                " (contents match no supported signature)");
   }
-  if (ext == ".png") return decode_png(path);
-  if (ext == ".avif") return decode_avif(path);
-  if (ext == ".heic" || ext == ".heif") {
-    // An AVIF is occasionally handed over under a HEIF name -- both are the
-    // same container family and .heic is what a phone gallery exports as. The
-    // signature decides, because libheif would otherwise reject an AV1 payload
-    // with an error about the codec rather than simply reading it.
-    if (is_avif_file(path)) return decode_avif(path);
-    return decode_heic(path, options.ignore_embedded_gain_map);
+
+  // The one read. Every probe and decoder below works from this buffer, so a
+  // JPEG is no longer opened twice -- once to ask whether it carries a gain map
+  // and once to decode it.
+  const auto bytes = read_binary_file(path);
+
+  switch (format) {
+    case InputFormat::Jpeg:
+      // A JPEG/R carries an SDR primary plus a gain map. Reading only the
+      // primary would discard the captured highlight range before any look
+      // decision, so the gain map is applied first and the plain-JPEG path is
+      // the fallback.
+      if (!options.ignore_embedded_gain_map && codec::is_ultrahdr_bytes(bytes)) {
+        try {
+          return codec::decode_ultrahdr_bytes(bytes);
+        } catch (const std::exception&) {
+          // Keep the backward-compatible primary usable, but never pretend that
+          // losing the advertised HDR rendition was an ordinary successful
+          // decode.  Export/report callers already surface DecodeInfo degraded
+          // state and the panel carries it in the native preview contract.
+          //
+          // decode_jpeg leaves the domain at display-referred SDR, which is what
+          // this fallback actually produced. That is the whole reason the domain
+          // is set by the decoder: the file still advertises a gain map, and a
+          // name-based classifier would have handed these SDR pixels to the
+          // highlight-splitting renderer.
+          auto fallback = decode_jpeg(bytes, options.preview_max_edge);
+          fallback.decode.degraded = true;
+          fallback.decode.degradation_reasons.push_back(
+              "ultrahdr_decode_failed_sdr_fallback");
+          return fallback;
+        }
+      }
+      return decode_jpeg(bytes, options.preview_max_edge);
+    case InputFormat::Png:
+      return decode_png(bytes, options.preview_max_edge);
+    case InputFormat::Isobmff:
+      // HEIF and AVIF are the same container family; the payload codec decides,
+      // because libheif would otherwise reject an AV1 payload with an error
+      // about the codec rather than simply reading it.
+      if (codec::is_avif_bytes(bytes)) {
+        return codec::decode_avif_bytes(bytes, options.preview_max_edge);
+      }
+      return decode_heic(bytes, options.ignore_embedded_gain_map,
+                         options.preview_max_edge);
+    case InputFormat::Unknown:
+      break;
   }
   throw std::invalid_argument("unsupported input format: " + ext);
 }

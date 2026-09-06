@@ -5,6 +5,11 @@
  * rewrite -- the mask the stage shows while the control is hovered. Adding a
  * slider means editing this file and nothing else.
  *
+ * There is no `scale` field any more: every control's `help` already says in
+ * words which way the slider runs, and rendering the two poles under every
+ * track as well cost a text row per control -- six rows in a column that has
+ * to end above the run button.
+ *
  * `mask` names the overlay painted on the photograph while the control is
  * hovered or focused (see preview/mask.js); null means the control has no
  * spatial story to tell (quality, highlight recovery) and hovering shows
@@ -14,27 +19,27 @@
 export const ENCODINGS = [
   {
     id: "adaptive", label: "Adaptive HDR", maxRange: 3,
-    hint: "Apple Adaptive HDR：Display P3 SDR 底图 + ISO 21496-1 增益图，最适合系统相册与分享。",
+    hint: "Apple 格式，兼容 SDR 设备与系统相册",
   },
   {
     id: "pq", label: "PQ", maxRange: 4,
-    hint: "PQ (HDR10)：BT.2100 / ST 2084 10-bit HEIC，适合 HDR10 电视与显示器。",
+    hint: "BT.2100 PQ (10-bit)，适合 HDR 显示设备",
   },
   {
     id: "hlg", label: "HLG", maxRange: 2.3,
-    hint: "HLG：BT.2100 HLG 10-bit HEIC，适合广播级 HDR 工作流；标准 1000-nit 映射最多约 2.3 档。",
+    hint: "BT.2100 HLG (10-bit)，广播级 HDR",
   },
   {
     id: "ultrahdr", label: "Ultra HDR", maxRange: 4,
-    hint: "Google Ultra HDR：向后兼容的 JPEG/R，内含 Display P3 SDR 底图、增益图，以及 Ultra HDR v1 + ISO 21496-1 元数据。",
+    hint: "Google 格式，向后兼容 JPEG，适合网页与 Android",
   },
   {
     id: "avif-pq", label: "AVIF PQ", maxRange: 4,
-    hint: "AVIF (PQ)：BT.2100 / ST 2084 10-bit AVIF，与 pq 渲染完全一致，适合 Chrome 与 Android。",
+    hint: "BT.2100 PQ (10-bit AVIF)，适合现代浏览器",
   },
   {
     id: "avif-hlg", label: "AVIF HLG", maxRange: 2.3,
-    hint: "AVIF (HLG)：BT.2100 HLG 10-bit AVIF；同样最多约 2.3 档。",
+    hint: "BT.2100 HLG (10-bit AVIF)，高效广播级格式",
   },
 ];
 
@@ -50,60 +55,70 @@ const stops = (digits) => (value) => `${value.toFixed(digits)} 档`;
 export const DEFAULT_BRIGHTNESS_EV = 0.6;
 
 /* `group` selects the container the control renders into; `kind` selects the
- * widget. `key` is both the store key and the name sent to /api/run. */
+ * widget. `key` is both the store key and the name sent to /api/run.
+ *
+ * `group: "pinned"` is a setting with no widget. It still seeds the store, is
+ * still read by the renderers, and is still sent to /api/run -- it simply is
+ * not adjustable. That is not the same as deleting it: curve-math.js takes
+ * `contrast` as an argument and stage/scope/mask all watch it, so a deleted key
+ * would reach the tone curve as `undefined`. Pinning keeps the exported image
+ * byte-identical (command.py's PANEL_DEFAULTS holds the same values for a
+ * browser that omits them) while taking the control off the rail. */
 export const CONTROLS = [
   {
     key: "brightness", kind: "range", group: "tone", label: "整体亮度",
-    min: 0, max: 2, step: 0.05, default: DEFAULT_BRIGHTNESS_EV, format: ev,
-    scale: ["0 EV", "+2 EV"], mask: null,
-    help: "在自动曝光基础上偏移整张画面，同时作用于 SDR 底图与 HDR 输出。",
+    min: 0, max: 2, step: 0.05, default: DEFAULT_BRIGHTNESS_EV, format: ev, mask: null,
+    help: "画面全局曝光微调",
   },
   {
     key: "hdrStrength", kind: "range", group: "tone", label: "HDR 扩展强度",
-    min: 0, max: 1, step: 0.05, default: 0.4, format: fixed(2),
-    scale: ["自然", "鲜明"], mask: "gain",
-    help: "控制高光增益与整体通透感；遮罩显示增益落在画面的哪些位置。",
+    min: 0, max: 1, step: 0.05, default: 0.4, format: fixed(2), mask: "gain",
+    help: "高光增益强度与通透感，悬停显示作用区域",
   },
   {
     key: "hdrRange", kind: "range", group: "tone", label: "HDR 扩展范围",
-    min: 0, max: 3, step: 0.1, default: 2.5, format: stops(1),
-    scale: ["0 档", "最大余量"], mask: "gainFull",
-    help: "高于 SDR 参考白的亮度余量；强度与范围共同决定最终峰值。上限随输出格式变化。",
+    min: 0, max: 3, step: 0.1, default: 2.5, format: stops(1), mask: "gainFull",
+    help: "高光动态余量与峰值上限",
   },
   {
     key: "modelStrength", kind: "range", group: "model", label: "优化强度",
-    min: 0, max: 1, step: 0.05, default: 1, format: percent,
-    scale: ["原始亮度", "完整优化"], mask: null,
-    help: "缩放模型生成的增益图。0% 保留原始亮度，100% 完整应用模型结果。",
+    min: 0, max: 1, step: 0.05, default: 1, format: percent, mask: null,
+    help: "AI 模型增益应用程度",
   },
   {
     key: "expansionStart", kind: "range", group: "region", label: "扩展起点",
-    min: 0.18, max: 0.75, step: 0.01, default: 0.25, format: percent,
-    scale: ["中间调", "极亮高光"], mask: "participation",
-    help: "数值越低，越多上部中间调和亮部参与扩展。",
+    min: 0.18, max: 0.75, step: 0.01, default: 0.25, format: percent, mask: "participation",
+    help: "触发 HDR 扩展的亮度阈值",
   },
   {
     key: "areaCoverage", kind: "range", group: "region", label: "区域覆盖",
-    min: 0, max: 1, step: 0.05, default: 1, format: percent,
-    scale: ["局部亮点", "均匀亮部"], mask: "coverage",
-    help: "扩展偏向镜面亮点，还是覆盖更大面积的明亮色调。照片遮罩是亮度范围估算；最终导出还会分析局部对比度与噪声。",
+    min: 0, max: 1, step: 0.05, default: 1, format: percent, mask: "coverage",
+    help: "控制高光扩展偏向镜面还是大面积区域",
   },
   {
     key: "highlightRecovery", kind: "segmented", group: "advanced", label: "高光恢复",
     default: "blend", mask: null,
-    help: "RAW 解码阶段的高光处理。切换方式会重新解码文件，预览需要重新载入。",
+    help: "RAW 高光重建算法",
     choices: [["blend", "混合"], ["reconstruct", "重建"], ["clip", "裁切"], ["unclip", "不裁切"]],
   },
+  /* Pinned. Both are general grading, not extended-range work: a photographer
+   * who wants a different contrast curve or more saturation reaches for their
+   * editor, not for the converter that writes the gain map. They were also the
+   * only two controls that never got a `help` string, which is the clearest
+   * signal in this file about which knobs were ever meant to be operated. The
+   * values still drive the tone curve and the preview; `HyperDR convert
+   * --contrast/--vibrance` remains the way to change them, and 查看命令行 shows
+   * the line to start from. */
   {
-    key: "contrast", kind: "range", group: "advanced", label: "对比度",
+    key: "contrast", kind: "range", group: "pinned", label: "对比度",
     min: 0.8, max: 1.35, step: 0.01, default: 1.08, format: fixed(2), mask: null,
   },
   {
-    key: "vibrance", kind: "range", group: "advanced", label: "鲜艳度",
+    key: "vibrance", kind: "range", group: "pinned", label: "鲜艳度",
     min: -0.5, max: 0.5, step: 0.01, default: 0.12, format: signed, mask: null,
   },
   {
-    key: "quality", kind: "number", group: "quality", label: "编码质量",
+    key: "quality", kind: "number", group: "quality", label: "质量",
     min: 0, max: 100, step: 1, default: 90, mask: null,
   },
 ];

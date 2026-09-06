@@ -17,6 +17,7 @@ root, so a crafted id cannot address anything outside.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -25,7 +26,9 @@ import uuid
 from pathlib import Path
 
 from .config import IS_FROZEN, REPO_ROOT
-from .formats import RAW_INPUT_EXTENSIONS, SUPPORTED_EXTENSIONS
+from . import formats
+from .formats import (CANONICAL_EXTENSIONS, PREFIX_BYTES, RAW_INPUT_EXTENSIONS,
+                      SUPPORTED_EXTENSIONS)
 
 
 
@@ -45,6 +48,16 @@ SESSION_TTL_SECONDS = int(os.environ.get("HYPERDR_SESSION_HOURS", "24")) * 3600
 RESULT_EXTENSIONS = frozenset({".avif", ".heic", ".jpg", ".jpeg"})
 
 _SESSION_RE = re.compile(r"^[0-9a-f]{32}$")
+
+# Desktop Tauri can hand us an absolute path instead of copying the image into
+# the session. This is deliberately process-local: a browser never gets to
+# persist or choose a path by session id, and a restart simply requires the
+# desktop panel to submit the path again.
+_EXTERNAL_INPUTS: dict[str, Path] = {}
+_INPUT_DIGESTS: dict[str, tuple[Path, int, int, str]] = {}
+# The resolved input per session, so the common case does not re-scan and
+# re-sort the input directory on every preview, run and download.
+_INPUT_PATHS: dict[str, Path] = {}
 
 
 # --- paths ----------------------------------------------------------------- #
@@ -90,24 +103,68 @@ def _safe_filename(value: str) -> str:
     return stem + suffix
 
 
-def _matches_declared_format(path: Path) -> bool:
-    """Guard against a renamed file: the header must match the extension."""
-    header = path.read_bytes()[:32]
-    suffix = path.suffix.lower()
-    if suffix in {".jpg", ".jpeg"}:
-        return header.startswith(b"\xff\xd8")
-    if suffix == ".png":
-        return header.startswith(b"\x89PNG\r\n\x1a\n")
-    if suffix in {".heic", ".heif", ".avif"}:
-        # All three are ISO base media containers; which codec sits inside is
-        # the decoder's business, not this guard's.
-        return len(header) >= 12 and header[4:8] == b"ftyp"
+def _read_header(path: Path) -> bytes:
+    """The leading bytes, and only those.
+
+    This used to be ``path.read_bytes()[:32]``, which pulled the entire file
+    into memory to look at 32 of it -- on every upload and every desktop drop,
+    so a 300 MB RAW cost a 300 MB read and allocation to answer a question the
+    first sixty-four bytes settle.
+    """
+    with path.open("rb") as handle:
+        return handle.read(PREFIX_BYTES)
+
+
+def _classify_input(path: Path, suffix: str) -> str:
+    """Return the extension this file should be stored under, or raise.
+
+    The old guard demanded that the header match the extension exactly and
+    refused the file otherwise. That is the right instinct -- a renamed file
+    must not be taken at its word -- but it drew the line in the wrong place: a
+    phone gallery exports HEIC under a ``.jpg`` name routinely, and those were
+    rejected as corrupt when nothing was wrong with them. The bytes now decide
+    the format and the name is corrected to match, while a file whose contents
+    are not a supported image at all is still refused, extension or no.
+
+    RAW keeps the strict form, because it has to. Most RAW containers *are*
+    TIFF, so a signature cannot say which RAW a file is; the extension does that
+    and the header is only asked to confirm it is a RAW at all. Its table also
+    covers all fourteen container layouts now, where the old one knew five and
+    turned away every Panasonic RW2, Canon CRW and Minolta MRW.
+    """
+    header = _read_header(path)
     if suffix in RAW_INPUT_EXTENSIONS:
-        return (
-            header.startswith((b"II*\x00", b"MM\x00*", b"IIRO", b"FUJIFILMCCD-RAW", b"FOVb"))
-            or (suffix == ".cr3" and len(header) >= 12 and header[4:8] == b"ftyp")
-        )
-    return False
+        if not formats.raw_signature_ok(header):
+            raise ValueError("文件内容不是 RAW 图像，与扩展名 %s 不符。" % suffix)
+        return suffix
+    detected = formats.detect_format(header)
+    if detected is None:
+        raise ValueError(
+            "无法识别此文件的图像格式；请选择 LibRaw RAW、JPEG、PNG、HEIC、HEIF 或 AVIF。")
+    if formats.extension_format(suffix) == detected:
+        return suffix
+    return CANONICAL_EXTENSIONS[detected]
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def input_digest(session_id: str) -> str:
+    """Return the current input digest, reusing it while its file is unchanged."""
+    source = input_path(session_id)
+    stat = source.stat()
+    cached = _INPUT_DIGESTS.get(session_id)
+    if (cached is not None and cached[0] == source
+            and cached[1] == stat.st_mtime_ns and cached[2] == stat.st_size):
+        return cached[3]
+    digest = _sha256(source)
+    _INPUT_DIGESTS[session_id] = (source, stat.st_mtime_ns, stat.st_size, digest)
+    return digest
 
 
 def save_upload(session_id: str, filename: str, stream, length: int) -> tuple[Path, int]:
@@ -126,6 +183,7 @@ def save_upload(session_id: str, filename: str, stream, length: int) -> tuple[Pa
     inputs = root / "input"
     safe_name = _safe_filename(filename)
     temporary = inputs / f".{uuid.uuid4().hex}{Path(safe_name).suffix}"
+    digest = hashlib.sha256()
     try:
         remaining = length
         with temporary.open("xb") as output:
@@ -134,16 +192,26 @@ def save_upload(session_id: str, filename: str, stream, length: int) -> tuple[Pa
                 if not chunk:
                     raise ValueError("上传在完成前中断。")
                 output.write(chunk)
+                digest.update(chunk)
                 remaining -= len(chunk)
-        if not _matches_declared_format(temporary):
-            raise ValueError("文件内容与扩展名不匹配。")
+        stored_suffix = _classify_input(temporary, Path(safe_name).suffix.lower())
         # One image per session: the previous one goes only once the new one is
         # known to be complete and well-formed.
         for existing in inputs.iterdir():
             if existing.is_file() and existing != temporary:
                 existing.unlink(missing_ok=True)
-        target = inputs / safe_name
+        # Stored under the extension its contents are, not the one it arrived
+        # with. Everything downstream reads the format off the name -- the
+        # converter's RAW/raster split, the model's --half-size decision, the
+        # job's resource class -- so a .jpg holding HEIC has to stop being
+        # called a .jpg here rather than fool each of them separately.
+        target = inputs / (Path(safe_name).stem + stored_suffix)
         temporary.replace(target)
+        _EXTERNAL_INPUTS.pop(session_id, None)
+        _INPUT_PATHS[session_id] = target
+        stat = target.stat()
+        _INPUT_DIGESTS[session_id] = (
+            target, stat.st_mtime_ns, stat.st_size, digest.hexdigest())
     except BaseException:
         temporary.unlink(missing_ok=True)
         raise
@@ -152,11 +220,75 @@ def save_upload(session_id: str, filename: str, stream, length: int) -> tuple[Pa
     return target, length
 
 
+def set_external_input(session_id: str, raw_path: str) -> tuple[Path, int]:
+    """Register a validated local source without copying its bytes.
+
+    Only the Tauri desktop bridge calls this endpoint. Validation happens before
+    the session's current input is removed, so a failed drop leaves the visible
+    photograph usable.
+    """
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        raise ValueError("源文件路径不能为空")
+    candidate = Path(raw_path)
+    if not candidate.is_absolute():
+        raise ValueError("源文件路径必须是绝对路径")
+    try:
+        source = candidate.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError("源文件不存在或无法访问") from exc
+    if not source.is_file():
+        raise ValueError("拖入的路径不是文件")
+    if source.suffix.lower() not in SUPPORTED_EXTENSIONS:
+        raise ValueError("不支持此图像格式")
+    try:
+        size = source.stat().st_size
+        if size <= 0:
+            raise ValueError("源文件为空")
+        stored_suffix = _classify_input(source, source.suffix.lower())
+    except OSError as exc:
+        raise ValueError("源文件无法读取") from exc
+    # The desktop bridge publishes a path instead of copying bytes, so there is
+    # nothing here to rename. A file whose contents disagree with its name is
+    # refused rather than passed to a converter that would route it by that
+    # name; the message says which format it actually is so the fix is obvious.
+    if stored_suffix != source.suffix.lower():
+        raise ValueError(
+            "此文件的内容其实是 %s 格式，请先将扩展名改为 %s 再拖入"
+            % (stored_suffix.lstrip("."), stored_suffix))
+
+    root = session_root(session_id)
+    inputs = root / "input"
+    for existing in inputs.iterdir():
+        if existing.is_file() or existing.is_symlink():
+            existing.unlink(missing_ok=True)
+    _EXTERNAL_INPUTS[session_id] = source
+    _INPUT_PATHS[session_id] = source
+    _INPUT_DIGESTS.pop(session_id, None)
+    os.utime(root, None)
+    return source, size
+
+
 def input_path(session_id: str) -> Path:
     """The session's image, or FileNotFoundError if nothing was uploaded."""
-    for item in sorted(session_dir(session_id, "input").iterdir()):
+    inputs = session_dir(session_id, "input")
+    external = _EXTERNAL_INPUTS.get(session_id)
+    if external is not None:
+        if external.is_file() and external.suffix.lower() in SUPPORTED_EXTENSIONS:
+            return external
+        raise FileNotFoundError("桌面端源文件已不存在")
+    # Both ingest paths record what they stored, so the ordinary case -- every
+    # preview, run and download of an image already in the session -- answers
+    # from memory instead of listing and sorting the directory again. The scan
+    # remains for a workspace this process did not populate: a resumed session
+    # after a restart, or a file placed there by hand.
+    remembered = _INPUT_PATHS.get(session_id)
+    if remembered is not None and remembered.parent == inputs and remembered.is_file():
+        return remembered
+    for item in sorted(inputs.iterdir()):
         if item.is_file() and item.suffix.lower() in SUPPORTED_EXTENSIONS:
+            _INPUT_PATHS[session_id] = item
             return item
+    _INPUT_PATHS.pop(session_id, None)
     raise FileNotFoundError("尚未上传图片。")
 
 
@@ -221,6 +353,9 @@ def cleanup_expired_sessions(now: float | None = None,
         try:
             if item.stat().st_mtime < cutoff:
                 shutil.rmtree(item)
+                _EXTERNAL_INPUTS.pop(item.name, None)
+                _INPUT_DIGESTS.pop(item.name, None)
+                _INPUT_PATHS.pop(item.name, None)
                 removed += 1
         except OSError:
             continue

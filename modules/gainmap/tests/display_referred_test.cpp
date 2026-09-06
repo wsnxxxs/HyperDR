@@ -102,30 +102,37 @@ void test_shoulder_shape() {
 
 // --- display-referred SDR --------------------------------------------------
 
-void test_sdr_is_passed_through() {
+void test_sdr_uses_the_hdr_controls() {
   const auto source = test_image(0.02F, 1.0F, 1.0F);
+  auto options = plain_options();
+  options.auto_headroom = false;
+  options.headroom_stops = 2.5F;
+  options.look.headroom_max_stops = 3.0F;
+  options.gain_strength = 0.4F;
   const auto result = hyperdr::make_gain_map(
-      source, plain_options(), {},
+      source, options, {},
       {hyperdr::InputDomain::kDisplayReferredSdr, 1.0F});
 
   require(result.base_linear.width == source.width &&
               result.base_linear.height == source.height,
           "the base must keep the input dimensions");
-  float worst = 0.0F;
-  for (std::size_t i = 0; i < source.pixels.size(); ++i) {
-    worst = std::max(worst, std::abs(result.base_linear.pixels[i] - source.pixels[i]));
+  for (const float value : result.base_linear.pixels) {
+    require(value >= 0.0F && value <= 1.0F,
+            "the SDR base must stay inside [0, 1]");
   }
-  require(worst < 1.0e-6F,
-          "an SDR input must reach the base unchanged, worst error " +
-              std::to_string(worst));
+  require(result.headroom_stops > 0.05F,
+          "an SDR input must receive the requested HDR expansion");
+  require(result.stats.gain_max_stops > 0.05F,
+          "an SDR input's gain map must contain a non-zero highlight gain");
 
-  require(result.headroom_stops == 0.0F,
-          "an SDR input must not be given headroom");
-  for (const float value : result.gain_map.pixels) {
-    require(value == 0.0F, "an SDR input's gain map must be exactly zero");
-  }
-  require(result.stats.gain_max_stops == 0.0F,
-          "an SDR input must report no gain");
+  const auto reconstructed = hyperdr::reconstruct_gain_map(
+      result.base_linear, result.gain_map, result.metadata,
+      hyperdr::rational_value(result.metadata.alternate_headroom));
+  require(peak_luminance(reconstructed) > 1.0F,
+          "the SDR alternate must exceed diffuse white, peak " +
+              std::to_string(peak_luminance(reconstructed)) +
+              " (rendered " + std::to_string(result.stats.rendered_peak) +
+              ", gain " + std::to_string(result.stats.gain_max_stops) + ")");
 }
 
 void test_sdr_brightening_rolls_off_instead_of_clipping() {
@@ -135,11 +142,10 @@ void test_sdr_brightening_rolls_off_instead_of_clipping() {
   const auto result = hyperdr::make_gain_map(
       source, options, {}, {hyperdr::InputDomain::kDisplayReferredSdr, 1.0F});
 
-  // Still no invented headroom...
-  require(result.headroom_stops == 0.0F,
-          "brightening an SDR input must not invent headroom");
-  // ...and the highlights that no longer fit stay ordered rather than merging
-  // into one clipped plate.
+  require(result.headroom_stops > 0.05F,
+          "brightening an SDR input must retain the HDR expansion");
+  // The SDR base still keeps highlights ordered rather than merging them into
+  // one clipped plate.
   const auto luminance_at = [&](std::uint32_t x, std::uint32_t y) {
     return 0.2289746F * result.base_linear.at(x, y, 0) +
            0.6917385F * result.base_linear.at(x, y, 1) +
@@ -327,7 +333,7 @@ void test_headroom_must_match_the_domain() {
 int main() {
   try {
     test_shoulder_shape();
-    test_sdr_is_passed_through();
+    test_sdr_uses_the_hdr_controls();
     test_sdr_brightening_rolls_off_instead_of_clipping();
     test_hdr_keeps_its_shadows_and_restores_its_peak();
     test_hdr_round_trip_holds_its_headroom();

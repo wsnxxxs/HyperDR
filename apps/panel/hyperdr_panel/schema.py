@@ -41,22 +41,27 @@ def _load() -> dict:
     return document
 
 
-_DOCUMENT = _load()
+#: The whole checked-in document. `formats` reads its `inputs` section.
+DOCUMENT = _load()
 
 #: Every setting, keyed by its canonical name.
-SETTINGS: dict[str, dict] = {entry["key"]: entry for entry in _DOCUMENT["settings"]}
+SETTINGS: dict[str, dict] = {entry["key"]: entry for entry in DOCUMENT["settings"]}
 #: The version of the converter that produced this schema.
-TOOL_VERSION: str = str(_DOCUMENT.get("tool", ""))
+TOOL_VERSION: str = str(DOCUMENT.get("tool", ""))
 ALL_KEYS = frozenset(SETTINGS)
 DEFAULTS = {key: entry["default"] for key, entry in SETTINGS.items()}
 
 
 def reload() -> None:
-    """Re-read the schema. Used by tests that regenerate it from the binary."""
-    global _DOCUMENT, SETTINGS, TOOL_VERSION, ALL_KEYS, DEFAULTS
-    _DOCUMENT = _load()
-    SETTINGS = {entry["key"]: entry for entry in _DOCUMENT["settings"]}
-    TOOL_VERSION = str(_DOCUMENT.get("tool", ""))
+    """Re-read the schema. Used by tests that regenerate it from the binary.
+
+    `formats` derives its own tables from this document, so it has a matching
+    `reload()`; call both when a test replaces the file underneath.
+    """
+    global DOCUMENT, SETTINGS, TOOL_VERSION, ALL_KEYS, DEFAULTS
+    DOCUMENT = _load()
+    SETTINGS = {entry["key"]: entry for entry in DOCUMENT["settings"]}
+    TOOL_VERSION = str(DOCUMENT.get("tool", ""))
     ALL_KEYS = frozenset(SETTINGS)
     DEFAULTS = {key: entry["default"] for key, entry in SETTINGS.items()}
 

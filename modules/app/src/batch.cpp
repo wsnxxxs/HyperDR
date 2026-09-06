@@ -188,6 +188,12 @@ Staged decode_stage(const std::filesystem::path& path,
     staged.input_stamp = input_stamp(path);
     auto raw = options.raw;
     raw.ignore_embedded_gain_map = !options.external_gain_path.empty();
+    // Only an explicitly declared preview lets the decoders reduce on their
+    // own. An export keeps decoding at full size and reaches --preview-max-edge
+    // through the linear-light resampler alone, so its bytes do not change.
+    if (options.decode_intent == DecodeIntent::Preview) {
+      raw.preview_max_edge = options.preview_max_edge;
+    }
 
     std::filesystem::path cache_file;
     if (!options.decode_cache_directory.empty()) {

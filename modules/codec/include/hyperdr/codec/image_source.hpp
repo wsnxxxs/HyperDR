@@ -113,6 +113,18 @@ struct RawDecodeOptions {
   // Conservative opt-in detector for saturated hot pixels and zero/dead
   // pixels. It only replaces extreme outliers using same-CFA neighbours.
   bool auto_bad_pixel_correction{false};
+  // A hint, not an output size: the caller still resamples to the exact edge
+  // afterwards, and zero means "decode at full size" exactly as before.
+  //
+  // Compressed rasters can skip real work for it -- libjpeg never materialises
+  // full-size rows at 1/8 DCT scale, and libpng box-averages while it streams.
+  // A decoder may come down to this edge but never below it, so the caller's
+  // resample still produces the exact size. See preview_decode_floor() in
+  // internal/budget.hpp for what that costs and why a preview may pay it.
+  //
+  // RAW ignores this and uses `half_size` instead: LibRaw's reduction is a
+  // demosaic choice, not a resampling one.
+  std::uint32_t preview_max_edge{0};
   // Sensor-domain digital gain, applied after RAW calibration and retained as
   // scene-linear headroom. The normal renderer's --exposure is intentionally a
   // later photographic exposure decision.

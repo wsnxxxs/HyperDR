@@ -1,157 +1,147 @@
-/* The app frame: the header and the three regions it presides over.
- *
- * Regions are named grid areas so a screen can be built without knowing where
- * it sits, and so the phone layout is a different `grid-template-areas` rather
- * than a second set of components.
- */
+/* The app frame: two columns layout with unified liquid glass panels */
 
-/* Every region is a rounded block floating on the page, separated by the grid
-   gap rather than by a shared border. Nothing is flush with the window edge,
-   so no two surfaces meet along a seam. */
 .app {
   display: grid;
   grid-template-areas:
-    "header header"
-    "stage  settings"
-    "run    settings";
+    "stage header"
+    "stage settings"
+    "stage run";
   grid-template-columns:
     minmax(0, 1fr)
-    minmax(336px, clamp(336px, 20vw, 384px));
+    minmax(350px, clamp(350px, 25vw, 440px));
   grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: var(--region-gap);
+  column-gap: var(--region-gap);
+  row-gap: 0;
   width: 100%;
   max-width: 1760px;
   height: 100dvh;
   margin-inline: auto;
-  padding-block: var(--page-pad) calc(var(--page-pad) + var(--space-2));
-  padding-inline: var(--page-pad);
-  background: var(--surface-page);
+  padding:
+    var(--page-pad)
+    var(--page-pad-inline)
+    var(--page-pad-bottom)
+    var(--page-pad-inline);
+  background: transparent;
 }
 
-/* No background of its own: the masthead is the page. A band in a different
-   tone has to stop somewhere, and wherever it stopped read as a rule drawn
-   across the window -- which is the opposite of what a masthead is for. */
 .app__header {
   grid-area: header;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  min-height: 66px;
+  min-height: 48px;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--line);
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  background: var(--surface-panel);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: inset 0 1px 1px 0 var(--glass-edge), var(--shadow-glass);
 }
-/* All three header objects share one geometric centre line even though the
-   wordmark capsule is taller than the status pill and theme button. */
-.app__header > .app__title,
-.app__header > .service-state,
-.app__header > [data-role="theme-toggle"] {
-  align-self: center;
-  margin-block: 0;
-}
-/* The pre-refactor masthead used three independent floating controls instead
-   of wrapping the whole row in a panel. */
 .app__title {
   flex: none;
-  min-height: 50px;
   margin: 0;
-  padding: 7px 17px 7px 8px;
-  border-radius: 17px;
-  background: var(--surface-panel);
-  box-shadow: inset 0 0 0 1px var(--line), var(--shadow-md);
 }
 .app__header .service-state {
-  height: 40px;
+  min-width: 0;
   margin-left: auto;
-  padding-inline: var(--space-4);
-  border-radius: 999px;
-  background: var(--surface-panel);
-  box-shadow: inset 0 0 0 1px var(--line), var(--shadow-sm);
 }
-/* A blocked service is the one state the panel cannot work around, so its ring
-   is tinted as well as its label. The warning tone is left neutral: an offline
-   preview still previews. */
-.app__header .service-state[data-tone="is-bad"] {
-  box-shadow:
-    inset 0 0 0 1px color-mix(in oklab, var(--danger) 45%, transparent),
-    var(--shadow-sm);
+.app__header [data-role="service-text"] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .app__header > [data-role="theme-toggle"] {
   flex: none;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-}
-.app__header .theme-icon {
-  width: 18px;
-  height: 18px;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
 }
 
 .app__stage {
   grid-area: stage;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  align-content: end;
-  gap: var(--space-2);
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
-  padding: var(--space-3);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--surface-panel);
-  box-shadow: inset 0 1px 0 var(--edge), var(--shadow-sm);
-}
-.stage-heading {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  width: max-content;
-  margin: 0;
-  color: var(--ink-strong);
-  font-size: var(--text);
-  font-weight: 600;
-  line-height: 1.25;
-  letter-spacing: 0.015em;
-}
-.stage-heading::before {
-  content: "";
-  width: 3px;
-  height: 16px;
-  border-radius: 999px;
-  background: var(--accent);
-}
-.stage-viewport {
-  --stage-gutter: var(--space-3);
-  display: grid;
-  place-items: center;
-  min-height: 0;
+  padding: var(--space-2);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-xl);
+  background: var(--surface-sunken);
+  backdrop-filter: var(--glass-blur-sm);
+  -webkit-backdrop-filter: var(--glass-blur-sm);
+  box-shadow: none;
+  transition:
+    background var(--duration) var(--ease),
+    border var(--duration) var(--ease),
+    box-shadow var(--duration) var(--ease);
 }
 
-/* Not a panel. The groups inside it are already cards, and wrapping them in a
-   second bordered surface stacked four rounded rectangles across a 340px
-   column while spending 32px of that column on padding the sliders needed.
-   The scroll container keeps a little inline padding only so the cards' own
-   shadows are not clipped -- overflow-y: auto forces overflow-x to auto too. */
+.app__stage:has(.stage.has-image) {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--preview-darkroom-bg);
+  box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.06), var(--shadow-glass);
+}
+
+.stage-viewport {
+  --stage-gutter: 0;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: var(--stage-gutter);
+  container-type: inline-size;
+}
+
 .app__settings {
   grid-area: settings;
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
   min-height: 0;
+  max-height: 100%;
   overflow-y: auto;
-  /* The first card shares its top guide with the outer preview panel. */
-  padding: 0 var(--space-1) 2px;
+  scroll-padding-block: var(--space-5);
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+  padding: var(--space-3) var(--space-4);
+  border-left: 1px solid var(--glass-border);
+  border-right: 1px solid var(--glass-border);
+  border-top: none;
+  border-bottom: none;
+  border-radius: 0;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  background:
+    linear-gradient(var(--surface-panel) 40%, transparent) local    0 0    / 100% 18px no-repeat,
+    linear-gradient(transparent, var(--surface-panel) 60%) local    0 100% / 100% 18px no-repeat,
+    linear-gradient(var(--rail-fade), transparent)         scroll   0 0    / 100% 12px no-repeat,
+    linear-gradient(transparent, var(--rail-fade))         scroll   0 100% / 100% 12px no-repeat,
+    var(--surface-panel);
+  box-shadow: var(--shadow-glass);
 }
-.app__settings.is-disabled {
-  opacity: 0.48;
-  filter: saturate(0.45);
+
+/* Waiting for an image, not broken. Saturation is left alone so the accent
+ * still marks what is selected; the dimming alone says "not yet". */
+.app__settings.is-disabled > * {
+  opacity: 0.55;
+  pointer-events: none;
 }
 
 .app__run {
   grid-area: run;
-  display: grid;
-  gap: var(--space-3);
-  margin-top: calc(-1 * var(--space-2));
+  border: 1px solid var(--glass-border);
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 var(--radius-xl) var(--radius-xl);
+  background: var(--surface-panel);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-glass);
 }
 
-/* One column below the split: the settings column at 360px leaves the preview
-   unusably narrow on a phone, which is the layout the old panel shipped. */
 @media (width < 860px) {
   :root {
     --page-pad: var(--space-3);
@@ -170,68 +160,47 @@
     min-height: 100dvh;
   }
   .app__header {
-    min-height: 60px;
-  }
-  .app__title {
-    min-height: 44px;
-    padding-inline: 8px 14px;
+    height: 44px;
   }
   .app__header .service-state {
-    min-width: 0;
     max-width: 154px;
-    white-space: nowrap;
-  }
-  .app__header [data-role="service-text"] {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
   .app__settings {
     display: block;
-    margin-top: calc(-1 * var(--space-1));
+    align-self: stretch;
+    max-height: none;
     overflow-y: visible;
-    padding: 2px var(--space-1);
-  }
-  .app__run {
-    margin-top: 0;
+    padding: var(--space-3);
+    background: var(--surface-panel);
   }
   .app__stage {
     grid-template-rows: minmax(0, 1fr);
     gap: 0;
+    padding: 0;
   }
   .app__stage:has(.stage.has-image) {
-    margin-inline: calc(-1 * var(--page-pad));
+    margin-inline: calc(-1 * var(--page-pad-inline));
     border-inline: 0;
     border-radius: 0;
   }
-  .stage-heading {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
+}
+
+@media (height < 620px) and (width >= 860px) {
+  :root { --page-pad: var(--space-3); }
+  .app__header {
+    height: 34px;
+    margin-bottom: var(--space-1);
   }
-  .stage-viewport {
-    --stage-gutter: 0;
-    place-items: center;
-    container-type: inline-size;
-  }
+  .app__settings { padding-block: var(--space-3) var(--space-2); }
 }
 
 @media (width < 360px) {
   .app__header .wordmark-text { display: none; }
-  .app__title { padding-inline: 8px; }
 }
-
-/* The boot banner used to live here. Service state is reported once, by the
-   header pill; a card in the rail repeating it cost the rail its first 80px
-   to say what the pill was already saying two inches above. */
 
 .placeholder {
   color: var(--ink-muted);
   font-size: var(--text-sm);
   text-align: center;
 }
+

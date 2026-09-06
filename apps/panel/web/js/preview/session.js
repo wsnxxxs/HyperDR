@@ -6,12 +6,35 @@
  * is reused across replacements; a new one is created only on the first upload,
  * which keeps the converter's decode bookkeeping valid for the session.
  *
- * The browser never sends a filesystem path. It receives an opaque session id
- * and the server owns every directory beneath it.
+ * Web browsers never send a filesystem path. The Windows Tauri bridge has a
+ * separate native-path entry point that is only enabled by the desktop server.
  */
 
 import { api } from "../core/api.js";
 import { store } from "../core/store.js";
+
+/* What the server would reject anyway, refused before the bytes go over the
+ * wire. Sending 300 MB and then being told the extension is wrong is the same
+ * answer arriving several minutes later, and on a phone it is several minutes
+ * of the user's data. The server still validates -- this only saves the trip,
+ * and it deliberately checks nothing the server does not also check. */
+function preflight(file) {
+  const capabilities = store.get().capabilities;
+  const extensions = capabilities?.inputExtensions;
+  if (Array.isArray(extensions) && extensions.length) {
+    const dot = file.name.lastIndexOf(".");
+    const suffix = dot > 0 ? file.name.slice(dot).toLowerCase() : "";
+    if (!extensions.includes(suffix)) {
+      return "不支持此格式；请选择 LibRaw RAW、JPEG、PNG、HEIC、HEIF 或 AVIF。";
+    }
+  }
+  const limit = Number(capabilities?.maxUploadMB);
+  if (Number.isFinite(limit) && limit > 0 && file.size > limit * 1024 * 1024) {
+    return `文件超过上传大小限制（最大 ${limit} MB）。`;
+  }
+  if (file.size === 0) return "上传内容为空。";
+  return null;
+}
 
 export function createUploader({ onProgress, onReady, onError }) {
   let inFlight = false;
@@ -22,6 +45,11 @@ export function createUploader({ onProgress, onReady, onError }) {
     const file = Array.from(fileList || [])[0];
     const previous = store.get();
     if (!file || inFlight || previous.uploading || previous.jobId) return;
+    const refusal = preflight(file);
+    if (refusal) {
+      onError(refusal, { preserveCurrent: Boolean(previous.file) });
+      return;
+    }
     inFlight = true;
     aborted = false;
     // Keep the current image/result until the replacement is accepted.
@@ -57,8 +85,44 @@ export function createUploader({ onProgress, onReady, onError }) {
     }
   }
 
+  async function startNativePath(path) {
+    const previous = store.get();
+    if (!path || inFlight || previous.uploading || previous.jobId
+        || !previous.capabilities?.nativePathInput) return;
+    inFlight = true;
+    aborted = false;
+    store.set({ uploading: true, uploadProgress: 0 });
+    onProgress(0);
+
+    try {
+      const sessionId = store.get().sessionId || (await api.newSession()).sessionId;
+      const selected = await api.openNativePath(sessionId, path);
+      const size = Number(selected.bytes);
+      store.set({
+        sessionId,
+        file: {
+          name: selected.name || String(path).split(/[\\/]/).pop() || "image",
+          size: Number.isFinite(size) ? size : 0,
+        },
+        result: null,
+      });
+      onProgress(1);
+      await onReady();
+    } catch (error) {
+      onError(aborted ? "已取消载入。" : error.message || "无法载入桌面端文件。", {
+        preserveCurrent: Boolean(previous.file),
+        cancelled: aborted,
+      });
+    } finally {
+      inFlight = false;
+      currentRequest = null;
+      store.set({ uploading: false });
+    }
+  }
+
   return {
     start,
+    startNativePath,
     /* Wired to the cancel button: the old panel had no way to stop a 300 MB
      * upload once the user had picked the wrong file. */
     abort() {

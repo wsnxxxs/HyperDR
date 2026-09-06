@@ -30,6 +30,7 @@ class ApiTests(unittest.TestCase):
         self.context = api.Context(output_selections={})
 
     def tearDown(self):
+        session._EXTERNAL_INPUTS.clear()
         session.WORK_ROOT = self.previous_root
         self.temporary.cleanup()
 
@@ -46,8 +47,32 @@ class ApiTests(unittest.TestCase):
         self.assertIn("ready", response.payload)
         self.assertIn("previewMaxEdge", response.payload)
         self.assertTrue(response.payload["hdrPreviewRequiresSecureContext"])
+        self.assertFalse(response.payload["transportSecure"])
         self.assertNotIn("exe", response.payload)
         self.assertNotIn("path", response.payload)
+
+    def test_desktop_native_path_is_registered_without_copying(self):
+        self.context.native_path_input = True
+        session_id = session.create_session()
+        with tempfile.TemporaryDirectory() as source_root:
+            source = Path(source_root) / "camera.jpg"
+            source.write_bytes(JPEG)
+            response = api.open_native_path(self.context, {
+                "sessionId": session_id,
+                "path": str(source),
+            })
+            self.assertEqual(response.status, 201)
+            self.assertTrue(response.payload["direct"])
+            self.assertEqual(session.input_path(session_id), source.resolve())
+            self.assertEqual(list((session.session_dir(session_id, "input")).iterdir()), [])
+
+    def test_native_path_input_is_not_available_to_browser_servers(self):
+        session_id = session.create_session()
+        response = api.open_native_path(self.context, {
+            "sessionId": session_id,
+            "path": "C:\\Users\\photo.jpg",
+        })
+        self.assertEqual(response.status, 404)
 
     # --- run -------------------------------------------------------------- #
 

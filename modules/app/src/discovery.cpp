@@ -1,6 +1,6 @@
 #include "hyperdr/app/discovery.hpp"
 
-#include "hyperdr/codec/image_source.hpp"
+#include "hyperdr/codec/input_format.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 
 #include <algorithm>
@@ -10,9 +10,6 @@
 
 namespace hyperdr {
 namespace {
-
-constexpr std::array<std::string_view, 6> kRasterExtensions{
-    ".jpg", ".jpeg", ".png", ".heic", ".heif", ".avif"};
 
 // This converter's own outputs end in "-hyperdr". When the output directory is
 // the input directory, skipping them is what stops a second run from converting
@@ -28,19 +25,19 @@ bool has_generated_output_name(const std::filesystem::path& path) {
 
 std::vector<std::string_view> supported_input_extensions() {
   std::vector<std::string_view> extensions;
-  extensions.reserve(kRawInputExtensions.size() + kRasterExtensions.size());
+  extensions.reserve(kRawInputExtensions.size() + kRasterInputExtensions.size());
   extensions.insert(extensions.end(), kRawInputExtensions.begin(),
                     kRawInputExtensions.end());
-  extensions.insert(extensions.end(), kRasterExtensions.begin(),
-                    kRasterExtensions.end());
+  extensions.insert(extensions.end(), kRasterInputExtensions.begin(),
+                    kRasterInputExtensions.end());
   return extensions;
 }
 
 bool is_supported_input(const std::filesystem::path& path) {
   const auto extension = lower_extension(path);
   return is_raw_extension(extension) ||
-         std::find(kRasterExtensions.begin(), kRasterExtensions.end(), extension) !=
-             kRasterExtensions.end();
+         std::find(kRasterInputExtensions.begin(), kRasterInputExtensions.end(),
+                   extension) != kRasterInputExtensions.end();
 }
 
 std::vector<std::filesystem::path> discover_input_files(const ConvertOptions& options) {

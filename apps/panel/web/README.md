@@ -25,7 +25,7 @@ web/
 │   ├── tokens.css      唯一写字面颜色/圆角/时长的地方
 │   ├── base.css        reset 与元素默认样式
 │   ├── shell.css       应用框架布局
-│   └── components.css  各区域组件（舞台、直方图、控件、dock、结果卡）
+│   └── components.css  各区域组件（舞台、直方图、控件、输出块、结果）
 └── js/
     ├── main.js         组合根：启动，然后把每个区域交给对应模块
     ├── core/           api.js（全部 HTTP 调用）、store.js（唯一可观察状态）、dom.js
@@ -34,7 +34,7 @@ web/
     │                   mask.js（滑杆作用遮罩）、cpu/gpu/sdr-gpu 渲染器、session.js
     │                   curve-math.js 是 C++ 色调曲线的移植，当前只被
     │                   tests/js/curve_math_runner.mjs 使用，不参与实时渲染
-    ├── run/            runner.js（轮询、阶段进度、结果卡、导出）
+    ├── run/            runner.js（轮询、阶段进度、结果卡、下载）
     └── ui/             toast.js、theme.js
 ```
 
@@ -45,3 +45,6 @@ web/
 3. **状态只放在 `store.js`。** 视图订阅它，本身不持有状态。
 4. **不用 `<base>` 标签。** 面板的 CSP 设了 `base-uri 'none'`。资源用相对路径引用，这样这棵树也能直接从磁盘打开。
 5. **`data-role` 用字面量查找。** `scripts/check_panel_roles.py` 做双向检查（声明 ↔ 读取），变量拼出来的角色名它看不见。
+6. **焦点环走 `--focus`，不要直接写 `--accent`。** `base.css` 的 `:focus-visible` 读的是 `--focus`（默认等于 `--accent`）。浮在照片上的控件——对照分割手柄、裁切 chip、视图切换、全屏按钮——把 `--focus` 改写成 `--overlay-ink`，因为强调蓝对中性预览底色只有 2.7:1。另外**不要**在 `:root` 里把整条 ring 拼成一个 `--focus-ring` 变量：自定义属性里的 `var()` 是在*声明它的元素*上代换的，在 `:root` 拼好的 ring 会把 `:root` 的 accent 固化进去，下面所有改写都失效。两层阴影在每个用到的地方分别写出来。
+7. **对比度按 AA 记账。** 12–13px 的次要文字（`--ink-muted`）、作为墨色使用的 `--accent`、以及服务状态的 `--warn` 都按 ≥4.5:1 选值，注释里记了实测比值。改这几个值前先按新的背景重算一遍——`--hdr` 只做填充和直方图曲线，它作为浅色模式墨色只有 3.7:1，所以文字用 `--warn`。
+8. **`group: "pinned"` 不是死代码，别删。** `schema.js` 里 `contrast` 与 `vibrance` 没有控件，但仍然进 store、进 `OPTION_KEYS`、进 `/api/run`。`curve-math.js` 拿 `contrast` 当参数，`stage/scope/mask` 都 watch 它——真删掉的话色调曲线会拿到 `undefined`。同时 `command.py` 的 `PANEL_DEFAULTS` 对这两个键的值与面板默认值一致，所以"面板不发送"和"面板发送默认值"导出结果相同；改任何一边前先对齐另一边。

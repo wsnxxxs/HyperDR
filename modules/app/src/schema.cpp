@@ -1,5 +1,6 @@
 #include "hyperdr/app/schema.hpp"
 
+#include "hyperdr/codec/input_format.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/foundation/version.hpp"
 
@@ -7,6 +8,7 @@
 #include <array>
 #include <cmath>
 #include <charconv>
+#include <span>
 #include <stdexcept>
 
 namespace hyperdr {
@@ -349,6 +351,69 @@ std::string settings_usage_text() {
   return out;
 }
 
+namespace {
+
+// The input vocabulary, emitted for the same reason the settings table is: the
+// panel, the native file dialog and the browser all need to know which files
+// exist and what their leading bytes look like, and the five hand-maintained
+// copies of that had already drifted apart. Magic bytes travel as hex because
+// several of them contain NUL, which a JSON string cannot carry.
+std::string hex_bytes(std::string_view magic) {
+  static constexpr char kDigits[] = "0123456789abcdef";
+  std::string text;
+  text.reserve(magic.size() * 2);
+  for (const char byte : magic) {
+    const auto value = static_cast<unsigned char>(byte);
+    text.push_back(kDigits[value >> 4U]);
+    text.push_back(kDigits[value & 0x0FU]);
+  }
+  return text;
+}
+
+void write_signatures(json::Writer& writer, std::string_view key,
+                      std::span<const InputSignature> table) {
+  writer.begin_array(key);
+  for (const auto& signature : table) {
+    writer.begin_object()
+        .member("offset", signature.offset)
+        .member("magic", hex_bytes(signature.magic))
+        .end_object();
+  }
+  writer.end_array();
+}
+
+void write_inputs(json::Writer& writer) {
+  writer.begin_object("inputs");
+  writer.begin_object("extensions");
+  writer.begin_array("raw");
+  for (const auto extension : kRawInputExtensions) writer.element(extension);
+  writer.end_array();
+  writer.begin_object("raster");
+  for (const auto& [key, table] : {
+           std::pair<std::string_view, std::span<const std::string_view>>{
+               "jpeg", kJpegExtensions},
+           std::pair<std::string_view, std::span<const std::string_view>>{
+               "png", kPngExtensions},
+           std::pair<std::string_view, std::span<const std::string_view>>{
+               "isobmff", kIsobmffExtensions}}) {
+    writer.begin_array(key);
+    for (const auto extension : table) writer.element(extension);
+    writer.end_array();
+  }
+  writer.end_object();
+  writer.end_object();
+  writer.begin_object("signatures");
+  write_signatures(writer, "jpeg", kJpegSignatures);
+  write_signatures(writer, "png", kPngSignatures);
+  write_signatures(writer, "isobmff", kIsobmffSignatures);
+  write_signatures(writer, "raw", kRawSignatures);
+  writer.end_object();
+  writer.member("prefixBytes", kSignaturePrefixBytes);
+  writer.end_object();
+}
+
+}  // namespace
+
 std::string schema_json() {
   const ConvertOptions defaults;
   json::Writer writer(json::Writer::Style::kIndented);
@@ -381,7 +446,9 @@ std::string schema_json() {
     else writer.member("default", value.number());
     writer.end_object();
   }
-  return writer.end_array().end_object().take() + "\n";
+  writer.end_array();
+  write_inputs(writer);
+  return writer.end_object().take() + "\n";
 }
 
 }  // namespace hyperdr

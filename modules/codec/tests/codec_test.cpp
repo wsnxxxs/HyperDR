@@ -602,6 +602,42 @@ int main() {
     const auto small = make_synthetic(64, 32);
     const auto small_gain = hyperdr::make_gain_map(small, options);
 
+    // The name no longer decides which decoder reads a raster. A phone gallery
+    // exports HEIC under a .jpg suffix routinely, and that file used to reach
+    // the plain JPEG decoder and be rejected for a bad marker -- a true
+    // statement about a file that was never a JPEG.
+    {
+      const auto heic = hyperdr::encode_adaptive_heic(small_gain, metadata, 90, 8);
+      const auto truthful = decode_encoded_input(heic, "signature-heic", ".heic");
+      for (const char* alias : {".jpg", ".png", ".avif"}) {
+        const auto renamed = decode_encoded_input(heic, "signature-alias", alias);
+        require(renamed.linear_p3.width == truthful.linear_p3.width &&
+                    renamed.linear_p3.height == truthful.linear_p3.height,
+                "a renamed HEIC did not decode to the same geometry");
+        require(renamed.linear_p3.pixels == truthful.linear_p3.pixels,
+                "a renamed HEIC did not decode to the same pixels");
+      }
+
+      const auto jpeg = hyperdr::encode_ultrahdr_jpeg(small_gain, metadata, 90);
+      const auto jpeg_truthful = decode_encoded_input(jpeg, "signature-jpeg", ".jpg");
+      const auto jpeg_renamed = decode_encoded_input(jpeg, "signature-jpeg", ".png");
+      require(jpeg_renamed.linear_p3.pixels == jpeg_truthful.linear_p3.pixels,
+              "a renamed Ultra HDR JPEG did not decode to the same pixels");
+
+      // A supported extension is not a promise. Refusing this by signature, and
+      // saying so, beats a codec-level complaint about a missing marker.
+      const std::vector<std::uint8_t> prose(64, std::uint8_t{'a'});
+      bool refused = false;
+      try {
+        static_cast<void>(decode_encoded_input(prose, "signature-prose", ".jpg"));
+      } catch (const std::invalid_argument& error) {
+        refused = std::string(error.what()).find("no supported signature") !=
+                  std::string::npos;
+      }
+      require(refused, "a non-image named .jpg was not refused by signature");
+      std::cout << "signature dispatch passed\n";
+    }
+
     // JPEG and HEIC can both carry an Exif-only phone orientation. The pixels,
     // metadata and reported decode geometry must all become upright together;
     // otherwise an export is either sideways or rotated a second time by its

@@ -15,8 +15,9 @@ void require_decode_resolution(const ConvertOptions& options,
                                const DecodeInfo& decode);
 
 // Renders one decoded image, choosing the renderer from the domain the decoder
-// recorded. Public so the domain routing has a fixture-free test: passing an
-// SDR-domain image must produce a zero gain map whatever the file was called.
+// recorded. Public so the domain routing has a fixture-free test: an
+// SDR-domain image uses fixed-exposure photographic expansion, whatever the
+// file was called.
 //
 // This replaces an earlier helper that decided the same question from the file
 // extension, which classified an Ultra HDR JPEG that had fallen back to its SDR

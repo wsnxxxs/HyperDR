@@ -2,10 +2,10 @@
  *
  * The result used to be a text link in the settings column and a toast -- the
  * one moment the whole panel exists for, spent on a hyperlink. It is now a
- * card in the dock: the file's name and dimensions, the peak the renderer
+ * block in the control column's foot: the file name and dimensions, the peak
  * actually reached (the report's `rendered_peak`, the number the preview
  * admits it cannot compute), the verification the converter ran on its own
- * output, and the two ways the file can leave the machine.
+ * output, and one consistent download action.
  *
  * The poll loop is a single awaited function with an explicit exit rather than
  * a `setInterval` whose handle had to be cleared from four branches.
@@ -14,7 +14,6 @@
 import { api, ApiError } from "../core/api.js";
 import { store } from "../core/store.js";
 import { role, setText, debounce } from "../core/dom.js";
-import { touchQuery } from "../core/media.js";
 import { toOptions, OPTION_KEYS } from "../settings/schema.js";
 
 const POLL_INTERVAL_MS = 400;
@@ -30,7 +29,6 @@ export function mountRunner({ toast }) {
   const runButton = role("run");
   const cancelButton = role("cancel");
   const download = role("download");
-  const exportButton = role("export");
   const resultCard = role("result");
   const commandLine = role("command-line");
   const commandCopy = role("command-copy");
@@ -65,10 +63,6 @@ export function mountRunner({ toast }) {
     warn.hidden = !result.degradedNote;
     setText(warn, result.degradedNote || "");
     if (download.href !== result.downloadUrl) download.href = result.downloadUrl;
-    /* "Export" opens the OS save dialog. The capability flag says the browser
-     * has one; `touchQuery` says whether the hand holding the device wants it
-     * over the plain download, which on a phone or tablet it does not. */
-    exportButton.hidden = !(state.capabilities?.nativeOutputPicker && !touchQuery.matches);
   }
 
   /* Touching any setting after a run makes the card's file describe settings
@@ -133,7 +127,7 @@ export function mountRunner({ toast }) {
   function syncRunAvailability(state) {
     runButton.disabled =
       starting || state.uploading || state.optimizing || Boolean(state.jobId)
-      || !state.capabilities?.ready || !state.file;
+      || !state.capabilities?.ready || !state.file || !state.previewReady;
   }
 
   /* ── the run itself ───────────────────────────────────────────────── */
@@ -286,15 +280,11 @@ export function mountRunner({ toast }) {
           degradedNote: summary.degradedNote,
           optionsKey,
           downloadUrl,
-          delivered: false,
         };
         store.set({ result: completedResult });
         toast(summary.degradedNote
           ? "转换成功，但" + summary.degradedNote
           : "转换成功", Boolean(summary.degradedNote));
-        if (activeJobId === started.jobId && store.get().result === completedResult) {
-          await deliver(state.sessionId, completedResult);
-        }
       }
     } catch (error) {
       toast(error.message || "转换任务状态已丢失。", true);
@@ -318,69 +308,13 @@ export function mountRunner({ toast }) {
     catch (error) { toast(error.message, true); cancelButton.disabled = false; }
   });
 
-  /* ── delivery ─────────────────────────────────────────────────────── */
-
-  function markDelivered(expected = store.get().result) {
-    const result = store.get().result;
-    if (result && result === expected && !result.delivered) {
-      store.set({ result: { ...result, delivered: true } });
-    }
-  }
-
-  /* The desktop flow: a chosen folder means the file lands there on its own,
-   * without a click on the card. The phone flow stays the download link. */
-  async function deliver(sessionId, expectedResult) {
-    const selectionId = store.get().outputSelectionId;
-    if (!selectionId) return;
-    try {
-      const body = await api.export(sessionId, selectionId);
-      if (store.get().result !== expectedResult) return;
-      toast(`已导出到 ${body.path}`);
-      markDelivered(expectedResult);
-    } catch (error) {
-      if (store.get().result !== expectedResult) return;
-      store.set({ outputSelectionId: "", outputDirectory: "" });
-      toast("导出到文件夹失败：" + error.message, true);
-    }
-  }
-
-  download.addEventListener("click", () => markDelivered());
-
-  exportButton.addEventListener("click", async () => {
-    const state = store.get();
-    if (!state.result) return;
-    exportButton.disabled = true;
-    try {
-      let selectionId = state.outputSelectionId;
-      if (!selectionId) {
-        const picked = await api.selectOutput();
-        if (picked.cancelled) return;
-        store.set({ outputSelectionId: picked.selectionId, outputDirectory: picked.path });
-        selectionId = picked.selectionId;
-      }
-      try {
-        const body = await api.export(state.sessionId, selectionId);
-        if (store.get().result !== state.result) return;
-        toast(`已导出到 ${body.path}`);
-        markDelivered(state.result);
-      } catch (error) {
-        // A stale selection (process restarted, folder deleted) is a 400:
-        // drop it so the next click opens the picker again.
-        store.set({ outputSelectionId: "", outputDirectory: "" });
-        toast("导出失败：" + error.message + "，请重新选择文件夹。", true);
-      }
-    } catch (error) {
-      toast(error.message, true);
-    } finally {
-      exportButton.disabled = false;
-    }
-  });
+  /* The result card is the single delivery path on every platform. */
 
   /* ── wiring ───────────────────────────────────────────────────────── */
 
-  store.watchAny(["result", "capabilities"], syncResult, { immediate: true });
+  store.watchAny(["result"], syncResult, { immediate: true });
   store.watchAny(
-    ["uploading", "optimizing", "file", "jobId", "capabilities"],
+    ["uploading", "optimizing", "file", "previewReady", "jobId", "capabilities"],
     syncRunAvailability,
     { immediate: true },
   );
@@ -391,5 +325,4 @@ export function mountRunner({ toast }) {
       refreshCommand();
     }
   });
-  touchQuery.addEventListener?.("change", () => syncResult(store.get()));
 }

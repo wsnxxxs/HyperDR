@@ -79,8 +79,8 @@ export const store = createStore({
   uploadProgress: 0,
   /** The settings snapshot a successful run used, for the stale badge. */
   result: null,
-  outputSelectionId: "",
-  outputDirectory: "",
+  /** Whether the current file has a preview matching the current settings. */
+  previewReady: false,
 
   /* -- viewer ---------------------------------------------------------- */
   /** @type {"effect"|"original"|"split"} */

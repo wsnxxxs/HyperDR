@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 from unittest import mock
 
 from apps.panel.hyperdr_panel.handler import Handler, READ_TIMEOUT_SECONDS
-from apps.panel.hyperdr_panel import security
+from apps.panel.hyperdr_panel import security, server
 from apps.panel.hyperdr_panel.server import PanelServer
 
 
@@ -145,6 +145,16 @@ class ServerBoundaryTests(unittest.TestCase):
             server.process_request_thread(mock.Mock(), ("127.0.0.1", 1234))
         self.assertTrue(server.connection_slots.acquire(blocking=False))
         server.connection_slots.release()
+
+    def test_desktop_loopback_is_secure_context_without_tls_transport(self):
+        with mock.patch.object(server, "PanelServer") as constructor:
+            instance = constructor.return_value
+            server.build_server("127.0.0.1", 0, "secret-token", "http", desktop=True)
+
+        context = instance.context
+        self.assertTrue(context.secure_context_expected)
+        self.assertFalse(context.transport_secure)
+        self.assertTrue(context.native_path_input)
 
 
 if __name__ == "__main__":

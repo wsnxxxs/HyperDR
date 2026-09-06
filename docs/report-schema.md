@@ -36,8 +36,9 @@ the renderer made about the scene; for the other two it is nothing but the
 creative offset the caller asked for. Only a scene-referred file gets
 content-selected headroom; a display-referred HDR file's `headroom_stops` is
 its `input_headroom` capped by `--headroom`/`--headroom-max` and scaled by
-`--gain-strength`, and a display-referred SDR file's is always zero, because an
-SDR input is never given highlight range it did not arrive with.
+`--gain-strength`. A display-referred SDR file has no measured input headroom,
+but its output uses the requested range as a creative expansion budget, so its
+reported `headroom_stops` can be non-zero while `input_headroom` remains 1.
 
 For `unknown`, `input_headroom` is the schema-safe sentinel `1` and must not
 be interpreted. Otherwise, `input_headroom` is the linear multiple of diffuse white the input's container

@@ -16,6 +16,20 @@ PhotoRenditions renditions_from_gain_map(GainMapResult images, bool include_hdr)
   out.sdr=std::move(images.base_linear); out.stats=images.stats;
   out.clamp_srgb=images.clamp_srgb;
   if(!include_hdr) {out.stats.headroom_stops=0;out.stats.headroom_linear=1;}
+  measure_rendition_stats(out.stats,out.sdr,out.hdr);
+  return out;
+}
+PhotoRenditions render_graded_gain_map(GainMapResult& images,
+    const ColorLutOptions& grade, bool include_hdr, const ColorLut* lut) {
+  if (!grade.path.empty() && grade.strength>0) {
+    PhotoRenditions base;
+    base.sdr=std::move(images.base_linear);
+    base.clamp_srgb=images.clamp_srgb;
+    apply_rendition_lut(base,grade,lut);
+    images.base_linear=std::move(base.sdr);
+  }
+  auto out=renditions_from_gain_map(images,include_hdr);
+  if (include_hdr) images.stats=out.stats;
   return out;
 }
 GainMapResult gain_map_from_renditions(PhotoRenditions images) {
@@ -53,6 +67,12 @@ GainMapResult gain_map_from_renditions(PhotoRenditions images) {
   out.headroom_stops=maximum; out.stats=images.stats;
   out.stats.gain_max_stops=maximum; out.stats.gain_gamma=gamma;
   measure_quantized_gain(out.stats,out.gain_map,maximum,gamma,images.stats.headroom_stops);
+  // Release the requested HDR pixels before allocating the actual quantized,
+  // bilinearly reconstructed rendition. Report the latter's peak and spill.
+  images.hdr={};
+  const auto reconstructed=reconstruct_gain_map(out.base_linear,out.gain_map,
+      out.metadata,out.headroom_stops,nullptr,out.clamp_srgb);
+  measure_rendition_stats(out.stats,out.base_linear,reconstructed,images.below_knee);
   return out;
 }
 }  // namespace hyperdr

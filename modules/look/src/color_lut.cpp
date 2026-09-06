@@ -32,16 +32,7 @@ bool sdr_space(LutSpace s) {
   return s == LutSpace::Srgb || s == LutSpace::DisplayP3 || s == LutSpace::Rec709;
 }
 void refresh_stats(PhotoRenditions& image) {
-  const auto& pixels=image.hdr.pixels.empty()?image.sdr:image.hdr;
-  float peak=1;
-  for(std::size_t i=0;i<pixels.pixels.size();i+=3)
-    peak=std::max(peak,p3_luminance(pixels.pixels[i],pixels.pixels[i+1],pixels.pixels[i+2]));
-  image.stats.rendered_peak=peak;
-  if(image.hdr.pixels.empty()) {
-    image.stats.headroom_stops=0; image.stats.headroom_linear=1;
-  }
-  image.stats.headroom_utilization=image.stats.headroom_linear>1
-      ? std::clamp((peak-1)/(image.stats.headroom_linear-1),0.0F,1.0F):0;
+  measure_rendition_stats(image.stats, image.sdr, image.hdr, image.below_knee);
 }
 std::array<float,3> multiply(std::array<float,3> a, const std::array<float,9>& m) {
   return {m[0]*a[0]+m[1]*a[1]+m[2]*a[2], m[3]*a[0]+m[4]*a[1]+m[5]*a[2],
@@ -181,7 +172,10 @@ void apply_rendition_lut(PhotoRenditions& out, const ColorLutOptions& grade, con
       const auto i=(static_cast<std::size_t>(y)*out.sdr.width+x)*3;
       const std::array<float,3> before{out.sdr.pixels[i],out.sdr.pixels[i+1],out.sdr.pixels[i+2]};
       const float base_y=p3_luminance(before[0],before[1],before[2]);
-      const float ratio=out.hdr.pixels.empty()?1: p3_luminance(out.hdr.pixels[i],out.hdr.pixels[i+1],out.hdr.pixels[i+2])/std::max(1e-6F,base_y);
+      // At black there is no measured ratio. Regularize toward unity so a
+      // lifted black meets neighbouring dark pixels continuously.
+      const float ratio=out.hdr.pixels.empty()?1:
+          (p3_luminance(out.hdr.pixels[i],out.hdr.pixels[i+1],out.hdr.pixels[i+2])+1e-6F)/(base_y+1e-6F);
       auto rgb=decode_lut_space(lut.sample(encode_lut_space(before,grade.input)),grade.output);
       for(auto& c:rgb) c=std::clamp(c,0.0F,1.0F);
       if(out.clamp_srgb) rgb=compress_linear_p3_to_srgb(rgb[0],rgb[1],rgb[2]);
@@ -225,6 +219,8 @@ PhotoRenditions render_graded_photo(const FloatImage& source,
     return out;
   }
   FloatImage working;
+  FloatImage developed_sdr;
+  std::vector<std::uint8_t> developed_below_knee;
   float exposure_ev=0;
   float working_headroom=1;
   std::optional<float> developed_stops;
@@ -247,6 +243,10 @@ PhotoRenditions render_graded_photo(const FloatImage& source,
     // HLG/PQ specifies the LUT's signal encoding, not a request to expand SDR.
     // Develop only the requested rendition before entering that encoding.
     auto developed=render_renditions(source,options,capture,input,target,analysis,preparation);
+    if (target==RenderTarget::Hdr) {
+      developed_sdr=std::move(developed.sdr);
+      developed_below_knee=std::move(developed.below_knee);
+    }
     working=target==RenderTarget::Sdr ? std::move(developed.sdr) : std::move(developed.hdr);
     exposure_ev=developed.stats.exposure_ev;
     working_headroom=developed.stats.headroom_linear;
@@ -283,6 +283,21 @@ PhotoRenditions render_graded_photo(const FloatImage& source,
     adjusted.gain_strength=1;
   }
   auto out=render_renditions(working,adjusted,capture,graded_input,target);
+  if (!developed_sdr.pixels.empty()) {
+    // Grade the existing SDR endpoint independently. Re-splitting the HDR
+    // endpoint would apply a second, different tone map even for identity LUTs.
+    transform(developed_sdr);
+    InputDescription sdr_input{InputDomain::kDisplayReferredSdr,1};
+    if (grade.output==LutSpace::Hlg || grade.output==LutSpace::Pq) {
+      const auto white=transform_rgb({1,1,1});
+      float headroom=std::max(1.0F,p3_luminance(white[0],white[1],white[2]));
+      for (std::size_t i=0;i<developed_sdr.pixels.size();i+=3)
+        headroom=std::max(headroom,p3_luminance(developed_sdr.pixels[i],developed_sdr.pixels[i+1],developed_sdr.pixels[i+2]));
+      if (headroom>1) sdr_input={InputDomain::kDisplayReferredHdr,headroom};
+    }
+    out.sdr=render_renditions(developed_sdr,adjusted,capture,sdr_input,RenderTarget::Sdr).sdr;
+    out.below_knee=std::move(developed_below_knee);
+  }
   out.stats.exposure_ev=exposure_ev;
   if(grade.strength<1) {
     auto original=baseline();

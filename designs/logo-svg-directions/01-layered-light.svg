@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">HyperDR — 叠光</title>
+  <desc id="desc">深炭黑圆角底，两片向右上方倾斜的银白与蓝灰光学薄片，完整轮廓与中央暗缝形成鲜明标识。</desc>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#23272b"/><stop offset="1" stop-color="#101215"/></linearGradient>
+    <linearGradient id="silver" x1="0" y1="0" x2=".8" y2="1"><stop stop-color="#ffffff"/><stop offset=".48" stop-color="#e6edf2"/><stop offset="1" stop-color="#95a9b7"/></linearGradient>
+    <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#acd7e8"/><stop offset=".48" stop-color="#6dabc9"/><stop offset="1" stop-color="#3f6c93"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".12"/>
+  <g transform="rotate(-38 256 256)">
+    <rect x="98" y="267" width="316" height="100" rx="34" fill="#000" opacity=".22"/>
+    <rect x="98" y="259" width="316" height="100" rx="34" fill="url(#blue)"/>
+    <path d="M132 260H380" fill="none" stroke="#cee9f4" stroke-opacity=".55" stroke-width="2"/>
+    <rect x="98" y="145" width="316" height="100" rx="34" fill="url(#silver)"/>
+    <path d="M132 146H380" fill="none" stroke="#fff" stroke-opacity=".8" stroke-width="2"/>
+  </g>
+</svg>

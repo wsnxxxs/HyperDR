@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">HyperDR — 月晕</title>
+  <desc id="desc">微弱的月盘与柔和光晕托住一弯流动亮面，月光氛围更明显。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#1b2330"/><stop offset=".6" stop-color="#101723"/><stop offset="1" stop-color="#0c111b"/></linearGradient>
+    <linearGradient id="body" x1=".15" y1=".05" x2=".72" y2="1"><stop stop-color="#e3edf8"/><stop offset=".3" stop-color="#acc4e0"/><stop offset=".68" stop-color="#6683b0"/><stop offset="1" stop-color="#344966"/></linearGradient>
+    <linearGradient id="face" x1=".2" y1=".15" x2=".8" y2="1"><stop stop-color="#fffdf2"/><stop offset=".35" stop-color="#eef1f3"/><stop offset=".65" stop-color="#c9d8eb"/><stop offset="1" stop-color="#748eaf"/></linearGradient>
+    <linearGradient id="rim" x1=".3" y1="0" x2=".4" y2="1"><stop stop-color="#fffdf1" stop-opacity=".95"/><stop offset=".5" stop-color="#e8efff" stop-opacity=".45"/><stop offset="1" stop-color="#a9c5ff" stop-opacity="0"/></linearGradient>
+    <radialGradient id="halo"><stop offset=".35" stop-color="#98b2e7" stop-opacity=".12"/><stop offset=".65" stop-color="#7a98d3" stop-opacity=".055"/><stop offset="1" stop-color="#7799d6" stop-opacity="0"/></radialGradient>
+    <radialGradient id="moon-disc" cx=".28" cy=".34" r=".8"><stop stop-color="#859bbe" stop-opacity=".13"/><stop offset=".8" stop-color="#667d9e" stop-opacity=".035"/><stop offset="1" stop-color="#586b85" stop-opacity=".01"/></radialGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#d8e4ff" stroke-opacity=".12"/>
+  <circle cx="259" cy="264" r="179" fill="url(#halo)"/>
+  <circle cx="261" cy="258" r="119" fill="url(#moon-disc)"/>
+  <path d="M392 137C343 164 300 158 250 175C188 196 142 243 144 298C146 355 201 392 259 371C303 355 336 321 351 282C315 327 266 339 236 313C206 286 220 247 261 216C304 184 360 178 392 137Z" fill="url(#body)"/>
+  <path d="M392 137C343 164 300 158 250 175C188 196 142 243 144 298C146 355 201 392 259 371C207 376 178 345 184 305C191 258 233 226 279 201C323 177 360 166 392 137Z" fill="url(#face)"/>
+  <path d="M144 298C142 243 188 196 250 175C300 158 343 164 392 137" fill="none" stroke="url(#rim)" stroke-width="2"/>
+</svg>

@@ -1,0 +1,18 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+const moduleText = fs.readFileSync(new URL("../../apps/panel/web/js/preview/histogram.js", import.meta.url));
+const { histogramFromPlane, toneToNorm, distribution } = await import(`data:text/javascript;base64,${moduleText.toString("base64")}`);
+const values = new Float32Array([0, 0, 0, .18, .18, .18, 1, 1, 1, 4, 4, 4, 32, 32, 32]);
+const hist = histogramFromPlane(values, 5, 1);
+for (const channel of ["red", "green", "blue", "luma"]) assert.equal(hist[channel].reduce((a, b) => a + b), 5);
+assert.equal(hist.luma[255], 1, "Extended values are retained in the overflow bin");
+assert.ok(Math.abs(toneToNorm(1) - .7) < 1e-12);
+assert.ok(Math.abs(toneToNorm(4) - .85) < 1e-12);
+assert.equal(toneToNorm(16), 1);
+const doubled = histogramFromPlane(new Float32Array([...values, ...values]), 10, 1);
+assert.deepEqual(distribution(hist, "luma"), distribution(doubled, "luma"), "Different preview sample counts use the same percentage scale");
+const sourceCounts = [...hist.luma];
+histogramFromPlane(new Float32Array([8, 8, 8]), 1, 1);
+assert.deepEqual([...hist.luma], sourceCounts, "Computing a new effect does not mutate the reference");
+assert.ok(distribution(hist, "luma").every(Number.isFinite));
+console.log("Histogram: native HDR bins, overflow, stable axis and sample normalization passed");

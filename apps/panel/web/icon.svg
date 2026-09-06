@@ -1,143 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">HyperDR — 月弧 · 放大并右上微移</title>
+  <desc id="desc">在放大 10% 的月弧版本基础上，主体向右移动 8 像素、向上移动 8 像素，保持大小、朝向、材质与底座不变。</desc>
   <defs>
-    <!-- Soft Matte Darkroom Canvas Background Gradient (Reduced Contrast) -->
-    <linearGradient id="tile-bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#151619"/>
-      <stop offset="50%" stop-color="#111215"/>
-      <stop offset="100%" stop-color="#0e0f11"/>
-    </linearGradient>
-
-    <!-- Canvas Inner Specular Rim (Soft & Delicate) -->
-    <linearGradient id="tile-rim" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.10"/>
-      <stop offset="50%" stop-color="#ffffff" stop-opacity="0.04"/>
-      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.01"/>
-    </linearGradient>
-
-    <!-- Squircle Clip Path -->
-    <clipPath id="squircle-clip">
-      <rect x="32" y="32" width="960" height="960" rx="224"/>
-    </clipPath>
-
-    <!-- LAYER 1 (+14px Elevation): Blue Luminous Glass Plane Fill -->
-    <linearGradient id="blue-plane-fill" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0284c7" stop-opacity="0.94"/>
-      <stop offset="30%" stop-color="#38bdf8" stop-opacity="0.90"/>
-      <stop offset="70%" stop-color="#60a5fa" stop-opacity="0.94"/>
-      <stop offset="100%" stop-color="#0369a1" stop-opacity="0.90"/>
-    </linearGradient>
-
-    <!-- Blue Plane Specular Rim -->
-    <linearGradient id="blue-plane-rim" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#bae6fd" stop-opacity="0.75"/>
-      <stop offset="50%" stop-color="#38bdf8" stop-opacity="0.45"/>
-      <stop offset="100%" stop-color="#0284c7" stop-opacity="0.2"/>
-    </linearGradient>
-
-    <!-- LAYER 2 (+28px Elevation): White Frosted Optical Glass Plane Fill -->
-    <linearGradient id="white-plane-fill" x1="100%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.98"/>
-      <stop offset="25%" stop-color="#f8fafc" stop-opacity="0.92"/>
-      <stop offset="50%" stop-color="#e2e8f0" stop-opacity="0.80"/>
-      <stop offset="75%" stop-color="#cbd5e1" stop-opacity="0.85"/>
-      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.95"/>
-    </linearGradient>
-
-    <!-- White Plane Razor-Sharp Specular Light Blade -->
-    <linearGradient id="white-specular-edge" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.35"/>
-      <stop offset="20%" stop-color="#ffffff" stop-opacity="0.9"/>
-      <stop offset="70%" stop-color="#ffffff" stop-opacity="0.85"/>
-      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.3"/>
-    </linearGradient>
-
-    <!-- 1. Elevation +14px: Soft, Gentle Diffuse Shadow & Subtle Ambient Caustics -->
-    <filter id="elevation-14-shadow" x="-40%" y="-40%" width="180%" height="180%">
-      <!-- Diffuse Soft Contact Shadow -->
-      <feDropShadow dx="0" dy="10" stdDeviation="18" flood-color="#000000" flood-opacity="0.28"/>
-      <!-- Soft Cyan Ambient Glow Spill -->
-      <feDropShadow dx="2" dy="8" stdDeviation="28" flood-color="#0284c7" flood-opacity="0.25"/>
-    </filter>
-
-    <!-- 2. Elevation +28px: Smooth, Non-Aggressive Floating Shadow -->
-    <filter id="elevation-28-shadow" x="-40%" y="-40%" width="180%" height="180%">
-      <!-- Gentle Soft Contact Shadow onto Blue Plane -->
-      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000000" flood-opacity="0.32"/>
-      <!-- Wide Diffuse Ambient Occlusion -->
-      <feDropShadow dx="0" dy="24" stdDeviation="32" flood-color="#000000" flood-opacity="0.18"/>
-    </filter>
-
-    <filter id="specular-glow" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur stdDeviation="6" result="blur"/>
-      <feMerge>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
+    <linearGradient id="bg" x1="0" y1="0" x2=".85" y2="1"><stop stop-color="#1b2330"/><stop offset=".5" stop-color="#121a27"/><stop offset="1" stop-color="#0c121d"/></linearGradient>
+    <radialGradient id="body" gradientUnits="userSpaceOnUse" cx="201" cy="181" r="272"><stop stop-color="#dce7f3"/><stop offset=".3" stop-color="#b8cae0"/><stop offset=".58" stop-color="#8ea9c9"/><stop offset=".82" stop-color="#647fa6"/><stop offset="1" stop-color="#405979"/></radialGradient>
+    <radialGradient id="face" gradientUnits="userSpaceOnUse" cx="183" cy="165" r="300"><stop stop-color="#fffef7"/><stop offset=".26" stop-color="#f4f5f3"/><stop offset=".49" stop-color="#e3e9ee"/><stop offset=".72" stop-color="#c0cede"/><stop offset=".88" stop-color="#9bafc8"/><stop offset="1" stop-color="#718aac"/></radialGradient>
+    <linearGradient id="rim" gradientUnits="userSpaceOnUse" x1="192" y1="157" x2="322" y2="367"><stop stop-color="#ffffff" stop-opacity=".58"/><stop offset=".42" stop-color="#e6eefb" stop-opacity=".23"/><stop offset="1" stop-color="#a8c3e5" stop-opacity="0"/></linearGradient>
+    <radialGradient id="halo"><stop offset=".25" stop-color="#a5c3f0" stop-opacity=".06"/><stop offset=".6" stop-color="#87a9dc" stop-opacity=".025"/><stop offset="1" stop-color="#7598ce" stop-opacity="0"/></radialGradient>
+    <linearGradient id="tile-rim" x2="1" y2="1"><stop stop-color="#d4e1f2" stop-opacity=".16"/><stop offset=".55" stop-color="#b6c9e4" stop-opacity=".055"/><stop offset="1" stop-color="#91a8cd" stop-opacity=".025"/></linearGradient>
   </defs>
-
-  <!-- 1. Background Rounded Squircle Canvas -->
-  <rect x="32" y="32" width="960" height="960" rx="224" fill="url(#tile-bg)"/>
-  <rect x="32" y="32" width="960" height="960" rx="224" fill="none" stroke="url(#tile-rim)" stroke-width="2"/>
-
-  <!-- 2. Two Parallel Floating Glass Planes in Dimensional Space (Dead-Center Balanced) -->
-  <g clip-path="url(#squircle-clip)">
-    <!-- Rotated 3D Axis (-38 degrees centered at 512, 512) -->
-    <g transform="rotate(-38 512 512)">
-
-      <!-- LAYER 1 (Elevation +14px): Blue Luminous Glass Plane -->
-      <g filter="url(#elevation-14-shadow)">
-        <!-- Base Blue Plane (height=280, rx=140 matching white plane) -->
-        <rect x="-140" y="495" width="1300" height="280" rx="140"
-              fill="url(#blue-plane-fill)"/>
-
-        <!-- Blue Plane Internal Glass Rim -->
-        <rect x="-140" y="495" width="1300" height="280" rx="140"
-              fill="none"
-              stroke="url(#blue-plane-rim)"
-              stroke-width="2"
-              opacity="0.75"/>
-
-        <!-- Top Specular Highlight Edge on Blue Plane -->
-        <path d="M -90 497 L 1110 497"
-              stroke="#7dd3fc"
-              stroke-width="2.5"
-              stroke-linecap="round"
-              opacity="0.8"/>
-      </g>
-
-      <!-- LAYER 2 (Elevation +28px): Top White Frosted Optical Glass Plane -->
-      <g filter="url(#elevation-28-shadow)">
-        <!-- Base White Plane (height=280, rx=140) -->
-        <rect x="-140" y="245" width="1300" height="280" rx="140"
-              fill="url(#white-plane-fill)"/>
-
-        <!-- White Plane Glass Sheen Outline -->
-        <rect x="-140" y="245" width="1300" height="280" rx="140"
-              fill="none"
-              stroke="url(#white-specular-edge)"
-              stroke-width="2"
-              opacity="0.8"/>
-
-        <!-- Razor-Sharp Top Specular Light Blade -->
-        <path d="M -90 247 L 1110 247"
-              stroke="#ffffff"
-              stroke-width="4"
-              stroke-linecap="round"
-              filter="url(#specular-glow)"/>
-        <path d="M 80 247 L 940 247"
-              stroke="#ffffff"
-              stroke-width="2"
-              stroke-linecap="round"/>
-
-        <!-- Bottom Rim Reflection (Refracting underlying blue plane) -->
-        <path d="M -70 523 L 1090 523"
-              stroke="#bae6fd"
-              stroke-width="1.5"
-              stroke-linecap="round"
-              opacity="0.5"/>
-      </g>
-
-    </g>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="url(#tile-rim)"/>
+  <ellipse cx="251" cy="259" rx="179" ry="172" fill="url(#halo)"/>
+  <g transform="translate(260 258) scale(1.1) translate(-252 -266)">
+  <path d="M85.979 307.557C94.998 231.935 152.685 174.02 228.414 158.851C310.107 141.355 377.488 190.649 383.128 260.878C388.636 333.34 319.789 390.586 240.668 387.628C298.907 372.755 326.041 323.758 313.596 277.313C300.785 229.503 249.653 208.064 195.878 223.206C148.067 236.017 118.639 270.988 85.979 307.557Z" fill="url(#body)"/>
+  <path d="M85.979 307.557C94.998 231.935 152.685 174.02 228.414 158.851C310.107 141.355 377.488 190.649 383.128 260.878C388.636 333.34 319.789 390.586 240.668 387.628C316.397 372.462 358.959 312.742 340.621 252.502C323.749 197.728 266.654 178.62 210.146 194.493C151.774 211.598 111.881 256.693 85.979 307.557Z" fill="url(#face)"/>
+  <path d="M85.979 307.557C94.998 231.935 152.685 174.02 228.414 158.851C310.107 141.355 377.488 190.649 383.128 260.878C388.636 333.34 319.789 390.586 240.668 387.628" fill="none" stroke="url(#rim)" stroke-width=".9"/>
   </g>
 </svg>

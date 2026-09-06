@@ -11,10 +11,10 @@
 //
 // The cache is a plain directory of self-describing files rather than process
 // state, so it survives the converter being a short-lived subprocess and needs
-// no daemon. Entries are validated against the source file's size and
-// modification time, and a corrupt or truncated file is simply a miss.
+// no daemon. Entries are keyed by the source content and decode recipe, and a
+// corrupt or truncated file is simply a miss.
 
-#include "hyperdr/codec/image_source.hpp"
+#include "hyperdr/app/settings.hpp"
 
 #include <cstdint>
 #include <filesystem>
@@ -26,12 +26,26 @@ namespace hyperdr {
 // change the decoded pixels: highlight recovery, half-size demosaic, and the
 // preview bound.
 //
-// The key includes a content hash of the input, so replacing a file with
-// different pixels at the same size and modification time is a miss. That
-// costs one sequential read of the source per lookup, which is small against
-// the decode it is protecting.
+// The source identity includes its content digest. A caller such as the panel
+// that already hashed an upload may pass it to avoid a second 300 MB read;
+// standalone CLI callers leave it empty and get the same correctness by hashing
+// here.
 [[nodiscard]] std::string decode_cache_key(const std::filesystem::path& input,
-                                           std::string_view variant);
+                                           std::string_view variant,
+                                           std::string_view source_sha256 = {});
+
+// Builds the decode-only cache variant from the same settings table used by
+// the CLI and report. Look and encoding controls are excluded; RAW development
+// controls, the preview size, and calibration resources are included.
+[[nodiscard]] std::string decode_cache_variant(
+    const ConvertOptions& options, const RawDecodeOptions& raw);
+
+// Decode and apply the requested pre-look size bound, reusing the optional
+// on-disk cache. Both batch conversion and `preview-frame` go through this
+// entry point so the panel cannot accidentally bypass the cache again.
+[[nodiscard]] DecodedImage decode_cached_image(
+    const std::filesystem::path& input, const ConvertOptions& options,
+    const RawDecodeOptions& raw);
 
 [[nodiscard]] std::filesystem::path decode_cache_path(
     const std::filesystem::path& directory, const std::string& key);

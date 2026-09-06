@@ -10,6 +10,8 @@
 // entry point, and the codec-less build defines them as throwing stubs. The
 // call graph is then identical and only the leaves differ.
 
+#include <string>
+
 namespace hyperdr {
 
 #if HYPERDR_WITH_CODECS
@@ -21,5 +23,9 @@ inline constexpr bool kCodecsAvailable = false;
 // Throws a uniform, actionable message. `capability` names what was attempted,
 // for example "RAW decoding".
 [[noreturn]] void fail_without_codecs(const char* capability);
+
+// Identity of the running converter and its side-by-side codec DLLs. Resume
+// state must change when a rebuild or a codec upgrade can change encoded bytes.
+[[nodiscard]] std::string codec_runtime_fingerprint();
 
 }  // namespace hyperdr

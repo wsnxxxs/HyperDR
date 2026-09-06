@@ -12,9 +12,11 @@
 // validation, help, the fingerprint, the report and the schema the panel
 // consumes are all generated from that description.
 //
-// `HyperDR schema --json` emits this table so the panel derives its own
-// validation instead of mirroring it. schema/settings.json is that output,
-// checked in, and CI fails if the two disagree.
+// `HyperDR schema --json` emits this table so the Python panel derives its
+// validation instead of mirroring the converter vocabulary. The browser still
+// has a small UI adapter for labels, widgets and request mapping. The generated
+// schema/settings.json is checked in for the Python backend and CI, which fails
+// if it disagrees with the converter output.
 
 #include "hyperdr/app/settings.hpp"
 #include "hyperdr/foundation/json.hpp"

@@ -24,7 +24,6 @@ from .command import build_argv
 from .concurrency import Busy
 from .formats import SUPPORTED_EXTENSIONS
 from .config import IS_WINDOWS, REPO_ROOT
-from .curve import look_curve
 from .executable import detect_exe
 from .schema import SETTINGS
 from .native_preview import (
@@ -68,10 +67,10 @@ class Context:
     # Folders the user picked through the native dialog, by opaque id. Paths are
     # never accepted from the browser: only ids issued here.
     output_selections: dict[str, Path]
-    secure_context_expected: bool = False
     # Whether the browser transport itself is TLS. A loopback HTTP page inside
     # the desktop WebView is still a trustworthy secure context, but it is not
-    # an encrypted transport; keep those facts separate in /api/state.
+    # an encrypted transport, and only the transport fact is reported: the page
+    # reads its own `window.isSecureContext` for the other half.
     transport_secure: bool = False
     # Injected so the native dialog, which only exists on Windows and must run
     # on its own thread, is not a hard dependency of the API.
@@ -81,8 +80,25 @@ class Context:
     native_path_input: bool = False
 
 
-def error(message: str, status: int = 400) -> Response:
-    return Response(status=status, payload={"error": str(message)})
+def error(message: str, status: int = 400, code: str = "") -> Response:
+    """`code` is a stable identifier the browser can translate.
+
+    The prose stays in the payload either way: an unknown code has to degrade
+    to something readable, and non-browser clients never had a catalogue.
+    """
+    payload: dict[str, str] = {"error": str(message)}
+    # An exception may carry its own code (see `coded`), which saves every
+    # generic `except ValueError` handler from having to name one.
+    code = code or getattr(message, "code", "")
+    if code:
+        payload["code"] = code
+    return Response(status=status, payload=payload)
+
+
+def coded(exc: Exception, code: str) -> Exception:
+    """Tag an exception with a catalogue code. `raise coded(ValueError(...), ...)`."""
+    exc.code = code
+    return exc
 
 
 def _display_command(argv: list[str]) -> str:
@@ -90,25 +106,36 @@ def _display_command(argv: list[str]) -> str:
     return " ".join(f'"{part}"' if " " in part else part for part in argv)
 
 
-def _prepare_model_options(raw_options: dict | None, *, preview: bool = False):
-    """Apply the model slider to the command before it is built."""
-    options = dict(raw_options or {})
-    use_model = options.pop("useModel", False)
-    if not isinstance(use_model, bool):
+def _validated_use_model(value) -> bool:
+    if not isinstance(value, bool):
         raise ValueError("useModel must be a boolean")
-    model_strength = options.pop("modelStrength", 1.0)
-    if (isinstance(model_strength, bool)
-            or not isinstance(model_strength, (int, float))
-            or not math.isfinite(model_strength)
-            or not 0 <= model_strength <= 1):
+    return value
+
+
+def _validated_model_strength(value) -> float:
+    # bool is an int subclass, and "true" is not a strength.
+    if (isinstance(value, bool) or not isinstance(value, (int, float))
+            or not math.isfinite(value) or not 0 <= value <= 1):
         raise ValueError("modelStrength must be a number in [0, 1]")
+    return value
+
+
+def _prepare_model_options(raw_options: dict | None, *, preview: bool = False):
+    """Mark a validated model request for the native command builder."""
+    options = dict(raw_options or {})
+    # This is an internal routing bit, never a browser-controlled switch.
+    options.pop("_model_mode", None)
+    use_model = _validated_use_model(options.pop("useModel", False))
+    model_strength = _validated_model_strength(options.pop("modelStrength", 1.0))
     if use_model:
-        # hdrStrength is the mathematical-mode control. In model mode it is
-        # only the plumbing slot used by the external-gain renderer.
+        # Keep the mode bit in the private command payload. The command builder
+        # turns it into `--ai-model embedded`; it is never accepted from the
+        # browser as an independent routing switch.
+        options["_model_mode"] = True
+        # hdrStrength is the shared plumbing slot for model strength. Manual
+        # look controls remain in the browser payload for stale-result display,
+        # but the native AI command branch deliberately omits them.
         options["hdrStrength"] = model_strength
-        if preview:
-            options["external_gain"] = "<任务输出>/.model/model-gain.f32"
-            options["external_gain_report"] = "<任务输出>/.model/model-gain.json"
     return options, use_model
 
 
@@ -124,9 +151,7 @@ def state(context: Context, _query: dict) -> Response:
     return Response(payload={
         "ready": bool(exe) and Path(exe).is_file(),
         "os": "windows" if IS_WINDOWS else "posix",
-        "nativeOutputPicker": IS_WINDOWS,
         "nativePathInput": context.native_path_input,
-        "secureContextExpected": context.secure_context_expected,
         "transportSecure": context.transport_secure,
         "hdrPreviewRequiresSecureContext": True,
         "previewMaxEdge": MAX_EDGE,
@@ -150,6 +175,8 @@ def preview(_context: Context, query: dict) -> Response:
         options = json.loads(_first(query, "options", "{}"))
         if not isinstance(options, dict):
             raise ValueError("preview options must be an object")
+        # Internal mode routing is re-derived from the validated useModel bit.
+        options.pop("_model_mode", None)
         if "external_gain" in options or "external_gain_report" in options:
             raise ValueError("preview paths are server-controlled")
     except (json.JSONDecodeError, TypeError, ValueError) as exc:
@@ -173,43 +200,45 @@ def preview(_context: Context, query: dict) -> Response:
     except (OSError, ValueError) as exc:
         return error(exc, status=404)
     try:
-        use_model = options.pop("useModel", False)
-        if not isinstance(use_model, bool):
-            raise ValueError("useModel must be a boolean")
+        use_model = _validated_use_model(options.pop("useModel", False))
         if use_model:
-            strength = options.get("modelStrength", 1.0)
-            if (isinstance(strength, bool) or not isinstance(strength, (int, float))
-                    or not math.isfinite(strength) or not 0 <= strength <= 1):
-                raise ValueError("modelStrength must be a number in [0, 1]")
+            # Read rather than popped: `modelStrength` stays in the options dict
+            # because it takes part in the preview cache key. The command
+            # builders pop it instead, which is why this is not
+            # `_prepare_model_options` -- only the predicates are shared.
+            strength = _validated_model_strength(options.get("modelStrength", 1.0))
+            options["_model_mode"] = True
             options["hdrStrength"] = strength
-            model_dir = session.session_dir(
-                _first(query, "id"), "output") / ".model-preview"
-            options["external_gain"] = model_dir / "model-gain.f32"
-            options["external_gain_report"] = model_dir / "model-gain.json"
-            if (not options["external_gain"].is_file()
-                    or not options["external_gain_report"].is_file()):
-                return error("模型预览已失效，请重新优化。", status=409)
+            model_state = model.status()
+            if not model_state.get("ready"):
+                return error(model_state.get("reason", "模型尚未就绪。"), status=409,
+                             code="model_not_ready")
         options["highlightRecovery"] = highlight_recovery
+        session_id = _first(query, "id")
+        source_digest = session.input_digest(session_id)
+        # The digest-named directory gives the native cache a stable, already
+        # computed content identity without making every slider move read the
+        # whole RAW again. Session expiry removes the cache with the image.
+        # `input_path` above has already validated the session id. Build this
+        # path without a second session lookup so preview admission tests and
+        # lightweight API embeddings can replace the input resolver alone.
+        decode_cache = (session.WORK_ROOT / session_id / "output" /
+                        ".decode-cache")
         data, metadata = preview_for(
-            source, options, requested_edge, session.input_digest(_first(query, "id")))
+            source, options, requested_edge, source_digest, decode_cache)
     except Busy as exc:
         # Distinct from a missing or broken image: the request was refused, not
         # answered, and a client may retry it.
-        return error(exc, status=exc.status)
+        return error(exc, status=exc.status, code=exc.code)
     except PreviewCancelled as exc:
         # The browser immediately requested a newer slider state. This is a
         # normal lifecycle event, not an invalid image and not a red toast.
         return error(exc, status=499)
     except (OSError, ValueError) as exc:
         return error(exc, status=422)
-    return Response(body=data, content_type="application/vnd.hyperdr.preview", headers={
-        "X-Preview-Width": str(metadata["width"]),
-        "X-Preview-Height": str(metadata["height"]),
-        "X-Preview-Max-Edge": str(requested_edge),
-        "X-Preview-Status": str(metadata.get("status", "error")),
-        "X-Preview-Degradation-Reasons": ",".join(
-            metadata.get("degradationReasons") or []),
-    })
+    # No headers: width, height, status and degradation reasons all travel in
+    # the HYPREV1 packet body, which is what the browser actually parses.
+    return Response(body=data, content_type="application/vnd.hyperdr.preview")
 
 
 def job_log(_context: Context, query: dict) -> Response:
@@ -254,10 +283,10 @@ def open_native_path(context: Context, body: dict) -> Response:
     session_id = str(body.get("sessionId") or "")
     raw_path = body.get("path")
     try:
-        with upload_is_allowed(session_id):
+        with job.upload_slot():
             source, size = session.set_external_input(session_id, raw_path)
     except Busy as exc:
-        return error(exc, status=429)
+        return error(exc, status=429, code=exc.code)
     except (OSError, ValueError, TypeError) as exc:
         return error(exc)
     # Do not return the source path to the browser. The name and size are enough
@@ -292,23 +321,13 @@ def command_preview(_context: Context, body: dict) -> Response:
     })
 
 
-def curve(_context: Context, body: dict) -> Response:
-    try:
-        exe = detect_exe()
-        if not exe:
-            raise ValueError("找不到 HyperDR 可执行文件。")
-        samples = int(body.get("samples") or 257)
-        if not 2 <= samples <= 4096:
-            raise ValueError("采样点数必须在 2 到 4096 之间。")
-        return Response(payload=look_curve(exe, dict(body.get("options") or {}), samples))
-    except Busy as exc:
-        return error(exc, status=exc.status)
-    except REQUEST_ERRORS as exc:
-        return error(exc)
-
-
 def model_preview(_context: Context, body: dict) -> Response:
-    """Generate the spatial model gain only after the user requests it."""
+    """Probe the native model on the button's existing API call.
+
+    The endpoint keeps its legacy raw-grid response shape so the browser
+    interaction stays unchanged, but the bytes now come from the native
+    ``model-gain --ai-model embedded`` packet and never touch a session file.
+    """
     try:
         session_id = str(body.get("sessionId") or "")
         source = session.input_path(session_id)
@@ -317,28 +336,24 @@ def model_preview(_context: Context, body: dict) -> Response:
         )
         if highlight_recovery not in _HIGHLIGHT_RECOVERY_CHOICES:
             raise ValueError("unknown highlight recovery: %s" % highlight_recovery)
-        exe = detect_exe()
-        if not exe:
-            raise ValueError("找不到 HyperDR 可执行文件。")
-        config = model.load_config()
-        if config is None:
-            raise ValueError("模型尚未启用。")
-        model_dir = session.session_dir(session_id, "output") / ".model-preview"
-        gain, report = model.infer_preview(
-            config, source, model_dir, exe, highlight_recovery
-        )
-        width, height = report["gain_grid_size"]
+        model_state = model.status()
+        if not model_state.get("ready"):
+            raise coded(
+                ValueError(model_state.get("reason", "模型尚未就绪。")),
+                "model_not_ready")
+        gain, report = model.native_model_gain(source, highlight_recovery)
+        width, height = report["width"], report["height"]
         return Response(
             body=gain,
             content_type="application/octet-stream",
             headers={
                 "X-Gain-Width": str(width),
                 "X-Gain-Height": str(height),
-                "X-Gain-Max-Stops": str(report["metadata_gain_max_stops"]),
+                "X-Gain-Max-Stops": str(report["max_stops"]),
             },
         )
     except Busy as exc:
-        return error(exc, status=exc.status)
+        return error(exc, status=exc.status, code=exc.code)
     except (OSError, ValueError, RuntimeError) as exc:
         return error(exc)
 
@@ -350,13 +365,14 @@ def cancel(_context: Context, body: dict) -> Response:
 def select_output(context: Context, _body: dict) -> Response:
     try:
         if context.choose_output_directory is None:
-            raise OSError("当前系统暂不支持原生导出文件夹选择。")
+            raise coded(OSError("当前系统暂不支持原生导出文件夹选择。"),
+                        "output_unsupported")
         selected = context.choose_output_directory()
         if not selected:
             return Response(payload={"cancelled": True})
         target = Path(selected).resolve()
         if not target.is_dir():
-            raise ValueError("所选导出文件夹不存在。")
+            raise coded(ValueError("所选导出文件夹不存在。"), "output_missing")
         selection_id = secrets.token_urlsafe(18)
         context.output_selections[selection_id] = target
         return Response(payload={
@@ -374,7 +390,7 @@ def export(context: Context, body: dict) -> Response:
         session_id = str(body.get("sessionId") or "")
         destination = context.output_selections.get(str(body.get("selectionId") or ""))
         if destination is None or not destination.is_dir():
-            raise ValueError("导出文件夹已失效，请重新选择。")
+            raise coded(ValueError("导出文件夹已失效，请重新选择。"), "output_stale")
         source = session.result_path(session_id)
         target = (destination / source.name).resolve()
         # Re-checked after resolution: a symlink inside the session must not be
@@ -387,47 +403,38 @@ def export(context: Context, body: dict) -> Response:
 
 
 def run(_context: Context, body: dict) -> Response:
+    session_id = str(body.get("sessionId") or "")
     try:
-        session_id = str(body.get("sessionId") or "")
-        source = session.input_path(session_id)
-        exe = detect_exe()
-        if not exe:
-            raise ValueError("找不到 HyperDR 可执行文件。")
-        output = session.session_dir(session_id, "output")
-        # The previous run's product goes before this one starts, so a change of
-        # encoding cannot leave a stale file under its old extension, and a run
-        # that fails before writing a report cannot be handed its predecessor's.
-        session.clear_output(session_id)
-        options, use_model = _prepare_model_options(body.get("options"))
-        options["input"] = str(source)
-        options["output"] = str(output)
-        options["report"] = str(output / ("hyperdr-report-%s.json" % secrets.token_hex(8)))
-        model_commands = []
-        model_config = model.load_config() if use_model else None
-        if model_config is not None:
-            highlight_recovery = str(
-                options.get("highlightRecovery") or DEFAULT_HIGHLIGHT_RECOVERY)
-            preview_model_dir = output / ".model-preview"
-            cached_model = model.cached_inference(
-                model_config, source, preview_model_dir, highlight_recovery)
-            if cached_model is not None:
-                gain_path = preview_model_dir / "model-gain.f32"
-                gain_report = preview_model_dir / "model-gain.json"
-            else:
-                model_dir = output / ".model"
-                model_commands, gain_path, gain_report = model.build_commands(
-                    model_config, source, model_dir, exe, highlight_recovery)
-            options["external_gain"] = str(gain_path)
-            options["external_gain_report"] = str(gain_report)
-        argv = build_argv(exe, options)
+        with job.preparation_slot(session_id) as preparation_token:
+            source = session.input_path(session_id)
+            exe = detect_exe()
+            if not exe:
+                raise coded(ValueError("找不到 HyperDR 可执行文件。"),
+                            "executable_missing")
+            output = session.session_dir(session_id, "output")
+            # The previous run's product goes before this one starts, so a change of
+            # encoding cannot leave a stale file under its old extension, and a run
+            # that fails before writing a report cannot be handed its predecessor's.
+            session.clear_output(session_id)
+            options, use_model = _prepare_model_options(body.get("options"))
+            options["input"] = str(source)
+            options["output"] = str(output)
+            options["report"] = str(
+                output / ("hyperdr-report-%s.json" % secrets.token_hex(8)))
+            if use_model:
+                model_state = model.status()
+                if not model_state.get("ready"):
+                    raise coded(
+                ValueError(model_state.get("reason", "模型尚未就绪。")),
+                "model_not_ready")
+            argv = build_argv(exe, options)
+            job_id = job.start(
+                argv, str(REPO_ROOT), options["report"], session_id,
+                preparation_token=preparation_token)
+    except job.Busy as exc:
+        return error(exc, status=429, code=exc.code)
     except REQUEST_ERRORS as exc:
         return error(exc)
-
-    try:
-        job_id = job.start(argv, str(REPO_ROOT), options["report"], session_id,
-                           pre_commands=model_commands)
-    except job.Busy as exc:
-        return error(exc, status=429)
 
     # The front-end shows this instead of assembling its own copy. The real
     # executable path is replaced by the product name: it is not the browser's
@@ -439,11 +446,6 @@ def run(_context: Context, body: dict) -> Response:
         "argv": display,
         "command": _display_command(display),
     })
-
-
-def upload_is_allowed(_session_id: str):
-    """Reserve upload admission until the replacement has been published."""
-    return job.upload_slot()
 
 
 GET_ROUTES = {
@@ -460,7 +462,6 @@ POST_ROUTES = {
     "/api/export": export,
     "/api/run": run,
     "/api/command": command_preview,
-    "/api/curve": curve,
     "/api/model-preview": model_preview,
     "/api/cancel": cancel,
 }

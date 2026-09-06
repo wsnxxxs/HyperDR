@@ -22,20 +22,7 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"x" * 64
 JPEG = b"\xff\xd8\xff\xe0" + b"y" * 64
 HEIC = b"\x00\x00\x00\x18ftypheic" + b"z" * 64
 
-# The RAW containers the old five-entry magic table turned away. Every one of
-# these extensions is offered by the file dialog, so refusing them was a dead
-# end the user could reach by picking a normal file from a normal camera.
-RAW_HEADERS = {
-    ".arw": b"II*\x00" + b"a" * 64,
-    ".rw2": b"IIU\x00" + b"b" * 64,
-    ".crw": b"II\x1a\x00\x00\x00HEAPCCDR" + b"c" * 64,
-    ".mrw": b"\x00MRM" + b"d" * 64,
-    ".orf": b"MMOR" + b"e" * 64,
-    ".iiq": b"IIII" + b"f" * 64,
-    ".raf": b"FUJIFILMCCD-RAW" + b"g" * 64,
-    ".x3f": b"FOVb" + b"h" * 64,
-    ".cr3": b"\x00\x00\x00\x18ftypcrx " + b"i" * 64,
-}
+RAW_BYTES = b"LibRaw validates camera contents, not this upload boundary"
 
 
 def upload(session_id: str, name: str, data: bytes = PNG):
@@ -74,18 +61,17 @@ class SessionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             upload(session_id, "actually-text.png", b"not a png at all" * 8)
 
-    def test_accepts_every_raw_container_the_file_dialog_offers(self):
-        """The guard used to know five RAW magics and refuse the other nine."""
-        for extension, header in RAW_HEADERS.items():
-            self.assertIn(extension, formats.RAW_INPUT_EXTENSIONS, extension)
+    def test_every_raw_extension_reaches_libraw(self):
+        """The upload layer must not pretend generic container magic identifies RAW."""
+        for extension in formats.RAW_INPUT_EXTENSIONS:
             session_id = session.create_session()
-            target, _ = upload(session_id, "capture" + extension, header)
+            target, _ = upload(session_id, "capture" + extension, RAW_BYTES)
             self.assertEqual(target.suffix, extension)
 
-    def test_raw_extension_still_requires_a_raw_header(self):
+    def test_raw_content_is_not_misclassified_by_a_generic_header(self):
         session_id = session.create_session()
-        with self.assertRaises(ValueError):
-            upload(session_id, "pretend.arw", PNG)
+        target, _ = upload(session_id, "capture.cr3", HEIC)
+        self.assertEqual(target.suffix, ".cr3")
 
     def test_a_misnamed_raster_is_stored_under_the_format_it_really_is(self):
         """A phone gallery exports HEIC as .jpg; that file is not broken."""
@@ -147,7 +133,7 @@ class SessionTests(unittest.TestCase):
         session_id = session.create_session()
         upload(session_id, "photo.png")
         expected = hashlib.sha256(PNG).hexdigest()
-        with mock.patch.object(session, "_sha256", side_effect=AssertionError):
+        with mock.patch.object(session, "sha256_file", side_effect=AssertionError):
             self.assertEqual(session.input_digest(session_id), expected)
 
     def test_external_digest_rehashes_only_after_size_or_mtime_changes(self):
@@ -155,7 +141,7 @@ class SessionTests(unittest.TestCase):
         source = Path(self.temporary.name) / "external.jpg"
         source.write_bytes(JPEG)
         session.set_external_input(session_id, str(source))
-        with mock.patch.object(session, "_sha256", wraps=session._sha256) as digest:
+        with mock.patch.object(session, "sha256_file", wraps=session.sha256_file) as digest:
             first = session.input_digest(session_id)
             self.assertEqual(session.input_digest(session_id), first)
             self.assertEqual(digest.call_count, 1)
@@ -175,7 +161,7 @@ class SessionTests(unittest.TestCase):
     def test_a_desktop_drop_accepts_a_truthfully_named_file(self):
         session_id = session.create_session()
         source = Path(self.temporary.name) / "capture.rw2"
-        source.write_bytes(RAW_HEADERS[".rw2"])
+        source.write_bytes(RAW_BYTES)
         registered, size = session.set_external_input(session_id, str(source))
         self.assertEqual(registered, source)
         self.assertEqual(size, source.stat().st_size)

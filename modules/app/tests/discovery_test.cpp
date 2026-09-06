@@ -127,17 +127,9 @@ int main() {
       require(probe({0xFF}) == hyperdr::InputFormat::Unknown,
               "a one-byte file matched a signature");
 
-      const std::vector<std::uint8_t> rw2{'I', 'I', 'U', 0};
-      const std::vector<std::uint8_t> crw{'I', 'I', 0x1A, 0};
-      const std::vector<std::uint8_t> mrw{0, 'M', 'R', 'M'};
-      const std::vector<std::uint8_t> prose{'p', 'l', 'a', 'i', 'n', ' ', 't', 'x'};
-      require(hyperdr::raw_signature_ok(rw2) && hyperdr::raw_signature_ok(crw) &&
-                  hyperdr::raw_signature_ok(mrw),
-              "a RAW container the file dialog offers was not recognised");
-      require(!hyperdr::raw_signature_ok(prose),
-              "prose was mistaken for a RAW container");
       // RAW is never named from bytes: most of these containers are TIFF, and
       // only the extension can say which RAW a TIFF is.
+      const std::vector<std::uint8_t> rw2{'I', 'I', 'U', 0};
       require(hyperdr::probe_input_signature(rw2) == hyperdr::InputFormat::Unknown,
               "a RAW file was classified as a raster format");
     }

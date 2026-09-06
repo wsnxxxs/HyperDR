@@ -37,9 +37,11 @@ virtual environment.
 `tauri build` runs `packaging/build-tauri-sidecar.ps1` first. That script uses
 PyInstaller to create a one-file Python sidecar, embeds the selected native
 HyperDR executable and its sibling DLLs, and places the target-triple-named
-executable under `src-tauri/binaries/` for Tauri bundling. The sidecar unpacks
-its private runtime into a temporary directory at startup; the user still sees
-only the Tauri window because Tauri launches it without a console window.
+executable under `src-tauri/binaries/` for Tauri bundling. The production model
+is already embedded in `HyperDR.exe`, so the sidecar carries no checkpoint,
+model Python code, or PyTorch dependency. The sidecar unpacks its private
+runtime into a temporary directory at startup; the user still sees only the
+Tauri window because Tauri launches it without a console window.
 
 The generated `binaries/` and sidecar build directories are intentionally
 ignored by Git. They are release artifacts, not source files.

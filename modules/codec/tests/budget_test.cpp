@@ -17,6 +17,17 @@ int main() {
   try {
     using hyperdr::codec::raw_input_budget_ok;
     using hyperdr::codec::raw_pipeline_bytes;
+    using hyperdr::codec::raster_budget_ok;
+    require(raster_budget_ok(4500, 8000),
+            "supported 4500x8000 raster was rejected");
+    require(raster_budget_ok(11656, 8742),
+            "configured raster boundary was rejected");
+    require(raster_budget_ok(8742, 11656),
+            "rotated configured raster boundary was rejected");
+    require(!raster_budget_ok(12000, 8000),
+            "raster beyond the configured width was accepted");
+    require(!raster_budget_ok(9000, 9000),
+            "raster beyond the configured height was accepted");
     require(raw_input_budget_ok(19008, 12672),
             "A7R V Pixel Shift boundary was rejected");
     require(!raw_input_budget_ok(19009, 12672),

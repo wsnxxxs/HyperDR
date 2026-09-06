@@ -7,7 +7,14 @@
 
 import { el, role, setPressed, setText, clamp } from "../core/dom.js";
 import { store } from "../core/store.js";
-import { CONTROLS, ENCODINGS, encodingById } from "./schema.js";
+import { COLOR_GAMUTS, CONTROLS, ENCODINGS, encodingById } from "./schema.js";
+import { t, onLocaleChange } from "../i18n/index.js";
+
+/* Widgets are built once and mutated thereafter, so a language change has to
+ * be pushed into the nodes that already exist. Each builder registers what it
+ * needs re-read here; mountControls runs the list on every locale change. */
+const relabels = [];
+const relabel = (fn) => { relabels.push(fn); fn(); };
 
 const GROUP_CONTAINERS = {
   tone: "group-tone",
@@ -20,12 +27,14 @@ const GROUP_CONTAINERS = {
 const hdrRangeCeiling = () =>
   encodingById(store.get().encoding).maxRange;
 
+const isHdrRange = (key) => key === "hdrRange" || key === "aiHdrRange";
+
 /** A patch of group defaults, with the range slider clamped to the encoding. */
 function defaultsFor(keys) {
   const patch = {};
   for (const control of CONTROLS) {
     if (!keys.includes(control.key)) continue;
-    patch[control.key] = control.key === "hdrRange"
+    patch[control.key] = isHdrRange(control.key)
       ? Math.min(control.default, hdrRangeCeiling())
       : control.default;
   }
@@ -70,9 +79,13 @@ function helpButton(control, hintNode) {
   const button = el("button", {
     class: "field-help", type: "button", "aria-expanded": "false",
     "aria-controls": hintNode.id,
-    "aria-label": `查看${control.label}说明`,
-    title: control.mask ? "悬停显示预计作用区域；点击查看说明" : null,
+    "aria-label": t("adjust.help", { label: t(control.label) }),
+    title: control.mask ? t("adjust.helpMask") : null,
   }, "?");
+  relabel(() => {
+    button.setAttribute("aria-label", t("adjust.help", { label: t(control.label) }));
+    if (control.mask) button.title = t("adjust.helpMask");
+  });
   button.addEventListener("click", () => {
     const open = hintNode.hidden;
     if (store.get().maskKey) store.set({ maskKey: null });
@@ -96,14 +109,18 @@ function buildRange(control) {
   const readout = el("span", { class: "field-value" });
   const input = el("input", {
     type: "range", min: control.min, max: control.max, step: control.step,
-    "aria-label": control.label,
+    "aria-label": t(control.label),
   });
-  const hint = control.help ? el("p", { class: "field-hint", hidden: true }, control.help) : null;
+  const hint = control.help ? el("p", { class: "field-hint", hidden: true }, t(control.help)) : null;
   const help = hint ? helpButton(control, hint) : null;
 
-  const title = el("span", { class: "field-title" },
-    el("b", {}, control.label),
-    help);
+  const name = el("b", {}, t(control.label));
+  const title = el("span", { class: "field-title" }, name, help);
+  relabel(() => {
+    setText(name, t(control.label));
+    if (hint) setText(hint, t(control.help));
+    input.setAttribute("aria-label", t(control.label));
+  });
 
   const node = el("div", { class: "field field--range" },
     el("div", { class: "field-head" }, title, readout),
@@ -116,7 +133,7 @@ function buildRange(control) {
    * the group reset, for the slider you are already touching. Shift+arrow
    * nudges ten steps for the times the track's pixels are too coarse. */
   input.addEventListener("dblclick", () => {
-    const value = control.key === "hdrRange"
+    const value = isHdrRange(control.key)
       ? Math.min(control.default, hdrRangeCeiling())
       : control.default;
     store.set({ [control.key]: value });
@@ -127,7 +144,7 @@ function buildRange(control) {
     if (!direction) return;
     event.preventDefault();
     const current = store.get()[control.key];
-    const max = control.key === "hdrRange" ? hdrRangeCeiling() : control.max;
+    const max = isHdrRange(control.key) ? hdrRangeCeiling() : control.max;
     const next = clamp(current + direction * control.step * 10, control.min, max);
     store.set({ [control.key]: Number(next.toFixed(4)) });
   });
@@ -157,7 +174,7 @@ function buildRange(control) {
   const apply = (state) => {
     const value = state[control.key];
     // The encoding clamps the headroom ceiling, so `max` is dynamic.
-    const max = control.key === "hdrRange" ? encodingById(state.encoding).maxRange : control.max;
+    const max = isHdrRange(control.key) ? encodingById(state.encoding).maxRange : control.max;
     // Assigning `max` reconfigures the control even when the number is
     // unchanged, so it is written only on an actual change.
     const maxText = String(max);
@@ -176,20 +193,27 @@ function buildSegmented(control) {
   const picker = el("div", {
     class: "segmented",
     role: "group",
-    "aria-label": control.label,
+    "aria-label": t(control.label),
   });
-  const buttons = control.choices.map(([value, label]) => {
-    const button = el("button", { type: "button", "aria-pressed": "false" }, label);
+  const buttons = control.choices.map(([value, labelKey]) => {
+    const button = el("button", { type: "button", "aria-pressed": "false" }, t(labelKey));
     button.addEventListener("click", () => store.set({ [control.key]: value }));
     picker.append(button);
+    relabel(() => setText(button, t(labelKey)));
     return [value, button];
   });
-  const hint = control.help ? el("p", { class: "field-hint", hidden: true }, control.help) : null;
+  const hint = control.help ? el("p", { class: "field-hint", hidden: true }, t(control.help)) : null;
   const help = hint ? helpButton(control, hint) : null;
+  const name = el("b", {}, t(control.label));
   const node = el("div", { class: "field" },
-    el("span", { class: "field-title" }, el("b", {}, control.label), help),
+    el("span", { class: "field-title" }, name, help),
     picker,
     hint);
+  relabel(() => {
+    setText(name, t(control.label));
+    picker.setAttribute("aria-label", t(control.label));
+    if (hint) setText(hint, t(control.help));
+  });
   return {
     node,
     apply: (state) => {
@@ -204,7 +228,7 @@ function buildSegmented(control) {
 function buildNumber(control) {
   const input = el("input", {
     type: "number", min: control.min, max: control.max, step: control.step,
-    "aria-label": control.label,
+    "aria-label": t(control.label),
   });
   const commit = () => {
     const parsed = Number(input.value);
@@ -219,8 +243,12 @@ function buildNumber(control) {
     commit();
   });
   input.addEventListener("change", commit);
-  const node = el("label", { class: "field field--inline" },
-    el("span", { class: "field-label" }, control.label), input);
+  const name = el("span", { class: "field-label" }, t(control.label));
+  const node = el("label", { class: "field field--inline" }, name, input);
+  relabel(() => {
+    setText(name, t(control.label));
+    input.setAttribute("aria-label", t(control.label));
+  });
   return {
     node,
     apply: (state) => { input.value = String(state[control.key]); },
@@ -245,13 +273,16 @@ function mountEncoding({ toast } = {}) {
     const button = el("button", { type: "button", "aria-pressed": "false" }, entry.label);
     button.addEventListener("click", () => {
       const current = store.get().hdrRange;
+      const aiCurrent = store.get().aiHdrRange;
       // Clamped here rather than in the slider so the stored value and the
       // command line agree the moment the format changes.
       const clamped = Math.min(current, entry.maxRange);
-      store.set({ encoding: entry.id, hdrRange: clamped });
+      const aiClamped = Math.min(aiCurrent, entry.maxRange);
+      store.set({ encoding: entry.id, hdrRange: clamped, aiHdrRange: aiClamped });
       // A silent clamp reads as the panel losing the user's setting.
-      if (clamped < current) {
-        toast?.(`HDR 扩展范围已按 ${entry.label} 上限调整为 ${clamped.toFixed(1)} 档`);
+      if (clamped < current || aiClamped < aiCurrent) {
+        const shown = clamped < current ? clamped : aiClamped;
+        toast?.(t("enc.clamped", { label: entry.label, value: shown.toFixed(1) }));
       }
     });
     buttons.set(entry.id, button);
@@ -263,8 +294,78 @@ function mountEncoding({ toast } = {}) {
     for (const [key, button] of buttons) {
       button.setAttribute("aria-pressed", String(key === active.id));
     }
-    setText(hint, active.hint);
+    setText(hint, t(active.hint));
   }, { immediate: true });
+  relabel(() => setText(hint, t(encodingById(store.get().encoding).hint)));
+}
+
+/* ── colour and gamut choices (lives in the output block) ──────────────── */
+
+const COLOR_HINTS = {
+  srgb: "out.colorHint.srgb",
+  p3: "out.colorHint.p3",
+  p3Clamped: "out.colorHint.p3Clamped",
+  rec2020: "out.colorHint.rec2020",
+  rec2020Clamped: "out.colorHint.rec2020Clamped",
+};
+
+function resolveColorHint(colorGamut, clampSrgb) {
+  if (colorGamut === "srgb") return COLOR_HINTS.srgb;
+  if (colorGamut === "p3") return clampSrgb ? COLOR_HINTS.p3Clamped : COLOR_HINTS.p3;
+  if (colorGamut === "rec2020") return clampSrgb ? COLOR_HINTS.rec2020Clamped : COLOR_HINTS.rec2020;
+  return COLOR_HINTS.srgb;
+}
+
+function mountColorGamut() {
+  const gamut = role("color-gamut");
+  const clamp = role("clamp-srgb");
+  const hint = role("color-hint");
+  const buttons = new Map();
+
+  for (const entry of COLOR_GAMUTS) {
+    const button = el("button", {
+      type: "button", "aria-pressed": "false",
+      title: t(entry.hint),
+    }, entry.label);
+    relabel(() => { button.title = t(entry.hint); });
+    button.addEventListener("click", () => {
+      const current = store.get();
+      if (current.colorGamut === entry.id) return;
+      if (entry.id === "srgb") {
+        store.set({ colorGamut: "srgb", clampSrgb: true });
+      } else {
+        // When switching from sRGB to wide gamut, default to unclamped wide color
+        // so the user immediately gets the wide gamut they selected.
+        const clampSrgb = current.colorGamut === "srgb" ? false : current.clampSrgb;
+        store.set({ colorGamut: entry.id, clampSrgb });
+      }
+    });
+    buttons.set(entry.id, button);
+    gamut.append(button);
+  }
+
+  clamp.addEventListener("click", () => {
+    const state = store.get();
+    if (state.colorGamut === "srgb") return;
+    store.set({ clampSrgb: !state.clampSrgb });
+  });
+
+  const syncState = (state) => {
+    const isSrgb = state.colorGamut === "srgb";
+    for (const [id, button] of buttons) {
+      setPressed(button, id === state.colorGamut);
+    }
+    const effectivelyClamped = isSrgb || Boolean(state.clampSrgb);
+    setPressed(clamp, effectivelyClamped);
+    clamp.disabled = isSrgb;
+    clamp.title = isSrgb ? t("out.clampSrgbLocked") : t("out.clampSrgbHint");
+    if (hint) {
+      setText(hint, t(resolveColorHint(state.colorGamut, state.clampSrgb)));
+    }
+  };
+
+  store.watchAny(["colorGamut", "clampSrgb"], syncState, { immediate: true });
+  relabel(() => syncState(store.get()));
 }
 
 /* ── reset ──────────────────────────────────────────────────────────── */
@@ -281,14 +382,14 @@ function mountResets({ toast } = {}) {
     armed = false;
     clearTimeout(armTimer);
     button.classList.remove("is-armed");
-    button.textContent = "重置";
+    setText(button, t("adjust.reset"));
   };
   button.addEventListener("click", () => {
     // Two-step confirm: a stray click on a text button must not wipe a grade.
     if (!armed) {
       armed = true;
       button.classList.add("is-armed");
-      button.textContent = "确认重置？";
+      setText(button, t("adjust.resetConfirm"));
       armTimer = setTimeout(disarm, 3000);
       return;
     }
@@ -299,15 +400,18 @@ function mountResets({ toast } = {}) {
       // current image's inferred gain cached for an instant comparison.
       previewOptimized: false,
     });
-    toast?.("已重置全部画面调整");
+    toast?.(t("adjust.resetDone"));
   });
   button.addEventListener("blur", disarm);
+  // The armed label is transient, so a locale change simply disarms it.
+  relabel(disarm);
 }
 
 /* ── entry point ────────────────────────────────────────────────────── */
 
 export function mountControls({ toast } = {}) {
   mountEncoding({ toast });
+  mountColorGamut();
   mountResets({ toast });
 
   const containers = new Map(
@@ -324,23 +428,19 @@ export function mountControls({ toast } = {}) {
     store.watchAny(widget.watches, widget.apply, { immediate: true });
   }
 
-  // In pure model mode the .f32 grid is the complete grade. Keep the controls
-  // visible so the switch in behaviour is legible, but make it impossible to
-  // imply that exposure, tone, coverage, contrast or vibrance still contribute.
-  const modelControlled = ["tone", "region", "advanced"]
-    .map((group) => containers.get(group))
-    .filter(Boolean);
-  const modelControls = containers.get("model");
+  const manualSubmenu = role("submenu-manual");
+  const aiSubmenu = role("submenu-ai");
+
   store.watch("previewOptimized", (active) => {
-    for (const container of modelControlled) {
-      container.inert = active;
-      container.setAttribute("aria-disabled", String(active));
-      container.classList.toggle("is-model-controlled", active);
+    if (manualSubmenu) {
+      manualSubmenu.hidden = active;
+      manualSubmenu.inert = active;
     }
-    if (modelControls) {
-      modelControls.hidden = !active;
-      modelControls.inert = !active;
-      modelControls.setAttribute("aria-disabled", String(!active));
+    if (aiSubmenu) {
+      aiSubmenu.hidden = !active;
+      aiSubmenu.inert = !active;
     }
   }, { immediate: true });
+
+  onLocaleChange(() => { for (const fn of [...relabels]) fn(); });
 }

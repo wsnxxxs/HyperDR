@@ -83,7 +83,7 @@
       animation: cardAppear 500ms var(--ease) both;
     }
 
-    /* SVG Exposure Wordmark Icon */
+    /* Reuse the exact desktop application icon. */
     .brand-icon-wrapper {
       position: relative;
       display: inline-flex;
@@ -92,49 +92,14 @@
       width: 64px;
       height: 64px;
       margin-bottom: 20px;
-      padding: 8px;
-      background: var(--surface-sunken);
-      border: 1px solid var(--glass-border);
       border-radius: var(--radius-md);
-      box-shadow:
-        inset 0 1px 2px rgba(0, 0, 0, 0.4),
-        0 4px 16px rgba(0, 0, 0, 0.25);
     }
 
     .brand-mark {
-      width: 44px;
-      height: 44px;
-      overflow: visible;
-    }
-
-    .wordmark-frame {
-      fill: none;
-      stroke: var(--ink);
-      stroke-width: 1.6;
-    }
-
-    .wordmark-frame.is-back {
-      opacity: 0.3;
-    }
-
-    .wordmark-frame.is-front {
-      opacity: 0.85;
-      stroke: var(--ink-strong);
-    }
-
-    .wordmark-glow {
-      fill: none;
-      stroke: var(--accent);
-      stroke-width: 2.4;
-      stroke-linecap: round;
-      animation: glowPulse 2.8s ease-in-out infinite alternate;
-    }
-
-    .wordmark-spark {
-      fill: var(--accent);
-      stroke: var(--surface-sunken);
-      stroke-width: 1.4;
-      animation: sparkPulse 2.8s ease-in-out infinite alternate;
+      width: 64px;
+      height: 64px;
+      display: block;
+      object-fit: contain;
     }
 
     /* Typography */
@@ -218,36 +183,10 @@
       }
     }
 
-    @keyframes glowPulse {
-      0%, 100% {
-        opacity: 0.75;
-        stroke: var(--accent);
-        filter: drop-shadow(0 0 2px rgba(56, 189, 248, 0.4));
-      }
-      50% {
-        opacity: 1;
-        stroke: #7dd3fc;
-        filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.8));
-      }
-    }
-
-    @keyframes sparkPulse {
-      0%, 100% {
-        transform: scale(1);
-        filter: drop-shadow(0 0 2px rgba(56, 189, 248, 0.4));
-      }
-      50% {
-        transform: scale(1.15);
-        filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.9));
-      }
-    }
-
     /* Accessibility: Reduced Motion */
     @media (prefers-reduced-motion: reduce) {
       .splash-card,
-      .status-dot,
-      .wordmark-glow,
-      .wordmark-spark {
+      .status-dot {
         animation: none !important;
         transition: none !important;
       }
@@ -256,14 +195,9 @@
 </head>
 <body>
   <main class="splash-card" role="region" aria-label="HyperDR 启动界面">
-    <!-- Brand Mark: Offset Exposure Frames Converging on Luminance -->
+    <!-- Brand Mark: the exact desktop application icon. -->
     <div class="brand-icon-wrapper" aria-hidden="true">
-      <svg class="brand-mark" viewBox="0 0 32 32">
-        <rect class="wordmark-frame is-back" x="4.5" y="7.5" width="17" height="17" rx="5"/>
-        <rect class="wordmark-frame is-front" x="10.5" y="4.5" width="17" height="17" rx="5"/>
-        <path class="wordmark-glow" d="M8 18.5h16"/>
-        <circle class="wordmark-spark" cx="24" cy="18.5" r="2.25"/>
-      </svg>
+      <img class="brand-mark" src="./icon.svg" alt="">
     </div>
 
     <!-- Wordmark Title & Tagline -->

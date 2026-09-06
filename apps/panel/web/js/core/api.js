@@ -3,6 +3,8 @@
  * changes.
  */
 
+import { t } from "../i18n/index.js";
+
 export class ApiError extends Error {
   constructor(message, status = 0) {
     super(message);
@@ -12,9 +14,21 @@ export class ApiError extends Error {
 }
 
 /** Every failure the panel can show reaches the UI as one of these. */
-const OFFLINE = () => new ApiError("无法连接本地服务，请确认处理程序仍在运行后重试。", 0);
+const OFFLINE = () => new ApiError(t("err.offline"), 0);
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
+
+/** The server sends a stable `code` beside its own prose. A code this build
+ *  knows is rendered in the reader's language; anything else falls through to
+ *  the server's own message, so the long tail keeps working untranslated. */
+function serverMessage(body, fallback) {
+  if (body?.code) {
+    const key = `err.server.${body.code}`;
+    const translated = t(key);
+    if (translated !== key) return translated;
+  }
+  return body?.error || fallback;
+}
 
 async function unwrap(response, fallback) {
   let body = null;
@@ -22,7 +36,7 @@ async function unwrap(response, fallback) {
   // A 200 carrying `{error: ...}` is still a failure, and an `ok` response with
   // no body is still a success. Both halves are checked on purpose.
   if (!response.ok || body?.error) {
-    throw new ApiError(body?.error || fallback, response.status);
+    throw new ApiError(serverMessage(body, fallback), response.status);
   }
   return body ?? {};
 }
@@ -48,39 +62,39 @@ export const api = {
   /* -- session ------------------------------------------------------- */
 
   /** @returns {Promise<{sessionId: string}>} */
-  newSession: () => post("/api/session", {}, "无法创建上传任务。"),
+  newSession: () => post("/api/session", {}, t("err.session")),
 
   /* -- capabilities -------------------------------------------------- */
 
   /** Feature flags and limits. Read once at boot; nothing here changes while
    *  the process lives. */
-  state: () => get("/api/state", null, "无法读取服务状态。"),
+  state: () => get("/api/state", null, t("err.state")),
 
   /* -- settings ------------------------------------------------------ */
 
   /** The exact command line a run would use, rendered by the same builder the
    *  runner uses -- which is the only reason the displayed command is true. */
-  command: (options) => post("/api/command", { options }, "无法生成命令行。"),
+  command: (options) => post("/api/command", { options }, t("err.command")),
 
   /* -- run ----------------------------------------------------------- */
 
   run: (sessionId, options) =>
-    post("/api/run", { sessionId, options }, "无法启动转换。"),
+    post("/api/run", { sessionId, options }, t("err.run")),
 
-  cancel: (jobId) => post("/api/cancel", { jobId }, "无法取消任务。"),
+  cancel: (jobId) => post("/api/cancel", { jobId }, t("err.cancel")),
 
   /** Incremental: pass the offset the last call returned, not 0. */
   log: (jobId, offset = 0) =>
-    get("/api/log", { id: jobId, offset }, "无法读取任务日志。"),
+    get("/api/log", { id: jobId, offset }, t("err.log")),
 
   /* -- output -------------------------------------------------------- */
 
   /** Opens the native folder dialog on the machine running the service.
    *  Resolves `{cancelled: true}` when the user dismisses it. */
-  selectOutput: () => post("/api/select-output", {}, "无法选择导出文件夹。"),
+  selectOutput: () => post("/api/select-output", {}, t("err.selectOutput")),
 
   export: (sessionId, selectionId) =>
-    post("/api/export", { sessionId, selectionId }, "无法导出结果。"),
+    post("/api/export", { sessionId, selectionId }, t("err.export")),
 
   /** The converted image. `download` matters on a phone, where the native
    *  picker is not reachable and saving is the browser's job. */
@@ -110,7 +124,7 @@ export const api = {
     let response;
     try { response = await fetch("/api/preview?" + query); } catch { throw OFFLINE(); }
     if (!response.ok) {
-      let message = "无法载入预览。";
+      let message = t("err.preview");
       try { const body = await response.json(); if (body.error) message = body.error; } catch {}
       throw new ApiError(message, response.status);
     }
@@ -118,13 +132,13 @@ export const api = {
     const bytes = new Uint8Array(buffer);
     const magic = new TextDecoder().decode(bytes.subarray(0, 8));
     if (magic !== "HYPREV1\n" || bytes.length < 12) {
-      throw new ApiError("预览数据异常，请重试。", 500);
+      throw new ApiError(t("err.previewData"), 500);
     }
     const jsonSize = new DataView(buffer).getUint32(8, true);
     let metadata;
     try {
       metadata = JSON.parse(new TextDecoder().decode(bytes.subarray(12, 12 + jsonSize)));
-    } catch (_) { throw new ApiError("预览信息异常，请重试。", 500); }
+    } catch (_) { throw new ApiError(t("err.previewMeta"), 500); }
     const width = Number(metadata.width), height = Number(metadata.height);
     const count = width * height * 3;
     const offset = 12 + jsonSize;
@@ -134,7 +148,7 @@ export const api = {
       // aligned, so copy the two payloads into aligned browser-owned buffers.
       if (!Number.isInteger(width) || width <= 0 || !Number.isInteger(height) || height <= 0
           || offset + count * 8 !== bytes.length) {
-        throw new ApiError("预览像素数据异常，请重试。", 500);
+        throw new ApiError(t("err.previewPixels"), 500);
       }
     }
     const copyPlane = (start) => {
@@ -158,7 +172,7 @@ export const api = {
       });
     } catch { throw OFFLINE(); }
     if (!response.ok) {
-      let message = "无法生成模型预览。";
+      let message = t("err.modelPreview");
       try { const body = await response.json(); if (body.error) message = body.error; } catch {}
       throw new ApiError(message, response.status);
     }
@@ -168,7 +182,7 @@ export const api = {
     const values = new Float32Array(await response.arrayBuffer());
     if (!Number.isInteger(width) || width <= 0 || !Number.isInteger(height) || height <= 0
         || values.length !== width * height || !Number.isFinite(maxStops)) {
-      throw new ApiError("模型返回了无效的增益图，请重试。", 500);
+      throw new ApiError(t("err.modelGain"), 500);
     }
     return { values, width, height, maxStops };
   },
@@ -178,7 +192,7 @@ export const api = {
   /** Desktop-only native path handoff. The server validates the path and keeps
    *  it as the session source instead of receiving a byte stream. */
   openNativePath: (sessionId, path) =>
-    post("/api/native-input", { sessionId, path }, "无法载入桌面端文件。"),
+    post("/api/native-input", { sessionId, path }, t("err.nativeInput")),
 
   /** XMLHttpRequest rather than fetch: fetch still cannot report request
    *  progress, and a 300 MB RAW with no progress bar looks like a hung panel.
@@ -200,10 +214,10 @@ export const api = {
         let body = {};
         try { body = JSON.parse(request.responseText || "{}"); } catch {}
         if (request.status >= 200 && request.status < 300) resolve(body);
-        else reject(new ApiError(body.error || "上传失败。", request.status));
+        else reject(new ApiError(body.error || t("err.uploadFailed"), request.status));
       };
-      request.onerror = () => reject(new ApiError("上传连接中断。", 0));
-      request.onabort = () => reject(new ApiError("上传已取消。", 0));
+      request.onerror = () => reject(new ApiError(t("err.uploadAborted"), 0));
+      request.onabort = () => reject(new ApiError(t("err.uploadCancelled"), 0));
       request.send(file);
     });
     // Returned rather than hidden: the old panel had no way to stop a 300 MB

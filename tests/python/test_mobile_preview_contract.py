@@ -63,6 +63,15 @@ class MobilePreviewContractTest(unittest.TestCase):
         self.assertIn('stage.style.removeProperty("width")', between)
         self.assertIn('stage.style.removeProperty("height")', between)
 
+    def test_effect_canvases_fill_and_clip_to_the_rounded_frame(self):
+        canvas_rule = COMPONENTS.split(".stage-frame canvas {", 1)[1].split("}", 1)[0]
+        self.assertIn("border-radius: inherit;", canvas_rule)
+        for role in ("canvas-hdr", "canvas-sdr"):
+            selector = f'.stage-frame canvas[data-role="{role}"]'
+            rule = COMPONENTS.split(selector, 1)[1].split("}", 1)[0]
+            self.assertIn("width: 100%;", rule)
+            self.assertIn("height: 100%;", rule)
+
     def test_resize_observer_does_not_write_mobile_pixel_dimensions(self):
         self.assertIn(
             "if (!mobileLayout.matches && !expanded) fitStageToImage();",
@@ -76,15 +85,9 @@ class MobilePreviewContractTest(unittest.TestCase):
         self.assertIn("wanted > image.previewRequestEdge", STAGE)
         self.assertIn("const PREVIEW_TIERS = [960, 1280, 2048];", STAGE)
 
-    def test_preview_zoom_has_fixed_levels_and_preserves_pan_contract(self):
-        self.assertIn('data-role="zoom-controls"', INDEX)
-        self.assertIn('["fit", "Fit", 0]', STAGE)
-        self.assertIn('["100", "100%", 1]', STAGE)
-        self.assertIn('["200", "200%", 2]', STAGE)
-        self.assertIn('["400", "400%", 4]', STAGE)
-        self.assertIn('stage.addEventListener("wheel", zoomFromWheel, { passive: false });', STAGE)
-        self.assertIn('stage.addEventListener("dblclick"', STAGE)
-        self.assertIn('stage.is-zoomed .stage-frame { touch-action: none; cursor: grab; }', COMPONENTS)
+    def test_zoom_and_view_mode_controls_are_removed(self):
+        self.assertNotIn('data-role="zoom-controls"', INDEX)
+        self.assertNotIn('data-role="view-mode"', INDEX)
 
     def test_empty_state_is_one_centred_card_in_normal_flow(self):
         # The invitation is a bounded card centred in the drop area, not a

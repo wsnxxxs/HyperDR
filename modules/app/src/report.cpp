@@ -21,6 +21,17 @@ void write_settings(json::Writer& writer, const ConvertOptions& options) {
   }
   // The encoded depth, as opposed to the requested one: BT.2100 is always 10-bit.
   writer.member("output_depth", is_bt2100_encoding(options.encoding) ? 10 : options.depth);
+  if (!options.ai_model_path.empty()) {
+    writer.member("ai_model", path_utf8(options.ai_model_path))
+        .begin_object("ai_post")
+        .member("brightness_ev", options.ai_post.brightness_ev)
+        .member("contrast", options.ai_post.contrast)
+        .member("shadows_ev", options.ai_post.shadows_ev)
+        .member("highlights_stops", options.ai_post.highlights_stops)
+        .member("hdr_range_stops", options.ai_post.hdr_range_stops)
+        .member("expansion_start", options.ai_post.expansion_start)
+        .end_object();
+  }
   writer.end_object();
   writer.begin_object("raw_processing")
       .member("black_level_correction", "LibRaw metadata")
@@ -110,7 +121,9 @@ std::string run_report_json(const std::vector<FileResult>& results,
         // each: an exposure_ev of 0 is a scene decision in one and the absence
         // of a creative offset in the others.
         .member("input_domain", input_domain_name(result.input_domain))
-        .member("input_headroom", result.input_headroom);
+        .member("input_headroom", result.input_headroom)
+        .member("model_development", result.model_development)
+        .member("model_id", result.model_id);
     writer.begin_array("decode_degradation_reasons");
     for (const auto& reason : result.decode_degradation_reasons) {
       writer.element(reason);

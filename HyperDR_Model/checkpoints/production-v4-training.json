@@ -1,0 +1,65 @@
+{
+  "schema": "hyperdr.model-training-plan/v1",
+  "model_id": "hyperdr.direct-deployment-matched/v4",
+  "status": "rejected_gate",
+  "parent_checkpoint": "production-v3.pt",
+  "parent_checkpoint_sha256": "286024d47db090f321d3cf31ad6b3a7b405557da41b0eac84e38824adfdf97d6",
+  "initialize_from_checkpoint": "checkpoints/production-v3.pt",
+  "artifact_policy": "This file records a reproducible run and its rejected selection result; it is not a release asset.",
+  "dataset_root": "/home/ryan/datasets/hyperdr-apple",
+  "input_cache_dir": "/home/ryan/datasets/hyperdr-apple/training/deployment_linear_p3_f32_dev_v1",
+  "target_cache_dir": "/home/ryan/datasets/hyperdr-apple/training/deployment_gain_grid_stride16_f32_dev_v1",
+  "output_dir": "/home/ryan/runs/hyperdr/direct-production-v4-deployment-matched-r1",
+  "arguments": {
+    "label_subset": "iso_native",
+    "target_mode": "signed_stops",
+    "model": "direct",
+    "architecture": "baseline",
+    "lambda_gradient": 0.2,
+    "lambda_global_mean": 0.1,
+    "epochs": 80,
+    "batch_size": 8,
+    "learning_rate": 0.0003,
+    "weight_decay": 0.0001,
+    "base_channels": 24,
+    "num_workers": 4,
+    "seed": 20260730,
+    "compile_model": false,
+    "highlight_weight": 0.0,
+    "production_selection_fold": 4,
+    "batch_by_shape": true
+  },
+  "selection_baseline": {
+    "checkpoint": "checkpoints/production-v3.pt",
+    "report": "reports/production-v3-deployment-input-selection.json",
+    "input_contract": "paired deployment SDR and rebased signed-stop target",
+    "capture_group_gain_mae_stops": 0.24212594562396408,
+    "absolute_highlight_mae_stops": 0.26979890079237523,
+    "per_image_hdr_log_luminance_contrast_span_mae_stops": 0.26434238060660986
+  },
+  "selection_policy": {
+    "max_capture_group_gain_mae_stops": 0.23068,
+    "max_absolute_highlight_mae_stops": 0.26979890079237523,
+    "require_hdr_log_luminance_contrast_span_relative_improvement": 0.1,
+    "rule": "All gates must pass. A failing candidate remains an experiment and must not replace production-v3."
+  },
+  "candidate_result": {
+    "run_completed": true,
+    "epochs": 80,
+    "best_epoch": 3,
+    "checkpoint": "/home/ryan/runs/hyperdr/direct-production-v4-deployment-matched-r1/best.pt",
+    "checkpoint_sha256": "a62405404f3bbd1caa73d26391ee3db65c6d768a61a80370ae821218a047499e",
+    "evaluation_report": "reports/production-v4-deployment-input-selection.json",
+    "capture_group_gain_mae_stops": 0.2345697809108311,
+    "absolute_highlight_mae_stops": 0.23772368705831468,
+    "per_image_hdr_log_luminance_contrast_span_mae_stops": 0.22875290072482565,
+    "contrast_span_relative_improvement": 0.134634029549533,
+    "selection_gates_passed": false,
+    "decision": "Rejected because capture-group gain MAE exceeded 0.23068. Do not create or replace a production-v4 release checkpoint."
+  },
+  "required_preflight": [
+    "Build the deployment cache with scripts/build_deployment_cache.py.",
+    "Run evaluate_absolute.py on production-v3.pt with --split selection and the paired input/target caches to quantify domain shift.",
+    "Do not create production-v4.pt or release metadata until training and selection evaluation complete."
+  ]
+}

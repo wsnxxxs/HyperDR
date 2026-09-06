@@ -18,6 +18,9 @@ namespace hyperdr {
 // have to carry this block, but model-generated grids do.  The application
 // validates it against the current source and decode before rendering.
 struct ExternalDevelopmentRecipe {
+  // Identifies how the model's retained SDR base was prepared. Older bindings
+  // omitted this member in memory and therefore retain the historical default.
+  std::string id{"photographic-v1"};
   float exposure_ev{};
   float headroom_stops{};
   float contrast{};

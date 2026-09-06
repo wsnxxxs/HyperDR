@@ -7,7 +7,8 @@ renamed key only if the C++ happened to still look the way the pattern expected.
 
 ``HyperDR schema`` now emits that table as JSON, and ``schema/settings.json`` is
 that output, checked in. This module turns it into validators, so a new setting
-reaches the panel by rebuilding the converter rather than by editing Python.
+reaches the Python panel by rebuilding the converter rather than by editing
+Python. The browser UI keeps its own presentation and request-mapping adapter.
 """
 from __future__ import annotations
 
@@ -46,24 +47,7 @@ DOCUMENT = _load()
 
 #: Every setting, keyed by its canonical name.
 SETTINGS: dict[str, dict] = {entry["key"]: entry for entry in DOCUMENT["settings"]}
-#: The version of the converter that produced this schema.
-TOOL_VERSION: str = str(DOCUMENT.get("tool", ""))
 ALL_KEYS = frozenset(SETTINGS)
-DEFAULTS = {key: entry["default"] for key, entry in SETTINGS.items()}
-
-
-def reload() -> None:
-    """Re-read the schema. Used by tests that regenerate it from the binary.
-
-    `formats` derives its own tables from this document, so it has a matching
-    `reload()`; call both when a test replaces the file underneath.
-    """
-    global DOCUMENT, SETTINGS, TOOL_VERSION, ALL_KEYS, DEFAULTS
-    DOCUMENT = _load()
-    SETTINGS = {entry["key"]: entry for entry in DOCUMENT["settings"]}
-    TOOL_VERSION = str(DOCUMENT.get("tool", ""))
-    ALL_KEYS = frozenset(SETTINGS)
-    DEFAULTS = {key: entry["default"] for key, entry in SETTINGS.items()}
 
 
 def _is_number(value) -> bool:

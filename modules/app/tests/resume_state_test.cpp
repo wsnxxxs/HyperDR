@@ -231,6 +231,14 @@ void check_decode_cache_key_varies() {
           "the preview bound must change the cache key");
   require(blend_full == hyperdr::decode_cache_key(self, "blend/full/0"),
           "the key must be stable for identical inputs");
+  const auto original_time = std::filesystem::last_write_time(self);
+  {
+    std::ofstream output(self, std::ios::binary | std::ios::trunc);
+    output << "changed";
+  }
+  std::filesystem::last_write_time(self, original_time);
+  require(blend_full != hyperdr::decode_cache_key(self, "blend/full/0"),
+          "same-size same-time content replacement must change the cache key");
   std::filesystem::remove(self);
 }
 
@@ -310,6 +318,18 @@ void check_model_binding_rejects_stale_gain() {
               replay.look.headroom_max_stops == 3.0F &&
               replay.output_headroom_limit_stops == 2.5F,
           "model recipe look was not replayed");
+
+  auto neutral_external = external;
+  neutral_external.binding->recipe.id = "raw-neutral-v1";
+  neutral_external.binding->recipe.contrast = 1.0F;
+  neutral_external.binding->recipe.vibrance = 0.0F;
+  neutral_external.binding->recipe.pop = 0.0F;
+  const auto neutral = hyperdr::replay_external_development(
+      neutral_external, source, image, options);
+  require(!neutral.auto_exposure && neutral.exposure_ev == 0.72F &&
+              neutral.look.contrast == 1.0F &&
+              neutral.look.vibrance == 0.0F && neutral.look.pop == 0.0F,
+          "neutral deployment recipe was not replayed exactly");
 
   // The model input and the fast RAW preview are both decoded at half size.
   // A final export below still has to match the binding at exactly 2x.
@@ -424,6 +444,30 @@ void check_input_domain_routing() {
           "a display-referred HDR input must keep its declared headroom");
 }
 
+void check_native_model_base_routing() {
+  const auto display = flat_image(
+      hyperdr::InputDomain::kDisplayReferredSdr, 0.8F, 1.0F);
+  const auto display_base = hyperdr::render_native_model_base(display);
+  require(display_base.base_linear.pixels == display.linear_p3.pixels,
+          "native AI must not re-develop a finished SDR base");
+  require(display_base.stats.gain_max_stops == 0.0F,
+          "native AI base preparation must not add mathematical SDR gain");
+
+  const auto raw = flat_image(
+      hyperdr::InputDomain::kSceneReferred, 0.25F, 1.0F);
+  hyperdr::GainMapOptions neutral;
+  neutral.exposure_bias_ev = 0.0F;
+  neutral.gain_strength = 1.0F;
+  neutral.look.contrast = 1.0F;
+  neutral.look.vibrance = 0.0F;
+  neutral.look.pop = 0.0F;
+  const auto expected = hyperdr::render_decoded_image(raw, neutral);
+  const auto actual = hyperdr::render_native_model_base(raw);
+  require(actual.base_linear.pixels == expected.base_linear.pixels &&
+              actual.exposure_ev == expected.exposure_ev,
+          "native RAW base must use the fixed neutral automatic development");
+}
+
 }  // namespace
 
 int main() {
@@ -437,6 +481,7 @@ int main() {
     check_model_binding_rejects_stale_gain();
     check_prune_respects_the_budget();
     check_input_domain_routing();
+    check_native_model_base_routing();
   } catch (const std::exception& e) {
     std::cerr << "resume_state_test failed: " << e.what() << '\n';
     return 1;

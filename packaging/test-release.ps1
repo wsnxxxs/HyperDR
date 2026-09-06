@@ -20,9 +20,9 @@ try {
         Select-Object -First 1
     if (-not $executable) { throw "Release archive does not contain HyperDR.exe." }
     $bin = $executable.Directory.FullName
-    foreach ($dll in @("libx265.dll", "libx265_main.dll")) {
+    foreach ($dll in @("libx265.dll", "libx265_main.dll", "ncnn.dll")) {
         if (-not (Test-Path -LiteralPath (Join-Path $bin $dll) -PathType Leaf)) {
-            throw "Release archive is missing the multibit x265 runtime: $dll"
+            throw "Release archive is missing a required native runtime: $dll"
         }
     }
 
@@ -49,16 +49,9 @@ try {
         }
     }
 
-    # The model itself ships, while PyTorch deliberately comes from the user's
-    # existing Windows Python environment.
-    foreach ($required in @(
-            "HyperDR_Model\infer_gain.py",
-            "HyperDR_Model\checkpoints\production-v3.pt",
-            "HyperDR_Model\dataset\assets\display-p3.icc")) {
-        if (-not (Test-Path -LiteralPath (Join-Path $root $required) -PathType Leaf)) {
-            throw "Release archive is missing a model inference file: $required"
-        }
-    }
+    # The inference model is embedded in HyperDR.exe. Startup loads and
+    # validates that resource before the conversions below, so the release must
+    # not depend on a loose checkpoint, Python script, or Display-P3 profile.
 
     # A deterministic 32x32 RGB gradient. Keeping the fixture in the script
     # makes the smoke test independent of private photographs or repository

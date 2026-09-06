@@ -14,6 +14,7 @@ resolves the dependencies below through vcpkg or CMake `FetchContent`.
 | libjpeg-turbo | JPEG input, preview output, and Ultra HDR support | IJG, modified BSD, and zlib licenses |
 | libpng | PNG input decoding | libpng-2.0 |
 | Google libultrahdr 1.4.0 | Ultra HDR JPEG/R reference codec | Apache-2.0 or MIT |
+| ncnn | Embedded native gain-map inference runtime | BSD-3-Clause |
 
 `Setup-HTTPS.bat` offers to install [mkcert](https://github.com/FiloSottile/mkcert)
 (BSD-3-Clause) through winget, and later invokes it to issue the local
@@ -26,6 +27,12 @@ The exact dependency versions and feature choices are defined in
 [`vcpkg.json`](vcpkg.json) and [`CMakeLists.txt`](CMakeLists.txt). Consult the
 license files distributed with each dependency; this notice is an aid, not a
 substitute for those license texts.
+
+The ONNX export and ncnn conversion tools listed in
+[`HyperDR_Model/requirements.txt`](HyperDR_Model/requirements.txt) are
+build-time tooling only. They are not required by, or installed with, the
+native release executable; its ncnn model bytes are embedded as Windows
+resources.
 
 `libavif` and its libaom codec are build dependencies for the two AVIF output
 formats; they are not merely reference implementations. Google's libultrahdr

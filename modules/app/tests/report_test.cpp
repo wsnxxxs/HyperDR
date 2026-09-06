@@ -166,6 +166,8 @@ void test_run_report_is_parseable_and_complete() {
   ok.decode_degradation_reasons = {"default_crop_rejected"};
   ok.input_domain = hyperdr::InputDomain::kDisplayReferredHdr;
   ok.input_headroom = 4.93F;
+  ok.model_development = "display-p3-passthrough";
+  ok.model_id = "hyperdr.direct-fixed-incumbent/v3-production";
   ok.width = 8192;
   ok.height = 5464;
   ok.stats.rendered_peak = 3.5F;
@@ -205,6 +207,12 @@ void test_run_report_is_parseable_and_complete() {
           "the renderer's input domain was not reported");
   require(files[0].find("input_headroom")->number() > 4.9,
           "the declared input headroom was not reported");
+  require(files[0].find("model_development")->string() ==
+              "display-p3-passthrough",
+          "the native model development kind was not reported");
+  require(files[0].find("model_id")->string() ==
+              "hyperdr.direct-fixed-incumbent/v3-production",
+          "the embedded model identity was not reported");
   require(files[1].find("input_domain")->string() == "unknown",
           "a file that never decoded should report an unknown domain");
   require(files[0].find("decode_degraded")->boolean(),

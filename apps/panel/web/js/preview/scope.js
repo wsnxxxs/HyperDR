@@ -11,6 +11,7 @@
  */
 
 import { role, setPressed, setText, readColor } from "../core/dom.js";
+import { t, onLocaleChange } from "../i18n/index.js";
 import { store } from "../core/store.js";
 
 const P3_LUMA = [0.2289746, 0.6917385, 0.0792869];
@@ -35,18 +36,50 @@ function emptyHistogram(total = 0) {
   };
 }
 
+/**
+ * Maps a linear scene light value (0 .. rangeLinear) to normalized chart position (0 .. 1)
+ * using a hybrid perceptual sRGB (SDR) and logarithmic (HDR headroom) scale.
+ */
+function toneToNorm(value, rangeLinear = 1) {
+  const v = Math.max(0, Number.isFinite(value) ? value : 0);
+  const maxRange = Math.max(1, Number.isFinite(rangeLinear) ? rangeLinear : 1);
+  const stops = Math.log2(maxRange);
+
+  if (stops <= 1e-4) {
+    // Standard SDR: perceptual sRGB gamma tone curve
+    return v <= 0.0031308
+      ? 12.92 * v
+      : Math.min(1, 1.055 * Math.pow(v, 1 / 2.4) - 0.055);
+  }
+
+  // Dynamic allocation: SDR (0..1) occupies ~60% of horizontal space,
+  // remaining space is evenly distributed per EV stop of HDR headroom.
+  const wSdr = Math.max(0.48, Math.min(0.72, 1 / (1 + 0.35 * stops)));
+
+  if (v <= 1.0) {
+    const srgb = v <= 0.0031308
+      ? 12.92 * v
+      : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
+    return Math.min(wSdr, Math.max(0, srgb * wSdr));
+  } else {
+    const stopOffset = Math.log2(v) / stops;
+    return Math.min(1, wSdr + (1 - wSdr) * Math.max(0, stopOffset));
+  }
+}
+
 function histogramFromPlane(values, width, height, rangeLinear) {
   const total = width * height;
   const histogram = emptyHistogram(total);
-  const scale = 255 / Math.max(rangeLinear, 1e-6);
+  const maxLinear = Math.max(rangeLinear, 1);
   for (let p = 0; p < values.length; p += 3) {
     const r = Math.max(0, Number.isFinite(values[p]) ? values[p] : 0);
     const g = Math.max(0, Number.isFinite(values[p + 1]) ? values[p + 1] : 0);
     const b = Math.max(0, Number.isFinite(values[p + 2]) ? values[p + 2] : 0);
-    histogram.red[clampBin(r * scale)]++;
-    histogram.green[clampBin(g * scale)]++;
-    histogram.blue[clampBin(b * scale)]++;
-    histogram.luma[clampBin((P3_LUMA[0] * r + P3_LUMA[1] * g + P3_LUMA[2] * b) * scale)]++;
+    const luma = P3_LUMA[0] * r + P3_LUMA[1] * g + P3_LUMA[2] * b;
+    histogram.red[clampBin(toneToNorm(r, maxLinear) * (HISTOGRAM_BINS - 1))]++;
+    histogram.green[clampBin(toneToNorm(g, maxLinear) * (HISTOGRAM_BINS - 1))]++;
+    histogram.blue[clampBin(toneToNorm(b, maxLinear) * (HISTOGRAM_BINS - 1))]++;
+    histogram.luma[clampBin(toneToNorm(luma, maxLinear) * (HISTOGRAM_BINS - 1))]++;
   }
   return histogram;
 }
@@ -54,15 +87,16 @@ function histogramFromPlane(values, width, height, rangeLinear) {
 function histogramFromDisplayImage(source, rangeLinear) {
   const data = source.data;
   const histogram = emptyHistogram(data.length / 4);
-  const scale = 255 / Math.max(rangeLinear, 1e-6);
+  const maxLinear = Math.max(rangeLinear, 1);
   for (let p = 0; p < data.length; p += 4) {
     const r = decodeDisplaySample(data[p]);
     const g = decodeDisplaySample(data[p + 1]);
     const b = decodeDisplaySample(data[p + 2]);
-    histogram.red[clampBin(r * scale)]++;
-    histogram.green[clampBin(g * scale)]++;
-    histogram.blue[clampBin(b * scale)]++;
-    histogram.luma[clampBin((P3_LUMA[0] * r + P3_LUMA[1] * g + P3_LUMA[2] * b) * scale)]++;
+    const luma = P3_LUMA[0] * r + P3_LUMA[1] * g + P3_LUMA[2] * b;
+    histogram.red[clampBin(toneToNorm(r, maxLinear) * (HISTOGRAM_BINS - 1))]++;
+    histogram.green[clampBin(toneToNorm(g, maxLinear) * (HISTOGRAM_BINS - 1))]++;
+    histogram.blue[clampBin(toneToNorm(b, maxLinear) * (HISTOGRAM_BINS - 1))]++;
+    histogram.luma[clampBin(toneToNorm(luma, maxLinear) * (HISTOGRAM_BINS - 1))]++;
   }
   return histogram;
 }
@@ -145,28 +179,67 @@ function readPalette() {
   return palette;
 }
 
-function drawSeries(context, counts, style, blend, width, height, fill, maxCount = 0) {
-  let max = maxCount;
-  if (!(max > 0)) for (let i = 0; i < 256; i++) if (counts[i] > max) max = counts[i];
-  max = Math.max(max, 1);
-  context.beginPath();
-  context.moveTo(0, height);
-  for (let i = 0; i < 256; i++) {
-    const x = (i / 255) * width;
-    const value = Math.min(1, counts[i] / max);
-    context.lineTo(x, height - Math.pow(value, 0.55) * (height - 2));
+/**
+ * Applies a 5-tap Gaussian/binomial smoothing filter to eliminate single-bin
+ * discrete jitter while preserving tone distribution peaks.
+ */
+function smoothCounts(counts) {
+  if (!counts) return null;
+  const n = counts.length;
+  const smoothed = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const c0 = counts[Math.max(0, i - 2)];
+    const c1 = counts[Math.max(0, i - 1)];
+    const c2 = counts[i];
+    const c3 = counts[Math.min(n - 1, i + 1)];
+    const c4 = counts[Math.min(n - 1, i + 2)];
+    smoothed[i] = (c0 + 4 * c1 + 6 * c2 + 4 * c3 + c4) / 16;
   }
-  if (fill) {
-    context.lineTo(width, height);
-    context.closePath();
-    context.fillStyle = style;
-    if (blend) context.globalCompositeOperation = blend;
-    context.fill();
-    context.globalCompositeOperation = "source-over";
+  return smoothed;
+}
+
+function getSeriesPeak(seriesList) {
+  let max = 0;
+  for (const series of seriesList) {
+    if (!series) continue;
+    for (let i = 0; i < series.length; i++) {
+      if (series[i] > max) max = series[i];
+    }
+  }
+  return Math.max(max, 1);
+}
+
+function computePoints(counts, max, width, height) {
+  const pts = [];
+  const len = counts.length;
+  for (let i = 0; i < len; i++) {
+    const x = (i / (len - 1)) * width;
+    const v = Math.min(1, counts[i] / max);
+    // Smooth root scaling so peaks remain well-proportioned
+    const h = v > 0 ? Math.pow(v, 0.62) * (height - 3) : 0;
+    pts.push({ x, y: height - h });
+  }
+  return pts;
+}
+
+function drawSmoothPath(context, pts, closeToBottom = false, height = 0) {
+  if (!pts || pts.length === 0) return;
+  context.beginPath();
+  if (closeToBottom) {
+    context.moveTo(pts[0].x, height);
+    context.lineTo(pts[0].x, pts[0].y);
   } else {
-    context.strokeStyle = style;
-    context.lineWidth = 1.5;
-    context.stroke();
+    context.moveTo(pts[0].x, pts[0].y);
+  }
+  for (let i = 0; i < pts.length - 1; i++) {
+    const xc = (pts[i].x + pts[i + 1].x) / 2;
+    const yc = (pts[i].y + pts[i + 1].y) / 2;
+    context.quadraticCurveTo(pts[i].x, pts[i].y, xc, yc);
+  }
+  context.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+  if (closeToBottom) {
+    context.lineTo(pts[pts.length - 1].x, height);
+    context.closePath();
   }
 }
 
@@ -178,15 +251,22 @@ export function mountScope({ analysis }) {
   const coldChip = role("clip-cold");
   const histMode = role("hist-mode");
 
-  const modes = [["luma", "亮度"], ["rgb", "RGB"]];
-  const modeButtons = modes.map(([id, label]) => {
+  const modes = [["luma", "scope.luma"], ["rgb", "scope.rgb"]];
+  const modeButtons = modes.map(([id, labelKey]) => {
     const button = document.createElement("button");
     button.type = "button";
     button.setAttribute("aria-pressed", "false");
-    button.textContent = label;
+    button.textContent = t(labelKey);
     button.addEventListener("click", () => store.set({ histMode: id }));
     histMode.append(button);
     return [id, button];
+  });
+  // Built once and mutated thereafter, so a language change has to be pushed
+  // in rather than re-rendered.
+  onLocaleChange(() => {
+    for (const [index, [, button]] of modeButtons.entries()) {
+      setText(button, t(modes[index][1]));
+    }
   });
 
   hotChip.addEventListener("click", () => store.set({ zebraHot: !store.get().zebraHot }));
@@ -201,53 +281,203 @@ export function mountScope({ analysis }) {
     const palette = readPalette();
     context.clearRect(0, 0, width, height);
 
-    context.strokeStyle = palette.grid;
+    const rangeLinear = data.rangeLinear || 1;
+    const stops = Math.log2(rangeLinear);
+
+    // --- Dynamic Photographic & EV Grid ---
     context.lineWidth = 1;
-    for (let g = 1; g < 4; g++) {
-      const x = ((width * g) / 4) | 0;
+    if (stops > 0.05) {
+      // 1. SDR boundary (0 EV / 1.0 scene light)
+      const xSdr = toneToNorm(1.0, rangeLinear) * width;
+      context.strokeStyle = palette.grid;
       context.beginPath();
-      context.moveTo(x + 0.5, 0);
-      context.lineTo(x + 0.5, height);
+      context.moveTo(xSdr + 0.5, 0);
+      context.lineTo(xSdr + 0.5, height);
       context.stroke();
+
+      // Label SDR boundary
+      context.font = "9px -apple-system, BlinkMacSystemFont, sans-serif";
+      context.fillStyle = palette.luma;
+      context.globalAlpha = 0.6;
+      context.fillText("SDR", Math.max(4, xSdr - 22), 10);
+      context.globalAlpha = 1;
+
+      // 2. HDR EV Stop landmarks (+1 EV, +2 EV, ...)
+      const maxStop = Math.floor(stops);
+      for (let k = 1; k <= maxStop; k++) {
+        const xStop = toneToNorm(2 ** k, rangeLinear) * width;
+        context.strokeStyle = palette.grid;
+        context.setLineDash([2, 3]);
+        context.beginPath();
+        context.moveTo(xStop + 0.5, 0);
+        context.lineTo(xStop + 0.5, height);
+        context.stroke();
+        context.setLineDash([]);
+
+        context.font = "9px -apple-system, BlinkMacSystemFont, sans-serif";
+        context.fillStyle = palette.output;
+        context.globalAlpha = 0.75;
+        context.fillText(`+${k}EV`, xStop + 2, 10);
+        context.globalAlpha = 1;
+      }
+
+      // 3. Middle gray landmark (18% in SDR zone)
+      const xMid = toneToNorm(0.18, rangeLinear) * width;
+      context.strokeStyle = palette.grid;
+      context.setLineDash([1, 4]);
+      context.beginPath();
+      context.moveTo(xMid + 0.5, 0);
+      context.lineTo(xMid + 0.5, height);
+      context.stroke();
+      context.setLineDash([]);
+    } else {
+      // Standard SDR Quarter grid
+      context.strokeStyle = palette.grid;
+      for (let g = 1; g < 4; g++) {
+        const x = ((width * g) / 4) | 0;
+        context.beginPath();
+        context.moveTo(x + 0.5, 0);
+        context.lineTo(x + 0.5, height);
+        context.stroke();
+      }
     }
 
     const { histogram } = data;
     if (state.histMode === "rgb") {
-      const sourceChannels = histogram;
-      const outputChannels = data.renderedHistogram || histogram;
-      const max = Math.max(
-        ...[sourceChannels.red, sourceChannels.green, sourceChannels.blue,
-          outputChannels.red, outputChannels.green, outputChannels.blue]
-          .map((series) => Math.max(...series)));
-      context.globalAlpha = 0.28;
-      drawSeries(context, sourceChannels.red, palette.red, "lighter", width, height, true, max);
-      drawSeries(context, sourceChannels.green, palette.green, "lighter", width, height, true, max);
-      drawSeries(context, sourceChannels.blue, palette.blue, "lighter", width, height, true, max);
-      context.globalAlpha = 1;
+      const srcR = smoothCounts(histogram.red);
+      const srcG = smoothCounts(histogram.green);
+      const srcB = smoothCounts(histogram.blue);
+
+      const outR = smoothCounts(data.renderedHistogram?.red || histogram.red);
+      const outG = smoothCounts(data.renderedHistogram?.green || histogram.green);
+      const outB = smoothCounts(data.renderedHistogram?.blue || histogram.blue);
+
+      const max = getSeriesPeak([srcR, srcG, srcB, outR, outG, outB]);
+
+      const ptsSrcR = computePoints(srcR, max, width, height);
+      const ptsSrcG = computePoints(srcG, max, width, height);
+      const ptsSrcB = computePoints(srcB, max, width, height);
+
+      const ptsOutR = computePoints(outR, max, width, height);
+      const ptsOutG = computePoints(outG, max, width, height);
+      const ptsOutB = computePoints(outB, max, width, height);
+
+      // Translucent channel area fills
+      context.globalCompositeOperation = "screen";
+      context.globalAlpha = 0.22;
+
+      context.fillStyle = palette.red;
+      drawSmoothPath(context, ptsOutR, true, height);
+      context.fill();
+
+      context.fillStyle = palette.green;
+      drawSmoothPath(context, ptsOutG, true, height);
+      context.fill();
+
+      context.fillStyle = palette.blue;
+      drawSmoothPath(context, ptsOutB, true, height);
+      context.fill();
+
+      context.globalCompositeOperation = "source-over";
+
+      // If rendered differs from source, draw source outline subtly
       if (data.renderedHistogram) {
-        drawSeries(context, outputChannels.red, palette.red, null, width, height, false, max);
-        drawSeries(context, outputChannels.green, palette.green, null, width, height, false, max);
-        drawSeries(context, outputChannels.blue, palette.blue, null, width, height, false, max);
+        context.globalAlpha = 0.35;
+        context.lineWidth = 1;
+        context.setLineDash([2, 2]);
+
+        context.strokeStyle = palette.red;
+        drawSmoothPath(context, ptsSrcR, false, height);
+        context.stroke();
+
+        context.strokeStyle = palette.green;
+        drawSmoothPath(context, ptsSrcG, false, height);
+        context.stroke();
+
+        context.strokeStyle = palette.blue;
+        drawSmoothPath(context, ptsSrcB, false, height);
+        context.stroke();
+
+        context.setLineDash([]);
       }
+
+      // Crisp output channel strokes
+      context.globalAlpha = 0.95;
+      context.lineWidth = 1.6;
+
+      context.strokeStyle = palette.red;
+      drawSmoothPath(context, ptsOutR, false, height);
+      context.stroke();
+
+      context.strokeStyle = palette.green;
+      drawSmoothPath(context, ptsOutG, false, height);
+      context.stroke();
+
+      context.strokeStyle = palette.blue;
+      drawSmoothPath(context, ptsOutB, false, height);
+      context.stroke();
+
+      context.globalAlpha = 1;
     } else {
-      const output = data.renderedHistogram?.luma || histogram.luma;
-      const max = Math.max(Math.max(...histogram.luma), Math.max(...output));
-      drawSeries(context, histogram.luma, palette.luma, null, width, height, true, max);
+      const srcLuma = smoothCounts(histogram.luma);
+      const outLuma = smoothCounts(data.renderedHistogram?.luma || histogram.luma);
+      const max = getSeriesPeak([srcLuma, outLuma]);
+
+      const ptsSrc = computePoints(srcLuma, max, width, height);
+      const ptsOut = computePoints(outLuma, max, width, height);
+
+      // 1. Source distribution base fill (slate cool tone)
+      context.fillStyle = palette.luma;
+      context.globalAlpha = 0.30;
+      drawSmoothPath(context, ptsSrc, true, height);
+      context.fill();
+
+      // 2. Source distribution outline
+      context.strokeStyle = palette.luma;
+      context.globalAlpha = 0.60;
+      context.lineWidth = 1.2;
+      drawSmoothPath(context, ptsSrc, false, height);
+      context.stroke();
+
+      // 3. HDR Output distribution (Warm Amber highlight expansion)
       if (data.renderedHistogram) {
-        drawSeries(context, output, palette.output, null, width, height, false, max);
+        // Output fill with warm gradient
+        const grad = context.createLinearGradient(0, 0, 0, height);
+        grad.addColorStop(0, "rgba(245, 158, 11, 0.28)");
+        grad.addColorStop(1, "rgba(245, 158, 11, 0.04)");
+        context.fillStyle = grad;
+        context.globalAlpha = 0.85;
+        drawSmoothPath(context, ptsOut, true, height);
+        context.fill();
+
+        // Output crisp amber stroke
+        context.strokeStyle = palette.output || "#f59e0b";
+        context.globalAlpha = 1;
+        context.lineWidth = 1.8;
+        drawSmoothPath(context, ptsOut, false, height);
+        context.stroke();
+      } else {
+        context.globalAlpha = 1;
       }
     }
 
+    // Expansion Start Marker (lift point)
     if (!state.previewOptimized) {
-      // Where the mathematical broad-highlight lift begins.
-      const marker = (state.expansionStart / Math.max(data.rangeLinear, 1)) * width;
+      const marker = toneToNorm(state.expansionStart, rangeLinear) * width;
       context.strokeStyle = palette.marker;
+      context.lineWidth = 1.2;
       context.setLineDash([3, 3]);
       context.beginPath();
       context.moveTo(marker + 0.5, 0);
       context.lineTo(marker + 0.5, height);
       context.stroke();
       context.setLineDash([]);
+
+      // Small top notch indicator for expansion start
+      context.fillStyle = palette.marker;
+      context.beginPath();
+      context.arc(marker + 0.5, 3, 2.5, 0, Math.PI * 2);
+      context.fill();
     }
   }
 

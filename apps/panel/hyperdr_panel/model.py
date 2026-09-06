@@ -1,365 +1,147 @@
-"""Optional HyperDR_Model orchestration for one panel conversion.
+"""Native AI model capability and preview orchestration.
 
-The model remains a separate Python project. This module only resolves its
-runtime configuration and builds the subprocess commands that connect model
-inference to HyperDR's external gain-grid input.
+The panel no longer owns a Python model environment or a gain-grid sidecar.
+The converter receives the uploaded source and the embedded model marker, then
+performs development, inference, filtering and post-adjustment in memory. This
+module is deliberately small: it only gates the feature, runs the optional
+button-time probe, and validates the packet returned on stdout.
 """
 from __future__ import annotations
 
 from contextlib import nullcontext
-from dataclasses import dataclass
-import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
-import sys
 
-from .config import IS_WINDOWS, REPO_ROOT
-from .concurrency import RAW_DECODE_BUDGET
+from .concurrency import RAW_DECODE_BUDGET, SingleFlight
+from .config import REPO_ROOT
+from .executable import detect_exe
 from .formats import RAW_INPUT_EXTENSIONS
 
 
-MODEL_ROOT_DEFAULT = (REPO_ROOT / "HyperDR_Model").resolve()
+NATIVE_MODEL_ARTIFACT = "embedded"
+NATIVE_MODEL_GAIN_MAGIC = b"HYPGAIN1\n"
 INFERENCE_TIMEOUT_SECONDS = max(
     10, int(os.environ.get("HYPERDR_MODEL_TIMEOUT_SECONDS", "300"))
 )
-
-
-class ModelConfigurationError(ValueError):
-    """The model was requested but its runtime is not usable."""
-
-
-@dataclass(frozen=True)
-class ModelConfig:
-    root: Path
-    python: str
-    script: Path
-    checkpoint: Path
-    dataset_root: Path
-    device: str
-    long_side: int
-    allow_legacy_label_schema: bool = False
-    label_contract_id: str = "hyperdr.apple-gain-label/v1"
-    model_id: str = ""
+_INFERENCE_FLIGHT = SingleFlight()
 
 
 def _enabled() -> bool:
+    """Whether the native model feature is enabled by operator policy."""
     configured = os.environ.get("HYPERDR_MODEL_ENABLED")
-    if configured is not None:
-        return configured.strip().lower() in {"1", "true", "yes", "on"}
-    if os.environ.get("HYPERDR_MODEL_CHECKPOINT", "").strip():
+    if configured is None:
         return True
-    # The packaged Windows workspace includes a checkpoint and runtime. Since
-    # inference is now user-triggered, making the button available has no
-    # startup or import cost; HYPERDR_MODEL_ENABLED=0 remains the explicit off.
-    return bool(_find_checkpoint(MODEL_ROOT_DEFAULT))
+    return configured.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _find_checkpoint(root: Path) -> Path | None:
-    # Production is an explicit release artifact. Never let an experimental
-    # run directory win merely because its path sorts first.
-    for candidate in (
-        root / "checkpoints" / "production-v3.pt",
-        root / "checkpoints" / "best.pt",
-    ):
-        if candidate.is_file():
-            return candidate.resolve()
-    for folder_name in ("runs", "checkpoints"):
-        folder = root / folder_name
-        if not folder.is_dir():
-            continue
-        candidates = sorted(folder.rglob("*.pt")) + sorted(folder.rglob("*.pth"))
-        if candidates:
-            return candidates[0].resolve()
-    return None
-
-
-def _checkpoint_metadata(checkpoint: Path) -> dict[str, object]:
-    sidecar = checkpoint.with_suffix(".json")
-    if not sidecar.is_file():
-        return {}
-    try:
-        value = json.loads(sidecar.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
-def _python_runtime(root: Path) -> str:
-    configured = os.environ.get("HYPERDR_MODEL_PYTHON", "").strip()
-    if configured:
-        return configured
-
-    candidates = [
-        root / ".venv" / "Scripts" / "python.exe",
-        root / ".venv" / "bin" / "python",
-    ]
-    # A lean release intentionally omits PyTorch. When it is unpacked somewhere
-    # below an existing HyperDR workspace (for example dist-latest-test/), find
-    # that workspace's already configured CUDA venv automatically. This keeps
-    # Start.bat double-clickable without hard-coding a user-specific path.
-    if IS_WINDOWS:
-        for ancestor in REPO_ROOT.parents:
-            candidates.extend([
-                ancestor / "HyperDR_Model" / ".venv" / "Scripts" / "python.exe",
-                ancestor / "HyperDR" / "HyperDR_Model" / ".venv"
-                / "Scripts" / "python.exe",
-            ])
-    for candidate in candidates:
-        if candidate.is_file():
-            return str(candidate)
-    return sys.executable
-
-
-def _long_side() -> int:
-    raw = os.environ.get("HYPERDR_MODEL_LONG_SIDE", "1024")
-    try:
-        value = int(raw)
-    except ValueError as exc:
-        raise ModelConfigurationError("HYPERDR_MODEL_LONG_SIDE must be an integer") from exc
-    if not 16 <= value <= 8192:
-        raise ModelConfigurationError("HYPERDR_MODEL_LONG_SIDE must be in [16, 8192]")
-    return value
-
-
-def _paths() -> tuple[Path, Path, Path, Path]:
-    root = Path(os.environ.get("HYPERDR_MODEL_ROOT", str(MODEL_ROOT_DEFAULT))).resolve()
-    script = root / "infer_gain.py"
-    configured_checkpoint = os.environ.get("HYPERDR_MODEL_CHECKPOINT", "").strip()
-    checkpoint = (Path(configured_checkpoint).expanduser().resolve()
-                  if configured_checkpoint else (_find_checkpoint(root) or Path()))
-    dataset_default = root / "dataset"
-    dataset = Path(os.environ.get("HYPERDR_MODEL_DATASET_ROOT", str(dataset_default)))
-    return root, script, checkpoint, dataset.resolve()
-
-
-def load_config() -> ModelConfig | None:
-    """Return a validated config, or ``None`` when model mode is disabled."""
-    if not _enabled():
-        return None
-    root, script, checkpoint, dataset_root = _paths()
-    missing = []
-    if not root.is_dir():
-        missing.append(f"model root {root}")
-    if not script.is_file():
-        missing.append(f"inference script {script}")
-    if not checkpoint.is_file():
-        missing.append("HYPERDR_MODEL_CHECKPOINT")
-    if not dataset_root.is_dir():
-        missing.append(f"dataset root {dataset_root}")
-    if not (dataset_root / "assets" / "display-p3.icc").is_file():
-        missing.append(f"Display P3 profile {dataset_root / 'assets' / 'display-p3.icc'}")
-    allow_legacy = os.environ.get("HYPERDR_MODEL_ALLOW_LEGACY_LABEL_SCHEMA", "").strip().lower() in {"1", "true", "yes", "on"}
-    metadata = _checkpoint_metadata(checkpoint)
-    configured_contract = os.environ.get("HYPERDR_MODEL_LABEL_CONTRACT", "").strip().lower()
-    declared_contract = configured_contract or str(
-        metadata.get("label_contract_id", "hyperdr.apple-gain-label/v1")
-    ).strip().lower()
-    if declared_contract == "v1":
-        declared_contract = "hyperdr.apple-gain-label/v1"
-    elif declared_contract == "v2":
-        declared_contract = "hyperdr.apple-gain-label/v2"
-    if declared_contract not in {
-        "hyperdr.apple-gain-label/v1", "hyperdr.apple-gain-label/v2"
-    }:
-        missing.append("checkpoint sidecar has an unknown label contract")
-    if declared_contract != "hyperdr.apple-gain-label/v2" and not allow_legacy:
-        missing.append("legacy checkpoint requires HYPERDR_MODEL_ALLOW_LEGACY_LABEL_SCHEMA=1")
-    if missing:
-        raise ModelConfigurationError(
-            "HyperDR_Model is enabled but not ready: " + "; ".join(missing)
-        )
-    device = os.environ.get("HYPERDR_MODEL_DEVICE", "auto").strip().lower()
-    if device not in {"auto", "cuda", "cpu"}:
-        raise ModelConfigurationError("HYPERDR_MODEL_DEVICE must be auto, cuda, or cpu")
-    return ModelConfig(
-        root=root,
-        python=_python_runtime(root),
-        script=script,
-        checkpoint=checkpoint,
-        dataset_root=dataset_root,
-        device=device,
-        long_side=_long_side(),
-        allow_legacy_label_schema=allow_legacy,
-        label_contract_id=declared_contract,
-        model_id=str(metadata.get("model_id", "")),
-    )
+def _native_executable() -> str:
+    """Return the converter path when the native binary is available."""
+    return detect_exe() or ""
 
 
 def status() -> dict[str, object]:
-    """Return non-throwing state suitable for ``/api/state``."""
-    enabled = _enabled()
-    if not enabled:
-        return {"enabled": False, "ready": False,
-                "reason": "set HYPERDR_MODEL_ENABLED=1 and configure a checkpoint"}
-    try:
-        config = load_config()
-    except ModelConfigurationError:
-        # Do not expose local filesystem paths through the browser API.
-        return {"enabled": True, "ready": False,
-                "reason": "HyperDR_Model is enabled but its runtime is not ready"}
-    assert config is not None
-    try:
-        probe = subprocess.run(
-            [
-                config.python, "-c",
-                "import numpy, torch; from PIL import Image, ImageCms",
-            ],
-            capture_output=True, timeout=20, check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        probe = None
-    if probe is None or probe.returncode != 0:
+    """Return a non-blocking native-model capability for ``/api/state``.
+
+    A checkpoint, Python interpreter and import probe are intentionally absent:
+    the model is owned by the native runtime. The executable locator is the
+    capability boundary; an unavailable runtime reports its actionable error
+    when the button starts a native request.
+    """
+    if not _enabled():
+        return {
+            "enabled": False,
+            "ready": False,
+            "reason": "AI 优化已由 HYPERDR_MODEL_ENABLED 关闭",
+        }
+    if not _native_executable():
         return {
             "enabled": True,
             "ready": False,
-            "reason": "configured Python does not provide PyTorch, NumPy and Pillow",
+            "reason": "原生 HyperDR 可执行文件尚未就绪",
         }
-    return {"enabled": True, "ready": True, "device": config.device,
-            "longSide": config.long_side, "labelContract": config.label_contract_id,
-            "modelId": config.model_id}
+    return {"enabled": True, "ready": True, "device": "native"}
 
 
-def build_commands(config: ModelConfig, source: Path, model_dir: Path,
-                   converter_exe: str, highlight_recovery: str = "blend") -> tuple[list[list[str]], Path, Path]:
-    """Build native SDR development plus direct-float inference commands."""
-    model_dir.mkdir(parents=True, exist_ok=True)
-    gain_path = model_dir / "model-gain.f32"
-    report_path = model_dir / "model-gain.json"
-    model_input = model_dir / "model-input-linear-p3.f32"
-    input_report = model_dir / "model-input.json"
-    prepare = [
-        converter_exe, "model-input", str(source),
-        "--output", str(model_input),
-        "--report", str(input_report),
-        "--long-side", str(config.long_side),
+def _packet_metadata(packet: bytes) -> tuple[int, int, dict]:
+    """Validate the native model-gain packet header and return its geometry."""
+    if not packet.startswith(NATIVE_MODEL_GAIN_MAGIC) or len(packet) < 13:
+        raise ValueError("native model returned an invalid gain packet")
+    json_size = int.from_bytes(packet[9:13], "little")
+    if json_size <= 0 or 13 + json_size > len(packet):
+        raise ValueError("native model gain metadata is truncated")
+    try:
+        metadata = json.loads(packet[13:13 + json_size].decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("native model gain metadata is invalid") from exc
+    if (not isinstance(metadata, dict)
+            or metadata.get("schema") != "hyperdr.native-model-gain/v1"):
+        raise ValueError("native model gain schema is invalid")
+    width = metadata.get("width")
+    height = metadata.get("height")
+    if (isinstance(width, bool) or not isinstance(width, int) or width <= 0
+            or isinstance(height, bool) or not isinstance(height, int) or height <= 0
+            or metadata.get("channels") != 1
+            or metadata.get("layout") != "HW"
+            or metadata.get("sampleType") != "float32-le"
+            or metadata.get("scale") != "signed-log2-gain"):
+        raise ValueError("native model gain geometry is invalid")
+    max_stops = metadata.get("gainMaxStops")
+    if (isinstance(max_stops, bool) or not isinstance(max_stops, (int, float))
+            or not math.isfinite(max_stops)):
+        raise ValueError("native model gain headroom is invalid")
+    expected = 13 + json_size + width * height * 4
+    if len(packet) != expected:
+        raise ValueError("native model gain pixels are truncated")
+    return width, height, metadata
+
+
+def _run_native_gain(executable: str, source: Path,
+                     highlight_recovery: str) -> tuple[bytes, dict]:
+    argv = [
+        executable, "model-gain", str(source),
+        "--ai-model", NATIVE_MODEL_ARTIFACT,
         "--highlight-recovery", highlight_recovery,
     ]
-    # LibRaw's fixed half-size demosaic is selected before unpack.  The recipe
-    # and delivered geometry it produces are frozen into input_report and
-    # checked against the later full-resolution export.
-    if source.suffix.lower() in RAW_INPUT_EXTENSIONS:
-        prepare.append("--half-size")
-    commands: list[list[str]] = [prepare]
-    commands.append([
-        config.python, str(config.script),
-        "--input", str(model_input),
-        "--input-report", str(input_report),
-        "--checkpoint", str(config.checkpoint),
-        "--gain-output", str(gain_path),
-        "--report", str(report_path),
-        "--dataset-root", str(config.dataset_root),
-        "--long-side", str(config.long_side),
-        "--device", config.device,
-    ])
-    if config.allow_legacy_label_schema:
-        commands[-1].append("--allow-legacy-label-schema")
-    return commands, gain_path, report_path
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _validated_inference_files(gain_path: Path, report_path: Path) -> tuple[bytes, dict]:
-    report = json.loads(report_path.read_text(encoding="utf-8"))
-    grid = report.get("gain_grid_size")
-    max_stops = report.get("metadata_gain_max_stops")
-    contract = report.get("label_contract_id")
-    gain_file = report.get("gain_file")
-    expected_scale = (
-        "signed_log2_gain"
-        if contract == "hyperdr.apple-gain-label/v2"
-        else "normalized_log2_gain_0_to_1"
-    )
-    if (not isinstance(grid, list) or len(grid) != 2
-            or not all(isinstance(value, int) and value > 0 for value in grid)
-            or not isinstance(max_stops, (int, float))
-            or not -64 <= float(max_stops) <= 64
-            or contract not in {
-                "hyperdr.apple-gain-label/v1", "hyperdr.apple-gain-label/v2"
-            }
-            or not isinstance(gain_file, dict)
-            or gain_file.get("scale") != expected_scale):
-        raise ValueError("model inference produced an invalid gain report")
-    gain = gain_path.read_bytes()
-    if len(gain) != grid[0] * grid[1] * 4:
-        raise ValueError("model gain byte length does not match its report")
-    expected_digest = gain_file.get("sha256")
-    if (expected_digest is not None
-            and (not isinstance(expected_digest, str)
-                 or _sha256(gain_path) != expected_digest)):
-        raise ValueError("model gain content does not match its report")
-    return gain, report
-
-
-def cached_inference(config: ModelConfig, source: Path, model_dir: Path,
-                     highlight_recovery: str = "blend") -> tuple[bytes, dict] | None:
-    """Return a preview inference only when its full provenance still matches."""
-    gain_path = model_dir / "model-gain.f32"
-    report_path = model_dir / "model-gain.json"
-    if not gain_path.is_file() or not report_path.is_file():
-        return None
     try:
-        gain, report = _validated_inference_files(gain_path, report_path)
-        binding = report["model_binding"]
-        source_binding = binding["source"]
-        model_binding = binding["model"]
-        recipe = report["development_recipe"]
-        if not isinstance(recipe, dict):
-            return None
-        tensor_size = binding["geometry"]["model_tensor_size"]
-        expected_long_side = ((config.long_side + 15) // 16) * 16
-        if (source_binding.get("sha256") != _sha256(source)
-                or source_binding.get("highlight_recovery") != highlight_recovery
-                # Reports created before the neutral model-label fix did not
-                # record this field; reject them so an old +1 EV tensor cannot
-                # be silently reused by the panel.
-                or float(recipe.get("exposure_bias_ev")) != 0.0
-                or model_binding.get("checkpoint_sha256") != _sha256(config.checkpoint)
-                or report.get("label_contract_id") != config.label_contract_id
-                or not isinstance(tensor_size, list) or len(tensor_size) != 2
-                or max(tensor_size) != expected_long_side):
-            return None
-        return gain, report
-    except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
-        return None
+        completed = subprocess.run(
+            argv, cwd=str(REPO_ROOT), capture_output=True,
+            timeout=INFERENCE_TIMEOUT_SECONDS, check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError("unable to run native model inference: %s" % exc) from exc
+    if completed.returncode != 0:
+        detail = completed.stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(detail or "native model inference failed")
+    width, height, metadata = _packet_metadata(completed.stdout)
+    payload_offset = 13 + int.from_bytes(completed.stdout[9:13], "little")
+    return completed.stdout[payload_offset:], {
+        "width": width,
+        "height": height,
+        "max_stops": metadata.get("gainMaxStops"),
+        "headroom_stops": metadata.get("headroomStops"),
+    }
 
 
-def infer_preview(config: ModelConfig, source: Path, model_dir: Path,
-                  converter_exe: str,
-                  highlight_recovery: str = "blend") -> tuple[bytes, dict]:
-    """Run inference now and return the validated browser-preview gain grid."""
-    cached = cached_inference(config, source, model_dir, highlight_recovery)
-    if cached is not None:
-        return cached
-    commands, gain_path, report_path = build_commands(
-        config, source, model_dir, converter_exe, highlight_recovery
-    )
-    # Only LibRaw camera files need the shared resident-memory slot. A raster
-    # model input is already display-referred and must remain independent from
-    # a concurrent RAW preview or model decode.
-    raw_input = source.suffix.lower() in RAW_INPUT_EXTENSIONS
-    for index, command in enumerate(commands):
-        # Release the LibRaw slot as soon as native model-input preparation
-        # ends; the Python inference step no longer owns camera decode memory.
-        decode_slot = (RAW_DECODE_BUDGET.hold(timeout=1.0)
-                       if index == 0 and raw_input else nullcontext())
-        with decode_slot:
-            try:
-                completed = subprocess.run(
-                    command, cwd=str(config.root), capture_output=True,
-                    timeout=INFERENCE_TIMEOUT_SECONDS, check=False,
-                )
-            except (OSError, subprocess.SubprocessError) as exc:
-                raise RuntimeError("unable to run model inference: %s" % exc) from exc
-            if completed.returncode != 0:
-                detail = completed.stderr.decode("utf-8", errors="replace").strip()
-                raise RuntimeError(detail or "model inference failed")
+def native_model_gain(source: Path, highlight_recovery: str = "blend") -> tuple[bytes, dict]:
+    """Run native model-gain without creating any sidecar files."""
+    if not _enabled():
+        raise RuntimeError("AI 优化已关闭。")
+    executable = _native_executable()
+    if not executable:
+        raise RuntimeError("原生 HyperDR 可执行文件尚未就绪。")
+    source = Path(source)
+    stat = source.stat()
+    key = (str(source.resolve()), stat.st_mtime_ns, stat.st_size,
+           highlight_recovery, executable)
 
-    return _validated_inference_files(gain_path, report_path)
+    def produce():
+        raw = source.suffix.lower() in RAW_INPUT_EXTENSIONS
+        slot = RAW_DECODE_BUDGET.hold(timeout=3.0) if raw else nullcontext()
+        with slot:
+            return _run_native_gain(executable, source, highlight_recovery)
+
+    return _INFERENCE_FLIGHT.run(
+        key, produce, timeout=INFERENCE_TIMEOUT_SECONDS + 5.0)

@@ -3,6 +3,8 @@
 #include "hyperdr/app/batch.hpp"
 #include "hyperdr/app/decode_cache.hpp"
 #include "hyperdr/app/report.hpp"
+#include "hyperdr/app/preview.hpp"
+#include "hyperdr/app/analysis_cache.hpp"
 #include "hyperdr/app/schema.hpp"
 #include "hyperdr/codec/availability.hpp"
 #include "hyperdr/codec/encoders.hpp"
@@ -11,6 +13,7 @@
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/foundation/hash.hpp"
 #include "hyperdr/foundation/json.hpp"
+#include "hyperdr/foundation/parallel.hpp"
 #include "hyperdr/foundation/version.hpp"
 #include "hyperdr/gainmap/gain_map.hpp"
 #include "hyperdr/gainmap/external.hpp"
@@ -23,6 +26,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <iomanip>
 #include <iostream>
 #include <stdexcept>
@@ -30,6 +34,7 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include <memory>
 
 #ifdef _WIN32
 #include <fcntl.h>
@@ -438,13 +443,17 @@ void append_u32_le(std::vector<std::uint8_t>& bytes, std::uint32_t value) {
 
 void append_float_image(std::vector<std::uint8_t>& bytes,
                         const FloatImage& image) {
-  bytes.reserve(bytes.size() + image.pixels.size() * sizeof(float));
-  for (const float value : image.pixels) {
-    if (!std::isfinite(value)) {
+  static_assert(sizeof(float) == 4 && std::endian::native == std::endian::little);
+  const auto offset = bytes.size();
+  bytes.resize(offset + image.pixels.size() * sizeof(float));
+  const auto row_size = static_cast<std::size_t>(image.width) * image.channels;
+  parallel_for_rows(image.height, [&](std::uint32_t y) {
+    const auto* row = image.pixels.data() + static_cast<std::size_t>(y) * row_size;
+    if (!std::all_of(row, row + row_size, [](float value) { return std::isfinite(value); }))
       throw std::runtime_error("native preview contains a non-finite pixel");
-    }
-    append_u32_le(bytes, std::bit_cast<std::uint32_t>(value));
-  }
+    std::memcpy(bytes.data() + offset + static_cast<std::size_t>(y) * row_size * sizeof(float),
+                row, row_size * sizeof(float));
+  });
 }
 
 std::vector<std::uint8_t> native_preview_packet(const GainMapResult& result,
@@ -477,6 +486,8 @@ std::vector<std::uint8_t> native_preview_packet(const GainMapResult& result,
 
   std::vector<std::uint8_t> bytes{
       'H', 'Y', 'P', 'R', 'E', 'V', '1', '\n'};
+  bytes.reserve(12 + metadata.size() +
+                (result.base_linear.pixels.size() + hdr.pixels.size()) * sizeof(float));
   append_u32_le(bytes, static_cast<std::uint32_t>(metadata.size()));
   bytes.insert(bytes.end(), metadata.begin(), metadata.end());
   append_float_image(bytes, result.base_linear);
@@ -535,7 +546,41 @@ void set_stdout_binary() {
 #endif
 }
 
-int preview_frame_command(int argc, char** argv) {
+struct PreviewSource {
+  std::string key;
+  DecodedImage image;
+  std::filesystem::path analysis_file;
+  PhotographicAnalysis analysis;
+  std::string preparation_key;
+  GainMapPreparation preparation;
+  std::string model_key;
+  GainMapResult model_base;
+  FloatImage model_input;
+  NativeModelOutput prediction;
+};
+
+struct PreviewSession {
+  std::vector<std::unique_ptr<PreviewSource>> sources;
+  PreviewSource& decode(const ConvertOptions& options) {
+    const auto key = decode_cache_key(options.input,
+        decode_cache_variant(options, options.raw), options.decode_cache_source_sha256);
+    for (auto& source : sources) if (source->key == key) return *source;
+    // One current photograph at its draft and final sizes, bounded in memory.
+    if (sources.size() == 2) sources.erase(sources.begin());
+    auto source = std::make_unique<PreviewSource>();
+    source->key = key;
+    source->image = decode_cached_image(options.input, options, options.raw, &source->analysis_file);
+    if (source->image.domain == InputDomain::kSceneReferred) {
+      source->analysis = cached_photographic_analysis(source->image.linear_p3,
+          source->analysis_file, options.decode_cache_budget_bytes);
+    }
+    sources.push_back(std::move(source));
+    return *sources.back();
+  }
+};
+
+int preview_frame_command(int argc, char** argv, PreviewSession* session = nullptr,
+                          std::vector<std::uint8_t>* packet = nullptr) {
   if (argc < 3) throw std::invalid_argument("preview-frame requires one input image");
   ConvertOptions options;
   options.input = argv[2];
@@ -562,15 +607,32 @@ int preview_frame_command(int argc, char** argv) {
   // than materialise a 48 MP raster the next line is about to shrink. RAW
   // ignores this and keeps using --fast-preview's half_size.
   options.raw.preview_max_edge = options.preview_max_edge;
-  auto decoded = decode_cached_image(options.input, options, options.raw);
+  std::filesystem::path analysis_cache;
+  DecodedImage owned;
+  PreviewSource* cached = session ? &session->decode(options) : nullptr;
+  if (!cached) owned = decode_cached_image(options.input, options, options.raw, &analysis_cache);
+  auto& decoded = cached ? cached->image : owned;
   const auto input = decoded.describe_input();
   GainMapResult result;
   if (!options.ai_model_path.empty()) {
-    result = render_native_model_base(decoded);
-    auto model_input = make_native_model_input(result.base_linear);
-    auto prediction = infer_native_model(options.ai_model_path, model_input);
-    apply_native_model_gain_map(result, model_input, std::move(prediction),
-                                options.gain.gain_strength, options.ai_post);
+    const auto model_key = path_utf8(options.ai_model_path);
+    if (cached) {
+      if (cached->model_key != model_key) {
+        cached->model_base = render_native_model_base(decoded);
+        cached->model_input = make_native_model_input(cached->model_base.base_linear);
+        cached->prediction = infer_native_model(options.ai_model_path, cached->model_input);
+        cached->model_key = model_key;
+      }
+      result = cached->model_base;
+      apply_native_model_gain_map(result, cached->model_input, cached->prediction,
+                                  options.gain.gain_strength, options.ai_post);
+    } else {
+      result = render_native_model_base(decoded);
+      auto model_input = make_native_model_input(result.base_linear);
+      auto prediction = infer_native_model(options.ai_model_path, model_input);
+      apply_native_model_gain_map(result, model_input, std::move(prediction),
+                                  options.gain.gain_strength, options.ai_post);
+    }
   } else if (!options.external_gain_path.empty()) {
     auto external = read_external_gain_map(
         options.external_gain_path, options.external_gain_report,
@@ -581,11 +643,61 @@ int preview_frame_command(int argc, char** argv) {
                                     development, decoded.capture,
                                     decoded.describe_input());
   } else {
-    result = render_decoded_image(decoded, options.gain);
+    if (cached) {
+      json::Writer key;
+      key.begin_object();
+      for (const auto& setting : settings()) {
+        if (setting.key == "gain_strength") continue;
+        const auto value = setting.read(options);
+        if (value.is_string()) key.member(setting.key, value.string());
+        else if (value.is_bool()) key.member(setting.key, value.boolean());
+        else key.member(setting.key, value.number());
+      }
+      const auto identity = key.end_object().take();
+      if (cached->preparation_key != identity) {
+        cached->preparation = {};
+        cached->preparation_key = identity;
+      }
+    }
+    result = cached ? make_gain_map(decoded.linear_p3, options.gain, decoded.capture,
+        input, input.domain == InputDomain::kSceneReferred ? &cached->analysis : nullptr,
+        &cached->preparation)
+      : render_decoded_image(decoded, options.gain, analysis_cache,
+                            options.decode_cache_budget_bytes);
   }
   validate_encoding_headroom(options.encoding, result.headroom_stops);
-  write_binary_file_atomic(options.output_directory,
-                           native_preview_packet(result, decoded.decode, input), true);
+  if (packet) {
+    *packet = result.gain_map.channels == 1
+        ? compact_preview_packet(result, decoded.decode, input)
+        : native_preview_packet(result, decoded.decode, input);
+  } else {
+    write_binary_file_atomic(options.output_directory,
+                             native_preview_packet(result, decoded.decode, input), true);
+  }
+  return 0;
+}
+
+int preview_worker_command() {
+  set_stdout_binary();
+  PreviewSession session;
+  std::cout << "{\"schema\":\"hyperdr.preview-worker/v1\"}\n" << std::flush;
+  std::string line;
+  while (std::getline(std::cin, line)) {
+    try {
+      const auto request = json::parse(line);
+      std::vector<std::string> arguments{"HyperDR", "preview-frame"};
+      for (const auto& value : request.array()) arguments.push_back(value.string());
+      std::vector<char*> argv;
+      for (auto& argument : arguments) argv.push_back(argument.data());
+      std::vector<std::uint8_t> packet;
+      preview_frame_command(static_cast<int>(argv.size()), argv.data(), &session, &packet);
+      std::cout << "{\"size\":" << packet.size() << "}\n";
+      std::cout.write(reinterpret_cast<const char*>(packet.data()), packet.size());
+    } catch (const std::exception& error) {
+      std::cout << "{\"size\":0,\"error\":\"" << json::escape(error.what()) << "\"}\n";
+    }
+    std::cout.flush();
+  }
   return 0;
 }
 
@@ -797,6 +909,7 @@ int run_cli(int argc, char** argv) {
   if (command == "verify") return verify_command(argc, argv);
   if (command == "thumbnail") return thumbnail_command(argc, argv);
   if (command == "preview-frame") return preview_frame_command(argc, argv);
+  if (command == "preview-worker") return preview_worker_command();
   if (command == "model-gain") return model_gain_command(argc, argv);
   if (command == "model-input") return model_input_command(argc, argv);
   throw std::invalid_argument("unknown command: " + std::string(command));

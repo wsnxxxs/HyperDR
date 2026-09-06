@@ -123,6 +123,9 @@ struct FileResult {
   double decode_ms{};
   double process_ms{};
   double encode_ms{};
+  double codec_ms{};
+  double verify_ms{};
+  double write_ms{};
   RenderStats stats;
 };
 

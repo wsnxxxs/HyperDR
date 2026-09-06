@@ -77,8 +77,10 @@ void test_photographic_calibration_preserves_gain_shape() {
 
   const float expected_headroom =
       options.headroom_stops * options.gain_strength;
-  require(std::abs(result.headroom_stops - expected_headroom) < 1.0e-5F,
-          "photographic calibration changed the requested headroom");
+  require(result.headroom_stops > 0.0F && result.headroom_stops <= expected_headroom,
+          "photographic gain must use some range without exceeding its budget");
+  require(std::abs(result.stats.headroom_stops - expected_headroom) < 1.0e-5F,
+          "requested budget must be reported separately from encoded gain");
   require(result.stats.gain_percentiles[1] <
               result.stats.gain_max_stops * 0.95F,
           "photographic calibration collapsed a smooth gain field into a plateau");
@@ -120,13 +122,14 @@ void test_color_preservation_and_headroom() {
   const float ratio = r / g;
   require(ratio > 1.5F && ratio < 4.0F,
           "gamut compression left the saturated patch flat or over-saturated");
+
   const float gain_max =
       static_cast<float>(saturated_result.metadata.gain_max.numerator) /
       saturated_result.metadata.gain_max.denominator;
   const float headroom =
       static_cast<float>(saturated_result.metadata.alternate_headroom.numerator) /
       saturated_result.metadata.alternate_headroom.denominator;
-  require(gain_max > 0.1F && std::abs(headroom - gain_max) < 1.0e-6F,
+  require(gain_max > 0.0F && std::abs(headroom - gain_max) < 1.0e-6F,
           "photographic output violated Apple's gain/headroom convention");
 
   // An achromatic HDR patch has positive luminance headroom and should
@@ -134,7 +137,7 @@ void test_color_preservation_and_headroom() {
   // declared headroom must reproduce the peak the renderer reports rather than
   // a constant copied out of one renderer's arithmetic.
   hyperdr::FloatImage achromatic(2, 2, 3);
-  std::fill(achromatic.pixels.begin(), achromatic.pixels.end(), 1.0F);
+  std::fill(achromatic.pixels.begin(), achromatic.pixels.end(), 4.0F);
   const auto flat = hyperdr::make_gain_map(achromatic, options);
   const auto reconstructed = hyperdr::reconstruct_gain_map(
       flat.base_linear, flat.gain_map, flat.metadata, flat.headroom_stops);

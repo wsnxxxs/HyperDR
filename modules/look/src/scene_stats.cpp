@@ -2,6 +2,7 @@
 
 #include "hyperdr/foundation/math.hpp"
 #include "hyperdr/image/color.hpp"
+#include "hyperdr/look/grid.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -18,17 +19,27 @@ SceneStatistics compute_luminance_statistics(const FloatImage& source) {
     throw std::invalid_argument("scene-statistics input must be RGB");
   }
   SceneStatistics stats;
-  const std::size_t pixel_count =
-      static_cast<std::size_t>(source.width) * source.height;
-  const std::size_t step = std::max<std::size_t>(1, pixel_count / 200000);
-  stats.samples.reserve(pixel_count / step + 1);
-  for (std::size_t i = 0; i < pixel_count; i += step) {
-    const std::size_t base = i * 3;
-    const float r = positive_finite(source.pixels[base]);
-    const float g = positive_finite(source.pixels[base + 1]);
-    const float b = positive_finite(source.pixels[base + 2]);
-    const float y = p3_luminance(r, g, b);
-    if (std::isfinite(y) && y > 0.0F) stats.samples.push_back(y);
+  // Sample the same normalized image coordinates at every render resolution.
+  // A flattened pixel stride aliases rows differently after a preview resize.
+  constexpr std::uint32_t reference_edge = 512;
+  const auto edge = std::max(source.width, source.height);
+  const double scale = std::min(1.0, static_cast<double>(reference_edge) / edge);
+  const auto width = std::max(1U, static_cast<std::uint32_t>(std::lround(source.width * scale)));
+  const auto height = std::max(1U, static_cast<std::uint32_t>(std::lround(source.height * scale)));
+  const BilinearGridSampler sampler(source.width, source.height, width, height);
+  stats.samples.reserve(static_cast<std::size_t>(width) * height);
+  for (std::uint32_t y = 0; y < height; ++y) {
+    for (std::uint32_t x = 0; x < width; ++x) {
+      const auto p = sampler.coordinates(x, y);
+      const auto luma = [&](std::uint32_t sx, std::uint32_t sy) {
+        const auto i = (static_cast<std::size_t>(sy) * source.width + sx) * 3;
+        return p3_luminance(positive_finite(source.pixels[i]),
+            positive_finite(source.pixels[i+1]), positive_finite(source.pixels[i+2]));
+      };
+      const float value = std::lerp(std::lerp(luma(p.x0,p.y0), luma(p.x1,p.y0), p.tx),
+          std::lerp(luma(p.x0,p.y1), luma(p.x1,p.y1), p.tx), p.ty);
+      if (std::isfinite(value) && value > 0.0F) stats.samples.push_back(value);
+    }
   }
   if (stats.samples.empty()) return stats;
 

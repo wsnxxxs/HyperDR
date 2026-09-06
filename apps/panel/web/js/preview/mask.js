@@ -29,6 +29,7 @@ export function mountMask({ stage }) {
   const context = canvas.getContext("2d");
   let queued = false;
   let cachedSource = null;
+  let cachedFrame = null;
   let nativeGain = null;
   let output = null;
 
@@ -50,8 +51,9 @@ export function mountMask({ stage }) {
    * walks a compact float buffer and reuses the same ImageData, avoiding three
    * table lookups plus a large allocation on every input frame. */
   function prepareSource(source, frame) {
-    if (source === cachedSource && nativeGain && output) return;
+    if (source === cachedSource && frame === cachedFrame && nativeGain && output) return;
     cachedSource = source;
+    cachedFrame = frame;
     if (!source) {
       nativeGain = null;
       output = null;

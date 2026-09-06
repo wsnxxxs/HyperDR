@@ -55,7 +55,8 @@ namespace hyperdr {
 // controls meaningful for ordinary JPEG/PNG photographs without claiming that
 // the source file carried HDR.
 [[nodiscard]] GainMapResult make_display_referred_sdr_result(
-    const FloatImage& linear_p3, const GainMapOptions& options);
+    const FloatImage& linear_p3, const GainMapOptions& options,
+    const CaptureMetadata& capture = {}, GainMapPreparation* preparation = nullptr);
 
 // A finished HDR rendition, split into an SDR base and the gain map that
 // restores it.

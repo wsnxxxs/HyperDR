@@ -98,7 +98,7 @@ export function fillPhotographicGainLut(destination, {
 export function previewCoverageWeight(
   y, globalGainStops, strength, areaCoverage, expansionStart,
 ) {
-  const diffuseFloor = clamp(areaCoverage + 0.20 * strength, 0, 1);
+  const diffuseFloor = clamp(areaCoverage, 0, 1);
   const highlight = smoothstep(expansionStart, 1, y);
   const absolute = smoothstep(0.70, 1.50, y * (2 ** globalGainStops));
   return diffuseFloor + (1 - diffuseFloor) * highlight * absolute;

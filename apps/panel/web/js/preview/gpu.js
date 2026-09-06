@@ -1,9 +1,11 @@
 /* WebGPU presentation of native linear-Display-P3 float preview planes.
- * Photographic development and gain-map reconstruction happen in C++; this
- * module performs only the display transfer required by the canvas. */
+ * Photographic development happens in C++; compact previews reconstruct the
+ * encoded gain here before applying the canvas display transfer. */
 
 const SHADER = `
-struct Params { original: f32, width: f32, height: f32, padding: f32 }
+struct Params { original: f32, width: f32, height: f32, compact: f32,
+  gainMin: f32, gainMax: f32, inverseGamma: f32, baseOffset: f32,
+  alternateOffset: f32, gainWeight: f32, pad1: f32, pad2: f32 }
 @group(0) @binding(0) var baseTexture: texture_2d<f32>;
 @group(0) @binding(1) var hdrTexture: texture_2d<f32>;
 @group(0) @binding(2) var<uniform> params: Params;
@@ -21,8 +23,22 @@ fn encode(linear: vec3f) -> vec3f {
 @fragment fn fragmentMain(input: VertexOutput) -> @location(0) vec4f {
   let xy = vec2i(clamp(input.uv * vec2f(params.width, params.height), vec2f(0),
                        vec2f(params.width-1, params.height-1)));
-  let linear = select(textureLoad(hdrTexture, xy, 0).rgb,
-                      textureLoad(baseTexture, xy, 0).rgb, params.original > 0.5);
+  let base = textureLoad(baseTexture, xy, 0).rgb;
+  var linear = base;
+  if (params.original < 0.5) {
+    if (params.compact > 0.5) {
+      let size = vec2f(textureDimensions(hdrTexture));
+      let g = clamp((vec2f(xy) + vec2f(.5)) * size / vec2f(params.width, params.height) - vec2f(.5), vec2f(0), size - vec2f(1));
+      let lo = vec2i(floor(g)); let hi = min(lo + vec2i(1), vec2i(size) - vec2i(1));
+      let w = fract(g);
+      let code = clamp(mix(mix(textureLoad(hdrTexture, lo, 0).r,
+        textureLoad(hdrTexture, vec2i(hi.x, lo.y), 0).r, w.x),
+        mix(textureLoad(hdrTexture, vec2i(lo.x, hi.y), 0).r,
+        textureLoad(hdrTexture, hi, 0).r, w.x), w.y), 0.0, 1.0);
+      let gain = exp2(mix(params.gainMin, params.gainMax, pow(code, params.inverseGamma)) * params.gainWeight);
+      linear = max(vec3f(0), (base + vec3f(params.baseOffset)) * gain - vec3f(params.alternateOffset));
+    } else { linear = textureLoad(hdrTexture, xy, 0).rgb; }
+  }
   return vec4f(encode(linear), 1);
 }`;
 
@@ -79,7 +95,7 @@ async function verifyExtendedFloatPixels(device, pipeline, uniform, uploadPlane)
       { binding: 1, resource: hdr.createView() },
       { binding: 2, resource: { buffer: uniform } },
     ] });
-    device.queue.writeBuffer(uniform, 0, new Float32Array([0, 1, 1, 0]));
+    device.queue.writeBuffer(uniform, 0, new Float32Array([0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0]));
     const encoder = device.createCommandEncoder();
     const pass = encoder.beginRenderPass({ colorAttachments: [{
       view: probeTexture.createView(),
@@ -139,10 +155,10 @@ export async function createHdrRenderer(canvas, onDeviceLost) {
     device.destroy();
     throw error;
   }
-  const uploadPlane = (values, width, height) => {
-    const texture = device.createTexture({ size: [width, height], format: "rgba32float",
+  const uploadPlane = (values, width, height, channels = 3) => {
+    const texture = device.createTexture({ size: [width, height], format: channels === 1 ? "r32float" : "rgba32float",
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
-    const rgba = rgbaPlane(values, width, height), rowBytes = width * 16;
+    const rgba = channels === 1 ? values : rgbaPlane(values, width, height), rowBytes = width * (channels === 1 ? 4 : 16);
     const bytesPerRow = Math.ceil(rowBytes / 256) * 256;
     let source = new Uint8Array(rgba.buffer);
     if (bytesPerRow !== rowBytes) {
@@ -161,7 +177,7 @@ export async function createHdrRenderer(canvas, onDeviceLost) {
       layout: "auto", vertex: { module, entryPoint: "vertexMain" },
       fragment: { module, entryPoint: "fragmentMain", targets: [{ format: "rgba16float" }] },
     });
-    uniform = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    uniform = device.createBuffer({ size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     await verifyExtendedFloatPixels(device, pipeline, uniform, uploadPlane);
   } catch (error) {
     uniform?.destroy();
@@ -175,8 +191,15 @@ export async function createHdrRenderer(canvas, onDeviceLost) {
   return {
     kind: "hdr", outputColorSpace: configuration.colorSpace,
     upload(next) {
-      textures.forEach((t) => t.destroy()); frame = next;
-      textures = [uploadPlane(next.base, next.width, next.height), uploadPlane(next.hdr, next.width, next.height)];
+      const reuseBase = frame && next.metadata?.baseId && frame.metadata?.baseId === next.metadata.baseId
+        && frame.width === next.width && frame.height === next.height;
+      if (!reuseBase) textures[0]?.destroy();
+      textures[1]?.destroy();
+      const base = reuseBase ? textures[0] : uploadPlane(next.base, next.width, next.height);
+      textures = [base, next.gain
+        ? uploadPlane(next.gain, next.metadata.gainWidth, next.metadata.gainHeight, 1)
+        : uploadPlane(next.hdr, next.width, next.height)];
+      frame = next;
       bindGroup = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [
         { binding: 0, resource: textures[0].createView() }, { binding: 1, resource: textures[1].createView() },
         { binding: 2, resource: { buffer: uniform } },
@@ -185,7 +208,9 @@ export async function createHdrRenderer(canvas, onDeviceLost) {
     uploadGainMap() {},
     draw(_table, params) {
       if (destroyed || !bindGroup) return;
-      device.queue.writeBuffer(uniform, 0, new Float32Array([params.original ? 1 : 0, frame.width, frame.height, 0]));
+      device.queue.writeBuffer(uniform, 0, new Float32Array([params.original ? 1 : 0, frame.width, frame.height, frame.gain ? 1 : 0,
+        frame.metadata?.gainMin || 0, frame.metadata?.gainMax || 0, 1 / (frame.metadata?.gainGamma || 1),
+        frame.metadata?.baseOffset || 0, frame.metadata?.alternateOffset || 0, frame.metadata?.gainWeight ?? 1, 0, 0]));
       const encoder = device.createCommandEncoder();
       const pass = encoder.beginRenderPass({ colorAttachments: [{ view: context.getCurrentTexture().createView(),
         clearValue: {r:0,g:0,b:0,a:1}, loadOp:"clear", storeOp:"store" }] });

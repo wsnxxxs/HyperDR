@@ -5,6 +5,44 @@ semantic versioning; dates use ISO 8601.
 
 ## Unreleased
 
+- Slider drags now show coalesced 640-pixel drafts and refine on release.
+  A native preview worker retains decoded sources, manual strength-independent
+  preparation, and model predictions. It releases idle resources after 90 seconds.
+- Preview delivery sends a float SDR base plus an encoded gain grid for GPU
+  reconstruction, and omits an unchanged editor base. Browser diagnostics use
+  a bounded native-linear sample; CPU presentation remains available.
+- Scene statistics sample a consistent 512-edge spatial reference across render
+  sizes. Export reports split codec, verification and publication timings.
+
+- Manual previews use bulk decoded-cache reads and parallel float-packet copies.
+  Rebuilding the converter invalidates cached preview frames, and returning to
+  a cached slider value also cancels the obsolete render. Gain-grid box filters
+  use double-precision sliding windows; gamma search reuses exact decode tables.
+
+- Manual rendering caps broad environment statistics at a 768-pixel grid edge
+  while retaining the existing fine grid for highlight gain and edge-aware
+  filtering. RAW analysis cache reads use bulk I/O and parallel cell validation.
+
+- RAW preview and conversion requests with a decode cache now reuse source
+  luminance samples and gain-cell mean/peak measurements across look changes.
+  Analysis entries share the decode cache identity and disk budget; missing
+  or truncated entries are rebuilt without changing the rendered pixels.
+
+- Manual rendering reuses bilinear sampling coordinates and local work buffers,
+  collects SDR guide luminance with gain requests, and measures quantized gain
+  distributions with a 256-bin histogram. Single-channel reconstruction now
+  decodes one gain multiplier per pixel and reuses channel metadata.
+
+- RAW gain maps average per-pixel highlight requests so small lights survive
+  grid reduction. Gain strength scales the weighted field without normalizing
+  its maximum to the whole budget, preserving broad-highlight and noise
+  attenuation. RAW base colour no longer changes with HDR strength.
+
+- Manual SDR expansion keeps the same base at every HDR strength, including
+  zero, and honours explicit exposure and capture ISO. The panel's HDR strength
+  no longer also changes photographic clarity and colour. Broad highlight
+  participation is labelled as a weighting rather than a measured area.
+
 - Raster inputs are now identified by their contents rather than by their file
   name. A HEIC exported under a `.jpg` suffix -- which is what a phone gallery
   routinely produces -- used to be handed to the JPEG decoder and rejected for a

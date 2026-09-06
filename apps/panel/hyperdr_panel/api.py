@@ -30,6 +30,7 @@ from .native_preview import (
     MAX_EDGE,
     PreviewCancelled,
     preview_for,
+    omit_unchanged_base,
 )
 
 # Errors an endpoint may raise for a bad request, as opposed to a bug.
@@ -234,6 +235,7 @@ def preview(_context: Context, query: dict) -> Response:
     # No headers: width, height, status and degradation reasons all travel in
     # the HYPREV1 packet body, which is what the browser actually parses.
     _context.workbench.publish_frame(session_id, raw_options, data)
+    data = omit_unchanged_base(data, metadata, _first(query, "base"))
     return Response(body=data, content_type="application/vnd.hyperdr.preview")
 
 

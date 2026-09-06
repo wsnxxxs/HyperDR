@@ -65,7 +65,7 @@ class BuildArgvTest(unittest.TestCase):
     def test_defaults_match_panel_controls(self):
         found = flags(build_argv("HyperDR", dict(BASE)))
         self.assertEqual(found["--gain-strength"], "0.4")
-        self.assertEqual(found["--pop"], "0.4")
+        self.assertEqual(found["--pop"], "0")
         self.assertEqual(found["--exposure-bias"], "0.6")
         self.assertNotIn("--color-gamut", found)
         self.assertNotIn("--clamp-srgb", found)
@@ -141,9 +141,10 @@ class BuildArgvTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 build_argv("HyperDR", dict(BASE, encoding=encoding, hdrRange=2.5))
 
-    def test_one_knob_drives_both_strength_settings(self):
+    def test_strength_does_not_change_photographic_style(self):
         found = flags(build_argv("HyperDR", dict(BASE, hdrStrength=0.6, hdrRange=3.0)))
-        self.assertEqual(found["--gain-strength"], found["--pop"])
+        self.assertEqual(found["--gain-strength"], "0.6")
+        self.assertEqual(found["--pop"], "0")
         self.assertEqual(found["--headroom"], found["--headroom-max"])
 
     def test_curve_argv_matches_the_render_settings(self):

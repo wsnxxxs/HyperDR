@@ -79,3 +79,11 @@ The flat `files[].headroom_stops` is the actual rendered peak (and is written to
 selected nominal target; `rendered_peak` and `headroom_utilization` are the
 post-local-gain result. `gain_map.local_weight_mean` and
 `gain_map.local_weight_p95` are serialized diagnostics.
+
+### Export timing breakdown
+
+`encode_ms` retains its aggregate meaning: encoding, verification and publication.
+`codec_ms` measures the encoder; `verify_ms` measures release of render buffers
+and output verification; `write_ms` measures the source-stamp check and atomic
+publication. The three components sum to `encode_ms`. Skipped or failed files
+retain zero for stages that did not complete.

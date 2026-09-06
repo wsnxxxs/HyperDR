@@ -17,7 +17,7 @@ import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import job, model, session, renditions
+from . import job, model, session, renditions, color_lut
 from .command import build_argv
 from .concurrency import Busy
 from .formats import SUPPORTED_EXTENSIONS
@@ -211,6 +211,7 @@ def preview(_context: Context, query: dict) -> Response:
                              code="model_not_ready")
         options["highlightRecovery"] = highlight_recovery
         session_id = _first(query, "id")
+        color_lut.resolve(options, session_id)
         source_digest = session.input_digest(session_id)
         # The digest-named directory gives the native cache a stable, already
         # computed content identity without making every slider move read the
@@ -305,6 +306,9 @@ def command_preview(_context: Context, body: dict) -> Response:
     """
     try:
         options, _ = _prepare_model_options(body.get("options"), preview=True)
+        options.pop("_lut_path", None)
+        if options.get("lutId"):
+            options["_lut_path"] = options.get("lutName") or "look.cube"
         options.update({
             "input": "<已上传图片>",
             "output": "<任务输出>",
@@ -371,6 +375,7 @@ def run(_context: Context, body: dict) -> Response:
                             "executable_missing")
             raw_options = dict(body.get("options") or {})
             options, use_model = _prepare_model_options(raw_options)
+            color_lut.resolve(options, session_id)
             if use_model:
                 model_state = model.status()
                 if not model_state.get("ready"):

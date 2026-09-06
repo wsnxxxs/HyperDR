@@ -8,6 +8,7 @@
 // directly: each one is a pure function of sampled statistics.
 
 #include "hyperdr/look/options.hpp"
+#include "hyperdr/look/grid.hpp"
 #include "hyperdr/look/tone_curve.hpp"
 #include "hyperdr/image/image.hpp"
 
@@ -54,5 +55,16 @@ struct SceneStatistics {
                                           const std::vector<float>& cell_peak,
                                           std::uint32_t width,
                                           std::uint32_t height, float pop);
+
+// Source-only measurements, reusable across exposure and look changes. The
+// caller owns their association with the decoded source and its resolution.
+struct PhotographicAnalysis {
+  SceneStatistics scene_stats;
+  GainGridDimensions dimensions;
+  std::vector<float> cell_mean;
+  std::vector<float> cell_peak;
+};
+
+[[nodiscard]] PhotographicAnalysis analyze_photographic_source(const FloatImage& source);
 
 }  // namespace hyperdr

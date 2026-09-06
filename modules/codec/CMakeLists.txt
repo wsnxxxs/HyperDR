@@ -4,6 +4,7 @@
 # naming, the second defines every entry point for the build without codecs, so
 # the two configurations share one call graph and differ only in these leaves.
 set(HYPERDR_CODEC_SOURCES
+  src/rendition_encoders.cpp
   src/descriptors.cpp
   src/unavailable.cpp)
 

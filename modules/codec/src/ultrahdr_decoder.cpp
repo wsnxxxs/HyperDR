@@ -77,12 +77,24 @@ constexpr float half_to_float(std::uint16_t half) {
 static_assert(half_to_float(0x0001U) == 0x1p-24F);
 static_assert(half_to_float(0x03FFU) == 0x1.ff8p-15F);
 
-std::array<float, 3> to_linear_p3(uhdr_color_gamut_t gamut, float r, float g, float b) {
+std::array<float, 3> to_linear_p3(uhdr_color_gamut_t gamut,
+                                 ColorGamut default_gamut,
+                                 float r, float g, float b) {
   switch (gamut) {
     case UHDR_CG_DISPLAY_P3:
       return {std::max(0.0F, r), std::max(0.0F, g), std::max(0.0F, b)};
     case UHDR_CG_BT_2100:
       return rec2020_to_linear_p3(r, g, b);
+    case UHDR_CG_UNSPECIFIED:
+      switch (default_gamut) {
+        case ColorGamut::kDisplayP3:
+          return {std::max(0.0F, r), std::max(0.0F, g), std::max(0.0F, b)};
+        case ColorGamut::kRec2020:
+          return rec2020_to_linear_p3(r, g, b);
+        case ColorGamut::kSrgb:
+          break;
+      }
+      return rec709_to_linear_p3(r, g, b);
     case UHDR_CG_BT_709:
     default:
       return rec709_to_linear_p3(r, g, b);
@@ -115,12 +127,14 @@ bool is_ultrahdr_jpeg_file(const std::filesystem::path& path) {
 // Decodes the gain-map-applied HDR rendition into linear Display P3 with SDR
 // diffuse white at 1.0, which is the same normalisation the RAW path produces.
 DecodedImage decode_ultrahdr(const std::filesystem::path& path) {
-  return codec::decode_ultrahdr_bytes(read_binary_file(path));
+  return codec::decode_ultrahdr_bytes(read_binary_file(path),
+                                      ColorGamut::kSrgb);
 }
 
 namespace codec {
 
-DecodedImage decode_ultrahdr_bytes(const std::vector<std::uint8_t>& bytes) {
+DecodedImage decode_ultrahdr_bytes(const std::vector<std::uint8_t>& bytes,
+                                   ColorGamut default_gamut) {
   if (bytes.empty()) throw std::runtime_error("Ultra HDR input is empty");
 
   std::unique_ptr<uhdr_codec_private_t, DecoderDeleter> decoder(uhdr_create_decoder());
@@ -176,7 +190,8 @@ DecodedImage decode_ultrahdr_bytes(const std::vector<std::uint8_t>& bytes) {
       const float r = half_to_float(row[x * 4U + 0U]);
       const float g = half_to_float(row[x * 4U + 1U]);
       const float b = half_to_float(row[x * 4U + 2U]);
-      const auto p3 = to_linear_p3(gamut, std::isfinite(r) ? r : 0.0F,
+      const auto p3 = to_linear_p3(gamut, default_gamut,
+                                   std::isfinite(r) ? r : 0.0F,
                                    std::isfinite(g) ? g : 0.0F,
                                    std::isfinite(b) ? b : 0.0F);
       result.linear_p3.at(x, y, 0) = p3[0];

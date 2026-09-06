@@ -6,6 +6,7 @@
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/gainmap/native_model.hpp"
 #include "hyperdr/gainmap/types.hpp"
+#include "hyperdr/look/color_lut.hpp"
 
 #include <cstdint>
 #include <filesystem>
@@ -37,7 +38,10 @@ struct ConvertOptions {
   // has the broadest decoder support; 10 selects HEVC Main10 (which requires
   // the multibit x265 runtime).
   int depth{8};
-  HdrEncoding encoding{HdrEncoding::Adaptive};
+  OutputEncoding encoding{OutputEncoding::Adaptive};
+  ColorLutOptions color_lut;
+  ColorGamut default_gamut{ColorGamut::kSrgb};
+  bool clamp_srgb{false};
   RawDecodeOptions raw;
   GainMapOptions gain;
   std::filesystem::path report_path;

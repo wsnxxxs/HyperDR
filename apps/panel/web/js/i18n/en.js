@@ -5,6 +5,22 @@
  * HDR) and colour spaces are proper nouns and stay as they are in both.
  */
 export default {
+  "hdr.sdrOutput": "SDR preview · sRGB JPEG output",
+  "hdr.reason.sdrOutput": "SDR output",
+
+  "enc.sdr-jpeg.hint": "Export the graded sRGB JPEG only, with no HDR image or gain map.",
+  "lut.title": "Colour LUT",
+  "lut.load": "Import .cube",
+  "lut.remove": "Remove",
+  "lut.empty": "No LUT applied · Choose a photo, then import a look",
+  "lut.failed": "Could not import LUT",
+  "lut.input": "Input space required by LUT",
+  "lut.output": "Output space produced by LUT",
+  "lut.strength": "LUT strength",
+  "lut.strengthHint": "Blend the original and graded renditions in linear light. 0% bypasses the LUT; 100% applies it fully.",
+  "lut.hint.sdr": "For finished-photo looks. RAW is developed first; HDR is mapped to SDR first. HDR output retains its brightness ratios. Follow the LUT documentation: .cube does not reliably declare its colour space.",
+  "lut.hint.hdr": "HLG/PQ specifies the LUT encoding. For SDR output, RAW/SDR is graded directly; existing HDR is graded before highlight compression. BT.2020, 203-nit reference white; HLG uses a 1000-nit display mapping.",
+  "lut.hint.log": "RAW only: exposure and gamut conversion feed S-Log3 / S-Gamut3.Cine into the LUT. Log and HLG are different. Select the LUT's actual output space; HLG/PQ photos cannot recover camera RAW data.",
   "phone.title": "Phone workbench",
   "phone.subtitle": "Import on your phone, fine-tune on your desktop, and preview on both.",
   "phone.enable": "Enable phone connection",
@@ -46,7 +62,7 @@ export default {
   "welcome.importNote": "Drop a file or choose one from your device.",
   "welcome.adjust": "Shape the light",
   "welcome.adjustNote": "Adjust by hand or use AI enhancement.",
-  "welcome.export": "Save your HDR photo",
+  "welcome.export": "Save your photo",
   "welcome.exportNote": "Choose the format and gamut when exporting.",
 
   "workspace.currentPhoto": "CURRENT PHOTO",
@@ -77,7 +93,6 @@ export default {
   "inspector.manualNote": "Start with brightness for a natural balance of light.",
   "inspector.aiNote": "AI enhancement applied. Fine-tune the result below.",
   "inspector.regionNote": "Brighter regions receive expansion first.",
-  "inspector.recoveryNote": "Choose how RAW highlights are recovered.",
   "editor.histogram": "Histogram",
   "editor.closeExport": "Close export dialog",
   "editor.closeVersions": "Close export history",
@@ -95,7 +110,7 @@ export default {
   "editor.local": "Photos processed locally",
   "editor.view": "Preview mode",
   "editor.original": "Original",
-  "editor.effect": "HDR effect",
+  "editor.effect": "Adjusted photo",
   "editor.compare": "Compare",
   "editor.fit": "Fit",
   "editor.zoomIn": "Zoom in",
@@ -359,7 +374,7 @@ export default {
   "prefs.previewCeiling.auto": "Auto",
 
   "prefs.hdrPreview.label": "True HDR preview (WebGPU)",
-  "prefs.hdrPreview.help": "When off, the preview is always an SDR approximation. The export is HDR either way.",
+  "prefs.hdrPreview.help": "When off, previews use SDR. Choose the export format separately.",
 
   "prefs.histMode.label": "Default histogram mode",
   "prefs.histMode.help": "Which mode the histogram starts in for each new photo.",

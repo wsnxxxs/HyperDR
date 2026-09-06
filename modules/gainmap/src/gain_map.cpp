@@ -60,32 +60,7 @@ void set_wide_gamut_stats(RenderStats& stats, const WideGamutMeasurement& measur
 }  // namespace
 
 void validate_gain_map_options(const GainMapOptions& options) {
-  if (!(std::isfinite(options.gain_strength) && options.gain_strength >= 0.0F &&
-        options.gain_strength <= 2.0F)) {
-    throw std::invalid_argument("gain strength must be in [0, 2]");
-  }
-  if (!std::isfinite(options.output_headroom_limit_stops) ||
-      (options.output_headroom_limit_stops >= 0.0F &&
-       options.output_headroom_limit_stops > 4.0F)) {
-    throw std::invalid_argument(
-        "output headroom limit must be negative or in [0, 4]");
-  }
-  if (!options.auto_exposure && !std::isfinite(options.exposure_ev)) {
-    throw std::invalid_argument("manual exposure must be finite");
-  }
-  if (!(std::isfinite(options.exposure_bias_ev) && options.exposure_bias_ev >= 0.0F &&
-        options.exposure_bias_ev <= 2.0F)) {
-    throw std::invalid_argument("exposure bias must be in [0, 2]");
-  }
-  validate_look_options(options.look);
-  if (options.auto_headroom) return;
-  // The photographic renderer treats headroom-max as a hard ceiling, so an
-  // explicit target above it would silently be clamped instead of honoured.
-  if (!(std::isfinite(options.headroom_stops) && options.headroom_stops >= 0.0F &&
-        options.headroom_stops <= options.look.headroom_max_stops)) {
-    throw std::invalid_argument(
-        "manual photographic headroom must be in [0, headroom-max]");
-  }
+  validate_render_options(options);
 }
 
 float nominal_headroom_stops(const GainMapOptions& options) {
@@ -128,6 +103,7 @@ GainMapResult make_gain_map(const FloatImage& source, const GainMapOptions& opti
     }
     return make_photographic_gain_map(source, options, capture, analysis, preparation);
   }();
+  result.clamp_srgb = options.clamp_srgb;
   set_wide_gamut_stats(result.stats, wide_gamut);
   if (preparation) set_wide_gamut_stats(preparation->base_stats, wide_gamut);
   return result;

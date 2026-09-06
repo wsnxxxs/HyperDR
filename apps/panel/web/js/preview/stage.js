@@ -274,7 +274,8 @@ export function mountStage({ toast }) {
 
   function setCapability(key, ok, params) {
     lastCapability = { key, ok, params };
-    const message = t(key, params?.reasonKey ? { ...params, reason: t(params.reasonKey) } : params);
+    const message = store.get().encoding === "sdr-jpeg" ? t("hdr.sdrOutput")
+      : t(key, params?.reasonKey ? { ...params, reason: t(params.reasonKey) } : params);
     const domain = sourceDomainLabel ? t(sourceDomainLabel) : "";
     setText(hdrStatus, domain ? `${domain} · ${message}` : message);
     hdrStatus.classList.toggle("is-ok", Boolean(ok));
@@ -332,6 +333,7 @@ export function mountStage({ toast }) {
    *  the least useful thing it could say.
    */
   function sdrReason() {
+    if (store.get().encoding === "sdr-jpeg") return "hdr.reason.sdrOutput";
     // The preference is a hard veto, not a hint: someone who turned true HDR
     // off wants the SDR path even on hardware that could do better.
     if (!prefs.get().hdrPreview) return "hdr.reason.disabledByPreference";
@@ -842,7 +844,7 @@ export function mountStage({ toast }) {
   store.watchAny(
     ["brightness", "hdrStrength", "hdrRange", "expansionStart", "areaCoverage",
      "encoding", "contrast", "vibrance", "previewOptimized", "modelStrength",
-     "colorGamut", "clampSrgb",
+     "colorGamut", "clampSrgb", "lutId", "lutInput", "lutOutput", "lutStrength",
      ...AI_POST_KEYS],
     (state, _previous, changed) => {
       if (!state.sessionId || state.restoring || state.uploading) return;
@@ -905,13 +907,15 @@ export function mountStage({ toast }) {
   optimizeButton.addEventListener("click", optimize);
   const optimizeNote = role("optimize-note");
   store.watchAny(
-    ["file", "capabilities", "optimizing", "previewOptimized", "modelGainReady", "jobId"],
+    ["file", "capabilities", "optimizing", "previewOptimized", "modelGainReady", "jobId", "encoding", "lutInput", "lutId"],
     (state) => {
       const ready = Boolean(state.capabilities?.model?.ready);
       const locked = state.optimizing || Boolean(state.jobId);
       mathModeButton.disabled = !state.file || locked;
       optimizeButton.disabled =
-        !state.file || locked || (!ready && !state.modelGainReady);
+        !state.file || locked || state.encoding === "sdr-jpeg"
+        || (state.lutId && ["hlg", "pq", "slog3-sgamut3cine"].includes(state.lutInput))
+        || (!ready && !state.modelGainReady);
       mathModeButton.setAttribute("aria-pressed", String(!state.previewOptimized));
       optimizeButton.setAttribute("aria-pressed", String(state.previewOptimized));
       setText(optimizeButton, state.optimizing ? t("adjust.aiBusy") : t("adjust.ai"));

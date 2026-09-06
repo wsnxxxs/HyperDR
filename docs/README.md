@@ -52,3 +52,5 @@ a particular revision and is not maintained as current feature documentation.
 The browser implementation notes in
 [apps/panel/web/README.md](../apps/panel/web/README.md) are intentionally kept
 beside that code rather than promoted into the user guide.
+
+- [颜色 LUT 与 SDR/HDR 渲染架构](color-lut-pipeline.md) — 接入空间、RAW/Log/HLG 区别、纯 SDR 导出与高光行为。

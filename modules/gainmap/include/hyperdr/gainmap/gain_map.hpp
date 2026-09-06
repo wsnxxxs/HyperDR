@@ -13,17 +13,6 @@
 
 namespace hyperdr {
 
-// Source-only measurements, reusable across exposure and look changes. The
-// caller owns their association with the decoded source and its resolution.
-struct PhotographicAnalysis {
-  SceneStatistics scene_stats;
-  GainGridDimensions dimensions;
-  std::vector<float> cell_mean;
-  std::vector<float> cell_peak;
-};
-
-[[nodiscard]] PhotographicAnalysis analyze_photographic_source(const FloatImage& source);
-
 // `input` is what the decoder produced, and it selects the renderer: only a
 // scene-referred input gets the photographic curve and its automatic exposure.
 // It defaults to scene-referred so that the renderer's own tests, which build
@@ -42,12 +31,5 @@ struct PhotographicAnalysis {
     const CaptureMetadata& capture,
     const PhotographicAnalysis* analysis = nullptr,
     GainMapPreparation* preparation = nullptr);
-
-// Selects the same content-aware exposure that the photographic renderer uses
-// before it builds the gain map. Callers that need an exposure anchor without
-// the user's creative bias should pass options.exposure_bias_ev = 0.
-[[nodiscard]] float photographic_exposure_ev(
-    const FloatImage& linear_p3, const GainMapOptions& options,
-    const CaptureMetadata& capture = {});
 
 }  // namespace hyperdr

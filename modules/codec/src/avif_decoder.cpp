@@ -83,8 +83,8 @@ std::uint16_t orientation_from_transforms(const avifImage& image) {
   return kHorizontalMirror[angle];
 }
 
-SourceColor source_color_for(const avifImage& image) {
-  SourceColor color;
+SourceColor source_color_for(const avifImage& image, ColorGamut default_gamut) {
+  SourceColor color(default_gamut);
   if (image.icc.data != nullptr && image.icc.size != 0 &&
       image.icc.size <= (4U << 20U)) {
     color.icc.assign(image.icc.data, image.icc.data + image.icc.size);
@@ -92,6 +92,9 @@ SourceColor source_color_for(const avifImage& image) {
   }
   color.primaries = static_cast<int>(image.colorPrimaries);
   color.transfer = static_cast<int>(image.transferCharacteristics);
+  if (codec::cicp_primaries_unspecified(color.primaries)) {
+    color.primaries = codec::cicp_primaries_for_gamut(default_gamut);
+  }
   return color;
 }
 
@@ -151,13 +154,15 @@ bool is_avif_file(const std::filesystem::path& path) {
 }
 
 DecodedImage decode_avif(const std::filesystem::path& path) {
-  return codec::decode_avif_bytes(read_binary_file(path), 0);
+  return codec::decode_avif_bytes(read_binary_file(path), 0,
+                                  ColorGamut::kSrgb);
 }
 
 namespace codec {
 
 DecodedImage decode_avif_bytes(const std::vector<std::uint8_t>& bytes,
-                              std::uint32_t preview_max_edge) {
+                              std::uint32_t preview_max_edge,
+                              ColorGamut default_gamut) {
   if (bytes.empty()) throw std::runtime_error("AVIF input is empty");
 
   std::unique_ptr<avifDecoder, DecoderDeleter> decoder(avifDecoderCreate());
@@ -191,7 +196,7 @@ DecodedImage decode_avif_bytes(const std::vector<std::uint8_t>& bytes,
   } guard{&rgb};
   check_avif(avifImageYUVToRGB(image, &rgb), "convert AVIF YUV to RGB");
 
-  const SourceColor color = source_color_for(*image);
+  const SourceColor color = source_color_for(*image, default_gamut);
   DecodedImage result;
   result.linear_p3 = interleaved_rgb_to_linear_p3(
       rgb.pixels, rgb.width, rgb.height, rgb.rowBytes, static_cast<int>(rgb.depth),

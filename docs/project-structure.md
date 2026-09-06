@@ -51,9 +51,9 @@ app → codec → gainmap → look → image → foundation
 
 - `foundation`: file IO, JSON, hashing and shared numeric helpers
 - `image`: image buffers, colour and transfer functions
-- `look`: photographic rendering intent
+- `look`: exposure, colour LUTs and independent float SDR/HDR renditions
 - `container`: Exif and gain-map container metadata
-- `gainmap`: SDR base, gain-map rendering and reconstruction
+- `gainmap`: gain-map packaging, model gain adapters and reconstruction
 - `codec`: image decoding, encoding and verification
 - `app`: CLI behaviour, settings, batches, resume and reports
 

@@ -75,6 +75,15 @@ export const api = {
    *  the process lives. */
   state: () => get("/api/state", null, t("err.state")),
 
+  async uploadLut(sessionId, file) {
+    let response;
+    try {
+      response = await fetch("/api/lut-upload?" + new URLSearchParams({ id: sessionId, name: file.name }),
+        { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file });
+    } catch { throw OFFLINE(); }
+    return unwrap(response, t("lut.failed"));
+  },
+
   /* -- settings ------------------------------------------------------ */
 
   /** The exact command line a run would use, rendered by the same builder the

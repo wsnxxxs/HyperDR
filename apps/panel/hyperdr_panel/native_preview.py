@@ -284,7 +284,7 @@ def preview_for(source: Path, options: dict, max_edge: int = MAX_EDGE,
         options, sort_keys=True, separators=(",", ":"), default=str)
     external_digests = tuple(
         (name, sha256_file(Path(options[name])))
-        for name in ("external_gain", "external_gain_report")
+        for name in ("external_gain", "external_gain_report", "_lut_path")
         if options.get(name)
     )
     exe = detect_exe()

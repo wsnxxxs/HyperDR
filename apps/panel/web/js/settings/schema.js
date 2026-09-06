@@ -19,6 +19,7 @@
 import { t } from "../i18n/index.js";
 
 export const ENCODINGS = [
+  { id: "sdr-jpeg", label: "SDR JPEG", maxRange: 4, hint: "enc.sdr-jpeg.hint" },
   {
     id: "adaptive", label: "Adaptive HDR", maxRange: 3,
     hint: "enc.adaptive.hint",
@@ -52,7 +53,7 @@ export const COLOR_GAMUTS = [
 ];
 
 export const encodingById = (id) =>
-  ENCODINGS.find((entry) => entry.id === id) || ENCODINGS[0];
+  ENCODINGS.find((entry) => entry.id === id) || ENCODINGS.find((entry) => entry.id === "adaptive");
 
 const ev = (value) => `${value > 0 ? "+" : ""}${value.toFixed(2)} EV`;
 const signed = (value) => `${value > 0 ? "+" : ""}${value.toFixed(2)}`;
@@ -91,6 +92,8 @@ const AI_EXPANSION_START_DEFAULT = -1;
  * byte-identical (command.py's PANEL_DEFAULTS holds the same values for a
  * browser that omits them) while taking the control off the rail. */
 export const CONTROLS = [
+  { key: "lutStrength", kind: "range", group: "lut", label: "lut.strength",
+    min: 0, max: 1, step: 0.01, default: 1, format: percent, mask: null, help: "lut.strengthHint" },
   {
     key: "brightness", kind: "range", group: "tone", label: "ctrl.brightness.label",
     min: 0, max: 2, step: 0.05, default: DEFAULT_BRIGHTNESS_EV, format: ev, mask: null,
@@ -189,18 +192,19 @@ export const CONTROLS_BY_KEY = new Map(CONTROLS.map((control) => [control.key, c
 
 /** Keys that appear in the object sent to /api/run. */
 export const OPTION_KEYS = [
-  "encoding", "colorGamut", "clampSrgb", ...CONTROLS.map((control) => control.key),
+  "encoding", "colorGamut", "clampSrgb", "lutId", "lutName", "lutInput", "lutOutput", ...CONTROLS.map((control) => control.key),
 ];
 
 /** Output and colour choices are workflow settings; image adjustments are per-image. */
 export const PERSISTED_OPTION_KEYS = ["encoding", "colorGamut", "clampSrgb"];
 
-export function defaultSettings(encoding = ENCODINGS[0].id) {
+export function defaultSettings(encoding = "adaptive") {
   const activeEncoding = encodingById(encoding);
   const values = {
     encoding: activeEncoding.id,
     colorGamut: COLOR_GAMUTS[0].id,
     clampSrgb: false,
+    lutId: "", lutName: "", lutInput: "srgb", lutOutput: "srgb",
   };
   for (const control of CONTROLS) values[control.key] = control.default;
   values.hdrRange = Math.min(values.hdrRange, activeEncoding.maxRange);
@@ -222,6 +226,13 @@ export function validatedSettings(saved, base = defaultSettings()) {
   if (ENCODINGS.some(({ id }) => id === saved.encoding)) values.encoding = saved.encoding;
   if (COLOR_GAMUTS.some(({ id }) => id === saved.colorGamut)) values.colorGamut = saved.colorGamut;
   if (typeof saved.clampSrgb === "boolean") values.clampSrgb = saved.clampSrgb;
+  if (typeof saved.lutId === "string" && /^[0-9a-f]{64}$/.test(saved.lutId)) {
+    values.lutId = saved.lutId;
+    values.lutName = typeof saved.lutName === "string" ? saved.lutName.slice(0, 160) : "";
+  }
+  for (const key of ["lutInput", "lutOutput"]) {
+    if (["srgb", "p3", "rec709", "hlg", "pq", "slog3-sgamut3cine"].includes(saved[key])) values[key] = saved[key];
+  }
   for (const control of CONTROLS) {
     if (control.group === "pinned") { values[control.key] = control.default; continue; }
     const value = saved[control.key];

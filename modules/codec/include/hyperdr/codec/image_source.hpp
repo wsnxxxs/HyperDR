@@ -10,6 +10,7 @@
 // not know which path produced it.
 
 #include "hyperdr/container/exif.hpp"
+#include "hyperdr/image/color.hpp"
 #include "hyperdr/image/image.hpp"
 #include "hyperdr/look/options.hpp"
 
@@ -85,6 +86,9 @@ struct RawMosaic {
 };
 
 struct RawDecodeOptions {
+  // Primaries used only when a raster carries neither a usable ICC profile nor
+  // a stated CICP primary. RAW remains ProPhoto/scene-referred and ignores it.
+  ColorGamut default_gamut{ColorGamut::kSrgb};
   // LibRaw's unclip mode can leave strongly magenta clipped highlights when
   // sensor channels saturate at different levels. Blend is the conservative
   // default: it removes false colour while retaining highlight luminance.

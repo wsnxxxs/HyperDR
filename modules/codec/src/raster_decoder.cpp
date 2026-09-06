@@ -261,7 +261,8 @@ int jpeg_decode_rgb(const unsigned char* data, std::size_t size,
 }
 
 DecodedImage decode_jpeg(const std::vector<std::uint8_t>& bytes,
-                         std::uint32_t preview_max_edge) {
+                         std::uint32_t preview_max_edge,
+                         ColorGamut default_gamut) {
   JpegDecodeOutput output{};
   const int failed =
       jpeg_decode_rgb(bytes.data(), bytes.size(), preview_max_edge, &output);
@@ -273,7 +274,7 @@ DecodedImage decode_jpeg(const std::vector<std::uint8_t>& bytes,
     throw std::runtime_error(std::string("JPEG decode: ") + output.message);
   }
 
-  SourceColor color;
+  SourceColor color(default_gamut);
   if (output.icc_size != 0) {
     color.icc.assign(icc.get(), icc.get() + output.icc_size);
   }
@@ -586,12 +587,17 @@ int png_decode_rgb(const unsigned char* data, std::size_t size,
 }
 
 DecodedImage decode_png(const std::vector<std::uint8_t>& bytes,
-                        std::uint32_t preview_max_edge) {
+                        std::uint32_t preview_max_edge,
+                        ColorGamut default_gamut) {
   PngDecodeOutput output{};
   const int failed =
       png_decode_rgb(bytes.data(), bytes.size(), preview_max_edge, &output);
   const MallocBytes rgb(output.rgb);
   const MallocBytes icc(output.icc);
+  if (failed != 0) {
+    throw std::runtime_error(std::string("PNG decode: ") + output.message);
+  }
+  SourceColor color(default_gamut);
   if (output.has_cicp) {
     if (!codec::cicp_primaries_unspecified(output.cicp_primaries)) {
       color.primaries = output.cicp_primaries;
@@ -601,10 +607,6 @@ DecodedImage decode_png(const std::vector<std::uint8_t>& bytes,
       color.transfer = output.cicp_transfer;
     }
   }
-  if (failed != 0) {
-    throw std::runtime_error(std::string("PNG decode: ") + output.message);
-  }
-  SourceColor color;
   if (output.icc_size != 0) {
     color.icc.assign(icc.get(), icc.get() + output.icc_size);
   }
@@ -681,9 +683,13 @@ bool has_heif_orientation_transform(const heif_context* context,
 DecodedImage decode_heif_rgb_handle(const heif_context* context,
                                     const heif_image_handle* handle,
                                     std::uint32_t preview_max_edge,
+                                    ColorGamut default_gamut,
                                     bool normalize_exif = true,
                                     std::uint16_t* exif_orientation = nullptr) {
-  SourceColor color;
+  SourceColor color(default_gamut);
+  // Keep the project-wide ICC-first policy. ICC is the only profile form here
+  // that can describe arbitrary RGB primaries; nclx is the fallback for files
+  // that do not carry a usable ICC profile.
   const auto profile_type = heif_image_handle_get_color_profile_type(handle);
   if (profile_type == heif_color_profile_type_prof ||
       profile_type == heif_color_profile_type_rICC) {
@@ -704,6 +710,9 @@ DecodedImage decode_heif_rgb_handle(const heif_context* context,
     if (has_nclx) {
       color.primaries = profile_raw->color_primaries;
       color.transfer = profile_raw->transfer_characteristics;
+      if (codec::cicp_primaries_unspecified(color.primaries)) {
+        color.primaries = codec::cicp_primaries_for_gamut(default_gamut);
+      }
     }
     if (profile_raw != nullptr) heif_nclx_color_profile_free(profile_raw);
   }
@@ -805,7 +814,8 @@ DecodedImage decode_heif_rgb_handle(const heif_context* context,
 
 DecodedImage decode_adaptive_heic(const std::vector<std::uint8_t>& bytes,
                                 heif_context* context,
-                                bool base_only) {
+                                bool base_only,
+                                ColorGamut default_gamut) {
   const auto inspection = inspect_heif(bytes);
   if (!inspection.structurally_valid || !inspection.has_tmap_brand ||
       !inspection.has_tmap_item || !inspection.has_dimg_reference) {
@@ -825,7 +835,8 @@ DecodedImage decode_adaptive_heic(const std::vector<std::uint8_t>& bytes,
   // No preview reduction here: the gain grid below is rejected when it is
   // larger than the base, and every Apple gain map is a fraction of its base's
   // size, so shrinking the base would make an ordinary file look malformed.
-  auto result = decode_heif_rgb_handle(context, base_handle.get(), 0, false,
+  auto result = decode_heif_rgb_handle(context, base_handle.get(), 0,
+                                       default_gamut, false,
                                        &exif_orientation);
   if (base_only) {
     normalize_orientation(result, exif_orientation);
@@ -886,20 +897,22 @@ DecodedImage decode_adaptive_heic(const std::vector<std::uint8_t>& bytes,
 }
 
 DecodedImage decode_heic(const std::vector<std::uint8_t>& bytes, bool base_only,
-                         std::uint32_t preview_max_edge) {
+                         std::uint32_t preview_max_edge,
+                         ColorGamut default_gamut) {
   std::unique_ptr<heif_context, ContextDeleter> context(heif_context_alloc());
   if (!context) throw std::runtime_error("cannot allocate HEIC decoder");
   check_heif(heif_context_read_from_memory_without_copy(context.get(), bytes.data(), bytes.size(), nullptr),
              "HEIC open");
   const auto inspection = inspect_heif(bytes);
   if (inspection.has_tmap_brand || inspection.has_tmap_item) {
-    return decode_adaptive_heic(bytes, context.get(), base_only);
+    return decode_adaptive_heic(bytes, context.get(), base_only, default_gamut);
   }
   heif_image_handle* handle_raw = nullptr;
   check_heif(heif_context_get_primary_image_handle(context.get(), &handle_raw),
              "HEIC primary image");
   std::unique_ptr<heif_image_handle, HandleDeleter> handle(handle_raw);
-  return decode_heif_rgb_handle(context.get(), handle.get(), preview_max_edge);
+  return decode_heif_rgb_handle(context.get(), handle.get(), preview_max_edge,
+                                default_gamut);
 }
 
 }  // namespace
@@ -938,7 +951,7 @@ DecodedImage decode_image(const std::filesystem::path& path, const RawDecodeOpti
       // the fallback.
       if (!options.ignore_embedded_gain_map && codec::is_ultrahdr_bytes(bytes)) {
         try {
-          return codec::decode_ultrahdr_bytes(bytes);
+          return codec::decode_ultrahdr_bytes(bytes, options.default_gamut);
         } catch (const std::exception&) {
           // Keep the backward-compatible primary usable, but never pretend that
           // losing the advertised HDR rendition was an ordinary successful
@@ -950,25 +963,27 @@ DecodedImage decode_image(const std::filesystem::path& path, const RawDecodeOpti
           // is set by the decoder: the file still advertises a gain map, and a
           // name-based classifier would have handed these SDR pixels to the
           // highlight-splitting renderer.
-          auto fallback = decode_jpeg(bytes, options.preview_max_edge);
+          auto fallback = decode_jpeg(bytes, options.preview_max_edge,
+                                      options.default_gamut);
           fallback.decode.degraded = true;
           fallback.decode.degradation_reasons.push_back(
               "ultrahdr_decode_failed_sdr_fallback");
           return fallback;
         }
       }
-      return decode_jpeg(bytes, options.preview_max_edge);
+      return decode_jpeg(bytes, options.preview_max_edge, options.default_gamut);
     case InputFormat::Png:
-      return decode_png(bytes, options.preview_max_edge);
+      return decode_png(bytes, options.preview_max_edge, options.default_gamut);
     case InputFormat::Isobmff:
       // HEIF and AVIF are the same container family; the payload codec decides,
       // because libheif would otherwise reject an AV1 payload with an error
       // about the codec rather than simply reading it.
       if (codec::is_avif_bytes(bytes)) {
-        return codec::decode_avif_bytes(bytes, options.preview_max_edge);
+        return codec::decode_avif_bytes(bytes, options.preview_max_edge,
+                                       options.default_gamut);
       }
       return decode_heic(bytes, options.ignore_embedded_gain_map,
-                         options.preview_max_edge);
+                         options.preview_max_edge, options.default_gamut);
     case InputFormat::Unknown:
       break;
   }

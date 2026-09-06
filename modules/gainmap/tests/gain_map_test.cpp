@@ -123,6 +123,18 @@ void test_color_preservation_and_headroom() {
   require(ratio > 1.5F && ratio < 4.0F,
           "gamut compression left the saturated patch flat or over-saturated");
 
+  options.clamp_srgb = true;
+  const auto clamped = hyperdr::make_gain_map(saturated, options);
+  const auto clamped_srgb = hyperdr::linear_p3_to_rec709(
+      clamped.base_linear.pixels[0], clamped.base_linear.pixels[1],
+      clamped.base_linear.pixels[2]);
+  for (const float value : clamped_srgb) {
+    require(value >= -1.0e-5F && value <= 1.0F + 1.0e-5F,
+            "clamped base escaped the sRGB gamut");
+  }
+  require(clamped.headroom_stops > 0.0F &&
+              clamped.headroom_stops == saturated_result.headroom_stops,
+          "sRGB clamping discarded HDR headroom");
   const float gain_max =
       static_cast<float>(saturated_result.metadata.gain_max.numerator) /
       saturated_result.metadata.gain_max.denominator;

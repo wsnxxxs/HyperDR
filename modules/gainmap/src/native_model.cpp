@@ -366,6 +366,21 @@ void apply_native_model_gain_map(GainMapResult& result,
   // These controls deliberately run after inference. In particular, changing
   // brightness or contrast cannot invalidate/re-run the model tensor.
   adjust_base(result, post);
+  if (result.clamp_srgb) {
+    parallel_for_rows(result.base_linear.height, [&](const std::uint32_t y) {
+      for (std::uint32_t x = 0; x < result.base_linear.width; ++x) {
+        const auto index =
+            (static_cast<std::size_t>(y) * result.base_linear.width + x) * 3U;
+        const auto fitted = compress_linear_p3_to_srgb(
+            result.base_linear.pixels[index],
+            result.base_linear.pixels[index + 1],
+            result.base_linear.pixels[index + 2]);
+        result.base_linear.pixels[index] = fitted[0];
+        result.base_linear.pixels[index + 1] = fitted[1];
+        result.base_linear.pixels[index + 2] = fitted[2];
+      }
+    });
+  }
 }
 
 GainMapResult make_native_model_gain_map(

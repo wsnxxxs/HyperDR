@@ -37,8 +37,8 @@ namespace hyperdr {
 // the two cannot disagree.
 inline constexpr std::array<std::string_view, 2> kJpegExtensions{".jpg", ".jpeg"};
 inline constexpr std::array<std::string_view, 1> kPngExtensions{".png"};
-inline constexpr std::array<std::string_view, 3> kIsobmffExtensions{
-    ".heic", ".heif", ".avif"};
+inline constexpr std::array<std::string_view, 4> kIsobmffExtensions{
+    ".heic", ".heif", ".hif", ".avif"};
 
 [[nodiscard]] consteval auto join_raster_extensions() {
   std::array<std::string_view, kJpegExtensions.size() + kPngExtensions.size() +

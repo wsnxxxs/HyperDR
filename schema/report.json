@@ -28,6 +28,36 @@
       "items": {
         "$ref": "#/$defs/file"
       }
+    },
+    "color_lut": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "input",
+        "output",
+        "strength"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "input": {
+          "type": "string"
+        },
+        "output": {
+          "type": "string"
+        },
+        "strength": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
     }
   },
   "$defs": {
@@ -36,6 +66,8 @@
       "additionalProperties": false,
       "required": [
         "encoding",
+        "color_gamut",
+        "clamp_srgb",
         "look",
         "highlight_recovery",
         "raw_gain",
@@ -71,8 +103,19 @@
             "pq",
             "hlg",
             "avif-pq",
-            "avif-hlg"
+            "avif-hlg",
+            "sdr-jpeg"
           ]
+        },
+        "color_gamut": {
+          "enum": [
+            "srgb",
+            "p3",
+            "rec2020"
+          ]
+        },
+        "clamp_srgb": {
+          "type": "boolean"
         },
         "look": {
           "enum": [
@@ -197,13 +240,55 @@
             "expansion_start"
           ],
           "properties": {
-            "brightness_ev": {"type": "number"},
-            "contrast": {"type": "number"},
-            "shadows_ev": {"type": "number"},
-            "highlights_stops": {"type": "number"},
-            "hdr_range_stops": {"type": "number"},
-            "expansion_start": {"type": "number"}
+            "brightness_ev": {
+              "type": "number"
+            },
+            "contrast": {
+              "type": "number"
+            },
+            "shadows_ev": {
+              "type": "number"
+            },
+            "highlights_stops": {
+              "type": "number"
+            },
+            "hdr_range_stops": {
+              "type": "number"
+            },
+            "expansion_start": {
+              "type": "number"
+            }
           }
+        },
+        "lut_input": {
+          "type": "string",
+          "enum": [
+            "srgb",
+            "p3",
+            "rec709",
+            "hlg",
+            "pq",
+            "slog3-sgamut3cine"
+          ]
+        },
+        "lut_output": {
+          "type": "string",
+          "enum": [
+            "srgb",
+            "p3",
+            "rec709",
+            "hlg",
+            "pq",
+            "slog3-sgamut3cine"
+          ]
+        },
+        "lut_strength": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "gain_map_output": {
+          "type": "boolean"
         }
       }
     },
@@ -222,10 +307,16 @@
       ],
       "properties": {
         "black_level_correction": {
-          "enum": ["LibRaw metadata", "metadata or measured dark; LUT-aware"]
+          "enum": [
+            "LibRaw metadata",
+            "metadata or measured dark; LUT-aware"
+          ]
         },
         "white_balance": {
-          "enum": ["camera WB", "camera WB with LibRaw fallback"]
+          "enum": [
+            "camera WB",
+            "camera WB with LibRaw fallback"
+          ]
         },
         "digital_gain": {
           "type": "number",
@@ -352,7 +443,13 @@
           "type": "boolean"
         },
         "raw_white_balance": {
-          "enum": ["", "camera", "camera-applied", "auto", "daylight"]
+          "enum": [
+            "",
+            "camera",
+            "camera-applied",
+            "auto",
+            "daylight"
+          ]
         },
         "input_domain": {
           "type": "string",

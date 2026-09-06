@@ -14,11 +14,15 @@
 namespace hyperdr {
 namespace {
 
-constexpr std::array<std::string_view, 6> kEncodingChoices{
-    "adaptive", "ultrahdr", "pq", "hlg", "avif-pq", "avif-hlg"};
+constexpr std::array<std::string_view, 7> kEncodingChoices{
+    "adaptive", "ultrahdr", "pq", "hlg", "avif-pq", "avif-hlg", "sdr-jpeg"};
+constexpr std::array<std::string_view, 6> kLutSpaceChoices{
+    "srgb", "p3", "rec709", "hlg", "pq", "slog3-sgamut3cine"};
 constexpr std::array<std::string_view, 1> kLookChoices{"photographic"};
 constexpr std::array<std::string_view, 4> kHighlightRecoveryChoices{
     "blend", "reconstruct", "clip", "unclip"};
+constexpr std::array<std::string_view, 3> kColorGamutChoices{
+    "srgb", "p3", "rec2020"};
 
 // --- accessors -------------------------------------------------------------
 // Each pair is the only place that knows where a setting lives in
@@ -54,6 +58,24 @@ json::Value read_highlight_recovery(const ConvertOptions& o) {
   return json::Value::from_string(highlight_recovery_name(o.raw.highlight_recovery));
 }
 
+void apply_color_gamut(ConvertOptions& o, const json::Value& v) {
+  const auto gamut = color_gamut_from_name(v.string());
+  if (!gamut) throw std::invalid_argument("unknown colour gamut: " + v.string());
+  o.default_gamut = *gamut;
+  o.raw.default_gamut = *gamut;
+}
+json::Value read_color_gamut(const ConvertOptions& o) {
+  return json::Value::from_string(color_gamut_name(o.default_gamut));
+}
+
+void apply_clamp_srgb(ConvertOptions& o, const json::Value& v) {
+  o.clamp_srgb = v.boolean();
+  o.gain.clamp_srgb = o.clamp_srgb;
+}
+json::Value read_clamp_srgb(const ConvertOptions& o) {
+  return json::Value::from_bool(o.clamp_srgb);
+}
+
 // "auto" or an explicit value, for the two settings that accept both. The flag
 // and the automatic bit are set together so they can never disagree.
 void apply_exposure(ConvertOptions& o, const json::Value& v) {
@@ -73,13 +95,21 @@ json::Value read_headroom(const ConvertOptions& o) {
                               : json::Value::from_number(o.gain.headroom_stops);
 }
 
-const std::array<Setting, 26>& table() {
-  static const std::array<Setting, 26> kSettings{{
+const std::array<Setting, 31>& table() {
+  static const std::array<Setting, 31> kSettings{{
       {"encoding", "--encoding", SettingKind::kEnum, 0, 0, kEncodingChoices,
-       "adaptive|ultrahdr|pq|hlg|avif-pq|avif-hlg", "Output representation", false,
+       "adaptive|ultrahdr|pq|hlg|avif-pq|avif-hlg|sdr-jpeg", "Output representation", false,
        true,
        [](std::string_view name) { return hdr_encoding_from_name(name).has_value(); },
        apply_encoding, read_encoding},
+      {"color_gamut", "--color-gamut", SettingKind::kEnum, 0, 0,
+       kColorGamutChoices, "srgb|p3|rec2020", "Default input colour gamut", false,
+       true,
+       [](std::string_view name) { return color_gamut_from_name(name).has_value(); },
+       apply_color_gamut, read_color_gamut, true},
+      {"clamp_srgb", "--clamp-srgb", SettingKind::kBoolean, 0, 0, {}, {},
+       "Clamp rendered colour to sRGB gamut", false, true, nullptr,
+       apply_clamp_srgb, read_clamp_srgb},
       {"look", "--look", SettingKind::kEnum, 0, 0, kLookChoices,
        "photographic",
        "Renderer", false, true, nullptr, apply_look,
@@ -106,6 +136,18 @@ const std::array<Setting, 26>& table() {
          return json::Value::from_bool(o.raw.auto_bad_pixel_correction);
        }, true},
 
+      {"lut_input", "--lut-input", SettingKind::kEnum, 0, 0, kLutSpaceChoices,
+       "<space>", "LUT input transfer and primaries (rec709 = gamma 2.4)", false, true, nullptr,
+       [](ConvertOptions& o, const json::Value& v) { o.color_lut.input = *lut_space_from_name(v.string()); },
+       [](const ConvertOptions& o) { return json::Value::from_string(lut_space_name(o.color_lut.input)); }},
+      {"lut_output", "--lut-output", SettingKind::kEnum, 0, 0, kLutSpaceChoices,
+       "<space>", "LUT output transfer and primaries", false, true, nullptr,
+       [](ConvertOptions& o, const json::Value& v) { o.color_lut.output = *lut_space_from_name(v.string()); },
+       [](const ConvertOptions& o) { return json::Value::from_string(lut_space_name(o.color_lut.output)); }},
+      {"lut_strength", "--lut-strength", SettingKind::kNumber, 0, 1, {},
+       "<0..1>", "Colour LUT blend in linear light", false, true, nullptr,
+       [](ConvertOptions& o, const json::Value& v) { o.color_lut.strength = as_float(v); },
+       [](const ConvertOptions& o) { return json::Value::from_number(o.color_lut.strength); }},
       {"contrast", "--contrast", SettingKind::kNumber, 0.80, 1.35, {},
        "<0.80..1.35>", "Photographic mid-tone slope", false, true, nullptr,
        [](ConvertOptions& o, const json::Value& v) { o.gain.look.contrast = as_float(v); },

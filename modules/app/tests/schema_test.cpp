@@ -105,6 +105,17 @@ void test_parsing_enforces_ranges_and_types() {
   require(throws([&] { hyperdr::parse_setting_text(*look, "neutral"); }),
           "the removed neutral look was still accepted");
 
+  const auto* gamut = hyperdr::find_setting_by_key("color_gamut");
+  require(gamut != nullptr, "color_gamut is missing from the table");
+  require(hyperdr::parse_setting_text(*gamut, "p3").string() == "p3",
+          "a valid colour gamut was not parsed");
+  require(throws([&] { hyperdr::parse_setting_text(*gamut, "rec709"); }),
+          "an unknown colour gamut was accepted");
+  const auto* clamp = hyperdr::find_setting_by_key("clamp_srgb");
+  require(clamp != nullptr &&
+              hyperdr::parse_setting_text(*clamp, "").boolean(),
+          "the sRGB clamp flag did not parse as true");
+
   // "auto" is a distinct state, not a sentinel number.
   const auto* headroom = hyperdr::find_setting_by_key("headroom");
   require(hyperdr::parse_setting_text(*headroom, "auto").is_string(),
@@ -202,7 +213,7 @@ void test_fingerprint_covers_exactly_the_byte_affecting_settings() {
 
 void test_decode_cache_controls_are_declared_in_the_settings_table() {
   const std::set<std::string> expected{
-      "half_size", "highlight_recovery", "preview_max_edge", "raw_gain",
+      "color_gamut", "half_size", "highlight_recovery", "preview_max_edge", "raw_gain",
       "raw_auto_bad_pixels"};
   std::set<std::string> actual;
   for (const auto& setting : hyperdr::settings()) {

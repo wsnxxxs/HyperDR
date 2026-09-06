@@ -1,6 +1,6 @@
 #pragma once
 
-// Which HDR representation to write.
+// Which SDR or HDR representation to write.
 //
 // The choice determines container, codec, bit depth and transfer function
 // together, because those four are not independently selectable in practice: a
@@ -12,7 +12,7 @@
 
 namespace hyperdr {
 
-enum class HdrEncoding {
+enum class OutputEncoding {
   // Display P3 SDR base plus an ISO 21496-1 gain map, in HEIF. The
   // compatibility-first default: it renders as an ordinary photo everywhere and
   // as HDR where the gain map is understood.
@@ -25,7 +25,14 @@ enum class HdrEncoding {
   // The same two renditions in AVIF. Same pixels, different container and codec.
   AvifPq,
   AvifHlg,
+  // Ordinary sRGB JPEG, with no HDR alternate or gain-map auxiliary.
+  SdrJpeg,
 };
+
+using HdrEncoding = OutputEncoding;  // Source compatibility for existing clients.
+
+[[nodiscard]] constexpr bool is_sdr_encoding(OutputEncoding e) { return e == OutputEncoding::SdrJpeg; }
+[[nodiscard]] constexpr bool is_gain_map_encoding(OutputEncoding e) { return e == OutputEncoding::Adaptive || e == OutputEncoding::UltraHdr; }
 
 // True for encodings whose sample values are BT.2100 rather than a Display-P3
 // SDR base plus a gain map.

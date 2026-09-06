@@ -98,6 +98,7 @@ std::string settings_signature(const ConvertOptions& options) {
   // Calibration files are external inputs, not schema scalar settings. Their
   // paths and contents still belong in the resume fingerprint: changing a
   // dark frame or lens grid must never be hidden by --skip-existing.
+  append_raw_file("color_lut", options.color_lut.path);
   for (const auto& resource : raw_decode_resources(options.raw)) {
     append_raw_file(resource.key, resource.path);
   }

@@ -237,7 +237,7 @@ GainMapResult make_display_referred_sdr_result(const FloatImage& source,
     result.base_linear = preparation->base.base;
     result.stats = preparation->base_stats;
     result.exposure_ev = preparation->exposure_ev;
-
+    result.clamp_srgb = options.clamp_srgb;
   } else result = make_display_referred_sdr_passthrough_result(source, options);
   const float requested_stops = options.auto_headroom
       ? options.look.headroom_max_stops
@@ -334,6 +334,7 @@ GainMapResult make_display_referred_sdr_passthrough_result(
 
   GainMapResult result;
   result.base_linear = FloatImage(source.width, source.height, 3);
+  result.clamp_srgb = options.clamp_srgb;
   std::vector<float> row_peak(source.height, 0.0F);
   parallel_for_rows(source.height, [&](const std::uint32_t y) {
     float peak = 0.0F;
@@ -354,7 +355,10 @@ GainMapResult make_display_referred_sdr_passthrough_result(
           for (float& channel : rgb) channel *= scale;
         }
       }
-      const auto fitted = fit_to_unit_cube(rgb);
+      auto fitted = fit_to_unit_cube(rgb);
+      if (options.clamp_srgb) {
+        fitted = compress_linear_p3_to_srgb(fitted[0], fitted[1], fitted[2]);
+      }
       result.base_linear.pixels[base] = fitted[0];
       result.base_linear.pixels[base + 1] = fitted[1];
       result.base_linear.pixels[base + 2] = fitted[2];
@@ -487,6 +491,7 @@ GainMapResult make_display_referred_hdr_gain_map(const FloatImage& source,
   GainMapResult result;
   result.gain_map = std::move(quantized.codes);
   result.base_linear = FloatImage(source.width, source.height, 3);
+  result.clamp_srgb = options.clamp_srgb;
 
   const GridView gain_view(result.gain_map.pixels, dimensions.width,
                            dimensions.height);
@@ -513,8 +518,11 @@ GainMapResult make_display_referred_hdr_gain_map(const FloatImage& source,
       // reaches the base unchanged.
       const float scale =
           luminance > kMinimumLuminance ? sdr_luminance / luminance : 1.0F;
-      const auto fitted = fit_to_unit_cube(
+      auto fitted = fit_to_unit_cube(
           {input[0] * scale, input[1] * scale, input[2] * scale});
+      if (options.clamp_srgb) {
+        fitted = compress_linear_p3_to_srgb(fitted[0], fitted[1], fitted[2]);
+      }
       result.base_linear.pixels[base] = fitted[0];
       result.base_linear.pixels[base + 1] = fitted[1];
       result.base_linear.pixels[base + 2] = fitted[2];

@@ -10,8 +10,33 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <optional>
+#include <string_view>
 
 namespace hyperdr {
+
+enum class ColorGamut : std::uint8_t {
+  kSrgb,
+  kDisplayP3,
+  kRec2020,
+};
+
+[[nodiscard]] inline const char* color_gamut_name(ColorGamut gamut) {
+  switch (gamut) {
+    case ColorGamut::kSrgb: return "srgb";
+    case ColorGamut::kDisplayP3: return "p3";
+    case ColorGamut::kRec2020: return "rec2020";
+  }
+  return "srgb";
+}
+
+[[nodiscard]] inline std::optional<ColorGamut> color_gamut_from_name(
+    std::string_view name) {
+  if (name == "srgb") return ColorGamut::kSrgb;
+  if (name == "p3") return ColorGamut::kDisplayP3;
+  if (name == "rec2020") return ColorGamut::kRec2020;
+  return std::nullopt;
+}
 
 // Display P3 D65 luminance. The one definition of "how bright is this pixel"
 // used by the tone curve, the headroom selector, the gain map, and the report;
@@ -73,6 +98,62 @@ namespace hyperdr {
           std::max(0.0F, 0.01708263F * r + 0.07239741F * g + 0.91051996F * b)};
 }
 
+// The inverse matrix without the defensive P3-channel floor. Gamut fitting
+// calls this only with a colour already inside the Rec.709 cube; retaining the
+// un-clamped form avoids hiding the result of the hue-preserving compression.
+[[nodiscard]] inline std::array<float, 3> rec709_to_linear_p3_unclamped(
+    float r, float g, float b) {
+  return {0.82246197F * r + 0.17753803F * g,
+          0.03319420F * r + 0.96680580F * g,
+          0.01708263F * r + 0.07239741F * g + 0.91051996F * b};
+}
+
+[[nodiscard]] inline std::array<float, 3> linear_p3_to_rec709(
+    float r, float g, float b) {
+  return {1.22494018F * r - 0.22494018F * g,
+          -0.04205695F * r + 1.04205695F * g,
+          -0.01963755F * r - 0.07863605F * g + 1.09827360F * b};
+}
+
+// Compress a linear Display-P3 colour toward its Rec.709 luminance until all
+// three Rec.709 channels fit the target cube. This keeps the direction from
+// neutral to the colour, so hue is retained instead of being shifted by three
+// independent channel clamps. HDR callers may preserve a common scale above
+// one; SDR/base callers leave it false and target the ordinary [0, 1] cube.
+[[nodiscard]] inline std::array<float, 3> compress_linear_p3_to_srgb(
+    float r, float g, float b, bool preserve_headroom = false) {
+  const auto source = linear_p3_to_rec709(
+      std::isfinite(r) ? r : 0.0F,
+      std::isfinite(g) ? g : 0.0F,
+      std::isfinite(b) ? b : 0.0F);
+  const float limit = preserve_headroom
+                          ? std::max(1.0F, std::max({source[0], source[1], source[2]}))
+                          : 1.0F;
+  const float luminance = std::clamp(
+      0.2126F * source[0] + 0.7152F * source[1] + 0.0722F * source[2],
+      0.0F, limit);
+  float amount = 1.0F;
+  for (const float channel : source) {
+    const float delta = channel - luminance;
+    if (delta > 0.0F) {
+      amount = std::min(amount, (limit - luminance) / delta);
+    } else if (delta < 0.0F) {
+      amount = std::min(amount, -luminance / delta);
+    }
+  }
+  amount = std::clamp(amount, 0.0F, 1.0F);
+  const std::array<float, 3> fitted{
+      luminance + amount * (source[0] - luminance),
+      luminance + amount * (source[1] - luminance),
+      luminance + amount * (source[2] - luminance)};
+  const auto p3 = rec709_to_linear_p3_unclamped(
+      std::clamp(fitted[0], 0.0F, limit),
+      std::clamp(fitted[1], 0.0F, limit),
+      std::clamp(fitted[2], 0.0F, limit));
+  return {std::max(0.0F, p3[0]), std::max(0.0F, p3[1]),
+          std::max(0.0F, p3[2])};
+}
+
 // True when a linear Display P3 colour lies outside the Rec.709 (sRGB) gamut,
 // i.e. reproducing its chromaticity in Rec.709 would need a negative primary.
 // The test is relative to the brightest channel so it is exposure-invariant and
@@ -80,9 +161,10 @@ namespace hyperdr {
 // verified numerically.
 [[nodiscard]] inline bool is_outside_rec709(float r, float g, float b,
                                             float relative_eps = 1.0e-3F) {
-  const float R = 1.22494018F * r - 0.22494018F * g;
-  const float G = -0.04205695F * r + 1.04205695F * g;
-  const float B = -0.01963755F * r - 0.07863605F * g + 1.09827360F * b;
+  const auto rec709 = linear_p3_to_rec709(r, g, b);
+  const float R = rec709[0];
+  const float G = rec709[1];
+  const float B = rec709[2];
   const float lo = std::min({R, G, B});
   const float hi = std::max({std::max({R, G, B}), 1.0e-6F});
   return (lo / hi) < -relative_eps;

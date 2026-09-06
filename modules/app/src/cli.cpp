@@ -1,6 +1,7 @@
 #include "hyperdr/app/cli.hpp"
 
 #include "hyperdr/app/batch.hpp"
+#include "hyperdr/app/decode_cache.hpp"
 #include "hyperdr/app/report.hpp"
 #include "hyperdr/app/schema.hpp"
 #include "hyperdr/codec/availability.hpp"
@@ -13,6 +14,7 @@
 #include "hyperdr/foundation/version.hpp"
 #include "hyperdr/gainmap/gain_map.hpp"
 #include "hyperdr/gainmap/external.hpp"
+#include "hyperdr/gainmap/native_model.hpp"
 #include "hyperdr/gainmap/reconstruct.hpp"
 #include "hyperdr/image/resample.hpp"
 
@@ -26,7 +28,13 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
+
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
 
 namespace hyperdr {
 namespace {
@@ -48,6 +56,8 @@ void usage() {
          "                            [--base-only]\n"
          "  HyperDR preview-frame <image> --output <preview.hpf> [look options]\n"
          "                            [--preview-max-edge <pixels>] [--fast-preview]\n"
+         "  HyperDR model-gain <image> --ai-model [embedded] [look options]\n"
+         "                            (writes a binary gain packet to stdout)\n"
          "  HyperDR model-input <image> --output <linear-p3.f32> --report <recipe.json>\n"
          "                            [--long-side <pixels>] [--half-size] [look options]\n"
          "  HyperDR curve [look options] [--samples <N>]   Emit the tone curve as JSON\n"
@@ -59,6 +69,13 @@ void usage() {
          "  --report <file.json>               Write a structured run report\n"
          "  --external-gain <file.f32>         Use an external canonical gain grid\n"
          "  --external-gain-report <file.json> Required sidecar for that gain grid\n"
+         "  --ai-model [embedded]              Run the embedded native gain model\n"
+         "  --ai-brightness <EV>               Post-model SDR brightness\n"
+         "  --ai-contrast <slope>              Post-model contrast around diffuse white\n"
+         "  --ai-shadows <EV>                  Post-model shadow lift\n"
+         "  --ai-highlights <stops>            Post-model highlight gain adjustment\n"
+         "  --ai-hdr-range <stops>             Post-model gain-range cap\n"
+         "  --ai-expansion-start <0..1>        Post-model gain luma knee\n"
           "  --allow-legacy-external-gain      Allow frozen v1 normalized sidecars\n"
           "  --decode-cache <directory>         Reuse decoded buffers across look-only reruns\n"
           "  --fast-preview                     Explicitly allow RAW half-size decoding\n"
@@ -134,8 +151,40 @@ void parse_settings(int argc, char** argv, int first, ConvertOptions& options,
       options.external_gain_report = next_value(i, argc, argv, arg);
     } else if (arg == "--allow-legacy-external-gain") {
       options.allow_legacy_external_gain = true;
+    } else if (arg == "--ai-model") {
+      // The shipping model is embedded/registered by the native runtime. Keep
+      // an optional artifact token for development adapters, but make the
+      // flag-only spelling ergonomic for the panel.
+      if (i + 1 < argc && !std::string_view(argv[i + 1]).starts_with("--")) {
+        options.ai_model_path = argv[++i];
+      } else {
+        options.ai_model_path = "embedded";
+      }
+    } else if (arg == "--ai-brightness") {
+      options.ai_post.brightness_ev =
+          real(next_value(i, argc, argv, arg), "AI brightness");
+    } else if (arg == "--ai-contrast") {
+      options.ai_post.contrast =
+          real(next_value(i, argc, argv, arg), "AI contrast");
+    } else if (arg == "--ai-shadows") {
+      options.ai_post.shadows_ev =
+          real(next_value(i, argc, argv, arg), "AI shadows");
+    } else if (arg == "--ai-highlights") {
+      options.ai_post.highlights_stops =
+          real(next_value(i, argc, argv, arg), "AI highlights");
+    } else if (arg == "--ai-hdr-range") {
+      options.ai_post.hdr_range_stops =
+          real(next_value(i, argc, argv, arg), "AI HDR range");
+    } else if (arg == "--ai-expansion-start") {
+      options.ai_post.expansion_start =
+          real(next_value(i, argc, argv, arg), "AI expansion start");
     } else if (arg == "--decode-cache") {
       options.decode_cache_directory = next_value(i, argc, argv, arg);
+    } else if (arg == "--decode-cache-source-sha256") {
+      // Internal panel plumbing: uploads are hashed while streaming, so the
+      // short-lived preview CLI need not read a large RAW again just to name an
+      // already-decoded cache entry.
+      options.decode_cache_source_sha256 = next_value(i, argc, argv, arg);
     } else if (arg == "--raw-bad-pixels") {
       options.raw.bad_pixel_map = next_value(i, argc, argv, arg);
     } else if (arg == "--raw-dark-frame") {
@@ -435,6 +484,57 @@ std::vector<std::uint8_t> native_preview_packet(const GainMapResult& result,
   return bytes;
 }
 
+std::vector<std::uint8_t> native_model_gain_packet(
+    const NativeModelOutput& output, const InputDescription& input) {
+  const auto& gain = output.signed_log2_gain;
+  gain.require_consistent("native model packet gain");
+  if (gain.channels != 1 || gain.pixels.empty()) {
+    throw std::invalid_argument(
+        "native model packet gain must be non-empty single-channel data");
+  }
+  float min_stops = gain.pixels.front();
+  float max_stops = gain.pixels.front();
+  for (const float value : gain.pixels) {
+    if (!std::isfinite(value) || value < -64.0F || value > 64.0F) {
+      throw std::invalid_argument(
+          "native model packet gain must be finite signed stops in [-64, 64]");
+    }
+    min_stops = std::min(min_stops, value);
+    max_stops = std::max(max_stops, value);
+  }
+  json::Writer writer;
+  writer.begin_object()
+      .member("schema", "hyperdr.native-model-gain/v1")
+      .member("width", gain.width)
+      .member("height", gain.height)
+      .member("channels", 1)
+      .member("layout", "HW")
+      .member("sampleType", "float32-le")
+      .member("scale", "signed-log2-gain")
+      .member("stride", kNativeModelStride)
+      .member("gainMinStops", min_stops)
+      .member("gainMaxStops", max_stops)
+      .member("inputDomain", input_domain_name(input.domain))
+      .member("headroomStops", std::max(0.0F, max_stops));
+  const std::string metadata = writer.end_object().take();
+
+  std::vector<std::uint8_t> bytes{'H', 'Y', 'P', 'G', 'A', 'I', 'N', '1', '\n'};
+  append_u32_le(bytes, static_cast<std::uint32_t>(metadata.size()));
+  bytes.insert(bytes.end(), metadata.begin(), metadata.end());
+  FloatImage packet_gain(gain.width, gain.height, 1);
+  packet_gain.pixels = gain.pixels;
+  append_float_image(bytes, packet_gain);
+  return bytes;
+}
+
+void set_stdout_binary() {
+#ifdef _WIN32
+  // The model-gain packet is a byte protocol, not text. Prevent the CRT from
+  // translating its header/newlines when the CLI is piped to the panel.
+  _setmode(_fileno(stdout), _O_BINARY);
+#endif
+}
+
 int preview_frame_command(int argc, char** argv) {
   if (argc < 3) throw std::invalid_argument("preview-frame requires one input image");
   ConvertOptions options;
@@ -448,18 +548,30 @@ int preview_frame_command(int argc, char** argv) {
     throw std::invalid_argument("preview-frame output must differ from input image");
   }
   validate_gain_map_options(options.gain);
-  options.raw.ignore_embedded_gain_map = !options.external_gain_path.empty();
+  validate_native_model_post_options(options.ai_post);
+  if (!options.ai_model_path.empty() &&
+      (!options.external_gain_path.empty() ||
+       !options.external_gain_report.empty())) {
+    throw std::invalid_argument(
+        "--ai-model cannot be combined with an external gain grid");
+  }
+  options.raw.ignore_embedded_gain_map =
+      !options.external_gain_path.empty() || !options.ai_model_path.empty();
   // This subcommand is a bounded preview by definition -- the edge is forced
   // above if the caller left it out -- so the decoders may stop early rather
   // than materialise a 48 MP raster the next line is about to shrink. RAW
   // ignores this and keeps using --fast-preview's half_size.
   options.raw.preview_max_edge = options.preview_max_edge;
-  auto decoded = decode_image(options.input, options.raw);
+  auto decoded = decode_cached_image(options.input, options, options.raw);
   const auto input = decoded.describe_input();
-  decoded.linear_p3 = resample_to_max_edge(
-      std::move(decoded.linear_p3), options.preview_max_edge);
   GainMapResult result;
-  if (!options.external_gain_path.empty()) {
+  if (!options.ai_model_path.empty()) {
+    result = render_native_model_base(decoded);
+    auto model_input = make_native_model_input(result.base_linear);
+    auto prediction = infer_native_model(options.ai_model_path, model_input);
+    apply_native_model_gain_map(result, model_input, std::move(prediction),
+                                options.gain.gain_strength, options.ai_post);
+  } else if (!options.external_gain_path.empty()) {
     auto external = read_external_gain_map(
         options.external_gain_path, options.external_gain_report,
         options.allow_legacy_external_gain);
@@ -474,6 +586,40 @@ int preview_frame_command(int argc, char** argv) {
   validate_encoding_headroom(options.encoding, result.headroom_stops);
   write_binary_file_atomic(options.output_directory,
                            native_preview_packet(result, decoded.decode, input), true);
+  return 0;
+}
+
+int model_gain_command(int argc, char** argv) {
+  if (argc < 3) throw std::invalid_argument("model-gain requires one input image");
+  ConvertOptions options;
+  options.input = argv[2];
+  parse_settings(argc, argv, 3, options);
+  if (options.ai_model_path.empty()) {
+    throw std::invalid_argument("model-gain requires --ai-model");
+  }
+  if (!options.external_gain_path.empty() ||
+      !options.external_gain_report.empty()) {
+    throw std::invalid_argument(
+        "model-gain --ai-model cannot use an external gain grid");
+  }
+  if (options.preview_max_edge == 0) options.preview_max_edge = 2048;
+  options.decode_intent = DecodeIntent::Preview;
+  options.raw.preview_max_edge = options.preview_max_edge;
+  options.raw.half_size = is_raw_extension(lower_extension(options.input));
+  options.raw.ignore_embedded_gain_map = true;
+  validate_gain_map_options(options.gain);
+  validate_native_model_post_options(options.ai_post);
+
+  auto decoded = decode_cached_image(options.input, options, options.raw);
+  const auto input = decoded.describe_input();
+  auto result = render_native_model_base(decoded);
+  auto model_input = make_native_model_input(result.base_linear);
+  auto prediction = infer_native_model(options.ai_model_path, model_input);
+  set_stdout_binary();
+  const auto packet = native_model_gain_packet(prediction, input);
+  std::cout.write(reinterpret_cast<const char*>(packet.data()),
+                  static_cast<std::streamsize>(packet.size()));
+  if (!std::cout) throw std::runtime_error("failed writing native model packet");
   return 0;
 }
 
@@ -534,10 +680,12 @@ std::string model_input_report(const std::filesystem::path& input,
       .begin_array("delivered_crop_origin_sensor")
           .element(d.delivered_crop_left).element(d.delivered_crop_top).end_array()
       .member("raw_half_size", raw.half_size)
+      .member("input_domain", input_domain_name(decoded.describe_input().domain))
       .member("default_crop_present", d.default_crop_present)
       .member("requested_crop_applied", d.target_dimensions_applied)
       .begin_object("development_recipe")
-      .member("id", "photographic-v1")
+      .member("id", native_model_development_kind(
+                        decoded.describe_input().domain))
       .member("exposure_bias_ev", gain.exposure_bias_ev)
       .member("exposure_ev", developed.exposure_ev)
       .member("headroom_stops", developed.stats.headroom_stops)
@@ -610,21 +758,17 @@ int model_input_command(int argc, char** argv) {
   validate_gain_map_options(options.gain);
   options.raw.ignore_embedded_gain_map = true;
   auto decoded = decode_image(input, options.raw);
-  // The SDR base is developed before any model resampling.  This is the same
-  // make_gain_map call used by final export; only its generated gain grid is
-  // discarded here.
-  auto development_options = options.gain;
-  // Model labels are SDR development inputs, so the creative offset is pinned
-  // rather than inherited: a recipe recorded here has to stay reproducible even
-  // if the CLI's own default ever moves again.
+  // Keep cache generation identical to the deployed input/base preparation.
+  GainMapOptions development_options{};
   development_options.exposure_bias_ev = 0.0F;
   development_options.gain_strength = 1.0F;
-  // The domain still comes from the decode. With embedded gain maps ignored
-  // above, a gain-map container arrives as its display-referred SDR base, which
-  // is exactly the developed image a model label wants; a RAW arrives
-  // scene-referred and is developed by the photographic renderer as before.
-  auto developed = make_gain_map(decoded.linear_p3, development_options,
-                                 decoded.capture, decoded.describe_input());
+  development_options.look.contrast = 1.0F;
+  development_options.look.vibrance = 0.0F;
+  development_options.look.pop = 0.0F;
+  if (decoded.describe_input().domain == InputDomain::kDisplayReferredSdr) {
+    development_options.gain_strength = 0.0F;
+  }
+  auto developed = render_native_model_base(decoded);
   const auto [width, height] = model_tensor_size(
       developed.base_linear.width, developed.base_linear.height, long_side);
   auto tensor = resample_to(developed.base_linear, width, height);
@@ -653,6 +797,7 @@ int run_cli(int argc, char** argv) {
   if (command == "verify") return verify_command(argc, argv);
   if (command == "thumbnail") return thumbnail_command(argc, argv);
   if (command == "preview-frame") return preview_frame_command(argc, argv);
+  if (command == "model-gain") return model_gain_command(argc, argv);
   if (command == "model-input") return model_input_command(argc, argv);
   throw std::invalid_argument("unknown command: " + std::string(command));
 }

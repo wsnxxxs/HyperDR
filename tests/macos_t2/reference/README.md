@@ -21,10 +21,11 @@ It carries its original EXIF, which normally includes capture time and location.
 
 ## idg_a8d59bf1077d1452826f.jpg — Adobe Indigo, a conformant third-party writer
 
-One of the 109 files in the frozen Indigo container audit
-(`HyperDR_Model/reports/indigo-container-audit.json`), which records it as
-`ok: true`, `iso_generic`, three channels, MPF present, gain map at image index
-1, gamma 1.0 per channel. Its bytes carry `urn:iso:std:iso:ts:21496:-1` twice.
+One of the 109 files in the frozen Indigo container audit. The local, untracked
+research record (`HyperDR_Model/reports/indigo-container-audit.json`) identifies
+it as `ok: true`, `iso_generic`, three channels, MPF present, gain map at image
+index 1, gamma 1.0 per channel. Its bytes carry
+`urn:iso:std:iso:ts:21496:-1` twice.
 
 Read it with one caveat in mind: it is **JPEG/MPF** while our fixtures are
 **HEIC**, so a difference between the two could come from the container format

@@ -150,7 +150,13 @@ ExternalGainBinding read_model_binding(const json::Value& value,
   binding.delivered_crop_top = delivered_origin[1];
   binding.raw_half_size = required_bool(source, "raw_half_size");
 
-  require_string(recipe, "id", "photographic-v1");
+  binding.recipe.id = required_string(recipe, "id");
+  if (binding.recipe.id != "photographic-v1" &&
+      binding.recipe.id != "display-p3-passthrough" &&
+      binding.recipe.id != "raw-neutral-v1") {
+    throw std::invalid_argument(
+        "external model binding has unsupported development recipe");
+  }
   binding.recipe.exposure_ev =
       finite_number(required_member(recipe, "exposure_ev"), "recipe exposure_ev");
   binding.recipe.headroom_stops = finite_number(
@@ -572,7 +578,10 @@ GainMapResult make_external_gain_map(const FloatImage& source,
   }
   auto development = options;
   const float strength = development.gain_strength;
-  development.gain_strength = 1.0F;
+  const bool display_passthrough =
+      external.binding &&
+      external.binding->recipe.id == "display-p3-passthrough";
+  development.gain_strength = display_passthrough ? 0.0F : 1.0F;
   auto result = make_gain_map(source, development, capture, input);
   apply_external_gain_map(result, std::move(external), strength,
                           options.output_headroom_limit_stops);

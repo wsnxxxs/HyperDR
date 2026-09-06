@@ -1,17 +1,15 @@
 """Which files are images, and how to tell from their first bytes.
 
-The panel used to carry its own copy of every extension, and a second, shorter
-copy of the magic bytes that go with them. The extension list had drifted into
-five places -- here, the C++ discovery filter, the C++ decoder's RAW table, the
-native file dialog and the browser's ``accept`` attribute -- and the magic table
-had never covered more than five of the fourteen RAW containers, so a Panasonic
-RW2, a Canon CRW and a Minolta MRW were all offered by the file dialog and then
-refused on upload as "contents do not match the extension".
+The panel used to carry its own copy of every extension and tried to validate
+RAW with a shorter table of generic container magic. That table could neither
+cover every camera format nor distinguish CR3 from HEIC, so RAW is now routed
+by extension and validated by LibRaw itself. Raster signatures remain useful
+because JPEG, PNG and ISO-BMFF are distinguishable from their leading bytes.
 
-``HyperDR schema`` now emits both tables, ``schema/settings.json`` is that
-output, checked in, and this module turns it into the sets and the sniffing the
-panel needs. A new format therefore reaches the panel by rebuilding the
-converter, exactly as a new setting does.
+``HyperDR schema`` emits the extension vocabulary and raster signatures;
+``schema/settings.json`` is that output, checked in, and this module turns it
+into the sets and sniffing the Python panel needs. Browser controls have a
+separate UI adapter for presentation and request mapping.
 """
 from __future__ import annotations
 
@@ -56,10 +54,18 @@ def _signatures(kind: str) -> tuple[tuple[int, bytes], ...]:
     )
 
 
+def _canonical_extensions() -> dict[str, str]:
+    values = _inputs().get("canonicalExtensions")
+    if not isinstance(values, dict) or not values:
+        raise SchemaError(
+            "设置定义中的 inputs.canonicalExtensions 为空或格式不正确。")
+    return {str(kind): str(extension).lower() for kind, extension in values.items()}
+
+
 def _derive() -> None:
     global RAW_INPUT_EXTENSIONS, RASTER_INPUT_EXTENSIONS, SUPPORTED_EXTENSIONS
-    global RASTER_FAMILY_EXTENSIONS
-    global _RASTER_SIGNATURES, _RAW_SIGNATURES, PREFIX_BYTES
+    global RASTER_FAMILY_EXTENSIONS, CANONICAL_EXTENSIONS
+    global _RASTER_SIGNATURES, PREFIX_BYTES
     RAW_INPUT_EXTENSIONS = _raw_extensions()
     RASTER_FAMILY_EXTENSIONS = _raster_extensions()
     RASTER_INPUT_EXTENSIONS = frozenset().union(*RASTER_FAMILY_EXTENSIONS.values())
@@ -70,25 +76,19 @@ def _derive() -> None:
     _RASTER_SIGNATURES = {
         kind: _signatures(kind) for kind in ("jpeg", "png", "isobmff")
     }
-    _RAW_SIGNATURES = _signatures("raw")
+    # The extension a file of each detected family is stored under. An ISO base
+    # media file is named `.heic` whatever codec it carries, because that is the
+    # name the converter's HEIF branch routes through -- and that branch already
+    # hands an AV1 payload to the AVIF decoder. Derived, not mirrored: this was
+    # the last table in this module still maintained by hand.
+    CANONICAL_EXTENSIONS = _canonical_extensions()
     # How many leading bytes are enough to answer any of the questions below.
     # Reading more than this to classify a file is waste -- and reading the whole
     # file, which this module's predecessor did, is 300 MB of it on a large RAW.
-    PREFIX_BYTES = int(_inputs().get("prefixBytes") or 64)
+    PREFIX_BYTES = int(_inputs().get("prefixBytes") or 16)
 
 
 _derive()
-
-
-def reload() -> None:
-    """Re-derive the tables after `schema.reload()` replaced the document."""
-    _derive()
-
-#: The extension a file of each detected family is stored under. An ISO base
-#: media file is named ``.heic`` whatever codec it carries, because that is the
-#: name the converter's HEIF branch routes through -- and that branch already
-#: hands an AV1 payload to the AVIF decoder.
-CANONICAL_EXTENSIONS = {"jpeg": ".jpg", "png": ".png", "isobmff": ".heic"}
 
 
 def _matches(header: bytes, signatures) -> bool:
@@ -101,19 +101,13 @@ def detect_format(header: bytes) -> str | None:
     """Name the raster family these leading bytes belong to, or None.
 
     RAW is deliberately not returned: most RAW containers *are* TIFF, so a
-    signature cannot separate a .dng from any other TIFF. Use
-    :func:`raw_signature_ok` for a file that already claims a RAW extension.
+    signature cannot separate a .dng from any other TIFF. LibRaw validates a
+    file after its extension routes it to the RAW decoder.
     """
     for kind, signatures in _RASTER_SIGNATURES.items():
         if _matches(header, signatures):
             return kind
     return None
-
-
-def raw_signature_ok(header: bytes) -> bool:
-    """Whether a file claiming a RAW extension carries a RAW container header."""
-    return _matches(header, _RAW_SIGNATURES)
-
 
 def extension_format(extension: str) -> str | None:
     """The raster family a filename claims, or None for RAW and the unknown."""

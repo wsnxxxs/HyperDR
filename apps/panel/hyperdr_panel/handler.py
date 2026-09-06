@@ -61,7 +61,8 @@ class Handler(BaseHTTPRequestHandler):
     def _lockout_response(self, retry_after: float) -> api.Response:
         return api.Response(
             status=429,
-            payload={"error": "尝试次数过多，请稍后再试。"},
+            payload={"error": "尝试次数过多，请稍后再试。",
+                     "code": "too_many_attempts"},
             headers={"Retry-After": str(int(retry_after) + 1)},
         )
 
@@ -86,14 +87,16 @@ class Handler(BaseHTTPRequestHandler):
             self._send(self._lockout_response(retry_after))
             return True
         self.server.login_throttle.record_failure(client_ip)
-        self._send(api.Response(status=403, payload={"error": "访问口令无效。"}))
+        self._send(api.Response(status=403, payload={
+            "error": "访问口令无效。", "code": "token_invalid"}))
         return True
 
     def _require_authorized(self) -> bool:
         supplied = self._cookie_token()
         if not supplied:
             self._send(api.Response(status=401, payload={
-                "error": "需要访问口令。请使用启动窗口显示的完整地址。"}))
+                "error": "需要访问口令。请使用启动窗口显示的完整地址。",
+            "code": "token_required"}))
             return False
 
         client_ip = self.client_address[0]
@@ -106,7 +109,8 @@ class Handler(BaseHTTPRequestHandler):
             return False
         self.server.login_throttle.record_failure(client_ip)
         self._send(api.Response(status=401, payload={
-            "error": "需要访问口令。请使用启动窗口显示的完整地址。"}))
+            "error": "需要访问口令。请使用启动窗口显示的完整地址。",
+            "code": "token_required"}))
         return False
 
     def _same_origin(self) -> bool:
@@ -180,7 +184,9 @@ class Handler(BaseHTTPRequestHandler):
     def _read_json(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
         if length < 0 or length > MAX_BODY_BYTES:
-            raise ValueError("请求内容过大。")
+            oversize = ValueError("请求内容过大。")
+            oversize.code = "body_too_large"
+            raise oversize
         body = json.loads(self.rfile.read(length) or b"{}")
         # `json.loads` returns whatever the document is, and every route then
         # calls `body.get(...)`. A perfectly valid `[]` therefore raised
@@ -211,7 +217,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self._require_authorized():
             return
         if not self._same_origin():
-            self._send(api.error("请求来源不匹配。", status=403))
+            self._send(api.error("请求来源不匹配。", status=403,
+                                 code="origin_mismatch"))
             return
         path = urlparse(self.path).path
         if path == "/api/upload":
@@ -250,7 +257,7 @@ class Handler(BaseHTTPRequestHandler):
         session_id = query.get("id", [""])[0]
         filename = query.get("name", [""])[0]
         try:
-            with api.upload_is_allowed(session_id):
+            with job.upload_slot():
                 length = int(self.headers.get("Content-Length", "0"))
                 target, written = save_upload(session_id, filename, self.rfile, length)
         except (job.Busy, OSError, ValueError) as exc:

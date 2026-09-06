@@ -1,9 +1,9 @@
 """Bounded, deduplicated access to the converter subprocess.
 
 Three endpoints start a HyperDR process: ``/api/run`` through ``job.py``,
-``/api/curve`` and ``/api/preview``. Only the first had any admission control.
-The other two looked bounded because both keep a cache, but a cache bounds
-*finished* work and says nothing about work in flight: N concurrent misses on
+``/api/preview`` and ``/api/model-preview``. Only the first had any admission
+control. The other two looked bounded because both keep a cache, but a cache
+bounds *finished* work and says nothing about work in flight: N concurrent misses on
 the same key were N separate processes, each doing the same thing. For preview
 that meant N whole-file reads of a RAW, N native decodes, N temporary
 files and N runs of a CLI with a 180-second timeout, all producing one answer.
@@ -36,18 +36,21 @@ class Busy(RuntimeError):
     survives the trip out of the worker.
     """
 
-    def __init__(self, message: str, status: int = 503) -> None:
+    def __init__(self, message: str, status: int = 503, code: str = "busy") -> None:
         super().__init__(message)
         self.status = status
+        #: Stable identifier for the browser's catalogue; see js/core/api.js.
+        self.code = code
 
 
 class Budget:
     """At most `limit` concurrent holders, with no unbounded queue behind it."""
 
-    def __init__(self, limit: int, message: str = "服务器繁忙，请稍后再试。") -> None:
+    def __init__(self, limit: int, message: str = "服务器繁忙，请稍后再试。",
+                 code: str = "busy") -> None:
         self._semaphore = threading.BoundedSemaphore(max(1, int(limit)))
         self._message = message
-        self.limit = max(1, int(limit))
+        self._code = code
 
     @contextlib.contextmanager
     def hold(self, timeout: float = 0.0):
@@ -63,7 +66,7 @@ class Budget:
         else:
             acquired = self._semaphore.acquire(blocking=False)
         if not acquired:
-            raise Busy(self._message, status=503)
+            raise Busy(self._message, status=503, code=self._code)
         try:
             yield
         finally:
@@ -104,7 +107,8 @@ class SingleFlight:
             # Bounded: a leader that hangs must not hold its followers'
             # request threads for longer than the work itself could take.
             if not call.done.wait(timeout):
-                raise Busy("相同请求仍在处理中，请稍后再试。", status=503)
+                raise Busy("相同请求仍在处理中，请稍后再试。", status=503,
+                       code="duplicate_request")
             if call.error is not None:
                 raise call.error
             return call.value
@@ -125,7 +129,7 @@ class SingleFlight:
             return len(self._calls)
 
 
-# Shared by thumbnail generation and model-input preparation.
+# Shared by thumbnail generation and the native model-gain probe.
 # Endpoint-local limits did not bound their combined LibRaw resident set. One
 # memory-heavy RAW decode at a time is the conservative default; operators may
 # raise the total allowance explicitly on machines with measured headroom.
@@ -135,4 +139,5 @@ RAW_DECODE_MEMORY_SLOTS = max(
 RAW_DECODE_BUDGET = Budget(
     RAW_DECODE_MEMORY_SLOTS,
     "RAW 解码内存额度正被占用，请稍后再试。",
+    code="raw_budget",
 )

@@ -3,9 +3,9 @@
 Training workspace for predicting Apple-style perceptual HDR gain maps from SDR
 photographs. HyperDR already derives a gain map from image content; this project
 learns to predict Apple-style gain maps from a corpus of Apple-rendered SDR
-photographs, and the panel can swap the learned grid in place of the
-mathematical one. The ML project owns extraction, target construction, training,
-evaluation, and inference; the separate HyperDR project owns final encoding.
+photographs. The ML project owns extraction, target construction, training,
+evaluation, and offline export; HyperDR embeds the fixed ncnn model and owns
+native inference, filtering, rendering, and final encoding.
 
 ## Setup
 
@@ -22,6 +22,10 @@ conda create -y -p .venv python=3.12 pip
 
 The local dataset defaults to `~/datasets/hyperdr-apple`. It is not
 distributed or committed.
+
+When this directory is refreshed from a sibling `HyperDR_Model` checkout, run
+`sync_from_source.ps1`. It copies only source and contract files; datasets,
+checkpoints, reports, caches, and virtual environments remain local.
 
 ## Dataset contract
 
@@ -122,6 +126,26 @@ read-only report; it contains no raw photos or private capture timestamps.
 
 ## Training
 
+Reproduce the production-v3 numerical recipe (this creates a new run; it does
+not overwrite or relabel the frozen checkpoint):
+
+```bash
+PYTHONPATH=. .venv/bin/python train.py \
+  --dataset-root ~/datasets/hyperdr-apple \
+  --output-dir ~/runs/hyperdr/direct-production-v3-reproduction \
+  --model-id hyperdr.direct-fixed-incumbent/v3-production \
+  --label-subset iso_native --target-mode signed_stops --model direct \
+  --architecture baseline --production-selection-fold 4 \
+  --lambda-gradient 0.2 \
+  --lambda-global-mean 0.1 --epochs 80 --batch-size 8 \
+  --learning-rate 0.0003 --weight-decay 0.0001 \
+  --base-channels 24 --seed 20260730
+```
+
+This matches the embedded config of `production-v3.pt`. The historical source
+is upstream commit `46a4ce098304e3b79608bdaf54b7fe0be999ddb1` plus
+`checkpoints/production-v3-training.patch`.
+
 ```bash
 PYTHONPATH=. .venv/bin/python train.py \
   --dataset-root ~/datasets/hyperdr-apple \
@@ -199,7 +223,7 @@ the recorded run inputs.
 ```bash
 PYTHONPATH=. .venv/bin/python evaluate_absolute.py \
   --checkpoint checkpoints/production-v3.pt \
-  --split test \
+  --split selection \
   --output <test-report.json>
 
 PYTHONPATH=. .venv/bin/python infer_gain.py \
@@ -212,26 +236,87 @@ PYTHONPATH=. .venv/bin/python infer_gain.py \
   --device auto
 ```
 
-The model input contract is linear Display-P3 SDR with diffuse white at 1.0.
-The HyperDR panel prepares non-raster inputs through its native thumbnail
-command; RAW/DNG model thumbnails use `--model-input`, which applies the shared
-automatic photographic exposure before JPEG encoding. The matching external
-gain export applies the same anchor to the decoded RAW base before clamping it
-to the SDR range.
+The research inference command above remains useful for evaluating checkpoints
+and sidecar compatibility; it is not used by the packaged panel. Production
+deployment exports inference-only ONNX with `export_onnx.py`, converts the
+five-plane ONNX view with `scripts/convert_ncnn.py`, and embeds the resulting
+ncnn param/bin in `HyperDR.exe`.
 
 Evaluation streams error sums and pixel counts, so batches with different
 padding shapes are never concatenated. Evaluation and inference use CUDA when
 available and otherwise support CPU.
 
-The panel/native RAW path supplies HWC little-endian float32 linear Display P3
-with relative SDR white at 1.0. It is the downsampled HyperDR photographic SDR
-base described by `hyperdr.model-input/v1`; inference validates its byte length,
-SHA-256, colour/layout declaration and stride-16 geometry, and performs no ICC,
-sRGB, JPEG or second resize step. Ordinary ICC-tagged raster input remains a
-legacy command-line compatibility path.
+`production-v3.pt` selected epoch 4 on fold 4, so `--split selection` is the
+honest reproducible evaluation entry. It is not a blind test. Frozen `test`
+remains one-shot and requires the evaluator's explicit protocol/ledger flags.
 
-The v2 gain interchange remains compatible with HyperDR's raw `.f32` consumer,
-but it is a required file pair:
+### Deployment-matched v4 preflight
+
+Build a separate cache through the exact HyperDR `model-input` implementation:
+
+```bash
+PYTHONPATH=. .venv/bin/python scripts/build_deployment_cache.py \
+  --dataset-root ~/datasets/hyperdr-apple \
+  --hyperdr-exe /mnt/c/path/to/HyperDR.exe \
+  --source-dir ~/datasets/hyperdr-apple/originals \
+  --fallback-sdr-dir ~/datasets/hyperdr-apple/extracted/sdr_1024 \
+  --label-subset iso_native --split development --resume \
+  --output-dir ~/datasets/hyperdr-apple/training/deployment_linear_p3_f32_dev_v1 \
+  --target-output-dir ~/datasets/hyperdr-apple/training/deployment_gain_grid_stride16_f32_dev_v1
+
+PYTHONPATH=. .venv/bin/python evaluate_absolute.py \
+  --checkpoint checkpoints/production-v3.pt --split selection \
+  --input-cache-dir ~/datasets/hyperdr-apple/training/deployment_linear_p3_f32_dev_v1 \
+  --target-cache-dir ~/datasets/hyperdr-apple/training/deployment_gain_grid_stride16_f32_dev_v1 \
+  --output reports/production-v3-deployment-input-selection.json
+```
+
+Start v4 from only the v3 model weights (optimizer, scheduler, epoch and run
+configuration are deliberately fresh):
+
+```bash
+PYTHONPATH=. .venv/bin/python train.py \
+  --dataset-root ~/datasets/hyperdr-apple \
+  --input-cache-dir ~/datasets/hyperdr-apple/training/deployment_linear_p3_f32_dev_v1 \
+  --target-cache-dir ~/datasets/hyperdr-apple/training/deployment_gain_grid_stride16_f32_dev_v1 \
+  --output-dir ~/runs/hyperdr/direct-production-v4-deployment-matched-r1 \
+  --model-id hyperdr.direct-deployment-matched/v4 \
+  --initialize-from-checkpoint checkpoints/production-v3.pt \
+  --label-subset iso_native --target-mode signed_stops --model direct \
+  --production-selection-fold 4 --epochs 80 --batch-size 8 \
+  --learning-rate 0.0003 --weight-decay 0.0001 --base-channels 24 \
+  --lambda-gradient 0.2 --lambda-global-mean 0.1 --batch-by-shape
+```
+
+Candidate selection is auditable and blocks release on failure. The checked-in
+v4 plan records the v3 baseline values used by these gates:
+
+```bash
+PYTHONPATH=. .venv/bin/python evaluate_absolute.py \
+  --checkpoint ~/runs/hyperdr/direct-production-v4-deployment-matched-r1/best.pt \
+  --split selection \
+  --input-cache-dir ~/datasets/hyperdr-apple/training/deployment_linear_p3_f32_dev_v1 \
+  --target-cache-dir ~/datasets/hyperdr-apple/training/deployment_gain_grid_stride16_f32_dev_v1 \
+  --baseline-report reports/production-v3-deployment-input-selection.json \
+  --max-capture-group-mae 0.23068 \
+  --max-highlight-mae 0.26979890079237523 \
+  --require-contrast-span-improvement 0.1 \
+  --output reports/production-v4-deployment-input-selection.json
+```
+
+The input and target cache arguments are an inseparable pair in both training
+and evaluation; using only one is rejected. The v4 recipe and completed
+candidate decision are in `checkpoints/production-v4-training.json`. The r1
+candidate failed the capture-group gate, so it remains an experiment and no
+`production-v4.pt` or release manifest is created.
+
+The native runtime receives the existing linear Display-P3 photographic SDR
+base in memory, creates RGB/log-luminance/clipping features, and emits one
+signed-log2 sample per stride-16 cell. It performs no ICC, sRGB, JPEG, or file
+sidecar round trip.
+
+The v2 file interchange remains available to offline research tools and generic
+external integrations as a required pair:
 
 - `.f32`: contiguous HW little-endian float32, signed canonical log2 gain;
 - JSON report: width, height, byte length, endianness, scale, contract ID,
@@ -243,14 +328,15 @@ The old v1 normalized `[0,1] + max_stops` sidecar is only accepted through the
 The writer verifies the byte length after writing. Any reader must supply both
 width and height and reject a file whose length is not `width * height * 4`.
 
-## Tests
+## Focused validation
 
 ```bash
-PYTHONPATH=. .venv/bin/python -m unittest discover -s tests -p 'test_*.py' -v
-PYTHONPATH=. .venv/bin/python tests/smoke.py
+PYTHONPATH=. .venv/bin/python -m compileall -q hyperdr_ml scripts *.py
+PYTHONPATH=. .venv/bin/python scripts/validate_dataset.py --help
+PYTHONPATH=. .venv/bin/python infer_gain.py --help
 ```
 
-The unit suite covers 690/696/683 boundaries, mixed landscape/portrait
-collation, direct unaligned model input, degenerate and non-finite targets,
-per-image loss aggregation, GroupNorm channel divisibility, controlled
-architecture parameter counts, and raw gain-grid validation.
+There is no separate model test suite in this runtime copy. During an iteration,
+run the dataset audit, training, evaluation, or inference command that owns the
+behaviour being changed. The panel's model orchestration contract is covered by
+the repository's focused Python checks under `tests/python/`.

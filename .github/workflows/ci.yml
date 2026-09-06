@@ -126,6 +126,12 @@ jobs:
       - name: Check every data-role a module reads exists in the markup
         run: python scripts/check_panel_roles.py
 
+      # Same problem, one layer up: a mistyped catalogue key renders as the key
+      # itself and a key missing from one locale silently falls back to the
+      # other, neither of which is a parse error.
+      - name: Check the string catalogues agree with each other and the code
+        run: python scripts/check_panel_i18n.py
+
   # The full configuration: LibRaw, libheif, libavif, libultrahdr and the x265
   # Main10 runtime. This is the build that produces shippable binaries, so it
   # runs last and is allowed to be slow.

@@ -28,19 +28,19 @@ qualified highlights into HDR headroom, and applies shared chroma processing
 before the two luminance outputs split. It is the only renderer; the earlier
 `neutral` one has been removed, and `--look neutral` is now rejected.
 
-The code is organised as seven layered modules under `modules/` — foundation,
-image, look, container, gainmap, codec, app — each publishing headers from its own
-include root, so the layering is enforced by the build rather than by convention.
-Everything below `codec` compiles and tests with nothing but a C++20 compiler,
-which is why the dependency-free configuration still runs almost the whole test
-suite. For a map of the repository and its single sources of truth, see
-[docs/project-structure.md](docs/project-structure.md).
+HyperDR has three user-facing surfaces: the folder-capable CLI, the local
+browser/iPhone panel, and the Windows desktop shell. The optional “优化” action
+adds a model-produced gain map without replacing the normal renderer. Start a
+change from the [feature ownership map](docs/project-structure.md); the native
+converter's internal layers are documented there only as a secondary concern.
 
 ## Repository guide
 
 - [`modules/`](modules/) contains the layered C++ core and command-line app.
 - [`apps/panel/`](apps/panel/) contains the Python browser-panel server and its
   web client.
+- [`apps/desktop/`](apps/desktop/) contains the Windows desktop shell that owns
+  the panel sidecar and native window lifecycle.
 - [`HyperDR_Model/`](HyperDR_Model/) contains the optional ML training and
   inference project.
 - [`tests/`](tests/) contains cross-component Python, JavaScript, PowerShell,
@@ -123,16 +123,20 @@ HyperDR inspect <file.heic> [--json]
 HyperDR verify <file.heic|file.jpg> [--reconstruct <preview.tiff>]
 HyperDR thumbnail <image> --output <preview.jpg> [--max-edge <pixels>]
 HyperDR preview-frame <image> --output <preview.hpf> [look options]
+HyperDR model-gain <image> --ai-model embedded [AI post options]
 HyperDR model-input <image> --output <linear-p3.f32> --report <recipe.json>
 HyperDR curve [look options] [--samples <N>]
 HyperDR schema
 ```
 
-Every setting is declared once, in one table. `--help`, the command-line parser,
-the resume fingerprint and the report's settings block are all generated from it,
-so a new setting cannot appear in some of those places and not others.
-`HyperDR schema` prints that table as JSON, and `schema/settings.json` is that
-output checked in for the browser panel to validate against.
+Within the converter, every setting is declared once, in one C++ table.
+`--help`, the command-line parser, the resume fingerprint and the report's
+settings block are all generated from it, so those converter surfaces cannot
+drift apart. `HyperDR schema` prints that table as JSON, and the checked-in
+`schema/settings.json` is the generated contract used by the panel backend and
+contract checks. The browser UI also has a small local schema for labels,
+widgets and request mapping; update that adapter when a setting is exposed in
+the UI.
 
 The full option list, exit codes, per-encoding behaviour, resume fingerprinting,
 and look-control ranges are in
@@ -143,7 +147,7 @@ and look-control ranges are in
 What the renderer promises about its output, and the manual scene checklist a
 release still has to pass, are in [docs/rendering.md](docs/rendering.md).
 
-## Report schema 7
+## Report schema 8
 
 The `--report` contents, geometry fields, and headroom fields are documented in
 [docs/report-schema.md](docs/report-schema.md), alongside the machine-readable
@@ -198,9 +202,10 @@ preview needs trusted HTTPS, which `Setup-HTTPS.bat` sets up once per computer.
 The full guide, covering the two iPhone trust steps, manual certificate setup,
 and security notes, is in [docs/iphone-lan.md](docs/iphone-lan.md).
 
-## Contributing and security
+## Development and security
 
-Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+The [feature-first development guide](docs/development.md) maps user-visible
+behaviour to its owner and lists the smallest useful checks for each area.
 [SECURITY.md](SECURITY.md) records the panel's threat model and how certificates
 and private keys are handled. User-visible changes are recorded in
 [CHANGELOG.md](CHANGELOG.md).

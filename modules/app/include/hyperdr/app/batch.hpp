@@ -15,15 +15,22 @@ void require_decode_resolution(const ConvertOptions& options,
                                const DecodeInfo& decode);
 
 // Renders one decoded image, choosing the renderer from the domain the decoder
-// recorded. Public so the domain routing has a fixture-free test: an
-// SDR-domain image uses fixed-exposure photographic expansion, whatever the
-// file was called.
+// recorded.
 //
 // This replaces an earlier helper that decided the same question from the file
 // extension, which classified an Ultra HDR JPEG that had fallen back to its SDR
 // primary as HDR and could not tell a PQ HEIC from an sRGB one at all.
 [[nodiscard]] GainMapResult render_decoded_image(const DecodedImage& image,
                                                  const GainMapOptions& options);
+
+// Produces the exact SDR base consumed by the native model and retained by the
+// final render. Finished SDR is passed through sample-for-sample; scene-linear
+// RAW keeps automatic exposure but uses a fixed neutral development.
+[[nodiscard]] GainMapResult render_native_model_base(const DecodedImage& image);
+
+// Stable provenance name used by model-input reports and conversion reports.
+[[nodiscard]] const char* native_model_development_kind(
+    InputDomain domain) noexcept;
 
 // Validates a model sidecar against the current file/decode and returns the
 // frozen photographic recipe to replay. Public for fixture-free stale-grid

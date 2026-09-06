@@ -85,7 +85,7 @@ struct LinearizationLut {
 
 struct RawCallbackContext {
   const LensShadingMap* lens_shading{};
-  std::vector<std::array<std::uint16_t, 4>>* captured_image{};
+  std::vector<std::uint16_t>* captured_mosaic{};
   std::uint32_t* captured_width{};
   std::uint32_t* captured_height{};
 };
@@ -312,18 +312,23 @@ void raw_pre_preinterpolate_callback(void* object) {
 void raw_capture_before_rgb_callback(void* object) {
   auto* raw = static_cast<LibRaw*>(object);
   auto* context = current_raw_callback_context;
-  if (context == nullptr || context->captured_image == nullptr ||
+  if (context == nullptr || context->captured_mosaic == nullptr ||
       raw->imgdata.image == nullptr) {
     return;
   }
   const auto width = static_cast<std::uint32_t>(raw->imgdata.sizes.iwidth);
   const auto height = static_cast<std::uint32_t>(raw->imgdata.sizes.iheight);
   const auto count = static_cast<std::size_t>(width) * height;
-  context->captured_image->resize(count);
+  context->captured_mosaic->resize(count);
   for (std::size_t i = 0; i < count; ++i) {
-    for (std::uint32_t c = 0; c < 4; ++c) {
-      (*context->captured_image)[i][c] = raw->imgdata.image[i][c];
-    }
+    const auto y = static_cast<int>(i / width);
+    const auto x = static_cast<int>(i % width);
+    const auto c = raw->COLOR(y, x);
+    // A non-Bayer layout is rejected after the callback. Keep the C callback
+    // non-throwing while copying only the one sensor sample each site owns,
+    // instead of four mostly-empty uint16 planes per pixel.
+    (*context->captured_mosaic)[i] =
+        c >= 0 && c <= 3 ? raw->imgdata.image[i][c] : 0;
   }
   if (context->captured_width != nullptr) *context->captured_width = width;
   if (context->captured_height != nullptr) *context->captured_height = height;
@@ -773,23 +778,29 @@ RawMosaic decode_raw_mosaic(const std::filesystem::path& path,
   const auto& sizes = raw.imgdata.sizes;
   const std::uint64_t width = sizes.width;
   const std::uint64_t height = sizes.height;
-  if (!codec::raw_input_budget_ok(width, height)) {
+  const std::uint64_t sensor_width =
+      sizes.raw_width ? sizes.raw_width : sizes.width;
+  const std::uint64_t sensor_height =
+      sizes.raw_height ? sizes.raw_height : sizes.height;
+  if (!codec::raw_input_budget_ok(sensor_width, sensor_height) ||
+      !codec::raw_input_budget_ok(width, height)) {
     throw std::runtime_error(
-        "RAW image " + std::to_string(width) + "x" + std::to_string(height) +
+        "RAW sensor raster " + std::to_string(sensor_width) + "x" +
+        std::to_string(sensor_height) +
         " exceeds the supported 240869376-pixel input limit");
   }
-  check_raw_memory_admission(width, height, width, height);
+  check_raw_memory_admission(sensor_width, sensor_height, width, height);
   check_raw(raw.unpack(), "LibRaw unpack RAW mosaic");
   apply_linearization_lut(raw, linearization_lut);
   if (options.auto_bad_pixel_correction) correct_auto_bad_pixels(raw);
 
-  std::vector<std::array<std::uint16_t, 4>> captured;
+  std::vector<std::uint16_t> captured;
   std::uint32_t captured_width = 0;
   std::uint32_t captured_height = 0;
   RawCallbackContext callback_context;
   callback_context.lens_shading = lens_shading.gains.empty() ? nullptr
                                                                : &lens_shading;
-  callback_context.captured_image = &captured;
+  callback_context.captured_mosaic = &captured;
   callback_context.captured_width = &captured_width;
   callback_context.captured_height = &captured_height;
   {
@@ -830,13 +841,9 @@ RawMosaic decode_raw_mosaic(const std::filesystem::path& path,
   result.black_level_corrected = true;
   for (std::uint32_t y = 0; y < captured_height; ++y) {
     for (std::uint32_t x = 0; x < captured_width; ++x) {
-      const auto c = raw.COLOR(static_cast<int>(y), static_cast<int>(x));
-      if (c < 0 || c > 3) {
-        throw std::runtime_error("LibRaw returned an invalid Bayer channel");
-      }
       const auto index = static_cast<std::size_t>(y) * captured_width + x;
       result.samples.at(x, y, 0) =
-          static_cast<float>(captured[index][c]) / white * options.digital_gain;
+          static_cast<float>(captured[index]) / white * options.digital_gain;
     }
   }
   return result;

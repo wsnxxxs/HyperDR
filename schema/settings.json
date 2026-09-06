@@ -278,6 +278,11 @@
         ]
       }
     },
+    "canonicalExtensions": {
+      "jpeg": ".jpg",
+      "png": ".png",
+      "isobmff": ".heic"
+    },
     "signatures": {
       "jpeg": [
         {
@@ -296,66 +301,8 @@
           "offset": 4,
           "magic": "66747970"
         }
-      ],
-      "raw": [
-        {
-          "offset": 0,
-          "magic": "49492a00"
-        },
-        {
-          "offset": 0,
-          "magic": "4d4d002a"
-        },
-        {
-          "offset": 0,
-          "magic": "49492b00"
-        },
-        {
-          "offset": 0,
-          "magic": "4d4d002b"
-        },
-        {
-          "offset": 0,
-          "magic": "49494949"
-        },
-        {
-          "offset": 0,
-          "magic": "49495500"
-        },
-        {
-          "offset": 0,
-          "magic": "49491a00"
-        },
-        {
-          "offset": 0,
-          "magic": "4949524f"
-        },
-        {
-          "offset": 0,
-          "magic": "49495253"
-        },
-        {
-          "offset": 0,
-          "magic": "4d4d4f52"
-        },
-        {
-          "offset": 0,
-          "magic": "004d524d"
-        },
-        {
-          "offset": 0,
-          "magic": "46554a4946494c4d4343442d524157"
-        },
-        {
-          "offset": 0,
-          "magic": "464f5662"
-        },
-        {
-          "offset": 4,
-          "magic": "66747970"
-        }
       ]
     },
-    "prefixBytes": 64
+    "prefixBytes": 16
   }
 }

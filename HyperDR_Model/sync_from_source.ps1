@@ -1,13 +1,24 @@
 param(
-  [string]$ModelRoot = "C:\Users\Ryan\Desktop\HyperDR_Model",
-  [string]$RuntimeRoot = "C:\Users\Ryan\Desktop\HyperDR\HyperDR_Model"
+  [string]$ModelRoot = "",
+  [string]$RuntimeRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
-$source = (Resolve-Path -LiteralPath $ModelRoot).Path
-if (-not (Test-Path -LiteralPath $source -PathType Container)) {
+
+# By default, sync from a sibling HyperDR_Model checkout into the model runtime
+# that owns this script. Both paths remain overridable for other workspaces.
+if (-not $RuntimeRoot) {
+  $RuntimeRoot = $PSScriptRoot
+}
+if (-not $ModelRoot) {
+  $projectRoot = Split-Path -Parent $PSScriptRoot
+  $ModelRoot = Join-Path (Split-Path -Parent $projectRoot) "HyperDR_Model"
+}
+
+if (-not (Test-Path -LiteralPath $ModelRoot -PathType Container)) {
   throw "Model source does not exist: $ModelRoot"
 }
+$source = (Resolve-Path -LiteralPath $ModelRoot).Path
 New-Item -ItemType Directory -Force -Path $RuntimeRoot | Out-Null
 
 # The model repository is the source of truth. Runtime packaging receives only

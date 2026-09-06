@@ -10,10 +10,9 @@
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/foundation/hash.hpp"
-#include "hyperdr/foundation/json.hpp"
 #include "hyperdr/gainmap/external.hpp"
 #include "hyperdr/gainmap/gain_map.hpp"
-#include "hyperdr/image/resample.hpp"
+#include "hyperdr/gainmap/native_model.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -32,39 +31,6 @@ using Clock = std::chrono::steady_clock;
 
 double milliseconds(Clock::time_point begin, Clock::time_point end) {
   return std::chrono::duration<double, std::milli>(end - begin).count();
-}
-
-// Scalar decode controls come from the settings table. Only derived state and
-// external calibration resources remain here because neither is a setting.
-std::string decode_variant(const ConvertOptions& options,
-                           const RawDecodeOptions& raw) {
-  const char* intent = options.decode_intent == DecodeIntent::Preview
-                           ? "preview"
-                           : "export";
-  auto reflected = options;
-  reflected.raw = raw;
-  std::string variant = std::string(intent) + '/' +
-      (raw.ignore_embedded_gain_map ? "base-only" : "embedded-gain");
-  for (const auto& setting : settings()) {
-    if (!setting.affects_decoded_pixels) continue;
-    const auto value = setting.read(reflected);
-    variant += '/';
-    variant += setting.key;
-    variant += '=';
-    if (value.is_string()) variant += value.string();
-    else if (value.is_bool()) variant += value.boolean() ? "1" : "0";
-    else variant += json::number_text(value.number());
-  }
-  for (const auto& resource : raw_decode_resources(raw)) {
-    if (resource.path.empty()) continue;
-    variant += '/';
-    variant += resource.key;
-    variant += '=';
-    variant += path_utf8(resource.path);
-    variant += ':';
-    variant += sha256_file_hex(resource.path);
-  }
-  return variant;
 }
 
 // One file's work is split in two so a batch can overlap the stages. A staged
@@ -89,6 +55,38 @@ GainMapResult render_decoded_image(const DecodedImage& image,
                                    const GainMapOptions& options) {
   return make_gain_map(image.linear_p3, options, image.capture,
                        image.describe_input());
+}
+
+const char* native_model_development_kind(InputDomain domain) noexcept {
+  switch (domain) {
+    case InputDomain::kDisplayReferredSdr:
+      return "display-p3-passthrough";
+    case InputDomain::kSceneReferred:
+      return "raw-neutral-v1";
+    case InputDomain::kDisplayReferredHdr:
+      return "display-hdr-split";
+    case InputDomain::kUnknown:
+      return "none";
+  }
+  return "none";
+}
+
+GainMapResult render_native_model_base(const DecodedImage& image) {
+  GainMapOptions development{};
+  development.exposure_bias_ev = 0.0F;
+  development.gain_strength = 1.0F;
+  development.look.contrast = 1.0F;
+  development.look.vibrance = 0.0F;
+  development.look.pop = 0.0F;
+
+  // make_display_referred_sdr_result only invokes photographic expansion when
+  // mathematical gain is requested. Zero gain therefore selects its exact
+  // linear Display-P3 passthrough result; the inferred gain replaces the zero
+  // grid immediately afterwards.
+  if (image.describe_input().domain == InputDomain::kDisplayReferredSdr) {
+    development.gain_strength = 0.0F;
+  }
+  return render_decoded_image(image, development);
 }
 
 GainMapOptions replay_external_development(
@@ -187,7 +185,8 @@ Staged decode_stage(const std::filesystem::path& path,
     const auto start = Clock::now();
     staged.input_stamp = input_stamp(path);
     auto raw = options.raw;
-    raw.ignore_embedded_gain_map = !options.external_gain_path.empty();
+    raw.ignore_embedded_gain_map = !options.external_gain_path.empty() ||
+                                   !options.ai_model_path.empty();
     // Only an explicitly declared preview lets the decoders reduce on their
     // own. An export keeps decoding at full size and reaches --preview-max-edge
     // through the linear-light resampler alone, so its bytes do not change.
@@ -195,21 +194,7 @@ Staged decode_stage(const std::filesystem::path& path,
       raw.preview_max_edge = options.preview_max_edge;
     }
 
-    std::filesystem::path cache_file;
-    if (!options.decode_cache_directory.empty()) {
-      cache_file = decode_cache_path(
-          options.decode_cache_directory,
-          decode_cache_key(path, decode_variant(options, raw)));
-    }
-    if (cache_file.empty() || !read_decode_cache(cache_file, staged.image)) {
-      staged.image = decode_image(path, raw);
-      staged.image.linear_p3 =
-          resample_to_max_edge(std::move(staged.image.linear_p3), options.preview_max_edge);
-      if (!cache_file.empty()) {
-        static_cast<void>(write_decode_cache(cache_file, staged.image,
-                                             options.decode_cache_budget_bytes));
-      }
-    }
+    staged.image = decode_cached_image(path, options, raw);
     staged.decode_ms = milliseconds(start, Clock::now());
     staged.decoded = true;
   } catch (const std::bad_alloc&) {
@@ -262,17 +247,28 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
                                          options.external_gain_report,
                                          options.allow_legacy_external_gain);
     }
-    const auto external_development = external.has_value()
-                                          ? replay_external_development(
-                                                *external, staged.result.input,
-                                                staged.image, options)
-                                          : options.gain;
-    auto gain = external.has_value()
-                    ? make_external_gain_map(
-                          staged.image.linear_p3, std::move(*external),
-                          external_development, staged.image.capture,
-                          staged.image.describe_input())
-                    : render_decoded_image(staged.image, options.gain);
+    GainMapResult gain;
+    if (!options.ai_model_path.empty()) {
+      // The model consumes and retains one shared SDR base: decoded linear P3
+      // for finished SDR, or the fixed neutral development for scene RAW.
+      gain = render_native_model_base(staged.image);
+      auto model_input = make_native_model_input(gain.base_linear);
+      auto prediction = infer_native_model(options.ai_model_path, model_input);
+      apply_native_model_gain_map(gain, model_input, std::move(prediction),
+                                  options.gain.gain_strength, options.ai_post);
+    } else {
+      const auto external_development = external.has_value()
+                                            ? replay_external_development(
+                                                  *external, staged.result.input,
+                                                  staged.image, options)
+                                            : options.gain;
+      gain = external.has_value()
+                 ? make_external_gain_map(
+                       staged.image.linear_p3, std::move(*external),
+                       external_development, staged.image.capture,
+                       staged.image.describe_input())
+                 : render_decoded_image(staged.image, options.gain);
+    }
     // Validate the peak the renderer actually produced. External model
     // metadata arrives after the initial option validation and can otherwise
     // bypass HLG's 1000-nit ceiling.
@@ -296,6 +292,13 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     const auto described = staged.image.describe_input();
     result.input_domain = described.domain;
     result.input_headroom = described.headroom;
+    result.model_development = options.ai_model_path.empty()
+                                   ? "none"
+                                   : native_model_development_kind(
+                                         described.domain);
+    result.model_id = options.ai_model_path.empty()
+                          ? "none"
+                          : std::string(kEmbeddedNativeModelId);
     result.width = gain.base_linear.width;
     result.height = gain.base_linear.height;
     result.exposure_ev = gain.exposure_ev;

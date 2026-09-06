@@ -12,6 +12,8 @@ function(hyperdr_configure_target target)
   target_compile_definitions(${target} PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
   target_compile_definitions(${target}
     PUBLIC HYPERDR_WITH_CODECS=$<IF:$<BOOL:${HYPERDR_WITH_CODECS}>,1,0>)
+  target_compile_definitions(${target}
+    PUBLIC HYPERDR_WITH_NCNN=$<IF:$<BOOL:${HYPERDR_WITH_NCNN}>,1,0>)
   target_compile_options(${target} PRIVATE /W4 /permissive- /utf-8)
   target_compile_options(${target} PRIVATE
     $<$<AND:$<CONFIG:Release>,$<BOOL:${HYPERDR_ENABLE_AVX2}>>:/arch:AVX2>)

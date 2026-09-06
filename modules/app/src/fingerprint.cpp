@@ -1,6 +1,7 @@
 #include "hyperdr/app/fingerprint.hpp"
 
 #include "hyperdr/app/schema.hpp"
+#include "hyperdr/codec/availability.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/foundation/hash.hpp"
 #include "hyperdr/foundation/version.hpp"
@@ -39,6 +40,10 @@ std::string settings_signature(const ConvertOptions& options) {
   std::string out = std::string("hyperdr:") + kVersion +
                     "|render_pipeline=" +
                     std::to_string(kRenderPipelineRevision);
+  // A settings-only signature is insufficient for --skip-existing: changing
+  // the executable or any side-by-side codec DLL can change the bytes while
+  // leaving every user-facing option untouched.
+  out += "|runtime=" + codec_runtime_fingerprint();
   for (const auto& setting : settings()) {
     if (!setting.affects_output_bytes) continue;
     const json::Value value = setting.read(options);
@@ -63,6 +68,22 @@ std::string settings_signature(const ConvertOptions& options) {
     out += sha256_file_hex(options.external_gain_report);
     out += "|allow_legacy_external_gain=";
     out += options.allow_legacy_external_gain ? "1" : "0";
+  }
+  if (!options.ai_model_path.empty()) {
+    out += "|ai_model=";
+    out += path_utf8(options.ai_model_path);
+    out += "|ai_brightness=";
+    out += exact_number_text(options.ai_post.brightness_ev);
+    out += "|ai_contrast=";
+    out += exact_number_text(options.ai_post.contrast);
+    out += "|ai_shadows=";
+    out += exact_number_text(options.ai_post.shadows_ev);
+    out += "|ai_highlights=";
+    out += exact_number_text(options.ai_post.highlights_stops);
+    out += "|ai_hdr_range=";
+    out += exact_number_text(options.ai_post.hdr_range_stops);
+    out += "|ai_expansion_start=";
+    out += exact_number_text(options.ai_post.expansion_start);
   }
   const auto append_raw_file = [&](std::string_view key,
                                    const std::filesystem::path& path) {

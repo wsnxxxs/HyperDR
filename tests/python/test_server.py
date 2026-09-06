@@ -113,7 +113,7 @@ class ServerBoundaryTests(unittest.TestCase):
         handler.headers["Content-Length"] = "0"
         handler.rfile = BytesIO()
         with mock.patch(
-            "apps.panel.hyperdr_panel.handler.api.upload_is_allowed",
+            "apps.panel.hyperdr_panel.handler.job.upload_slot",
             return_value=nullcontext(),
         ), mock.patch(
             "apps.panel.hyperdr_panel.handler.save_upload",
@@ -146,13 +146,12 @@ class ServerBoundaryTests(unittest.TestCase):
         self.assertTrue(server.connection_slots.acquire(blocking=False))
         server.connection_slots.release()
 
-    def test_desktop_loopback_is_secure_context_without_tls_transport(self):
+    def test_desktop_loopback_reports_no_tls_transport_but_takes_native_paths(self):
         with mock.patch.object(server, "PanelServer") as constructor:
             instance = constructor.return_value
             server.build_server("127.0.0.1", 0, "secret-token", "http", desktop=True)
 
         context = instance.context
-        self.assertTrue(context.secure_context_expected)
         self.assertFalse(context.transport_secure)
         self.assertTrue(context.native_path_input)
 

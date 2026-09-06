@@ -166,6 +166,9 @@ void test_fingerprint_covers_exactly_the_byte_affecting_settings() {
   require(hyperdr::settings_signature(base).find("|render_pipeline=") !=
               std::string::npos,
           "the renderer revision is missing from the resume signature");
+  require(hyperdr::settings_signature(base).find("|runtime=binary=") !=
+              std::string::npos,
+          "the running binary is missing from the resume signature");
   for (const auto& setting : hyperdr::settings()) {
     if (setting.affects_output_bytes) {
       require(hyperdr::settings_signature(base).find(std::string(setting.key) + "=") !=

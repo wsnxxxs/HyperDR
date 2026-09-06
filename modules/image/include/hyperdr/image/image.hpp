@@ -32,7 +32,9 @@ struct FloatImage {
 
   [[nodiscard]] static std::size_t checked_size(std::uint32_t w, std::uint32_t h,
                                                 std::uint32_t c) {
-    if (w == 0 || h == 0 || c == 0 || c > 4) {
+    // Five planes are used by the embedded model's RGB + luminance + clipping
+    // feature tensor. Ordinary image paths still use one, three, or four.
+    if (w == 0 || h == 0 || c == 0 || c > 5) {
       throw std::invalid_argument("invalid image dimensions");
     }
     const auto max = static_cast<std::uint64_t>(std::vector<float>{}.max_size());
@@ -49,7 +51,7 @@ struct FloatImage {
   // no pixels) is consistent: it is what the default constructor produces.
   [[nodiscard]] bool is_consistent() const {
     if (width == 0 && height == 0 && channels == 0) return pixels.empty();
-    if (width == 0 || height == 0 || channels == 0 || channels > 4) return false;
+    if (width == 0 || height == 0 || channels == 0 || channels > 5) return false;
     const auto expected = static_cast<std::uint64_t>(width) * height * channels;
     return static_cast<std::uint64_t>(pixels.size()) == expected;
   }
@@ -74,14 +76,6 @@ struct FloatImage {
   }
   [[nodiscard]] float at(std::uint32_t x, std::uint32_t y, std::uint32_t c) const {
     assert(is_consistent() && contains(x, y, c));
-    return pixels[(static_cast<std::size_t>(y) * width + x) * channels + c];
-  }
-
-  // Bounds-checked access for callers holding an image of unverified origin.
-  [[nodiscard]] float checked_at(std::uint32_t x, std::uint32_t y,
-                                 std::uint32_t c) const {
-    require_consistent();
-    if (!contains(x, y, c)) throw std::out_of_range("image sample is out of range");
     return pixels[(static_cast<std::size_t>(y) * width + x) * channels + c];
   }
 };

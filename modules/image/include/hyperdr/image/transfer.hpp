@@ -33,6 +33,10 @@ namespace hyperdr {
 // decoding a 0.1 code as sRGB yields 0.0100 against BT.709's 0.0224 -- 55% too
 // dark. A CICP transfer of 1, 6, 14 or 15 means this curve, and the decoder
 // used to route all four through srgb_eotf.
+//
+// Only bt709_inverse_oetf is on a decode path; this forward curve exists so
+// transfer_test can assert the pair round-trips, which is the property the
+// decoder actually depends on.
 [[nodiscard]] inline float bt709_oetf(float linear) {
   constexpr float kAlpha = 1.099F;
   constexpr float kBeta = 0.018F;

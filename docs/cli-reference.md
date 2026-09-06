@@ -19,6 +19,9 @@ HyperDR convert <file-or-directory> --output <directory>
     [--highlight-recovery blend|reconstruct|clip|unclip]
     [--quality <0..100>] [--depth <8|10>]
     [--preview-max-edge <pixels>] [--fast-preview] [--decode-cache <dir>]
+    [--ai-model embedded] [--ai-brightness <EV>] [--ai-contrast <slope>]
+    [--ai-shadows <EV>] [--ai-highlights <stops>]
+    [--ai-hdr-range <stops>] [--ai-expansion-start <0..1>]
     [--no-verify] [--overwrite|--skip-existing] [--report <file.json>]
 
 HyperDR inspect <file.heic> [--json]
@@ -28,20 +31,23 @@ HyperDR thumbnail <image> --output <preview.jpg> [--max-edge <pixels>]
                           [--highlight-recovery blend|reconstruct|clip|unclip]
 HyperDR preview-frame <image> --output <preview.hpf> [look options]
                           [--preview-max-edge <pixels>] [--fast-preview]
+HyperDR model-gain <image> --ai-model embedded [AI post options]
 HyperDR model-input <image> --output <linear-p3.f32> --report <recipe.json>
                           [--long-side <pixels>] [--half-size] [look options]
 HyperDR curve [look options] [--samples <N>]
 HyperDR schema
 ```
 
-Every setting above is declared once, in one table. `--help`, the command-line
-parser, the resume fingerprint and the report's settings block are all generated
-from it, so a new setting cannot appear in some of those places and not others.
+Every setting above is declared once in the converter's C++ table. `--help`, the
+command-line parser, the resume fingerprint and the report's settings block are
+all generated from it, so those converter surfaces cannot drift apart.
 
 `schema` prints that table as JSON: each setting's key, flag, type, range or
 choices, default, whether it can change the encoded bytes, and its help text.
-`schema/settings.json` is that output, checked in, and the browser panel builds its
-own validation from it instead of carrying a second copy of the vocabulary.
+`schema/settings.json` is that generated output, checked in for the panel
+backend and contract checks. The browser panel has a separate UI schema for
+labels, widgets and request mapping, so update that adapter too when a setting
+is exposed in the browser.
 Regenerate it whenever a setting changes:
 
 ```powershell
@@ -84,6 +90,19 @@ Display-P3 float32 planes. The browser only presents those planes; it no longer
 compresses HDR into an 8-bit JPEG and then tries to recreate the exporter's
 tone and gain-map maths. When an Ultra HDR source cannot be decoded through the
 native path, the packet explicitly reports a degraded SDR fallback.
+
+## Embedded AI model
+
+`--ai-model embedded` replaces the mathematical gain field with the bundled
+native model while retaining the normal SDR development, guided filter, ISO
+gain coding, reconstruction, and encoders. The model receives an in-memory
+linear Display-P3 thumbnail and returns one signed-log2 gain sample per
+stride-16 cell; no Python process or model sidecar is involved.
+
+The six `--ai-*` controls run after inference. They do not change the model
+tensor and are separate from the panel's manual-mode look controls.
+`model-gain` exposes the filtered stride-16 grid as a binary stdout packet for
+panel/diagnostic use.
 
 Recommended photographic conversion:
 
@@ -139,8 +158,10 @@ consequence of covering every setting: sidecars written by earlier builds no
 longer match, so the first batch after an upgrade re-renders once and every
 batch after that skips normally.
 
-`--decode-cache <dir>` stores the decoded, bounded linear image so that manual
-CLI runs differing only in look controls can skip the RAW decode entirely.
+`--decode-cache <dir>` stores the decoded, bounded linear image so that runs
+differing only in look controls can skip the RAW decode entirely. The browser
+panel enables this automatically for native previews; moving a look slider
+reuses the half-size, resampled linear RAW instead of entering LibRaw again.
 
 ## Look controls
 

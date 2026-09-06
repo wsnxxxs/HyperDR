@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(HyperDR VERSION 1.0.0 LANGUAGES CXX)
+project(HyperDR VERSION 1.0.0 LANGUAGES CXX RC)
 
 if(NOT WIN32 OR NOT MSVC)
   message(FATAL_ERROR "HyperDR requires Windows with MSVC")
@@ -34,6 +34,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(HyperDRCompiler)
 include(HyperDRTesting)
 include(HyperDRCodecs)
+include(HyperDRModel)
 
 find_package(Threads REQUIRED)
 
@@ -41,6 +42,8 @@ include(CheckIPOSupported)
 check_ipo_supported(RESULT HYPERDR_IPO_SUPPORTED OUTPUT HYPERDR_IPO_ERROR LANGUAGES CXX)
 
 include(CTest)
+
+hyperdr_configure_model()
 
 add_subdirectory(modules/foundation)
 add_subdirectory(modules/image)
@@ -85,26 +88,11 @@ endif()
 install(DIRECTORY apps/panel/ DESTINATION apps/panel COMPONENT Runtime
   PATTERN "__pycache__" EXCLUDE
   PATTERN "*.pyc" EXCLUDE)
-# The panel's opt-in “优化” action ships its inference code and checkpoint, but
-# deliberately reuses the user's existing PyTorch environment instead of
-# embedding a second CPU/CUDA runtime in every release archive.
-install(FILES
-  HyperDR_Model/infer_gain.py
-  HyperDR_Model/LICENSE
-  DESTINATION HyperDR_Model COMPONENT Runtime)
-install(DIRECTORY HyperDR_Model/hyperdr_ml/
-  DESTINATION HyperDR_Model/hyperdr_ml COMPONENT Runtime
-  PATTERN "__pycache__" EXCLUDE
-  PATTERN "*.pyc" EXCLUDE)
-# Only the deployable checkpoint ships. The retired normalized-v1 `best.pt` is
-# a local rollback artefact, is not in version control, and a release that
-# installed it could not be built from a clean checkout.
-install(FILES HyperDR_Model/checkpoints/production-v3.pt
-              HyperDR_Model/checkpoints/production-v3.json
-              HyperDR_Model/checkpoints/production-v3-training.patch
-  DESTINATION HyperDR_Model/checkpoints COMPONENT Runtime)
-install(FILES HyperDR_Model/dataset/assets/display-p3.icc
-  DESTINATION HyperDR_Model/dataset/assets COMPONENT Runtime)
+hyperdr_install_model_assets()
+# PyTorch checkpoints, optimizer state, virtual environments and private
+# training data are intentionally not installed. The inference-only ONNX and
+# ncnn files remain offline build assets; the release executable contains the
+# fixed ncnn model as Windows resources.
 # The panel derives its settings vocabulary from this file, so it ships too.
 install(FILES schema/settings.json schema/report.json DESTINATION schema COMPONENT Runtime)
 install(FILES Start.bat Setup-HTTPS.bat DESTINATION . COMPONENT Runtime)

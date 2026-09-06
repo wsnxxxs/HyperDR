@@ -37,6 +37,11 @@ The canonical result is `t2-output/t2-report.json`, validated against the fixed
 schema and uploaded together with all intermediate evidence. Until that report
 has `status: pass` on a real macOS 15 run, T2 remains pending.
 
+References to `HyperDR_Model/reports/` in this directory and nearby source
+comments point to local, untracked research records. They are provenance only
+and are not required to verify fixtures or run T2; the executable contract is
+fully contained in this directory.
+
 ## Running it on a borrowed Mac instead of the hosted runner
 
 `run_t2_local.sh` performs the same steps, on the same frozen inputs, with the

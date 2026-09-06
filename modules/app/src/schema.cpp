@@ -402,11 +402,19 @@ void write_inputs(json::Writer& writer) {
   }
   writer.end_object();
   writer.end_object();
+  // The name a file of each detected family is stored under. Emitted rather
+  // than mirrored by hand in the panel, so the rule that renames a `.jpg`
+  // holding HEIC lives in the same header as the family it renames to.
+  writer.begin_object("canonicalExtensions");
+  for (const auto format :
+       {InputFormat::Jpeg, InputFormat::Png, InputFormat::Isobmff}) {
+    writer.member(input_format_name(format), canonical_extension(format));
+  }
+  writer.end_object();
   writer.begin_object("signatures");
   write_signatures(writer, "jpeg", kJpegSignatures);
   write_signatures(writer, "png", kPngSignatures);
   write_signatures(writer, "isobmff", kIsobmffSignatures);
-  write_signatures(writer, "raw", kRawSignatures);
   writer.end_object();
   writer.member("prefixBytes", kSignaturePrefixBytes);
   writer.end_object();

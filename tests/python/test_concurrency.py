@@ -1,9 +1,9 @@
 """Admission control and request deduplication for converter subprocesses.
 
 The panel starts a HyperDR process from three places. Only `/api/run` counted
-them. `/api/curve` and `/api/preview` each kept a cache, which bounds *finished*
-work and says nothing about work in flight: N concurrent misses on one key were
-N processes producing one answer.
+them. `/api/preview` and `/api/model-preview` each kept a cache, which bounds
+*finished* work and says nothing about work in flight: N concurrent misses on
+one key were N processes producing one answer.
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from unittest import mock
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "apps" / "panel"))
 
-from hyperdr_panel import api, curve, job, model, native_preview  # noqa: E402
+from hyperdr_panel import api, job, model, native_preview  # noqa: E402
 from hyperdr_panel.concurrency import (  # noqa: E402
     Budget, Busy, RAW_DECODE_BUDGET, SingleFlight,
 )
@@ -166,33 +166,39 @@ class SingleFlightTests(unittest.TestCase):
         leader.join(5)
 
 
-class CurveSingleFlightTests(unittest.TestCase):
+class PreviewAdmissionTests(unittest.TestCase):
+    """The endpoint boundary: dedup, timeouts and a full budget.
+
+    These used to exercise `/api/curve`, which was the third endpoint to start a
+    converter process. The browser now computes the curve locally, so the same
+    admission machinery is covered through `/api/preview` instead -- it shares
+    the very `SingleFlight` and `Budget` objects the curve path used.
+    """
+
     def setUp(self):
-        curve._CACHE.clear()
+        native_preview._CACHE.clear()
 
     def tearDown(self):
-        curve._CACHE.clear()
+        native_preview._CACHE.clear()
 
     def test_identical_concurrent_requests_run_the_converter_once(self):
         release = threading.Event()
-        runs = []
+        builds = []
         lock = threading.Lock()
 
-        class Completed:
-            returncode = 0
-            stdout = b'{"schema": 1}'
-            stderr = b""
-
-        def fake_run(_argv, **_kwargs):
+        def fake_build(*_args):
             with lock:
-                runs.append(1)
+                builds.append(1)
             release.wait(5)
-            return Completed()
+            return b"packet", {"width": 1, "height": 1}
 
         results = []
-        with mock.patch.object(curve.subprocess, "run", fake_run):
+        with tempfile.TemporaryDirectory() as directory,                 mock.patch.object(native_preview, "_build", fake_build):
+            source = Path(directory) / "photo.jpg"
+            source.write_bytes(b"jpeg")
+
             def caller():
-                results.append(curve.look_curve("HyperDR", {}, 33))
+                results.append(native_preview.preview_for(source, {}, 960))
 
             threads = [threading.Thread(target=caller) for _ in range(4)]
             for thread in threads:
@@ -202,27 +208,35 @@ class CurveSingleFlightTests(unittest.TestCase):
             for thread in threads:
                 thread.join(10)
 
-        self.assertEqual(len(runs), 1, "four concurrent curve requests, one process")
-        self.assertEqual(results, [{"schema": 1}] * 4)
+        self.assertEqual(len(builds), 1, "four concurrent previews, one process")
+        self.assertEqual(results, [(b"packet", {"width": 1, "height": 1})] * 4)
 
     def test_a_timeout_becomes_a_reportable_error_not_a_traceback(self):
-        def fake_run(argv, **kwargs):
-            raise subprocess.TimeoutExpired(argv, 30)
+        # `_build` converts TimeoutExpired to ValueError; this is the other half
+        # of that contract -- the endpoint must turn it into a JSON error rather
+        # than let a SubprocessError escape as a dropped connection.
+        def fake_preview_for(*_args, **_kwargs):
+            raise ValueError("native preview timed out")
 
-        with mock.patch.object(api, "detect_exe", lambda: "HyperDR"), \
-                mock.patch.object(curve.subprocess, "run", fake_run):
-            response = api.curve(api.Context(output_selections={}),
-                                 {"options": {}, "samples": 33})
-        self.assertEqual(response.status, 400)
-        self.assertIn("超时", response.payload["error"])
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "photo.jpg"
+            source.write_bytes(b"jpeg")
+            with mock.patch.object(api.session, "input_path", lambda _id: source),                     mock.patch.object(api.session, "input_digest", lambda _id: "d"),                     mock.patch.object(api, "preview_for", fake_preview_for):
+                response = api.preview(api.Context(output_selections={}),
+                                       {"id": ["session"], "edge": ["960"]})
+        self.assertEqual(response.status, 422)
+        self.assertIn("timed out", response.payload["error"])
 
     def test_a_full_budget_is_reported_as_busy(self):
         replacement = Budget(1, "busy")
-        with mock.patch.object(api, "detect_exe", lambda: "HyperDR"), \
-                mock.patch.object(curve, "_BUDGET", replacement):
-            with replacement.hold():
-                response = api.curve(api.Context(output_selections={}),
-                                     {"options": {}, "samples": 41})
+        with tempfile.TemporaryDirectory() as directory,                 mock.patch.object(native_preview, "RAW_DECODE_BUDGET", replacement):
+            # A RAW suffix is what puts the request under the decode budget at
+            # all; a JPEG deliberately bypasses it.
+            source = Path(directory) / "photo.dng"
+            source.write_bytes(b"raw")
+            with mock.patch.object(api.session, "input_path", lambda _id: source),                     mock.patch.object(api.session, "input_digest", lambda _id: "d"),                     replacement.hold():
+                response = api.preview(api.Context(output_selections={}),
+                                       {"id": ["session"], "edge": ["960"]})
         self.assertEqual(response.status, 503)
         self.assertIn("busy", response.payload["error"])
 

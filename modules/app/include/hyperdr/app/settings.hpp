@@ -4,6 +4,7 @@
 
 #include "hyperdr/codec/encoding.hpp"
 #include "hyperdr/codec/image_source.hpp"
+#include "hyperdr/gainmap/native_model.hpp"
 #include "hyperdr/gainmap/types.hpp"
 
 #include <cstdint>
@@ -46,10 +47,20 @@ struct ConvertOptions {
   std::filesystem::path external_gain_report;
   // Explicitly re-enable the frozen v1 normalized sidecar contract.
   bool allow_legacy_external_gain{false};
+  // Enables the embedded in-process AI model. The runtime receives the
+  // existing linear Display-P3 SDR thumbnail directly; no model-input/gain
+  // sidecars are written. The shipping model adapter is registered during
+  // startup; the path value is only a compatibility seam for development
+  // adapters and normally contains the "embedded" sentinel.
+  std::filesystem::path ai_model_path;
+  NativeModelPostOptions ai_post;
   // Optional directory for cached decoded buffers. Interactive preview reruns
   // change only post-decode look controls, so caching the decode turns each
   // slider move from a full RAW read into a file copy.
   std::filesystem::path decode_cache_directory;
+  // Optional digest already computed by the panel while ingesting the image.
+  // A standalone CLI run leaves it empty and the cache computes the digest.
+  std::string decode_cache_source_sha256;
   std::uint64_t decode_cache_budget_bytes{2ULL * 1024ULL * 1024ULL * 1024ULL};
 };
 
@@ -75,7 +86,7 @@ struct FileResult {
   std::uint32_t decoded_width{};
   std::uint32_t decoded_height{};
   // Unambiguous crop vocabulary for model bindings. target_*/decoded_* remain
-  // as compatibility aliases in schema 7.
+  // as compatibility aliases carried forward from schema 7.
   std::uint32_t requested_crop_width{};
   std::uint32_t requested_crop_height{};
   std::uint32_t delivered_crop_width{};
@@ -94,6 +105,12 @@ struct FileResult {
   // Unknown means the file was skipped or failed before a decoder could state
   // which renderer it would have used. It is not a rendering domain.
   InputDomain input_domain{InputDomain::kUnknown};
+  // Native-model input/base preparation, or "none" for the manual/external
+  // paths and failures before model preparation.
+  std::string model_development{"none"};
+  // Frozen checkpoint identity behind the embedded runtime, or "none" when
+  // this file did not use native model inference.
+  std::string model_id{"none"};
   // 1.0 is a schema-safe sentinel when input_domain is unknown; consumers must
   // read input_domain before interpreting this value.
   float input_headroom{1.0F};

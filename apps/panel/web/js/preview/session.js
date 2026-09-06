@@ -10,6 +10,7 @@
  * separate native-path entry point that is only enabled by the desktop server.
  */
 
+import { t } from "../i18n/index.js";
 import { api } from "../core/api.js";
 import { store } from "../core/store.js";
 
@@ -25,14 +26,14 @@ function preflight(file) {
     const dot = file.name.lastIndexOf(".");
     const suffix = dot > 0 ? file.name.slice(dot).toLowerCase() : "";
     if (!extensions.includes(suffix)) {
-      return "不支持此格式；请选择 LibRaw RAW、JPEG、PNG、HEIC、HEIF 或 AVIF。";
+      return t("err.unsupported");
     }
   }
   const limit = Number(capabilities?.maxUploadMB);
   if (Number.isFinite(limit) && limit > 0 && file.size > limit * 1024 * 1024) {
-    return `文件超过上传大小限制（最大 ${limit} MB）。`;
+    return t("err.tooLarge", { limit });
   }
-  if (file.size === 0) return "上传内容为空。";
+  if (file.size === 0) return t("err.emptyFile");
   return null;
 }
 
@@ -74,7 +75,7 @@ export function createUploader({ onProgress, onReady, onError }) {
       // The session may still be usable -- the failure could be this one file.
       // Keep any previously published image visible and current in the store.
       // A user-aborted upload is not an error and must not clear the stage.
-      onError(aborted ? "已取消上传。" : error.message || "上传失败。", {
+      onError(aborted ? t("err.uploadCancelledBy") : error.message || t("err.uploadFailed"), {
         preserveCurrent: Boolean(previous.file),
         cancelled: aborted,
       });
@@ -109,7 +110,7 @@ export function createUploader({ onProgress, onReady, onError }) {
       onProgress(1);
       await onReady();
     } catch (error) {
-      onError(aborted ? "已取消载入。" : error.message || "无法载入桌面端文件。", {
+      onError(aborted ? t("err.loadCancelled") : error.message || t("err.nativeInput"), {
         preserveCurrent: Boolean(previous.file),
         cancelled: aborted,
       });

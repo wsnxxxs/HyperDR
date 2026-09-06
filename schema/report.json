@@ -181,6 +181,29 @@
             8,
             10
           ]
+        },
+        "ai_model": {
+          "type": "string"
+        },
+        "ai_post": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "brightness_ev",
+            "contrast",
+            "shadows_ev",
+            "highlights_stops",
+            "hdr_range_stops",
+            "expansion_start"
+          ],
+          "properties": {
+            "brightness_ev": {"type": "number"},
+            "contrast": {"type": "number"},
+            "shadows_ev": {"type": "number"},
+            "highlights_stops": {"type": "number"},
+            "hdr_range_stops": {"type": "number"},
+            "expansion_start": {"type": "number"}
+          }
         }
       }
     },
@@ -252,6 +275,8 @@
         "decode_degradation_reasons",
         "input_domain",
         "input_headroom",
+        "model_development",
+        "model_id",
         "width",
         "height",
         "exposure_ev",
@@ -335,6 +360,19 @@
         "input_headroom": {
           "type": "number",
           "minimum": 1
+        },
+        "model_development": {
+          "type": "string",
+          "enum": [
+            "none",
+            "display-p3-passthrough",
+            "raw-neutral-v1",
+            "display-hdr-split"
+          ]
+        },
+        "model_id": {
+          "type": "string",
+          "minLength": 1
         },
         "decode_degradation_reasons": {
           "type": "array",

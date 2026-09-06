@@ -11,11 +11,9 @@ semantic versioning; dates use ISO 8601.
   bad marker; it now decodes, and the panel stores it under the extension its
   bytes actually are. Which files are offered at all is still decided by
   extension, so a conversion cannot pick up something that is not an image.
-- Fixed the panel refusing several RAW formats it offered in its own file
-  dialog. Panasonic RW2, Canon CRW, Minolta MRW, two of the three Olympus ORF
-  layouts and Phase One IIQ were all rejected on upload as "contents do not
-  match the extension" because the panel's header check knew only five of the
-  fourteen RAW container signatures.
+- Fixed the panel refusing valid RAW formats based on an incomplete file-header
+  table. RAW extensions now route directly to LibRaw, which is the only layer
+  that can distinguish the many TIFF- and ISO-BMFF-based camera formats.
 - The list of supported input formats now has one definition, emitted by
   `HyperDR schema` and read by the panel, the native file dialog and the
   browser. It previously existed as five hand-maintained copies.

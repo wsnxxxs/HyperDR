@@ -26,6 +26,12 @@ namespace hyperdr {
 // matrix, whose luminance row equals the P3 coefficients used elsewhere.
 // Colours outside P3 produce a negative component and are clamped to the P3
 // gamut boundary here rather than being pre-clipped to Rec.709 during decode.
+//
+// No production caller: raw_decoder.cpp asks LibRaw for ProPhoto
+// (output_color = 4) rather than XYZ, because XYZ's 1.0888 Z row sum clips
+// neutral highlights before float conversion. This conversion is what the XYZ
+// path needed, and only color_dither_test still exercises it. Delete it with
+// that test if the XYZ option is never revisited.
 [[nodiscard]] inline std::array<float, 3> xyz_d65_to_linear_p3(float X, float Y,
                                                                float Z) {
   return {std::max(0.0F, 2.4934969F * X - 0.9313836F * Y - 0.4027108F * Z),

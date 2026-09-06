@@ -12,6 +12,7 @@
     "libjpeg-turbo",
     "libpng",
     "lcms",
+    "ncnn",
     {
       "name": "libheif",
       "features": [ "hevc" ]

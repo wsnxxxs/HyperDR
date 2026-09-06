@@ -1,0 +1,7 @@
+// Embedded frozen ncnn model resources.  The paths are resolved by CMake so
+// the resource compiler reads the exact bytes selected by HyperDRModel.cmake.
+#define HYPERDR_NCNN_PARAM_RESOURCE 101
+#define HYPERDR_NCNN_BIN_RESOURCE 102
+
+HYPERDR_NCNN_PARAM_RESOURCE RCDATA "@HYPERDR_MODEL_NCNN_PARAM@"
+HYPERDR_NCNN_BIN_RESOURCE RCDATA "@HYPERDR_MODEL_NCNN_BIN@"

@@ -306,6 +306,9 @@ struct PngDecodeOutput {
   std::size_t rgb_size{};
   unsigned char* icc{};
   unsigned int icc_size{};
+  int cicp_primaries{codec::kCicpPrimariesUnspecified};
+  int cicp_transfer{codec::kCicpTransferUnspecified};
+  bool has_cicp{false};
   unsigned int width{};
   unsigned int height{};
   int bits{};
@@ -317,6 +320,33 @@ struct PngDecodeOutput {
   bool budget_limited{false};
   char message[256]{};
 };
+
+bool read_png_cicp(const unsigned char* data, std::size_t size,
+                   int* primaries, int* transfer) {
+  constexpr std::array<unsigned char, 8> kPngSignature{
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a};
+  if (data == nullptr || size < kPngSignature.size() ||
+      !std::equal(kPngSignature.begin(), kPngSignature.end(), data)) {
+    return false;
+  }
+  std::size_t offset = kPngSignature.size();
+  while (offset + 12U <= size) {
+    const auto length = (static_cast<std::uint32_t>(data[offset]) << 24U) |
+                        (static_cast<std::uint32_t>(data[offset + 1]) << 16U) |
+                        (static_cast<std::uint32_t>(data[offset + 2]) << 8U) |
+                        static_cast<std::uint32_t>(data[offset + 3]);
+    if (length > size - offset - 12U) return false;
+    const auto* type = data + offset + 4U;
+    if (std::equal(type, type + 4, "cICP") && length >= 4U) {
+      *primaries = data[offset + 8U];
+      *transfer = data[offset + 9U];
+      return true;
+    }
+    offset += 12U + length;
+    if (std::equal(type, type + 4, "IEND")) break;
+  }
+  return false;
+}
 
 void png_read_from_memory(png_structp png, png_bytep target, png_size_t length) {
   auto* state = static_cast<PngReadState*>(png_get_io_ptr(png));
@@ -344,6 +374,8 @@ int png_decode_rgb(const unsigned char* data, std::size_t size,
     set_message(out->message, sizeof(out->message), "not a PNG file");
     return 1;
   }
+  out->has_cicp = read_png_cicp(data, size, &out->cicp_primaries,
+                                &out->cicp_transfer);
   png_structp png =
       png_create_read_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, png_warn);
   if (png == nullptr) {
@@ -560,6 +592,15 @@ DecodedImage decode_png(const std::vector<std::uint8_t>& bytes,
       png_decode_rgb(bytes.data(), bytes.size(), preview_max_edge, &output);
   const MallocBytes rgb(output.rgb);
   const MallocBytes icc(output.icc);
+  if (output.has_cicp) {
+    if (!codec::cicp_primaries_unspecified(output.cicp_primaries)) {
+      color.primaries = output.cicp_primaries;
+    }
+    if (output.cicp_transfer != codec::kCicpTransferReserved &&
+        output.cicp_transfer != codec::kCicpTransferUnspecified) {
+      color.transfer = output.cicp_transfer;
+    }
+  }
   if (failed != 0) {
     throw std::runtime_error(std::string("PNG decode: ") + output.message);
   }
@@ -572,6 +613,12 @@ DecodedImage decode_png(const std::vector<std::uint8_t>& bytes,
   auto result = from_interleaved_rgb(rgb.get(), output.width, output.height,
                                      stride, output.bits, color);
   result.decode.resolution_reduced = output.budget_limited;
+  // cICP describes the transfer function's available range. Keep the same
+  // ICC-first rule as the other raster decoders: an ICC profile can transform
+  // arbitrary colour, but it does not declare HDR headroom.
+  result.hdr_headroom =
+      color.icc.empty() ? transfer_headroom(color.transfer) : 1.0F;
+  result.domain = display_referred_domain(result.hdr_headroom);
   return result;
 }
 
@@ -637,16 +684,9 @@ DecodedImage decode_heif_rgb_handle(const heif_context* context,
                                     bool normalize_exif = true,
                                     std::uint16_t* exif_orientation = nullptr) {
   SourceColor color;
-  heif_color_profile_nclx* profile_raw = nullptr;
-  const auto profile_error = heif_image_handle_get_nclx_color_profile(handle, &profile_raw);
-  const bool has_nclx = profile_error.code == heif_error_Ok && profile_raw != nullptr;
-  if (has_nclx) {
-    color.primaries = profile_raw->color_primaries;
-    color.transfer = profile_raw->transfer_characteristics;
-    heif_nclx_color_profile_free(profile_raw);
-  } else if (heif_image_handle_get_color_profile_type(handle) ==
-             heif_color_profile_type_prof) {
-    // No CICP, but an ICC profile: read it rather than assuming Rec.709/sRGB.
+  const auto profile_type = heif_image_handle_get_color_profile_type(handle);
+  if (profile_type == heif_color_profile_type_prof ||
+      profile_type == heif_color_profile_type_rICC) {
     const std::size_t size = heif_image_handle_get_raw_color_profile_size(handle);
     if (size != 0 && size <= (4U << 20U)) {
       color.icc.resize(size);
@@ -655,6 +695,17 @@ DecodedImage decode_heif_rgb_handle(const heif_context* context,
         color.icc.clear();
       }
     }
+  }
+  if (color.icc.empty()) {
+    heif_color_profile_nclx* profile_raw = nullptr;
+    const auto profile_error =
+        heif_image_handle_get_nclx_color_profile(handle, &profile_raw);
+    const bool has_nclx = profile_error.code == heif_error_Ok && profile_raw != nullptr;
+    if (has_nclx) {
+      color.primaries = profile_raw->color_primaries;
+      color.transfer = profile_raw->transfer_characteristics;
+    }
+    if (profile_raw != nullptr) heif_nclx_color_profile_free(profile_raw);
   }
 
   const bool wide = heif_image_handle_get_luma_bits_per_pixel(handle) > 8;

@@ -2,8 +2,9 @@
 # -*- coding: utf-8 -*-
 """hyperdr GUI launcher.
 
-Starts a tiny local web server and opens your browser for a control panel over
-the real hyperdr converter. Pure Python standard library, no pip installs.
+Starts a tiny local web server for a control panel over the real hyperdr
+converter. The server prints its URL; opening a browser is left to the caller.
+Pure Python standard library, no pip installs.
 
 Usage:
     python hyperdr_gui.py
@@ -20,7 +21,7 @@ The implementation lives in the ``hyperdr_panel`` package next to this file:
     session     - one image in, one result out, and their expiry
     job         - the running conversion and the log the browser polls
     native_preview - validated linear-P3 float preview packets and their cache
-    model       - the optional HyperDR_Model gain-map inference run
+    model       - native embedded gain-model capability and packet adapter
     curve       - the exporter's tone curve, fetched from the binary
     concurrency - process admission control shared by preview, model, and curve
     picker      - native tkinter folder dialog (spawned as a subprocess)
@@ -28,7 +29,9 @@ The implementation lives in the ``hyperdr_panel`` package next to this file:
     security    - tokens, login throttling, response headers
     handler     - HTTP request handling and routing
     server      - ports, TLS, addresses, startup
-The front-end is a single source of truth in ``web/``.
+The browser front-end lives in ``web/``. Its UI schema is an adapter for labels,
+widgets and request mapping; converter vocabulary validation comes from the
+generated ``schema/settings.json`` consumed by the Python backend.
 """
 from __future__ import annotations
 

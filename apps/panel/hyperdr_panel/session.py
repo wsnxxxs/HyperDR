@@ -26,6 +26,7 @@ import uuid
 from pathlib import Path
 
 from .config import IS_FROZEN, REPO_ROOT
+from .digest import sha256_file
 from . import formats
 from .formats import (CANONICAL_EXTENSIONS, PREFIX_BYTES, RAW_INPUT_EXTENSIONS,
                       SUPPORTED_EXTENSIONS)
@@ -126,17 +127,16 @@ def _classify_input(path: Path, suffix: str) -> str:
     the format and the name is corrected to match, while a file whose contents
     are not a supported image at all is still refused, extension or no.
 
-    RAW keeps the strict form, because it has to. Most RAW containers *are*
-    TIFF, so a signature cannot say which RAW a file is; the extension does that
-    and the header is only asked to confirm it is a RAW at all. Its table also
-    covers all fourteen container layouts now, where the old one knew five and
-    turned away every Panasonic RW2, Canon CRW and Minolta MRW.
+    RAW takes the opposite path. Most RAW containers are TIFF and CR3 shares
+    ISO-BMFF with HEIC, so a prefix cannot validate the claim. The extension
+    routes it to LibRaw and the decoder remains the authority on its contents.
     """
-    header = _read_header(path)
     if suffix in RAW_INPUT_EXTENSIONS:
-        if not formats.raw_signature_ok(header):
-            raise ValueError("文件内容不是 RAW 图像，与扩展名 %s 不符。" % suffix)
+        # RAW headers are not an identification scheme: most formats are TIFF,
+        # while CR3 shares ISO-BMFF with HEIC/AVIF. The extension selects LibRaw
+        # and LibRaw reports whether the camera file itself is valid.
         return suffix
+    header = _read_header(path)
     detected = formats.detect_format(header)
     if detected is None:
         raise ValueError(
@@ -144,14 +144,6 @@ def _classify_input(path: Path, suffix: str) -> str:
     if formats.extension_format(suffix) == detected:
         return suffix
     return CANONICAL_EXTENSIONS[detected]
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def input_digest(session_id: str) -> str:
@@ -162,7 +154,7 @@ def input_digest(session_id: str) -> str:
     if (cached is not None and cached[0] == source
             and cached[1] == stat.st_mtime_ns and cached[2] == stat.st_size):
         return cached[3]
-    digest = _sha256(source)
+    digest = sha256_file(source)
     _INPUT_DIGESTS[session_id] = (source, stat.st_mtime_ns, stat.st_size, digest)
     return digest
 

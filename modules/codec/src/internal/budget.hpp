@@ -5,9 +5,18 @@
 
 namespace hyperdr::codec {
 
-inline constexpr std::uint64_t kMaxRasterPixels = 32ULL * 1024ULL * 1024ULL;
+// The product supports raster inputs up to 11656x8742 in either orientation.
+// Keep the dimensions explicit: an area-only check would accept an image with
+// one axis beyond the supported decoder geometry.
+inline constexpr std::uint64_t kMaxRasterWidth = 11656ULL;
+inline constexpr std::uint64_t kMaxRasterHeight = 8742ULL;
+inline constexpr std::uint64_t kMaxRasterPixels =
+    kMaxRasterWidth * kMaxRasterHeight;
+// The raster pipeline's working-set estimate is 15 bytes per input pixel. It
+// must cover the configured product limit, otherwise a valid 36MP input would
+// still be reduced before the export-resolution check can see it.
 inline constexpr std::uint64_t kMaxRasterPeakBytes =
-    512ULL * 1024ULL * 1024ULL;
+    kMaxRasterPixels * 15ULL;
 
 // RAW has a different contract from ordinary compressed rasters. A full export
 // must preserve the input's photographic dimensions, so its admission limit is
@@ -86,7 +95,12 @@ inline constexpr std::uint64_t kMaxRawPixels =
 
 [[nodiscard]] inline bool raster_budget_ok(std::uint64_t width,
                                            std::uint64_t height) {
-  if (!pixel_count_ok(width, height, kMaxRasterPixels)) return false;
+  const bool dimensions_ok =
+      (width <= kMaxRasterWidth && height <= kMaxRasterHeight) ||
+      (height <= kMaxRasterWidth && width <= kMaxRasterHeight);
+  if (!dimensions_ok || !pixel_count_ok(width, height, kMaxRasterPixels)) {
+    return false;
+  }
   const auto pixels = width * height;
   return pixels <= kMaxRasterPixels &&
          pixels <= kMaxRasterPeakBytes / 15U;

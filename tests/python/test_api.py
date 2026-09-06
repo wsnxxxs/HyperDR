@@ -17,7 +17,7 @@ from unittest import mock
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "apps" / "panel"))
 
-from hyperdr_panel import api, curve, job, session  # noqa: E402
+from hyperdr_panel import api, job, session  # noqa: E402
 
 JPEG = b"\xff\xd8\xff" + b"x" * 64
 
@@ -84,16 +84,27 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.payload["argv"][0], "HyperDR")
         self.assertIn("--contrast", response.payload["command"])
 
-    def test_model_command_preview_uses_model_strength_and_external_gain(self):
+    def test_model_command_preview_uses_native_model_and_post_flags(self):
         response = api.command_preview(self.context, {"options": {
             "useModel": True,
             "modelStrength": 1.0,
             "hdrStrength": 0.4,
+            "aiBrightness": 0.2,
+            "aiContrast": 1.15,
+            "aiShadows": -0.25,
+            "aiHighlights": 0.35,
+            "aiHdrRange": 2.2,
+            "aiExpansionStart": 0.4,
         }})
         argv = response.payload["argv"]
         self.assertEqual(argv[argv.index("--gain-strength") + 1], "1")
-        self.assertIn("--external-gain", argv)
-        self.assertIn("--external-gain-report", argv)
+        self.assertEqual(argv[argv.index("--ai-model") + 1], "embedded")
+        for flag, value in {
+                "--ai-brightness": "0.2", "--ai-contrast": "1.15",
+                "--ai-shadows": "-0.25", "--ai-highlights": "0.35",
+                "--ai-hdr-range": "2.2", "--ai-expansion-start": "0.4",
+        }.items():
+            self.assertEqual(argv[argv.index(flag) + 1], value)
         for flag in ("--look", "--contrast", "--vibrance", "--pop",
                      "--headroom-max", "--exposure-bias", "--expansion-start",
                      "--area-coverage", "--exposure", "--headroom"):
@@ -125,62 +136,43 @@ class ApiTests(unittest.TestCase):
     def test_run_keeps_the_mathematical_path_until_model_is_requested(self):
         session_id = self._session_with_image()
         with mock.patch.object(api, "detect_exe", return_value="HyperDR"), \
-                mock.patch.object(api.model, "load_config") as load_model, \
                 mock.patch.object(job, "start", return_value="job-1"):
             response = api.run(self.context, {
                 "sessionId": session_id,
                 "options": {"useModel": False},
             })
         self.assertEqual(response.status, 200)
-        load_model.assert_not_called()
 
-    def test_run_uses_model_only_after_explicit_optimization(self):
+    def test_run_refuses_model_mode_when_the_model_is_disabled(self):
         session_id = self._session_with_image()
-        output = session.session_dir(session_id, "output")
-        gain = output / ".model" / "model-gain.f32"
-        report = output / ".model" / "model-gain.json"
         with mock.patch.object(api, "detect_exe", return_value="HyperDR"), \
-                mock.patch.object(api.model, "load_config", return_value=object()), \
-                mock.patch.object(
-                    api.model, "build_commands",
-                    return_value=([["model"]], gain, report),
-                ) as build_model, \
+                mock.patch.object(api.model, "status", return_value={
+                    "enabled": False, "ready": False, "reason": "disabled",
+                }), \
+                mock.patch.object(job, "start") as start:
+            response = api.run(self.context, {
+                "sessionId": session_id,
+                "options": {"useModel": True},
+            })
+        self.assertEqual(response.status, 400)
+        start.assert_not_called()
+
+    def test_run_uses_native_model_without_preparation_commands(self):
+        session_id = self._session_with_image()
+        with mock.patch.object(api, "detect_exe", return_value="HyperDR"), \
+                mock.patch.object(api.model, "status", return_value={
+                    "enabled": True, "ready": True,
+                }), \
                 mock.patch.object(job, "start", return_value="job-1") as start:
             response = api.run(self.context, {
                 "sessionId": session_id,
                 "options": {"useModel": True, "modelStrength": 0.65},
             })
         self.assertEqual(response.status, 200)
-        build_model.assert_called_once()
-        self.assertEqual(start.call_args.kwargs["pre_commands"], [["model"]])
+        self.assertNotIn("pre_commands", start.call_args.kwargs)
         argv = start.call_args.args[0]
+        self.assertEqual(argv[argv.index("--ai-model") + 1], "embedded")
         self.assertEqual(argv[argv.index("--gain-strength") + 1], "0.65")
-
-    def test_run_reuses_matching_preview_inference(self):
-        session_id = self._session_with_image()
-        output = session.session_dir(session_id, "output")
-        preview_model = output / ".model-preview"
-        preview_model.mkdir()
-        gain = preview_model / "model-gain.f32"
-        report = preview_model / "model-gain.json"
-        gain.write_bytes(b"gain")
-        report.write_text("{}", encoding="utf-8")
-        with mock.patch.object(api, "detect_exe", return_value="HyperDR"), \
-                mock.patch.object(api.model, "load_config", return_value=object()), \
-                mock.patch.object(api.model, "cached_inference",
-                                  return_value=(b"gain", {})), \
-                mock.patch.object(api.model, "build_commands") as build_model, \
-                mock.patch.object(job, "start", return_value="job-1") as start:
-            response = api.run(self.context, {
-                "sessionId": session_id,
-                "options": {"useModel": True},
-            })
-        self.assertEqual(response.status, 200)
-        build_model.assert_not_called()
-        self.assertEqual(start.call_args.kwargs["pre_commands"], [])
-        argv = start.call_args.args[0]
-        self.assertEqual(Path(argv[argv.index("--external-gain") + 1]), gain)
-        self.assertEqual(Path(argv[argv.index("--external-gain-report") + 1]), report)
 
     def test_model_strength_is_bounded(self):
         session_id = self._session_with_image()
@@ -194,13 +186,12 @@ class ApiTests(unittest.TestCase):
     def test_model_preview_returns_the_float_grid_contract(self):
         session_id = self._session_with_image()
         gain = b"\x00\x00\x00\x00" * 6
-        report = {
-            "gain_grid_size": [3, 2],
-            "metadata_gain_max_stops": 3.0,
-        }
+        report = {"width": 3, "height": 2, "max_stops": 3.0}
         with mock.patch.object(api, "detect_exe", return_value="HyperDR"), \
-                mock.patch.object(api.model, "load_config", return_value=object()), \
-                mock.patch.object(api.model, "infer_preview", return_value=(gain, report)):
+                mock.patch.object(api.model, "status", return_value={
+                    "enabled": True, "ready": True,
+                }), \
+                mock.patch.object(api.model, "native_model_gain", return_value=(gain, report)):
             response = api.model_preview(self.context, {
                 "sessionId": session_id,
                 "highlightRecovery": "blend",
@@ -234,12 +225,15 @@ class ApiTests(unittest.TestCase):
             })
         self.assertEqual(cancelled.status, 499)
 
-    def test_preview_reports_missing_model_artifacts_as_conflict(self):
+    def test_preview_reports_native_model_unavailability_as_conflict(self):
         session_id = self._session_with_image()
-        response = api.preview(self.context, {
-            "id": [session_id], "edge": ["512"],
-            "options": ['{"useModel":true}'],
-        })
+        with mock.patch.object(api.model, "status", return_value={
+                "enabled": False, "ready": False, "reason": "disabled",
+        }):
+            response = api.preview(self.context, {
+                "id": [session_id], "edge": ["512"],
+                "options": ['{"useModel":true}'],
+            })
         self.assertEqual(response.status, 409)
 
     def test_a_busy_converter_is_reported_as_too_many_requests(self):
@@ -311,18 +305,14 @@ class ApiTests(unittest.TestCase):
             response = endpoint(self.context, {"id": ["../../etc"]})
             self.assertEqual(response.status, 404, endpoint.__name__)
 
-    # --- curve ------------------------------------------------------------ #
+    # --- preview parameters ----------------------------------------------- #
 
-    def test_curve_validates_the_sample_count(self):
-        with mock.patch.object(api, "detect_exe", return_value="HyperDR"):
-            for samples in (1, 5000):
-                self.assertEqual(api.curve(self.context, {"samples": samples}).status, 400, samples)
-
-    def test_curve_timeout_is_converted_to_a_request_error(self):
-        with mock.patch.object(api, "detect_exe", return_value="HyperDR"), \
-                mock.patch.object(curve.subprocess, "run",
-                                  side_effect=subprocess.TimeoutExpired(["HyperDR"], 30)):
-            self.assertEqual(api.curve(self.context, {}).status, 400)
+    def test_preview_validates_the_requested_edge(self):
+        # Rejected before the session id is resolved, so a nonsense edge reads
+        # as a bad request rather than an expired upload.
+        for edge in ("319", str(api.MAX_EDGE + 1), "not-a-number"):
+            response = api.preview(self.context, {"id": ["x"], "edge": [edge]})
+            self.assertEqual(response.status, 400, edge)
 
     # --- log -------------------------------------------------------------- #
 

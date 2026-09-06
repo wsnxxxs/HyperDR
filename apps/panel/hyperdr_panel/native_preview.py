@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import contextlib
-import hashlib
 import json
 import os
 import subprocess
@@ -13,6 +12,7 @@ from pathlib import Path
 
 from .command import build_preview_frame_argv
 from .concurrency import RAW_DECODE_BUDGET, SingleFlight
+from .digest import sha256_file
 from .executable import detect_exe
 from .formats import RAW_INPUT_EXTENSIONS
 
@@ -38,9 +38,13 @@ class PreviewCancelled(ValueError):
 class _PreviewCall:
     """Cancellation state shared by the request thread and its CLI process."""
 
-    def __init__(self, source_key: str, key: tuple) -> None:
+    def __init__(self, source_key: str, key: tuple,
+                 decode_cache: Path | None = None,
+                 source_digest: str | None = None) -> None:
         self.source_key = source_key
         self.key = key
+        self.decode_cache = decode_cache
+        self.source_digest = source_digest
         self.cancel = threading.Event()
         self.process: subprocess.Popen | None = None
 
@@ -83,14 +87,6 @@ def _unregister_call(call: _PreviewCall) -> None:
     with _ACTIVE_LOCK:
         if _ACTIVE.get(call.source_key) is call:
             _ACTIVE.pop(call.source_key, None)
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _remove_output_artifacts(output: Path) -> None:
@@ -162,7 +158,10 @@ def _build(source: Path, options: dict, max_edge: int,
     output = Path(name)
     _remove_output_artifacts(output)
     try:
-        argv = build_preview_frame_argv(exe, source, output, options, max_edge)
+        argv = build_preview_frame_argv(
+            exe, source, output, options, max_edge,
+            decode_cache=call.decode_cache if call is not None else None,
+            source_digest=call.source_digest if call is not None else None)
         # Keep the small internal helper usable by diagnostics/tests that call
         # it directly. Live requests always pass a call object and use the
         # cancellable Popen path below.
@@ -245,15 +244,16 @@ def _cache_put(key: tuple, value: tuple[bytes, dict]) -> None:
 
 
 def preview_for(source: Path, options: dict, max_edge: int = MAX_EDGE,
-                source_digest: str | None = None) -> tuple[bytes, dict]:
+                source_digest: str | None = None,
+                decode_cache: Path | None = None) -> tuple[bytes, dict]:
     """Return an exact native SDR-base/HDR float frame and its metadata."""
     edge = max(320, min(MAX_EDGE, int(max_edge)))
     stat = source.stat()
-    source_digest = source_digest or _sha256(source)
+    source_digest = source_digest or sha256_file(source)
     stable_options = json.dumps(
         options, sort_keys=True, separators=(",", ":"), default=str)
     external_digests = tuple(
-        (name, _sha256(Path(options[name])))
+        (name, sha256_file(Path(options[name])))
         for name in ("external_gain", "external_gain_report")
         if options.get(name)
     )
@@ -268,7 +268,7 @@ def preview_for(source: Path, options: dict, max_edge: int = MAX_EDGE,
     _cancel_superseded(source_key, key)
 
     def produce():
-        call = _PreviewCall(source_key, key)
+        call = _PreviewCall(source_key, key, decode_cache, source_digest)
         _register_call(call)
         try:
             # Raster previews do not use LibRaw's large sensor-domain working
@@ -276,7 +276,10 @@ def preview_for(source: Path, options: dict, max_edge: int = MAX_EDGE,
             # slider move from producing a misleading "RAW memory occupied"
             # error while another request is decoding a camera file.
             is_raw = source.suffix.lower() in RAW_INPUT_EXTENSIONS
-            slot = RAW_DECODE_BUDGET.hold(timeout=1.0) if is_raw else contextlib.nullcontext()
+            # A superseded RAW process needs a moment to terminate and release
+            # the one decode slot. Absorb that normal handoff instead of making
+            # the newest slider value fail with a transient 503.
+            slot = RAW_DECODE_BUDGET.hold(timeout=3.0) if is_raw else contextlib.nullcontext()
             with slot:
                 if call.cancel.is_set():
                     raise PreviewCancelled("preview superseded")

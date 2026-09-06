@@ -10,6 +10,7 @@
 
 #include <libheif/heif.h>
 #include <libheif/heif_properties.h>
+#include <png.h>
 
 #include <algorithm>
 #include <cmath>
@@ -55,6 +56,81 @@ float mean_luminance(const hyperdr::FloatImage& image) {
              0.0792869 * image.pixels[i * 3 + 2];
   }
   return count == 0 ? 0.0F : static_cast<float>(total / count);
+}
+
+void require_declared_headroom(const hyperdr::DecodedImage& decoded,
+                               float expected, const char* message) {
+  const float error = std::abs(decoded.hdr_headroom - expected);
+  if (decoded.domain != hyperdr::InputDomain::kDisplayReferredHdr ||
+      error > std::max(0.05F, expected * 0.01F)) {
+    std::cerr << message << ": headroom=" << decoded.hdr_headroom
+              << " expected=" << expected << '\n';
+    throw std::runtime_error(message);
+  }
+}
+
+struct PngWriteBuffer {
+  std::vector<std::uint8_t> bytes;
+};
+
+void png_write_to_vector(png_structp png, png_bytep data, png_size_t size) {
+  auto* output = static_cast<PngWriteBuffer*>(png_get_io_ptr(png));
+  try {
+    output->bytes.insert(output->bytes.end(), data, data + size);
+  } catch (...) {
+    png_error(png, "PNG test output allocation failed");
+  }
+}
+
+void png_flush_vector(png_structp) {}
+
+std::vector<std::uint8_t> make_pq_png() {
+  PngWriteBuffer output;
+  output.bytes.reserve(1024);
+  png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr,
+                                             nullptr, nullptr);
+  require(png != nullptr, "cannot create the PNG test writer");
+  png_infop info = png_create_info_struct(png);
+  if (info == nullptr) {
+    png_destroy_write_struct(&png, nullptr);
+    throw std::runtime_error("cannot create the PNG test info");
+  }
+  png_set_write_fn(png, &output, png_write_to_vector, png_flush_vector);
+  png_set_IHDR(png, info, 1, 1, 8, PNG_COLOR_TYPE_RGB, PNG_INTERLACE_NONE,
+               PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+
+  // PNG cICP: Display P3 primaries, PQ transfer, RGB matrix, full range.
+  png_byte cicp_data[4]{12, 16, 0, 1};
+  png_unknown_chunk cicp{};
+  std::memcpy(cicp.name, "cICP", 4);
+  cicp.data = cicp_data;
+  cicp.size = sizeof(cicp_data);
+  cicp.location = PNG_HAVE_IHDR;
+  const png_byte cicp_name[4]{'c', 'I', 'C', 'P'};
+  png_set_keep_unknown_chunks(png, PNG_HANDLE_CHUNK_ALWAYS, cicp_name, 1);
+  png_set_unknown_chunks(png, info, &cicp, 1);
+  png_write_info(png, info);
+  png_byte row[3]{128, 128, 128};
+  png_write_row(png, row);
+  png_write_end(png, info);
+  png_destroy_write_struct(&png, &info);
+  return output.bytes;
+}
+
+void check_png_cicp_headroom() {
+  const auto path = std::filesystem::temp_directory_path() /
+                    "hyperdr-codec-cicp-pq.png";
+  try {
+    hyperdr::write_binary_file_atomic(path, make_pq_png(), true);
+    const auto decoded = hyperdr::decode_image(path);
+    require_declared_headroom(
+        decoded, 10000.0F / hyperdr::kReferenceWhiteNits,
+        "PQ PNG did not preserve cICP headroom");
+    std::filesystem::remove(path);
+  } catch (...) {
+    std::filesystem::remove(path);
+    throw;
+  }
 }
 
 hyperdr::DecodedImage decode_encoded_input(const std::vector<std::uint8_t>& bytes,
@@ -753,6 +829,10 @@ int main() {
                 decoded_ultrahdr.metadata.iso == metadata.iso &&
                 decoded_ultrahdr.metadata.orientation == 1,
             "Ultra HDR input did not preserve portable Exif");
+    require_declared_headroom(
+        decoded_ultrahdr,
+        std::exp2(hyperdr::rational_value(small_gain.metadata.alternate_headroom)),
+        "Ultra HDR input did not preserve linear headroom");
     require_linear_round_trip(decoded_ultrahdr, expected_ultrahdr,
                               "Ultra HDR input did not reconstruct its Gain Map");
     // AVIF is the encoding this project could write but not read, so unlike the
@@ -772,6 +852,12 @@ int main() {
       hyperdr::verify_avif_decodable(avif);
       const auto decoded =
           decode_encoded_input(avif, pq ? "avif-pq" : "avif-hlg", ".avif");
+      require_declared_headroom(
+          decoded,
+          pq ? 10000.0F / hyperdr::kReferenceWhiteNits
+             : 1000.0F / hyperdr::kReferenceWhiteNits,
+          pq ? "PQ AVIF did not preserve CICP headroom"
+             : "HLG AVIF did not preserve CICP headroom");
       require_linear_round_trip(decoded, expected_avif,
                                 pq ? "PQ AVIF input transfer round trip changed brightness"
                                    : "HLG AVIF input transfer round trip changed brightness");
@@ -781,6 +867,7 @@ int main() {
               "AVIF input did not carry its ISO back");
     }
     std::cout << "PQ/HLG AVIF input round trips passed\n";
+    check_png_cicp_headroom();
     auto no_headroom_options = options;
     no_headroom_options.headroom_stops = 0.0F;
     const auto no_headroom_gain = hyperdr::make_gain_map(small, no_headroom_options);
@@ -833,8 +920,7 @@ int main() {
 
     // Single-image BT.2100 exports must be Main10, carry the requested transfer
     // function, remain distinct from gain-map topology, and decode end-to-end.
-    try {
-      for (const auto encoding : {hyperdr::HdrEncoding::Pq, hyperdr::HdrEncoding::Hlg}) {
+    for (const auto encoding : {hyperdr::HdrEncoding::Pq, hyperdr::HdrEncoding::Hlg}) {
         const auto hdr_bytes = hyperdr::encode_hdr_heic(small_gain, metadata, 80, encoding);
         const auto inspection = hyperdr::inspect_heif(hdr_bytes);
         require(inspection.structurally_valid && inspection.has_heic_brand &&
@@ -850,6 +936,14 @@ int main() {
             small_gain.headroom_stops);
         const auto decoded = decode_encoded_input(
             hdr_bytes, encoding == hyperdr::HdrEncoding::Pq ? "pq" : "hlg");
+        require_declared_headroom(
+            decoded,
+            encoding == hyperdr::HdrEncoding::Pq
+                ? 10000.0F / hyperdr::kReferenceWhiteNits
+                : 1000.0F / hyperdr::kReferenceWhiteNits,
+            encoding == hyperdr::HdrEncoding::Pq
+                ? "PQ HEIC did not preserve CICP headroom"
+                : "HLG HEIC did not preserve CICP headroom");
         require_linear_round_trip(
             decoded, expected_hdr,
             encoding == hyperdr::HdrEncoding::Pq
@@ -862,51 +956,33 @@ int main() {
                 "HEIC input did not carry its camera model back");
         require(decoded.capture.iso && *decoded.capture.iso == 100.0F,
                 "HEIC input did not carry its ISO back");
-      }
-      std::cout << "PQ/HLG Main10 round trips passed\n";
-    } catch (const std::exception& e) {
-      if (std::string(e.what()).find("Bit depth not supported") == std::string::npos) {
-        throw;
-      }
-      std::cout << "PQ/HLG tests skipped (Main10 x265 unavailable?): " << e.what() << '\n';
     }
+    std::cout << "PQ/HLG Main10 round trips passed\n";
 
     // A camera-shaped HDR input: 10-bit BT.2100 HLG at 4:2:2. This is the only
     // chroma format no HyperDR output can stand in for, and the only one whose
     // decode depends on the HEVC range extensions.
-    try {
-      const auto hlg422 = encode_hlg_422(small);
-      if (hlg422.empty()) {
-        std::cout << "4:2:2 HLG input test skipped (x265 cannot encode 4:2:2)\n";
-      } else {
-        require_chroma_422(hlg422);
-        require_linear_round_trip(decode_encoded_input(hlg422, "hlg422"), small,
-                                  "4:2:2 HLG input did not decode to its linear values");
-        std::cout << "4:2:2 HLG input round trip passed\n";
-      }
-    } catch (const std::exception& e) {
-      if (std::string(e.what()).find("Bit depth not supported") == std::string::npos) {
-        throw;
-      }
-      std::cout << "4:2:2 HLG input test skipped (Main10 x265 unavailable?): "
-                << e.what() << '\n';
+    const auto hlg422 = encode_hlg_422(small);
+    if (hlg422.empty()) {
+      throw std::runtime_error("x265 cannot produce the required 4:2:2 Main10 fixture");
     }
+    require_chroma_422(hlg422);
+    const auto decoded_hlg422 = decode_encoded_input(hlg422, "hlg422");
+    require_declared_headroom(
+        decoded_hlg422, 1000.0F / hyperdr::kReferenceWhiteNits,
+        "4:2:2 HLG input did not preserve CICP headroom");
+    require_linear_round_trip(decoded_hlg422, small,
+                              "4:2:2 HLG input did not decode to its linear values");
+    std::cout << "4:2:2 HLG input round trip passed\n";
 
-    // Optional 10-bit round trip; requires a Main10-capable x265, which the stock
-    // vcpkg DLL is not. Missing 10-bit support is reported, not treated as failure.
-    try {
-      const auto bytes10 = hyperdr::encode_adaptive_heic(small_gain, metadata, 80, 10);
-      check_structure(bytes10, "10-bit single");
-      decode_and_check(bytes10, 64, 32);
-      reconstruct_and_check(bytes10, "10-bit single");
-      display_curve_identity_check(bytes10, "10-bit single");
-      std::cout << "10-bit Main10 round trip passed\n";
-    } catch (const std::exception& e) {
-      if (std::string(e.what()).find("Bit depth not supported") == std::string::npos) {
-        throw;
-      }
-      std::cout << "10-bit test skipped (Main10 x265 unavailable?): " << e.what() << '\n';
-    }
+    // 10-bit output is required: it is the only way to exercise the Main10
+    // path used by the BT.2100 encodings.
+    const auto bytes10 = hyperdr::encode_adaptive_heic(small_gain, metadata, 80, 10);
+    check_structure(bytes10, "10-bit single");
+    decode_and_check(bytes10, 64, 32);
+    reconstruct_and_check(bytes10, "10-bit single");
+    display_curve_identity_check(bytes10, "10-bit single");
+    std::cout << "10-bit Main10 round trip passed\n";
 
     std::cout << "codec/TMAP integration test passed (" << bytes8.size() << " bytes, grid)\n";
     return 0;

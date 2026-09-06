@@ -59,6 +59,7 @@ class JobTests(unittest.TestCase):
             job._JOB = None
             job._ACCEPTING = True
             job._UPLOAD_IN_PROGRESS = False
+            job._PREPARING = None
 
     def _wait_done(self, job_id, timeout=5.0):
         deadline = time.monotonic() + timeout
@@ -111,6 +112,20 @@ class JobTests(unittest.TestCase):
                     pass
             release.set()
             self._wait_done(job_id)
+
+    def test_preparation_reserves_input_and_becomes_the_job(self):
+        with job.preparation_slot("session-a") as token:
+            with self.assertRaises(job.Busy):
+                with job.upload_slot():
+                    pass
+            with self.assertRaises(job.Busy):
+                job.start(["exe"], ".", "", "session-b")
+            with mock.patch.object(job.subprocess, "Popen",
+                                   return_value=FakeProcess()):
+                job_id = job.start(
+                    ["exe"], ".", "", "session-a",
+                    preparation_token=token)
+        self._wait_done(job_id)
 
     def test_starting_replaces_the_previous_job_record(self):
         """Only the current job is readable; the old id stops resolving."""

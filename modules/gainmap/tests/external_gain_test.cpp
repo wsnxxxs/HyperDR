@@ -135,6 +135,23 @@ void test_external_gain_round_trip() {
           "external strength did not scale model gain stops");
   require(half.base_linear.pixels == expected_base.base_linear.pixels,
           "model strength changed the SDR base");
+
+  hyperdr::FloatImage display_source(2, 1, 3);
+  display_source.pixels = {0.15F, 0.35F, 0.75F, 0.9F, 0.6F, 0.2F};
+  hyperdr::ExternalGainMap passthrough_external{
+      hyperdr::FloatImage(1, 1, 1), 2.0F};
+  passthrough_external.gain_map.pixels[0] = 0.5F;
+  passthrough_external.binding.emplace();
+  passthrough_external.binding->recipe.id = "display-p3-passthrough";
+  hyperdr::GainMapOptions passthrough_options;
+  passthrough_options.gain_strength = 0.5F;
+  const auto passthrough = hyperdr::make_external_gain_map(
+      display_source, std::move(passthrough_external), passthrough_options, {},
+      {hyperdr::InputDomain::kDisplayReferredSdr, 1.0F});
+  require(passthrough.base_linear.pixels == display_source.pixels,
+          "deployment external gain re-developed its finished SDR base");
+  require(hyperdr::rational_value(passthrough.metadata.gain_max) == 1.0F,
+          "deployment passthrough lost the user's external gain strength");
   std::filesystem::remove_all(root);
 }
 
@@ -177,11 +194,51 @@ void test_v2_signed_canonical_sidecar() {
     "gamma": {"numerator": 1000000, "denominator": 1000000},
     "base_offset": {"numerator": 0, "denominator": 1000000},
     "alternate_offset": {"numerator": 0, "denominator": 1000000}
+  },
+  "model_binding": {
+    "contract": "hyperdr.model-gain-binding/v1",
+    "source": {
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "highlight_recovery": "blend",
+      "orientation": 1,
+      "sensor_size": [2, 1],
+      "requested_crop": [2, 1],
+      "delivered_crop": [2, 1],
+      "requested_crop_origin_sensor": [0, 0],
+      "delivered_crop_origin_sensor": [0, 0],
+      "raw_half_size": false
+    },
+    "development_recipe": {
+      "id": "raw-neutral-v1",
+      "exposure_ev": 0.25,
+      "headroom_stops": 3.0,
+      "contrast": 1.0,
+      "vibrance": 0.0,
+      "pop": 0.0,
+      "toe_end": 0.08,
+      "toe_output_ratio": 0.6666667,
+      "shoulder_start": 0.48,
+      "positive_exposure_limit_ev": 1.5,
+      "diffuse_gain_floor": 0.35
+    },
+    "geometry": {
+      "developed_size": [2, 1],
+      "model_tensor_size": [32, 16],
+      "gain_grid_size": [2, 1],
+      "resize_convention": "half-pixel-centres/area-then-bilinear"
+    },
+    "model": {
+      "version": "production-v4",
+      "checkpoint_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
   }
 })";
   }
   const auto external = hyperdr::read_external_gain_map(raw, report, false);
   require(external.canonical_log2, "v2 sidecar was not recognized");
+  require(external.binding &&
+              external.binding->recipe.id == "raw-neutral-v1",
+          "deployment development recipe id was not parsed");
   require(external.gain_map.pixels[0] == -0.5F,
           "signed canonical gain was not preserved");
   hyperdr::GainMapResult result;

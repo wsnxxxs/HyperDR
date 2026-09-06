@@ -50,6 +50,11 @@ void validate_convert_options(const ConvertOptions& options) {
     throw std::invalid_argument(
         "external gain is supported for one input at a time, not recursive batches");
   }
+  if (!options.ai_model_path.empty() && has_external_gain) {
+    throw std::invalid_argument(
+        "--ai-model cannot be combined with an external gain grid");
+  }
+  validate_native_model_post_options(options.ai_post);
   if (has_external_gain) {
     std::error_code ec;
     if (!std::filesystem::is_regular_file(options.external_gain_path, ec) || ec) {

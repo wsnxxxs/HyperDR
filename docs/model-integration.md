@@ -1,110 +1,107 @@
-# HyperDR_Model integration
+# Native AI model integration
 
-`HyperDR_Model` is an optional inference stage in the local panel. The normal
-HyperDR path stays the default even when the model runtime is enabled: in the
-panel, inference starts only when the user clicks “优化”, and the `.f32` grid it
-produces then drives both the live preview and the next conversion. Importing or
-replacing an image returns to the mathematical preview.
+The panel's “AI 优化” action runs the production model inside `HyperDR.exe`.
+There is no runtime Python environment, Python child process, checkpoint load,
+or `.f32`/`.json` model sidecar.
 
 ```text
-input image
-  -> HyperDR photographic SDR development
-     (RAW uses LibRaw half-size; auto exposure + photographic-v1 tone/look)
-  -> stride-16 linear Display P3 HWC float32
-  -> HyperDR_Model/infer_gain.py
-  -> model-gain.f32 + bound model-gain.json
-  -> full-resolution decode + replay the frozen development recipe
-  -> replace only the mathematical Gain Map
-  -> HyperDR --external-gain ...
-  -> HDR output
+decoded linear Display-P3 image
+  -> finished SDR: sample-preserving base
+     scene RAW: automatic exposure + neutral development
+  -> stride-16-aligned linear Display-P3 thumbnail
+  -> embedded ncnn model
+  -> raw signed log2 gain grid at thumbnail / 16
+  -> gain controls once in signed-stop space
+  -> ISO gain-map coding and lift once
+  -> existing preview, reconstruction, and output encoders
 ```
 
-The repository includes a Windows runtime under `HyperDR_Model/`: the trained
-checkpoint, inference code, a Windows virtual environment, and the Display P3
-profile needed by inference. The full private training dataset stays in WSL;
-panel inference does not need it. The model project also provides a dataset root
-whose `assets/display-p3.icc` was built by its cache workflow.
+The ncnn param and weights are compiled into the executable as Windows
+resources. The package does not install loose model files or the PyTorch
+checkpoint. `ncnn.dll` is shipped with the other runtime dependencies.
 
-## Runtime configuration on Windows
+## Offline model export
 
-The bundled runtime is detected automatically; the production v3 checkpoint and
-its JSON release manifest are found without any configuration. The overrides
-below exist for trying a different checkpoint or installation:
+Model export is a deliberate developer operation. The first graph is the
+inference-only, three-channel ONNX exchange model:
 
-```powershell
-$env:HYPERDR_MODEL_ENABLED = "1"
-$env:HYPERDR_MODEL_ROOT = "<path to HyperDR_Model>"
-$env:HYPERDR_MODEL_CHECKPOINT = "<checkpoint.pt>"
-$env:HYPERDR_MODEL_DATASET_ROOT = "<dataset root>"
-$env:HYPERDR_MODEL_PYTHON = "<python.exe inside the model venv>"
-$env:HYPERDR_MODEL_DEVICE = "auto"
-python apps\panel\hyperdr_gui.py
+```bash
+PYTHONPATH=HyperDR_Model python HyperDR_Model/export_onnx.py \
+  --checkpoint HyperDR_Model/checkpoints/production-v3.pt \
+  --output HyperDR_Model/models/production-v3.onnx \
+  --metadata HyperDR_Model/models/production-v3.onnx.json
 ```
 
-To reproduce the retired normalized-v1 path with `best.pt`, set both
-`HYPERDR_MODEL_ALLOW_LEGACY_LABEL_SCHEMA=1` and
-`HYPERDR_ALLOW_LEGACY_EXTERNAL_GAIN=1`.
+The deployment frontend adds normalized log-luminance and clipping planes.
+Export that five-plane view, then convert that ONNX graph to ncnn:
 
-## How a model run works
+```bash
+PYTHONPATH=HyperDR_Model python HyperDR_Model/export_onnx.py \
+  --checkpoint HyperDR_Model/checkpoints/production-v3.pt \
+  --graph features \
+  --output HyperDR_Model/models/production-v3.features.onnx \
+  --metadata HyperDR_Model/models/production-v3.features.onnx.json
 
-The panel reports model readiness through `/api/state`. An optimized run logs
-the model subprocess, writes intermediate files under the session's hidden
-`.model` directory, and passes the validated pair to HyperDR. If the model
-fails, the conversion stops before an output file is written.
-
-There is no sRGB JPEG in between. `HyperDR model-input` develops the SDR base
-first, resamples it with the native area-then-bilinear convention, and writes
-little-endian HWC float32 linear Display P3 straight to PyTorch, keeping P3
-colours intact and skipping JPEG quantisation. For RAW, preparation uses
-LibRaw's fixed half-size demosaic, and the chosen exposure plus the full
-photographic recipe are written down once and replayed during the later
-full-size export instead of being estimated again. Model preparation and
-ordinary RAW previews share one process-wide RAW memory admission pool.
-
-The gain report carries a `hyperdr.model-gain-binding/v1` record so HyperDR can
-tell whether a grid still matches the photo it was computed for: source hash,
-highlight recovery, sensor raster, requested and delivered crop, orientation,
-developed/tensor/grid sizes, resize convention, and the model version and
-checkpoint hash. If any current source or decode property disagrees, the
-conversion stops rather than rendering from a stale grid.
-
-For direct CLI use, generate the direct-float input and its report first, then
-run:
-
-```powershell
-HyperDR model-input photo.ARW --output out\model-input.f32 `
-  --report out\model-input.json --long-side 1024 --half-size
-python HyperDR_Model\infer_gain.py --input out\model-input.f32 `
-  --input-report out\model-input.json `
-  --checkpoint HyperDR_Model\checkpoints\production-v3.pt `
-  --gain-output out\model-gain.f32 --report out\model-gain.json `
-  --dataset-root HyperDR_Model\dataset
-HyperDR convert photo.ARW --output out `
-  --external-gain out\model-gain.f32 `
-  --external-gain-report out\model-gain.json
+PYTHONPATH=HyperDR_Model python HyperDR_Model/scripts/convert_ncnn.py \
+  --checkpoint HyperDR_Model/checkpoints/production-v3.pt \
+  --source-onnx HyperDR_Model/models/production-v3.features.onnx \
+  --output-dir HyperDR_Model/models --pnnx pnnx
 ```
 
-## Gain-map labels
+The converter is pinned to `pnnx==20260526`, rejects unsupported layers, and
+records source and output hashes in `production-v3.ncnn.json`. The ncnn graph
+uses blobs `in0` and `out0`; although conversion uses a reference shape, its
+convolutional graph accepts stride-16-aligned spatial sizes and returns H/16 by
+W/16.
 
-Phase A v2 sidecars declare `label_contract_id=hyperdr.apple-gain-label/v2` and
-store signed canonical `log2(linear gain)` with exact ISO rationals. The
-converter accepts frozen v1 normalized sidecars only with
-`--allow-legacy-external-gain`; the panel mirrors that gate with
-`HYPERDR_ALLOW_LEGACY_EXTERNAL_GAIN=1`. The label contract itself is documented
-once, in [HyperDR_Model/README.md](../HyperDR_Model/README.md).
+Ordinary builds consume the checked-in assets. A deliberate refresh can use
+`-DHYPERDR_REGENERATE_NCNN_MODEL=ON` with `HYPERDR_MODEL_PYTHON` and
+`HYPERDR_PNNX_EXECUTABLE` configured.
 
-When the input is an Apple gain-map HEIC, an external v2 grid selects the
-embedded SDR base item instead of applying the embedded gain first, so the
-source map is not counted twice before the model grid is encoded.
+## Runtime behavior
 
-## Experimental RAW model limitations
+`HyperDR convert ... --ai-model embedded` and `preview-frame` use the same
+in-memory path. JPEG, PNG, ordinary HEIC, and the base image of an Apple
+gain-map container pass through as decoded linear Display-P3 SDR. Scene-linear
+RAW keeps automatic exposure and highlight recovery, but uses a fixed neutral
+development (`contrast=1`, `vibrance=0`, `pop=0`, exposure bias `0`). The
+retained SDR base is the same image used to build the model tensor; there is no
+8-bit intermediate or second tone render.
 
-The production v3 checkpoint was trained from Apple-rendered ISO-native SDR
-rather than generic camera RAW, so camera colour, noise and exposure
-distributions can shift its predictions. Its direct head emits raw signed log2
-gain and the inference stage writes native v2 sidecars, but the network still
-does not consume ISO, shutter, aperture or camera-model metadata; per-image ISO
-metadata is conservatively derived from the prediction. LibRaw highlight
-recovery is not Apple's SDR/HDR processing. The unified base and binding
-contract removed the earlier reference-image error. These model-domain
-limitations remain, and quality is not uniform across cameras.
+The default AI path does not guided-filter the prediction. Strength,
+highlights, expansion start, and an optional HDR-range cap are applied directly
+to the raw signed-stop grid, after which the grid is ISO-encoded and lifted
+once. Identity post controls therefore preserve the model prediction instead
+of decoding and re-quantizing it.
+
+`HyperDR model-gain ... --ai-model embedded` is a diagnostic/panel probe. It
+writes one binary `HYPGAIN1` packet to stdout containing JSON geometry followed
+by the unfiltered stride-16 float32 signed-log2 ncnn prediction. It does not
+apply strength or AI post controls and does not create sidecars.
+
+The panel keeps its existing `useModel` / “AI 优化” interaction. In AI mode it
+passes model strength plus these post-inference controls:
+
+- brightness
+- contrast
+- shadows
+- highlights
+- HDR range
+- expansion start
+
+They are separate from the manual-mode controls. Manual look parameters do not
+alter the tensor sent to the model, and stale AI values do not alter manual
+mode.
+
+`HYPERDR_MODEL_ENABLED=0` can hide/disable AI optimization by operator policy;
+no other model runtime configuration is required.
+
+## Model-domain limitation
+
+The production model is trained from Apple-rendered ISO-native SDR, not a broad
+corpus of generic camera RAW development. Camera colour, noise, highlight
+recovery, and exposure distributions can therefore shift RAW predictions. RAW
+remains a pure-model path with visual regression coverage on the repository's
+samples; it is not presented as an HDR-ground-truth guarantee. Training,
+evaluation, and legacy file-based research utilities remain under
+`HyperDR_Model/`, but they are not part of the packaged panel runtime.

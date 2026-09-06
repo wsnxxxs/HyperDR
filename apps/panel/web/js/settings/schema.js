@@ -16,31 +16,39 @@
  * nothing.
  */
 
+import { t } from "../i18n/index.js";
+
 export const ENCODINGS = [
   {
     id: "adaptive", label: "Adaptive HDR", maxRange: 3,
-    hint: "Apple 格式，兼容 SDR 设备与系统相册",
+    hint: "enc.adaptive.hint",
   },
   {
     id: "pq", label: "PQ", maxRange: 4,
-    hint: "BT.2100 PQ (10-bit)，适合 HDR 显示设备",
+    hint: "enc.pq.hint",
   },
   {
     id: "hlg", label: "HLG", maxRange: 2.3,
-    hint: "BT.2100 HLG (10-bit)，广播级 HDR",
+    hint: "enc.hlg.hint",
   },
   {
     id: "ultrahdr", label: "Ultra HDR", maxRange: 4,
-    hint: "Google 格式，向后兼容 JPEG，适合网页与 Android",
+    hint: "enc.ultrahdr.hint",
   },
   {
     id: "avif-pq", label: "AVIF PQ", maxRange: 4,
-    hint: "BT.2100 PQ (10-bit AVIF)，适合现代浏览器",
+    hint: "enc.avif-pq.hint",
   },
   {
     id: "avif-hlg", label: "AVIF HLG", maxRange: 2.3,
-    hint: "BT.2100 HLG (10-bit AVIF)，高效广播级格式",
+    hint: "enc.avif-hlg.hint",
   },
+];
+
+export const COLOR_GAMUTS = [
+  { id: "srgb", label: "sRGB", hint: "out.gamutHint.srgb" },
+  { id: "p3", label: "Display P3", hint: "out.gamutHint.p3" },
+  { id: "rec2020", label: "Rec.2020", hint: "out.gamutHint.rec2020" },
 ];
 
 export const encodingById = (id) =>
@@ -50,9 +58,27 @@ const ev = (value) => `${value > 0 ? "+" : ""}${value.toFixed(2)} EV`;
 const signed = (value) => `${value > 0 ? "+" : ""}${value.toFixed(2)}`;
 const percent = (value) => `${Math.round(value * 100)}%`;
 const fixed = (digits) => (value) => value.toFixed(digits);
-const stops = (digits) => (value) => `${value.toFixed(digits)} 档`;
+const stops = (digits) => (value) => t("unit.stops", { value: value.toFixed(digits) });
+const stopsOrAuto = (digits) => (value) =>
+  value < 0 ? t("unit.auto") : t("unit.stops", { value: value.toFixed(digits) });
+const percentOrAuto = (value) => value < 0 ? t("unit.auto") : `${Math.round(value * 100)}%`;
 
 export const DEFAULT_BRIGHTNESS_EV = 0.6;
+
+/* AI controls are deliberately separate from the mathematical renderer's
+ * controls below.  A model gain is a complete rendition, so these values are
+ * post-adjustments applied after the model has produced its spatial result;
+ * sharing a store key with manual mode would make a hidden AI slider silently
+ * change a later manual export. */
+export const AI_POST_KEYS = [
+  "aiBrightness", "aiContrast", "aiShadows", "aiHighlights",
+  "aiHdrRange", "aiExpansionStart",
+];
+
+const AI_BRIGHTNESS_DEFAULT = 0;
+const AI_CONTRAST_DEFAULT = 1;
+const AI_HDR_RANGE_DEFAULT = -1;
+const AI_EXPANSION_START_DEFAULT = -1;
 
 /* `group` selects the container the control renders into; `kind` selects the
  * widget. `key` is both the store key and the name sent to /api/run.
@@ -66,40 +92,73 @@ export const DEFAULT_BRIGHTNESS_EV = 0.6;
  * browser that omits them) while taking the control off the rail. */
 export const CONTROLS = [
   {
-    key: "brightness", kind: "range", group: "tone", label: "整体亮度",
+    key: "brightness", kind: "range", group: "tone", label: "ctrl.brightness.label",
     min: 0, max: 2, step: 0.05, default: DEFAULT_BRIGHTNESS_EV, format: ev, mask: null,
-    help: "画面全局曝光微调",
+    help: "ctrl.brightness.help",
   },
   {
-    key: "hdrStrength", kind: "range", group: "tone", label: "HDR 扩展强度",
+    key: "hdrStrength", kind: "range", group: "tone", label: "ctrl.hdrStrength.label",
     min: 0, max: 1, step: 0.05, default: 0.4, format: fixed(2), mask: "gain",
-    help: "高光增益强度与通透感，悬停显示作用区域",
+    help: "ctrl.hdrStrength.help",
   },
   {
-    key: "hdrRange", kind: "range", group: "tone", label: "HDR 扩展范围",
+    key: "hdrRange", kind: "range", group: "tone", label: "ctrl.hdrRange.label",
     min: 0, max: 3, step: 0.1, default: 2.5, format: stops(1), mask: "gainFull",
-    help: "高光动态余量与峰值上限",
+    help: "ctrl.hdrRange.help",
   },
   {
-    key: "modelStrength", kind: "range", group: "model", label: "优化强度",
+    key: "modelStrength", kind: "range", group: "model", label: "ctrl.modelStrength.label",
     min: 0, max: 1, step: 0.05, default: 1, format: percent, mask: null,
-    help: "AI 模型增益应用程度",
+    help: "ctrl.modelStrength.help",
   },
   {
-    key: "expansionStart", kind: "range", group: "region", label: "扩展起点",
+    key: "aiBrightness", kind: "range", group: "model", label: "ctrl.aiBrightness.label",
+    min: -1, max: 1, step: 0.05, default: AI_BRIGHTNESS_DEFAULT, format: ev, mask: null,
+    help: "ctrl.aiBrightness.help",
+  },
+  {
+    key: "aiContrast", kind: "range", group: "model", label: "ctrl.aiContrast.label",
+    min: 0.8, max: 1.35, step: 0.01, default: AI_CONTRAST_DEFAULT, format: fixed(2), mask: null,
+    help: "ctrl.aiContrast.help",
+  },
+  {
+    key: "aiShadows", kind: "range", group: "model", label: "ctrl.aiShadows.label",
+    min: -1, max: 1, step: 0.05, default: 0, format: ev, mask: null,
+    help: "ctrl.aiShadows.help",
+  },
+  {
+    key: "aiHighlights", kind: "range", group: "model", label: "ctrl.aiHighlights.label",
+    min: -1, max: 1, step: 0.05, default: 0, format: ev, mask: null,
+    help: "ctrl.aiHighlights.help",
+  },
+  {
+    key: "aiHdrRange", kind: "range", group: "model", label: "ctrl.aiHdrRange.label",
+    min: -1, max: 3, step: 0.1, default: AI_HDR_RANGE_DEFAULT, format: stopsOrAuto(1), mask: null,
+    help: "ctrl.aiHdrRange.help",
+  },
+  {
+    key: "aiExpansionStart", kind: "range", group: "model", label: "ctrl.aiExpansionStart.label",
+    min: -1, max: 0.75, step: 0.01, default: AI_EXPANSION_START_DEFAULT, format: percentOrAuto, mask: null,
+    help: "ctrl.aiExpansionStart.help",
+  },
+  {
+    key: "expansionStart", kind: "range", group: "region", label: "ctrl.expansionStart.label",
     min: 0.18, max: 0.75, step: 0.01, default: 0.25, format: percent, mask: "participation",
-    help: "触发 HDR 扩展的亮度阈值",
+    help: "ctrl.expansionStart.help",
   },
   {
-    key: "areaCoverage", kind: "range", group: "region", label: "区域覆盖",
+    key: "areaCoverage", kind: "range", group: "region", label: "ctrl.areaCoverage.label",
     min: 0, max: 1, step: 0.05, default: 1, format: percent, mask: "coverage",
-    help: "控制高光扩展偏向镜面还是大面积区域",
+    help: "ctrl.areaCoverage.help",
   },
   {
-    key: "highlightRecovery", kind: "segmented", group: "advanced", label: "高光恢复",
+    key: "highlightRecovery", kind: "segmented", group: "advanced", label: "ctrl.highlightRecovery.label",
     default: "blend", mask: null,
-    help: "RAW 高光重建算法",
-    choices: [["blend", "混合"], ["reconstruct", "重建"], ["clip", "裁切"], ["unclip", "不裁切"]],
+    help: "ctrl.highlightRecovery.help",
+    choices: [["blend", "ctrl.highlightRecovery.blend"],
+              ["reconstruct", "ctrl.highlightRecovery.reconstruct"],
+              ["clip", "ctrl.highlightRecovery.clip"],
+              ["unclip", "ctrl.highlightRecovery.unclip"]],
   },
   /* Pinned. Both are general grading, not extended-range work: a photographer
    * who wants a different contrast curve or more saturation reaches for their
@@ -110,32 +169,39 @@ export const CONTROLS = [
    * --contrast/--vibrance` remains the way to change them, and 查看命令行 shows
    * the line to start from. */
   {
-    key: "contrast", kind: "range", group: "pinned", label: "对比度",
+    key: "contrast", kind: "range", group: "pinned", label: "ctrl.contrast.label",
     min: 0.8, max: 1.35, step: 0.01, default: 1.08, format: fixed(2), mask: null,
   },
   {
-    key: "vibrance", kind: "range", group: "pinned", label: "鲜艳度",
+    key: "vibrance", kind: "range", group: "pinned", label: "ctrl.vibrance.label",
     min: -0.5, max: 0.5, step: 0.01, default: 0.12, format: signed, mask: null,
   },
   {
-    key: "quality", kind: "number", group: "quality", label: "质量",
+    key: "quality", kind: "number", group: "quality", label: "ctrl.quality.label",
     min: 0, max: 100, step: 1, default: 90, mask: null,
   },
 ];
 
 export const CONTROLS_BY_KEY = new Map(CONTROLS.map((control) => [control.key, control]));
 
-/** Keys that appear in the object sent to /api/run and /api/curve. */
-export const OPTION_KEYS = ["encoding", ...CONTROLS.map((control) => control.key)];
+/** Keys that appear in the object sent to /api/run. */
+export const OPTION_KEYS = [
+  "encoding", "colorGamut", "clampSrgb", ...CONTROLS.map((control) => control.key),
+];
 
-/** The output format is a workflow choice; image adjustments are per-image. */
-export const PERSISTED_OPTION_KEYS = ["encoding"];
+/** Output and colour choices are workflow settings; image adjustments are per-image. */
+export const PERSISTED_OPTION_KEYS = ["encoding", "colorGamut", "clampSrgb"];
 
 export function defaultSettings(encoding = ENCODINGS[0].id) {
   const activeEncoding = encodingById(encoding);
-  const values = { encoding: activeEncoding.id };
+  const values = {
+    encoding: activeEncoding.id,
+    colorGamut: COLOR_GAMUTS[0].id,
+    clampSrgb: COLOR_GAMUTS[0].id === "srgb",
+  };
   for (const control of CONTROLS) values[control.key] = control.default;
   values.hdrRange = Math.min(values.hdrRange, activeEncoding.maxRange);
+  values.aiHdrRange = Math.min(values.aiHdrRange, activeEncoding.maxRange);
   return values;
 }
 

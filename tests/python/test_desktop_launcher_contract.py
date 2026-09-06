@@ -1,6 +1,7 @@
 """Contracts shared by the Tauri desktop shell and the Python sidecar."""
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -15,6 +16,9 @@ SERVER = (ROOT / "apps" / "panel" / "hyperdr_panel" / "server.py").read_text(
     encoding="utf-8")
 TAURI = (ROOT / "apps" / "desktop" / "src-tauri" / "src" / "lib.rs").read_text(
     encoding="utf-8")
+TAURI_CONFIG = json.loads(
+    (ROOT / "apps" / "desktop" / "src-tauri" / "tauri.conf.json").read_text(
+        encoding="utf-8"))
 PROCESS_TREE = (ROOT / "apps" / "desktop" / "src-tauri" / "src" / "process_tree.rs").read_text(
     encoding="utf-8")
 
@@ -28,7 +32,16 @@ class DesktopLauncherContractTests(unittest.TestCase):
 
     def test_server_announces_ready_url_without_opening_browser(self):
         self.assertIn("HYPERDR_READY", SERVER)
-        self.assertIn("if not desktop and", SERVER)
+        self.assertNotIn("import webbrowser", SERVER)
+        self.assertNotIn("webbrowser.open", SERVER)
+
+    def test_release_uses_one_upgradeable_installer(self):
+        self.assertEqual(TAURI_CONFIG["version"], "1.0.0")
+        self.assertEqual(TAURI_CONFIG["bundle"]["targets"], ["nsis"])
+        windows_bundle = TAURI_CONFIG["bundle"]["windows"]
+        self.assertFalse(windows_bundle["allowDowngrades"])
+        self.assertEqual(
+            windows_bundle["nsis"]["installMode"], "currentUser")
 
     def test_windows_webview_is_configured_for_display_p3_webgpu(self):
         self.assertIn("--enable-features=WebGPU,UseDisplayP3ColorSpace", TAURI)

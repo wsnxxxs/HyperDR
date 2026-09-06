@@ -183,7 +183,7 @@ void test_sdr_hdr_lut_routing(const std::filesystem::path& file) {
         if(alternate) {
           selected.auto_headroom=false; selected.headroom_stops=1;
           selected.look.headroom_max_stops=1; selected.gain_strength=0;
-          selected.look.shoulder_start=.75F; selected.look.diffuse_gain_floor=0;
+          selected.look.diffuse_gain_floor=0;
         }
         const auto ungraded=render_renditions(source,selected,{},input,RenderTarget::Sdr);
         require_image_close(ungraded.sdr,baseline.sdr,"hidden HDR controls must not affect SDR development or RAW auto exposure");

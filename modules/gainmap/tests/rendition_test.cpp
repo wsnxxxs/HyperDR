@@ -1,4 +1,5 @@
 #include "hyperdr/gainmap/rendition.hpp"
+#include "hyperdr/gainmap/gain_map.hpp"
 #include "hyperdr/gainmap/reconstruct.hpp"
 #include "hyperdr/image/color.hpp"
 #include "hyperdr/image/transfer.hpp"
@@ -73,8 +74,45 @@ void test_final_gain_statistics() {
   require(std::abs(packed.stats.headroom_utilization-(peak-1)/(photo.stats.headroom_linear-1))<1e-6F,
       "headroom utilization must use the reconstructed peak");
 }
+
+void test_zero_and_spatial_gain() {
+  FloatImage source(256,128,3);
+  for(unsigned y=0;y<128;++y) for(unsigned x=0;x<256;++x) {
+    const float v=x<240?.06F:8;
+    source.at(x,y,0)=v; source.at(x,y,1)=v*.85F; source.at(x,y,2)=v*.7F;
+  }
+  RenderOptions options; options.auto_headroom=false;
+  options.headroom_stops=2.5F; options.look.headroom_max_stops=2.5F;
+  options.look.shoulder_start=.25F; options.look.diffuse_gain_floor=1;
+  options.gain_strength=0;
+  const auto base=render_renditions(source,options,{}, {},RenderTarget::Hdr);
+  options.headroom_stops=0; options.look.headroom_max_stops=0;
+  const auto zero=render_renditions(source,options,{}, {},RenderTarget::Hdr);
+  require(base.stats.exposure_ev==zero.stats.exposure_ev,"HDR range must not alter RAW metering");
+  require(base.sdr.pixels==zero.sdr.pixels && zero.sdr.pixels==zero.hdr.pixels,
+      "zero gain must retain the same RAW base");
+  const auto sdr=render_renditions(source,options,{}, {},RenderTarget::Sdr);
+  require(sdr.sdr.pixels==base.sdr.pixels,"output format must preserve RAW base");
+  options.headroom_stops=2.5F; options.look.headroom_max_stops=2.5F;
+  for(auto domain:{InputDomain::kSceneReferred,InputDomain::kDisplayReferredSdr}) {
+    if(domain==InputDomain::kDisplayReferredSdr)
+      for(unsigned y=0;y<128;++y) for(unsigned x=0;x<256;++x) for(int c=0;c<3;++c)
+        source.at(x,y,c)=(.01F+.99F*x/255)*(1-.15F*c);
+    for(float strength:{0.0F,.4F,1.0F}) {
+      options.gain_strength=strength;
+      const InputDescription input{domain,1};
+      const auto legacy=make_gain_map(source,options,{},input);
+      const auto packed=gain_map_from_renditions(render_renditions(source,options,{},input,RenderTarget::Hdr));
+      require(legacy.base_linear.pixels==packed.base_linear.pixels,"retained grid must preserve base");
+      const auto old_hdr=reconstruct_gain_map(legacy.base_linear,legacy.gain_map,legacy.metadata,legacy.headroom_stops);
+      const auto new_hdr=reconstruct_gain_map(packed.base_linear,packed.gain_map,packed.metadata,packed.headroom_stops);
+      for(std::size_t i=0;i<old_hdr.pixels.size();++i)
+        require(std::abs(old_hdr.pixels[i]-new_hdr.pixels[i])<1e-5F,"packaging must not blur highlight edges again");
+    }
+  }
+}
 int main() {
-  try { test_model_grading(); test_final_gain_statistics(); }
+  try { test_zero_and_spatial_gain(); test_model_grading(); test_final_gain_statistics(); }
   catch(const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
   std::cout<<"graded model reconstruction and final gain statistics passed\n";
 }

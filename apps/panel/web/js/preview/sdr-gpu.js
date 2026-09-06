@@ -3,25 +3,13 @@ const VERTEX = `#version 300 es
 in vec2 position; out vec2 uv;
 void main(){ gl_Position=vec4(position,0,1); uv=vec2((position.x+1.0)*.5,(1.0-position.y)*.5); }`;
 const FRAGMENT = `#version 300 es
-precision highp float; uniform sampler2D baseTexture; uniform sampler2D hdrTexture;
-uniform float original; uniform float compact; uniform vec4 gainParams; uniform float alternateOffset; uniform float gainWeight; in vec2 uv; out vec4 color;
+precision highp float; uniform sampler2D baseTexture;
+in vec2 uv; out vec4 color;
 vec3 encode(vec3 v){ v=max(v,vec3(0)); return mix(1.055*pow(v,vec3(1.0/2.4))-0.055,12.92*v,lessThanEqual(v,vec3(.0031308))); }
-float shoulder(float v){ return v<=.8?v:.8+.2*(1.0-exp(-(v-.8)/.2)); }
 void main(){
   ivec2 bs=textureSize(baseTexture,0); ivec2 xy=clamp(ivec2(uv*vec2(bs)),ivec2(0),bs-1);
-  vec3 base=texelFetch(baseTexture,xy,0).rgb;
-  vec3 v=base;
-  if(original<.5){
-    if(compact>.5){
-      ivec2 gs=textureSize(hdrTexture,0);
-      vec2 p=clamp((vec2(xy)+.5)*vec2(gs)/vec2(bs)-.5,vec2(0),vec2(gs-1));
-      ivec2 lo=ivec2(floor(p)), hi=min(lo+1,gs-1); vec2 w=fract(p);
-      float code=clamp(mix(mix(texelFetch(hdrTexture,lo,0).r,texelFetch(hdrTexture,ivec2(hi.x,lo.y),0).r,w.x),
-        mix(texelFetch(hdrTexture,ivec2(lo.x,hi.y),0).r,texelFetch(hdrTexture,hi,0).r,w.x),w.y),0.,1.);
-      v=max(vec3(0),(base+gainParams.w)*exp2(mix(gainParams.x,gainParams.y,pow(code,gainParams.z))*gainWeight)-alternateOffset);
-    }else v=texture(hdrTexture,uv).rgb;
-  }
-  if(original<.5) v=vec3(shoulder(v.r),shoulder(v.g),shoulder(v.b)); color=vec4(encode(v),1); }`;
+  color=vec4(encode(texelFetch(baseTexture,xy,0).rgb),1);
+}`;
 function compile(gl,type,source){ const s=gl.createShader(type); gl.shaderSource(s,source); gl.compileShader(s);
   if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; }
 
@@ -37,30 +25,22 @@ export function createSdrGpuRenderer(canvas, onContextLost) {
   if(!gl.getProgramParameter(program,gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
   const buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buffer);
   gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);
-  const textures=[gl.createTexture(),gl.createTexture()];
+  const textures=[gl.createTexture()];
   for(const texture of textures){gl.bindTexture(gl.TEXTURE_2D,texture);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,floatFilter);
     gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,floatFilter);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);}
   gl.useProgram(program); const position=gl.getAttribLocation(program,"position"); gl.enableVertexAttribArray(position);
   gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.vertexAttribPointer(position,2,gl.FLOAT,false,0,0);
-  gl.uniform1i(gl.getUniformLocation(program,"baseTexture"),0);gl.uniform1i(gl.getUniformLocation(program,"hdrTexture"),1);
-  const original=gl.getUniformLocation(program,"original");
+  gl.uniform1i(gl.getUniformLocation(program,"baseTexture"),0);
   let previous = null;
   return { kind:"sdr-gpu",
-    upload(frame){ [frame.base,frame.gain || frame.hdr].forEach((plane,index)=>{
-      if(index===0 && frame.metadata?.baseId && previous?.metadata?.baseId===frame.metadata.baseId
-          && previous.width===frame.width && previous.height===frame.height) return;
-      gl.activeTexture(gl.TEXTURE0+index);gl.bindTexture(gl.TEXTURE_2D,textures[index]);
-      const gain=index===1 && frame.gain;
-      gl.texImage2D(gl.TEXTURE_2D,0,gain?gl.R32F:gl.RGB32F,gain?frame.metadata.gainWidth:frame.width,
-        gain?frame.metadata.gainHeight:frame.height,0,gain?gl.RED:gl.RGB,gl.FLOAT,plane);
-    });
-      const m=frame.metadata || {}; gl.useProgram(program);
-      gl.uniform1f(gl.getUniformLocation(program,"compact"),frame.gain?1:0);
-      gl.uniform4f(gl.getUniformLocation(program,"gainParams"),m.gainMin||0,m.gainMax||0,1/(m.gainGamma||1),m.baseOffset||0);
-      gl.uniform1f(gl.getUniformLocation(program,"alternateOffset"),m.alternateOffset||0);
-      gl.uniform1f(gl.getUniformLocation(program,"gainWeight"),m.gainWeight ?? 1);
+    upload(frame){
+      if(!(frame.metadata?.baseId && previous?.metadata?.baseId===frame.metadata.baseId
+          && previous.width===frame.width && previous.height===frame.height)) {
+        gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,textures[0]);
+        gl.texImage2D(gl.TEXTURE_2D,0,gl.RGB32F,frame.width,frame.height,0,gl.RGB,gl.FLOAT,frame.base);
+      }
       previous=frame; gl.viewport(0,0,canvas.width,canvas.height); },
-    uploadGainMap(){}, draw(_table,params){gl.useProgram(program);gl.uniform1f(original,params.original?1:0);gl.drawArrays(gl.TRIANGLES,0,6);},
+    uploadGainMap(){}, draw(){gl.useProgram(program);gl.drawArrays(gl.TRIANGLES,0,6);},
     destroy(){canvas.removeEventListener("webglcontextlost",lost);textures.forEach(t=>gl.deleteTexture(t));gl.deleteBuffer(buffer);gl.deleteProgram(program);}
   };
 }

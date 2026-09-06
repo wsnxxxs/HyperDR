@@ -1,13 +1,6 @@
-/* Uploading one photograph into a server-side session.
- *
- * The panel converts a single image at a time, so picking another replaces the
- * current one rather than adding to a batch -- on the server too, where the
- * previous input is removed only once the new one has arrived intact. A session
- * is reused across replacements; a new one is created only on the first upload,
- * which keeps the converter's decode bookkeeping valid for the session.
- *
- * Web browsers never send a filesystem path. The Windows Tauri bridge has a
- * separate native-path entry point that is only enabled by the desktop server.
+/* Upload one photo into a new session. Older photos and exports remain intact
+ * until session expiry, and two tabs never replace each other's input.
+ * The native desktop bridge can register a path without copying its bytes.
  */
 
 import { t } from "../i18n/index.js";
@@ -45,7 +38,7 @@ export function createUploader({ onProgress, onReady, onError }) {
   async function start(fileList) {
     const file = Array.from(fileList || [])[0];
     const previous = store.get();
-    if (!file || inFlight || previous.uploading || previous.jobId) return;
+    if (!file || inFlight || previous.uploading || previous.restoring || previous.starting || previous.jobId) return;
     const refusal = preflight(file);
     if (refusal) {
       onError(refusal, { preserveCurrent: Boolean(previous.file) });
@@ -58,7 +51,7 @@ export function createUploader({ onProgress, onReady, onError }) {
     onProgress(0);
 
     try {
-      const sessionId = store.get().sessionId || (await api.newSession()).sessionId;
+      const sessionId = (await api.newSession()).sessionId;
       const request = api.upload(sessionId, file, (fraction) => {
         store.set({ uploadProgress: fraction });
         onProgress(fraction);
@@ -68,7 +61,7 @@ export function createUploader({ onProgress, onReady, onError }) {
       store.set({
         sessionId,
         file: { name: file.name, size: file.size },
-        result: null,
+        result: null, exports: [],
       });
       await onReady();
     } catch (error) {
@@ -88,7 +81,7 @@ export function createUploader({ onProgress, onReady, onError }) {
 
   async function startNativePath(path) {
     const previous = store.get();
-    if (!path || inFlight || previous.uploading || previous.jobId
+    if (!path || inFlight || previous.uploading || previous.restoring || previous.starting || previous.jobId
         || !previous.capabilities?.nativePathInput) return;
     inFlight = true;
     aborted = false;
@@ -96,7 +89,7 @@ export function createUploader({ onProgress, onReady, onError }) {
     onProgress(0);
 
     try {
-      const sessionId = store.get().sessionId || (await api.newSession()).sessionId;
+      const sessionId = (await api.newSession()).sessionId;
       const selected = await api.openNativePath(sessionId, path);
       const size = Number(selected.bytes);
       store.set({
@@ -105,7 +98,7 @@ export function createUploader({ onProgress, onReady, onError }) {
           name: selected.name || String(path).split(/[\\/]/).pop() || "image",
           size: Number.isFinite(size) ? size : 0,
         },
-        result: null,
+        result: null, exports: [],
       });
       onProgress(1);
       await onReady();

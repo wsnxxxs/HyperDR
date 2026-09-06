@@ -17,6 +17,8 @@ import { t, onLocaleChange } from "../i18n/index.js";
 import { role, setText, debounce } from "../core/dom.js";
 import { toOptions, OPTION_KEYS } from "../settings/schema.js";
 
+import { mountExportHistory } from "./export-history.js";
+
 const POLL_INTERVAL_MS = 400;
 const TRACKING_INTERRUPTED_MS = 15_000;
 
@@ -128,7 +130,7 @@ export function mountRunner({ toast }) {
 
   function syncRunAvailability(state) {
     runButton.disabled =
-      starting || state.uploading || state.optimizing || Boolean(state.jobId)
+      starting || state.restoring || state.uploading || state.optimizing || Boolean(state.jobId)
       || !state.capabilities?.ready || !state.file || !state.previewReady;
   }
 
@@ -168,7 +170,7 @@ export function mountRunner({ toast }) {
         continue;
       }
       if (update.offset != null) offset = update.offset;
-      if (typeof update.text === "string") log += update.text;
+      if (typeof update.text === "string") log = (log + update.text).slice(-200_000);
       // The converter narrates its stages on stdout; the last line is the
       // closest thing a long RAW conversion has to a progress bar.
       const line = lastLine(log, 80);
@@ -231,13 +233,14 @@ export function mountRunner({ toast }) {
 
   async function start() {
     const state = store.get();
+    if (starting || state.jobId || state.uploading || state.restoring || state.optimizing) return;
     if (!state.capabilities?.ready) { toast(t("run.notReady"), true); return; }
     if (!state.file) { toast(t("run.noFile"), true); return; }
 
     const runOptions = runOptionsFor(state);
-    const optionsKey = JSON.stringify(runOptions);
     let started;
     starting = true;
+    store.set({ starting: true });
     syncRunAvailability(store.get());
     try {
       started = await api.run(state.sessionId, runOptions);
@@ -246,12 +249,17 @@ export function mountRunner({ toast }) {
       return;
     } finally {
       starting = false;
+      store.set({ starting: false });
       syncRunAvailability(store.get());
     }
 
+    track(started, state);
+  }
+
+  async function track(started, state) {
     activeJobId = started.jobId;
     trackingInterrupted = false;
-    store.set({ jobId: started.jobId, result: null });
+    store.set({ jobId: started.jobId });
     setText(runButton, t("run.busy"));
     setText(runProgress, t("run.starting"));
     runProgress.hidden = false;
@@ -270,24 +278,14 @@ export function mountRunner({ toast }) {
         const detail = lastLine(outcome.log);
         toast(detail ? t("run.failedDetail", { detail }) : t("run.failed"), true);
       } else {
-        const summary = summarizeReport(outcome.report);
-        // Cache-busted: the same URL serves a different file after the next run.
-        const downloadUrl = `${api.resultUrl(state.sessionId, { download: true })}&t=${Date.now()}`;
-        const completedResult = {
-          name: summary.name || state.file.name,
-          width: summary.width,
-          height: summary.height,
-          peakLinear: summary.peakLinear,
-          verified: summary.verified,
-          durationS: summary.durationS,
-          degradedNote: summary.degradedNote,
-          optionsKey,
-          downloadUrl,
-        };
-        store.set({ result: completedResult });
-        toast(summary.degradedNote
-          ? t("run.succeededDegraded", { note: summary.degradedNote })
-          : t("run.succeeded"), Boolean(summary.degradedNote));
+        const workspace = await api.workspace(state.sessionId);
+        if (activeJobId !== started.jobId) return;
+        store.set({ exports: workspace.exports });
+        const entry = workspace.exports.find(({ id }) => id === (outcome.exportId || started.exportId));
+        if (!entry) throw new Error(t("run.lost"));
+        selectResult(entry);
+        const note = store.get().result.degradedNote;
+        toast(note ? t("run.succeededDegraded", { note }) : t("run.succeeded"), Boolean(note));
       }
     } catch (error) {
       toast(error.message || t("run.lost"), true);
@@ -317,7 +315,7 @@ export function mountRunner({ toast }) {
 
   store.watchAny(["result"], syncResult, { immediate: true });
   store.watchAny(
-    ["uploading", "optimizing", "file", "previewReady", "jobId", "capabilities"],
+    ["restoring", "uploading", "optimizing", "file", "previewReady", "jobId", "capabilities"],
     syncRunAvailability,
     { immediate: true },
   );
@@ -336,4 +334,26 @@ export function mountRunner({ toast }) {
     syncRunLabel();
     syncResult(store.get());
   });
+
+  function selectResult(entry) {
+    const summary = summarizeReport(entry.report);
+    store.set({ result: {
+      ...summary, name: summary.name || entry.name, exportId: entry.id,
+      optionsKey: JSON.stringify(runOptionsFor({
+        ...store.get(), ...entry.options, previewOptimized: entry.options.useModel,
+      })),
+      downloadUrl: api.resultUrl(store.get().sessionId, { download: true, exportId: entry.id }),
+    } });
+  }
+  mountExportHistory({ selectResult });
+  return {
+    restore(workspace, selectedExport) {
+      const entry = workspace.exports.find(({ id }) => id === selectedExport) || workspace.exports[0];
+      if (entry) selectResult(entry);
+      if (workspace.job && !workspace.job.done) {
+        track(workspace.job, store.get());
+      }
+    },
+  };
+
 }

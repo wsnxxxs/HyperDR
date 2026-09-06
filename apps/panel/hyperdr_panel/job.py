@@ -1,15 +1,8 @@
-"""The running conversion, and the log the browser polls.
+"""One active converter process, incremental logs and export publication.
 
-One image at a time means one converter process at a time. The multi-file
-version had to reserve per session *and* per run kind, keep up to 64 finished
-jobs so several tabs could each poll their own, and bound a log that a
-`--recursive` pass over a folder could grow without limit. A single job needs
-none of that: the previous one is replaced when the next starts, and the log of
-one image is a few lines.
-
-The log is still served incrementally by character offset rather than in full
-on every poll, because a slow decode should not re-send its transcript four
-times a second.
+Conversion admission protects uploads and command preparation. A job becomes
+terminal only after its successful export is published or its pending files
+are discarded. Completed exports outlive this process-local job record.
 """
 from __future__ import annotations
 
@@ -22,6 +15,7 @@ import time
 import uuid
 from pathlib import Path
 
+from . import renditions
 from .concurrency import RAW_DECODE_BUDGET
 from .formats import RAW_INPUT_EXTENSIONS
 
@@ -208,6 +202,7 @@ def _pump(job: dict, argv: list[str], cwd: str,
     """
     proc: subprocess.Popen | None = None
     report = None
+    failed = False
     pre_commands = list(pre_commands or [])
     commands = pre_commands + [argv]
     try:
@@ -229,22 +224,33 @@ def _pump(job: dict, argv: list[str], cwd: str,
         complete = proc is not None and (not pre_commands or proc.returncode == 0)
         if complete and path and os.path.isfile(path):
             report = _read_report(job, path)
+        if (job.get("export_id") and proc is not None and proc.returncode == 0
+                and not job.get("cancelled") and not job.get("timed_out")):
+            renditions.publish(job["session_id"], job["export_id"], report)
     except Exception as exc:  # noqa: BLE001 - the boundary is the point
+        failed = True
         if proc is not None:
             _stop(proc)
         with _LOCK:
             _append_locked(job, "无法运行 HyperDR：%s\n" % exc)
     finally:
+        if job.get("export_id"):
+            try:
+                renditions.discard(job["session_id"], job["export_id"])
+            except (OSError, ValueError) as exc:
+                with _LOCK:
+                    _append_locked(job, "清理临时导出失败：%s\n" % exc)
         with _LOCK:
             job["done"] = True
-            job["rc"] = proc.returncode if proc is not None else -1
+            job["rc"] = proc.returncode if proc is not None and not failed else -1
             job["report"] = report
             job["finished_at"] = time.time()
 
 
 def start(argv: list[str], cwd: str, report_path: str, session_id: str,
           pre_commands: list[list[str]] | None = None,
-          preparation_token: str | None = None) -> str:
+          preparation_token: str | None = None, export_id: str = "",
+          options: dict | None = None) -> str:
     """Launch a conversion, optionally after model preprocessing commands."""
     global _JOB, _PREPARING
     with _LOCK:
@@ -267,6 +273,7 @@ def start(argv: list[str], cwd: str, report_path: str, session_id: str,
             "done": False, "rc": None, "report": None, "report_path": report_path,
             "proc": None, "cancelled": False, "timed_out": False,
             "session_id": session_id, "finished_at": None,
+            "export_id": export_id, "options": dict(options or {}),
         }
         _JOB = job
     try:
@@ -313,10 +320,20 @@ def read(job_id: str, offset: int) -> dict | None:
             "rc": job["rc"],
             "report": job["report"] if job["done"] else None,
             "sessionId": job["session_id"],
+            "exportId": job.get("export_id", ""),
             "cancelled": bool(job["cancelled"]),
             "timedOut": bool(job["timed_out"]),
             "truncated": bool(job["truncated"]) or requested < dropped,
         }
+
+
+def for_session(session_id: str) -> dict | None:
+    with _LOCK:
+        if _JOB is None or _JOB["session_id"] != session_id:
+            return None
+        return {"jobId": _JOB["id"], "done": _JOB["done"],
+                "exportId": _JOB.get("export_id", ""),
+                "options": _JOB.get("options", {})}
 
 
 def active_session_id() -> str:

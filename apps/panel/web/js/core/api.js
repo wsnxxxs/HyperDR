@@ -64,6 +64,8 @@ export const api = {
   /** @returns {Promise<{sessionId: string}>} */
   newSession: () => post("/api/session", {}, t("err.session")),
 
+  workspace: (sessionId) => get("/api/workspace", { id: sessionId }, t("err.session")),
+
   /* -- capabilities -------------------------------------------------- */
 
   /** Feature flags and limits. Read once at boot; nothing here changes while
@@ -98,9 +100,9 @@ export const api = {
 
   /** The converted image. `download` matters on a phone, where the native
    *  picker is not reachable and saving is the browser's job. */
-  resultUrl: (sessionId, { download = false } = {}) =>
+  resultUrl: (sessionId, { download = false, exportId = "" } = {}) =>
     "/api/result?" + new URLSearchParams({
-      id: sessionId, download: download ? "1" : "0",
+      id: sessionId, download: download ? "1" : "0", export: exportId,
     }),
 
   /* -- preview ------------------------------------------------------- */

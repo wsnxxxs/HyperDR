@@ -243,15 +243,15 @@ class ApiTests(unittest.TestCase):
             response = api.run(self.context, {"sessionId": session_id})
         self.assertEqual(response.status, 429)
 
-    def test_run_clears_the_previous_encodings_output(self):
-        """Otherwise `result_path` could hand back the last run's file."""
+    def test_run_preserves_the_previous_encodings_output(self):
+        """A retry must leave the last good result available for download."""
         session_id = self._session_with_image()
         stale = session.session_dir(session_id, "output") / "photo.heic"
         stale.write_bytes(b"old")
         with mock.patch.object(api, "detect_exe", return_value="HyperDR"), \
                 mock.patch.object(job, "start", return_value="job-1"):
             api.run(self.context, {"sessionId": session_id})
-        self.assertFalse(stale.exists())
+        self.assertTrue(stale.exists())
 
     # --- result ----------------------------------------------------------- #
 

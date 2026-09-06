@@ -2,14 +2,11 @@
 
 .app {
   display: grid;
-  grid-template-areas:
-    "stage header"
-    "stage settings"
-    "stage run";
+  grid-template-areas: "stage rail";
   grid-template-columns:
     minmax(0, 1fr)
     minmax(360px, clamp(360px, 27vw, 420px));
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
   column-gap: var(--region-gap);
   row-gap: 0;
   width: 100%;
@@ -24,8 +21,25 @@
   background: transparent;
 }
 
+/* One scrollable rail keeps large result cards from collapsing the editor. */
+.app__rail {
+  grid-area: rail;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+  border-radius: var(--radius-xl);
+}
+.app__rail > * { flex-shrink: 0; }
+
 .app__header {
   grid-area: header;
+  position: sticky;
+  top: 0;
+  z-index: 5;
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -102,8 +116,8 @@
   flex-direction: column;
   gap: var(--space-2);
   min-height: 0;
-  max-height: 100%;
-  overflow-y: auto;
+  max-height: none;
+  overflow-y: visible;
   scroll-padding-block: var(--space-3);
   overscroll-behavior: contain;
   scrollbar-width: thin;
@@ -160,7 +174,9 @@
     height: auto;
     min-height: 100dvh;
   }
+  .app__rail { display: contents; }
   .app__header {
+    position: static;
     height: 44px;
   }
   .app__header .service-state {

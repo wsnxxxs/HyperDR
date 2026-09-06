@@ -11,14 +11,9 @@ runs in one direction only. Named presets used to make it a round trip -- the
 panel wrote a settings file, then read it back into the controls -- and that
 reverse path is gone with them.
 
-Five settings the panel used to expose are gone, and their absence is the point:
-
-``--recursive`` and ``--threads`` only meant something when a run could cover a
-folder. ``--skip-existing`` only meant something when that folder might already
-hold output from an earlier pass. ``--overwrite`` never meant anything at all --
-the session's output directory is emptied before every run, so there was nothing
-there to overwrite, and the export step copies with ``shutil.copy2``, which
-overwrites regardless.
+Folder flags (`--recursive`, `--threads`, `--skip-existing`) stay in the CLI.
+Each panel run writes into its own export directory, so it never needs to
+replace an existing rendition.
 
 ``--no-verify`` is gone for a different reason: it is not a preference. The
 converter verifies by decoding what it just encoded *before* writing it, so a

@@ -123,6 +123,9 @@ jobs:
 
       # Markup and modules are wired by data-role. A typo in either is invisible
       # until the panel is opened, so the two sides are compared here instead.
+      - name: Test photo editing history
+        run: node tests/js/history_test.mjs
+
       - name: Check every data-role a module reads exists in the markup
         run: python scripts/check_panel_roles.py
 

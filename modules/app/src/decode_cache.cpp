@@ -1,9 +1,12 @@
 #include "hyperdr/app/decode_cache.hpp"
 
+#include "hyperdr/app/fingerprint.hpp"
+#include "hyperdr/app/schema.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/foundation/hash.hpp"
 #include "hyperdr/foundation/json.hpp"
 #include "hyperdr/foundation/version.hpp"
+#include "hyperdr/image/resample.hpp"
 
 #include <algorithm>
 #include <array>
@@ -211,28 +214,22 @@ void apply_metadata_json(const std::string& text, DecodedImage& out) {
 }  // namespace
 
 std::string decode_cache_key(const std::filesystem::path& input,
-                             std::string_view variant) {
+                             std::string_view variant,
+                             std::string_view source_sha256) {
   const auto absolute = std::filesystem::absolute(input).lexically_normal();
   std::error_code size_ec;
   const auto size = std::filesystem::file_size(absolute, size_ec);
   std::error_code time_ec;
   const auto modified = std::filesystem::last_write_time(absolute, time_ec);
-  // Content hash, not just size and mtime.
-  //
-  // Path, size and modification time describe where a file is and when it was
-  // touched, not what is in it, and every one of them survives a replacement:
-  // restoring a backup, checking out a different revision, or any tool that
-  // preserves timestamps produces a different photograph at the same identity,
-  // and the cache would serve the previous one's pixels. Hashing costs a
-  // sequential read of the source; the decode this avoids costs far more.
-  std::string content;
-  try {
-    content = sha256_file_hex(absolute);
-  } catch (const std::exception&) {
-    // Unreadable here means the decode is about to fail anyway. Fall back to
-    // a marker that cannot collide with a real digest so the entry is simply
-    // never shared with a successfully hashed read.
-    content = "unhashed";
+  std::string content(source_sha256);
+  if (content.empty()) {
+    try {
+      content = sha256_file_hex(absolute);
+    } catch (const std::exception&) {
+      // The decode is about to report the unreadable input. Keep the key out of
+      // the namespace of successful hashes instead of hiding that real error.
+      content = "unhashed";
+    }
   }
   const std::string identity =
       path_utf8(absolute) + '|' +
@@ -242,6 +239,60 @@ std::string decode_cache_key(const std::filesystem::path& input,
       '|' + content + '|' + std::string(variant) + '|' + kVersion + '|' +
       std::to_string(kCacheSchema);
   return fnv1a_hex(identity);
+}
+
+std::string decode_cache_variant(const ConvertOptions& options,
+                                 const RawDecodeOptions& raw) {
+  const char* intent = options.decode_intent == DecodeIntent::Preview
+                           ? "preview"
+                           : "export";
+  auto reflected = options;
+  reflected.raw = raw;
+  std::string variant = std::string(intent) + '/' +
+      (raw.ignore_embedded_gain_map ? "base-only" : "embedded-gain");
+  for (const auto& setting : settings()) {
+    if (!setting.affects_decoded_pixels) continue;
+    const auto value = setting.read(reflected);
+    variant += '/';
+    variant += setting.key;
+    variant += '=';
+    if (value.is_string()) variant += value.string();
+    else if (value.is_bool()) variant += value.boolean() ? "1" : "0";
+    else variant += json::number_text(value.number());
+  }
+  for (const auto& resource : raw_decode_resources(raw)) {
+    if (resource.path.empty()) continue;
+    variant += '/';
+    variant += resource.key;
+    variant += '=';
+    variant += path_utf8(resource.path);
+    variant += ':';
+    variant += sha256_file_hex(resource.path);
+  }
+  return variant;
+}
+
+DecodedImage decode_cached_image(const std::filesystem::path& input,
+                                 const ConvertOptions& options,
+                                 const RawDecodeOptions& raw) {
+  std::filesystem::path cache_file;
+  if (!options.decode_cache_directory.empty()) {
+    cache_file = decode_cache_path(
+        options.decode_cache_directory,
+        decode_cache_key(input, decode_cache_variant(options, raw),
+                         options.decode_cache_source_sha256));
+    DecodedImage cached;
+    if (read_decode_cache(cache_file, cached)) return cached;
+  }
+
+  auto decoded = decode_image(input, raw);
+  decoded.linear_p3 = resample_to_max_edge(
+      std::move(decoded.linear_p3), options.preview_max_edge);
+  if (!cache_file.empty()) {
+    static_cast<void>(write_decode_cache(
+        cache_file, decoded, options.decode_cache_budget_bytes));
+  }
+  return decoded;
 }
 
 std::filesystem::path decode_cache_path(const std::filesystem::path& directory,
@@ -265,7 +316,10 @@ bool read_decode_cache(const std::filesystem::path& file, DecodedImage& out) {
   const auto height = get_u32(header.data() + 16);
   const auto channels = get_u32(header.data() + 20);
   const auto json_length = get_u32(header.data() + 24);
-  if (width == 0 || height == 0 || channels == 0 || channels > 4) return false;
+  // FloatImage also carries the five-plane native-model feature tensor. The
+  // decode cache normally stores RGB, but keep its wire validator in sync with
+  // the shared image contract if a feature buffer is cached by a caller.
+  if (width == 0 || height == 0 || channels == 0 || channels > 5) return false;
   if (json_length > (1U << 20U)) return false;
   const auto pixel_count =
       static_cast<std::uint64_t>(width) * height * channels;

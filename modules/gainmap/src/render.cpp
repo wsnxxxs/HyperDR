@@ -95,14 +95,10 @@ void render_full_resolution(const FloatImage& source, float exposure,
 
   std::vector<float> row_peak(source.height, 1.0F);
   std::vector<float> row_below(source.height, 0.0F);
-  std::vector<std::uint64_t> row_wide(source.height, 0);
-  std::vector<std::uint64_t> row_lit(source.height, 0);
 
   parallel_for_rows(source.height, [&](const std::uint32_t y) {
     float peak = 1.0F;
     float below = 0.0F;
-    std::uint64_t wide = 0;
-    std::uint64_t lit = 0;
     for (std::uint32_t x = 0; x < source.width; ++x) {
       const std::size_t base =
           (static_cast<std::size_t>(y) * source.width + x) * 3;
@@ -142,32 +138,18 @@ void render_full_resolution(const FloatImage& source, float exposure,
             std::abs(hdr - sdr) / std::max(sdr, kEpsilon);
         below = std::max(below, relative);
       }
-      if (sdr > 0.02F) {
-        ++lit;
-        if (is_outside_rec709(base_rgb[0], base_rgb[1], base_rgb[2])) ++wide;
-      }
     }
     row_peak[y] = peak;
     row_below[y] = below;
-    row_wide[y] = wide;
-    row_lit[y] = lit;
   });
 
   float rendered_peak = 1.0F;
   float below_knee_difference_max = 0.0F;
-  std::uint64_t wide_count = 0;
-  std::uint64_t lit_count = 0;
   for (std::uint32_t y = 0; y < source.height; ++y) {
     rendered_peak = std::max(rendered_peak, row_peak[y]);
     below_knee_difference_max =
         std::max(below_knee_difference_max, row_below[y]);
-    wide_count += row_wide[y];
-    lit_count += row_lit[y];
   }
-  const float wide_gamut_fraction =
-      lit_count == 0 ? 0.0F
-                     : static_cast<float>(static_cast<double>(wide_count) /
-                                          static_cast<double>(lit_count));
 
   auto& stats = result.stats;
   stats.rendered_peak = rendered_peak;
@@ -177,9 +159,6 @@ void render_full_resolution(const FloatImage& source, float exposure,
                        1.0F)
           : 0.0F;
   stats.below_knee_relative_difference_max = below_knee_difference_max;
-  stats.wide_gamut_fraction = wide_gamut_fraction;
-  stats.wide_gamut_pixels = wide_count;
-  stats.wide_gamut_eligible_pixels = lit_count;
 }
 
 }  // namespace hyperdr

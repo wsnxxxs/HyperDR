@@ -13,6 +13,7 @@
 
 import { api, ApiError } from "../core/api.js";
 import { store } from "../core/store.js";
+import { t, onLocaleChange } from "../i18n/index.js";
 import { role, setText, debounce } from "../core/dom.js";
 import { toOptions, OPTION_KEYS } from "../settings/schema.js";
 
@@ -44,7 +45,7 @@ export function mountRunner({ toast }) {
   function peakClause(peakLinear) {
     if (!Number.isFinite(peakLinear) || peakLinear <= 1) return "";
     const stops = Math.log2(peakLinear);
-    return `实测峰值 ×${peakLinear.toFixed(2)}（+${stops.toFixed(1)} 档）`;
+    return t("run.peak", { peak: peakLinear.toFixed(2), stops: stops.toFixed(1) });
   }
 
   function syncResult(state) {
@@ -55,8 +56,9 @@ export function mountRunner({ toast }) {
     const meta = [
       result.width && result.height ? `${result.width}×${result.height}` : "",
       peakClause(result.peakLinear),
-      result.verified ? "已通过自检" : "",
-      Number.isFinite(result.durationS) ? `用时 ${result.durationS.toFixed(1)} s` : "",
+      result.verified ? t("run.verified") : "",
+      Number.isFinite(result.durationS)
+        ? t("run.duration", { seconds: result.durationS.toFixed(1) }) : "",
     ].filter(Boolean).join(" · ");
     setText(role("result-meta"), meta);
     const warn = role("result-warn");
@@ -76,7 +78,7 @@ export function mountRunner({ toast }) {
    * card has gone stale it says so by offering to "重新转换". */
   function syncRunLabel() {
     if (activeJobId || starting) return;
-    setText(runButton, isStale(store.get()) ? "重新转换" : "开始转换");
+    setText(runButton, isStale(store.get()) ? t("run.again") : t("run.start"));
   }
 
   function syncStale(state) {
@@ -94,7 +96,7 @@ export function mountRunner({ toast }) {
       const body = await api.command(runOptionsFor(store.get()));
       if (seq === commandSeq) setText(commandLine, body.command || "");
     } catch (_) {
-      if (seq === commandSeq) setText(commandLine, "当前无法生成命令行。");
+      if (seq === commandSeq) setText(commandLine, t("out.commandUnavailable"));
     }
   }, 300);
   commandLine.closest("details").addEventListener("toggle", refreshCommand);
@@ -116,9 +118,9 @@ export function mountRunner({ toast }) {
         document.execCommand("copy");
         area.remove();
       }
-      toast("已复制命令行");
+      toast(t("out.commandCopied"));
     } catch (_) {
-      toast("复制失败，请手动选择文本复制。", true);
+      toast(t("out.commandCopyFailed"), true);
     }
   });
 
@@ -135,8 +137,8 @@ export function mountRunner({ toast }) {
   function setTrackingInterrupted(jobId, interrupted) {
     if (activeJobId !== jobId || trackingInterrupted === interrupted) return;
     trackingInterrupted = interrupted;
-    setText(runButton, interrupted ? "连接中断，正在重试…" : "转换中…");
-    setText(cancelButton, interrupted ? "停止等待" : "取消");
+    setText(runButton, interrupted ? t("run.interrupted") : t("run.busy"));
+    setText(cancelButton, interrupted ? t("run.stopWaiting") : t("run.cancel"));
     cancelButton.disabled = false;
   }
 
@@ -184,7 +186,7 @@ export function mountRunner({ toast }) {
     return line.length > limit ? line.slice(0, limit - 1) + "…" : line;
   }
 
-  const basename = (path) => String(path || "").split(/[\\/]/).filter(Boolean).pop() || "输出文件";
+  const basename = (path) => String(path || "").split(/[\\/]/).filter(Boolean).pop() || t("run.outputFile");
 
   // Report schema 8. Only the single success file is read; the reasons are
   // joined for display and never inspected, so a new reason needs no change here.
@@ -195,13 +197,14 @@ export function mountRunner({ toast }) {
     let degradedNote = "";
     if (file.decode_degraded) {
       const reasons = Array.isArray(file.decode_degradation_reasons)
-        ? file.decode_degradation_reasons.join("、")
+        ? file.decode_degradation_reasons.join(t("run.reasonSeparator"))
         : "";
       const actual = `${file.decoded_width}×${file.decoded_height}`;
       const target = `${file.target_width}×${file.target_height}`;
+      const wrapped = reasons ? t("run.reasonWrap", { reasons }) : "";
       degradedNote = file.target_dimensions_applied === false
-        ? `已忽略记录的 ${target} 裁切，实际输出 ${actual}${reasons ? `（${reasons}）` : ""}`
-        : `实际输出 ${actual}，而非预期的 ${target}${reasons ? `（${reasons}）` : ""}`;
+        ? t("run.cropIgnored", { target, actual, reasons: wrapped })
+        : t("run.cropMismatch", { actual, target, reasons: wrapped });
     }
     return {
       name: basename(file.output),
@@ -221,15 +224,15 @@ export function mountRunner({ toast }) {
     store.set({ jobId: null });
     runProgress.hidden = true;
     syncRunLabel();
-    setText(cancelButton, "取消");
+    setText(cancelButton, t("run.cancel"));
     cancelButton.hidden = true;
     cancelButton.disabled = false;
   }
 
   async function start() {
     const state = store.get();
-    if (!state.capabilities?.ready) { toast("转换程序尚未就绪。", true); return; }
-    if (!state.file) { toast("请先选择图片。", true); return; }
+    if (!state.capabilities?.ready) { toast(t("run.notReady"), true); return; }
+    if (!state.file) { toast(t("run.noFile"), true); return; }
 
     const runOptions = runOptionsFor(state);
     const optionsKey = JSON.stringify(runOptions);
@@ -249,8 +252,8 @@ export function mountRunner({ toast }) {
     activeJobId = started.jobId;
     trackingInterrupted = false;
     store.set({ jobId: started.jobId, result: null });
-    setText(runButton, "转换中…");
-    setText(runProgress, "正在启动转换…");
+    setText(runButton, t("run.busy"));
+    setText(runProgress, t("run.starting"));
     runProgress.hidden = false;
     cancelButton.hidden = false;
     cancelButton.disabled = false;
@@ -260,12 +263,12 @@ export function mountRunner({ toast }) {
       if (outcome.abandoned) return;
 
       if (outcome.cancelled) {
-        toast("已取消转换");
+        toast(t("run.cancelled"));
       } else if (outcome.timedOut) {
-        toast("转换超时已终止", true);
+        toast(t("run.timeout"), true);
       } else if (outcome.rc !== 0) {
         const detail = lastLine(outcome.log);
-        toast(detail ? "转换失败：" + detail : "转换失败，请重试或检查服务日志", true);
+        toast(detail ? t("run.failedDetail", { detail }) : t("run.failed"), true);
       } else {
         const summary = summarizeReport(outcome.report);
         // Cache-busted: the same URL serves a different file after the next run.
@@ -283,11 +286,11 @@ export function mountRunner({ toast }) {
         };
         store.set({ result: completedResult });
         toast(summary.degradedNote
-          ? "转换成功，但" + summary.degradedNote
-          : "转换成功", Boolean(summary.degradedNote));
+          ? t("run.succeededDegraded", { note: summary.degradedNote })
+          : t("run.succeeded"), Boolean(summary.degradedNote));
       }
     } catch (error) {
-      toast(error.message || "转换任务状态已丢失。", true);
+      toast(error.message || t("run.lost"), true);
     } finally {
       resetRunningUi(started.jobId);
     }
@@ -300,7 +303,7 @@ export function mountRunner({ toast }) {
     if (!jobId) return;
     if (trackingInterrupted) {
       resetRunningUi(jobId);
-      toast("已停止等待；服务端任务可能仍在后台运行。", true);
+      toast(t("run.stoppedWaiting"), true);
       return;
     }
     cancelButton.disabled = true;
@@ -324,5 +327,13 @@ export function mountRunner({ toast }) {
       commandSeq++;
       refreshCommand();
     }
+  });
+
+  /* The run button and the result card are written imperatively, so a language
+   * change has to re-emit them; anything transient (a toast already on screen,
+   * a log line already scrolled past) keeps the language it was written in. */
+  onLocaleChange(() => {
+    syncRunLabel();
+    syncResult(store.get());
   });
 }

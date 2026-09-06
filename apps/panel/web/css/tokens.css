@@ -102,10 +102,10 @@
   --space-5: 24px;
   --space-6: 32px;
 
-  --page-pad: clamp(16px, 1.8vw, 28px);
+  --page-pad: clamp(12px, 1.4vw, 20px);
   --page-pad-inline: max(var(--page-pad), env(safe-area-inset-left), env(safe-area-inset-right));
   --page-pad-bottom: max(var(--page-pad), env(safe-area-inset-bottom));
-  --region-gap: var(--space-4);
+  --region-gap: var(--space-3);
 
   /* -- elevation & liquid glassmorphism ------------------------------ */
   --edge:            var(--glass-edge);
@@ -125,6 +125,12 @@
   --shadow-glass:
     0 12px 36px -4px light-dark(rgba(30, 64, 120, 0.07), rgba(0, 0, 0, 0.55)),
     inset 0 1px 0 0 var(--glass-edge);
+  /* Floating glass surfaces -- the popover, the toast, the preferences panel.
+   * Referenced since the glass pass landed but never defined, which silently
+   * voided the whole box-shadow declaration at each of those sites. */
+  --shadow-glass-lg:
+    0 24px 60px -12px light-dark(rgba(30, 64, 120, 0.16), rgba(0, 0, 0, 0.70)),
+    0 8px 24px -8px light-dark(rgba(30, 64, 120, 0.10), rgba(0, 0, 0, 0.45));
   --shadow-glow:
     0 0 24px light-dark(rgba(0, 113, 227, 0.15), rgba(56, 189, 248, 0.25));
   --shadow-hdr:
@@ -150,6 +156,10 @@
 @media (prefers-reduced-motion: reduce) {
   :root { --duration: 0ms; }
 }
+
+/* The preferences override, for people whose OS says one thing and who want
+   the other. It sits after the media query so it wins in both directions. */
+:root[data-motion="reduced"] { --duration: 0ms; }
 
 @media (prefers-contrast: more) {
   :root {

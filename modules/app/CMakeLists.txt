@@ -14,6 +14,12 @@ hyperdr_add_module(app
   DEPENDS HyperDR::codec)
 
 add_executable(HyperDR src/main.cpp)
+if(HYPERDR_WITH_NCNN)
+  target_sources(HyperDR PRIVATE "${HYPERDR_MODEL_RESOURCE_FILE}")
+  if(HYPERDR_REGENERATE_NCNN_MODEL)
+    add_dependencies(HyperDR HyperDRModelNcnnGenerated)
+  endif()
+endif()
 target_link_libraries(HyperDR PRIVATE HyperDR::app)
 hyperdr_configure_target(HyperDR)
 hyperdr_restore_x265_multibit(HyperDR)

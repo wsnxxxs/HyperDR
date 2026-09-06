@@ -5,7 +5,7 @@ if(HYPERDR_WITH_CODECS)
   # includes <libheif/heif.h> directly, and the module deliberately keeps that
   # dependency private. Without this the only test that exercises the real
   # codec paths fails to compile, which is how it came to be skipped silently.
-  hyperdr_add_test(codec_test LINK HyperDR::codec heif)
+  hyperdr_add_test(codec_test LINK HyperDR::codec heif PNG::PNG)
   if(TARGET codec_test)
     hyperdr_restore_x265_multibit(codec_test)
     hyperdr_copy_libultrahdr(codec_test)

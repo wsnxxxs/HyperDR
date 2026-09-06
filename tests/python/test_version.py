@@ -18,6 +18,14 @@ class VersionConsistencyTests(unittest.TestCase):
         changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
         schema = json.loads((ROOT / "schema/settings.json").read_text(encoding="utf-8"))
         manifest = json.loads((ROOT / "vcpkg.json").read_text(encoding="utf-8-sig"))
+        tauri_config = json.loads(
+            (ROOT / "apps/desktop/src-tauri/tauri.conf.json").read_text(
+                encoding="utf-8"))
+        desktop_package = json.loads(
+            (ROOT / "apps/desktop/package.json").read_text(encoding="utf-8"))
+        desktop_cargo = (
+            ROOT / "apps/desktop/src-tauri/Cargo.toml"
+        ).read_text(encoding="utf-8")
 
         cmake_version = re.search(r"project\(HyperDR VERSION ([0-9.]+)", cmake).group(1)
         header_version = re.search(r'kVersion\[\] = "([0-9.]+)"', header).group(1)
@@ -29,6 +37,11 @@ class VersionConsistencyTests(unittest.TestCase):
             released_version,
             schema["tool"],
             manifest["version-string"],
+            tauri_config["version"],
+            desktop_package["version"],
+            re.search(
+                r'^version = "([0-9.]+)"', desktop_cargo, re.MULTILINE
+            ).group(1),
         }
         self.assertEqual(len(versions), 1, "release version sources disagree: %r" % versions)
 

@@ -11,7 +11,6 @@ import os
 import socket
 import ssl
 import threading
-import webbrowser
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote
@@ -131,10 +130,9 @@ def build_server(host: str, port: int, token: str, scheme: str,
     loopback = host.lower() in {"127.0.0.1", "localhost", "::1"}
     server.context = api.Context(
         output_selections={},
-        # Chromium/WebView treats loopback origins as trustworthy even when
-        # the local panel uses HTTP. This is the same predicate the frontend
-        # observes through window.isSecureContext.
-        secure_context_expected=scheme == "https" or (desktop and loopback),
+        # TLS only. Chromium/WebView also treats a loopback HTTP origin as a
+        # trustworthy secure context, but the page observes that for itself
+        # through window.isSecureContext, so the server does not report it.
         transport_secure=scheme == "https",
         # Absolute source paths are a local desktop capability; never expose
         # that route if a desktop process was deliberately rebound to LAN.
@@ -212,11 +210,6 @@ def serve(*, desktop: bool = False) -> None:
         print("提示：局域网 HTTP 可以上传和转换，但 Safari WebGPU HDR 需要受信任的 HTTPS。")
     if removed:
         print(f"已清理 {removed} 个过期任务。")
-    if not desktop and os.environ.get("HYPERDR_NO_BROWSER") != "1":
-        try:
-            webbrowser.open(local_url)
-        except Exception:
-            pass
     try:
         server.serve_forever()
     except KeyboardInterrupt:

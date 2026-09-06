@@ -4,23 +4,21 @@
  * once per image and swapped wholesale, so the fallback path never has to ask
  * whether a GPU device happens to exist right now.
  *
- * Comparing against the source is a first-class mode, not a hidden gesture:
- * a segmented control offers effect / original / split, where split stacks a
- * clipped 2D copy of the source over the live renderer with a draggable wipe
- * between them. Press-and-hold still works on the desktop because hands learn
- * it once and use it forever.
+ * Press-and-hold compares against the source on desktop.
  */
 
 import { api } from "../core/api.js";
 import { store } from "../core/store.js";
-import { role, setText, setPressed, clamp } from "../core/dom.js";
+import { t, onLocaleChange } from "../i18n/index.js";
+import { prefs, previewCeilingPx } from "../ui/prefs-schema.js";
+import { role, setText, clamp } from "../core/dom.js";
 import { mobileLayout, touchQuery } from "../core/media.js";
 import { renderSdr, planeToImageData } from "./cpu.js";
 import { createHdrRenderer } from "./gpu.js";
 import { createSdrGpuRenderer } from "./sdr-gpu.js";
 import { analyse, mountScope } from "./scope.js";
 import { createUploader } from "./session.js";
-import { defaultSettings, toOptions } from "../settings/schema.js";
+import { AI_POST_KEYS, defaultSettings, toOptions } from "../settings/schema.js";
 
 const hdrDisplayQuery = window.matchMedia("(dynamic-range: high)");
 
@@ -33,23 +31,14 @@ const PREVIEW_RELOAD_DELAY_MS = 240;
 /* Shown on the photograph itself (see .stage-hint), so the gestures are
  * discoverable by sighted users too -- an aria-label alone only speaks to
  * screen readers. */
-const TOUCH_HINT = "轻点更换图片 · 缩放后拖动平移";
-const MOUSE_HINT = "轻点更换图片 · 按住查看原图 · 滚轮缩放";
+const TOUCH_HINT = "stage.hintTouch";
+const MOUSE_HINT = "stage.hintMouse";
 const INPUT_DOMAIN_LABELS = Object.freeze({
-  "display-referred-hdr": "输入：HDR",
-  "display-referred-sdr": "输入：SDR",
-  "scene-referred": "输入：RAW/场景源",
-  unknown: "输入：类型未知",
+  "display-referred-hdr": "stage.input.hdr",
+  "display-referred-sdr": "stage.input.sdr",
+  "scene-referred": "stage.input.scene",
+  unknown: "stage.input.unknown",
 });
-
-const VIEW_MODES = [["original", "原图"], ["split", "对比"], ["effect", "HDR 效果"]];
-const ZOOM_LEVELS = [
-  ["fit", "Fit", 0],
-  ["100", "100%", 1],
-  ["200", "200%", 2],
-  ["400", "400%", 4],
-];
-const ZOOM_SHORTCUTS = { "0": "fit", "1": "100", "2": "200", "4": "400" };
 
 export function mountStage({ toast }) {
   const stage = role("stage");
@@ -71,8 +60,6 @@ export function mountStage({ toast }) {
   const divider = role("divider");
   const hdrCanvas = role("canvas-hdr");
   const originalCanvas = role("canvas-original");
-  const viewModeGroup = role("view-mode");
-  const zoomControls = role("zoom-controls");
   const expandButton = role("stage-expand");
   const mathModeButton = role("math-mode");
   const optimizeButton = role("optimize");
@@ -100,8 +87,6 @@ export function mountStage({ toast }) {
   let frame_ = 0;
   let imageGeneration = 0;
   let rendererGeneration = 0;
-  let panGesture = null;
-  let spacePan = false;
   let sourceDomainLabel = "";
 
   const isCurrentImage = (epoch) => epoch === imageGeneration;
@@ -109,104 +94,10 @@ export function mountStage({ toast }) {
   const isCurrentRenderer = (epoch) => epoch === rendererGeneration;
   const invalidateRenderer = () => ++rendererGeneration;
 
-  /* ── view mode segmented ──────────────────────────────────────────── */
-
-  const modeButtons = VIEW_MODES.map(([id, label]) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.setAttribute("aria-pressed", "false");
-    button.textContent = label;
-    button.addEventListener("click", () => store.set({ viewMode: id }));
-    viewModeGroup.append(button);
-    return [id, button];
-  });
-
-  const zoomButtons = ZOOM_LEVELS.map(([id, label, pixels]) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.setAttribute("aria-pressed", "false");
-    button.setAttribute("aria-label", id === "fit"
-      ? "适合窗口"
-      : `${label} 预览像素缩放`);
-    button.title = id === "fit" ? "适合窗口" : `${label}（预览像素）`;
-    button.textContent = label;
-    button.addEventListener("click", (event) => {
-      event.stopPropagation();
-      setZoomLevel(id);
-    });
-    zoomControls.append(button);
-    return [id, pixels, button];
-  });
-
   const showingOriginal = () => {
     const state = store.get();
-    return state.viewMode === "original" || (state.comparing && state.viewMode !== "split");
+    return state.viewMode === "original" || Boolean(state.comparing);
   };
-
-  const zoomCanvases = () => [
-    hdrCanvas, sdrCanvas, originalCanvas,
-    role("canvas-zebra-hot"), role("canvas-zebra-cold"), role("canvas-mask"),
-  ].filter(Boolean);
-
-  function zoomMetrics(state = store.get(), level = state.zoomLevel) {
-    if (!image.source || !frame) return null;
-    const frameWidth = frame.clientWidth || frame.getBoundingClientRect().width;
-    const frameHeight = frame.clientHeight || frame.getBoundingClientRect().height;
-    const fitScale = Math.min(
-      frameWidth / image.source.width,
-      frameHeight / image.source.height);
-    if (!(fitScale > 0)) return null;
-    const pixels = ZOOM_LEVELS.find(([id]) => id === level)?.[2] || 0;
-    const imageScale = pixels > 0 ? pixels : fitScale;
-    const scale = imageScale / fitScale;
-    return {
-      scale,
-      maxPanX: Math.max(0, (image.source.width * imageScale - frameWidth) / 2),
-      maxPanY: Math.max(0, (image.source.height * imageScale - frameHeight) / 2),
-    };
-  }
-
-  function applyZoom() {
-    const state = store.get();
-    const metrics = zoomMetrics(state);
-    const panX = metrics ? clamp(Number(state.panX) || 0, -metrics.maxPanX, metrics.maxPanX) : 0;
-    const panY = metrics ? clamp(Number(state.panY) || 0, -metrics.maxPanY, metrics.maxPanY) : 0;
-    if (panX !== state.panX || panY !== state.panY) {
-      store.set({ panX, panY });
-      return;
-    }
-    const transform = metrics
-      ? `translate3d(${panX}px, ${panY}px, 0) scale(${metrics.scale})`
-      : "";
-    for (const canvas of zoomCanvases()) canvas.style.transform = transform;
-    const zoomed = Boolean(metrics && state.zoomLevel !== "fit");
-    stage.classList.toggle("is-zoomed", zoomed);
-    stage.classList.toggle("is-panning", Boolean(panGesture));
-    for (const [id, _pixels, button] of zoomButtons) setPressed(button, id === state.zoomLevel);
-  }
-
-  function setZoomLevel(level, anchor = null) {
-    if (!ZOOM_LEVELS.some(([id]) => id === level)) return;
-    const current = store.get();
-    const before = zoomMetrics(current, current.zoomLevel);
-    const after = zoomMetrics(current, level);
-    let panX = level === "fit" ? 0 : current.panX;
-    let panY = level === "fit" ? 0 : current.panY;
-    if (anchor && before && after) {
-      const rect = frame.getBoundingClientRect();
-      const offsetX = anchor.clientX - (rect.left + rect.width / 2);
-      const offsetY = anchor.clientY - (rect.top + rect.height / 2);
-      const imageX = (offsetX - current.panX) / before.scale;
-      const imageY = (offsetY - current.panY) / before.scale;
-      panX = offsetX - imageX * after.scale;
-      panY = offsetY - imageY * after.scale;
-    }
-    if (after) {
-      panX = clamp(panX, -after.maxPanX, after.maxPanX);
-      panY = clamp(panY, -after.maxPanY, after.maxPanY);
-    }
-    store.set({ zoomLevel: level, panX, panY });
-  }
 
   /* ── the wipe ─────────────────────────────────────────────────────── */
 
@@ -262,6 +153,29 @@ export function mountStage({ toast }) {
     stage.style.height = `${height}px`;
   }
 
+  // Keep the comparison pixels independent from look reloads, while matching
+  // the intrinsic canvas size of the current native frame. Preview tiers can
+  // change when the stage is expanded, so the first cached ImageData may not
+  // have the same dimensions as the new HDR plane.
+  function paintOriginal(width, height) {
+    originalCanvas.width = width;
+    originalCanvas.height = height;
+    const context = originalCanvas.getContext(
+      "2d", { colorSpace: "display-p3" }) || originalCanvas.getContext("2d");
+    if (image.original.width === width && image.original.height === height) {
+      context.putImageData(image.original, 0, 0);
+      return;
+    }
+    const sourceCanvas = document.createElement("canvas");
+    sourceCanvas.width = image.original.width;
+    sourceCanvas.height = image.original.height;
+    const sourceContext = sourceCanvas.getContext(
+      "2d", { colorSpace: "display-p3" }) || sourceCanvas.getContext("2d");
+    sourceContext.putImageData(image.original, 0, 0);
+    context.imageSmoothingEnabled = true;
+    context.drawImage(sourceCanvas, 0, 0, width, height);
+  }
+
   function syncView() {
     const state = store.get();
     const hasImage = Boolean(image.source);
@@ -285,17 +199,17 @@ export function mountStage({ toast }) {
       originalCanvas.style.removeProperty("clip-path");
     }
 
-    setText(badge, original ? "原图" : renderer?.kind === "hdr" ? "HDR 输出" : "SDR 近似");
+    setText(badge, original ? t("stage.badgeOriginal")
+      : renderer?.kind === "hdr" ? "HDR" : t("stage.badgeSdr"));
     badge.hidden = !hasImage || renderer?.kind !== "hdr";
     badge.title = original
-      ? "当前显示未调整的原图"
-      : "当前使用真实 HDR 输出；输入文件类型见右侧状态";
+      ? t("stage.titleOriginal")
+      : t("stage.titleHdr");
     hdrStatus.hidden = !hasImage;
     hintEl.hidden = !hasImage;
     if (!hasImage) hintEl.classList.remove("is-visible");
     stage.classList.toggle("is-comparing", original);
     stage.setAttribute("aria-pressed", String(original));
-    for (const [id, button] of modeButtons) setPressed(button, id === state.viewMode);
   }
 
   let dividerPointer = null;
@@ -326,24 +240,29 @@ export function mountStage({ toast }) {
 
   new ResizeObserver(() => {
     if (!mobileLayout.matches && !expanded) fitStageToImage();
-    applyZoom();
     positionDivider();
   }).observe(viewport);
 
   /* ── capability reporting ─────────────────────────────────────────── */
 
-  function setCapability(message, ok) {
-    setText(hdrStatus, sourceDomainLabel ? `${sourceDomainLabel} · ${message}` : message);
+  let lastCapability = null;
+
+  function setCapability(key, ok, params) {
+    lastCapability = { key, ok, params };
+    const message = t(key, params);
+    const domain = sourceDomainLabel ? t(sourceDomainLabel) : "";
+    setText(hdrStatus, domain ? `${domain} · ${message}` : message);
     hdrStatus.classList.toggle("is-ok", Boolean(ok));
     hdrStatus.hidden = !Boolean(image.source);
     stage.dataset.previewMode = renderer?.kind || "uninitialized";
   }
 
   function reportInitialCapability() {
-    if (!hdrDisplayQuery.matches) setCapability("SDR 屏幕预览 (导出为 HDR)", false);
-    else if (!window.isSecureContext) setCapability("HTTP 模式 (导出为 HDR)", false);
-    else if (!navigator.gpu) setCapability("无 WebGPU (导出为 HDR)", false);
-    else setCapability("等待图像 · 将在预览时验证 HDR 输出", false);
+    if (!prefs.get().hdrPreview) setCapability("hdr.disabled", false);
+    else if (!hdrDisplayQuery.matches) setCapability("hdr.sdrScreen", false);
+    else if (!window.isSecureContext) setCapability("hdr.httpMode", false);
+    else if (!navigator.gpu) setCapability("hdr.noWebgpu", false);
+    else setCapability("hdr.waiting", false);
   }
 
   /* ── rendering ────────────────────────────────────────────────────── */
@@ -380,9 +299,24 @@ export function mountStage({ toast }) {
     return new Promise((resolve) => requestAnimationFrame(resolve));
   }
 
-  function canUseHdrRenderer() {
-    return hdrDisplayQuery.matches && window.isSecureContext && Boolean(navigator.gpu);
+  /** Why the true-HDR path is unavailable, or "" when it is available.
+   *
+   *  One function so the branch that picks the renderer, the branch that reuses
+   *  it, and the status line can never disagree about the reason -- the
+   *  diagnostics group reports this string, and "SDR preview" with no cause was
+   *  the least useful thing it could say.
+   */
+  function sdrReason() {
+    // The preference is a hard veto, not a hint: someone who turned true HDR
+    // off wants the SDR path even on hardware that could do better.
+    if (!prefs.get().hdrPreview) return "hdr.reason.disabledByPreference";
+    if (!hdrDisplayQuery.matches) return "hdr.reason.sdrScreen";
+    if (!window.isSecureContext) return "hdr.reason.httpMode";
+    if (!navigator.gpu) return "hdr.reason.noWebgpu";
+    return "";
   }
+
+  const canUseHdrRenderer = () => sdrReason() === "";
 
   function chooseSdrRenderer(reason, epoch = rendererGeneration, forceCpu = false) {
     if (!isCurrentRenderer(epoch) || !image.frame) return;
@@ -393,13 +327,13 @@ export function mountStage({ toast }) {
       let created = null;
       created = createSdrGpuRenderer(sdrCanvas, () => {
         if (isCurrentRenderer(epoch) && renderer === created) {
-          chooseSdrRenderer("SDR 图形设备断开", epoch, true);
+          chooseSdrRenderer("hdr.reason.sdrDeviceLost", epoch, true);
         }
       });
       renderer = created;
       renderer.upload(image.frame);
       showCanvas("sdr");
-      setCapability(`${reason} · SDR 预览 (导出为 HDR)`, false);
+      setCapability("hdr.sdrPreviewWhy", false, { reason: t(reason) });
     } catch (error) {
       renderer = null;
       // A canvas that has successfully created a WebGL context cannot later
@@ -411,7 +345,7 @@ export function mountStage({ toast }) {
       sdrCanvas.replaceWith(replacement);
       sdrCanvas = replacement;
       showCanvas("sdr");
-      setCapability(`${reason} · SDR 兼容预览 (导出为 HDR)`, false);
+      setCapability("hdr.sdrCompatWhy", false, { reason: t(reason) });
     }
     syncView();
     schedule();
@@ -431,10 +365,13 @@ export function mountStage({ toast }) {
       renderer.upload(image.frame);
       showCanvas(wantsHdr ? "hdr" : "sdr");
       if (wantsHdr) {
-        const gamut = renderer.outputColorSpace === "display-p3" ? "Display P3" : "扩展 sRGB";
-        setCapability(`真 HDR · ${gamut}`, true);
+        const gamut = renderer.outputColorSpace === "display-p3"
+          ? "Display P3" : t("hdr.gamutExtendedSrgb");
+        setCapability("hdr.true", true, { gamut });
       } else {
-        setCapability("SDR 预览 (导出为 HDR)", false);
+        const reason = sdrReason();
+        if (reason) setCapability("hdr.sdrPreviewWhy", false, { reason: t(reason) });
+        else setCapability("hdr.sdrPreview", false);
       }
       syncView();
       schedule();
@@ -444,35 +381,33 @@ export function mountStage({ toast }) {
     renderer?.destroy();
     renderer = null;
 
-    if (!wantsHdr && !hdrDisplayQuery.matches) {
-      chooseSdrRenderer("SDR 屏幕", epoch);
-    } else if (!wantsHdr && !window.isSecureContext) {
-      chooseSdrRenderer("HTTP 模式", epoch);
-    } else if (!wantsHdr && !navigator.gpu) {
-      chooseSdrRenderer("无 WebGPU 支持", epoch);
+    const blocked = sdrReason();
+    if (blocked) {
+      chooseSdrRenderer(blocked, epoch);
     } else {
       let created = null;
-      setCapability("验证 HDR 支持…", false);
+      setCapability("hdr.verifying", false);
       try {
         await prepareHdrCanvas();
         if (!isCurrentRenderer(epoch) || !image.frame) return;
         created = await createHdrRenderer(hdrCanvas, () => {
           if (isCurrentRenderer(epoch) && renderer === created) {
-            chooseSdrRenderer("HDR 设备断开", epoch);
+            chooseSdrRenderer("hdr.reason.deviceLost", epoch);
           }
         });
         if (!isCurrentRenderer(epoch) || !image.frame) { created.destroy(); return; }
         renderer = created;
         renderer.upload(image.frame);
         showCanvas("hdr");
-        const gamut = renderer.outputColorSpace === "display-p3" ? "Display P3" : "扩展 sRGB";
-        setCapability(`真 HDR · ${gamut}`, true);
+        const gamut = renderer.outputColorSpace === "display-p3"
+          ? "Display P3" : t("hdr.gamutExtendedSrgb");
+        setCapability("hdr.true", true, { gamut });
       } catch (error) {
         created?.destroy();
         if (!isCurrentRenderer(epoch)) return;
-        const detail = error?.message ? `：${error.message}` : "";
+        const detail = error?.message ? `: ${error.message}` : "";
         console.error("HyperDR HDR renderer initialization failed", error);
-        chooseSdrRenderer(`WebGPU HDR 初始化失败${detail}`, epoch);
+        chooseSdrRenderer(t("hdr.reason.initFailed", { detail }), epoch);
       }
     }
     if (!isCurrentRenderer(epoch)) return;
@@ -483,9 +418,12 @@ export function mountStage({ toast }) {
   /* ── loading ──────────────────────────────────────────────────────── */
 
   function previewTier() {
-    const ceiling = Number(store.get().capabilities?.previewMaxEdge);
+    const served = Number(store.get().capabilities?.previewMaxEdge);
     // Before /api/state resolves, let the server apply its configured maximum.
-    if (!Number.isFinite(ceiling) || ceiling <= 0) return null;
+    if (!Number.isFinite(served) || served <= 0) return null;
+    // The preference can only lower the ceiling: raising it past what the
+    // server will decode would just produce a rejected request.
+    const ceiling = Math.min(served, previewCeilingPx());
     const allowed = PREVIEW_TIERS.filter((tier) => tier <= ceiling);
     const list = allowed.length ? allowed : [ceiling];
     const box = frame.getBoundingClientRect();
@@ -502,14 +440,14 @@ export function mountStage({ toast }) {
     viewport.classList.toggle("is-expanded", expanded);
     document.documentElement.classList.toggle("preview-expanded", expanded);
     expandButton.setAttribute("aria-pressed", String(expanded));
-    expandButton.setAttribute("aria-label", expanded ? "退出全屏查看" : "全屏查看");
+    expandButton.setAttribute("aria-label",
+      expanded ? t("stage.collapse") : t("stage.expand"));
 
     if (!expanded) {
       if (exitNative && document.fullscreenElement === viewport) {
         document.exitFullscreen?.().catch(() => {});
       }
       fitStageToImage();
-      applyZoom();
       positionDivider();
       return;
     }
@@ -525,7 +463,6 @@ export function mountStage({ toast }) {
     // higher cached preview tier only when the existing decode is too small.
     requestAnimationFrame(() => requestAnimationFrame(() => {
       if (!expanded) return;
-      applyZoom();
       positionDivider();
       const wanted = previewTier();
       if (wanted && wanted > image.previewRequestEdge) load();
@@ -541,7 +478,7 @@ export function mountStage({ toast }) {
     }
   });
 
-  function clear(message = "选择图片，或拖到这里") {
+  function clear(message = t("stage.empty")) {
     invalidateImage();
     invalidateRenderer();
     updateExpandedState(false);
@@ -560,7 +497,6 @@ export function mountStage({ toast }) {
     analysis.modelGain = null;
     store.set({
       comparing: false, maskKey: null,
-      zoomLevel: "fit", panX: 0, panY: 0,
       previewReady: false,
       previewOptimized: false, modelGainReady: false, optimizing: false,
     });
@@ -585,7 +521,7 @@ export function mountStage({ toast }) {
     const sessionId = store.get().sessionId;
     const epoch = invalidateImage();
     if (!sessionId) { clear(); reportInitialCapability(); return; }
-    setText(emptyTitle, "正在生成预览…");
+    setText(emptyTitle, t("stage.generating"));
 
     try {
       const state = store.get();
@@ -603,7 +539,7 @@ export function mountStage({ toast }) {
       image.frame = preview;
       sourceDomainLabel = INPUT_DOMAIN_LABELS[preview.metadata.inputDomain]
         || INPUT_DOMAIN_LABELS.unknown;
-      setCapability("正在验证 HDR 输出", false);
+      setCapability("hdr.verifyingOutput", false);
       // Diagnostics receive an SDR display copy. Preview rendering consumes
       // only the untouched native float planes above.
       image.source = planeToImageData(preview.base, width, height);
@@ -617,14 +553,10 @@ export function mountStage({ toast }) {
         canvas.width = width;
         canvas.height = height;
       }
-      // Keep the comparison layer at the dimensions of the first frame. CSS
-      // scales it to the current stage, so a later high-resolution preview
-      // tier cannot replace the cached original with a brightened frame.
-      originalCanvas.width = image.original.width;
-      originalCanvas.height = image.original.height;
-      const originalContext = originalCanvas.getContext(
-        "2d", { colorSpace: "display-p3" }) || originalCanvas.getContext("2d");
-      originalContext.putImageData(image.original, 0, 0);
+      // The comparison content remains the first frame, but its canvas is
+      // resampled to the current frame size so original and HDR share one
+      // intrinsic resolution at every preview tier.
+      paintOriginal(width, height);
       // Scope statistics use the untouched native linear planes. The 8-bit
       // image copy remains only for the original comparison canvas and zebra
       // presentation; folding HDR through a display shoulder here destroyed
@@ -636,7 +568,6 @@ export function mountStage({ toast }) {
       empty.style.display = "none";
       stage.classList.add("has-image");
       fitStageToImage();
-      applyZoom();
       stage.setAttribute("role", "button");
       stage.tabIndex = 0;
       store.set({ comparing: false });
@@ -644,7 +575,7 @@ export function mountStage({ toast }) {
       flashHint();
       if (preview.metadata.status === "degraded") {
         const reasons = (preview.metadata.degradationReasons || []).join(", ");
-        toast(`预览已降级：${reasons || "原生 HDR 解码失败"}`, true);
+        toast(t("hdr.degraded", { reasons: reasons || t("hdr.degradedFallback") }), true);
       }
       await chooseRenderer();
       if (isCurrentImage(epoch)) store.set({ previewReady: true });
@@ -656,10 +587,10 @@ export function mountStage({ toast }) {
       if (error.status === 499) return;
       store.set({ previewReady: false });
       if (error.status === 503) {
-        toast("预览正在切换，请稍候。");
+        toast(t("err.previewSwitching"));
         return;
       }
-      const message = error.message || "无法载入预览。";
+      const message = error.message || t("err.preview");
       if (error.status === 404) {
         clear(message);
         return;
@@ -684,19 +615,22 @@ export function mountStage({ toast }) {
     onProgress: (fraction) => {
       const percent = Math.round(fraction * 100);
       progressBar.style.width = `${percent}%`;
-      setText(progressText, fraction > 0 && fraction < 1 ? `上传中 · ${percent}%` : "");
-      setText(uploadOverlayText, `上传中 · ${percent}%`);
+      const uploading = t("stage.uploading", { percent });
+      setText(progressText, fraction > 0 && fraction < 1 ? uploading : "");
+      setText(uploadOverlayText, uploading);
     },
     onReady: async () => {
       modelGain = null;
       analysis.modelGain = null;
       image.original = null;
+      const activeGamut = store.get().colorGamut;
       store.set({
         // All image adjustments are image-scoped. Do not carry a previous
         // photograph's grade into a newly uploaded image. Keep the selected
         // output format, which is a workflow choice rather than a grade.
         ...defaultSettings(store.get().encoding),
-        zoomLevel: "fit", panX: 0, panY: 0,
+        colorGamut: activeGamut,
+        clampSrgb: activeGamut === "srgb" ? true : store.get().clampSrgb,
         previewReady: false,
         previewOptimized: false, modelGainReady: false, optimizing: false,
       });
@@ -748,7 +682,7 @@ export function mountStage({ toast }) {
     const extensions = capabilities?.inputExtensions;
     if (!Array.isArray(extensions) || !extensions.length) return;
     fileInput.accept = ["image/*", ...extensions].join(",");
-    setText(supportHint, "支持 RAW · HEIC · JPG · PNG · AVIF");
+    setText(supportHint, t("stage.support"));
     supportHint.title = extensions.join(" ");
   };
   store.watch("capabilities", describeSupport);
@@ -761,7 +695,7 @@ export function mountStage({ toast }) {
     const list = Array.from(files || []);
     if (!list.length) return false;
     if (list.length > 1) {
-      toast(`一次只能处理一张图片，已选用「${list[0].name}」。`);
+      toast(t("err.oneFile", { name: list[0].name }));
     }
     upload.start(list);
     return true;
@@ -787,46 +721,6 @@ export function mountStage({ toast }) {
 
   const gesture = { pointerId: null, at: 0, x: 0, y: 0, timer: 0 };
 
-  function beginPan(event) {
-    if (!image.source || isStageControl(event.target)) return false;
-    const zoomed = store.get().zoomLevel !== "fit";
-    const wantsPan = event.button === 1 || (event.button === 0 && (zoomed || spacePan));
-    if (!wantsPan) return false;
-    event.preventDefault();
-    panGesture = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      panX: store.get().panX,
-      panY: store.get().panY,
-    };
-    stage.classList.add("is-panning");
-    try { stage.setPointerCapture(event.pointerId); } catch (_) {}
-    return true;
-  }
-
-  function endPan(event) {
-    if (!panGesture) return false;
-    if (event?.pointerId != null && panGesture.pointerId !== event.pointerId) return false;
-    const pointerId = panGesture.pointerId;
-    panGesture = null;
-    stage.classList.remove("is-panning");
-    try {
-      if (stage.hasPointerCapture(pointerId)) stage.releasePointerCapture(pointerId);
-    } catch (_) {}
-    return true;
-  }
-
-  function zoomFromWheel(event) {
-    if (!image.source || isStageControl(event.target)) return;
-    event.preventDefault();
-    const current = store.get().zoomLevel;
-    const index = Math.max(0, ZOOM_LEVELS.findIndex(([id]) => id === current));
-    const nextIndex = clamp(index + (event.deltaY < 0 ? 1 : -1), 0, ZOOM_LEVELS.length - 1);
-    const next = ZOOM_LEVELS[nextIndex][0];
-    if (next !== current) setZoomLevel(next, event);
-  }
-
   function beginCompare(event) {
     if (!image.source || store.get().comparing || store.get().viewMode === "split") return;
     event?.preventDefault();
@@ -847,12 +741,10 @@ export function mountStage({ toast }) {
     clearTimeout(gesture.timer);
     gesture.timer = 0;
     gesture.pointerId = null;
-    endPan(event);
     endCompare(event);
   }
 
   stage.addEventListener("pointerdown", (event) => {
-    if (beginPan(event)) return;
     if (event.button !== 0 || !canReplace() || isStageControl(event.target)) return;
     gesture.pointerId = event.pointerId;
     gesture.at = performance.now();
@@ -860,15 +752,12 @@ export function mountStage({ toast }) {
     gesture.y = event.clientY;
     clearTimeout(gesture.timer);
     // Press-and-hold compares against the original; a tap opens the picker.
-    // Touch devices get the segmented control instead, since a long press
-    // there already means "select".
     if (image.source && !touchQuery.matches) {
       gesture.timer = setTimeout(() => beginCompare(event), 240);
     }
   });
 
   stage.addEventListener("pointerup", (event) => {
-    if (endPan(event)) return;
     const isActive = gesture.pointerId === event.pointerId;
     const elapsed = performance.now() - gesture.at;
     const moved = Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y);
@@ -876,26 +765,6 @@ export function mountStage({ toast }) {
     cancelGesture(event);
     if (isActive && !wasComparing && !isStageControl(event.target)
         && elapsed < 320 && moved < 12) openPicker();
-  });
-
-  stage.addEventListener("pointermove", (event) => {
-    if (!panGesture || panGesture.pointerId !== event.pointerId) return;
-    event.preventDefault();
-    const metrics = zoomMetrics();
-    if (!metrics) return;
-    store.set({
-      panX: clamp(panGesture.panX + event.clientX - panGesture.startX,
-        -metrics.maxPanX, metrics.maxPanX),
-      panY: clamp(panGesture.panY + event.clientY - panGesture.startY,
-        -metrics.maxPanY, metrics.maxPanY),
-    });
-  });
-
-  stage.addEventListener("wheel", zoomFromWheel, { passive: false });
-  stage.addEventListener("dblclick", (event) => {
-    if (store.get().zoomLevel === "fit" || isStageControl(event.target)) return;
-    event.preventDefault();
-    setZoomLevel("fit");
   });
 
   stage.addEventListener("pointercancel", cancelGesture);
@@ -918,7 +787,7 @@ export function mountStage({ toast }) {
     // A folder, a link or a text selection arrives with no files at all. Doing
     // nothing at that point looks like the drop was missed rather than refused.
     if (!startUpload(event.dataTransfer.files)) {
-      toast("请拖入单个图片文件。", true);
+      toast(t("err.singleFileDrop"), true);
     }
   });
 
@@ -937,38 +806,21 @@ export function mountStage({ toast }) {
 
   stage.addEventListener("contextmenu", (event) => { if (image.source) event.preventDefault(); });
   stage.addEventListener("selectstart", (event) => {
-    if (touchQuery.matches || store.get().zoomLevel !== "fit") event.preventDefault();
+    if (touchQuery.matches) event.preventDefault();
   });
   stage.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && expanded) {
       event.preventDefault();
       updateExpandedState(false);
-    } else if (event.target === stage && event.code === "Space" && image.source) {
-      event.preventDefault();
-      spacePan = true;
-    } else if (event.target === stage && !event.repeat && ZOOM_SHORTCUTS[event.key]) {
-      event.preventDefault();
-      setZoomLevel(ZOOM_SHORTCUTS[event.key]);
     } else if (event.target === stage && event.key === "Enter" && !event.repeat) {
       event.preventDefault();
       openPicker();
     } else if (event.key === "Escape") cancelGesture(event);
   });
-  window.addEventListener("keyup", (event) => {
-    if (event.code === "Space") spacePan = false;
-  });
-  window.addEventListener("blur", (event) => {
-    spacePan = false;
-    cancelGesture(event);
-  });
 
   /* ── reactions ────────────────────────────────────────────────────── */
 
   store.watchAny(["viewMode", "comparing", "splitRatio"], () => { syncView(); schedule(); }, { immediate: true });
-  store.watchAny(["zoomLevel", "panX", "panY"], () => {
-    applyZoom();
-    positionDivider();
-  }, { immediate: true });
   store.watchAny(["uploading"], (state) => {
     stage.classList.toggle("is-uploading", state.uploading);
     stage.setAttribute("aria-busy", String(state.uploading));
@@ -978,9 +830,17 @@ export function mountStage({ toast }) {
   let nativeReloadTimer = 0;
   store.watchAny(
     ["brightness", "hdrStrength", "hdrRange", "expansionStart", "areaCoverage",
-     "encoding", "contrast", "vibrance", "previewOptimized", "modelStrength"],
-    () => {
+     "encoding", "contrast", "vibrance", "previewOptimized", "modelStrength",
+     "colorGamut", "clampSrgb",
+     ...AI_POST_KEYS],
+    (state, _previous, changed) => {
       if (!store.get().sessionId) return;
+      // AI post controls are independent from the mathematical mode. A hidden
+      // value change must not cause a native decode while the manual preview
+      // is active; once AI is selected the same controls invalidate its frame.
+      if (!state.previewOptimized
+          && changed.length > 0
+          && changed.every((key) => AI_POST_KEYS.includes(key))) return;
       clearTimeout(nativeReloadTimer);
       nativeReloadTimer = setTimeout(load, PREVIEW_RELOAD_DELAY_MS);
     },
@@ -989,10 +849,7 @@ export function mountStage({ toast }) {
   /* Every other control acts on the decoded pixels the browser already holds,
    * so a redraw is enough. Highlight recovery acts *during* the RAW decode, so
    * the pixels themselves are stale and the preview has to be fetched again. */
-  let decodedWith = store.get().highlightRecovery;
   store.watch("highlightRecovery", (mode) => {
-    if (mode === decodedWith) return;
-    decodedWith = mode;
     modelGain = null;
     analysis.modelGain = null;
     image.original = null;
@@ -1018,12 +875,12 @@ export function mountStage({ toast }) {
       renderer?.uploadGainMap(gain);
       store.set({ previewOptimized: true, modelGainReady: true });
       schedule();
-      toast("AI 优化已应用");
+      toast(t("adjust.aiApplied"));
     } catch (error) {
       modelGain = null;
       analysis.modelGain = null;
       store.set({ previewOptimized: false, modelGainReady: false });
-      toast(error.message || "AI 优化失败。", true);
+      toast(error.message || t("adjust.aiFailed"), true);
     } finally {
       store.set({ optimizing: false });
     }
@@ -1044,13 +901,13 @@ export function mountStage({ toast }) {
         !state.file || locked || (!ready && !state.modelGainReady);
       mathModeButton.setAttribute("aria-pressed", String(!state.previewOptimized));
       optimizeButton.setAttribute("aria-pressed", String(state.previewOptimized));
-      setText(optimizeButton, state.optimizing ? "优化中…" : "AI 优化");
+      setText(optimizeButton, state.optimizing ? t("adjust.aiBusy") : t("adjust.ai"));
       optimizeButton.title = state.previewOptimized
-        ? "当前正在显示 AI 优化效果"
+        ? t("adjust.aiShowing")
         : state.modelGainReady
-        ? "切换到已缓存的 AI 优化效果"
-        : ready ? "用 AI 模型分析当前图片，自动生成增益图"
-        : (state.capabilities?.model?.reason || "模型尚未就绪");
+        ? t("adjust.aiCached")
+        : ready ? t("adjust.aiReady")
+        : (state.capabilities?.model?.reason || t("adjust.aiNotReady"));
       // The disabled button's title is unreachable on touch, so the reason
       // the AI mode cannot be used is also printed under the toggle.
       const unavailable = Boolean(state.file) && !state.previewOptimized
@@ -1058,7 +915,9 @@ export function mountStage({ toast }) {
       optimizeNote.hidden = !unavailable;
       if (unavailable) {
         setText(optimizeNote,
-          `AI 优化不可用：${state.capabilities?.model?.reason || "模型尚未就绪"}，当前为手动参数预览。`);
+          t("adjust.aiUnavailable", {
+            reason: state.capabilities?.model?.reason || t("adjust.aiNotReady"),
+          }));
       }
     },
     { immediate: true },
@@ -1070,7 +929,7 @@ export function mountStage({ toast }) {
   });
 
   const applyPointerHint = () => {
-    const text = touchQuery.matches ? TOUCH_HINT : MOUSE_HINT;
+    const text = t(touchQuery.matches ? TOUCH_HINT : MOUSE_HINT);
     stage.setAttribute("aria-label", text);
     setText(hintEl, text);
   };
@@ -1090,8 +949,36 @@ export function mountStage({ toast }) {
   });
   mobileLayout.addEventListener?.("change", () => {
     fitStageToImage();
-    applyZoom();
     positionDivider();
+  });
+
+  /* Preference reactions.
+   *
+   * Turning true HDR off has to re-pick the renderer, not merely relabel the
+   * status line: the WebGPU context is chosen once per image and would keep
+   * painting until the next load. Narrowing the resolution cap re-requests the
+   * frame at the new tier, which is what `load` does when the tier moves. */
+  prefs.watch("hdrPreview", () => {
+    reportInitialCapability();
+    if (image.source) chooseRenderer();
+  });
+  prefs.watch("previewCeiling", () => {
+    if (image.source) load();
+  });
+
+  /* Nothing here re-renders on its own, so a language change re-emits the
+   * strings this module wrote imperatively. `lastCapability` is kept as a key
+   * plus parameters precisely so this does not have to re-probe the GPU. */
+  onLocaleChange(() => {
+    applyPointerHint();
+    syncView();
+    if (lastCapability) {
+      setCapability(lastCapability.key, lastCapability.ok, lastCapability.params);
+    }
+    if (!image.source) setText(emptyTitle, t("stage.empty"));
+    setText(supportHint, t("stage.support"));
+    expandButton.setAttribute("aria-label",
+      expanded ? t("stage.collapse") : t("stage.expand"));
   });
 
   applyPointerHint();

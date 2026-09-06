@@ -14,3 +14,8 @@ numpy>=2.0
 Pillow>=11
 pillow-heif>=1.3
 opencv-python>=4.10
+
+# Offline export/conversion tooling (not needed by the native ncnn runtime).
+onnx>=1.17
+onnxscript>=0.2
+pnnx==20260526

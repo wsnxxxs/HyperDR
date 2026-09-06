@@ -192,8 +192,11 @@ DecodedImage decode_ultrahdr_bytes(const std::vector<std::uint8_t>& bytes) {
   if (const uhdr_gainmap_metadata_t* gain =
           uhdr_dec_get_gainmap_metadata(decoder.get());
       gain != nullptr && std::isfinite(gain->hdr_capacity_max)) {
+    // libultrahdr exposes hdr_capacity_max in the same linear scale that the
+    // encoder supplied it. Converting stops here would apply the exponent a
+    // second time (for example, 8.0 would become 256.0).
     result.hdr_headroom =
-        std::clamp(std::exp2(gain->hdr_capacity_max), 1.0F, 64.0F);
+        std::clamp(gain->hdr_capacity_max, 1.0F, 64.0F);
   }
   result.domain = display_referred_domain(result.hdr_headroom);
 

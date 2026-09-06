@@ -15,19 +15,11 @@ the source tree or tests.
 The application starts a local HyperDR panel and prints a temporary LAN URL.
 Keep the terminal open while using the panel.
 
-## Existing PyTorch environment for “优化”
+## Native “AI 优化”
 
-The archive includes the model code and checkpoint, but does not duplicate
-PyTorch. Install `torch`, `numpy`, and `Pillow` in the Python environment that
-starts the panel. If they are already installed in another virtual environment,
-point HyperDR to it before running `Start.bat`:
-
-```powershell
-$env:HYPERDR_MODEL_PYTHON = "C:\path\to\.venv\Scripts\python.exe"
-```
-
-The “优化” button remains disabled when that Python environment cannot import
-the three required packages.
+The production model and inference weights are embedded in `HyperDR.exe` and
+run through the bundled native runtime. No PyTorch installation, checkpoint,
+model script, or model-specific Python environment is required.
 
 ## Why step 3 is not optional for true HDR
 

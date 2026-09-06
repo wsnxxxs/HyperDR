@@ -29,6 +29,7 @@ _LOCK = threading.Lock()
 _JOB: dict | None = None
 _ACCEPTING = True
 _UPLOAD_IN_PROGRESS = False
+_PREPARING: tuple[str, str] | None = None
 
 TIMEOUT_SECONDS = max(1, int(os.environ.get("HYPERDR_JOB_TIMEOUT_SECONDS", "3600")))
 TERMINATE_GRACE_SECONDS = max(1, int(os.environ.get("HYPERDR_TERMINATE_GRACE_SECONDS", "5")))
@@ -46,7 +47,16 @@ def _uses_raw_model_input(command: list[str]) -> bool:
 
 
 class Busy(RuntimeError):
-    """A conversion is already running."""
+    """A conversion is already running.
+
+    `code` is a stable identifier for the browser's string catalogue, so the
+    refusal can be shown in the reader's language; the message itself stays the
+    fallback for clients that have no catalogue.
+    """
+
+    def __init__(self, message: str, code: str = "convert_in_progress") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 @contextmanager
@@ -55,17 +65,45 @@ def upload_slot():
     global _UPLOAD_IN_PROGRESS
     with _LOCK:
         if not _ACCEPTING:
-            raise Busy("服务正在关闭。")
+            raise Busy("服务正在关闭。", code="shutting_down")
         if _JOB is not None and not _JOB.get("done"):
-            raise Busy("转换进行期间不能更换图片。")
+            raise Busy("转换进行期间不能更换图片。", code="swap_during_convert")
+        if _PREPARING is not None:
+            raise Busy("转换准备期间不能更换图片。", code="swap_during_prepare")
         if _UPLOAD_IN_PROGRESS:
-            raise Busy("已有图片正在上传。")
+            raise Busy("已有图片正在上传。", code="upload_in_progress")
         _UPLOAD_IN_PROGRESS = True
     try:
         yield
     finally:
         with _LOCK:
             _UPLOAD_IN_PROGRESS = False
+
+
+@contextmanager
+def preparation_slot(session_id: str):
+    """Reserve the input and output before conversion command preparation.
+
+    Model cache checks and output cleanup happen before the subprocess starts;
+    treating that interval as part of the run prevents a second request from
+    deleting its files or replacing its RAW underneath it.
+    """
+    global _PREPARING
+    token = uuid.uuid4().hex
+    with _LOCK:
+        if not _ACCEPTING:
+            raise Busy("服务正在关闭。", code="shutting_down")
+        if _UPLOAD_IN_PROGRESS:
+            raise Busy("图片上传完成前不能开始转换。", code="upload_incomplete")
+        if _PREPARING is not None or (_JOB is not None and not _JOB.get("done")):
+            raise Busy("已有转换正在进行。", code="convert_in_progress")
+        _PREPARING = (token, session_id)
+    try:
+        yield token
+    finally:
+        with _LOCK:
+            if _PREPARING is not None and _PREPARING[0] == token:
+                _PREPARING = None
 
 
 def _append_locked(job: dict, text: str) -> None:
@@ -110,107 +148,92 @@ def _watch_timeout(job: dict, proc: subprocess.Popen, finished: threading.Event)
     _stop(proc)
 
 
-def _pump(job: dict, argv: list[str], cwd: str) -> None:
-    proc: subprocess.Popen | None = None
-    report = None
-    finished = threading.Event()
-    try:
+def _run_step(job: dict, command: list[str], cwd: str, *,
+              decode_budget: bool = False) -> subprocess.Popen | None:
+    """Run one command to completion, streaming its output into the job log.
+
+    Returns None when the job was cancelled before the process could start.
+    The cancellation check and `job["proc"]` share one lock acquisition on
+    purpose: `cancel()` reads that slot under the same lock, so a cancel can
+    never land in a gap where the process exists but nothing can stop it.
+    """
+    # HyperDR model-input can decode a full RAW. Share the resident-memory
+    # budget with live previews so those two paths cannot demosaic concurrently.
+    slot = RAW_DECODE_BUDGET.hold(timeout=1.0) if decode_budget else nullcontext()
+    with slot:
         with _LOCK:
             if job.get("cancelled"):
                 _append_locked(job, "任务在启动前已取消。\n")
-                return
+                return None
             proc = subprocess.Popen(
-                argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, encoding="utf-8", errors="replace", bufsize=1,
             )
             job["proc"] = proc
+        finished = threading.Event()
         threading.Thread(target=_watch_timeout, args=(job, proc, finished),
                          name="hyperdr-timeout", daemon=True).start()
-        for line in proc.stdout:
-            with _LOCK:
-                _append_locked(job, line)
-        proc.wait()
+        try:
+            for line in proc.stdout:
+                with _LOCK:
+                    _append_locked(job, line)
+            proc.wait()
+        finally:
+            # Release the watchdog even if streaming raised, or it sits on the
+            # whole timeout before noticing the job is already over.
+            finished.set()
+    return proc
+
+
+def _read_report(job: dict, path: str):
+    """Return the parsed report, or None after logging why it could not be."""
+    try:
+        if os.path.getsize(path) > MAX_REPORT_BYTES:
+            raise ValueError("report 超过 %d 字节上限" % MAX_REPORT_BYTES)
+        with open(path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except Exception as exc:  # noqa: BLE001 - reported, not fatal
+        with _LOCK:
+            _append_locked(job, "（读取 report 失败：%s）\n" % exc)
+        return None
+
+
+def _pump(job: dict, argv: list[str], cwd: str,
+          pre_commands: list[list[str]] | None = None) -> None:
+    """Run any model preparation commands, then the conversion itself.
+
+    One function for both shapes deliberately: they had drifted into two copies
+    that reported the same failures in different languages into the same
+    browser-visible log pane.
+    """
+    proc: subprocess.Popen | None = None
+    report = None
+    pre_commands = list(pre_commands or [])
+    commands = pre_commands + [argv]
+    try:
+        for index, command in enumerate(commands):
+            proc = _run_step(job, command, cwd,
+                             decode_budget=index == 0 and _uses_raw_model_input(command))
+            if proc is None:
+                return
+            if proc.returncode != 0 or job.get("cancelled"):
+                if proc.returncode != 0 and index < len(commands) - 1:
+                    with _LOCK:
+                        _append_locked(job, "模型流程步骤失败，未开始转换。\n")
+                break
 
         path = job.get("report_path")
-        if path and os.path.isfile(path):
-            try:
-                if os.path.getsize(path) > MAX_REPORT_BYTES:
-                    raise ValueError("report 超过 %d 字节上限" % MAX_REPORT_BYTES)
-                with open(path, "r", encoding="utf-8") as handle:
-                    report = json.load(handle)
-            except Exception as exc:  # noqa: BLE001 - reported, not fatal
-                with _LOCK:
-                    _append_locked(job, "（读取 report 失败：%s）\n" % exc)
+        # A lone conversion writes a report describing its own failure, so it is
+        # worth reading whatever the exit code. A pipeline's report describes
+        # only the final step and means nothing if an earlier one broke.
+        complete = proc is not None and (not pre_commands or proc.returncode == 0)
+        if complete and path and os.path.isfile(path):
+            report = _read_report(job, path)
     except Exception as exc:  # noqa: BLE001 - the boundary is the point
         if proc is not None:
             _stop(proc)
         with _LOCK:
             _append_locked(job, "无法运行 HyperDR：%s\n" % exc)
-    finally:
-        finished.set()
-        with _LOCK:
-            job["done"] = True
-            job["rc"] = proc.returncode if proc is not None else -1
-            job["report"] = report
-            job["finished_at"] = time.time()
-
-
-def _pump_pipeline(job: dict, argv: list[str], cwd: str,
-                   pre_commands: list[list[str]]) -> None:
-    """Run model preparation commands before the final HyperDR command."""
-    proc: subprocess.Popen | None = None
-    report = None
-    commands = list(pre_commands) + [argv]
-    try:
-        for index, command in enumerate(commands):
-            with _LOCK:
-                if job.get("cancelled"):
-                    _append_locked(job, "job cancelled before pipeline step\n")
-                    return
-            # The first model pipeline step is HyperDR model-input and can
-            # decode a full RAW. Share the same resident-memory budget as live
-            # previews so those two paths cannot demosaic concurrently.
-            decode_slot = (RAW_DECODE_BUDGET.hold(timeout=1.0)
-                           if index == 0 and _uses_raw_model_input(command)
-                           else nullcontext())
-            with decode_slot:
-                proc = subprocess.Popen(
-                    command, cwd=cwd, stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-                    errors="replace", bufsize=1,
-                )
-                with _LOCK:
-                    job["proc"] = proc
-                finished = threading.Event()
-                threading.Thread(target=_watch_timeout,
-                                 args=(job, proc, finished),
-                                 name="hyperdr-timeout", daemon=True).start()
-                for line in proc.stdout:
-                    with _LOCK:
-                        _append_locked(job, line)
-                proc.wait()
-                finished.set()
-            if proc.returncode != 0 or job.get("cancelled"):
-                if proc.returncode != 0 and index < len(commands) - 1:
-                    with _LOCK:
-                        _append_locked(job, "model pipeline step failed; conversion was not started\n")
-                break
-
-        path = job.get("report_path")
-        if proc is not None and proc.returncode == 0 and path and os.path.isfile(path):
-            try:
-                if os.path.getsize(path) > MAX_REPORT_BYTES:
-                    raise ValueError("report exceeds %d bytes" % MAX_REPORT_BYTES)
-                with open(path, "r", encoding="utf-8") as handle:
-                    report = json.load(handle)
-            except Exception as exc:  # noqa: BLE001 - reported, not fatal
-                with _LOCK:
-                    _append_locked(job, "(report read failed: %s)\n" % exc)
-    except Exception as exc:  # noqa: BLE001 - the boundary is the point
-        if proc is not None:
-            _stop(proc)
-        with _LOCK:
-            _append_locked(job, "unable to run HyperDR model pipeline: %s\n" % exc)
     finally:
         with _LOCK:
             job["done"] = True
@@ -220,16 +243,25 @@ def _pump_pipeline(job: dict, argv: list[str], cwd: str,
 
 
 def start(argv: list[str], cwd: str, report_path: str, session_id: str,
-          pre_commands: list[list[str]] | None = None) -> str:
+          pre_commands: list[list[str]] | None = None,
+          preparation_token: str | None = None) -> str:
     """Launch a conversion, optionally after model preprocessing commands."""
-    global _JOB
+    global _JOB, _PREPARING
     with _LOCK:
         if not _ACCEPTING:
-            raise Busy("服务正在关闭。")
-        if _UPLOAD_IN_PROGRESS:
-            raise Busy("图片上传完成前不能开始转换。")
-        if _JOB is not None and not _JOB.get("done"):
-            raise Busy("已有转换正在进行。")
+            raise Busy("服务正在关闭。", code="shutting_down")
+        if preparation_token is not None:
+            if (_PREPARING is None or _PREPARING[0] != preparation_token
+                    or _PREPARING[1] != session_id):
+                raise Busy("转换准备凭据已失效。", code="convert_preparing")
+            _PREPARING = None
+        else:
+            if _UPLOAD_IN_PROGRESS:
+                raise Busy("图片上传完成前不能开始转换。", code="upload_incomplete")
+            if _PREPARING is not None:
+                raise Busy("已有转换正在准备。", code="convert_preparing")
+            if _JOB is not None and not _JOB.get("done"):
+                raise Busy("已有转换正在进行。", code="convert_in_progress")
         job = {
             "id": uuid.uuid4().hex, "log": "", "dropped": 0, "truncated": False,
             "done": False, "rc": None, "report": None, "report_path": report_path,
@@ -238,9 +270,8 @@ def start(argv: list[str], cwd: str, report_path: str, session_id: str,
         }
         _JOB = job
     try:
-        target = _pump_pipeline if pre_commands else _pump
-        args = (job, argv, cwd, pre_commands) if pre_commands else (job, argv, cwd)
-        threading.Thread(target=target, args=args, daemon=True).start()
+        threading.Thread(target=_pump, args=(job, argv, cwd, pre_commands),
+                         daemon=True).start()
     except Exception:
         with _LOCK:
             if _JOB is job:
@@ -292,12 +323,15 @@ def active_session_id() -> str:
     """The session a conversion is using, so cleanup does not delete its files."""
     with _LOCK:
         job = _JOB
-        return job["session_id"] if job is not None and not job.get("done") else ""
+        if job is not None and not job.get("done"):
+            return job["session_id"]
+        return _PREPARING[1] if _PREPARING is not None else ""
 
 
 def is_running() -> bool:
     with _LOCK:
-        return _JOB is not None and not _JOB.get("done")
+        return (_PREPARING is not None or
+                (_JOB is not None and not _JOB.get("done")))
 
 
 def shutdown(wait_seconds: float = 10.0) -> None:

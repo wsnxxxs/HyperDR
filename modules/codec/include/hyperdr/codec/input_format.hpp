@@ -59,9 +59,9 @@ inline constexpr auto kRasterInputExtensions = join_raster_extensions();
 // structure and differ only in the codec inside, which libheif and libavif
 // answer far better than a brand-string table would; `decode_image` asks
 // `is_avif_bytes` once it has the file. RAW is absent for the opposite reason:
-// most RAW formats *are* TIFF, so a signature cannot separate a `.dng` from any
-// other TIFF, and the extension has to stay the one that decides. Use
-// `raw_signature_ok` to verify a file that already claims a RAW extension.
+// most RAW formats *are* TIFF, so a signature cannot separate a `.dng` from an
+// unrelated TIFF or distinguish one camera format from another. The extension
+// routes it to LibRaw, and LibRaw is the content authority.
 enum class InputFormat : std::uint8_t {
   Unknown,
   Jpeg,
@@ -94,6 +94,10 @@ enum class InputFormat : std::uint8_t {
 }
 
 // Which family a filename claims. Unknown for a RAW or unrecognised extension.
+//
+// Exercised by discovery_test rather than by the pipeline, which decides from
+// bytes: this is the other half of that comparison, and the test's point is
+// that a name and its contents can disagree.
 [[nodiscard]] constexpr InputFormat extension_format(std::string_view extension) {
   for (const auto candidate : kJpegExtensions) {
     if (candidate == extension) return InputFormat::Jpeg;
@@ -131,32 +135,10 @@ inline constexpr std::array<InputSignature, 1> kIsobmffSignatures{{
     {4, magic_literal("ftyp")},
 }};
 
-// Every LibRaw container this project offers an extension for.
-//
-// The panel's guard used to carry five of these and rejected the rest as
-// "contents do not match the extension" -- a Panasonic RW2, a Canon CRW, a
-// Minolta MRW and two of the three Olympus ORF layouts were all offered by the
-// file dialog and then refused on upload.
-inline constexpr std::array<InputSignature, 14> kRawSignatures{{
-    {0, magic_literal("II*\0")},              // TIFF little-endian: ARW, CR2,
-    {0, magic_literal("MM\0*")},              // DNG, NEF, PEF, SRW, 3FR, ...
-    {0, magic_literal("II+\0")},              // BigTIFF, as some DNG writers use
-    {0, magic_literal("MM\0+")},
-    {0, magic_literal("IIII")},               // Phase One IIQ / CAP
-    {0, magic_literal("IIU\0")},              // Panasonic RW2
-    {0, magic_literal("II\x1a\0")},           // Canon CRW (II\x1a\0\0\0HEAPCCDR)
-    {0, magic_literal("IIRO")},               // Olympus ORF
-    {0, magic_literal("IIRS")},               // Olympus ORF
-    {0, magic_literal("MMOR")},               // Olympus ORF, big-endian
-    {0, magic_literal("\0MRM")},              // Minolta MRW
-    {0, magic_literal("FUJIFILMCCD-RAW")},    // Fujifilm RAF
-    {0, magic_literal("FOVb")},               // Sigma X3F
-    {4, magic_literal("ftyp")},               // Canon CR3
-}};
-
-// Enough for every magic above, with room for a longer one later. Reading more
-// than this to classify a file is waste; reading less would miss the RAF header.
-inline constexpr std::size_t kSignaturePrefixBytes = 64;
+// Enough for JPEG, PNG, and ISO-BMFF. RAW does not participate in signature
+// probing; reading more bytes cannot make its generic container headers
+// authoritative.
+inline constexpr std::size_t kSignaturePrefixBytes = 16;
 
 [[nodiscard]] inline bool matches_signature(std::span<const std::uint8_t> head,
                                             const InputSignature& signature) {
@@ -181,13 +163,6 @@ template <std::size_t N>
   if (matches_any(head, kPngSignatures)) return InputFormat::Png;
   if (matches_any(head, kIsobmffSignatures)) return InputFormat::Isobmff;
   return InputFormat::Unknown;
-}
-
-// Whether a file claiming a RAW extension carries a RAW container's header.
-// This is the anti-rename check, not a format identification: which RAW it is
-// remains LibRaw's answer.
-[[nodiscard]] inline bool raw_signature_ok(std::span<const std::uint8_t> head) {
-  return matches_any(head, kRawSignatures);
 }
 
 }  // namespace hyperdr

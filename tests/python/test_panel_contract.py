@@ -6,13 +6,13 @@ sends versus the one the converter accepts.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "apps" / "panel"))
@@ -24,6 +24,7 @@ from hyperdr_panel.executable import detect_exe  # noqa: E402
 from hyperdr_panel.command import (  # noqa: E402
     build_argv,
     build_curve_argv,
+    build_preview_frame_argv,
     options_to_settings,
 )
 
@@ -67,6 +68,28 @@ class BuildArgvTest(unittest.TestCase):
         self.assertEqual(found["--gain-strength"], "0.4")
         self.assertEqual(found["--pop"], "0.4")
         self.assertEqual(found["--exposure-bias"], "0.6")
+        self.assertNotIn("--color-gamut", found)
+        self.assertNotIn("--clamp-srgb", found)
+
+    def test_color_options_reach_export_and_preview(self):
+        options = dict(BASE, colorGamut="p3", clampSrgb=True)
+        found = flags(build_argv("HyperDR", options))
+        self.assertEqual(found["--color-gamut"], "p3")
+        self.assertIn("--clamp-srgb", found)
+        preview = flags(build_preview_frame_argv(
+            "HyperDR", "photo.jpg", "preview.hpf", options, 1024))
+        self.assertEqual(preview["--color-gamut"], "p3")
+        self.assertIn("--clamp-srgb", preview)
+
+    def test_explicit_default_color_gamut_is_visible(self):
+        found = flags(build_argv("HyperDR", dict(BASE, colorGamut="srgb")))
+        self.assertEqual(found["--color-gamut"], "srgb")
+
+    def test_color_options_validate(self):
+        with self.assertRaises(ValueError):
+            options_to_settings(dict(BASE, colorGamut="rec709"))
+        with self.assertRaises(ValueError):
+            options_to_settings(dict(BASE, clampSrgb="true"))
 
     def test_panel_options_are_not_silently_coerced(self):
         for options in ({"quality": 90.9}, {"contrast": "1.2"},
@@ -75,7 +98,7 @@ class BuildArgvTest(unittest.TestCase):
                 options_to_settings(options)
 
     def test_the_renderer_is_fixed_and_a_stale_client_cannot_change_it(self):
-        """The renderer decides what /api/curve draws, so a client cannot pick it."""
+        """The renderer decides which curve the browser draws, so a client cannot pick it."""
         self.assertEqual(flags(build_argv("HyperDR", dict(BASE)))["--look"],
                          "photographic")
         # `neutral` was the second look until it was removed; a stale client
@@ -148,95 +171,120 @@ class BuildArgvTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_argv("HyperDR", dict(BASE, external_gain="out/gain.f32"))
 
+    def test_ai_post_adjustments_are_model_only_and_reach_native_cli(self):
+        options = dict(
+            BASE,
+            _model_mode=True,
+            hdrStrength=0.65,
+            aiBrightness=0.25,
+            aiContrast=1.2,
+            aiShadows=-0.3,
+            aiHighlights=0.4,
+            aiHdrRange=2.8,
+            aiExpansionStart=0.55,
+        )
+        found = flags(build_argv("HyperDR", options))
+        self.assertEqual(found["--ai-model"], "embedded")
+        self.assertEqual(found["--gain-strength"], "0.65")
+        expected = {
+            "--ai-brightness": "0.25",
+            "--ai-contrast": "1.2",
+            "--ai-shadows": "-0.3",
+            "--ai-highlights": "0.4",
+            "--ai-hdr-range": "2.8",
+            "--ai-expansion-start": "0.55",
+        }
+        for flag, value in expected.items():
+            self.assertEqual(found[flag], value)
+
+        # A stale AI snapshot must not change manual-mode argv at all.
+        manual = flags(build_argv(
+            "HyperDR", dict(BASE, aiBrightness=0.9, aiContrast=1.3)))
+        for flag in expected:
+            self.assertNotIn(flag, manual)
+        for flag in ("--look", "--contrast", "--vibrance", "--pop",
+                     "--headroom-max", "--exposure-bias", "--expansion-start",
+                     "--area-coverage", "--exposure", "--headroom"):
+            self.assertNotIn(flag, found, flag)
+
+    def test_ai_post_adjustments_validate_encoding_headroom(self):
+        with self.assertRaises(ValueError):
+            build_argv("HyperDR", dict(
+                BASE,
+                encoding="hlg",
+                _model_mode=True,
+                aiHdrRange=2.5,
+            ))
+
+    def test_native_model_preview_omits_manual_development_flags(self):
+        found = flags(build_preview_frame_argv(
+            "HyperDR", "photo.jpg", "preview.hpf",
+            dict(BASE, _model_mode=True, hdrStrength=0.7,
+                 brightness=0.6, contrast=1.08, vibrance=0.12,
+                 hdrRange=2.5, expansionStart=0.25, areaCoverage=1.0),
+            1024))
+        self.assertEqual(found["--ai-model"], "embedded")
+        self.assertEqual(found["--gain-strength"], "0.7")
+        for flag in ("--look", "--contrast", "--vibrance", "--pop",
+                     "--headroom-max", "--exposure-bias", "--expansion-start",
+                     "--area-coverage", "--exposure", "--headroom"):
+            self.assertNotIn(flag, found, flag)
+
+    def test_native_model_ignores_stale_manual_hdr_ceiling(self):
+        found = flags(build_argv(
+            "HyperDR", dict(BASE, _model_mode=True, encoding="hlg",
+                             hdrRange=4.0, brightness=0.6,
+                             expansionStart=0.75)))
+        self.assertEqual(found["--ai-model"], "embedded")
+        self.assertEqual(found["--ai-hdr-range"], "-1")
+
+    def test_native_preview_reuses_a_decode_cache(self):
+        argv = build_preview_frame_argv(
+            "HyperDR", "photo.arw", "preview.hpf", {}, 2048,
+            decode_cache="work/.decode-cache", source_digest="abc123")
+        found = flags(argv)
+        self.assertEqual(found["--decode-cache"],
+                         "work/.decode-cache")
+        self.assertEqual(found["--decode-cache-source-sha256"], "abc123")
+        self.assertIn("--fast-preview", found)
+
 
 class ModelIntegrationTest(unittest.TestCase):
-    def test_production_checkpoint_is_preferred_over_legacy_best(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            checkpoints = root / "checkpoints"
-            checkpoints.mkdir()
-            legacy = checkpoints / "best.pt"
-            production = checkpoints / "production-v3.pt"
-            legacy.write_bytes(b"legacy")
-            production.write_bytes(b"production")
-            self.assertEqual(model._find_checkpoint(root), production.resolve())
+    def test_status_uses_native_switch_and_executable_only(self):
+        with mock.patch.object(model, "_native_executable", return_value="HyperDR"), \
+                mock.patch.object(model, "_enabled", return_value=True):
+            self.assertTrue(model.status()["ready"])
+        with mock.patch.object(model, "_enabled", return_value=False):
+            state = model.status()
+            self.assertFalse(state["enabled"])
+            self.assertFalse(state["ready"])
 
-    def test_raster_input_uses_native_photographic_base(self):
-        config = model.ModelConfig(
-            root=Path("model"), python="python", script=Path("model/infer_gain.py"),
-            checkpoint=Path("model/best.pt"), dataset_root=Path("dataset"),
-            device="cpu", long_side=1024,
-        )
+    def test_native_packet_is_decoded_without_writing_model_sidecars(self):
         with tempfile.TemporaryDirectory() as directory:
-            commands, gain, report = model.build_commands(
-                config, Path("photo.jpg"), Path(directory) / ".model", "HyperDR")
-        self.assertEqual(len(commands), 2)
-        self.assertEqual(commands[0][0:2], ["HyperDR", "model-input"])
-        self.assertNotIn("--half-size", commands[0])
-        self.assertTrue(commands[0][commands[0].index("--output") + 1].endswith(".f32"))
-        self.assertIn("--input-report", commands[1])
-        self.assertEqual(commands[1][commands[1].index("--gain-output") + 1], str(gain))
-        self.assertEqual(commands[1][commands[1].index("--report") + 1], str(report))
-
-    def test_raw_input_is_developed_at_half_size_without_jpeg(self):
-        config = model.ModelConfig(
-            root=Path("model"), python="python", script=Path("model/infer_gain.py"),
-            checkpoint=Path("model/best.pt"), dataset_root=Path("dataset"),
-            device="cpu", long_side=1024,
-        )
-        with tempfile.TemporaryDirectory() as directory:
-            commands, _, _ = model.build_commands(
-                config, Path("photo.arw"), Path(directory) / ".model", "HyperDR",
-                "reconstruct")
-        self.assertEqual(commands[0][0:2], ["HyperDR", "model-input"])
-        self.assertIn("--highlight-recovery", commands[0])
-        self.assertEqual(commands[0][commands[0].index("--highlight-recovery") + 1],
-                         "reconstruct")
-        self.assertIn("--half-size", commands[0])
-        self.assertNotIn(".jpg", " ".join(part for command in commands for part in command))
-        self.assertEqual(commands[1][0], "python")
-
-    def test_matching_preview_inference_is_reusable(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = root / "photo.jpg"
-            checkpoint = root / "model.pt"
-            model_dir = root / ".model-preview"
-            model_dir.mkdir()
+            source = Path(directory) / "photo.jpg"
             source.write_bytes(b"source")
-            checkpoint.write_bytes(b"checkpoint")
-            gain = model_dir / "model-gain.f32"
-            gain.write_bytes(b"\x00\x00\x00\x00")
-            digest = lambda value: hashlib.sha256(value).hexdigest()
-            report = {
-                "gain_grid_size": [1, 1],
-                "metadata_gain_max_stops": 1.0,
-                "label_contract_id": "hyperdr.apple-gain-label/v2",
-                "gain_file": {
-                    "scale": "signed_log2_gain",
-                    "sha256": digest(gain.read_bytes()),
-                },
-                "development_recipe": {"exposure_bias_ev": 0.0},
-                "model_binding": {
-                    "source": {
-                        "sha256": digest(source.read_bytes()),
-                        "highlight_recovery": "blend",
-                    },
-                    "model": {"checkpoint_sha256": digest(checkpoint.read_bytes())},
-                    "geometry": {"model_tensor_size": [32, 16]},
-                },
-            }
-            (model_dir / "model-gain.json").write_text(
-                json.dumps(report), encoding="utf-8")
-            config = model.ModelConfig(
-                root=root, python="python", script=root / "infer_gain.py",
-                checkpoint=checkpoint, dataset_root=root, device="cpu",
-                long_side=17, label_contract_id="hyperdr.apple-gain-label/v2")
-            cached = model.cached_inference(config, source, model_dir, "blend")
-            self.assertIsNotNone(cached)
-            self.assertEqual(cached[0], gain.read_bytes())
-            self.assertIsNone(
-                model.cached_inference(config, source, model_dir, "reconstruct"))
+            metadata = json.dumps({
+                "schema": "hyperdr.native-model-gain/v1",
+                "width": 2, "height": 1, "channels": 1,
+                "layout": "HW", "sampleType": "float32-le",
+                "scale": "signed-log2-gain", "gainMaxStops": 1.5,
+                "headroomStops": 1.5,
+            }, separators=(",", ":")).encode()
+            packet = (model.NATIVE_MODEL_GAIN_MAGIC
+                      + len(metadata).to_bytes(4, "little")
+                      + metadata + b"\x00" * 8)
+            completed = subprocess.CompletedProcess(
+                ["HyperDR"], 0, stdout=packet, stderr=b"")
+            with mock.patch.object(model, "_native_executable", return_value="HyperDR"), \
+                    mock.patch.object(model.subprocess, "run", return_value=completed) as run:
+                values, report = model.native_model_gain(source, "blend")
+            self.assertEqual(values, b"\x00" * 8)
+            self.assertEqual(report["width"], 2)
+            self.assertEqual(report["max_stops"], 1.5)
+            argv = run.call_args.args[0]
+            self.assertEqual(argv[:5], ["HyperDR", "model-gain", str(source),
+                                        "--ai-model", "embedded"])
+            self.assertEqual(list(Path(directory).iterdir()), [source])
 
 
 class InputVocabularyTest(unittest.TestCase):
@@ -267,11 +315,10 @@ class InputVocabularyTest(unittest.TestCase):
             self.assertIn("*" + extension, patterns, extension)
             self.assertIn("*" + extension.upper(), patterns, extension)
 
-    def test_a_raw_extension_is_never_named_by_its_signature(self):
-        """Most RAW containers are TIFF; only the extension can say which."""
+    def test_a_raw_header_is_never_named_as_a_raster(self):
+        """Most RAW containers are TIFF; only LibRaw can validate the file."""
         for header in (b"II*" + bytes(1) + b"a" * 60, b"MM" + bytes(1) + b"*" + b"b" * 60):
             self.assertIsNone(formats.detect_format(header))
-            self.assertTrue(formats.raw_signature_ok(header))
 
 
 class SettingsContractTest(unittest.TestCase):

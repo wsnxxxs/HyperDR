@@ -161,7 +161,7 @@ fn create_splash_window(app: &AppHandle) -> Result<(), String> {
     let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("splash.html".into()))
         .title("HyperDR")
         .inner_size(1440.0, 900.0)
-        .min_inner_size(960.0, 640.0)
+        .min_inner_size(1280.0, 800.0)
         .resizable(true)
         .on_page_load(|window, payload| {
             if !matches!(payload.event(), PageLoadEvent::Finished) || !is_panel_url(payload.url()) {
@@ -202,7 +202,6 @@ fn spawn_dev_panel(app: &AppHandle) -> Result<(), String> {
         .arg(&launcher)
         .arg("--desktop")
         .env("HYPERDR_HOST", "127.0.0.1")
-        .env("HYPERDR_NO_BROWSER", "1")
         .env("PYTHONUNBUFFERED", "1")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

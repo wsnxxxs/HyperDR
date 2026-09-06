@@ -26,6 +26,12 @@ SCOPE = (
 GPU = (
     REPO_ROOT / "apps" / "panel" / "web" / "js" / "preview" / "gpu.js"
 ).read_text(encoding="utf-8")
+PREFS_SCHEMA = (
+    REPO_ROOT / "apps" / "panel" / "web" / "js" / "ui" / "prefs-schema.js"
+).read_text(encoding="utf-8")
+CATALOGUE = (
+    REPO_ROOT / "apps" / "panel" / "web" / "js" / "i18n" / "zh-CN.js"
+).read_text(encoding="utf-8")
 
 from hyperdr_panel import native_preview  # noqa: E402
 from hyperdr_panel.native_preview import parse_packet  # noqa: E402
@@ -137,8 +143,23 @@ class NativePreviewFrontendContractTests(unittest.TestCase):
     def test_image_adjustments_reset_to_point_six_ev_without_persistence(self):
         self.assertIn("export const DEFAULT_BRIGHTNESS_EV = 0.6;", SETTINGS_SCHEMA)
         self.assertIn("default: DEFAULT_BRIGHTNESS_EV", SETTINGS_SCHEMA)
-        self.assertIn('export const PERSISTED_OPTION_KEYS = ["encoding"];', SETTINGS_SCHEMA)
-        self.assertIn("store.watchAny(PERSISTED_OPTION_KEYS, persistSettings)", MAIN)
+        self.assertIn(
+            'export const PERSISTED_OPTION_KEYS = ["encoding", "colorGamut", "clampSrgb"];',
+            SETTINGS_SCHEMA,
+        )
+        # The watched set is computed rather than constant now, because
+        # `rememberAdjustments` can extend it. What must not drift is the
+        # default: with the preference off, only the output keys persist.
+        self.assertIn("store.watchAny(persistedKeys(), persistSettings)", MAIN)
+        self.assertIn("preferences.rememberOutput ? PERSISTED_OPTION_KEYS : []", MAIN)
+        self.assertIn("preferences.rememberAdjustments ? ADJUSTMENT_KEYS : []", MAIN)
+        self.assertIn(
+            'key: "rememberAdjustments", group: "adjust", kind: "toggle", default: false',
+            PREFS_SCHEMA,
+        )
+        # Pinned controls stay out of the persisted set either way, so an
+        # export cannot drift from command.py's PANEL_DEFAULTS.
+        self.assertIn('control.group !== "pinned"', MAIN)
         self.assertIn("...defaultSettings(store.get().encoding)", STAGE)
 
     def test_native_float_planes_do_not_use_retired_sdr_display_buffers(self):
@@ -164,7 +185,9 @@ class NativePreviewFrontendContractTests(unittest.TestCase):
     def test_original_comparison_layer_is_cached_across_look_reloads(self):
         self.assertIn("original: null", STAGE)
         self.assertIn("if (resetOriginal || !image.original)", STAGE)
-        self.assertIn("originalContext.putImageData(image.original", STAGE)
+        self.assertIn("function paintOriginal(width, height)", STAGE)
+        self.assertIn("originalCanvas.width = width", STAGE)
+        self.assertIn("context.drawImage(sourceCanvas, 0, 0, width, height)", STAGE)
         self.assertIn("renderer.draw(null, { original: false })", STAGE)
 
     def test_hdr_capability_probe_never_targets_the_visible_swap_chain(self):
@@ -175,9 +198,19 @@ class NativePreviewFrontendContractTests(unittest.TestCase):
     def test_hdr_status_waits_for_real_renderer_and_labels_input_domain(self):
         self.assertIn("INPUT_DOMAIN_LABELS", STAGE)
         self.assertIn("inputDomain", STAGE)
-        self.assertIn("等待图像 · 将在预览时验证 HDR 输出", STAGE)
+        self.assertIn('setCapability("hdr.waiting", false)', STAGE)
+        self.assertIn('"hdr.waiting": "等待图像 · 将在预览时验证 HDR 输出"', CATALOGUE)
         self.assertIn('stage.dataset.previewMode = renderer?.kind || "uninitialized"', STAGE)
         self.assertNotIn('setCapability("HDR 能力就绪", true)', STAGE)
+
+    def test_ai_post_controls_have_independent_keys_and_reload_native_frames(self):
+        for key in (
+                "aiBrightness", "aiContrast", "aiShadows", "aiHighlights",
+                "aiHdrRange", "aiExpansionStart"):
+            self.assertIn(f'key: "{key}"', SETTINGS_SCHEMA)
+        self.assertIn("export const AI_POST_KEYS", SETTINGS_SCHEMA)
+        self.assertIn("...AI_POST_KEYS", STAGE)
+        self.assertIn("state.previewOptimized", STAGE)
 
 
 if __name__ == "__main__":

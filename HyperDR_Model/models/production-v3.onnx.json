@@ -1,0 +1,42 @@
+{
+  "schema": "hyperdr.model-onnx/v1",
+  "model_id": "hyperdr.direct-fixed-incumbent/v3-production",
+  "graph": "direct",
+  "checkpoint": {
+    "file": "HyperDR_Model/checkpoints/production-v3.pt",
+    "sha256": "286024d47db090f321d3cf31ad6b3a7b405557da41b0eac84e38824adfdf97d6",
+    "epoch": 4,
+    "label_contract_id": "hyperdr.apple-gain-label/v2"
+  },
+  "model": {
+    "family": "DirectGainMapNet",
+    "architecture": "baseline",
+    "base_channels": 24,
+    "parameters": 635113,
+    "input": "linear Display-P3 SDR, BCHW, three channels",
+    "output": "single-channel raw signed log2 gain in stops",
+    "target_mode": "signed_stops"
+  },
+  "onnx": {
+    "file": "HyperDR_Model/models/production-v3.onnx",
+    "sha256": "39f162be0ebb181c0387f505325fd80631912fcef5e87f3991fcfff717db5e5b",
+    "opset": 18,
+    "input_name": "linear_p3",
+    "output_name": "gain_stops",
+    "input_shape": [
+      1,
+      3,
+      192,
+      256
+    ],
+    "output_shape": [
+      1,
+      1,
+      12,
+      16
+    ],
+    "dynamic_spatial": true,
+    "external_data": false,
+    "inference_only": true
+  }
+}

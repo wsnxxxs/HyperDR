@@ -5,7 +5,8 @@
 竞争假设是先解码再插值。gamma ≠ 1 时两者不等价，规范文本读法不能裁定，
 **只有 Apple 自己的解码器（ImageIO / Core Image）能裁定**。这就是必须借 Mac 的全部原因。
 
-判据早已冻结（`HyperDR_Model/reports/display-domain-protocol-registration.json` 的 T2 条），
+判据已冻结在本目录的 `fixture_spec.json` 与 `report.schema.json`；原始预注册记录
+保存在本地、不入库的 `HyperDR_Model/reports/display-domain-protocol-registration.json`。
 夹具、阈值、决策规则都在仓库里，**Mac 上不做任何判断，只产出证据**。
 
 ---
@@ -145,8 +146,8 @@ Core Image 的那条路——**那条路的插值顺序是 harness 写死的**�
 - `*-decoded-input.bin` —— Core Image 解出的 base/gain，供离线复算
 - `toolchain.txt` —— 系统与编译器版本
 
-回到 Windows 后，这些进 `HyperDR_Model` 的证据流程，
-并据结果更新 `docs/DESIGN_VERDICT.md` 里 T2 的状态与"渲染链路现状"的插值顺序条目。
+回到 Windows 后，将证据包交给 `HyperDR_Model` 的本地证据流程保存；
+若结论改变，再同步更新本目录的 `README.md`、冻结判据与相关实现说明。
 
 ---
 

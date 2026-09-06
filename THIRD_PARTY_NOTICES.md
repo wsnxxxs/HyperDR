@@ -1,6 +1,6 @@
 # Third-party notices
 
-`HyperDR` does not vendor third-party source code. A normal codec-enabled build
+A normal codec-enabled `HyperDR` build
 resolves the dependencies below through vcpkg or CMake `FetchContent`.
 
 | Component | Purpose | Upstream license information |
@@ -45,3 +45,10 @@ implementation.
 HEVC may be subject to patent rights in some jurisdictions. Before distributing
 binaries, bundling codecs, or offering a hosted conversion service, review all
 applicable dependency licenses and patent obligations with qualified counsel.
+
+## Phone connection QR code
+
+The desktop connection dialog bundles [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator)
+by Kazuhiko Arase under the MIT license. Its ES module and full license are in
+`apps/panel/web/js/vendor/qrcode.mjs` and `qrcode-LICENSE.txt`. QR codes are
+generated locally; connection tokens are never sent to a QR service.

@@ -13,7 +13,7 @@ One photograph at a time: upload it, tune it while watching a live HDR preview,
 convert it, export it. Batch conversion is what the command line is for.
 
 The implementation lives in the ``hyperdr_panel`` package next to this file:
-    app         - entry-point dispatch: the --pick subprocess, or the server
+    app         - local editor and desktop-shell entry point
     config      - shared paths and platform flags
     schema      - the converter's settings vocabulary, from schema/settings.json
     command     - panel controls -> a HyperDR command line (the only builder)
@@ -24,7 +24,7 @@ The implementation lives in the ``hyperdr_panel`` package next to this file:
     model       - native embedded gain-model capability and packet adapter
     curve       - the exporter's tone curve, fetched from the binary
     concurrency - process admission control shared by preview, model, and curve
-    picker      - native tkinter folder dialog (spawned as a subprocess)
+    workbench   - shared photo, phone upload handoff and preview frame
     api         - the HTTP endpoints, as plain testable functions
     security    - tokens, login throttling, response headers
     handler     - HTTP request handling and routing

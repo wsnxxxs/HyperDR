@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from http import cookies
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
@@ -21,6 +22,7 @@ _CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
     ".css": "text/css; charset=utf-8",
     ".js": "text/javascript; charset=utf-8",
+    ".mjs": "text/javascript; charset=utf-8",
     ".png": "image/png",
     ".svg": "image/svg+xml",
     ".ico": "image/x-icon",
@@ -69,13 +71,13 @@ class Handler(BaseHTTPRequestHandler):
     def _accept_login(self, parsed) -> bool:
         """Exchange ?token=... for a cookie. True when the request was handled."""
         supplied = parse_qs(parsed.query).get("token", [""])[0]
-        if parsed.path != "/" or not supplied:
+        if parsed.path not in ("/", "/phone", "/phone/") or not supplied:
             return False
         client_ip = self.client_address[0]
         if security.tokens_match(supplied, self.server.access_token):
             self.server.login_throttle.clear(client_ip)
             self.send_response(303)
-            self.send_header("Location", "/")
+            self.send_header("Location", "/phone" if parsed.path.startswith("/phone") or getattr(self.server, "phone_only", False) else "/")
             self.send_header("Set-Cookie", security.cookie_attributes(
                 self.server.access_token, self.server.cookie_secure))
             for name, value in security.SECURITY_HEADERS.items():
@@ -178,6 +180,8 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     def _serve_static(self, route: str) -> bool:
+        if route in ("/phone", "/phone/") or (route in ("/", "/index.html") and self.server.phone_only):
+            return self._serve_from(WEB_ROOT, "phone/index.html")
         relative = "index.html" if route in ("/", "/index.html") else route.lstrip("/")
         return self._serve_from(WEB_ROOT, relative)
 
@@ -203,6 +207,20 @@ class Handler(BaseHTTPRequestHandler):
             return
         if not self._require_authorized():
             return
+        if parsed.path.startswith("/api/phone/"):
+            self._phone_get(parsed)
+            return
+        if self.server.phone_only and parsed.path.startswith("/api/"):
+            if parsed.path not in ("/api/state", "/api/result"):
+                self._send(api.error("not found", status=404))
+                return
+            if parsed.path == "/api/result":
+                query = parse_qs(parsed.query)
+                allowed = any(e["sessionId"] == api._first(query, "id") and e["id"] == api._first(query, "export")
+                              for e in self.server.context.workbench.snapshot()["completed"])
+                if not allowed:
+                    self._send(api.error("结果尚未分享到手机。", status=404))
+                    return
         route = api.GET_ROUTES.get(parsed.path)
         if route is not None:
             self._send(self._dispatch(route, parse_qs(parsed.query)))
@@ -221,10 +239,13 @@ class Handler(BaseHTTPRequestHandler):
                                  code="origin_mismatch"))
             return
         path = urlparse(self.path).path
+        if self.server.phone_only and path != "/api/upload" and not path.startswith("/api/phone/"):
+            self._send(api.error("not found", status=404))
+            return
         if path == "/api/upload":
             self._handle_upload()
             return
-        route = api.POST_ROUTES.get(path)
+        route = self._phone_post if path.startswith("/api/phone/") else api.POST_ROUTES.get(path)
         if route is None:
             self._send(api.error("not found", status=404))
             return
@@ -234,6 +255,74 @@ class Handler(BaseHTTPRequestHandler):
             self._send(api.error(exc))
             return
         self._send(self._dispatch(route, body))
+
+    def _phone_get(self, parsed):
+        workbench = self.server.context.workbench
+        if parsed.path == "/api/phone/state":
+            if self.server.phone_only:
+                workbench.phone_seen = time.monotonic()
+            self._send(api.Response(payload=workbench.snapshot()))
+        elif parsed.path in ("/api/phone/frame", "/api/phone/original"):
+            with workbench.changed:
+                original = parsed.path.endswith("/original")
+                frame = workbench.original_frame if original else workbench.frame
+                version = workbench.frame_version
+                key = (workbench.current.get("sessionId"), workbench.current.get("options", {}).get("highlightRecovery", "blend")) if original else workbench.frame_key()
+                if not frame or frame[:2] != key:
+                    self._send(api.error("正在更新预览。", status=409))
+                    return
+            self._send(api.Response(body=frame[2], content_type="application/vnd.hyperdr.preview",
+                                    headers={"X-Frame-Version": str(version)}))
+        elif parsed.path == "/api/phone/events" and self.server.phone_only:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self._common_headers()
+            self.end_headers()
+            self.close_connection = True
+            revision = -1
+            try:
+                while workbench.enabled:
+                    with workbench.changed:
+                        workbench.phone_seen = time.monotonic()
+                        if revision == workbench.revision:
+                            workbench.changed.wait(timeout=5)
+                        payload = workbench.snapshot()
+                        revision = payload["revision"]
+                    data = json.dumps(payload, ensure_ascii=False)
+                    self.wfile.write(f"data: {data}\n\n".encode("utf-8"))
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionError, TimeoutError):
+                pass
+        else:
+            self._send(api.error("not found", status=404))
+
+    def _phone_post(self, context, body):
+        path = urlparse(self.path).path
+        workbench = context.workbench
+        desktop_routes = ("/api/phone/connect", "/api/phone/disconnect", "/api/phone/publish", "/api/phone/heartbeat")
+        if path in desktop_routes and (self.server.phone_only or self.client_address[0] not in ("127.0.0.1", "::1")):
+            return api.error("请在电脑编辑器中管理连接。", status=403)
+        if path in desktop_routes[1:] and body.get("owner") != workbench.owner:
+            return api.error("工作台连接已关闭或被其他窗口接管。", status=409,
+                             code="workbench_owner")
+        try:
+            if path == "/api/phone/heartbeat":
+                workbench.desktop_seen = time.monotonic()
+                return api.Response(payload={"enabled": workbench.enabled})
+            if path == "/api/phone/connect":
+                return api.Response(payload=self.server.enable_phone(str(body.get("owner", ""))))
+            if path == "/api/phone/disconnect":
+                self.server.stop_phone()
+                return api.Response(payload={"enabled": False})
+            if path == "/api/phone/publish":
+                return api.Response(payload=workbench.publish(body))
+            if path == "/api/phone/import":
+                return api.Response(payload=workbench.begin_upload(body.get("name", "")))
+            if path == "/api/phone/upload":
+                return api.Response(payload=workbench.update_upload(body))
+        except (ValueError, OSError) as exc:
+            return api.error(exc, status=409)
+        return api.error("not found", status=404)
 
     def _dispatch(self, route, argument) -> api.Response:
         """Run an endpoint, turning any escaping exception into a response.
@@ -256,6 +345,12 @@ class Handler(BaseHTTPRequestHandler):
         query = parse_qs(urlparse(self.path).query)
         session_id = query.get("id", [""])[0]
         filename = query.get("name", [""])[0]
+        if getattr(self.server, "phone_only", False):
+            upload = self.server.context.workbench.snapshot()["upload"]
+            if not upload or upload["sessionId"] != session_id:
+                self.close_connection = True
+                self._send(api.error("请先选择要导入的照片。", status=409))
+                return
         try:
             with job.upload_slot():
                 length = int(self.headers.get("Content-Length", "0"))

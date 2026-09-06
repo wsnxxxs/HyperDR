@@ -1,0 +1,41 @@
+.phone-settings { display: grid; gap: 20px; }
+.phone-heading { display: flex; align-items: center; gap: 14px; }
+.phone-heading > i { display: grid; place-items: center; width: 48px; height: 48px; flex: none; border-radius: var(--radius-xl); background: var(--accent-soft); color: var(--accent); font-size: 26px; }
+.phone-heading h3 { margin: 0; color: var(--ink-strong); font-size: var(--text-lg); font-weight: 600; }
+.phone-subtitle { margin: 5px 0 0; color: var(--ink-muted); font-size: var(--text-sm); line-height: 1.6; }
+.phone-connection { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface-card); }
+.phone-status { display: flex; align-items: baseline; gap: 8px; flex: 1 1 180px; margin: 0; font-size: var(--text-sm); line-height: 1.6; }
+.phone-status::before { content: ""; width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--ink-muted); }
+.phone-settings[data-state="active"] .phone-status::before { background: var(--accent); }
+.phone-settings[data-state="error"] .phone-status { color: var(--danger); }
+.phone-settings[data-state="error"] .phone-status::before { background: var(--danger); }
+.phone-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.phone-pairing { display: grid; grid-template-columns: 200px minmax(0, 1fr); align-items: center; gap: 24px; }
+.phone-code { width: 200px; }
+.phone-qr { background: white; border-radius: var(--radius-lg); overflow: hidden; }
+.phone-qr:empty { display: none; }
+.phone-qr svg { display: block; width: 100%; height: auto; }
+.phone-placeholder { display: flex; min-height: 200px; align-items: center; justify-content: center; flex-direction: column; gap: 14px; padding: 16px; border: 1px dashed var(--line-strong); border-radius: var(--radius-lg); color: var(--ink-muted); font-size: var(--text-xs); text-align: center; background: var(--surface-sunken); }
+.phone-placeholder[hidden] { display: none; }
+.phone-placeholder i { font-size: 52px; opacity: .5; }
+.phone-instructions { min-width: 0; }
+.phone-instructions ol { display: grid; gap: 12px; padding: 0; margin: 0 0 20px; list-style: none; counter-reset: pairing; }
+.phone-instructions li { display: flex; align-items: baseline; gap: 10px; font-size: var(--text-sm); line-height: 1.6; counter-increment: pairing; }
+.phone-instructions li::before { content: counter(pairing); display: grid; place-items: center; flex: none; width: 21px; height: 21px; border-radius: 50%; background: var(--surface-sunken); color: var(--ink-muted); font-size: var(--text-xs); }
+.phone-address-label { display: grid; gap: 6px; font-size: var(--text-xs); color: var(--ink-muted); }
+.phone-address-label[hidden] { display: none; }
+.phone-address-label select { width: 100%; min-width: 0; min-height: var(--control-height); padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-sunken); color: var(--ink); }
+.phone-link { display: flex; gap: 8px; margin-top: 10px; }
+.phone-link input { flex: 1; min-width: 0; width: 0; padding: 10px; background: var(--surface-sunken); color: var(--ink-muted); border: 1px solid var(--line); border-radius: var(--radius-md); font-size: var(--text-xs); }
+.phone-link .button { flex: none; }
+.phone-preview-note { padding: 16px; border: 1px solid var(--line); border-radius: var(--radius-lg); }
+.phone-preview-note h4 { margin: 0 0 6px; font-size: var(--text-sm); font-weight: 600; color: var(--ink-strong); }
+.phone-preview-note p, .phone-privacy { margin: 0; font-size: var(--text-xs); color: var(--ink-muted); line-height: 1.8; }
+.phone-privacy { text-align: center; }
+#phone-connect[data-connected="true"] { color: var(--accent); }
+@media (width < 1200px) { #phone-connect span { display: none; } }
+@media (max-width: 600px) {
+  .phone-pairing { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .phone-code { justify-self: center; }
+  .phone-heading { align-items: flex-start; }
+}

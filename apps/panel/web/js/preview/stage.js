@@ -12,7 +12,7 @@ import { store } from "../core/store.js";
 import { t, onLocaleChange } from "../i18n/index.js";
 import { prefs, previewCeilingPx } from "../ui/prefs-schema.js";
 import { role, setText, clamp } from "../core/dom.js";
-import { mobileLayout, touchQuery } from "../core/media.js";
+import { touchQuery } from "../core/media.js";
 import { renderSdr, planeToImageData } from "./cpu.js";
 import { createHdrRenderer } from "./gpu.js";
 import { createSdrGpuRenderer } from "./sdr-gpu.js";
@@ -28,9 +28,7 @@ const hdrDisplayQuery = window.matchMedia("(dynamic-range: high)");
 const PREVIEW_TIERS = [960, 1280, 2048];
 const PREVIEW_RELOAD_DELAY_MS = 240;
 
-/* Shown on the photograph itself (see .stage-hint), so the gestures are
- * discoverable by sighted users too -- an aria-label alone only speaks to
- * screen readers. */
+/* Gesture descriptions remain available to screen readers. */
 const TOUCH_HINT = "stage.hintTouch";
 const MOUSE_HINT = "stage.hintMouse";
 const INPUT_DOMAIN_LABELS = Object.freeze({
@@ -52,7 +50,6 @@ export function mountStage({ toast }) {
   const uploadOverlay = role("stage-upload");
   const uploadOverlayText = role("stage-upload-text");
   const uploadCancel = role("upload-cancel");
-  const hintEl = role("stage-hint");
   const hdrStatus = role("hdr-status");
   const badge = role("hdr-badge");
   const fileInput = role("file-input");
@@ -60,7 +57,6 @@ export function mountStage({ toast }) {
   const divider = role("divider");
   const hdrCanvas = role("canvas-hdr");
   const originalCanvas = role("canvas-original");
-  const expandButton = role("stage-expand");
   const mathModeButton = role("math-mode");
   const optimizeButton = role("optimize");
   let sdrCanvas = role("canvas-sdr");
@@ -74,9 +70,8 @@ export function mountStage({ toast }) {
     // either one for "原图" makes the supposedly untreated side follow the
     // adjustment as well.
     original: null,
-    previewRequestEdge: 0,
+
   };
-  let expanded = false;
   const sourceListeners = new Set();
   const notifySource = () => { for (const listener of [...sourceListeners]) listener(); };
   const analysis = { current: null, modelGain: null };
@@ -132,11 +127,6 @@ export function mountStage({ toast }) {
     stage.style.setProperty(
       "--stage-aspect",
       `${image.source.width} / ${image.source.height}`);
-    if (mobileLayout.matches || expanded) {
-      stage.style.removeProperty("width");
-      stage.style.removeProperty("height");
-      return;
-    }
     const bounds = viewport.getBoundingClientRect();
     const gutter = Number.parseFloat(
       getComputedStyle(viewport).getPropertyValue("--stage-gutter")) || 0;
@@ -155,7 +145,7 @@ export function mountStage({ toast }) {
 
   // Keep the comparison pixels independent from look reloads, while matching
   // the intrinsic canvas size of the current native frame. Preview tiers can
-  // change when the stage is expanded, so the first cached ImageData may not
+  // change when the window is resized, so the first cached ImageData may not
   // have the same dimensions as the new HDR plane.
   function paintOriginal(width, height) {
     originalCanvas.width = width;
@@ -179,7 +169,8 @@ export function mountStage({ toast }) {
   function syncView() {
     const state = store.get();
     const hasImage = Boolean(image.source);
-    const split = state.viewMode === "split" && hasImage;
+    stage.dataset.viewMode = state.comparing ? "original" : state.viewMode;
+    const split = state.viewMode === "split" && hasImage && !state.comparing;
     const original = showingOriginal();
     const showOriginalCanvas = Boolean(image.original) && (split || original);
 
@@ -206,8 +197,6 @@ export function mountStage({ toast }) {
       ? t("stage.titleOriginal")
       : t("stage.titleHdr");
     hdrStatus.hidden = !hasImage;
-    hintEl.hidden = !hasImage;
-    if (!hasImage) hintEl.classList.remove("is-visible");
     stage.classList.toggle("is-comparing", original);
     stage.setAttribute("aria-pressed", String(original));
   }
@@ -239,9 +228,43 @@ export function mountStage({ toast }) {
   });
 
   new ResizeObserver(() => {
-    if (!mobileLayout.matches && !expanded) fitStageToImage();
+    fitStageToImage();
     positionDivider();
   }).observe(viewport);
+
+  function applyZoom() {
+    const state = store.get();
+    const maxX = frame.clientWidth * (state.viewerZoom - 1) / 2;
+    const maxY = frame.clientHeight * (state.viewerZoom - 1) / 2;
+    const x = clamp(state.viewerPanX, -maxX, maxX);
+    const y = clamp(state.viewerPanY, -maxY, maxY);
+    for (const canvas of frame.querySelectorAll("canvas")) {
+      canvas.style.transform = `translate(${x}px, ${y}px) scale(${state.viewerZoom})`;
+    }
+    stage.classList.toggle("is-zoomed", state.viewerZoom > 1);
+    positionDivider();
+  }
+  store.watchAny(["viewerZoom", "viewerPanX", "viewerPanY"], applyZoom);
+  new ResizeObserver(applyZoom).observe(frame);
+  const pan = { pointer: null, x: 0, y: 0, originX: 0, originY: 0 };
+  stage.addEventListener("pointerdown", (event) => {
+    if (store.get().viewerZoom <= 1 || event.button !== 0 || event.target.closest("button, [role='slider']")) return;
+    event.stopImmediatePropagation(); event.preventDefault();
+    const state = store.get();
+    const maxX = frame.clientWidth * (state.viewerZoom - 1) / 2;
+    const maxY = frame.clientHeight * (state.viewerZoom - 1) / 2;
+    Object.assign(pan, { pointer: event.pointerId, x: event.clientX, y: event.clientY,
+      originX: clamp(state.viewerPanX, -maxX, maxX), originY: clamp(state.viewerPanY, -maxY, maxY) });
+    stage.setPointerCapture(event.pointerId);
+  });
+  stage.addEventListener("pointermove", (event) => {
+    if (pan.pointer !== event.pointerId) return;
+    store.set({ viewerPanX: pan.originX + event.clientX - pan.x, viewerPanY: pan.originY + event.clientY - pan.y });
+  });
+  for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) stage.addEventListener(type, (event) => {
+    if (pan.pointer !== event.pointerId) return;
+    pan.pointer = null; event.stopImmediatePropagation();
+  });
 
   /* ── capability reporting ─────────────────────────────────────────── */
 
@@ -249,7 +272,7 @@ export function mountStage({ toast }) {
 
   function setCapability(key, ok, params) {
     lastCapability = { key, ok, params };
-    const message = t(key, params);
+    const message = t(key, params?.reasonKey ? { ...params, reason: t(params.reasonKey) } : params);
     const domain = sourceDomainLabel ? t(sourceDomainLabel) : "";
     setText(hdrStatus, domain ? `${domain} · ${message}` : message);
     hdrStatus.classList.toggle("is-ok", Boolean(ok));
@@ -333,7 +356,7 @@ export function mountStage({ toast }) {
       renderer = created;
       renderer.upload(image.frame);
       showCanvas("sdr");
-      setCapability("hdr.sdrPreviewWhy", false, { reason: t(reason) });
+      setCapability("hdr.sdrPreviewWhy", false, { reasonKey: reason });
     } catch (error) {
       renderer = null;
       // A canvas that has successfully created a WebGL context cannot later
@@ -345,7 +368,7 @@ export function mountStage({ toast }) {
       sdrCanvas.replaceWith(replacement);
       sdrCanvas = replacement;
       showCanvas("sdr");
-      setCapability("hdr.sdrCompatWhy", false, { reason: t(reason) });
+      setCapability("hdr.sdrCompatWhy", false, { reasonKey: reason });
     }
     syncView();
     schedule();
@@ -370,7 +393,7 @@ export function mountStage({ toast }) {
         setCapability("hdr.true", true, { gamut });
       } else {
         const reason = sdrReason();
-        if (reason) setCapability("hdr.sdrPreviewWhy", false, { reason: t(reason) });
+        if (reason) setCapability("hdr.sdrPreviewWhy", false, { reasonKey: reason });
         else setCapability("hdr.sdrPreview", false);
       }
       syncView();
@@ -433,60 +456,14 @@ export function mountStage({ toast }) {
     return list[list.length - 1];
   }
 
-  let nativeFullscreenActive = false;
-
-  function updateExpandedState(next, { exitNative = true } = {}) {
-    expanded = Boolean(next && image.source && mobileLayout.matches);
-    viewport.classList.toggle("is-expanded", expanded);
-    document.documentElement.classList.toggle("preview-expanded", expanded);
-    expandButton.setAttribute("aria-pressed", String(expanded));
-    expandButton.setAttribute("aria-label",
-      expanded ? t("stage.collapse") : t("stage.expand"));
-
-    if (!expanded) {
-      if (exitNative && document.fullscreenElement === viewport) {
-        document.exitFullscreen?.().catch(() => {});
-      }
-      fitStageToImage();
-      positionDivider();
-      return;
-    }
-
-    // CSS expansion is the dependable path on every mobile browser. Native
-    // fullscreen is only an enhancement and must be requested while this click
-    // still owns user activation.
-    if (!document.fullscreenElement && typeof viewport.requestFullscreen === "function") {
-      viewport.requestFullscreen().catch(() => {});
-    }
-
-    // Let the fixed overlay acquire its final dimensions, then ask for a
-    // higher cached preview tier only when the existing decode is too small.
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      if (!expanded) return;
-      positionDivider();
-      const wanted = previewTier();
-      if (wanted && wanted > image.previewRequestEdge) load();
-    }));
-  }
-
-  document.addEventListener("fullscreenchange", () => {
-    if (document.fullscreenElement === viewport) {
-      nativeFullscreenActive = true;
-    } else if (nativeFullscreenActive) {
-      nativeFullscreenActive = false;
-      updateExpandedState(false, { exitNative: false });
-    }
-  });
-
   function clear(message = t("stage.empty")) {
     invalidateImage();
     invalidateRenderer();
-    updateExpandedState(false);
     Object.assign(image, {
       source: null,
       frame: null,
       original: null,
-      previewRequestEdge: 0,
+
     });
     notifySource();
     analysis.current = null;
@@ -497,6 +474,7 @@ export function mountStage({ toast }) {
     analysis.modelGain = null;
     store.set({
       comparing: false, maskKey: null,
+      viewerZoom: 1, viewerPanX: 0, viewerPanY: 0,
       previewReady: false,
       previewOptimized: false, modelGainReady: false, optimizing: false,
     });
@@ -519,6 +497,7 @@ export function mountStage({ toast }) {
 
   async function load({ resetOriginal = false } = {}) {
     clearTimeout(nativeReloadTimer);
+    store.set({ previewError: false });
     const sessionId = store.get().sessionId;
     const epoch = invalidateImage();
     if (!sessionId) { clear(); reportInitialCapability(); return; }
@@ -547,7 +526,6 @@ export function mountStage({ toast }) {
       if (resetOriginal || !image.original) {
         image.original = planeToImageData(preview.base, width, height);
       }
-      image.previewRequestEdge = requestedEdge || Math.max(width, height);
       notifySource();
 
       for (const canvas of [sdrCanvas, hdrCanvas]) {
@@ -573,13 +551,12 @@ export function mountStage({ toast }) {
       stage.tabIndex = 0;
       store.set({ comparing: false });
       refreshScope();
-      flashHint();
       if (preview.metadata.status === "degraded") {
         const reasons = (preview.metadata.degradationReasons || []).join(", ");
         toast(t("hdr.degraded", { reasons: reasons || t("hdr.degradedFallback") }), true);
       }
       await chooseRenderer();
-      if (isCurrentImage(epoch)) store.set({ previewReady: true });
+      if (isCurrentImage(epoch)) { applyZoom(); store.set({ previewReady: true }); }
     } catch (error) {
       if (!isCurrentImage(epoch)) return;
       // A newer slider event may have cancelled this decode, or another
@@ -591,6 +568,7 @@ export function mountStage({ toast }) {
         toast(t("err.previewSwitching"));
         return;
       }
+      store.set({ previewError: true });
       const message = error.message || t("err.preview");
       if (error.status === 404) {
         clear(message);
@@ -612,6 +590,25 @@ export function mountStage({ toast }) {
     }
   }
 
+  async function preparePhoto() {
+    modelGain = null;
+    analysis.modelGain = null;
+    image.original = null;
+    const activeGamut = store.get().colorGamut;
+    store.set({
+      // All image adjustments are image-scoped. Do not carry a previous
+      // photograph's grade into a newly uploaded image. Keep the selected
+      // output format, which is a workflow choice rather than a grade.
+      ...(prefs.get().rememberAdjustments ? {} : defaultSettings(store.get().encoding)),
+      colorGamut: activeGamut,
+      clampSrgb: store.get().clampSrgb,
+      previewReady: false,
+      viewerZoom: 1, viewerPanX: 0, viewerPanY: 0,
+      previewOptimized: false, modelGainReady: false, optimizing: false,
+    });
+    await load({ resetOriginal: true });
+  }
+
   const upload = createUploader({
     onProgress: (fraction) => {
       const percent = Math.round(fraction * 100);
@@ -620,23 +617,7 @@ export function mountStage({ toast }) {
       setText(progressText, fraction > 0 && fraction < 1 ? uploading : "");
       setText(uploadOverlayText, uploading);
     },
-    onReady: async () => {
-      modelGain = null;
-      analysis.modelGain = null;
-      image.original = null;
-      const activeGamut = store.get().colorGamut;
-      store.set({
-        // All image adjustments are image-scoped. Do not carry a previous
-        // photograph's grade into a newly uploaded image. Keep the selected
-        // output format, which is a workflow choice rather than a grade.
-        ...(prefs.get().rememberAdjustments ? {} : defaultSettings(store.get().encoding)),
-        colorGamut: activeGamut,
-        clampSrgb: activeGamut === "srgb" ? true : store.get().clampSrgb,
-        previewReady: false,
-        previewOptimized: false, modelGainReady: false, optimizing: false,
-      });
-      await load({ resetOriginal: true });
-    },
+    onReady: preparePhoto,
     onError: (message, { preserveCurrent, cancelled } = {}) => {
       // A user-aborted upload is a confirmation, not a failure: keep the
       // current image (or the plain empty state) and say so quietly.
@@ -704,10 +685,6 @@ export function mountStage({ toast }) {
 
   const openPicker = () => { if (canReplace()) fileInput.click(); };
   selectButton.addEventListener("click", openPicker);
-  expandButton.addEventListener("click", (event) => {
-    event.stopPropagation();
-    updateExpandedState(!expanded);
-  });
   const isStageControl = (target) =>
     target instanceof Element
     && Boolean(target.closest("button, a, input, select, textarea, [role='slider']"));
@@ -723,7 +700,7 @@ export function mountStage({ toast }) {
   const gesture = { pointerId: null, at: 0, x: 0, y: 0, timer: 0 };
 
   function beginCompare(event) {
-    if (!image.source || store.get().comparing || store.get().viewMode === "split") return;
+    if (!image.source || store.get().comparing) return;
     event?.preventDefault();
     store.set({ comparing: true });
     if (event?.pointerId != null) { try { stage.setPointerCapture(event.pointerId); } catch (_) {} }
@@ -752,7 +729,7 @@ export function mountStage({ toast }) {
     gesture.x = event.clientX;
     gesture.y = event.clientY;
     clearTimeout(gesture.timer);
-    // Press-and-hold compares against the original; a tap opens the picker.
+    // Press-and-hold compares against the original; an empty-stage tap imports.
     if (image.source && !touchQuery.matches) {
       gesture.timer = setTimeout(() => beginCompare(event), 240);
     }
@@ -764,7 +741,7 @@ export function mountStage({ toast }) {
     const moved = Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y);
     const wasComparing = store.get().comparing;
     cancelGesture(event);
-    if (isActive && !wasComparing && !isStageControl(event.target)
+    if (!image.source && isActive && !wasComparing && !isStageControl(event.target)
         && elapsed < 320 && moved < 12) openPicker();
   });
 
@@ -810,13 +787,14 @@ export function mountStage({ toast }) {
     if (touchQuery.matches) event.preventDefault();
   });
   stage.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && expanded) {
+    if (event.target === stage && ["Enter", " "].includes(event.key) && !event.repeat) {
       event.preventDefault();
-      updateExpandedState(false);
-    } else if (event.target === stage && event.key === "Enter" && !event.repeat) {
-      event.preventDefault();
-      openPicker();
+      if (image.source) beginCompare(event); else openPicker();
     } else if (event.key === "Escape") cancelGesture(event);
+  });
+
+  stage.addEventListener("keyup", (event) => {
+    if (["Enter", " "].includes(event.key)) endCompare(event);
   });
 
   /* ── reactions ────────────────────────────────────────────────────── */
@@ -827,6 +805,11 @@ export function mountStage({ toast }) {
     stage.setAttribute("aria-busy", String(state.uploading));
     selectButton.disabled = state.uploading;
     uploadOverlay.hidden = !state.uploading;
+  });
+  store.watch("uploadProgress", (fraction) => {
+    const percent = Math.round(fraction * 100);
+    progressBar.style.width = `${percent}%`;
+    setText(uploadOverlayText, t("stage.uploading", { percent }));
   });
   let nativeReloadTimer = 0;
   store.watchAny(
@@ -847,9 +830,7 @@ export function mountStage({ toast }) {
     },
     { immediate: true });
 
-  /* Every other control acts on the decoded pixels the browser already holds,
-   * so a redraw is enough. Highlight recovery acts *during* the RAW decode, so
-   * the pixels themselves are stale and the preview has to be fetched again. */
+  /* Highlight recovery also invalidates the decoded source and model cache. */
   store.subscribe((state, _previous, changed) => {
     if (!changed.includes("highlightRecovery")) return;
     modelGain = null;
@@ -936,26 +917,13 @@ export function mountStage({ toast }) {
   const applyPointerHint = () => {
     const text = t(touchQuery.matches ? TOUCH_HINT : MOUSE_HINT);
     stage.setAttribute("aria-label", text);
-    setText(hintEl, text);
   };
 
-  /* Touch users get no hover, so the hint is flashed once when an image
-   * lands; desktop users see it whenever the pointer is over the stage. */
-  let hintTimer = 0;
-  function flashHint() {
-    if (!touchQuery.matches || !image.source) return;
-    hintEl.classList.add("is-visible");
-    clearTimeout(hintTimer);
-    hintTimer = setTimeout(() => hintEl.classList.remove("is-visible"), 4000);
-  }
   touchQuery.addEventListener?.("change", () => {
     applyPointerHint();
     store.set({ comparing: false });
   });
-  mobileLayout.addEventListener?.("change", () => {
-    fitStageToImage();
-    positionDivider();
-  });
+
 
   /* Preference reactions.
    *
@@ -975,6 +943,7 @@ export function mountStage({ toast }) {
    * strings this module wrote imperatively. `lastCapability` is kept as a key
    * plus parameters precisely so this does not have to re-probe the GPU. */
   onLocaleChange(() => {
+    setText(optimizeButton, store.get().optimizing ? t("adjust.aiBusy") : t("adjust.ai"));
     applyPointerHint();
     syncView();
     if (lastCapability) {
@@ -982,16 +951,21 @@ export function mountStage({ toast }) {
     }
     if (!image.source) setText(emptyTitle, t("stage.empty"));
     setText(supportHint, t("stage.support"));
-    expandButton.setAttribute("aria-label",
-      expanded ? t("stage.collapse") : t("stage.expand"));
   });
 
   applyPointerHint();
   reportInitialCapability();
 
   return {
+    openPicker,
     redraw: schedule,
     reload: load,
+    async acceptPhonePhoto(current) {
+      store.set({ restoring: true, uploading: true, phoneUploading: false,
+        sessionId: current.sessionId, file: current.file, result: null, exports: [] });
+      try { await preparePhoto(); }
+      finally { store.set({ restoring: false, uploading: false }); }
+    },
     clear,
     /** The decoded preview pixels, for the mask overlay. Null before upload. */
     getSource: () => image.source,

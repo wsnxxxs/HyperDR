@@ -177,7 +177,7 @@ export const CONTROLS = [
     min: -0.5, max: 0.5, step: 0.01, default: 0.12, format: signed, mask: null,
   },
   {
-    key: "quality", kind: "number", group: "quality", label: "ctrl.quality.label",
+    key: "quality", kind: "range", group: "quality", label: "ctrl.quality.label",
     min: 0, max: 100, step: 1, default: 90, mask: null,
   },
 ];
@@ -197,7 +197,7 @@ export function defaultSettings(encoding = ENCODINGS[0].id) {
   const values = {
     encoding: activeEncoding.id,
     colorGamut: COLOR_GAMUTS[0].id,
-    clampSrgb: COLOR_GAMUTS[0].id === "srgb",
+    clampSrgb: false,
   };
   for (const control of CONTROLS) values[control.key] = control.default;
   values.hdrRange = Math.min(values.hdrRange, activeEncoding.maxRange);
@@ -233,6 +233,5 @@ export function validatedSettings(saved, base = defaultSettings()) {
   const ceiling = encodingById(values.encoding).maxRange;
   values.hdrRange = Math.min(values.hdrRange, ceiling);
   values.aiHdrRange = Math.min(values.aiHdrRange, ceiling);
-  if (values.colorGamut === "srgb") values.clampSrgb = true;
   return values;
 }

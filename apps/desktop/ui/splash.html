@@ -5,192 +5,42 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>HyperDR</title>
   <style>
-    /* HyperDR Splash Screen - Obsidian Darkroom & Liquid Glass (Style C) */
+    /* Standalone shell: values mirror the desktop's dark tokens.css palette. */
     :root {
       color-scheme: dark;
       --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text",
         "Segoe UI", Inter, system-ui, "PingFang SC", "HarmonyOS Sans SC",
         "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
-      --surface-page: #080a0f;
-      --surface-card: rgba(18, 24, 35, 0.76);
-      --surface-sunken: rgba(9, 12, 17, 0.65);
-      --line: rgba(255, 255, 255, 0.08);
-      --glass-border: rgba(255, 255, 255, 0.12);
-      --glass-edge: rgba(255, 255, 255, 0.22);
-      --ink-strong: #f8fafc;
-      --ink: #cbd5e1;
-      --ink-muted: #94a3b8;
-      --accent: #38bdf8;
-      --accent-glow: rgba(56, 189, 248, 0.35);
-      --success: #34d399;
-      --success-glow: rgba(52, 211, 153, 0.45);
-      --radius-sm: 6px;
-      --radius-md: 10px;
-      --radius-xl: 20px;
-      --ease: cubic-bezier(0.16, 1, 0.3, 1);
+      --surface-page: #17181b;
+      --surface-panel: #1e1f23;
+      --surface-sunken: #191a1e;
+      --line: rgba(255, 255, 255, .08);
+      --ink-strong: #f1f1f3;
+      --ink: #c9cbd2;
+      --ink-muted: #a1a4af;
+      --accent: #8ba8ff;
     }
-
-    *, *::before, *::after {
-      box-sizing: border-box;
-    }
-
-    html, body {
-      margin: 0;
-      padding: 0;
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      font-family: var(--font-ui);
-      background-color: var(--surface-page);
-      color: var(--ink-strong);
-      user-select: none;
-      -webkit-user-select: none;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-    }
-
-    /* Ambient atmospheric background matching HDR darkroom */
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; min-height: 100%; }
     body {
-      display: grid;
-      place-items: center;
-      background:
-        radial-gradient(circle at 50% 40%, rgba(56, 189, 248, 0.09) 0%, transparent 60%),
-        radial-gradient(circle at 80% 80%, rgba(245, 158, 11, 0.04) 0%, transparent 50%),
-        radial-gradient(circle at 20% 20%, rgba(99, 102, 241, 0.05) 0%, transparent 50%),
-        var(--surface-page);
+      display: grid; place-items: center; min-height: 100dvh;
+      padding: 24px; background: var(--surface-page); color: var(--ink);
+      font: 14px/1.6 var(--font-ui); user-select: none;
     }
-
-    /* Floating Liquid Glass Container */
     .splash-card {
-      position: relative;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      text-align: center;
-      width: calc(100% - 48px);
-      max-width: 420px;
-      padding: 44px 36px 38px;
-      background: var(--surface-card);
-      border: 1px solid var(--glass-border);
-      border-radius: var(--radius-xl);
-      backdrop-filter: blur(28px) saturate(190%);
-      -webkit-backdrop-filter: blur(28px) saturate(190%);
-      box-shadow:
-        0 24px 60px -12px rgba(0, 0, 0, 0.75),
-        0 8px 24px -4px rgba(0, 0, 0, 0.5),
-        0 0 40px -8px var(--accent-glow),
-        inset 0 1px 1px 0 var(--glass-edge);
-      animation: cardAppear 500ms var(--ease) both;
+      display: flex; flex-direction: column; align-items: center;
+      width: min(420px, 100%); padding: 40px 24px; text-align: center;
+      border: 1px solid var(--line); border-radius: 12px; background: var(--surface-panel);
     }
-
-    /* Reuse the exact desktop application icon. */
-    .brand-icon-wrapper {
-      position: relative;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 64px;
-      height: 64px;
-      margin-bottom: 20px;
-      border-radius: var(--radius-md);
-    }
-
-    .brand-mark {
-      width: 64px;
-      height: 64px;
-      display: block;
-      object-fit: contain;
-    }
-
-    /* Typography */
-    .brand-title {
-      margin: 0 0 6px;
-      font-size: 1.75rem;
-      font-weight: 700;
-      line-height: 1.15;
-      letter-spacing: -0.025em;
-      color: var(--ink-strong);
-      white-space: nowrap;
-    }
-
-    .brand-accent {
-      color: var(--accent);
-      font-weight: 800;
-    }
-
-    .brand-subtitle {
-      margin: 0 0 28px;
-      font-size: 0.8125rem;
-      font-weight: 500;
-      letter-spacing: 0.08em;
-      color: var(--ink-muted);
-      text-transform: uppercase;
-    }
-
-    /* Status Capsule / Badge (Unified Rounded Rectangle) */
-    .status-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      padding: 7px 14px;
-      background: var(--surface-sunken);
-      border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
-      box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
-    }
-
-    .status-dot {
-      flex: none;
-      width: 7px;
-      height: 7px;
-      border-radius: 2px;
-      background: var(--success);
-      box-shadow: 0 0 8px var(--success-glow);
-      animation: dotPulse 2s ease-in-out infinite;
-    }
-
-    .status-text {
-      margin: 0;
-      font-size: 0.8125rem;
-      font-weight: 450;
-      letter-spacing: 0.015em;
-      color: var(--ink);
-      white-space: nowrap;
-    }
-
-    /* Animations */
-    @keyframes cardAppear {
-      from {
-        opacity: 0;
-        transform: translateY(12px) scale(0.98);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-      }
-    }
-
-    @keyframes dotPulse {
-      0%, 100% {
-        opacity: 1;
-        box-shadow: 0 0 6px var(--success-glow);
-        transform: scale(1);
-      }
-      50% {
-        opacity: 0.45;
-        box-shadow: 0 0 2px var(--success-glow);
-        transform: scale(0.85);
-      }
-    }
-
-    /* Accessibility: Reduced Motion */
-    @media (prefers-reduced-motion: reduce) {
-      .splash-card,
-      .status-dot {
-        animation: none !important;
-        transition: none !important;
-      }
-    }
+    .brand-icon-wrapper { margin-bottom: 24px; }
+    .brand-mark { display: block; width: 64px; height: 64px; }
+    .brand-title { margin: 0 0 8px; color: var(--ink-strong); font-size: 28px; font-weight: 600; letter-spacing: -.025em; line-height: 1.3; }
+    .brand-subtitle { margin: 0 0 32px; color: var(--ink-muted); font-size: 13px; }
+    .status-badge { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; padding: 12px 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-sunken); }
+    .status-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: pulse 1.8s ease-in-out infinite; }
+    .status-text { font-size: 13px; }
+    @keyframes pulse { 50% { opacity: .35; } }
+    @media (prefers-reduced-motion: reduce) { .status-dot { animation: none; } }
   </style>
 </head>
 <body>

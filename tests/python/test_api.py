@@ -27,7 +27,7 @@ class ApiTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.previous_root = session.WORK_ROOT
         session.WORK_ROOT = Path(self.temporary.name).resolve()
-        self.context = api.Context(output_selections={})
+        self.context = api.Context()
 
     def tearDown(self):
         session._EXTERNAL_INPUTS.clear()
@@ -275,28 +275,6 @@ class ApiTests(unittest.TestCase):
     def test_a_session_with_no_result_is_a_not_found(self):
         session_id = session.create_session()
         self.assertEqual(api.result(self.context, {"id": [session_id]}).status, 404)
-
-    # --- export ----------------------------------------------------------- #
-
-    def test_export_requires_a_selection_the_server_issued(self):
-        session_id = session.create_session()
-        response = api.export(self.context, {"sessionId": session_id, "selectionId": "made-up"})
-        self.assertEqual(response.status, 400)
-        # A path from the browser is never accepted, only an id from select_output.
-        with tempfile.TemporaryDirectory() as elsewhere:
-            response = api.export(self.context, {
-                "sessionId": session_id, "destination": elsewhere,
-            })
-            self.assertEqual(response.status, 400)
-
-    def test_export_copies_the_result_into_the_chosen_folder(self):
-        session_id = session.create_session()
-        (session.session_dir(session_id, "output") / "photo.heic").write_bytes(b"result")
-        with tempfile.TemporaryDirectory() as chosen:
-            self.context.output_selections["ok"] = Path(chosen).resolve()
-            response = api.export(self.context, {"sessionId": session_id, "selectionId": "ok"})
-            self.assertEqual(response.status, 200)
-            self.assertEqual((Path(chosen) / "photo.heic").read_bytes(), b"result")
 
     # --- paths from the browser ------------------------------------------- #
 

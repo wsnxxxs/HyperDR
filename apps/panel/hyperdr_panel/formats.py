@@ -115,16 +115,3 @@ def extension_format(extension: str) -> str | None:
         if extension in extensions:
             return kind
     return None
-
-
-def picker_patterns() -> str:
-    """The space-separated glob list a tkinter file dialog wants.
-
-    Both cases of every extension, because tkinter's Windows filter is
-    case-sensitive and a camera that writes .ARW is not unusual.
-    """
-    return " ".join(
-        pattern
-        for extension in sorted(SUPPORTED_EXTENSIONS)
-        for pattern in ("*" + extension.upper(), "*" + extension)
-    )

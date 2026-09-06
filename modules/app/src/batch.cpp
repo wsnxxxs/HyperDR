@@ -283,6 +283,7 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     // bypass HLG's 1000-nit ceiling.
     validate_encoding_headroom(options.encoding, gain.headroom_stops);
     result.sensor_width = staged.image.decode.sensor_width;
+    result.raw_white_balance = staged.image.raw_white_balance;
     result.sensor_height = staged.image.decode.sensor_height;
     result.target_width = staged.image.decode.target_width;
     result.target_height = staged.image.decode.target_height;

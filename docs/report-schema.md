@@ -13,8 +13,13 @@ changes.
 table, so it records every setting by its canonical name — not the handful someone
 remembered to add — plus `output_depth`, the depth actually encoded (BT.2100 is
 always 10-bit regardless of `--depth`). The top-level `raw_processing` block
-records the calibration files, auto bad-pixel mode, and sensor digital gain used
-for the run. Each file carries flat result fields and `look`, `render`, and
+records requested calibration files, auto bad-pixel mode, post-decode linear
+gain and the black/WB policies for the run. Invalid requested calibration
+files fail the conversion rather than silently appearing as applied.
+The optional per-file `raw_white_balance` records `camera`, `camera-applied`,
+`auto`, or `daylight`; an empty string means no RAW decode was reported (for
+example a raster, skipped file or failure before rendering). It survives decode
+cache hits. Each file carries flat result fields and `look`, `render`, and
 `gain_map` objects. These record EV100 (or
 `null`), selected/linear headroom, rendered peak, utilization, gamma, gain
 percentiles, high-gain fractions, clipping, and local-weight diagnostics.

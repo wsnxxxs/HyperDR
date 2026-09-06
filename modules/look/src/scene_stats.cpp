@@ -33,8 +33,8 @@ SceneStatistics compute_luminance_statistics(const FloatImage& source) {
       const auto p = sampler.coordinates(x, y);
       const auto luma = [&](std::uint32_t sx, std::uint32_t sy) {
         const auto i = (static_cast<std::size_t>(sy) * source.width + sx) * 3;
-        return p3_luminance(positive_finite(source.pixels[i]),
-            positive_finite(source.pixels[i+1]), positive_finite(source.pixels[i+2]));
+        return p3_luminance(finite_or_zero(source.pixels[i]),
+            finite_or_zero(source.pixels[i+1]), finite_or_zero(source.pixels[i+2]));
       };
       const float value = std::lerp(std::lerp(luma(p.x0,p.y0), luma(p.x1,p.y0), p.tx),
           std::lerp(luma(p.x0,p.y1), luma(p.x1,p.y1), p.tx), p.ty);

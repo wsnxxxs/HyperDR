@@ -29,6 +29,12 @@ inline constexpr float kEpsilon = 1.0e-6F;
   return std::isfinite(value) && value > 0.0F ? value : 0.0F;
 }
 
+// Linear RGB may have negative components outside its working gamut. Keep
+// those until chroma compression; only invalid numbers should become zero.
+[[nodiscard]] inline float finite_or_zero(float value) {
+  return std::isfinite(value) ? value : 0.0F;
+}
+
 // Hermite smoothstep. Outside [low, high] it saturates; a degenerate interval
 // becomes a step so callers never divide by zero.
 [[nodiscard]] inline float smoothstep(float low, float high, float value) {

@@ -222,10 +222,10 @@
       ],
       "properties": {
         "black_level_correction": {
-          "const": "LibRaw metadata"
+          "enum": ["LibRaw metadata", "metadata or measured dark; LUT-aware"]
         },
         "white_balance": {
-          "const": "camera WB"
+          "enum": ["camera WB", "camera WB with LibRaw fallback"]
         },
         "digital_gain": {
           "type": "number",
@@ -350,6 +350,9 @@
         },
         "decode_degraded": {
           "type": "boolean"
+        },
+        "raw_white_balance": {
+          "enum": ["", "camera", "camera-applied", "auto", "daylight"]
         },
         "input_domain": {
           "type": "string",

@@ -14,7 +14,7 @@ namespace {
 
 // Local little-endian cache, like the decoded float buffers beside it.
 constexpr std::uint32_t kMagic = 0x414e5244U;
-constexpr std::uint32_t kVersion = 2;
+constexpr std::uint32_t kVersion = 3;
 
 bool read_analysis(const FloatImage& source, const std::filesystem::path& file,
                    PhotographicAnalysis& out) {

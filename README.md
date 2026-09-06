@@ -178,12 +178,15 @@ own session; sessions and their exports expire after the configured idle time
 
 ## Continuous integration
 
-`.github/workflows/ci.yml` is configured to build the dependency-free Windows
-core in Debug and Release, run the panel tests on two Python versions, parse the
-front-end, check the panel's `data-role` contract, validate the checked-in JSON
-schemas, and confirm that `schema/settings.json` matches what the built converter
-emits. It then builds and tests the full codec-enabled Windows configuration.
-A change is ready to merge only when all of these jobs are green.
+Local checks and `.github/workflows/ci.yml` share `python scripts/test.py`.
+Run it after configuring `build-core`, or select `panel`, `frontend`, or `native`
+for a focused check. The [development guide](docs/development.md#validate-only-the-affected-behaviour)
+lists prerequisites and build options.
+
+CI builds the Windows core in Debug and Release, runs panel tests on two Python
+versions, checks front-end behavior and wiring, and compares native curve/schema
+contracts with the selected build. Full codec builds and extracted-release
+smoke tests cover both SSE and AVX2. All jobs must pass before merging.
 
 ## Scope and limitations
 

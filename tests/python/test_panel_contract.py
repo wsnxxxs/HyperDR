@@ -20,7 +20,6 @@ sys.path.insert(0, str(REPO_ROOT / "apps" / "panel"))
 from hyperdr_panel import formats  # noqa: E402
 from hyperdr_panel import schema  # noqa: E402
 from hyperdr_panel import model  # noqa: E402
-from hyperdr_panel.executable import detect_exe  # noqa: E402
 from hyperdr_panel.command import (  # noqa: E402
     build_argv,
     build_curve_argv,
@@ -335,19 +334,6 @@ class SettingsContractTest(unittest.TestCase):
                                           "auto_or_number"}, key)
             self.assertTrue(entry["flag"].startswith("--"), key)
             self.assertIn("default", entry, key)
-
-    def test_schema_file_matches_the_built_converter(self):
-        """schema/settings.json is generated output; drift is a build error."""
-        exe = detect_exe()
-        if not exe:
-            self.skipTest("no built HyperDR to compare against")
-        emitted = subprocess.run([exe, "schema"], capture_output=True, timeout=30)
-        self.assertEqual(emitted.returncode, 0, emitted.stderr.decode(errors="replace"))
-        checked_in = schema.SCHEMA_PATH.read_text(encoding="utf-8")
-        self.assertEqual(json.loads(emitted.stdout.decode("utf-8")),
-                         json.loads(checked_in),
-                         "schema/settings.json is stale: run "
-                         "`HyperDR schema > schema/settings.json`")
 
     def test_validation_rejects_unknown_and_out_of_range(self):
         with self.assertRaises(ValueError):

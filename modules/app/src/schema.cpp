@@ -89,7 +89,7 @@ const std::array<Setting, 26>& table() {
        "RAW clipped-highlight handling", false, true, nullptr,
        apply_highlight_recovery, read_highlight_recovery, true},
       {"raw_gain", "--raw-gain", SettingKind::kNumber, 0.125, 64.0, {},
-       "<0.125..64>", "Sensor-domain RAW digital gain", false, true, nullptr,
+       "<0.125..64>", "Post-decode scene-linear RAW gain", false, true, nullptr,
        [](ConvertOptions& o, const json::Value& v) {
          o.raw.digital_gain = as_float(v);
        },

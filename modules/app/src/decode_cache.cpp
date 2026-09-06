@@ -25,7 +25,7 @@ constexpr std::array<char, 8> kMagic{'H', 'D', 'R', 'C', 'A', 'C', 'H', '3'};
 // build that started writing a new field would silently read old entries that
 // lacked it -- which is how a cache hit came to produce different Exif from
 // the decode that filled it.
-constexpr std::uint32_t kCacheSchema = 7;
+constexpr std::uint32_t kCacheSchema = 8;
 
 // x86-64 and arm64, the only targets this project builds for, are both little
 // endian; the cache is a local scratch format and is never transported.
@@ -81,6 +81,7 @@ std::string metadata_json(const DecodedImage& value) {
       .member("focal_length_mm", m.focal_length_mm)
       .member("focal_length_35mm", m.focal_length_35mm)
       .member("capture_iso", c.iso)
+      .member("raw_white_balance", value.raw_white_balance)
       .member("capture_exposure_time_seconds", c.exposure_time_seconds)
       .member("capture_aperture_f_number", c.aperture_f_number)
       .member("decode_sensor_width", d.sensor_width)
@@ -170,6 +171,7 @@ void apply_metadata_json(const std::string& text, DecodedImage& out) {
   out.domain = input_domain_from_name(string_at("input_domain"))
                    .value_or(InputDomain::kDisplayReferredSdr);
   out.capture.iso = read_optional(document, "capture_iso");
+  out.raw_white_balance = string_at("raw_white_balance");
   out.capture.exposure_time_seconds =
       read_optional(document, "capture_exposure_time_seconds");
   out.capture.aperture_f_number = read_optional(document, "capture_aperture_f_number");

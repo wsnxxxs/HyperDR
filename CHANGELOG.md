@@ -5,6 +5,20 @@ semantic versioning; dates use ISO 8601.
 
 ## Unreleased
 
+- RAW LUTs transform pixels, black and white levels together. Dark frames and
+  bad-pixel maps use original visible-area coordinates before DefaultCrop;
+  invalid calibration files fail explicitly. Lens-shading maps preserve those
+  coordinates in full and half-size decoding and reserve integer headroom.
+- Highlight-mode exposure compensation uses the WB multipliers actually applied
+  by LibRaw, including fallback WB. Reports record that selection, stale decode
+  caches are invalidated, and the mosaic API rejects non-2x2 CFAs before packing.
+- `--raw-gain` is described as a post-decode linear multiplier, matching its
+  actual placement and interaction with automatic exposure.
+
+- RAW scene analysis and photographic rendering retain signed linear-P3
+  components until gamut compression, preserving saturated colours and their
+  luminance. Earlier source-analysis caches are rebuilt.
+
 - Slider drags now show coalesced 640-pixel drafts and refine on release.
   A native preview worker retains decoded sources, manual strength-independent
   preparation, and model predictions. It releases idle resources after 90 seconds.

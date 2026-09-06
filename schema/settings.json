@@ -50,7 +50,7 @@
       "minimum": 0.125,
       "maximum": 64,
       "affects_output_bytes": true,
-      "help": "Sensor-domain RAW digital gain",
+      "help": "Post-decode scene-linear RAW gain",
       "default": 1
     },
     {

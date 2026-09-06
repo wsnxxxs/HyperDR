@@ -1,5 +1,6 @@
 #include "hyperdr/gainmap/gain_map.hpp"
 #include "hyperdr/gainmap/reconstruct.hpp"
+#include "hyperdr/image/color.hpp"
 
 #include <cmath>
 #include <iostream>
@@ -29,6 +30,33 @@ hyperdr::FloatImage colorful_source() {
 
 int main() {
   try {
+    // Out-of-P3 sensor colours must reach chroma compression with their signed
+    // components intact, and exposure must measure their actual luminance.
+    hyperdr::FloatImage signed_source(32, 16, 3);
+    for (std::size_t i = 0; i < signed_source.pixels.size(); i += 3) {
+      signed_source.pixels[i] = -0.2F;
+      signed_source.pixels[i + 1] = 0.3F;
+      signed_source.pixels[i + 2] = 0.2F;
+    }
+    const float signed_y = hyperdr::p3_luminance(-0.2F, 0.3F, 0.2F);
+    const auto analysis = hyperdr::analyze_photographic_source(signed_source);
+    require(std::abs(analysis.scene_stats.log_average - signed_y) < 1.0e-6F &&
+                std::abs(analysis.cell_mean.front() - signed_y) < 1.0e-6F,
+            "scene analysis clipped negative P3 components");
+    hyperdr::GainMapOptions signed_options;
+    signed_options.auto_exposure = false;
+    const auto signed_render = hyperdr::make_gain_map(signed_source, signed_options);
+    auto clipped_source = signed_source;
+    for (std::size_t i = 0; i < clipped_source.pixels.size(); i += 3)
+      clipped_source.pixels[i] = 0.0F;
+    const auto clipped_render = hyperdr::make_gain_map(clipped_source, signed_options);
+    require(std::abs(signed_render.base_linear.pixels[1] -
+                     clipped_render.base_linear.pixels[1]) > 0.01F,
+            "rendering discarded signed colour before gamut compression");
+    for (const float value : signed_render.base_linear.pixels)
+      require(std::isfinite(value) && value >= 0.0F && value <= 1.0F,
+              "signed colour did not produce an in-gamut SDR base");
+
     const auto source = colorful_source();
     hyperdr::GainMapOptions no_headroom;
     no_headroom.auto_exposure = false;

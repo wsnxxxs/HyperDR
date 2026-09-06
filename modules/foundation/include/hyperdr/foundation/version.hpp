@@ -10,6 +10,6 @@ inline constexpr char kVersion[] = "1.0.0";
 // invalidate an existing output without being a user-visible product release.
 // Increment it whenever the encoded bytes can change while the settings table
 // and public version remain unchanged.
-inline constexpr int kRenderPipelineRevision = 2;
+inline constexpr int kRenderPipelineRevision = 3;
 
 }  // namespace hyperdr

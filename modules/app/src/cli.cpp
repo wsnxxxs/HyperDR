@@ -84,8 +84,8 @@ void usage() {
           "  --allow-legacy-external-gain      Allow frozen v1 normalized sidecars\n"
           "  --decode-cache <directory>         Reuse decoded buffers across look-only reruns\n"
           "  --fast-preview                     Explicitly allow RAW half-size decoding\n"
-          "  --raw-bad-pixels <file>             LibRaw bad-pixel coordinate map\n"
-          "  --raw-dark-frame <file>              LibRaw dark-frame PGM\n"
+          "  --raw-bad-pixels <file>             Visible-area bad-pixel coordinates\n"
+          "  --raw-dark-frame <file>              Visible-area 16-bit dark-frame PGM\n"
           "  --raw-linearization-lut <file>      N code-to-code LUT for RAW linearization\n"
           "  --raw-lens-shading <file>           Text gain map: width height channels + gains\n";
   if (!kCodecsAvailable) {

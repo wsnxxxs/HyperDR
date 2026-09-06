@@ -88,6 +88,9 @@ RenderOptions render_options_for_target(RenderOptions options, RenderTarget targ
 struct PhotoRenditions {
   FloatImage sdr;
   FloatImage hdr;
+  // Original spatial log2 gain, before interpolation/quantization.
+  // Cleared by grading that changes the SDR/HDR relation.
+  FloatImage gain_stops;
   RenderStats stats;
   bool clamp_srgb{false};
   // Selection made before creative grading; reused after gain quantization.

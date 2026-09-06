@@ -42,8 +42,8 @@ PANEL_DEFAULTS = {
     "colorGamut": "srgb",
     "clampSrgb": False,
     "highlightRecovery": "blend",
-    "contrast": 1.08,
-    "vibrance": 0.12,
+    "contrast": 1.0,
+    "vibrance": 0.0,
     "hdrStrength": 0.4,
     "hdrRange": 2.5,
     # The panel starts with a modest +0.6 EV lift after the renderer's

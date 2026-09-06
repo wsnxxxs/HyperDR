@@ -163,6 +163,7 @@ void validate_color_lut_options(const ColorLutOptions& o) {
 void apply_rendition_lut(PhotoRenditions& out, const ColorLutOptions& grade, const ColorLut* supplied) {
   validate_color_lut_options(grade);
   if(grade.path.empty() || grade.strength==0) return;
+  out.gain_stops = {};
   if(!sdr_space(grade.input)) throw std::invalid_argument("AI/external gain requires an SDR creative LUT");
   const auto owned=supplied ? ColorLut{} : read_color_lut(grade.path);
   const auto& lut=supplied?*supplied:owned;

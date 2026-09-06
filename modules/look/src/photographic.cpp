@@ -67,25 +67,15 @@ float select_exposure_ev(const PhotographicAnalysis& inputs,
                          const ToneCurveParameters& curve) {
   const auto ev100 = estimate_ev100(capture);
   const float target_middle_gray = compute_target_middle_gray(ev100);
-  const float pop = std::clamp(options.look.pop, 0.0F, 1.0F);
   float exposure_ev = 0.0F;
   if (options.auto_exposure) {
     const float base_ev =
         std::log2(target_middle_gray /
                   std::max(inputs.scene_stats.log_average, kEpsilon));
     const float provisional_exposure_ev = clamp_finite(base_ev, -6.0F, 6.0F);
-    const float provisional_exposure = std::exp2(provisional_exposure_ev);
-    const float provisional_stops =
-        options.auto_headroom
-            ? choose_headroom_stops(
-                  inputs.scene_stats, provisional_exposure, capture,
-                  options.look.headroom_max_stops, inputs.cell_mean,
-                  inputs.cell_peak, inputs.dimensions.width,
-                  inputs.dimensions.height, pop)
-            : std::clamp(options.headroom_stops, 0.0F,
-                         options.look.headroom_max_stops);
+    // Base metering has a fixed capture budget, independent of output HDR controls.
     const float highlight_limit = highlight_limited_exposure(
-        inputs.scene_stats.p995, std::exp2(provisional_stops), curve);
+        inputs.scene_stats.p995, std::exp2(2.5F), curve);
     exposure_ev = std::min(provisional_exposure_ev, highlight_limit);
     if (ev100 && *ev100 < 8.0F) {
       exposure_ev =

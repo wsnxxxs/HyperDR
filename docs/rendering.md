@@ -14,19 +14,21 @@ carries it as `input_domain`. Nothing branches on the file extension.
 | Domain | Produced by | What 1.0 means | Renderer |
 | --- | --- | --- | --- |
 | `scene-referred` | RAW through LibRaw | wherever white balance landed | photographic curve, automatic exposure |
-| `display-referred-sdr` | JPEG, PNG, SDR HEIC/AVIF, an Ultra HDR JPEG that fell back to its primary | diffuse white, and the ceiling | fixed-exposure photographic expansion |
+| `display-referred-sdr` | JPEG, PNG, SDR HEIC/AVIF, an Ultra HDR JPEG that fell back to its primary | diffuse white, and the ceiling | stable finished base plus creative highlight gain |
 | `display-referred-hdr` | PQ/HLG HEIC and AVIF, Ultra HDR, a gain-map HEIC | diffuse white, with real detail above it | log-domain shoulder, split at the declared headroom |
 
 - **A scene-referred input** is developed: the photographic curve below chooses
   an exposure from the scene's log average and selects headroom from content.
 - **A display-referred SDR input** is already a finished photograph, so it does
   not get automatic exposure or pretend that its container carried highlight
-  data. It is rendered through the photographic expansion pipeline with
-  exposure pinned to the display-referred value, which lets `--gain-strength`,
+  data. Its base uses the same exposure and roll-off at every HDR strength,
+  including zero. A smooth highlight gain above the knee lets `--gain-strength`,
   `--headroom`/`--headroom-max`, `--expansion-start`, and `--area-coverage`
   create a controlled HDR alternate for ordinary JPEG/PNG photos. The source
   remains labelled SDR; the inferred range is a creative output budget, not an
-  input measurement.
+  input measurement. Explicit exposure and exposure bias are both honoured;
+  capture ISO participates in local noise weighting. The panel keeps `pop`
+  fixed so its strength slider does not also change clarity and colour.
 - **A display-referred HDR input** is split rather than re-developed. Both
   renditions come from one shoulder in the log domain: identity below the knee
   (`--expansion-start`), slope exactly 1 at the knee, and asymptotic above it.
@@ -69,20 +71,25 @@ creative expansion as any other SDR photograph.
 - The photographic path uses a shared toe and middle segment for SDR and HDR.
   Their exponential shoulders asymptote to `1` and `2^headroom_stops` rather
   than hard-clipping highlights. Scene-referred input selects exposure
-  automatically; display-referred SDR uses the same expansion with exposure
-  pinned to the finished image.
+  automatically; display-referred SDR retains its finished base and builds
+  creative gain separately.
 - A single-channel gain map can only reconstruct a common RGB multiplier. Shared
   vibrance, highlight-to-white convergence, and hue-preserving gamut compression
-  therefore happen before the SDR/HDR luminance split.
+  therefore happen on the shared base. RAW chroma is determined by SDR
+  luminance, independent of the strength of the HDR alternate.
 - Gain maps write zero base and alternate offsets, preserving common RGB ratios
   during ISO 21496-1 reconstruction.
 - Gain-map gamma is chosen by simulating 8-bit encode/decode error. Stored values
   use `pow(q, gamma)` and decoders use `pow(code, 1/gamma)`.
 - `2^headroom_stops` is the nominal global-curve target. Local highlight
   weighting can deliberately make the final rendered peak lower; the report
-  records both values.
-- Any gain-grid node that would bilinearly influence a shadow below the
-  expansion knee is set to zero before encoding. The 8-bit auxiliary gain image
+  records both values. Local weights are not normalized back to the largest
+  gain: attenuation remains attenuation even in a mostly uniform image.
+- RAW and SDR gain grids average individual pixel requests before local
+  filtering. Below-knee pixels contribute zero, while mixed cells can retain
+  a small highlight. Bilinear reconstruction can affect its immediate dark
+  neighbours; `below_knee_relative_difference_max` measures that spill and
+  the local-gain check also measures the far dark field. The 8-bit auxiliary gain image
   is HEVC-lossless, so zero gain cells survive Adaptive HEIC decoding exactly.
   Ultra HDR stores the map as
   a grayscale JPEG at quality 85 or higher, as recommended for JPEG/R; the

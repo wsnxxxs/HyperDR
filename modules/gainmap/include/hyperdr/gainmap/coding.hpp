@@ -11,6 +11,14 @@
 
 namespace hyperdr {
 
+struct RenderStats;
+struct FloatImage;
+
+// Exact distribution of an 8-bit gain grid, using 256 counts instead of a
+// decoded full-grid copy and sort. Ceiling is the requested output budget.
+void measure_quantized_gain(RenderStats& stats, const FloatImage& codes,
+                            float gain_max, float gamma, float ceiling);
+
 [[nodiscard]] float encode_gain_code(float normalized_gain, float gamma);
 [[nodiscard]] float decode_gain_code(float encoded_gain, float gamma);
 

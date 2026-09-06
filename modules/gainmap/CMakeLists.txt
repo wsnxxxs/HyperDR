@@ -5,6 +5,7 @@ hyperdr_add_module(gainmap
     src/display_referred.cpp
     src/external.cpp
     src/gain_map.cpp
+    src/local_gain.cpp
     src/native_model.cpp
     src/photographic.cpp
     src/reconstruct.cpp

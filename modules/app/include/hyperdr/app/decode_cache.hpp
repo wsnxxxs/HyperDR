@@ -43,9 +43,11 @@ namespace hyperdr {
 // Decode and apply the requested pre-look size bound, reusing the optional
 // on-disk cache. Both batch conversion and `preview-frame` go through this
 // entry point so the panel cannot accidentally bypass the cache again.
+// The optional output names the source-analysis sidecar for this exact decode;
+// it stays empty when caching is disabled.
 [[nodiscard]] DecodedImage decode_cached_image(
     const std::filesystem::path& input, const ConvertOptions& options,
-    const RawDecodeOptions& raw);
+    const RawDecodeOptions& raw, std::filesystem::path* analysis_cache_file = nullptr);
 
 [[nodiscard]] std::filesystem::path decode_cache_path(
     const std::filesystem::path& directory, const std::string& key);

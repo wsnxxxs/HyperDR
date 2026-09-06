@@ -69,6 +69,18 @@ void check_sampling_is_exact_at_cell_centres() {
   require(hyperdr::sample_grid_bilinear(view, 4, 4, 3, 3) == 3.0F, "bottom right");
 }
 
+void check_cached_sampling_matches_reference() {
+  const std::vector<float> values{0.0F, 0.8F, 0.2F, 1.0F, 0.1F, 0.6F};
+  const hyperdr::GridView grid(values, 3, 2);
+  const hyperdr::BilinearGridSampler sampler(3, 2, 19, 13);
+  for (std::uint32_t y = 0; y < 13; ++y) {
+    for (std::uint32_t x = 0; x < 19; ++x) {
+      require(sampler.sample(grid, x, y) == hyperdr::sample_grid_bilinear(grid, 19, 13, x, y),
+              "cached grid coordinates changed bilinear reconstruction");
+    }
+  }
+}
+
 // Coordinates for a very wide image. `(x + 0.5) * grid_width` reaches 4.6e9
 // here, past a float's 24-bit mantissa, so the index the caller floors was
 // computed from a rounded product. Every sampled position must still fall in
@@ -98,6 +110,7 @@ int main() {
     check_short_buffer_is_rejected();
     check_zero_image_extent_is_rejected();
     check_sampling_is_exact_at_cell_centres();
+    check_cached_sampling_matches_reference();
     check_large_image_coordinates();
   } catch (const std::exception& e) {
     std::cerr << "grid_test failed: " << e.what() << '\n';

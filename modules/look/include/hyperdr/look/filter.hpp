@@ -11,10 +11,9 @@
 
 namespace hyperdr {
 
-// Summed-area-table box mean over a (2*radius+1) window. `integral` is scratch
-// of size (width+1) * (height+1); reusing it across calls avoids reallocation.
-// Double precision in the table is required: a 3072-square grid accumulates
-// billions before four nearby entries are subtracted to recover a small window.
+// Separable sliding-window box mean over a (2*radius+1) window. `integral`
+// retains the existing scratch contract: (width+1) * (height+1) doubles.
+// It stores horizontal sums; double precision keeps local means stable.
 void box_mean(const std::vector<float>& input, std::vector<float>& output,
               std::uint32_t width, std::uint32_t height, std::uint32_t radius,
               std::vector<double>& integral);

@@ -112,6 +112,36 @@ class NativePreviewContractTests(unittest.TestCase):
         self.assertFalse(seen_output.exists())
         self.assertEqual(list(seen_output.parent.glob(seen_output.name + ".tmp.*")), [])
 
+    def test_rebuilt_converter_invalidates_cached_preview(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "photo.jpg"
+            exe = Path(directory) / "HyperDR.exe"
+            source.write_bytes(b"photo")
+            exe.write_bytes(b"old")
+            with mock.patch.object(native_preview, "detect_exe", return_value=str(exe)), \
+                    mock.patch.object(native_preview, "_build", return_value=(packet(), {})) as build:
+                native_preview.preview_for(source, {}, 960)
+                native_preview.preview_for(source, {}, 960)
+                self.assertEqual(build.call_count, 1)
+                exe.write_bytes(b"new converter")
+                native_preview.preview_for(source, {}, 960)
+                self.assertEqual(build.call_count, 2)
+
+    def test_cached_slider_value_cancels_obsolete_render(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "photo.jpg"
+            source.write_bytes(b"photo")
+            with mock.patch.object(native_preview, "_build", return_value=(packet(), {})) as build:
+                native_preview.preview_for(source, {}, 960)
+                old = native_preview._PreviewCall(native_preview._source_key(source), ("obsolete",))
+                native_preview._register_call(old)
+                try:
+                    native_preview.preview_for(source, {}, 960)
+                    self.assertTrue(old.cancel.is_set())
+                    self.assertEqual(build.call_count, 1)
+                finally:
+                    native_preview._unregister_call(old)
+
     def test_old_crash_orphans_are_swept_without_touching_live_preview(self):
         with tempfile.TemporaryDirectory() as temporary:
             folder = Path(temporary)

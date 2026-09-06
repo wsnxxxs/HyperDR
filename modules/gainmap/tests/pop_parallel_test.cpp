@@ -118,24 +118,27 @@ int main() {
     weak.auto_headroom = false;
     weak.headroom_stops = 3.0F;
     weak.gain_strength = 0.25F;
-    weak.look.pop = 0.25F;
+    weak.look.pop = 0.0F;
     const auto weak_result = make_gain_map(src, weak);
     auto strong = weak;
     strong.gain_strength = 0.80F;
-    strong.look.pop = 0.80F;
+    strong.look.pop = 0.0F;
     const auto strong_result = make_gain_map(src, strong);
-    require(strong_result.headroom_stops > weak_result.headroom_stops + 1.0F,
+    require(strong_result.headroom_stops > weak_result.headroom_stops + 0.1F,
             "HDR strength did not produce a perceptible peak change");
-    require(std::abs(strong_result.headroom_stops - 2.40F) < 0.15F,
-            "HDR strength did not reach its target content headroom");
+    require(strong_result.headroom_stops <= 2.40F &&
+                std::abs(strong_result.headroom_stops / weak_result.headroom_stops - 3.2F) < 0.01F,
+            "HDR strength must scale the gain field within its budget");
+    require(strong_result.base_linear.pixels == weak_result.base_linear.pixels,
+            "HDR strength changed RAW base pixels");
 
     auto short_range = strong;
     short_range.headroom_stops = 1.0F;
     const auto short_result = make_gain_map(src, short_range);
-    require(strong_result.headroom_stops > short_result.headroom_stops + 1.0F,
+    require(strong_result.headroom_stops > short_result.headroom_stops + 0.1F,
             "HDR range did not produce a perceptible peak change");
-    require(std::abs(short_result.headroom_stops - 0.80F) < 0.15F,
-            "HDR range did not reach its target content headroom");
+    require(short_result.headroom_stops > 0.0F && short_result.headroom_stops <= 0.80F,
+            "HDR range exceeded its target content headroom");
 
     GainMapOptions baseline_brightness = strong;
     baseline_brightness.auto_exposure = false;

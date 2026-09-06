@@ -31,6 +31,7 @@ def collect_metrics(reports: list[dict]) -> dict:
     decode = []
     process = []
     encode = []
+    codec, verify, write = [], [], []
     total = []
     headroom = []
     rendered_peak = []
@@ -40,13 +41,15 @@ def collect_metrics(reports: list[dict]) -> dict:
     files_err = 0
 
     for report in reports:
-        results = report.get("results", [])
+        results = report.get("files", report.get("results", []))
         if not isinstance(results, list):
             continue
         for entry in results:
             if not isinstance(entry, dict):
                 continue
-            if entry.get("error"):
+            if entry.get("skipped"):
+                continue
+            if entry.get("error") or entry.get("success") is False:
                 files_err += 1
                 continue
             files_ok += 1
@@ -54,6 +57,7 @@ def collect_metrics(reports: list[dict]) -> dict:
                 ("decode_ms", decode),
                 ("process_ms", process),
                 ("encode_ms", encode),
+                ("codec_ms", codec), ("verify_ms", verify), ("write_ms", write),
             ):
                 val = entry.get(field)
                 if isinstance(val, (int, float)):
@@ -90,6 +94,7 @@ def collect_metrics(reports: list[dict]) -> dict:
         "decode_ms": decode,
         "process_ms": process,
         "encode_ms": encode,
+        "codec_ms": codec, "verify_ms": verify, "write_ms": write,
         "total_ms": total,
         "headroom_stops": headroom,
         "rendered_peak": rendered_peak,
@@ -108,6 +113,7 @@ def summarise(name: str, metrics: dict) -> str:
         ("decode_ms", "decode_ms"),
         ("process_ms", "process_ms"),
         ("encode_ms", "encode_ms"),
+        ("codec_ms", "codec_ms"), ("verify_ms", "verify_ms"), ("write_ms", "write_ms"),
         ("total_ms", "total_ms"),
         ("headroom_stops", "headroom_stops"),
         ("rendered_peak", "rendered_peak"),
@@ -188,6 +194,7 @@ def main() -> None:
             ("decode_ms", "decode_ms"),
             ("process_ms", "process_ms"),
             ("encode_ms", "encode_ms"),
+        ("codec_ms", "codec_ms"), ("verify_ms", "verify_ms"), ("write_ms", "write_ms"),
             ("total_ms", "total_ms"),
         ):
             values = metrics.get(key, [])

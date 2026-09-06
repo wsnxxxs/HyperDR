@@ -1,4 +1,5 @@
 #include "hyperdr/gainmap/gain_map.hpp"
+#include "local_gain.hpp"
 
 #include "hyperdr/foundation/math.hpp"
 #include "hyperdr/foundation/parallel.hpp"
@@ -7,41 +8,23 @@
 #include "hyperdr/gainmap/render.hpp"
 #include "hyperdr/image/color.hpp"
 #include "hyperdr/look/analysis.hpp"
-#include "hyperdr/look/filter.hpp"
 #include "hyperdr/look/grid.hpp"
 #include "hyperdr/look/tone_curve.hpp"
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
-#include <numeric>
 #include <stdexcept>
 #include <utility>
 #include <vector>
 
 namespace hyperdr {
-namespace {
-
-struct ExposureInputs {
-  SceneStatistics scene_stats;
-  CaptureMetadata capture;
-  std::optional<float> ev100;
-  float target_middle_gray{0.18F};
-  GainGridDimensions dimensions;
-  std::vector<float> cell_mean;
-  std::vector<float> cell_peak;
-};
-
-ExposureInputs build_exposure_inputs(const FloatImage& source,
-                                     const CaptureMetadata& capture) {
-  ExposureInputs inputs;
-  inputs.capture = capture;
+PhotographicAnalysis analyze_photographic_source(const FloatImage& source) {
+  source.require_consistent("photographic analysis input");
+  if (source.channels != 3) throw std::invalid_argument("photographic analysis requires RGB");
+  PhotographicAnalysis inputs;
   inputs.scene_stats = compute_luminance_statistics(source);
-  inputs.ev100 = estimate_ev100(capture);
-  inputs.target_middle_gray = compute_target_middle_gray(inputs.ev100);
   inputs.dimensions = choose_gain_dimensions(source);
   const std::size_t count = static_cast<std::size_t>(inputs.dimensions.width) *
                             inputs.dimensions.height;
@@ -89,21 +72,26 @@ ExposureInputs build_exposure_inputs(const FloatImage& source,
   return inputs;
 }
 
-float select_exposure_ev(const ExposureInputs& inputs,
+namespace {
+
+float select_exposure_ev(const PhotographicAnalysis& inputs,
+                         const CaptureMetadata& capture,
                          const GainMapOptions& options,
                          const ToneCurveParameters& curve) {
+  const auto ev100 = estimate_ev100(capture);
+  const float target_middle_gray = compute_target_middle_gray(ev100);
   const float pop = std::clamp(options.look.pop, 0.0F, 1.0F);
   float exposure_ev = 0.0F;
   if (options.auto_exposure) {
     const float base_ev =
-        std::log2(inputs.target_middle_gray /
+        std::log2(target_middle_gray /
                   std::max(inputs.scene_stats.log_average, kEpsilon));
     const float provisional_exposure_ev = clamp_finite(base_ev, -6.0F, 6.0F);
     const float provisional_exposure = std::exp2(provisional_exposure_ev);
     const float provisional_stops =
         options.auto_headroom
             ? choose_headroom_stops(
-                  inputs.scene_stats, provisional_exposure, inputs.capture,
+                  inputs.scene_stats, provisional_exposure, capture,
                   options.look.headroom_max_stops, inputs.cell_mean,
                   inputs.cell_peak, inputs.dimensions.width,
                   inputs.dimensions.height, pop)
@@ -112,7 +100,7 @@ float select_exposure_ev(const ExposureInputs& inputs,
     const float highlight_limit = highlight_limited_exposure(
         inputs.scene_stats.p995, std::exp2(provisional_stops), curve);
     exposure_ev = std::min(provisional_exposure_ev, highlight_limit);
-    if (inputs.ev100 && *inputs.ev100 < 8.0F) {
+    if (ev100 && *ev100 < 8.0F) {
       exposure_ev =
           std::min(exposure_ev, options.look.positive_exposure_limit_ev);
     }
@@ -131,160 +119,113 @@ float photographic_exposure_ev(const FloatImage& source,
   if (source.channels != 3)
     throw std::invalid_argument("photographic exposure input must be RGB");
   validate_gain_map_options(options);
-  const auto inputs = build_exposure_inputs(source, capture);
-  return select_exposure_ev(inputs, options, build_tone_curve(options.look));
+  const auto inputs = analyze_photographic_source(source);
+  return select_exposure_ev(inputs, capture, options, build_tone_curve(options.look));
 }
 
 GainMapResult make_photographic_gain_map(const FloatImage& source,
                                          const GainMapOptions& options,
-                                         const CaptureMetadata& capture) {
+                                         const CaptureMetadata& capture,
+                                         const PhotographicAnalysis* cached_analysis,
+                                         GainMapPreparation* preparation) {
   if (source.channels != 3)
     throw std::invalid_argument("gain-map input must be RGB");
   validate_gain_map_options(options);
 
   const ToneCurveParameters curve = build_tone_curve(options.look);
   const float pop = std::clamp(options.look.pop, 0.0F, 1.0F);
-  const float diffuse_floor =
-      std::clamp(options.look.diffuse_gain_floor + 0.20F * pop, 0.0F, 1.0F);
 
-  // --- Scene analysis, exposure metadata, and gain-grid sampling ---
-  auto inputs = build_exposure_inputs(source, capture);
-  const auto& scene_stats = inputs.scene_stats;
-  const auto& ev100 = inputs.ev100;
-  const float target_middle_gray = inputs.target_middle_gray;
-  const GainGridDimensions dimensions = inputs.dimensions;
-  const std::size_t gain_count =
-      static_cast<std::size_t>(dimensions.width) * dimensions.height;
+  GainMapPreparation owned_preparation;
+  auto& prepared = preparation ? *preparation : owned_preparation;
+  if (!prepared.ready) {
+    // --- Scene analysis, exposure metadata, and gain-grid sampling ---
+    const auto owned_analysis = cached_analysis ? PhotographicAnalysis{} : analyze_photographic_source(source);
+    const auto& inputs = cached_analysis ? *cached_analysis : owned_analysis;
+    const auto expected = choose_gain_dimensions(source);
+    const auto count = static_cast<std::size_t>(expected.width) * expected.height;
+    if (inputs.dimensions.width != expected.width || inputs.dimensions.height != expected.height ||
+        inputs.cell_mean.size() != count || inputs.cell_peak.size() != count)
+      throw std::invalid_argument("photographic analysis dimensions do not match the source");
+    const auto& scene_stats = inputs.scene_stats;
+    const GainGridDimensions dimensions = inputs.dimensions;
+    const std::size_t gain_count =
+        static_cast<std::size_t>(dimensions.width) * dimensions.height;
 
-  // --- Exposure selection ---
-  const float exposure_ev = select_exposure_ev(inputs, options, curve);
+    // --- Exposure selection ---
+    const float exposure_ev = select_exposure_ev(inputs, capture, options, curve);
 
-  // The cell means and peaks are reused by the headroom and gain-map stages.
-  std::vector<float> scene_luma = std::move(inputs.cell_mean);
-  std::vector<float> highlight_peak = std::move(inputs.cell_peak);
-  const float exposure = std::exp2(exposure_ev);
+    // The cell means and peaks are reused by the headroom and gain-map stages.
+    std::vector<float> scene_luma = inputs.cell_mean;
+    const auto& highlight_peak = inputs.cell_peak;
+    const float exposure = std::exp2(exposure_ev);
 
-  // --- Headroom selection ---
-  const float requested_headroom_stops =
-      options.auto_headroom
-          ? choose_headroom_stops(
-                scene_stats, exposure, capture,
-                options.look.headroom_max_stops, scene_luma, highlight_peak,
-                dimensions.width, dimensions.height, pop)
-          : std::clamp(options.headroom_stops, 0.0F,
-                       options.look.headroom_max_stops);
-  const float requested_headroom_linear = std::exp2(requested_headroom_stops);
+    // --- Headroom selection ---
+    const float requested_headroom_stops =
+        options.auto_headroom
+            ? choose_headroom_stops(
+                  scene_stats, exposure, capture,
+                  options.look.headroom_max_stops, scene_luma, highlight_peak,
+                  dimensions.width, dimensions.height, pop)
+            : std::clamp(options.headroom_stops, 0.0F,
+                         options.look.headroom_max_stops);
+    const float requested_headroom_linear = std::exp2(requested_headroom_stops);
 
-  highlight_peak.clear();
-  highlight_peak.shrink_to_fit();
-
-  // --- Gain map core computation ---
-  std::vector<float> global_gain(gain_count, 0.0F);
-  std::vector<float> local(gain_count, 0.0F);
-  std::vector<float> variance(gain_count, 0.0F);
-  std::vector<float> gain(gain_count, 0.0F);
-  std::vector<float> work_one(gain_count, 0.0F);
-  std::vector<float> work_two(gain_count, 0.0F);
-  std::vector<double> integral(
-      (static_cast<std::size_t>(dimensions.width) + 1) *
-          (static_cast<std::size_t>(dimensions.height) + 1),
-      0.0);
-
-  const float photographic_strength = std::min(options.gain_strength, 1.0F);
-  for (std::size_t i = 0; i < gain_count; ++i) {
-    scene_luma[i] *= exposure;
-    const float sdr = render_tone_curve(scene_luma[i], 1.0F, curve);
-    const float hdr =
-        render_tone_curve(scene_luma[i], requested_headroom_linear, curve);
-    global_gain[i] =
-        scene_luma[i] <= curve.shoulder_input
-            ? 0.0F
-            : std::max(0.0F, std::log2((hdr + kEpsilon) / (sdr + kEpsilon)));
-    gain[i] = std::log2(scene_luma[i] + kEpsilon);
-  }
-
-  const std::uint32_t environment_radius = std::clamp<std::uint32_t>(
-      std::min(dimensions.width, dimensions.height) * 3U / 100U, 4U, 64U);
-  box_mean(gain, local, dimensions.width, dimensions.height,
-           environment_radius, integral);
-  for (std::size_t i = 0; i < gain_count; ++i) gain[i] *= gain[i];
-  box_mean(gain, variance, dimensions.width, dimensions.height,
-           environment_radius, integral);
-
-  double weight_sum = 0.0;
-  for (std::size_t i = 0; i < gain_count; ++i) {
-    const float scene = scene_luma[i];
-    const float sdr = render_tone_curve(scene, 1.0F, curve);
-    const float hdr_global = sdr * std::exp2(global_gain[i]);
-    const float local_contrast = std::log2(
-        (scene + kEpsilon) / (std::exp2(local[i]) + kEpsilon));
-    const float specular = smoothstep(1.0F, 2.5F, local_contrast);
-    const float absolute = smoothstep(0.70F, 1.50F, hdr_global);
-    float weight =
-        diffuse_floor + (1.0F - diffuse_floor) * specular * absolute;
-    const float local_var =
-        std::max(0.0F, variance[i] - local[i] * local[i]);
-    const float iso_term =
-        capture.iso && std::isfinite(*capture.iso) && *capture.iso > 0.0F
-            ? smoothstep(800.0F, 25600.0F, *capture.iso)
-            : 0.35F;
-    const float dark_term = 1.0F - smoothstep(0.03F, 0.20F, sdr);
-    const float var_term = smoothstep(0.005F, 0.07F, local_var);
-    const float noise_risk = iso_term * dark_term * var_term;
-    weight = std::clamp(weight * (1.0F - noise_risk), 0.0F, 1.0F);
-    variance[i] = weight;
-    weight_sum += weight;
-    gain[i] = weight * global_gain[i];
-    scene_luma[i] = sdr;
-  }
-
-  const float local_weight_mean =
-      gain_count == 0
-          ? 1.0F
-          : static_cast<float>(weight_sum / static_cast<double>(gain_count));
-  const float local_weight_p95 =
-      percentile(variance, 0.95F);
-
-  guided_filter_gain(gain, global_gain, scene_luma, dimensions.width,
-                     dimensions.height, local, variance, work_one, work_two,
-                     integral);
-
-  for (std::size_t i = 0; i < gain_count; ++i) {
-    const float support = smoothstep(
-        curve.shoulder_output * 0.45F, curve.shoulder_output * 1.05F,
-        scene_luma[i]);
-    gain[i] = std::max(0.0F, gain[i]) * support;
-  }
-
-  // --- Calibration ---
-  const float target_headroom_stops =
-      requested_headroom_stops * photographic_strength;
-  const float target_peak = std::exp2(target_headroom_stops);
-  if (target_headroom_stops <= kEpsilon) {
-    std::fill(gain.begin(), gain.end(), 0.0F);
-  } else {
-    // scene_luma is the SDR tone-mapped guide used by the filter above. It is
-    // strictly below one, so it cannot be reused here as an unbounded scene
-    // luminance when deriving a per-cell required gain. That made the old
-    // calibration leave gain_scale at its fallback value of 32 and clamp most
-    // cells to the same ceiling, destroying the smooth gain structure.
-    //
-    // The guided gain is already a continuous, non-negative field. Normalize
-    // that field once so its actual peak reaches the requested headroom. This
-    // preserves its shape, keeps the encoded gain/headroom ceilings equal for
-    // Apple-targeted output, and avoids introducing a large hard-clipped
-    // plateau.
-    float peak_gain = 0.0F;
-    for (const float value : gain) {
-      peak_gain = std::max(peak_gain, std::max(0.0F, value));
-    }
-    if (peak_gain > kEpsilon) {
-      const float gain_scale = target_headroom_stops / peak_gain;
-      for (float& value : gain) {
-        value = std::max(0.0F, value) * gain_scale;
+    // Average the gain requested by each pixel, not the gain of its cell mean:
+    // a small specular must not disappear into the dark pixels surrounding it.
+    std::vector<float> global_gain(gain_count, 0.0F);
+    std::vector<float> sdr_guide(gain_count, 0.0F);
+    parallel_for_rows(dimensions.height, [&](const std::uint32_t gy) {
+      const auto y0 = grid_cell_edge(gy, source.height, dimensions.height);
+      const auto y1 = grid_cell_edge(gy + 1U, source.height, dimensions.height);
+      for (std::uint32_t gx = 0; gx < dimensions.width; ++gx) {
+        const auto x0 = grid_cell_edge(gx, source.width, dimensions.width);
+        const auto x1 = grid_cell_edge(gx + 1U, source.width, dimensions.width);
+        double gain_sum = 0.0, guide_sum = 0.0;
+        for (auto y = y0; y < y1; ++y) {
+          for (auto x = x0; x < x1; ++x) {
+            const auto px = (static_cast<std::size_t>(y) * source.width + x) * 3;
+            const float scene = p3_luminance(positive_finite(source.pixels[px]),
+                positive_finite(source.pixels[px + 1]),
+                positive_finite(source.pixels[px + 2])) * exposure;
+            const float sdr = render_tone_curve(scene, 1.0F, curve);
+            guide_sum += sdr;
+            if (scene > curve.shoulder_input) {
+              const float hdr = render_tone_curve(scene, requested_headroom_linear, curve);
+              gain_sum += std::max(0.0F, std::log2((hdr + kEpsilon) / (sdr + kEpsilon)));
+            }
+          }
+        }
+        const auto i = static_cast<std::size_t>(gy) * dimensions.width + gx;
+        const auto samples = (x1 - x0) * (y1 - y0);
+        global_gain[i] = samples ? static_cast<float>(gain_sum / samples) : 0.0F;
+        sdr_guide[i] = samples ? static_cast<float>(guide_sum / samples) : 0.0F;
+        scene_luma[i] *= exposure;
       }
-    }
+    });
+    auto local_gain = weight_local_highlights(global_gain, scene_luma, sdr_guide,
+                                             dimensions, capture, options.look);
+    prepared.width = dimensions.width; prepared.height = dimensions.height;
+    prepared.exposure_ev = exposure_ev; prepared.requested_stops = requested_headroom_stops;
+    prepared.stops = std::move(local_gain.stops);
+    prepared.local_average = std::move(local_gain.local_average);
+    prepared.weight_mean = local_gain.weight_mean; prepared.weight_p95 = local_gain.weight_p95;
+    prepared.ready = true;
   }
+  const GainGridDimensions dimensions{prepared.width, prepared.height};
+  const auto gain_count = prepared.stops.size();
+  const float exposure_ev = prepared.exposure_ev;
+  const float exposure = std::exp2(exposure_ev);
+  const float requested_headroom_stops = prepared.requested_stops;
+  const auto ev100 = estimate_ev100(capture);
+  const float target_middle_gray = compute_target_middle_gray(ev100);
+  auto gain = prepared.stops;
+  const float photographic_strength = std::min(options.gain_strength, 1.0F);
+  const float target_headroom_stops = requested_headroom_stops * photographic_strength;
+  const float target_peak = std::exp2(target_headroom_stops);
+  // A range is a budget, not a requirement to brighten some cell to its limit.
+  // Multiplication preserves the local/noise attenuation and makes strength
+  // independent of the brightest cell elsewhere in the photograph.
+  for (float& value : gain) value *= photographic_strength;
 
   // --- Encode gain map ---
   float gain_max = 0.0F;
@@ -321,11 +262,9 @@ GainMapResult make_photographic_gain_map(const FloatImage& source,
   }
 
   // --- Full-resolution render ---
-  box_mean(scene_luma, local, dimensions.width, dimensions.height,
-           environment_radius, integral);
-  render_full_resolution(source, exposure, local, dimensions.width,
+  render_full_resolution(source, exposure, prepared.local_average, dimensions.width,
                          dimensions.height, stored_gain_max, stored_gamma,
-                         target_peak, options.look, result);
+                         target_peak, options.look, result, preparation ? &prepared.base : nullptr);
 
   // --- Populate remaining metadata and stats ---
   result.metadata.gain_min = {0, 1};
@@ -351,36 +290,10 @@ GainMapResult make_photographic_gain_map(const FloatImage& source,
   stats.gain_max_stops = stored_gain_max;
   stats.gain_gamma = stored_gamma;
 
-  // Gain percentile distribution
-  std::vector<float> stored_gains(gain_count, 0.0F);
-  for (std::size_t i = 0; i < gain_count; ++i) {
-    stored_gains[i] = stored_gain_max *
-                      decode_gain_code(result.gain_map.pixels[i], stored_gamma);
-  }
-  for (const float value : stored_gains) {
-    if (value > 0.5F) stats.gain_fraction_gt_0_5 += 1.0F;
-    if (value > 1.0F) stats.gain_fraction_gt_1_0 += 1.0F;
-    if (value > 2.0F) stats.gain_fraction_gt_2_0 += 1.0F;
-  }
-  std::sort(stored_gains.begin(), stored_gains.end());
-  constexpr std::array<float, 8> fractions{0.50F, 0.75F, 0.90F, 0.95F,
-                                             0.99F, 0.999F, 0.9999F, 1.0F};
-  if (!stored_gains.empty()) {
-    for (std::size_t i = 0; i < fractions.size(); ++i) {
-      const auto index = static_cast<std::size_t>(
-          fractions[i] * static_cast<float>(stored_gains.size() - 1));
-      stats.gain_percentiles[i] = stored_gains[index];
-    }
-  }
-  if (gain_count != 0) {
-    const float count = static_cast<float>(gain_count);
-    stats.gain_fraction_gt_0_5 /= count;
-    stats.gain_fraction_gt_1_0 /= count;
-    stats.gain_fraction_gt_2_0 /= count;
-  }
-  stats.gain_clipped_fraction = 0.0F;
-  stats.local_weight_mean = local_weight_mean;
-  stats.local_weight_p95 = local_weight_p95;
+  measure_quantized_gain(stats, result.gain_map, stored_gain_max, stored_gamma,
+                          target_headroom_stops);
+  stats.local_weight_mean = prepared.weight_mean;
+  stats.local_weight_p95 = prepared.weight_p95;
 
   return result;
 }

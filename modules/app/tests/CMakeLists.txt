@@ -1,4 +1,6 @@
 hyperdr_add_test(cli_test LINK HyperDR::app)
+hyperdr_add_test(preview_test LINK HyperDR::app)
+hyperdr_add_test(analysis_cache_test LINK HyperDR::app)
 hyperdr_add_test(discovery_test LINK HyperDR::app)
 if(TARGET discovery_test)
   target_compile_definitions(discovery_test PRIVATE HYPERDR_SOURCE_DIR="${PROJECT_SOURCE_DIR}")

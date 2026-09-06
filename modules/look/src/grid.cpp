@@ -88,6 +88,23 @@ float sample_grid_bilinear(const GridView& grid, std::uint32_t image_width,
   return std::lerp(top, bottom, c.ty);
 }
 
+BilinearGridSampler::BilinearGridSampler(std::uint32_t grid_width,
+                                         std::uint32_t grid_height,
+                                         std::uint32_t image_width,
+                                         std::uint32_t image_height) {
+  // Validate once, even when an empty image would otherwise skip the loops.
+  static_cast<void>(bilinear_grid_coordinates(grid_width, grid_height,
+                                               image_width, image_height, 0, 0));
+  columns_.reserve(image_width);
+  rows_.reserve(image_height);
+  for (std::uint32_t x = 0; x < image_width; ++x)
+    columns_.push_back(bilinear_grid_coordinates(grid_width, grid_height,
+                                                 image_width, image_height, x, 0));
+  for (std::uint32_t y = 0; y < image_height; ++y)
+    rows_.push_back(bilinear_grid_coordinates(grid_width, grid_height,
+                                              image_width, image_height, 0, y));
+}
+
 float sample_grid_bilinear(const std::vector<float>& grid,
                            std::uint32_t grid_width, std::uint32_t grid_height,
                            std::uint32_t image_width,

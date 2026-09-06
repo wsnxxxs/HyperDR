@@ -80,6 +80,21 @@ struct RenderStats {
   float wide_gamut_luminance_threshold{0.02F};
 };
 
+// Owned by an interactive caller, invalidated when source or any option except
+// gain strength changes. Ordinary exports do not allocate these caches.
+struct BaseRenderCache {
+  FloatImage base;
+  std::vector<float> luminance;
+};
+struct GainMapPreparation {
+  bool ready{false};
+  std::uint32_t width{}, height{};
+  float exposure_ev{}, requested_stops{}, weight_mean{1}, weight_p95{1};
+  std::vector<float> stops, local_average;
+  BaseRenderCache base;
+  RenderStats base_stats;
+};
+
 struct GainMapResult {
   FloatImage base_linear;
   FloatImage gain_map;

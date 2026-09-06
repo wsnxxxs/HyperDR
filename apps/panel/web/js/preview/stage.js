@@ -16,6 +16,8 @@ import { touchQuery } from "../core/media.js";
 import { renderSdr, planeToImageData } from "./cpu.js";
 import { createHdrRenderer } from "./gpu.js";
 import { createSdrGpuRenderer } from "./sdr-gpu.js";
+import { createPreviewScheduler } from "./scheduler.js";
+import { diagnosticFrame } from "./packet.js";
 import { analyse, mountScope } from "./scope.js";
 import { createUploader } from "./session.js";
 import { AI_POST_KEYS, defaultSettings, toOptions } from "../settings/schema.js";
@@ -26,7 +28,7 @@ const hdrDisplayQuery = window.matchMedia("(dynamic-range: high)");
  * does not create a new native frame on every window drag. Three tiers cover
  * phone to desktop, clamped to what the server says it can decode. */
 const PREVIEW_TIERS = [960, 1280, 2048];
-const PREVIEW_RELOAD_DELAY_MS = 240;
+const DRAFT_PREVIEW_EDGE = 640;
 
 /* Gesture descriptions remain available to screen readers. */
 const TOUCH_HINT = "stage.hintTouch";
@@ -495,8 +497,8 @@ export function mountStage({ toast }) {
     syncView();
   }
 
-  async function load({ resetOriginal = false } = {}) {
-    clearTimeout(nativeReloadTimer);
+  async function load({ resetOriginal = false, draft = false, requestedAt = performance.now() } = {}) {
+    if (resetOriginal) previewScheduler.cancel();
     store.set({ previewError: false });
     const sessionId = store.get().sessionId;
     const epoch = invalidateImage();
@@ -505,7 +507,8 @@ export function mountStage({ toast }) {
 
     try {
       const state = store.get();
-      const requestedEdge = previewTier();
+      const requestedEdge = draft ? Math.min(previewTier() || DRAFT_PREVIEW_EDGE, DRAFT_PREVIEW_EDGE) : previewTier();
+      const fetchStarted = performance.now();
       const preview = await api.preview(sessionId, {
         options: {
           ...toOptions(state),
@@ -514,34 +517,39 @@ export function mountStage({ toast }) {
         highlightRecovery: state.highlightRecovery,
         maxEdge: requestedEdge,
       });
+      const receivedAt = performance.now();
       if (!isCurrentImage(epoch)) return;
       const { width, height } = preview;
+      const sameBase = preview.metadata.baseId && image.frame?.metadata.baseId === preview.metadata.baseId
+        && image.frame.width === width && image.frame.height === height;
       image.frame = preview;
       sourceDomainLabel = INPUT_DOMAIN_LABELS[preview.metadata.inputDomain]
         || INPUT_DOMAIN_LABELS.unknown;
       setCapability("hdr.verifyingOutput", false);
       // Diagnostics receive an SDR display copy. Preview rendering consumes
       // only the untouched native float planes above.
-      image.source = planeToImageData(preview.base, width, height);
+      if (!sameBase) image.source = planeToImageData(preview.base, width, height);
       if (resetOriginal || !image.original) {
         image.original = planeToImageData(preview.base, width, height);
       }
       notifySource();
 
       for (const canvas of [sdrCanvas, hdrCanvas]) {
-        canvas.width = width;
-        canvas.height = height;
+        if (canvas.width !== width) canvas.width = width;
+        if (canvas.height !== height) canvas.height = height;
       }
       // The comparison content remains the first frame, but its canvas is
       // resampled to the current frame size so original and HDR share one
       // intrinsic resolution at every preview tier.
-      paintOriginal(width, height);
+      if (resetOriginal || originalCanvas.width !== width || originalCanvas.height !== height
+          || !sameBase) paintOriginal(width, height);
       // Scope statistics use the untouched native linear planes. The 8-bit
       // image copy remains only for the original comparison canvas and zebra
       // presentation; folding HDR through a display shoulder here destroyed
       // the very highlight distribution the graph is meant to show.
+      const diagnostic = diagnosticFrame(preview);
       analysis.current = analyse(
-        image.source, null, preview,
+        planeToImageData(diagnostic.base, diagnostic.width, diagnostic.height), null, diagnostic,
         Math.max(1, 2 ** Number(store.get().hdrRange || 0)));
 
       empty.style.display = "none";
@@ -556,7 +564,18 @@ export function mountStage({ toast }) {
         toast(t("hdr.degraded", { reasons: reasons || t("hdr.degradedFallback") }), true);
       }
       await chooseRenderer();
-      if (isCurrentImage(epoch)) { applyZoom(); store.set({ previewReady: true }); }
+      if (isCurrentImage(epoch)) {
+        applyZoom();
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        if (!isCurrentImage(epoch)) return;
+        store.set({ previewReady: true, previewTiming: {
+          draft, width, height,
+          requestMs: receivedAt - fetchStarted,
+          presentationMs: performance.now() - receivedAt,
+          inputToFrameMs: performance.now() - requestedAt,
+          bytes: preview.byteLength,
+        } });
+      }
     } catch (error) {
       if (!isCurrentImage(epoch)) return;
       // A newer slider event may have cancelled this decode, or another
@@ -811,7 +830,15 @@ export function mountStage({ toast }) {
     progressBar.style.width = `${percent}%`;
     setText(uploadOverlayText, t("stage.uploading", { percent }));
   });
-  let nativeReloadTimer = 0;
+  const previewScheduler = createPreviewScheduler(load);
+  let interactionDirty = false;
+  store.watch("sessionId", () => { previewScheduler.cancel(); interactionDirty = false; });
+  store.watch("previewInteracting", (active) => {
+    if (!active && interactionDirty) {
+      interactionDirty = false;
+      previewScheduler.request(false);
+    }
+  });
   store.watchAny(
     ["brightness", "hdrStrength", "hdrRange", "expansionStart", "areaCoverage",
      "encoding", "contrast", "vibrance", "previewOptimized", "modelStrength",
@@ -825,8 +852,8 @@ export function mountStage({ toast }) {
       if (!state.previewOptimized
           && changed.length > 0
           && changed.every((key) => AI_POST_KEYS.includes(key))) return;
-      clearTimeout(nativeReloadTimer);
-      nativeReloadTimer = setTimeout(load, PREVIEW_RELOAD_DELAY_MS);
+      interactionDirty ||= Boolean(state.previewInteracting);
+      previewScheduler.request(Boolean(state.previewInteracting));
     },
     { immediate: true });
 

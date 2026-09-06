@@ -55,14 +55,13 @@ void check_avif(avifResult result, const char* operation) {
 
 }  // namespace
 
-std::vector<std::uint8_t> encode_avif(const GainMapResult& images,
+std::vector<std::uint8_t> encode_avif(const PhotoRenditions& images,
                                       const PhotoMetadata& metadata, int quality,
                                       HdrEncoding encoding) {
   if (encoding != HdrEncoding::AvifPq && encoding != HdrEncoding::AvifHlg) {
     throw std::invalid_argument("encode_avif requires an AVIF encoding");
   }
-  auto hdr = reconstruct_gain_map(images.base_linear, images.gain_map, images.metadata,
-                                  images.headroom_stops);
+  const auto& hdr = images.hdr;
 
   std::unique_ptr<avifImage, ImageDeleter> image(
       avifImageCreate(static_cast<uint32_t>(hdr.width), static_cast<uint32_t>(hdr.height),
@@ -127,7 +126,7 @@ std::vector<std::uint8_t> encode_avif(const GainMapResult& images,
   const auto exif = make_minimal_exif(metadata);
   check_avif(avifImageSetMetadataExif(image.get(), exif.data(), exif.size()),
              "attach AVIF Exif");
-  const auto xmp = make_xmp(metadata, images.headroom_stops,
+  const auto xmp = make_xmp(metadata, images.stats.headroom_stops,
                             /*has_gain_map=*/false);
   check_avif(avifImageSetMetadataXMP(image.get(),
                                      reinterpret_cast<const std::uint8_t*>(xmp.data()),

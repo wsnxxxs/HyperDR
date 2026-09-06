@@ -207,3 +207,11 @@ before RAW decoding. `--gain-strength` can attenuate local HDR gain. The
 photographic renderer caps values above `1` at the global curve target so its
 output cannot exceed that target; external gain maps retain the documented
 `0..2` scale for controlled amplification.
+
+## Creative colour LUT and SDR output
+
+Use `--encoding sdr-jpeg` for an ordinary 8-bit sRGB JPEG with no HDR or gain map.
+`--lut <file.cube>`, `--lut-input`, `--lut-output`, and `--lut-strength <0..1>`
+configure creative grading. The default spaces are sRGB; `rec709` means Rec.709
+primaries with display gamma 2.4. RAW sensor calibration remains the separate
+`--raw-linearization-lut` option. See the [LUT pipeline guide](color-lut-pipeline.md).

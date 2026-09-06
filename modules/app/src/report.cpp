@@ -4,6 +4,7 @@
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/foundation/json.hpp"
 #include "hyperdr/foundation/version.hpp"
+#include "hyperdr/foundation/hash.hpp"
 
 namespace hyperdr {
 namespace {
@@ -32,7 +33,14 @@ void write_settings(json::Writer& writer, const ConvertOptions& options) {
         .member("expansion_start", options.ai_post.expansion_start)
         .end_object();
   }
+  writer.member("gain_map_output", is_gain_map_encoding(options.encoding));
   writer.end_object();
+  writer.begin_object("color_lut")
+      .member("path", path_utf8(options.color_lut.path))
+      .member("sha256", options.color_lut.path.empty() ? std::string{} : sha256_file_hex(options.color_lut.path))
+      .member("input", lut_space_name(options.color_lut.input))
+      .member("output", lut_space_name(options.color_lut.output))
+      .member("strength", options.color_lut.strength).end_object();
   writer.begin_object("raw_processing")
       .member("black_level_correction", "metadata or measured dark; LUT-aware")
       .member("white_balance", "camera WB with LibRaw fallback")

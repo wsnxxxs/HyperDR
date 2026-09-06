@@ -1,5 +1,6 @@
 #include "hyperdr/image/color.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <iostream>
@@ -46,6 +47,23 @@ int main() {
             "neutral grey wrongly flagged outside Rec.709");
     require(!is_outside_rec709(0.5F, 0.2F, 0.1F),
             "in-gamut warm colour wrongly flagged outside Rec.709");
+
+    const auto compressed_red = compress_linear_p3_to_srgb(1.0F, 0.0F, 0.0F);
+    const auto compressed_red_srgb = linear_p3_to_rec709(
+        compressed_red[0], compressed_red[1], compressed_red[2]);
+    for (const float value : compressed_red_srgb) {
+      require(value >= -1.0e-5F && value <= 1.0F + 1.0e-5F,
+              "sRGB gamut compression left the SDR cube");
+    }
+    const auto neutral = compress_linear_p3_to_srgb(0.4F, 0.4F, 0.4F);
+    require(std::abs(neutral[0] - neutral[1]) < 1.0e-5F &&
+                std::abs(neutral[1] - neutral[2]) < 1.0e-5F,
+            "sRGB gamut compression changed neutral colour");
+    const auto hdr_red = compress_linear_p3_to_srgb(2.0F, 0.0F, 0.0F, true);
+    const auto hdr_red_srgb = linear_p3_to_rec709(
+        hdr_red[0], hdr_red[1], hdr_red[2]);
+    require(std::max({hdr_red_srgb[0], hdr_red_srgb[1], hdr_red_srgb[2]}) > 1.0F,
+            "HDR gamut compression discarded headroom");
 
     const auto green2020 = rec2020_to_linear_p3(0.0F, 1.0F, 0.0F);
     require(green2020[1] > 0.0F, "Rec.2020 green lost luminance converting to P3");

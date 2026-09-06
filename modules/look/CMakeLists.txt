@@ -3,6 +3,12 @@
 # gain maps, containers or codecs.
 hyperdr_add_module(look
   SOURCES
+    src/chroma.cpp
+    src/local_gain.cpp
+    src/photographic.cpp
+    src/render_options.cpp
+    src/rendition.cpp
+    src/color_lut.cpp
     src/curve.cpp
     src/exposure.cpp
     src/filter.cpp

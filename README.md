@@ -1,11 +1,11 @@
 # HyperDR
 
 `HyperDR` is a C++20 command-line converter for ARW, DNG, JPEG, PNG, HEIC,
-HEIF, and AVIF images, developed on Windows. It exports six real HDR
+HEIF/HIF, and AVIF images, developed on Windows. It exports graded SDR JPEGs and six real HDR
 representations: Apple-compatible Adaptive HDR HEIC (a Display P3 SDR base plus
 an ISO 21496-1 single-channel gain map), Google Ultra HDR JPEG/R, 10-bit ITU-R
 BT.2100 PQ and HLG HEIC, and the same two BT.2100 renditions as 10-bit AVIF. PQ,
-HLG and AVIF are rendered from the reconstructed linear HDR image; SDR samples
+HLG and AVIF encode the directly rendered linear HDR image; SDR samples
 are never merely relabelled HDR.
 
 **Every encoding HyperDR writes, it also reads.** An HDR photograph given as
@@ -16,6 +16,13 @@ HEIC through its `tmap` gain map, and a BT.2100 PQ or HLG file -- HEIC or AVIF,
 exact inverse of the transfer function this project encodes with. All of them
 land in the same linear Display P3 working space as a RAW, so the look controls,
 the preview and the six exports behave the same whatever the input was.
+
+Creative colour LUTs are independent of RAW sensor linearization. Import a
+1D/3D `.cube`, declare its input/output colour spaces, and choose SDR JPEG or
+any of the six HDR exports. RAW can feed S-Log3/S-Gamut3.Cine LUTs before
+development; ordinary photo LUTs can grade RAW, SDR and existing HDR sources.
+See [the architecture review and LUT guide](docs/color-lut-pipeline.md) for the
+stage choices, HDR highlight policy and command examples.
 
 Camera, lens and capture settings are read from the input's Exif and carried to
 the output. ISO is not merely copied: the gain map weighs local expansion

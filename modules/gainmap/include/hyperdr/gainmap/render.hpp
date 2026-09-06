@@ -30,6 +30,7 @@ void render_full_resolution(const FloatImage& source, float exposure,
                             std::uint32_t gain_width, std::uint32_t gain_height,
                             float stored_gain_max, float stored_gamma,
                             float target_peak, const LookOptions& look,
+                            bool clamp_srgb,
                             GainMapResult& result, BaseRenderCache* cache = nullptr);
 
 }  // namespace hyperdr

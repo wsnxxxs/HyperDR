@@ -123,15 +123,20 @@ std::vector<std::uint8_t> encode_ultrahdr_jpeg(const GainMapResult&,
   fail_without_codecs("Ultra HDR JPEG encoding");
 }
 
-std::vector<std::uint8_t> encode_hdr_heic(const GainMapResult&,
+std::vector<std::uint8_t> encode_hdr_heic(const PhotoRenditions&,
                                           const PhotoMetadata&, int, HdrEncoding) {
   fail_without_codecs("BT.2100 HEIC encoding");
 }
 
-std::vector<std::uint8_t> encode_avif(const GainMapResult&, const PhotoMetadata&,
+std::vector<std::uint8_t> encode_avif(const PhotoRenditions&, const PhotoMetadata&,
                                       int, HdrEncoding) {
   fail_without_codecs("AVIF encoding");
 }
+
+std::vector<std::uint8_t> encode_sdr_jpeg(const FloatImage&, const PhotoMetadata&, int) {
+  fail_without_codecs("SDR JPEG encoding");
+}
+void verify_sdr_jpeg(const std::vector<std::uint8_t>&) { fail_without_codecs("SDR JPEG verification"); }
 
 void verify_heic_decodable(const std::vector<std::uint8_t>&) {
   fail_without_codecs("HEIC decode verification");

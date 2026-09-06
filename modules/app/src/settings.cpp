@@ -54,6 +54,15 @@ void validate_convert_options(const ConvertOptions& options) {
     throw std::invalid_argument(
         "--ai-model cannot be combined with an external gain grid");
   }
+  validate_color_lut_options(options.color_lut);
+  if (!options.color_lut.path.empty()) {
+    (void)read_color_lut(options.color_lut.path);
+    if ((!options.ai_model_path.empty() || has_external_gain) &&
+        (options.color_lut.input == LutSpace::SLog3 || options.color_lut.input == LutSpace::Hlg || options.color_lut.input == LutSpace::Pq))
+      throw std::invalid_argument("AI/external gain supports SDR creative LUTs; use manual rendering for Log/HLG/PQ LUTs");
+  }
+  if (is_sdr_encoding(options.encoding) && options.depth != 8)
+    throw std::invalid_argument("SDR JPEG requires --depth 8");
   validate_native_model_post_options(options.ai_post);
   if (has_external_gain) {
     std::error_code ec;

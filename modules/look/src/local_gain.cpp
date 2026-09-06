@@ -1,4 +1,4 @@
-#include "local_gain.hpp"
+#include "hyperdr/look/local_gain.hpp"
 
 #include "hyperdr/foundation/math.hpp"
 #include "hyperdr/foundation/parallel.hpp"

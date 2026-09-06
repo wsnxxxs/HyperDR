@@ -28,15 +28,23 @@ namespace hyperdr {
 [[nodiscard]] std::vector<std::uint8_t> encode_ultrahdr_jpeg(
     const GainMapResult& images, const PhotoMetadata& metadata, int quality);
 
-// 10-bit BT.2100 PQ or HLG, in HEIF and in AVIF respectively. Both render from
-// the reconstructed linear HDR image through the same transfer functions, so
-// they differ only in container and codec.
+// Compatibility overloads for callers that already own gain-map renditions.
+// The application uses the PhotoRenditions overloads below for direct HDR.
 [[nodiscard]] std::vector<std::uint8_t> encode_hdr_heic(
     const GainMapResult& images, const PhotoMetadata& metadata, int quality,
     HdrEncoding encoding);
 [[nodiscard]] std::vector<std::uint8_t> encode_avif(
     const GainMapResult& images, const PhotoMetadata& metadata, int quality,
     HdrEncoding encoding);
+
+
+[[nodiscard]] std::vector<std::uint8_t> encode_sdr_jpeg(
+    const FloatImage& image, const PhotoMetadata& metadata, int quality);
+void verify_sdr_jpeg(const std::vector<std::uint8_t>& bytes);
+[[nodiscard]] std::vector<std::uint8_t> encode_hdr_heic(
+    const PhotoRenditions& images, const PhotoMetadata& metadata, int quality, HdrEncoding encoding);
+[[nodiscard]] std::vector<std::uint8_t> encode_avif(
+    const PhotoRenditions& images, const PhotoMetadata& metadata, int quality, HdrEncoding encoding);
 
 // Decode-verification. Each throws with a specific reason on failure.
 void verify_heic_decodable(const std::vector<std::uint8_t>& bytes);

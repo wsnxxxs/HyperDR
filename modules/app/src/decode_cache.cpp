@@ -250,6 +250,7 @@ std::string decode_cache_variant(const ConvertOptions& options,
                            : "export";
   auto reflected = options;
   reflected.raw = raw;
+  reflected.raw.default_gamut = options.default_gamut;
   std::string variant = std::string(intent) + '/' +
       (raw.ignore_embedded_gain_map ? "base-only" : "embedded-gain");
   for (const auto& setting : settings()) {
@@ -293,7 +294,9 @@ DecodedImage decode_cached_image(const std::filesystem::path& input,
     if (read_decode_cache(cache_file, cached)) return cached;
   }
 
-  auto decoded = decode_image(input, raw);
+  auto effective_raw = raw;
+  effective_raw.default_gamut = options.default_gamut;
+  auto decoded = decode_image(input, effective_raw);
   decoded.linear_p3 = resample_to_max_edge(
       std::move(decoded.linear_p3), options.preview_max_edge);
   if (!cache_file.empty()) {

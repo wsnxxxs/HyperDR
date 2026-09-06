@@ -5,6 +5,13 @@ has to pass. For the options that drive it see
 [cli-reference.md](cli-reference.md); for what a run records see
 [report-schema.md](report-schema.md).
 
+The primary render contract is now `PhotoRenditions`: an SDR image and an optional
+HDR image in linear Display P3. SDR JPEG writes only the SDR rendition. HLG/PQ
+encoders consume the HDR pixels directly; the gain-map quantization and
+reconstruction guarantees below apply to Adaptive HDR, Ultra HDR, and model gain
+adapters. Creative LUT placement and its effect on these guarantees are described
+in [colour LUT pipeline](color-lut-pipeline.md).
+
 ## Input domains
 
 Three kinds of input reach the renderer, and they are not interchangeable. The

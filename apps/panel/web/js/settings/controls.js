@@ -20,7 +20,6 @@ const GROUP_CONTAINERS = {
   tone: "group-tone",
   model: "group-model",
   region: "group-region",
-  advanced: "group-advanced",
   quality: "group-quality",
 };
 
@@ -217,27 +216,21 @@ function buildSegmented(control) {
     relabel(() => setText(button, t(labelKey)));
     return [value, button];
   });
-  const recovery = control.key === "highlightRecovery";
   const hint = control.help ? el("p", { class: "field-hint", hidden: true }, t(control.help)) : null;
-  const help = hint && !recovery ? helpButton(control, hint) : null;
+  const help = hint ? helpButton(control, hint) : null;
   const name = el("b", {}, t(control.label));
   const node = el("div", { class: "field" },
-    recovery ? null : el("span", { class: "field-title" }, name, help),
+    el("span", { class: "field-title" }, name, help),
     picker,
     hint);
   relabel(() => {
     setText(name, t(control.label));
     picker.setAttribute("aria-label", t(control.label));
-    if (hint) { setText(hint, t(recovery ? "inspector.recoveryNote" : control.help)); hint.hidden = !recovery; }
+    if (hint) setText(hint, t(control.help));
   });
   return {
     node,
     apply: (state) => {
-      if (recovery) {
-        const selected = control.choices.find(([id]) => id === state[control.key]);
-        setText(role("recovery-summary"), t(selected[1]));
-        role("recovery-summary").closest("summary").title = t(control.help);
-      }
       for (const [value, button] of buttons) {
         setPressed(button, value === state[control.key]);
       }

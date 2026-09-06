@@ -5,10 +5,9 @@ namespace hyperdr {
 RenderOptions render_options_for_target(RenderOptions options, RenderTarget target) {
   if(target==RenderTarget::Sdr) {
     // SDR development, including RAW exposure selection, must not depend on
-    // HDR controls retained by the UI. Use a fixed SDR shoulder and no gain.
+    // HDR range/strength retained by the UI. Keep the shared base curve.
     options.auto_headroom=false; options.headroom_stops=0;
     options.gain_strength=0; options.look.headroom_max_stops=0;
-    options.look.shoulder_start=LookOptions{}.shoulder_start;
     options.look.diffuse_gain_floor=0;
   }
   return options;

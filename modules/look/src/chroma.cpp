@@ -21,7 +21,7 @@ std::array<float, 3> render_common_chroma(float r, float g, float b,
 
   const float white_start = std::max(0.72F, peak * 0.70F);
   const float white_cap =
-      std::lerp(0.45F, 0.28F, std::clamp(look.pop, 0.0F, 1.0F));
+      0.28F * std::clamp(look.pop, 0.0F, 1.0F);
   const float white_amount =
       smoothstep(white_start, peak, hdr_y) * white_cap;
   for (float& value : chroma) value *= 1.0F - white_amount;

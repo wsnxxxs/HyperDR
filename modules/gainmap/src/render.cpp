@@ -24,7 +24,7 @@ void render_full_resolution(const FloatImage& source, float exposure,
                             GainMapResult& result, BaseRenderCache* cache) {
   const ToneCurveParameters curve = build_tone_curve(look);
   const float pop = std::clamp(look.pop, 0.0F, 1.0F);
-  const float clarity_amount = std::lerp(0.08F, 0.14F, pop);
+  const float clarity_amount = 0.14F * pop;
 
   const bool reuse_base = cache && !cache->base.pixels.empty();
   result.base_linear = reuse_base ? cache->base : FloatImage(source.width, source.height, 3);

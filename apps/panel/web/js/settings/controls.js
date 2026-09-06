@@ -7,7 +7,7 @@
 
 import { el, role, setPressed, setText, clamp } from "../core/dom.js";
 import { store } from "../core/store.js";
-import { COLOR_GAMUTS, CONTROLS, ENCODINGS, encodingById } from "./schema.js";
+import { COLOR_GAMUTS, CONTROLS, ENCODINGS, encodingById, neutralSettings } from "./schema.js";
 import { api } from "../core/api.js";
 import { t, onLocaleChange } from "../i18n/index.js";
 
@@ -29,18 +29,6 @@ const hdrRangeCeiling = () =>
   encodingById(store.get().encoding).maxRange;
 
 const isHdrRange = (key) => key === "hdrRange" || key === "aiHdrRange";
-
-/** A patch of group defaults, with the range slider clamped to the encoding. */
-function defaultsFor(keys) {
-  const patch = {};
-  for (const control of CONTROLS) {
-    if (!keys.includes(control.key)) continue;
-    patch[control.key] = isHdrRange(control.key)
-      ? Math.min(control.default, hdrRangeCeiling())
-      : control.default;
-  }
-  return patch;
-}
 
 /* ── mask hover: the stage reads `maskKey` and paints the overlay ────── */
 
@@ -351,10 +339,11 @@ function mountResets({ toast } = {}) {
   const keys = CONTROLS.map((control) => control.key);
   button.textContent = t("adjust.reset");
   button.addEventListener("click", () => {
+    const neutral = neutralSettings(store.get().encoding);
     store.set({
-      ...defaultsFor(keys),
+      ...Object.fromEntries(keys.map((key) => [key, neutral[key]])),
       lutId: "", lutName: "", lutInput: "srgb", lutOutput: "srgb",
-      // Reset returns to the mathematical defaults, but deliberately keeps the
+      // Reset returns to neutral manual development, but deliberately keeps the
       // current image's inferred gain cached for an instant comparison.
       previewOptimized: false,
     });
@@ -390,7 +379,7 @@ function mountLut({ toast } = {}) {
     load.disabled = true;
     try {
       const saved = await api.uploadLut(sessionId, selected);
-      if (store.get().sessionId === sessionId) store.set(saved);
+      if (store.get().sessionId === sessionId) store.set({ ...saved, lutStrength: 1 });
     } catch (error) { toast?.(error.message || t("lut.failed")); }
     finally { load.disabled = !store.get().sessionId; }
   });

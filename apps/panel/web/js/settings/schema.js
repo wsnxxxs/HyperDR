@@ -88,9 +88,8 @@ const AI_EXPANSION_START_DEFAULT = -1;
  * still read by the renderers, and is still sent to /api/run -- it simply is
  * not adjustable. That is not the same as deleting it: curve-math.js takes
  * `contrast` as an argument and stage/scope/mask all watch it, so a deleted key
- * would reach the tone curve as `undefined`. Pinning keeps the exported image
- * byte-identical (command.py's PANEL_DEFAULTS holds the same values for a
- * browser that omits them) while taking the control off the rail. */
+ * would reach the tone curve as `undefined`. Pinned controls use neutral values (command.py's PANEL_DEFAULTS agrees),
+ * so hidden contrast and vibrance do not add an unrequested grade. */
 export const CONTROLS = [
   { key: "lutStrength", kind: "range", group: "lut", label: "lut.strength",
     min: 0, max: 1, step: 0.01, default: 1, format: percent, mask: null, help: "lut.strengthHint" },
@@ -176,11 +175,11 @@ export const CONTROLS = [
    * the line to start from. */
   {
     key: "contrast", kind: "range", group: "pinned", label: "ctrl.contrast.label",
-    min: 0.8, max: 1.35, step: 0.01, default: 1.08, format: fixed(2), mask: null,
+    min: 0.8, max: 1.35, step: 0.01, default: 1, format: fixed(2), mask: null,
   },
   {
     key: "vibrance", kind: "range", group: "pinned", label: "ctrl.vibrance.label",
-    min: -0.5, max: 0.5, step: 0.01, default: 0.12, format: signed, mask: null,
+    min: -0.5, max: 0.5, step: 0.01, default: 0, format: signed, mask: null,
   },
   {
     key: "quality", kind: "range", group: "quality", label: "ctrl.quality.label",
@@ -210,6 +209,12 @@ export function defaultSettings(encoding = "adaptive") {
   values.hdrRange = Math.min(values.hdrRange, activeEncoding.maxRange);
   values.aiHdrRange = Math.min(values.aiHdrRange, activeEncoding.maxRange);
   return values;
+}
+
+/** No creative adjustment; RAW still receives its fixed base development. */
+export function neutralSettings(encoding = "adaptive") {
+  return { ...defaultSettings(encoding), brightness: 0, hdrStrength: 0, hdrRange: 0,
+    contrast: 1, vibrance: 0, areaCoverage: 0, lutStrength: 0 };
 }
 
 /** The exact payload the server's option vocabulary expects. */

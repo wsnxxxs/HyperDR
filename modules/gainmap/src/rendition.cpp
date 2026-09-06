@@ -37,8 +37,10 @@ GainMapResult gain_map_from_renditions(PhotoRenditions images) {
   if(sdr.channels!=3 || hdr.channels!=3 || sdr.width!=hdr.width || sdr.height!=hdr.height)
     throw std::invalid_argument("gain-map packaging requires matching SDR and HDR renditions");
   const auto dimensions=choose_gain_dimensions(sdr);
-  FloatImage stops(dimensions.width,dimensions.height,1);
-  parallel_for_rows(stops.height,[&](std::uint32_t gy) {
+  const bool retained = !images.gain_stops.pixels.empty();
+  FloatImage stops = retained ? std::move(images.gain_stops)
+      : FloatImage(dimensions.width,dimensions.height,1);
+  if (!retained) parallel_for_rows(stops.height,[&](std::uint32_t gy) {
     const auto y0=grid_cell_edge(gy,sdr.height,stops.height), y1=grid_cell_edge(gy+1,sdr.height,stops.height);
     for(std::uint32_t gx=0;gx<stops.width;++gx) {
       const auto x0=grid_cell_edge(gx,sdr.width,stops.width), x1=grid_cell_edge(gx+1,sdr.width,stops.width);

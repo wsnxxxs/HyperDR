@@ -21,7 +21,7 @@ import { diagnosticFrame } from "./packet.js";
 import { analyse, mountScope } from "./scope.js";
 import { histogramFromPlane } from "./histogram.js";
 import { createUploader } from "./session.js";
-import { AI_POST_KEYS, defaultSettings, toOptions } from "../settings/schema.js";
+import { AI_POST_KEYS, defaultSettings, neutralSettings, toOptions } from "../settings/schema.js";
 
 const hdrDisplayQuery = window.matchMedia("(dynamic-range: high)");
 
@@ -514,6 +514,15 @@ export function mountStage({ toast }) {
       const state = store.get();
       const requestedEdge = draft ? Math.min(previewTier() || DRAFT_PREVIEW_EDGE, DRAFT_PREVIEW_EDGE) : previewTier();
       const fetchStarted = performance.now();
+      let reference = null;
+      if (resetOriginal || !image.original) {
+        reference = await api.preview(sessionId, {
+          options: { ...toOptions(neutralSettings(state.encoding)), colorGamut: state.colorGamut,
+            clampSrgb: state.clampSrgb, useModel: false },
+          highlightRecovery: "blend", maxEdge: requestedEdge,
+        });
+        if (!isCurrentImage(epoch)) return;
+      }
       const preview = await api.preview(sessionId, {
         options: {
           ...toOptions(state),
@@ -535,9 +544,11 @@ export function mountStage({ toast }) {
       // Diagnostics receive an SDR display copy. Preview rendering consumes
       // only the untouched native float planes above.
       if (!sameBase) image.source = planeToImageData(preview.base, width, height);
-      if (resetOriginal || !image.original) {
-        image.original = planeToImageData(preview.base, width, height);
-        image.originalHistogram = histogramFromPlane(diagnostic.base, diagnostic.width, diagnostic.height);
+      if (reference) {
+        image.original = planeToImageData(reference.base, reference.width, reference.height);
+        const referenceDiagnostic = diagnosticFrame(reference);
+        image.originalHistogram = histogramFromPlane(referenceDiagnostic.base,
+          referenceDiagnostic.width, referenceDiagnostic.height);
       }
       notifySource();
 
@@ -545,7 +556,7 @@ export function mountStage({ toast }) {
         if (canvas.width !== width) canvas.width = width;
         if (canvas.height !== height) canvas.height = height;
       }
-      // The comparison content remains the first frame, but its canvas is
+      // The comparison content remains the neutral reference, but its canvas is
       // resampled to the current frame size so original and HDR share one
       // intrinsic resolution at every preview tier.
       if (resetOriginal || originalCanvas.width !== width || originalCanvas.height !== height

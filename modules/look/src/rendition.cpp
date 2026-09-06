@@ -144,7 +144,7 @@ PhotoRenditions render_renditions(const FloatImage& source,
         const float local = scene_sampler->sample(*local_view, x, y);
         const float detail = std::clamp(std::log2((tone + kEpsilon)/(local + kEpsilon)), -1.5F, 1.5F);
         const float mask = smoothstep(.025F, .16F, tone) * (1 - .65F * smoothstep(.78F, 1, tone));
-        sdr_y = std::clamp(tone * std::exp2(detail * std::lerp(.08F, .14F, options.look.pop) * mask), 0.0F, 1.0F);
+        sdr_y = std::clamp(tone * std::exp2(detail * .14F * options.look.pop * mask), 0.0F, 1.0F);
         const float gain = want_hdr ? scene_sampler->sample(*stops_view, x, y) * strength : 0;
         hdr_y = sdr_y * std::exp2(gain);
         base = render_common_chroma(rgb[0], rgb[1], rgb[2], luma, sdr_y, sdr_y, 1, options.look);
@@ -204,6 +204,11 @@ PhotoRenditions render_renditions(const FloatImage& source,
         for(int c=0;c<3;++c) out.hdr.pixels[i+c]=out.sdr.pixels[i+c]*scale;
       }
     });
+  }
+  if (want_hdr && !input_hdr && prepared.ready) {
+    out.gain_stops = FloatImage(prepared.width, prepared.height, 1);
+    for (std::size_t i=0; i<prepared.stops.size(); ++i)
+      out.gain_stops.pixels[i] = prepared.stops[i] * strength;
   }
   auto& stats = out.stats;
   stats.exposure_ev = ev;

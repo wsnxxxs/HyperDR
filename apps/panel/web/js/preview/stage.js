@@ -19,6 +19,7 @@ import { createSdrGpuRenderer } from "./sdr-gpu.js";
 import { createPreviewScheduler } from "./scheduler.js";
 import { diagnosticFrame } from "./packet.js";
 import { analyse, mountScope } from "./scope.js";
+import { histogramFromPlane } from "./histogram.js";
 import { createUploader } from "./session.js";
 import { AI_POST_KEYS, defaultSettings, toOptions } from "../settings/schema.js";
 
@@ -72,6 +73,7 @@ export function mountStage({ toast }) {
     // either one for "原图" makes the supposedly untreated side follow the
     // adjustment as well.
     original: null,
+    originalHistogram: null,
 
   };
   const sourceListeners = new Set();
@@ -467,6 +469,7 @@ export function mountStage({ toast }) {
       source: null,
       frame: null,
       original: null,
+      originalHistogram: null,
 
     });
     notifySource();
@@ -522,6 +525,7 @@ export function mountStage({ toast }) {
       const receivedAt = performance.now();
       if (!isCurrentImage(epoch)) return;
       const { width, height } = preview;
+      const diagnostic = diagnosticFrame(preview);
       const sameBase = preview.metadata.baseId && image.frame?.metadata.baseId === preview.metadata.baseId
         && image.frame.width === width && image.frame.height === height;
       image.frame = preview;
@@ -533,6 +537,7 @@ export function mountStage({ toast }) {
       if (!sameBase) image.source = planeToImageData(preview.base, width, height);
       if (resetOriginal || !image.original) {
         image.original = planeToImageData(preview.base, width, height);
+        image.originalHistogram = histogramFromPlane(diagnostic.base, diagnostic.width, diagnostic.height);
       }
       notifySource();
 
@@ -549,10 +554,11 @@ export function mountStage({ toast }) {
       // image copy remains only for the original comparison canvas and zebra
       // presentation; folding HDR through a display shoulder here destroyed
       // the very highlight distribution the graph is meant to show.
-      const diagnostic = diagnosticFrame(preview);
       analysis.current = analyse(
         planeToImageData(diagnostic.base, diagnostic.width, diagnostic.height), null, diagnostic,
-        Math.max(1, 2 ** Number(store.get().hdrRange || 0)));
+        Math.max(1, 2 ** Number(preview.metadata.headroomStops ??
+          (state.previewOptimized ? state.aiHdrRange : state.hdrRange) ?? 0)),
+        image.originalHistogram);
 
       empty.style.display = "none";
       stage.classList.add("has-image");

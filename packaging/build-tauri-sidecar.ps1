@@ -49,6 +49,7 @@ $pyinstallerArgs = @(
     # HYPERDR_READY to the desktop shell.
     "--console",
     "--name", "hyperdr-panel",
+    "--icon", (Join-Path $tauriRoot "icons\icon.ico"),
     "--distpath", $stagingRoot,
     "--workpath", $buildRoot,
     "--specpath", $buildRoot,

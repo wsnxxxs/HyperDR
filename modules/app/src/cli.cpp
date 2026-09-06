@@ -693,8 +693,7 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
   }
   if(!options.ai_model_path.empty() || !options.external_gain_path.empty()) {
     if(!options.color_lut.path.empty() || !is_gain_map_encoding(options.encoding)) {
-      auto photo=renditions_from_gain_map(result, !is_sdr_encoding(options.encoding));
-      apply_rendition_lut(photo,options.color_lut);
+      auto photo=render_graded_gain_map(result, options.color_lut, !is_sdr_encoding(options.encoding));
       if(is_sdr_encoding(options.encoding)) fit_sdr_to_srgb(photo.sdr);
       if(is_gain_map_encoding(options.encoding)) result.base_linear=std::move(photo.sdr);
       else {

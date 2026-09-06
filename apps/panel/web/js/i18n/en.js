@@ -85,7 +85,6 @@ export default {
   "inspector.fineTune": "Fine adjustments",
   "inspector.adjustments": "Image adjustments",
   "inspector.manual": "Manual",
-  "inspector.midtones": "Midtones",
   "inspector.natural": "Natural",
   "inspector.bright": "Bright",
   "inspector.soft": "Soft",
@@ -180,8 +179,10 @@ export default {
   "scope.hot": "Highlights",
   "scope.cold": "Shadows",
   "scope.empty": "No histogram data yet",
-  "scope.source": "Before",
-  "scope.output": "After",
+  "scope.source": "Original",
+  "scope.output": "Current",
+
+  "scope.graph": "Original filled distribution and current solid-line comparison",
 
   /* ── adjustment rail ─────────────────────────────────────────────── */
   "adjust.label": "Adjust",

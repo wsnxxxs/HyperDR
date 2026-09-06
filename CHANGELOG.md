@@ -5,6 +5,13 @@ semantic versioning; dates use ISO 8601.
 
 ## Unreleased
 
+- HLG/PQ LUTs grade already-developed SDR and HDR endpoints independently;
+  identity LUTs preserve both. SDR-style LUTs lift HDR black continuously.
+- AI/external LUT grading retains the original gain map and offsets, then
+  reconstructs the same HDR pixels for previews and every output format.
+- Manual gain-map reports measure peak, headroom utilization and below-knee
+  spill after gain quantization and interpolation, before image encoding.
+
 - RAW LUTs transform pixels, black and white levels together. Dark frames and
   bad-pixel maps use original visible-area coordinates before DefaultCrop;
   invalid calibration files fail explicitly. Lens-shading maps preserve those

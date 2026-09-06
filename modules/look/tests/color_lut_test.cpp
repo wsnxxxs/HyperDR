@@ -103,11 +103,40 @@ void test_hdr_lut_headroom(const std::filesystem::path& file) {
   options.gain_strength=.4F;
   grade.strength=1;
   grade.input=grade.output=LutSpace::Hlg;
-  for(auto domain:{InputDomain::kSceneReferred,InputDomain::kDisplayReferredSdr}) {
+  for(auto domain:{InputDomain::kSceneReferred,InputDomain::kDisplayReferredSdr})
+      for(auto space:{LutSpace::Hlg,LutSpace::Pq}) {
+    grade.input=grade.output=space;
     const InputDescription developed_input{domain,1};
     const auto baseline=render_renditions(source,options,{},developed_input,RenderTarget::Hdr);
     const auto graded=render_graded_photo(source,options,{},developed_input,RenderTarget::Hdr,grade,&identity);
     require_image_close(graded.hdr,baseline.hdr,"an already-developed HDR rendition must not apply HDR strength twice");
+    require_image_close(graded.sdr,baseline.sdr,"identity HDR LUT must also preserve the existing SDR endpoint");
+    const auto developed_dimmer=hdr_conversion_lut(space,space,.5F);
+    const auto developed_dimmed=render_graded_photo(source,options,{},developed_input,RenderTarget::Hdr,grade,&developed_dimmer);
+    auto expected_sdr=baseline.sdr;
+    for(auto& c:expected_sdr.pixels) c*=.5F;
+    require_image_close(developed_dimmed.sdr,expected_sdr,"a real HDR LUT must grade the existing SDR endpoint");
+    grade.strength=.5F;
+    const auto partial=render_graded_photo(source,options,{},developed_input,RenderTarget::Hdr,grade,&developed_dimmer);
+    for(std::size_t i=0;i<expected_sdr.pixels.size();++i)
+      expected_sdr.pixels[i]=std::lerp(baseline.sdr.pixels[i],expected_sdr.pixels[i],.5F);
+    require_image_close(partial.sdr,expected_sdr,"partial HDR LUT strength must blend the preserved SDR endpoints");
+    grade.strength=1;
+  }
+}
+
+void test_lifted_black(const std::filesystem::path& file) {
+  FloatImage source(8,1,3);
+  const float levels[]{0,1e-8F,1e-7F,1e-6F,1e-5F,.001F,.01F,.1F};
+  for(unsigned x=0;x<8;++x) for(int c=0;c<3;++c) source.at(x,0,c)=levels[x];
+  ColorLut lut; lut.size=2; lut.values={{.8F,.8F,.8F},{.8F,.8F,.8F}};
+  for(float strength:{0.0F,.5F,1.0F}) {
+    ColorLutOptions grade{file,LutSpace::DisplayP3,LutSpace::DisplayP3,strength};
+    const auto out=render_graded_photo(source,{}, {},
+        {InputDomain::kDisplayReferredSdr,1},RenderTarget::Hdr,grade,&lut);
+    require_image_close(out.hdr,out.sdr,"lifting black must affect SDR and HDR without a black discontinuity");
+    require(std::abs(out.hdr.pixels[0]-srgb_eotf(.8F)*strength)<1e-6F,
+        "HDR pure black must receive the selected LUT lift");
   }
 }
 
@@ -229,6 +258,7 @@ int main() {
     require(rejected,"finished HLG/PQ is not camera Log");
     test_hdr_strength_continuity(lut,file);
     test_hdr_lut_headroom(file);
+    test_lifted_black(file);
     test_hdr_lut_below_reference_white(file);
     test_sdr_hdr_lut_routing(file);
     test_near_unit_headroom();

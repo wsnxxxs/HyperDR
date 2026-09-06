@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">HyperDR — 月流</title>
+  <desc id="desc">舒展的月牙上端化为长光尾，下端渐入深蓝，保留掠光的斜向流动。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#1b2330"/><stop offset=".6" stop-color="#101723"/><stop offset="1" stop-color="#0c111b"/></linearGradient>
+    <linearGradient id="body" x1=".15" y1=".05" x2=".72" y2="1"><stop stop-color="#e3edf8"/><stop offset=".3" stop-color="#acc4e0"/><stop offset=".68" stop-color="#6683b0"/><stop offset="1" stop-color="#344966"/></linearGradient>
+    <linearGradient id="face" x1=".2" y1=".15" x2=".8" y2="1"><stop stop-color="#fffdf2"/><stop offset=".35" stop-color="#eef1f3"/><stop offset=".65" stop-color="#c9d8eb"/><stop offset="1" stop-color="#748eaf"/></linearGradient>
+    <linearGradient id="rim" x1=".3" y1="0" x2=".4" y2="1"><stop stop-color="#fffdf1" stop-opacity=".95"/><stop offset=".5" stop-color="#e8efff" stop-opacity=".45"/><stop offset="1" stop-color="#a9c5ff" stop-opacity="0"/></linearGradient>
+    <radialGradient id="halo"><stop offset=".35" stop-color="#98b2e7" stop-opacity=".12"/><stop offset=".65" stop-color="#7a98d3" stop-opacity=".055"/><stop offset="1" stop-color="#7799d6" stop-opacity="0"/></radialGradient>
+    <radialGradient id="moon-disc" cx=".28" cy=".34" r=".8"><stop stop-color="#859bbe" stop-opacity=".13"/><stop offset=".8" stop-color="#667d9e" stop-opacity=".035"/><stop offset="1" stop-color="#586b85" stop-opacity=".01"/></radialGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#d8e4ff" stroke-opacity=".12"/>
+  <ellipse cx="235" cy="268" rx="166" ry="163" fill="url(#halo)" opacity=".35"/>
+  <path d="M400 123C355 161 313 161 263 182C200 209 146 248 137 299C126 360 178 399 235 385C286 373 327 331 345 287C314 330 269 345 239 324C207 301 224 263 263 232C310 195 371 178 400 123Z" fill="url(#body)"/>
+  <path d="M400 123C355 161 313 161 263 182C200 209 146 248 137 299C126 360 178 399 235 385C186 379 168 353 177 319C189 275 239 236 282 209C332 178 373 156 400 123Z" fill="url(#face)"/>
+  <path d="M137 299C146 248 200 209 263 182C313 161 355 161 400 123" fill="none" stroke="url(#rim)" stroke-width="2"/>
+</svg>

@@ -285,8 +285,7 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
       photo = render_graded_photo(staged.image.linear_p3, options.gain, staged.image.capture,
           staged.image.describe_input(), target, options.color_lut);
     } else {
-      photo = renditions_from_gain_map(gain, target == RenderTarget::Hdr);
-      if (!options.color_lut.path.empty()) apply_rendition_lut(photo, options.color_lut);
+      photo = render_graded_gain_map(gain, options.color_lut, target == RenderTarget::Hdr);
     }
     if (is_sdr_encoding(options.encoding)) fit_sdr_to_srgb(photo.sdr);
     if (is_gain_map_encoding(options.encoding)) {

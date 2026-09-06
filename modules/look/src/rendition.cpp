@@ -53,6 +53,31 @@ void fit_sdr_to_srgb(FloatImage& image) {
   });
 }
 
+void measure_rendition_stats(RenderStats& stats, const FloatImage& sdr,
+    const FloatImage& hdr, std::span<const std::uint8_t> below_knee) {
+  const bool has_hdr = !hdr.pixels.empty();
+  const auto& image = has_hdr ? hdr : sdr;
+  std::vector<float> peaks(image.height, 1), differences(image.height, 0);
+  parallel_for_rows(image.height, [&](std::uint32_t y) {
+    for (std::uint32_t x = 0; x < image.width; ++x) {
+      const auto pixel = static_cast<std::size_t>(y) * image.width + x;
+      const auto i = pixel * 3;
+      const float alternate = p3_luminance(image.pixels[i], image.pixels[i+1], image.pixels[i+2]);
+      peaks[y] = std::max(peaks[y], alternate);
+      if (has_hdr && !below_knee.empty() && below_knee[pixel]) {
+        const float base = p3_luminance(sdr.pixels[i], sdr.pixels[i+1], sdr.pixels[i+2]);
+        differences[y] = std::max(differences[y], std::abs(alternate-base)/std::max(base,kEpsilon));
+      }
+    }
+  });
+  stats.rendered_peak = *std::max_element(peaks.begin(), peaks.end());
+  if (!has_hdr) { stats.headroom_stops=0; stats.headroom_linear=1; }
+  stats.headroom_utilization = stats.headroom_linear > 1
+      ? std::clamp((stats.rendered_peak-1)/(stats.headroom_linear-1),0.0F,1.0F) : 0;
+  if (!below_knee.empty() || !has_hdr)
+    stats.below_knee_relative_difference_max = *std::max_element(differences.begin(), differences.end());
+}
+
 PhotoRenditions render_renditions(const FloatImage& source,
     const RenderOptions& requested_options, const CaptureMetadata& capture,
     const InputDescription& input, RenderTarget target,
@@ -87,9 +112,11 @@ PhotoRenditions render_renditions(const FloatImage& source,
   const auto curve = build_tone_curve(options.look);
   PhotoRenditions out;
   out.sdr = FloatImage(source.width, source.height, 3);
-  if (want_hdr) out.hdr = FloatImage(source.width, source.height, 3);
+  if (want_hdr) {
+    out.hdr = FloatImage(source.width, source.height, 3);
+    out.below_knee.resize(static_cast<std::size_t>(source.width)*source.height);
+  }
   out.clamp_srgb = options.clamp_srgb;
-  std::vector<float> peaks(source.height, 1);
   std::vector<std::uint64_t> wide(source.height), eligible(source.height);
   std::optional<BilinearGridSampler> scene_sampler;
   std::optional<GridView> local_view, stops_view;
@@ -109,6 +136,7 @@ PhotoRenditions render_renditions(const FloatImage& source,
       }
       for (auto& c : rgb) c *= exposure;
       const float luma = p3_luminance(rgb[0], rgb[1], rgb[2]);
+      if (want_hdr) out.below_knee[i/3] = luma <= (scene ? curve.shoulder_input : options.look.shoulder_start);
       float sdr_y, hdr_y;
       std::array<float, 3> base, hdr;
       if (scene) {
@@ -140,7 +168,6 @@ PhotoRenditions render_renditions(const FloatImage& source,
         out.sdr.pixels[i+c] = base[c];
         if (want_hdr) out.hdr.pixels[i+c] = hdr[c];
       }
-      peaks[y] = std::max(peaks[y], want_hdr ? p3_luminance(hdr[0],hdr[1],hdr[2]) : sdr_y);
     }
   });
   // SDR expansion retains the existing spatial highlight/noise weighting.
@@ -175,7 +202,6 @@ PhotoRenditions render_renditions(const FloatImage& source,
         const auto i=(static_cast<std::size_t>(y)*source.width+x)*3;
         const float scale=std::exp2(sampler.sample(view,x,y)*strength);
         for(int c=0;c<3;++c) out.hdr.pixels[i+c]=out.sdr.pixels[i+c]*scale;
-        peaks[y]=std::max(peaks[y],p3_luminance(out.hdr.pixels[i],out.hdr.pixels[i+1],out.hdr.pixels[i+2]));
       }
     });
   }
@@ -184,14 +210,13 @@ PhotoRenditions render_renditions(const FloatImage& source,
   stats.ev100 = estimate_ev100(capture);
   stats.target_middle_gray = compute_target_middle_gray(stats.ev100);
   stats.headroom_stops = stops; stats.headroom_linear = peak;
-  stats.rendered_peak = *std::max_element(peaks.begin(), peaks.end());
-  stats.headroom_utilization = peak > 1 ? (stats.rendered_peak-1)/(peak-1) : 0;
   for (std::uint32_t y = 0; y < source.height; ++y) {
     stats.wide_gamut_pixels += wide[y]; stats.wide_gamut_eligible_pixels += eligible[y];
   }
   if (stats.wide_gamut_eligible_pixels) stats.wide_gamut_fraction =
       static_cast<float>(static_cast<double>(stats.wide_gamut_pixels)/stats.wide_gamut_eligible_pixels);
   if (prepared.ready) { stats.local_weight_mean = prepared.weight_mean; stats.local_weight_p95 = prepared.weight_p95; }
+  measure_rendition_stats(stats, out.sdr, out.hdr, out.below_knee);
   return out;
 }
 }  // namespace hyperdr

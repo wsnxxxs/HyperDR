@@ -1,0 +1,338 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="930" viewBox="0 0 1440 930" role="img" aria-labelledby="board-title">
+<title id="board-title">HyperDR 第二轮 SVG 标识探索</title>
+<rect width="1440" height="930" fill="#f2f1ed"/>
+<g font-family="Microsoft YaHei,Segoe UI,sans-serif">
+<text x="64" y="65" fill="#607786" font-size="13" letter-spacing="3">HYPERDR / FORM STUDIES 02</text>
+<text x="64" y="125" fill="#20262a" font-size="40" font-weight="600">从光的形态，重新开始。</text>
+<text x="66" y="161" fill="#687078" font-size="17">弧面、折射与明暗交界。三种不同轮廓，延续银白与蓝灰的光学质感。</text>
+<rect x="64" y="202" width="424" height="600" rx="24" fill="#fcfcfa"/>
+<text x="92" y="247" fill="#20262a" font-size="23" font-weight="600">01 / 掠光</text>
+<text x="92" y="278" fill="#727b82" font-size="15">一枚向暗处收束的偏心弧面</text>
+<svg x="142" y="307" width="268" height="268" viewBox="0 0 512 512">
+  <title id="r2-0-title">HyperDR — 掠光</title>
+  <desc id="r2-0-desc">一枚偏心光学弧面，银白色宽边向右下方收束为蓝色薄刃。</desc>
+  <defs>
+    <linearGradient id="r2-0-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="r2-0-body" x1=".15" y1="0" x2=".7" y2="1"><stop stop-color="#d7e6ec"/><stop offset=".32" stop-color="#83b7ce"/><stop offset=".7" stop-color="#5088ad"/><stop offset="1" stop-color="#25425f"/></linearGradient>
+    <linearGradient id="r2-0-face" x1=".2" y1="0" x2=".7" y2="1"><stop stop-color="#fff"/><stop offset=".4" stop-color="#e1eaf0"/><stop offset=".77" stop-color="#aac3d2"/><stop offset="1" stop-color="#6c9ab7"/></linearGradient>
+    <linearGradient id="r2-0-rim" x2="0" y2="1"><stop stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#c4e7f4" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#r2-0-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <path d="M376 164C327 103 228 94 166 145C96 202 89 304 145 366C198 425 302 416 364 349C321 377 263 377 231 340C195 299 207 250 244 220C277 194 327 194 376 164Z" fill="url(#r2-0-body)"/>
+  <path d="M376 164C320 111 239 119 201 172C159 230 177 312 233 351C277 381 327 372 364 349C307 407 216 415 159 359C100 302 104 211 161 155C220 97 319 98 376 164Z" fill="url(#r2-0-face)"/>
+  <path d="M159 359C100 302 104 211 161 155C220 97 319 98 376 164" fill="none" stroke="url(#r2-0-rim)" stroke-width="2"/>
+</svg>
+
+
+<text x="276" y="612" text-anchor="middle" fill="#54616a" font-size="15">流动的轮廓 · 柔和的光学曲面</text>
+<path d="M92 640H460" stroke="#e8e9e5"/>
+<text x="92" y="679" fill="#81878b" font-size="11" letter-spacing="1.5">ACTUAL SIZE</text>
+<svg x="226.0" y="672.0" width="16" height="16" viewBox="0 0 512 512">
+  <title id="r2-1-title">HyperDR — 掠光</title>
+  <desc id="r2-1-desc">一枚偏心光学弧面，银白色宽边向右下方收束为蓝色薄刃。</desc>
+  <defs>
+    <linearGradient id="r2-1-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="r2-1-body" x1=".15" y1="0" x2=".7" y2="1"><stop stop-color="#d7e6ec"/><stop offset=".32" stop-color="#83b7ce"/><stop offset=".7" stop-color="#5088ad"/><stop offset="1" stop-color="#25425f"/></linearGradient>
+    <linearGradient id="r2-1-face" x1=".2" y1="0" x2=".7" y2="1"><stop stop-color="#fff"/><stop offset=".4" stop-color="#e1eaf0"/><stop offset=".77" stop-color="#aac3d2"/><stop offset="1" stop-color="#6c9ab7"/></linearGradient>
+    <linearGradient id="r2-1-rim" x2="0" y2="1"><stop stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#c4e7f4" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#r2-1-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <path d="M376 164C327 103 228 94 166 145C96 202 89 304 145 366C198 425 302 416 364 349C321 377 263 377 231 340C195 299 207 250 244 220C277 194 327 194 376 164Z" fill="url(#r2-1-body)"/>
+  <path d="M376 164C320 111 239 119 201 172C159 230 177 312 233 351C277 381 327 372 364 349C307 407 216 415 159 359C100 302 104 211 161 155C220 97 319 98 376 164Z" fill="url(#r2-1-face)"/>
+  <path d="M159 359C100 302 104 211 161 155C220 97 319 98 376 164" fill="none" stroke="url(#r2-1-rim)" stroke-width="2"/>
+</svg>
+
+
+<text x="234" y="727" text-anchor="middle" fill="#8b9296" font-size="11">16</text>
+<svg x="278.0" y="668.0" width="24" height="24" viewBox="0 0 512 512">
+  <title id="r2-2-title">HyperDR — 掠光</title>
+  <desc id="r2-2-desc">一枚偏心光学弧面，银白色宽边向右下方收束为蓝色薄刃。</desc>
+  <defs>
+    <linearGradient id="r2-2-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="r2-2-body" x1=".15" y1="0" x2=".7" y2="1"><stop stop-color="#d7e6ec"/><stop offset=".32" stop-color="#83b7ce"/><stop offset=".7" stop-color="#5088ad"/><stop offset="1" stop-color="#25425f"/></linearGradient>
+    <linearGradient id="r2-2-face" x1=".2" y1="0" x2=".7" y2="1"><stop stop-color="#fff"/><stop offset=".4" stop-color="#e1eaf0"/><stop offset=".77" stop-color="#aac3d2"/><stop offset="1" stop-color="#6c9ab7"/></linearGradient>
+    <linearGradient id="r2-2-rim" x2="0" y2="1"><stop stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#c4e7f4" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#r2-2-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <path d="M376 164C327 103 228 94 166 145C96 202 89 304 145 366C198 425 302 416 364 349C321 377 263 377 231 340C195 299 207 250 244 220C277 194 327 194 376 164Z" fill="url(#r2-2-body)"/>
+  <path d="M376 164C320 111 239 119 201 172C159 230 177 312 233 351C277 381 327 372 364 349C307 407 216 415 159 359C100 302 104 211 161 155C220 97 319 98 376 164Z" fill="url(#r2-2-face)"/>
+  <path d="M159 359C100 302 104 211 161 155C220 97 319 98 376 164" fill="none" stroke="url(#r2-2-rim)" stroke-width="2"/>
+</svg>
+
+
+<text x="290" y="727" text-anchor="middle" fill="#8b9296" font-size="11">24</text>
+<svg x="330.0" y="664.0" width="32" height="32" viewBox="0 0 512 512">
+  <title id="r2-3-title">HyperDR — 掠光</title>
+  <desc id="r2-3-desc">一枚偏心光学弧面，银白色宽边向右下方收束为蓝色薄刃。</desc>
+  <defs>
+    <linearGradient id="r2-3-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="r2-3-body" x1=".15" y1="0" x2=".7" y2="1"><stop stop-color="#d7e6ec"/><stop offset=".32" stop-color="#83b7ce"/><stop offset=".7" stop-color="#5088ad"/><stop offset="1" stop-color="#25425f"/></linearGradient>
+    <linearGradient id="r2-3-face" x1=".2" y1="0" x2=".7" y2="1"><stop stop-color="#fff"/><stop offset=".4" stop-color="#e1eaf0"/><stop offset=".77" stop-color="#aac3d2"/><stop offset="1" stop-color="#6c9ab7"/></linearGradient>
+    <linearGradient id="r2-3-rim" x2="0" y2="1"><stop stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#c4e7f4" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#r2-3-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <path d="M376 164C327 103 228 94 166 145C96 202 89 304 145 366C198 425 302 416 364 349C321 377 263 377 231 340C195 299 207 250 244 220C277 194 327 194 376 164Z" fill="url(#r2-3-body)"/>
+  <path d="M376 164C320 111 239 119 201 172C159 230 177 312 233 351C277 381 327 372 364 349C307 407 216 415 159 359C100 302 104 211 161 155C220 97 319 98 376 164Z" fill="url(#r2-3-face)"/>
+  <path d="M159 359C100 302 104 211 161 155C220 97 319 98 376 164" fill="none" stroke="url(#r2-3-rim)" stroke-width="2"/>
+</svg>
+
+
+<text x="346" y="727" text-anchor="middle" fill="#8b9296" font-size="11">32</text>
+<svg x="378.0" y="656.0" width="48" height="48" viewBox="0 0 512 512">
+  <title id="r2-4-title">HyperDR — 掠光</title>
+  <desc id="r2-4-desc">一枚偏心光学弧面，银白色宽边向右下方收束为蓝色薄刃。</desc>
+  <defs>
+    <linearGradient id="r2-4-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="r2-4-body" x1=".15" y1="0" x2=".7" y2="1"><stop stop-color="#d7e6ec"/><stop offset=".32" stop-color="#83b7ce"/><stop offset=".7" stop-color="#5088ad"/><stop offset="1" stop-color="#25425f"/></linearGradient>
+    <linearGradient id="r2-4-face" x1=".2" y1="0" x2=".7" y2="1"><stop stop-color="#fff"/><stop offset=".4" stop-color="#e1eaf0"/><stop offset=".77" stop-color="#aac3d2"/><stop offset="1" stop-color="#6c9ab7"/></linearGradient>
+    <linearGradient id="r2-4-rim" x2="0" y2="1"><stop stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#c4e7f4" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#r2-4-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <path d="M376 164C327 103 228 94 166 145C96 202 89 304 145 366C198 425 302 416 364 349C321 377 263 377 231 340C195 299 207 250 244 220C277 194 327 194 376 164Z" fill="url(#r2-4-body)"/>
+  <path d="M376 164C320 111 239 119 201 172C159 230 177 312 233 351C277 381 327 372 364 349C307 407 216 415 159 359C100 302 104 211 161 155C220 97 319 98 376 164Z" fill="url(#r2-4-face)"/>
+  <path d="M159 359C100 302 104 211 161 155C220 97 319 98 376 164" fill="none" stroke="url(#r2-4-rim)" stroke-width="2"/>
+</svg>
+
+
+<text x="402" y="727" text-anchor="middle" fill="#8b9296" font-size="11">48</text>
+<text x="92" y="773" fill="#426b7d" font-size="14">柔和 / 流动</text>
+<rect x="508" y="202" width="424" height="600" rx="24" fill="#fcfcfa"/>
+<text x="536" y="247" fill="#20262a" font-size="23" font-weight="600">02 / 折面</text>
+<text x="536" y="278" fill="#727b82" font-size="15">连续薄带，折成一个光学开口</text>
+<svg x="586" y="307" width="268" height="268" viewBox="0 0 512 512">
+  <title id="r2-5-title">HyperDR — 折面</title>
+  <desc id="r2-5-desc">一片连续折叠的光学薄带形成不对称菱形开口，银白上表面与蓝灰内表面表达折射。</desc>
+  <defs>
+    <linearGradient id="r2-5-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="r2-5-top" x1="0" y1="0" x2=".7" y2="1"><stop stop-color="#fff"/><stop offset=".5" stop-color="#e7eff3"/><stop offset="1" stop-color="#9bb5c6"/></linearGradient>
+    <linearGradient id="r2-5-left" x1="0" y1="0" x2="1" y2=".7"><stop stop-color="#b7cad5"/><stop offset="1" stop-color="#5d8aa6"/></linearGradient>
+    <linearGradient id="r2-5-right" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#c0deea"/><stop offset=".4" stop-color="#7cafc9"/><stop offset="1" stop-color="#315d82"/></linearGradient>
+    <linearGradient id="r2-5-bottom" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#344e69"/><stop offset="1" stop-color="#85b4cd"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#r2-5-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <path d="M239 111Q255 100 273 110L390 179Q406 189 405 208L390 294Q388 310 372 320L263 397Q248 407 232 397L118 329Q103 320 106 300L120 217Q122 201 137 191Z" fill="url(#r2-5-left)"/>
+  <path d="M137 191 239 111Q255 100 273 110L390 179Q399 184 402 192L312 251 214 196 120 217Q122 201 137 191Z" fill="url(#r2-5-top)"/>
+  <path d="M402 192Q407 201 405 208L390 294Q388 310 372 320L263 397Q248 407 232 397L217 310 312 251Z" fill="url(#r2-5-right)"/>
+  <path d="M106 300 217 310 312 251 232 397 118 329Q103 320 106 300Z" fill="url(#r2-5-bottom)"/>
+  <path d="M214 196 312 251 217 310 167 276Z" fill="#14191f"/>
+  <path d="M214 196 312 251 217 310" fill="none" stroke="#b5d3e2" stroke-opacity=".35" stroke-width="2"/>
+  <path d="M137 191 239 111Q255 100 273 110L390 179" fill="none" stroke="#fff" stroke-opacity=".65" stroke-width="2"/>
+</svg>
+
+
+<text x="720" y="612" text-anchor="middle" fill="#54616a" font-size="15">折叠的结构 · 清晰的中心负形</text>
+<path d="M536 640H904" stroke="#e8e9e5"/>
+<text x="536" y="679" fill="#81878b" font-size="11" letter-spacing="1.5">ACTUAL SIZE</text>
+<svg x="670.0" y="672.0" width="16" height="16" viewBox="0 0 512 512">
+  <title id="r2-6-title">HyperDR — 折面</title>
+  <desc id="r2-6-desc">一片连续折叠的光学薄带形成不对称菱形开口，银白上表面与蓝灰内表面表达折射。</desc>
+  <defs>
+    <linearGradient id="r2-6-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="r2-6-top" x1="0" y1="0" x2=".7" y2="1"><stop stop-color="#fff"/><stop offset=".5" stop-color="#e7eff3"/><stop offset="1" stop-color="#9bb5c6"/></linearGradient>
+    <linearGradient id="r2-6-left" x1="0" y1="0" x2="1" y2=".7"><stop stop-color="#b7cad5"/><stop offset="1" stop-color="#5d8aa6"/></linearGradient>
+    <linearGradient id="r2-6-right" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#c0deea"/><stop offset=".4" stop-color="#7cafc9"/><stop offset="1" stop-color="#315d82"/></linearGradient>
+    <linearGradient id="r2-6-bottom" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#344e69"/><stop offset="1" stop-color="#85b4cd"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#r2-6-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <path d="M239 111Q255 100 273 110L390 179Q406 189 405 208L390 294Q388 310 372 320L263 397Q248 407 232 397L118 329Q103 320 106 300L120 217Q122 201 137 191Z" fill="url(#r2-6-left)"/>
+  <path d="M137 191 239 111Q255 100 273 110L390 179Q399 184 402 192L312 251 214 196 120 217Q122 201 137 191Z" fill="url(#r2-6-top)"/>
+  <path d="M402 192Q407 201 405 208L390 294Q388 310 372 320L263 397Q248 407 232 397L217 310 312 251Z" fill="url(#r2-6-right)"/>
+  <path d="M106 300 217 310 312 251 232 397 118 329Q103 320 106 300Z" fill="url(#r2-6-bottom)"/>
+  <path d="M214 196 312 251 217 310 167 276Z" fill="#14191f"/>
+  <path d="M214 196 312 251 217 310" fill="none" stroke="#b5d3e2" stroke-opacity=".35" stroke-width="2"/>
+  <path d="M137 191 239 111Q255 100 273 110L390 179" fill="none" stroke="#fff" stroke-opacity=".65" stroke-width="2"/>
+</svg>
+
+
+<text x="678" y="727" text-anchor="middle" fill="#8b9296" font-size="11">16</text>
+<svg x="722.0" y="668.0" width="24" height="24" viewBox="0 0 512 512">
+  <title id="r2-7-title">HyperDR — 折面</title>
+  <desc id="r2-7-desc">一片连续折叠的光学薄带形成不对称菱形开口，银白上表面与蓝灰内表面表达折射。</desc>
+  <defs>
+    <linearGradient id="r2-7-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="r2-7-top" x1="0" y1="0" x2=".7" y2="1"><stop stop-color="#fff"/><stop offset=".5" stop-color="#e7eff3"/><stop offset="1" stop-color="#9bb5c6"/></linearGradient>
+    <linearGradient id="r2-7-left" x1="0" y1="0" x2="1" y2=".7"><stop stop-color="#b7cad5"/><stop offset="1" stop-color="#5d8aa6"/></linearGradient>
+    <linearGradient id="r2-7-right" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#c0deea"/><stop offset=".4" stop-color="#7cafc9"/><stop offset="1" stop-color="#315d82"/></linearGradient>
+    <linearGradient id="r2-7-bottom" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#344e69"/><stop offset="1" stop-color="#85b4cd"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#r2-7-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <path d="M239 111Q255 100 273 110L390 179Q406 189 405 208L390 294Q388 310 372 320L263 397Q248 407 232 397L118 329Q103 320 106 300L120 217Q122 201 137 191Z" fill="url(#r2-7-left)"/>
+  <path d="M137 191 239 111Q255 100 273 110L390 179Q399 184 402 192L312 251 214 196 120 217Q122 201 137 191Z" fill="url(#r2-7-top)"/>
+  <path d="M402 192Q407 201 405 208L390 294Q388 310 372 320L263 397Q248 407 232 397L217 310 312 251Z" fill="url(#r2-7-right)"/>
+  <path d="M106 300 217 310 312 251 232 397 118 329Q103 320 106 300Z" fill="url(#r2-7-bottom)"/>
+  <path d="M214 196 312 251 217 310 167 276Z" fill="#14191f"/>
+  <path d="M214 196 312 251 217 310" fill="none" stroke="#b5d3e2" stroke-opacity=".35" stroke-width="2"/>
+  <path d="M137 191 239 111Q255 100 273 110L390 179" fill="none" stroke="#fff" stroke-opacity=".65" stroke-width="2"/>
+</svg>
+
+
+<text x="734" y="727" text-anchor="middle" fill="#8b9296" font-size="11">24</text>
+<svg x="774.0" y="664.0" width="32" height="32" viewBox="0 0 512 512">
+  <title id="r2-8-title">HyperDR — 折面</title>
+  <desc id="r2-8-desc">一片连续折叠的光学薄带形成不对称菱形开口，银白上表面与蓝灰内表面表达折射。</desc>
+  <defs>
+    <linearGradient id="r2-8-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="r2-8-top" x1="0" y1="0" x2=".7" y2="1"><stop stop-color="#fff"/><stop offset=".5" stop-color="#e7eff3"/><stop offset="1" stop-color="#9bb5c6"/></linearGradient>
+    <linearGradient id="r2-8-left" x1="0" y1="0" x2="1" y2=".7"><stop stop-color="#b7cad5"/><stop offset="1" stop-color="#5d8aa6"/></linearGradient>
+    <linearGradient id="r2-8-right" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#c0deea"/><stop offset=".4" stop-color="#7cafc9"/><stop offset="1" stop-color="#315d82"/></linearGradient>
+    <linearGradient id="r2-8-bottom" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#344e69"/><stop offset="1" stop-color="#85b4cd"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#r2-8-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <path d="M239 111Q255 100 273 110L390 179Q406 189 405 208L390 294Q388 310 372 320L263 397Q248 407 232 397L118 329Q103 320 106 300L120 217Q122 201 137 191Z" fill="url(#r2-8-left)"/>
+  <path d="M137 191 239 111Q255 100 273 110L390 179Q399 184 402 192L312 251 214 196 120 217Q122 201 137 191Z" fill="url(#r2-8-top)"/>
+  <path d="M402 192Q407 201 405 208L390 294Q388 310 372 320L263 397Q248 407 232 397L217 310 312 251Z" fill="url(#r2-8-right)"/>
+  <path d="M106 300 217 310 312 251 232 397 118 329Q103 320 106 300Z" fill="url(#r2-8-bottom)"/>
+  <path d="M214 196 312 251 217 310 167 276Z" fill="#14191f"/>
+  <path d="M214 196 312 251 217 310" fill="none" stroke="#b5d3e2" stroke-opacity=".35" stroke-width="2"/>
+  <path d="M137 191 239 111Q255 100 273 110L390 179" fill="none" stroke="#fff" stroke-opacity=".65" stroke-width="2"/>
+</svg>
+
+
+<text x="790" y="727" text-anchor="middle" fill="#8b9296" font-size="11">32</text>
+<svg x="822.0" y="656.0" width="48" height="48" viewBox="0 0 512 512">
+  <title id="r2-9-title">HyperDR — 折面</title>
+  <desc id="r2-9-desc">一片连续折叠的光学薄带形成不对称菱形开口，银白上表面与蓝灰内表面表达折射。</desc>
+  <defs>
+    <linearGradient id="r2-9-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="r2-9-top" x1="0" y1="0" x2=".7" y2="1"><stop stop-color="#fff"/><stop offset=".5" stop-color="#e7eff3"/><stop offset="1" stop-color="#9bb5c6"/></linearGradient>
+    <linearGradient id="r2-9-left" x1="0" y1="0" x2="1" y2=".7"><stop stop-color="#b7cad5"/><stop offset="1" stop-color="#5d8aa6"/></linearGradient>
+    <linearGradient id="r2-9-right" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#c0deea"/><stop offset=".4" stop-color="#7cafc9"/><stop offset="1" stop-color="#315d82"/></linearGradient>
+    <linearGradient id="r2-9-bottom" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#344e69"/><stop offset="1" stop-color="#85b4cd"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#r2-9-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <path d="M239 111Q255 100 273 110L390 179Q406 189 405 208L390 294Q388 310 372 320L263 397Q248 407 232 397L118 329Q103 320 106 300L120 217Q122 201 137 191Z" fill="url(#r2-9-left)"/>
+  <path d="M137 191 239 111Q255 100 273 110L390 179Q399 184 402 192L312 251 214 196 120 217Q122 201 137 191Z" fill="url(#r2-9-top)"/>
+  <path d="M402 192Q407 201 405 208L390 294Q388 310 372 320L263 397Q248 407 232 397L217 310 312 251Z" fill="url(#r2-9-right)"/>
+  <path d="M106 300 217 310 312 251 232 397 118 329Q103 320 106 300Z" fill="url(#r2-9-bottom)"/>
+  <path d="M214 196 312 251 217 310 167 276Z" fill="#14191f"/>
+  <path d="M214 196 312 251 217 310" fill="none" stroke="#b5d3e2" stroke-opacity=".35" stroke-width="2"/>
+  <path d="M137 191 239 111Q255 100 273 110L390 179" fill="none" stroke="#fff" stroke-opacity=".65" stroke-width="2"/>
+</svg>
+
+
+<text x="846" y="727" text-anchor="middle" fill="#8b9296" font-size="11">48</text>
+<text x="536" y="773" fill="#6c747a" font-size="14">立体 / 精密</text>
+<rect x="952" y="202" width="424" height="600" rx="24" fill="#fcfcfa"/>
+<text x="980" y="247" fill="#20262a" font-size="23" font-weight="600">03 / 光隙</text>
+<text x="980" y="278" fill="#727b82" font-size="15">用一道曲线塑造明暗交界</text>
+<svg x="1030" y="307" width="268" height="268" viewBox="0 0 512 512">
+  <title id="r2-10-title">HyperDR — 光隙</title>
+  <desc id="r2-10-desc">一块圆润的光学实体被弯曲的明暗交界切开，左侧银白弧面与右侧蓝色折面共用完整轮廓。</desc>
+  <defs>
+    <linearGradient id="r2-10-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="r2-10-blue" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#d2e8f1"/><stop offset=".38" stop-color="#83b3ce"/><stop offset="1" stop-color="#345c7d"/></linearGradient>
+    <linearGradient id="r2-10-white" x1="0" y1=".2" x2="1" y2=".6"><stop stop-color="#fff"/><stop offset=".55" stop-color="#e5edf2"/><stop offset="1" stop-color="#9bb5c7"/></linearGradient>
+    <linearGradient id="r2-10-edge" x2="0" y2="1"><stop stop-color="#fff"/><stop offset="1" stop-color="#a4c8dd" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#r2-10-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <g transform="rotate(-12 256 256)">
+    <path d="M189 119H323Q393 119 393 189V323Q393 393 323 393H189Q119 393 119 323V189Q119 119 189 119Z" fill="url(#r2-10-blue)"/>
+    <path d="M189 119H323C267 175 304 216 250 263C205 302 182 343 189 393Q119 393 119 323V189Q119 119 189 119Z" fill="url(#r2-10-white)"/>
+    <path d="M323 119C267 175 304 216 250 263C205 302 182 343 189 393C224 343 256 339 286 299C332 239 291 191 323 119Z" fill="#14212c"/>
+    <path d="M323 119C267 175 304 216 250 263C205 302 182 343 189 393" fill="none" stroke="url(#r2-10-edge)" stroke-width="2"/>
+  </g>
+</svg>
+
+
+<text x="1164" y="612" text-anchor="middle" fill="#54616a" font-size="15">圆润的实体 · 不对称的弧形切口</text>
+<path d="M980 640H1348" stroke="#e8e9e5"/>
+<text x="980" y="679" fill="#81878b" font-size="11" letter-spacing="1.5">ACTUAL SIZE</text>
+<svg x="1114.0" y="672.0" width="16" height="16" viewBox="0 0 512 512">
+  <title id="r2-11-title">HyperDR — 光隙</title>
+  <desc id="r2-11-desc">一块圆润的光学实体被弯曲的明暗交界切开，左侧银白弧面与右侧蓝色折面共用完整轮廓。</desc>
+  <defs>
+    <linearGradient id="r2-11-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="r2-11-blue" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#d2e8f1"/><stop offset=".38" stop-color="#83b3ce"/><stop offset="1" stop-color="#345c7d"/></linearGradient>
+    <linearGradient id="r2-11-white" x1="0" y1=".2" x2="1" y2=".6"><stop stop-color="#fff"/><stop offset=".55" stop-color="#e5edf2"/><stop offset="1" stop-color="#9bb5c7"/></linearGradient>
+    <linearGradient id="r2-11-edge" x2="0" y2="1"><stop stop-color="#fff"/><stop offset="1" stop-color="#a4c8dd" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#r2-11-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <g transform="rotate(-12 256 256)">
+    <path d="M189 119H323Q393 119 393 189V323Q393 393 323 393H189Q119 393 119 323V189Q119 119 189 119Z" fill="url(#r2-11-blue)"/>
+    <path d="M189 119H323C267 175 304 216 250 263C205 302 182 343 189 393Q119 393 119 323V189Q119 119 189 119Z" fill="url(#r2-11-white)"/>
+    <path d="M323 119C267 175 304 216 250 263C205 302 182 343 189 393C224 343 256 339 286 299C332 239 291 191 323 119Z" fill="#14212c"/>
+    <path d="M323 119C267 175 304 216 250 263C205 302 182 343 189 393" fill="none" stroke="url(#r2-11-edge)" stroke-width="2"/>
+  </g>
+</svg>
+
+
+<text x="1122" y="727" text-anchor="middle" fill="#8b9296" font-size="11">16</text>
+<svg x="1166.0" y="668.0" width="24" height="24" viewBox="0 0 512 512">
+  <title id="r2-12-title">HyperDR — 光隙</title>
+  <desc id="r2-12-desc">一块圆润的光学实体被弯曲的明暗交界切开，左侧银白弧面与右侧蓝色折面共用完整轮廓。</desc>
+  <defs>
+    <linearGradient id="r2-12-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="r2-12-blue" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#d2e8f1"/><stop offset=".38" stop-color="#83b3ce"/><stop offset="1" stop-color="#345c7d"/></linearGradient>
+    <linearGradient id="r2-12-white" x1="0" y1=".2" x2="1" y2=".6"><stop stop-color="#fff"/><stop offset=".55" stop-color="#e5edf2"/><stop offset="1" stop-color="#9bb5c7"/></linearGradient>
+    <linearGradient id="r2-12-edge" x2="0" y2="1"><stop stop-color="#fff"/><stop offset="1" stop-color="#a4c8dd" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#r2-12-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <g transform="rotate(-12 256 256)">
+    <path d="M189 119H323Q393 119 393 189V323Q393 393 323 393H189Q119 393 119 323V189Q119 119 189 119Z" fill="url(#r2-12-blue)"/>
+    <path d="M189 119H323C267 175 304 216 250 263C205 302 182 343 189 393Q119 393 119 323V189Q119 119 189 119Z" fill="url(#r2-12-white)"/>
+    <path d="M323 119C267 175 304 216 250 263C205 302 182 343 189 393C224 343 256 339 286 299C332 239 291 191 323 119Z" fill="#14212c"/>
+    <path d="M323 119C267 175 304 216 250 263C205 302 182 343 189 393" fill="none" stroke="url(#r2-12-edge)" stroke-width="2"/>
+  </g>
+</svg>
+
+
+<text x="1178" y="727" text-anchor="middle" fill="#8b9296" font-size="11">24</text>
+<svg x="1218.0" y="664.0" width="32" height="32" viewBox="0 0 512 512">
+  <title id="r2-13-title">HyperDR — 光隙</title>
+  <desc id="r2-13-desc">一块圆润的光学实体被弯曲的明暗交界切开，左侧银白弧面与右侧蓝色折面共用完整轮廓。</desc>
+  <defs>
+    <linearGradient id="r2-13-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="r2-13-blue" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#d2e8f1"/><stop offset=".38" stop-color="#83b3ce"/><stop offset="1" stop-color="#345c7d"/></linearGradient>
+    <linearGradient id="r2-13-white" x1="0" y1=".2" x2="1" y2=".6"><stop stop-color="#fff"/><stop offset=".55" stop-color="#e5edf2"/><stop offset="1" stop-color="#9bb5c7"/></linearGradient>
+    <linearGradient id="r2-13-edge" x2="0" y2="1"><stop stop-color="#fff"/><stop offset="1" stop-color="#a4c8dd" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#r2-13-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <g transform="rotate(-12 256 256)">
+    <path d="M189 119H323Q393 119 393 189V323Q393 393 323 393H189Q119 393 119 323V189Q119 119 189 119Z" fill="url(#r2-13-blue)"/>
+    <path d="M189 119H323C267 175 304 216 250 263C205 302 182 343 189 393Q119 393 119 323V189Q119 119 189 119Z" fill="url(#r2-13-white)"/>
+    <path d="M323 119C267 175 304 216 250 263C205 302 182 343 189 393C224 343 256 339 286 299C332 239 291 191 323 119Z" fill="#14212c"/>
+    <path d="M323 119C267 175 304 216 250 263C205 302 182 343 189 393" fill="none" stroke="url(#r2-13-edge)" stroke-width="2"/>
+  </g>
+</svg>
+
+
+<text x="1234" y="727" text-anchor="middle" fill="#8b9296" font-size="11">32</text>
+<svg x="1266.0" y="656.0" width="48" height="48" viewBox="0 0 512 512">
+  <title id="r2-14-title">HyperDR — 光隙</title>
+  <desc id="r2-14-desc">一块圆润的光学实体被弯曲的明暗交界切开，左侧银白弧面与右侧蓝色折面共用完整轮廓。</desc>
+  <defs>
+    <linearGradient id="r2-14-bg" x2="1" y2="1"><stop stop-color="#24282c"/><stop offset="1" stop-color="#111316"/></linearGradient>
+    <linearGradient id="r2-14-blue" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#d2e8f1"/><stop offset=".38" stop-color="#83b3ce"/><stop offset="1" stop-color="#345c7d"/></linearGradient>
+    <linearGradient id="r2-14-white" x1="0" y1=".2" x2="1" y2=".6"><stop stop-color="#fff"/><stop offset=".55" stop-color="#e5edf2"/><stop offset="1" stop-color="#9bb5c7"/></linearGradient>
+    <linearGradient id="r2-14-edge" x2="0" y2="1"><stop stop-color="#fff"/><stop offset="1" stop-color="#a4c8dd" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#r2-14-bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <g transform="rotate(-12 256 256)">
+    <path d="M189 119H323Q393 119 393 189V323Q393 393 323 393H189Q119 393 119 323V189Q119 119 189 119Z" fill="url(#r2-14-blue)"/>
+    <path d="M189 119H323C267 175 304 216 250 263C205 302 182 343 189 393Q119 393 119 323V189Q119 119 189 119Z" fill="url(#r2-14-white)"/>
+    <path d="M323 119C267 175 304 216 250 263C205 302 182 343 189 393C224 343 256 339 286 299C332 239 291 191 323 119Z" fill="#14212c"/>
+    <path d="M323 119C267 175 304 216 250 263C205 302 182 343 189 393" fill="none" stroke="url(#r2-14-edge)" stroke-width="2"/>
+  </g>
+</svg>
+
+
+<text x="1290" y="727" text-anchor="middle" fill="#8b9296" font-size="11">48</text>
+<text x="980" y="773" fill="#6c747a" font-size="14">克制 / 抽象</text>
+<text x="66" y="855" fill="#4c585f" font-size="17">这一轮先比较轮廓与气质，再决定值得继续细化的方向。</text>
+<text x="66" y="886" fill="#858c90" font-size="13">第二轮 SVG 草案 · 下方展示 16 / 24 / 32 / 48 px 尺寸 · 尚未替换应用图标</text>
+</g></svg>

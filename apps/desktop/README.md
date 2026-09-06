@@ -32,6 +32,14 @@ Debug builds start `apps/panel/hyperdr_gui.py` with the active Python
 interpreter. Set `HYPERDR_PANEL_PYTHON` when the panel or model uses a specific
 virtual environment.
 
+## Application icon
+
+`src-tauri/icons/icon.svg` is the shared brand source, using the approved moon
+design from `designs/logo-moon-balanced/moon-balanced-larger-offset.svg`.
+After editing the source, run `npm run icons` here to regenerate native icons
+and synchronize the splash, editor, phone workbench, favicon and Apple touch icon.
+Native executable and installer icons take effect in the next desktop build.
+
 ## Windows release build
 
 `tauri build` runs `packaging/build-tauri-sidecar.ps1` first. That script uses

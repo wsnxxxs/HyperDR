@@ -86,7 +86,6 @@ export default {
   "inspector.fineTune": "细节微调",
   "inspector.adjustments": "画面调整",
   "inspector.manual": "手动调整",
-  "inspector.midtones": "中间调",
   "inspector.natural": "自然",
   "inspector.bright": "明亮",
   "inspector.soft": "柔和",
@@ -181,8 +180,10 @@ export default {
   "scope.hot": "高光",
   "scope.cold": "暗部",
   "scope.empty": "打开照片后显示亮度分布",
-  "scope.source": "调整前",
-  "scope.output": "调整后",
+  "scope.source": "原图",
+  "scope.output": "当前效果",
+
+  "scope.graph": "原图填充分布与当前效果实线对照",
 
   /* ── adjustment rail ─────────────────────────────────────────────── */
   "adjust.label": "调整",

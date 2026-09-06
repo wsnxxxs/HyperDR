@@ -14,7 +14,7 @@
 .app__rail > .scope { flex: none; margin: 0; padding: 22px 20px 16px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; box-shadow: none; background: transparent; }
 .app__settings { flex: none; padding: 0; }
 .app__settings.is-disabled > * { opacity: .65; }
-.app__rail:has(.is-disabled) .scope-empty { display: grid; }
+
 .app__status { grid-area: status; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; border-top: 1px solid var(--line); color: var(--ink-muted); font-size: var(--text-xs); background: var(--surface-panel); }
 .viewer-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .viewer-zoom { display: flex; align-items: center; gap: 8px; color: var(--ink); }

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">HyperDR — 光桥</title>
+  <desc id="desc">银白和蓝灰的双立柱，以向上倾斜的光桥连接成 H，表达从暗部通往高光。</desc>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#23272b"/><stop offset="1" stop-color="#101215"/></linearGradient>
+    <linearGradient id="silver" x2="1" y2="1"><stop stop-color="#fff"/><stop offset="1" stop-color="#a9bac8"/></linearGradient>
+    <linearGradient id="blue" x2=".2" y2="1"><stop stop-color="#afd7e9"/><stop offset="1" stop-color="#467396"/></linearGradient>
+    <linearGradient id="bridge" x2="1" y2="0"><stop stop-color="#bdcdd7"/><stop offset="1" stop-color="#f8fcff"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".12"/>
+  <rect x="306" y="116" width="78" height="280" rx="28" fill="url(#blue)"/>
+  <path d="M162 261 345 192V263L162 332Z" fill="#05090c" opacity=".28" transform="translate(0 8)"/>
+  <path d="M162 255 345 186V257L162 326Z" fill="url(#bridge)"/>
+  <rect x="128" y="116" width="78" height="280" rx="28" fill="url(#silver)"/>
+  <path d="M207 238 344 187" fill="none" stroke="#fff" stroke-opacity=".7" stroke-width="2"/>
+</svg>

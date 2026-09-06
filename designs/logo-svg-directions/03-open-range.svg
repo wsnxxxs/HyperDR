@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">HyperDR — 光域</title>
+  <desc id="desc">蓝灰色取景边框在右上角打开，一枚银白光片延伸至边框之外，表达 HDR 高光范围的扩展。</desc>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#23272b"/><stop offset="1" stop-color="#101215"/></linearGradient>
+    <linearGradient id="frame" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#497191"/><stop offset="1" stop-color="#a6c9db"/></linearGradient>
+    <linearGradient id="light" x2="1" y2="0"><stop stop-color="#a9bdca"/><stop offset=".65" stop-color="#edf5fa"/><stop offset="1" stop-color="#fff"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#fff" stroke-opacity=".12"/>
+  <path d="M262 143H174Q138 143 138 179V340Q138 376 174 376H335Q371 376 371 340V252" fill="none" stroke="url(#frame)" stroke-width="44" stroke-linecap="round"/>
+  <rect x="206" y="145" width="216" height="76" rx="27" fill="url(#light)" transform="rotate(-38 314 183)"/>
+</svg>

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">HyperDR — 月弧 · 放大 10%</title>
+  <desc id="desc">在视觉平衡精修版基础上，将中间的月弧主体围绕视觉中心放大 10%，保持当前朝向、材质、夜蓝底座与环境光晕。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2=".85" y2="1"><stop stop-color="#1b2330"/><stop offset=".5" stop-color="#121a27"/><stop offset="1" stop-color="#0c121d"/></linearGradient>
+    <radialGradient id="body" gradientUnits="userSpaceOnUse" cx="201" cy="181" r="272"><stop stop-color="#dce7f3"/><stop offset=".3" stop-color="#b8cae0"/><stop offset=".58" stop-color="#8ea9c9"/><stop offset=".82" stop-color="#647fa6"/><stop offset="1" stop-color="#405979"/></radialGradient>
+    <radialGradient id="face" gradientUnits="userSpaceOnUse" cx="183" cy="165" r="300"><stop stop-color="#fffef7"/><stop offset=".26" stop-color="#f4f5f3"/><stop offset=".49" stop-color="#e3e9ee"/><stop offset=".72" stop-color="#c0cede"/><stop offset=".88" stop-color="#9bafc8"/><stop offset="1" stop-color="#718aac"/></radialGradient>
+    <linearGradient id="rim" gradientUnits="userSpaceOnUse" x1="192" y1="157" x2="322" y2="367"><stop stop-color="#ffffff" stop-opacity=".58"/><stop offset=".42" stop-color="#e6eefb" stop-opacity=".23"/><stop offset="1" stop-color="#a8c3e5" stop-opacity="0"/></linearGradient>
+    <radialGradient id="halo"><stop offset=".25" stop-color="#a5c3f0" stop-opacity=".06"/><stop offset=".6" stop-color="#87a9dc" stop-opacity=".025"/><stop offset="1" stop-color="#7598ce" stop-opacity="0"/></radialGradient>
+    <linearGradient id="tile-rim" x2="1" y2="1"><stop stop-color="#d4e1f2" stop-opacity=".16"/><stop offset=".55" stop-color="#b6c9e4" stop-opacity=".055"/><stop offset="1" stop-color="#91a8cd" stop-opacity=".025"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="url(#tile-rim)"/>
+  <ellipse cx="251" cy="259" rx="179" ry="172" fill="url(#halo)"/>
+  <g transform="translate(252 266) scale(1.1) translate(-252 -266)">
+  <path d="M85.979 307.557C94.998 231.935 152.685 174.02 228.414 158.851C310.107 141.355 377.488 190.649 383.128 260.878C388.636 333.34 319.789 390.586 240.668 387.628C298.907 372.755 326.041 323.758 313.596 277.313C300.785 229.503 249.653 208.064 195.878 223.206C148.067 236.017 118.639 270.988 85.979 307.557Z" fill="url(#body)"/>
+  <path d="M85.979 307.557C94.998 231.935 152.685 174.02 228.414 158.851C310.107 141.355 377.488 190.649 383.128 260.878C388.636 333.34 319.789 390.586 240.668 387.628C316.397 372.462 358.959 312.742 340.621 252.502C323.749 197.728 266.654 178.62 210.146 194.493C151.774 211.598 111.881 256.693 85.979 307.557Z" fill="url(#face)"/>
+  <path d="M85.979 307.557C94.998 231.935 152.685 174.02 228.414 158.851C310.107 141.355 377.488 190.649 383.128 260.878C388.636 333.34 319.789 390.586 240.668 387.628" fill="none" stroke="url(#rim)" stroke-width=".9"/>
+  </g>
+</svg>

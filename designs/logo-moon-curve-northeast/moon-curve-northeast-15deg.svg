@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">HyperDR — 月弧 · 再逆时针 15°</title>
+  <desc id="desc">在弧背朝右上的版本基础上，主体绕视觉中心再逆时针旋转 15 度。保留银白亮面、蓝灰内侧、夜蓝背景与左上光源。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2=".85" y2="1"><stop stop-color="#1b2330"/><stop offset=".5" stop-color="#121a27"/><stop offset="1" stop-color="#0c121d"/></linearGradient>
+    <radialGradient id="body" gradientUnits="userSpaceOnUse" cx="205" cy="147" r="264"><stop stop-color="#d7e5f5"/><stop offset=".35" stop-color="#a9bfdc"/><stop offset=".72" stop-color="#6b87af"/><stop offset="1" stop-color="#415a7d"/></radialGradient>
+    <radialGradient id="face" gradientUnits="userSpaceOnUse" cx="177" cy="161" r="290"><stop stop-color="#fffef7"/><stop offset=".32" stop-color="#f3f5f6"/><stop offset=".63" stop-color="#d8e2ee"/><stop offset=".85" stop-color="#afc1d9"/><stop offset="1" stop-color="#7895b8"/></radialGradient>
+    <linearGradient id="rim" gradientUnits="userSpaceOnUse" x1="177" y1="150" x2="288" y2="386"><stop stop-color="#ffffff" stop-opacity=".72"/><stop offset=".42" stop-color="#e6eefb" stop-opacity=".23"/><stop offset="1" stop-color="#a8c3e5" stop-opacity="0"/></linearGradient>
+    <radialGradient id="halo"><stop offset=".25" stop-color="#a5c3f0" stop-opacity=".085"/><stop offset=".6" stop-color="#87a9dc" stop-opacity=".035"/><stop offset="1" stop-color="#7598ce" stop-opacity="0"/></radialGradient>
+    <linearGradient id="tile-rim" x2="1" y2="1"><stop stop-color="#d4e1f2" stop-opacity=".16"/><stop offset=".55" stop-color="#b6c9e4" stop-opacity=".055"/><stop offset="1" stop-color="#91a8cd" stop-opacity=".025"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="url(#tile-rim)"/>
+  <ellipse cx="271" cy="247" rx="180" ry="171" fill="url(#halo)"/>
+  <path d="M89.979 289.557C98.998 213.935 156.685 156.02 232.414 140.851C314.107 123.355 381.488 172.649 387.128 242.878C392.636 315.34 323.789 372.586 244.668 369.628C302.907 354.755 330.041 305.758 317.596 259.313C304.785 211.503 253.653 190.064 199.878 205.206C152.067 218.017 122.639 252.988 89.979 289.557Z" fill="url(#body)"/>
+  <path d="M89.979 289.557C98.998 213.935 156.685 156.02 232.414 140.851C314.107 123.355 381.488 172.649 387.128 242.878C392.636 315.34 323.789 372.586 244.668 369.628C320.397 354.462 362.959 294.742 344.621 234.502C327.749 179.728 270.654 160.62 214.146 176.493C155.774 193.598 115.881 238.693 89.979 289.557Z" fill="url(#face)"/>
+  <path d="M89.979 289.557C98.998 213.935 156.685 156.02 232.414 140.851C314.107 123.355 381.488 172.649 387.128 242.878C392.636 315.34 323.789 372.586 244.668 369.628" fill="none" stroke="url(#rim)" stroke-width="1.2"/>
+</svg>

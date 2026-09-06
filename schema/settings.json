@@ -12,11 +12,34 @@
         "pq",
         "hlg",
         "avif-pq",
-        "avif-hlg"
+        "avif-hlg",
+        "sdr-jpeg"
       ],
       "affects_output_bytes": true,
       "help": "Output representation",
       "default": "adaptive"
+    },
+    {
+      "key": "color_gamut",
+      "flag": "--color-gamut",
+      "kind": "enum",
+      "choices": [
+        "srgb",
+        "p3",
+        "rec2020"
+      ],
+      "affects_output_bytes": true,
+      "help": "Default input colour gamut",
+      "default": "srgb"
+    },
+    {
+      "key": "clamp_srgb",
+      "flag": "--clamp-srgb",
+      "kind": "boolean",
+      "flag_sets_false": false,
+      "affects_output_bytes": true,
+      "help": "Clamp rendered colour to sRGB gamut",
+      "default": false
     },
     {
       "key": "look",
@@ -61,6 +84,48 @@
       "affects_output_bytes": true,
       "help": "Conservative RAW hot/dead pixel correction",
       "default": false
+    },
+    {
+      "key": "lut_input",
+      "flag": "--lut-input",
+      "kind": "enum",
+      "choices": [
+        "srgb",
+        "p3",
+        "rec709",
+        "hlg",
+        "pq",
+        "slog3-sgamut3cine"
+      ],
+      "affects_output_bytes": true,
+      "help": "LUT input transfer and primaries (rec709 = gamma 2.4)",
+      "default": "srgb"
+    },
+    {
+      "key": "lut_output",
+      "flag": "--lut-output",
+      "kind": "enum",
+      "choices": [
+        "srgb",
+        "p3",
+        "rec709",
+        "hlg",
+        "pq",
+        "slog3-sgamut3cine"
+      ],
+      "affects_output_bytes": true,
+      "help": "LUT output transfer and primaries",
+      "default": "srgb"
+    },
+    {
+      "key": "lut_strength",
+      "flag": "--lut-strength",
+      "kind": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "affects_output_bytes": true,
+      "help": "Colour LUT blend in linear light",
+      "default": 1
     },
     {
       "key": "contrast",
@@ -274,6 +339,7 @@
         "isobmff": [
           ".heic",
           ".heif",
+          ".hif",
           ".avif"
         ]
       }

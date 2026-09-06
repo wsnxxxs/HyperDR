@@ -4,6 +4,7 @@
 #include "hyperdr/app/decode_cache.hpp"
 #include "hyperdr/app/report.hpp"
 #include "hyperdr/app/preview.hpp"
+#include "hyperdr/gainmap/rendition.hpp"
 #include "hyperdr/app/analysis_cache.hpp"
 #include "hyperdr/app/schema.hpp"
 #include "hyperdr/codec/availability.hpp"
@@ -86,6 +87,7 @@ void usage() {
           "  --fast-preview                     Explicitly allow RAW half-size decoding\n"
           "  --raw-bad-pixels <file>             Visible-area bad-pixel coordinates\n"
           "  --raw-dark-frame <file>              Visible-area 16-bit dark-frame PGM\n"
+          "  --lut <file.cube>                  Creative 1D/3D colour LUT\n"
           "  --raw-linearization-lut <file>      N code-to-code LUT for RAW linearization\n"
           "  --raw-lens-shading <file>           Text gain map: width height channels + gains\n";
   if (!kCodecsAvailable) {
@@ -194,6 +196,8 @@ void parse_settings(int argc, char** argv, int first, ConvertOptions& options,
       options.raw.bad_pixel_map = next_value(i, argc, argv, arg);
     } else if (arg == "--raw-dark-frame") {
       options.raw.dark_frame = next_value(i, argc, argv, arg);
+    } else if (arg == "--lut") {
+      options.color_lut.path = next_value(i, argc, argv, arg);
     } else if (arg == "--raw-linearization-lut") {
       options.raw.linearization_lut = next_value(i, argc, argv, arg);
     } else if (arg == "--raw-lens-shading") {
@@ -318,7 +322,7 @@ int inspect_command(int argc, char** argv) {
 
 int verify_command(int argc, char** argv) {
   if (argc < 3) {
-    throw std::invalid_argument("verify requires one HEIC or Ultra HDR JPEG path");
+    throw std::invalid_argument("verify requires one HEIC or JPEG path");
   }
   const std::filesystem::path input = argv[2];
   std::filesystem::path reconstruct;
@@ -333,8 +337,14 @@ int verify_command(int argc, char** argv) {
     if (!reconstruct.empty()) {
       throw std::invalid_argument("--reconstruct is only available for gain-map HEIC");
     }
-    verify_ultrahdr_jpeg(read_binary_file(input));
-    std::cout << "Ultra HDR JPEG/R: yes\nverification passed\n";
+    if (is_ultrahdr_jpeg_file(input)) {
+      verify_ultrahdr_jpeg(read_binary_file(input));
+      std::cout << "Ultra HDR JPEG/R: yes\n";
+    } else {
+      verify_sdr_jpeg(read_binary_file(input));
+      std::cout << "SDR JPEG: yes\n";
+    }
+    std::cout << "verification passed\n";
     return 0;
   }
 
@@ -456,26 +466,25 @@ void append_float_image(std::vector<std::uint8_t>& bytes,
   });
 }
 
-std::vector<std::uint8_t> native_preview_packet(const GainMapResult& result,
+std::vector<std::uint8_t> photo_preview_packet(const PhotoRenditions& result,
                                                 const DecodeInfo& decode,
                                                 const InputDescription& input) {
   // Wire format v1: magic, JSON byte length, UTF-8 JSON, then two tightly
   // packed little-endian HWC RGB float32 planes (SDR base, reconstructed HDR).
   // JSON makes status/geometry extensible while the pixel payload stays
   // directly uploadable to GPU textures without an 8-bit colour conversion.
-  auto hdr = reconstruct_gain_map(result.base_linear, result.gain_map,
-                                  result.metadata, result.headroom_stops);
+  const auto& hdr = result.hdr.pixels.empty() ? result.sdr : result.hdr;
   json::Writer writer;
   writer.begin_object()
       .member("schema", "hyperdr.native-preview/v1")
-      .member("width", result.base_linear.width)
-      .member("height", result.base_linear.height)
+      .member("width", result.sdr.width)
+      .member("height", result.sdr.height)
       .member("channels", 3)
       .member("layout", "HWC")
       .member("sampleType", "float32-le")
       .member("colorSpace", "linear-display-p3")
       .member("relativeSdrWhite", 1.0F)
-      .member("headroomStops", result.headroom_stops)
+      .member("headroomStops", result.stats.headroom_stops)
       .member("inputDomain", input_domain_name(input.domain))
       .member("inputHeadroomStops", std::log2(input.headroom))
       .member("status", decode.degraded ? "degraded" : "ok")
@@ -487,12 +496,17 @@ std::vector<std::uint8_t> native_preview_packet(const GainMapResult& result,
   std::vector<std::uint8_t> bytes{
       'H', 'Y', 'P', 'R', 'E', 'V', '1', '\n'};
   bytes.reserve(12 + metadata.size() +
-                (result.base_linear.pixels.size() + hdr.pixels.size()) * sizeof(float));
+                (result.sdr.pixels.size() + hdr.pixels.size()) * sizeof(float));
   append_u32_le(bytes, static_cast<std::uint32_t>(metadata.size()));
   bytes.insert(bytes.end(), metadata.begin(), metadata.end());
-  append_float_image(bytes, result.base_linear);
+  append_float_image(bytes, result.sdr);
   append_float_image(bytes, hdr);
   return bytes;
+}
+
+std::vector<std::uint8_t> native_preview_packet(const GainMapResult& result,
+    const DecodeInfo& decode, const InputDescription& input) {
+  return photo_preview_packet(renditions_from_gain_map(result),decode,input);
 }
 
 std::vector<std::uint8_t> native_model_gain_packet(
@@ -602,6 +616,7 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
   }
   options.raw.ignore_embedded_gain_map =
       !options.external_gain_path.empty() || !options.ai_model_path.empty();
+  options.raw.default_gamut = options.default_gamut;
   // This subcommand is a bounded preview by definition -- the edge is forced
   // above if the caller left it out -- so the decoders may stop early rather
   // than materialise a 48 MP raster the next line is about to shrink. RAW
@@ -615,10 +630,12 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
   const auto input = decoded.describe_input();
   GainMapResult result;
   if (!options.ai_model_path.empty()) {
-    const auto model_key = path_utf8(options.ai_model_path);
-    if (cached) {
+    const auto model_key = path_utf8(options.ai_model_path) + (options.clamp_srgb ? "/srgb" : "/p3");
+    if (is_sdr_encoding(options.encoding)) {
+      result = render_native_model_base(decoded, options.clamp_srgb);
+    } else if (cached) {
       if (cached->model_key != model_key) {
-        cached->model_base = render_native_model_base(decoded);
+        cached->model_base = render_native_model_base(decoded, options.clamp_srgb);
         cached->model_input = make_native_model_input(cached->model_base.base_linear);
         cached->prediction = infer_native_model(options.ai_model_path, cached->model_input);
         cached->model_key = model_key;
@@ -627,7 +644,7 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
       apply_native_model_gain_map(result, cached->model_input, cached->prediction,
                                   options.gain.gain_strength, options.ai_post);
     } else {
-      result = render_native_model_base(decoded);
+      result = render_native_model_base(decoded, options.clamp_srgb);
       auto model_input = make_native_model_input(result.base_linear);
       auto prediction = infer_native_model(options.ai_model_path, model_input);
       apply_native_model_gain_map(result, model_input, std::move(prediction),
@@ -647,7 +664,7 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
       json::Writer key;
       key.begin_object();
       for (const auto& setting : settings()) {
-        if (setting.key == "gain_strength") continue;
+        if (setting.key == "gain_strength" || setting.key.starts_with("lut_")) continue;
         const auto value = setting.read(options);
         if (value.is_string()) key.member(setting.key, value.string());
         else if (value.is_bool()) key.member(setting.key, value.boolean());
@@ -659,15 +676,38 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
         cached->preparation_key = identity;
       }
     }
-    result = cached ? make_gain_map(decoded.linear_p3, options.gain, decoded.capture,
-        input, input.domain == InputDomain::kSceneReferred ? &cached->analysis : nullptr,
-        &cached->preparation)
-      : render_decoded_image(decoded, options.gain, analysis_cache,
-                            options.decode_cache_budget_bytes);
+    auto photo=render_graded_photo(decoded.linear_p3,options.gain,decoded.capture,input,
+        is_sdr_encoding(options.encoding) ? RenderTarget::Sdr : RenderTarget::Hdr,
+        options.color_lut, nullptr,
+        cached && input.domain==InputDomain::kSceneReferred ? &cached->analysis : nullptr,
+        cached ? &cached->preparation : nullptr);
+    if(is_sdr_encoding(options.encoding)) fit_sdr_to_srgb(photo.sdr);
+    if(is_gain_map_encoding(options.encoding)) result=gain_map_from_renditions(std::move(photo));
+    else {
+      validate_encoding_headroom(options.encoding,photo.stats.headroom_stops);
+      auto bytes=photo_preview_packet(photo,decoded.decode,input);
+      if(packet) *packet=std::move(bytes);
+      else write_binary_file_atomic(options.output_directory,bytes,true);
+      return 0;
+    }
+  }
+  if(!options.ai_model_path.empty() || !options.external_gain_path.empty()) {
+    if(!options.color_lut.path.empty() || !is_gain_map_encoding(options.encoding)) {
+      auto photo=renditions_from_gain_map(result, !is_sdr_encoding(options.encoding));
+      apply_rendition_lut(photo,options.color_lut);
+      if(is_sdr_encoding(options.encoding)) fit_sdr_to_srgb(photo.sdr);
+      if(is_gain_map_encoding(options.encoding)) result.base_linear=std::move(photo.sdr);
+      else {
+        auto bytes=photo_preview_packet(photo,decoded.decode,input);
+        if(packet) *packet=std::move(bytes);
+        else write_binary_file_atomic(options.output_directory,bytes,true);
+        return 0;
+      }
+    }
   }
   validate_encoding_headroom(options.encoding, result.headroom_stops);
   if (packet) {
-    *packet = result.gain_map.channels == 1
+    *packet = !result.clamp_srgb && result.gain_map.channels == 1
         ? compact_preview_packet(result, decoded.decode, input)
         : native_preview_packet(result, decoded.decode, input);
   } else {
@@ -719,12 +759,13 @@ int model_gain_command(int argc, char** argv) {
   options.raw.preview_max_edge = options.preview_max_edge;
   options.raw.half_size = is_raw_extension(lower_extension(options.input));
   options.raw.ignore_embedded_gain_map = true;
+  options.raw.default_gamut = options.default_gamut;
   validate_gain_map_options(options.gain);
   validate_native_model_post_options(options.ai_post);
 
   auto decoded = decode_cached_image(options.input, options, options.raw);
   const auto input = decoded.describe_input();
-  auto result = render_native_model_base(decoded);
+  auto result = render_native_model_base(decoded, options.clamp_srgb);
   auto model_input = make_native_model_input(result.base_linear);
   auto prediction = infer_native_model(options.ai_model_path, model_input);
   set_stdout_binary();
@@ -869,10 +910,12 @@ int model_input_command(int argc, char** argv) {
   }
   validate_gain_map_options(options.gain);
   options.raw.ignore_embedded_gain_map = true;
+  options.raw.default_gamut = options.default_gamut;
   auto decoded = decode_image(input, options.raw);
   // Keep cache generation identical to the deployed input/base preparation.
   GainMapOptions development_options{};
   development_options.exposure_bias_ev = 0.0F;
+  development_options.clamp_srgb = options.clamp_srgb;
   development_options.gain_strength = 1.0F;
   development_options.look.contrast = 1.0F;
   development_options.look.vibrance = 0.0F;
@@ -880,7 +923,7 @@ int model_input_command(int argc, char** argv) {
   if (decoded.describe_input().domain == InputDomain::kDisplayReferredSdr) {
     development_options.gain_strength = 0.0F;
   }
-  auto developed = render_native_model_base(decoded);
+  auto developed = render_native_model_base(decoded, options.clamp_srgb);
   const auto [width, height] = model_tensor_size(
       developed.base_linear.width, developed.base_linear.height, long_side);
   auto tensor = resample_to(developed.base_linear, width, height);

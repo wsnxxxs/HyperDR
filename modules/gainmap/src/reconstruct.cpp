@@ -3,6 +3,7 @@
 #include "hyperdr/foundation/math.hpp"
 #include "hyperdr/foundation/parallel.hpp"
 #include "hyperdr/foundation/rational.hpp"
+#include "hyperdr/image/color.hpp"
 #include "hyperdr/look/grid.hpp"
 
 #include <algorithm>
@@ -16,7 +17,7 @@ namespace hyperdr {
 FloatImage reconstruct_gain_map(const FloatImage& base, const FloatImage& gain,
                                 const GainMapMetadata& metadata,
                                 float display_headroom_stops,
-                                ReconstructionStats* stats) {
+                                ReconstructionStats* stats, bool clamp_srgb) {
   validate_gain_map_metadata(metadata);
   const auto metadata_channels = gain_map_channel_count(metadata);
   if (base.channels != 3 ||
@@ -86,6 +87,13 @@ FloatImage reconstruct_gain_map(const FloatImage& base, const FloatImage& gain,
           pixel_clamped = true;
         }
         output.at(x, y, c) = std::max(0.0F, reconstructed);
+      }
+      if (clamp_srgb) {
+        const auto fitted = compress_linear_p3_to_srgb(
+            output.at(x, y, 0), output.at(x, y, 1), output.at(x, y, 2), true);
+        output.at(x, y, 0) = fitted[0];
+        output.at(x, y, 1) = fitted[1];
+        output.at(x, y, 2) = fitted[2];
       }
       if (pixel_clamped) ++row_clamp_pixels[y];
     }

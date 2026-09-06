@@ -9,6 +9,7 @@
 
 #include <jpeglib.h>
 #include <ultrahdr_api.h>
+#include <lcms2.h>
 
 #include <algorithm>
 #include <cmath>
@@ -40,7 +41,8 @@ void jpeg_fail(j_common_ptr info) {
 std::vector<std::uint8_t> compress_jpeg(const std::uint8_t* pixels, std::uint32_t width,
                                         std::uint32_t height, int components,
                                         J_COLOR_SPACE color_space, int quality,
-                                        const std::vector<std::uint8_t>* exif_tiff = nullptr) {
+                                        const std::vector<std::uint8_t>* exif_tiff = nullptr,
+                                        const std::vector<std::uint8_t>* icc = nullptr) {
   if (!pixels || width == 0 || height == 0) {
     throw std::invalid_argument("cannot encode an empty JPEG image");
   }
@@ -68,6 +70,12 @@ std::vector<std::uint8_t> compress_jpeg(const std::uint8_t* pixels, std::uint32_
   info.optimize_coding = TRUE;
   jpeg_start_compress(&info, TRUE);
 
+  if (icc && !icc->empty()) {
+    std::vector<std::uint8_t> marker{'I','C','C','_','P','R','O','F','I','L','E',0,1,1};
+    marker.insert(marker.end(), icc->begin(), icc->end());
+    jpeg_write_marker(&info, JPEG_APP0 + 2, marker.data(), static_cast<unsigned int>(marker.size()));
+  }
+
   if (exif_tiff && !exif_tiff->empty()) {
     std::vector<std::uint8_t> marker{'E', 'x', 'i', 'f', 0, 0};
     marker.insert(marker.end(), exif_tiff->begin(), exif_tiff->end());
@@ -90,15 +98,23 @@ std::vector<std::uint8_t> compress_jpeg(const std::uint8_t* pixels, std::uint32_
 }
 
 std::vector<std::uint8_t> make_base_jpeg(const FloatImage& image,
-                                         const PhotoMetadata& metadata, int quality) {
+                                         const PhotoMetadata& metadata, int quality,
+                                         bool clamp_srgb) {
   if (image.channels != 3) throw std::invalid_argument("Ultra HDR base must be RGB");
   std::vector<std::uint8_t> rgb(static_cast<std::size_t>(image.width) * image.height * 3);
   for (std::uint32_t y = 0; y < image.height; ++y) {
     for (std::uint32_t x = 0; x < image.width; ++x) {
       const auto base = (static_cast<std::size_t>(y) * image.width + x) * 3;
+      const auto fitted = clamp_srgb
+                              ? compress_linear_p3_to_srgb(
+                                    image.pixels[base], image.pixels[base + 1],
+                                    image.pixels[base + 2])
+                              : std::array<float, 3>{image.pixels[base],
+                                                     image.pixels[base + 1],
+                                                     image.pixels[base + 2]};
       for (unsigned c = 0; c < 3; ++c) {
         rgb[base + c] = static_cast<std::uint8_t>(quantize_dithered(
-            srgb_oetf(image.at(x, y, c)), 255, x, y, c));
+            srgb_oetf(fitted[c]), 255, x, y, c));
       }
     }
   }
@@ -151,10 +167,52 @@ bool contains_text(const std::vector<std::uint8_t>& bytes, const char* text) {
 
 }  // namespace
 
+std::vector<std::uint8_t> encode_sdr_jpeg(const FloatImage& image,
+    const PhotoMetadata& metadata, int quality) {
+  image.require_consistent("SDR JPEG");
+  if (image.channels != 3) throw std::invalid_argument("SDR JPEG requires RGB");
+  std::vector<std::uint8_t> rgb(image.pixels.size());
+  for (std::uint32_t y=0;y<image.height;++y) for (std::uint32_t x=0;x<image.width;++x) {
+    const auto i=(static_cast<std::size_t>(y)*image.width+x)*3;
+    auto color=compress_linear_p3_to_srgb(image.pixels[i],image.pixels[i+1],image.pixels[i+2]);
+    color=linear_p3_to_rec709(color[0],color[1],color[2]);
+    for (unsigned c=0;c<3;++c) rgb[i+c]=static_cast<std::uint8_t>(quantize_dithered(srgb_oetf(color[c]),255,x,y,c));
+  }
+  const auto profile=cmsCreate_sRGBProfile();
+  if (!profile) throw std::runtime_error("cannot create sRGB profile");
+  cmsUInt32Number size=0;
+  cmsSaveProfileToMem(profile,nullptr,&size);
+  std::vector<std::uint8_t> icc(size);
+  const auto saved=cmsSaveProfileToMem(profile,icc.data(),&size);
+  cmsCloseProfile(profile);
+  if (!saved) throw std::runtime_error("cannot serialize sRGB profile");
+  const auto exif=make_minimal_exif(metadata);
+  return compress_jpeg(rgb.data(),image.width,image.height,3,JCS_RGB,quality,&exif,&icc);
+}
+
+void verify_sdr_jpeg(const std::vector<std::uint8_t>& bytes) {
+  jpeg_decompress_struct info{};
+  JpegError error{};
+  info.err=jpeg_std_error(&error.base); error.base.error_exit=jpeg_fail;
+  if (setjmp(error.jump)) {
+    jpeg_destroy_decompress(&info);
+    throw std::runtime_error(std::string("SDR JPEG verification: ")+error.message);
+  }
+  jpeg_create_decompress(&info);
+  jpeg_mem_src(&info,bytes.data(),static_cast<unsigned long>(bytes.size()));
+  jpeg_read_header(&info,TRUE);
+  jpeg_start_decompress(&info);
+  auto row=(*info.mem->alloc_sarray)(reinterpret_cast<j_common_ptr>(&info),JPOOL_IMAGE,
+      info.output_width*info.output_components,1);
+  while(info.output_scanline<info.output_height) jpeg_read_scanlines(&info,row,1);
+  jpeg_finish_decompress(&info); jpeg_destroy_decompress(&info);
+}
+
 std::vector<std::uint8_t> encode_ultrahdr_jpeg(const GainMapResult& images,
                                                const PhotoMetadata& metadata, int quality) {
   if (quality < 0 || quality > 100) throw std::invalid_argument("quality must be in [0,100]");
-  auto base_bytes = make_base_jpeg(images.base_linear, metadata, quality);
+  auto base_bytes = make_base_jpeg(images.base_linear, metadata, quality,
+                                   images.clamp_srgb);
   // The format guidance recommends 85-90 for the recovery map. Keep HDR
   // reconstruction stable even when the caller deliberately lowers base quality.
   auto gain_bytes = make_gain_jpeg(images.gain_map, std::max(85, quality));

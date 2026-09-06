@@ -92,3 +92,11 @@ post-local-gain result. `gain_map.local_weight_mean` and
 and output verification; `write_ms` measures the source-stamp check and atomic
 publication. The three components sum to `encode_ms`. Skipped or failed files
 retain zero for stages that did not complete.
+
+## Colour LUT and output rendition
+
+The additive `color_lut` block records the path, SHA-256, input/output space and
+strength of the creative LUT. It is independent of `raw_processing.linearization_lut`.
+Settings include `lut_input`, `lut_output`, `lut_strength` and `gain_map_output`.
+`encoding: sdr-jpeg` has zero output headroom and no encoded gain map; direct
+HLG/PQ outputs also have `gain_map_output: false`.

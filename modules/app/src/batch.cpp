@@ -13,6 +13,7 @@
 #include "hyperdr/foundation/hash.hpp"
 #include "hyperdr/gainmap/external.hpp"
 #include "hyperdr/gainmap/gain_map.hpp"
+#include "hyperdr/gainmap/rendition.hpp"
 #include "hyperdr/gainmap/native_model.hpp"
 
 #include <algorithm>
@@ -79,8 +80,10 @@ const char* native_model_development_kind(InputDomain domain) noexcept {
   return "none";
 }
 
-GainMapResult render_native_model_base(const DecodedImage& image) {
+GainMapResult render_native_model_base(const DecodedImage& image,
+                                       bool clamp_srgb) {
   GainMapOptions development{};
+  development.clamp_srgb = clamp_srgb;
   development.exposure_bias_ev = 0.0F;
   development.gain_strength = 1.0F;
   development.look.contrast = 1.0F;
@@ -193,6 +196,7 @@ Staged decode_stage(const std::filesystem::path& path,
     const auto start = Clock::now();
     staged.input_stamp = input_stamp(path);
     auto raw = options.raw;
+    raw.default_gamut = options.default_gamut;
     raw.ignore_embedded_gain_map = !options.external_gain_path.empty() ||
                                    !options.ai_model_path.empty();
     // Only an explicitly declared preview lets the decoders reduce on their
@@ -217,27 +221,30 @@ Staged decode_stage(const std::filesystem::path& path,
   return staged;
 }
 
-std::vector<std::uint8_t> encode_for(const GainMapResult& images,
+std::vector<std::uint8_t> encode_for(const PhotoRenditions& photo, const GainMapResult& images,
                                      const PhotoMetadata& metadata,
                                      const ConvertOptions& options) {
   switch (options.encoding) {
+    case HdrEncoding::SdrJpeg:
+      return encode_sdr_jpeg(photo.sdr, metadata, options.quality);
     case HdrEncoding::Adaptive:
       return encode_adaptive_heic(images, metadata, options.quality, options.depth);
     case HdrEncoding::UltraHdr:
       return encode_ultrahdr_jpeg(images, metadata, options.quality);
     case HdrEncoding::AvifPq:
     case HdrEncoding::AvifHlg:
-      return encode_avif(images, metadata, options.quality, options.encoding);
+      return encode_avif(photo, metadata, options.quality, options.encoding);
     case HdrEncoding::Pq:
     case HdrEncoding::Hlg:
       break;
   }
-  return encode_hdr_heic(images, metadata, options.quality, options.encoding);
+  return encode_hdr_heic(photo, metadata, options.quality, options.encoding);
 }
 
 void verify_encoded(const std::vector<std::uint8_t>& bytes,
                     const ConvertOptions& options) {
-  if (options.encoding == HdrEncoding::UltraHdr) verify_ultrahdr_jpeg(bytes);
+  if (is_sdr_encoding(options.encoding)) verify_sdr_jpeg(bytes);
+  else if (options.encoding == HdrEncoding::UltraHdr) verify_ultrahdr_jpeg(bytes);
   else if (is_avif_encoding(options.encoding)) verify_avif_decodable(bytes);
   else verify_heic_decodable(bytes, options.encoding);
 }
@@ -256,32 +263,42 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
                                          options.allow_legacy_external_gain);
     }
     GainMapResult gain;
+    PhotoRenditions photo;
+    const auto target = is_sdr_encoding(options.encoding) ? RenderTarget::Sdr : RenderTarget::Hdr;
     if (!options.ai_model_path.empty()) {
       // The model consumes and retains one shared SDR base: decoded linear P3
       // for finished SDR, or the fixed neutral development for scene RAW.
-      gain = render_native_model_base(staged.image);
-      auto model_input = make_native_model_input(gain.base_linear);
-      auto prediction = infer_native_model(options.ai_model_path, model_input);
-      apply_native_model_gain_map(gain, model_input, std::move(prediction),
+      gain = render_native_model_base(staged.image, options.clamp_srgb);
+      if (target == RenderTarget::Hdr) {
+        auto model_input = make_native_model_input(gain.base_linear);
+        auto prediction = infer_native_model(options.ai_model_path, model_input);
+        apply_native_model_gain_map(gain, model_input, std::move(prediction),
                                   options.gain.gain_strength, options.ai_post);
-    } else {
-      const auto external_development = external.has_value()
-                                            ? replay_external_development(
-                                                  *external, staged.result.input,
-                                                  staged.image, options)
-                                            : options.gain;
-      gain = external.has_value()
-                 ? make_external_gain_map(
-                       staged.image.linear_p3, std::move(*external),
-                       external_development, staged.image.capture,
-                       staged.image.describe_input())
-                 : render_decoded_image(staged.image, options.gain, staged.analysis_cache,
-                                        options.decode_cache_budget_bytes);
+      }
+    } else if (external) {
+      const auto development = replay_external_development(
+          *external, staged.result.input, staged.image, options);
+      gain = make_external_gain_map(staged.image.linear_p3, std::move(*external),
+          development, staged.image.capture, staged.image.describe_input());
     }
+    if (options.ai_model_path.empty() && !external) {
+      photo = render_graded_photo(staged.image.linear_p3, options.gain, staged.image.capture,
+          staged.image.describe_input(), target, options.color_lut);
+    } else {
+      photo = renditions_from_gain_map(gain, target == RenderTarget::Hdr);
+      if (!options.color_lut.path.empty()) apply_rendition_lut(photo, options.color_lut);
+    }
+    if (is_sdr_encoding(options.encoding)) fit_sdr_to_srgb(photo.sdr);
+    if (is_gain_map_encoding(options.encoding)) {
+      if (options.ai_model_path.empty() && !external) gain = gain_map_from_renditions(std::move(photo));
+      else gain.base_linear = std::move(photo.sdr);
+    }
+    const auto& rendered_stats = is_gain_map_encoding(options.encoding) ? gain.stats : photo.stats;
+    const auto& rendered_base = is_gain_map_encoding(options.encoding) ? gain.base_linear : photo.sdr;
     // Validate the peak the renderer actually produced. External model
     // metadata arrives after the initial option validation and can otherwise
     // bypass HLG's 1000-nit ceiling.
-    validate_encoding_headroom(options.encoding, gain.headroom_stops);
+    validate_encoding_headroom(options.encoding, rendered_stats.headroom_stops);
     result.sensor_width = staged.image.decode.sensor_width;
     result.raw_white_balance = staged.image.raw_white_balance;
     result.sensor_height = staged.image.decode.sensor_height;
@@ -309,19 +326,20 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     result.model_id = options.ai_model_path.empty()
                           ? "none"
                           : std::string(kEmbeddedNativeModelId);
-    result.width = gain.base_linear.width;
-    result.height = gain.base_linear.height;
-    result.exposure_ev = gain.exposure_ev;
-    result.headroom_stops = gain.headroom_stops;
-    result.stats = gain.stats;
-    result.gain_min = rational_value(gain.metadata.gain_min);
-    result.gain_max = rational_value(gain.metadata.gain_max);
+    result.width = rendered_base.width;
+    result.height = rendered_base.height;
+    result.exposure_ev = rendered_stats.exposure_ev;
+    result.headroom_stops = is_gain_map_encoding(options.encoding) ? gain.headroom_stops : photo.stats.headroom_stops;
+    result.stats = rendered_stats;
+    result.gain_min = is_gain_map_encoding(options.encoding) ? rational_value(gain.metadata.gain_min) : 0;
+    result.gain_max = is_gain_map_encoding(options.encoding) ? rational_value(gain.metadata.gain_max) : 0;
     // Release the largest no-longer-needed allocation before encoding.
     staged.image.linear_p3 = {};
     const auto processed = Clock::now();
 
-    auto bytes = encode_for(gain, staged.image.metadata, options);
+    auto bytes = encode_for(photo, gain, staged.image.metadata, options);
     const auto codec_finished = Clock::now();
+    photo = {};
     gain = {};  // Free the float base and gain before the decoder allocates.
     if (options.verify_output) {
       verify_encoded(bytes, options);

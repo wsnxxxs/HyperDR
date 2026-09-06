@@ -55,6 +55,20 @@ enum : int {
   kCicpTransferHlg = 18,      // BT.2100 / ARIB STD-B67
 };
 
+[[nodiscard]] inline int cicp_primaries_for_gamut(ColorGamut gamut) {
+  switch (gamut) {
+    case ColorGamut::kSrgb: return kCicpPrimariesBt709;
+    case ColorGamut::kDisplayP3: return kCicpPrimariesDisplayP3;
+    case ColorGamut::kRec2020: return kCicpPrimariesBt2020;
+  }
+  return kCicpPrimariesBt709;
+}
+
+[[nodiscard]] inline bool cicp_primaries_unspecified(int primaries) {
+  return primaries == kCicpPrimariesReserved ||
+         primaries == kCicpPrimariesUnspecified;
+}
+
 // The headroom a transfer function can carry above diffuse white, as a linear
 // multiple of it. Only the two BT.2100 curves have any; every SDR curve tops
 // out at white by construction, and an ICC-described buffer is SDR unless it
@@ -75,6 +89,10 @@ struct SourceColor {
   std::vector<std::uint8_t> icc;
   int primaries{kCicpPrimariesBt709};
   int transfer{kCicpTransferSrgb};
+
+  SourceColor() = default;
+  explicit SourceColor(ColorGamut gamut)
+      : primaries(cicp_primaries_for_gamut(gamut)) {}
 };
 
 struct ProfileDeleter {

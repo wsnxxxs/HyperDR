@@ -26,7 +26,7 @@ TREES = [
     (
         REPO_ROOT / "apps" / "panel" / "web",
         {"group-tone", "group-model", "group-region", "group-quality",
-         "group-advanced"},
+         "group-advanced", "group-lut"},
     ),
 ]
 

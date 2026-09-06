@@ -53,6 +53,7 @@ PANEL_DEFAULTS = {
     "expansionStart": 0.25,
     "areaCoverage": 1.0,
     "quality": 90,
+    "lutInput": "srgb", "lutOutput": "srgb", "lutStrength": 1.0,
 }
 
 # AI controls are a post-processing layer over the model's spatial gain. They
@@ -85,7 +86,7 @@ _HLG_ENCODINGS = frozenset({"hlg", "avif-hlg"})
 _HLG_MAX_STOPS = 2.3
 
 #: Only the gain-map formats have a selectable base depth; BT.2100 is 10-bit.
-_EIGHT_BIT_ENCODINGS = frozenset({"adaptive", "ultrahdr"})
+_EIGHT_BIT_ENCODINGS = frozenset({"adaptive", "ultrahdr", "sdr-jpeg"})
 
 
 def _headroom(options: dict, encoding: str):
@@ -130,6 +131,9 @@ def options_to_settings(options: dict) -> dict:
     headroom = _headroom(effective_options, encoding)
     return validate_settings({
         "encoding": encoding,
+        "lut_input": value("lutInput"),
+        "lut_output": value("lutOutput"),
+        "lut_strength": value("lutStrength"),
         "color_gamut": value("colorGamut"),
         "clamp_srgb": value("clampSrgb"),
         # Not a panel control, and pinned rather than passed through: the
@@ -209,6 +213,10 @@ def _color_flags(options: dict, settings: dict) -> list[str]:
         flags.extend(["--color-gamut", settings["color_gamut"]])
     if settings["clamp_srgb"]:
         flags.append("--clamp-srgb")
+    if options.get("_lut_path"):
+        flags.extend(["--lut", str(options["_lut_path"]),
+                      "--lut-input", settings["lut_input"], "--lut-output", settings["lut_output"],
+                      "--lut-strength", fmt_num(settings["lut_strength"])])
     return flags
 
 

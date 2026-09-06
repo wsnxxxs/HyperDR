@@ -31,6 +31,6 @@ struct ReconstructionStats {
 [[nodiscard]] FloatImage reconstruct_gain_map(
     const FloatImage& base, const FloatImage& gain,
     const GainMapMetadata& metadata, float display_headroom_stops,
-    ReconstructionStats* stats = nullptr);
+    ReconstructionStats* stats = nullptr, bool clamp_srgb = false);
 
 }  // namespace hyperdr

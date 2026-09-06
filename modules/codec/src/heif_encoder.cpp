@@ -222,11 +222,10 @@ std::unique_ptr<heif_image, ImageDeleter> make_gain(const FloatImage& image) {
 }
 
 std::unique_ptr<heif_image, ImageDeleter> make_hdr(
-    const GainMapResult& images, HdrEncoding encoding,
+    const PhotoRenditions& images, HdrEncoding encoding,
     heif_content_light_level& light_level) {
   constexpr int depth = 10;
-  auto hdr = reconstruct_gain_map(images.base_linear, images.gain_map, images.metadata,
-                                  images.headroom_stops);
+  const auto& hdr = images.hdr;
   heif_image* raw = nullptr;
   check_heif(heif_image_create(static_cast<int>(hdr.width), static_cast<int>(hdr.height),
                                heif_colorspace_RGB, heif_chroma_interleaved_RRGGBB_LE,
@@ -437,7 +436,7 @@ std::vector<std::uint8_t> encode_adaptive_heic(const GainMapResult& images,
   return add_tmap_to_two_image_heif(intermediate, serialize_tmap_payload(images.metadata));
 }
 
-std::vector<std::uint8_t> encode_hdr_heic(const GainMapResult& images,
+std::vector<std::uint8_t> encode_hdr_heic(const PhotoRenditions& images,
                                           const PhotoMetadata& metadata, int quality,
                                           HdrEncoding encoding) {
   if (encoding != HdrEncoding::Pq && encoding != HdrEncoding::Hlg) {
@@ -456,7 +455,7 @@ std::vector<std::uint8_t> encode_hdr_heic(const GainMapResult& images,
   heif_content_light_level light_level{};
   auto image = make_hdr(images, encoding, light_level);
   auto handle = encode_hdr_image(context.get(), image.get(), encoder.get(),
-                                 images.base_linear.width, images.base_linear.height,
+                                 images.sdr.width, images.sdr.height,
                                  encoding, light_level);
   check_heif(heif_context_set_primary_image(context.get(), handle.get()),
              "set HDR primary image");
@@ -464,7 +463,7 @@ std::vector<std::uint8_t> encode_hdr_heic(const GainMapResult& images,
   check_heif(heif_context_add_exif_metadata(context.get(), handle.get(), exif.data(),
                                              static_cast<int>(exif.size())),
              "add HDR Exif");
-  const auto xmp = make_xmp(metadata, images.headroom_stops,
+  const auto xmp = make_xmp(metadata, images.stats.headroom_stops,
                             /*has_gain_map=*/false);
   check_heif(heif_context_add_XMP_metadata(context.get(), handle.get(), xmp.data(),
                                             static_cast<int>(xmp.size())),

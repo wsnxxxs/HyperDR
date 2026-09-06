@@ -22,7 +22,9 @@ namespace hyperdr::codec {
 
 // Ultra HDR JPEG/R: true when the file carries a gain map libultrahdr can read.
 [[nodiscard]] bool is_ultrahdr_bytes(const std::vector<std::uint8_t>& bytes);
-[[nodiscard]] DecodedImage decode_ultrahdr_bytes(const std::vector<std::uint8_t>& bytes);
+[[nodiscard]] DecodedImage decode_ultrahdr_bytes(
+    const std::vector<std::uint8_t>& bytes,
+    ColorGamut default_gamut = ColorGamut::kSrgb);
 
 // AVIF is a member of the same box family as HEIF, so this answers which of the
 // two an ISO base media file actually is.
@@ -30,6 +32,8 @@ namespace hyperdr::codec {
 // `preview_max_edge` is the same hint RawDecodeOptions carries: zero decodes
 // at full size, non-zero lets the decoder stop early. See image_source.hpp.
 [[nodiscard]] DecodedImage decode_avif_bytes(const std::vector<std::uint8_t>& bytes,
-                                            std::uint32_t preview_max_edge);
+                                            std::uint32_t preview_max_edge,
+                                            ColorGamut default_gamut =
+                                                ColorGamut::kSrgb);
 
 }  // namespace hyperdr::codec

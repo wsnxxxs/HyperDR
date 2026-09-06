@@ -6,6 +6,22 @@
  * en.js; scripts/check_panel_i18n.py fails the build when they drift.
  */
 export default {
+  "hdr.sdrOutput": "SDR 预览 · sRGB JPEG 输出",
+  "hdr.reason.sdrOutput": "SDR 输出",
+
+  "enc.sdr-jpeg.hint": "仅输出调色后的 sRGB JPEG，不生成 HDR 或 gain map。",
+  "lut.title": "颜色 LUT",
+  "lut.load": "导入 .cube",
+  "lut.remove": "移除",
+  "lut.empty": "未应用 LUT · 先选择照片，再导入风格文件",
+  "lut.failed": "LUT 导入失败",
+  "lut.input": "LUT 要求的输入空间",
+  "lut.output": "LUT 产生的输出空间",
+  "lut.strength": "LUT 强度",
+  "lut.strengthHint": "在线性光中混合原图与调色结果。0% 关闭 LUT；100% 完全应用。",
+  "lut.hint.sdr": "用于普通照片风格 LUT。RAW 先显影，HDR 先映射为 SDR；HDR 输出沿用亮度比例。请按 LUT 说明选择空间，.cube 不会可靠标注它。",
+  "lut.hint.hdr": "HLG/PQ 是 LUT 的编码空间。纯 SDR 输出时，RAW/SDR 直接调色；已有 HDR 先调色再压缩高光。BT.2020、203 nit 参考白；HLG 使用 1000 nit 显示映射。",
+  "lut.hint.log": "仅适用于 RAW：曝光与色域转换后进入 S-Log3 / S-Gamut3.Cine，再应用 LUT。Log 不是 HLG；请选择 LUT 实际输出空间。HLG/PQ 照片不能还原为相机 RAW。",
   "phone.title": "手机连接工作台",
   "phone.subtitle": "手机导入照片，电脑精细调整，两端同步查看效果。",
   "phone.enable": "开启手机连接",
@@ -47,7 +63,7 @@ export default {
   "welcome.importNote": "拖入文件，或从本机选择。",
   "welcome.adjust": "调整光线",
   "welcome.adjustNote": "手动微调，或使用 AI 优化。",
-  "welcome.export": "保存 HDR 照片",
+  "welcome.export": "保存照片",
   "welcome.exportNote": "导出时选择格式与色域。",
 
   "workspace.currentPhoto": "当前照片",
@@ -78,7 +94,6 @@ export default {
   "inspector.manualNote": "从亮度开始，让光线自然呈现。",
   "inspector.aiNote": "AI 优化已应用，可继续微调画面。",
   "inspector.regionNote": "亮度较高的区域优先获得扩展。",
-  "inspector.recoveryNote": "控制 RAW 高光的恢复方式。",
   "editor.histogram": "直方图",
   "editor.closeExport": "关闭导出窗口",
   "editor.closeVersions": "关闭导出记录",
@@ -96,7 +111,7 @@ export default {
   "editor.local": "照片在本机处理",
   "editor.view": "预览方式",
   "editor.original": "原图",
-  "editor.effect": "HDR 效果",
+  "editor.effect": "调整效果",
   "editor.compare": "分屏对比",
   "editor.fit": "适应窗口",
   "editor.zoomIn": "放大预览",
@@ -360,7 +375,7 @@ export default {
   "prefs.previewCeiling.auto": "自动",
 
   "prefs.hdrPreview.label": "真 HDR 预览 (WebGPU)",
-  "prefs.hdrPreview.help": "关闭后始终使用 SDR 预览，仍导出 HDR。",
+  "prefs.hdrPreview.help": "关闭后使用 SDR 预览；导出格式由输出选择决定。",
 
   "prefs.histMode.label": "直方图默认模式",
   "prefs.histMode.help": "新图片的直方图初始模式。",

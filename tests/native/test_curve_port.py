@@ -8,6 +8,7 @@ diverge.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -18,7 +19,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "apps" / "panel"))
 
 from hyperdr_panel.command import build_curve_argv  # noqa: E402
-from hyperdr_panel.executable import detect_exe  # noqa: E402
 
 
 CASES = [
@@ -36,12 +36,10 @@ CASES = [
 class BrowserCurvePortTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.exe = detect_exe()
+        cls.exe = os.environ["HYPERDR_EXECUTABLE"]
         cls.node = shutil.which("node")
-        if not cls.exe:
-            raise unittest.SkipTest("no built HyperDR curve command")
         if not cls.node:
-            raise unittest.SkipTest("Node is required for the browser curve port test")
+            raise RuntimeError("Node is required for the browser curve port test")
 
     def browser_curves(self, cases: list[dict] = CASES) -> list[list[float]]:
         runner = REPO_ROOT / "tests" / "js" / "curve_math_runner.mjs"

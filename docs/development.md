@@ -33,20 +33,36 @@ but it should not be the starting point for describing a feature.
 
 ## Validate only the affected behaviour
 
-Use the smallest useful check while iterating:
+Local development and CI use the same entry point. Install Python 3.11+,
+pytest (`python -m pip install pytest`), Node.js 20+, and PowerShell 7. Native
+checks also need the Windows C++ build tools and a configured CMake build.
 
 ```powershell
-# Native conversion or rendering
+# Configure the dependency-free core once
 cmake -S . -B build-core -DHYPERDR_WITH_CODECS=OFF
-cmake --build build-core --config Release
-ctest --test-dir build-core -C Release --output-on-failure
 
-# Panel or desktop-sidecar contract
-python -m pytest tests/python -q
+# Full routine suite: panel + HTTPS, front-end, native build + CTest + contracts
+python scripts/test.py
 
-# Front-end role wiring
-python scripts/check_panel_roles.py
+# Select only the affected area while iterating
+python scripts/test.py panel
+python scripts/test.py frontend
+python scripts/test.py native --build-dir build-core --config Release
 ```
+
+The native suite builds the selected configuration before running CTest, compares
+the browser curve and checked-in settings schema against that exact converter,
+and parses the report schema. Missing native prerequisites fail the suite.
+The panel suite needs no converter or Node.js. The front-end suite runs the
+history and WebGPU configuration behavior tests, parses JavaScript modules, and
+checks role wiring and translations. GPU rendering and responsive layout still
+need a real browser/device check when those features change; source-text
+assertions cannot verify them.
+
+For a focused Python regression, `python -m pytest tests/python/test_session.py -q`
+remains available. Native integration tests live separately in `tests/native/`
+so a panel run never silently picks up an unrelated local converter.
+Plain `python -m pytest` also selects only `tests/python/`.
 
 Run the codec-enabled build or `packaging/test-release.ps1` only when the change
 touches codecs, native runtime assembly, installation, or release behaviour.

@@ -96,6 +96,7 @@ struct FileResult {
   bool target_dimensions_applied{true};
   bool default_crop_present{false};
   bool decode_degraded{false};
+  std::string raw_white_balance;
   std::vector<std::string> decode_degradation_reasons;
   // Which renderer ran, and the headroom it was told the input carried. These
   // are the two facts that decide what every other number in this record means:

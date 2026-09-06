@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -83,8 +84,21 @@ struct LinearizationLut {
   bool normalized{false};
 };
 
+struct RawCalibration {
+  std::uint32_t left{}, top{}, width{}, height{};
+  float white{};
+  std::array<unsigned, 4> black{};
+  std::uint32_t black_rows{}, black_columns{};
+  std::vector<unsigned> black_pattern;
+  std::vector<std::uint16_t> dark;
+  const LinearizationLut* lut{};
+};
+
 struct RawCallbackContext {
   const LensShadingMap* lens_shading{};
+  const RawCalibration* calibration{};
+  float lens_shading_scale{1.0F};
+  float exposure_gain{1.0F};
   std::vector<std::uint16_t>* captured_mosaic{};
   std::uint32_t* captured_width{};
   std::uint32_t* captured_height{};
@@ -118,6 +132,23 @@ class CallbackLibRaw : public LibRaw {
   }
   void set_pre_converttorgb_callback(process_step_callback callback) {
     callbacks.pre_converttorgb_cb = callback;
+  }
+  void normalized_black_levels(RawCalibration& calibration) {
+    const auto saved_black = imgdata.color.black;
+    std::array<unsigned, LIBRAW_CBLACK_SIZE> saved{};
+    std::copy(std::begin(imgdata.color.cblack), std::end(imgdata.color.cblack), saved.begin());
+    adjust_bl();
+    std::copy_n(imgdata.color.cblack, 4, calibration.black.begin());
+    calibration.black_rows = imgdata.color.cblack[4];
+    calibration.black_columns = imgdata.color.cblack[5];
+    const auto count = calibration.black_rows * calibration.black_columns;
+    calibration.black_pattern.assign(imgdata.color.cblack + 6,
+                                    imgdata.color.cblack + 6 + count);
+    imgdata.color.black = saved_black;
+    std::copy(saved.begin(), saved.end(), std::begin(imgdata.color.cblack));
+  }
+  unsigned sample_step() const {
+    return 1U << libraw_internal_data.internal_output_params.shrink;
   }
 };
 
@@ -205,8 +236,13 @@ LinearizationLut read_linearization_lut(const std::filesystem::path& path) {
       throw std::invalid_argument(
           "RAW linearization LUT samples must be in [0,65535]");
     }
+    if (!lut.samples.empty() && value < lut.samples.back()) {
+      throw std::invalid_argument("RAW linearization LUT must be nondecreasing");
+    }
     lut.samples.push_back(static_cast<float>(value));
   }
+  if (lut.samples.front() == lut.samples.back())
+    throw std::invalid_argument("RAW linearization LUT must retain a signal range");
   return lut;
 }
 
@@ -279,7 +315,27 @@ std::uint32_t lsc_channel_for_cfa(const LibRaw& raw, std::uint32_t c,
   return 1;
 }
 
-void apply_lens_shading_to_mosaic(LibRaw& raw, const LensShadingMap& map) {
+// Coordinates remain relative to the original visible sensor area, even when
+// LibRaw has cropped the image or packed four sites into one half-size pixel.
+std::pair<unsigned, unsigned> calibration_site(CallbackLibRaw& raw,
+                                               const RawCalibration& calibration,
+                                               unsigned x, unsigned y, unsigned c) {
+  const auto step = raw.sample_step();
+  unsigned dx = 0, dy = 0;
+  if (step == 2) {
+    for (unsigned sy = 0; sy < 2; ++sy)
+      for (unsigned sx = 0; sx < 2; ++sx)
+        if (raw.COLOR(y * 2 + sy, x * 2 + sx) == static_cast<int>(c)) {
+          dx = sx;
+          dy = sy;
+        }
+  }
+  return {raw.imgdata.sizes.left_margin - calibration.left + x * step + dx,
+          raw.imgdata.sizes.top_margin - calibration.top + y * step + dy};
+}
+
+void apply_lens_shading_to_mosaic(CallbackLibRaw& raw, const LensShadingMap& map,
+                                 const RawCalibration& calibration, float scale) {
   if (!raw.imgdata.image || map.gains.empty()) return;
   const auto width = static_cast<std::uint32_t>(raw.imgdata.sizes.iwidth);
   const auto height = static_cast<std::uint32_t>(raw.imgdata.sizes.iheight);
@@ -287,12 +343,16 @@ void apply_lens_shading_to_mosaic(LibRaw& raw, const LensShadingMap& map) {
     for (std::uint32_t x = 0; x < width; ++x) {
       auto& pixel = raw.imgdata.image[static_cast<std::size_t>(y) * width + x];
       for (std::uint32_t c = 0; c < 4; ++c) {
+        if (pixel[c] == 0) continue;
+        const auto [sx, sy] = calibration_site(raw, calibration, x, y, c);
         const auto plane = lsc_channel_for_cfa(raw, c, map.channels);
         const float gain = bilinear_gain(
-            map, width > 1 ? static_cast<float>(x) / (width - 1U) : 0.0F,
-            height > 1 ? static_cast<float>(y) / (height - 1U) : 0.0F,
+            map, calibration.width > 1 ? static_cast<float>(sx) / (calibration.width - 1U) : 0.0F,
+            calibration.height > 1 ? static_cast<float>(sy) / (calibration.height - 1U) : 0.0F,
             plane);
-        const auto corrected = static_cast<long>(std::lround(pixel[c] * gain));
+        // Never amplify an integer sample here. Restore the common scale in
+        // float after LibRaw, preserving the headroom requested by the map.
+        const auto corrected = static_cast<long>(std::lround(pixel[c] * (gain / scale)));
         pixel[c] = static_cast<std::uint16_t>(
             std::clamp<long>(corrected, 0L, 65535L));
       }
@@ -301,11 +361,19 @@ void apply_lens_shading_to_mosaic(LibRaw& raw, const LensShadingMap& map) {
 }
 
 void raw_pre_preinterpolate_callback(void* object) {
-  auto* raw = static_cast<LibRaw*>(object);
-  if (current_raw_callback_context != nullptr &&
-      current_raw_callback_context->lens_shading != nullptr) {
+  auto* raw = static_cast<CallbackLibRaw*>(object);
+  auto* context = current_raw_callback_context;
+  if (!context) return;
+  if (!raw->imgdata.params.no_auto_scale && raw->imgdata.params.highlight != 0) {
+    const auto& multipliers = raw->imgdata.color.pre_mul;
+    const float low = *std::min_element(std::begin(multipliers), std::end(multipliers));
+    const float high = *std::max_element(std::begin(multipliers), std::end(multipliers));
+    if (std::isfinite(low) && std::isfinite(high) && low > 0.0F)
+      context->exposure_gain = high / low;
+  }
+  if (context->lens_shading != nullptr) {
     apply_lens_shading_to_mosaic(
-        *raw, *current_raw_callback_context->lens_shading);
+        *raw, *context->lens_shading, *context->calibration, context->lens_shading_scale);
   }
 }
 
@@ -344,45 +412,148 @@ float raw_white_level(const LibRaw& raw) {
   return 65535.0F;
 }
 
-void apply_linearization_lut(LibRaw& raw, const LinearizationLut& lut) {
-  if (lut.samples.empty()) return;
-  const auto& sizes = raw.imgdata.rawdata.sizes;
-  const float input_white = std::max(1.0F, raw_white_level(raw));
-  const auto map_value = [&](std::uint16_t value) {
-    const float position = std::clamp(value / input_white, 0.0F, 1.0F) *
-                           static_cast<float>(lut.samples.size() - 1U);
-    const auto index = static_cast<std::size_t>(position);
-    const auto next = std::min(index + 1U, lut.samples.size() - 1U);
-    const float fraction = position - static_cast<float>(index);
-    const float mapped_code =
-        lut.samples[index] * (1.0F - fraction) + lut.samples[next] * fraction;
-    const float mapped = lut.normalized ? mapped_code * input_white : mapped_code;
-    return static_cast<std::uint16_t>(std::clamp<long>(
-        std::lround(mapped), 0L, 65535L));
+float linearized_code(float value, const RawCalibration& calibration) {
+  const auto& lut = *calibration.lut;
+  if (lut.samples.empty()) return value;
+  const float position = std::clamp(value / calibration.white, 0.0F, 1.0F) *
+                         static_cast<float>(lut.samples.size() - 1U);
+  const auto index = static_cast<std::size_t>(position);
+  const auto next = std::min(index + 1U, lut.samples.size() - 1U);
+  const float mapped = std::lerp(lut.samples[index], lut.samples[next],
+                                 position - static_cast<float>(index));
+  return lut.normalized ? mapped * calibration.white : mapped;
+}
+
+std::vector<std::uint16_t> read_dark_frame(const std::filesystem::path& path,
+                                          unsigned width, unsigned height) {
+  if (path.empty()) return {};
+  std::ifstream input(path, std::ios::binary);
+  const auto token = [&]() {
+    std::string value;
+    while (input >> std::ws && input.peek() == '#') {
+      std::getline(input, value);
+    }
+    input >> value;
+    return value;
   };
-  if (raw.imgdata.rawdata.raw_image != nullptr) {
-    const auto row_stride = std::max<std::uint32_t>(
-        1U, sizes.raw_pitch / static_cast<unsigned>(sizeof(std::uint16_t)));
-    for (std::uint32_t y = 0; y < sizes.raw_height; ++y) {
-      auto* row = raw.imgdata.rawdata.raw_image +
-                  static_cast<std::size_t>(y) * row_stride;
-      for (std::uint32_t x = 0; x < sizes.raw_width; ++x) row[x] = map_value(row[x]);
-    }
-    return;
+  if (token() != "P5" || token() != std::to_string(width) ||
+      token() != std::to_string(height) || token() != "65535") {
+    throw std::invalid_argument(
+        "RAW dark frame must be a 16-bit P5 PGM matching the original visible area " +
+        std::to_string(width) + "x" + std::to_string(height));
   }
-  if (raw.imgdata.rawdata.color4_image != nullptr) {
-    const auto row_stride = std::max<std::uint32_t>(
-        1U, sizes.raw_pitch / (4U * static_cast<unsigned>(sizeof(std::uint16_t))));
-    for (std::uint32_t y = 0; y < sizes.raw_height; ++y) {
-      auto* row = raw.imgdata.rawdata.color4_image +
-                  static_cast<std::size_t>(y) * row_stride;
-      for (std::uint32_t x = 0; x < sizes.raw_width; ++x)
-        for (std::uint32_t c = 0; c < 4; ++c) row[x][c] = map_value(row[x][c]);
+  const int separator = input.get();
+  if (separator == '\r' && input.peek() == '\n') input.get();
+  if (separator == EOF || !std::isspace(static_cast<unsigned char>(separator)))
+    throw std::invalid_argument("RAW dark frame has an invalid PGM header");
+  std::vector<std::uint16_t> dark(static_cast<std::size_t>(width) * height);
+  input.read(reinterpret_cast<char*>(dark.data()),
+             static_cast<std::streamsize>(dark.size() * sizeof(std::uint16_t)));
+  if (!input) throw std::invalid_argument("RAW dark frame pixel data is truncated");
+  // PGM samples are big endian; supported Windows targets are little endian.
+  for (auto& value : dark) value = static_cast<std::uint16_t>((value >> 8) | (value << 8));
+  return dark;
+}
+
+RawCalibration prepare_calibration(CallbackLibRaw& raw, const LinearizationLut& lut,
+                                    const RawDecodeOptions& options) {
+  const auto& sizes = raw.imgdata.sizes;
+  RawCalibration calibration;
+  calibration.left = sizes.left_margin;
+  calibration.top = sizes.top_margin;
+  calibration.width = sizes.width;
+  calibration.height = sizes.height;
+  calibration.white = std::max(1.0F, raw_white_level(raw));
+  calibration.lut = &lut;
+  raw.normalized_black_levels(calibration);
+  calibration.dark = read_dark_frame(options.dark_frame, sizes.width, sizes.height);
+  return calibration;
+}
+
+void apply_code_calibration(CallbackLibRaw& raw, const RawCalibration& calibration) {
+  if (calibration.lut->samples.empty() && calibration.dark.empty()) return;
+  auto& data = raw.imgdata.rawdata;
+  if (!data.raw_image && !data.color4_image)
+    throw std::invalid_argument("RAW code calibration requires an unpacked 16-bit sensor buffer");
+  if (!calibration.dark.empty() && (!data.raw_image || !raw.imgdata.idata.filters))
+    throw std::invalid_argument("RAW dark-frame calibration requires a CFA sensor buffer");
+  const float mapped_white = linearized_code(calibration.white, calibration);
+  const auto corrected = [&](std::uint16_t value, unsigned x, unsigned y, unsigned c) {
+    float black = static_cast<float>(calibration.black[c]);
+    if (!calibration.black_pattern.empty()) {
+      black += calibration.black_pattern[(y % calibration.black_rows) *
+                   calibration.black_columns + x % calibration.black_columns];
     }
-    return;
+    const float mapped_black = linearized_code(black, calibration);
+    const float range = mapped_white - mapped_black;
+    if (!(range > 0.0F))
+      throw std::invalid_argument("RAW linearization LUT leaves no range above the black level");
+    const float baseline = calibration.dark.empty() ? mapped_black :
+        linearized_code(calibration.dark[static_cast<std::size_t>(y) * calibration.width + x],
+                        calibration);
+    const float signal = (linearized_code(value, calibration) - baseline) / range;
+    return static_cast<std::uint16_t>(std::lround(std::clamp(signal, 0.0F, 1.0F) * 65535.0F));
+  };
+  for (unsigned y = 0; y < calibration.height; ++y) {
+    for (unsigned x = 0; x < calibration.width; ++x) {
+      const auto row_bytes = static_cast<std::size_t>(y + calibration.top) * data.sizes.raw_pitch;
+      if (data.raw_image) {
+        auto& value = data.raw_image[row_bytes / 2 + x + calibration.left];
+        value = corrected(value, x, y, raw.COLOR(y, x));
+      } else {
+        auto& value = data.color4_image[row_bytes / 8 + x + calibration.left];
+        for (unsigned c = 0; c < 4; ++c) value[c] = corrected(value[c], x, y, c);
+      }
+    }
   }
-  throw std::runtime_error(
-      "RAW linearization LUT requires an unpacked Bayer buffer");
+  // raw2image_start() restores rawdata.color. Update both copies so LibRaw
+  // neither subtracts the old black again nor scales by the old white level.
+  for (auto* color : {&raw.imgdata.color, &data.color}) {
+    color->black = 0;
+    std::fill(std::begin(color->cblack), std::end(color->cblack), 0U);
+    color->maximum = 65535;
+    color->data_maximum = 0;
+  }
+  raw.imgdata.params.adjust_maximum_thr = 0.0F;
+}
+
+void apply_bad_pixel_map(LibRaw& raw, const std::filesystem::path& path) {
+  if (path.empty()) return;
+  auto& data = raw.imgdata.rawdata;
+  if (!data.raw_image || !raw.imgdata.idata.filters)
+    throw std::invalid_argument("RAW bad-pixel map requires a CFA sensor buffer");
+  std::ifstream input(path);
+  if (!input) throw std::invalid_argument("cannot read RAW bad-pixel map");
+  const auto& sizes = data.sizes;
+  const auto sample = [&](unsigned x, unsigned y) -> std::uint16_t& {
+    return data.raw_image[static_cast<std::size_t>(y + sizes.top_margin) *
+                          (sizes.raw_pitch / 2) + x + sizes.left_margin];
+  };
+  std::string line;
+  while (std::getline(input, line)) {
+    if (const auto hash = line.find('#'); hash != std::string::npos) line.resize(hash);
+    std::istringstream row(line);
+    row >> std::ws;
+    if (row.eof()) continue;
+    int x, y;
+    long long timestamp;
+    if (!(row >> x >> y >> timestamp))
+      throw std::invalid_argument("RAW bad-pixel map requires x y timestamp rows");
+    if (x < 0 || y < 0 || x >= sizes.width || y >= sizes.height ||
+        timestamp > raw.imgdata.other.timestamp) continue;
+    const auto c = raw.COLOR(y, x);
+    unsigned sum = 0, count = 0;
+    for (int radius = 1; radius <= 2 && count == 0; ++radius) {
+      for (int sy = y - radius; sy <= y + radius; ++sy)
+        for (int sx = x - radius; sx <= x + radius; ++sx)
+          if (sx >= 0 && sy >= 0 && sx < sizes.width && sy < sizes.height &&
+              (sx != x || sy != y) && raw.COLOR(sy, sx) == c) {
+            sum += sample(sx, sy);
+            ++count;
+          }
+    }
+    if (count) sample(x, y) = static_cast<std::uint16_t>(sum / count);
+  }
 }
 
 void correct_auto_bad_pixels(LibRaw& raw) {
@@ -439,8 +610,8 @@ void correct_auto_bad_pixels(LibRaw& raw) {
 }
 
 BayerPattern detect_bayer_pattern(LibRaw& raw, std::uint32_t width,
-                                  std::uint32_t height) {
-  if (width < 2 || height < 2 || raw.imgdata.idata.filters == 0) {
+                                   std::uint32_t height) {
+  if (width < 2 || height < 2 || raw.imgdata.idata.filters <= 1000) {
     return BayerPattern::Unknown;
   }
   const auto role = [&](std::uint32_t x, std::uint32_t y) {
@@ -448,7 +619,12 @@ BayerPattern detect_bayer_pattern(LibRaw& raw, std::uint32_t width,
     return c >= 0 && c < 5 ? raw.imgdata.idata.cdesc[c] : '\0';
   };
   const std::array<char, 4> top_left{{role(0, 0), role(1, 0), role(0, 1),
-                                      role(1, 1)}};
+                                       role(1, 1)}};
+  // LibRaw's packed filter word spans eight rows. A matching corner alone
+  // does not prove a 2x2 CFA, even for layouts stored in that packed word.
+  for (unsigned y = 0; y < 8; ++y)
+    for (unsigned x = 0; x < 2; ++x)
+      if (role(x, y) != top_left[(y % 2) * 2 + x]) return BayerPattern::Unknown;
   if (top_left == std::array<char, 4>{{'R', 'G', 'G', 'B'}})
     return BayerPattern::RGGB;
   if (top_left == std::array<char, 4>{{'B', 'G', 'G', 'R'}})
@@ -470,8 +646,6 @@ DecodedImage decode_raw(const std::filesystem::path& path,
   const auto linearization_lut =
       read_linearization_lut(options.linearization_lut);
   const auto lens_shading = read_lens_shading_map(options.lens_shading_map);
-  const std::string bad_pixel_path = path_utf8(options.bad_pixel_map);
-  const std::string dark_frame_path = path_utf8(options.dark_frame);
 
   CallbackLibRaw raw;
   // Parameters that affect camera WB/matrix selection must be configured before
@@ -490,12 +664,6 @@ DecodedImage decode_raw(const std::filesystem::path& path,
   params.gamm[0] = 1.0;
   params.gamm[1] = 1.0;
   params.use_p1_correction = 1;
-  if (!bad_pixel_path.empty()) {
-    params.bad_pixels = const_cast<char*>(bad_pixel_path.c_str());
-  }
-  if (!dark_frame_path.empty()) {
-    params.dark_frame = const_cast<char*>(dark_frame_path.c_str());
-  }
   switch (options.highlight_recovery) {
     case HighlightRecovery::Clip: params.highlight = 0; break;
     case HighlightRecovery::Unclip: params.highlight = 1; break;
@@ -546,28 +714,11 @@ DecodedImage decode_raw(const std::filesystem::path& path,
     decode.degraded = true;
     decode.degradation_reasons.emplace_back(reason);
   };
-  // With highlight recovery enabled dcraw normalises by the largest WB
-  // multiplier instead of the smallest, darkening the whole frame by
-  // dmin/dmax. cam_mul is the camera/as-shot WB that scale_colors uses for this
-  // normalisation; pre_mul already includes colour-calibration scaling and
-  // over-corrects this A7R V by about 0.06 EV. Capture cam_mul before
-  // dcraw_process() mutates the colour state and restore the exposure later in
-  // float, where HDR values may exceed 1.0 without clipping.
-  float exposure_gain = 1.0F;
-  if (options.highlight_recovery != HighlightRecovery::Clip) {
-    float dmin = std::numeric_limits<float>::max();
-    float dmax = 0.0F;
-    for (const float multiplier : raw.imgdata.color.cam_mul) {
-      if (!(multiplier > 0.0F) || !std::isfinite(multiplier)) continue;
-      dmin = std::min(dmin, multiplier);
-      dmax = std::max(dmax, multiplier);
-    }
-    if (dmin > 0.0F && dmax > dmin) exposure_gain = dmax / dmin;
-  }
-
   check_raw(raw.unpack(), "LibRaw unpack");
-  apply_linearization_lut(raw, linearization_lut);
+  const auto calibration = prepare_calibration(raw, linearization_lut, options);
+  apply_bad_pixel_map(raw, options.bad_pixel_map);
   if (options.auto_bad_pixel_correction) correct_auto_bad_pixels(raw);
+  apply_code_calibration(raw, calibration);
 #if defined(LIBRAW_VERSION) && defined(LIBRAW_MAKE_VERSION)
 #if LIBRAW_VERSION >= LIBRAW_MAKE_VERSION(0, 21, 0)
   // raw_inset_crops is expressed in the sensor coordinate system. Promote the
@@ -619,16 +770,25 @@ DecodedImage decode_raw(const std::filesystem::path& path,
   }
 #endif
 #endif
+  if ((!linearization_lut.samples.empty() || !calibration.dark.empty() ||
+       !lens_shading.gains.empty()) &&
+      (sizes.left_margin < calibration.left || sizes.top_margin < calibration.top ||
+       static_cast<unsigned>(sizes.left_margin) + sizes.width > calibration.left + calibration.width ||
+       static_cast<unsigned>(sizes.top_margin) + sizes.height > calibration.top + calibration.height)) {
+    throw std::invalid_argument("RAW crop extends outside the calibration's original visible area");
+  }
+  RawCallbackContext callback_context;
+  callback_context.calibration = &calibration;
+  callback_context.lens_shading = lens_shading.gains.empty() ? nullptr : &lens_shading;
+  if (!lens_shading.gains.empty())
+    callback_context.lens_shading_scale =
+        std::max(1.0F, *std::max_element(lens_shading.gains.begin(), lens_shading.gains.end()));
   {
-    RawCallbackContext callback_context;
-    callback_context.lens_shading = lens_shading.gains.empty() ? nullptr
-                                                                 : &lens_shading;
     RawCallbackScope callback_scope(callback_context);
-    if (callback_context.lens_shading != nullptr) {
-      raw.set_pre_preinterpolate_callback(raw_pre_preinterpolate_callback);
-    }
+    raw.set_pre_preinterpolate_callback(raw_pre_preinterpolate_callback);
     check_raw(raw.dcraw_process(), "LibRaw demosaic");
   }
+  const float exposure_gain = callback_context.exposure_gain * callback_context.lens_shading_scale;
   int error = 0;
   std::unique_ptr<libraw_processed_image_t, decltype(&LibRaw::dcraw_clear_mem)>
       processed(raw.dcraw_make_mem_image(&error), &LibRaw::dcraw_clear_mem);
@@ -651,6 +811,18 @@ DecodedImage decode_raw(const std::filesystem::path& path,
   // a rendering intent, so 1.0 here is wherever white balance happened to land
   // rather than diffuse white, and the renderer owns the exposure decision.
   result.domain = InputDomain::kSceneReferred;
+  const float camera_wb = raw.imgdata.color.cam_mul[0];
+  if (raw.imgdata.color.as_shot_wb_applied && camera_wb > 0.00001F) {
+    result.raw_white_balance = "camera-applied";
+  } else if (camera_wb > 0.00001F &&
+             !(raw.imgdata.process_warnings & LIBRAW_WARN_BAD_CAMERA_WB)) {
+    result.raw_white_balance = "camera";
+  } else if (camera_wb < -0.5F || (camera_wb <= 0.00001F &&
+             !(raw.imgdata.rawparams.options & LIBRAW_RAWOPTIONS_CAMERAWB_FALLBACK_TO_DAYLIGHT))) {
+    result.raw_white_balance = "auto";
+  } else {
+    result.raw_white_balance = "daylight";
+  }
   result.linear_p3 = FloatImage(processed->width, processed->height, 3);
   const auto* pixels = reinterpret_cast<const std::uint16_t*>(processed->data);
   parallel_for_rows(processed->height, [&](const std::uint32_t y) {
@@ -752,8 +924,6 @@ RawMosaic decode_raw_mosaic(const std::filesystem::path& path,
   const auto linearization_lut =
       read_linearization_lut(options.linearization_lut);
   const auto lens_shading = read_lens_shading_map(options.lens_shading_map);
-  const std::string bad_pixel_path = path_utf8(options.bad_pixel_map);
-  const std::string dark_frame_path = path_utf8(options.dark_frame);
 
   CallbackLibRaw raw;
   auto& params = raw.imgdata.params;
@@ -765,14 +935,10 @@ RawMosaic decode_raw_mosaic(const std::filesystem::path& path,
   params.output_color = 0;
   params.no_auto_scale = 1;
   params.no_interpolation = 1;
+  params.use_fuji_rotate = 0;
+  params.adjust_maximum_thr = 0.0F;
   params.half_size = 0;
   params.use_p1_correction = 1;
-  if (!bad_pixel_path.empty()) {
-    params.bad_pixels = const_cast<char*>(bad_pixel_path.c_str());
-  }
-  if (!dark_frame_path.empty()) {
-    params.dark_frame = const_cast<char*>(dark_frame_path.c_str());
-  }
 
   check_raw(raw.open_file(path.c_str()), "LibRaw open RAW mosaic");
   const auto& sizes = raw.imgdata.sizes;
@@ -790,9 +956,15 @@ RawMosaic decode_raw_mosaic(const std::filesystem::path& path,
         " exceeds the supported 240869376-pixel input limit");
   }
   check_raw_memory_admission(sensor_width, sensor_height, width, height);
+  if (detect_bayer_pattern(raw, static_cast<unsigned>(width), static_cast<unsigned>(height)) ==
+      BayerPattern::Unknown) {
+    throw std::invalid_argument("RAW mosaic requires a 2x2 Bayer CFA (X-Trans is not packable)");
+  }
   check_raw(raw.unpack(), "LibRaw unpack RAW mosaic");
-  apply_linearization_lut(raw, linearization_lut);
+  const auto calibration = prepare_calibration(raw, linearization_lut, options);
+  apply_bad_pixel_map(raw, options.bad_pixel_map);
   if (options.auto_bad_pixel_correction) correct_auto_bad_pixels(raw);
+  apply_code_calibration(raw, calibration);
 
   std::vector<std::uint16_t> captured;
   std::uint32_t captured_width = 0;
@@ -800,6 +972,10 @@ RawMosaic decode_raw_mosaic(const std::filesystem::path& path,
   RawCallbackContext callback_context;
   callback_context.lens_shading = lens_shading.gains.empty() ? nullptr
                                                                : &lens_shading;
+  callback_context.calibration = &calibration;
+  if (!lens_shading.gains.empty())
+    callback_context.lens_shading_scale =
+        std::max(1.0F, *std::max_element(lens_shading.gains.begin(), lens_shading.gains.end()));
   callback_context.captured_mosaic = &captured;
   callback_context.captured_width = &captured_width;
   callback_context.captured_height = &captured_height;
@@ -843,7 +1019,8 @@ RawMosaic decode_raw_mosaic(const std::filesystem::path& path,
     for (std::uint32_t x = 0; x < captured_width; ++x) {
       const auto index = static_cast<std::size_t>(y) * captured_width + x;
       result.samples.at(x, y, 0) =
-          static_cast<float>(captured[index]) / white * options.digital_gain;
+          static_cast<float>(captured[index]) / white * options.digital_gain *
+          callback_context.lens_shading_scale;
     }
   }
   return result;

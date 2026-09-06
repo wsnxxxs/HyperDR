@@ -103,23 +103,33 @@ creative expansion as any other SDR photograph.
   input before exposure or look processing: among pixels with P3 luminance at least
   `0.02`, it is the fraction outside Rec.709. The report also records its
   numerator, denominator, and threshold.
-- RAW calibration is configurable before demosaic. LibRaw applies the metadata
-  black level, camera white balance, optional bad-pixel coordinate map
-  (`--raw-bad-pixels`), and dark-frame PGM (`--raw-dark-frame`); Phase One's
-  metadata linearization/defect correction is enabled explicitly. An external
-  dark frame is also the supported fixed-pattern-noise path: row/column bias is
-  removed when it is present in that measured frame; no scene-derived
-  row/column estimator is enabled by default because it could confuse real
-  image gradients with sensor noise.
-  A code LUT can be supplied with `--raw-linearization-lut`: its text format is
-  `N` followed by `N` samples, either raw code values or normalized `[0,1]`
-  values. A lens-shading map can be supplied with `--raw-lens-shading`; its
-  format is `width height channels` followed by row-major gains, with 1, 3
-  (RGB), or 4 (R,G1,B,G2) channels. The opt-in `--raw-auto-bad-pixels` detector
-  only replaces extreme zero/saturated outliers with same-CFA neighbours, so a
-  supplied calibration map remains preferred for scientific work. `--raw-gain`
-  is a sensor-domain digital gain and is included in the decode cache and resume
-  fingerprint.
+- RAW calibration is configurable before demosaic. Optional dcraw-format
+  `--raw-bad-pixels` coordinates and `--raw-dark-frame` PGM samples refer to the
+  original visible area, before DefaultCrop or orientation. The dark frame is
+  a full-visible-area 16-bit P5 PGM containing the measured bias, including
+  black; it replaces metadata black rather than being subtracted twice.
+  Wrong dimensions, malformed headers and truncated pixels fail explicitly.
+  Phase One's metadata correction remains enabled on the normal LibRaw path.
+  A measured dark frame is the fixed-pattern-noise path; no scene-derived
+  row/column estimator is enabled.
+- `--raw-linearization-lut` accepts `N` followed by `N` nondecreasing samples,
+  in code values or normalized `[0,1]` values. The same interpolation transforms
+  source codes, metadata black, white and any dark frame. Corrected samples are
+  normalized by the transformed white-minus-black range and rebased to 16-bit
+  codes before LibRaw; an affine LUT therefore leaves normalized signal intact.
+  LUTs with no usable signal range are rejected.
+- `--raw-lens-shading` accepts `width height channels` plus row-major gains,
+  with 1, 3 (RGB), or 4 (R,G1,B,G2) channels. Its grid covers the original
+  visible sensor area. Crop offsets and half-size CFA positions determine
+  sampling locations. Gains are divided by their common maximum (at least 1)
+  in the integer mosaic, then that scale is restored in float; the LSC stage
+  cannot introduce integer overflow. LibRaw's demosaic and highlight processing
+  still operate on that normalized mosaic.
+- The opt-in `--raw-auto-bad-pixels` detector replaces extreme outliers using
+  same-CFA neighbours before code calibration. `--raw-gain` multiplies the
+  decoded float scene-linear image; it cannot recover earlier clipping and
+  automatic exposure may compensate its brightness change. RAW controls and
+  calibration-file contents participate in decode caches and resume identity.
 - RAW-domain consumers can call `decode_raw_mosaic()` and `pack_bayer()`. The
   former returns black-corrected, white-level-normalized Bayer samples in sensor
   coordinates; the latter produces `H/2 x W/2 x 4` in fixed `R,Gr,Gb,B` order.

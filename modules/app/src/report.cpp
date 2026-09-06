@@ -34,8 +34,8 @@ void write_settings(json::Writer& writer, const ConvertOptions& options) {
   }
   writer.end_object();
   writer.begin_object("raw_processing")
-      .member("black_level_correction", "LibRaw metadata")
-      .member("white_balance", "camera WB")
+      .member("black_level_correction", "metadata or measured dark; LUT-aware")
+      .member("white_balance", "camera WB with LibRaw fallback")
       .member("digital_gain", options.raw.digital_gain)
       .member("auto_bad_pixel_correction",
               options.raw.auto_bad_pixel_correction)
@@ -115,6 +115,7 @@ std::string run_report_json(const std::vector<FileResult>& results,
         .member("target_dimensions_applied", result.target_dimensions_applied)
         .member("default_crop_present", result.default_crop_present)
         .member("decode_degraded", result.decode_degraded)
+        .member("raw_white_balance", result.raw_white_balance)
         // Which of the three renderers this file took, and the headroom it was
         // told the input carried. Recorded because nothing else in the record
         // distinguishes them, and the same settings mean different things in

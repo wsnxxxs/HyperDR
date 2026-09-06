@@ -140,7 +140,8 @@ void write_synthetic_dng(const std::filesystem::path& path,
                          std::uint32_t crop_height = kCropHeight,
                          std::uint32_t crop_left = kCropLeft,
                          std::uint32_t crop_top = kCropTop,
-                         std::uint16_t black_level = 0) {
+                         std::uint16_t black_level = 0,
+                         bool camera_wb = true, bool xtrans = false) {
   const auto raster = synthetic_cfa(black_level);
   const std::string model = "HyperDR Synthetic";
 
@@ -157,6 +158,10 @@ void write_synthetic_dng(const std::filesystem::path& path,
 
   std::vector<std::uint8_t> model_ascii(model.begin(), model.end());
   model_ascii.push_back(0);
+  const std::vector<std::uint8_t> cfa = xtrans
+      ? std::vector<std::uint8_t>{1,2,1,1,0,1, 0,1,0,2,1,2, 1,2,1,1,0,1,
+                                  1,0,1,1,2,1, 2,1,2,0,1,0, 1,0,1,1,2,1}
+      : std::vector<std::uint8_t>{0,1,1,2};
 
   std::vector<Field> fields{
       {254, 4, 1, bytes32(0), false},                       // NewSubfileType
@@ -171,8 +176,8 @@ void write_synthetic_dng(const std::filesystem::path& path,
       {278, 4, 1, bytes32(kHeight), false},                 // RowsPerStrip
       {279, 4, 1, bytes32(static_cast<std::uint32_t>(raster.size())), false},
       {284, 3, 1, bytes16(1), false},                       // PlanarConfiguration
-      {33421, 3, 2, [] { auto v = bytes16(2); append(v, bytes16(2)); return v; }(), false},
-      {33422, 1, 4, {0, 1, 1, 2}, false},                   // CFAPattern: RGGB
+      {33421, 3, 2, [xtrans] { auto v = bytes16(xtrans ? 6 : 2); append(v, bytes16(xtrans ? 6 : 2)); return v; }(), false},
+      {33422, 1, static_cast<std::uint32_t>(cfa.size()), cfa, false},
       {50706, 1, 4, {1, 4, 0, 0}, false},                   // DNGVersion
       {50707, 1, 4, {1, 1, 0, 0}, false},                   // DNGBackwardVersion
       {50708, 2, static_cast<std::uint32_t>(model_ascii.size()), model_ascii, false},
@@ -192,6 +197,7 @@ void write_synthetic_dng(const std::filesystem::path& path,
       {50728, 5, 3, as_shot_neutral, false},                // AsShotNeutral
       {50778, 3, 1, bytes16(21), false},                    // CalibrationIlluminant1: D65
   };
+  if (!camera_wb) std::erase_if(fields, [](const Field& field) { return field.tag == 50728; });
   std::sort(fields.begin(), fields.end(),
             [](const Field& a, const Field& b) { return a.tag < b.tag; });
 
@@ -513,10 +519,9 @@ int main(int argc, char** argv) {
                     1.0e-5F,
             "RGGB packing plane order is incorrect");
 
-    // External linearization is applied to sensor codes before black-level
-    // subtraction. A [0, 0.5] normalized LUT therefore halves this low-code
-    // scene, while a 2x lens grid doubles it in the pre-demosaic callback.
-    hyperdr::write_text_file_atomic(lut_path, "2\n0\n0.5\n", true);
+    // This piecewise-linear LUT halves low codes while retaining the white
+    // endpoint. Black and white must be interpreted through the same LUT.
+    hyperdr::write_text_file_atomic(lut_path, "3\n0\n0.25\n1\n", true);
     hyperdr::RawDecodeOptions lut_options;
     lut_options.linearization_lut = lut_path;
     const auto linearized = hyperdr::decode_raw_mosaic(path, lut_options);
@@ -546,6 +551,109 @@ int main(int argc, char** argv) {
     const float first_red = black_corrected.samples.at(0, 0, 0);
     require(first_red > 0.008F && first_red < 0.011F,
             "DNG BlackLevel was not subtracted before RAW normalization");
+
+    const auto black_lut = hyperdr::decode_raw_mosaic(path, lut_options);
+    const float expected_lut = 300.0F / (65535.0F - 256.0F);
+    require(std::abs(black_lut.samples.at(0, 0, 0) - expected_lut) < 2.0F / 65535.0F,
+            "LUT pixel, black and white levels used different code domains");
+    // A purely affine remapping of all codes, including black and white,
+    // must leave the normalized sensor signal unchanged.
+    hyperdr::write_text_file_atomic(lut_path, "2\n0\n0.5\n", true);
+    const auto affine_lut = hyperdr::decode_raw_mosaic(path, lut_options);
+    require(std::abs(affine_lut.samples.at(0, 0, 0) - first_red) < 2.0F / 65535.0F,
+            "affine LUT changed the calibrated normalized signal");
+
+    // A full-visible-area dark frame remains valid after DefaultCrop, and
+    // substitutes its measured bias for the nominal metadata black level.
+    const auto dark_path = lsc_path;
+    std::string pgm_header = "P5\n96 80\n65535\n";
+    std::vector<std::uint8_t> dark_bytes(pgm_header.begin(), pgm_header.end());
+    for (unsigned i = 0; i < kWidth * kHeight; ++i) {
+      dark_bytes.push_back(1); dark_bytes.push_back(0); // 256 codes, big endian
+    }
+    hyperdr::write_binary_file_atomic(dark_path, dark_bytes, true);
+    hyperdr::RawDecodeOptions dark_options;
+    dark_options.dark_frame = dark_path;
+    const auto dark_mosaic = hyperdr::decode_raw_mosaic(path, dark_options);
+    require(std::abs(dark_mosaic.samples.at(0, 0, 0) - 856.0F / 65023.0F) < 2.0F / 65535.0F,
+            "dark calibration did not use the original visible sensor samples");
+    const auto before_dark = hyperdr::decode_image(path);
+    const auto after_dark = hyperdr::decode_image(path, dark_options);
+    require(max_abs_difference(before_dark.linear_p3, after_dark.linear_p3) > 0.001F,
+            "DefaultCrop silently disabled the full-visible-area dark frame");
+    dark_options.linearization_lut = lut_path;
+    const auto dark_lut = hyperdr::decode_raw_mosaic(path, dark_options);
+    require(std::abs(dark_lut.samples.at(0, 0, 0) - dark_mosaic.samples.at(0, 0, 0)) < 2.0F / 65535.0F,
+            "dark frame and source did not undergo the same affine LUT");
+    hyperdr::write_text_file_atomic(dark_path, "P5\n1 1\n65535\n", true);
+    bool bad_dark_rejected = false;
+    try { static_cast<void>(hyperdr::decode_image(path, dark_options)); }
+    catch (const std::invalid_argument&) { bad_dark_rejected = true; }
+    require(bad_dark_rejected, "incompatible dark frame was silently ignored");
+
+    // Bad-pixel coordinates also refer to the uncropped visible raster.
+    write_synthetic_dng(path);
+    const auto before_defect = hyperdr::decode_image(path);
+    auto defect_bytes = hyperdr::read_binary_file(path);
+    const auto defect_at = defect_bytes.size() - kWidth * kHeight * 2 + (20 * kWidth + 20) * 2;
+    defect_bytes[defect_at] = 255; defect_bytes[defect_at + 1] = 255;
+    hyperdr::write_binary_file_atomic(path, defect_bytes, true);
+    hyperdr::write_text_file_atomic(lsc_path, "20 20 0\n", true);
+    hyperdr::RawDecodeOptions defect_options;
+    defect_options.bad_pixel_map = lsc_path;
+    const auto corrected_defect = hyperdr::decode_image(path, defect_options);
+    require(max_abs_difference(before_defect.linear_p3, corrected_defect.linear_p3) < 1.0e-4F,
+            "DefaultCrop shifted the bad-pixel coordinates");
+
+    write_synthetic_dng(path);
+    hyperdr::write_text_file_atomic(lsc_path, "2 2 1\n2 2 2 2\n", true);
+    const auto rgb_lsc = hyperdr::decode_image(path, lsc_options);
+    const auto rgb_gain = hyperdr::decode_image(path, gain_options);
+    require(max_abs_difference(rgb_lsc.linear_p3, rgb_gain.linear_p3) < 1.0e-4F,
+            "uniform LSC lost highlights before the float HDR domain");
+    lsc_options.half_size = gain_options.half_size = true;
+    require(max_abs_difference(hyperdr::decode_image(path, lsc_options).linear_p3,
+                               hyperdr::decode_image(path, gain_options).linear_p3) < 1.0e-4F,
+            "half-size LSC lost highlight headroom");
+    lsc_options.half_size = gain_options.half_size = false;
+
+    // A spatial calibration has the same sensor coordinates with and without
+    // DefaultCrop. Exclude demosaic borders when comparing the two renders.
+    hyperdr::write_text_file_atomic(lsc_path, "2 2 1\n1 2 1 2\n", true);
+    for (const bool half : {false, true}) {
+      lsc_options.half_size = half;
+      const unsigned divisor = half ? 2 : 1;
+      write_synthetic_dng(path);
+      const auto crop_lsc = hyperdr::decode_image(path, lsc_options);
+      write_synthetic_dng(path, kWidth, kHeight, 0, 0);
+      const auto full_lsc = hyperdr::decode_image(path, lsc_options);
+      float crop_error = 0.0F;
+      for (unsigned y = 8; y + 8 < crop_lsc.linear_p3.height; ++y)
+        for (unsigned x = 8; x + 8 < crop_lsc.linear_p3.width; ++x)
+          for (unsigned c = 0; c < 3; ++c)
+            crop_error = std::max(crop_error, std::abs(crop_lsc.linear_p3.at(x,y,c) -
+                full_lsc.linear_p3.at(x + (kHeight - kCropTop - kCropHeight) / divisor,
+                                     y + kCropLeft / divisor,c)));
+      require(crop_error < 0.005F, "DefaultCrop shifted the lens-shading calibration grid");
+    }
+
+    write_synthetic_dng(path, kCropWidth, kCropHeight, kCropLeft, kCropTop, 0, false);
+    hyperdr::RawDecodeOptions clip_options;
+    clip_options.highlight_recovery = hyperdr::HighlightRecovery::Clip;
+    const auto fallback_clip = hyperdr::decode_image(path, clip_options);
+    const auto fallback_blend = hyperdr::decode_image(path);
+    require(fallback_clip.raw_white_balance == "auto" &&
+                fallback_blend.raw_white_balance == "auto",
+            "missing camera WB was not reported as an automatic fallback");
+    require(std::abs(std::log2(median_luminance(fallback_clip.linear_p3) /
+                              median_luminance(fallback_blend.linear_p3))) < 0.05F,
+            "WB fallback changed whole-image exposure between highlight modes");
+
+    write_synthetic_dng(path, kCropWidth, kCropHeight, kCropLeft, kCropTop, 0, true, true);
+    bool xtrans_rejected = false;
+    try { static_cast<void>(hyperdr::decode_raw_mosaic(path)); }
+    catch (const std::invalid_argument&) { xtrans_rejected = true; }
+    require(xtrans_rejected, "6x6 X-Trans was silently packed as a 2x2 Bayer CFA");
 
     std::filesystem::remove(path);
     std::filesystem::remove(lut_path);

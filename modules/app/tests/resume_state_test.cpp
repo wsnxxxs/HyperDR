@@ -132,6 +132,7 @@ void check_decode_cache_roundtrip() {
   value.metadata.iso = 640;
   value.metadata.orientation = 1;
   value.capture.iso = 640.0F;
+  value.raw_white_balance = "auto";
   value.capture.exposure_time_seconds = 1.0F / 250.0F;
   value.capture.aperture_f_number = 1.8F;
   value.decode.sensor_width = 9600;
@@ -160,6 +161,7 @@ void check_decode_cache_roundtrip() {
   require(loaded.linear_p3.width == 7 && loaded.linear_p3.height == 5, "dimensions");
   require(loaded.linear_p3.pixels == value.linear_p3.pixels, "pixels must round-trip exactly");
   require(loaded.metadata.model == "ILCE-7RM5", "metadata must round-trip");
+  require(loaded.raw_white_balance == "auto", "RAW WB fallback must survive a cache hit");
   require(loaded.metadata.lens == "FE 35mm F1.4 GM", "lens must round-trip");
   require(loaded.capture.aperture_f_number.has_value(), "optional capture value");
   require(loaded.decode.target_width == 9504, "decode target must round-trip");

@@ -105,11 +105,11 @@ void render_full_resolution(const FloatImage& source, float exposure,
     for (std::uint32_t x = 0; x < source.width; ++x) {
       const std::size_t base =
           (static_cast<std::size_t>(y) * source.width + x) * 3;
-      const float r = positive_finite(source.pixels[base]) * exposure;
+      const float r = finite_or_zero(source.pixels[base]) * exposure;
       const float g =
-          positive_finite(source.pixels[base + 1]) * exposure;
+          finite_or_zero(source.pixels[base + 1]) * exposure;
       const float b =
-          positive_finite(source.pixels[base + 2]) * exposure;
+          finite_or_zero(source.pixels[base + 2]) * exposure;
       const float scene = p3_luminance(r, g, b);
       float sdr;
       if (reuse_base) sdr = cache->luminance[static_cast<std::size_t>(y) * source.width + x];

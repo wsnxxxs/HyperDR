@@ -97,18 +97,21 @@ struct RawDecodeOptions {
   // base of an embedded Apple/Ultra HDR container. Applying the embedded map
   // first would double-count the same gain before the external grid is used.
   bool ignore_embedded_gain_map{false};
-  // Optional dcraw/LibRaw bad-pixel coordinate map. LibRaw interpolates the
-  // listed sites from neighbouring CFA samples before demosaic.
+  // Optional dcraw-format x y timestamp map, in original visible-area
+  // coordinates. Corrected from same-CFA neighbours before DefaultCrop.
   std::filesystem::path bad_pixel_map;
-  // Optional dark-frame PGM accepted by LibRaw. It is subtracted before the
-  // normal black-level correction.
+  // Optional 16-bit P5 PGM matching the original visible area. Its measured
+  // bias replaces metadata black; source and dark use the same optional LUT.
   std::filesystem::path dark_frame;
   // Optional text LUT for sensor-code linearization. Format: one integer N,
   // followed by N output samples; values are code values unless all are in
   // [0,1], in which case they are interpreted as normalized code values.
+  // Must be nondecreasing. Pixel, black and white are transformed together;
+  // the corrected code range is rebased to 0..65535 before LibRaw processing.
   std::filesystem::path linearization_lut;
   // Optional text lens-shading map. Format: `width height channels` followed
   // by row-major gains; channels may be 1, 3 (RGB), or 4 (R,G1,B,G2).
+  // Covers the original visible area before DefaultCrop or orientation.
   std::filesystem::path lens_shading_map;
   // Conservative opt-in detector for saturated hot pixels and zero/dead
   // pixels. It only replaces extreme outliers using same-CFA neighbours.
@@ -125,9 +128,9 @@ struct RawDecodeOptions {
   // RAW ignores this and uses `half_size` instead: LibRaw's reduction is a
   // demosaic choice, not a resampling one.
   std::uint32_t preview_max_edge{0};
-  // Sensor-domain digital gain, applied after RAW calibration and retained as
-  // scene-linear headroom. The normal renderer's --exposure is intentionally a
-  // later photographic exposure decision.
+  // Float scene-linear multiplier after RAW decoding/calibration. It cannot
+  // recover earlier sensor clipping, and automatic exposure may compensate
+  // its brightness change. --exposure is a later photographic decision.
   float digital_gain{1.0F};
 };
 
@@ -184,6 +187,8 @@ struct DecodedImage {
   FloatImage linear_p3;
   PhotoMetadata metadata;
   CaptureMetadata capture;
+  // Actual RAW WB selection; empty for non-RAW inputs.
+  std::string raw_white_balance;
   DecodeInfo decode;
   // How far above diffuse white this input's *format* can carry detail, as a
   // linear multiple of 1.0. HLG is 1000/203, PQ up to 10000/203, a gain-map

@@ -54,9 +54,9 @@ PhotographicAnalysis analyze_photographic_source(const FloatImage& source) {
           const std::size_t index =
               (static_cast<std::size_t>(y) * source.width + x) * 3;
           const float value =
-              p3_luminance(positive_finite(source.pixels[index]),
-                           positive_finite(source.pixels[index + 1]),
-                           positive_finite(source.pixels[index + 2]));
+              p3_luminance(finite_or_zero(source.pixels[index]),
+                           finite_or_zero(source.pixels[index + 1]),
+                           finite_or_zero(source.pixels[index + 2]));
           total += value;
           peak = std::max(peak, value);
           ++samples;
@@ -184,9 +184,9 @@ GainMapResult make_photographic_gain_map(const FloatImage& source,
         for (auto y = y0; y < y1; ++y) {
           for (auto x = x0; x < x1; ++x) {
             const auto px = (static_cast<std::size_t>(y) * source.width + x) * 3;
-            const float scene = p3_luminance(positive_finite(source.pixels[px]),
-                positive_finite(source.pixels[px + 1]),
-                positive_finite(source.pixels[px + 2])) * exposure;
+            const float scene = p3_luminance(finite_or_zero(source.pixels[px]),
+                finite_or_zero(source.pixels[px + 1]),
+                finite_or_zero(source.pixels[px + 2])) * exposure;
             const float sdr = render_tone_curve(scene, 1.0F, curve);
             guide_sum += sdr;
             if (scene > curve.shoulder_input) {

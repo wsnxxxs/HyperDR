@@ -28,9 +28,9 @@ WideGamutMeasurement measure_wide_gamut_input(const FloatImage& source) {
     std::uint64_t eligible = 0;
     for (std::uint32_t x = 0; x < source.width; ++x) {
       const std::size_t base = (static_cast<std::size_t>(y) * source.width + x) * 3;
-      const float r = positive_finite(source.pixels[base]);
-      const float g = positive_finite(source.pixels[base + 1]);
-      const float b = positive_finite(source.pixels[base + 2]);
+      const float r = finite_or_zero(source.pixels[base]);
+      const float g = finite_or_zero(source.pixels[base + 1]);
+      const float b = finite_or_zero(source.pixels[base + 2]);
       if (p3_luminance(r, g, b) < kWideGamutLuminanceThreshold) continue;
       ++eligible;
       if (is_outside_rec709(r, g, b)) ++pixels;

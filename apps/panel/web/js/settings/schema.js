@@ -211,3 +211,28 @@ export function toOptions(state) {
   for (const key of OPTION_KEYS) options[key] = state[key];
   return options;
 }
+
+/** Validate both device preferences and a recovered photo through one adapter. */
+export function validatedSettings(saved, base = defaultSettings()) {
+  const values = { ...base };
+  if (!saved || typeof saved !== "object") return values;
+  if (ENCODINGS.some(({ id }) => id === saved.encoding)) values.encoding = saved.encoding;
+  if (COLOR_GAMUTS.some(({ id }) => id === saved.colorGamut)) values.colorGamut = saved.colorGamut;
+  if (typeof saved.clampSrgb === "boolean") values.clampSrgb = saved.clampSrgb;
+  for (const control of CONTROLS) {
+    if (control.group === "pinned") { values[control.key] = control.default; continue; }
+    const value = saved[control.key];
+    if (control.choices) {
+      if (control.choices.some(([id]) => id === value)) values[control.key] = value;
+    } else if (Number.isFinite(value)) {
+      const max = ["hdrRange", "aiHdrRange"].includes(control.key)
+        ? encodingById(values.encoding).maxRange : control.max;
+      values[control.key] = Math.min(max, Math.max(control.min, value));
+    }
+  }
+  const ceiling = encodingById(values.encoding).maxRange;
+  values.hdrRange = Math.min(values.hdrRange, ceiling);
+  values.aiHdrRange = Math.min(values.aiHdrRange, ceiling);
+  if (values.colorGamut === "srgb") values.clampSrgb = true;
+  return values;
+}

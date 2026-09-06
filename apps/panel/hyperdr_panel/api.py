@@ -19,7 +19,7 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import job, model, session
+from . import job, model, session, renditions
 from .command import build_argv
 from .concurrency import Busy
 from .formats import SUPPORTED_EXTENSIONS
@@ -260,7 +260,7 @@ def result(_context: Context, query: dict) -> Response:
     opens on the machine running the service.
     """
     try:
-        target = session.result_path(_first(query, "id"))
+        target = renditions.result_path(_first(query, "id"), _first(query, "export"))
     except (OSError, ValueError) as exc:
         return error(exc, status=404)
     return Response(
@@ -391,7 +391,7 @@ def export(context: Context, body: dict) -> Response:
         destination = context.output_selections.get(str(body.get("selectionId") or ""))
         if destination is None or not destination.is_dir():
             raise coded(ValueError("导出文件夹已失效，请重新选择。"), "output_stale")
-        source = session.result_path(session_id)
+        source = renditions.result_path(session_id, str(body.get("exportId") or ""))
         target = (destination / source.name).resolve()
         # Re-checked after resolution: a symlink inside the session must not be
         # able to write outside the chosen folder.
@@ -411,26 +411,28 @@ def run(_context: Context, body: dict) -> Response:
             if not exe:
                 raise coded(ValueError("找不到 HyperDR 可执行文件。"),
                             "executable_missing")
-            output = session.session_dir(session_id, "output")
-            # The previous run's product goes before this one starts, so a change of
-            # encoding cannot leave a stale file under its old extension, and a run
-            # that fails before writing a report cannot be handed its predecessor's.
-            session.clear_output(session_id)
-            options, use_model = _prepare_model_options(body.get("options"))
-            options["input"] = str(source)
-            options["output"] = str(output)
-            options["report"] = str(
-                output / ("hyperdr-report-%s.json" % secrets.token_hex(8)))
+            raw_options = dict(body.get("options") or {})
+            options, use_model = _prepare_model_options(raw_options)
             if use_model:
                 model_state = model.status()
                 if not model_state.get("ready"):
                     raise coded(
-                ValueError(model_state.get("reason", "模型尚未就绪。")),
-                "model_not_ready")
-            argv = build_argv(exe, options)
-            job_id = job.start(
-                argv, str(REPO_ROOT), options["report"], session_id,
-                preparation_token=preparation_token)
+                        ValueError(model_state.get("reason", "模型尚未就绪。")),
+                        "model_not_ready")
+            # Validate before allocating output or touching any previous result.
+            options.update(input=str(source), output="<output>", report="<report>")
+            build_argv(exe, options)
+            export_id, output = renditions.prepare(session_id, raw_options)
+            options.update(output=str(output), report=str(output / "report.json"))
+            try:
+                argv = build_argv(exe, options)
+                job_id = job.start(
+                    argv, str(REPO_ROOT), options["report"], session_id,
+                    preparation_token=preparation_token, export_id=export_id,
+                    options=raw_options)
+            except Exception:
+                renditions.discard(session_id, export_id)
+                raise
     except job.Busy as exc:
         return error(exc, status=429, code=exc.code)
     except REQUEST_ERRORS as exc:
@@ -443,12 +445,30 @@ def run(_context: Context, body: dict) -> Response:
     display[0] = "HyperDR"
     return Response(payload={
         "jobId": job_id,
+        "exportId": export_id,
         "argv": display,
         "command": _display_command(display),
     })
 
 
+def workspace(_context: Context, query: dict) -> Response:
+    """Resolve a tab's saved photo against actual server state."""
+    session_id = _first(query, "id")
+    try:
+        source = session.input_path(session_id)
+        return Response(payload={
+            "sessionId": session_id,
+            "file": {"name": source.name, "size": source.stat().st_size},
+            "sourceDigest": session.input_digest(session_id),
+            "exports": renditions.list_for(session_id),
+            "job": job.for_session(session_id),
+        })
+    except (OSError, ValueError) as exc:
+        return error(exc, status=404)
+
+
 GET_ROUTES = {
+    "/api/workspace": workspace,
     "/api/state": state,
     "/api/preview": preview,
     "/api/log": job_log,

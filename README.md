@@ -170,10 +170,11 @@ decoder is touched, and anything rendered with *different* settings is
 regenerated. Re-running after a card copy therefore converges on whatever is
 actually on disk.
 
-The graphical panel does not do this. It converts one photograph at a time,
-because the settings worth reaching for over a slider are the ones that differ
-per image; a folder that should share one look is what the command line above
-is for.
+The graphical panel edits one photograph at a time, with undo/redo, per-tab
+refresh recovery, and a history of immutable exports. A failed or cancelled
+retry leaves earlier results available for download. Each new photo gets its
+own session; sessions and their exports expire after the configured idle time
+(24 hours by default). Use the CLI for a folder that should share one look.
 
 ## Continuous integration
 

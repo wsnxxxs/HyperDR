@@ -75,6 +75,9 @@ export const store = createStore({
   /** @type {{name: string, size: number} | null} */
   file: null,
   uploading: false,
+  restoring: false,
+  exports: [],
+  starting: false,
   /** Upload progress, 0..1. */
   uploadProgress: 0,
   /** The settings snapshot a successful run used, for the stale badge. */

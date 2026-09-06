@@ -29,35 +29,7 @@
   <!-- The masthead is a line at the top of the control column, not a band
        across the window: a title bar spanning the page pushed the photograph
        down by its own height plus a region gap for no work in return. -->
-  <header class="app__header">
-    <h1 class="app__title wordmark" aria-label="HyperDR">
-      <!-- Reuse the exact desktop application icon. -->
-      <img class="wordmark-mark" src="./icon.svg" alt="" aria-hidden="true">
-      <span class="wordmark-text" aria-hidden="true">
-        <span class="wordmark-accent">H</span><span class="wordmark-name">yper</span><span class="wordmark-accent">DR</span>
-      </span>
-    </h1>
-    <!-- The only place service state is reported. -->
-    <p class="service-state" data-role="service-state" aria-live="polite">
-      <span class="service-dot" data-role="service-dot"></span>
-      <span data-role="service-text" data-i18n="app.service.detecting">正在检测…</span>
-    </p>
-    <button class="icon-button" type="button" data-role="theme-toggle" aria-pressed="false">
-      <svg class="theme-icon theme-icon--sun" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></svg>
-      <svg class="theme-icon theme-icon--moon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20.2 15.3A8.5 8.5 0 0 1 8.7 3.8a8.5 8.5 0 1 0 11.5 11.5Z"/></svg>
-    </button>
-    <!-- The header is the only region main.js never marks `inert`, so a global
-         entry point belongs here rather than in the rail, which is disabled
-         until a photograph is loaded. -->
-    <button class="icon-button" type="button" data-role="prefs-open"
-            aria-expanded="false" aria-haspopup="dialog"
-            data-i18n-attr="aria-label:prefs.open;title:prefs.open">
-      <svg class="prefs-icon" aria-hidden="true" viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="3.2"/>
-        <path d="M19.6 13.4a7.7 7.7 0 0 0 0-2.8l1.9-1.5-1.9-3.3-2.3.9a7.7 7.7 0 0 0-2.4-1.4L14.5 3h-3.8l-.4 2.3a7.7 7.7 0 0 0-2.4 1.4l-2.3-.9-1.9 3.3 1.9 1.5a7.7 7.7 0 0 0 0 2.8l-1.9 1.5 1.9 3.3 2.3-.9a7.7 7.7 0 0 0 2.4 1.4l.4 2.3h3.8l.4-2.3a7.7 7.7 0 0 0 2.4-1.4l2.3.9 1.9-3.3Z"/>
-      </svg>
-    </button>
-  </header>
+
 
   <!-- Full window height. No heading: a panel containing one large photograph
        does not need a caption saying it is the preview. -->
@@ -117,6 +89,37 @@
       </div>
     </div>
   </main>
+
+  <div class="app__rail">
+  <header class="app__header">
+    <h1 class="app__title wordmark" aria-label="HyperDR">
+      <!-- Reuse the exact desktop application icon. -->
+      <img class="wordmark-mark" src="./icon.svg" alt="" aria-hidden="true">
+      <span class="wordmark-text" aria-hidden="true">
+        <span class="wordmark-accent">H</span><span class="wordmark-name">yper</span><span class="wordmark-accent">DR</span>
+      </span>
+    </h1>
+    <!-- The only place service state is reported. -->
+    <p class="service-state" data-role="service-state" aria-live="polite">
+      <span class="service-dot" data-role="service-dot"></span>
+      <span data-role="service-text" data-i18n="app.service.detecting">正在检测…</span>
+    </p>
+    <button class="icon-button" type="button" data-role="theme-toggle" aria-pressed="false">
+      <svg class="theme-icon theme-icon--sun" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></svg>
+      <svg class="theme-icon theme-icon--moon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20.2 15.3A8.5 8.5 0 0 1 8.7 3.8a8.5 8.5 0 1 0 11.5 11.5Z"/></svg>
+    </button>
+    <!-- The header is the only region main.js never marks `inert`, so a global
+         entry point belongs here rather than in the rail, which is disabled
+         until a photograph is loaded. -->
+    <button class="icon-button" type="button" data-role="prefs-open"
+            aria-expanded="false" aria-haspopup="dialog"
+            data-i18n-attr="aria-label:prefs.open;title:prefs.open">
+      <svg class="prefs-icon" aria-hidden="true" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="3.2"/>
+        <path d="M19.6 13.4a7.7 7.7 0 0 0 0-2.8l1.9-1.5-1.9-3.3-2.3.9a7.7 7.7 0 0 0-2.4-1.4L14.5 3h-3.8l-.4 2.3a7.7 7.7 0 0 0-2.4 1.4l-2.3-.9-1.9 3.3 1.9 1.5a7.7 7.7 0 0 0 0 2.8l-1.9 1.5 1.9 3.3 2.3-.9a7.7 7.7 0 0 0 2.4 1.4l.4 2.3h3.8l.4-2.3a7.7 7.7 0 0 0 2.4-1.4l2.3.9 1.9-3.3Z"/>
+      </svg>
+    </button>
+  </header>
 
   <aside class="app__settings" id="settings" data-i18n-attr="aria-label:adjust.label">
     <!-- Histogram & clipping inspection unit at the top of the rail -->
@@ -228,6 +231,7 @@
       </details>
     </div>
   </footer>
+  </div>
 
 </div>
 

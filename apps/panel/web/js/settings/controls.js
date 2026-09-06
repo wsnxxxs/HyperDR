@@ -376,24 +376,8 @@ function mountResets({ toast } = {}) {
    * look being dialled in. */
   const button = role("settings-reset");
   const keys = CONTROLS.map((control) => control.key);
-  let armed = false;
-  let armTimer = 0;
-  const disarm = () => {
-    armed = false;
-    clearTimeout(armTimer);
-    button.classList.remove("is-armed");
-    setText(button, t("adjust.reset"));
-  };
+  button.textContent = t("adjust.reset");
   button.addEventListener("click", () => {
-    // Two-step confirm: a stray click on a text button must not wipe a grade.
-    if (!armed) {
-      armed = true;
-      button.classList.add("is-armed");
-      setText(button, t("adjust.resetConfirm"));
-      armTimer = setTimeout(disarm, 3000);
-      return;
-    }
-    disarm();
     store.set({
       ...defaultsFor(keys),
       // Reset returns to the mathematical defaults, but deliberately keeps the
@@ -402,9 +386,7 @@ function mountResets({ toast } = {}) {
     });
     toast?.(t("adjust.resetDone"));
   });
-  button.addEventListener("blur", disarm);
-  // The armed label is transient, so a locale change simply disarms it.
-  relabel(disarm);
+  relabel(() => { button.textContent = t("adjust.reset"); });
 }
 
 /* ── entry point ────────────────────────────────────────────────────── */

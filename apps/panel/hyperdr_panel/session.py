@@ -1,19 +1,9 @@
-"""One session, one image.
+"""Photo sessions: input ingestion, content identity and idle expiry.
 
-The panel converts a single photograph at a time, so a session holds exactly one
-input and produces exactly one output. That is what lets this module be a
-handful of path lookups: the previous multi-file version had to track the
-running byte total of a directory that grew with every upload *and* with
-whatever the converter wrote into a nested output tree, which took a usage
-cache, a directory mtime stamp, a per-session lock and an explicit invalidation
-hook that `jobs.py` had to remember to call.
-
-Uploading replaces the current input rather than adding to it, matching the
-interface, where tapping the preview swaps the photograph.
-
-The browser never supplies a filesystem path. It receives an opaque session id
-and every path in here is derived from it and re-checked against the workspace
-root, so a crafted id cannot address anything outside.
+The browser creates a new session for each photo. Upload replacement remains
+atomic for API clients that reuse a session. Versioned exports are managed by
+renditions.py; this module retains the legacy direct-output lookup for older
+workspaces. All session paths are resolved beneath the workspace root.
 """
 from __future__ import annotations
 

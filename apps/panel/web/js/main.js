@@ -8,8 +8,10 @@ import { api, ApiError } from "./core/api.js";
 import { store } from "./core/store.js";
 import { role, setText, debounce } from "./core/dom.js";
 import {
-  COLOR_GAMUTS, CONTROLS, PERSISTED_OPTION_KEYS, defaultSettings, encodingById,
+  CONTROLS, PERSISTED_OPTION_KEYS, defaultSettings, validatedSettings,
 } from "./settings/schema.js";
+import { mountWorkspace } from "./core/workspace.js";
+import { mountHistory } from "./settings/history-controls.js";
 import { mountControls } from "./settings/controls.js";
 import { mountStage } from "./preview/stage.js";
 import { mountMask } from "./preview/mask.js";
@@ -92,38 +94,9 @@ function restoreSettings() {
   }
   catch (_) { return; }
   if (!saved || typeof saved !== "object") return;
-  const patch = {};
-  for (const control of CONTROLS) {
-    if (!keys.includes(control.key)) continue;
-    const value = saved[control.key];
-    if (value === undefined) continue;
-    if (control.kind === "segmented") {
-      if (control.choices.some(([id]) => id === value)) patch[control.key] = value;
-    } else if (Number.isFinite(value)) {
-      patch[control.key] = Math.min(control.max, Math.max(control.min, value));
-    }
-  }
-  if (keys.includes("colorGamut")
-      && COLOR_GAMUTS.some(({ id }) => id === saved.colorGamut)) {
-    patch.colorGamut = saved.colorGamut;
-  }
-  if (keys.includes("clampSrgb") && typeof saved.clampSrgb === "boolean") {
-    patch.clampSrgb = saved.clampSrgb;
-  }
-  const effectiveGamut = patch.colorGamut ?? store.get().colorGamut;
-  if (effectiveGamut === "srgb") {
-    patch.clampSrgb = true;
-  }
-  if (keys.includes("encoding")) patch.encoding = encodingById(saved.encoding).id;
-  // The fresh default range must respect the restored encoding's ceiling.
-  const encoding = encodingById(patch.encoding ?? store.get().encoding);
-  patch.hdrRange = Math.min(
-    Number.isFinite(patch.hdrRange) ? patch.hdrRange : store.get().hdrRange,
-    encoding.maxRange);
-  patch.aiHdrRange = Math.min(
-    Number.isFinite(patch.aiHdrRange) ? patch.aiHdrRange : store.get().aiHdrRange,
-    encoding.maxRange);
-  store.set(patch);
+  const selected = Object.fromEntries(keys.filter((key) => saved[key] !== undefined)
+    .map((key) => [key, saved[key]]));
+  store.set(validatedSettings(selected, store.get()));
   // Rewrite both legacy and current snapshots with only the keys that are
   // persisted now, so a grade stored under an older preference cannot be
   // resurrected by turning the preference back on later.
@@ -154,7 +127,9 @@ const stage = mountStage({ toast });
 
 mountControls({ toast });
 mountMask({ stage });
-mountRunner({ toast });
+const runner = mountRunner({ toast });
+const workspace = mountWorkspace({ stage, runner, toast });
+mountHistory();
 mountPrefs({ toast });
 
 /* Viewer defaults are per photograph, not per session: they are what each new
@@ -212,10 +187,12 @@ async function boot() {
     store.set({ capabilities, phase: "ready", error: null });
     if (capabilities.ready) showService("is-ok", "app.service.ready");
     else showService("is-bad", "app.service.missing", "app.service.missingDetail");
+    await workspace.restore();
   } catch (error) {
     const message = error instanceof ApiError ? error.message : t("app.service.bootFailed");
     store.set({ phase: "unavailable", error: message });
     showService("is-warn", "app.service.unavailable", message);
+    store.set({ restoring: false });
   }
 }
 

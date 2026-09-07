@@ -107,7 +107,7 @@ Sony 的 [S-Log3 / S-Gamut3.Cine 技术说明](https://pro.sony/s3/cms-static-co
 ## 使用
 
 界面中先选择「仅调色」或「HDR 增强」，再打开照片。「仅调色」将颜色 LUT 置顶，
-点击「浏览 LUT 库」导入或选用 `.cube`，调整强度后「保存 JPEG」。首次导入默认按 sRGB
+点击顶栏「LUT 库」在右栏搜索、导入或选用 `.cube`，「继续调色」返回强度调整，再「保存 JPEG」。首次导入默认按 sRGB
 处理，空间设置可展开并按 LUT 作者说明修改，不能视为自动识别。LUT 库在本机持久保存，
 支持换照片复用；移出库不会删除照片会话内的副本。启用开关通过强度 0 绕过 LUT。
 HDR 模式保留六种 HDR 输出格式与 LUT 调色。AI 模式支持 SDR 风格 LUT；Log/HLG/PQ LUT

@@ -391,6 +391,17 @@ function mountLut({ toast } = {}) {
     if (!state.lutApplying) select.value = state.lutId;
   }, { immediate: true });
   const enabled = role("lut-enabled");
+  const spaceOpen = role("lut-space-open"), spaceDialog = role("lut-space-dialog");
+  spaceOpen.addEventListener("click", () => {
+    spaceDialog.showModal();
+    spaceOpen.setAttribute("aria-expanded", "true");
+  });
+  spaceDialog.addEventListener("close", () => spaceOpen.setAttribute("aria-expanded", "false"));
+  spaceDialog.addEventListener("click", (event) => {
+    const bounds = spaceDialog.getBoundingClientRect();
+    if (event.target === spaceDialog && (event.clientX < bounds.left || event.clientX > bounds.right
+      || event.clientY < bounds.top || event.clientY > bounds.bottom)) spaceDialog.close();
+  });
   enabled.addEventListener("change", () => {
     const state = store.get();
     store.set(enabled.checked ? { lutStrength: state.lastLutStrength || 1 }
@@ -418,10 +429,14 @@ function mountLut({ toast } = {}) {
     remove.disabled = !state.lutId;
     enabled.disabled = !state.lutId;
     enabled.checked = Boolean(state.lutId && state.lutStrength > 0);
-    role("lut-space-summary").closest("details").hidden = !state.lutId;
+    spaceOpen.hidden = !state.lutId;
+    if (!state.lutId && spaceDialog.open) spaceDialog.close();
     const inputLabel = spaces.find(([id]) => id === state.lutInput)?.[1];
     const outputLabel = spaces.find(([id]) => id === state.lutOutput)?.[1];
-    setText(role("lut-space-summary"), t("lut.spaceSummary", { input: inputLabel, output: outputLabel }));
+    const summary = state.lutInput === state.lutOutput ? inputLabel
+      : t("lut.spaceSummary", { input: inputLabel.split(" · ")[0], output: outputLabel.split(" · ")[0] });
+    setText(role("lut-space-summary"), summary);
+    spaceOpen.title = t("lut.spaceSummary", { input: inputLabel, output: outputLabel });
     const kind = state.lutInput === "slog3-sgamut3cine" ? "log" : ["hlg", "pq"].includes(state.lutInput) ? "hdr" : "sdr";
     setText(role("lut-hint"), t({ log: "lut.hint.log", hdr: "lut.hint.hdr", sdr: "lut.hint.sdr" }[kind]));
   };

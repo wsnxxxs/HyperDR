@@ -34,7 +34,10 @@ export default {
   "lut.libraryFailed": "Could not update the LUT library. Please try again.",
   "lut.delete": "Remove",
   "lut.deleteNamed": "Remove {name} from library (keep current photo effect)",
-  "lut.spaceSummary": "Using {input} → {output} · Space settings",
+  "lut.spaceSummary": "{input} → {output}",
+  "lut.spaceSettings": "Space settings",
+  "lut.spaceClose": "Close space settings",
+  "lut.spaceHelp": "Set the input and output spaces specified by the LUT provider. Changes preview immediately.",
 
   "hdr.sdrOutput": "SDR preview · sRGB JPEG output",
   "hdr.reason.sdrOutput": "SDR output",

@@ -114,6 +114,7 @@ export const store = createStore({
   lutLibraryOpen: false,
   lutLibraryQuery: "",
   lutLibraryBusy: false,
+  lutApplying: false,
   lutLibraryError: "",
   lastLutStrength: 1,
   /** Whether the current image already has a reusable model gain in memory. */

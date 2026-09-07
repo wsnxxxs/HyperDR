@@ -1217,6 +1217,5 @@ html.prefs-open body {
 }
 .export-history .link-button { justify-self: start; }
 
-.lut-filename { overflow-wrap:anywhere; margin:10px 0; }
 .lut-space { display:grid; gap:6px; margin:12px 0; }
 .lut-select { width:100%; min-height:36px; border:1px solid var(--line-strong); border-radius:6px; padding:6px 8px; background:var(--surface-card); color:inherit; font:inherit; }

@@ -69,7 +69,7 @@ function applySnapshot(next) {
     photoId = id; frame = null; original = null; displayedVersion = 0;
     comparing = false; draw();
     canvas.style.visibility = "hidden";
-    $("compare").disabled = $("fit").disabled = true;
+    $("compare").disabled = true;
     resetView();
   }
   $("viewer-state").textContent = next.pending ? "正在交给电脑编辑器"
@@ -137,7 +137,7 @@ async function loadFrame() {
     canvas.width = frame.width; canvas.height = frame.height;
     renderer.upload(frame); draw(); canvas.style.visibility = "visible";
     displayedVersion = version;
-    $("compare").disabled = $("fit").disabled = false;
+    $("compare").disabled = false;
     $("viewer-state").textContent = snapshot.current.status === "exporting" ? "正在导出成品" : "已同步最新效果";
     transform();
   } catch (error) {
@@ -160,7 +160,6 @@ function transform() {
   $("original-photo").style.transform = canvas.style.transform;
 }
 function resetView() { zoom = 1; panX = panY = 0; transform(); }
-$("fit").addEventListener("click", resetView);
 $("compare").addEventListener("pointerdown", (event) => {
   event.preventDefault(); $("compare").setPointerCapture(event.pointerId); comparing = true; draw();
 });

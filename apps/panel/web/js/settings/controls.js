@@ -391,7 +391,6 @@ function mountLut({ toast } = {}) {
     enabled.disabled = !state.lutId;
     enabled.checked = Boolean(state.lutId && state.lutStrength > 0);
     role("lut-space-summary").closest("details").hidden = !state.lutId;
-    role("lut-library-open").disabled = !state.sessionId || state.uploading || state.restoring;
     setText(role("lut-name"), state.lutName || t("lut.empty"));
     const inputLabel = spaces.find(([id]) => id === state.lutInput)?.[1];
     const outputLabel = spaces.find(([id]) => id === state.lutOutput)?.[1];

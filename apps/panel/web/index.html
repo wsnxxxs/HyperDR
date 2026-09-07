@@ -34,6 +34,7 @@
       </span>
     </h1>
     <button class="button open-photo" type="button" data-role="open-photo"><i class="ph ph-folder-open" aria-hidden="true"></i><span data-i18n="editor.open">打开照片</span></button>
+    <button class="button header-lut-library" type="button" data-role="lut-library-open" aria-expanded="false" aria-controls="lut-library"><i class="ph ph-palette" aria-hidden="true"></i><span data-i18n="lut.browse">LUT 库</span></button>
     <span class="document-state" data-role="document-state"></span>
     <div class="header-history" data-role="header-history"></div>
     <button class="button" id="phone-connect" type="button" aria-haspopup="dialog" data-i18n-attr="title:phone.title;aria-label:phone.title"><i class="ph ph-device-mobile" aria-hidden="true"></i><span data-i18n="phone.connect">连接手机</span></button>
@@ -120,9 +121,25 @@
   </main>
 
   <aside class="app__rail" data-i18n-attr="aria-label:adjust.label">
-
-
-
+    <section class="lut-library" id="lut-library" data-role="lut-library" hidden aria-labelledby="lut-library-title">
+      <header class="lut-library-head">
+        <div class="lut-library-heading"><h2 id="lut-library-title" data-i18n="lut.library">我的 LUT</h2><span class="lut-library-count" data-role="lut-library-count"></span></div>
+        <button type="button" class="icon-button" data-role="lut-library-close" data-i18n-attr="aria-label:lut.close;title:lut.close"><i class="ph ph-x" aria-hidden="true"></i></button>
+      </header>
+      <p class="lut-library-description" data-role="lut-library-description"></p>
+      <div class="lut-library-tools">
+        <label class="lut-library-search"><i class="ph ph-magnifying-glass" aria-hidden="true"></i><input type="search" data-role="lut-library-search" data-i18n-attr="aria-label:lut.search;placeholder:lut.search" autocomplete="off"></label>
+        <button type="button" class="button" data-role="lut-load"><i class="ph ph-plus" aria-hidden="true"></i><span data-i18n="lut.load">导入</span></button>
+        <input type="file" accept=".cube" multiple data-role="lut-file" hidden>
+      </div>
+      <p class="lut-library-status" data-role="lut-library-status" role="status" hidden></p>
+      <div class="lut-library-list" data-role="lut-library-list"></div>
+      <footer class="lut-library-footer">
+        <div class="lut-library-current"><span data-i18n="lut.current">当前风格</span><strong data-role="lut-library-current"></strong></div>
+        <button type="button" class="button button--primary" data-role="lut-library-done" data-i18n="lut.done">继续调色</button>
+        <p data-i18n="lut.libraryHint">风格保存在本机，可用于其他照片。</p>
+      </footer>
+    </section>
     <section class="scope" data-i18n-attr="aria-label:scope.label">
       <div class="scope-head">
         <h2 data-i18n="editor.histogram">直方图</h2>
@@ -181,16 +198,7 @@
       <details class="parameter-group lut-panel" data-role="lut-panel" open>
         <summary><span><i class="ph ph-palette" aria-hidden="true"></i><span data-i18n="lut.title">颜色 LUT</span></span><i class="ph ph-caret-down" aria-hidden="true"></i></summary>
         <div class="parameter-body">
-          <p class="field-hint lut-filename" data-role="lut-name"></p>
-          <div class="lut-file-row"><button type="button" class="button" data-role="lut-library-open" aria-expanded="false" aria-controls="lut-library" data-i18n="lut.browse">浏览 LUT 库</button><button type="button" class="link-button" data-role="lut-remove" data-i18n="lut.remove">移除</button></div>
-          <section class="lut-library" id="lut-library" data-role="lut-library" hidden aria-labelledby="lut-library-title">
-            <div class="lut-file-row"><h3 id="lut-library-title" data-i18n="lut.library">我的 LUT</h3><button type="button" class="link-button" data-role="lut-library-close" data-i18n="lut.done">完成</button></div>
-            <button type="button" class="button" data-role="lut-load" data-i18n="lut.load">导入 .cube</button>
-            <input type="file" accept=".cube" multiple data-role="lut-file" hidden>
-            <p class="field-hint" data-i18n="lut.libraryHint">保存在本机，换照片后可继续使用。</p>
-            <p class="field-hint" data-role="lut-library-status" aria-live="polite"></p>
-            <div class="lut-library-list" data-role="lut-library-list"></div>
-          </section>
+          <div class="lut-current-look"><p class="field-hint lut-filename" data-role="lut-name"></p><button type="button" class="icon-button" data-role="lut-remove" data-i18n-attr="aria-label:lut.remove;title:lut.remove"><i class="ph ph-x" aria-hidden="true"></i></button></div>
           <label class="lut-enable"><input type="checkbox" data-role="lut-enabled" checked><span data-i18n="lut.enabled">启用 LUT</span></label>
           <div class="group" data-role="group-lut"></div>
           <details class="lut-advanced">

@@ -111,6 +111,8 @@ export const store = createStore({
   lastHdrEncoding: "adaptive",
   lastHdrOptimized: false,
   lutLibraryEntries: [],
+  lutLibraryOpen: false,
+  lutLibraryQuery: "",
   lutLibraryBusy: false,
   lutLibraryError: "",
   lastLutStrength: 1,

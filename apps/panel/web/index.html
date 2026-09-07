@@ -137,6 +137,14 @@
       </div>
     </section>
 
+    <section class="workflow-picker">
+      <h2 data-i18n="workflow.title">处理模式</h2>
+      <div class="segmented" role="group" data-i18n-attr="aria-label:workflow.title">
+        <button type="button" data-role="workflow-color" aria-pressed="false" data-i18n="workflow.color">仅调色</button>
+        <button type="button" data-role="workflow-hdr" aria-pressed="true" data-i18n="workflow.hdr">HDR 增强</button>
+      </div>
+      <p class="field-hint" data-role="workflow-hint"></p>
+    </section>
     <section class="rail-welcome">
       <h2 data-i18n="welcome.title">从一张照片开始</h2>
       <p data-i18n="welcome.description">打开照片后，在这里调整光线与高光层次。</p>
@@ -170,15 +178,26 @@
           <div class="parameter-body"><div class="group" data-role="group-model-detail"></div></div>
         </details>
       </div>
-      <details class="parameter-group" open>
+      <details class="parameter-group lut-panel" data-role="lut-panel" open>
         <summary><span><i class="ph ph-palette" aria-hidden="true"></i><span data-i18n="lut.title">颜色 LUT</span></span><i class="ph ph-caret-down" aria-hidden="true"></i></summary>
         <div class="parameter-body">
-          <div class="lut-file-row"><button type="button" class="link-button" data-role="lut-load" data-i18n="lut.load">导入 .cube</button><button type="button" class="link-button" data-role="lut-remove" data-i18n="lut.remove">移除</button></div>
-          <input type="file" accept=".cube" data-role="lut-file" hidden>
           <p class="field-hint lut-filename" data-role="lut-name"></p>
-          <div data-role="lut-spaces"></div>
+          <div class="lut-file-row"><button type="button" class="button" data-role="lut-library-open" aria-expanded="false" aria-controls="lut-library" data-i18n="lut.browse">浏览 LUT 库</button><button type="button" class="link-button" data-role="lut-remove" data-i18n="lut.remove">移除</button></div>
+          <section class="lut-library" id="lut-library" data-role="lut-library" hidden aria-labelledby="lut-library-title">
+            <div class="lut-file-row"><h3 id="lut-library-title" data-i18n="lut.library">我的 LUT</h3><button type="button" class="link-button" data-role="lut-library-close" data-i18n="lut.done">完成</button></div>
+            <button type="button" class="button" data-role="lut-load" data-i18n="lut.load">导入 .cube</button>
+            <input type="file" accept=".cube" multiple data-role="lut-file" hidden>
+            <p class="field-hint" data-i18n="lut.libraryHint">保存在本机，换照片后可继续使用。</p>
+            <p class="field-hint" data-role="lut-library-status" aria-live="polite"></p>
+            <div class="lut-library-list" data-role="lut-library-list"></div>
+          </section>
+          <label class="lut-enable"><input type="checkbox" data-role="lut-enabled" checked><span data-i18n="lut.enabled">启用 LUT</span></label>
           <div class="group" data-role="group-lut"></div>
-          <p class="parameter-note" data-role="lut-hint"></p>
+          <details class="lut-advanced">
+            <summary data-role="lut-space-summary"></summary>
+            <div data-role="lut-spaces"></div>
+            <p class="parameter-note" data-role="lut-hint"></p>
+          </details>
         </div>
       </details>
     </div>

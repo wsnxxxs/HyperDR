@@ -17,7 +17,7 @@ import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import job, model, session, renditions, color_lut
+from . import job, model, session, renditions, color_lut, lut_library
 from .command import build_argv
 from .concurrency import Busy
 from .formats import SUPPORTED_EXTENSIONS
@@ -430,7 +430,25 @@ def workspace(_context: Context, query: dict) -> Response:
         return error(exc, status=404)
 
 
+def list_luts(_context: Context, _query: dict) -> Response:
+    return Response(payload={"entries": lut_library.entries()})
+
+
+def manage_lut(_context: Context, body: dict) -> Response:
+    digest = body.get("lutId")
+    action = body.get("action")
+    if action == "apply":
+        return Response(payload=lut_library.apply(body.get("sessionId"), digest))
+    if action == "update":
+        return Response(payload=lut_library.update(digest, body))
+    if action == "remove":
+        lut_library.remove(digest)
+        return Response(payload={"ok": True})
+    return error("未知 LUT 库操作。")
+
+
 GET_ROUTES = {
+    "/api/lut-library": list_luts,
     "/api/workspace": workspace,
     "/api/state": state,
     "/api/preview": preview,
@@ -439,6 +457,7 @@ GET_ROUTES = {
 }
 
 POST_ROUTES = {
+    "/api/lut-library": manage_lut,
     "/api/session": new_session,
     "/api/native-input": open_native_path,
     "/api/run": run,

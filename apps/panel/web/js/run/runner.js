@@ -80,7 +80,7 @@ export function mountRunner({ toast }) {
    * card has gone stale it says so by offering to "重新转换". */
   function syncRunLabel() {
     if (activeJobId || starting) return;
-    setText(runButton, isStale(store.get()) ? t("run.again") : t("run.start"));
+    setText(runButton, store.get().encoding === "sdr-jpeg" ? t("workflow.saveJpeg") : isStale(store.get()) ? t("run.again") : t("run.start"));
   }
 
   function syncStale(state) {

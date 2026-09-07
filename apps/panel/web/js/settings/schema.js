@@ -19,7 +19,7 @@
 import { t } from "../i18n/index.js";
 
 export const ENCODINGS = [
-  { id: "sdr-jpeg", label: "SDR JPEG", maxRange: 4, hint: "enc.sdr-jpeg.hint" },
+  { id: "sdr-jpeg", label: "JPEG", maxRange: 4, hint: "enc.sdr-jpeg.hint" },
   {
     id: "adaptive", label: "Adaptive HDR", maxRange: 3,
     hint: "enc.adaptive.hint",
@@ -206,6 +206,7 @@ export function defaultSettings(encoding = "adaptive") {
     lutId: "", lutName: "", lutInput: "srgb", lutOutput: "srgb",
   };
   for (const control of CONTROLS) values[control.key] = control.default;
+  if (activeEncoding.id === "sdr-jpeg") values.brightness = 0;
   values.hdrRange = Math.min(values.hdrRange, activeEncoding.maxRange);
   values.aiHdrRange = Math.min(values.aiHdrRange, activeEncoding.maxRange);
   return values;

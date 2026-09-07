@@ -211,6 +211,32 @@
 }
 
 /* Dialogs and navigation use the same control rhythm as the editor. */
+.workflow-picker { padding: 18px 20px; border-bottom: 1px solid var(--line); }
+.workflow-picker h2 { margin-bottom: 12px; font-size: var(--text-sm); font-weight: 600; }
+.workflow-picker .segmented { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.workflow-picker button { min-height: var(--control-height); font-size: var(--text-sm); }
+.workflow-picker .field-hint { margin-top: 10px; }
+:root[data-workflow="color"] .optimize-toggle,
+:root[data-workflow="color"] [data-role="optimize-note"] { display: none; }
+:root[data-workflow="color"] .lut-panel { border-top: 0; border-bottom: 1px solid var(--line); }
+.out-formats--sdr { grid-template-columns: minmax(0, 1fr); }
+.lut-file-row { align-items: center; }
+.lut-file-row h3 { font-size: var(--text-sm); font-weight: 600; }
+.lut-enable { display: flex; align-items: center; gap: 8px; margin: 16px 0 8px; color: var(--ink); font-size: var(--text-xs); }
+.lut-enable input { accent-color: var(--accent); }
+.lut-library { margin-top: 14px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-sunken); }
+.lut-library > .button { width: 100%; margin-top: 12px; }
+.lut-library .field-hint { margin-top: 10px; }
+.lut-library-list { display: grid; gap: 8px; max-height: 300px; overflow-y: auto; margin-top: 10px; }
+.lut-library-item { display: flex; align-items: center; gap: 8px; }
+.lut-library-choice { display: grid; gap: 5px; flex: 1; min-width: 0; min-height: 56px; padding: 10px; text-align: left; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-card); color: var(--ink); }
+.lut-library-choice strong { overflow-wrap: anywhere; font-size: var(--text-sm); font-weight: 500; }
+.lut-library-choice small { color: var(--ink-muted); font-size: var(--text-xs); }
+.lut-library-choice[aria-pressed="true"] { border-color: var(--accent); background: var(--selected-bg); color: var(--selected-ink); }
+.lut-library-choice[aria-pressed="true"] small { color: var(--selected-ink); }
+.lut-library-item > .link-button { flex: none; font-size: var(--text-xs); }
+.lut-advanced { margin-top: 16px; }
+.lut-advanced > summary { cursor: pointer; color: var(--ink-muted); font-size: var(--text-xs); line-height: 1.7; }
 .prefs-title { font-size: var(--text-lg); }
 .export-head .icon-button, .prefs-head .icon-button { width: var(--control-compact); height: var(--control-compact); }
 .prefs-nav button { gap: 10px; min-height: var(--control-height); font-size: var(--text-sm); }

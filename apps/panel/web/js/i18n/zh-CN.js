@@ -35,7 +35,10 @@ export default {
   "lut.libraryFailed": "LUT 库操作失败，请重试。",
   "lut.delete": "移出库",
   "lut.deleteNamed": "将 {name} 移出库（保留当前照片效果）",
-  "lut.spaceSummary": "按 {input} → {output} 处理 · 空间设置",
+  "lut.spaceSummary": "{input} → {output}",
+  "lut.spaceSettings": "空间设置",
+  "lut.spaceClose": "关闭空间设置",
+  "lut.spaceHelp": "按 LUT 提供方的说明设置输入和输出空间，修改后即时预览。",
 
   "hdr.sdrOutput": "SDR 预览 · sRGB JPEG 输出",
   "hdr.reason.sdrOutput": "SDR 输出",

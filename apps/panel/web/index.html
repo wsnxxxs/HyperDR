@@ -183,11 +183,10 @@
           <div class="lut-current-look"><select class="lut-select" data-role="lut-select" data-i18n-attr="aria-label:lut.select"></select><button type="button" class="icon-button" data-role="lut-remove" data-i18n-attr="aria-label:lut.remove;title:lut.remove"><i class="ph ph-x" aria-hidden="true"></i></button></div>
           <label class="lut-enable"><input type="checkbox" data-role="lut-enabled" checked><span data-i18n="lut.enabled">启用 LUT</span></label>
           <div class="group" data-role="group-lut"></div>
-          <details class="lut-advanced">
-            <summary data-role="lut-space-summary"></summary>
-            <div data-role="lut-spaces"></div>
-            <p class="parameter-note" data-role="lut-hint"></p>
-          </details>
+          <button class="lut-space-trigger" type="button" data-role="lut-space-open" aria-haspopup="dialog" aria-controls="lut-space-dialog" aria-expanded="false">
+            <span class="lut-space-copy"><span data-i18n="lut.spaceSettings">空间设置</span><small data-role="lut-space-summary"></small></span>
+            <i class="ph ph-caret-right" aria-hidden="true"></i>
+          </button>
         </div>
       </details>
     </div>
@@ -203,6 +202,19 @@
     <button class="link-button shortcuts-open" type="button" data-role="shortcuts-open"><i class="ph ph-keyboard" aria-hidden="true"></i><span data-i18n="workspace.shortcuts">快捷键</span></button>
   </footer>
 </div>
+
+    <dialog class="lut-space-dialog" id="lut-space-dialog" data-role="lut-space-dialog" aria-labelledby="lut-space-title" aria-describedby="lut-space-help">
+      <header class="lut-space-head">
+        <h2 id="lut-space-title" data-i18n="lut.spaceSettings">空间设置</h2>
+        <form method="dialog"><button class="icon-button" data-i18n-attr="aria-label:lut.spaceClose;title:lut.spaceClose"><i class="ph ph-x" aria-hidden="true"></i></button></form>
+      </header>
+      <div class="lut-space-body">
+        <p id="lut-space-help" data-i18n="lut.spaceHelp">按 LUT 提供方的说明设置输入和输出空间，修改后即时预览。</p>
+        <div class="lut-space-fields" data-role="lut-spaces"></div>
+        <p class="parameter-note" data-role="lut-hint"></p>
+      </div>
+      <form method="dialog" class="lut-space-foot"><button class="button button--primary" data-i18n="lut.done">完成</button></form>
+    </dialog>
 
     <dialog class="lut-library" id="lut-library" data-role="lut-library" aria-labelledby="lut-library-title">
       <header class="lut-library-head">

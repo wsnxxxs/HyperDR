@@ -78,11 +78,16 @@ export const api = {
   async uploadLut(sessionId, file) {
     let response;
     try {
-      response = await fetch("/api/lut-upload?" + new URLSearchParams({ id: sessionId, name: file.name }),
+      response = await fetch("/api/lut-upload?" + new URLSearchParams({ id: sessionId, name: file.name, library: "1" }),
         { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file });
     } catch { throw OFFLINE(); }
     return unwrap(response, t("lut.failed"));
   },
+
+  lutLibrary: () => get("/api/lut-library", null, t("lut.libraryFailed")),
+  applyLibraryLut: (sessionId, lutId) => post("/api/lut-library", { action: "apply", sessionId, lutId }, t("lut.failed")),
+  updateLibraryLut: (lutId, spaces) => post("/api/lut-library", { action: "update", lutId, ...spaces }, t("lut.libraryFailed")),
+  removeLibraryLut: (lutId) => post("/api/lut-library", { action: "remove", lutId }, t("lut.libraryFailed")),
 
   /* -- settings ------------------------------------------------------ */
 

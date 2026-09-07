@@ -8,7 +8,8 @@
 import { el, role, setPressed, setText, clamp } from "../core/dom.js";
 import { store } from "../core/store.js";
 import { COLOR_GAMUTS, CONTROLS, ENCODINGS, encodingById, neutralSettings } from "./schema.js";
-import { api } from "../core/api.js";
+import { mountLutLibrary } from "./lut-library.js";
+import { mountWorkflow } from "./workflow.js";
 import { t, onLocaleChange } from "../i18n/index.js";
 
 /* Widgets are built once and mutated thereafter, so a language change has to
@@ -299,7 +300,9 @@ function mountEncoding({ toast } = {}) {
     const active = encodingById(id);
     for (const [key, button] of buttons) {
       button.setAttribute("aria-pressed", String(key === active.id));
+      button.hidden = (key === "sdr-jpeg") !== (id === "sdr-jpeg");
     }
+    container.classList.toggle("out-formats--sdr", id === "sdr-jpeg");
     setText(hint, t(active.hint));
   }, { immediate: true });
   relabel(() => setText(hint, t(encodingById(store.get().encoding).hint)));
@@ -317,6 +320,7 @@ function mountColorGamut() {
   limited.addEventListener("click", () => store.set({ clampSrgb: true }));
   const sync = (state) => {
     const sdr = state.encoding === "sdr-jpeg";
+    gamut.closest("section").hidden = sdr;
     current.disabled = limited.disabled = sdr;
     setText(current, t("editor.currentGamut"));
     setText(limited, t("out.clampSrgb"));
@@ -339,10 +343,13 @@ function mountResets({ toast } = {}) {
   const keys = CONTROLS.map((control) => control.key);
   button.textContent = t("adjust.reset");
   button.addEventListener("click", () => {
+    const colorOnly = store.get().encoding === "sdr-jpeg";
     const neutral = neutralSettings(store.get().encoding);
+    const resetKeys = colorOnly ? ["brightness", "contrast", "vibrance", "lutStrength"] : keys;
     store.set({
-      ...Object.fromEntries(keys.map((key) => [key, neutral[key]])),
+      ...Object.fromEntries(resetKeys.map((key) => [key, neutral[key]])),
       lutId: "", lutName: "", lutInput: "srgb", lutOutput: "srgb",
+      ...(colorOnly ? {} : { lastHdrOptimized: false }),
       // Reset returns to neutral manual development, but deliberately keeps the
       // current image's inferred gain cached for an instant comparison.
       previewOptimized: false,
@@ -353,7 +360,14 @@ function mountResets({ toast } = {}) {
 }
 
 function mountLut({ toast } = {}) {
-  const file = role("lut-file"), load = role("lut-load"), remove = role("lut-remove");
+  const library = mountLutLibrary({ toast });
+  const remove = role("lut-remove");
+  const enabled = role("lut-enabled");
+  enabled.addEventListener("change", () => {
+    const state = store.get();
+    store.set(enabled.checked ? { lutStrength: state.lastLutStrength || 1 }
+      : { lastLutStrength: state.lutStrength, lutStrength: 0 });
+  });
   const spaces = [["srgb", "sRGB"], ["p3", "Display P3"], ["rec709", "Rec.709 · Gamma 2.4"],
     ["hlg", "HLG · BT.2020"], ["pq", "PQ · BT.2020"], ["slog3-sgamut3cine", "S-Log3 · S-Gamut3.Cine"]];
   for (const [key, labelKey] of [["lutInput", "lut.input"], ["lutOutput", "lut.output"]]) {
@@ -366,31 +380,26 @@ function mountLut({ toast } = {}) {
       if (key === "lutInput") patch.lutOutput = select.value === "slog3-sgamut3cine" ? "rec709" : select.value;
       if (["hlg", "pq", "slog3-sgamut3cine"].includes(patch.lutInput)) patch.previewOptimized = false;
       store.set(patch);
+      void library.saveSpaces(store.get());
     });
     store.watchAny([key, "lutId"], (state) => { select.value = state[key]; select.disabled = !state.lutId; }, { immediate: true });
     relabel(() => { label.firstChild.textContent = t(labelKey); select.setAttribute("aria-label", t(labelKey)); });
   }
-  load.addEventListener("click", () => file.click());
   remove.addEventListener("click", () => store.set({ lutId: "", lutName: "" }));
-  file.addEventListener("change", async () => {
-    const selected = file.files?.[0], sessionId = store.get().sessionId;
-    file.value = "";
-    if (!selected || !sessionId) return;
-    load.disabled = true;
-    try {
-      const saved = await api.uploadLut(sessionId, selected);
-      if (store.get().sessionId === sessionId) store.set({ ...saved, lutStrength: 1 });
-    } catch (error) { toast?.(error.message || t("lut.failed")); }
-    finally { load.disabled = !store.get().sessionId; }
-  });
   const sync = (state) => {
-    load.disabled = !state.sessionId || state.uploading;
     remove.disabled = !state.lutId;
+    enabled.disabled = !state.lutId;
+    enabled.checked = Boolean(state.lutId && state.lutStrength > 0);
+    role("lut-space-summary").closest("details").hidden = !state.lutId;
+    role("lut-library-open").disabled = !state.sessionId || state.uploading || state.restoring;
     setText(role("lut-name"), state.lutName || t("lut.empty"));
+    const inputLabel = spaces.find(([id]) => id === state.lutInput)?.[1];
+    const outputLabel = spaces.find(([id]) => id === state.lutOutput)?.[1];
+    setText(role("lut-space-summary"), t("lut.spaceSummary", { input: inputLabel, output: outputLabel }));
     const kind = state.lutInput === "slog3-sgamut3cine" ? "log" : ["hlg", "pq"].includes(state.lutInput) ? "hdr" : "sdr";
     setText(role("lut-hint"), t({ log: "lut.hint.log", hdr: "lut.hint.hdr", sdr: "lut.hint.sdr" }[kind]));
   };
-  store.watchAny(["sessionId", "uploading", "lutId", "lutName", "lutInput"], sync, { immediate: true });
+  store.watchAny(["sessionId", "uploading", "restoring", "lutId", "lutName", "lutInput", "lutOutput", "lutStrength"], sync, { immediate: true });
   store.watch("sessionId", () => {
     if (!store.get().restoring) store.set({ lutId: "", lutName: "" });
   });
@@ -404,6 +413,7 @@ function mountLut({ toast } = {}) {
 /* ── entry point ────────────────────────────────────────────────────── */
 
 export function mountControls({ toast } = {}) {
+  mountWorkflow();
   mountEncoding({ toast });
   mountColorGamut();
   mountLut({ toast });
@@ -421,6 +431,9 @@ export function mountControls({ toast } = {}) {
     if (!container) continue;
     const widget = BUILDERS[control.kind](control);
     container.append(widget.node);
+    if (control.key === "lutStrength") {
+      store.watch("lutId", (id) => { widget.node.querySelector("input").disabled = !id; }, { immediate: true });
+    }
     if (["hdrStrength", "hdrRange", "expansionStart", "areaCoverage"].includes(control.key)) {
       store.watch("encoding", (id) => { widget.node.hidden = id === "sdr-jpeg"; }, { immediate: true });
     }
@@ -443,8 +456,8 @@ export function mountControls({ toast } = {}) {
   }, { immediate: true });
 
   const modeNote = role("mode-note");
-  const syncModeNote = () => setText(modeNote, store.get().previewOptimized ? t("inspector.aiNote") : t("inspector.manualNote"));
-  store.watch("previewOptimized", syncModeNote, { immediate: true });
+  const syncModeNote = () => setText(modeNote, store.get().encoding === "sdr-jpeg" ? t("workflow.baseNote") : store.get().previewOptimized ? t("inspector.aiNote") : t("inspector.manualNote"));
+  store.watchAny(["previewOptimized", "encoding"], syncModeNote, { immediate: true });
   relabels.push(syncModeNote);
   for (const group of document.querySelectorAll(".parameter-group")) {
     group.addEventListener("toggle", () => { if (!group.open) store.set({ maskKey: null }); });

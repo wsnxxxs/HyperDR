@@ -5,15 +5,15 @@
  * HDR) and colour spaces are proper nouns and stay as they are in both.
  */
 export default {
-  "lut.close": "Back to adjustments",
+  "lut.manageHint": "Manage your local LUTs. Import one or more .cube files.",
+
+  "lut.select": "Choose a LUT look",
+
+  "lut.close": "Close LUT library",
   "lut.search": "Search looks",
   "lut.searchEmpty": "No matching looks. Try a different name.",
-  "lut.current": "Current look",
-  "lut.none": "No LUT selected",
-  "lut.selected": "Selected",
+  "lut.none": "No LUT",
   "lut.count": "{count} looks",
-  "lut.previewHint": "Select a look to preview it on your photo.",
-  "lut.choosePhoto": "Collect your looks here. Open a photo to try them.",
 
   "lut.enabled": "Enable LUT",
   "workflow.title": "Processing mode",
@@ -27,7 +27,7 @@ export default {
   "workflow.colorEffect": "Graded photo",
   "lut.browse": "LUT library",
   "lut.library": "My LUTs",
-  "lut.done": "Continue editing",
+  "lut.done": "Done",
   "lut.libraryHint": "Looks stay on this computer, ready for your next photo.",
   "lut.libraryEmpty": "Your library is empty. Import one or more .cube files to get started.",
   "lut.loading": "Loading…",
@@ -43,7 +43,7 @@ export default {
   "lut.title": "Colour LUT",
   "lut.load": "Import",
   "lut.remove": "Clear current LUT",
-  "lut.empty": "Choose a look from the LUT library in the toolbar",
+  "lut.empty": "Import looks using the LUT library in the toolbar",
   "lut.failed": "Could not import LUT",
   "lut.input": "Input space required by LUT",
   "lut.output": "Output space produced by LUT",

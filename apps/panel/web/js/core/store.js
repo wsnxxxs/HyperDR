@@ -108,6 +108,12 @@ export const store = createStore({
   maskKey: null,
   /** Whether the preview/export is currently using the model gain. */
   previewOptimized: false,
+  lastHdrEncoding: "adaptive",
+  lastHdrOptimized: false,
+  lutLibraryEntries: [],
+  lutLibraryBusy: false,
+  lutLibraryError: "",
+  lastLutStrength: 1,
   /** Whether the current image already has a reusable model gain in memory. */
   modelGainReady: false,
   optimizing: false,

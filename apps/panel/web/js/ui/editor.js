@@ -44,11 +44,12 @@ export function mountEditor({ stage }) {
   }
   function sync() {
     const state = store.get();
+    const sdr = state.encoding === "sdr-jpeg";
     open.closest(".app").dataset.workspace = state.file ? "editing" : state.uploading || state.restoring ? "loading" : "empty";
     const ready = Boolean(state.file && state.previewReady);
     open.disabled = state.restoring || state.uploading || state.starting || state.optimizing || Boolean(state.jobId);
     exportOpen.disabled = !state.file || state.uploading || state.restoring;
-    setText(exportOpen.querySelector("span"), state.jobId || state.starting ? t("editor.exporting") : t("editor.export"));
+    setText(exportOpen.querySelector("span"), state.jobId || state.starting ? t("editor.exporting") : sdr ? t("workflow.saveJpeg") : t("editor.export"));
     setText(filename, state.file?.name || t("editor.noPhoto"));
     filename.title = state.file?.name || "";
     const currentKey = JSON.stringify({ ...toOptions(state), useModel: Boolean(state.previewOptimized) });
@@ -60,9 +61,9 @@ export function mountEditor({ stage }) {
     setText(metadata, frame ? [t("workspace.previewSize", { width: frame.width, height: frame.height }), size].filter(Boolean).join(" · ") : "");
     setText(viewerHint, !ready ? "" : state.viewerZoom > 1 ? t("workspace.panHint") : state.viewMode === "split" ? t("workspace.compareHint") : t("workspace.photoHint"));
     setText(exportFilename, state.file?.name || "");
-    setText(summary, `${state.previewOptimized ? t("adjust.ai") : t("adjust.manual")} · ${encodingById(state.encoding).label}`);
+    setText(summary, sdr ? t("workflow.jpegSummary") : `${state.previewOptimized ? t("adjust.ai") : t("adjust.manual")} · ${encodingById(state.encoding).label}`);
     for (const { value, label, button } of modeButtons) {
-      setText(button, t(label)); setPressed(button, state.viewMode === value); button.disabled = !ready;
+      setText(button, sdr && value === "effect" ? t("workflow.colorEffect") : t(label)); setPressed(button, state.viewMode === value); button.disabled = !ready;
     }
     fit.disabled = zoomOut.disabled = zoomIn.disabled = !ready;
     setText(zoomValue, `${Math.round(state.viewerZoom * 100)}%`);

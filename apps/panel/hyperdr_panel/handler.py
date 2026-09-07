@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
 
-from . import api, job, security, color_lut
+from . import api, job, security, color_lut, lut_library
 from .config import WEB_ROOT
 from .session import save_upload
 
@@ -248,6 +248,8 @@ class Handler(BaseHTTPRequestHandler):
                 with job.upload_slot():
                     saved = color_lut.save(query.get("id", [""])[0], query.get("name", [""])[0],
                                            self.rfile, int(self.headers.get("Content-Length", "0")))
+                    if query.get("library") == ["1"]:
+                        saved = lut_library.add(query.get("id", [""])[0], saved)
                 self._send(api.Response(status=201, payload=saved))
             except (job.Busy, OSError, ValueError, UnicodeError) as exc:
                 self.close_connection = True

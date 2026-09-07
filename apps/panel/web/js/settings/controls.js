@@ -10,6 +10,7 @@ import { store } from "../core/store.js";
 import { COLOR_GAMUTS, CONTROLS, ENCODINGS, encodingById, neutralSettings } from "./schema.js";
 import { mountLutLibrary } from "./lut-library.js";
 import { mountWorkflow } from "./workflow.js";
+import { api } from "../core/api.js";
 import { t, onLocaleChange } from "../i18n/index.js";
 
 /* Widgets are built once and mutated thereafter, so a language change has to
@@ -362,6 +363,33 @@ function mountResets({ toast } = {}) {
 function mountLut({ toast } = {}) {
   const library = mountLutLibrary({ toast });
   const remove = role("lut-remove");
+  const select = role("lut-select");
+  const renderChoices = (state) => {
+    select.replaceChildren(el("option", { value: "" }, state.lutLibraryEntries.length ? t("lut.none") : t("lut.empty")));
+    const entries = [...state.lutLibraryEntries];
+    if (state.lutId && !entries.some((entry) => entry.lutId === state.lutId)) entries.unshift({ lutId: state.lutId, lutName: state.lutName });
+    for (const entry of entries) select.append(el("option", { value: entry.lutId }, entry.lutName.replace(/\.cube$/i, "")));
+    select.value = state.lutId;
+  };
+  store.watchAny(["lutLibraryEntries", "lutId", "lutName"], renderChoices, { immediate: true });
+  relabel(() => renderChoices(store.get()));
+  select.addEventListener("change", async () => {
+    const lutId = select.value, sessionId = store.get().sessionId;
+    if (!lutId) { store.set({ lutId: "", lutName: "" }); return; }
+    store.set({ lutApplying: true });
+    try {
+      const saved = await api.applyLibraryLut(sessionId, lutId);
+      if (store.get().sessionId === sessionId) {
+        const technical = ["hlg", "pq", "slog3-sgamut3cine"].includes(saved.lutInput);
+        store.set({ ...saved, lutStrength: 1, ...(technical ? { previewOptimized: false } : {}) });
+      }
+    } catch (error) { toast?.(error.message || t("lut.failed")); }
+    finally { store.set({ lutApplying: false }); }
+  });
+  store.watchAny(["lutApplying", "lutLibraryBusy", "sessionId", "file", "uploading", "restoring"], (state) => {
+    select.disabled = state.lutApplying || state.lutLibraryBusy || !state.file || state.uploading || state.restoring;
+    if (!state.lutApplying) select.value = state.lutId;
+  }, { immediate: true });
   const enabled = role("lut-enabled");
   enabled.addEventListener("change", () => {
     const state = store.get();
@@ -391,7 +419,6 @@ function mountLut({ toast } = {}) {
     enabled.disabled = !state.lutId;
     enabled.checked = Boolean(state.lutId && state.lutStrength > 0);
     role("lut-space-summary").closest("details").hidden = !state.lutId;
-    setText(role("lut-name"), state.lutName || t("lut.empty"));
     const inputLabel = spaces.find(([id]) => id === state.lutInput)?.[1];
     const outputLabel = spaces.find(([id]) => id === state.lutOutput)?.[1];
     setText(role("lut-space-summary"), t("lut.spaceSummary", { input: inputLabel, output: outputLabel }));

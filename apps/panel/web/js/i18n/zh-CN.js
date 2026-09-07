@@ -6,15 +6,15 @@
  * en.js; scripts/check_panel_i18n.py fails the build when they drift.
  */
 export default {
-  "lut.close": "返回调整",
+  "lut.manageHint": "整理本机 LUT，支持批量导入 .cube 文件。",
+
+  "lut.select": "选择 LUT 风格",
+
+  "lut.close": "关闭 LUT 库",
   "lut.search": "搜索风格",
   "lut.searchEmpty": "没有找到匹配的风格，试试其他名称。",
-  "lut.current": "当前风格",
-  "lut.none": "未使用 LUT",
-  "lut.selected": "已选",
+  "lut.none": "不使用 LUT",
   "lut.count": "{count} 个风格",
-  "lut.previewHint": "点击风格，直接查看照片效果。",
-  "lut.choosePhoto": "先收藏喜欢的风格，打开照片后即可试用。",
 
   "lut.enabled": "启用 LUT",
   "workflow.title": "处理模式",
@@ -28,7 +28,7 @@ export default {
   "workflow.colorEffect": "调色效果",
   "lut.browse": "LUT 库",
   "lut.library": "我的 LUT",
-  "lut.done": "继续调色",
+  "lut.done": "完成",
   "lut.libraryHint": "风格保存在本机，可用于其他照片。",
   "lut.libraryEmpty": "还没有收藏的风格。点击「导入」添加 .cube 文件，支持多选。",
   "lut.loading": "正在载入…",
@@ -44,7 +44,7 @@ export default {
   "lut.title": "颜色 LUT",
   "lut.load": "导入",
   "lut.remove": "清除当前 LUT",
-  "lut.empty": "从顶部 LUT 库选择喜欢的风格",
+  "lut.empty": "请先从顶部 LUT 库导入风格",
   "lut.failed": "LUT 导入失败",
   "lut.input": "LUT 要求的输入空间",
   "lut.output": "LUT 产生的输出空间",

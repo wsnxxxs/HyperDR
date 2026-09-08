@@ -70,3 +70,6 @@ __pycache__/
 /HyperDR_Model/.venv/
 /HyperDR_Model/checkpoints/*.pt
 /HyperDR_Model/reports/
+
+# Independent local thesis research repository; not part of the application.
+/_research/

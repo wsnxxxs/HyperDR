@@ -1,6 +1,6 @@
 # HyperDR 图形界面
 
-一个纯标准库 Python 的本地网页控制台，用来直观地调用 `HyperDR` 转换器。
+一个 Python 本地网页控制台，用来直观地调用 `HyperDR` 转换器。普通工作台使用标准库；手机证书配置使用随桌面版打包的 cryptography，源码运行可通过 `python -m pip install -r apps/panel/requirements.txt` 安装。
 文件只上传到运行服务的这台电脑，不经过任何外部网络。
 
 **一次一张。** 上传照片后，参照实时 HDR 预览调参，转换并下载，再换下一张。

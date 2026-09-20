@@ -77,7 +77,11 @@ class Handler(BaseHTTPRequestHandler):
         if security.tokens_match(supplied, self.server.access_token):
             self.server.login_throttle.clear(client_ip)
             self.send_response(303)
-            self.send_header("Location", "/phone" if parsed.path.startswith("/phone") or getattr(self.server, "phone_only", False) else "/")
+            destination = "/phone" if parsed.path.startswith("/phone") or getattr(self.server, "phone_only", False) else "/"
+            check = parse_qs(parsed.query).get("check", [""])[0]
+            if destination == "/phone" and check and security.tokens_match(check, getattr(self.server, "setup_check_token", "")):
+                destination += "?check=" + quote(check)
+            self.send_header("Location", destination)
             self.send_header("Set-Cookie", security.cookie_attributes(
                 self.server.access_token, self.server.cookie_secure))
             for name, value in security.SECURITY_HEADERS.items():
@@ -271,7 +275,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def _phone_get(self, parsed):
         workbench = self.server.context.workbench
-        if parsed.path == "/api/phone/state":
+        if parsed.path == "/api/phone/connection":
+            if self.server.phone_only or self.client_address[0] not in ("127.0.0.1", "::1"):
+                self._send(api.error("请在电脑编辑器中管理连接。", status=403))
+                return
+            owner = parse_qs(parsed.query).get("owner", [None])[0]
+            if owner is not None and owner != workbench.owner:
+                self._send(api.error("工作台连接已关闭或被其他窗口接管。", status=409, code="workbench_owner"))
+                return
+            self._send(api.Response(payload=self.server.phone_status()))
+        elif parsed.path == "/api/phone/state":
             if self.server.phone_only:
                 workbench.phone_seen = time.monotonic()
             self._send(api.Response(payload=workbench.snapshot()))
@@ -294,7 +307,7 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
             revision = -1
             try:
-                while workbench.enabled:
+                while workbench.enabled and not self.server.retired:
                     with workbench.changed:
                         workbench.phone_seen = time.monotonic()
                         if revision == workbench.revision:
@@ -312,7 +325,8 @@ class Handler(BaseHTTPRequestHandler):
     def _phone_post(self, context, body):
         path = urlparse(self.path).path
         workbench = context.workbench
-        desktop_routes = ("/api/phone/connect", "/api/phone/disconnect", "/api/phone/publish", "/api/phone/heartbeat")
+        desktop_routes = ("/api/phone/connect", "/api/phone/disconnect", "/api/phone/publish", "/api/phone/heartbeat",
+                          "/api/phone/tls/prepare", "/api/phone/setup", "/api/phone/setup/close")
         if path in desktop_routes and (self.server.phone_only or self.client_address[0] not in ("127.0.0.1", "::1")):
             return api.error("请在电脑编辑器中管理连接。", status=403)
         if path in desktop_routes[1:] and body.get("owner") != workbench.owner:
@@ -323,7 +337,27 @@ class Handler(BaseHTTPRequestHandler):
                 workbench.desktop_seen = time.monotonic()
                 return api.Response(payload={"enabled": workbench.enabled})
             if path == "/api/phone/connect":
-                return api.Response(payload=self.server.enable_phone(str(body.get("owner", ""))))
+                return api.Response(payload=self.server.enable_phone(str(body.get("owner", "")), ordinary=body.get("ordinary") is True))
+            if path == "/api/phone/tls/prepare":
+                return api.Response(status=202, payload=self.server.prepare_phone_tls(body.get("owner")))
+            if path == "/api/phone/setup":
+                return api.Response(payload=self.server.open_phone_setup(body.get("owner")))
+            if path == "/api/phone/setup/close":
+                with self.server.phone_lock:
+                    self.server._close_setup()
+                return api.Response(payload=self.server.phone_status())
+            if path == "/api/phone/diagnostics":
+                if not self.server.phone_only or self.server.retired:
+                    return api.error("请在手机工作台检测预览。", status=403)
+                result = workbench.report_diagnostics(body, self.server.public_scheme == "https")
+                controller = getattr(self.server, "phone_controller", None)
+                if controller and result["diagnostics"]["secureContext"]:
+                    # Keep all listener mutations under the same desktop-owned lock.
+                    with controller.phone_lock:
+                        setup = controller.setup_server
+                        if setup and security.tokens_match(str(body.get("setupCheck", "")), setup.check_token):
+                            controller._close_setup()
+                return api.Response(payload=result)
             if path == "/api/phone/disconnect":
                 self.server.stop_phone()
                 return api.Response(payload={"enabled": False})

@@ -25,7 +25,7 @@ producing a successful handoff if:
 - any conversion report does not record both `success` and `self_verified`.
 
 Key material is a release blocker rather than a warning. Every computer must
-generate its own certificate authority through `Setup-HTTPS.bat`; a shared
+generate its own certificate authority through the phone workbench; a shared
 authority in a published archive would let anyone holding it issue a trusted
 certificate for any site, on every phone that installed it.
 
@@ -36,10 +36,10 @@ Windows computer that has never run HyperDR and an iPhone that has never
 installed the root certificate:
 
 1. Extract the archive to a path containing a space and a non-ASCII character.
-2. Run `Setup-HTTPS.bat`, install and fully trust the exported root certificate
-   on the phone.
-3. Run `Start.bat` and confirm the printed address is `https://` and that the
-   phone reaches the panel with no certificate warning.
+2. Start the editor and choose **Phone workbench → Enable HDR preview**.
+   Scan the setup QR, install the CA, and on iOS also enable full trust.
+3. Enter the HTTPS phone workbench and confirm there is no certificate warning.
+   Confirm the desktop editor still opens over loopback HTTP.
 4. Confirm the status bar reports true HDR rather than an SDR approximation.
 5. Move the extracted folder elsewhere and confirm `Start.bat` still serves
    HTTPS.

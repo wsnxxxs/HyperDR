@@ -760,6 +760,101 @@ void check_hdr_source_gain_maps(const hyperdr::PhotoMetadata& metadata) {
   check(decode_ultrahdr_input(ultrahdr), "HLG source to Ultra HDR", 2.5, 3.0);
 }
 
+void check_rgb_ultrahdr(const hyperdr::PhotoMetadata& metadata) {
+  hyperdr::PhotoRenditions photo;
+  photo.sdr = hyperdr::FloatImage(64, 32, 3);
+  photo.hdr = hyperdr::FloatImage(64, 32, 3);
+  photo.stats.headroom_stops = 2;
+  photo.stats.headroom_linear = 4;
+  for (unsigned y = 0; y < 32; ++y) for (unsigned x = 0; x < 64; ++x) {
+    const std::array<float, 3> base{.5F, .4F, .2F};
+    const std::array<float, 3> target{x < 32 ? 2.0F : .25F, .8F, .05F};
+    for (unsigned c = 0; c < 3; ++c) {
+      photo.sdr.at(x, y, c) = base[c];
+      photo.hdr.at(x, y, c) = target[c];
+    }
+  }
+  const auto packed = hyperdr::gain_map_from_renditions(photo,
+      hyperdr::GainMapWriterProfile::iso_generic);
+  const auto bytes = hyperdr::encode_ultrahdr_jpeg(packed, metadata, 95);
+  hyperdr::verify_ultrahdr_jpeg(bytes);
+  const auto decoded = decode_ultrahdr_input(bytes);
+  require_declared_headroom(decoded, 4, "RGB JPEG must retain independent display headroom");
+  double error = 0;
+  for (std::size_t i = 0; i < photo.hdr.pixels.size(); ++i) {
+    const float expected = photo.hdr.pixels[i];
+    const float delta = decoded.linear_p3.pixels[i] - expected;
+    require(std::abs(delta) < .06F * std::max(expected, .1F),
+        "RGB JPEG round trip must retain channel ratios and negative gains");
+    error += delta * delta;
+  }
+  std::cout << "Graded RGB Ultra HDR MSE: " << error / photo.hdr.pixels.size() << '\n';
+}
+
+void check_ultrahdr_pair(const hyperdr::PhotoMetadata& metadata) {
+  hyperdr::PhotoRenditions photo;
+  // Odd dimensions exercise half-float packed stride and JPEG edge padding.
+  photo.sdr = hyperdr::FloatImage(65, 33, 3);
+  photo.hdr = hyperdr::FloatImage(65, 33, 3);
+  photo.stats.headroom_stops = 2;
+  photo.stats.headroom_linear = 4;
+  for (unsigned y = 0; y < 33; ++y) for (unsigned x = 0; x < 65; ++x) {
+    const std::array<float, 3> base{.5F, .4F, .2F};
+    // Keep this pair inside both P3 and sRGB: XMP gain applies in base gamut.
+    const std::array<float, 3> target{x < 32 ? 2.0F : .25F, .8F, .15F};
+    for (unsigned c = 0; c < 3; ++c) {
+      photo.sdr.at(x, y, c) = base[c];
+      photo.hdr.at(x, y, c) = target[c];
+    }
+  }
+  const auto check_hdr = [&](const std::vector<std::uint8_t>& bytes) {
+    hyperdr::verify_ultrahdr_jpeg(bytes);
+    const auto info = hyperdr::probe_ultrahdr_jpeg(bytes);
+    require(info.width == 65 && info.height == 33 &&
+        info.gain_width == 65 && info.gain_height == 33, "API3 must retain full raster size");
+    require(info.gain_min[0] < 0 && info.gain_max[0] > 0, "API3 must support signed RGB gain");
+    require(std::abs(info.headroom_stops - 2) < .001F, "API3 must set display capacity independently");
+    const auto decoded = decode_ultrahdr_input(bytes);
+    require_declared_headroom(decoded, 4, "API3 must retain 203-nit white and declared headroom");
+    require(decoded.metadata.model == metadata.model, "API3 must preserve EXIF");
+    double error = 0;
+    for (std::size_t i = 0; i < photo.hdr.pixels.size(); ++i) {
+      const float expected = photo.hdr.pixels[i];
+      const float delta = decoded.linear_p3.pixels[i] - expected;
+      if (std::abs(delta) >= .08F * std::max(expected, .1F)) {
+        std::cerr << "API3 mismatch sample " << i << ": got " << decoded.linear_p3.pixels[i]
+                  << " expected " << expected << '\n';
+      }
+      require(std::abs(delta) < .08F * std::max(expected, .1F),
+          "API3 must reconstruct independent channel ratios");
+      error += delta * delta;
+    }
+    std::cout << "API3 RGB Ultra HDR MSE: " << error / photo.hdr.pixels.size() << '\n';
+  };
+  check_hdr(hyperdr::encode_ultrahdr_jpeg(photo, metadata, 90));
+  // Existing sRGB JPEG carries its own ICC. It is intentionally low quality:
+  // gain must be computed from its decoded samples, not the original floats.
+  const auto jpeg = hyperdr::encode_sdr_jpeg(photo.sdr, metadata, 20);
+  const auto reused = hyperdr::encode_ultrahdr_jpeg(photo.hdr, jpeg,
+      hyperdr::ColorGamut::kSrgb, 2, 95);
+  check_hdr(reused);
+  const std::array<std::uint8_t, 2> sos{0xff, 0xda};
+  const auto scan = std::search(jpeg.begin(), jpeg.end(), sos.begin(), sos.end());
+  require(scan != jpeg.end() &&
+      std::search(reused.begin(), reused.end(), scan, jpeg.end()) != reused.end(),
+      "API3 must reuse the original compressed JPEG scan without re-encoding");
+  bool rejected = false;
+  try {
+    (void)hyperdr::encode_ultrahdr_jpeg(hyperdr::FloatImage(64, 33, 3), jpeg,
+        hyperdr::ColorGamut::kSrgb, 2, 95);
+  } catch (const std::exception&) { rejected = true; }
+  require(rejected, "API3 must reject misaligned raster dimensions");
+  // Zero headroom remains a valid SDR-compatible Ultra HDR file.
+  photo.hdr = photo.sdr;
+  photo.stats.headroom_stops = 0;
+  hyperdr::verify_ultrahdr_jpeg(hyperdr::encode_ultrahdr_jpeg(photo, metadata, 90));
+}
+
 }  // namespace
 
 int main() {
@@ -775,6 +870,8 @@ int main() {
     metadata.exposure_seconds = 1.0 / 125.0;
     metadata.aperture = 2.8;
     metadata.date_time = "2026:08:12 10:11:12";
+    check_rgb_ultrahdr(metadata);
+    check_ultrahdr_pair(metadata);
 
     // Default 8-bit output through the grid path (wider than one 2048 tile), with a
     // full decode and gain-map reconstruction regression, not just structure checks.

@@ -12,6 +12,7 @@
 #include <lcms2.h>
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <csetjmp>
 #include <cstdlib>
@@ -131,13 +132,16 @@ std::vector<std::uint8_t> make_base_jpeg(const FloatImage& image,
 }
 
 std::vector<std::uint8_t> make_gain_jpeg(const FloatImage& image, int quality) {
-  if (image.channels != 1) throw std::invalid_argument("Ultra HDR gain map must be monochrome");
-  std::vector<std::uint8_t> gray(static_cast<std::size_t>(image.width) * image.height);
-  for (std::size_t i = 0; i < gray.size(); ++i) {
-    gray[i] = static_cast<std::uint8_t>(
+  if (image.channels != 1 && image.channels != 3) {
+    throw std::invalid_argument("Ultra HDR gain map must have one or three channels");
+  }
+  std::vector<std::uint8_t> pixels(image.pixels.size());
+  for (std::size_t i = 0; i < pixels.size(); ++i) {
+    pixels[i] = static_cast<std::uint8_t>(
         std::lround(std::clamp(image.pixels[i], 0.0F, 1.0F) * 255.0F));
   }
-  return compress_jpeg(gray.data(), image.width, image.height, 1, JCS_GRAYSCALE, quality);
+  return compress_jpeg(pixels.data(), image.width, image.height, image.channels,
+      image.channels == 1 ? JCS_GRAYSCALE : JCS_RGB, quality, nullptr, nullptr, true);
 }
 
 float value(const Rational& rational) {
@@ -173,7 +177,127 @@ bool contains_text(const std::vector<std::uint8_t>& bytes, const char* text) {
   return std::search(bytes.begin(), bytes.end(), text, text + length) != bytes.end();
 }
 
+// Nonnegative finite binary32 -> binary16, round to nearest, ties to even.
+// Input is checked against the linear HDR range before reaching this helper.
+constexpr std::uint16_t linear_half(float input) {
+  const auto bits = std::bit_cast<std::uint32_t>(input);
+  const int exponent = static_cast<int>((bits >> 23) & 255) - 127;
+  if (exponent < -25) return 0;
+  if (exponent < -14) {
+    const auto mantissa = (bits & 0x7fffffU) | 0x800000U;
+    const unsigned shift = static_cast<unsigned>(-exponent - 1);
+    return static_cast<std::uint16_t>((mantissa + ((1U << (shift - 1)) - 1) +
+        ((mantissa >> shift) & 1U)) >> shift);
+  }
+  const auto rounded = bits + 0xfffU + ((bits >> 13) & 1U);
+  return static_cast<std::uint16_t>((rounded - (112U << 23)) >> 13);
+}
+static_assert(linear_half(1.0F) == 0x3c00 && linear_half(4.0F) == 0x4400);
+static_assert(linear_half(0x1p-24F) == 1 && linear_half(0x1p-25F) == 0);
+static_assert(linear_half(1.00048828125F) == 0x3c00);
+
 }  // namespace
+
+std::vector<std::uint8_t> encode_ultrahdr_jpeg(const FloatImage& hdr,
+    const std::vector<std::uint8_t>& sdr_jpeg, ColorGamut sdr_gamut,
+    float headroom_stops, int gain_quality) {
+  hdr.require_consistent("Ultra HDR linear input");
+  if (hdr.channels != 3) throw std::invalid_argument("Ultra HDR linear input must be RGB");
+  if (gain_quality < 0 || gain_quality > 100) throw std::invalid_argument("quality must be in [0,100]");
+  const float peak_nits = 203.0F * std::exp2(headroom_stops);
+  if (!std::isfinite(peak_nits) || peak_nits < 203.0F || peak_nits > 10000.01F) {
+    throw std::invalid_argument("Ultra HDR display peak must be in [203,10000] nits");
+  }
+  std::vector<std::uint16_t> rgba(static_cast<std::size_t>(hdr.width) * hdr.height * 4);
+  for (std::size_t i = 0; i < hdr.pixels.size() / 3; ++i) {
+    for (unsigned c = 0; c < 3; ++c) {
+      const float v = hdr.pixels[i * 3 + c];
+      if (!std::isfinite(v) || v < 0 || v > 10000.01F / 203.0F) {
+        throw std::invalid_argument("Ultra HDR linear pixels must be finite and in [0,10000/203]");
+      }
+      rgba[i * 4 + c] = linear_half(v == 0 ? 0.0F : v);
+    }
+    rgba[i * 4 + 3] = 0x3c00;
+  }
+  uhdr_raw_image_t raw{};
+  raw.fmt = UHDR_IMG_FMT_64bppRGBAHalfFloat;
+  raw.cg = UHDR_CG_DISPLAY_P3;
+  raw.ct = UHDR_CT_LINEAR;
+  raw.range = UHDR_CR_FULL_RANGE;
+  raw.w = hdr.width;
+  raw.h = hdr.height;
+  raw.planes[UHDR_PLANE_PACKED] = rgba.data();
+  raw.stride[UHDR_PLANE_PACKED] = hdr.width;
+  uhdr_compressed_image_t base{};
+  base.data = const_cast<std::uint8_t*>(sdr_jpeg.data());
+  base.data_sz = base.capacity = sdr_jpeg.size();
+  switch (sdr_gamut) {
+    case ColorGamut::kSrgb: base.cg = UHDR_CG_BT_709; break;
+    case ColorGamut::kDisplayP3: base.cg = UHDR_CG_DISPLAY_P3; break;
+    case ColorGamut::kRec2020: base.cg = UHDR_CG_BT_2100; break;
+  }
+  base.ct = UHDR_CT_SRGB;
+  base.range = UHDR_CR_FULL_RANGE;
+  std::unique_ptr<uhdr_codec_private_t, EncoderDeleter> encoder(uhdr_create_encoder());
+  if (!encoder) throw std::runtime_error("cannot allocate libultrahdr encoder");
+  check_uhdr(uhdr_enc_set_raw_image(encoder.get(), &raw, UHDR_HDR_IMG), "set linear HDR pixels");
+  // set_raw_image owns a copy; release our potentially full-camera-size buffer
+  // before the library allocates its decoded SDR and gain-map working images.
+  std::vector<std::uint16_t>().swap(rgba);
+  check_uhdr(uhdr_enc_set_compressed_image(encoder.get(), &base, UHDR_SDR_IMG), "set SDR JPEG");
+  check_uhdr(uhdr_enc_set_preset(encoder.get(), UHDR_USAGE_BEST_QUALITY), "set gain-map quality preset");
+  check_uhdr(uhdr_enc_set_using_multi_channel_gainmap(encoder.get(), 1), "enable RGB gain map");
+  check_uhdr(uhdr_enc_set_gainmap_scale_factor(encoder.get(), 1), "set full-resolution gain map");
+  check_uhdr(uhdr_enc_set_quality(encoder.get(), gain_quality, UHDR_GAIN_MAP_IMG), "set gain JPEG quality");
+  // The v1.4 decoder rejects equal min/max capacity. As with API4, give SDR
+  // output a negligible positive interval without changing the HDR pixels.
+  check_uhdr(uhdr_enc_set_target_display_peak_brightness(encoder.get(),
+      std::clamp(peak_nits, 203.0F * 1.0001F, 10000.0F)),
+      "set Ultra HDR display peak");
+  check_uhdr(uhdr_encode(encoder.get()), "encode Ultra HDR rendition pair");
+  const auto* output = uhdr_get_encoded_stream(encoder.get());
+  if (!output || !output->data || output->data_sz == 0) {
+    throw std::runtime_error("libultrahdr returned an empty JPEG/R stream");
+  }
+  const auto* begin = static_cast<const std::uint8_t*>(output->data);
+  return {begin, begin + output->data_sz};
+}
+
+std::vector<std::uint8_t> encode_ultrahdr_jpeg(const PhotoRenditions& images,
+    const PhotoMetadata& metadata, int quality) {
+  images.sdr.require_consistent("Ultra HDR SDR rendition");
+  if (images.sdr.width != images.hdr.width || images.sdr.height != images.hdr.height) {
+    throw std::invalid_argument("Ultra HDR SDR and HDR dimensions must match");
+  }
+  if (quality < 0 || quality > 100) throw std::invalid_argument("quality must be in [0,100]");
+  const auto base = make_base_jpeg(images.sdr, metadata, quality, images.clamp_srgb, true);
+  return encode_ultrahdr_jpeg(images.hdr, base, ColorGamut::kDisplayP3,
+      images.stats.headroom_stops, std::max(85, quality));
+}
+
+UltraHdrInfo probe_ultrahdr_jpeg(const std::vector<std::uint8_t>& bytes) {
+  uhdr_compressed_image_t input{};
+  input.data = const_cast<std::uint8_t*>(bytes.data());
+  input.data_sz = input.capacity = bytes.size();
+  std::unique_ptr<uhdr_codec_private_t, DecoderDeleter> decoder(uhdr_create_decoder());
+  if (!decoder) throw std::runtime_error("cannot allocate libultrahdr probe");
+  check_uhdr(uhdr_dec_set_image(decoder.get(), &input), "open Ultra HDR JPEG");
+  check_uhdr(uhdr_dec_probe(decoder.get()), "probe Ultra HDR JPEG");
+  const auto* metadata = uhdr_dec_get_gainmap_metadata(decoder.get());
+  if (!metadata) throw std::runtime_error("Ultra HDR JPEG has no gain metadata");
+  UltraHdrInfo result;
+  result.width = uhdr_dec_get_image_width(decoder.get());
+  result.height = uhdr_dec_get_image_height(decoder.get());
+  result.gain_width = uhdr_dec_get_gainmap_width(decoder.get());
+  result.gain_height = uhdr_dec_get_gainmap_height(decoder.get());
+  for (unsigned c = 0; c < 3; ++c) {
+    result.gain_min[c] = std::log2(metadata->min_content_boost[c]);
+    result.gain_max[c] = std::log2(metadata->max_content_boost[c]);
+    result.gamma[c] = metadata->gamma[c];
+  }
+  result.headroom_stops = std::log2(metadata->hdr_capacity_max);
+  return result;
+}
 
 std::vector<std::uint8_t> encode_sdr_jpeg(const FloatImage& image,
     const PhotoMetadata& metadata, int quality) {
@@ -219,6 +343,12 @@ void verify_sdr_jpeg(const std::vector<std::uint8_t>& bytes) {
 std::vector<std::uint8_t> encode_ultrahdr_jpeg(const GainMapResult& images,
                                                const PhotoMetadata& metadata, int quality) {
   if (quality < 0 || quality > 100) throw std::invalid_argument("quality must be in [0,100]");
+  images.gain_map.require_consistent("Ultra HDR gain map");
+  validate_gain_map_metadata(images.metadata);
+  const auto channels = gain_map_channel_count(images.metadata);
+  if (images.gain_map.channels != channels) {
+    throw std::invalid_argument("Ultra HDR gain pixels and metadata must have matching channels");
+  }
   // A full-resolution gain map exists to put every HDR pixel back where it was
   // (an HDR source's own highlights). Subsampling the base's chroma would throw
   // away half of the colour resolution that map multiplies, which measured on a
@@ -247,17 +377,13 @@ std::vector<std::uint8_t> encode_ultrahdr_jpeg(const GainMapResult& images,
   gain.range = UHDR_CR_UNSPECIFIED;
 
   uhdr_gainmap_metadata_t gain_metadata{};
-  const float min_boost = boost_from_stops(value(images.metadata.gain_min));
-  const float max_boost = boost_from_stops(value(images.metadata.gain_max));
-  const float gamma = value(images.metadata.gamma);
-  const float sdr_offset = value(images.metadata.base_offset);
-  const float hdr_offset = value(images.metadata.alternate_offset);
   for (unsigned c = 0; c < 3; ++c) {
-    gain_metadata.min_content_boost[c] = min_boost;
-    gain_metadata.max_content_boost[c] = max_boost;
-    gain_metadata.gamma[c] = gamma;
-    gain_metadata.offset_sdr[c] = sdr_offset;
-    gain_metadata.offset_hdr[c] = hdr_offset;
+    const auto channel = gain_map_channel(images.metadata, channels == 1 ? 0 : c);
+    gain_metadata.min_content_boost[c] = boost_from_stops(value(channel.gain_min));
+    gain_metadata.max_content_boost[c] = boost_from_stops(value(channel.gain_max));
+    gain_metadata.gamma[c] = value(channel.gamma);
+    gain_metadata.offset_sdr[c] = value(channel.base_offset);
+    gain_metadata.offset_hdr[c] = value(channel.alternate_offset);
   }
   gain_metadata.hdr_capacity_min = boost_from_stops(value(images.metadata.base_headroom));
   gain_metadata.hdr_capacity_max = boost_from_stops(value(images.metadata.alternate_headroom));

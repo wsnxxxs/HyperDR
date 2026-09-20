@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "HyperDR conversion report schema 9",
+  "title": "HyperDR conversion report schema 10",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,7 +12,7 @@
   ],
   "properties": {
     "schema": {
-      "const": 9
+      "const": 10
     },
     "tool": {
       "type": "string"
@@ -645,18 +645,19 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "encoder",
+        "distribution_measured",
         "gamma",
         "min_stops",
-        "max_stops",
-        "percentiles_stops",
-        "fraction_gt_0_5",
-        "fraction_gt_1_0",
-        "fraction_gt_2_0",
-        "clipped_fraction",
-        "local_weight_mean",
-        "local_weight_p95"
+        "max_stops"
       ],
       "properties": {
+        "encoder": {
+          "enum": ["hyperdr", "libultrahdr-api3"]
+        },
+        "distribution_measured": {
+          "type": "boolean"
+        },
         "gamma": {
           "type": "number"
         },

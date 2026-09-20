@@ -161,13 +161,76 @@ GainMapResult exact_gain_map_from_renditions(PhotoRenditions images) {
   return out;
 }
 
+// Preserve both endpoints when grading gives them independent RGB ratios.
+// Offsets use the same SDR-white-relative units on encode and reconstruction;
+// they keep a LUT's zero-valued channel representable without infinite gain.
+// A shared coding range/gamma also permits libultrahdr's XMP + ISO writer.
+GainMapResult rgb_gain_map_from_renditions(PhotoRenditions images) {
+  constexpr float offset = 1.0F / 64.0F;
+  const auto width = images.sdr.width, height = images.sdr.height;
+  FloatImage codes(width, height, 3);
+  parallel_for_rows(height, [&](std::uint32_t y) {
+    const auto end = static_cast<std::size_t>(y + 1) * width * 3;
+    for (auto i = static_cast<std::size_t>(y) * width * 3; i < end; ++i) {
+      codes.pixels[i] = std::log2((std::max(0.0F, images.hdr.pixels[i]) + offset) /
+                                (std::max(0.0F, images.sdr.pixels[i]) + offset));
+    }
+  });
+  const auto [minimum, maximum] = std::minmax_element(codes.pixels.begin(), codes.pixels.end());
+  GainMapResult out;
+  auto& metadata = out.metadata;
+  metadata.gain_min = rational_from_float(std::min(0.0F, *minimum));
+  metadata.gain_max = rational_from_float(std::max(0.0F, *maximum));
+  const float min_gain = rational_value(metadata.gain_min);
+  const float max_gain = rational_value(metadata.gain_max);
+  const float range = max_gain - min_gain;
+  for (float& gain : codes.pixels) {
+    gain = range > kEpsilon ? std::clamp((gain - min_gain) / range, 0.0F, 1.0F) : 0.0F;
+  }
+  metadata.gamma = rational_from_float(range > kEpsilon ? choose_gain_gamma(codes.pixels) : 1.0F);
+  const float gamma = rational_value(metadata.gamma);
+  for (float& gain : codes.pixels) {
+    gain = std::round(encode_gain_code(gain, gamma) * 255.0F) / 255.0F;
+  }
+  metadata.base_offset = metadata.alternate_offset = {1, 64};
+  metadata.base_headroom = {0, 1};
+  // Display capacity describes the rendition, not an extreme channel ratio.
+  metadata.alternate_headroom = rational_from_float(images.stats.headroom_stops);
+  const auto channel = gain_map_channel(metadata, 0);
+  metadata.flags |= 0x80;
+  metadata.channels.assign(3, channel);
+  out.headroom_stops = rational_value(metadata.alternate_headroom);
+  out.exposure_ev = images.stats.exposure_ev;
+  out.clamp_srgb = images.clamp_srgb;
+  out.base_linear = std::move(images.sdr);
+  out.gain_map = std::move(codes);
+  out.stats = images.stats;
+  out.stats.gain_min_stops = min_gain;
+  out.stats.gain_max_stops = max_gain;
+  out.stats.gain_gamma = gamma;
+  // These ratios were measured, not clipped to the display headroom.
+  measure_quantized_gain(out.stats, out.gain_map, max_gain, gamma,
+                         0.0F, min_gain);
+  images.hdr = {};
+  const auto reconstructed = reconstruct_gain_map(out.base_linear, out.gain_map,
+      metadata, out.headroom_stops, nullptr, out.clamp_srgb);
+  measure_rendition_stats(out.stats, out.base_linear, reconstructed, images.below_knee);
+  return out;
+}
+
 }  // namespace
 
-GainMapResult gain_map_from_renditions(PhotoRenditions images) {
+GainMapResult gain_map_from_renditions(PhotoRenditions images, GainMapWriterProfile profile) {
+  images.sdr.require_consistent("gain-map SDR rendition");
+  images.hdr.require_consistent("gain-map HDR rendition");
   const auto& sdr=images.sdr; const auto& hdr=images.hdr;
   if(sdr.channels!=3 || hdr.channels!=3 || sdr.width!=hdr.width || sdr.height!=hdr.height)
     throw std::invalid_argument("gain-map packaging requires matching SDR and HDR renditions");
   if (images.hdr_is_source) return exact_gain_map_from_renditions(std::move(images));
+  if (profile == GainMapWriterProfile::iso_generic && images.gain_stops.pixels.empty() &&
+      images.stats.headroom_stops > kEpsilon) {
+    return rgb_gain_map_from_renditions(std::move(images));
+  }
   const auto dimensions=choose_gain_dimensions(sdr);
   const bool retained = !images.gain_stops.pixels.empty();
   FloatImage stops = retained ? std::move(images.gain_stops)

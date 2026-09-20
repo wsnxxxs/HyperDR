@@ -38,6 +38,8 @@ DYNAMIC_PREFIXES = {
     "scope.": "js/preview/scope.js builds scope.<mode> for the histogram modes",
     "stage.input.": "js/preview/stage.js builds stage.input.<domain>",
     "hdr.reason.": "js/preview/stage.js passes hdr.reason.<why> into a template",
+    "model.": "js/settings/model-select.js builds model.<id> display names",
+    "field.": "js/settings/model-select.js builds field.<capture-field> fallback labels",
 }
 
 # "key": "value" -- one entry per line, which is how the catalogues are written.

@@ -1,8 +1,8 @@
 # Native AI model integration
 
-The panel's “AI 优化” action runs the production model inside `HyperDR.exe`.
-There is no runtime Python environment, Python child process, checkpoint load,
-or `.f32`/`.json` model sidecar.
+The panel's “AI 优化” action runs one of two embedded models inside
+`HyperDR.exe`. There is no runtime Python environment, Python child process,
+checkpoint load, or `.f32`/`.json` model sidecar.
 
 ```text
 decoded linear Display-P3 image
@@ -22,45 +22,99 @@ checkpoint. `ncnn.dll` is shipped with the other runtime dependencies.
 
 ## Offline model export
 
-Model export is a deliberate developer operation. The first graph is the
-inference-only, three-channel ONNX exchange model:
+The checked-in CNN and EXIF-assisted assets are generated offline with
+`HyperDR_Model/scripts/export_research_assets.py`, which reuses the ONNX export
+and ncnn conversion tools. Ordinary builds embed those two param/bin pairs;
+the retired production model assets and build-time regeneration path are removed.
+Historical training checkpoints remain outside the application build.
 
-```bash
-PYTHONPATH=HyperDR_Model python HyperDR_Model/export_onnx.py \
-  --checkpoint HyperDR_Model/checkpoints/production-v3.pt \
-  --output HyperDR_Model/models/production-v3.onnx \
-  --metadata HyperDR_Model/models/production-v3.onnx.json
-```
+## Selectable models
 
-The deployment frontend adds normalized log-luminance and clipping planes.
-Export that five-plane view, then convert that ONNX graph to ncnn:
+`--ai-model` takes an id from a fixed table, not a path: the shipping adapter
+owns the assets and never opens a caller-named file. `embedded` and an omitted
+value select CNN. Unsupported IDs are errors. The panel restores old saved
+model selections as CNN and never offers the retired production model.
 
-```bash
-PYTHONPATH=HyperDR_Model python HyperDR_Model/export_onnx.py \
-  --checkpoint HyperDR_Model/checkpoints/production-v3.pt \
-  --graph features \
-  --output HyperDR_Model/models/production-v3.features.onnx \
-  --metadata HyperDR_Model/models/production-v3.features.onnx.json
+| id | Shown as | Asset | Answer |
+|---|---|---|---|
+| `research-cnn-v1` | 纯 CNN | `research-cnn-v1.ncnn.*` | image-only signed-gain CNN |
+| `research-exif-v1` | EXIF 参数辅助预测 | `research-exif-v1.ncnn.*` + `research_exif_level_data.inc` | a spatial network plus an EXIF level estimator |
 
-PYTHONPATH=HyperDR_Model python HyperDR_Model/scripts/convert_ncnn.py \
-  --checkpoint HyperDR_Model/checkpoints/production-v3.pt \
-  --source-onnx HyperDR_Model/models/production-v3.features.onnx \
-  --output-dir HyperDR_Model/models --pnnx pnnx
-```
+Without decoded capture parameters, the panel selects CNN and hides model
+selection. When capture parameters are present, both choices are shown.
+The selector and strength controls share one section so a hidden selector
+leaves no empty padded section. Incomplete capture parameters still use the
+runtime fallback described below.
 
-The converter is pinned to `pnnx==20260526`, rejects unsupported layers, and
-records source and output hashes in `production-v3.ncnn.json`. The ncnn graph
-uses blobs `in0` and `out0`; although conversion uses a reference shape, its
-convolutional graph accepts stride-16-aligned spatial sizes and returns H/16 by
-W/16.
+`HyperDR model-list --json` reports the table, and the panel reads it once per
+executable version instead of carrying its own copy. Each model also has a
+`*.manifest.json` recording its research run, fold and seed, checkpoint and
+export hashes, and the conventions it was built with.
 
-Ordinary builds consume the checked-in assets. A deliberate refresh can use
-`-DHYPERDR_REGENERATE_NCNN_MODEL=ON` with `HYPERDR_MODEL_PYTHON` and
-`HYPERDR_PNNX_EXECUTABLE` configured.
+### The capture-assisted model
+
+Model 2 predicts the *shape* of the gain and takes its overall level from six
+ordinary capture settings:
+
+| order | field | Exif tag | model input |
+|---|---|---|---|
+| 0 | ISO | 34855 | `log2(max(iso, 1))` |
+| 1 | exposure time | 33434 | `log2(max(seconds, 1e-6))` |
+| 2 | f-number | 33437 | as recorded |
+| 3 | exposure compensation | 37380 (`0x9204`) | signed EV, not logged |
+| 4 | focal length | 37386 | millimetres |
+| 5 | 35 mm-equivalent focal length | 41989 | millimetres |
+
+`gain = (net(image) − mean(net(image))) + estimator(capture)`. The estimator is
+a fitted `SimpleImputer(median) + HistGradientBoostingRegressor` whose arrays are
+compiled in as static tables; no Python, scikit-learn or second inference runtime
+is involved at run time.
+
+The capture is complete only when all six fields are present, finite, and — for
+ISO, exposure time and f-number — positive. Exposure compensation of `0 EV` is a
+value: presence is carried by the tag, never inferred from truthiness. A zero in
+either focal-length tag counts as absent, because Exif defines it as “unknown”.
+
+When the capture is incomplete, model 2 answers with model 1's prediction and
+says so: the packet reports `effectiveModelId: research-cnn-v1`,
+`inferenceMode: pixel_only_fallback` and a `fallbackReason` naming the fields.
+The shape-only network is deliberately never used on its own — its training
+target had the per-image level removed, so its raw output is not a complete gain.
+A damaged asset or a failed inference is an error, not a fallback.
+
+Every supported input route reaches the model with the same capture vector. The
+Exif-based decoders get it from the parsed block; RAW additionally reads the
+file's own Exif prefix, because LibRaw exposes none of the exposure compensation
+and no presence information at all.
+
+### Reconstruction offsets
+
+The research reconstruction is `max((base + 1e-5) × 2^gain − 1e-5, 0)`, so both
+research models carry `base_offset = alternate_offset = 1/100000` into the
+ISO 21496-1 metadata. The offsets follow the
+model that actually answered, so a fallback reconstructs with model 1's
+convention rather than blending two curves.
+
+### Verifying the assets
+
+`HyperDR_Model/scripts/verify_research_models.py` checks the four claims this
+integration makes, and fails rather than widening its own tolerances:
+
+- PyTorch and ncnn on the **same** float32 tensor, so the reported number is
+  conversion error and not the decode path's (bound: 1e-3 stops);
+- the compiled estimator against the fitted sklearn object, including the
+  presence rules (bound: 1e-5 stops);
+- the fallback producing model 1's grid exactly, with the research offsets;
+- every manifest hash.
+
+`HyperDR_Model/scripts/make_capture_fixtures.py` derives the three acceptance
+files from one photograph — a complete capture, a capture whose exposure
+compensation is 0 EV, and one with no Exif at all. The measured result is
+recorded in `docs/research-model-acceptance.md`.
 
 ## Runtime behavior
 
-`HyperDR convert ... --ai-model embedded` and `preview-frame` use the same
+`HyperDR convert ... --ai-model <id>` and `preview-frame` use the same
 in-memory path. JPEG, PNG, ordinary HEIC, and the base image of an Apple
 gain-map container pass through as decoded linear Display-P3 SDR. Scene-linear
 RAW keeps automatic exposure and highlight recovery, but uses a fixed neutral
@@ -74,9 +128,11 @@ to the raw signed-stop grid, after which the grid is ISO-encoded and lifted
 once. Identity post controls therefore preserve the model prediction instead
 of decoding and re-quantizing it.
 
-`HyperDR model-gain ... --ai-model embedded` is a diagnostic/panel probe. It
-writes one binary `HYPGAIN1` packet to stdout containing JSON geometry followed
-by the unfiltered stride-16 float32 signed-log2 ncnn prediction. It does not
+`HyperDR model-gain ... --ai-model <id>` is a diagnostic/panel probe. It
+writes one binary `HYPGAIN1` packet to stdout containing JSON geometry and
+identity followed by the unfiltered stride-16 float32 signed-log2 ncnn
+prediction. The identity members name the model that was asked for, the one that
+answered, its version, its inference mode and — when they differ — why. It does not
 apply strength or AI post controls and does not create sidecars.
 
 The panel keeps its existing `useModel` / “AI 优化” interaction. In AI mode it

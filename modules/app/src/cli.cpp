@@ -20,6 +20,7 @@
 #include "hyperdr/gainmap/external.hpp"
 #include "hyperdr/gainmap/native_model.hpp"
 #include "hyperdr/gainmap/reconstruct.hpp"
+#include "hyperdr/image/fidelity.hpp"
 #include "hyperdr/image/resample.hpp"
 
 #include <algorithm>
@@ -54,6 +55,7 @@ void usage() {
          "  HyperDR convert <file-or-directory> --output <directory> [options]\n"
          "  HyperDR inspect <file.heic> [--json]\n"
          "  HyperDR verify <file.heic|file.jpg> [--reconstruct <preview.tiff>]\n"
+         "                         [--reference <source-image>]\n"
          "  HyperDR display-curve <reference.heic> <candidate.heic>\n"
          "                         --headroom <stops> [--headroom <stops> ...]\n"
          "  HyperDR thumbnail <image> --output <preview.jpg> [--max-edge <pixels>]\n"
@@ -62,8 +64,11 @@ void usage() {
          "                            [--base-only]\n"
          "  HyperDR preview-frame <image> --output <preview.hpf> [look options]\n"
          "                            [--preview-max-edge <pixels>] [--fast-preview]\n"
-         "  HyperDR model-gain <image> --ai-model [embedded] [look options]\n"
+         "  HyperDR model-gain <image> --ai-model [<id>] [look options]\n"
          "                            (writes a binary gain packet to stdout)\n"
+         "                            [--input-tensor <linear-p3.f32> --tensor-width <px>\n"
+         "                             --tensor-height <px>]\n"
+         "  HyperDR model-list [--json]                    Emit the model table as JSON\n"
          "  HyperDR model-input <image> --output <linear-p3.f32> --report <recipe.json>\n"
          "                            [--long-side <pixels>] [--half-size] [look options]\n"
          "  HyperDR curve [look options] [--samples <N>]   Emit the tone curve as JSON\n"
@@ -75,7 +80,13 @@ void usage() {
          "  --report <file.json>               Write a structured run report\n"
          "  --external-gain <file.f32>         Use an external canonical gain grid\n"
          "  --external-gain-report <file.json> Required sidecar for that gain grid\n"
-         "  --ai-model [embedded]              Run the embedded native gain model\n"
+         "  --ai-model [<id>]                   Run an embedded native gain model\n"
+         "                                     (research-cnn-v1,\n"
+         "                                      research-exif-v1; default research-cnn-v1)\n"
+         "  --input-tensor <file.f32>          Feed model-gain a developed HWC linear-P3\n"
+         "                                     float32 tensor instead of decoding an image\n"
+         "  --tensor-width <pixels>            Width of --input-tensor (required with it)\n"
+         "  --tensor-height <pixels>           Height of --input-tensor (required with it)\n"
          "  --ai-brightness <EV>               Post-model SDR brightness\n"
          "  --ai-contrast <slope>              Post-model contrast around diffuse white\n"
          "  --ai-shadows <EV>                  Post-model shadow lift\n"
@@ -159,13 +170,14 @@ void parse_settings(int argc, char** argv, int first, ConvertOptions& options,
     } else if (arg == "--allow-legacy-external-gain") {
       options.allow_legacy_external_gain = true;
     } else if (arg == "--ai-model") {
-      // The shipping model is embedded/registered by the native runtime. Keep
-      // an optional artifact token for development adapters, but make the
-      // flag-only spelling ergonomic for the panel.
+      // The value is a model id from the fixed table, not a path: the shipping
+      // adapter owns the assets and never opens a caller-named file. The bare
+      // flag stays accepted and still means the incumbent, so existing scripts
+      // and saved settings keep behaving identically.
       if (i + 1 < argc && !std::string_view(argv[i + 1]).starts_with("--")) {
         options.ai_model_path = argv[++i];
       } else {
-        options.ai_model_path = "embedded";
+        options.ai_model_path = kEmbeddedNativeModel;
       }
     } else if (arg == "--ai-brightness") {
       options.ai_post.brightness_ev =
@@ -185,6 +197,16 @@ void parse_settings(int argc, char** argv, int first, ConvertOptions& options,
     } else if (arg == "--ai-expansion-start") {
       options.ai_post.expansion_start =
           real(next_value(i, argc, argv, arg), "AI expansion start");
+    } else if (arg == "--input-tensor") {
+      options.model_input_tensor = next_value(i, argc, argv, arg);
+    } else if (arg == "--tensor-width") {
+      options.model_input_tensor_width =
+          integer<std::uint32_t>(next_value(i, argc, argv, arg), "tensor width");
+    } else if (arg == "--tensor-height") {
+      options.model_input_tensor_height =
+          integer<std::uint32_t>(next_value(i, argc, argv, arg), "tensor height");
+    } else if (arg == "--capture-json") {
+      options.model_capture_path = next_value(i, argc, argv, arg);
     } else if (arg == "--decode-cache") {
       options.decode_cache_directory = next_value(i, argc, argv, arg);
     } else if (arg == "--decode-cache-source-sha256") {
@@ -320,15 +342,85 @@ int inspect_command(int argc, char** argv) {
   return inspection.structurally_valid ? 0 : 1;
 }
 
+// What a viewer of `candidate` sees compared with `reference`, both decoded the
+// way every other command decodes them: a gain map is applied at its full
+// alternate headroom and PQ/HLG are read through their exact inverses, so an
+// HDR source and its gain-map conversion meet in the same linear P3 space.
+void print_fidelity(const std::filesystem::path& reference,
+                    const std::filesystem::path& candidate) {
+  if (same_path(reference, candidate)) {
+    throw std::invalid_argument("--reference must name a different file");
+  }
+  const RawDecodeOptions decode{};
+  auto source = decode_image(reference, decode);
+  auto converted = decode_image(candidate, decode);
+  const auto result = measure_hdr_fidelity(source.linear_p3, converted.linear_p3);
+  const auto stops = [](float peak) { return std::log2(std::max(peak, 1.0e-6F)); };
+  const auto flags = std::cout.flags();
+  const auto precision = std::cout.precision();
+  std::cout << std::fixed << std::setprecision(3)
+            << "reference: " << path_utf8(reference) << " ("
+            << input_domain_name(source.domain) << ")\n"
+            << "candidate domain: " << input_domain_name(converted.domain) << '\n'
+            << "compared pixels: " << result.pixels << '\n'
+            << "delta E ITP mean/p50/p95/p99/p99.9/max: " << result.delta_e_itp_mean
+            << " / " << result.delta_e_itp_p50 << " / " << result.delta_e_itp_p95
+            << " / " << result.delta_e_itp_p99 << " / " << result.delta_e_itp_p999
+            << " / " << result.delta_e_itp_max << '\n'
+            << "pixels above delta E ITP 1/2/5: " << 100.0 * result.fraction_above_1
+            << "% / " << 100.0 * result.fraction_above_2 << "% / "
+            << 100.0 * result.fraction_above_5 << "%\n"
+            << "delta E ITP mean in shadows/midtones/highlights: "
+            << result.band_delta_e_itp_mean[0] << " / " << result.band_delta_e_itp_mean[1]
+            << " / " << result.band_delta_e_itp_mean[2] << " (pixels "
+            << result.band_pixels[0] << " / " << result.band_pixels[1] << " / "
+            << result.band_pixels[2] << ")\n"
+            << "PSNR (PQ, BT.2020): ";
+  if (std::isinf(result.psnr_pq_db)) std::cout << "identical\n";
+  else std::cout << result.psnr_pq_db << " dB\n";
+  std::cout << "peak luminance reference/candidate: " << result.reference_peak << " ("
+            << stops(result.reference_peak) << " stops) / " << result.candidate_peak << " ("
+            << stops(result.candidate_peak) << " stops)\n"
+            << "mean luminance reference/candidate: " << result.reference_mean << " / "
+            << result.candidate_mean << '\n';
+  // The same comparison after averaging 4x4 blocks in linear light. Per-pixel
+  // ΔE ITP counts the dither grain of an 8-bit base in the deepest shadows as
+  // colour error at full weight, although no display shows a camera frame at
+  // 1:1 and grain that fine averages out before anyone sees it. The quarter
+  // scale is still larger than any screen the photograph is viewed on; a tonal
+  // or colour shift survives the averaging and grain does not, which is the
+  // distinction the full-resolution figures above cannot make.
+  constexpr std::uint32_t kViewingScale = 4;
+  const auto width = source.linear_p3.width / kViewingScale;
+  const auto height = source.linear_p3.height / kViewingScale;
+  if (width >= 256 && height >= 256) {
+    const auto viewed = measure_hdr_fidelity(
+        resample_to(std::move(source.linear_p3), width, height),
+        resample_to(std::move(converted.linear_p3), width, height));
+    std::cout << "at 1/" << kViewingScale << " scale (" << width << 'x' << height
+              << ", 4x4 linear means) delta E ITP mean/p99/p99.9: "
+              << viewed.delta_e_itp_mean << " / " << viewed.delta_e_itp_p99 << " / "
+              << viewed.delta_e_itp_p999 << ", shadows/midtones/highlights: "
+              << viewed.band_delta_e_itp_mean[0] << " / " << viewed.band_delta_e_itp_mean[1]
+              << " / " << viewed.band_delta_e_itp_mean[2] << ", PSNR: ";
+    if (std::isinf(viewed.psnr_pq_db)) std::cout << "identical\n";
+    else std::cout << viewed.psnr_pq_db << " dB\n";
+  }
+  std::cout.flags(flags);
+  std::cout.precision(precision);
+}
+
 int verify_command(int argc, char** argv) {
   if (argc < 3) {
     throw std::invalid_argument("verify requires one HEIC or JPEG path");
   }
   const std::filesystem::path input = argv[2];
   std::filesystem::path reconstruct;
+  std::filesystem::path reference;
   for (int i = 3; i < argc; ++i) {
     const std::string_view arg = argv[i];
     if (arg == "--reconstruct") reconstruct = next_value(i, argc, argv, arg);
+    else if (arg == "--reference") reference = next_value(i, argc, argv, arg);
     else throw std::invalid_argument("unknown verify option: " + std::string(arg));
   }
 
@@ -344,6 +436,7 @@ int verify_command(int argc, char** argv) {
       verify_sdr_jpeg(read_binary_file(input));
       std::cout << "SDR JPEG: yes\n";
     }
+    if (!reference.empty()) print_fidelity(reference, input);
     std::cout << "verification passed\n";
     return 0;
   }
@@ -372,6 +465,7 @@ int verify_command(int argc, char** argv) {
     std::cout << (adaptive ? "base/Gain Map decode: passed\n"
                            : "BT.2100 HDR decode: passed\n");
   }
+  if (!reference.empty()) print_fidelity(reference, input);
   std::cout << "verification passed\n";
   return 0;
 }
@@ -468,7 +562,7 @@ void append_float_image(std::vector<std::uint8_t>& bytes,
 
 std::vector<std::uint8_t> photo_preview_packet(const PhotoRenditions& result,
                                                 const DecodeInfo& decode,
-                                                const InputDescription& input) {
+                                                const InputDescription& input, bool hasCaptureMetadata) {
   // Wire format v1: magic, JSON byte length, UTF-8 JSON, then two tightly
   // packed little-endian HWC RGB float32 planes (SDR base, reconstructed HDR).
   // JSON makes status/geometry extensible while the pixel payload stays
@@ -486,6 +580,7 @@ std::vector<std::uint8_t> photo_preview_packet(const PhotoRenditions& result,
       .member("relativeSdrWhite", 1.0F)
       .member("headroomStops", result.stats.headroom_stops)
       .member("inputDomain", input_domain_name(input.domain))
+      .member("hasCaptureMetadata", hasCaptureMetadata)
       .member("inputHeadroomStops", std::log2(input.headroom))
       .member("status", decode.degraded ? "degraded" : "ok")
       .begin_array("degradationReasons");
@@ -505,12 +600,12 @@ std::vector<std::uint8_t> photo_preview_packet(const PhotoRenditions& result,
 }
 
 std::vector<std::uint8_t> native_preview_packet(const GainMapResult& result,
-    const DecodeInfo& decode, const InputDescription& input) {
-  return photo_preview_packet(renditions_from_gain_map(result),decode,input);
+    const DecodeInfo& decode, const InputDescription& input, bool hasCaptureMetadata) {
+  return photo_preview_packet(renditions_from_gain_map(result),decode,input,hasCaptureMetadata);
 }
 
 std::vector<std::uint8_t> native_model_gain_packet(
-    const NativeModelOutput& output, const InputDescription& input) {
+    const NativeModelOutput& output, std::string_view input_domain) {
   const auto& gain = output.signed_log2_gain;
   gain.require_consistent("native model packet gain");
   if (gain.channels != 1 || gain.pixels.empty()) {
@@ -539,8 +634,20 @@ std::vector<std::uint8_t> native_model_gain_packet(
       .member("stride", kNativeModelStride)
       .member("gainMinStops", min_stops)
       .member("gainMaxStops", max_stops)
-      .member("inputDomain", input_domain_name(input.domain))
-      .member("headroomStops", std::max(0.0F, max_stops));
+      .member("inputDomain", input_domain)
+      .member("headroomStops", std::max(0.0F, max_stops))
+      // Identity travels with the pixels. A caller that only knows what it asked
+      // for cannot tell a fallback from an answer, and would label a
+      // model-1 result as model 2's.
+      .member("requestedModelId", output.requested_model_id)
+      .member("effectiveModelId", output.effective_model_id)
+      .member("modelVersion", output.model_version)
+      .member("inferenceMode", output.inference_mode)
+      .member("fallbackReason", output.fallback_reason)
+      .member("baseOffsetNumerator", output.base_offset.numerator)
+      .member("baseOffsetDenominator", output.base_offset.denominator)
+      .member("alternateOffsetNumerator", output.alternate_offset.numerator)
+      .member("alternateOffsetDenominator", output.alternate_offset.denominator);
   const std::string metadata = writer.end_object().take();
 
   std::vector<std::uint8_t> bytes{'H', 'Y', 'P', 'G', 'A', 'I', 'N', '1', '\n'};
@@ -628,16 +735,25 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
   if (!cached) owned = decode_cached_image(options.input, options, options.raw, &analysis_cache);
   auto& decoded = cached ? cached->image : owned;
   const auto input = decoded.describe_input();
+  const auto& capture = decoded.capture;
+  const bool hasCaptureMetadata = capture.iso.has_value() || capture.exposure_time_seconds.has_value()
+      || capture.aperture_f_number.has_value() || capture.exposure_bias_ev.has_value()
+      || capture.focal_length_mm.has_value() || capture.focal_length_35mm.has_value();
   GainMapResult result;
   if (!options.ai_model_path.empty()) {
-    const auto model_key = path_utf8(options.ai_model_path) + (options.clamp_srgb ? "/srgb" : "/p3");
+    // The model id is part of the cache key, not just the request: without it a
+    // cached model-1 base would be reused for model 2 and the preview would show
+    // the previous model's picture under the new model's name.
+    const auto model_key = selected_native_model_id(options) +
+                           (options.clamp_srgb ? "/srgb" : "/p3");
+    const auto request = native_model_request(options, decoded.metadata);
     if (is_sdr_encoding(options.encoding)) {
       result = render_native_model_base(decoded, options.clamp_srgb);
     } else if (cached) {
       if (cached->model_key != model_key) {
         cached->model_base = render_native_model_base(decoded, options.clamp_srgb);
         cached->model_input = make_native_model_input(cached->model_base.base_linear);
-        cached->prediction = infer_native_model(options.ai_model_path, cached->model_input);
+        cached->prediction = infer_native_model(request, cached->model_input);
         cached->model_key = model_key;
       }
       result = cached->model_base;
@@ -646,7 +762,7 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
     } else {
       result = render_native_model_base(decoded, options.clamp_srgb);
       auto model_input = make_native_model_input(result.base_linear);
-      auto prediction = infer_native_model(options.ai_model_path, model_input);
+      auto prediction = infer_native_model(request, model_input);
       apply_native_model_gain_map(result, model_input, std::move(prediction),
                                   options.gain.gain_strength, options.ai_post);
     }
@@ -685,7 +801,7 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
     if(is_gain_map_encoding(options.encoding)) result=gain_map_from_renditions(std::move(photo));
     else {
       validate_encoding_headroom(options.encoding,photo.stats.headroom_stops);
-      auto bytes=photo_preview_packet(photo,decoded.decode,input);
+      auto bytes=photo_preview_packet(photo,decoded.decode,input,hasCaptureMetadata);
       if(packet) *packet=std::move(bytes);
       else write_binary_file_atomic(options.output_directory,bytes,true);
       return 0;
@@ -697,7 +813,7 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
       if(is_sdr_encoding(options.encoding)) fit_sdr_to_srgb(photo.sdr);
       if(is_gain_map_encoding(options.encoding)) result.base_linear=std::move(photo.sdr);
       else {
-        auto bytes=photo_preview_packet(photo,decoded.decode,input);
+        auto bytes=photo_preview_packet(photo,decoded.decode,input,hasCaptureMetadata);
         if(packet) *packet=std::move(bytes);
         else write_binary_file_atomic(options.output_directory,bytes,true);
         return 0;
@@ -707,11 +823,11 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
   validate_encoding_headroom(options.encoding, result.headroom_stops);
   if (packet) {
     *packet = !result.clamp_srgb && result.gain_map.channels == 1
-        ? compact_preview_packet(result, decoded.decode, input)
-        : native_preview_packet(result, decoded.decode, input);
+        ? compact_preview_packet(result, decoded.decode, input,hasCaptureMetadata)
+        : native_preview_packet(result, decoded.decode, input,hasCaptureMetadata);
   } else {
     write_binary_file_atomic(options.output_directory,
-                             native_preview_packet(result, decoded.decode, input), true);
+                             native_preview_packet(result, decoded.decode, input,hasCaptureMetadata), true);
   }
   return 0;
 }
@@ -740,6 +856,72 @@ int preview_worker_command() {
   return 0;
 }
 
+// Reads a developed HWC linear-P3 float32 tensor.  The bytes are exactly what
+// `model-input` writes, so a conversion check can hand the model the same tensor
+// PyTorch is about to be run on rather than a second decode of the same file.
+FloatImage read_model_tensor(const std::filesystem::path& path,
+                             std::uint32_t width, std::uint32_t height) {
+  if (width == 0 || height == 0) {
+    throw std::invalid_argument(
+        "--input-tensor requires --tensor-width and --tensor-height");
+  }
+  if (width % kNativeModelStride != 0 || height % kNativeModelStride != 0) {
+    throw std::invalid_argument(
+        "input tensor dimensions must be stride-16 aligned");
+  }
+  const auto bytes = read_binary_file(path);
+  FloatImage tensor(width, height, 3);
+  const auto expected = tensor.pixels.size() * sizeof(float);
+  if (bytes.size() != expected) {
+    throw std::invalid_argument(
+        "input tensor byte length does not match its declared dimensions");
+  }
+  // The runtime is little-endian only, which the model packet already declares;
+  // reading a big-endian host's tensor would silently permute every sample.
+  static_assert(std::endian::native == std::endian::little,
+                "the model tensor file format is little-endian");
+  std::memcpy(tensor.pixels.data(), bytes.data(), expected);
+  for (const float value : tensor.pixels) {
+    if (!std::isfinite(value) || value < 0.0F || value > 1.0F) {
+      throw std::invalid_argument(
+          "input tensor samples must be finite linear SDR in [0, 1]");
+    }
+  }
+  return tensor;
+}
+
+// The capture settings that accompany a tensor.  A key that is absent, null or
+// not finite is absent from the result, which is what makes this able to express
+// the cases the fallback rule is tested with -- including a recorded exposure
+// bias of exactly zero.
+CaptureParameters read_capture_parameters(const std::filesystem::path& path) {
+  CaptureParameters capture;
+  const auto bytes = read_binary_file(path);
+  const auto document = json::parse(
+      std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
+  if (!document.is_object()) {
+    throw std::invalid_argument("--capture-json must contain a JSON object");
+  }
+  const auto value = [&](std::string_view key) -> std::optional<double> {
+    const auto* found = document.find(key);
+    if (found == nullptr || found->is_null()) return std::nullopt;
+    if (!found->is_number()) {
+      throw std::invalid_argument(std::string(key) +
+                                  " must be a number or null");
+    }
+    const double number = found->number();
+    if (!std::isfinite(number)) return std::nullopt;
+    return number;
+  };
+  capture.iso = value("iso");
+  capture.exposure_seconds = value("exposure_seconds");
+  capture.f_number = value("f_number");
+  capture.exposure_bias_ev = value("exposure_bias_ev");
+  capture.focal_length_mm = value("focal_length_mm");
+  capture.focal_length_35mm = value("focal_length_35mm");
+  return capture;
+}
+
 int model_gain_command(int argc, char** argv) {
   if (argc < 3) throw std::invalid_argument("model-gain requires one input image");
   ConvertOptions options;
@@ -753,6 +935,32 @@ int model_gain_command(int argc, char** argv) {
     throw std::invalid_argument(
         "model-gain --ai-model cannot use an external gain grid");
   }
+  if (options.model_input_tensor.empty() && !options.model_capture_path.empty()) {
+    throw std::invalid_argument(
+        "--capture-json describes an --input-tensor and needs one");
+  }
+  validate_native_model_post_options(options.ai_post);
+
+  if (!options.model_input_tensor.empty()) {
+    // No decode happens on this path, so there is no domain to declare and no
+    // capture to read from a file; both are stated rather than guessed.
+    const auto tensor = read_model_tensor(options.model_input_tensor,
+                                         options.model_input_tensor_width,
+                                         options.model_input_tensor_height);
+    NativeModelRequest request;
+    request.model_id = selected_native_model_id(options);
+    if (!options.model_capture_path.empty()) {
+      request.capture = read_capture_parameters(options.model_capture_path);
+    }
+    auto prediction = infer_native_model(request, tensor);
+    set_stdout_binary();
+    const auto packet = native_model_gain_packet(prediction, "undeclared");
+    std::cout.write(reinterpret_cast<const char*>(packet.data()),
+                    static_cast<std::streamsize>(packet.size()));
+    if (!std::cout) throw std::runtime_error("failed writing native model packet");
+    return 0;
+  }
+
   if (options.preview_max_edge == 0) options.preview_max_edge = 2048;
   options.decode_intent = DecodeIntent::Preview;
   options.raw.preview_max_edge = options.preview_max_edge;
@@ -760,18 +968,33 @@ int model_gain_command(int argc, char** argv) {
   options.raw.ignore_embedded_gain_map = true;
   options.raw.default_gamut = options.default_gamut;
   validate_gain_map_options(options.gain);
-  validate_native_model_post_options(options.ai_post);
 
   auto decoded = decode_cached_image(options.input, options, options.raw);
   const auto input = decoded.describe_input();
   auto result = render_native_model_base(decoded, options.clamp_srgb);
   auto model_input = make_native_model_input(result.base_linear);
-  auto prediction = infer_native_model(options.ai_model_path, model_input);
+  auto prediction = infer_native_model(native_model_request(options, decoded.metadata),
+                                       model_input);
   set_stdout_binary();
-  const auto packet = native_model_gain_packet(prediction, input);
+  const auto packet =
+      native_model_gain_packet(prediction, input_domain_name(input.domain));
   std::cout.write(reinterpret_cast<const char*>(packet.data()),
                   static_cast<std::streamsize>(packet.size()));
   if (!std::cout) throw std::runtime_error("failed writing native model packet");
+  return 0;
+}
+
+int model_list_command(int argc, char** argv) {
+  // `--json` is accepted for symmetry with `inspect`; the table is always JSON so
+  // the panel has one parse path rather than two. The adapter was registered
+  // during startup, so `available` already reflects whether every asset loaded.
+  for (int i = 2; i < argc; ++i) {
+    if (std::string_view(argv[i]) != "--json") {
+      throw std::invalid_argument("unknown model-list option: " +
+                                  std::string(argv[i]));
+    }
+  }
+  std::cout << native_model_list_json() << "\n";
   return 0;
 }
 
@@ -954,6 +1177,7 @@ int run_cli(int argc, char** argv) {
   if (command == "preview-worker") return preview_worker_command();
   if (command == "model-gain") return model_gain_command(argc, argv);
   if (command == "model-input") return model_input_command(argc, argv);
+  if (command == "model-list") return model_list_command(argc, argv);
   throw std::invalid_argument("unknown command: " + std::string(command));
 }
 

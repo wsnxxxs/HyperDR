@@ -5,6 +5,10 @@ import { OPTION_KEYS } from "./schema.js";
 import { createHistory } from "./history.js";
 
 export function mountHistory() {
+  // `modelId` belongs to the undo stack for the same reason `previewOptimized`
+  // does: switching the model changes what is on screen, and an undo that
+  // restored every slider but left the new model selected would produce a frame
+  // that never existed.
   const history = createHistory(store, [...OPTION_KEYS, "previewOptimized"]);
   const group = document.createElement("div");
   group.className = "edit-history";

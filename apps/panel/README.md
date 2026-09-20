@@ -113,8 +113,13 @@ PQ / HLG 需要 Main10 x265；首次完整构建后按项目根 `README.md` 运�
 - 拖拽或点选一张 ARW、DNG、JPG、PNG、HEIC/HEIF、AVIF 照片。再选一张会替换掉它。
   HDR 输入（HLG/PQ 的 HEIC 与 AVIF、Ultra HDR JPEG）的高光会保留下来：转换器直接
   返回线性 Display P3 float32 的 SDR 底图与重建 HDR，不经过 8 位 JPEG 中间层。
+- **HDR 照片打开即原片**：第一帧识别出 HDR 输入后，画面调节直接置为“不改动”——
+  整体亮度 0 EV、HDR 扩展强度 1.00、HDR 扩展范围取当前格式上限（不截断原片高光，
+  也不会超出文件自身声明的余量）。「重置」对 HDR 照片同样回到原片，而不是压成 SDR。
+  导出 Adaptive HDR 时使用 10 位底图，增益图为全分辨率，解码后逐像素还原原片 HDR；
+  可用 `HyperDR verify <导出文件> --reference <原片>` 核对差异。SDR 与 RAW 照片不变。
 - 六种导出格式：**Apple Adaptive HDR、Google Ultra HDR、PQ (HDR10)、HLG、AVIF PQ、AVIF HLG**。
-- **整体亮度**在自动曝光之后做 0～+2 EV 偏移，默认 +0.6 EV，同时作用于 SDR 底图与 HDR 输出；每张新照片都会将全部画面调节恢复为默认值。
+- **整体亮度**在自动曝光之后做 0～+2 EV 偏移，SDR/RAW 照片默认 +0.6 EV、HDR 照片默认 0 EV，同时作用于 SDR 底图与 HDR 输出；每张新照片都会将全部画面调节恢复为默认值。
 - **HDR 扩展强度**与 **HDR 扩展范围**；范围是实际亮度余量，Adaptive HDR 最高 3 stops，
   Ultra HDR / PQ 最高 4 stops，HLG 系最高约 2.3 stops（切换格式时自动钳制）。
 - **扩展作用区域**给出扩展起点与区域覆盖，默认 25% / 100%，暗部与噪声保护始终启用。

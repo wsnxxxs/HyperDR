@@ -83,6 +83,14 @@ export const store = createStore({
   uploadProgress: 0,
   /** The settings snapshot a successful run used, for the stale badge. */
   result: null,
+  /** The decoder's input domain for the current photo ("display-referred-hdr",
+   *  "display-referred-sdr", "scene-referred"), or "" until its first frame.
+   *  A fact about the file rather than a setting: it decides what "unchanged"
+   *  means for reset and new-photo defaults, and it travels beside the options
+   *  of an export so an HDR source keeps a 10-bit Adaptive HDR base. */
+  sourceDomain: "",
+  /** Whether the decoder found EXIF capture parameters for this photo. */
+  hasCaptureMetadata: false,
   /** Whether the current file has a preview matching the current settings. */
   previewReady: false,
   previewError: false,
@@ -108,6 +116,15 @@ export const store = createStore({
   maskKey: null,
   /** Whether the preview/export is currently using the model gain. */
   previewOptimized: false,
+  /** Which model the next AI request will name. Not a renderer setting, so it
+   *  is declared here rather than in settings/schema.js's CONTROLS: it selects
+   *  an asset, and an export records it beside `useModel`. */
+  modelId: "",
+  /** What actually ran for the AI result on screen: requested and effective id,
+   *  version, mode and the reason a fallback happened. Null when the current
+   *  frame is not a model result, so a stale identity can never be shown beside
+   *  a manual preview. */
+  modelIdentity: null,
   lastHdrEncoding: "adaptive",
   lastHdrOptimized: false,
   lutLibraryEntries: [],

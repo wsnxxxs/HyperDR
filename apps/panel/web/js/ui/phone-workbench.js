@@ -121,7 +121,15 @@ export function mountPhoneWorkbench({ stage, toast }) {
     try {
       const s = store.get();
       const snapshot = await phoneRequest("publish", { owner, current: {
-        sessionId: s.sessionId, options: { ...toOptions(s), useModel: Boolean(s.previewOptimized) },
+        sessionId: s.sessionId,
+        // The phone workbench receives the same option payload the panel sends,
+        // and the model travels beside `useModel` there too; otherwise a phone
+        // session would restore onto the desktop with no model recorded.
+        options: {
+          ...toOptions(s),
+          useModel: Boolean(s.previewOptimized),
+          modelId: s.modelId,
+        },
         busy: Boolean(s.starting || s.jobId || s.optimizing || (s.uploading && !s.phoneUploading)),
         status: s.jobId || s.starting ? "exporting" : s.previewError ? "error" : s.previewReady ? "ready" : "updating",
       } });

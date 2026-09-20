@@ -10,9 +10,11 @@ import { role, setText, debounce } from "./core/dom.js";
 import {
   CONTROLS, PERSISTED_OPTION_KEYS, defaultSettings, validatedSettings,
 } from "./settings/schema.js";
+import { availableModelIds, restoredModelId } from "./settings/model-ids.js";
 import { mountWorkspace } from "./core/workspace.js";
 import { mountHistory } from "./settings/history-controls.js";
 import { mountControls } from "./settings/controls.js";
+import { mountModelSelect } from "./settings/model-select.js";
 import { mountStage } from "./preview/stage.js";
 import { mountMask } from "./preview/mask.js";
 import { mountRunner } from "./run/runner.js";
@@ -99,7 +101,13 @@ function restoreSettings() {
   if (!saved || typeof saved !== "object") return;
   const selected = Object.fromEntries(keys.filter((key) => saved[key] !== undefined)
     .map((key) => [key, saved[key]]));
-  store.set(validatedSettings(selected, store.get()));
+  store.set({
+    ...validatedSettings(selected, store.get()),
+    // A snapshot written before the selector existed has no model id and meant
+    // the incumbent; `restoredModelId` is also what turns a saved id this build
+    // cannot run back into one it can.
+    modelId: restoredModelId(saved, availableModelIds(store.get())),
+  });
   // Rewrite both legacy and current snapshots with only the keys that are
   // persisted now, so a grade stored under an older preference cannot be
   // resurrected by turning the preference back on later.
@@ -130,6 +138,7 @@ mountDesktop();
 const stage = mountStage({ toast });
 
 mountControls({ toast });
+const modelSelect = mountModelSelect();
 mountMask({ stage });
 const runner = mountRunner({ toast });
 const workspace = mountWorkspace({ stage, runner, toast });

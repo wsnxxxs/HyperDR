@@ -174,7 +174,7 @@ class NativePreviewFrontendContractTests(unittest.TestCase):
         self.assertIn("export const DEFAULT_BRIGHTNESS_EV = 0.6;", SETTINGS_SCHEMA)
         self.assertIn("default: DEFAULT_BRIGHTNESS_EV", SETTINGS_SCHEMA)
         self.assertIn(
-            'export const PERSISTED_OPTION_KEYS = ["encoding", "colorGamut", "clampSrgb"];',
+            'export const PERSISTED_OPTION_KEYS = ["encoding", "colorGamut", "clampSrgb", MODEL_KEY];',
             SETTINGS_SCHEMA,
         )
         # The watched set is computed rather than constant now, because

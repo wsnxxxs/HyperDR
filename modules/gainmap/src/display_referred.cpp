@@ -117,9 +117,9 @@ CellGains measure_cell_gains(const FloatImage& source, float exposure,
         for (std::uint32_t x = x0; x < x1; ++x) {
           const std::size_t index =
               (static_cast<std::size_t>(y) * source.width + x) * 3;
-          const float luminance = p3_luminance(positive_finite(source.pixels[index]),
-                           positive_finite(source.pixels[index + 1]),
-                           positive_finite(source.pixels[index + 2])) *
+          const float luminance = p3_luminance(finite_or_zero(source.pixels[index]),
+                           finite_or_zero(source.pixels[index + 1]),
+                           finite_or_zero(source.pixels[index + 2])) *
               exposure;
           total += gain_of(luminance);
           if (luminance_guide) guide_total += luminance;
@@ -192,17 +192,7 @@ QuantizedGrid quantize_grid(const std::vector<float>& gain_stops,
 // Clamping each channel independently would shift the hue instead, and scaling
 // all three would darken a highlight the curve had deliberately placed.
 std::array<float, 3> fit_to_unit_cube(std::array<float, 3> rgb) {
-  const float peak = std::max({rgb[0], rgb[1], rgb[2]});
-  if (!(peak > 1.0F)) {
-    return {std::clamp(rgb[0], 0.0F, 1.0F), std::clamp(rgb[1], 0.0F, 1.0F),
-            std::clamp(rgb[2], 0.0F, 1.0F)};
-  }
-  const float luminance = p3_luminance(rgb[0], rgb[1], rgb[2]);
-  if (!(luminance < 1.0F) || !std::isfinite(luminance)) return {1.0F, 1.0F, 1.0F};
-  const float t = std::clamp((1.0F - luminance) / (peak - luminance), 0.0F, 1.0F);
-  return {std::clamp(luminance + t * (rgb[0] - luminance), 0.0F, 1.0F),
-          std::clamp(luminance + t * (rgb[1] - luminance), 0.0F, 1.0F),
-          std::clamp(luminance + t * (rgb[2] - luminance), 0.0F, 1.0F)};
+  return fit_linear_p3_gamut(rgb[0], rgb[1], rgb[2], 1.0F);
 }
 
 }  // namespace
@@ -342,9 +332,9 @@ GainMapResult make_display_referred_sdr_passthrough_result(
       const std::size_t base =
           (static_cast<std::size_t>(y) * source.width + x) * 3;
       std::array<float, 3> rgb{
-          positive_finite(source.pixels[base]) * exposure,
-          positive_finite(source.pixels[base + 1]) * exposure,
-          positive_finite(source.pixels[base + 2]) * exposure};
+          finite_or_zero(source.pixels[base]) * exposure,
+          finite_or_zero(source.pixels[base + 1]) * exposure,
+          finite_or_zero(source.pixels[base + 2]) * exposure};
       if (rolls_off) {
         const float luminance = p3_luminance(rgb[0], rgb[1], rgb[2]);
         if (luminance > kMinimumLuminance) {
@@ -509,9 +499,9 @@ GainMapResult make_display_referred_hdr_gain_map(const FloatImage& source,
       const std::size_t base =
           (static_cast<std::size_t>(y) * source.width + x) * 3;
       const std::array<float, 3> input{
-          positive_finite(source.pixels[base]) * exposure,
-          positive_finite(source.pixels[base + 1]) * exposure,
-          positive_finite(source.pixels[base + 2]) * exposure};
+          finite_or_zero(source.pixels[base]) * exposure,
+          finite_or_zero(source.pixels[base + 1]) * exposure,
+          finite_or_zero(source.pixels[base + 2]) * exposure};
       const float luminance = p3_luminance(input[0], input[1], input[2]);
       const float sdr_luminance = sdr_of(luminance);
       // Chroma rides the luminance change, so a pixel the shoulder leaves alone

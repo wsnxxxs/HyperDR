@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
 
-from . import api, job, security, color_lut, lut_library
+from . import api, job, security, color_lut, lut_library, raw_profiles
 from .config import WEB_ROOT
 from .session import save_upload
 
@@ -246,6 +246,17 @@ class Handler(BaseHTTPRequestHandler):
         if self.server.phone_only and path != "/api/upload" and not path.startswith("/api/phone/"):
             self._send(api.error("not found", status=404))
             return
+        if path == "/api/raw-profile-upload":
+            query = parse_qs(urlparse(self.path).query)
+            try:
+                with job.upload_slot():
+                    saved = raw_profiles.save(query.get("id", [""])[0], query.get("name", [""])[0],
+                                              self.rfile, int(self.headers.get("Content-Length", "0")))
+                self._send(api.Response(status=201, payload=saved))
+            except (job.Busy, OSError, ValueError) as exc:
+                self.close_connection = True
+                self._send(api.error(exc))
+            return
         if path == "/api/lut-upload":
             query = parse_qs(urlparse(self.path).query)
             try:
@@ -293,7 +304,7 @@ class Handler(BaseHTTPRequestHandler):
                 original = parsed.path.endswith("/original")
                 frame = workbench.original_frame if original else workbench.frame
                 version = workbench.frame_version
-                key = (workbench.current.get("sessionId"), workbench.current.get("options", {}).get("highlightRecovery", "blend")) if original else workbench.frame_key()
+                key = (workbench.current.get("sessionId"), (workbench.current.get("options", {}).get("highlightRecovery", "blend"), workbench.current.get("options", {}).get("rawProfile", ""))) if original else workbench.frame_key()
                 if not frame or frame[:2] != key:
                     self._send(api.error("正在更新预览。", status=409))
                     return

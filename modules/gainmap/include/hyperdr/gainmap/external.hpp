@@ -51,6 +51,7 @@ struct ExternalGainBinding {
   std::uint32_t delivered_crop_left{};
   std::uint32_t delivered_crop_top{};
   bool raw_half_size{false};
+  std::string raw_profile_sha256;
   std::uint32_t model_width{};
   std::uint32_t model_height{};
   std::uint32_t gain_width{};

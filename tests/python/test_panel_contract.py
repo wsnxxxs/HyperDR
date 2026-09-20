@@ -528,7 +528,7 @@ class SettingsContractTest(unittest.TestCase):
         self.assertTrue(schema.ALL_KEYS)
         for key, entry in schema.SETTINGS.items():
             self.assertIn(entry["kind"], {"enum", "number", "integer", "boolean",
-                                          "auto_or_number"}, key)
+                                          "auto_or_number", "string"}, key)
             self.assertTrue(entry["flag"].startswith("--"), key)
             self.assertIn("default", entry, key)
 

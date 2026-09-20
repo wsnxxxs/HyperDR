@@ -1,4 +1,5 @@
 #include "hyperdr/app/decode_cache.hpp"
+#include "hyperdr/codec/dcp_profile.hpp"
 
 #include "hyperdr/app/fingerprint.hpp"
 #include "hyperdr/app/schema.hpp"
@@ -35,7 +36,7 @@ constexpr std::array<char, 8> kMagic{'H', 'D', 'R', 'C', 'A', 'C', 'H', '3'};
 // OOTF, kept HDR colours outside Display P3, and gave DNGs their own colour
 // model and opcode lists. 14 honours DNG calibration signatures, so a profile
 // mismatch no longer reuses pixels made with the wrong camera calibration.
-constexpr std::uint32_t kCacheSchema = 14;
+constexpr std::uint32_t kCacheSchema = 15;
 
 // x86-64 and arm64, the only targets this project builds for, are both little
 // endian; the cache is a local scratch format and is never transported.
@@ -155,6 +156,12 @@ std::string metadata_json(const DecodedImage& value) {
   write_capture_value(writer, "capture_exposure_bias_ev", c.exposure_bias_ev);
   write_capture_value(writer, "capture_focal_length_mm", c.focal_length_mm);
   write_capture_value(writer, "capture_focal_length_35mm", c.focal_length_35mm);
+  if (value.raw_profile) {
+    writer.member("raw_profile_path", path_utf8(value.raw_profile_path))
+        .member("raw_profile_sha256", value.raw_profile->profile->sha256)
+        .member("raw_profile_weight", value.raw_profile->illuminant_weight)
+        .member("raw_profile_baseline", value.raw_profile->baseline_exposure);
+  }
   writer.begin_array("decode_degradation_reasons");
   for (const auto& reason : d.degradation_reasons) {
     writer.element(reason);
@@ -230,6 +237,18 @@ void apply_metadata_json(const std::string& text, DecodedImage& out) {
   out.capture.iso = read_optional(document, "capture_iso");
   out.raw_white_balance = string_at("raw_white_balance");
   out.raw_color_matrix = string_at("raw_color_matrix");
+  out.raw_profile_path = path_from_utf8(string_at("raw_profile_path"));
+  if (!out.raw_profile_path.empty()) {
+    auto profile = read_dcp_profile(out.raw_profile_path);
+    if (profile.sha256 != string_at("raw_profile_sha256"))
+      throw std::runtime_error("cached DCP profile changed");
+    auto context = std::make_shared<DcpRenderContext>();
+    context->profile = std::make_shared<const DcpProfile>(std::move(profile));
+    context->illuminant_weight = number_at("raw_profile_weight");
+    context->baseline_exposure = static_cast<float>(number_at("raw_profile_baseline"));
+    out.raw_profile = std::move(context);
+  }
+
   out.capture.exposure_time_seconds =
       read_optional(document, "capture_exposure_time_seconds");
   out.capture.aperture_f_number = read_optional(document, "capture_aperture_f_number");

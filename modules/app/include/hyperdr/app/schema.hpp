@@ -28,6 +28,8 @@
 namespace hyperdr {
 
 enum class SettingKind {
+  // A UTF-8 string, including an external resource path.
+  kString,
   // A name from a fixed set.
   kEnum,
   // A real number in [minimum, maximum].

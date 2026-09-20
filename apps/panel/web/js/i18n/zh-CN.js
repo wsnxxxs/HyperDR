@@ -6,6 +6,12 @@
  * en.js; scripts/check_panel_i18n.py fails the build when they drift.
  */
 export default {
+  "rawProfile.label": "RAW 相机配置",
+  "rawProfile.choose": "选择 DCP 文件…",
+  "rawProfile.default": "HyperDR 默认",
+  "rawProfile.local": "来自本机 Adobe 安装的匹配配置",
+  "rawProfile.unknown": "无法读取相机型号。请手动选择对应 DCP，解码器将检查兼容性。",
+
   "lut.manageHint": "整理本机 LUT，支持批量导入 .cube 文件。",
 
   "lut.select": "选择 LUT 风格",

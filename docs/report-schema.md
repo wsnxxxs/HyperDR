@@ -1,15 +1,15 @@
-# Report schema 9
+# Report schema 11
 
 What `--report` writes. The machine-readable JSON Schema is
 [`schema/report.json`](../schema/report.json): it defines every required object,
-field, type, enum, and nullable value in a schema-8 report. The emitter is
+field, type, enum, and nullable value in a schema-11 report. The emitter is
 `modules/app/src/report.cpp`, and `report_test` checks emitted reports against
 the schema. Update all three together whenever the report version or shape
 changes.
 
 ## Contents
 
-`--report` writes schema 9. Its `settings` block is generated from the settings
+`--report` writes schema 11. Its `settings` block is generated from the settings
 table, so it records every setting by its canonical name — not the handful someone
 remembered to add — plus `output_depth`, the depth actually encoded (BT.2100 is
 always 10-bit regardless of `--depth`). The top-level `raw_processing` block
@@ -24,6 +24,7 @@ matrix came from: `embedded` (the file's own matrix; for a DNG, its whole
 colour model, both calibrations interpolated at the as-shot white with any
 ForwardMatrix, unless the DNG SDK would refuse that profile, in which case it is
 LibRaw's choice of the file's ColorMatrix), `libraw` (LibRaw's per-model table),
+`dcp` (the explicitly selected external camera profile),
 or `none` (LibRaw has no matrix for the camera, so its colour is uncalibrated,
 and the decode is also reported as degraded with `no_camera_matrix`); an empty
 string follows the same rule as `raw_white_balance`, and it too survives decode
@@ -45,7 +46,8 @@ Ultra HDR JPEG that fell back to its SDR primary reports
 never reached a decoder.
 
 Read it first, because it decides what the rest of the record means. Only a
-scene-referred file gets automatic exposure, so its `exposure_ev` is a decision
+scene-referred file gets automatic exposure; an external DCP uses its recorded
+baseline instead of scene-metered exposure. For ordinary RAW, `exposure_ev` is a decision
 the renderer made about the scene; for the other two it is nothing but the
 creative offset the caller asked for. Only a scene-referred file gets
 content-selected headroom; a display-referred HDR file's `headroom_stops` is
@@ -131,3 +133,35 @@ reader that only saw one of them could not tell a fallback from a result.
 
 `settings.ai_model_id` replaces `settings.ai_model`: the value is an id from the
 model table, not a path.
+
+
+## External RAW DCP (schema 11)
+
+`settings.raw_profile` records the requested DCP path. The per-file fields
+below describe the profile actually used, including after a decode-cache hit:
+
+| Field | Meaning |
+|---|---|
+| `raw_color_matrix` | `dcp` when the external profile supplies camera colour conversion |
+| `raw_profile_name` | DCP profile name |
+| `raw_profile_sha256` | SHA-256 of the profile file's contents |
+| `raw_profile_camera` | Profile's UniqueCameraModel |
+| `raw_profile_tone` | `profile` for an explicit curve, or `adobe-sdk-acr3` for the SDK default |
+| `raw_profile_baseline_ev` | RAW baseline exposure plus DCP BaselineExposureOffset, in EV |
+
+Without an applied external DCP, profile strings are empty and baseline EV is
+zero; these are absence markers, not measurements of the default RAW look.
+The baseline does not include the caller's additional exposure adjustment.
+The reported tone source identifies the implemented SDK-style rendering, not
+a claim that Lightroom's current Process Version has been reproduced.
+
+A native-model DCP base reports `model_development: raw-dcp-v1`. The separate
+`hyperdr.model-input/v1` descriptor carries `raw_profile_sha256` and
+`development_recipe.id: raw-dcp-v1`; an external gain sidecar copies the hash
+to `model_binding.source.raw_profile_sha256` and preserves that recipe.
+Replay requires the same profile hash and recipe, preventing a gain prediction
+for one DCP base from being applied to another.
+
+Schema 11 also retains schema 10's encoded-gain reporting: API3-derived gain
+ranges describe the encoded result; distribution statistics that were not
+measured are omitted rather than copied from a different pre-JPEG gain grid.

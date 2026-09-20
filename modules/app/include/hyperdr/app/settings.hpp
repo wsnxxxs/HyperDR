@@ -180,6 +180,9 @@ struct FileResult {
   double headroom_stops{};
   double gain_min{};
   double gain_max{};
+  // API3 measures gain against the final JPEG; only header statistics are read
+  // back. The renderer's pre-compression gain distribution does not describe it.
+  bool codec_gain{false};
   double decode_ms{};
   double process_ms{};
   double encode_ms{};

@@ -19,8 +19,10 @@ HLG/PQ HEIC 与 AVIF 编码器也必须先从量化后的低分辨率 gain map �
 2. `look` 管理曝光、局部高光权重、色彩、LUT 和照片渲染。
    `PhotoRenditions` 明确携带 SDR 图像和可选 HDR 图像；纯 SDR 的 HDR 缓冲为空。
    此层不依赖容器或 gain map 元数据。
-3. 选择 Adaptive HDR / Ultra HDR 时，`gainmap` 从照片的 SDR/HDR 亮度关系生成
-   兼容现有单通道配置的空间映射，再交给对应编码器。
+3. 选择 Adaptive HDR / Ultra HDR 时，`gainmap` 按目标格式打包 SDR/HDR。
+   原生 HDR 保留全分辨率反算基图路径，未经独立调色的 RAW/SDR 保留原有增益网格。
+   独立调色后的 Ultra HDR JPEG 使用全分辨率 RGB gain map，分别保存各通道的正负增益，
+   SDR 基图保持调色结果；Adaptive HEIC 继续采用兼容现有配置的单通道亮度映射。
 4. 选择 HLG/PQ HEIC / AVIF 时，编码器直接接收 HDR 浮点像素；不再经过量化 gain map。
 5. 选择 SDR JPEG 时，只编码 SDR 图像，实际输出为带 sRGB ICC 和拍摄 Exif 的普通 JPEG。
 
@@ -101,8 +103,8 @@ Sony 的 [S-Log3 / S-Gamut3.Cine 技术说明](https://pro.sony/s3/cms-static-co
 - 强度 0% 完全绕过 LUT；SDR 和 HDR 分别从各自的原始 RGB 在线性光中混合至完整调色
   结果，100% 完全采用调色结果。HDR LUT 改变亮度范围时，headroom 的线性倍率也随强度
   混合，避免极低强度就丢弃原有高光色彩或突然改变输出范围。
-- 直接 HLG/PQ 编码保留渲染图像的空间细节。Adaptive / Ultra HDR 的单通道、低分辨率
-  gain map 对细小高光和 SDR/HDR 色彩差异仍是近似表示；需要这种精度时应选择直出格式。
+- 直接 HLG/PQ 编码保留渲染图像的空间细节。Adaptive 和显式模型 gain map 的单通道、
+  低分辨率映射仍是近似表示；常规 Ultra HDR JPEG 使用全分辨率 RGB gain map。
 - 手动渲染保留显影时选定的扩展起点以下像素标记。增益图报告中的实际峰值、范围利用率
   和暗部相对变化在增益量化及双线性重建后测量；这不包含后续 JPEG/HEVC 有损编码误差。
 
@@ -134,6 +136,53 @@ HyperDR convert DSC02120.HIF --output graded-adaptive --encoding adaptive --lut 
 红通道最快变化的 RGB 表。3D 使用三线性插值。组合式 1D shaper + 3D 文件明确报错，
 应从制作软件导出为单一 cube。现有 `--raw-linearization-lut` 仍仅用于传感器码值校准，
 不接受它来代替 `--lut`。
+
+## Ultra HDR 编码接口
+
+RAW／SDR 渲染和独立调色结果的 `--encoding ultrahdr` 导出使用 libultrahdr v1.4 的
+API3：先将项目完成显影、
+调色的 SDR 编码为 Display P3、sRGB 传递函数、4:4:4 JPEG，再同时提交该 JPEG 和
+线性 HDR 像素。库解码实际基图后计算增益，因此增益针对最终压缩基图，而非压缩前
+的 SDR 浮点值。RAW 处理、曝光、色彩 LUT 和 SDR/HDR 外观仍由 HyperDR 决定。
+
+HDR 在接口边界转换为线性 RGBA half-float，Display P3，`1 = 203 nit`；不需要先
+编码成 PQ、HLG 或某个 HDR 文件。使用 BEST_QUALITY 双遍计算、全分辨率 RGB gain map，
+增益 JPEG 质量至少 85；库测量每通道对数比值，并在 XMP + ISO 兼容配置下共用范围。
+显示峰值明确设置为 `203 × 2^headroom_stops` nit，避免线性输入默认 10000 nit
+导致显示增益权重不符合项目设置。gain 范围与显示 headroom 分别记录。
+
+相较缩小的单通道映射，全分辨率 RGB 增加编码时间、内存和文件体积。浮点转 half、
+gain map 量化及 JPEG 压缩仍有误差，不能称为无损 HDR。实时预览直接显示渲染所得的
+SDR/HDR 像素对，不在每次拖动滑块时执行 JPEG 编解码。
+
+已有 SDR JPEG 可以通过 C++ 编码接口直接复用：
+
+```cpp
+auto bytes = hyperdr::encode_ultrahdr_jpeg(
+    hdr_linear_p3, existing_sdr_jpeg, hyperdr::ColorGamut::kDisplayP3,
+    headroom_stops, 95);
+auto info = hyperdr::probe_ultrahdr_jpeg(bytes);
+```
+
+两份图像的尺寸、像素坐标和方向必须一致；若 JPEG 保留 EXIF 旋转，HDR 应按 JPEG
+未旋转的原始栅格对齐。JPEG 必须使用 sRGB 传递函数，所声明色域应与其受支持的 ICC
+一致。压缩基图不重编码，EXIF 和 ICC 保留；容器会重写标记并加入 gain map，因此
+不保证整个 JPEG 文件逐字节不变。当前 XMP 兼容写入在基图色域中计算增益；复用 sRGB
+JPEG 时，超出 sRGB 的 HDR 颜色可能被裁剪。宽色域 HDR 应优先配 Display P3 基图。
+此接口不意味着普通单图 CLI 导出自动透传输入 JPEG：普通导出保存的是当前编辑结果。
+
+`uhdr_dec_probe` 接入为轻量元数据检查，导出报告的增益范围从实际文件读取。
+报告 schema 10 的 `gain_map.encoder = libultrahdr-api3` 表示这一路径；
+`distribution_measured = false` 时不输出未测量的 gain 分位数。`render` 字段仍描述
+压缩前渲染图像，默认的输出验证另行执行完整 HDR 解码。
+
+AI 和外部 gain map 使用 API4，保留模型给定的增益曲线。未被独立调色改变关系的
+原生 HDR（`hdr_is_source`）也保留已有全分辨率保真打包及 API4：HLG 合成回归中，
+API3 在 quality 95 的平均 ΔE ITP 从 1.061 降到 0.750，但峰值偏差从 1.28% 增至
+2.65%，超过现有 2% 门槛；质量 100 仍未满足峰值门槛，因此不全局替换。
+Adaptive HEIC 继续使用
+原有单通道打包。直接调用 `gain_map_from_renditions(..., iso_generic)` 的独立调色
+路径仍可使用 HyperDR 自己的带偏移 RGB 增益算法；常规 JPEG 导出已切换到 API3。
 
 ## 实片验证
 

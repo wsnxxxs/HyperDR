@@ -57,7 +57,7 @@ void write_settings(json::Writer& writer, const ConvertOptions& options) {
       .end_object();
 }
 
-void write_stats(json::Writer& writer, const RenderStats& s) {
+void write_stats(json::Writer& writer, const RenderStats& s, bool codec_gain) {
   writer.begin_object("look")
       .member("exposure_ev", s.exposure_ev)
       .member("ev100", s.ev100)
@@ -75,10 +75,16 @@ void write_stats(json::Writer& writer, const RenderStats& s) {
       .member("wide_gamut_luminance_threshold", s.wide_gamut_luminance_threshold)
       .end_object();
   writer.begin_object("gain_map")
+      .member("encoder", codec_gain ? "libultrahdr-api3" : "hyperdr")
+      .member("distribution_measured", !codec_gain)
       .member("gamma", s.gain_gamma)
       .member("min_stops", s.gain_min_stops)
-      .member("max_stops", s.gain_max_stops)
-      .begin_object("percentiles_stops")
+      .member("max_stops", s.gain_max_stops);
+  if (codec_gain) {
+    writer.end_object();
+    return;
+  }
+  writer.begin_object("percentiles_stops")
       .member("p50", s.gain_percentiles[0])
       .member("p75", s.gain_percentiles[1])
       .member("p90", s.gain_percentiles[2])
@@ -102,10 +108,9 @@ void write_stats(json::Writer& writer, const RenderStats& s) {
 std::string run_report_json(const std::vector<FileResult>& results,
                             const ConvertOptions& options) {
   json::Writer writer(json::Writer::Style::kIndented);
-  // 9: a model run now reports the model that answered rather than the frozen
-  // incumbent's asset id, and names the requested model separately. A consumer
-  // comparing `model_id` textually has to know that.
-  writer.begin_object().member("schema", 9).member("tool", kVersion);
+  // 10: API3 reports encoded gain ranges; unmeasured distribution fields are
+  // omitted instead of publishing the renderer's different pre-JPEG grid.
+  writer.begin_object().member("schema", 10).member("tool", kVersion);
   write_settings(writer, options);
   writer.begin_array("files");
   for (const auto& result : results) {
@@ -165,7 +170,7 @@ std::string run_report_json(const std::vector<FileResult>& results,
         .member("codec_ms", result.codec_ms)
         .member("verify_ms", result.verify_ms)
         .member("write_ms", result.write_ms);
-    write_stats(writer, result.stats);
+    write_stats(writer, result.stats, result.codec_gain);
     writer.end_object();
   }
   return writer.end_array().end_object().take() + "\n";

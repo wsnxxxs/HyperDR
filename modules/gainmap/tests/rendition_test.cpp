@@ -208,9 +208,67 @@ void test_hdr_source_outside_p3() {
       "an out-of-P3 green must not be clamped channel by channel");
 }
 
+void test_independent_rgb_renditions() {
+  PhotoRenditions photo;
+  photo.sdr = FloatImage(5, 3, 3);
+  photo.hdr = FloatImage(5, 3, 3);
+  photo.stats.headroom_stops = 2;
+  photo.stats.headroom_linear = 4;
+  for (unsigned y = 0; y < 3; ++y) for (unsigned x = 0; x < 5; ++x) {
+    const std::array<float, 3> base{.5F, .4F, .2F};
+    const std::array<float, 3> hdr{x % 2 ? .25F : 2.0F, .8F, .05F};
+    for (unsigned c = 0; c < 3; ++c) {
+      photo.sdr.at(x, y, c) = base[c];
+      photo.hdr.at(x, y, c) = hdr[c];
+    }
+  }
+  // A graded channel can reach black at either endpoint.
+  photo.sdr.at(4, 2, 0) = 0;
+  photo.hdr.at(4, 2, 0) = .5F;
+  photo.hdr.at(4, 2, 1) = 0;
+  const auto packed = gain_map_from_renditions(photo, GainMapWriterProfile::iso_generic);
+  require(packed.base_linear.pixels == photo.sdr.pixels, "RGB packaging must preserve the graded SDR endpoint");
+  require(packed.gain_map.channels == 3 && packed.gain_map.width == 5 && packed.gain_map.height == 3,
+      "independent endpoints need full-resolution RGB gain");
+  require(rational_value(packed.metadata.gain_min) < 0, "RGB packaging must retain negative gains");
+  require(packed.headroom_stops == 2 && rational_value(packed.metadata.gain_max) > 4,
+      "a black-channel ratio must not raise display capacity");
+  require(packed.stats.gain_clipped_fraction == 0,
+      "a channel ratio above display headroom is not clipped content");
+  const auto metadata = parse_tmap_payload(serialize_tmap_payload(packed.metadata));
+  require(gain_map_channel_count(metadata) == 3, "RGB metadata must survive serialization");
+  const auto actual = reconstruct_gain_map(packed.base_linear, packed.gain_map, metadata, 2);
+  const auto halfway = reconstruct_gain_map(packed.base_linear, packed.gain_map, metadata, 1);
+  const auto sdr = reconstruct_gain_map(packed.base_linear, packed.gain_map, metadata, 0);
+  const float offset = rational_value(metadata.channels[0].base_offset);
+  double squared_error = 0;
+  for (std::size_t i = 0; i < actual.pixels.size(); ++i) {
+    const float expected = photo.hdr.pixels[i];
+    require(std::abs(actual.pixels[i] - expected) < .035F * std::max(expected, .1F),
+        "signed RGB gain must reconstruct each independently graded channel");
+    const float middle = std::sqrt((photo.sdr.pixels[i] + offset) * (expected + offset)) - offset;
+    require(std::abs(halfway.pixels[i] - middle) < .025F * std::max(middle, .1F),
+        "intermediate display capacity must use the independent headroom");
+    require(std::abs(sdr.pixels[i] - photo.sdr.pixels[i]) < 1e-6F, "SDR display must retain the base");
+    squared_error += std::pow(actual.pixels[i] - expected, 2);
+  }
+  const auto compatible = gain_map_from_renditions(photo);
+  validate_gain_map_metadata(compatible.metadata, GainMapWriterProfile::apple_strict);
+  const auto old = reconstruct_gain_map(compatible.base_linear, compatible.gain_map,
+      compatible.metadata, compatible.headroom_stops);
+  double old_squared_error = 0;
+  for (std::size_t i = 0; i < old.pixels.size(); ++i)
+    old_squared_error += std::pow(old.pixels[i] - photo.hdr.pixels[i], 2);
+  require(squared_error < old_squared_error * .01F,
+      "RGB gain must materially reduce the single-channel color reconstruction error");
+  std::cout << "Independent RGB rendition MSE: " << squared_error / actual.pixels.size()
+            << " (single-channel: " << old_squared_error / actual.pixels.size() << ")\n";
+}
+
 int main() {
   try { test_zero_and_spatial_gain(); test_model_grading(); test_final_gain_statistics();
-        test_hdr_source_reconstructs_itself(); test_hdr_source_outside_p3(); }
+        test_hdr_source_reconstructs_itself(); test_hdr_source_outside_p3();
+        test_independent_rgb_renditions(); }
   catch(const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
   std::cout<<"graded model reconstruction and final gain statistics passed\n";
 }

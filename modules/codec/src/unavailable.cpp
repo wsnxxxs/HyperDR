@@ -128,6 +128,18 @@ std::vector<std::uint8_t> encode_hdr_heic(const PhotoRenditions&,
   fail_without_codecs("BT.2100 HEIC encoding");
 }
 
+std::vector<std::uint8_t> encode_ultrahdr_jpeg(const PhotoRenditions&,
+    const PhotoMetadata&, int) {
+  fail_without_codecs("Ultra HDR rendition encoding");
+}
+std::vector<std::uint8_t> encode_ultrahdr_jpeg(const FloatImage&,
+    const std::vector<std::uint8_t>&, ColorGamut, float, int) {
+  fail_without_codecs("Ultra HDR JPEG reuse");
+}
+UltraHdrInfo probe_ultrahdr_jpeg(const std::vector<std::uint8_t>&) {
+  fail_without_codecs("Ultra HDR metadata inspection");
+}
+
 std::vector<std::uint8_t> encode_avif(const PhotoRenditions&, const PhotoMetadata&,
                                       int, HdrEncoding) {
   fail_without_codecs("AVIF encoding");

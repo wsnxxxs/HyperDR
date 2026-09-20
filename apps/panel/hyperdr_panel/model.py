@@ -218,7 +218,7 @@ def _packet_metadata(packet: bytes) -> tuple[int, int, dict]:
 
 def _run_native_gain(executable: str, source: Path, highlight_recovery: str,
                      model_id: str, *, color_gamut: str | None = None,
-                     clamp_srgb: bool = False) -> tuple[bytes, dict]:
+                     clamp_srgb: bool = False, raw_profile: str | None = None) -> tuple[bytes, dict]:
     argv = [
         executable, "model-gain", str(source),
         "--ai-model", model_id,
@@ -228,6 +228,8 @@ def _run_native_gain(executable: str, source: Path, highlight_recovery: str,
         argv.extend(["--color-gamut", color_gamut])
     if clamp_srgb:
         argv.append("--clamp-srgb")
+    if raw_profile:
+        argv.extend(["--raw-profile", raw_profile])
     try:
         completed = subprocess.run(
             argv, cwd=str(REPO_ROOT), capture_output=True,
@@ -272,7 +274,7 @@ def _offset_value(metadata: dict, prefix: str) -> float:
 
 def native_model_gain(source: Path, highlight_recovery: str = "blend",
                       model_id: str | None = None, *, color_gamut: str | None = None,
-                      clamp_srgb: bool = False) -> tuple[bytes, dict]:
+                      clamp_srgb: bool = False, raw_profile: str | None = None) -> tuple[bytes, dict]:
     """Run native model-gain without creating any sidecar files."""
     require_enabled()
     input_options = {"clamp_srgb": clamp_srgb}
@@ -289,14 +291,15 @@ def native_model_gain(source: Path, highlight_recovery: str = "blend",
     stat = source.stat()
     # Model and input/base options distinguish predictions for the same source.
     key = (str(source.resolve()), stat.st_mtime_ns, stat.st_size,
-           highlight_recovery, selected, color_gamut, clamp_srgb, executable)
+           highlight_recovery, selected, color_gamut, clamp_srgb, raw_profile, executable)
 
     def produce():
         raw = source.suffix.lower() in RAW_INPUT_EXTENSIONS
         slot = RAW_DECODE_BUDGET.hold(timeout=3.0) if raw else nullcontext()
         with slot:
             return _run_native_gain(executable, source, highlight_recovery, selected,
-                                    color_gamut=color_gamut, clamp_srgb=clamp_srgb)
+                                    color_gamut=color_gamut, clamp_srgb=clamp_srgb,
+                                    **({"raw_profile": raw_profile} if raw_profile else {}))
 
     return _INFERENCE_FLIGHT.run(
         key, produce, timeout=INFERENCE_TIMEOUT_SECONDS + 5.0)

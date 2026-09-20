@@ -297,6 +297,8 @@ def main() -> None:
             "contract": "hyperdr.model-gain-binding/v1",
             "source": {
                 "sha256": model_input_descriptor["source_sha256"],
+                **({"raw_profile_sha256": model_input_descriptor["raw_profile_sha256"]}
+                   if model_input_descriptor.get("raw_profile_sha256") else {}),
                 "highlight_recovery": model_input_descriptor["highlight_recovery"],
                 "orientation": model_input_descriptor["orientation"],
                 "sensor_size": model_input_descriptor["sensor_size"],

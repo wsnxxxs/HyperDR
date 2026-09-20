@@ -1,3 +1,4 @@
+#include "hyperdr/look/dcp_render.hpp"
 #include "hyperdr/look/rendition.hpp"
 #include "hyperdr/foundation/math.hpp"
 #include "hyperdr/foundation/parallel.hpp"
@@ -79,6 +80,20 @@ PhotoRenditions render_renditions(const FloatImage& source,
   const auto options=render_options_for_target(requested_options,target);
   validate_render_options(options);
   validate_input_description(input);
+  if (input.raw_profile) {
+    const float ev = std::clamp((options.auto_exposure ? 0.0F : options.exposure_ev) +
+        options.exposure_bias_ev, -10.0F, 10.0F);
+    auto base = render_dcp_base(source, *input.raw_profile, ev);
+    apply_dcp_adjustments(base, options.look);
+    auto adjusted = options;
+    adjusted.auto_exposure = false;
+    adjusted.exposure_ev = adjusted.exposure_bias_ev = 0.0F;
+    auto result = render_renditions(base, adjusted, capture,
+        {InputDomain::kDisplayReferredSdr, 1}, target, nullptr, preparation);
+    result.stats.exposure_ev = ev + input.raw_profile->baseline_exposure +
+        input.raw_profile->profile->baseline_exposure_offset;
+    return result;
+  }
   const bool scene = input.domain == InputDomain::kSceneReferred;
   const bool input_hdr = input.domain == InputDomain::kDisplayReferredHdr;
   const bool want_hdr = target == RenderTarget::Hdr;

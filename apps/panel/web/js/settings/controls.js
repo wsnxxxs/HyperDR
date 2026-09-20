@@ -9,6 +9,7 @@ import { el, role, setPressed, setText, clamp } from "../core/dom.js";
 import { store } from "../core/store.js";
 import { COLOR_GAMUTS, CONTROLS, ENCODINGS, encodingById, neutralSettings } from "./schema.js";
 import { mountLutLibrary } from "./lut-library.js";
+import { mountRawProfiles } from "./raw-profiles.js";
 import { mountWorkflow } from "./workflow.js";
 import { api } from "../core/api.js";
 import { t, onLocaleChange } from "../i18n/index.js";
@@ -459,6 +460,7 @@ export function mountControls({ toast } = {}) {
   mountEncoding({ toast });
   mountColorGamut();
   mountLut({ toast });
+  mountRawProfiles({ toast });
   mountResets({ toast });
 
   const containers = new Map(

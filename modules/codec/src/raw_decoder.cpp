@@ -1,5 +1,6 @@
 #include "hyperdr/image/color.hpp"
 #include "hyperdr/image/dng_color.hpp"
+#include "hyperdr/codec/dcp_profile.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/foundation/parallel.hpp"
 #include "hyperdr/codec/encoders.hpp"
@@ -135,6 +136,10 @@ class RawCallbackScope {
 class CallbackLibRaw : public LibRaw {
  public:
   CallbackLibRaw() { set_exifparser_handler(read_calibration_signature, this); }
+
+  bool camera_calibration_matches_signature(const std::string& signature) const {
+    return camera_calibration_signature_ == signature;
+  }
 
   bool camera_calibration_matches_profile() const {
     return camera_calibration_signature_ == profile_calibration_signature_;
@@ -299,6 +304,7 @@ void validate_raw_options(const RawDecodeOptions& options) {
         options.digital_gain <= 64.0F)) {
     throw std::invalid_argument("RAW digital gain must be finite and in (0,64]");
   }
+  require_calibration_file(options.profile, "RAW DCP profile");
   require_calibration_file(options.bad_pixel_map, "RAW bad-pixel map");
   require_calibration_file(options.dark_frame, "RAW dark frame");
   require_calibration_file(options.linearization_lut,
@@ -867,8 +873,18 @@ DecodedImage decode_raw(const std::filesystem::path& path,
   }
   // Correct channel overflow before demosaic; this is specifically intended to
   // prevent artefacts such as magenta clouds.
-  params.adjust_maximum_thr = 0.75F;
+  params.adjust_maximum_thr = options.profile.empty() ? 0.75F : 0.0F;
   check_raw(raw.open_file(path.c_str()), "LibRaw open");
+  std::shared_ptr<const DcpProfile> external_profile;
+  if (!options.profile.empty()) {
+    auto profile = read_dcp_profile(options.profile);
+    if (!dcp_matches_camera(profile, raw.imgdata.idata.make, raw.imgdata.idata.model))
+      throw std::invalid_argument("DCP camera does not match RAW: " + profile.camera_model);
+    if (raw.imgdata.idata.colors != 3 || raw.imgdata.color.as_shot_wb_applied)
+      throw std::invalid_argument("DCP requires three-channel RAW without pre-applied white balance");
+    external_profile = std::make_shared<const DcpProfile>(std::move(profile));
+  }
+
 
   // LibRaw's only cheap RAW reduction must be selected before unpack(). It is
   // an explicit preview choice: a full export is a full-resolution contract,
@@ -1043,6 +1059,42 @@ DecodedImage decode_raw(const std::filesystem::path& path,
   const auto dng_matrix = color_matrix == "embedded"
                               ? dng_camera_matrix(raw, callback_context.applied_multipliers)
                               : std::nullopt;
+  std::optional<DngColorTransform> profile_transform;
+  if (external_profile) {
+    auto color_profile = external_profile->color;
+    if (raw.imgdata.idata.dng_version != 0) {
+      for (unsigned c = 0; c < 3; ++c) {
+        const auto v = raw.imgdata.color.dng_levels.analogbalance[c];
+        color_profile.analog_balance[c] = std::isfinite(v) && v > 0 ? v : 1.0;
+      }
+      if (raw.camera_calibration_matches_signature(external_profile->calibration_signature)) {
+        for (unsigned k = 0; k < 2; ++k) {
+          Matrix3d camera_calibration{};
+          bool present = false;
+          for (unsigned i = 0; i < 3; ++i) for (unsigned j = 0; j < 3; ++j) {
+            camera_calibration[i][j] = raw.imgdata.color.dng_color[k].calibration[i][j];
+            present = present || camera_calibration[i][j] != 0;
+          }
+          if (present) color_profile.calibrations[k].camera_calibration = camera_calibration;
+        }
+      }
+    }
+    std::array<double, 3> neutral{};
+    for (unsigned c = 0; c < 3; ++c)
+      neutral[c] = 1.0 / callback_context.applied_multipliers[c];
+    profile_transform = dng_camera_color_transform(color_profile, neutral);
+    if (!profile_transform) throw std::invalid_argument("DCP has an unusable camera color transform");
+    auto context = std::make_shared<DcpRenderContext>();
+    context->profile = external_profile;
+    context->illuminant_weight = profile_transform->illuminant_weight;
+    const float baseline = raw.imgdata.color.dng_levels.baseline_exposure;
+    // LibRaw uses -999 for an absent BaselineExposure (including native ARW).
+    context->baseline_exposure = std::isfinite(baseline) && baseline != -999.0F
+                                     ? baseline : 0.0F;
+    result.raw_profile = std::move(context);
+    result.raw_profile_path = std::filesystem::absolute(options.profile);
+    result.raw_color_matrix = "dcp";
+  }
   const auto columns = camera_to_ap1_columns(raw, color_matrix != "none", dng_matrix);
   const float scale = exposure_gain * options.digital_gain / 65535.0F;
   const auto channels = static_cast<std::size_t>(processed->colors);
@@ -1057,6 +1109,16 @@ DecodedImage decode_raw(const std::filesystem::path& path,
       std::array<float, 4> camera{};
       for (std::size_t c = 0; c < channels; ++c) {
         camera[c] = pixels[input_index + c] * scale;
+      }
+      if (profile_transform) {
+        // Preserve scene values outside P3 for DCP development in ProPhoto.
+        // The existing native gamut compressor is intentionally after this branch.
+        for (unsigned i = 0; i < 3; ++i) {
+          const auto& row = profile_transform->camera_to_p3[i];
+          result.linear_p3.pixels[output_index * 3 + i] = static_cast<float>(
+              row[0] * camera[0] + row[1] * camera[1] + row[2] * camera[2]);
+        }
+        continue;
       }
       // A camera matrix extrapolates some saturated colours past the spectral
       // locus. Narrow-band blue light lands at zero or negative luminance

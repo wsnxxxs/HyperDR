@@ -1,3 +1,4 @@
+#include "hyperdr/image/dcp_profile.hpp"
 #include "hyperdr/app/batch.hpp"
 #include "hyperdr/app/analysis_cache.hpp"
 
@@ -94,7 +95,7 @@ GainMapResult render_native_model_base(const DecodedImage& image,
   // mathematical gain is requested. Zero gain therefore selects its exact
   // linear Display-P3 passthrough result; the inferred gain replaces the zero
   // grid immediately afterwards.
-  if (image.describe_input().domain == InputDomain::kDisplayReferredSdr) {
+  if (image.raw_profile || image.describe_input().domain == InputDomain::kDisplayReferredSdr) {
     development.gain_strength = 0.0F;
   }
   return render_decoded_image(image, development);
@@ -146,9 +147,14 @@ GainMapOptions replay_external_development(
       : same_delivered_size;
   if (!delivered_matches) reject("delivered crop");
 
+  const auto profile_hash = image.raw_profile ? image.raw_profile->profile->sha256 : std::string{};
+  if (binding.raw_profile_sha256 != profile_hash) reject("RAW DCP profile");
+  if (image.raw_profile && binding.recipe.id != "raw-dcp-v1") reject("RAW DCP development recipe");
   GainMapOptions replay = options.gain;
   replay.auto_exposure = false;
   replay.exposure_ev = binding.recipe.exposure_ev;
+  if (image.raw_profile) replay.exposure_ev -= image.raw_profile->baseline_exposure +
+      image.raw_profile->profile->baseline_exposure_offset;
   replay.exposure_bias_ev = 0.0F;
   replay.auto_headroom = false;
   replay.headroom_stops = binding.recipe.headroom_stops;
@@ -329,6 +335,15 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     result.sensor_width = staged.image.decode.sensor_width;
     result.raw_white_balance = staged.image.raw_white_balance;
     result.raw_color_matrix = staged.image.raw_color_matrix;
+    if (staged.image.raw_profile) {
+      const auto& context = *staged.image.raw_profile;
+      const auto& profile = *context.profile;
+      result.raw_profile_name = profile.name;
+      result.raw_profile_sha256 = profile.sha256;
+      result.raw_profile_camera = profile.camera_model;
+      result.raw_profile_tone = profile.tone_curve.empty() ? "adobe-sdk-acr3" : "profile";
+      result.raw_profile_baseline_ev = context.baseline_exposure + profile.baseline_exposure_offset;
+    }
     result.sensor_height = staged.image.decode.sensor_height;
     result.target_width = staged.image.decode.target_width;
     result.target_height = staged.image.decode.target_height;
@@ -349,7 +364,7 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     result.input_headroom = described.headroom;
     result.model_development = options.ai_model_path.empty()
                                    ? "none"
-                                   : native_model_development_kind(
+                                   : staged.image.raw_profile ? "raw-dcp-v1" : native_model_development_kind(
                                          described.domain);
     result.width = rendered_base.width;
     result.height = rendered_base.height;

@@ -86,6 +86,8 @@ struct RawMosaic {
 };
 
 struct RawDecodeOptions {
+  // User-owned DCP camera profile; empty preserves the native rendering path.
+  std::filesystem::path profile;
   // Primaries used only when a raster carries neither a usable ICC profile nor
   // a stated CICP primary. RAW uses its camera matrix and ignores it.
   ColorGamut default_gamut{ColorGamut::kSrgb};
@@ -197,6 +199,8 @@ struct DecodedImage {
   // such as a DNG ColorMatrix), `libraw` (LibRaw's per-model table), or `none`
   // (no matrix; camera RGB is read as ProPhoto). Empty for non-RAW inputs.
   std::string raw_color_matrix;
+  std::filesystem::path raw_profile_path;
+  std::shared_ptr<const DcpRenderContext> raw_profile;
   DecodeInfo decode;
   // How far above diffuse white this input's *format* can carry detail, as a
   // linear multiple of 1.0. HLG is 1000/203, PQ up to 10000/203, a gain-map
@@ -233,7 +237,7 @@ struct DecodedImage {
       // pixels through the photographic renderer.
       return {InputDomain::kDisplayReferredSdr, 1.0F};
     }
-    if (domain != InputDomain::kDisplayReferredHdr) return {domain, 1.0F};
+    if (domain != InputDomain::kDisplayReferredHdr) return {domain, 1.0F, raw_profile};
     if (!(hdr_headroom > 1.0F) || !std::isfinite(hdr_headroom)) {
       return {InputDomain::kDisplayReferredSdr, 1.0F};
     }

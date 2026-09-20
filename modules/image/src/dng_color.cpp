@@ -305,7 +305,7 @@ double correlated_color_temperature(double x, double y) {
   return 0.0;
 }
 
-std::optional<Matrix3d> dng_camera_to_linear_p3(const DngColorProfile& profile,
+std::optional<DngColorTransform> dng_camera_color_transform(const DngColorProfile& profile,
                                                 const std::array<double, 3>& neutral) {
   for (const double value : neutral) {
     if (!(value > 0.0) || !std::isfinite(value)) return std::nullopt;
@@ -369,7 +369,21 @@ std::optional<Matrix3d> dng_camera_to_linear_p3(const DngColorProfile& profile,
   const Matrix3d xyz_to_p3{{{2.4934969, -0.9313836, -0.4027108},
                             {-0.8294890, 1.7626641, 0.0236247},
                             {0.0358458, -0.0761724, 0.9568845}}};
-  return multiply(xyz_to_p3, camera_to_d65);
+  const double temperature = correlated_color_temperature(white[0], white[1]);
+  const double t1 = dng_illuminant_temperature(profile.calibrations[0].illuminant);
+  const double t2 = dng_illuminant_temperature(profile.calibrations[1].illuminant);
+  double weight = 1.0;
+  if (profile.calibrations[1].color_matrix && t1 > 0 && t2 > 0 && t1 != t2) {
+    weight = std::clamp((1.0 / temperature - 1.0 / t2) /
+                        (1.0 / t1 - 1.0 / t2), 0.0, 1.0);
+  }
+  return DngColorTransform{multiply(xyz_to_p3, camera_to_d65), weight, temperature};
+}
+
+std::optional<Matrix3d> dng_camera_to_linear_p3(const DngColorProfile& profile,
+                                             const std::array<double, 3>& neutral) {
+  const auto transform = dng_camera_color_transform(profile, neutral);
+  return transform ? std::optional<Matrix3d>(transform->camera_to_p3) : std::nullopt;
 }
 
 }  // namespace hyperdr

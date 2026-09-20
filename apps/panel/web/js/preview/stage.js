@@ -489,6 +489,7 @@ export function mountStage({ toast }) {
     store.set({
       comparing: false, maskKey: null,
       viewerZoom: 1, viewerPanX: 0, viewerPanY: 0,
+      rawProfile: "", rawProfileName: "",
       sourceDomain: "",
       hasCaptureMetadata: false,
       previewReady: false,
@@ -538,7 +539,7 @@ export function mountStage({ toast }) {
       if (resetOriginal || !image.original) {
         reference = await api.preview(sessionId, {
           options: { ...toOptions(referenceSettings(state.encoding)), colorGamut: state.colorGamut,
-            clampSrgb: state.clampSrgb, useModel: false },
+            clampSrgb: state.clampSrgb, rawProfile: state.rawProfile, useModel: false },
           highlightRecovery: "blend", maxEdge: requestedEdge,
         });
         if (!isCurrentImage(epoch)) return;
@@ -680,6 +681,7 @@ export function mountStage({ toast }) {
       modelId: store.get().modelId,
       colorGamut: activeGamut,
       clampSrgb: store.get().clampSrgb,
+      rawProfile: "", rawProfileName: "",
       sourceDomain: "",
       hasCaptureMetadata: false,
       previewReady: false,
@@ -921,7 +923,7 @@ export function mountStage({ toast }) {
 
   /* Input/base options invalidate both the decoded source and model cache. */
   store.subscribe((state, _previous, changed) => {
-    if (!changed.some((key) => ["highlightRecovery", "clampSrgb", "colorGamut"].includes(key))) return;
+    if (!changed.some((key) => ["highlightRecovery", "clampSrgb", "colorGamut", "rawProfile"].includes(key))) return;
     ++modelRequest;
     modelGain = null;
     analysis.modelGain = null;
@@ -962,6 +964,7 @@ export function mountStage({ toast }) {
       && store.get().sessionId === state.sessionId && store.get().file === state.file
       && store.get().highlightRecovery === state.highlightRecovery
       && store.get().clampSrgb === state.clampSrgb && store.get().colorGamut === state.colorGamut
+      && store.get().rawProfile === state.rawProfile
       && store.get().modelId === state.modelId;
     previewScheduler.cancel();
     invalidateImage();
@@ -969,7 +972,7 @@ export function mountStage({ toast }) {
     try {
       const gain = await api.modelPreview(
         state.sessionId, state.highlightRecovery, state.modelId,
-        { colorGamut: state.colorGamut, clampSrgb: state.clampSrgb });
+        { colorGamut: state.colorGamut, clampSrgb: state.clampSrgb, rawProfile: state.rawProfile });
       if (!current()) return;
       modelGain = gain;
       analysis.modelGain = gain;

@@ -234,6 +234,7 @@ PhotoRenditions render_graded_photo(const FloatImage& source,
   float working_headroom=1;
   std::optional<float> developed_stops;
   if(grade.input==LutSpace::SLog3) {
+    if (input.raw_profile) throw std::invalid_argument("S-Log3 scene LUT and DCP development are alternative RAW renderers; select one");
     if(input.domain!=InputDomain::kSceneReferred) throw std::invalid_argument("S-Log3 LUT input requires a RAW scene; an SDR/HLG/PQ photograph is already rendered");
     exposure_ev=photographic_exposure_ev(source,options,capture);
     working=source;

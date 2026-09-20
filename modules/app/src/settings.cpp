@@ -109,6 +109,7 @@ void validate_convert_options(const ConvertOptions& options) {
       throw std::invalid_argument(std::string(label) + " does not exist");
     }
   };
+  validate_raw_file(options.raw.profile, "RAW DCP profile");
   validate_raw_file(options.raw.bad_pixel_map, "RAW bad-pixel map");
   validate_raw_file(options.raw.dark_frame, "RAW dark frame");
   validate_raw_file(options.raw.linearization_lut, "RAW linearization LUT");

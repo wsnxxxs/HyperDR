@@ -95,8 +95,8 @@ json::Value read_headroom(const ConvertOptions& o) {
                               : json::Value::from_number(o.gain.headroom_stops);
 }
 
-const std::array<Setting, 31>& table() {
-  static const std::array<Setting, 31> kSettings{{
+const std::array<Setting, 32>& table() {
+  static const std::array<Setting, 32> kSettings{{
       {"encoding", "--encoding", SettingKind::kEnum, 0, 0, kEncodingChoices,
        "adaptive|ultrahdr|pq|hlg|avif-pq|avif-hlg|sdr-jpeg", "Output representation", false,
        true,
@@ -118,6 +118,10 @@ const std::array<Setting, 31>& table() {
        kHighlightRecoveryChoices, "blend|reconstruct|clip|unclip",
        "RAW clipped-highlight handling", false, true, nullptr,
        apply_highlight_recovery, read_highlight_recovery, true},
+      {"raw_profile", "--raw-profile", SettingKind::kString, 0, 0, {},
+       "<file.dcp>", "RAW DCP profile (auto exposure uses the profile baseline)", false, true, nullptr,
+       [](ConvertOptions& o, const json::Value& v) { o.raw.profile = path_from_utf8(v.string()); },
+       [](const ConvertOptions& o) { return json::Value::from_string(path_utf8(o.raw.profile)); }, true},
       {"raw_gain", "--raw-gain", SettingKind::kNumber, 0.125, 64.0, {},
        "<0.125..64>", "Post-decode scene-linear RAW gain", false, true, nullptr,
        [](ConvertOptions& o, const json::Value& v) {
@@ -295,6 +299,9 @@ const Setting* find_setting_by_flag(std::string_view flag) {
 
 void validate_setting_value(const Setting& setting, const json::Value& value) {
   switch (setting.kind) {
+    case SettingKind::kString:
+      if (!value.is_string()) type_error(setting, "a string");
+      return;
     case SettingKind::kEnum: {
       if (!value.is_string()) type_error(setting, "a name");
       const bool known =
@@ -341,6 +348,7 @@ void validate_setting_value(const Setting& setting, const json::Value& value) {
 json::Value parse_setting_text(const Setting& setting, std::string_view text) {
   json::Value value;
   switch (setting.kind) {
+    case SettingKind::kString:
     case SettingKind::kEnum:
       value = json::Value::from_string(std::string(text));
       break;
@@ -472,6 +480,7 @@ std::string schema_json() {
     if (!setting.presetable()) continue;
     writer.begin_object().member("key", setting.key).member("flag", setting.flag);
     switch (setting.kind) {
+      case SettingKind::kString: writer.member("kind", "string"); break;
       case SettingKind::kEnum: writer.member("kind", "enum"); break;
       case SettingKind::kNumber: writer.member("kind", "number"); break;
       case SettingKind::kInteger: writer.member("kind", "integer"); break;
@@ -482,7 +491,7 @@ std::string schema_json() {
       writer.begin_array("choices");
       for (const auto& choice : setting.choices) writer.element(choice);
       writer.end_array();
-    } else if (setting.kind != SettingKind::kBoolean) {
+    } else if (setting.kind != SettingKind::kBoolean && setting.kind != SettingKind::kString) {
       writer.member("minimum", setting.minimum).member("maximum", setting.maximum);
     }
     if (setting.kind == SettingKind::kBoolean) {

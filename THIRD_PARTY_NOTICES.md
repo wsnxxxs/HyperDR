@@ -53,3 +53,13 @@ The desktop connection dialog bundles [qrcode-generator](https://github.com/kazu
 by Kazuhiko Arase under the MIT license. Its ES module and full license are in
 `apps/panel/web/js/vendor/qrcode.mjs` and `qrcode-LICENSE.txt`. QR codes are
 generated locally; connection tokens are never sent to a QR service.
+
+## Adobe DNG SDK rendering reference
+
+This product includes DNG technology under license by Adobe Systems Incorporated.
+The ACR3 default curve in `modules/look/src/dcp_acr3_curve.inc` is from Adobe's
+DNG SDK `dng_render.cpp`, revision `de700ad461e35af50b28b861943a0b0753b10929`.
+Copyright 2006-2023 Adobe Systems Incorporated. All Rights Reserved.
+The accompanying [DNG SDK License Agreement](licenses/Adobe-DNG-SDK-LICENSE.txt)
+is retained in full. Rendering mathematics follow the same SDK's sample pipeline.
+No Adobe camera profile files are distributed with HyperDR.

@@ -5,6 +5,12 @@
  * HDR) and colour spaces are proper nouns and stay as they are in both.
  */
 export default {
+  "rawProfile.label": "RAW camera profile",
+  "rawProfile.choose": "Choose DCP file…",
+  "rawProfile.default": "HyperDR default",
+  "rawProfile.local": "Matching profiles from your local Adobe installation",
+  "rawProfile.unknown": "Camera metadata unavailable. Choose a matching DCP manually; the decoder checks compatibility.",
+
   "lut.manageHint": "Manage your local LUTs. Import one or more .cube files.",
 
   "lut.select": "Choose a LUT look",

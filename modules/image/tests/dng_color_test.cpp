@@ -315,6 +315,23 @@ void test_rejections() {
   require(!dng_camera_to_linear_p3(unbalanced, kRicohNeutral), "AnalogBalance must be positive");
 }
 
+void test_original_illuminant_weight() {
+  auto profile = dual(kStandardLightA, kRicohA, kD65, kRicohD65);
+  const auto normal = hyperdr::dng_camera_color_transform(profile, kRicohNeutral);
+  require(normal.has_value(), "dual profile transform is required");
+  require(normal->illuminant_weight > 0 && normal->illuminant_weight < 1,
+          "intermediate white must blend both maps");
+  std::swap(profile.calibrations[0], profile.calibrations[1]);
+  const auto reversed = hyperdr::dng_camera_color_transform(profile, kRicohNeutral);
+  require(reversed.has_value(), "reversed profile transform is required");
+  require(std::abs(normal->illuminant_weight + reversed->illuminant_weight - 1) < 1e-12,
+          "weight must follow the original first map, not temperature order");
+  require(max_difference(normal->camera_to_p3, reversed->camera_to_p3) < 1e-12,
+          "reversing illuminants must preserve the transform");
+  const auto one = hyperdr::dng_camera_color_transform(single(kD65, kRicohD65), kRicohNeutral);
+  require(one && one->illuminant_weight == 1, "single illuminant must use its first map");
+}
+
 }  // namespace
 
 int main() {
@@ -327,6 +344,7 @@ int main() {
     test_color_matrix_scale();
     test_raw_channel_gains_cancel();
     test_rejections();
+    test_original_illuminant_weight();
     std::cout << "DNG colour tests passed\n";
     return 0;
   } catch (const std::exception& e) {

@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace hyperdr {
@@ -43,6 +44,7 @@ void write_text_file_atomic(const std::filesystem::path& path,
 // UTF-8 text for messages and JSON. `path::string()` throws on Windows for
 // paths outside the active code page, which is most of them for CJK users.
 [[nodiscard]] std::string path_utf8(const std::filesystem::path& path);
+[[nodiscard]] std::filesystem::path path_from_utf8(std::string_view text);
 
 // Windows path comparison keys use native wide strings and fold case.
 using PathKey = std::wstring;

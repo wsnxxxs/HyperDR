@@ -199,7 +199,7 @@ export const CONTROLS_BY_KEY = new Map(CONTROLS.map((control) => [control.key, c
 
 /** Keys that appear in the object sent to /api/run. */
 export const OPTION_KEYS = [
-  "encoding", "colorGamut", "clampSrgb", "lutId", "lutName", "lutInput", "lutOutput", MODEL_KEY, ...CONTROLS.map((control) => control.key),
+  "encoding", "colorGamut", "clampSrgb", "rawProfile", "rawProfileName", "lutId", "lutName", "lutInput", "lutOutput", MODEL_KEY, ...CONTROLS.map((control) => control.key),
 ];
 
 /** Output, colour and model choices are workflow settings; image adjustments
@@ -233,6 +233,7 @@ export function defaultSettings(encoding = "adaptive", sourceDomain = "") {
     encoding: activeEncoding.id,
     colorGamut: COLOR_GAMUTS[0].id,
     clampSrgb: false,
+    rawProfile: "", rawProfileName: "",
     lutId: "", lutName: "", lutInput: "srgb", lutOutput: "srgb",
     [MODEL_KEY]: DEFAULT_MODEL_ID,
   };
@@ -274,6 +275,10 @@ export function validatedSettings(saved, base = defaultSettings()) {
   if (ENCODINGS.some(({ id }) => id === saved.encoding)) values.encoding = saved.encoding;
   if (COLOR_GAMUTS.some(({ id }) => id === saved.colorGamut)) values.colorGamut = saved.colorGamut;
   if (typeof saved.clampSrgb === "boolean") values.clampSrgb = saved.clampSrgb;
+  if (typeof saved.rawProfile === "string" && /^[0-9a-f]{64}$/.test(saved.rawProfile)) {
+    values.rawProfile = saved.rawProfile;
+    values.rawProfileName = typeof saved.rawProfileName === "string" ? saved.rawProfileName.slice(0, 160) : "";
+  }
   if (typeof saved.lutId === "string" && /^[0-9a-f]{64}$/.test(saved.lutId)) {
     values.lutId = saved.lutId;
     values.lutName = typeof saved.lutName === "string" ? saved.lutName.slice(0, 160) : "";

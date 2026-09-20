@@ -217,7 +217,7 @@ void test_run_report_is_parseable_and_complete() {
   // Schema 9: a model run reports the model that answered, named separately from
   // the one that was asked for. A single field could not tell a fallback from a
   // result, which is the case this pair exists for.
-  require(document.find("schema")->number() == 10, "report schema version was not moved");
+  require(document.find("schema")->number() == 11, "report schema version was not moved");
   require(files[0].find("model_id")->string() == "research-cnn-v1" &&
               files[0].find("model_requested_id")->string() == "research-exif-v1",
           "the requested and effective model identities were not both reported");

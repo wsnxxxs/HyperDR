@@ -17,7 +17,7 @@ import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import job, model, session, renditions, color_lut, lut_library
+from . import job, model, session, renditions, color_lut, lut_library, raw_profiles
 from .command import build_argv
 from .concurrency import Busy
 from .formats import SUPPORTED_EXTENSIONS
@@ -238,6 +238,7 @@ def preview(_context: Context, query: dict) -> Response:
         options["highlightRecovery"] = highlight_recovery
         session_id = _first(query, "id")
         color_lut.resolve(options, session_id)
+        raw_profiles.resolve(options, session_id)
         source_digest = session.input_digest(session_id)
         # The digest-named directory gives the native cache a stable, already
         # computed content identity without making every slider move read the
@@ -332,6 +333,9 @@ def command_preview(_context: Context, body: dict) -> Response:
     """
     try:
         options, _ = _prepare_model_options(body.get("options"))
+        options.pop("_raw_profile_path", None)
+        if options.get("rawProfile"):
+            options["_raw_profile_path"] = options.get("rawProfileName") or "camera.dcp"
         options.pop("_lut_path", None)
         if options.get("lutId"):
             options["_lut_path"] = options.get("lutName") or "look.cube"
@@ -367,9 +371,12 @@ def model_preview(_context: Context, body: dict) -> Response:
         )
         if highlight_recovery not in _HIGHLIGHT_RECOVERY_CHOICES:
             raise ValueError("unknown highlight recovery: %s" % highlight_recovery)
+        profile_options = {"rawProfile": body.get("rawProfile")}
+        raw_profiles.resolve(profile_options, session_id)
         gain, report = model.native_model_gain(
             source, highlight_recovery, model_id,
-            color_gamut=body.get("colorGamut"), clamp_srgb=body.get("clampSrgb", False))
+            color_gamut=body.get("colorGamut"), clamp_srgb=body.get("clampSrgb", False),
+            **({"raw_profile": profile_options["_raw_profile_path"]} if profile_options.get("_raw_profile_path") else {}))
         width, height = report["width"], report["height"]
         return Response(
             body=gain,
@@ -412,6 +419,7 @@ def run(_context: Context, body: dict) -> Response:
                 raise coded(ValueError("找不到 HyperDR 可执行文件。"),
                             "executable_missing")
             color_lut.resolve(options, session_id)
+            raw_profiles.resolve(options, session_id)
             if use_model:
                 # Record what the run actually selected, not only what the
                 # browser sent: the export record is what a later restore reads,
@@ -483,7 +491,15 @@ def manage_lut(_context: Context, body: dict) -> Response:
     return error("未知 LUT 库操作。")
 
 
+def list_raw_profiles(_context: Context, query: dict) -> Response:
+    try:
+        return Response(payload=raw_profiles.discover(_first(query, "id")))
+    except (OSError, ValueError) as exc:
+        return error(exc)
+
+
 GET_ROUTES = {
+    "/api/raw-profiles": list_raw_profiles,
     "/api/lut-library": list_luts,
     "/api/workspace": workspace,
     "/api/state": state,

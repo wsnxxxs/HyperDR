@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "HyperDR conversion report schema 10",
+  "title": "HyperDR conversion report schema 11",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,7 +12,7 @@
   ],
   "properties": {
     "schema": {
-      "const": 10
+      "const": 11
     },
     "tool": {
       "type": "string"
@@ -290,6 +290,9 @@
         },
         "gain_map_output": {
           "type": "boolean"
+        },
+        "raw_profile": {
+          "type": "string"
         }
       }
     },
@@ -461,7 +464,8 @@
             "",
             "embedded",
             "libraw",
-            "none"
+            "none",
+            "dcp"
           ]
         },
         "input_domain": {
@@ -483,6 +487,7 @@
             "none",
             "display-p3-passthrough",
             "raw-neutral-v1",
+            "raw-dcp-v1",
             "display-hdr-split"
           ]
         },
@@ -561,6 +566,21 @@
         },
         "gain_map": {
           "$ref": "#/$defs/gain_map"
+        },
+        "raw_profile_name": {
+          "type": "string"
+        },
+        "raw_profile_sha256": {
+          "type": "string"
+        },
+        "raw_profile_camera": {
+          "type": "string"
+        },
+        "raw_profile_tone": {
+          "type": "string"
+        },
+        "raw_profile_baseline_ev": {
+          "type": "number"
         }
       }
     },
@@ -653,7 +673,10 @@
       ],
       "properties": {
         "encoder": {
-          "enum": ["hyperdr", "libultrahdr-api3"]
+          "enum": [
+            "hyperdr",
+            "libultrahdr-api3"
+          ]
         },
         "distribution_measured": {
           "type": "boolean"

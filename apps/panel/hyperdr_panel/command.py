@@ -255,6 +255,8 @@ def _color_flags(options: dict, settings: dict) -> list[str]:
         flags.extend(["--color-gamut", settings["color_gamut"]])
     if settings["clamp_srgb"]:
         flags.append("--clamp-srgb")
+    if options.get("_raw_profile_path"):
+        flags.extend(["--raw-profile", str(options["_raw_profile_path"])])
     if options.get("_lut_path"):
         flags.extend(["--lut", str(options["_lut_path"]),
                       "--lut-input", settings["lut_input"], "--lut-output", settings["lut_output"],

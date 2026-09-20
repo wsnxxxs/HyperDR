@@ -149,11 +149,15 @@ ExternalGainBinding read_model_binding(const json::Value& value,
   binding.delivered_crop_left = delivered_origin[0];
   binding.delivered_crop_top = delivered_origin[1];
   binding.raw_half_size = required_bool(source, "raw_half_size");
+  if (const auto* profile = source.find("raw_profile_sha256")) {
+    if (!profile->is_string()) throw std::invalid_argument("invalid RAW profile hash");
+    binding.raw_profile_sha256 = profile->string();
+  }
 
   binding.recipe.id = required_string(recipe, "id");
   if (binding.recipe.id != "photographic-v1" &&
       binding.recipe.id != "display-p3-passthrough" &&
-      binding.recipe.id != "raw-neutral-v1") {
+      binding.recipe.id != "raw-neutral-v1" && binding.recipe.id != "raw-dcp-v1") {
     throw std::invalid_argument(
         "external model binding has unsupported development recipe");
   }
@@ -580,7 +584,8 @@ GainMapResult make_external_gain_map(const FloatImage& source,
   const float strength = development.gain_strength;
   const bool display_passthrough =
       external.binding &&
-      external.binding->recipe.id == "display-p3-passthrough";
+      (external.binding->recipe.id == "display-p3-passthrough" ||
+       external.binding->recipe.id == "raw-dcp-v1");
   development.gain_strength = display_passthrough ? 0.0F : 1.0F;
   auto result = make_gain_map(source, development, capture, input);
   apply_external_gain_map(result, std::move(external), strength,

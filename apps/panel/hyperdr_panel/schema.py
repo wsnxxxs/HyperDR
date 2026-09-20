@@ -73,6 +73,10 @@ def validate_value(key: str, value):
                 "设置 %s 必须是 %s 之一。" % (key, "、".join(entry["choices"]))
             )
         return value
+    if kind == "string":
+        if not isinstance(value, str):
+            raise ValueError("设置 %s 必须是字符串。" % key)
+        return value
     if kind == "boolean":
         if not isinstance(value, bool):
             raise ValueError("设置 %s 必须是 true 或 false。" % key)

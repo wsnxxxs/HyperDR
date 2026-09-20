@@ -1,3 +1,4 @@
+#include "hyperdr/look/dcp_render.hpp"
 #include "hyperdr/image/color.hpp"
 #include "hyperdr/container/exif.hpp"
 #include "hyperdr/container/heif_tmap.hpp"
@@ -1052,12 +1053,15 @@ PreviewJpeg encode_preview_jpeg(const std::filesystem::path& path,
     throw std::invalid_argument("preview max edge must be in [1,8192]");
   }
   auto decoded = decode_image(path, options);
+  const bool profiled = static_cast<bool>(decoded.raw_profile);
+  if (profiled) decoded.linear_p3 = render_dcp_base(decoded.linear_p3, *decoded.raw_profile);
+
   // Measure before resampling so the exposure anchor is not a function of the
   // requested preview size. Half-size RAW callers still intentionally trade
   // demosaic detail for speed, but the exposure algorithm is shared with the
   // formal photographic renderer.
   const float exposure_ev =
-      raw_preview_exposure_ev(path, decoded.linear_p3, decoded.capture);
+      profiled ? 0.0F : raw_preview_exposure_ev(path, decoded.linear_p3, decoded.capture);
   // Identical policy to the --preview-max-edge conversion path: repeated 2x2
   // area reduction in linear light, then one bilinear step to the exact size.
   auto source = resample_to_max_edge(std::move(decoded.linear_p3), max_edge);

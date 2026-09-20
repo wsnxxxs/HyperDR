@@ -110,7 +110,7 @@ std::string run_report_json(const std::vector<FileResult>& results,
   json::Writer writer(json::Writer::Style::kIndented);
   // 10: API3 reports encoded gain ranges; unmeasured distribution fields are
   // omitted instead of publishing the renderer's different pre-JPEG grid.
-  writer.begin_object().member("schema", 10).member("tool", kVersion);
+  writer.begin_object().member("schema", 11).member("tool", kVersion);
   write_settings(writer, options);
   writer.begin_array("files");
   for (const auto& result : results) {
@@ -136,6 +136,11 @@ std::string run_report_json(const std::vector<FileResult>& results,
         .member("decode_degraded", result.decode_degraded)
         .member("raw_white_balance", result.raw_white_balance)
         .member("raw_color_matrix", result.raw_color_matrix)
+        .member("raw_profile_name", result.raw_profile_name)
+        .member("raw_profile_sha256", result.raw_profile_sha256)
+        .member("raw_profile_camera", result.raw_profile_camera)
+        .member("raw_profile_tone", result.raw_profile_tone)
+        .member("raw_profile_baseline_ev", result.raw_profile_baseline_ev)
         // Which of the three renderers this file took, and the headroom it was
         // told the input carried. Recorded because nothing else in the record
         // distinguishes them, and the same settings mean different things in

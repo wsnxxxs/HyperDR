@@ -4,6 +4,7 @@
 hyperdr_add_module(look
   SOURCES
     src/chroma.cpp
+    src/dcp_render.cpp
     src/local_gain.cpp
     src/photographic.cpp
     src/render_options.cpp

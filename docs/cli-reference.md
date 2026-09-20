@@ -224,7 +224,9 @@ a new photo is opened. An HDR photograph instead opens as itself: brightness
 exactly as the file declares them, and 重置 returns it there rather than to an
 SDR rendering. The standalone CLI remains neutral at 0 EV unless
 `--exposure-bias` is supplied.
-`--exposure auto` is honoured for RAW only. A JPEG, PNG or HDR input is already
+`--exposure auto` is honoured for RAW only. With an external DCP, auto uses
+the profile baseline instead of the photographic scene-exposure estimate;
+see [RAW camera profiles](#raw-camera-profiles). A JPEG, PNG or HDR input is already
 a finished photograph, so automatic exposure would re-measure someone else's
 grade; a manual `--exposure <EV>` is still applied to them. See
 [rendering.md](rendering.md#input-domains). The other primary controls are photographic
@@ -268,3 +270,48 @@ Use `--encoding sdr-jpeg` for an ordinary 8-bit sRGB JPEG with no HDR or gain ma
 configure creative grading. The default spaces are sRGB; `rec709` means Rec.709
 primaries with display gamma 2.4. RAW sensor calibration remains the separate
 `--raw-linearization-lut` option. See the [LUT pipeline guide](color-lut-pipeline.md).
+
+
+## RAW camera profiles
+
+`--raw-profile <file.dcp>` selects an external camera DCP for RAW development.
+Omitting it preserves the existing native RAW development. For example:
+
+```powershell
+HyperDR convert DSC01925.ARW --output output --encoding sdr-jpeg --raw-profile "C:/Program Files/Adobe/Adobe Lightroom Classic/Resources/CameraProfiles/Adobe Standard/Sony ILCE-7RM5 Adobe Standard.dcp"
+```
+
+The same option applies to `preview-frame`, `thumbnail`, `model-input` and
+`model-gain`. It participates in decode, preview, model and output identities;
+replacing the profile's contents invalidates its cached result. The decoder
+checks the profile's camera model against the RAW and reports invalid,
+unreadable or incompatible profiles as errors.
+
+The supported traditional RGB DCP pipeline applies camera matrices,
+HueSatMap/LookTable, baseline exposure, black rendering and the profile's tone
+curve. A missing profile curve uses the Adobe SDK ACR3 default. This follows
+SDK-style development and is an approximation of the corresponding Lightroom
+look, not an exact implementation of Lightroom's current Process Version.
+`--exposure auto` uses the RAW baseline plus DCP BaselineExposureOffset, once;
+manual exposure and `--exposure-bias` remain additional adjustments. HDR
+expansion is HyperDR's rendering of the selected SDR base.
+The DCP CLI defaults to neutral contrast (1) and vibrance (0); explicitly
+requested values apply after development. `pop` affects HDR expansion only.
+Native RAW formats may lack Adobe's camera baseline exposure; a DCP alone
+cannot recover that value. See the [A7R V validation](raw-dcp-validation.md)
+for the measured difference and an explicit exposure adjustment.
+
+In the panel, open a RAW and use **RAW camera profile** in the colour/LUT
+controls. Choose **HyperDR default**, a matching **Adobe Standard** or
+**Camera ST** discovered in local Adobe camera-profile directories, or
+**Choose DCP file…**. Automatic discovery requires readable camera make/model
+metadata; other RAW containers can use a manually selected DCP. Profiles come
+from the user's installation or upload and are not distributed with HyperDR.
+The panel stores an immutable copy with the photo, restores the selection with
+its session, and refreshes the original comparison and AI/ordinary previews
+when it changes. The first switch from HyperDR default to DCP sets the panel's
+brightness adjustment to 0 EV; subsequent profile switches preserve edits.
+
+Creative display-space LUTs can follow DCP development. A scene-space
+`--lut-input slog3-sgamut3cine` LUT and `--raw-profile` are mutually exclusive:
+the DCP result already has its base tone rendering and is not a scene Log input.

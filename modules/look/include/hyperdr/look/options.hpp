@@ -1,5 +1,7 @@
 #pragma once
 
+#include <memory>
+
 // What the photographer asked for, and what the camera recorded.
 //
 // These controls describe rendering intent only. Nothing here knows about gain
@@ -10,6 +12,8 @@
 #include <string_view>
 
 namespace hyperdr {
+
+struct DcpRenderContext;
 
 // The rendering mode is deliberately separate from the ISO gain-map metadata.
 // Only the perceptual HDR pipeline remains. The enum stays because `look` is
@@ -72,6 +76,7 @@ struct InputDescription {
   // How far above diffuse white the input's *encoding* can carry detail, as a
   // linear multiple. Only read for kDisplayReferredHdr, where it exceeds 1.
   float headroom{1.0F};
+  std::shared_ptr<const DcpRenderContext> raw_profile;
 };
 
 // Rejects a description whose headroom contradicts its domain before any

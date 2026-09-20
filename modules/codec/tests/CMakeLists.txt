@@ -1,5 +1,6 @@
 # The codec tests encode and decode real files, so they only exist in the
 # codec-enabled configuration.
+hyperdr_add_test(dcp_reader_test LINK HyperDR::codec)
 if(HYPERDR_WITH_CODECS)
   # `heif` as well as the module: the test builds its own HEIF fixtures, so it
   # includes <libheif/heif.h> directly, and the module deliberately keeps that

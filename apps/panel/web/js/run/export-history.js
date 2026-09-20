@@ -2,7 +2,9 @@ import { store } from "../core/store.js";
 import { role, el } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { t, onLocaleChange } from "../i18n/index.js";
-import { validatedSettings, encodingById } from "../settings/schema.js";
+import { availableModelIds, restoredModelId } from "../settings/model-ids.js";
+import { modelLabel, fallbackFields } from "../settings/model-select.js";
+import { encodingById, validatedSettings } from "../settings/schema.js";
 
 export function mountExportHistory({ selectResult }) {
   const open = role("versions-open");
@@ -28,15 +30,29 @@ export function mountExportHistory({ selectResult }) {
       restore.disabled = state.uploading || state.restoring || state.optimizing || state.starting || Boolean(state.jobId);
       restore.addEventListener("click", () => {
         selectResult(entry);
-        store.set({ ...validatedSettings(entry.options), previewOptimized: Boolean(entry.options.useModel) });
+        store.set({
+          ...validatedSettings(entry.options),
+          previewOptimized: Boolean(entry.options.useModel),
+          // An export written before the selector existed produced its bytes with
+          // the incumbent, so that is the model restoring it recovers.
+          modelId: restoredModelId(entry.options, availableModelIds(store.get())),
+        });
         dialog.close();
       });
       const download = el("a", { class: "button", href: api.resultUrl(state.sessionId, { download: true, exportId: entry.id }), download: "" }, t("out.download"));
       const time = new Date(entry.createdAt * 1000).toLocaleString(document.documentElement.lang);
+      const result = entry.report?.files?.find((file) => file.success);
+      const modelName = entry.options.useModel
+        ? modelLabel(result?.model_requested_id || restoredModelId(entry.options), state)
+        : t("adjust.manual");
+      const fallback = result?.model_inference_mode === "pixel_only_fallback"
+        ? t("adjust.modelFallback", { model: modelLabel(result.model_id, state),
+          fields: fallbackFields(result.model_fallback_reason) }) : "";
       list.append(el("article", { class: "version-card", "data-selected": String(state.result?.exportId === entry.id) },
         el("div", { class: "version-heading" }, el("span", { class: "version-index" }, String(entries.length - index).padStart(2, "0")),
           el("h3", {}, entry.name), state.result?.exportId === entry.id ? el("span", { class: "version-selected" }, t("workspace.selectedVersion")) : null),
-        el("p", {}, `${time} · ${encodingById(entry.options.encoding).label}`),
+        el("p", {}, `${time} · ${encodingById(entry.options.encoding).label} · ${modelName}`),
+        fallback ? el("p", {}, fallback) : null,
         el("div", { class: "version-actions" }, restore, download)));
     }
   }

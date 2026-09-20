@@ -1,7 +1,15 @@
 // Embedded frozen ncnn model resources.  The paths are resolved by CMake so
 // the resource compiler reads the exact bytes selected by HyperDRModel.cmake.
-#define HYPERDR_NCNN_PARAM_RESOURCE 101
-#define HYPERDR_NCNN_BIN_RESOURCE 102
+//
+// One param/bin pair per selectable model.  The numbers are fixed here and read
+// by modules/gainmap/src/ncnn_runtime.cpp; there is no runtime lookup by name,
+// so adding another option means a new pair of ids on both sides.
+#define HYPERDR_RESEARCH_CNN_PARAM_RESOURCE 103
+#define HYPERDR_RESEARCH_CNN_BIN_RESOURCE 104
+#define HYPERDR_RESEARCH_EXIF_PARAM_RESOURCE 105
+#define HYPERDR_RESEARCH_EXIF_BIN_RESOURCE 106
 
-HYPERDR_NCNN_PARAM_RESOURCE RCDATA "@HYPERDR_MODEL_NCNN_PARAM@"
-HYPERDR_NCNN_BIN_RESOURCE RCDATA "@HYPERDR_MODEL_NCNN_BIN@"
+HYPERDR_RESEARCH_CNN_PARAM_RESOURCE RCDATA "@HYPERDR_RESEARCH_CNN_PARAM@"
+HYPERDR_RESEARCH_CNN_BIN_RESOURCE RCDATA "@HYPERDR_RESEARCH_CNN_BIN@"
+HYPERDR_RESEARCH_EXIF_PARAM_RESOURCE RCDATA "@HYPERDR_RESEARCH_EXIF_PARAM@"
+HYPERDR_RESEARCH_EXIF_BIN_RESOURCE RCDATA "@HYPERDR_RESEARCH_EXIF_BIN@"

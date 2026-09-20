@@ -229,7 +229,9 @@ export default {
   "adjust.resetTitle": "重置画面调整参数",
   "adjust.resetDone": "已重置全部画面调整",
   "adjust.region": "作用区域",
-  "adjust.aiApplied": "AI 优化已应用",
+  "adjust.model": "模型",
+  "adjust.modelFallback": "拍摄参数不完整（{fields}），已使用{model}。",
+  "adjust.aiApplied": "AI 优化已应用 · {model}",
   "adjust.aiFailed": "AI 优化失败。",
   "adjust.aiShowing": "正在显示 AI 优化效果",
   "adjust.aiCached": "切换到已缓存的 AI 优化效果",
@@ -238,6 +240,22 @@ export default {
   "adjust.aiUnavailable": "AI 优化不可用：{reason}，当前为手动参数预览。",
   "adjust.help": "查看{label}说明",
   "adjust.helpMask": "悬停显示预计作用区域；点击查看说明",
+
+  /* ── AI models ─────────────────────────────────────────────────────
+   * The ids come from the executable; these are the names and the one-line
+   * reasons, kept on the client so the English panel reads in English. */
+  "model.research-cnn-v1": "纯 CNN",
+  "model.research-exif-v1": "EXIF 参数辅助预测",
+  "model.help.research-cnn-v1": "仅根据图像预测增益。",
+  "model.help.research-exif-v1": "结合拍摄参数估计整体增益。",
+
+  /* The capture fields a fallback names. */
+  "field.iso": "感光度",
+  "field.exposure_seconds": "曝光时间",
+  "field.f_number": "光圈",
+  "field.exposure_bias_ev": "曝光补偿",
+  "field.focal_length_mm": "焦距",
+  "field.focal_length_35mm": "等效焦距",
 
   /* ── controls ────────────────────────────────────────────────────── */
   "ctrl.brightness.label": "整体亮度",
@@ -328,6 +346,7 @@ export default {
   "run.reasonWrap": "（{reasons}）",
   "run.cropIgnored": "已忽略记录的 {target} 裁切，实际输出 {actual}{reasons}",
   "run.cropMismatch": "实际输出 {actual}，而非预期的 {target}{reasons}",
+  "run.decodeDegraded": "解码结果有降级{reasons}",
 
   /* ── errors ──────────────────────────────────────────────────────── */
   "err.offline": "无法连接本地服务，请确认处理程序仍在运行后重试。",
@@ -375,6 +394,7 @@ export default {
   "err.server.upload_incomplete": "图片上传完成前不能开始转换。",
   "err.server.shutting_down": "服务正在关闭。",
   "err.server.model_not_ready": "模型尚未就绪。",
+  "err.server.model_unknown": "该模型在当前构建中不可用。",
   "err.server.executable_missing": "找不到 HyperDR 可执行文件。",
   "err.server.hlg_range": "HLG 动态范围超出该格式上限。",
 

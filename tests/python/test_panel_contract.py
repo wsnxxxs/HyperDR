@@ -133,6 +133,24 @@ class BuildArgvTest(unittest.TestCase):
             found = flags(build_argv("HyperDR", dict(BASE, encoding=encoding)))
             self.assertEqual(found["--depth"], "8", encoding)
 
+    def test_hdr_sources_keep_a_ten_bit_adaptive_base(self):
+        """A camera's 10-bit HDR survives its gain map only through a 10-bit base."""
+        hdr = dict(BASE, sourceDomain="display-referred-hdr")
+        self.assertEqual(flags(build_argv("HyperDR", dict(hdr, encoding="adaptive")))["--depth"],
+                         "10")
+        # The formats whose base is 8-bit by definition do not change.
+        for encoding in ("ultrahdr", "sdr-jpeg"):
+            self.assertEqual(
+                flags(build_argv("HyperDR", dict(hdr, encoding=encoding)))["--depth"], "8",
+                encoding)
+        # SDR and RAW photographs keep the compatibility-first default.
+        for domain in ("display-referred-sdr", "scene-referred", "", "nonsense"):
+            found = flags(build_argv("HyperDR", dict(BASE, encoding="adaptive",
+                                                      sourceDomain=domain)))
+            self.assertEqual(found["--depth"], "8", domain)
+        # The domain is a fact about the file, not a converter setting.
+        self.assertNotIn("--source-domain", build_argv("HyperDR", dict(hdr)))
+
     def test_hlg_encodings_default_to_supported_headroom(self):
         for encoding in ("hlg", "avif-hlg"):
             found = flags(build_argv("HyperDR", dict(BASE, encoding=encoding)))
@@ -250,14 +268,132 @@ class BuildArgvTest(unittest.TestCase):
 
 
 class ModelIntegrationTest(unittest.TestCase):
-    def test_status_uses_native_switch_and_executable_only(self):
+    def setUp(self):
+        # Capability is cached per executable; a stale entry from another test
+        # would make the model list look like it came from a different binary.
+        model._MODEL_LIST_CACHE.clear()
+        self.table = {
+            "schema": "hyperdr.model-list/v1", "runtimeAvailable": True,
+            "defaultModelId": "research-cnn-v1",
+            "models": [{"id": name, "available": True} for name in
+                       ("research-cnn-v1", "research-exif-v1")],
+        }
+        self.completed = subprocess.CompletedProcess(
+            ["HyperDR"], 0, stdout=json.dumps(self.table).encode(), stderr=b"")
+
+    def tearDown(self):
+        model._MODEL_LIST_CACHE.clear()
+
+    def test_disabled_model_does_not_probe_even_with_cached_capability(self):
         with mock.patch.object(model, "_native_executable", return_value="HyperDR"), \
-                mock.patch.object(model, "_enabled", return_value=True):
+                mock.patch.object(model.subprocess, "run", return_value=self.completed) as run:
             self.assertTrue(model.status()["ready"])
-        with mock.patch.object(model, "_enabled", return_value=False):
-            state = model.status()
-            self.assertFalse(state["enabled"])
-            self.assertFalse(state["ready"])
+            for cached in (True, False):
+                if not cached:
+                    model._MODEL_LIST_CACHE.clear()
+                run.reset_mock()
+                with mock.patch.object(model, "_enabled", return_value=False):
+                    state = model.status()
+                    self.assertFalse(state["enabled"])
+                    self.assertFalse(state["ready"])
+                    for call in (model.model_list,
+                                 lambda: model.resolve_model_id("nope"),
+                                 lambda: model.native_model_gain(Path("missing.jpg"))):
+                        with self.assertRaisesRegex(RuntimeError, "HYPERDR_MODEL_ENABLED"):
+                            call()
+                run.assert_not_called()
+
+    def test_model_list_comes_from_the_executable(self):
+        """The ids and the versions live in the binary, not in a Python copy."""
+        table = {
+            "schema": "hyperdr.model-list/v1",
+            "runtimeAvailable": True,
+            "defaultModelId": "research-cnn-v1",
+            "models": [
+                {"id": "research-cnn-v1", "available": True},
+                {"id": "research-exif-v1", "available": True, "requiresExif": True,
+                 "fallbackModelId": "research-cnn-v1"},
+            ],
+        }
+        completed = subprocess.CompletedProcess(
+            ["HyperDR"], 0, stdout=json.dumps(table).encode(), stderr=b"")
+        with mock.patch.object(model, "_native_executable", return_value="HyperDR"), \
+                mock.patch.object(model.subprocess, "run", return_value=completed) as run:
+            status = model.status()
+            model.model_list()
+            run.assert_called_once()
+        self.assertTrue(status["ready"])
+        self.assertEqual(status["defaultModelId"], "research-cnn-v1")
+        self.assertEqual([entry["id"] for entry in status["models"]],
+                         ["research-cnn-v1", "research-exif-v1"])
+        self.assertEqual(run.call_args.args[0][:3], ["HyperDR", "model-list", "--json"])
+
+    def test_an_executable_without_the_list_is_not_supported(self):
+        completed = subprocess.CompletedProcess([], 2, stdout=b"", stderr=b"unknown command: model-list")
+        with mock.patch.object(model, "_native_executable", return_value="HyperDR"), \
+                mock.patch.object(model.subprocess, "run", return_value=completed):
+            self.assertFalse(model.status()["ready"])
+            with self.assertRaises(RuntimeError):
+                model.resolve_model_id(None)
+
+    def test_failed_probes_are_not_legacy_capability_and_can_retry(self):
+        failures = [
+            subprocess.CompletedProcess([], 2, stdout=b"", stderr=b"fatal: failed to load weights"),
+            subprocess.TimeoutExpired("model-list", 30),
+            OSError("cannot launch converter"),
+            subprocess.CompletedProcess([], 0, stdout=b"invalid json", stderr=b""),
+            subprocess.CompletedProcess([], 0, stdout=b"[]", stderr=b""),
+            subprocess.CompletedProcess([], 0, stdout=b'{"models":[]}', stderr=b""),
+        ]
+        for failure in failures:
+            with self.subTest(failure=failure):
+                model._MODEL_LIST_CACHE.clear()
+                with mock.patch.object(model, "_native_executable", return_value="HyperDR"), \
+                        mock.patch.object(model.subprocess, "run",
+                                          side_effect=[failure, self.completed]) as run:
+                    state = model.status()
+                    self.assertFalse(state["ready"])
+                    self.assertTrue(state["reason"])
+                    self.assertEqual(state["models"], [])
+                    self.assertEqual(state["modelListSource"], "probe-failed")
+                    self.assertTrue(model.status()["ready"])
+                    self.assertEqual(run.call_count, 2)
+
+    def test_runtime_and_individual_model_availability_gate_selection(self):
+        for runtime, available in ((False, True), (True, False), (None, True), (True, None)):
+            with self.subTest(runtime=runtime, available=available):
+                model._MODEL_LIST_CACHE.clear()
+                table = {"runtimeAvailable": runtime, "defaultModelId": "research-cnn-v1",
+                         "models": [{"id": "research-cnn-v1", "available": available}]}
+                completed = subprocess.CompletedProcess(
+                    [], 0, stdout=json.dumps(table).encode(), stderr=b"")
+                with mock.patch.object(model, "_native_executable", return_value="HyperDR"), \
+                        mock.patch.object(model.subprocess, "run", return_value=completed):
+                    self.assertFalse(model.status()["ready"])
+                    for requested in (None, "research-cnn-v1"):
+                        with self.assertRaises(RuntimeError):
+                            model.resolve_model_id(requested)
+        model._MODEL_LIST_CACHE.clear()
+        self.table["models"][0]["available"] = False
+        completed = subprocess.CompletedProcess(
+            [], 0, stdout=json.dumps(self.table).encode(), stderr=b"")
+        with mock.patch.object(model, "_native_executable", return_value="HyperDR"), \
+                mock.patch.object(model.subprocess, "run", return_value=completed):
+            self.assertTrue(model.status()["ready"])
+            self.assertEqual(model.resolve_model_id("research-exif-v1"), "research-exif-v1")
+            for requested in (None, "research-cnn-v1"):
+                with self.assertRaises(RuntimeError):
+                    model.resolve_model_id(requested)
+
+    def test_an_unknown_model_id_is_refused(self):
+        with mock.patch.object(model, "_native_executable", return_value="HyperDR"), \
+                mock.patch.object(model.subprocess, "run", return_value=self.completed):
+            self.assertEqual(model.resolve_model_id("research-exif-v1"), "research-exif-v1")
+            # An omitted id means this build's default, which is what a settings
+            # file written before the selector contained.
+            self.assertEqual(model.resolve_model_id(None), "research-cnn-v1")
+            with self.assertRaises(ValueError):
+                model.resolve_model_id("research-exif-v2")
 
     def test_native_packet_is_decoded_without_writing_model_sidecars(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -269,6 +405,13 @@ class ModelIntegrationTest(unittest.TestCase):
                 "layout": "HW", "sampleType": "float32-le",
                 "scale": "signed-log2-gain", "gainMaxStops": 1.5,
                 "headroomStops": 1.5,
+                "requestedModelId": "research-exif-v1",
+                "effectiveModelId": "research-cnn-v1",
+                "modelVersion": "research-demo-fold0-seed908/v1",
+                "inferenceMode": "pixel_only_fallback",
+                "fallbackReason": "missing_capture_fields:iso",
+                "baseOffsetNumerator": 1, "baseOffsetDenominator": 100000,
+                "alternateOffsetNumerator": 1, "alternateOffsetDenominator": 100000,
             }, separators=(",", ":")).encode()
             packet = (model.NATIVE_MODEL_GAIN_MAGIC
                       + len(metadata).to_bytes(4, "little")
@@ -276,15 +419,74 @@ class ModelIntegrationTest(unittest.TestCase):
             completed = subprocess.CompletedProcess(
                 ["HyperDR"], 0, stdout=packet, stderr=b"")
             with mock.patch.object(model, "_native_executable", return_value="HyperDR"), \
-                    mock.patch.object(model.subprocess, "run", return_value=completed) as run:
-                values, report = model.native_model_gain(source, "blend")
+                    mock.patch.object(model.subprocess, "run",
+                                      side_effect=[self.completed, completed]) as run:
+                values, report = model.native_model_gain(source, "blend", "research-exif-v1")
             self.assertEqual(values, b"\x00" * 8)
             self.assertEqual(report["width"], 2)
             self.assertEqual(report["max_stops"], 1.5)
+            # The report carries what ran, not what was asked for: a caller that
+            # echoed its own request would label a fallback as a model-2 result.
+            self.assertEqual(report["requested_model_id"], "research-exif-v1")
+            self.assertEqual(report["effective_model_id"], "research-cnn-v1")
+            self.assertEqual(report["inference_mode"], "pixel_only_fallback")
+            self.assertEqual(report["fallback_reason"], "missing_capture_fields:iso")
+            self.assertAlmostEqual(report["base_offset"], 1e-5)
             argv = run.call_args.args[0]
-            self.assertEqual(argv[:5], ["HyperDR", "model-gain", str(source),
-                                        "--ai-model", "embedded"])
+            self.assertEqual(argv[:3], ["HyperDR", "model-gain", str(source)])
+            self.assertEqual(argv[argv.index("--ai-model") + 1], "research-exif-v1")
+            self.assertNotIn("--color-gamut", argv)
+            self.assertNotIn("--clamp-srgb", argv)
             self.assertEqual(list(Path(directory).iterdir()), [source])
+
+    def test_model_and_color_options_distinguish_inference_requests(self):
+        """Changing the model or its input/base must not join another prediction."""
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "photo.jpg"
+            source.write_bytes(b"source")
+            seen = []
+
+            def record(argv, **_kwargs):
+                if argv[1] == "model-list":
+                    return self.completed
+                seen.append(argv)
+                metadata = json.dumps({
+                    "schema": "hyperdr.native-model-gain/v1",
+                    "width": 1, "height": 1, "channels": 1, "layout": "HW",
+                    "sampleType": "float32-le", "scale": "signed-log2-gain",
+                    "gainMaxStops": 1.0, "headroomStops": 1.0,
+                }, separators=(",", ":")).encode()
+                return subprocess.CompletedProcess(
+                    argv, 0,
+                    stdout=model.NATIVE_MODEL_GAIN_MAGIC
+                    + len(metadata).to_bytes(4, "little") + metadata + b"\x00" * 4,
+                    stderr=b"")
+
+            with mock.patch.object(model, "_native_executable", return_value="HyperDR"), \
+                    mock.patch.object(model.subprocess, "run", side_effect=record), \
+                    mock.patch.object(model._INFERENCE_FLIGHT, "run",
+                                      wraps=model._INFERENCE_FLIGHT.run) as flight:
+                model._MODEL_LIST_CACHE.clear()
+                model.native_model_gain(source, "blend", "research-cnn-v1")
+                model.native_model_gain(source, "blend", "research-exif-v1")
+                model.native_model_gain(source, "blend", "research-cnn-v1", color_gamut="p3")
+                model.native_model_gain(source, "blend", "research-cnn-v1",
+                                        color_gamut="p3", clamp_srgb=True)
+                model.native_model_gain(source, "blend", "research-cnn-v1",
+                                        color_gamut="rec2020", clamp_srgb=True)
+                model.native_model_gain(source, "blend", "research-cnn-v1",
+                                        color_gamut="rec2020", clamp_srgb=True)
+            keys = [call.args[0] for call in flight.call_args_list]
+            self.assertEqual(len(set(keys[:5])), 5)
+            self.assertEqual(keys[4], keys[5])
+            self.assertEqual([flags(argv)["--ai-model"] for argv in seen[:2]],
+                             ["research-cnn-v1", "research-exif-v1"])
+            self.assertNotIn("--color-gamut", seen[0])
+            self.assertNotIn("--clamp-srgb", seen[2])
+            self.assertEqual(flags(seen[2])["--color-gamut"], "p3")
+            self.assertEqual(flags(seen[3])["--color-gamut"], "p3")
+            self.assertIn("--clamp-srgb", seen[3])
+            self.assertEqual(flags(seen[4])["--color-gamut"], "rec2020")
 
 
 class InputVocabularyTest(unittest.TestCase):

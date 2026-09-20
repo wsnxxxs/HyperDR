@@ -2,6 +2,7 @@ import { store } from "../core/store.js";
 import { role, el, setText, setPressed } from "../core/dom.js";
 import { t, onLocaleChange } from "../i18n/index.js";
 import { encodingById, OPTION_KEYS, toOptions } from "../settings/schema.js";
+import { modelLabel } from "../settings/model-select.js";
 import { planeToImageData } from "../preview/cpu.js";
 
 export function mountEditor({ stage }) {
@@ -52,7 +53,15 @@ export function mountEditor({ stage }) {
     setText(exportOpen.querySelector("span"), state.jobId || state.starting ? t("editor.exporting") : sdr ? t("workflow.saveJpeg") : t("editor.export"));
     setText(filename, state.file?.name || t("editor.noPhoto"));
     filename.title = state.file?.name || "";
-    const currentKey = JSON.stringify({ ...toOptions(state), useModel: Boolean(state.previewOptimized) });
+    const currentKey = JSON.stringify({
+      ...toOptions(state),
+      useModel: Boolean(state.previewOptimized),
+      // Part of the document's identity: switching the model changes the bytes
+      // this photograph would export, so the badge has to call it edited.
+      modelId: state.modelId,
+      // Same key order as the runner's export options, which carry it too.
+      sourceDomain: state.sourceDomain,
+    });
     const exported = state.result?.optionsKey === currentKey;
     documentState.dataset.state = !state.file ? "empty" : exported ? "saved" : "edited";
     setText(documentState, !state.file ? t("workspace.waiting") : exported ? t("workspace.exported") : t("workspace.dirty"));
@@ -61,7 +70,10 @@ export function mountEditor({ stage }) {
     setText(metadata, frame ? [t("workspace.previewSize", { width: frame.width, height: frame.height }), size].filter(Boolean).join(" · ") : "");
     setText(viewerHint, !ready ? "" : state.viewerZoom > 1 ? t("workspace.panHint") : state.viewMode === "split" ? t("workspace.compareHint") : t("workspace.photoHint"));
     setText(exportFilename, state.file?.name || "");
-    setText(summary, sdr ? t("workflow.jpegSummary") : `${state.previewOptimized ? t("adjust.ai") : t("adjust.manual")} · ${encodingById(state.encoding).label}`);
+    setText(summary, sdr ? t("workflow.jpegSummary")
+      : state.previewOptimized
+        ? `${t("adjust.ai")} · ${modelLabel(state.modelId, state)} · ${encodingById(state.encoding).label}`
+        : `${t("adjust.manual")} · ${encodingById(state.encoding).label}`);
     for (const { value, label, button } of modeButtons) {
       setText(button, sdr && value === "effect" ? t("workflow.colorEffect") : t(label)); setPressed(button, state.viewMode === value); button.disabled = !ready;
     }

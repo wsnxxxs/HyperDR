@@ -51,13 +51,36 @@ struct ConvertOptions {
   std::filesystem::path external_gain_report;
   // Explicitly re-enable the frozen v1 normalized sidecar contract.
   bool allow_legacy_external_gain{false};
-  // Enables the embedded in-process AI model. The runtime receives the
+  // Enables one of the embedded in-process AI models. The runtime receives the
   // existing linear Display-P3 SDR thumbnail directly; no model-input/gain
-  // sidecars are written. The shipping model adapter is registered during
-  // startup; the path value is only a compatibility seam for development
-  // adapters and normally contains the "embedded" sentinel.
+  // sidecars are written. The field keeps its original name and type so existing
+  // callers and the settings vocabulary do not change, but its value is now a
+  // model id from the fixed table rather than a path: the shipping adapter owns
+  // the assets and never opens a caller-named file. The legacy "embedded"
+  // sentinel still selects the incumbent model, and an empty value means no
+  // model at all.
   std::filesystem::path ai_model_path;
   NativeModelPostOptions ai_post;
+  // `model-gain` only: a pre-developed HWC linear Display-P3 float32 tensor to
+  // run the model on instead of decoding an image.
+  //
+  // The conversion check this exists for has to compare PyTorch and ncnn on the
+  // *same* tensor. Running both against the same file would fold the decode and
+  // resample differences into the same number as the conversion error, and the
+  // two would then be indistinguishable. It is not a way to bypass the decode
+  // path in normal use: the dimensions are required, so a caller has to say what
+  // it is feeding rather than have it guessed.
+  std::filesystem::path model_input_tensor;
+  std::uint32_t model_input_tensor_width{};
+  std::uint32_t model_input_tensor_height{};
+  // `model-gain` only: the capture settings to send with `model_input_tensor`,
+  // as a JSON object keyed by the six ordinary names. An absent key and an
+  // explicit null both mean "the tag was not recorded", which is the case the
+  // level estimator's fallback rule turns on and the one a photograph cannot be
+  // asked for on demand. Without this file the tensor path has no capture at
+  // all, so a model that needs one falls back exactly as it would for an image
+  // whose tags were missing.
+  std::filesystem::path model_capture_path;
   // Optional directory for cached decoded buffers. Interactive preview reruns
   // change only post-decode look controls, so caching the decode turns each
   // slider move from a full RAW read into a file copy.
@@ -70,6 +93,30 @@ struct ConvertOptions {
 
 // Rejects combinations no encoder can honour, before any file is opened.
 void validate_convert_options(const ConvertOptions& options);
+
+// Whether this run selected a native model at all.
+[[nodiscard]] bool uses_native_model(const ConvertOptions& options);
+
+// The canonical model id this run selected, or an empty string when it selected
+// none. An unknown id is an error here rather than a silent substitution of the
+// incumbent: a typo that quietly rendered with another model would be worse than
+// a failed run, because the report would look successful.
+[[nodiscard]] std::string selected_native_model_id(const ConvertOptions& options);
+
+// The model request for one decoded image: the selected id, plus the capture
+// settings the decoder actually read.
+//
+// Four sites infer a model -- the cached and uncached preview paths, model-gain
+// and the batch converter -- and all of them have to send the same thing.
+// Building the request in one place is what keeps model 2 from being fed a
+// complete capture on the panel's probe and an empty one on export, which would
+// look like the model changing its mind about the same photograph.
+//
+// `metadata` is `PhotoMetadata`, not `CaptureMetadata`, because only the former
+// preserves whether a tag was present: an exposure bias of 0 EV is a real value
+// and the level estimator's fallback rule turns on that distinction.
+[[nodiscard]] NativeModelRequest native_model_request(const ConvertOptions& options,
+                                                      const PhotoMetadata& metadata);
 
 // Rejects a rendered peak that the selected transfer function cannot encode.
 // This second boundary matters for external gain maps: their authoritative
@@ -101,6 +148,7 @@ struct FileResult {
   bool default_crop_present{false};
   bool decode_degraded{false};
   std::string raw_white_balance;
+  std::string raw_color_matrix;
   std::vector<std::string> decode_degradation_reasons;
   // Which renderer ran, and the headroom it was told the input carried. These
   // are the two facts that decide what every other number in this record means:
@@ -113,9 +161,16 @@ struct FileResult {
   // Native-model input/base preparation, or "none" for the manual/external
   // paths and failures before model preparation.
   std::string model_development{"none"};
-  // Frozen checkpoint identity behind the embedded runtime, or "none" when
-  // this file did not use native model inference.
+  // What the user selected, and what actually produced the gain. These differ
+  // whenever model 2 answered with model 1's prediction because the capture
+  // settings were incomplete, which is exactly the case a single `model_id`
+  // field used to hide.
+  std::string model_requested_id{"none"};
   std::string model_id{"none"};
+  std::string model_version{"none"};
+  std::string model_inference_mode{"none"};
+  // Empty when the effective model is the requested one.
+  std::string model_fallback_reason;
   // 1.0 is a schema-safe sentinel when input_domain is unknown; consumers must
   // read input_domain before interpreting this value.
   float input_headroom{1.0F};

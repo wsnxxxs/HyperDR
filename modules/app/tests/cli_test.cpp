@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -94,6 +95,80 @@ void test_thumbnail_rejects_quality_outside_documented_range() {
           "thumbnail accepted quality above 100");
 }
 
+// `--ai-model` now takes an id from a fixed table. Both halves matter: a bare
+// flag and the legacy sentinel must keep meaning the incumbent, and a name this
+// build does not have must fail before any file is opened rather than rendering
+// with whatever model happened to be first.
+void test_ai_model_flag_accepts_ids_and_refuses_unknown_ones() {
+  char program[] = "HyperDR";
+  char command[] = "convert";
+  char input[] = "photo.jpg";
+  char output[] = "--output";
+  char destination[] = "./out";
+  char flag[] = "--ai-model";
+  char legacy[] = "embedded";
+  char known[] = "research-exif-v1";
+  char unknown[] = "research-cnn-v2";
+
+  char* bare[] = {program, command, input, output, destination, flag};
+  // Without the runtime registered the command stops at the adapter, which is
+  // past the id validation this test is about.
+  const std::string bare_error = failure([&] {
+    static_cast<void>(hyperdr::run_cli(6, bare));
+  });
+  require(bare_error.find("unknown AI model id") == std::string::npos,
+          "a bare --ai-model was read as an unknown model id");
+
+  char* with_legacy[] = {program, command, input, output, destination, flag, legacy};
+  const std::string legacy_error = failure([&] {
+    static_cast<void>(hyperdr::run_cli(7, with_legacy));
+  });
+  require(legacy_error.find("unknown AI model id") == std::string::npos,
+          "the legacy 'embedded' sentinel is no longer accepted");
+
+  char* with_known[] = {program, command, input, output, destination, flag, known};
+  const std::string known_error = failure([&] {
+    static_cast<void>(hyperdr::run_cli(7, with_known));
+  });
+  require(known_error.find("unknown AI model id") == std::string::npos,
+          "a model id the build carries was rejected");
+
+  char* with_unknown[] = {program, command, input, output, destination, flag, unknown};
+  const std::string unknown_error = failure([&] {
+    static_cast<void>(hyperdr::run_cli(7, with_unknown));
+  });
+  require(unknown_error.find("unknown AI model id") != std::string::npos &&
+              unknown_error.find("research-cnn-v2") != std::string::npos,
+          "an unknown model id was not refused by name");
+}
+
+// The capability list is what the panel reads instead of carrying its own copy,
+// so the ids, the fallback and the capture requirement all have to be in it.
+void test_model_list_reports_the_table() {
+  char program[] = "HyperDR";
+  char command[] = "model-list";
+  char json[] = "--json";
+  char* argv[] = {program, command, json};
+  std::ostringstream captured;
+  std::streambuf* previous = std::cout.rdbuf(captured.rdbuf());
+  int status = 1;
+  try {
+    status = hyperdr::run_cli(3, argv);
+  } catch (...) {
+    std::cout.rdbuf(previous);
+    throw;
+  }
+  std::cout.rdbuf(previous);
+  require(status == 0, "model-list did not succeed");
+  const std::string text = captured.str();
+  for (const char* expected : {"\"research-cnn-v1\"",
+                               "\"research-exif-v1\"", "\"fallbackModelId\":\"research-cnn-v1\"",
+                               "\"requiresExif\":true", "\"defaultModelId\":\"research-cnn-v1\""}) {
+    require(text.find(expected) != std::string::npos,
+            std::string("model-list is missing ") + expected);
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -101,6 +176,8 @@ int main() {
     test_thumbnail_rejects_identical_input_and_output();
     test_preview_intent_is_explicit_and_order_independent();
     test_thumbnail_rejects_quality_outside_documented_range();
+    test_ai_model_flag_accepts_ids_and_refuses_unknown_ones();
+    test_model_list_reports_the_table();
     std::cout << "cli tests passed\n";
     return 0;
   } catch (const std::exception& error) {

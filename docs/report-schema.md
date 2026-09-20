@@ -1,4 +1,4 @@
-# Report schema 8
+# Report schema 9
 
 What `--report` writes. The machine-readable JSON Schema is
 [`schema/report.json`](../schema/report.json): it defines every required object,
@@ -9,7 +9,7 @@ changes.
 
 ## Contents
 
-`--report` writes schema 8. Its `settings` block is generated from the settings
+`--report` writes schema 9. Its `settings` block is generated from the settings
 table, so it records every setting by its canonical name — not the handful someone
 remembered to add — plus `output_depth`, the depth actually encoded (BT.2100 is
 always 10-bit regardless of `--depth`). The top-level `raw_processing` block
@@ -19,7 +19,16 @@ files fail the conversion rather than silently appearing as applied.
 The optional per-file `raw_white_balance` records `camera`, `camera-applied`,
 `auto`, or `daylight`; an empty string means no RAW decode was reported (for
 example a raster, skipped file or failure before rendering). It survives decode
-cache hits. Each file carries flat result fields and `look`, `render`, and
+cache hits. The optional per-file `raw_color_matrix` records where the camera
+matrix came from: `embedded` (the file's own matrix; for a DNG, its whole
+colour model, both calibrations interpolated at the as-shot white with any
+ForwardMatrix, unless the DNG SDK would refuse that profile, in which case it is
+LibRaw's choice of the file's ColorMatrix), `libraw` (LibRaw's per-model table),
+or `none` (LibRaw has no matrix for the camera, so its colour is uncalibrated,
+and the decode is also reported as degraded with `no_camera_matrix`); an empty
+string follows the same rule as `raw_white_balance`, and it too survives decode
+cache hits.
+Each file carries flat result fields and `look`, `render`, and
 `gain_map` objects. These record EV100 (or
 `null`), selected/linear headroom, rendered peak, utilization, gamma, gain
 percentiles, high-gain fractions, clipping, and local-weight diagnostics.
@@ -75,7 +84,9 @@ DefaultCrop is rejected, `target_*` is the request that was refused rather than
 a geometry the decode delivered. `default_crop_present` distinguishes "no crop
 recorded" from "crop applied". `decode_degradation_reasons` is a string array
 for diagnostics and display only: new reasons may be added at any time, so no
-consumer should branch on its contents.
+consumer should branch on its contents. A DNG reports `dng_opcode_unsupported`
+when its opcode lists require an operation the decoder does not apply, and
+`dng_opcode_list_malformed` when a list does not parse.
 
 ## Headroom fields
 
@@ -100,3 +111,23 @@ strength of the creative LUT. It is independent of `raw_processing.linearization
 Settings include `lut_input`, `lut_output`, `lut_strength` and `gain_map_output`.
 `encoding: sdr-jpeg` has zero output headroom and no encoded gain map; direct
 HLG/PQ outputs also have `gain_map_output: false`.
+
+## Model identity
+
+A run that used a native model reports four members beside `model_development`:
+
+| member | meaning |
+|---|---|
+| `model_requested_id` | the id the command line named |
+| `model_id` | the id that actually produced the gain |
+| `model_version` | the frozen asset's version string |
+| `model_inference_mode` | `not_run`, `pixel_only`, `exif_assisted` or `pixel_only_fallback` |
+| `model_fallback_reason` | empty unless the mode is a fallback, then the fields that were missing |
+
+`model_id` was the embedded asset's identity string in schema 8 and is now the
+selected model's id, which is why the schema number moved. The requested and
+effective ids are separate members because they differ on a fallback, and a
+reader that only saw one of them could not tell a fallback from a result.
+
+`settings.ai_model_id` replaces `settings.ai_model`: the value is an id from the
+model table, not a path.

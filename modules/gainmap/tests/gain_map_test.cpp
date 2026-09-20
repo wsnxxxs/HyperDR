@@ -114,10 +114,20 @@ void test_color_preservation_and_headroom() {
   const float g = saturated_result.base_linear.pixels[1];
   const float b = saturated_result.base_linear.pixels[2];
   // Photographic compresses this 10:1 input towards white on purpose, so the
-  // input ratio is not preserved -- what must survive is the hue. The two equal
-  // input channels have to stay exactly equal, red has to stay dominant, and the
-  // compression must not run so far that the colour is flattened or inverted.
-  require(g == b, "gamut compression split two equal channels apart");
+  // input ratio is not preserved -- what must survive is the hue. The base has
+  // to keep the input's Oklab hue (a straight line toward white would keep G
+  // equal to B instead, and turn the hue that the eye sees), red has to stay
+  // dominant, and the compression must not run so far that the colour is
+  // flattened or inverted.
+  const auto hue = [](float red, float green, float blue) {
+    const auto lab = hyperdr::linear_p3_to_oklab(red, green, blue);
+    return std::atan2(lab[2], lab[1]);
+  };
+  const float turn = std::remainder(hue(r, g, b) - hue(2.0F, 0.2F, 0.2F), 6.2831853F);
+  const std::string turned = "gamut compression turned the saturated patch's hue by " +
+                             std::to_string(turn) + " rad (" + std::to_string(r) + ", " +
+                             std::to_string(g) + ", " + std::to_string(b) + ")";
+  require(std::abs(turn) < 2.0e-3F, turned.c_str());
   require(r > g, "gamut compression did not keep red dominant");
   const float ratio = r / g;
   require(ratio > 1.5F && ratio < 4.0F,
@@ -166,10 +176,10 @@ void test_common_chroma_is_continuous_at_gamut_boundary() {
   look.vibrance = 0.0F;
   look.pop = 0.0F;
 
-  // This saturated green ramp crosses the alpha_limit == 1 boundary used by
-  // render_common_chroma.  The previous tanh softener dropped alpha to tanh(1)
-  // immediately before the boundary, making adjacent pixels differ by about
-  // 0.35 in RGB and leaving a contour in smooth skies.
+  // This saturated green ramp crosses the bound at which render_common_chroma
+  // starts fitting colours.  The previous tanh softener dropped alpha to
+  // tanh(1) immediately before the boundary, making adjacent pixels differ by
+  // about 0.35 in RGB and leaving a contour in smooth skies.
   std::array<float, 3> previous{};
   bool have_previous = false;
   for (int step = 0; step <= 100; ++step) {

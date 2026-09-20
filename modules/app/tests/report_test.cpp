@@ -164,10 +164,15 @@ void test_run_report_is_parseable_and_complete() {
   ok.default_crop_present = true;
   ok.decode_degraded = true;
   ok.decode_degradation_reasons = {"default_crop_rejected"};
+  ok.raw_color_matrix = "embedded";
   ok.input_domain = hyperdr::InputDomain::kDisplayReferredHdr;
   ok.input_headroom = 4.93F;
   ok.model_development = "display-p3-passthrough";
-  ok.model_id = "hyperdr.direct-fixed-incumbent/v3-production";
+  ok.model_requested_id = "research-exif-v1";
+  ok.model_id = "research-cnn-v1";
+  ok.model_version = "research-demo-fold0-seed908/v1";
+  ok.model_inference_mode = "pixel_only_fallback";
+  ok.model_fallback_reason = "missing_capture_fields:iso";
   ok.width = 8192;
   ok.height = 5464;
   ok.stats.rendered_peak = 3.5F;
@@ -177,7 +182,6 @@ void test_run_report_is_parseable_and_complete() {
 
   const auto document = hyperdr::json::parse(
       hyperdr::run_report_json({ok, failed}, options));
-  require(document.find("schema")->number() == 8, "report schema version missing");
   const auto* settings = document.find("settings");
   require(settings != nullptr, "report has no settings block");
   // Generated from the table, so every setting is present without anyone
@@ -210,13 +214,25 @@ void test_run_report_is_parseable_and_complete() {
   require(files[0].find("model_development")->string() ==
               "display-p3-passthrough",
           "the native model development kind was not reported");
-  require(files[0].find("model_id")->string() ==
-              "hyperdr.direct-fixed-incumbent/v3-production",
-          "the embedded model identity was not reported");
+  // Schema 9: a model run reports the model that answered, named separately from
+  // the one that was asked for. A single field could not tell a fallback from a
+  // result, which is the case this pair exists for.
+  require(document.find("schema")->number() == 9, "report schema version was not moved");
+  require(files[0].find("model_id")->string() == "research-cnn-v1" &&
+              files[0].find("model_requested_id")->string() == "research-exif-v1",
+          "the requested and effective model identities were not both reported");
+  require(files[0].find("model_version")->string() == "research-demo-fold0-seed908/v1" &&
+              files[0].find("model_inference_mode")->string() == "pixel_only_fallback" &&
+              files[0].find("model_fallback_reason")->string() ==
+                  "missing_capture_fields:iso",
+          "the model run's mode and fallback reason were not reported");
   require(files[1].find("input_domain")->string() == "unknown",
           "a file that never decoded should report an unknown domain");
   require(files[0].find("decode_degraded")->boolean(),
           "decode degradation was not reported");
+  require(files[0].find("raw_color_matrix")->string() == "embedded" &&
+              files[1].find("raw_color_matrix")->string().empty(),
+          "the RAW camera matrix source was not reported");
   // Types are pinned, not just values: the panel branches on
   // target_dimensions_applied and joins the reasons, so a reason emitted as a
   // bare string again -- or the predicate emitted as a number -- would break it

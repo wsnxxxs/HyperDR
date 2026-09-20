@@ -51,7 +51,7 @@ jobs:
           python-version: ${{ matrix.python }}
 
       - name: Install test dependencies
-        run: python -m pip install --upgrade pip pytest
+        run: python -m pip install --upgrade pip pytest -r apps/panel/requirements.txt
 
       - name: Test panel and HTTPS helpers
         run: python scripts/test.py panel

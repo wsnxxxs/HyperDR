@@ -29,6 +29,8 @@ class Workbench:
         self.phone_seen = 0.0
         self.desktop_seen = 0.0
         self.completed = []
+        self.diagnostics = None
+        self.diagnostics_seen = 0.0
 
     def notify(self):
         self.revision += 1
@@ -45,7 +47,30 @@ class Workbench:
                 "pending": self.pending, "frameVersion": self.frame_version,
                 "frameReady": self.frame is not None and self.frame[:2] == self.frame_key(),
                 "completed": list(self.completed),
+                "diagnostics": dict(self.diagnostics) if self.diagnostics and time.monotonic() - self.diagnostics_seen < 45 else None,
             }
+
+    def clear_diagnostics(self):
+        with self.changed:
+            self.diagnostics = None
+            self.diagnostics_seen = 0
+            self.phone_seen = 0
+            self.notify()
+
+    def report_diagnostics(self, body, transport_secure):
+        with self.changed:
+            reason = body.get("reason")
+            if reason not in ("insecure", "webgpu", "display", "renderer", "ready"):
+                raise ValueError("无效的预览检测结果。")
+            flags = {key: body.get(key) is True for key in ("secureContext", "webgpu", "displayHdr", "hdr")}
+            # A browser report can describe capability, never grant access or mark HTTP trusted.
+            flags["secureContext"] = flags["secureContext"] and transport_secure
+            flags["hdr"] = all(flags.values()) and reason == "ready"
+            self.diagnostics = {**flags, "reason": reason if flags["secureContext"] else "insecure",
+                                "detail": str(body.get("detail", ""))[:500], "transportSecure": transport_secure}
+            self.diagnostics_seen = self.phone_seen = time.monotonic()
+            self.notify()
+            return self.snapshot()
 
     def frame_key(self):
         return (self.current.get("sessionId"),
@@ -145,4 +170,5 @@ class Workbench:
             self.frame = None
             self.incoming_frame = None
             self.phone_seen = 0
+            self.diagnostics = None
             self.notify()

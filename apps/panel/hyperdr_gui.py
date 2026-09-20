@@ -4,7 +4,8 @@
 
 Starts a tiny local web server for a control panel over the real hyperdr
 converter. The server prints its URL; opening a browser is left to the caller.
-Pure Python standard library, no pip installs.
+The basic panel uses the standard library; phone certificate generation uses
+cryptography (bundled in desktop releases).
 
 Usage:
     python hyperdr_gui.py

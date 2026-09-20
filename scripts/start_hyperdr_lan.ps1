@@ -58,6 +58,13 @@ function Repair-ManagedCertificate {
     #>
     param([string]$Reason, [string[]]$Addresses)
 
+    # The application owns this CA. Never replace its leaf using mkcert's CA.
+    if ((Test-Path -LiteralPath (Join-Path $HyperDRTlsRoot "ca\rootCA.pem")) -or
+        (Test-Path -LiteralPath (Join-Path $HyperDRTlsRoot "ca-source.txt"))) {
+        Write-Host "手机证书将由工作台在连接时自动维护。" -ForegroundColor DarkGray
+        return $true
+    }
+
     $mkcert = Resolve-HyperDRMkcert
     if (-not $mkcert) {
         Write-Host ""

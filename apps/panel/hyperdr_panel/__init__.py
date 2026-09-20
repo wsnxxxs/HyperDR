@@ -1,7 +1,7 @@
-"""hyperdr control panel — a local, standard-library-only web UI.
+"""hyperdr control panel — a local web UI.
 
-The package is intentionally small and dependency-free so it runs on the
-official Windows Python without any pip installs. Entry point: :func:`main`.
+The basic panel uses the standard library. Phone certificate generation adds
+cryptography, bundled in desktop releases. Entry point: :func:`main`.
 """
 from __future__ import annotations
 

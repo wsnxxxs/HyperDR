@@ -8,12 +8,14 @@ the source tree or tests.
    program.
 2. Install Python 3.11 or newer from python.org, including `tkinter` and the
    option to add Python to `PATH`.
-3. Double-click `Setup-HTTPS.bat` once, and follow the two iPhone steps it
-   prints. Skip this only if you will never use the iPhone HDR preview.
-4. Double-click `Start.bat`.
+3. For phone HDR setup in this source-based archive, install the small certificate dependency:
+   `python -m pip install -r apps/panel/requirements.txt`.
+   The packaged Tauri desktop app already bundles it.
+4. Double-click `Start.bat`, then open **Phone workbench → Enable HDR preview**.
+   Scan the setup QR and follow the iOS or Android certificate instructions.
 
-The application starts a local HyperDR panel and prints a temporary LAN URL.
-Keep the terminal open while using the panel.
+The editor stays local; the phone listener opens only when enabled. Keep the
+terminal open while using the source-based panel.
 
 ## Native “AI 优化”
 
@@ -21,26 +23,21 @@ The production model and inference weights are embedded in `HyperDR.exe` and
 run through the bundled native runtime. No PyTorch installation, checkpoint,
 model script, or model-specific Python environment is required.
 
-## Why step 3 is not optional for true HDR
+## Phone HDR and HTTPS
 
-Safari renders the real HDR preview through WebGPU, which browsers expose only
-in a secure context. Over plain HTTP the panel still uploads, converts and
-downloads correctly, and the final HEIC is still HDR in Photos, but the live
-preview presents the same native float HDR plane folded into SDR. Dismissing a certificate warning is
-not a substitute: an exception does not create a secure context.
+The workbench generates a CA unique to this installation without installing
+mkcert or changing the computer trust store. iOS requires both installing the
+profile and enabling full trust; Android requires installing a CA certificate.
+The setup page provides these steps and the phone reports actual rendering
+capabilities. Unsupported devices continue to use SDR previews.
 
-`Setup-HTTPS.bat` installs `mkcert` through winget if needed, generates a
-certificate authority **unique to this computer**, issues a server certificate
-for your current LAN address, and exports the public root certificate to your
-desktop so you can send it to the phone. No certificate authority and no
-private key is ever shipped inside this archive: a shared one would let anyone
-holding it impersonate any site your phone trusts.
+Certificates live in `%LOCALAPPDATA%\HyperDR\tls`. Reconnecting checks address
+coverage and renews the server certificate using the same root. Uploads finish
+before a listener switch. The certificate-only HTTP setup listener expires after
+15 minutes or closes when HTTPS verification succeeds. See `docs\iphone-lan.md`.
 
-Certificates are written to `%LOCALAPPDATA%\HyperDR\tls`, so moving or
-re-extracting the program never breaks HTTPS. If your router later hands the
-computer a different IP address, `Start.bat` re-issues the server certificate
-from the same authority automatically; the phone needs no changes. See
-`docs\iphone-lan.md` for the details.
+`Setup-HTTPS.bat` remains a command-line alternative and uses the same CA manager.
+No CA or private key is included in a release archive.
 
 For command-line use, run `bin\HyperDR.exe` from a terminal. The package
 includes the required native runtime DLLs, including the dual Main10/8-bit x265

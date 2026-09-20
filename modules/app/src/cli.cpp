@@ -798,7 +798,12 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
         cached && input.domain==InputDomain::kSceneReferred ? &cached->analysis : nullptr,
         cached ? &cached->preparation : nullptr);
     if(is_sdr_encoding(options.encoding)) fit_sdr_to_srgb(photo.sdr);
-    if(is_gain_map_encoding(options.encoding)) result=gain_map_from_renditions(std::move(photo));
+    if(options.encoding == OutputEncoding::Adaptive ||
+        (options.encoding == OutputEncoding::UltraHdr && photo.hdr_is_source)) {
+      result=gain_map_from_renditions(std::move(photo),
+          options.encoding == OutputEncoding::UltraHdr ? GainMapWriterProfile::iso_generic
+                                                      : GainMapWriterProfile::apple_strict);
+    }
     else {
       validate_encoding_headroom(options.encoding,photo.stats.headroom_stops);
       auto bytes=photo_preview_packet(photo,decoded.decode,input,hasCaptureMetadata);

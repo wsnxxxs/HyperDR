@@ -217,7 +217,7 @@ void test_run_report_is_parseable_and_complete() {
   // Schema 9: a model run reports the model that answered, named separately from
   // the one that was asked for. A single field could not tell a fallback from a
   // result, which is the case this pair exists for.
-  require(document.find("schema")->number() == 9, "report schema version was not moved");
+  require(document.find("schema")->number() == 10, "report schema version was not moved");
   require(files[0].find("model_id")->string() == "research-cnn-v1" &&
               files[0].find("model_requested_id")->string() == "research-exif-v1",
           "the requested and effective model identities were not both reported");
@@ -269,6 +269,17 @@ void test_run_report_is_parseable_and_complete() {
       reinterpret_cast<const char*>(schema_bytes.data()), schema_bytes.size()));
   std::string schema_error;
   require(validates(schema, document, schema, "$", schema_error), schema_error);
+  auto codec_result = hyperdr::FileResult{};
+  codec_result.codec_gain = true;
+  codec_result.stats.gain_min_stops = -2;
+  codec_result.stats.gain_max_stops = 3;
+  const auto codec_document = hyperdr::json::parse(hyperdr::run_report_json({codec_result}, options));
+  const auto* codec_gain = codec_document.find("files")->array()[0].find("gain_map");
+  require(codec_gain->find("encoder")->string() == "libultrahdr-api3" &&
+      !codec_gain->find("distribution_measured")->boolean() &&
+      codec_gain->find("percentiles_stops") == nullptr,
+      "API3 must not report an unmeasured gain distribution");
+  require(validates(schema, codec_document, schema, "$", schema_error), schema_error);
 }
 
 void test_curve_export_matches_the_requested_settings() {

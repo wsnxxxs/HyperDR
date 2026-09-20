@@ -230,6 +230,9 @@ std::vector<std::uint8_t> encode_for(const PhotoRenditions& photo, const GainMap
     case HdrEncoding::Adaptive:
       return encode_adaptive_heic(images, metadata, options.quality, options.depth);
     case HdrEncoding::UltraHdr:
+      if (images.gain_map.pixels.empty()) {
+        return encode_ultrahdr_jpeg(photo, metadata, options.quality);
+      }
       return encode_ultrahdr_jpeg(images, metadata, options.quality);
     case HdrEncoding::AvifPq:
     case HdrEncoding::AvifHlg:
@@ -306,12 +309,19 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
       photo = render_graded_gain_map(gain, options.color_lut, target == RenderTarget::Hdr);
     }
     if (is_sdr_encoding(options.encoding)) fit_sdr_to_srgb(photo.sdr);
-    if (is_gain_map_encoding(options.encoding)) {
-      if (options.ai_model_path.empty() && !external) gain = gain_map_from_renditions(std::move(photo));
+    const bool codec_gain = options.encoding == OutputEncoding::UltraHdr &&
+        options.ai_model_path.empty() && !external && !photo.hdr_is_source;
+    const bool explicit_gain = is_gain_map_encoding(options.encoding) && !codec_gain;
+    if (explicit_gain) {
+      if (options.ai_model_path.empty() && !external) {
+        gain = gain_map_from_renditions(std::move(photo),
+            options.encoding == OutputEncoding::UltraHdr ? GainMapWriterProfile::iso_generic
+                                                        : GainMapWriterProfile::apple_strict);
+      }
       else gain.base_linear = std::move(photo.sdr);
     }
-    const auto& rendered_stats = is_gain_map_encoding(options.encoding) ? gain.stats : photo.stats;
-    const auto& rendered_base = is_gain_map_encoding(options.encoding) ? gain.base_linear : photo.sdr;
+    const auto& rendered_stats = explicit_gain ? gain.stats : photo.stats;
+    const auto& rendered_base = explicit_gain ? gain.base_linear : photo.sdr;
     // Validate the peak the renderer actually produced. External model
     // metadata arrives after the initial option validation and can otherwise
     // bypass HLG's 1000-nit ceiling.
@@ -344,15 +354,23 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     result.width = rendered_base.width;
     result.height = rendered_base.height;
     result.exposure_ev = rendered_stats.exposure_ev;
-    result.headroom_stops = is_gain_map_encoding(options.encoding) ? gain.headroom_stops : photo.stats.headroom_stops;
+    result.headroom_stops = explicit_gain ? gain.headroom_stops : photo.stats.headroom_stops;
     result.stats = rendered_stats;
-    result.gain_min = is_gain_map_encoding(options.encoding) ? rational_value(gain.metadata.gain_min) : 0;
-    result.gain_max = is_gain_map_encoding(options.encoding) ? rational_value(gain.metadata.gain_max) : 0;
+    result.gain_min = explicit_gain ? rational_value(gain.metadata.gain_min) : 0;
+    result.gain_max = explicit_gain ? rational_value(gain.metadata.gain_max) : 0;
     // Release the largest no-longer-needed allocation before encoding.
     staged.image.linear_p3 = {};
     const auto processed = Clock::now();
 
     auto bytes = encode_for(photo, gain, staged.image.metadata, options);
+    if (codec_gain) {
+      const auto info = probe_ultrahdr_jpeg(bytes);
+      result.codec_gain = true;
+      result.gain_min = result.stats.gain_min_stops = *std::min_element(info.gain_min.begin(), info.gain_min.end());
+      result.gain_max = result.stats.gain_max_stops = *std::max_element(info.gain_max.begin(), info.gain_max.end());
+      result.stats.gain_gamma = info.gamma[0]; // XMP writer uses shared channel metadata.
+      result.headroom_stops = info.headroom_stops;
+    }
     const auto codec_finished = Clock::now();
     photo = {};
     gain = {};  // Free the float base and gain before the decoder allocates.

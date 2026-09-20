@@ -14,7 +14,7 @@
 namespace hyperdr {
 
 void measure_quantized_gain(RenderStats& stats, const FloatImage& codes,
-                            float gain_max, float gamma, float ceiling) {
+                            float gain_max, float gamma, float ceiling, float gain_min) {
   std::array<std::uint64_t, 256> histogram{};
   for (float code : codes.pixels) {
     ++histogram[static_cast<std::size_t>(std::clamp(std::lround(code * 255.0F), 0L, 255L))];
@@ -22,7 +22,8 @@ void measure_quantized_gain(RenderStats& stats, const FloatImage& codes,
   std::array<float, 256> decoded{};
   std::uint64_t over_half = 0, over_one = 0, over_two = 0, clipped = 0;
   for (std::size_t code = 0; code < histogram.size(); ++code) {
-    decoded[code] = gain_max * decode_gain_code(static_cast<float>(code) / 255.0F, gamma);
+    decoded[code] = std::lerp(gain_min, gain_max,
+        decode_gain_code(static_cast<float>(code) / 255.0F, gamma));
     if (decoded[code] > 0.5F) over_half += histogram[code];
     if (decoded[code] > 1.0F) over_one += histogram[code];
     if (decoded[code] > 2.0F) over_two += histogram[code];

@@ -1,0 +1,588 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>HyperDR · 图标方向参考</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%23536c82'/%3E%3Cpath d='M4 6l4-3 4 3v4l-4 3-4-3z' fill='none' stroke='white' stroke-width='1.2'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      --page: #f4f4f1;
+      --surface: rgba(255, 255, 255, .74);
+      --surface-strong: #fff;
+      --ink: #1d242b;
+      --muted: #68727b;
+      --quiet: #8c949b;
+      --line: rgba(24, 34, 43, .11);
+      --line-strong: rgba(24, 34, 43, .22);
+      --blue: #3e5f82;
+      --blue-soft: #e7edf2;
+      --radius-lg: 28px;
+      --radius-md: 18px;
+      --shadow: 0 22px 60px rgba(27, 42, 57, .09), 0 2px 8px rgba(27, 42, 57, .05);
+      --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Microsoft YaHei UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--ink);
+      background: var(--page);
+      font-family: var(--font);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button { font: inherit; }
+
+    .page {
+      width: min(1240px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 54px 0 72px;
+    }
+
+    .masthead {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 32px;
+      margin-bottom: 38px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 15px;
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before {
+      content: "";
+      width: 20px;
+      height: 1px;
+      background: currentColor;
+      opacity: .55;
+    }
+
+    h1, h2, h3, p { margin-top: 0; }
+
+    h1 {
+      max-width: 680px;
+      margin-bottom: 12px;
+      font-size: clamp(34px, 5vw, 64px);
+      line-height: .98;
+      letter-spacing: -.055em;
+      font-weight: 680;
+    }
+
+    .intro {
+      max-width: 600px;
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.65;
+    }
+
+    .mark {
+      flex: 0 0 auto;
+      display: grid;
+      place-items: center;
+      width: 64px;
+      height: 64px;
+      border: 1px solid rgba(255, 255, 255, .8);
+      border-radius: 20px;
+      color: #edf3f7;
+      background: #536c82;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, .42), 0 12px 28px rgba(52, 75, 94, .18);
+    }
+
+    .mark svg { width: 36px; height: 36px; }
+
+    .brief {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 1px;
+      overflow: hidden;
+      margin-bottom: 40px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      background: var(--line);
+      box-shadow: 0 8px 26px rgba(27, 42, 57, .035);
+    }
+
+    .brief-item {
+      padding: 18px 20px 19px;
+      background: rgba(255, 255, 255, .64);
+    }
+
+    .brief-kicker {
+      display: block;
+      margin-bottom: 7px;
+      color: var(--quiet);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .09em;
+      text-transform: uppercase;
+    }
+
+    .brief strong {
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .section-heading {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 16px;
+    }
+
+    .section-heading h2 {
+      margin-bottom: 0;
+      font-size: 21px;
+      letter-spacing: -.025em;
+    }
+
+    .section-heading p {
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .directions {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .direction {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+    }
+
+    .direction:hover {
+      transform: translateY(-2px);
+      border-color: var(--line-strong);
+    }
+
+    .direction.is-selected {
+      border-color: rgba(62, 95, 130, .65);
+      box-shadow: 0 0 0 3px rgba(62, 95, 130, .14), var(--shadow);
+    }
+
+    .direction__visual {
+      position: relative;
+      display: grid;
+      place-items: center;
+      min-height: 312px;
+      padding: 28px;
+      background: #e6eaec;
+    }
+
+    .direction:nth-child(2) .direction__visual { background: #e8ece6; }
+    .direction:nth-child(3) .direction__visual { background: #e1e6ed; }
+
+    .direction__visual::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: linear-gradient(145deg, rgba(255, 255, 255, .22), transparent 42%);
+    }
+
+    .direction__visual img {
+      position: relative;
+      z-index: 1;
+      display: block;
+      width: min(100%, 248px);
+      aspect-ratio: 1;
+      object-fit: contain;
+      filter: saturate(.82) contrast(.98);
+    }
+
+    .choice {
+      position: absolute;
+      z-index: 2;
+      top: 18px;
+      right: 18px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 11px;
+      border: 1px solid rgba(30, 44, 56, .14);
+      border-radius: 999px;
+      color: var(--muted);
+      background: rgba(255, 255, 255, .64);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 650;
+      backdrop-filter: blur(12px);
+    }
+
+    .choice:hover { color: var(--ink); background: rgba(255, 255, 255, .9); }
+
+    .choice__dot {
+      display: block;
+      width: 12px;
+      height: 12px;
+      border: 1px solid rgba(30, 44, 56, .28);
+      border-radius: 50%;
+      background: transparent;
+    }
+
+    .is-selected .choice { color: #264665; border-color: rgba(62, 95, 130, .35); }
+    .is-selected .choice__dot { border: 4px solid #537594; background: #f8fbfd; }
+
+    .direction__body {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      padding: 22px 22px 20px;
+    }
+
+    .direction__title-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+
+    .direction h3 {
+      margin-bottom: 0;
+      font-size: 21px;
+      letter-spacing: -.035em;
+    }
+
+    .number {
+      color: var(--quiet);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .direction__summary {
+      min-height: 47px;
+      margin-bottom: 18px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 20px;
+    }
+
+    .tag {
+      padding: 6px 9px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: #56616a;
+      background: rgba(244, 246, 246, .82);
+      font-size: 11px;
+      line-height: 1;
+    }
+
+    .swatches {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: auto;
+      padding-top: 15px;
+      border-top: 1px solid var(--line);
+    }
+
+    .swatch {
+      width: 18px;
+      height: 18px;
+      border: 1px solid rgba(30, 44, 56, .12);
+      border-radius: 6px;
+    }
+
+    .swatches span:last-child {
+      margin-left: 2px;
+      color: var(--quiet);
+      font-size: 11px;
+    }
+
+    .scale {
+      margin-top: 42px;
+    }
+
+    .scale-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .scale-card {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      background: rgba(255, 255, 255, .54);
+    }
+
+    .scale-card h3 {
+      margin-bottom: 14px;
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .scale-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 16px;
+      min-height: 94px;
+    }
+
+    .scale-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 7px;
+      color: var(--quiet);
+      font-size: 10px;
+    }
+
+    .scale-item img {
+      display: block;
+      width: var(--size);
+      height: var(--size);
+      object-fit: contain;
+      filter: saturate(.82) contrast(.98);
+    }
+
+    .selection {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      margin-top: 40px;
+      padding: 18px 20px;
+      border: 1px solid rgba(62, 95, 130, .2);
+      border-radius: var(--radius-md);
+      color: #314b63;
+      background: var(--blue-soft);
+    }
+
+    .selection p { margin-bottom: 0; font-size: 14px; line-height: 1.5; }
+    .selection strong { font-weight: 700; }
+    .selection__hint { color: #62788d; font-size: 12px !important; text-align: right; }
+
+    .footer-note {
+      margin: 18px 2px 0;
+      color: var(--quiet);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    :focus-visible {
+      outline: 3px solid rgba(62, 95, 130, .32);
+      outline-offset: 3px;
+    }
+
+    @media (max-width: 920px) {
+      .directions { grid-template-columns: 1fr; }
+      .direction { display: grid; grid-template-columns: minmax(230px, 34%) 1fr; }
+      .direction__visual { min-height: 0; }
+      .scale-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 620px) {
+      .page { width: min(100% - 24px, 520px); padding-top: 28px; }
+      .masthead { margin-bottom: 28px; }
+      .mark { width: 52px; height: 52px; border-radius: 16px; }
+      .mark svg { width: 30px; height: 30px; }
+      .brief { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 30px; }
+      .brief-item { padding: 15px; }
+      .section-heading { display: block; }
+      .section-heading p { margin-top: 6px; }
+      .direction { display: flex; }
+      .direction__visual { min-height: 250px; }
+      .selection { display: block; }
+      .selection__hint { margin-top: 6px; text-align: left; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .direction { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="masthead">
+      <div>
+        <p class="eyebrow">HyperDR · Icon direction</p>
+        <h1>把影像的高光，<br>收进一个安静的形状。</h1>
+        <p class="intro">这是基于当前 HDR 转换、预览与增益映射能力整理的图标方向参考。三种方案都控制在低饱和、哑光半透明、少形状的范围内，重点看小尺寸下是否仍然像一个可靠的系统工具。</p>
+      </div>
+      <div class="mark" aria-hidden="true">
+        <svg viewBox="0 0 40 40" fill="none">
+          <path d="M9 15.5 20 8l11 7.5v9L20 32 9 24.5v-9Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>
+          <path d="m9 15.5 11 7.3 11-7.3M20 22.8V32" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>
+        </svg>
+      </div>
+    </header>
+
+    <section class="brief" aria-label="设计约束">
+      <div class="brief-item"><span class="brief-kicker">主色</span><strong>最多 3 种</strong></div>
+      <div class="brief-item"><span class="brief-kicker">形状</span><strong>1–3 个大形状</strong></div>
+      <div class="brief-item"><span class="brief-kicker">材质</span><strong>哑光半透明玻璃</strong></div>
+      <div class="brief-item"><span class="brief-kicker">目标</span><strong>成熟的系统感</strong></div>
+    </section>
+
+    <section aria-labelledby="direction-heading">
+      <div class="section-heading">
+        <h2 id="direction-heading">三个可选方向</h2>
+        <p>点击卡片右上角，记录你更偏向的语义</p>
+      </div>
+
+      <div class="directions">
+        <article class="direction" data-direction="扩展棱面">
+          <div class="direction__visual">
+            <button class="choice" type="button" aria-pressed="false" aria-label="选择扩展棱面">
+              <span class="choice__dot" aria-hidden="true"></span>选择
+            </button>
+            <img src="./hyperdr-icon-concepts-ios-liquid-glass-v2/01-slate-diamond.png" alt="扩展棱面图标方向">
+          </div>
+          <div class="direction__body">
+            <div class="direction__title-row">
+              <h3>扩展棱面</h3>
+              <span class="number">A / 01</span>
+            </div>
+            <p class="direction__summary">两块重叠的半透明平面，表达 SDR 基底与 HDR 高光头空间的叠合。识别最快，最接近系统级工具图标。</p>
+            <div class="tags"><span class="tag">层次</span><span class="tag">可控扩展</span><span class="tag">最稳妥</span></div>
+            <div class="swatches" aria-label="主色：石板蓝、乳白、透明灰">
+              <i class="swatch" style="background:#6d87a4"></i>
+              <i class="swatch" style="background:#e9eef0"></i>
+              <i class="swatch" style="background:#b8c4ce"></i>
+              <span>石板蓝 · 乳白 · 透明灰</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="direction" data-direction="高光弧线">
+          <div class="direction__visual">
+            <button class="choice" type="button" aria-pressed="false" aria-label="选择高光弧线">
+              <span class="choice__dot" aria-hidden="true"></span>选择
+            </button>
+            <img src="./hyperdr-icon-concepts-ios-liquid-glass-v2/02-sage-arc.png" alt="高光弧线图标方向">
+          </div>
+          <div class="direction__body">
+            <div class="direction__title-row">
+              <h3>高光弧线</h3>
+              <span class="number">B / 02</span>
+            </div>
+            <p class="direction__summary">一条平滑、克制的弧线，像摄影色调曲线的 shoulder。最安静、最有摄影工具气质，适合强调“还原与保留”。</p>
+            <div class="tags"><span class="tag">摄影</span><span class="tag">色调曲线</span><span class="tag">安静</span></div>
+            <div class="swatches" aria-label="主色：鼠尾草绿、象牙白、雾灰">
+              <i class="swatch" style="background:#a7b7a1"></i>
+              <i class="swatch" style="background:#eeeede"></i>
+              <i class="swatch" style="background:#ccd2c8"></i>
+              <span>鼠尾草绿 · 象牙白 · 雾灰</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="direction" data-direction="增益回环">
+          <div class="direction__visual">
+            <button class="choice" type="button" aria-pressed="false" aria-label="选择增益回环">
+              <span class="choice__dot" aria-hidden="true"></span>选择
+            </button>
+            <img src="./hyperdr-icon-concepts-ios-liquid-glass-v2/03-navy-loop.png" alt="增益回环图标方向">
+          </div>
+          <div class="direction__body">
+            <div class="direction__title-row">
+              <h3>增益回环</h3>
+              <span class="number">C / 03</span>
+            </div>
+            <p class="direction__summary">一个带留白的闭合回环，借“写入 / 读回”的可逆路径表达 gain map。辨识度最高，但仍保持单一大形状。</p>
+            <div class="tags"><span class="tag">可逆</span><span class="tag">增益映射</span><span class="tag">辨识度</span></div>
+            <div class="swatches" aria-label="主色：深海蓝、雾蓝、白">
+              <i class="swatch" style="background:#18366c"></i>
+              <i class="swatch" style="background:#79a8d7"></i>
+              <i class="swatch" style="background:#e8f0f6"></i>
+              <span>深海蓝 · 雾蓝 · 白</span>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="scale" aria-labelledby="scale-heading">
+      <div class="section-heading">
+        <h2 id="scale-heading">小尺寸可读性</h2>
+        <p>先看 20pt，再看桌面端常用尺寸</p>
+      </div>
+      <div class="scale-grid">
+        <article class="scale-card">
+          <h3>浅色背景 · 轻量工具栏</h3>
+          <div class="scale-row">
+            <div class="scale-item"><img style="--size:20px" src="./hyperdr-icon-concepts-ios-liquid-glass-v2/01-slate-diamond.png" alt=""><span>20 pt</span></div>
+            <div class="scale-item"><img style="--size:32px" src="./hyperdr-icon-concepts-ios-liquid-glass-v2/01-slate-diamond.png" alt=""><span>32 pt</span></div>
+            <div class="scale-item"><img style="--size:48px" src="./hyperdr-icon-concepts-ios-liquid-glass-v2/01-slate-diamond.png" alt=""><span>48 pt</span></div>
+          </div>
+        </article>
+        <article class="scale-card">
+          <h3>中性背景 · 面板入口</h3>
+          <div class="scale-row">
+            <div class="scale-item"><img style="--size:20px" src="./hyperdr-icon-concepts-ios-liquid-glass-v2/02-sage-arc.png" alt=""><span>20 pt</span></div>
+            <div class="scale-item"><img style="--size:32px" src="./hyperdr-icon-concepts-ios-liquid-glass-v2/02-sage-arc.png" alt=""><span>32 pt</span></div>
+            <div class="scale-item"><img style="--size:48px" src="./hyperdr-icon-concepts-ios-liquid-glass-v2/02-sage-arc.png" alt=""><span>48 pt</span></div>
+          </div>
+        </article>
+        <article class="scale-card">
+          <h3>深色背景 · 桌面应用</h3>
+          <div class="scale-row">
+            <div class="scale-item"><img style="--size:20px" src="./hyperdr-icon-concepts-ios-liquid-glass-v2/03-navy-loop.png" alt=""><span>20 pt</span></div>
+            <div class="scale-item"><img style="--size:32px" src="./hyperdr-icon-concepts-ios-liquid-glass-v2/03-navy-loop.png" alt=""><span>32 pt</span></div>
+            <div class="scale-item"><img style="--size:48px" src="./hyperdr-icon-concepts-ios-liquid-glass-v2/03-navy-loop.png" alt=""><span>48 pt</span></div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <div class="selection" role="status" aria-live="polite">
+      <p>当前选择：<strong data-selection>尚未选择</strong></p>
+      <p class="selection__hint">选定方向后，再继续收敛到最终图标与各平台尺寸。</p>
+    </div>
+    <p class="footer-note">素材来自仓库中的 <code>designs/hyperdr-icon-concepts-ios-liquid-glass-v2</code>。本页只用于方向评估，不代表最终导出尺寸、透明安全区或平台角标规范。</p>
+  </main>
+
+  <script>
+    const cards = [...document.querySelectorAll(".direction")];
+    const current = document.querySelector("[data-selection]");
+
+    function select(card) {
+      cards.forEach((item) => {
+        const selected = item === card;
+        item.classList.toggle("is-selected", selected);
+        item.querySelector(".choice").setAttribute("aria-pressed", String(selected));
+      });
+      current.textContent = card.dataset.direction;
+    }
+
+    cards.forEach((card) => {
+      card.querySelector(".choice").addEventListener("click", () => select(card));
+    });
+  </script>
+</body>
+</html>

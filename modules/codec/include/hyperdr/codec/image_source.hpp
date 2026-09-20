@@ -87,7 +87,7 @@ struct RawMosaic {
 
 struct RawDecodeOptions {
   // Primaries used only when a raster carries neither a usable ICC profile nor
-  // a stated CICP primary. RAW remains ProPhoto/scene-referred and ignores it.
+  // a stated CICP primary. RAW uses its camera matrix and ignores it.
   ColorGamut default_gamut{ColorGamut::kSrgb};
   // LibRaw's unclip mode can leave strongly magenta clipped highlights when
   // sensor channels saturate at different levels. Blend is the conservative
@@ -193,6 +193,10 @@ struct DecodedImage {
   CaptureMetadata capture;
   // Actual RAW WB selection; empty for non-RAW inputs.
   std::string raw_white_balance;
+  // Where the RAW camera matrix came from: `embedded` (the file's own matrix,
+  // such as a DNG ColorMatrix), `libraw` (LibRaw's per-model table), or `none`
+  // (no matrix; camera RGB is read as ProPhoto). Empty for non-RAW inputs.
+  std::string raw_color_matrix;
   DecodeInfo decode;
   // How far above diffuse white this input's *format* can carry detail, as a
   // linear multiple of 1.0. HLG is 1000/203, PQ up to 10000/203, a gain-map

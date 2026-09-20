@@ -1,4 +1,5 @@
 #include "hyperdr/look/color_lut.hpp"
+#include "hyperdr/image/color.hpp"
 #include "hyperdr/image/transfer.hpp"
 #include <cmath>
 #include <filesystem>
@@ -38,13 +39,22 @@ void test_hdr_strength_continuity(const ColorLut& lut,
   }
 }
 
+// A 1D conversion LUT, which is only exact where a per-channel curve can be:
+// PQ has no OOTF, and scaling HLG display light by k scales scene light by
+// k^(1/1.2) on every channel. Between HLG and PQ the OOTF couples the channels
+// through luminance, so there the LUT is exact for neutral colours only.
 ColorLut hdr_conversion_lut(LutSpace input, LutSpace output, float scale=1) {
   ColorLut lut;
   lut.size=4096;
   for(unsigned i=0;i<lut.size;++i) {
     const float code=static_cast<float>(i)/(lut.size-1);
-    const float linear=input==LutSpace::Hlg?hlg_inverse_oetf(code):pq_eotf(code);
-    const float mapped=output==LutSpace::Hlg?hlg_oetf(linear*scale):pq_oetf(linear*scale);
+    float mapped;
+    if(input==LutSpace::Hlg && output==LutSpace::Hlg) {
+      mapped=hlg_oetf_scene(hlg_inverse_oetf_scene(code)*std::pow(scale,1/1.2F));
+    } else {
+      const float linear=input==LutSpace::Hlg?hlg_decode({code,code,code})[0]:pq_eotf(code);
+      mapped=output==LutSpace::Hlg?hlg_encode({linear*scale,linear*scale,linear*scale})[0]:pq_oetf(linear*scale);
+    }
     lut.values.push_back({mapped,mapped,mapped});
   }
   return lut;
@@ -57,8 +67,11 @@ void test_hdr_lut_headroom(const std::filesystem::path& file) {
     source.at(x,0,0)=y; source.at(x,0,1)=y*.8F; source.at(x,0,2)=y*.6F;
   }
   // A saturated highlight can exceed the P3 channel limit while its luminance
-  // remains below the declared 4x range, as in real BT.2020 HIF input.
-  source.at(7,0,0)=5; source.at(7,0,1)=2; source.at(7,0,2)=.5F;
+  // remains below the declared 4x range, as in real BT.2020 HIF input. It also
+  // stays inside what an HLG signal carries at +0.2 EV: BT.2100's luminance
+  // OOTF caps a scene channel at 1, so a saturated red reaches only about 77%
+  // of the display peak (0.2627^0.2), and (5, 2, 0.5) no longer fitted.
+  source.at(7,0,0)=4.4F; source.at(7,0,1)=2.6F; source.at(7,0,2)=.9F;
   // The declared 4x range deliberately exceeds the brightest actual luminance.
   const InputDescription input{InputDomain::kDisplayReferredHdr,4};
   ColorLut identity; identity.size=2; identity.values={{0,0,0},{1,1,1}};
@@ -78,21 +91,29 @@ void test_hdr_lut_headroom(const std::filesystem::path& file) {
     }
   }
   options.gain_strength=1; options.exposure_bias_ev=0;
+  // An HLG-to-PQ LUT has to be three-dimensional to carry HLG's luminance OOTF,
+  // and the range decisions tested here depend on luminance alone, so this part
+  // uses the neutral colours a 1D LUT converts exactly.
+  auto neutral=source;
+  for(unsigned x=0;x<neutral.width;++x) {
+    const float y=p3_luminance(source.at(x,0,0),source.at(x,0,1),source.at(x,0,2));
+    for(int c=0;c<3;++c) neutral.at(x,0,c)=y;
+  }
   ColorLutOptions grade{file,LutSpace::Hlg,LutSpace::Pq,1};
   const auto conversion=hdr_conversion_lut(grade.input,grade.output);
-  const auto converted=render_graded_photo(source,options,{},input,RenderTarget::Hdr,grade,&conversion);
-  const auto expected=render_renditions(source,options,{},input,RenderTarget::Hdr);
+  const auto converted=render_graded_photo(neutral,options,{},input,RenderTarget::Hdr,grade,&conversion);
+  const auto expected=render_renditions(neutral,options,{},input,RenderTarget::Hdr);
   require_image_close(converted.hdr,expected.hdr,"HLG to PQ conversion must not assign a 10000-nit photo range");
   require_image_close(converted.sdr,expected.sdr,"HLG to PQ conversion must preserve SDR tone mapping");
   const auto dimmer=hdr_conversion_lut(grade.input,grade.output,.5F);
-  auto scaled=source; for(auto& c:scaled.pixels)c*=.5F;
-  const auto dimmed=render_graded_photo(source,options,{},input,RenderTarget::Hdr,grade,&dimmer);
+  auto scaled=neutral; for(auto& c:scaled.pixels)c*=.5F;
+  const auto dimmed=render_graded_photo(neutral,options,{},input,RenderTarget::Hdr,grade,&dimmer);
   const auto dimmed_expected=render_renditions(scaled,options,{},
       {InputDomain::kDisplayReferredHdr,2},RenderTarget::Hdr);
   require_image_close(dimmed.sdr,dimmed_expected.sdr,"a LUT that lowers the photo range must lower its mapping headroom too");
   for(float strength:{1e-5F,.5F}) {
     grade.strength=strength;
-    const auto partial=render_graded_photo(source,options,{},input,RenderTarget::Hdr,grade,&dimmer);
+    const auto partial=render_graded_photo(neutral,options,{},input,RenderTarget::Hdr,grade,&dimmer);
     require(std::abs(partial.stats.headroom_linear-std::lerp(4.0F,2.0F,strength))<5e-4F,
         "partial HDR LUT strength must blend headroom with its pixels");
     for(std::size_t i=0;i<partial.hdr.pixels.size();++i)

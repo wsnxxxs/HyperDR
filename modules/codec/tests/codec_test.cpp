@@ -6,6 +6,9 @@
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/gainmap/reconstruct.hpp"
+#include "hyperdr/gainmap/rendition.hpp"
+#include "hyperdr/image/color.hpp"
+#include "hyperdr/image/fidelity.hpp"
 #include "hyperdr/image/transfer.hpp"
 
 #include <libheif/heif.h>
@@ -13,6 +16,7 @@
 #include <png.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <iostream>
@@ -263,10 +267,11 @@ std::vector<std::uint8_t> encode_hlg_422(const hyperdr::FloatImage& linear) {
     for (std::uint32_t x = 0; x < linear.width; ++x) {
       const auto wide = hyperdr::p3_to_rec2020(linear.at(x, y, 0), linear.at(x, y, 1),
                                                linear.at(x, y, 2));
+      const auto encoded = hyperdr::hlg_encode(
+          {std::max(0.0F, wide[0]), std::max(0.0F, wide[1]), std::max(0.0F, wide[2])});
       for (unsigned channel = 0; channel < 3; ++channel) {
-        const float encoded = hyperdr::hlg_oetf(std::max(0.0F, wide[channel]));
         row[x * 3 + channel] = static_cast<std::uint16_t>(
-            std::lround(std::clamp(encoded, 0.0F, 1.0F) * max_code));
+            std::lround(std::clamp(encoded[channel], 0.0F, 1.0F) * max_code));
       }
     }
   }
@@ -645,6 +650,116 @@ void display_curve_difference_check(const std::vector<std::uint8_t>& reference_b
           (std::string(label) + ": a perturbed Gain Map reported no difference at all").c_str());
 }
 
+// A camera HLG photograph converted to both gain-map formats has to decode back
+// to itself. The fixture is the shape that exposed the failures: a 4:2:2 HLG
+// frame wide enough that its full-resolution gain map needs a grid, shadows
+// below sRGB code 10, highlight bars one to three pixels wide, and a saturated
+// highlight. Before the fix the highlights came back about a fifth darker (a
+// cell-averaged map), saturated colour came back desaturated (a gain-map base
+// gamut-fitted in SDR), and every Adaptive HEIC shadow under code 10 decoded as
+// black (a zero slope in the base's ICC toe).
+hyperdr::FloatImage make_camera_hdr(std::uint32_t width, std::uint32_t height) {
+  const float peak = 1000.0F / hyperdr::kReferenceWhiteNits;
+  hyperdr::FloatImage image(width, height, 3);
+  for (std::uint32_t y = 0; y < height; ++y) {
+    for (std::uint32_t x = 0; x < width; ++x) {
+      const float t = static_cast<float>(x % 800) / 799.0F;
+      std::array<float, 3> rgb{};
+      if (x < 800) {
+        const float v = 0.0003F + 0.02F * t;
+        rgb = {v, v * 0.9F, v * 0.8F};
+      } else if (x < 1600) {
+        const float v = 0.05F + 0.85F * t;
+        rgb = {v, v * (0.7F + 0.3F * y / height), v * 0.5F};
+      } else if (x < 2400) {
+        const bool bar = (x / 3U) % 2U == 0U;
+        const float v = bar ? peak * 0.98F : 0.05F;
+        rgb = {v, v, v};
+      } else if (x < 2800) {
+        rgb = {3.0F, 0.6F, 0.25F};
+      } else {
+        const float v = 1.0F + (peak - 1.0F) * t * 2.0F;
+        rgb = {std::min(v, peak), std::min(v, peak) * 0.95F, std::min(v, peak) * 0.9F};
+      }
+      for (unsigned c = 0; c < 3; ++c) image.at(x, y, c) = rgb[c];
+    }
+  }
+  return image;
+}
+
+float region_mean_luminance(const hyperdr::FloatImage& image, std::uint32_t x0,
+                            std::uint32_t x1) {
+  double total = 0.0;
+  for (std::uint32_t y = 0; y < image.height; ++y) {
+    for (std::uint32_t x = x0; x < x1; ++x) {
+      total += hyperdr::p3_luminance(image.at(x, y, 0), image.at(x, y, 1), image.at(x, y, 2));
+    }
+  }
+  return static_cast<float>(total / (static_cast<double>(x1 - x0) * image.height));
+}
+
+void check_hdr_source_gain_maps(const hyperdr::PhotoMetadata& metadata) {
+  const auto hlg = encode_hlg_422(make_camera_hdr(3200, 48));
+  require(!hlg.empty(), "x265 cannot produce the 4:2:2 HLG camera fixture");
+  const auto source = decode_encoded_input(hlg, "camera-hlg");
+  require(source.domain == hyperdr::InputDomain::kDisplayReferredHdr,
+          "the HLG fixture must decode as an HDR source");
+
+  hyperdr::RenderOptions identity;
+  identity.auto_headroom = false;
+  identity.headroom_stops = 3.0F;
+  identity.look.headroom_max_stops = 3.0F;
+  identity.look.shoulder_start = 0.25F;
+  identity.look.contrast = 1.0F;
+  identity.look.vibrance = 0.0F;
+  auto photo = hyperdr::render_renditions(source.linear_p3, identity, source.capture,
+                                          source.describe_input(),
+                                          hyperdr::RenderTarget::Hdr);
+  require(photo.hdr_is_source, "an HLG photograph must be packaged as its own HDR");
+  const auto gain = hyperdr::gain_map_from_renditions(std::move(photo));
+  require(gain.gain_map.width == 3200 && gain.gain_map.height == 48,
+          "an HDR source's gain map must be full resolution");
+
+  const auto check = [&](const hyperdr::DecodedImage& decoded, const char* label,
+                         double mean_limit, double highlight_limit) {
+    const auto fidelity = hyperdr::measure_hdr_fidelity(source.linear_p3, decoded.linear_p3);
+    std::cout << label << ": delta E ITP mean " << fidelity.delta_e_itp_mean << ", p99 "
+              << fidelity.delta_e_itp_p99 << ", highlights "
+              << fidelity.band_delta_e_itp_mean[2] << ", peak " << fidelity.candidate_peak
+              << " / " << fidelity.reference_peak << '\n';
+    require(fidelity.delta_e_itp_mean < mean_limit,
+            (std::string(label) + ": the HDR source did not survive its gain map").c_str());
+    require(fidelity.band_delta_e_itp_mean[2] < highlight_limit,
+            (std::string(label) + ": highlights did not survive their gain map").c_str());
+    require(std::abs(fidelity.candidate_peak / fidelity.reference_peak - 1.0F) < 0.02F,
+            (std::string(label) + ": the peak was not restored").c_str());
+    const float shadows = region_mean_luminance(decoded.linear_p3, 0, 800) /
+                          region_mean_luminance(source.linear_p3, 0, 800);
+    require(shadows > 0.9F && shadows < 1.1F,
+            (std::string(label) + ": shadows under sRGB code 10 were lost").c_str());
+    const float bars = region_mean_luminance(decoded.linear_p3, 1600, 2400) /
+                       region_mean_luminance(source.linear_p3, 1600, 2400);
+    require(bars > 0.97F && bars < 1.03F,
+            (std::string(label) + ": pixel-wide highlights lost brightness").c_str());
+    const auto red = decoded.linear_p3.at(2600, 24, 0) /
+                     std::max(decoded.linear_p3.at(2600, 24, 1), 1.0e-6F);
+    const auto red_source = source.linear_p3.at(2600, 24, 0) /
+                            std::max(source.linear_p3.at(2600, 24, 1), 1.0e-6F);
+    require(std::abs(red / red_source - 1.0F) < 0.05F,
+            (std::string(label) + ": a saturated highlight lost its colour").c_str());
+  };
+
+  const auto adaptive = hyperdr::encode_adaptive_heic(gain, metadata, 95, 10);
+  check_structure(adaptive, "HDR-source adaptive");
+  hyperdr::verify_heic_decodable(adaptive);
+  check(decode_encoded_input(adaptive, "hdr-source-adaptive"), "HLG source to Adaptive HEIC",
+        1.5, 3.0);
+
+  const auto ultrahdr = hyperdr::encode_ultrahdr_jpeg(gain, metadata, 95);
+  hyperdr::verify_ultrahdr_jpeg(ultrahdr);
+  check(decode_ultrahdr_input(ultrahdr), "HLG source to Ultra HDR", 2.5, 3.0);
+}
+
 }  // namespace
 
 int main() {
@@ -878,6 +993,13 @@ int main() {
       const auto code = i % 7 == 0 ? 0U : (i % 11 == 0 ? 255U : static_cast<unsigned>((i * 37U) % 255U));
       lossless_probe.gain_map.pixels[i] = static_cast<float>(code) / 255.0F;
     }
+    // The codes are synthetic, so the range they span is declared rather than
+    // inherited from whatever the photographic renderer chose for `small`: the
+    // headroom check below needs at least a stop for the preview divisor to use,
+    // and the renderer's local weighting now gives this smooth gradient 0.6.
+    lossless_probe.metadata.gain_max = {2, 1};
+    lossless_probe.metadata.alternate_headroom = {2, 1};
+    lossless_probe.headroom_stops = 2.0F;
     const auto small8 = hyperdr::encode_adaptive_heic(lossless_probe, metadata, 80, 8);
     check_structure(small8, "8-bit single");
     decode_and_check(small8, 64, 32);
@@ -974,6 +1096,8 @@ int main() {
     require_linear_round_trip(decoded_hlg422, small,
                               "4:2:2 HLG input did not decode to its linear values");
     std::cout << "4:2:2 HLG input round trip passed\n";
+    check_hdr_source_gain_maps(metadata);
+    std::cout << "HLG source to Adaptive HEIC and Ultra HDR round trips passed\n";
 
     // 10-bit output is required: it is the only way to exercise the Main10
     // path used by the BT.2100 encodings.

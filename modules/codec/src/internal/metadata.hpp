@@ -11,10 +11,12 @@
 
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/container/exif.hpp"
+#include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/image/orientation.hpp"
 
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <utility>
 
@@ -36,6 +38,60 @@ inline void apply_exif(DecodedImage& image, const ExifRead& exif) {
           : std::nullopt;
   image.capture.exposure_time_seconds = positive(image.metadata.exposure_seconds);
   image.capture.aperture_f_number = positive(image.metadata.aperture);
+  // The research level estimator reads the capture exactly as the camera wrote
+  // it, so these three come from `metadata.capture` -- the presence-preserving
+  // copy -- rather than from the plain doubles, whose zero default cannot say
+  // whether the tag was there. A recorded 0 EV is kept as a value.
+  const auto recorded = [](const std::optional<double>& value) -> std::optional<float> {
+    if (!value.has_value() || !std::isfinite(*value)) return std::nullopt;
+    return static_cast<float>(*value);
+  };
+  image.capture.exposure_bias_ev = recorded(image.metadata.capture.exposure_bias_ev);
+  // The two length fields follow the estimator's own presence rule, which treats
+  // a zero as unknown because Exif defines it that way; the two sides must agree
+  // or the same photograph would be complete in one and absent in the other.
+  const auto length = [](const std::optional<double>& value) -> std::optional<float> {
+    if (!value.has_value() || !std::isfinite(*value) || *value == 0.0) return std::nullopt;
+    return static_cast<float>(*value);
+  };
+  image.capture.focal_length_mm = length(image.metadata.capture.focal_length_mm);
+  image.capture.focal_length_35mm = length(image.metadata.capture.focal_length_35mm);
+}
+
+// The capture vector for a level model, read from the file's own Exif.
+//
+// A decoder that filled `capture` from its decoding library instead would make
+// the same photograph a complete input in one container and an incomplete one in
+// another, and would lose the presence information the model's fallback rule
+// turns on: LibRaw reports no exposure compensation at all rather than a zero,
+// and no 35 mm-equivalent focal length. Only the leading block is read -- every
+// format this build opens keeps IFD0 and the Exif IFD near the front, and
+// re-reading a 60 MB RAW to recover six numbers would cost more than the decode.
+//
+// `metadata.capture` is replaced wholesale rather than merged: a partial read
+// must leave the fields it did not find absent, not inherit a neighbouring
+// decoder's guess.
+inline void apply_capture_parameters_from_file(
+    DecodedImage& image, const std::filesystem::path& path,
+    std::size_t prefix_bytes = 1U << 20U) {
+  const auto prefix = read_binary_prefix(path, prefix_bytes);
+  if (prefix.empty()) return;
+  const auto exif = read_exif(prefix.data(), prefix.size());
+  image.metadata.capture = exif.metadata.capture;
+  const auto recorded = [](const std::optional<double>& value) -> std::optional<float> {
+    if (!value.has_value() || !std::isfinite(*value)) return std::nullopt;
+    return static_cast<float>(*value);
+  };
+  image.capture.exposure_bias_ev = recorded(exif.metadata.capture.exposure_bias_ev);
+  // The two length fields keep the same zero-means-unknown rule the estimator
+  // uses, so a container that wrote a zero and one that omitted the tag reach
+  // the same conclusion.
+  const auto length = [](const std::optional<double>& value) -> std::optional<float> {
+    if (!value.has_value() || !std::isfinite(*value) || *value == 0.0) return std::nullopt;
+    return static_cast<float>(*value);
+  };
+  image.capture.focal_length_mm = length(exif.metadata.capture.focal_length_mm);
+  image.capture.focal_length_35mm = length(exif.metadata.capture.focal_length_35mm);
 }
 
 // Rotates the raster so the stored orientation becomes 1, and brings the

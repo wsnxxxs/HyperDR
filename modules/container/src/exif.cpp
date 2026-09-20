@@ -185,6 +185,23 @@ std::optional<double> entry_rational(
   return static_cast<double>(*numerator) / *denominator;
 }
 
+// SRATIONAL. ExposureBiasValue is the one ordinary tag that is routinely
+// negative, and reading its two's-complement numerator as unsigned would turn
+// -2/3 EV into +1431655764 EV rather than failing, so it is decoded here rather
+// than through `entry_rational`.
+std::optional<double> entry_signed_rational(
+    const TiffView& tiff, const std::optional<TiffEntry>& entry,
+    std::size_t index = 0) {
+  if (!entry || entry->type != 10 || index >= entry->count) return std::nullopt;
+  const auto numerator = tiff.u32(entry->bytes_offset + index * 8);
+  const auto denominator = tiff.u32(entry->bytes_offset + index * 8 + 4);
+  if (!numerator || !denominator || *denominator == 0) return std::nullopt;
+  const auto signed_numerator = static_cast<std::int32_t>(*numerator);
+  const auto signed_denominator = static_cast<std::int32_t>(*denominator);
+  return static_cast<double>(signed_numerator) /
+         static_cast<double>(signed_denominator);
+}
+
 std::optional<double> gps_coordinate(const TiffView& tiff,
                                      std::uint32_t gps_ifd,
                                      std::uint16_t value_tag,
@@ -218,6 +235,21 @@ Entry rational_value(std::uint16_t tag, double value) {
   u32le(bytes, numerator);
   u32le(bytes, denominator);
   return {tag, 5, 1, std::move(bytes)};
+}
+
+// SRATIONAL, so a negative exposure compensation survives the round trip. The
+// denominator is kept positive: the sign belongs in the numerator, which is
+// where every producer and consumer expects to find it.
+Entry signed_rational_value(std::uint16_t tag, double value) {
+  constexpr std::int32_t denominator = 1000;
+  const auto numerator = static_cast<std::int32_t>(
+      std::max(std::min(std::round(value * denominator),
+                        static_cast<double>(std::numeric_limits<std::int32_t>::max())),
+               static_cast<double>(std::numeric_limits<std::int32_t>::min())));
+  std::vector<std::uint8_t> bytes;
+  u32le(bytes, static_cast<std::uint32_t>(numerator));
+  u32le(bytes, static_cast<std::uint32_t>(denominator));
+  return {tag, 10, 1, std::move(bytes)};
 }
 
 Entry byte_array(std::uint16_t tag, std::vector<std::uint8_t> bytes) {
@@ -281,6 +313,12 @@ std::vector<std::uint8_t> make_minimal_exif(const PhotoMetadata& m) {
   if (!m.date_time.empty()) exif_entries.push_back(ascii(0x9003, m.date_time));
   if (m.exposure_seconds > 0) exif_entries.push_back(rational_value(0x829A, m.exposure_seconds));
   if (m.aperture > 0) exif_entries.push_back(rational_value(0x829D, m.aperture));
+  // ExposureBiasValue, so a rendered file still says what the camera was asked
+  // to compensate for. A model that reads capture settings must not be handed a
+  // file whose own bias tag its producer dropped.
+  if (m.capture.exposure_bias_ev) {
+    exif_entries.push_back(signed_rational_value(0x9204, *m.capture.exposure_bias_ev));
+  }
   // Exif PhotographicSensitivity is SHORT. Exif requires 65535 as the
   // sentinel when the real sensitivity is larger; XMP below retains the value.
   if (m.iso > 0) {
@@ -448,22 +486,31 @@ std::optional<PhotoMetadata> read_photo_metadata(const std::uint8_t* data,
     if (const auto iso =
             entry_unsigned(tiff, find_entry(tiff, *exif_ifd, 0x8827))) {
       metadata.iso = *iso;
+      metadata.capture.iso = static_cast<double>(*iso);
     }
     if (const auto exposure =
             entry_rational(tiff, find_entry(tiff, *exif_ifd, 0x829A))) {
       metadata.exposure_seconds = *exposure;
+      metadata.capture.exposure_seconds = *exposure;
     }
     if (const auto aperture =
             entry_rational(tiff, find_entry(tiff, *exif_ifd, 0x829D))) {
       metadata.aperture = *aperture;
+      metadata.capture.f_number = *aperture;
+    }
+    if (const auto bias =
+            entry_signed_rational(tiff, find_entry(tiff, *exif_ifd, 0x9204))) {
+      metadata.capture.exposure_bias_ev = *bias;
     }
     if (const auto focal =
             entry_rational(tiff, find_entry(tiff, *exif_ifd, 0x920A))) {
       metadata.focal_length_mm = *focal;
+      metadata.capture.focal_length_mm = *focal;
     }
     if (const auto focal35 =
             entry_unsigned(tiff, find_entry(tiff, *exif_ifd, 0xA405))) {
       metadata.focal_length_35mm = *focal35;
+      metadata.capture.focal_length_35mm = static_cast<double>(*focal35);
     }
   }
 
@@ -488,6 +535,52 @@ std::optional<PhotoMetadata> read_photo_metadata(const std::uint8_t* data,
     }
   }
   return metadata;
+}
+
+bool capture_parameters_complete(const CaptureParameters& capture,
+                                 std::vector<std::string>* missing) {
+  const auto report = [&](const char* name) {
+    if (missing != nullptr) missing->emplace_back(name);
+  };
+
+  // Three different notions of "a real value", and the difference between them
+  // is the whole point of this function.
+  enum class Rule {
+    // Must be positive: a zero ISO, exposure time or f-number is not a capture.
+    kPositive,
+    // Any finite value, zero included. ExposureBiasValue is signed and 0 EV is
+    // the ordinary value on a rig that did not compensate, so a truthiness test
+    // here would silently throw away the most common complete vector there is.
+    kAnyFinite,
+    // Finite and non-zero. Exif defines 0 as "unknown" for both focal-length
+    // tags, and a lens of zero millimetres is not a measurement, so a zero is
+    // treated as an absent tag.
+    kNonZero,
+  };
+  const auto usable = [](const std::optional<double>& value, Rule rule) {
+    if (!value.has_value() || !std::isfinite(*value)) return false;
+    switch (rule) {
+      case Rule::kPositive: return *value > 0.0;
+      case Rule::kAnyFinite: return true;
+      case Rule::kNonZero: return *value != 0.0;
+    }
+    return false;
+  };
+
+  const bool iso = usable(capture.iso, Rule::kPositive);
+  const bool exposure = usable(capture.exposure_seconds, Rule::kPositive);
+  const bool aperture = usable(capture.f_number, Rule::kPositive);
+  const bool bias = usable(capture.exposure_bias_ev, Rule::kAnyFinite);
+  const bool focal = usable(capture.focal_length_mm, Rule::kNonZero);
+  const bool focal35 = usable(capture.focal_length_35mm, Rule::kNonZero);
+
+  if (!iso) report("iso");
+  if (!exposure) report("exposure_seconds");
+  if (!aperture) report("f_number");
+  if (!bias) report("exposure_bias_ev");
+  if (!focal) report("focal_length_mm");
+  if (!focal35) report("focal_length_35mm");
+  return iso && exposure && aperture && bias && focal && focal35;
 }
 
 std::optional<PhotoMetadata> read_jpeg_photo_metadata(

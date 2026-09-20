@@ -33,7 +33,12 @@ void check_heif(heif_error error, const char* operation) {
 std::vector<std::uint8_t> display_p3_profile(bool linear = false) {
   cmsCIExyY white{0.3127, 0.3290, 1.0};
   cmsCIExyYTRIPLE primaries{{0.680, 0.320, 1.0}, {0.265, 0.690, 1.0}, {0.150, 0.060, 1.0}};
-  double parameters[]{2.4, 1.0 / 1.055, 0.055 / 1.055, 0.0, 0.04045, 1.0 / 12.92, 0.0};
+  // Little CMS type 4 is the IEC 61966-2-1 form, parameters {g, a, b, c, d}:
+  // Y = (aX + b)^g for X >= d, and Y = cX below it. The slope c used to sit in
+  // the unused sixth slot with 0 in its place, which zeroed the linear toe: any
+  // ICC-honouring reader decoded every base code under 10/255 as black, and a
+  // gain map cannot bring back a shadow that multiplies zero.
+  double parameters[]{2.4, 1.0 / 1.055, 0.055 / 1.055, 1.0 / 12.92, 0.04045};
   cmsToneCurve* curve = linear ? cmsBuildGamma(nullptr, 1.0)
                                : cmsBuildParametricToneCurve(nullptr, 4, parameters);
   if (!curve) throw std::runtime_error("cannot build Display P3 tone curve");
@@ -253,12 +258,13 @@ std::unique_ptr<heif_image, ImageDeleter> make_hdr(
           std::max(0.0F, rgb[0]), std::max(0.0F, rgb[1]), std::max(0.0F, rgb[2])};
       peak = std::max(peak, std::max({linear[0], linear[1], linear[2]}));
       luminance_sum += 0.2627 * linear[0] + 0.6780 * linear[1] + 0.0593 * linear[2];
+      const auto encoded = encoding == HdrEncoding::Pq
+                               ? std::array<float, 3>{pq_oetf(linear[0]), pq_oetf(linear[1]),
+                                                      pq_oetf(linear[2])}
+                               : hlg_encode(linear);
       for (unsigned channel = 0; channel < 3; ++channel) {
-        const float encoded = encoding == HdrEncoding::Pq
-                                  ? pq_oetf(linear[channel])
-                                  : hlg_oetf(linear[channel]);
         row[x * 3 + channel] = static_cast<std::uint16_t>(
-            quantize_dithered(encoded, max_code, x, y, channel));
+            quantize_dithered(encoded[channel], max_code, x, y, channel));
       }
     }
     row_peak[y] = peak;
@@ -322,6 +328,44 @@ std::unique_ptr<heif_image_handle, HandleDeleter> encode_base(
       check_heif(heif_context_add_image_tile(context, handle.get(), x, y,
                                              tile.get(), encoder),
                  "encode base tile");
+    }
+  }
+  return handle;
+}
+
+// The gain map normally fits one HEVC picture: mathematical maps stop at 3072
+// pixels an edge. A full-resolution map for an HDR source is the size of the
+// base, which for a 60 MP camera is beyond HEVC Level 6.2's largest picture and,
+// losslessly coded, beyond libde265's 16 MiB NAL limit -- the same two reasons
+// the base is tiled. It is tiled the same way, so both grids share one layout.
+std::unique_ptr<heif_image_handle, HandleDeleter> encode_gain_map_item(
+    heif_context* context, heif_image* image, heif_encoder* encoder,
+    const heif_encoding_options* options, std::uint32_t width, std::uint32_t height) {
+  constexpr std::uint32_t single_picture_edge = 3072;
+  constexpr std::uint32_t tile_size = 2048;
+  heif_image_handle* handle_raw = nullptr;
+  if (width <= single_picture_edge && height <= single_picture_edge) {
+    check_heif(heif_context_encode_image(context, image, encoder, options, &handle_raw),
+               "encode gain map");
+    return std::unique_ptr<heif_image_handle, HandleDeleter>(handle_raw);
+  }
+  const auto columns = (width + tile_size - 1) / tile_size;
+  const auto rows = (height + tile_size - 1) / tile_size;
+  check_heif(heif_context_add_grid_image(context, width, height, columns, rows, options,
+                                         &handle_raw),
+             "create gain map grid");
+  std::unique_ptr<heif_image_handle, HandleDeleter> handle(handle_raw);
+  for (std::uint32_t y = 0; y < rows; ++y) {
+    for (std::uint32_t x = 0; x < columns; ++x) {
+      heif_image* tile_raw = nullptr;
+      check_heif(heif_image_extract_area(image, static_cast<int>(x * tile_size),
+                                         static_cast<int>(y * tile_size),
+                                         static_cast<int>(tile_size),
+                                         static_cast<int>(tile_size), nullptr, &tile_raw),
+                 "extract gain map tile");
+      std::unique_ptr<heif_image, ImageDeleter> tile(tile_raw);
+      check_heif(heif_context_add_image_tile(context, handle.get(), x, y, tile.get(), encoder),
+                 "encode gain map tile");
     }
   }
   return handle;
@@ -406,7 +450,6 @@ std::vector<std::uint8_t> encode_adaptive_heic(const GainMapResult& images,
 
   auto base = make_base(images.base_linear, depth);
   auto gain = make_gain(images.gain_map);
-  heif_image_handle* gain_handle_raw = nullptr;
   // Explicit encoding options are required for libheif to carry the gain-map
   // nclx profile into the encoded item.
   std::unique_ptr<heif_encoding_options, EncodingOptionsDeleter> gain_options(
@@ -416,10 +459,9 @@ std::vector<std::uint8_t> encode_adaptive_heic(const GainMapResult& images,
   gain_options->output_nclx_profile = &gain_nclx;
   // Encode the visible gain image first. Grid encoding creates hidden HEVC tile
   // items; keeping the gain item first makes the narrow TMAP adapter unambiguous.
-  check_heif(heif_context_encode_image(context.get(), gain.get(), gain_encoder.get(),
-                                       gain_options.get(), &gain_handle_raw),
-             "encode gain map");
-  std::unique_ptr<heif_image_handle, HandleDeleter> gain_handle(gain_handle_raw);
+  const auto gain_handle = encode_gain_map_item(
+      context.get(), gain.get(), gain_encoder.get(), gain_options.get(),
+      images.gain_map.width, images.gain_map.height);
   auto base_handle = encode_base(context.get(), base.get(), encoder.get(),
                                  images.base_linear.width, images.base_linear.height);
   check_heif(heif_context_set_primary_image(context.get(), base_handle.get()), "set primary image");

@@ -26,7 +26,7 @@ struct RawDecodeResource {
 // External calibration inputs used by both the decode cache and the resumable
 // output fingerprint. Keeping this list here prevents those two identities
 // from drifting when another RAW resource is introduced.
-[[nodiscard]] std::array<RawDecodeResource, 4> raw_decode_resources(
+[[nodiscard]] std::array<RawDecodeResource, 5> raw_decode_resources(
     const RawDecodeOptions& options);
 
 // Human-readable, and the exact input to the hash. Recorded in the sidecar so a

@@ -1,3 +1,4 @@
+#include "hyperdr/image/dcp_profile.hpp"
 #include "hyperdr/app/cli.hpp"
 
 #include "hyperdr/app/batch.hpp"
@@ -140,8 +141,11 @@ std::string next_value(int& i, int argc, char** argv, std::string_view option) {
 // Settings come from the schema; only the plumbing is listed here.
 void parse_settings(int argc, char** argv, int first, ConvertOptions& options,
                     unsigned* curve_samples = nullptr) {
+  bool contrast_set = false, vibrance_set = false;
   for (int i = first; i < argc; ++i) {
     const std::string_view arg = argv[i];
+    contrast_set = contrast_set || arg == "--contrast";
+    vibrance_set = vibrance_set || arg == "--vibrance";
     if (const Setting* setting = find_setting_by_flag(arg)) {
       const std::string text = setting->kind == SettingKind::kBoolean
                                    ? std::string{}
@@ -231,6 +235,12 @@ void parse_settings(int argc, char** argv, int first, ConvertOptions& options,
     } else {
       throw std::invalid_argument("unknown option: " + std::string(arg));
     }
+  }
+  if (!options.raw.profile.empty()) {
+    // The profile already supplies its base look. Only explicit creative
+    // controls should change it; argument order must not affect this choice.
+    if (!contrast_set) options.gain.look.contrast = 1.0F;
+    if (!vibrance_set) options.gain.look.vibrance = 0.0F;
   }
   if (is_hlg_encoding(options.encoding)) {
     // HLG's range above diffuse white is fixed by the standard, so a higher
@@ -508,6 +518,8 @@ int thumbnail_command(int argc, char** argv) {
       raw.dark_frame = next_value(i, argc, argv, arg);
     } else if (arg == "--raw-linearization-lut") {
       raw.linearization_lut = next_value(i, argc, argv, arg);
+    } else if (arg == "--raw-profile") {
+      raw.profile = path_from_utf8(next_value(i, argc, argv, arg));
     } else if (arg == "--raw-lens-shading") {
       raw.lens_shading_map = next_value(i, argc, argv, arg);
     } else if (arg == "--raw-auto-bad-pixels") {
@@ -1059,12 +1071,13 @@ std::string model_input_report(const std::filesystem::path& input,
           .element(d.requested_crop_left).element(d.requested_crop_top).end_array()
       .begin_array("delivered_crop_origin_sensor")
           .element(d.delivered_crop_left).element(d.delivered_crop_top).end_array()
+      .member("raw_profile_sha256", decoded.raw_profile ? decoded.raw_profile->profile->sha256 : "")
       .member("raw_half_size", raw.half_size)
       .member("input_domain", input_domain_name(decoded.describe_input().domain))
       .member("default_crop_present", d.default_crop_present)
       .member("requested_crop_applied", d.target_dimensions_applied)
       .begin_object("development_recipe")
-      .member("id", native_model_development_kind(
+      .member("id", decoded.raw_profile ? "raw-dcp-v1" : native_model_development_kind(
                         decoded.describe_input().domain))
       .member("exposure_bias_ev", gain.exposure_bias_ev)
       .member("exposure_ev", developed.exposure_ev)

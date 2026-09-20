@@ -149,6 +149,8 @@ struct FileResult {
   bool decode_degraded{false};
   std::string raw_white_balance;
   std::string raw_color_matrix;
+  std::string raw_profile_name, raw_profile_sha256, raw_profile_camera, raw_profile_tone;
+  float raw_profile_baseline_ev{};
   std::vector<std::string> decode_degradation_reasons;
   // Which renderer ran, and the headroom it was told the input carried. These
   // are the two facts that decide what every other number in this record means:

@@ -75,6 +75,13 @@ export const api = {
    *  the process lives. */
   state: () => get("/api/state", null, t("err.state")),
 
+  rawProfiles: (sessionId) => get("/api/raw-profiles", { id: sessionId }, "DCP"),
+  async uploadRawProfile(sessionId, file) {
+    const response = await fetch("/api/raw-profile-upload?" + new URLSearchParams({ id: sessionId, name: file.name }),
+      { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file });
+    return unwrap(response, "DCP");
+  },
+
   async uploadLut(sessionId, file) {
     let response;
     try {
@@ -154,13 +161,13 @@ export const api = {
    *  because a model that needs capture settings can answer with another model's
    *  prediction, and a caller that assumed its own request had been honoured
    *  would label that result with the wrong model's name. */
-  async modelPreview(sessionId, highlightRecovery, modelId, { colorGamut, clampSrgb } = {}) {
+  async modelPreview(sessionId, highlightRecovery, modelId, { colorGamut, clampSrgb, rawProfile } = {}) {
     let response;
     try {
       response = await fetch("/api/model-preview", {
         method: "POST",
         headers: JSON_HEADERS,
-        body: JSON.stringify({ sessionId, highlightRecovery, modelId, colorGamut, clampSrgb }),
+        body: JSON.stringify({ sessionId, highlightRecovery, modelId, colorGamut, clampSrgb, rawProfile }),
       });
     } catch { throw OFFLINE(); }
     if (!response.ok) {

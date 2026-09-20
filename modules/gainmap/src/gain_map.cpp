@@ -1,3 +1,4 @@
+#include "hyperdr/look/dcp_render.hpp"
 #include "hyperdr/gainmap/gain_map.hpp"
 
 #include "hyperdr/foundation/math.hpp"
@@ -76,6 +77,20 @@ GainMapResult make_gain_map(const FloatImage& source, const GainMapOptions& opti
   validate_gain_map_options(options);
   validate_input_description(input);
   if (source.channels != 3) throw std::invalid_argument("gain-map input must be RGB");
+  if (input.raw_profile) {
+    const float ev = std::clamp((options.auto_exposure ? 0.0F : options.exposure_ev) +
+        options.exposure_bias_ev, -10.0F, 10.0F);
+    auto base = render_dcp_base(source, *input.raw_profile, ev);
+    apply_dcp_adjustments(base, options.look);
+    auto adjusted = options;
+    adjusted.auto_exposure = false;
+    adjusted.exposure_ev = adjusted.exposure_bias_ev = 0.0F;
+    auto result = make_gain_map(base, adjusted, capture,
+        {InputDomain::kDisplayReferredSdr, 1}, nullptr, preparation);
+    result.exposure_ev = result.stats.exposure_ev = ev + input.raw_profile->baseline_exposure +
+        input.raw_profile->profile->baseline_exposure_offset;
+    return result;
+  }
   // Measure the decoded P3 source before exposure or the renderer mutates its
   // colour. This makes the report a property of the capture rather than of the
   // grade.

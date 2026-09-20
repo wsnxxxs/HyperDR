@@ -1,4 +1,6 @@
 #include "hyperdr/app/decode_cache.hpp"
+#include "hyperdr/codec/dcp_profile.hpp"
+#include "hyperdr/foundation/file_io.hpp"
 
 #include <chrono>
 #include <fstream>
@@ -39,6 +41,60 @@ void round_trip(const std::filesystem::path& path,
           "cache changed the EXIF fallback decision");
   require(source.linear_p3.pixels == cached.linear_p3.pixels,
           "cache changed decoded pixels");
+}
+
+// Standalone little-endian DCP with one identity-like ColorMatrix and D65.
+void write_profile(const std::filesystem::path& path, std::uint32_t first) {
+  std::vector<std::uint8_t> bytes{'I', 'I'};
+  const auto put = [&](std::uint32_t value, unsigned size) {
+    for (unsigned i = 0; i < size; ++i)
+      bytes.push_back(static_cast<std::uint8_t>(value >> (8*i)));
+  };
+  put(0x4352,2); put(8,4); put(2,2);
+  put(50721,2); put(10,2); put(9,4); put(38,4);
+  put(50778,2); put(3,2); put(1,4); put(21,4);
+  put(0,4);
+  for (unsigned i = 0; i < 9; ++i) {
+    put(i == 0 ? first : (i%4 == 0 ? 10000 : 0),4);
+    put(10000,4);
+  }
+  hyperdr::write_binary_file_atomic(path,bytes,true);
+}
+
+void profile_round_trip(const std::filesystem::path& directory) {
+  const auto profile_path = directory / "camera.dcp";
+  const auto cache_path = directory / "profile.hdrcache";
+  write_profile(profile_path,10000);
+  auto profile = std::make_shared<hyperdr::DcpProfile>(hyperdr::read_dcp_profile(profile_path));
+  auto context = std::make_shared<hyperdr::DcpRenderContext>();
+  context->profile = profile;
+  context->illuminant_weight = .375;
+  context->baseline_exposure = .25F;
+  hyperdr::DecodedImage source;
+  source.raw_profile_path = profile_path;
+  source.raw_profile = context;
+  source.linear_p3 = hyperdr::FloatImage(2,2,3);
+  for (std::size_t i=0; i<source.linear_p3.pixels.size(); ++i)
+    source.linear_p3.pixels[i] = static_cast<float>(i) / 16;
+  require(hyperdr::write_decode_cache(cache_path,source),"DCP cache write failed");
+  hyperdr::DecodedImage cached;
+  require(hyperdr::read_decode_cache(cache_path,cached),"DCP cache must hit");
+  require(cached.raw_profile && cached.raw_profile->profile,"DCP context was not restored");
+  require(cached.raw_profile_path == profile_path && cached.raw_profile->profile->sha256 == profile->sha256,
+          "DCP identity changed after caching");
+  require(cached.raw_profile->illuminant_weight == context->illuminant_weight &&
+              cached.raw_profile->baseline_exposure == context->baseline_exposure,
+          "DCP interpolation or exposure changed after caching");
+  require(cached.linear_p3.pixels == source.linear_p3.pixels,"DCP cache changed pixels");
+  hyperdr::ConvertOptions options;
+  options.raw.profile = profile_path;
+  const auto before = hyperdr::decode_cache_variant(options,options.raw);
+  require(before.find(profile->sha256) != std::string::npos,"cache variant must include DCP content hash");
+  // Same filename and file size; contents alone must invalidate the old entry.
+  write_profile(profile_path,11000);
+  require(!hyperdr::read_decode_cache(cache_path,cached),"replaced DCP must invalidate cached pixels");
+  const auto after = hyperdr::decode_cache_variant(options,options.raw);
+  require(after != before,"same-path DCP replacement must change decode variant");
 }
 }  // namespace
 
@@ -82,6 +138,7 @@ int main() {
     }
     hyperdr::DecodedImage cached;
     require(!hyperdr::read_decode_cache(path, cached), "schema-8 cache must miss");
+    profile_round_trip(directory);
     std::filesystem::remove_all(directory);
     std::cout << "decode cache tests passed\n";
   } catch (const std::exception& error) {

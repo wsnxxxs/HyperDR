@@ -67,6 +67,14 @@
       "default": "blend"
     },
     {
+      "key": "raw_profile",
+      "flag": "--raw-profile",
+      "kind": "string",
+      "affects_output_bytes": true,
+      "help": "RAW DCP profile (auto exposure uses the profile baseline)",
+      "default": ""
+    },
+    {
       "key": "raw_gain",
       "flag": "--raw-gain",
       "kind": "number",

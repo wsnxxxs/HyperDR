@@ -35,6 +35,16 @@ struct DngColorProfile {
   std::array<double, 3> analog_balance{1.0, 1.0, 1.0};
 };
 
+struct DngColorTransform {
+  Matrix3d camera_to_p3;
+  double illuminant_weight{1.0};
+  double temperature{5000.0};
+};
+// Same white-balanced input convention as dng_camera_to_linear_p3. Weight is
+// for calibration 1 as stored, including profiles with reversed illuminants.
+[[nodiscard]] std::optional<DngColorTransform> dng_camera_color_transform(
+    const DngColorProfile& profile, const std::array<double, 3>& neutral);
+
 // The temperature, in kelvin, the DNG SDK interpolates a calibration at for an
 // EXIF LightSource code: 2850 for standard light A, 5000 for D50, 6500 for
 // D65, the middle of a fluorescent class's range, and so on. Profiles are

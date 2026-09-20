@@ -115,6 +115,11 @@ std::string path_utf8(const std::filesystem::path& path) {
   return std::string(text.begin(), text.end());
 }
 
+std::filesystem::path path_from_utf8(std::string_view text) {
+  return std::filesystem::path(std::u8string_view(
+      reinterpret_cast<const char8_t*>(text.data()), text.size()));
+}
+
 PathKey path_key(const std::filesystem::path& path) {
   const auto normalized = std::filesystem::absolute(path).lexically_normal();
   auto key = normalized.wstring();

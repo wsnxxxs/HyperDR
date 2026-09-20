@@ -1,5 +1,6 @@
 #include "hyperdr/gainmap/native_model.hpp"
 
+#include "hyperdr/foundation/json.hpp"
 #include "hyperdr/foundation/math.hpp"
 #include "hyperdr/foundation/parallel.hpp"
 #include "hyperdr/foundation/rational.hpp"
@@ -21,6 +22,12 @@
 
 namespace hyperdr {
 namespace {
+
+//: The offset the research reconstruction adds to the base before applying the
+//: gain (`src/hdr_core.py::reconstruct` uses 1e-5). It is carried on the model
+//: rather than applied globally because the incumbent model was trained with a
+//: zero offset and changing it would alter its output.
+constexpr Rational kResearchBaseOffset{1, 100000};
 
 NativeModelInfer& runtime_slot() {
   static NativeModelInfer runtime;
@@ -165,6 +172,111 @@ void adjust_base(GainMapResult& result, const NativeModelPostOptions& post) {
 
 }  // namespace
 
+const std::vector<NativeModelDescriptor>& native_model_table() {
+  static const std::vector<NativeModelDescriptor> table{
+      {kResearchCnnModelId, "纯 CNN", "model.research-cnn-v1",
+       "research-demo-fold0-seed908/v1", {}, false, true},
+      {kResearchExifModelId, "EXIF 参数辅助预测", "model.research-exif-v1",
+       "research-demo-fold0-seed908/v1", kResearchCnnModelId, true, true},
+  };
+  return table;
+}
+
+bool native_model_id_known(std::string_view requested) {
+  for (const auto& descriptor : native_model_table()) {
+    if (descriptor.id == requested) return true;
+  }
+  return false;
+}
+
+std::string normalize_native_model_id(std::string_view requested) {
+  // Default to CNN when the caller does not select a model.
+  if (requested.empty() || requested == kEmbeddedNativeModel) {
+    return std::string(kResearchCnnModelId);
+  }
+  if (native_model_id_known(requested)) return std::string(requested);
+  std::string message("unknown AI model id '");
+  message.append(requested);
+  message += "'; known ids are";
+  for (const auto& descriptor : native_model_table()) {
+    message += " ";
+    message += descriptor.id;
+  }
+  throw std::invalid_argument(message);
+}
+
+const NativeModelDescriptor& native_model_descriptor(std::string_view canonical_id) {
+  for (const auto& descriptor : native_model_table()) {
+    if (descriptor.id == canonical_id) return descriptor;
+  }
+  throw std::invalid_argument("not a canonical AI model id: " +
+                              std::string(canonical_id));
+}
+
+std::string native_model_list_json() {
+  // `available` is a per-build fact: without the ncnn adapter the table still
+  // describes the options, but none of them can run.
+  const bool available = native_model_runtime_available();
+  json::Writer writer;
+  writer.begin_object()
+      .member("schema", "hyperdr.model-list/v1")
+      .member("runtimeAvailable", available)
+      .member("defaultModelId", std::string(kResearchCnnModelId))
+      .begin_array("models");
+  for (const auto& descriptor : native_model_table()) {
+    writer.begin_object()
+        .member("id", std::string(descriptor.id))
+        .member("displayName", std::string(descriptor.display_name))
+        .member("displayKey", std::string(descriptor.display_key))
+        .member("version", std::string(descriptor.version))
+        .member("available", available)
+        .member("requiresExif", descriptor.requires_capture)
+        .member("fallbackModelId", std::string(descriptor.fallback_id))
+        .end_object();
+  }
+  writer.end_array().end_object();
+  return writer.take();
+}
+
+CaptureParameters capture_parameters_from_metadata(const CaptureMetadata& capture) {
+  CaptureParameters parameters;
+  const auto copy = [](const std::optional<float>& value) -> std::optional<double> {
+    if (!value.has_value() || !std::isfinite(*value)) return std::nullopt;
+    return static_cast<double>(*value);
+  };
+  parameters.iso = copy(capture.iso);
+  parameters.exposure_seconds = copy(capture.exposure_time_seconds);
+  parameters.f_number = copy(capture.aperture_f_number);
+  parameters.exposure_bias_ev = copy(capture.exposure_bias_ev);
+  parameters.focal_length_mm = copy(capture.focal_length_mm);
+  parameters.focal_length_35mm = copy(capture.focal_length_35mm);
+  return parameters;
+}
+
+NativeModelOutput make_native_model_output(std::string_view requested_id,
+                                           std::string_view effective_id,
+                                           std::string_view inference_mode,
+                                           std::string fallback_reason,
+                                           FloatImage signed_log2_gain) {
+  const auto requested = normalize_native_model_id(requested_id);
+  const auto effective = normalize_native_model_id(effective_id);
+  const auto& descriptor = native_model_descriptor(effective);
+  NativeModelOutput output;
+  output.signed_log2_gain = std::move(signed_log2_gain);
+  output.requested_model_id = requested;
+  output.effective_model_id = effective;
+  output.model_version = std::string(descriptor.version);
+  output.inference_mode =
+      inference_mode.empty() ? std::string(kInferenceModePixelOnly)
+                             : std::string(inference_mode);
+  output.fallback_reason = std::move(fallback_reason);
+  if (descriptor.research_reconstruction_offset) {
+    output.base_offset = kResearchBaseOffset;
+    output.alternate_offset = kResearchBaseOffset;
+  }
+  return output;
+}
+
 void set_native_model_runtime(NativeModelInfer runtime) {
   std::lock_guard lock(runtime_mutex());
   runtime_slot() = std::move(runtime);
@@ -179,7 +291,7 @@ bool native_model_runtime_available() {
   return static_cast<bool>(runtime_slot());
 }
 
-NativeModelOutput infer_native_model(const std::filesystem::path& model_artifact,
+NativeModelOutput infer_native_model(const NativeModelRequest& request,
                                      const FloatImage& linear_display_p3_sdr) {
   NativeModelInfer runtime;
   {
@@ -191,13 +303,19 @@ NativeModelOutput infer_native_model(const std::filesystem::path& model_artifact
         "embedded native AI model adapter is unavailable; link/register the "
         "model backend before using --ai-model");
   }
-  // Library callers may omit the compatibility seam entirely; keep the
-  // shipping contract explicit for adapters even when the CLI supplied no
-  // optional token.
-  const std::filesystem::path selected_artifact =
-      model_artifact.empty() ? std::filesystem::path("embedded")
-                             : model_artifact;
-  return runtime(selected_artifact, linear_display_p3_sdr);
+  NativeModelRequest normalized;
+  normalized.model_id = normalize_native_model_id(request.model_id);
+  normalized.capture = request.capture;
+  auto output = runtime(normalized, linear_display_p3_sdr);
+  // An adapter that forgets the identity fields would otherwise publish an
+  // empty model id, which reads downstream as "no model ran".
+  if (output.requested_model_id.empty()) output.requested_model_id = normalized.model_id;
+  if (output.effective_model_id.empty()) output.effective_model_id = normalized.model_id;
+  if (output.model_version.empty()) {
+    output.model_version =
+        std::string(native_model_descriptor(normalized.model_id).version);
+  }
+  return output;
 }
 
 FloatImage make_native_model_input(const FloatImage& linear_display_p3_sdr,
@@ -356,8 +474,12 @@ void apply_native_model_gain_map(GainMapResult& result,
   external.metadata.gain_min = outward_gain_min(predicted_min_stops);
   external.metadata.gain_max = outward_gain_max(predicted_max_stops);
   external.metadata.gamma = {1, 1};
-  external.metadata.base_offset = {0, 1};
-  external.metadata.alternate_offset = {0, 1};
+  // The base offset travels with the prediction. The incumbent model keeps its
+  // zero; a research model's reconstruction was trained with 1e-5 subtracted
+  // after the gain, so leaving these at zero would render a slightly different
+  // curve than the one the model was fitted against.
+  external.metadata.base_offset = output.base_offset;
+  external.metadata.alternate_offset = output.alternate_offset;
   external.metadata.base_headroom = {0, 1};
   external.metadata.alternate_headroom = external.metadata.gain_max;
   external.max_stops = predicted_max_stops;
@@ -386,8 +508,7 @@ void apply_native_model_gain_map(GainMapResult& result,
 GainMapResult make_native_model_gain_map(
     const FloatImage& source, const GainMapOptions& development,
     const CaptureMetadata& capture, const InputDescription& input,
-    const std::filesystem::path& model_artifact,
-    std::uint32_t model_long_side, float strength,
+    std::string_view model_id, std::uint32_t model_long_side, float strength,
     const NativeModelPostOptions& post) {
   auto base_options = development;
   // A model replaces the gain field; the mathematical pass is used only to
@@ -395,7 +516,10 @@ GainMapResult make_native_model_gain_map(
   base_options.gain_strength = 1.0F;
   auto result = make_gain_map(source, base_options, capture, input);
   auto model_input = make_native_model_input(result.base_linear, model_long_side);
-  auto output = infer_native_model(model_artifact, model_input);
+  NativeModelRequest request;
+  request.model_id = normalize_native_model_id(model_id);
+  request.capture = capture_parameters_from_metadata(capture);
+  auto output = infer_native_model(request, model_input);
   apply_native_model_gain_map(result, model_input, std::move(output), strength,
                               post);
   return result;

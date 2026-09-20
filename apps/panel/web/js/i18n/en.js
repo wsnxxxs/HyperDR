@@ -228,7 +228,9 @@ export default {
   "adjust.resetTitle": "Reset the image adjustments",
   "adjust.resetDone": "All image adjustments reset",
   "adjust.region": "Affected area",
-  "adjust.aiApplied": "AI enhancement applied",
+  "adjust.model": "Model",
+  "adjust.modelFallback": "Capture settings are incomplete ({fields}); using {model}.",
+  "adjust.aiApplied": "AI enhancement applied · {model}",
   "adjust.aiFailed": "AI enhancement failed.",
   "adjust.aiShowing": "Showing the AI-enhanced result",
   "adjust.aiCached": "Switch to the cached AI-enhanced result",
@@ -237,6 +239,22 @@ export default {
   "adjust.aiUnavailable": "AI enhance unavailable: {reason}. Showing the manual preview instead.",
   "adjust.help": "About {label}",
   "adjust.helpMask": "Hover to see the affected area; click for an explanation",
+
+  /* ── AI models ─────────────────────────────────────────────────────
+   * The ids come from the executable; these are the names and the one-line
+   * reasons, kept on the client so the English panel reads in English. */
+  "model.research-cnn-v1": "Image-only CNN",
+  "model.research-exif-v1": "EXIF-assisted prediction",
+  "model.help.research-cnn-v1": "Predicts the gain from the image alone.",
+  "model.help.research-exif-v1": "Estimates the overall gain level from the capture settings.",
+
+  /* The capture fields a fallback names. */
+  "field.iso": "ISO",
+  "field.exposure_seconds": "exposure time",
+  "field.f_number": "aperture",
+  "field.exposure_bias_ev": "exposure compensation",
+  "field.focal_length_mm": "focal length",
+  "field.focal_length_35mm": "35 mm-equivalent focal length",
 
   /* ── controls ────────────────────────────────────────────────────── */
   "ctrl.brightness.label": "Overall brightness",
@@ -327,6 +345,7 @@ export default {
   "run.reasonWrap": " ({reasons})",
   "run.cropIgnored": "Ignored the recorded {target} crop; actual output {actual}{reasons}",
   "run.cropMismatch": "Actual output {actual}, not the expected {target}{reasons}",
+  "run.decodeDegraded": "the decode was degraded{reasons}",
 
   /* ── errors ──────────────────────────────────────────────────────── */
   "err.offline": "Cannot reach the local service. Check that the converter is still running, then retry.",
@@ -374,6 +393,7 @@ export default {
   "err.server.upload_incomplete": "The conversion cannot start until the upload finishes.",
   "err.server.shutting_down": "The service is shutting down.",
   "err.server.model_not_ready": "The model is not ready.",
+  "err.server.model_unknown": "That model is not available in this build.",
   "err.server.executable_missing": "The HyperDR executable was not found.",
   "err.server.hlg_range": "The HDR range is over the HLG ceiling for this format.",
 

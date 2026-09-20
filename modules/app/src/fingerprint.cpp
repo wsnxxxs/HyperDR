@@ -71,7 +71,15 @@ std::string settings_signature(const ConvertOptions& options) {
   }
   if (!options.ai_model_path.empty()) {
     out += "|ai_model=";
-    out += path_utf8(options.ai_model_path);
+    const auto id = selected_native_model_id(options);
+    out += id;
+    const auto& descriptor = native_model_descriptor(id);
+    out += "|ai_model_version=";
+    out += descriptor.version;
+    if (!descriptor.fallback_id.empty()) {
+      out += "|ai_fallback_version=";
+      out += native_model_descriptor(descriptor.fallback_id).version;
+    }
     out += "|ai_brightness=";
     out += exact_number_text(options.ai_post.brightness_ev);
     out += "|ai_contrast=";

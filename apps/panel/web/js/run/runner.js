@@ -15,7 +15,7 @@ import { api, ApiError } from "../core/api.js";
 import { store } from "../core/store.js";
 import { t, onLocaleChange } from "../i18n/index.js";
 import { role, setText, debounce } from "../core/dom.js";
-import { toOptions, OPTION_KEYS } from "../settings/schema.js";
+import { toOptions, OPTION_KEYS, restoredModelId } from "../settings/schema.js";
 
 import { mountExportHistory } from "./export-history.js";
 
@@ -26,6 +26,13 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const runOptionsFor = (state) => ({
   ...toOptions(state),
   useModel: Boolean(state.previewOptimized),
+  // The model is not a renderer setting, so it travels beside `useModel`. The
+  // server resolves it against the executable's own table and rejects an id this
+  // build cannot run, rather than falling back to a different algorithm.
+  modelId: state.modelId,
+  // Neither is the photo's domain: it is what the decoder reported, and it lets
+  // the command builder keep an HDR source's precision in the Adaptive HDR base.
+  sourceDomain: state.sourceDomain,
 });
 
 export function mountRunner({ toast }) {
@@ -204,9 +211,15 @@ export function mountRunner({ toast }) {
       const actual = `${file.decoded_width}×${file.decoded_height}`;
       const target = `${file.target_width}×${file.target_height}`;
       const wrapped = reasons ? t("run.reasonWrap", { reasons }) : "";
-      degradedNote = file.target_dimensions_applied === false
-        ? t("run.cropIgnored", { target, actual, reasons: wrapped })
-        : t("run.cropMismatch", { actual, target, reasons: wrapped });
+      // A degradation that left the geometry alone (no camera matrix, an SDR
+      // fallback) must not read as a size mismatch.
+      if (file.target_dimensions_applied === false) {
+        degradedNote = t("run.cropIgnored", { target, actual, reasons: wrapped });
+      } else if (actual !== target) {
+        degradedNote = t("run.cropMismatch", { actual, target, reasons: wrapped });
+      } else {
+        degradedNote = t("run.decodeDegraded", { reasons: wrapped });
+      }
     }
     return {
       name: basename(file.output),
@@ -319,13 +332,15 @@ export function mountRunner({ toast }) {
     syncRunAvailability,
     { immediate: true },
   );
-  store.watchAny([...OPTION_KEYS, "previewOptimized", "result"], (state, _previous, changed) => {
-    syncStale(state);
-    if (changed.some((key) => OPTION_KEYS.includes(key) || key === "previewOptimized")) {
-      commandSeq++;
-      refreshCommand();
-    }
-  });
+  store.watchAny([...OPTION_KEYS, "previewOptimized", "modelId", "sourceDomain", "result"],
+    (state, _previous, changed) => {
+      syncStale(state);
+      if (changed.some((key) => OPTION_KEYS.includes(key)
+          || key === "previewOptimized" || key === "modelId" || key === "sourceDomain")) {
+        commandSeq++;
+        refreshCommand();
+      }
+    });
 
   /* The run button and the result card are written imperatively, so a language
    * change has to re-emit them; anything transient (a toast already on screen,
@@ -341,6 +356,7 @@ export function mountRunner({ toast }) {
       ...summary, name: summary.name || entry.name, exportId: entry.id,
       optionsKey: JSON.stringify(runOptionsFor({
         ...store.get(), ...entry.options, previewOptimized: entry.options.useModel,
+        modelId: restoredModelId(entry.options),
       })),
       downloadUrl: api.resultUrl(store.get().sessionId, { download: true, exportId: entry.id }),
     } });

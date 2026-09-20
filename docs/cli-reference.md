@@ -19,21 +19,25 @@ HyperDR convert <file-or-directory> --output <directory>
     [--highlight-recovery blend|reconstruct|clip|unclip]
     [--quality <0..100>] [--depth <8|10>]
     [--preview-max-edge <pixels>] [--fast-preview] [--decode-cache <dir>]
-    [--ai-model embedded] [--ai-brightness <EV>] [--ai-contrast <slope>]
+    [--ai-model <id>] [--ai-brightness <EV>] [--ai-contrast <slope>]
     [--ai-shadows <EV>] [--ai-highlights <stops>]
     [--ai-hdr-range <stops>] [--ai-expansion-start <0..1>]
     [--no-verify] [--overwrite|--skip-existing] [--report <file.json>]
 
 HyperDR inspect <file.heic> [--json]
 HyperDR verify <file.heic|file.jpg> [--reconstruct <preview.tiff>]
+                                    [--reference <source-image>]
 HyperDR thumbnail <image> --output <preview.jpg> [--max-edge <pixels>]
                           [--quality <1..100>] [--half-size]
                           [--highlight-recovery blend|reconstruct|clip|unclip]
 HyperDR preview-frame <image> --output <preview.hpf> [look options]
                           [--preview-max-edge <pixels>] [--fast-preview]
-HyperDR model-gain <image> --ai-model embedded [AI post options]
+HyperDR model-gain <image> --ai-model <id> [AI post options]
+                          [--input-tensor <linear-p3.f32> --tensor-width <px>
+                           --tensor-height <px> [--capture-json <capture.json>]]
 HyperDR model-input <image> --output <linear-p3.f32> --report <recipe.json>
                           [--long-side <pixels>] [--half-size] [look options]
+HyperDR model-list [--json]
 HyperDR curve [look options] [--samples <N>]
 HyperDR schema
 ```
@@ -93,11 +97,22 @@ native path, the packet explicitly reports a degraded SDR fallback.
 
 ## Embedded AI model
 
-`--ai-model embedded` replaces the mathematical gain field with the bundled
-native model while retaining the normal SDR development, guided filter, ISO
-gain coding, reconstruction, and encoders. The model receives an in-memory
-linear Display-P3 thumbnail and returns one signed-log2 gain sample per
-stride-16 cell; no Python process or model sidecar is involved.
+`--ai-model <id>` replaces the mathematical gain field with one of the
+embedded native models while retaining the normal SDR development, guided
+filter, ISO gain coding, reconstruction, and encoders. The model receives an
+in-memory linear Display-P3 thumbnail and returns one signed-log2 gain sample
+per stride-16 cell; no Python process or model sidecar is involved.
+
+`model-list --json` reports the ids, versions, capture requirement and fallback
+for every option this build carries. `embedded`, and omitting the flag's value,
+still select the incumbent; an id the build does not have is an error.
+`docs/model-integration.md` describes the table, model 2's capture contract and
+the reconstruction offsets.
+
+`model-gain --input-tensor` runs the model on a developed HWC linear-P3 float32
+tensor instead of decoding an image, which is how the exported networks are
+compared against PyTorch on the same input;
+`--capture-json` supplies the six capture settings that accompany it.
 
 The six `--ai-*` controls run after inference. They do not change the model
 tensor and are separate from the panel's manual-mode look controls.
@@ -123,9 +138,13 @@ that case.
 `--encoding adaptive` is the compatibility-first default. `pq` and `hlg` always
 write 10-bit HEVC Main10 with Rec.2020 primaries and the matching BT.2100 transfer
 function. They also carry computed MaxCLL/MaxFALL metadata. PQ maps diffuse white
-to 203 nits and preserves up to the 10,000-nit PQ ceiling. HLG uses the standard
+to 203 nits and preserves up to the 10,000-nit PQ ceiling. HLG uses the BT.2100
 1000-nit system OOTF, placing diffuse white at signal level 0.75; its useful range
-above 203-nit white is therefore about 2.3 stops.
+above 203-nit white is therefore about 2.3 stops. The OOTF (system gamma 1.2) is
+applied to Rec.2020 luminance, as BT.2100 defines it, in both HLG files written
+and HLG files read, so a saturated colour keeps its channel ratios; a scene
+channel still cannot exceed the signal's maximum, which lets a saturated red
+reach only about 77% of the display peak.
 
 `--encoding ultrahdr` writes a backward-compatible `.jpg`/JPEG/R file. Its
 primary image is an 8-bit Display P3 SDR rendition and its secondary image is
@@ -137,11 +156,42 @@ HyperDR convert photo.ARW --output out --encoding ultrahdr --depth 8
 HyperDR verify out\photo-hyperdr.jpg
 ```
 
+An HDR input (HLG/PQ HEIC or AVIF, Ultra HDR, Adaptive HDR) is packaged so
+both gain-map encodings decode back to its HDR pixels: a full-resolution,
+per-pixel gain map, a base derived from the HDR pixels, and a declared headroom
+equal to the photograph's own. Use `--depth 10` for its Adaptive HDR base, which
+is what the panel sends for an HDR source; an 8-bit base cannot hold a 10-bit
+camera's deepest shadows. See [rendering.md](rendering.md#input-domains).
+
 ## Verification, resume, and caching
 
 Conversions decode-verify their output by default. For trusted high-volume batch
 work, `--no-verify` skips that final self-check; reports then record
 `self_verified: false` independently of conversion success.
+
+`verify <output> --reference <source>` additionally decodes both files the way
+the converter reads them -- a gain map applied at its full alternate headroom,
+PQ/HLG through their exact inverses -- and reports what a viewer would see:
+ITU-R BT.2124 ΔE ITP (1.0 ≈ one just-noticeable difference) as mean and
+percentiles, the share of pixels above 1, 2 and 5, the mean in shadows
+(< 0.18 of diffuse white), midtones and highlights (> 1.0), PSNR over PQ-encoded
+BT.2020 RGB, and both luminance peaks. The same figures are repeated on 4×4
+linear-light means, which keeps tonal and colour shifts but not the pixel-level
+dither grain of an 8-bit base. For a 61 MP Sony HLG 4:2:2 HEIF (9504×6336, a
+dark night scene) converted with the panel's HDR-source defaults at quality 90:
+
+| Output | ΔE ITP mean (1:1 / ¼ scale) | highlights (1:1) | PSNR (1:1) | peak |
+| --- | --- | --- | --- | --- |
+| Adaptive HDR, 10-bit base | 2.13 / 0.77 | 4.07 | 47.8 dB | 2.30 stops, exact |
+| Ultra HDR | 4.81 / 2.12 | 4.63 | 40.6 dB | 2.30 stops, exact |
+| For scale: the same frame re-encoded as 10-bit HLG | 1.49 / 0.62 | 4.57 | 54.3 dB | 2.30 stops |
+
+Ultra HDR's remaining difference is concentrated below about 2 cd/m², where its
+8-bit JPEG base is coarser than the camera's 10-bit HLG.
+
+```powershell
+HyperDR verify out\DSC02120-hyperdr.heic --reference DSC02120.HIF
+```
 
 `--skip-existing` makes interrupted recursive batches resumable. After each
 successful conversion HyperDR records a fingerprint in a hidden `.hyperdr/`
@@ -169,7 +219,10 @@ The GUI separates whole-image brightness, **HDR brightness headroom**, and
 **tone-region coverage**. The panel starts whole-image brightness at +0.6 EV
 and ranges from 0..+2 EV; it is applied after exposure selection to both the SDR
 base and HDR rendition. The panel resets all image-scoped adjustments whenever
-a new photo is opened. The standalone CLI remains neutral at 0 EV unless
+a new photo is opened. An HDR photograph instead opens as itself: brightness
+0 EV, HDR strength 1 and the format's full range, which leaves its highlights
+exactly as the file declares them, and 重置 returns it there rather than to an
+SDR rendering. The standalone CLI remains neutral at 0 EV unless
 `--exposure-bias` is supplied.
 `--exposure auto` is honoured for RAW only. A JPEG, PNG or HDR input is already
 a finished photograph, so automatic exposure would re-measure someone else's

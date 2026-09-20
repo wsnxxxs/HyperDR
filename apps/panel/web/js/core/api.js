@@ -148,14 +148,19 @@ export const api = {
     return frame;
   },
 
-  /** Run the optional model and return its raw little-endian float32 gain grid. */
-  async modelPreview(sessionId, highlightRecovery) {
+  /** Run the selected model and return its raw little-endian float32 gain grid.
+   *
+   *  The identity of what actually ran comes back beside the geometry. It matters
+   *  because a model that needs capture settings can answer with another model's
+   *  prediction, and a caller that assumed its own request had been honoured
+   *  would label that result with the wrong model's name. */
+  async modelPreview(sessionId, highlightRecovery, modelId, { colorGamut, clampSrgb } = {}) {
     let response;
     try {
       response = await fetch("/api/model-preview", {
         method: "POST",
         headers: JSON_HEADERS,
-        body: JSON.stringify({ sessionId, highlightRecovery }),
+        body: JSON.stringify({ sessionId, highlightRecovery, modelId, colorGamut, clampSrgb }),
       });
     } catch { throw OFFLINE(); }
     if (!response.ok) {
@@ -171,7 +176,16 @@ export const api = {
         || values.length !== width * height || !Number.isFinite(maxStops)) {
       throw new ApiError(t("err.modelGain"), 500);
     }
-    return { values, width, height, maxStops };
+    return {
+      values, width, height, maxStops,
+      identity: {
+        requestedModelId: response.headers.get("X-Model-Requested") || modelId || "",
+        effectiveModelId: response.headers.get("X-Model-Effective") || modelId || "",
+        modelVersion: response.headers.get("X-Model-Version") || "",
+        inferenceMode: response.headers.get("X-Inference-Mode") || "",
+        fallbackReason: response.headers.get("X-Model-Fallback") || "",
+      },
+    };
   },
 
   /* -- upload -------------------------------------------------------- */

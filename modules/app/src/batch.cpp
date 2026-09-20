@@ -265,13 +265,31 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     GainMapResult gain;
     PhotoRenditions photo;
     const auto target = is_sdr_encoding(options.encoding) ? RenderTarget::Sdr : RenderTarget::Hdr;
+    // Identity of the model that actually produced this file's gain. Assigned
+    // here rather than derived later from the options, because the options only
+    // say what was asked for: model 2 answering with model 1's prediction is a
+    // successful run with a different model behind it, and a report that echoed
+    // the request would call it model 2.
+    if (uses_native_model(options)) {
+      const auto requested = selected_native_model_id(options);
+      result.model_requested_id = requested;
+      result.model_id = requested;
+      result.model_version =
+          std::string(native_model_descriptor(requested).version);
+      result.model_inference_mode = std::string(kInferenceModeNotRun);
+    }
     if (!options.ai_model_path.empty()) {
       // The model consumes and retains one shared SDR base: decoded linear P3
       // for finished SDR, or the fixed neutral development for scene RAW.
       gain = render_native_model_base(staged.image, options.clamp_srgb);
       if (target == RenderTarget::Hdr) {
         auto model_input = make_native_model_input(gain.base_linear);
-        auto prediction = infer_native_model(options.ai_model_path, model_input);
+        auto prediction = infer_native_model(
+            native_model_request(options, staged.image.metadata), model_input);
+        result.model_id = prediction.effective_model_id;
+        result.model_version = prediction.model_version;
+        result.model_inference_mode = prediction.inference_mode;
+        result.model_fallback_reason = prediction.fallback_reason;
         apply_native_model_gain_map(gain, model_input, std::move(prediction),
                                   options.gain.gain_strength, options.ai_post);
       }
@@ -300,6 +318,7 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     validate_encoding_headroom(options.encoding, rendered_stats.headroom_stops);
     result.sensor_width = staged.image.decode.sensor_width;
     result.raw_white_balance = staged.image.raw_white_balance;
+    result.raw_color_matrix = staged.image.raw_color_matrix;
     result.sensor_height = staged.image.decode.sensor_height;
     result.target_width = staged.image.decode.target_width;
     result.target_height = staged.image.decode.target_height;
@@ -322,9 +341,6 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
                                    ? "none"
                                    : native_model_development_kind(
                                          described.domain);
-    result.model_id = options.ai_model_path.empty()
-                          ? "none"
-                          : std::string(kEmbeddedNativeModelId);
     result.width = rendered_base.width;
     result.height = rendered_base.height;
     result.exposure_ev = rendered_stats.exposure_ev;
@@ -440,17 +456,22 @@ int run_conversion(const ConvertOptions& options) {
     // rejected crop metadata. Resolution is not a degradable export property:
     // RAW half-size is selected explicitly by preview callers only.
     if (result.success && result.decode_degraded) {
-      std::cerr << "warning: " << path_utf8(file) << ": decoded at "
-                << result.decoded_width << 'x' << result.decoded_height;
+      std::cerr << "warning: " << path_utf8(file) << ": ";
       // Only phrase this as a shortfall against the target when the target was
       // actually applied; otherwise target_* is the request that was refused
-      // and comparing the two would read as a resolution loss it is not.
-      if (result.target_dimensions_applied) {
-        std::cerr << " instead of " << result.target_width << 'x'
-                  << result.target_height;
-      } else {
-        std::cerr << ", ignoring the recorded " << result.target_width << 'x'
+      // and comparing the two would read as a resolution loss it is not. A
+      // degradation that left the geometry alone (no camera matrix, an SDR
+      // fallback) is not described as one at all.
+      if (!result.target_dimensions_applied) {
+        std::cerr << "decoded at " << result.decoded_width << 'x' << result.decoded_height
+                  << ", ignoring the recorded " << result.target_width << 'x'
                   << result.target_height << " crop";
+      } else if (result.decoded_width != result.target_width ||
+                 result.decoded_height != result.target_height) {
+        std::cerr << "decoded at " << result.decoded_width << 'x' << result.decoded_height
+                  << " instead of " << result.target_width << 'x' << result.target_height;
+      } else {
+        std::cerr << "decode degraded";
       }
       std::cerr << " (";
       for (std::size_t i = 0; i < result.decode_degradation_reasons.size(); ++i) {

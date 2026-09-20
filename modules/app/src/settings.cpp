@@ -1,12 +1,30 @@
 #include "hyperdr/app/settings.hpp"
 
 #include "hyperdr/codec/availability.hpp"
+#include "hyperdr/foundation/file_io.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
 namespace hyperdr {
+
+bool uses_native_model(const ConvertOptions& options) {
+  return !options.ai_model_path.empty();
+}
+
+std::string selected_native_model_id(const ConvertOptions& options) {
+  if (options.ai_model_path.empty()) return {};
+  return normalize_native_model_id(path_utf8(options.ai_model_path));
+}
+
+NativeModelRequest native_model_request(const ConvertOptions& options,
+                                        const PhotoMetadata& metadata) {
+  NativeModelRequest request;
+  request.model_id = selected_native_model_id(options);
+  request.capture = metadata.capture;
+  return request;
+}
 
 void validate_encoding_headroom(HdrEncoding encoding, float headroom_stops) {
   if (is_hlg_encoding(encoding) &&
@@ -54,6 +72,11 @@ void validate_convert_options(const ConvertOptions& options) {
     throw std::invalid_argument(
         "--ai-model cannot be combined with an external gain grid");
   }
+  // Resolve the model id once, here, so a run that names a model this build does
+  // not have fails before any file is opened. The preview and batch paths both
+  // reach the adapter through the same table, and neither can substitute the
+  // incumbent for a misspelled id.
+  (void)selected_native_model_id(options);
   validate_color_lut_options(options.color_lut);
   if (!options.color_lut.path.empty()) {
     (void)read_color_lut(options.color_lut.path);

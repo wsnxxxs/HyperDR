@@ -345,7 +345,8 @@ function mountResets({ toast } = {}) {
   button.textContent = t("adjust.reset");
   button.addEventListener("click", () => {
     const colorOnly = store.get().encoding === "sdr-jpeg";
-    const neutral = neutralSettings(store.get().encoding);
+    // For an HDR photograph "no adjustment" is the photograph, not its SDR base.
+    const neutral = neutralSettings(store.get().encoding, store.get().sourceDomain);
     const resetKeys = colorOnly ? ["brightness", "contrast", "vibrance", "lutStrength"] : keys;
     store.set({
       ...Object.fromEntries(resetKeys.map((key) => [key, neutral[key]])),

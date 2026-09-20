@@ -1,0 +1,125 @@
+{
+  "schema": "hyperdr.research-model/v1",
+  "modelId": "research-exif-v1",
+  "uiName": "模型 2 · 拍摄参数辅助增益预测",
+  "version": "research-demo-fold0-seed908/v1",
+  "description": "Mean-removed spatial CNN plus an ordinary-EXIF HistGradientBoostingRegressor (absolute_error)",
+  "researchRun": "shape_only-f0-s908",
+  "fold": 0,
+  "seed": 908,
+  "checkpoint": {
+    "file": "C:\\Users\\Ryan\\Desktop\\HyperDR_research\\artifacts\\runs\\shape_only-f0-s908\\best.pt",
+    "sha256": "5dccbb2844ab480585b0770642fc4299ddd8bb4a11af625b84b10d4f6278df28",
+    "best_epoch": 22
+  },
+  "model": {
+    "family": "DirectGainMapNet",
+    "base_channels": 24,
+    "architecture": "baseline",
+    "parameters": 635113,
+    "output": "single-channel raw signed log2 gain in stops"
+  },
+  "graph": {
+    "kind": "features",
+    "input_blob": "in0",
+    "output_blob": "out0",
+    "input_shape": [
+      1,
+      5,
+      192,
+      256
+    ],
+    "output_shape": [
+      1,
+      1,
+      12,
+      16
+    ],
+    "second_input_shape": null,
+    "feature_contract": {
+      "channels": [
+        "linear_p3_r",
+        "linear_p3_g",
+        "linear_p3_b",
+        "log_luminance",
+        "clipping"
+      ],
+      "layout": "BCHW",
+      "linear_range": [
+        0.0,
+        1.0
+      ],
+      "luminance_coefficients": [
+        0.22897456,
+        0.69173852,
+        0.07928691
+      ],
+      "log_luminance": "clamp((log2(max(luminance, 1e-6)) + 12) / 12, 0, 1)",
+      "clipping": "float(max(linear_p3, dim=channel) >= 0.98)"
+    }
+  },
+  "tool": {
+    "torch": "2.9.1+cpu",
+    "numpy": "2.2.6",
+    "pnnx": "20260526"
+  },
+  "assets": {
+    "onnx": {
+      "file": "HyperDR_Model/models/research-exif-v1.features.onnx",
+      "sha256": "45043697b5f123ccef1c6e96251f88eb06a8dae7255e4e144c3e56096cd02bb6"
+    },
+    "param": {
+      "file": "HyperDR_Model/models/research-exif-v1.ncnn.param",
+      "sha256": "7fdfb08ea0f8c5421e2be4d50965fc3703a456ea94292dcc58dbed6691593ded",
+      "size_bytes": 3338
+    },
+    "bin": {
+      "file": "HyperDR_Model/models/research-exif-v1.ncnn.bin",
+      "sha256": "09a550ac082ae2bb1430d0e70f98918f86e480397e6e87cb704366e30a7997d3",
+      "size_bytes": 2540504
+    },
+    "exifLevel": {
+      "file": "HyperDR_Model/models/research-exif-v1.exif-level.json",
+      "sha256": "b489ac9af098bc5a304d06ead71f42b06cf811a1fffe97d5306eea6315153192"
+    }
+  },
+  "spatialMeanRemoved": true,
+  "exif": {
+    "estimator": "SimpleImputer(median) + HistGradientBoostingRegressor",
+    "loss": "absolute_error",
+    "learningRate": 0.1,
+    "maxDepth": 2,
+    "maxIter": 100,
+    "minSamplesLeaf": 15,
+    "l2Regularization": 10.0,
+    "randomState": 908,
+    "fieldOrder": [
+      "log2_iso",
+      "log2_exposure_seconds",
+      "f_number",
+      "exposure_bias_ev",
+      "focal_length_mm",
+      "focal_length_35mm"
+    ],
+    "imputerMedians": [
+      6.643856189774724,
+      -6.643856189774724,
+      1.7799999713880652,
+      0.0,
+      6.764999866370901,
+      30.0
+    ],
+    "baseline": 0.7535315155982971,
+    "treeCount": 100,
+    "auditRecord": "HyperDR_Model/models/research-exif-v1.exif-level.json",
+    "generatedHeader": "modules/gainmap/src/research_exif_level_data.inc",
+    "generatedHeaderSha256": "39444dffbc2eb488db7a5c9145c35b8eec0af02fcb483d165e4bba52904bad0b"
+  },
+  "fallbackModelId": "research-cnn-v1",
+  "reconstructionOffset": {
+    "numerator": 1,
+    "denominator": 100000
+  },
+  "scope": "isolated fold deployment asset; not a five-fold or all-seed average",
+  "inferenceOnly": true
+}

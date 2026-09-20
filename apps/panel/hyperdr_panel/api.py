@@ -115,18 +115,42 @@ def _validated_model_strength(value) -> float:
     return value
 
 
-def _prepare_model_options(raw_options: dict | None, *, preview: bool = False):
+def _resolve_model_choice(raw) -> str:
+    """Validate the requested model against the executable's own table.
+
+    The id is resolved here, once, and carried as a private routing value: every
+    command builder, the probe and the batch converter then reach the native
+    adapter with the same id, and the converter's settings vocabulary never has
+    to learn a key that is not a renderer setting.
+    """
+    model_state = model.status()
+    if not model_state.get("ready"):
+        raise coded(ValueError(model_state.get("reason", "模型尚未就绪。")),
+                    "model_not_ready")
+    try:
+        return model.resolve_model_id(raw)
+    except ValueError as exc:
+        raise coded(ValueError(str(exc)), "model_unknown") from exc
+    except RuntimeError as exc:
+        raise coded(ValueError(str(exc)), "model_not_ready") from exc
+
+
+def _prepare_model_options(raw_options: dict | None):
     """Mark a validated model request for the native command builder."""
     options = dict(raw_options or {})
-    # This is an internal routing bit, never a browser-controlled switch.
+    # These are internal routing bits, never browser-controlled switches.
     options.pop("_model_mode", None)
+    options.pop("_model_id", None)
     use_model = _validated_use_model(options.pop("useModel", False))
-    model_strength = _validated_model_strength(options.pop("modelStrength", 1.0))
+    requested = options.pop("modelId", None)
     if use_model:
         # Keep the mode bit in the private command payload. The command builder
-        # turns it into `--ai-model embedded`; it is never accepted from the
+        # turns it into `--ai-model <id>`; neither key is accepted from the
         # browser as an independent routing switch.
         options["_model_mode"] = True
+        options["_model_id"] = _resolve_model_choice(requested)
+    model_strength = _validated_model_strength(options.pop("modelStrength", 1.0))
+    if use_model:
         # hdrStrength is the shared plumbing slot for model strength. Manual
         # look controls remain in the browser payload for stale-result display,
         # but the native AI command branch deliberately omits them.
@@ -172,6 +196,7 @@ def preview(_context: Context, query: dict) -> Response:
             raise ValueError("preview options must be an object")
         # Internal mode routing is re-derived from the validated useModel bit.
         options.pop("_model_mode", None)
+        options.pop("_model_id", None)
         if "external_gain" in options or "external_gain_report" in options:
             raise ValueError("preview paths are server-controlled")
     except (json.JSONDecodeError, TypeError, ValueError) as exc:
@@ -197,18 +222,19 @@ def preview(_context: Context, query: dict) -> Response:
         return error(exc, status=404)
     try:
         use_model = _validated_use_model(options.pop("useModel", False))
+        requested_model = options.pop("modelId", None)
         if use_model:
             # Read rather than popped: `modelStrength` stays in the options dict
             # because it takes part in the preview cache key. The command
             # builders pop it instead, which is why this is not
             # `_prepare_model_options` -- only the predicates are shared.
-            strength = _validated_model_strength(options.get("modelStrength", 1.0))
             options["_model_mode"] = True
+            # The resolved id, not the raw request: an id this build does not
+            # have is rejected here rather than after a decode, and the private
+            # key cannot be spoofed because it was just popped.
+            options["_model_id"] = _resolve_model_choice(requested_model)
+            strength = _validated_model_strength(options.get("modelStrength", 1.0))
             options["hdrStrength"] = strength
-            model_state = model.status()
-            if not model_state.get("ready"):
-                return error(model_state.get("reason", "模型尚未就绪。"), status=409,
-                             code="model_not_ready")
         options["highlightRecovery"] = highlight_recovery
         session_id = _first(query, "id")
         color_lut.resolve(options, session_id)
@@ -232,7 +258,7 @@ def preview(_context: Context, query: dict) -> Response:
         # normal lifecycle event, not an invalid image and not a red toast.
         return error(exc, status=499)
     except (OSError, ValueError) as exc:
-        return error(exc, status=422)
+        return error(exc, status=409 if getattr(exc, "code", "") == "model_not_ready" else 422)
     # No headers: width, height, status and degradation reasons all travel in
     # the HYPREV1 packet body, which is what the browser actually parses.
     _context.workbench.publish_frame(session_id, raw_options, data)
@@ -305,7 +331,7 @@ def command_preview(_context: Context, body: dict) -> Response:
     displayed command truthful.
     """
     try:
-        options, _ = _prepare_model_options(body.get("options"), preview=True)
+        options, _ = _prepare_model_options(body.get("options"))
         options.pop("_lut_path", None)
         if options.get("lutId"):
             options["_lut_path"] = options.get("lutName") or "look.cube"
@@ -324,13 +350,16 @@ def command_preview(_context: Context, body: dict) -> Response:
 
 
 def model_preview(_context: Context, body: dict) -> Response:
-    """Probe the native model on the button's existing API call.
+    """Probe the selected native model on the button's existing API call.
 
     The endpoint keeps its legacy raw-grid response shape so the browser
     interaction stays unchanged, but the bytes now come from the native
-    ``model-gain --ai-model embedded`` packet and never touch a session file.
+    ``model-gain --ai-model <id>`` packet and never touch a session file. The
+    identity of what actually ran travels in ASCII headers beside the geometry,
+    so the page can say "model 2 fell back" without a second request.
     """
     try:
+        model_id = _resolve_model_choice(body.get("modelId"))
         session_id = str(body.get("sessionId") or "")
         source = session.input_path(session_id)
         highlight_recovery = str(
@@ -338,12 +367,9 @@ def model_preview(_context: Context, body: dict) -> Response:
         )
         if highlight_recovery not in _HIGHLIGHT_RECOVERY_CHOICES:
             raise ValueError("unknown highlight recovery: %s" % highlight_recovery)
-        model_state = model.status()
-        if not model_state.get("ready"):
-            raise coded(
-                ValueError(model_state.get("reason", "模型尚未就绪。")),
-                "model_not_ready")
-        gain, report = model.native_model_gain(source, highlight_recovery)
+        gain, report = model.native_model_gain(
+            source, highlight_recovery, model_id,
+            color_gamut=body.get("colorGamut"), clamp_srgb=body.get("clampSrgb", False))
         width, height = report["width"], report["height"]
         return Response(
             body=gain,
@@ -352,6 +378,16 @@ def model_preview(_context: Context, body: dict) -> Response:
                 "X-Gain-Width": str(width),
                 "X-Gain-Height": str(height),
                 "X-Gain-Max-Stops": str(report["max_stops"]),
+                # Header values must be latin-1 encodable; every field here is an
+                # identifier, a mode name or a field list, so it is. Read with a
+                # default because the identity is produced by `model.py` itself:
+                # an absent one means a stub or a version skew, and a missing
+                # header is a better outcome than a failed preview.
+                "X-Model-Requested": report.get("requested_model_id") or model_id,
+                "X-Model-Effective": report.get("effective_model_id") or model_id,
+                "X-Model-Version": report.get("model_version", ""),
+                "X-Inference-Mode": report.get("inference_mode", ""),
+                "X-Model-Fallback": report.get("fallback_reason", ""),
             },
         )
     except Busy as exc:
@@ -368,20 +404,20 @@ def run(_context: Context, body: dict) -> Response:
     session_id = str(body.get("sessionId") or "")
     try:
         with job.preparation_slot(session_id) as preparation_token:
+            raw_options = dict(body.get("options") or {})
+            options, use_model = _prepare_model_options(raw_options)
             source = session.input_path(session_id)
             exe = detect_exe()
             if not exe:
                 raise coded(ValueError("找不到 HyperDR 可执行文件。"),
                             "executable_missing")
-            raw_options = dict(body.get("options") or {})
-            options, use_model = _prepare_model_options(raw_options)
             color_lut.resolve(options, session_id)
             if use_model:
-                model_state = model.status()
-                if not model_state.get("ready"):
-                    raise coded(
-                        ValueError(model_state.get("reason", "模型尚未就绪。")),
-                        "model_not_ready")
+                # Record what the run actually selected, not only what the
+                # browser sent: the export record is what a later restore reads,
+                # and a request that omitted the id must not come back as "no
+                # model was chosen".
+                raw_options["modelId"] = options["_model_id"]
             # Validate before allocating output or touching any previous result.
             options.update(input=str(source), output="<output>", report="<report>")
             build_argv(exe, options)

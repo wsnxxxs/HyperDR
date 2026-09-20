@@ -2,6 +2,7 @@
  * The server resolves the saved session and completed exports after reload. */
 import { api } from "./api.js";
 import { store } from "./store.js";
+import { MODEL_KEY, availableModelIds, restoredModelId } from "../settings/model-ids.js";
 import { toOptions, validatedSettings } from "../settings/schema.js";
 import { t } from "../i18n/index.js";
 
@@ -19,6 +20,7 @@ export function mountWorkspace({ stage, runner, toast }) {
     try {
       sessionStorage.setItem(KEY, JSON.stringify({
         sessionId: state.sessionId, settings: toOptions(state),
+        [MODEL_KEY]: state.modelId,
         previewOptimized: state.previewOptimized,
         viewMode: state.viewMode, splitRatio: state.splitRatio,
         selectedExport: state.result?.exportId,
@@ -37,6 +39,10 @@ export function mountWorkspace({ stage, runner, toast }) {
           sessionId: workspace.sessionId, file: workspace.file,
           exports: workspace.exports, ...validatedSettings(saved.settings),
           previewOptimized: Boolean(saved.previewOptimized),
+          // A tab saved before the selector existed has no model id, and the
+          // compatibility rule says that meant the incumbent rather than the
+          // demonstration default.
+          [MODEL_KEY]: restoredModelId(saved, availableModelIds(store.get())),
         });
         // Viewer defaults run on the file event; restore the chosen view after it.
         store.set({

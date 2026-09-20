@@ -21,7 +21,10 @@ import { diagnosticFrame } from "./packet.js";
 import { analyse, mountScope } from "./scope.js";
 import { histogramFromPlane } from "./histogram.js";
 import { createUploader } from "./session.js";
-import { AI_POST_KEYS, defaultSettings, neutralSettings, toOptions } from "../settings/schema.js";
+import {
+  AI_POST_KEYS, CONTROLS, defaultSettings, isHdrSource, referenceSettings, toOptions,
+} from "../settings/schema.js";
+import { fallbackFields, modelLabel } from "../settings/model-select.js";
 
 const hdrDisplayQuery = window.matchMedia("(dynamic-range: high)");
 
@@ -34,6 +37,8 @@ const DRAFT_PREVIEW_EDGE = 640;
 /* Gesture descriptions remain available to screen readers. */
 const TOUCH_HINT = "stage.hintTouch";
 const MOUSE_HINT = "stage.hintMouse";
+const imageAdjustments = (settings) =>
+  Object.fromEntries(CONTROLS.map(({ key }) => [key, settings[key]]));
 const INPUT_DOMAIN_LABELS = Object.freeze({
   "display-referred-hdr": "stage.input.hdr",
   "display-referred-sdr": "stage.input.sdr",
@@ -83,6 +88,7 @@ export function mountStage({ toast }) {
 
   let renderer = null;        // WebGPU/WebGL renderer, or null for the CPU path
   let modelGain = null;
+  let modelRequest = 0;
   let frame_ = 0;
   let imageGeneration = 0;
   let rendererGeneration = 0;
@@ -463,6 +469,7 @@ export function mountStage({ toast }) {
   }
 
   function clear(message = t("stage.empty")) {
+    ++modelRequest;
     invalidateImage();
     invalidateRenderer();
     Object.assign(image, {
@@ -482,8 +489,11 @@ export function mountStage({ toast }) {
     store.set({
       comparing: false, maskKey: null,
       viewerZoom: 1, viewerPanX: 0, viewerPanY: 0,
+      sourceDomain: "",
+      hasCaptureMetadata: false,
       previewReady: false,
       previewOptimized: false, modelGainReady: false, optimizing: false,
+      modelIdentity: null,
     });
     stage.classList.remove("has-image", "is-comparing");
     fitStageToImage();
@@ -502,8 +512,18 @@ export function mountStage({ toast }) {
     syncView();
   }
 
-  async function load({ resetOriginal = false, draft = false, requestedAt = performance.now() } = {}) {
+  async function load({
+    resetOriginal = false, draft = false, requestedAt = performance.now(),
+    newPhoto = false,
+  } = {}) {
     if (resetOriginal) previewScheduler.cancel();
+    if (store.get().previewOptimized && !store.get().capabilities?.model?.ready) {
+      store.set({ previewOptimized: false, modelGainReady: false, modelIdentity: null });
+    }
+    // Restored AI views also need their actual model identity and fallback state.
+    if (store.get().previewOptimized && !store.get().modelGainReady) {
+      return optimize({ resetOriginal });
+    }
     store.set({ previewError: false });
     const sessionId = store.get().sessionId;
     const epoch = invalidateImage();
@@ -511,22 +531,36 @@ export function mountStage({ toast }) {
     setText(emptyTitle, t("stage.generating"));
 
     try {
-      const state = store.get();
+      let state = store.get();
       const requestedEdge = draft ? Math.min(previewTier() || DRAFT_PREVIEW_EDGE, DRAFT_PREVIEW_EDGE) : previewTier();
       const fetchStarted = performance.now();
       let reference = null;
       if (resetOriginal || !image.original) {
         reference = await api.preview(sessionId, {
-          options: { ...toOptions(neutralSettings(state.encoding)), colorGamut: state.colorGamut,
+          options: { ...toOptions(referenceSettings(state.encoding)), colorGamut: state.colorGamut,
             clampSrgb: state.clampSrgb, useModel: false },
           highlightRecovery: "blend", maxEdge: requestedEdge,
         });
         if (!isCurrentImage(epoch)) return;
+        const sourceDomain = reference.metadata.inputDomain || "";
+        // The domain is a fact about the file, known only once the decoder has
+        // read it. A newly opened HDR photograph starts from its own rendering
+        // rather than from the SDR enhancement preset, so the first frame
+        // below already shows the photograph and every control reads as
+        // "unchanged". Remembered adjustments remain the user's explicit choice.
+        // Only the image adjustments are replaced: output format, gamut and
+        // model are workflow choices preparePhoto() already carried over.
+        const adjustments = newPhoto && isHdrSource(sourceDomain)
+          && !prefs.get().rememberAdjustments
+          ? imageAdjustments(defaultSettings(state.encoding, sourceDomain)) : {};
+        store.set({ sourceDomain, hasCaptureMetadata: reference.metadata.hasCaptureMetadata === true, ...adjustments });
+        state = store.get();
       }
       const preview = await api.preview(sessionId, {
         options: {
           ...toOptions(state),
           useModel: Boolean(state.previewOptimized),
+          modelId: state.modelId,
         },
         highlightRecovery: state.highlightRecovery,
         maxEdge: requestedEdge,
@@ -538,8 +572,11 @@ export function mountStage({ toast }) {
       const sameBase = preview.metadata.baseId && image.frame?.metadata.baseId === preview.metadata.baseId
         && image.frame.width === width && image.frame.height === height;
       image.frame = preview;
-      sourceDomainLabel = INPUT_DOMAIN_LABELS[preview.metadata.inputDomain]
+      sourceDomainLabel = INPUT_DOMAIN_LABELS[state.sourceDomain]
         || INPUT_DOMAIN_LABELS.unknown;
+      // Keep the domain learned from the untouched reference. AI deliberately
+      // decodes a gain-map photograph's SDR base; that frame's input domain
+      // describes model input, not the original photo used by reset/export.
       setCapability("hdr.verifyingOutput", false);
       // Diagnostics receive an SDR display copy. Preview rendering consumes
       // only the untouched native float planes above.
@@ -618,7 +655,7 @@ export function mountStage({ toast }) {
       if (error.status === 409 && store.get().previewOptimized) {
         modelGain = null;
         analysis.modelGain = null;
-        store.set({ previewOptimized: false, modelGainReady: false });
+        store.set({ previewOptimized: false, modelGainReady: false, modelIdentity: null });
       }
       if (!image.frame) {
         clear(message);
@@ -637,14 +674,20 @@ export function mountStage({ toast }) {
       // All image adjustments are image-scoped. Do not carry a previous
       // photograph's grade into a newly uploaded image. Keep the selected
       // output format, which is a workflow choice rather than a grade.
+      // An HDR photograph replaces these with its own rendering as soon as the
+      // first frame names its domain; see load().
       ...(prefs.get().rememberAdjustments ? {} : defaultSettings(store.get().encoding)),
+      modelId: store.get().modelId,
       colorGamut: activeGamut,
       clampSrgb: store.get().clampSrgb,
+      sourceDomain: "",
+      hasCaptureMetadata: false,
       previewReady: false,
       viewerZoom: 1, viewerPanX: 0, viewerPanY: 0,
       previewOptimized: false, modelGainReady: false, optimizing: false,
+      modelIdentity: null,
     });
-    await load({ resetOriginal: true });
+    await load({ resetOriginal: true, newPhoto: true });
   }
 
   const upload = createUploader({
@@ -876,46 +919,92 @@ export function mountStage({ toast }) {
     },
     { immediate: true });
 
-  /* Highlight recovery also invalidates the decoded source and model cache. */
+  /* Input/base options invalidate both the decoded source and model cache. */
   store.subscribe((state, _previous, changed) => {
-    if (!changed.includes("highlightRecovery")) return;
+    if (!changed.some((key) => ["highlightRecovery", "clampSrgb", "colorGamut"].includes(key))) return;
+    ++modelRequest;
     modelGain = null;
     analysis.modelGain = null;
     image.original = null;
-    store.set({ modelGainReady: false,
-      ...(!changed.includes("previewOptimized") && !state.restoring
-        ? { previewOptimized: false } : {}),
+    store.set({ modelGainReady: false, modelIdentity: null, optimizing: false,
+      ...(state.previewOptimized ? { previewReady: false } : {}),
     });
     if (state.sessionId && !state.restoring && !state.uploading) load({ resetOriginal: true });
   });
 
-  async function optimize() {
+  // Invalidate even in manual mode: the next AI click must use the new model.
+  // Keep the selected workflow during inference so undo records one model change.
+  store.subscribe((state, previous, changed) => {
+    if (!changed.includes("modelId")) return;
+    if (state.modelId === previous.modelId) return;
+    ++modelRequest;
+    modelGain = null;
+    analysis.modelGain = null;
+    if (state.previewOptimized) {
+      previewScheduler.cancel();
+      invalidateImage();
+    }
+    store.set({ modelGainReady: false, modelIdentity: null, optimizing: false,
+      ...(state.previewOptimized ? { previewReady: false } : {}) });
+    if (state.previewOptimized && !state.restoring && !state.uploading) void optimize();
+  });
+
+  async function optimize({ resetOriginal = false } = {}) {
     const state = store.get();
-    if (state.previewOptimized || state.optimizing) return;
-    if (modelGain) {
-      store.set({ previewOptimized: true, modelGainReady: true });
+    if (state.optimizing || (state.previewOptimized && state.modelGainReady && modelGain)) return;
+    if (modelGain && state.modelGainReady) {
+      store.set({ previewOptimized: true });
       return;
     }
     if (!state.sessionId || !state.capabilities?.model?.ready) return;
-    store.set({ optimizing: true });
+    const request = ++modelRequest;
+    const current = () => request === modelRequest
+      && store.get().sessionId === state.sessionId && store.get().file === state.file
+      && store.get().highlightRecovery === state.highlightRecovery
+      && store.get().clampSrgb === state.clampSrgb && store.get().colorGamut === state.colorGamut
+      && store.get().modelId === state.modelId;
+    previewScheduler.cancel();
+    invalidateImage();
+    store.set({ optimizing: true, previewReady: false });
     try {
-      const gain = await api.modelPreview(state.sessionId, state.highlightRecovery);
-      if (store.get().sessionId !== state.sessionId || store.get().file !== state.file
-          || store.get().highlightRecovery !== state.highlightRecovery) return;
+      const gain = await api.modelPreview(
+        state.sessionId, state.highlightRecovery, state.modelId,
+        { colorGamut: state.colorGamut, clampSrgb: state.clampSrgb });
+      if (!current()) return;
       modelGain = gain;
       analysis.modelGain = gain;
       renderer?.uploadGainMap(gain);
-      store.set({ previewOptimized: true, modelGainReady: true });
-      schedule();
-      toast(t("adjust.aiApplied"));
+      store.set({ previewOptimized: true, modelGainReady: true,
+        modelIdentity: gain.identity });
+      // Keep switching/export locked until the new native frame is presented.
+      previewScheduler.cancel();
+      await load({ resetOriginal });
+      if (current() && store.get().previewReady) announceModel(gain.identity);
     } catch (error) {
+      if (!current()) return;
       modelGain = null;
       analysis.modelGain = null;
-      store.set({ previewOptimized: false, modelGainReady: false });
+      store.set({ previewOptimized: false, modelGainReady: false, modelIdentity: null });
       toast(error.message || t("adjust.aiFailed"), true);
     } finally {
-      store.set({ optimizing: false });
+      if (current()) store.set({ optimizing: false });
     }
+  }
+
+  /* The selection stays on model 2 when it falls back. The persistent status
+   * line is rendered by the selector itself; this toast is the transient
+   * counterpart so the change is noticed even when the sidebar is scrolled away
+   * from the control. */
+  function announceModel(identity) {
+    if (!identity) return;
+    if (identity.inferenceMode === "pixel_only_fallback") {
+      toast(t("adjust.modelFallback", {
+        fields: fallbackFields(identity.fallbackReason),
+        model: modelLabel(identity.effectiveModelId),
+      }));
+      return;
+    }
+    toast(t("adjust.aiApplied", { model: modelLabel(identity.effectiveModelId) }));
   }
 
   mathModeButton.addEventListener("click", () => {

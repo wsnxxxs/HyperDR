@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "HyperDR conversion report schema 8",
+  "title": "HyperDR conversion report schema 9",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,7 +12,7 @@
   ],
   "properties": {
     "schema": {
-      "const": 8
+      "const": 9
     },
     "tool": {
       "type": "string"
@@ -225,8 +225,9 @@
             10
           ]
         },
-        "ai_model": {
-          "type": "string"
+        "ai_model_id": {
+          "type": "string",
+          "minLength": 1
         },
         "ai_post": {
           "type": "object",
@@ -367,7 +368,11 @@
         "input_domain",
         "input_headroom",
         "model_development",
+        "model_requested_id",
         "model_id",
+        "model_version",
+        "model_inference_mode",
+        "model_fallback_reason",
         "width",
         "height",
         "exposure_ev",
@@ -451,6 +456,14 @@
             "daylight"
           ]
         },
+        "raw_color_matrix": {
+          "enum": [
+            "",
+            "embedded",
+            "libraw",
+            "none"
+          ]
+        },
         "input_domain": {
           "type": "string",
           "enum": [
@@ -476,6 +489,27 @@
         "model_id": {
           "type": "string",
           "minLength": 1
+        },
+        "model_requested_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model_inference_mode": {
+          "type": "string",
+          "enum": [
+            "none",
+            "not_run",
+            "pixel_only",
+            "exif_assisted",
+            "pixel_only_fallback"
+          ]
+        },
+        "model_fallback_reason": {
+          "type": "string"
         },
         "decode_degradation_reasons": {
           "type": "array",

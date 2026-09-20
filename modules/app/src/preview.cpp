@@ -8,7 +8,7 @@
 
 namespace hyperdr {
 std::vector<std::uint8_t> compact_preview_packet(const GainMapResult& result,
-    const DecodeInfo& decode, const InputDescription& input) {
+    const DecodeInfo& decode, const InputDescription& input, bool hasCaptureMetadata) {
   const auto& base = result.base_linear;
   const auto& gain = result.gain_map;
   const auto channel = gain_map_channel(result.metadata, 0);
@@ -36,6 +36,7 @@ std::vector<std::uint8_t> compact_preview_packet(const GainMapResult& result,
       .member("alternateOffset", rational_value(channel.alternate_offset))
       .member("headroomStops", result.headroom_stops)
       .member("inputDomain", input_domain_name(input.domain))
+      .member("hasCaptureMetadata", hasCaptureMetadata)
       .member("inputHeadroomStops", std::log2(input.headroom))
       .member("status", decode.degraded ? "degraded" : "ok")
       .begin_array("degradationReasons");

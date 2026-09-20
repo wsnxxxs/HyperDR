@@ -70,7 +70,12 @@ AI_POST_DEFAULTS = {
     "aiExpansionStart": -1.0,
 }
 
-NATIVE_MODEL_ARTIFACT = "embedded"
+#: The value sent when a request carries no model id. The converter maps it to
+#: the incumbent model, so a caller that predates the selector keeps producing a
+#: byte-identical command line instead of silently changing which algorithm ran.
+#: A selected id always wins over this: the converter treats a real id as a
+#: whitelist lookup and this sentinel as "the default one".
+LEGACY_MODEL_ARTIFACT = "embedded"
 
 _AI_POST_FLAGS = {
     "aiBrightness": ("--ai-brightness", -1.0, 1.0),
@@ -81,12 +86,49 @@ _AI_POST_FLAGS = {
     "aiExpansionStart": ("--ai-expansion-start", -1.0, 0.75),
 }
 
+
+def selected_model_artifact(options: dict) -> str:
+    """The ``--ai-model`` value for this request.
+
+    The API resolves and validates the browser's choice against the executable's
+    own table and stores it under the private ``_model_id`` key, the same way it
+    stores the model-mode bit. Reading only that key keeps ``modelId`` out of the
+    converter's settings vocabulary, so the panel cannot accidentally send a
+    model name where a setting belongs. This does not re-validate: a second
+    opinion here could disagree with the one the run actually used.
+    """
+    value = options.get("_model_id")
+    if isinstance(value, str) and value and value != LEGACY_MODEL_ARTIFACT:
+        return value
+    return LEGACY_MODEL_ARTIFACT
+
 #: Formats whose standard 1000-nit mapping cannot carry more than this.
 _HLG_ENCODINGS = frozenset({"hlg", "avif-hlg"})
 _HLG_MAX_STOPS = 2.3
 
 #: Only the gain-map formats have a selectable base depth; BT.2100 is 10-bit.
 _EIGHT_BIT_ENCODINGS = frozenset({"adaptive", "ultrahdr", "sdr-jpeg"})
+
+#: The decoder's name for a finished HDR photograph (PQ/HLG, Ultra HDR,
+#: Adaptive HDR). The browser reports it from the photo's first native frame.
+HDR_SOURCE_DOMAIN = "display-referred-hdr"
+
+
+def _base_depth(encoding: str, options: dict) -> str:
+    """The ``--depth`` for this export.
+
+    Adaptive HDR stays 8-bit, the compatibility-first default, except for an HDR
+    source. There the base carries a camera's 10-bit highlights and shadows
+    through a gain map that reproduces them pixel for pixel, and an 8-bit base
+    was measured to be the largest remaining loss: on a Sony HLG frame the
+    10-bit base halved the mean ΔE ITP against the original (3.9 to 2.3) and
+    produced a smaller file. The domain is only a hint from the browser; a wrong
+    one changes nothing but the base's bit depth. Ultra HDR's JPEG base and SDR
+    JPEG are 8-bit by format.
+    """
+    if encoding == "adaptive" and options.get("sourceDomain") == HDR_SOURCE_DOMAIN:
+        return "10"
+    return "8" if encoding in _EIGHT_BIT_ENCODINGS else "10"
 
 
 def _headroom(options: dict, encoding: str):
@@ -240,9 +282,9 @@ def build_argv(exe: str, options: dict) -> list[str]:
             "--gain-strength", fmt_num(settings["gain_strength"]),
             "--highlight-recovery", settings["highlight_recovery"],
             "--quality", str(settings["quality"]),
-            "--depth", "8" if encoding in _EIGHT_BIT_ENCODINGS else "10",
+            "--depth", _base_depth(encoding, options),
             "--report", options["report"],
-            "--ai-model", NATIVE_MODEL_ARTIFACT,
+            "--ai-model", selected_model_artifact(options),
         ]
         argv.extend(_color_flags(options, settings))
         argv.extend(_ai_post_flags(options, encoding))
@@ -256,7 +298,7 @@ def build_argv(exe: str, options: dict) -> list[str]:
             "--gain-strength", fmt_num(settings["gain_strength"]),
             "--highlight-recovery", settings["highlight_recovery"],
             "--quality", str(settings["quality"]),
-            "--depth", "8" if encoding in _EIGHT_BIT_ENCODINGS else "10",
+            "--depth", _base_depth(encoding, options),
             "--report", options["report"],
             "--external-gain", str(external_gain),
             "--external-gain-report", str(external_report),
@@ -287,7 +329,7 @@ def build_argv(exe: str, options: dict) -> list[str]:
         "--headroom", fmt_num(settings["headroom"]),
         "--highlight-recovery", settings["highlight_recovery"],
         "--quality", str(settings["quality"]),
-        "--depth", "8" if encoding in _EIGHT_BIT_ENCODINGS else "10",
+        "--depth", _base_depth(encoding, options),
         "--report", options["report"],
     ]
     argv.extend(_color_flags(options, settings))
@@ -335,7 +377,7 @@ def build_preview_frame_argv(
             "--encoding", settings["encoding"],
             "--gain-strength", fmt_num(settings["gain_strength"]),
             "--highlight-recovery", settings["highlight_recovery"],
-            "--ai-model", NATIVE_MODEL_ARTIFACT,
+            "--ai-model", selected_model_artifact(options),
         ]
     else:
         argv = [

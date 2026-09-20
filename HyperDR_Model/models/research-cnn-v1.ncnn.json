@@ -1,0 +1,108 @@
+{
+  "schema": "hyperdr.model-ncnn/v1",
+  "converter": {
+    "name": "pnnx",
+    "path": "pnnx.exe",
+    "version": "20260526",
+    "fp16": false,
+    "optlevel": 2
+  },
+  "source": {
+    "kind": "onnx",
+    "file": "HyperDR_Model/models/research-cnn-v1.features.onnx",
+    "sha256": "5f630fd0922312af05b396d3b7a0a8189634a2c8792b6d894cc3bc4a0ee4f388"
+  },
+  "graph": {
+    "kind": "features",
+    "input_blob": "in0",
+    "output_blob": "out0",
+    "input_shape": [
+      1,
+      5,
+      192,
+      256
+    ],
+    "output_shape": [
+      1,
+      1,
+      12,
+      16
+    ],
+    "second_input_shape": null,
+    "feature_contract": {
+      "channels": [
+        "linear_p3_r",
+        "linear_p3_g",
+        "linear_p3_b",
+        "log_luminance",
+        "clipping"
+      ],
+      "layout": "BCHW",
+      "linear_range": [
+        0.0,
+        1.0
+      ],
+      "luminance_coefficients": [
+        0.22897456,
+        0.69173852,
+        0.07928691
+      ],
+      "log_luminance": "clamp((log2(max(luminance, 1e-6)) + 12) / 12, 0, 1)",
+      "clipping": "float(max(linear_p3, dim=channel) >= 0.98)"
+    }
+  },
+  "assets": {
+    "param": {
+      "file": "HyperDR_Model/models/research-cnn-v1.ncnn.param",
+      "sha256": "7fdfb08ea0f8c5421e2be4d50965fc3703a456ea94292dcc58dbed6691593ded",
+      "size_bytes": 3338
+    },
+    "bin": {
+      "file": "HyperDR_Model/models/research-cnn-v1.ncnn.bin",
+      "sha256": "bccaaf71779b7f657e757ade7dcc2885efcd3ef2c815657429579aef24e4bd3a",
+      "size_bytes": 2540504
+    }
+  },
+  "layers": [
+    "Input",
+    "Convolution",
+    "GroupNorm",
+    "Swish",
+    "Convolution",
+    "GroupNorm",
+    "Swish",
+    "Convolution",
+    "GroupNorm",
+    "Swish",
+    "Convolution",
+    "GroupNorm",
+    "Swish",
+    "Convolution",
+    "GroupNorm",
+    "Swish",
+    "Convolution",
+    "GroupNorm",
+    "Swish",
+    "Split",
+    "Convolution",
+    "GroupNorm",
+    "Swish",
+    "Convolution",
+    "GroupNorm",
+    "Swish",
+    "ConvolutionDepthWise",
+    "GroupNorm",
+    "Swish",
+    "Convolution",
+    "Split",
+    "Sigmoid",
+    "Pooling",
+    "Convolution",
+    "BinaryOp",
+    "BinaryOp",
+    "Convolution",
+    "Swish",
+    "Convolution"
+  ],
+  "inference_only": true
+}

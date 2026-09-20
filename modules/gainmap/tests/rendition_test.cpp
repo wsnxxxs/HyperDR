@@ -4,6 +4,7 @@
 #include "hyperdr/image/color.hpp"
 #include "hyperdr/image/transfer.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -59,6 +60,9 @@ void test_final_gain_statistics() {
   RenderOptions options; options.auto_headroom=false; options.headroom_stops=3;
   auto photo=render_renditions(source,options,{}, {InputDomain::kDisplayReferredHdr,4},RenderTarget::Hdr);
   require(photo.stats.below_knee_relative_difference_max<1e-6F,"direct HDR must leave this dark field alone");
+  // The cell-averaged packager is what renditions whose SDR endpoint carries
+  // its own grade still use; an HDR source itself is packaged exactly below.
+  photo.hdr_is_source=false;
   const auto packed=gain_map_from_renditions(photo);
   const auto hdr=reconstruct_gain_map(packed.base_linear,packed.gain_map,packed.metadata,packed.headroom_stops);
   float peak=1, difference=0;
@@ -111,8 +115,102 @@ void test_zero_and_spatial_gain() {
     }
   }
 }
+// A display-referred HDR photograph must come back out of its gain map as
+// itself: a highlight beside a shadow keeps both its brightness and the
+// shadow's, and a saturated highlight keeps its colour. The cell-averaged map
+// gave the Sony HLG frame that motivated this its neighbours' gain and the SDR
+// base's desaturated chroma, about a fifth of its highlight brightness lost.
+void test_hdr_source_reconstructs_itself() {
+  const float headroom=1000.0F/203.0F;
+  FloatImage source(67,41,3);  // odd sizes: nothing may depend on a 2x grid
+  for(unsigned y=0;y<41;++y) for(unsigned x=0;x<67;++x) {
+    std::array<float,3> rgb{.02F,.02F,.02F};
+    if(x>=30) rgb={headroom,headroom,headroom};            // hard edge to peak white
+    if(x>=30 && y>=20) rgb={3.0F,.6F,.25F};                 // saturated, inside the volume
+    if(x==66 && y==40) rgb={6.2F,.0F,.05F};                 // brighter channel than the headroom
+    if(x<30 && y>=30) rgb={.4F*(x+1)/30,.3F,.2F};           // midtone ramp below the knee
+    for(int c=0;c<3;++c) source.at(x,y,c)=rgb[c];
+  }
+  RenderOptions options; options.auto_headroom=false; options.headroom_stops=3;
+  options.look.headroom_max_stops=3; options.look.shoulder_start=.25F;
+  const InputDescription input{InputDomain::kDisplayReferredHdr,headroom};
+  auto photo=render_renditions(source,options,{},input,RenderTarget::Hdr);
+  require(photo.hdr_is_source,"an HDR source's renditions must request exact packaging");
+  const auto target_sdr=photo.sdr;
+  const auto expected_hdr=photo.hdr;
+  const auto packed=gain_map_from_renditions(photo);
+  require(packed.gain_map.width==source.width && packed.gain_map.height==source.height,
+      "an HDR source's gain map must be full resolution");
+  require(rational_value(packed.metadata.gamma)==1 && rational_value(packed.metadata.gain_min)==0,
+      "exact packaging stores linear, non-negative gain");
+  require(packed.metadata.alternate_headroom.numerator==packed.metadata.gain_max.numerator &&
+      packed.metadata.alternate_headroom.denominator==packed.metadata.gain_max.denominator,
+      "the declared headroom is the stored gain maximum");
+  require(packed.headroom_stops<=std::log2(headroom)+1e-3F,
+      "saturated channels must not inflate the declared headroom past the photograph's");
+  for(float v:packed.base_linear.pixels) require(v>=0 && v<=1,"the base must stay inside [0, 1]");
+  const auto hdr=reconstruct_gain_map(packed.base_linear,packed.gain_map,packed.metadata,packed.headroom_stops);
+  float worst=0;
+  for(unsigned y=0;y<41;++y) for(unsigned x=0;x<67;++x) {
+    if(x==66 && y==40) continue;
+    for(int c=0;c<3;++c) {
+      const float want=expected_hdr.at(x,y,c), got=hdr.at(x,y,c);
+      worst=std::max(worst,std::abs(got-want)/std::max(want,1e-3F));
+    }
+    const float base_y=p3_luminance(packed.base_linear.at(x,y,0),packed.base_linear.at(x,y,1),packed.base_linear.at(x,y,2));
+    const float tone_y=p3_luminance(target_sdr.at(x,y,0),target_sdr.at(x,y,1),target_sdr.at(x,y,2));
+    require(base_y<=tone_y*1.0001F+1e-6F,"the base is never brighter than the SDR tone map");
+    require(base_y>=tone_y*.99F-1e-6F || x>=30,"below the highlights the base is the SDR tone map");
+  }
+  require(worst<2e-4F,"every in-volume HDR pixel must reconstruct exactly, edges included");
+  require(std::abs(hdr.at(29,5,0)-.02F)<1e-6F,"the shadow beside a peak-white edge receives no gain");
+  require(std::abs(hdr.at(40,25,0)/hdr.at(40,25,1)-5.0F)<1e-3F,"a saturated highlight keeps its chroma");
+  const float over_want=p3_luminance(expected_hdr.at(66,40,0),expected_hdr.at(66,40,1),expected_hdr.at(66,40,2));
+  const float over_got=p3_luminance(hdr.at(66,40,0),hdr.at(66,40,1),hdr.at(66,40,2));
+  require(std::abs(over_got/over_want-1)<2e-3F,
+      "a colour beyond the headroom keeps its luminance and gives up only excess chroma");
+  require(packed.stats.below_knee_relative_difference_max<1e-4F,"the report sees no dark-field spill");
+  require(std::abs(packed.stats.rendered_peak-headroom)<5e-3F,"the report sees the declared peak restored");
+
+  // Grading that gives the SDR endpoint its own colour keeps the averaged map.
+  photo=render_renditions(source,options,{},input,RenderTarget::Hdr);
+  photo.hdr_is_source=false;
+  const auto averaged=gain_map_from_renditions(photo);
+  require(averaged.gain_map.width<source.width,"graded renditions keep the low-frequency map");
+}
+
+// A Rec.2020 green outside P3 decodes with negative P3 components. The HDR
+// rendition must fit it at its own luminance and Oklab hue rather than clamp
+// each channel, which is what the decoder used to do before any gamut decision.
+void test_hdr_source_outside_p3() {
+  const float headroom=1000.0F/203.0F;
+  const auto green=rec2020_to_linear_p3(0.0F,2.0F,0.0F);
+  require(green[0]<0 && green[2]<0,"Rec.2020 green must keep its negative P3 components");
+  FloatImage source(4,4,3);
+  for(unsigned y=0;y<4;++y) for(unsigned x=0;x<4;++x) for(int c=0;c<3;++c) source.at(x,y,c)=green[c];
+  RenderOptions options; options.auto_headroom=false; options.headroom_stops=std::log2(headroom);
+  const InputDescription input{InputDomain::kDisplayReferredHdr,headroom};
+  const auto photo=render_renditions(source,options,{},input,RenderTarget::Hdr);
+  const float peak=std::exp2(photo.stats.headroom_stops);
+  for(float v:photo.sdr.pixels) require(v>=-1e-6F && v<=1+1e-6F,"the SDR rendition of an out-of-P3 colour must be inside [0, 1]");
+  for(float v:photo.hdr.pixels) require(v>=-1e-6F && v<=peak*(1+1e-5F),"the HDR rendition of an out-of-P3 colour must be inside its headroom");
+  const std::array<float,3> hdr{photo.hdr.at(1,1,0),photo.hdr.at(1,1,1),photo.hdr.at(1,1,2)};
+  const float source_y=p3_luminance(green[0],green[1],green[2]);
+  require(std::abs(p3_luminance(hdr[0],hdr[1],hdr[2])/std::min(source_y,peak)-1)<1e-3F,
+      "the HDR rendition of an out-of-P3 colour must keep its luminance");
+  const auto hue=[](const std::array<float,3>& rgb) {
+    const auto lab=linear_p3_to_oklab(rgb[0],rgb[1],rgb[2]);
+    return std::atan2(lab[2],lab[1]);
+  };
+  require(std::abs(std::remainder(hue(hdr)-hue(green),6.2831853F))<3e-3F,
+      "the HDR rendition of an out-of-P3 green must keep its Oklab hue");
+  require(std::abs(hdr[0])>1e-3F || std::abs(hdr[2])>1e-3F,
+      "an out-of-P3 green must not be clamped channel by channel");
+}
+
 int main() {
-  try { test_zero_and_spatial_gain(); test_model_grading(); test_final_gain_statistics(); }
+  try { test_zero_and_spatial_gain(); test_model_grading(); test_final_gain_statistics();
+        test_hdr_source_reconstructs_itself(); test_hdr_source_outside_p3(); }
   catch(const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
   std::cout<<"graded model reconstruction and final gain statistics passed\n";
 }

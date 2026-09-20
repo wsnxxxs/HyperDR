@@ -5,6 +5,110 @@ semantic versioning; dates use ISO 8601.
 
 ## Unreleased
 
+- HLG encoding fits saturated highlights into its luminance-dependent signal
+  range before applying the transfer function. Directly clipping inverse-OOTF
+  channels could darken a bright P3 blue by about 29%; HEIC, AVIF and HLG LUT
+  inputs now preserve its luminance while reducing unrepresentable chroma.
+- DNG CameraCalibration matrices are applied only when the camera and profile
+  calibration signatures match, including their empty defaults. Mismatched
+  profiles keep their ColorMatrix/ForwardMatrix without the incompatible
+  camera correction, and old decode caches are invalidated.
+
+- RAW colour is converted in float. LibRaw now hands over camera RGB and
+  HyperDR applies the camera matrix, so its truncation of up to one code is
+  gone and highlights keep colour components above LibRaw's 16-bit output
+  ceiling (seen with the clip, unclip and reconstruct highlight modes).
+  Colours the camera matrix extrapolates past the spectral locus are
+  compressed smoothly into the AP1 gamut instead of being clamped at
+  ProPhoto's boundary; the compression leaves colours inside P3 untouched.
+  Narrow-band blue lights, which the clamp left nearly black, now render as
+  visible blue (in the Sony night frames checked, still darker than the
+  camera's own JPEG). Reports record where the matrix came from in
+  `raw_color_matrix` (`embedded`, `libraw` or `none`); a camera without one
+  is reported as a degraded decode (`no_camera_matrix`), with a warning that
+  no longer describes such a degradation as a size mismatch. Earlier decode
+  caches are rebuilt.
+- Colours fitted into a gamut -- the SDR base, sRGB outputs and the base of an
+  HDR photograph's exact gain map -- keep their perceived hue. Reds, oranges,
+  yellows and greens now keep their Oklab hue instead of following a straight
+  line toward white, which drew pink cores into orange lights; blues and
+  violets keep the straight line, where hue models disagree and the Oklab hue
+  turned a blue light teal. Colours already inside the gamut are unchanged.
+- HLG is read and written with BT.2100's OOTF, which scales a colour by a power
+  of its luminance. A gamma on each channel was used before and over-saturated
+  every HLG colour: the reference Sony HLG frame now renders 3.1 ΔE ITP
+  different on average, almost all of it saturation (median hue change 0.3°),
+  and its Adaptive HDR and Ultra HDR exports decode closer to the photograph
+  (ΔE ITP mean 2.13 and 4.81, highlights 4.07 and 4.63). HLG LUT spaces use the
+  same OOTF.
+- HDR files with colours outside Display P3 (Rec.2020 HLG or PQ HEIF and AVIF,
+  BT.2100 Ultra HDR) keep those colours until the renderer's gamut fit, which
+  keeps their luminance and hue, instead of clamping each channel as they are
+  decoded. LUT outputs outside the SDR cube or the HDR headroom are fitted the
+  same way.
+- DNG colour follows the file's own calibration as the DNG specification
+  defines it. LibRaw applied the D65 ColorMatrix under any light; now both
+  calibrations are interpolated at the as-shot white, with CameraCalibration,
+  AnalogBalance and ForwardMatrix, the way Adobe's DNG SDK reads them.
+  Neutrals are unchanged; colours in the seven DNGs checked moved a mean 0.4 to
+  3.0 ΔE ITP, more under tungsten light than near daylight for the same camera.
+- DNG opcode lists are applied. Phone DNGs (Android, HDR+) carry their lens
+  shading correction as OpcodeList2 gain maps, which were ignored, leaving
+  corners two to three times too dark and their colour uncorrected; bad
+  pixels listed in OpcodeList1 are now fixed as well. A DNG that requires an
+  opcode HyperDR does not apply, such as a lens-distortion warp, is reported
+  as a degraded decode (`dng_opcode_unsupported`).
+
+- An HDR photograph (HLG/PQ HEIF or AVIF, Ultra HDR, Adaptive HDR) now opens in
+  the panel as itself: brightness 0 EV, HDR strength 1.00 and the format's full
+  range, instead of the SDR preset's +0.6 EV and 0.4 strength that exported a
+  Sony HLG frame 0.6 EV brighter with its 2.3-stop range squeezed to one stop.
+  Reset returns an HDR photograph to itself rather than flattening it to SDR, and
+  the original-comparison frame is the photograph at those settings. SDR and RAW
+  photos keep their existing defaults and reset.
+- Adaptive HDR and Ultra HDR exports of an HDR photograph decode back to it pixel
+  for pixel. Its gain map is full resolution (a 2048-pixel HEVC grid where a
+  single picture would be too large), each pixel's gain restores that pixel, and
+  the base keeps the HDR colour. Previously highlights came back about a fifth
+  darker on average and saturated highlights desaturated. The declared headroom
+  stays the photograph's own. The panel writes such an Adaptive HDR base at 10
+  bits, and an Ultra HDR base with a full-resolution map is coded 4:4:4.
+- Fixed Adaptive HDR HEIC shadows decoding as black. The base's embedded Display
+  P3 ICC profile had a zero slope in its sRGB toe, so every base code under 10
+  (and the HDR reconstructed from it) turned black in any reader that honours the
+  ICC profile, this converter's own decoder included. All Adaptive HDR exports
+  were affected, not only HDR sources.
+- `HyperDR verify <output> --reference <source>` reports how far a conversion is
+  from its source as a viewer would see it: ΔE ITP (ITU-R BT.2124) mean and
+  percentiles by tonal range, PQ PSNR and luminance peaks, at full resolution and
+  on 4×4 linear means.
+
+- The AI panel offers three models instead of one: the bundled
+  `production-v3` plus two research demonstration options, `research-cnn-v1`
+  (image only) and `research-exif-v1` (capture-assisted). The choice lives in a
+  dropdown above the AI toggle, survives a refresh with the other workflow
+  settings, and is recorded in every export. A model that needs capture settings
+  falls back to the image-only model when they are incomplete, keeps the user's
+  selection, and says on screen and in the report which model actually ran.
+  Reconstruction offsets travel with the model, so a fallback reconstructs with
+  the curve it was actually produced from.
+
+- `--ai-model` takes a model id; `model-list --json` reports the table. The
+  legacy `embedded` spelling and an omitted value still mean the incumbent, and
+  an id this build does not carry is refused by name. `model-gain` gained
+  `--input-tensor` and `--capture-json` so an exported network can be compared
+  against its framework on the same input.
+
+- Exposure compensation is read from Exif as a signed SRATIONAL and kept with
+  its presence, so `0 EV` is a value rather than a missing tag. RAW reads the
+  file's own Exif prefix for the capture settings, because LibRaw reports no
+  exposure compensation and no presence at all.
+
+- The conversion report moves to schema 9: `model_requested_id` and `model_id`
+  are separate, with `model_version`, `model_inference_mode` and
+  `model_fallback_reason` beside them, and `settings.ai_model_id` replaces
+  `settings.ai_model`.
+
 - HLG/PQ LUTs grade already-developed SDR and HDR endpoints independently;
   identity LUTs preserve both. SDR-style LUTs lift HDR black continuously.
 - AI/external LUT grading retains the original gain map and offsets, then

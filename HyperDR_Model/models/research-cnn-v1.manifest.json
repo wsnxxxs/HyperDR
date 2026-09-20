@@ -1,0 +1,91 @@
+{
+  "schema": "hyperdr.research-model/v1",
+  "modelId": "research-cnn-v1",
+  "uiName": "模型 1 · 纯图像 CNN",
+  "version": "research-demo-fold0-seed908/v1",
+  "description": "ResearchNet baseline configuration predicting the complete signed log2 gain",
+  "researchRun": "baseline-f0-s908",
+  "fold": 0,
+  "seed": 908,
+  "checkpoint": {
+    "file": "C:\\Users\\Ryan\\Desktop\\HyperDR_research\\artifacts\\runs\\baseline-f0-s908\\best.pt",
+    "sha256": "adbed708fdbcdfb43bca74d6062b4c1f0bd5909b7fdb22fcc25e98a509e77039",
+    "best_epoch": 17
+  },
+  "model": {
+    "family": "DirectGainMapNet",
+    "base_channels": 24,
+    "architecture": "baseline",
+    "parameters": 635113,
+    "output": "single-channel raw signed log2 gain in stops"
+  },
+  "graph": {
+    "kind": "features",
+    "input_blob": "in0",
+    "output_blob": "out0",
+    "input_shape": [
+      1,
+      5,
+      192,
+      256
+    ],
+    "output_shape": [
+      1,
+      1,
+      12,
+      16
+    ],
+    "second_input_shape": null,
+    "feature_contract": {
+      "channels": [
+        "linear_p3_r",
+        "linear_p3_g",
+        "linear_p3_b",
+        "log_luminance",
+        "clipping"
+      ],
+      "layout": "BCHW",
+      "linear_range": [
+        0.0,
+        1.0
+      ],
+      "luminance_coefficients": [
+        0.22897456,
+        0.69173852,
+        0.07928691
+      ],
+      "log_luminance": "clamp((log2(max(luminance, 1e-6)) + 12) / 12, 0, 1)",
+      "clipping": "float(max(linear_p3, dim=channel) >= 0.98)"
+    }
+  },
+  "tool": {
+    "torch": "2.9.1+cpu",
+    "numpy": "2.2.6",
+    "pnnx": "20260526"
+  },
+  "assets": {
+    "onnx": {
+      "file": "HyperDR_Model/models/research-cnn-v1.features.onnx",
+      "sha256": "5f630fd0922312af05b396d3b7a0a8189634a2c8792b6d894cc3bc4a0ee4f388"
+    },
+    "param": {
+      "file": "HyperDR_Model/models/research-cnn-v1.ncnn.param",
+      "sha256": "7fdfb08ea0f8c5421e2be4d50965fc3703a456ea94292dcc58dbed6691593ded",
+      "size_bytes": 3338
+    },
+    "bin": {
+      "file": "HyperDR_Model/models/research-cnn-v1.ncnn.bin",
+      "sha256": "bccaaf71779b7f657e757ade7dcc2885efcd3ef2c815657429579aef24e4bd3a",
+      "size_bytes": 2540504
+    }
+  },
+  "spatialMeanRemoved": false,
+  "exif": null,
+  "fallbackModelId": "",
+  "reconstructionOffset": {
+    "numerator": 1,
+    "denominator": 100000
+  },
+  "scope": "isolated fold deployment asset; not a five-fold or all-seed average",
+  "inferenceOnly": true
+}

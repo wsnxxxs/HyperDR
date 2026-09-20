@@ -130,7 +130,8 @@ HyperDR inspect <file.heic> [--json]
 HyperDR verify <file.heic|file.jpg> [--reconstruct <preview.tiff>]
 HyperDR thumbnail <image> --output <preview.jpg> [--max-edge <pixels>]
 HyperDR preview-frame <image> --output <preview.hpf> [look options]
-HyperDR model-gain <image> --ai-model embedded [AI post options]
+HyperDR model-gain <image> --ai-model <id> [AI post options]
+HyperDR model-list [--json]
 HyperDR model-input <image> --output <linear-p3.f32> --report <recipe.json>
 HyperDR curve [look options] [--samples <N>]
 HyperDR schema

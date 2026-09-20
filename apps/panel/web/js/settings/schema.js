@@ -66,6 +66,14 @@ const percentOrAuto = (value) => value < 0 ? t("unit.auto") : `${Math.round(valu
 
 export const DEFAULT_BRIGHTNESS_EV = 0.6;
 
+/* The model-id contract lives in settings/model-ids.js: it is a set of decisions
+ * with no imports, and the compatibility rule it contains is worth testing on
+ * its own. It is re-exported here so callers keep one import site. */
+export {
+  DEFAULT_MODEL_ID, MODEL_KEY, availableModelIds, restoredModelId,
+} from "./model-ids.js";
+import { DEFAULT_MODEL_ID, MODEL_KEY, restoredModelId } from "./model-ids.js";
+
 /* AI controls are deliberately separate from the mathematical renderer's
  * controls below.  A model gain is a complete rendition, so these values are
  * post-adjustments applied after the model has produced its spatial result;
@@ -191,31 +199,64 @@ export const CONTROLS_BY_KEY = new Map(CONTROLS.map((control) => [control.key, c
 
 /** Keys that appear in the object sent to /api/run. */
 export const OPTION_KEYS = [
-  "encoding", "colorGamut", "clampSrgb", "lutId", "lutName", "lutInput", "lutOutput", ...CONTROLS.map((control) => control.key),
+  "encoding", "colorGamut", "clampSrgb", "lutId", "lutName", "lutInput", "lutOutput", MODEL_KEY, ...CONTROLS.map((control) => control.key),
 ];
 
-/** Output and colour choices are workflow settings; image adjustments are per-image. */
-export const PERSISTED_OPTION_KEYS = ["encoding", "colorGamut", "clampSrgb"];
+/** Output, colour and model choices are workflow settings; image adjustments
+ *  are per-image. The model is here because it is the same kind of decision as
+ *  the output format -- "how should this be processed" rather than "how should
+ *  it look" -- and because persisting it is what keeps a refresh from quietly
+ *  re-pointing the next export at a different algorithm. */
+export const PERSISTED_OPTION_KEYS = ["encoding", "colorGamut", "clampSrgb", MODEL_KEY];
 
-export function defaultSettings(encoding = "adaptive") {
+/* The decoder's name for a finished HDR photograph: PQ/HLG HEIC or AVIF, Ultra
+ * HDR, an Adaptive HDR HEIC. The panel learns it from the first native frame. */
+export const HDR_SOURCE_DOMAIN = "display-referred-hdr";
+export const isHdrSource = (domain) => domain === HDR_SOURCE_DOMAIN;
+
+/* An HDR photograph's own rendering, expressed in the manual controls. The
+ * controls describe a change to the picture, so for an HDR source zero change
+ * is: no exposure offset, the full strength of its own highlights, and a range
+ * ceiling that does not cut into them (the format's maximum; the renderer never
+ * extends past what the file declares). Strength and range are the two
+ * controls whose identity sits at the top of the slider rather than at zero. */
+function hdrSourceIdentity(values, encoding) {
+  return { ...values, brightness: 0, hdrStrength: 1,
+    hdrRange: encodingById(encoding).maxRange, contrast: 1, vibrance: 0 };
+}
+
+/** What a newly opened photo starts from. An SDR or RAW photo gets the modest
+ *  enhancement preset; an HDR photo opens as itself. */
+export function defaultSettings(encoding = "adaptive", sourceDomain = "") {
   const activeEncoding = encodingById(encoding);
   const values = {
     encoding: activeEncoding.id,
     colorGamut: COLOR_GAMUTS[0].id,
     clampSrgb: false,
     lutId: "", lutName: "", lutInput: "srgb", lutOutput: "srgb",
+    [MODEL_KEY]: DEFAULT_MODEL_ID,
   };
   for (const control of CONTROLS) values[control.key] = control.default;
   if (activeEncoding.id === "sdr-jpeg") values.brightness = 0;
   values.hdrRange = Math.min(values.hdrRange, activeEncoding.maxRange);
   values.aiHdrRange = Math.min(values.aiHdrRange, activeEncoding.maxRange);
-  return values;
+  return isHdrSource(sourceDomain) ? hdrSourceIdentity(values, activeEncoding.id) : values;
 }
 
-/** No creative adjustment; RAW still receives its fixed base development. */
-export function neutralSettings(encoding = "adaptive") {
-  return { ...defaultSettings(encoding), brightness: 0, hdrStrength: 0, hdrRange: 0,
+/** No creative adjustment; RAW still receives its fixed base development, and
+ *  an HDR photo keeps its own highlights rather than being flattened to SDR. */
+export function neutralSettings(encoding = "adaptive", sourceDomain = "") {
+  const neutral = { ...defaultSettings(encoding), brightness: 0, hdrStrength: 0, hdrRange: 0,
     contrast: 1, vibrance: 0, areaCoverage: 0, lutStrength: 0 };
+  return isHdrSource(sourceDomain) ? hdrSourceIdentity(neutral, encoding) : neutral;
+}
+
+/** The request behind the "original" comparison, made before the photo's
+ *  domain is known. Its SDR base is the untouched development for every
+ *  domain -- HDR strength and range never move an SDR or RAW base -- and for an
+ *  HDR photo the whole frame is the photograph itself. */
+export function referenceSettings(encoding = "adaptive") {
+  return neutralSettings(encoding, HDR_SOURCE_DOMAIN);
 }
 
 /** The exact payload the server's option vocabulary expects. */
@@ -229,6 +270,7 @@ export function toOptions(state) {
 export function validatedSettings(saved, base = defaultSettings()) {
   const values = { ...base };
   if (!saved || typeof saved !== "object") return values;
+  values[MODEL_KEY] = restoredModelId(saved);
   if (ENCODINGS.some(({ id }) => id === saved.encoding)) values.encoding = saved.encoding;
   if (COLOR_GAMUTS.some(({ id }) => id === saved.colorGamut)) values.colorGamut = saved.colorGamut;
   if (typeof saved.clampSrgb === "boolean") values.clampSrgb = saved.clampSrgb;

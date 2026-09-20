@@ -23,7 +23,10 @@ void write_settings(json::Writer& writer, const ConvertOptions& options) {
   // The encoded depth, as opposed to the requested one: BT.2100 is always 10-bit.
   writer.member("output_depth", is_bt2100_encoding(options.encoding) ? 10 : options.depth);
   if (!options.ai_model_path.empty()) {
-    writer.member("ai_model", path_utf8(options.ai_model_path))
+    // The value is a model id, not a path: the runtime owns the assets. The key
+    // is renamed with it so a consumer cannot read the id as a filename, and the
+    // report's schema number moves with the rename.
+    writer.member("ai_model_id", selected_native_model_id(options))
         .begin_object("ai_post")
         .member("brightness_ev", options.ai_post.brightness_ev)
         .member("contrast", options.ai_post.contrast)
@@ -99,7 +102,10 @@ void write_stats(json::Writer& writer, const RenderStats& s) {
 std::string run_report_json(const std::vector<FileResult>& results,
                             const ConvertOptions& options) {
   json::Writer writer(json::Writer::Style::kIndented);
-  writer.begin_object().member("schema", 8).member("tool", kVersion);
+  // 9: a model run now reports the model that answered rather than the frozen
+  // incumbent's asset id, and names the requested model separately. A consumer
+  // comparing `model_id` textually has to know that.
+  writer.begin_object().member("schema", 9).member("tool", kVersion);
   write_settings(writer, options);
   writer.begin_array("files");
   for (const auto& result : results) {
@@ -124,6 +130,7 @@ std::string run_report_json(const std::vector<FileResult>& results,
         .member("default_crop_present", result.default_crop_present)
         .member("decode_degraded", result.decode_degraded)
         .member("raw_white_balance", result.raw_white_balance)
+        .member("raw_color_matrix", result.raw_color_matrix)
         // Which of the three renderers this file took, and the headroom it was
         // told the input carried. Recorded because nothing else in the record
         // distinguishes them, and the same settings mean different things in
@@ -132,7 +139,15 @@ std::string run_report_json(const std::vector<FileResult>& results,
         .member("input_domain", input_domain_name(result.input_domain))
         .member("input_headroom", result.input_headroom)
         .member("model_development", result.model_development)
-        .member("model_id", result.model_id);
+        // Requested and effective are separate members because they differ on a
+        // fallback, and a consumer that only saw one of them would have to guess
+        // which. `model_id` keeps its old name and now holds the model that
+        // actually answered.
+        .member("model_requested_id", result.model_requested_id)
+        .member("model_id", result.model_id)
+        .member("model_version", result.model_version)
+        .member("model_inference_mode", result.model_inference_mode)
+        .member("model_fallback_reason", result.model_fallback_reason);
     writer.begin_array("decode_degradation_reasons");
     for (const auto& reason : result.decode_degradation_reasons) {
       writer.element(reason);

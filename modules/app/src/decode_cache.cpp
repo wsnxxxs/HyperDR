@@ -11,8 +11,12 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <limits>
+#include <stdexcept>
 #include <vector>
 
 namespace hyperdr {
@@ -24,8 +28,14 @@ constexpr std::array<char, 8> kMagic{'H', 'D', 'R', 'C', 'A', 'C', 'H', '3'};
 // magic alone could not express "same container, different contents", so a
 // build that started writing a new field would silently read old entries that
 // lacked it -- which is how a cache hit came to produce different Exif from
-// the decode that filled it.
-constexpr std::uint32_t kCacheSchema = 8;
+// the decode that filled it. Also bumped when a decoder's pixels change within
+// one version: 10 moved the RAW camera matrix out of LibRaw's integer output,
+// 12 replaced its gamut clamp with smooth compression (11 was a development
+// build with other compression thresholds), and 13 decoded HLG with BT.2100's
+// OOTF, kept HDR colours outside Display P3, and gave DNGs their own colour
+// model and opcode lists. 14 honours DNG calibration signatures, so a profile
+// mismatch no longer reuses pixels made with the wrong camera calibration.
+constexpr std::uint32_t kCacheSchema = 14;
 
 // x86-64 and arm64, the only targets this project builds for, are both little
 // endian; the cache is a local scratch format and is never transported.
@@ -45,10 +55,37 @@ std::uint32_t get_u32(const std::uint8_t* data) {
          (static_cast<std::uint32_t>(data[3]) << 24U);
 }
 
-std::optional<float> read_optional(const json::Value& parent, std::string_view key) {
+std::optional<double> read_optional_double(const json::Value& parent, std::string_view key) {
   const auto* value = parent.find(key);
   if (value == nullptr || !value->is_number()) return std::nullopt;
-  return static_cast<float>(value->number());
+  return value->number();
+}
+
+std::optional<float> read_optional(const json::Value& parent, std::string_view key) {
+  const auto value = read_optional_double(parent, key);
+  return value ? std::optional<float>(static_cast<float>(*value)) : std::nullopt;
+}
+
+// Cache inputs must round-trip exactly: report-oriented JSON rounding can move
+// a capture value across an EXIF estimator's split threshold.
+template <class T>
+void write_capture_value(json::Writer& writer, std::string_view key,
+                         const std::optional<T>& value) {
+  if (!value) {
+    writer.null_member(key);
+    return;
+  }
+  if (!std::isfinite(*value)) {
+    throw std::invalid_argument("cannot cache a non-finite capture value");
+  }
+  std::array<char, 64> buffer{};
+  const auto converted = std::to_chars(buffer.data(), buffer.data() + buffer.size(),
+      *value, std::chars_format::general, std::numeric_limits<T>::max_digits10);
+  if (converted.ec != std::errc{}) {
+    throw std::runtime_error("capture value does not fit its cache representation");
+  }
+  writer.raw_member(key, std::string_view(buffer.data(),
+      static_cast<std::size_t>(converted.ptr - buffer.data())));
 }
 
 // Every field of PhotoMetadata and CaptureMetadata, without exception.
@@ -80,10 +117,8 @@ std::string metadata_json(const DecodedImage& value) {
       .member("aperture", m.aperture)
       .member("focal_length_mm", m.focal_length_mm)
       .member("focal_length_35mm", m.focal_length_35mm)
-      .member("capture_iso", c.iso)
       .member("raw_white_balance", value.raw_white_balance)
-      .member("capture_exposure_time_seconds", c.exposure_time_seconds)
-      .member("capture_aperture_f_number", c.aperture_f_number)
+      .member("raw_color_matrix", value.raw_color_matrix)
       .member("decode_sensor_width", d.sensor_width)
       .member("decode_sensor_height", d.sensor_height)
       .member("decode_target_width", d.target_width)
@@ -108,6 +143,18 @@ std::string metadata_json(const DecodedImage& value) {
       // one that would appear only on the second run of a batch.
       .member("input_domain", input_domain_name(value.domain))
       .member("has_gps", m.gps.has_value());
+  write_capture_value(writer, "metadata_capture_iso", m.capture.iso);
+  write_capture_value(writer, "metadata_capture_exposure_seconds", m.capture.exposure_seconds);
+  write_capture_value(writer, "metadata_capture_f_number", m.capture.f_number);
+  write_capture_value(writer, "metadata_capture_exposure_bias_ev", m.capture.exposure_bias_ev);
+  write_capture_value(writer, "metadata_capture_focal_length_mm", m.capture.focal_length_mm);
+  write_capture_value(writer, "metadata_capture_focal_length_35mm", m.capture.focal_length_35mm);
+  write_capture_value(writer, "capture_iso", c.iso);
+  write_capture_value(writer, "capture_exposure_time_seconds", c.exposure_time_seconds);
+  write_capture_value(writer, "capture_aperture_f_number", c.aperture_f_number);
+  write_capture_value(writer, "capture_exposure_bias_ev", c.exposure_bias_ev);
+  write_capture_value(writer, "capture_focal_length_mm", c.focal_length_mm);
+  write_capture_value(writer, "capture_focal_length_35mm", c.focal_length_35mm);
   writer.begin_array("decode_degradation_reasons");
   for (const auto& reason : d.degradation_reasons) {
     writer.element(reason);
@@ -151,6 +198,16 @@ void apply_metadata_json(const std::string& text, DecodedImage& out) {
   out.metadata.aperture = number_at("aperture");
   out.metadata.focal_length_mm = number_at("focal_length_mm");
   out.metadata.focal_length_35mm = number_at("focal_length_35mm");
+  out.metadata.capture.iso = read_optional_double(document, "metadata_capture_iso");
+  out.metadata.capture.exposure_seconds =
+      read_optional_double(document, "metadata_capture_exposure_seconds");
+  out.metadata.capture.f_number = read_optional_double(document, "metadata_capture_f_number");
+  out.metadata.capture.exposure_bias_ev =
+      read_optional_double(document, "metadata_capture_exposure_bias_ev");
+  out.metadata.capture.focal_length_mm =
+      read_optional_double(document, "metadata_capture_focal_length_mm");
+  out.metadata.capture.focal_length_35mm =
+      read_optional_double(document, "metadata_capture_focal_length_35mm");
   out.metadata.gps.reset();
   if (flag_at("has_gps")) {
     GpsPosition gps;
@@ -172,9 +229,13 @@ void apply_metadata_json(const std::string& text, DecodedImage& out) {
                    .value_or(InputDomain::kDisplayReferredSdr);
   out.capture.iso = read_optional(document, "capture_iso");
   out.raw_white_balance = string_at("raw_white_balance");
+  out.raw_color_matrix = string_at("raw_color_matrix");
   out.capture.exposure_time_seconds =
       read_optional(document, "capture_exposure_time_seconds");
   out.capture.aperture_f_number = read_optional(document, "capture_aperture_f_number");
+  out.capture.exposure_bias_ev = read_optional(document, "capture_exposure_bias_ev");
+  out.capture.focal_length_mm = read_optional(document, "capture_focal_length_mm");
+  out.capture.focal_length_35mm = read_optional(document, "capture_focal_length_35mm");
   out.decode.sensor_width =
       static_cast<std::uint32_t>(number_at("decode_sensor_width"));
   out.decode.sensor_height =

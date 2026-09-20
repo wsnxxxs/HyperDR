@@ -7,10 +7,10 @@
     "sha256": "01fadbf416c3d2104789f1d39e746477da951101e105ef3b61e94732c2d7ac2d"
   },
   "source_sha256": {
-    "modules/codec/src/heif_encoder.cpp": "39728cecc0ca581d02209f3f722bd576536b68d7d3388a11a6a8bd570a79f8bb",
-    "modules/gainmap/src/external.cpp": "1b9447af2fe11ba83a5f55266357fb08b35f6d5224665dd8574c2f0289d03073",
+    "modules/codec/src/heif_encoder.cpp": "cc3a81ffb6475760a9ab93859d9f3c8d0aadf161a16f4a422632fddcab41829b",
+    "modules/gainmap/src/external.cpp": "7d222e85a9fd0cc729ef1ffc42e1a38ca2c69db9e9f74f96de83efe5a1090e61",
     "modules/container/src/iso_gain_map.cpp": "c2b69935a6e5b264a405462139eedfc84d7783ee703fecbd851af6cab224b58e",
-    "modules/gainmap/src/reconstruct.cpp": "d2f31732d4cc8a3c34c1fd2fb6e5054b765fd90ec8d512cfc8267cb16711b806",
+    "modules/gainmap/src/reconstruct.cpp": "ab05a9c7515f79e02faa70db1c64079c3f5fcd8383554d01d3e2123569eab02e",
     "tests/macos_t2/generate_fixtures.py": "89e33a27d31c889630ad036055b3464564acec5af441c07a9e28106f9056e5ad",
     "tests/macos_t2/fixture_spec.json": "ae9e2c0f7cb49488da2c0269cbf72249cf27ac0ee0dfaaeb4b2b845334b08d2d"
   },

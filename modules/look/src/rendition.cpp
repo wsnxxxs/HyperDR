@@ -30,15 +30,7 @@ float mapped(float y, float knee, float ceiling) {
   return y > 1e-6F ? std::exp2(shoulder(std::log2(y), knee, ceiling)) : y;
 }
 std::array<float, 3> fit(std::array<float, 3> rgb, float limit) {
-  const float y = std::clamp(p3_luminance(rgb[0], rgb[1], rgb[2]), 0.0F, limit);
-  float a = 1.0F;
-  for (const auto c : rgb) {
-    const float d = c - y;
-    if (d > 0) a = std::min(a, (limit - y) / d);
-    if (d < 0) a = std::min(a, -y / d);
-  }
-  for (auto& c : rgb) c = std::clamp(y + a * (c - y), 0.0F, limit);
-  return rgb;
+  return fit_linear_p3_gamut(rgb[0], rgb[1], rgb[2], limit);
 }
 }
 
@@ -117,6 +109,7 @@ PhotoRenditions render_renditions(const FloatImage& source,
     out.below_knee.resize(static_cast<std::size_t>(source.width)*source.height);
   }
   out.clamp_srgb = options.clamp_srgb;
+  out.hdr_is_source = input_hdr && want_hdr;
   std::vector<std::uint64_t> wide(source.height), eligible(source.height);
   std::optional<BilinearGridSampler> scene_sampler;
   std::optional<GridView> local_view, stops_view;

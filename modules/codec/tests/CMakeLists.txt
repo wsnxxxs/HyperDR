@@ -18,4 +18,7 @@ if(HYPERDR_WITH_CODECS)
   # Pure boundary tests: no giant fixture or allocation is needed to pin the
   # maximum RAW dimensions and the overflow-safe arithmetic.
   hyperdr_add_test(budget_test)
+
+  # The DNG opcode lists the RAW decoder applies, as bytes and arithmetic.
+  hyperdr_add_test(dng_opcode_test)
 endif()

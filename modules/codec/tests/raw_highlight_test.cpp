@@ -22,6 +22,7 @@
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/gainmap/gain_map.hpp"
 #include "hyperdr/image/color.hpp"
+#include "hyperdr/image/dng_color.hpp"
 
 #include <algorithm>
 #include <array>
@@ -78,6 +79,54 @@ void append(std::vector<std::uint8_t>& out, const std::vector<std::uint8_t>& mor
   out.insert(out.end(), more.begin(), more.end());
 }
 
+// Values in millionths, which every matrix below is written in exactly.
+std::vector<std::uint8_t> srational_matrix(const hyperdr::Matrix3d& matrix) {
+  std::vector<std::uint8_t> out;
+  for (const auto& row : matrix) {
+    for (const double value : row) {
+      append(out, srational(static_cast<std::int32_t>(std::lround(value * 1.0e6)), 1000000));
+    }
+  }
+  return out;
+}
+
+// DNG opcode lists are big-endian in any file.
+void put_be32(std::vector<std::uint8_t>& out, std::uint32_t value) {
+  for (int shift = 24; shift >= 0; shift -= 8) out.push_back(static_cast<std::uint8_t>(value >> shift));
+}
+
+void put_be64(std::vector<std::uint8_t>& out, double value) {
+  std::uint64_t bits = 0;
+  std::memcpy(&bits, &value, sizeof(bits));
+  for (int shift = 56; shift >= 0; shift -= 8) out.push_back(static_cast<std::uint8_t>(bits >> shift));
+}
+
+std::vector<std::uint8_t> opcode(std::uint32_t id, std::uint32_t flags,
+                                 const std::vector<std::uint8_t>& parameters) {
+  std::vector<std::uint8_t> out;
+  put_be32(out, id);
+  put_be32(out, 0x01030000U);
+  put_be32(out, flags);
+  put_be32(out, static_cast<std::uint32_t>(parameters.size()));
+  append(out, parameters);
+  return out;
+}
+
+std::vector<std::uint8_t> opcode_list(const std::vector<std::vector<std::uint8_t>>& opcodes) {
+  std::vector<std::uint8_t> out;
+  put_be32(out, static_cast<std::uint32_t>(opcodes.size()));
+  for (const auto& entry : opcodes) append(out, entry);
+  return out;
+}
+
+std::vector<std::uint8_t> rational_vector(const std::array<double, 3>& values) {
+  std::vector<std::uint8_t> out;
+  for (const double value : values) {
+    append(out, rational(static_cast<std::uint32_t>(std::lround(value * 1.0e6)), 1000000));
+  }
+  return out;
+}
+
 constexpr std::uint32_t kWidth = 96;
 constexpr std::uint32_t kHeight = 80;
 constexpr std::uint32_t kCropLeft = 8;
@@ -94,7 +143,8 @@ unsigned cfa_channel(std::uint32_t x, std::uint32_t y) {
   return 1;
 }
 
-std::vector<std::uint8_t> synthetic_cfa(std::uint16_t black_level = 0) {
+std::vector<std::uint8_t> synthetic_cfa(std::uint16_t black_level = 0,
+                                        const std::array<std::uint16_t, 3>& field = {}) {
   // Deliberately dark, so that "the modes disagree only in the highlights" is a
   // statement about a small bright region rather than about most of the frame.
   constexpr std::array<double, 3> kSceneGain{1.0, 0.75, 0.45};
@@ -105,6 +155,9 @@ std::vector<std::uint8_t> synthetic_cfa(std::uint16_t black_level = 0) {
   const double centre_y = kHeight * 0.40;
   const double radius = kWidth * 0.22;
 
+  // A non-zero field replaces the scene with one flat colour: every site of a
+  // channel at that channel's level.
+  const bool flat = field[0] != 0 || field[1] != 0 || field[2] != 0;
   std::vector<std::uint8_t> raster;
   raster.reserve(static_cast<std::size_t>(kWidth) * kHeight * 2);
   for (std::uint32_t y = 0; y < kHeight; ++y) {
@@ -114,8 +167,9 @@ std::vector<std::uint8_t> synthetic_cfa(std::uint16_t black_level = 0) {
       const double dy = static_cast<double>(y) - centre_y;
       const bool blown = dx * dx + dy * dy < radius * radius;
       const double value = black_level +
-                           (blown ? kBlown[channel]
-                                   : (600.0 + 110.0 * x) * kSceneGain[channel]);
+                           (flat    ? static_cast<double>(field[channel])
+                            : blown ? kBlown[channel]
+                                    : (600.0 + 110.0 * x) * kSceneGain[channel]);
       const auto clamped = static_cast<std::uint16_t>(
           std::clamp(value, 0.0, static_cast<double>(kWhiteLevel)));
       put16(raster, clamped);
@@ -132,29 +186,35 @@ struct Field {
   bool is_strip_offset{false};
 };
 
+// The fixture's camera: raw channels are CIE XYZ scaled so that a D65 white
+// gives the as-shot neutral (0.45, 1, 0.65). With the scene white at D65 the
+// DNG colour model and LibRaw's D65 matrix agree, so the tests of other
+// stages do not depend on which one decoded the file.
+constexpr hyperdr::Matrix3d kFixtureColorMatrix{{{0.473457, 0.0, 0.0},
+                                                 {0.0, 1.0, 0.0},
+                                                 {0.0, 0.0, 0.596846}}};
+
 // A little-endian, single-strip, uncompressed CFA DNG. Only the tags LibRaw
 // needs to treat the file as a raw mosaic are written; anything it can default,
-// it defaults.
+// it defaults. `colour_fields`, when given, replace the fixture's ColorMatrix1,
+// CalibrationIlluminant1 and AsShotNeutral.
 void write_synthetic_dng(const std::filesystem::path& path,
                          std::uint32_t crop_width = kCropWidth,
                          std::uint32_t crop_height = kCropHeight,
                          std::uint32_t crop_left = kCropLeft,
                          std::uint32_t crop_top = kCropTop,
                          std::uint16_t black_level = 0,
-                         bool camera_wb = true, bool xtrans = false) {
-  const auto raster = synthetic_cfa(black_level);
+                         bool camera_wb = true, bool xtrans = false,
+                         bool with_colour_matrix = true,
+                         const std::array<std::uint16_t, 3>& field = {},
+                         const std::vector<Field>& colour_fields = {},
+                         const std::vector<Field>& extra_fields = {}) {
+  const auto raster = synthetic_cfa(black_level, field);
   const std::string model = "HyperDR Synthetic";
 
-  std::vector<std::uint8_t> colour_matrix;
-  for (int i = 0; i < 9; ++i) {
-    append(colour_matrix, srational(i % 4 == 0 ? 10000 : 0, 10000));
-  }
   // A daylight-ish as-shot neutral. Unity here would make every highlight mode
   // agree; see the comment at the top of the file.
-  std::vector<std::uint8_t> as_shot_neutral;
-  append(as_shot_neutral, rational(4500, 10000));
-  append(as_shot_neutral, rational(10000, 10000));
-  append(as_shot_neutral, rational(6500, 10000));
+  const auto as_shot_neutral = rational_vector({0.45, 1.0, 0.65});
 
   std::vector<std::uint8_t> model_ascii(model.begin(), model.end());
   model_ascii.push_back(0);
@@ -193,11 +253,23 @@ void write_synthetic_dng(const std::filesystem::path& path,
          append(v, bytes32(crop_height));
          return v;
        }(), false},                                         // DefaultCropSize
-      {50721, 10, 9, colour_matrix, false},                 // ColorMatrix1
+      {50721, 10, 9, srational_matrix(kFixtureColorMatrix), false},  // ColorMatrix1
       {50728, 5, 3, as_shot_neutral, false},                // AsShotNeutral
       {50778, 3, 1, bytes16(21), false},                    // CalibrationIlluminant1: D65
   };
-  if (!camera_wb) std::erase_if(fields, [](const Field& field) { return field.tag == 50728; });
+  if (!camera_wb) std::erase_if(fields, [](const Field& entry) { return entry.tag == 50728; });
+  if (!with_colour_matrix) {
+    std::erase_if(fields, [](const Field& entry) {
+      return entry.tag == 50721 || entry.tag == 50778;
+    });
+  }
+  if (!colour_fields.empty()) {
+    std::erase_if(fields, [](const Field& entry) {
+      return entry.tag == 50721 || entry.tag == 50778 || entry.tag == 50728;
+    });
+    fields.insert(fields.end(), colour_fields.begin(), colour_fields.end());
+  }
+  fields.insert(fields.end(), extra_fields.begin(), extra_fields.end());
   std::sort(fields.begin(), fields.end(),
             [](const Field& a, const Field& b) { return a.tag < b.tag; });
 
@@ -648,6 +720,278 @@ int main(int argc, char** argv) {
     require(std::abs(std::log2(median_luminance(fallback_clip.linear_p3) /
                               median_luminance(fallback_blend.linear_p3))) < 0.05F,
             "WB fallback changed whole-image exposure between highlight modes");
+
+    // Through this fixture's diagonal ColorMatrix, a field lit only at the red
+    // sites is pure CIE X: an imaginary colour with zero luminance and -0.39
+    // AP1 green relative to red. Unclamped, it reaches the renderer as black,
+    // which is what narrow-band blue lights did in real frames. Clamped at
+    // ProPhoto's boundary it keeps -0.06 AP1 green and P3 luminance 0.16 of
+    // its P3 red; gamut compression brings it inside AP1 with 0.19.
+    write_synthetic_dng(path, kCropWidth, kCropHeight, kCropLeft, kCropTop, 0, true, false,
+                        true, {20000, 0, 0});
+    const auto red = hyperdr::decode_image(path);
+    require(red.raw_color_matrix == "embedded",
+            "a DNG ColorMatrix was not reported as the file's own matrix");
+    const auto centre = [](const hyperdr::FloatImage& image) {
+      return std::array<float, 3>{image.at(image.width / 2, image.height / 2, 0),
+                                  image.at(image.width / 2, image.height / 2, 1),
+                                  image.at(image.width / 2, image.height / 2, 2)};
+    };
+    const auto red_p3 = centre(red.linear_p3);
+    const auto red_ap1 = hyperdr::linear_p3_to_ap1_d65(red_p3[0], red_p3[1], red_p3[2]);
+    require(red_ap1[0] > 0.0F && red_ap1[1] > -1.0e-4F * red_ap1[0] &&
+                red_ap1[2] > -1.0e-4F * red_ap1[0],
+            "a colour outside the spectral locus was left outside AP1 by RAW decode (AP1 " +
+                std::to_string(red_ap1[0]) + ", " + std::to_string(red_ap1[1]) + ", " +
+                std::to_string(red_ap1[2]) + ")");
+    require(hyperdr::p3_luminance(red_p3[0], red_p3[1], red_p3[2]) > 0.1F * red_p3[0],
+            "a colour outside the spectral locus left RAW decode without visible luminance");
+    // The matrix is applied in float, so headroom above LibRaw's 16-bit output
+    // survives. Clip highlight handling saturates the red sites at white, and
+    // white camera red is 2.18 in P3 red; LibRaw's output capped its ProPhoto
+    // red at 1.0 (1.63 in P3).
+    write_synthetic_dng(path, kCropWidth, kCropHeight, kCropLeft, kCropTop, 0, true, false,
+                        true, {60000, 0, 0});
+    const auto bright = hyperdr::decode_image(path, clip_options);
+    const float bright_red = centre(bright.linear_p3)[0];
+    require(bright_red > 2.0F && bright_red < 2.3F,
+            "RAW highlight headroom was clipped at LibRaw's 16-bit ceiling (P3 red " +
+                std::to_string(bright_red) + ")");
+    write_synthetic_dng(path, kCropWidth, kCropHeight, kCropLeft, kCropTop, 0, true, false,
+                        false, {20000, 0, 0});
+    const auto uncalibrated = hyperdr::decode_image(path);
+    const auto& uncalibrated_reasons = uncalibrated.decode.degradation_reasons;
+    require(uncalibrated.raw_color_matrix == "none" && uncalibrated.decode.degraded &&
+                std::find(uncalibrated_reasons.begin(), uncalibrated_reasons.end(),
+                          "no_camera_matrix") != uncalibrated_reasons.end(),
+            "a RAW without any camera matrix was not reported as a degraded decode");
+
+    // A DNG is decoded with its own colour model: both calibrations
+    // interpolated at the as-shot white, not LibRaw's D65 ColorMatrix alone.
+    // The calibrations are a Ricoh GR IV's (standard light A and D65, as-shot
+    // white near 4600 K), where the two give colours about 0.01 apart in
+    // chromaticity. A second file adds ForwardMatrices, CameraCalibrations
+    // and AnalogBalance, so every field LibRaw exposes is read in its place.
+    {
+      hyperdr::DngColorProfile profile;
+      profile.calibrations[0].illuminant = 17;
+      profile.calibrations[0].color_matrix = hyperdr::Matrix3d{
+          {{0.698959, -0.287201, -0.031876}, {-0.380997, 0.997040, 0.446777},
+           {-0.011490, 0.036133, 0.737518}}};
+      profile.calibrations[1].illuminant = 21;
+      profile.calibrations[1].color_matrix = hyperdr::Matrix3d{
+          {{0.642670, -0.148453, -0.081421}, {-0.461395, 1.272781, 0.206543},
+           {-0.067871, 0.151535, 0.603012}}};
+      const std::array<double, 3> neutral{0.4136, 1.0, 0.5614};
+      auto full = profile;
+      full.calibrations[0].forward_matrix = hyperdr::Matrix3d{
+          {{0.702589, 0.153334, 0.108373}, {0.449611, 1.094298, -0.543910},
+           {0.004547, -0.052018, 0.872576}}};
+      full.calibrations[1].forward_matrix = hyperdr::Matrix3d{
+          {{0.825411, 0.099922, 0.038963}, {0.505329, 0.681835, -0.187164},
+           {0.015447, -0.097989, 0.907646}}};
+      full.calibrations[0].camera_calibration =
+          hyperdr::Matrix3d{{{1.02, 0.01, 0.0}, {0.0, 0.98, 0.0}, {0.0, 0.005, 1.01}}};
+      full.calibrations[1].camera_calibration =
+          hyperdr::Matrix3d{{{1.01, 0.0, 0.0}, {0.004, 1.0, 0.0}, {0.0, 0.0, 0.99}}};
+      full.analog_balance = {1.05, 1.0, 0.97};
+
+      const auto tags = [&](const hyperdr::DngColorProfile& source) {
+        std::vector<Field> out{
+            {50721, 10, 9, srational_matrix(*source.calibrations[0].color_matrix), false},
+            {50722, 10, 9, srational_matrix(*source.calibrations[1].color_matrix), false},
+            {50727, 5, 3, rational_vector(source.analog_balance), false},
+            {50728, 5, 3, rational_vector(neutral), false},
+            {50778, 3, 1, bytes16(source.calibrations[0].illuminant), false},
+            {50779, 3, 1, bytes16(source.calibrations[1].illuminant), false},
+        };
+        const std::array<std::uint16_t, 2> calibration_tags{50723, 50724};
+        const std::array<std::uint16_t, 2> forward_tags{50964, 50965};
+        for (std::size_t k = 0; k < 2; ++k) {
+          const auto& calibration = source.calibrations[k];
+          if (calibration.camera_calibration) {
+            out.push_back({calibration_tags[k], 10, 9,
+                           srational_matrix(*calibration.camera_calibration), false});
+          }
+          if (calibration.forward_matrix) {
+            out.push_back({forward_tags[k], 10, 9, srational_matrix(*calibration.forward_matrix), false});
+          }
+        }
+        return out;
+      };
+      const auto chromaticity = [](const std::array<double, 3>& rgb) {
+        const double sum = rgb[0] + rgb[1] + rgb[2];
+        return std::array<double, 3>{rgb[0] / sum, rgb[1] / sum, rgb[2] / sum};
+      };
+      const auto predicted = [&](const hyperdr::Matrix3d& matrix, const std::array<std::uint16_t, 3>& level) {
+        std::array<double, 3> p3{};
+        for (std::size_t i = 0; i < 3; ++i) {
+          for (std::size_t c = 0; c < 3; ++c) p3[i] += matrix[i][c] * level[c] / neutral[c];
+        }
+        return p3;
+      };
+      const auto d65_only = *hyperdr::dng_camera_to_linear_p3(
+          [&] {
+            hyperdr::DngColorProfile one;
+            one.calibrations[0] = profile.calibrations[1];
+            return one;
+          }(),
+          neutral);
+      for (const auto* variant : {&profile, &full}) {
+        const auto expected_matrix = hyperdr::dng_camera_to_linear_p3(*variant, neutral);
+        require(expected_matrix.has_value(), "the DNG colour fixture must be a valid profile");
+        for (const std::array<std::uint16_t, 3>& level :
+             {std::array<std::uint16_t, 3>{12000, 20000, 6000},
+              std::array<std::uint16_t, 3>{6000, 24000, 28000}}) {
+          write_synthetic_dng(path, kCropWidth, kCropHeight, kCropLeft, kCropTop, 0, true, false, true,
+                              level, tags(*variant));
+          const auto dng = hyperdr::decode_image(path, clip_options);
+          require(dng.raw_color_matrix == "embedded",
+                  "a DNG with two calibrations was not reported as using its own matrix");
+          const auto pixel = centre(dng.linear_p3);
+          const auto expected = predicted(*expected_matrix, level);
+          require(*std::min_element(expected.begin(), expected.end()) >
+                      0.05 * *std::max_element(expected.begin(), expected.end()),
+                  "the DNG colour fixture must stay inside P3, clear of gamut compression");
+          const auto got = chromaticity({pixel[0], pixel[1], pixel[2]});
+          const auto want = chromaticity(expected);
+          const auto other = chromaticity(predicted(d65_only, level));
+          double error = 0.0;
+          double separation = 0.0;
+          for (std::size_t i = 0; i < 3; ++i) {
+            error = std::max(error, std::abs(got[i] - want[i]));
+            separation = std::max(separation, std::abs(want[i] - other[i]));
+          }
+          require(error < 1.0e-3,
+                  "a DNG was not decoded with its own colour model (chromaticity off by " +
+                      std::to_string(error) + ")");
+          if (variant == &profile) {
+            require(separation > 5.0e-3,
+                    "the DNG colour fixture cannot tell its interpolated matrix from the D65 one");
+          }
+        }
+      }
+
+      // CameraCalibration belongs to a reference camera identified by its
+      // signature. A profile with a different signature must use identity
+      // calibration, including when just one of the signatures is absent.
+      // The cases above already cover both absent (the empty strings match).
+      const std::array<std::uint16_t, 3> signature_level{12000, 20000, 6000};
+      auto without_calibration = full;
+      for (auto& calibration : without_calibration.calibrations) {
+        calibration.camera_calibration.reset();
+      }
+      const auto decode_profile = [&](const hyperdr::DngColorProfile& source,
+                                       const std::vector<Field>& signatures) {
+        write_synthetic_dng(path, kCropWidth, kCropHeight, kCropLeft, kCropTop, 0,
+                            true, false, true, signature_level, tags(source), signatures);
+        return hyperdr::decode_image(path, clip_options).linear_p3;
+      };
+      const auto calibrated = decode_profile(full, {});
+      const auto uncalibrated = decode_profile(without_calibration, {});
+      require(max_abs_difference(calibrated, uncalibrated) > 1.0e-3F,
+              "the calibration-signature fixture must distinguish its camera calibration");
+      const auto signature_tag = [](std::uint16_t tag, const char* text, std::uint16_t type) {
+        std::vector<std::uint8_t> value(text, text + std::strlen(text) + 1);
+        return Field{tag, type, static_cast<std::uint32_t>(value.size()), value, false};
+      };
+      const auto camera_signature = signature_tag(50931, "camera-reference", 2);
+      const auto same_profile = signature_tag(50932, "camera-reference", 1);
+      const auto other_profile = signature_tag(50932, "other-reference", 2);
+      require(max_abs_difference(decode_profile(full, {camera_signature, same_profile}), calibrated) < 1.0e-6F,
+              "matching DNG calibration signatures must apply CameraCalibration");
+      for (const auto& signatures : {std::vector<Field>{camera_signature, other_profile},
+                                     std::vector<Field>{camera_signature},
+                                     std::vector<Field>{same_profile}}) {
+        require(max_abs_difference(decode_profile(full, signatures), uncalibrated) < 1.0e-6F,
+                "nonmatching DNG calibration signatures must use identity CameraCalibration");
+      }
+    }
+
+    // A DNG's opcode lists are applied. OpcodeList2's GainMap here brightens
+    // the sensor from 1x at the top row to 2x at the bottom; decoded against
+    // the same file without it, every pixel must come out brighter by the
+    // gain at its sensor row. The fixture's 90-degree orientation turns
+    // sensor rows into output columns, counted from the bottom row.
+    {
+      const auto opcode_tag = [](std::uint16_t tag, const std::vector<std::uint8_t>& list) {
+        return Field{tag, 7, static_cast<std::uint32_t>(list.size()), list, false};
+      };
+      std::vector<std::uint8_t> ramp;
+      for (const std::uint32_t value : {0U, 0U, kHeight, kWidth, 0U, 1U, 1U, 1U, 2U, 1U}) put_be32(ramp, value);
+      put_be64(ramp, 1.0);  // spacing, rows
+      put_be64(ramp, 1.0);  // spacing, columns
+      put_be64(ramp, 0.0);  // origin, rows
+      put_be64(ramp, 0.0);  // origin, columns
+      put_be32(ramp, 1);    // map planes
+      for (const float gain : {1.0F, 2.0F}) {
+        std::uint32_t bits = 0;
+        std::memcpy(&bits, &gain, sizeof(bits));
+        put_be32(ramp, bits);
+      }
+      const std::array<std::uint16_t, 3> flat{6000, 6000, 6000};
+      write_synthetic_dng(path, kCropWidth, kCropHeight, kCropLeft, kCropTop, 0, true, false, true, flat);
+      const auto plain = hyperdr::decode_image(path, clip_options);
+      write_synthetic_dng(path, kCropWidth, kCropHeight, kCropLeft, kCropTop, 0, true, false, true, flat, {},
+                          {opcode_tag(51009, opcode_list({opcode(9, 0, ramp)}))});
+      const auto ramped = hyperdr::decode_image(path, clip_options);
+      require(!ramped.decode.degraded, "a GainMap the decoder applies must not degrade the decode");
+      const auto y = ramped.linear_p3.height / 2;
+      for (std::uint32_t x = 2; x + 2 < ramped.linear_p3.width; x += 6) {
+        const double row = kCropTop + kCropHeight - 1.0 - x;
+        const double expected = 1.0 + (row + 0.5) / kHeight;
+        const double ratio = ramped.linear_p3.at(x, y, 1) / plain.linear_p3.at(x, y, 1);
+        require(std::abs(ratio / expected - 1.0) < 0.01,
+                "OpcodeList2 GainMap was not applied at its sensor row (output column " + std::to_string(x) +
+                    ": " + std::to_string(ratio) + ", expected " + std::to_string(expected) + ")");
+      }
+
+      // OpcodeList1: dead pixels stored as 0 are fixed from their neighbours.
+      const auto dead = [&](bool with_opcode) {
+        std::vector<Field> extra;
+        if (with_opcode) {
+          std::vector<std::uint8_t> parameters;
+          put_be32(parameters, 0);  // constant
+          put_be32(parameters, 1);  // Bayer phase: red at the top left
+          extra.push_back(opcode_tag(51008, opcode_list({opcode(4, 0, parameters)})));
+        }
+        write_synthetic_dng(path, kCropWidth, kCropHeight, kCropLeft, kCropTop, 0, true, false, true, flat, {},
+                            extra);
+        auto bytes = hyperdr::read_binary_file(path);
+        for (const auto& [sx, sy] : {std::pair{40U, 40U}, std::pair{41U, 40U}, std::pair{47U, 33U}}) {
+          const auto at = bytes.size() - kWidth * kHeight * 2 + (sy * kWidth + sx) * 2;
+          bytes[at] = 0;
+          bytes[at + 1] = 0;
+        }
+        hyperdr::write_binary_file_atomic(path, bytes, true);
+        return hyperdr::decode_image(path, clip_options);
+      };
+      require(max_abs_difference(dead(true).linear_p3, plain.linear_p3) < 1.0e-4F,
+              "OpcodeList1 FixBadPixelsConstant left dead pixels in the decode");
+      require(max_abs_difference(dead(false).linear_p3, plain.linear_p3) > 0.01F,
+              "the dead-pixel fixture must show its defects without the opcode");
+
+      // A required opcode this decoder does not apply is reported; an optional
+      // one, or a list that does not parse, too, each by its own reason.
+      const auto reasons = [&](const std::vector<Field>& extra) {
+        write_synthetic_dng(path, kCropWidth, kCropHeight, kCropLeft, kCropTop, 0, true, false, true, flat, {},
+                            extra);
+        return hyperdr::decode_image(path, clip_options).decode.degradation_reasons;
+      };
+      const auto has = [](const std::vector<std::string>& list, const char* reason) {
+        return std::find(list.begin(), list.end(), reason) != list.end();
+      };
+      const std::vector<std::uint8_t> warp_parameters{0, 0, 0, 1};
+      require(has(reasons({opcode_tag(51022, opcode_list({opcode(1, 0, warp_parameters)}))}),
+                  "dng_opcode_unsupported"),
+              "a required opcode that was not applied must degrade the decode");
+      require(reasons({opcode_tag(51022, opcode_list({opcode(1, 1, warp_parameters)}))}).empty(),
+              "an optional opcode that was not applied must not degrade the decode");
+      auto cut = opcode_list({opcode(9, 0, ramp)});
+      cut.resize(cut.size() - 5);
+      require(has(reasons({opcode_tag(51009, cut)}), "dng_opcode_list_malformed"),
+              "a malformed opcode list must degrade the decode");
+    }
 
     write_synthetic_dng(path, kCropWidth, kCropHeight, kCropLeft, kCropTop, 0, true, true);
     bool xtrans_rejected = false;

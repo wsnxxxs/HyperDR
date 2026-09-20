@@ -1,9 +1,12 @@
 #include "hyperdr/image/color.hpp"
+#include "hyperdr/image/dng_color.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/foundation/parallel.hpp"
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/image_source.hpp"
 #include "internal/budget.hpp"
+#include "internal/dng_opcodes.hpp"
+#include "internal/metadata.hpp"
 #include "internal/raw.hpp"
 #include "hyperdr/foundation/version.hpp"
 
@@ -92,6 +95,8 @@ struct RawCalibration {
   std::vector<unsigned> black_pattern;
   std::vector<std::uint16_t> dark;
   const LinearizationLut* lut{};
+  // A DNG's OpcodeList2 gain maps, in the coordinates of the area above.
+  std::vector<codec::DngGainMap> gain_maps;
 };
 
 struct RawCallbackContext {
@@ -99,6 +104,8 @@ struct RawCallbackContext {
   const RawCalibration* calibration{};
   float lens_shading_scale{1.0F};
   float exposure_gain{1.0F};
+  // The white-balance multipliers LibRaw applied, in its channel order.
+  std::array<float, 4> applied_multipliers{};
   std::vector<std::uint16_t>* captured_mosaic{};
   std::uint32_t* captured_width{};
   std::uint32_t* captured_height{};
@@ -127,6 +134,12 @@ class RawCallbackScope {
 
 class CallbackLibRaw : public LibRaw {
  public:
+  CallbackLibRaw() { set_exifparser_handler(read_calibration_signature, this); }
+
+  bool camera_calibration_matches_profile() const {
+    return camera_calibration_signature_ == profile_calibration_signature_;
+  }
+
   void set_pre_preinterpolate_callback(process_step_callback callback) {
     callbacks.pre_preinterpolate_cb = callback;
   }
@@ -150,7 +163,126 @@ class CallbackLibRaw : public LibRaw {
   unsigned sample_step() const {
     return 1U << libraw_internal_data.internal_output_params.shrink;
   }
+  // Where the camera matrix in rgb_cam came from. Read after unpack(), which
+  // can still drop the matrix for some formats, and before dcraw_process():
+  // with output_color = 0, convert_to_rgb() marks every image as raw colour.
+  const char* color_matrix_source() const {
+    if (libraw_internal_data.internal_output_params.raw_color) return "none";
+    // identify() copies the file's own matrix (DNG ColorMatrix, maker-note
+    // matrix) into rgb_cam when use_camera_matrix admits it; otherwise the
+    // matrix is LibRaw's per-model table or a format constant.
+    const auto& color = imgdata.color;
+    return color.cmatrix[0][0] != 0.0F &&
+                   std::memcmp(color.rgb_cam, color.cmatrix, sizeof(color.rgb_cam)) == 0
+               ? "embedded"
+               : "libraw";
+  }
+
+ private:
+  // LibRaw exposes the calibration matrices but not their signatures. Its
+  // TIFF callback is already positioned at a tag's value and restores the
+  // stream afterwards. Only IFD0 describes the primary embedded profile.
+  static void read_calibration_signature(void* context, int tag, int type, int len,
+                                         unsigned int, void* input, INT64) {
+    if ((tag >> 20) != 1 || (type != 1 && type != 2) || len <= 0) return;
+    const int id = tag & 0xffff;
+    if (id != 50931 && id != 50932) return;
+    auto& raw = *static_cast<CallbackLibRaw*>(context);
+    auto& signature = id == 50931 ? raw.camera_calibration_signature_
+                                  : raw.profile_calibration_signature_;
+    std::string value(static_cast<std::size_t>(len), '\0');
+    auto* stream = static_cast<LibRaw_abstract_datastream*>(input);
+    const auto position = stream->tell();
+    const auto count = stream->read(value.data(), 1, value.size());
+    stream->seek(position, SEEK_SET);
+    if (count != len) return;
+    if (const auto end = value.find('\0'); end != std::string::npos) value.resize(end);
+    signature = std::move(value);
+  }
+
+  std::string camera_calibration_signature_;
+  std::string profile_calibration_signature_;
 };
+
+// A DNG's own colour model, where LibRaw would apply only the D65 ColorMatrix
+// whatever the light: both calibrations interpolated at the white LibRaw
+// actually balanced to (the reciprocal of the multipliers it applied), with
+// CameraCalibration, AnalogBalance and ForwardMatrix. Empty for other files,
+// for sensors with other than three colours, for raw data the camera had
+// already white balanced, and for a profile the DNG SDK would refuse, all of
+// which keep LibRaw's matrix. LibRaw 0.22 leaves parsedfields zero on the
+// fields it exposes, so an all-zero matrix is taken as an absent one.
+std::optional<Matrix3d> dng_camera_matrix(const CallbackLibRaw& raw,
+                                          const std::array<float, 4>& multipliers) {
+  const auto& color = raw.imgdata.color;
+  if (raw.imgdata.idata.dng_version == 0 || raw.imgdata.idata.colors != 3 ||
+      color.as_shot_wb_applied) {
+    return std::nullopt;
+  }
+  const auto read = [](const auto& source) -> std::optional<Matrix3d> {
+    Matrix3d matrix{};
+    bool any = false;
+    for (std::size_t i = 0; i < 3; ++i) {
+      for (std::size_t j = 0; j < 3; ++j) {
+        const double value = source[i][j];
+        if (!std::isfinite(value)) return std::nullopt;
+        matrix[i][j] = value;
+        any = any || value != 0.0;
+      }
+    }
+    return any ? std::optional<Matrix3d>(matrix) : std::nullopt;
+  };
+  DngColorProfile profile;
+  for (std::size_t k = 0; k < profile.calibrations.size(); ++k) {
+    const auto& source = color.dng_color[k];
+    auto& calibration = profile.calibrations[k];
+    calibration.illuminant = source.illuminant;
+    calibration.color_matrix = read(source.colormatrix);
+    calibration.forward_matrix = read(source.forwardmatrix);
+    // DNG defaults both signatures to empty, so older files still apply
+    // calibration. A different profile's signature requires identity instead.
+    if (raw.camera_calibration_matches_profile()) {
+      calibration.camera_calibration = read(source.calibration);
+    }
+  }
+  std::array<double, 3> neutral{};
+  for (std::size_t c = 0; c < 3; ++c) {
+    const float gain = color.dng_levels.analogbalance[c];
+    profile.analog_balance[c] = std::isfinite(gain) && gain > 0.0F ? gain : 1.0;
+    if (!(std::isfinite(multipliers[c]) && multipliers[c] > 0.0F)) return std::nullopt;
+    neutral[c] = 1.0 / multipliers[c];
+  }
+  return dng_camera_to_linear_p3(profile, neutral);
+}
+
+// LibRaw's camera RGB -- after white balance, demosaic and highlight handling --
+// to RGB on the AP1 primaries at D65, as the columns of a 3x4 matrix: column c
+// is the AP1 colour of camera channel c. A DNG's own colour model, when it has
+// given one, maps to linear P3; otherwise rgb_cam maps camera RGB to linear
+// sRGB (D65), which goes on through P3. A camera without a matrix keeps what
+// LibRaw's ProPhoto output gave it: camera RGB read as ProPhoto, with a fourth
+// channel dropped.
+std::array<std::array<float, 3>, 4> camera_to_ap1_columns(
+    const LibRaw& raw, bool has_matrix, const std::optional<Matrix3d>& dng_matrix) {
+  std::array<std::array<float, 3>, 4> columns{};
+  for (unsigned c = 0; c < columns.size(); ++c) {
+    std::array<float, 3> p3{};
+    if (dng_matrix) {
+      if (c < 3) {
+        for (std::size_t i = 0; i < 3; ++i) p3[i] = static_cast<float>((*dng_matrix)[i][c]);
+      }
+    } else if (has_matrix) {
+      const auto& m = raw.imgdata.color.rgb_cam;
+      p3 = rec709_to_linear_p3_unclamped(m[0][c], m[1][c], m[2][c]);
+    } else if (c < 3) {
+      std::array<float, 3> prophoto{};
+      prophoto[c] = 1.0F;
+      p3 = prophoto_to_linear_p3(prophoto[0], prophoto[1], prophoto[2]);
+    }
+    columns[c] = linear_p3_to_ap1_d65(p3[0], p3[1], p3[2]);
+  }
+  return columns;
+}
 
 void require_calibration_file(const std::filesystem::path& path,
                               const char* label) {
@@ -364,6 +496,10 @@ void raw_pre_preinterpolate_callback(void* object) {
   auto* raw = static_cast<CallbackLibRaw*>(object);
   auto* context = current_raw_callback_context;
   if (!context) return;
+  // scale_colors() has run: pre_mul holds the multipliers it applied, divided
+  // by their largest (or, without highlight recovery, their smallest).
+  std::copy(std::begin(raw->imgdata.color.pre_mul), std::end(raw->imgdata.color.pre_mul),
+            context->applied_multipliers.begin());
   if (!raw->imgdata.params.no_auto_scale && raw->imgdata.params.highlight != 0) {
     const auto& multipliers = raw->imgdata.color.pre_mul;
     const float low = *std::min_element(std::begin(multipliers), std::end(multipliers));
@@ -456,7 +592,8 @@ std::vector<std::uint16_t> read_dark_frame(const std::filesystem::path& path,
 }
 
 RawCalibration prepare_calibration(CallbackLibRaw& raw, const LinearizationLut& lut,
-                                    const RawDecodeOptions& options) {
+                                    const RawDecodeOptions& options,
+                                    std::vector<codec::DngGainMap> gain_maps) {
   const auto& sizes = raw.imgdata.sizes;
   RawCalibration calibration;
   calibration.left = sizes.left_margin;
@@ -467,18 +604,66 @@ RawCalibration prepare_calibration(CallbackLibRaw& raw, const LinearizationLut& 
   calibration.lut = &lut;
   raw.normalized_black_levels(calibration);
   calibration.dark = read_dark_frame(options.dark_frame, sizes.width, sizes.height);
+  calibration.gain_maps = std::move(gain_maps);
   return calibration;
 }
 
+// A DNG's three opcode lists, parsed; empty for any other file.
+std::array<codec::DngOpcodeList, 3> read_dng_opcodes(const LibRaw& raw) {
+  std::array<codec::DngOpcodeList, 3> lists;
+  if (raw.imgdata.idata.dng_version == 0) return lists;
+  for (std::size_t k = 0; k < lists.size(); ++k) {
+    const auto& stored = raw.imgdata.color.dng_levels.rawopcodes[k];
+    lists[k] = codec::parse_dng_opcode_list(static_cast<const std::uint8_t*>(stored.data), stored.len,
+                                            static_cast<int>(k + 1));
+  }
+  return lists;
+}
+
+// OpcodeList1's bad-pixel fixes, on the stored values of the whole sensor
+// image, before anything else touches them. False when one could not be
+// applied: the file is not a Bayer mosaic, or the list is implausibly large.
+bool apply_dng_bad_pixels(LibRaw& raw, const codec::DngOpcodeList& list) {
+  if (list.bad_pixels.empty()) return true;
+  auto& data = raw.imgdata.rawdata;
+  if (!data.raw_image || raw.imgdata.idata.filters < 1000) return false;
+  const std::size_t stride = std::max<std::size_t>(1U, data.sizes.raw_pitch / sizeof(std::uint16_t));
+  bool applied = true;
+  for (const auto& fix : list.bad_pixels) {
+    applied = codec::fix_dng_bad_pixels(data.raw_image, data.sizes.raw_width, data.sizes.raw_height,
+                                        stride, fix) &&
+              applied;
+  }
+  return applied;
+}
+
 void apply_code_calibration(CallbackLibRaw& raw, const RawCalibration& calibration) {
-  if (calibration.lut->samples.empty() && calibration.dark.empty()) return;
+  if (calibration.lut->samples.empty() && calibration.dark.empty() &&
+      calibration.gain_maps.empty()) {
+    return;
+  }
   auto& data = raw.imgdata.rawdata;
   if (!data.raw_image && !data.color4_image)
     throw std::invalid_argument("RAW code calibration requires an unpacked 16-bit sensor buffer");
   if (!calibration.dark.empty() && (!data.raw_image || !raw.imgdata.idata.filters))
     throw std::invalid_argument("RAW dark-frame calibration requires a CFA sensor buffer");
   const float mapped_white = linearized_code(calibration.white, calibration);
-  const auto corrected = [&](std::uint16_t value, unsigned x, unsigned y, unsigned c) {
+  // A gain map's grid position depends on the row and the column separately,
+  // so both are found once per map rather than once per sample.
+  struct GainAxes {
+    std::vector<codec::DngGainAxis> rows, columns;
+  };
+  std::vector<GainAxes> axes(calibration.gain_maps.size());
+  for (std::size_t i = 0; i < axes.size(); ++i) {
+    const auto& map = calibration.gain_maps[i];
+    axes[i].rows.resize(calibration.height);
+    axes[i].columns.resize(calibration.width);
+    for (unsigned y = 0; y < calibration.height; ++y)
+      axes[i].rows[y] = codec::dng_gain_axis(y, calibration.height, map.origin_v, map.spacing_v, map.points_v);
+    for (unsigned x = 0; x < calibration.width; ++x)
+      axes[i].columns[x] = codec::dng_gain_axis(x, calibration.width, map.origin_h, map.spacing_h, map.points_h);
+  }
+  const auto corrected = [&](std::uint16_t value, unsigned x, unsigned y, unsigned c, unsigned plane) {
     float black = static_cast<float>(calibration.black[c]);
     if (!calibration.black_pattern.empty()) {
       black += calibration.black_pattern[(y % calibration.black_rows) *
@@ -491,7 +676,16 @@ void apply_code_calibration(CallbackLibRaw& raw, const RawCalibration& calibrati
     const float baseline = calibration.dark.empty() ? mapped_black :
         linearized_code(calibration.dark[static_cast<std::size_t>(y) * calibration.width + x],
                         calibration);
-    const float signal = (linearized_code(value, calibration) - baseline) / range;
+    float signal =
+        std::clamp((linearized_code(value, calibration) - baseline) / range, 0.0F, 1.0F);
+    // OpcodeList2 acts on these linear values. Each gain map is clipped at
+    // white as the DNG SDK clips it, so a corner the map brightens saturates
+    // where the centre does and highlight recovery sees one clip level.
+    for (std::size_t i = 0; i < calibration.gain_maps.size(); ++i) {
+      const auto& map = calibration.gain_maps[i];
+      if (!codec::dng_gain_map_covers(map, y, x, plane)) continue;
+      signal = std::min(signal * codec::dng_gain(map, axes[i].rows[y], axes[i].columns[x], plane), 1.0F);
+    }
     return static_cast<std::uint16_t>(std::lround(std::clamp(signal, 0.0F, 1.0F) * 65535.0F));
   };
   for (unsigned y = 0; y < calibration.height; ++y) {
@@ -499,10 +693,10 @@ void apply_code_calibration(CallbackLibRaw& raw, const RawCalibration& calibrati
       const auto row_bytes = static_cast<std::size_t>(y + calibration.top) * data.sizes.raw_pitch;
       if (data.raw_image) {
         auto& value = data.raw_image[row_bytes / 2 + x + calibration.left];
-        value = corrected(value, x, y, raw.COLOR(y, x));
+        value = corrected(value, x, y, raw.COLOR(y, x), 0);
       } else {
         auto& value = data.color4_image[row_bytes / 8 + x + calibration.left];
-        for (unsigned c = 0; c < 4; ++c) value[c] = corrected(value[c], x, y, c);
+        for (unsigned c = 0; c < 4; ++c) value[c] = corrected(value[c], x, y, c, c);
       }
     }
   }
@@ -657,10 +851,11 @@ DecodedImage decode_raw(const std::filesystem::path& path,
   params.no_auto_bright = 1;
   params.output_bps = 16;
   params.half_size = options.half_size ? 1 : 0;
-  // ProPhoto's matrix rows sum to one, so neutral highlights fit in LibRaw's
-  // 16-bit output. XYZ (output_color=5) has a 1.0888 Z row sum and therefore
-  // clips neutral highlights in only that channel before float conversion.
-  params.output_color = 4;
+  // Camera RGB, no matrix. LibRaw applies an output matrix in 16-bit integers,
+  // truncating and clamping every component to [0, 65535], which cuts off
+  // highlight headroom and leaves no place to choose how colours outside the
+  // gamut are handled. The camera matrix is applied below, in float.
+  params.output_color = 0;
   params.gamm[0] = 1.0;
   params.gamm[1] = 1.0;
   params.use_p1_correction = 1;
@@ -715,7 +910,25 @@ DecodedImage decode_raw(const std::filesystem::path& path,
     decode.degradation_reasons.emplace_back(reason);
   };
   check_raw(raw.unpack(), "LibRaw unpack");
-  const auto calibration = prepare_calibration(raw, linearization_lut, options);
+  const std::string color_matrix = raw.color_matrix_source();
+  // Without a matrix camera RGB stands in for ProPhoto, so every colour is
+  // uncalibrated even though the decode itself succeeds.
+  if (color_matrix == "none") mark_degraded("no_camera_matrix");
+  // A DNG's opcode lists belong to its raw data: bad pixels it lists, and the
+  // lens shading its gain maps correct, are part of what the file describes.
+  // One this decoder cannot apply, unless the file marks it optional, leaves
+  // the image short of that description.
+  auto opcodes = read_dng_opcodes(raw);
+  bool opcodes_skipped = !apply_dng_bad_pixels(raw, opcodes[0]);
+  bool opcodes_malformed = false;
+  for (const auto& list : opcodes) {
+    opcodes_skipped = opcodes_skipped || !list.skipped_required.empty();
+    opcodes_malformed = opcodes_malformed || list.malformed;
+  }
+  if (opcodes_malformed) mark_degraded("dng_opcode_list_malformed");
+  if (opcodes_skipped) mark_degraded("dng_opcode_unsupported");
+  const auto calibration =
+      prepare_calibration(raw, linearization_lut, options, std::move(opcodes[1].gain_maps));
   apply_bad_pixel_map(raw, options.bad_pixel_map);
   if (options.auto_bad_pixel_correction) correct_auto_bad_pixels(raw);
   apply_code_calibration(raw, calibration);
@@ -771,7 +984,7 @@ DecodedImage decode_raw(const std::filesystem::path& path,
 #endif
 #endif
   if ((!linearization_lut.samples.empty() || !calibration.dark.empty() ||
-       !lens_shading.gains.empty()) &&
+       !calibration.gain_maps.empty() || !lens_shading.gains.empty()) &&
       (sizes.left_margin < calibration.left || sizes.top_margin < calibration.top ||
        static_cast<unsigned>(sizes.left_margin) + sizes.width > calibration.left + calibration.width ||
        static_cast<unsigned>(sizes.top_margin) + sizes.height > calibration.top + calibration.height)) {
@@ -797,8 +1010,9 @@ DecodedImage decode_raw(const std::filesystem::path& path,
     throw RawMemoryError(
         "LibRaw memory image: insufficient memory for processed RAW pixels");
   }
+  // Without an output matrix a four-colour sensor keeps all four channels.
   if (processed->type != LIBRAW_IMAGE_BITMAP || processed->colors < 3 ||
-      processed->bits != 16)
+      processed->colors > 4 || processed->bits != 16)
     throw std::runtime_error("LibRaw did not return a 16-bit RGB bitmap");
 
   DecodedImage result;
@@ -823,21 +1037,42 @@ DecodedImage decode_raw(const std::filesystem::path& path,
   } else {
     result.raw_white_balance = "daylight";
   }
+  result.raw_color_matrix = color_matrix;
   result.linear_p3 = FloatImage(processed->width, processed->height, 3);
   const auto* pixels = reinterpret_cast<const std::uint16_t*>(processed->data);
+  const auto dng_matrix = color_matrix == "embedded"
+                              ? dng_camera_matrix(raw, callback_context.applied_multipliers)
+                              : std::nullopt;
+  const auto columns = camera_to_ap1_columns(raw, color_matrix != "none", dng_matrix);
+  const float scale = exposure_gain * options.digital_gain / 65535.0F;
+  const auto channels = static_cast<std::size_t>(processed->colors);
+  // Camera RGB is never negative, so these limits cover every colour this
+  // camera's matrix can produce.
+  const auto compression = gamut_compression_scales(gamut_compression_limits(columns, channels));
   parallel_for_rows(processed->height, [&](const std::uint32_t y) {
     const auto row_start = static_cast<std::size_t>(y) * processed->width;
     for (std::uint32_t x = 0; x < processed->width; ++x) {
       const auto output_index = row_start + x;
-      const auto input_index =
-          output_index * processed->colors;
-      const float r = pixels[input_index] / 65535.0F * exposure_gain *
-                      options.digital_gain;
-      const float g = pixels[input_index + 1] / 65535.0F * exposure_gain *
-                      options.digital_gain;
-      const float b = pixels[input_index + 2] / 65535.0F * exposure_gain *
-                      options.digital_gain;
-      const auto p3 = prophoto_to_linear_p3(r, g, b);
+      const auto input_index = output_index * channels;
+      std::array<float, 4> camera{};
+      for (std::size_t c = 0; c < channels; ++c) {
+        camera[c] = pixels[input_index + c] * scale;
+      }
+      // A camera matrix extrapolates some saturated colours past the spectral
+      // locus. Narrow-band blue light lands at zero or negative luminance
+      // there, which the renderer shows as black, and clamping the negative
+      // components (as LibRaw's integer output did at ProPhoto's boundary)
+      // leaves it nearly black with its hue shifted. Compression instead pulls
+      // components that reach past P3 toward the largest one, so every camera
+      // colour ends inside AP1 and colours inside P3 are untouched. Values
+      // above one are highlight headroom and pass through.
+      std::array<float, 3> ap1{};
+      for (std::size_t i = 0; i < 3; ++i) {
+        ap1[i] = columns[0][i] * camera[0] + columns[1][i] * camera[1] +
+                 columns[2][i] * camera[2] + columns[3][i] * camera[3];
+      }
+      const auto inside = compress_gamut(ap1[0], ap1[1], ap1[2], compression);
+      const auto p3 = ap1_d65_to_linear_p3(inside[0], inside[1], inside[2]);
       result.linear_p3.pixels[output_index * 3] = p3[0];
       result.linear_p3.pixels[output_index * 3 + 1] = p3[1];
       result.linear_p3.pixels[output_index * 3 + 2] = p3[2];
@@ -872,6 +1107,32 @@ DecodedImage decode_raw(const std::filesystem::path& path,
   result.metadata.exposure_seconds = result.capture.exposure_time_seconds.value_or(0.0F);
   result.metadata.aperture = result.capture.aperture_f_number.value_or(0.0F);
   result.metadata.focal_length_mm = other.focal_len;
+  // LibRaw exposes the three settings the renderer needs and none of the six a
+  // level model reads: there is no exposure compensation in its `other` block and
+  // no presence anywhere. The file's own Exif is read instead, so a RAW reaches
+  // the model with the same capture vector a JPEG of the same frame would.
+  codec::apply_capture_parameters_from_file(result, path);
+  // Provenance follows the same source where LibRaw had nothing. Its maker-note
+  // block is empty for the 35 mm-equivalent length on some bodies while the Exif
+  // tag is right there, and a rendered file that cannot state the capture its own
+  // model read is a file whose provenance is weaker than its result.
+  const auto& parsed = result.metadata.capture;
+  if (result.metadata.iso == 0 && parsed.iso && *parsed.iso > 0.0) {
+    result.metadata.iso = static_cast<std::uint32_t>(std::min(
+        *parsed.iso, static_cast<double>(std::numeric_limits<std::uint32_t>::max())));
+  }
+  if (!(result.metadata.exposure_seconds > 0.0) && parsed.exposure_seconds) {
+    result.metadata.exposure_seconds = *parsed.exposure_seconds;
+  }
+  if (!(result.metadata.aperture > 0.0) && parsed.f_number) {
+    result.metadata.aperture = *parsed.f_number;
+  }
+  if (!(result.metadata.focal_length_mm > 0.0) && parsed.focal_length_mm) {
+    result.metadata.focal_length_mm = *parsed.focal_length_mm;
+  }
+  if (!(result.metadata.focal_length_35mm > 0.0) && parsed.focal_length_35mm) {
+    result.metadata.focal_length_35mm = *parsed.focal_length_35mm;
+  }
   if (other.timestamp > 0) {
     std::tm time{};
     localtime_s(&time, &other.timestamp);
@@ -961,7 +1222,10 @@ RawMosaic decode_raw_mosaic(const std::filesystem::path& path,
     throw std::invalid_argument("RAW mosaic requires a 2x2 Bayer CFA (X-Trans is not packable)");
   }
   check_raw(raw.unpack(), "LibRaw unpack RAW mosaic");
-  const auto calibration = prepare_calibration(raw, linearization_lut, options);
+  auto opcodes = read_dng_opcodes(raw);
+  static_cast<void>(apply_dng_bad_pixels(raw, opcodes[0]));
+  const auto calibration =
+      prepare_calibration(raw, linearization_lut, options, std::move(opcodes[1].gain_maps));
   apply_bad_pixel_map(raw, options.bad_pixel_map);
   if (options.auto_bad_pixel_correction) correct_auto_bad_pixels(raw);
   apply_code_calibration(raw, calibration);

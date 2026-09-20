@@ -53,16 +53,54 @@ carries it as `input_domain`. Nothing branches on the file extension.
   a gain-map HEIC round-trips at 2.08x across passes, drifting only by 8-bit
   gain quantization, where it previously lost roughly a third of its range each
   time.
-- The gain a cell carries is the mean of the gain its own pixels ask for, with
-  below-knee pixels contributing zero — the gain map downsampled, rather than
-  the gain of the downsampled image, so a small specular is not averaged away
-  before it is ever restored. Because the grid is then sampled bilinearly, a
-  shadow pixel bordering a bright cell still receives a little gain; the report
-  measures exactly how much as `render.below_knee_relative_difference_max`.
-  Manual rendering retains this pixel selection through LUT grading. For
-  gain-map output, peak, utilization and below-knee difference are measured
-  from the final quantized, bilinearly reconstructed map, before JPEG/HEVC
-  compression; they are not measurements of the codec's additional loss.
+- For Adaptive HDR and Ultra HDR the HDR rendition of an HDR input is packaged
+  to decode back to itself, pixel for pixel. The gain map is full resolution,
+  so no decoder resamples it: libultrahdr, Core Image and this project each
+  interpolate a smaller map by a different rule, and averaging gain over cells
+  gave every highlight its darker neighbours' gain (a Sony HLG frame came back
+  about a fifth darker above diffuse white). Each pixel's gain is the larger of
+  the SDR tone map's luminance ratio and the ratio that brings its brightest
+  channel down to 1.0, capped at the rendition's headroom; codes are rounded up
+  and the base is then computed from the *decoded* gain, so `base × 2^gain` is
+  the HDR pixel again and the 8-bit gain step only darkens the base by at most
+  one code (0.6% at 2.3 stops). The base therefore carries the HDR pixel's own
+  chroma instead of a gamut-fitted SDR colour — a saturated light is darker in
+  SDR rather than paler in HDR. The cap keeps `alternate_headroom` at the
+  photograph's real luminance range, because every display with less headroom
+  scales all gain by headroom ÷ `alternate_headroom`; a colour whose brightest
+  channel exceeds that range (0.04% of the reference HLG frame) keeps its
+  luminance and gives up only the excess chroma. A pixel below the knee receives
+  gain only when one of its channels is brighter than SDR white, which is what
+  `render.below_knee_relative_difference_max` then reports.
+- A full-resolution gain map larger than 3072 pixels an edge is written as a
+  grid of 2048-pixel HEVC tiles in the same layout as the base; the Ultra HDR
+  base of a full-resolution map is coded 4:4:4 rather than 4:2:0, because that
+  map exists to restore pixel-level detail and subsampled chroma measured as most
+  of the remaining error at saturated highlight edges. The panel exports an HDR
+  source's Adaptive HDR base at 10 bits; on the reference HLG frame an 8-bit
+  base was the largest remaining loss. `HyperDR verify <output> --reference
+  <source>` measures what survived (see [cli-reference.md](cli-reference.md)).
+- HLG uses the luminance-based BT.2100 OOTF. Its encodable display-light volume
+  is not a fixed RGB cube: with display RGB normalized to 1000 nits and
+  luminance `Y`, each channel must be at most `Y^(1 - 1/1.2)` for the inverse
+  OOTF's scene values to fit [0, 1]. Colours beyond that boundary are moved
+  toward the same-luminance neutral before encoding. This preserves brightness
+  instead of clipping saturated highlights channel by channel. Colours already
+  inside the HLG volume are unchanged. HEIC, AVIF and HLG LUT input encoding
+  share this handling; a colour outside that volume cannot retain all of its
+  saturation in a bounded HLG signal.
+- For RAW and SDR inputs, and for renditions whose SDR endpoint carries its own
+  LUT grade, the gain a cell carries is the mean of the gain its own pixels ask
+  for, with below-knee pixels contributing zero — the gain map downsampled,
+  rather than the gain of the downsampled image, so a small specular is not
+  averaged away before it is ever restored. Because the grid is then sampled
+  bilinearly, a shadow pixel bordering a bright cell still receives a little
+  gain; the report measures exactly how much as
+  `render.below_knee_relative_difference_max`. Manual rendering retains this
+  pixel selection through LUT grading. For gain-map output, peak, utilization and
+  below-knee difference are measured from the final quantized, reconstructed
+  map, before JPEG/HEVC compression; they are not measurements of the codec's
+  additional loss.
 
 Working in the log domain is what makes a large input headroom usable. A
 linear-domain shoulder asymptotic to 1.0 spends nearly its whole output range
@@ -88,10 +126,28 @@ creative expansion as any other SDR photograph.
   vibrance, highlight-to-white convergence, and hue-preserving gamut compression
   therefore happen on the shared base. RAW chroma is determined by SDR
   luminance, independent of the strength of the HDR alternate.
+- Every gamut fit (the shared base, display-referred SDR and HDR renditions,
+  the base of an exact HDR gain map, and the sRGB cube of an sRGB output) keeps
+  the colour's luminance, gives up only saturation, and returns a colour already
+  inside unchanged. Which hue it keeps depends on the hue. Outside the blues and
+  violets the colour keeps its Oklab hue: a straight line toward neutral keeps
+  the xy dominant wavelength, and on narrow-band LED colours that line missed
+  the hue of reds, oranges and yellows by 7.7 degrees on average in CAM16, 13.0
+  in IPT and 15.5 in ICtCp, against 1.7, 7.0 and 6.5 along the Oklab hue, and it
+  drew pink cores into orange lights. Blues and violets (Oklab hue -150 to -60
+  degrees, blended over 20 degrees on each side) keep the straight line: there
+  the four models disagree by up to 20 degrees, and the Oklab hue turned a blue
+  light in a real night frame teal where the camera's own rendering is blue.
 - Gain maps write zero base and alternate offsets, preserving common RGB ratios
   during ISO 21496-1 reconstruction.
 - Gain-map gamma is chosen by simulating 8-bit encode/decode error. Stored values
-  use `pow(q, gamma)` and decoders use `pow(code, 1/gamma)`.
+  use `pow(q, gamma)` and decoders use `pow(code, 1/gamma)`. The full-resolution
+  map of an HDR input stores linear gain (gamma 1): its base already absorbs the
+  code step, and nothing is interpolated.
+- The Adaptive HDR base declares Display P3 twice, as nclx and as an ICC profile
+  whose sRGB curve has its linear toe. An ICC-honouring reader decodes every base
+  code, including the shadows under code 10 that a zero toe slope used to turn
+  black in both the base and its reconstructed HDR.
 - `2^headroom_stops` is the nominal global-curve target. Local highlight
   weighting can deliberately make the final rendered peak lower; the report
   records both values. Local weights are not normalized back to the largest
@@ -105,12 +161,54 @@ creative expansion as any other SDR photograph.
   Ultra HDR stores the map as
   a grayscale JPEG at quality 85 or higher, as recommended for JPEG/R; the
   requested quality still controls the SDR base.
-- RAW is decoded through LibRaw's linear ProPhoto output (`output_color` 4), then
-  transformed in float to linear Display P3. ProPhoto is intentional: XYZ
-  (`output_color` 5) can clip neutral highlights in its Z channel before the
-  float conversion because that matrix row sums above one. Neither path passes
-  through Rec.709/sRGB, and out-of-P3 float components remain available until
-  output-specific gamut handling. `render.wide_gamut_fraction` is measured on the decoded, linear-P3
+- RAW is taken from LibRaw as linear camera RGB (`output_color` 0), after white
+  balance, demosaic and highlight handling, and the camera matrix LibRaw
+  selected is applied in float. LibRaw's own output spaces are converted in
+  16-bit integers clamped to [0, 65535], which cuts off headroom above white
+  (and XYZ, `output_color` 5, clips neutral highlights in its Z channel).
+  A camera matrix extrapolates some saturated colours past the spectral locus:
+  narrow-band blue light can land at zero or negative luminance and would
+  render as black, and clamping the negative components, as LibRaw's output
+  did at ProPhoto's boundary, leaves it nearly black with its hue shifted.
+  Camera colours are instead compressed into AP1 (the ACES primaries, kept at
+  D65) with the curve of the ACES Reference Gamut Compression, then converted
+  to linear Display P3. Per component, the distance from the achromatic axis,
+  `(max - c) / max`, is kept up to a threshold just above the farthest P3
+  reaches in AP1 (0.945, 0.987 and 0.9955), so no colour inside P3 changes.
+  Beyond it the curve (power 1.2) bends so that the farthest distance any
+  non-negative camera RGB reaches through this image's matrix lands on the AP1
+  boundary; those limits are computed exactly from the matrix, so no camera
+  colour leaves AP1. The compression is scale-invariant and leaves headroom
+  alone. Lower thresholds are smoother but move P3's most saturated colours
+  (a common 0.95 shifts P3 red toward magenta by 6 CIEDE2000), because AP1's
+  red-green edge runs along x + y = 1, as P3 red and the spectral locus from
+  yellow to red do. Nothing is clamped to Rec.709/sRGB on the way, and
+  out-of-P3 float components remain available until output-specific gamut
+  handling. The report's `raw_color_matrix` says whose matrix was used; a
+  camera LibRaw has no matrix for keeps its earlier treatment, camera RGB read
+  as ProPhoto primaries, and is compressed the same way, but its decode is
+  reported as degraded (`no_camera_matrix`) because none of its colours are
+  calibrated.
+  A DNG's colour calibration is applied as the DNG specification defines it and
+  Adobe's DNG SDK computes it, where LibRaw applies the D65 ColorMatrix whatever
+  the light. The white LibRaw balanced to (the reciprocal of the multipliers it
+  applied) is located through the file's own matrices; the two calibrations,
+  each ColorMatrix with its CameraCalibration and AnalogBalance, are
+  interpolated in inverse colour temperature at that white, at the SDK's
+  temperature for each illuminant (2850 K for standard light A, 6500 K for
+  D65); and a ForwardMatrix, where present, takes over from the inverted
+  ColorMatrix. CameraCalibration is used only when CameraCalibrationSignature
+  and ProfileCalibrationSignature match (missing signatures default to empty);
+  otherwise it is the identity matrix. The result is adapted from D50 to D65
+  with Bradford. Neutrals do
+  not move; how far other colours move depends on the camera, the content and
+  how far the light is from D65 (on the decoded data of seven DNGs checked, a
+  mean 0.4 to 3.0 ΔE ITP: a Ricoh GR IV 0.4 and 0.6 under 4600 to 4900 K and
+  1.8 and 2.4 under 3300 to 3500 K, three HDR+ phone frames near 4700 to
+  5100 K 0.9 to 3.0). A profile the SDK would refuse keeps LibRaw's matrix. A
+  profile's HueSatMap, LookTable and tone curve are a look rather than
+  calibration and are not applied.
+  `render.wide_gamut_fraction` is measured on the decoded, linear-P3
   input before exposure or look processing: among pixels with P3 luminance at least
   `0.02`, it is the fraction outside Rec.709. The report also records its
   numerator, denominator, and threshold.
@@ -136,6 +234,24 @@ creative expansion as any other SDR photograph.
   in the integer mosaic, then that scale is restored in float; the LSC stage
   cannot introduce integer overflow. LibRaw's demosaic and highlight processing
   still operate on that normalized mosaic.
+- A DNG's opcode lists, which LibRaw reads but never applies, are applied where
+  they describe the raw data. OpcodeList1's FixBadPixelsConstant is fixed as the
+  DNG SDK fixes it (a green pixel from its diagonal neighbours, red or blue from
+  the same colour two pixels away) and FixBadPixelsList from the nearest ring
+  of good same-colour pixels, both on the stored sensor values. OpcodeList2's
+  GainMap, the lens and colour shading correction Android phones write, runs
+  on linear values after black and white normalisation (the path a
+  linearization LUT takes, so LibRaw's maximum adjustment is off), interpolated
+  over the active area as the SDK interpolates it and clipped at white, so the
+  whole frame keeps one clip level for highlight recovery. On the HDR+ DNGs
+  checked the correction brightens the corners 2 to 2.8 times, and the radial
+  brightness of the renders follows the phone's own JPEG: in one frame, from
+  half to 70% of the way to the corners, the median is 1.69 times the centre's
+  against 1.95 in that JPEG, where it was 0.90.
+  Any other opcode a file does not mark optional, such as OpcodeList3's
+  lens-distortion warps, is not applied and the decode is reported as degraded
+  (`dng_opcode_unsupported`); an opcode list that does not parse reports
+  `dng_opcode_list_malformed`.
 - The opt-in `--raw-auto-bad-pixels` detector replaces extreme outliers using
   same-CFA neighbours before code calibration. `--raw-gain` multiplies the
   decoded float scene-linear image; it cannot recover earlier clipping and

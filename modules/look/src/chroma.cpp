@@ -3,6 +3,7 @@
 #include "hyperdr/image/color.hpp"
 #include <algorithm>
 #include <cmath>
+#include <limits>
 namespace hyperdr {
 std::array<float, 3> render_common_chroma(float r, float g, float b,
                                            float source_y, float sdr_y,
@@ -26,36 +27,21 @@ std::array<float, 3> render_common_chroma(float r, float g, float b,
       smoothstep(white_start, peak, hdr_y) * white_cap;
   for (float& value : chroma) value *= 1.0F - white_amount;
 
+  // At the source's scale a channel has to stay below 1 / sdr_ratio for the SDR
+  // rendition and below peak / hdr_ratio for the HDR one; the common colour is
+  // fitted to the lower of the two. The fit keeps the luminance and the Oklab
+  // hue and gives up only saturation, and returns a colour that already fits
+  // unchanged, so the mapping is continuous where colours reach the bound.
+  // (The tanh softener used before was not: values just below the bound were
+  // multiplied by tanh(1), about 0.76, and a smooth sky crossing it showed a
+  // contour.)
   const float sdr_ratio = sdr_y / source_y;
   const float hdr_ratio = hdr_y / source_y;
-  float alpha_limit = 1.0F;
-  for (const float value : chroma) {
-    if (value < 0.0F) {
-      alpha_limit = std::min(alpha_limit, -source_y / value);
-    } else if (value > 0.0F) {
-      if (sdr_ratio > kEpsilon) {
-        alpha_limit =
-            std::min(alpha_limit, (1.0F / sdr_ratio - source_y) / value);
-      }
-      if (hdr_ratio > kEpsilon) {
-        alpha_limit =
-            std::min(alpha_limit, (peak / hdr_ratio - source_y) / value);
-      }
-    }
-  }
-  alpha_limit = std::clamp(alpha_limit, 0.0F, 1.0F);
-  // `alpha_limit` is the largest common-chroma fraction that keeps both the
-  // SDR and HDR renditions inside their channel bounds.  The old tanh softener
-  // was discontinuous at exactly one: values just below one were multiplied
-  // by tanh(1) (~0.76), while one and above were left untouched.  A smooth sky
-  // crossing that boundary therefore produced a visible contour.  The limit
-  // itself is already a hue-preserving gamut compression, and using it
-  // directly keeps the mapping continuous while never allowing a channel to
-  // exceed the bound it was computed for.
-  const float alpha = alpha_limit;
-  std::array<float, 3> common{source_y + alpha * chroma[0],
-                               source_y + alpha * chroma[1],
-                               source_y + alpha * chroma[2]};
+  float upper = std::numeric_limits<float>::infinity();
+  if (sdr_ratio > kEpsilon) upper = std::min(upper, 1.0F / sdr_ratio);
+  if (hdr_ratio > kEpsilon) upper = std::min(upper, peak / hdr_ratio);
+  const auto common = fit_linear_p3_gamut(
+      source_y + chroma[0], source_y + chroma[1], source_y + chroma[2], upper);
   const float common_y = p3_luminance(common[0], common[1], common[2]);
   if (!(common_y > kEpsilon && std::isfinite(common_y)))
     return {0.0F, 0.0F, 0.0F};

@@ -50,6 +50,60 @@ void test_exif() {
           "high ISO value missing from XMP sequence");
 }
 
+// The capture vector the research level model consumes is only usable when the
+// reader can tell "the tag was absent" from "the tag held zero", and only the
+// exposure-bias tag is routinely zero on purpose. Both halves are asserted here,
+// because a reader that reported the two the same way would still round-trip
+// every value correctly while making the model's fallback rule unreachable.
+void test_capture_parameters_and_exposure_bias() {
+  hyperdr::PhotoMetadata metadata;
+  metadata.iso = 400;
+  metadata.exposure_seconds = 1.0 / 500.0;
+  metadata.aperture = 2.8;
+  metadata.focal_length_mm = 35.0;
+  metadata.focal_length_35mm = 35;
+  metadata.capture.iso = 400.0;
+  metadata.capture.exposure_seconds = 1.0 / 500.0;
+  metadata.capture.f_number = 2.8;
+  metadata.capture.exposure_bias_ev = -2.0 / 3.0;
+  metadata.capture.focal_length_mm = 35.0;
+  metadata.capture.focal_length_35mm = 35.0;
+
+  const auto exif = hyperdr::make_minimal_exif(metadata);
+  const auto read = hyperdr::read_photo_metadata(exif.data(), exif.size());
+  require(read.has_value(), "capture metadata did not round trip at all");
+  require(read->capture.exposure_bias_ev.has_value(),
+          "ExposureBiasValue was not read back");
+  require(std::abs(*read->capture.exposure_bias_ev + 2.0 / 3.0) < 1.0e-3,
+          "a negative exposure compensation changed sign or magnitude");
+  require(hyperdr::capture_parameters_complete(read->capture),
+          "a complete capture was rejected");
+
+  auto released = read->capture;
+  released.exposure_bias_ev = 0.0;
+  require(hyperdr::capture_parameters_complete(released),
+          "0 EV was treated as a missing tag");
+
+  auto absent = read->capture;
+  absent.exposure_bias_ev.reset();
+  std::vector<std::string> missing;
+  require(!hyperdr::capture_parameters_complete(absent, &missing) &&
+              missing.size() == 1 && missing.front() == "exposure_bias_ev",
+          "a missing exposure bias did not name itself and only itself");
+
+  auto zero_length = read->capture;
+  zero_length.focal_length_35mm = 0.0;
+  missing.clear();
+  require(!hyperdr::capture_parameters_complete(zero_length, &missing) &&
+              missing.size() == 1 && missing.front() == "focal_length_35mm",
+          "a zero 35 mm-equivalent focal length was accepted as a measurement");
+
+  auto invalid_iso = read->capture;
+  invalid_iso.iso = 0.0;
+  require(!hyperdr::capture_parameters_complete(invalid_iso),
+          "a zero ISO was accepted as a capture setting");
+}
+
 void test_portable_metadata_round_trip() {
   hyperdr::PhotoMetadata source;
   source.make = "Camera & Co";
@@ -286,6 +340,7 @@ void test_preamble_is_skipped() {
 int main() {
   try {
     test_exif();
+    test_capture_parameters_and_exposure_bias();
     test_portable_metadata_round_trip();
     test_orientation_reader();
     test_round_trip();

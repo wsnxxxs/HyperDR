@@ -84,6 +84,40 @@ void test_common_denominator_round_trip() {
           "common-denominator numerators changed");
 }
 
+// The research models reconstruct with a 1e-5 base offset; the incumbent uses
+// zero. The offset is only meaningful if it survives the container, so the
+// payload is the thing asserted rather than the in-memory result: a report field
+// that says 1e-5 while the encoded metadata says 0 would render the other curve.
+void test_base_offset_round_trip() {
+  hyperdr::GainMapMetadata metadata;
+  metadata.base_headroom = {0, 1};
+  metadata.alternate_headroom = {2500000, 1000000};
+  metadata.gain_min = {-500000, 1000000};
+  metadata.gain_max = {2504564, 1000000};
+  metadata.gamma = {1000000, 1000000};
+  metadata.base_offset = {1, 100000};
+  metadata.alternate_offset = {1, 100000};
+
+  const auto payload = hyperdr::serialize_tmap_payload(metadata);
+  const auto decoded = hyperdr::parse_tmap_payload(payload);
+  require(decoded.base_offset.numerator == 1 && decoded.base_offset.denominator == 100000,
+          "the research base offset did not survive the payload");
+  require(decoded.alternate_offset.numerator == 1 &&
+              decoded.alternate_offset.denominator == 100000,
+          "the research alternate offset did not survive the payload");
+  require(std::abs(hyperdr::rational_value(decoded.base_offset) - 1.0e-5F) < 1.0e-12F,
+          "the research base offset changed value");
+
+  // And the incumbent's zero must stay exactly zero: a default that quietly
+  // became 1e-5 would change the production model's output.
+  metadata.base_offset = {0, 1};
+  metadata.alternate_offset = {0, 1};
+  const auto incumbent = hyperdr::parse_tmap_payload(hyperdr::serialize_tmap_payload(metadata));
+  require(incumbent.base_offset.numerator == 0 &&
+              hyperdr::rational_value(incumbent.base_offset) == 0.0F,
+          "a zero base offset did not round trip as zero");
+}
+
 void test_multichannel_round_trip() {
   hyperdr::GainMapMetadata metadata;
   metadata.flags |= 0x80U;
@@ -230,6 +264,7 @@ int main() {
   try {
     test_invalid_tmap_metadata();
     test_common_denominator_round_trip();
+    test_base_offset_round_trip();
     test_multichannel_round_trip();
     test_writer_profiles_are_explicit();
     test_registered_profiles_against_corpus_payloads();

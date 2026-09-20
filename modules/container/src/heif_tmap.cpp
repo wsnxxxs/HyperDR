@@ -528,9 +528,12 @@ Bytes add_tmap_to_two_image_heif(const Bytes& source, const Bytes& tmap_payload)
     max_id = std::max(max_id, static_cast<std::uint16_t>(item.id));
     const bool hidden = item.infe.size() >= 12 && (item.infe[11] & 1U) != 0;
     // The Gain Map is encoded first, so it is the lowest-numbered visible HEVC item
-    // that is not the primary image; grid tile items are hidden by libheif.
-    if ((item.type == "hvc1" || item.type == "hev1") && item.id != primary_id &&
-        !hidden && gain_id == 0) gain_id = static_cast<std::uint16_t>(item.id);
+    // that is not the primary image; grid tile items are hidden by libheif. A
+    // full-resolution map is itself a grid, whose hidden tiles follow it.
+    if ((item.type == "hvc1" || item.type == "hev1" || item.type == "grid") &&
+        item.id != primary_id && !hidden && gain_id == 0) {
+      gain_id = static_cast<std::uint16_t>(item.id);
+    }
   }
   if (gain_id == 0 || max_id == std::numeric_limits<std::uint16_t>::max()) throw std::runtime_error("expected a second HEVC image item");
   const auto tmap_id = static_cast<std::uint16_t>(max_id + 1);

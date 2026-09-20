@@ -42,7 +42,8 @@ std::vector<std::uint8_t> compress_jpeg(const std::uint8_t* pixels, std::uint32_
                                         std::uint32_t height, int components,
                                         J_COLOR_SPACE color_space, int quality,
                                         const std::vector<std::uint8_t>* exif_tiff = nullptr,
-                                        const std::vector<std::uint8_t>* icc = nullptr) {
+                                        const std::vector<std::uint8_t>* icc = nullptr,
+                                        bool full_chroma = false) {
   if (!pixels || width == 0 || height == 0) {
     throw std::invalid_argument("cannot encode an empty JPEG image");
   }
@@ -67,6 +68,12 @@ std::vector<std::uint8_t> compress_jpeg(const std::uint8_t* pixels, std::uint32_
   info.in_color_space = color_space;
   jpeg_set_defaults(&info);
   jpeg_set_quality(&info, std::clamp(quality, 0, 100), TRUE);
+  if (full_chroma) {
+    for (int component = 0; component < info.num_components; ++component) {
+      info.comp_info[component].h_samp_factor = 1;
+      info.comp_info[component].v_samp_factor = 1;
+    }
+  }
   info.optimize_coding = TRUE;
   jpeg_start_compress(&info, TRUE);
 
@@ -99,7 +106,7 @@ std::vector<std::uint8_t> compress_jpeg(const std::uint8_t* pixels, std::uint32_
 
 std::vector<std::uint8_t> make_base_jpeg(const FloatImage& image,
                                          const PhotoMetadata& metadata, int quality,
-                                         bool clamp_srgb) {
+                                         bool clamp_srgb, bool full_chroma) {
   if (image.channels != 3) throw std::invalid_argument("Ultra HDR base must be RGB");
   std::vector<std::uint8_t> rgb(static_cast<std::size_t>(image.width) * image.height * 3);
   for (std::uint32_t y = 0; y < image.height; ++y) {
@@ -119,7 +126,8 @@ std::vector<std::uint8_t> make_base_jpeg(const FloatImage& image,
     }
   }
   const auto exif = make_minimal_exif(metadata);
-  return compress_jpeg(rgb.data(), image.width, image.height, 3, JCS_RGB, quality, &exif);
+  return compress_jpeg(rgb.data(), image.width, image.height, 3, JCS_RGB, quality, &exif,
+                       nullptr, full_chroma);
 }
 
 std::vector<std::uint8_t> make_gain_jpeg(const FloatImage& image, int quality) {
@@ -211,8 +219,15 @@ void verify_sdr_jpeg(const std::vector<std::uint8_t>& bytes) {
 std::vector<std::uint8_t> encode_ultrahdr_jpeg(const GainMapResult& images,
                                                const PhotoMetadata& metadata, int quality) {
   if (quality < 0 || quality > 100) throw std::invalid_argument("quality must be in [0,100]");
+  // A full-resolution gain map exists to put every HDR pixel back where it was
+  // (an HDR source's own highlights). Subsampling the base's chroma would throw
+  // away half of the colour resolution that map multiplies, which measured on a
+  // Sony HLG frame as most of the remaining error at saturated highlight edges.
+  // A mathematical map is low-frequency and keeps the smaller 4:2:0 base.
+  const bool full_resolution_gain = images.gain_map.width == images.base_linear.width &&
+                                     images.gain_map.height == images.base_linear.height;
   auto base_bytes = make_base_jpeg(images.base_linear, metadata, quality,
-                                   images.clamp_srgb);
+                                   images.clamp_srgb, full_resolution_gain);
   // The format guidance recommends 85-90 for the recovery map. Keep HDR
   // reconstruction stable even when the caller deliberately lowers base quality.
   auto gain_bytes = make_gain_jpeg(images.gain_map, std::max(85, quality));

@@ -91,6 +91,14 @@ struct PhotoRenditions {
   // Original spatial log2 gain, before interpolation/quantization.
   // Cleared by grading that changes the SDR/HDR relation.
   FloatImage gain_stops;
+  // The HDR rendition is the photograph itself rather than an expansion the
+  // renderer invented, so a gain map must decode back to it pixel for pixel.
+  // Set for a display-referred HDR input; the packager then stores a
+  // full-resolution gain and derives the base from these HDR pixels instead of
+  // averaging gain over cells. `sdr` still supplies each pixel's tone-mapped
+  // luminance. Cleared, like gain_stops, by grading that gives the SDR
+  // rendition a colour of its own.
+  bool hdr_is_source{false};
   RenderStats stats;
   bool clamp_srgb{false};
   // Selection made before creative grading; reused after gain quantization.

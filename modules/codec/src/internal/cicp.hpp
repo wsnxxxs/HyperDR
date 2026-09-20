@@ -130,7 +130,9 @@ inline float decode_transfer(float encoded, int transfer) {
     case kCicpTransferPq:
       return pq_eotf(encoded);
     case kCicpTransferHlg:
-      return hlg_inverse_oetf(encoded);
+      // The HLG OOTF works on a pixel's luminance, so no single channel can
+      // be decoded on its own; encoded_to_linear_p3 decodes the whole pixel.
+      throw std::logic_error("HLG decodes whole pixels, not single channels");
     case kCicpTransferSrgb:
       return srgb_eotf(encoded);
     // The four SDR broadcast curves are one function, and it is not sRGB.
@@ -159,11 +161,28 @@ inline float decode_transfer(float encoded, int transfer) {
                            std::to_string(transfer));
 }
 
+// Luminance weights of a signal's primaries, for the HLG OOTF. BT.2100 defines
+// HLG on Rec.2020; a file that pairs HLG with other primaries gets theirs.
+[[nodiscard]] inline std::array<float, 3> cicp_luminance_weights(int primaries) {
+  switch (primaries) {
+    case kCicpPrimariesBt2020: return kRec2020Luminance;
+    case kCicpPrimariesDisplayP3: return {0.2289746F, 0.6917385F, 0.0792869F};
+    default: return {0.2126F, 0.7152F, 0.0722F};
+  }
+}
+
 inline std::array<float, 3> encoded_to_linear_p3(float r, float g, float b,
                                                  int primaries, int transfer) {
-  const float R = decode_transfer(r, transfer);
-  const float G = decode_transfer(g, transfer);
-  const float B = decode_transfer(b, transfer);
+  std::array<float, 3> linear{};
+  if (transfer == kCicpTransferHlg) {
+    linear = hlg_decode({r, g, b}, cicp_luminance_weights(primaries));
+  } else {
+    linear = {decode_transfer(r, transfer), decode_transfer(g, transfer),
+              decode_transfer(b, transfer)};
+  }
+  const float R = linear[0];
+  const float G = linear[1];
+  const float B = linear[2];
   switch (primaries) {
     case kCicpPrimariesDisplayP3:
       return {std::max(0.0F, R), std::max(0.0F, G), std::max(0.0F, B)};

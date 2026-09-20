@@ -80,10 +80,18 @@ void validate_input_description(const InputDescription& input);
 
 // These values are intentionally optional: a missing EXIF field must not be
 // silently replaced with a plausible-looking capture setting.
+//
+// The last three were added for the research gain-level model rather than for
+// the renderer, and are carried here because every decoder already builds this
+// one structure: a capture setting reachable from only some input formats would
+// make the same photograph a different model input depending on its container.
 struct CaptureMetadata {
   std::optional<float> iso;
   std::optional<float> exposure_time_seconds;
   std::optional<float> aperture_f_number;
+  std::optional<float> exposure_bias_ev;
+  std::optional<float> focal_length_mm;
+  std::optional<float> focal_length_35mm;
 };
 
 struct LookOptions {

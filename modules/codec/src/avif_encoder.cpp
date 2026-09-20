@@ -98,13 +98,15 @@ std::vector<std::uint8_t> encode_avif(const PhotoRenditions& images,
                                         std::max(0.0F, wide[2])};
       peak = std::max(peak, std::max({linear[0], linear[1], linear[2]}));
       luminance_sum += 0.2627 * linear[0] + 0.6780 * linear[1] + 0.0593 * linear[2];
+      const auto encoded = encoding == HdrEncoding::AvifPq
+                               ? std::array<float, 3>{pq_oetf(linear[0]), pq_oetf(linear[1]),
+                                                      pq_oetf(linear[2])}
+                               : hlg_encode(linear);
       for (unsigned channel = 0; channel < 3; ++channel) {
-        const float encoded = encoding == HdrEncoding::AvifPq ? pq_oetf(linear[channel])
-                                                              : hlg_oetf(linear[channel]);
         // Same dithered quantization as the HEIC path: the gain map multiplies
         // quantization error, so undithered 10-bit skies band visibly.
-        row[x * 3U + channel] =
-            static_cast<std::uint16_t>(quantize_dithered(encoded, max_code, x, y, channel));
+        row[x * 3U + channel] = static_cast<std::uint16_t>(
+            quantize_dithered(encoded[channel], max_code, x, y, channel));
       }
     }
     row_peak[y] = peak;

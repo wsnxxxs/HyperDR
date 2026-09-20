@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 
 namespace hyperdr {
 
@@ -90,32 +91,84 @@ inline constexpr float kReferenceWhiteNits = 203.0F;
   return normalized_10000_nits * 10000.0F / kReferenceWhiteNits;
 }
 
-[[nodiscard]] inline float hlg_oetf(float relative_linear) {
-  constexpr float kNominalPeakNits = 1000.0F;
-  constexpr float kSystemGamma = 1.2F;
+// The BT.2100 HLG reference display: a 1000 cd/m² nominal peak and the system
+// gamma of 1.2 that goes with it. Its OOTF is defined on Rec.2020 luminance.
+inline constexpr float kHlgNominalPeakNits = 1000.0F;
+inline constexpr float kHlgSystemGamma = 1.2F;
+inline constexpr std::array<float, 3> kRec2020Luminance{0.2627F, 0.6780F, 0.0593F};
+
+// The BT.2100 HLG OETF on normalized scene light in [0, 1], and its inverse.
+// No OOTF: these are per channel by definition.
+[[nodiscard]] inline float hlg_oetf_scene(float scene) {
   constexpr float a = 0.17883277F;
   constexpr float b = 0.28466892F;
   constexpr float c = 0.55991073F;
-  // Undo the 1000-nit HLG display OOTF, then apply the BT.2100 scene OETF.
-  // This places diffuse white (203 nits) at signal level 0.75.
-  const float display =
-      std::clamp(relative_linear * kReferenceWhiteNits / kNominalPeakNits, 0.0F, 1.0F);
-  const float scene = std::pow(display, 1.0F / kSystemGamma);
-  return scene <= 1.0F / 12.0F ? std::sqrt(3.0F * scene)
-                               : a * std::log(12.0F * scene - b) + c;
+  const float e = std::max(0.0F, scene);
+  return e <= 1.0F / 12.0F ? std::sqrt(3.0F * e) : a * std::log(12.0F * e - b) + c;
 }
 
-[[nodiscard]] inline float hlg_inverse_oetf(float encoded) {
-  constexpr float kNominalPeakNits = 1000.0F;
-  constexpr float kSystemGamma = 1.2F;
+[[nodiscard]] inline float hlg_inverse_oetf_scene(float signal) {
   constexpr float a = 0.17883277F;
   constexpr float b = 0.28466892F;
   constexpr float c = 0.55991073F;
-  const float signal = std::max(0.0F, encoded);
-  const float scene = signal <= 0.5F ? (signal * signal) / 3.0F
-                                     : (std::exp((signal - c) / a) + b) / 12.0F;
-  const float display = std::pow(std::max(scene, 0.0F), kSystemGamma);
-  return display * kNominalPeakNits / kReferenceWhiteNits;
+  const float s = std::max(0.0F, signal);
+  return s <= 0.5F ? (s * s) / 3.0F : (std::exp((s - c) / a) + b) / 12.0F;
+}
+
+// Display light relative to diffuse white to an HLG signal: BT.2100's inverse
+// OOTF, then the OETF on each channel. Diffuse white (203 cd/m²) lands at 0.75.
+// The OOTF works on luminance -- the colour is scaled by a power of its own
+// luminance -- so channel ratios survive it. Raising each channel to the system
+// gamma instead, as this project used to, over-saturated every HLG colour
+// relative to a BT.2100 display. `weights` are the luminance weights of the
+// signal's primaries (Rec.2020 unless an HLG signal says otherwise).
+[[nodiscard]] inline std::array<float, 3> hlg_encode(
+    const std::array<float, 3>& relative,
+    const std::array<float, 3>& weights = kRec2020Luminance) {
+  const double scale = kReferenceWhiteNits / kHlgNominalPeakNits;
+  std::array<double, 3> display{};
+  for (std::size_t c = 0; c < 3; ++c) {
+    display[c] = std::isfinite(relative[c]) ? std::max(0.0, relative[c] * scale) : 0.0;
+  }
+  const double luminance =
+      weights[0] * display[0] + weights[1] * display[1] + weights[2] * display[2];
+  if (!(luminance > 0.0)) return {0.0F, 0.0F, 0.0F};
+  // HLG's display volume is not a fixed RGB cube: at luminance Y the
+  // inverse OOTF requires each display channel <= Y^((gamma-1)/gamma).
+  // Fit toward neutral at the same luminance before encoding, so a saturated
+  // highlight gives up only unrepresentable chroma rather than also losing
+  // brightness when its scene-light channel is clipped to one.
+  if (luminance >= 1.0) return {1.0F, 1.0F, 1.0F};
+  const double maximum = std::pow(luminance, 1.0 - 1.0 / kHlgSystemGamma);
+  const double peak = std::max({display[0], display[1], display[2]});
+  if (peak > maximum) {
+    const double amount = (maximum - luminance) / (peak - luminance);
+    for (double& channel : display) {
+      channel = luminance + amount * (channel - luminance);
+    }
+  }
+  const double factor = std::pow(luminance, 1.0 / kHlgSystemGamma - 1.0);
+  std::array<float, 3> signal{};
+  for (std::size_t c = 0; c < 3; ++c) {
+    signal[c] = hlg_oetf_scene(static_cast<float>(std::min(1.0, display[c] * factor)));
+  }
+  return signal;
+}
+
+// The inverse of hlg_encode: the OETF undone on each channel, then the OOTF on
+// the scene luminance, returned relative to diffuse white.
+[[nodiscard]] inline std::array<float, 3> hlg_decode(
+    const std::array<float, 3>& signal,
+    const std::array<float, 3>& weights = kRec2020Luminance) {
+  std::array<double, 3> scene{};
+  for (std::size_t c = 0; c < 3; ++c) scene[c] = hlg_inverse_oetf_scene(signal[c]);
+  const double luminance =
+      weights[0] * scene[0] + weights[1] * scene[1] + weights[2] * scene[2];
+  if (!(luminance > 0.0)) return {0.0F, 0.0F, 0.0F};
+  const double factor = std::pow(luminance, kHlgSystemGamma - 1.0) * kHlgNominalPeakNits /
+                        kReferenceWhiteNits;
+  return {static_cast<float>(scene[0] * factor), static_cast<float>(scene[1] * factor),
+          static_cast<float>(scene[2] * factor)};
 }
 
 }  // namespace hyperdr

@@ -19,6 +19,44 @@ struct GpsPosition {
   std::optional<double> altitude_metres;
 };
 
+// The ordinary capture settings a gain-level model may consume, in the order
+// the research training pipeline builds them (``src/prepare.py``). Each field
+// is optional because the tag is: an exposure bias of 0 EV is a real capture
+// value and must not be confused with a missing tag, which is why presence is
+// carried by ``optional`` and not by a sentinel number.
+//
+// This is deliberately separate from ``PhotoMetadata``'s plain doubles: those
+// exist for writing Exif back out, where a zero default is the correct "omit
+// the tag" signal, and a reader that returned them would be unable to answer
+// whether the camera recorded anything at all.
+struct CaptureParameters {
+  std::optional<double> iso;
+  std::optional<double> exposure_seconds;
+  std::optional<double> f_number;
+  std::optional<double> exposure_bias_ev;
+  std::optional<double> focal_length_mm;
+  std::optional<double> focal_length_35mm;
+};
+
+// Whether these six values are a complete capture.
+//
+// The demonstration contract is: every field present and finite, and ISO,
+// exposure time and aperture positive. Exposure bias is deliberately not in
+// that last group -- 0 EV is the ordinary value on a rig that did not
+// compensate, and treating it as absent would throw away the most common
+// complete vector there is.
+//
+// One further condition was added after reading the tags back, and is called out
+// because it is stricter than the written rule rather than implied by it: Exif
+// defines 0 as "unknown" for both focal-length tags, so a zero there is treated
+// as an absent tag instead of as a measurement of zero millimetres.
+//
+// When `missing` is not null it receives the names of the fields that failed,
+// which is what a run report has to say instead of only that the model fell
+// back.
+[[nodiscard]] bool capture_parameters_complete(
+    const CaptureParameters& capture, std::vector<std::string>* missing = nullptr);
+
 struct PhotoMetadata {
   std::string make;
   std::string model;
@@ -36,6 +74,9 @@ struct PhotoMetadata {
   double focal_length_mm{};
   double focal_length_35mm{};
   std::optional<GpsPosition> gps;
+  // What the camera recorded, with the "no tag" case preserved. `iso` above
+  // says 0 for both "ISO 0" and "no ISO tag"; this one does not.
+  CaptureParameters capture;
 };
 
 [[nodiscard]] std::vector<std::uint8_t> make_minimal_exif(const PhotoMetadata& metadata);

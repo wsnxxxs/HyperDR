@@ -127,10 +127,11 @@ std::array<float,3> encode_lut_space(std::array<float,3> rgb, LutSpace space) {
     rgb=compress_linear_p3_to_srgb(rgb[0],rgb[1],rgb[2]);
     rgb=linear_p3_to_rec709(rgb[0],rgb[1],rgb[2]);
   }
+  // HLG's OOTF works on luminance, so its signal is encoded per pixel.
+  if (space==LutSpace::Hlg) return hlg_encode(rgb);
   for(auto& c:rgb) {
     switch(space) {
       case LutSpace::SLog3:c=slog3_encode(c);break;
-      case LutSpace::Hlg:c=hlg_oetf(c);break;
       case LutSpace::Pq:c=pq_oetf(c);break;
       case LutSpace::Rec709:c=std::pow(std::max(0.0F,c),1/2.4F);break;
       default:c=srgb_oetf(c);break;
@@ -139,10 +140,12 @@ std::array<float,3> encode_lut_space(std::array<float,3> rgb, LutSpace space) {
   return rgb;
 }
 std::array<float,3> decode_lut_space(std::array<float,3> rgb, LutSpace space) {
-  for(auto& c:rgb) {
+  if (space==LutSpace::Hlg) {
+    for(auto& c:rgb) c=std::clamp(c,0.0F,1.0F);
+    rgb=hlg_decode(rgb);
+  } else for(auto& c:rgb) {
     switch(space) {
       case LutSpace::SLog3:c=slog3_decode(c);break;
-      case LutSpace::Hlg:c=hlg_inverse_oetf(std::clamp(c,0.0F,1.0F));break;
       case LutSpace::Pq:c=pq_eotf(std::clamp(c,0.0F,1.0F));break;
       case LutSpace::Rec709:c=std::pow(std::max(0.0F,c),2.4F);break;
       default:c=srgb_eotf(c);break;
@@ -164,6 +167,7 @@ void apply_rendition_lut(PhotoRenditions& out, const ColorLutOptions& grade, con
   validate_color_lut_options(grade);
   if(grade.path.empty() || grade.strength==0) return;
   out.gain_stops = {};
+  out.hdr_is_source = false;
   if(!sdr_space(grade.input)) throw std::invalid_argument("AI/external gain requires an SDR creative LUT");
   const auto owned=supplied ? ColorLut{} : read_color_lut(grade.path);
   const auto& lut=supplied?*supplied:owned;
@@ -178,14 +182,18 @@ void apply_rendition_lut(PhotoRenditions& out, const ColorLutOptions& grade, con
       const float ratio=out.hdr.pixels.empty()?1:
           (p3_luminance(out.hdr.pixels[i],out.hdr.pixels[i+1],out.hdr.pixels[i+2])+1e-6F)/(base_y+1e-6F);
       auto rgb=decode_lut_space(lut.sample(encode_lut_space(before,grade.input)),grade.output);
-      for(auto& c:rgb) c=std::clamp(c,0.0F,1.0F);
+      // A LUT output outside the SDR cube (or, from a Rec.2020 output space,
+      // outside P3) is fitted at its own luminance and hue; clamping each
+      // channel would shift the hue of every colour the grade pushed out.
+      rgb=fit_linear_p3_gamut(rgb[0],rgb[1],rgb[2],1.0F);
       if(out.clamp_srgb) rgb=compress_linear_p3_to_srgb(rgb[0],rgb[1],rgb[2]);
+      const auto hdr_rgb=fit_linear_p3_gamut(rgb[0]*ratio,rgb[1]*ratio,rgb[2]*ratio,peak);
       // Construct the full-grade endpoints first. The HDR source can have a
       // different hue from SDR, so each rendition blends from its own RGB.
       for(int c=0;c<3;++c) {
         out.sdr.pixels[i+c]=std::lerp(before[c],rgb[c],grade.strength);
         if(!out.hdr.pixels.empty()) out.hdr.pixels[i+c]=std::lerp(
-            out.hdr.pixels[i+c],std::min(peak,rgb[c]*ratio),grade.strength);
+            out.hdr.pixels[i+c],hdr_rgb[c],grade.strength);
       }
     }
   });
@@ -298,9 +306,13 @@ PhotoRenditions render_graded_photo(const FloatImage& source,
     }
     out.sdr=render_renditions(developed_sdr,adjusted,capture,sdr_input,RenderTarget::Sdr).sdr;
     out.below_knee=std::move(developed_below_knee);
+    // The SDR endpoint now carries its own grade, so it is no longer the tone
+    // map of the HDR pixels the packager would derive a base from.
+    out.hdr_is_source=false;
   }
   out.stats.exposure_ev=exposure_ev;
   if(grade.strength<1) {
+    out.hdr_is_source=false;
     auto original=baseline();
     for(std::size_t i=0;i<out.sdr.pixels.size();++i) out.sdr.pixels[i]=std::lerp(original.sdr.pixels[i],out.sdr.pixels[i],grade.strength);
     for(std::size_t i=0;i<out.hdr.pixels.size();++i) out.hdr.pixels[i]=std::lerp(original.hdr.pixels[i],out.hdr.pixels[i],grade.strength);

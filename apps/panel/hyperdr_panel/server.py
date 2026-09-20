@@ -20,9 +20,10 @@ from . import api, security
 from .config import PREFERRED_PORT
 from .handler import Handler
 from .job import active_session_id, shutdown
+from .phone_connection import PhoneConnections
 from .session import cleanup_expired_sessions
 
-class PanelServer(ThreadingHTTPServer):
+class PanelServer(PhoneConnections, ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
@@ -58,44 +59,6 @@ class PanelServer(ThreadingHTTPServer):
     context: api.Context
     login_throttle: security.LoginThrottle
 
-    def enable_phone(self, owner: str) -> dict:
-        if not owner or len(owner) > 128:
-            raise ValueError("缺少桌面会话标识。")
-        with self.phone_lock:
-            workbench = self.context.workbench
-            if self.phone_server is None:
-                tls_dir = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "HyperDR" / "tls"
-                certificate = os.environ.get("HYPERDR_TLS_CERT", str(tls_dir / "hyperdr.pem"))
-                key = os.environ.get("HYPERDR_TLS_KEY", str(tls_dir / "hyperdr-key.pem"))
-                tls = load_tls_context(certificate, key) if Path(certificate).is_file() and Path(key).is_file() else None
-                scheme = "https" if tls else "http"
-                port = find_free_port("0.0.0.0", PREFERRED_PORT + 1)
-                phone = build_server("0.0.0.0", port, security.make_token(), scheme,
-                                     phone_only=True)
-                phone.context.workbench = workbench
-                if tls:
-                    phone.socket = tls.wrap_socket(phone.socket, server_side=True)
-                self.phone_server = phone
-                threading.Thread(target=phone.serve_forever, daemon=True,
-                                 name="hyperdr-phone").start()
-            phone = self.phone_server
-            with workbench.changed:
-                workbench.enabled = True
-                workbench.owner = owner
-                workbench.desktop_seen = time.monotonic()
-                workbench.notify()
-            urls = [f"{phone.public_scheme}://{ip}:{phone.server_port}/phone?token={quote(phone.access_token)}"
-                    for ip in lan_addresses()]
-            return {"urls": urls, "secure": phone.public_scheme == "https",
-                    **workbench.snapshot()}
-
-    def stop_phone(self):
-        with self.phone_lock:
-            self.context.workbench.disable()
-            if self.phone_server is not None:
-                self.phone_server.shutdown()
-                self.phone_server.server_close()
-                self.phone_server = None
 
 
 def find_free_port(host: str, preferred: int = PREFERRED_PORT) -> int:
@@ -151,8 +114,8 @@ def build_server(host: str, port: int, token: str, scheme: str,
     server.cookie_secure = scheme == "https" or os.environ.get("HYPERDR_COOKIE_SECURE") == "1"
     server.login_throttle = security.LoginThrottle()
     server.phone_only = phone_only
-    server.phone_server = None
-    server.phone_lock = threading.Lock()
+    server.init_phone()
+    server.retired = False
     loopback = host.lower() in {"127.0.0.1", "localhost", "::1"}
     server.context = api.Context(
         # TLS only. Chromium/WebView also treats a loopback HTTP origin as a
@@ -202,9 +165,10 @@ def serve(*, desktop: bool = False) -> None:
     certificate = os.environ.get("HYPERDR_TLS_CERT", "")
     key = os.environ.get("HYPERDR_TLS_KEY", "")
 
-    # The scheme has to be decided before the server is built, because the
-    # cookie and secure-context policies are derived from it.
-    tls_context = load_tls_context(certificate, key) if certificate and key else None
+    # Loopback already provides a secure browser context. Phone certificates
+    # must not make the local editor require installation of a desktop root CA.
+    loopback = host.lower() in {"127.0.0.1", "localhost", "::1"}
+    tls_context = load_tls_context(certificate, key) if certificate and key and not loopback else None
     scheme = "https" if tls_context else "http"
 
     server = build_server(host, port, token, scheme, desktop=desktop)

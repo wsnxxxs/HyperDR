@@ -1,9 +1,10 @@
 import { decodePreview } from "/js/preview/packet.js";
-import { createHdrRenderer } from "/js/preview/gpu.js";
+import { assessPhoneHdr } from "/js/preview/phone-diagnostics.js";
 import { createSdrGpuRenderer } from "/js/preview/sdr-gpu.js";
 import { renderSdr } from "/js/preview/cpu.js";
 
 const $ = (id) => document.getElementById(id);
+const setupCheck = new URLSearchParams(location.search).get("check") || "";
 let snapshot = null, capabilities = null, online = false, transfer = null;
 let frame = null, original = null, photoId = "", displayedVersion = 0;
 let renderer = null, canvas = $("photo"), frameRequest = null, rendering = false;
@@ -89,12 +90,58 @@ function newCanvas() {
   next.setAttribute("aria-label", "照片效果预览");
   canvas.replaceWith(next); canvas = next;
 }
+let diagnosticRun = null, lastDiagnostic = null, rendererRefreshPending = false;
+const diagnosticMessages = {
+  insecure: ["需要安全连接才能检测 HDR", "请重新扫描电脑上的设置二维码，安装并信任证书后进入 HTTPS 工作台。"],
+  webgpu: ["此浏览器尚未提供 WebGPU", "可以继续上传和保存照片；请尝试更新系统与浏览器后重新检测。"],
+  display: ["当前未检测到 HDR 显示能力", "屏幕或浏览器目前报告 SDR。可以继续使用 SDR 预览，保存的成品不受影响。"],
+  renderer: ["HDR 渲染器未通过检测", "当前使用 SDR 预览。可重新检测，并在详细信息中查看原因。"],
+  ready: ["HDR 预览能力检测通过", "这是设备能力检测；加载照片后，预览标记会显示实际渲染模式。"],
+};
+function publishDiagnostics(result) {
+  lastDiagnostic = result;
+  const [title, description] = diagnosticMessages[result.reason];
+  $("diagnostic-title").textContent = title;
+  $("diagnostic-description").textContent = description;
+  $("diagnostics").dataset.hdr = String(result.hdr);
+  $("diagnostic-detail").textContent = `安全上下文：${result.secureContext ? "是" : "否"} · WebGPU：${result.webgpu ? "有" : "无"} · HDR 显示：${result.displayHdr ? "是" : "否"}\n${result.detail || "未运行 HDR 渲染器：前置条件未满足。"}`;
+  request("/api/phone/diagnostics", { ...result, setupCheck }).then(() => {
+    $("diagnostic-report").textContent = "检测结果已同步到电脑。";
+  }).catch((error) => { $("diagnostic-report").textContent = `检测已完成，暂未同步到电脑：${error.message}`; });
+}
+setInterval(() => {
+  if (!document.hidden && online && lastDiagnostic) {
+    request("/api/phone/diagnostics", { ...lastDiagnostic, setupCheck }).catch(() => {});
+  }
+}, 20000);
+function probeDiagnostics() {
+  if (diagnosticRun) return diagnosticRun;
+  $("retry-diagnostics").disabled = true;
+  diagnosticRun = (async () => {
+    const probe = document.createElement("canvas"); probe.width = 2; probe.height = 2;
+    const { result, renderer: testRenderer } = await assessPhoneHdr(probe);
+    testRenderer?.destroy(); publishDiagnostics(result);
+  })().finally(() => { diagnosticRun = null; $("retry-diagnostics").disabled = false; });
+  return diagnosticRun;
+}
+async function refreshDiagnostics() {
+  await probeDiagnostics();
+  if (!renderer) return;
+  if (rendering) { rendererRefreshPending = true; return; }
+  rendererRefreshPending = false;
+  rendererLost();
+}
+$("retry-diagnostics").addEventListener("click", refreshDiagnostics);
+try { matchMedia("(dynamic-range: high)").addEventListener("change", refreshDiagnostics); } catch {}
 async function initRenderer() {
   if (renderer) return;
-  if (window.isSecureContext && navigator.gpu && matchMedia("(dynamic-range: high)").matches) {
-    try { renderer = await createHdrRenderer(canvas, () => rendererLost()); }
-    catch { newCanvas(); }
-  }
+  if (diagnosticRun) await diagnosticRun;
+  let candidate = null;
+  const assessment = await assessPhoneHdr(canvas, () => { if (candidate && renderer === candidate) rendererLost(); });
+  candidate = assessment.renderer;
+  renderer = candidate;
+  publishDiagnostics(assessment.result);
+  if (!renderer) newCanvas();
   if (!renderer) {
     try { renderer = createSdrGpuRenderer(canvas, () => rendererLost()); }
     catch { newCanvas(); renderer = { kind: "cpu", upload() {}, destroy() {}, draw(_unused, params) { renderSdr(canvas, { frame, original: params.original }); } }; }
@@ -144,7 +191,8 @@ async function loadFrame() {
     if (error.name !== "AbortError") $("viewer-state").textContent = error.message;
   } finally {
     rendering = false; frameRequest = null;
-    if (retry && snapshot?.frameReady) loadFrame();
+    if (rendererRefreshPending) { rendererRefreshPending = false; rendererLost(); }
+    else if (retry && snapshot?.frameReady) loadFrame();
   }
 }
 function draw() {
@@ -263,11 +311,12 @@ function subscribe() {
 }
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) { endCompare(); events?.close(); frameRequest?.abort(); }
-  else { subscribe(); request("/api/phone/state").then(applySnapshot).catch(() => connectionState(false)); }
+  else { probeDiagnostics(); subscribe(); request("/api/phone/state").then(applySnapshot).catch(() => connectionState(false)); }
 });
 window.addEventListener("pagehide", () => { events?.close(); frameRequest?.abort(); });
 window.addEventListener("pageshow", (event) => { if (event.persisted) subscribe(); });
 async function boot() {
+  probeDiagnostics();
   try {
     capabilities = await request("/api/state");
     $("photos-input").accept = ["image/*", ...capabilities.inputExtensions].join(",");

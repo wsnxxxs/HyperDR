@@ -16,12 +16,13 @@ resolves the dependencies below through vcpkg or CMake `FetchContent`.
 | Google libultrahdr 1.4.0 | Ultra HDR JPEG/R reference codec | Apache-2.0 or MIT |
 | ncnn | Embedded native gain-map inference runtime | BSD-3-Clause |
 
-`Setup-HTTPS.bat` offers to install [mkcert](https://github.com/FiloSottile/mkcert)
-(BSD-3-Clause) through winget, and later invokes it to issue the local
-certificate. mkcert is neither redistributed in this repository nor included in
-any release archive; it is installed on, and remains owned by, the end user's
-machine. The certificate authority it creates is generated per computer and is
-never shipped.
+Phone HTTPS certificate generation uses [cryptography](https://github.com/pyca/cryptography)
+under Apache-2.0 or BSD-3-Clause. The desktop sidecar bundles this dependency;
+source-panel users install it from `apps/panel/requirements.txt`. Each computer
+generates its own CA; neither certificates nor private keys are distributed.
+Existing [mkcert](https://github.com/FiloSottile/mkcert) (BSD-3-Clause) roots may
+be reused when they match a previously configured certificate. No new mkcert
+installation is required.
 
 The exact dependency versions and feature choices are defined in
 [`vcpkg.json`](vcpkg.json) and [`CMakeLists.txt`](CMakeLists.txt). Consult the

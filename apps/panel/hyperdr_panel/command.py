@@ -257,6 +257,8 @@ def _color_flags(options: dict, settings: dict) -> list[str]:
         flags.append("--clamp-srgb")
     if options.get("_raw_profile_path"):
         flags.extend(["--raw-profile", str(options["_raw_profile_path"])])
+    if options.get("_lens_profile_path"):
+        flags.extend(["--raw-lens-profile", str(options["_lens_profile_path"])])
     if options.get("_lut_path"):
         flags.extend(["--lut", str(options["_lut_path"]),
                       "--lut-input", settings["lut_input"], "--lut-output", settings["lut_output"],

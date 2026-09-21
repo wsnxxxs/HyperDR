@@ -6,10 +6,16 @@
  * en.js; scripts/check_panel_i18n.py fails the build when they drift.
  */
 export default {
+  "lensProfile.label": "启用镜头校正",
+  "lensProfile.enabled": "已启用 · {name}",
+  "lensProfile.disabled": "未启用 · {name}",
+  "lensProfile.unmatched": "未启用 · 未找到匹配的 Lightroom 镜头校正文件。",
+  "lensProfile.unknown": "未启用 · 无法读取镜头型号。",
   "rawProfile.label": "RAW 相机配置",
-  "rawProfile.choose": "选择 DCP 文件…",
+  "rawProfile.choose": "导入 DCP…",
   "rawProfile.default": "HyperDR 默认",
-  "rawProfile.local": "来自本机 Adobe 安装的匹配配置",
+  "rawProfile.local": "已找到 {count} 个匹配配置",
+  "rawProfile.empty": "未找到此相机的本地配置，可手动导入 DCP。",
   "rawProfile.unknown": "无法读取相机型号。请手动选择对应 DCP，解码器将检查兼容性。",
 
   "lut.manageHint": "整理本机 LUT，支持批量导入 .cube 文件。",

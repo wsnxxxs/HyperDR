@@ -54,6 +54,7 @@ void write_settings(json::Writer& writer, const ConvertOptions& options) {
       .member("dark_frame", path_utf8(options.raw.dark_frame))
       .member("linearization_lut", path_utf8(options.raw.linearization_lut))
       .member("lens_shading_map", path_utf8(options.raw.lens_shading_map))
+      .member("lens_profile", path_utf8(options.raw.lens_profile))
       .end_object();
 }
 
@@ -137,6 +138,8 @@ std::string run_report_json(const std::vector<FileResult>& results,
         .member("raw_white_balance", result.raw_white_balance)
         .member("raw_color_matrix", result.raw_color_matrix)
         .member("raw_profile_name", result.raw_profile_name)
+        .member("raw_lens_profile", result.raw_lens_profile)
+        .member("raw_lens_correction", result.raw_lens_correction)
         .member("raw_profile_sha256", result.raw_profile_sha256)
         .member("raw_profile_camera", result.raw_profile_camera)
         .member("raw_profile_tone", result.raw_profile_tone)

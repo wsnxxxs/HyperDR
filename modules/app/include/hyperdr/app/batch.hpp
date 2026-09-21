@@ -29,7 +29,8 @@ void require_decode_resolution(const ConvertOptions& options,
 // final render. Finished SDR is passed through sample-for-sample; scene-linear
 // RAW keeps automatic exposure but uses a fixed neutral development.
 [[nodiscard]] GainMapResult render_native_model_base(
-    const DecodedImage& image, bool clamp_srgb = false);
+    const DecodedImage& image, bool clamp_srgb = false,
+    const PhotographicAnalysis* analysis = nullptr);
 
 // Stable provenance name used by model-input reports and conversion reports.
 [[nodiscard]] const char* native_model_development_kind(

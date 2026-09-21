@@ -59,7 +59,7 @@ GainMapResult render_decoded_image(const DecodedImage& image,
                                    const GainMapOptions& options,
                                    const std::filesystem::path& analysis_cache,
                                    std::uint64_t cache_budget_bytes) {
-  if (!analysis_cache.empty() && image.describe_input().domain == InputDomain::kSceneReferred) {
+  if (!image.raw_profile && !analysis_cache.empty() && image.describe_input().domain == InputDomain::kSceneReferred) {
     const auto analysis = cached_photographic_analysis(image.linear_p3, analysis_cache, cache_budget_bytes);
     return make_gain_map(image.linear_p3, options, image.capture, image.describe_input(), &analysis);
   }
@@ -82,7 +82,8 @@ const char* native_model_development_kind(InputDomain domain) noexcept {
 }
 
 GainMapResult render_native_model_base(const DecodedImage& image,
-                                       bool clamp_srgb) {
+                                       bool clamp_srgb,
+                                       const PhotographicAnalysis* analysis) {
   GainMapOptions development{};
   development.clamp_srgb = clamp_srgb;
   development.exposure_bias_ev = 0.0F;
@@ -98,7 +99,8 @@ GainMapResult render_native_model_base(const DecodedImage& image,
   if (image.raw_profile || image.describe_input().domain == InputDomain::kDisplayReferredSdr) {
     development.gain_strength = 0.0F;
   }
-  return render_decoded_image(image, development);
+  return make_gain_map(image.linear_p3, development, image.capture,
+      image.describe_input(), image.raw_profile ? nullptr : analysis);
 }
 
 GainMapOptions replay_external_development(
@@ -149,6 +151,8 @@ GainMapOptions replay_external_development(
 
   const auto profile_hash = image.raw_profile ? image.raw_profile->profile->sha256 : std::string{};
   if (binding.raw_profile_sha256 != profile_hash) reject("RAW DCP profile");
+  const auto lens_hash = image.raw_lens_profile_path.empty() ? std::string{} : sha256_file_hex(image.raw_lens_profile_path);
+  if (binding.raw_lens_profile_sha256 != lens_hash) reject("RAW LCP profile");
   if (image.raw_profile && binding.recipe.id != "raw-dcp-v1") reject("RAW DCP development recipe");
   GainMapOptions replay = options.gain;
   replay.auto_exposure = false;
@@ -335,6 +339,8 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     result.sensor_width = staged.image.decode.sensor_width;
     result.raw_white_balance = staged.image.raw_white_balance;
     result.raw_color_matrix = staged.image.raw_color_matrix;
+    result.raw_lens_profile = path_utf8(staged.image.raw_lens_profile_path);
+    result.raw_lens_correction = staged.image.raw_lens_correction;
     if (staged.image.raw_profile) {
       const auto& context = *staged.image.raw_profile;
       const auto& profile = *context.profile;

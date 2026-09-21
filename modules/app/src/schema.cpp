@@ -95,8 +95,8 @@ json::Value read_headroom(const ConvertOptions& o) {
                               : json::Value::from_number(o.gain.headroom_stops);
 }
 
-const std::array<Setting, 32>& table() {
-  static const std::array<Setting, 32> kSettings{{
+const std::array<Setting, 33>& table() {
+  static const std::array<Setting, 33> kSettings{{
       {"encoding", "--encoding", SettingKind::kEnum, 0, 0, kEncodingChoices,
        "adaptive|ultrahdr|pq|hlg|avif-pq|avif-hlg|sdr-jpeg", "Output representation", false,
        true,
@@ -122,6 +122,10 @@ const std::array<Setting, 32>& table() {
        "<file.dcp>", "RAW DCP profile (auto exposure uses the profile baseline)", false, true, nullptr,
        [](ConvertOptions& o, const json::Value& v) { o.raw.profile = path_from_utf8(v.string()); },
        [](const ConvertOptions& o) { return json::Value::from_string(path_utf8(o.raw.profile)); }, true},
+      {"raw_lens_profile", "--raw-lens-profile", SettingKind::kString, 0, 0, {},
+       "<file.lcp>", "RAW Lightroom lens correction profile", false, true, nullptr,
+       [](ConvertOptions& o, const json::Value& v) { o.raw.lens_profile = path_from_utf8(v.string()); },
+       [](const ConvertOptions& o) { return json::Value::from_string(path_utf8(o.raw.lens_profile)); }, true},
       {"raw_gain", "--raw-gain", SettingKind::kNumber, 0.125, 64.0, {},
        "<0.125..64>", "Post-decode scene-linear RAW gain", false, true, nullptr,
        [](ConvertOptions& o, const json::Value& v) {

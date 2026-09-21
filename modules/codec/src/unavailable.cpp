@@ -87,6 +87,10 @@ void fail_without_codecs(const char* capability) {
 
 #if !HYPERDR_WITH_CODECS
 
+RawLensMetadata probe_raw_lens_metadata(const std::filesystem::path&) {
+  fail_without_codecs("RAW metadata probing");
+}
+
 DecodedImage decode_image(const std::filesystem::path&, const RawDecodeOptions&) {
   fail_without_codecs("image decoding");
 }

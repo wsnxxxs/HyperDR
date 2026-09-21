@@ -61,7 +61,7 @@ PhotographicAnalysis analyze_photographic_source(const FloatImage& source) {
 
 namespace {
 
-float select_exposure_ev(const PhotographicAnalysis& inputs,
+float select_exposure_ev(const SceneStatistics& stats,
                          const CaptureMetadata& capture,
                          const RenderOptions& options,
                          const ToneCurveParameters& curve) {
@@ -71,11 +71,11 @@ float select_exposure_ev(const PhotographicAnalysis& inputs,
   if (options.auto_exposure) {
     const float base_ev =
         std::log2(target_middle_gray /
-                  std::max(inputs.scene_stats.log_average, kEpsilon));
+                  std::max(stats.log_average, kEpsilon));
     const float provisional_exposure_ev = clamp_finite(base_ev, -6.0F, 6.0F);
     // Base metering has a fixed capture budget, independent of output HDR controls.
     const float highlight_limit = highlight_limited_exposure(
-        inputs.scene_stats.p995, std::exp2(2.5F), curve);
+        stats.p995, std::exp2(2.5F), curve);
     exposure_ev = std::min(provisional_exposure_ev, highlight_limit);
     if (ev100 && *ev100 < 8.0F) {
       exposure_ev =
@@ -92,12 +92,18 @@ float select_exposure_ev(const PhotographicAnalysis& inputs,
 
 float photographic_exposure_ev(const FloatImage& source,
                                const RenderOptions& options,
-                               const CaptureMetadata& capture) {
+                               const CaptureMetadata& capture,
+                               const PhotographicAnalysis* analysis) {
+  source.require_consistent("photographic exposure input");
   if (source.channels != 3)
     throw std::invalid_argument("photographic exposure input must be RGB");
   validate_render_options(options);
-  const auto inputs = analyze_photographic_source(source);
-  return select_exposure_ev(inputs, capture, options, build_tone_curve(options.look));
+  // Exposure needs global statistics only. Manual exposure needs no image
+  // analysis; neither path needs the cell means/peaks used by HDR expansion.
+  const auto owned_stats = !analysis && options.auto_exposure
+      ? compute_luminance_statistics(source) : SceneStatistics{};
+  const auto& stats = analysis ? analysis->scene_stats : owned_stats;
+  return select_exposure_ev(stats, capture, options, build_tone_curve(options.look));
 }
 
 void prepare_photographic_render(const FloatImage& source,
@@ -120,7 +126,7 @@ void prepare_photographic_render(const FloatImage& source,
         static_cast<std::size_t>(dimensions.width) * dimensions.height;
 
     // --- Exposure selection ---
-    const float exposure_ev = select_exposure_ev(inputs, capture, options, curve);
+    const float exposure_ev = select_exposure_ev(inputs.scene_stats, capture, options, curve);
 
     // The cell means and peaks are reused by the headroom and gain-map stages.
     std::vector<float> scene_luma = inputs.cell_mean;

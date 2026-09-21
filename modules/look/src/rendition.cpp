@@ -101,8 +101,10 @@ PhotoRenditions render_renditions(const FloatImage& source,
   auto& prepared = preparation ? *preparation : owned;
   // The photographic preparation is shared with the legacy renderer, but
   // contains float luminance decisions only, never quantized gain codes.
-  if (scene) prepare_photographic_render(source, options, capture, analysis, prepared);
-  const float ev = scene ? prepared.exposure_ev : std::clamp(
+  const bool scene_grids = scene && (options.look.pop > 0 || (want_hdr && options.gain_strength > 0));
+  if (scene_grids) prepare_photographic_render(source, options, capture, analysis, prepared);
+  const float ev = scene ? (scene_grids ? prepared.exposure_ev
+      : photographic_exposure_ev(source, options, capture, analysis)) : std::clamp(
       (options.auto_exposure ? 0.0F : options.exposure_ev) + options.exposure_bias_ev, -10.0F, 10.0F);
   const float exposure = std::exp2(ev);
   const float requested = options.auto_headroom ? options.look.headroom_max_stops : options.headroom_stops;
@@ -128,7 +130,7 @@ PhotoRenditions render_renditions(const FloatImage& source,
   std::vector<std::uint64_t> wide(source.height), eligible(source.height);
   std::optional<BilinearGridSampler> scene_sampler;
   std::optional<GridView> local_view, stops_view;
-  if (scene) {
+  if (scene_grids) {
     scene_sampler.emplace(prepared.width, prepared.height, source.width, source.height);
     local_view.emplace(prepared.local_average, prepared.width, prepared.height);
     stops_view.emplace(prepared.stops, prepared.width, prepared.height);
@@ -149,11 +151,14 @@ PhotoRenditions render_renditions(const FloatImage& source,
       std::array<float, 3> base, hdr;
       if (scene) {
         const float tone = render_tone_curve(luma, 1, curve);
-        const float local = scene_sampler->sample(*local_view, x, y);
-        const float detail = std::clamp(std::log2((tone + kEpsilon)/(local + kEpsilon)), -1.5F, 1.5F);
-        const float mask = smoothstep(.025F, .16F, tone) * (1 - .65F * smoothstep(.78F, 1, tone));
-        sdr_y = std::clamp(tone * std::exp2(detail * .14F * options.look.pop * mask), 0.0F, 1.0F);
-        const float gain = want_hdr ? scene_sampler->sample(*stops_view, x, y) * strength : 0;
+        sdr_y = std::clamp(tone, 0.0F, 1.0F);
+        if (options.look.pop > 0) {
+          const float local = scene_sampler->sample(*local_view, x, y);
+          const float detail = std::clamp(std::log2((tone + kEpsilon)/(local + kEpsilon)), -1.5F, 1.5F);
+          const float mask = smoothstep(.025F, .16F, tone) * (1 - .65F * smoothstep(.78F, 1, tone));
+          sdr_y = std::clamp(tone * std::exp2(detail * .14F * options.look.pop * mask), 0.0F, 1.0F);
+        }
+        const float gain = want_hdr && strength > 0 ? scene_sampler->sample(*stops_view, x, y) * strength : 0;
         hdr_y = sdr_y * std::exp2(gain);
         base = render_common_chroma(rgb[0], rgb[1], rgb[2], luma, sdr_y, sdr_y, 1, options.look);
         hdr = base;

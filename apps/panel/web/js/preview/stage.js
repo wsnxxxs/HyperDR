@@ -21,6 +21,7 @@ import { diagnosticFrame } from "./packet.js";
 import { analyse, mountScope } from "./scope.js";
 import { histogramFromPlane } from "./histogram.js";
 import { createUploader } from "./session.js";
+import { pickInputFile } from "./file-picker.js";
 import {
   AI_POST_KEYS, CONTROLS, defaultSettings, isHdrSource, referenceSettings, toOptions,
 } from "../settings/schema.js";
@@ -746,7 +747,7 @@ export function mountStage({ toast }) {
     const capabilities = store.get().capabilities;
     const extensions = capabilities?.inputExtensions;
     if (!Array.isArray(extensions) || !extensions.length) return;
-    fileInput.accept = ["image/*", ...extensions].join(",");
+    fileInput.accept = extensions.join(",");
     setText(supportHint, t("stage.support"));
     supportHint.title = extensions.join(" ");
   };
@@ -766,7 +767,19 @@ export function mountStage({ toast }) {
     return true;
   };
 
-  const openPicker = () => { if (canReplace()) fileInput.click(); };
+  let pickingFile = false;
+  const openPicker = async () => {
+    if (!canReplace() || pickingFile) return;
+    pickingFile = true;
+    try {
+      await pickInputFile({ capabilities: store.get().capabilities,
+        dialog: window.__TAURI__?.dialog, fileInput, upload });
+    } catch (error) {
+      toast(error.message || t("err.nativeInput"), true);
+    } finally {
+      pickingFile = false;
+    }
+  };
   selectButton.addEventListener("click", openPicker);
   const isStageControl = (target) =>
     target instanceof Element

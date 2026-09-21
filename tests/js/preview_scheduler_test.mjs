@@ -24,4 +24,18 @@ scheduler.cancel();
 complete();
 await tick();
 assert.equal(frames.length, 2, "changing photos discards queued work");
+// A profile change queued while rendering must keep its reference reset even
+// if subsequent slider movement replaces the draft/quality request.
+scheduler.request(false, 22, true);
+await tick();
+scheduler.request(false, 23, true);
+scheduler.request(true, 24);
+scheduler.request(false, 25);
+assert.equal(frames.length, 3, "profile changes must not overlap an active render");
+complete();
+await tick();
+assert.deepEqual(frames[3], { draft: false, requestedAt: 25, resetOriginal: true },
+  "coalescing must retain profile invalidation with the latest settings");
+complete();
+await tick();
 console.log("Preview scheduler: coalescing, release refinement and cancellation passed");

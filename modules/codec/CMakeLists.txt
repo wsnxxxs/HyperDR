@@ -5,6 +5,7 @@
 # the two configurations share one call graph and differ only in these leaves.
 set(HYPERDR_CODEC_SOURCES
   src/dcp_reader.cpp
+  src/lens_profile.cpp
   src/rendition_encoders.cpp
   src/descriptors.cpp
   src/unavailable.cpp)

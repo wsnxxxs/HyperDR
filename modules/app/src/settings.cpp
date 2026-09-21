@@ -110,6 +110,7 @@ void validate_convert_options(const ConvertOptions& options) {
     }
   };
   validate_raw_file(options.raw.profile, "RAW DCP profile");
+  validate_raw_file(options.raw.lens_profile, "RAW LCP profile");
   validate_raw_file(options.raw.bad_pixel_map, "RAW bad-pixel map");
   validate_raw_file(options.raw.dark_frame, "RAW dark frame");
   validate_raw_file(options.raw.linearization_lut, "RAW linearization LUT");

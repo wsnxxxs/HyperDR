@@ -490,7 +490,7 @@ export function mountStage({ toast }) {
     store.set({
       comparing: false, maskKey: null,
       viewerZoom: 1, viewerPanX: 0, viewerPanY: 0,
-      rawProfile: "", rawProfileName: "",
+      rawProfile: "", rawProfileName: "", lensCorrection: true, lensProfileName: "",
       sourceDomain: "",
       hasCaptureMetadata: false,
       previewReady: false,
@@ -516,15 +516,15 @@ export function mountStage({ toast }) {
 
   async function load({
     resetOriginal = false, draft = false, requestedAt = performance.now(),
-    newPhoto = false,
+    newPhoto = false, scheduled = false,
   } = {}) {
-    if (resetOriginal) previewScheduler.cancel();
+    if (resetOriginal && !scheduled) previewScheduler.cancel();
     if (store.get().previewOptimized && !store.get().capabilities?.model?.ready) {
       store.set({ previewOptimized: false, modelGainReady: false, modelIdentity: null });
     }
     // Restored AI views also need their actual model identity and fallback state.
     if (store.get().previewOptimized && !store.get().modelGainReady) {
-      return optimize({ resetOriginal });
+      return optimize({ resetOriginal, scheduled });
     }
     store.set({ previewError: false });
     const sessionId = store.get().sessionId;
@@ -540,7 +540,7 @@ export function mountStage({ toast }) {
       if (resetOriginal || !image.original) {
         reference = await api.preview(sessionId, {
           options: { ...toOptions(referenceSettings(state.encoding)), colorGamut: state.colorGamut,
-            clampSrgb: state.clampSrgb, rawProfile: state.rawProfile, useModel: false },
+            clampSrgb: state.clampSrgb, rawProfile: state.rawProfile, lensCorrection: state.lensCorrection, useModel: false },
           highlightRecovery: "blend", maxEdge: requestedEdge,
         });
         if (!isCurrentImage(epoch)) return;
@@ -682,7 +682,7 @@ export function mountStage({ toast }) {
       modelId: store.get().modelId,
       colorGamut: activeGamut,
       clampSrgb: store.get().clampSrgb,
-      rawProfile: "", rawProfileName: "",
+      rawProfile: "", rawProfileName: "", lensCorrection: true, lensProfileName: "",
       sourceDomain: "",
       hasCaptureMetadata: false,
       previewReady: false,
@@ -907,7 +907,7 @@ export function mountStage({ toast }) {
     progressBar.style.width = `${percent}%`;
     setText(uploadOverlayText, t("stage.uploading", { percent }));
   });
-  const previewScheduler = createPreviewScheduler(load);
+  const previewScheduler = createPreviewScheduler((request) => load({ ...request, scheduled: true }));
   let interactionDirty = false;
   store.watch("sessionId", () => { previewScheduler.cancel(); interactionDirty = false; });
   store.watch("previewInteracting", (active) => {
@@ -936,7 +936,7 @@ export function mountStage({ toast }) {
 
   /* Input/base options invalidate both the decoded source and model cache. */
   store.subscribe((state, _previous, changed) => {
-    if (!changed.some((key) => ["highlightRecovery", "clampSrgb", "colorGamut", "rawProfile"].includes(key))) return;
+    if (!changed.some((key) => ["highlightRecovery", "clampSrgb", "colorGamut", "rawProfile", "lensCorrection"].includes(key))) return;
     ++modelRequest;
     modelGain = null;
     analysis.modelGain = null;
@@ -944,7 +944,12 @@ export function mountStage({ toast }) {
     store.set({ modelGainReady: false, modelIdentity: null, optimizing: false,
       ...(state.previewOptimized ? { previewReady: false } : {}),
     });
-    if (state.sessionId && !state.restoring && !state.uploading) load({ resetOriginal: true });
+    if (state.sessionId && !state.restoring && !state.uploading) {
+      // Discard stale results while allowing the worker's current operation
+      // to finish. The scheduler then runs only the latest profile/settings.
+      invalidateImage();
+      previewScheduler.request(false, performance.now(), true);
+    }
   });
 
   // Invalidate even in manual mode: the next AI click must use the new model.
@@ -956,15 +961,14 @@ export function mountStage({ toast }) {
     modelGain = null;
     analysis.modelGain = null;
     if (state.previewOptimized) {
-      previewScheduler.cancel();
       invalidateImage();
     }
     store.set({ modelGainReady: false, modelIdentity: null, optimizing: false,
       ...(state.previewOptimized ? { previewReady: false } : {}) });
-    if (state.previewOptimized && !state.restoring && !state.uploading) void optimize();
+    if (state.previewOptimized && !state.restoring && !state.uploading) previewScheduler.request(false);
   });
 
-  async function optimize({ resetOriginal = false } = {}) {
+  async function optimize({ resetOriginal = false, scheduled = false } = {}) {
     const state = store.get();
     if (state.optimizing || (state.previewOptimized && state.modelGainReady && modelGain)) return;
     if (modelGain && state.modelGainReady) {
@@ -978,14 +982,15 @@ export function mountStage({ toast }) {
       && store.get().highlightRecovery === state.highlightRecovery
       && store.get().clampSrgb === state.clampSrgb && store.get().colorGamut === state.colorGamut
       && store.get().rawProfile === state.rawProfile
+      && store.get().lensCorrection === state.lensCorrection
       && store.get().modelId === state.modelId;
-    previewScheduler.cancel();
+    if (!scheduled) previewScheduler.cancel();
     invalidateImage();
     store.set({ optimizing: true, previewReady: false });
     try {
       const gain = await api.modelPreview(
         state.sessionId, state.highlightRecovery, state.modelId,
-        { colorGamut: state.colorGamut, clampSrgb: state.clampSrgb, rawProfile: state.rawProfile });
+        { colorGamut: state.colorGamut, clampSrgb: state.clampSrgb, rawProfile: state.rawProfile, lensCorrection: state.lensCorrection });
       if (!current()) return;
       modelGain = gain;
       analysis.modelGain = gain;
@@ -993,8 +998,8 @@ export function mountStage({ toast }) {
       store.set({ previewOptimized: true, modelGainReady: true,
         modelIdentity: gain.identity });
       // Keep switching/export locked until the new native frame is presented.
-      previewScheduler.cancel();
-      await load({ resetOriginal });
+      if (!scheduled) previewScheduler.cancel();
+      await load({ resetOriginal, scheduled });
       if (current() && store.get().previewReady) announceModel(gain.identity);
     } catch (error) {
       if (!current()) return;

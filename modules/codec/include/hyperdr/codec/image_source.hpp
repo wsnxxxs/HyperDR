@@ -85,9 +85,16 @@ struct RawMosaic {
   bool black_level_corrected{false};
 };
 
+struct RawLensMetadata {
+  std::string make, model, lens;
+  double focal_length{}, aperture{};
+};
+[[nodiscard]] RawLensMetadata probe_raw_lens_metadata(const std::filesystem::path& path);
+
 struct RawDecodeOptions {
   // User-owned DCP camera profile; empty preserves the native rendering path.
   std::filesystem::path profile;
+  std::filesystem::path lens_profile;
   // Primaries used only when a raster carries neither a usable ICC profile nor
   // a stated CICP primary. RAW uses its camera matrix and ignores it.
   ColorGamut default_gamut{ColorGamut::kSrgb};
@@ -200,6 +207,8 @@ struct DecodedImage {
   // (no matrix; camera RGB is read as ProPhoto). Empty for non-RAW inputs.
   std::string raw_color_matrix;
   std::filesystem::path raw_profile_path;
+  std::filesystem::path raw_lens_profile_path;
+  std::string raw_lens_correction;
   std::shared_ptr<const DcpRenderContext> raw_profile;
   DecodeInfo decode;
   // How far above diffuse white this input's *format* can carry detail, as a

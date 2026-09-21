@@ -153,6 +153,10 @@ ExternalGainBinding read_model_binding(const json::Value& value,
     if (!profile->is_string()) throw std::invalid_argument("invalid RAW profile hash");
     binding.raw_profile_sha256 = profile->string();
   }
+  if (const auto* profile = source.find("raw_lens_profile_sha256")) {
+    if (!profile->is_string()) throw std::invalid_argument("invalid RAW lens profile hash");
+    binding.raw_lens_profile_sha256 = profile->string();
+  }
 
   binding.recipe.id = required_string(recipe, "id");
   if (binding.recipe.id != "photographic-v1" &&

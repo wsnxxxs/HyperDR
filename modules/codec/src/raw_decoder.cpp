@@ -1,6 +1,7 @@
 #include "hyperdr/image/color.hpp"
 #include "hyperdr/image/dng_color.hpp"
 #include "hyperdr/codec/dcp_profile.hpp"
+#include "hyperdr/codec/lens_profile.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/foundation/parallel.hpp"
 #include "hyperdr/codec/encoders.hpp"
@@ -305,6 +306,7 @@ void validate_raw_options(const RawDecodeOptions& options) {
     throw std::invalid_argument("RAW digital gain must be finite and in (0,64]");
   }
   require_calibration_file(options.profile, "RAW DCP profile");
+  require_calibration_file(options.lens_profile, "RAW lens profile");
   require_calibration_file(options.bad_pixel_map, "RAW bad-pixel map");
   require_calibration_file(options.dark_frame, "RAW dark frame");
   require_calibration_file(options.linearization_lut,
@@ -838,6 +840,16 @@ BayerPattern detect_bayer_pattern(LibRaw& raw, std::uint32_t width,
 
 }  // namespace
 
+RawLensMetadata probe_raw_lens_metadata(const std::filesystem::path& path) {
+  LibRaw raw;
+  check_raw(raw.open_file(path.c_str()), "LibRaw metadata open");
+  const std::string lens = raw.imgdata.lens.Lens[0] ? raw.imgdata.lens.Lens
+                                                  : raw.imgdata.lens.makernotes.Lens;
+  return {safe_string(raw.imgdata.idata.make), safe_string(raw.imgdata.idata.model),
+          lens, raw.imgdata.other.focal_len,
+          raw.imgdata.other.aperture};
+}
+
 namespace codec {
 
 DecodedImage decode_raw(const std::filesystem::path& path,
@@ -935,6 +947,7 @@ DecodedImage decode_raw(const std::filesystem::path& path,
   // One this decoder cannot apply, unless the file marks it optional, leaves
   // the image short of that description.
   auto opcodes = read_dng_opcodes(raw);
+  const bool embedded_vignette = !opcodes[1].gain_maps.empty();
   bool opcodes_skipped = !apply_dng_bad_pixels(raw, opcodes[0]);
   bool opcodes_malformed = false;
   for (const auto& list : opcodes) {
@@ -1234,6 +1247,20 @@ DecodedImage decode_raw(const std::filesystem::path& path,
   }
 #endif
 #endif
+  const int sensor_flip = raw.imgdata.sizes.flip;
+  // All pixels and metadata have been copied out. Release LibRaw's mosaic,
+  // working bitmap and 16-bit output before LCP allocates a float destination.
+  processed.reset();
+  raw.recycle();
+  if (!options.lens_profile.empty()) {
+    auto profile = read_lens_profile(options.lens_profile);
+    // An embedded gain map has already calibrated this RAW's lens shading.
+    if (embedded_vignette || !lens_shading.gains.empty())
+      for (auto& c : profile.calibrations) c.vignette.reset();
+    result.raw_lens_correction = apply_lens_profile(result.linear_p3, profile,
+        result.metadata.focal_length_mm, result.metadata.aperture, sensor_flip);
+    result.raw_lens_profile_path = std::filesystem::absolute(options.lens_profile);
+  }
   // LibRaw applies the sensor orientation while rendering, so the encoded pixels are top-left.
   result.metadata.orientation = 1;
   return result;

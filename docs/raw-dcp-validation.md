@@ -13,8 +13,9 @@ Implementation follows [the design](raw-dcp-compatibility-plan.md).
 - Separate scene-linear decode and DCP SDR development, followed by optional
   contrast/vibrance, display LUT and HyperDR HDR expansion. The native default
   remains available. Scene S-Log3 LUTs and DCP are alternative developers.
-- CLI `--raw-profile`; panel discovery of matching installed Adobe Standard
-  and Camera ST profiles, manual DCP import and session persistence.
+- CLI `--raw-profile`; panel discovery of all matching installed camera DCPs,
+  manual DCP import and session persistence. The RAW-only profile section sits
+  above processing mode. The tested A7R V installation supplies 10 profiles.
 - Profile SHA-256 in decode/model/output identities, cache restoration,
   report schema 11 and external model binding. DCP data is not bundled.
 

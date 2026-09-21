@@ -14,8 +14,11 @@ export function createPreviewScheduler(render, delay = 80) {
     }
   }
   return {
-    request(draft, requestedAt = performance.now()) {
-      pending = { draft, requestedAt };
+    request(draft, requestedAt = performance.now(), resetOriginal = false) {
+      // Source/profile invalidation survives newer slider events coalesced
+      // into the same queued render. Only changing photos discards it.
+      const reset = resetOriginal || pending?.resetOriginal;
+      pending = { draft, requestedAt, ...(reset ? { resetOriginal: true } : {}) };
       // Do not reset the timer on every input: continuous motion must render.
       if (!running && timer === null) timer = setTimeout(flush, draft ? delay : 0);
       if (!draft && timer !== null) { clearTimeout(timer); timer = setTimeout(flush, 0); }

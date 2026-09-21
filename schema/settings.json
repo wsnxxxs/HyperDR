@@ -75,6 +75,14 @@
       "default": ""
     },
     {
+      "key": "raw_lens_profile",
+      "flag": "--raw-lens-profile",
+      "kind": "string",
+      "affects_output_bytes": true,
+      "help": "RAW Lightroom lens correction profile",
+      "default": ""
+    },
+    {
       "key": "raw_gain",
       "flag": "--raw-gain",
       "kind": "number",

@@ -470,6 +470,12 @@ void check_native_model_base_routing() {
   require(actual.base_linear.pixels == expected.base_linear.pixels &&
               actual.exposure_ev == expected.exposure_ev,
           "native RAW base must use the fixed neutral automatic development");
+  const auto analysis = hyperdr::analyze_photographic_source(raw.linear_p3);
+  const auto cached = hyperdr::render_native_model_base(raw, false, &analysis);
+  require(cached.base_linear.pixels == actual.base_linear.pixels &&
+              cached.gain_map.pixels == actual.gain_map.pixels &&
+              cached.exposure_ev == actual.exposure_ev,
+          "cached analysis must preserve the native RAW base and gain");
 }
 
 }  // namespace

@@ -212,6 +212,13 @@
 
 /* Dialogs and navigation use the same control rhythm as the editor. */
 .workflow-picker { padding: 18px 20px; border-bottom: 1px solid var(--line); }
+.raw-profile-panel { padding: 18px 20px; border-bottom: 1px solid var(--line); }
+.raw-profile-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.raw-profile-head h2 { margin: 0; font-size: var(--text-sm); font-weight: 600; }
+.raw-profile-import { flex: none; font-size: var(--text-xs); }
+.raw-profile-camera { margin: 6px 0 12px; color: var(--ink-muted); font-size: var(--text-xs); overflow-wrap: anywhere; }
+.raw-profile-panel > .lut-select { display: block; margin-top: 12px; min-height: var(--control-height); }
+.raw-profile-panel > .field-hint { margin-top: 8px; line-height: 1.5; }
 .workflow-picker h2 { margin-bottom: 12px; font-size: var(--text-sm); font-weight: 600; }
 .workflow-picker .segmented { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .workflow-picker button { min-height: var(--control-height); font-size: var(--text-sm); }
@@ -305,3 +312,7 @@ html.lut-library-open, html.lut-library-open body { overflow: hidden; }
   .prefs-diagnostics dt { padding-bottom: 0; border: 0; }
   .prefs-diagnostics dd { padding-top: 4px; }
 }
+
+.lens-profile-toggle { display: flex; align-items: center; gap: 8px; margin-top: 16px; font-size: var(--text-xs); cursor: pointer; }
+.lens-profile-toggle input { margin: 0; accent-color: var(--accent); }
+.lens-profile-toggle:has(input:disabled) { color: var(--ink-muted); cursor: default; }

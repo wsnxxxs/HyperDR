@@ -218,6 +218,13 @@ creative expansion as any other SDR photograph.
   a full-visible-area 16-bit P5 PGM containing the measured bias, including
   black; it replaces metadata black rather than being subtracted twice.
   Wrong dimensions, malformed headers and truncated pixels fail explicitly.
+  On Fuji Super CCD, the visible area is the unpacked storage rectangle,
+  not the larger diamond working raster. LUT, dark-frame and bad-pixel access
+  use the storage bounds; shading and local highlight thresholds map each
+  working CFA site back to that rectangle, including half-size decoding.
+  CFA selection uses storage `COLOR` before rearrangement and working `FC`
+  afterwards. Automatic bad-pixel neighbours preserve CFA phase on the
+  densely packed Fuji axis. The Bayer mosaic API rejects diamond layouts.
   Phase One's metadata correction remains enabled on the normal LibRaw path.
   A measured dark frame is the fixed-pattern-noise path; no scene-derived
   row/column estimator is enabled.
@@ -230,10 +237,38 @@ creative expansion as any other SDR photograph.
 - `--raw-lens-shading` accepts `width height channels` plus row-major gains,
   with 1, 3 (RGB), or 4 (R,G1,B,G2) channels. Its grid covers the original
   visible sensor area. Crop offsets and half-size CFA positions determine
-  sampling locations. Gains are divided by their common maximum (at least 1)
-  in the integer mosaic, then that scale is restored in float; the LSC stage
-  cannot introduce integer overflow. LibRaw's demosaic and highlight processing
-  still operate on that normalized mosaic.
+  sampling locations. A gain shared by every channel throughout the effective
+  crop is applied in float after LibRaw, including gains below one; unused map
+  regions cannot change highlight recovery for such a crop. Bayer mosaic
+  output applies all shading gains directly in float, preserving the original
+  CFA's separate G1/G2 calibration and avoiding integer normalization loss.
+  For rendered images with spatially varying or unequal channel gains, gains
+  are still divided by their common maximum (at least 1) in the integer mosaic
+  and that scale is restored in float. The bound uses all grid vertices that
+  support the effective crop, including interpolation neighbours outside it;
+  unrelated vertices cannot reduce crop precision. Fuji diamond layouts retain
+  the full-grid bound because the working diamond spans the storage rectangle. Mosaic
+  correction runs on independent rows in parallel. Blend uses the local calibrated
+  clip reference after demosaic and before Fuji geometry, keeping the camera
+  channel mean and shrinking chroma in floating-point arithmetic. For two
+  green planes it uses the lower clip reference, a conservative policy that
+  does not pretend to recover the separate signals after they were mixed.
+  Reconstruct uses the same local channel references to select near-highlight
+  colour-ratio seeds and clipped samples. It propagates calibrated camera
+  ratios on a coarse grid, includes partial edge blocks, and only increases
+  clipped channels. The reference channel stays unchanged. Where no colour
+  evidence reaches a block, it retains dcraw mode 3's neutral ratio prior;
+  this is a reconstruction assumption, not recovered sensor information.
+  Extreme gain ratios still lose precision in the rendered integer mosaic;
+  the floating-point Bayer output avoids that loss. After demosaic and median
+  filtering, camera samples remain in float: reconstruction can exceed 65535
+  without being clipped by LibRaw's output buffer. Fuji rotation, pixel-aspect
+  interpolation and sensor orientation operate on these float samples before
+  the camera colour transform. Aspect stretching retains the interpolation
+  fraction discarded by LibRaw's integer implementation. The common exposure
+  scale is restored once during the float colour transform.
+  Explicit shading maps multiply the embedded DNG calibration, so they must
+  describe residual correction when the DNG already contains a gain map.
 - A DNG's opcode lists, which LibRaw reads but never applies, are applied where
   they describe the raw data. OpcodeList1's FixBadPixelsConstant is fixed as the
   DNG SDK fixes it (a green pixel from its diagonal neighbours, red or blue from

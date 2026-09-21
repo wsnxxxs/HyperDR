@@ -27,6 +27,11 @@ without resampling. Existing DNG gain maps or an explicit shading map suppress t
 LCP vignette correction. Fisheye and chromatic-aberration models are not applied;
 this is not intended to reproduce every Lightroom rendering decision.
 
+An explicit shading map is additional calibration after the embedded DNG gain
+map, not a replacement for it. For a calibrated DNG, supply residual gains;
+repeating its original optical correction would apply that correction twice.
+Both forms suppress LCP vignetting while retaining LCP geometry correction.
+
 Preview, AI model input, original comparison, and export share the correction
 option. Changing it invalidates decoded and inferred results. Export reports
 record the applied correction and profile path; external model bindings include

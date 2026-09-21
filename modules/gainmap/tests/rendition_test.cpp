@@ -265,10 +265,41 @@ void test_independent_rgb_renditions() {
             << " (single-channel: " << old_squared_error / actual.pixels.size() << ")\n";
 }
 
+void test_scene_base_without_gain_preparation() {
+  FloatImage source(64,32,3);
+  for (unsigned y=0;y<source.height;++y) for (unsigned x=0;x<source.width;++x)
+    for (unsigned c=0;c<3;++c) source.at(x,y,c)=.005F+x*x*.002F+(2-c)*.02F;
+  const InputDescription input{InputDomain::kSceneReferred,1};
+  for (bool automatic : {false,true}) {
+    RenderOptions options;
+    options.auto_exposure=automatic;
+    options.exposure_ev=-.5F;
+    options.look.pop=0;
+    const auto reference=render_renditions(source,options,{},input,RenderTarget::Hdr);
+    GainMapPreparation prepared;
+    const auto analysis=analyze_photographic_source(source);
+    const auto sdr=render_renditions(source,options,{},input,RenderTarget::Sdr,&analysis,&prepared);
+    require(sdr.sdr.pixels==reference.sdr.pixels,"SDR fast path must retain the HDR renderer's base pixels");
+    require(!prepared.ready && prepared.stops.empty(),"SDR without local enhancement must not prepare HDR gain");
+    options.gain_strength=0;
+    const auto zero=render_renditions(source,options,{},input,RenderTarget::Hdr,&analysis,&prepared);
+    require(zero.sdr.pixels==reference.sdr.pixels && zero.hdr.pixels==zero.sdr.pixels,
+        "zero gain must preserve the base and produce identical endpoints");
+    require(!prepared.ready,"zero gain without local enhancement must not prepare a gain grid");
+    options.gain_strength=1;
+    const auto restored=render_renditions(source,options,{},input,RenderTarget::Hdr,&analysis,&prepared);
+    require(prepared.ready && restored.hdr.pixels==reference.hdr.pixels,
+        "enabling gain after the fast path must prepare the correct HDR pixels");
+    options.gain_strength=0;
+    const auto cached_zero=render_renditions(source,options,{},input,RenderTarget::Hdr,&analysis,&prepared);
+    require(cached_zero.hdr.pixels==zero.hdr.pixels,"a warm gain cache must not change the zero-gain frame");
+  }
+}
+
 int main() {
   try { test_zero_and_spatial_gain(); test_model_grading(); test_final_gain_statistics();
         test_hdr_source_reconstructs_itself(); test_hdr_source_outside_p3();
-        test_independent_rgb_renditions(); }
+        test_independent_rgb_renditions(); test_scene_base_without_gain_preparation(); }
   catch(const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
   std::cout<<"graded model reconstruction and final gain statistics passed\n";
 }

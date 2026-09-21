@@ -154,3 +154,33 @@ python scripts/benchmark_raw_preview.py photo.ARW --exe build-release/Release/Hy
 逐值一致；记录在 `output/pipeline-review/logic/verification.json`。这验证选择确定性，不代表几何精度评价。
 新版本另完成 9504×6336 Ultra HDR 导出，`decode_degraded=false`、`self_verified=true`，
 报告为 `output/pipeline-review/logic-full-export.json`。未进行浏览器快速连点实测或实体 HDR 屏幕验收。
+
+## 第三轮：按输出需求计算，以及负亮度统计
+
+- **原生 RAW 的 SDR / 零增益路径仍在计算 HDR。** 当 `pop=0` 且只需要 SDR 底图或 HDR 强度为零时，
+  旧实现仍扫描场景、生成高光增益网格、做局部环境与导向滤波，再把增益乘零。
+  现在只计算曝光和底图；自动曝光复用已有全局统计或单独测光，手动曝光无需分析。
+  `pop>0` 时仍保留其需要的局部分析，实际启用 HDR 时才生成增益准备数据。
+  S-Log3 LUT 的曝光步骤也复用同一测光函数，不再为了曝光生成完整的 HDR 分析网格。
+  此优化针对原生场景显影；DCP 的显影路径没有因此更换算法。
+- **一个负亮度单元可以污染整个局部增益计算。** `log2(scene_luma + epsilon)` 对负值产生 NaN，
+  后面的 clamp 并不能消除它。16×16 的最小回归在旧代码上失败，权重统计非有限。
+  现在仅在对数统计入口将亮度下限设为零；源 RGB 和正亮度计算保持原样。
+  回归同时检查邻近正常高光、有限增益和与黑电平统计下限的一致性。
+  这是已复现的数值错误，但没有证据表明它导致了所提供 ARW 的观感问题。
+
+新增渲染回归覆盖自动/手动曝光、SDR 与 HDR 底图逐值一致、零增益两个端点一致，以及
+`0 → 1 → 0` 增益切换后的缓存正确性。渲染 revision 升至 11；解码像素和缓存 schema 不变。
+
+验证通过 44 项 Release CTest 和 3 项 native Python 契约测试。另用 `DSC01925.ARW`、
+原生显影、无 DCP/LCP、2048 预览、`pop=0`、零增益测量；每个版本、输出目标各启动三个 worker，
+顺序请求曝光 `0 / +0.25 / -0.25 / 0 EV`。全部 48 帧按目标和曝光比较，像素 payload SHA256
+一致。排除首次解码帧后，每组九次请求的中位墙钟时间如下，包含完整浮点包传输，不含浏览器：
+
+| 输出目标 | 修改前 | 修改后 |
+| --- | ---: | ---: |
+| SDR JPEG 预览 | 124 ms | 92 ms |
+| Ultra HDR 零增益预览 | 155 ms | 120 ms |
+
+记录为 `output/pipeline-review/demand-verification.json`。这不是 DCP 性能或首次解码速度的结论；
+本轮未再次执行全尺寸实拍导出，前文全尺寸结果对应第二轮版本。

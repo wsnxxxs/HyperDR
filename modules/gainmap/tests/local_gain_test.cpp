@@ -42,6 +42,29 @@ float decoded_bilinear_gain(const hyperdr::GainMapResult& result,
 
 int main() {
   try {
+    // Signed scene luminance can occur after a camera colour transform. One
+    // negative cell must not poison the neighbourhood's logarithmic moments.
+    {
+      const hyperdr::GainGridDimensions dims{16, 16};
+      std::vector<float> scene(256, 1.2F), guide(256, 0.7F), global(256, 1.5F);
+      scene[8 * 16 + 8] = -0.01F;
+      guide[8 * 16 + 8] = 0.0F;
+      global[8 * 16 + 8] = 0.0F;
+      hyperdr::CaptureMetadata capture;
+      capture.iso = 100.0F;
+      const auto local = hyperdr::weight_local_highlights(global, scene, guide, dims, capture, {});
+      require(std::isfinite(local.weight_mean) && std::isfinite(local.weight_p95),
+              "negative scene luminance poisoned local weight statistics");
+      for (const auto gain : local.stops)
+        require(std::isfinite(gain), "negative scene luminance poisoned filtered gain");
+      require(local.stops[0] > 0.0F, "negative scene cell erased normal highlight gain");
+      require(scene[8 * 16 + 8] == -0.01F, "local statistics changed signed scene luminance");
+      scene[8 * 16 + 8] = 0.0F;
+      const auto black = hyperdr::weight_local_highlights(global, scene, guide, dims, capture, {});
+      require(local.stops == black.stops && local.weight_mean == black.weight_mean &&
+                  local.weight_p95 == black.weight_p95,
+              "negative luminance must use the same log-statistic floor as black");
+    }
     // The environment can be coarse, but a fine gain request remains on its
     // original cell. Compare two scales of the same broad scene as well.
     std::vector<float> low_gain;

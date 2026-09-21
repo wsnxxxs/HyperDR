@@ -110,7 +110,8 @@ void measure_rendition_stats(RenderStats& stats, const FloatImage& sdr,
 void fit_sdr_to_srgb(FloatImage& image);
 void validate_render_options(const RenderOptions& options);
 float photographic_exposure_ev(const FloatImage& source,
-    const RenderOptions& options, const CaptureMetadata& capture = {});
+    const RenderOptions& options, const CaptureMetadata& capture = {},
+    const PhotographicAnalysis* analysis = nullptr);
 void prepare_photographic_render(const FloatImage& source,
     const RenderOptions& options, const CaptureMetadata& capture,
     const PhotographicAnalysis* analysis, GainMapPreparation& prepared);

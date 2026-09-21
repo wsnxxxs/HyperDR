@@ -85,7 +85,7 @@ LocalGain weight_local_highlights(const std::vector<float>& global_gain,
   for (std::size_t i = 0; i < count; ++i) {
     // The noise statistic needs no values below -8 EV. Bounding before
     // squaring also keeps both moments inside box_mean's supported range.
-    result.stops[i] = std::clamp(std::log2(scene_luma[i] + kEpsilon), -8.0F, 8.0F);
+    result.stops[i] = std::clamp(std::log2(std::max(scene_luma[i], 0.0F) + kEpsilon), -8.0F, 8.0F);
   }
   auto env = analyze_environment(result.stops, sdr_guide, dimensions);
   const bool same_grid = env.dimensions.width == dimensions.width && env.dimensions.height == dimensions.height;

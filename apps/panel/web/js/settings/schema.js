@@ -199,7 +199,7 @@ export const CONTROLS_BY_KEY = new Map(CONTROLS.map((control) => [control.key, c
 
 /** Keys that appear in the object sent to /api/run. */
 export const OPTION_KEYS = [
-  "encoding", "colorGamut", "clampSrgb", "rawProfile", "rawProfileName", "lutId", "lutName", "lutInput", "lutOutput", MODEL_KEY, ...CONTROLS.map((control) => control.key),
+  "encoding", "colorGamut", "clampSrgb", "rawProfile", "rawProfileName", "lensCorrection", "lensProfileName", "lutId", "lutName", "lutInput", "lutOutput", MODEL_KEY, ...CONTROLS.map((control) => control.key),
 ];
 
 /** Output, colour and model choices are workflow settings; image adjustments
@@ -233,7 +233,7 @@ export function defaultSettings(encoding = "adaptive", sourceDomain = "") {
     encoding: activeEncoding.id,
     colorGamut: COLOR_GAMUTS[0].id,
     clampSrgb: false,
-    rawProfile: "", rawProfileName: "",
+    rawProfile: "", rawProfileName: "", lensCorrection: true, lensProfileName: "",
     lutId: "", lutName: "", lutInput: "srgb", lutOutput: "srgb",
     [MODEL_KEY]: DEFAULT_MODEL_ID,
   };
@@ -274,6 +274,8 @@ export function validatedSettings(saved, base = defaultSettings()) {
   values[MODEL_KEY] = restoredModelId(saved);
   if (ENCODINGS.some(({ id }) => id === saved.encoding)) values.encoding = saved.encoding;
   if (COLOR_GAMUTS.some(({ id }) => id === saved.colorGamut)) values.colorGamut = saved.colorGamut;
+  if (typeof saved.lensCorrection === "boolean") values.lensCorrection = saved.lensCorrection;
+  if (typeof saved.lensProfileName === "string") values.lensProfileName = saved.lensProfileName.slice(0, 160);
   if (typeof saved.clampSrgb === "boolean") values.clampSrgb = saved.clampSrgb;
   if (typeof saved.rawProfile === "string" && /^[0-9a-f]{64}$/.test(saved.rawProfile)) {
     values.rawProfile = saved.rawProfile;

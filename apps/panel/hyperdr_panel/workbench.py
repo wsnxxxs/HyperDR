@@ -78,7 +78,7 @@ class Workbench:
 
     def publish_frame(self, session_id, options, data):
         with self.changed:
-            original_key = (session_id, (options.get("highlightRecovery", "blend"), options.get("rawProfile", "")))
+            original_key = (session_id, (options.get("highlightRecovery", "blend"), options.get("rawProfile", ""), options.get("lensCorrection", True)))
             if self.original_frame is None or self.original_frame[:2] != original_key:
                 self.original_frame = (*original_key, data)
             key = (session_id, json.dumps(options, sort_keys=True))

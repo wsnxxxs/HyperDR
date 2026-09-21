@@ -78,6 +78,19 @@ void table_interpolation_and_encoding() {
     const auto out=hyperdr::render_dcp_base(input,context);
     close(out.pixels[0],.1*(.5+.5*weight),"dual illuminant map interpolation");
   }
+  // Vary every grid axis so preblending is checked against an independently
+  // evaluated trilinear function, not just constant identity tables.
+  for (unsigned z=0;z<2;++z) for(unsigned h=0;h<4;++h) for(unsigned s=0;s<2;++s) {
+    const auto i=(z*4+h)*2+s;
+    p->hue_sat_maps[0].values[i][2]=.6F+.1F*h+.05F*s+.02F*z;
+    p->hue_sat_maps[1].values[i][2]=.8F-.03F*h-.04F*s-.01F*z;
+  }
+  context.illuminant_weight=.37;
+  const auto blended=p3_to_pro(hyperdr::render_dcp_base(pixel(pro_to_p3({.3,.2,.1})),context));
+  const double scale=std::lerp(.8-.03/3-.04*2/3-.01*.3,
+                               .6+.1/3+.05*2/3+.02*.3,.37);
+  close(blended[0],.3*scale,"preblended illuminant grid preserves trilinear sampling");
+  close(blended[1],.2*scale,"preblended map preserves channel ratios");
   p->hue_sat_maps={};
   p->look_table=map(.8F,true);
   const auto colored=pixel(pro_to_p3({.2,.15,.1}));

@@ -94,8 +94,8 @@ def save(session_id, name, stream, length):
 
 
 def roots():
-    candidates = [Path(os.environ.get("ProgramFiles", "C:/Program Files")) /
-                  "Adobe/Adobe Lightroom Classic/Resources/CameraProfiles"]
+    adobe = Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Adobe"
+    candidates = sorted(adobe.glob("*Lightroom*/Resources/CameraProfiles"))
     for variable in ("PROGRAMDATA", "APPDATA", "LOCALAPPDATA"):
         if os.environ.get(variable):
             candidates.append(Path(os.environ[variable]) / "Adobe/CameraRaw/CameraProfiles")
@@ -112,8 +112,6 @@ def discover(session_id):
             if not root.is_dir():
                 continue
             for path in root.rglob("*.dcp"):
-                if not any(name in path.stem.casefold() for name in ("adobe standard", "camera st")):
-                    continue
                 try:
                     with path.open("rb") as stream:
                         fields = tiff_strings(stream, {50708, 50936})
@@ -126,6 +124,9 @@ def discover(session_id):
                         seen.add(entry["rawProfile"])
                 except (OSError, ValueError):
                     continue
+    preferred = {"adobe standard": 0, "camera st": 1}
+    entries.sort(key=lambda entry: (preferred.get(entry["rawProfileName"].casefold(), 2),
+                                    entry["rawProfileName"].casefold()))
     return {"isRaw": is_raw, "camera": camera, "entries": entries}
 
 
@@ -139,4 +140,6 @@ def resolve(options, session_id):
     target = session.session_root(session_id) / "raw-profiles" / (digest + ".dcp")
     if not target.is_file():
         raise ValueError("此照片的 DCP 已过期，请重新选择。")
+    if session.input_path(session_id).suffix.lower() not in RAW_INPUT_EXTENSIONS:
+        raise ValueError("DCP 相机配置仅适用于 RAW 照片。")
     options["_raw_profile_path"] = str(target)

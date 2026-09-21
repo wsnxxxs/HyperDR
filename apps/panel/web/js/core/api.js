@@ -161,13 +161,13 @@ export const api = {
    *  because a model that needs capture settings can answer with another model's
    *  prediction, and a caller that assumed its own request had been honoured
    *  would label that result with the wrong model's name. */
-  async modelPreview(sessionId, highlightRecovery, modelId, { colorGamut, clampSrgb, rawProfile } = {}) {
+  async modelPreview(sessionId, highlightRecovery, modelId, { colorGamut, clampSrgb, rawProfile, lensCorrection } = {}) {
     let response;
     try {
       response = await fetch("/api/model-preview", {
         method: "POST",
         headers: JSON_HEADERS,
-        body: JSON.stringify({ sessionId, highlightRecovery, modelId, colorGamut, clampSrgb, rawProfile }),
+        body: JSON.stringify({ sessionId, highlightRecovery, modelId, colorGamut, clampSrgb, rawProfile, lensCorrection }),
       });
     } catch { throw OFFLINE(); }
     if (!response.ok) {

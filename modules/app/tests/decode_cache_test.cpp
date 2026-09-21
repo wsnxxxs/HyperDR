@@ -41,6 +41,9 @@ void round_trip(const std::filesystem::path& path,
           "cache changed the EXIF fallback decision");
   require(source.linear_p3.pixels == cached.linear_p3.pixels,
           "cache changed decoded pixels");
+  require(source.raw_lens_profile_path == cached.raw_lens_profile_path &&
+              source.raw_lens_correction == cached.raw_lens_correction,
+          "cache changed lens correction provenance");
 }
 
 // Standalone little-endian DCP with one identity-like ColorMatrix and D65.
@@ -106,6 +109,8 @@ int main() {
     const auto path = directory / "capture.hdrcache";
     hyperdr::DecodedImage source;
     source.linear_p3 = hyperdr::FloatImage(16, 16, 3);
+    source.raw_lens_profile_path = directory / "lens.lcp";
+    source.raw_lens_correction = "distortion,vignette";
     // Values beyond the report writer's precision must survive exactly, since
     // even small rounding can change a tree's branch. Zero EV remains present.
     source.metadata.capture = {125.0, 1.0 / 693.0, 1.7999999523162842,

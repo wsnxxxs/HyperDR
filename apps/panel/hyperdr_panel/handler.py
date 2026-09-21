@@ -304,7 +304,7 @@ class Handler(BaseHTTPRequestHandler):
                 original = parsed.path.endswith("/original")
                 frame = workbench.original_frame if original else workbench.frame
                 version = workbench.frame_version
-                key = (workbench.current.get("sessionId"), (workbench.current.get("options", {}).get("highlightRecovery", "blend"), workbench.current.get("options", {}).get("rawProfile", ""))) if original else workbench.frame_key()
+                key = (workbench.current.get("sessionId"), (workbench.current.get("options", {}).get("highlightRecovery", "blend"), workbench.current.get("options", {}).get("rawProfile", ""), workbench.current.get("options", {}).get("lensCorrection", True))) if original else workbench.frame_key()
                 if not frame or frame[:2] != key:
                     self._send(api.error("正在更新预览。", status=409))
                     return

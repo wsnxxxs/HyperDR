@@ -5,10 +5,16 @@
  * HDR) and colour spaces are proper nouns and stay as they are in both.
  */
 export default {
+  "lensProfile.label": "Enable lens correction",
+  "lensProfile.enabled": "Enabled · {name}",
+  "lensProfile.disabled": "Disabled · {name}",
+  "lensProfile.unmatched": "Disabled · No matching Lightroom lens profile found.",
+  "lensProfile.unknown": "Disabled · Lens metadata is unavailable.",
   "rawProfile.label": "RAW camera profile",
-  "rawProfile.choose": "Choose DCP file…",
+  "rawProfile.choose": "Import DCP…",
   "rawProfile.default": "HyperDR default",
-  "rawProfile.local": "Matching profiles from your local Adobe installation",
+  "rawProfile.local": "Found {count} matching profiles",
+  "rawProfile.empty": "No local profiles found for this camera. Import a DCP to use one.",
   "rawProfile.unknown": "Camera metadata unavailable. Choose a matching DCP manually; the decoder checks compatibility.",
 
   "lut.manageHint": "Manage your local LUTs. Import one or more .cube files.",

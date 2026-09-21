@@ -55,6 +55,7 @@ void usage() {
          "Usage:\n"
          "  HyperDR convert <file-or-directory> --output <directory> [options]\n"
          "  HyperDR inspect <file.heic> [--json]\n"
+         "  HyperDR raw-metadata <raw-file>\n"
          "  HyperDR verify <file.heic|file.jpg> [--reconstruct <preview.tiff>]\n"
          "                         [--reference <source-image>]\n"
          "  HyperDR display-curve <reference.heic> <candidate.heic>\n"
@@ -520,6 +521,8 @@ int thumbnail_command(int argc, char** argv) {
       raw.linearization_lut = next_value(i, argc, argv, arg);
     } else if (arg == "--raw-profile") {
       raw.profile = path_from_utf8(next_value(i, argc, argv, arg));
+    } else if (arg == "--raw-lens-profile") {
+      raw.lens_profile = path_from_utf8(next_value(i, argc, argv, arg));
     } else if (arg == "--raw-lens-shading") {
       raw.lens_shading_map = next_value(i, argc, argv, arg);
     } else if (arg == "--raw-auto-bad-pixels") {
@@ -694,6 +697,8 @@ struct PreviewSource {
 
 struct PreviewSession {
   std::vector<std::unique_ptr<PreviewSource>> sources;
+  std::string raw_key;
+  DecodedImage raw_master;
   PreviewSource& decode(const ConvertOptions& options) {
     const auto key = decode_cache_key(options.input,
         decode_cache_variant(options, options.raw), options.decode_cache_source_sha256);
@@ -702,8 +707,46 @@ struct PreviewSession {
     if (sources.size() == 2) sources.erase(sources.begin());
     auto source = std::make_unique<PreviewSource>();
     source->key = key;
-    source->image = decode_cached_image(options.input, options, options.raw, &source->analysis_file);
-    if (source->image.domain == InputDomain::kSceneReferred) {
+    if (options.raw.half_size && is_raw_extension(lower_extension(options.input))) {
+      const auto cache_file = options.decode_cache_directory.empty()
+          ? std::filesystem::path{} : decode_cache_path(options.decode_cache_directory, key);
+      if (!cache_file.empty()) {
+        source->analysis_file = cache_file.parent_path() /
+            (cache_file.stem().string() + ".analysis.hdrcache");
+      }
+      const bool disk_hit = !cache_file.empty() && read_decode_cache(cache_file, source->image);
+      if (!disk_hit) {
+        // LibRaw produces the same half-size pixels for every preview edge.
+        // Keep one such decode, then derive the two bounded render sizes below.
+        auto master_options = options;
+        master_options.preview_max_edge = 0;
+        master_options.raw.preview_max_edge = 0;
+        const auto master_key = decode_cache_key(options.input,
+            decode_cache_variant(master_options, master_options.raw),
+            options.decode_cache_source_sha256);
+        if (raw_key != master_key) {
+          raw_master = {};
+          raw_key.clear();
+          // This large intermediate belongs to this worker only. Persisting it
+          // adds substantial disk I/O to the first frame and worker retirement.
+          master_options.decode_cache_directory.clear();
+          raw_master = decode_cached_image(options.input, master_options, master_options.raw);
+          raw_key = master_key;
+        }
+        source->image = raw_master;
+        source->image.linear_p3 = resample_to_max_edge(
+            std::move(source->image.linear_p3), options.preview_max_edge);
+        if (!cache_file.empty()) {
+          static_cast<void>(write_decode_cache(cache_file, source->image,
+              options.decode_cache_budget_bytes));
+        }
+      }
+    } else {
+      raw_master = {};
+      raw_key.clear();
+      source->image = decode_cached_image(options.input, options, options.raw, &source->analysis_file);
+    }
+    if (!source->image.raw_profile && source->image.domain == InputDomain::kSceneReferred) {
       source->analysis = cached_photographic_analysis(source->image.linear_p3,
           source->analysis_file, options.decode_cache_budget_bytes);
     }
@@ -753,6 +796,8 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
       || capture.focal_length_mm.has_value() || capture.focal_length_35mm.has_value();
   GainMapResult result;
   if (!options.ai_model_path.empty()) {
+    const auto* analysis = cached && !decoded.raw_profile && input.domain == InputDomain::kSceneReferred
+        ? &cached->analysis : nullptr;
     // The model id is part of the cache key, not just the request: without it a
     // cached model-1 base would be reused for model 2 and the preview would show
     // the previous model's picture under the new model's name.
@@ -760,10 +805,10 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
                            (options.clamp_srgb ? "/srgb" : "/p3");
     const auto request = native_model_request(options, decoded.metadata);
     if (is_sdr_encoding(options.encoding)) {
-      result = render_native_model_base(decoded, options.clamp_srgb);
+      result = render_native_model_base(decoded, options.clamp_srgb, analysis);
     } else if (cached) {
       if (cached->model_key != model_key) {
-        cached->model_base = render_native_model_base(decoded, options.clamp_srgb);
+        cached->model_base = render_native_model_base(decoded, options.clamp_srgb, analysis);
         cached->model_input = make_native_model_input(cached->model_base.base_linear);
         cached->prediction = infer_native_model(request, cached->model_input);
         cached->model_key = model_key;
@@ -807,7 +852,7 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
     auto photo=render_graded_photo(decoded.linear_p3,options.gain,decoded.capture,input,
         is_sdr_encoding(options.encoding) ? RenderTarget::Sdr : RenderTarget::Hdr,
         options.color_lut, nullptr,
-        cached && input.domain==InputDomain::kSceneReferred ? &cached->analysis : nullptr,
+        cached && !decoded.raw_profile && input.domain==InputDomain::kSceneReferred ? &cached->analysis : nullptr,
         cached ? &cached->preparation : nullptr);
     if(is_sdr_encoding(options.encoding)) fit_sdr_to_srgb(photo.sdr);
     if(options.encoding == OutputEncoding::Adaptive ||
@@ -1072,6 +1117,7 @@ std::string model_input_report(const std::filesystem::path& input,
       .begin_array("delivered_crop_origin_sensor")
           .element(d.delivered_crop_left).element(d.delivered_crop_top).end_array()
       .member("raw_profile_sha256", decoded.raw_profile ? decoded.raw_profile->profile->sha256 : "")
+      .member("raw_lens_profile_sha256", decoded.raw_lens_profile_path.empty() ? std::string{} : sha256_file_hex(decoded.raw_lens_profile_path))
       .member("raw_half_size", raw.half_size)
       .member("input_domain", input_domain_name(decoded.describe_input().domain))
       .member("default_crop_present", d.default_crop_present)
@@ -1188,6 +1234,16 @@ int run_cli(int argc, char** argv) {
   if (command == "curve") return curve_command(argc, argv);
   if (command == "schema") return schema_command(argc, argv);
   if (command == "display-curve") return display_curve_command(argc, argv);
+  if (command == "raw-metadata") {
+    if (argc != 3) throw std::invalid_argument("raw-metadata requires one RAW path");
+    const auto metadata = probe_raw_lens_metadata(path_from_utf8(argv[2]));
+    json::Writer writer;
+    writer.begin_object().member("make", metadata.make).member("model", metadata.model)
+        .member("lens", metadata.lens).member("focalLength", metadata.focal_length)
+        .member("aperture", metadata.aperture).end_object();
+    std::cout << writer.take() << '\n';
+    return 0;
+  }
   if (command == "inspect") return inspect_command(argc, argv);
   if (command == "verify") return verify_command(argc, argv);
   if (command == "thumbnail") return thumbnail_command(argc, argv);

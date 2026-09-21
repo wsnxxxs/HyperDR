@@ -150,6 +150,7 @@ struct FileResult {
   std::string raw_white_balance;
   std::string raw_color_matrix;
   std::string raw_profile_name, raw_profile_sha256, raw_profile_camera, raw_profile_tone;
+  std::string raw_lens_profile, raw_lens_correction;
   float raw_profile_baseline_ev{};
   std::vector<std::string> decode_degradation_reasons;
   // Which renderer ran, and the headroom it was told the input carried. These

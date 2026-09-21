@@ -301,10 +301,12 @@ Native RAW formats may lack Adobe's camera baseline exposure; a DCP alone
 cannot recover that value. See the [A7R V validation](raw-dcp-validation.md)
 for the measured difference and an explicit exposure adjustment.
 
-In the panel, open a RAW and use **RAW camera profile** in the colour/LUT
-controls. Choose **HyperDR default**, a matching **Adobe Standard** or
-**Camera ST** discovered in local Adobe camera-profile directories, or
-**Choose DCP file…**. Automatic discovery requires readable camera make/model
+In the panel, open a RAW and use **RAW camera profile** above **Processing mode**.
+This section is hidden and disabled for non-RAW input. Choose **HyperDR default**,
+any matching DCP discovered in local Lightroom/Adobe camera-profile directories,
+or **Import DCP…**. The list includes all matching camera styles, deduplicated
+and sorted with Adobe Standard and Camera ST first.
+Automatic discovery requires readable camera make/model
 metadata; other RAW containers can use a manually selected DCP. Profiles come
 from the user's installation or upload and are not distributed with HyperDR.
 The panel stores an immutable copy with the photo, restores the selection with

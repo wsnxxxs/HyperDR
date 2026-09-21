@@ -41,8 +41,18 @@ class RawProfileTests(unittest.TestCase):
             profiles.mkdir()
             path = profiles / "Sony Adobe Standard.dcp"
             path.write_bytes(tiff({50708: "Sony ILCE-7RM5", 50936: "Adobe Standard"}, 0x4352))
+            for filename, camera, name in [
+                ("portrait.dcp", "Sony ILCE-7RM5", "Camera PT"),
+                ("vivid.dcp", "Sony ILCE-7RM5", "Camera VV"),
+                ("other.dcp", "Sony ILCE-7RM4", "Camera PT"),
+            ]:
+                (profiles / filename).write_bytes(tiff({50708: camera, 50936: name}, 0x4352))
+            (profiles / "duplicate.dcp").write_bytes((profiles / "portrait.dcp").read_bytes())
             with patch.object(session, "input_path", return_value=source), patch.object(raw_profiles, "roots", return_value=[profiles]):
-                entry = raw_profiles.discover(sid)["entries"][0]
+                discovered = raw_profiles.discover(sid)
+                self.assertEqual([entry["rawProfileName"] for entry in discovered["entries"]],
+                                 ["Adobe Standard", "Camera PT", "Camera VV"])
+                entry = discovered["entries"][0]
                 options = dict(entry, input=str(source), output="output", report="report.json")
                 raw_profiles.resolve(options, sid)
                 for model in (False, True):
@@ -55,6 +65,10 @@ class RawProfileTests(unittest.TestCase):
                 wrong = tiff({50708: "Sony ILCE-7RM4"}, 0x4352)
                 with self.assertRaisesRegex(ValueError, "不匹配"):
                     raw_profiles.save(sid, "wrong.dcp", io.BytesIO(wrong), len(wrong))
+            with patch.object(session, "input_path", return_value=source.with_suffix(".jpg")):
+                self.assertEqual(raw_profiles.discover(sid), {"isRaw": False, "camera": "", "entries": []})
+                with self.assertRaisesRegex(ValueError, "仅适用于 RAW"):
+                    raw_profiles.resolve(entry.copy(), sid)
             with self.assertRaises(ValueError):
                 raw_profiles.resolve({"rawProfile": "C:/private.dcp"}, sid)
             with self.assertRaises(ValueError):

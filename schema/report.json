@@ -293,6 +293,9 @@
         },
         "raw_profile": {
           "type": "string"
+        },
+        "raw_lens_profile": {
+          "type": "string"
         }
       }
     },
@@ -340,6 +343,9 @@
           "type": "string"
         },
         "lens_shading_map": {
+          "type": "string"
+        },
+        "lens_profile": {
           "type": "string"
         }
       }
@@ -581,6 +587,12 @@
         },
         "raw_profile_baseline_ev": {
           "type": "number"
+        },
+        "raw_lens_profile": {
+          "type": "string"
+        },
+        "raw_lens_correction": {
+          "type": "string"
         }
       }
     },

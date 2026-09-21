@@ -158,18 +158,34 @@ FloatImage render_dcp_base(const FloatImage& input, const DcpRenderContext& cont
   const auto& map1=profile.hue_sat_maps[0];
   const auto& map2=profile.hue_sat_maps[1];
   const double weight=std::clamp(context.illuminant_weight,0.0,1.0);
+  // Both illuminants use the same DCP grid. Interpolation is linear in its
+  // deltas, so blend the small table once instead of sampling two grids for
+  // every pixel. Keep the profile immutable for other photographs/threads.
+  DcpHueSatMap blended;
+  const DcpHueSatMap* hue_sat = map1.values.empty() ? &map2 : &map1;
+  if (!map1.values.empty() && !map2.values.empty()) {
+    if (map1.dims != map2.dims || map1.srgb_encoding != map2.srgb_encoding ||
+        map1.values.size() != map2.values.size())
+      throw std::invalid_argument("DCP illuminant maps must share a grid and encoding");
+    if (weight == 0) hue_sat = &map2;
+    else if (weight < 1) {
+      blended.dims = map1.dims;
+      blended.srgb_encoding = map1.srgb_encoding;
+      blended.values.resize(map1.values.size());
+      for (std::size_t i = 0; i < blended.values.size(); ++i)
+        for (unsigned c = 0; c < 3; ++c)
+          blended.values[i][c] = static_cast<float>(std::lerp(
+              double(map2.values[i][c]), double(map1.values[i][c]), weight));
+      hue_sat = &blended;
+    }
+  }
   FloatImage output(input.width,input.height,3);
   parallel_for_rows(input.height,[&](std::uint32_t y) {
     for (std::uint32_t x=0;x<input.width;++x) {
       const auto i=(static_cast<std::size_t>(y)*input.width+x)*3;
       RGB rgb=transform(to_pro,{input.pixels[i],input.pixels[i+1],input.pixels[i+2]});
       for (auto& c:rgb) c=pin(c);
-      if (!map1.values.empty() && !map2.values.empty()) {
-        const auto v=hsv(rgb), d1=sample(map1,v), d2=sample(map2,v);
-        RGB delta{};
-        for (int c=0;c<3;++c) delta[c]=std::lerp(d2[c],d1[c],weight);
-        rgb=apply_delta(v,delta,map1.srgb_encoding && map1.dims[2]>1);
-      } else rgb=apply_map(rgb,map1.values.empty()?map2:map1);
+      rgb=apply_map(rgb,*hue_sat);
       for (auto& c:rgb) {
         if (c<=black-radius) c=0;
         else if (c>=black+radius) c=pin((c-black)*slope);

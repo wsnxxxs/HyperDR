@@ -1,5 +1,7 @@
 #include "hyperdr/look/options.hpp"
+#include "hyperdr/image/transfer.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <string_view>
@@ -75,6 +77,12 @@ std::optional<InputDomain> input_domain_from_name(std::string_view name) {
   return std::nullopt;
 }
 
+float rendering_headroom(const InputDescription& input) {
+  if (input.domain != InputDomain::kDisplayReferredHdr || !input.content_peak_nits)
+    return input.headroom;
+  return std::clamp(*input.content_peak_nits / kReferenceWhiteNits, 1.0F, input.headroom);
+}
+
 void validate_input_description(const InputDescription& input) {
   if (input.domain == InputDomain::kUnknown) {
     throw std::invalid_argument("input domain is unknown");
@@ -82,9 +90,12 @@ void validate_input_description(const InputDescription& input) {
   if (!std::isfinite(input.headroom) || input.headroom < 1.0F) {
     throw std::invalid_argument("input headroom must be finite and at least 1");
   }
-  // A display-referred HDR input with unit headroom has no range to split, and
-  // the log-domain shoulder would divide by a zero span. Callers that cannot
-  // prove headroom > 1 must describe the input as SDR instead.
+  if (input.content_peak_nits &&
+      (!std::isfinite(*input.content_peak_nits) || *input.content_peak_nits <= 0)) {
+    throw std::invalid_argument("content peak must be finite and positive");
+  }
+  // The encoding must carry HDR range. Content-light metadata can separately
+  // limit rendering to unit headroom without changing the input domain.
   if (input.domain == InputDomain::kDisplayReferredHdr && input.headroom <= 1.0F) {
     throw std::invalid_argument(
         "a display-referred HDR input must declare headroom above 1");

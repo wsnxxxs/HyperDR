@@ -82,10 +82,55 @@ int main() {
     color.icc = linear_rec2020_profile();
     for (int bits : {16, 10, 12}) check_depth(bits, color);
     check_odd_reduction(color);
+    // The float ICC path must unassociate before conversion and retain signed
+    // out-of-P3 values when compositing. Include a sub-16-bit input.
+    for (int bits : {8, 10, 16}) {
+      const unsigned maximum = (1U << bits) - 1, alpha = maximum / 2;
+      std::vector<std::uint8_t> rgba;
+      for (unsigned code : {alpha, 0U, 0U, alpha}) {
+        rgba.push_back(static_cast<std::uint8_t>(code));
+        if (bits > 8) rgba.push_back(static_cast<std::uint8_t>(code >> 8));
+      }
+      const auto image = hyperdr::codec::interleaved_rgb_to_linear_p3(
+          rgba.data(), 1, 1, rgba.size(), bits, color, 0, 0,
+          hyperdr::codec::RgbAlpha::Premultiplied);
+      const auto expected = hyperdr::rec2020_to_linear_p3(static_cast<float>(alpha) / maximum, 0, 0);
+      for (unsigned c = 0; c < 3; ++c)
+        if (!std::isfinite(image.pixels[c]) || std::abs(image.pixels[c] - expected[c]) > 3e-4F)
+          throw std::runtime_error("premultiplied ICC alpha changed signed linear colour");
+    }
     color.icc.clear();
     color.primaries = hyperdr::codec::kCicpPrimariesBt2020;
     color.transfer = hyperdr::codec::kCicpTransferLinear;
     check_odd_reduction(color);
+    // Alpha is a linear weight even for PQ/HLG. Premultiplied *encoded*
+    // white has RGB=alpha, so unassociation must precede transfer decoding.
+    for (int bits : {8, 10, 12, 16}) {
+      const unsigned maximum = (1U << bits) - 1, middle = maximum / 2;
+      for (int transfer : {hyperdr::codec::kCicpTransferSrgb, hyperdr::codec::kCicpTransferPq,
+                           hyperdr::codec::kCicpTransferHlg}) {
+        color.transfer = transfer;
+        color.primaries = hyperdr::codec::kCicpPrimariesDisplayP3;
+        for (auto alpha : {hyperdr::codec::RgbAlpha::Straight, hyperdr::codec::RgbAlpha::Premultiplied}) {
+          std::vector<std::uint8_t> rgba;
+          const auto put = [&](unsigned v) {
+            rgba.push_back(static_cast<std::uint8_t>(v));
+            if (bits > 8) rgba.push_back(static_cast<std::uint8_t>(v >> 8));
+          };
+          for (unsigned a : {0U, middle, maximum}) {
+            const unsigned value = alpha == hyperdr::codec::RgbAlpha::Straight ? maximum : a;
+            put(value); put(value); put(value); put(a);
+          }
+          const auto image = hyperdr::codec::interleaved_rgb_to_linear_p3(
+              rgba.data(), 3, 1, rgba.size(), bits, color, 1, 1, alpha);
+          const float expected = hyperdr::codec::transfer_headroom(transfer) *
+              (1 + static_cast<float>(middle) / maximum) / 3;
+          for (float value : image.pixels)
+            if (!std::isfinite(value) || std::abs(value - expected) > 2e-4F)
+              throw std::runtime_error("HDR alpha association or linear reduction is incorrect");
+        }
+      }
+    }
     std::cout << "ICC signed gamut and sample normalization passed\n";
     return 0;
   } catch (const std::exception& error) {

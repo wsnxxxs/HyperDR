@@ -110,7 +110,7 @@ GainMapResult make_gain_map(const FloatImage& source, const GainMapOptions& opti
         return make_display_referred_sdr_result(source, options, capture, preparation);
       case InputDomain::kDisplayReferredHdr:
         return make_display_referred_hdr_gain_map(source, options,
-                                                  input.headroom);
+                                                  rendering_headroom(input));
       case InputDomain::kSceneReferred:
         break;
       case InputDomain::kUnknown:

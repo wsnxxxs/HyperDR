@@ -51,7 +51,7 @@ baseline instead of scene-metered exposure. For ordinary RAW, `exposure_ev` is a
 the renderer made about the scene; for the other two it is nothing but the
 creative offset the caller asked for. Only a scene-referred file gets
 content-selected headroom; a display-referred HDR file's `headroom_stops` is
-its `input_headroom` capped by `--headroom`/`--headroom-max` and scaled by
+its effective input range capped by `--headroom`/`--headroom-max` and scaled by
 `--gain-strength`. A display-referred SDR file has no measured input headroom,
 but its output uses the requested range as a creative expansion budget, so its
 reported `headroom_stops` can be non-zero while `input_headroom` remains 1.
@@ -63,6 +63,15 @@ rather than a measurement, so an HDR file whose colour is described by an ICC
 profile rather than by CICP reports 1 and the SDR domain: an ICC profile cannot
 state a headroom, and rendering such a file faithfully beats inventing a range
 for it.
+
+When a CICP HDR raster declares a nonzero MaxCLL, the optional
+`input_content_peak_nits` records that value in cd/m². The renderer uses
+`clamp(input_content_peak_nits / 203, 1, input_headroom)` as its effective
+range, then applies exposure and the output controls. `input_headroom` retains
+the encoding capacity. A 203-nit PQ input remains `display-referred-hdr` with
+zero content headroom; it is not expanded as an SDR source. Missing or zero
+MaxCLL omits this field and retains the encoding-capacity fallback. Native
+preview packets expose the same optional value as `inputContentPeakNits`.
 
 ## Geometry fields
 

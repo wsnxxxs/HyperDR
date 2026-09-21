@@ -205,12 +205,14 @@ inline std::array<float, 3> encoded_to_linear_p3(float r, float g, float b,
 // One immutable transform per image, shared by independently converted rows.
 // Tabulate finite integer codes exactly (no interpolation). HLG tabulates only
 // its inverse OETF; the luminance-dependent OOTF still runs per pixel.
+enum class RgbAlpha { None, Straight, Premultiplied };
+
 class RgbRowTransform {
  public:
   RgbRowTransform(const SourceColor& color, int bits, bool narrow_range = false,
-                  bool allow_gray = false)
+                  bool allow_gray = false, RgbAlpha alpha = RgbAlpha::None)
       : primaries_(color.primaries), hlg_(color.transfer == kCicpTransferHlg),
-        wide_(bits > 8) {
+        wide_(bits > 8), alpha_(alpha), transfer_code_(color.transfer) {
     if (bits < 1 || bits > 16 || (narrow_range && bits < 8))
       throw std::runtime_error("decoded image has invalid RGB depth");
     max_code_ = (1U << bits) - 1U;
@@ -222,8 +224,9 @@ class RgbRowTransform {
       if (!gray_ && cmsGetColorSpace(source.get()) != cmsSigRgbData)
         throw std::runtime_error("embedded ICC profile is not an RGB profile");
       const auto destination = linear_display_p3_profile();
-      const auto format = gray_ ? (wide_ ? TYPE_GRAY_16 : TYPE_GRAY_8)
-                               : (wide_ ? TYPE_RGB_16 : TYPE_RGB_8);
+      const auto format = alpha_ == RgbAlpha::Premultiplied
+          ? (gray_ ? TYPE_GRAY_FLT : TYPE_RGB_FLT)
+          : gray_ ? (wide_ ? TYPE_GRAY_16 : TYPE_GRAY_8) : (wide_ ? TYPE_RGB_16 : TYPE_RGB_8);
       transform_.reset(cmsCreateTransform(source.get(), format, destination.get(),
           TYPE_RGB_FLT, INTENT_RELATIVE_COLORIMETRIC, 0));
       if (!transform_) throw std::runtime_error("cannot build the ICC colour transform");
@@ -241,6 +244,58 @@ class RgbRowTransform {
   }
 
   void convert(const std::uint8_t* row, float* target, std::uint32_t width) const {
+    convert(row, target, width, true);
+  }
+
+  void convert(const std::uint8_t* row, float* target, std::uint32_t width,
+               bool composite_alpha) const {
+    if (alpha_ == RgbAlpha::None) {
+      convert_rgb(row, target, width);
+      return;
+    }
+    if (alpha_ == RgbAlpha::Premultiplied) {
+      // Undo association in the encoded domain, without another integer
+      // quantization. Alpha itself is linear and always spans the full range.
+      const unsigned channels = gray_ ? 1 : 3;
+      std::vector<float> packed(static_cast<std::size_t>(width) * channels);
+      for (unsigned x = 0; x < width; ++x) {
+        const float alpha = static_cast<float>(sample(row, static_cast<std::size_t>(x) * 4 + 3));
+        for (unsigned c = 0; c < channels; ++c)
+          packed[static_cast<std::size_t>(x) * channels + c] = alpha > 0
+              ? std::min(static_cast<float>(sample(row, static_cast<std::size_t>(x) * 4 + c)) / alpha, 1.0F)
+              : 0.0F;
+      }
+      if (transform_) {
+        cmsDoTransform(transform_.get(), packed.data(), target, width);
+      } else {
+        for (unsigned x = 0; x < width; ++x) {
+          const auto i = static_cast<std::size_t>(x) * 3;
+          const auto linear = encoded_to_linear_p3(packed[i], packed[i + 1], packed[i + 2],
+                                                   primaries_, transfer_code_);
+          std::copy(linear.begin(), linear.end(), target + i);
+        }
+      }
+    } else {
+      const unsigned bytes = wide_ ? 2 : 1;
+      std::vector<std::uint8_t> packed(static_cast<std::size_t>(width) * 3 * bytes);
+      for (unsigned x = 0; x < width; ++x)
+        std::copy_n(row + static_cast<std::size_t>(x) * 4 * bytes, 3 * bytes,
+                    packed.data() + static_cast<std::size_t>(x) * 3 * bytes);
+      convert_rgb(packed.data(), target, width);
+    }
+    if (composite_alpha) {
+      for (unsigned x = 0; x < width; ++x) {
+        const float alpha = static_cast<float>(sample(row, static_cast<std::size_t>(x) * 4 + 3)) / max_code_;
+        for (unsigned c = 0; c < 3; ++c) {
+          auto& value = target[static_cast<std::size_t>(x) * 3 + c];
+          value = alpha == 0 ? 0 : value * alpha;
+        }
+      }
+    }
+  }
+
+ private:
+  void convert_rgb(const std::uint8_t* row, float* target, std::uint32_t width) const {
     if (transform_) {
       // RGB outputs keep the stream's 10/12-bit codes. LCMS's integer formats
       // instead span all 16 bits. Also pack libpng-expanded gray back to one
@@ -272,13 +327,14 @@ class RgbRowTransform {
     }
   }
 
- private:
   [[nodiscard]] unsigned sample(const std::uint8_t* row, std::size_t index) const {
     return wide_ ? row[index * 2] | (static_cast<unsigned>(row[index * 2 + 1]) << 8)
                  : row[index];
   }
   int primaries_{};
   bool hlg_{}, wide_{}, gray_{};
+  RgbAlpha alpha_{};
+  int transfer_code_{};
   unsigned max_code_{};
   TransformHandle transform_;
   std::vector<float> transfer_;
@@ -295,19 +351,21 @@ inline FloatImage interleaved_rgb_to_linear_p3(const std::uint8_t* pixels,
                                                std::size_t stride, int bits,
                                                const SourceColor& color,
                                                std::uint32_t out_width = 0,
-                                               std::uint32_t out_height = 0) {
+                                               std::uint32_t out_height = 0,
+                                               RgbAlpha alpha = RgbAlpha::None,
+                                               bool composite_alpha = true) {
   if (!pixels || !width || !height)
     throw std::runtime_error("decoded image has invalid RGB dimensions");
   if (!out_width) out_width = width;
   if (!out_height) out_height = height;
   if (out_width > width || out_height > height)
     throw std::runtime_error("decoded preview cannot enlarge the source");
-  const RgbRowTransform transform(color, bits);
+  const RgbRowTransform transform(color, bits, false, false, alpha);
   FloatImage linear(out_width, out_height, 3);
   if (out_width == width && out_height == height) {
     parallel_for_rows(height, [&](std::uint32_t y) {
       transform.convert(pixels + static_cast<std::size_t>(y) * stride,
-          linear.pixels.data() + static_cast<std::size_t>(y) * width * 3, width);
+          linear.pixels.data() + static_cast<std::size_t>(y) * width * 3, width, composite_alpha);
     });
     return linear;
   }
@@ -317,7 +375,7 @@ inline FloatImage interleaved_rgb_to_linear_p3(const std::uint8_t* pixels,
     const auto top = static_cast<std::uint64_t>(oy) * height;
     const auto bottom = static_cast<std::uint64_t>(oy + 1) * height;
     for (auto sy = top / out_height; sy <= (bottom - 1) / out_height; ++sy) {
-      transform.convert(pixels + sy * stride, row.data(), width);
+      transform.convert(pixels + sy * stride, row.data(), width, composite_alpha);
       const double wy = static_cast<double>(std::min(bottom, (sy + 1) * out_height) -
           std::max(top, sy * out_height)) / height;
       for (std::uint32_t ox = 0; ox < out_width; ++ox) {

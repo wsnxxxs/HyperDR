@@ -399,9 +399,9 @@ GainMapResult make_display_referred_hdr_gain_map(const FloatImage& source,
     throw std::invalid_argument("gain-map input must be RGB");
   }
   validate_gain_map_options(options);
-  if (!(std::isfinite(input_headroom) && input_headroom > 1.0F)) {
+  if (!(std::isfinite(input_headroom) && input_headroom >= 1.0F)) {
     throw std::invalid_argument(
-        "a display-referred HDR render needs an input headroom above 1");
+        "a display-referred HDR render needs an input headroom of at least 1");
   }
 
   const float exposure_ev = display_referred_exposure_ev(options);

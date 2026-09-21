@@ -673,6 +673,82 @@ Sony DSC01925.ARW 的 DCP/LCP 路径及附加阴影图路径也均与旧版逐�
 `.workbuddy/fuji-calibration-{red,green,real,ctest,native}.log` 留有记录。
 缓存升为 schema 28 / render revision 22。极端空间增益在去马赛克前的整数精度限制未解决。
 
+## 第十六轮：透明度、预乘颜色与 HDR 重建顺序
+
+PNG 直接 strip alpha，HEIF 直接请求 RGB，都会让透明像素隐藏的颜色进入工作图像。
+AVIF 的旧路径则有另一种错误：
+[libavif 1.4.2](https://github.com/AOMediaCodec/libavif/blob/v1.4.2/src/reformat.c#L1660)
+在 RGB 输出不带 alpha 时会把未预乘输入自动乘 alpha，然后才交给本项目解码传递函数，
+因此半透明边缘在非线性编码域被压暗。根据用户选择，统一以黑色作为不透明成片的背景。
+
+现在 PNG 保留 RGBA/tRNS，HEIF/AVIF 有透明度时请求 RGBA；共享行转换器先恢复未预乘的
+编码 RGB，再做 ICC 或 CICP 转换，在浮点线性 P3 中乘 alpha，最后才做面积缩图。
+alpha 为零的结果精确置零。没有 alpha 的图片继续使用原来的 RGB 转换分支。
+[PNG 第三版](https://www.w3.org/TR/png-3/)将 alpha 定义为未做 gamma 编码的线性权重；
+PNG 本身不存预乘 RGB。HEIF/AVIF 则显式保留输入的预乘标志，由共享浮点转换器解除
+预乘，避免库在整数 RGB 上解除预乘后再量化。
+
+Adaptive HDR HEIC 先用未合成的 base 重建 HDR，再乘 alpha，base-only 分支则直接
+合成 SDR。回归夹具使用一档增益、base offset=1/4、alternate offset=1/8：
+白色的正确结果是 `((1+1/4)*2-1/8)*alpha = 2.375*alpha`；如果先合成再重建，
+全透明区域会残留 0.375。真实 HEIF 编码夹具验证了此顺序及 base-only 分支。
+
+验证覆盖 PNG 8/16 位、普通/Adam7、灰度 ICC、palette tRNS；共享转换覆盖
+8/10/12/16 位与 sRGB/PQ/HLG，并检查预乘 ICC 的负 P3 分量。真实 HEIF/AVIF
+文件覆盖 8 位 straight/premultiplied，完整解码与缩图的线性均值一致。
+真实 HEIF/AVIF 高位深透明输入的文件级验收尚未覆盖；高位深数学路径已有解析测试。
+
+CLI 四条白色带的 alpha 为 0/128/255/64。旧 PNG 预览均为 1.0，新版为
+0/0.5019608/1/0.2509804，缩成一个像素为 0.4382357（解析值 0.4382353）。
+不透明对照预览逐值一致。SDR JPEG、Ultra HDR、Adaptive HEIC、PQ HEIC、PQ AVIF
+五种导出均自检通过，回读后全透明带为黑色。重放脚本、报告和文件位于
+`output/pipeline-review/alpha/`。
+
+Release 完整构建通过。完整 CTest 的其余 48 项通过；新增 alpha 测试夹具先遇到
+encoder handle 查询及 Windows 文件占用问题，修正为文件读回验证、关闭 reader 后
+再写 tmap 后，定向回归通过，合计 49 项通过。3 项 native Python 测试通过。
+记录为 `.workbuddy/alpha-{build,ctest,final-test,native,real}.log`。
+缓存升为 schema 29 / render revision 23，使旧透明度结果失效。
+
+## 第十七轮：内容峰值与 PQ/HLG 编码容量
+
+上一轮导出回读暴露了另一个真实问题：203 nit 白色写入 PQ 后，SDR 预览变为约 0.764。
+编码器已经写出 MaxCLL，解码器却忽略它，只把 PQ 的 10000/203 或 HLG 的 1000/203
+作为输入范围。色调映射因而为图片没有使用的亮度范围预留空间；在默认四档 HDR 输出
+上，812 nit 样本的峰值也从 4 被压至约 3.084。
+
+现在把非零 MaxCLL 保存为独立的 `content_peak_nits`，不改变 EOTF、像素单位、编码
+容量和 HDR domain。渲染范围使用 `clamp(MaxCLL/203, 1, encoding_headroom)`，然后
+施加曝光和输出预算。203 nit PQ 仍走 HDR 显影分支，只是无须分割额外亮度；不能把它
+改成 SDR domain，否则会进入创意 HDR 扩展分支。普通 rendition、旧 gain-map 入口、
+HDR LUT 的白点锚都使用同一个范围选择函数。Adaptive HDR 使用自身重建元数据，不
+继承底图的内容峰值。
+
+[libavif 的 MIAF 定义](https://github.com/AOMediaCodec/libavif/blob/v1.4.2/include/avif/avif.h)
+把 MaxCLL 描述为线性 RGB 各分量的上界，故保留编码器现有的 maxRGB 统计。
+[PNG cLLI](https://www.w3.org/TR/png-3/#cLLI-chunk) 的单位是 0.0001 nit，
+HEIF/AVIF 为整数 nit；测试分别核对单位。零/缺失仍为未知，沿用编码容量回退，
+不从缩小的预览估计峰值。这仍是既定回退策略，并不说明未知峰值的色调映射已经最优。
+ICC/SDR 图片不消费这项 HDR 提示；没有把 MaxFALL 当成白点或曝光参数。
+
+独立脚本用 ST 2084 公式生成 16 位 PQ PNG，比较旧、新 CLI 的线性预览：
+
+| 内容峰值 | 旧 SDR / HDR 峰值 | 新 SDR / HDR 峰值 | 新输出范围 |
+| --- | --- | --- | --- |
+| 203 nit | 0.763624 / 0.967496 | 0.999933 / 0.999933 | 0 档 |
+| 812 nit | 0.961002 / 3.084075 | 1.000000 / 4.000000 | 2 档 |
+
+同一图片缓存命中与首次渲染逐值相同，gain strength=0 与 1 的 SDR 底图逐值相同；
+未知/零 MaxCLL 的新旧输出逐值相同。两个峰值分别导出 PQ/HLG HEIF、PQ/HLG AVIF，
+八份文件均自检通过；回读 HDR 峰值最大偏差约 0.26%，SDR 白色误差小于 0.001。
+解析测试另覆盖 identity PQ/HLG LUT、内容提示超过格式容量以及无内容提示的回退。
+现有真实彩色 HEIF/AVIF 编码回归验证 maxRGB 内容峰值、完整与缩小解码元数据一致。
+
+缓存与报告传递这项可选元数据，报告字段为 `input_content_peak_nits`，原生预览字段
+为 `inputContentPeakNits`。缓存 schema 30 / render revision 24 使旧结果失效。
+Release 完整构建、49 项 CTest、3 项 native Python 测试通过。脚本、文件与逐项数据在
+`output/pipeline-review/content-light/`，日志为 `.workbuddy/clli-*.log`。
+
 ## 总体正确性的验收范围
 
 当前仍不能用上述回归通过来证明“整个管线已经没有问题”。持续审核按以下不变量推进：
@@ -681,8 +757,8 @@ Sony DSC01925.ARW 的 DCP/LCP 路径及附加阴影图路径也均与旧版逐�
 | --- | --- | --- |
 | RAW 解码与校准 | 黑白电平、白平衡、矩阵和方向各应用一次；全尺寸导出不静默降级 | 恒定阴影增益、Bayer 浮点校准、Blend/Reconstruct 局部阈值、恢复边缘块及去马赛克后浮点阶段已修复；去马赛克前极端增益比精度及不同组合和机型仍需验收 |
 | 镜头与重采样 | 坐标随方向一致；恒定场和线性均值不偏移；有符号场景值不提前裁剪 | 镜头方向、恒等、插值解析测试及本轮缩图回归；尚未覆盖全部真实镜头类型 |
-| 栅格颜色解码 | 显式颜色标签优先于默认值；颜色转换先于线性缩图；保留工作色域外分量 | PNG 颜色/窄范围、ICC、HEIF/AVIF 线性缩图已修复并做真实编码回归；透明度与 PNG 照片字段传递尚待核对，Exif 不默认控制方向 |
-| 场景/显示域显影 | 成片输入不再次当 RAW 显影；DCP 与原生曲线不重复应用 | domain routing、DCP、LUT、rendition 回归；各格式与 LUT 组合仍需系统核对 |
+| 栅格颜色解码 | 显式颜色标签优先于默认值；颜色转换与透明度合成先于线性缩图；保留工作色域外分量 | PNG 颜色/窄范围、ICC、HEIF/AVIF 线性缩图与黑背景 alpha 已修复并做真实编码回归；HEIF/AVIF 高位深透明文件、PNG 照片字段传递尚待核对，Exif 不默认控制方向 |
+| 场景/显示域显影 | 成片输入不再次当 RAW 显影；DCP 与原生曲线不重复应用；内容峰值与格式容量分开 | domain routing、DCP、LUT、rendition、MaxCLL 读取及 PQ/HLG 回读回归；缺失内容峰值的映射策略、各格式与 LUT 组合仍需系统核对 |
 | 局部增益 | 负值不产生 NaN；零增益不改变底图；缓存切换与现算一致 | 负亮度回归、0→1→0 回归、原生渲染测试及多尺寸阶跃剖面；有一像素增益泄漏，真实照片边缘与尺度差异尚需验收 |
 | 增益编码与重建 | gamma/offset/channel/headroom 语义一致；量化误差可测 | 解析重建、RGB endpoint 和 codec 测试；不同封装器与显示容量的交叉验证仍在继续 |
 | 预览与导出 | 同配置共享处理语义；像素尺寸、采样差异明确；旧结果不覆盖新结果 | native worker、scheduler、绑定测试及基准；没有用缩图逐值比较代替完整格式验证 |

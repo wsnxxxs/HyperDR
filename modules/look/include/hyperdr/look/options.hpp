@@ -77,7 +77,14 @@ struct InputDescription {
   // linear multiple. Only read for kDisplayReferredHdr, where it exceeds 1.
   float headroom{1.0F};
   std::shared_ptr<const DcpRenderContext> raw_profile;
+  // Optional MaxCLL in cd/m². This bounds tone mapping, not transfer decoding;
+  // a PQ image with a 203-nit peak is still an already rendered HDR input.
+  std::optional<float> content_peak_nits;
 };
+
+// Range to map after applying any content-light metadata. Unknown content
+// retains the encoding's range; unit content headroom requires no HDR split.
+[[nodiscard]] float rendering_headroom(const InputDescription& input);
 
 // Rejects a description whose headroom contradicts its domain before any
 // renderer divides by it.

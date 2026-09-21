@@ -296,10 +296,45 @@ void test_scene_base_without_gain_preparation() {
   }
 }
 
+void test_content_light_mapping() {
+  for (float peak : {1.0F, 4.0F}) {
+    FloatImage source(32, 8, 3);
+    for (unsigned y=0;y<source.height;++y) for (unsigned x=0;x<source.width;++x)
+      for (unsigned c=0;c<3;++c) source.at(x,y,c)=peak*x/(source.width-1);
+    InputDescription input{InputDomain::kDisplayReferredHdr, 10000.0F/kReferenceWhiteNits};
+    input.content_peak_nits=peak*kReferenceWhiteNits;
+    RenderOptions options;
+    const auto photo=render_renditions(source,options,{},input,RenderTarget::Hdr);
+    require(std::abs(photo.stats.headroom_stops-std::log2(peak))<1e-5F,
+        "HDR output range must use content light, not PQ capacity");
+    for (std::size_t i=0;i<source.pixels.size();++i)
+      require(std::abs(photo.hdr.pixels[i]-source.pixels[i])<1e-5F,
+          "content fitting the output must not receive another HDR shoulder");
+    const auto sdr=render_renditions(source,options,{},input,RenderTarget::Sdr);
+    require(sdr.sdr.pixels==photo.sdr.pixels,"content light must agree in SDR-only and paired rendering");
+    if (peak==1) {
+      const auto legacy=make_gain_map(source,{}, {},input);
+      require(legacy.headroom_stops==0,"SDR-range PQ must not be creatively expanded");
+      for(std::size_t i=0;i<source.pixels.size();++i)
+        require(std::abs(legacy.base_linear.pixels[i]-source.pixels[i])<1e-5F,
+            "legacy gain-map rendering must retain SDR-range PQ light");
+    } else {
+      const auto expected=render_renditions(source,options,{},
+          {InputDomain::kDisplayReferredHdr,peak},RenderTarget::Hdr);
+      require(photo.sdr.pixels==expected.sdr.pixels,"MaxCLL must set the same SDR shoulder as declared content range");
+    }
+    input.content_peak_nits=20000.0F;
+    require(rendering_headroom(input)==input.headroom,"content hint cannot expand transfer capacity");
+    input.content_peak_nits.reset();
+    require(rendering_headroom(input)==input.headroom,"unknown content must retain the encoding fallback");
+  }
+}
+
 int main() {
   try { test_zero_and_spatial_gain(); test_model_grading(); test_final_gain_statistics();
         test_hdr_source_reconstructs_itself(); test_hdr_source_outside_p3();
-        test_independent_rgb_renditions(); test_scene_base_without_gain_preparation(); }
+        test_independent_rgb_renditions(); test_scene_base_without_gain_preparation();
+        test_content_light_mapping(); }
   catch(const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
   std::cout<<"graded model reconstruction and final gain statistics passed\n";
 }

@@ -24,6 +24,14 @@ carries it as `input_domain`. Nothing branches on the file extension.
 | `display-referred-sdr` | JPEG, PNG, SDR HEIC/AVIF, an Ultra HDR JPEG that fell back to its primary | diffuse white, and the ceiling | stable finished base plus creative highlight gain |
 | `display-referred-hdr` | PQ/HLG HEIC and AVIF, Ultra HDR, a gain-map HEIC | diffuse white, with real detail above it | log-domain shoulder, split at the declared headroom |
 
+PNG, HEIF and AVIF transparency is composited onto black in linear Display P3
+before resizing or rendering; outputs are opaque photographs. Premultiplied
+inputs are first unassociated in their encoded colour space, then converted to
+linear light and weighted by alpha. An Adaptive HDR HEIC reconstructs its HDR
+pixels before applying alpha, because gain-map offsets do not commute with
+compositing. Fully transparent pixels become exactly zero, irrespective of
+their hidden RGB values.
+
 - **A scene-referred input** is developed: the photographic curve below chooses
   an exposure from the scene's log average and selects headroom from content.
 - **A display-referred SDR input** is already a finished photograph, so it does
@@ -45,6 +53,13 @@ carries it as `input_domain`. Nothing branches on the file extension.
   its ceiling, and assuming it instead rendered a 1.06-stop input at 0.42 stops.
   When the output budget covers everything the input declared, the rendition is
   the input, unmodified.
+- PQ/HLG PNG, HEIF and AVIF may declare MaxCLL independently of the transfer
+  function's capacity. Tone mapping uses that nonzero content peak, bounded by
+  the encoding capacity and a minimum of SDR white (203 nits), before exposure.
+  Transfer decoding and the HDR input domain stay unchanged. Thus a 203-nit PQ
+  photograph has no HDR range to compress or expand, rather than being mapped
+  as though it reached 10,000 nits. Missing/zero MaxCLL retains the encoding
+  fallback. This is a declared mapping hint, not a rescaling of pixel light.
 - The output headroom is the input's declared headroom capped by
   `--headroom`/`--headroom-max` and scaled by `--gain-strength`, so an
   over-range input is attenuated deliberately instead of being flattened

@@ -248,7 +248,7 @@ PhotoRenditions render_graded_photo(const FloatImage& source,
     working=source;
     exposure_ev=std::clamp((options.auto_exposure?0:options.exposure_ev)+options.exposure_bias_ev,-10.0F,10.0F);
     for(auto& c:working.pixels) c*=std::exp2(exposure_ev);
-    working_headroom=input.headroom*std::exp2(exposure_ev);
+    working_headroom=rendering_headroom(input)*std::exp2(exposure_ev);
   } else {
     // HLG/PQ specifies the LUT's signal encoding, not a request to expand SDR.
     // Develop only the requested rendition before entering that encoding.

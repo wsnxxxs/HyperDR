@@ -109,7 +109,7 @@ PhotoRenditions render_renditions(const FloatImage& source,
   const float exposure = std::exp2(ev);
   const float requested = options.auto_headroom ? options.look.headroom_max_stops : options.headroom_stops;
   const float strength = std::min(1.0F, options.gain_strength);
-  const float available = std::max(0.0F, std::log2(input.headroom * exposure));
+  const float available = std::max(0.0F, std::log2(rendering_headroom(input) * exposure));
   const float stops = !want_hdr ? 0.0F : (scene ? prepared.requested_stops :
       input_hdr ? std::min(available, requested) : requested) * strength;
   const float peak = std::exp2(stops);

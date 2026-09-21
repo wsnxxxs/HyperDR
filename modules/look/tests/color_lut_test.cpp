@@ -232,6 +232,24 @@ void test_near_unit_headroom() {
         "near-unit headroom must approach SDR passthrough smoothly");
 }
 
+void test_content_light_lut(const std::filesystem::path& file) {
+  ColorLut identity; identity.size=2; identity.values={{0,0,0},{1,1,1}};
+  for (float peak : {1.0F, 4.0F}) {
+    FloatImage source(32,1,3);
+    for(unsigned x=0;x<source.width;++x) for(unsigned c=0;c<3;++c)
+      source.at(x,0,c)=peak*x/(source.width-1);
+    InputDescription input{InputDomain::kDisplayReferredHdr,10000.0F/203};
+    input.content_peak_nits=203*peak;
+    const auto baseline=render_renditions(source,{}, {},input,RenderTarget::Hdr);
+    for(auto space:{LutSpace::Hlg,LutSpace::Pq}) {
+      ColorLutOptions grade{file,space,space,1};
+      const auto result=render_graded_photo(source,{}, {},input,RenderTarget::Hdr,grade,&identity);
+      require_image_close(result.sdr,baseline.sdr,"identity LUT must retain content-light SDR mapping");
+      require_image_close(result.hdr,baseline.hdr,"identity LUT must retain content-light HDR mapping");
+    }
+  }
+}
+
 int main() {
   const auto file=std::filesystem::temp_directory_path()/"hyperdr-color-lut-test.cube";
   try {
@@ -283,6 +301,7 @@ int main() {
     test_hdr_lut_below_reference_white(file);
     test_sdr_hdr_lut_routing(file);
     test_near_unit_headroom();
+    test_content_light_lut(file);
     {std::ofstream out(file);out<<"LUT_3D_SIZE 2\n0 0 0\n";}
     rejected=false;
     try{(void)read_color_lut(file);}catch(const std::invalid_argument&){rejected=true;}

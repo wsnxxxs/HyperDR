@@ -224,6 +224,9 @@ struct DecodedImage {
   // whether an input is genuinely HDR must branch on this rather than on a
   // percentile of the image.
   float hdr_headroom{1.0F};
+  // Optional CICP HDR content-light metadata, in nits. Zero means unknown;
+  // this is a content hint, not the transfer function's encoding capacity.
+  std::optional<float> content_peak_nits;
   // Which domain `linear_p3` lives in, set by the decoder that produced it.
   // This and `hdr_headroom` are the two things the renderer needs in order to
   // know what its tone curve means; `describe_input()` bundles them.
@@ -251,7 +254,7 @@ struct DecodedImage {
     if (!(hdr_headroom > 1.0F) || !std::isfinite(hdr_headroom)) {
       return {InputDomain::kDisplayReferredSdr, 1.0F};
     }
-    return {InputDomain::kDisplayReferredHdr, hdr_headroom};
+    return {InputDomain::kDisplayReferredHdr, hdr_headroom, {}, content_peak_nits};
   }
 };
 

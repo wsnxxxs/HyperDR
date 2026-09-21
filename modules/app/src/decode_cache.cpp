@@ -48,7 +48,9 @@ constexpr std::array<char, 8> kMagic{'H', 'D', 'R', 'C', 'A', 'C', 'H', '3'};
 // 26 preserves floating-point RAW highlights and geometry after demosaic.
 // 27 excludes unused shading vertices from RAW integer normalization.
 // 28 separates stored Fuji sensor coordinates from the rearranged raster.
-constexpr std::uint32_t kCacheSchema = 28;
+// 29 composites raster alpha on black in linear light after HDR reconstruction.
+// 30 retains content-light metadata independently of HDR encoding capacity.
+constexpr std::uint32_t kCacheSchema = 30;
 
 // x86-64 and arm64, the only targets this project builds for, are both little
 // endian; the cache is a local scratch format and is never transported.
@@ -163,6 +165,7 @@ std::string metadata_json(const DecodedImage& value) {
   write_capture_value(writer, "metadata_capture_focal_length_mm", m.capture.focal_length_mm);
   write_capture_value(writer, "metadata_capture_focal_length_35mm", m.capture.focal_length_35mm);
   write_capture_value(writer, "capture_iso", c.iso);
+  write_capture_value(writer, "content_peak_nits", value.content_peak_nits);
   write_capture_value(writer, "capture_exposure_time_seconds", c.exposure_time_seconds);
   write_capture_value(writer, "capture_aperture_f_number", c.aperture_f_number);
   write_capture_value(writer, "capture_exposure_bias_ev", c.exposure_bias_ev);
@@ -241,6 +244,7 @@ void apply_metadata_json(const std::string& text, DecodedImage& out) {
     out.metadata.gps = gps;
   }
   out.hdr_headroom = read_optional(document, "hdr_headroom").value_or(1.0F);
+  out.content_peak_nits = read_optional(document, "content_peak_nits");
   // kCacheSchema was bumped for this field, so an entry that predates it is
   // already a miss and never reaches here. The fallback covers only a name this
   // build does not recognise, and it points at display-referred SDR because

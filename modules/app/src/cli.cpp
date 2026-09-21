@@ -598,8 +598,9 @@ std::vector<std::uint8_t> photo_preview_packet(const PhotoRenditions& result,
       .member("inputDomain", input_domain_name(input.domain))
       .member("hasCaptureMetadata", hasCaptureMetadata)
       .member("inputHeadroomStops", std::log2(input.headroom))
-      .member("status", decode.degraded ? "degraded" : "ok")
-      .begin_array("degradationReasons");
+      .member("status", decode.degraded ? "degraded" : "ok");
+  if (input.content_peak_nits) writer.member("inputContentPeakNits", *input.content_peak_nits);
+  writer.begin_array("degradationReasons");
   for (const auto& reason : decode.degradation_reasons) writer.element(reason);
   writer.end_array().end_object();
   const std::string metadata = writer.take();

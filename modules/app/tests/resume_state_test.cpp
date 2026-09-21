@@ -153,6 +153,7 @@ void check_decode_cache_roundtrip() {
   value.decode.degradation_reasons = {"default_crop_rejected"};
   value.domain = hyperdr::InputDomain::kDisplayReferredHdr;
   value.hdr_headroom = 4.93F;
+  value.content_peak_nits = 406.25F;
 
   const auto file = hyperdr::decode_cache_path(directory, "roundtrip");
   require(hyperdr::write_decode_cache(file, value), "cache write should succeed");
@@ -185,6 +186,9 @@ void check_decode_cache_roundtrip() {
   require(loaded.domain == hyperdr::InputDomain::kDisplayReferredHdr &&
               std::abs(loaded.hdr_headroom - 4.93F) < 1.0e-6F,
           "input domain and HDR headroom must round-trip");
+  require(loaded.content_peak_nits == value.content_peak_nits &&
+              loaded.describe_input().content_peak_nits == value.content_peak_nits,
+          "content-light metadata must survive cache and input description");
 
   // A truncated file is a miss, never a crash or a half-filled image.
   {

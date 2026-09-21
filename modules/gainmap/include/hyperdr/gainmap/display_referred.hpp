@@ -61,8 +61,10 @@ namespace hyperdr {
 // A finished HDR rendition, split into an SDR base and the gain map that
 // restores it.
 //
-// `input_headroom` is the linear multiple of diffuse white the input's own
-// container declared, not a percentile of its pixels. The output headroom is
+// `input_headroom` is the linear multiple of diffuse white selected from the
+// container's content-light hint or encoding capacity, not a pixel percentile.
+// Unit headroom retains SDR-range HDR content without creative expansion.
+// The output headroom is
 // that value capped by the caller's target and by `gain_strength`, so a 5.6-stop
 // PQ input converted to a 3-stop Adaptive HEIC is attenuated deliberately
 // instead of being clipped by the encoder.

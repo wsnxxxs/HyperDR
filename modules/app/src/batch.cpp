@@ -53,6 +53,19 @@ bool half_size_matches_full(std::uint32_t half, std::uint32_t full) {
          (full == half * 2U || full + 1U == half * 2U);
 }
 
+bool raster_preview_matches_full(const DecodeInfo& decoded) {
+  if (!decoded.target_dimensions_applied || !decoded.decoded_width || !decoded.decoded_height)
+    return false;
+  // Raster decoders reduce both axes by one integer factor and round up.
+  // The reduced raster still covers the entire source crop.
+  for (std::uint64_t factor = 1; factor <= 64; ++factor) {
+    if (decoded.decoded_width == (decoded.target_width + factor - 1) / factor &&
+        decoded.decoded_height == (decoded.target_height + factor - 1) / factor)
+      return true;
+  }
+  return false;
+}
+
 }  // namespace
 
 GainMapResult render_decoded_image(const DecodedImage& image,
@@ -116,6 +129,9 @@ GainMapOptions replay_external_development(
   if (sha256_file_hex(input) != binding.source_sha256) {
     reject("source sha256");
   }
+  if (binding.preprocessing_fingerprint != model_preprocessing_fingerprint(options)) {
+    reject("preprocessing changed; regenerate the model input and gain");
+  }
   if (binding.highlight_recovery !=
       highlight_recovery_name(options.raw.highlight_recovery)) {
     reject("highlight recovery");
@@ -140,20 +156,34 @@ GainMapOptions replay_external_development(
   const bool same_delivered_size =
       binding.delivered_crop_width == decoded.decoded_width &&
       binding.delivered_crop_height == decoded.decoded_height;
-  const bool delivered_matches = binding.raw_half_size
+  const bool raster_preview = options.decode_intent == DecodeIntent::Preview &&
+      (image.domain == InputDomain::kDisplayReferredSdr ||
+       image.domain == InputDomain::kDisplayReferredHdr) && !image.raw_profile &&
+      binding.delivered_crop_width == decoded.target_width &&
+      binding.delivered_crop_height == decoded.target_height &&
+      raster_preview_matches_full(decoded);
+  const bool delivered_matches = raster_preview || (binding.raw_half_size
       ? (options.decode_intent == DecodeIntent::Preview && same_delivered_size) ||
             (half_size_matches_full(binding.delivered_crop_width,
                                     decoded.decoded_width) &&
              half_size_matches_full(binding.delivered_crop_height,
                                     decoded.decoded_height))
-      : same_delivered_size;
+      : same_delivered_size ||
+            (options.decode_intent == DecodeIntent::Preview && options.raw.half_size &&
+             half_size_matches_full(decoded.decoded_width, binding.delivered_crop_width) &&
+             half_size_matches_full(decoded.decoded_height, binding.delivered_crop_height)));
   if (!delivered_matches) reject("delivered crop");
 
   const auto profile_hash = image.raw_profile ? image.raw_profile->profile->sha256 : std::string{};
   if (binding.raw_profile_sha256 != profile_hash) reject("RAW DCP profile");
   const auto lens_hash = image.raw_lens_profile_path.empty() ? std::string{} : sha256_file_hex(image.raw_lens_profile_path);
   if (binding.raw_lens_profile_sha256 != lens_hash) reject("RAW LCP profile");
-  if (image.raw_profile && binding.recipe.id != "raw-dcp-v1") reject("RAW DCP development recipe");
+  const auto expected_recipe = image.raw_profile ? "raw-dcp-v1" :
+      native_model_development_kind(image.describe_input().domain);
+  const bool legacy_scene_recipe = binding.recipe.id == "photographic-v1" &&
+      image.describe_input().domain == InputDomain::kSceneReferred && !image.raw_profile;
+  if (binding.recipe.id != expected_recipe && !legacy_scene_recipe)
+    reject("development recipe does not match the decoded input domain");
   GainMapOptions replay = options.gain;
   replay.auto_exposure = false;
   replay.exposure_ev = binding.recipe.exposure_ev;

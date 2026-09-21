@@ -46,7 +46,7 @@ void check_no_upscale_and_passthrough() {
           "a bound of zero must disable resampling");
 }
 
-// A flat field must survive both the halving chain and the bilinear step
+// A flat field must survive both the halving chain and the final area integration
 // exactly; any leak of an OETF into this path would shift the value.
 void check_linear_light_is_preserved() {
   const auto reduced = hyperdr::resample_to_max_edge(constant_image(2000, 1000, 0.375F), 137);
@@ -81,6 +81,35 @@ void check_energy_is_not_lost() {
           "resampling must approximately preserve total energy");
 }
 
+void check_fractional_footprints() {
+  // The last pixel of an odd raster has the same area as every other pixel.
+  // Repeated pair averaging used to turn its mean from 1/5 into 1/2.
+  hyperdr::FloatImage impulse(5,1,1);
+  impulse.at(4,0,0)=1;
+  const auto single=hyperdr::resample_to(impulse,1,1);
+  require(std::abs(single.pixels[0]-.2F)<1e-6F,
+      "odd-size reduction must not overweight the final source pixel");
+  hyperdr::FloatImage stripe(3,1,1);
+  stripe.pixels={0,1,0};
+  const auto fractional=hyperdr::resample_to(stripe,2,1);
+  for (float value:fractional.pixels) require(std::abs(value-1.0F/3)<1e-6F,
+      "fractional reduction must integrate the complete destination pixel footprint");
+  hyperdr::FloatImage signed_field(9,7,3);
+  for(unsigned y=0;y<7;++y) for(unsigned x=0;x<9;++x) {
+    signed_field.at(x,y,0)=(x==8 && y==6)?8.0F:0;
+    signed_field.at(x,y,1)=-.25F;
+    signed_field.at(x,y,2)=2;
+  }
+  const auto reduced=hyperdr::resample_to(signed_field,2,3);
+  double energy=0;
+  for(unsigned y=0;y<3;++y) for(unsigned x=0;x<2;++x) {
+    energy+=reduced.at(x,y,0);
+    require(std::abs(reduced.at(x,y,1)+.25F)<1e-6F && std::abs(reduced.at(x,y,2)-2)<1e-6F,
+        "linear resampling must preserve signed channels and HDR values");
+  }
+  require(std::abs(energy*63/6-8)<1e-5,"two-axis odd reduction must preserve mean energy");
+}
+
 void check_single_axis_downscale_is_antialiased() {
   hyperdr::FloatImage horizontal(16, 1, 1);
   for (std::uint32_t x = 0; x < horizontal.width; ++x) {
@@ -112,7 +141,8 @@ void check_just_over_two_to_one_is_antialiased() {
   const auto reduced = hyperdr::resample_to(std::move(image), 1600, 1);
   double deviation = 0.0;
   for (std::uint32_t x = 8; x + 8 < reduced.width; ++x) {
-    deviation += std::abs(reduced.at(x, 0, 0) - 0.5F);
+    // This odd raster has 1600 bright pixels, not half of 3201 pixels.
+    deviation += std::abs(reduced.at(x, 0, 0) - 1600.0F/3201.0F);
   }
   deviation /= static_cast<double>(reduced.width - 16U);
   require(deviation < 1.0e-4,
@@ -160,6 +190,7 @@ void check_size_overflow_is_rejected() {
 
 int main() {
   try {
+    check_fractional_footprints();
     check_exact_bound();
     check_no_upscale_and_passthrough();
     check_linear_light_is_preserved();

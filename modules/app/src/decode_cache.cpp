@@ -38,7 +38,11 @@ constexpr std::array<char, 8> kMagic{'H', 'D', 'R', 'C', 'A', 'C', 'H', '3'};
 // mismatch no longer reuses pixels made with the wrong camera calibration.
 // 17 uses detail-preserving cubic LCP resampling and an exact identity path.
 // 18 selects duplicate LCP calibrations by fit quality, not record order.
-constexpr std::uint32_t kCacheSchema = 18;
+// 19 preserves uniform pixel area through odd and fractional preview resizes.
+// 20 honours PNG colour tags, reduces PNG in linear light, and retains signed ICC output.
+// 21 decodes narrow-range PNG, retains signed HLG/P3 and original raster geometry.
+// 22 reduces HEIF/AVIF in linear light with uniform pixel-area weights.
+constexpr std::uint32_t kCacheSchema = 22;
 
 // x86-64 and arm64, the only targets this project builds for, are both little
 // endian; the cache is a local scratch format and is never transported.

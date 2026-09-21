@@ -272,6 +272,7 @@ void check_model_binding_rejects_stale_gain() {
 
   hyperdr::ExternalGainMap external;
   hyperdr::ExternalGainBinding binding;
+  binding.preprocessing_fingerprint = hyperdr::model_preprocessing_fingerprint(base_options());
   binding.source_sha256 = hyperdr::sha256_file_hex(source);
   binding.highlight_recovery = "blend";
   binding.orientation = 1;
@@ -286,7 +287,7 @@ void check_model_binding_rejects_stale_gain() {
   binding.model_height = 1280;
   binding.gain_width = 64;
   binding.gain_height = 80;
-  binding.resize_convention = "half-pixel-centres/area-then-bilinear";
+  binding.resize_convention = "uniform-area-stages/linear-upscale-v2";
   binding.model_version = "baseline@epoch-1";
   binding.checkpoint_sha256 = std::string(64, 'a');
   binding.recipe.exposure_ev = 0.72F;
@@ -302,6 +303,7 @@ void check_model_binding_rejects_stale_gain() {
   external.binding = binding;
 
   hyperdr::DecodedImage image;
+  image.domain = hyperdr::InputDomain::kSceneReferred;
   image.metadata.orientation = 1;
   image.decode.sensor_width = 96;
   image.decode.sensor_height = 80;
@@ -345,6 +347,54 @@ void check_model_binding_rejects_stale_gain() {
   preview_options.raw.half_size = true;
   static_cast<void>(hyperdr::replay_external_development(
       external, source, preview_image, preview_options));
+  auto full_external = external;
+  full_external.binding->raw_half_size = false;
+  full_external.binding->delivered_crop_width = 64;
+  full_external.binding->delivered_crop_height = 80;
+  static_cast<void>(hyperdr::replay_external_development(
+      full_external, source, preview_image, preview_options));
+  bool reduced_export_rejected = false;
+  try {
+    static_cast<void>(hyperdr::replay_external_development(
+        full_external, source, preview_image, options));
+  } catch (const std::invalid_argument&) { reduced_export_rejected = true; }
+  require(reduced_export_rejected, "full model binding accepted a half-size final export");
+
+  // A full raster binding can drive JPEG/PNG/HEIF/AVIF previews at more than
+  // LibRaw's one fixed 2x reduction. Source and crop identity still match.
+  auto raster = image;
+  raster.domain = hyperdr::InputDomain::kDisplayReferredSdr;
+  raster.decode.sensor_width = raster.decode.target_width = 6401;
+  raster.decode.sensor_height = raster.decode.target_height = 4267;
+  auto raster_external = full_external;
+  auto& raster_binding = *raster_external.binding;
+  raster_binding.sensor_width = raster_binding.requested_crop_width =
+      raster_binding.delivered_crop_width = 6401;
+  raster_binding.sensor_height = raster_binding.requested_crop_height =
+      raster_binding.delivered_crop_height = 4267;
+  raster_binding.recipe.id = "display-p3-passthrough";
+  auto raster_options = options;
+  raster_options.decode_intent = hyperdr::DecodeIntent::Preview;
+  for (const unsigned factor : {4, 8}) {
+    raster.decode.decoded_width = (6401 + factor - 1) / factor;
+    raster.decode.decoded_height = (4267 + factor - 1) / factor;
+    static_cast<void>(hyperdr::replay_external_development(
+        raster_external, source, raster, raster_options));
+  }
+  const auto rejects_raster = [&](const auto& current_options) {
+    try {
+      static_cast<void>(hyperdr::replay_external_development(
+          raster_external, source, raster, current_options));
+    } catch (const std::invalid_argument&) { return true; }
+    return false;
+  };
+  require(rejects_raster(options), "a reduced raster preview passed final export validation");
+  raster.decode.decoded_width = 800;
+  raster.decode.decoded_height = 533;
+  require(rejects_raster(raster_options), "a raster preview with obsolete floor rounding was accepted");
+  raster.decode.decoded_width = 801;
+  raster.decode.decoded_height = 530;
+  require(rejects_raster(raster_options), "a raster preview with a different aspect ratio was accepted");
 
   const auto rejected = [&](const auto& mutate) {
     auto stale_external = external;
@@ -363,10 +413,23 @@ void check_model_binding_rejects_stale_gain() {
             gain.binding->source_sha256 = std::string(64, '0');
           }),
           "gain from a different RAW hash was accepted");
+  require(rejected([](auto& gain, auto&, auto&) {
+            gain.binding->preprocessing_fingerprint = "obsolete-pipeline";
+          }), "gain from a different preprocessing version was accepted");
+  require(rejected([](auto& gain, auto&, auto&) {
+            gain.binding->recipe.id = "display-p3-passthrough";
+          }), "display recipe was accepted for scene-referred input");
   require(rejected([](auto&, auto&, auto& current) {
             current.raw.highlight_recovery = hyperdr::HighlightRecovery::Reconstruct;
           }),
           "gain from a different highlight recovery was accepted");
+  require(rejected([](auto&, auto&, auto& current) { current.raw.digital_gain = 2.0F; }),
+          "gain from a different RAW digital gain was accepted");
+  require(rejected([](auto&, auto&, auto& current) { current.clamp_srgb = true; }),
+          "gain from a different base gamut mapping was accepted");
+  require(rejected([](auto&, auto&, auto& current) {
+            current.raw.auto_bad_pixel_correction = true;
+          }), "gain from a different RAW bad-pixel correction was accepted");
   require(rejected([](auto&, auto& current, auto&) {
              current.decode.decoded_width = 62;
            }),
@@ -384,6 +447,40 @@ void check_model_binding_rejects_stale_gain() {
           }),
           "half-size preview accepted a different delivered crop");
   std::filesystem::remove(source);
+}
+
+void check_model_calibration_identity() {
+  const auto file = std::filesystem::temp_directory_path() / "hyperdr-binding-calibration.txt";
+  const auto moved = std::filesystem::temp_directory_path() / "hyperdr-binding-calibration-moved.txt";
+  const auto reference = hyperdr::model_preprocessing_fingerprint(base_options());
+  for (auto member : {&hyperdr::RawDecodeOptions::profile, &hyperdr::RawDecodeOptions::lens_profile,
+                      &hyperdr::RawDecodeOptions::bad_pixel_map, &hyperdr::RawDecodeOptions::dark_frame,
+                      &hyperdr::RawDecodeOptions::linearization_lut, &hyperdr::RawDecodeOptions::lens_shading_map}) {
+    { std::ofstream out(file); out << "calibration-a"; }
+    { std::ofstream out(moved); out << "calibration-a"; }
+    auto options = base_options();
+    options.raw.*member = file;
+    const auto calibrated = hyperdr::model_preprocessing_fingerprint(options);
+    require(calibrated != reference, "calibration resource was omitted from model binding");
+    options.raw.*member = moved;
+    require(hyperdr::model_preprocessing_fingerprint(options) == calibrated,
+            "moving unchanged calibration invalidated model binding");
+    { std::ofstream out(moved); out << "calibration-b"; }
+    require(hyperdr::model_preprocessing_fingerprint(options) != calibrated,
+            "in-place calibration change was omitted from model binding");
+  }
+  auto preview = base_options();
+  preview.raw.half_size = true;
+  preview.preview_max_edge = preview.raw.preview_max_edge = 640;
+  preview.decode_intent = hyperdr::DecodeIntent::Preview;
+  preview.quality = 70;
+  require(hyperdr::model_preprocessing_fingerprint(preview) == reference,
+          "preview geometry or output quality changed model colour identity");
+  preview.default_gamut = hyperdr::ColorGamut::kDisplayP3;
+  require(hyperdr::model_preprocessing_fingerprint(preview) != reference,
+          "default input colour gamut was omitted from model binding");
+  std::filesystem::remove(file);
+  std::filesystem::remove(moved);
 }
 
 void check_prune_respects_the_budget() {
@@ -489,6 +586,7 @@ int main() {
     check_decode_cache_key_varies();
     check_export_rejects_reduced_resolution();
     check_model_binding_rejects_stale_gain();
+    check_model_calibration_identity();
     check_prune_respects_the_budget();
     check_input_domain_routing();
     check_native_model_base_routing();

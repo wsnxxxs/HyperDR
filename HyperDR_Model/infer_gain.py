@@ -159,8 +159,10 @@ def main() -> None:
     model_input_descriptor = None
     if args.input_report is not None:
         model_input_descriptor = json.loads(args.input_report.read_text(encoding="utf-8"))
-        if model_input_descriptor.get("schema") != "hyperdr.model-input/v1":
-            raise SystemExit("unsupported --input-report schema")
+        if model_input_descriptor.get("schema") != "hyperdr.model-input/v2":
+            raise SystemExit("regenerate --input-report with the current HyperDR model-input command")
+        if not model_input_descriptor.get("preprocessing_fingerprint"):
+            raise SystemExit("model input report is missing preprocessing identity")
         pixel_file = model_input_descriptor.get("pixel_file")
         geometry = model_input_descriptor.get("geometry")
         if not isinstance(pixel_file, dict) or not isinstance(geometry, dict):
@@ -294,7 +296,8 @@ def main() -> None:
     if model_input_descriptor is not None:
         gain_size = [int(gain_stops.shape[1]), int(gain_stops.shape[0])]
         report["model_binding"] = {
-            "contract": "hyperdr.model-gain-binding/v1",
+            "contract": "hyperdr.model-gain-binding/v2",
+            "preprocessing_fingerprint": model_input_descriptor["preprocessing_fingerprint"],
             "source": {
                 "sha256": model_input_descriptor["source_sha256"],
                 **({"raw_profile_sha256": model_input_descriptor["raw_profile_sha256"]}

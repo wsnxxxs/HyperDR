@@ -7,6 +7,7 @@
 #include "hyperdr/foundation/version.hpp"
 
 #include <array>
+#include <algorithm>
 #include <cstdio>
 #include <stdexcept>
 
@@ -117,6 +118,30 @@ std::string settings_signature(const ConvertOptions& options) {
 
 std::string settings_fingerprint(const ConvertOptions& options) {
   return fnv1a_hex(settings_signature(options));
+}
+
+std::string model_preprocessing_fingerprint(const ConvertOptions& options) {
+  std::string identity = std::string("model-base:") + kVersion +
+      "|pipeline=" + std::to_string(kRenderPipelineRevision) +
+      "|clamp_srgb=" + (options.clamp_srgb ? "1" : "0");
+  const auto resources = raw_decode_resources(options.raw);
+  for (const auto& setting : settings()) {
+    if (!setting.affects_decoded_pixels || setting.key == "half_size" ||
+        setting.key == "preview_max_edge") continue;
+    if (std::any_of(resources.begin(), resources.end(), [&](const auto& resource) {
+          return resource.key == setting.key;
+        })) continue;
+    const auto value = setting.read(options);
+    identity += '|' + std::string(setting.key) + '=';
+    if (value.is_string()) identity += value.string();
+    else if (value.is_bool()) identity += value.boolean() ? "1" : "0";
+    else identity += exact_number_text(value.number());
+  }
+  for (const auto& resource : resources) {
+    identity += '|' + std::string(resource.key) + '=';
+    if (!resource.path.empty()) identity += sha256_file_hex(resource.path);
+  }
+  return fnv1a_hex(identity);
 }
 
 }  // namespace hyperdr

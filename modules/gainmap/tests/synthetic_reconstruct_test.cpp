@@ -247,6 +247,38 @@ void test_channel_mismatch_is_rejected() {
           "one-channel metadata silently consumed a three-channel gain map");
 }
 
+void test_small_positive_gamma_uses_its_actual_value() {
+  const float code = 0.9999999F;
+  const auto expected = [](float encoded, double gamma) {
+    return static_cast<float>(0.25 * std::exp2(2.0 * std::pow(static_cast<double>(encoded), 1.0 / gamma)));
+  };
+  auto metadata = positive_metadata();
+  metadata.gamma = {1, 10'000'000};
+  const auto mono = hyperdr::reconstruct_gain_map(
+      base_image(0.25F), gain_image(code), metadata, 2.0F);
+  for (float sample : mono.pixels) {
+    require(std::isfinite(sample), "small positive gamma produced a non-finite sample");
+    require_close(sample, expected(code, 1.0e-7), 1.0e-6F,
+                  "small positive gamma was replaced by a larger value");
+  }
+
+  metadata.flags |= 0x80U;
+  metadata.channels = {
+      {{0, 1}, {2, 1}, {1, 10'000'000}, {0, 1}, {0, 1}},
+      {{0, 1}, {2, 1}, {2, 1}, {0, 1}, {0, 1}},
+      {{0, 1}, {2, 1}, {1, 2}, {0, 1}, {0, 1}},
+  };
+  hyperdr::FloatImage gain(1, 1, 3);
+  gain.pixels = {code, 0.25F, 0.5F};
+  const auto rgb = hyperdr::reconstruct_gain_map(base_image(0.25F), gain, metadata, 2.0F);
+  const double gammas[] = {1.0e-7, 2.0, 0.5};
+  for (unsigned c = 0; c < 3; ++c) {
+    require(std::isfinite(rgb.pixels[c]), "independent RGB gamma produced a non-finite sample");
+    require_close(rgb.pixels[c], expected(gain.pixels[c], gammas[c]), 1.0e-6F,
+                  "RGB reconstruction did not use each actual gamma");
+  }
+}
+
 void test_large_image_uses_shared_double_precision_coordinates() {
   constexpr std::uint32_t kWidth = 1'500'000;
   constexpr std::uint32_t kGainWidth = 3068;
@@ -280,6 +312,7 @@ int main() {
     test_clamp_statistics_are_reported();
     test_three_channel_reconstruction_uses_each_channel();
     test_channel_mismatch_is_rejected();
+    test_small_positive_gamma_uses_its_actual_value();
     test_large_image_uses_shared_double_precision_coordinates();
     std::cout << "synthetic reconstruction tests passed\n";
     return 0;

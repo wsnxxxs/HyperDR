@@ -34,4 +34,9 @@ struct RawDecodeResource {
 [[nodiscard]] std::string settings_signature(const ConvertOptions& options);
 [[nodiscard]] std::string settings_fingerprint(const ConvertOptions& options);
 
+// Identity of the decoded colour/calibration and canonical model base.
+// Geometry is checked separately so a half-size model input can serve a full
+// export. Resource contents, rather than paths, allow moving calibration files.
+[[nodiscard]] std::string model_preprocessing_fingerprint(const ConvertOptions& options);
+
 }  // namespace hyperdr

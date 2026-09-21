@@ -8,16 +8,19 @@
 // factor of two smaller than asked for -- while the latter halved only down to
 // twice the bound and then resampled to the exact size. Both now call this.
 //
-// Repeated 2x2 area reduction low-passes the image before the final bilinear
-// step, so large reductions (9504 -> 2048) cannot skip most source pixels and
-// alias fine texture. All of it runs on linear values, which keeps highlight
-// energy correct; reducing after an OETF would darken bright detail.
+// Staged area reduction low-passes large reductions. Every shrinking stage,
+// including odd rasters and the final fractional ratio, integrates uniform
+// output-pixel footprints. Enlarged axes use centre-aligned bilinear sampling.
+// All operations run on linear values to preserve mean highlight energy;
+// reducing after an OETF would darken bright detail.
 
 #include "hyperdr/image/image.hpp"
 
 #include <cstdint>
 
 namespace hyperdr {
+
+inline constexpr char kResampleConvention[] = "uniform-area-stages/linear-upscale-v2";
 
 // Scales so the longest edge is exactly `max_edge`, preserving aspect ratio.
 // `max_edge` of 0, or an image already within the bound, returns the source

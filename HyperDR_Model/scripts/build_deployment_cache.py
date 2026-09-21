@@ -48,6 +48,43 @@ def atomic_npy(path: Path, value: np.ndarray) -> None:
     os.replace(temporary, path)
 
 
+def cache_manifest(directory: Path) -> dict[str, dict]:
+    path = directory / "deployment-cache.jsonl"
+    if not path.is_file():
+        return {}
+    try:
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        result = {row["sample_id"]: row for row in rows}
+        return result if len(result) == len(rows) else {}
+    except (ValueError, KeyError, TypeError):
+        return {}
+
+
+def reusable_row(row: dict | None, tensor_path: Path, original: Path,
+                 fallback_dir: Path | None, generation: dict) -> dict | None:
+    """Reuse only tensors whose original generation is still reproducible."""
+    if not row or not tensor_path.is_file() or row.get("generation") != generation:
+        return None
+    try:
+        source = (find_source(fallback_dir.resolve(), row["sample_id"])
+                  if row.get("original_decode_error") and fallback_dir is not None else original)
+        if (row.get("original_decode_error") and fallback_dir is None
+                or row.get("original_source_sha256") != sha256_file(original)
+                or Path(row["source"]).resolve() != source.resolve()
+                or row.get("source_sha256") != sha256_file(source)
+                or row.get("tensor_sha256") != sha256_file(tensor_path)
+                or not isinstance(row.get("model_input_report"), dict)):
+            return None
+        tensor = np.load(tensor_path, allow_pickle=False)
+        if (tensor.ndim != 3 or tensor.shape[0] != 3 or 0 in tensor.shape
+                or list(tensor.shape) != row.get("tensor_shape")
+                or not np.isfinite(tensor).all() or tensor.min() < 0 or tensor.max() > 1):
+            return None
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError):
+        return None
+    return dict(row, reused=True)
+
+
 def sample_ids(root: Path, split: str, label_subset: str) -> list[str]:
     if split == "development":
         # The CV registry is the only development-membership authority.  Do
@@ -158,38 +195,28 @@ def main() -> None:
     if manifest_path.exists() and not args.resume:
         raise SystemExit(f"{manifest_path} already exists; use a new directory or --resume")
 
+    generation = {"executable_sha256": sha256_file(args.hyperdr_exe),
+                  "long_side": args.long_side, "highlight_recovery": args.highlight_recovery}
+    existing = cache_manifest(output) if args.resume else {}
+    reuse_rows = cache_manifest(reuse_input) if reuse_input is not None else {}
+
     rows: list[dict[str, object]] = []
     windows_executable = os.name != "nt" and args.hyperdr_exe.suffix.lower() == ".exe"
     for index, sample_id in enumerate(sample_ids(root, args.split, args.label_subset), 1):
         destination = output / f"{sample_id}.npy"
         source = find_source(source_dir, sample_id)
-        row: dict[str, object]
-        if destination.is_file() and args.resume:
-            tensor = np.load(destination, allow_pickle=False)
-            row = {
-                "sample_id": sample_id,
-                "source": str(source),
-                "source_sha256": sha256_file(source),
-                "tensor_shape": list(tensor.shape),
-                "tensor_sha256": sha256_file(destination),
-                "reused": True,
-            }
-        elif reuse_input is not None and (reuse_input / f"{sample_id}.npy").is_file():
+        original_digest = sha256_file(source)
+        row = reusable_row(existing.get(sample_id), destination, source,
+                           args.fallback_sdr_dir, generation)
+        if row is None and reuse_input is not None:
             reused_source = reuse_input / f"{sample_id}.npy"
-            shutil.copyfile(reused_source, destination)
-            tensor = np.load(destination, allow_pickle=False)
-            if tensor.ndim != 3 or tensor.shape[0] != 3 or not np.isfinite(tensor).all():
-                raise RuntimeError(f"{sample_id}: reused deployment tensor is incompatible")
-            row = {
-                "sample_id": sample_id,
-                "source": str(source),
-                "source_sha256": sha256_file(source),
-                "tensor_shape": list(tensor.shape),
-                "tensor_sha256": sha256_file(destination),
-                "reused": True,
-                "reused_input_from": str(reused_source),
-            }
-        else:
+            row = reusable_row(reuse_rows.get(sample_id), reused_source, source,
+                               args.fallback_sdr_dir, generation)
+            if row is not None:
+                if reused_source.resolve() != destination.resolve():
+                    shutil.copyfile(reused_source, destination)
+                row["reused_input_from"] = str(reused_source)
+        if row is None:
           with tempfile.TemporaryDirectory(prefix="hyperdr-deployment-cache-") as temporary:
             raw = Path(temporary) / "input.f32"
             report_path = Path(temporary) / "input.json"
@@ -239,6 +266,8 @@ def main() -> None:
                 "sample_id": sample_id,
                 "source": str(source),
                 "source_sha256": sha256_file(source),
+                "original_source_sha256": original_digest,
+                "generation": generation,
                 "tensor_shape": list(chw.shape),
                 "tensor_sha256": sha256_file(destination),
                 "model_input_report": report,

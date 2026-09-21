@@ -98,6 +98,7 @@ inline constexpr float kHlgSystemGamma = 1.2F;
 inline constexpr std::array<float, 3> kRec2020Luminance{0.2627F, 0.6780F, 0.0593F};
 
 // The BT.2100 HLG OETF on normalized scene light in [0, 1], and its inverse.
+// The inverse retains narrow-range excursions using an odd extension.
 // No OOTF: these are per channel by definition.
 [[nodiscard]] inline float hlg_oetf_scene(float scene) {
   constexpr float a = 0.17883277F;
@@ -111,8 +112,10 @@ inline constexpr std::array<float, 3> kRec2020Luminance{0.2627F, 0.6780F, 0.0593
   constexpr float a = 0.17883277F;
   constexpr float b = 0.28466892F;
   constexpr float c = 0.55991073F;
-  const float s = std::max(0.0F, signal);
-  return s <= 0.5F ? (s * s) / 3.0F : (std::exp((s - c) / a) + b) / 12.0F;
+  // Odd extension retains below-black excursions in narrow-range signals.
+  const float s = std::abs(signal);
+  const float scene = s <= 0.5F ? (s * s) / 3.0F : (std::exp((s - c) / a) + b) / 12.0F;
+  return std::copysign(scene, signal);
 }
 
 // Display light relative to diffuse white to an HLG signal: BT.2100's inverse
@@ -155,20 +158,31 @@ inline constexpr std::array<float, 3> kRec2020Luminance{0.2627F, 0.6780F, 0.0593
   return signal;
 }
 
-// The inverse of hlg_encode: the OETF undone on each channel, then the OOTF on
-// the scene luminance, returned relative to diffuse white.
-[[nodiscard]] inline std::array<float, 3> hlg_decode(
-    const std::array<float, 3>& signal,
+// The HLG OOTF acts on the whole pixel. Kept separate so integer decoders can
+// tabulate the inverse OETF without tabulating a colour-dependent operation.
+[[nodiscard]] inline std::array<float, 3> hlg_ootf(
+    const std::array<float, 3>& scene,
     const std::array<float, 3>& weights = kRec2020Luminance) {
-  std::array<double, 3> scene{};
-  for (std::size_t c = 0; c < 3; ++c) scene[c] = hlg_inverse_oetf_scene(signal[c]);
   const double luminance =
-      weights[0] * scene[0] + weights[1] * scene[1] + weights[2] * scene[2];
-  if (!(luminance > 0.0)) return {0.0F, 0.0F, 0.0F};
-  const double factor = std::pow(luminance, kHlgSystemGamma - 1.0) * kHlgNominalPeakNits /
+      static_cast<double>(weights[0]) * scene[0] +
+      static_cast<double>(weights[1]) * scene[1] +
+      static_cast<double>(weights[2]) * scene[2];
+  // BT.2100 uses |Ys| here, so negative scene components are not clipped and
+  // the fractional power remains defined for below-black luminance.
+  const double factor = std::pow(std::abs(luminance), kHlgSystemGamma - 1.0) * kHlgNominalPeakNits /
                         kReferenceWhiteNits;
   return {static_cast<float>(scene[0] * factor), static_cast<float>(scene[1] * factor),
           static_cast<float>(scene[2] * factor)};
+}
+
+// The inverse of hlg_encode: inverse OETF, then luminance OOTF, relative to
+// diffuse white. Do not apply system gamma independently to RGB channels.
+[[nodiscard]] inline std::array<float, 3> hlg_decode(
+    const std::array<float, 3>& signal,
+    const std::array<float, 3>& weights = kRec2020Luminance) {
+  return hlg_ootf({hlg_inverse_oetf_scene(signal[0]),
+                   hlg_inverse_oetf_scene(signal[1]),
+                   hlg_inverse_oetf_scene(signal[2])}, weights);
 }
 
 }  // namespace hyperdr

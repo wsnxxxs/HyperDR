@@ -50,7 +50,7 @@ FloatImage reconstruct_gain_map(const FloatImage& base, const FloatImage& gain,
   for (unsigned c = 0; c < gain.channels; ++c) {
     const auto channel = gain_map_channel(metadata, c);
     channels[c] = {rational_value(channel.gain_min), rational_value(channel.gain_max),
-                   1.0F / std::max(rational_value(channel.gamma), 1.0e-6F),
+                   1.0F / rational_value(channel.gamma),
                    rational_value(channel.base_offset), rational_value(channel.alternate_offset)};
   }
   parallel_for_rows(base.height, [&](const std::uint32_t y) {

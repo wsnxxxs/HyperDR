@@ -177,6 +177,7 @@ struct FileResult {
   // 1.0 is a schema-safe sentinel when input_domain is unknown; consumers must
   // read input_domain before interpreting this value.
   float input_headroom{1.0F};
+  std::optional<float> input_content_peak_nits;
   std::uint32_t width{};
   std::uint32_t height{};
   double exposure_ev{};

@@ -81,11 +81,13 @@ DecodedImage from_interleaved_rgb(const std::uint8_t* pixels,
                                   std::size_t stride, int bits,
                                   const SourceColor& color = {},
                                   std::uint32_t out_width = 0,
-                                  std::uint32_t out_height = 0) {
+                                  std::uint32_t out_height = 0,
+                                  codec::RgbAlpha alpha = codec::RgbAlpha::None,
+                                  bool composite_alpha = true) {
   DecodedImage result;
   result.linear_p3 =
       interleaved_rgb_to_linear_p3(pixels, width, height, stride, bits, color,
-                                  out_width, out_height);
+                                  out_width, out_height, alpha, composite_alpha);
   result.decode.sensor_width = width;
   result.decode.sensor_height = height;
   result.decode.target_width = width;
@@ -450,18 +452,20 @@ DecodedImage decode_png(const std::vector<std::uint8_t>& bytes,
     if (color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8) png_set_expand_gray_1_2_4_to_8(png);
     if (png_get_valid(png, info, PNG_INFO_tRNS)) png_set_tRNS_to_alpha(png);
     if (!(color_type & PNG_COLOR_MASK_COLOR)) png_set_gray_to_rgb(png);
-    png_set_strip_alpha(png);
     if (bit_depth == 16) png_set_swap(png);
     png_set_interlace_handling(png);
     png_read_update_info(png, info);
   });
   const int bits = bit_depth == 16 ? 16 : 8;
+  const auto channels = png_get_channels(png, info);
   const std::size_t row_bytes = png_get_rowbytes(png, info);
-  if (row_bytes != static_cast<std::size_t>(width) * 3 * (bits / 8))
+  if ((channels != 3 && channels != 4) ||
+      row_bytes != static_cast<std::size_t>(width) * channels * (bits / 8))
     throw std::runtime_error("unsupported PNG channel layout");
   bool narrow_range = false;
   const auto color = png_source_color(png, info, default_gamut, narrow_range);
-  const codec::RgbRowTransform transform(color, bits, narrow_range, true);
+  const codec::RgbRowTransform transform(color, bits, narrow_range, true,
+      channels == 4 ? codec::RgbAlpha::Straight : codec::RgbAlpha::None);
 
   const auto plan = codec::raster_decode_plan(width, height, preview_max_edge);
   const auto out_width = plan.width;
@@ -550,6 +554,11 @@ DecodedImage decode_png(const std::vector<std::uint8_t>& bytes,
   result.metadata.orientation = 1;
   result.decode.resolution_reduced = plan.budget_limited;
   result.hdr_headroom = color.icc.empty() ? transfer_headroom(color.transfer) : 1.0F;
+#ifdef PNG_cLLI_SUPPORTED
+  png_uint_32 max_cll = 0, max_fall = 0;
+  if (result.hdr_headroom > 1.0F && png_get_cLLI_fixed(png, info, &max_cll, &max_fall) && max_cll != 0)
+    result.content_peak_nits = static_cast<float>(max_cll / 10000.0);
+#endif
   result.domain = display_referred_domain(result.hdr_headroom);
   return result;
 }
@@ -615,7 +624,8 @@ DecodedImage decode_heif_rgb_handle(const heif_context* context,
                                     std::uint32_t preview_max_edge,
                                     ColorGamut default_gamut,
                                     bool normalize_exif = true,
-                                    std::uint16_t* exif_orientation = nullptr) {
+                                    std::uint16_t* exif_orientation = nullptr,
+                                    FloatImage* alpha_out = nullptr) {
   SourceColor color(default_gamut);
   // Keep the project-wide ICC-first policy. ICC is the only profile form here
   // that can describe arbitrary RGB primaries; nclx is the fallback for files
@@ -648,6 +658,10 @@ DecodedImage decode_heif_rgb_handle(const heif_context* context,
   }
 
   const bool wide = heif_image_handle_get_luma_bits_per_pixel(handle) > 8;
+  const bool has_alpha = heif_image_handle_has_alpha_channel(handle) != 0;
+  const auto alpha = !has_alpha ? codec::RgbAlpha::None
+      : heif_image_handle_is_premultiplied_alpha(handle) ? codec::RgbAlpha::Premultiplied
+                                                       : codec::RgbAlpha::Straight;
   std::unique_ptr<heif_decoding_options, DecodingOptionsDeleter> options(
       heif_decoding_options_alloc());
   if (!options) throw std::runtime_error("cannot allocate HEIC decoding options");
@@ -659,8 +673,8 @@ DecodedImage decode_heif_rgb_handle(const heif_context* context,
 
   heif_image* image_raw = nullptr;
   check_heif(heif_decode_image(handle, &image_raw, heif_colorspace_RGB,
-                               wide ? heif_chroma_interleaved_RRGGBB_LE
-                                    : heif_chroma_interleaved_RGB,
+                               wide ? (has_alpha ? heif_chroma_interleaved_RRGGBBAA_LE : heif_chroma_interleaved_RRGGBB_LE)
+                                    : (has_alpha ? heif_chroma_interleaved_RGBA : heif_chroma_interleaved_RGB),
                                options.get()),
              "HEIC decode");
   std::unique_ptr<heif_image, ImageDeleter> image(image_raw);
@@ -668,6 +682,9 @@ DecodedImage decode_heif_rgb_handle(const heif_context* context,
   const int full_height = heif_image_get_height(image.get(), heif_channel_interleaved);
   if (full_width <= 0 || full_height <= 0)
     throw std::runtime_error("HEIC decoder returned invalid dimensions");
+  // Adaptive HDR must reconstruct before compositing. Independently reducing
+  // unassociated colour and alpha would change their product at image edges.
+  if (alpha_out && has_alpha) check_raster_budget(full_width, full_height);
   const auto plan = codec::raster_decode_plan(static_cast<std::uint32_t>(full_width),
       static_cast<std::uint32_t>(full_height), preview_max_edge);
   int stride = 0;
@@ -683,7 +700,18 @@ DecodedImage decode_heif_rgb_handle(const heif_context* context,
   auto result = from_interleaved_rgb(
       rgb, static_cast<std::uint32_t>(width),
       static_cast<std::uint32_t>(height),
-      static_cast<std::size_t>(stride), bits, color, plan.width, plan.height);
+      static_cast<std::size_t>(stride), bits, color, plan.width, plan.height,
+      alpha, alpha_out == nullptr);
+  if (alpha_out && has_alpha) {
+    *alpha_out = FloatImage(width, height, 1);
+    const float maximum = static_cast<float>((1U << bits) - 1U);
+    for (int y = 0; y < height; ++y) for (int x = 0; x < width; ++x) {
+      const auto* sample = rgb + static_cast<std::size_t>(y) * stride +
+          (static_cast<std::size_t>(x) * 4 + 3) * (bits > 8 ? 2 : 1);
+      const unsigned value = bits > 8 ? sample[0] | (static_cast<unsigned>(sample[1]) << 8) : sample[0];
+      alpha_out->at(x, y, 0) = value / maximum;
+    }
+  }
   result.decode.sensor_width = heif_image_handle_get_ispe_width(handle);
   result.decode.sensor_height = heif_image_handle_get_ispe_height(handle);
   result.decode.target_width = full_width;
@@ -695,6 +723,10 @@ DecodedImage decode_heif_rgb_handle(const heif_context* context,
   // container declared.
   result.hdr_headroom =
       color.icc.empty() ? transfer_headroom(color.transfer) : 1.0F;
+  heif_content_light_level light{};
+  if (result.hdr_headroom > 1.0F && heif_image_handle_get_content_light_level(handle, &light) &&
+      light.max_content_light_level != 0)
+    result.content_peak_nits = static_cast<float>(light.max_content_light_level);
   result.domain = display_referred_domain(result.hdr_headroom);
   ExifRead exif;
   if (auto read = read_heif_exif(handle)) exif = std::move(*read);
@@ -730,12 +762,13 @@ DecodedImage decode_adaptive_heic(const std::vector<std::uint8_t>& bytes,
   // Exif-only orientation to the complete HDR result. Rotating the base before
   // sampling the gain grid would attach gain to the wrong parts of the image.
   std::uint16_t exif_orientation = 1;
+  FloatImage alpha;
   // No preview reduction here: the gain grid below is rejected when it is
   // larger than the base, and every Apple gain map is a fraction of its base's
   // size, so shrinking the base would make an ordinary file look malformed.
   auto result = decode_heif_rgb_handle(context, base_handle.get(), 0,
                                        default_gamut, false,
-                                       &exif_orientation);
+                                       &exif_orientation, base_only ? nullptr : &alpha);
   if (base_only) {
     normalize_orientation(result, exif_orientation);
     return result;
@@ -784,9 +817,19 @@ DecodedImage decode_adaptive_heic(const std::vector<std::uint8_t>& bytes,
       static_cast<float>(metadata.alternate_headroom.denominator);
   result.linear_p3 = reconstruct_gain_map(result.linear_p3, gain, metadata,
                                           alternate_headroom);
+  if (!alpha.pixels.empty()) {
+    for (std::size_t i = 0; i < alpha.pixels.size(); ++i)
+      for (unsigned c = 0; c < 3; ++c) {
+        auto& value = result.linear_p3.pixels[i * 3 + c];
+        value = alpha.pixels[i] == 0 ? 0 : value * alpha.pixels[i];
+      }
+  }
   // The base is a Display P3 SDR image, so the headroom is entirely whatever
   // the gain map was written to add. `alternate_headroom` is in stops.
   result.hdr_headroom = std::max(1.0F, std::exp2(alternate_headroom));
+  // The gain-map metadata describes the reconstructed image. A base item's
+  // content-light hint, if present, cannot describe this different rendition.
+  result.content_peak_nits.reset();
   // A tmap file whose gain map adds nothing is an SDR picture in an HDR
   // container, and saying so keeps it out of the highlight-splitting renderer.
   result.domain = display_referred_domain(result.hdr_headroom);

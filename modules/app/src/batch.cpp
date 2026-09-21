@@ -398,6 +398,7 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     const auto described = staged.image.describe_input();
     result.input_domain = described.domain;
     result.input_headroom = described.headroom;
+    result.input_content_peak_nits = described.content_peak_nits;
     result.model_development = options.ai_model_path.empty()
                                    ? "none"
                                    : staged.image.raw_profile ? "raw-dcp-v1" : native_model_development_kind(

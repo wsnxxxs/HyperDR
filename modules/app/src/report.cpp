@@ -161,6 +161,8 @@ std::string run_report_json(const std::vector<FileResult>& results,
         .member("model_version", result.model_version)
         .member("model_inference_mode", result.model_inference_mode)
         .member("model_fallback_reason", result.model_fallback_reason);
+    if (result.input_content_peak_nits)
+      writer.member("input_content_peak_nits", *result.input_content_peak_nits);
     writer.begin_array("decode_degradation_reasons");
     for (const auto& reason : result.decode_degradation_reasons) {
       writer.element(reason);

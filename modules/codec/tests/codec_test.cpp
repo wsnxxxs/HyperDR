@@ -62,6 +62,20 @@ float mean_luminance(const hyperdr::FloatImage& image) {
   return count == 0 ? 0.0F : static_cast<float>(total / count);
 }
 
+void require_content_peak(const hyperdr::DecodedImage& decoded, const hyperdr::FloatImage& source) {
+  float peak = 0;
+  for (unsigned y = 0; y < source.height; ++y)
+    for (unsigned x = 0; x < source.width; ++x) {
+      const auto rgb = hyperdr::p3_to_rec2020(source.at(x,y,0), source.at(x,y,1), source.at(x,y,2));
+      peak = std::max({peak, rgb[0], rgb[1], rgb[2]});
+    }
+  const float expected = std::ceil(peak * hyperdr::kReferenceWhiteNits);
+  require(decoded.content_peak_nits && std::abs(*decoded.content_peak_nits - expected) < 0.01F,
+          "HDR raster lost encoded maxRGB content-light metadata");
+  require(decoded.describe_input().content_peak_nits == decoded.content_peak_nits,
+          "HDR input description lost content-light metadata");
+}
+
 void require_declared_headroom(const hyperdr::DecodedImage& decoded,
                                float expected, const char* message) {
   const float error = std::abs(decoded.hdr_headroom - expected);
@@ -1099,6 +1113,9 @@ int main() {
       require_linear_round_trip(decoded, expected_avif,
                                 pq ? "PQ AVIF input transfer round trip changed brightness"
                                    : "HLG AVIF input transfer round trip changed brightness");
+      require_content_peak(decoded, expected_avif);
+      require(reduced_avif.content_peak_nits == decoded.content_peak_nits,
+              "AVIF preview changed declared content peak");
       require(decoded.metadata.model == metadata.model,
               "AVIF input did not carry its camera model back");
       require(decoded.capture.iso && *decoded.capture.iso == 100.0F,
@@ -1215,6 +1232,9 @@ int main() {
             encoding == hyperdr::HdrEncoding::Pq
                 ? "PQ input transfer round trip changed brightness"
                 : "HLG input transfer round trip changed brightness");
+        require_content_peak(decoded, expected_hdr);
+        require(reduced.content_peak_nits == decoded.content_peak_nits,
+                "HEIC preview changed declared content peak");
         // The HEIF Exif item is prefixed with a four-byte TIFF offset, which is
         // exactly the kind of preamble the reader has to skip. Checking it here
         // keeps the container path honest as well as the AVIF one.

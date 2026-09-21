@@ -27,8 +27,9 @@ struct Fixture {
   unsigned width{1}, height{1};
   int bits{8};
   int transfer{};
-  bool srgb{}, p3_chrm{}, icc{}, interlaced{}, gray{}, narrow{};
+  bool srgb{}, p3_chrm{}, icc{}, interlaced{}, gray{}, narrow{}, alpha{}, palette{};
   double gamma{};
+  std::optional<png_uint_32> content_peak;
   std::vector<unsigned char> pixels{128, 128, 128};
 };
 void write_bytes(png_structp png, png_bytep data, png_size_t size) {
@@ -40,9 +41,18 @@ std::vector<unsigned char> encode(const Fixture& f) {
   auto* png = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
   auto* info = png_create_info_struct(png);
   png_set_write_fn(png, &bytes, write_bytes, nullptr);
-  png_set_IHDR(png, info, f.width, f.height, f.bits, f.gray ? PNG_COLOR_TYPE_GRAY : PNG_COLOR_TYPE_RGB,
+  const int type = f.palette ? PNG_COLOR_TYPE_PALETTE
+      : (f.gray ? PNG_COLOR_TYPE_GRAY : PNG_COLOR_TYPE_RGB) | (f.alpha ? PNG_COLOR_MASK_ALPHA : 0);
+  png_set_IHDR(png, info, f.width, f.height, f.bits, type,
                f.interlaced ? PNG_INTERLACE_ADAM7 : PNG_INTERLACE_NONE, 0, 0);
+  if (f.palette) {
+    png_color palette[2]{{255, 0, 0}, {0, 0, 255}};
+    png_byte transparency[2]{0, 255};
+    png_set_PLTE(png, info, palette, 2);
+    png_set_tRNS(png, info, transparency, 2, nullptr);
+  }
   if (f.gamma) png_set_gAMA(png, info, f.gamma);
+  if (f.content_peak) png_set_cLLI_fixed(png, info, *f.content_peak, 0);
   if (f.p3_chrm) png_set_cHRM(png, info, .3127, .3290, .680, .320, .265, .690, .150, .060);
   if (f.srgb) png_set_sRGB(png, info, PNG_sRGB_INTENT_RELATIVE);
   if (f.icc) {
@@ -75,7 +85,8 @@ std::vector<unsigned char> encode(const Fixture& f) {
   png_write_info(png, info);
   std::vector<png_bytep> rows(f.height);
   for (unsigned y = 0; y < f.height; ++y)
-    rows[y] = const_cast<png_bytep>(f.pixels.data() + y * f.width * (f.gray ? 1 : 3) * (f.bits / 8));
+    rows[y] = const_cast<png_bytep>(f.pixels.data() + y * f.width *
+        (f.palette ? 1 : (f.gray ? 1 : 3) + (f.alpha ? 1 : 0)) * (f.bits / 8));
   png_write_image(png, rows.data());
   png_write_end(png, info);
   png_destroy_write_struct(&png, &info);
@@ -283,12 +294,71 @@ void check_block_boundaries() {
   for (std::size_t i = 0; i < result.linear_p3.pixels.size(); ++i)
     near(interlaced.linear_p3.pixels[i], result.linear_p3.pixels[i], "Adam7 block boundary mismatch");
 }
+
+void check_alpha() {
+  for (int bits : {8, 16}) for (bool interlaced : {false, true}) {
+    Fixture f;
+    f.bits = bits; f.alpha = true; f.srgb = true; f.interlaced = interlaced;
+    f.width = 2; f.height = 2;
+    f.pixels.clear();
+    const unsigned maximum = (1U << bits) - 1, half = maximum / 2;
+    for (unsigned i = 0; i < 4; ++i) {
+      for (unsigned value : {maximum, maximum, maximum, i == 0 ? 0U : i == 1 ? half : maximum}) {
+        if (bits == 16) f.pixels.push_back(static_cast<unsigned char>(value >> 8));
+        f.pixels.push_back(static_cast<unsigned char>(value));
+      }
+    }
+    const auto full = decode(f);
+    const auto reduced = decode(f, 1);
+    for (unsigned c = 0; c < 3; ++c) {
+      near(full.linear_p3.at(0, 0, c), 0, "transparent PNG hidden colour became visible");
+      near(full.linear_p3.at(1, 0, c), static_cast<float>(half) / maximum,
+           "PNG alpha was composited in encoded light");
+      near(reduced.linear_p3.pixels[c], (2 + static_cast<float>(half) / maximum) / 4,
+           "PNG reduction happened before linear alpha composition");
+    }
+  }
+  Fixture gray;
+  gray.gray = gray.icc = gray.alpha = true;
+  gray.pixels = {128, 64};
+  for (float value : decode(gray).linear_p3.pixels)
+    near(value, (128.0F / 255) * (64.0F / 255), "gray ICC alpha was lost");
+  Fixture palette;
+  palette.width = 2; palette.palette = palette.srgb = true;
+  palette.pixels = {0, 1};
+  const auto result = decode(palette, 1);
+  const auto blue = hyperdr::rec709_to_linear_p3(0, 0, 0.5F);
+  for (unsigned c = 0; c < 3; ++c)
+    near(result.linear_p3.pixels[c], blue[c], "palette tRNS leaked hidden RGB into reduction");
+}
+void check_content_peak() {
+  for (int transfer : {16, 18}) {
+    Fixture f;
+    f.transfer = transfer;
+    require(!decode(f).content_peak_nits, "missing PNG cLLI invented a content peak");
+    f.content_peak = 0;
+    require(!decode(f).content_peak_nits, "zero PNG cLLI was not unknown");
+    f.content_peak = 2031250;
+    const auto result = decode(f);
+    require(result.content_peak_nits.has_value(), "PNG cLLI content peak was lost");
+    near(*result.content_peak_nits, 203.125F, "PNG cLLI units are not 0.0001 nit");
+    require(result.describe_input().content_peak_nits == result.content_peak_nits,
+            "HDR input description lost content peak");
+    near(result.hdr_headroom, (transfer == 16 ? 10000.0F : 1000.0F) / hyperdr::kReferenceWhiteNits,
+         "content peak changed transfer headroom");
+    f.transfer = 13;
+    require(!decode(f).content_peak_nits, "SDR cICP consumed HDR content peak");
+    f.transfer = 0;
+    f.icc = true;
+    require(!decode(f).content_peak_nits, "ICC consumed HDR content peak");
+  }
+}
 }  // namespace
 
 int main() {
   int failures = 0;
   for (auto test : {check_gamma, check_srgb, check_chrm, check_hdr_priority, check_narrow_range, check_preview,
-                    check_decode_errors, check_block_boundaries}) {
+                    check_decode_errors, check_block_boundaries, check_alpha, check_content_peak}) {
     try { test(); }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; ++failures; }
   }

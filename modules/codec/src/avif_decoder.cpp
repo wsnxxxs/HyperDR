@@ -153,7 +153,12 @@ DecodedImage decode_avif_bytes(const std::vector<std::uint8_t>& bytes,
 
   avifRGBImage rgb{};
   avifRGBImageSetDefaults(&rgb, image);
-  rgb.format = AVIF_RGB_FORMAT_RGB;
+  const bool has_alpha = image->alphaPlane != nullptr;
+  rgb.format = has_alpha ? AVIF_RGB_FORMAT_RGBA : AVIF_RGB_FORMAT_RGB;
+  // Retain source association; the shared float converter undoes it before
+  // transfer decoding and composites in linear light, avoiding integer undo.
+  rgb.alphaPremultiplied = image->alphaPremultiplied;
+  rgb.ignoreAlpha = AVIF_FALSE;
   rgb.depth = image->depth;
   check_avif(avifRGBImageAllocatePixels(&rgb), "allocate AVIF RGB pixels");
   struct RgbGuard {
@@ -166,7 +171,8 @@ DecodedImage decode_avif_bytes(const std::vector<std::uint8_t>& bytes,
   DecodedImage result;
   result.linear_p3 = interleaved_rgb_to_linear_p3(
       rgb.pixels, rgb.width, rgb.height, rgb.rowBytes, static_cast<int>(rgb.depth),
-      color, plan.width, plan.height);
+      color, plan.width, plan.height, !has_alpha ? RgbAlpha::None
+          : image->alphaPremultiplied ? RgbAlpha::Premultiplied : RgbAlpha::Straight);
   result.decode.sensor_width = result.decode.target_width = source_width;
   result.decode.sensor_height = result.decode.target_height = source_height;
   result.decode.decoded_width = plan.width;
@@ -176,6 +182,8 @@ DecodedImage decode_avif_bytes(const std::vector<std::uint8_t>& bytes,
   // As in the HEIF path: an ICC profile carries no headroom, so an ICC-tagged
   // AVIF is read as SDR and rendered faithfully rather than speculatively.
   result.hdr_headroom = color.icc.empty() ? transfer_headroom(color.transfer) : 1.0F;
+  if (result.hdr_headroom > 1.0F && image->clli.maxCLL != 0)
+    result.content_peak_nits = static_cast<float>(image->clli.maxCLL);
   result.domain = display_referred_domain(result.hdr_headroom);
 
   // The container's own transforms are authoritative when present, which is

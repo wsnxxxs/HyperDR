@@ -95,8 +95,8 @@ struct RawDecodeOptions {
   // User-owned DCP camera profile; empty preserves the native rendering path.
   std::filesystem::path profile;
   std::filesystem::path lens_profile;
-  // Primaries used only when a raster carries neither a usable ICC profile nor
-  // a stated CICP primary. RAW uses its camera matrix and ignores it.
+  // Primaries used only when a raster lacks a colour description (ICC, CICP,
+  // or PNG sRGB/cHRM). RAW uses its camera matrix and ignores it.
   ColorGamut default_gamut{ColorGamut::kSrgb};
   // LibRaw's unclip mode can leave strongly magenta clipped highlights when
   // sensor channels saturate at different levels. Blend is the conservative
@@ -152,7 +152,8 @@ struct DecodeInfo {
   // them. These are sensor coordinates and are deliberately *not* rotated by
   // the capture orientation, unlike target_* and decoded_*: this is the shape
   // of the physical readout, so a portrait frame reports a landscape sensor.
-  // Raster inputs use their decoded dimensions here.
+  // Raster inputs use their original stored dimensions before preview/budget
+  // reduction or orientation; target_* is the upright full-resolution area.
   std::uint32_t sensor_width{};
   std::uint32_t sensor_height{};
   // The full-resolution photographic area requested by DefaultCrop, after

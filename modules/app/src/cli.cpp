@@ -3,6 +3,7 @@
 
 #include "hyperdr/app/batch.hpp"
 #include "hyperdr/app/decode_cache.hpp"
+#include "hyperdr/app/fingerprint.hpp"
 #include "hyperdr/app/report.hpp"
 #include "hyperdr/app/preview.hpp"
 #include "hyperdr/gainmap/rendition.hpp"
@@ -759,6 +760,7 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
                           std::vector<std::uint8_t>* packet = nullptr) {
   if (argc < 3) throw std::invalid_argument("preview-frame requires one input image");
   ConvertOptions options;
+  options.decode_intent = DecodeIntent::Preview;
   options.input = argv[2];
   parse_settings(argc, argv, 3, options);
   if (options.output_directory.empty()) {
@@ -1100,11 +1102,14 @@ std::string model_input_report(const std::filesystem::path& input,
                                const GainMapResult& developed,
                                const GainMapOptions& gain,
                                const RawDecodeOptions& raw,
+                               const ConvertOptions& options,
                                const FloatImage& tensor) {
   const auto& d = decoded.decode;
   json::Writer writer(json::Writer::Style::kIndented);
   writer.begin_object()
-      .member("schema", "hyperdr.model-input/v1")
+      .member("schema", "hyperdr.model-input/v2")
+      .member("pipeline_revision", kRenderPipelineRevision)
+      .member("preprocessing_fingerprint", model_preprocessing_fingerprint(options))
       .member("source", path_utf8(input))
       .member("source_sha256", sha256_file_hex(input))
       .member("highlight_recovery", highlight_recovery_name(raw.highlight_recovery))
@@ -1141,7 +1146,7 @@ std::string model_input_report(const std::filesystem::path& input,
       .begin_array("developed_size").element(developed.base_linear.width)
           .element(developed.base_linear.height).end_array()
       .begin_array("model_tensor_size").element(tensor.width).element(tensor.height).end_array()
-      .member("resize_convention", "half-pixel-centres/area-then-bilinear")
+      .member("resize_convention", kResampleConvention)
       .member("model_stride", 16)
       .end_object()
       .begin_object("pixel_file")
@@ -1183,6 +1188,14 @@ int model_input_command(int argc, char** argv) {
                                          "model long side");
     } else if (arg == "--half-size") {
       options.raw.half_size = true;
+    } else if (arg == "--raw-bad-pixels") {
+      options.raw.bad_pixel_map = next_value(i, argc, argv, arg);
+    } else if (arg == "--raw-dark-frame") {
+      options.raw.dark_frame = next_value(i, argc, argv, arg);
+    } else if (arg == "--raw-linearization-lut") {
+      options.raw.linearization_lut = next_value(i, argc, argv, arg);
+    } else if (arg == "--raw-lens-shading") {
+      options.raw.lens_shading_map = next_value(i, argc, argv, arg);
     } else {
       throw std::invalid_argument("unknown model-input option: " + std::string(arg));
     }
@@ -1216,7 +1229,7 @@ int model_input_command(int argc, char** argv) {
   write_binary_file_atomic(output, float32_le_bytes(tensor), true);
   write_text_file_atomic(report,
                          model_input_report(input, output, decoded, developed,
-                                            development_options, options.raw, tensor),
+                                            development_options, options.raw, options, tensor),
                          true);
   return 0;
 }

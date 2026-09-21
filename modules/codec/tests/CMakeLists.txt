@@ -3,6 +3,11 @@
 hyperdr_add_test(dcp_reader_test LINK HyperDR::codec)
 hyperdr_add_test(lens_profile_test LINK HyperDR::codec)
 if(HYPERDR_WITH_CODECS)
+  hyperdr_add_test(icc_color_test LINK HyperDR::image lcms2::lcms2)
+  hyperdr_add_test(png_decode_test LINK HyperDR::codec PNG::PNG lcms2::lcms2)
+  if(TARGET png_decode_test)
+    hyperdr_copy_libultrahdr(png_decode_test)
+  endif()
   # `heif` as well as the module: the test builds its own HEIF fixtures, so it
   # includes <libheif/heif.h> directly, and the module deliberately keeps that
   # dependency private. Without this the only test that exercises the real

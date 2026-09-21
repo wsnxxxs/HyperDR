@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <stdexcept>
 
 namespace hyperdr::codec {
 
@@ -68,10 +69,9 @@ inline constexpr std::uint64_t kMaxRawPixels =
 // The smallest raster a preview decoder is allowed to stop at: the requested
 // edge itself, never below it.
 //
-// This is a real trade and worth stating. libjpeg reduces in the DCT domain and
-// libpng box-averages encoded samples, while resample.cpp averages in linear
-// light, so letting a decoder do part of the reduction moves that part into the
-// gamma domain. Measured on a 6000x4000 JPEG previewed at 2048, the resulting
+// libjpeg reduces in the DCT domain; PNG and resample.cpp average in linear
+// light. Letting JPEG do part of the reduction moves that part into the gamma
+// domain. Measured on a 6000x4000 JPEG previewed at 2048, the resulting
 // preview differs from the full-resolution decode by a mean of 0.0009 and a
 // 99.9th percentile of 0.004 relative to SDR white -- a quarter of an 8-bit code
 // value, on 0.1% of pixels -- and the decode is 26% faster.
@@ -104,6 +104,33 @@ inline constexpr std::uint64_t kMaxRawPixels =
   const auto pixels = width * height;
   return pixels <= kMaxRasterPixels &&
          pixels <= kMaxRasterPeakBytes / 15U;
+}
+
+struct RasterDecodePlan {
+  std::uint32_t width{}, height{};
+  bool budget_limited{};
+};
+
+// PNG/HEIF/AVIF reduce linear RGB using identical uniform-area footprints.
+// Plan and deliver the same rounded-up dimensions: a preview must not fall
+// below its requested floor because planning rounded up and execution down.
+[[nodiscard]] inline RasterDecodePlan raster_decode_plan(
+    std::uint32_t width, std::uint32_t height, std::uint32_t preview_max_edge) {
+  const auto divided = [](std::uint32_t size, unsigned divisor) {
+    return static_cast<std::uint32_t>((static_cast<std::uint64_t>(size) + divisor - 1) / divisor);
+  };
+  unsigned factor = 1;
+  while (!raster_budget_ok(divided(width, factor), divided(height, factor))) {
+    if (factor == 64) throw std::runtime_error("image exceeds the pixel or memory budget");
+    ++factor;
+  }
+  const bool budget_limited = factor > 1;
+  if (const auto floor = preview_decode_floor(preview_max_edge); floor) {
+    while (factor <= 32 && keeps_preview_detail(divided(width, factor * 2),
+                                                divided(height, factor * 2), floor))
+      factor *= 2;
+  }
+  return {divided(width, factor), divided(height, factor), budget_limited};
 }
 
 }  // namespace hyperdr::codec

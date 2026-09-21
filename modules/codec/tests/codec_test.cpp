@@ -139,12 +139,13 @@ void check_png_cicp_headroom() {
 
 hyperdr::DecodedImage decode_encoded_input(const std::vector<std::uint8_t>& bytes,
                                            const char* label,
-                                           const char* extension = ".heic") {
+                                           const char* extension = ".heic",
+                                           const hyperdr::RawDecodeOptions& options = {}) {
   const auto path = std::filesystem::temp_directory_path() /
       (std::string("hyperdr-codec-input-") + label + extension);
   hyperdr::write_binary_file_atomic(path, bytes, true);
   try {
-    auto decoded = hyperdr::decode_image(path);
+    auto decoded = hyperdr::decode_image(path, options);
     std::filesystem::remove(path);
     return decoded;
   } catch (...) {
@@ -943,7 +944,22 @@ int main() {
                                       true);
     const auto oriented_jpeg =
         hyperdr::decode_image(oriented_jpeg_path, base_only);
+    auto reduced_jpeg_options = base_only;
+    reduced_jpeg_options.preview_max_edge = 8;
+    const auto reduced_oriented_jpeg =
+        hyperdr::decode_image(oriented_jpeg_path, reduced_jpeg_options);
     std::filesystem::remove(oriented_jpeg_path);
+    require(reduced_oriented_jpeg.linear_p3.width == 4 &&
+                reduced_oriented_jpeg.linear_p3.height == 8 &&
+                reduced_oriented_jpeg.decode.sensor_width == 64 &&
+                reduced_oriented_jpeg.decode.sensor_height == 32 &&
+                reduced_oriented_jpeg.decode.target_width == 32 &&
+                reduced_oriented_jpeg.decode.target_height == 64 &&
+                reduced_oriented_jpeg.decode.decoded_width == 4 &&
+                reduced_oriented_jpeg.decode.decoded_height == 8 &&
+                !reduced_oriented_jpeg.decode.resolution_reduced &&
+                reduced_oriented_jpeg.metadata.orientation == 1,
+            "reduced JPEG lost upright original/target geometry or reported a degraded preview");
     require(oriented_jpeg.linear_p3.width == 32 &&
                 oriented_jpeg.linear_p3.height == 64 &&
                 oriented_jpeg.decode.target_width == 32 &&
@@ -1064,6 +1080,16 @@ int main() {
       hyperdr::verify_avif_decodable(avif);
       const auto decoded =
           decode_encoded_input(avif, pq ? "avif-pq" : "avif-hlg", ".avif");
+      const auto reduced_avif = decode_encoded_input(avif,
+          pq ? "avif-pq-preview" : "avif-hlg-preview", ".avif", reduced_jpeg_options);
+      require(reduced_avif.decode.sensor_width == decoded.decode.sensor_width &&
+                  reduced_avif.decode.sensor_height == decoded.decode.sensor_height &&
+                  reduced_avif.decode.target_width == decoded.decode.target_width &&
+                  reduced_avif.decode.target_height == decoded.decode.target_height &&
+                  reduced_avif.decode.decoded_width == 8 && reduced_avif.decode.decoded_height == 4 &&
+                  reduced_avif.linear_p3.width == 8 && reduced_avif.linear_p3.height == 4 &&
+                  !reduced_avif.decode.resolution_reduced,
+              "AVIF preview lost full stored/target geometry");
       require_declared_headroom(
           decoded,
           pq ? 10000.0F / hyperdr::kReferenceWhiteNits
@@ -1155,6 +1181,27 @@ int main() {
             small_gain.headroom_stops);
         const auto decoded = decode_encoded_input(
             hdr_bytes, encoding == hyperdr::HdrEncoding::Pq ? "pq" : "hlg");
+        const auto reduced = decode_encoded_input(hdr_bytes,
+            encoding == hyperdr::HdrEncoding::Pq ? "pq-preview" : "hlg-preview",
+            ".heic", reduced_jpeg_options);
+        // The stored ispe can include codec padding beyond the clean aperture.
+        // Check it against the container, not the intended display dimensions.
+        std::unique_ptr<heif_context, TestContextDeleter> geometry_context(heif_context_alloc());
+        require_heif(heif_context_read_from_memory_without_copy(geometry_context.get(),
+            hdr_bytes.data(), hdr_bytes.size(), nullptr), "read HEIC preview geometry");
+        heif_image_handle* geometry_raw = nullptr;
+        require_heif(heif_context_get_primary_image_handle(geometry_context.get(), &geometry_raw),
+            "get HEIC preview geometry");
+        std::unique_ptr<heif_image_handle, TestHandleDeleter> geometry_handle(geometry_raw);
+        require(reduced.decode.sensor_width == static_cast<unsigned>(heif_image_handle_get_ispe_width(geometry_handle.get())) &&
+                    reduced.decode.sensor_height == static_cast<unsigned>(heif_image_handle_get_ispe_height(geometry_handle.get())) &&
+                    reduced.decode.sensor_width == decoded.decode.sensor_width &&
+                    reduced.decode.sensor_height == decoded.decode.sensor_height &&
+                    reduced.decode.target_width == 64 && reduced.decode.target_height == 32 &&
+                    reduced.decode.decoded_width == 8 && reduced.decode.decoded_height == 4 &&
+                    reduced.linear_p3.width == 8 && reduced.linear_p3.height == 4 &&
+                    !reduced.decode.resolution_reduced,
+                "HEIC preview lost stored/target/delivered geometry");
         require_declared_headroom(
             decoded,
             encoding == hyperdr::HdrEncoding::Pq
@@ -1177,6 +1224,41 @@ int main() {
                 "HEIC input did not carry its ISO back");
     }
     std::cout << "PQ/HLG Main10 round trips passed\n";
+
+    // Compare two decodes of the same compressed checkerboard, so codec loss
+    // cancels out: reducing resolution must preserve the linear-light mean.
+    auto checker_gain = small_gain;
+    for (std::uint32_t y = 0; y < checker_gain.base_linear.height; ++y) {
+      for (std::uint32_t x = 0; x < checker_gain.base_linear.width; ++x) {
+        const float value = ((x / 2 + y / 2) % 2) ? 1.0F : 0.0F;
+        const auto index = (static_cast<std::size_t>(y) * checker_gain.base_linear.width + x) * 3;
+        for (int c = 0; c < 3; ++c) checker_gain.base_linear.pixels[index + c] = value;
+      }
+    }
+    std::fill(checker_gain.gain_map.pixels.begin(), checker_gain.gain_map.pixels.end(), 0.0F);
+    const auto linear_mean = [](const hyperdr::FloatImage& image) {
+      double sum = 0.0;
+      for (const float value : image.pixels) sum += value;
+      return sum / static_cast<double>(image.pixels.size());
+    };
+    bool means_preserved = true;
+    for (const auto encoding : {hyperdr::HdrEncoding::Pq, hyperdr::HdrEncoding::Hlg,
+                               hyperdr::HdrEncoding::AvifPq, hyperdr::HdrEncoding::AvifHlg}) {
+      const bool avif = encoding == hyperdr::HdrEncoding::AvifPq || encoding == hyperdr::HdrEncoding::AvifHlg;
+      const bool pq = encoding == hyperdr::HdrEncoding::Pq || encoding == hyperdr::HdrEncoding::AvifPq;
+      const auto bytes = avif ? hyperdr::encode_avif(checker_gain, metadata, 90, encoding)
+                              : hyperdr::encode_hdr_heic(checker_gain, metadata, 90, encoding);
+      const auto full = decode_encoded_input(bytes, "checker-full", avif ? ".avif" : ".heic");
+      const auto reduced = decode_encoded_input(bytes, "checker-preview", avif ? ".avif" : ".heic",
+                                                reduced_jpeg_options);
+      const double full_mean = linear_mean(full.linear_p3);
+      const double reduced_mean = linear_mean(reduced.linear_p3);
+      std::cout << (avif ? "AVIF " : "HEIC ") << (pq ? "PQ" : "HLG")
+                << " checker linear mean: full=" << full_mean << ", preview=" << reduced_mean << '\n';
+      means_preserved = means_preserved && std::isfinite(full_mean) && std::isfinite(reduced_mean) &&
+          std::abs(full_mean - reduced_mean) <= 1e-5 * std::max(1.0, std::abs(full_mean));
+    }
+    require(means_preserved, "HDR preview reduction did not preserve the decoded linear-light mean");
 
     // A camera-shaped HDR input: 10-bit BT.2100 HLG at 4:2:2. This is the only
     // chroma format no HyperDR output can stand in for, and the only one whose

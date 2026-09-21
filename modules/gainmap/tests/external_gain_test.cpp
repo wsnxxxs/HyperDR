@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 
@@ -196,7 +197,8 @@ void test_v2_signed_canonical_sidecar() {
     "alternate_offset": {"numerator": 0, "denominator": 1000000}
   },
   "model_binding": {
-    "contract": "hyperdr.model-gain-binding/v1",
+    "contract": "hyperdr.model-gain-binding/v2",
+    "preprocessing_fingerprint": "1234567890abcdef",
     "source": {
       "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "highlight_recovery": "blend",
@@ -225,7 +227,7 @@ void test_v2_signed_canonical_sidecar() {
       "developed_size": [2, 1],
       "model_tensor_size": [32, 16],
       "gain_grid_size": [2, 1],
-      "resize_convention": "half-pixel-centres/area-then-bilinear"
+      "resize_convention": "uniform-area-stages/linear-upscale-v2"
     },
     "model": {
       "version": "production-v4",
@@ -239,6 +241,27 @@ void test_v2_signed_canonical_sidecar() {
   require(external.binding &&
               external.binding->recipe.id == "raw-neutral-v1",
           "deployment development recipe id was not parsed");
+  require(external.binding->preprocessing_fingerprint == "1234567890abcdef",
+          "preprocessing identity was not parsed");
+  {
+    std::ifstream input(report);
+    std::string text{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+    input.close();
+    text.replace(text.find("raw-neutral-v1"), std::string("raw-neutral-v1").size(), "display-hdr-split");
+    { std::ofstream output(report); output << text; }
+    require(hyperdr::read_external_gain_map(raw, report).binding->recipe.id == "display-hdr-split",
+            "the native HDR model development recipe was rejected");
+    text.replace(text.find("hyperdr.model-gain-binding/v2"), std::string("hyperdr.model-gain-binding/v2").size(),
+                 "hyperdr.model-gain-binding/v1");
+    { std::ofstream output(report); output << text; }
+    bool rejected = false;
+    try { (void)hyperdr::read_external_gain_map(raw, report); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    require(rejected, "old model bindings without complete preprocessing identity were accepted");
+    text.replace(text.find("hyperdr.model-gain-binding/v1"), std::string("hyperdr.model-gain-binding/v1").size(),
+                 "hyperdr.model-gain-binding/v2");
+    { std::ofstream output(report); output << text; }
+  }
   require(external.gain_map.pixels[0] == -0.5F,
           "signed canonical gain was not preserved");
   hyperdr::GainMapResult result;
@@ -261,6 +284,16 @@ void test_v2_signed_canonical_sidecar() {
           "identity strength rewrote exact v2 rational metadata");
   require(result.gain_map.pixels[0] > 0.0F && result.gain_map.pixels[1] > result.gain_map.pixels[0],
           "v2 canonical gain was not quantized to ISO code space");
+  std::ifstream current_report(report);
+  std::string old_report((std::istreambuf_iterator<char>(current_report)), {});
+  current_report.close();
+  const std::string convention="uniform-area-stages/linear-upscale-v2";
+  old_report.replace(old_report.find(convention), convention.size(), "half-pixel-centres/area-then-bilinear");
+  { std::ofstream out(report); out << old_report; }
+  bool rejected=false;
+  try { (void)hyperdr::read_external_gain_map(raw,report,false); }
+  catch(const std::invalid_argument&) { rejected=true; }
+  require(rejected,"a model binding made with the old resampler must be rejected");
   std::filesystem::remove_all(root);
 }
 

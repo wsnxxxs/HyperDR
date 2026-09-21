@@ -79,16 +79,19 @@ using MallocBytes = std::unique_ptr<unsigned char, FreeDeleter>;
 DecodedImage from_interleaved_rgb(const std::uint8_t* pixels,
                                   std::uint32_t width, std::uint32_t height,
                                   std::size_t stride, int bits,
-                                  const SourceColor& color = {}) {
+                                  const SourceColor& color = {},
+                                  std::uint32_t out_width = 0,
+                                  std::uint32_t out_height = 0) {
   DecodedImage result;
   result.linear_p3 =
-      interleaved_rgb_to_linear_p3(pixels, width, height, stride, bits, color);
+      interleaved_rgb_to_linear_p3(pixels, width, height, stride, bits, color,
+                                  out_width, out_height);
   result.decode.sensor_width = width;
   result.decode.sensor_height = height;
   result.decode.target_width = width;
   result.decode.target_height = height;
-  result.decode.decoded_width = width;
-  result.decode.decoded_height = height;
+  result.decode.decoded_width = result.linear_p3.width;
+  result.decode.decoded_height = result.linear_p3.height;
   result.metadata.orientation = 1;
   return result;
 }
@@ -116,6 +119,8 @@ struct JpegDecodeOutput {
   unsigned int exif_size{};
   unsigned int width{};
   unsigned int height{};
+  unsigned int source_width{};
+  unsigned int source_height{};
   // The reduction libjpeg actually applied, as num/denom. 8/8 means the image
   // was decoded at full size.
   unsigned int scale_num{8};
@@ -169,6 +174,8 @@ int jpeg_decode_rgb(const unsigned char* data, std::size_t size,
   jpeg_save_markers(&info, JPEG_APP0 + 1, 0xFFFF);  // Exif
   jpeg_save_markers(&info, JPEG_APP0 + 2, 0xFFFF);  // ICC
   jpeg_read_header(&info, TRUE);
+  out->source_width = info.image_width;
+  out->source_height = info.image_height;
   info.out_color_space = JCS_RGB;
   // A 50MP camera raw conversion or a 108MP phone shot overruns the raster
   // budget at full size, and rejecting it outright is the wrong answer: the
@@ -282,6 +289,10 @@ DecodedImage decode_jpeg(const std::vector<std::uint8_t>& bytes,
   auto result = from_interleaved_rgb(
       rgb.get(), output.width, output.height,
       static_cast<std::size_t>(output.width) * 3, 8, color);
+  // Preserve file geometry before orientation normalizes target and delivered
+  // dimensions. DCT scaling changes only delivered size; sensor stays stored.
+  result.decode.sensor_width = result.decode.target_width = output.source_width;
+  result.decode.sensor_height = result.decode.target_height = output.source_height;
   result.decode.resolution_reduced = output.budget_limited;
 
   // Carry the portable photographic fields forward before normalising
@@ -303,56 +314,9 @@ struct PngReadState {
   std::size_t offset{};
 };
 
-struct PngDecodeOutput {
-  unsigned char* rgb{};
-  std::size_t rgb_size{};
-  unsigned char* icc{};
-  unsigned int icc_size{};
-  int cicp_primaries{codec::kCicpPrimariesUnspecified};
-  int cicp_transfer{codec::kCicpTransferUnspecified};
-  bool has_cicp{false};
-  unsigned int width{};
-  unsigned int height{};
-  int bits{};
-  // 1 when the image was decoded at full size; >1 is the integer box-average
-  // factor that was applied.
-  std::uint32_t downscale{1};
-  // Whether the raster budget forced that factor, as opposed to a preview
-  // caller asking to be bounded. Only the first is a lost-resolution decode.
-  bool budget_limited{false};
-  char message[256]{};
-};
-
-bool read_png_cicp(const unsigned char* data, std::size_t size,
-                   int* primaries, int* transfer) {
-  constexpr std::array<unsigned char, 8> kPngSignature{
-      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a};
-  if (data == nullptr || size < kPngSignature.size() ||
-      !std::equal(kPngSignature.begin(), kPngSignature.end(), data)) {
-    return false;
-  }
-  std::size_t offset = kPngSignature.size();
-  while (offset + 12U <= size) {
-    const auto length = (static_cast<std::uint32_t>(data[offset]) << 24U) |
-                        (static_cast<std::uint32_t>(data[offset + 1]) << 16U) |
-                        (static_cast<std::uint32_t>(data[offset + 2]) << 8U) |
-                        static_cast<std::uint32_t>(data[offset + 3]);
-    if (length > size - offset - 12U) return false;
-    const auto* type = data + offset + 4U;
-    if (std::equal(type, type + 4, "cICP") && length >= 4U) {
-      *primaries = data[offset + 8U];
-      *transfer = data[offset + 9U];
-      return true;
-    }
-    offset += 12U + length;
-    if (std::equal(type, type + 4, "IEND")) break;
-  }
-  return false;
-}
-
 void png_read_from_memory(png_structp png, png_bytep target, png_size_t length) {
   auto* state = static_cast<PngReadState*>(png_get_io_ptr(png));
-  if (state == nullptr || state->offset + length > state->size) {
+  if (state == nullptr || length > state->size - state->offset) {
     png_error(png, "read past the end of the PNG");
     return;
   }
@@ -362,265 +326,230 @@ void png_read_from_memory(png_structp png, png_bytep target, png_size_t length) 
 
 void png_warn(png_structp, png_const_charp) {}
 
-// Same C-style discipline as the JPEG path: libpng's error handler longjmps,
-// so nothing with a destructor may be alive in this frame.
-//
-// This is also where the 16-bit fix lives. The old code went through libpng's
-// simplified API with PNG_FORMAT_RGB, which is 8-bit unconditionally, so a
-// legitimate 16-bit PNG lost 8 bits per channel -- 65,536 code values reduced
-// to 256 -- before the pipeline saw a single pixel, and no amount of 10-bit
-// output could bring the gradients back.
-int png_decode_rgb(const unsigned char* data, std::size_t size,
-                   std::uint32_t preview_max_edge, PngDecodeOutput* out) {
-  if (size < 8 || png_sig_cmp(data, 0, 8) != 0) {
-    set_message(out->message, sizeof(out->message), "not a PNG file");
-    return 1;
-  }
-  out->has_cicp = read_png_cicp(data, size, &out->cicp_primaries,
-                                &out->cicp_transfer);
-  png_structp png =
-      png_create_read_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, png_warn);
-  if (png == nullptr) {
-    set_message(out->message, sizeof(out->message), "cannot create a PNG reader");
-    return 1;
-  }
-  png_infop info = png_create_info_struct(png);
-  if (info == nullptr) {
-    png_destroy_read_struct(&png, nullptr, nullptr);
-    set_message(out->message, sizeof(out->message), "cannot create PNG info");
-    return 1;
-  }
-  PngReadState state{data, size, 0};
-  // volatile: this is assigned after setjmp and read in the longjmp handler,
-  // and a non-volatile automatic whose value changed in between is
-  // indeterminate once the jump has happened.
-  png_bytep* volatile rows = nullptr;
-  // Scratch for the streaming downscale path below; same discipline.
-  unsigned char* volatile src_row = nullptr;
-  std::uint64_t* volatile accum = nullptr;
+struct PngReader {
+  png_structp png{png_create_read_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, png_warn)};
+  png_infop info{};
+  PngReadState input;
 
-  if (setjmp(png_jmpbuf(png))) {
-    png_destroy_read_struct(&png, &info, nullptr);
-    std::free(rows);
-    std::free(src_row);
-    std::free(accum);
-    std::free(out->rgb);
-    std::free(out->icc);
-    out->rgb = nullptr;
-    out->rgb_size = 0;
-    out->icc = nullptr;
-    out->icc_size = 0;
-    if (out->message[0] == '\0') {
-      set_message(out->message, sizeof(out->message), "PNG decode failed");
+  explicit PngReader(const std::vector<std::uint8_t>& bytes)
+      : input{bytes.data(), bytes.size(), 0} {
+    if (!png) throw std::runtime_error("cannot create a PNG reader");
+    info = png_create_info_struct(png);
+    if (!info) {
+      png_destroy_read_struct(&png, nullptr, nullptr);
+      throw std::runtime_error("cannot create PNG info");
     }
-    return 1;
+    png_set_read_fn(png, &input, png_read_from_memory);
   }
+  ~PngReader() { png_destroy_read_struct(&png, &info, nullptr); }
+};
 
-  png_set_read_fn(png, &state, png_read_from_memory);
-  png_read_info(png, info);
+// Each operation below calls only libpng and has no C++ owners in its frame.
+// A libpng error jumps back here, then throws normally through the caller's
+// RAII objects. In particular, row colour conversion runs outside this frame.
+template <typename Read>
+void checked_png_read(png_structp png, const Read& read) {
+  if (setjmp(png_jmpbuf(png))) throw std::runtime_error("PNG decode failed");
+  read();
+}
 
-  png_uint_32 width = 0;
-  png_uint_32 height = 0;
-  int bit_depth = 0;
-  int color_type = 0;
-  int interlace_type = PNG_INTERLACE_NONE;
-  png_get_IHDR(png, info, &width, &height, &bit_depth, &color_type,
-               &interlace_type, nullptr, nullptr);
-
-  // PNG has no equivalent of the JPEG DCT scale, so an oversized image is
-  // box-averaged by an integer factor while it streams in: only one source row
-  // and one accumulator row are ever resident, so peak memory tracks the
-  // *output* size, not the input. Interlaced PNGs are the exception -- libpng
-  // can only deliver those through png_read_image, which needs the full raster
-  // up front, and they are vanishingly rare at these dimensions.
-  std::uint32_t factor = 1;
-  while (!raster_budget_ok((width + factor - 1) / factor,
-                           (height + factor - 1) / factor)) {
-    if (factor >= 64) {
-      set_message(out->message, sizeof(out->message),
-                  "image exceeds the pixel or memory budget");
-      png_error(png, "budget");
-    }
-    ++factor;
-  }
-  out->budget_limited = factor > 1;
-  // A preview caller keeps averaging past that, but only while the result still
-  // clears the floor -- the last reduction belongs to the linear-light
-  // resampler, not to this one, which averages encoded samples.
-  if (const auto floor = preview_decode_floor(preview_max_edge); floor != 0) {
-    while (keeps_preview_detail((width + factor * 2 - 1) / (factor * 2),
-                                (height + factor * 2 - 1) / (factor * 2), floor) &&
-           factor < 64) {
-      factor *= 2;
+SourceColor png_source_color(png_structp png, png_infop info, ColorGamut fallback,
+                             bool& narrow_range) {
+  SourceColor color(fallback);
+  png_byte primaries = 0, transfer = 0, matrix = 0, full_range = 1;
+  bool has_cicp = false;
+#ifdef PNG_READ_cICP_SUPPORTED
+  has_cicp = png_get_cICP(png, info, &primaries, &transfer, &matrix, &full_range) != 0;
+#else
+  // Older libpng keeps this ancillary chunk opaque but still validates its CRC.
+  png_unknown_chunkp chunks = nullptr;
+  const int count = png_get_unknown_chunks(png, info, &chunks);
+  for (int i = 0; i < count; ++i) {
+    if (std::memcmp(chunks[i].name, "cICP", 4) == 0 && chunks[i].size == 4) {
+      primaries = chunks[i].data[0];
+      transfer = chunks[i].data[1];
+      matrix = chunks[i].data[2];
+      full_range = chunks[i].data[3];
+      has_cicp = true;
+      break;
     }
   }
-  if (factor > 1 && interlace_type != PNG_INTERLACE_NONE) {
-    set_message(out->message, sizeof(out->message),
-                "interlaced image exceeds the pixel or memory budget");
-    png_error(png, "budget");
+#endif
+  // PNG 3 specifies cICP > iCCP > sRGB > cHRM/gAMA. Do not send a
+  // lower-priority ICC profile to the shared ICC-first raster converter.
+  if (has_cicp) {
+    if (matrix != 0 || full_range > 1)
+      throw std::runtime_error("PNG cICP requires RGB samples and a valid range flag");
+    narrow_range = full_range == 0;
+    if (!codec::cicp_primaries_unspecified(primaries)) color.primaries = primaries;
+    if (transfer != codec::kCicpTransferReserved && transfer != codec::kCicpTransferUnspecified)
+      color.transfer = transfer;
+    return color;
   }
-
-  if (color_type == PNG_COLOR_TYPE_PALETTE) png_set_palette_to_rgb(png);
-  if (color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8) {
-    png_set_expand_gray_1_2_4_to_8(png);
-  }
-  if (png_get_valid(png, info, PNG_INFO_tRNS) != 0) png_set_tRNS_to_alpha(png);
-  if ((color_type & PNG_COLOR_MASK_COLOR) == 0) png_set_gray_to_rgb(png);
-  png_set_strip_alpha(png);
-  if (bit_depth == 16) {
-    // PNG samples are big-endian on the wire; the rest of this file reads
-    // 16-bit samples little-endian, and so does Little CMS's TYPE_RGB_16.
-    png_set_swap(png);
-  }
-  png_set_interlace_handling(png);
-  png_read_update_info(png, info);
-
-  const int out_bits = bit_depth == 16 ? 16 : 8;
-  const std::size_t row_bytes = png_get_rowbytes(png, info);
-  if (row_bytes != static_cast<std::size_t>(width) * 3 *
-                       (out_bits == 16 ? 2U : 1U)) {
-    set_message(out->message, sizeof(out->message),
-                "unsupported PNG channel layout");
-    png_error(png, "layout");
-  }
-
-  const bool wide = out_bits == 16;
-  const std::uint32_t out_width = (width + factor - 1) / factor;
-  const std::uint32_t out_height = (height + factor - 1) / factor;
-  const std::size_t out_row_bytes =
-      static_cast<std::size_t>(out_width) * 3 * (wide ? 2U : 1U);
-  out->rgb_size = out_row_bytes * out_height;
-  out->rgb = static_cast<unsigned char*>(std::malloc(out->rgb_size));
-  if (out->rgb == nullptr) {
-    set_message(out->message, sizeof(out->message), "out of memory");
-    png_error(png, "allocation");
-  }
-
-  if (factor == 1) {
-    rows = static_cast<png_bytep*>(std::malloc(sizeof(png_bytep) * height));
-    if (rows == nullptr) {
-      set_message(out->message, sizeof(out->message), "out of memory");
-      png_error(png, "allocation");
-    }
-    for (png_uint_32 y = 0; y < height; ++y) rows[y] = out->rgb + y * row_bytes;
-    png_read_image(png, rows);
-  } else {
-    const std::size_t accum_samples = static_cast<std::size_t>(out_width) * 3;
-    src_row = static_cast<unsigned char*>(std::malloc(row_bytes));
-    accum = static_cast<std::uint64_t*>(
-        std::malloc(accum_samples * sizeof(std::uint64_t)));
-    if (src_row == nullptr || accum == nullptr) {
-      set_message(out->message, sizeof(out->message), "out of memory");
-      png_error(png, "allocation");
-    }
-    for (png_uint_32 y = 0; y < height; ++y) {
-      const std::uint32_t out_y = y / factor;
-      if (y % factor == 0) {
-        std::memset(accum, 0, accum_samples * sizeof(std::uint64_t));
-      }
-      png_read_row(png, src_row, nullptr);
-      for (png_uint_32 x = 0; x < width; ++x) {
-        const std::size_t base = static_cast<std::size_t>(x / factor) * 3;
-        for (unsigned c = 0; c < 3; ++c) {
-          const std::size_t at = (static_cast<std::size_t>(x) * 3 + c) *
-                                 (wide ? 2U : 1U);
-          const std::uint32_t sample =
-              wide ? static_cast<std::uint32_t>(
-                         src_row[at] | (static_cast<std::uint32_t>(
-                                            src_row[at + 1]) << 8))
-                   : src_row[at];
-          accum[base + c] += sample;
-        }
-      }
-      // Flush once the last source row of this block has landed. The final
-      // block is short when the dimensions are not a multiple of the factor,
-      // so the divisor is the actual contributing pixel count, not factor^2.
-      const bool last_in_block = (y + 1) % factor == 0 || y + 1 == height;
-      if (!last_in_block) continue;
-      const std::uint64_t rows_used =
-          static_cast<std::uint64_t>(y % factor) + 1;
-      auto* target = out->rgb + static_cast<std::size_t>(out_y) * out_row_bytes;
-      for (std::uint32_t ox = 0; ox < out_width; ++ox) {
-        const std::uint64_t cols_used =
-            std::min<std::uint64_t>(factor, width - static_cast<std::uint64_t>(ox) * factor);
-        const std::uint64_t divisor = rows_used * cols_used;
-        for (unsigned c = 0; c < 3; ++c) {
-          const std::uint64_t mean =
-              (accum[static_cast<std::size_t>(ox) * 3 + c] + divisor / 2) / divisor;
-          if (wide) {
-            const std::size_t at = (static_cast<std::size_t>(ox) * 3 + c) * 2;
-            target[at] = static_cast<unsigned char>(mean & 0xFFU);
-            target[at + 1] = static_cast<unsigned char>((mean >> 8) & 0xFFU);
-          } else {
-            target[static_cast<std::size_t>(ox) * 3 + c] =
-                static_cast<unsigned char>(mean);
-          }
-        }
-      }
-    }
-  }
-  png_read_end(png, info);
-
   char* profile_name = nullptr;
   int compression = 0;
   png_bytep profile = nullptr;
   png_uint_32 profile_size = 0;
-  if (png_get_iCCP(png, info, &profile_name, &compression, &profile,
-                   &profile_size) == PNG_INFO_iCCP &&
-      profile != nullptr && profile_size != 0) {
-    auto* copy = static_cast<unsigned char*>(std::malloc(profile_size));
-    if (copy != nullptr) {
-      std::memcpy(copy, profile, profile_size);
-      out->icc = copy;
-      out->icc_size = profile_size;
-    }
+  if (png_get_iCCP(png, info, &profile_name, &compression, &profile, &profile_size)) {
+    color.icc.assign(profile, profile + profile_size);
+    return color;
   }
+  int intent = 0;
+  if (png_get_sRGB(png, info, &intent)) return SourceColor(ColorGamut::kSrgb);
 
-  out->width = out_width;
-  out->height = out_height;
-  out->bits = out_bits;
-  out->downscale = factor;
-  std::free(rows);
-  std::free(src_row);
-  std::free(accum);
-  png_destroy_read_struct(&png, &info, nullptr);
-  return 0;
+  double gamma = 0;
+  const bool has_gamma = png_get_gAMA(png, info, &gamma) != 0;
+  cmsCIExyY white{.3127, .3290, 1};
+  cmsCIExyYTRIPLE chromaticities{{.640, .330, 1}, {.300, .600, 1}, {.150, .060, 1}};
+  if (fallback == ColorGamut::kDisplayP3)
+    chromaticities = {{.680, .320, 1}, {.265, .690, 1}, {.150, .060, 1}};
+  else if (fallback == ColorGamut::kRec2020)
+    chromaticities = {{.708, .292, 1}, {.170, .797, 1}, {.131, .046, 1}};
+  const bool has_chrm = png_get_cHRM(png, info, &white.x, &white.y,
+      &chromaticities.Red.x, &chromaticities.Red.y,
+      &chromaticities.Green.x, &chromaticities.Green.y,
+      &chromaticities.Blue.x, &chromaticities.Blue.y) != 0;
+  if (!has_gamma && !has_chrm) return color;
+
+  // gAMA is the encoding exponent. Little CMS expects the inverse decoding
+  // curve. With cHRM alone retain the documented sRGB transfer assumption.
+  const codec::ProfileHandle srgb(cmsCreate_sRGBProfile());
+  if (!srgb) throw std::runtime_error("cannot build the PNG transfer profile");
+  cmsToneCurve* curve = has_gamma ? cmsBuildGamma(nullptr, 1.0 / gamma)
+      : cmsDupToneCurve(static_cast<cmsToneCurve*>(cmsReadTag(srgb.get(), cmsSigRedTRCTag)));
+  if (!curve) throw std::runtime_error("cannot build the PNG tone curve");
+  cmsToneCurve* curves[]{curve, curve, curve};
+  const codec::ProfileHandle generated(cmsCreateRGBProfile(&white, &chromaticities, curves));
+  cmsFreeToneCurve(curve);
+  if (!generated) throw std::runtime_error("cannot build the PNG colour profile");
+  cmsUInt32Number size = 0;
+  if (!cmsSaveProfileToMem(generated.get(), nullptr, &size))
+    throw std::runtime_error("cannot serialize the PNG colour profile");
+  color.icc.resize(size);
+  if (!cmsSaveProfileToMem(generated.get(), color.icc.data(), &size))
+    throw std::runtime_error("cannot serialize the PNG colour profile");
+  return color;
 }
 
 DecodedImage decode_png(const std::vector<std::uint8_t>& bytes,
                         std::uint32_t preview_max_edge,
                         ColorGamut default_gamut) {
-  PngDecodeOutput output{};
-  const int failed =
-      png_decode_rgb(bytes.data(), bytes.size(), preview_max_edge, &output);
-  const MallocBytes rgb(output.rgb);
-  const MallocBytes icc(output.icc);
-  if (failed != 0) {
-    throw std::runtime_error(std::string("PNG decode: ") + output.message);
+  PngReader reader(bytes);
+  auto* png = reader.png;
+  auto* info = reader.info;
+  png_uint_32 width = 0, height = 0;
+  int bit_depth = 0, color_type = 0, interlace = 0;
+  checked_png_read(png, [&] {
+#ifndef PNG_READ_cICP_SUPPORTED
+    const png_byte cicp_name[5]{'c', 'I', 'C', 'P', 0};
+    png_set_keep_unknown_chunks(png, PNG_HANDLE_CHUNK_ALWAYS, cicp_name, 1);
+#endif
+    png_read_info(png, info);
+    png_get_IHDR(png, info, &width, &height, &bit_depth, &color_type, &interlace, nullptr, nullptr);
+    if (color_type == PNG_COLOR_TYPE_PALETTE) png_set_palette_to_rgb(png);
+    if (color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8) png_set_expand_gray_1_2_4_to_8(png);
+    if (png_get_valid(png, info, PNG_INFO_tRNS)) png_set_tRNS_to_alpha(png);
+    if (!(color_type & PNG_COLOR_MASK_COLOR)) png_set_gray_to_rgb(png);
+    png_set_strip_alpha(png);
+    if (bit_depth == 16) png_set_swap(png);
+    png_set_interlace_handling(png);
+    png_read_update_info(png, info);
+  });
+  const int bits = bit_depth == 16 ? 16 : 8;
+  const std::size_t row_bytes = png_get_rowbytes(png, info);
+  if (row_bytes != static_cast<std::size_t>(width) * 3 * (bits / 8))
+    throw std::runtime_error("unsupported PNG channel layout");
+  bool narrow_range = false;
+  const auto color = png_source_color(png, info, default_gamut, narrow_range);
+  const codec::RgbRowTransform transform(color, bits, narrow_range, true);
+
+  const auto plan = codec::raster_decode_plan(width, height, preview_max_edge);
+  const auto out_width = plan.width;
+  const auto out_height = plan.height;
+  const bool reduce = out_width != width || out_height != height;
+  std::vector<unsigned char> raster;
+  if (interlace != PNG_INTERLACE_NONE) {
+    // Adam7 needs the full encoded raster to combine its passes. Feed those
+    // completed rows through the same linear reduction as ordinary PNG rows.
+    check_raster_budget(width, height);
+    raster.resize(row_bytes * height);
+    std::vector<png_bytep> rows(height);
+    for (unsigned y = 0; y < height; ++y) rows[y] = raster.data() + y * row_bytes;
+    checked_png_read(png, [&] { png_read_image(png, rows.data()); });
   }
-  SourceColor color(default_gamut);
-  if (output.has_cicp) {
-    if (!codec::cicp_primaries_unspecified(output.cicp_primaries)) {
-      color.primaries = output.cicp_primaries;
+  FloatImage linear(out_width, out_height, 3);
+  // Bound scratch memory by 64 source rows, while allowing the shared pool to
+  // perform expensive ICC transforms concurrently. PNG inflation stays serial.
+  constexpr std::uint32_t kBlockRows = 64;
+  const auto block_rows = std::min(height, kBlockRows);
+  std::vector<unsigned char> encoded(raster.empty() ? row_bytes * block_rows : 0);
+  const std::size_t source_stride = static_cast<std::size_t>(width) * 3;
+  const std::size_t output_stride = static_cast<std::size_t>(out_width) * 3;
+  std::vector<float> source(reduce ? source_stride * block_rows : 0);
+  std::vector<float> horizontal(reduce ? output_stride * block_rows : 0);
+  std::uint32_t first_row = height;
+  const auto load_block = [&](std::uint32_t y) {
+    first_row = (y / kBlockRows) * kBlockRows;
+    const auto count = std::min(kBlockRows, height - first_row);
+    if (raster.empty()) {
+      checked_png_read(png, [&] {
+        for (unsigned row = 0; row < count; ++row)
+          png_read_row(png, encoded.data() + row * row_bytes, nullptr);
+      });
     }
-    if (output.cicp_transfer != codec::kCicpTransferReserved &&
-        output.cicp_transfer != codec::kCicpTransferUnspecified) {
-      color.transfer = output.cicp_transfer;
+    parallel_for_rows(count, [&](std::uint32_t row) {
+      const auto* input = raster.empty() ? encoded.data() + row * row_bytes
+          : raster.data() + (static_cast<std::size_t>(first_row) + row) * row_bytes;
+      if (!reduce) {
+        transform.convert(input, linear.pixels.data() +
+            (static_cast<std::size_t>(first_row) + row) * output_stride, width);
+        return;
+      }
+      auto* converted = source.data() + row * source_stride;
+      auto* reduced = horizontal.data() + row * output_stride;
+      transform.convert(input, converted, width);
+      // Integer boundaries in units of 1/output_size avoid rounded indices.
+      // Each output cell has equal area, including odd-sized source rasters.
+      for (std::uint32_t ox = 0; ox < out_width; ++ox) {
+        const auto left = static_cast<std::uint64_t>(ox) * width;
+        const auto right = static_cast<std::uint64_t>(ox + 1) * width;
+        std::array<double, 3> sum{};
+        for (auto sx = left / out_width; sx <= (right - 1) / out_width; ++sx) {
+          const double weight = static_cast<double>(std::min(right, (sx + 1) * out_width) -
+              std::max(left, sx * out_width)) / width;
+          for (unsigned c = 0; c < 3; ++c) sum[c] += converted[sx * 3 + c] * weight;
+        }
+        for (unsigned c = 0; c < 3; ++c) reduced[static_cast<std::size_t>(ox) * 3 + c] = static_cast<float>(sum[c]);
+      }
+    });
+  };
+  if (!reduce) {
+    for (std::uint32_t y = 0; y < height; y += kBlockRows) load_block(y);
+  } else {
+    for (std::uint32_t oy = 0; oy < out_height; ++oy) {
+      const auto top = static_cast<std::uint64_t>(oy) * height;
+      const auto bottom = static_cast<std::uint64_t>(oy + 1) * height;
+      auto* target = linear.pixels.data() + static_cast<std::size_t>(oy) * output_stride;
+      for (auto sy = top / out_height; sy <= (bottom - 1) / out_height; ++sy) {
+        if (sy < first_row || sy >= static_cast<std::uint64_t>(first_row) + kBlockRows)
+          load_block(static_cast<std::uint32_t>(sy));
+        const auto* reduced = horizontal.data() + (sy - first_row) * output_stride;
+        const float weight = static_cast<float>(static_cast<double>(std::min(bottom, (sy + 1) * out_height) -
+            std::max(top, sy * out_height)) / height);
+        for (std::size_t i = 0; i < output_stride; ++i) target[i] += reduced[i] * weight;
+      }
     }
   }
-  if (output.icc_size != 0) {
-    color.icc.assign(icc.get(), icc.get() + output.icc_size);
-  }
-  const std::size_t stride =
-      static_cast<std::size_t>(output.width) * 3 * (output.bits == 16 ? 2U : 1U);
-  auto result = from_interleaved_rgb(rgb.get(), output.width, output.height,
-                                     stride, output.bits, color);
-  result.decode.resolution_reduced = output.budget_limited;
-  // cICP describes the transfer function's available range. Keep the same
-  // ICC-first rule as the other raster decoders: an ICC profile can transform
-  // arbitrary colour, but it does not declare HDR headroom.
-  result.hdr_headroom =
-      color.icc.empty() ? transfer_headroom(color.transfer) : 1.0F;
+  checked_png_read(png, [&] { png_read_end(png, info); });
+  DecodedImage result;
+  result.linear_p3 = std::move(linear);
+  result.decode.sensor_width = result.decode.target_width = width;
+  result.decode.sensor_height = result.decode.target_height = height;
+  result.decode.decoded_width = out_width;
+  result.decode.decoded_height = out_height;
+  result.metadata.orientation = 1;
+  result.decode.resolution_reduced = plan.budget_limited;
+  result.hdr_headroom = color.icc.empty() ? transfer_headroom(color.transfer) : 1.0F;
   result.domain = display_referred_domain(result.hdr_headroom);
   return result;
 }
@@ -735,46 +664,12 @@ DecodedImage decode_heif_rgb_handle(const heif_context* context,
                                options.get()),
              "HEIC decode");
   std::unique_ptr<heif_image, ImageDeleter> image(image_raw);
-  bool resolution_reduced = false;
-  {
-    // libheif has no scaled-decode entry point, so unlike JPEG the full raster
-    // is already resident here. The budget still has to hold for the float
-    // working buffer that follows -- it is the larger of the two -- so shrink
-    // in place and release the oversized original before converting.
-    const int full_width = heif_image_get_width(image.get(), heif_channel_interleaved);
-    const int full_height = heif_image_get_height(image.get(), heif_channel_interleaved);
-    if (full_width > 0 && full_height > 0) {
-      const auto wide = static_cast<std::uint64_t>(full_width);
-      const auto tall = static_cast<std::uint64_t>(full_height);
-      std::uint32_t factor = 1;
-      while (factor <= 64 &&
-             !raster_budget_ok((wide + factor - 1) / factor, (tall + factor - 1) / factor)) {
-        ++factor;
-      }
-      if (factor > 64) {
-        throw std::runtime_error("HEIC image exceeds the pixel or memory budget");
-      }
-      // Only a budget-forced reduction is a degradation; a preview asked to be
-      // bounded got what it asked for.
-      resolution_reduced = factor > 1;
-      if (const auto floor = preview_decode_floor(preview_max_edge); floor != 0) {
-        while (factor < 64 &&
-               keeps_preview_detail((wide + factor * 2 - 1) / (factor * 2),
-                                    (tall + factor * 2 - 1) / (factor * 2), floor)) {
-          factor *= 2;
-        }
-      }
-      if (factor > 1) {
-        heif_image* scaled_raw = nullptr;
-        check_heif(heif_image_scale_image(
-                       image.get(), &scaled_raw,
-                       std::max(1, full_width / static_cast<int>(factor)),
-                       std::max(1, full_height / static_cast<int>(factor)), nullptr),
-                   "HEIC downscale");
-        image.reset(scaled_raw);
-      }
-    }
-  }
+  const int full_width = heif_image_get_width(image.get(), heif_channel_interleaved);
+  const int full_height = heif_image_get_height(image.get(), heif_channel_interleaved);
+  if (full_width <= 0 || full_height <= 0)
+    throw std::runtime_error("HEIC decoder returned invalid dimensions");
+  const auto plan = codec::raster_decode_plan(static_cast<std::uint32_t>(full_width),
+      static_cast<std::uint32_t>(full_height), preview_max_edge);
   int stride = 0;
   const auto* rgb =
       heif_image_get_plane_readonly(image.get(), heif_channel_interleaved, &stride);
@@ -785,13 +680,15 @@ DecodedImage decode_heif_rgb_handle(const heif_context* context,
   if (!rgb || stride <= 0 || width <= 0 || height <= 0 || bits <= 0 || bits > 16) {
     throw std::runtime_error("HEIC decoder returned an invalid RGB plane");
   }
-  check_raster_budget(static_cast<std::uint32_t>(width),
-                      static_cast<std::uint32_t>(height));
   auto result = from_interleaved_rgb(
       rgb, static_cast<std::uint32_t>(width),
       static_cast<std::uint32_t>(height),
-      static_cast<std::size_t>(stride), bits, color);
-  result.decode.resolution_reduced = resolution_reduced;
+      static_cast<std::size_t>(stride), bits, color, plan.width, plan.height);
+  result.decode.sensor_width = heif_image_handle_get_ispe_width(handle);
+  result.decode.sensor_height = heif_image_handle_get_ispe_height(handle);
+  result.decode.target_width = full_width;
+  result.decode.target_height = full_height;
+  result.decode.resolution_reduced = plan.budget_limited;
   // An ICC profile cannot state a headroom, so an ICC-described HEIC is read as
   // SDR. That is the conservative answer rather than the complete one: it
   // renders such a file faithfully instead of inventing a range nothing in the

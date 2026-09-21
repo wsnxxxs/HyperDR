@@ -151,7 +151,7 @@ void set_native_model_runtime(NativeModelInfer runtime);
     const NativeModelRequest& request, const FloatImage& linear_display_p3_sdr);
 
 // Converts an SDR base into the model tensor geometry. Both dimensions are
-// ceil-aligned to stride 16; reductions use the shared area-then-bilinear
+// ceil-aligned to stride 16; reductions use the shared uniform-area
 // resampler so the model sees the same linear Display-P3 thumbnail as the
 // preview path rather than an 8-bit intermediate.
 [[nodiscard]] FloatImage make_native_model_input(

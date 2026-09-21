@@ -10,8 +10,67 @@
 namespace hyperdr {
 namespace {
 
+// Each shrinking output pixel covers an equal area of the input raster.
+// Enlarged axes keep centre-aligned linear interpolation.
+struct Footprint {
+  std::uint32_t first, last;
+  float first_weight, last_weight;
+};
+Footprint footprint(std::uint32_t position, std::uint32_t input, std::uint32_t output) {
+  const double scale = static_cast<double>(input) / output;
+  if (input > output) {
+    const double left = position * scale;
+    const double right = std::min(static_cast<double>(input), (position + 1.0) * scale);
+    const auto first = static_cast<std::uint32_t>(std::floor(left));
+    const auto last = std::min(input - 1U, static_cast<std::uint32_t>(std::ceil(right) - 1));
+    return {first, last, static_cast<float>((std::min(right, first + 1.0) - left) / scale),
+            static_cast<float>((right - std::max(left, static_cast<double>(last))) / scale)};
+  }
+  const double coordinate = std::clamp((position + 0.5) * scale - 0.5, 0.0, input - 1.0);
+  const auto first = static_cast<std::uint32_t>(std::floor(coordinate));
+  const auto last = std::min(first + 1U, input - 1U);
+  const float weight = static_cast<float>(coordinate - first);
+  return {first, last, first == last ? 1.0F : 1.0F - weight, weight};
+}
+float weight_at(const Footprint& span, std::uint32_t index, float interior) {
+  return index == span.first ? span.first_weight : index == span.last ? span.last_weight : interior;
+}
+FloatImage resample_stage(const FloatImage& source, std::uint32_t width, std::uint32_t height) {
+  FloatImage out(width, height, source.channels);
+  std::vector<Footprint> columns(width);
+  for (std::uint32_t x = 0; x < width; ++x) columns[x] = footprint(x, source.width, width);
+  const float interior_x = static_cast<float>(static_cast<double>(width) / source.width);
+  const float interior_y = static_cast<float>(static_cast<double>(height) / source.height);
+  parallel_for_rows(height, [&](std::uint32_t y) {
+    const auto rows = footprint(y, source.height, height);
+    for (std::uint32_t x = 0; x < width; ++x) {
+      const auto& cols = columns[x];
+      for (std::uint32_t c = 0; c < source.channels; ++c) {
+        double sum = 0;
+        for (auto sy = rows.first; sy <= rows.last; ++sy) {
+          const float wy = weight_at(rows, sy, interior_y);
+          if (wy == 0) continue;
+          double row = 0;
+          for (auto sx = cols.first; sx <= cols.last; ++sx) {
+            const float wx = weight_at(cols, sx, interior_x);
+            if (wx != 0) row += source.at(sx, sy, c) * static_cast<double>(wx);
+          }
+          sum += row * wy;
+        }
+        out.at(x, y, c) = static_cast<float>(sum);
+      }
+    }
+  });
+  return out;
+}
+
 FloatImage halve(const FloatImage& source, bool reduce_width,
                  bool reduce_height) {
+  // Pair averaging is exact only when every output cell has the same area.
+  // An odd tail must not receive a full output pixel's weight by itself.
+  if ((reduce_width && source.width % 2U) || (reduce_height && source.height % 2U))
+    return resample_stage(source, reduce_width ? (source.width / 2U + source.width % 2U) : source.width,
+        reduce_height ? (source.height / 2U + source.height % 2U) : source.height);
   FloatImage reduced(reduce_width ? source.width / 2U + source.width % 2U
                                   : source.width,
                      reduce_height ? source.height / 2U + source.height % 2U
@@ -44,7 +103,8 @@ FloatImage resample_to(FloatImage source, std::uint32_t width, std::uint32_t hei
   if (width == 0 || height == 0) throw std::invalid_argument("resample target must be non-empty");
   if (source.width == width && source.height == height) return source;
 
-  // Low-pass first so the bilinear step below never undersamples.
+  // Staged low-pass filtering bounds the final footprint and suppresses fine
+  // alternating texture. Each stage preserves equal-area pixel coverage.
   while (true) {
     // Compare in 64 bits. Integer division made 3201 -> 1600 look like an
     // exact 2:1 step and skipped the box filter even though it undersamples.
@@ -59,38 +119,7 @@ FloatImage resample_to(FloatImage source, std::uint32_t width, std::uint32_t hei
   }
   if (source.width == width && source.height == height) return source;
 
-  FloatImage out(width, height, source.channels);
-  const auto& in = source;
-  struct Column { std::uint32_t x0, x1; float weight; };
-  std::vector<Column> columns(width);
-  for (std::uint32_t x = 0; x < width; ++x) {
-      const double sx = std::clamp(
-          (static_cast<double>(x) + 0.5) * static_cast<double>(in.width) /
-                  static_cast<double>(width) - 0.5,
-          0.0, static_cast<double>(in.width - 1U));
-      const auto x0 = std::min(static_cast<std::uint32_t>(std::floor(sx)), in.width - 1U);
-      const auto x1 = std::min(x0 + 1U, in.width - 1U);
-      const float wx = static_cast<float>(sx - static_cast<double>(x0));
-    columns[x] = {x0, x1, wx};
-  }
-  parallel_for_rows(height, [&](const std::uint32_t y) {
-    const double sy = std::clamp(
-        (static_cast<double>(y) + 0.5) * static_cast<double>(in.height) /
-                static_cast<double>(height) - 0.5,
-        0.0, static_cast<double>(in.height - 1U));
-    const auto y0 = std::min(static_cast<std::uint32_t>(std::floor(sy)), in.height - 1U);
-    const auto y1 = std::min(y0 + 1U, in.height - 1U);
-    const float wy = static_cast<float>(sy - static_cast<double>(y0));
-    for (std::uint32_t x = 0; x < width; ++x) {
-      const auto [x0, x1, wx] = columns[x];
-      for (std::uint32_t c = 0; c < in.channels; ++c) {
-        const float top = std::lerp(in.at(x0, y0, c), in.at(x1, y0, c), wx);
-        const float bottom = std::lerp(in.at(x0, y1, c), in.at(x1, y1, c), wx);
-        out.at(x, y, c) = std::lerp(top, bottom, wy);
-      }
-    }
-  });
-  return out;
+  return resample_stage(source, width, height);
 }
 
 FloatImage resample_to_max_edge(FloatImage source, std::uint32_t max_edge) {

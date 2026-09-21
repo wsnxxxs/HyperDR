@@ -34,6 +34,7 @@ struct ExternalDevelopmentRecipe {
 };
 
 struct ExternalGainBinding {
+  std::string preprocessing_fingerprint;
   std::string source_sha256;
   std::string highlight_recovery;
   std::uint32_t orientation{1};

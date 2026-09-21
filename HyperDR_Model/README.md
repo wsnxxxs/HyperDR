@@ -325,6 +325,15 @@ external integrations as a required pair:
 The old v1 normalized `[0,1] + max_stops` sidecar is only accepted through the
 `--allow-legacy-label-schema` / `--allow-legacy-external-gain` gate.
 
+Native model inputs use `hyperdr.model-input/v2`; `infer_gain.py` carries their
+preprocessing identity into `hyperdr.model-gain-binding/v2`. This binds the
+pipeline revision, RAW gain and corrections, calibration file contents, default
+colour gamut and base gamut mapping. Regenerate older model inputs and gains
+with the current executable. Half-size preview and full-size export may share
+a binding when their source/crop geometry matches; moving an unchanged
+calibration file does not invalidate it. This version change concerns model
+bindings, not the generic signed-gain file format above.
+
 The writer verifies the byte length after writing. Any reader must supply both
 width and height and reject a file whose length is not `width * height * 4`.
 

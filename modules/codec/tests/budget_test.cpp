@@ -28,6 +28,12 @@ int main() {
             "raster beyond the configured width was accepted");
     require(!raster_budget_ok(9000, 9000),
             "raster beyond the configured height was accepted");
+    const auto preview = hyperdr::codec::raster_decode_plan(513, 257, 257);
+    require(preview.width == 257 && preview.height == 129 && !preview.budget_limited,
+            "odd raster preview fell below its requested decode floor");
+    const auto reduced = hyperdr::codec::raster_decode_plan(12000, 8000, 0);
+    require(reduced.width == 6000 && reduced.height == 4000 && reduced.budget_limited,
+            "budget-driven reduction was confused with a preview request");
     require(raw_input_budget_ok(19008, 12672),
             "A7R V Pixel Shift boundary was rejected");
     require(!raw_input_budget_ok(19009, 12672),

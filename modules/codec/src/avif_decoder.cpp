@@ -38,9 +38,6 @@ namespace {
 using codec::apply_exif;
 using codec::interleaved_rgb_to_linear_p3;
 using codec::normalize_orientation;
-using codec::keeps_preview_detail;
-using codec::preview_decode_floor;
-using codec::raster_budget_ok;
 using codec::transfer_headroom;
 using codec::SourceColor;
 
@@ -98,39 +95,6 @@ SourceColor source_color_for(const avifImage& image, ColorGamut default_gamut) {
   return color;
 }
 
-// libavif has no scaled-decode entry point, so the full raster is resident by
-// the time the budget can be checked -- the same position the HEIC path is in.
-// Shrinking before the float working buffer is allocated is what the budget is
-// protecting, because that buffer is the larger of the two.
-// Returns whether the *budget* forced a reduction. A preview caller's own
-// bound is not a degradation and must not be reported as one.
-bool fit_to_budget(avifImage* image, std::uint32_t preview_max_edge) {
-  const auto wide = static_cast<std::uint64_t>(image->width);
-  const auto tall = static_cast<std::uint64_t>(image->height);
-  std::uint32_t factor = 1;
-  while (factor <= 64 &&
-         !raster_budget_ok((wide + factor - 1) / factor, (tall + factor - 1) / factor)) {
-    ++factor;
-  }
-  if (factor > 64) {
-    throw std::runtime_error("AVIF image exceeds the pixel or memory budget");
-  }
-  const bool budget_limited = factor > 1;
-  if (const auto floor = preview_decode_floor(preview_max_edge); floor != 0) {
-    while (factor < 64 &&
-           keeps_preview_detail((wide + factor * 2 - 1) / (factor * 2),
-                                (tall + factor * 2 - 1) / (factor * 2), floor)) {
-      factor *= 2;
-    }
-  }
-  if (factor > 1) {
-    check_avif(avifImageScale(image, std::max(1U, image->width / factor),
-                              std::max(1U, image->height / factor), nullptr),
-               "AVIF downscale");
-  }
-  return budget_limited;
-}
-
 }  // namespace
 
 namespace codec {
@@ -183,7 +147,9 @@ DecodedImage decode_avif_bytes(const std::vector<std::uint8_t>& bytes,
     throw std::runtime_error("unsupported AVIF bit depth " +
                              std::to_string(image->depth));
   }
-  const bool resolution_reduced = fit_to_budget(image, preview_max_edge);
+  const auto source_width = image->width;
+  const auto source_height = image->height;
+  const auto plan = codec::raster_decode_plan(source_width, source_height, preview_max_edge);
 
   avifRGBImage rgb{};
   avifRGBImageSetDefaults(&rgb, image);
@@ -200,14 +166,12 @@ DecodedImage decode_avif_bytes(const std::vector<std::uint8_t>& bytes,
   DecodedImage result;
   result.linear_p3 = interleaved_rgb_to_linear_p3(
       rgb.pixels, rgb.width, rgb.height, rgb.rowBytes, static_cast<int>(rgb.depth),
-      color);
-  result.decode.sensor_width = rgb.width;
-  result.decode.sensor_height = rgb.height;
-  result.decode.target_width = rgb.width;
-  result.decode.target_height = rgb.height;
-  result.decode.decoded_width = rgb.width;
-  result.decode.decoded_height = rgb.height;
-  result.decode.resolution_reduced = resolution_reduced;
+      color, plan.width, plan.height);
+  result.decode.sensor_width = result.decode.target_width = source_width;
+  result.decode.sensor_height = result.decode.target_height = source_height;
+  result.decode.decoded_width = plan.width;
+  result.decode.decoded_height = plan.height;
+  result.decode.resolution_reduced = plan.budget_limited;
   result.metadata.orientation = 1;
   // As in the HEIF path: an ICC profile carries no headroom, so an ICC-tagged
   // AVIF is read as SDR and rendered faithfully rather than speculatively.

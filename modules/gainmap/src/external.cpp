@@ -113,7 +113,7 @@ ExternalGainBinding read_model_binding(const json::Value& value,
   if (!value.is_object()) {
     throw std::invalid_argument("external gain report has invalid model_binding");
   }
-  require_string(value, "contract", "hyperdr.model-gain-binding/v1");
+  require_string(value, "contract", "hyperdr.model-gain-binding/v2");
   const auto& source = required_member(value, "source");
   const auto& recipe = required_member(value, "development_recipe");
   const auto& geometry = required_member(value, "geometry");
@@ -124,6 +124,7 @@ ExternalGainBinding read_model_binding(const json::Value& value,
   }
 
   ExternalGainBinding binding;
+  binding.preprocessing_fingerprint = required_string(value, "preprocessing_fingerprint");
   binding.source_sha256 = required_string(source, "sha256");
   if (binding.source_sha256.size() != 64) {
     throw std::invalid_argument("external model binding has invalid source sha256");
@@ -161,7 +162,8 @@ ExternalGainBinding read_model_binding(const json::Value& value,
   binding.recipe.id = required_string(recipe, "id");
   if (binding.recipe.id != "photographic-v1" &&
       binding.recipe.id != "display-p3-passthrough" &&
-      binding.recipe.id != "raw-neutral-v1" && binding.recipe.id != "raw-dcp-v1") {
+      binding.recipe.id != "raw-neutral-v1" && binding.recipe.id != "raw-dcp-v1" &&
+      binding.recipe.id != "display-hdr-split") {
     throw std::invalid_argument(
         "external model binding has unsupported development recipe");
   }
@@ -201,7 +203,7 @@ ExternalGainBinding read_model_binding(const json::Value& value,
   binding.gain_width = grid[0];
   binding.gain_height = grid[1];
   binding.resize_convention = required_string(geometry, "resize_convention");
-  if (binding.resize_convention != "half-pixel-centres/area-then-bilinear") {
+  if (binding.resize_convention != kResampleConvention) {
     throw std::invalid_argument("external model binding has unsupported resize convention");
   }
   binding.model_version = required_string(model, "version");

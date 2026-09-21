@@ -122,6 +122,26 @@ export const api = {
       id: sessionId, download: download ? "1" : "0", export: exportId,
     }),
 
+  async resultBlob(sessionId, exportId) {
+    let response;
+    try { response = await fetch(api.resultUrl(sessionId, { exportId })); }
+    catch { throw OFFLINE(); }
+    if (!response.ok) {
+      let body = null;
+      try { body = await response.json(); } catch {}
+      throw new ApiError(serverMessage(body, t("err.result")), response.status);
+    }
+    return response.blob();
+  },
+
+  setExportFolder: (path) => post("/api/export-folder", { path }, t("save.folderFailed")),
+  /** `path` writes this one result somewhere other than the remembered folder,
+   *  and does not become the remembered folder. Desktop-only, like the rest. */
+  saveTo: (sessionId, exportId, path = "") =>
+    post("/api/save-to", { sessionId, exportId, path }, t("save.failed")),
+  openExportFolder: (openToken = "") =>
+    post("/api/open-export-folder", { openToken }, t("save.folderFailed")),
+
   /* -- preview ------------------------------------------------------- */
 
   /** Native float32 linear-Display-P3 SDR base and reconstructed HDR planes.

@@ -100,7 +100,10 @@ def main() -> int:
     # 2. Every key the code asks for exists; every key declared is asked for.
     namespaces = {key.split(".", 1)[0] for key in source}
     used: dict[str, set[str]] = {}
-    modules = sorted((WEB / "js").rglob("*.js"))
+    # The phone front-end is scanned too: it shares modules with the editor, so
+    # a key it names is a key this catalogue has to carry, and a typo there is
+    # exactly as invisible at runtime as one in js/.
+    modules = sorted((WEB / "js").rglob("*.js")) + sorted((WEB / "phone").rglob("*.js"))
     if not modules:
         problems.append(f"no front-end modules found under {WEB / 'js'}")
     for module in modules:

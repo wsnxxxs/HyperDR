@@ -175,6 +175,37 @@ void test_research_exif_level_matches_the_fitted_estimator() {
           "an absent capture was not imputed with the fitted medians");
 }
 
+// A clipped white is the brightest valid SDR sample, and area resampling of it
+// must stay a valid model input. At a 1280x853 preview the float weights sum a
+// rounding step above one, which used to push 1.0 to 1.0000001 and refused the
+// AI preview for every photograph with clipped highlights at that size.
+void test_model_input_tolerates_resample_rounding() {
+  for (const auto [width, height] : {std::array<std::uint32_t, 2>{1280, 853},
+                                     std::array<std::uint32_t, 2>{2048, 1365},
+                                     std::array<std::uint32_t, 2>{1440, 959}}) {
+    hyperdr::FloatImage white(width, height, 3);
+    white.pixels.assign(white.pixels.size(), 1.0F);
+    const auto tensor = hyperdr::make_native_model_input(white);
+    require(tensor.width % 16U == 0 && tensor.height % 16U == 0,
+            "model input lost its stride alignment");
+    for (const float value : tensor.pixels) {
+      require(value >= 0.0F && value <= 1.0F,
+              "resampled model input left the [0, 1] contract");
+    }
+  }
+
+  // The tolerance absorbs rounding, not a base that is genuinely out of range.
+  hyperdr::FloatImage overexposed(1280, 853, 3);
+  overexposed.pixels.assign(overexposed.pixels.size(), 1.5F);
+  bool rejected = false;
+  try {
+    (void)hyperdr::make_native_model_input(overexposed);
+  } catch (const std::invalid_argument&) {
+    rejected = true;
+  }
+  require(rejected, "an out-of-range model base was silently clamped");
+}
+
 }  // namespace
 
 int main() {
@@ -184,6 +215,7 @@ int main() {
     test_model_ids_are_a_closed_set();
     test_reconstruction_offsets_follow_the_effective_model();
     test_research_exif_level_matches_the_fitted_estimator();
+    test_model_input_tolerates_resample_rounding();
     std::cout << "native model tests passed\n";
     return 0;
   } catch (const std::exception& error) {

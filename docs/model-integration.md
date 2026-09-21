@@ -110,7 +110,8 @@ integration makes, and fails rather than widening its own tolerances:
 `HyperDR_Model/scripts/make_capture_fixtures.py` derives the three acceptance
 files from one photograph — a complete capture, a capture whose exposure
 compensation is 0 EV, and one with no Exif at all. The measured result is
-recorded in `docs/research-model-acceptance.md`.
+recorded in the dated [acceptance record](archive/research-model-acceptance.md)
+and its [follow-up review](archive/research-model-review.md).
 
 ## Runtime behavior
 

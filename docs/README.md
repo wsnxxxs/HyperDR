@@ -24,6 +24,7 @@ Folder conversion is a CLI feature; its command and examples are in the
 | --- | --- |
 | Commands, options, exit codes and format behaviour | [CLI reference](cli-reference.md) |
 | Tone, HDR output promises and visual acceptance scenes | [Rendering behaviour](rendering.md) |
+| Colour LUT stages, RAW/Log/HLG input spaces and SDR export behaviour | [颜色 LUT 与 SDR/HDR 渲染架构](color-lut-pipeline.md) |
 | Conversion report fields | [Report schema guide](report-schema.md) |
 | Machine-readable report contract | [schema/report.json](../schema/report.json) |
 | Generated settings vocabulary used by the panel | [schema/settings.json](../schema/settings.json) |
@@ -42,15 +43,27 @@ Folder conversion is a CLI feature; its command and examples are in the
 
 ## Archived evidence
 
-`archive/` contains dated, point-in-time evidence. It explains what was seen on
-a particular revision and is not maintained as current feature documentation.
+`archive/` contains dated, point-in-time evidence: what was seen on a particular
+revision, and what was changed in response. It is not maintained as current
+feature documentation. Revalidate a finding against the current code before
+acting on it, and do not treat a measurement here as a live guarantee.
 
 | Evidence | Status |
 | --- | --- |
-| [2026-08-13 panel audit](archive/frontend-panel-2026-08-13/audit.md) | The preview exception was fixed in that report; revalidate its remaining findings against the current UI before acting on them. |
+| [2026-08-13 panel audit](archive/frontend-panel-2026-08-13/audit.md) | The preview exception was fixed in that report; revalidate its remaining findings against the current UI. |
+| [2026-09-06 experience review](archive/experience-review-2026-09-06/) | Four screenshots of the editor as it was that day. No accompanying write-up. |
+| [2026-09-06 manual rendering optimization](archive/manual-optimization-2026-09-06.md) | Describes the manual SDR/HDR base unification as delivered on that date. |
+| [2026-09-06 interactive pipeline optimization](archive/pipeline-optimization-2026-09-06.md) | Slider coalescing and preview tiers as delivered; the timing numbers are browser presentation, not display scanout. |
+| [2026-09-06 RAW pipeline review](archive/raw-pipeline-review-2026-09-06.md) | The six defects it reproduces were fixed; the unimplemented development controls it lists were out of scope. |
+| [2026-09-07 zero-adjustment review](archive/zero-adjustment-pipeline-review-2026-09-07.md) | Investigation only, baseline `fbad406`; no product behaviour was changed by it. |
+| [2026-09-07 zero-adjustment fix](archive/zero-adjustment-pipeline-fix-2026-09-07.md) | The repair for the review above. No physical HDR display check was performed. |
+| [2026-09-07 histogram redesign](archive/histogram-redesign-2026-09-07/README.md) | Screenshots 01–04 are withdrawn proposals; `05-simple-overlay.png` is the shipped overlay. |
+| [2026-09-14 research model acceptance](archive/research-model-acceptance.md) | The original delivery record for the three selectable models. Superseded numbers; see the review below. |
+| [2026-09-14 research model review](archive/research-model-review.md) | The follow-up review and repair. Its raw evidence lives in machine-local `.workbuddy/` archives that are not part of the repository. |
+| [2026-09-20 image pipeline review](archive/image-pipeline-review-2026-09-20.md) | HLG highlight and DNG CameraCalibration defects found and fixed; decode cache schema moved to 14. |
+| [2026-09-20 upgrade review](archive/review-2026-09-20.md) | Panel, model-selection and DNG gain-map repairs from the same pass. |
+| [2026-09-20 panel interaction plan](archive/panel-interaction-plan-2026-09-20.md) | Why saving a result reported nothing, and the save-destination design that followed. Its P0–P2 shipped. Of the three gaps section four left open, the export button that turned grey without a reason (gap 6) was closed on 2026-09-21; gaps 7 and 8 remain. |
 
 The browser implementation notes in
 [apps/panel/web/README.md](../apps/panel/web/README.md) are intentionally kept
 beside that code rather than promoted into the user guide.
-
-- [颜色 LUT 与 SDR/HDR 渲染架构](color-lut-pipeline.md) — 接入空间、RAW/Log/HLG 区别、纯 SDR 导出与高光行为。

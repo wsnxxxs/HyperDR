@@ -22,7 +22,9 @@
   --ink-strong:      light-dark(#202127, #f1f1f3);
   --ink:             light-dark(#3d4048, #c9cbd2);
   --ink-muted:       light-dark(#606470, #a1a4af);
-  --ink-disabled:    light-dark(#94a3b8, #526074);
+  /* Neutral like every other ink. The slate values this replaced were the
+   * only blue-tinted greys in the interface and read as a second palette. */
+  --ink-disabled:    light-dark(#a2a5ad, #5d6069);
 
   /* -- lines & glass edges ------------------------------------------- */
   --line:            light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.08));
@@ -33,19 +35,31 @@
   --glass-edge-subtle: light-dark(rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.08));
 
   /* -- accents ------------------------------------------------------- */
+  /* `--accent` is the accent as ink and stroke: links, focus, selected text.
+   * On the dark panel it has to be light to reach 4.5:1 (#8ba8ff is 7.2:1).
+   * A primary button is the opposite problem -- a fill carrying white text --
+   * so it has its own pair. Dark buttons used to be the ink colour with navy
+   * text, which made the one committed action the palest thing on screen.
+   * White on #3a6ddc is 4.8:1 (hover #3e71e0, 4.5:1); on the light theme's
+   * #0071e3 it is 4.7:1. */
   --accent:          light-dark(#0071e3, #8ba8ff);
-  --accent-gradient: linear-gradient(var(--accent), var(--accent));
+  --accent-gradient: linear-gradient(var(--accent-fill), var(--accent-fill));
   --accent-hover:    light-dark(#0062cc, #a4baff);
-  --accent-ink:      light-dark(#ffffff, #141b32);
+  --accent-fill:     light-dark(#0071e3, #3a6ddc);
+  --accent-fill-hover: light-dark(#0062cc, #3e71e0);
+  --accent-ink:      #ffffff;
   --accent-soft:     light-dark(rgba(0, 113, 227, 0.06), rgba(139, 168, 255, 0.1));
 
   --selected-bg:     light-dark(rgba(0, 113, 227, 0.07), rgba(139, 168, 255, 0.12));
   --selected-line:   light-dark(rgba(0, 113, 227, 0.22), rgba(139, 168, 255, 0.32));
   --selected-ink:    light-dark(#0062cc, #afc2ff);
 
-  --danger:          light-dark(#ef4444, #f87171);
+  /* Both are used as text (save errors, stale results, warnings), so the
+   * light values are measured against the light panel: #c93434 is 5.0:1 and
+   * #b45309 is 4.9:1. The previous #ef4444 / #d97706 were 3.6:1 and 3.1:1. */
+  --danger:          light-dark(#c93434, #f87171);
   --success:         var(--accent);
-  --warn:            light-dark(#d97706, #fbbf24);
+  --warn:            light-dark(#b45309, #f5b83d);
   --warn-soft:       light-dark(#fff7e6, #342b1e);
   --dialog-backdrop: rgba(10, 11, 14, 0.64);
 
@@ -56,10 +70,12 @@
   --hdr-soft:        light-dark(rgba(254, 243, 199, 0.8), rgba(120, 53, 15, 0.35));
   --hdr-border:      light-dark(rgba(245, 158, 11, 0.35), rgba(251, 191, 36, 0.35));
 
-  /* Sliders and controls */
-  --control-fill:    light-dark(#8b98ae, #566177);
-  --control-track:   light-dark(rgba(203, 213, 225, 0.6), rgba(38, 44, 55, 0.65));
-  --control-thumb:   light-dark(#596273, #e6e7eb);
+  /* Sliders and controls. Neutral, like a darkroom's: the value is read from
+   * the numeric field beside the track, and a coloured fill competed with the
+   * photograph for attention in every row of the rail. */
+  --control-fill:    light-dark(#8d9099, #7b7e87);
+  --control-track:   light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.1));
+  --control-thumb:   light-dark(#43464e, #e8e9ec);
   --control-ring:    light-dark(rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.5));
   --control-glow:    light-dark(rgba(0, 113, 227, 0.2), rgba(139, 168, 255, 0.35));
 

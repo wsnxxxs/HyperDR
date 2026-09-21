@@ -339,6 +339,15 @@ FloatImage make_native_model_input(const FloatImage& linear_display_p3_sdr,
       1U, static_cast<std::uint32_t>(std::lround(
           static_cast<double>(linear_display_p3_sdr.height) * scale))));
   auto tensor = resample_to(linear_display_p3_sdr, width, height);
+  // Uniform-area weights sum to one only up to float rounding, so a clipped
+  // white can come back a step above 1.0 at some sizes (1280x853 does). Snap
+  // that rounding back onto the contract; anything further out is a real
+  // defect in the base and is still refused below.
+  constexpr float kResampleRounding = 1.0e-5F;
+  for (float& value : tensor.pixels) {
+    if (value > 1.0F && value <= 1.0F + kResampleRounding) value = 1.0F;
+    else if (value < 0.0F && value >= -kResampleRounding) value = 0.0F;
+  }
   validate_model_input(tensor);
   return tensor;
 }

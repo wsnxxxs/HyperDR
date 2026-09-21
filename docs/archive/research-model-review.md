@@ -60,7 +60,7 @@
 
 EXIF 验证汇总含 14 个用例：8 个折内参数样本、2 个单字段缺失、0 EV、2 个树分裂阈值和高 ISO。模型 2 网格的**均值**等于 level；零输入仍可能因卷积边界产生空间变化，不能声称每个像素都恒等于 level。
 
-机器可读数值记录：[report.json](C:/Users/Ryan/Desktop/HyperDR/.workbuddy/review-verification/report.json)。这些结果验证适配正确性，不代表模型质量、RAW 准确率或跨折泛化有提升。
+机器可读数值记录：`.workbuddy/review-verification/report.json`（本机归档，未入库）。这些结果验证适配正确性，不代表模型质量、RAW 准确率或跨折泛化有提升。
 
 ### 真实界面
 
@@ -77,9 +77,9 @@ EXIF 验证汇总含 14 个用例：8 个折内参数样本、2 个单字段缺�
 | 模型 1 | `pixel_only` | `7.72216` | `ab0b1a80b3ae3f443a76f1926e8e10aacca9a1dc89c2d39197285c6a3b01f8df` |
 | 模型 2 | `exif_assisted` | `3.63327` | `28b3282e685457755e539955d2baadb5cc33e8e415cb5fb8170ce105443ff334` |
 
-导出文件及对应原始 result 记录保存在 [review-results](C:/Users/Ryan/Desktop/HyperDR/.workbuddy/review-results)。不要把渲染峰值倍率与 gainMax stops 混为一谈，也不要用亮度更高来判断模型质量更好。
+导出文件及对应原始 result 记录保存在 `.workbuddy/review-results`（本机归档，未入库）。不要把渲染峰值倍率与 gainMax stops 混为一谈，也不要用亮度更高来判断模型质量更好。
 
-截图：[模型 1](C:/Users/Ryan/Desktop/HyperDR/docs/research-model-review-assets/model1.png)、[模型 2](C:/Users/Ryan/Desktop/HyperDR/docs/research-model-review-assets/model2.png)、[导出记录](C:/Users/Ryan/Desktop/HyperDR/docs/research-model-review-assets/export-history.png)、[缺 EXIF 回退](C:/Users/Ryan/Desktop/HyperDR/docs/research-model-review-assets/missing-exif-fallback.png)、[0 EV](C:/Users/Ryan/Desktop/HyperDR/docs/research-model-review-assets/zero-bias.png)。截图用于确认交互、名称和状态，不能替代 HDR 显示设备上的亮度评价。
+截图：[模型 1](research-model-review-assets/model1.png)、[模型 2](research-model-review-assets/model2.png)、[导出记录](research-model-review-assets/export-history.png)、[缺 EXIF 回退](research-model-review-assets/missing-exif-fallback.png)、[0 EV](research-model-review-assets/zero-bias.png)。截图用于确认交互、名称和状态，不能替代 HDR 显示设备上的亮度评价。
 
 ## 启动与边界
 
@@ -91,7 +91,7 @@ $env:HYPERDR_EXECUTABLE = 'C:/Users/Ryan/Desktop/HyperDR/build-release/Release/H
 python apps/panel/hyperdr_gui.py
 ```
 
-需要分发安装版时，再按 [桌面打包说明](C:/Users/Ryan/Desktop/HyperDR/apps/desktop/README.md)重建侧车和安装包；本次未覆盖安装目录或旧安装包。
+需要分发安装版时，再按 [桌面打包说明](../../apps/desktop/README.md)重建侧车和安装包；本次未覆盖安装目录或旧安装包。
 
 参考验证仍要求 sklearn 1.8.0；运行 HyperDR 本身不需要 PyTorch 或 sklearn。研究模型仍是 fold 0 / seed 908，未改成集成或重新训练。
 

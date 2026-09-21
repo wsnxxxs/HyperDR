@@ -62,6 +62,11 @@ export const PREFS = [
 
   /* -- output -------------------------------------------------------- */
   { key: "rememberOutput", group: "output", kind: "toggle", default: true },
+  {
+    key: "saveTarget", group: "output", kind: "segmented", default: "ask",
+    choices: [["ask", "prefs.saveTarget.ask"], ["fixed", "prefs.saveTarget.fixed"],
+              ["download", "prefs.saveTarget.download"]],
+  },
 
   /* -- adjustments --------------------------------------------------- */
   /* Off by default, and deliberately so: settings/schema.js resets every image

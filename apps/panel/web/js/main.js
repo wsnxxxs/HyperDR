@@ -26,6 +26,7 @@ import { mountPrefs } from "./ui/prefs.js";
 import { mountPhoneWorkbench } from "./ui/phone-workbench.js";
 import { prefs } from "./ui/prefs-schema.js";
 import { t, setLocale, applyStatic, onLocaleChange } from "./i18n/index.js";
+import { applyKeyLabels } from "./core/keys.js";
 
 // The schema's defaults become store keys here, so core/store.js never has to
 // know a control's name -- the dependency points settings -> core, not back.
@@ -38,6 +39,8 @@ store.set(defaultSettings());
 document.documentElement.lang = prefs.get().locale;
 setLocale(prefs.get().locale);
 applyStatic();
+applyKeyLabels();
+onLocaleChange(() => applyKeyLabels());
 prefs.watch("locale", setLocale);
 
 /** The system's own reduce-motion setting is honoured by tokens.css; this is

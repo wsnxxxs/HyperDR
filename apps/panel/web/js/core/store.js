@@ -83,6 +83,10 @@ export const store = createStore({
   uploadProgress: 0,
   /** The settings snapshot a successful run used, for the stale badge. */
   result: null,
+  /** Exports that have been saved out of the workspace, by export id, with the
+   *  file name they were saved under. "Exported" is not "saved": until this
+   *  records it, the file exists only in the session's workspace. */
+  savedExports: {},
   /** The decoder's input domain for the current photo ("display-referred-hdr",
    *  "display-referred-sdr", "scene-referred"), or "" until its first frame.
    *  A fact about the file rather than a setting: it decides what "unchanged"

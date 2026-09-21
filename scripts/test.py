@@ -23,7 +23,11 @@ def panel() -> None:
 
 
 def frontend() -> None:
-    for source in sorted((ROOT / "apps/panel/web/js").rglob("*.js")):
+    # The phone tree is parsed too: it is an ES module that imports the editor's
+    # own modules, so a syntax error there breaks a real front-end.
+    sources = (sorted((ROOT / "apps/panel/web/js").rglob("*.js"))
+               + sorted((ROOT / "apps/panel/web/phone").rglob("*.js")))
+    for source in sources:
         run("node", "--input-type=module", "--check", input=source.read_bytes(),
             label=f"Parse {source.relative_to(ROOT)}")
     for test in sorted((ROOT / "tests/js").glob("*_test.mjs")):

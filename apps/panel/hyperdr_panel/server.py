@@ -125,6 +125,9 @@ def build_server(host: str, port: int, token: str, scheme: str,
         # Absolute source paths are a local desktop capability; never expose
         # that route if a desktop process was deliberately rebound to LAN.
         native_path_input=desktop and loopback,
+        # Saving directly to the user's file system is likewise desktop-only;
+        # the separately bound phone server is built with desktop=False.
+        native_path_output=desktop and loopback,
     )
     return server
 

@@ -10,6 +10,9 @@
 #include "internal/dng_opcodes.hpp"
 #include "internal/metadata.hpp"
 #include "internal/raw.hpp"
+#include "internal/raw_highlights.hpp"
+#include "internal/raw_geometry.hpp"
+#include "internal/raw_sensor_geometry.hpp"
 #include "hyperdr/foundation/version.hpp"
 
 #include <libraw/libraw.h>
@@ -90,7 +93,7 @@ struct LinearizationLut {
 };
 
 struct RawCalibration {
-  std::uint32_t left{}, top{}, width{}, height{};
+  codec::RawSensorGeometry sensor;
   float white{};
   std::array<unsigned, 4> black{};
   std::uint32_t black_rows{}, black_columns{};
@@ -108,6 +111,15 @@ struct RawCallbackContext {
   float exposure_gain{1.0F};
   // The white-balance multipliers LibRaw applied, in its channel order.
   std::array<float, 4> applied_multipliers{};
+  bool blend_highlights{};
+  bool reconstruct_highlights{};
+  FloatImage camera;
+  codec::RawOutputGeometry geometry;
+  unsigned shading_channels{}, shading_step{1}, cfa_period{};
+  std::array<unsigned, 4> shading_planes{};
+  // Preserve CFA phase before pre_interpolate merges green indices or clears
+  // filters for half-size output. LibRaw uses a 6x6 X-Trans or up to 16x16 CFA.
+  std::array<std::uint8_t, 256> shading_cfa{};
   std::vector<std::uint16_t>* captured_mosaic{};
   std::uint32_t* captured_width{};
   std::uint32_t* captured_height{};
@@ -152,6 +164,13 @@ class CallbackLibRaw : public LibRaw {
   void set_pre_converttorgb_callback(process_step_callback callback) {
     callbacks.pre_converttorgb_cb = callback;
   }
+  void set_post_interpolate_callback(process_step_callback callback) {
+    callbacks.post_interpolate_cb = callback;
+  }
+  void apply_default_median_filter() {
+    if (!imgdata.idata.is_foveon && imgdata.idata.colors == 3 && imgdata.params.med_passes > 0)
+      median_filter();
+  }
   void normalized_black_levels(RawCalibration& calibration) {
     const auto saved_black = imgdata.color.black;
     std::array<unsigned, LIBRAW_CBLACK_SIZE> saved{};
@@ -168,6 +187,17 @@ class CallbackLibRaw : public LibRaw {
   }
   unsigned sample_step() const {
     return 1U << libraw_internal_data.internal_output_params.shrink;
+  }
+  codec::RawSensorGeometry sensor_geometry() const {
+    const auto& s = imgdata.sizes;
+    return codec::raw_sensor_geometry(s.width, s.height, s.raw_width, s.raw_height,
+        s.left_margin, s.top_margin, libraw_internal_data.internal_output_params.fuji_width,
+        libraw_internal_data.unpacker_data.fuji_layout != 0);
+  }
+  int working_color(int row, int col) {
+    // COLOR() expects storage coordinates on Fuji; raw2image uses FC() for
+    // its already rearranged working raster.
+    return libraw_internal_data.internal_output_params.fuji_width ? FC(row, col) : COLOR(row, col);
   }
   // Where the camera matrix in rgb_cam came from. Read after unpack(), which
   // can still drop the matrix for some formats, and before dcraw_process():
@@ -455,9 +485,59 @@ std::uint32_t lsc_channel_for_cfa(const LibRaw& raw, std::uint32_t c,
   return 1;
 }
 
+// Supporting vertices bound every bilinear sample in the effective crop.
+// Use the same range for both constant-gain detection and integer headroom;
+// unused vertices must not reduce the precision of a nonconstant crop.
+std::pair<float, float> lens_shading_gain_range(const LensShadingMap& map,
+                                               const RawCalibration& calibration,
+                                               LibRaw& raw) {
+  if (raw.is_fuji_rotated()) {
+    // The diamond raster covers the original storage rectangle; its blank
+    // corners are not a rectangular crop in calibration coordinates.
+    const auto [low, high] = std::minmax_element(map.gains.begin(), map.gains.end());
+    return {*low, *high};
+  }
+  const auto& sizes = raw.imgdata.sizes;
+  const auto bounds = [](unsigned offset, unsigned length, unsigned extent,
+                         unsigned points) {
+    // Match bilinear_gain's float coordinates so a rounded boundary cannot
+    // sample a neighbour omitted by an idealized double-precision bound.
+    const auto coordinate = [&](unsigned site) {
+      const float position = extent > 1 ? static_cast<float>(site) / (extent - 1) : 0;
+      return std::clamp(position, 0.0F, 1.0F) * (points - 1);
+    };
+    return std::pair<unsigned, unsigned>{
+        static_cast<unsigned>(std::floor(coordinate(offset))),
+        static_cast<unsigned>(std::ceil(coordinate(offset + length - 1)))};
+  };
+  const auto [x0, x1] = bounds(sizes.left_margin - calibration.sensor.left,
+                              sizes.width, calibration.sensor.width, map.width);
+  const auto [y0, y1] = bounds(sizes.top_margin - calibration.sensor.top,
+                              sizes.height, calibration.sensor.height, map.height);
+  float low = map.gains[(static_cast<std::size_t>(y0) * map.width + x0) * map.channels];
+  float high = low;
+  for (unsigned y = y0; y <= y1; ++y)
+    for (unsigned x = x0; x <= x1; ++x)
+      for (unsigned c = 0; c < map.channels; ++c) {
+        const float gain = map.gains[(static_cast<std::size_t>(y) * map.width + x) * map.channels + c];
+        low = std::min(low, gain);
+        high = std::max(high, gain);
+      }
+  return {low, high};
+}
+
 // Coordinates remain relative to the original visible sensor area, even when
 // LibRaw has cropped the image or packed four sites into one half-size pixel.
-std::pair<unsigned, unsigned> calibration_site(CallbackLibRaw& raw,
+std::pair<int, int> calibration_working_site(const LibRaw& raw,
+                                            const RawCalibration& calibration,
+                                            unsigned x, unsigned y) {
+  const auto [sx, sy] = codec::raw_sensor_site(calibration.sensor,
+                                              static_cast<int>(x), static_cast<int>(y));
+  return {static_cast<int>(raw.imgdata.sizes.left_margin) - static_cast<int>(calibration.sensor.left) + sx,
+          static_cast<int>(raw.imgdata.sizes.top_margin) - static_cast<int>(calibration.sensor.top) + sy};
+}
+
+std::pair<int, int> calibration_site(CallbackLibRaw& raw,
                                                const RawCalibration& calibration,
                                                unsigned x, unsigned y, unsigned c) {
   const auto step = raw.sample_step();
@@ -465,13 +545,12 @@ std::pair<unsigned, unsigned> calibration_site(CallbackLibRaw& raw,
   if (step == 2) {
     for (unsigned sy = 0; sy < 2; ++sy)
       for (unsigned sx = 0; sx < 2; ++sx)
-        if (raw.COLOR(y * 2 + sy, x * 2 + sx) == static_cast<int>(c)) {
+        if (raw.working_color(y * 2 + sy, x * 2 + sx) == static_cast<int>(c)) {
           dx = sx;
           dy = sy;
         }
   }
-  return {raw.imgdata.sizes.left_margin - calibration.left + x * step + dx,
-          raw.imgdata.sizes.top_margin - calibration.top + y * step + dy};
+  return calibration_working_site(raw, calibration, x * step + dx, y * step + dy);
 }
 
 void apply_lens_shading_to_mosaic(CallbackLibRaw& raw, const LensShadingMap& map,
@@ -479,7 +558,7 @@ void apply_lens_shading_to_mosaic(CallbackLibRaw& raw, const LensShadingMap& map
   if (!raw.imgdata.image || map.gains.empty()) return;
   const auto width = static_cast<std::uint32_t>(raw.imgdata.sizes.iwidth);
   const auto height = static_cast<std::uint32_t>(raw.imgdata.sizes.iheight);
-  for (std::uint32_t y = 0; y < height; ++y) {
+  parallel_for_rows(height, [&](std::uint32_t y) {
     for (std::uint32_t x = 0; x < width; ++x) {
       auto& pixel = raw.imgdata.image[static_cast<std::size_t>(y) * width + x];
       for (std::uint32_t c = 0; c < 4; ++c) {
@@ -487,8 +566,8 @@ void apply_lens_shading_to_mosaic(CallbackLibRaw& raw, const LensShadingMap& map
         const auto [sx, sy] = calibration_site(raw, calibration, x, y, c);
         const auto plane = lsc_channel_for_cfa(raw, c, map.channels);
         const float gain = bilinear_gain(
-            map, calibration.width > 1 ? static_cast<float>(sx) / (calibration.width - 1U) : 0.0F,
-            calibration.height > 1 ? static_cast<float>(sy) / (calibration.height - 1U) : 0.0F,
+            map, calibration.sensor.width > 1 ? static_cast<float>(sx) / (calibration.sensor.width - 1U) : 0.0F,
+            calibration.sensor.height > 1 ? static_cast<float>(sy) / (calibration.sensor.height - 1U) : 0.0F,
             plane);
         // Never amplify an integer sample here. Restore the common scale in
         // float after LibRaw, preserving the headroom requested by the map.
@@ -497,7 +576,7 @@ void apply_lens_shading_to_mosaic(CallbackLibRaw& raw, const LensShadingMap& map
             std::clamp<long>(corrected, 0L, 65535L));
       }
     }
-  }
+  });
 }
 
 void raw_pre_preinterpolate_callback(void* object) {
@@ -516,6 +595,21 @@ void raw_pre_preinterpolate_callback(void* object) {
       context->exposure_gain = high / low;
   }
   if (context->lens_shading != nullptr) {
+    if (context->blend_highlights || context->reconstruct_highlights) {
+      context->shading_channels = raw->imgdata.idata.colors;
+      if (raw->imgdata.idata.filters && raw->imgdata.idata.filters != 9 &&
+          context->shading_channels == 3)
+        context->shading_channels = 4;
+      context->shading_step = raw->sample_step();
+      context->cfa_period = raw->imgdata.idata.filters == 9 ? 6 : 16;
+      for (unsigned c = 0; c < context->shading_channels; ++c)
+        context->shading_planes[c] = lsc_channel_for_cfa(*raw, c, context->lens_shading->channels);
+      if (context->shading_step == 2)
+        for (unsigned y = 0; y < context->cfa_period; ++y)
+          for (unsigned x = 0; x < context->cfa_period; ++x)
+            context->shading_cfa[y * context->cfa_period + x] =
+                static_cast<std::uint8_t>(raw->working_color(y, x));
+    }
     apply_lens_shading_to_mosaic(
         *raw, *context->lens_shading, *context->calibration, context->lens_shading_scale);
   }
@@ -602,16 +696,12 @@ std::vector<std::uint16_t> read_dark_frame(const std::filesystem::path& path,
 RawCalibration prepare_calibration(CallbackLibRaw& raw, const LinearizationLut& lut,
                                     const RawDecodeOptions& options,
                                     std::vector<codec::DngGainMap> gain_maps) {
-  const auto& sizes = raw.imgdata.sizes;
   RawCalibration calibration;
-  calibration.left = sizes.left_margin;
-  calibration.top = sizes.top_margin;
-  calibration.width = sizes.width;
-  calibration.height = sizes.height;
+  calibration.sensor = raw.sensor_geometry();
   calibration.white = std::max(1.0F, raw_white_level(raw));
   calibration.lut = &lut;
   raw.normalized_black_levels(calibration);
-  calibration.dark = read_dark_frame(options.dark_frame, sizes.width, sizes.height);
+  calibration.dark = read_dark_frame(options.dark_frame, calibration.sensor.width, calibration.sensor.height);
   calibration.gain_maps = std::move(gain_maps);
   return calibration;
 }
@@ -664,12 +754,12 @@ void apply_code_calibration(CallbackLibRaw& raw, const RawCalibration& calibrati
   std::vector<GainAxes> axes(calibration.gain_maps.size());
   for (std::size_t i = 0; i < axes.size(); ++i) {
     const auto& map = calibration.gain_maps[i];
-    axes[i].rows.resize(calibration.height);
-    axes[i].columns.resize(calibration.width);
-    for (unsigned y = 0; y < calibration.height; ++y)
-      axes[i].rows[y] = codec::dng_gain_axis(y, calibration.height, map.origin_v, map.spacing_v, map.points_v);
-    for (unsigned x = 0; x < calibration.width; ++x)
-      axes[i].columns[x] = codec::dng_gain_axis(x, calibration.width, map.origin_h, map.spacing_h, map.points_h);
+    axes[i].rows.resize(calibration.sensor.height);
+    axes[i].columns.resize(calibration.sensor.width);
+    for (unsigned y = 0; y < calibration.sensor.height; ++y)
+      axes[i].rows[y] = codec::dng_gain_axis(y, calibration.sensor.height, map.origin_v, map.spacing_v, map.points_v);
+    for (unsigned x = 0; x < calibration.sensor.width; ++x)
+      axes[i].columns[x] = codec::dng_gain_axis(x, calibration.sensor.width, map.origin_h, map.spacing_h, map.points_h);
   }
   const auto corrected = [&](std::uint16_t value, unsigned x, unsigned y, unsigned c, unsigned plane) {
     float black = static_cast<float>(calibration.black[c]);
@@ -682,7 +772,7 @@ void apply_code_calibration(CallbackLibRaw& raw, const RawCalibration& calibrati
     if (!(range > 0.0F))
       throw std::invalid_argument("RAW linearization LUT leaves no range above the black level");
     const float baseline = calibration.dark.empty() ? mapped_black :
-        linearized_code(calibration.dark[static_cast<std::size_t>(y) * calibration.width + x],
+        linearized_code(calibration.dark[static_cast<std::size_t>(y) * calibration.sensor.width + x],
                         calibration);
     float signal =
         std::clamp((linearized_code(value, calibration) - baseline) / range, 0.0F, 1.0F);
@@ -696,14 +786,14 @@ void apply_code_calibration(CallbackLibRaw& raw, const RawCalibration& calibrati
     }
     return static_cast<std::uint16_t>(std::lround(std::clamp(signal, 0.0F, 1.0F) * 65535.0F));
   };
-  for (unsigned y = 0; y < calibration.height; ++y) {
-    for (unsigned x = 0; x < calibration.width; ++x) {
-      const auto row_bytes = static_cast<std::size_t>(y + calibration.top) * data.sizes.raw_pitch;
+  for (unsigned y = 0; y < calibration.sensor.height; ++y) {
+    for (unsigned x = 0; x < calibration.sensor.width; ++x) {
+      const auto row_bytes = static_cast<std::size_t>(y + calibration.sensor.top) * data.sizes.raw_pitch;
       if (data.raw_image) {
-        auto& value = data.raw_image[row_bytes / 2 + x + calibration.left];
+        auto& value = data.raw_image[row_bytes / 2 + x + calibration.sensor.left];
         value = corrected(value, x, y, raw.COLOR(y, x), 0);
       } else {
-        auto& value = data.color4_image[row_bytes / 8 + x + calibration.left];
+        auto& value = data.color4_image[row_bytes / 8 + x + calibration.sensor.left];
         for (unsigned c = 0; c < 4; ++c) value[c] = corrected(value[c], x, y, c, c);
       }
     }
@@ -719,7 +809,7 @@ void apply_code_calibration(CallbackLibRaw& raw, const RawCalibration& calibrati
   raw.imgdata.params.adjust_maximum_thr = 0.0F;
 }
 
-void apply_bad_pixel_map(LibRaw& raw, const std::filesystem::path& path) {
+void apply_bad_pixel_map(CallbackLibRaw& raw, const std::filesystem::path& path) {
   if (path.empty()) return;
   auto& data = raw.imgdata.rawdata;
   if (!data.raw_image || !raw.imgdata.idata.filters)
@@ -727,6 +817,7 @@ void apply_bad_pixel_map(LibRaw& raw, const std::filesystem::path& path) {
   std::ifstream input(path);
   if (!input) throw std::invalid_argument("cannot read RAW bad-pixel map");
   const auto& sizes = data.sizes;
+  const auto sensor = raw.sensor_geometry();
   const auto sample = [&](unsigned x, unsigned y) -> std::uint16_t& {
     return data.raw_image[static_cast<std::size_t>(y + sizes.top_margin) *
                           (sizes.raw_pitch / 2) + x + sizes.left_margin];
@@ -741,14 +832,14 @@ void apply_bad_pixel_map(LibRaw& raw, const std::filesystem::path& path) {
     long long timestamp;
     if (!(row >> x >> y >> timestamp))
       throw std::invalid_argument("RAW bad-pixel map requires x y timestamp rows");
-    if (x < 0 || y < 0 || x >= sizes.width || y >= sizes.height ||
+    if (x < 0 || y < 0 || static_cast<unsigned>(x) >= sensor.width || static_cast<unsigned>(y) >= sensor.height ||
         timestamp > raw.imgdata.other.timestamp) continue;
     const auto c = raw.COLOR(y, x);
     unsigned sum = 0, count = 0;
     for (int radius = 1; radius <= 2 && count == 0; ++radius) {
       for (int sy = y - radius; sy <= y + radius; ++sy)
         for (int sx = x - radius; sx <= x + radius; ++sx)
-          if (sx >= 0 && sy >= 0 && sx < sizes.width && sy < sizes.height &&
+          if (sx >= 0 && sy >= 0 && static_cast<unsigned>(sx) < sensor.width && static_cast<unsigned>(sy) < sensor.height &&
               (sx != x || sy != y) && raw.COLOR(sy, sx) == c) {
             sum += sample(sx, sy);
             ++count;
@@ -758,7 +849,7 @@ void apply_bad_pixel_map(LibRaw& raw, const std::filesystem::path& path) {
   }
 }
 
-void correct_auto_bad_pixels(LibRaw& raw) {
+void correct_auto_bad_pixels(CallbackLibRaw& raw) {
   if (raw.imgdata.rawdata.raw_image == nullptr) {
     throw std::runtime_error(
         "automatic RAW bad-pixel correction requires a Bayer buffer");
@@ -768,8 +859,9 @@ void correct_auto_bad_pixels(LibRaw& raw) {
         "automatic RAW bad-pixel correction supports Bayer RAW only");
   }
   const auto& sizes = raw.imgdata.rawdata.sizes;
-  const auto width = static_cast<std::uint32_t>(sizes.width);
-  const auto height = static_cast<std::uint32_t>(sizes.height);
+  const auto sensor = raw.sensor_geometry();
+  const auto width = sensor.width;
+  const auto height = sensor.height;
   const auto left = static_cast<std::uint32_t>(sizes.left_margin);
   const auto top = static_cast<std::uint32_t>(sizes.top_margin);
   const auto row_stride = std::max<std::uint32_t>(
@@ -781,8 +873,13 @@ void correct_auto_bad_pixels(LibRaw& raw) {
   }
   auto& pixels = raw.imgdata.rawdata.raw_image;
   std::array<std::uint16_t, 4> neighbours{};
-  for (std::uint32_t y = 2; y + 2 < height; ++y) {
-    for (std::uint32_t x = 2; x + 2 < width; ++x) {
+  // In a Fuji storage rectangle one axis is packed twice as densely. A
+  // two-site displacement there changes red to blue (or the green plane);
+  // four sites are needed to reach the same CFA phase.
+  const unsigned dx = sensor.fuji_width && !sensor.fuji_layout ? 4 : 2;
+  const unsigned dy = sensor.fuji_width && sensor.fuji_layout ? 4 : 2;
+  for (std::uint32_t y = dy; y + dy < height; ++y) {
+    for (std::uint32_t x = dx; x + dx < width; ++x) {
       const auto sensor_y = y + top;
       const auto sensor_x = x + left;
       const auto c = raw.COLOR(static_cast<int>(y), static_cast<int>(x));
@@ -792,7 +889,7 @@ void correct_auto_bad_pixels(LibRaw& raw) {
         return raw.COLOR(static_cast<int>(ny), static_cast<int>(nx)) == c;
       };
       const std::array<std::pair<std::uint32_t, std::uint32_t>, 4> positions{{
-          {x - 2U, y}, {x + 2U, y}, {x, y - 2U}, {x, y + 2U}}};
+          {x - dx, y}, {x + dx, y}, {x, y - dy}, {x, y + dy}}};
       std::size_t count = 0;
       for (const auto [nx, ny] : positions) {
         if (!same_colour(nx, ny)) continue;
@@ -813,7 +910,7 @@ void correct_auto_bad_pixels(LibRaw& raw) {
 
 BayerPattern detect_bayer_pattern(LibRaw& raw, std::uint32_t width,
                                    std::uint32_t height) {
-  if (width < 2 || height < 2 || raw.imgdata.idata.filters <= 1000) {
+  if (width < 2 || height < 2 || raw.imgdata.idata.filters <= 1000 || raw.is_fuji_rotated()) {
     return BayerPattern::Unknown;
   }
   const auto role = [&](std::uint32_t x, std::uint32_t y) {
@@ -850,6 +947,77 @@ RawLensMetadata probe_raw_lens_metadata(const std::filesystem::path& path) {
           raw.imgdata.other.aperture};
 }
 
+std::array<float, 4> raw_clip_references(const CallbackLibRaw& raw,
+                                        const RawCallbackContext& context,
+                                        unsigned x, unsigned y) {
+  std::array<float, 4> clip{};
+  for (unsigned c = 0; c < 4; ++c) clip[c] = 65535.0F * context.applied_multipliers[c];
+  if (!context.lens_shading) return clip;
+  const auto& calibration = *context.calibration;
+  for (unsigned c = 0; c < context.shading_channels; ++c) {
+    unsigned dx = 0, dy = 0;
+    if (context.shading_step == 2)
+      for (unsigned sy = 0; sy < 2; ++sy)
+        for (unsigned sx = 0; sx < 2; ++sx)
+          if (context.shading_cfa[((y * 2 + sy) % context.cfa_period) * context.cfa_period +
+                                  (x * 2 + sx) % context.cfa_period] == c) {
+            dx = sx; dy = sy;
+          }
+    const auto [sx, sy] = calibration_working_site(raw, calibration,
+        x * context.shading_step + dx, y * context.shading_step + dy);
+    const float gain = bilinear_gain(*context.lens_shading,
+        calibration.sensor.width > 1 ? static_cast<float>(sx) / (calibration.sensor.width - 1U) : 0.0F,
+        calibration.sensor.height > 1 ? static_cast<float>(sy) / (calibration.sensor.height - 1U) : 0.0F,
+        context.shading_planes[c]);
+    clip[c] *= gain / context.lens_shading_scale;
+  }
+  // A mixed green uses the earliest of its two sensor clip references, for
+  // both seeding and restoration. This does not undo the mixed sensor values.
+  if (raw.imgdata.idata.colors == 3 && context.shading_channels == 4)
+    clip[1] = std::min(clip[1], clip[3]);
+  return clip;
+}
+
+void raw_highlights_after_interpolate_callback(void* object) {
+  auto& raw = *static_cast<CallbackLibRaw*>(object);
+  auto& context = *current_raw_callback_context;
+  raw.apply_default_median_filter();
+  const unsigned channels = raw.imgdata.idata.colors;
+  if (channels < 3 || channels > 4) return;
+  const auto width = static_cast<unsigned>(raw.imgdata.sizes.width);
+  const auto height = static_cast<unsigned>(raw.imgdata.sizes.height);
+  context.geometry = {static_cast<unsigned>(raw.is_fuji_rotated()), raw.sample_step(),
+                      raw.imgdata.sizes.pixel_aspect, raw.imgdata.sizes.flip};
+  context.camera = FloatImage(width, height, channels);
+  parallel_for_rows(height, [&](unsigned y) {
+    for (unsigned x = 0; x < width; ++x) {
+      const auto i = static_cast<std::size_t>(y) * width + x;
+      for (unsigned c = 0; c < channels; ++c)
+        context.camera.pixels[i * channels + c] = raw.imgdata.image[i][c];
+    }
+  });
+  if (context.reconstruct_highlights) {
+    std::array<float, 4> base_clip{};
+    for (unsigned c = 0; c < 4; ++c) base_clip[c] = 65535.0F * context.applied_multipliers[c];
+    codec::reconstruct_highlight_channels(context.camera, 4U / raw.sample_step(), base_clip,
+        [&](unsigned x, unsigned y) { return raw_clip_references(raw, context, x, y); });
+    return;
+  }
+  if (!context.blend_highlights) return;
+  parallel_for_rows(height, [&](unsigned y) {
+    for (unsigned x = 0; x < width; ++x) {
+      const auto references = raw_clip_references(raw, context, x, y);
+      const float clip = *std::min_element(references.begin(), references.begin() + channels);
+      auto* pixel = context.camera.pixels.data() + (static_cast<std::size_t>(y) * width + x) * channels;
+      std::array<float, 4> camera{};
+      for (unsigned c = 0; c < channels; ++c) camera[c] = pixel[c];
+      codec::blend_highlight_chroma(camera, channels, clip);
+      for (unsigned c = 0; c < channels; ++c)
+        pixel[c] = camera[c];
+    }
+  });
+}
+
 namespace codec {
 
 DecodedImage decode_raw(const std::filesystem::path& path,
@@ -867,6 +1035,7 @@ DecodedImage decode_raw(const std::filesystem::path& path,
   params.use_auto_wb = 0;
   params.use_camera_matrix = 1;
   params.no_auto_bright = 1;
+  params.bright = 1.0F;
   params.output_bps = 16;
   params.half_size = options.half_size ? 1 : 0;
   // Camera RGB, no matrix. LibRaw applies an output matrix in 16-bit integers,
@@ -877,11 +1046,16 @@ DecodedImage decode_raw(const std::filesystem::path& path,
   params.gamm[0] = 1.0;
   params.gamm[1] = 1.0;
   params.use_p1_correction = 1;
+  // Complete geometry on float camera samples after LibRaw. Its integer output
+  // would clip reconstructed highlights and truncate interpolation fractions.
+  params.use_fuji_rotate = 0;
   switch (options.highlight_recovery) {
     case HighlightRecovery::Clip: params.highlight = 0; break;
     case HighlightRecovery::Unclip: params.highlight = 1; break;
-    case HighlightRecovery::Blend: params.highlight = 2; break;
-    case HighlightRecovery::Reconstruct: params.highlight = 3; break;
+    // Keep LibRaw's highlight-preserving WB scale, then recover in our callback
+    // with local calibrated clip references instead of fixed thresholds.
+    case HighlightRecovery::Blend: params.highlight = 1; break;
+    case HighlightRecovery::Reconstruct: params.highlight = 1; break;
   }
   // Correct channel overflow before demosaic; this is specifically intended to
   // prevent artefacts such as magenta clouds.
@@ -1012,41 +1186,41 @@ DecodedImage decode_raw(const std::filesystem::path& path,
   }
 #endif
 #endif
+  const auto cropped_sensor = raw.sensor_geometry();
   if ((!linearization_lut.samples.empty() || !calibration.dark.empty() ||
        !calibration.gain_maps.empty() || !lens_shading.gains.empty()) &&
-      (sizes.left_margin < calibration.left || sizes.top_margin < calibration.top ||
-       static_cast<unsigned>(sizes.left_margin) + sizes.width > calibration.left + calibration.width ||
-       static_cast<unsigned>(sizes.top_margin) + sizes.height > calibration.top + calibration.height)) {
+      (cropped_sensor.left < calibration.sensor.left || cropped_sensor.top < calibration.sensor.top ||
+       cropped_sensor.left + cropped_sensor.width > calibration.sensor.left + calibration.sensor.width ||
+       cropped_sensor.top + cropped_sensor.height > calibration.sensor.top + calibration.sensor.height)) {
     throw std::invalid_argument("RAW crop extends outside the calibration's original visible area");
   }
   RawCallbackContext callback_context;
+  callback_context.blend_highlights = options.highlight_recovery == HighlightRecovery::Blend;
+  callback_context.reconstruct_highlights = options.highlight_recovery == HighlightRecovery::Reconstruct;
   callback_context.calibration = &calibration;
   callback_context.lens_shading = lens_shading.gains.empty() ? nullptr : &lens_shading;
-  if (!lens_shading.gains.empty())
-    callback_context.lens_shading_scale =
-        std::max(1.0F, *std::max_element(lens_shading.gains.begin(), lens_shading.gains.end()));
+  if (!lens_shading.gains.empty()) {
+    const auto [low, high] = lens_shading_gain_range(lens_shading, calibration, raw);
+    if (low == high) {
+      // A common gain commutes with demosaic and belongs in float. Attenuating
+      // the integer mosaic would hide saturation from LibRaw's fixed thresholds.
+      callback_context.lens_shading = nullptr;
+      callback_context.lens_shading_scale = low;
+    } else {
+      callback_context.lens_shading_scale = std::max(1.0F, high);
+    }
+  }
   {
     RawCallbackScope callback_scope(callback_context);
     raw.set_pre_preinterpolate_callback(raw_pre_preinterpolate_callback);
+    raw.set_post_interpolate_callback(raw_highlights_after_interpolate_callback);
     check_raw(raw.dcraw_process(), "LibRaw demosaic");
   }
   const float exposure_gain = callback_context.exposure_gain * callback_context.lens_shading_scale;
-  int error = 0;
-  std::unique_ptr<libraw_processed_image_t, decltype(&LibRaw::dcraw_clear_mem)>
-      processed(raw.dcraw_make_mem_image(&error), &LibRaw::dcraw_clear_mem);
-  check_raw(error, "LibRaw memory image");
-  if (!processed) {
-    throw RawMemoryError(
-        "LibRaw memory image: insufficient memory for processed RAW pixels");
-  }
-  // Without an output matrix a four-colour sensor keeps all four channels.
-  if (processed->type != LIBRAW_IMAGE_BITMAP || processed->colors < 3 ||
-      processed->colors > 4 || processed->bits != 16)
-    throw std::runtime_error("LibRaw did not return a 16-bit RGB bitmap");
+  if (callback_context.camera.pixels.empty())
+    throw std::runtime_error("LibRaw did not expose a three- or four-channel camera raster");
 
   DecodedImage result;
-  decode.decoded_width = processed->width;
-  decode.decoded_height = processed->height;
   decode.delivered_crop_left = raw.imgdata.sizes.left_margin;
   decode.delivered_crop_top = raw.imgdata.sizes.top_margin;
   result.decode = std::move(decode);
@@ -1067,8 +1241,7 @@ DecodedImage decode_raw(const std::filesystem::path& path,
     result.raw_white_balance = "daylight";
   }
   result.raw_color_matrix = color_matrix;
-  result.linear_p3 = FloatImage(processed->width, processed->height, 3);
-  const auto* pixels = reinterpret_cast<const std::uint16_t*>(processed->data);
+  result.linear_p3 = std::move(callback_context.camera);
   const auto dng_matrix = color_matrix == "embedded"
                               ? dng_camera_matrix(raw, callback_context.applied_multipliers)
                               : std::nullopt;
@@ -1110,49 +1283,10 @@ DecodedImage decode_raw(const std::filesystem::path& path,
   }
   const auto columns = camera_to_ap1_columns(raw, color_matrix != "none", dng_matrix);
   const float scale = exposure_gain * options.digital_gain / 65535.0F;
-  const auto channels = static_cast<std::size_t>(processed->colors);
+  const auto channels = static_cast<std::size_t>(result.linear_p3.channels);
   // Camera RGB is never negative, so these limits cover every colour this
   // camera's matrix can produce.
   const auto compression = gamut_compression_scales(gamut_compression_limits(columns, channels));
-  parallel_for_rows(processed->height, [&](const std::uint32_t y) {
-    const auto row_start = static_cast<std::size_t>(y) * processed->width;
-    for (std::uint32_t x = 0; x < processed->width; ++x) {
-      const auto output_index = row_start + x;
-      const auto input_index = output_index * channels;
-      std::array<float, 4> camera{};
-      for (std::size_t c = 0; c < channels; ++c) {
-        camera[c] = pixels[input_index + c] * scale;
-      }
-      if (profile_transform) {
-        // Preserve scene values outside P3 for DCP development in ProPhoto.
-        // The existing native gamut compressor is intentionally after this branch.
-        for (unsigned i = 0; i < 3; ++i) {
-          const auto& row = profile_transform->camera_to_p3[i];
-          result.linear_p3.pixels[output_index * 3 + i] = static_cast<float>(
-              row[0] * camera[0] + row[1] * camera[1] + row[2] * camera[2]);
-        }
-        continue;
-      }
-      // A camera matrix extrapolates some saturated colours past the spectral
-      // locus. Narrow-band blue light lands at zero or negative luminance
-      // there, which the renderer shows as black, and clamping the negative
-      // components (as LibRaw's integer output did at ProPhoto's boundary)
-      // leaves it nearly black with its hue shifted. Compression instead pulls
-      // components that reach past P3 toward the largest one, so every camera
-      // colour ends inside AP1 and colours inside P3 are untouched. Values
-      // above one are highlight headroom and pass through.
-      std::array<float, 3> ap1{};
-      for (std::size_t i = 0; i < 3; ++i) {
-        ap1[i] = columns[0][i] * camera[0] + columns[1][i] * camera[1] +
-                 columns[2][i] * camera[2] + columns[3][i] * camera[3];
-      }
-      const auto inside = compress_gamut(ap1[0], ap1[1], ap1[2], compression);
-      const auto p3 = ap1_d65_to_linear_p3(inside[0], inside[1], inside[2]);
-      result.linear_p3.pixels[output_index * 3] = p3[0];
-      result.linear_p3.pixels[output_index * 3 + 1] = p3[1];
-      result.linear_p3.pixels[output_index * 3 + 2] = p3[2];
-    }
-  });
 
   const auto& other = raw.imgdata.other;
   result.metadata.make = safe_string(raw.imgdata.idata.make);
@@ -1248,10 +1382,62 @@ DecodedImage decode_raw(const std::filesystem::path& path,
 #endif
 #endif
   const int sensor_flip = raw.imgdata.sizes.flip;
-  // All pixels and metadata have been copied out. Release LibRaw's mosaic,
-  // working bitmap and 16-bit output before LCP allocates a float destination.
-  processed.reset();
+  // All metadata and camera coefficients have been copied. Release LibRaw
+  // before float geometry allocates a destination, keeping two image buffers
+  // as the maximum geometry working set.
   raw.recycle();
+  result.linear_p3 = apply_raw_output_geometry(std::move(result.linear_p3), callback_context.geometry);
+  result.decode.decoded_width = result.linear_p3.width;
+  result.decode.decoded_height = result.linear_p3.height;
+  parallel_for_rows(result.linear_p3.height, [&](const std::uint32_t y) {
+    const auto row_start = static_cast<std::size_t>(y) * result.linear_p3.width;
+    for (std::uint32_t x = 0; x < result.linear_p3.width; ++x) {
+      const auto output_index = row_start + x;
+      const auto input_index = output_index * channels;
+      std::array<float, 4> camera{};
+      for (std::size_t c = 0; c < channels; ++c) {
+        camera[c] = result.linear_p3.pixels[input_index + c] * scale;
+      }
+      if (profile_transform) {
+        // Preserve scene values outside P3 for DCP development in ProPhoto.
+        // The existing native gamut compressor is intentionally after this branch.
+        for (unsigned i = 0; i < 3; ++i) {
+          const auto& row = profile_transform->camera_to_p3[i];
+          result.linear_p3.pixels[output_index * channels + i] = static_cast<float>(
+              row[0] * camera[0] + row[1] * camera[1] + row[2] * camera[2]);
+        }
+        continue;
+      }
+      // A camera matrix extrapolates some saturated colours past the spectral
+      // locus. Narrow-band blue light lands at zero or negative luminance
+      // there, which the renderer shows as black, and clamping the negative
+      // components (as LibRaw's integer output did at ProPhoto's boundary)
+      // leaves it nearly black with its hue shifted. Compression instead pulls
+      // components that reach past P3 toward the largest one, so every camera
+      // colour ends inside AP1 and colours inside P3 are untouched. Values
+      // above one are highlight headroom and pass through.
+      std::array<float, 3> ap1{};
+      for (std::size_t i = 0; i < 3; ++i) {
+        ap1[i] = columns[0][i] * camera[0] + columns[1][i] * camera[1] +
+                 columns[2][i] * camera[2] + columns[3][i] * camera[3];
+      }
+      const auto inside = compress_gamut(ap1[0], ap1[1], ap1[2], compression);
+      const auto p3 = ap1_d65_to_linear_p3(inside[0], inside[1], inside[2]);
+      result.linear_p3.pixels[output_index * channels] = p3[0];
+      result.linear_p3.pixels[output_index * channels + 1] = p3[1];
+      result.linear_p3.pixels[output_index * channels + 2] = p3[2];
+    }
+  });
+  if (channels == 4) {
+    // Compact only after all parallel pixel transforms finish. Four-to-three
+    // compaction during row processing would overwrite another row's input.
+    const auto count = static_cast<std::size_t>(result.linear_p3.width) * result.linear_p3.height;
+    for (std::size_t i = 0; i < count; ++i)
+      for (unsigned c = 0; c < 3; ++c)
+        result.linear_p3.pixels[i * 3 + c] = result.linear_p3.pixels[i * 4 + c];
+    result.linear_p3.channels = 3;
+    result.linear_p3.pixels.resize(count * 3);
+  }
   if (!options.lens_profile.empty()) {
     auto profile = read_lens_profile(options.lens_profile);
     // An embedded gain map has already calibrated this RAW's lens shading.
@@ -1261,7 +1447,7 @@ DecodedImage decode_raw(const std::filesystem::path& path,
         result.metadata.focal_length_mm, result.metadata.aperture, sensor_flip);
     result.raw_lens_profile_path = std::filesystem::absolute(options.lens_profile);
   }
-  // LibRaw applies the sensor orientation while rendering, so the encoded pixels are top-left.
+  // Float output geometry has applied the sensor orientation; encoded pixels are top-left.
   result.metadata.orientation = 1;
   return result;
 }
@@ -1322,22 +1508,21 @@ RawMosaic decode_raw_mosaic(const std::filesystem::path& path,
   std::vector<std::uint16_t> captured;
   std::uint32_t captured_width = 0;
   std::uint32_t captured_height = 0;
-  RawCallbackContext callback_context;
-  callback_context.lens_shading = lens_shading.gains.empty() ? nullptr
-                                                               : &lens_shading;
-  callback_context.calibration = &calibration;
+  // pre_interpolate() can merge the green channel indices even with
+  // no_interpolation set. Preserve the original CFA calibration plane first.
+  std::array<unsigned, 4> shading_planes{};
   if (!lens_shading.gains.empty())
-    callback_context.lens_shading_scale =
-        std::max(1.0F, *std::max_element(lens_shading.gains.begin(), lens_shading.gains.end()));
+    for (unsigned y = 0; y < 2; ++y)
+      for (unsigned x = 0; x < 2; ++x)
+        shading_planes[y * 2 + x] = lsc_channel_for_cfa(
+            raw, static_cast<unsigned>(raw.COLOR(y, x)), lens_shading.channels);
+  RawCallbackContext callback_context;
   callback_context.captured_mosaic = &captured;
   callback_context.captured_width = &captured_width;
   callback_context.captured_height = &captured_height;
   {
     RawCallbackScope callback_scope(callback_context);
     raw.set_pre_converttorgb_callback(raw_capture_before_rgb_callback);
-    if (callback_context.lens_shading != nullptr) {
-      raw.set_pre_preinterpolate_callback(raw_pre_preinterpolate_callback);
-    }
     check_raw(raw.dcraw_process(), "LibRaw RAW mosaic processing");
   }
   if (captured.empty() || captured_width == 0 || captured_height == 0) {
@@ -1371,9 +1556,19 @@ RawMosaic decode_raw_mosaic(const std::filesystem::path& path,
   for (std::uint32_t y = 0; y < captured_height; ++y) {
     for (std::uint32_t x = 0; x < captured_width; ++x) {
       const auto index = static_cast<std::size_t>(y) * captured_width + x;
+      float shading_gain = 1.0F;
+      if (!lens_shading.gains.empty()) {
+        const auto [sx, sy] = calibration_site(raw, calibration, x, y, 0);
+        shading_gain = bilinear_gain(lens_shading,
+            calibration.sensor.width > 1 ? static_cast<float>(sx) / (calibration.sensor.width - 1U) : 0.0F,
+            calibration.sensor.height > 1 ? static_cast<float>(sy) / (calibration.sensor.height - 1U) : 0.0F,
+            shading_planes[(y % 2) * 2 + x % 2]);
+      }
+      // This path never demosaics: preserve the captured sensor precision and
+      // apply calibration directly in float, without a max-gain round trip.
       result.samples.at(x, y, 0) =
           static_cast<float>(captured[index]) / white * options.digital_gain *
-          callback_context.lens_shading_scale;
+          shading_gain;
     }
   }
   return result;

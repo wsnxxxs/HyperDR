@@ -23,6 +23,7 @@
 #include "hyperdr/gainmap/gain_map.hpp"
 #include "hyperdr/image/color.hpp"
 #include "hyperdr/image/dng_color.hpp"
+#include "../src/internal/raw_highlights.hpp"
 
 #include <algorithm>
 #include <array>
@@ -430,6 +431,83 @@ int main(int argc, char** argv) {
   try {
     write_synthetic_dng(path);
 
+    // Analytic checks on the highlight operation, independent of LibRaw's
+    // integer colour transform and the camera-to-P3 matrix below.
+    for (unsigned channels : {3U, 4U}) {
+      std::array<float, 4> neutral{{60000, 60000, 60000, 60000}};
+      hyperdr::codec::blend_highlight_chroma(neutral, channels, 1000);
+      for (unsigned c = 0; c < channels; ++c)
+        require(neutral[c] == 60000, "neutral highlights became non-finite or lost energy");
+      std::array<float, 4> red{{1, 0, 0, 0}};
+      hyperdr::codec::blend_highlight_chroma(red, channels, 0.5F);
+      float sum = 0;
+      for (unsigned c = 0; c < channels; ++c) {
+        const float expected = 0.5F / channels + (c == 0 ? 0.5F : 0.0F);
+        require(std::abs(red[c] - expected) < 1.0e-7F,
+                "highlight chroma blend differs from its analytic value");
+        sum += red[c];
+      }
+      require(std::abs(sum - 1.0F) < 1.0e-7F, "highlight blending changed the channel mean");
+      std::array<float, 4> edge{{40000, 20000, 10000, 30000}};
+      const auto original_edge = edge;
+      hyperdr::codec::blend_highlight_chroma(edge, channels, 65535);
+      require(edge == original_edge, "unmodified highlight samples lost precision");
+      hyperdr::codec::blend_highlight_chroma(edge, channels, 0.01F);
+      for (unsigned c = 0; c < channels; ++c)
+        require(std::isfinite(edge[c]) && edge[c] >= 10000 && edge[c] <= 40000,
+                "small spatial clip reference overflowed the camera sample range");
+    }
+
+    // A 5x5 raster has four reconstruction blocks at block size four. The
+    // clipped bottom-right pixel receives three seed neighbours, with total
+    // weight five and ratio 1/2. With the neutral prior of weight two its
+    // recovered ratio is (5/2 + 2)/(5 + 2) = 9/14. This pins both partial seed
+    // blocks and restoration of the final pixel, independently of DNG decoding.
+    for (const auto [channels, shading_scale] : {std::pair{3U, 1.0F}, std::pair{4U, 0.25F}}) {
+      hyperdr::FloatImage image(5, 5, channels);
+      const auto pixel = [&](unsigned i, unsigned c) -> float& { return image.pixels[i * channels + c]; };
+      for (unsigned i = 0; i < 25; ++i) {
+        pixel(i, 0) = 30000 * shading_scale;
+        pixel(i, 1) = 15000 * shading_scale;
+        for (unsigned c = 2; c < channels; ++c) pixel(i, c) = 8000 * shading_scale;
+      }
+      pixel(24, 0) = 60000 * shading_scale;
+      pixel(24, 1) = 20000 * shading_scale;
+      const std::array<float, 4> base_clip{{65535, 20000, 40000, 40000}};
+      hyperdr::codec::reconstruct_highlight_channels(image, 4, base_clip,
+          [&](unsigned, unsigned) {
+            auto clip = base_clip;
+            for (auto& value : clip) value *= shading_scale;
+            return clip;
+          });
+      require(std::abs(pixel(24, 1) - 60000.0F * shading_scale * 9.0F / 14.0F) < 0.01F,
+              "partial edge blocks lost the calibrated reconstruction ratio");
+      require(pixel(24, 0) == 60000 * shading_scale && pixel(24, 2) == 8000 * shading_scale &&
+                  pixel(0, 1) == 15000 * shading_scale && pixel(24, channels - 1) == 8000 * shading_scale,
+              "reconstruction changed its reference or an unclipped sample");
+    }
+    hyperdr::FloatImage zero_reference(1, 1, 3);
+    zero_reference.pixels[1] = 1;
+    hyperdr::codec::reconstruct_highlight_channels(zero_reference, 4,
+        std::array<float, 4>{{65535, 20000, 40000, 40000}},
+        [](unsigned, unsigned) { return std::array<float, 4>{{0.01F, 0.001F, 0.01F, 0.01F}}; });
+    require(zero_reference.pixels[1] == 1, "zero reference created a non-finite reconstruction ratio");
+
+    // The same corner construction with a seed ratio of 1.6 predicts 60000 *
+    // (5*1.6+2)/7 = 85714.2857. Preserve that estimate beyond the integer white.
+    hyperdr::FloatImage reconstructed_hdr(5, 5, 3);
+    for (unsigned i = 0; i < 25; ++i) {
+      reconstructed_hdr.pixels[i * 3] = 30000;
+      reconstructed_hdr.pixels[i * 3 + 1] = 48000;
+      reconstructed_hdr.pixels[i * 3 + 2] = 8000;
+    }
+    reconstructed_hdr.at(4, 4, 0) = reconstructed_hdr.at(4, 4, 1) = 60000;
+    const std::array<float, 4> hdr_clip{{65535, 60000, 40000, 40000}};
+    hyperdr::codec::reconstruct_highlight_channels(reconstructed_hdr, 4, hdr_clip,
+        [&](unsigned, unsigned) { return hdr_clip; });
+    require(std::abs(reconstructed_hdr.at(4, 4, 1) - 60000.0F * 10.0F / 7.0F) < 0.01F,
+            "highlight reconstruction clipped its floating-point HDR estimate");
+
     constexpr std::array<std::pair<const char*, hyperdr::HighlightRecovery>, 4> kModes{{
         {"clip", hyperdr::HighlightRecovery::Clip},
         {"unclip", hyperdr::HighlightRecovery::Unclip},
@@ -688,6 +766,118 @@ int main(int argc, char** argv) {
                                hyperdr::decode_image(path, gain_options).linear_p3) < 1.0e-4F,
             "half-size LSC lost highlight headroom");
     lsc_options.half_size = gain_options.half_size = false;
+
+    // The blown disc lies inside a gain=1 plateau, while the same crop also
+    // contains gain=4 at its left edge. A global max must not suppress recovery
+    // inside the plateau just because another region needs more correction.
+    std::string plateau_map = "96 80 1\n";
+    for (unsigned y = 0; y < kHeight; ++y)
+      for (unsigned x = 0; x < kWidth; ++x)
+        plateau_map += x < 20 ? "4 " : "1 ";
+    hyperdr::write_text_file_atomic(lsc_path, plateau_map, true);
+    for (const auto mode : {hyperdr::HighlightRecovery::Blend,
+                            hyperdr::HighlightRecovery::Reconstruct}) {
+      for (const bool half : {false, true}) {
+        hyperdr::RawDecodeOptions reference_options;
+        reference_options.half_size = half;
+        reference_options.highlight_recovery = mode;
+        auto calibrated_options = reference_options;
+        calibrated_options.lens_shading_map = lsc_path;
+        const auto expected = hyperdr::decode_image(path, reference_options);
+        const auto actual = hyperdr::decode_image(path, calibrated_options);
+        const unsigned divisor = half ? 2 : 1;
+        float error = 0;
+        // Sensor (60,32), away from both the calibration and demosaic edges;
+        // the DNG fixture rotates the cropped raster 90 degrees clockwise.
+        for (unsigned y = 26 / divisor; y < 38 / divisor; ++y)
+          for (unsigned x = 54 / divisor; x < 66 / divisor; ++x)
+            for (unsigned c = 0; c < 3; ++c) {
+              const unsigned ox = (kCropTop + kCropHeight) / divisor - 1 - y;
+              const unsigned oy = x - kCropLeft / divisor;
+              error = std::max(error, std::abs(expected.linear_p3.at(ox, oy, c) -
+                                              actual.linear_p3.at(ox, oy, c)));
+            }
+        std::cout << "spatial shading " << (mode == hyperdr::HighlightRecovery::Blend ? "Blend" : "Reconstruct")
+                  << " plateau error: " << error << '\n';
+        require(error < 0.002F, "spatial shading suppressed highlight recovery");
+      }
+    }
+
+    // A common calibration gain is exposure, including gains below one.
+    // It must not change which samples LibRaw considers saturated.
+    for (const auto mode : {hyperdr::HighlightRecovery::Blend,
+                            hyperdr::HighlightRecovery::Reconstruct}) {
+      for (const bool half : {false, true}) {
+        hyperdr::RawDecodeOptions reference_options;
+        reference_options.highlight_recovery = mode;
+        reference_options.half_size = half;
+        reference_options.digital_gain = 0.5F;
+        auto calibrated_options = reference_options;
+        calibrated_options.digital_gain = 1.0F;
+        calibrated_options.lens_shading_map = lsc_path;
+        hyperdr::write_text_file_atomic(lsc_path, "1 1 1\n0.5\n", true);
+        const auto expected = hyperdr::decode_image(path, reference_options);
+        const auto actual = hyperdr::decode_image(path, calibrated_options);
+        const float attenuation_error = max_abs_difference(expected.linear_p3, actual.linear_p3);
+        std::cout << "constant shading highlight error: " << attenuation_error << '\n';
+        require(attenuation_error < 1.0e-5F,
+                "constant shading attenuation changed highlight recovery");
+
+        // Only an unused sensor corner differs. Every interpolated gain in
+        // DefaultCrop remains exactly one, for all four CFA channels.
+        std::string outside_map = "96 80 4\n";
+        for (unsigned i = 0; i < kWidth * kHeight; ++i)
+          outside_map += i == 0 ? "4 4 4 4\n" : "1 1 1 1\n";
+        hyperdr::write_text_file_atomic(lsc_path, outside_map, true);
+        reference_options.digital_gain = 1.0F;
+        require(max_abs_difference(hyperdr::decode_image(path, reference_options).linear_p3,
+                                   hyperdr::decode_image(path, calibrated_options).linear_p3) < 1.0e-5F,
+                "shading outside DefaultCrop changed visible highlights");
+      }
+    }
+
+    // The crop remains nonconstant, so it cannot take the common-gain path.
+    // An unused corner must not set its integer normalization precision.
+    bool crop_range_preserved = true;
+    for (const bool half : {false, true}) {
+      hyperdr::RawDecodeOptions range_options;
+      range_options.half_size = half;
+      range_options.highlight_recovery = hyperdr::HighlightRecovery::Unclip;
+      range_options.lens_shading_map = lsc_path;
+      const auto range_map = [](bool outside_peak) {
+        std::string text = "96 80 1\n";
+        for (unsigned y = 0; y < kHeight; ++y)
+          for (unsigned x = 0; x < kWidth; ++x)
+            text += std::to_string(outside_peak && x == 0 && y == 0
+                ? 64.0F : 1.0F + static_cast<float>(x) / (kWidth - 1)) + " ";
+        return text;
+      };
+      hyperdr::write_text_file_atomic(lsc_path, range_map(false), true);
+      const auto expected = hyperdr::decode_image(path, range_options);
+      hyperdr::write_text_file_atomic(lsc_path, range_map(true), true);
+      const auto actual = hyperdr::decode_image(path, range_options);
+      const float error = max_abs_difference(expected.linear_p3, actual.linear_p3);
+      std::cout << "nonconstant crop shading range error (half=" << half << "): " << error << '\n';
+      crop_range_preserved = crop_range_preserved && error < 1.0e-6F;
+    }
+    require(crop_range_preserved, "unused shading vertex reduced nonconstant crop precision");
+
+    // Mosaic consumers have no demosaic or highlight stage. Applying a small
+    // gain in float must preserve even the darkest stored sensor sample.
+    hyperdr::write_text_file_atomic(lsc_path, "2 2 1\n0.001 64 0.001 64\n", true);
+    lsc_options.half_size = false;
+    const auto precise_shading = hyperdr::decode_raw_mosaic(path, lsc_options);
+    require(std::abs(precise_shading.samples.at(0, 0, 0) -
+                     mosaic.samples.at(0, 0, 0) * 0.001F) < 1.0e-8F,
+            "integer shading normalization erased a nonzero sensor sample");
+    hyperdr::write_text_file_atomic(lsc_path, "1 1 4\n0.5 1 2 4\n", true);
+    const auto four_plane_shading = hyperdr::decode_raw_mosaic(path, lsc_options);
+    const float site_gain[2][2] = {{0.5F, 1.0F}, {4.0F, 2.0F}};
+    for (unsigned y = 0; y < 2; ++y)
+      for (unsigned x = 0; x < 2; ++x)
+        require(std::abs(four_plane_shading.samples.at(x, y, 0) -
+                         mosaic.samples.at(x, y, 0) * site_gain[y][x]) < 1.0e-7F,
+                "float mosaic shading mixed the two green calibration planes");
 
     // A spatial calibration has the same sensor coordinates with and without
     // DefaultCrop. Exclude demosaic borders when comparing the two renders.

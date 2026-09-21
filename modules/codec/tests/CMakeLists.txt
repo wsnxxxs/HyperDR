@@ -21,6 +21,8 @@ if(HYPERDR_WITH_CODECS)
   # Writes its own DNG fixture and decodes it through LibRaw, so it needs the
   # module but none of the container libraries.
   hyperdr_add_test(raw_highlight_test LINK HyperDR::codec)
+  hyperdr_add_test(raw_geometry_test LINK HyperDR::image)
+  hyperdr_add_test(raw_sensor_geometry_test)
 
   # Pure boundary tests: no giant fixture or allocation is needed to pin the
   # maximum RAW dimensions and the overflow-safe arithmetic.

@@ -42,7 +42,13 @@ constexpr std::array<char, 8> kMagic{'H', 'D', 'R', 'C', 'A', 'C', 'H', '3'};
 // 20 honours PNG colour tags, reduces PNG in linear light, and retains signed ICC output.
 // 21 decodes narrow-range PNG, retains signed HLG/P3 and original raster geometry.
 // 22 reduces HEIF/AVIF in linear light with uniform pixel-area weights.
-constexpr std::uint32_t kCacheSchema = 22;
+// 23 preserves highlight recovery for constant RAW shading gains.
+// 24 blends RAW highlights against local calibrated clip references.
+// 25 reconstructs RAW highlights with local calibrated channel thresholds.
+// 26 preserves floating-point RAW highlights and geometry after demosaic.
+// 27 excludes unused shading vertices from RAW integer normalization.
+// 28 separates stored Fuji sensor coordinates from the rearranged raster.
+constexpr std::uint32_t kCacheSchema = 28;
 
 // x86-64 and arm64, the only targets this project builds for, are both little
 // endian; the cache is a local scratch format and is never transported.

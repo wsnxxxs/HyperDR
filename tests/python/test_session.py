@@ -81,11 +81,23 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(session.input_path(session_id), target)
 
     def test_a_matching_raster_keeps_the_name_it_arrived_with(self):
-        for name, data in (("a.jpeg", JPEG), ("b.heif", HEIC), ("c.avif", HEIC),
+        for name, data in (("a.jpeg", JPEG), ("a.JPEG", JPEG), ("a.JPG", JPEG), ("b.heif", HEIC), ("c.avif", HEIC),
                            ("d.png", PNG)):
             session_id = session.create_session()
             target, _ = upload(session_id, name, data)
-            self.assertEqual(target.name, name)
+            self.assertEqual(target.name, Path(name).stem + Path(name).suffix.lower())
+
+    def test_native_input_accepts_supported_formats_and_jpeg_aliases(self):
+        for suffix, data in ((".jpg", JPEG), (".jpeg", JPEG), (".JPEG", JPEG),
+                             (".png", PNG), (".heic", HEIC), (".heif", HEIC),
+                             (".avif", HEIC), (".CR3", RAW_BYTES)):
+            with self.subTest(suffix=suffix):
+                source = session.WORK_ROOT / ("external" + suffix)
+                source.write_bytes(data)
+                session_id = session.create_session()
+                path, size = session.set_external_input(session_id, str(source))
+                self.assertEqual(path, source)
+                self.assertEqual(size, len(data))
 
     def test_classification_reads_only_the_header(self):
         """Reading the whole file to see 32 bytes cost 300 MB on a large RAW."""

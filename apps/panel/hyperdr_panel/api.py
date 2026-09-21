@@ -17,7 +17,7 @@ import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import job, model, session, renditions, color_lut, lut_library, raw_profiles, lens_profiles
+from . import job, model, session, renditions, color_lut, lut_library, export_target, raw_profiles, lens_profiles
 from .command import build_argv
 from .concurrency import Busy
 from .formats import SUPPORTED_EXTENSIONS
@@ -72,6 +72,9 @@ class Context:
     # Tauri's Windows shell can submit an absolute local path from its native
     # drag/drop event. Browser/LAN servers leave this disabled.
     native_path_input: bool = False
+    # The output folder is another local desktop capability. Phone/LAN servers
+    # always leave it disabled and never disclose its display label.
+    native_path_output: bool = False
     workbench: Workbench = field(default_factory=Workbench)
 
 
@@ -167,10 +170,15 @@ def _first(query: dict, key: str, default: str = "") -> str:
 
 def state(context: Context, _query: dict) -> Response:
     exe = detect_exe()
+    folder = (export_target.info() if context.native_path_output
+              else {"label": "", "ready": False})
     return Response(payload={
         "ready": bool(exe) and Path(exe).is_file(),
         "os": "windows" if IS_WINDOWS else "posix",
         "nativePathInput": context.native_path_input,
+        "nativePathOutput": context.native_path_output,
+        "exportFolderLabel": folder["label"],
+        "exportFolderReady": folder["ready"],
         "transportSecure": context.transport_secure,
         "hdrPreviewRequiresSecureContext": True,
         "previewMaxEdge": MAX_EDGE,
@@ -295,6 +303,48 @@ def result(_context: Context, query: dict) -> Response:
         content_type=_RESULT_TYPES.get(target.suffix.lower(), "application/octet-stream"),
         download=_first(query, "download", "0") == "1",
     )
+
+
+def set_export_folder(context: Context, body: dict) -> Response:
+    """Remember the folder chosen through the desktop's native picker."""
+    if not context.native_path_output:
+        return error("native path output is unavailable", status=404)
+    try:
+        label = export_target.set_folder(body.get("path"))
+    except (OSError, ValueError, TypeError) as exc:
+        return error(exc)
+    # The absolute path remains server-side; the editor receives only a label.
+    return Response(payload={"label": label})
+
+
+def save_to(context: Context, body: dict) -> Response:
+    """Copy a completed rendition into a desktop folder.
+
+    ``path`` is the one-off destination "ask every time" picked in the shell's
+    own dialog; it is validated like any other and never remembered. Without it
+    the copy goes to the folder the preferences chose.
+    """
+    if not context.native_path_output:
+        return error("native path output is unavailable", status=404)
+    try:
+        saved = export_target.save_result(
+            str(body.get("sessionId") or ""), str(body.get("exportId") or ""),
+            body.get("path"))
+    except FileNotFoundError as exc:
+        return error(exc, status=404)
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        return error(exc)
+    return Response(payload=saved)
+
+
+def open_export_folder(context: Context, body: dict) -> Response:
+    if not context.native_path_output:
+        return error("native path output is unavailable", status=404)
+    try:
+        export_target.open_folder(body.get("openToken"))
+    except (OSError, ValueError) as exc:
+        return error(exc)
+    return Response(payload={"opened": True})
 
 
 # --- POST ------------------------------------------------------------------ #
@@ -522,6 +572,9 @@ POST_ROUTES = {
     "/api/lut-library": manage_lut,
     "/api/session": new_session,
     "/api/native-input": open_native_path,
+    "/api/export-folder": set_export_folder,
+    "/api/save-to": save_to,
+    "/api/open-export-folder": open_export_folder,
     "/api/run": run,
     "/api/command": command_preview,
     "/api/model-preview": model_preview,

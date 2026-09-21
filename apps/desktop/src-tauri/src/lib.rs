@@ -306,6 +306,7 @@ pub fn run() {
         .manage(PanelProcess::default())
         .manage(NativeDropQueue::default())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .on_webview_event(|webview, event| {
             if let WebviewEvent::DragDrop(DragDropEvent::Drop { paths, .. }) = event {
                 let paths = paths

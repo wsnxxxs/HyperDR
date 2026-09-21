@@ -1,9 +1,36 @@
 import { store } from "../core/store.js";
 import { role, el, setText, setPressed } from "../core/dom.js";
 import { t, onLocaleChange } from "../i18n/index.js";
-import { encodingById, OPTION_KEYS, toOptions } from "../settings/schema.js";
+import { encodingById, OPTION_KEYS } from "../settings/schema.js";
 import { modelLabel } from "../settings/model-select.js";
 import { planeToImageData } from "../preview/cpu.js";
+import { currentResult } from "../run/options.js";
+
+/* Zoom is relative to fit-to-window. Buttons and keys move along a 25% grid,
+ * so a zoom reached with the wheel snaps back onto it at the next step. */
+export const MIN_ZOOM = 1;
+export const MAX_ZOOM = 4;
+const ZOOM_STEP = 0.25;
+export const zoomStep = (zoom, direction) => {
+  const grid = direction > 0
+    ? (Math.floor(zoom / ZOOM_STEP + 1e-6) + 1) * ZOOM_STEP
+    : (Math.ceil(zoom / ZOOM_STEP - 1e-6) - 1) * ZOOM_STEP;
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, grid));
+};
+
+/** Where the edit on screen stands, for the header: the key of its label and
+ *  the dot's state. "Exported" and "saved" are different facts -- an export
+ *  sits in the workspace until it is saved to the user's own storage. */
+export function documentStatus(state) {
+  if (!state.file) return { state: "empty", key: "workspace.waiting" };
+  const result = currentResult(state);
+  if (!result) {
+    return { state: "edited", key: (state.exports || []).length ? "workspace.dirty" : "workspace.notExported" };
+  }
+  return state.savedExports?.[result.exportId]
+    ? { state: "saved", key: "workspace.saved" }
+    : { state: "exported", key: "workspace.exported" };
+}
 
 export function mountEditor({ stage }) {
   const open = role("open-photo");
@@ -43,41 +70,57 @@ export function mountEditor({ stage }) {
     thumbnail.height = Math.round(390 * frame.height / frame.width);
     thumbnail.getContext("2d", { colorSpace: "display-p3" }).drawImage(source, 0, 0, thumbnail.width, thumbnail.height);
   }
+
+  /** The settings the next export will be made from, one row each. */
+  function summaryRows(state) {
+    const sdr = state.encoding === "sdr-jpeg";
+    const encoding = encodingById(state.encoding);
+    const mode = sdr ? t("workflow.color")
+      : state.previewOptimized ? `${t("adjust.ai")} · ${modelLabel(state.modelId, state)}`
+        : t("inspector.manual");
+    return [
+      ["export.mode", mode],
+      ["export.format", `${encoding.label} · ${t(encoding.detail)}`],
+      sdr ? null : ["export.gamut", state.clampSrgb ? t("out.clampSrgb") : t("editor.currentGamut")],
+      ["export.quality", String(state.quality)],
+      state.lutId ? ["export.lut", String(state.lutName || "").replace(/\.cube$/i, "")] : null,
+    ].filter(Boolean);
+  }
+
   function sync() {
     const state = store.get();
-    const sdr = state.encoding === "sdr-jpeg";
     open.closest(".app").dataset.workspace = state.file ? "editing" : state.uploading || state.restoring ? "loading" : "empty";
     const ready = Boolean(state.file && state.previewReady);
     open.disabled = state.restoring || state.uploading || state.starting || state.optimizing || Boolean(state.jobId);
     exportOpen.disabled = !state.file || state.uploading || state.restoring;
+    const sdr = state.encoding === "sdr-jpeg";
     setText(exportOpen.querySelector("span"), state.jobId || state.starting ? t("editor.exporting") : sdr ? t("workflow.saveJpeg") : t("editor.export"));
     setText(filename, state.file?.name || t("editor.noPhoto"));
     filename.title = state.file?.name || "";
-    const currentKey = JSON.stringify({
-      ...toOptions(state),
-      useModel: Boolean(state.previewOptimized),
-      // Part of the document's identity: switching the model changes the bytes
-      // this photograph would export, so the badge has to call it edited.
-      modelId: state.modelId,
-      // Same key order as the runner's export options, which carry it too.
-      sourceDomain: state.sourceDomain,
-    });
-    const exported = state.result?.optionsKey === currentKey;
-    documentState.dataset.state = !state.file ? "empty" : exported ? "saved" : "edited";
-    setText(documentState, !state.file ? t("workspace.waiting") : exported ? t("workspace.exported") : t("workspace.dirty"));
+
+    const status = documentStatus(state);
+    documentState.dataset.state = status.state;
+    setText(documentState, t(status.key));
+    documentState.disabled = !state.file;
+    documentState.title = state.file ? t("workspace.statusOpen") : "";
+
+    // The file's own facts. The preview size changes with the window and is
+    // only interesting when diagnosing the preview, so it is the tooltip.
     const frame = stage.getFrame();
+    const extension = /\.([a-z0-9]+)$/i.exec(state.file?.name || "")?.[1]?.toUpperCase() || "";
     const size = state.file?.size > 0 ? `${(state.file.size / 1048576).toFixed(1)} MB` : "";
-    setText(metadata, frame ? [t("workspace.previewSize", { width: frame.width, height: frame.height }), size].filter(Boolean).join(" · ") : "");
+    setText(metadata, state.file ? [extension, size].filter(Boolean).join(" · ") : "");
+    metadata.title = frame ? t("workspace.previewSize", { width: frame.width, height: frame.height }) : "";
+
     setText(viewerHint, !ready ? "" : state.viewerZoom > 1 ? t("workspace.panHint") : state.viewMode === "split" ? t("workspace.compareHint") : t("workspace.photoHint"));
     setText(exportFilename, state.file?.name || "");
-    setText(summary, sdr ? t("workflow.jpegSummary")
-      : state.previewOptimized
-        ? `${t("adjust.ai")} · ${modelLabel(state.modelId, state)} · ${encodingById(state.encoding).label}`
-        : `${t("adjust.manual")} · ${encodingById(state.encoding).label}`);
+    summary.replaceChildren(...summaryRows(state).flatMap(([key, value]) => [el("dt", {}, t(key)), el("dd", {}, value)]));
     for (const { value, label, button } of modeButtons) {
-      setText(button, sdr && value === "effect" ? t("workflow.colorEffect") : t(label)); setPressed(button, state.viewMode === value); button.disabled = !ready;
+      setText(button, t(label)); setPressed(button, state.viewMode === value); button.disabled = !ready;
     }
-    fit.disabled = zoomOut.disabled = zoomIn.disabled = !ready;
+    fit.disabled = !ready;
+    zoomOut.disabled = !ready || state.viewerZoom <= MIN_ZOOM;
+    zoomIn.disabled = !ready || state.viewerZoom >= MAX_ZOOM;
     setText(zoomValue, `${Math.round(state.viewerZoom * 100)}%`);
     setPressed(fit, state.viewerZoom === 1);
   }
@@ -86,13 +129,19 @@ export function mountEditor({ stage }) {
     paintThumbnail();
     dialog.showModal();
   }
+  const zoomBy = (direction) => {
+    const state = store.get();
+    const next = zoomStep(state.viewerZoom, direction);
+    store.set(next === MIN_ZOOM ? { viewerZoom: next, viewerPanX: 0, viewerPanY: 0 } : { viewerZoom: next });
+  };
   open.addEventListener("click", stage.openPicker);
   exportOpen.addEventListener("click", showExport);
+  documentState.addEventListener("click", showExport);
   close.addEventListener("click", () => dialog.close());
   fit.addEventListener("click", () => store.set({ viewerZoom: 1, viewerPanX: 0, viewerPanY: 0 }));
-  zoomIn.addEventListener("click", () => store.set({ viewerZoom: Math.min(4, store.get().viewerZoom + .25) }));
-  zoomOut.addEventListener("click", () => store.set({ viewerZoom: Math.max(1, store.get().viewerZoom - .25) }));
-  store.watchAny(["file", "previewReady", "uploading", "restoring", "starting", "optimizing", "jobId", "encoding", "previewOptimized", "viewMode", "viewerZoom", "result", ...OPTION_KEYS], sync, { immediate: true });
+  zoomIn.addEventListener("click", () => zoomBy(1));
+  zoomOut.addEventListener("click", () => zoomBy(-1));
+  store.watchAny(["file", "previewReady", "uploading", "restoring", "starting", "optimizing", "jobId", "encoding", "previewOptimized", "viewMode", "viewerZoom", "result", "exports", "savedExports", "sourceDomain", ...OPTION_KEYS], sync, { immediate: true });
   stage.onSourceChange(() => { sync(); if (dialog.open) paintThumbnail(); });
   onLocaleChange(sync);
   document.addEventListener("keydown", (event) => {
@@ -104,6 +153,8 @@ export function mountEditor({ stage }) {
     } else if (!event.ctrlKey && !event.metaKey && !event.altKey && store.get().previewReady) {
       if (key === "c") { event.preventDefault(); store.set({ viewMode: store.get().viewMode === "split" ? "effect" : "split" }); }
       if (key === "f") { event.preventDefault(); fit.click(); }
+      if (key === "+" || key === "=") { event.preventDefault(); zoomBy(1); }
+      if (key === "-" || key === "_") { event.preventDefault(); zoomBy(-1); }
     }
   });
 }

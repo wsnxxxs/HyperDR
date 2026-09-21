@@ -214,10 +214,10 @@ class NativePreviewFrontendContractTests(unittest.TestCase):
 
     def test_original_comparison_layer_is_cached_across_look_reloads(self):
         self.assertIn("original: null", STAGE)
-        self.assertIn("if (resetOriginal || !image.original)", STAGE)
-        self.assertIn("function paintOriginal(width, height)", STAGE)
-        self.assertIn("originalCanvas.width = width", STAGE)
-        self.assertIn("context.drawImage(sourceCanvas, 0, 0, width, height)", STAGE)
+        self.assertIn("if (resetOriginal || !image.original || (referenceEdge ?? Infinity) > image.originalEdge)", STAGE)
+        self.assertIn("function paintOriginal()", STAGE)
+        self.assertIn("originalCanvas.width = image.original.width", STAGE)
+        self.assertIn("context.putImageData(image.original, 0, 0)", STAGE)
         self.assertIn("renderer.draw(null, { original: false })", STAGE)
 
     def test_hdr_capability_probe_never_targets_the_visible_swap_chain(self):

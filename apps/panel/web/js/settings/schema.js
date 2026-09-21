@@ -18,31 +18,34 @@
 
 import { t } from "../i18n/index.js";
 
+/* `detail` is the second line of the format card: the container, and the one
+ * property that separates it from its neighbours. `hint` is the sentence shown
+ * under the grid for the selected format. */
 export const ENCODINGS = [
-  { id: "sdr-jpeg", label: "JPEG", maxRange: 4, hint: "enc.sdr-jpeg.hint" },
+  { id: "sdr-jpeg", label: "JPEG", maxRange: 4, hint: "enc.sdr-jpeg.hint", detail: "enc.sdr-jpeg.detail" },
   {
     id: "adaptive", label: "Adaptive HDR", maxRange: 3,
-    hint: "enc.adaptive.hint",
+    hint: "enc.adaptive.hint", detail: "enc.adaptive.detail",
   },
   {
     id: "pq", label: "PQ", maxRange: 4,
-    hint: "enc.pq.hint",
+    hint: "enc.pq.hint", detail: "enc.pq.detail",
   },
   {
     id: "hlg", label: "HLG", maxRange: 2.3,
-    hint: "enc.hlg.hint",
+    hint: "enc.hlg.hint", detail: "enc.hlg.detail",
   },
   {
     id: "ultrahdr", label: "Ultra HDR", maxRange: 4,
-    hint: "enc.ultrahdr.hint",
+    hint: "enc.ultrahdr.hint", detail: "enc.ultrahdr.detail",
   },
   {
     id: "avif-pq", label: "AVIF PQ", maxRange: 4,
-    hint: "enc.avif-pq.hint",
+    hint: "enc.avif-pq.hint", detail: "enc.avif-pq.detail",
   },
   {
     id: "avif-hlg", label: "AVIF HLG", maxRange: 2.3,
-    hint: "enc.avif-hlg.hint",
+    hint: "enc.avif-hlg.hint", detail: "enc.avif-hlg.detail",
   },
 ];
 
@@ -92,6 +95,10 @@ const AI_EXPANSION_START_DEFAULT = -1;
 /* `group` selects the container the control renders into; `kind` selects the
  * widget. `key` is both the store key and the name sent to /api/run.
  *
+ * `unit: "percent"` says the readout multiplies by 100, so a typed 25 means
+ * 0.25; `auto: true` says a negative value is the "automatic" setting, which
+ * the typed field accepts as the word itself.
+ *
  * `group: "pinned"` is a setting with no widget. It still seeds the store, is
  * still read by the renderers, and is still sent to /api/run -- it simply is
  * not adjustable. That is not the same as deleting it: curve-math.js takes
@@ -100,7 +107,7 @@ const AI_EXPANSION_START_DEFAULT = -1;
  * so hidden contrast and vibrance do not add an unrequested grade. */
 export const CONTROLS = [
   { key: "lutStrength", kind: "range", group: "lut", label: "lut.strength",
-    min: 0, max: 1, step: 0.01, default: 1, format: percent, mask: null, help: "lut.strengthHint" },
+    min: 0, max: 1, step: 0.01, default: 1, format: percent, unit: "percent", mask: null, help: "lut.strengthHint" },
   {
     key: "brightness", kind: "range", group: "tone", label: "ctrl.brightness.label",
     min: 0, max: 2, step: 0.05, default: DEFAULT_BRIGHTNESS_EV, format: ev, mask: null,
@@ -108,7 +115,7 @@ export const CONTROLS = [
   },
   {
     key: "hdrStrength", kind: "range", group: "tone", label: "ctrl.hdrStrength.label",
-    min: 0, max: 1, step: 0.05, default: 0.4, format: fixed(2), mask: "gain",
+    min: 0, max: 1, step: 0.05, default: 0.4, format: percent, unit: "percent", mask: "gain",
     help: "ctrl.hdrStrength.help",
   },
   {
@@ -118,7 +125,7 @@ export const CONTROLS = [
   },
   {
     key: "modelStrength", kind: "range", group: "model", label: "ctrl.modelStrength.label",
-    min: 0, max: 1, step: 0.05, default: 1, format: percent, mask: null,
+    min: 0, max: 1, step: 0.05, default: 1, format: percent, unit: "percent", mask: null,
     help: "ctrl.modelStrength.help",
   },
   {
@@ -143,22 +150,23 @@ export const CONTROLS = [
   },
   {
     key: "aiHdrRange", kind: "range", group: "model", label: "ctrl.aiHdrRange.label",
-    min: -1, max: 3, step: 0.1, default: AI_HDR_RANGE_DEFAULT, format: stopsOrAuto(1), mask: null,
+    min: -1, max: 3, step: 0.1, default: AI_HDR_RANGE_DEFAULT, format: stopsOrAuto(1), auto: true, mask: null,
     help: "ctrl.aiHdrRange.help",
   },
   {
     key: "aiExpansionStart", kind: "range", group: "model", label: "ctrl.aiExpansionStart.label",
-    min: -1, max: 0.75, step: 0.01, default: AI_EXPANSION_START_DEFAULT, format: percentOrAuto, mask: null,
+    min: -1, max: 0.75, step: 0.01, default: AI_EXPANSION_START_DEFAULT, format: percentOrAuto,
+    unit: "percent", auto: true, mask: null,
     help: "ctrl.aiExpansionStart.help",
   },
   {
     key: "expansionStart", kind: "range", group: "region", label: "ctrl.expansionStart.label",
-    min: 0.18, max: 0.75, step: 0.01, default: 0.25, format: percent, mask: "participation",
+    min: 0.18, max: 0.75, step: 0.01, default: 0.25, format: percent, unit: "percent", mask: "participation",
     help: "ctrl.expansionStart.help",
   },
   {
     key: "areaCoverage", kind: "range", group: "region", label: "ctrl.areaCoverage.label",
-    min: 0, max: 1, step: 0.05, default: 1, format: percent, mask: "coverage",
+    min: 0, max: 1, step: 0.05, default: 1, format: percent, unit: "percent", mask: "coverage",
     help: "ctrl.areaCoverage.help",
   },
   {

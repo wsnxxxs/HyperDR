@@ -33,13 +33,13 @@
         <span class="wordmark-accent">H</span><span class="wordmark-name">yper</span><span class="wordmark-accent">DR</span>
       </span>
     </h1>
-    <button class="button open-photo" type="button" data-role="open-photo"><i class="ph ph-folder-open" aria-hidden="true"></i><span data-i18n="editor.open">打开照片</span></button>
-    <button class="button header-lut-library" type="button" data-role="lut-library-open" aria-expanded="false" aria-controls="lut-library" aria-haspopup="dialog"><i class="ph ph-palette" aria-hidden="true"></i><span data-i18n="lut.browse">LUT 库</span></button>
-    <span class="document-state" data-role="document-state"></span>
+    <button class="button button--ghost open-photo" type="button" data-role="open-photo"><i class="ph ph-folder-open" aria-hidden="true"></i><span data-i18n="editor.open">打开照片</span></button>
+    <button class="button button--ghost header-lut-library" type="button" data-role="lut-library-open" aria-expanded="false" aria-controls="lut-library" aria-haspopup="dialog"><i class="ph ph-palette" aria-hidden="true"></i><span data-i18n="lut.browse">LUT 库</span></button>
+    <div class="header-spacer"><button class="document-state" type="button" data-role="document-state" aria-haspopup="dialog"></button></div>
     <div class="header-history" data-role="header-history"></div>
-    <button class="button" id="phone-connect" type="button" aria-haspopup="dialog" data-i18n-attr="title:phone.title;aria-label:phone.title"><i class="ph ph-device-mobile" aria-hidden="true"></i><span data-i18n="phone.connect">连接手机</span></button>
-    <button class="button" type="button" data-role="versions-open"><i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i><span data-i18n="workspace.versions">导出记录</span></button>
-    <button class="button button--primary" type="button" data-role="export-open"><i class="ph ph-export" aria-hidden="true"></i><span data-i18n="editor.export">导出</span></button>
+    <button class="button button--ghost" id="phone-connect" type="button" aria-haspopup="dialog" data-i18n-attr="title:phone.title;aria-label:phone.title"><i class="ph ph-device-mobile" aria-hidden="true"></i><span data-i18n="phone.connect">连接手机</span></button>
+    <button class="button button--ghost" type="button" data-role="versions-open" aria-haspopup="dialog"><i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i><span data-i18n="workspace.versions">导出记录</span></button>
+    <button class="button button--primary" type="button" data-role="export-open" aria-haspopup="dialog"><i class="ph ph-export" aria-hidden="true"></i><span data-i18n="editor.export">导出</span></button>
 
     <button class="icon-button" type="button" data-role="theme-toggle" aria-pressed="false">
       <svg class="theme-icon theme-icon--sun" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></svg>
@@ -61,11 +61,11 @@
   </header>
 
   <main class="app__stage" id="stage" data-i18n-attr="aria-label:stage.label">
-    <header class="canvas-head"><div class="canvas-document"><span class="eyebrow" data-i18n="workspace.currentPhoto">当前照片</span><strong class="editor-filename" data-role="editor-filename"></strong></div><span class="photo-meta" data-role="photo-meta"></span></header>
+    <header class="canvas-head"><strong class="editor-filename" data-role="editor-filename"></strong><span class="photo-meta" data-role="photo-meta"></span></header>
     <div class="stage-viewport">
       <div class="stage" data-role="stage" aria-busy="false">
         <div class="stage-frame">
-          <span class="view-tag view-tag--original" data-i18n="editor.original">原图</span><span class="view-tag view-tag--edited" data-i18n="editor.currentEdit">当前调整</span>
+          <span class="view-tag view-tag--original" data-i18n="editor.original">原图</span><span class="view-tag view-tag--edited" data-i18n="editor.effect">调整后</span>
           <canvas data-role="canvas-hdr" hidden data-i18n-attr="aria-label:stage.canvasHdr"></canvas>
           <canvas data-role="canvas-sdr" hidden data-i18n-attr="aria-label:stage.canvasSdr"></canvas>
           <canvas data-role="canvas-original" hidden aria-hidden="true"></canvas>
@@ -98,7 +98,7 @@
             <button class="button button--primary stage-select" type="button"
                     data-role="stage-select" aria-describedby="stage-drop-hint"
                     data-i18n="stage.select">选择图片</button>
-            <span class="empty-shortcut"><kbd>Ctrl / ⌘ O</kbd><span data-i18n="workspace.orDrop">或将照片拖入此处</span></span>
+            <span class="empty-shortcut"><kbd data-keys="mod+o">Ctrl O</kbd><span data-i18n="workspace.orDrop">或将照片拖入此处</span></span>
             <span class="empty-local" data-i18n="editor.local">照片在本机处理</span>
             <span class="stage-progress" aria-hidden="true"><span class="stage-progress-fill" data-role="upload-bar"></span></span>
             <span class="stage-progress-text" data-role="upload-progress" aria-live="polite"></span>
@@ -136,7 +136,6 @@
       </div>
     </section>
 
-    <section class="raw-profile-panel" data-role="raw-profile-panel" hidden></section>
     <section class="workflow-picker">
       <h2 data-i18n="workflow.title">处理模式</h2>
       <div class="segmented" role="group" data-i18n-attr="aria-label:workflow.title">
@@ -190,15 +189,20 @@
         <summary><span><i class="ph ph-palette" aria-hidden="true"></i><span data-i18n="lut.title">颜色 LUT</span></span><i class="ph ph-caret-down" aria-hidden="true"></i></summary>
         <div class="parameter-body">
           <div class="lut-current-look"><select class="lut-select" data-role="lut-select" data-i18n-attr="aria-label:lut.select"></select><button type="button" class="icon-button" data-role="lut-remove" data-i18n-attr="aria-label:lut.remove;title:lut.remove"><i class="ph ph-x" aria-hidden="true"></i></button></div>
-          <label class="lut-enable"><input type="checkbox" data-role="lut-enabled" checked><span data-i18n="lut.enabled">启用 LUT</span></label>
+          <label class="lut-enable" data-role="lut-enable-row"><input type="checkbox" data-role="lut-enabled" checked><span data-i18n="lut.enabled">启用 LUT</span></label>
           <div class="group" data-role="group-lut"></div>
           <button class="lut-space-trigger" type="button" data-role="lut-space-open" aria-haspopup="dialog" aria-controls="lut-space-dialog" aria-expanded="false">
             <span class="lut-space-copy"><span data-i18n="lut.spaceSettings">空间设置</span><small data-role="lut-space-summary"></small></span>
             <i class="ph ph-caret-right" aria-hidden="true"></i>
           </button>
+          <p class="parameter-note lut-empty-note" data-role="lut-empty-note"><span data-i18n="lut.emptyNote">LUT 库中还没有风格。</span><button class="link-button" type="button" data-role="lut-manage" aria-haspopup="dialog" data-i18n="lut.manage">打开 LUT 库</button></p>
         </div>
       </details>
     </div>
+    <details class="parameter-group raw-profile-panel" data-role="raw-profile-panel" hidden>
+      <summary><span><i class="ph ph-aperture" aria-hidden="true"></i><span data-i18n="rawProfile.group">相机与镜头</span></span><span class="summary-value" data-role="raw-profile-summary"></span><i class="ph ph-caret-down" aria-hidden="true"></i></summary>
+      <div class="parameter-body" data-role="raw-profile-body"></div>
+    </details>
   </aside>
 
 
@@ -245,19 +249,21 @@
     </dialog>
 
   <dialog class="export-dialog" data-role="export-dialog" aria-labelledby="export-title">
-    <header class="export-head"><div><h2 id="export-title" data-i18n="editor.exportTitle">导出照片</h2><p data-i18n="editor.exportSubtitle">选择输出格式，保存当前调整</p></div><button class="icon-button" type="button" data-role="export-close" data-i18n-attr="aria-label:editor.closeExport">×</button></header>
+    <header class="export-head"><div><h2 id="export-title" data-i18n="editor.exportTitle">导出照片</h2><p data-i18n="editor.exportSubtitle">选择输出格式，保存当前调整</p></div><button class="icon-button" type="button" data-role="export-close" data-i18n-attr="aria-label:editor.closeExport;title:editor.closeExport"><i class="ph ph-x" aria-hidden="true"></i></button></header>
     <div class="export-body">
-    <aside class="export-overview"><canvas data-role="export-thumbnail" width="300" height="200"></canvas><strong data-role="export-filename"></strong><p data-i18n="editor.currentEdit">当前调整</p><p class="export-summary" data-role="export-summary"></p>
+    <aside class="export-overview"><canvas data-role="export-thumbnail" width="300" height="200"></canvas><strong data-role="export-filename"></strong><dl class="export-summary" data-role="export-summary"></dl>
       <div class="result" data-role="result" hidden aria-live="polite">
-        <div class="result-info"><span class="result-caption" data-i18n="workspace.previousExport">上次导出</span>
+        <div class="result-info"><span class="result-caption" data-role="result-caption"></span>
           <strong class="result-name" data-role="result-name"></strong>
           <span class="result-meta" data-role="result-meta"></span>
           <span class="result-warn" data-role="result-warn" hidden></span>
-          <span class="result-stale" data-role="result-stale" hidden data-i18n="out.stale">设置已变更，需重新转换</span>
+          <span class="result-stale" data-role="result-stale" hidden data-i18n="out.stale">当前调整已更改，这是上一版的结果</span>
         </div>
         <div class="result-actions">
-          <a class="button button--primary" data-role="download" download data-i18n="out.download">保存到设备</a>
+          <button class="button button--primary" type="button" data-role="save">保存到设备</button>
+          <button class="button" type="button" data-role="save-open-folder" data-i18n="save.openFolder" hidden>打开文件夹</button>
         </div>
+        <p class="save-state" data-role="save-state" role="status" aria-live="polite" hidden></p>
       </div>
 
     </aside>
@@ -288,8 +294,9 @@
       </details>
       <p class="out-progress" data-role="run-progress" hidden aria-live="polite"></p>
       <div class="out-actions">
+        <p class="out-note" data-role="run-note" hidden></p>
         <button class="button" type="button" data-role="cancel" hidden>取消</button>
-        <button class="button button--primary button--run" type="button" data-role="run">开始转换</button>
+        <button class="button button--primary button--run" type="button" data-role="run">导出照片</button>
       </div>
     </footer>
   </dialog>
@@ -317,19 +324,25 @@
 </div>
 
 <dialog class="shortcuts-dialog" data-role="shortcuts-dialog" aria-labelledby="shortcuts-title">
-  <form method="dialog"><header class="export-head"><div><h2 id="shortcuts-title" data-i18n="workspace.shortcuts">快捷键</h2><p data-i18n="workspace.shortcutNote">让注意力留在照片上。</p></div><button class="icon-button" data-i18n-attr="aria-label:workspace.closeShortcuts">×</button></header></form>
+  <form method="dialog"><header class="export-head"><div><h2 id="shortcuts-title" data-i18n="workspace.shortcuts">快捷键</h2><p data-i18n="workspace.shortcutNote">单键快捷键在输入框之外生效。</p></div><button class="icon-button" data-i18n-attr="aria-label:workspace.closeShortcuts;title:workspace.closeShortcuts"><i class="ph ph-x" aria-hidden="true"></i></button></header></form>
   <div class="shortcut-grid">
-    <span data-i18n="editor.open">打开照片</span><kbd>Ctrl / ⌘ O</kbd>
-    <span data-i18n="editor.export">导出</span><kbd>Ctrl / ⌘ E</kbd>
-    <span data-i18n="edit.undo">撤销</span><kbd>Ctrl / ⌘ Z</kbd>
-    <span data-i18n="edit.redo">重做</span><kbd>Ctrl / ⌘ Shift Z</kbd>
-    <span data-i18n="editor.compare">分屏对比</span><kbd>C</kbd>
-    <span data-i18n="editor.fit">适应窗口</span><kbd>F</kbd>
-    <span data-i18n="workspace.holdOriginal">按住查看原图</span><kbd>Space</kbd>
+    <h3 class="shortcut-group" data-i18n="shortcuts.file">文件</h3>
+    <span data-i18n="editor.open">打开照片</span><kbd data-keys="mod+o">Ctrl O</kbd>
+    <span data-i18n="editor.export">导出</span><kbd data-keys="mod+e">Ctrl E</kbd>
+    <span data-i18n="prefs.open">偏好设置</span><kbd data-keys="mod+,">Ctrl ,</kbd>
+    <h3 class="shortcut-group" data-i18n="shortcuts.edit">编辑</h3>
+    <span data-i18n="edit.undo">撤销</span><kbd data-keys="mod+z">Ctrl Z</kbd>
+    <span data-i18n="edit.redo">重做</span><kbd data-keys="mod+shift+z">Ctrl Shift Z</kbd>
+    <h3 class="shortcut-group" data-i18n="shortcuts.view">查看</h3>
+    <span data-i18n="workspace.holdOriginal">按住查看原图</span><kbd data-keys="space">Space</kbd>
+    <span data-i18n="editor.compare">分屏对比</span><kbd data-keys="c">C</kbd>
+    <span data-i18n="editor.fit">适应窗口</span><kbd data-keys="f">F</kbd>
+    <span data-i18n="shortcuts.zoom">放大 / 缩小</span><kbd data-keys="+ / -">+ / −</kbd>
+    <span data-i18n="shortcuts.wheelZoom">以指针为中心缩放</span><kbd data-keys="wheel">滚轮</kbd>
   </div>
 </dialog>
 
-<div class="toast" data-role="toast" role="status" aria-live="polite"></div>
+<div class="toast" data-role="toast" role="status" aria-live="polite" popover="manual"></div>
 
 <script type="module" src="./js/main.js"></script>
 </body>

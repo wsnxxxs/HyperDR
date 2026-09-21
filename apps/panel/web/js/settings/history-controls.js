@@ -1,5 +1,6 @@
 import { store } from "../core/store.js";
 import { role } from "../core/dom.js";
+import { keyLabel } from "../core/keys.js";
 import { t, onLocaleChange } from "../i18n/index.js";
 import { OPTION_KEYS } from "./schema.js";
 import { createHistory } from "./history.js";
@@ -33,7 +34,8 @@ export function mountHistory() {
     undo.disabled = locked() || !history.status().canUndo;
     redo.disabled = locked() || !history.status().canRedo;
     undo.setAttribute("aria-label", t("edit.undo")); redo.setAttribute("aria-label", t("edit.redo"));
-    undo.title = t("edit.undoHint"); redo.title = t("edit.redoHint");
+    undo.title = t("edit.undoHint", { keys: keyLabel("mod+z") });
+    redo.title = t("edit.redoHint", { keys: keyLabel("mod+shift+z") });
   };
   history.subscribe(sync);
   store.watchAny(["file", "uploading", "restoring", "optimizing"], sync);

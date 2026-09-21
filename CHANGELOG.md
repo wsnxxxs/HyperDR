@@ -5,6 +5,72 @@ semantic versioning; dates use ISO 8601.
 
 ## Unreleased
 
+- AI enhance no longer fails at the 1280-pixel preview size. Resampling a
+  clipped white into the model's input could land one float step above 1.0,
+  which the input contract refused, so on a typical desktop window every
+  photograph with clipped highlights showed "native model input must be finite
+  linear SDR in [0, 1]". Rounding within 1e-5 of the range is now snapped back;
+  a base that is genuinely out of range is still refused.
+
+- When an AI preview does fail, the editor returns to the manual adjustment and
+  says why. It used to keep "AI 优化" selected and report the enhancement as
+  applied over the manual frame it was still showing.
+
+- The desktop editor's header says whether the edit on screen is not exported,
+  exported but only in the workspace, or saved, and opens the export window
+  from there. An undo that returns to an exported version shows that version
+  instead of calling the edit unexported. In the export window, saving becomes
+  the primary action once the edit is exported, exporting the same settings
+  again becomes secondary, and a disabled export button says why. With the
+  "fixed folder" save method, a finished export is saved to that folder
+  without a second click.
+
+- The export window's colour choice is "keep wide gamut" or "limit to sRGB".
+  It used to call the first option "current gamut" and name the input-fallback
+  gamut (sRGB for new sessions) beside it, which read as though the output
+  would be sRGB either way. Format cards name their container and main
+  property instead of repeating their own title.
+
+- Slider readouts accept typed values (units optional; percentages as
+  displayed), strengths read as percentages throughout, and the rows no longer
+  carry end-of-scale captions. RAW camera profile and lens correction move into
+  a folded "camera & lens" group below the adjustments, so the brightness and
+  HDR controls are visible without scrolling. The colour LUT group shows only
+  its menu until a look is chosen.
+
+- Viewer: the scroll wheel zooms around the pointer, `+` / `-` step the zoom,
+  the zoom buttons disable at their limits, and holding Space compares with the
+  original whenever focus is not in a control. Shortcut labels follow the
+  platform (Ctrl+O on Windows, ⌘O on macOS).
+
+- Visual refinements: dark-mode primary buttons use a saturated blue fill with
+  white text instead of the pale ink colour with navy text; slider tracks,
+  disabled text and thumbs are neutral grey rather than slate blue; light-mode
+  warning and error text reach 4.5:1 contrast; dialogs share one close icon and
+  a short entrance transition; the empty workspace hides the unused histogram,
+  and the first photo's load shows its own progress state.
+
+- Original-photo comparison now refreshes its neutral pixels when preview
+  resolution increases, keeping detail consistent with the edited image.
+  Press-and-hold and split view retain the sharp reference during slider
+  drafts instead of resizing a cached low-resolution image.
+
+- Saving a finished export now says what happened. The save action was a plain
+  download link inside a modal dialog: the browser took the file and the panel
+  said nothing, and the confirmation toast was drawn underneath the dialog that
+  raised it, so every message shown while the export dialog was open was
+  invisible. Saving now reports progress, the name the file was written under,
+  and the reason when it fails -- on the result card, in the export history and
+  on the phone -- and toasts are visible above every dialog.
+
+- Where an export is saved is now a preference. The desktop app can write
+  straight into a folder picked from its own dialog, either once or as a
+  remembered destination, with "open folder" beside the confirmation. Browsers
+  that support it get the system "save as" dialog or a remembered directory;
+  everywhere else keeps the browser's download folder, which used to be the
+  only possibility. The folder belongs to the local desktop app alone: a phone
+  on the LAN can neither see nor set it.
+
 - HLG encoding fits saturated highlights into its luminance-dependent signal
   range before applying the transfer function. Directly clipping inverse-OOTF
   channels could darken a bright P3 blue by about 29%; HEIC, AVIF and HLG LUT

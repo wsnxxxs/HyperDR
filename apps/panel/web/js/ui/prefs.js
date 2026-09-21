@@ -19,6 +19,10 @@ import { t, applyStatic, onLocaleChange, currentLocale } from "../i18n/index.js"
 import {
   PREFS, PREF_GROUPS, prefs, persistPrefs, resetPrefs,
 } from "./prefs-schema.js";
+import { api } from "../core/api.js";
+import {
+  availableSaveTargets, browserDirectoryName, chooseSaveFolder,
+} from "../run/save.js";
 
 /** Focusable descendants, in tab order, skipping anything currently hidden. */
 const focusable = (root) =>
@@ -83,7 +87,8 @@ export function mountPrefs({ toast, phoneWorkbench }) {
     picker.setAttribute("role", "group");
     const label = () => t(`prefs.${pref.key}.label`);
     picker.setAttribute("aria-label", label());
-    const buttons = pref.choices.map(([value, labelKey]) => {
+    const choices = pref.key === "saveTarget" ? availableSaveTargets() : pref.choices;
+    const buttons = choices.map(([value, labelKey]) => {
       const text = labelKey ? t(labelKey) : (pref.labels?.[value] ?? value);
       const button = el("button", { type: "button", "aria-pressed": "false" }, text);
       button.addEventListener("click", () => prefs.set({ [pref.key]: value }));
@@ -95,9 +100,76 @@ export function mountPrefs({ toast, phoneWorkbench }) {
     });
     relabels.push(() => picker.setAttribute("aria-label", label()));
     const apply = (state) => {
-      for (const [value, button] of buttons) setPressed(button, value === state[pref.key]);
+      const current = choices.some(([value]) => value === state[pref.key])
+        ? state[pref.key] : choices[0]?.[0];
+      for (const [value, button] of buttons) setPressed(button, value === current);
     };
     return { node: fieldShell(pref, picker), apply };
+  }
+
+  function buildExportFolderRow() {
+    const title = el("b", {}, t("prefs.exportFolder.label"));
+    const value = el("span", { class: "prefs-export-folder-value" }, t("prefs.exportFolder.none"));
+    const help = el("p", { class: "field-hint prefs-hint" }, t("prefs.exportFolder.help"));
+    const change = el("button", { class: "button", type: "button" }, t("prefs.exportFolder.change"));
+    const openFolder = el("button", { class: "button", type: "button" }, t("save.openFolder"));
+    const row = el("div", { class: "prefs-field prefs-export-folder" },
+      el("div", { class: "prefs-field-copy" },
+        el("span", { class: "field-title" }, title), value, help),
+      el("div", { class: "prefs-export-folder-actions" }, change, openFolder));
+    let folderLabel = "";
+
+    function relabel() {
+      setText(title, t("prefs.exportFolder.label"));
+      setText(value, folderLabel || t("prefs.exportFolder.none"));
+      setText(help, t("prefs.exportFolder.help"));
+      setText(change, t("prefs.exportFolder.change"));
+      setText(openFolder, t("save.openFolder"));
+    }
+    relabels.push(relabel);
+
+    async function refresh() {
+      const capabilities = store.get().capabilities || {};
+      const native = Boolean(capabilities.nativePathOutput && window.__TAURI__?.dialog?.open);
+      const browserFolder = !native
+        && availableSaveTargets().some(([target]) => target === "fixed");
+      row.hidden = !native && !browserFolder;
+      openFolder.hidden = !native;
+      openFolder.disabled = !capabilities.exportFolderReady;
+      folderLabel = native
+        ? capabilities.exportFolderLabel || ""
+        : await browserDirectoryName();
+      relabel();
+    }
+
+    change.addEventListener("click", async () => {
+      change.disabled = true;
+      try {
+        const label = await chooseSaveFolder();
+        if (label) {
+          folderLabel = label;
+          toast(t("prefs.exportFolder.saved"));
+        }
+      } catch (error) {
+        if (error?.name !== "AbortError") toast(error?.message || t("save.folderFailed"), true);
+      } finally {
+        change.disabled = false;
+        await refresh();
+      }
+    });
+    openFolder.addEventListener("click", async () => {
+      openFolder.disabled = true;
+      try {
+        await api.openExportFolder();
+        toast(t("prefs.exportFolder.opened"));
+      } catch (error) {
+        toast(error?.message || t("save.folderFailed"), true);
+      } finally {
+        await refresh();
+      }
+    });
+    void refresh();
+    return row;
   }
 
   function buildToggle(pref) {
@@ -192,6 +264,7 @@ export function mountPrefs({ toast, phoneWorkbench }) {
           const built = BUILDERS[pref.kind](pref);
           section.append(built.node);
           appliers.push(built.apply);
+          if (pref.key === "saveTarget") section.append(buildExportFolderRow());
         }
         // Said once per surface, where the consequence lands, rather than in a
         // README nobody opens: these choices do not travel to the phone.

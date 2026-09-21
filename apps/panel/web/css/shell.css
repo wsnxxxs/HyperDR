@@ -40,6 +40,8 @@
 .app:not([data-workspace="editing"]) [data-role="export-open"],
 .app:not([data-workspace="editing"]) [data-role="versions-open"] { display: none; }
 .app:not([data-workspace="editing"]) .rail-welcome { display: block; }
+/* An empty histogram frame said nothing a photograph would not say better. */
+.app:not([data-workspace="editing"]) .app__rail > .scope { display: none; }
 .app:not([data-workspace="editing"]) .document-state { visibility: hidden; }
 .app:not([data-workspace="editing"]) .app__stage { grid-template-rows: minmax(0, 1fr); margin-block: 22px; }
 .app:not([data-workspace="editing"]) .stage-viewport { background: var(--surface-page); border: 0; }
@@ -62,7 +64,6 @@
 @media (width < 860px) {
   .app { grid-template: "header" auto "stage" minmax(350px, 55dvh) "rail" auto "status" auto / minmax(0, 1fr); height: auto; min-height: 100dvh; overflow: visible; }
   .app__header { flex-wrap: wrap; padding: 12px; gap: 8px; }
-  .editor-filename { flex-basis: 25%; }
   .app__rail { border-left: 0; border-top: 1px solid var(--line); overflow: visible; scrollbar-gutter: auto; }
   .app__settings { overflow: visible; }
   .app__stage { grid-template-rows: 48px minmax(0,1fr) auto; margin-inline: 12px; }
@@ -74,6 +75,5 @@
 }
 @media (width < 500px) {
   .app__header .wordmark-text { display: none; }
-  .app__header .editor-filename { flex-basis: 40%; }
   .viewer-zoom { gap: 6px; }
 }

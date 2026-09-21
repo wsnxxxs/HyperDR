@@ -7,7 +7,7 @@
 
 import { el, role, setPressed, setText, clamp } from "../core/dom.js";
 import { store } from "../core/store.js";
-import { COLOR_GAMUTS, CONTROLS, ENCODINGS, encodingById, neutralSettings } from "./schema.js";
+import { CONTROLS, ENCODINGS, encodingById, neutralSettings } from "./schema.js";
 import { mountLutLibrary } from "./lut-library.js";
 import { mountRawProfiles } from "./raw-profiles.js";
 import { mountWorkflow } from "./workflow.js";
@@ -97,8 +97,43 @@ function helpButton(control, hintNode) {
   return button;
 }
 
+/* ── typed values ───────────────────────────────────────────────────── *
+ * The readout beside every slider is also a text field, because a precise
+ * value is often known before the slider is touched ("+0.3 EV", "25%"). What is
+ * typed is the number as displayed: a percentage control takes 25 for 0.25.
+ * The unit is ignored, so pasting "+0.30 EV" works too. */
+
+const editScale = (control) => (control.unit === "percent" ? 100 : 1);
+const editDecimals = (control) =>
+  Math.max(0, -Math.floor(Math.log10(control.step * editScale(control)) + 1e-9));
+
+/** The editable text for a stored value: the displayed number without its unit. */
+export function editableValue(control, value) {
+  if (control.auto && value < 0) return t("unit.auto");
+  return (value * editScale(control)).toFixed(editDecimals(control));
+}
+
+/** A typed value as a stored one, snapped to the control's step and clamped to
+ *  `[min, max]`; `null` when nothing numeric was typed. Auto controls accept
+ *  an empty field or the word for "auto". */
+export function parseTypedValue(control, text, max = control.max) {
+  const raw = String(text ?? "").trim().toLowerCase();
+  if (control.auto && (raw === "" || raw === "auto" || raw === t("unit.auto").toLowerCase())) {
+    return control.min;
+  }
+  const match = raw.replace(/,/g, ".").replace(/[−–]/g, "-").match(/[-+]?(?:\d+\.?\d*|\.\d+)/);
+  if (!match) return null;
+  const typed = Number(match[0]) / editScale(control);
+  if (!Number.isFinite(typed)) return null;
+  const snapped = control.min + Math.round((typed - control.min) / control.step) * control.step;
+  return Number(clamp(snapped, control.min, max).toFixed(6));
+}
+
 function buildRange(control) {
-  const readout = el("span", { class: "field-value" });
+  const readout = el("input", {
+    class: "field-value", type: "text", inputmode: "decimal", autocomplete: "off",
+    spellcheck: "false", "aria-label": t("adjust.valueInput", { label: t(control.label) }),
+  });
   const input = el("input", {
     type: "range", min: control.min, max: control.max, step: control.step,
     "aria-label": t(control.label),
@@ -113,17 +148,57 @@ function buildRange(control) {
     setText(name, t(control.label));
     if (hint) setText(hint, t(control.help));
     input.setAttribute("aria-label", t(control.label));
+    readout.setAttribute("aria-label", t("adjust.valueInput", { label: t(control.label) }));
   });
 
-  const scaleStart = el("span");
-  const scaleEnd = el("span");
-  const scale = control.group === "tone" || ["modelStrength", "aiBrightness", "aiHdrRange"].includes(control.key) ? el("div", { class: "range-scale", "aria-hidden": "true" }, scaleStart, scaleEnd) : null;
   const node = el("div", { class: "field field--range" },
     el("div", { class: "field-head" }, title, readout),
-    input, scale,
+    input,
     hint);
 
   input.addEventListener("input", () => store.set({ [control.key]: Number(input.value) }));
+
+  /* The field shows the formatted value until it is focused, then the bare
+   * number. Enter or leaving commits, Escape abandons, and the arrow keys step
+   * the value the way they do on the slider. */
+  let editing = false;
+  const currentMax = () => (isHdrRange(control.key) ? hdrRangeCeiling() : control.max);
+  const beginTyping = () => {
+    editing = true;
+    readout.value = editableValue(control, store.get()[control.key]);
+    readout.select();
+  };
+  const commitTyped = () => {
+    if (!editing) return;
+    editing = false;
+    const value = parseTypedValue(control, readout.value, currentMax());
+    if (value != null) store.set({ [control.key]: value });
+    apply(store.get());
+  };
+  readout.addEventListener("focus", beginTyping);
+  readout.addEventListener("blur", commitTyped);
+  readout.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      // Commit, and stay in the field with the value as it was stored, so a
+      // second number can be typed straight away.
+      event.preventDefault();
+      commitTyped();
+      beginTyping();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      editing = false;
+      apply(store.get());
+      readout.blur();
+    } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      event.preventDefault();
+      const direction = event.key === "ArrowUp" ? 1 : -1;
+      const next = clamp(store.get()[control.key] + direction * control.step * (event.shiftKey ? 10 : 1),
+        control.min, currentMax());
+      store.set({ [control.key]: Number(next.toFixed(6)) });
+      readout.value = editableValue(control, store.get()[control.key]);
+      readout.select();
+    }
+  });
 
   /* Double-click returns to the schema default -- the discoverable cousin of
    * the group reset, for the slider you are already touching. Shift+arrow
@@ -180,14 +255,10 @@ function buildRange(control) {
     const maxText = String(max);
     if (lastMax !== maxText) { lastMax = maxText; input.max = maxText; }
     if (!dragging && input.value !== String(value)) input.value = String(value);
-    setText(readout, (control.format || String)(value));
-    if (scale) {
-      const ends = control.key === "brightness" ? [t("inspector.natural"), t("inspector.bright")]
-        : control.key === "hdrStrength" ? [t("inspector.soft"), t("inspector.vivid")]
-        : control.group === "model" ? [control.format(control.min), control.format(max)]
-        : [t("unit.stops", { value: "0" }), t("unit.stops", { value: String(max) })];
-      setText(scaleStart, ends[0]); setText(scaleEnd, ends[1]);
-    }
+    const shown = (control.format || String)(value);
+    if (!editing && readout.value !== shown) readout.value = shown;
+    // The ceiling moves with the output format, and is otherwise invisible.
+    readout.title = isHdrRange(control.key) ? t("adjust.rangeCeiling", { value: String(max) }) : "";
     const fill = ((value - control.min) / (max - control.min)) * 100;
     const fillText = `${Math.min(100, Math.max(0, fill)).toFixed(1)}%`;
     if (lastFill !== fillText) { lastFill = fillText; input.style.setProperty("--fill", fillText); }
@@ -277,9 +348,12 @@ function mountEncoding({ toast } = {}) {
   const buttons = new Map();
 
   for (const entry of ENCODINGS) {
-    const descriptions = { "sdr-jpeg": "sRGB", adaptive: "Apple HDR", pq: "HDR10", hlg: "BT.2100", ultrahdr: "Google HDR", "avif-pq": "AVIF · PQ", "avif-hlg": "AVIF · HLG" };
-    const button = el("button", { type: "button", "aria-pressed": "false", "aria-label": entry.label },
-      el("strong", {}, entry.label), el("small", {}, descriptions[entry.id]));
+    // The container and the one property that decides between formats, so two
+    // cards never repeat their own title back ("AVIF PQ / AVIF · PQ").
+    const detail = el("small", {}, t(entry.detail));
+    const button = el("button", { type: "button", "aria-pressed": "false" },
+      el("strong", {}, entry.label), detail);
+    relabel(() => setText(detail, t(entry.detail)));
     button.addEventListener("click", () => {
       const current = store.get().hdrRange;
       const aiCurrent = store.get().aiHdrRange;
@@ -320,6 +394,10 @@ function mountColorGamut() {
   gamut.append(current, limited);
   current.addEventListener("click", () => store.set({ clampSrgb: false }));
   limited.addEventListener("click", () => store.set({ clampSrgb: true }));
+  /* This is the one colour decision the export makes: keep the wide-gamut
+   * colour the working space holds, or compress it into sRGB. `colorGamut` is
+   * not shown here -- it is only how an untagged input file is read, so naming
+   * it "the current gamut" suggested the output would be sRGB either way. */
   const sync = (state) => {
     const sdr = state.encoding === "sdr-jpeg";
     gamut.closest("section").hidden = sdr;
@@ -328,8 +406,7 @@ function mountColorGamut() {
     setText(limited, t("out.clampSrgb"));
     setPressed(current, !state.clampSrgb && !sdr);
     setPressed(limited, Boolean(state.clampSrgb) || sdr);
-    const label = COLOR_GAMUTS.find(({ id }) => id === state.colorGamut)?.label || "sRGB";
-    setText(hint, sdr ? t("enc.sdr-jpeg.hint") : state.clampSrgb ? t("editor.limitedHint") : t("editor.currentGamutHint", { gamut: label }));
+    setText(hint, sdr ? t("enc.sdr-jpeg.hint") : state.clampSrgb ? t("editor.limitedHint") : t("editor.currentGamutHint"));
   };
   store.watchAny(["colorGamut", "clampSrgb", "encoding"], sync, { immediate: true });
   relabel(() => sync(store.get()));
@@ -367,7 +444,7 @@ function mountLut({ toast } = {}) {
   const remove = role("lut-remove");
   const select = role("lut-select");
   const renderChoices = (state) => {
-    select.replaceChildren(el("option", { value: "" }, state.lutLibraryEntries.length ? t("lut.none") : t("lut.empty")));
+    select.replaceChildren(el("option", { value: "" }, state.lutLibraryEntries.length || state.lutId ? t("lut.none") : t("lut.empty")));
     const entries = [...state.lutLibraryEntries];
     if (state.lutId && !entries.some((entry) => entry.lutId === state.lutId)) entries.unshift({ lutId: state.lutId, lutName: state.lutName });
     for (const entry of entries) select.append(el("option", { value: entry.lutId }, entry.lutName.replace(/\.cube$/i, "")));
@@ -427,7 +504,17 @@ function mountLut({ toast } = {}) {
     relabel(() => { label.firstChild.textContent = t(labelKey); select.setAttribute("aria-label", t(labelKey)); });
   }
   remove.addEventListener("click", () => store.set({ lutId: "", lutName: "" }));
+  // The library is managed in its own dialog; this is a shortcut into it for
+  // the moment the panel has nothing to offer.
+  role("lut-manage").addEventListener("click", () => role("lut-library-open").click());
+  const enableRow = role("lut-enable-row");
+  const emptyNote = role("lut-empty-note");
   const sync = (state) => {
+    // Bypass, strength and spaces describe a selected LUT. Without one they
+    // were three disabled controls under an empty menu.
+    remove.hidden = enableRow.hidden = !state.lutId;
+    role("group-lut").hidden = !state.lutId;
+    emptyNote.hidden = Boolean(state.lutId || state.lutLibraryEntries.length);
     remove.disabled = !state.lutId;
     enabled.disabled = !state.lutId;
     enabled.checked = Boolean(state.lutId && state.lutStrength > 0);
@@ -442,7 +529,7 @@ function mountLut({ toast } = {}) {
     const kind = state.lutInput === "slog3-sgamut3cine" ? "log" : ["hlg", "pq"].includes(state.lutInput) ? "hdr" : "sdr";
     setText(role("lut-hint"), t({ log: "lut.hint.log", hdr: "lut.hint.hdr", sdr: "lut.hint.sdr" }[kind]));
   };
-  store.watchAny(["sessionId", "uploading", "restoring", "lutId", "lutName", "lutInput", "lutOutput", "lutStrength"], sync, { immediate: true });
+  store.watchAny(["sessionId", "uploading", "restoring", "lutId", "lutName", "lutInput", "lutOutput", "lutStrength", "lutLibraryEntries"], sync, { immediate: true });
   store.watch("sessionId", () => {
     if (!store.get().restoring) store.set({ lutId: "", lutName: "" });
   });
@@ -476,7 +563,9 @@ export function mountControls({ toast } = {}) {
     const widget = BUILDERS[control.kind](control);
     container.append(widget.node);
     if (control.key === "lutStrength") {
-      store.watch("lutId", (id) => { widget.node.querySelector("input").disabled = !id; }, { immediate: true });
+      store.watch("lutId", (id) => {
+        for (const input of widget.node.querySelectorAll("input")) input.disabled = !id;
+      }, { immediate: true });
     }
     if (["hdrStrength", "hdrRange", "expansionStart", "areaCoverage"].includes(control.key)) {
       store.watch("encoding", (id) => { widget.node.hidden = id === "sdr-jpeg"; }, { immediate: true });

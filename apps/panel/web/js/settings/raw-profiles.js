@@ -3,11 +3,18 @@ import { store } from "../core/store.js";
 import { api } from "../core/api.js";
 import { t, onLocaleChange } from "../i18n/index.js";
 
+/* Camera profile and lens correction for a RAW photograph.
+ *
+ * Both are chosen once per camera and lens rather than per look, so the group
+ * sits below the adjustments, folded, with what is in effect written on its
+ * summary line -- the rail no longer opens on it and pushes the brightness and
+ * HDR controls below the fold for every RAW file. */
 export function mountRawProfiles({ toast } = {}) {
   const section = role("raw-profile-panel");
-  const title = el("h2", { id: "raw-profile-title" });
+  const body = role("raw-profile-body");
+  const summary = role("raw-profile-summary");
   const cameraName = el("p", { class: "raw-profile-camera" });
-  const select = el("select", { class: "lut-select", "aria-labelledby": "raw-profile-title",
+  const select = el("select", { class: "lut-select", "aria-label": t("rawProfile.label"),
     "aria-describedby": "raw-profile-hint" });
   const file = el("input", { type: "file", accept: ".dcp", hidden: true });
   const button = el("button", { type: "button", class: "link-button raw-profile-import" });
@@ -16,17 +23,15 @@ export function mountRawProfiles({ toast } = {}) {
   const lensLabel = el("span");
   const lensHint = el("p", { id: "lens-profile-hint", class: "field-hint", "aria-live": "polite" });
   const lensRow = el("label", { class: "lens-profile-toggle" }, lensToggle, lensLabel);
-  section.setAttribute("aria-labelledby", "raw-profile-title");
-  section.append(el("div", { class: "raw-profile-head" }, title, button), cameraName, select, file, hint, lensRow, lensHint);
+  body.append(el("div", { class: "raw-profile-head" }, cameraName, button), select, file, hint, lensRow, lensHint);
   let entries = [], camera = "", isRaw = false, busy = false, request = 0;
   let lens = null;
   function sync() {
     const state = store.get();
     section.hidden = !isRaw;
-    title.textContent = t("rawProfile.label");
+    select.setAttribute("aria-label", t("rawProfile.label"));
     button.textContent = t("rawProfile.choose");
     cameraName.textContent = camera;
-    cameraName.hidden = !camera;
     hint.textContent = entries.length ? t("rawProfile.local", { count: entries.length })
       : camera ? t("rawProfile.empty") : t("rawProfile.unknown");
     const choices = [...entries];
@@ -43,6 +48,12 @@ export function mountRawProfiles({ toast } = {}) {
     lensHint.textContent = lens?.available
       ? t(lensToggle.checked ? "lensProfile.enabled" : "lensProfile.disabled", { name: lens.profileName })
       : t(lens?.lens ? "lensProfile.unmatched" : "lensProfile.unknown");
+    const profile = state.rawProfile
+      ? (choices.find((entry) => entry.rawProfile === state.rawProfile)?.rawProfileName || "DCP")
+      : t("rawProfile.default");
+    const text = lensToggle.checked ? t("rawProfile.summaryLens", { profile }) : profile;
+    summary.textContent = text;
+    summary.title = text;
   }
   lensToggle.addEventListener("change", () => store.set({ lensCorrection: lensToggle.checked }));
   function apply(entry) {

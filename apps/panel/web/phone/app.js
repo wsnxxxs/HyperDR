@@ -2,6 +2,7 @@ import { decodePreview } from "/js/preview/packet.js";
 import { assessPhoneHdr } from "/js/preview/phone-diagnostics.js";
 import { createSdrGpuRenderer } from "/js/preview/sdr-gpu.js";
 import { renderSdr } from "/js/preview/cpu.js";
+import { bindSaveAction } from "/js/run/save.js";
 
 const $ = (id) => document.getElementById(id);
 const setupCheck = new URLSearchParams(location.search).get("check") || "";
@@ -51,9 +52,18 @@ function syncExports(entries) {
     const info = document.createElement("div");
     const title = document.createElement("h3"); title.textContent = entry.name;
     const meta = document.createElement("p"); meta.textContent = `${(entry.bytes / 1048576).toFixed(1)} MB · ${new Date(entry.createdAt * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
-    const save = document.createElement("a"); save.textContent = "保存到手机"; save.download = entry.name;
-    save.href = "/api/result?" + new URLSearchParams({ id: entry.sessionId, export: entry.id, download: "1" });
-    info.append(title, meta); card.append(mark, info, save); return card;
+    const saveState = document.createElement("p");
+    saveState.className = "save-state phone-save-state";
+    saveState.setAttribute("role", "status");
+    saveState.setAttribute("aria-live", "polite");
+    saveState.hidden = true;
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "phone-save-button";
+    bindSaveAction(save, saveState, () => ({
+      sessionId: entry.sessionId, exportId: entry.id, name: entry.name,
+    }), { downloadKey: "save.button.phone" });
+    info.append(title, meta, saveState); card.append(mark, info, save); return card;
   }));
 }
 function applySnapshot(next) {

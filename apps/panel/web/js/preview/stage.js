@@ -74,11 +74,13 @@ export function mountStage({ toast }) {
   const image = {
     source: null,
     frame: null,
-    // The comparison image is captured once for each uploaded/decode variant.
+    // Keep a neutral comparison for each uploaded/decode variant, upgrading
+    // its pixels whenever the effect requests a higher preview tier.
     // `source` and `frame` are replaced whenever a look slider moves, so using
     // either one for "原图" makes the supposedly untreated side follow the
     // adjustment as well.
     original: null,
+    originalEdge: 0,
     originalHistogram: null,
 
   };
@@ -154,27 +156,14 @@ export function mountStage({ toast }) {
     stage.style.height = `${height}px`;
   }
 
-  // Keep the comparison pixels independent from look reloads, while matching
-  // the intrinsic canvas size of the current native frame. Preview tiers can
-  // change when the window is resized, so the first cached ImageData may not
-  // have the same dimensions as the new HDR plane.
-  function paintOriginal(width, height) {
-    originalCanvas.width = width;
-    originalCanvas.height = height;
+  // CSS fits both layers to the same frame. Keep the original's native pixels
+  // instead of shrinking them to slider drafts or enlarging an old thumbnail.
+  function paintOriginal() {
+    originalCanvas.width = image.original.width;
+    originalCanvas.height = image.original.height;
     const context = originalCanvas.getContext(
       "2d", { colorSpace: "display-p3" }) || originalCanvas.getContext("2d");
-    if (image.original.width === width && image.original.height === height) {
-      context.putImageData(image.original, 0, 0);
-      return;
-    }
-    const sourceCanvas = document.createElement("canvas");
-    sourceCanvas.width = image.original.width;
-    sourceCanvas.height = image.original.height;
-    const sourceContext = sourceCanvas.getContext(
-      "2d", { colorSpace: "display-p3" }) || sourceCanvas.getContext("2d");
-    sourceContext.putImageData(image.original, 0, 0);
-    context.imageSmoothingEnabled = true;
-    context.drawImage(sourceCanvas, 0, 0, width, height);
+    context.putImageData(image.original, 0, 0);
   }
 
   function syncView() {
@@ -497,7 +486,7 @@ export function mountStage({ toast }) {
       previewOptimized: false, modelGainReady: false, optimizing: false,
       modelIdentity: null,
     });
-    stage.classList.remove("has-image", "is-comparing");
+    stage.classList.remove("has-image", "is-comparing", "is-loading");
     fitStageToImage();
     stage.removeAttribute("role");
     stage.removeAttribute("tabindex");
@@ -531,17 +520,27 @@ export function mountStage({ toast }) {
     const epoch = invalidateImage();
     if (!sessionId) { clear(); reportInitialCapability(); return; }
     setText(emptyTitle, t("stage.generating"));
+    // The first frame of a photograph: the empty card becomes a progress
+    // report. The bar is indeterminate, so the upload's percentage is cleared.
+    if (!image.source) {
+      stage.classList.add("is-loading");
+      progressBar.style.removeProperty("width");
+      setText(progressText, "");
+    }
 
     try {
       let state = store.get();
-      const requestedEdge = draft ? Math.min(previewTier() || DRAFT_PREVIEW_EDGE, DRAFT_PREVIEW_EDGE) : previewTier();
+      const referenceEdge = previewTier();
+      const requestedEdge = draft ? Math.min(referenceEdge || DRAFT_PREVIEW_EDGE, DRAFT_PREVIEW_EDGE) : referenceEdge;
       const fetchStarted = performance.now();
       let reference = null;
-      if (resetOriginal || !image.original) {
+      // Track the requested tier, not returned dimensions: small source photos
+      // must not trigger another reference decode on every adjustment.
+      if (resetOriginal || !image.original || (referenceEdge ?? Infinity) > image.originalEdge) {
         reference = await api.preview(sessionId, {
           options: { ...toOptions(referenceSettings(state.encoding)), colorGamut: state.colorGamut,
             clampSrgb: state.clampSrgb, rawProfile: state.rawProfile, lensCorrection: state.lensCorrection, useModel: false },
-          highlightRecovery: "blend", maxEdge: requestedEdge,
+          highlightRecovery: "blend", maxEdge: referenceEdge,
         });
         if (!isCurrentImage(epoch)) return;
         const sourceDomain = reference.metadata.inputDomain || "";
@@ -585,9 +584,11 @@ export function mountStage({ toast }) {
       if (!sameBase) image.source = planeToImageData(preview.base, width, height);
       if (reference) {
         image.original = planeToImageData(reference.base, reference.width, reference.height);
+        image.originalEdge = referenceEdge ?? Infinity;
         const referenceDiagnostic = diagnosticFrame(reference);
         image.originalHistogram = histogramFromPlane(referenceDiagnostic.base,
           referenceDiagnostic.width, referenceDiagnostic.height);
+        paintOriginal();
       }
       notifySource();
 
@@ -595,11 +596,6 @@ export function mountStage({ toast }) {
         if (canvas.width !== width) canvas.width = width;
         if (canvas.height !== height) canvas.height = height;
       }
-      // The comparison content remains the neutral reference, but its canvas is
-      // resampled to the current frame size so original and HDR share one
-      // intrinsic resolution at every preview tier.
-      if (resetOriginal || originalCanvas.width !== width || originalCanvas.height !== height
-          || !sameBase) paintOriginal(width, height);
       // Scope statistics use the untouched native linear planes. The 8-bit
       // image copy remains only for the original comparison canvas and zebra
       // presentation; folding HDR through a display shoulder here destroyed
@@ -612,6 +608,7 @@ export function mountStage({ toast }) {
 
       empty.style.display = "none";
       stage.classList.add("has-image");
+      stage.classList.remove("is-loading");
       fitStageToImage();
       stage.setAttribute("role", "button");
       stage.tabIndex = 0;
@@ -651,13 +648,19 @@ export function mountStage({ toast }) {
         clear(message);
         return;
       }
-      // A model artifact can disappear after a server restart or cleanup.
-      // Fall back to the mathematical frame; the state change schedules that
-      // reload while this catch keeps the last valid pixels visible.
-      if (error.status === 409 && store.get().previewOptimized) {
+      // A model-backed frame that failed leaves the last frame on screen, and
+      // that frame is not the AI result. Keeping "AI 优化" selected over it
+      // claimed an enhancement the photograph never received, so any failure
+      // returns to the mathematical frame, which the state change reloads. A
+      // model artifact that disappeared after a restart or cleanup (409) is
+      // the common case, and says so.
+      if (store.get().previewOptimized) {
         modelGain = null;
         analysis.modelGain = null;
         store.set({ previewOptimized: false, modelGainReady: false, modelIdentity: null });
+        toast(error.status === 409 ? t("adjust.aiExpired")
+          : t("adjust.aiPreviewFailed", { detail: message }), true);
+        return;
       }
       if (!image.frame) {
         clear(message);
@@ -893,6 +896,53 @@ export function mountStage({ toast }) {
     if (["Enter", " "].includes(event.key)) endCompare(event);
   });
 
+  /* Space compares without the canvas having focus first: after a click on
+   * the photo's surroundings or when nothing is focused, the documented
+   * shortcut used to do nothing. It is an allow-list -- the page itself or the
+   * viewer area -- because everything else focusable (buttons, fields, the
+   * rail's collapsible headers) already has its own meaning for Space. */
+  const comparesOnSpace = (target) => target === document.body || target === document.documentElement
+    || (target instanceof Element && Boolean(target.closest(".app__stage"))
+      && !target.closest("button, a, input, select, textarea, summary, [contenteditable], [role='slider']"));
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== " " || event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.target === stage || !comparesOnSpace(event.target) || !image.source) return;
+    event.preventDefault();
+    beginCompare();
+  });
+  document.addEventListener("keyup", (event) => {
+    if (event.key === " " && event.target !== stage) endCompare();
+  });
+  window.addEventListener("blur", () => endCompare());
+
+  /* Wheel zoom, anchored at the pointer so the detail under it stays put.
+   * A trackpad pinch arrives as a ctrl+wheel and is honoured everywhere; a
+   * plain wheel zooms only in the desktop layout, where the stage never
+   * scrolls -- in the stacked phone-width layout it scrolls the page. */
+  const wideLayout = window.matchMedia("(width >= 860px)");
+  stage.addEventListener("wheel", (event) => {
+    if (!image.source || (!event.ctrlKey && !wideLayout.matches)) return;
+    event.preventDefault();
+    const state = store.get();
+    const pixels = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
+    const next = clamp(state.viewerZoom * Math.exp(-pixels * (event.ctrlKey ? 0.01 : 0.0015)), 1, 4);
+    if (Math.abs(next - state.viewerZoom) < 1e-4) return;
+    if (next <= 1.001) { store.set({ viewerZoom: 1, viewerPanX: 0, viewerPanY: 0 }); return; }
+    const box = frame.getBoundingClientRect();
+    const pointerX = event.clientX - (box.left + box.width / 2);
+    const pointerY = event.clientY - (box.top + box.height / 2);
+    const limitX = frame.clientWidth * (state.viewerZoom - 1) / 2;
+    const limitY = frame.clientHeight * (state.viewerZoom - 1) / 2;
+    const panX = clamp(state.viewerPanX, -limitX, limitX);
+    const panY = clamp(state.viewerPanY, -limitY, limitY);
+    const ratio = next / state.viewerZoom;
+    store.set({
+      viewerZoom: Number(next.toFixed(4)),
+      viewerPanX: pointerX - (pointerX - panX) * ratio,
+      viewerPanY: pointerY - (pointerY - panY) * ratio,
+    });
+  }, { passive: false });
+
   /* ── reactions ────────────────────────────────────────────────────── */
 
   store.watchAny(["viewMode", "comparing", "splitRatio"], () => { syncView(); schedule(); }, { immediate: true });
@@ -901,6 +951,9 @@ export function mountStage({ toast }) {
     stage.setAttribute("aria-busy", String(state.uploading));
     selectButton.disabled = state.uploading;
     uploadOverlay.hidden = !state.uploading;
+    // The first photo arrives on the empty card, whose headline would
+    // otherwise keep inviting a drop while the bar fills underneath it.
+    if (state.uploading && !image.source) setText(emptyTitle, t("stage.reading"));
   });
   store.watch("uploadProgress", (fraction) => {
     const percent = Math.round(fraction * 100);
@@ -1006,7 +1059,10 @@ export function mountStage({ toast }) {
       modelGain = null;
       analysis.modelGain = null;
       store.set({ previewOptimized: false, modelGainReady: false, modelIdentity: null });
-      toast(error.message || t("adjust.aiFailed"), true);
+      // The converter's reason is kept, but it is English engine prose; the
+      // sentence around it says what happened and what is on screen now.
+      toast(error.message ? t("adjust.aiFailedDetail", { detail: error.message })
+        : t("adjust.aiFailed"), true);
     } finally {
       if (current()) store.set({ optimizing: false });
     }

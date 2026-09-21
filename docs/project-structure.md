@@ -13,11 +13,13 @@ HyperDR/
 ├── HyperDR_Model/      # Optional “优化” inference and training project
 ├── docs/               # Current guides and references
 │   └── archive/        # Dated evidence that is no longer living guidance
+├── designs/            # Icon, logo and darkroom-layout explorations
 ├── schema/             # Checked-in settings and report contracts
 ├── scripts/            # Local launch, Windows setup and development helpers
 ├── packaging/          # Release assembly, smoke test and install guide
 ├── tests/              # Checks that cross more than one owning area
 ├── cmake/              # Native build helpers
+├── .github/workflows/  # CI: Windows core, panel, front-end and manual macOS T2
 ├── Start.bat           # Browser/LAN entry point
 └── Setup-HTTPS.bat     # One-time iPhone HDR setup
 ```
@@ -39,6 +41,13 @@ If a change fits one row, keep it there. Add a new top-level directory only
 when it represents a new independently runnable product surface or a genuinely
 separate data lifecycle.
 
+`docs/` holds living guidance only. A dated review, audit, acceptance record or
+optimisation write-up is evidence about one revision, so it goes straight into
+`docs/archive/` and gets a row in the archive table of
+[docs/README.md](README.md). `designs/` is the same kind of record for visual
+exploration: the concepts it holds are not a claim about the shipped UI.
+Neither tree is a place to look for how the product behaves today.
+
 ## Native converter modules
 
 The C++ converter keeps seven small build boundaries because their dependency
@@ -59,8 +68,10 @@ app → codec → gainmap → look → image → foundation
 
 Public headers remain under each module's `include/hyperdr/<module>/` tree;
 implementation stays in `src/`, and a module's focused C++ checks stay in its
-own `tests/` directory. This is an existing build boundary, not a template that
-every new feature must copy.
+own `tests/` directory. The one exception is `gainmap`'s second include root,
+`include/hyperdr/model/`, which carries `ncnn_runtime.hpp` so the CLI can
+install a model runtime without including gain-map internals. This is an
+existing build boundary, not a template that every new feature must copy.
 
 ## Shared contracts
 

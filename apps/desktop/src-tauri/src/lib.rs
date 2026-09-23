@@ -11,8 +11,8 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use tauri::webview::PageLoadEvent;
+use tauri::DragDropEvent;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
-use tauri::{DragDropEvent, WebviewEvent};
 #[cfg(not(debug_assertions))]
 use tauri_plugin_shell::process::CommandChild;
 #[cfg(not(debug_assertions))]
@@ -101,8 +101,13 @@ impl NativeDropQueue {
 }
 
 fn is_panel_url(url: &Url) -> bool {
-    matches!(url.scheme(), "http" | "https")
-        && matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "::1"))
+    let is_loopback_host = match url.host() {
+        Some(url::Host::Domain(host)) => host == "localhost",
+        Some(url::Host::Ipv4(address)) => address.is_loopback(),
+        Some(url::Host::Ipv6(address)) => address.is_loopback(),
+        None => false,
+    };
+    matches!(url.scheme(), "http" | "https") && is_loopback_host
 }
 
 fn take_native_drop_script(app: &AppHandle) -> Option<(Vec<String>, String)> {
@@ -182,10 +187,36 @@ fn create_splash_window(app: &AppHandle) -> Result<(), String> {
         .decorations(false)
         .initialization_script("window.__HYPERDR_FRAMELESS__ = true;");
     let window = window.build().map_err(|error| error.to_string())?;
-    window.on_window_event(move |event| {
-        if matches!(event, WindowEvent::CloseRequested { .. }) {
-            handle.state::<PanelProcess>().stop();
+    window.on_window_event(move |event| match event {
+        WindowEvent::CloseRequested { .. } => handle.state::<PanelProcess>().stop(),
+        WindowEvent::DragDrop(DragDropEvent::Drop { paths, .. }) => {
+            let paths = paths
+                .iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect::<Vec<_>>();
+            if paths.is_empty() {
+                return;
+            }
+            handle.state::<NativeDropQueue>().append(paths);
+            // Splash-page drops remain in Rust until the real panel has
+            // finished navigating. Once the panel is live, deliver them
+            // immediately and remove them only after eval succeeds.
+            let Some(window) = handle.get_webview_window("main") else {
+                return;
+            };
+            let panel_loaded = window.url().map(|url| is_panel_url(&url)).unwrap_or(false);
+            if !panel_loaded {
+                return;
+            }
+            let Some((queued, script)) = take_native_drop_script(&handle) else {
+                return;
+            };
+            if let Err(error) = window.eval(&script) {
+                handle.state::<NativeDropQueue>().prepend(queued);
+                eprintln!("Unable to forward queued native file drop to the panel: {error}");
+            }
         }
+        _ => {}
     });
     Ok(())
 }
@@ -307,33 +338,6 @@ pub fn run() {
         .manage(NativeDropQueue::default())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
-        .on_webview_event(|webview, event| {
-            if let WebviewEvent::DragDrop(DragDropEvent::Drop { paths, .. }) = event {
-                let paths = paths
-                    .iter()
-                    .map(|path| path.to_string_lossy().into_owned())
-                    .collect::<Vec<_>>();
-                if paths.is_empty() {
-                    return;
-                }
-                let app = webview.app_handle();
-                app.state::<NativeDropQueue>().append(paths);
-                // Splash-page drops remain in Rust until the real panel has
-                // finished navigating. Once the panel is live, deliver them
-                // immediately and remove them only after eval succeeds.
-                let panel_loaded = webview.url().map(|url| is_panel_url(&url)).unwrap_or(false);
-                if !panel_loaded {
-                    return;
-                }
-                let Some((queued, script)) = take_native_drop_script(app) else {
-                    return;
-                };
-                if let Err(error) = webview.eval(&script) {
-                    app.state::<NativeDropQueue>().prepend(queued);
-                    eprintln!("Unable to forward native file drop to the panel: {error}");
-                }
-            }
-        })
         .setup(|app| {
             create_splash_window(app.handle())?;
             spawn_panel(app.handle())?;

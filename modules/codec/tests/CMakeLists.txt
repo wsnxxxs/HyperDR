@@ -13,7 +13,12 @@ if(HYPERDR_WITH_CODECS)
   # dependency private. Without this the only test that exercises the real
   # codec paths fails to compile, which is how it came to be skipped silently.
   hyperdr_add_test(codec_test LINK HyperDR::codec heif avif PNG::PNG lcms2::lcms2)
+  hyperdr_add_test(heif_parallel_test LINK HyperDR::codec heif)
   hyperdr_add_test(alpha_decode_test LINK HyperDR::codec heif avif)
+  if(TARGET heif_parallel_test)
+    hyperdr_restore_x265_multibit(heif_parallel_test)
+    hyperdr_copy_libultrahdr(heif_parallel_test)
+  endif()
   if(TARGET alpha_decode_test)
     hyperdr_restore_x265_multibit(alpha_decode_test)
     hyperdr_copy_libultrahdr(alpha_decode_test)

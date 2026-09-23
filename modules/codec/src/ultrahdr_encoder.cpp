@@ -263,8 +263,41 @@ std::vector<std::uint8_t> encode_ultrahdr_jpeg(const FloatImage& hdr,
   if (!output || !output->data || output->data_sz == 0) {
     throw std::runtime_error("libultrahdr returned an empty JPEG/R stream");
   }
-  const auto* begin = static_cast<const std::uint8_t*>(output->data);
-  return {begin, begin + output->data_sz};
+  // API3 computes gain from the actual compressed base, but its display
+  // capacity otherwise remains the requested budget. Repackage the same JPEG
+  // payloads with the measured gain maximum, just like the explicit-map path.
+  // No pixels are decoded or JPEG-compressed again here.
+  std::unique_ptr<uhdr_codec_private_t, DecoderDeleter> probe(uhdr_create_decoder());
+  if (!probe) throw std::runtime_error("cannot allocate libultrahdr metadata probe");
+  auto generated = *output;
+  check_uhdr(uhdr_dec_set_image(probe.get(), &generated), "open generated Ultra HDR metadata");
+  check_uhdr(uhdr_dec_probe(probe.get()), "probe generated Ultra HDR metadata");
+  const auto* measured = uhdr_dec_get_gainmap_metadata(probe.get());
+  const auto* gain_jpeg = uhdr_dec_get_gainmap_image(probe.get());
+  if (!measured || !gain_jpeg || !gain_jpeg->data || !gain_jpeg->data_sz)
+    throw std::runtime_error("generated Ultra HDR gain metadata is missing");
+  auto gain_metadata = *measured;
+  gain_metadata.hdr_capacity_max = std::max({gain_metadata.max_content_boost[0],
+      gain_metadata.max_content_boost[1], gain_metadata.max_content_boost[2],
+      gain_metadata.hdr_capacity_min * 1.0001F});
+  uhdr_compressed_image_t gain{};
+  gain.data = gain_jpeg->data;
+  gain.data_sz = gain.capacity = gain_jpeg->data_sz;
+  gain.cg = UHDR_CG_UNSPECIFIED;
+  gain.ct = UHDR_CT_UNSPECIFIED;
+  gain.range = UHDR_CR_UNSPECIFIED;
+  std::unique_ptr<uhdr_codec_private_t, EncoderDeleter> repack(uhdr_create_encoder());
+  if (!repack) throw std::runtime_error("cannot allocate libultrahdr repackager");
+  check_uhdr(uhdr_enc_set_compressed_image(repack.get(), &base, UHDR_BASE_IMG),
+             "reuse Ultra HDR base JPEG");
+  check_uhdr(uhdr_enc_set_gainmap_image(repack.get(), &gain, &gain_metadata),
+             "set measured Ultra HDR gain capacity");
+  check_uhdr(uhdr_encode(repack.get()), "package measured Ultra HDR gain capacity");
+  const auto* packaged = uhdr_get_encoded_stream(repack.get());
+  if (!packaged || !packaged->data || !packaged->data_sz)
+    throw std::runtime_error("libultrahdr returned an empty repackaged JPEG/R stream");
+  const auto* begin = static_cast<const std::uint8_t*>(packaged->data);
+  return {begin, begin + packaged->data_sz};
 }
 
 std::vector<std::uint8_t> encode_ultrahdr_jpeg(const PhotoRenditions& images,

@@ -6,6 +6,7 @@
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/foundation/file_io.hpp"
+#include "internal/icc_profiles.hpp"
 
 #include <jpeglib.h>
 #include <ultrahdr_api.h>
@@ -127,8 +128,11 @@ std::vector<std::uint8_t> make_base_jpeg(const FloatImage& image,
     }
   }
   const auto exif = make_minimal_exif(metadata);
+  // Gamut compression retains P3 coordinates even when clamp_srgb is enabled.
+  // Both modes therefore store Display P3 primaries with the sRGB transfer.
+  const auto icc = codec::display_p3_profile();
   return compress_jpeg(rgb.data(), image.width, image.height, 3, JCS_RGB, quality, &exif,
-                       nullptr, full_chroma);
+                       &icc, full_chroma);
 }
 
 std::vector<std::uint8_t> make_gain_jpeg(const FloatImage& image, int quality) {
@@ -440,11 +444,12 @@ void verify_ultrahdr_jpeg(const std::vector<std::uint8_t>& bytes) {
   check_uhdr(uhdr_dec_set_out_color_transfer(decoder.get(), UHDR_CT_LINEAR),
              "set Ultra HDR verification transfer");
   check_uhdr(uhdr_dec_probe(decoder.get()), "probe Ultra HDR JPEG");
+  const auto* icc = uhdr_dec_get_icc(decoder.get());
   if (uhdr_dec_get_image_width(decoder.get()) <= 0 ||
       uhdr_dec_get_image_height(decoder.get()) <= 0 ||
       uhdr_dec_get_gainmap_width(decoder.get()) <= 0 ||
       uhdr_dec_get_gainmap_height(decoder.get()) <= 0 ||
-      !uhdr_dec_get_gainmap_metadata(decoder.get()) || !uhdr_dec_get_icc(decoder.get())) {
+      !uhdr_dec_get_gainmap_metadata(decoder.get()) || !icc || !icc->data || icc->data_sz == 0) {
     throw std::runtime_error("Ultra HDR JPEG probe returned incomplete base/gain-map data");
   }
   check_uhdr(uhdr_decode(decoder.get()), "decode reconstructed Ultra HDR rendition");

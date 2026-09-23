@@ -1,4 +1,5 @@
 #include "hyperdr/gainmap/rendition.hpp"
+#include "hyperdr/gainmap/coding.hpp"
 #include "hyperdr/gainmap/gain_map.hpp"
 #include "hyperdr/gainmap/reconstruct.hpp"
 #include "hyperdr/image/color.hpp"
@@ -60,8 +61,8 @@ void test_final_gain_statistics() {
   RenderOptions options; options.auto_headroom=false; options.headroom_stops=3;
   auto photo=render_renditions(source,options,{}, {InputDomain::kDisplayReferredHdr,4},RenderTarget::Hdr);
   require(photo.stats.below_knee_relative_difference_max<1e-6F,"direct HDR must leave this dark field alone");
-  // The cell-averaged packager is what renditions whose SDR endpoint carries
-  // its own grade still use; an HDR source itself is packaged exactly below.
+  // Exercise the normal Apple endpoint packager rather than the HDR-source
+  // special case below.
   photo.hdr_is_source=false;
   const auto packed=gain_map_from_renditions(photo);
   const auto hdr=reconstruct_gain_map(packed.base_linear,packed.gain_map,packed.metadata,packed.headroom_stops);
@@ -71,7 +72,7 @@ void test_final_gain_statistics() {
     peak=std::max(peak,alternate);
     if(x<32) difference=std::max(difference,std::abs(alternate/.1F-1));
   }
-  require(difference>.4F,"fixture must expose bilinear spill into dark pixels");
+  require(difference<1e-6F,"full-resolution packaging must not spill gain into dark pixels");
   require(std::abs(packed.stats.below_knee_relative_difference_max-difference)<1e-5F,
       "gain-map report must measure the final interpolated dark-field change");
   require(std::abs(packed.stats.rendered_peak-peak)<1e-6F,"gain-map report must measure the reconstructed peak");
@@ -105,13 +106,15 @@ void test_zero_and_spatial_gain() {
     for(float strength:{0.0F,.4F,1.0F}) {
       options.gain_strength=strength;
       const InputDescription input{domain,1};
-      const auto legacy=make_gain_map(source,options,{},input);
-      const auto packed=gain_map_from_renditions(render_renditions(source,options,{},input,RenderTarget::Hdr));
-      require(legacy.base_linear.pixels==packed.base_linear.pixels,"retained grid must preserve base");
-      const auto old_hdr=reconstruct_gain_map(legacy.base_linear,legacy.gain_map,legacy.metadata,legacy.headroom_stops);
+      const auto photo=render_renditions(source,options,{},input,RenderTarget::Hdr);
+      const auto packed=gain_map_from_renditions(photo);
+      require(photo.sdr.pixels==packed.base_linear.pixels,"packaging must preserve the final base");
       const auto new_hdr=reconstruct_gain_map(packed.base_linear,packed.gain_map,packed.metadata,packed.headroom_stops);
-      for(std::size_t i=0;i<old_hdr.pixels.size();++i)
-        require(std::abs(old_hdr.pixels[i]-new_hdr.pixels[i])<1e-5F,"packaging must not blur highlight edges again");
+      for(std::size_t i=0;i<new_hdr.pixels.size();++i) {
+        const float expected=photo.hdr.pixels[i];
+        require(std::abs(expected-new_hdr.pixels[i])/std::max(expected,1e-3F)<.015F,
+            "packaging must retain the final HDR endpoint within one gain-code step");
+      }
     }
   }
 }
@@ -172,11 +175,76 @@ void test_hdr_source_reconstructs_itself() {
   require(packed.stats.below_knee_relative_difference_max<1e-4F,"the report sees no dark-field spill");
   require(std::abs(packed.stats.rendered_peak-headroom)<5e-3F,"the report sees the declared peak restored");
 
-  // Grading that gives the SDR endpoint its own colour keeps the averaged map.
+  // Grading that gives the SDR endpoint its own colour is also derived from
+  // the final endpoints without another spatial average.
   photo=render_renditions(source,options,{},input,RenderTarget::Hdr);
   photo.hdr_is_source=false;
-  const auto averaged=gain_map_from_renditions(photo);
-  require(averaged.gain_map.width<source.width,"graded renditions keep the low-frequency map");
+  const auto graded=gain_map_from_renditions(photo);
+  require(graded.gain_map.width==source.width && graded.gain_map.height==source.height,
+      "graded renditions must keep full-resolution endpoint gain");
+}
+
+void test_rendition_codes_use_serialized_metadata() {
+  PhotoRenditions photo;
+  photo.sdr=FloatImage(257,1,3);
+  photo.hdr=FloatImage(257,1,3);
+  photo.stats.headroom_stops=.1234564F;
+  photo.stats.headroom_linear=std::exp2(photo.stats.headroom_stops);
+  std::vector<float> intended(photo.sdr.width);
+  for(std::uint32_t x=0;x<photo.sdr.width;++x) {
+    const float gain=photo.stats.headroom_stops*static_cast<float>(x)/256.0F;
+    for(unsigned c=0;c<3;++c) {
+      photo.sdr.at(x,0,c)=.25F;
+      photo.hdr.at(x,0,c)=.25F*std::exp2(gain);
+    }
+    intended[x]=std::log2(p3_luminance(photo.hdr.at(x,0,0),photo.hdr.at(x,0,1),photo.hdr.at(x,0,2))/.25F);
+  }
+  const float requested_max=*std::max_element(intended.begin(),intended.end());
+  const auto packed=gain_map_from_renditions(photo);
+  const float stored_max=rational_value(packed.metadata.gain_max);
+  const float stored_gamma=rational_value(packed.metadata.gamma);
+  bool exposes_old_float_path=false;
+  for(std::uint32_t x=0;x<photo.sdr.width;++x) {
+    const float stored_expected=quantize_gain_code_dithered(
+        encode_gain_code(intended[x]/stored_max,stored_gamma),x,0);
+    const float float_expected=quantize_gain_code_dithered(
+        encode_gain_code(intended[x]/requested_max,stored_gamma),x,0);
+    require(packed.gain_map.at(x,0,0)==stored_expected,
+        "rendition codes must be quantized against serialized gain metadata");
+    exposes_old_float_path|=stored_expected!=float_expected;
+  }
+  require(exposes_old_float_path,"quantization fixture did not distinguish float and serialized ranges");
+  require(packed.headroom_stops==stored_max && packed.stats.gain_max_stops==stored_max,
+      "runtime headroom must match serialized gain metadata");
+}
+
+void test_graded_sdr_endpoint_packaging() {
+  FloatImage source(33,3,3);
+  for(std::uint32_t y=0;y<source.height;++y) for(std::uint32_t x=0;x<source.width;++x) {
+    const float v=.02F+.96F*static_cast<float>(x)/(source.width-1);
+    source.at(x,y,0)=v;
+    source.at(x,y,1)=v*(.75F+.1F*y);
+    source.at(x,y,2)=v*.55F;
+  }
+  ColorLut lut;
+  lut.size=2;
+  lut.values={{.03F,.01F,.06F},{.72F,.94F,.81F}};
+  ColorLutOptions grade{"endpoint-test.cube",LutSpace::Pq,LutSpace::Pq,.5F};
+  RenderOptions options;
+  options.auto_headroom=false;
+  options.headroom_stops=2.0F;
+  options.look.headroom_max_stops=2.0F;
+  const auto graded=render_graded_photo(source,options,{},
+      {InputDomain::kDisplayReferredSdr,1.0F},RenderTarget::Hdr,grade,&lut);
+  const auto packed=gain_map_from_renditions(graded,GainMapWriterProfile::iso_generic);
+  const auto reconstructed=reconstruct_gain_map(
+      packed.base_linear,packed.gain_map,packed.metadata,packed.headroom_stops);
+  require(packed.base_linear.pixels==graded.sdr.pixels,
+      "packaging must retain the graded SDR endpoint");
+  for(std::size_t i=0;i<reconstructed.pixels.size();++i) {
+    require(std::abs(reconstructed.pixels[i]-graded.hdr.pixels[i])<.01F,
+        "packaging must derive gain from the graded HDR endpoint");
+  }
 }
 
 // A Rec.2020 green outside P3 decodes with negative P3 components. The HDR
@@ -334,6 +402,8 @@ int main() {
   try { test_zero_and_spatial_gain(); test_model_grading(); test_final_gain_statistics();
         test_hdr_source_reconstructs_itself(); test_hdr_source_outside_p3();
         test_independent_rgb_renditions(); test_scene_base_without_gain_preparation();
+        test_rendition_codes_use_serialized_metadata();
+        test_graded_sdr_endpoint_packaging();
         test_content_light_mapping(); }
   catch(const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
   std::cout<<"graded model reconstruction and final gain statistics passed\n";

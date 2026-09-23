@@ -11,9 +11,11 @@
 #include "hyperdr/image/fidelity.hpp"
 #include "hyperdr/image/transfer.hpp"
 
+#include <avif/avif.h>
 #include <libheif/heif.h>
 #include <libheif/heif_properties.h>
 #include <png.h>
+#include <lcms2.h>
 
 #include <algorithm>
 #include <array>
@@ -62,15 +64,34 @@ float mean_luminance(const hyperdr::FloatImage& image) {
   return count == 0 ? 0.0F : static_cast<float>(total / count);
 }
 
-void require_content_peak(const hyperdr::DecodedImage& decoded, const hyperdr::FloatImage& source) {
+std::array<std::uint16_t, 2> expected_content_light(
+    const hyperdr::FloatImage& source) {
+  // ITU-T H.274 8.10.2 defines MaxCLL from max(R, G, B) in linear light,
+  // deliberately allowing saturated colours to exceed their CIE luminance;
+  // MaxPALL averages that same per-sample light level over the picture.
   float peak = 0;
+  double sum = 0;
   for (unsigned y = 0; y < source.height; ++y)
     for (unsigned x = 0; x < source.width; ++x) {
       const auto rgb = hyperdr::p3_to_rec2020(source.at(x,y,0), source.at(x,y,1), source.at(x,y,2));
-      peak = std::max({peak, rgb[0], rgb[1], rgb[2]});
+      const float light = std::max({0.0F, rgb[0], rgb[1], rgb[2]});
+      peak = std::max(peak, light);
+      sum += light;
     }
-  const float expected = std::ceil(peak * hyperdr::kReferenceWhiteNits);
-  require(decoded.content_peak_nits && std::abs(*decoded.content_peak_nits - expected) < 0.01F,
+  const auto clamp_light = [](double nits) {
+    return static_cast<std::uint16_t>(
+        std::clamp(std::ceil(nits), 0.0, 10000.0));
+  };
+  const double count = static_cast<double>(source.width) * source.height;
+  return {clamp_light(peak * hyperdr::kReferenceWhiteNits),
+          clamp_light(count > 0 ? sum * hyperdr::kReferenceWhiteNits / count : 0)};
+}
+
+void require_content_peak(const hyperdr::DecodedImage& decoded,
+                          const hyperdr::FloatImage& source) {
+  const auto expected = expected_content_light(source);
+  require(decoded.content_peak_nits &&
+              std::abs(*decoded.content_peak_nits - expected[0]) < 0.01F,
           "HDR raster lost encoded maxRGB content-light metadata");
   require(decoded.describe_input().content_peak_nits == decoded.content_peak_nits,
           "HDR input description lost content-light metadata");
@@ -806,6 +827,167 @@ void check_rgb_ultrahdr(const hyperdr::PhotoMetadata& metadata) {
   std::cout << "Graded RGB Ultra HDR MSE: " << error / photo.hdr.pixels.size() << '\n';
 }
 
+void check_ultrahdr_icc(const hyperdr::PhotoMetadata& metadata) {
+  hyperdr::PhotoRenditions photo;
+  photo.sdr = hyperdr::FloatImage(32, 32, 3);
+  std::fill(photo.sdr.pixels.begin(), photo.sdr.pixels.end(), .2F);
+  photo.hdr = photo.sdr;
+  for (auto& value : photo.hdr.pixels) value *= 2;
+  photo.stats.headroom_stops = 1;
+  photo.stats.headroom_linear = 2;
+  for (bool clamp : {false, true}) for (bool pair : {false, true}) {
+    photo.clamp_srgb = clamp;
+    auto bytes = pair ? hyperdr::encode_ultrahdr_jpeg(photo, metadata, 95)
+        : hyperdr::encode_ultrahdr_jpeg(hyperdr::gain_map_from_renditions(photo), metadata, 95);
+    hyperdr::verify_ultrahdr_jpeg(bytes);
+    constexpr std::string_view signature = "ICC_PROFILE";
+    const auto marker = std::search(bytes.begin(), bytes.end(), signature.begin(), signature.end());
+    require(marker != bytes.end(), "Ultra HDR primary must carry an ICC profile");
+    // APP2 identifier, terminator, sequence number and chunk count precede ICC.
+    const auto start = marker + 14;
+    const auto profile = cmsOpenProfileFromMem(&*start,
+        static_cast<cmsUInt32Number>(bytes.end() - start));
+    require(profile != nullptr, "Ultra HDR ICC must be readable by a colour manager");
+    const auto* red = static_cast<const cmsCIEXYZ*>(cmsReadTag(profile, cmsSigRedColorantTag));
+    const auto* curve = static_cast<const cmsToneCurve*>(cmsReadTag(profile, cmsSigRedTRCTag));
+    const bool valid = red && curve && std::abs(red->X - .5151) < .001 &&
+        std::abs(cmsEvalToneCurveFloat(curve, .02F) - hyperdr::srgb_eotf(.02F)) < 1e-5F;
+    cmsCloseProfile(profile);
+    require(valid, "Ultra HDR pixels require Display P3 primaries and an sRGB toe, including gamut clamp");
+    // Hide only the identifier, preserving JPEG lengths and MPF offsets.
+    *marker = 'X';
+    bool rejected = false;
+    try { hyperdr::verify_ultrahdr_jpeg(bytes); }
+    catch (const std::runtime_error& error) {
+      rejected = std::string_view(error.what()).find("incomplete base/gain-map data") != std::string_view::npos;
+    }
+    require(rejected, "Ultra HDR verification must reject an empty ICC block even when its pointer exists");
+  }
+}
+
+std::vector<std::uint8_t> encode_icc_only_heic() {
+  std::unique_ptr<heif_context, TestContextDeleter> context(heif_context_alloc());
+  require(context != nullptr, "cannot allocate the ICC-only fixture context");
+  heif_encoder* encoder_raw = nullptr;
+  require_heif(heif_context_get_encoder_for_format(context.get(), heif_compression_HEVC,
+                                                   &encoder_raw),
+               "get the ICC-only fixture encoder");
+  std::unique_ptr<heif_encoder, TestEncoderDeleter> encoder(encoder_raw);
+  require_heif(heif_encoder_set_lossy_quality(encoder.get(), 90),
+               "set the ICC-only fixture quality");
+
+  heif_image* image_raw = nullptr;
+  require_heif(heif_image_create(4, 4, heif_colorspace_RGB,
+                                 heif_chroma_interleaved_RGB, &image_raw),
+               "create the ICC-only fixture image");
+  std::unique_ptr<heif_image, TestImageDeleter> image(image_raw);
+  require_heif(heif_image_add_plane(image.get(), heif_channel_interleaved, 4, 4, 8),
+               "allocate the ICC-only fixture plane");
+  int stride = 0;
+  auto* plane = heif_image_get_plane(image.get(), heif_channel_interleaved, &stride);
+  require(plane != nullptr && stride >= 12, "ICC-only fixture plane is unavailable");
+  for (int y = 0; y < 4; ++y) {
+    for (int x = 0; x < 4; ++x) {
+      plane[y * stride + x * 3] = 48;
+      plane[y * stride + x * 3 + 1] = 96;
+      plane[y * stride + x * 3 + 2] = 144;
+    }
+  }
+
+  cmsHPROFILE profile = cmsCreate_sRGBProfile();
+  require(profile != nullptr, "cannot create the ICC-only fixture profile");
+  cmsUInt32Number profile_size = 0;
+  if (!cmsSaveProfileToMem(profile, nullptr, &profile_size) || profile_size == 0) {
+    cmsCloseProfile(profile);
+    throw std::runtime_error("cannot size the ICC-only fixture profile");
+  }
+  std::vector<std::uint8_t> icc(profile_size);
+  const bool saved = cmsSaveProfileToMem(profile, icc.data(), &profile_size) != 0;
+  cmsCloseProfile(profile);
+  require(saved, "cannot serialize the ICC-only fixture profile");
+  icc.resize(profile_size);
+  require_heif(heif_image_set_raw_color_profile(image.get(), "prof", icc.data(), icc.size()),
+               "set the ICC-only fixture profile");
+
+  std::unique_ptr<heif_encoding_options, TestEncodingOptionsDeleter> options(
+      heif_encoding_options_alloc());
+  require(options != nullptr, "cannot allocate the ICC-only fixture options");
+  options->macOS_compatibility_workaround_no_nclx_profile = 1;
+  heif_image_handle* handle_raw = nullptr;
+  require_heif(heif_context_encode_image(context.get(), image.get(), encoder.get(),
+                                         options.get(), &handle_raw),
+               "encode the ICC-only fixture");
+  std::unique_ptr<heif_image_handle, TestHandleDeleter> handle(handle_raw);
+  require_heif(heif_context_set_primary_image(context.get(), handle.get()),
+               "set the ICC-only fixture primary image");
+
+  std::vector<std::uint8_t> bytes;
+  heif_writer writer{1, &collect_heif_bytes};
+  require_heif(heif_context_write(context.get(), &writer, &bytes),
+               "write the ICC-only fixture");
+  return bytes;
+}
+
+void check_icc_only_heic() {
+  const auto bytes = encode_icc_only_heic();
+  std::unique_ptr<heif_context, TestContextDeleter> context(heif_context_alloc());
+  require(context != nullptr, "cannot allocate the ICC-only inspection context");
+  require_heif(heif_context_read_from_memory_without_copy(
+                   context.get(), bytes.data(), bytes.size(), nullptr),
+               "read the ICC-only fixture");
+  heif_image_handle* handle_raw = nullptr;
+  require_heif(heif_context_get_primary_image_handle(context.get(), &handle_raw),
+               "get the ICC-only fixture primary image");
+  std::unique_ptr<heif_image_handle, TestHandleDeleter> handle(handle_raw);
+  require(heif_image_handle_get_raw_color_profile_size(handle.get()) > 0,
+          "ICC-only fixture lost its ICC profile");
+  heif_color_profile_nclx* nclx = nullptr;
+  const auto nclx_error =
+      heif_image_handle_get_nclx_color_profile(handle.get(), &nclx);
+  require(nclx_error.code != heif_error_Ok || nclx == nullptr,
+          "ICC-only fixture unexpectedly contains nclx");
+  if (nclx) heif_nclx_color_profile_free(nclx);
+
+  const auto path = std::filesystem::temp_directory_path() /
+                    "hyperdr-codec-icc-only.heic";
+  hyperdr::write_binary_file_atomic(path, bytes, true);
+  try {
+    const auto decoded = hyperdr::decode_image(path);
+    require(decoded.linear_p3.width == 4 && decoded.linear_p3.height == 4,
+            "ICC-only HEIC did not decode normally");
+    bool rejected = false;
+    try {
+      hyperdr::verify_heic_decodable(path);
+    } catch (const std::runtime_error& error) {
+      rejected = std::string_view(error.what()).find(
+                     "neither Adaptive HDR nor nclx-signalled PQ/HLG") !=
+                 std::string_view::npos;
+    }
+    require(rejected, "ICC-only HEIC verification must fail cleanly without nclx");
+    std::filesystem::remove(path);
+  } catch (...) {
+    std::filesystem::remove(path);
+    throw;
+  }
+}
+
+void require_avif_content_light(const std::vector<std::uint8_t>& bytes,
+                                const hyperdr::FloatImage& source) {
+  std::unique_ptr<avifDecoder, decltype(&avifDecoderDestroy)> decoder(
+      avifDecoderCreate(), &avifDecoderDestroy);
+  require(decoder != nullptr, "cannot allocate the AVIF metadata decoder");
+  require(avifDecoderSetIOMemory(decoder.get(), bytes.data(), bytes.size()) ==
+              AVIF_RESULT_OK &&
+              avifDecoderParse(decoder.get()) == AVIF_RESULT_OK &&
+              avifDecoderNextImage(decoder.get()) == AVIF_RESULT_OK,
+          "cannot read AVIF content-light metadata");
+  const auto expected = expected_content_light(source);
+  require(decoder->image != nullptr &&
+              decoder->image->clli.maxCLL == expected[0] &&
+              decoder->image->clli.maxPALL == expected[1],
+          "AVIF CLLI does not use maxRGB for MaxCLL and MaxPALL");
+}
+
 void check_ultrahdr_pair(const hyperdr::PhotoMetadata& metadata) {
   hyperdr::PhotoRenditions photo;
   // Odd dimensions exercise half-float packed stride and JPEG edge padding.
@@ -887,6 +1069,8 @@ int main() {
     metadata.date_time = "2026:08:12 10:11:12";
     check_rgb_ultrahdr(metadata);
     check_ultrahdr_pair(metadata);
+    check_ultrahdr_icc(metadata);
+    check_icc_only_heic();
 
     // Default 8-bit output through the grid path (wider than one 2048 tile), with a
     // full decode and gain-map reconstruction regression, not just structure checks.
@@ -1092,6 +1276,7 @@ int main() {
                   !contains_text(avif, "ISO-21496-1"),
               "rendered AVIF incorrectly claims to carry a Gain Map");
       hyperdr::verify_avif_decodable(avif);
+      require_avif_content_light(avif, expected_avif);
       const auto decoded =
           decode_encoded_input(avif, pq ? "avif-pq" : "avif-hlg", ".avif");
       const auto reduced_avif = decode_encoded_input(avif,
@@ -1210,6 +1395,24 @@ int main() {
         require_heif(heif_context_get_primary_image_handle(geometry_context.get(), &geometry_raw),
             "get HEIC preview geometry");
         std::unique_ptr<heif_image_handle, TestHandleDeleter> geometry_handle(geometry_raw);
+        heif_color_profile_nclx* hdr_nclx_raw = nullptr;
+        require_heif(heif_image_handle_get_nclx_color_profile(
+                         geometry_handle.get(), &hdr_nclx_raw),
+                     "get BT.2100 HEIC nclx");
+        std::unique_ptr<heif_color_profile_nclx,
+                        decltype(&heif_nclx_color_profile_free)>
+            hdr_nclx(hdr_nclx_raw, &heif_nclx_color_profile_free);
+        require(hdr_nclx != nullptr &&
+                    hdr_nclx->matrix_coefficients ==
+                        heif_matrix_coefficients_ITU_R_BT_2020_2_non_constant_luminance,
+                "BT.2100 HEIC must use the same Rec.2020 YCbCr matrix as AVIF");
+        heif_content_light_level hdr_light{};
+        const auto expected_light = expected_content_light(expected_hdr);
+        require(heif_image_handle_get_content_light_level(
+                    geometry_handle.get(), &hdr_light) &&
+                    hdr_light.max_content_light_level == expected_light[0] &&
+                    hdr_light.max_pic_average_light_level == expected_light[1],
+                "HEIC CLLI does not use maxRGB for MaxCLL and MaxPALL");
         require(reduced.decode.sensor_width == static_cast<unsigned>(heif_image_handle_get_ispe_width(geometry_handle.get())) &&
                     reduced.decode.sensor_height == static_cast<unsigned>(heif_image_handle_get_ispe_height(geometry_handle.get())) &&
                     reduced.decode.sensor_width == decoded.decode.sensor_width &&

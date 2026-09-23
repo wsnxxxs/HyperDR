@@ -166,13 +166,16 @@ void test_hdr_lut_below_reference_white(const std::filesystem::path& file) {
   for(unsigned x=0;x<source.width;++x)
     for(int c=0;c<3;++c) source.at(x,0,c)=.1F+x;
   RenderOptions options;
-  for(auto space:{LutSpace::Hlg,LutSpace::Pq}) for(float level:{0.0F,.5F,1.0F}) {
-    const auto code=encode_lut_space({level,level,level},space);
+  for(auto space:{LutSpace::Hlg,LutSpace::Pq,LutSpace::SLog3})
+      for(auto output:{LutSpace::Hlg,LutSpace::Pq,LutSpace::Srgb,LutSpace::DisplayP3,LutSpace::Rec709})
+      for(float level:{0.0F,.5F,1.0F}) {
+    const auto code=encode_lut_space({level,level,level},output);
     ColorLut lut; lut.size=2; lut.values={code,code};
-    ColorLutOptions grade{file,space,space,1};
+    ColorLutOptions grade{file,space,output,1};
+    const InputDescription input{space==LutSpace::SLog3 ? InputDomain::kSceneReferred
+        : InputDomain::kDisplayReferredHdr,4};
     for(auto target:{RenderTarget::Sdr,RenderTarget::Hdr}) {
-      const auto result=render_graded_photo(source,options,{},
-          {InputDomain::kDisplayReferredHdr,4},target,grade,&lut);
+      const auto result=render_graded_photo(source,options,{},input,target,grade,&lut);
       require(result.stats.headroom_stops<1e-4F,
           "an HDR LUT ending below reference white must not invent HDR expansion");
       for(float c:result.sdr.pixels)

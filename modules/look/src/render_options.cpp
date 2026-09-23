@@ -27,9 +27,9 @@ void validate_render_options(const RenderOptions& options) {
   if (!options.auto_exposure && !std::isfinite(options.exposure_ev)) {
     throw std::invalid_argument("manual exposure must be finite");
   }
-  if (!(std::isfinite(options.exposure_bias_ev) && options.exposure_bias_ev >= 0.0F &&
+  if (!(std::isfinite(options.exposure_bias_ev) && options.exposure_bias_ev >= -2.0F &&
         options.exposure_bias_ev <= 2.0F)) {
-    throw std::invalid_argument("exposure bias must be in [0, 2]");
+    throw std::invalid_argument("exposure bias must be in [-2, 2]");
   }
   validate_look_options(options.look);
   if (options.auto_headroom) return;

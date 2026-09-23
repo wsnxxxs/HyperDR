@@ -43,9 +43,8 @@ std::array<float, 3> fit_unit_cube(std::array<float, 3> rgb) {
 }
 
 // Packages an HDR rendition that has to decode back to itself.
-// render_renditions shares the HDR-source shoulder with
-// make_display_referred_hdr_gain_map, but this export path derives the base
-// from decoded per-pixel gain instead of averaging gain into cells.
+// This export path derives the base from decoded per-pixel gain instead of
+// averaging gain into cells.
 //
 // A display-referred HDR input is the photograph, not an expansion the renderer
 // chose, so a coarse map cannot be used for it: averaging gain over a cell
@@ -196,8 +195,9 @@ GainMapResult rgb_gain_map_from_renditions(PhotoRenditions images) {
   }
   metadata.base_offset = metadata.alternate_offset = {1, 64};
   metadata.base_headroom = {0, 1};
-  // Display capacity describes the rendition, not an extreme channel ratio.
-  metadata.alternate_headroom = rational_from_float(images.stats.headroom_stops);
+  // The declared usable range must match the gain actually encoded. A lower
+  // declaration makes re-import attenuate the authored HDR alternate.
+  metadata.alternate_headroom = metadata.gain_max;
   const auto channel = gain_map_channel(metadata, 0);
   metadata.flags |= 0x80;
   metadata.channels.assign(3, channel);
@@ -220,6 +220,74 @@ GainMapResult rgb_gain_map_from_renditions(PhotoRenditions images) {
   return out;
 }
 
+GainMapResult authored_mono_gain_map(PhotoRenditions images) {
+  const auto width = images.sdr.width, height = images.sdr.height;
+  FloatImage gains(width, height, 1);
+  const float base_offset = images.authored_gain_map.base_offset[0];
+  const float alternate_offset = images.authored_gain_map.alternate_offset[0];
+  parallel_for_rows(height, [&](std::uint32_t y) {
+    for (std::uint32_t x = 0; x < width; ++x) {
+      const auto i = (static_cast<std::size_t>(y) * width + x) * 3;
+      const float base = p3_luminance(images.sdr.pixels[i], images.sdr.pixels[i+1], images.sdr.pixels[i+2]);
+      const float alternate = p3_luminance(images.hdr.pixels[i], images.hdr.pixels[i+1], images.hdr.pixels[i+2]);
+      gains.at(x,y,0) = std::log2((std::max(0.0F, alternate) + alternate_offset + kEpsilon) /
+          (std::max(0.0F, base) + base_offset + kEpsilon));
+    }
+  });
+  const auto [minimum, maximum] = std::minmax_element(gains.pixels.begin(), gains.pixels.end());
+  GainMapResult out;
+  out.metadata.gain_min = rational_from_float(std::min(0.0F, *minimum));
+  out.metadata.gain_max = rational_from_float(std::max(0.0F, *maximum));
+  out.metadata.gamma = {1,1};
+  out.metadata.base_offset = rational_from_float(base_offset);
+  out.metadata.alternate_offset = rational_from_float(alternate_offset);
+  out.metadata.base_headroom = {0,1};
+  out.metadata.alternate_headroom = out.metadata.gain_max;
+  const float low = rational_value(out.metadata.gain_min);
+  const float high = rational_value(out.metadata.gain_max);
+  const float range = high-low;
+  for (auto& gain : gains.pixels)
+    gain = range > kEpsilon ? std::round(std::clamp((gain-low)/range,0.0F,1.0F)*255)/255 : 0;
+  out.base_linear = std::move(images.sdr);
+  out.gain_map = std::move(gains);
+  out.clamp_srgb = images.clamp_srgb;
+  out.exposure_ev = images.stats.exposure_ev;
+  out.headroom_stops = high;
+  out.stats = images.stats;
+  out.stats.gain_min_stops = low;
+  out.stats.gain_max_stops = high;
+  out.stats.gain_gamma = 1;
+  measure_quantized_gain(out.stats,out.gain_map,high,1,0,low);
+  images.hdr = {};
+  const auto reconstructed = reconstruct_gain_map(out.base_linear,out.gain_map,
+      out.metadata,out.headroom_stops,nullptr,out.clamp_srgb);
+  measure_rendition_stats(out.stats,out.base_linear,reconstructed,images.below_knee);
+  return out;
+}
+
+bool common_gain_compatible(const PhotoRenditions& images) {
+  const auto& offsets = images.authored_gain_map;
+  const float bo = offsets.base_offset[0], ao = offsets.alternate_offset[0];
+  for (int c = 1; c < 3; ++c)
+    if (std::abs(offsets.base_offset[c]-bo) > 1e-6F ||
+        std::abs(offsets.alternate_offset[c]-ao) > 1e-6F) return false;
+  for (std::size_t i = 0; i < images.sdr.pixels.size(); i += 3) {
+    float reference = 1.0F;
+    bool has_reference = false;
+    for (int c = 0; c < 3; ++c) {
+      if (images.sdr.pixels[i+c] + bo < 1e-5F &&
+          images.hdr.pixels[i+c] + ao < 1e-5F) continue;
+      const float ratio = (images.hdr.pixels[i+c] + ao + kEpsilon) /
+          (images.sdr.pixels[i+c] + bo + kEpsilon);
+      if (has_reference && std::abs(ratio-reference) > 1e-3F * std::max(1.0F,reference))
+        return false;
+      reference = ratio;
+      has_reference = true;
+    }
+  }
+  return true;
+}
+
 }  // namespace
 
 GainMapResult gain_map_from_renditions(PhotoRenditions images, GainMapWriterProfile profile) {
@@ -228,6 +296,15 @@ GainMapResult gain_map_from_renditions(PhotoRenditions images, GainMapWriterProf
   const auto& sdr=images.sdr; const auto& hdr=images.hdr;
   if(sdr.channels!=3 || hdr.channels!=3 || sdr.width!=hdr.width || sdr.height!=hdr.height)
     throw std::invalid_argument("gain-map packaging requires matching SDR and HDR renditions");
+  if (images.dual_rendition) {
+    if (profile == GainMapWriterProfile::iso_generic)
+      return rgb_gain_map_from_renditions(std::move(images));
+    if (images.authored_gain_channels == 1 && common_gain_compatible(images))
+      return authored_mono_gain_map(std::move(images));
+    auto result = exact_gain_map_from_renditions(std::move(images));
+    result.stats.adaptive_chroma_loss = true;
+    return result;
+  }
   if (images.hdr_is_source) return exact_gain_map_from_renditions(std::move(images));
   if (profile == GainMapWriterProfile::iso_generic &&
       images.stats.headroom_stops > kEpsilon) {

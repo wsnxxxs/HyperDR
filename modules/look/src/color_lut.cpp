@@ -242,7 +242,8 @@ PhotoRenditions render_graded_photo(const FloatImage& source,
     for(std::size_t i=0;i<working.pixels.size();i+=3)
       working_headroom=std::max(working_headroom,
           p3_luminance(working.pixels[i],working.pixels[i+1],working.pixels[i+2]));
-  } else if(input.domain==InputDomain::kDisplayReferredHdr) {
+  } else if(input.domain==InputDomain::kDisplayReferredHdr ||
+            input.domain==InputDomain::kDualRendition) {
     // Grade original HDR highlights before the user's output headroom limit.
     working=source;
     exposure_ev=std::clamp((options.auto_exposure?0:options.exposure_ev)+options.exposure_bias_ev,-10.0F,10.0F);

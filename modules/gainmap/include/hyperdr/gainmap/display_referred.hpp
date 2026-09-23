@@ -58,25 +58,4 @@ namespace hyperdr {
     const FloatImage& linear_p3, const GainMapOptions& options,
     const CaptureMetadata& capture = {}, GainMapPreparation* preparation = nullptr);
 
-// A finished HDR rendition, split into an SDR base and the gain map that
-// restores it.
-//
-// `input_headroom` is the linear multiple of diffuse white selected from the
-// container's content-light hint or encoding capacity, not a pixel percentile.
-// Unit headroom retains SDR-range HDR content without creative expansion.
-// The output headroom is
-// that value capped by the caller's target and by `gain_strength`, so a 5.6-stop
-// PQ input converted to a 3-stop Adaptive HEIC is attenuated deliberately
-// instead of being clipped by the encoder.
-//
-// The split follows the photographic renderer's: the base is the SDR shoulder
-// applied per pixel, and the grid carries the cell-mean difference between the
-// two ceilings. Deriving the base the other way round -- `hdr / 2^gain` -- would
-// reconstruct more exactly, but a low-frequency grid that has to cover a
-// specular also covers its dark surroundings, and the shadows next to every
-// highlight would be crushed in the one image SDR viewers actually see.
-[[nodiscard]] GainMapResult make_display_referred_hdr_gain_map(
-    const FloatImage& linear_p3, const GainMapOptions& options,
-    float input_headroom);
-
 }  // namespace hyperdr

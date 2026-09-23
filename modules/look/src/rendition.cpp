@@ -33,6 +33,97 @@ float mapped(float y, float knee, float ceiling) {
 std::array<float, 3> fit(std::array<float, 3> rgb, float limit) {
   return fit_linear_p3_gamut(rgb[0], rgb[1], rgb[2], limit);
 }
+
+PhotoRenditions render_dual_rendition(const FloatImage& source,
+    const RenderOptions& options, const CaptureMetadata& capture,
+    const InputDescription& input, RenderTarget target) {
+  const auto& authored = *input.authored_sdr;
+  authored.require_consistent("authored SDR rendition");
+  if (authored.channels != 3 || authored.width != source.width ||
+      authored.height != source.height)
+    throw std::invalid_argument("authored SDR and HDR renditions must match");
+  const bool want_hdr = target == RenderTarget::Hdr;
+  const float ev = std::clamp((options.auto_exposure ? 0.0F : options.exposure_ev) +
+      options.exposure_bias_ev, -10.0F, 10.0F);
+  const float exposure = std::exp2(ev);
+  const float base_stops = std::log2(input.gain_map.base_headroom);
+  const float alternate_stops = std::log2(input.gain_map.alternate_headroom);
+  const float declared = std::max(0.0F, alternate_stops - base_stops);
+  const float requested = options.auto_headroom ? options.look.headroom_max_stops : options.headroom_stops;
+  const float available_stops = std::log2(rendering_headroom(input));
+  const float stops = want_hdr ? std::clamp(std::min({alternate_stops, available_stops, requested}) - base_stops,
+      0.0F, declared) *
+      std::min(options.gain_strength, 1.0F) : 0.0F;
+  const float weight = declared > 1e-6F ? stops / declared :
+      (want_hdr ? std::min(options.gain_strength, 1.0F) : 0.0F);
+  const float sdr_knee = std::log2(0.48F);
+  const float sdr_ceiling = exposure > 1.0F + kEpsilon
+      ? solve_ceiling(sdr_knee, ev, 0.0F) : 0.0F;
+  PhotoRenditions out;
+  out.sdr = FloatImage(source.width, source.height, 3);
+  if (want_hdr) out.hdr = FloatImage(source.width, source.height, 3);
+  out.dual_rendition = true;
+  out.authored_gain_channels = input.gain_map.channels;
+  out.authored_gain_map = input.gain_map;
+  out.clamp_srgb = options.clamp_srgb;
+  std::vector<std::uint64_t> wide(source.height), eligible(source.height);
+  parallel_for_rows(source.height, [&](std::uint32_t y) {
+    for (std::uint32_t x = 0; x < source.width; ++x) {
+      const auto i = (static_cast<std::size_t>(y) * source.width + x) * 3;
+      const float luma = p3_luminance(authored.pixels[i], authored.pixels[i+1], authored.pixels[i+2]);
+      if (luma >= .02F) {
+        ++eligible[y];
+        if (is_outside_rec709(authored.pixels[i], authored.pixels[i+1], authored.pixels[i+2])) ++wide[y];
+      }
+      const float exposed_luma = luma * exposure;
+      const float sdr_luma = sdr_ceiling > 0 && exposed_luma > 0
+          ? std::min(1.0F, mapped(exposed_luma, sdr_knee, sdr_ceiling)) : exposed_luma;
+      const float sdr_scale = exposed_luma > kEpsilon ? sdr_luma / exposed_luma : 1.0F;
+      std::array<float, 3> sdr{}, hdr{};
+      for (int c = 0; c < 3; ++c) {
+        const float base = finite_or_zero(authored.pixels[i+c]);
+        sdr[c] = base * exposure * sdr_scale;
+        if (want_hdr) {
+          if (weight <= 0) hdr[c] = sdr[c];
+          else if (weight >= 1) hdr[c] = finite_or_zero(source.pixels[i+c]) * exposure;
+          else {
+            const float bo = input.gain_map.base_offset[c];
+            const float ao = input.gain_map.alternate_offset[c];
+            const float gain = std::log2((std::max(0.0F, source.pixels[i+c]) + ao + kEpsilon) /
+                (std::max(0.0F, base) + bo + kEpsilon));
+            // Interpolating offsets makes zero strength exactly the authored base
+            // while still reaching the authored alternate at full strength.
+            hdr[c] = std::max(0.0F, (base + bo) * std::exp2(weight * gain) -
+                std::lerp(bo, ao, weight)) * exposure;
+          }
+        }
+      }
+      if (options.clamp_srgb) {
+        sdr = compress_linear_p3_to_srgb(sdr[0], sdr[1], sdr[2]);
+        if (want_hdr) hdr = compress_linear_p3_to_srgb(hdr[0], hdr[1], hdr[2], true);
+      }
+      for (int c = 0; c < 3; ++c) {
+        out.sdr.pixels[i+c] = sdr[c];
+        if (want_hdr) out.hdr.pixels[i+c] = hdr[c];
+      }
+    }
+  });
+  auto& stats = out.stats;
+  stats.exposure_ev = ev;
+  stats.ev100 = estimate_ev100(capture);
+  stats.target_middle_gray = compute_target_middle_gray(stats.ev100);
+  stats.headroom_stops = want_hdr ? base_stops + stops : 0.0F;
+  stats.headroom_linear = std::exp2(stats.headroom_stops);
+  for (std::uint32_t y = 0; y < source.height; ++y) {
+    stats.wide_gamut_pixels += wide[y];
+    stats.wide_gamut_eligible_pixels += eligible[y];
+  }
+  if (stats.wide_gamut_eligible_pixels) stats.wide_gamut_fraction =
+      static_cast<float>(static_cast<double>(stats.wide_gamut_pixels) /
+          stats.wide_gamut_eligible_pixels);
+  measure_rendition_stats(stats, out.sdr, out.hdr);
+  return out;
+}
 }
 
 void fit_sdr_to_srgb(FloatImage& image) {
@@ -80,6 +171,8 @@ PhotoRenditions render_renditions(const FloatImage& source,
   const auto options=render_options_for_target(requested_options,target);
   validate_render_options(options);
   validate_input_description(input);
+  if (input.domain == InputDomain::kDualRendition)
+    return render_dual_rendition(source, options, capture, input, target);
   if (input.raw_profile) {
     const float ev = std::clamp((options.auto_exposure ? 0.0F : options.exposure_ev) +
         options.exposure_bias_ev, -10.0F, 10.0F);
@@ -113,14 +206,12 @@ PhotoRenditions render_renditions(const FloatImage& source,
   const float stops = !want_hdr ? 0.0F : (scene ? prepared.requested_stops :
       input_hdr ? std::min(available, requested) : requested) * strength;
   const float peak = std::exp2(stops);
-  const float knee = std::log2(options.look.shoulder_start);
-  // Keep the HDR-source shoulder and headroom mapping aligned with
-  // make_display_referred_hdr_gain_map. Export retains per-pixel HDR endpoints
-  // for exact_gain_map_from_renditions instead of averaging gain into cells.
-  const float sdr_ceiling = available > kEpsilon ? solve_ceiling(knee, available, 0) : 0;
+  const float sdr_knee = std::log2(0.48F);
+  const float hdr_knee = stops >= 1.0F ? 0.0F : std::lerp(sdr_knee, 0.0F, stops);
+  const float sdr_ceiling = available > kEpsilon ? solve_ceiling(sdr_knee, available, 0) : 0;
   const bool hdr_passthrough = input_hdr && stops >= available - kEpsilon;
-  const float hdr_ceiling = input_hdr && !hdr_passthrough && available > kEpsilon
-      ? solve_ceiling(knee, available, stops) : 0;
+  const float hdr_ceiling = input_hdr && !hdr_passthrough && available > kEpsilon && stops > kEpsilon
+      ? solve_ceiling(hdr_knee, available, stops) : 0;
   const auto curve = build_tone_curve(options.look);
   PhotoRenditions out;
   out.sdr = FloatImage(source.width, source.height, 3);
@@ -167,8 +258,9 @@ PhotoRenditions render_renditions(const FloatImage& source,
         hdr = base;
         for (auto& c : hdr) c *= std::exp2(gain);
       } else {
-        sdr_y = available > kEpsilon ? std::min(1.0F, mapped(luma, knee, sdr_ceiling)) : std::min(1.0F, luma);
-        hdr_y = input_hdr ? (hdr_passthrough ? luma : available > kEpsilon ? mapped(luma, knee, hdr_ceiling) : luma) : sdr_y;
+        sdr_y = available > kEpsilon ? std::min(1.0F, mapped(luma, sdr_knee, sdr_ceiling)) : std::min(1.0F, luma);
+        hdr_y = input_hdr ? (stops <= kEpsilon ? sdr_y : hdr_passthrough ? luma :
+            available > kEpsilon ? mapped(luma, hdr_knee, hdr_ceiling) : luma) : sdr_y;
         // Finished SDR keeps its chosen tone response. HDR expansion is an
         // explicit creative operation, with no claim to recovering capture data.
         const float scale = luma > kEpsilon ? sdr_y / luma : 0;

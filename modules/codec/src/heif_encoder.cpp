@@ -449,6 +449,53 @@ struct HeicTileSource {
   heif_color_profile_nclx nclx;
 };
 
+// Encode one picture as a standalone single-image HEIF. Never share the
+// mutable libheif context or encoder between jobs.
+void encode_heic_picture(const HeicTileSource& source, heif_image* pixels,
+                         HevcPreset preset, std::vector<std::uint8_t>& out) {
+  std::unique_ptr<heif_context, ContextDeleter> context(heif_context_alloc());
+  if (!context) throw std::runtime_error("cannot allocate tile context");
+  heif_encoder* raw_encoder = nullptr;
+  check_heif(heif_context_get_encoder_for_format(context.get(), heif_compression_HEVC,
+      &raw_encoder), "get tile HEVC encoder");
+  std::unique_ptr<heif_encoder, EncoderDeleter> encoder(raw_encoder);
+  check_heif(heif_encoder_set_lossy_quality(encoder.get(), source.quality),
+             "set tile HEVC quality");
+  configure_hevc_preset(encoder.get(), preset);
+  if (source.main10) configure_main10_still(encoder.get());
+  std::unique_ptr<heif_encoding_options, EncodingOptionsDeleter> options(
+      heif_encoding_options_alloc());
+  if (!options) throw std::runtime_error("cannot allocate tile encoding options");
+  options->save_two_colr_boxes_when_ICC_and_nclx_available = source.save_two_profiles;
+  auto nclx = source.nclx;
+  options->output_nclx_profile = &nclx;
+  heif_image_handle* raw_handle = nullptr;
+  check_heif(heif_context_encode_image(context.get(), pixels, encoder.get(),
+      options.get(), &raw_handle), "encode parallel HEIC tile");
+  std::unique_ptr<heif_image_handle, HandleDeleter> handle(raw_handle);
+  heif_writer writer{1, &write_callback};
+  check_heif(heif_context_write(context.get(), &writer, &out),
+             "write parallel HEIC tile");
+}
+
+// x265 fills its process-wide primitive table on the first encoder open, and
+// only checks one entry to decide whether that has happened. Concurrent first
+// opens can therefore see a half-filled table. Each bit depth is a separate
+// x265 library with its own table, so open one small encoder per depth, once
+// per process, before any tile workers start.
+void warm_x265(const HeicTileSource& source, HevcPreset preset) {
+  static std::once_flag main8, main10;
+  std::call_once(source.main10 ? main10 : main8, [&] {
+    heif_image* extracted = nullptr;
+    check_heif(heif_image_extract_area(source.image, 0, 0,
+        std::min(64U, source.width), std::min(64U, source.height), nullptr, &extracted),
+        "extract x265 warm-up area");
+    std::unique_ptr<heif_image, ImageDeleter> area(extracted);
+    std::vector<std::uint8_t> discarded;
+    encode_heic_picture(source, area.get(), preset, discarded);
+  });
+}
+
 std::vector<std::uint8_t> encode_parallel_heic(
     const std::vector<HeicTileSource>& sources, std::size_t primary,
     unsigned workers, HevcPreset preset, const PhotoMetadata& metadata,
@@ -469,6 +516,8 @@ std::vector<std::uint8_t> encode_parallel_heic(
     grid.tiles.resize(static_cast<std::size_t>(grid.columns) * grid.rows);
     for (std::size_t t = 0; t < grid.tiles.size(); ++t) jobs.push_back({s, t});
   }
+
+  for (const auto& source : sources) warm_x265(source, preset);
 
   std::atomic<std::size_t> next{0};
   std::exception_ptr failure;
@@ -492,30 +541,7 @@ std::vector<std::uint8_t> encode_parallel_heic(
           tile.reset(extracted);
           pixels = tile.get();
         }
-        // Never share the mutable libheif context or encoder between jobs.
-        std::unique_ptr<heif_context, ContextDeleter> context(heif_context_alloc());
-        if (!context) throw std::runtime_error("cannot allocate tile context");
-        heif_encoder* raw_encoder = nullptr;
-        check_heif(heif_context_get_encoder_for_format(context.get(), heif_compression_HEVC,
-            &raw_encoder), "get tile HEVC encoder");
-        std::unique_ptr<heif_encoder, EncoderDeleter> encoder(raw_encoder);
-        check_heif(heif_encoder_set_lossy_quality(encoder.get(), source.quality),
-                   "set tile HEVC quality");
-        configure_hevc_preset(encoder.get(), preset);
-        if (source.main10) configure_main10_still(encoder.get());
-        std::unique_ptr<heif_encoding_options, EncodingOptionsDeleter> options(
-            heif_encoding_options_alloc());
-        if (!options) throw std::runtime_error("cannot allocate tile encoding options");
-        options->save_two_colr_boxes_when_ICC_and_nclx_available = source.save_two_profiles;
-        auto nclx = source.nclx;
-        options->output_nclx_profile = &nclx;
-        heif_image_handle* raw_handle = nullptr;
-        check_heif(heif_context_encode_image(context.get(), pixels, encoder.get(),
-            options.get(), &raw_handle), "encode parallel HEIC tile");
-        std::unique_ptr<heif_image_handle, HandleDeleter> handle(raw_handle);
-        heif_writer writer{1, &write_callback};
-        check_heif(heif_context_write(context.get(), &writer, &grid.tiles[t]),
-                   "write parallel HEIC tile");
+        encode_heic_picture(source, pixels, preset, grid.tiles[t]);
       }
     } catch (...) {
       next.store(jobs.size());

@@ -15,6 +15,14 @@ The container assembler copies encoded HEVC payloads and their properties,
 creates hidden tile items and grid references, attaches Exif/XMP to the primary
 image, and retains the existing Adaptive TMAP adapter. Container layout and
 the generated ICC creation timestamp can differ; reconstructed pixels do not.
+The assembler follows libheif's serial output where it has a choice: a grid's
+`pixi` association is essential and Exif/XMP items are hidden. Item types,
+hidden flags and property associations then match the serial file item for item.
+
+x265 fills a process-wide primitive table on its first encoder open and checks
+a single entry to decide whether that has happened, so concurrent first opens
+can observe a half-filled table. Before starting tile workers, the encoder opens
+one 64 × 64 picture per bit depth, once per process, on the calling thread.
 
 Windows' Main10/8-bit dual x265 runtime also needs a loader fix. x265 4.2's
 process-wide recursion counter races during concurrent fallback API lookups.

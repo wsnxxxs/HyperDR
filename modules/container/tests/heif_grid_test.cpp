@@ -4,8 +4,11 @@
 
 #include "internal/items.hpp"
 
+#include <span>
 #include <stdexcept>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -87,6 +90,35 @@ Bytes leaf(std::uint8_t marker, std::string_view brand = "heic") {
   return file;
 }
 
+// The assembler writes a version-0, narrow-index ipma.
+bool grid_pixi_is_essential(std::span<const std::uint8_t> meta, std::uint32_t id) {
+  for (const auto& iprp : children(meta, 12, meta.size())) {
+    if (iprp.type != "iprp") continue;
+    std::vector<std::string> types;
+    std::span<const std::uint8_t> ipma;
+    for (const auto& box : children(meta, iprp.offset + iprp.header, iprp.offset + iprp.size)) {
+      if (box.type == "ipma") ipma = meta.subspan(box.offset, box.size);
+      if (box.type != "ipco") continue;
+      for (const auto& property : children(meta, box.offset + box.header, box.offset + box.size)) {
+        types.push_back(property.type);
+      }
+    }
+    std::size_t p = 16;
+    while (p + 3 <= ipma.size()) {
+      const auto item = static_cast<std::uint32_t>(ipma[p] << 8 | ipma[p + 1]);
+      const auto count = ipma[p + 2];
+      p += 3;
+      for (std::size_t a = 0; a < count && p < ipma.size(); ++a, ++p) {
+        const auto index = ipma[p] & 0x7FU;
+        if (item == id && index >= 1 && index <= types.size() && types[index - 1] == "pixi") {
+          return (ipma[p] & 0x80U) != 0;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 void test_grid_and_single_image() {
   hyperdr::EncodedHeifGrid gain{4, 2, 2, 1, {leaf(0x11), leaf(0x22)}};
   hyperdr::EncodedHeifGrid base{2, 2, 1, 1, {leaf(0x33, "heix")}};
@@ -119,6 +151,9 @@ void test_grid_and_single_image() {
               items[5].type == "mime", "grid items or metadata items are wrong");
   require((items[1].infe[11] & 1) && (items[2].infe[11] & 1),
           "grid tiles are not hidden");
+  require((items[4].infe[11] & 1) && (items[5].infe[11] & 1),
+          "metadata items are not hidden");
+  require(grid_pixi_is_essential(meta, items[0].id), "grid pixi is not essential");
   require(parse_pitm(pitm) == items[3].id, "wrong primary logical image");
   bool dimg = false, cdsc = false;
   for (const auto& box : children(iref, 12, iref.size())) {

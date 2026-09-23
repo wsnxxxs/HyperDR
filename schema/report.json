@@ -83,6 +83,7 @@
         "exposure",
         "headroom",
         "quality",
+        "hevc_preset",
         "depth",
         "preview_max_edge",
         "recursive",
@@ -184,6 +185,12 @@
         },
         "quality": {
           "type": "integer"
+        },
+        "hevc_preset": {
+          "enum": [
+            "slow",
+            "medium"
+          ]
         },
         "depth": {
           "enum": [

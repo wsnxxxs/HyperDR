@@ -99,7 +99,7 @@ GainMapResult make_gain_map(const FloatImage& source, const GainMapOptions& opti
       ? WideGamutMeasurement{preparation->base_stats.wide_gamut_pixels,
                              preparation->base_stats.wide_gamut_eligible_pixels}
       : measure_wide_gamut_input(source);
-  // The one place the three domains part company. The photographic renderer
+  // The one place the input domains part company. The photographic renderer
   // below is scene-referred throughout -- it chooses an exposure from the
   // scene's log average and lands on a toe/linear/shoulder curve -- and running
   // it over a finished photograph re-develops someone else's picture. Which

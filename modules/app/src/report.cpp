@@ -77,6 +77,7 @@ void write_stats(json::Writer& writer, const RenderStats& s, bool codec_gain) {
       .end_object();
   writer.begin_object("gain_map")
       .member("encoder", codec_gain ? "libultrahdr-api3" : "hyperdr")
+      .member("adaptive_chroma_loss", s.adaptive_chroma_loss)
       .member("distribution_measured", !codec_gain)
       .member("gamma", s.gain_gamma)
       .member("min_stops", s.gain_min_stops)
@@ -144,7 +145,7 @@ std::string run_report_json(const std::vector<FileResult>& results,
         .member("raw_profile_camera", result.raw_profile_camera)
         .member("raw_profile_tone", result.raw_profile_tone)
         .member("raw_profile_baseline_ev", result.raw_profile_baseline_ev)
-        // Which of the three renderers this file took, and the headroom it was
+        // Which input rendition path this file took, and the headroom it was
         // told the input carried. Recorded because nothing else in the record
         // distinguishes them, and the same settings mean different things in
         // each: an exposure_ev of 0 is a scene decision in one and the absence

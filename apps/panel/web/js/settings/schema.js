@@ -110,7 +110,7 @@ export const CONTROLS = [
     min: 0, max: 1, step: 0.01, default: 1, format: percent, unit: "percent", mask: null, help: "lut.strengthHint" },
   {
     key: "brightness", kind: "range", group: "tone", label: "ctrl.brightness.label",
-    min: 0, max: 2, step: 0.05, default: DEFAULT_BRIGHTNESS_EV, format: ev, mask: null,
+    min: -2, max: 2, step: 0.05, default: DEFAULT_BRIGHTNESS_EV, format: ev, mask: null,
     help: "ctrl.brightness.help",
   },
   {
@@ -217,10 +217,11 @@ export const OPTION_KEYS = [
  *  re-pointing the next export at a different algorithm. */
 export const PERSISTED_OPTION_KEYS = ["encoding", "hevcPreset", "colorGamut", "clampSrgb", MODEL_KEY];
 
-/* The decoder's name for a finished HDR photograph: PQ/HLG HEIC or AVIF, Ultra
- * HDR, an Adaptive HDR HEIC. The panel learns it from the first native frame. */
+/* The decoder reports single-HDR and authored SDR+HDR photographs separately. */
 export const HDR_SOURCE_DOMAIN = "display-referred-hdr";
-export const isHdrSource = (domain) => domain === HDR_SOURCE_DOMAIN;
+export const DUAL_SOURCE_DOMAIN = "dual-rendition";
+export const isHdrSource = (domain) =>
+  domain === HDR_SOURCE_DOMAIN || domain === DUAL_SOURCE_DOMAIN;
 
 /* An HDR photograph's own rendering, expressed in the manual controls. The
  * controls describe a change to the picture, so for an HDR source zero change
@@ -228,14 +229,16 @@ export const isHdrSource = (domain) => domain === HDR_SOURCE_DOMAIN;
  * ceiling that does not cut into them (the format's maximum; the renderer never
  * extends past what the file declares). Strength and range are the two
  * controls whose identity sits at the top of the slider rather than at zero. */
-function hdrSourceIdentity(values, encoding) {
-  return { ...values, brightness: 0, hdrStrength: 1,
-    hdrRange: encodingById(encoding).maxRange, contrast: 1, vibrance: 0 };
+function sourceIdentity(values, encoding, unadjusted) {
+  if (!unadjusted) return values;
+  return { ...values, ...unadjusted,
+    hdrRange: Math.min(unadjusted.hdrRange, encodingById(encoding).maxRange),
+    contrast: 1, vibrance: 0 };
 }
 
 /** What a newly opened photo starts from. An SDR or RAW photo gets the modest
  *  enhancement preset; an HDR photo opens as itself. */
-export function defaultSettings(encoding = "adaptive", sourceDomain = "") {
+export function defaultSettings(encoding = "adaptive", sourceDomain = "", unadjusted = null) {
   const activeEncoding = encodingById(encoding);
   const values = {
     encoding: activeEncoding.id,
@@ -250,15 +253,15 @@ export function defaultSettings(encoding = "adaptive", sourceDomain = "") {
   if (activeEncoding.id === "sdr-jpeg") values.brightness = 0;
   values.hdrRange = Math.min(values.hdrRange, activeEncoding.maxRange);
   values.aiHdrRange = Math.min(values.aiHdrRange, activeEncoding.maxRange);
-  return isHdrSource(sourceDomain) ? hdrSourceIdentity(values, activeEncoding.id) : values;
+  return isHdrSource(sourceDomain) ? sourceIdentity(values, activeEncoding.id, unadjusted) : values;
 }
 
 /** No creative adjustment; RAW still receives its fixed base development, and
  *  an HDR photo keeps its own highlights rather than being flattened to SDR. */
-export function neutralSettings(encoding = "adaptive", sourceDomain = "") {
+export function neutralSettings(encoding = "adaptive", sourceDomain = "", unadjusted = null) {
   const neutral = { ...defaultSettings(encoding), brightness: 0, hdrStrength: 0, hdrRange: 0,
     contrast: 1, vibrance: 0, areaCoverage: 0, lutStrength: 0 };
-  return isHdrSource(sourceDomain) ? hdrSourceIdentity(neutral, encoding) : neutral;
+  return sourceIdentity(neutral, encoding, unadjusted);
 }
 
 /** The request behind the "original" comparison, made before the photo's
@@ -266,7 +269,10 @@ export function neutralSettings(encoding = "adaptive", sourceDomain = "") {
  *  domain -- HDR strength and range never move an SDR or RAW base -- and for an
  *  HDR photo the whole frame is the photograph itself. */
 export function referenceSettings(encoding = "adaptive") {
-  return neutralSettings(encoding, HDR_SOURCE_DOMAIN);
+  // Before decoding, ask the renderer for full available headroom. The returned
+  // packet supplies the input's authoritative unadjusted control values.
+  return { ...neutralSettings(encoding), hdrStrength: 1,
+    hdrRange: encodingById(encoding).maxRange };
 }
 
 /** The exact payload the server's option vocabulary expects. */

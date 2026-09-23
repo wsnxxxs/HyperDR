@@ -165,7 +165,7 @@ void test_run_report_is_parseable_and_complete() {
   ok.decode_degraded = true;
   ok.decode_degradation_reasons = {"default_crop_rejected"};
   ok.raw_color_matrix = "embedded";
-  ok.input_domain = hyperdr::InputDomain::kDisplayReferredHdr;
+  ok.input_domain = hyperdr::InputDomain::kDualRendition;
   ok.input_headroom = 4.93F;
   ok.model_development = "display-p3-passthrough";
   ok.model_requested_id = "research-exif-v1";
@@ -176,6 +176,7 @@ void test_run_report_is_parseable_and_complete() {
   ok.width = 8192;
   ok.height = 5464;
   ok.stats.rendered_peak = 3.5F;
+  ok.stats.adaptive_chroma_loss = true;
   hyperdr::FileResult failed;
   failed.input = "in/broken.ARW";
   failed.message = R"(cannot read "broken": unexpected end)";
@@ -207,8 +208,10 @@ void test_run_report_is_parseable_and_complete() {
           "requested and delivered crop dimensions were not distinguished");
   // Which renderer ran is not derivable from anything else in the record, so a
   // reader that wants to compare two runs has to be able to read it back.
-  require(files[0].find("input_domain")->string() == "display-referred-hdr",
+  require(files[0].find("input_domain")->string() == "dual-rendition",
           "the renderer's input domain was not reported");
+  require(files[0].find("gain_map")->find("adaptive_chroma_loss")->boolean(),
+          "the adaptive chroma loss was not reported");
   require(files[0].find("input_headroom")->number() > 4.9,
           "the declared input headroom was not reported");
   require(files[0].find("model_development")->string() ==

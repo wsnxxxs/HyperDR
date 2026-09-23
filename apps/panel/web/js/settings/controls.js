@@ -7,7 +7,7 @@
 
 import { el, role, setPressed, setText, clamp } from "../core/dom.js";
 import { store } from "../core/store.js";
-import { CONTROLS, ENCODINGS, encodingById, neutralSettings } from "./schema.js";
+import { CONTROLS, ENCODINGS, encodingById, isHdrSource, neutralSettings } from "./schema.js";
 import { mountLutLibrary } from "./lut-library.js";
 import { mountRawProfiles } from "./raw-profiles.js";
 import { mountWorkflow } from "./workflow.js";
@@ -116,7 +116,7 @@ export function editableValue(control, value) {
 /** A typed value as a stored one, snapped to the control's step and clamped to
  *  `[min, max]`; `null` when nothing numeric was typed. Auto controls accept
  *  an empty field or the word for "auto". */
-export function parseTypedValue(control, text, max = control.max) {
+export function parseTypedValue(control, text, max = control.max, min = control.min) {
   const raw = String(text ?? "").trim().toLowerCase();
   if (control.auto && (raw === "" || raw === "auto" || raw === t("unit.auto").toLowerCase())) {
     return control.min;
@@ -125,8 +125,8 @@ export function parseTypedValue(control, text, max = control.max) {
   if (!match) return null;
   const typed = Number(match[0]) / editScale(control);
   if (!Number.isFinite(typed)) return null;
-  const snapped = control.min + Math.round((typed - control.min) / control.step) * control.step;
-  return Number(clamp(snapped, control.min, max).toFixed(6));
+  const snapped = min + Math.round((typed - min) / control.step) * control.step;
+  return Number(clamp(snapped, min, max).toFixed(6));
 }
 
 function buildRange(control) {
@@ -163,6 +163,8 @@ function buildRange(control) {
    * the value the way they do on the slider. */
   let editing = false;
   const currentMax = () => (isHdrRange(control.key) ? hdrRangeCeiling() : control.max);
+  const currentMin = () => control.key === "brightness" && !isHdrSource(store.get().sourceDomain)
+    ? 0 : control.min;
   const beginTyping = () => {
     editing = true;
     readout.value = editableValue(control, store.get()[control.key]);
@@ -171,7 +173,7 @@ function buildRange(control) {
   const commitTyped = () => {
     if (!editing) return;
     editing = false;
-    const value = parseTypedValue(control, readout.value, currentMax());
+    const value = parseTypedValue(control, readout.value, currentMax(), currentMin());
     if (value != null) store.set({ [control.key]: value });
     apply(store.get());
   };
@@ -193,7 +195,7 @@ function buildRange(control) {
       event.preventDefault();
       const direction = event.key === "ArrowUp" ? 1 : -1;
       const next = clamp(store.get()[control.key] + direction * control.step * (event.shiftKey ? 10 : 1),
-        control.min, currentMax());
+        currentMin(), currentMax());
       store.set({ [control.key]: Number(next.toFixed(6)) });
       readout.value = editableValue(control, store.get()[control.key]);
       readout.select();
@@ -216,7 +218,7 @@ function buildRange(control) {
     event.preventDefault();
     const current = store.get()[control.key];
     const max = isHdrRange(control.key) ? hdrRangeCeiling() : control.max;
-    const next = clamp(current + direction * control.step * 10, control.min, max);
+    const next = clamp(current + direction * control.step * 10, currentMin(), max);
     store.set({ [control.key]: Number(next.toFixed(4)) });
   });
 
@@ -250,21 +252,23 @@ function buildRange(control) {
     const value = state[control.key];
     // The encoding clamps the headroom ceiling, so `max` is dynamic.
     const max = isHdrRange(control.key) ? encodingById(state.encoding).maxRange : control.max;
+    const min = control.key === "brightness" && !isHdrSource(state.sourceDomain) ? 0 : control.min;
     // Assigning `max` reconfigures the control even when the number is
     // unchanged, so it is written only on an actual change.
     const maxText = String(max);
     if (lastMax !== maxText) { lastMax = maxText; input.max = maxText; }
+    if (input.min !== String(min)) input.min = String(min);
     if (!dragging && input.value !== String(value)) input.value = String(value);
     const shown = (control.format || String)(value);
     if (!editing && readout.value !== shown) readout.value = shown;
     // The ceiling moves with the output format, and is otherwise invisible.
     readout.title = isHdrRange(control.key) ? t("adjust.rangeCeiling", { value: String(max) }) : "";
-    const fill = ((value - control.min) / (max - control.min)) * 100;
+    const fill = ((value - min) / (max - min)) * 100;
     const fillText = `${Math.min(100, Math.max(0, fill)).toFixed(1)}%`;
     if (lastFill !== fillText) { lastFill = fillText; input.style.setProperty("--fill", fillText); }
   };
   wireMask(help, control);
-  return { node, apply, watches: [control.key, "encoding"] };
+  return { node, apply, watches: [control.key, "encoding", "sourceDomain"] };
 }
 
 function buildSegmented(control) {
@@ -355,11 +359,17 @@ function mountEncoding({ toast } = {}) {
       el("strong", {}, entry.label), detail);
     relabel(() => setText(detail, t(entry.detail)));
     button.addEventListener("click", () => {
-      const current = store.get().hdrRange;
-      const aiCurrent = store.get().aiHdrRange;
+      const state = store.get();
+      const current = state.hdrRange;
+      const aiCurrent = state.aiHdrRange;
       // Clamped here rather than in the slider so the stored value and the
       // command line agree the moment the format changes.
-      const clamped = Math.min(current, entry.maxRange);
+      const sourceRange = state.sourceUnadjusted?.hdrRange;
+      const oldIdentityRange = Math.min(sourceRange ?? 0, encodingById(state.encoding).maxRange);
+      const unchangedSource = isHdrSource(state.sourceDomain) && sourceRange != null
+        && state.brightness === 0 && state.hdrStrength === 1 && current === oldIdentityRange;
+      const clamped = unchangedSource ? Math.min(sourceRange, entry.maxRange)
+        : Math.min(current, entry.maxRange);
       const aiClamped = Math.min(aiCurrent, entry.maxRange);
       store.set({ encoding: entry.id, hdrRange: clamped, aiHdrRange: aiClamped });
       // A silent clamp reads as the panel losing the user's setting.
@@ -434,7 +444,8 @@ function mountResets({ toast } = {}) {
   button.addEventListener("click", () => {
     const colorOnly = store.get().encoding === "sdr-jpeg";
     // For an HDR photograph "no adjustment" is the photograph, not its SDR base.
-    const neutral = neutralSettings(store.get().encoding, store.get().sourceDomain);
+    const neutral = neutralSettings(store.get().encoding, store.get().sourceDomain,
+      store.get().sourceUnadjusted);
     const resetKeys = colorOnly ? ["brightness", "contrast", "vibrance", "lutStrength"] : keys;
     store.set({
       ...Object.fromEntries(resetKeys.map((key) => [key, neutral[key]])),
@@ -544,8 +555,9 @@ function mountLut({ toast } = {}) {
     if (!store.get().restoring) store.set({ lutId: "", lutName: "" });
   });
   store.watch("encoding", (id) => { if (id === "sdr-jpeg") store.set({ previewOptimized: false }); });
-  store.watch("encoding", (id) => {
-    role("group-region").closest("details").hidden = id === "sdr-jpeg";
+  store.watchAny(["encoding", "sourceDomain"], (state) => {
+    role("group-region").closest("details").hidden =
+      state.encoding === "sdr-jpeg" || isHdrSource(state.sourceDomain);
   }, { immediate: true });
   relabel(() => sync(store.get()));
 }
@@ -579,7 +591,11 @@ export function mountControls({ toast } = {}) {
       }, { immediate: true });
     }
     if (["hdrStrength", "hdrRange", "expansionStart", "areaCoverage"].includes(control.key)) {
-      store.watch("encoding", (id) => { widget.node.hidden = id === "sdr-jpeg"; }, { immediate: true });
+      store.watchAny(["encoding", "sourceDomain"], (state) => {
+        widget.node.hidden = state.encoding === "sdr-jpeg"
+          || (["expansionStart", "areaCoverage"].includes(control.key)
+            && isHdrSource(state.sourceDomain));
+      }, { immediate: true });
     }
     relabels.push(() => widget.apply(store.get()));
     store.watchAny(widget.watches, widget.apply, { immediate: true });

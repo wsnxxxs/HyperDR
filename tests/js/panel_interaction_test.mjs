@@ -27,6 +27,8 @@ assert.equal(parseTypedValue(brightness, "0,45"), 0.45, "a decimal comma is a de
 assert.equal(parseTypedValue(brightness, "0.62"), 0.6, "snapped to the step");
 assert.equal(parseTypedValue(brightness, "9"), 2, "clamped to the maximum");
 assert.equal(parseTypedValue(brightness, "−1"), 0, "a typographic minus is a minus, then clamped");
+assert.equal(parseTypedValue({ ...brightness, min: -2 }, "−1"), -1,
+  "HDR exposure accepts a negative trim");
 assert.equal(parseTypedValue(brightness, "abc"), null, "nothing numeric changes nothing");
 assert.equal(parseTypedValue(strength, "25"), 0.25, "a percentage control takes the displayed number");
 assert.equal(parseTypedValue(strength, "40%"), 0.4);

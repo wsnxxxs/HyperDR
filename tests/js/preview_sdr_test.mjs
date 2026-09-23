@@ -28,7 +28,7 @@ const schemaText = fs.readFileSync(new URL("../../apps/panel/web/js/settings/sch
   .replaceAll('"./model-ids.js"', JSON.stringify(modelIdsUrl));
 const {
   neutralSettings, validatedSettings, toOptions, defaultSettings, referenceSettings,
-  HDR_SOURCE_DOMAIN, isHdrSource,
+  HDR_SOURCE_DOMAIN, DUAL_SOURCE_DOMAIN, isHdrSource,
 } = await import(`data:text/javascript;base64,${Buffer.from(schemaText).toString("base64")}`);
 const neutral = neutralSettings("hlg");
 assert.equal(neutral.brightness,0);
@@ -51,12 +51,16 @@ console.log("Neutral reset: settings round trip passed");
  * offset, full strength of its own highlights and a range that does not cut
  * into them -- not the SDR preset, and not a reset that flattens it to SDR. */
 assert.equal(HDR_SOURCE_DOMAIN, "display-referred-hdr");
-assert.ok(isHdrSource("display-referred-hdr") && !isHdrSource("display-referred-sdr")
+assert.equal(DUAL_SOURCE_DOMAIN, "dual-rendition");
+assert.ok(isHdrSource("display-referred-hdr") && isHdrSource("dual-rendition")
+  && !isHdrSource("display-referred-sdr")
   && !isHdrSource("scene-referred") && !isHdrSource(""));
+const unadjusted = { brightness: 0, hdrStrength: 1, hdrRange: 4,
+  areaCoverage: 1, lutStrength: 0 };
 for (const encoding of ["adaptive", "ultrahdr", "hlg", "pq", "sdr-jpeg"]) {
   const maxRange = { adaptive: 3, ultrahdr: 4, hlg: 2.3, pq: 4, "sdr-jpeg": 4 }[encoding];
-  for (const settings of [defaultSettings(encoding, HDR_SOURCE_DOMAIN),
-                          neutralSettings(encoding, HDR_SOURCE_DOMAIN),
+  for (const settings of [defaultSettings(encoding, HDR_SOURCE_DOMAIN, unadjusted),
+                          neutralSettings(encoding, DUAL_SOURCE_DOMAIN, unadjusted),
                           referenceSettings(encoding)]) {
     assert.equal(settings.brightness, 0, `${encoding}: an HDR photo opens without an exposure offset`);
     assert.equal(settings.hdrStrength, 1, `${encoding}: an HDR photo keeps its own highlights`);
@@ -66,11 +70,12 @@ for (const encoding of ["adaptive", "ultrahdr", "hlg", "pq", "sdr-jpeg"]) {
     assert.equal(settings.encoding, encoding, "the output format is kept");
   }
   assert.deepEqual(
-    validatedSettings(JSON.parse(JSON.stringify(toOptions(neutralSettings(encoding, HDR_SOURCE_DOMAIN))))),
-    neutralSettings(encoding, HDR_SOURCE_DOMAIN),
+    validatedSettings(JSON.parse(JSON.stringify(toOptions(neutralSettings(encoding, HDR_SOURCE_DOMAIN, unadjusted))))),
+    neutralSettings(encoding, HDR_SOURCE_DOMAIN, unadjusted),
     `${encoding}: saving and restoring an HDR reset must not reintroduce adjustments`);
 }
-assert.equal(neutralSettings("adaptive", HDR_SOURCE_DOMAIN).lutStrength, 0, "reset still clears the LUT grade");
+assert.equal(neutralSettings("adaptive", HDR_SOURCE_DOMAIN, unadjusted).lutStrength, 0,
+  "reset still clears the LUT grade");
 // SDR and RAW photographs are unaffected: their defaults remain the preset and
 // their reset remains neutral. The reference request serves every domain
 // because HDR strength and range never move an SDR or RAW base.

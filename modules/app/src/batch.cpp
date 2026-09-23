@@ -88,6 +88,8 @@ const char* native_model_development_kind(InputDomain domain) noexcept {
       return "raw-neutral-v1";
     case InputDomain::kDisplayReferredHdr:
       return "display-hdr-split";
+    case InputDomain::kDualRendition:
+      return "none";
     case InputDomain::kUnknown:
       return "none";
   }
@@ -237,8 +239,9 @@ Staged decode_stage(const std::filesystem::path& path,
     staged.input_stamp = input_stamp(path);
     auto raw = options.raw;
     raw.default_gamut = options.default_gamut;
-    raw.ignore_embedded_gain_map = !options.external_gain_path.empty() ||
-                                   !options.ai_model_path.empty();
+    // Keep the authored base and gain map so the decoded domain can enforce
+    // the model/external-gain restriction before any rendition is replaced.
+    raw.ignore_embedded_gain_map = false;
     // Only an explicitly declared preview lets the decoders reduce on their
     // own. An export keeps decoding at full size and reaches --preview-max-edge
     // through the linear-light resampler alone, so its bytes do not change.
@@ -301,6 +304,13 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
   try {
     const auto decoded = Clock::now();
     require_decode_resolution(options, staged.image.decode);
+    const auto domain = staged.image.describe_input().domain;
+    if ((domain == InputDomain::kDisplayReferredHdr ||
+         domain == InputDomain::kDualRendition) &&
+        (!options.ai_model_path.empty() || !options.external_gain_path.empty())) {
+      throw std::invalid_argument(
+          "--ai-model and --external-gain require SDR or RAW input; HDR and dual-rendition photos already contain authored HDR");
+    }
     std::optional<ExternalGainMap> external;
     if (!options.external_gain_path.empty()) {
       external = read_external_gain_map(options.external_gain_path,

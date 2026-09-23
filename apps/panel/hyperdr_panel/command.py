@@ -110,9 +110,8 @@ _HLG_MAX_STOPS = 2.3
 #: Only the gain-map formats have a selectable base depth; BT.2100 is 10-bit.
 _EIGHT_BIT_ENCODINGS = frozenset({"adaptive", "ultrahdr", "sdr-jpeg"})
 
-#: The decoder's name for a finished HDR photograph (PQ/HLG, Ultra HDR,
-#: Adaptive HDR). The browser reports it from the photo's first native frame.
-HDR_SOURCE_DOMAIN = "display-referred-hdr"
+#: The browser reports these domains from the photo's first native frame.
+HDR_SOURCE_DOMAINS = frozenset({"display-referred-hdr", "dual-rendition"})
 
 
 def _base_depth(encoding: str, options: dict) -> str:
@@ -127,7 +126,7 @@ def _base_depth(encoding: str, options: dict) -> str:
     one changes nothing but the base's bit depth. Ultra HDR's JPEG base and SDR
     JPEG are 8-bit by format.
     """
-    if encoding == "adaptive" and options.get("sourceDomain") == HDR_SOURCE_DOMAIN:
+    if encoding == "adaptive" and options.get("sourceDomain") in HDR_SOURCE_DOMAINS:
         return "10"
     return "8" if encoding in _EIGHT_BIT_ENCODINGS else "10"
 

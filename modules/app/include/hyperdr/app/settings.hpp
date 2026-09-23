@@ -157,8 +157,8 @@ struct FileResult {
   // Which renderer ran, and the headroom it was told the input carried. These
   // are the two facts that decide what every other number in this record means:
   // `exposure_ev` is an automatic scene decision for a scene-referred input and
-  // a pure creative offset for the other two, and `headroom_stops` is content
-  // dependent for the first and bounded by `input_headroom` for the third.
+  // a pure creative offset for the display-referred inputs. Their headroom is
+  // bounded by `input_headroom`, while RAW headroom is content dependent.
   // Unknown means the file was skipped or failed before a decoder could state
   // which renderer it would have used. It is not a rendering domain.
   InputDomain input_domain{InputDomain::kUnknown};

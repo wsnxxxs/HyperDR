@@ -42,6 +42,7 @@ const imageAdjustments = (settings) =>
   Object.fromEntries(CONTROLS.map(({ key }) => [key, settings[key]]));
 const INPUT_DOMAIN_LABELS = Object.freeze({
   "display-referred-hdr": "stage.input.hdr",
+  "dual-rendition": "stage.input.dual",
   "display-referred-sdr": "stage.input.sdr",
   "scene-referred": "stage.input.scene",
   unknown: "stage.input.unknown",
@@ -481,6 +482,7 @@ export function mountStage({ toast }) {
       viewerZoom: 1, viewerPanX: 0, viewerPanY: 0,
       rawProfile: "", rawProfileName: "", lensCorrection: true, lensProfileName: "",
       sourceDomain: "",
+      sourceUnadjusted: null,
       hasCaptureMetadata: false,
       previewReady: false,
       previewOptimized: false, modelGainReady: false, optimizing: false,
@@ -544,6 +546,7 @@ export function mountStage({ toast }) {
         });
         if (!isCurrentImage(epoch)) return;
         const sourceDomain = reference.metadata.inputDomain || "";
+        const sourceUnadjusted = reference.metadata.unadjusted || null;
         // The domain is a fact about the file, known only once the decoder has
         // read it. A newly opened HDR photograph starts from its own rendering
         // rather than from the SDR enhancement preset, so the first frame
@@ -553,8 +556,10 @@ export function mountStage({ toast }) {
         // model are workflow choices preparePhoto() already carried over.
         const adjustments = newPhoto && isHdrSource(sourceDomain)
           && !prefs.get().rememberAdjustments
-          ? imageAdjustments(defaultSettings(state.encoding, sourceDomain)) : {};
-        store.set({ sourceDomain, hasCaptureMetadata: reference.metadata.hasCaptureMetadata === true, ...adjustments });
+          ? imageAdjustments(defaultSettings(state.encoding, sourceDomain, sourceUnadjusted)) : {};
+        store.set({ sourceDomain, sourceUnadjusted,
+          hasCaptureMetadata: reference.metadata.hasCaptureMetadata === true, ...adjustments,
+          ...(isHdrSource(sourceDomain) ? { previewOptimized: false, modelGainReady: false } : {}) });
         state = store.get();
       }
       const preview = await api.preview(sessionId, {
@@ -687,6 +692,7 @@ export function mountStage({ toast }) {
       clampSrgb: store.get().clampSrgb,
       rawProfile: "", rawProfileName: "", lensCorrection: true, lensProfileName: "",
       sourceDomain: "",
+      sourceUnadjusted: null,
       hasCaptureMetadata: false,
       previewReady: false,
       viewerZoom: 1, viewerPanX: 0, viewerPanY: 0,
@@ -1023,6 +1029,7 @@ export function mountStage({ toast }) {
 
   async function optimize({ resetOriginal = false, scheduled = false } = {}) {
     const state = store.get();
+    if (isHdrSource(state.sourceDomain)) return;
     if (state.optimizing || (state.previewOptimized && state.modelGainReady && modelGain)) return;
     if (modelGain && state.modelGainReady) {
       store.set({ previewOptimized: true });
@@ -1090,13 +1097,16 @@ export function mountStage({ toast }) {
   optimizeButton.addEventListener("click", optimize);
   const optimizeNote = role("optimize-note");
   store.watchAny(
-    ["file", "capabilities", "optimizing", "previewOptimized", "modelGainReady", "jobId", "encoding", "lutInput", "lutId"],
+    ["file", "capabilities", "optimizing", "previewOptimized", "modelGainReady", "jobId", "encoding", "lutInput", "lutId", "sourceDomain"],
     (state) => {
+      const authoredHdr = isHdrSource(state.sourceDomain);
+      optimizeButton.closest(".optimize-toggle").hidden = authoredHdr;
       const ready = Boolean(state.capabilities?.model?.ready);
       const locked = state.optimizing || Boolean(state.jobId);
       mathModeButton.disabled = !state.file || locked;
       optimizeButton.disabled =
         !state.file || locked || state.encoding === "sdr-jpeg"
+        || authoredHdr
         || (state.lutId && ["hlg", "pq", "slog3-sgamut3cine"].includes(state.lutInput))
         || (!ready && !state.modelGainReady);
       mathModeButton.setAttribute("aria-pressed", String(!state.previewOptimized));
@@ -1110,7 +1120,7 @@ export function mountStage({ toast }) {
         : (state.capabilities?.model?.reason || t("adjust.aiNotReady"));
       // The disabled button's title is unreachable on touch, so the reason
       // the AI mode cannot be used is also printed under the toggle.
-      const unavailable = Boolean(state.file) && !state.previewOptimized
+      const unavailable = Boolean(state.file) && !authoredHdr && !state.previewOptimized
         && !state.modelGainReady && !ready;
       optimizeNote.hidden = !unavailable;
       if (unavailable) {

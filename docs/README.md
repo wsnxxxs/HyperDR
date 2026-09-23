@@ -50,6 +50,9 @@ acting on it, and do not treat a measurement here as a live guarantee.
 
 | Evidence | Status |
 | --- | --- |
+| [2026-09-23 HEIF review verification](heif-review-2026-09-23.md) | Separates reproduced HEVC signalling from unverified Apple gain-map compatibility claims. |
+| [2026-09-23 gain compression study](gain-compression-study-2026-09-23.md) | Measures full-resolution lossy gain coding separately from downsampling, including decoder signalling. |
+| [2026-09-23 WSL gain-map comparison](wsl-gainmap-comparison-2026-09-23.md) | Audits 847 Apple originals and five training-label samples; corrects assumptions about grid and monochrome RExt gain maps. |
 | [2026-08-13 panel audit](archive/frontend-panel-2026-08-13/audit.md) | The preview exception was fixed in that report; revalidate its remaining findings against the current UI. |
 | [2026-09-06 experience review](archive/experience-review-2026-09-06/) | Four screenshots of the editor as it was that day. No accompanying write-up. |
 | [2026-09-06 manual rendering optimization](archive/manual-optimization-2026-09-06.md) | Describes the manual SDR/HDR base unification as delivered on that date. |

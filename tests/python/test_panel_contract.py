@@ -70,6 +70,12 @@ class BuildArgvTest(unittest.TestCase):
         self.assertNotIn("--color-gamut", found)
         self.assertNotIn("--clamp-srgb", found)
 
+    def test_dual_source_uses_ten_bit_adaptive_base_and_negative_exposure(self):
+        found = flags(build_argv("HyperDR", dict(
+            BASE, sourceDomain="dual-rendition", brightness=-1.0)))
+        self.assertEqual(found["--depth"], "10")
+        self.assertEqual(found["--exposure-bias"], "-1")
+
     def test_color_options_reach_export_and_preview(self):
         options = dict(BASE, colorGamut="p3", clampSrgb=True)
         found = flags(build_argv("HyperDR", options))

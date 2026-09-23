@@ -9,6 +9,7 @@
 #include "hyperdr/gainmap/rendition.hpp"
 #include "hyperdr/app/analysis_cache.hpp"
 #include "hyperdr/app/schema.hpp"
+#include "hyperdr/app/source_defaults.hpp"
 #include "hyperdr/codec/availability.hpp"
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/image_source.hpp"
@@ -584,6 +585,7 @@ std::vector<std::uint8_t> photo_preview_packet(const PhotoRenditions& result,
   // JSON makes status/geometry extensible while the pixel payload stays
   // directly uploadable to GPU textures without an 8-bit colour conversion.
   const auto& hdr = result.hdr.pixels.empty() ? result.sdr : result.hdr;
+  const auto defaults = source_defaults(input.domain);
   json::Writer writer;
   writer.begin_object()
       .member("schema", "hyperdr.native-preview/v1")
@@ -598,7 +600,14 @@ std::vector<std::uint8_t> photo_preview_packet(const PhotoRenditions& result,
       .member("inputDomain", input_domain_name(input.domain))
       .member("hasCaptureMetadata", hasCaptureMetadata)
       .member("inputHeadroomStops", std::log2(input.headroom))
-      .member("status", decode.degraded ? "degraded" : "ok");
+      .member("status", decode.degraded ? "degraded" : "ok")
+      .begin_object("unadjusted")
+      .member("brightness", defaults.brightness_ev)
+      .member("hdrStrength", defaults.hdr_strength)
+      .member("hdrRange", defaults.hdr_range_stops)
+      .member("areaCoverage", defaults.area_coverage)
+      .member("lutStrength", defaults.lut_strength)
+      .end_object();
   if (input.content_peak_nits) writer.member("inputContentPeakNits", *input.content_peak_nits);
   writer.begin_array("degradationReasons");
   for (const auto& reason : decode.degradation_reasons) writer.element(reason);
@@ -779,8 +788,7 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
     throw std::invalid_argument(
         "--ai-model cannot be combined with an external gain grid");
   }
-  options.raw.ignore_embedded_gain_map =
-      !options.external_gain_path.empty() || !options.ai_model_path.empty();
+  options.raw.ignore_embedded_gain_map = false;
   options.raw.default_gamut = options.default_gamut;
   // This subcommand is a bounded preview by definition -- the edge is forced
   // above if the caller left it out -- so the decoders may stop early rather
@@ -793,6 +801,12 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
   if (!cached) owned = decode_cached_image(options.input, options, options.raw, &analysis_cache);
   auto& decoded = cached ? cached->image : owned;
   const auto input = decoded.describe_input();
+  if ((input.domain == InputDomain::kDisplayReferredHdr ||
+       input.domain == InputDomain::kDualRendition) &&
+      (!options.ai_model_path.empty() || !options.external_gain_path.empty())) {
+    throw std::invalid_argument(
+        "--ai-model and --external-gain require SDR or RAW input; HDR and dual-rendition photos already contain authored HDR");
+  }
   const auto& capture = decoded.capture;
   const bool hasCaptureMetadata = capture.iso.has_value() || capture.exposure_time_seconds.has_value()
       || capture.aperture_f_number.has_value() || capture.exposure_bias_ev.has_value()
@@ -1030,12 +1044,17 @@ int model_gain_command(int argc, char** argv) {
   options.decode_intent = DecodeIntent::Preview;
   options.raw.preview_max_edge = options.preview_max_edge;
   options.raw.half_size = is_raw_extension(lower_extension(options.input));
-  options.raw.ignore_embedded_gain_map = true;
+  options.raw.ignore_embedded_gain_map = false;
   options.raw.default_gamut = options.default_gamut;
   validate_gain_map_options(options.gain);
 
   auto decoded = decode_cached_image(options.input, options, options.raw);
   const auto input = decoded.describe_input();
+  if (input.domain == InputDomain::kDisplayReferredHdr ||
+      input.domain == InputDomain::kDualRendition) {
+    throw std::invalid_argument(
+        "--ai-model requires SDR or RAW input; HDR and dual-rendition photos already contain authored HDR");
+  }
   auto result = render_native_model_base(decoded, options.clamp_srgb);
   auto model_input = make_native_model_input(result.base_linear);
   auto prediction = infer_native_model(native_model_request(options, decoded.metadata),
@@ -1209,9 +1228,14 @@ int model_input_command(int argc, char** argv) {
     throw std::invalid_argument("model-input source, pixels and report must be distinct");
   }
   validate_gain_map_options(options.gain);
-  options.raw.ignore_embedded_gain_map = true;
+  options.raw.ignore_embedded_gain_map = false;
   options.raw.default_gamut = options.default_gamut;
   auto decoded = decode_image(input, options.raw);
+  if (decoded.describe_input().domain == InputDomain::kDisplayReferredHdr ||
+      decoded.describe_input().domain == InputDomain::kDualRendition) {
+    throw std::invalid_argument(
+        "model-input requires SDR or RAW input; HDR and dual-rendition photos already contain authored HDR");
+  }
   // Keep cache generation identical to the deployed input/base preparation.
   GainMapOptions development_options{};
   development_options.exposure_bias_ev = 0.0F;

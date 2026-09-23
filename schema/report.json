@@ -487,6 +487,7 @@
             "scene-referred",
             "display-referred-sdr",
             "display-referred-hdr",
+            "dual-rendition",
             "unknown"
           ]
         },
@@ -698,6 +699,9 @@
           ]
         },
         "distribution_measured": {
+          "type": "boolean"
+        },
+        "adaptive_chroma_loss": {
           "type": "boolean"
         },
         "gamma": {

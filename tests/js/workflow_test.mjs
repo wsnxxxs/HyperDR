@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const source = fs.readFileSync(new URL("../../apps/panel/web/js/settings/workflow.js", import.meta.url), "utf8").replace(/^import .*;\r?\n/gm, "");
-const { workflowPatch } = await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
+const { workflowPatch } = await import(`data:text/javascript;base64,${Buffer.from(
+  'const isHdrSource = domain => ["display-referred-hdr", "dual-rendition"].includes(domain);\n' + source).toString("base64")}`);
 const original = { encoding: "pq", previewOptimized: true, modelGainReady: true,
   hdrRange: 3, brightness: .3, lutId: "warm", lutInput: "srgb", lutStrength: .7 };
 const color = { ...original, ...workflowPatch(original, true) };
@@ -18,4 +19,5 @@ assert.equal(hdr.previewOptimized, true);
 assert.deepEqual(workflowPatch(color, true), {});
 assert.equal(workflowPatch({ ...color, modelGainReady: false }, false).previewOptimized, false);
 assert.equal(workflowPatch({ ...color, lutInput: "hlg" }, false).previewOptimized, false);
+assert.equal(workflowPatch({ ...color, sourceDomain: "dual-rendition" }, false).previewOptimized, false);
 console.log("Workflow: preserves grade and HDR settings; restores only compatible cached AI");

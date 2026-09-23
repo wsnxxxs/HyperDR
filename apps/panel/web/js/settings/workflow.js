@@ -1,6 +1,7 @@
 import { store } from "../core/store.js";
 import { role, setPressed, setText } from "../core/dom.js";
 import { t, onLocaleChange } from "../i18n/index.js";
+import { isHdrSource } from "./schema.js";
 
 // Encoding remains the single source of truth for the workflow, including
 // restored exports and undo. Switching does not change the shared grade.
@@ -12,7 +13,8 @@ export function workflowPatch(state, colorOnly) {
   };
   return {
     encoding: state.lastHdrEncoding || "adaptive", maskKey: null,
-    previewOptimized: Boolean(state.lastHdrOptimized && state.modelGainReady
+    previewOptimized: Boolean(!isHdrSource(state.sourceDomain)
+      && state.lastHdrOptimized && state.modelGainReady
       && !(state.lutId && ["hlg", "pq", "slog3-sgamut3cine"].includes(state.lutInput))),
   };
 }

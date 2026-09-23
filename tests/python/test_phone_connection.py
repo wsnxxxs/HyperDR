@@ -102,6 +102,9 @@ class PhoneConnectionTests(unittest.TestCase):
         self.assertEqual(self.call(setup, "GET", "/setup/root.crt", cookie="")[0], 401)
         code, headers, _ = self.call(setup, "GET", "/setup?token=" + setup.access_token, cookie="")
         self.assertEqual(code, 303)
+        self.assertEqual(headers["Location"], "/setup")
+        self.assertEqual(headers["Set-Cookie"],
+                         f"hyperdr_setup={setup.access_token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=900")
         cookie = headers["Set-Cookie"].split(";", 1)[0]
         code, _, root = self.call(setup, "GET", "/setup/root.crt", cookie=cookie)
         self.assertEqual(code, 200)
@@ -298,6 +301,9 @@ class PhoneConnectionTests(unittest.TestCase):
         login.request("GET", entry.path + "?" + entry.query)
         response = login.getresponse()
         self.assertEqual(response.status, 303)
+        self.assertEqual(response.getheader("Location"), "/phone?check=" + setup.check_token)
+        self.assertEqual(response.getheader("Set-Cookie"),
+                         f"hyperdr_access={self.desktop.phone_server.access_token}; Path=/; HttpOnly; SameSite=Lax; Secure")
         viewer = response.getheader("Set-Cookie").split(";", 1)[0]
         response.read()
         login.close()

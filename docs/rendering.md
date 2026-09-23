@@ -68,7 +68,10 @@ their hidden RGB values.
 - **A dual-rendition input** uses the authored SDR base directly, with explicit
   exposure and a highlight roll-off only for positive exposure. HDR strength
   scales its logarithmic gain by the requested display headroom relative to
-  the base and alternate headrooms. Zero strength returns SDR exactly, and
+  the base headroom and usable HDR range. Ultra HDR uses its reconstructed
+  pixel peak for that range: a large gain ratio in a dark pixel must not dim
+  an otherwise fully covered photograph. Original reconstruction headrooms
+  remain in the decoded metadata. Zero strength returns SDR exactly, and
   full strength with sufficient headroom returns the reconstructed source HDR.
   Between the endpoints, the renderer derives per-channel gain from
   `log2((HDR + alternate_offset) / (SDR + base_offset))`; the subtracted offset

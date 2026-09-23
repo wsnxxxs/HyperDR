@@ -105,7 +105,9 @@ inline void apply_capture_parameters_from_file(
 // portrait frame really does come off a landscape sensor.
 inline void normalize_orientation(DecodedImage& image, std::uint16_t orientation) {
   if (orientation == 1 || orientation < 1 || orientation > 8) return;
-  image.linear_p3 = apply_exif_orientation(std::move(image.linear_p3), orientation);
+  image.transform_planes([&](FloatImage plane) {
+    return apply_exif_orientation(std::move(plane), orientation);
+  });
   if (exif_orientation_transposes(orientation)) {
     std::swap(image.decode.target_width, image.decode.target_height);
     std::swap(image.decode.decoded_width, image.decode.decoded_height);

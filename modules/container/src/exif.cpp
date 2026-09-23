@@ -666,4 +666,62 @@ ExifRead read_exif(const std::uint8_t* data, std::size_t size) {
   return result;
 }
 
+std::optional<float> read_apple_legacy_gain_headroom(const std::uint8_t* data,
+                                                      std::size_t size) {
+  // Apple publishes this MakerNote headroom curve and the legacy gain-map
+  // reconstruction rule at:
+  // https://developer.apple.com/documentation/appkit/applying-apple-hdr-effect-to-your-photos
+  const auto start = tiff_start(data, size);
+  if (!start || *start > size) return std::nullopt;
+  TiffView tiff{data + *start, size - *start, false};
+  if (tiff.size < 10) return std::nullopt;
+  if (tiff.data[0] == 'M' && tiff.data[1] == 'M') tiff.big_endian = true;
+  else if (!(tiff.data[0] == 'I' && tiff.data[1] == 'I')) return std::nullopt;
+  const auto ifd0 = tiff.u32(4);
+  if (!ifd0) return std::nullopt;
+  const auto exif_ifd = entry_unsigned(tiff, find_entry(tiff, *ifd0, 0x8769));
+  if (!exif_ifd) return std::nullopt;
+  const auto maker = find_entry(tiff, *exif_ifd, 0x927C);
+  if (!maker || maker->bytes_size < 16) return std::nullopt;
+  const auto* blob = tiff.data + maker->bytes_offset;
+  const auto length = static_cast<std::size_t>(maker->bytes_size);
+  std::optional<float> maker33, maker48;
+  for (std::size_t marker = 0; marker + 4 <= length; ++marker) {
+    if (blob[marker] != 'M' || blob[marker + 1] != 'M') continue;
+    const auto count = static_cast<std::uint16_t>(blob[marker + 2] << 8 | blob[marker + 3]);
+    if (marker + 4 + static_cast<std::size_t>(count) * 12 > length) continue;
+    for (unsigned i = 0; i < count; ++i) {
+      const auto at = marker + 4 + i * 12;
+      const auto tag = static_cast<std::uint16_t>(blob[at] << 8 | blob[at + 1]);
+      if (tag != 0x21 && tag != 0x30) continue;
+      const auto type = static_cast<std::uint16_t>(blob[at + 2] << 8 | blob[at + 3]);
+      const auto items = (static_cast<std::uint32_t>(blob[at + 4]) << 24) |
+                         (static_cast<std::uint32_t>(blob[at + 5]) << 16) |
+                         (static_cast<std::uint32_t>(blob[at + 6]) << 8) | blob[at + 7];
+      const auto offset = (static_cast<std::uint32_t>(blob[at + 8]) << 24) |
+                          (static_cast<std::uint32_t>(blob[at + 9]) << 16) |
+                          (static_cast<std::uint32_t>(blob[at + 10]) << 8) | blob[at + 11];
+      if (type != 10 || items != 1 || offset > length || length - offset < 8) continue;
+      const auto word = [&](std::size_t p) -> std::int32_t {
+        return static_cast<std::int32_t>((static_cast<std::uint32_t>(blob[p]) << 24) |
+            (static_cast<std::uint32_t>(blob[p + 1]) << 16) |
+            (static_cast<std::uint32_t>(blob[p + 2]) << 8) | blob[p + 3]);
+      };
+      const auto denominator = word(offset + 4);
+      if (denominator == 0) continue;
+      const float value = static_cast<float>(word(offset)) / denominator;
+      if (tag == 0x21) maker33 = value;
+      else maker48 = value;
+    }
+    if (maker33 && maker48) break;
+  }
+  if (!maker33 || !maker48) return std::nullopt;
+  const float stops = *maker33 < 1.0F
+      ? (*maker48 <= 0.01F ? -20.0F * *maker48 + 1.8F
+                           : -0.101F * *maker48 + 1.601F)
+      : (*maker48 <= 0.01F ? -70.0F * *maker48 + 3.0F
+                           : -0.303F * *maker48 + 2.303F);
+  return std::exp2(std::max(stops, 0.0F));
+}
+
 }  // namespace hyperdr

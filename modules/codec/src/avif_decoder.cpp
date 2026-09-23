@@ -8,12 +8,9 @@
 // rather than being written a second time against libavif's spelling of the
 // same code points.
 //
-// Gain-map AVIF is read as its base image, deliberately and symmetrically with
-// the encoder: libavif's gain-map support is behind an experimental build flag
-// whose API is still moving (see the note at the top of avif_encoder.cpp), so
-// neither half of this project depends on it. An Ultra HDR AVIF therefore
-// arrives as its SDR base rather than failing, which is the same fallback the
-// JPEG/R path takes when its gain map will not parse.
+// The bundled libavif exposes the ISO gain-map API. Preserve both its primary
+// and reconstructed alternate; a failed map application is reported as a
+// degraded primary-only decode.
 
 #include "hyperdr/codec/image_source.hpp"
 #include "internal/decode_bytes.hpp"
@@ -26,6 +23,7 @@
 #include <avif/avif.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
@@ -82,13 +80,16 @@ std::uint16_t orientation_from_transforms(const avifImage& image) {
 
 SourceColor source_color_for(const avifImage& image, ColorGamut default_gamut) {
   SourceColor color(default_gamut);
+  const int transfer = static_cast<int>(image.transferCharacteristics);
+  const bool hdr_transfer = transfer == codec::kCicpTransferPq ||
+                            transfer == codec::kCicpTransferHlg;
   if (image.icc.data != nullptr && image.icc.size != 0 &&
-      image.icc.size <= (4U << 20U)) {
+      image.icc.size <= (4U << 20U) && !hdr_transfer) {
     color.icc.assign(image.icc.data, image.icc.data + image.icc.size);
     return color;
   }
   color.primaries = static_cast<int>(image.colorPrimaries);
-  color.transfer = static_cast<int>(image.transferCharacteristics);
+  color.transfer = transfer;
   if (codec::cicp_primaries_unspecified(color.primaries)) {
     color.primaries = codec::cicp_primaries_for_gamut(default_gamut);
   }
@@ -134,6 +135,9 @@ DecodedImage decode_avif_bytes(const std::vector<std::uint8_t>& bytes,
   // The row-parallel pool does the work after this point; one decoder thread
   // keeps the two from oversubscribing, matching the encoder's choice.
   decoder->maxThreads = 1;
+#if AVIF_VERSION >= 1020000
+  decoder->imageContentToDecode = AVIF_IMAGE_CONTENT_ALL;
+#endif
   check_avif(avifDecoderSetIOMemory(decoder.get(), bytes.data(), bytes.size()),
              "open the AVIF");
   check_avif(avifDecoderParse(decoder.get()), "parse the AVIF");
@@ -179,12 +183,83 @@ DecodedImage decode_avif_bytes(const std::vector<std::uint8_t>& bytes,
   result.decode.decoded_height = plan.height;
   result.decode.resolution_reduced = plan.budget_limited;
   result.metadata.orientation = 1;
-  // As in the HEIF path: an ICC profile carries no headroom, so an ICC-tagged
-  // AVIF is read as SDR and rendered faithfully rather than speculatively.
-  result.hdr_headroom = color.icc.empty() ? transfer_headroom(color.transfer) : 1.0F;
+  // PQ/HLG CICP determines transfer and range even beside an ICC profile.
+  result.hdr_headroom = transfer_headroom(color.transfer);
   if (result.hdr_headroom > 1.0F && image->clli.maxCLL != 0)
     result.content_peak_nits = static_cast<float>(image->clli.maxCLL);
   result.domain = display_referred_domain(result.hdr_headroom);
+
+#if AVIF_VERSION >= 1020000
+  if (image->gainMap != nullptr) {
+    const auto* map = image->gainMap;
+    const bool primary_is_hdr =
+        static_cast<double>(map->baseHdrHeadroom.n) / map->baseHdrHeadroom.d >
+        static_cast<double>(map->alternateHdrHeadroom.n) / map->alternateHdrHeadroom.d;
+    if (map->image == nullptr || map->image->yuvPlanes[AVIF_CHAN_Y] == nullptr) {
+      result.decode.degraded = true;
+      result.decode.degradation_reasons.push_back("avif_gain_map_pixels_unavailable_sdr_fallback");
+    } else {
+      avifRGBImage alternate{};
+      avifRGBImageSetDefaults(&alternate, image);
+      alternate.format = has_alpha ? AVIF_RGB_FORMAT_RGBA : AVIF_RGB_FORMAT_RGB;
+      alternate.depth = 16;
+      alternate.isFloat = AVIF_FALSE;
+      const auto status = avifRGBImageApplyGainMap(
+          &rgb, image->colorPrimaries, image->transferCharacteristics, map,
+          static_cast<float>(map->alternateHdrHeadroom.n) /
+              static_cast<float>(map->alternateHdrHeadroom.d),
+          AVIF_COLOR_PRIMARIES_SMPTE432,
+          AVIF_TRANSFER_CHARACTERISTICS_SMPTE2084,
+          &alternate, nullptr, &decoder->diag);
+      if (status != AVIF_RESULT_OK) {
+        avifRGBImageFreePixels(&alternate);
+        result.decode.degraded = true;
+        result.decode.degradation_reasons.push_back(
+            std::string("avif_gain_map_apply_failed_sdr_fallback:") +
+            avifResultToString(status) + ":" + decoder->diag.error);
+      } else {
+        struct AlternateGuard {
+          avifRGBImage* rgb;
+          ~AlternateGuard() { avifRGBImageFreePixels(rgb); }
+        } alternate_guard{&alternate};
+        SourceColor alternate_color(ColorGamut::kDisplayP3);
+        alternate_color.transfer = kCicpTransferPq;
+        FloatImage secondary = interleaved_rgb_to_linear_p3(
+            alternate.pixels, alternate.width, alternate.height,
+            alternate.rowBytes, static_cast<int>(alternate.depth),
+            alternate_color, plan.width, plan.height,
+            !has_alpha ? RgbAlpha::None : RgbAlpha::Straight);
+        if (primary_is_hdr) {
+          result.authored_sdr = std::move(secondary);
+        } else {
+          result.authored_sdr = std::move(result.linear_p3);
+          result.linear_p3 = std::move(secondary);
+        }
+        result.gain_map.channels = map->image->yuvFormat == AVIF_PIXEL_FORMAT_YUV400 ? 1U : 3U;
+        const float primary_headroom = std::exp2(
+            static_cast<float>(map->baseHdrHeadroom.n) / map->baseHdrHeadroom.d);
+        const float secondary_headroom = std::exp2(
+            static_cast<float>(map->alternateHdrHeadroom.n) / map->alternateHdrHeadroom.d);
+        result.gain_map.base_headroom = primary_is_hdr ? secondary_headroom : primary_headroom;
+        result.gain_map.alternate_headroom = primary_is_hdr ? primary_headroom : secondary_headroom;
+        for (unsigned c = 0; c < 3; ++c) {
+          const float primary_offset =
+              static_cast<float>(map->baseOffset[c].n) / map->baseOffset[c].d;
+          const float secondary_offset =
+              static_cast<float>(map->alternateOffset[c].n) / map->alternateOffset[c].d;
+          result.gain_map.base_offset[c] = primary_is_hdr ? secondary_offset : primary_offset;
+          result.gain_map.alternate_offset[c] = primary_is_hdr ? primary_offset : secondary_offset;
+        }
+        float peak = 1.0F;
+        for (float value : result.linear_p3.pixels)
+          if (std::isfinite(value)) peak = std::max(peak, value);
+        result.hdr_headroom = peak;
+        result.content_peak_nits.reset();
+        result.domain = InputDomain::kDualRendition;
+      }
+    }
+  }
+#endif
 
   // The container's own transforms are authoritative when present, which is
   // what the HEIF family says and what libavif's encoder assumes when it folds

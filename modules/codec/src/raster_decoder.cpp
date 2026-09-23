@@ -13,6 +13,7 @@
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/gainmap/reconstruct.hpp"
 #include "hyperdr/look/analysis.hpp"
+#include "hyperdr/look/grid.hpp"
 #include "hyperdr/codec/input_format.hpp"
 #include "internal/budget.hpp"
 #include "internal/decode_bytes.hpp"
@@ -23,6 +24,7 @@
 #include "hyperdr/image/transfer.hpp"
 
 #include <libheif/heif.h>
+#include <libheif/heif_aux_images.h>
 #include <libheif/heif_properties.h>
 #include <jpeglib.h>
 #include <lcms2.h>
@@ -46,6 +48,12 @@
 #include <vector>
 
 namespace hyperdr {
+
+namespace codec {
+std::optional<DecodedImage> decode_apple_legacy_heic(
+    heif_context* context, const heif_image_handle* primary,
+    ColorGamut default_gamut);
+}
 
 namespace {
 
@@ -582,7 +590,8 @@ struct DecodingOptionsDeleter {
 };
 
 std::optional<ExifRead> read_heif_exif(
-    const heif_image_handle* handle) {
+    const heif_image_handle* handle,
+    std::optional<float>* apple_headroom = nullptr) {
   const int count =
       heif_image_handle_get_number_of_metadata_blocks(handle, "Exif");
   if (count <= 0 || count > 64) return std::nullopt;
@@ -600,6 +609,8 @@ std::optional<ExifRead> read_heif_exif(
         heif_error_Ok) {
       continue;
     }
+    if (apple_headroom)
+      *apple_headroom = read_apple_legacy_gain_headroom(bytes.data(), bytes.size());
     // Orientation parsing is intentionally independent of the broader photo
     // metadata parser: one malformed optional Exif field must not prevent a
     // valid IFD0 Orientation tag from being normalised.
@@ -642,16 +653,22 @@ DecodedImage decode_heif_rgb_handle(const heif_context* context,
       }
     }
   }
-  if (color.icc.empty()) {
+  {
     heif_color_profile_nclx* profile_raw = nullptr;
     const auto profile_error =
         heif_image_handle_get_nclx_color_profile(handle, &profile_raw);
     const bool has_nclx = profile_error.code == heif_error_Ok && profile_raw != nullptr;
     if (has_nclx) {
-      color.primaries = profile_raw->color_primaries;
-      color.transfer = profile_raw->transfer_characteristics;
-      if (codec::cicp_primaries_unspecified(color.primaries)) {
-        color.primaries = codec::cicp_primaries_for_gamut(default_gamut);
+      const int transfer = profile_raw->transfer_characteristics;
+      if (color.icc.empty() || transfer == codec::kCicpTransferPq ||
+          transfer == codec::kCicpTransferHlg) {
+        if (transfer == codec::kCicpTransferPq || transfer == codec::kCicpTransferHlg)
+          color.icc.clear();
+        color.primaries = profile_raw->color_primaries;
+        color.transfer = transfer;
+        if (codec::cicp_primaries_unspecified(color.primaries)) {
+          color.primaries = codec::cicp_primaries_for_gamut(default_gamut);
+        }
       }
     }
     if (profile_raw != nullptr) heif_nclx_color_profile_free(profile_raw);
@@ -717,12 +734,9 @@ DecodedImage decode_heif_rgb_handle(const heif_context* context,
   result.decode.target_width = full_width;
   result.decode.target_height = full_height;
   result.decode.resolution_reduced = plan.budget_limited;
-  // An ICC profile cannot state a headroom, so an ICC-described HEIC is read as
-  // SDR. That is the conservative answer rather than the complete one: it
-  // renders such a file faithfully instead of inventing a range nothing in the
-  // container declared.
-  result.hdr_headroom =
-      color.icc.empty() ? transfer_headroom(color.transfer) : 1.0F;
+  // An ICC-only file has no declared HDR transfer. PQ/HLG nclx remains
+  // authoritative for transfer and range when both profiles are present.
+  result.hdr_headroom = transfer_headroom(color.transfer);
   heif_content_light_level light{};
   if (result.hdr_headroom > 1.0F && heif_image_handle_get_content_light_level(handle, &light) &&
       light.max_content_light_level != 0)
@@ -753,6 +767,7 @@ DecodedImage decode_adaptive_heic(const std::vector<std::uint8_t>& bytes,
   }
   const auto references = find_tmap_references(bytes);
   const auto metadata = parse_tmap_payload(extract_tmap_payload(bytes));
+  const auto gain_channels = gain_map_channel_count(metadata);
 
   heif_image_handle* base_handle_raw = nullptr;
   check_heif(heif_context_get_image_handle(context, references.base_id, &base_handle_raw),
@@ -779,17 +794,20 @@ DecodedImage decode_adaptive_heic(const std::vector<std::uint8_t>& bytes,
              "get Adaptive HDR Gain Map");
   std::unique_ptr<heif_image_handle, HandleDeleter> gain_handle(gain_handle_raw);
   heif_image* gain_raw = nullptr;
-  check_heif(heif_decode_image(gain_handle.get(), &gain_raw, heif_colorspace_YCbCr,
-                               heif_chroma_420, nullptr),
+  check_heif(heif_decode_image(gain_handle.get(), &gain_raw,
+                               gain_channels == 1 ? heif_colorspace_YCbCr : heif_colorspace_RGB,
+                               gain_channels == 1 ? heif_chroma_420 : heif_chroma_interleaved_RGB,
+                               nullptr),
              "decode Adaptive HDR Gain Map");
   std::unique_ptr<heif_image, ImageDeleter> gain_image(gain_raw);
-  const int gain_width = heif_image_get_width(gain_image.get(), heif_channel_Y);
-  const int gain_height = heif_image_get_height(gain_image.get(), heif_channel_Y);
+  const auto gain_channel = gain_channels == 1 ? heif_channel_Y : heif_channel_interleaved;
+  const int gain_width = heif_image_get_width(gain_image.get(), gain_channel);
+  const int gain_height = heif_image_get_height(gain_image.get(), gain_channel);
   const int gain_bits =
-      heif_image_get_bits_per_pixel_range(gain_image.get(), heif_channel_Y);
+      heif_image_get_bits_per_pixel_range(gain_image.get(), gain_channel);
   int gain_stride = 0;
   const auto* gain_plane =
-      heif_image_get_plane_readonly(gain_image.get(), heif_channel_Y, &gain_stride);
+      heif_image_get_plane_readonly(gain_image.get(), gain_channel, &gain_stride);
   if (!gain_plane || gain_width <= 0 || gain_height <= 0 || gain_stride <= 0 ||
       gain_bits < 1 || gain_bits > 16 ||
       gain_width > static_cast<int>(result.linear_p3.width) ||
@@ -798,30 +816,47 @@ DecodedImage decode_adaptive_heic(const std::vector<std::uint8_t>& bytes,
   }
 
   FloatImage gain(static_cast<std::uint32_t>(gain_width),
-                  static_cast<std::uint32_t>(gain_height), 1);
+                  static_cast<std::uint32_t>(gain_height),
+                  static_cast<std::uint32_t>(gain_channels));
   const float gain_max = static_cast<float>((1U << gain_bits) - 1U);
   for (int y = 0; y < gain_height; ++y) {
     const auto* row = gain_plane + static_cast<std::size_t>(y) * gain_stride;
     for (int x = 0; x < gain_width; ++x) {
-      std::uint16_t code = row[x];
-      if (gain_bits > 8) {
-        code = static_cast<std::uint16_t>(row[x * 2] |
-                                         (static_cast<std::uint16_t>(row[x * 2 + 1]) << 8));
+      for (std::size_t c = 0; c < gain_channels; ++c) {
+        const auto index = (static_cast<std::size_t>(x) * gain_channels + c) *
+                           (gain_bits > 8 ? 2U : 1U);
+        std::uint16_t code = row[index];
+        if (gain_bits > 8) {
+          code = static_cast<std::uint16_t>(row[index] |
+              (static_cast<std::uint16_t>(row[index + 1]) << 8));
+        }
+        gain.at(static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(y),
+                static_cast<std::uint32_t>(c)) =
+            code / gain_max;
       }
-      gain.at(static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(y), 0) =
-          code / gain_max;
     }
   }
   const float alternate_headroom =
       static_cast<float>(metadata.alternate_headroom.numerator) /
       static_cast<float>(metadata.alternate_headroom.denominator);
-  result.linear_p3 = reconstruct_gain_map(result.linear_p3, gain, metadata,
+  result.authored_sdr = result.linear_p3;
+  result.gain_map.channels = static_cast<std::uint32_t>(gain_channels);
+  result.gain_map.base_headroom = std::exp2(rational_value(metadata.base_headroom));
+  result.gain_map.alternate_headroom = std::exp2(alternate_headroom);
+  for (unsigned c = 0; c < 3; ++c) {
+    const auto channel = gain_map_channel(metadata, gain_channels == 1 ? 0 : c);
+    result.gain_map.base_offset[c] = rational_value(channel.base_offset);
+    result.gain_map.alternate_offset[c] = rational_value(channel.alternate_offset);
+  }
+  result.linear_p3 = reconstruct_gain_map(*result.authored_sdr, gain, metadata,
                                           alternate_headroom);
   if (!alpha.pixels.empty()) {
     for (std::size_t i = 0; i < alpha.pixels.size(); ++i)
       for (unsigned c = 0; c < 3; ++c) {
-        auto& value = result.linear_p3.pixels[i * 3 + c];
-        value = alpha.pixels[i] == 0 ? 0 : value * alpha.pixels[i];
+        auto& hdr = result.linear_p3.pixels[i * 3 + c];
+        auto& sdr = result.authored_sdr->pixels[i * 3 + c];
+        hdr *= alpha.pixels[i];
+        sdr *= alpha.pixels[i];
       }
   }
   // The base is a Display P3 SDR image, so the headroom is entirely whatever
@@ -832,7 +867,7 @@ DecodedImage decode_adaptive_heic(const std::vector<std::uint8_t>& bytes,
   result.content_peak_nits.reset();
   // A tmap file whose gain map adds nothing is an SDR picture in an HDR
   // container, and saying so keeps it out of the highlight-splitting renderer.
-  result.domain = display_referred_domain(result.hdr_headroom);
+  result.domain = InputDomain::kDualRendition;
   normalize_orientation(result, exif_orientation);
   return result;
 }
@@ -852,11 +887,95 @@ DecodedImage decode_heic(const std::vector<std::uint8_t>& bytes, bool base_only,
   check_heif(heif_context_get_primary_image_handle(context.get(), &handle_raw),
              "HEIC primary image");
   std::unique_ptr<heif_image_handle, HandleDeleter> handle(handle_raw);
+  if (!base_only) {
+    if (auto legacy = codec::decode_apple_legacy_heic(context.get(), handle.get(),
+            default_gamut))
+      return std::move(*legacy);
+  }
   return decode_heif_rgb_handle(context.get(), handle.get(), preview_max_edge,
                                 default_gamut);
 }
 
 }  // namespace
+
+namespace codec {
+DecodedImage decode_jpeg_primary_bytes(const std::vector<std::uint8_t>& bytes,
+                                       ColorGamut default_gamut) {
+  return decode_jpeg(bytes, 0, default_gamut);
+}
+
+std::optional<DecodedImage> decode_apple_legacy_heic(
+    heif_context* context, const heif_image_handle* primary,
+    ColorGamut default_gamut) {
+  const int count = heif_image_handle_get_number_of_auxiliary_images(primary,
+      LIBHEIF_AUX_IMAGE_FILTER_OMIT_ALPHA | LIBHEIF_AUX_IMAGE_FILTER_OMIT_DEPTH);
+  if (count <= 0 || count > 64) return std::nullopt;
+  std::vector<heif_item_id> ids(static_cast<std::size_t>(count));
+  const int written = heif_image_handle_get_list_of_auxiliary_image_IDs(
+      primary, LIBHEIF_AUX_IMAGE_FILTER_OMIT_ALPHA |
+      LIBHEIF_AUX_IMAGE_FILTER_OMIT_DEPTH, ids.data(), count);
+  for (int i = 0; i < written; ++i) {
+    heif_image_handle* aux_raw = nullptr;
+    if (heif_image_handle_get_auxiliary_image_handle(primary, ids[i], &aux_raw).code !=
+        heif_error_Ok) continue;
+    std::unique_ptr<heif_image_handle, HandleDeleter> aux(aux_raw);
+    const char* type = nullptr;
+    if (heif_image_handle_get_auxiliary_type(aux.get(), &type).code != heif_error_Ok)
+      continue;
+    const bool legacy = type && std::strcmp(type,
+        "urn:com:apple:photo:2020:aux:hdrgainmap") == 0;
+    heif_image_handle_release_auxiliary_type(aux.get(), &type);
+    if (!legacy) continue;
+
+    std::optional<float> headroom;
+    if (!read_heif_exif(primary, &headroom) || !headroom || *headroom < 1.0F)
+      throw std::runtime_error("Apple legacy gain map lacks usable MakerNote headroom");
+    heif_image* gain_raw = nullptr;
+    check_heif(heif_decode_image(aux.get(), &gain_raw, heif_colorspace_YCbCr,
+                                 heif_chroma_420, nullptr),
+               "decode Apple legacy gain map");
+    std::unique_ptr<heif_image, ImageDeleter> gain_image(gain_raw);
+    const int width = heif_image_get_width(gain_image.get(), heif_channel_Y);
+    const int height = heif_image_get_height(gain_image.get(), heif_channel_Y);
+    const int bits = heif_image_get_bits_per_pixel_range(gain_image.get(), heif_channel_Y);
+    int stride = 0;
+    const auto* plane = heif_image_get_plane_readonly(gain_image.get(), heif_channel_Y, &stride);
+    if (!plane || width <= 0 || height <= 0 || bits != 8 || stride < width)
+      throw std::runtime_error("Apple legacy gain map has invalid pixels");
+
+    // Decode the full base before sampling the auxiliary grid. The preview
+    // caller reduces both planes together after reconstruction.
+    std::uint16_t orientation = 1;
+    auto result = decode_heif_rgb_handle(context, primary, 0, default_gamut,
+                                         false, &orientation, nullptr);
+    FloatImage encoded(width, height, 1);
+    for (int y = 0; y < height; ++y)
+      for (int x = 0; x < width; ++x)
+        encoded.at(x, y, 0) = plane[static_cast<std::size_t>(y) * stride + x] / 255.0F;
+    result.authored_sdr = result.linear_p3;
+    result.gain_map.channels = 1;
+    result.gain_map.base_headroom = 1.0F;
+    result.gain_map.alternate_headroom = *headroom;
+    const BilinearGridSampler sampler(encoded.width, encoded.height,
+                                      result.linear_p3.width, result.linear_p3.height);
+    const GridView grid(encoded.pixels, encoded.width, encoded.height);
+    parallel_for_rows(result.linear_p3.height, [&](std::uint32_t y) {
+      for (std::uint32_t x = 0; x < result.linear_p3.width; ++x) {
+        const float gain = bt709_inverse_oetf(sampler.sample(grid, x, y));
+        const float multiplier = 1.0F + (*headroom - 1.0F) * gain;
+        for (unsigned c = 0; c < 3; ++c)
+          result.linear_p3.at(x, y, c) *= multiplier;
+      }
+    });
+    result.hdr_headroom = *headroom;
+    result.content_peak_nits.reset();
+    result.domain = InputDomain::kDualRendition;
+    normalize_orientation(result, orientation);
+    return result;
+  }
+  return std::nullopt;
+}
+}  // namespace codec
 
 DecodedImage decode_image(const std::filesystem::path& path, const RawDecodeOptions& options) {
   const auto ext = lower_extension(path);

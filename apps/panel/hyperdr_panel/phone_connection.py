@@ -5,7 +5,7 @@ import threading
 import time
 from urllib.parse import quote
 
-from . import phone_setup, phone_tls, security
+from . import phone_log, phone_setup, phone_tls, security
 
 
 class PhoneConnections:
@@ -59,18 +59,24 @@ class PhoneConnections:
         phone.context.workbench = self.context.workbench
         phone.phone_controller = self
         if tls:
-            phone.socket = tls.wrap_socket(phone.socket, server_side=True)
+            # Deferred handshake: `accept()` only accepts, `PanelServer._handshake`
+            # runs the TLS handshake per connection inside its worker.
+            phone.socket = tls.wrap_socket(
+                phone.socket, server_side=True, do_handshake_on_connect=False)
         self.phone_server = phone
         threading.Thread(target=phone.serve_forever, daemon=True, name="hyperdr-phone").start()
+        phone_log.log("phone-listener-start", scheme=scheme, port=phone.server_port)
 
     def _close_setup(self):
         if self.setup_server:
+            phone_log.log("setup-listener-stop", port=self.setup_server.server_port)
             phone_setup.close(self.setup_server)
             self.setup_server = None
 
     def _close_phone_listener(self):
         self._close_setup()
         if self.phone_server:
+            phone_log.log("phone-listener-stop", port=self.phone_server.server_port)
             self.phone_server.retired = True
             with self.context.workbench.changed:
                 self.context.workbench.notify()
@@ -125,6 +131,7 @@ class PhoneConnections:
             self._close_setup()
             self.setup_server = phone_setup.start(find_free_port("0.0.0.0", 8801),
                                                   self._addresses, self.phone_server, certificate)
+            phone_log.log("setup-listener-start", port=self.setup_server.server_port)
             return self.phone_status()
 
     def _require_owner(self, owner):

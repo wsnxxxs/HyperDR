@@ -16,12 +16,18 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote
 
-from . import api, security
+from . import api, phone_log, security
 from .config import PREFERRED_PORT
 from .handler import Handler
 from .job import active_session_id, shutdown
 from .phone_connection import PhoneConnections
 from .session import cleanup_expired_sessions
+
+# Bounded so one client that connects and never finishes its TLS handshake
+# cannot hold a worker and a connection slot forever. The timeout covers only
+# the handshake; handlers restore their own read timeout afterwards.
+TLS_HANDSHAKE_TIMEOUT_SECONDS = max(
+    0.5, float(os.environ.get("HYPERDR_TLS_HANDSHAKE_TIMEOUT_SECONDS", "5")))
 
 class PanelServer(PhoneConnections, ThreadingHTTPServer):
     daemon_threads = True
@@ -35,9 +41,18 @@ class PanelServer(PhoneConnections, ThreadingHTTPServer):
     def process_request(self, request, client_address):
         if not self.connection_slots.acquire(blocking=False):
             try:
-                request.sendall(
-                    b"HTTP/1.1 503 Service Unavailable\r\n"
-                    b"Connection: close\r\nContent-Length: 0\r\n\r\n")
+                if isinstance(request, ssl.SSLSocket):
+                    # Writing to a TLS socket that has not handshaked would start
+                    # the handshake here in the accept thread. A saturated server
+                    # just drops such a connection.
+                    phone_log.log("connection-saturated", transport="tls",
+                                  peer=client_address[0])
+                else:
+                    request.sendall(
+                        b"HTTP/1.1 503 Service Unavailable\r\n"
+                        b"Connection: close\r\nContent-Length: 0\r\n\r\n")
+            except OSError:
+                pass
             finally:
                 request.close()
             return
@@ -49,9 +64,37 @@ class PanelServer(PhoneConnections, ThreadingHTTPServer):
 
     def process_request_thread(self, request, client_address):
         try:
+            if isinstance(request, ssl.SSLSocket) and not self._handshake(request, client_address):
+                self.shutdown_request(request)
+                return
             super().process_request_thread(request, client_address)
         finally:
             self.connection_slots.release()
+
+    def _handshake(self, request, client_address) -> bool:
+        """Complete the TLS handshake here, never at accept time.
+
+        `accept()` must return immediately: a client that connects and stalls
+        before or during the handshake would otherwise queue every later
+        request — including the whole phone workbench — behind itself, and
+        would stall `shutdown()` just as reliably.
+        """
+        started = time.monotonic()
+        request.settimeout(TLS_HANDSHAKE_TIMEOUT_SECONDS)
+        try:
+            request.do_handshake()
+        except (OSError, ValueError) as error:
+            phone_log.log("tls-handshake", result="failed",
+                          error="timeout" if isinstance(error, TimeoutError) else type(error).__name__,
+                          elapsed=time.monotonic() - started, peer=client_address[0])
+            return False
+        finally:
+            request.settimeout(None)
+        elapsed = time.monotonic() - started
+        if elapsed >= 1.0:
+            phone_log.log("tls-handshake", result="ok", elapsed=elapsed,
+                          peer=client_address[0])
+        return True
 
     access_token: str
     cookie_secure: bool
@@ -176,7 +219,10 @@ def serve(*, desktop: bool = False) -> None:
 
     server = build_server(host, port, token, scheme, desktop=desktop)
     if tls_context is not None:
-        server.socket = tls_context.wrap_socket(server.socket, server_side=True)
+        # Deferred handshake: `accept()` only accepts, `PanelServer._handshake`
+        # runs the TLS handshake per connection inside its worker.
+        server.socket = tls_context.wrap_socket(
+            server.socket, server_side=True, do_handshake_on_connect=False)
 
     removed = cleanup_expired_sessions()
     cleanup_minutes = max(1, min(1440, int(os.environ.get("HYPERDR_CLEANUP_MINUTES", "15"))))

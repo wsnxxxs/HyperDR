@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
 
-from . import api, job, security, color_lut, lut_library, raw_profiles
+from . import api, job, phone_log, security, color_lut, lut_library, raw_profiles
 from .config import WEB_ROOT
 from .session import save_upload
 
@@ -87,14 +87,17 @@ class Handler(BaseHTTPRequestHandler):
             for name, value in security.SECURITY_HEADERS.items():
                 self.send_header(name, value)
             self.end_headers()
+            self._log("phone-login", status=303)
             return True
         retry_after = self.server.login_throttle.retry_after(client_ip)
         if retry_after > 0:
             self._send(self._lockout_response(retry_after))
+            self._log("phone-login", status=429)
             return True
         self.server.login_throttle.record_failure(client_ip)
         self._send(api.Response(status=403, payload={
             "error": "访问口令无效。", "code": "token_invalid"}))
+        self._log("phone-login", status=403)
         return True
 
     def _require_authorized(self) -> bool:
@@ -124,6 +127,19 @@ class Handler(BaseHTTPRequestHandler):
         if not origin:
             return True
         return urlparse(origin).netloc.lower() == self.headers.get("Host", "").lower()
+
+    # -- diagnostics ---------------------------------------------------- #
+    def _tracing(self) -> bool:
+        """Phone-facing listeners only; the loopback editor stays quiet."""
+        return (bool(getattr(self.server, "phone_only", False))
+                or getattr(self.server, "public_scheme", "http") == "https")
+
+    def _elapsed(self) -> float:
+        return time.monotonic() - getattr(self, "_request_started", time.monotonic())
+
+    def _log(self, event: str, **fields) -> None:
+        if self._tracing():
+            phone_log.log(event, **fields, elapsed=self._elapsed())
 
     # -- sending -------------------------------------------------------- #
     def _common_headers(self) -> None:
@@ -206,6 +222,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # -- routing -------------------------------------------------------- #
     def do_GET(self):
+        self._request_started = time.monotonic()
         parsed = urlparse(self.path)
         if self._accept_login(parsed):
             return
@@ -227,12 +244,18 @@ class Handler(BaseHTTPRequestHandler):
                     return
         route = api.GET_ROUTES.get(parsed.path)
         if route is not None:
-            self._send(self._dispatch(route, parse_qs(parsed.query)))
+            response = self._dispatch(route, parse_qs(parsed.query))
+            if parsed.path == "/api/state":
+                self._log("init-api", name="state", status=response.status)
+            self._send(response)
             return
         if parsed.path.startswith("/api/"):
             self._send(api.error("not found", status=404))
             return
-        if not self._serve_static(parsed.path):
+        served = self._serve_static(parsed.path)
+        if parsed.path in ("/", "/index.html", "/phone", "/phone/"):
+            self._log("phone-index", status=200 if served else 404)
+        if not served:
             self._send(api.error("not found", status=404))
 
     def do_POST(self):
@@ -298,7 +321,9 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/phone/state":
             if self.server.phone_only:
                 workbench.phone_seen = time.monotonic()
-            self._send(api.Response(payload=workbench.snapshot()))
+            response = api.Response(payload=workbench.snapshot())
+            self._log("init-api", name="phone-state", status=response.status)
+            self._send(response)
         elif parsed.path in ("/api/phone/frame", "/api/phone/original"):
             with workbench.changed:
                 original = parsed.path.endswith("/original")

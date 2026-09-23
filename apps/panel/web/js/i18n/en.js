@@ -101,6 +101,8 @@ export default {
   "phone.starting": "Opening phone workbench…",
   "phone.noNetwork": "No local network found. Connect to Wi-Fi and try again.",
   "phone.failed": "Could not connect. Please retry.",
+  "phone.timeout": "The service timed out. Please retry.",
+  "phone.timeoutStatus": "The service timed out; the latest connection state has been reloaded. Try again after checking.",
   "phone.prepare": "Enable HDR preview",
   "phone.prepareRetry": "Retry HDR setup",
   "phone.setupPhone": "Set up phone",

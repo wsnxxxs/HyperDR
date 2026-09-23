@@ -50,7 +50,8 @@ constexpr std::array<char, 8> kMagic{'H', 'D', 'R', 'C', 'A', 'C', 'H', '3'};
 // 28 separates stored Fuji sensor coordinates from the rearranged raster.
 // 29 composites raster alpha on black in linear light after HDR reconstruction.
 // 30 retains content-light metadata independently of HDR encoding capacity.
-constexpr std::uint32_t kCacheSchema = 30;
+// 31 retains both authored renditions and their gain-map reconstruction metadata.
+constexpr std::uint32_t kCacheSchema = 31;
 
 // x86-64 and arm64, the only targets this project builds for, are both little
 // endian; the cache is a local scratch format and is never transported.
@@ -166,6 +167,17 @@ std::string metadata_json(const DecodedImage& value) {
   write_capture_value(writer, "metadata_capture_focal_length_35mm", m.capture.focal_length_35mm);
   write_capture_value(writer, "capture_iso", c.iso);
   write_capture_value(writer, "content_peak_nits", value.content_peak_nits);
+  if (value.authored_sdr) {
+    writer.member("gain_channels", value.gain_map.channels);
+    write_capture_value(writer, "gain_base_headroom", std::optional(value.gain_map.base_headroom));
+    write_capture_value(writer, "gain_alternate_headroom", std::optional(value.gain_map.alternate_headroom));
+    for (std::size_t channel = 0; channel < 3; ++channel) {
+      write_capture_value(writer, "gain_base_offset_" + std::to_string(channel),
+                          std::optional(value.gain_map.base_offset[channel]));
+      write_capture_value(writer, "gain_alternate_offset_" + std::to_string(channel),
+                          std::optional(value.gain_map.alternate_offset[channel]));
+    }
+  }
   write_capture_value(writer, "capture_exposure_time_seconds", c.exposure_time_seconds);
   write_capture_value(writer, "capture_aperture_f_number", c.aperture_f_number);
   write_capture_value(writer, "capture_exposure_bias_ev", c.exposure_bias_ev);
@@ -245,6 +257,17 @@ void apply_metadata_json(const std::string& text, DecodedImage& out) {
   }
   out.hdr_headroom = read_optional(document, "hdr_headroom").value_or(1.0F);
   out.content_peak_nits = read_optional(document, "content_peak_nits");
+  if (out.authored_sdr) {
+    out.gain_map.channels = static_cast<std::uint32_t>(number_at("gain_channels"));
+    out.gain_map.base_headroom = read_optional(document, "gain_base_headroom").value_or(1.0F);
+    out.gain_map.alternate_headroom = read_optional(document, "gain_alternate_headroom").value_or(1.0F);
+    for (std::size_t channel = 0; channel < 3; ++channel) {
+      out.gain_map.base_offset[channel] = read_optional(document,
+          "gain_base_offset_" + std::to_string(channel)).value_or(0.0F);
+      out.gain_map.alternate_offset[channel] = read_optional(document,
+          "gain_alternate_offset_" + std::to_string(channel)).value_or(0.0F);
+    }
+  }
   // kCacheSchema was bumped for this field, so an entry that predates it is
   // already a miss and never reaches here. The fallback covers only a name this
   // build does not recognise, and it points at display-referred SDR because
@@ -397,8 +420,9 @@ DecodedImage decode_cached_image(const std::filesystem::path& input,
   auto effective_raw = raw;
   effective_raw.default_gamut = options.default_gamut;
   auto decoded = decode_image(input, effective_raw);
-  decoded.linear_p3 = resample_to_max_edge(
-      std::move(decoded.linear_p3), options.preview_max_edge);
+  decoded.transform_planes([&](FloatImage plane) {
+    return resample_to_max_edge(std::move(plane), options.preview_max_edge);
+  });
   if (!cache_file.empty()) {
     static_cast<void>(write_decode_cache(
         cache_file, decoded, options.decode_cache_budget_bytes));
@@ -416,7 +440,7 @@ bool read_decode_cache(const std::filesystem::path& file, DecodedImage& out) {
   if (!std::filesystem::is_regular_file(file, ec) || ec) return false;
   BinaryInput input(file);
   if (!input) return false;
-  std::array<std::uint8_t, 28> header{};
+  std::array<std::uint8_t, 32> header{};
   if (!input.read(header.data(), header.size())) return false;
   if (std::memcmp(header.data(), kMagic.data(), kMagic.size()) != 0) return false;
   if (get_u32(header.data() + 8) != kCacheSchema) return false;
@@ -425,6 +449,8 @@ bool read_decode_cache(const std::filesystem::path& file, DecodedImage& out) {
   const auto height = get_u32(header.data() + 16);
   const auto channels = get_u32(header.data() + 20);
   const auto json_length = get_u32(header.data() + 24);
+  const auto planes = get_u32(header.data() + 28);
+  if (planes != 1 && planes != 2) return false;
   // FloatImage also carries the five-plane native-model feature tensor. The
   // decode cache normally stores RGB, but keep its wire validator in sync with
   // the shared image contract if a feature buffer is cached by a caller.
@@ -434,7 +460,7 @@ bool read_decode_cache(const std::filesystem::path& file, DecodedImage& out) {
       static_cast<std::uint64_t>(width) * height * channels;
   if (pixel_count > (1ULL << 34U)) return false;
   const auto expected_size = static_cast<std::uint64_t>(header.size()) +
-                             json_length + pixel_count * sizeof(float);
+                             json_length + pixel_count * sizeof(float) * planes;
   const auto actual_size = std::filesystem::file_size(file, ec);
   if (ec || static_cast<std::uint64_t>(actual_size) != expected_size) return false;
 
@@ -446,12 +472,14 @@ bool read_decode_cache(const std::filesystem::path& file, DecodedImage& out) {
   DecodedImage loaded;
   try {
     loaded.linear_p3 = FloatImage(width, height, channels);
+    if (planes == 2) loaded.authored_sdr.emplace(width, height, channels);
     if (json_length != 0) apply_metadata_json(metadata_text, loaded);
   } catch (const std::exception&) {
     return false;
   }
   const auto bytes = static_cast<std::size_t>(pixel_count * sizeof(float));
   if (!input.read(loaded.linear_p3.pixels.data(), bytes)) return false;
+  if (loaded.authored_sdr && !input.read(loaded.authored_sdr->pixels.data(), bytes)) return false;
   out = std::move(loaded);
   return true;
 }
@@ -461,20 +489,29 @@ bool write_decode_cache(const std::filesystem::path& file, const DecodedImage& v
   const auto& image = value.linear_p3;
   if (image.width == 0 || image.height == 0 || image.channels == 0) return false;
   if (!image.is_consistent()) return false;
+  if (value.authored_sdr &&
+      (!value.authored_sdr->is_consistent() || value.authored_sdr->width != image.width ||
+       value.authored_sdr->height != image.height || value.authored_sdr->channels != image.channels)) return false;
   try {
     std::filesystem::create_directories(file.parent_path());
     const auto metadata = metadata_json(value);
     std::vector<std::uint8_t> bytes;
-    bytes.reserve(28 + metadata.size() + image.pixels.size() * sizeof(float));
+    const std::uint32_t planes = value.authored_sdr ? 2 : 1;
+    bytes.reserve(32 + metadata.size() + image.pixels.size() * sizeof(float) * planes);
     bytes.insert(bytes.end(), kMagic.begin(), kMagic.end());
     put_u32(bytes, kCacheSchema);
     put_u32(bytes, image.width);
     put_u32(bytes, image.height);
     put_u32(bytes, image.channels);
     put_u32(bytes, static_cast<std::uint32_t>(metadata.size()));
+    put_u32(bytes, planes);
     bytes.insert(bytes.end(), metadata.begin(), metadata.end());
     const auto* raw = reinterpret_cast<const std::uint8_t*>(image.pixels.data());
     bytes.insert(bytes.end(), raw, raw + image.pixels.size() * sizeof(float));
+    if (value.authored_sdr) {
+      const auto* base = reinterpret_cast<const std::uint8_t*>(value.authored_sdr->pixels.data());
+      bytes.insert(bytes.end(), base, base + value.authored_sdr->pixels.size() * sizeof(float));
+    }
     write_binary_file_atomic(file, bytes, true);
     // The budget is enforced here, on every write, not only once before a
     // batch starts. Pruning at the start bounds what a batch inherits and

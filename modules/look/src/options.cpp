@@ -80,7 +80,8 @@ std::optional<InputDomain> input_domain_from_name(std::string_view name) {
 }
 
 float rendering_headroom(const InputDescription& input) {
-  if ((input.domain != InputDomain::kDisplayReferredHdr && input.domain != InputDomain::kDualRendition) || !input.content_peak_nits)
+  // Dual inputs already carry a measured peak of the restored alternate.
+  if (input.domain != InputDomain::kDisplayReferredHdr || !input.content_peak_nits)
     return input.headroom;
   return std::clamp(*input.content_peak_nits / kReferenceWhiteNits, 1.0F, input.headroom);
 }

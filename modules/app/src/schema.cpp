@@ -185,8 +185,8 @@ const std::array<Setting, 34>& table() {
        "<0..2>", "Gain-map scale; photographic values above 1 are capped", false, true, nullptr,
        [](ConvertOptions& o, const json::Value& v) { o.gain.gain_strength = as_float(v); },
        [](const ConvertOptions& o) { return json::Value::from_number(o.gain.gain_strength); }},
-      {"exposure_bias", "--exposure-bias", SettingKind::kNumber, 0.0, 2.0, {},
-       "<0..2>", "Creative offset applied after exposure selection", false, true, nullptr,
+      {"exposure_bias", "--exposure-bias", SettingKind::kNumber, -2.0, 2.0, {},
+       "<-2..2>", "Creative offset applied after exposure selection", false, true, nullptr,
        [](ConvertOptions& o, const json::Value& v) { o.gain.exposure_bias_ev = as_float(v); },
        [](const ConvertOptions& o) { return json::Value::from_number(o.gain.exposure_bias_ev); }},
 

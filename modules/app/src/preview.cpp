@@ -1,4 +1,5 @@
 #include "hyperdr/app/preview.hpp"
+#include "hyperdr/app/source_defaults.hpp"
 #include "hyperdr/foundation/hash.hpp"
 #include "hyperdr/foundation/json.hpp"
 #include "hyperdr/foundation/rational.hpp"
@@ -20,6 +21,7 @@ std::vector<std::uint8_t> compact_preview_packet(const GainMapResult& result,
   const float denominator = rational_value(result.metadata.alternate_headroom) - base_headroom;
   const float weight = std::abs(denominator) < 1e-8F ? 0.0F
       : std::clamp((result.headroom_stops - base_headroom) / denominator, 0.0F, 1.0F);
+  const auto defaults = source_defaults(input.domain);
   json::Writer writer;
   writer.begin_object()
       .member("schema", "hyperdr.native-preview/v2")
@@ -38,7 +40,14 @@ std::vector<std::uint8_t> compact_preview_packet(const GainMapResult& result,
       .member("inputDomain", input_domain_name(input.domain))
       .member("hasCaptureMetadata", hasCaptureMetadata)
       .member("inputHeadroomStops", std::log2(input.headroom))
-      .member("status", decode.degraded ? "degraded" : "ok");
+      .member("status", decode.degraded ? "degraded" : "ok")
+      .begin_object("unadjusted")
+      .member("brightness", defaults.brightness_ev)
+      .member("hdrStrength", defaults.hdr_strength)
+      .member("hdrRange", defaults.hdr_range_stops)
+      .member("areaCoverage", defaults.area_coverage)
+      .member("lutStrength", defaults.lut_strength)
+      .end_object();
   if (input.content_peak_nits) writer.member("inputContentPeakNits", *input.content_peak_nits);
   writer.begin_array("degradationReasons");
   for (const auto& reason : decode.degradation_reasons) writer.element(reason);

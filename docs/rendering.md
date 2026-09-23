@@ -14,7 +14,7 @@ in [colour LUT pipeline](color-lut-pipeline.md).
 
 ## Input domains
 
-Three kinds of input reach the renderer, and they are not interchangeable. The
+Four kinds of input reach the renderer, and they are not interchangeable. The
 decoder records which one it produced, in `DecodedImage::domain`; the report
 carries it as `input_domain`. Nothing branches on the file extension.
 
@@ -22,7 +22,15 @@ carries it as `input_domain`. Nothing branches on the file extension.
 | --- | --- | --- | --- |
 | `scene-referred` | RAW through LibRaw | wherever white balance landed | photographic curve, automatic exposure |
 | `display-referred-sdr` | JPEG, PNG, SDR HEIC/AVIF, an Ultra HDR JPEG that fell back to its primary | diffuse white, and the ceiling | stable finished base plus creative highlight gain |
-| `display-referred-hdr` | PQ/HLG HEIC and AVIF, Ultra HDR, a gain-map HEIC | diffuse white, with real detail above it | log-domain shoulder, split at the declared headroom |
+| `display-referred-hdr` | Single-version PQ/HLG HEIC, AVIF and PNG | diffuse white, with real detail above it | preserve HDR; generate SDR with a log-domain shoulder |
+| `dual-rendition` | Adaptive HEIC, Ultra HDR JPEG, legacy Apple gain-map HEIC, supported gain-map AVIF | authored diffuse white | retain the authored SDR base and reconstructed HDR alternate |
+
+`DecodedImage::linear_p3` remains the HDR endpoint. Dual inputs additionally own
+`authored_sdr`, a same-size linear Display P3 image, plus channel offsets and both
+headrooms. Orientation, alpha compositing, preview reduction, and the decode
+cache retain both planes. This costs another 12 bytes per pixel: approximately
+576 MB for 48 million pixels. A decoder without support for a container's gain
+map reports its SDR fallback as degraded.
 
 PNG, HEIF and AVIF transparency is composited onto black in linear Display P3
 before resizing or rendering; outputs are opaque photographs. Premultiplied
@@ -44,15 +52,31 @@ their hidden RGB values.
   input measurement. Explicit exposure and exposure bias are both honoured;
   capture ISO participates in local noise weighting. The panel keeps `pop`
   fixed so its strength slider does not also change clarity and colour.
-- **A display-referred HDR input** is split rather than re-developed. Both
-  renditions come from one shoulder in the log domain: identity below the knee
-  (`--expansion-start`), slope exactly 1 at the knee, and asymptotic above it.
-  The ceiling is the only difference between the two. Each ceiling is *solved*
+- **A display-referred HDR input** preserves its HDR photograph and generates
+  an SDR rendition. The SDR log-domain shoulder has a fixed knee at 0.48,
+  independent of `--expansion-start`. HDR compression starts at diffuse white
+  (1.0) when the target has at least one stop of headroom; below one stop its
+  knee moves linearly in log light back to the SDR knee. Thus diffuse white and
+  midtones stay fixed whenever at least one stop remains. At zero strength,
+  HDR equals SDR. Each shoulder is identity below its knee, has slope exactly
+  1 at the knee, and is asymptotic above it. Each ceiling is *solved*
   so the input's declared peak lands exactly on its target — 1.0 for the base,
   the output headroom for the rendition — because a shoulder only approaches
   its ceiling, and assuming it instead rendered a 1.06-stop input at 0.42 stops.
   When the output budget covers everything the input declared, the rendition is
   the input, unmodified.
+- **A dual-rendition input** uses the authored SDR base directly, with explicit
+  exposure and a highlight roll-off only for positive exposure. HDR strength
+  scales its logarithmic gain by the requested display headroom relative to
+  the base and alternate headrooms. Zero strength returns SDR exactly, and
+  full strength with sufficient headroom returns the reconstructed source HDR.
+  Between the endpoints, the renderer derives per-channel gain from
+  `log2((HDR + alternate_offset) / (SDR + base_offset))`; the subtracted offset
+  interpolates from base to alternate so unequal offsets still preserve both
+  endpoints. Zero-gain pixels with equal offsets do not change with strength.
+  SDR-space LUTs grade the base and carry the rendition ratio into HDR.
+  HLG/PQ-space LUTs grade HDR and regenerate SDR by tone mapping; that deliberate
+  choice gives up the original authored SDR appearance after HDR grading.
 - PQ/HLG PNG, HEIF and AVIF may declare MaxCLL independently of the transfer
   function's capacity. Tone mapping uses that nonzero content peak, bounded by
   the encoding capacity and a minimum of SDR white (203 nits), before exposure.
@@ -127,11 +151,18 @@ on the first two stops: a PQ input reaching 49x diffuse white arrived at the
 The log-domain shoulder spreads the same 5.6 stops across roughly 26 codes at
 the default knee, and leaves everything below the knee bit-exact.
 
-The headroom the split uses is the one the *container declared*, never a
-percentile of the pixels. An HDR file whose colour is described by an ICC
-profile rather than by CICP therefore reports SDR; it has no measured input
-headroom, but the output controls may still apply the same fixed-exposure
-creative expansion as any other SDR photograph.
+Single-version HDR uses transfer-function headroom, bounded by declared
+content-light metadata when present. PQ/HLG nclx/CICP transfer information takes
+precedence over a simultaneous ICC profile, so an ICC profile cannot silently
+turn HDR into SDR. Gain-map inputs retain their authored reconstruction
+headrooms separately; Ultra HDR's usable pixel range is measured from the
+reconstructed HDR rather than copied from `hdr_capacity_max`.
+
+HDR and dual inputs cannot use AI or external gain maps: their HDR detail
+already exists in the file. CLI and preview operations reject those combinations
+after decoding the input. The panel hides AI, expansion start and bright-area
+weight for these inputs, allows brightness from −2 to +2 EV, and receives its
+unadjusted source defaults from the backend.
 
 ## Guarantees
 
@@ -156,8 +187,15 @@ creative expansion as any other SDR photograph.
   degrees, blended over 20 degrees on each side) keep the straight line: there
   the four models disagree by up to 20 degrees, and the Oklab hue turned a blue
   light in a real night frame teal where the camera's own rendering is blue.
-- Gain maps write zero base and alternate offsets, preserving common RGB ratios
-  during ISO 21496-1 reconstruction.
+- Ordinary generated gain maps use zero base and alternate offsets. Dual
+  rendition packaging retains the offsets needed to represent authored pixels.
+  Ultra HDR uses three gain channels to preserve both endpoints before codec
+  and gain quantization losses. Apple Adaptive uses one gain channel. A source
+  requiring channel-dependent gain is projected to a shared gain while deriving
+  its base from HDR; the report marks the resulting SDR chroma loss with
+  `adaptive_chroma_loss`. Neither JPEG nor HEVC export is claimed to be lossless.
+  Both gain-map formats declare the actual maximum gain as alternate headroom,
+  rather than a larger unused creative budget that would attenuate a later read.
 - Gain-map gamma is chosen by simulating 8-bit encode/decode error. Stored values
   use `pow(q, gamma)` and decoders use `pow(code, 1/gamma)`. The full-resolution
   map of an HDR input stores linear gain (gamma 1): its base already absorbs the

@@ -41,6 +41,21 @@ void round_trip(const std::filesystem::path& path,
           "cache changed the EXIF fallback decision");
   require(source.linear_p3.pixels == cached.linear_p3.pixels,
           "cache changed decoded pixels");
+  require(source.authored_sdr.has_value() == cached.authored_sdr.has_value(),
+          "cache lost the authored SDR rendition");
+  if (source.authored_sdr) {
+    require(source.authored_sdr->pixels == cached.authored_sdr->pixels,
+            "cache changed authored SDR pixels");
+    require(cached.describe_input().domain == hyperdr::InputDomain::kDualRendition &&
+                cached.describe_input().authored_sdr == &*cached.authored_sdr,
+            "cache lost the dual rendition input contract");
+    require(source.gain_map.base_offset == cached.gain_map.base_offset &&
+                source.gain_map.alternate_offset == cached.gain_map.alternate_offset &&
+                source.gain_map.base_headroom == cached.gain_map.base_headroom &&
+                source.gain_map.alternate_headroom == cached.gain_map.alternate_headroom &&
+                source.gain_map.channels == cached.gain_map.channels,
+            "cache changed authored gain reconstruction metadata");
+  }
   require(source.raw_lens_profile_path == cached.raw_lens_profile_path &&
               source.raw_lens_correction == cached.raw_lens_correction,
           "cache changed lens correction provenance");
@@ -117,6 +132,20 @@ int main() {
                                0.0, 4.73992180818545, 36.5};
     source.capture = {125.0F, 1.0F / 693.0F, 1.8F, 0.0F,
                       4.73992180818545F, 36.5F};
+    round_trip(path, source);
+
+    source.domain = hyperdr::InputDomain::kDualRendition;
+    source.hdr_headroom = 4.0F;
+    source.authored_sdr.emplace(16, 16, 3);
+    for (std::size_t i = 0; i < source.linear_p3.pixels.size(); ++i) {
+      source.authored_sdr->pixels[i] = static_cast<float>(i) / 1000.0F;
+      source.linear_p3.pixels[i] = source.authored_sdr->pixels[i] * 4.0F;
+    }
+    source.gain_map.base_offset = {0.012345678F, 0.0012345678F, 0.023456789F};
+    source.gain_map.alternate_offset = {0.023456789F, 0.012345678F, 0.0012345678F};
+    source.gain_map.base_headroom = 1.23456789F;
+    source.gain_map.alternate_headroom = 4.123456789F;
+    source.gain_map.channels = 3;
     round_trip(path, source);
 
     source.metadata.capture.exposure_bias_ev = -2.0 / 3.0;

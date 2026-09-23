@@ -13,7 +13,7 @@ HyperDR convert <file-or-directory> --output <directory>
     [--look photographic]
     [--contrast <0.80..1.35>] [--vibrance <-0.50..0.50>] [--pop <0..1>]
     [--headroom-max <0..4>] [--exposure auto|<EV>]
-    [--exposure-bias <0..2>]
+    [--exposure-bias <-2..2>]
     [--headroom auto|<stops>] [--gain-strength <0..2>]
     [--expansion-start <0.18..0.75>] [--area-coverage <0..1>]
     [--highlight-recovery blend|reconstruct|clip|unclip]

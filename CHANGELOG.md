@@ -5,6 +5,33 @@ semantic versioning; dates use ISO 8601.
 
 ## Unreleased
 
+- Gain-map photographs -- Adaptive HDR HEIC, Ultra HDR JPEG, iPhone HDR HEIC
+  in both the ISO and the older Apple format, and gain-map AVIF -- now open with
+  both of their own renditions. SDR and JPEG exports use the photograph's
+  authored SDR image instead of a tone map of its HDR, and HDR strength scales
+  the photograph's own gain, so midtones stay put. Re-exporting to Adaptive HDR
+  keeps the authored SDR base exactly wherever one shared gain can reproduce the
+  HDR pixel; only other pixels (for example edges of a reduced export) are
+  rebuilt, and the report's `adaptive_chroma_loss` says whether any moved.
+
+- The HDR range of a gain-map input is measured from what the photograph
+  reaches, not the capacity its metadata declares, so a format with less
+  headroom does not dim a photograph that fits: an iPhone frame declaring 3
+  stops but peaking at 1.78 exports to HLG (2.3 stops) unchanged.
+
+- An older-format iPhone HDR photo whose MakerNote was removed by an editor
+  opens as its SDR image and is reported as degraded
+  (`apple_legacy_gain_map_unusable_sdr_fallback`).
+
+- Lowering HDR strength on a PQ/HLG photograph no longer dims diffuse white and
+  midtones; compression starts at diffuse white while at least one stop remains.
+
+- For JPEG, PNG and other SDR inputs, brightening now rolls highlights off from
+  a fixed 0.48 knee, the same as HDR inputs, and "Expansion start" affects only
+  the HDR gain. With the panel's default +0.6 EV, midtones between 0.5 and 0.8
+  come out up to about 9% brighter than before, and highlights next to white
+  are compressed more firmly. Photographs at zero brightness are unchanged.
+
 - Phone login and certificate setup now retain authentication through
   cross-site browser redirects, fixing `token_required` after opening a valid
   QR link in Chrome.

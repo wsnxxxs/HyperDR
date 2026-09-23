@@ -51,7 +51,8 @@ constexpr std::array<char, 8> kMagic{'H', 'D', 'R', 'C', 'A', 'C', 'H', '3'};
 // 29 composites raster alpha on black in linear light after HDR reconstruction.
 // 30 retains content-light metadata independently of HDR encoding capacity.
 // 31 retains both authored renditions and their gain-map reconstruction metadata.
-constexpr std::uint32_t kCacheSchema = 31;
+// 32 measures Adaptive and legacy Apple usable headroom from the reconstructed peak.
+constexpr std::uint32_t kCacheSchema = 32;
 
 // x86-64 and arm64, the only targets this project builds for, are both little
 // endian; the cache is a local scratch format and is never transported.

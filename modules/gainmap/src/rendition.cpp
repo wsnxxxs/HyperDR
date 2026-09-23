@@ -220,18 +220,59 @@ GainMapResult rgb_gain_map_from_renditions(PhotoRenditions images) {
   return out;
 }
 
+// The single RGB multiplier, in stops, that takes an SDR pixel to its HDR pixel
+// under the file's offsets. Luminance is linear in RGB, so for a pair that does
+// share one multiplier the luminance ratio is that multiplier exactly, whatever
+// the colour. Black, or a zero offset denominator, carries no gain.
+float mono_gain_stops(float sdr_y, float hdr_y, float base_offset, float alternate_offset) {
+  const float base = std::max(0.0F, sdr_y) + base_offset;
+  const float alternate = std::max(0.0F, hdr_y) + alternate_offset;
+  if (!(base > 1.0e-12F) || !(alternate > 1.0e-12F)) return 0.0F;
+  return std::log2(alternate / base);
+}
+
+// Packages an authored monochrome pair for Apple-compatible output, keeping
+// every authored SDR pixel that one shared multiplier can take to its HDR
+// pixel. That is judged by reconstruction error, not by per-channel ratios: a
+// zero channel has no meaningful ratio, and the old ratio test rejected every
+// Apple frame containing one. The tolerance -- 0.1% of the pixel's brightest
+// HDR channel plus a floor far below one 10-bit code at black -- sits under the
+// step of the 8-bit gain code that packaging adds anyway.
+//
+// A pixel outside it (a resized edge, where SDR and HDR were reduced
+// separately, or an edit that gave the endpoints different colours) has only
+// its own base rebuilt from its HDR pixel and decoded gain, as the exact HDR
+// packager does. The HDR stays exact everywhere and any SDR change is confined
+// to those pixels: rejecting the whole frame for a few edges rebuilt every
+// saturated colour in a reduced iPhone export.
 GainMapResult authored_mono_gain_map(PhotoRenditions images) {
   const auto width = images.sdr.width, height = images.sdr.height;
   FloatImage gains(width, height, 1);
+  std::vector<std::uint8_t> rebuild(static_cast<std::size_t>(width) * height, 0);
   const float base_offset = images.authored_gain_map.base_offset[0];
   const float alternate_offset = images.authored_gain_map.alternate_offset[0];
   parallel_for_rows(height, [&](std::uint32_t y) {
     for (std::uint32_t x = 0; x < width; ++x) {
-      const auto i = (static_cast<std::size_t>(y) * width + x) * 3;
-      const float base = p3_luminance(images.sdr.pixels[i], images.sdr.pixels[i+1], images.sdr.pixels[i+2]);
-      const float alternate = p3_luminance(images.hdr.pixels[i], images.hdr.pixels[i+1], images.hdr.pixels[i+2]);
-      gains.at(x,y,0) = std::log2((std::max(0.0F, alternate) + alternate_offset + kEpsilon) /
-          (std::max(0.0F, base) + base_offset + kEpsilon));
+      const auto pixel = static_cast<std::size_t>(y) * width + x;
+      const auto* sdr = &images.sdr.pixels[pixel * 3];
+      const auto* hdr = &images.hdr.pixels[pixel * 3];
+      float gain = mono_gain_stops(p3_luminance(sdr[0], sdr[1], sdr[2]),
+          p3_luminance(hdr[0], hdr[1], hdr[2]), base_offset, alternate_offset);
+      const float multiplier = std::exp2(gain);
+      const float peak = std::max({hdr[0], hdr[1], hdr[2], 0.0F});
+      const float tolerance = 1.0e-3F * peak + 1.0e-5F;
+      bool fits = true;
+      for (int c = 0; c < 3 && fits; ++c) {
+        const float rebuilt = std::max(0.0F,
+            (std::max(0.0F, sdr[c]) + base_offset) * multiplier - alternate_offset);
+        fits = std::abs(rebuilt - std::max(0.0F, hdr[c])) <= tolerance;
+      }
+      if (!fits) {
+        // Leave room for the brightest channel inside a unit base.
+        rebuild[pixel] = 1;
+        gain = std::max(gain, mono_gain_stops(1.0F, peak, base_offset, alternate_offset));
+      }
+      gains.pixels[pixel] = gain;
     }
   });
   const auto [minimum, maximum] = std::minmax_element(gains.pixels.begin(), gains.pixels.end());
@@ -246,9 +287,29 @@ GainMapResult authored_mono_gain_map(PhotoRenditions images) {
   const float low = rational_value(out.metadata.gain_min);
   const float high = rational_value(out.metadata.gain_max);
   const float range = high-low;
-  for (auto& gain : gains.pixels)
-    gain = range > kEpsilon ? std::round(std::clamp((gain-low)/range,0.0F,1.0F)*255)/255 : 0;
-  out.base_linear = std::move(images.sdr);
+  auto& base = images.sdr;
+  std::vector<float> row_change(height, 0.0F);
+  parallel_for_rows(height, [&](std::uint32_t y) {
+    for (std::uint32_t x = 0; x < width; ++x) {
+      const auto pixel = static_cast<std::size_t>(y) * width + x;
+      auto& gain = gains.pixels[pixel];
+      if (!(range > kEpsilon)) { gain = 0; continue; }
+      const float position = std::clamp((gain-low)/range,0.0F,1.0F)*255;
+      // A rebuilt base absorbs the code step, so its gain rounds up and the
+      // base never has to exceed 1.0; an authored base keeps rounding.
+      gain = (rebuild[pixel] ? std::ceil(position - 1.0e-3F) : std::round(position))/255;
+      if (!rebuild[pixel]) continue;
+      const float scale = std::exp2(-(low + range*gain));
+      const auto* hdr = &images.hdr.pixels[pixel * 3];
+      for (int c = 0; c < 3; ++c) {
+        const float rebuilt = std::clamp((std::max(0.0F, hdr[c]) + alternate_offset) * scale -
+            base_offset, 0.0F, 1.0F);
+        row_change[y] = std::max(row_change[y], std::abs(rebuilt - base.pixels[pixel*3+c]));
+        base.pixels[pixel*3+c] = rebuilt;
+      }
+    }
+  });
+  out.base_linear = std::move(base);
   out.gain_map = std::move(gains);
   out.clamp_srgb = images.clamp_srgb;
   out.exposure_ev = images.stats.exposure_ev;
@@ -257,6 +318,9 @@ GainMapResult authored_mono_gain_map(PhotoRenditions images) {
   out.stats.gain_min_stops = low;
   out.stats.gain_max_stops = high;
   out.stats.gain_gamma = 1;
+  // Report a changed SDR colour once any rebuilt pixel moved by a linear code.
+  out.stats.adaptive_chroma_loss =
+      *std::max_element(row_change.begin(), row_change.end()) > 1.0F/255;
   measure_quantized_gain(out.stats,out.gain_map,high,1,0,low);
   images.hdr = {};
   const auto reconstructed = reconstruct_gain_map(out.base_linear,out.gain_map,
@@ -265,26 +329,13 @@ GainMapResult authored_mono_gain_map(PhotoRenditions images) {
   return out;
 }
 
-bool common_gain_compatible(const PhotoRenditions& images) {
+// One multiplier can serve all three channels only if the offsets agree.
+bool common_offsets(const PhotoRenditions& images) {
   const auto& offsets = images.authored_gain_map;
   const float bo = offsets.base_offset[0], ao = offsets.alternate_offset[0];
   for (int c = 1; c < 3; ++c)
     if (std::abs(offsets.base_offset[c]-bo) > 1e-6F ||
         std::abs(offsets.alternate_offset[c]-ao) > 1e-6F) return false;
-  for (std::size_t i = 0; i < images.sdr.pixels.size(); i += 3) {
-    float reference = 1.0F;
-    bool has_reference = false;
-    for (int c = 0; c < 3; ++c) {
-      if (images.sdr.pixels[i+c] + bo < 1e-5F &&
-          images.hdr.pixels[i+c] + ao < 1e-5F) continue;
-      const float ratio = (images.hdr.pixels[i+c] + ao + kEpsilon) /
-          (images.sdr.pixels[i+c] + bo + kEpsilon);
-      if (has_reference && std::abs(ratio-reference) > 1e-3F * std::max(1.0F,reference))
-        return false;
-      reference = ratio;
-      has_reference = true;
-    }
-  }
   return true;
 }
 
@@ -299,7 +350,7 @@ GainMapResult gain_map_from_renditions(PhotoRenditions images, GainMapWriterProf
   if (images.dual_rendition) {
     if (profile == GainMapWriterProfile::iso_generic)
       return rgb_gain_map_from_renditions(std::move(images));
-    if (images.authored_gain_channels == 1 && common_gain_compatible(images))
+    if (images.authored_gain_channels == 1 && common_offsets(images))
       return authored_mono_gain_map(std::move(images));
     auto result = exact_gain_map_from_renditions(std::move(images));
     result.stats.adaptive_chroma_loss = true;

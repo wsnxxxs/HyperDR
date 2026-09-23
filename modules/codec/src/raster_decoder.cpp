@@ -50,9 +50,12 @@
 namespace hyperdr {
 
 namespace codec {
+// Empty when the primary has no legacy gain map. A map that is present but
+// unusable also returns empty and names the reason in `fallback_reason`, so the
+// caller can decode the SDR primary and report it as degraded.
 std::optional<DecodedImage> decode_apple_legacy_heic(
     heif_context* context, const heif_image_handle* primary,
-    ColorGamut default_gamut);
+    ColorGamut default_gamut, std::string* fallback_reason);
 }
 
 namespace {
@@ -859,9 +862,9 @@ DecodedImage decode_adaptive_heic(const std::vector<std::uint8_t>& bytes,
         sdr *= alpha.pixels[i];
       }
   }
-  // The base is a Display P3 SDR image, so the headroom is entirely whatever
-  // the gain map was written to add. `alternate_headroom` is in stops.
-  result.hdr_headroom = std::max(1.0F, std::exp2(alternate_headroom));
+  // The declared alternate headroom stays in gain_map; the usable range is
+  // what the reconstructed photograph actually reaches.
+  result.hdr_headroom = codec::measured_alternate_headroom(result.linear_p3);
   // The gain-map metadata describes the reconstructed image. A base item's
   // content-light hint, if present, cannot describe this different rendition.
   result.content_peak_nits.reset();
@@ -887,13 +890,20 @@ DecodedImage decode_heic(const std::vector<std::uint8_t>& bytes, bool base_only,
   check_heif(heif_context_get_primary_image_handle(context.get(), &handle_raw),
              "HEIC primary image");
   std::unique_ptr<heif_image_handle, HandleDeleter> handle(handle_raw);
+  std::string legacy_fallback;
   if (!base_only) {
     if (auto legacy = codec::decode_apple_legacy_heic(context.get(), handle.get(),
-            default_gamut))
+            default_gamut, &legacy_fallback))
       return std::move(*legacy);
   }
-  return decode_heif_rgb_handle(context.get(), handle.get(), preview_max_edge,
-                                default_gamut);
+  auto result = decode_heif_rgb_handle(context.get(), handle.get(), preview_max_edge,
+                                       default_gamut);
+  if (!legacy_fallback.empty()) {
+    // The file advertises an HDR rendition this decode could not restore.
+    result.decode.degraded = true;
+    result.decode.degradation_reasons.push_back(std::move(legacy_fallback));
+  }
+  return result;
 }
 
 }  // namespace
@@ -906,7 +916,7 @@ DecodedImage decode_jpeg_primary_bytes(const std::vector<std::uint8_t>& bytes,
 
 std::optional<DecodedImage> decode_apple_legacy_heic(
     heif_context* context, const heif_image_handle* primary,
-    ColorGamut default_gamut) {
+    ColorGamut default_gamut, std::string* fallback_reason) {
   const int count = heif_image_handle_get_number_of_auxiliary_images(primary,
       LIBHEIF_AUX_IMAGE_FILTER_OMIT_ALPHA | LIBHEIF_AUX_IMAGE_FILTER_OMIT_DEPTH);
   if (count <= 0 || count > 64) return std::nullopt;
@@ -927,21 +937,30 @@ std::optional<DecodedImage> decode_apple_legacy_heic(
     heif_image_handle_release_auxiliary_type(aux.get(), &type);
     if (!legacy) continue;
 
+    // An editor that strips the MakerNote, or a damaged auxiliary item, leaves
+    // the SDR primary intact. Keep that photograph readable rather than failing
+    // the whole file over the rendition it can no longer restore.
+    const auto unusable = [&](std::string why) -> std::optional<DecodedImage> {
+      if (fallback_reason)
+        *fallback_reason = "apple_legacy_gain_map_unusable_sdr_fallback:" + std::move(why);
+      return std::nullopt;
+    };
     std::optional<float> headroom;
-    if (!read_heif_exif(primary, &headroom) || !headroom || *headroom < 1.0F)
-      throw std::runtime_error("Apple legacy gain map lacks usable MakerNote headroom");
+    if (!read_heif_exif(primary, &headroom) || !headroom || !(*headroom >= 1.0F))
+      return unusable("missing MakerNote headroom");
     heif_image* gain_raw = nullptr;
-    check_heif(heif_decode_image(aux.get(), &gain_raw, heif_colorspace_YCbCr,
-                                 heif_chroma_420, nullptr),
-               "decode Apple legacy gain map");
+    const auto gain_error = heif_decode_image(aux.get(), &gain_raw, heif_colorspace_YCbCr,
+                                              heif_chroma_420, nullptr);
     std::unique_ptr<heif_image, ImageDeleter> gain_image(gain_raw);
+    if (gain_error.code != heif_error_Ok || !gain_image)
+      return unusable(gain_error.message ? gain_error.message : "gain map decode failed");
     const int width = heif_image_get_width(gain_image.get(), heif_channel_Y);
     const int height = heif_image_get_height(gain_image.get(), heif_channel_Y);
     const int bits = heif_image_get_bits_per_pixel_range(gain_image.get(), heif_channel_Y);
     int stride = 0;
     const auto* plane = heif_image_get_plane_readonly(gain_image.get(), heif_channel_Y, &stride);
     if (!plane || width <= 0 || height <= 0 || bits != 8 || stride < width)
-      throw std::runtime_error("Apple legacy gain map has invalid pixels");
+      return unusable("invalid gain map pixels");
 
     // Decode the full base before sampling the auxiliary grid. The preview
     // caller reduces both planes together after reconstruction.
@@ -967,7 +986,7 @@ std::optional<DecodedImage> decode_apple_legacy_heic(
           result.linear_p3.at(x, y, c) *= multiplier;
       }
     });
-    result.hdr_headroom = *headroom;
+    result.hdr_headroom = measured_alternate_headroom(result.linear_p3);
     result.content_peak_nits.reset();
     result.domain = InputDomain::kDualRendition;
     normalize_orientation(result, orientation);

@@ -13,6 +13,7 @@
 
 #include <avif/avif.h>
 #include <libheif/heif.h>
+#include <libheif/heif_items.h>
 #include <libheif/heif_properties.h>
 #include <png.h>
 #include <lcms2.h>
@@ -1223,6 +1224,128 @@ void check_ultrahdr_pair(const hyperdr::PhotoMetadata& metadata) {
 
 }  // namespace
 
+// Apple's pre-ISO HDR photo: an SDR primary, an 8-bit monochrome auxiliary
+// image of type urn:com:apple:photo:2020:aux:hdrgainmap, and the headroom in
+// MakerNote tags 33 and 48. libheif cannot write auxiliary images directly, so
+// the gain item is encoded as an ordinary image and given the auxC property and
+// auxl reference Apple writes.
+std::vector<std::uint8_t> encode_apple_legacy_heic(bool with_makernote) {
+  std::unique_ptr<heif_context, TestContextDeleter> context(heif_context_alloc());
+  require(context != nullptr, "cannot allocate the legacy Apple fixture context");
+  heif_encoder* encoder_raw = nullptr;
+  require_heif(heif_context_get_encoder_for_format(context.get(), heif_compression_HEVC,
+                                                   &encoder_raw),
+               "get the legacy Apple fixture encoder");
+  std::unique_ptr<heif_encoder, TestEncoderDeleter> encoder(encoder_raw);
+  require_heif(heif_encoder_set_lossy_quality(encoder.get(), 100),
+               "set the legacy Apple fixture quality");
+  constexpr int kSize = 16;
+  const auto encode = [&](heif_colorspace space, heif_chroma chroma, heif_channel channel,
+                          int components, auto value) {
+    heif_image* image_raw = nullptr;
+    require_heif(heif_image_create(kSize, kSize, space, chroma, &image_raw),
+                 "create a legacy Apple fixture image");
+    std::unique_ptr<heif_image, TestImageDeleter> image(image_raw);
+    require_heif(heif_image_add_plane(image.get(), channel, kSize, kSize, 8),
+                 "allocate a legacy Apple fixture plane");
+    int stride = 0;
+    auto* plane = heif_image_get_plane(image.get(), channel, &stride);
+    require(plane != nullptr, "legacy Apple fixture plane is unavailable");
+    for (int y = 0; y < kSize; ++y)
+      for (int x = 0; x < kSize; ++x)
+        for (int c = 0; c < components; ++c)
+          plane[y * stride + x * components + c] = value(x);
+    heif_image_handle* handle_raw = nullptr;
+    require_heif(heif_context_encode_image(context.get(), image.get(), encoder.get(),
+                                           nullptr, &handle_raw),
+                 "encode a legacy Apple fixture image");
+    return std::unique_ptr<heif_image_handle, TestHandleDeleter>(handle_raw);
+  };
+  // A mid-grey base; the gain map is full gain on the left half, none on the right.
+  const auto primary = encode(heif_colorspace_RGB, heif_chroma_interleaved_RGB,
+      heif_channel_interleaved, 3, [](int) { return std::uint8_t{128}; });
+  const auto gain = encode(heif_colorspace_monochrome, heif_chroma_monochrome,
+      heif_channel_Y, 1, [](int x) { return static_cast<std::uint8_t>(x < kSize / 2 ? 255 : 0); });
+  require_heif(heif_context_set_primary_image(context.get(), primary.get()),
+               "set the legacy Apple fixture primary image");
+  const auto primary_id = heif_image_handle_get_item_id(primary.get());
+  const auto gain_id = heif_image_handle_get_item_id(gain.get());
+  const std::string urn = "urn:com:apple:photo:2020:aux:hdrgainmap";
+  std::vector<std::uint8_t> aux_type(4, 0);  // FullBox version and flags.
+  aux_type.insert(aux_type.end(), urn.begin(), urn.end());
+  aux_type.push_back(0);
+  require_heif(heif_item_add_raw_property(context.get(), gain_id, heif_fourcc('a', 'u', 'x', 'C'),
+                                          nullptr, aux_type.data(), aux_type.size(), 1, nullptr),
+               "attach the legacy Apple auxiliary type");
+  require_heif(heif_context_add_item_reference(context.get(), heif_fourcc('a', 'u', 'x', 'l'),
+                                               gain_id, primary_id),
+               "reference the legacy Apple gain map");
+  if (with_makernote) {
+    // The Exif fixture from exif_test: tags 33 = 3/2 and 48 = 0 declare 3 stops.
+    std::vector<std::uint8_t> tiff(104, 0);
+    const auto le16 = [&](std::size_t at, std::uint16_t v) {
+      tiff[at] = static_cast<std::uint8_t>(v); tiff[at + 1] = static_cast<std::uint8_t>(v >> 8);
+    };
+    const auto le32 = [&](std::size_t at, std::uint32_t v) {
+      for (unsigned i = 0; i < 4; ++i) tiff[at + i] = static_cast<std::uint8_t>(v >> (8 * i));
+    };
+    const auto be16 = [&](std::size_t at, std::uint16_t v) {
+      tiff[at] = static_cast<std::uint8_t>(v >> 8); tiff[at + 1] = static_cast<std::uint8_t>(v);
+    };
+    const auto be32 = [&](std::size_t at, std::uint32_t v) {
+      for (unsigned i = 0; i < 4; ++i) tiff[at + i] = static_cast<std::uint8_t>(v >> (24 - 8 * i));
+    };
+    tiff[0] = tiff[1] = 'I';
+    le16(2, 42); le32(4, 8);
+    le16(8, 1); le16(10, 0x8769); le16(12, 4); le32(14, 1); le32(18, 26);
+    le16(26, 1); le16(28, 0x927C); le16(30, 7); le32(32, 60); le32(36, 44);
+    tiff[54] = tiff[55] = 'M'; be16(56, 2);
+    be16(58, 0x21); be16(60, 10); be32(62, 1); be32(66, 38);
+    be16(70, 0x30); be16(72, 10); be32(74, 1); be32(78, 46);
+    be32(82, 3); be32(86, 2); be32(90, 0); be32(94, 1);
+    require_heif(heif_context_add_exif_metadata(context.get(), primary.get(),
+                                                tiff.data(), static_cast<int>(tiff.size())),
+                 "attach the legacy Apple MakerNote");
+  }
+  std::vector<std::uint8_t> bytes;
+  heif_writer writer{1, &collect_heif_bytes};
+  require_heif(heif_context_write(context.get(), &writer, &bytes),
+               "write the legacy Apple fixture");
+  return bytes;
+}
+
+void check_apple_legacy_heic() {
+  const auto path = std::filesystem::temp_directory_path() / "hyperdr-apple-legacy.heic";
+  try {
+    hyperdr::write_binary_file_atomic(path, encode_apple_legacy_heic(true), true);
+    const auto decoded = hyperdr::decode_image(path);
+    require(decoded.domain == hyperdr::InputDomain::kDualRendition &&
+                decoded.authored_sdr.has_value() && !decoded.decode.degraded,
+            "a legacy Apple gain map must decode as a dual rendition");
+    // The MakerNote declares 8x; this grey base reaches only 8x its own level.
+    const float measured = std::max(1.0F, *std::max_element(
+        decoded.linear_p3.pixels.begin(), decoded.linear_p3.pixels.end()));
+    require(std::abs(decoded.gain_map.alternate_headroom - 8.0F) < 1e-3F &&
+                std::abs(decoded.hdr_headroom - measured) < 1e-5F &&
+                decoded.hdr_headroom < 4.0F,
+            "legacy Apple usable headroom must be the measured peak, not the MakerNote capacity");
+
+    hyperdr::write_binary_file_atomic(path, encode_apple_legacy_heic(false), true);
+    const auto fallback = hyperdr::decode_image(path);
+    const bool reported = !fallback.decode.degradation_reasons.empty() &&
+        fallback.decode.degradation_reasons.front().rfind(
+            "apple_legacy_gain_map_unusable_sdr_fallback:", 0) == 0;
+    require(fallback.domain == hyperdr::InputDomain::kDisplayReferredSdr &&
+                !fallback.authored_sdr && fallback.decode.degraded && reported,
+            "a legacy Apple gain map without MakerNote headroom must fall back to degraded SDR");
+    std::filesystem::remove(path);
+  } catch (...) {
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+    throw;
+  }
+}
+
 int main() {
   try {
     hyperdr::GainMapOptions options;
@@ -1240,6 +1363,7 @@ int main() {
     check_ultrahdr_pair(metadata);
     check_ultrahdr_icc(metadata);
     check_icc_only_heic();
+    check_apple_legacy_heic();
     check_avif_gain_map(false);
     check_avif_gain_map(true);
 

@@ -14,6 +14,7 @@
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/image/orientation.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -113,6 +114,19 @@ inline void normalize_orientation(DecodedImage& image, std::uint16_t orientation
     std::swap(image.decode.decoded_width, image.decode.decoded_height);
   }
   image.metadata.orientation = 1;
+}
+
+// Usable range of a reconstructed gain-map alternate: its brightest finite
+// channel, never below diffuse white. Gain-map metadata states the capacity a
+// display needs for the full map, which can sit well above what the photograph
+// reaches (a legacy Apple frame declaring 3 stops peaked at 1.78), and treating
+// that capacity as content made every output ceiling below it attenuate a
+// photograph that already fitted. Every dual-rendition decoder uses this rule.
+[[nodiscard]] inline float measured_alternate_headroom(const FloatImage& hdr) {
+  float peak = 1.0F;
+  for (const float value : hdr.pixels)
+    if (std::isfinite(value)) peak = std::max(peak, value);
+  return peak;
 }
 
 }  // namespace hyperdr::codec

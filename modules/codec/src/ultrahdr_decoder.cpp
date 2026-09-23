@@ -202,10 +202,7 @@ DecodedImage decode_ultrahdr_bytes(const std::vector<std::uint8_t>& bytes,
   });
   // The reconstructed alternate can exceed (or fall below) the metadata's
   // nominal capacity. Use its actual peak for the usable input range.
-  float peak = 1.0F;
-  for (const float value : result.linear_p3.pixels)
-    if (std::isfinite(value)) peak = std::max(peak, value);
-  result.hdr_headroom = peak;
+  result.hdr_headroom = measured_alternate_headroom(result.linear_p3);
   if (const uhdr_gainmap_metadata_t* gain =
           uhdr_dec_get_gainmap_metadata(decoder.get());
       gain != nullptr) {

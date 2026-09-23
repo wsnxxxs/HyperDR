@@ -250,10 +250,7 @@ DecodedImage decode_avif_bytes(const std::vector<std::uint8_t>& bytes,
           result.gain_map.base_offset[c] = primary_is_hdr ? secondary_offset : primary_offset;
           result.gain_map.alternate_offset[c] = primary_is_hdr ? primary_offset : secondary_offset;
         }
-        float peak = 1.0F;
-        for (float value : result.linear_p3.pixels)
-          if (std::isfinite(value)) peak = std::max(peak, value);
-        result.hdr_headroom = peak;
+        result.hdr_headroom = measured_alternate_headroom(result.linear_p3);
         result.content_peak_nits.reset();
         result.domain = InputDomain::kDualRendition;
       }

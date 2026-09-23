@@ -4,6 +4,7 @@
 #include "hyperdr/foundation/math.hpp"
 #include "hyperdr/foundation/parallel.hpp"
 #include "hyperdr/gainmap/display_referred.hpp"
+#include "hyperdr/gainmap/rendition.hpp"
 #include "hyperdr/image/color.hpp"
 
 #include <cmath>
@@ -109,8 +110,9 @@ GainMapResult make_gain_map(const FloatImage& source, const GainMapOptions& opti
       case InputDomain::kDisplayReferredSdr:
         return make_display_referred_sdr_result(source, options, capture, preparation);
       case InputDomain::kDisplayReferredHdr:
-        return make_display_referred_hdr_gain_map(source, options,
-                                                  rendering_headroom(input));
+      case InputDomain::kDualRendition:
+        return gain_map_from_renditions(render_renditions(source, options, capture,
+            input, RenderTarget::Hdr));
       case InputDomain::kSceneReferred:
         break;
       case InputDomain::kUnknown:

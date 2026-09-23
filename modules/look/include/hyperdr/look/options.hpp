@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+#include <cstdint>
 #include <memory>
 
 // What the photographer asked for, and what the camera recorded.
@@ -14,6 +16,7 @@
 namespace hyperdr {
 
 struct DcpRenderContext;
+struct FloatImage;
 
 // The rendering mode is deliberately separate from the ISO gain-map metadata.
 // Only the perceptual HDR pipeline remains. The enum stays because `look` is
@@ -56,6 +59,8 @@ enum class InputDomain {
   // A finished HDR rendition: 1.0 is diffuse white and everything above it is
   // real highlight detail, up to the input's declared headroom.
   kDisplayReferredHdr,
+  // A finished SDR base and its authored HDR alternate are both available.
+  kDualRendition,
   // Report-only value used when a file was skipped or failed before decoding.
   // It must never be passed to a renderer as an InputDescription.
   kUnknown,
@@ -71,6 +76,15 @@ enum class InputDomain {
 // field is a setting, which is why they travel beside GainMapOptions rather
 // than inside it: they are facts about the file, already covered by the input
 // hash, and must not enter the settings fingerprint.
+struct AuthoredGainMap {
+  std::array<float, 3> base_offset{};
+  std::array<float, 3> alternate_offset{};
+  // Linear multiples of reference white, converted to stops by the renderer.
+  float base_headroom{1.0F};
+  float alternate_headroom{1.0F};
+  std::uint32_t channels{1};
+};
+
 struct InputDescription {
   InputDomain domain{InputDomain::kSceneReferred};
   // How far above diffuse white the input's *encoding* can carry detail, as a
@@ -80,6 +94,8 @@ struct InputDescription {
   // Optional MaxCLL in cd/m². This bounds tone mapping, not transfer decoding;
   // a PQ image with a 203-nit peak is still an already rendered HDR input.
   std::optional<float> content_peak_nits;
+  const FloatImage* authored_sdr{nullptr};
+  AuthoredGainMap gain_map{};
 };
 
 // Range to map after applying any content-light metadata. Unknown content

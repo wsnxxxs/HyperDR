@@ -299,14 +299,15 @@ void test_independent_rgb_renditions() {
   require(packed.gain_map.channels == 3 && packed.gain_map.width == 5 && packed.gain_map.height == 3,
       "independent endpoints need full-resolution RGB gain");
   require(rational_value(packed.metadata.gain_min) < 0, "RGB packaging must retain negative gains");
-  require(packed.headroom_stops == 2 && rational_value(packed.metadata.gain_max) > 4,
-      "a black-channel ratio must not raise display capacity");
+  require(packed.headroom_stops == rational_value(packed.metadata.gain_max) &&
+      packed.headroom_stops > 4,
+      "the declared range must include the actual maximum gain");
   require(packed.stats.gain_clipped_fraction == 0,
       "a channel ratio above display headroom is not clipped content");
   const auto metadata = parse_tmap_payload(serialize_tmap_payload(packed.metadata));
   require(gain_map_channel_count(metadata) == 3, "RGB metadata must survive serialization");
-  const auto actual = reconstruct_gain_map(packed.base_linear, packed.gain_map, metadata, 2);
-  const auto halfway = reconstruct_gain_map(packed.base_linear, packed.gain_map, metadata, 1);
+  const auto actual = reconstruct_gain_map(packed.base_linear, packed.gain_map, metadata, packed.headroom_stops);
+  const auto halfway = reconstruct_gain_map(packed.base_linear, packed.gain_map, metadata, packed.headroom_stops*.5F);
   const auto sdr = reconstruct_gain_map(packed.base_linear, packed.gain_map, metadata, 0);
   const float offset = rational_value(metadata.channels[0].base_offset);
   double squared_error = 0;
@@ -398,13 +399,88 @@ void test_content_light_mapping() {
   }
 }
 
+void test_authored_dual_renditions() {
+  FloatImage base(4,1,3), hdr(4,1,3);
+  const std::array<float,4> levels{.2F,.4F,.7F,.9F};
+  const std::array<float,4> gains{1,2,3,4};
+  for (unsigned x=0;x<4;++x) for (unsigned c=0;c<3;++c) {
+    base.at(x,0,c)=levels[x];
+    hdr.at(x,0,c)=levels[x]*gains[x];
+  }
+  InputDescription input{InputDomain::kDualRendition,4};
+  input.authored_sdr=&base;
+  input.gain_map.alternate_headroom=4;
+  RenderOptions options;
+  const auto photo=render_renditions(hdr,options,{},input,RenderTarget::Hdr);
+  require(photo.sdr.pixels==base.pixels && photo.hdr.pixels==hdr.pixels,
+      "neutral dual rendering must retain both authored endpoints");
+  const auto rgb=gain_map_from_renditions(photo,GainMapWriterProfile::iso_generic);
+  require(rgb.base_linear.pixels==base.pixels && rgb.gain_map.channels==3,
+      "Ultra HDR must retain the authored base and use RGB gain");
+  const auto restored=reconstruct_gain_map(rgb.base_linear,rgb.gain_map,rgb.metadata,rgb.headroom_stops);
+  for (std::size_t i=0;i<hdr.pixels.size();++i)
+    require(std::abs(restored.pixels[i]-hdr.pixels[i])<.02F,
+        "Ultra HDR must reconstruct the authored HDR rendition");
+  const auto apple=gain_map_from_renditions(photo,GainMapWriterProfile::apple_strict);
+  require(apple.base_linear.pixels==base.pixels && !apple.stats.adaptive_chroma_loss,
+      "monochrome Adaptive must retain the authored base");
+  input.gain_map.channels=3;
+  hdr.at(2,0,0)=.7F*3.5F;
+  const auto chromatic=render_renditions(hdr,options,{},input,RenderTarget::Hdr);
+  const auto adaptive=gain_map_from_renditions(chromatic,GainMapWriterProfile::apple_strict);
+  require(adaptive.stats.adaptive_chroma_loss,
+      "three-channel Adaptive conversion must report SDR chroma loss");
+  input.gain_map.channels=1;
+  hdr.at(2,0,0)=.7F*3;
+  options.gain_strength=.5F;
+  const auto half=render_renditions(hdr,options,{},input,RenderTarget::Hdr);
+  for (unsigned c=0;c<3;++c)
+    require(half.hdr.at(0,0,c)==base.at(0,0,c),
+        "zero-gain midtones must remain fixed at half strength");
+  options.gain_strength=0;
+  const auto zero=render_renditions(hdr,options,{},input,RenderTarget::Hdr);
+  require(zero.hdr.pixels==base.pixels,"zero strength must equal the authored base");
+}
+
+void test_dual_nonunit_base_headroom() {
+  FloatImage base(1,1,3), hdr(1,1,3);
+  base.pixels={.5F,.5F,.5F}; hdr.pixels={2,2,2};
+  InputDescription input{InputDomain::kDualRendition,8};
+  input.authored_sdr=&base;
+  input.gain_map.base_headroom=2;
+  input.gain_map.alternate_headroom=8;
+  RenderOptions options;
+  options.auto_headroom=false;
+  options.headroom_stops=2;
+  options.gain_strength=1;
+  const auto result=render_renditions(hdr,options,{},input,RenderTarget::Hdr);
+  require(std::abs(result.hdr.pixels[0]-1)<1e-5F &&
+      std::abs(result.stats.headroom_stops-2)<1e-5F,
+      "display headroom must be measured from the authored base headroom");
+}
+
+void test_single_hdr_midtones_at_half_strength() {
+  FloatImage hdr(3,1,3);
+  for (unsigned c=0;c<3;++c) {
+    hdr.at(0,0,c)=.5F; hdr.at(1,0,c)=1; hdr.at(2,0,c)=4;
+  }
+  RenderOptions options;
+  options.gain_strength=.5F;
+  const auto result=render_renditions(hdr,options,{},
+      {InputDomain::kDisplayReferredHdr,4},RenderTarget::Hdr);
+  for (unsigned c=0;c<3;++c)
+    require(std::abs(result.hdr.at(1,0,c)-1)<1e-5F,
+        "half strength must keep HDR diffuse white at 1");
+}
+
 int main() {
   try { test_zero_and_spatial_gain(); test_model_grading(); test_final_gain_statistics();
         test_hdr_source_reconstructs_itself(); test_hdr_source_outside_p3();
         test_independent_rgb_renditions(); test_scene_base_without_gain_preparation();
         test_rendition_codes_use_serialized_metadata();
         test_graded_sdr_endpoint_packaging();
-        test_content_light_mapping(); }
+        test_content_light_mapping(); test_authored_dual_renditions();
+        test_dual_nonunit_base_headroom(); test_single_hdr_midtones_at_half_strength(); }
   catch(const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
   std::cout<<"graded model reconstruction and final gain statistics passed\n";
 }

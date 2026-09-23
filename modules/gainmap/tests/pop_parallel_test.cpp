@@ -91,8 +91,11 @@ int main() {
     bias_too_high.exposure_bias_ev = 2.01F;
     require(rejected(bias_too_high), "exposure bias above 2 EV was not rejected");
     GainMapOptions bias_too_low = base_options;
-    bias_too_low.exposure_bias_ev = -0.01F;
-    require(rejected(bias_too_low), "negative exposure bias was not rejected");
+    bias_too_low.exposure_bias_ev = -2.01F;
+    require(rejected(bias_too_low), "exposure bias below -2 EV was not rejected");
+    GainMapOptions negative_bias = base_options;
+    negative_bias.exposure_bias_ev = -2.0F;
+    validate_gain_map_options(negative_bias);
     GainMapOptions bias_not_finite = base_options;
     bias_not_finite.exposure_bias_ev = std::numeric_limits<float>::quiet_NaN();
     require(rejected(bias_not_finite), "NaN exposure bias was not rejected");

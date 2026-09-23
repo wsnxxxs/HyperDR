@@ -63,6 +63,8 @@ struct RenderStats {
   std::uint64_t wide_gamut_pixels{0};
   std::uint64_t wide_gamut_eligible_pixels{0};
   float wide_gamut_luminance_threshold{0.02F};
+  // Apple-compatible monochrome packaging had to derive a new SDR colour.
+  bool adaptive_chroma_loss{false};
 };
 
 // Owned by an interactive caller, invalidated when source, render target or any
@@ -95,6 +97,9 @@ struct PhotoRenditions {
   // luminance. Cleared by grading that gives the SDR
   // rendition a colour of its own.
   bool hdr_is_source{false};
+  bool dual_rendition{false};
+  std::uint32_t authored_gain_channels{1};
+  AuthoredGainMap authored_gain_map{};
   RenderStats stats;
   bool clamp_srgb{false};
   // Selection made before creative grading; reused after gain quantization.

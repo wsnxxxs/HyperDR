@@ -43,6 +43,12 @@
 .out-quality { margin-top: 8px; }
 .out-quality .field { padding: 0; border: 0; background: transparent; }
 .out-quality .field--range { display: grid; grid-template-columns: minmax(0, 1fr); }
+.out-hevc-speed { display: flex; align-items: flex-start; gap: 10px; margin-top: 12px; cursor: pointer; }
+.out-hevc-speed[hidden] { display: none; }
+.out-hevc-speed input { margin-top: 3px; }
+.out-hevc-speed span { display: grid; gap: 2px; }
+.out-hevc-speed strong { font-size: var(--text-xs); font-weight: 600; }
+.out-hevc-speed small { color: var(--ink-muted); font-size: var(--text-xs); line-height: 1.4; }
 .out-actions { margin-top: 8px; padding-top: 16px; border-top: 1px solid var(--line); }
 .button--run { min-height: var(--control-height); font-size: var(--text-sm); }
 .out-command-popover { position: static; margin-top: 8px; width: 100%; box-shadow: none; }

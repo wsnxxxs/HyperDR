@@ -83,6 +83,9 @@ export function mountEditor({ stage }) {
       ["export.format", `${encoding.label} · ${t(encoding.detail)}`],
       sdr ? null : ["export.gamut", state.clampSrgb ? t("out.clampSrgb") : t("editor.currentGamut")],
       ["export.quality", String(state.quality)],
+      ["adaptive", "pq", "hlg"].includes(state.encoding)
+        ? ["export.speed", state.hevcPreset === "medium" ? t("out.hevcFast") : t("out.hevcStandard")]
+        : null,
       state.lutId ? ["export.lut", String(state.lutName || "").replace(/\.cube$/i, "")] : null,
     ].filter(Boolean);
   }

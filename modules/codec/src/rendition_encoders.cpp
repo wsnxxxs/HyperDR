@@ -2,8 +2,8 @@
 #include "hyperdr/gainmap/rendition.hpp"
 namespace hyperdr {
 std::vector<std::uint8_t> encode_hdr_heic(const GainMapResult& images,
-    const PhotoMetadata& metadata, int quality, HdrEncoding encoding) {
-  return encode_hdr_heic(renditions_from_gain_map(images),metadata,quality,encoding);
+    const PhotoMetadata& metadata, int quality, HdrEncoding encoding, HevcPreset preset) {
+  return encode_hdr_heic(renditions_from_gain_map(images),metadata,quality,encoding,preset);
 }
 std::vector<std::uint8_t> encode_avif(const GainMapResult& images,
     const PhotoMetadata& metadata, int quality, HdrEncoding encoding) {

@@ -254,6 +254,18 @@
       "default": 90
     },
     {
+      "key": "hevc_preset",
+      "flag": "--hevc-preset",
+      "kind": "enum",
+      "choices": [
+        "slow",
+        "medium"
+      ],
+      "affects_output_bytes": true,
+      "help": "HEIC encoding speed",
+      "default": "slow"
+    },
+    {
       "key": "depth",
       "flag": "--depth",
       "kind": "integer",

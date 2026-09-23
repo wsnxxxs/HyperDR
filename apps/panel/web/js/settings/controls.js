@@ -412,6 +412,16 @@ function mountColorGamut() {
   relabel(() => sync(store.get()));
 }
 
+function mountHevcSpeed() {
+  const row = role("hevc-speed");
+  const fast = role("hevc-fast");
+  fast.addEventListener("change", () => store.set({ hevcPreset: fast.checked ? "medium" : "slow" }));
+  store.watchAny(["encoding", "hevcPreset"], (state) => {
+    row.hidden = !["adaptive", "pq", "hlg"].includes(state.encoding);
+    fast.checked = state.hevcPreset === "medium";
+  }, { immediate: true });
+}
+
 /* ── reset ──────────────────────────────────────────────────────────── */
 
 function mountResets({ toast } = {}) {
@@ -546,6 +556,7 @@ export function mountControls({ toast } = {}) {
   mountWorkflow();
   mountEncoding({ toast });
   mountColorGamut();
+  mountHevcSpeed();
   mountLut({ toast });
   mountRawProfiles({ toast });
   mountResets({ toast });

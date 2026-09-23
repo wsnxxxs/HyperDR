@@ -207,7 +207,7 @@ export const CONTROLS_BY_KEY = new Map(CONTROLS.map((control) => [control.key, c
 
 /** Keys that appear in the object sent to /api/run. */
 export const OPTION_KEYS = [
-  "encoding", "colorGamut", "clampSrgb", "rawProfile", "rawProfileName", "lensCorrection", "lensProfileName", "lutId", "lutName", "lutInput", "lutOutput", MODEL_KEY, ...CONTROLS.map((control) => control.key),
+  "encoding", "hevcPreset", "colorGamut", "clampSrgb", "rawProfile", "rawProfileName", "lensCorrection", "lensProfileName", "lutId", "lutName", "lutInput", "lutOutput", MODEL_KEY, ...CONTROLS.map((control) => control.key),
 ];
 
 /** Output, colour and model choices are workflow settings; image adjustments
@@ -215,7 +215,7 @@ export const OPTION_KEYS = [
  *  the output format -- "how should this be processed" rather than "how should
  *  it look" -- and because persisting it is what keeps a refresh from quietly
  *  re-pointing the next export at a different algorithm. */
-export const PERSISTED_OPTION_KEYS = ["encoding", "colorGamut", "clampSrgb", MODEL_KEY];
+export const PERSISTED_OPTION_KEYS = ["encoding", "hevcPreset", "colorGamut", "clampSrgb", MODEL_KEY];
 
 /* The decoder's name for a finished HDR photograph: PQ/HLG HEIC or AVIF, Ultra
  * HDR, an Adaptive HDR HEIC. The panel learns it from the first native frame. */
@@ -239,6 +239,7 @@ export function defaultSettings(encoding = "adaptive", sourceDomain = "") {
   const activeEncoding = encodingById(encoding);
   const values = {
     encoding: activeEncoding.id,
+    hevcPreset: "slow",
     colorGamut: COLOR_GAMUTS[0].id,
     clampSrgb: false,
     rawProfile: "", rawProfileName: "", lensCorrection: true, lensProfileName: "",
@@ -281,6 +282,7 @@ export function validatedSettings(saved, base = defaultSettings()) {
   if (!saved || typeof saved !== "object") return values;
   values[MODEL_KEY] = restoredModelId(saved);
   if (ENCODINGS.some(({ id }) => id === saved.encoding)) values.encoding = saved.encoding;
+  if (["slow", "medium"].includes(saved.hevcPreset)) values.hevcPreset = saved.hevcPreset;
   if (COLOR_GAMUTS.some(({ id }) => id === saved.colorGamut)) values.colorGamut = saved.colorGamut;
   if (typeof saved.lensCorrection === "boolean") values.lensCorrection = saved.lensCorrection;
   if (typeof saved.lensProfileName === "string") values.lensProfileName = saved.lensProfileName.slice(0, 160);

@@ -195,6 +195,10 @@ void test_fingerprint_covers_exactly_the_byte_affecting_settings() {
   looser.gain.look.contrast += 0.05F;
   require(hyperdr::settings_fingerprint(looser) != baseline,
           "a look change did not change the fingerprint");
+  auto faster = base;
+  faster.hevc_preset = hyperdr::HevcPreset::Medium;
+  require(hyperdr::settings_fingerprint(faster) != baseline,
+          "HEIC preset change did not change the fingerprint");
   auto plumbing = base;
   plumbing.verify_output = false;
   plumbing.overwrite = true;

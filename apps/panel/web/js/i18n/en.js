@@ -351,6 +351,9 @@ export default {
   "out.gamutHint.p3": "Wide gamut · Richer colors for iPhone, Mac & modern screens",
   "out.gamutHint.rec2020": "Ultra-wide gamut · For high-end HDR TVs & pro displays",
   "out.clampSrgb": "Clamp to sRGB",
+  "out.hevcFast": "Fast HEIC export",
+  "out.hevcStandard": "Standard quality",
+  "out.hevcFastHint": "Encodes faster; file size and fine detail may differ slightly.",
   "out.stale": "Your edit has changed since this export",
   "out.download": "Save to device",
   "save.button.as": "Save as…",
@@ -592,5 +595,6 @@ export default {
   "export.format": "Format",
   "export.gamut": "Gamut",
   "export.quality": "Quality",
+  "export.speed": "HEIC speed",
   "export.lut": "LUT",
 };

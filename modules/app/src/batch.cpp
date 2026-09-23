@@ -268,7 +268,8 @@ std::vector<std::uint8_t> encode_for(const PhotoRenditions& photo, const GainMap
     case HdrEncoding::SdrJpeg:
       return encode_sdr_jpeg(photo.sdr, metadata, options.quality);
     case HdrEncoding::Adaptive:
-      return encode_adaptive_heic(images, metadata, options.quality, options.depth);
+      return encode_adaptive_heic(images, metadata, options.quality, options.depth,
+                                  options.hevc_preset);
     case HdrEncoding::UltraHdr:
       if (images.gain_map.pixels.empty()) {
         return encode_ultrahdr_jpeg(photo, metadata, options.quality);
@@ -281,7 +282,8 @@ std::vector<std::uint8_t> encode_for(const PhotoRenditions& photo, const GainMap
     case HdrEncoding::Hlg:
       break;
   }
-  return encode_hdr_heic(photo, metadata, options.quality, options.encoding);
+  return encode_hdr_heic(photo, metadata, options.quality, options.encoding,
+                         options.hevc_preset);
 }
 
 void verify_encoded(const std::vector<std::uint8_t>& bytes,

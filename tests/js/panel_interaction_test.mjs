@@ -88,6 +88,12 @@ assert.notEqual(options.entryKeyFor({ ...entry, options: { ...entry.options, use
 const selected = { ...edit, result: { exportId: "e1", optionsKey: options.entryKeyFor(entry, edit) } };
 assert.equal(options.currentResult(selected)?.exportId, "e1");
 assert.equal(options.currentResult({ ...selected, brightness: 1 }), null);
+assert.notEqual(options.exportKeyFor({ ...edit, hevcPreset: "medium" }),
+  options.entryKeyFor(entry, { ...edit, hevcPreset: "medium" }),
+  "a legacy slow HEIC export does not match the fast setting");
+assert.equal(options.exportKeyFor({ ...edit, encoding: "avif-pq", hevcPreset: "medium" }),
+  options.exportKeyFor({ ...edit, encoding: "avif-pq", hevcPreset: "slow" }),
+  "HEIC speed does not change AVIF export identity");
 
 /* ── shortcut labels follow the platform ────────────────────────────── */
 const keysFor = (platform) => load("core/keys.js", T,

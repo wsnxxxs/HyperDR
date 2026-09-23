@@ -31,6 +31,7 @@
 #include <numeric>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace hyperdr {
@@ -143,9 +144,10 @@ std::vector<std::uint8_t> encode_avif(const PhotoRenditions& images,
   encoder->quality = std::clamp(quality, 0, 100);
   encoder->qualityAlpha = AVIF_QUALITY_LOSSLESS;
   encoder->speed = 6;
-  // libavif's own thread pool; the row-parallel pool above has already finished
-  // by this point, so this does not oversubscribe.
-  encoder->maxThreads = 1;
+  // Batch exports run one file at a time, and row conversion is complete here.
+  // Give the AV1 codec several cores without creating an unbounded worker pool.
+  encoder->maxThreads = static_cast<int>(
+      std::min(8U, std::max(1U, std::thread::hardware_concurrency())));
 
   avifRWData output = AVIF_DATA_EMPTY;
   struct DataGuard {

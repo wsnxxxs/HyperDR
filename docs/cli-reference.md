@@ -17,7 +17,7 @@ HyperDR convert <file-or-directory> --output <directory>
     [--headroom auto|<stops>] [--gain-strength <0..2>]
     [--expansion-start <0.18..0.75>] [--area-coverage <0..1>]
     [--highlight-recovery blend|reconstruct|clip|unclip]
-    [--quality <0..100>] [--depth <8|10>]
+    [--quality <0..100>] [--depth <8|10>] [--hevc-preset slow|medium]
     [--preview-max-edge <pixels>] [--fast-preview] [--decode-cache <dir>]
     [--ai-model <id>] [--ai-brightness <EV>] [--ai-contrast <slope>]
     [--ai-shadows <EV>] [--ai-highlights <stops>]
@@ -127,6 +127,12 @@ HyperDR convert photo.ARW --output out --look photographic --depth 10 `
 ```
 
 ## Encodings
+
+HEIC uses the x265 `slow` preset by default. Add `--hevc-preset medium` to
+encode Adaptive HDR, PQ, or HLG HEIC faster, with a small possible change in
+file size or fine detail. The panel exposes this as **Fast HEIC export**. RAW
+OpenMP parallelism and AVIF multithreading are automatic; neither needs this
+option.
 
 `--encoding avif-pq` and `--encoding avif-hlg` write 10-bit BT.2100 AVIF using
 the same reconstructed HDR image, the same Rec.2020 matrix, and the same

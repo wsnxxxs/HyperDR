@@ -125,6 +125,7 @@ PQ / HLG 需要 Main10 x265；首次完整构建后按项目根 `README.md` 运�
   导出 Adaptive HDR 时使用 10 位底图，增益图为全分辨率，解码后逐像素还原原片 HDR；
   可用 `HyperDR verify <导出文件> --reference <原片>` 核对差异。SDR 与 RAW 照片不变。
 - 六种导出格式：**Apple Adaptive HDR、Google Ultra HDR、PQ (HDR10)、HLG、AVIF PQ、AVIF HLG**。
+- Adaptive HDR、PQ、HLG 导出可勾选「快速导出 HEIC」，使用 x265 medium；默认 slow 保留原有画质。RAW 的 OpenMP 并行和 AVIF 多线程自动启用，无需设置。
 - **整体亮度**在自动曝光之后做 0～+2 EV 偏移，SDR/RAW 照片默认 +0.6 EV、HDR 照片默认 0 EV，同时作用于 SDR 底图与 HDR 输出；每张新照片都会将全部画面调节恢复为默认值。
 - **HDR 扩展强度**与 **HDR 扩展范围**；范围是实际亮度余量，Adaptive HDR 最高 3 stops，
   Ultra HDR / PQ 最高 4 stops，HLG 系最高约 2.3 stops（切换格式时自动钳制）。

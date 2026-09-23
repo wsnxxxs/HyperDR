@@ -67,12 +67,14 @@ export function mountExportHistory({ selectResult }) {
         ? t("adjust.modelFallback", { model: modelLabel(result.model_id, state),
           fields: fallbackFields(result.model_fallback_reason) }) : "";
       const size = result?.width && result?.height ? `${result.width}×${result.height}` : "";
+      const speed = ["adaptive", "pq", "hlg"].includes(entry.options.encoding) &&
+        entry.options.hevcPreset === "medium" ? t("out.hevcFast") : "";
       list.append(el("article", { class: "version-card", "data-selected": String(matches) },
         el("div", { class: "version-heading" }, el("span", { class: "version-index" }, String(entries.length - index).padStart(2, "0")),
           el("h3", {}, entry.name),
           matches ? el("span", { class: "version-selected" }, t("workspace.matchesCurrent")) : null,
           saved ? el("span", { class: "version-saved" }, t("workspace.savedBadge")) : null),
-        el("p", {}, [time, encodingById(entry.options.encoding).label, modelName, size].filter(Boolean).join(" · ")),
+        el("p", {}, [time, encodingById(entry.options.encoding).label, speed, modelName, size].filter(Boolean).join(" · ")),
         fallback ? el("p", {}, fallback) : null,
         el("div", { class: "version-actions" }, restore, save, openFolder), saveState));
     }

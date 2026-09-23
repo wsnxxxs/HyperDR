@@ -53,6 +53,7 @@ PANEL_DEFAULTS = {
     "expansionStart": 0.25,
     "areaCoverage": 1.0,
     "quality": 90,
+    "hevcPreset": "slow",
     "lutInput": "srgb", "lutOutput": "srgb", "lutStrength": 1.0,
 }
 
@@ -196,6 +197,7 @@ def options_to_settings(options: dict) -> dict:
         "expansion_start": value("expansionStart"),
         "area_coverage": value("areaCoverage"),
         "quality": value("quality"),
+        "hevc_preset": value("hevcPreset"),
     })
 
 
@@ -266,6 +268,12 @@ def _color_flags(options: dict, settings: dict) -> list[str]:
     return flags
 
 
+def _hevc_flags(settings: dict) -> list[str]:
+    if settings["encoding"] in {"adaptive", "pq", "hlg"} and settings["hevc_preset"] == "medium":
+        return ["--hevc-preset", "medium"]
+    return []
+
+
 def build_argv(exe: str, options: dict) -> list[str]:
     """Build the `HyperDR convert` command line for one image."""
     settings = options_to_settings(options)
@@ -291,6 +299,7 @@ def build_argv(exe: str, options: dict) -> list[str]:
             "--ai-model", selected_model_artifact(options),
         ]
         argv.extend(_color_flags(options, settings))
+        argv.extend(_hevc_flags(settings))
         argv.extend(_ai_post_flags(options, encoding))
         return argv
     if external_gain:
@@ -308,6 +317,7 @@ def build_argv(exe: str, options: dict) -> list[str]:
             "--external-gain-report", str(external_report),
         ]
         argv.extend(_color_flags(options, settings))
+        argv.extend(_hevc_flags(settings))
         # External model integrations may also opt into the native post layer.
         argv.extend(_ai_post_flags(options, encoding))
         legacy_env = {
@@ -337,6 +347,7 @@ def build_argv(exe: str, options: dict) -> list[str]:
         "--report", options["report"],
     ]
     argv.extend(_color_flags(options, settings))
+    argv.extend(_hevc_flags(settings))
     # Manual mode never emits AI post flags, even if a stale browser snapshot
     # contains those independent keys.
     argv.extend(_ai_post_flags(options, encoding))

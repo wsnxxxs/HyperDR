@@ -23,7 +23,7 @@ namespace hyperdr {
 // item. `depth` selects the base image's bit depth; the gain map is always 8-bit.
 [[nodiscard]] std::vector<std::uint8_t> encode_adaptive_heic(
     const GainMapResult& images, const PhotoMetadata& metadata, int quality,
-    int depth);
+    int depth, HevcPreset preset = HevcPreset::Slow);
 
 // Backward-compatible JPEG/R, carrying both Ultra HDR v1 XMP and ISO 21496-1
 // metadata. Requires an 8-bit base.
@@ -56,7 +56,7 @@ struct UltraHdrInfo {
 // The application uses the PhotoRenditions overloads below for direct HDR.
 [[nodiscard]] std::vector<std::uint8_t> encode_hdr_heic(
     const GainMapResult& images, const PhotoMetadata& metadata, int quality,
-    HdrEncoding encoding);
+    HdrEncoding encoding, HevcPreset preset = HevcPreset::Slow);
 [[nodiscard]] std::vector<std::uint8_t> encode_avif(
     const GainMapResult& images, const PhotoMetadata& metadata, int quality,
     HdrEncoding encoding);
@@ -66,7 +66,8 @@ struct UltraHdrInfo {
     const FloatImage& image, const PhotoMetadata& metadata, int quality);
 void verify_sdr_jpeg(const std::vector<std::uint8_t>& bytes);
 [[nodiscard]] std::vector<std::uint8_t> encode_hdr_heic(
-    const PhotoRenditions& images, const PhotoMetadata& metadata, int quality, HdrEncoding encoding);
+    const PhotoRenditions& images, const PhotoMetadata& metadata, int quality, HdrEncoding encoding,
+    HevcPreset preset = HevcPreset::Slow);
 [[nodiscard]] std::vector<std::uint8_t> encode_avif(
     const PhotoRenditions& images, const PhotoMetadata& metadata, int quality, HdrEncoding encoding);
 

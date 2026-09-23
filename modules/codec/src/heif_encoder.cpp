@@ -1,4 +1,5 @@
 #include "hyperdr/container/heif_tmap.hpp"
+#include "hyperdr/container/heif_grid.hpp"
 #include "hyperdr/image/color.hpp"
 #include "hyperdr/image/transfer.hpp"
 #include "hyperdr/foundation/parallel.hpp"
@@ -15,13 +16,17 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <numeric>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 namespace hyperdr {
 namespace {
@@ -424,6 +429,111 @@ heif_error write_callback(heif_context*, const void* data, size_t size, void* us
   }
 }
 
+unsigned heic_tile_workers() {
+  // Each x265 encoder already has its own WPP workers. Limit simultaneous
+  // pictures, rather than starting one encoder for every tile of a large RAW.
+  const unsigned automatic = std::clamp(std::thread::hardware_concurrency() / 4U, 1U, 4U);
+  const char* value = std::getenv("HYPERDR_HEIC_TILE_WORKERS");
+  if (!value || !*value) return automatic;
+  char* end = nullptr;
+  const long requested = std::strtol(value, &end, 10);
+  return *end == '\0' && requested >= 1 && requested <= 4
+             ? static_cast<unsigned>(requested) : automatic;
+}
+
+struct HeicTileSource {
+  heif_image* image;
+  std::uint32_t width, height, single_picture_edge;
+  int quality;
+  bool main10, save_two_profiles;
+  heif_color_profile_nclx nclx;
+};
+
+std::vector<std::uint8_t> encode_parallel_heic(
+    const std::vector<HeicTileSource>& sources, std::size_t primary,
+    unsigned workers, HevcPreset preset, const PhotoMetadata& metadata,
+    float headroom, bool has_gain_map) {
+  constexpr std::uint32_t tile_size = 2048;
+  std::vector<EncodedHeifGrid> grids(sources.size());
+  struct Job { std::size_t source, tile; };
+  std::vector<Job> jobs;
+  for (std::size_t s = 0; s < sources.size(); ++s) {
+    const auto& source = sources[s];
+    auto& grid = grids[s];
+    grid.width = source.width;
+    grid.height = source.height;
+    const bool tiled = source.width > source.single_picture_edge ||
+                       source.height > source.single_picture_edge;
+    grid.columns = tiled ? (source.width + tile_size - 1) / tile_size : 1;
+    grid.rows = tiled ? (source.height + tile_size - 1) / tile_size : 1;
+    grid.tiles.resize(static_cast<std::size_t>(grid.columns) * grid.rows);
+    for (std::size_t t = 0; t < grid.tiles.size(); ++t) jobs.push_back({s, t});
+  }
+
+  std::atomic<std::size_t> next{0};
+  std::exception_ptr failure;
+  std::mutex failure_mutex;
+  const auto run = [&] {
+    try {
+      for (;;) {
+        const auto index = next.fetch_add(1);
+        if (index >= jobs.size()) break;
+        const auto [s, t] = jobs[index];
+        const auto& source = sources[s];
+        auto& grid = grids[s];
+        std::unique_ptr<heif_image, ImageDeleter> tile;
+        heif_image* pixels = source.image;
+        if (grid.tiles.size() > 1) {
+          heif_image* extracted = nullptr;
+          check_heif(heif_image_extract_area(source.image,
+              static_cast<int>((t % grid.columns) * tile_size),
+              static_cast<int>((t / grid.columns) * tile_size), tile_size, tile_size,
+              nullptr, &extracted), "extract parallel HEIC tile");
+          tile.reset(extracted);
+          pixels = tile.get();
+        }
+        // Never share the mutable libheif context or encoder between jobs.
+        std::unique_ptr<heif_context, ContextDeleter> context(heif_context_alloc());
+        if (!context) throw std::runtime_error("cannot allocate tile context");
+        heif_encoder* raw_encoder = nullptr;
+        check_heif(heif_context_get_encoder_for_format(context.get(), heif_compression_HEVC,
+            &raw_encoder), "get tile HEVC encoder");
+        std::unique_ptr<heif_encoder, EncoderDeleter> encoder(raw_encoder);
+        check_heif(heif_encoder_set_lossy_quality(encoder.get(), source.quality),
+                   "set tile HEVC quality");
+        configure_hevc_preset(encoder.get(), preset);
+        if (source.main10) configure_main10_still(encoder.get());
+        std::unique_ptr<heif_encoding_options, EncodingOptionsDeleter> options(
+            heif_encoding_options_alloc());
+        if (!options) throw std::runtime_error("cannot allocate tile encoding options");
+        options->save_two_colr_boxes_when_ICC_and_nclx_available = source.save_two_profiles;
+        auto nclx = source.nclx;
+        options->output_nclx_profile = &nclx;
+        heif_image_handle* raw_handle = nullptr;
+        check_heif(heif_context_encode_image(context.get(), pixels, encoder.get(),
+            options.get(), &raw_handle), "encode parallel HEIC tile");
+        std::unique_ptr<heif_image_handle, HandleDeleter> handle(raw_handle);
+        heif_writer writer{1, &write_callback};
+        check_heif(heif_context_write(context.get(), &writer, &grid.tiles[t]),
+                   "write parallel HEIC tile");
+      }
+    } catch (...) {
+      next.store(jobs.size());
+      std::lock_guard lock(failure_mutex);
+      if (!failure) failure = std::current_exception();
+    }
+  };
+  {
+    std::vector<std::jthread> threads;
+    for (unsigned i = 1; i < std::min<std::size_t>(workers, jobs.size()); ++i)
+      threads.emplace_back(run);
+    run();
+  }  // Join before reading the indexed results or propagating an error.
+  if (failure) std::rethrow_exception(failure);
+  return assemble_heif_grids(grids, primary, make_minimal_exif(metadata),
+                             make_xmp(metadata, headroom, has_gain_map));
+}
+
 }  // namespace
 
 std::vector<std::uint8_t> encode_adaptive_heic(const GainMapResult& images,
@@ -452,6 +562,17 @@ std::vector<std::uint8_t> encode_adaptive_heic(const GainMapResult& images,
 
   auto base = make_base(images.base_linear, depth);
   auto gain = make_gain(images.gain_map);
+  const auto workers = heic_tile_workers();
+  if (workers > 1 && (images.base_linear.width > 2048 || images.base_linear.height > 2048 ||
+                      images.gain_map.width > 3072 || images.gain_map.height > 3072)) {
+    const auto intermediate = encode_parallel_heic({
+        {gain.get(), images.gain_map.width, images.gain_map.height, 3072, 95,
+         false, false, gain_map_nclx()},
+        {base.get(), images.base_linear.width, images.base_linear.height, 2048,
+         std::clamp(quality, 0, 100), depth == 10, true, display_p3_nclx()}},
+        1, workers, preset, metadata, images.headroom_stops, true);
+    return add_tmap_to_two_image_heif(intermediate, serialize_tmap_payload(images.metadata));
+  }
   // Explicit encoding options are required for libheif to carry the gain-map
   // nclx profile into the encoded item.
   std::unique_ptr<heif_encoding_options, EncodingOptionsDeleter> gain_options(
@@ -500,6 +621,12 @@ std::vector<std::uint8_t> encode_hdr_heic(const PhotoRenditions& images,
 
   heif_content_light_level light_level{};
   auto image = make_hdr(images, encoding, light_level);
+  const auto workers = heic_tile_workers();
+  if (workers > 1 && (images.hdr.width > 2048 || images.hdr.height > 2048)) {
+    return encode_parallel_heic({{image.get(), images.hdr.width, images.hdr.height, 2048,
+        std::clamp(quality, 0, 100), true, false, bt2100_nclx(encoding)}},
+        0, workers, preset, metadata, images.stats.headroom_stops, false);
+  }
   auto handle = encode_hdr_image(context.get(), image.get(), encoder.get(),
                                  images.sdr.width, images.sdr.height,
                                  encoding, light_level);

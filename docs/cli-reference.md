@@ -134,6 +134,15 @@ file size or fine detail. The panel exposes this as **Fast HEIC export**. RAW
 OpenMP parallelism and AVIF multithreading are automatic; neither needs this
 option.
 
+Large HEIC exports encode independent 2048-pixel tiles concurrently, then
+assemble the HEIF grid in row-major order. This also applies to full-resolution
+gain maps and to PQ/HLG exports. Tile coding settings, decoded pixels, and HDR
+metadata are preserved; container layout may differ. The default is one tile
+worker per four logical CPU cores, capped at four workers, because each x265
+encoder also uses internal threads. For diagnostics,
+`HYPERDR_HEIC_TILE_WORKERS=1` restores serial encoding; values 2 through 4
+override the automatic count. Small images keep the single-image path.
+
 `--encoding avif-pq` and `--encoding avif-hlg` write 10-bit BT.2100 AVIF using
 the same reconstructed HDR image, the same Rec.2020 matrix, and the same
 transfer functions as the HEIC paths, so they differ only in container and

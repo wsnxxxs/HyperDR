@@ -4,6 +4,7 @@ hyperdr_add_module(container
   SOURCES
     src/exif.cpp
     src/heif_tmap.cpp
+    src/heif_grid.cpp
     src/inspect.cpp
     src/iso_gain_map.cpp
   DEPENDS HyperDR::foundation

@@ -6,6 +6,8 @@
 // directions and the gamma search here makes the convention directly testable,
 // and means the encoder and the verifier cannot disagree about it.
 
+#include "hyperdr/foundation/rational.hpp"
+
 #include <cstdint>
 #include <vector>
 
@@ -13,6 +15,14 @@ namespace hyperdr {
 
 struct RenderStats;
 struct FloatImage;
+
+struct QuantizedGainGrid {
+  std::vector<float> codes;
+  float stored_gain_max{0.0F};
+  float stored_gamma{1.0F};
+  Rational gain_max_metadata{0, 1};
+  Rational gamma_metadata{1, 1};
+};
 
 // Exact distribution of an 8-bit gain grid, using 256 counts instead of a
 // decoded full-grid copy and sort. Ceiling is the requested output budget;
@@ -36,5 +46,10 @@ void measure_quantized_gain(RenderStats& stats, const FloatImage& codes,
 // grid's own distribution, preferring 1 when the difference is immaterial so
 // the metadata stays simple.
 [[nodiscard]] float choose_gain_gamma(const std::vector<float>& normalized_gains);
+
+// Encodes a non-negative log2-gain grid with the same 8-bit representation and
+// serializable rational metadata used by every scalar gain-map writer.
+[[nodiscard]] QuantizedGainGrid quantize_gain_grid(
+    const std::vector<float>& gain_stops, std::uint32_t width);
 
 }  // namespace hyperdr

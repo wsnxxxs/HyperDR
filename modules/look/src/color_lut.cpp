@@ -166,7 +166,6 @@ void validate_color_lut_options(const ColorLutOptions& o) {
 void apply_rendition_lut(PhotoRenditions& out, const ColorLutOptions& grade, const ColorLut* supplied) {
   validate_color_lut_options(grade);
   if(grade.path.empty() || grade.strength==0) return;
-  out.gain_stops = {};
   out.hdr_is_source = false;
   if(!sdr_space(grade.input)) throw std::invalid_argument("AI/external gain requires an SDR creative LUT");
   const auto owned=supplied ? ColorLut{} : read_color_lut(grade.path);
@@ -281,7 +280,7 @@ PhotoRenditions render_graded_photo(const FloatImage& source,
   }
   auto adjusted=options;
   adjusted.auto_exposure=false; adjusted.exposure_ev=0; adjusted.exposure_bias_ev=0;
-  if((grade.output==LutSpace::Hlg || grade.output==LutSpace::Pq) && graded_input.headroom==1) {
+  if(graded_input.domain==InputDomain::kDisplayReferredSdr) {
     // The LUT removed HDR range. Keep that result even in an HDR container,
     // rather than expanding the newly classified SDR image again.
     adjusted.gain_strength=0;

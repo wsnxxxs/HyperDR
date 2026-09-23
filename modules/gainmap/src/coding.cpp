@@ -132,4 +132,36 @@ float choose_gain_gamma(const std::vector<float>& normalized_gains) {
   return best_gamma;
 }
 
+QuantizedGainGrid quantize_gain_grid(const std::vector<float>& gain_stops,
+                                     std::uint32_t width) {
+  if (width == 0 || gain_stops.size() % width != 0) {
+    throw std::invalid_argument("gain grid dimensions do not match its samples");
+  }
+  QuantizedGainGrid quantized;
+  float gain_max = 0.0F;
+  for (const float value : gain_stops) gain_max = std::max(gain_max, value);
+  quantized.gain_max_metadata = rational_from_float(gain_max);
+  quantized.stored_gain_max = rational_value(quantized.gain_max_metadata);
+
+  quantized.codes.assign(gain_stops.size(), 0.0F);
+  if (quantized.stored_gain_max > kEpsilon) {
+    for (std::size_t i = 0; i < gain_stops.size(); ++i) {
+      quantized.codes[i] = std::clamp(
+          gain_stops[i] / quantized.stored_gain_max, 0.0F, 1.0F);
+    }
+  }
+  const float gamma = quantized.stored_gain_max > kEpsilon
+                          ? choose_gain_gamma(quantized.codes)
+                          : 1.0F;
+  quantized.gamma_metadata = rational_from_float(gamma);
+  quantized.stored_gamma = rational_value(quantized.gamma_metadata);
+  for (std::size_t i = 0; i < gain_stops.size(); ++i) {
+    const float code = encode_gain_code(quantized.codes[i], quantized.stored_gamma);
+    const auto x = static_cast<std::uint32_t>(i % width);
+    const auto y = static_cast<std::uint32_t>(i / width);
+    quantized.codes[i] = quantize_gain_code_dithered(code, x, y);
+  }
+  return quantized;
+}
+
 }  // namespace hyperdr

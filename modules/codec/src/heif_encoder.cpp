@@ -11,7 +11,7 @@
 
 #include <libheif/heif.h>
 #include <libheif/heif_tiling.h>
-#include <lcms2.h>
+#include "internal/icc_profiles.hpp"
 
 #include <algorithm>
 #include <array>
@@ -28,31 +28,6 @@ namespace {
 
 void check_heif(heif_error error, const char* operation) {
   if (error.code != heif_error_Ok) throw std::runtime_error(std::string(operation) + ": " + (error.message ? error.message : "unknown libheif error"));
-}
-
-std::vector<std::uint8_t> display_p3_profile(bool linear = false) {
-  cmsCIExyY white{0.3127, 0.3290, 1.0};
-  cmsCIExyYTRIPLE primaries{{0.680, 0.320, 1.0}, {0.265, 0.690, 1.0}, {0.150, 0.060, 1.0}};
-  // Little CMS type 4 is the IEC 61966-2-1 form, parameters {g, a, b, c, d}:
-  // Y = (aX + b)^g for X >= d, and Y = cX below it. The slope c used to sit in
-  // the unused sixth slot with 0 in its place, which zeroed the linear toe: any
-  // ICC-honouring reader decoded every base code under 10/255 as black, and a
-  // gain map cannot bring back a shadow that multiplies zero.
-  double parameters[]{2.4, 1.0 / 1.055, 0.055 / 1.055, 1.0 / 12.92, 0.04045};
-  cmsToneCurve* curve = linear ? cmsBuildGamma(nullptr, 1.0)
-                               : cmsBuildParametricToneCurve(nullptr, 4, parameters);
-  if (!curve) throw std::runtime_error("cannot build Display P3 tone curve");
-  cmsToneCurve* curves[]{curve, curve, curve};
-  cmsHPROFILE profile = cmsCreateRGBProfile(&white, &primaries, curves);
-  cmsFreeToneCurve(curve);
-  if (!profile) throw std::runtime_error("cannot create Display P3 ICC profile");
-  cmsUInt32Number size = 0;
-  if (!cmsSaveProfileToMem(profile, nullptr, &size) || size == 0) { cmsCloseProfile(profile); throw std::runtime_error("cannot size ICC profile"); }
-  std::vector<std::uint8_t> data(size);
-  if (!cmsSaveProfileToMem(profile, data.data(), &size)) { cmsCloseProfile(profile); throw std::runtime_error("cannot serialize ICC profile"); }
-  cmsCloseProfile(profile);
-  data.resize(size);
-  return data;
 }
 
 struct ImageDeleter { void operator()(heif_image* p) const { if (p) heif_image_release(p); } };
@@ -92,8 +67,8 @@ heif_color_profile_nclx bt2100_nclx(HdrEncoding encoding) {
   nclx.transfer_characteristics = encoding == HdrEncoding::Pq
       ? heif_transfer_characteristic_ITU_R_BT_2100_0_PQ
       : heif_transfer_characteristic_ITU_R_BT_2100_0_HLG;
-  // Match Apple's still-image HEIC signalling in the supplied references.
-  nclx.matrix_coefficients = heif_matrix_coefficients_ITU_R_BT_709_5;
+  nclx.matrix_coefficients =
+      heif_matrix_coefficients_ITU_R_BT_2020_2_non_constant_luminance;
   nclx.full_range_flag = 1;
   return nclx;
 }
@@ -182,7 +157,7 @@ std::unique_ptr<heif_image, ImageDeleter> make_base(const FloatImage& image, int
   });
   auto nclx = display_p3_nclx();
   check_heif(heif_image_set_nclx_color_profile(raw, &nclx), "set P3 nclx");
-  const auto icc = display_p3_profile();
+  const auto icc = codec::display_p3_profile();
   check_heif(heif_image_set_raw_color_profile(raw, "prof", icc.data(), icc.size()), "set P3 ICC");
   return result;
 }
@@ -246,18 +221,19 @@ std::unique_ptr<heif_image, ImageDeleter> make_hdr(
 
   constexpr unsigned max_code = (1U << depth) - 1U;
   std::vector<float> row_peak(hdr.height, 0.0F);
-  std::vector<double> row_luminance(hdr.height, 0.0);
+  std::vector<double> row_light_level(hdr.height, 0.0);
   parallel_for_rows(hdr.height, [&](const std::uint32_t y) {
     auto* row = reinterpret_cast<std::uint16_t*>(
         plane + static_cast<std::size_t>(y) * stride);
     float peak = 0.0F;
-    double luminance_sum = 0.0;
+    double light_level_sum = 0.0;
     for (std::uint32_t x = 0; x < hdr.width; ++x) {
       const auto rgb = p3_to_rec2020(hdr.at(x, y, 0), hdr.at(x, y, 1), hdr.at(x, y, 2));
       const std::array<float, 3> linear{
           std::max(0.0F, rgb[0]), std::max(0.0F, rgb[1]), std::max(0.0F, rgb[2])};
-      peak = std::max(peak, std::max({linear[0], linear[1], linear[2]}));
-      luminance_sum += 0.2627 * linear[0] + 0.6780 * linear[1] + 0.0593 * linear[2];
+      const float light_level = std::max({linear[0], linear[1], linear[2]});
+      peak = std::max(peak, light_level);
+      light_level_sum += light_level;
       const auto encoded = encoding == HdrEncoding::Pq
                                ? std::array<float, 3>{pq_oetf(linear[0]), pq_oetf(linear[1]),
                                                       pq_oetf(linear[2])}
@@ -268,18 +244,21 @@ std::unique_ptr<heif_image, ImageDeleter> make_hdr(
       }
     }
     row_peak[y] = peak;
-    row_luminance[y] = luminance_sum;
+    row_light_level[y] = light_level_sum;
   });
 
   const float peak = *std::max_element(row_peak.begin(), row_peak.end());
-  const double luminance_sum = std::accumulate(row_luminance.begin(), row_luminance.end(), 0.0);
+  const double light_level_sum =
+      std::accumulate(row_light_level.begin(), row_light_level.end(), 0.0);
   const double pixel_count = static_cast<double>(hdr.width) * hdr.height;
   const auto clamp_light = [](double nits) {
     return static_cast<std::uint16_t>(std::clamp(std::ceil(nits), 0.0, 10000.0));
   };
   light_level.max_content_light_level = clamp_light(peak * kReferenceWhiteNits);
   light_level.max_pic_average_light_level =
-      clamp_light(pixel_count > 0.0 ? luminance_sum * kReferenceWhiteNits / pixel_count : 0.0);
+      clamp_light(pixel_count > 0.0
+                      ? light_level_sum * kReferenceWhiteNits / pixel_count
+                      : 0.0);
   heif_image_set_content_light_level(raw, &light_level);
   auto nclx = bt2100_nclx(encoding);
   check_heif(heif_image_set_nclx_color_profile(raw, &nclx), "set BT.2100 nclx");
@@ -657,7 +636,8 @@ void verify_heic_decodable(const std::vector<std::uint8_t>& bytes,
   if (profile->color_primaries !=
           heif_color_primaries_ITU_R_BT_2020_2_and_2100_0 ||
       profile->transfer_characteristics != expected_transfer ||
-      profile->matrix_coefficients != heif_matrix_coefficients_ITU_R_BT_709_5 ||
+      profile->matrix_coefficients !=
+          heif_matrix_coefficients_ITU_R_BT_2020_2_non_constant_luminance ||
       profile->full_range_flag != 1) {
     throw std::runtime_error("BT.2100 HEIC has incorrect nclx signalling");
   }
@@ -699,8 +679,13 @@ void verify_heic_decodable(const std::filesystem::path& input) {
              "get image for HDR mode detection");
   std::unique_ptr<heif_image_handle, HandleDeleter> primary(primary_raw);
   heif_color_profile_nclx* profile_raw = nullptr;
-  check_heif(heif_image_handle_get_nclx_color_profile(primary.get(), &profile_raw),
-             "get nclx for HDR mode detection");
+  const auto profile_error =
+      heif_image_handle_get_nclx_color_profile(primary.get(), &profile_raw);
+  if (profile_error.code != heif_error_Ok || profile_raw == nullptr) {
+    if (profile_raw) heif_nclx_color_profile_free(profile_raw);
+    throw std::runtime_error(
+        "HEIC is neither Adaptive HDR nor nclx-signalled PQ/HLG");
+  }
   std::unique_ptr<heif_color_profile_nclx, decltype(&heif_nclx_color_profile_free)>
       profile(profile_raw, &heif_nclx_color_profile_free);
   if (profile->transfer_characteristics == heif_transfer_characteristic_ITU_R_BT_2100_0_PQ) {
@@ -904,7 +889,7 @@ void reconstruct_heic_to_tiff(const std::filesystem::path& input,
     out.push_back(static_cast<std::uint8_t>(v)); out.push_back(static_cast<std::uint8_t>(v >> 8));
     out.push_back(static_cast<std::uint8_t>(v >> 16)); out.push_back(static_cast<std::uint8_t>(v >> 24));
   };
-  const auto linear_icc = display_p3_profile(true);
+  const auto linear_icc = codec::display_p3_profile(true);
   constexpr std::uint16_t entry_count = 12;
   const std::uint32_t ifd_end = 8 + 2 + entry_count * 12 + 4;
   const std::uint32_t bits_offset = ifd_end;

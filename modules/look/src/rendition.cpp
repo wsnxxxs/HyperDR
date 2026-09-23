@@ -114,6 +114,9 @@ PhotoRenditions render_renditions(const FloatImage& source,
       input_hdr ? std::min(available, requested) : requested) * strength;
   const float peak = std::exp2(stops);
   const float knee = std::log2(options.look.shoulder_start);
+  // Keep the HDR-source shoulder and headroom mapping aligned with
+  // make_display_referred_hdr_gain_map. Export retains per-pixel HDR endpoints
+  // for exact_gain_map_from_renditions instead of averaging gain into cells.
   const float sdr_ceiling = available > kEpsilon ? solve_ceiling(knee, available, 0) : 0;
   const bool hdr_passthrough = input_hdr && stops >= available - kEpsilon;
   const float hdr_ceiling = input_hdr && !hdr_passthrough && available > kEpsilon
@@ -217,11 +220,6 @@ PhotoRenditions render_renditions(const FloatImage& source,
         for(int c=0;c<3;++c) out.hdr.pixels[i+c]=out.sdr.pixels[i+c]*scale;
       }
     });
-  }
-  if (want_hdr && !input_hdr && prepared.ready) {
-    out.gain_stops = FloatImage(prepared.width, prepared.height, 1);
-    for (std::size_t i=0; i<prepared.stops.size(); ++i)
-      out.gain_stops.pixels[i] = prepared.stops[i] * strength;
   }
   auto& stats = out.stats;
   stats.exposure_ev = ev;

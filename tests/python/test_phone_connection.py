@@ -5,12 +5,14 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import socket
 import ssl
 import tempfile
 import threading
 import time
 import unittest
 from unittest import mock
+from urllib.parse import urlparse
 
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
@@ -179,6 +181,133 @@ class PhoneConnectionTests(unittest.TestCase):
             server.serve(desktop=True)
             self.assertEqual(build.call_args.args[3], "http")
             tls.assert_not_called()
+
+    def idle_socket(self, listener):
+        """A TCP client that connects but never sends a TLS handshake."""
+        client = socket.create_connection(("127.0.0.1", listener.server_port))
+        client.settimeout(3)
+        self.addCleanup(client.close)
+        return client
+
+    def test_idle_pre_handshake_connection_does_not_block_other_requests(self):
+        self.prepare()
+        phone = self.desktop.phone_server
+        self.assertEqual(self.call(phone, "GET", "/api/phone/state")[0], 200)
+        self.idle_socket(phone)
+        time.sleep(0.1)
+        started = time.monotonic()
+        self.assertEqual(self.call(phone, "GET", "/api/phone/state")[0], 200)
+        self.assertLess(time.monotonic() - started, 1.0)
+
+    def test_failed_handshakes_recycle_their_connection_slot(self):
+        self.prepare()
+        phone = self.desktop.phone_server
+        phone.connection_slots = threading.BoundedSemaphore(1)
+        with mock.patch.object(server, "TLS_HANDSHAKE_TIMEOUT_SECONDS", 0.3):
+            # A pending handshake holds its slot ...
+            stalled = self.idle_socket(phone)
+            time.sleep(0.1)
+            self.assertFalse(phone.connection_slots.acquire(blocking=False))
+            # ... until the handshake timeout drops exactly that connection.
+            self.assertTrue(phone.connection_slots.acquire(timeout=3))
+            phone.connection_slots.release()
+            self.assertEqual(stalled.recv(64), b"")
+            self.assertEqual(self.call(phone, "GET", "/api/phone/state")[0], 200)
+
+            # A connection that dies mid-handshake is recycled the same way.
+            dropped = socket.create_connection(("127.0.0.1", phone.server_port))
+            dropped.sendall(b"\x16\x03\x01")  # truncated TLS record, then EOF
+            dropped.close()
+            self.assertTrue(phone.connection_slots.acquire(timeout=3))
+            phone.connection_slots.release()
+            self.assertEqual(self.call(phone, "GET", "/api/phone/state")[0], 200)
+
+            # A normal "I don't trust this certificate" refusal fails and closes
+            # cleanly; the next correctly configured request succeeds at once.
+            untrusted = http.client.HTTPSConnection(
+                "127.0.0.1", phone.server_port,
+                context=ssl.create_default_context(), timeout=4)
+            with self.assertRaises(ssl.SSLCertVerificationError):
+                untrusted.request("GET", "/api/phone/state",
+                                  headers={"Cookie": "hyperdr_access=" + phone.access_token})
+                untrusted.getresponse()
+            untrusted.close()
+            self.assertTrue(phone.connection_slots.acquire(timeout=3))
+            phone.connection_slots.release()
+            self.assertEqual(self.call(phone, "GET", "/api/phone/state")[0], 200)
+
+    def test_saturated_listener_drops_tls_connections_without_touching_them(self):
+        self.prepare()
+        phone = self.desktop.phone_server
+        phone.connection_slots = threading.BoundedSemaphore(1)
+        self.assertTrue(phone.connection_slots.acquire(blocking=False))
+        client = self.idle_socket(phone)
+        # Any send would implicitly start a handshake in the accept thread, so a
+        # saturated TLS listener must close without sending a single byte.
+        self.assertEqual(client.recv(64), b"")
+        phone.connection_slots.release()
+        self.assertEqual(self.call(phone, "GET", "/api/phone/state")[0], 200)
+
+    def test_stop_and_mode_switch_finish_despite_a_pending_handshake(self):
+        self.prepare()
+        workbench = self.desktop.context.workbench
+        self.idle_socket(self.desktop.phone_server)
+        time.sleep(0.1)
+        stopping = threading.Thread(target=self.desktop.stop_phone)
+        stopping.start()
+        stopping.join(timeout=2)
+        self.assertFalse(stopping.is_alive(), "关闭手机连接被未完成的握手卡住")
+        self.assertTrue(workbench.changed.acquire(timeout=1))
+        workbench.changed.release()
+
+        # Switching the transport with a pending handshake must finish too.
+        self.assertEqual(self.call(self.desktop, "POST", "/api/phone/connect", {"owner": "desktop"})[0], 200)
+        self.assertEqual(self.desktop.phone_server.public_scheme, "https")
+        self.idle_socket(self.desktop.phone_server)
+        time.sleep(0.1)
+        started = time.monotonic()
+        code, _, _ = self.call(self.desktop, "POST", "/api/phone/connect",
+                               {"owner": "desktop", "ordinary": True})
+        self.assertEqual(code, 200)
+        self.assertLess(time.monotonic() - started, 2)
+        self.assertEqual(self.desktop.phone_server.public_scheme, "http")
+
+    def test_obtained_https_entry_survives_the_setup_listener_closing(self):
+        self.prepare()
+        setup = self.desktop.setup_server
+        _, headers, _ = self.call(setup, "GET", "/setup?token=" + setup.access_token, cookie="")
+        cookie = headers["Set-Cookie"].split(";", 1)[0]
+        code, _, payload = self.call(setup, "GET", "/setup/state", cookie=cookie)
+        self.assertEqual(code, 200)
+        state = json.loads(payload)
+        entry = urlparse(state["httpsUrl"])
+        self.assertEqual(entry.scheme, "https")
+        self.assertGreater(state["expiresIn"], 0)
+
+        # The real expiry path closes the download listener entirely.
+        self.desktop._close_setup()
+        with self.assertRaises(OSError):
+            self.call(setup, "GET", "/setup/root.crt", cookie=cookie)
+
+        # The entry obtained earlier still reaches the unchanged main service:
+        # an expired download access is not a lost preview connection.
+        root = x509.load_der_x509_certificate(phone_tls.root_certificate())
+        context = ssl.create_default_context(
+            cadata=root.public_bytes(serialization.Encoding.PEM).decode())
+        login = http.client.HTTPSConnection(entry.hostname, entry.port, context=context, timeout=4)
+        login.request("GET", entry.path + "?" + entry.query)
+        response = login.getresponse()
+        self.assertEqual(response.status, 303)
+        viewer = response.getheader("Set-Cookie").split(";", 1)[0]
+        response.read()
+        login.close()
+        self.addCleanup(login.close)
+        page = http.client.HTTPSConnection(entry.hostname, entry.port, context=context, timeout=4)
+        self.addCleanup(page.close)
+        page.request("GET", "/phone", headers={"Cookie": viewer})
+        response = page.getresponse()
+        self.assertEqual(response.status, 200)
+        self.assertIn(b"HyperDR", response.read())
 
 
 if __name__ == "__main__":

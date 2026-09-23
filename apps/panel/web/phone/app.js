@@ -13,13 +13,29 @@ let comparing = false, zoom = 1, panX = 0, panY = 0;
 const pointers = new Map();
 let gesture = null;
 
-async function request(path, body) {
-  const response = await fetch(path, body === undefined ? {} : {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "请求未完成，请重试。");
-  return data;
+async function request(path, body, { timeout = 0, signal } = {}) {
+  const control = timeout || signal ? new AbortController() : null;
+  const cancel = () => control.abort();
+  if (signal?.aborted) cancel();
+  else signal?.addEventListener("abort", cancel, { once: true });
+  const timer = timeout && setTimeout(cancel, timeout);
+  try {
+    const response = await fetch(path, {
+      ...(body === undefined ? {} : {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      }),
+      ...(control ? { signal: control.signal } : {}),
+    });
+    const data = await response.json();
+    if (!response.ok) throw Object.assign(new Error(data.error || "请求未完成，请重试。"), { status: response.status });
+    return data;
+  } catch (error) {
+    if (error.name === "AbortError" && !signal?.aborted) throw Object.assign(new Error("请求超时，请重试。"), { status: 0, timeout: true });
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
+    signal?.removeEventListener("abort", cancel);
+  }
 }
 function notice(message = "") { $("notice").textContent = message; $("notice").hidden = !message; }
 function connectionState(connected) {
@@ -128,9 +144,15 @@ function probeDiagnostics() {
   if (diagnosticRun) return diagnosticRun;
   $("retry-diagnostics").disabled = true;
   diagnosticRun = (async () => {
-    const probe = document.createElement("canvas"); probe.width = 2; probe.height = 2;
-    const { result, renderer: testRenderer } = await assessPhoneHdr(probe);
-    testRenderer?.destroy(); publishDiagnostics(result);
+    try {
+      const probe = document.createElement("canvas"); probe.width = 2; probe.height = 2;
+      const { result, renderer: testRenderer } = await assessPhoneHdr(probe);
+      testRenderer?.destroy(); publishDiagnostics(result);
+    } catch (error) {
+      // A capability check that fails must still leave the page usable.
+      publishDiagnostics({ secureContext: Boolean(window.isSecureContext), webgpu: Boolean(navigator.gpu),
+        displayHdr: false, hdr: false, reason: "renderer", detail: String(error.message || error) });
+    }
   })().finally(() => { diagnosticRun = null; $("retry-diagnostics").disabled = false; });
   return diagnosticRun;
 }
@@ -147,10 +169,15 @@ async function initRenderer() {
   if (renderer) return;
   if (diagnosticRun) await diagnosticRun;
   let candidate = null;
-  const assessment = await assessPhoneHdr(canvas, () => { if (candidate && renderer === candidate) rendererLost(); });
-  candidate = assessment.renderer;
+  try {
+    const assessment = await assessPhoneHdr(canvas, () => { if (candidate && renderer === candidate) rendererLost(); });
+    candidate = assessment.renderer;
+    publishDiagnostics(assessment.result);
+  } catch (error) {
+    publishDiagnostics({ secureContext: Boolean(window.isSecureContext), webgpu: Boolean(navigator.gpu),
+      displayHdr: false, hdr: false, reason: "renderer", detail: String(error.message || error) });
+  }
   renderer = candidate;
-  publishDiagnostics(assessment.result);
   if (!renderer) newCanvas();
   if (!renderer) {
     try { renderer = createSdrGpuRenderer(canvas, () => rendererLost()); }
@@ -315,22 +342,92 @@ $("photos-input").addEventListener("change", (event) => { upload(event.target.fi
 
 let events = null;
 function subscribe() {
-  events?.close(); events = new EventSource("/api/phone/events");
-  events.onmessage = (event) => { applySnapshot(JSON.parse(event.data)); };
-  events.onerror = () => connectionState(false);
+  // Never two subscriptions at once: an EventSource that is still open or
+  // reconnecting keeps its place.
+  if (document.hidden || retryPaused || (events && events.readyState !== EventSource.CLOSED)) return;
+  events?.close();
+  const stream = events = new EventSource("/api/phone/events");
+  stream.onmessage = (event) => { if (events === stream && !document.hidden) applySnapshot(JSON.parse(event.data)); };
+  stream.onerror = () => {
+    if (events !== stream || document.hidden) return;
+    connectionState(false);
+    if (stream.readyState === EventSource.CLOSED) scheduleRetry();
+  };
+}
+const STATE_TIMEOUT_MS = 8000;
+let initializing = null, initControl = null, retryTimer = 0, retryDelay = 1000, retryPaused = false;
+function scheduleRetry() {
+  if (retryPaused || document.hidden || retryTimer) return;
+  retryTimer = setTimeout(() => { retryTimer = 0; initialize(); }, retryDelay);
+  retryDelay = Math.min(retryDelay * 2, 8000);
+}
+async function runInitialize(signal) {
+  const current = () => !signal.aborted && !document.hidden;
+  let capabilitiesOk = Boolean(capabilities), stateOk = false, authFailure = false;
+  if (!capabilities) {
+    try {
+      const next = await request("/api/state", undefined, { timeout: STATE_TIMEOUT_MS, signal });
+      if (!current()) return;
+      capabilities = next;
+      $("photos-input").accept = ["image/*", ...capabilities.inputExtensions].join(",");
+      capabilitiesOk = true;
+    } catch (error) {
+      if (!current()) return;
+      authFailure = authFailure || error.status === 401 || error.status === 403;
+      connectionState(false);
+    }
+  }
+  try {
+    const next = await request("/api/phone/state", undefined, { timeout: STATE_TIMEOUT_MS, signal });
+    if (!current()) return;
+    applySnapshot(next);
+    stateOk = true;
+  } catch (error) {
+    if (!current()) return;
+    authFailure = authFailure || error.status === 401 || error.status === 403;
+    connectionState(false);
+  }
+  retryPaused = authFailure || (stateOk && !snapshot.enabled);
+  if (stateOk && !retryPaused) subscribe();
+  if (capabilitiesOk && stateOk && !retryPaused) {
+    notice(""); $("retry-connection").hidden = true;
+    retryPaused = false; retryDelay = 1000; clearTimeout(retryTimer); retryTimer = 0;
+    return;
+  }
+  // 401/403 means the connection code is gone: retrying cannot bring it back.
+  if (retryPaused) { events?.close(); events = null; }
+  notice(retryPaused
+    ? "连接口令已失效。请在电脑上重新开启手机连接，并扫描新的二维码。"
+    : "连接暂时不可用，正在自动重试……也可以点击“重试连接”。");
+  $("retry-connection").hidden = false;
+  connectionState(false);
+  scheduleRetry();
+}
+function initialize(manual = false) {
+  if (manual) {
+    retryPaused = false; retryDelay = 1000;
+    clearTimeout(retryTimer); retryTimer = 0;
+  }
+  if (document.hidden || retryPaused) return;
+  if (!initializing) {
+    const control = initControl = new AbortController();
+    initializing = runInitialize(control.signal).finally(() => {
+      if (initControl === control) { initializing = null; initControl = null; }
+    });
+  }
+  return initializing;
+}
+$("retry-connection").addEventListener("click", () => initialize(true));
+function pauseConnection() {
+  initControl?.abort(); initControl = null; initializing = null;
+  endCompare(); events?.close(); events = null; frameRequest?.abort();
+  clearTimeout(retryTimer); retryTimer = 0;
 }
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) { endCompare(); events?.close(); frameRequest?.abort(); }
-  else { probeDiagnostics(); subscribe(); request("/api/phone/state").then(applySnapshot).catch(() => connectionState(false)); }
+  if (document.hidden) pauseConnection();
+  else { probeDiagnostics(); initialize(); }
 });
-window.addEventListener("pagehide", () => { events?.close(); frameRequest?.abort(); });
-window.addEventListener("pageshow", (event) => { if (event.persisted) subscribe(); });
-async function boot() {
-  probeDiagnostics();
-  try {
-    capabilities = await request("/api/state");
-    $("photos-input").accept = ["image/*", ...capabilities.inputExtensions].join(",");
-    applySnapshot(await request("/api/phone/state")); subscribe();
-  } catch { notice("连接暂时不可用。请在电脑上开启手机连接工作台，扫描新的二维码。"); connectionState(false); }
-}
-boot();
+window.addEventListener("pagehide", pauseConnection);
+window.addEventListener("pageshow", (event) => { if (event.persisted) initialize(); });
+probeDiagnostics();
+initialize();

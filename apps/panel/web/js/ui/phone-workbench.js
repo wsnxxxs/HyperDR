@@ -4,13 +4,29 @@ import { toOptions } from "../settings/schema.js";
 import { t, onLocaleChange } from "../i18n/index.js";
 import qrcode from "../vendor/qrcode.mjs";
 
-export async function phoneRequest(path, body) {
-  const response = await fetch(`/api/phone/${path}`, body === undefined ? {} : {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-  });
-  const data = await response.json();
-  if (!response.ok) throw Object.assign(new Error(data.error || t("phone.failed")), { code: data.code });
-  return data;
+const REQUEST_TIMEOUT_MS = 8000;
+
+export async function phoneRequest(path, body, { timeout = REQUEST_TIMEOUT_MS } = {}) {
+  // Bounded so a request stuck behind the service's connection lock cannot
+  // pin the `sending`/`busy` flags and block every later publish.
+  const control = new AbortController();
+  const timer = setTimeout(() => control.abort(), timeout);
+  try {
+    const response = await fetch(`/api/phone/${path}`, {
+      ...(body === undefined ? {} : {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      }),
+      signal: control.signal,
+    });
+    const data = await response.json();
+    if (!response.ok) throw Object.assign(new Error(data.error || t("phone.failed")), { code: data.code });
+    return data;
+  } catch (error) {
+    if (error.name === "AbortError") throw Object.assign(new Error(t("phone.timeout")), { code: "timeout" });
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function mountPhoneWorkbench({ stage, toast }) {
@@ -101,6 +117,26 @@ export function mountPhoneWorkbench({ stage, toast }) {
     updateAddresses(); labels();
   }
   function mode(next) { qrMode = next; updateAddresses(); labels(); }
+  async function recoverAfterTimeout(fallback, path) {
+    // A timeout does not prove the operation failed: preparing certificates and
+    // switching listeners keep running server-side. Read the actual state
+    // before offering another attempt instead of repeating the switch blindly.
+    try {
+      const next = await phoneRequest(`connection?owner=${encodeURIComponent(owner)}`);
+      if (!next.enabled) finishDisconnect();
+      else if (!active) await finishConnect(next);
+      else {
+        selectConnectionMode(path);
+        updateConnection(next);
+        await publish();
+      }
+      if (active) failure = t("phone.timeoutStatus");
+    } catch (error) {
+      if (error.code === "workbench_owner") finishDisconnect();
+      failure = error.code === "workbench_owner" ? (path === "disconnect" ? "" : error.message) : fallback;
+    }
+    labels();
+  }
   setupMode.addEventListener("click", () => mode("setup"));
   connectMode.addEventListener("click", () => mode("connect"));
   addresses.addEventListener("change", renderAddress);
@@ -198,6 +234,7 @@ export function mountPhoneWorkbench({ stage, toast }) {
   async function publish() {
     if (!active || sending || applying || store.get().restoring) return;
     sending = true;
+    const currentGeneration = generation;
     try {
       const s = store.get();
       const snapshot = await phoneRequest("publish", { owner, current: {
@@ -213,12 +250,13 @@ export function mountPhoneWorkbench({ stage, toast }) {
         busy: Boolean(s.starting || s.jobId || s.optimizing || (s.uploading && !s.phoneUploading)),
         status: s.jobId || s.starting ? "exporting" : s.previewError ? "error" : s.previewReady ? "ready" : "updating",
       } });
+      if (!active || generation !== currentGeneration) return;
       failure = "";
       await applySnapshot(snapshot);
-      const currentGeneration = generation;
       const nextConnection = await phoneRequest(`connection?owner=${encodeURIComponent(owner)}`);
       if (active && generation === currentGeneration) updateConnection(nextConnection);
     } catch (error) {
+      if (generation !== currentGeneration) return;
       if (error.code === "workbench_owner") {
         active = false;
         sessionStorage.removeItem("hyperdr.phone.active");
@@ -241,6 +279,26 @@ export function mountPhoneWorkbench({ stage, toast }) {
     addresses.replaceChildren();
     renderAddress();
   }
+  function finishDisconnect() {
+    active = false;
+    sessionStorage.removeItem("hyperdr.phone.active");
+    clearConnection();
+    failure = "";
+    if (store.get().phoneUploading) store.set({ uploading: false, phoneUploading: false });
+  }
+  async function finishConnect(next) {
+    active = true;
+    sessionStorage.setItem("hyperdr.phone.active", "1");
+    requestedSetup = Boolean(next.setupUrls?.length);
+    updateConnection(next);
+    await publish();
+    // Publish the existing photo once after either a response or state recovery.
+    if (active && store.get().file && !lastSnapshot?.frameReady) await stage.reload();
+  }
+  function selectConnectionMode(path) {
+    if (path === "tls/prepare" || path === "setup") requestedSetup = true;
+    if (path === "connect" || path === "setup/close") { requestedSetup = false; qrMode = "connect"; }
+  }
   async function connect() {
     if (busy) return;
     if (active) { await publish(); return; }
@@ -249,14 +307,11 @@ export function mountPhoneWorkbench({ stage, toast }) {
     labels();
     try {
       const next = await phoneRequest("connect", { owner });
-      active = true;
-      sessionStorage.setItem("hyperdr.phone.active", "1");
-      requestedSetup = Boolean(next.setupUrls?.length);
-      updateConnection(next);
-      await publish();
-      // A photo already on the desktop needs to enter the shared frame cache once.
-      if (store.get().file && !lastSnapshot?.frameReady) await stage.reload();
-    } catch (error) { failure = error.message; toast(error.message, true); }
+      await finishConnect(next);
+    } catch (error) {
+      if (error.code === "timeout") await recoverAfterTimeout(error.message, "connect");
+      else { failure = error.message; toast(error.message, true); }
+    }
     finally { busy = false; labels(); }
   }
   async function securityAction(path, extra = {}) {
@@ -264,14 +319,16 @@ export function mountPhoneWorkbench({ stage, toast }) {
     busy = true; failure = ""; labels();
     try {
       await phoneRequest(path, { owner, ...extra });
-      if (path === "tls/prepare" || path === "setup") requestedSetup = true;
-      if (path === "connect" || path === "setup/close") { requestedSetup = false; qrMode = "connect"; }
+      selectConnectionMode(path);
       // Publish first verifies ownership before adopting the connection response.
       await publish();
     } catch (error) {
-      failure = error.message;
-      if (error.code === "workbench_owner") { active = false; sessionStorage.removeItem("hyperdr.phone.active"); clearConnection(); }
-      toast(error.message, true);
+      if (error.code === "timeout") { await recoverAfterTimeout(error.message, path); }
+      else {
+        failure = error.message;
+        if (error.code === "workbench_owner") { active = false; sessionStorage.removeItem("hyperdr.phone.active"); clearConnection(); }
+        toast(error.message, true);
+      }
     } finally { busy = false; labels(); }
   }
   prepare.addEventListener("click", () => securityAction(connection?.tls?.ready && !connection?.tls?.canPrepare ? "connect" : "tls/prepare"));
@@ -285,12 +342,11 @@ export function mountPhoneWorkbench({ stage, toast }) {
     button.disabled = true;
     try {
       await phoneRequest("disconnect", { owner });
-      active = false;
-      sessionStorage.removeItem("hyperdr.phone.active");
-      clearConnection();
-      failure = "";
-      if (store.get().phoneUploading) store.set({ uploading: false, phoneUploading: false });
-    } catch (error) { failure = error.message; toast(error.message, true); }
+      finishDisconnect();
+    } catch (error) {
+      if (error.code === "timeout") await recoverAfterTimeout(error.message, "disconnect");
+      else { failure = error.message; toast(error.message, true); }
+    }
     finally { busy = false; labels(); if (!active) start.focus(); }
   });
   setInterval(() => {

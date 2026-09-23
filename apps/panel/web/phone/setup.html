@@ -3,9 +3,11 @@
 <body><div class="setup-shell"><header><img src="/icon.svg" alt=""><span>HyperDR<small>手机安全连接设置</small></span></header><main>
 <p class="eyebrow">首次连接 · 只需配置一次</p><h1>让手机安全地<br>连接你的电脑。</h1><p class="intro">HDR 预览需要可信的 HTTPS 连接。下载这台电脑的公开根证书，再到系统设置中安装并信任。</p>
 <p class="error" id="error" role="alert" hidden></p><button id="reload" type="button" hidden>重新获取设置</button>
+<a class="download" id="resume" href="/setup/continue" hidden>打开上次获取的工作台入口 →</a>
+<p class="callout" id="resume-note" hidden>这是上次获取的入口，仅当电脑的连接服务未重启、网络地址未变化时有效。若无法打开，请在电脑上重新生成二维码并扫描。证书下载入口失效不影响已经安装的证书。</p>
 <section class="identity" aria-label="证书身份"><strong id="computer">正在读取电脑信息…</strong><p id="certificate-name"></p><details><summary>核对证书身份</summary><p>仅为你自己的电脑安装。请与电脑工作台“证书与检测详情”中显示的 SHA-256 指纹逐位核对；不一致时停止安装。</p><code id="fingerprint"></code><p id="expiry"></p></details></section>
 <div class="platforms" role="group" aria-label="选择手机系统"><button id="ios" type="button" aria-pressed="true">iPhone / iPad</button><button id="android" type="button" aria-pressed="false">Android</button></div>
 <section class="step-card" aria-labelledby="step-title"><p class="eyebrow" id="progress"></p><h2 id="step-title" tabindex="-1"></h2><div id="step-content"></div><nav class="step-nav" aria-label="设置步骤"><button id="back" type="button">上一步</button><button class="primary" id="next" type="button">下一步 →</button></nav></section>
-<a class="continue" href="/setup/continue">已配置，检查连接 →</a>
+<a class="continue" id="continue-link" href="/setup/continue">已配置，检查连接 →</a>
 <details id="help"><summary>连接遇到问题？</summary><p>网页不能替你安装证书、开启完全信任，也不能直接检测系统的信任开关。最后一步会打开 HTTPS 工作台，再检测安全上下文、WebGPU、屏幕和实际 HDR 渲染器。</p><p>如果出现证书警告，请返回检查证书名称、指纹、有效期和信任设置；不要跳过浏览器警告。iPhone 请使用 Safari，Android 可使用支持 WebGPU 的新版浏览器；系统或屏幕不支持 HDR 时仍可使用 SDR 预览。</p><p>切换到设置后找不到本页？从浏览器最近标签页返回，进度会保留。无需公网，但手机与电脑须在同一局域网，电脑工作台保持开启。连接失效时在电脑重新生成二维码并扫描。</p><p>安装项只包含公开根证书，不包含电脑的私钥。信任根证书会允许它签发的证书用于验证连接，请仅信任自己掌控的电脑。</p><h3>不再使用时移除</h3><p>iPhone / iPad：设置 → 通用 → VPN 与设备管理，选择对应的 HyperDR 描述文件并移除。Android：在设置中搜索“用户凭据”或“受信任的凭据”，找到本页名称对应的证书并移除。不同品牌菜单名称可能不同。</p></details>
 </main><footer>HyperDR · 照片在你的电脑上处理</footer></div></body></html>

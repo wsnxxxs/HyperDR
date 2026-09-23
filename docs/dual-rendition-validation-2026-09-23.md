@@ -30,6 +30,19 @@ The native rendering tests separately check exact unadjusted float endpoints,
 zero and fractional strength, unequal offsets, diffuse white, and packaging
 quantization. Private originals and generated images remain outside Git.
 
+The final Release CTest run passes all 51 tests. The panel Python suite passes
+227 tests (one skipped), the JavaScript suite passes, and all three native
+Python contract tests pass. Codec fixtures additionally check AVIF gain maps
+with either SDR or HDR as primary, concurrent ICC and PQ CICP, alpha,
+orientation and reduced previews. Legacy headroom parsing follows
+[Apple's documented HDR effect](https://developer.apple.com/documentation/appkit/applying-apple-hdr-effect-to-your-photos).
+
+The round-trip script also asserts that Ultra HDR's declared capacity equals
+its stored maximum gain. This covers both explicit gain-map packaging and
+libultrahdr API3: API3's compressed base and gain JPEGs are reused unchanged,
+with only the capacity metadata repackaged. Its JPEG scan and Exif regression
+tests confirm that this step does not recompress the base or lose metadata.
+
 ## Named acceptance checks
 
 The 60,217,344-pixel `DSC02120.HIF` was exported to Adaptive HEIC at quality 90,
@@ -44,9 +57,9 @@ Both runs use the existing `verify --reference` fidelity measurements.
 | HDR peak, relative to diffuse white | 4.926 | 4.926 |
 
 At the regression preview size, `IMG_0017` SDR mean luminance after re-export is
-0.99983× its authored base through Adaptive and 1.00002× through Ultra HDR.
+0.99983× its authored base through Adaptive and approximately 1.000× through Ultra HDR.
 Legacy Apple `IMG_0707` now reports `dual-rendition`, with successful SDR/HDR
-round trips. First-generation RAW→Ultra HDR SDR mean luminance is 0.99588× the
+round trips. First-generation RAW→Ultra HDR SDR mean luminance is 0.99630× the
 rendered RAW SDR endpoint; the previous 7–23% darkening is absent in this check.
 
 An odd-size 193-pixel-edge `IMG_0017` preview produces byte-identical two-plane
@@ -63,7 +76,7 @@ including `baseline-verify.txt`, `hif-verify.txt`, and `roundtrip/summary.json`.
 - RGB gain maps can preserve channel-dependent endpoints in Ultra HDR, subject
   to gain quantization and JPEG loss. Apple-compatible Adaptive is monochrome;
   incompatible endpoints preserve HDR by changing the SDR base, with
-  `render.adaptive_chroma_loss` in the report.
+  `gain_map.adaptive_chroma_loss` in the report.
 - HLG/PQ LUTs regenerate SDR from graded HDR. SDR-space LUTs retain the authored
   base as their input and propagate its rendition ratio to HDR.
 - The inspected Windows dependency is libavif 1.4.2, which exposes gain-map

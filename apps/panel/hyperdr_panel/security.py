@@ -52,7 +52,8 @@ def tokens_match(supplied: str, expected: str) -> bool:
 
 
 def cookie_attributes(token: str, secure: bool) -> str:
-    attributes = [f"{COOKIE_NAME}={token}", "Path=/", "HttpOnly", "SameSite=Strict"]
+    # Allow the cookie on the top-level GET after opening a QR link from another site.
+    attributes = [f"{COOKIE_NAME}={token}", "Path=/", "HttpOnly", "SameSite=Lax"]
     if secure:
         attributes.append("Secure")
     return "; ".join(attributes)

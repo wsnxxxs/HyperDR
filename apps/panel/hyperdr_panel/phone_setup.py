@@ -54,8 +54,9 @@ class SetupHandler(BaseHTTPRequestHandler):
         token = parse_qs(parsed.query).get("token", [""])[0]
         if parsed.path == "/setup" and token:
             if security.tokens_match(token, self.server.access_token):
+                # The QR link may start on another site; its redirect must receive this cookie.
                 self.send(303, Location="/setup", **{"Set-Cookie":
-                    f"{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={SETUP_SECONDS}"})
+                    f"{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SETUP_SECONDS}"})
             else:
                 self.send(403, "设置链接无效，请重新扫码。".encode())
             return

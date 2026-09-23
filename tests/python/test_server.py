@@ -52,6 +52,10 @@ class ServerBoundaryTests(unittest.TestCase):
             mock.call("Location", "/"),
             handler.send_header.call_args_list,
         )
+        self.assertIn(
+            mock.call("Set-Cookie", "hyperdr_access=secret-token; Path=/; HttpOnly; SameSite=Lax"),
+            handler.send_header.call_args_list,
+        )
 
     def test_handler_sets_read_timeout_on_accepted_socket(self):
         handler = Handler.__new__(Handler)

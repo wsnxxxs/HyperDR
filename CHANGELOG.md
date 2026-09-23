@@ -5,6 +5,10 @@ semantic versioning; dates use ISO 8601.
 
 ## Unreleased
 
+- Phone login and certificate setup now retain authentication through
+  cross-site browser redirects, fixing `token_required` after opening a valid
+  QR link in Chrome.
+
 - Adaptive HEIC gain maps now use high-quality HEVC Q95 compression at their
   existing resolution, replacing lossless coding and its Level 8.5 signalling.
   This adds a small gain-coding error in measured samples; Apple Photos zoom

@@ -34,6 +34,7 @@ struct ConvertOptions {
   // cache directory, quality setting, or other side-effect signal.
   DecodeIntent decode_intent{DecodeIntent::Export};
   int quality{90};
+  HevcPreset hevc_preset{HevcPreset::Slow};
   // 8-bit matches what the iPhone camera itself writes for gain-map HEICs and
   // has the broadest decoder support; 10 selects HEVC Main10 (which requires
   // the multibit x265 runtime).

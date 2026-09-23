@@ -12,6 +12,8 @@ import { restoredModelId } from "../settings/model-ids.js";
 
 export const runOptionsFor = (state) => ({
   ...toOptions(state),
+  hevcPreset: ["adaptive", "pq", "hlg"].includes(state.encoding)
+    ? state.hevcPreset || "slow" : "slow",
   useModel: Boolean(state.previewOptimized),
   // The model is not a renderer setting, so it travels beside `useModel`. The
   // server resolves it against the executable's own table and rejects an id this
@@ -28,6 +30,7 @@ export const exportKeyFor = (state) => JSON.stringify(runOptionsFor(state));
 /** The comparison key an export was made with, from its recorded options. */
 export const entryKeyFor = (entry, state) => exportKeyFor({
   ...state, ...entry.options,
+  hevcPreset: entry.options?.hevcPreset || "slow",
   previewOptimized: Boolean(entry.options?.useModel),
   modelId: restoredModelId(entry.options),
 });

@@ -20,7 +20,7 @@ try {
         Select-Object -First 1
     if (-not $executable) { throw "Release archive does not contain HyperDR.exe." }
     $bin = $executable.Directory.FullName
-    foreach ($dll in @("libx265.dll", "libx265_main.dll", "ncnn.dll")) {
+    foreach ($dll in @("libx265.dll", "libx265_main.dll", "ncnn.dll", "vcomp140.dll")) {
         if (-not (Test-Path -LiteralPath (Join-Path $bin $dll) -PathType Leaf)) {
             throw "Release archive is missing a required native runtime: $dll"
         }

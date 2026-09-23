@@ -118,7 +118,7 @@ PreviewJpeg encode_preview_jpeg(const std::filesystem::path&, std::uint32_t, int
 }
 
 std::vector<std::uint8_t> encode_adaptive_heic(const GainMapResult&,
-                                               const PhotoMetadata&, int, int) {
+                                               const PhotoMetadata&, int, int, HevcPreset) {
   fail_without_codecs("Adaptive HDR HEIC encoding");
 }
 
@@ -128,7 +128,7 @@ std::vector<std::uint8_t> encode_ultrahdr_jpeg(const GainMapResult&,
 }
 
 std::vector<std::uint8_t> encode_hdr_heic(const PhotoRenditions&,
-                                          const PhotoMetadata&, int, HdrEncoding) {
+                                          const PhotoMetadata&, int, HdrEncoding, HevcPreset) {
   fail_without_codecs("BT.2100 HEIC encoding");
 }
 

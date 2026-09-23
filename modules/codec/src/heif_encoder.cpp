@@ -43,6 +43,15 @@ void configure_main10_still(heif_encoder* encoder) {
              "set HEVC Main10 parameter sets");
 }
 
+void configure_hevc_preset(heif_encoder* encoder, HevcPreset preset) {
+  // Leaving the default untouched preserves existing exports. The opt-in
+  // medium preset trades a little compression efficiency for encoding speed.
+  if (preset == HevcPreset::Medium) {
+    check_heif(heif_encoder_set_parameter_string(encoder, "preset", "medium"),
+               "set HEVC encoding preset");
+  }
+}
+
 struct ImageDeleter { void operator()(heif_image* p) const { if (p) heif_image_release(p); } };
 struct HandleDeleter { void operator()(heif_image_handle* p) const { if (p) heif_image_handle_release(p); } };
 struct EncoderDeleter { void operator()(heif_encoder* p) const { if (p) heif_encoder_release(p); } };
@@ -419,7 +428,7 @@ heif_error write_callback(heif_context*, const void* data, size_t size, void* us
 
 std::vector<std::uint8_t> encode_adaptive_heic(const GainMapResult& images,
                                                const PhotoMetadata& metadata, int quality,
-                                               int depth) {
+                                               int depth, HevcPreset preset) {
   // Adaptive HEIC is the Apple-interoperable writer. Keep this check at the
   // codec boundary as well as in the renderer so a future alternate producer
   // cannot silently emit generic ISO metadata through this path.
@@ -431,6 +440,7 @@ std::vector<std::uint8_t> encode_adaptive_heic(const GainMapResult& images,
   check_heif(heif_context_get_encoder_for_format(context.get(), heif_compression_HEVC, &encoder_raw), "get HEVC encoder");
   std::unique_ptr<heif_encoder, EncoderDeleter> encoder(encoder_raw);
   check_heif(heif_encoder_set_lossy_quality(encoder.get(), std::clamp(quality, 0, 100)), "set HEVC quality");
+  configure_hevc_preset(encoder.get(), preset);
   if (depth == 10) configure_main10_still(encoder.get());
   heif_encoder* gain_encoder_raw = nullptr;
   check_heif(heif_context_get_encoder_for_format(context.get(), heif_compression_HEVC,
@@ -438,6 +448,7 @@ std::vector<std::uint8_t> encode_adaptive_heic(const GainMapResult& images,
   std::unique_ptr<heif_encoder, EncoderDeleter> gain_encoder(gain_encoder_raw);
   check_heif(heif_encoder_set_lossy_quality(gain_encoder.get(), 95),
              "set Gain Map HEVC quality");
+  configure_hevc_preset(gain_encoder.get(), preset);
 
   auto base = make_base(images.base_linear, depth);
   auto gain = make_gain(images.gain_map);
@@ -471,7 +482,7 @@ std::vector<std::uint8_t> encode_adaptive_heic(const GainMapResult& images,
 
 std::vector<std::uint8_t> encode_hdr_heic(const PhotoRenditions& images,
                                           const PhotoMetadata& metadata, int quality,
-                                          HdrEncoding encoding) {
+                                          HdrEncoding encoding, HevcPreset preset) {
   if (encoding != HdrEncoding::Pq && encoding != HdrEncoding::Hlg) {
     throw std::invalid_argument("encode_hdr_heic requires PQ or HLG");
   }
@@ -484,6 +495,7 @@ std::vector<std::uint8_t> encode_hdr_heic(const PhotoRenditions& images,
   std::unique_ptr<heif_encoder, EncoderDeleter> encoder(encoder_raw);
   check_heif(heif_encoder_set_lossy_quality(encoder.get(), std::clamp(quality, 0, 100)),
              "set HDR HEVC quality");
+  configure_hevc_preset(encoder.get(), preset);
   configure_main10_still(encoder.get());
 
   heif_content_light_level light_level{};

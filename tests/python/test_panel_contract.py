@@ -125,6 +125,19 @@ class BuildArgvTest(unittest.TestCase):
         self.assertEqual(
             flags(build_argv("HyperDR", dict(BASE, quality=72)))["--quality"], "72")
 
+    def test_fast_heic_export_is_explicit_and_format_specific(self):
+        for encoding in ("adaptive", "pq", "hlg"):
+            standard = flags(build_argv("HyperDR", dict(BASE, encoding=encoding)))
+            fast = flags(build_argv(
+                "HyperDR", dict(BASE, encoding=encoding, hevcPreset="medium")))
+            self.assertNotIn("--hevc-preset", standard)
+            self.assertEqual(fast["--hevc-preset"], "medium")
+        for encoding in ("ultrahdr", "avif-pq", "avif-hlg", "sdr-jpeg"):
+            self.assertNotIn("--hevc-preset", flags(build_argv(
+                "HyperDR", dict(BASE, encoding=encoding, hevcPreset="medium"))))
+        with self.assertRaises(ValueError):
+            options_to_settings(dict(BASE, hevcPreset="fastest"))
+
     def test_bt2100_encodings_are_ten_bit(self):
         for encoding in ("pq", "hlg", "avif-pq", "avif-hlg"):
             found = flags(build_argv("HyperDR", dict(BASE, encoding=encoding)))

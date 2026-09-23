@@ -30,7 +30,10 @@ carries it as `input_domain`. Nothing branches on the file extension.
 headrooms. Orientation, alpha compositing, preview reduction, and the decode
 cache retain both planes. This costs another 12 bytes per pixel: approximately
 576 MB for 48 million pixels. A decoder without support for a container's gain
-map reports its SDR fallback as degraded.
+map reports its SDR fallback as degraded. So does a legacy Apple gain map that
+cannot be used -- for example after an editor stripped the MakerNote that states
+its headroom -- with `apple_legacy_gain_map_unusable_sdr_fallback` and the
+reason; the SDR primary still opens.
 
 PNG, HEIF and AVIF transparency is composited onto black in linear Display P3
 before resizing or rendering; outputs are opaque photographs. Premultiplied
@@ -45,7 +48,12 @@ their hidden RGB values.
 - **A display-referred SDR input** is already a finished photograph, so it does
   not get automatic exposure or pretend that its container carried highlight
   data. Its base uses the same exposure and roll-off at every HDR strength,
-  including zero. A smooth highlight gain above the knee lets `--gain-strength`,
+  including zero. Positive exposure rolls the excess above white off with the
+  same fixed 0.48 knee as the other display-referred inputs, so the base never
+  depends on `--expansion-start`. At +0.6 EV a 0.3 input receives the full lift
+  (0.455, against 0.432 with the panel's former 0.25 knee), at the cost of
+  firmer compression next to white (log slope 0.39 rather than 0.59 at 0.95).
+  A smooth highlight gain above the knee lets `--gain-strength`,
   `--headroom`/`--headroom-max`, `--expansion-start`, and `--area-coverage`
   create a controlled HDR alternate for ordinary JPEG/PNG photos. The source
   remains labelled SDR; the inferred range is a creative output budget, not an
@@ -158,8 +166,11 @@ Single-version HDR uses transfer-function headroom, bounded by declared
 content-light metadata when present. PQ/HLG nclx/CICP transfer information takes
 precedence over a simultaneous ICC profile, so an ICC profile cannot silently
 turn HDR into SDR. Gain-map inputs retain their authored reconstruction
-headrooms separately; Ultra HDR's usable pixel range is measured from the
-reconstructed HDR rather than copied from `hdr_capacity_max`.
+headrooms separately; every gain-map decoder (Adaptive HEIC, legacy Apple HEIC,
+Ultra HDR and AVIF) measures the usable pixel range from the brightest channel
+of the reconstructed HDR rather than copying the declared capacity. A legacy
+Apple frame declaring 3 stops peaked at 1.78; taking the declaration as content
+made an HLG export (2.3 stops) attenuate a photograph that already fitted.
 
 HDR and dual inputs cannot use AI or external gain maps: their HDR detail
 already exists in the file. CLI and preview operations reject those combinations
@@ -193,10 +204,13 @@ unadjusted source defaults from the backend.
 - Ordinary generated gain maps use zero base and alternate offsets. Dual
   rendition packaging retains the offsets needed to represent authored pixels.
   Ultra HDR uses three gain channels to preserve both endpoints before codec
-  and gain quantization losses. Apple Adaptive uses one gain channel. A source
-  requiring channel-dependent gain is projected to a shared gain while deriving
-  its base from HDR; the report marks the resulting SDR chroma loss with
-  `adaptive_chroma_loss`. Neither JPEG nor HEVC export is claimed to be lossless.
+  and gain quantization losses. Apple Adaptive uses one gain channel. A
+  single-channel source keeps every authored SDR pixel that one multiplier can
+  take to its HDR pixel (within 0.1% of its brightest channel); any other pixel,
+  such as a resized edge or an edited colour, has only its own base rebuilt from
+  HDR and the decoded gain. A three-channel source is projected to a shared gain
+  with its base derived from HDR. `adaptive_chroma_loss` reports whether any
+  SDR pixel moved by more than one linear code (1/255). Neither JPEG nor HEVC export is claimed to be lossless.
   Both gain-map formats declare the actual maximum gain as alternate headroom,
   rather than a larger unused creative budget that would attenuate a later read.
 - Gain-map gamma is chosen by simulating 8-bit encode/decode error. Stored values

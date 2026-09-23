@@ -75,9 +75,36 @@ including `baseline-verify.txt`, `hif-verify.txt`, and `roundtrip/summary.json`.
   Batch export releases both decoded source planes before encoding.
 - RGB gain maps can preserve channel-dependent endpoints in Ultra HDR, subject
   to gain quantization and JPEG loss. Apple-compatible Adaptive is monochrome;
-  incompatible endpoints preserve HDR by changing the SDR base, with
-  `gain_map.adaptive_chroma_loss` in the report.
+  pixels one shared gain cannot serve preserve HDR by changing only their own
+  SDR base, with `gain_map.adaptive_chroma_loss` in the report.
 - HLG/PQ LUTs regenerate SDR from graded HDR. SDR-space LUTs retain the authored
   base as their input and propagate its rendition ratio to HDR.
 - The inspected Windows dependency is libavif 1.4.2, which exposes gain-map
   decoding. Unsupported gain-map decoding paths report an explicit degradation.
+
+## Review follow-up
+
+Three defects found in review were fixed afterwards.
+
+- Adaptive HEIC and legacy Apple decoders now measure usable headroom from the
+  reconstructed peak, as Ultra HDR and AVIF already did. `IMG_0707` declares
+  3.00 stops and peaks at 1.78; its HLG export previously came back 0.27 EV
+  darker above white (peak 2.49 against 3.31) and now matches the authored HDR
+  (worst -0.01 EV, peak 3.31). Decode cache schema 32 rejects older entries.
+- Monochrome Adaptive packaging judged a shared gain by per-channel ratios with
+  an epsilon, so any pixel with a zero channel rejected the whole frame and the
+  SDR base was re-derived. Measured before HEVC encoding, that fallback moved
+  0.32% of `IMG_0017`'s full-resolution pixels by more than 1/255 (maximum
+  0.0044); with the reconstruction-error test the authored base is kept exactly.
+  At a 1024-pixel edge, SDR and HDR are reduced independently and 14.5% of
+  pixels miss the tolerance; only those are rebuilt (0.47% move by more than
+  1/255, against 0.64% with whole-frame fallback).
+- A legacy Apple gain map without MakerNote headroom, or with an unreadable
+  auxiliary image, now falls back to the degraded SDR primary instead of failing
+  the decode.
+
+`codec_test` builds a legacy Apple HEIC (auxC and auxl written through libheif)
+with and without its MakerNote; `rendition_test` covers zero channels and a
+single unrepresentable pixel. Both fail against the previous sources. All 51
+Release tests and the 26 round-trip checks pass, and `DSC02120.HIF` verifies at
+the recorded ΔE ITP 2.116 / 0.758, highlights 4.045, 47.8 dB.

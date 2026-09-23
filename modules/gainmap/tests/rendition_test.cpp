@@ -543,6 +543,73 @@ void test_single_hdr_midtones_at_half_strength() {
         "half strength must keep HDR diffuse white at 1");
 }
 
+void test_mono_gain_with_zero_channels() {
+  // Apple's monochrome maps carry 1e-5 offsets, and real frames contain black
+  // pixels and fully saturated colours with a zero channel. One shared
+  // multiplier still rebuilds them, so Adaptive must keep the authored base.
+  constexpr float offset=1e-5F;
+  FloatImage base(4,1,3), hdr(4,1,3);
+  base.pixels={0,0,0, .6F,0,.3F, .8F,.1F,0, .2F,.2F,.2F};
+  const std::array<float,4> multipliers{1,2.5F,3.1F,1.4F};
+  for (unsigned x=0;x<4;++x) for (unsigned c=0;c<3;++c)
+    hdr.at(x,0,c)=(base.at(x,0,c)+offset)*multipliers[x]-offset;
+  InputDescription input{InputDomain::kDualRendition,3.1F};
+  input.authored_sdr=&base;
+  input.gain_map.alternate_headroom=3.1F;
+  input.gain_map.base_offset.fill(offset);
+  input.gain_map.alternate_offset.fill(offset);
+  const auto photo=render_renditions(hdr,{}, {},input,RenderTarget::Hdr);
+  const auto apple=gain_map_from_renditions(photo,GainMapWriterProfile::apple_strict);
+  require(apple.base_linear.pixels==base.pixels && !apple.stats.adaptive_chroma_loss,
+      "zero channels must not break a shared monochrome gain");
+  const auto restored=reconstruct_gain_map(apple.base_linear,apple.gain_map,
+      apple.metadata,apple.headroom_stops);
+  for (std::size_t i=0;i<hdr.pixels.size();++i)
+    require(std::abs(restored.pixels[i]-hdr.pixels[i])<.01F*std::max(hdr.pixels[i],.1F),
+        "the monochrome Adaptive map must reconstruct the authored alternate");
+
+  // One pixel whose endpoints no longer share a multiplier -- a resized edge or
+  // an edit -- rebuilds only its own base; the rest keep the authored SDR.
+  hdr.at(3,0,0)=.2F*1.4F*1.3F;
+  const auto mixed_photo=render_renditions(hdr,{}, {},input,RenderTarget::Hdr);
+  const auto mixed=gain_map_from_renditions(mixed_photo,GainMapWriterProfile::apple_strict);
+  for (std::size_t i=0;i<9;++i)
+    require(mixed.base_linear.pixels[i]==base.pixels[i],
+        "pixels a shared gain can serve must keep the authored base");
+  require(mixed.base_linear.at(3,0,0)!=base.at(3,0,0) && mixed.stats.adaptive_chroma_loss,
+      "a pixel no shared gain can serve must rebuild and report its base");
+  const auto mixed_restored=reconstruct_gain_map(mixed.base_linear,mixed.gain_map,
+      mixed.metadata,mixed.headroom_stops);
+  for (std::size_t i=0;i<hdr.pixels.size();++i)
+    require(std::abs(mixed_restored.pixels[i]-hdr.pixels[i])<.01F*std::max(hdr.pixels[i],.1F),
+        "per-pixel rebuilding must keep every HDR pixel");
+}
+
+void test_sdr_rolloff_ignores_expansion_start() {
+  // Expansion start places the HDR gain only. A brightened SDR photograph rolls
+  // off from the fixed 0.48 knee whatever that control says.
+  FloatImage sdr(4,1,3);
+  const std::array<float,4> levels{.2F,.3F,.5F,1.0F};
+  for (unsigned x=0;x<4;++x) for (unsigned c=0;c<3;++c) sdr.at(x,0,c)=levels[x];
+  const InputDescription input{InputDomain::kDisplayReferredSdr,1};
+  RenderOptions early, late;
+  early.exposure_bias_ev=late.exposure_bias_ev=.6F;
+  early.look.shoulder_start=.25F;
+  late.look.shoulder_start=.48F;
+  for (const auto target:{RenderTarget::Sdr,RenderTarget::Hdr}) {
+    const auto a=render_renditions(sdr,early,{},input,target);
+    const auto b=render_renditions(sdr,late,{},input,target);
+    require(a.sdr.pixels==b.sdr.pixels,
+        "expansion start must not change a brightened SDR base");
+  }
+  const auto base=render_renditions(sdr,late,{},input,RenderTarget::Sdr).sdr;
+  // Below the knee the lift is exact; above it the excess rolls off to 1.0.
+  require(std::abs(base.at(0,0,0)-.2F*std::exp2(.6F))<1e-5F &&
+      std::abs(base.at(1,0,0)-.455F)<2e-3F && std::abs(base.at(2,0,0)-.701F)<2e-3F &&
+      std::abs(base.at(3,0,0)-1)<1e-4F,
+      "a brightened SDR base must roll off from the 0.48 knee");
+}
+
 int main() {
   try { test_zero_and_spatial_gain(); test_model_grading(); test_final_gain_statistics();
         test_hdr_source_reconstructs_itself(); test_hdr_source_outside_p3();
@@ -551,7 +618,8 @@ int main() {
         test_graded_sdr_endpoint_packaging();
         test_content_light_mapping(); test_authored_dual_renditions();
         test_dual_nonunit_base_headroom(); test_single_hdr_midtones_at_half_strength();
-        test_dual_metadata_range_and_edited_mono(); test_dual_signed_rgb_gain(); }
+        test_dual_metadata_range_and_edited_mono(); test_dual_signed_rgb_gain();
+        test_mono_gain_with_zero_channels(); test_sdr_rolloff_ignores_expansion_start(); }
   catch(const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
   std::cout<<"graded model reconstruction and final gain statistics passed\n";
 }

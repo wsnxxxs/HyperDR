@@ -469,11 +469,24 @@ void test_dual_metadata_range_and_edited_mono() {
   input.gain_map.alternate_headroom=16;
   input.gain_map.base_offset.fill(.1F);
   input.gain_map.alternate_offset.fill(.1F);
+  input.content_peak_nits=203;  // An unrelated content hint cannot replace the measured HDR peak.
   // The metadata can describe more range than this frame uses. A neutral
   // four-stop budget still reaches the authored alternate endpoint.
   const auto neutral=render_renditions(hdr,{}, {},input,RenderTarget::Hdr);
   require(neutral.hdr.pixels==hdr.pixels && neutral.sdr.pixels==base.pixels,
       "measured pixel peak must not shorten the authored interpolation span");
+  RenderOptions selected;
+  selected.auto_headroom=false;
+  selected.headroom_stops=1;
+  const auto fits=render_renditions(hdr,selected,{},input,RenderTarget::Hdr);
+  require(fits.hdr.pixels==hdr.pixels,
+      "a display range covering the measured peak must reach authored HDR");
+  selected.headroom_stops=.5F;
+  const auto limited=render_renditions(hdr,selected,{},input,RenderTarget::Hdr);
+  const float expected=(base.pixels[0]+.1F)*std::sqrt(
+      (hdr.pixels[0]+.1F)/(base.pixels[0]+.1F))-.1F;
+  require(std::abs(limited.hdr.pixels[0]-expected)<1e-5F,
+      "half the usable display range must interpolate halfway in log gain");
   const auto compatible=gain_map_from_renditions(neutral,GainMapWriterProfile::apple_strict);
   require(compatible.base_linear.pixels==base.pixels && !compatible.stats.adaptive_chroma_loss,
       "an unedited mono gain with offsets must preserve the authored SDR base");

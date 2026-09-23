@@ -47,10 +47,13 @@ PhotoRenditions render_dual_rendition(const FloatImage& source,
       options.exposure_bias_ev, -10.0F, 10.0F);
   const float exposure = std::exp2(ev);
   const float base_stops = std::log2(input.gain_map.base_headroom);
-  const float alternate_stops = std::log2(input.gain_map.alternate_headroom);
-  const float declared = std::max(0.0F, alternate_stops - base_stops);
+  // Metadata capacity may exceed the peaks this photograph actually uses.
+  // Weight both the numerator and denominator by usable image headroom so a
+  // display that fits the real alternate reaches that authored endpoint.
+  const float usable_stops = std::log2(rendering_headroom(input));
+  const float declared = std::max(0.0F, usable_stops - base_stops);
   const float requested = options.auto_headroom ? options.look.headroom_max_stops : options.headroom_stops;
-  const float stops = want_hdr ? std::clamp(std::min(alternate_stops, requested) - base_stops,
+  const float stops = want_hdr ? std::clamp(std::min(usable_stops, requested) - base_stops,
       0.0F, declared) *
       std::min(options.gain_strength, 1.0F) : 0.0F;
   const float weight = declared > 1e-6F ? stops / declared :
@@ -66,6 +69,7 @@ PhotoRenditions render_dual_rendition(const FloatImage& source,
   out.authored_gain_map = input.gain_map;
   out.clamp_srgb = options.clamp_srgb;
   std::vector<std::uint64_t> wide(source.height), eligible(source.height);
+  std::vector<float> channel_peaks(source.height, 1.0F);
   parallel_for_rows(source.height, [&](std::uint32_t y) {
     for (std::uint32_t x = 0; x < source.width; ++x) {
       const auto i = (static_cast<std::size_t>(y) * source.width + x) * 3;
@@ -108,7 +112,10 @@ PhotoRenditions render_dual_rendition(const FloatImage& source,
       }
       for (int c = 0; c < 3; ++c) {
         out.sdr.pixels[i+c] = sdr[c];
-        if (want_hdr) out.hdr.pixels[i+c] = hdr[c];
+        if (want_hdr) {
+          out.hdr.pixels[i+c] = hdr[c];
+          channel_peaks[y] = std::max(channel_peaks[y], hdr[c]);
+        }
       }
     }
   });
@@ -116,7 +123,11 @@ PhotoRenditions render_dual_rendition(const FloatImage& source,
   stats.exposure_ev = ev;
   stats.ev100 = estimate_ev100(capture);
   stats.target_middle_gray = compute_target_middle_gray(stats.ev100);
-  stats.headroom_stops = want_hdr ? base_stops + stops : 0.0F;
+  const float rendered_channel_stops = std::log2(*std::max_element(
+      channel_peaks.begin(), channel_peaks.end()));
+  const float selected_capacity = weight > 0.0F ? base_stops + stops + std::max(ev, 0.0F) : 0.0F;
+  stats.headroom_stops = want_hdr ? std::max({selected_capacity,
+      rendered_channel_stops, 0.0F}) : 0.0F;
   stats.headroom_linear = std::exp2(stats.headroom_stops);
   for (std::uint32_t y = 0; y < source.height; ++y) {
     stats.wide_gamut_pixels += wide[y];

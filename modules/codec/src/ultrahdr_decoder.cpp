@@ -136,6 +136,7 @@ namespace codec {
 DecodedImage decode_ultrahdr_bytes(const std::vector<std::uint8_t>& bytes,
                                    ColorGamut default_gamut) {
   if (bytes.empty()) throw std::runtime_error("Ultra HDR input is empty");
+  auto authored_sdr = decode_jpeg_primary_bytes(bytes, default_gamut);
 
   std::unique_ptr<uhdr_codec_private_t, DecoderDeleter> decoder(uhdr_create_decoder());
   if (!decoder) throw std::runtime_error("cannot create the Ultra HDR decoder");
@@ -199,21 +200,26 @@ DecodedImage decode_ultrahdr_bytes(const std::vector<std::uint8_t>& bytes,
       result.linear_p3.at(x, y, 2) = p3[2];
     }
   });
-  // The gain-map declaration, rather than measured pixels, defines how far
-  // above diffuse white this display-referred input can reach. When the
-  // metadata is absent the headroom stays 1 and the domain below reads SDR:
-  // libultrahdr still handed back a valid picture, and rendering it as a
-  // finished SDR image is right, because nothing in the file says otherwise.
+  // The reconstructed alternate can exceed (or fall below) the metadata's
+  // nominal capacity. Use its actual peak for the usable input range.
+  float peak = 1.0F;
+  for (const float value : result.linear_p3.pixels)
+    if (std::isfinite(value)) peak = std::max(peak, value);
+  result.hdr_headroom = peak;
   if (const uhdr_gainmap_metadata_t* gain =
           uhdr_dec_get_gainmap_metadata(decoder.get());
-      gain != nullptr && std::isfinite(gain->hdr_capacity_max)) {
-    // libultrahdr exposes hdr_capacity_max in the same linear scale that the
-    // encoder supplied it. Converting stops here would apply the exponent a
-    // second time (for example, 8.0 would become 256.0).
-    result.hdr_headroom =
-        std::clamp(gain->hdr_capacity_max, 1.0F, 64.0F);
+      gain != nullptr) {
+    const auto* gain_image = uhdr_get_decoded_gainmap_image(decoder.get());
+    result.gain_map.channels =
+        gain_image && gain_image->fmt == UHDR_IMG_FMT_8bppYCbCr400 ? 1U : 3U;
+    result.gain_map.base_headroom = std::max(1.0F, gain->hdr_capacity_min);
+    result.gain_map.alternate_headroom = std::max(1.0F, gain->hdr_capacity_max);
+    for (unsigned c = 0; c < 3; ++c) {
+      result.gain_map.base_offset[c] = gain->offset_sdr[c];
+      result.gain_map.alternate_offset[c] = gain->offset_hdr[c];
+    }
   }
-  result.domain = display_referred_domain(result.hdr_headroom);
+  result.domain = InputDomain::kDualRendition;
 
   result.metadata.orientation = 1;
   // libultrahdr exposes the authoritative Exif payload. The shared reader now
@@ -230,6 +236,10 @@ DecodedImage decode_ultrahdr_bytes(const std::vector<std::uint8_t>& bytes,
     // the plain-JPEG decoder does.
     if (read.orientation) codec::normalize_orientation(result, *read.orientation);
   }
+  if (authored_sdr.linear_p3.width != result.linear_p3.width ||
+      authored_sdr.linear_p3.height != result.linear_p3.height)
+    throw std::runtime_error("Ultra HDR primary and alternate dimensions disagree");
+  result.authored_sdr = std::move(authored_sdr.linear_p3);
   return result;
 }
 

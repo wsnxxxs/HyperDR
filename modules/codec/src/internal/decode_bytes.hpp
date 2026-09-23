@@ -20,6 +20,11 @@
 
 namespace hyperdr::codec {
 
+// The authored JPEG primary of an Ultra HDR file, decoded without applying
+// its embedded gain map.
+[[nodiscard]] DecodedImage decode_jpeg_primary_bytes(
+    const std::vector<std::uint8_t>& bytes, ColorGamut default_gamut);
+
 // Ultra HDR JPEG/R: true when the file carries a gain map libultrahdr can read.
 [[nodiscard]] bool is_ultrahdr_bytes(const std::vector<std::uint8_t>& bytes);
 [[nodiscard]] DecodedImage decode_ultrahdr_bytes(

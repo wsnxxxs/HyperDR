@@ -422,8 +422,10 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     result.stats = rendered_stats;
     result.gain_min = explicit_gain ? rational_value(gain.metadata.gain_min) : 0;
     result.gain_max = explicit_gain ? rational_value(gain.metadata.gain_max) : 0;
-    // Release the largest no-longer-needed allocation before encoding.
+    // Rendering is complete; release both decoded planes before the encoder
+    // allocates its own base, gain map, and output buffer.
     staged.image.linear_p3 = {};
+    staged.image.authored_sdr.reset();
     const auto processed = Clock::now();
 
     auto bytes = encode_for(photo, gain, staged.image.metadata, options);

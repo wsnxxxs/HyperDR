@@ -745,8 +745,9 @@ struct PreviewSession {
           raw_key = master_key;
         }
         source->image = raw_master;
-        source->image.linear_p3 = resample_to_max_edge(
-            std::move(source->image.linear_p3), options.preview_max_edge);
+        source->image.transform_planes([&](FloatImage plane) {
+          return resample_to_max_edge(std::move(plane), options.preview_max_edge);
+        });
         if (!cache_file.empty()) {
           static_cast<void>(write_decode_cache(cache_file, source->image,
               options.decode_cache_budget_bytes));

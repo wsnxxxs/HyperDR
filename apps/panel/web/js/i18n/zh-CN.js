@@ -102,6 +102,8 @@ export default {
   "phone.starting": "正在开启手机工作台…",
   "phone.noNetwork": "未找到局域网地址，请连接 Wi-Fi 后重新开启。",
   "phone.failed": "手机连接失败，请重试。",
+  "phone.timeout": "服务响应超时，可重试。",
+  "phone.timeoutStatus": "服务响应超时。已重新读取连接状态，确认后可重试。",
   "phone.prepare": "开启 HDR 预览",
   "phone.prepareRetry": "重试配置 HDR 预览",
   "phone.setupPhone": "设置手机",

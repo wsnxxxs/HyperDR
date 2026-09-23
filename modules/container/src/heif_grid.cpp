@@ -435,7 +435,10 @@ std::vector<std::uint8_t> assemble_heif_grids(
       for (const auto& property : leaves[0].properties) {
         const auto type = std::string_view(
             reinterpret_cast<const char*>(property.box.data() + 4), 4);
-        if (type == "pixi" || type == "colr" || type == "clli") {
+        if (type == "pixi") {
+          // libheif marks a grid's pixi essential; keep the serial writer's form.
+          logical.properties.push_back(pool.add({property.box, true}));
+        } else if (type == "colr" || type == "clli") {
           logical.properties.push_back(pool.add(property));
         }
       }
@@ -456,16 +459,17 @@ std::vector<std::uint8_t> assemble_heif_grids(
       items.push_back(std::move(tile_item));
     }
   }
+  // Metadata items are hidden, as libheif writes them on the serial path.
   if (!exif.empty()) {
     Bytes data{0, 0, 0, 0};
     append(data, exif);
     items.push_back({static_cast<std::uint16_t>(items.size() + 1), "Exif", "Exif",
-                     false, std::move(data)});
+                     true, std::move(data)});
   }
   if (!xmp.empty()) {
     Bytes data(xmp.begin(), xmp.end());
     items.push_back({static_cast<std::uint16_t>(items.size() + 1), "mime", "XMP",
-                     false, std::move(data), {}, {}, "application/rdf+xml"});
+                     true, std::move(data), {}, {}, "application/rdf+xml"});
   }
   if (items.size() > kMaxItems) throw std::runtime_error("too many HEIF items");
 

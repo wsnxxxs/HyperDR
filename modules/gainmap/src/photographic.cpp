@@ -34,7 +34,6 @@ GainMapResult make_photographic_gain_map(const FloatImage& source,
   auto& prepared = preparation ? *preparation : owned_preparation;
   prepare_photographic_render(source, options, capture, cached_analysis, prepared);
   const GainGridDimensions dimensions{prepared.width, prepared.height};
-  const auto gain_count = prepared.stops.size();
   const float exposure_ev = prepared.exposure_ev;
   const float exposure = std::exp2(exposure_ev);
   const float requested_headroom_stops = prepared.requested_stops;
@@ -50,38 +49,16 @@ GainMapResult make_photographic_gain_map(const FloatImage& source,
   for (float& value : gain) value *= photographic_strength;
 
   // --- Encode gain map ---
-  float gain_max = 0.0F;
-  for (const float value : gain) gain_max = std::max(gain_max, value);
-  std::vector<float> normalized_gains(gain_count, 0.0F);
-  if (gain_max > kEpsilon) {
-    for (std::size_t i = 0; i < gain_count; ++i) {
-      normalized_gains[i] = std::clamp(gain[i] / gain_max, 0.0F, 1.0F);
-    }
-  }
-  const float gamma =
-      gain_max > kEpsilon ? choose_gain_gamma(normalized_gains) : 1.0F;
-  const Rational stored_gain_max_metadata = rational_from_float(gain_max);
-  const Rational stored_gamma_metadata = rational_from_float(gamma);
-  const float stored_gain_max =
-      static_cast<float>(stored_gain_max_metadata.numerator) /
-      stored_gain_max_metadata.denominator;
-  const float stored_gamma =
-      static_cast<float>(stored_gamma_metadata.numerator) /
-      stored_gamma_metadata.denominator;
+  auto quantized = quantize_gain_grid(gain, dimensions.width);
+  const auto stored_gain_max_metadata = quantized.gain_max_metadata;
+  const auto stored_gamma_metadata = quantized.gamma_metadata;
+  const float stored_gain_max = quantized.stored_gain_max;
+  const float stored_gamma = quantized.stored_gamma;
 
   GainMapResult result;
   result.gain_map =
       FloatImage(dimensions.width, dimensions.height, 1);
-  for (std::uint32_t y = 0; y < dimensions.height; ++y) {
-    for (std::uint32_t x = 0; x < dimensions.width; ++x) {
-      const std::size_t index =
-          static_cast<std::size_t>(y) * dimensions.width + x;
-      const float code =
-          encode_gain_code(normalized_gains[index], stored_gamma);
-      result.gain_map.at(x, y, 0) =
-          quantize_gain_code_dithered(code, x, y);
-    }
-  }
+  result.gain_map.pixels = std::move(quantized.codes);
 
   // --- Full-resolution render ---
   render_full_resolution(source, exposure, prepared.local_average, dimensions.width,

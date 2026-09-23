@@ -86,18 +86,19 @@ std::vector<std::uint8_t> encode_avif(const PhotoRenditions& images,
 
   constexpr unsigned max_code = (1U << kDepth) - 1U;
   std::vector<float> row_peak(hdr.height, 0.0F);
-  std::vector<double> row_luminance(hdr.height, 0.0);
+  std::vector<double> row_light_level(hdr.height, 0.0);
   parallel_for_rows(hdr.height, [&](const std::uint32_t y) {
     auto* row = reinterpret_cast<std::uint16_t*>(rgb.pixels +
                                                  static_cast<std::size_t>(y) * rgb.rowBytes);
     float peak = 0.0F;
-    double luminance_sum = 0.0;
+    double light_level_sum = 0.0;
     for (std::uint32_t x = 0; x < hdr.width; ++x) {
       const auto wide = p3_to_rec2020(hdr.at(x, y, 0), hdr.at(x, y, 1), hdr.at(x, y, 2));
       const std::array<float, 3> linear{std::max(0.0F, wide[0]), std::max(0.0F, wide[1]),
                                         std::max(0.0F, wide[2])};
-      peak = std::max(peak, std::max({linear[0], linear[1], linear[2]}));
-      luminance_sum += 0.2627 * linear[0] + 0.6780 * linear[1] + 0.0593 * linear[2];
+      const float light_level = std::max({linear[0], linear[1], linear[2]});
+      peak = std::max(peak, light_level);
+      light_level_sum += light_level;
       const auto encoded = encoding == HdrEncoding::AvifPq
                                ? std::array<float, 3>{pq_oetf(linear[0]), pq_oetf(linear[1]),
                                                       pq_oetf(linear[2])}
@@ -110,20 +111,22 @@ std::vector<std::uint8_t> encode_avif(const PhotoRenditions& images,
       }
     }
     row_peak[y] = peak;
-    row_luminance[y] = luminance_sum;
+    row_light_level[y] = light_level_sum;
   });
   check_avif(avifImageRGBToYUV(image.get(), &rgb), "convert AVIF RGB to YUV");
 
   const float peak = *std::max_element(row_peak.begin(), row_peak.end());
-  const double luminance_sum =
-      std::accumulate(row_luminance.begin(), row_luminance.end(), 0.0);
+  const double light_level_sum =
+      std::accumulate(row_light_level.begin(), row_light_level.end(), 0.0);
   const double pixel_count = static_cast<double>(hdr.width) * hdr.height;
   const auto clamp_light = [](double nits) {
-    return static_cast<std::uint16_t>(std::clamp(std::ceil(nits), 0.0, 65535.0));
+    return static_cast<std::uint16_t>(std::clamp(std::ceil(nits), 0.0, 10000.0));
   };
   image->clli.maxCLL = clamp_light(peak * kReferenceWhiteNits);
   image->clli.maxPALL =
-      clamp_light(pixel_count > 0.0 ? luminance_sum * kReferenceWhiteNits / pixel_count : 0.0);
+      clamp_light(pixel_count > 0.0
+                      ? light_level_sum * kReferenceWhiteNits / pixel_count
+                      : 0.0);
 
   const auto exif = make_minimal_exif(metadata);
   check_avif(avifImageSetMetadataExif(image.get(), exif.data(), exif.size()),
@@ -177,6 +180,9 @@ void verify_avif_decodable(const std::vector<std::uint8_t>& bytes) {
   if (image->transferCharacteristics != AVIF_TRANSFER_CHARACTERISTICS_SMPTE2084 &&
       image->transferCharacteristics != AVIF_TRANSFER_CHARACTERISTICS_HLG) {
     throw std::runtime_error("the encoded AVIF does not carry a BT.2100 transfer function");
+  }
+  if (image->matrixCoefficients != AVIF_MATRIX_COEFFICIENTS_BT2020_NCL) {
+    throw std::runtime_error("the encoded AVIF does not carry a BT.2020 YCbCr matrix");
   }
 }
 

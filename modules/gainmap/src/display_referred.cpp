@@ -137,51 +137,6 @@ CellGains measure_cell_gains(const FloatImage& source, float exposure,
   return cells;
 }
 
-struct QuantizedGrid {
-  FloatImage codes;
-  float stored_gain_max{0.0F};
-  float stored_gamma{1.0F};
-  Rational gain_max_metadata{0, 1};
-  Rational gamma_metadata{1, 1};
-};
-
-// Same 8-bit encoding the photographic writer uses: normalise by the grid's own
-// maximum, pick the gamma that minimises round-trip error over that
-// distribution, and store the rounded code.
-QuantizedGrid quantize_grid(const std::vector<float>& gain_stops,
-                            const GainGridDimensions& dimensions) {
-  QuantizedGrid quantized;
-  const std::size_t count = gain_stops.size();
-  float gain_max = 0.0F;
-  for (const float value : gain_stops) gain_max = std::max(gain_max, value);
-
-  std::vector<float> normalized(count, 0.0F);
-  if (gain_max > kEpsilon) {
-    for (std::size_t i = 0; i < count; ++i) {
-      normalized[i] = std::clamp(gain_stops[i] / gain_max, 0.0F, 1.0F);
-    }
-  }
-  const float gamma = gain_max > kEpsilon ? choose_gain_gamma(normalized) : 1.0F;
-  quantized.gain_max_metadata = rational_from_float(gain_max);
-  quantized.gamma_metadata = rational_from_float(gamma);
-  quantized.stored_gain_max =
-      static_cast<float>(quantized.gain_max_metadata.numerator) /
-      static_cast<float>(quantized.gain_max_metadata.denominator);
-  quantized.stored_gamma =
-      static_cast<float>(quantized.gamma_metadata.numerator) /
-      static_cast<float>(quantized.gamma_metadata.denominator);
-
-  quantized.codes = FloatImage(dimensions.width, dimensions.height, 1);
-  for (std::size_t i = 0; i < count; ++i) {
-    const float code = encode_gain_code(normalized[i], quantized.stored_gamma);
-    const auto x = static_cast<std::uint32_t>(i % dimensions.width);
-    const auto y = static_cast<std::uint32_t>(i / dimensions.width);
-    const float stored = quantize_gain_code_dithered(code, x, y);
-    quantized.codes.pixels[i] = stored;
-  }
-  return quantized;
-}
-
 // Fits a base pixel into [0, 1] by reducing saturation only.
 //
 // Reached only where a channel overflows even though the luminance the tone
@@ -258,8 +213,9 @@ GainMapResult make_display_referred_sdr_result(const FloatImage& source,
   auto gains = prepared.stops;
   const float strength = std::min(options.gain_strength, 1.0F);
   for (float& gain : gains) gain *= strength;
-  auto quantized = quantize_grid(gains, dimensions);
-  result.gain_map = std::move(quantized.codes);
+  auto quantized = quantize_gain_grid(gains, dimensions.width);
+  result.gain_map = FloatImage(dimensions.width, dimensions.height, 1);
+  result.gain_map.pixels = std::move(quantized.codes);
   result.metadata.gain_max = quantized.gain_max_metadata;
   result.metadata.alternate_headroom = quantized.gain_max_metadata;
   result.metadata.gamma = quantized.gamma_metadata;
@@ -425,6 +381,9 @@ GainMapResult make_display_referred_hdr_gain_map(const FloatImage& source,
       std::max(0.0F, std::min(available_stops, requested_stops) *
                          std::min(options.gain_strength, 1.0F));
 
+  // Keep this HDR shoulder and headroom mapping aligned with
+  // render_renditions. This path averages gain into cells; export packages its
+  // HDR source with per-pixel gain in exact_gain_map_from_renditions.
   // Both renditions come from one shoulder; only the ceiling differs, so below
   // the knee they are the same function and the gain there is zero. Each
   // ceiling is solved so the input's declared peak lands exactly on its target:
@@ -476,10 +435,11 @@ GainMapResult make_display_referred_hdr_gain_map(const FloatImage& source,
   const auto cells = measure_cell_gains(source, exposure, pixel_gain);
   const auto& dimensions = cells.dimensions;
 
-  auto quantized = quantize_grid(cells.stops, dimensions);
+  auto quantized = quantize_gain_grid(cells.stops, dimensions.width);
 
   GainMapResult result;
-  result.gain_map = std::move(quantized.codes);
+  result.gain_map = FloatImage(dimensions.width, dimensions.height, 1);
+  result.gain_map.pixels = std::move(quantized.codes);
   result.base_linear = FloatImage(source.width, source.height, 3);
   result.clamp_srgb = options.clamp_srgb;
 

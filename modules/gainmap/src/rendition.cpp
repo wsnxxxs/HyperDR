@@ -5,7 +5,6 @@
 #include "hyperdr/foundation/parallel.hpp"
 #include "hyperdr/foundation/rational.hpp"
 #include "hyperdr/image/color.hpp"
-#include "hyperdr/look/grid.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -44,10 +43,13 @@ std::array<float, 3> fit_unit_cube(std::array<float, 3> rgb) {
 }
 
 // Packages an HDR rendition that has to decode back to itself.
+// render_renditions shares the HDR-source shoulder with
+// make_display_referred_hdr_gain_map, but this export path derives the base
+// from decoded per-pixel gain instead of averaging gain into cells.
 //
 // A display-referred HDR input is the photograph, not an expansion the renderer
-// chose, so the cell-averaged map below cannot be used for it: averaging gain
-// over a cell gives a bright pixel its darker neighbours' gain, and a Sony HLG
+// chose, so a coarse map cannot be used for it: averaging gain over a cell
+// gives a bright pixel its darker neighbours' gain, and a Sony HLG
 // frame came back with its highlights about a fifth darker, while a
 // single-channel map that multiplies the *SDR* rendition could only return that
 // rendition's desaturated chroma. Here every pixel gets its own gain and the
@@ -227,37 +229,31 @@ GainMapResult gain_map_from_renditions(PhotoRenditions images, GainMapWriterProf
   if(sdr.channels!=3 || hdr.channels!=3 || sdr.width!=hdr.width || sdr.height!=hdr.height)
     throw std::invalid_argument("gain-map packaging requires matching SDR and HDR renditions");
   if (images.hdr_is_source) return exact_gain_map_from_renditions(std::move(images));
-  if (profile == GainMapWriterProfile::iso_generic && images.gain_stops.pixels.empty() &&
+  if (profile == GainMapWriterProfile::iso_generic &&
       images.stats.headroom_stops > kEpsilon) {
     return rgb_gain_map_from_renditions(std::move(images));
   }
-  const auto dimensions=choose_gain_dimensions(sdr);
-  const bool retained = !images.gain_stops.pixels.empty();
-  FloatImage stops = retained ? std::move(images.gain_stops)
-      : FloatImage(dimensions.width,dimensions.height,1);
-  if (!retained) parallel_for_rows(stops.height,[&](std::uint32_t gy) {
-    const auto y0=grid_cell_edge(gy,sdr.height,stops.height), y1=grid_cell_edge(gy+1,sdr.height,stops.height);
-    for(std::uint32_t gx=0;gx<stops.width;++gx) {
-      const auto x0=grid_cell_edge(gx,sdr.width,stops.width), x1=grid_cell_edge(gx+1,sdr.width,stops.width);
-      double sum=0;
-      for(auto y=y0;y<y1;++y) for(auto x=x0;x<x1;++x) {
-        const auto i=(static_cast<std::size_t>(y)*sdr.width+x)*3;
-        const float base=p3_luminance(sdr.pixels[i],sdr.pixels[i+1],sdr.pixels[i+2]);
-        const float alternate=p3_luminance(hdr.pixels[i],hdr.pixels[i+1],hdr.pixels[i+2]);
-        if(base>1e-6F) sum+=std::clamp(std::log2(std::max(alternate,base)/base),0.0F,images.stats.headroom_stops);
-      }
-      stops.at(gx,gy,0)=static_cast<float>(sum/((x1-x0)*(y1-y0)));
+  // Apple-compatible output has one shared RGB multiplier. Derive it from the
+  // final endpoints at full resolution: a second cell average would blur the
+  // renderer's already-spatial gain and make bright edges reconstruct darker.
+  FloatImage stops(sdr.width,sdr.height,1);
+  parallel_for_rows(stops.height,[&](std::uint32_t y) {
+    for(std::uint32_t x=0;x<stops.width;++x) {
+      const auto i=(static_cast<std::size_t>(y)*sdr.width+x)*3;
+      const float base=p3_luminance(sdr.pixels[i],sdr.pixels[i+1],sdr.pixels[i+2]);
+      const float alternate=p3_luminance(hdr.pixels[i],hdr.pixels[i+1],hdr.pixels[i+2]);
+      if(base>1e-6F) stops.at(x,y,0)=std::clamp(
+          std::log2(std::max(alternate,base)/base),0.0F,images.stats.headroom_stops);
     }
   });
-  const float maximum=*std::max_element(stops.pixels.begin(),stops.pixels.end());
-  if(maximum>0) for(auto& c:stops.pixels) c/=maximum;
-  const float gamma=maximum>0 ? choose_gain_gamma(stops.pixels) : 1;
-  for(std::uint32_t y=0;y<stops.height;++y) for(std::uint32_t x=0;x<stops.width;++x)
-    stops.at(x,y,0)=quantize_gain_code_dithered(encode_gain_code(stops.at(x,y,0),gamma),x,y);
+  auto quantized=quantize_gain_grid(stops.pixels,stops.width);
+  const float maximum=quantized.stored_gain_max;
+  const float gamma=quantized.stored_gamma;
+  stops.pixels=std::move(quantized.codes);
   GainMapResult out;
   out.base_linear=std::move(images.sdr); out.gain_map=std::move(stops);
-  out.metadata.gain_min={0,1}; out.metadata.gain_max=rational_from_float(maximum);
-  out.metadata.gamma=rational_from_float(gamma);
+  out.metadata.gain_min={0,1}; out.metadata.gain_max=quantized.gain_max_metadata;
+  out.metadata.gamma=quantized.gamma_metadata;
   out.metadata.base_offset={0,1}; out.metadata.alternate_offset={0,1};
   out.metadata.base_headroom={0,1}; out.metadata.alternate_headroom=out.metadata.gain_max;
   out.clamp_srgb=images.clamp_srgb; out.exposure_ev=images.stats.exposure_ev;

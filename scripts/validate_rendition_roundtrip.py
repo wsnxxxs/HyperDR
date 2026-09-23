@@ -58,6 +58,10 @@ def convert(exe: Path, source: Path, directory: Path, encoding: str) -> Path:
     run(exe, "convert", source, "--output", directory, "--encoding", encoding,
         "--quality", "100", "--depth", depth, "--overwrite", "--report", report, *NEUTRAL, *limits)
     result = json.loads(report.read_text(encoding="utf-8"))["files"][0]
+    if encoding == "ultrahdr":
+        actual_gain = max(0.0, result["gain_map"]["max_stops"])
+        if abs(result["headroom_stops"] - actual_gain) > .001:
+            raise AssertionError("Ultra HDR capacity differs from the stored maximum gain")
     return Path(result["output"])
 
 

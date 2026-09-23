@@ -459,6 +459,63 @@ void test_dual_nonunit_base_headroom() {
       "display headroom must be measured from the authored base headroom");
 }
 
+void test_dual_metadata_range_and_edited_mono() {
+  FloatImage base(2,1,3), hdr(2,1,3);
+  base.pixels={.2F,.4F,.6F,.25F,.35F,.45F};
+  for (std::size_t i=0;i<base.pixels.size();++i)
+    hdr.pixels[i]=2*base.pixels[i]+.1F;
+  InputDescription input{InputDomain::kDualRendition,2};
+  input.authored_sdr=&base;
+  input.gain_map.alternate_headroom=16;
+  input.gain_map.base_offset.fill(.1F);
+  input.gain_map.alternate_offset.fill(.1F);
+  // The metadata can describe more range than this frame uses. A neutral
+  // four-stop budget still reaches the authored alternate endpoint.
+  const auto neutral=render_renditions(hdr,{}, {},input,RenderTarget::Hdr);
+  require(neutral.hdr.pixels==hdr.pixels && neutral.sdr.pixels==base.pixels,
+      "measured pixel peak must not shorten the authored interpolation span");
+  const auto compatible=gain_map_from_renditions(neutral,GainMapWriterProfile::apple_strict);
+  require(compatible.base_linear.pixels==base.pixels && !compatible.stats.adaptive_chroma_loss,
+      "an unedited mono gain with offsets must preserve the authored SDR base");
+  RenderOptions brighter;
+  brighter.exposure_bias_ev=1;
+  const auto edited=render_renditions(hdr,brighter,{},input,RenderTarget::Hdr);
+  const auto fallback=gain_map_from_renditions(edited,GainMapWriterProfile::apple_strict);
+  require(fallback.stats.adaptive_chroma_loss,
+      "exposure that breaks common gain must report Adaptive SDR chroma loss");
+  const auto reconstructed=reconstruct_gain_map(fallback.base_linear,fallback.gain_map,
+      fallback.metadata,fallback.headroom_stops);
+  for (std::size_t i=0;i<hdr.pixels.size();++i)
+    require(std::abs(reconstructed.pixels[i]-edited.hdr.pixels[i])<.015F,
+        "the Apple fallback must prioritize the edited HDR endpoint");
+  brighter.gain_strength=0;
+  const auto zero=render_renditions(hdr,brighter,{},input,RenderTarget::Hdr);
+  brighter.gain_strength=1e-5F;
+  const auto near_zero=render_renditions(hdr,brighter,{},input,RenderTarget::Hdr);
+  for (std::size_t i=0;i<hdr.pixels.size();++i)
+    require(std::abs(near_zero.hdr.pixels[i]-zero.sdr.pixels[i])<1e-4F,
+        "positive-exposure SDR rolloff must meet zero HDR strength continuously");
+}
+
+void test_dual_signed_rgb_gain() {
+  FloatImage base(1,1,3), hdr(1,1,3);
+  base.pixels={.5F,.5F,.5F}; hdr.pixels={.25F,1.0F,.5F};
+  InputDescription input{InputDomain::kDualRendition,2};
+  input.authored_sdr=&base;
+  input.gain_map.channels=3;
+  input.gain_map.alternate_headroom=2;
+  const auto photo=render_renditions(hdr,{}, {},input,RenderTarget::Hdr);
+  const auto packed=gain_map_from_renditions(photo,GainMapWriterProfile::iso_generic);
+  require(rational_value(packed.metadata.gain_min)<0 &&
+      packed.base_linear.pixels==base.pixels,
+      "signed RGB gain must preserve darkened channels and the authored base");
+  const auto reconstructed=reconstruct_gain_map(packed.base_linear,packed.gain_map,
+      packed.metadata,packed.headroom_stops);
+  for (unsigned c=0;c<3;++c)
+    require(std::abs(reconstructed.pixels[c]-hdr.pixels[c])<.01F,
+        "signed RGB gain must reconstruct the authored alternate");
+}
+
 void test_single_hdr_midtones_at_half_strength() {
   FloatImage hdr(3,1,3);
   for (unsigned c=0;c<3;++c) {
@@ -480,7 +537,8 @@ int main() {
         test_rendition_codes_use_serialized_metadata();
         test_graded_sdr_endpoint_packaging();
         test_content_light_mapping(); test_authored_dual_renditions();
-        test_dual_nonunit_base_headroom(); test_single_hdr_midtones_at_half_strength(); }
+        test_dual_nonunit_base_headroom(); test_single_hdr_midtones_at_half_strength();
+        test_dual_metadata_range_and_edited_mono(); test_dual_signed_rgb_gain(); }
   catch(const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
   std::cout<<"graded model reconstruction and final gain statistics passed\n";
 }

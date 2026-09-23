@@ -45,6 +45,21 @@ else {
   }
 }
 
+# x265 4.2 uses a process-wide recursion counter whenever Main10 loads the
+# 8-bit fallback. Parallel tile encodes can trip that guard and lose the API.
+$apiSourcePath = Join-Path $x265SourcePath 'source\encoder\api.cpp'
+$apiSource = [System.IO.File]::ReadAllText($apiSourcePath)
+$originalGuard = 'static int g_recursion /* = 0 */;'
+$threadLocalGuard = 'static thread_local int g_recursion /* = 0 */;'
+if ($apiSource.Contains($originalGuard)) {
+  $apiSource = $apiSource.Replace($originalGuard, $threadLocalGuard)
+  [System.IO.File]::WriteAllText($apiSourcePath, $apiSource,
+    [System.Text.UTF8Encoding]::new($false))
+}
+elseif (-not $apiSource.Contains($threadLocalGuard)) {
+  throw "Unexpected x265 recursion guard in $apiSourcePath"
+}
+
 $nasmSearchRoot = Join-Path $VcpkgRoot 'downloads\tools\nasm'
 $nasm = $null
 if (Test-Path -LiteralPath $nasmSearchRoot -PathType Container) {

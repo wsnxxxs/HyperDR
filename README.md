@@ -115,7 +115,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\prepare_x265_multibi
 ```
 
 After that, the CMake post-build hook preserves the Main10 + 8-bit dual runtime
-across normal rebuilds.
+across normal rebuilds. If upgrading from a build made before parallel HEIC
+tile encoding, run the preparation script again: it also fixes x265 4.2's
+shared recursion guard so concurrent tiles can safely load the 8-bit fallback.
 
 Build trees belong in one of the four names the tooling already knows —
 `build/`, `build-core/`, `build-release/`, `build-codecs-win/`. They are listed

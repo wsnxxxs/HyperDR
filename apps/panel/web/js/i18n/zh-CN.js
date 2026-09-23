@@ -352,6 +352,9 @@ export default {
   "out.gamutHint.p3": "丰富广色域 · 适合 iPhone、Mac 及现代屏幕",
   "out.gamutHint.rec2020": "超广色域 · 适合高端 HDR 电视与专业显示设备",
   "out.clampSrgb": "限制在 sRGB",
+  "out.hevcFast": "快速导出 HEIC",
+  "out.hevcStandard": "标准质量",
+  "out.hevcFastHint": "编码更快，文件大小和细节可能略有变化。",
   "out.stale": "当前调整已更改，这是上一版的结果",
   "out.download": "保存到设备",
   "save.button.as": "另存为…",
@@ -593,5 +596,6 @@ export default {
   "export.format": "格式",
   "export.gamut": "色域",
   "export.quality": "质量",
+  "export.speed": "HEIC 速度",
   "export.lut": "LUT",
 };

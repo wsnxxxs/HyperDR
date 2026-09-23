@@ -38,6 +38,18 @@ include(HyperDRModel)
 
 find_package(Threads REQUIRED)
 
+if(HYPERDR_WITH_CODECS)
+  # LibRaw's OpenMP build requires the MSVC OpenMP runtime.
+  set(CMAKE_INSTALL_OPENMP_LIBRARIES TRUE)
+endif()
+include(InstallRequiredSystemLibraries)
+foreach(hyperdr_runtime IN LISTS CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
+  get_filename_component(hyperdr_runtime_name "${hyperdr_runtime}" NAME)
+  if(hyperdr_runtime_name MATCHES "^vcomp[0-9]+\\.dll$")
+    set(HYPERDR_OPENMP_RUNTIME_DLL "${hyperdr_runtime}")
+  endif()
+endforeach()
+
 include(CheckIPOSupported)
 check_ipo_supported(RESULT HYPERDR_IPO_SUPPORTED OUTPUT HYPERDR_IPO_ERROR LANGUAGES CXX)
 
@@ -80,7 +92,6 @@ if(HYPERDR_WITH_CODECS)
     "${CMAKE_BINARY_DIR}/x265-runtime/$<CONFIG>/libx265_main.dll"
     DESTINATION bin COMPONENT Runtime)
 endif()
-include(InstallRequiredSystemLibraries)
 if(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
   install(PROGRAMS ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS} DESTINATION bin COMPONENT Runtime)
 endif()

@@ -23,6 +23,7 @@ constexpr std::array<std::string_view, 4> kHighlightRecoveryChoices{
     "blend", "reconstruct", "clip", "unclip"};
 constexpr std::array<std::string_view, 3> kColorGamutChoices{
     "srgb", "p3", "rec2020"};
+constexpr std::array<std::string_view, 2> kHevcPresetChoices{"slow", "medium"};
 
 // --- accessors -------------------------------------------------------------
 // Each pair is the only place that knows where a setting lives in
@@ -95,8 +96,8 @@ json::Value read_headroom(const ConvertOptions& o) {
                               : json::Value::from_number(o.gain.headroom_stops);
 }
 
-const std::array<Setting, 33>& table() {
-  static const std::array<Setting, 33> kSettings{{
+const std::array<Setting, 34>& table() {
+  static const std::array<Setting, 34> kSettings{{
       {"encoding", "--encoding", SettingKind::kEnum, 0, 0, kEncodingChoices,
        "adaptive|ultrahdr|pq|hlg|avif-pq|avif-hlg|sdr-jpeg", "Output representation", false,
        true,
@@ -200,6 +201,14 @@ const std::array<Setting, 33>& table() {
        "Encoder quality", false, true, nullptr,
        [](ConvertOptions& o, const json::Value& v) { o.quality = static_cast<int>(v.number()); },
        [](const ConvertOptions& o) { return json::Value::from_number(o.quality); }},
+      {"hevc_preset", "--hevc-preset", SettingKind::kEnum, 0, 0,
+       kHevcPresetChoices, "slow|medium", "HEIC encoding speed", false, true, nullptr,
+       [](ConvertOptions& o, const json::Value& v) {
+         o.hevc_preset = v.string() == "medium" ? HevcPreset::Medium : HevcPreset::Slow;
+       },
+       [](const ConvertOptions& o) {
+         return json::Value::from_string(o.hevc_preset == HevcPreset::Medium ? "medium" : "slow");
+       }},
       {"depth", "--depth", SettingKind::kInteger, 8, 10, {}, "<8|10>",
        "HEIC base depth; Ultra HDR JPEG requires 8", false, true, nullptr,
        [](ConvertOptions& o, const json::Value& v) {

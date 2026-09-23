@@ -846,7 +846,12 @@ void check_rgb_ultrahdr(const hyperdr::PhotoMetadata& metadata) {
   const auto bytes = hyperdr::encode_ultrahdr_jpeg(packed, metadata, 95);
   hyperdr::verify_ultrahdr_jpeg(bytes);
   const auto decoded = decode_ultrahdr_input(bytes);
-  require_declared_headroom(decoded, 4, "RGB JPEG must retain independent display headroom");
+  const float measured_peak = std::max(1.0F,
+      *std::max_element(decoded.linear_p3.pixels.begin(), decoded.linear_p3.pixels.end()));
+  require(decoded.domain == hyperdr::InputDomain::kDualRendition &&
+              decoded.authored_sdr.has_value() && decoded.gain_map.channels == 3 &&
+              std::abs(decoded.hdr_headroom - measured_peak) < 1e-5F,
+          "RGB JPEG must retain both renditions and its measured range");
   double error = 0;
   for (std::size_t i = 0; i < photo.hdr.pixels.size(); ++i) {
     const float expected = photo.hdr.pixels[i];
@@ -1002,6 +1007,132 @@ void check_icc_only_heic() {
   }
 }
 
+void check_avif_gain_map(bool hdr_primary) {
+  std::unique_ptr<avifImage, decltype(&avifImageDestroy)> image(
+      avifImageCreate(8, 6, 8, AVIF_PIXEL_FORMAT_YUV400), &avifImageDestroy);
+  require(image && avifImageAllocatePlanes(image.get(), AVIF_PLANES_YUV) == AVIF_RESULT_OK,
+          "create AVIF primary fixture");
+  image->yuvRange = AVIF_RANGE_FULL;
+  image->colorPrimaries = hdr_primary ? AVIF_COLOR_PRIMARIES_BT2020
+                                     : AVIF_COLOR_PRIMARIES_BT709;
+  image->transferCharacteristics = hdr_primary ? AVIF_TRANSFER_CHARACTERISTICS_PQ
+                                               : AVIF_TRANSFER_CHARACTERISTICS_SRGB;
+  image->matrixCoefficients = AVIF_MATRIX_COEFFICIENTS_BT709;
+  for (unsigned y = 0; y < 6; ++y)
+    std::memset(image->yuvPlanes[AVIF_CHAN_Y] + y * image->yuvRowBytes[AVIF_CHAN_Y],
+                hdr_primary ? 180 : 220, 8);
+  require(avifImageAllocatePlanes(image.get(), AVIF_PLANES_A) == AVIF_RESULT_OK,
+          "allocate AVIF alpha fixture");
+  for (unsigned y = 0; y < 6; ++y)
+    std::memset(image->alphaPlane + y * image->alphaRowBytes, 255, 8);
+  image->alphaPlane[0] = 0;
+  image->transformFlags = AVIF_TRANSFORM_IROT;
+  image->irot.angle = 1;
+
+  image->gainMap = avifGainMapCreate();
+  require(image->gainMap != nullptr, "create AVIF gain map");
+  auto* map = image->gainMap;
+  map->image = avifImageCreate(4, 3, 8, AVIF_PIXEL_FORMAT_YUV400);
+  require(map->image && avifImageAllocatePlanes(map->image, AVIF_PLANES_YUV) == AVIF_RESULT_OK,
+          "create AVIF gain pixels");
+  for (unsigned y = 0; y < 3; ++y)
+    std::memset(map->image->yuvPlanes[AVIF_CHAN_Y] + y * map->image->yuvRowBytes[AVIF_CHAN_Y],
+                255, 4);
+  map->image->yuvRange = AVIF_RANGE_FULL;
+  map->image->colorPrimaries = AVIF_COLOR_PRIMARIES_UNSPECIFIED;
+  map->image->transferCharacteristics = AVIF_TRANSFER_CHARACTERISTICS_UNSPECIFIED;
+  map->image->matrixCoefficients = AVIF_MATRIX_COEFFICIENTS_BT709;
+  map->useBaseColorSpace = AVIF_TRUE;
+  map->baseHdrHeadroom = hdr_primary ? avifUnsignedFraction{2, 1} : avifUnsignedFraction{0, 1};
+  map->alternateHdrHeadroom = hdr_primary ? avifUnsignedFraction{0, 1} : avifUnsignedFraction{2, 1};
+  for (unsigned c = 0; c < 3; ++c) {
+    map->gainMapMin[c] = {0, 1}; map->gainMapMax[c] = {2, 1};
+    map->gainMapGamma[c] = {1, 1};
+    map->baseOffset[c] = {0, 1}; map->alternateOffset[c] = {0, 1};
+  }
+  map->altDepth = 8;
+  map->altPlaneCount = 3;
+  map->altColorPrimaries = hdr_primary ? AVIF_COLOR_PRIMARIES_BT709
+                                      : AVIF_COLOR_PRIMARIES_BT2020;
+  map->altTransferCharacteristics = hdr_primary ? AVIF_TRANSFER_CHARACTERISTICS_SRGB
+                                               : AVIF_TRANSFER_CHARACTERISTICS_PQ;
+  map->altMatrixCoefficients = AVIF_MATRIX_COEFFICIENTS_BT709;
+  map->altYUVRange = AVIF_RANGE_FULL;
+
+  if (hdr_primary) {
+    cmsHPROFILE profile = cmsCreate_sRGBProfile();
+    require(profile != nullptr, "create AVIF ICC fixture");
+    cmsUInt32Number size = 0;
+    require(cmsSaveProfileToMem(profile, nullptr, &size) && size > 0,
+            "size AVIF ICC fixture");
+    std::vector<std::uint8_t> icc(size);
+    const bool saved = cmsSaveProfileToMem(profile, icc.data(), &size) != 0;
+    cmsCloseProfile(profile);
+    require(saved && avifImageSetProfileICC(image.get(), icc.data(), size) == AVIF_RESULT_OK,
+            "attach ICC beside PQ CICP");
+  }
+
+  std::unique_ptr<avifEncoder, decltype(&avifEncoderDestroy)> encoder(
+      avifEncoderCreate(), &avifEncoderDestroy);
+  require(encoder != nullptr, "create AVIF encoder");
+  avifRWData encoded = AVIF_DATA_EMPTY;
+  const auto status = avifEncoderWrite(encoder.get(), image.get(), &encoded);
+  require(status == AVIF_RESULT_OK, "encode AVIF gain-map fixture");
+  std::vector<std::uint8_t> bytes(encoded.data, encoded.data + encoded.size);
+  avifRWDataFree(&encoded);
+  if (hdr_primary) {
+    std::unique_ptr<avifDecoder, decltype(&avifDecoderDestroy)> inspect(
+        avifDecoderCreate(), &avifDecoderDestroy);
+    require(inspect && avifDecoderSetIOMemory(inspect.get(), bytes.data(), bytes.size()) == AVIF_RESULT_OK &&
+                avifDecoderParse(inspect.get()) == AVIF_RESULT_OK && inspect->image &&
+                inspect->image->icc.size > 0 &&
+                inspect->image->transferCharacteristics == AVIF_TRANSFER_CHARACTERISTICS_PQ,
+            "AVIF fixture must store ICC and PQ CICP together");
+  }
+  const auto path = std::filesystem::temp_directory_path() /
+      (hdr_primary ? "hyperdr-gain-hdr-primary.avif" : "hyperdr-gain-sdr-primary.avif");
+  hyperdr::write_binary_file_atomic(path, bytes, true);
+  try {
+    const auto decoded = hyperdr::decode_image(path);
+    if (decoded.domain != hyperdr::InputDomain::kDualRendition ||
+        !decoded.authored_sdr || decoded.hdr_headroom <= 1.0F || decoded.decode.degraded)
+      std::cerr << "AVIF gain fixture " << (hdr_primary ? "HDR" : "SDR")
+                << " primary domain=" << hyperdr::input_domain_name(decoded.domain)
+                << " headroom=" << decoded.hdr_headroom << " degraded=" << decoded.decode.degraded
+                << (decoded.decode.degradation_reasons.empty() ? "" : decoded.decode.degradation_reasons.front())
+                << '\n';
+    require(decoded.domain == hyperdr::InputDomain::kDualRendition &&
+                decoded.authored_sdr.has_value() && decoded.gain_map.channels == 1 &&
+                decoded.hdr_headroom > 1.0F && !decoded.decode.degraded,
+            "AVIF gain map must preserve SDR and HDR in either direction");
+    require(decoded.linear_p3.width == 6 && decoded.linear_p3.height == 8 &&
+                decoded.linear_p3.width == decoded.authored_sdr->width &&
+                decoded.linear_p3.height == decoded.authored_sdr->height &&
+                decoded.linear_p3.at(3, 2, 0) > decoded.authored_sdr->at(3, 2, 0),
+            "AVIF gain map must rotate and align both authored renditions");
+    require(decoded.linear_p3.at(0, 7, 0) < decoded.linear_p3.at(5, 0, 0) * .1F &&
+                decoded.authored_sdr->at(0, 7, 0) <
+                    decoded.authored_sdr->at(5, 0, 0) * .1F,
+            "AVIF alpha must composite both rotated renditions");
+    if (hdr_primary)
+      require(decoded.hdr_headroom > 1.0F,
+              "PQ CICP must survive an accompanying SDR ICC profile");
+    hyperdr::RawDecodeOptions preview_options;
+    preview_options.preview_max_edge = 4;
+    const auto preview = hyperdr::decode_image(path, preview_options);
+    require(preview.domain == hyperdr::InputDomain::kDualRendition &&
+                preview.authored_sdr.has_value() &&
+                preview.linear_p3.width == 3 && preview.linear_p3.height == 4 &&
+                preview.authored_sdr->width == 3 && preview.authored_sdr->height == 4 &&
+                preview.linear_p3.at(1, 1, 0) > preview.authored_sdr->at(1, 1, 0),
+            "AVIF preview must reduce and rotate both aligned renditions");
+    std::filesystem::remove(path);
+  } catch (...) {
+    std::filesystem::remove(path);
+    throw;
+  }
+}
+
 void require_avif_content_light(const std::vector<std::uint8_t>& bytes,
                                 const hyperdr::FloatImage& source) {
   std::unique_ptr<avifDecoder, decltype(&avifDecoderDestroy)> decoder(
@@ -1041,9 +1172,16 @@ void check_ultrahdr_pair(const hyperdr::PhotoMetadata& metadata) {
     require(info.width == 65 && info.height == 33 &&
         info.gain_width == 65 && info.gain_height == 33, "API3 must retain full raster size");
     require(info.gain_min[0] < 0 && info.gain_max[0] > 0, "API3 must support signed RGB gain");
-    require(std::abs(info.headroom_stops - 2) < .001F, "API3 must set display capacity independently");
+    require(std::abs(info.headroom_stops -
+                     *std::max_element(info.gain_max.begin(), info.gain_max.end())) < .001F,
+            "API3 must declare its actual maximum gain");
     const auto decoded = decode_ultrahdr_input(bytes);
-    require_declared_headroom(decoded, 4, "API3 must retain 203-nit white and declared headroom");
+    const float measured_peak = std::max(1.0F,
+        *std::max_element(decoded.linear_p3.pixels.begin(), decoded.linear_p3.pixels.end()));
+    require(decoded.domain == hyperdr::InputDomain::kDualRendition &&
+                decoded.authored_sdr.has_value() &&
+                std::abs(decoded.hdr_headroom - measured_peak) < 1e-5F,
+            "API3 must retain both authored renditions and measured headroom");
     require(decoded.metadata.model == metadata.model, "API3 must preserve EXIF");
     double error = 0;
     for (std::size_t i = 0; i < photo.hdr.pixels.size(); ++i) {
@@ -1102,6 +1240,8 @@ int main() {
     check_ultrahdr_pair(metadata);
     check_ultrahdr_icc(metadata);
     check_icc_only_heic();
+    check_avif_gain_map(false);
+    check_avif_gain_map(true);
 
     // Default 8-bit output through the grid path (wider than one 2048 tile), with a
     // full decode and gain-map reconstruction regression, not just structure checks.
@@ -1287,10 +1427,13 @@ int main() {
                 decoded_ultrahdr.metadata.iso == metadata.iso &&
                 decoded_ultrahdr.metadata.orientation == 1,
             "Ultra HDR input did not preserve portable Exif");
-    require_declared_headroom(
-        decoded_ultrahdr,
-        std::exp2(hyperdr::rational_value(small_gain.metadata.alternate_headroom)),
-        "Ultra HDR input did not preserve linear headroom");
+    const float measured_ultrahdr_peak = std::max(1.0F,
+        *std::max_element(decoded_ultrahdr.linear_p3.pixels.begin(),
+                          decoded_ultrahdr.linear_p3.pixels.end()));
+    require(decoded_ultrahdr.domain == hyperdr::InputDomain::kDualRendition &&
+                decoded_ultrahdr.authored_sdr.has_value() &&
+                std::abs(decoded_ultrahdr.hdr_headroom - measured_ultrahdr_peak) < 1e-5F,
+            "Ultra HDR input did not preserve authored SDR and measured HDR range");
     require_linear_round_trip(decoded_ultrahdr, expected_ultrahdr,
                               "Ultra HDR input did not reconstruct its Gain Map");
     // AVIF is the encoding this project could write but not read, so unlike the

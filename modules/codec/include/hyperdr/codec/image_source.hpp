@@ -24,6 +24,7 @@
 #include <filesystem>
 #include <vector>
 #include <string>
+#include <utility>
 
 namespace hyperdr {
 
@@ -199,6 +200,17 @@ struct DecodeInfo {
 
 struct DecodedImage {
   FloatImage linear_p3;
+  // Authored SDR base for a gain-map photograph. Geometry always matches
+  // linear_p3, which holds the reconstructed HDR alternate.
+  std::optional<FloatImage> authored_sdr;
+  AuthoredGainMap gain_map;
+  // Apply the same geometric operation to both renditions while preserving
+  // their pixel correspondence. The callable takes and returns a FloatImage.
+  template <typename Transform>
+  void transform_planes(Transform&& transform) {
+    linear_p3 = transform(std::move(linear_p3));
+    if (authored_sdr) *authored_sdr = transform(std::move(*authored_sdr));
+  }
   PhotoMetadata metadata;
   CaptureMetadata capture;
   // Actual RAW WB selection; empty for non-RAW inputs.
@@ -212,12 +224,11 @@ struct DecodedImage {
   std::string raw_lens_correction;
   std::shared_ptr<const DcpRenderContext> raw_profile;
   DecodeInfo decode;
-  // How far above diffuse white this input's *format* can carry detail, as a
-  // linear multiple of 1.0. HLG is 1000/203, PQ up to 10000/203, a gain-map
-  // input whatever its metadata declares, and everything else exactly 1.
+  // Usable HDR range above diffuse white as a linear multiple of 1.0.
+  // PQ/HLG use their transfer capacity. Gain-map inputs use the measured
+  // reconstructed peak; the authored display endpoints stay in gain_map.
   //
-  // This is a property of the encoding, not a measurement of the pixels, and
-  // the distinction is the point. A RAW routinely decodes to values above 1.0 --
+  // A RAW routinely decodes to values above 1.0 --
   // that is white-balance normalisation headroom, which auto-exposure brings
   // back down -- and treating those as HDR highlights would make a scene-referred
   // input behave like a display-referred one. Consumers that need to know
@@ -233,10 +244,8 @@ struct DecodedImage {
   //
   // The pair is deliberately redundant so that each stays readable on its own,
   // and `describe_input()` is the one place that reconciles them. In
-  // particular an HDR-encoded file whose colour is described by an ICC profile
-  // rather than by CICP decodes with `hdr_headroom == 1`, because an ICC
-  // profile cannot state a headroom; such a file is reported as SDR, which
-  // renders it faithfully rather than inventing a range nothing declared.
+  // particular an ICC-only file has no HDR declaration, while PQ/HLG nclx
+  // still supplies the transfer and range when both descriptions are present.
   InputDomain domain{InputDomain::kDisplayReferredSdr};
 
   [[nodiscard]] InputDescription describe_input() const {
@@ -249,6 +258,10 @@ struct DecodedImage {
       // defensive fallback display-referred so a malformed cache cannot route
       // pixels through the photographic renderer.
       return {InputDomain::kDisplayReferredSdr, 1.0F};
+    }
+    if (domain == InputDomain::kDualRendition && authored_sdr.has_value()) {
+      return {domain, hdr_headroom, raw_profile, content_peak_nits,
+              &*authored_sdr, gain_map};
     }
     if (domain != InputDomain::kDisplayReferredHdr) return {domain, 1.0F, raw_profile};
     if (!(hdr_headroom > 1.0F) || !std::isfinite(hdr_headroom)) {

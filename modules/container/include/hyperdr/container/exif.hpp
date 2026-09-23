@@ -129,5 +129,10 @@ struct ExifRead {
 [[nodiscard]] std::optional<std::uint16_t> read_exif_orientation(
     const std::uint8_t* data, std::size_t size);
 
+// Apple's pre-ISO auxiliary gain map stores its headroom in MakerNote tags
+// 0x21 and 0x30. Returns the linear HDR/SDR white ratio.
+[[nodiscard]] std::optional<float> read_apple_legacy_gain_headroom(
+    const std::uint8_t* data, std::size_t size);
+
 }  // namespace hyperdr
 

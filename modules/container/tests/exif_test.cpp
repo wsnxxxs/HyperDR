@@ -335,6 +335,35 @@ void test_preamble_is_skipped() {
           "an absent block yields nothing");
 }
 
+void test_apple_legacy_makernote_headroom() {
+  std::vector<std::uint8_t> tiff(104, 0);
+  const auto le16 = [&](std::size_t at, std::uint16_t value) {
+    tiff[at] = static_cast<std::uint8_t>(value);
+    tiff[at + 1] = static_cast<std::uint8_t>(value >> 8);
+  };
+  const auto le32 = [&](std::size_t at, std::uint32_t value) {
+    for (unsigned i = 0; i < 4; ++i) tiff[at + i] = static_cast<std::uint8_t>(value >> (8 * i));
+  };
+  const auto be16 = [&](std::size_t at, std::uint16_t value) {
+    tiff[at] = static_cast<std::uint8_t>(value >> 8);
+    tiff[at + 1] = static_cast<std::uint8_t>(value);
+  };
+  const auto be32 = [&](std::size_t at, std::uint32_t value) {
+    for (unsigned i = 0; i < 4; ++i) tiff[at + i] = static_cast<std::uint8_t>(value >> (24 - 8 * i));
+  };
+  tiff[0] = tiff[1] = 'I';
+  le16(2, 42); le32(4, 8);
+  le16(8, 1); le16(10, 0x8769); le16(12, 4); le32(14, 1); le32(18, 26);
+  le16(26, 1); le16(28, 0x927C); le16(30, 7); le32(32, 60); le32(36, 44);
+  tiff[54] = tiff[55] = 'M'; be16(56, 2);
+  be16(58, 0x21); be16(60, 10); be32(62, 1); be32(66, 38);
+  be16(70, 0x30); be16(72, 10); be32(74, 1); be32(78, 46);
+  be32(82, 3); be32(86, 2); be32(90, 0); be32(94, 1);
+  const auto headroom = hyperdr::read_apple_legacy_gain_headroom(tiff.data(), tiff.size());
+  require(headroom && std::abs(*headroom - 8.0F) < 0.001F,
+          "Apple MakerNote must yield its HDR headroom from tags 33 and 48");
+}
+
 }  // namespace
 
 int main() {
@@ -345,6 +374,7 @@ int main() {
     test_orientation_reader();
     test_round_trip();
     test_preamble_is_skipped();
+    test_apple_legacy_makernote_headroom();
     std::cout << "Exif tests passed\n";
     return 0;
   } catch (const std::exception& e) {

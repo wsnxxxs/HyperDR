@@ -11,10 +11,9 @@
 // diffuse white flattened into the top code of the base, because that curve's
 // shoulder asymptotes to 1.0 within about two stops.
 //
-// These two renderers are what a display-referred input gets instead. Both are
-// built on one shoulder, `display_shoulder_log2`, applied in the log domain so
-// that its knee is C1 and its reach is set by the ceiling rather than by how
-// far the input happens to extend.
+// The SDR creative-expansion renderer remains here. Finished HDR photographs
+// are split from full-resolution renditions by gain_map_from_renditions.
+// Its shoulder helper is shared by the display-referred SDR renderer.
 
 #include "hyperdr/gainmap/types.hpp"
 

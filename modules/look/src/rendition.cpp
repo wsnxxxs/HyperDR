@@ -50,8 +50,7 @@ PhotoRenditions render_dual_rendition(const FloatImage& source,
   const float alternate_stops = std::log2(input.gain_map.alternate_headroom);
   const float declared = std::max(0.0F, alternate_stops - base_stops);
   const float requested = options.auto_headroom ? options.look.headroom_max_stops : options.headroom_stops;
-  const float available_stops = std::log2(rendering_headroom(input));
-  const float stops = want_hdr ? std::clamp(std::min({alternate_stops, available_stops, requested}) - base_stops,
+  const float stops = want_hdr ? std::clamp(std::min(alternate_stops, requested) - base_stops,
       0.0F, declared) *
       std::min(options.gain_strength, 1.0F) : 0.0F;
   const float weight = declared > 1e-6F ? stops / declared :
@@ -93,8 +92,13 @@ PhotoRenditions render_dual_rendition(const FloatImage& source,
                 (std::max(0.0F, base) + bo + kEpsilon));
             // Interpolating offsets makes zero strength exactly the authored base
             // while still reaching the authored alternate at full strength.
-            hdr[c] = std::max(0.0F, (base + bo) * std::exp2(weight * gain) -
-                std::lerp(bo, ao, weight)) * exposure;
+            const float unrolled = std::max(0.0F, (base + bo) *
+                std::exp2(weight * gain) - std::lerp(bo, ao, weight)) * exposure;
+            // SDR alone receives a positive-exposure shoulder. Fade that
+            // shoulder away with gain weight so strength approaches zero
+            // continuously and full strength still reaches the authored HDR.
+            hdr[c] = std::max(0.0F, unrolled -
+                (1.0F-weight) * (base*exposure-sdr[c]));
           }
         }
       }

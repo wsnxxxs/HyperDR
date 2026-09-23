@@ -88,7 +88,7 @@ struct AuthoredGainMap {
 struct InputDescription {
   InputDomain domain{InputDomain::kSceneReferred};
   // How far above diffuse white the input's *encoding* can carry detail, as a
-  // linear multiple. Only read for kDisplayReferredHdr, where it exceeds 1.
+  // linear multiple. Read for single HDR and dual-rendition inputs.
   float headroom{1.0F};
   std::shared_ptr<const DcpRenderContext> raw_profile;
   // Optional MaxCLL in cd/m². This bounds tone mapping, not transfer decoding;

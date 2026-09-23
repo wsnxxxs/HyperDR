@@ -5,6 +5,15 @@ semantic versioning; dates use ISO 8601.
 
 ## Unreleased
 
+- Adaptive HEIC gain maps now use high-quality HEVC Q95 compression at their
+  existing resolution, replacing lossless coding and its Level 8.5 signalling.
+  This adds a small gain-coding error in measured samples; Apple Photos zoom
+  compatibility still requires device validation.
+
+- 10-bit Adaptive, PQ, and HLG HEIC exports now use HEVC Main10 signalling
+  instead of Range Extensions, avoiding an unnecessary decoder profile
+  requirement. Apple Photos zoom behaviour still requires device validation.
+
 - AI enhance no longer fails at the 1280-pixel preview size. Resampling a
   clipped white into the model's input could land one float step above 1.0,
   which the input contract refused, so on a typical desktop window every

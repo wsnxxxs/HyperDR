@@ -65,12 +65,13 @@ their hidden RGB values.
   over-range input is attenuated deliberately instead of being flattened
   against the format ceiling. Because ISO 21496-1 metadata declares the gain
   interval as the alternate headroom, this is also what makes re-export stable:
-  a gain-map HEIC round-trips at 2.08x across passes, drifting only by 8-bit
-  gain quantization, where it previously lost roughly a third of its range each
-  time.
+  a gain-map HEIC round-trips at 2.08x across passes, subject to gain
+  quantization and codec error, where it previously lost roughly a third of its
+  range each time.
 - For Adaptive HDR and Ultra HDR the HDR rendition of an HDR input is packaged
-  to decode back to itself, pixel for pixel. The gain map is full resolution,
-  so no decoder resamples it: libultrahdr, Core Image and this project each
+  to reconstruct itself before the base and gain codecs add their losses.
+  The gain map is full resolution, so no decoder resamples it: libultrahdr,
+  Core Image and this project each
   interpolate a smaller map by a different rule, and averaging gain over cells
   gave every highlight its darker neighbours' gain (a Sony HLG frame came back
   about a fifth darker above diffuse white). Each pixel's gain is the larger of
@@ -87,7 +88,10 @@ their hidden RGB values.
   luminance and gives up only the excess chroma. A pixel below the knee receives
   gain only when one of its channels is brighter than SDR white, which is what
   `render.below_knee_relative_difference_max` then reports.
-- A full-resolution gain map larger than 3072 pixels an edge is written as a
+- Ordinary rendition exports use full-resolution gain maps for RAW, SDR, and
+  HDR sources. AI and external-gain paths lift coarse predictions to the
+  development gain-map dimensions while retaining already finer supplied maps.
+  A full-resolution gain map larger than 3072 pixels an edge is written as a
   grid of 2048-pixel HEVC tiles in the same layout as the base; the Ultra HDR
   base of a full-resolution map is coded 4:4:4 rather than 4:2:0, because that
   map exists to restore pixel-level detail and subsampled chroma measured as most
@@ -104,15 +108,14 @@ their hidden RGB values.
   inside the HLG volume are unchanged. HEIC, AVIF and HLG LUT input encoding
   share this handling; a colour outside that volume cannot retain all of its
   saturation in a bounded HLG signal.
-- For RAW and SDR inputs, and for renditions whose SDR endpoint carries its own
-  LUT grade, the gain a cell carries is the mean of the gain its own pixels ask
-  for, with below-knee pixels contributing zero — the gain map downsampled,
-  rather than the gain of the downsampled image, so a small specular is not
-  averaged away before it is ever restored. Because the grid is then sampled
-  bilinearly, a shadow pixel bordering a bright cell still receives a little
-  gain; the report measures exactly how much as
-  `render.below_knee_relative_difference_max`. Manual rendering retains this
-  pixel selection through LUT grading. For gain-map output, peak, utilization and
+- The `make_gain_map` development path used by previews and model input forms
+  cell means from the gain requested by each pixel, with below-knee pixels
+  contributing zero. Bilinear sampling can give a shadow beside a bright cell
+  a little gain. Ordinary rendition exports instead derive the stored gain
+  from the final SDR/HDR endpoints at full resolution, including after LUT
+  grading; they do not apply a second cell average. The report measures the
+  resulting spill as `render.below_knee_relative_difference_max`.
+  For gain-map output, peak, utilization and
   below-knee difference are measured from the final quantized, reconstructed
   map, before JPEG/HEVC compression; they are not measurements of the codec's
   additional loss.
@@ -171,9 +174,12 @@ creative expansion as any other SDR photograph.
   filtering. Below-knee pixels contribute zero, while mixed cells can retain
   a small highlight. Bilinear reconstruction can affect its immediate dark
   neighbours; `below_knee_relative_difference_max` measures that spill and
-  the local-gain check also measures the far dark field. The 8-bit auxiliary gain image
-  is HEVC-lossless, so zero gain cells survive Adaptive HEIC decoding exactly.
-  Ultra HDR stores the map as
+  the local-gain check also measures the far dark field. The 8-bit Adaptive HEIC
+  auxiliary gain image uses fixed HEVC quality 95, independently of the base
+  quality setting. Its existing dimensions and grid policy are retained; gain
+  codes, including zero cells near transitions, can change during compression.
+  The [compression study](gain-compression-study-2026-09-23.md) measures this
+  error separately from downsampling. Ultra HDR stores the map as
   a grayscale JPEG at quality 85 or higher, as recommended for JPEG/R; the
   requested quality still controls the SDR base.
 - RAW is taken from LibRaw as linear camera RGB (`output_color` 0), after white
@@ -315,6 +321,12 @@ creative expansion as any other SDR photograph.
   downstream contract is linear Display P3 RGB.
 - The SDR base is quantized with deterministic TPDF dithering, suppressing sky and
   gradient banding that the multiplicative gain map would otherwise amplify.
+- With the shipped x265 encoder, 10-bit Adaptive bases and PQ/HLG HEIC images
+  use HEVC Main10; 8-bit bases and gain maps retain Main Still Picture.
+  Adaptive gain maps use high-quality lossy HEVC Q95, removing the lossless
+  bypass and Level 8.5 signalling. These encoding choices and local
+  decode checks do not establish iOS Photos behaviour at full-resolution zoom;
+  see the [HEIF review verification](heif-review-2026-09-23.md).
 - The HEIF/BMFF item topology, `tmap` payload layout, and structural verifier are
   unchanged. Ultra HDR JPEG/R output uses Google's reference container writer.
   Every output is decoded and semantically verified before publication.

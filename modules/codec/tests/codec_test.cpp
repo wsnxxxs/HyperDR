@@ -47,6 +47,28 @@ void require(bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
 }
 
+void require_hevc_profiles(const std::vector<std::uint8_t>& bytes,
+                           bool expect_main10, bool expect_still_picture) {
+  const auto inspection = hyperdr::inspect_heif(bytes);
+  bool has_main10 = false;
+  bool has_still_picture = false;
+  for (const auto& box : inspection.boxes) {
+    if (box.type != "hvcC") continue;
+    require(box.size >= 23 && box.offset + box.size <= bytes.size(),
+            "HEIC has an invalid hvcC box");
+    const auto profile = bytes[static_cast<std::size_t>(box.offset) + 9] & 31;
+    require(profile == 2 || profile == 3,
+            "HEIC writer emitted an unexpected HEVC profile");
+    require(bytes[static_cast<std::size_t>(box.offset) + 20] != 255,
+            "HEIC writer emitted HEVC Level 8.5");
+    has_main10 |= profile == 2;
+    has_still_picture |= profile == 3;
+  }
+  require(has_main10 == expect_main10 &&
+              has_still_picture == expect_still_picture,
+          "HEIC writer emitted the wrong HEVC profile");
+}
+
 bool contains_text(const std::vector<std::uint8_t>& bytes,
                    std::string_view text) {
   return std::search(bytes.begin(), bytes.end(), text.begin(), text.end()) !=
@@ -509,10 +531,12 @@ void check_gain_decode(const std::vector<std::uint8_t>& bytes,
     if (expected) {
       require(expected->channels == 1 && expected->width == static_cast<std::uint32_t>(width) &&
                   expected->height == static_cast<std::uint32_t>(height),
-              "lossless Gain Map probe has unexpected dimensions");
+              "Gain Map probe has unexpected dimensions");
     }
     int minimum = 255;
     int maximum = 0;
+    std::uint64_t total_code_error = 0;
+    int maximum_code_error = 0;
     for (int y = 0; y < height; ++y) {
       for (int x = 0; x < width; ++x) {
         const auto actual = y_plane[y * y_stride + x];
@@ -522,13 +546,19 @@ void check_gain_decode(const std::vector<std::uint8_t>& bytes,
           const auto wanted = static_cast<std::uint8_t>(std::lround(
               std::clamp(expected->at(static_cast<std::uint32_t>(x),
                                       static_cast<std::uint32_t>(y), 0), 0.0F, 1.0F) * 255.0F));
-          if (actual != wanted) {
-            throw std::runtime_error(wanted == 0
-                ? "lossless Gain Map changed a zero-gain cell"
-                : "lossless Gain Map changed an encoded gain code");
-          }
+          const int code_error = std::abs(static_cast<int>(actual) - wanted);
+          total_code_error += code_error;
+          maximum_code_error = std::max(maximum_code_error, code_error);
         }
       }
+    }
+    if (expected) {
+      const double mean_code_error = static_cast<double>(total_code_error) /
+                                     (static_cast<double>(width) * height);
+      std::cout << "Q95 Gain Map code error: mean " << mean_code_error
+                << ", maximum " << maximum_code_error << '\n';
+      require(mean_code_error <= 0.5 && maximum_code_error <= 3,
+              "Q95 Gain Map changed the gain codes too much");
     }
     require(minimum <= 16 && maximum >= 239,
             "Gain Map does not retain full-range endpoints");
@@ -787,6 +817,7 @@ void check_hdr_source_gain_maps(const hyperdr::PhotoMetadata& metadata) {
 
   const auto adaptive = hyperdr::encode_adaptive_heic(gain, metadata, 95, 10);
   check_structure(adaptive, "HDR-source adaptive");
+  require_hevc_profiles(adaptive, true, true);
   hyperdr::verify_heic_decodable(adaptive);
   check(decode_encoded_input(adaptive, "hdr-source-adaptive"), "HLG source to Adaptive HEIC",
         1.5, 3.0);
@@ -1078,6 +1109,7 @@ int main() {
     const auto large_gain = hyperdr::make_gain_map(large, options);
     const auto bytes8 = hyperdr::encode_adaptive_heic(large_gain, metadata, 90, 8);
     check_structure(bytes8, "8-bit grid");
+    require_hevc_profiles(bytes8, false, true);
     decode_and_check(bytes8, 2600, 1408);
     check_gain_decode(bytes8);
     check_semantic_rejections(bytes8);
@@ -1313,25 +1345,26 @@ int main() {
     const auto no_headroom_gain = hyperdr::make_gain_map(small, no_headroom_options);
     hyperdr::verify_ultrahdr_jpeg(
         hyperdr::encode_ultrahdr_jpeg(no_headroom_gain, metadata, 20));
-    auto lossless_probe = small_gain;
-    for (std::size_t i = 0; i < lossless_probe.gain_map.pixels.size(); ++i) {
+    auto gain_probe = small_gain;
+    for (std::size_t i = 0; i < gain_probe.gain_map.pixels.size(); ++i) {
       const auto code = i % 7 == 0 ? 0U : (i % 11 == 0 ? 255U : static_cast<unsigned>((i * 37U) % 255U));
-      lossless_probe.gain_map.pixels[i] = static_cast<float>(code) / 255.0F;
+      gain_probe.gain_map.pixels[i] = static_cast<float>(code) / 255.0F;
     }
     // The codes are synthetic, so the range they span is declared rather than
     // inherited from whatever the photographic renderer chose for `small`: the
     // headroom check below needs at least a stop for the preview divisor to use,
     // and the renderer's local weighting now gives this smooth gradient 0.6.
-    lossless_probe.metadata.gain_max = {2, 1};
-    lossless_probe.metadata.alternate_headroom = {2, 1};
-    lossless_probe.headroom_stops = 2.0F;
-    const auto small8 = hyperdr::encode_adaptive_heic(lossless_probe, metadata, 80, 8);
+    gain_probe.metadata.gain_max = {2, 1};
+    gain_probe.metadata.alternate_headroom = {2, 1};
+    gain_probe.headroom_stops = 2.0F;
+    const auto small8 = hyperdr::encode_adaptive_heic(gain_probe, metadata, 80, 8);
     check_structure(small8, "8-bit single");
+    require_hevc_profiles(small8, false, true);
     decode_and_check(small8, 64, 32);
-    check_gain_decode(small8, &lossless_probe.gain_map);
+    check_gain_decode(small8, &gain_probe.gain_map);
     const auto expected_adaptive = hyperdr::reconstruct_gain_map(
-        lossless_probe.base_linear, lossless_probe.gain_map,
-        lossless_probe.metadata, lossless_probe.headroom_stops);
+        gain_probe.base_linear, gain_probe.gain_map,
+        gain_probe.metadata, gain_probe.headroom_stops);
     require(contains_text(small8, "AdaptiveHDR") &&
                 contains_text(small8, "ISO-21496-1:2025"),
             "Adaptive HEIC is missing its Gain Map XMP declaration");
@@ -1357,7 +1390,7 @@ int main() {
 
     // Same base, compressed the same way; only the Gain Map codes move, so any
     // difference the curve reports has to come from the gain path.
-    auto perturbed_probe = lossless_probe;
+    auto perturbed_probe = gain_probe;
     for (auto& code : perturbed_probe.gain_map.pixels) {
       code = std::min(1.0F, code * 0.5F + 0.25F);
     }
@@ -1369,6 +1402,7 @@ int main() {
     // function, remain distinct from gain-map topology, and decode end-to-end.
     for (const auto encoding : {hyperdr::HdrEncoding::Pq, hyperdr::HdrEncoding::Hlg}) {
         const auto hdr_bytes = hyperdr::encode_hdr_heic(small_gain, metadata, 80, encoding);
+        require_hevc_profiles(hdr_bytes, true, false);
         const auto inspection = hyperdr::inspect_heif(hdr_bytes);
         require(inspection.structurally_valid && inspection.has_heic_brand &&
                     !inspection.has_tmap_brand && !inspection.has_tmap_item &&
@@ -1505,6 +1539,7 @@ int main() {
     // path used by the BT.2100 encodings.
     const auto bytes10 = hyperdr::encode_adaptive_heic(small_gain, metadata, 80, 10);
     check_structure(bytes10, "10-bit single");
+    require_hevc_profiles(bytes10, true, true);
     decode_and_check(bytes10, 64, 32);
     reconstruct_and_check(bytes10, "10-bit single");
     display_curve_identity_check(bytes10, "10-bit single");

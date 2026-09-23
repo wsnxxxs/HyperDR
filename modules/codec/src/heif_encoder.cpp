@@ -30,6 +30,19 @@ void check_heif(heif_error error, const char* operation) {
   if (error.code != heif_error_Ok) throw std::runtime_error(std::string(operation) + ": " + (error.message ? error.message : "unknown libheif error"));
 }
 
+void configure_main10_still(heif_encoder* encoder) {
+  // libheif's x265 plugin defaults to one total frame and Main10 Intra.
+  // Together those settings make x265 signal Range Extensions. The only
+  // encoded frame remains intra even when the sequence permits more frames.
+  // Repeat the parameter sets in that frame so libheif can build hvcC.
+  check_heif(heif_encoder_set_parameter_string(encoder, "x265:total-frames", "0"),
+             "set HEVC Main10 frame count");
+  check_heif(heif_encoder_set_parameter_string(encoder, "x265:keyint", "250"),
+             "set HEVC Main10 keyframe interval");
+  check_heif(heif_encoder_set_parameter_string(encoder, "x265:repeat-headers", "1"),
+             "set HEVC Main10 parameter sets");
+}
+
 struct ImageDeleter { void operator()(heif_image* p) const { if (p) heif_image_release(p); } };
 struct HandleDeleter { void operator()(heif_image_handle* p) const { if (p) heif_image_handle_release(p); } };
 struct EncoderDeleter { void operator()(heif_encoder* p) const { if (p) heif_encoder_release(p); } };
@@ -162,11 +175,11 @@ std::unique_ptr<heif_image, ImageDeleter> make_base(const FloatImage& image, int
   return result;
 }
 
-// The gain map is encoded as 8-bit 4:2:0 YCbCr with neutral chroma instead of true
-// 4:0:0 monochrome: x265 signals monochrome with the format-range-extensions profile
-// (general_profile_idc 4), which is far less widely decodable than plain Main profile,
-// notably on iOS hardware decoders. Neutral-chroma 4:2:0 costs a few kilobytes and
-// keeps the stream in baseline Main/Main Still Picture territory.
+// Encode the gain map as 8-bit 4:2:0 YCbCr with neutral chroma. x265 signals
+// this as Main Still Picture (profile_idc 3), while true 4:0:0 monochrome
+// signals Range Extensions (profile_idc 4). Apple camera HEICs also use
+// monochrome RExt gain maps, so the profile number alone does not establish
+// Apple compatibility.
 std::unique_ptr<heif_image, ImageDeleter> make_gain(const FloatImage& image) {
   heif_image* raw = nullptr;
   check_heif(heif_image_create(static_cast<int>(image.width), static_cast<int>(image.height),
@@ -312,11 +325,9 @@ std::unique_ptr<heif_image_handle, HandleDeleter> encode_base(
   return handle;
 }
 
-// The gain map normally fits one HEVC picture: mathematical maps stop at 3072
-// pixels an edge. A full-resolution map for an HDR source is the size of the
-// base, which for a 60 MP camera is beyond HEVC Level 6.2's largest picture and,
-// losslessly coded, beyond libde265's 16 MiB NAL limit -- the same two reasons
-// the base is tiled. It is tiled the same way, so both grids share one layout.
+// Rendition-based exports use full-resolution gain maps. A 60 MP map exceeds
+// HEVC Level 6.2's largest picture, and a large single slice can exceed
+// libde265's 16 MiB NAL limit. Tile it like the base to avoid both limits.
 std::unique_ptr<heif_image_handle, HandleDeleter> encode_gain_map_item(
     heif_context* context, heif_image* image, heif_encoder* encoder,
     const heif_encoding_options* options, std::uint32_t width, std::uint32_t height) {
@@ -420,12 +431,13 @@ std::vector<std::uint8_t> encode_adaptive_heic(const GainMapResult& images,
   check_heif(heif_context_get_encoder_for_format(context.get(), heif_compression_HEVC, &encoder_raw), "get HEVC encoder");
   std::unique_ptr<heif_encoder, EncoderDeleter> encoder(encoder_raw);
   check_heif(heif_encoder_set_lossy_quality(encoder.get(), std::clamp(quality, 0, 100)), "set HEVC quality");
+  if (depth == 10) configure_main10_still(encoder.get());
   heif_encoder* gain_encoder_raw = nullptr;
   check_heif(heif_context_get_encoder_for_format(context.get(), heif_compression_HEVC,
                                                   &gain_encoder_raw), "get Gain Map HEVC encoder");
   std::unique_ptr<heif_encoder, EncoderDeleter> gain_encoder(gain_encoder_raw);
-  check_heif(heif_encoder_set_lossless(gain_encoder.get(), 1),
-             "set Gain Map HEVC lossless");
+  check_heif(heif_encoder_set_lossy_quality(gain_encoder.get(), 95),
+             "set Gain Map HEVC quality");
 
   auto base = make_base(images.base_linear, depth);
   auto gain = make_gain(images.gain_map);
@@ -472,6 +484,7 @@ std::vector<std::uint8_t> encode_hdr_heic(const PhotoRenditions& images,
   std::unique_ptr<heif_encoder, EncoderDeleter> encoder(encoder_raw);
   check_heif(heif_encoder_set_lossy_quality(encoder.get(), std::clamp(quality, 0, 100)),
              "set HDR HEVC quality");
+  configure_main10_still(encoder.get());
 
   heif_content_light_level light_level{};
   auto image = make_hdr(images, encoding, light_level);

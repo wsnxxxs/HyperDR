@@ -134,6 +134,7 @@ FloatImage render_dcp_base(const FloatImage& input, const DcpRenderContext& cont
   if (input.channels!=3 || !context.profile) throw std::invalid_argument("DCP render requires RGB and a profile");
   const auto& profile=*context.profile;
   const Tone tone(profile.tone_curve);
+  const Tone xmp_tone(profile.xmp_tone_curve);
   const double exposure=exposure_ev+context.baseline_exposure+profile.baseline_exposure_offset;
   const double white=std::exp2(-std::max(0.0,exposure));
   // SDK sample defaults: Shadows=5, ShadowScale=1, Stage3Gain=1. Sensor
@@ -195,6 +196,18 @@ FloatImage render_dcp_base(const FloatImage& input, const DcpRenderContext& cont
       const double lo=std::min({rgb[0],rgb[1],rgb[2]}), hi=std::max({rgb[0],rgb[1],rgb[2]});
       const double low=lookup(lo), high=lookup(hi);
       for (auto& c:rgb) c=hi>lo ? low+(high-low)*(c-lo)/(hi-lo) : low;
+      // An attached XMP look is a second, optional creative stage after the
+      // camera DCP. Keep it in the same ProPhoto domain, before output gamut
+      // conversion. An empty curve must not select Tone's ACR3 fallback.
+      if (!profile.xmp_look_table.values.empty())
+        rgb=apply_map(rgb,profile.xmp_look_table);
+      if (!profile.xmp_tone_curve.empty()) {
+        const double xmp_lo=std::min({rgb[0],rgb[1],rgb[2]});
+        const double xmp_hi=std::max({rgb[0],rgb[1],rgb[2]});
+        const double xmp_low=xmp_tone(xmp_lo), xmp_high=xmp_tone(xmp_hi);
+        for (auto& c:rgb) c=xmp_hi>xmp_lo
+            ? xmp_low+(xmp_high-xmp_low)*(c-xmp_lo)/(xmp_hi-xmp_lo) : xmp_low;
+      }
       rgb=transform(to_p3,rgb);
       for (int c=0;c<3;++c) output.pixels[i+c]=static_cast<float>(pin(rgb[c]));
     }

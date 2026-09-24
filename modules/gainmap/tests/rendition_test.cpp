@@ -276,6 +276,35 @@ void test_hdr_source_outside_p3() {
       "an out-of-P3 green must not be clamped channel by channel");
 }
 
+void test_hdr_rec2020_target() {
+  const float headroom=1000.0F/203.0F;
+  const auto green=rec2020_to_linear_p3(0.0F,2.0F,0.0F);
+  FloatImage source(2,2,3);
+  for(std::size_t i=0;i<source.pixels.size();++i) source.pixels[i]=green[i%3];
+  RenderOptions options; options.auto_headroom=false;
+  options.headroom_stops=std::log2(headroom);
+  const InputDescription input{InputDomain::kDisplayReferredHdr,headroom};
+  const auto p3=render_renditions(source,options,{},input,RenderTarget::Hdr);
+  options.hdr_gamut=ColorGamut::kRec2020;
+  const auto wide=render_renditions(source,options,{},input,RenderTarget::Hdr);
+  for(int c=0;c<3;++c) {
+    require(std::abs(wide.hdr.pixels[c]-green[c])<2e-5F,
+        "Rec.2020 target must retain an in-gamut HDR source outside P3");
+    require(p3.hdr.pixels[c]>=-1e-6F,
+        "default P3 target must fit an HDR source outside P3");
+    require(std::abs(wide.sdr.pixels[c]-p3.sdr.pixels[c])<1e-6F,
+        "HDR target gamut must not change the SDR base");
+  }
+  require(wide.hdr.pixels[0]<-0.1F && wide.hdr.pixels[2]<-0.01F,
+      "Rec.2020 target must retain signed P3 working coordinates");
+  options.clamp_srgb=true;
+  const auto limited=render_renditions(source,options,{},input,RenderTarget::Hdr);
+  const auto rec709=linear_p3_to_rec709(limited.hdr.pixels[0],
+      limited.hdr.pixels[1],limited.hdr.pixels[2]);
+  for(float c:rec709) require(c>=-1e-5F,
+      "sRGB limit must take priority over Rec.2020 output gamut");
+}
+
 void test_independent_rgb_renditions() {
   PhotoRenditions photo;
   photo.sdr = FloatImage(5, 3, 3);
@@ -613,6 +642,7 @@ void test_sdr_rolloff_ignores_expansion_start() {
 int main() {
   try { test_zero_and_spatial_gain(); test_model_grading(); test_final_gain_statistics();
         test_hdr_source_reconstructs_itself(); test_hdr_source_outside_p3();
+        test_hdr_rec2020_target();
         test_independent_rgb_renditions(); test_scene_base_without_gain_preparation();
         test_rendition_codes_use_serialized_metadata();
         test_graded_sdr_endpoint_packaging();

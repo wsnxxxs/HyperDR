@@ -2,6 +2,7 @@
 #include "hyperdr/look/options.hpp"
 #include "hyperdr/look/analysis.hpp"
 #include "hyperdr/image/image.hpp"
+#include "hyperdr/image/color.hpp"
 #include <array>
 #include <optional>
 #include <span>
@@ -11,6 +12,9 @@ struct RenderOptions {
   // Keep the rendered base and its gain-map reconstruction inside sRGB
   // chromaticity while retaining HDR luminance headroom.
   bool clamp_srgb{false};
+  // Target for the HDR rendition; the SDR base remains Display P3.
+  // BT.2100 PQ/HLG callers select Rec.2020; gain-map output keeps P3.
+  ColorGamut hdr_gamut{ColorGamut::kDisplayP3};
   bool auto_exposure{true};
   float exposure_ev{0.0F};
   // Creative offset applied after automatic or manual exposure selection.
@@ -102,6 +106,7 @@ struct PhotoRenditions {
   AuthoredGainMap authored_gain_map{};
   RenderStats stats;
   bool clamp_srgb{false};
+  ColorGamut hdr_gamut{ColorGamut::kDisplayP3};
   // Selection made before creative grading; reused after gain quantization.
   std::vector<std::uint8_t> below_knee;
 };

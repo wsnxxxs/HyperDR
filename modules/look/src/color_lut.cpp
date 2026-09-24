@@ -186,7 +186,11 @@ void apply_rendition_lut(PhotoRenditions& out, const ColorLutOptions& grade, con
       // channel would shift the hue of every colour the grade pushed out.
       rgb=fit_linear_p3_gamut(rgb[0],rgb[1],rgb[2],1.0F);
       if(out.clamp_srgb) rgb=compress_linear_p3_to_srgb(rgb[0],rgb[1],rgb[2]);
-      const auto hdr_rgb=fit_linear_p3_gamut(rgb[0]*ratio,rgb[1]*ratio,rgb[2]*ratio,peak);
+      // Creative SDR LUTs have already passed through the SDR base gamut fit.
+      // The HDR endpoint can use a wider output cube, but that cannot recover
+      // chromaticity the SDR grade has discarded.
+      const auto hdr_rgb=fit_linear_p3_to_gamut(rgb[0]*ratio,rgb[1]*ratio,
+          rgb[2]*ratio,peak,out.clamp_srgb ? ColorGamut::kSrgb : out.hdr_gamut);
       // Construct the full-grade endpoints first. The HDR source can have a
       // different hue from SDR, so each rendition blends from its own RGB.
       for(int c=0;c<3;++c) {

@@ -30,8 +30,9 @@ float solve_ceiling(float knee, float peak, float target) {
 float mapped(float y, float knee, float ceiling) {
   return y > 1e-6F ? std::exp2(shoulder(std::log2(y), knee, ceiling)) : y;
 }
-std::array<float, 3> fit(std::array<float, 3> rgb, float limit) {
-  return fit_linear_p3_gamut(rgb[0], rgb[1], rgb[2], limit);
+std::array<float, 3> fit(std::array<float, 3> rgb, float limit,
+                         ColorGamut gamut = ColorGamut::kDisplayP3) {
+  return fit_linear_p3_to_gamut(rgb[0], rgb[1], rgb[2], limit, gamut);
 }
 
 PhotoRenditions render_dual_rendition(const FloatImage& source,
@@ -68,6 +69,7 @@ PhotoRenditions render_dual_rendition(const FloatImage& source,
   out.authored_gain_channels = input.gain_map.channels;
   out.authored_gain_map = input.gain_map;
   out.clamp_srgb = options.clamp_srgb;
+  out.hdr_gamut = options.hdr_gamut;
   std::vector<std::uint64_t> wide(source.height), eligible(source.height);
   std::vector<float> channel_peaks(source.height, 1.0F);
   parallel_for_rows(source.height, [&](std::uint32_t y) {
@@ -109,6 +111,9 @@ PhotoRenditions render_dual_rendition(const FloatImage& source,
       if (options.clamp_srgb) {
         sdr = compress_linear_p3_to_srgb(sdr[0], sdr[1], sdr[2]);
         if (want_hdr) hdr = compress_linear_p3_to_srgb(hdr[0], hdr[1], hdr[2], true);
+      } else if (want_hdr && options.hdr_gamut != ColorGamut::kDisplayP3) {
+        const float limit = std::max({1.0F, hdr[0], hdr[1], hdr[2]});
+        hdr = fit(hdr, limit, options.hdr_gamut);
       }
       for (int c = 0; c < 3; ++c) {
         out.sdr.pixels[i+c] = sdr[c];
@@ -252,7 +257,8 @@ PhotoRenditions render_renditions(const FloatImage& source,
             const float scale = hdr_y / base_y;
             auto rgb = fit({result.sdr.pixels[i] * scale,
                 result.sdr.pixels[i+1] * scale, result.sdr.pixels[i+2] * scale},
-                target_peak);
+                target_peak, options.clamp_srgb ? ColorGamut::kDisplayP3 :
+                    options.hdr_gamut);
             if (options.clamp_srgb)
               rgb = compress_linear_p3_to_srgb(rgb[0], rgb[1], rgb[2], true);
             for (int c = 0; c < 3; ++c) result.hdr.pixels[i+c] = rgb[c];
@@ -298,6 +304,7 @@ PhotoRenditions render_renditions(const FloatImage& source,
     out.below_knee.resize(static_cast<std::size_t>(source.width)*source.height);
   }
   out.clamp_srgb = options.clamp_srgb;
+  out.hdr_gamut = options.hdr_gamut;
   out.hdr_is_source = input_hdr && want_hdr;
   std::vector<std::uint64_t> wide(source.height), eligible(source.height);
   std::optional<BilinearGridSampler> scene_sampler;
@@ -344,7 +351,8 @@ PhotoRenditions render_renditions(const FloatImage& source,
         const float scale = luma > kEpsilon ? sdr_y / luma : 0;
         base = fit({rgb[0]*scale, rgb[1]*scale, rgb[2]*scale}, 1);
         const float hdr_scale = luma > kEpsilon ? hdr_y / luma : 0;
-        hdr = fit({rgb[0]*hdr_scale, rgb[1]*hdr_scale, rgb[2]*hdr_scale}, peak);
+        hdr = fit({rgb[0]*hdr_scale, rgb[1]*hdr_scale, rgb[2]*hdr_scale},
+            peak, options.clamp_srgb ? ColorGamut::kDisplayP3 : options.hdr_gamut);
       }
       if (options.clamp_srgb) {
         base = compress_linear_p3_to_srgb(base[0], base[1], base[2]);

@@ -340,8 +340,16 @@ PhotoRenditions render_renditions(const FloatImage& source,
         const float gain = want_hdr && strength > 0 ? scene_sampler->sample(*stops_view, x, y) * strength : 0;
         hdr_y = sdr_y * std::exp2(gain);
         base = render_common_chroma(rgb[0], rgb[1], rgb[2], luma, sdr_y, sdr_y, 1, options.look);
-        hdr = base;
-        for (auto& c : hdr) c *= std::exp2(gain);
+        if (want_hdr && !options.clamp_srgb &&
+            options.hdr_gamut == ColorGamut::kRec2020) {
+          // Keep the existing P3 SDR base, but develop the wider HDR colour
+          // from the signed source before the base's gamut fit discards it.
+          hdr = render_hdr_chroma(rgb[0], rgb[1], rgb[2], luma,
+              hdr_y, peak, options.look, options.hdr_gamut);
+        } else {
+          hdr = base;
+          for (auto& c : hdr) c *= std::exp2(gain);
+        }
       } else {
         sdr_y = available > kEpsilon ? std::min(1.0F, mapped(luma, sdr_knee, sdr_ceiling)) : std::min(1.0F, luma);
         hdr_y = input_hdr ? (stops <= kEpsilon ? sdr_y : hdr_passthrough ? luma :

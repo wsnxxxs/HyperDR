@@ -1,4 +1,5 @@
 #include "hyperdr/image/color.hpp"
+#include "hyperdr/image/transfer.hpp"
 
 #include <algorithm>
 #include <array>
@@ -204,6 +205,18 @@ int main() {
     const auto inside_fit = fit_linear_p3_gamut(0.3F, 0.6F, 0.1F, 1.0F);
     require(inside_fit == std::array<float, 3>{0.3F, 0.6F, 0.1F},
             "gamut fitting changed a colour already inside");
+    const auto rec2020_green = rec2020_to_linear_p3(0.0F, 1.0F, 0.0F);
+    require(fit_linear_p3_to_gamut(rec2020_green[0], rec2020_green[1],
+                rec2020_green[2], 1.0F, ColorGamut::kRec2020) == rec2020_green,
+            "Rec.2020 matrix rounding must not compress a pure target primary");
+    const auto outside_2020 = rec2020_to_linear_p3(-0.01F, 0.8F, 0.0F);
+    const auto fitted_2020 = fit_linear_p3_to_gamut(outside_2020[0],
+        outside_2020[1], outside_2020[2], 1.0F, ColorGamut::kRec2020);
+    const auto target_2020 = p3_to_rec2020(fitted_2020[0], fitted_2020[1],
+        fitted_2020[2]);
+    for (float value : target_2020)
+      require(value >= -2.0e-6F && value <= 1.0F + 2.0e-6F,
+              "Rec.2020 fit left the target cube");
     int oklab_cases = 0;
     int straight_cases = 0;
     for (const bool rec709 : {false, true}) {

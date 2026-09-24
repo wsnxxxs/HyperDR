@@ -86,10 +86,14 @@ SourceColor source_color_for(const avifImage& image, ColorGamut default_gamut) {
   if (image.icc.data != nullptr && image.icc.size != 0 &&
       image.icc.size <= (4U << 20U) && !hdr_transfer) {
     color.icc.assign(image.icc.data, image.icc.data + image.icc.size);
+    color.source = "icc";
     return color;
   }
   color.primaries = static_cast<int>(image.colorPrimaries);
   color.transfer = transfer;
+  if (!codec::cicp_primaries_unspecified(color.primaries) ||
+      (transfer != codec::kCicpTransferReserved &&
+       transfer != codec::kCicpTransferUnspecified)) color.source = "cicp";
   if (codec::cicp_primaries_unspecified(color.primaries)) {
     color.primaries = codec::cicp_primaries_for_gamut(default_gamut);
   }
@@ -173,6 +177,7 @@ DecodedImage decode_avif_bytes(const std::vector<std::uint8_t>& bytes,
 
   const SourceColor color = source_color_for(*image, default_gamut);
   DecodedImage result;
+  result.source_color = describe_source_color(color);
   result.linear_p3 = interleaved_rgb_to_linear_p3(
       rgb.pixels, rgb.width, rgb.height, rgb.rowBytes, static_cast<int>(rgb.depth),
       color, plan.width, plan.height, !has_alpha ? RgbAlpha::None

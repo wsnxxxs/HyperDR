@@ -12,6 +12,7 @@
 #include "hyperdr/container/exif.hpp"
 #include "hyperdr/image/color.hpp"
 #include "hyperdr/image/image.hpp"
+#include "hyperdr/image/source_color.hpp"
 #include "hyperdr/look/options.hpp"
 
 #include <optional>
@@ -201,6 +202,7 @@ struct DecodeInfo {
 
 struct DecodedImage {
   FloatImage linear_p3;
+  SourceColorInfo source_color;
   // Authored SDR base for a gain-map photograph. Geometry always matches
   // linear_p3, which holds the reconstructed HDR alternate.
   std::optional<FloatImage> authored_sdr;

@@ -96,6 +96,7 @@ DecodedImage from_interleaved_rgb(const std::uint8_t* pixels,
                                   codec::RgbAlpha alpha = codec::RgbAlpha::None,
                                   bool composite_alpha = true) {
   DecodedImage result;
+  result.source_color = codec::describe_source_color(color);
   result.linear_p3 =
       interleaved_rgb_to_linear_p3(pixels, width, height, stride, bits, color,
                                   out_width, out_height, alpha, composite_alpha);
@@ -391,6 +392,7 @@ SourceColor png_source_color(png_structp png, png_infop info, ColorGamut fallbac
   // PNG 3 specifies cICP > iCCP > sRGB > cHRM/gAMA. Do not send a
   // lower-priority ICC profile to the shared ICC-first raster converter.
   if (has_cicp) {
+    color.source = "cicp";
     if (matrix != 0 || full_range > 1)
       throw std::runtime_error("PNG cICP requires RGB samples and a valid range flag");
     narrow_range = full_range == 0;
@@ -405,10 +407,15 @@ SourceColor png_source_color(png_structp png, png_infop info, ColorGamut fallbac
   png_uint_32 profile_size = 0;
   if (png_get_iCCP(png, info, &profile_name, &compression, &profile, &profile_size)) {
     color.icc.assign(profile, profile + profile_size);
+    color.source = "icc";
     return color;
   }
   int intent = 0;
-  if (png_get_sRGB(png, info, &intent)) return SourceColor(ColorGamut::kSrgb);
+  if (png_get_sRGB(png, info, &intent)) {
+    SourceColor srgb(ColorGamut::kSrgb);
+    srgb.source = "png-srgb";
+    return srgb;
+  }
 
   double gamma = 0;
   const bool has_gamma = png_get_gAMA(png, info, &gamma) != 0;
@@ -423,6 +430,7 @@ SourceColor png_source_color(png_structp png, png_infop info, ColorGamut fallbac
       &chromaticities.Green.x, &chromaticities.Green.y,
       &chromaticities.Blue.x, &chromaticities.Blue.y) != 0;
   if (!has_gamma && !has_chrm) return color;
+  color.source = "png-chrm-gamma";
 
   // gAMA is the encoding exponent. Little CMS expects the inverse decoding
   // curve. With cHRM alone retain the documented sRGB transfer assumption.
@@ -557,6 +565,7 @@ DecodedImage decode_png(const std::vector<std::uint8_t>& bytes,
   }
   checked_png_read(png, [&] { png_read_end(png, info); });
   DecodedImage result;
+  result.source_color = codec::describe_source_color(color);
   result.linear_p3 = std::move(linear);
   result.decode.sensor_width = result.decode.target_width = width;
   result.decode.sensor_height = result.decode.target_height = height;
@@ -653,6 +662,8 @@ DecodedImage decode_heif_rgb_handle(const heif_context* context,
       if (heif_image_handle_get_raw_color_profile(handle, color.icc.data()).code !=
           heif_error_Ok) {
         color.icc.clear();
+      } else {
+        color.source = "icc";
       }
     }
   }
@@ -665,6 +676,7 @@ DecodedImage decode_heif_rgb_handle(const heif_context* context,
       const int transfer = profile_raw->transfer_characteristics;
       if (color.icc.empty() || transfer == codec::kCicpTransferPq ||
           transfer == codec::kCicpTransferHlg) {
+        color.source = "cicp";
         if (transfer == codec::kCicpTransferPq || transfer == codec::kCicpTransferHlg)
           color.icc.clear();
         color.primaries = profile_raw->color_primaries;
@@ -871,6 +883,7 @@ DecodedImage decode_adaptive_heic(const std::vector<std::uint8_t>& bytes,
   // A tmap file whose gain map adds nothing is an SDR picture in an HDR
   // container, and saying so keeps it out of the highlight-splitting renderer.
   result.domain = InputDomain::kDualRendition;
+  result.source_color.name = "Adaptive HDR (base: " + result.source_color.name + ")";
   normalize_orientation(result, exif_orientation);
   return result;
 }

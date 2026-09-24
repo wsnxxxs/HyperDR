@@ -645,6 +645,7 @@ PhotoRenditions crop_preview_photo(PhotoRenditions photo,
 std::vector<std::uint8_t> photo_preview_packet(const PhotoRenditions& result,
                                                 const DecodeInfo& decode,
                                                 const InputDescription& input, bool hasCaptureMetadata,
+                                                const SourceColorInfo& source_color,
                                                 const PreviewRegion* region = nullptr,
                                                 std::uint32_t full_width = 0,
                                                 std::uint32_t full_height = 0) {
@@ -666,6 +667,12 @@ std::vector<std::uint8_t> photo_preview_packet(const PhotoRenditions& result,
       .member("relativeSdrWhite", 1.0F)
       .member("headroomStops", result.stats.headroom_stops)
       .member("inputDomain", input_domain_name(input.domain))
+      .begin_object("sourceColor")
+      .member("name", source_color.name)
+      .member("primaries", source_color.primaries)
+      .member("transfer", source_color.transfer)
+      .member("source", source_color.source)
+      .end_object()
       .member("hasCaptureMetadata", hasCaptureMetadata)
       .member("inputHeadroomStops", std::log2(input.headroom))
       .member("status", decode.degraded ? "degraded" : "ok")
@@ -701,8 +708,10 @@ std::vector<std::uint8_t> photo_preview_packet(const PhotoRenditions& result,
 }
 
 std::vector<std::uint8_t> native_preview_packet(const GainMapResult& result,
-    const DecodeInfo& decode, const InputDescription& input, bool hasCaptureMetadata) {
-  return photo_preview_packet(renditions_from_gain_map(result),decode,input,hasCaptureMetadata);
+    const DecodeInfo& decode, const InputDescription& input, bool hasCaptureMetadata,
+    const SourceColorInfo& source_color) {
+  return photo_preview_packet(renditions_from_gain_map(result),decode,input,
+                              hasCaptureMetadata, source_color);
 }
 
 std::vector<std::uint8_t> native_model_gain_packet(
@@ -867,6 +876,7 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
   options.input = path_from_utf8(argv[2]);
   PreviewRegion region;
   parse_settings(argc, argv, 3, options, nullptr, &region);
+  apply_output_color_options(options);
   if (options.output_directory.empty()) {
     throw std::invalid_argument("preview-frame --output is required");
   }
@@ -918,6 +928,7 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
   const auto packet_from_photo = [&](PhotoRenditions photo) {
     if (detail) photo = crop_preview_photo(std::move(photo), region);
     return photo_preview_packet(photo, decoded.decode, input, hasCaptureMetadata,
+        decoded.source_color,
         detail ? &region : nullptr, full_width, full_height);
   };
   const auto release_detail_render_cache = [&] {
@@ -990,7 +1001,8 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
         options.color_lut, nullptr,
         cached && !decoded.raw_profile && input.domain==InputDomain::kSceneReferred ? &cached->analysis : nullptr,
         cached ? &cached->preparation : nullptr);
-    if(options.encoding == OutputEncoding::SdrJpeg) fit_sdr_to_srgb(photo.sdr);
+    if (is_sdr_encoding(options.encoding) &&
+        resolved_sdr_gamut(options) == ColorGamut::kSrgb) fit_sdr_to_srgb(photo.sdr);
     if(options.encoding == OutputEncoding::Adaptive ||
         (options.encoding == OutputEncoding::UltraHdr && photo.hdr_is_source)) {
       result=gain_map_from_renditions(std::move(photo),
@@ -1009,7 +1021,8 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
   if(!options.ai_model_path.empty() || !options.external_gain_path.empty()) {
     if(!options.color_lut.path.empty() || !is_gain_map_encoding(options.encoding)) {
       auto photo=render_graded_gain_map(result, options.color_lut, !is_sdr_encoding(options.encoding));
-      if(options.encoding == OutputEncoding::SdrJpeg) fit_sdr_to_srgb(photo.sdr);
+      if (is_sdr_encoding(options.encoding) &&
+          resolved_sdr_gamut(options) == ColorGamut::kSrgb) fit_sdr_to_srgb(photo.sdr);
       if(is_gain_map_encoding(options.encoding)) result.base_linear=std::move(photo.sdr);
       else {
         auto bytes=packet_from_photo(std::move(photo));
@@ -1030,11 +1043,14 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
   }
   if (packet) {
     *packet = !result.clamp_srgb && result.gain_map.channels == 1
-        ? compact_preview_packet(result, decoded.decode, input,hasCaptureMetadata)
-        : native_preview_packet(result, decoded.decode, input,hasCaptureMetadata);
+        ? compact_preview_packet(result, decoded.decode, input, hasCaptureMetadata,
+                                 decoded.source_color)
+        : native_preview_packet(result, decoded.decode, input, hasCaptureMetadata,
+                                decoded.source_color);
   } else {
     write_binary_file_atomic(options.output_directory,
-                             native_preview_packet(result, decoded.decode, input,hasCaptureMetadata), true);
+                             native_preview_packet(result, decoded.decode, input,
+                                                   hasCaptureMetadata, decoded.source_color), true);
   }
   return 0;
 }
@@ -1134,6 +1150,7 @@ int model_gain_command(int argc, char** argv) {
   ConvertOptions options;
   options.input = path_from_utf8(argv[2]);
   parse_settings(argc, argv, 3, options);
+  apply_output_color_options(options);
   if (options.ai_model_path.empty()) {
     throw std::invalid_argument("model-gain requires --ai-model");
   }
@@ -1273,6 +1290,12 @@ std::string model_input_report(const std::filesystem::path& input,
       .member("raw_lens_profile_sha256", decoded.raw_lens_profile_path.empty() ? std::string{} : sha256_file_hex(decoded.raw_lens_profile_path))
       .member("raw_half_size", raw.half_size)
       .member("input_domain", input_domain_name(decoded.describe_input().domain))
+      .begin_object("source_color")
+      .member("name", decoded.source_color.name)
+      .member("primaries", decoded.source_color.primaries)
+      .member("transfer", decoded.source_color.transfer)
+      .member("source", decoded.source_color.source)
+      .end_object()
       .member("default_crop_present", d.default_crop_present)
       .member("requested_crop_applied", d.target_dimensions_applied)
       .begin_object("development_recipe")
@@ -1351,6 +1374,7 @@ int model_input_command(int argc, char** argv) {
   if (output.empty() || report.empty()) {
     throw std::invalid_argument("model-input requires --output and --report");
   }
+  apply_output_color_options(options);
   const std::filesystem::path input = path_from_utf8(argv[2]);
   if (same_path(input, output) || same_path(input, report) || same_path(output, report)) {
     throw std::invalid_argument("model-input source, pixels and report must be distinct");

@@ -5,5 +5,6 @@
 namespace hyperdr {
 // Aligned float SDR base plus encoded monochrome gain, reconstructed by the viewer.
 std::vector<std::uint8_t> compact_preview_packet(const GainMapResult& result,
-    const DecodeInfo& decode, const InputDescription& input, bool hasCaptureMetadata = false);
+    const DecodeInfo& decode, const InputDescription& input, bool hasCaptureMetadata = false,
+    const SourceColorInfo& source_color = {});
 }

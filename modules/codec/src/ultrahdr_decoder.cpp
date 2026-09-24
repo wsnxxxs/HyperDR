@@ -178,6 +178,14 @@ DecodedImage decode_ultrahdr_bytes(const std::vector<std::uint8_t>& bytes,
   const auto gamut = image->cg;
 
   DecodedImage result;
+  const char* source_primaries = gamut == UHDR_CG_DISPLAY_P3 ? "Display P3"
+      : gamut == UHDR_CG_BT_2100 ? "Rec.2020"
+      : gamut == UHDR_CG_BT_709 ? "Rec.709"
+      : default_gamut == ColorGamut::kDisplayP3 ? "Display P3 (assumed)"
+      : default_gamut == ColorGamut::kRec2020 ? "Rec.2020 (assumed)"
+      : "Rec.709 (assumed)";
+  result.source_color = {"Ultra HDR", source_primaries,
+                         "Gain-map HDR reconstruction", "ultrahdr"};
   result.linear_p3 = FloatImage(image->w, image->h, 3);
   result.decode.sensor_width = image->w;
   result.decode.sensor_height = image->h;

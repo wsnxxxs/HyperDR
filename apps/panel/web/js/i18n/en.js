@@ -54,7 +54,7 @@ export default {
   "lut.spaceClose": "Close space settings",
   "lut.spaceHelp": "Set the input and output spaces specified by the LUT provider. Changes preview immediately.",
 
-  "hdr.sdrOutput": "SDR preview · sRGB JPEG output",
+  "hdr.sdrOutput": "SDR preview · {gamut} {format} output",
   "hdr.reason.sdrOutput": "SDR output",
 
   "enc.sdr-jpeg.hint": "8-bit JPEG with a tagged output gamut.",

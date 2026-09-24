@@ -15,7 +15,16 @@ HEIC through its `tmap` gain map, and a BT.2100 PQ or HLG file -- HEIC or AVIF,
 4:2:0, 4:2:2 or 4:4:4, which is what cameras such as Sony's write -- through the
 exact inverse of the transfer function this project encodes with. All of them
 land in the same linear Display P3 working space as a RAW, so the look controls,
-the preview and the six exports behave the same whatever the input was.
+the preview and the six exports share one pipeline whatever the input was.
+
+SDR JPEG and 16-bit TIFF support `--output-gamut auto|srgb|p3`. The defaults
+are sRGB for JPEG and Display P3 for TIFF; both pixels and embedded ICC match
+the selected space, and the preview applies the same final mapping. The HDR
+`--clamp-srgb` restriction does not affect SDR exports. PQ/HLG output maps HDR
+colour into Rec.2020 rather than first reducing it to P3. Input colour
+interpretation and its source (ICC, CICP, RAW or an assumption) are included in
+previews and reports. `--color-gamut` remains an untagged-input fallback with
+sRGB transfer, not an output choice or a PQ/HLG override.
 
 Creative colour LUTs are independent of RAW sensor linearization. Import a
 1D/3D `.cube`, declare its input/output colour spaces, and choose SDR JPEG or

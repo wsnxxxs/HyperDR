@@ -116,6 +116,9 @@
             "rec2020"
           ]
         },
+        "output_gamut": {
+          "enum": ["auto", "srgb", "p3"]
+        },
         "clamp_srgb": {
           "type": "boolean"
         },
@@ -495,6 +498,17 @@
             "dual-rendition",
             "unknown"
           ]
+        },
+        "source_color": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "primaries", "transfer", "source"],
+          "properties": {
+            "name": {"type": "string"},
+            "primaries": {"type": "string"},
+            "transfer": {"type": "string"},
+            "source": {"type": "string"}
+          }
         },
         "input_headroom": {
           "type": "number",

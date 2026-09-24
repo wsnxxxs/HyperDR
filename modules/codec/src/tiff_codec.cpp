@@ -134,6 +134,7 @@ DecodedImage decode_tiff_bytes(const std::vector<std::uint8_t>& bytes,
       icc_size && icc_data) {
     color.icc.assign(static_cast<std::uint8_t*>(icc_data),
                      static_cast<std::uint8_t*>(icc_data) + icc_size);
+    color.source = "icc";
   }
   const RgbRowTransform transform(color, bits, false, gray);
   const auto plan = raster_decode_plan(width, height, preview_max_edge);
@@ -206,6 +207,7 @@ DecodedImage decode_tiff_bytes(const std::vector<std::uint8_t>& bytes,
     }
   }
   DecodedImage result;
+  result.source_color = describe_source_color(color);
   result.linear_p3 = std::move(linear);
   result.decode.sensor_width = result.decode.target_width = width;
   result.decode.sensor_height = result.decode.target_height = height;
@@ -223,9 +225,11 @@ DecodedImage decode_tiff_bytes(const std::vector<std::uint8_t>& bytes,
 }  // namespace codec
 
 std::vector<std::uint8_t> encode_sdr_tiff(const FloatImage& image,
-                                          const PhotoMetadata& metadata) {
+                                          const PhotoMetadata& metadata, ColorGamut gamut) {
   image.require_consistent("SDR TIFF");
   if (image.channels != 3) throw std::invalid_argument("SDR TIFF requires RGB pixels");
+  if (gamut != ColorGamut::kSrgb && gamut != ColorGamut::kDisplayP3)
+    throw std::invalid_argument("SDR TIFF supports sRGB or Display P3");
   codec::MemoryFile file;
   file.writable = true;
   {
@@ -242,10 +246,10 @@ std::vector<std::uint8_t> encode_sdr_tiff(const FloatImage& image,
         !TIFFSetField(tiff.get(), TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT) ||
         !TIFFSetField(tiff.get(), TIFFTAG_ROWSPERSTRIP, TIFFDefaultStripSize(tiff.get(), 0)))
       throw std::runtime_error("cannot configure SDR TIFF");
-    const auto icc = codec::display_p3_profile();
+    const auto icc = gamut == ColorGamut::kSrgb ? codec::srgb_profile() : codec::display_p3_profile();
     if (!TIFFSetField(tiff.get(), TIFFTAG_ICCPROFILE,
                       static_cast<std::uint32_t>(icc.size()), icc.data()))
-      throw std::runtime_error("cannot attach Display P3 ICC to TIFF");
+      throw std::runtime_error("cannot attach colour ICC to TIFF");
     if (!metadata.make.empty()) TIFFSetField(tiff.get(), TIFFTAG_MAKE, metadata.make.c_str());
     if (!metadata.model.empty()) TIFFSetField(tiff.get(), TIFFTAG_MODEL, metadata.model.c_str());
     if (!metadata.artist.empty()) TIFFSetField(tiff.get(), TIFFTAG_ARTIST, metadata.artist.c_str());
@@ -254,10 +258,15 @@ std::vector<std::uint8_t> encode_sdr_tiff(const FloatImage& image,
     TIFFSetField(tiff.get(), TIFFTAG_SOFTWARE, "HyperDR");
     std::vector<std::uint16_t> row(static_cast<std::size_t>(image.width) * 3);
     for (std::uint32_t y = 0; y < image.height; ++y) {
-      for (std::size_t i = 0; i < row.size(); ++i) {
-        const float linear = image.pixels[static_cast<std::size_t>(y) * row.size() + i];
-        const float encoded = srgb_oetf(std::clamp(std::isfinite(linear) ? linear : 0.0F, 0.0F, 1.0F));
-        row[i] = static_cast<std::uint16_t>(std::lround(encoded * 65535.0F));
+      for (std::size_t x = 0; x < image.width; ++x) {
+        const auto i = static_cast<std::size_t>(y) * row.size() + x * 3;
+        auto color = fit_linear_p3_gamut(image.pixels[i], image.pixels[i+1], image.pixels[i+2],
+                                         1.0F, gamut == ColorGamut::kSrgb);
+        if (gamut == ColorGamut::kSrgb) color = linear_p3_to_rec709(color[0], color[1], color[2]);
+        for (unsigned c = 0; c < 3; ++c) {
+          const float encoded = srgb_oetf(std::clamp(color[c], 0.0F, 1.0F));
+          row[x * 3 + c] = static_cast<std::uint16_t>(std::lround(encoded * 65535.0F));
+        }
       }
       if (TIFFWriteScanline(tiff.get(), row.data(), y) < 0)
         throw std::runtime_error("SDR TIFF scanline encoding failed");

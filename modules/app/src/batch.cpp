@@ -269,9 +269,9 @@ std::vector<std::uint8_t> encode_for(const PhotoRenditions& photo, const GainMap
                                      const ConvertOptions& options) {
   switch (options.encoding) {
     case HdrEncoding::SdrJpeg:
-      return encode_sdr_jpeg(photo.sdr, metadata, options.quality);
+      return encode_sdr_jpeg(photo.sdr, metadata, options.quality, resolved_sdr_gamut(options));
     case HdrEncoding::SdrTiff:
-      return encode_sdr_tiff(photo.sdr, metadata);
+      return encode_sdr_tiff(photo.sdr, metadata, resolved_sdr_gamut(options));
     case HdrEncoding::Adaptive:
       return encode_adaptive_heic(images, metadata, options.quality, options.depth,
                                   options.hevc_preset);
@@ -363,7 +363,8 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     } else {
       photo = render_graded_gain_map(gain, options.color_lut, target == RenderTarget::Hdr);
     }
-    if (options.encoding == HdrEncoding::SdrJpeg) fit_sdr_to_srgb(photo.sdr);
+    if (is_sdr_encoding(options.encoding) && resolved_sdr_gamut(options) == ColorGamut::kSrgb)
+      fit_sdr_to_srgb(photo.sdr);
     const bool codec_gain = options.encoding == OutputEncoding::UltraHdr &&
         options.ai_model_path.empty() && !external && !photo.hdr_is_source;
     const bool explicit_gain = is_gain_map_encoding(options.encoding) && !codec_gain;
@@ -382,6 +383,7 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     // bypass HLG's 1000-nit ceiling.
     validate_encoding_headroom(options.encoding, rendered_stats.headroom_stops);
     result.sensor_width = staged.image.decode.sensor_width;
+    result.source_color = staged.image.source_color;
     result.raw_white_balance = staged.image.raw_white_balance;
     result.raw_color_matrix = staged.image.raw_color_matrix;
     result.raw_lens_profile = path_utf8(staged.image.raw_lens_profile_path);
@@ -513,14 +515,18 @@ void require_decode_resolution(const ConvertOptions& options,
 }
 
 FileResult convert_file(const std::filesystem::path& input,
-                        const ConvertOptions& options,
+                        const ConvertOptions& requested_options,
                         const std::string& fingerprint) {
+  auto options = requested_options;
+  apply_output_color_options(options);
   auto staged = decode_stage(input, options, fingerprint);
   finish_stage(staged, options, fingerprint);
   return staged.result;
 }
 
-int run_conversion(const ConvertOptions& options) {
+int run_conversion(const ConvertOptions& requested_options) {
+  auto options = requested_options;
+  apply_output_color_options(options);
   validate_convert_options(options);
   const auto files = discover_input_files(options);
   check_output_collisions(files, options);

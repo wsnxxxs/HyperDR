@@ -9,6 +9,20 @@
 
 namespace hyperdr {
 
+ColorGamut resolved_sdr_gamut(const ConvertOptions& options) {
+  return options.output_gamut.value_or(options.encoding == OutputEncoding::SdrJpeg
+      ? ColorGamut::kSrgb : ColorGamut::kDisplayP3);
+}
+
+void apply_output_color_options(ConvertOptions& options) {
+  options.gain.hdr_gamut = is_bt2100_encoding(options.encoding)
+      ? ColorGamut::kRec2020 : ColorGamut::kDisplayP3;
+  // SDR output mapping happens after the creative grade. A retained HDR
+  // chromaticity restriction must not silently change the TIFF/JPEG rendition.
+  if (is_sdr_encoding(options.encoding)) options.clamp_srgb = false;
+  options.gain.clamp_srgb = options.clamp_srgb;
+}
+
 bool uses_native_model(const ConvertOptions& options) {
   return !options.ai_model_path.empty();
 }
@@ -36,6 +50,9 @@ void validate_encoding_headroom(HdrEncoding encoding, float headroom_stops) {
 }
 
 void validate_convert_options(const ConvertOptions& options) {
+  if (options.output_gamut && (!is_sdr_encoding(options.encoding) ||
+      *options.output_gamut == ColorGamut::kRec2020))
+    throw std::invalid_argument("--output-gamut selects sRGB or P3 for SDR JPEG/TIFF only");
   if (options.output_directory.empty()) {
     throw std::invalid_argument("--output is required");
   }

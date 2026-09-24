@@ -50,6 +50,7 @@ acting on it, and do not treat a measurement here as a live guarantee.
 
 | Evidence | Status |
 | --- | --- |
+| [2026-09-24 local Adobe pipeline research](archive/adobe-local-pipeline-research-2026-09-24.md) | Local profiles, model manifests, binary component evidence and TIFF metadata; separates observed data from inferred pipeline behavior. |
 | [2026-09-23 HEIF review verification](heif-review-2026-09-23.md) | Separates reproduced HEVC signalling from unverified Apple gain-map compatibility claims. |
 | [2026-09-23 gain compression study](gain-compression-study-2026-09-23.md) | Measures full-resolution lossy gain coding separately from downsampling, including decoder signalling. |
 | [2026-09-23 WSL gain-map comparison](wsl-gainmap-comparison-2026-09-23.md) | Audits 847 Apple originals and five training-label samples; corrects assumptions about grid and monochrome RExt gain maps. |

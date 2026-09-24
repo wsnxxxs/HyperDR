@@ -65,6 +65,9 @@ struct UltraHdrInfo {
 [[nodiscard]] std::vector<std::uint8_t> encode_sdr_jpeg(
     const FloatImage& image, const PhotoMetadata& metadata, int quality);
 void verify_sdr_jpeg(const std::vector<std::uint8_t>& bytes);
+[[nodiscard]] std::vector<std::uint8_t> encode_sdr_tiff(
+    const FloatImage& image, const PhotoMetadata& metadata);
+void verify_sdr_tiff(const std::vector<std::uint8_t>& bytes);
 [[nodiscard]] std::vector<std::uint8_t> encode_hdr_heic(
     const PhotoRenditions& images, const PhotoMetadata& metadata, int quality, HdrEncoding encoding,
     HevcPreset preset = HevcPreset::Slow);

@@ -530,10 +530,10 @@ class InputVocabularyTest(unittest.TestCase):
             self.assertIn(formats.CANONICAL_EXTENSIONS[family],
                           formats.RASTER_INPUT_EXTENSIONS, family)
 
-    def test_a_raw_header_is_never_named_as_a_raster(self):
-        """Most RAW containers are TIFF; only LibRaw can validate the file."""
+    def test_classic_tiff_headers_are_recognized(self):
+        """The caller uses the RAW suffix before raster signature detection."""
         for header in (b"II*" + bytes(1) + b"a" * 60, b"MM" + bytes(1) + b"*" + b"b" * 60):
-            self.assertIsNone(formats.detect_format(header))
+            self.assertEqual(formats.detect_format(header), "tiff")
 
 
 class SettingsContractTest(unittest.TestCase):

@@ -175,19 +175,37 @@ export const api = {
     return frame;
   },
 
+  /** A 1:1 region from the full decoder, independent of the fit preview cache. */
+  async detailPreview(sessionId, { options = {}, highlightRecovery, x = 0, y = 0,
+    width, height, center = false } = {}) {
+    const query = new URLSearchParams({ id: sessionId, options: JSON.stringify(options),
+      x: String(x), y: String(y), w: String(width), h: String(height),
+      center: center ? "1" : "0" });
+    if (highlightRecovery) query.set("hr", highlightRecovery);
+    let response;
+    try { response = await fetch("/api/detail-preview?" + query); }
+    catch { throw OFFLINE(); }
+    if (!response.ok) {
+      let message = t("err.preview");
+      try { const body = await response.json(); if (body.error) message = body.error; } catch {}
+      throw new ApiError(message, response.status);
+    }
+    return decodePreview(await response.arrayBuffer());
+  },
+
   /** Run the selected model and return its raw little-endian float32 gain grid.
    *
    *  The identity of what actually ran comes back beside the geometry. It matters
    *  because a model that needs capture settings can answer with another model's
    *  prediction, and a caller that assumed its own request had been honoured
    *  would label that result with the wrong model's name. */
-  async modelPreview(sessionId, highlightRecovery, modelId, { colorGamut, clampSrgb, rawProfile, lensCorrection } = {}) {
+  async modelPreview(sessionId, highlightRecovery, modelId, { colorGamut, clampSrgb, rawProfile, rawLook, lensCorrection } = {}) {
     let response;
     try {
       response = await fetch("/api/model-preview", {
         method: "POST",
         headers: JSON_HEADERS,
-        body: JSON.stringify({ sessionId, highlightRecovery, modelId, colorGamut, clampSrgb, rawProfile, lensCorrection }),
+        body: JSON.stringify({ sessionId, highlightRecovery, modelId, colorGamut, clampSrgb, rawProfile, rawLook, lensCorrection }),
       });
     } catch { throw OFFLINE(); }
     if (!response.ok) {

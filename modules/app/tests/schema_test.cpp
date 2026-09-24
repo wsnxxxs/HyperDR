@@ -218,7 +218,7 @@ void test_fingerprint_covers_exactly_the_byte_affecting_settings() {
 void test_decode_cache_controls_are_declared_in_the_settings_table() {
   const std::set<std::string> expected{
       "color_gamut", "half_size", "highlight_recovery", "preview_max_edge", "raw_gain",
-      "raw_auto_bad_pixels", "raw_profile", "raw_lens_profile"};
+      "raw_auto_bad_pixels", "raw_profile", "raw_look", "raw_lens_profile"};
   std::set<std::string> actual;
   for (const auto& setting : hyperdr::settings()) {
     if (setting.affects_decoded_pixels) actual.insert(std::string(setting.key));

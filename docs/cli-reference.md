@@ -309,7 +309,8 @@ SDK-style development and is an approximation of the corresponding Lightroom
 look, not an exact implementation of Lightroom's current Process Version.
 `--exposure auto` uses the RAW baseline plus DCP BaselineExposureOffset, once;
 manual exposure and `--exposure-bias` remain additional adjustments. HDR
-expansion is HyperDR's rendering of the selected SDR base.
+rendering uses the selected SDR base for color and retains the RAW's
+above-white scene luminance where available. It remains HyperDR's HDR rendering.
 The DCP CLI defaults to neutral contrast (1) and vibrance (0); explicitly
 requested values apply after development. `pop` affects HDR expansion only.
 Native RAW formats may lack Adobe's camera baseline exposure; a DCP alone
@@ -332,3 +333,20 @@ brightness adjustment to 0 EV; subsequent profile switches preserve edits.
 Creative display-space LUTs can follow DCP development. A scene-space
 `--lut-input slog3-sgamut3cine` LUT and `--raw-profile` are mutually exclusive:
 the DCP result already has its base tone rendering and is not a scene Log input.
+
+`--raw-look <file.xmp>` adds a static creative look to `--raw-profile`. Its
+`CameraProfile` must match the selected DCP name. Supported look content is an
+embedded static HSV LookTable (v1/v2 at default amount) and a composite
+`ToneCurvePV2012`, with identity per-channel curves. Adaptive gain-table and RGB
+table profiles, monochrome conversion, and edit sliders are unsupported and
+produce an error. This is a restricted static-look renderer, not Lightroom
+Process Version parity. The panel discovers compatible local looks and selects
+the required DCP when a look is chosen. Look contents participate in cache and
+model identities; the requested path is recorded as `settings.raw_look`.
+
+For full-resolution inspection, `preview-frame` accepts `--detail-center
+--detail-width 1024 --detail-height 768`, or explicit `--detail-left` and
+`--detail-top`. Coordinates refer to the oriented full decoded image. Each side
+is limited to 2048 pixels. This mode disables half-size/preview decoding,
+renders the whole photograph to preserve global and local processing, then
+returns only the crop. It can take substantially longer than a fit preview.

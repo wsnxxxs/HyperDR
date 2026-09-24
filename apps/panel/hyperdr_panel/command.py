@@ -108,7 +108,7 @@ _HLG_ENCODINGS = frozenset({"hlg", "avif-hlg"})
 _HLG_MAX_STOPS = 2.3
 
 #: Only the gain-map formats have a selectable base depth; BT.2100 is 10-bit.
-_EIGHT_BIT_ENCODINGS = frozenset({"adaptive", "ultrahdr", "sdr-jpeg"})
+_EIGHT_BIT_ENCODINGS = frozenset({"adaptive", "ultrahdr", "sdr-jpeg", "sdr-tiff"})
 
 #: The browser reports these domains from the photo's first native frame.
 HDR_SOURCE_DOMAINS = frozenset({"display-referred-hdr", "dual-rendition"})
@@ -258,6 +258,8 @@ def _color_flags(options: dict, settings: dict) -> list[str]:
         flags.append("--clamp-srgb")
     if options.get("_raw_profile_path"):
         flags.extend(["--raw-profile", str(options["_raw_profile_path"])])
+    if options.get("_raw_look_path"):
+        flags.extend(["--raw-look", str(options["_raw_look_path"])])
     if options.get("_lens_profile_path"):
         flags.extend(["--raw-lens-profile", str(options["_lens_profile_path"])])
     if options.get("_lut_path"):
@@ -376,6 +378,7 @@ def build_curve_argv(exe: str, options: dict, samples: int = 257) -> list[str]:
 def build_preview_frame_argv(
     exe: str, source, output, options: dict, max_edge: int,
     decode_cache=None, source_digest: str | None = None,
+    detail_region: tuple[int, int, int, int, bool] | None = None,
 ) -> list[str]:
     """Build the native float-preview command from the export settings."""
     settings = options_to_settings(options)
@@ -410,7 +413,13 @@ def build_preview_frame_argv(
             "--exposure", "auto", "--headroom", fmt_num(settings["headroom"]),
             "--highlight-recovery", settings["highlight_recovery"],
         ]
-    if str(source).lower().endswith(tuple(RAW_INPUT_EXTENSIONS)):
+    if detail_region is not None:
+        x, y, width, height, center = detail_region
+        argv.extend(["--detail-left", str(x), "--detail-top", str(y),
+                     "--detail-width", str(width), "--detail-height", str(height)])
+        if center:
+            argv.append("--detail-center")
+    if detail_region is None and str(source).lower().endswith(tuple(RAW_INPUT_EXTENSIONS)):
         argv.append("--fast-preview")
     argv.extend(_color_flags(options, settings))
     if decode_cache:

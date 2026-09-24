@@ -14,8 +14,8 @@
 namespace hyperdr {
 namespace {
 
-constexpr std::array<std::string_view, 7> kEncodingChoices{
-    "adaptive", "ultrahdr", "pq", "hlg", "avif-pq", "avif-hlg", "sdr-jpeg"};
+constexpr std::array<std::string_view, 8> kEncodingChoices{
+    "adaptive", "ultrahdr", "pq", "hlg", "avif-pq", "avif-hlg", "sdr-jpeg", "sdr-tiff"};
 constexpr std::array<std::string_view, 6> kLutSpaceChoices{
     "srgb", "p3", "rec709", "hlg", "pq", "slog3-sgamut3cine"};
 constexpr std::array<std::string_view, 1> kLookChoices{"photographic"};
@@ -96,10 +96,10 @@ json::Value read_headroom(const ConvertOptions& o) {
                               : json::Value::from_number(o.gain.headroom_stops);
 }
 
-const std::array<Setting, 34>& table() {
-  static const std::array<Setting, 34> kSettings{{
+const std::array<Setting, 35>& table() {
+  static const std::array<Setting, 35> kSettings{{
       {"encoding", "--encoding", SettingKind::kEnum, 0, 0, kEncodingChoices,
-       "adaptive|ultrahdr|pq|hlg|avif-pq|avif-hlg|sdr-jpeg", "Output representation", false,
+       "adaptive|ultrahdr|pq|hlg|avif-pq|avif-hlg|sdr-jpeg|sdr-tiff", "Output representation", false,
        true,
        [](std::string_view name) { return hdr_encoding_from_name(name).has_value(); },
        apply_encoding, read_encoding},
@@ -127,6 +127,10 @@ const std::array<Setting, 34>& table() {
        "<file.lcp>", "RAW Lightroom lens correction profile", false, true, nullptr,
        [](ConvertOptions& o, const json::Value& v) { o.raw.lens_profile = path_from_utf8(v.string()); },
        [](const ConvertOptions& o) { return json::Value::from_string(path_utf8(o.raw.lens_profile)); }, true},
+      {"raw_look", "--raw-look", SettingKind::kString, 0, 0, {},
+       "<file.xmp>", "Static Adobe XMP look (requires matching --raw-profile)", false, true, nullptr,
+       [](ConvertOptions& o, const json::Value& v) { o.raw.look_profile = path_from_utf8(v.string()); },
+       [](const ConvertOptions& o) { return json::Value::from_string(path_utf8(o.raw.look_profile)); }, true},
       {"raw_gain", "--raw-gain", SettingKind::kNumber, 0.125, 64.0, {},
        "<0.125..64>", "Post-decode scene-linear RAW gain", false, true, nullptr,
        [](ConvertOptions& o, const json::Value& v) {
@@ -458,6 +462,8 @@ void write_inputs(json::Writer& writer) {
            std::pair<std::string_view, std::span<const std::string_view>>{
                "png", kPngExtensions},
            std::pair<std::string_view, std::span<const std::string_view>>{
+               "tiff", kTiffExtensions},
+           std::pair<std::string_view, std::span<const std::string_view>>{
                "isobmff", kIsobmffExtensions}}) {
     writer.begin_array(key);
     for (const auto extension : table) writer.element(extension);
@@ -470,13 +476,14 @@ void write_inputs(json::Writer& writer) {
   // holding HEIC lives in the same header as the family it renames to.
   writer.begin_object("canonicalExtensions");
   for (const auto format :
-       {InputFormat::Jpeg, InputFormat::Png, InputFormat::Isobmff}) {
+       {InputFormat::Jpeg, InputFormat::Png, InputFormat::Tiff, InputFormat::Isobmff}) {
     writer.member(input_format_name(format), canonical_extension(format));
   }
   writer.end_object();
   writer.begin_object("signatures");
   write_signatures(writer, "jpeg", kJpegSignatures);
   write_signatures(writer, "png", kPngSignatures);
+  write_signatures(writer, "tiff", kTiffSignatures);
   write_signatures(writer, "isobmff", kIsobmffSignatures);
   writer.end_object();
   writer.member("prefixBytes", kSignaturePrefixBytes);

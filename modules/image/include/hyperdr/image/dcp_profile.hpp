@@ -18,6 +18,10 @@ struct DcpProfile {
   std::vector<std::array<double, 2>> tone_curve;
   float baseline_exposure_offset{0};
   bool default_black_render_none{false};
+  // Optional static Adobe XMP look layered over the camera DCP.
+  DcpHueSatMap xmp_look_table;
+  std::vector<std::array<double, 2>> xmp_tone_curve;
+  std::string xmp_look_name, xmp_look_sha256;
 };
 struct DcpRenderContext {
   std::shared_ptr<const DcpProfile> profile;

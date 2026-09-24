@@ -23,6 +23,7 @@ Folder conversion is a CLI feature; its command and examples are in the
 | Topic | Document |
 | --- | --- |
 | Commands, options, exit codes and format behaviour | [CLI reference](cli-reference.md) |
+| Supported image formats and Lightroom interchange | [图像格式与 Lightroom 往返](formats.md) |
 | Tone, HDR output promises and visual acceptance scenes | [Rendering behaviour](rendering.md) |
 | Colour LUT stages, RAW/Log/HLG input spaces and SDR export behaviour | [颜色 LUT 与 SDR/HDR 渲染架构](color-lut-pipeline.md) |
 | Conversion report fields | [Report schema guide](report-schema.md) |

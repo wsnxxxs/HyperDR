@@ -74,7 +74,7 @@ def _derive() -> None:
     # at the container on purpose: HEIF and AVIF are the same box structure and
     # which codec sits inside is the decoder's business, as it always was here.
     _RASTER_SIGNATURES = {
-        kind: _signatures(kind) for kind in ("jpeg", "png", "isobmff")
+        kind: _signatures(kind) for kind in ("jpeg", "png", "tiff", "isobmff")
     }
     # The extension a file of each detected family is stored under. An ISO base
     # media file is named `.heic` whatever codec it carries, because that is the

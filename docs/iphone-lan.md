@@ -84,5 +84,5 @@
   下载仅限本工作台已发布的成品。
 
 任务文件仍存于 hdr-workspace，默认空闲 24 小时后清理。默认单文件上限
-256 MB，可通过 HYPERDR_MAX_UPLOAD_MB、HYPERDR_MAX_SESSION_MB 和
+512 MB，可通过 HYPERDR_MAX_UPLOAD_MB、HYPERDR_MAX_SESSION_MB 和
 HYPERDR_SESSION_HOURS 调整。手机列表中的过期结果需重新导出。

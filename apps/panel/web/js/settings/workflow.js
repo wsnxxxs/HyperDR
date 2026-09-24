@@ -1,12 +1,12 @@
 import { store } from "../core/store.js";
 import { role, setPressed, setText } from "../core/dom.js";
 import { t, onLocaleChange } from "../i18n/index.js";
-import { isHdrSource } from "./schema.js";
+import { isHdrSource, isSdrEncoding } from "./schema.js";
 
 // Encoding remains the single source of truth for the workflow, including
 // restored exports and undo. Switching does not change the shared grade.
 export function workflowPatch(state, colorOnly) {
-  if ((state.encoding === "sdr-jpeg") === colorOnly) return {};
+  if (isSdrEncoding(state.encoding) === colorOnly) return {};
   if (colorOnly) return {
     lastHdrEncoding: state.encoding, lastHdrOptimized: state.previewOptimized,
     encoding: "sdr-jpeg", previewOptimized: false, maskKey: null,
@@ -27,7 +27,7 @@ export function mountWorkflow() {
   color.addEventListener("click", () => store.set(workflowPatch(store.get(), true)));
   hdr.addEventListener("click", () => store.set(workflowPatch(store.get(), false)));
   function sync(state) {
-    const sdr = state.encoding === "sdr-jpeg";
+    const sdr = isSdrEncoding(state.encoding);
     document.documentElement.dataset.workflow = sdr ? "color" : "hdr";
     setPressed(color, sdr); setPressed(hdr, !sdr);
     color.disabled = hdr.disabled = state.uploading || state.restoring || state.optimizing || state.starting || Boolean(state.jobId);

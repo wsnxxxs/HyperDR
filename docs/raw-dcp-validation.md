@@ -21,6 +21,40 @@ Implementation follows [the design](raw-dcp-compatibility-plan.md).
 
 ## Actual sample
 
+### 2026-09-24 additions
+
+Static XMP profiles can now add an embedded HSV LookTable and composite PV2012
+curve after DCP development. The local Adobe Color profile was successfully read
+with the Sony ILCE-7RM5 Adobe Standard DCP. This proves file compatibility;
+it does not establish visual equivalence with Lightroom. Adaptive profiles and
+unsupported rendering properties are rejected.
+
+DCP HDR rendering also retains pre-tone scene luminance above diffuse white,
+using the same baseline/profile/user exposure once. Color is inherited from
+the SDR development; clipped chroma cannot be reconstructed. SDR rendering is
+unchanged with no XMP selected. Unit tests cover HDR highlight ordering,
+strength-zero identity, and continuity at diffuse white.
+
+Local integration checks on the same A7R V photograph:
+
+- Adobe Color plus Adobe Standard produced a 1280-pixel fit preview.
+- A resident worker produced a 400×300 full-resolution ROI in 6.34 seconds;
+  a subsequent pan took 4.24 seconds and reused the decoded source. Overlapping
+  pixels were identical. These are single-run diagnostics, not a speed guarantee.
+- Synthetic detail crops exactly matched the corresponding full-render pixels;
+  the API rejected regions larger than 2048 pixels per side.
+- Direct CLI and resident-worker previews passed with Chinese RAW, DCP, XMP,
+  and output paths after unifying the Windows argument boundary as UTF-8.
+- The 9504×6336 ProPhoto reference TIFF exported and verified at its original
+  dimensions as 16-bit Display P3 TIFF. Report timings were 7.10 s decode,
+  0.94 s rendering, 11.73 s codec, and 6.84 s verification. This converts the
+  color space; it is not a byte-preserving ProPhoto round trip.
+
+Detail inspection currently displays SDR and still renders the full photograph
+before cropping, so panning can take seconds. A browser was unavailable for
+visual validation in this run. GPU processing and piecewise LCP vignetting
+remain separate follow-up work; neither is claimed by this implementation.
+
 Reference TIFFs are 9504 × 6336, 16-bit ProPhoto RGB. Measurements use their
 embedded ICC matrix/TRC and XYZ D50; HyperDR uses the float linear P3 SDR
 preview plane, Bradford-adapted to D50. Sky ROI: x=[0.20,0.75),

@@ -44,6 +44,7 @@ _HIGHLIGHT_RECOVERY_CHOICES = frozenset(SETTINGS["highlight_recovery"]["choices"
 _RESULT_TYPES = {
     ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
     ".avif": "image/avif", ".heic": "image/heic",
+    ".tif": "image/tiff", ".tiff": "image/tiff",
 }
 
 
@@ -191,7 +192,7 @@ def state(context: Context, _query: dict) -> Response:
     })
 
 
-def preview(_context: Context, query: dict) -> Response:
+def _preview(_context: Context, query: dict, *, detail: bool = False) -> Response:
     """Native linear-P3 SDR-base and reconstructed-HDR float planes.
 
     `hr` is the highlight-recovery mode the panel currently has selected. It
@@ -214,12 +215,27 @@ def preview(_context: Context, query: dict) -> Response:
                              _first(query, "hr", DEFAULT_HIGHLIGHT_RECOVERY))
     if highlight_recovery not in _HIGHLIGHT_RECOVERY_CHOICES:
         return error("unknown highlight recovery: %s" % highlight_recovery)
-    try:
-        requested_edge = int(_first(query, "edge", str(MAX_EDGE)))
-    except ValueError:
-        return error("invalid preview edge")
-    if not 320 <= requested_edge <= MAX_EDGE:
-        return error("preview edge must be between 320 and %s" % MAX_EDGE)
+    detail_region = None
+    if detail:
+        try:
+            x = int(_first(query, "x", "0"))
+            y = int(_first(query, "y", "0"))
+            width = int(_first(query, "w"))
+            height = int(_first(query, "h"))
+            center = _first(query, "center", "0") == "1"
+        except (TypeError, ValueError):
+            return error("invalid detail region")
+        if x < 0 or y < 0 or not 1 <= width <= 2048 or not 1 <= height <= 2048:
+            return error("detail region must be positive and at most 2048 pixels per side")
+        detail_region = (x, y, width, height, center)
+        requested_edge = MAX_EDGE
+    else:
+        try:
+            requested_edge = int(_first(query, "edge", str(MAX_EDGE)))
+        except ValueError:
+            return error("invalid preview edge")
+        if not 320 <= requested_edge <= MAX_EDGE:
+            return error("preview edge must be between 320 and %s" % MAX_EDGE)
 
     # A missing session is the one preview failure that invalidates the frame
     # already on the stage. Resolve it separately so the browser can
@@ -257,8 +273,13 @@ def preview(_context: Context, query: dict) -> Response:
         # lightweight API embeddings can replace the input resolver alone.
         decode_cache = (session.WORK_ROOT / session_id / "output" /
                         ".decode-cache")
-        data, metadata = preview_for(
-            source, options, requested_edge, source_digest, decode_cache)
+        if detail_region is None:
+            data, metadata = preview_for(
+                source, options, requested_edge, source_digest, decode_cache)
+        else:
+            data, metadata = preview_for(
+                source, options, requested_edge, source_digest, decode_cache,
+                detail_region=detail_region)
     except Busy as exc:
         # Distinct from a missing or broken image: the request was refused, not
         # answered, and a client may retry it.
@@ -271,9 +292,19 @@ def preview(_context: Context, query: dict) -> Response:
         return error(exc, status=409 if getattr(exc, "code", "") == "model_not_ready" else 422)
     # No headers: width, height, status and degradation reasons all travel in
     # the HYPREV1 packet body, which is what the browser actually parses.
-    _context.workbench.publish_frame(session_id, raw_options, data)
+    if not detail:
+        _context.workbench.publish_frame(session_id, raw_options, data)
     data = omit_unchanged_base(data, metadata, _first(query, "base"))
     return Response(body=data, content_type="application/vnd.hyperdr.preview")
+
+
+def preview(_context: Context, query: dict) -> Response:
+    return _preview(_context, query)
+
+
+def detail_preview(_context: Context, query: dict) -> Response:
+    """A bounded pixel crop rendered from the source's full decode."""
+    return _preview(_context, query, detail=True)
 
 
 def job_log(_context: Context, query: dict) -> Response:
@@ -390,6 +421,9 @@ def command_preview(_context: Context, body: dict) -> Response:
         options.pop("_raw_profile_path", None)
         if options.get("rawProfile"):
             options["_raw_profile_path"] = options.get("rawProfileName") or "camera.dcp"
+        options.pop("_raw_look_path", None)
+        if options.get("rawLook"):
+            options["_raw_look_path"] = (options.get("rawLookName") or "look") + ".xmp"
         options.pop("_lut_path", None)
         if options.get("lutId"):
             options["_lut_path"] = options.get("lutName") or "look.cube"
@@ -425,13 +459,14 @@ def model_preview(_context: Context, body: dict) -> Response:
         )
         if highlight_recovery not in _HIGHLIGHT_RECOVERY_CHOICES:
             raise ValueError("unknown highlight recovery: %s" % highlight_recovery)
-        profile_options = {"rawProfile": body.get("rawProfile"), "lensCorrection": body.get("lensCorrection", True)}
+        profile_options = {"rawProfile": body.get("rawProfile"), "rawLook": body.get("rawLook"), "lensCorrection": body.get("lensCorrection", True)}
         raw_profiles.resolve(profile_options, session_id)
         lens_profiles.resolve(profile_options, session_id)
         gain, report = model.native_model_gain(
             source, highlight_recovery, model_id,
             color_gamut=body.get("colorGamut"), clamp_srgb=body.get("clampSrgb", False),
             **({"raw_profile": profile_options["_raw_profile_path"]} if profile_options.get("_raw_profile_path") else {}),
+            **({"raw_look": profile_options["_raw_look_path"]} if profile_options.get("_raw_look_path") else {}),
             **({"lens_profile": profile_options["_lens_profile_path"]} if profile_options.get("_lens_profile_path") else {}))
         width, height = report["width"], report["height"]
         return Response(
@@ -564,6 +599,7 @@ GET_ROUTES = {
     "/api/workspace": workspace,
     "/api/state": state,
     "/api/preview": preview,
+    "/api/detail-preview": detail_preview,
     "/api/log": job_log,
     "/api/result": result,
 }

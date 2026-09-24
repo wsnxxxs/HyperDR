@@ -330,6 +330,30 @@ void test_scene_rec2020_hdr_chroma() {
         "scene HDR must fit the Rec.2020 output range");
 }
 
+void test_sdr_expansion_rec2020_chroma() {
+  const auto green=rec2020_to_linear_p3(0.0F,1.0F,0.0F);
+  FloatImage source(16,16,3);
+  for(std::size_t i=0;i<source.pixels.size();++i) source.pixels[i]=green[i%3];
+  RenderOptions options;
+  options.auto_headroom=false;
+  options.headroom_stops=2.0F;
+  const InputDescription input{InputDomain::kDisplayReferredSdr,1};
+  const auto p3=render_renditions(source,options,{},input,RenderTarget::Hdr);
+  options.hdr_gamut=ColorGamut::kRec2020;
+  const auto wide=render_renditions(source,options,{},input,RenderTarget::Hdr);
+  require(wide.sdr.pixels==p3.sdr.pixels,
+      "Rec.2020 SDR expansion must keep the P3 base unchanged");
+  require(wide.hdr.pixels[0]<-0.01F && wide.hdr.pixels[2]<-0.001F,
+      "SDR expansion must not replace wide HDR color with the P3 base");
+  require(p3.hdr.pixels[0]>=-1e-6F && p3.hdr.pixels[2]>=-1e-6F,
+      "default SDR expansion must retain P3 gamut");
+  const float p3_y=p3_luminance(p3.hdr.pixels[0],p3.hdr.pixels[1],p3.hdr.pixels[2]);
+  const float wide_y=p3_luminance(wide.hdr.pixels[0],wide.hdr.pixels[1],wide.hdr.pixels[2]);
+  require(p3_y>p3_luminance(wide.sdr.pixels[0],wide.sdr.pixels[1],
+      wide.sdr.pixels[2])*1.01F && std::abs(wide_y-p3_y)<1e-4F,
+      "wide HDR color must receive the same spatial gain as the P3 endpoint");
+}
+
 void test_independent_rgb_renditions() {
   PhotoRenditions photo;
   photo.sdr = FloatImage(5, 3, 3);
@@ -669,6 +693,7 @@ int main() {
         test_hdr_source_reconstructs_itself(); test_hdr_source_outside_p3();
         test_hdr_rec2020_target();
         test_scene_rec2020_hdr_chroma();
+        test_sdr_expansion_rec2020_chroma();
         test_independent_rgb_renditions(); test_scene_base_without_gain_preparation();
         test_rendition_codes_use_serialized_metadata();
         test_graded_sdr_endpoint_packaging();

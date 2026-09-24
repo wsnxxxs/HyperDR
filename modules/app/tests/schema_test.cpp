@@ -256,6 +256,32 @@ void test_schema_document_describes_every_settable_option() {
   }
 }
 
+void test_output_colour_selection() {
+  using namespace hyperdr;
+  ConvertOptions options;
+  options.encoding = OutputEncoding::SdrJpeg;
+  require(resolved_sdr_gamut(options) == ColorGamut::kSrgb, "JPEG default gamut changed");
+  options.encoding = OutputEncoding::SdrTiff;
+  require(resolved_sdr_gamut(options) == ColorGamut::kDisplayP3, "TIFF default gamut changed");
+  options.clamp_srgb = options.gain.clamp_srgb = true;
+  apply_output_color_options(options);
+  require(!options.clamp_srgb && !options.gain.clamp_srgb,
+          "hidden HDR restriction still changes SDR output");
+  const auto* setting = find_setting_by_key("output_gamut");
+  require(setting != nullptr, "output gamut is absent from settings");
+  setting->apply(options, parse_setting_text(*setting, "srgb"));
+  require(resolved_sdr_gamut(options) == ColorGamut::kSrgb, "explicit TIFF sRGB was ignored");
+  require(throws([&] { parse_setting_text(*setting, "rec2020"); }),
+          "unsupported SDR gamut was accepted");
+  setting->apply(options, parse_setting_text(*setting, "auto"));
+  for (const auto encoding : {OutputEncoding::Pq, OutputEncoding::Hlg,
+                              OutputEncoding::AvifPq, OutputEncoding::AvifHlg}) {
+    options.encoding = encoding;
+    apply_output_color_options(options);
+    require(options.gain.hdr_gamut == ColorGamut::kRec2020, "BT.2100 still renders into P3");
+  }
+}
+
 void test_usage_text_lists_every_flag() {
   const auto usage = hyperdr::settings_usage_text();
   for (const auto& setting : hyperdr::settings()) {
@@ -278,6 +304,7 @@ int main() {
     test_rendered_hlg_headroom_is_bounded();
     test_schema_document_describes_every_settable_option();
     test_usage_text_lists_every_flag();
+    test_output_colour_selection();
     std::cout << "settings schema tests passed\n";
     return 0;
   } catch (const std::exception& e) {

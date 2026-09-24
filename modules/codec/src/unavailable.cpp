@@ -149,11 +149,11 @@ std::vector<std::uint8_t> encode_avif(const PhotoRenditions&, const PhotoMetadat
   fail_without_codecs("AVIF encoding");
 }
 
-std::vector<std::uint8_t> encode_sdr_jpeg(const FloatImage&, const PhotoMetadata&, int) {
+std::vector<std::uint8_t> encode_sdr_jpeg(const FloatImage&, const PhotoMetadata&, int, ColorGamut) {
   fail_without_codecs("SDR JPEG encoding");
 }
 void verify_sdr_jpeg(const std::vector<std::uint8_t>&) { fail_without_codecs("SDR JPEG verification"); }
-std::vector<std::uint8_t> encode_sdr_tiff(const FloatImage&, const PhotoMetadata&) {
+std::vector<std::uint8_t> encode_sdr_tiff(const FloatImage&, const PhotoMetadata&, ColorGamut) {
   fail_without_codecs("SDR TIFF encoding");
 }
 void verify_sdr_tiff(const std::vector<std::uint8_t>&) { fail_without_codecs("SDR TIFF verification"); }

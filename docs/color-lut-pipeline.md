@@ -24,7 +24,7 @@ HLG/PQ HEIC 与 AVIF 编码器也必须先从量化后的低分辨率 gain map �
    独立调色后的 Ultra HDR JPEG 使用全分辨率 RGB gain map，分别保存各通道的正负增益，
    SDR 基图保持调色结果；Adaptive HEIC 继续采用兼容现有配置的单通道亮度映射。
 4. 选择 HLG/PQ HEIC / AVIF 时，编码器直接接收 HDR 浮点像素；不再经过量化 gain map。
-5. 选择 SDR JPEG 时，只编码 SDR 图像，实际输出为带 sRGB ICC 和拍摄 Exif 的普通 JPEG。
+5. 选择 SDR JPEG 时，只编码 SDR 图像，默认写入 sRGB ICC 和拍摄 Exif；`--output-gamut p3` 可选 Display P3，像素与 ICC 同步转换。16 位 TIFF 默认 P3，也可选择 sRGB。
 
 曝光分析、局部高光权重和公共色彩计算从 `gainmap` 下移到了 `look`，没有另造一套
 相机解码器。旧 `GainMapOptions` 和接受 `GainMapResult` 的编码 API 保留兼容入口。
@@ -104,7 +104,9 @@ Sony 的 [S-Log3 / S-Gamut3.Cine 技术说明](https://pro.sony/s3/cms-static-co
 - 输入超出 LUT 的 DOMAIN 范围时采用边界采样；不进行无约束外推。作者制作的高光平台、
   通道截断、黑位平台或狭窄色域，都可能造成不可逆损失。
 - 工作空间为线性 Display P3；进入 sRGB/Rec.709 LUT 时会做目标色域适配。
-  最终 SDR JPEG 固定转换到 sRGB。选用窄色域 LUT 后不能期待宽色域颜色完全不变。
+  最终 SDR JPEG / TIFF 按 `--output-gamut auto|srgb|p3` 映射；auto 分别为 sRGB / P3。
+  PQ / HLG 的 HDR 版本按 Rec.2020 映射，解码保留的负 P3 分量不再提前收缩到 P3。
+  选用窄色域 LUT 后不能期待宽色域颜色完全不变；DCP 显影仍保留原有 P3 风格路径。
 - 强度 0% 完全绕过 LUT；SDR 和 HDR 分别从各自的原始 RGB 在线性光中混合至完整调色
   结果，100% 完全采用调色结果。HDR LUT 改变亮度范围时，headroom 的线性倍率也随强度
   混合，避免极低强度就丢弃原有高光色彩或突然改变输出范围。
@@ -121,7 +123,7 @@ Sony 的 [S-Log3 / S-Gamut3.Cine 技术说明](https://pro.sony/s3/cms-static-co
 处理，点击「空间设置」打开独立弹窗并按 LUT 作者说明修改，不挤动侧栏，不能视为自动识别。LUT 库在本机持久保存，
 支持换照片复用；移出库不会删除照片会话内的副本。启用开关通过强度 0 绕过 LUT。
 HDR 模式保留六种 HDR 输出格式与 LUT 调色。AI 模式支持 SDR 风格 LUT；Log/HLG/PQ LUT
-使用手动渲染。模式切换保留已有调整，纯 SDR 时隐藏 HDR 扩展控件并明确显示 sRGB 输出。
+使用手动渲染。模式切换保留已有调整，纯 SDR 时隐藏 HDR 扩展控件，并可选择 sRGB 或 P3 输出。
 
 ```powershell
 # 任意支持的照片来源，应用普通 sRGB 风格 LUT，只输出 SDR

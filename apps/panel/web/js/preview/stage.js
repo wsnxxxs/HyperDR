@@ -23,7 +23,7 @@ import { histogramFromPlane } from "./histogram.js";
 import { createUploader } from "./session.js";
 import { pickInputFile } from "./file-picker.js";
 import {
-  AI_POST_KEYS, CONTROLS, defaultSettings, isHdrSource, referenceSettings, toOptions,
+  AI_POST_KEYS, CONTROLS, defaultSettings, effectiveOutputGamut, isHdrSource, referenceSettings, toOptions,
 } from "../settings/schema.js";
 import { fallbackFields, modelLabel } from "../settings/model-select.js";
 
@@ -424,7 +424,10 @@ export function mountStage({ toast }) {
 
   function setCapability(key, ok, params) {
     lastCapability = { key, ok, params };
-    const message = ["sdr-jpeg", "sdr-tiff"].includes(store.get().encoding) ? t("hdr.sdrOutput")
+    const state = store.get();
+    const format = state.encoding === "sdr-tiff" ? "TIFF" : "JPEG";
+    const gamut = effectiveOutputGamut(state.encoding, state.outputGamut) === "p3" ? "Display P3" : "sRGB";
+    const message = ["sdr-jpeg", "sdr-tiff"].includes(state.encoding) ? t("hdr.sdrOutput", { format, gamut })
       : t(key, params?.reasonKey ? { ...params, reason: t(params.reasonKey) } : params);
     const domain = sourceDomainLabel ? t(sourceDomainLabel) : "";
     setText(hdrStatus, domain ? `${domain} · ${message}` : message);
@@ -695,7 +698,7 @@ export function mountStage({ toast }) {
       if (resetOriginal || !image.original || (referenceEdge ?? Infinity) > image.originalEdge) {
         reference = await api.preview(sessionId, {
           options: { ...toOptions(referenceSettings(state.encoding)), colorGamut: state.colorGamut,
-            clampSrgb: state.clampSrgb, rawProfile: state.rawProfile, rawLook: state.rawLook,
+            outputGamut: state.outputGamut, clampSrgb: state.clampSrgb, rawProfile: state.rawProfile, rawLook: state.rawLook,
             lensCorrection: state.lensCorrection, useModel: false },
           highlightRecovery: "blend", maxEdge: referenceEdge,
         });
@@ -712,7 +715,7 @@ export function mountStage({ toast }) {
         const adjustments = newPhoto && isHdrSource(sourceDomain)
           && !prefs.get().rememberAdjustments
           ? imageAdjustments(defaultSettings(state.encoding, sourceDomain, sourceUnadjusted)) : {};
-        store.set({ sourceDomain, sourceUnadjusted,
+        store.set({ sourceDomain, sourceUnadjusted, sourceColor: reference.metadata.sourceColor || null,
           hasCaptureMetadata: reference.metadata.hasCaptureMetadata === true, ...adjustments,
           ...(isHdrSource(sourceDomain) ? { previewOptimized: false, modelGainReady: false } : {}) });
         state = store.get();
@@ -836,6 +839,7 @@ export function mountStage({ toast }) {
     analysis.modelGain = null;
     image.original = null;
     const activeGamut = store.get().colorGamut;
+    const activeOutputGamut = store.get().outputGamut;
     store.set({
       // All image adjustments are image-scoped. Do not carry a previous
       // photograph's grade into a newly uploaded image. Keep the selected
@@ -845,6 +849,8 @@ export function mountStage({ toast }) {
       ...(prefs.get().rememberAdjustments ? {} : defaultSettings(store.get().encoding)),
       modelId: store.get().modelId,
       colorGamut: activeGamut,
+      outputGamut: activeOutputGamut,
+      sourceColor: null,
       clampSrgb: store.get().clampSrgb,
       rawProfile: "", rawProfileName: "", rawLook: "", rawLookName: "",
       lensCorrection: true, lensProfileName: "",
@@ -1108,6 +1114,10 @@ export function mountStage({ toast }) {
 
   /* ── reactions ────────────────────────────────────────────────────── */
 
+  store.watchAny(["encoding", "outputGamut"], () => {
+    if (lastCapability) setCapability(lastCapability.key, lastCapability.ok, lastCapability.params);
+  });
+
   store.watchAny(["viewMode", "comparing", "splitRatio"], () => { syncView(); schedule(); }, { immediate: true });
   store.watchAny(["uploading"], (state) => {
     stage.classList.toggle("is-uploading", state.uploading);
@@ -1135,7 +1145,7 @@ export function mountStage({ toast }) {
   store.watchAny(
     ["brightness", "hdrStrength", "hdrRange", "expansionStart", "areaCoverage",
      "encoding", "contrast", "vibrance", "previewOptimized", "modelStrength",
-     "colorGamut", "clampSrgb", "lutId", "lutInput", "lutOutput", "lutStrength",
+     "colorGamut", "outputGamut", "clampSrgb", "lutId", "lutInput", "lutOutput", "lutStrength",
      ...AI_POST_KEYS],
     (state, _previous, changed) => {
       if (!state.sessionId || state.restoring || state.uploading) return;
@@ -1152,7 +1162,7 @@ export function mountStage({ toast }) {
 
   /* Input/base options invalidate both the decoded source and model cache. */
   store.subscribe((state, _previous, changed) => {
-    if (!changed.some((key) => ["highlightRecovery", "clampSrgb", "colorGamut", "rawProfile", "rawLook", "lensCorrection"].includes(key))) return;
+    if (!changed.some((key) => ["highlightRecovery", "clampSrgb", "colorGamut", "outputGamut", "rawProfile", "rawLook", "lensCorrection"].includes(key))) return;
     ++modelRequest;
     modelGain = null;
     analysis.modelGain = null;

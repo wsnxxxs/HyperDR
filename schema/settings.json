@@ -34,12 +34,25 @@
       "default": "srgb"
     },
     {
+      "key": "output_gamut",
+      "flag": "--output-gamut",
+      "kind": "enum",
+      "choices": [
+        "auto",
+        "srgb",
+        "p3"
+      ],
+      "affects_output_bytes": true,
+      "help": "SDR file colour space (auto: JPEG sRGB, TIFF P3)",
+      "default": "auto"
+    },
+    {
       "key": "clamp_srgb",
       "flag": "--clamp-srgb",
       "kind": "boolean",
       "flag_sets_false": false,
       "affects_output_bytes": true,
-      "help": "Clamp rendered colour to sRGB gamut",
+      "help": "Limit HDR colours to sRGB chromaticity without changing file primaries",
       "default": false
     },
     {

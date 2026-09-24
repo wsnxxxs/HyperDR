@@ -337,24 +337,20 @@ UltraHdrInfo probe_ultrahdr_jpeg(const std::vector<std::uint8_t>& bytes) {
 }
 
 std::vector<std::uint8_t> encode_sdr_jpeg(const FloatImage& image,
-    const PhotoMetadata& metadata, int quality) {
+    const PhotoMetadata& metadata, int quality, ColorGamut gamut) {
   image.require_consistent("SDR JPEG");
   if (image.channels != 3) throw std::invalid_argument("SDR JPEG requires RGB");
+  if (gamut != ColorGamut::kSrgb && gamut != ColorGamut::kDisplayP3)
+    throw std::invalid_argument("SDR JPEG supports sRGB or Display P3");
   std::vector<std::uint8_t> rgb(image.pixels.size());
   for (std::uint32_t y=0;y<image.height;++y) for (std::uint32_t x=0;x<image.width;++x) {
     const auto i=(static_cast<std::size_t>(y)*image.width+x)*3;
-    auto color=compress_linear_p3_to_srgb(image.pixels[i],image.pixels[i+1],image.pixels[i+2]);
-    color=linear_p3_to_rec709(color[0],color[1],color[2]);
+    auto color=fit_linear_p3_gamut(image.pixels[i],image.pixels[i+1],image.pixels[i+2],1.0F,
+                                  gamut == ColorGamut::kSrgb);
+    if (gamut == ColorGamut::kSrgb) color=linear_p3_to_rec709(color[0],color[1],color[2]);
     for (unsigned c=0;c<3;++c) rgb[i+c]=static_cast<std::uint8_t>(quantize_dithered(srgb_oetf(color[c]),255,x,y,c));
   }
-  const auto profile=cmsCreate_sRGBProfile();
-  if (!profile) throw std::runtime_error("cannot create sRGB profile");
-  cmsUInt32Number size=0;
-  cmsSaveProfileToMem(profile,nullptr,&size);
-  std::vector<std::uint8_t> icc(size);
-  const auto saved=cmsSaveProfileToMem(profile,icc.data(),&size);
-  cmsCloseProfile(profile);
-  if (!saved) throw std::runtime_error("cannot serialize sRGB profile");
+  const auto icc = gamut == ColorGamut::kSrgb ? codec::srgb_profile() : codec::display_p3_profile();
   const auto exif=make_minimal_exif(metadata);
   return compress_jpeg(rgb.data(),image.width,image.height,3,JCS_RGB,quality,&exif,&icc);
 }

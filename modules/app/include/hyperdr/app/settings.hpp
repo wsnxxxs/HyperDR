@@ -42,6 +42,8 @@ struct ConvertOptions {
   OutputEncoding encoding{OutputEncoding::Adaptive};
   ColorLutOptions color_lut;
   ColorGamut default_gamut{ColorGamut::kSrgb};
+  // Unset uses the format default: sRGB JPEG or Display P3 TIFF.
+  std::optional<ColorGamut> output_gamut;
   bool clamp_srgb{false};
   RawDecodeOptions raw;
   GainMapOptions gain;
@@ -94,6 +96,8 @@ struct ConvertOptions {
 
 // Rejects combinations no encoder can honour, before any file is opened.
 void validate_convert_options(const ConvertOptions& options);
+[[nodiscard]] ColorGamut resolved_sdr_gamut(const ConvertOptions& options);
+void apply_output_color_options(ConvertOptions& options);
 
 // Whether this run selected a native model at all.
 [[nodiscard]] bool uses_native_model(const ConvertOptions& options);
@@ -162,6 +166,7 @@ struct FileResult {
   // Unknown means the file was skipped or failed before a decoder could state
   // which renderer it would have used. It is not a rendering domain.
   InputDomain input_domain{InputDomain::kUnknown};
+  SourceColorInfo source_color;
   // Native-model input/base preparation, or "none" for the manual/external
   // paths and failures before model preparation.
   std::string model_development{"none"};

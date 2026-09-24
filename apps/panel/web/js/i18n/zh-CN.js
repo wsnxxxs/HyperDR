@@ -55,7 +55,7 @@ export default {
   "lut.spaceClose": "关闭空间设置",
   "lut.spaceHelp": "按 LUT 提供方的说明设置输入和输出空间，修改后即时预览。",
 
-  "hdr.sdrOutput": "SDR 预览 · 输出 sRGB JPEG",
+  "hdr.sdrOutput": "SDR 预览 · 输出 {gamut} {format}",
   "hdr.reason.sdrOutput": "SDR 输出",
 
   "enc.sdr-jpeg.hint": "8 位 JPEG，写入所选输出色域标记。",

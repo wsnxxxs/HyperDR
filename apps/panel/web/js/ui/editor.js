@@ -1,7 +1,7 @@
 import { store } from "../core/store.js";
 import { role, el, setText, setPressed } from "../core/dom.js";
 import { t, onLocaleChange } from "../i18n/index.js";
-import { encodingById, isSdrEncoding, OPTION_KEYS } from "../settings/schema.js";
+import { isSdrEncoding, OPTION_KEYS, outputDescription } from "../settings/schema.js";
 import { modelLabel } from "../settings/model-select.js";
 import { planeToImageData } from "../preview/cpu.js";
 import { currentResult } from "../run/options.js";
@@ -74,14 +74,13 @@ export function mountEditor({ stage }) {
   /** The settings the next export will be made from, one row each. */
   function summaryRows(state) {
     const sdr = isSdrEncoding(state.encoding);
-    const encoding = encodingById(state.encoding);
     const mode = sdr ? t("workflow.color")
       : state.previewOptimized ? `${t("adjust.ai")} · ${modelLabel(state.modelId, state)}`
         : t("inspector.manual");
     return [
       ["export.mode", mode],
-      ["export.format", `${encoding.label} · ${t(encoding.detail)}`],
-      sdr ? null : ["export.gamut", state.clampSrgb ? t("out.clampSrgb") : t("editor.currentGamut")],
+      ["export.format", outputDescription(state.encoding, state.outputGamut)],
+      sdr || !state.clampSrgb ? null : ["export.gamut", t("out.clampSrgb")],
       state.encoding === "sdr-tiff" ? null : ["export.quality", String(state.quality)],
       ["adaptive", "pq", "hlg"].includes(state.encoding)
         ? ["export.speed", state.hevcPreset === "medium" ? t("out.hevcFast") : t("out.hevcStandard")]
@@ -111,7 +110,13 @@ export function mountEditor({ stage }) {
     const frame = stage.getFrame();
     const extension = /\.([a-z0-9]+)$/i.exec(state.file?.name || "")?.[1]?.toUpperCase() || "";
     const size = state.file?.size > 0 ? `${(state.file.size / 1048576).toFixed(1)} MB` : "";
-    setText(metadata, state.file ? [extension, size].filter(Boolean).join(" · ") : "");
+    const source = state.sourceColor;
+    const sourceNames = { icc: "input.source.icc", cicp: "input.source.cicp",
+      assumed: "input.source.assumed", raw: "input.source.raw", "png-srgb": "input.source.png-srgb",
+      "png-chrm-gamma": "input.source.png-chrm-gamma", ultrahdr: "input.source.ultrahdr" };
+    const sourceLabel = source?.source && sourceNames[source.source] ? t(sourceNames[source.source]) : "";
+    const inputColor = source?.name ? `${source.name}${sourceLabel ? ` (${sourceLabel})` : ""}` : "";
+    setText(metadata, state.file ? [extension, size, inputColor].filter(Boolean).join(" · ") : "");
     metadata.title = frame ? t("workspace.previewSize", { width: frame.width, height: frame.height }) : "";
 
     setText(viewerHint, !ready ? "" : state.viewerZoom > 1 ? t("workspace.panHint") : state.viewMode === "split" ? t("workspace.compareHint") : t("workspace.photoHint"));

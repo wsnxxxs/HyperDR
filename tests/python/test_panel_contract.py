@@ -86,6 +86,18 @@ class BuildArgvTest(unittest.TestCase):
         self.assertEqual(preview["--color-gamut"], "p3")
         self.assertIn("--clamp-srgb", preview)
 
+    def test_sdr_output_gamut_ignores_stale_hdr_clamp(self):
+        for encoding in ("sdr-jpeg", "sdr-tiff"):
+            options = dict(BASE, encoding=encoding, outputGamut="p3", clampSrgb=True)
+            for argv in (build_argv("HyperDR", options),
+                         build_preview_frame_argv("HyperDR", "photo.jpg", "preview.hpf", options, 1024)):
+                found = flags(argv)
+                self.assertEqual(found["--output-gamut"], "p3")
+                self.assertNotIn("--clamp-srgb", found)
+        hdr = flags(build_argv("HyperDR", dict(BASE, outputGamut="p3", clampSrgb=True)))
+        self.assertNotIn("--output-gamut", hdr)
+        self.assertIn("--clamp-srgb", hdr)
+
     def test_explicit_default_color_gamut_is_visible(self):
         found = flags(build_argv("HyperDR", dict(BASE, colorGamut="srgb")))
         self.assertEqual(found["--color-gamut"], "srgb")

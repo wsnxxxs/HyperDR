@@ -403,7 +403,16 @@ PhotoRenditions render_renditions(const FloatImage& source,
       for(std::uint32_t x=0;x<source.width;++x) {
         const auto i=(static_cast<std::size_t>(y)*source.width+x)*3;
         const float scale=std::exp2(sampler.sample(view,x,y)*strength);
-        for(int c=0;c<3;++c) out.hdr.pixels[i+c]=out.sdr.pixels[i+c]*scale;
+        if (options.hdr_gamut == ColorGamut::kRec2020 && !options.clamp_srgb) {
+          // Keep the independently fitted HDR chromaticity. Rebuilding it from
+          // the P3 SDR base would discard input colour outside P3 again.
+          const auto expanded = fit({out.hdr.pixels[i]*scale,
+              out.hdr.pixels[i+1]*scale, out.hdr.pixels[i+2]*scale},
+              peak, options.hdr_gamut);
+          for(int c=0;c<3;++c) out.hdr.pixels[i+c]=expanded[c];
+        } else {
+          for(int c=0;c<3;++c) out.hdr.pixels[i+c]=out.sdr.pixels[i+c]*scale;
+        }
       }
     });
   }

@@ -3,12 +3,17 @@ const VERTEX = `#version 300 es
 in vec2 position; out vec2 uv;
 void main(){ gl_Position=vec4(position,0,1); uv=vec2((position.x+1.0)*.5,(1.0-position.y)*.5); }`;
 const FRAGMENT = `#version 300 es
-precision highp float; uniform sampler2D baseTexture;
+precision highp float; uniform sampler2D baseTexture; uniform bool outputP3;
 in vec2 uv; out vec4 color;
 vec3 encode(vec3 v){ v=max(v,vec3(0)); return mix(1.055*pow(v,vec3(1.0/2.4))-0.055,12.92*v,lessThanEqual(v,vec3(.0031308))); }
+vec3 p3ToSrgb(vec3 v){ return vec3(
+  1.2249401*v.r-0.2249401*v.g,
+  -0.0420569*v.r+1.0420569*v.g,
+  -0.0196376*v.r-0.0786361*v.g+1.0982737*v.b); }
 void main(){
   ivec2 bs=textureSize(baseTexture,0); ivec2 xy=clamp(ivec2(uv*vec2(bs)),ivec2(0),bs-1);
-  color=vec4(encode(texelFetch(baseTexture,xy,0).rgb),1);
+  vec3 rgb=texelFetch(baseTexture,xy,0).rgb;
+  color=vec4(encode(outputP3 ? rgb : p3ToSrgb(rgb)),1);
 }`;
 function compile(gl,type,source){ const s=gl.createShader(type); gl.shaderSource(s,source); gl.compileShader(s);
   if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; }
@@ -19,6 +24,7 @@ export function createSdrGpuRenderer(canvas, onContextLost) {
   const gl=canvas.getContext("webgl2",{alpha:false,antialias:false});
   if(!gl) throw new Error("WebGL2 unavailable");
   if ("drawingBufferColorSpace" in gl) gl.drawingBufferColorSpace = "display-p3";
+  const outputP3 = gl.drawingBufferColorSpace === "display-p3";
   const floatFilter = gl.getExtension("OES_texture_float_linear") ? gl.LINEAR : gl.NEAREST;
   const program=gl.createProgram(), vs=compile(gl,gl.VERTEX_SHADER,VERTEX), fs=compile(gl,gl.FRAGMENT_SHADER,FRAGMENT);
   gl.attachShader(program,vs);gl.attachShader(program,fs);gl.linkProgram(program);gl.deleteShader(vs);gl.deleteShader(fs);
@@ -31,6 +37,7 @@ export function createSdrGpuRenderer(canvas, onContextLost) {
   gl.useProgram(program); const position=gl.getAttribLocation(program,"position"); gl.enableVertexAttribArray(position);
   gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.vertexAttribPointer(position,2,gl.FLOAT,false,0,0);
   gl.uniform1i(gl.getUniformLocation(program,"baseTexture"),0);
+  gl.uniform1i(gl.getUniformLocation(program,"outputP3"),outputP3 ? 1 : 0);
   let previous = null;
   return { kind:"sdr-gpu",
     upload(frame){

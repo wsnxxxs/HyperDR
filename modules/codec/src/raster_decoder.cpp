@@ -1053,6 +1053,9 @@ DecodedImage decode_image(const std::filesystem::path& path, const RawDecodeOpti
       return decode_jpeg(bytes, options.preview_max_edge, options.default_gamut);
     case InputFormat::Png:
       return decode_png(bytes, options.preview_max_edge, options.default_gamut);
+    case InputFormat::Tiff:
+      return codec::decode_tiff_bytes(bytes, options.preview_max_edge,
+                                      options.default_gamut);
     case InputFormat::Isobmff:
       // HEIF and AVIF are the same container family; the payload codec decides,
       // because libheif would otherwise reject an AV1 payload with an error

@@ -219,7 +219,7 @@ def _packet_metadata(packet: bytes) -> tuple[int, int, dict]:
 def _run_native_gain(executable: str, source: Path, highlight_recovery: str,
                      model_id: str, *, color_gamut: str | None = None,
                      clamp_srgb: bool = False, raw_profile: str | None = None,
-                     lens_profile: str | None = None) -> tuple[bytes, dict]:
+                     lens_profile: str | None = None, raw_look: str | None = None) -> tuple[bytes, dict]:
     argv = [
         executable, "model-gain", str(source),
         "--ai-model", model_id,
@@ -231,6 +231,8 @@ def _run_native_gain(executable: str, source: Path, highlight_recovery: str,
         argv.append("--clamp-srgb")
     if raw_profile:
         argv.extend(["--raw-profile", raw_profile])
+    if raw_look:
+        argv.extend(["--raw-look", raw_look])
     if lens_profile:
         argv.extend(["--raw-lens-profile", lens_profile])
     try:
@@ -278,7 +280,7 @@ def _offset_value(metadata: dict, prefix: str) -> float:
 def native_model_gain(source: Path, highlight_recovery: str = "blend",
                       model_id: str | None = None, *, color_gamut: str | None = None,
                       clamp_srgb: bool = False, raw_profile: str | None = None,
-                      lens_profile: str | None = None) -> tuple[bytes, dict]:
+                      lens_profile: str | None = None, raw_look: str | None = None) -> tuple[bytes, dict]:
     """Run native model-gain without creating any sidecar files."""
     require_enabled()
     input_options = {"clamp_srgb": clamp_srgb}
@@ -295,7 +297,7 @@ def native_model_gain(source: Path, highlight_recovery: str = "blend",
     stat = source.stat()
     # Model and input/base options distinguish predictions for the same source.
     key = (str(source.resolve()), stat.st_mtime_ns, stat.st_size,
-           highlight_recovery, selected, color_gamut, clamp_srgb, raw_profile, lens_profile, executable)
+           highlight_recovery, selected, color_gamut, clamp_srgb, raw_profile, raw_look, lens_profile, executable)
 
     def produce():
         raw = source.suffix.lower() in RAW_INPUT_EXTENSIONS
@@ -304,6 +306,7 @@ def native_model_gain(source: Path, highlight_recovery: str = "blend",
             return _run_native_gain(executable, source, highlight_recovery, selected,
                                     color_gamut=color_gamut, clamp_srgb=clamp_srgb,
                                     **({"raw_profile": raw_profile} if raw_profile else {}),
+                                    **({"raw_look": raw_look} if raw_look else {}),
                                     **({"lens_profile": lens_profile} if lens_profile else {}))
 
     return _INFERENCE_FLIGHT.run(

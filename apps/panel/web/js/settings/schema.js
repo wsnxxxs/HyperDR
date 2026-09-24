@@ -23,6 +23,7 @@ import { t } from "../i18n/index.js";
  * under the grid for the selected format. */
 export const ENCODINGS = [
   { id: "sdr-jpeg", label: "JPEG", maxRange: 4, hint: "enc.sdr-jpeg.hint", detail: "enc.sdr-jpeg.detail" },
+  { id: "sdr-tiff", label: "16-bit TIFF", maxRange: 4, hint: "enc.sdr-tiff.hint", detail: "enc.sdr-tiff.detail" },
   {
     id: "adaptive", label: "Adaptive HDR", maxRange: 3,
     hint: "enc.adaptive.hint", detail: "enc.adaptive.detail",
@@ -57,6 +58,7 @@ export const COLOR_GAMUTS = [
 
 export const encodingById = (id) =>
   ENCODINGS.find((entry) => entry.id === id) || ENCODINGS.find((entry) => entry.id === "adaptive");
+export const isSdrEncoding = (id) => id === "sdr-jpeg" || id === "sdr-tiff";
 
 const ev = (value) => `${value > 0 ? "+" : ""}${value.toFixed(2)} EV`;
 const signed = (value) => `${value > 0 ? "+" : ""}${value.toFixed(2)}`;
@@ -207,7 +209,7 @@ export const CONTROLS_BY_KEY = new Map(CONTROLS.map((control) => [control.key, c
 
 /** Keys that appear in the object sent to /api/run. */
 export const OPTION_KEYS = [
-  "encoding", "hevcPreset", "colorGamut", "clampSrgb", "rawProfile", "rawProfileName", "lensCorrection", "lensProfileName", "lutId", "lutName", "lutInput", "lutOutput", MODEL_KEY, ...CONTROLS.map((control) => control.key),
+  "encoding", "hevcPreset", "colorGamut", "clampSrgb", "rawProfile", "rawProfileName", "rawLook", "rawLookName", "lensCorrection", "lensProfileName", "lutId", "lutName", "lutInput", "lutOutput", MODEL_KEY, ...CONTROLS.map((control) => control.key),
 ];
 
 /** Output, colour and model choices are workflow settings; image adjustments
@@ -245,12 +247,12 @@ export function defaultSettings(encoding = "adaptive", sourceDomain = "", unadju
     hevcPreset: "slow",
     colorGamut: COLOR_GAMUTS[0].id,
     clampSrgb: false,
-    rawProfile: "", rawProfileName: "", lensCorrection: true, lensProfileName: "",
+    rawProfile: "", rawProfileName: "", rawLook: "", rawLookName: "", lensCorrection: true, lensProfileName: "",
     lutId: "", lutName: "", lutInput: "srgb", lutOutput: "srgb",
     [MODEL_KEY]: DEFAULT_MODEL_ID,
   };
   for (const control of CONTROLS) values[control.key] = control.default;
-  if (activeEncoding.id === "sdr-jpeg") values.brightness = 0;
+  if (isSdrEncoding(activeEncoding.id)) values.brightness = 0;
   values.hdrRange = Math.min(values.hdrRange, activeEncoding.maxRange);
   values.aiHdrRange = Math.min(values.aiHdrRange, activeEncoding.maxRange);
   return isHdrSource(sourceDomain) ? sourceIdentity(values, activeEncoding.id, unadjusted) : values;
@@ -296,6 +298,10 @@ export function validatedSettings(saved, base = defaultSettings()) {
   if (typeof saved.rawProfile === "string" && /^[0-9a-f]{64}$/.test(saved.rawProfile)) {
     values.rawProfile = saved.rawProfile;
     values.rawProfileName = typeof saved.rawProfileName === "string" ? saved.rawProfileName.slice(0, 160) : "";
+  }
+  if (values.rawProfile && typeof saved.rawLook === "string" && /^[0-9a-f]{64}$/.test(saved.rawLook)) {
+    values.rawLook = saved.rawLook;
+    values.rawLookName = typeof saved.rawLookName === "string" ? saved.rawLookName.slice(0, 160) : "";
   }
   if (typeof saved.lutId === "string" && /^[0-9a-f]{64}$/.test(saved.lutId)) {
     values.lutId = saved.lutId;

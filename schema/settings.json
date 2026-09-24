@@ -13,7 +13,8 @@
         "hlg",
         "avif-pq",
         "avif-hlg",
-        "sdr-jpeg"
+        "sdr-jpeg",
+        "sdr-tiff"
       ],
       "affects_output_bytes": true,
       "help": "Output representation",
@@ -80,6 +81,14 @@
       "kind": "string",
       "affects_output_bytes": true,
       "help": "RAW Lightroom lens correction profile",
+      "default": ""
+    },
+    {
+      "key": "raw_look",
+      "flag": "--raw-look",
+      "kind": "string",
+      "affects_output_bytes": true,
+      "help": "Static Adobe XMP look (requires matching --raw-profile)",
       "default": ""
     },
     {
@@ -364,6 +373,10 @@
         "png": [
           ".png"
         ],
+        "tiff": [
+          ".tif",
+          ".tiff"
+        ],
         "isobmff": [
           ".heic",
           ".heif",
@@ -375,6 +388,7 @@
     "canonicalExtensions": {
       "jpeg": ".jpg",
       "png": ".png",
+      "tiff": ".tif",
       "isobmff": ".heic"
     },
     "signatures": {
@@ -388,6 +402,16 @@
         {
           "offset": 0,
           "magic": "89504e470d0a1a0a"
+        }
+      ],
+      "tiff": [
+        {
+          "offset": 0,
+          "magic": "49492a00"
+        },
+        {
+          "offset": 0,
+          "magic": "4d4d002a"
         }
       ],
       "isobmff": [

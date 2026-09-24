@@ -153,6 +153,10 @@ std::vector<std::uint8_t> encode_sdr_jpeg(const FloatImage&, const PhotoMetadata
   fail_without_codecs("SDR JPEG encoding");
 }
 void verify_sdr_jpeg(const std::vector<std::uint8_t>&) { fail_without_codecs("SDR JPEG verification"); }
+std::vector<std::uint8_t> encode_sdr_tiff(const FloatImage&, const PhotoMetadata&) {
+  fail_without_codecs("SDR TIFF encoding");
+}
+void verify_sdr_tiff(const std::vector<std::uint8_t>&) { fail_without_codecs("SDR TIFF verification"); }
 
 void verify_heic_decodable(const std::vector<std::uint8_t>&) {
   fail_without_codecs("HEIC decode verification");

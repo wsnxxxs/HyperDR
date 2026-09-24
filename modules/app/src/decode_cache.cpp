@@ -52,7 +52,8 @@ constexpr std::array<char, 8> kMagic{'H', 'D', 'R', 'C', 'A', 'C', 'H', '3'};
 // 30 retains content-light metadata independently of HDR encoding capacity.
 // 31 retains both authored renditions and their gain-map reconstruction metadata.
 // 32 measures Adaptive and legacy Apple usable headroom from the reconstructed peak.
-constexpr std::uint32_t kCacheSchema = 32;
+// 33 persists the optional static XMP look layered over the camera DCP.
+constexpr std::uint32_t kCacheSchema = 33;
 
 // x86-64 and arm64, the only targets this project builds for, are both little
 // endian; the cache is a local scratch format and is never transported.
@@ -188,6 +189,8 @@ std::string metadata_json(const DecodedImage& value) {
       .member("raw_lens_correction", value.raw_lens_correction);
   if (value.raw_profile) {
     writer.member("raw_profile_path", path_utf8(value.raw_profile_path))
+        .member("raw_look_path", path_utf8(value.raw_look_path))
+        .member("raw_look_sha256", value.raw_profile->profile->xmp_look_sha256)
         .member("raw_profile_sha256", value.raw_profile->profile->sha256)
         .member("raw_profile_weight", value.raw_profile->illuminant_weight)
         .member("raw_profile_baseline", value.raw_profile->baseline_exposure);
@@ -280,10 +283,16 @@ void apply_metadata_json(const std::string& text, DecodedImage& out) {
   out.raw_white_balance = string_at("raw_white_balance");
   out.raw_color_matrix = string_at("raw_color_matrix");
   out.raw_profile_path = path_from_utf8(string_at("raw_profile_path"));
+  out.raw_look_path = path_from_utf8(string_at("raw_look_path"));
   out.raw_lens_profile_path = path_from_utf8(string_at("raw_lens_profile_path"));
   out.raw_lens_correction = string_at("raw_lens_correction");
   if (!out.raw_profile_path.empty()) {
     auto profile = read_dcp_profile(out.raw_profile_path);
+    if (!out.raw_look_path.empty()) {
+      apply_xmp_look(profile, out.raw_look_path);
+      if (profile.xmp_look_sha256 != string_at("raw_look_sha256"))
+        throw std::runtime_error("cached XMP look changed");
+    }
     if (profile.sha256 != string_at("raw_profile_sha256"))
       throw std::runtime_error("cached DCP profile changed");
     auto context = std::make_shared<DcpRenderContext>();

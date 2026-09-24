@@ -20,8 +20,9 @@ void write_settings(json::Writer& writer, const ConvertOptions& options) {
     else if (value.is_bool()) writer.member(setting.key, value.boolean());
     else writer.member(setting.key, static_cast<float>(value.number()));
   }
-  // The encoded depth, as opposed to the requested one: BT.2100 is always 10-bit.
-  writer.member("output_depth", is_bt2100_encoding(options.encoding) ? 10 : options.depth);
+  // The encoded depth, as opposed to the requested codec-base depth.
+  writer.member("output_depth", options.encoding == HdrEncoding::SdrTiff ? 16
+      : is_bt2100_encoding(options.encoding) ? 10 : options.depth);
   if (!options.ai_model_path.empty()) {
     // The value is a model id, not a path: the runtime owns the assets. The key
     // is renamed with it so a consumer cannot read the id as a filename, and the

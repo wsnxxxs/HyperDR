@@ -105,7 +105,8 @@
             "hlg",
             "avif-pq",
             "avif-hlg",
-            "sdr-jpeg"
+            "sdr-jpeg",
+            "sdr-tiff"
           ]
         },
         "color_gamut": {
@@ -229,7 +230,8 @@
         "output_depth": {
           "enum": [
             8,
-            10
+            10,
+            16
           ]
         },
         "ai_model_id": {
@@ -299,6 +301,9 @@
           "type": "boolean"
         },
         "raw_profile": {
+          "type": "string"
+        },
+        "raw_look": {
           "type": "string"
         },
         "raw_lens_profile": {

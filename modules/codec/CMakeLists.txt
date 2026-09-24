@@ -6,6 +6,7 @@
 set(HYPERDR_CODEC_SOURCES
   src/dcp_reader.cpp
   src/lens_profile.cpp
+  src/xmp_look.cpp
   src/rendition_encoders.cpp
   src/descriptors.cpp
   src/unavailable.cpp)
@@ -16,6 +17,7 @@ if(HYPERDR_WITH_CODECS)
     src/avif_encoder.cpp
     src/heif_encoder.cpp
     src/raster_decoder.cpp
+    src/tiff_codec.cpp
     src/raw_decoder.cpp
     src/ultrahdr_decoder.cpp
     src/ultrahdr_encoder.cpp)
@@ -34,11 +36,13 @@ if(HYPERDR_WITH_CODECS)
   find_package(lcms2 CONFIG REQUIRED)
   find_package(JPEG REQUIRED)
   find_package(PNG REQUIRED)
+  find_package(TIFF REQUIRED)
+  find_package(ZLIB REQUIRED)
   find_package(libavif CONFIG REQUIRED)
   # PRIVATE: nothing above this module includes a codec header, which is the
   # point of the module existing.
   target_link_libraries(hyperdr_codec PRIVATE
-    libraw::raw_r heif lcms2::lcms2 JPEG::JPEG PNG::PNG uhdr avif)
+    libraw::raw_r heif lcms2::lcms2 JPEG::JPEG PNG::PNG TIFF::TIFF ZLIB::ZLIB uhdr avif)
   target_include_directories(hyperdr_codec PRIVATE ${LIBUHDR_SOURCE_DIR})
 endif()
 

@@ -67,6 +67,9 @@ int main() {
     const auto with_avif = hyperdr::discover_input_files(options);
     require(contains(with_avif, avif), "discovery did not accept an AVIF input");
     require(hyperdr::is_supported_input(avif), "AVIF is not a supported input");
+    const auto tiff = input / "nested" / "scene.tiff";
+    touch(tiff);
+    require(hyperdr::is_supported_input(tiff), "TIFF is not a supported input");
 
     // LibRaw handles more than the original ARW/DNG pair. These are discovery
     // filters only; the codec still validates their actual contents.
@@ -87,6 +90,8 @@ int main() {
                       hyperdr::kJpegExtensions.end());
       families.insert(families.end(), hyperdr::kPngExtensions.begin(),
                       hyperdr::kPngExtensions.end());
+      families.insert(families.end(), hyperdr::kTiffExtensions.begin(),
+                      hyperdr::kTiffExtensions.end());
       families.insert(families.end(), hyperdr::kIsobmffExtensions.begin(),
                       hyperdr::kIsobmffExtensions.end());
       std::vector<std::string_view> flat(hyperdr::kRasterInputExtensions.begin(),
@@ -117,6 +122,9 @@ int main() {
       require(probe({0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}) ==
                   hyperdr::InputFormat::Png,
               "a PNG signature was not recognised");
+      require(probe({'I', 'I', 0x2A, 0}) == hyperdr::InputFormat::Tiff &&
+                  probe({'M', 'M', 0, 0x2A}) == hyperdr::InputFormat::Tiff,
+              "classic TIFF signatures were not recognised");
       require(probe({0, 0, 0, 0x18, 'f', 't', 'y', 'p', 'h', 'e', 'i', 'c'}) ==
                   hyperdr::InputFormat::Isobmff,
               "an ISO base media signature was not recognised");

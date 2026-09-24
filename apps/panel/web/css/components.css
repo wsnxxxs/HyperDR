@@ -173,6 +173,54 @@
   height: 100%;
 }
 .stage-frame canvas[hidden] { display: none; }
+.stage-detail-button {
+  position: absolute;
+  z-index: 8;
+  top: 12px;
+  right: 12px;
+  padding: 7px 11px;
+  border: 1px solid rgba(255, 255, 255, .55);
+  border-radius: 8px;
+  background: rgba(12, 17, 24, .82);
+  color: #fff;
+  cursor: pointer;
+}
+.stage-detail-button[hidden], .stage-detail-overlay[hidden] { display: none; }
+.stage-detail-overlay {
+  position: absolute;
+  z-index: 6;
+  inset: 0;
+  width: min(100%, 2048px);
+  height: min(100%, 2048px);
+  margin: auto;
+  overflow: hidden;
+  background: #10141a;
+  cursor: grab;
+  touch-action: none;
+}
+.stage-detail-overlay:active { cursor: grabbing; }
+.stage-frame .stage-detail-overlay canvas {
+  position: absolute;
+  display: block;
+  max-width: none;
+  max-height: none;
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  transform: none;
+  will-change: left, top;
+}
+.stage-detail-status {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: rgba(12, 17, 24, .82);
+  color: #fff;
+  font-size: 12px;
+  pointer-events: none;
+}
 .stage.is-drop-target .stage-frame {
   outline: 2px dashed var(--accent);
   outline-offset: -6px;

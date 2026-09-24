@@ -26,9 +26,10 @@ std::string exact_number_text(double value) {
 
 }  // namespace
 
-std::array<RawDecodeResource, 6> raw_decode_resources(
+std::array<RawDecodeResource, 7> raw_decode_resources(
     const RawDecodeOptions& options) {
   return {{{"raw_profile", options.profile},
+           {"raw_look", options.look_profile},
            {"raw_lens_profile", options.lens_profile},
            {"raw_bad_pixel_map", options.bad_pixel_map},
            {"raw_dark_frame", options.dark_frame},

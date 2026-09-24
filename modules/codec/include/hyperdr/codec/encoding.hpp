@@ -29,11 +29,15 @@ enum class OutputEncoding {
   AvifHlg,
   // Ordinary sRGB JPEG, with no HDR alternate or gain-map auxiliary.
   SdrJpeg,
+  // Lossless 16-bit Display P3 TIFF for further photo editing.
+  SdrTiff,
 };
 
 using HdrEncoding = OutputEncoding;  // Source compatibility for existing clients.
 
-[[nodiscard]] constexpr bool is_sdr_encoding(OutputEncoding e) { return e == OutputEncoding::SdrJpeg; }
+[[nodiscard]] constexpr bool is_sdr_encoding(OutputEncoding e) {
+  return e == OutputEncoding::SdrJpeg || e == OutputEncoding::SdrTiff;
+}
 [[nodiscard]] constexpr bool is_gain_map_encoding(OutputEncoding e) { return e == OutputEncoding::Adaptive || e == OutputEncoding::UltraHdr; }
 
 // True for encodings whose sample values are BT.2100 rather than a Display-P3

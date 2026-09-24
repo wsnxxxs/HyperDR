@@ -7,7 +7,7 @@
 
 import { el, role, setPressed, setText, clamp } from "../core/dom.js";
 import { store } from "../core/store.js";
-import { CONTROLS, ENCODINGS, encodingById, isHdrSource, neutralSettings } from "./schema.js";
+import { CONTROLS, ENCODINGS, encodingById, isHdrSource, isSdrEncoding, neutralSettings } from "./schema.js";
 import { mountLutLibrary } from "./lut-library.js";
 import { mountRawProfiles } from "./raw-profiles.js";
 import { mountWorkflow } from "./workflow.js";
@@ -386,9 +386,9 @@ function mountEncoding({ toast } = {}) {
     const active = encodingById(id);
     for (const [key, button] of buttons) {
       button.setAttribute("aria-pressed", String(key === active.id));
-      button.hidden = (key === "sdr-jpeg") !== (id === "sdr-jpeg");
+      button.hidden = isSdrEncoding(key) !== isSdrEncoding(id);
     }
-    container.classList.toggle("out-formats--sdr", id === "sdr-jpeg");
+    container.classList.toggle("out-formats--sdr", isSdrEncoding(id));
     setText(hint, t(active.hint));
   }, { immediate: true });
   relabel(() => setText(hint, t(encodingById(store.get().encoding).hint)));
@@ -409,14 +409,14 @@ function mountColorGamut() {
    * not shown here -- it is only how an untagged input file is read, so naming
    * it "the current gamut" suggested the output would be sRGB either way. */
   const sync = (state) => {
-    const sdr = state.encoding === "sdr-jpeg";
+    const sdr = isSdrEncoding(state.encoding);
     gamut.closest("section").hidden = sdr;
     current.disabled = limited.disabled = sdr;
     setText(current, t("editor.currentGamut"));
     setText(limited, t("out.clampSrgb"));
     setPressed(current, !state.clampSrgb && !sdr);
     setPressed(limited, Boolean(state.clampSrgb) || sdr);
-    setText(hint, sdr ? t("enc.sdr-jpeg.hint") : state.clampSrgb ? t("editor.limitedHint") : t("editor.currentGamutHint"));
+    setText(hint, sdr ? t(encodingById(state.encoding).hint) : state.clampSrgb ? t("editor.limitedHint") : t("editor.currentGamutHint"));
   };
   store.watchAny(["colorGamut", "clampSrgb", "encoding"], sync, { immediate: true });
   relabel(() => sync(store.get()));
@@ -442,7 +442,7 @@ function mountResets({ toast } = {}) {
   const keys = CONTROLS.map((control) => control.key);
   button.textContent = t("adjust.reset");
   button.addEventListener("click", () => {
-    const colorOnly = store.get().encoding === "sdr-jpeg";
+    const colorOnly = isSdrEncoding(store.get().encoding);
     // For an HDR photograph "no adjustment" is the photograph, not its SDR base.
     const neutral = neutralSettings(store.get().encoding, store.get().sourceDomain,
       store.get().sourceUnadjusted);
@@ -554,10 +554,10 @@ function mountLut({ toast } = {}) {
   store.watch("sessionId", () => {
     if (!store.get().restoring) store.set({ lutId: "", lutName: "" });
   });
-  store.watch("encoding", (id) => { if (id === "sdr-jpeg") store.set({ previewOptimized: false }); });
+  store.watch("encoding", (id) => { if (isSdrEncoding(id)) store.set({ previewOptimized: false }); });
   store.watchAny(["encoding", "sourceDomain"], (state) => {
     role("group-region").closest("details").hidden =
-      state.encoding === "sdr-jpeg" || isHdrSource(state.sourceDomain);
+      isSdrEncoding(state.encoding) || isHdrSource(state.sourceDomain);
   }, { immediate: true });
   relabel(() => sync(store.get()));
 }
@@ -575,6 +575,9 @@ export function mountControls({ toast } = {}) {
 
   const containers = new Map(
     Object.entries(GROUP_CONTAINERS).map(([group, name]) => [group, role(name)]));
+  store.watch("encoding", (id) => {
+    containers.get("quality").hidden = id === "sdr-tiff";
+  }, { immediate: true });
 
   for (const control of CONTROLS) {
     // `pinned` controls seed the store and ride along in the run payload but
@@ -592,7 +595,7 @@ export function mountControls({ toast } = {}) {
     }
     if (["hdrStrength", "hdrRange", "expansionStart", "areaCoverage"].includes(control.key)) {
       store.watchAny(["encoding", "sourceDomain"], (state) => {
-        widget.node.hidden = state.encoding === "sdr-jpeg"
+        widget.node.hidden = isSdrEncoding(state.encoding)
           || (["expansionStart", "areaCoverage"].includes(control.key)
             && isHdrSource(state.sourceDomain));
       }, { immediate: true });
@@ -616,7 +619,7 @@ export function mountControls({ toast } = {}) {
   }, { immediate: true });
 
   const modeNote = role("mode-note");
-  const syncModeNote = () => setText(modeNote, store.get().encoding === "sdr-jpeg" ? t("workflow.baseNote") : store.get().previewOptimized ? t("inspector.aiNote") : t("inspector.manualNote"));
+  const syncModeNote = () => setText(modeNote, isSdrEncoding(store.get().encoding) ? t("workflow.baseNote") : store.get().previewOptimized ? t("inspector.aiNote") : t("inspector.manualNote"));
   store.watchAny(["previewOptimized", "encoding"], syncModeNote, { immediate: true });
   relabels.push(syncModeNote);
   for (const group of document.querySelectorAll(".parameter-group")) {

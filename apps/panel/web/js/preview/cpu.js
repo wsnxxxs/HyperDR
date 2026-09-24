@@ -10,10 +10,14 @@ export function planeToImageData(values, width, height) {
   let image;
   try { image = new ImageData(width, height, { colorSpace: "display-p3" }); }
   catch (_) { image = new ImageData(width, height); }
+  const outputP3 = image.colorSpace === "display-p3";
   for (let s = 0, d = 0; s < values.length; s += 3, d += 4) {
-    image.data[d] = encode8(values[s]);
-    image.data[d+1] = encode8(values[s+1]);
-    image.data[d+2] = encode8(values[s+2]);
+    const r = values[s], g = values[s+1], b = values[s+2];
+    // ImageData defaults to sRGB on older browsers. Convert the native linear
+    // Display-P3 pixels before transfer encoding instead of relabelling them.
+    image.data[d] = encode8(outputP3 ? r : 1.2249401*r - 0.2249401*g);
+    image.data[d+1] = encode8(outputP3 ? g : -0.0420569*r + 1.0420569*g);
+    image.data[d+2] = encode8(outputP3 ? b : -0.0196376*r - 0.0786361*g + 1.0982737*b);
     image.data[d+3] = 255;
   }
   return image;

@@ -270,6 +270,8 @@ std::vector<std::uint8_t> encode_for(const PhotoRenditions& photo, const GainMap
   switch (options.encoding) {
     case HdrEncoding::SdrJpeg:
       return encode_sdr_jpeg(photo.sdr, metadata, options.quality);
+    case HdrEncoding::SdrTiff:
+      return encode_sdr_tiff(photo.sdr, metadata);
     case HdrEncoding::Adaptive:
       return encode_adaptive_heic(images, metadata, options.quality, options.depth,
                                   options.hevc_preset);
@@ -291,7 +293,8 @@ std::vector<std::uint8_t> encode_for(const PhotoRenditions& photo, const GainMap
 
 void verify_encoded(const std::vector<std::uint8_t>& bytes,
                     const ConvertOptions& options) {
-  if (is_sdr_encoding(options.encoding)) verify_sdr_jpeg(bytes);
+  if (options.encoding == HdrEncoding::SdrTiff) verify_sdr_tiff(bytes);
+  else if (options.encoding == HdrEncoding::SdrJpeg) verify_sdr_jpeg(bytes);
   else if (options.encoding == HdrEncoding::UltraHdr) verify_ultrahdr_jpeg(bytes);
   else if (is_avif_encoding(options.encoding)) verify_avif_decodable(bytes);
   else verify_heic_decodable(bytes, options.encoding);
@@ -360,7 +363,7 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     } else {
       photo = render_graded_gain_map(gain, options.color_lut, target == RenderTarget::Hdr);
     }
-    if (is_sdr_encoding(options.encoding)) fit_sdr_to_srgb(photo.sdr);
+    if (options.encoding == HdrEncoding::SdrJpeg) fit_sdr_to_srgb(photo.sdr);
     const bool codec_gain = options.encoding == OutputEncoding::UltraHdr &&
         options.ai_model_path.empty() && !external && !photo.hdr_is_source;
     const bool explicit_gain = is_gain_map_encoding(options.encoding) && !codec_gain;

@@ -19,12 +19,14 @@ export function mountRawProfiles({ toast } = {}) {
   const file = el("input", { type: "file", accept: ".dcp", hidden: true });
   const button = el("button", { type: "button", class: "link-button raw-profile-import" });
   const hint = el("p", { id: "raw-profile-hint", class: "field-hint", "aria-live": "polite" });
+  const lookSelect = el("select", { class: "lut-select", "aria-label": t("rawLook.label") });
+  const lookHint = el("p", { class: "field-hint" });
   const lensToggle = el("input", { type: "checkbox", "aria-describedby": "lens-profile-hint" });
   const lensLabel = el("span");
   const lensHint = el("p", { id: "lens-profile-hint", class: "field-hint", "aria-live": "polite" });
   const lensRow = el("label", { class: "lens-profile-toggle" }, lensToggle, lensLabel);
-  body.append(el("div", { class: "raw-profile-head" }, cameraName, button), select, file, hint, lensRow, lensHint);
-  let entries = [], camera = "", isRaw = false, busy = false, request = 0;
+  body.append(el("div", { class: "raw-profile-head" }, cameraName, button), select, file, hint, lookSelect, lookHint, lensRow, lensHint);
+  let entries = [], looks = [], camera = "", isRaw = false, busy = false, request = 0;
   let lens = null;
   function sync() {
     const state = store.get();
@@ -42,6 +44,15 @@ export function mountRawProfiles({ toast } = {}) {
       ...choices.map((entry) => el("option", { value: entry.rawProfile }, entry.rawProfileName)));
     select.value = state.rawProfile || "";
     select.disabled = button.disabled = file.disabled = !isRaw || busy || state.uploading || state.restoring || state.optimizing || state.starting || Boolean(state.jobId);
+    lookSelect.setAttribute("aria-label", t("rawLook.label"));
+    const lookChoices = [...looks];
+    if (state.rawLook && !lookChoices.some((entry) => entry.rawLook === state.rawLook))
+      lookChoices.push({ rawLook: state.rawLook, rawLookName: state.rawLookName || "XMP" });
+    lookSelect.replaceChildren(el("option", { value: "" }, t("rawLook.none")),
+      ...lookChoices.map((entry) => el("option", { value: entry.rawLook }, entry.rawLookName)));
+    lookSelect.value = state.rawLook || "";
+    lookSelect.disabled = select.disabled || !lookChoices.length;
+    lookHint.textContent = t("rawLook.hint");
     lensToggle.checked = Boolean(lens?.available && state.lensCorrection !== false);
     lensToggle.disabled = select.disabled || !lens?.available;
     lensLabel.textContent = t("lensProfile.label");
@@ -51,7 +62,8 @@ export function mountRawProfiles({ toast } = {}) {
     const profile = state.rawProfile
       ? (choices.find((entry) => entry.rawProfile === state.rawProfile)?.rawProfileName || "DCP")
       : t("rawProfile.default");
-    const text = lensToggle.checked ? t("rawProfile.summaryLens", { profile }) : profile;
+    const appearance = state.rawLookName ? `${profile} · ${state.rawLookName}` : profile;
+    const text = lensToggle.checked ? t("rawProfile.summaryLens", { profile: appearance }) : appearance;
     summary.textContent = text;
     summary.title = text;
   }
@@ -59,10 +71,19 @@ export function mountRawProfiles({ toast } = {}) {
   function apply(entry) {
     const previous = store.get();
     store.set({ rawProfile: entry?.rawProfile || "", rawProfileName: entry?.rawProfileName || "",
+      rawLook: "", rawLookName: "",
       ...(!previous.rawProfile && entry?.rawProfile ? { brightness: 0 } : {}) });
   }
   select.addEventListener("change", () => apply(entries.find((entry) => entry.rawProfile === select.value)
     || (select.value ? { rawProfile: select.value, rawProfileName: store.get().rawProfileName } : null)));
+  lookSelect.addEventListener("change", () => {
+    const look = looks.find((entry) => entry.rawLook === lookSelect.value);
+    const profile = look && entries.find((entry) => entry.rawProfileName === look.requiredProfile);
+    const previous = store.get();
+    store.set({ rawLook: look?.rawLook || "", rawLookName: look?.rawLookName || "",
+      ...(profile ? { rawProfile: profile.rawProfile, rawProfileName: profile.rawProfileName,
+        ...(!previous.rawProfile ? { brightness: 0 } : {}) } : {}) });
+  });
   button.addEventListener("click", () => file.click());
   file.addEventListener("change", async () => {
     const selected = file.files[0], sessionId = store.get().sessionId;
@@ -79,17 +100,18 @@ export function mountRawProfiles({ toast } = {}) {
   });
   store.watchAny(["sessionId", "file"], async (state) => {
     const current = ++request;
-    entries = []; camera = ""; isRaw = false; lens = null; sync();
+    entries = []; looks = []; camera = ""; isRaw = false; lens = null; sync();
     if (!state.sessionId || !state.file) return;
     try {
       const result = await api.rawProfiles(state.sessionId);
       if (current !== request) return;
       entries = result.entries; camera = result.camera; isRaw = result.isRaw;
+      looks = result.looks || [];
       lens = result.lensCorrection;
       store.set({ lensProfileName: lens?.profileName || "" });
       sync();
     } catch (error) { if (current === request) toast?.(error.message); }
   }, { immediate: true });
-  store.watchAny(["rawProfile", "rawProfileName", "lensCorrection", "uploading", "restoring", "optimizing", "starting", "jobId"], sync);
+  store.watchAny(["rawProfile", "rawProfileName", "rawLook", "rawLookName", "lensCorrection", "uploading", "restoring", "optimizing", "starting", "jobId"], sync);
   onLocaleChange(sync);
 }

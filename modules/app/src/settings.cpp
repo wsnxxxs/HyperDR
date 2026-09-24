@@ -84,7 +84,7 @@ void validate_convert_options(const ConvertOptions& options) {
         (options.color_lut.input == LutSpace::SLog3 || options.color_lut.input == LutSpace::Hlg || options.color_lut.input == LutSpace::Pq))
       throw std::invalid_argument("AI/external gain supports SDR creative LUTs; use manual rendering for Log/HLG/PQ LUTs");
   }
-  if (is_sdr_encoding(options.encoding) && options.depth != 8)
+  if (options.encoding == HdrEncoding::SdrJpeg && options.depth != 8)
     throw std::invalid_argument("SDR JPEG requires --depth 8");
   validate_native_model_post_options(options.ai_post);
   if (has_external_gain) {
@@ -110,6 +110,9 @@ void validate_convert_options(const ConvertOptions& options) {
     }
   };
   validate_raw_file(options.raw.profile, "RAW DCP profile");
+  validate_raw_file(options.raw.look_profile, "RAW XMP look");
+  if (!options.raw.look_profile.empty() && options.raw.profile.empty())
+    throw std::invalid_argument("--raw-look requires --raw-profile");
   validate_raw_file(options.raw.lens_profile, "RAW LCP profile");
   validate_raw_file(options.raw.bad_pixel_map, "RAW bad-pixel map");
   validate_raw_file(options.raw.dark_frame, "RAW dark frame");

@@ -5,6 +5,25 @@ semantic versioning; dates use ISO 8601.
 
 ## Unreleased
 
+- RAW photos can use supported static XMP looks from the local Adobe installation
+  on top of their matching DCP. The panel discovers compatible looks; the CLI
+  accepts `--raw-look`. Adaptive profiles and unsupported adjustment properties
+  are rejected. Profile files are not bundled.
+
+- DCP-based HDR development now keeps above-white scene luminance from the RAW
+  instead of deriving every highlight from the clipped SDR rendition. SDR
+  development stays unchanged when no XMP look is selected.
+
+- TIFF input supports stripped 8/16-bit RGB and grayscale with embedded ICC
+  conversion. `sdr-tiff` exports lossless 16-bit Display P3 TIFF for editing.
+
+- The editor has a 100% detail view using full-resolution decoding and a bounded
+  crop, with drag and arrow-key panning. SDR canvas fallback converts P3 pixels
+  to sRGB when the browser cannot honor a Display P3 canvas.
+
+- Windows CLI and resident preview requests now use the same UTF-8 path
+  handling, fixing previews and profile paths containing Chinese characters.
+
 - Gain-map photographs -- Adaptive HDR HEIC, Ultra HDR JPEG, iPhone HDR HEIC
   in both the ISO and the older Apple format, and gain-map AVIF -- now open with
   both of their own renditions. SDR and JPEG exports use the photograph's

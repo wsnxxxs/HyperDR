@@ -7,7 +7,7 @@
 
 import { el, role, setPressed, setText, clamp } from "../core/dom.js";
 import { store } from "../core/store.js";
-import { CONTROLS, ENCODINGS, encodingById, isHdrSource, isSdrEncoding, neutralSettings } from "./schema.js";
+import { CONTROLS, ENCODINGS, effectiveOutputGamut, encodingById, isHdrSource, isSdrEncoding, neutralSettings, outputDescription } from "./schema.js";
 import { mountLutLibrary } from "./lut-library.js";
 import { mountRawProfiles } from "./raw-profiles.js";
 import { mountWorkflow } from "./workflow.js";
@@ -402,23 +402,36 @@ function mountColorGamut() {
   const current = el("button", { type: "button", "aria-pressed": "false" });
   const limited = el("button", { type: "button", "aria-pressed": "false" });
   gamut.append(current, limited);
-  current.addEventListener("click", () => store.set({ clampSrgb: false }));
-  limited.addEventListener("click", () => store.set({ clampSrgb: true }));
-  /* This is the one colour decision the export makes: keep the wide-gamut
-   * colour the working space holds, or compress it into sRGB. `colorGamut` is
-   * not shown here -- it is only how an untagged input file is read, so naming
-   * it "the current gamut" suggested the output would be sRGB either way. */
+  current.addEventListener("click", () => store.set(isSdrEncoding(store.get().encoding)
+    ? { outputGamut: "srgb" } : { clampSrgb: false }));
+  limited.addEventListener("click", () => store.set(isSdrEncoding(store.get().encoding)
+    ? { outputGamut: "p3" } : { clampSrgb: true }));
   const sync = (state) => {
     const sdr = isSdrEncoding(state.encoding);
-    gamut.closest("section").hidden = sdr;
-    current.disabled = limited.disabled = sdr;
-    setText(current, t("editor.currentGamut"));
-    setText(limited, t("out.clampSrgb"));
-    setPressed(current, !state.clampSrgb && !sdr);
-    setPressed(limited, Boolean(state.clampSrgb) || sdr);
-    setText(hint, sdr ? t(encodingById(state.encoding).hint) : state.clampSrgb ? t("editor.limitedHint") : t("editor.currentGamutHint"));
+    setText(current, sdr ? "sRGB" : t("editor.currentGamut"));
+    setText(limited, sdr ? "Display P3" : t("out.clampSrgb"));
+    setPressed(current, sdr ? effectiveOutputGamut(state.encoding, state.outputGamut) === "srgb" : !state.clampSrgb);
+    setPressed(limited, sdr ? effectiveOutputGamut(state.encoding, state.outputGamut) === "p3" : Boolean(state.clampSrgb));
+    setText(hint, sdr ? outputDescription(state.encoding, state.outputGamut)
+      : `${outputDescription(state.encoding)} · ${t(state.clampSrgb ? "editor.limitedHint" : "editor.currentGamutHint")}`);
   };
-  store.watchAny(["colorGamut", "clampSrgb", "encoding"], sync, { immediate: true });
+  store.watchAny(["clampSrgb", "outputGamut", "encoding"], sync, { immediate: true });
+  relabel(() => sync(store.get()));
+}
+
+function mountInputColor() {
+  const panel = role("input-color-panel");
+  const select = role("input-color-select");
+  const hint = role("input-color-hint");
+  select.addEventListener("change", () => store.set({ colorGamut: select.value }));
+  const sync = (state) => {
+    panel.hidden = !state.file || state.sourceDomain === "scene-referred";
+    const untagged = state.sourceColor?.source === "assumed";
+    select.disabled = !untagged || state.uploading || state.restoring;
+    select.value = state.colorGamut;
+    setText(hint, t(untagged ? "input.untaggedHint" : "input.taggedHint"));
+  };
+  store.watchAny(["file", "sourceDomain", "sourceColor", "colorGamut", "uploading", "restoring"], sync, { immediate: true });
   relabel(() => sync(store.get()));
 }
 
@@ -509,8 +522,10 @@ function mountLut({ toast } = {}) {
   });
   const spaces = [["srgb", "sRGB"], ["p3", "Display P3"], ["rec709", "Rec.709 · Gamma 2.4"],
     ["hlg", "HLG · BT.2020"], ["pq", "PQ · BT.2020"], ["slog3-sgamut3cine", "S-Log3 · S-Gamut3.Cine"]];
+  const spaceSelects = {};
   for (const [key, labelKey] of [["lutInput", "lut.input"], ["lutOutput", "lut.output"]]) {
     const select = el("select", { class: "lut-select", "aria-label": t(labelKey) });
+    spaceSelects[key] = select;
     for (const [value, label] of spaces) select.append(el("option", { value }, label));
     const label = el("label", { class: "field lut-space" }, el("span", {}, t(labelKey)), select);
     role("lut-spaces").append(label);
@@ -524,6 +539,25 @@ function mountLut({ toast } = {}) {
     store.watchAny([key, "lutId"], (state) => { select.value = state[key]; select.disabled = !state.lutId; }, { immediate: true });
     relabel(() => { label.firstChild.textContent = t(labelKey); select.setAttribute("aria-label", t(labelKey)); });
   }
+  const sdrSpaces = new Set(["srgb", "p3", "rec709"]);
+  store.watchAny(["lutInput", "sourceDomain", "rawProfile", "lutId"], (state) => {
+    const sceneLutAllowed = state.sourceDomain === "scene-referred" && !state.rawProfile;
+    for (const option of spaceSelects.lutInput.options)
+      if (option.value === "slog3-sgamut3cine") option.disabled = !sceneLutAllowed;
+    for (const option of spaceSelects.lutOutput.options)
+      option.disabled = (sdrSpaces.has(state.lutInput) && !sdrSpaces.has(option.value))
+        || (state.lutInput !== "slog3-sgamut3cine" && option.value === "slog3-sgamut3cine");
+  }, { immediate: true });
+  store.watchAny(["lutId", "lutInput", "lutOutput", "sourceDomain", "rawProfile"], (state) => {
+    if (!state.lutId) return;
+    if ((sdrSpaces.has(state.lutInput) && !sdrSpaces.has(state.lutOutput))
+        || (state.lutInput !== "slog3-sgamut3cine" && state.lutOutput === "slog3-sgamut3cine")) {
+      store.set({ lutOutput: state.lutInput });
+    }
+    if (state.lutInput === "slog3-sgamut3cine"
+        && (state.rawProfile || (state.sourceDomain && state.sourceDomain !== "scene-referred"))
+        && state.lutStrength > 0) store.set({ lastLutStrength: state.lutStrength, lutStrength: 0 });
+  }, { immediate: true });
   remove.addEventListener("click", () => store.set({ lutId: "", lutName: "" }));
   // The library is managed in its own dialog; this is a shortcut into it for
   // the moment the panel has nothing to offer.
@@ -537,7 +571,9 @@ function mountLut({ toast } = {}) {
     role("group-lut").hidden = !state.lutId;
     emptyNote.hidden = Boolean(state.lutId || state.lutLibraryEntries.length);
     remove.disabled = !state.lutId;
-    enabled.disabled = !state.lutId;
+    const invalidScene = state.lutInput === "slog3-sgamut3cine"
+      && (state.sourceDomain !== "scene-referred" || state.rawProfile);
+    enabled.disabled = !state.lutId || invalidScene;
     enabled.checked = Boolean(state.lutId && state.lutStrength > 0);
     spaceOpen.hidden = !state.lutId;
     if (!state.lutId && spaceDialog.open) spaceDialog.close();
@@ -548,9 +584,10 @@ function mountLut({ toast } = {}) {
     setText(role("lut-space-summary"), summary);
     spaceOpen.title = t("lut.spaceSummary", { input: inputLabel, output: outputLabel });
     const kind = state.lutInput === "slog3-sgamut3cine" ? "log" : ["hlg", "pq"].includes(state.lutInput) ? "hdr" : "sdr";
-    setText(role("lut-hint"), t({ log: "lut.hint.log", hdr: "lut.hint.hdr", sdr: "lut.hint.sdr" }[kind]));
+    setText(role("lut-hint"), t(invalidScene ? "lut.hint.sceneRequired"
+      : { log: "lut.hint.log", hdr: "lut.hint.hdr", sdr: "lut.hint.sdr" }[kind]));
   };
-  store.watchAny(["sessionId", "uploading", "restoring", "lutId", "lutName", "lutInput", "lutOutput", "lutStrength", "lutLibraryEntries"], sync, { immediate: true });
+  store.watchAny(["sessionId", "uploading", "restoring", "lutId", "lutName", "lutInput", "lutOutput", "lutStrength", "lutLibraryEntries", "sourceDomain", "rawProfile"], sync, { immediate: true });
   store.watch("sessionId", () => {
     if (!store.get().restoring) store.set({ lutId: "", lutName: "" });
   });
@@ -568,6 +605,7 @@ export function mountControls({ toast } = {}) {
   mountWorkflow();
   mountEncoding({ toast });
   mountColorGamut();
+  mountInputColor();
   mountHevcSpeed();
   mountLut({ toast });
   mountRawProfiles({ toast });

@@ -1,5 +1,6 @@
 #include "hyperdr/look/dcp_render.hpp"
 #include "hyperdr/look/options.hpp"
+#include "hyperdr/look/rendition.hpp"
 #include "hyperdr/image/color.hpp"
 #include <algorithm>
 #include <cmath>
@@ -145,8 +146,72 @@ void explicit_adjustments() {
         hyperdr::p3_luminance(original.pixels[0],original.pixels[1],original.pixels[2]),
         "vibrance preserves luminance");
 }
+void attached_xmp_look() {
+  auto p=identity();
+  p->tone_curve={{{0,0}},{{.25,.5}},{{1,1}}};
+  const hyperdr::DcpRenderContext context{p,1,0};
+  const auto input=pixel({.25,.25,.25});
+  const auto standard=hyperdr::render_dcp_base(input,context);
+  close(standard.pixels[0],.5,"DCP tone precedes attached XMP look");
+  p->xmp_look_table=map(.8F);
+  const auto table_only=hyperdr::render_dcp_base(input,context);
+  close(table_only.pixels[0],.4,"attached XMP look table follows DCP tone");
+  p->xmp_tone_curve={{{0,0}},{{.4,.6}},{{1,1}}};
+  const auto with_tone=hyperdr::render_dcp_base(input,context);
+  close(with_tone.pixels[0],.6,"attached XMP tone follows its look table");
+  p->xmp_look_table={};
+  p->xmp_tone_curve.clear();
+  const auto restored=hyperdr::render_dcp_base(input,context);
+  require(restored.pixels==standard.pixels,"empty XMP fields leave DCP pixels unchanged");
+}
+void dcp_scene_highlights() {
+  auto p=identity();
+  auto context=std::make_shared<hyperdr::DcpRenderContext>(
+      hyperdr::DcpRenderContext{p,1,0});
+  hyperdr::InputDescription input{hyperdr::InputDomain::kSceneReferred,1};
+  input.raw_profile=context;
+  hyperdr::RenderOptions options;
+  options.auto_headroom=false;
+  options.headroom_stops=2;
+  options.look.contrast=1;
+  options.look.vibrance=0;
+  hyperdr::FloatImage scene(4,1,3);
+  for (int x=0;x<4;++x)
+    for (int c=0;c<3;++c) scene.at(x,0,c)=std::array<float,4>{.5F,1.1F,1.5F,2.0F}[x];
+  const auto sdr=hyperdr::render_renditions(scene,options,{},input,hyperdr::RenderTarget::Sdr);
+  const auto hdr=hyperdr::render_renditions(scene,options,{},input,hyperdr::RenderTarget::Hdr);
+  require(hdr.sdr.pixels==sdr.sdr.pixels,"DCP SDR base must remain unchanged in HDR render");
+  close(hdr.sdr.at(1,0,0),hdr.sdr.at(3,0,0),"DCP SDR highlights remain clipped");
+  require(hdr.hdr.at(1,0,0)<hdr.hdr.at(2,0,0) &&
+      hdr.hdr.at(2,0,0)<hdr.hdr.at(3,0,0),
+      "DCP HDR must retain distinct RAW highlight intensities");
+  require(hdr.hdr.at(0,0,0)==hdr.sdr.at(0,0,0),
+      "a scene with real highlights keeps below-white pixels at their DCP base");
+  hyperdr::FloatImage ramp(7,1,3);
+  constexpr std::array<float,7> levels{.8F,.95F,1.0F,1.05F,1.1F,1.5F,2.0F};
+  for (int x=0;x<7;++x)
+    for (int c=0;c<3;++c) ramp.at(x,0,c)=levels[x];
+  const auto ramp_hdr=hyperdr::render_renditions(ramp,options,{},input,hyperdr::RenderTarget::Hdr);
+  for (int x=1;x<7;++x)
+    require(ramp_hdr.hdr.at(x,0,0)>=ramp_hdr.hdr.at(x-1,0,0),
+        "DCP HDR must not create a downward seam at scene white");
+  options.gain_strength=0;
+  const auto zero=hyperdr::render_renditions(scene,options,{},input,hyperdr::RenderTarget::Hdr);
+  require(zero.hdr.pixels==zero.sdr.pixels,"zero HDR strength must equal DCP SDR exactly");
+  hyperdr::FloatImage below(2,1,3);
+  below.pixels={.2F,.2F,.2F,.8F,.8F,.8F};
+  options.gain_strength=1;
+  const auto no_scene_highlights=hyperdr::render_renditions(
+      below,options,{},input,hyperdr::RenderTarget::Hdr);
+  const auto developed=hyperdr::render_dcp_base(below,*context);
+  const auto old_path=hyperdr::render_renditions(developed,options,{},
+      {hyperdr::InputDomain::kDisplayReferredSdr,1},hyperdr::RenderTarget::Hdr);
+  require(no_scene_highlights.hdr.pixels==old_path.hdr.pixels,
+      "a RAW without overrange highlights retains its previous HDR render");
+}
 }
 int main() {
-  try { neutral_and_exposure(); table_interpolation_and_encoding(); rgb_tone_semantics(); explicit_adjustments(); }
+  try { neutral_and_exposure(); table_interpolation_and_encoding(); rgb_tone_semantics();
+        explicit_adjustments(); attached_xmp_look(); dcp_scene_highlights(); }
   catch (const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
 }

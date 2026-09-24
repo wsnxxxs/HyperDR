@@ -357,6 +357,7 @@ export default {
   "out.format": "Output format",
   "out.encoding": "Output encoding",
   "out.gamutTitle": "Output gamut",
+  "out.rangeTitle": "Color range",
   "out.gamut": "Output gamut",
   "out.gamutHint.srgb": "Standard gamut · Compatible with all screens & platforms",
   "out.gamutHint.p3": "Wide gamut · Richer colors for iPhone, Mac & modern screens",

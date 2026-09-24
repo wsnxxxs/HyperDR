@@ -358,6 +358,7 @@ export default {
   "out.format": "输出格式",
   "out.encoding": "输出编码",
   "out.gamutTitle": "输出色域",
+  "out.rangeTitle": "颜色范围",
   "out.gamut": "输出色域",
   "out.gamutHint.srgb": "通用标准色彩 · 兼容所有屏幕与平台",
   "out.gamutHint.p3": "丰富广色域 · 适合 iPhone、Mac 及现代屏幕",

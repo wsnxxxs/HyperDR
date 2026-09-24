@@ -59,6 +59,17 @@ export const COLOR_GAMUTS = [
 export const encodingById = (id) =>
   ENCODINGS.find((entry) => entry.id === id) || ENCODINGS.find((entry) => entry.id === "adaptive");
 export const isSdrEncoding = (id) => id === "sdr-jpeg" || id === "sdr-tiff";
+export const effectiveOutputGamut = (encoding, choice = "auto") =>
+  choice === "auto" ? (encoding === "sdr-tiff" ? "p3" : "srgb") : choice;
+export const outputDescription = (encoding, choice = "auto") => {
+  const gamut = effectiveOutputGamut(encoding, choice) === "p3" ? "Display P3" : "sRGB";
+  if (encoding === "sdr-jpeg") return `JPEG · ${gamut} · ${t("out.bit8")}`;
+  if (encoding === "sdr-tiff") return `TIFF · ${gamut} · ${t("out.bit16")}`;
+  if (encoding === "adaptive") return `HEIC · Display P3 ${t("out.gainBase")}`;
+  if (encoding === "ultrahdr") return `JPEG · Display P3 ${t("out.gainBase")}`;
+  if (encoding === "pq" || encoding === "avif-pq") return `${encoding === "pq" ? "HEIC" : "AVIF"} · Rec.2020 · PQ · ${t("out.bit10")}`;
+  return `${encoding === "hlg" ? "HEIC" : "AVIF"} · Rec.2020 · HLG · ${t("out.bit10")}`;
+};
 
 const ev = (value) => `${value > 0 ? "+" : ""}${value.toFixed(2)} EV`;
 const signed = (value) => `${value > 0 ? "+" : ""}${value.toFixed(2)}`;
@@ -209,7 +220,7 @@ export const CONTROLS_BY_KEY = new Map(CONTROLS.map((control) => [control.key, c
 
 /** Keys that appear in the object sent to /api/run. */
 export const OPTION_KEYS = [
-  "encoding", "hevcPreset", "colorGamut", "clampSrgb", "rawProfile", "rawProfileName", "rawLook", "rawLookName", "lensCorrection", "lensProfileName", "lutId", "lutName", "lutInput", "lutOutput", MODEL_KEY, ...CONTROLS.map((control) => control.key),
+  "encoding", "hevcPreset", "colorGamut", "outputGamut", "clampSrgb", "rawProfile", "rawProfileName", "rawLook", "rawLookName", "lensCorrection", "lensProfileName", "lutId", "lutName", "lutInput", "lutOutput", MODEL_KEY, ...CONTROLS.map((control) => control.key),
 ];
 
 /** Output, colour and model choices are workflow settings; image adjustments
@@ -217,7 +228,7 @@ export const OPTION_KEYS = [
  *  the output format -- "how should this be processed" rather than "how should
  *  it look" -- and because persisting it is what keeps a refresh from quietly
  *  re-pointing the next export at a different algorithm. */
-export const PERSISTED_OPTION_KEYS = ["encoding", "hevcPreset", "colorGamut", "clampSrgb", MODEL_KEY];
+export const PERSISTED_OPTION_KEYS = ["encoding", "hevcPreset", "colorGamut", "outputGamut", "clampSrgb", MODEL_KEY];
 
 /* The decoder reports single-HDR and authored SDR+HDR photographs separately. */
 export const HDR_SOURCE_DOMAIN = "display-referred-hdr";
@@ -246,6 +257,7 @@ export function defaultSettings(encoding = "adaptive", sourceDomain = "", unadju
     encoding: activeEncoding.id,
     hevcPreset: "slow",
     colorGamut: COLOR_GAMUTS[0].id,
+    outputGamut: "auto",
     clampSrgb: false,
     rawProfile: "", rawProfileName: "", rawLook: "", rawLookName: "", lensCorrection: true, lensProfileName: "",
     lutId: "", lutName: "", lutInput: "srgb", lutOutput: "srgb",
@@ -292,6 +304,7 @@ export function validatedSettings(saved, base = defaultSettings()) {
   if (ENCODINGS.some(({ id }) => id === saved.encoding)) values.encoding = saved.encoding;
   if (["slow", "medium"].includes(saved.hevcPreset)) values.hevcPreset = saved.hevcPreset;
   if (COLOR_GAMUTS.some(({ id }) => id === saved.colorGamut)) values.colorGamut = saved.colorGamut;
+  if (["auto", "srgb", "p3"].includes(saved.outputGamut)) values.outputGamut = saved.outputGamut;
   if (typeof saved.lensCorrection === "boolean") values.lensCorrection = saved.lensCorrection;
   if (typeof saved.lensProfileName === "string") values.lensProfileName = saved.lensProfileName.slice(0, 160);
   if (typeof saved.clampSrgb === "boolean") values.clampSrgb = saved.clampSrgb;

@@ -40,6 +40,7 @@ def fmt_num(value) -> str:
 PANEL_DEFAULTS = {
     "encoding": "adaptive",
     "colorGamut": "srgb",
+    "outputGamut": "auto",
     "clampSrgb": False,
     "highlightRecovery": "blend",
     "contrast": 1.0,
@@ -171,13 +172,17 @@ def options_to_settings(options: dict) -> dict:
     strength = value("hdrStrength")
     encoding = value("encoding")
     headroom = _headroom(effective_options, encoding)
+    output_gamut = value("outputGamut")
+    if output_gamut not in {"auto", "srgb", "p3"}:
+        raise ValueError("outputGamut must be auto, srgb or p3")
     return validate_settings({
         "encoding": encoding,
         "lut_input": value("lutInput"),
         "lut_output": value("lutOutput"),
         "lut_strength": value("lutStrength"),
         "color_gamut": value("colorGamut"),
-        "clamp_srgb": value("clampSrgb"),
+        **({"output_gamut": output_gamut} if encoding in {"sdr-jpeg", "sdr-tiff"} else {}),
+        "clamp_srgb": False if encoding in {"sdr-jpeg", "sdr-tiff"} else value("clampSrgb"),
         # Not a panel control, and pinned rather than passed through: the
         # renderer decides which curve the browser draws locally, so a client
         # that could choose it could make the preview disagree with the export. `photographic` is
@@ -245,7 +250,7 @@ def _ai_post_flags(options: dict, encoding: str) -> list[str]:
 
 
 def _color_flags(options: dict, settings: dict) -> list[str]:
-    """Serialize the input-gamut and output-clamp choices.
+    """Serialize input interpretation and the selected output color policy.
 
     The panel always supplies ``colorGamut`` through ``toOptions``; keeping
     the presence check here preserves the old CLI default for callers that do
@@ -254,6 +259,8 @@ def _color_flags(options: dict, settings: dict) -> list[str]:
     flags: list[str] = []
     if "colorGamut" in options:
         flags.extend(["--color-gamut", settings["color_gamut"]])
+    if "outputGamut" in options and settings["encoding"] in {"sdr-jpeg", "sdr-tiff"}:
+        flags.extend(["--output-gamut", settings["output_gamut"]])
     if settings["clamp_srgb"]:
         flags.append("--clamp-srgb")
     if options.get("_raw_profile_path"):

@@ -307,7 +307,13 @@ inline constexpr float kGamutCompressionPower = 1.2F;
     }
     return true;
   };
-  if (inside(source, 0.0)) {
+  // The existing forward and inverse Rec.2020 matrices differ by less than
+  // one part per million. Accept that round-trip noise at the boundary so a
+  // nominal pure primary is not needlessly compressed.
+  const double round_trip_tolerance = gamut == ColorGamut::kRec2020
+      ? 1.0e-6 * std::max({1.0, std::abs(source[0]), std::abs(source[1]),
+                          std::abs(source[2])}) : 0.0;
+  if (inside(source, round_trip_tolerance)) {
     return {static_cast<float>(source[0]), static_cast<float>(source[1]),
             static_cast<float>(source[2])};
   }

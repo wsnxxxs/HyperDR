@@ -123,6 +123,9 @@ void prepare_photographic_render(const FloatImage& source,
     const PhotographicAnalysis* analysis, GainMapPreparation& prepared);
 std::array<float, 3> render_common_chroma(float r, float g, float b,
     float source_y, float sdr_y, float hdr_y, float peak, const LookOptions& look);
+std::array<float, 3> render_hdr_chroma(float r, float g, float b,
+    float source_y, float hdr_y, float peak, const LookOptions& look,
+    ColorGamut gamut);
 PhotoRenditions render_renditions(const FloatImage& source,
     const RenderOptions& options, const CaptureMetadata& capture,
     const InputDescription& input, RenderTarget target,

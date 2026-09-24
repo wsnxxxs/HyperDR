@@ -23,6 +23,7 @@ constexpr std::array<std::string_view, 4> kHighlightRecoveryChoices{
     "blend", "reconstruct", "clip", "unclip"};
 constexpr std::array<std::string_view, 3> kColorGamutChoices{
     "srgb", "p3", "rec2020"};
+constexpr std::array<std::string_view, 3> kOutputGamutChoices{"auto", "srgb", "p3"};
 constexpr std::array<std::string_view, 2> kHevcPresetChoices{"slow", "medium"};
 
 // --- accessors -------------------------------------------------------------
@@ -96,8 +97,8 @@ json::Value read_headroom(const ConvertOptions& o) {
                               : json::Value::from_number(o.gain.headroom_stops);
 }
 
-const std::array<Setting, 35>& table() {
-  static const std::array<Setting, 35> kSettings{{
+const std::array<Setting, 36>& table() {
+  static const std::array<Setting, 36> kSettings{{
       {"encoding", "--encoding", SettingKind::kEnum, 0, 0, kEncodingChoices,
        "adaptive|ultrahdr|pq|hlg|avif-pq|avif-hlg|sdr-jpeg|sdr-tiff", "Output representation", false,
        true,
@@ -108,8 +109,16 @@ const std::array<Setting, 35>& table() {
        true,
        [](std::string_view name) { return color_gamut_from_name(name).has_value(); },
        apply_color_gamut, read_color_gamut, true},
+      {"output_gamut", "--output-gamut", SettingKind::kEnum, 0, 0,
+       kOutputGamutChoices, "auto|srgb|p3", "SDR file colour space (auto: JPEG sRGB, TIFF P3)", false,
+       true, nullptr,
+       [](ConvertOptions& o, const json::Value& v) {
+         o.output_gamut = v.string() == "auto" ? std::nullopt : color_gamut_from_name(v.string());
+       },
+       [](const ConvertOptions& o) { return json::Value::from_string(
+           o.output_gamut ? color_gamut_name(*o.output_gamut) : "auto"); }},
       {"clamp_srgb", "--clamp-srgb", SettingKind::kBoolean, 0, 0, {}, {},
-       "Clamp rendered colour to sRGB gamut", false, true, nullptr,
+       "Limit HDR colours to sRGB chromaticity without changing file primaries", false, true, nullptr,
        apply_clamp_srgb, read_clamp_srgb},
       {"look", "--look", SettingKind::kEnum, 0, 0, kLookChoices,
        "photographic",

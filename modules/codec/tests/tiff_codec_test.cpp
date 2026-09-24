@@ -62,6 +62,26 @@ int main() {
   for (std::size_t i = 0; i < original.pixels.size(); ++i)
     near(decoded.linear_p3.pixels[i], original.pixels[i], "Display P3 TIFF round-trip changed colour");
 
+  // A saturated P3 patch distinguishes a profile-only relabel from a real
+  // conversion. Exercise both file formats through the ordinary ICC decoder.
+  FloatImage patch(16, 16, 3);
+  const std::array<float, 3> p3{0.05F, 0.8F, 0.03F};
+  for (std::size_t i = 0; i < patch.pixels.size(); ++i) patch.pixels[i] = p3[i % 3];
+  for (const bool jpeg : {false, true}) {
+    for (const auto gamut : {ColorGamut::kSrgb, ColorGamut::kDisplayP3}) {
+      TemporaryFile output{directory / (jpeg ? "hyperdr-gamut-output.jpg" : "hyperdr-gamut-output.tif")};
+      const auto encoded = jpeg ? encode_sdr_jpeg(patch, {}, 100, gamut)
+                                : encode_sdr_tiff(patch, {}, gamut);
+      write_binary_file_atomic(output.path, encoded, true);
+      const auto roundtrip = decode_image(output.path);
+      const auto expected = gamut == ColorGamut::kSrgb
+          ? compress_linear_p3_to_srgb(p3[0], p3[1], p3[2]) : p3;
+      for (unsigned c = 0; c < 3; ++c)
+        require(std::abs(roundtrip.linear_p3.at(8, 8, c) - expected[c]) < (jpeg ? .015F : .003F),
+                "SDR output samples and embedded ICC disagree");
+    }
+  }
+
   TemporaryFile gray{directory / "hyperdr-tiff-gray-test.tiff"};
   {
     TIFF* tiff = TIFFOpen(gray.path.string().c_str(), "w");

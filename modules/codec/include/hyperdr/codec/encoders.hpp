@@ -63,10 +63,12 @@ struct UltraHdrInfo {
 
 
 [[nodiscard]] std::vector<std::uint8_t> encode_sdr_jpeg(
-    const FloatImage& image, const PhotoMetadata& metadata, int quality);
+    const FloatImage& image, const PhotoMetadata& metadata, int quality,
+    ColorGamut gamut = ColorGamut::kSrgb);
 void verify_sdr_jpeg(const std::vector<std::uint8_t>& bytes);
 [[nodiscard]] std::vector<std::uint8_t> encode_sdr_tiff(
-    const FloatImage& image, const PhotoMetadata& metadata);
+    const FloatImage& image, const PhotoMetadata& metadata,
+    ColorGamut gamut = ColorGamut::kDisplayP3);
 void verify_sdr_tiff(const std::vector<std::uint8_t>& bytes);
 [[nodiscard]] std::vector<std::uint8_t> encode_hdr_heic(
     const PhotoRenditions& images, const PhotoMetadata& metadata, int quality, HdrEncoding encoding,

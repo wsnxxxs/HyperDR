@@ -7,6 +7,22 @@
 
 namespace hyperdr::codec {
 
+inline std::vector<std::uint8_t> srgb_profile() {
+  const auto profile = cmsCreate_sRGBProfile();
+  if (!profile) throw std::runtime_error("cannot create sRGB profile");
+  cmsUInt32Number size = 0;
+  if (!cmsSaveProfileToMem(profile, nullptr, &size) || !size) {
+    cmsCloseProfile(profile);
+    throw std::runtime_error("cannot size sRGB profile");
+  }
+  std::vector<std::uint8_t> data(size);
+  const auto saved = cmsSaveProfileToMem(profile, data.data(), &size);
+  cmsCloseProfile(profile);
+  if (!saved) throw std::runtime_error("cannot serialize sRGB profile");
+  data.resize(size);
+  return data;
+}
+
 inline std::vector<std::uint8_t> display_p3_profile(bool linear = false) {
   cmsCIExyY white{0.3127, 0.3290, 1.0};
   cmsCIExyYTRIPLE primaries{{0.680, 0.320, 1.0}, {0.265, 0.690, 1.0}, {0.150, 0.060, 1.0}};

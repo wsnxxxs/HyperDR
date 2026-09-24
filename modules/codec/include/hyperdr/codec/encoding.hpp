@@ -27,9 +27,9 @@ enum class OutputEncoding {
   // The same two renditions in AVIF. Same pixels, different container and codec.
   AvifPq,
   AvifHlg,
-  // Ordinary sRGB JPEG, with no HDR alternate or gain-map auxiliary.
+  // Ordinary JPEG, sRGB by default or Display P3, without a gain map.
   SdrJpeg,
-  // Lossless 16-bit Display P3 TIFF for further photo editing.
+  // Lossless 16-bit TIFF, Display P3 by default or sRGB.
   SdrTiff,
 };
 

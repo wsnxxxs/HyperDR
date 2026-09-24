@@ -336,6 +336,9 @@ void validate_raw_options(const RawDecodeOptions& options) {
     throw std::invalid_argument("RAW digital gain must be finite and in (0,64]");
   }
   require_calibration_file(options.profile, "RAW DCP profile");
+  require_calibration_file(options.look_profile, "RAW XMP look");
+  if (!options.look_profile.empty() && options.profile.empty())
+    throw std::invalid_argument("RAW XMP look requires a DCP profile");
   require_calibration_file(options.lens_profile, "RAW lens profile");
   require_calibration_file(options.bad_pixel_map, "RAW bad-pixel map");
   require_calibration_file(options.dark_frame, "RAW dark frame");
@@ -1064,6 +1067,7 @@ DecodedImage decode_raw(const std::filesystem::path& path,
   std::shared_ptr<const DcpProfile> external_profile;
   if (!options.profile.empty()) {
     auto profile = read_dcp_profile(options.profile);
+    if (!options.look_profile.empty()) apply_xmp_look(profile, options.look_profile);
     if (!dcp_matches_camera(profile, raw.imgdata.idata.make, raw.imgdata.idata.model))
       throw std::invalid_argument("DCP camera does not match RAW: " + profile.camera_model);
     if (raw.imgdata.idata.colors != 3 || raw.imgdata.color.as_shot_wb_applied)
@@ -1279,6 +1283,7 @@ DecodedImage decode_raw(const std::filesystem::path& path,
                                      ? baseline : 0.0F;
     result.raw_profile = std::move(context);
     result.raw_profile_path = std::filesystem::absolute(options.profile);
+    if (!options.look_profile.empty()) result.raw_look_path = std::filesystem::absolute(options.look_profile);
     result.raw_color_matrix = "dcp";
   }
   const auto columns = camera_to_ap1_columns(raw, color_matrix != "none", dng_matrix);

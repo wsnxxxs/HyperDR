@@ -8,6 +8,7 @@ namespace hyperdr {
 const char* hdr_encoding_name(HdrEncoding encoding) {
   switch (encoding) {
     case HdrEncoding::SdrJpeg: return "sdr-jpeg";
+    case HdrEncoding::SdrTiff: return "sdr-tiff";
     case HdrEncoding::Adaptive: return "adaptive";
     case HdrEncoding::UltraHdr: return "ultrahdr";
     case HdrEncoding::Pq: return "pq";
@@ -22,6 +23,7 @@ std::optional<HdrEncoding> hdr_encoding_from_name(std::string_view name) {
   // The aliases are the names earlier versions accepted. Keeping them costs one
   // line each and avoids breaking scripts and stored presets.
   if (name == "sdr-jpeg" || name == "sdr") return HdrEncoding::SdrJpeg;
+  if (name == "sdr-tiff" || name == "tiff") return HdrEncoding::SdrTiff;
   if (name == "adaptive" || name == "gain-map") return HdrEncoding::Adaptive;
   if (name == "ultrahdr" || name == "ultra-hdr" || name == "jpegr") {
     return HdrEncoding::UltraHdr;
@@ -34,7 +36,8 @@ std::optional<HdrEncoding> hdr_encoding_from_name(std::string_view name) {
 }
 
 const char* hdr_encoding_extension(HdrEncoding encoding) {
-  if (encoding == HdrEncoding::UltraHdr || is_sdr_encoding(encoding)) return ".jpg";
+  if (encoding == HdrEncoding::SdrTiff) return ".tif";
+  if (encoding == HdrEncoding::UltraHdr || encoding == HdrEncoding::SdrJpeg) return ".jpg";
   return is_avif_encoding(encoding) ? ".avif" : ".heic";
 }
 

@@ -1,7 +1,7 @@
 import { store } from "../core/store.js";
 import { role, el, setText, setPressed } from "../core/dom.js";
 import { t, onLocaleChange } from "../i18n/index.js";
-import { encodingById, OPTION_KEYS } from "../settings/schema.js";
+import { encodingById, isSdrEncoding, OPTION_KEYS } from "../settings/schema.js";
 import { modelLabel } from "../settings/model-select.js";
 import { planeToImageData } from "../preview/cpu.js";
 import { currentResult } from "../run/options.js";
@@ -73,7 +73,7 @@ export function mountEditor({ stage }) {
 
   /** The settings the next export will be made from, one row each. */
   function summaryRows(state) {
-    const sdr = state.encoding === "sdr-jpeg";
+    const sdr = isSdrEncoding(state.encoding);
     const encoding = encodingById(state.encoding);
     const mode = sdr ? t("workflow.color")
       : state.previewOptimized ? `${t("adjust.ai")} · ${modelLabel(state.modelId, state)}`
@@ -82,7 +82,7 @@ export function mountEditor({ stage }) {
       ["export.mode", mode],
       ["export.format", `${encoding.label} · ${t(encoding.detail)}`],
       sdr ? null : ["export.gamut", state.clampSrgb ? t("out.clampSrgb") : t("editor.currentGamut")],
-      ["export.quality", String(state.quality)],
+      state.encoding === "sdr-tiff" ? null : ["export.quality", String(state.quality)],
       ["adaptive", "pq", "hlg"].includes(state.encoding)
         ? ["export.speed", state.hevcPreset === "medium" ? t("out.hevcFast") : t("out.hevcStandard")]
         : null,
@@ -96,8 +96,7 @@ export function mountEditor({ stage }) {
     const ready = Boolean(state.file && state.previewReady);
     open.disabled = state.restoring || state.uploading || state.starting || state.optimizing || Boolean(state.jobId);
     exportOpen.disabled = !state.file || state.uploading || state.restoring;
-    const sdr = state.encoding === "sdr-jpeg";
-    setText(exportOpen.querySelector("span"), state.jobId || state.starting ? t("editor.exporting") : sdr ? t("workflow.saveJpeg") : t("editor.export"));
+    setText(exportOpen.querySelector("span"), state.jobId || state.starting ? t("editor.exporting") : state.encoding === "sdr-jpeg" ? t("workflow.saveJpeg") : t("editor.export"));
     setText(filename, state.file?.name || t("editor.noPhoto"));
     filename.title = state.file?.name || "";
 

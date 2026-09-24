@@ -12,7 +12,7 @@ changes.
 `--report` writes schema 11. Its `settings` block is generated from the settings
 table, so it records every setting by its canonical name — not the handful someone
 remembered to add — plus `output_depth`, the depth actually encoded (BT.2100 is
-always 10-bit regardless of `--depth`). The top-level `raw_processing` block
+always 10-bit and SDR TIFF is 16-bit regardless of `--depth`). The top-level `raw_processing` block
 records requested calibration files, auto bad-pixel mode, post-decode linear
 gain and the black/WB policies for the run. Invalid requested calibration
 files fail the conversion rather than silently appearing as applied.
@@ -165,11 +165,16 @@ The reported tone source identifies the implemented SDK-style rendering, not
 a claim that Lightroom's current Process Version has been reproduced.
 
 A native-model DCP base reports `model_development: raw-dcp-v1`. The separate
-`hyperdr.model-input/v1` descriptor carries `raw_profile_sha256` and
+`hyperdr.model-input/v2` descriptor carries `raw_profile_sha256` and
 `development_recipe.id: raw-dcp-v1`; an external gain sidecar copies the hash
 to `model_binding.source.raw_profile_sha256` and preserves that recipe.
 Replay requires the same profile hash and recipe, preventing a gain prediction
 for one DCP base from being applied to another.
+
+`settings.raw_look` records the optional static XMP look path. Its content hash
+is included in the model preprocessing fingerprint, decoded-cache identity,
+and output settings signature. The DCP-specific name/hash fields still describe
+the camera DCP; they do not identify the attached XMP appearance.
 
 Schema 11 also retains schema 10's encoded-gain reporting: API3-derived gain
 ranges describe the encoded result; distribution statistics that were not

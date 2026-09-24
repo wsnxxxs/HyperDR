@@ -70,6 +70,27 @@ export function mountStage({ toast }) {
   const mathModeButton = role("math-mode");
   const optimizeButton = role("optimize");
   let sdrCanvas = role("canvas-sdr");
+  const detailButton = document.createElement("button");
+  detailButton.type = "button";
+  detailButton.className = "stage-detail-button";
+  detailButton.hidden = true;
+  detailButton.setAttribute("aria-pressed", "false");
+  detailButton.textContent = t("stage.detailOpen");
+  stage.append(detailButton);
+  const detailOverlay = document.createElement("div");
+  detailOverlay.className = "stage-detail-overlay";
+  detailOverlay.hidden = true;
+  detailOverlay.tabIndex = 0;
+  detailOverlay.setAttribute("role", "region");
+  detailOverlay.setAttribute("aria-label", t("stage.detailLabel"));
+  const detailCanvas = document.createElement("canvas");
+  const detailStatus = document.createElement("span");
+  detailStatus.className = "stage-detail-status";
+  detailStatus.textContent = t("stage.detailStatus");
+  detailOverlay.append(detailCanvas, detailStatus);
+  frame.append(detailOverlay);
+  const detail = { active: false, frame: null, centerX: 0, centerY: 0,
+    fullWidth: 0, fullHeight: 0, request: 0, pointer: null, x: 0, y: 0 };
 
   /** Decoded image + derived buffers. Replaced wholesale, never patched. */
   const image = {
@@ -200,6 +221,7 @@ export function mountStage({ toast }) {
     hdrStatus.hidden = !hasImage;
     stage.classList.toggle("is-comparing", original);
     stage.setAttribute("aria-pressed", String(original));
+    detailButton.hidden = !hasImage;
   }
 
   let dividerPointer = null;
@@ -240,6 +262,7 @@ export function mountStage({ toast }) {
     const x = clamp(state.viewerPanX, -maxX, maxX);
     const y = clamp(state.viewerPanY, -maxY, maxY);
     for (const canvas of frame.querySelectorAll("canvas")) {
+      if (canvas === detailCanvas) continue;
       canvas.style.transform = `translate(${x}px, ${y}px) scale(${state.viewerZoom})`;
     }
     stage.classList.toggle("is-zoomed", state.viewerZoom > 1);
@@ -247,6 +270,11 @@ export function mountStage({ toast }) {
   }
   store.watchAny(["viewerZoom", "viewerPanX", "viewerPanY"], applyZoom);
   new ResizeObserver(applyZoom).observe(frame);
+  new ResizeObserver(() => {
+    if (!detail.active) return;
+    positionDetail();
+    if (detailNeedsPixels()) requestDetail();
+  }).observe(frame);
   const pan = { pointer: null, x: 0, y: 0, originX: 0, originY: 0 };
   stage.addEventListener("pointerdown", (event) => {
     if (store.get().viewerZoom <= 1 || event.button !== 0 || event.target.closest("button, [role='slider']")) return;
@@ -267,13 +295,136 @@ export function mountStage({ toast }) {
     pan.pointer = null; event.stopImmediatePropagation();
   });
 
+  function positionDetail() {
+    if (!detail.frame) return;
+    const { regionX, regionY } = detail.frame.metadata;
+    detailCanvas.style.left = `${Math.round(detailOverlay.clientWidth / 2 - (detail.centerX - regionX))}px`;
+    detailCanvas.style.top = `${Math.round(detailOverlay.clientHeight / 2 - (detail.centerY - regionY))}px`;
+  }
+
+  function detailNeedsPixels() {
+    if (!detail.frame) return true;
+    const m = detail.frame.metadata;
+    const left = Math.max(0, detail.centerX - detailOverlay.clientWidth / 2);
+    const top = Math.max(0, detail.centerY - detailOverlay.clientHeight / 2);
+    const right = Math.min(detail.fullWidth, detail.centerX + detailOverlay.clientWidth / 2);
+    const bottom = Math.min(detail.fullHeight, detail.centerY + detailOverlay.clientHeight / 2);
+    return left < m.regionX || top < m.regionY
+      || right > m.regionX + detail.frame.width
+      || bottom > m.regionY + detail.frame.height;
+  }
+
+  async function requestDetail() {
+    if (!detail.active || !store.get().sessionId || !image.frame) return;
+    const request = ++detail.request;
+    const state = store.get();
+    const width = Math.min(2048, Math.max(1, Math.ceil(detailOverlay.clientWidth) + 512));
+    const height = Math.min(2048, Math.max(1, Math.ceil(detailOverlay.clientHeight) + 512));
+    const center = !detail.fullWidth;
+    const x = Math.max(0, Math.round(detail.centerX - width / 2));
+    const y = Math.max(0, Math.round(detail.centerY - height / 2));
+    detailStatus.textContent = t("stage.detailLoading");
+    try {
+      const pixels = await api.detailPreview(state.sessionId, {
+        options: { ...toOptions(state), useModel: Boolean(state.previewOptimized),
+          modelId: state.modelId },
+        highlightRecovery: state.highlightRecovery,
+        x, y, width, height, center,
+      });
+      if (!detail.active || request !== detail.request
+          || state.sessionId !== store.get().sessionId) return;
+      if (pixels.metadata.detail !== true) throw new Error(t("err.previewData"));
+      detail.frame = pixels;
+      detail.fullWidth = Number(pixels.metadata.fullWidth);
+      detail.fullHeight = Number(pixels.metadata.fullHeight);
+      if (center) {
+        detail.centerX = detail.fullWidth / 2;
+        detail.centerY = detail.fullHeight / 2;
+      }
+      detailCanvas.width = pixels.width;
+      detailCanvas.height = pixels.height;
+      renderSdr(detailCanvas, { frame: pixels });
+      positionDetail();
+      detailStatus.textContent = t("stage.detailStatus");
+    } catch (error) {
+      if (!detail.active || request !== detail.request || error.status === 499) return;
+      detailStatus.textContent = error.message || t("err.preview");
+    }
+  }
+
+  function closeDetail() {
+    ++detail.request;
+    detail.active = false;
+    detail.frame = null;
+    detail.fullWidth = detail.fullHeight = 0;
+    detailOverlay.hidden = true;
+    detailButton.setAttribute("aria-pressed", "false");
+    detailButton.textContent = t("stage.detailOpen");
+  }
+
+  detailButton.addEventListener("click", (event) => {
+    event.preventDefault(); event.stopImmediatePropagation();
+    if (detail.active) { closeDetail(); return; }
+    if (!image.frame) return;
+    detail.active = true;
+    detailOverlay.hidden = false;
+    detailOverlay.focus({ preventScroll: true });
+    detailButton.setAttribute("aria-pressed", "true");
+    detailButton.textContent = t("stage.detailClose");
+    store.set({ viewMode: "effect", comparing: false, viewerZoom: 1,
+      viewerPanX: 0, viewerPanY: 0 });
+    requestDetail();
+  });
+  detailOverlay.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    detailOverlay.focus({ preventScroll: true });
+    detail.pointer = event.pointerId;
+    detail.x = event.clientX; detail.y = event.clientY;
+    detailOverlay.setPointerCapture(event.pointerId);
+  });
+  detailOverlay.addEventListener("pointermove", (event) => {
+    if (detail.pointer !== event.pointerId || !detail.fullWidth) return;
+    detail.centerX = clamp(detail.centerX - (event.clientX - detail.x), 0, detail.fullWidth);
+    detail.centerY = clamp(detail.centerY - (event.clientY - detail.y), 0, detail.fullHeight);
+    detail.x = event.clientX; detail.y = event.clientY;
+    positionDetail();
+  });
+  for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) {
+    detailOverlay.addEventListener(type, (event) => {
+      if (detail.pointer !== event.pointerId) return;
+      detail.pointer = null;
+      event.stopImmediatePropagation();
+      if (detailNeedsPixels()) requestDetail();
+    });
+  }
+  detailOverlay.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.preventDefault(); closeDetail(); detailButton.focus(); return; }
+    const move = { ArrowLeft: [-128, 0], ArrowRight: [128, 0],
+      ArrowUp: [0, -128], ArrowDown: [0, 128] }[event.key];
+    if (!move || !detail.fullWidth) return;
+    event.preventDefault();
+    detail.centerX = clamp(detail.centerX + move[0], 0, detail.fullWidth);
+    detail.centerY = clamp(detail.centerY + move[1], 0, detail.fullHeight);
+    positionDetail();
+    if (detailNeedsPixels()) requestDetail();
+  });
+  detailOverlay.addEventListener("wheel", (event) => {
+    event.preventDefault(); event.stopImmediatePropagation();
+    if (!detail.fullWidth) return;
+    detail.centerX = clamp(detail.centerX + event.deltaX, 0, detail.fullWidth);
+    detail.centerY = clamp(detail.centerY + event.deltaY, 0, detail.fullHeight);
+    positionDetail();
+    if (detailNeedsPixels()) requestDetail();
+  }, { passive: false });
+
   /* ── capability reporting ─────────────────────────────────────────── */
 
   let lastCapability = null;
 
   function setCapability(key, ok, params) {
     lastCapability = { key, ok, params };
-    const message = store.get().encoding === "sdr-jpeg" ? t("hdr.sdrOutput")
+    const message = ["sdr-jpeg", "sdr-tiff"].includes(store.get().encoding) ? t("hdr.sdrOutput")
       : t(key, params?.reasonKey ? { ...params, reason: t(params.reasonKey) } : params);
     const domain = sourceDomainLabel ? t(sourceDomainLabel) : "";
     setText(hdrStatus, domain ? `${domain} · ${message}` : message);
@@ -332,7 +483,7 @@ export function mountStage({ toast }) {
    *  the least useful thing it could say.
    */
   function sdrReason() {
-    if (store.get().encoding === "sdr-jpeg") return "hdr.reason.sdrOutput";
+    if (["sdr-jpeg", "sdr-tiff"].includes(store.get().encoding)) return "hdr.reason.sdrOutput";
     // The preference is a hard veto, not a hint: someone who turned true HDR
     // off wants the SDR path even on hardware that could do better.
     if (!prefs.get().hdrPreview) return "hdr.reason.disabledByPreference";
@@ -460,6 +611,7 @@ export function mountStage({ toast }) {
   }
 
   function clear(message = t("stage.empty")) {
+    closeDetail();
     ++modelRequest;
     invalidateImage();
     invalidateRenderer();
@@ -480,7 +632,8 @@ export function mountStage({ toast }) {
     store.set({
       comparing: false, maskKey: null,
       viewerZoom: 1, viewerPanX: 0, viewerPanY: 0,
-      rawProfile: "", rawProfileName: "", lensCorrection: true, lensProfileName: "",
+      rawProfile: "", rawProfileName: "", rawLook: "", rawLookName: "",
+      lensCorrection: true, lensProfileName: "",
       sourceDomain: "",
       sourceUnadjusted: null,
       hasCaptureMetadata: false,
@@ -509,6 +662,7 @@ export function mountStage({ toast }) {
     resetOriginal = false, draft = false, requestedAt = performance.now(),
     newPhoto = false, scheduled = false,
   } = {}) {
+    if (newPhoto) closeDetail();
     if (resetOriginal && !scheduled) previewScheduler.cancel();
     if (store.get().previewOptimized && !store.get().capabilities?.model?.ready) {
       store.set({ previewOptimized: false, modelGainReady: false, modelIdentity: null });
@@ -541,7 +695,8 @@ export function mountStage({ toast }) {
       if (resetOriginal || !image.original || (referenceEdge ?? Infinity) > image.originalEdge) {
         reference = await api.preview(sessionId, {
           options: { ...toOptions(referenceSettings(state.encoding)), colorGamut: state.colorGamut,
-            clampSrgb: state.clampSrgb, rawProfile: state.rawProfile, lensCorrection: state.lensCorrection, useModel: false },
+            clampSrgb: state.clampSrgb, rawProfile: state.rawProfile, rawLook: state.rawLook,
+            lensCorrection: state.lensCorrection, useModel: false },
           highlightRecovery: "blend", maxEdge: referenceEdge,
         });
         if (!isCurrentImage(epoch)) return;
@@ -635,6 +790,7 @@ export function mountStage({ toast }) {
           inputToFrameMs: performance.now() - requestedAt,
           bytes: preview.byteLength,
         } });
+        if (detail.active) requestDetail();
       }
     } catch (error) {
       if (!isCurrentImage(epoch)) return;
@@ -690,7 +846,8 @@ export function mountStage({ toast }) {
       modelId: store.get().modelId,
       colorGamut: activeGamut,
       clampSrgb: store.get().clampSrgb,
-      rawProfile: "", rawProfileName: "", lensCorrection: true, lensProfileName: "",
+      rawProfile: "", rawProfileName: "", rawLook: "", rawLookName: "",
+      lensCorrection: true, lensProfileName: "",
       sourceDomain: "",
       sourceUnadjusted: null,
       hasCaptureMetadata: false,
@@ -995,7 +1152,7 @@ export function mountStage({ toast }) {
 
   /* Input/base options invalidate both the decoded source and model cache. */
   store.subscribe((state, _previous, changed) => {
-    if (!changed.some((key) => ["highlightRecovery", "clampSrgb", "colorGamut", "rawProfile", "lensCorrection"].includes(key))) return;
+    if (!changed.some((key) => ["highlightRecovery", "clampSrgb", "colorGamut", "rawProfile", "rawLook", "lensCorrection"].includes(key))) return;
     ++modelRequest;
     modelGain = null;
     analysis.modelGain = null;
@@ -1042,6 +1199,7 @@ export function mountStage({ toast }) {
       && store.get().highlightRecovery === state.highlightRecovery
       && store.get().clampSrgb === state.clampSrgb && store.get().colorGamut === state.colorGamut
       && store.get().rawProfile === state.rawProfile
+      && store.get().rawLook === state.rawLook
       && store.get().lensCorrection === state.lensCorrection
       && store.get().modelId === state.modelId;
     if (!scheduled) previewScheduler.cancel();
@@ -1050,7 +1208,8 @@ export function mountStage({ toast }) {
     try {
       const gain = await api.modelPreview(
         state.sessionId, state.highlightRecovery, state.modelId,
-        { colorGamut: state.colorGamut, clampSrgb: state.clampSrgb, rawProfile: state.rawProfile, lensCorrection: state.lensCorrection });
+        { colorGamut: state.colorGamut, clampSrgb: state.clampSrgb, rawProfile: state.rawProfile,
+          rawLook: state.rawLook, lensCorrection: state.lensCorrection });
       if (!current()) return;
       modelGain = gain;
       analysis.modelGain = gain;
@@ -1105,7 +1264,7 @@ export function mountStage({ toast }) {
       const locked = state.optimizing || Boolean(state.jobId);
       mathModeButton.disabled = !state.file || locked;
       optimizeButton.disabled =
-        !state.file || locked || state.encoding === "sdr-jpeg"
+        !state.file || locked || ["sdr-jpeg", "sdr-tiff"].includes(state.encoding)
         || authoredHdr
         || (state.lutId && ["hlg", "pq", "slog3-sgamut3cine"].includes(state.lutInput))
         || (!ready && !state.modelGainReady);
@@ -1175,6 +1334,9 @@ export function mountStage({ toast }) {
     }
     if (!image.source) setText(emptyTitle, t("stage.empty"));
     setText(supportHint, t("stage.support"));
+    detailButton.textContent = t(detail.active ? "stage.detailClose" : "stage.detailOpen");
+    detailOverlay.setAttribute("aria-label", t("stage.detailLabel"));
+    if (detail.frame) detailStatus.textContent = t("stage.detailStatus");
   });
 
   applyPointerHint();

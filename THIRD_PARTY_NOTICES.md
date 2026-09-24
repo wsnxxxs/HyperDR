@@ -13,6 +13,8 @@ resolves the dependencies below through vcpkg or CMake `FetchContent`.
 | Alliance for Open Media libaom | AV1 codec selected by libavif's `aom` feature | BSD-2-Clause-style license and patent grant; see upstream `LICENSE` and `PATENTS` |
 | libjpeg-turbo | JPEG input, preview output, and Ultra HDR support | IJG, modified BSD, and zlib licenses |
 | libpng | PNG input decoding | libpng-2.0 |
+| libtiff | TIFF input and output | libtiff license (BSD-style) |
+| zlib | TIFF Deflate compression and Adobe XMP look decoding | zlib license |
 | Google libultrahdr 1.4.0 | Ultra HDR JPEG/R reference codec | Apache-2.0 or MIT |
 | ncnn | Embedded native gain-map inference runtime | BSD-3-Clause |
 
@@ -63,3 +65,8 @@ Copyright 2006-2023 Adobe Systems Incorporated. All Rights Reserved.
 The accompanying [DNG SDK License Agreement](licenses/Adobe-DNG-SDK-LICENSE.txt)
 is retained in full. Rendering mathematics follow the same SDK's sample pipeline.
 No Adobe camera profile files are distributed with HyperDR.
+
+The static XMP LookTable reader uses the serialization format documented by
+`dng_big_table.cpp` in Adobe DNG SDK 1.7.1. Its base85/zlib reader is implemented
+in HyperDR; Adobe's installed XMP profiles and embedded tables are read only
+when selected locally and are not distributed with the application.

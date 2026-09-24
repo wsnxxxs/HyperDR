@@ -23,6 +23,7 @@ JPEG = b"\xff\xd8\xff\xe0" + b"y" * 64
 HEIC = b"\x00\x00\x00\x18ftypheic" + b"z" * 64
 
 RAW_BYTES = b"LibRaw validates camera contents, not this upload boundary"
+TIFF_HEADER = b"II*\x00" + b"t" * 64
 
 
 def upload(session_id: str, name: str, data: bytes = PNG):
@@ -72,6 +73,16 @@ class SessionTests(unittest.TestCase):
         session_id = session.create_session()
         target, _ = upload(session_id, "capture.cr3", HEIC)
         self.assertEqual(target.suffix, ".cr3")
+        for suffix in (".arw", ".dng"):
+            with self.subTest(suffix=suffix):
+                session_id = session.create_session()
+                target, _ = upload(session_id, "capture" + suffix, TIFF_HEADER)
+                self.assertEqual(target.suffix, suffix)
+                external = session.WORK_ROOT / ("external" + suffix)
+                external.write_bytes(TIFF_HEADER)
+                external_session = session.create_session()
+                source, _ = session.set_external_input(external_session, str(external))
+                self.assertEqual(source.suffix, suffix)
 
     def test_a_misnamed_raster_is_stored_under_the_format_it_really_is(self):
         """A phone gallery exports HEIC as .jpg; that file is not broken."""

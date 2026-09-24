@@ -33,10 +33,10 @@ def _default_work_root() -> Path:
 
 
 WORK_ROOT = Path(os.environ.get("HYPERDR_WORK_ROOT", _default_work_root())).resolve()
-MAX_UPLOAD_BYTES = int(os.environ.get("HYPERDR_MAX_UPLOAD_MB", "256")) * 1024 * 1024
+MAX_UPLOAD_BYTES = int(os.environ.get("HYPERDR_MAX_UPLOAD_MB", "512")) * 1024 * 1024
 SESSION_TTL_SECONDS = int(os.environ.get("HYPERDR_SESSION_HOURS", "24")) * 3600
 
-RESULT_EXTENSIONS = frozenset({".avif", ".heic", ".jpg", ".jpeg"})
+RESULT_EXTENSIONS = frozenset({".avif", ".heic", ".jpg", ".jpeg", ".tif", ".tiff"})
 
 _SESSION_RE = re.compile(r"^[0-9a-f]{32}$")
 
@@ -88,7 +88,7 @@ def _safe_filename(value: str) -> str:
         raise ValueError("文件名无效。")
     suffix = Path(name).suffix.lower()
     if suffix not in SUPPORTED_EXTENSIONS:
-        raise ValueError("不支持此格式；请选择 LibRaw RAW、JPEG、PNG、HEIC、HEIF 或 AVIF。")
+        raise ValueError("不支持此格式；请选择 LibRaw RAW、JPEG、PNG、TIFF、HEIC、HEIF 或 AVIF。")
     stem = re.sub(r"[^\w\-. ()\u4e00-\u9fff]", "_", Path(name).stem, flags=re.UNICODE)
     stem = stem[:120].strip(". ") or "image"
     return stem + suffix
@@ -130,7 +130,7 @@ def _classify_input(path: Path, suffix: str) -> str:
     detected = formats.detect_format(header)
     if detected is None:
         raise ValueError(
-            "无法识别此文件的图像格式；请选择 LibRaw RAW、JPEG、PNG、HEIC、HEIF 或 AVIF。")
+            "无法识别此文件的图像格式；请选择 LibRaw RAW、JPEG、PNG、TIFF、HEIC、HEIF 或 AVIF。")
     if formats.extension_format(suffix) == detected:
         return suffix
     return CANONICAL_EXTENSIONS[detected]

@@ -6,6 +6,15 @@ const { planeToImageData, renderSdr } = await import(`data:text/javascript;base6
 const base = new Float32Array([.18,.18,.18, .9,.9,.9, 1,1,1]);
 const expected = planeToImageData(base,3,1);
 assert.equal(expected.data[8],255);
+assert.deepEqual([...planeToImageData(new Float32Array([.5,0,0]),1,1).data],
+  [205,0,0,255], "an sRGB-only ImageData receives converted P3 red");
+const SrgbImageData = globalThis.ImageData;
+globalThis.ImageData = class extends SrgbImageData {
+  constructor(width, height, options) { super(width,height); this.colorSpace=options?.colorSpace; }
+};
+assert.deepEqual([...planeToImageData(new Float32Array([.5,0,0]),1,1).data],
+  [188,0,0,255], "a P3 ImageData retains native P3 red");
+globalThis.ImageData = SrgbImageData;
 let actual;
 const canvas = { getContext: () => ({putImageData: image => { actual = image; }}) };
 for (const hdr of [base, base.map(v=>v*4)]) {

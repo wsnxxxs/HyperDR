@@ -95,6 +95,7 @@ struct RawLensMetadata {
 struct RawDecodeOptions {
   // User-owned DCP camera profile; empty preserves the native rendering path.
   std::filesystem::path profile;
+  std::filesystem::path look_profile;
   std::filesystem::path lens_profile;
   // Primaries used only when a raster lacks a colour description (ICC, CICP,
   // or PNG sRGB/cHRM). RAW uses its camera matrix and ignores it.
@@ -220,6 +221,7 @@ struct DecodedImage {
   // (no matrix; camera RGB is read as ProPhoto). Empty for non-RAW inputs.
   std::string raw_color_matrix;
   std::filesystem::path raw_profile_path;
+  std::filesystem::path raw_look_path;
   std::filesystem::path raw_lens_profile_path;
   std::string raw_lens_correction;
   std::shared_ptr<const DcpRenderContext> raw_profile;

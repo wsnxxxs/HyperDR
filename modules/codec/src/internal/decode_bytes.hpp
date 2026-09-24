@@ -41,4 +41,8 @@ namespace hyperdr::codec {
                                             ColorGamut default_gamut =
                                                 ColorGamut::kSrgb);
 
+[[nodiscard]] DecodedImage decode_tiff_bytes(const std::vector<std::uint8_t>& bytes,
+                                            std::uint32_t preview_max_edge,
+                                            ColorGamut default_gamut);
+
 }  // namespace hyperdr::codec

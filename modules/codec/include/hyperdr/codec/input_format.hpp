@@ -37,16 +37,19 @@ namespace hyperdr {
 // the two cannot disagree.
 inline constexpr std::array<std::string_view, 2> kJpegExtensions{".jpg", ".jpeg"};
 inline constexpr std::array<std::string_view, 1> kPngExtensions{".png"};
+inline constexpr std::array<std::string_view, 2> kTiffExtensions{".tif", ".tiff"};
 inline constexpr std::array<std::string_view, 4> kIsobmffExtensions{
     ".heic", ".heif", ".hif", ".avif"};
 
 [[nodiscard]] consteval auto join_raster_extensions() {
   std::array<std::string_view, kJpegExtensions.size() + kPngExtensions.size() +
+                                   kTiffExtensions.size() +
                                    kIsobmffExtensions.size()>
       all{};
   std::size_t next = 0;
   for (const auto extension : kJpegExtensions) all[next++] = extension;
   for (const auto extension : kPngExtensions) all[next++] = extension;
+  for (const auto extension : kTiffExtensions) all[next++] = extension;
   for (const auto extension : kIsobmffExtensions) all[next++] = extension;
   return all;
 }
@@ -66,6 +69,7 @@ enum class InputFormat : std::uint8_t {
   Unknown,
   Jpeg,
   Png,
+  Tiff,
   Isobmff,
 };
 
@@ -73,6 +77,7 @@ enum class InputFormat : std::uint8_t {
   switch (format) {
     case InputFormat::Jpeg: return "jpeg";
     case InputFormat::Png: return "png";
+    case InputFormat::Tiff: return "tiff";
     case InputFormat::Isobmff: return "isobmff";
     case InputFormat::Unknown: break;
   }
@@ -87,6 +92,7 @@ enum class InputFormat : std::uint8_t {
   switch (format) {
     case InputFormat::Jpeg: return ".jpg";
     case InputFormat::Png: return ".png";
+    case InputFormat::Tiff: return ".tif";
     case InputFormat::Isobmff: return ".heic";
     case InputFormat::Unknown: break;
   }
@@ -104,6 +110,9 @@ enum class InputFormat : std::uint8_t {
   }
   for (const auto candidate : kPngExtensions) {
     if (candidate == extension) return InputFormat::Png;
+  }
+  for (const auto candidate : kTiffExtensions) {
+    if (candidate == extension) return InputFormat::Tiff;
   }
   for (const auto candidate : kIsobmffExtensions) {
     if (candidate == extension) return InputFormat::Isobmff;
@@ -129,6 +138,10 @@ inline constexpr std::array<InputSignature, 1> kJpegSignatures{{
 
 inline constexpr std::array<InputSignature, 1> kPngSignatures{{
     {0, magic_literal("\x89\x50\x4e\x47\x0d\x0a\x1a\x0a")},
+}};
+inline constexpr std::array<InputSignature, 2> kTiffSignatures{{
+    {0, magic_literal("II\x2a\x00")},
+    {0, magic_literal("MM\x00\x2a")},
 }};
 
 inline constexpr std::array<InputSignature, 1> kIsobmffSignatures{{
@@ -161,6 +174,7 @@ template <std::size_t N>
 [[nodiscard]] inline InputFormat probe_input_signature(std::span<const std::uint8_t> head) {
   if (matches_any(head, kJpegSignatures)) return InputFormat::Jpeg;
   if (matches_any(head, kPngSignatures)) return InputFormat::Png;
+  if (matches_any(head, kTiffSignatures)) return InputFormat::Tiff;
   if (matches_any(head, kIsobmffSignatures)) return InputFormat::Isobmff;
   return InputFormat::Unknown;
 }

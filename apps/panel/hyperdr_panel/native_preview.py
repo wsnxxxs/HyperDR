@@ -30,6 +30,7 @@ _ORPHAN_MAX_AGE_SECONDS = max(3600, TIMEOUT_SECONDS * 2)
 _ACTIVE_LOCK = threading.Lock()
 _ACTIVE: dict[str, "_PreviewCall"] = {}
 _CURRENT_CALL = threading.local()
+_CURRENT_DETAIL = threading.local()
 
 
 class PreviewCancelled(ValueError):
@@ -169,9 +170,11 @@ def _build(source: Path, options: dict, max_edge: int,
            call: _PreviewCall | None = None) -> tuple[bytes, dict]:
     if call is None:
         call = getattr(_CURRENT_CALL, "value", None)
+    detail_region = getattr(_CURRENT_DETAIL, "value", None)
     if call is not None and os.environ.get("HYPERDR_PREVIEW_WORKER", "1") != "0":
         argv = build_preview_frame_argv(call.executable or detect_exe(), source, "-", options,
-            max_edge, decode_cache=call.decode_cache, source_digest=call.source_digest)
+            max_edge, decode_cache=call.decode_cache, source_digest=call.source_digest,
+            detail_region=detail_region)
         try:
             data = WORKER.request(argv, call, TIMEOUT_SECONDS)
         except ValueError:
@@ -191,7 +194,8 @@ def _build(source: Path, options: dict, max_edge: int,
         argv = build_preview_frame_argv(
             exe, source, output, options, max_edge,
             decode_cache=call.decode_cache if call is not None else None,
-            source_digest=call.source_digest if call is not None else None)
+            source_digest=call.source_digest if call is not None else None,
+            detail_region=detail_region)
         # Keep the small internal helper usable by diagnostics/tests that call
         # it directly. Live requests always pass a call object and use the
         # cancellable Popen path below.
@@ -275,7 +279,8 @@ def _cache_put(key: tuple, value: tuple[bytes, dict]) -> None:
 
 def preview_for(source: Path, options: dict, max_edge: int = MAX_EDGE,
                 source_digest: str | None = None,
-                decode_cache: Path | None = None) -> tuple[bytes, dict]:
+                decode_cache: Path | None = None,
+                detail_region: tuple[int, int, int, int, bool] | None = None) -> tuple[bytes, dict]:
     """Return an exact native SDR-base/HDR float frame and its metadata."""
     edge = max(320, min(MAX_EDGE, int(max_edge)))
     stat = source.stat()
@@ -284,7 +289,8 @@ def preview_for(source: Path, options: dict, max_edge: int = MAX_EDGE,
         options, sort_keys=True, separators=(",", ":"), default=str)
     external_digests = tuple(
         (name, sha256_file(Path(options[name])))
-        for name in ("external_gain", "external_gain_report", "_lut_path", "_raw_profile_path", "_lens_profile_path")
+        for name in ("external_gain", "external_gain_report", "_lut_path", "_raw_profile_path",
+                     "_raw_look_path", "_lens_profile_path")
         if options.get(name)
     )
     exe = detect_exe()
@@ -295,7 +301,7 @@ def preview_for(source: Path, options: dict, max_edge: int = MAX_EDGE,
     executable_key = (exe, exe_stat.st_mtime_ns, exe_stat.st_size) if exe_stat else (exe,)
     source_key = _source_key(source)
     key = (source_key, stat.st_mtime_ns, stat.st_size, source_digest,
-           stable_options, external_digests, edge, executable_key)
+           stable_options, external_digests, edge, detail_region, executable_key)
     # Returning to a cached slider value must also stop the superseded render.
     _cancel_superseded(source_key, key)
     with _CACHE_LOCK:
@@ -320,6 +326,7 @@ def preview_for(source: Path, options: dict, max_edge: int = MAX_EDGE,
                 if call.cancel.is_set():
                     raise PreviewCancelled("preview superseded")
                 _CURRENT_CALL.value = call
+                _CURRENT_DETAIL.value = detail_region
                 try:
                     # Keep the three-argument helper contract used by small
                     # diagnostics and tests; the thread-local carries live
@@ -327,6 +334,7 @@ def preview_for(source: Path, options: dict, max_edge: int = MAX_EDGE,
                     result = _build(source, options, edge)
                 finally:
                     del _CURRENT_CALL.value
+                    del _CURRENT_DETAIL.value
             if call.cancel.is_set():
                 raise PreviewCancelled("preview superseded")
             with _CACHE_LOCK:

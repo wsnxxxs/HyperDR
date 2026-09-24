@@ -40,6 +40,7 @@
 #include <utility>
 #include <vector>
 #include <memory>
+#include <optional>
 
 #ifdef _WIN32
 #include <fcntl.h>
@@ -58,7 +59,7 @@ void usage() {
          "  HyperDR convert <file-or-directory> --output <directory> [options]\n"
          "  HyperDR inspect <file.heic> [--json]\n"
          "  HyperDR raw-metadata <raw-file>\n"
-         "  HyperDR verify <file.heic|file.jpg> [--reconstruct <preview.tiff>]\n"
+         "  HyperDR verify <file.heic|file.jpg|file.tiff> [--reconstruct <preview.tiff>]\n"
          "                         [--reference <source-image>]\n"
          "  HyperDR display-curve <reference.heic> <candidate.heic>\n"
          "                         --headroom <stops> [--headroom <stops> ...]\n"
@@ -139,11 +140,35 @@ std::string next_value(int& i, int argc, char** argv, std::string_view option) {
   return argv[i];
 }
 
+struct PreviewRegion {
+  std::optional<std::uint32_t> left, top, width, height;
+  bool center{false};
+  [[nodiscard]] bool requested() const {
+    return left || top || width || height || center;
+  }
+  void resolve(std::uint32_t image_width, std::uint32_t image_height) {
+    if (!width || !height || *width == 0 || *height == 0 ||
+        *width > 2048 || *height > 2048 || image_width == 0 || image_height == 0 ||
+        (!center && (!left || !top))) {
+      throw std::invalid_argument("detail region must have a position and be at most 2048 pixels per side");
+    }
+    *width = std::min(*width, image_width);
+    *height = std::min(*height, image_height);
+    if (center) {
+      left = (image_width - *width) / 2;
+      top = (image_height - *height) / 2;
+    } else {
+      left = std::min(*left, image_width - *width);
+      top = std::min(*top, image_height - *height);
+    }
+  }
+};
+
 // One parser for every command that accepts render settings, so `convert` and
 // `curve` can never disagree about what a flag means or what it defaults to.
 // Settings come from the schema; only the plumbing is listed here.
 void parse_settings(int argc, char** argv, int first, ConvertOptions& options,
-                    unsigned* curve_samples = nullptr) {
+                    unsigned* curve_samples = nullptr, PreviewRegion* region = nullptr) {
   bool contrast_set = false, vibrance_set = false;
   for (int i = first; i < argc; ++i) {
     const std::string_view arg = argv[i];
@@ -156,7 +181,17 @@ void parse_settings(int argc, char** argv, int first, ConvertOptions& options,
       setting->apply(options, parse_setting_text(*setting, text));
       continue;
     }
-    if (arg == "--fast-preview" && curve_samples == nullptr) {
+    if (region && arg == "--detail-left") {
+      region->left = integer<std::uint32_t>(next_value(i, argc, argv, arg), "detail left");
+    } else if (region && arg == "--detail-top") {
+      region->top = integer<std::uint32_t>(next_value(i, argc, argv, arg), "detail top");
+    } else if (region && arg == "--detail-width") {
+      region->width = integer<std::uint32_t>(next_value(i, argc, argv, arg), "detail width");
+    } else if (region && arg == "--detail-height") {
+      region->height = integer<std::uint32_t>(next_value(i, argc, argv, arg), "detail height");
+    } else if (region && arg == "--detail-center") {
+      region->center = true;
+    } else if (arg == "--fast-preview" && curve_samples == nullptr) {
       // Intent is selected explicitly at the command boundary. The size option
       // remains a pure output bound, so it can also describe a full-quality
       // size-limited export and argument order cannot change this decision.
@@ -167,13 +202,13 @@ void parse_settings(int argc, char** argv, int first, ConvertOptions& options,
     } else if (arg == "--json" && curve_samples != nullptr) {
       // Accepted for symmetry with `inspect --json`; the curve is always JSON.
     } else if (arg == "--output") {
-      options.output_directory = next_value(i, argc, argv, arg);
+      options.output_directory = path_from_utf8(next_value(i, argc, argv, arg));
     } else if (arg == "--report") {
-      options.report_path = next_value(i, argc, argv, arg);
+      options.report_path = path_from_utf8(next_value(i, argc, argv, arg));
     } else if (arg == "--external-gain") {
-      options.external_gain_path = next_value(i, argc, argv, arg);
+      options.external_gain_path = path_from_utf8(next_value(i, argc, argv, arg));
     } else if (arg == "--external-gain-report") {
-      options.external_gain_report = next_value(i, argc, argv, arg);
+      options.external_gain_report = path_from_utf8(next_value(i, argc, argv, arg));
     } else if (arg == "--allow-legacy-external-gain") {
       options.allow_legacy_external_gain = true;
     } else if (arg == "--ai-model") {
@@ -205,7 +240,7 @@ void parse_settings(int argc, char** argv, int first, ConvertOptions& options,
       options.ai_post.expansion_start =
           real(next_value(i, argc, argv, arg), "AI expansion start");
     } else if (arg == "--input-tensor") {
-      options.model_input_tensor = next_value(i, argc, argv, arg);
+      options.model_input_tensor = path_from_utf8(next_value(i, argc, argv, arg));
     } else if (arg == "--tensor-width") {
       options.model_input_tensor_width =
           integer<std::uint32_t>(next_value(i, argc, argv, arg), "tensor width");
@@ -213,24 +248,24 @@ void parse_settings(int argc, char** argv, int first, ConvertOptions& options,
       options.model_input_tensor_height =
           integer<std::uint32_t>(next_value(i, argc, argv, arg), "tensor height");
     } else if (arg == "--capture-json") {
-      options.model_capture_path = next_value(i, argc, argv, arg);
+      options.model_capture_path = path_from_utf8(next_value(i, argc, argv, arg));
     } else if (arg == "--decode-cache") {
-      options.decode_cache_directory = next_value(i, argc, argv, arg);
+      options.decode_cache_directory = path_from_utf8(next_value(i, argc, argv, arg));
     } else if (arg == "--decode-cache-source-sha256") {
       // Internal panel plumbing: uploads are hashed while streaming, so the
       // short-lived preview CLI need not read a large RAW again just to name an
       // already-decoded cache entry.
       options.decode_cache_source_sha256 = next_value(i, argc, argv, arg);
     } else if (arg == "--raw-bad-pixels") {
-      options.raw.bad_pixel_map = next_value(i, argc, argv, arg);
+      options.raw.bad_pixel_map = path_from_utf8(next_value(i, argc, argv, arg));
     } else if (arg == "--raw-dark-frame") {
-      options.raw.dark_frame = next_value(i, argc, argv, arg);
+      options.raw.dark_frame = path_from_utf8(next_value(i, argc, argv, arg));
     } else if (arg == "--lut") {
-      options.color_lut.path = next_value(i, argc, argv, arg);
+      options.color_lut.path = path_from_utf8(next_value(i, argc, argv, arg));
     } else if (arg == "--raw-linearization-lut") {
-      options.raw.linearization_lut = next_value(i, argc, argv, arg);
+      options.raw.linearization_lut = path_from_utf8(next_value(i, argc, argv, arg));
     } else if (arg == "--raw-lens-shading") {
-      options.raw.lens_shading_map = next_value(i, argc, argv, arg);
+      options.raw.lens_shading_map = path_from_utf8(next_value(i, argc, argv, arg));
     } else if (arg == "--raw-auto-bad-pixels") {
       options.raw.auto_bad_pixel_correction = true;
     } else if (arg == "--raw-gain") {
@@ -258,7 +293,7 @@ void parse_settings(int argc, char** argv, int first, ConvertOptions& options,
 int convert_command(int argc, char** argv) {
   if (argc < 3) throw std::invalid_argument("convert requires an input path");
   ConvertOptions options;
-  options.input = argv[2];
+  options.input = path_from_utf8(argv[2]);
   parse_settings(argc, argv, 3, options);
   return run_conversion(options);
 }
@@ -288,8 +323,8 @@ int display_curve_command(int argc, char** argv) {
     throw std::invalid_argument(
         "display-curve requires reference, candidate, and --headroom");
   }
-  const std::filesystem::path reference = argv[2];
-  const std::filesystem::path candidate = argv[3];
+  const std::filesystem::path reference = path_from_utf8(argv[2]);
+  const std::filesystem::path candidate = path_from_utf8(argv[3]);
   std::vector<float> headrooms;
   for (int i = 4; i < argc; ++i) {
     const std::string_view arg = argv[i];
@@ -343,7 +378,7 @@ void print_inspection(const HeifInspection& i) {
 
 int inspect_command(int argc, char** argv) {
   if (argc < 3 || argc > 4) throw std::invalid_argument("inspect requires one HEIC path");
-  const auto inspection = inspect_heif(read_binary_file(argv[2]));
+  const auto inspection = inspect_heif(read_binary_file(path_from_utf8(argv[2])));
   if (argc == 4) {
     if (std::string_view(argv[3]) != "--json") {
       throw std::invalid_argument("unknown inspect option: " + std::string(argv[3]));
@@ -425,19 +460,29 @@ void print_fidelity(const std::filesystem::path& reference,
 
 int verify_command(int argc, char** argv) {
   if (argc < 3) {
-    throw std::invalid_argument("verify requires one HEIC or JPEG path");
+    throw std::invalid_argument("verify requires one HEIC, JPEG, or TIFF path");
   }
-  const std::filesystem::path input = argv[2];
+  const std::filesystem::path input = path_from_utf8(argv[2]);
   std::filesystem::path reconstruct;
   std::filesystem::path reference;
   for (int i = 3; i < argc; ++i) {
     const std::string_view arg = argv[i];
-    if (arg == "--reconstruct") reconstruct = next_value(i, argc, argv, arg);
-    else if (arg == "--reference") reference = next_value(i, argc, argv, arg);
+    if (arg == "--reconstruct") reconstruct = path_from_utf8(next_value(i, argc, argv, arg));
+    else if (arg == "--reference") reference = path_from_utf8(next_value(i, argc, argv, arg));
     else throw std::invalid_argument("unknown verify option: " + std::string(arg));
   }
 
   const auto extension = lower_extension(input);
+  if (extension == ".tif" || extension == ".tiff") {
+    if (!reconstruct.empty()) {
+      throw std::invalid_argument("--reconstruct is only available for gain-map HEIC");
+    }
+    verify_sdr_tiff(read_binary_file(input));
+    std::cout << "SDR TIFF: yes\n";
+    if (!reference.empty()) print_fidelity(reference, input);
+    std::cout << "verification passed\n";
+    return 0;
+  }
   if (extension == ".jpg" || extension == ".jpeg") {
     if (!reconstruct.empty()) {
       throw std::invalid_argument("--reconstruct is only available for gain-map HEIC");
@@ -494,7 +539,7 @@ int thumbnail_command(int argc, char** argv) {
   RawDecodeOptions raw;
   for (int i = 3; i < argc; ++i) {
     const std::string_view arg = argv[i];
-    if (arg == "--output") output = next_value(i, argc, argv, arg);
+    if (arg == "--output") output = path_from_utf8(next_value(i, argc, argv, arg));
     else if (arg == "--max-edge") {
       max_edge = integer<std::uint32_t>(next_value(i, argc, argv, arg), "preview max edge");
     } else if (arg == "--quality") {
@@ -516,17 +561,17 @@ int thumbnail_command(int argc, char** argv) {
     } else if (arg == "--model-input") {
       model_input = true;
     } else if (arg == "--raw-bad-pixels") {
-      raw.bad_pixel_map = next_value(i, argc, argv, arg);
+      raw.bad_pixel_map = path_from_utf8(next_value(i, argc, argv, arg));
     } else if (arg == "--raw-dark-frame") {
-      raw.dark_frame = next_value(i, argc, argv, arg);
+      raw.dark_frame = path_from_utf8(next_value(i, argc, argv, arg));
     } else if (arg == "--raw-linearization-lut") {
-      raw.linearization_lut = next_value(i, argc, argv, arg);
+      raw.linearization_lut = path_from_utf8(next_value(i, argc, argv, arg));
     } else if (arg == "--raw-profile") {
       raw.profile = path_from_utf8(next_value(i, argc, argv, arg));
     } else if (arg == "--raw-lens-profile") {
       raw.lens_profile = path_from_utf8(next_value(i, argc, argv, arg));
     } else if (arg == "--raw-lens-shading") {
-      raw.lens_shading_map = next_value(i, argc, argv, arg);
+      raw.lens_shading_map = path_from_utf8(next_value(i, argc, argv, arg));
     } else if (arg == "--raw-auto-bad-pixels") {
       raw.auto_bad_pixel_correction = true;
     } else if (arg == "--raw-gain") {
@@ -536,7 +581,7 @@ int thumbnail_command(int argc, char** argv) {
     }
   }
   if (output.empty()) throw std::invalid_argument("thumbnail --output is required");
-  const std::filesystem::path input = argv[2];
+  const std::filesystem::path input = path_from_utf8(argv[2]);
   if (same_path(input, output)) {
     throw std::invalid_argument("thumbnail output must differ from input image");
   }
@@ -577,9 +622,32 @@ void append_float_image(std::vector<std::uint8_t>& bytes,
   });
 }
 
+FloatImage crop_preview_plane(const FloatImage& image, const PreviewRegion& region) {
+  if (image.pixels.empty()) return {};
+  FloatImage cropped(*region.width, *region.height, image.channels);
+  const auto row_samples = static_cast<std::size_t>(*region.width) * image.channels;
+  for (std::uint32_t y = 0; y < *region.height; ++y) {
+    const auto source = (static_cast<std::size_t>(*region.top + y) * image.width +
+                         *region.left) * image.channels;
+    std::copy_n(image.pixels.data() + source, row_samples,
+                cropped.pixels.data() + static_cast<std::size_t>(y) * row_samples);
+  }
+  return cropped;
+}
+
+PhotoRenditions crop_preview_photo(PhotoRenditions photo,
+                                   const PreviewRegion& region) {
+  photo.sdr = crop_preview_plane(photo.sdr, region);
+  photo.hdr = crop_preview_plane(photo.hdr, region);
+  return photo;
+}
+
 std::vector<std::uint8_t> photo_preview_packet(const PhotoRenditions& result,
                                                 const DecodeInfo& decode,
-                                                const InputDescription& input, bool hasCaptureMetadata) {
+                                                const InputDescription& input, bool hasCaptureMetadata,
+                                                const PreviewRegion* region = nullptr,
+                                                std::uint32_t full_width = 0,
+                                                std::uint32_t full_height = 0) {
   // Wire format v1: magic, JSON byte length, UTF-8 JSON, then two tightly
   // packed little-endian HWC RGB float32 planes (SDR base, reconstructed HDR).
   // JSON makes status/geometry extensible while the pixel payload stays
@@ -608,6 +676,13 @@ std::vector<std::uint8_t> photo_preview_packet(const PhotoRenditions& result,
       .member("areaCoverage", defaults.area_coverage)
       .member("lutStrength", defaults.lut_strength)
       .end_object();
+  if (region) {
+    writer.member("detail", true)
+        .member("fullWidth", full_width)
+        .member("fullHeight", full_height)
+        .member("regionX", *region->left)
+        .member("regionY", *region->top);
+  }
   if (input.content_peak_nits) writer.member("inputContentPeakNits", *input.content_peak_nits);
   writer.begin_array("degradationReasons");
   for (const auto& reason : decode.degradation_reasons) writer.element(reason);
@@ -713,9 +788,14 @@ struct PreviewSession {
   PreviewSource& decode(const ConvertOptions& options) {
     const auto key = decode_cache_key(options.input,
         decode_cache_variant(options, options.raw), options.decode_cache_source_sha256);
-    for (auto& source : sources) if (source->key == key) return *source;
-    // One current photograph at its draft and final sizes, bounded in memory.
-    if (sources.size() == 2) sources.erase(sources.begin());
+    for (std::size_t i = 0; i < sources.size(); ++i) {
+      if (sources[i]->key != key) continue;
+      // A detail pan should find the full demosaic that the last pan used.
+      auto hit = std::move(sources[i]);
+      sources.erase(sources.begin() + static_cast<std::ptrdiff_t>(i));
+      sources.push_back(std::move(hit));
+      return *sources.back();
+    }
     auto source = std::make_unique<PreviewSource>();
     source->key = key;
     if (options.raw.half_size && is_raw_extension(lower_extension(options.input))) {
@@ -763,6 +843,18 @@ struct PreviewSession {
           source->analysis_file, options.decode_cache_budget_bytes);
     }
     sources.push_back(std::move(source));
+    constexpr std::size_t kDecodedBudget = 768ULL * 1024 * 1024;
+    const auto decoded_bytes = [](const PreviewSource& item) {
+      std::size_t bytes = item.image.linear_p3.pixels.size() * sizeof(float);
+      if (item.image.authored_sdr) bytes += item.image.authored_sdr->pixels.size() * sizeof(float);
+      return bytes;
+    };
+    std::size_t retained = 0;
+    for (const auto& item : sources) retained += decoded_bytes(*item);
+    while (sources.size() > 1 && (sources.size() > 3 || retained > kDecodedBudget)) {
+      retained -= decoded_bytes(*sources.front());
+      sources.erase(sources.begin());
+    }
     return *sources.back();
   }
 };
@@ -772,12 +864,22 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
   if (argc < 3) throw std::invalid_argument("preview-frame requires one input image");
   ConvertOptions options;
   options.decode_intent = DecodeIntent::Preview;
-  options.input = argv[2];
-  parse_settings(argc, argv, 3, options);
+  options.input = path_from_utf8(argv[2]);
+  PreviewRegion region;
+  parse_settings(argc, argv, 3, options, nullptr, &region);
   if (options.output_directory.empty()) {
     throw std::invalid_argument("preview-frame --output is required");
   }
-  if (options.preview_max_edge == 0) options.preview_max_edge = 2048;
+  const bool detail = region.requested();
+  if (detail) {
+    // A detail crop must start from the full decode. Neither a decoder resize
+    // nor LibRaw half-size output can recover sensor detail afterward.
+    options.preview_max_edge = 0;
+    options.raw.preview_max_edge = 0;
+    options.raw.half_size = false;
+  } else if (options.preview_max_edge == 0) {
+    options.preview_max_edge = 2048;
+  }
   if (same_path(options.input, options.output_directory)) {
     throw std::invalid_argument("preview-frame output must differ from input image");
   }
@@ -791,16 +893,17 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
   }
   options.raw.ignore_embedded_gain_map = false;
   options.raw.default_gamut = options.default_gamut;
-  // This subcommand is a bounded preview by definition -- the edge is forced
-  // above if the caller left it out -- so the decoders may stop early rather
-  // than materialise a 48 MP raster the next line is about to shrink. RAW
-  // ignores this and keeps using --fast-preview's half_size.
+  // Ordinary previews may decode at a bounded edge. Detail requests leave
+  // this at zero so the decoder preserves native pixels before cropping.
   options.raw.preview_max_edge = options.preview_max_edge;
   std::filesystem::path analysis_cache;
   DecodedImage owned;
   PreviewSource* cached = session ? &session->decode(options) : nullptr;
   if (!cached) owned = decode_cached_image(options.input, options, options.raw, &analysis_cache);
   auto& decoded = cached ? cached->image : owned;
+  const auto full_width = decoded.linear_p3.width;
+  const auto full_height = decoded.linear_p3.height;
+  if (detail) region.resolve(full_width, full_height);
   const auto input = decoded.describe_input();
   if ((input.domain == InputDomain::kDisplayReferredHdr ||
        input.domain == InputDomain::kDualRendition) &&
@@ -812,6 +915,21 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
   const bool hasCaptureMetadata = capture.iso.has_value() || capture.exposure_time_seconds.has_value()
       || capture.aperture_f_number.has_value() || capture.exposure_bias_ev.has_value()
       || capture.focal_length_mm.has_value() || capture.focal_length_35mm.has_value();
+  const auto packet_from_photo = [&](PhotoRenditions photo) {
+    if (detail) photo = crop_preview_photo(std::move(photo), region);
+    return photo_preview_packet(photo, decoded.decode, input, hasCaptureMetadata,
+        detail ? &region : nullptr, full_width, full_height);
+  };
+  const auto release_detail_render_cache = [&] {
+    if (!detail || !cached) return;
+    // Panning needs the full decoder result, not several full-resolution
+    // rendered copies. Rebuild adjustment-specific intermediates on demand.
+    cached->preparation = {};
+    cached->model_base = {};
+    cached->model_input = {};
+    cached->prediction = {};
+    cached->model_key.clear();
+  };
   GainMapResult result;
   if (!options.ai_model_path.empty()) {
     const auto* analysis = cached && !decoded.raw_profile && input.domain == InputDomain::kSceneReferred
@@ -872,7 +990,7 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
         options.color_lut, nullptr,
         cached && !decoded.raw_profile && input.domain==InputDomain::kSceneReferred ? &cached->analysis : nullptr,
         cached ? &cached->preparation : nullptr);
-    if(is_sdr_encoding(options.encoding)) fit_sdr_to_srgb(photo.sdr);
+    if(options.encoding == OutputEncoding::SdrJpeg) fit_sdr_to_srgb(photo.sdr);
     if(options.encoding == OutputEncoding::Adaptive ||
         (options.encoding == OutputEncoding::UltraHdr && photo.hdr_is_source)) {
       result=gain_map_from_renditions(std::move(photo),
@@ -881,26 +999,35 @@ int preview_frame_command(int argc, char** argv, PreviewSession* session = nullp
     }
     else {
       validate_encoding_headroom(options.encoding,photo.stats.headroom_stops);
-      auto bytes=photo_preview_packet(photo,decoded.decode,input,hasCaptureMetadata);
+      auto bytes=packet_from_photo(std::move(photo));
       if(packet) *packet=std::move(bytes);
       else write_binary_file_atomic(options.output_directory,bytes,true);
+      release_detail_render_cache();
       return 0;
     }
   }
   if(!options.ai_model_path.empty() || !options.external_gain_path.empty()) {
     if(!options.color_lut.path.empty() || !is_gain_map_encoding(options.encoding)) {
       auto photo=render_graded_gain_map(result, options.color_lut, !is_sdr_encoding(options.encoding));
-      if(is_sdr_encoding(options.encoding)) fit_sdr_to_srgb(photo.sdr);
+      if(options.encoding == OutputEncoding::SdrJpeg) fit_sdr_to_srgb(photo.sdr);
       if(is_gain_map_encoding(options.encoding)) result.base_linear=std::move(photo.sdr);
       else {
-        auto bytes=photo_preview_packet(photo,decoded.decode,input,hasCaptureMetadata);
+        auto bytes=packet_from_photo(std::move(photo));
         if(packet) *packet=std::move(bytes);
         else write_binary_file_atomic(options.output_directory,bytes,true);
+        release_detail_render_cache();
         return 0;
       }
     }
   }
   validate_encoding_headroom(options.encoding, result.headroom_stops);
+  if (detail) {
+    auto bytes = packet_from_photo(renditions_from_gain_map(std::move(result)));
+    if (packet) *packet = std::move(bytes);
+    else write_binary_file_atomic(options.output_directory, bytes, true);
+    release_detail_render_cache();
+    return 0;
+  }
   if (packet) {
     *packet = !result.clamp_srgb && result.gain_map.channels == 1
         ? compact_preview_packet(result, decoded.decode, input,hasCaptureMetadata)
@@ -1005,7 +1132,7 @@ CaptureParameters read_capture_parameters(const std::filesystem::path& path) {
 int model_gain_command(int argc, char** argv) {
   if (argc < 3) throw std::invalid_argument("model-gain requires one input image");
   ConvertOptions options;
-  options.input = argv[2];
+  options.input = path_from_utf8(argv[2]);
   parse_settings(argc, argv, 3, options);
   if (options.ai_model_path.empty()) {
     throw std::invalid_argument("model-gain requires --ai-model");
@@ -1201,22 +1328,22 @@ int model_input_command(int argc, char** argv) {
                                    : next_value(i, argc, argv, arg);
       setting->apply(options, parse_setting_text(*setting, text));
     } else if (arg == "--output") {
-      output = next_value(i, argc, argv, arg);
+      output = path_from_utf8(next_value(i, argc, argv, arg));
     } else if (arg == "--report") {
-      report = next_value(i, argc, argv, arg);
+      report = path_from_utf8(next_value(i, argc, argv, arg));
     } else if (arg == "--long-side") {
       long_side = integer<std::uint32_t>(next_value(i, argc, argv, arg),
                                          "model long side");
     } else if (arg == "--half-size") {
       options.raw.half_size = true;
     } else if (arg == "--raw-bad-pixels") {
-      options.raw.bad_pixel_map = next_value(i, argc, argv, arg);
+      options.raw.bad_pixel_map = path_from_utf8(next_value(i, argc, argv, arg));
     } else if (arg == "--raw-dark-frame") {
-      options.raw.dark_frame = next_value(i, argc, argv, arg);
+      options.raw.dark_frame = path_from_utf8(next_value(i, argc, argv, arg));
     } else if (arg == "--raw-linearization-lut") {
-      options.raw.linearization_lut = next_value(i, argc, argv, arg);
+      options.raw.linearization_lut = path_from_utf8(next_value(i, argc, argv, arg));
     } else if (arg == "--raw-lens-shading") {
-      options.raw.lens_shading_map = next_value(i, argc, argv, arg);
+      options.raw.lens_shading_map = path_from_utf8(next_value(i, argc, argv, arg));
     } else {
       throw std::invalid_argument("unknown model-input option: " + std::string(arg));
     }
@@ -1224,7 +1351,7 @@ int model_input_command(int argc, char** argv) {
   if (output.empty() || report.empty()) {
     throw std::invalid_argument("model-input requires --output and --report");
   }
-  const std::filesystem::path input = argv[2];
+  const std::filesystem::path input = path_from_utf8(argv[2]);
   if (same_path(input, output) || same_path(input, report) || same_path(output, report)) {
     throw std::invalid_argument("model-input source, pixels and report must be distinct");
   }

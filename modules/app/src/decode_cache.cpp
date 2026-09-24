@@ -53,7 +53,8 @@ constexpr std::array<char, 8> kMagic{'H', 'D', 'R', 'C', 'A', 'C', 'H', '3'};
 // 31 retains both authored renditions and their gain-map reconstruction metadata.
 // 32 measures Adaptive and legacy Apple usable headroom from the reconstructed peak.
 // 33 persists the optional static XMP look layered over the camera DCP.
-constexpr std::uint32_t kCacheSchema = 33;
+// 34 persists the input colour interpretation shown in previews and reports.
+constexpr std::uint32_t kCacheSchema = 34;
 
 // x86-64 and arm64, the only targets this project builds for, are both little
 // endian; the cache is a local scratch format and is never transported.
@@ -137,6 +138,10 @@ std::string metadata_json(const DecodedImage& value) {
       .member("focal_length_35mm", m.focal_length_35mm)
       .member("raw_white_balance", value.raw_white_balance)
       .member("raw_color_matrix", value.raw_color_matrix)
+      .member("source_color_name", value.source_color.name)
+      .member("source_color_primaries", value.source_color.primaries)
+      .member("source_color_transfer", value.source_color.transfer)
+      .member("source_color_source", value.source_color.source)
       .member("decode_sensor_width", d.sensor_width)
       .member("decode_sensor_height", d.sensor_height)
       .member("decode_target_width", d.target_width)
@@ -282,6 +287,10 @@ void apply_metadata_json(const std::string& text, DecodedImage& out) {
   out.capture.iso = read_optional(document, "capture_iso");
   out.raw_white_balance = string_at("raw_white_balance");
   out.raw_color_matrix = string_at("raw_color_matrix");
+  out.source_color.name = string_at("source_color_name");
+  out.source_color.primaries = string_at("source_color_primaries");
+  out.source_color.transfer = string_at("source_color_transfer");
+  out.source_color.source = string_at("source_color_source");
   out.raw_profile_path = path_from_utf8(string_at("raw_profile_path"));
   out.raw_look_path = path_from_utf8(string_at("raw_look_path"));
   out.raw_lens_profile_path = path_from_utf8(string_at("raw_lens_profile_path"));

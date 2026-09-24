@@ -1225,6 +1225,7 @@ DecodedImage decode_raw(const std::filesystem::path& path,
     throw std::runtime_error("LibRaw did not expose a three- or four-channel camera raster");
 
   DecodedImage result;
+  result.source_color = {"Camera RAW", "Camera sensor", "Linear scene", "raw"};
   decode.delivered_crop_left = raw.imgdata.sizes.left_margin;
   decode.delivered_crop_top = raw.imgdata.sizes.top_margin;
   result.decode = std::move(decode);

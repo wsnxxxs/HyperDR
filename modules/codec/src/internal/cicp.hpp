@@ -15,6 +15,7 @@
 #include "hyperdr/foundation/parallel.hpp"
 #include "hyperdr/image/color.hpp"
 #include "hyperdr/image/image.hpp"
+#include "hyperdr/image/source_color.hpp"
 #include "hyperdr/image/transfer.hpp"
 
 #include <lcms2.h>
@@ -89,11 +90,79 @@ struct SourceColor {
   std::vector<std::uint8_t> icc;
   int primaries{kCicpPrimariesBt709};
   int transfer{kCicpTransferSrgb};
+  std::string source{"assumed"};
 
   SourceColor() = default;
   explicit SourceColor(ColorGamut gamut)
       : primaries(cicp_primaries_for_gamut(gamut)) {}
 };
+
+[[nodiscard]] inline std::string primaries_name(int value) {
+  switch (value) {
+    case kCicpPrimariesBt709: return "Rec.709";
+    case kCicpPrimariesDisplayP3: return "Display P3";
+    case kCicpPrimariesBt2020: return "Rec.2020";
+    default: return "CICP " + std::to_string(value);
+  }
+}
+
+[[nodiscard]] inline std::string transfer_name(int value) {
+  switch (value) {
+    case kCicpTransferSrgb: return "sRGB";
+    case kCicpTransferPq: return "PQ";
+    case kCicpTransferHlg: return "HLG";
+    case kCicpTransferLinear: return "Linear";
+    case kCicpTransferBt709: case kCicpTransferBt601:
+    case kCicpTransferBt2020_10: case kCicpTransferBt2020_12:
+      return "BT.709";
+    case kCicpTransferGamma22: return "Gamma 2.2";
+    case kCicpTransferGamma28: return "Gamma 2.8";
+    case kCicpTransferReserved: case kCicpTransferUnspecified:
+      return "sRGB (assumed)";
+    default: return "CICP " + std::to_string(value);
+  }
+}
+
+[[nodiscard]] inline SourceColorInfo describe_source_color(const SourceColor& color) {
+  SourceColorInfo info;
+  info.source = color.source;
+  if (!color.icc.empty() && color.source != "png-chrm-gamma") {
+    info.source = "icc";
+    info.primaries = "ICC profile";
+    info.transfer = "ICC profile";
+    info.name = "Embedded ICC profile";
+    // An arbitrary ICC profile need not be any of the named RGB spaces.
+    // Its own description is informative without claiming known primaries.
+    if (void* profile = cmsOpenProfileFromMem(color.icc.data(),
+            static_cast<cmsUInt32Number>(color.icc.size()))) {
+      char description[192]{};
+      if (cmsGetProfileInfoASCII(profile, cmsInfoDescription, "en", "US",
+                                 description, sizeof(description)) > 0) {
+        std::string clean;
+        for (const unsigned char ch : std::string(description)) {
+          if (ch >= 32 && ch < 127) clean += static_cast<char>(ch);
+        }
+        if (!clean.empty()) info.name = std::move(clean);
+      }
+      cmsCloseProfile(profile);
+    }
+    return info;
+  }
+  if (color.source == "png-chrm-gamma") {
+    info.name = "PNG cHRM/gAMA";
+    info.primaries = "PNG cHRM or assumed";
+    info.transfer = "PNG gAMA or sRGB";
+    return info;
+  }
+  info.primaries = primaries_name(color.primaries);
+  info.transfer = transfer_name(color.transfer);
+  if (color.primaries == kCicpPrimariesBt709 &&
+      color.transfer == kCicpTransferSrgb) info.name = "sRGB";
+  else if (color.primaries == kCicpPrimariesDisplayP3 &&
+           color.transfer == kCicpTransferSrgb) info.name = "Display P3";
+  else info.name = info.primaries + " " + info.transfer;
+  return info;
+}
 
 struct ProfileDeleter {
   void operator()(void* p) const { cmsCloseProfile(p); }

@@ -38,6 +38,14 @@ The global `settings.pop` and per-file input-domain
 
 ## Input domain
 
+Each file also records `source_color` (`name`, `primaries`, `transfer`,
+`source`). It describes the input samples before conversion to the linear P3
+working space. `source` distinguishes embedded ICC, CICP, PNG colour tags,
+RAW processing, Ultra HDR reconstruction, and an untagged file interpreted
+with the selected default. An arbitrary ICC keeps its profile description;
+its primaries and transfer are reported as `ICC profile` rather than guessed.
+Skipped files may have empty values.
+
 Schema 8 adds `input_domain` and `input_headroom` to each file. `input_domain`
 is one of `scene-referred`, `display-referred-sdr`, `display-referred-hdr`, or
 `unknown`. It is the decoder's answer, not a guess from the file extension: an

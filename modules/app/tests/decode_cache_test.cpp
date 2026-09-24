@@ -41,6 +41,11 @@ void round_trip(const std::filesystem::path& path,
           "cache changed the EXIF fallback decision");
   require(source.linear_p3.pixels == cached.linear_p3.pixels,
           "cache changed decoded pixels");
+  require(source.source_color.name == cached.source_color.name &&
+              source.source_color.primaries == cached.source_color.primaries &&
+              source.source_color.transfer == cached.source_color.transfer &&
+              source.source_color.source == cached.source_color.source,
+          "cache lost the input colour interpretation");
   require(source.authored_sdr.has_value() == cached.authored_sdr.has_value(),
           "cache lost the authored SDR rendition");
   if (source.authored_sdr) {
@@ -124,6 +129,7 @@ int main() {
     const auto path = directory / "capture.hdrcache";
     hyperdr::DecodedImage source;
     source.linear_p3 = hyperdr::FloatImage(16, 16, 3);
+    source.source_color = {"Display P3", "Display P3", "sRGB", "icc"};
     source.raw_lens_profile_path = directory / "lens.lcp";
     source.raw_lens_correction = "distortion,vignette";
     // Values beyond the report writer's precision must survive exactly, since

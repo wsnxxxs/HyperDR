@@ -129,6 +129,9 @@ void check_srgb() {
   f.srgb = true;
   f.pixels = {255, 0, 0};
   const auto result = decode(f, 0, hyperdr::ColorGamut::kDisplayP3);
+  require(result.source_color.source == "png-srgb" &&
+              result.source_color.name == "sRGB",
+          "PNG sRGB marker was reported as an assumed input space");
   const auto expected = hyperdr::rec709_to_linear_p3(1, 0, 0);
   for (unsigned c = 0; c < 3; ++c)
     near(result.linear_p3.pixels[c], expected[c], "explicit sRGB lost to default gamut");
@@ -139,6 +142,8 @@ void check_chrm() {
   f.p3_chrm = true;
   f.pixels = {255, 0, 0};
   const auto result = decode(f);
+  require(result.source_color.source == "png-chrm-gamma",
+          "PNG cHRM/gAMA source was not reported");
   for (unsigned c = 0; c < 3; ++c)
     near(result.linear_p3.pixels[c], c == 0 ? 1.0F : 0.0F, "cHRM primaries were ignored");
 }

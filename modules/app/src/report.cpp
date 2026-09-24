@@ -152,6 +152,12 @@ std::string run_report_json(const std::vector<FileResult>& results,
         // each: an exposure_ev of 0 is a scene decision in one and the absence
         // of a creative offset in the others.
         .member("input_domain", input_domain_name(result.input_domain))
+        .begin_object("source_color")
+        .member("name", result.source_color.name)
+        .member("primaries", result.source_color.primaries)
+        .member("transfer", result.source_color.transfer)
+        .member("source", result.source_color.source)
+        .end_object()
         .member("input_headroom", result.input_headroom)
         .member("model_development", result.model_development)
         // Requested and effective are separate members because they differ on a

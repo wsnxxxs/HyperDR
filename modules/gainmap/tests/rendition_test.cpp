@@ -305,6 +305,31 @@ void test_hdr_rec2020_target() {
       "sRGB limit must take priority over Rec.2020 output gamut");
 }
 
+void test_scene_rec2020_hdr_chroma() {
+  const auto green=rec2020_to_linear_p3(0.0F,1.0F,0.0F);
+  FloatImage source(16,16,3);
+  for(std::size_t i=0;i<source.pixels.size();++i) source.pixels[i]=green[i%3];
+  RenderOptions options;
+  options.auto_exposure=false;
+  options.auto_headroom=false;
+  options.headroom_stops=2.0F;
+  const InputDescription input{InputDomain::kSceneReferred,1};
+  const auto p3=render_renditions(source,options,{},input,RenderTarget::Hdr);
+  options.hdr_gamut=ColorGamut::kRec2020;
+  const auto wide=render_renditions(source,options,{},input,RenderTarget::Hdr);
+  require(wide.sdr.pixels==p3.sdr.pixels,
+      "Rec.2020 scene HDR must keep the existing SDR base exactly");
+  require(wide.hdr.pixels[0]<-0.01F && wide.hdr.pixels[2]<-0.001F,
+      "Rec.2020 scene HDR must retain source color outside P3");
+  for(float value:p3.hdr.pixels)
+    require(value>=-1e-6F,"default scene HDR must retain its P3 gamut");
+  const auto target=p3_to_rec2020(wide.hdr.pixels[0],wide.hdr.pixels[1],
+      wide.hdr.pixels[2]);
+  for(float value:target)
+    require(value>=-2e-6F && value<=wide.stats.headroom_linear+2e-5F,
+        "scene HDR must fit the Rec.2020 output range");
+}
+
 void test_independent_rgb_renditions() {
   PhotoRenditions photo;
   photo.sdr = FloatImage(5, 3, 3);
@@ -643,6 +668,7 @@ int main() {
   try { test_zero_and_spatial_gain(); test_model_grading(); test_final_gain_statistics();
         test_hdr_source_reconstructs_itself(); test_hdr_source_outside_p3();
         test_hdr_rec2020_target();
+        test_scene_rec2020_hdr_chroma();
         test_independent_rgb_renditions(); test_scene_base_without_gain_preparation();
         test_rendition_codes_use_serialized_metadata();
         test_graded_sdr_endpoint_packaging();

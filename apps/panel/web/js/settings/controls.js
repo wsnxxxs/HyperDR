@@ -408,6 +408,8 @@ function mountColorGamut() {
     ? { outputGamut: "p3" } : { clampSrgb: true }));
   const sync = (state) => {
     const sdr = isSdrEncoding(state.encoding);
+    setText(gamut.closest("section").querySelector("h3"), t(sdr ? "out.gamutTitle" : "out.rangeTitle"));
+    gamut.setAttribute("aria-label", t(sdr ? "out.gamut" : "out.rangeTitle"));
     setText(current, sdr ? "sRGB" : t("editor.currentGamut"));
     setText(limited, sdr ? "Display P3" : t("out.clampSrgb"));
     setPressed(current, sdr ? effectiveOutputGamut(state.encoding, state.outputGamut) === "srgb" : !state.clampSrgb);

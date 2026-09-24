@@ -265,8 +265,8 @@ inline constexpr float kGamutCompressionPower = 1.2F;
           static_cast<float>(-0.0260136497 * l3 - 0.5080276490 * m3 + 1.5333166822 * s3)};
 }
 
-// Fits a linear Display P3 colour into [0, limit] on every channel -- of P3, or
-// of Rec.709 when `rec709` is set -- keeping its luminance (clamped to
+// Fits a linear Display P3 colour into [0, limit] on every channel of the
+// selected output gamut, keeping its luminance (clamped to
 // [0, limit]) and giving up only saturation. A colour already inside is
 // returned unchanged; at the limit only neutral is left.
 //
@@ -280,19 +280,26 @@ inline constexpr float kGamutCompressionPower = 1.2F;
 // about which path keeps the hue, and the Oklab one turned a blue light in a
 // real night frame teal, so those keep the straight line. The feathered blend
 // of two in-gamut colours of equal luminance stays inside and continuous.
-[[nodiscard]] inline std::array<float, 3> fit_linear_p3_gamut(
-    float r, float g, float b, float limit, bool rec709 = false) {
+[[nodiscard]] inline std::array<float, 3> fit_linear_p3_to_gamut(
+    float r, float g, float b, float limit, ColorGamut gamut) {
   const std::array<double, 3> source{std::isfinite(r) ? r : 0.0,
                                      std::isfinite(g) ? g : 0.0,
                                      std::isfinite(b) ? b : 0.0};
   const double upper = std::isfinite(limit) ? std::max(0.0, static_cast<double>(limit))
                                             : std::numeric_limits<double>::max();
-  const auto target_space = [rec709](const std::array<double, 3>& c) {
-    return rec709 ? std::array<double, 3>{1.22494018 * c[0] - 0.22494018 * c[1],
-                                          -0.04205695 * c[0] + 1.04205695 * c[1],
-                                          -0.01963755 * c[0] - 0.07863605 * c[1] +
-                                              1.09827360 * c[2]}
-                  : c;
+  const auto target_space = [gamut](const std::array<double, 3>& c) {
+    if (gamut == ColorGamut::kSrgb) {
+      return std::array<double, 3>{1.22494018 * c[0] - 0.22494018 * c[1],
+                                   -0.04205695 * c[0] + 1.04205695 * c[1],
+                                   -0.01963755 * c[0] - 0.07863605 * c[1] +
+                                       1.09827360 * c[2]};
+    }
+    if (gamut == ColorGamut::kRec2020) {
+      return std::array<double, 3>{0.753833 * c[0] + 0.198597 * c[1] + 0.047570 * c[2],
+                                   0.045744 * c[0] + 0.941777 * c[1] + 0.012479 * c[2],
+                                   -0.001210 * c[0] + 0.017602 * c[1] + 0.983608 * c[2]};
+    }
+    return c;
   };
   const auto inside = [&](const std::array<double, 3>& c, double tolerance) {
     for (const double value : target_space(c)) {
@@ -305,13 +312,17 @@ inline constexpr float kGamutCompressionPower = 1.2F;
             static_cast<float>(source[2])};
   }
   // Clamped in the target space (removing the search's tolerance) and returned
-  // as P3; a Rec.709 colour inside its cube has no negative P3 component.
+  // as P3; a Rec.2020 colour may retain negative P3 components.
   const auto finish = [&](const std::array<double, 3>& c) {
     auto t = target_space(c);
     for (auto& value : t) value = std::clamp(value, 0.0, upper);
-    if (rec709) {
+    if (gamut == ColorGamut::kSrgb) {
       t = {0.82246197 * t[0] + 0.17753803 * t[1], 0.03319420 * t[0] + 0.96680580 * t[1],
            0.01708263 * t[0] + 0.07239741 * t[1] + 0.91051996 * t[2]};
+    } else if (gamut == ColorGamut::kRec2020) {
+      t = {1.3435783 * t[0] - 0.2821797 * t[1] - 0.0613986 * t[2],
+           -0.0652975 * t[0] + 1.0757879 * t[1] - 0.0104905 * t[2],
+           0.0028218 * t[0] - 0.0195985 * t[1] + 1.0167767 * t[2]};
     }
     return std::array<float, 3>{static_cast<float>(t[0]), static_cast<float>(t[1]),
                                 static_cast<float>(t[2])};
@@ -402,6 +413,12 @@ inline constexpr float kGamutCompressionPower = 1.2F;
     }
   }
   return finish(best);
+}
+
+[[nodiscard]] inline std::array<float, 3> fit_linear_p3_gamut(
+    float r, float g, float b, float limit, bool rec709 = false) {
+  return fit_linear_p3_to_gamut(r, g, b, limit,
+      rec709 ? ColorGamut::kSrgb : ColorGamut::kDisplayP3);
 }
 
 // Fits a linear Display-P3 colour into the Rec.709 (sRGB) cube with

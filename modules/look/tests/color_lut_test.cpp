@@ -146,6 +146,30 @@ void test_hdr_lut_headroom(const std::filesystem::path& file) {
   }
 }
 
+void test_bt2100_lut_rec2020_target(const std::filesystem::path& file) {
+  const auto green=rec2020_to_linear_p3(0.0F,2.0F,0.0F);
+  FloatImage source(1,1,3);
+  source.pixels={green[0],green[1],green[2]};
+  RenderOptions options;
+  options.auto_headroom=false;
+  options.headroom_stops=std::log2(1000.0F/203.0F);
+  options.hdr_gamut=ColorGamut::kRec2020;
+  const InputDescription input{InputDomain::kDisplayReferredHdr,1000.0F/203.0F};
+  ColorLut identity; identity.size=2; identity.values={{0,0,0},{1,1,1}};
+  for(auto space:{LutSpace::Pq,LutSpace::Hlg}) {
+    const ColorLutOptions grade{file,space,space,1};
+    const auto result=render_graded_photo(source,options,{},input,
+        RenderTarget::Hdr,grade,&identity);
+    require(result.hdr.pixels[0]<-0.1F && result.hdr.pixels[2]<-0.01F,
+        "PQ/HLG LUT must preserve Rec.2020 colour outside P3");
+    const auto encoded=p3_to_rec2020(result.hdr.pixels[0],
+        result.hdr.pixels[1],result.hdr.pixels[2]);
+    require(std::abs(encoded[0])<1e-3F &&
+        std::abs(encoded[1]-2.0F)<1e-3F && std::abs(encoded[2])<1e-3F,
+        "identity PQ/HLG LUT must retain Rec.2020 source colour");
+  }
+}
+
 void test_lifted_black(const std::filesystem::path& file) {
   FloatImage source(8,1,3);
   const float levels[]{0,1e-8F,1e-7F,1e-6F,1e-5F,.001F,.01F,.1F};
@@ -300,6 +324,7 @@ int main() {
     require(rejected,"finished HLG/PQ is not camera Log");
     test_hdr_strength_continuity(lut,file);
     test_hdr_lut_headroom(file);
+    test_bt2100_lut_rec2020_target(file);
     test_lifted_black(file);
     test_hdr_lut_below_reference_white(file);
     test_sdr_hdr_lut_routing(file);

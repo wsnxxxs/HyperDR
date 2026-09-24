@@ -198,6 +198,69 @@ PhotoRenditions render_renditions(const FloatImage& source,
     adjusted.exposure_ev = adjusted.exposure_bias_ev = 0.0F;
     auto result = render_renditions(base, adjusted, capture,
         {InputDomain::kDisplayReferredSdr, 1}, target, nullptr, preparation);
+    if (target == RenderTarget::Hdr && options.gain_strength > 0.0F &&
+        !result.hdr.pixels.empty()) {
+      // DCP development deliberately clips its SDR base. Keep the pre-tone RAW
+      // signal for the HDR alternate so two clipped SDR highlights can still
+      // have different brightness. The same DCP baseline and user exposure
+      // determine where the profile's white lands in that signal.
+      const float scene_exposure = std::exp2(ev + input.raw_profile->baseline_exposure +
+          input.raw_profile->profile->baseline_exposure_offset);
+      std::vector<float> row_peaks(source.height, 1.0F);
+      parallel_for_rows(source.height, [&](std::uint32_t y) {
+        for (std::uint32_t x = 0; x < source.width; ++x) {
+          const auto i = (static_cast<std::size_t>(y) * source.width + x) * 3;
+          const float scene_y = p3_luminance(source.pixels[i], source.pixels[i+1],
+              source.pixels[i+2]) * scene_exposure;
+          if (std::isfinite(scene_y)) row_peaks[y] = std::max(row_peaks[y], scene_y);
+        }
+      });
+      const float scene_peak = *std::max_element(row_peaks.begin(), row_peaks.end());
+      const float requested = options.auto_headroom ? options.look.headroom_max_stops :
+          options.headroom_stops;
+      const float available_stops = std::log2(scene_peak);
+      const float target_stops = std::min(available_stops, requested) *
+          std::min(1.0F, options.gain_strength);
+      if (scene_peak > 1.0F + kEpsilon && target_stops > kEpsilon) {
+        const float ceiling = target_stops < available_stops - kEpsilon
+            ? solve_ceiling(0.0F, available_stops, target_stops) : 0.0F;
+        const float target_peak = std::exp2(target_stops);
+        const float creative_peak = std::exp2(requested *
+            std::min(1.0F, options.gain_strength));
+        parallel_for_rows(source.height, [&](std::uint32_t y) {
+          for (std::uint32_t x = 0; x < source.width; ++x) {
+            const auto i = (static_cast<std::size_t>(y) * source.width + x) * 3;
+            const float scene_y = p3_luminance(source.pixels[i], source.pixels[i+1],
+                source.pixels[i+2]) * scene_exposure;
+            if (!(scene_y > 1.0F)) {
+              for (int c = 0; c < 3; ++c) result.hdr.pixels[i+c] = result.sdr.pixels[i+c];
+              continue;
+            }
+            const float base_y = p3_luminance(result.sdr.pixels[i],
+                result.sdr.pixels[i+1], result.sdr.pixels[i+2]);
+            if (!(base_y > kEpsilon)) continue;
+            const float creative_y = p3_luminance(result.hdr.pixels[i],
+                result.hdr.pixels[i+1], result.hdr.pixels[i+2]);
+            // Preserve the existing local highlight/noise weighting. Only the
+            // brightness above DCP's SDR endpoint now comes from RAW detail.
+            const float local_weight = creative_peak > 1.0F + kEpsilon
+                ? std::clamp((creative_y / base_y - 1.0F) /
+                    (creative_peak - 1.0F), 0.0F, 1.0F) : 0.0F;
+            const float mapped_y = ceiling > 0.0F
+                ? std::exp2(shoulder(std::log2(scene_y), 0.0F, ceiling)) : scene_y;
+            const float hdr_y = base_y + local_weight * (mapped_y - 1.0F);
+            const float scale = hdr_y / base_y;
+            auto rgb = fit({result.sdr.pixels[i] * scale,
+                result.sdr.pixels[i+1] * scale, result.sdr.pixels[i+2] * scale},
+                target_peak);
+            if (options.clamp_srgb)
+              rgb = compress_linear_p3_to_srgb(rgb[0], rgb[1], rgb[2], true);
+            for (int c = 0; c < 3; ++c) result.hdr.pixels[i+c] = rgb[c];
+          }
+        });
+        measure_rendition_stats(result.stats, result.sdr, result.hdr, result.below_knee);
+      }
+    }
     result.stats.exposure_ev = ev + input.raw_profile->baseline_exposure +
         input.raw_profile->profile->baseline_exposure_offset;
     return result;

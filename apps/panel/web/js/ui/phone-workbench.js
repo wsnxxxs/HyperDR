@@ -38,8 +38,9 @@ export function mountPhoneWorkbench({ stage, toast }) {
   let active = false, sending = false, applying = false, busy = false;
   let lastSnapshot = null, connection = null, failure = "";
   let qrMode = "connect", requestedSetup = false, generation = 0, heartbeatSending = false;
+  let hdrOpen = false, wasConnected = false, copiedUntil = 0;
   const button = document.getElementById("phone-connect");
-  const title = el("h3");
+  const title = el("h2", { id: "phone-wizard-title" });
   const subtitle = el("p", { class: "phone-subtitle" });
   const status = el("p", { class: "phone-status", role: "status" });
   const qr = el("div", { class: "phone-qr" });
@@ -60,7 +61,8 @@ export function mountPhoneWorkbench({ stage, toast }) {
   const advanced = el("details", {}, advancedTitle, advancedContent);
   const helpTitle = el("summary");
   const helpText = el("p");
-  const troubleshooting = el("details", { class: "phone-troubleshooting" }, helpTitle, helpText);
+  const troubleshooting = el("details", { class: "phone-troubleshooting" }, helpTitle, helpText,
+    addressLabel, el("div", { class: "phone-link" }, link));
   const setupMode = el("button", { type: "button", class: "button", "aria-pressed": "false" });
   const connectMode = el("button", { type: "button", class: "button", "aria-pressed": "true" });
   const closeSetup = el("button", { type: "button", class: "button" });
@@ -69,21 +71,55 @@ export function mountPhoneWorkbench({ stage, toast }) {
   const previewTitle = el("h4");
   const start = el("button", { type: "button", class: "button button--primary" });
   const stop = el("button", { type: "button", class: "button" });
-  const steps = ["phone.stepNetwork", "phone.stepImport", "phone.stepPreview"].map((key) =>
-    el("li", {}, t(key)));
-  const pairing = el("div", { class: "phone-pairing" },
-    el("div", { class: "phone-code" }, qr, placeholder),
-    el("div", { class: "phone-instructions" },
-      el("ol", {}, ...steps), addressLabel, el("div", { class: "phone-link" }, link, copy)));
+  const stepLabels = [el("span"), el("span"), el("span")];
+  const steps = stepLabels.map((label, index) => el("li", {},
+    el("span", { class: "phone-step-number", "aria-hidden": "true" }, String(index + 1)), label));
+  const railTitle = el("h3");
+  const hdrButton = el("button", { type: "button", class: "phone-hdr-entry" });
+  const heroTitle = el("h3");
+  const pairing = el("div", { class: "phone-pairing" }, qr, placeholder);
+  const successIcon = el("i", { class: "ph ph-device-mobile", "aria-hidden": "true" });
+  const progress = el("progress", { max: "1", value: "0" });
+  const photoName = el("p", { class: "phone-photo-name" });
+  const connectedView = el("div", { class: "phone-connected-view" }, successIcon, photoName, progress);
+  const stateHint = el("p", { class: "phone-state-hint" });
+  const previewBadge = el("p", { class: "phone-preview-badge" });
+  const closeButton = el("button", { type: "button", class: "icon-button", autofocus: true },
+    el("i", { class: "ph ph-x", "aria-hidden": "true" }));
+  const dismiss = el("button", { type: "button", class: "button" });
+  const footerHint = el("span");
+  const security = el("section", { class: "phone-preview-note" }, previewTitle, note, tlsStatus, diagnosticStatus,
+    el("div", { class: "phone-actions phone-security-actions" }, prepare, setup, ordinary), advanced);
+  const utilities = el("div", { class: "phone-utilities" }, copy, troubleshooting);
+  troubleshooting.append(el("div", { class: "phone-actions" }, start, stop));
   const privacy = el("p", { class: "phone-privacy" });
-  const node = el("div", { class: "phone-settings" },
-    el("header", { class: "phone-heading" },
-      el("i", { class: "ph ph-device-mobile", "aria-hidden": "true" }),
-      el("div", {}, title, subtitle)),
-    el("div", { class: "phone-connection" }, status, el("div", { class: "phone-actions" }, start, stop)),
-    el("div", { class: "phone-preview-note" }, previewTitle, note, tlsStatus, diagnosticStatus,
-      el("div", { class: "phone-actions phone-security-actions" }, prepare, setup, ordinary), advanced),
-    modes, qrCaption, pairing, troubleshooting, privacy);
+  const node = el("dialog", { class: "phone-wizard", "aria-labelledby": "phone-wizard-title" },
+    el("div", { class: "phone-wizard-layout" },
+      el("aside", { class: "phone-wizard-rail" }, railTitle, el("ol", {}, ...steps), hdrButton),
+      el("div", { class: "phone-wizard-main" },
+        el("header", { class: "phone-heading" }, title, closeButton),
+        el("div", { class: "phone-wizard-body" }, heroTitle, subtitle, security,
+          modes, pairing, qrCaption, connectedView, status, stateHint, previewBadge, utilities, privacy),
+        el("footer", { class: "phone-wizard-footer" },
+          el("p", {}, el("i", { class: "ph ph-info", "aria-hidden": "true" }), footerHint), dismiss))));
+  document.body.append(node);
+  button.setAttribute("aria-haspopup", "dialog");
+  function close() { node.close(); }
+  function open() {
+    hdrOpen = false;
+    mode("connect");
+    if (!node.open) node.showModal();
+    button.setAttribute("aria-expanded", "true");
+    void connect();
+  }
+  closeButton.addEventListener("click", close);
+  dismiss.addEventListener("click", close);
+  node.addEventListener("close", () => { button.setAttribute("aria-expanded", "false"); button.focus(); });
+  node.addEventListener("click", (event) => { if (event.target === node) close(); });
+  hdrButton.addEventListener("click", () => {
+    hdrOpen = !hdrOpen;
+    mode(hdrOpen && connection?.setupUrls?.length ? "setup" : "connect");
+  });
   function renderAddress() {
     const next = addresses.value;
     if (link.value === next && qr.childElementCount) return;
@@ -143,23 +179,54 @@ export function mountPhoneWorkbench({ stage, toast }) {
   copy.addEventListener("click", async () => {
     try {
       if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(link.value);
-      else { link.select(); document.execCommand("copy"); }
+      else { troubleshooting.open = true; link.select(); document.execCommand("copy"); }
+      copiedUntil = Date.now() + 2500;
+      labels();
       toast(t("phone.copied"));
-    } catch { link.select(); }
+    } catch { troubleshooting.open = true; link.select(); }
   });
   function labels() {
-    title.textContent = t("phone.title");
-    subtitle.textContent = t("phone.subtitle");
+    const connected = Boolean(active && lastSnapshot?.phoneConnected);
+    if (connected) wasConnected = true;
+    const hasPhoto = Boolean(lastSnapshot?.current?.sessionId);
+    const uploading = Boolean(lastSnapshot?.upload);
+    const setupVisible = hdrOpen && Boolean(connection?.setupUrls?.length);
+    const step = connected ? (hasPhoto && !uploading ? 2 : 1) : 0;
+    title.textContent = t("phone.wizardTitle");
+    railTitle.textContent = t("phone.guide");
+    heroTitle.textContent = t(hdrOpen ? "phone.hdrSetupTitle" : connected ? uploading ? "phone.receiving" : hasPhoto ? "phone.previewStep" : "phone.chooseTitle" : wasConnected && active ? "phone.reconnecting" : "phone.scanTitle");
+    subtitle.textContent = t(hdrOpen ? "phone.hdrSetupHelp" : connected ? hasPhoto ? "phone.previewHint" : "phone.chooseHint" : "phone.networkHint");
     placeholder.querySelector("span").textContent = t("phone.qrPlaceholder");
     addressLabel.querySelector("span").textContent = t("phone.address");
     addresses.setAttribute("aria-label", t("phone.address"));
     link.setAttribute("aria-label", t("phone.link"));
     link.placeholder = t("phone.linkPlaceholder");
-    ["phone.stepNetwork", "phone.stepImport", "phone.stepPreview"].forEach((key, index) => {
-      steps[index].textContent = t(key);
+    ["phone.connect", "phone.chooseStep", "phone.previewStep"].forEach((key, index) => {
+      stepLabels[index].textContent = t(key);
+      steps[index].dataset.state = index < step ? "complete" : index === step ? "current" : "upcoming";
+      steps[index].setAttribute("aria-current", index === step ? "step" : "false");
     });
+    closeButton.setAttribute("aria-label", t("phone.closeWindow"));
+    dismiss.textContent = t(connected ? "phone.continueEditing" : "phone.connectLater");
+    footerHint.textContent = t("phone.closeKeepsConnection");
+    hdrButton.textContent = t(hdrOpen ? "phone.backToConnection" : "phone.hdrLater");
+    hdrButton.setAttribute("aria-expanded", String(hdrOpen));
+    security.hidden = !hdrOpen;
+    pairing.hidden = !setupVisible && (connected || hdrOpen);
+    connectedView.hidden = !connected || hdrOpen;
+    successIcon.className = `ph ph-${hasPhoto ? "images" : "device-mobile"}`;
+    photoName.textContent = lastSnapshot?.upload?.name || lastSnapshot?.current?.file?.name || t("phone.readyToImport");
+    progress.hidden = !uploading;
+    progress.value = lastSnapshot?.upload?.progress || 0;
+    progress.setAttribute("aria-label", t("phone.receiving"));
+    stateHint.textContent = t(connected ? hasPhoto ? lastSnapshot?.frameReady ? "phone.previewSynced" : "phone.previewUpdating" : "phone.chooseHint" : wasConnected && active ? "phone.reconnectHint" : "phone.autoAdvance");
+    stateHint.hidden = hdrOpen || Boolean(failure) || !active || !connection?.urls?.length;
+    previewBadge.hidden = !connected || hdrOpen;
+    previewBadge.textContent = t(!connection?.secure ? "phone.previewSdr" : !connection?.diagnostics ? "phone.checkPending" : connection.diagnostics.hdr ? "phone.checkReady" : "phone.previewSdr");
+    privacy.hidden = !hdrOpen;
+    utilities.hidden = hdrOpen && !setupVisible;
     button.querySelector("span").textContent = t(lastSnapshot?.phoneConnected && active ? "phone.connected" : "phone.connect");
-    copy.textContent = t("phone.copy");
+    copy.textContent = t(Date.now() < copiedUntil ? "phone.copied" : "phone.copy");
     copy.disabled = !link.value || busy;
     start.textContent = t(busy ? "phone.starting" : active ? "phone.refresh" : "phone.enable");
     start.hidden = false;
@@ -173,8 +240,8 @@ export function mountPhoneWorkbench({ stage, toast }) {
     previewTitle.textContent = t(!active ? "phone.previewTitle" : connection?.secure ? "phone.previewSecure" : "phone.previewSdr");
     note.textContent = t(!active ? "phone.previewHelp" : connection?.secure ? "phone.secureNote" : "phone.httpsNote");
     privacy.textContent = t("phone.private");
-    status.textContent = failure || t(busy ? "phone.starting" : !active ? "phone.off" : !connection?.urls.length ? "phone.noNetwork" : lastSnapshot?.upload ? "phone.receiving" : lastSnapshot?.phoneConnected ? "phone.live" : "phone.waiting");
-    node.dataset.state = failure ? "error" : active ? "active" : "off";
+    status.textContent = failure || t(busy ? "phone.starting" : !active ? "phone.off" : !connection?.urls.length ? "phone.noNetwork" : uploading ? "phone.receiving" : connected ? "phone.live" : wasConnected ? "phone.reconnecting" : "phone.waitForPhone");
+    node.dataset.state = failure ? "error" : connected ? "connected" : active ? "waiting" : "off";
     button.dataset.connected = String(Boolean(active && lastSnapshot?.phoneConnected));
     qr.querySelector("svg")?.setAttribute("aria-label", t("phone.scan"));
     const tls = connection?.tls || {};
@@ -206,16 +273,13 @@ export function mountPhoneWorkbench({ stage, toast }) {
     }
     advanced.hidden = !active;
     helpTitle.textContent = t("phone.troubleshooting"); helpText.textContent = t("phone.troubleshootingHelp");
-    modes.hidden = !active;
+    modes.hidden = !hdrOpen || !connection?.setupUrls?.length;
     setupMode.textContent = t("phone.modeSetup"); connectMode.textContent = t("phone.modeConnect");
     setupMode.hidden = !connection?.setupUrls?.length;
     closeSetup.textContent = t("phone.closeSetup"); closeSetup.hidden = !connection?.setupUrls?.length; closeSetup.disabled = busy;
     setupMode.setAttribute("aria-pressed", String(qrMode === "setup")); connectMode.setAttribute("aria-pressed", String(qrMode === "connect"));
-    qrCaption.hidden = !active;
+    qrCaption.hidden = !active || !setupVisible;
     qrCaption.textContent = t(qrMode === "setup" ? "phone.setupQrHint" : "phone.connectQrHint");
-    if (qrMode === "setup") {
-      ["phone.stepNetwork", "phone.stepSetup", "phone.stepCheck"].forEach((key, index) => { steps[index].textContent = t(key); });
-    }
   }
   async function applySnapshot(snapshot) {
     lastSnapshot = snapshot;
@@ -275,6 +339,7 @@ export function mountPhoneWorkbench({ stage, toast }) {
     generation++;
     connection = null;
     lastSnapshot = null;
+    wasConnected = false;
     qrMode = "connect"; requestedSetup = false;
     addresses.replaceChildren();
     renderAddress();
@@ -362,7 +427,7 @@ export function mountPhoneWorkbench({ stage, toast }) {
   renderAddress();
   labels();
   return {
-    node, connect,
+    node, connect, open, close,
     async restore() { if (sessionStorage.getItem("hyperdr.phone.active") === "1") await connect(); },
   };
 }

@@ -14,8 +14,9 @@ function timers() {
     fire() { const [key, fn] = pending.entries().next().value; pending.delete(key); fn(); } };
 }
 function node() {
-  return { dataset: {}, options: [], value: "", handlers: {},
-    addEventListener(name, fn) { this.handlers[name] = fn; }, setAttribute() {}, focus() {},
+  return { dataset: {}, options: [], value: "", handlers: {}, attributes: {},
+    addEventListener(name, fn) { this.handlers[name] = fn; }, setAttribute(key, value) { this.attributes[key] = value; }, focus() {}, append() {},
+    showModal() { this.open = true; }, close() { this.open = false; this.handlers.close?.(); },
     querySelector() { return node(); }, replaceChildren(...children) { this.options = children; } };
 }
 function desktopPage(fetch, publishResponse) {
@@ -23,8 +24,8 @@ function desktopPage(fetch, publishResponse) {
   let published = 0, reloaded = 0;
   const next = { enabled: true, urls: [], setupUrls: [], tls: {} };
   const ctx = vm.createContext({ ...clock, AbortController, URL, crypto: { randomUUID: () => "desktop" },
-    document: { getElementById: node }, t: (key) => key, onLocaleChange() {}, setInterval() {},
-    el: () => { const item = node(); nodes.push(item); return item; }, debounce: (fn) => fn,
+    document: { getElementById: node, body: node() }, t: (key) => key, onLocaleChange() {}, setInterval() {},
+    el: (tag, attributes = {}) => { const item = Object.assign(node(), { tag, className: attributes.class }); nodes.push(item); return item; }, debounce: (fn) => fn,
     store: { get: () => state, set: (value) => Object.assign(state, value), subscribe() {} }, toOptions: () => ({}),
     sessionStorage: { getItem: (key) => storage.get(key), setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key) },
     fetch: (url, options) => {
@@ -81,6 +82,29 @@ const stalledBody = (_url, { signal }) => Promise.resolve({ ok: true, json: () =
   late.resolve(response({ enabled: true, upload: { progress: 0.5 } })); await publishing;
   assert.equal(page.storage.has("hyperdr.phone.active"), false);
   assert.notEqual(page.state.phoneUploading, true); assert.equal(stop.hidden, true);
+}
+
+// Wizard progress follows the server; closing the dialog must keep the session.
+{
+  let snapshot = { phoneConnected: false };
+  const page = desktopPage((_url, _options, next) => Promise.resolve(response(next)),
+    () => Promise.resolve(response(snapshot)));
+  await page.ctx.page.connect();
+  const steps = page.nodes.filter((item) => item.tag === "li");
+  const currentStep = () => steps.findIndex((item) => item.attributes["aria-current"] === "step");
+  assert.equal(currentStep(), 0);
+  snapshot = { phoneConnected: true };
+  await page.ctx.page.connect(); assert.equal(currentStep(), 1);
+  snapshot.current = { sessionId: "photo", file: { name: "landscape.png" } };
+  await page.ctx.page.connect(); assert.equal(currentStep(), 2);
+  snapshot.upload = { name: "next.png", progress: 0.4 };
+  await page.ctx.page.connect(); assert.equal(currentStep(), 1);
+  snapshot = { phoneConnected: false };
+  await page.ctx.page.connect(); assert.equal(currentStep(), 0);
+  assert.ok(page.nodes.some((item) => item.textContent === "phone.reconnecting"));
+  page.ctx.page.open(); page.ctx.page.close(); await flush();
+  assert.equal(page.ctx.page.node.open, false);
+  assert.equal(page.storage.get("hyperdr.phone.active"), "1");
 }
 
 function phonePage(fetch) {

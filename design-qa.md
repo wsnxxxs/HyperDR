@@ -1,5 +1,11 @@
 # Phone connection wizard design QA
 
+## Follow-up: match settings dimensions
+
+The user requested the phone window match Settings. The current target therefore supersedes the original concept's larger dimensions: 960 × 680, 200px rail, Settings header/footer spacing and close-button size; full-screen at widths up to 720px. QR reduced to 200px and content spacing tightened to fit.
+
+Browser verification at 1280 × 800 measured both Settings and the phone dialog at x=160, y=60, width=960, height=680. The phone content area measured clientHeight=scrollHeight=536 (no initial vertical overflow). Additional narrow verification used a 390 × 844 CSS viewport. Latest evidence: `designs/phone-connection-wizard/settings-size-desktop.png` and `settings-size-narrow.png`. This change is CSS-only; connection logic is unchanged. The original comparison below is retained as historical evidence.
+
 Date: 2026-09-26
 
 Source visual truth: `designs/phone-connection-wizard/reference.png` (the user's selected second concept).

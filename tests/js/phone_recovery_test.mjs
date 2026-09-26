@@ -21,10 +21,12 @@ function node() {
 }
 function desktopPage(fetch, publishResponse) {
   const clock = timers(), nodes = [], storage = new Map(), state = { file: {} };
+  const opener = node();
   let published = 0, reloaded = 0;
   const next = { enabled: true, urls: [], setupUrls: [], tls: {} };
   const ctx = vm.createContext({ ...clock, AbortController, URL, crypto: { randomUUID: () => "desktop" },
-    document: { getElementById: node, body: node() }, t: (key) => key, onLocaleChange() {}, setInterval() {},
+    document: { getElementById: () => opener, body: node() }, t: (key) => key, onLocaleChange() {}, setInterval() {},
+    openDialog: (dialog) => { dialog.showModal(); return true; },
     el: (tag, attributes = {}) => { const item = Object.assign(node(), { tag, className: attributes.class }); nodes.push(item); return item; }, debounce: (fn) => fn,
     store: { get: () => state, set: (value) => Object.assign(state, value), subscribe() {} }, toOptions: () => ({}),
     sessionStorage: { getItem: (key) => storage.get(key), setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key) },
@@ -34,11 +36,27 @@ function desktopPage(fetch, publishResponse) {
     }, stage: { reload: async () => { reloaded++; } }, toast() {},
   });
   vm.runInContext(desktop + "\nvar page = mountPhoneWorkbench({stage, toast});", ctx);
-  return { ctx, clock, storage, nodes, state, published: () => published, reloaded: () => reloaded };
+  return { ctx, clock, storage, nodes, state, opener, published: () => published, reloaded: () => reloaded };
 }
 const stalledBody = (_url, { signal }) => Promise.resolve({ ok: true, json: () => new Promise((_resolve, reject) => {
   signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })), { once: true });
 }) });
+
+// Closing and reopening while connecting leaves one request in progress and
+// keeps the toolbar entry available for checking that progress.
+{
+  const pending = deferred(); let connects = 0;
+  const page = desktopPage((url, _options, next) => {
+    if (url.endsWith("/connect")) { connects++; return pending.promise; }
+    return Promise.resolve(response(next));
+  });
+  page.ctx.page.open(); page.ctx.page.close(); page.ctx.page.open();
+  assert.equal(connects, 1);
+  assert.notEqual(page.opener.disabled, true);
+  assert.equal(page.ctx.page.node.open, true);
+  pending.resolve(response({ enabled: true, urls: [], setupUrls: [], tls: {} }));
+  await flush();
+}
 
 // Headers arrive, but the body never completes. The deadline must still abort it.
 {

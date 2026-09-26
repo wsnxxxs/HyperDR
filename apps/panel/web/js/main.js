@@ -149,10 +149,9 @@ const workspace = mountWorkspace({ stage, runner, toast });
 const phoneWorkbench = mountPhoneWorkbench({ stage, toast });
 mountHistory();
 mountEditor({ stage });
-const preferencesPanel = mountPrefs({ toast, phoneWorkbench });
+mountPrefs({ toast, phoneWorkbench });
 mountDialogs();
 document.getElementById("phone-connect").addEventListener("click", () => {
-  preferencesPanel.close();
   phoneWorkbench.open();
 });
 

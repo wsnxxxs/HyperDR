@@ -311,6 +311,7 @@ export function mountRunner({ toast }) {
     setText(runProgress, t("run.starting"));
     runProgress.hidden = false;
     cancelButton.hidden = false;
+    setText(cancelButton, t("run.cancel"));
     cancelButton.disabled = false;
 
     try {
@@ -397,6 +398,7 @@ export function mountRunner({ toast }) {
    * change has to re-emit them; anything transient (a toast already on screen,
    * a log line already scrolled past) keeps the language it was written in. */
   onLocaleChange(() => {
+    setText(cancelButton, t(trackingInterrupted ? "run.stopWaiting" : "run.cancel"));
     syncStale(store.get());
     syncResult(store.get());
     syncRunAvailability(store.get());

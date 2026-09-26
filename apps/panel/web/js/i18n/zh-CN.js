@@ -6,6 +6,7 @@
  * en.js; scripts/check_panel_i18n.py fails the build when they drift.
  */
 export default {
+  "common.done": "完成",
   "lensProfile.label": "启用镜头校正",
   "lensProfile.enabled": "已启用 · {name}",
   "lensProfile.disabled": "未启用 · {name}",

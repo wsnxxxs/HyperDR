@@ -41,15 +41,6 @@ export function mountLutLibrary({ toast }) {
     browse.setAttribute("aria-expanded", String(open));
   }, { immediate: true });
   panel.addEventListener("close", () => { if (!panel.open) store.set({ lutLibraryOpen: false }); });
-  panel.addEventListener("cancel", (event) => { event.preventDefault(); close(); });
-  panel.addEventListener("click", (event) => {
-    const bounds = panel.getBoundingClientRect();
-    if (event.target === panel && (event.clientX < bounds.left || event.clientX > bounds.right
-      || event.clientY < bounds.top || event.clientY > bounds.bottom)) close();
-  });
-  panel.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); }
-  });
   search.addEventListener("input", () => store.set({ lutLibraryQuery: search.value }));
   load.addEventListener("click", () => input.click());
   input.addEventListener("change", () => {

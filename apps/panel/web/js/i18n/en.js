@@ -5,6 +5,7 @@
  * HDR) and color spaces are proper nouns and stay as they are in both.
  */
 export default {
+  "common.done": "Done",
   "lensProfile.label": "Enable lens correction",
   "lensProfile.enabled": "Enabled · {name}",
   "lensProfile.disabled": "Disabled · {name}",

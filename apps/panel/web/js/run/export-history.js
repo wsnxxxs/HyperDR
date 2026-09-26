@@ -6,6 +6,7 @@ import { modelLabel, fallbackFields } from "../settings/model-select.js";
 import { encodingById, validatedSettings } from "../settings/schema.js";
 import { bindSaveAction } from "./save.js";
 import { entryKeyFor, exportKeyFor } from "./options.js";
+import { openDialog } from "../ui/dialogs.js";
 
 export function mountExportHistory({ selectResult }) {
   const open = role("versions-open");
@@ -14,16 +15,20 @@ export function mountExportHistory({ selectResult }) {
   const close = el("button", { type: "button", class: "icon-button" }, el("i", { class: "ph ph-x", "aria-hidden": "true" }));
   const note = el("p");
   const list = el("div", { class: "version-list" });
-  dialog.append(el("header", { class: "export-head dialog-head" }, el("div", {}, title, note), close), list);
+  const done = el("button", { type: "button", class: "button" });
+  dialog.append(el("header", { class: "export-head dialog-head" }, el("div", {}, title, note), close), list,
+    el("footer", { class: "dialog-foot" }, done));
   document.body.append(dialog);
-  open.addEventListener("click", () => dialog.showModal());
+  open.addEventListener("click", () => openDialog(dialog));
   close.addEventListener("click", () => dialog.close());
+  done.addEventListener("click", () => dialog.close());
   function sync(state = store.get()) {
     const entries = state.exports || [];
     const currentKey = exportKeyFor(state);
     const busy = state.uploading || state.restoring || state.optimizing || state.starting || Boolean(state.jobId);
     title.textContent = t("workspace.versions");
     note.textContent = t("workspace.versionNote");
+    done.textContent = t("common.done");
     open.querySelector("span").textContent = `${t("workspace.versions")}${entries.length ? ` · ${entries.length}` : ""}`;
     close.setAttribute("aria-label", t("editor.closeVersions"));
     close.title = t("editor.closeVersions");

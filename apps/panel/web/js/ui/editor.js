@@ -5,6 +5,7 @@ import { isSdrEncoding, OPTION_KEYS, outputDescription } from "../settings/schem
 import { modelLabel } from "../settings/model-select.js";
 import { planeToImageData } from "../preview/cpu.js";
 import { currentResult } from "../run/options.js";
+import { openDialog } from "./dialogs.js";
 
 /* Zoom is relative to fit-to-window. Buttons and keys move along a 25% grid,
  * so a zoom reached with the wheel snaps back onto it at the next step. */
@@ -37,11 +38,12 @@ export function mountEditor({ stage }) {
   const exportOpen = role("export-open");
   const dialog = role("export-dialog");
   const close = role("export-close");
+  const backgroundNote = role("export-background-note");
   const filename = role("editor-filename");
   const documentState = role("document-state");
   const metadata = role("photo-meta");
   const viewerHint = role("viewer-hint");
-  role("shortcuts-open").addEventListener("click", () => role("shortcuts-dialog").showModal());
+  role("shortcuts-open").addEventListener("click", () => openDialog(role("shortcuts-dialog")));
   const exportFilename = role("export-filename");
   const summary = role("export-summary");
   const thumbnail = role("export-thumbnail");
@@ -91,6 +93,7 @@ export function mountEditor({ stage }) {
 
   function sync() {
     const state = store.get();
+    backgroundNote.hidden = !state.starting && !state.jobId;
     open.closest(".app").dataset.workspace = state.file ? "editing" : state.uploading || state.restoring ? "loading" : "empty";
     const ready = Boolean(state.file && state.previewReady);
     open.disabled = state.restoring || state.uploading || state.starting || state.optimizing || Boolean(state.jobId);
@@ -134,7 +137,7 @@ export function mountEditor({ stage }) {
   function showExport() {
     if (exportOpen.disabled || dialog.open) return;
     paintThumbnail();
-    dialog.showModal();
+    openDialog(dialog);
   }
   const zoomBy = (direction) => {
     const state = store.get();
@@ -145,6 +148,7 @@ export function mountEditor({ stage }) {
   exportOpen.addEventListener("click", showExport);
   documentState.addEventListener("click", showExport);
   close.addEventListener("click", () => dialog.close());
+  role("export-dismiss").addEventListener("click", () => dialog.close());
   fit.addEventListener("click", () => store.set({ viewerZoom: 1, viewerPanX: 0, viewerPanY: 0 }));
   zoomIn.addEventListener("click", () => zoomBy(1));
   zoomOut.addEventListener("click", () => zoomBy(-1));

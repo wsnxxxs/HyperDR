@@ -2,6 +2,7 @@ import { api } from "../core/api.js";
 import { store } from "../core/store.js";
 import { el, role, setText } from "../core/dom.js";
 import { t, onLocaleChange } from "../i18n/index.js";
+import { openDialog } from "../ui/dialogs.js";
 
 export function mountLutLibrary({ toast }) {
   const panel = role("lut-library"), browse = role("lut-library-open");
@@ -11,7 +12,7 @@ export function mountLutLibrary({ toast }) {
   const rows = new Map();
   const lookName = (name) => name.replace(/\.cube$/i, "");
   const spaceName = (id) => ({ srgb: "sRGB", p3: "Display P3", rec709: "Rec.709", hlg: "HLG", pq: "PQ", "slog3-sgamut3cine": "S-Log3" }[id] || id);
-  const close = () => { store.set({ lutLibraryOpen: false }); browse.focus(); };
+  const close = () => { panel.close(); };
 
   async function refresh() {
     const result = await api.lutLibrary();
@@ -23,22 +24,20 @@ export function mountLutLibrary({ toast }) {
     try { await action(); }
     catch (error) {
       store.set({ lutLibraryError: error.message || t("lut.libraryFailed") });
-      toast?.(error.message || t("lut.libraryFailed"));
+      toast?.(error.message || t("lut.libraryFailed"), true);
     } finally { store.set({ lutLibraryBusy: false }); }
   }
   browse.addEventListener("click", () => {
     if (store.get().lutLibraryOpen) { close(); return; }
     store.set({ lutLibraryOpen: true });
-    search.focus({ preventScroll: true });
     void perform(refresh);
   });
   role("lut-library-close").addEventListener("click", close);
   done.addEventListener("click", close);
   store.watch("lutLibraryOpen", (open) => {
-    if (open && !panel.open) panel.showModal();
+    if (open && !panel.open) openDialog(panel);
     if (!open && panel.open) panel.close();
     document.documentElement.classList.toggle("lut-library-open", open);
-    browse.setAttribute("aria-expanded", String(open));
   }, { immediate: true });
   panel.addEventListener("close", () => { if (!panel.open) store.set({ lutLibraryOpen: false }); });
   search.addEventListener("input", () => store.set({ lutLibraryQuery: search.value }));
@@ -68,7 +67,7 @@ export function mountLutLibrary({ toast }) {
       remove.addEventListener("click", () => void perform(async () => {
         await api.removeLibraryLut(entry.lutId);
         await refresh();
-        load.focus();
+        if (panel.open) load.focus();
       }));
       const row = el("div", { class: "lut-library-item" }, info, remove);
       list.append(row);

@@ -17,6 +17,8 @@ dialog.app-dialog {
 }
 dialog.app-dialog[open] { display: flex; flex-direction: column; }
 dialog.app-dialog::backdrop { background: var(--dialog-backdrop); }
+dialog.app-dialog[data-dialog-covered] { visibility: hidden; }
+dialog.app-dialog[data-dialog-covered]::backdrop { background: transparent; }
 dialog.app-dialog--wide { height: min(var(--dialog-height), calc(100dvh - 24px)); }
 dialog.app-dialog--compact { width: min(var(--dialog-compact-width), calc(100vw - 24px)); height: fit-content; }
 .app-dialog .dialog-head {
@@ -37,7 +39,7 @@ dialog.app-dialog--compact { width: min(var(--dialog-compact-width), calc(100vw 
   gap: 12px; min-height: 69px; padding: 16px var(--dialog-padding);
   border-top: 1px solid var(--line); background: var(--surface-panel);
 }
-.app-dialog .dialog-foot > p { flex: 1; min-width: 0; color: var(--ink-muted); font-size: var(--text-xs); line-height: 1.6; }
+.app-dialog .dialog-foot > p { flex: 1; min-width: 0; margin: 0; color: var(--ink-muted); font-size: var(--text-xs); line-height: 1.6; }
 .app-dialog .dialog-foot > .button { min-width: 88px; min-height: var(--control-height); }
 .app-dialog .button { font-size: var(--text-sm); }
 .app-dialog :is(.prefs-body, .phone-wizard-body, .export-body, .version-list, .lut-library-list, .lut-space-body, .shortcut-grid) {
@@ -77,6 +79,7 @@ dialog.app-dialog--compact { width: min(var(--dialog-compact-width), calc(100vw 
 .app-dialog .export-footer .out-command[open] { flex-basis: 100%; }
 .app-dialog .export-footer .out-actions { flex: 1 1 auto; flex-wrap: wrap; }
 .app-dialog .export-footer .out-progress { flex-basis: 100%; }
+.app-dialog .export-footer .dialog-background-note { flex-basis: 100%; }
 .app-dialog .lut-library-footer > .button { min-width: 88px; }
 .app-dialog .lut-space-body { padding: var(--dialog-padding); }
 .app-dialog .shortcut-grid { padding: var(--dialog-padding); }

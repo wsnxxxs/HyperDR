@@ -7,6 +7,7 @@ import {
   PREFS, PREF_GROUPS, prefs, persistPrefs, resetPrefs,
 } from "./prefs-schema.js";
 import { api } from "../core/api.js";
+import { openDialog } from "./dialogs.js";
 import {
   availableSaveTargets, browserDirectoryName, chooseSaveFolder,
 } from "../run/save.js";
@@ -19,6 +20,8 @@ export function mountPrefs({ toast, phoneWorkbench }) {
   const body = role("prefs-body");
   const resetButton = role("prefs-reset");
   const copyButton = role("prefs-copy-diagnostics");
+  const saveHint = el("p", { "data-i18n": "prefs.autoSave" }, t("prefs.autoSave"));
+  resetButton.parentElement.prepend(saveHint);
 
   let activeGroup = PREF_GROUPS[0];
   /** Re-label hooks, one per built node, run when the locale changes. */
@@ -225,7 +228,7 @@ export function mountPrefs({ toast, phoneWorkbench }) {
       if (group === "phone") {
         const launch = el("button", { type: "button", class: "button button--primary" }, t("phone.connect"));
         const hint = el("p", { class: "field-hint prefs-hint" }, t("phone.subtitle"));
-        launch.addEventListener("click", () => { close(); phoneWorkbench.open(); });
+        launch.addEventListener("click", () => phoneWorkbench.open());
         relabels.push(() => { setText(launch, t("phone.connect")); setText(hint, t("phone.subtitle")); });
         section.append(hint, launch);
       } else if (group === "about") {
@@ -284,6 +287,7 @@ export function mountPrefs({ toast, phoneWorkbench }) {
   }
 
   function selectGroup(group) {
+    disarm();
     activeGroup = group;
     for (const section of body.querySelectorAll(".prefs-group")) {
       section.hidden = section.dataset.group !== group;
@@ -293,6 +297,7 @@ export function mountPrefs({ toast, phoneWorkbench }) {
     }
     copyButton.hidden = group !== "about";
     resetButton.hidden = group === "phone";
+    saveHint.hidden = group === "phone" || group === "about";
 
     body.scrollTop = 0;
   }
@@ -305,9 +310,7 @@ export function mountPrefs({ toast, phoneWorkbench }) {
     if (PREF_GROUPS.includes(group)) activeGroup = group;
     if (isOpen()) { selectGroup(activeGroup); return; }
     render();
-    panel.showModal();
-    openButton.setAttribute("aria-expanded", "true");
-    closeButton.focus();
+    openDialog(panel);
   }
 
   function close() { if (panel.open) panel.close(); }
@@ -315,7 +318,6 @@ export function mountPrefs({ toast, phoneWorkbench }) {
   openButton.addEventListener("click", () => (isOpen() ? close() : open()));
   closeButton.addEventListener("click", close);
   panel.addEventListener("close", () => {
-    openButton.setAttribute("aria-expanded", "false");
     disarm();
   });
   const done = el("button", { type: "button", class: "button", "data-i18n": "common.done" }, t("common.done"));
@@ -325,7 +327,8 @@ export function mountPrefs({ toast, phoneWorkbench }) {
   window.addEventListener("keydown", (event) => {
     if (event.key !== "," || !(event.metaKey || event.ctrlKey)) return;
     // Keep shortcuts inside the active dialog instead of stacking Settings over it.
-    if (!isOpen() && document.querySelector("dialog[open]")) return;
+    const activeDialog = document.querySelector("dialog[open]:not([data-dialog-covered])");
+    if (activeDialog && activeDialog !== panel) { event.preventDefault(); return; }
     event.preventDefault();
     isOpen() ? close() : open();
   });

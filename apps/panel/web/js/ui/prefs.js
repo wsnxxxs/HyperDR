@@ -243,7 +243,11 @@ export function mountPrefs({ toast, phoneWorkbench }) {
       }, heading);
 
       if (group === "phone") {
-        section.append(phoneWorkbench.node);
+        const launch = el("button", { type: "button", class: "button button--primary" }, t("phone.connect"));
+        const hint = el("p", { class: "field-hint prefs-hint" }, t("phone.subtitle"));
+        launch.addEventListener("click", () => { close(); phoneWorkbench.open(); });
+        relabels.push(() => { setText(launch, t("phone.connect")); setText(hint, t("phone.subtitle")); });
+        section.append(hint, launch);
       } else if (group === "about") {
         const list = el("dl", { class: "prefs-diagnostics" });
         for (const [key, value] of diagnosticRows()) {

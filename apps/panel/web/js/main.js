@@ -150,8 +150,8 @@ mountHistory();
 mountEditor({ stage });
 const preferencesPanel = mountPrefs({ toast, phoneWorkbench });
 document.getElementById("phone-connect").addEventListener("click", () => {
-  preferencesPanel.open("phone");
-  phoneWorkbench.connect();
+  preferencesPanel.close();
+  phoneWorkbench.open();
 });
 
 /* Viewer defaults are per photograph, not per session: they are what each new

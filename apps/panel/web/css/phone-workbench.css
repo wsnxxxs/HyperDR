@@ -19,7 +19,6 @@
 .phone-wizard-rail li[data-state="complete"] .phone-step-number { color: var(--accent); border-color: var(--accent); }
 .phone-hdr-entry { margin-top: auto; padding: 16px 0 0; border: 0; background: none; text-align: left; color: var(--ink-muted); font-size: 12px; line-height: 1.7; cursor: pointer; }
 .phone-hdr-entry:hover { color: var(--accent); }
-.phone-wizard-main { min-height: 0; min-width: 0; display: flex; flex-direction: column; }
 .phone-heading { display: flex; align-items: center; justify-content: space-between; flex: none; padding: 20px var(--panel-padding); border-bottom: 1px solid var(--line); gap: 16px; }
 .phone-heading h2 { margin: 0; font-size: var(--text-lg); font-weight: 600; color: var(--ink-strong); }
 .phone-heading .icon-button { width: var(--control-compact); height: var(--control-compact); font-size: 20px; }

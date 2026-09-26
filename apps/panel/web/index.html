@@ -23,6 +23,7 @@
 <link rel="stylesheet" href="./css/components.css">
 <link rel="stylesheet" href="./css/darkroom.css">
 <link rel="stylesheet" href="./css/phone-workbench.css">
+<link rel="stylesheet" href="./css/dialogs.css">
 </head>
 <body>
 <div class="app" data-workspace="empty">
@@ -227,8 +228,8 @@
   </footer>
 </div>
 
-    <dialog class="lut-space-dialog" id="lut-space-dialog" data-role="lut-space-dialog" aria-labelledby="lut-space-title" aria-describedby="lut-space-help">
-      <header class="lut-space-head">
+    <dialog class="lut-space-dialog app-dialog app-dialog--compact" id="lut-space-dialog" data-role="lut-space-dialog" aria-labelledby="lut-space-title" aria-describedby="lut-space-help">
+      <header class="lut-space-head dialog-head">
         <h2 id="lut-space-title" data-i18n="lut.spaceSettings">空间设置</h2>
         <form method="dialog"><button class="icon-button" data-i18n-attr="aria-label:lut.spaceClose;title:lut.spaceClose"><i class="ph ph-x" aria-hidden="true"></i></button></form>
       </header>
@@ -237,30 +238,30 @@
         <div class="lut-space-fields" data-role="lut-spaces"></div>
         <p class="parameter-note" data-role="lut-hint"></p>
       </div>
-      <form method="dialog" class="lut-space-foot"><button class="button button--primary" data-i18n="lut.done">完成</button></form>
+      <form method="dialog" class="lut-space-foot dialog-foot"><button class="button" data-i18n="lut.done">完成</button></form>
     </dialog>
 
-    <dialog class="lut-library" id="lut-library" data-role="lut-library" aria-labelledby="lut-library-title">
-      <header class="lut-library-head">
+    <dialog class="lut-library app-dialog app-dialog--wide" id="lut-library" data-role="lut-library" aria-labelledby="lut-library-title">
+      <header class="lut-library-head dialog-head">
         <div class="lut-library-heading"><h2 id="lut-library-title" data-i18n="lut.library">我的 LUT</h2><span class="lut-library-count" data-role="lut-library-count"></span></div>
         <button type="button" class="icon-button" data-role="lut-library-close" data-i18n-attr="aria-label:lut.close;title:lut.close"><i class="ph ph-x" aria-hidden="true"></i></button>
       </header>
       <p class="lut-library-description" data-role="lut-library-description"></p>
       <div class="lut-library-tools">
         <label class="lut-library-search"><i class="ph ph-magnifying-glass" aria-hidden="true"></i><input type="search" data-role="lut-library-search" data-i18n-attr="aria-label:lut.search;placeholder:lut.search" autocomplete="off"></label>
-        <button type="button" class="button" data-role="lut-load"><i class="ph ph-plus" aria-hidden="true"></i><span data-i18n="lut.load">导入</span></button>
+        <button type="button" class="button button--primary" data-role="lut-load"><i class="ph ph-plus" aria-hidden="true"></i><span data-i18n="lut.load">导入</span></button>
         <input type="file" accept=".cube" multiple data-role="lut-file" hidden>
       </div>
       <p class="lut-library-status" data-role="lut-library-status" role="status" hidden></p>
       <div class="lut-library-list" data-role="lut-library-list"></div>
-      <footer class="lut-library-footer">
+      <footer class="lut-library-footer dialog-foot">
         <p data-i18n="lut.libraryHint">风格保存在本机，可用于其他照片。</p>
-        <button type="button" class="button button--primary" data-role="lut-library-done" data-i18n="lut.done">完成</button>
+        <button type="button" class="button" data-role="lut-library-done" data-i18n="lut.done">完成</button>
       </footer>
     </dialog>
 
-  <dialog class="export-dialog" data-role="export-dialog" aria-labelledby="export-title">
-    <header class="export-head"><div><h2 id="export-title" data-i18n="editor.exportTitle">导出照片</h2><p data-i18n="editor.exportSubtitle">选择输出格式，保存当前调整</p></div><button class="icon-button" type="button" data-role="export-close" data-i18n-attr="aria-label:editor.closeExport;title:editor.closeExport"><i class="ph ph-x" aria-hidden="true"></i></button></header>
+  <dialog class="export-dialog app-dialog app-dialog--wide" data-role="export-dialog" aria-labelledby="export-title">
+    <header class="export-head dialog-head"><div><h2 id="export-title" data-i18n="editor.exportTitle">导出照片</h2><p data-i18n="editor.exportSubtitle">选择输出格式，保存当前调整</p></div><button class="icon-button" type="button" data-role="export-close" data-i18n-attr="aria-label:editor.closeExport;title:editor.closeExport"><i class="ph ph-x" aria-hidden="true"></i></button></header>
     <div class="export-body">
     <aside class="export-overview"><canvas data-role="export-thumbnail" width="300" height="200"></canvas><strong data-role="export-filename"></strong><dl class="export-summary" data-role="export-summary"></dl>
       <div class="result" data-role="result" hidden aria-live="polite">
@@ -300,7 +301,7 @@
 
     </div>
     </div>
-    <footer class="export-footer">
+    <footer class="export-footer dialog-foot">
       <details class="out-command">
         <summary data-i18n="out.command">查看命令行</summary>
         <div class="out-command-popover">
@@ -317,30 +318,30 @@
     </footer>
   </dialog>
 
-<div class="prefs" data-role="prefs" hidden role="dialog" aria-modal="true"
+<dialog class="prefs app-dialog app-dialog--wide" data-role="prefs"
      aria-labelledby="prefs-title">
   <div class="prefs-surface">
-    <header class="prefs-head">
+    <header class="prefs-head dialog-head">
       <h2 class="prefs-title" id="prefs-title" data-i18n="prefs.title">偏好设置</h2>
       <button class="icon-button" type="button" data-role="prefs-close"
               data-i18n-attr="aria-label:prefs.close;title:prefs.close">
-        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        <i class="ph ph-x" aria-hidden="true"></i>
       </button>
     </header>
     <nav class="prefs-nav segmented segmented--small" data-role="prefs-nav"
          role="group" data-i18n-attr="aria-label:prefs.nav"></nav>
     <div class="prefs-body" data-role="prefs-body"></div>
-    <footer class="prefs-foot">
+    <footer class="prefs-foot dialog-foot">
       <button class="link-button" type="button" data-role="prefs-copy-diagnostics"
               data-i18n="prefs.about.copy">复制诊断信息</button>
       <button class="link-button" type="button" data-role="prefs-reset"
               data-i18n="prefs.about.reset">重置全部偏好</button>
     </footer>
   </div>
-</div>
+</dialog>
 
-<dialog class="shortcuts-dialog" data-role="shortcuts-dialog" aria-labelledby="shortcuts-title">
-  <form method="dialog"><header class="export-head"><div><h2 id="shortcuts-title" data-i18n="workspace.shortcuts">快捷键</h2><p data-i18n="workspace.shortcutNote">单键快捷键在输入框之外生效。</p></div><button class="icon-button" data-i18n-attr="aria-label:workspace.closeShortcuts;title:workspace.closeShortcuts"><i class="ph ph-x" aria-hidden="true"></i></button></header></form>
+<dialog class="shortcuts-dialog app-dialog app-dialog--compact" data-role="shortcuts-dialog" aria-labelledby="shortcuts-title">
+  <form method="dialog"><header class="export-head dialog-head"><div><h2 id="shortcuts-title" data-i18n="workspace.shortcuts">快捷键</h2><p data-i18n="workspace.shortcutNote">单键快捷键在输入框之外生效。</p></div><button class="icon-button" data-i18n-attr="aria-label:workspace.closeShortcuts;title:workspace.closeShortcuts"><i class="ph ph-x" aria-hidden="true"></i></button></header></form>
   <div class="shortcut-grid">
     <h3 class="shortcut-group" data-i18n="shortcuts.file">文件</h3>
     <span data-i18n="editor.open">打开照片</span><kbd data-keys="mod+o">Ctrl O</kbd>

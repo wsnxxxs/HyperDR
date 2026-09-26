@@ -24,6 +24,7 @@ import { mountDesktop } from "./ui/desktop.js";
 import { mountTheme } from "./ui/theme.js";
 import { mountPrefs } from "./ui/prefs.js";
 import { mountPhoneWorkbench } from "./ui/phone-workbench.js";
+import { mountDialogs } from "./ui/dialogs.js";
 import { prefs } from "./ui/prefs-schema.js";
 import { t, setLocale, applyStatic, onLocaleChange } from "./i18n/index.js";
 import { applyKeyLabels } from "./core/keys.js";
@@ -149,6 +150,7 @@ const phoneWorkbench = mountPhoneWorkbench({ stage, toast });
 mountHistory();
 mountEditor({ stage });
 const preferencesPanel = mountPrefs({ toast, phoneWorkbench });
+mountDialogs();
 document.getElementById("phone-connect").addEventListener("click", () => {
   preferencesPanel.close();
   phoneWorkbench.open();

@@ -93,15 +93,14 @@ export function mountPhoneWorkbench({ stage, toast }) {
   const utilities = el("div", { class: "phone-utilities" }, copy, troubleshooting);
   troubleshooting.append(el("div", { class: "phone-actions" }, start, stop));
   const privacy = el("p", { class: "phone-privacy" });
-  const node = el("dialog", { class: "phone-wizard", "aria-labelledby": "phone-wizard-title" },
+  const node = el("dialog", { class: "phone-wizard app-dialog app-dialog--wide", "aria-labelledby": "phone-wizard-title" },
     el("div", { class: "phone-wizard-layout" },
+      el("header", { class: "phone-heading dialog-head" }, title, closeButton),
       el("aside", { class: "phone-wizard-rail" }, railTitle, el("ol", {}, ...steps), hdrButton),
-      el("div", { class: "phone-wizard-main" },
-        el("header", { class: "phone-heading" }, title, closeButton),
         el("div", { class: "phone-wizard-body" }, heroTitle, subtitle, security,
           modes, pairing, qrCaption, connectedView, status, stateHint, previewBadge, utilities, privacy),
-        el("footer", { class: "phone-wizard-footer" },
-          el("p", {}, el("i", { class: "ph ph-info", "aria-hidden": "true" }), footerHint), dismiss))));
+        el("footer", { class: "phone-wizard-footer dialog-foot" },
+          el("p", {}, el("i", { class: "ph ph-info", "aria-hidden": "true" }), footerHint), dismiss)));
   document.body.append(node);
   button.setAttribute("aria-haspopup", "dialog");
   function close() { node.close(); }
@@ -115,7 +114,6 @@ export function mountPhoneWorkbench({ stage, toast }) {
   closeButton.addEventListener("click", close);
   dismiss.addEventListener("click", close);
   node.addEventListener("close", () => { button.setAttribute("aria-expanded", "false"); button.focus(); });
-  node.addEventListener("click", (event) => { if (event.target === node) close(); });
   hdrButton.addEventListener("click", () => {
     hdrOpen = !hdrOpen;
     mode(hdrOpen && connection?.setupUrls?.length ? "setup" : "connect");

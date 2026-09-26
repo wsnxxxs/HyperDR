@@ -512,11 +512,6 @@ function mountLut({ toast } = {}) {
     spaceOpen.setAttribute("aria-expanded", "true");
   });
   spaceDialog.addEventListener("close", () => spaceOpen.setAttribute("aria-expanded", "false"));
-  spaceDialog.addEventListener("click", (event) => {
-    const bounds = spaceDialog.getBoundingClientRect();
-    if (event.target === spaceDialog && (event.clientX < bounds.left || event.clientX > bounds.right
-      || event.clientY < bounds.top || event.clientY > bounds.bottom)) spaceDialog.close();
-  });
   enabled.addEventListener("change", () => {
     const state = store.get();
     store.set(enabled.checked ? { lutStrength: state.lastLutStrength || 1 }

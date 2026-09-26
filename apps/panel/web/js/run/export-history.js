@@ -9,12 +9,12 @@ import { entryKeyFor, exportKeyFor } from "./options.js";
 
 export function mountExportHistory({ selectResult }) {
   const open = role("versions-open");
-  const dialog = el("dialog", { class: "versions-dialog", "aria-labelledby": "versions-title" });
+  const dialog = el("dialog", { class: "versions-dialog app-dialog app-dialog--wide", "aria-labelledby": "versions-title" });
   const title = el("h2", { id: "versions-title" });
   const close = el("button", { type: "button", class: "icon-button" }, el("i", { class: "ph ph-x", "aria-hidden": "true" }));
   const note = el("p");
   const list = el("div", { class: "version-list" });
-  dialog.append(el("header", { class: "export-head" }, el("div", {}, title, note), close), list);
+  dialog.append(el("header", { class: "export-head dialog-head" }, el("div", {}, title, note), close), list);
   document.body.append(dialog);
   open.addEventListener("click", () => dialog.showModal());
   close.addEventListener("click", () => dialog.close());

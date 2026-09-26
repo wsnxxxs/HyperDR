@@ -152,7 +152,7 @@ export function mountEditor({ stage }) {
   stage.onSourceChange(() => { sync(); if (dialog.open) paintThumbnail(); });
   onLocaleChange(sync);
   document.addEventListener("keydown", (event) => {
-    if (event.target.closest('dialog[open], .prefs:not([hidden]), input, textarea, select, [contenteditable]')) return;
+    if (event.target.closest('dialog[open], input, textarea, select, [contenteditable]')) return;
     const key = event.key.toLowerCase();
     if ((event.ctrlKey || event.metaKey) && (key === "o" || key === "e")) {
       event.preventDefault();

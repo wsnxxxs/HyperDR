@@ -3,6 +3,7 @@ import { el, debounce } from "../core/dom.js";
 import { toOptions } from "../settings/schema.js";
 import { t, onLocaleChange } from "../i18n/index.js";
 import qrcode from "../vendor/qrcode.mjs";
+import { openDialog } from "./dialogs.js";
 
 const REQUEST_TIMEOUT_MS = 8000;
 
@@ -105,15 +106,15 @@ export function mountPhoneWorkbench({ stage, toast }) {
   button.setAttribute("aria-haspopup", "dialog");
   function close() { node.close(); }
   function open() {
+    if (node.open) return;
     hdrOpen = false;
     mode("connect");
-    if (!node.open) node.showModal();
-    button.setAttribute("aria-expanded", "true");
+    openDialog(node);
+    labels();
     void connect();
   }
   closeButton.addEventListener("click", close);
   dismiss.addEventListener("click", close);
-  node.addEventListener("close", () => { button.setAttribute("aria-expanded", "false"); button.focus(); });
   hdrButton.addEventListener("click", () => {
     hdrOpen = !hdrOpen;
     mode(hdrOpen && connection?.setupUrls?.length ? "setup" : "connect");
@@ -205,7 +206,7 @@ export function mountPhoneWorkbench({ stage, toast }) {
       steps[index].setAttribute("aria-current", index === step ? "step" : "false");
     });
     closeButton.setAttribute("aria-label", t("phone.closeWindow"));
-    dismiss.textContent = t(connected ? "phone.continueEditing" : "phone.connectLater");
+    dismiss.textContent = t(node.dataset.dialogNested === "true" ? "common.back" : "common.done");
     footerHint.textContent = t("phone.closeKeepsConnection");
     hdrButton.textContent = t(hdrOpen ? "phone.backToConnection" : "phone.hdrLater");
     hdrButton.setAttribute("aria-expanded", String(hdrOpen));
@@ -232,7 +233,6 @@ export function mountPhoneWorkbench({ stage, toast }) {
     stop.textContent = t("phone.disconnect");
     stop.hidden = !active;
     stop.disabled = busy;
-    button.disabled = busy;
     addresses.disabled = busy;
     addressLabel.hidden = !active || !addresses.options.length;
     previewTitle.textContent = t(!active ? "phone.previewTitle" : connection?.secure ? "phone.previewSecure" : "phone.previewSdr");
@@ -400,9 +400,10 @@ export function mountPhoneWorkbench({ stage, toast }) {
   closeSetup.addEventListener("click", () => securityAction("setup/close"));
   start.addEventListener("click", connect);
   stop.addEventListener("click", async () => {
+    if (busy) return;
     busy = true;
-    stop.disabled = true;
-    button.disabled = true;
+    failure = "";
+    labels();
     try {
       await phoneRequest("disconnect", { owner });
       finishDisconnect();
@@ -410,7 +411,7 @@ export function mountPhoneWorkbench({ stage, toast }) {
       if (error.code === "timeout") await recoverAfterTimeout(error.message, "disconnect");
       else { failure = error.message; toast(error.message, true); }
     }
-    finally { busy = false; labels(); if (!active) start.focus(); }
+    finally { busy = false; labels(); if (!active && node.open) start.focus(); }
   });
   setInterval(() => {
     if (active && (sending || applying)) {

@@ -13,6 +13,7 @@ import { mountRawProfiles } from "./raw-profiles.js";
 import { mountWorkflow } from "./workflow.js";
 import { api } from "../core/api.js";
 import { t, onLocaleChange } from "../i18n/index.js";
+import { openDialog } from "../ui/dialogs.js";
 
 /* Widgets are built once and mutated thereafter, so a language change has to
  * be pushed into the nodes that already exist. Each builder registers what it
@@ -508,10 +509,8 @@ function mountLut({ toast } = {}) {
   const enabled = role("lut-enabled");
   const spaceOpen = role("lut-space-open"), spaceDialog = role("lut-space-dialog");
   spaceOpen.addEventListener("click", () => {
-    spaceDialog.showModal();
-    spaceOpen.setAttribute("aria-expanded", "true");
+    openDialog(spaceDialog);
   });
-  spaceDialog.addEventListener("close", () => spaceOpen.setAttribute("aria-expanded", "false"));
   enabled.addEventListener("change", () => {
     const state = store.get();
     store.set(enabled.checked ? { lutStrength: state.lastLutStrength || 1 }

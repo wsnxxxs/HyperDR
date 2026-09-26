@@ -238,7 +238,7 @@
         <div class="lut-space-fields" data-role="lut-spaces"></div>
         <p class="parameter-note" data-role="lut-hint"></p>
       </div>
-      <form method="dialog" class="lut-space-foot dialog-foot"><button class="button" data-i18n="lut.done">完成</button></form>
+      <form method="dialog" class="lut-space-foot dialog-foot"><p data-i18n="common.immediate">更改即时生效</p><button class="button" data-i18n="common.done">完成</button></form>
     </dialog>
 
     <dialog class="lut-library app-dialog app-dialog--wide" id="lut-library" data-role="lut-library" aria-labelledby="lut-library-title">
@@ -256,7 +256,7 @@
       <div class="lut-library-list" data-role="lut-library-list"></div>
       <footer class="lut-library-footer dialog-foot">
         <p data-i18n="lut.libraryHint">风格保存在本机，可用于其他照片。</p>
-        <button type="button" class="button" data-role="lut-library-done" data-i18n="lut.done">完成</button>
+        <button type="button" class="button" data-role="lut-library-done" data-i18n="common.done">完成</button>
       </footer>
     </dialog>
 
@@ -310,9 +310,11 @@
         </div>
       </details>
       <p class="out-progress" data-role="run-progress" hidden aria-live="polite"></p>
+      <p class="dialog-background-note" data-role="export-background-note" data-i18n="editor.exportBackground" hidden>关闭窗口后仍会继续导出，可重新打开查看进度。</p>
       <div class="out-actions">
         <p class="out-note" data-role="run-note" hidden></p>
-        <button class="button" type="button" data-role="cancel" hidden>取消</button>
+        <button class="button" type="button" data-role="export-dismiss" data-i18n="common.close">关闭</button>
+        <button class="button" type="button" data-role="cancel" hidden>取消导出</button>
         <button class="button button--primary button--run" type="button" data-role="run">导出照片</button>
       </div>
     </footer>
@@ -357,6 +359,7 @@
     <span data-i18n="shortcuts.zoom">放大 / 缩小</span><kbd data-keys="+ / -">+ / −</kbd>
     <span data-i18n="shortcuts.wheelZoom">以指针为中心缩放</span><kbd data-keys="wheel">滚轮</kbd>
   </div>
+  <form method="dialog" class="dialog-foot"><button class="button" data-i18n="common.done">完成</button></form>
 </dialog>
 
 <div class="toast" data-role="toast" role="status" aria-live="polite" popover="manual"></div>

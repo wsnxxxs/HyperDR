@@ -1070,8 +1070,8 @@ html.prefs-open body {
   display: grid;
   grid-template-columns: 200px minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr) auto;
-  width: min(960px, 100%);
-  height: min(680px, 100%);
+  width: min(840px, 100%);
+  height: min(600px, 100%);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-xl);
   background: var(--surface-panel);

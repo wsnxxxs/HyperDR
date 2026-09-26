@@ -1,5 +1,9 @@
 # Phone connection wizard design QA
 
+## Latest follow-up: smaller window
+
+The user clarified that the entire window should be smaller. Both phone and Settings now use 840 × 600, reduced from 960 × 680. At the same 1280 × 720 browser viewport, both measured x=220, y=60, width=840, height=600. Phone content clientHeight and scrollHeight both measured 456; the QR, status, actions and footer remain fully visible. Evidence: `designs/phone-connection-wizard/compact-desktop.png`. Narrow-screen rules are unchanged. Earlier dimensions below are historical.
+
 ## Follow-up: match settings dimensions
 
 The user requested the phone window match Settings. The current target therefore supersedes the original concept's larger dimensions: 960 × 680, 200px rail, Settings header/footer spacing and close-button size; full-screen at widths up to 720px. QR reduced to 200px and content spacing tightened to fit.

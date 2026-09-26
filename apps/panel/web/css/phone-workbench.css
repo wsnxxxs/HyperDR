@@ -1,6 +1,6 @@
 .phone-wizard {
-  width: min(960px, calc(100vw - 24px)); max-width: none;
-  height: min(680px, calc(100dvh - 24px)); max-height: none; padding: 0; margin: auto;
+  width: min(840px, calc(100vw - 24px)); max-width: none;
+  height: min(600px, calc(100dvh - 24px)); max-height: none; padding: 0; margin: auto;
   border: 1px solid var(--line-strong); border-radius: var(--radius-xl);
   background: var(--surface-panel); color: var(--ink); box-shadow: var(--shadow-lg); overflow: hidden;
 }

@@ -1,0 +1,102 @@
+/* Shared subview frame. Content layouts remain with their own components. */
+:root {
+  --dialog-width: 840px;
+  --dialog-height: 600px;
+  --dialog-compact-width: 560px;
+  --dialog-rail-width: 200px;
+  --dialog-padding: 24px;
+}
+html:has(dialog.app-dialog[open]), html:has(dialog.app-dialog[open]) body { overflow: hidden; }
+dialog.app-dialog {
+  position: fixed; inset: 0; display: none; margin: auto; padding: 0;
+  width: min(var(--dialog-width), calc(100vw - 24px));
+  max-width: none; max-height: calc(100dvh - 24px);
+  border: 1px solid var(--line-strong); border-radius: var(--radius-xl);
+  color: var(--ink); background: var(--surface-panel); box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+dialog.app-dialog[open] { display: flex; flex-direction: column; }
+dialog.app-dialog::backdrop { background: var(--dialog-backdrop); }
+dialog.app-dialog--wide { height: min(var(--dialog-height), calc(100dvh - 24px)); }
+dialog.app-dialog--compact { width: min(var(--dialog-compact-width), calc(100vw - 24px)); height: fit-content; }
+.app-dialog .dialog-head {
+  display: flex; flex: none; align-items: center; justify-content: space-between;
+  gap: 16px; min-height: 73px; padding: 16px var(--dialog-padding);
+  border-bottom: 1px solid var(--line); background: var(--surface-panel);
+}
+.app-dialog .dialog-head > div { min-width: 0; }
+.app-dialog .dialog-head h2 { margin: 0; color: var(--ink-strong); font-size: var(--text-lg); font-weight: 600; }
+.app-dialog .dialog-head p { margin: 4px 0 0; color: var(--ink-muted); font-size: var(--text-xs); line-height: 1.6; }
+.app-dialog .dialog-head .icon-button {
+  flex: none; width: var(--control-compact); height: var(--control-compact);
+  border-radius: var(--radius-md); font-size: 20px; color: var(--ink-muted); background: transparent;
+}
+.app-dialog .dialog-head .icon-button:hover { color: var(--ink-strong); background: var(--surface-hover); }
+.app-dialog .dialog-foot {
+  display: flex; flex: none; align-items: center; justify-content: flex-end; flex-wrap: wrap;
+  gap: 12px; min-height: 69px; padding: 16px var(--dialog-padding);
+  border-top: 1px solid var(--line); background: var(--surface-panel);
+}
+.app-dialog .dialog-foot > p { flex: 1; min-width: 0; color: var(--ink-muted); font-size: var(--text-xs); line-height: 1.6; }
+.app-dialog .dialog-foot > .button { min-width: 88px; min-height: var(--control-height); }
+.app-dialog .button { font-size: var(--text-sm); }
+.app-dialog :is(.prefs-body, .phone-wizard-body, .export-body, .version-list, .lut-library-list, .lut-space-body, .shortcut-grid) {
+  min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin;
+}
+
+/* Preferences and phone connection share a rail, full-width header and footer. */
+.app-dialog .prefs-surface {
+  width: 100%; height: 100%; min-height: 0; grid-template-columns: var(--dialog-rail-width) minmax(0, 1fr);
+  border: 0; border-radius: 0; box-shadow: none; backdrop-filter: none;
+}
+.app-dialog .prefs-nav { padding: 20px 12px; background: var(--surface-sunken); }
+.app-dialog .prefs-body { padding: var(--dialog-padding); }
+.app-dialog .prefs-foot > .link-button { margin-right: auto; }
+.app-dialog .prefs-foot > .link-button[hidden] { display: none; }
+.app-dialog .phone-wizard-layout {
+  display: grid; height: 100%; min-height: 0;
+  grid-template-columns: var(--dialog-rail-width) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+.app-dialog .phone-heading, .app-dialog .phone-wizard-footer { grid-column: 1 / -1; }
+.app-dialog .phone-wizard-rail { min-height: 0; padding: 20px var(--dialog-padding); background: var(--surface-sunken); overflow-y: auto; }
+.app-dialog .phone-wizard-rail h3 { font-size: var(--text-sm); margin-bottom: 16px; }
+.app-dialog .phone-wizard-rail li { min-height: 76px; font-size: var(--text-sm); gap: 12px; }
+.app-dialog .phone-step-number { width: 32px; height: 32px; font-size: var(--text-sm); }
+.app-dialog .phone-wizard-rail li:not(:last-child)::after { left: 15px; top: 55px; height: 42px; }
+.app-dialog .phone-wizard-body { min-width: 0; padding: 20px var(--dialog-padding) 12px; }
+.app-dialog .phone-wizard-body > h3 { font-size: 22px; }
+.app-dialog .phone-hdr-entry { color: var(--accent); }
+
+/* Complex dialogs keep their actions visible while their content scrolls. */
+.app-dialog .export-body { flex: 1; padding: var(--dialog-padding); }
+.app-dialog .version-list { flex: 1; align-content: start; padding: var(--dialog-padding); }
+.app-dialog .version-actions { flex-wrap: wrap; gap: 8px; }
+.app-dialog .versions-empty { align-self: center; color: var(--ink-muted); }
+.app-dialog .export-footer .out-command { flex: 0 1 auto; }
+.app-dialog .export-footer .out-command[open] { flex-basis: 100%; }
+.app-dialog .export-footer .out-actions { flex: 1 1 auto; flex-wrap: wrap; }
+.app-dialog .export-footer .out-progress { flex-basis: 100%; }
+.app-dialog .lut-library-footer > .button { min-width: 88px; }
+.app-dialog .lut-space-body { padding: var(--dialog-padding); }
+.app-dialog .shortcut-grid { padding: var(--dialog-padding); }
+.app-dialog.shortcuts-dialog > form { flex: none; }
+
+@media (max-width: 720px) {
+  :root { --dialog-padding: 16px; }
+  dialog.app-dialog--wide { width: 100vw; height: 100dvh; max-height: 100dvh; border: 0; border-radius: 0; }
+  .app-dialog .dialog-head { min-height: 64px; padding-block: 12px; }
+  .app-dialog .dialog-head .icon-button { width: 40px; height: 40px; }
+  .app-dialog .dialog-foot { min-height: 69px; padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+  .app-dialog .dialog-foot > .button { min-height: 40px; }
+  .app-dialog .prefs-surface { grid-template-columns: minmax(0, 1fr); }
+  .app-dialog .phone-wizard-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; }
+  .app-dialog .phone-wizard-rail { padding: 12px var(--dialog-padding); overflow: visible; }
+  .app-dialog .phone-wizard-rail li { min-height: 32px; gap: 6px; font-size: 12px; }
+  .app-dialog .phone-step-number { width: 26px; height: 26px; font-size: 13px; }
+  .app-dialog .phone-wizard-body { padding-top: 20px; }
+  .app-dialog .phone-wizard-body > h3 { font-size: 20px; }
+  .app-dialog .export-body { grid-template-columns: minmax(0, 1fr); }
+  .app-dialog .export-overview { border-right: 0; padding-right: 0; }
+  .app-dialog .lut-library-list { grid-template-columns: minmax(0, 1fr); }
+}

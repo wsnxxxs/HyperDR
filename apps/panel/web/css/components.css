@@ -940,8 +940,6 @@ input.field-value:disabled { color: var(--ink-disabled); cursor: default; }
  * reduced. */
 dialog[open] { animation: dialog-in var(--duration) var(--ease); }
 dialog[open]::backdrop { animation: backdrop-in var(--duration) ease-out; }
-.prefs:not([hidden]) { animation: backdrop-in var(--duration) ease-out; }
-.prefs:not([hidden]) .prefs-surface { animation: dialog-in var(--duration) var(--ease); }
 @keyframes dialog-in { from { opacity: 0; transform: translateY(6px) scale(0.99); } }
 @keyframes backdrop-in { from { opacity: 0; } }
 
@@ -1047,25 +1045,6 @@ dialog[open]::backdrop { animation: backdrop-in var(--duration) ease-out; }
    z-index 1000, plus a scroll lock on <html>) rather than introducing a second
    layering system. What it adds is the modal behaviour the preview never
    needed: a scrim, a focus trap, and Esc -- all in js/ui/prefs.js. */
-.prefs {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  display: grid;
-  place-items: center;
-  padding: max(var(--space-3), env(safe-area-inset-top))
-           max(var(--space-3), env(safe-area-inset-right))
-           max(var(--space-3), env(safe-area-inset-bottom))
-           max(var(--space-3), env(safe-area-inset-left));
-  background: var(--dialog-backdrop);
-}
-.prefs[hidden] { display: none; }
-
-html.prefs-open,
-html.prefs-open body {
-  overflow: hidden;
-}
-
 .prefs-surface {
   display: grid;
   grid-template-columns: 200px minmax(0, 1fr);
@@ -1210,7 +1189,6 @@ html.prefs-open body {
 .prefs-foot[hidden] { display: none; }
 
 @media (max-width: 720px) {
-  .prefs { padding: 0; }
   .prefs-surface {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto auto minmax(0, 1fr) auto;

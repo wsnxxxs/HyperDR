@@ -1,17 +1,4 @@
-/* The preferences overlay: a shared dialog surface with a category rail.
- *
- * The panel had no dialog of any kind before this, and inventing a modal system
- * for one surface would have been the wrong trade. The open/close mechanics are
- * the ones the full-screen preview already uses (a fixed inset-0 layer plus a
- * scroll lock on <html>); what is genuinely new here is the modal part -- Esc,
- * a focus trap, and returning focus to the trigger -- because the preview
- * expander is not modal and had none of it.
- *
- * Every row is built from the PREFS table rather than written into index.html.
- * That keeps scripts/check_panel_roles.py honest: the markup declares one
- * container, `prefs-body`, and no per-row roles that the checker would have to
- * be told to ignore.
- */
+/* Preferences use the same native dialog lifecycle as the other subviews. */
 
 import { el, role, setPressed, setText } from "../core/dom.js";
 import { store } from "../core/store.js";
@@ -24,12 +11,6 @@ import {
   availableSaveTargets, browserDirectoryName, chooseSaveFolder,
 } from "../run/save.js";
 
-/** Focusable descendants, in tab order, skipping anything currently hidden. */
-const focusable = (root) =>
-  Array.from(root.querySelectorAll(
-    'button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])'))
-    .filter((node) => node.offsetParent !== null);
-
 export function mountPrefs({ toast, phoneWorkbench }) {
   const openButton = role("prefs-open");
   const panel = role("prefs");
@@ -40,7 +21,6 @@ export function mountPrefs({ toast, phoneWorkbench }) {
   const copyButton = role("prefs-copy-diagnostics");
 
   let activeGroup = PREF_GROUPS[0];
-  let lastFocused = null;
   /** Re-label hooks, one per built node, run when the locale changes. */
   const relabels = [];
 
@@ -313,66 +293,41 @@ export function mountPrefs({ toast, phoneWorkbench }) {
     }
     copyButton.hidden = group !== "about";
     resetButton.hidden = group === "phone";
-    resetButton.parentElement.hidden = group === "phone";
+
     body.scrollTop = 0;
   }
 
   /* ── open / close ──────────────────────────────────────────────────── */
 
-  const isOpen = () => !panel.hidden;
+  const isOpen = () => panel.open;
 
   function open(group = activeGroup) {
     if (PREF_GROUPS.includes(group)) activeGroup = group;
     if (isOpen()) { selectGroup(activeGroup); return; }
-    lastFocused = document.activeElement;
-    // Diagnostics are probed at open time, so the readouts are never stale.
     render();
-    panel.hidden = false;
-    document.documentElement.classList.add("prefs-open");
+    panel.showModal();
     openButton.setAttribute("aria-expanded", "true");
-    (focusable(panel)[0] || closeButton).focus();
+    closeButton.focus();
   }
 
-  function close() {
-    if (!isOpen()) return;
-    panel.hidden = true;
-    document.documentElement.classList.remove("prefs-open");
-    openButton.setAttribute("aria-expanded", "false");
-    if (lastFocused instanceof HTMLElement) lastFocused.focus();
-    lastFocused = null;
-  }
+  function close() { if (panel.open) panel.close(); }
 
   openButton.addEventListener("click", () => (isOpen() ? close() : open()));
   closeButton.addEventListener("click", close);
-  // The scrim is the panel itself; a click that lands on it rather than on the
-  // surface inside is a click outside the dialog.
-  panel.addEventListener("pointerdown", (event) => {
-    if (event.target === panel) close();
+  panel.addEventListener("close", () => {
+    openButton.setAttribute("aria-expanded", "false");
+    disarm();
   });
+  const done = el("button", { type: "button", class: "button", "data-i18n": "common.done" }, t("common.done"));
+  done.addEventListener("click", close);
+  resetButton.parentElement.append(done);
 
   window.addEventListener("keydown", (event) => {
-    // Ctrl/Cmd+, is the platform convention and is worth honouring even though
-    // this panel is also served to a phone, where no one will press it.
-    if (event.key === "," && (event.metaKey || event.ctrlKey)) {
-      event.preventDefault();
-      isOpen() ? close() : open();
-      return;
-    }
-    if (!isOpen()) return;
-    if (event.key === "Escape") { event.preventDefault(); close(); return; }
-    if (event.key !== "Tab") return;
-    // Focus trap: without it, Tab walks into the inert rail behind the overlay.
-    const nodes = focusable(panel);
-    if (nodes.length === 0) return;
-    const first = nodes[0];
-    const last = nodes[nodes.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
+    if (event.key !== "," || !(event.metaKey || event.ctrlKey)) return;
+    // Keep shortcuts inside the active dialog instead of stacking Settings over it.
+    if (!isOpen() && document.querySelector("dialog[open]")) return;
+    event.preventDefault();
+    isOpen() ? close() : open();
   });
 
   /* ── actions ───────────────────────────────────────────────────────── */

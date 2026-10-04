@@ -70,3 +70,6 @@ __pycache__/
 /HyperDR_Model/.venv/
 /HyperDR_Model/checkpoints/*.pt
 /HyperDR_Model/reports/
+
+# Keep documentation local.
+/docs/

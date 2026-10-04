@@ -1,0 +1,74 @@
+{
+  "source_name": "IMG_0017.heic",
+  "source_sha256": "c5a028d71f4ebc50bc90264f2170ae2e1b7b58f93eca9a9d0de368435cb21a6f",
+  "input_generator_sha256": "06c2795c33fb3920a41fde18877f38834d9691770bb0ac29a4dbd298f0c46a8a",
+  "input_generator_mtime_utc_seconds": 1790234157.9909015,
+  "preview_metadata": {
+    "schema": "hyperdr.native-preview/v1",
+    "width": 1024,
+    "height": 768,
+    "channels": 3,
+    "layout": "HWC",
+    "sampleType": "float32-le",
+    "colorSpace": "linear-display-p3",
+    "relativeSdrWhite": 1,
+    "headroomStops": 1.62266,
+    "inputDomain": "dual-rendition",
+    "sourceColor": {
+      "name": "Adaptive HDR (base: Display P3)",
+      "primaries": "ICC profile",
+      "transfer": "ICC profile",
+      "source": "icc"
+    },
+    "hasCaptureMetadata": true,
+    "inputHeadroomStops": 1.62266,
+    "status": "ok",
+    "unadjusted": {
+      "brightness": 0,
+      "hdrStrength": 1,
+      "hdrRange": 4,
+      "areaCoverage": 1,
+      "lutStrength": 0
+    },
+    "degradationReasons": []
+  },
+  "source_tmap": {
+    "minimum_version": 0,
+    "writer_version": 0,
+    "flags": 64,
+    "use_base_color_space": true,
+    "backward_direction": false,
+    "common_denominator": false,
+    "base_headroom": {
+      "numerator": 0,
+      "denominator": 1000000
+    },
+    "alternate_headroom": {
+      "numerator": 1653053,
+      "denominator": 1000000
+    },
+    "gain_min": {
+      "numerator": 0,
+      "denominator": 1000000
+    },
+    "gain_max": {
+      "numerator": 1653053,
+      "denominator": 1000000
+    },
+    "gamma": {
+      "numerator": 744629,
+      "denominator": 1000000
+    },
+    "base_offset": {
+      "numerator": 10,
+      "denominator": 1000000
+    },
+    "alternate_offset": {
+      "numerator": 10,
+      "denominator": 1000000
+    }
+  },
+  "preview_encoding": "ultrahdr: direct paired endpoint path for dual-rendition input",
+  "paired_float_sha256": "939c31a352137356c6f3a89e326485caab60aeec519aebe9b2f51e22d355aa84",
+  "limitation": "CLI prepares inputs only. The current core packager is called separately by probe.cpp. No final lossy codec comparison."
+}

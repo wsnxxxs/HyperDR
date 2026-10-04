@@ -1,0 +1,122 @@
+{
+  "checked_at_utc": "2026-10-04T04:27:41.4495920Z",
+  "anonymous_read": true,
+  "public_repository": "https://github.com/wsnxxxs/HyperDR",
+  "private": false,
+  "source_revision": "4795f817475b708066896db00b635346ba946971",
+  "public_main": "134c5a9d6227d04a0c4739291524b5ad479f8cd9",
+  "tree_truncated": false,
+  "branches": [
+    {
+      "name": "main",
+      "sha": "134c5a9d6227d04a0c4739291524b5ad479f8cd9"
+    }
+  ],
+  "releases": [
+    {
+      "url": "https://github.com/wsnxxxs/HyperDR/releases/tag/v0.3.2",
+      "published_at": "2026-07-31T14:13:43Z",
+      "assets": [
+        {
+          "name": "HyperDR-0.3.2-windows-x64-avx2.zip",
+          "created_at": "2026-07-31T14:12:05Z"
+        },
+        {
+          "name": "HyperDR-0.3.2-windows-x64.zip",
+          "created_at": "2026-07-31T14:12:05Z"
+        }
+      ],
+      "tag": "v0.3.2"
+    },
+    {
+      "url": "https://github.com/wsnxxxs/HyperDR/releases/tag/v0.3.1",
+      "published_at": "2026-07-30T11:42:16Z",
+      "assets": [
+        {
+          "name": "HyperDR-0.3.1-windows-x64.zip",
+          "created_at": "2026-07-30T11:42:13Z"
+        }
+      ],
+      "tag": "v0.3.1"
+    },
+    {
+      "url": "https://github.com/wsnxxxs/HyperDR/releases/tag/v0.2.2",
+      "published_at": "2026-07-28T09:19:07Z",
+      "assets": [
+        {
+          "name": "HyperDR-0.2.2-windows-x64.zip",
+          "created_at": "2026-07-28T09:19:04Z"
+        }
+      ],
+      "tag": "v0.2.2"
+    },
+    {
+      "url": "https://github.com/wsnxxxs/HyperDR/releases/tag/v0.2.1",
+      "published_at": "2026-07-27T05:53:28Z",
+      "assets": [
+        {
+          "name": "HyperDR-0.2.1-windows-x64.zip",
+          "created_at": "2026-07-27T05:53:25Z"
+        }
+      ],
+      "tag": "v0.2.1"
+    }
+  ],
+  "source_files": [
+    {
+      "path": "modules/look/src/headroom.cpp",
+      "public_blob": "4240b16209fbdb9040ad9646aac860d2a1086041",
+      "local_blob": "4240b16209fbdb9040ad9646aac860d2a1086041",
+      "identical": true
+    },
+    {
+      "path": "modules/look/src/local_gain.cpp",
+      "public_blob": "72902aaf78e0d8420effd965329a9c6b1e319220",
+      "local_blob": "72902aaf78e0d8420effd965329a9c6b1e319220",
+      "identical": true
+    },
+    {
+      "path": "modules/gainmap/src/ncnn_runtime.cpp",
+      "public_blob": "333ab060b59926bdd64093fcf4ad532f812ee053",
+      "local_blob": "333ab060b59926bdd64093fcf4ad532f812ee053",
+      "identical": true
+    },
+    {
+      "path": "HyperDR_Model/hyperdr_ml/model.py",
+      "public_blob": "fe26f6560066f6074a0178734c92c3976b7fc9f4",
+      "local_blob": "fe26f6560066f6074a0178734c92c3976b7fc9f4",
+      "identical": true
+    },
+    {
+      "path": "HyperDR_Model/hyperdr_ml/loss.py",
+      "public_blob": "ed4e6424322d239939da0d4b622750c439911efb",
+      "local_blob": "ed4e6424322d239939da0d4b622750c439911efb",
+      "identical": true
+    },
+    {
+      "path": "HyperDR_Model/hyperdr_ml/phase_a_labels.py",
+      "public_blob": "921a5b03dd9a67f08683f03b101934f75502b9a5",
+      "local_blob": "921a5b03dd9a67f08683f03b101934f75502b9a5",
+      "identical": true
+    },
+    {
+      "path": "modules/image/include/hyperdr/image/color.hpp",
+      "public_blob": "028890525a48701cdd1994104c2b1bc818e33112",
+      "local_blob": "9a1f66dca79c0b54004cd3acab18abcda1ef57df",
+      "identical": false
+    },
+    {
+      "path": "modules/look/src/rendition.cpp",
+      "public_blob": "c59f753165542dea52e1ffa19801dcf23925ccad",
+      "local_blob": "ab8442b0d77c69b651c0ce4d2446f95041109dbc",
+      "identical": false
+    },
+    {
+      "path": "modules/gainmap/src/rendition.cpp",
+      "public_blob": "b16bffe5f340365fb5635faa83f9d227979fb2ea",
+      "local_blob": "c46552f9e4cb8b84ff9324420ca268cb5cace64b",
+      "identical": false
+    }
+  ],
+  "limitation": "A differing public-main blob does not prove a local feature was never publicly disclosed. External installers, other repositories, and demonstrations remain unverified."
+}

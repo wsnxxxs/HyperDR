@@ -51,6 +51,7 @@ acting on it, and do not treat a measurement here as a live guarantee.
 
 | Evidence | Status |
 | --- | --- |
+| [2026-10-04 Chinese patent feasibility review](patent-feasibility-2026-10-04.md) | Compares public and local implementations with patent publications; identifies one narrow candidate and records unresolved novelty and inventiveness questions. |
 | [2026-09-24 local Adobe pipeline research](archive/adobe-local-pipeline-research-2026-09-24.md) | Local profiles, model manifests, binary component evidence and TIFF metadata; separates observed data from inferred pipeline behavior. |
 | [2026-09-23 HEIF review verification](heif-review-2026-09-23.md) | Separates reproduced HEVC signalling from unverified Apple gain-map compatibility claims. |
 | [2026-09-23 gain compression study](gain-compression-study-2026-09-23.md) | Measures full-resolution lossy gain coding separately from downsampling, including decoder signalling. |

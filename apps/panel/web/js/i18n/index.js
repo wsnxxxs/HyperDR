@@ -50,7 +50,13 @@ export const isLocale = (value) => Object.hasOwn(CATALOGUES, value);
  *  the markup. */
 export function applyStatic(root = document) {
   for (const node of root.querySelectorAll("[data-i18n]")) {
-    node.textContent = t(node.dataset.i18n);
+    if (node.dataset.i18nNode !== undefined) {
+      // Mixed labels keep their icons, line breaks and existing CSS selectors.
+      const indexes = node.dataset.i18nNode.split(";");
+      node.dataset.i18n.split(";").forEach((key, index) => {
+        node.childNodes[Number(indexes[index])].textContent = t(key);
+      });
+    } else node.textContent = t(node.dataset.i18n);
   }
   // "aria-label:prefs.close;title:prefs.close" -- one node, several attributes.
   for (const node of root.querySelectorAll("[data-i18n-attr]")) {

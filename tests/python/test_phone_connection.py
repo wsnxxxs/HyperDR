@@ -106,6 +106,18 @@ class PhoneConnectionTests(unittest.TestCase):
         self.assertEqual(headers["Set-Cookie"],
                          f"hyperdr_setup={setup.access_token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=900")
         cookie = headers["Set-Cookie"].split(";", 1)[0]
+        # Imports on the pre-trust HTTP listener must resolve on that origin;
+        # the HTTPS viewer also serves the same setup page and module graph.
+        for path in ("/phone/setup.html", "/phone/setup.js", "/phone/setup-controller.js",
+                     "/js/core/api.js", "/js/preview/packet.js", "/js/i18n/index.js",
+                     "/js/i18n/zh-CN.js", "/js/i18n/en.js"):
+            with self.subTest(asset=path):
+                self.assertEqual(self.call(setup, "GET", path, cookie="")[0], 401)
+                code, headers, body = self.call(setup, "GET", path, cookie=cookie)
+                self.assertEqual(code, 200)
+                self.assertTrue(body)
+                self.assertIn("text/html" if path.endswith(".html") else "text/javascript", headers["Content-Type"])
+                self.assertEqual(self.call(self.desktop.phone_server, "GET", path)[0], 200)
         code, _, root = self.call(setup, "GET", "/setup/root.crt", cookie=cookie)
         self.assertEqual(code, 200)
         self.assertEqual(root, phone_tls.root_certificate())

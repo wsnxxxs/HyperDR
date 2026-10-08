@@ -19,6 +19,14 @@ COOKIE_NAME = "hyperdr_setup"
 ASSETS = {
     "/setup": ("phone/setup.html", "text/html; charset=utf-8"),
     "/phone/setup.js": ("phone/setup.js", "text/javascript; charset=utf-8"),
+    # Setup runs before certificate trust, on its own same-origin HTTP listener.
+    "/phone/setup.html": ("phone/setup.html", "text/html; charset=utf-8"),
+    "/phone/setup-controller.js": ("phone/setup-controller.js", "text/javascript; charset=utf-8"),
+    "/js/core/api.js": ("js/core/api.js", "text/javascript; charset=utf-8"),
+    "/js/preview/packet.js": ("js/preview/packet.js", "text/javascript; charset=utf-8"),
+    "/js/i18n/index.js": ("js/i18n/index.js", "text/javascript; charset=utf-8"),
+    "/js/i18n/zh-CN.js": ("js/i18n/zh-CN.js", "text/javascript; charset=utf-8"),
+    "/js/i18n/en.js": ("js/i18n/en.js", "text/javascript; charset=utf-8"),
     "/phone/setup.css": ("phone/setup.css", "text/css; charset=utf-8"),
     "/css/tokens.css": ("css/tokens.css", "text/css; charset=utf-8"),
     "/css/base.css": ("css/base.css", "text/css; charset=utf-8"),

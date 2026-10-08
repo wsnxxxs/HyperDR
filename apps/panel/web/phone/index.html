@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#f2f3f5" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#17181b" media="(prefers-color-scheme: dark)">
-  <title>手机连接工作台 · HyperDR</title>
+  <title data-i18n="phone.mobile.pageTitle">手机连接工作台 · HyperDR</title>
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">
   <link rel="stylesheet" href="/css/tokens.css">
@@ -17,62 +17,62 @@
 <body>
   <div class="phone-shell">
     <header class="masthead">
-      <a class="brand" href="/phone" aria-label="HyperDR 手机连接工作台"><img src="/icon.svg" alt=""><span>HyperDR<small>手机连接工作台</small></span></a>
-      <span class="connection" id="connection" role="status"><i></i><span>正在连接</span></span>
+      <a class="brand" href="/phone" aria-label="HyperDR 手机连接工作台" data-i18n-attr="aria-label:phone.mobile.brandLabel"><img src="/icon.svg" alt=""><span>HyperDR<small data-i18n="phone.title">手机连接工作台</small></span></a>
+      <span class="connection" id="connection" role="status"><i></i><span data-i18n="phone.mobile.connecting">正在连接</span></span>
     </header>
     <main>
-      <section class="computer-line" aria-label="已连接的电脑">
+      <section class="computer-line" aria-label="已连接的电脑" data-i18n-attr="aria-label:phone.mobile.computerLabel">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 21h8m-4-5v5"/></svg>
-        <span id="computer">等待电脑工作台</span><span class="local-note">照片在电脑上处理</span>
+        <span id="computer" data-i18n="phone.mobile.waitingComputer">等待电脑工作台</span><span class="local-note" data-i18n="phone.mobile.localNote">照片在电脑上处理</span>
       </section>
 
-      <section class="diagnostics" id="diagnostics" aria-label="HDR 能力检测">
-        <div class="diagnostic-heading"><strong id="diagnostic-title" role="status">正在检测 HDR 预览能力</strong><button id="retry-diagnostics" type="button">重新检测</button></div>
-        <p id="diagnostic-description">无需先上传照片，检测不影响照片导入。</p>
-        <details><summary>详细信息</summary><p id="diagnostic-detail"></p><p id="diagnostic-report"></p><p>此页面不能读取系统证书信任设置；安全上下文与渲染能力由浏览器报告。</p></details>
+      <section class="diagnostics" id="diagnostics" aria-label="HDR 能力检测" data-i18n-attr="aria-label:phone.mobile.diagnostic.label">
+        <div class="diagnostic-heading"><strong id="diagnostic-title" role="status" data-i18n="phone.mobile.diagnostic.checking">正在检测 HDR 预览能力</strong><button id="retry-diagnostics" type="button" data-i18n="phone.mobile.diagnostic.retry">重新检测</button></div>
+        <p id="diagnostic-description" data-i18n="phone.mobile.diagnostic.intro">无需先上传照片，检测不影响照片导入。</p>
+        <details><summary data-i18n="phone.mobile.details">详细信息</summary><p id="diagnostic-detail"></p><p id="diagnostic-report"></p><p data-i18n="phone.mobile.diagnostic.browserNote">此页面不能读取系统证书信任设置；安全上下文与渲染能力由浏览器报告。</p></details>
       </section>
 
       <section class="welcome" id="welcome">
-        <p class="eyebrow">手机连接工作台</p>
-        <h1>照片从手机开始。<br><span>调整，在电脑继续。</span></h1>
-        <p class="intro">直接导入，随调整同步看效果。<br>完成的照片，在这里保存。</p>
+        <p class="eyebrow" data-i18n="phone.title">手机连接工作台</p>
+        <h1 data-i18n="phone.mobile.welcomeStart" data-i18n-node="0">照片从手机开始。<br><span data-i18n="phone.mobile.welcomeContinue">调整，在电脑继续。</span></h1>
+        <p class="intro" data-i18n="phone.mobile.introImport;phone.mobile.introSave" data-i18n-node="0;2">直接导入，随调整同步看效果。<br>完成的照片，在这里保存。</p>
         <div class="empty-visual" aria-hidden="true">
           <div class="phone-empty-icon"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1"/><path d="m4 17 5-5 4 4 3-3 5 5"/></svg></div>
         </div>
       </section>
 
-      <section class="photo-workspace" id="photo-workspace" hidden aria-label="同步照片预览">
-        <div class="photo-heading"><div><p class="eyebrow">同步预览</p><h1 id="filename"></h1></div><span class="render-badge" id="render-badge">准备预览</span></div>
+      <section class="photo-workspace" id="photo-workspace" hidden aria-label="同步照片预览" data-i18n-attr="aria-label:phone.mobile.previewLabel">
+        <div class="photo-heading"><div><p class="eyebrow" data-i18n="phone.previewStep">同步预览</p><h1 id="filename"></h1></div><span class="render-badge" id="render-badge" data-i18n="phone.mobile.preparingPreview">准备预览</span></div>
         <div class="viewer" id="viewer">
-          <div class="canvas-wrap" id="canvas-wrap"><canvas id="photo" aria-label="照片效果预览"></canvas><canvas id="original-photo" aria-label="原图预览" hidden></canvas></div>
-          <span class="viewer-state" id="viewer-state" role="status">正在生成预览</span>
-          <button class="viewer-expand" id="fullscreen" type="button" aria-label="全屏预览"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5"/></svg></button>
-          <div class="viewer-tools"><button id="compare" type="button" disabled>按住看原图</button></div>
+          <div class="canvas-wrap" id="canvas-wrap"><canvas id="photo" aria-label="照片效果预览" data-i18n-attr="aria-label:phone.mobile.effectPreview"></canvas><canvas id="original-photo" aria-label="原图预览" hidden data-i18n-attr="aria-label:phone.mobile.originalPreview"></canvas></div>
+          <span class="viewer-state" id="viewer-state" role="status" data-i18n="phone.mobile.generatingPreview">正在生成预览</span>
+          <button class="viewer-expand" id="fullscreen" type="button" aria-label="全屏预览" data-i18n-attr="aria-label:phone.mobile.fullscreen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5"/></svg></button>
+          <div class="viewer-tools"><button id="compare" type="button" disabled data-i18n="phone.mobile.compare">按住看原图</button></div>
         </div>
-        <p class="preview-note" id="preview-note">电脑调整后自动更新 · 双指缩放查看细节</p>
+        <p class="preview-note" id="preview-note" data-i18n="phone.mobile.previewNote">电脑调整后自动更新 · 双指缩放查看细节</p>
       </section>
 
       <section class="transfer" id="transfer" hidden aria-live="polite">
-        <div class="transfer-top"><div><strong id="transfer-title">正在传到电脑</strong><p id="transfer-name"></p></div><button id="cancel-upload" type="button">取消</button></div>
-        <progress id="upload-progress" max="1" value="0" aria-label="照片上传进度"></progress>
+        <div class="transfer-top"><div><strong id="transfer-title" data-i18n="phone.mobile.transferring">正在传到电脑</strong><p id="transfer-name"></p></div><button id="cancel-upload" type="button" data-i18n="phone.mobile.cancel">取消</button></div>
+        <progress id="upload-progress" max="1" value="0" aria-label="照片上传进度" data-i18n-attr="aria-label:phone.mobile.uploadProgress"></progress>
         <span id="upload-percent">0%</span>
       </section>
       <p class="notice" id="notice" hidden role="alert"></p>
-      <button id="retry-connection" type="button" hidden>重试连接</button>
+      <button id="retry-connection" type="button" hidden data-i18n="phone.mobile.retryConnection">重试连接</button>
 
-      <section class="import-actions" id="import-actions" aria-label="导入照片">
-        <button class="primary" id="pick-photos" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1"/><path d="m4 17 5-5 4 4 3-3 5 5"/></svg><span id="pick-label">选择照片</span><span class="button-arrow" aria-hidden="true">→</span></button>
+      <section class="import-actions" id="import-actions" aria-label="导入照片" data-i18n-attr="aria-label:phone.mobile.importLabel">
+        <button class="primary" id="pick-photos" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1"/><path d="m4 17 5-5 4 4 3-3 5 5"/></svg><span id="pick-label" data-i18n="stage.select">选择照片</span><span class="button-arrow" aria-hidden="true">→</span></button>
         <input id="photos-input" type="file" accept="image/*" hidden>
-        <p class="import-hint" id="import-hint">也可以在电脑上打开照片，手机会同步显示。</p>
+        <p class="import-hint" id="import-hint" data-i18n="phone.mobile.importHint">也可以在电脑上打开照片，手机会同步显示。</p>
       </section>
 
       <section class="exports" id="exports" hidden aria-labelledby="exports-title">
-        <div class="section-heading"><div><p class="eyebrow">导出记录</p><h2 id="exports-title">完成的照片</h2></div><span id="export-count"></span></div>
+        <div class="section-heading"><div><p class="eyebrow" data-i18n="workspace.versions">导出记录</p><h2 id="exports-title" data-i18n="phone.mobile.completedPhotos">完成的照片</h2></div><span id="export-count"></span></div>
         <div id="export-list"></div>
       </section>
-      <ol class="workflow" id="workflow"><li><span>01</span>手机选图</li><li><span>02</span>电脑调整</li><li><span>03</span>保存照片</li></ol>
+      <ol class="workflow" id="workflow"><li data-i18n="phone.mobile.workflowChoose" data-i18n-node="1"><span>01</span>手机选图</li><li data-i18n="phone.mobile.workflowAdjust" data-i18n-node="1"><span>02</span>电脑调整</li><li data-i18n="welcome.export" data-i18n-node="1"><span>03</span>保存照片</li></ol>
     </main>
-    <footer>HyperDR <span>让每一张照片，多一些光。</span></footer>
+    <footer>HyperDR <span data-i18n="phone.mobile.tagline">让每一张照片，多一些光。</span></footer>
   </div>
 </body>
 </html>

@@ -2,7 +2,9 @@ import { createPhoneApi } from "../js/core/api.js";
 import { createPhoneState } from "./state.js";
 import { createPhoneConnection } from "./connection.js";
 import { mountPhoneView } from "./view.js";
+import { applyStatic } from "../js/i18n/index.js";
 
+applyStatic();
 const api = createPhoneApi({ fetch, setTimeout, clearTimeout, XMLHttpRequest });
 const state = createPhoneState();
 const view = mountPhoneView({ state, api });

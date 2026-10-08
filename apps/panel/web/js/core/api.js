@@ -292,7 +292,7 @@ export function createPhoneApi({ fetch, setTimeout, clearTimeout, XMLHttpRequest
       return await consume(response);
     } catch (error) {
       if (error.name === "AbortError" && !signal?.aborted) {
-        throw Object.assign(new Error(timeoutError || "请求超时，请重试。"), { status: 0, timeout: true });
+        throw Object.assign(new Error(timeoutError || t("phone.mobile.requestTimeout")), { status: 0, timeout: true });
       }
       throw error;
     } finally {
@@ -305,18 +305,18 @@ export function createPhoneApi({ fetch, setTimeout, clearTimeout, XMLHttpRequest
       method: "POST", headers: JSON_HEADERS, body: JSON.stringify(body),
     }, async (response) => {
       const data = await response.json();
-      if (!response.ok) throw Object.assign(new Error(data.error || "请求未完成，请重试。"), { status: response.status });
+      if (!response.ok) throw Object.assign(new Error(data.error || t("phone.mobile.requestFailed")), { status: response.status });
       return data;
     }, options);
   }
   function setupState() {
     return read("/setup/state", { cache: "no-store" }, async (response) => {
-      if (response.status === 410) throw new ApiError("设置入口已过期。手机上已安装的证书仍然有效；重新下载证书需要在电脑上重新开启设置入口。", 410);
+      if (response.status === 410) throw new ApiError(t("phone.mobile.setup.expired"), 410);
       if (!response.ok) throw new Error(response.status === 401 || response.status === 403
-        ? "设置链接已失效。请在电脑上重新生成二维码并扫描。"
-        : "无法读取设置。请确认电脑工作台已开启，手机与电脑连接同一 Wi-Fi，然后重试。");
+        ? t("phone.mobile.setup.invalid")
+        : t("phone.mobile.setup.readFailed"));
       return response.json();
-    }, { timeout: 8000, timeoutError: "读取设置超时。请确认手机与电脑连接同一 Wi-Fi，然后重试。" });
+    }, { timeout: 8000, timeoutError: t("phone.mobile.setup.readTimeout") });
   }
   return {
     request, setupState,
@@ -324,7 +324,7 @@ export function createPhoneApi({ fetch, setTimeout, clearTimeout, XMLHttpRequest
     original: (signal) => fetch("/api/phone/original", { signal }),
     upload: (sessionId, file, onProgress) => api.upload(sessionId, file, onProgress, {
       XMLHttpRequest, readBody: false, error: (message) => new Error(message),
-      failed: "上传失败，请重试。", interrupted: "上传中断，请检查 Wi-Fi 后重新选择照片。", cancelled: "已取消上传",
+      failed: t("phone.mobile.uploadFailed"), interrupted: t("phone.mobile.uploadInterrupted"), cancelled: t("phone.mobile.uploadCancelled"),
     }),
   };
 }

@@ -1,3 +1,4 @@
+import { t } from "../js/i18n/index.js";
 const STATE_TIMEOUT_MS = 8000;
 
 export function createPhoneConnection({ state, request, EventSource, setTimeout, clearTimeout,
@@ -57,8 +58,8 @@ export function createPhoneConnection({ state, request, EventSource, setTimeout,
     // 401/403 means the connection code is gone: retrying cannot bring it back.
     if (state.retryPaused) { state.events?.close(); state.events = null; }
     notice(state.retryPaused
-      ? "连接口令已失效。请在电脑上重新开启手机连接，并扫描新的二维码。"
-      : "连接暂时不可用，正在自动重试……也可以点击“重试连接”。");
+      ? t("phone.mobile.expiredCode")
+      : t("phone.mobile.retryNotice"));
     onRetry(true);
     connectionState(false);
     scheduleRetry();

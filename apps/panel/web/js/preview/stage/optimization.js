@@ -7,9 +7,8 @@ import { t, onLocaleChange } from "../../i18n/index.js";
 import { isHdrSource } from "../../settings/schema.js";
 import { fallbackFields, modelLabel } from "../../settings/model-select.js";
 
-
 export function createOptimization(ctx) {
-  const { image, detail, analysis, toast, actions } = ctx;
+  const { analysis, toast, actions } = ctx;
   const { mathModeButton, optimizeButton } = ctx.dom;
 
   function mountModelChange() {
@@ -95,6 +94,7 @@ export function createOptimization(ctx) {
     }
     toast(t("adjust.aiApplied", { model: modelLabel(identity.effectiveModelId) }));
   }
+
   function mountControls() {
     mathModeButton.addEventListener("click", () => {
       if (!store.get().optimizing) store.set({ previewOptimized: false });
@@ -144,7 +144,6 @@ export function createOptimization(ctx) {
       setText(optimizeButton, store.get().optimizing ? t("adjust.aiBusy") : t("adjust.ai"));
     });
   }
-
 
   return { optimize, announceModel, mountModelChange, mountControls, mountLocale };
 }

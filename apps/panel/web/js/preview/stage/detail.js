@@ -7,10 +7,9 @@ import { t, onLocaleChange } from "../../i18n/index.js";
 import { toOptions } from "../../settings/schema.js";
 import { renderSdr } from "../cpu.js";
 
-
 export function createDetail(ctx) {
-  const { image, detail, analysis, toast, actions } = ctx;
-  const { stage, frame, detailButton, detailOverlay, detailCanvas, detailStatus } = ctx.dom;
+  const { image, detail } = ctx;
+  const { frame, detailButton, detailOverlay, detailCanvas, detailStatus } = ctx.dom;
 
   function positionDetail() {
     if (!detail.frame) return;
@@ -78,6 +77,7 @@ export function createDetail(ctx) {
     detailButton.setAttribute("aria-pressed", "false");
     detailButton.textContent = t("stage.detailOpen");
   }
+
   function mountResize() {
     new ResizeObserver(() => {
       if (!detail.active) return;
@@ -151,7 +151,6 @@ export function createDetail(ctx) {
       if (detail.frame) detailStatus.textContent = t("stage.detailStatus");
     });
   }
-
 
   return { positionDetail, detailNeedsPixels, requestDetail, closeDetail, mountResize, mountInteractions, mountLocale };
 }

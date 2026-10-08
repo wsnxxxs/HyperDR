@@ -6,9 +6,8 @@ import { t, onLocaleChange } from "../../i18n/index.js";
 import { createUploader } from "../session.js";
 import { pickInputFile } from "../file-picker.js";
 
-
 export function createIntake(ctx) {
-  const { image, detail, analysis, toast, actions } = ctx;
+  const { image, toast, actions } = ctx;
   const { stage, selectButton, fileInput, supportHint, uploadCancel, progressBar, progressText, uploadOverlayText, uploadOverlay, emptyTitle } = ctx.dom;
 
   const upload = createUploader({
@@ -172,7 +171,6 @@ export function createIntake(ctx) {
       upload.abort();
     });
   }
-
 
   return { canReplace, consumeNativeDrop, describeSupport, startUpload, openPicker, mountNativeDrop, mountSupport, mountPicker, mountDrop, mountReactions, mountLocale };
 }

@@ -9,7 +9,7 @@ const TOUCH_HINT = "stage.hintTouch";
 const MOUSE_HINT = "stage.hintMouse";
 
 export function createGestures(ctx) {
-  const { image, detail, analysis, toast, actions } = ctx;
+  const { image, actions } = ctx;
   const { stage } = ctx.dom;
 
   const isStageControl = (target) =>
@@ -39,6 +39,7 @@ export function createGestures(ctx) {
     gesture.pointerId = null;
     endCompare(event);
   }
+
   function mountPointer() {
     stage.addEventListener("pointerdown", (event) => {
       if (event.button !== 0 || !actions.intake.canReplace() || isStageControl(event.target)) return;
@@ -119,7 +120,6 @@ export function createGestures(ctx) {
   function mountLocale() {
     onLocaleChange(applyPointerHint);
   }
-
 
   return { isStageControl, beginCompare, endCompare, cancelGesture, applyPointerHint, mountPointer, mountKeyboard, mountPointerHint, mountLocale };
 }

@@ -52,4 +52,9 @@ std::string next_value(int& i, int argc, char** argv, std::string_view option);
 void parse_settings(int argc, char** argv, int first, ConvertOptions& options,
                     unsigned* curve_samples = nullptr, PreviewRegion* region = nullptr);
 
+int convert_command(int argc, char** argv);
+int curve_command(int argc, char** argv);
+int schema_command(int argc, char** argv);
+int display_curve_command(int argc, char** argv);
+
 }  // namespace hyperdr::app::detail

@@ -11,9 +11,12 @@ from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "apps" / "panel"))
-STAGE = (
-    REPO_ROOT / "apps" / "panel" / "web" / "js" / "preview" / "stage.js"
-).read_text(encoding="utf-8")
+STAGE_PATH = REPO_ROOT / "apps" / "panel" / "web" / "js" / "preview" / "stage.js"
+# Stage is split into modules, so contracts check the source of the whole stage.
+STAGE = "\n".join(
+    path.read_text(encoding="utf-8")
+    for path in [STAGE_PATH, *sorted(STAGE_PATH.with_suffix("").glob("*.js"))]
+)
 MAIN = (
     REPO_ROOT / "apps" / "panel" / "web" / "js" / "main.js"
 ).read_text(encoding="utf-8")
@@ -230,7 +233,7 @@ class NativePreviewFrontendContractTests(unittest.TestCase):
         self.assertIn("inputDomain", STAGE)
         self.assertIn('setCapability("hdr.waiting", false)', STAGE)
         self.assertIn('"hdr.waiting": "等待图像 · 将在预览时验证 HDR 输出"', CATALOGUE)
-        self.assertIn('stage.dataset.previewMode = renderer?.kind || "uninitialized"', STAGE)
+        self.assertIn('stage.dataset.previewMode = ctx.renderer?.kind || "uninitialized"', STAGE)
         self.assertNotIn('setCapability("HDR 能力就绪", true)', STAGE)
 
     def test_ai_post_controls_have_independent_keys_and_reload_native_frames(self):

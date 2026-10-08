@@ -1,6 +1,14 @@
 import { t } from "../js/i18n/index.js";
 const STATE_TIMEOUT_MS = 8000;
 
+export function startDiagnosticHeartbeat({ state, request, setInterval, isHidden, setupCheck }) {
+  setInterval(() => {
+    if (!isHidden() && state.connection.online && state.diagnostics.lastDiagnostic) {
+      request("/api/phone/diagnostics", { ...state.diagnostics.lastDiagnostic, setupCheck }).catch(() => {});
+    }
+  }, 20000);
+}
+
 export function createPhoneConnection({ state, request, EventSource, setTimeout, clearTimeout,
   isHidden, applySnapshot, connectionState, notice, onCapabilities, onRetry, onPause }) {
   function receive(next) { state.snapshot = next; applySnapshot(next); }

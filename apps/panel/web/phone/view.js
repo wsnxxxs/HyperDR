@@ -5,11 +5,10 @@ import { createSdrGpuRenderer } from "../js/preview/sdr-gpu.js";
 import { renderSdr } from "../js/preview/cpu.js";
 import { bindSaveAction } from "../js/run/save.js";
 
-export function mountPhoneView({ state, api }) {
+export function mountPhoneView({ state, api, setupCheck }) {
   const { connection, photo, view, diagnostics } = state;
   const request = api.request;
   const $ = (id) => document.getElementById(id);
-  const setupCheck = new URLSearchParams(location.search).get("check") || "";
   let canvas = $("photo");
   function notice(message = "") { $("notice").textContent = message; $("notice").hidden = !message; }
   function connectionState(connected) {
@@ -22,7 +21,7 @@ export function mountPhoneView({ state, api }) {
     const ready = connection.online && connection.snapshot?.enabled && connection.snapshot.desktopConnected && connection.capabilities?.ready;
     const busy = photo.transfer || connection.snapshot?.upload || connection.snapshot?.pending || connection.snapshot?.current?.busy;
     $("pick-photos").disabled = !ready || Boolean(busy);
-    $("pick-label").textContent = connection.snapshot?.current?.file ? t("phone.mobile.changePhoto") : t("stage.select");
+    $("pick-label").textContent = connection.snapshot?.current?.file ? t("phone.mobile.changePhoto") : t("phone.chooseStep");
     $("import-hint").textContent = connection.snapshot && !connection.snapshot.enabled ? t("phone.mobile.reopenHint")
       : !connection.online ? t("phone.mobile.recoverHint")
       : !connection.snapshot?.desktopConnected ? t("phone.mobile.openHint")
@@ -113,11 +112,6 @@ export function mountPhoneView({ state, api }) {
       $("diagnostic-report").textContent = t("phone.mobile.diagnostic.reported");
     }).catch((error) => { $("diagnostic-report").textContent = t("phone.mobile.diagnostic.reportFailed", { message: error.message }); });
   }
-  setInterval(() => {
-    if (!document.hidden && connection.online && diagnostics.lastDiagnostic) {
-      request("/api/phone/diagnostics", { ...diagnostics.lastDiagnostic, setupCheck }).catch(() => {});
-    }
-  }, 20000);
   function probeDiagnostics() {
     if (diagnostics.diagnosticRun) return diagnostics.diagnosticRun;
     $("retry-diagnostics").disabled = true;

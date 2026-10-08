@@ -117,16 +117,19 @@ def main() -> int:
             if key.split(".", 1)[0] in namespaces:
                 used.setdefault(key, set()).add(source_name)
 
-    markup = WEB / "index.html"
-    if markup.is_file():
+    for markup in [WEB / "index.html", *sorted((WEB / "phone").glob("*.html"))]:
+        if not markup.is_file():
+            continue
         text = markup.read_text(encoding="utf-8")
-        for key in MARKUP_RE.findall(text):
-            used.setdefault(key, set()).add("index.html")
+        source_name = str(markup.relative_to(WEB))
+        for spec in MARKUP_RE.findall(text):
+            for key in spec.split(";"):
+                used.setdefault(key, set()).add(source_name)
         for spec in MARKUP_ATTR_RE.findall(text):
             for pair in spec.split(";"):
                 _, _, key = pair.partition(":")
                 if key.strip():
-                    used.setdefault(key.strip(), set()).add("index.html")
+                    used.setdefault(key.strip(), set()).add(source_name)
 
     for key, sources in sorted(used.items()):
         if key not in source:

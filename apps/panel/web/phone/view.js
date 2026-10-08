@@ -1,3 +1,4 @@
+import { t } from "../js/i18n/index.js";
 import { decodePreview } from "../js/preview/packet.js";
 import { assessPhoneHdr } from "../js/preview/phone-diagnostics.js";
 import { createSdrGpuRenderer } from "../js/preview/sdr-gpu.js";
@@ -14,27 +15,27 @@ export function mountPhoneView({ state, api }) {
   function connectionState(connected) {
     connection.online = connected;
     $("connection").dataset.online = String(connected && Boolean(connection.snapshot?.enabled && connection.snapshot?.desktopConnected));
-    $("connection").querySelector("span").textContent = connection.snapshot && !connection.snapshot.enabled ? "连接已关闭" : !connected ? "正在重连" : connection.snapshot?.desktopConnected ? "已连接" : "等待电脑";
+    $("connection").querySelector("span").textContent = connection.snapshot && !connection.snapshot.enabled ? t("phone.off") : !connected ? t("phone.mobile.reconnecting") : connection.snapshot?.desktopConnected ? t("phone.mobile.connected") : t("phone.mobile.waiting");
     availability();
   }
   function availability() {
     const ready = connection.online && connection.snapshot?.enabled && connection.snapshot.desktopConnected && connection.capabilities?.ready;
     const busy = photo.transfer || connection.snapshot?.upload || connection.snapshot?.pending || connection.snapshot?.current?.busy;
     $("pick-photos").disabled = !ready || Boolean(busy);
-    $("pick-label").textContent = connection.snapshot?.current?.file ? "换一张照片" : "选择照片";
-    $("import-hint").textContent = connection.snapshot && !connection.snapshot.enabled ? "请在电脑上重新开启连接，并扫描新的二维码。"
-      : !connection.online ? "连接恢复后，照片和调整会自动同步。"
-      : !connection.snapshot?.desktopConnected ? "请在电脑上打开手机连接工作台。"
-      : !connection.capabilities?.ready ? "电脑上的照片处理服务尚未就绪。"
-      : connection.snapshot?.current?.busy ? "电脑正在处理照片，请稍候。"
-      : "也可以在电脑上打开照片，手机会同步显示。";
+    $("pick-label").textContent = connection.snapshot?.current?.file ? t("phone.mobile.changePhoto") : t("stage.select");
+    $("import-hint").textContent = connection.snapshot && !connection.snapshot.enabled ? t("phone.mobile.reopenHint")
+      : !connection.online ? t("phone.mobile.recoverHint")
+      : !connection.snapshot?.desktopConnected ? t("phone.mobile.openHint")
+      : !connection.capabilities?.ready ? t("phone.mobile.serviceHint")
+      : connection.snapshot?.current?.busy ? t("phone.mobile.processingHint")
+      : t("phone.mobile.importHint");
   }
   function syncExports(entries) {
     const key = entries.map((e) => `${e.sessionId}/${e.id}`).join("|");
     if ($("export-list").dataset.key === key) return;
     $("export-list").dataset.key = key;
     $("exports").hidden = !entries.length;
-    $("export-count").textContent = `${entries.length} 个结果`;
+    $("export-count").textContent = t("phone.mobile.exportCount", { count: entries.length });
     $("export-list").replaceChildren(...entries.map((entry) => {
       const card = document.createElement("article"); card.className = "export-card";
       const mark = document.createElement("span"); mark.className = "export-mark"; mark.textContent = "↙";
@@ -72,11 +73,11 @@ export function mountPhoneView({ state, api }) {
       $("compare").disabled = true;
       resetView();
     }
-    $("viewer-state").textContent = next.pending ? "正在交给电脑编辑器"
-      : current.status === "exporting" ? "正在导出成品"
-      : current.status === "error" ? "预览未完成，请在电脑查看原因或换一张照片"
-      : next.frameReady && photo.displayedVersion === next.frameVersion ? "已同步最新效果"
-      : "正在更新效果";
+    $("viewer-state").textContent = next.pending ? t("phone.mobile.handoff")
+      : current.status === "exporting" ? t("phone.mobile.exporting")
+      : current.status === "error" ? t("phone.mobile.previewFailed")
+      : next.frameReady && photo.displayedVersion === next.frameVersion ? t("phone.mobile.synced")
+      : t("phone.mobile.updating");
     if (next.upload && !photo.transfer) showTransfer(next.upload.name, next.upload.progress);
     else if (!photo.transfer) $("transfer").hidden = true;
     syncExports(next.completed || []);
@@ -86,15 +87,15 @@ export function mountPhoneView({ state, api }) {
   }
   function newCanvas() {
     const next = document.createElement("canvas"); next.id = "photo";
-    next.setAttribute("aria-label", "照片效果预览");
+    next.setAttribute("aria-label", t("phone.mobile.effectPreview"));
     canvas.replaceWith(next); canvas = next;
   }
   const diagnosticMessages = {
-    insecure: ["需要安全连接才能检测 HDR", "请重新扫描电脑上的设置二维码，安装并信任证书后进入 HTTPS 工作台。"],
-    webgpu: ["此浏览器尚未提供 WebGPU", "可以继续上传和保存照片；请尝试更新系统与浏览器后重新检测。"],
-    display: ["当前未检测到 HDR 显示能力", "屏幕或浏览器目前报告 SDR。可以继续使用 SDR 预览，保存的成品不受影响。"],
-    renderer: ["HDR 渲染器未通过检测", "当前使用 SDR 预览。可重新检测，并在详细信息中查看原因。"],
-    ready: ["HDR 预览能力检测通过", "这是设备能力检测；加载照片后，预览标记会显示实际渲染模式。"],
+    insecure: [t("phone.mobile.diagnostic.insecureTitle"), t("phone.mobile.diagnostic.insecureHelp")],
+    webgpu: [t("phone.mobile.diagnostic.webgpuTitle"), t("phone.mobile.diagnostic.webgpuHelp")],
+    display: [t("phone.mobile.diagnostic.displayTitle"), t("phone.mobile.diagnostic.displayHelp")],
+    renderer: [t("phone.mobile.diagnostic.rendererTitle"), t("phone.mobile.diagnostic.rendererHelp")],
+    ready: [t("phone.mobile.diagnostic.readyTitle"), t("phone.mobile.diagnostic.readyHelp")],
   };
   function publishDiagnostics(result) {
     diagnostics.lastDiagnostic = result;
@@ -102,10 +103,15 @@ export function mountPhoneView({ state, api }) {
     $("diagnostic-title").textContent = title;
     $("diagnostic-description").textContent = description;
     $("diagnostics").dataset.hdr = String(result.hdr);
-    $("diagnostic-detail").textContent = `安全上下文：${result.secureContext ? "是" : "否"} · WebGPU：${result.webgpu ? "有" : "无"} · HDR 显示：${result.displayHdr ? "是" : "否"}\n${result.detail || "未运行 HDR 渲染器：前置条件未满足。"}`;
+    $("diagnostic-detail").textContent = t("phone.mobile.diagnostic.summary", {
+      secure: result.secureContext ? t("phone.mobile.yes") : t("phone.mobile.no"),
+      webgpu: result.webgpu ? t("phone.mobile.available") : t("phone.mobile.unavailable"),
+      hdr: result.displayHdr ? t("phone.mobile.yes") : t("phone.mobile.no"),
+      detail: result.detail || t("phone.mobile.diagnostic.skipped"),
+    });
     request("/api/phone/diagnostics", { ...result, setupCheck }).then(() => {
-      $("diagnostic-report").textContent = "检测结果已同步到电脑。";
-    }).catch((error) => { $("diagnostic-report").textContent = `检测已完成，暂未同步到电脑：${error.message}`; });
+      $("diagnostic-report").textContent = t("phone.mobile.diagnostic.reported");
+    }).catch((error) => { $("diagnostic-report").textContent = t("phone.mobile.diagnostic.reportFailed", { message: error.message }); });
   }
   setInterval(() => {
     if (!document.hidden && connection.online && diagnostics.lastDiagnostic) {
@@ -156,11 +162,11 @@ export function mountPhoneView({ state, api }) {
       catch { newCanvas(); view.renderer = { kind: "cpu", upload() {}, destroy() {}, draw(_unused, params) { renderSdr(canvas, { frame: photo.frame, original: params.original }); } }; }
     }
     const hdr = view.renderer.kind === "hdr";
-    $("render-badge").textContent = hdr ? "真 HDR" : "SDR 预览";
+    $("render-badge").textContent = hdr ? t("phone.mobile.trueHdr") : t("phone.mobile.sdr");
     $("render-badge").dataset.hdr = String(hdr);
-    $("preview-note").textContent = hdr ? "电脑调整后自动更新 · 双指缩放查看细节"
-      : !window.isSecureContext ? "当前为 SDR 预览。真 HDR 需要可信 HTTPS；保存的成品不受影响。"
-      : "当前屏幕或浏览器使用 SDR 预览；保存的 HDR 成品不受影响。";
+    $("preview-note").textContent = hdr ? t("phone.mobile.previewNote")
+      : !window.isSecureContext ? t("phone.mobile.insecurePreviewNote")
+      : t("phone.mobile.sdrPreviewNote");
   }
   function rendererLost() {
     const previous = view.renderer; view.renderer = null;
@@ -174,13 +180,13 @@ export function mountPhoneView({ state, api }) {
     let retry = false;
     try {
       const response = await api.frame(photo.frameRequest.signal);
-      if (!response.ok) { if (response.status === 409) return; throw new Error("预览获取失败，正在重试。"); }
+      if (!response.ok) { if (response.status === 409) return; throw new Error(t("phone.mobile.frameFailed")); }
       const data = await response.arrayBuffer();
       if (id !== photo.photoId || !connection.snapshot.frameReady || version !== connection.snapshot.frameVersion || Number(response.headers.get("X-Frame-Version")) !== version) { retry = true; return; }
       const next = decodePreview(data);
       if (!photo.original) {
         const source = await api.original(photo.frameRequest.signal);
-        if (!source.ok) throw new Error("原图正在准备，请稍候。");
+        if (!source.ok) throw new Error(t("phone.mobile.originalPending"));
         const originalData = decodePreview(await source.arrayBuffer());
         if (id !== photo.photoId) { retry = true; return; }
         photo.original = originalData;
@@ -194,7 +200,7 @@ export function mountPhoneView({ state, api }) {
       view.renderer.upload(photo.frame); draw(); canvas.style.visibility = "visible";
       photo.displayedVersion = version;
       $("compare").disabled = false;
-      $("viewer-state").textContent = connection.snapshot.current.status === "exporting" ? "正在导出成品" : "已同步最新效果";
+      $("viewer-state").textContent = connection.snapshot.current.status === "exporting" ? t("phone.mobile.exporting") : t("phone.mobile.synced");
       transform();
     } catch (error) {
       if (error.name !== "AbortError") $("viewer-state").textContent = error.message;
@@ -227,7 +233,7 @@ export function mountPhoneView({ state, api }) {
   $("compare").addEventListener("keyup", endCompare);
   $("fullscreen").addEventListener("click", () => {
     const expanded = document.body.classList.toggle("fullscreen");
-    $("fullscreen").setAttribute("aria-label", expanded ? "退出全屏" : "全屏预览");
+    $("fullscreen").setAttribute("aria-label", expanded ? t("phone.mobile.exitFullscreen") : t("phone.mobile.fullscreen"));
     $("fullscreen").setAttribute("aria-pressed", String(expanded)); resetView();
   });
   document.addEventListener("keydown", (event) => { if (event.key === "Escape") { document.body.classList.remove("fullscreen"); resetView(); } });
@@ -258,15 +264,15 @@ export function mountPhoneView({ state, api }) {
 
   function showTransfer(name, progress, cancellable = true) {
     $("transfer").hidden = false; $("transfer-name").textContent = name;
-    $("transfer-title").textContent = progress >= 1 ? "正在准备照片" : "正在传到电脑";
+    $("transfer-title").textContent = progress >= 1 ? t("phone.mobile.preparingPhoto") : t("phone.mobile.transferring");
     $("upload-progress").value = progress; $("upload-percent").textContent = `${Math.round(progress * 100)}%`;
     $("cancel-upload").hidden = !cancellable;
   }
   async function upload(file) {
     if (!file || photo.transfer) return;
     const extension = "." + file.name.split(".").pop().toLowerCase();
-    if (!connection.capabilities.inputExtensions.includes(extension)) { notice("暂不支持这个格式，请选择照片或 RAW 文件。"); return; }
-    if (!file.size || file.size > connection.capabilities.maxUploadMB * 1048576) { notice(`请选择非空且不超过 ${connection.capabilities.maxUploadMB} MB 的照片。`); return; }
+    if (!connection.capabilities.inputExtensions.includes(extension)) { notice(t("phone.mobile.unsupported")); return; }
+    if (!file.size || file.size > connection.capabilities.maxUploadMB * 1048576) { notice(t("phone.mobile.sizeLimit", { size: connection.capabilities.maxUploadMB })); return; }
     const task = { cancelled: false, sid: null, xhr: null, progress: Promise.resolve() };
     photo.transfer = task; notice(); showTransfer(file.name, 0); availability();
     try {

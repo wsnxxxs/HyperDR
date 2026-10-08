@@ -273,16 +273,16 @@ export function mountPhoneView({ state, api, setupCheck }) {
       const result = await request("/api/phone/import", { name: file.name }); task.sid = result.sessionId;
       if (task.cancelled) return;
       let lastProgress = 0;
-    const transfer = api.upload(task.sid, file, (progress) => {
-      showTransfer(file.name, progress);
-      if (Date.now() - lastProgress > 500) {
-        lastProgress = Date.now();
-        task.progress = task.progress.then(() => request("/api/phone/upload", { sessionId: task.sid, progress })).catch(() => {});
-      }
-    });
-    task.xhr = transfer;
-    await transfer.promise;
-    await task.progress;
+      const transfer = api.upload(task.sid, file, (progress) => {
+        showTransfer(file.name, progress);
+        if (Date.now() - lastProgress > 500) {
+          lastProgress = Date.now();
+          task.progress = task.progress.then(() => request("/api/phone/upload", { sessionId: task.sid, progress })).catch(() => {});
+        }
+      });
+      task.xhr = transfer;
+      await transfer.promise;
+      await task.progress;
       if (!task.cancelled) applySnapshot(await request("/api/phone/upload", { sessionId: task.sid, complete: true }));
     } catch (error) { if (!task.cancelled) notice(error.message); task.cancelled = true; }
     finally {

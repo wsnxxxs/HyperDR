@@ -6,9 +6,11 @@
  *
  * Press-and-hold compares against the source on desktop.
  */
+import { mountScope } from "./scope.js";
+import { store } from "../core/store.js";
+import { createStageContext } from "./stage/context.js";
 
 import { api } from "../core/api.js";
-import { store } from "../core/store.js";
 import { t, onLocaleChange } from "../i18n/index.js";
 import { prefs, previewCeilingPx } from "../ui/prefs-schema.js";
 import { role, setText, clamp } from "../core/dom.js";
@@ -18,7 +20,7 @@ import { createHdrRenderer } from "./gpu.js";
 import { createSdrGpuRenderer } from "./sdr-gpu.js";
 import { createPreviewScheduler } from "./scheduler.js";
 import { diagnosticFrame } from "./packet.js";
-import { analyse, mountScope } from "./scope.js";
+import { analyse } from "./scope.js";
 import { histogramFromPlane } from "./histogram.js";
 import { createUploader } from "./session.js";
 import { pickInputFile } from "./file-picker.js";
@@ -26,103 +28,84 @@ import {
   AI_POST_KEYS, CONTROLS, defaultSettings, effectiveOutputGamut, isHdrSource, referenceSettings, toOptions,
 } from "../settings/schema.js";
 import { fallbackFields, modelLabel } from "../settings/model-select.js";
-
-const hdrDisplayQuery = window.matchMedia("(dynamic-range: high)");
-
-/* Preview sizes are quantised so a continuous "how wide is the stage right now"
- * does not create a new native frame on every window drag. Three tiers cover
- * phone to desktop, clamped to what the server says it can decode. */
-const PREVIEW_TIERS = [960, 1280, 2048];
-const DRAFT_PREVIEW_EDGE = 640;
-
-/* Gesture descriptions remain available to screen readers. */
-const TOUCH_HINT = "stage.hintTouch";
-const MOUSE_HINT = "stage.hintMouse";
-const imageAdjustments = (settings) =>
-  Object.fromEntries(CONTROLS.map(({ key }) => [key, settings[key]]));
-const INPUT_DOMAIN_LABELS = Object.freeze({
-  "display-referred-hdr": "stage.input.hdr",
-  "dual-rendition": "stage.input.dual",
-  "display-referred-sdr": "stage.input.sdr",
-  "scene-referred": "stage.input.scene",
-  unknown: "stage.input.unknown",
-});
+import { createDetail, createDetailElements } from "./stage/detail.js";
 
 export function mountStage({ toast }) {
-  const stage = role("stage");
-  const frame = stage.querySelector(".stage-frame");
-  const viewport = stage.closest(".stage-viewport");
-  const empty = role("stage-empty");
-  const selectButton = role("stage-select");
-  const emptyTitle = role("stage-title");
-  const progressText = role("upload-progress");
-  const progressBar = role("upload-bar");
-  const uploadOverlay = role("stage-upload");
-  const uploadOverlayText = role("stage-upload-text");
-  const uploadCancel = role("upload-cancel");
-  const hdrStatus = role("hdr-status");
-  const badge = role("hdr-badge");
-  const fileInput = role("file-input");
-  const supportHint = role("stage-support");
-  const divider = role("divider");
-  const hdrCanvas = role("canvas-hdr");
-  const originalCanvas = role("canvas-original");
-  const mathModeButton = role("math-mode");
-  const optimizeButton = role("optimize");
-  let sdrCanvas = role("canvas-sdr");
-  const detailButton = document.createElement("button");
-  detailButton.type = "button";
-  detailButton.className = "stage-detail-button";
-  detailButton.hidden = true;
-  detailButton.setAttribute("aria-pressed", "false");
-  detailButton.textContent = t("stage.detailOpen");
-  stage.append(detailButton);
-  const detailOverlay = document.createElement("div");
-  detailOverlay.className = "stage-detail-overlay";
-  detailOverlay.hidden = true;
-  detailOverlay.tabIndex = 0;
-  detailOverlay.setAttribute("role", "region");
-  detailOverlay.setAttribute("aria-label", t("stage.detailLabel"));
-  const detailCanvas = document.createElement("canvas");
-  const detailStatus = document.createElement("span");
-  detailStatus.className = "stage-detail-status";
-  detailStatus.textContent = t("stage.detailStatus");
-  detailOverlay.append(detailCanvas, detailStatus);
-  frame.append(detailOverlay);
-  const detail = { active: false, frame: null, centerX: 0, centerY: 0,
-    fullWidth: 0, fullHeight: 0, request: 0, pointer: null, x: 0, y: 0 };
+  const ctx = createStageContext({ toast });
+  createDetailElements(ctx);
+  ctx.refreshScope = mountScope({ analysis: ctx.analysis });
 
-  /** Decoded image + derived buffers. Replaced wholesale, never patched. */
-  const image = {
-    source: null,
-    frame: null,
-    // Keep a neutral comparison for each uploaded/decode variant, upgrading
-    // its pixels whenever the effect requests a higher preview tier.
-    // `source` and `frame` are replaced whenever a look slider moves, so using
-    // either one for "原图" makes the supposedly untreated side follow the
-    // adjustment as well.
-    original: null,
-    originalEdge: 0,
-    originalHistogram: null,
+  // All collaborators share this mount's context. Wire their calls before any
+  // immediate store subscription or native drop can start loading a photo.
+  const detail = ctx.actions.detail = createDetail(ctx);
+  const view = ctx.actions.view = createView(ctx);
+  const rendering = ctx.actions.rendering = createRendering(ctx);
+  const photo = ctx.actions.photo = createPhoto(ctx);
+  const intake = ctx.actions.intake = createIntake(ctx);
+  const gestures = ctx.actions.gestures = createGestures(ctx);
+  const optimization = ctx.actions.optimization = createOptimization(ctx);
 
+  // Keep listener/subscription order: pan and detail consume pointer events
+  // before the press-and-hold gesture, and settings coalesce before AI invalidation.
+  view.mountGeometry();
+  detail.mountResize();
+  view.mountPan();
+  detail.mountInteractions();
+  intake.mountNativeDrop();
+  intake.mountSupport();
+  intake.mountPicker();
+  gestures.mountPointer();
+  intake.mountDrop();
+  gestures.mountKeyboard();
+  view.mountWheel();
+  rendering.mountReactions();
+  view.mountReactions();
+  intake.mountReactions();
+  photo.mountScheduler();
+  optimization.mountModelChange();
+  optimization.mountControls();
+  rendering.mountDisplay();
+  gestures.mountPointerHint();
+  rendering.mountPreference();
+  photo.mountPreference();
+
+  optimization.mountLocale();
+  gestures.mountLocale();
+  view.mountLocale();
+  rendering.mountLocale();
+  photo.mountLocale();
+  intake.mountLocale();
+  detail.mountLocale();
+  gestures.applyPointerHint();
+  rendering.reportInitialCapability();
+
+  return {
+    openPicker: intake.openPicker,
+    redraw: rendering.schedule,
+    reload: photo.load,
+    async acceptPhonePhoto(current) {
+      store.set({ restoring: true, uploading: true, phoneUploading: false,
+        sessionId: current.sessionId, file: current.file, result: null, exports: [] });
+      try { await photo.preparePhoto(); }
+      finally { store.set({ restoring: false, uploading: false }); }
+    },
+    clear: photo.clear,
+    /** The decoded preview pixels, for the mask overlay. Null before upload. */
+    getSource: () => ctx.image.source,
+    getFrame: () => ctx.image.frame,
+    onSourceChange(listener) {
+      ctx.sourceListeners.add(listener);
+      return () => ctx.sourceListeners.delete(listener);
+    },
   };
-  const sourceListeners = new Set();
-  const notifySource = () => { for (const listener of [...sourceListeners]) listener(); };
-  const analysis = { current: null, modelGain: null };
-  const refreshScope = mountScope({ analysis });
+}
 
-  let renderer = null;        // WebGPU/WebGL renderer, or null for the CPU path
-  let modelGain = null;
-  let modelRequest = 0;
-  let frame_ = 0;
-  let imageGeneration = 0;
-  let rendererGeneration = 0;
-  let sourceDomainLabel = "";
+/* Fit and transform the preview layers and keep the original comparison wipe aligned. */
 
-  const isCurrentImage = (epoch) => epoch === imageGeneration;
-  const invalidateImage = () => ++imageGeneration;
-  const isCurrentRenderer = (epoch) => epoch === rendererGeneration;
-  const invalidateRenderer = () => ++rendererGeneration;
+
+function createView(ctx) {
+  const { image, detail, analysis, toast, actions } = ctx;
+  const { stage, frame, viewport, divider, hdrCanvas, originalCanvas, badge, hdrStatus, detailButton, detailCanvas } = ctx.dom;
 
   const showingOriginal = () => {
     const state = store.get();
@@ -133,7 +116,7 @@ export function mountStage({ toast }) {
 
   /** The effect canvas's displayed rectangle, in frame coordinates. */
   function imageRect() {
-    const canvas = renderer?.kind === "hdr" ? hdrCanvas : sdrCanvas;
+    const canvas = ctx.renderer?.kind === "hdr" ? hdrCanvas : ctx.dom.sdrCanvas;
     const c = canvas.getBoundingClientRect();
     const f = frame.getBoundingClientRect();
     return { left: c.left - f.left, top: c.top - f.top, width: c.width, height: c.height, clientLeft: c.left };
@@ -201,9 +184,9 @@ export function mountStage({ toast }) {
     // adjustment.  In split mode it is clipped over the live effect; in
     // original/press-and-hold mode it covers the effect canvas completely.
     originalCanvas.hidden = !showOriginalCanvas;
-    hdrCanvas.hidden = original || (renderer?.kind !== "hdr");
-    sdrCanvas.hidden = original || renderer?.kind === "hdr"
-      || (!renderer && !image.frame);
+    hdrCanvas.hidden = original || (ctx.renderer?.kind !== "hdr");
+    ctx.dom.sdrCanvas.hidden = original || ctx.renderer?.kind === "hdr"
+      || (!ctx.renderer && !image.frame);
     divider.hidden = !split;
     if (split) {
       originalCanvas.style.clipPath = `inset(0 ${((1 - state.splitRatio) * 100).toFixed(2)}% 0 0)`;
@@ -213,8 +196,8 @@ export function mountStage({ toast }) {
     }
 
     setText(badge, original ? t("stage.badgeOriginal")
-      : renderer?.kind === "hdr" ? "HDR" : t("stage.badgeSdr"));
-    badge.hidden = !hasImage || renderer?.kind !== "hdr";
+      : ctx.renderer?.kind === "hdr" ? "HDR" : t("stage.badgeSdr"));
+    badge.hidden = !hasImage || ctx.renderer?.kind !== "hdr";
     badge.title = original
       ? t("stage.titleOriginal")
       : t("stage.titleHdr");
@@ -223,38 +206,6 @@ export function mountStage({ toast }) {
     stage.setAttribute("aria-pressed", String(original));
     detailButton.hidden = !hasImage;
   }
-
-  let dividerPointer = null;
-  divider.addEventListener("pointerdown", (event) => {
-    // The stage would read this as the start of a tap-to-replace.
-    event.stopPropagation();
-    event.preventDefault();
-    dividerPointer = event.pointerId;
-    divider.setPointerCapture(event.pointerId);
-  });
-  divider.addEventListener("pointermove", (event) => {
-    if (dividerPointer !== event.pointerId) return;
-    const rect = imageRect();
-    store.set({ splitRatio: clamp((event.clientX - rect.clientLeft) / rect.width, 0.05, 0.95) });
-  });
-  const endDividerDrag = (event) => {
-    if (dividerPointer !== event.pointerId) return;
-    dividerPointer = null;
-  };
-  divider.addEventListener("pointerup", endDividerDrag);
-  divider.addEventListener("pointercancel", endDividerDrag);
-  divider.addEventListener("keydown", (event) => {
-    const delta = { ArrowLeft: -0.05, ArrowRight: 0.05 }[event.key];
-    if (!delta) return;
-    event.preventDefault();
-    store.set({ splitRatio: clamp(store.get().splitRatio + delta, 0.05, 0.95) });
-  });
-
-  new ResizeObserver(() => {
-    fitStageToImage();
-    positionDivider();
-  }).observe(viewport);
-
   function applyZoom() {
     const state = store.get();
     const maxX = frame.clientWidth * (state.viewerZoom - 1) / 2;
@@ -268,172 +219,129 @@ export function mountStage({ toast }) {
     stage.classList.toggle("is-zoomed", state.viewerZoom > 1);
     positionDivider();
   }
-  store.watchAny(["viewerZoom", "viewerPanX", "viewerPanY"], applyZoom);
-  new ResizeObserver(applyZoom).observe(frame);
-  new ResizeObserver(() => {
-    if (!detail.active) return;
-    positionDetail();
-    if (detailNeedsPixels()) requestDetail();
-  }).observe(frame);
-  const pan = { pointer: null, x: 0, y: 0, originX: 0, originY: 0 };
-  stage.addEventListener("pointerdown", (event) => {
-    if (store.get().viewerZoom <= 1 || event.button !== 0 || event.target.closest("button, [role='slider']")) return;
-    event.stopImmediatePropagation(); event.preventDefault();
-    const state = store.get();
-    const maxX = frame.clientWidth * (state.viewerZoom - 1) / 2;
-    const maxY = frame.clientHeight * (state.viewerZoom - 1) / 2;
-    Object.assign(pan, { pointer: event.pointerId, x: event.clientX, y: event.clientY,
-      originX: clamp(state.viewerPanX, -maxX, maxX), originY: clamp(state.viewerPanY, -maxY, maxY) });
-    stage.setPointerCapture(event.pointerId);
-  });
-  stage.addEventListener("pointermove", (event) => {
-    if (pan.pointer !== event.pointerId) return;
-    store.set({ viewerPanX: pan.originX + event.clientX - pan.x, viewerPanY: pan.originY + event.clientY - pan.y });
-  });
-  for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) stage.addEventListener(type, (event) => {
-    if (pan.pointer !== event.pointerId) return;
-    pan.pointer = null; event.stopImmediatePropagation();
-  });
+  function mountGeometry() {
+    let dividerPointer = null;
+    divider.addEventListener("pointerdown", (event) => {
+      // The stage would read this as the start of a tap-to-replace.
+      event.stopPropagation();
+      event.preventDefault();
+      dividerPointer = event.pointerId;
+      divider.setPointerCapture(event.pointerId);
+    });
+    divider.addEventListener("pointermove", (event) => {
+      if (dividerPointer !== event.pointerId) return;
+      const rect = imageRect();
+      store.set({ splitRatio: clamp((event.clientX - rect.clientLeft) / rect.width, 0.05, 0.95) });
+    });
+    const endDividerDrag = (event) => {
+      if (dividerPointer !== event.pointerId) return;
+      dividerPointer = null;
+    };
+    divider.addEventListener("pointerup", endDividerDrag);
+    divider.addEventListener("pointercancel", endDividerDrag);
+    divider.addEventListener("keydown", (event) => {
+      const delta = { ArrowLeft: -0.05, ArrowRight: 0.05 }[event.key];
+      if (!delta) return;
+      event.preventDefault();
+      store.set({ splitRatio: clamp(store.get().splitRatio + delta, 0.05, 0.95) });
+    });
 
-  function positionDetail() {
-    if (!detail.frame) return;
-    const { regionX, regionY } = detail.frame.metadata;
-    detailCanvas.style.left = `${Math.round(detailOverlay.clientWidth / 2 - (detail.centerX - regionX))}px`;
-    detailCanvas.style.top = `${Math.round(detailOverlay.clientHeight / 2 - (detail.centerY - regionY))}px`;
+    new ResizeObserver(() => {
+      fitStageToImage();
+      positionDivider();
+    }).observe(viewport);
+    store.watchAny(["viewerZoom", "viewerPanX", "viewerPanY"], applyZoom);
+    new ResizeObserver(applyZoom).observe(frame);
   }
 
-  function detailNeedsPixels() {
-    if (!detail.frame) return true;
-    const m = detail.frame.metadata;
-    const left = Math.max(0, detail.centerX - detailOverlay.clientWidth / 2);
-    const top = Math.max(0, detail.centerY - detailOverlay.clientHeight / 2);
-    const right = Math.min(detail.fullWidth, detail.centerX + detailOverlay.clientWidth / 2);
-    const bottom = Math.min(detail.fullHeight, detail.centerY + detailOverlay.clientHeight / 2);
-    return left < m.regionX || top < m.regionY
-      || right > m.regionX + detail.frame.width
-      || bottom > m.regionY + detail.frame.height;
-  }
-
-  async function requestDetail() {
-    if (!detail.active || !store.get().sessionId || !image.frame) return;
-    const request = ++detail.request;
-    const state = store.get();
-    const width = Math.min(2048, Math.max(1, Math.ceil(detailOverlay.clientWidth) + 512));
-    const height = Math.min(2048, Math.max(1, Math.ceil(detailOverlay.clientHeight) + 512));
-    const center = !detail.fullWidth;
-    const x = Math.max(0, Math.round(detail.centerX - width / 2));
-    const y = Math.max(0, Math.round(detail.centerY - height / 2));
-    detailStatus.textContent = t("stage.detailLoading");
-    try {
-      const pixels = await api.detailPreview(state.sessionId, {
-        options: { ...toOptions(state), useModel: Boolean(state.previewOptimized),
-          modelId: state.modelId },
-        highlightRecovery: state.highlightRecovery,
-        x, y, width, height, center,
-      });
-      if (!detail.active || request !== detail.request
-          || state.sessionId !== store.get().sessionId) return;
-      if (pixels.metadata.detail !== true) throw new Error(t("err.previewData"));
-      detail.frame = pixels;
-      detail.fullWidth = Number(pixels.metadata.fullWidth);
-      detail.fullHeight = Number(pixels.metadata.fullHeight);
-      if (center) {
-        detail.centerX = detail.fullWidth / 2;
-        detail.centerY = detail.fullHeight / 2;
-      }
-      detailCanvas.width = pixels.width;
-      detailCanvas.height = pixels.height;
-      renderSdr(detailCanvas, { frame: pixels });
-      positionDetail();
-      detailStatus.textContent = t("stage.detailStatus");
-    } catch (error) {
-      if (!detail.active || request !== detail.request || error.status === 499) return;
-      detailStatus.textContent = error.message || t("err.preview");
-    }
-  }
-
-  function closeDetail() {
-    ++detail.request;
-    detail.active = false;
-    detail.frame = null;
-    detail.fullWidth = detail.fullHeight = 0;
-    detailOverlay.hidden = true;
-    detailButton.setAttribute("aria-pressed", "false");
-    detailButton.textContent = t("stage.detailOpen");
-  }
-
-  detailButton.addEventListener("click", (event) => {
-    event.preventDefault(); event.stopImmediatePropagation();
-    if (detail.active) { closeDetail(); return; }
-    if (!image.frame) return;
-    detail.active = true;
-    detailOverlay.hidden = false;
-    detailOverlay.focus({ preventScroll: true });
-    detailButton.setAttribute("aria-pressed", "true");
-    detailButton.textContent = t("stage.detailClose");
-    store.set({ viewMode: "effect", comparing: false, viewerZoom: 1,
-      viewerPanX: 0, viewerPanY: 0 });
-    requestDetail();
-  });
-  detailOverlay.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0) return;
-    event.preventDefault(); event.stopImmediatePropagation();
-    detailOverlay.focus({ preventScroll: true });
-    detail.pointer = event.pointerId;
-    detail.x = event.clientX; detail.y = event.clientY;
-    detailOverlay.setPointerCapture(event.pointerId);
-  });
-  detailOverlay.addEventListener("pointermove", (event) => {
-    if (detail.pointer !== event.pointerId || !detail.fullWidth) return;
-    detail.centerX = clamp(detail.centerX - (event.clientX - detail.x), 0, detail.fullWidth);
-    detail.centerY = clamp(detail.centerY - (event.clientY - detail.y), 0, detail.fullHeight);
-    detail.x = event.clientX; detail.y = event.clientY;
-    positionDetail();
-  });
-  for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) {
-    detailOverlay.addEventListener(type, (event) => {
-      if (detail.pointer !== event.pointerId) return;
-      detail.pointer = null;
-      event.stopImmediatePropagation();
-      if (detailNeedsPixels()) requestDetail();
+  function mountPan() {
+    const pan = { pointer: null, x: 0, y: 0, originX: 0, originY: 0 };
+    stage.addEventListener("pointerdown", (event) => {
+      if (store.get().viewerZoom <= 1 || event.button !== 0 || event.target.closest("button, [role='slider']")) return;
+      event.stopImmediatePropagation(); event.preventDefault();
+      const state = store.get();
+      const maxX = frame.clientWidth * (state.viewerZoom - 1) / 2;
+      const maxY = frame.clientHeight * (state.viewerZoom - 1) / 2;
+      Object.assign(pan, { pointer: event.pointerId, x: event.clientX, y: event.clientY,
+        originX: clamp(state.viewerPanX, -maxX, maxX), originY: clamp(state.viewerPanY, -maxY, maxY) });
+      stage.setPointerCapture(event.pointerId);
+    });
+    stage.addEventListener("pointermove", (event) => {
+      if (pan.pointer !== event.pointerId) return;
+      store.set({ viewerPanX: pan.originX + event.clientX - pan.x, viewerPanY: pan.originY + event.clientY - pan.y });
+    });
+    for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) stage.addEventListener(type, (event) => {
+      if (pan.pointer !== event.pointerId) return;
+      pan.pointer = null; event.stopImmediatePropagation();
     });
   }
-  detailOverlay.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") { event.preventDefault(); closeDetail(); detailButton.focus(); return; }
-    const move = { ArrowLeft: [-128, 0], ArrowRight: [128, 0],
-      ArrowUp: [0, -128], ArrowDown: [0, 128] }[event.key];
-    if (!move || !detail.fullWidth) return;
-    event.preventDefault();
-    detail.centerX = clamp(detail.centerX + move[0], 0, detail.fullWidth);
-    detail.centerY = clamp(detail.centerY + move[1], 0, detail.fullHeight);
-    positionDetail();
-    if (detailNeedsPixels()) requestDetail();
-  });
-  detailOverlay.addEventListener("wheel", (event) => {
-    event.preventDefault(); event.stopImmediatePropagation();
-    if (!detail.fullWidth) return;
-    detail.centerX = clamp(detail.centerX + event.deltaX, 0, detail.fullWidth);
-    detail.centerY = clamp(detail.centerY + event.deltaY, 0, detail.fullHeight);
-    positionDetail();
-    if (detailNeedsPixels()) requestDetail();
-  }, { passive: false });
+
+  function mountWheel() {
+    /* Wheel zoom, anchored at the pointer so the detail under it stays put.
+     * A trackpad pinch arrives as a ctrl+wheel and is honoured everywhere; a
+     * plain wheel zooms only in the desktop layout, where the stage never
+     * scrolls -- in the stacked phone-width layout it scrolls the page. */
+    const wideLayout = window.matchMedia("(width >= 860px)");
+    stage.addEventListener("wheel", (event) => {
+      if (!image.source || (!event.ctrlKey && !wideLayout.matches)) return;
+      event.preventDefault();
+      const state = store.get();
+      const pixels = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
+      const next = clamp(state.viewerZoom * Math.exp(-pixels * (event.ctrlKey ? 0.01 : 0.0015)), 1, 4);
+      if (Math.abs(next - state.viewerZoom) < 1e-4) return;
+      if (next <= 1.001) { store.set({ viewerZoom: 1, viewerPanX: 0, viewerPanY: 0 }); return; }
+      const box = frame.getBoundingClientRect();
+      const pointerX = event.clientX - (box.left + box.width / 2);
+      const pointerY = event.clientY - (box.top + box.height / 2);
+      const limitX = frame.clientWidth * (state.viewerZoom - 1) / 2;
+      const limitY = frame.clientHeight * (state.viewerZoom - 1) / 2;
+      const panX = clamp(state.viewerPanX, -limitX, limitX);
+      const panY = clamp(state.viewerPanY, -limitY, limitY);
+      const ratio = next / state.viewerZoom;
+      store.set({
+        viewerZoom: Number(next.toFixed(4)),
+        viewerPanX: pointerX - (pointerX - panX) * ratio,
+        viewerPanY: pointerY - (pointerY - panY) * ratio,
+      });
+    }, { passive: false });
+  }
+
+  function mountReactions() {
+    store.watchAny(["viewMode", "comparing", "splitRatio"], () => { syncView(); actions.rendering.schedule(); }, { immediate: true });
+  }
+
+  function mountLocale() {
+    onLocaleChange(syncView);
+  }
+
+
+  return { showingOriginal, imageRect, positionDivider, fitStageToImage, paintOriginal, syncView, applyZoom, mountGeometry, mountPan, mountWheel, mountReactions, mountLocale };
+}
+
+/* Select, replace and report the HDR / SDR GPU / CPU presentation path. */
+
+
+function createRendering(ctx) {
+  const { image, detail, analysis, toast, actions } = ctx;
+  const { stage, hdrStatus, hdrCanvas } = ctx.dom;
+
+  const { hdrDisplayQuery } = ctx;
 
   /* ── capability reporting ─────────────────────────────────────────── */
 
-  let lastCapability = null;
 
   function setCapability(key, ok, params) {
-    lastCapability = { key, ok, params };
+    ctx.lastCapability = { key, ok, params };
     const state = store.get();
     const format = state.encoding === "sdr-tiff" ? "TIFF" : "JPEG";
     const gamut = effectiveOutputGamut(state.encoding, state.outputGamut) === "p3" ? "Display P3" : "sRGB";
     const message = ["sdr-jpeg", "sdr-tiff"].includes(state.encoding) ? t("hdr.sdrOutput", { format, gamut })
       : t(key, params?.reasonKey ? { ...params, reason: t(params.reasonKey) } : params);
-    const domain = sourceDomainLabel ? t(sourceDomainLabel) : "";
+    const domain = ctx.sourceDomainLabel ? t(ctx.sourceDomainLabel) : "";
     setText(hdrStatus, domain ? `${domain} · ${message}` : message);
     hdrStatus.classList.toggle("is-ok", Boolean(ok));
     hdrStatus.hidden = !Boolean(image.source);
-    stage.dataset.previewMode = renderer?.kind || "uninitialized";
+    stage.dataset.previewMode = ctx.renderer?.kind || "uninitialized";
   }
 
   function reportInitialCapability() {
@@ -443,30 +351,29 @@ export function mountStage({ toast }) {
     else if (!navigator.gpu) setCapability("hdr.noWebgpu", false);
     else setCapability("hdr.waiting", false);
   }
-
   /* ── rendering ────────────────────────────────────────────────────── */
 
   function draw() {
-    frame_ = 0;
+    ctx.animationFrame = 0;
     if (!image.source) return;
-    if (renderer) {
+    if (ctx.renderer) {
       // `originalCanvas` owns the comparison view; keep the GPU renderer on
       // the current effect frame even while that layer is temporarily over it.
       renderer.draw(null, { original: false });
     } else {
-      renderSdr(sdrCanvas, { frame: image.frame, original: false });
+      renderSdr(ctx.dom.sdrCanvas, { frame: image.frame, original: false });
     }
   }
 
   function schedule() {
     if (!image.source) return;
-    if (frame_) cancelAnimationFrame(frame_);
-    frame_ = requestAnimationFrame(draw);
+    if (ctx.animationFrame) cancelAnimationFrame(ctx.animationFrame);
+    ctx.animationFrame = requestAnimationFrame(draw);
   }
 
   function showCanvas(mode) {
-    hdrCanvas.hidden = mode !== "hdr" || showingOriginal();
-    sdrCanvas.hidden = mode !== "sdr" || showingOriginal();
+    hdrCanvas.hidden = mode !== "hdr" || actions.view.showingOriginal();
+    ctx.dom.sdrCanvas.hidden = mode !== "sdr" || actions.view.showingOriginal();
   }
 
   function prepareHdrCanvas() {
@@ -474,7 +381,7 @@ export function mountStage({ toast }) {
     // swap chain. This matters on Chromium when the canvas can become a
     // DirectComposition overlay.
     hdrCanvas.hidden = false;
-    sdrCanvas.hidden = true;
+    ctx.dom.sdrCanvas.hidden = true;
     return new Promise((resolve) => requestAnimationFrame(resolve));
   }
 
@@ -498,41 +405,41 @@ export function mountStage({ toast }) {
 
   const canUseHdrRenderer = () => sdrReason() === "";
 
-  function chooseSdrRenderer(reason, epoch = rendererGeneration, forceCpu = false) {
-    if (!isCurrentRenderer(epoch) || !image.frame) return;
-    renderer?.destroy();
-    renderer = null;
+  function chooseSdrRenderer(reason, epoch = ctx.rendererGeneration, forceCpu = false) {
+    if (!ctx.isCurrentRenderer(epoch) || !image.frame) return;
+    ctx.renderer?.destroy();
+    ctx.renderer = null;
     try {
       if (forceCpu) throw new Error("WebGL context lost");
       let created = null;
-      created = createSdrGpuRenderer(sdrCanvas, () => {
-        if (isCurrentRenderer(epoch) && renderer === created) {
+      created = createSdrGpuRenderer(ctx.dom.sdrCanvas, () => {
+        if (ctx.isCurrentRenderer(epoch) && ctx.renderer === created) {
           chooseSdrRenderer("hdr.reason.sdrDeviceLost", epoch, true);
         }
       });
-      renderer = created;
-      renderer.upload(image.frame);
+      ctx.renderer = created;
+      ctx.renderer.upload(image.frame);
       showCanvas("sdr");
       setCapability("hdr.sdrPreviewWhy", false, { reasonKey: reason });
     } catch (error) {
-      renderer = null;
+      ctx.renderer = null;
       // A canvas that has successfully created a WebGL context cannot later
       // switch to 2D. Replace it before entering the last-resort CPU path if
       // WebGL setup failed after context creation.
-      const replacement = sdrCanvas.cloneNode(false);
-      replacement.width = sdrCanvas.width;
-      replacement.height = sdrCanvas.height;
-      sdrCanvas.replaceWith(replacement);
-      sdrCanvas = replacement;
+      const replacement = ctx.dom.sdrCanvas.cloneNode(false);
+      replacement.width = ctx.dom.sdrCanvas.width;
+      replacement.height = ctx.dom.sdrCanvas.height;
+      ctx.dom.sdrCanvas.replaceWith(replacement);
+      ctx.dom.sdrCanvas = replacement;
       showCanvas("sdr");
       setCapability("hdr.sdrCompatWhy", false, { reasonKey: reason });
     }
-    syncView();
+    actions.view.syncView();
     schedule();
   }
 
-  async function chooseRenderer(epoch = invalidateRenderer()) {
-    if (!isCurrentRenderer(epoch) || !image.frame) return;
+  async function chooseRenderer(epoch = ctx.invalidateRenderer()) {
+    if (!ctx.isCurrentRenderer(epoch) || !image.frame) return;
 
     // Look changes replace the uploaded planes, not the display technology.
     // Reusing the live renderer avoids tearing down the visible swap chain and
@@ -540,12 +447,12 @@ export function mountStage({ toast }) {
     // has to be created.  Device/display capability changes still fall through
     // to the normal destroy-and-select path below.
     const wantsHdr = canUseHdrRenderer();
-    if ((wantsHdr && renderer?.kind === "hdr")
-        || (!wantsHdr && renderer?.kind === "sdr-gpu")) {
-      renderer.upload(image.frame);
+    if ((wantsHdr && ctx.renderer?.kind === "hdr")
+        || (!wantsHdr && ctx.renderer?.kind === "sdr-gpu")) {
+      ctx.renderer.upload(image.frame);
       showCanvas(wantsHdr ? "hdr" : "sdr");
       if (wantsHdr) {
-        const gamut = renderer.outputColorSpace === "display-p3"
+        const gamut = ctx.renderer.outputColorSpace === "display-p3"
           ? "Display P3" : t("hdr.gamutExtendedSrgb");
         setCapability("hdr.true", true, { gamut });
       } else {
@@ -553,13 +460,13 @@ export function mountStage({ toast }) {
         if (reason) setCapability("hdr.sdrPreviewWhy", false, { reasonKey: reason });
         else setCapability("hdr.sdrPreview", false);
       }
-      syncView();
+      actions.view.syncView();
       schedule();
       return;
     }
 
-    renderer?.destroy();
-    renderer = null;
+    ctx.renderer?.destroy();
+    ctx.renderer = null;
 
     const blocked = sdrReason();
     if (blocked) {
@@ -569,31 +476,94 @@ export function mountStage({ toast }) {
       setCapability("hdr.verifying", false);
       try {
         await prepareHdrCanvas();
-        if (!isCurrentRenderer(epoch) || !image.frame) return;
+        if (!ctx.isCurrentRenderer(epoch) || !image.frame) return;
         created = await createHdrRenderer(hdrCanvas, () => {
-          if (isCurrentRenderer(epoch) && renderer === created) {
+          if (ctx.isCurrentRenderer(epoch) && ctx.renderer === created) {
             chooseSdrRenderer("hdr.reason.deviceLost", epoch);
           }
         });
-        if (!isCurrentRenderer(epoch) || !image.frame) { created.destroy(); return; }
-        renderer = created;
-        renderer.upload(image.frame);
+        if (!ctx.isCurrentRenderer(epoch) || !image.frame) { created.destroy(); return; }
+        ctx.renderer = created;
+        ctx.renderer.upload(image.frame);
         showCanvas("hdr");
-        const gamut = renderer.outputColorSpace === "display-p3"
+        const gamut = ctx.renderer.outputColorSpace === "display-p3"
           ? "Display P3" : t("hdr.gamutExtendedSrgb");
         setCapability("hdr.true", true, { gamut });
       } catch (error) {
         created?.destroy();
-        if (!isCurrentRenderer(epoch)) return;
+        if (!ctx.isCurrentRenderer(epoch)) return;
         const detail = error?.message ? `: ${error.message}` : "";
         console.error("HyperDR HDR renderer initialization failed", error);
         chooseSdrRenderer(t("hdr.reason.initFailed", { detail }), epoch);
       }
     }
-    if (!isCurrentRenderer(epoch)) return;
-    syncView();
+    if (!ctx.isCurrentRenderer(epoch)) return;
+    actions.view.syncView();
     schedule();
   }
+  function mountReactions() {
+    store.watchAny(["encoding", "outputGamut"], () => {
+      if (ctx.lastCapability) setCapability(ctx.lastCapability.key, ctx.lastCapability.ok, ctx.lastCapability.params);
+    });
+  }
+
+  function mountDisplay() {
+    hdrDisplayQuery.addEventListener?.("change", () => {
+      reportInitialCapability();
+      if (image.source) chooseRenderer();
+    });
+  }
+
+  function mountPreference() {
+    /* Preference reactions.
+     *
+     * Turning true HDR off has to re-pick the renderer, not merely relabel the
+     * status line: the WebGPU context is chosen once per image and would keep
+     * painting until the next load. Narrowing the resolution cap re-requests the
+     * frame at the new tier, which is what `load` does when the tier moves. */
+    prefs.watch("hdrPreview", () => {
+      reportInitialCapability();
+      if (image.source) chooseRenderer();
+    });
+  }
+
+  function mountLocale() {
+    /* Nothing here re-renders on its own, so a language change re-emits the
+     * strings this module wrote imperatively. `lastCapability` is kept as a key
+     * plus parameters precisely so this does not have to re-probe the GPU. */
+    onLocaleChange(() => {
+      if (ctx.lastCapability) {
+        setCapability(ctx.lastCapability.key, ctx.lastCapability.ok, ctx.lastCapability.params);
+      }
+    });
+  }
+
+
+  return { setCapability, reportInitialCapability, draw, schedule, showCanvas, prepareHdrCanvas, sdrReason, canUseHdrRenderer, chooseSdrRenderer, chooseRenderer, mountReactions, mountDisplay, mountPreference, mountLocale };
+}
+
+/* Load quantised preview frames, maintain the neutral reference and schedule settings changes. */
+
+
+/* Preview sizes are quantised so a continuous "how wide is the stage right now"
+ * does not create a new native frame on every window drag. Three tiers cover
+ * phone to desktop, clamped to what the server says it can decode. */
+const PREVIEW_TIERS = [960, 1280, 2048];
+const DRAFT_PREVIEW_EDGE = 640;
+const imageAdjustments = (settings) =>
+  Object.fromEntries(CONTROLS.map(({ key }) => [key, settings[key]]));
+const INPUT_DOMAIN_LABELS = Object.freeze({
+  "display-referred-hdr": "stage.input.hdr",
+  "dual-rendition": "stage.input.dual",
+  "display-referred-sdr": "stage.input.sdr",
+  "scene-referred": "stage.input.scene",
+  unknown: "stage.input.unknown",
+});
+
+
+function createPhoto(ctx) {
+  const { image, detail, analysis, toast, actions } = ctx;
+  const { stage, frame, viewport, empty, emptyTitle, progressBar, progressText, divider, hdrCanvas, originalCanvas } = ctx.dom;
 
   /* ── loading ──────────────────────────────────────────────────────── */
 
@@ -614,10 +584,10 @@ export function mountStage({ toast }) {
   }
 
   function clear(message = t("stage.empty")) {
-    closeDetail();
-    ++modelRequest;
-    invalidateImage();
-    invalidateRenderer();
+    actions.detail.closeDetail();
+    ++ctx.modelRequest;
+    ctx.invalidateImage();
+    ctx.invalidateRenderer();
     Object.assign(image, {
       source: null,
       frame: null,
@@ -625,12 +595,12 @@ export function mountStage({ toast }) {
       originalHistogram: null,
 
     });
-    notifySource();
+    ctx.notifySource();
     analysis.current = null;
-    renderer?.destroy();
-    renderer = null;
-    sourceDomainLabel = "";
-    modelGain = null;
+    ctx.renderer?.destroy();
+    ctx.renderer = null;
+    ctx.sourceDomainLabel = "";
+    ctx.modelGain = null;
     analysis.modelGain = null;
     store.set({
       comparing: false, maskKey: null,
@@ -645,10 +615,10 @@ export function mountStage({ toast }) {
       modelIdentity: null,
     });
     stage.classList.remove("has-image", "is-comparing", "is-loading");
-    fitStageToImage();
+    actions.view.fitStageToImage();
     stage.removeAttribute("role");
     stage.removeAttribute("tabindex");
-    for (const canvas of [sdrCanvas, hdrCanvas, originalCanvas]) {
+    for (const canvas of [ctx.dom.sdrCanvas, hdrCanvas, originalCanvas]) {
       canvas.hidden = true;
       canvas.width = 0;
       canvas.height = 0;
@@ -656,28 +626,28 @@ export function mountStage({ toast }) {
     divider.hidden = true;
     empty.style.display = "flex";
     setText(emptyTitle, message);
-    reportInitialCapability();
-    refreshScope();
-    syncView();
+    actions.rendering.reportInitialCapability();
+    ctx.refreshScope();
+    actions.view.syncView();
   }
 
   async function load({
     resetOriginal = false, draft = false, requestedAt = performance.now(),
     newPhoto = false, scheduled = false,
   } = {}) {
-    if (newPhoto) closeDetail();
-    if (resetOriginal && !scheduled) previewScheduler.cancel();
+    if (newPhoto) actions.detail.closeDetail();
+    if (resetOriginal && !scheduled) ctx.previewScheduler.cancel();
     if (store.get().previewOptimized && !store.get().capabilities?.model?.ready) {
       store.set({ previewOptimized: false, modelGainReady: false, modelIdentity: null });
     }
     // Restored AI views also need their actual model identity and fallback state.
     if (store.get().previewOptimized && !store.get().modelGainReady) {
-      return optimize({ resetOriginal, scheduled });
+      return actions.optimization.optimize({ resetOriginal, scheduled });
     }
     store.set({ previewError: false });
     const sessionId = store.get().sessionId;
-    const epoch = invalidateImage();
-    if (!sessionId) { clear(); reportInitialCapability(); return; }
+    const epoch = ctx.invalidateImage();
+    if (!sessionId) { clear(); actions.rendering.reportInitialCapability(); return; }
     setText(emptyTitle, t("stage.generating"));
     // The first frame of a photograph: the empty card becomes a progress
     // report. The bar is indeterminate, so the upload's percentage is cleared.
@@ -702,7 +672,7 @@ export function mountStage({ toast }) {
             lensCorrection: state.lensCorrection, useModel: false },
           highlightRecovery: "blend", maxEdge: referenceEdge,
         });
-        if (!isCurrentImage(epoch)) return;
+        if (!ctx.isCurrentImage(epoch)) return;
         const sourceDomain = reference.metadata.inputDomain || "";
         const sourceUnadjusted = reference.metadata.unadjusted || null;
         // The domain is a fact about the file, known only once the decoder has
@@ -730,13 +700,13 @@ export function mountStage({ toast }) {
         maxEdge: requestedEdge,
       });
       const receivedAt = performance.now();
-      if (!isCurrentImage(epoch)) return;
+      if (!ctx.isCurrentImage(epoch)) return;
       const { width, height } = preview;
       const diagnostic = diagnosticFrame(preview);
       const sameBase = preview.metadata.baseId && image.frame?.metadata.baseId === preview.metadata.baseId
         && image.frame.width === width && image.frame.height === height;
       image.frame = preview;
-      sourceDomainLabel = INPUT_DOMAIN_LABELS[state.sourceDomain]
+      ctx.sourceDomainLabel = INPUT_DOMAIN_LABELS[state.sourceDomain]
         || INPUT_DOMAIN_LABELS.unknown;
       // Keep the domain learned from the untouched reference. AI deliberately
       // decodes a gain-map photograph's SDR base; that frame's input domain
@@ -751,11 +721,11 @@ export function mountStage({ toast }) {
         const referenceDiagnostic = diagnosticFrame(reference);
         image.originalHistogram = histogramFromPlane(referenceDiagnostic.base,
           referenceDiagnostic.width, referenceDiagnostic.height);
-        paintOriginal();
+        actions.view.paintOriginal();
       }
-      notifySource();
+      ctx.notifySource();
 
-      for (const canvas of [sdrCanvas, hdrCanvas]) {
+      for (const canvas of [ctx.dom.sdrCanvas, hdrCanvas]) {
         if (canvas.width !== width) canvas.width = width;
         if (canvas.height !== height) canvas.height = height;
       }
@@ -772,20 +742,20 @@ export function mountStage({ toast }) {
       empty.style.display = "none";
       stage.classList.add("has-image");
       stage.classList.remove("is-loading");
-      fitStageToImage();
+      actions.view.fitStageToImage();
       stage.setAttribute("role", "button");
       stage.tabIndex = 0;
       store.set({ comparing: false });
-      refreshScope();
+      ctx.refreshScope();
       if (preview.metadata.status === "degraded") {
         const reasons = (preview.metadata.degradationReasons || []).join(", ");
         toast(t("hdr.degraded", { reasons: reasons || t("hdr.degradedFallback") }), true);
       }
-      await chooseRenderer();
-      if (isCurrentImage(epoch)) {
-        applyZoom();
+      await actions.rendering.chooseRenderer();
+      if (ctx.isCurrentImage(epoch)) {
+        actions.view.applyZoom();
         await new Promise((resolve) => requestAnimationFrame(resolve));
-        if (!isCurrentImage(epoch)) return;
+        if (!ctx.isCurrentImage(epoch)) return;
         store.set({ previewReady: true, previewTiming: {
           draft, width, height,
           requestMs: receivedAt - fetchStarted,
@@ -793,10 +763,10 @@ export function mountStage({ toast }) {
           inputToFrameMs: performance.now() - requestedAt,
           bytes: preview.byteLength,
         } });
-        if (detail.active) requestDetail();
+        if (detail.active) actions.detail.requestDetail();
       }
     } catch (error) {
-      if (!isCurrentImage(epoch)) return;
+      if (!ctx.isCurrentImage(epoch)) return;
       // A newer slider event may have cancelled this decode, or another
       // legitimate conversion may temporarily own the RAW budget. Neither is
       // a bad image and neither should flash the destructive red error toast.
@@ -819,7 +789,7 @@ export function mountStage({ toast }) {
       // model artifact that disappeared after a restart or cleanup (409) is
       // the common case, and says so.
       if (store.get().previewOptimized) {
-        modelGain = null;
+        ctx.modelGain = null;
         analysis.modelGain = null;
         store.set({ previewOptimized: false, modelGainReady: false, modelIdentity: null });
         toast(error.status === 409 ? t("adjust.aiExpired")
@@ -835,7 +805,7 @@ export function mountStage({ toast }) {
   }
 
   async function preparePhoto() {
-    modelGain = null;
+    ctx.modelGain = null;
     analysis.modelGain = null;
     image.original = null;
     const activeGamut = store.get().colorGamut;
@@ -864,6 +834,75 @@ export function mountStage({ toast }) {
     });
     await load({ resetOriginal: true, newPhoto: true });
   }
+  function mountScheduler() {
+    ctx.previewScheduler = createPreviewScheduler((request) => load({ ...request, scheduled: true }));
+    let interactionDirty = false;
+    store.watch("sessionId", () => { ctx.previewScheduler.cancel(); interactionDirty = false; });
+    store.watch("previewInteracting", (active) => {
+      if (!active && interactionDirty) {
+        interactionDirty = false;
+        ctx.previewScheduler.request(false);
+      }
+    });
+    store.watchAny(
+      ["brightness", "hdrStrength", "hdrRange", "expansionStart", "areaCoverage",
+       "encoding", "contrast", "vibrance", "previewOptimized", "modelStrength",
+       "colorGamut", "outputGamut", "clampSrgb", "lutId", "lutInput", "lutOutput", "lutStrength",
+       ...AI_POST_KEYS],
+      (state, _previous, changed) => {
+        if (!state.sessionId || state.restoring || state.uploading) return;
+        // AI post controls are independent from the mathematical mode. A hidden
+        // value change must not cause a native decode while the manual preview
+        // is active; once AI is selected the same controls invalidate its frame.
+        if (!state.previewOptimized
+            && changed.length > 0
+            && changed.every((key) => AI_POST_KEYS.includes(key))) return;
+        interactionDirty ||= Boolean(state.previewInteracting);
+        ctx.previewScheduler.request(Boolean(state.previewInteracting));
+      },
+      { immediate: true });
+
+    /* Input/base options invalidate both the decoded source and model cache. */
+    store.subscribe((state, _previous, changed) => {
+      if (!changed.some((key) => ["highlightRecovery", "clampSrgb", "colorGamut", "outputGamut", "rawProfile", "rawLook", "lensCorrection"].includes(key))) return;
+      ++ctx.modelRequest;
+      ctx.modelGain = null;
+      analysis.modelGain = null;
+      image.original = null;
+      store.set({ modelGainReady: false, modelIdentity: null, optimizing: false,
+        ...(state.previewOptimized ? { previewReady: false } : {}),
+      });
+      if (state.sessionId && !state.restoring && !state.uploading) {
+        // Discard stale results while allowing the worker's current operation
+        // to finish. The scheduler then runs only the latest profile/settings.
+        invalidateImage();
+        ctx.previewScheduler.request(false, performance.now(), true);
+      }
+    });
+  }
+
+  function mountPreference() {
+    prefs.watch("previewCeiling", () => {
+      if (image.source) load();
+    });
+  }
+
+  function mountLocale() {
+    onLocaleChange(() => {
+      if (!image.source) setText(emptyTitle, t("stage.empty"));
+    });
+  }
+
+
+  return { previewTier, clear, load, preparePhoto, mountScheduler, mountPreference, mountLocale };
+}
+
+/* Accept picker, native drop, browser drop and clipboard photos through the uploader. */
+
+
+function createIntake(ctx) {
+  const { image, detail, analysis, toast, actions } = ctx;
+  const { stage, selectButton, fileInput, supportHint, uploadCancel, progressBar, progressText, uploadOverlayText, uploadOverlay, emptyTitle } = ctx.dom;
 
   const upload = createUploader({
     onProgress: (fraction) => {
@@ -873,16 +912,16 @@ export function mountStage({ toast }) {
       setText(progressText, fraction > 0 && fraction < 1 ? uploading : "");
       setText(uploadOverlayText, uploading);
     },
-    onReady: preparePhoto,
+    onReady: actions.photo.preparePhoto,
     onError: (message, { preserveCurrent, cancelled } = {}) => {
       // A user-aborted upload is a confirmation, not a failure: keep the
       // current image (or the plain empty state) and say so quietly.
       if (cancelled) {
-        if (!preserveCurrent) clear();
+        if (!preserveCurrent) actions.photo.clear();
         toast(message);
         return;
       }
-      if (!preserveCurrent) clear(message);
+      if (!preserveCurrent) actions.photo.clear(message);
       toast(message, true);
     },
   });
@@ -908,9 +947,12 @@ export function mountStage({ toast }) {
   };
   // Rust queues before dispatching, so this also handles a drop that arrived
   // during panel initialization.
-  window.addEventListener("hyperdr:native-file-drop", consumeNativeDrop);
-  store.watchAny(["capabilities", "restoring"], consumeNativeDrop);
-  consumeNativeDrop();
+  function mountNativeDrop() {
+    window.addEventListener("hyperdr:native-file-drop", consumeNativeDrop);
+    store.watchAny(["capabilities", "restoring"], consumeNativeDrop);
+    consumeNativeDrop();
+  }
+
   /* What the picker offers and what the hint promises both come from the
    * converter's own extension table, served in /api/state. The markup used to
    * carry a hand-written accept list -- the fifth copy of that list in the
@@ -923,8 +965,10 @@ export function mountStage({ toast }) {
     setText(supportHint, t("stage.support"));
     supportHint.title = extensions.join(" ");
   };
-  store.watch("capabilities", describeSupport);
-  describeSupport();
+  function mountSupport() {
+    store.watch("capabilities", describeSupport);
+    describeSupport();
+  }
 
   /* One image per session, so a multiple selection is not an error -- but it is
    * not what the user asked for either, and silently keeping the first of five
@@ -952,19 +996,93 @@ export function mountStage({ toast }) {
       pickingFile = false;
     }
   };
-  selectButton.addEventListener("click", openPicker);
+  function mountDrop() {
+    for (const type of ["dragover", "dragenter"]) {
+      stage.addEventListener(type, (event) => {
+        event.preventDefault();
+        stage.classList.add("is-drop-target");
+      });
+    }
+    stage.addEventListener("dragleave", (event) => {
+      if (!stage.contains(event.relatedTarget)) stage.classList.remove("is-drop-target");
+    });
+    stage.addEventListener("drop", (event) => {
+      event.preventDefault();
+      stage.classList.remove("is-drop-target");
+      if (!canReplace()) return;
+      // A folder, a link or a text selection arrives with no files at all. Doing
+      // nothing at that point looks like the drop was missed rather than refused.
+      if (!startUpload(event.dataTransfer.files)) {
+        toast(t("err.singleFileDrop"), true);
+      }
+    });
+
+    /* Pasting is the sibling of dropping and was simply missing: a screenshot on
+     * the clipboard had to be saved to disk first. Ignored while a text field has
+     * focus, so pasting into an input still pastes text. */
+    document.addEventListener("paste", (event) => {
+      const target = event.target;
+      if (target instanceof Element
+          && target.closest("input, textarea, [contenteditable]")) return;
+      const files = Array.from(event.clipboardData?.files || []);
+      if (!files.length || !canReplace()) return;
+      event.preventDefault();
+      startUpload(files);
+    });
+  }
+
+  function mountReactions() {
+    store.watchAny(["uploading"], (state) => {
+      stage.classList.toggle("is-uploading", state.uploading);
+      stage.setAttribute("aria-busy", String(state.uploading));
+      selectButton.disabled = state.uploading;
+      uploadOverlay.hidden = !state.uploading;
+      // The first photo arrives on the empty card, whose headline would
+      // otherwise keep inviting a drop while the bar fills underneath it.
+      if (state.uploading && !image.source) setText(emptyTitle, t("stage.reading"));
+    });
+    store.watch("uploadProgress", (fraction) => {
+      const percent = Math.round(fraction * 100);
+      progressBar.style.width = `${percent}%`;
+      setText(uploadOverlayText, t("stage.uploading", { percent }));
+    });
+  }
+
+  function mountLocale() {
+    onLocaleChange(() => {
+      setText(supportHint, t("stage.support"));
+    });
+  }
+
+  function mountPicker() {
+    selectButton.addEventListener("click", openPicker);
+    fileInput.addEventListener("change", (event) => {
+      startUpload(event.target.files);
+      fileInput.value = "";
+    });
+    uploadCancel.addEventListener("click", (event) => {
+      event.stopPropagation();
+      upload.abort();
+    });
+  }
+
+
+  return { canReplace, consumeNativeDrop, describeSupport, startUpload, openPicker, mountNativeDrop, mountSupport, mountPicker, mountDrop, mountReactions, mountLocale };
+}
+
+/* Handle press-and-hold comparison and the stage keyboard shortcuts. */
+
+/* Gesture descriptions remain available to screen readers. */
+const TOUCH_HINT = "stage.hintTouch";
+const MOUSE_HINT = "stage.hintMouse";
+
+function createGestures(ctx) {
+  const { image, detail, analysis, toast, actions } = ctx;
+  const { stage } = ctx.dom;
+
   const isStageControl = (target) =>
     target instanceof Element
     && Boolean(target.closest("button, a, input, select, textarea, [role='slider']"));
-  fileInput.addEventListener("change", (event) => {
-    startUpload(event.target.files);
-    fileInput.value = "";
-  });
-  uploadCancel.addEventListener("click", (event) => {
-    event.stopPropagation();
-    upload.abort();
-  });
-
   const gesture = { pointerId: null, at: 0, x: 0, y: 0, timer: 0 };
 
   function beginCompare(event) {
@@ -989,222 +1107,127 @@ export function mountStage({ toast }) {
     gesture.pointerId = null;
     endCompare(event);
   }
+  function mountPointer() {
+    stage.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 || !actions.intake.canReplace() || isStageControl(event.target)) return;
+      gesture.pointerId = event.pointerId;
+      gesture.at = performance.now();
+      gesture.x = event.clientX;
+      gesture.y = event.clientY;
+      clearTimeout(gesture.timer);
+      // Press-and-hold compares against the original; an empty-stage tap imports.
+      if (image.source && !touchQuery.matches) {
+        gesture.timer = setTimeout(() => beginCompare(event), 240);
+      }
+    });
 
-  stage.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0 || !canReplace() || isStageControl(event.target)) return;
-    gesture.pointerId = event.pointerId;
-    gesture.at = performance.now();
-    gesture.x = event.clientX;
-    gesture.y = event.clientY;
-    clearTimeout(gesture.timer);
-    // Press-and-hold compares against the original; an empty-stage tap imports.
-    if (image.source && !touchQuery.matches) {
-      gesture.timer = setTimeout(() => beginCompare(event), 240);
-    }
-  });
+    stage.addEventListener("pointerup", (event) => {
+      const isActive = gesture.pointerId === event.pointerId;
+      const elapsed = performance.now() - gesture.at;
+      const moved = Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y);
+      const wasComparing = store.get().comparing;
+      cancelGesture(event);
+      if (!image.source && isActive && !wasComparing && !isStageControl(event.target)
+          && elapsed < 320 && moved < 12) actions.intake.openPicker();
+    });
 
-  stage.addEventListener("pointerup", (event) => {
-    const isActive = gesture.pointerId === event.pointerId;
-    const elapsed = performance.now() - gesture.at;
-    const moved = Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y);
-    const wasComparing = store.get().comparing;
-    cancelGesture(event);
-    if (!image.source && isActive && !wasComparing && !isStageControl(event.target)
-        && elapsed < 320 && moved < 12) openPicker();
-  });
+    stage.addEventListener("pointercancel", cancelGesture);
+    stage.addEventListener("lostpointercapture", cancelGesture);
+    stage.addEventListener("blur", cancelGesture);
+  }
 
-  stage.addEventListener("pointercancel", cancelGesture);
-  stage.addEventListener("lostpointercapture", cancelGesture);
-  stage.addEventListener("blur", cancelGesture);
+  function mountKeyboard() {
+    stage.addEventListener("contextmenu", (event) => { if (image.source) event.preventDefault(); });
+    stage.addEventListener("selectstart", (event) => {
+      if (touchQuery.matches) event.preventDefault();
+    });
+    stage.addEventListener("keydown", (event) => {
+      if (event.target === stage && ["Enter", " "].includes(event.key) && !event.repeat) {
+        event.preventDefault();
+        if (image.source) beginCompare(event); else actions.intake.openPicker();
+      } else if (event.key === "Escape") cancelGesture(event);
+    });
 
-  for (const type of ["dragover", "dragenter"]) {
-    stage.addEventListener(type, (event) => {
+    stage.addEventListener("keyup", (event) => {
+      if (["Enter", " "].includes(event.key)) endCompare(event);
+    });
+
+    /* Space compares without the canvas having focus first: after a click on
+     * the photo's surroundings or when nothing is focused, the documented
+     * shortcut used to do nothing. It is an allow-list -- the page itself or the
+     * viewer area -- because everything else focusable (buttons, fields, the
+     * rail's collapsible headers) already has its own meaning for Space. */
+    const comparesOnSpace = (target) => target === document.body || target === document.documentElement
+      || (target instanceof Element && Boolean(target.closest(".app__stage"))
+        && !target.closest("button, a, input, select, textarea, summary, [contenteditable], [role='slider']"));
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== " " || event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.target === stage || !comparesOnSpace(event.target) || !image.source) return;
       event.preventDefault();
-      stage.classList.add("is-drop-target");
+      beginCompare();
+    });
+    document.addEventListener("keyup", (event) => {
+      if (event.key === " " && event.target !== stage) endCompare();
+    });
+    window.addEventListener("blur", () => endCompare());
+  }
+
+  const applyPointerHint = () => {
+    const text = t(touchQuery.matches ? TOUCH_HINT : MOUSE_HINT);
+    stage.setAttribute("aria-label", text);
+  };
+
+  function mountPointerHint() {
+    touchQuery.addEventListener?.("change", () => {
+      applyPointerHint();
+      store.set({ comparing: false });
     });
   }
-  stage.addEventListener("dragleave", (event) => {
-    if (!stage.contains(event.relatedTarget)) stage.classList.remove("is-drop-target");
-  });
-  stage.addEventListener("drop", (event) => {
-    event.preventDefault();
-    stage.classList.remove("is-drop-target");
-    if (!canReplace()) return;
-    // A folder, a link or a text selection arrives with no files at all. Doing
-    // nothing at that point looks like the drop was missed rather than refused.
-    if (!startUpload(event.dataTransfer.files)) {
-      toast(t("err.singleFileDrop"), true);
-    }
-  });
 
-  /* Pasting is the sibling of dropping and was simply missing: a screenshot on
-   * the clipboard had to be saved to disk first. Ignored while a text field has
-   * focus, so pasting into an input still pastes text. */
-  document.addEventListener("paste", (event) => {
-    const target = event.target;
-    if (target instanceof Element
-        && target.closest("input, textarea, [contenteditable]")) return;
-    const files = Array.from(event.clipboardData?.files || []);
-    if (!files.length || !canReplace()) return;
-    event.preventDefault();
-    startUpload(files);
-  });
+  function mountLocale() {
+    onLocaleChange(applyPointerHint);
+  }
 
-  stage.addEventListener("contextmenu", (event) => { if (image.source) event.preventDefault(); });
-  stage.addEventListener("selectstart", (event) => {
-    if (touchQuery.matches) event.preventDefault();
-  });
-  stage.addEventListener("keydown", (event) => {
-    if (event.target === stage && ["Enter", " "].includes(event.key) && !event.repeat) {
-      event.preventDefault();
-      if (image.source) beginCompare(event); else openPicker();
-    } else if (event.key === "Escape") cancelGesture(event);
-  });
 
-  stage.addEventListener("keyup", (event) => {
-    if (["Enter", " "].includes(event.key)) endCompare(event);
-  });
+  return { isStageControl, beginCompare, endCompare, cancelGesture, applyPointerHint, mountPointer, mountKeyboard, mountPointerHint, mountLocale };
+}
 
-  /* Space compares without the canvas having focus first: after a click on
-   * the photo's surroundings or when nothing is focused, the documented
-   * shortcut used to do nothing. It is an allow-list -- the page itself or the
-   * viewer area -- because everything else focusable (buttons, fields, the
-   * rail's collapsible headers) already has its own meaning for Space. */
-  const comparesOnSpace = (target) => target === document.body || target === document.documentElement
-    || (target instanceof Element && Boolean(target.closest(".app__stage"))
-      && !target.closest("button, a, input, select, textarea, summary, [contenteditable], [role='slider']"));
-  document.addEventListener("keydown", (event) => {
-    if (event.key !== " " || event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
-    if (event.target === stage || !comparesOnSpace(event.target) || !image.source) return;
-    event.preventDefault();
-    beginCompare();
-  });
-  document.addEventListener("keyup", (event) => {
-    if (event.key === " " && event.target !== stage) endCompare();
-  });
-  window.addEventListener("blur", () => endCompare());
+/* Request AI gain maps and update the optimization controls. */
 
-  /* Wheel zoom, anchored at the pointer so the detail under it stays put.
-   * A trackpad pinch arrives as a ctrl+wheel and is honoured everywhere; a
-   * plain wheel zooms only in the desktop layout, where the stage never
-   * scrolls -- in the stacked phone-width layout it scrolls the page. */
-  const wideLayout = window.matchMedia("(width >= 860px)");
-  stage.addEventListener("wheel", (event) => {
-    if (!image.source || (!event.ctrlKey && !wideLayout.matches)) return;
-    event.preventDefault();
-    const state = store.get();
-    const pixels = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
-    const next = clamp(state.viewerZoom * Math.exp(-pixels * (event.ctrlKey ? 0.01 : 0.0015)), 1, 4);
-    if (Math.abs(next - state.viewerZoom) < 1e-4) return;
-    if (next <= 1.001) { store.set({ viewerZoom: 1, viewerPanX: 0, viewerPanY: 0 }); return; }
-    const box = frame.getBoundingClientRect();
-    const pointerX = event.clientX - (box.left + box.width / 2);
-    const pointerY = event.clientY - (box.top + box.height / 2);
-    const limitX = frame.clientWidth * (state.viewerZoom - 1) / 2;
-    const limitY = frame.clientHeight * (state.viewerZoom - 1) / 2;
-    const panX = clamp(state.viewerPanX, -limitX, limitX);
-    const panY = clamp(state.viewerPanY, -limitY, limitY);
-    const ratio = next / state.viewerZoom;
-    store.set({
-      viewerZoom: Number(next.toFixed(4)),
-      viewerPanX: pointerX - (pointerX - panX) * ratio,
-      viewerPanY: pointerY - (pointerY - panY) * ratio,
+
+function createOptimization(ctx) {
+  const { image, detail, analysis, toast, actions } = ctx;
+  const { mathModeButton, optimizeButton } = ctx.dom;
+
+  function mountModelChange() {
+    // Invalidate even in manual mode: the next AI click must use the new model.
+    // Keep the selected workflow during inference so undo records one model change.
+    store.subscribe((state, previous, changed) => {
+      if (!changed.includes("modelId")) return;
+      if (state.modelId === previous.modelId) return;
+      ++ctx.modelRequest;
+      ctx.modelGain = null;
+      analysis.modelGain = null;
+      if (state.previewOptimized) {
+        ctx.invalidateImage();
+      }
+      store.set({ modelGainReady: false, modelIdentity: null, optimizing: false,
+        ...(state.previewOptimized ? { previewReady: false } : {}) });
+      if (state.previewOptimized && !state.restoring && !state.uploading) ctx.previewScheduler.request(false);
     });
-  }, { passive: false });
-
-  /* ── reactions ────────────────────────────────────────────────────── */
-
-  store.watchAny(["encoding", "outputGamut"], () => {
-    if (lastCapability) setCapability(lastCapability.key, lastCapability.ok, lastCapability.params);
-  });
-
-  store.watchAny(["viewMode", "comparing", "splitRatio"], () => { syncView(); schedule(); }, { immediate: true });
-  store.watchAny(["uploading"], (state) => {
-    stage.classList.toggle("is-uploading", state.uploading);
-    stage.setAttribute("aria-busy", String(state.uploading));
-    selectButton.disabled = state.uploading;
-    uploadOverlay.hidden = !state.uploading;
-    // The first photo arrives on the empty card, whose headline would
-    // otherwise keep inviting a drop while the bar fills underneath it.
-    if (state.uploading && !image.source) setText(emptyTitle, t("stage.reading"));
-  });
-  store.watch("uploadProgress", (fraction) => {
-    const percent = Math.round(fraction * 100);
-    progressBar.style.width = `${percent}%`;
-    setText(uploadOverlayText, t("stage.uploading", { percent }));
-  });
-  const previewScheduler = createPreviewScheduler((request) => load({ ...request, scheduled: true }));
-  let interactionDirty = false;
-  store.watch("sessionId", () => { previewScheduler.cancel(); interactionDirty = false; });
-  store.watch("previewInteracting", (active) => {
-    if (!active && interactionDirty) {
-      interactionDirty = false;
-      previewScheduler.request(false);
-    }
-  });
-  store.watchAny(
-    ["brightness", "hdrStrength", "hdrRange", "expansionStart", "areaCoverage",
-     "encoding", "contrast", "vibrance", "previewOptimized", "modelStrength",
-     "colorGamut", "outputGamut", "clampSrgb", "lutId", "lutInput", "lutOutput", "lutStrength",
-     ...AI_POST_KEYS],
-    (state, _previous, changed) => {
-      if (!state.sessionId || state.restoring || state.uploading) return;
-      // AI post controls are independent from the mathematical mode. A hidden
-      // value change must not cause a native decode while the manual preview
-      // is active; once AI is selected the same controls invalidate its frame.
-      if (!state.previewOptimized
-          && changed.length > 0
-          && changed.every((key) => AI_POST_KEYS.includes(key))) return;
-      interactionDirty ||= Boolean(state.previewInteracting);
-      previewScheduler.request(Boolean(state.previewInteracting));
-    },
-    { immediate: true });
-
-  /* Input/base options invalidate both the decoded source and model cache. */
-  store.subscribe((state, _previous, changed) => {
-    if (!changed.some((key) => ["highlightRecovery", "clampSrgb", "colorGamut", "outputGamut", "rawProfile", "rawLook", "lensCorrection"].includes(key))) return;
-    ++modelRequest;
-    modelGain = null;
-    analysis.modelGain = null;
-    image.original = null;
-    store.set({ modelGainReady: false, modelIdentity: null, optimizing: false,
-      ...(state.previewOptimized ? { previewReady: false } : {}),
-    });
-    if (state.sessionId && !state.restoring && !state.uploading) {
-      // Discard stale results while allowing the worker's current operation
-      // to finish. The scheduler then runs only the latest profile/settings.
-      invalidateImage();
-      previewScheduler.request(false, performance.now(), true);
-    }
-  });
-
-  // Invalidate even in manual mode: the next AI click must use the new model.
-  // Keep the selected workflow during inference so undo records one model change.
-  store.subscribe((state, previous, changed) => {
-    if (!changed.includes("modelId")) return;
-    if (state.modelId === previous.modelId) return;
-    ++modelRequest;
-    modelGain = null;
-    analysis.modelGain = null;
-    if (state.previewOptimized) {
-      invalidateImage();
-    }
-    store.set({ modelGainReady: false, modelIdentity: null, optimizing: false,
-      ...(state.previewOptimized ? { previewReady: false } : {}) });
-    if (state.previewOptimized && !state.restoring && !state.uploading) previewScheduler.request(false);
-  });
+  }
 
   async function optimize({ resetOriginal = false, scheduled = false } = {}) {
     const state = store.get();
     if (isHdrSource(state.sourceDomain)) return;
-    if (state.optimizing || (state.previewOptimized && state.modelGainReady && modelGain)) return;
-    if (modelGain && state.modelGainReady) {
+    if (state.optimizing || (state.previewOptimized && state.modelGainReady && ctx.modelGain)) return;
+    if (ctx.modelGain && state.modelGainReady) {
       store.set({ previewOptimized: true });
       return;
     }
     if (!state.sessionId || !state.capabilities?.model?.ready) return;
-    const request = ++modelRequest;
-    const current = () => request === modelRequest
+    const request = ++ctx.modelRequest;
+    const current = () => request === ctx.modelRequest
       && store.get().sessionId === state.sessionId && store.get().file === state.file
       && store.get().highlightRecovery === state.highlightRecovery
       && store.get().clampSrgb === state.clampSrgb && store.get().colorGamut === state.colorGamut
@@ -1212,8 +1235,8 @@ export function mountStage({ toast }) {
       && store.get().rawLook === state.rawLook
       && store.get().lensCorrection === state.lensCorrection
       && store.get().modelId === state.modelId;
-    if (!scheduled) previewScheduler.cancel();
-    invalidateImage();
+    if (!scheduled) ctx.previewScheduler.cancel();
+    ctx.invalidateImage();
     store.set({ optimizing: true, previewReady: false });
     try {
       const gain = await api.modelPreview(
@@ -1221,18 +1244,18 @@ export function mountStage({ toast }) {
         { colorGamut: state.colorGamut, clampSrgb: state.clampSrgb, rawProfile: state.rawProfile,
           rawLook: state.rawLook, lensCorrection: state.lensCorrection });
       if (!current()) return;
-      modelGain = gain;
+      ctx.modelGain = gain;
       analysis.modelGain = gain;
-      renderer?.uploadGainMap(gain);
+      ctx.renderer?.uploadGainMap(gain);
       store.set({ previewOptimized: true, modelGainReady: true,
         modelIdentity: gain.identity });
       // Keep switching/export locked until the new native frame is presented.
-      if (!scheduled) previewScheduler.cancel();
-      await load({ resetOriginal, scheduled });
+      if (!scheduled) ctx.previewScheduler.cancel();
+      await actions.photo.load({ resetOriginal, scheduled });
       if (current() && store.get().previewReady) announceModel(gain.identity);
     } catch (error) {
       if (!current()) return;
-      modelGain = null;
+      ctx.modelGain = null;
       analysis.modelGain = null;
       store.set({ previewOptimized: false, modelGainReady: false, modelIdentity: null });
       // The converter's reason is kept, but it is English engine prose; the
@@ -1259,116 +1282,56 @@ export function mountStage({ toast }) {
     }
     toast(t("adjust.aiApplied", { model: modelLabel(identity.effectiveModelId) }));
   }
+  function mountControls() {
+    mathModeButton.addEventListener("click", () => {
+      if (!store.get().optimizing) store.set({ previewOptimized: false });
+    });
+    optimizeButton.addEventListener("click", optimize);
+    const optimizeNote = role("optimize-note");
+    store.watchAny(
+      ["file", "capabilities", "optimizing", "previewOptimized", "modelGainReady", "jobId", "encoding", "lutInput", "lutId", "sourceDomain"],
+      (state) => {
+        const authoredHdr = isHdrSource(state.sourceDomain);
+        optimizeButton.closest(".optimize-toggle").hidden = authoredHdr;
+        const ready = Boolean(state.capabilities?.model?.ready);
+        const locked = state.optimizing || Boolean(state.jobId);
+        mathModeButton.disabled = !state.file || locked;
+        optimizeButton.disabled =
+          !state.file || locked || ["sdr-jpeg", "sdr-tiff"].includes(state.encoding)
+          || authoredHdr
+          || (state.lutId && ["hlg", "pq", "slog3-sgamut3cine"].includes(state.lutInput))
+          || (!ready && !state.modelGainReady);
+        mathModeButton.setAttribute("aria-pressed", String(!state.previewOptimized));
+        optimizeButton.setAttribute("aria-pressed", String(state.previewOptimized));
+        setText(optimizeButton, state.optimizing ? t("adjust.aiBusy") : t("adjust.ai"));
+        optimizeButton.title = state.previewOptimized
+          ? t("adjust.aiShowing")
+          : state.modelGainReady
+          ? t("adjust.aiCached")
+          : ready ? t("adjust.aiReady")
+          : (state.capabilities?.model?.reason || t("adjust.aiNotReady"));
+        // The disabled button's title is unreachable on touch, so the reason
+        // the AI mode cannot be used is also printed under the toggle.
+        const unavailable = Boolean(state.file) && !authoredHdr && !state.previewOptimized
+          && !state.modelGainReady && !ready;
+        optimizeNote.hidden = !unavailable;
+        if (unavailable) {
+          setText(optimizeNote,
+            t("adjust.aiUnavailable", {
+              reason: state.capabilities?.model?.reason || t("adjust.aiNotReady"),
+            }));
+        }
+      },
+      { immediate: true },
+    );
+  }
 
-  mathModeButton.addEventListener("click", () => {
-    if (!store.get().optimizing) store.set({ previewOptimized: false });
-  });
-  optimizeButton.addEventListener("click", optimize);
-  const optimizeNote = role("optimize-note");
-  store.watchAny(
-    ["file", "capabilities", "optimizing", "previewOptimized", "modelGainReady", "jobId", "encoding", "lutInput", "lutId", "sourceDomain"],
-    (state) => {
-      const authoredHdr = isHdrSource(state.sourceDomain);
-      optimizeButton.closest(".optimize-toggle").hidden = authoredHdr;
-      const ready = Boolean(state.capabilities?.model?.ready);
-      const locked = state.optimizing || Boolean(state.jobId);
-      mathModeButton.disabled = !state.file || locked;
-      optimizeButton.disabled =
-        !state.file || locked || ["sdr-jpeg", "sdr-tiff"].includes(state.encoding)
-        || authoredHdr
-        || (state.lutId && ["hlg", "pq", "slog3-sgamut3cine"].includes(state.lutInput))
-        || (!ready && !state.modelGainReady);
-      mathModeButton.setAttribute("aria-pressed", String(!state.previewOptimized));
-      optimizeButton.setAttribute("aria-pressed", String(state.previewOptimized));
-      setText(optimizeButton, state.optimizing ? t("adjust.aiBusy") : t("adjust.ai"));
-      optimizeButton.title = state.previewOptimized
-        ? t("adjust.aiShowing")
-        : state.modelGainReady
-        ? t("adjust.aiCached")
-        : ready ? t("adjust.aiReady")
-        : (state.capabilities?.model?.reason || t("adjust.aiNotReady"));
-      // The disabled button's title is unreachable on touch, so the reason
-      // the AI mode cannot be used is also printed under the toggle.
-      const unavailable = Boolean(state.file) && !authoredHdr && !state.previewOptimized
-        && !state.modelGainReady && !ready;
-      optimizeNote.hidden = !unavailable;
-      if (unavailable) {
-        setText(optimizeNote,
-          t("adjust.aiUnavailable", {
-            reason: state.capabilities?.model?.reason || t("adjust.aiNotReady"),
-          }));
-      }
-    },
-    { immediate: true },
-  );
-
-  hdrDisplayQuery.addEventListener?.("change", () => {
-    reportInitialCapability();
-    if (image.source) chooseRenderer();
-  });
-
-  const applyPointerHint = () => {
-    const text = t(touchQuery.matches ? TOUCH_HINT : MOUSE_HINT);
-    stage.setAttribute("aria-label", text);
-  };
-
-  touchQuery.addEventListener?.("change", () => {
-    applyPointerHint();
-    store.set({ comparing: false });
-  });
+  function mountLocale() {
+    onLocaleChange(() => {
+      setText(optimizeButton, store.get().optimizing ? t("adjust.aiBusy") : t("adjust.ai"));
+    });
+  }
 
 
-  /* Preference reactions.
-   *
-   * Turning true HDR off has to re-pick the renderer, not merely relabel the
-   * status line: the WebGPU context is chosen once per image and would keep
-   * painting until the next load. Narrowing the resolution cap re-requests the
-   * frame at the new tier, which is what `load` does when the tier moves. */
-  prefs.watch("hdrPreview", () => {
-    reportInitialCapability();
-    if (image.source) chooseRenderer();
-  });
-  prefs.watch("previewCeiling", () => {
-    if (image.source) load();
-  });
-
-  /* Nothing here re-renders on its own, so a language change re-emits the
-   * strings this module wrote imperatively. `lastCapability` is kept as a key
-   * plus parameters precisely so this does not have to re-probe the GPU. */
-  onLocaleChange(() => {
-    setText(optimizeButton, store.get().optimizing ? t("adjust.aiBusy") : t("adjust.ai"));
-    applyPointerHint();
-    syncView();
-    if (lastCapability) {
-      setCapability(lastCapability.key, lastCapability.ok, lastCapability.params);
-    }
-    if (!image.source) setText(emptyTitle, t("stage.empty"));
-    setText(supportHint, t("stage.support"));
-    detailButton.textContent = t(detail.active ? "stage.detailClose" : "stage.detailOpen");
-    detailOverlay.setAttribute("aria-label", t("stage.detailLabel"));
-    if (detail.frame) detailStatus.textContent = t("stage.detailStatus");
-  });
-
-  applyPointerHint();
-  reportInitialCapability();
-
-  return {
-    openPicker,
-    redraw: schedule,
-    reload: load,
-    async acceptPhonePhoto(current) {
-      store.set({ restoring: true, uploading: true, phoneUploading: false,
-        sessionId: current.sessionId, file: current.file, result: null, exports: [] });
-      try { await preparePhoto(); }
-      finally { store.set({ restoring: false, uploading: false }); }
-    },
-    clear,
-    /** The decoded preview pixels, for the mask overlay. Null before upload. */
-    getSource: () => image.source,
-    getFrame: () => image.frame,
-    onSourceChange(listener) {
-      sourceListeners.add(listener);
-      return () => sourceListeners.delete(listener);
-    },
-  };
+  return { optimize, announceModel, mountModelChange, mountControls, mountLocale };
 }

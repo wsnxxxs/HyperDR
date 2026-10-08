@@ -24,10 +24,9 @@ const INPUT_DOMAIN_LABELS = Object.freeze({
   unknown: "stage.input.unknown",
 });
 
-
 export function createPhoto(ctx) {
   const { image, detail, analysis, toast, actions } = ctx;
-  const { stage, frame, viewport, empty, emptyTitle, progressBar, progressText, divider, hdrCanvas, originalCanvas } = ctx.dom;
+  const { stage, frame, empty, emptyTitle, progressBar, progressText, divider, hdrCanvas, originalCanvas } = ctx.dom;
 
   /* ── loading ──────────────────────────────────────────────────────── */
 
@@ -170,7 +169,7 @@ export function createPhoto(ctx) {
       // Keep the domain learned from the untouched reference. AI deliberately
       // decodes a gain-map photograph's SDR base; that frame's input domain
       // describes model input, not the original photo used by reset/export.
-      setCapability("hdr.verifyingOutput", false);
+      actions.rendering.setCapability("hdr.verifyingOutput", false);
       // Diagnostics receive an SDR display copy. Preview rendering consumes
       // only the untouched native float planes above.
       if (!sameBase) image.source = planeToImageData(preview.base, width, height);
@@ -293,6 +292,7 @@ export function createPhoto(ctx) {
     });
     await load({ resetOriginal: true, newPhoto: true });
   }
+
   function mountScheduler() {
     ctx.previewScheduler = createPreviewScheduler((request) => load({ ...request, scheduled: true }));
     let interactionDirty = false;
@@ -334,7 +334,7 @@ export function createPhoto(ctx) {
       if (state.sessionId && !state.restoring && !state.uploading) {
         // Discard stale results while allowing the worker's current operation
         // to finish. The scheduler then runs only the latest profile/settings.
-        invalidateImage();
+        ctx.invalidateImage();
         ctx.previewScheduler.request(false, performance.now(), true);
       }
     });
@@ -351,7 +351,6 @@ export function createPhoto(ctx) {
       if (!image.source) setText(emptyTitle, t("stage.empty"));
     });
   }
-
 
   return { previewTier, clear, load, preparePhoto, mountScheduler, mountPreference, mountLocale };
 }

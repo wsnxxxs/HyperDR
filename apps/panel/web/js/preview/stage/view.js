@@ -5,9 +5,8 @@ import { setText, clamp } from "../../core/dom.js";
 import { t, onLocaleChange } from "../../i18n/index.js";
 import { fittedSize, clampedPan, wheelZoomLevel, zoomAtPointer } from "./geometry.js";
 
-
 export function createView(ctx) {
-  const { image, detail, analysis, toast, actions } = ctx;
+  const { image, actions } = ctx;
   const { stage, frame, viewport, divider, hdrCanvas, originalCanvas, badge, hdrStatus, detailButton, detailCanvas } = ctx.dom;
 
   const showingOriginal = () => {
@@ -102,6 +101,7 @@ export function createView(ctx) {
     stage.setAttribute("aria-pressed", String(original));
     detailButton.hidden = !hasImage;
   }
+
   function applyZoom() {
     const state = store.get();
     const { x, y } = clampedPan(state, frame.clientWidth, frame.clientHeight);
@@ -112,6 +112,7 @@ export function createView(ctx) {
     stage.classList.toggle("is-zoomed", state.viewerZoom > 1);
     positionDivider();
   }
+
   function mountGeometry() {
     let dividerPointer = null;
     divider.addEventListener("pointerdown", (event) => {
@@ -193,7 +194,6 @@ export function createView(ctx) {
   function mountLocale() {
     onLocaleChange(syncView);
   }
-
 
   return { showingOriginal, imageRect, positionDivider, fitStageToImage, paintOriginal, syncView, applyZoom, mountGeometry, mountPan, mountWheel, mountReactions, mountLocale };
 }

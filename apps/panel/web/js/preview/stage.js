@@ -45,6 +45,8 @@ export function mountStage({ toast }) {
   intake.mountDrop();
   gestures.mountKeyboard();
   view.mountWheel();
+  /* ── reactions ────────────────────────────────────────────────────── */
+
   rendering.mountReactions();
   view.mountReactions();
   intake.mountReactions();

@@ -246,8 +246,12 @@ export const api = {
    *  @param {(fraction: number) => void} [onProgress]
    *  @returns {{promise: Promise<object>, abort: () => void}}
    */
-  upload(sessionId, file, onProgress) {
-    const request = new XMLHttpRequest();
+  upload(sessionId, file, onProgress, {
+    XMLHttpRequest: Request = globalThis.XMLHttpRequest, readBody = true,
+    error = (message, status) => new ApiError(message, status),
+    failed = t("err.uploadFailed"), interrupted = t("err.uploadAborted"), cancelled = t("err.uploadCancelled"),
+  } = {}) {
+    const request = new Request();
     const promise = new Promise((resolve, reject) => {
       request.open("POST", "/api/upload?" + new URLSearchParams({
         id: sessionId, name: file.name,
@@ -258,12 +262,14 @@ export const api = {
       };
       request.onload = () => {
         let body = {};
-        try { body = JSON.parse(request.responseText || "{}"); } catch {}
-        if (request.status >= 200 && request.status < 300) resolve(body);
-        else reject(new ApiError(body.error || t("err.uploadFailed"), request.status));
+        if (readBody || request.status < 200 || request.status >= 300) {
+          try { body = JSON.parse(request.responseText || "{}"); } catch {}
+        }
+        if (request.status >= 200 && request.status < 300) resolve(readBody ? body : undefined);
+        else reject(error(body.error || failed, request.status));
       };
-      request.onerror = () => reject(new ApiError(t("err.uploadAborted"), 0));
-      request.onabort = () => reject(new ApiError(t("err.uploadCancelled"), 0));
+      request.onerror = () => reject(error(interrupted, 0));
+      request.onabort = () => reject(error(cancelled, 0));
       request.send(file);
     });
     // Returned rather than hidden: the old panel had no way to stop a 300 MB
@@ -271,3 +277,54 @@ export const api = {
     return { promise, abort: () => request.abort() };
   },
 };
+
+/** Mobile transport keeps its original JSON/error contract. Dependencies are
+ * explicit so recovery can run without a browser or real deadlines. */
+export function createPhoneApi({ fetch, setTimeout, clearTimeout, XMLHttpRequest }) {
+  async function read(path, options, consume, { timeout = 0, signal, timeoutError } = {}) {
+    const control = timeout || signal ? new AbortController() : null;
+    const cancel = () => control.abort();
+    if (signal?.aborted) cancel();
+    else signal?.addEventListener("abort", cancel, { once: true });
+    const timer = timeout && setTimeout(cancel, timeout);
+    try {
+      const response = await fetch(path, { ...options, ...(control ? { signal: control.signal } : {}) });
+      return await consume(response);
+    } catch (error) {
+      if (error.name === "AbortError" && !signal?.aborted) {
+        throw Object.assign(new Error(timeoutError || "请求超时，请重试。"), { status: 0, timeout: true });
+      }
+      throw error;
+    } finally {
+      if (timer) clearTimeout(timer);
+      signal?.removeEventListener("abort", cancel);
+    }
+  }
+  function request(path, body, options) {
+    return read(path, body === undefined ? {} : {
+      method: "POST", headers: JSON_HEADERS, body: JSON.stringify(body),
+    }, async (response) => {
+      const data = await response.json();
+      if (!response.ok) throw Object.assign(new Error(data.error || "请求未完成，请重试。"), { status: response.status });
+      return data;
+    }, options);
+  }
+  function setupState() {
+    return read("/setup/state", { cache: "no-store" }, async (response) => {
+      if (response.status === 410) throw new ApiError("设置入口已过期。手机上已安装的证书仍然有效；重新下载证书需要在电脑上重新开启设置入口。", 410);
+      if (!response.ok) throw new Error(response.status === 401 || response.status === 403
+        ? "设置链接已失效。请在电脑上重新生成二维码并扫描。"
+        : "无法读取设置。请确认电脑工作台已开启，手机与电脑连接同一 Wi-Fi，然后重试。");
+      return response.json();
+    }, { timeout: 8000, timeoutError: "读取设置超时。请确认手机与电脑连接同一 Wi-Fi，然后重试。" });
+  }
+  return {
+    request, setupState,
+    frame: (signal) => fetch("/api/phone/frame", { signal }),
+    original: (signal) => fetch("/api/phone/original", { signal }),
+    upload: (sessionId, file, onProgress) => api.upload(sessionId, file, onProgress, {
+      XMLHttpRequest, readBody: false, error: (message) => new Error(message),
+      failed: "上传失败，请重试。", interrupted: "上传中断，请检查 Wi-Fi 后重新选择照片。", cancelled: "已取消上传",
+    }),
+  };
+}

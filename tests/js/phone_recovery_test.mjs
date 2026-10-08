@@ -4,7 +4,9 @@ import vm from "node:vm";
 
 const read = (path) => fs.readFileSync(new URL(`../../apps/panel/web/${path}`, import.meta.url), "utf8");
 const desktop = read("js/ui/phone-workbench.js").replace(/^import .*;\r?\n/gm, "").replace(/^export /gm, "");
-const phone = read("phone/app.js");
+import { createPhoneConnection } from "../../apps/panel/web/phone/connection.js";
+import { createPhoneState } from "../../apps/panel/web/phone/state.js";
+import { createPhoneApi } from "../../apps/panel/web/js/core/api.js";
 const flush = () => new Promise(setImmediate);
 const deferred = () => { let resolve; const promise = new Promise((done) => { resolve = done; }); return { promise, resolve }; };
 const response = (data, status = 200) => ({ ok: status < 400, status, json: async () => data });
@@ -126,26 +128,28 @@ const stalledBody = (_url, { signal }) => Promise.resolve({ ok: true, json: () =
 }
 
 function phonePage(fetch) {
-  const clock = timers(), nodes = new Map(), streams = [], handlers = {}, windowHandlers = {};
+  const clock = timers(), nodes = new Map(), streams = [];
+  const state = createPhoneState().connection;
+  let hidden = false;
+  const getNode = (id) => { if (!nodes.has(id)) nodes.set(id, node()); return nodes.get(id); };
   class EventSource {
     static CLOSED = 2;
     readyState = 0;
-    constructor() { streams.push(this); }
+    constructor(url) { assert.equal(url, "/api/phone/events"); streams.push(this); }
     close() { this.readyState = 2; }
   }
-  const document = { hidden: false, addEventListener: (name, fn) => { handlers[name] = fn; } };
-  const ctx = vm.createContext({ ...clock, fetch, AbortController, EventSource, document,
-    window: { addEventListener: (name, fn) => { windowHandlers[name] = fn; } },
-    $: (id) => { if (!nodes.has(id)) nodes.set(id, node()); return nodes.get(id); },
-    capabilities: null, snapshot: null, frameRequest: null, endCompare() {}, probeDiagnostics() {},
-    notice() {}, connectionState() {}, applySnapshot: (next) => { ctx.snapshot = next; },
+  const api = createPhoneApi({ fetch, ...clock });
+  const connection = createPhoneConnection({ state, request: api.request, EventSource, ...clock,
+    isHidden: () => hidden, applySnapshot() {}, connectionState: (online) => { state.online = online; },
+    notice: (message) => { getNode("notice").textContent = message; },
+    onCapabilities: (next) => { getNode("photos-input").accept = ["image/*", ...next.inputExtensions].join(","); },
+    onRetry: (visible) => { getNode("retry-connection").hidden = !visible; }, onPause() {},
   });
-  // Execute the real request helper and complete initialization/lifecycle block.
-  vm.runInContext(phone.slice(phone.indexOf("async function request("), phone.indexOf("function notice("))
-    + phone.slice(phone.indexOf("let events = null;")), ctx);
-  return { ctx, clock, streams, nodes, windowHandlers,
-    hide() { document.hidden = true; handlers.visibilitychange(); },
-    show() { document.hidden = false; handlers.visibilitychange(); } };
+  connection.initialize();
+  return { connection, state, clock, streams, nodes,
+    windowHandlers: { pagehide: connection.pause, pageshow: (event) => { if (event.persisted) connection.initialize(); } },
+    hide() { hidden = true; connection.pause(); },
+    show() { hidden = false; connection.initialize(); } };
 }
 // Mobile state requests also keep the deadline active until JSON is complete.
 {
@@ -165,10 +169,10 @@ function phonePage(fetch) {
   });
   await flush(); page.hide(); assert.equal(oldSignal.aborted, true); page.show(); await flush();
   old.resolve({ inputExtensions: ["old"] }); await flush();
-  vm.runInContext("initialize()", page.ctx); assert.equal(reads, 2);
-  assert.equal(page.streams.length, 0); assert.equal(page.ctx.capabilities, null);
+  page.connection.initialize(); assert.equal(reads, 2);
+  assert.equal(page.streams.length, 0); assert.equal(page.state.capabilities, null);
   fresh.resolve({ inputExtensions: ["fresh"] }); await flush();
-  assert.equal(page.ctx.capabilities.inputExtensions[0], "fresh"); assert.equal(page.streams.length, 1);
+  assert.equal(page.state.capabilities.inputExtensions[0], "fresh"); assert.equal(page.streams.length, 1);
   page.windowHandlers.pagehide(); assert.equal(page.streams[0].readyState, 2);
   page.windowHandlers.pageshow({ persisted: true }); await flush(); assert.equal(page.streams.length, 2);
   page.hide(); assert.equal(page.clock.pending.size, 0);

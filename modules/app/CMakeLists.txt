@@ -5,6 +5,7 @@ hyperdr_add_module(app
     src/analysis_cache.cpp
     src/batch.cpp
     src/cli.cpp
+    src/cli_preview.cpp
     src/cli_model.cpp
     src/cli_binary.cpp
     src/cli_inspection.cpp

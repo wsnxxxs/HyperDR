@@ -70,4 +70,9 @@ int model_gain_command(int argc, char** argv);
 int model_list_command(int argc, char** argv);
 int model_input_command(int argc, char** argv);
 
+struct PreviewSession;
+int preview_frame_command(int argc, char** argv, PreviewSession* session = nullptr,
+                          std::vector<std::uint8_t>* packet = nullptr);
+int preview_worker_command();
+
 }  // namespace hyperdr::app::detail

@@ -28,24 +28,32 @@ const prefs = { get: () => ({ hdrPreview: true }), watch() {} };
 let frames;
 globalThis.requestAnimationFrame = callback => (frames.push(callback), frames.length);
 globalThis.cancelAnimationFrame = () => {};
-globalThis.window = { devicePixelRatio: 1, isSecureContext: true };
+globalThis.window = { devicePixelRatio: 1, isSecureContext: true, matchMedia: () => ({ matches: true }) };
 Object.defineProperty(globalThis, "navigator", { configurable: true, value: { gpu: {} } });
+const { createStageContext } = await load("preview/stage/context.js", {
+  role: () => ({ ...element(), querySelector: () => element(), closest: () => element() }),
+});
 
 function context() {
   const dom = Object.fromEntries(["stage", "frame", "empty", "emptyTitle", "progressBar", "progressText",
     "divider", "hdrCanvas", "sdrCanvas", "originalCanvas", "hdrStatus"].map(key => [key, element()]));
-  const ctx = { dom, image: { source: null, frame: null, original: null, originalEdge: 0 },
-    detail: { active: false }, analysis: {}, renderer: null, modelRequest: 0, imageGeneration: 0, rendererGeneration: 0,
+  const ctx = createStageContext({ toast: message => { throw new Error(message); } });
+  Object.assign(ctx, { dom,
     previewScheduler: { cancel() {} }, toast: message => { throw new Error(message); },
-    notifySource() {}, refreshScope() {}, hdrDisplayQuery: { matches: true },
+    refreshScope() {},
     actions: { detail: { closeDetail() {} }, view: { fitStageToImage() {}, paintOriginal() {}, applyZoom() {}, syncView() {} },
-      rendering: { setCapability() {}, reportInitialCapability() {}, chooseRenderer: async () => {} } } };
-  ctx.invalidateImage = () => ++ctx.imageGeneration;
-  ctx.isCurrentImage = epoch => epoch === ctx.imageGeneration;
-  ctx.invalidateRenderer = () => ++ctx.rendererGeneration;
-  ctx.isCurrentRenderer = epoch => epoch === ctx.rendererGeneration;
+      rendering: { setCapability() {}, reportInitialCapability() {}, chooseRenderer: async () => {} } } });
   return ctx;
 }
+
+const first = context();
+const second = context();
+first.invalidateImage();
+first.invalidateRenderer();
+first.detail.active = true;
+assert.equal(second.imageGeneration, 0);
+assert.equal(second.rendererGeneration, 0);
+assert.equal(second.detail.active, false, "stage mounts never share request epochs or detail state");
 
 async function photoFixture(preview) {
   frames = [];

@@ -10,15 +10,13 @@ import { createHdrRenderer } from "../gpu.js";
 import { createSdrGpuRenderer } from "../sdr-gpu.js";
 import { sdrReasonFor, canReuseRenderer } from "./policy.js";
 
-
 export function createRendering(ctx) {
-  const { image, detail, analysis, toast, actions } = ctx;
+  const { image, actions } = ctx;
   const { stage, hdrStatus, hdrCanvas } = ctx.dom;
 
   const { hdrDisplayQuery } = ctx;
 
   /* ── capability reporting ─────────────────────────────────────────── */
-
 
   function setCapability(key, ok, params) {
     ctx.lastCapability = { key, ok, params };
@@ -49,7 +47,7 @@ export function createRendering(ctx) {
     if (ctx.renderer) {
       // `originalCanvas` owns the comparison view; keep the GPU renderer on
       // the current effect frame even while that layer is temporarily over it.
-      renderer.draw(null, { original: false });
+      ctx.renderer.draw(null, { original: false });
     } else {
       renderSdr(ctx.dom.sdrCanvas, { frame: image.frame, original: false });
     }
@@ -185,6 +183,7 @@ export function createRendering(ctx) {
     actions.view.syncView();
     schedule();
   }
+
   function mountReactions() {
     store.watchAny(["encoding", "outputGamut"], () => {
       if (ctx.lastCapability) setCapability(ctx.lastCapability.key, ctx.lastCapability.ok, ctx.lastCapability.params);
@@ -221,7 +220,6 @@ export function createRendering(ctx) {
       }
     });
   }
-
 
   return { setCapability, reportInitialCapability, draw, schedule, showCanvas, prepareHdrCanvas, sdrReason, canUseHdrRenderer, chooseSdrRenderer, chooseRenderer, mountReactions, mountDisplay, mountPreference, mountLocale };
 }

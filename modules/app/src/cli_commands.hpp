@@ -62,4 +62,8 @@ int verify_command(int argc, char** argv);
 int thumbnail_command(int argc, char** argv);
 int raw_metadata_command(int argc, char** argv);
 
+void append_u32_le(std::vector<std::uint8_t>& bytes, std::uint32_t value);
+void append_float_image(std::vector<std::uint8_t>& bytes, const FloatImage& image);
+void set_stdout_binary();
+
 }  // namespace hyperdr::app::detail

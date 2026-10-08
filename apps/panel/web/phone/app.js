@@ -1,13 +1,15 @@
 import { createPhoneApi } from "../js/core/api.js";
 import { createPhoneState } from "./state.js";
-import { createPhoneConnection } from "./connection.js";
+import { createPhoneConnection, startDiagnosticHeartbeat } from "./connection.js";
 import { mountPhoneView } from "./view.js";
 import { applyStatic } from "../js/i18n/index.js";
 
 applyStatic();
 const api = createPhoneApi({ fetch, setTimeout, clearTimeout, XMLHttpRequest });
 const state = createPhoneState();
-const view = mountPhoneView({ state, api });
+const setupCheck = new URLSearchParams(location.search).get("check") || "";
+startDiagnosticHeartbeat({ state, request: api.request, setInterval, isHidden: () => document.hidden, setupCheck });
+const view = mountPhoneView({ state, api, setupCheck });
 const connection = createPhoneConnection({ state: state.connection, request: api.request,
   EventSource, setTimeout, clearTimeout, isHidden: () => document.hidden,
   applySnapshot: view.applySnapshot, connectionState: view.connectionState, notice: view.notice,

@@ -57,4 +57,9 @@ int curve_command(int argc, char** argv);
 int schema_command(int argc, char** argv);
 int display_curve_command(int argc, char** argv);
 
+int inspect_command(int argc, char** argv);
+int verify_command(int argc, char** argv);
+int thumbnail_command(int argc, char** argv);
+int raw_metadata_command(int argc, char** argv);
+
 }  // namespace hyperdr::app::detail

@@ -4,6 +4,9 @@
 // a linear working space, with the channel count carried alongside so a
 // single-channel gain map and a three-channel base image share one container.
 
+#include "hyperdr/foundation/cancel.hpp"
+
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -28,7 +31,21 @@ struct FloatImage {
 
   FloatImage() = default;
   FloatImage(std::uint32_t w, std::uint32_t h, std::uint32_t c)
-      : width(w), height(h), channels(c), pixels(checked_size(w, h, c), 0.0F) {}
+      : width(w), height(h), channels(c) {
+    const auto count = checked_size(w, h, c);
+    if (!current_cancel_token) {
+      pixels.resize(count, 0.0F);
+      return;
+    }
+    // A large zero-fill can itself outlast the cancellation budget in Debug
+    // and sanitizer builds. Reserve once, then initialize in bounded blocks.
+    check_cancelled();
+    pixels.reserve(count);
+    while (pixels.size() < count) {
+      check_cancelled();
+      pixels.resize(std::min(count, pixels.size() + 65536), 0.0F);
+    }
+  }
 
   [[nodiscard]] static std::size_t checked_size(std::uint32_t w, std::uint32_t h,
                                                 std::uint32_t c) {

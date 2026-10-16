@@ -22,6 +22,7 @@ void usage() {
          " PQ, HLG, AVIF\n\n"
          "Usage:\n"
          "  HyperDR convert <file-or-directory> --output <directory> [options]\n"
+         "  HyperDR probe <image> [--json]\n"
          "  HyperDR inspect <file.heic> [--json]\n"
          "  HyperDR raw-metadata <raw-file>\n"
          "  HyperDR verify <file.heic|file.jpg|file.tiff> [--reconstruct <preview.tiff>]\n"
@@ -80,6 +81,7 @@ void usage() {
 }  // namespace
 
 int run_cli(int argc, char** argv) {
+  Engine engine;
   if (argc < 2 || std::string_view(argv[1]) == "--help" ||
       std::string_view(argv[1]) == "-h") {
     usage();
@@ -91,6 +93,7 @@ int run_cli(int argc, char** argv) {
   if (command == "schema") return schema_command(argc, argv);
   if (command == "display-curve") return display_curve_command(argc, argv);
   if (command == "raw-metadata") return raw_metadata_command(argc, argv);
+  if (command == "probe") return probe_command(argc, argv);
   if (command == "inspect") return inspect_command(argc, argv);
   if (command == "verify") return verify_command(argc, argv);
   if (command == "thumbnail") return thumbnail_command(argc, argv);

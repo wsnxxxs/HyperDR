@@ -8,14 +8,13 @@
 #include <algorithm>
 
 namespace hyperdr {
-std::vector<std::uint8_t> compact_preview_packet(const GainMapResult& result,
+std::string compact_preview_metadata(const GainMapResult& result,
     const DecodeInfo& decode, const InputDescription& input, bool hasCaptureMetadata,
     const SourceColorInfo& source_color) {
   const auto& base = result.base_linear;
   const auto& gain = result.gain_map;
   const auto channel = gain_map_channel(result.metadata, 0);
   const auto base_bytes = base.pixels.size() * sizeof(float);
-  const auto gain_bytes = gain.pixels.size() * sizeof(float);
   const auto base_id = std::to_string(base.width) + "x" + std::to_string(base.height) + "-" +
       fnv1a_hex(std::string_view(reinterpret_cast<const char*>(base.pixels.data()), base_bytes));
   const float base_headroom = rational_value(result.metadata.base_headroom);
@@ -60,6 +59,16 @@ std::vector<std::uint8_t> compact_preview_packet(const GainMapResult& result,
   for (const auto& reason : decode.degradation_reasons) writer.element(reason);
   auto metadata = writer.end_array().end_object().take();
   while (metadata.size() % 4) metadata += ' ';
+  return metadata;
+}
+std::vector<std::uint8_t> compact_preview_packet(const GainMapResult& result,
+    const DecodeInfo& decode, const InputDescription& input, bool hasCaptureMetadata,
+    const SourceColorInfo& source_color) {
+  const auto& base = result.base_linear;
+  const auto& gain = result.gain_map;
+  const auto base_bytes = base.pixels.size() * sizeof(float);
+  const auto gain_bytes = gain.pixels.size() * sizeof(float);
+  const auto metadata = compact_preview_metadata(result, decode, input, hasCaptureMetadata, source_color);
   std::vector<std::uint8_t> bytes(12 + metadata.size() + base_bytes + gain_bytes);
   std::memcpy(bytes.data(), "HYPREV2\n", 8);
   const auto size = static_cast<std::uint32_t>(metadata.size());

@@ -25,15 +25,12 @@ if(HYPERDR_WITH_CODECS)
   hyperdr_add_test(alpha_decode_test LINK HyperDR::codec heif avif)
   if(TARGET heif_parallel_test)
     set_tests_properties(heif_parallel_test PROPERTIES SKIP_RETURN_CODE 77)
-    hyperdr_restore_x265_multibit(heif_parallel_test)
     hyperdr_copy_libultrahdr(heif_parallel_test)
   endif()
   if(TARGET alpha_decode_test)
-    hyperdr_restore_x265_multibit(alpha_decode_test)
     hyperdr_copy_libultrahdr(alpha_decode_test)
   endif()
   if(TARGET codec_test)
-    hyperdr_restore_x265_multibit(codec_test)
     hyperdr_copy_libultrahdr(codec_test)
   endif()
 
@@ -45,7 +42,7 @@ if(HYPERDR_WITH_CODECS)
 
   # Pure boundary tests: no giant fixture or allocation is needed to pin the
   # maximum RAW dimensions and the overflow-safe arithmetic.
-  hyperdr_add_test(budget_test)
+  hyperdr_add_test(budget_test LINK HyperDR::foundation)
 
   # The DNG opcode lists the RAW decoder applies, as bytes and arithmetic.
   hyperdr_add_test(dng_opcode_test)

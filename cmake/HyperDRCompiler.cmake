@@ -30,10 +30,7 @@ function(hyperdr_configure_target target)
         $<$<AND:$<CONFIG:Release>,$<BOOL:${HYPERDR_ENABLE_AVX2}>>:-mavx2>)
     endif()
   endif()
-  # Every executable lands at the top of the build tree, where the Windows
-  # runtime DLLs (libheif, libx265's dual 8/10-bit pair, libultrahdr) are staged.
-  # Scattering them across module subdirectories would mean staging those DLLs
-  # once per directory.
+  # Executables share the build root with the staged codec libraries.
   get_target_property(hyperdr_target_type ${target} TYPE)
   if(hyperdr_target_type STREQUAL "EXECUTABLE")
     set_target_properties(${target} PROPERTIES

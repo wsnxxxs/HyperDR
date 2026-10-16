@@ -1,4 +1,5 @@
 #include "hyperdr/foundation/hash.hpp"
+#include "hyperdr/foundation/cancel.hpp"
 
 #include <algorithm>
 #include <array>
@@ -15,9 +16,12 @@ namespace hyperdr {
 
 std::string fnv1a_hex(std::string_view text) {
   std::uint64_t hash = 1469598103934665603ULL;
-  for (const unsigned char c : text) {
-    hash ^= static_cast<std::uint64_t>(c);
-    hash *= 1099511628211ULL;
+  for (std::size_t offset = 0; offset < text.size(); offset += 65536) {
+    check_cancelled();
+    for (const unsigned char c : text.substr(offset, 65536)) {
+      hash ^= static_cast<std::uint64_t>(c);
+      hash *= 1099511628211ULL;
+    }
   }
   std::array<char, 17> buffer{};
   std::snprintf(buffer.data(), buffer.size(), "%016llx",
@@ -116,6 +120,7 @@ std::string sha256_file_hex(const std::filesystem::path& path) {
   // terminated the process on Windows while passing on Linux's 8 MiB.
   std::vector<std::uint8_t> buffer(1024 * 1024);
   while (input) {
+    check_cancelled();
     input.read(reinterpret_cast<char*>(buffer.data()), buffer.size());
     const auto count = input.gcount();
     if (count > 0) hash.update(buffer.data(), static_cast<std::size_t>(count));

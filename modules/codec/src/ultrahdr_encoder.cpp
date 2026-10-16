@@ -3,6 +3,7 @@
 #include "hyperdr/container/heif_tmap.hpp"
 #include "hyperdr/container/exif.hpp"
 #include "hyperdr/foundation/rational.hpp"
+#include "hyperdr/foundation/parallel.hpp"
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/foundation/file_io.hpp"
@@ -95,6 +96,11 @@ std::vector<std::uint8_t> compress_jpeg(const std::uint8_t* pixels, std::uint32_
 
   const std::size_t stride = static_cast<std::size_t>(width) * components;
   while (info.next_scanline < info.image_height) {
+    if (current_cancel_token && current_cancel_token->requested()) {
+      jpeg_destroy_compress(&info);
+      std::free(output);
+      throw Cancelled();
+    }
     auto* row = const_cast<JSAMPLE*>(
         pixels + static_cast<std::size_t>(info.next_scanline) * stride);
     jpeg_write_scanlines(&info, &row, 1);
@@ -112,6 +118,7 @@ std::vector<std::uint8_t> make_base_jpeg(const FloatImage& image,
   if (image.channels != 3) throw std::invalid_argument("Ultra HDR base must be RGB");
   std::vector<std::uint8_t> rgb(static_cast<std::size_t>(image.width) * image.height * 3);
   for (std::uint32_t y = 0; y < image.height; ++y) {
+    check_cancelled();
     for (std::uint32_t x = 0; x < image.width; ++x) {
       const auto base = (static_cast<std::size_t>(y) * image.width + x) * 3;
       const auto fitted = clamp_srgb
@@ -343,13 +350,15 @@ std::vector<std::uint8_t> encode_sdr_jpeg(const FloatImage& image,
   if (gamut != ColorGamut::kSrgb && gamut != ColorGamut::kDisplayP3)
     throw std::invalid_argument("SDR JPEG supports sRGB or Display P3");
   std::vector<std::uint8_t> rgb(image.pixels.size());
-  for (std::uint32_t y=0;y<image.height;++y) for (std::uint32_t x=0;x<image.width;++x) {
-    const auto i=(static_cast<std::size_t>(y)*image.width+x)*3;
-    auto color=fit_linear_p3_gamut(image.pixels[i],image.pixels[i+1],image.pixels[i+2],1.0F,
-                                  gamut == ColorGamut::kSrgb);
-    if (gamut == ColorGamut::kSrgb) color=linear_p3_to_rec709(color[0],color[1],color[2]);
-    for (unsigned c=0;c<3;++c) rgb[i+c]=static_cast<std::uint8_t>(quantize_dithered(srgb_oetf(color[c]),255,x,y,c));
-  }
+  parallel_for_rows(image.height, [&](std::uint32_t y) {
+    for (std::uint32_t x=0;x<image.width;++x) {
+      const auto i=(static_cast<std::size_t>(y)*image.width+x)*3;
+      auto color=fit_linear_p3_gamut(image.pixels[i],image.pixels[i+1],image.pixels[i+2],1.0F,
+                                    gamut == ColorGamut::kSrgb);
+      if (gamut == ColorGamut::kSrgb) color=linear_p3_to_rec709(color[0],color[1],color[2]);
+      for (unsigned c=0;c<3;++c) rgb[i+c]=static_cast<std::uint8_t>(quantize_dithered(srgb_oetf(color[c]),255,x,y,c));
+    }
+  });
   const auto icc = gamut == ColorGamut::kSrgb ? codec::srgb_profile() : codec::display_p3_profile();
   const auto exif=make_minimal_exif(metadata);
   return compress_jpeg(rgb.data(),image.width,image.height,3,JCS_RGB,quality,&exif,&icc);

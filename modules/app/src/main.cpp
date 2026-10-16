@@ -1,5 +1,4 @@
 #include "hyperdr/app/cli.hpp"
-#include "hyperdr/model/ncnn_runtime.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 
 #include <exception>
@@ -13,9 +12,6 @@ int wmain(int argc, wchar_t** wide_argv) {
 int main(int argc, char** argv) {
 #endif
   try {
-#if HYPERDR_WITH_NCNN
-    hyperdr::install_embedded_ncnn_runtime();
-#endif
 #ifdef _WIN32
     std::vector<std::string> utf8_args;
     utf8_args.reserve(argc);

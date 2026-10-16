@@ -116,8 +116,7 @@ cmake -S . -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems
 cmake --build build --config Release
 ```
 界面会自动在 `build/`、`build/Release/` 等位置找到它。
-PQ / HLG 需要 Main10 x265；首次完整构建后按项目根 `README.md` 运行一次
-`scripts/prepare_x265_multibit.ps1`。
+Windows 版本已冻结在 [`a43d46a`](https://github.com/wsnxxxs/HyperDR/tree/a43d46a)，相关说明见该提交。
 
 ## 能做什么
 

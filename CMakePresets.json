@@ -30,28 +30,6 @@
       }
     },
     {
-      "name": "windows-msvc-core",
-      "inherits": "core",
-      "condition": {
-        "type": "equals",
-        "lhs": "${hostSystemName}",
-        "rhs": "Windows"
-      }
-    },
-    {
-      "name": "windows-msvc-codecs",
-      "inherits": "codecs",
-      "condition": {
-        "type": "equals",
-        "lhs": "${hostSystemName}",
-        "rhs": "Windows"
-      },
-      "cacheVariables": {
-        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
-        "VCPKG_TARGET_TRIPLET": "x64-windows"
-      }
-    },
-    {
       "name": "macos-arm64-core",
       "inherits": "core",
       "condition": {
@@ -78,26 +56,9 @@
         "CMAKE_TOOLCHAIN_FILE": "$env{HOME}/vcpkg/scripts/buildsystems/vcpkg.cmake",
         "VCPKG_TARGET_TRIPLET": "arm64-osx"
       }
-    },
-    {
-      "name": "linux-core",
-      "inherits": "core",
-      "condition": {
-        "type": "equals",
-        "lhs": "${hostSystemName}",
-        "rhs": "Linux"
-      }
     }
   ],
   "buildPresets": [
-    {
-      "name": "windows-msvc-core",
-      "configurePreset": "windows-msvc-core"
-    },
-    {
-      "name": "windows-msvc-codecs",
-      "configurePreset": "windows-msvc-codecs"
-    },
     {
       "name": "macos-arm64-core",
       "configurePreset": "macos-arm64-core"
@@ -105,33 +66,9 @@
     {
       "name": "macos-arm64-codecs",
       "configurePreset": "macos-arm64-codecs"
-    },
-    {
-      "name": "linux-core",
-      "configurePreset": "linux-core"
     }
   ],
   "testPresets": [
-    {
-      "name": "windows-msvc-core",
-      "configurePreset": "windows-msvc-core",
-      "output": {
-        "outputOnFailure": true
-      },
-      "execution": {
-        "noTestsAction": "error"
-      }
-    },
-    {
-      "name": "windows-msvc-codecs",
-      "configurePreset": "windows-msvc-codecs",
-      "output": {
-        "outputOnFailure": true
-      },
-      "execution": {
-        "noTestsAction": "error"
-      }
-    },
     {
       "name": "macos-arm64-core",
       "configurePreset": "macos-arm64-core",
@@ -145,16 +82,6 @@
     {
       "name": "macos-arm64-codecs",
       "configurePreset": "macos-arm64-codecs",
-      "output": {
-        "outputOnFailure": true
-      },
-      "execution": {
-        "noTestsAction": "error"
-      }
-    },
-    {
-      "name": "linux-core",
-      "configurePreset": "linux-core",
       "output": {
         "outputOnFailure": true
       },

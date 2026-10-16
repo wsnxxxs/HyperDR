@@ -17,6 +17,16 @@
 
 namespace hyperdr::app::detail {
 
+int probe_command(int argc, char** argv) {
+  if (argc < 3 || argc > 4) throw std::invalid_argument("probe requires one input image");
+  if (argc == 4 && std::string_view(argv[3]) != "--json") {
+    throw std::invalid_argument("unknown probe option: " + std::string(argv[3]));
+  }
+  set_stdout_binary();
+  std::cout << Engine().probe(path_from_utf8(argv[2]));
+  return 0;
+}
+
 void print_inspection(const HeifInspection& i) {
   std::cout << "structurally valid: " << (i.structurally_valid ? "yes" : "no") << '\n'
             << "HEIC brand: " << (i.has_heic_brand ? "yes" : "no") << '\n'

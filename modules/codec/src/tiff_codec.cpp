@@ -1,4 +1,5 @@
 #include "hyperdr/codec/encoders.hpp"
+#include "hyperdr/foundation/cancel.hpp"
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/container/exif.hpp"
 #include "hyperdr/image/transfer.hpp"
@@ -258,6 +259,7 @@ std::vector<std::uint8_t> encode_sdr_tiff(const FloatImage& image,
     TIFFSetField(tiff.get(), TIFFTAG_SOFTWARE, "HyperDR");
     std::vector<std::uint16_t> row(static_cast<std::size_t>(image.width) * 3);
     for (std::uint32_t y = 0; y < image.height; ++y) {
+      check_cancelled();
       for (std::size_t x = 0; x < image.width; ++x) {
         const auto i = static_cast<std::size_t>(y) * row.size() + x * 3;
         auto color = fit_linear_p3_gamut(image.pixels[i], image.pixels[i+1], image.pixels[i+2],

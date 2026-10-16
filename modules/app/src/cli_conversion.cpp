@@ -7,6 +7,7 @@
 #include "hyperdr/foundation/file_io.hpp"
 
 #include <iomanip>
+#include <cstdlib>
 #include <iostream>
 
 namespace hyperdr::app::detail {
@@ -16,7 +17,18 @@ int convert_command(int argc, char** argv) {
   ConvertOptions options;
   options.input = path_from_utf8(argv[2]);
   parse_settings(argc, argv, 3, options);
-  return run_conversion(options);
+  struct CliProgress : ProgressSink {
+    void on_progress(const ProgressEvent& event) override { std::cerr << event.text; }
+  } sink;
+  EngineConfig config;
+  if (const char* text = std::getenv("HYPERDR_HEIC_TILE_WORKERS")) {
+    char* end = nullptr;
+    const long workers = std::strtol(text, &end, 10);
+    if (*text && *end == '\0' && workers >= 1 && workers <= 4) config.heic_tile_workers = static_cast<unsigned>(workers);
+  }
+  int status = 0;
+  static_cast<void>(Engine(config).convert(options, &sink, nullptr, &status));
+  return status;
 }
 
 // Emits the exporter's own global curve so the panel can render a preview from

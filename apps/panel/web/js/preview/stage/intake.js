@@ -1,6 +1,7 @@
 /* Accept picker, native drop, browser drop and clipboard photos through the uploader. */
 
 import { store } from "../../core/store.js";
+import { native } from "../../core/native.js";
 import { setText } from "../../core/dom.js";
 import { t, onLocaleChange } from "../../i18n/index.js";
 import { createUploader } from "../session.js";
@@ -38,23 +39,20 @@ export function createIntake(ctx) {
     const state = store.get();
     return !state.restoring && !state.starting && !state.uploading && !state.optimizing && !state.jobId;
   };
-  const nativeDropQueueKey = "__HYPERDR_NATIVE_FILE_DROPS__";
   const consumeNativeDrop = () => {
-    const queued = globalThis[nativeDropQueueKey];
     const capabilities = store.get().capabilities;
     // Keep a native drop queued until the boot capability request completes;
     // otherwise a very quick drop after launch would be mistaken for a browser
     // page that does not support the desktop bridge.
-    if (!Array.isArray(queued) || !capabilities || store.get().restoring) return;
-    globalThis[nativeDropQueueKey] = [];
+    if (!native.hasDroppedPaths || !capabilities || store.get().restoring) return;
+    const [path] = native.takeDroppedPaths();
     if (!canReplace() || !capabilities.nativePathInput) return;
-    const path = queued.find((value) => typeof value === "string" && value);
     if (path) upload.startNativePath(path);
   };
-  // Rust queues before dispatching, so this also handles a drop that arrived
-  // during panel initialization.
+  // The shell queues before dispatching, so this also handles a drop that
+  // arrived during panel initialization.
   function mountNativeDrop() {
-    window.addEventListener("hyperdr:native-file-drop", consumeNativeDrop);
+    native.onFileDrop(consumeNativeDrop);
     store.watchAny(["capabilities", "restoring"], consumeNativeDrop);
     consumeNativeDrop();
   }
@@ -95,7 +93,7 @@ export function createIntake(ctx) {
     pickingFile = true;
     try {
       await pickInputFile({ capabilities: store.get().capabilities,
-        dialog: window.__TAURI__?.dialog, fileInput, upload });
+        dialog: native.dialog, fileInput, upload });
     } catch (error) {
       toast(error.message || t("err.nativeInput"), true);
     } finally {

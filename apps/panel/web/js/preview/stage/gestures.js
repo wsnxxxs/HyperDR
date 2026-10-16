@@ -49,7 +49,10 @@ export function createGestures(ctx) {
       gesture.y = event.clientY;
       clearTimeout(gesture.timer);
       // Press-and-hold compares against the original; an empty-stage tap imports.
-      if (image.source && !touchQuery.matches) {
+      // Decided per pointer, not per device: a touch laptop with a mouse
+      // reports a fine primary pointer, yet its fingers still pinch, and a
+      // touch hold is the system's own gesture (callout, selection).
+      if (image.source && event.pointerType !== "touch") {
         gesture.timer = setTimeout(() => beginCompare(event), 240);
       }
     });

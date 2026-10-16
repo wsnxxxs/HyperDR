@@ -6,6 +6,7 @@
 
 import { api, ApiError } from "../core/api.js";
 import { store } from "../core/store.js";
+import { native } from "../core/native.js";
 import { prefs } from "../ui/prefs-schema.js";
 import { t } from "../i18n/index.js";
 
@@ -15,9 +16,9 @@ const DIRECTORY_STORE = "handles";
 let browserDirectory = null;
 let browserPermission = "";
 
-function nativeFolderPickerAvailable() {
-  return Boolean(store.get().capabilities?.nativePathOutput
-    && typeof window.__TAURI__?.dialog?.open === "function");
+/** The shell's folder dialog can choose where the service writes results. */
+export function nativeFolderPickerAvailable() {
+  return Boolean(store.get().capabilities?.nativePathOutput && native.canPickFolder);
 }
 
 function savePickerAvailable() {
@@ -127,18 +128,12 @@ function updateServerFolder(label) {
   } });
 }
 
-/** The desktop shell's own folder dialog. Returns "" when it was dismissed. */
-async function pickNativeFolder() {
-  const path = await window.__TAURI__.dialog.open({ directory: true, multiple: false });
-  return typeof path === "string" ? path : "";
-}
-
 /** Select and remember a save directory, without returning a server path to the
  * preferences UI. The desktop path is kept on the server; browser handles live
  * in this origin's IndexedDB. */
 export async function chooseSaveFolder() {
   if (nativeFolderPickerAvailable()) {
-    const path = await pickNativeFolder();
+    const path = await native.pickFolder();
     if (!path) return "";
     const result = await api.setExportFolder(path);
     updateServerFolder(result.label);

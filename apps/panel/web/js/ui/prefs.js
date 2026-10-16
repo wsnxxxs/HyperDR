@@ -9,7 +9,7 @@ import {
 import { api } from "../core/api.js";
 import { openDialog } from "./dialogs.js";
 import {
-  availableSaveTargets, browserDirectoryName, chooseSaveFolder,
+  availableSaveTargets, browserDirectoryName, chooseSaveFolder, nativeFolderPickerAvailable,
 } from "../run/save.js";
 
 export function mountPrefs({ toast, phoneWorkbench }) {
@@ -113,7 +113,7 @@ export function mountPrefs({ toast, phoneWorkbench }) {
 
     async function refresh() {
       const capabilities = store.get().capabilities || {};
-      const native = Boolean(capabilities.nativePathOutput && window.__TAURI__?.dialog?.open);
+      const native = nativeFolderPickerAvailable();
       const browserFolder = !native
         && availableSaveTargets().some(([target]) => target === "fixed");
       row.hidden = !native && !browserFolder;

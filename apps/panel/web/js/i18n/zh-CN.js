@@ -559,6 +559,8 @@ export default {
   "out.hevcFast": "快速导出 HEIC",
   "out.hevcStandard": "标准质量",
   "out.hevcFastHint": "编码更快，文件大小和细节可能略有变化。",
+  "out.limitHint": "此设备导出的长边最多 {edge} 像素，更大的照片会等比缩小。",
+  "out.limitScaled": "此设备导出的长边最多 {edge} 像素，这张照片将缩小为 {width} × {height}。",
   "out.stale": "当前调整已更改，这是上一版的结果",
   "out.download": "保存到设备",
   "save.button.as": "另存为…",

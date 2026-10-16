@@ -46,6 +46,7 @@ export function mountEditor({ stage }) {
   role("shortcuts-open").addEventListener("click", () => openDialog(role("shortcuts-dialog")));
   const exportFilename = role("export-filename");
   const summary = role("export-summary");
+  const limit = role("export-limit");
   const thumbnail = role("export-thumbnail");
   const modes = role("viewer-modes");
   const fit = role("zoom-fit");
@@ -91,6 +92,20 @@ export function mountEditor({ stage }) {
     ].filter(Boolean);
   }
 
+  /* A device may cap the exported resolution (the first mobile builds do).
+   * The cap comes from `capabilities.exportMaxEdge`; the source size, when the
+   * service reports it, from `file.width` / `file.height`. Unknown size: say
+   * the rule. Known size over the cap: say what this photo becomes. */
+  function exportLimit(state) {
+    const edge = Number(state.capabilities?.exportMaxEdge);
+    if (!state.file || !Number.isFinite(edge) || edge <= 0) return "";
+    const width = Number(state.file.width), height = Number(state.file.height);
+    if (!(width > 0 && height > 0)) return t("out.limitHint", { edge });
+    const scale = edge / Math.max(width, height);
+    if (scale >= 1) return "";
+    return t("out.limitScaled", { edge, width: Math.round(width * scale), height: Math.round(height * scale) });
+  }
+
   function sync() {
     const state = store.get();
     backgroundNote.hidden = !state.starting && !state.jobId;
@@ -125,6 +140,9 @@ export function mountEditor({ stage }) {
     setText(viewerHint, !ready ? "" : state.viewerZoom > 1 ? t("workspace.panHint") : state.viewMode === "split" ? t("workspace.compareHint") : t("workspace.photoHint"));
     setText(exportFilename, state.file?.name || "");
     summary.replaceChildren(...summaryRows(state).flatMap(([key, value]) => [el("dt", {}, t(key)), el("dd", {}, value)]));
+    const limitText = exportLimit(state);
+    setText(limit, limitText);
+    limit.hidden = !limitText;
     for (const { value, label, button } of modeButtons) {
       setText(button, t(label)); setPressed(button, state.viewMode === value); button.disabled = !ready;
     }
@@ -152,7 +170,7 @@ export function mountEditor({ stage }) {
   fit.addEventListener("click", () => store.set({ viewerZoom: 1, viewerPanX: 0, viewerPanY: 0 }));
   zoomIn.addEventListener("click", () => zoomBy(1));
   zoomOut.addEventListener("click", () => zoomBy(-1));
-  store.watchAny(["file", "previewReady", "uploading", "restoring", "starting", "optimizing", "jobId", "encoding", "previewOptimized", "viewMode", "viewerZoom", "result", "exports", "savedExports", "sourceDomain", ...OPTION_KEYS], sync, { immediate: true });
+  store.watchAny(["file", "capabilities", "previewReady", "uploading", "restoring", "starting", "optimizing", "jobId", "encoding", "previewOptimized", "viewMode", "viewerZoom", "result", "exports", "savedExports", "sourceDomain", ...OPTION_KEYS], sync, { immediate: true });
   stage.onSourceChange(() => { sync(); if (dialog.open) paintThumbnail(); });
   onLocaleChange(sync);
   document.addEventListener("keydown", (event) => {

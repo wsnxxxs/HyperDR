@@ -5,6 +5,9 @@ import { setText, clamp } from "../../core/dom.js";
 import { t, onLocaleChange } from "../../i18n/index.js";
 import { fittedSize, clampedPan, wheelZoomLevel, zoomAtPointer } from "./geometry.js";
 
+/* The same ceiling wheelZoomLevel() applies. */
+const MAX_PINCH_ZOOM = 4;
+
 export function createView(ctx) {
   const { image, actions } = ctx;
   const { stage, frame, viewport, divider, hdrCanvas, originalCanvas, badge, hdrStatus, detailButton, detailCanvas } = ctx.dom;
@@ -150,19 +153,61 @@ export function createView(ctx) {
 
   function mountPan() {
     const pan = { pointer: null, x: 0, y: 0, originX: 0, originY: 0 };
+    function beginPan(pointerId, clientX, clientY) {
+      const { x, y } = clampedPan(store.get(), frame.clientWidth, frame.clientHeight);
+      Object.assign(pan, { pointer: pointerId, x: clientX, y: clientY, originX: x, originY: y });
+    }
+    /* Two fingers pinch and pan together, like any photo viewer: the zoom is
+     * anchored where the gesture began and the image follows the fingers'
+     * midpoint. A second finger takes over from a one-finger pan; lifting one
+     * of two hands the pan back to the finger that stays. */
+    const touches = new Map();
+    let pinch = null;
+    const spread = () => {
+      const [a, b] = touches.values();
+      return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, distance: Math.hypot(a.x - b.x, a.y - b.y) || 1 };
+    };
+    const releaseTouch = (event) => {
+      if (!touches.delete(event.pointerId) || !pinch || touches.size >= 2) return;
+      pinch = null;
+      const [[pointerId, rest] = []] = touches;
+      if (pointerId != null && store.get().viewerZoom > 1) beginPan(pointerId, rest.x, rest.y);
+    };
     stage.addEventListener("pointerdown", (event) => {
+      if (event.pointerType === "touch" && image.source && !event.target.closest("button, [role='slider']")) {
+        touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        if (touches.size === 2) {
+          const state = store.get();
+          const { x, y } = clampedPan(state, frame.clientWidth, frame.clientHeight);
+          pinch = { ...spread(), state: { viewerZoom: state.viewerZoom, viewerPanX: x, viewerPanY: y } };
+          pan.pointer = null;
+          // The first finger may have started press-and-hold in gestures.js;
+          // this event never reaches it, so stop that here.
+          actions.gestures?.cancelGesture();
+          event.stopImmediatePropagation(); event.preventDefault();
+          return;
+        }
+      }
       if (store.get().viewerZoom <= 1 || event.button !== 0 || event.target.closest("button, [role='slider']")) return;
       event.stopImmediatePropagation(); event.preventDefault();
-      const state = store.get();
-      const { x, y } = clampedPan(state, frame.clientWidth, frame.clientHeight);
-      Object.assign(pan, { pointer: event.pointerId, x: event.clientX, y: event.clientY,
-        originX: x, originY: y });
+      beginPan(event.pointerId, event.clientX, event.clientY);
       stage.setPointerCapture(event.pointerId);
     });
     stage.addEventListener("pointermove", (event) => {
+      if (touches.has(event.pointerId)) touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (pinch && touches.size === 2) {
+        const now = spread();
+        const next = clamp(pinch.state.viewerZoom * now.distance / pinch.distance, 1, MAX_PINCH_ZOOM);
+        if (next <= 1.001) { store.set({ viewerZoom: 1, viewerPanX: 0, viewerPanY: 0 }); return; }
+        const zoomed = zoomAtPointer(pinch.state, next, pinch.x, pinch.y,
+          frame.getBoundingClientRect(), frame.clientWidth, frame.clientHeight);
+        store.set({ ...zoomed, viewerPanX: zoomed.viewerPanX + now.x - pinch.x, viewerPanY: zoomed.viewerPanY + now.y - pinch.y });
+        return;
+      }
       if (pan.pointer !== event.pointerId) return;
       store.set({ viewerPanX: pan.originX + event.clientX - pan.x, viewerPanY: pan.originY + event.clientY - pan.y });
     });
+    for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) stage.addEventListener(type, releaseTouch);
     for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) stage.addEventListener(type, (event) => {
       if (pan.pointer !== event.pointerId) return;
       pan.pointer = null; event.stopImmediatePropagation();
@@ -171,12 +216,11 @@ export function createView(ctx) {
 
   function mountWheel() {
     /* Wheel zoom, anchored at the pointer so the detail under it stays put.
-     * A trackpad pinch arrives as a ctrl+wheel and is honoured everywhere; a
-     * plain wheel zooms only in the desktop layout, where the stage never
-     * scrolls -- in the stacked phone-width layout it scrolls the page. */
-    const wideLayout = window.matchMedia("(width >= 860px)");
+     * A trackpad pinch arrives as a ctrl+wheel. A plain wheel zooms too: no
+     * layout scrolls the page any more (the stacked layout scrolls only its
+     * rail), so the stage never has to pass the wheel on. */
     stage.addEventListener("wheel", (event) => {
-      if (!image.source || (!event.ctrlKey && !wideLayout.matches)) return;
+      if (!image.source) return;
       event.preventDefault();
       const state = store.get();
       const next = wheelZoomLevel(state.viewerZoom, event);

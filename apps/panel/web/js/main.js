@@ -28,6 +28,7 @@ import { mountDialogs } from "./ui/dialogs.js";
 import { prefs } from "./ui/prefs-schema.js";
 import { t, setLocale, applyStatic, onLocaleChange } from "./i18n/index.js";
 import { applyKeyLabels } from "./core/keys.js";
+import { applyPlatform } from "./core/platform.js";
 
 // The schema's defaults become store keys here, so core/store.js never has to
 // know a control's name -- the dependency points settings -> core, not back.
@@ -36,6 +37,9 @@ store.set(defaultSettings());
 /* ── device preferences ────────────────────────────────────────────────
  * Applied before anything mounts, so no view ever paints in the wrong
  * language or with a transition the user asked not to see. */
+
+// First, so adaptive.css lays out for this OS and shell before anything mounts.
+applyPlatform();
 
 document.documentElement.lang = prefs.get().locale;
 setLocale(prefs.get().locale);

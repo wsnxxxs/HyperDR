@@ -558,6 +558,8 @@ export default {
   "out.hevcFast": "Fast HEIC export",
   "out.hevcStandard": "Standard quality",
   "out.hevcFastHint": "Encodes faster; file size and fine detail may differ slightly.",
+  "out.limitHint": "Exports on this device are at most {edge} pixels on the long edge; larger photos are scaled down.",
+  "out.limitScaled": "Exports on this device are at most {edge} pixels on the long edge, so this photo will be saved at {width} × {height}.",
   "out.stale": "Your edit has changed since this export",
   "out.download": "Save to device",
   "save.button.as": "Save as…",

@@ -1,4 +1,25 @@
-/* Neutral darkroom surfaces with blue interaction accents. */
+/* Design tokens: the one place literal colours, sizes, radii and timings live.
+ *
+ * Neutral darkroom surfaces with blue interaction accents. apps/panel/web/README.md
+ * ("界面一致性" and "多平台") states the rules these values implement.
+ *
+ * Breakpoints cannot be custom properties (media queries do not read `var()`),
+ * so the canonical set is written out here and every stylesheet uses exactly
+ * these values:
+ *
+ *   xs        width < 380px                 smallest phones: drop secondary text
+ *   compact   width < 600px                 phones in portrait
+ *   stacked   (width < 600px), (width < 860px) and (orientation: portrait)
+ *                                           stage above rail, rail scrolls alone
+ *   sheet     width <= 720px                dialogs become full-screen sheets
+ *   regular   860px <= width < 1150px       narrower rail, tighter header
+ *   wide      width >= 1150px               full desktop layout
+ *   short     height < 800px                trim vertical rhythm in the rail
+ *
+ * Phones in landscape (width < 860px but not portrait) keep the side-by-side
+ * layout with the narrow rail, because stacking a 390px-tall screen leaves no
+ * room for either the photograph or the controls.
+ */
 
 :root {
   color-scheme: light dark;
@@ -97,12 +118,20 @@
 
   /* Preview backdrop and overlays (Pro darkroom standard) */
   --preview-backdrop: #141517;
+  --preview-detail-backdrop: #10141a;
   --preview-darkroom-bg: light-dark(#e3e5e8, #121315);
   --overlay:         rgba(15, 18, 24, 0.82);
   --overlay-ink:     #f8fafc;
   --overlay-muted:   #a1a4af;
   --overlay-track:   rgba(255, 255, 255, 0.18);
   --overlay-hover:   rgba(255, 255, 255, 0.15);
+  --overlay-line:    rgba(255, 255, 255, 0.12);
+  --overlay-line-strong: rgba(255, 255, 255, 0.45);
+  --overlay-shadow:  rgba(0, 0, 0, 0.4);
+  --inset-shade:     light-dark(rgba(0, 0, 0, 0.05), rgba(0, 0, 0, 0.2));
+  --success-line:    rgba(16, 185, 129, 0.4);
+  /* QR codes need a white quiet zone in both themes or phones cannot read them. */
+  --qr-surface:      #ffffff;
 
   /* -- focus --------------------------------------------------------- */
   --focus:           var(--accent);
@@ -123,14 +152,43 @@
   --space-5: 24px;
   --space-6: 32px;
 
+  /* Control heights. `--control-compact` is the dense toolbar size and
+   * `--control-height` the default; both grow to the touch minimum on coarse
+   * pointers (see the input section below). `--control-touch` is the
+   * platform minimum hit target (Apple HIG 44pt; Material asks 48dp for
+   * standalone targets, 44 is accepted inside dense toolbars). */
   --control-compact: 32px;
   --control-height: 36px;
   --control-touch: 44px;
   --panel-padding: var(--space-5);
 
+  /* -- application frame --------------------------------------------- */
+  --header-height: 48px;
+  --status-height: 28px;
+  --rail-width: 342px;
+  --rail-width-regular: 320px;
+  --rail-width-narrow: 300px;
+  --frame-pad: 22px;
+
+  /* -- platform insets ----------------------------------------------- */
+  /* Device cut-outs and gesture bars (iOS/Android with viewport-fit=cover).
+   * They resolve to 0 on desktop browsers and in desktop shells. */
+  --safe-top:    env(safe-area-inset-top, 0px);
+  --safe-right:  env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left:   env(safe-area-inset-left, 0px);
+  /* Space the window system draws over the header. Zero unless the desktop
+   * shell asks for an overlaid title bar; see `[data-titlebar]` in
+   * adaptive.css. macOS traffic lights occupy ~70px from the left edge at the
+   * default 48px header; Windows caption buttons are drawn by the panel itself
+   * so they need no inset. */
+  --titlebar-inset-start: 0px;
+  --titlebar-inset-end:   0px;
+  --titlebar-macos-inset: 78px;
+
   --page-pad: clamp(12px, 1.4vw, 20px);
-  --page-pad-inline: max(var(--page-pad), env(safe-area-inset-left), env(safe-area-inset-right));
-  --page-pad-bottom: max(var(--page-pad), env(safe-area-inset-bottom));
+  --page-pad-inline: max(var(--page-pad), var(--safe-left), var(--safe-right));
+  --page-pad-bottom: max(var(--page-pad), var(--safe-bottom));
   --region-gap: var(--space-3);
 
   /* -- elevation & liquid glassmorphism ------------------------------ */
@@ -165,27 +223,62 @@
   --rail-fade: light-dark(rgba(15, 23, 42, 0.06), rgba(0, 0, 0, 0.35));
 
   /* -- typography ---------------------------------------------------- */
+  /* System faces only: nothing is downloaded, and each platform renders its
+   * own UI face. Order: Apple (SF via -apple-system), Windows (Segoe UI
+   * Variable, then Segoe UI), Android/Chrome OS (Roboto), generic system-ui,
+   * then CJK families per platform -- PingFang (Apple), Microsoft YaHei UI
+   * (Windows), HarmonyOS Sans / Noto Sans CJK (Android, Linux). Latin faces
+   * come first so digits and Latin letters keep the platform's UI metrics
+   * inside Chinese text. */
   --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text",
-    "Segoe UI", Inter, system-ui, "PingFang SC", "HarmonyOS Sans SC",
-    "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
-  --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, monospace;
+    "Segoe UI", Roboto, Inter, system-ui, "PingFang SC", "HarmonyOS Sans SC",
+    "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC",
+    "Source Han Sans SC", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas,
+    "Roboto Mono", "Noto Sans Mono", monospace;
+  /* 12 / 13 / 14 / 18px. Body text is 14px everywhere; phones do not shrink
+   * it. `--text-display` is the phone page's welcome heading. */
   --text-xs: 0.75rem;
   --text-sm: 0.8125rem;
   --text:    0.875rem;
   --text-lg: 1.125rem;
+  --text-display: clamp(1.5rem, 7vw, 1.875rem);
 
   /* -- motion -------------------------------------------------------- */
+  /* Three durations: `fast` for hover and press feedback, the default for
+   * state changes, `slow` for surfaces entering (toast, sheet). All collapse to
+   * 0 under reduced motion. */
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 120ms;
   --duration: 200ms;
+  --duration-slow: 320ms;
+
+  /* -- layering ------------------------------------------------------ */
+  /* Native <dialog> and [popover] sit in the top layer and need no z-index;
+   * these order the in-flow overlays on the stage. */
+  --z-stage-overlay: 4;
+  --z-stage-controls: 8;
+  --z-fullscreen: 10;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :root { --duration: 0ms; }
+  :root { --duration-fast: 0ms; --duration: 0ms; --duration-slow: 0ms; }
 }
 
 /* The preferences override, for people whose OS says one thing and who want
    the other. It sits after the media query so it wins in both directions. */
-:root[data-motion="reduced"] { --duration: 0ms; }
+:root[data-motion="reduced"] { --duration-fast: 0ms; --duration: 0ms; --duration-slow: 0ms; }
+
+/* -- input ------------------------------------------------------------- */
+/* Coarse pointers (phones, tablets, touch-only laptops in tablet mode) get
+ * touch-sized controls. Hover is not assumed: anything shown on hover must
+ * also be reachable by tap or focus. */
+@media (pointer: coarse) {
+  :root {
+    --control-compact: 40px;
+    --control-height: 44px;
+  }
+}
 
 @media (prefers-contrast: more) {
   :root {

@@ -1,25 +1,40 @@
-/* A continuous application shell surrounds the recessed photograph workspace. */
+/* A continuous application shell surrounds the recessed photograph workspace.
+ *
+ * Frame sizes, insets and breakpoints come from tokens.css. Every edge that can
+ * meet a device cut-out, gesture bar or window title bar reads the matching
+ * inset (`--safe-*`, `--titlebar-inset-*`); on a desktop browser they are 0. */
 .app {
+  /* Horizontal frame padding, widened where a landscape phone's notch sits. */
+  --frame-start: max(var(--frame-pad), var(--safe-left));
+  --frame-end: max(var(--frame-pad), var(--safe-right));
   display: grid;
-  grid-template: "header header" 48px "stage rail" minmax(0, 1fr) "status status" 28px / minmax(0, 1fr) 342px;
+  grid-template:
+    "header header" calc(var(--header-height) + var(--safe-top))
+    "stage rail" minmax(0, 1fr)
+    "status status" calc(var(--status-height) + var(--safe-bottom))
+    / minmax(0, 1fr) var(--rail-width);
   width: 100%; height: 100dvh; overflow: hidden; background: var(--surface-page);
 }
-.app__header { grid-area: header; display: flex; align-items: center; gap: 12px; padding: 0 22px; border-bottom: 1px solid var(--line); background: var(--surface-panel); user-select: none; }
+.app__header {
+  grid-area: header; display: flex; align-items: center; gap: 12px;
+  padding: var(--safe-top) calc(var(--frame-end) + var(--titlebar-inset-end)) 0 calc(var(--frame-start) + var(--titlebar-inset-start));
+  border-bottom: 1px solid var(--line); background: var(--surface-panel); user-select: none; -webkit-user-select: none;
+}
 .app__title { flex: none; margin-right: 14px; }
 .editor-filename { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text); color: var(--ink); }
 .header-history { margin-left: 0; }
-.app__stage { grid-area: stage; display: grid; grid-template-rows: 52px minmax(0, 1fr) 54px; min-height: 0; min-width: 0; margin: 0 22px; }
+.app__stage { grid-area: stage; display: grid; grid-template-rows: 52px minmax(0, 1fr) 54px; min-height: 0; min-width: 0; margin: 0 var(--frame-pad) 0 var(--frame-start); }
 .stage-viewport { --stage-gutter: 28px; display: grid; place-items: center; min-height: 0; min-width: 0; width: 100%; height: 100%; padding: var(--stage-gutter); overflow: hidden; container-type: inline-size; border: 1px solid var(--line); border-radius: var(--radius); }
-.app__rail { grid-area: rail; display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--line); background: var(--surface-panel); overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; overscroll-behavior: contain; }
+.app__rail { grid-area: rail; display: flex; flex-direction: column; min-width: 0; min-height: 0; padding-right: var(--safe-right); border-left: 1px solid var(--line); background: var(--surface-panel); overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; overscroll-behavior: contain; }
 .app__rail > * { flex-shrink: 0; min-width: 0; }
 .app__rail > .scope { flex: none; margin: 0; padding: 22px 20px 16px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; box-shadow: none; background: transparent; }
 .app__settings { flex: none; padding: 0; }
 .app__settings.is-disabled > * { opacity: .65; }
 
-.app__status { grid-area: status; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; border-top: 1px solid var(--line); color: var(--ink-muted); font-size: var(--text-xs); background: var(--surface-panel); }
+.app__status { grid-area: status; display: flex; align-items: center; justify-content: space-between; padding: 0 var(--frame-end) var(--safe-bottom) var(--frame-start); border-top: 1px solid var(--line); color: var(--ink-muted); font-size: var(--text-xs); background: var(--surface-panel); }
 .viewer-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .viewer-zoom { display: flex; align-items: center; gap: 8px; color: var(--ink); }
-.viewer-zoom output { font: 12px var(--font-mono); min-width: 42px; text-align: center; }
+.viewer-zoom output { font: var(--text-xs) var(--font-mono); min-width: 42px; text-align: center; }
 .viewer-zoom .icon-button { background: transparent; }
 .viewer-modes { color: var(--ink); }
 .rail-welcome { display: none; padding: 28px 24px; }
@@ -27,7 +42,7 @@
 .rail-welcome > p { margin-top: 10px; font-size: var(--text-sm); line-height: 1.8; color: var(--ink-muted); }
 .welcome-steps { display: grid; gap: 26px; margin-top: 32px; list-style: none; padding: 0; }
 .welcome-steps li { display: grid; grid-template-columns: 26px 1fr; gap: 12px; }
-.welcome-steps .step-number { font: 12px/22px var(--font-mono); color: var(--ink-muted); }
+.welcome-steps .step-number { font: var(--text-xs)/22px var(--font-mono); color: var(--ink-muted); }
 .welcome-steps strong { font-size: var(--text-sm); font-weight: 500; color: var(--ink); }
 .welcome-steps p { margin-top: 4px; font-size: var(--text-xs); line-height: 1.7; color: var(--ink-muted); }
 .app:not([data-workspace="editing"]) .app__settings,
@@ -49,31 +64,60 @@
 .app:not([data-workspace="editing"]) .scope-graph { opacity: 0; }
 .app:not([data-workspace="editing"]) .scope-empty { display: grid; font-size: var(--text-xs); }
 .window-controls { display: flex; align-items: center; gap: 2px; flex: none; margin-left: 4px; padding-left: 12px; border-left: 1px solid var(--line); }
-.window-controls button { display: grid; place-items: center; width: 40px; height: 30px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--ink-muted); }
+.window-controls button { display: grid; place-items: center; width: 40px; height: 30px; padding: 0; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--ink-muted); }
 .window-controls svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1; }
 .window-controls button:hover { background: var(--surface-hover); }
 .window-controls .window-close:hover { background: var(--danger); color: var(--overlay-ink); }
 .app__header:has(.window-controls:not([hidden])) { padding-right: 8px; }
-@media (width < 1150px) and (width >= 860px) {
-  .app { grid-template-columns: minmax(0,1fr) 320px; }
-  .app__header { padding-inline: 16px; gap: 8px; }
+
+/* regular: a narrower rail and tighter header beside the photograph. */
+@media (860px <= width < 1150px) {
+  .app { --frame-pad: 16px; grid-template-columns: minmax(0, 1fr) var(--rail-width-regular); }
+  .app__header { gap: 8px; }
   .app__title { margin-right: 0; }
-  .app__stage { margin-inline: 16px; }
   .stage-viewport { --stage-gutter: 20px; }
 }
-@media (width < 860px) {
-  .app { grid-template: "header" auto "stage" minmax(350px, 55dvh) "rail" auto "status" auto / minmax(0, 1fr); height: auto; min-height: 100dvh; overflow: visible; }
-  .app__header { flex-wrap: wrap; padding: 12px; gap: 8px; }
-  .app__rail { border-left: 0; border-top: 1px solid var(--line); overflow: visible; scrollbar-gutter: auto; }
-  .app__settings { overflow: visible; }
-  .app__stage { grid-template-rows: 48px minmax(0,1fr) auto; margin-inline: 12px; }
-  .stage-viewport { --stage-gutter: 16px; }
-  .viewer-toolbar { padding-block: 10px; flex-wrap: wrap; }
-  .app__status { padding: 8px 12px; gap: 12px; }
+
+/* Phones in landscape and small landscape windows keep the photograph and the
+ * rail side by side; stacking a 390px-tall screen leaves room for neither. */
+@media (600px <= width < 860px) and (orientation: landscape) {
+  .app { --frame-pad: 12px; grid-template-columns: minmax(0, 1fr) var(--rail-width-narrow); }
+  .app__header { gap: 8px; }
+  .app__title { margin-right: 0; }
+  .app__stage { grid-template-rows: 44px minmax(0, 1fr) 48px; }
+  .stage-viewport { --stage-gutter: 12px; }
+}
+@media (height < 500px) and (orientation: landscape) {
+  .app { --header-height: 44px; }
+  .app__stage { grid-template-rows: 36px minmax(0, 1fr) 44px; }
+  .app:not([data-workspace="editing"]) .app__stage { margin-block: 12px; }
+}
+
+/* stacked: phones in portrait, tablets in portrait and narrow windows. The
+ * photograph stays on screen while the rail scrolls beneath it -- the page
+ * itself never scrolls, so a slider is never adjusted with the image out of
+ * view. */
+@media (width < 600px), (width < 860px) and (orientation: portrait) {
+  .app {
+    --frame-pad: 12px;
+    grid-template:
+      "header" auto
+      "stage" minmax(220px, 45dvh)
+      "rail" minmax(0, 1fr)
+      "status" auto
+      / minmax(0, 1fr);
+  }
+  .app:not([data-workspace="editing"]) { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+  .app__header { flex-wrap: wrap; row-gap: 0; column-gap: 8px; padding-block: calc(8px + var(--safe-top)) 8px; }
+  .app__rail { padding-left: var(--safe-left); border-left: 0; border-top: 1px solid var(--line); scrollbar-gutter: auto; }
+  .app__stage { grid-template-rows: 40px minmax(0, 1fr) auto; margin-inline: var(--frame-start) var(--frame-end); }
+  .app:not([data-workspace="editing"]) .app__stage { margin-block: 12px; }
+  .stage-viewport { --stage-gutter: 12px; }
+  .viewer-toolbar { padding-block: 8px; flex-wrap: wrap; }
+  .app__status { padding: 6px var(--frame-end) calc(6px + var(--safe-bottom)) var(--frame-start); gap: 12px; }
   .rail-welcome { padding: 22px; }
   .welcome-steps { margin-top: 22px; }
 }
-@media (width < 500px) {
-  .app__header .wordmark-text { display: none; }
+@media (width < 600px) {
   .viewer-zoom { gap: 6px; }
 }

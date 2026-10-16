@@ -1,12 +1,30 @@
-/* Every call to the panel's HTTP API, in one module. Keep this module and the
- * server implementation in apps/panel/hyperdr_panel/ in sync when the API
+/* The front-end's only door to the conversion service.
+ *
+ * Every request the interface makes -- HTTP today -- is written here and
+ * nowhere else; views call the named operations on `api` (editor), the
+ * phone-workbench requests (desktop side of the LAN hand-off) and
+ * `createPhoneApi` (the LAN phone page). Replacing the transport -- another
+ * origin, a native bridge, in-process FFI -- means reimplementing these
+ * operations with the same arguments, results and `ApiError`s; no view
  * changes.
+ *
+ * Keep this module and apps/panel/hyperdr_panel/ in sync when the API changes.
+ *
+ * Imports are fixed on purpose: the phone setup page loads this file from a
+ * server that serves an explicit file list (hyperdr_panel/phone_setup.py
+ * ASSETS), so a new import here is a 404 there until that list grows too.
  */
 
 import { decodePreview } from "../preview/packet.js";
 
 import { t } from "../i18n/index.js";
 let previousPreview = null;
+
+/* ── transport ──────────────────────────────────────────────────────── */
+
+/** Where a service path lives. Same origin today; the single place a base
+ *  URL would be added. */
+const endpoint = (path, params) => path + (params ? "?" + new URLSearchParams(params) : "");
 
 export class ApiError extends Error {
   constructor(message, status = 0) {
@@ -45,21 +63,40 @@ async function unwrap(response, fallback) {
 }
 
 async function get(path, params, fallback) {
-  const query = params ? "?" + new URLSearchParams(params) : "";
   let response;
-  try { response = await fetch(path + query); } catch { throw OFFLINE(); }
+  try { response = await fetch(endpoint(path, params)); } catch { throw OFFLINE(); }
   return unwrap(response, fallback);
 }
 
 async function post(path, body, fallback) {
   let response;
   try {
-    response = await fetch(path, {
+    response = await fetch(endpoint(path), {
       method: "POST", headers: JSON_HEADERS, body: JSON.stringify(body ?? {}),
     });
   } catch { throw OFFLINE(); }
   return unwrap(response, fallback);
 }
+
+/** A raw file body, for the importers that take bytes rather than JSON. */
+async function postBytes(path, params, file, fallback) {
+  let response;
+  try {
+    response = await fetch(endpoint(path, params),
+      { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file });
+  } catch { throw OFFLINE(); }
+  return unwrap(response, fallback);
+}
+
+/** A binary body, or the server's error rendered as an ApiError. */
+async function binary(response, fallback) {
+  if (response.ok) return response;
+  let body = null;
+  try { body = await response.json(); } catch {}
+  throw new ApiError(serverMessage(body, fallback), response.status);
+}
+
+/* ── operations ─────────────────────────────────────────────────────── */
 
 export const api = {
   /* -- session ------------------------------------------------------- */
@@ -76,20 +113,11 @@ export const api = {
   state: () => get("/api/state", null, t("err.state")),
 
   rawProfiles: (sessionId) => get("/api/raw-profiles", { id: sessionId }, "DCP"),
-  async uploadRawProfile(sessionId, file) {
-    const response = await fetch("/api/raw-profile-upload?" + new URLSearchParams({ id: sessionId, name: file.name }),
-      { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file });
-    return unwrap(response, "DCP");
-  },
+  uploadRawProfile: (sessionId, file) =>
+    postBytes("/api/raw-profile-upload", { id: sessionId, name: file.name }, file, "DCP"),
 
-  async uploadLut(sessionId, file) {
-    let response;
-    try {
-      response = await fetch("/api/lut-upload?" + new URLSearchParams({ id: sessionId, name: file.name, library: "1" }),
-        { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file });
-    } catch { throw OFFLINE(); }
-    return unwrap(response, t("lut.failed"));
-  },
+  uploadLut: (sessionId, file) =>
+    postBytes("/api/lut-upload", { id: sessionId, name: file.name, library: "1" }, file, t("lut.failed")),
 
   lutLibrary: () => get("/api/lut-library", null, t("lut.libraryFailed")),
   applyLibraryLut: (sessionId, lutId) => post("/api/lut-library", { action: "apply", sessionId, lutId }, t("lut.failed")),
@@ -118,20 +146,13 @@ export const api = {
   /** The converted image. `download` matters on a phone, where the native
    *  picker is not reachable and saving is the browser's job. */
   resultUrl: (sessionId, { download = false, exportId = "" } = {}) =>
-    "/api/result?" + new URLSearchParams({
-      id: sessionId, download: download ? "1" : "0", export: exportId,
-    }),
+    endpoint("/api/result", { id: sessionId, download: download ? "1" : "0", export: exportId }),
 
   async resultBlob(sessionId, exportId) {
     let response;
     try { response = await fetch(api.resultUrl(sessionId, { exportId })); }
     catch { throw OFFLINE(); }
-    if (!response.ok) {
-      let body = null;
-      try { body = await response.json(); } catch {}
-      throw new ApiError(serverMessage(body, t("err.result")), response.status);
-    }
-    return response.blob();
+    return (await binary(response, t("err.result"))).blob();
   },
 
   setExportFolder: (path) => post("/api/export-folder", { path }, t("save.folderFailed")),
@@ -163,13 +184,8 @@ export const api = {
     if (maxEdge) query.set("edge", String(maxEdge));
 
     let response;
-    try { response = await fetch("/api/preview?" + query); } catch { throw OFFLINE(); }
-    if (!response.ok) {
-      let message = t("err.preview");
-      try { const body = await response.json(); if (body.error) message = body.error; } catch {}
-      throw new ApiError(message, response.status);
-    }
-    const buffer = await response.arrayBuffer();
+    try { response = await fetch(endpoint("/api/preview", query)); } catch { throw OFFLINE(); }
+    const buffer = await (await binary(response, t("err.preview"))).arrayBuffer();
     const frame = decodePreview(buffer, previous);
     previousPreview = { sessionId, frame };
     return frame;
@@ -183,14 +199,9 @@ export const api = {
       center: center ? "1" : "0" });
     if (highlightRecovery) query.set("hr", highlightRecovery);
     let response;
-    try { response = await fetch("/api/detail-preview?" + query); }
+    try { response = await fetch(endpoint("/api/detail-preview", query)); }
     catch { throw OFFLINE(); }
-    if (!response.ok) {
-      let message = t("err.preview");
-      try { const body = await response.json(); if (body.error) message = body.error; } catch {}
-      throw new ApiError(message, response.status);
-    }
-    return decodePreview(await response.arrayBuffer());
+    return decodePreview(await (await binary(response, t("err.preview"))).arrayBuffer());
   },
 
   /** Run the selected model and return its raw little-endian float32 gain grid.
@@ -202,17 +213,13 @@ export const api = {
   async modelPreview(sessionId, highlightRecovery, modelId, { colorGamut, clampSrgb, rawProfile, rawLook, lensCorrection } = {}) {
     let response;
     try {
-      response = await fetch("/api/model-preview", {
+      response = await fetch(endpoint("/api/model-preview"), {
         method: "POST",
         headers: JSON_HEADERS,
         body: JSON.stringify({ sessionId, highlightRecovery, modelId, colorGamut, clampSrgb, rawProfile, rawLook, lensCorrection }),
       });
     } catch { throw OFFLINE(); }
-    if (!response.ok) {
-      let message = t("err.modelPreview");
-      try { const body = await response.json(); if (body.error) message = body.error; } catch {}
-      throw new ApiError(message, response.status);
-    }
+    await binary(response, t("err.modelPreview"));
     const width = Number(response.headers.get("X-Gain-Width"));
     const height = Number(response.headers.get("X-Gain-Height"));
     const maxStops = Number(response.headers.get("X-Gain-Max-Stops"));
@@ -253,9 +260,7 @@ export const api = {
   } = {}) {
     const request = new Request();
     const promise = new Promise((resolve, reject) => {
-      request.open("POST", "/api/upload?" + new URLSearchParams({
-        id: sessionId, name: file.name,
-      }));
+      request.open("POST", endpoint("/api/upload", { id: sessionId, name: file.name }));
       request.setRequestHeader("Content-Type", "application/octet-stream");
       request.upload.onprogress = (event) => {
         if (event.lengthComputable) onProgress?.(event.loaded / event.total);
@@ -278,6 +283,42 @@ export const api = {
   },
 };
 
+/* ── LAN phone hand-off (retiring) ──────────────────────────────────── */
+
+/** The desktop editor's side of the LAN phone workbench: `/api/phone/<path>`,
+ *  GET without a body, JSON POST with one. Bounded so a request stuck behind
+ *  the service's connection lock cannot pin the caller's busy flags; a
+ *  deadline rejects with `code: "timeout"`, a server error carries the
+ *  server's `code`. Dependencies are explicit for the recovery tests. */
+export function createWorkbenchRequest({ fetch, setTimeout, clearTimeout, timeout: defaultTimeout = 8000 }) {
+  return async function workbenchRequest(path, body, { timeout = defaultTimeout } = {}) {
+    const control = new AbortController();
+    const timer = setTimeout(() => control.abort(), timeout);
+    try {
+      const response = await fetch(endpoint(`/api/phone/${path}`), {
+        ...(body === undefined ? {} : {
+          method: "POST", headers: JSON_HEADERS, body: JSON.stringify(body),
+        }),
+        signal: control.signal,
+      });
+      const data = await response.json();
+      if (!response.ok) throw Object.assign(new Error(data.error || t("phone.failed")), { code: data.code });
+      return data;
+    } catch (error) {
+      if (error.name === "AbortError") throw Object.assign(new Error(t("phone.timeout")), { code: "timeout" });
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+}
+
+export const workbenchRequest = createWorkbenchRequest({
+  fetch: (...args) => globalThis.fetch(...args),
+  setTimeout: (...args) => globalThis.setTimeout(...args),
+  clearTimeout: (...args) => globalThis.clearTimeout(...args),
+});
+
 /** Mobile transport keeps its original JSON/error contract. Dependencies are
  * explicit so recovery can run without a browser or real deadlines. */
 export function createPhoneApi({ fetch, setTimeout, clearTimeout, XMLHttpRequest }) {
@@ -288,7 +329,7 @@ export function createPhoneApi({ fetch, setTimeout, clearTimeout, XMLHttpRequest
     else signal?.addEventListener("abort", cancel, { once: true });
     const timer = timeout && setTimeout(cancel, timeout);
     try {
-      const response = await fetch(path, { ...options, ...(control ? { signal: control.signal } : {}) });
+      const response = await fetch(endpoint(path), { ...options, ...(control ? { signal: control.signal } : {}) });
       return await consume(response);
     } catch (error) {
       if (error.name === "AbortError" && !signal?.aborted) {
@@ -320,8 +361,8 @@ export function createPhoneApi({ fetch, setTimeout, clearTimeout, XMLHttpRequest
   }
   return {
     request, setupState,
-    frame: (signal) => fetch("/api/phone/frame", { signal }),
-    original: (signal) => fetch("/api/phone/original", { signal }),
+    frame: (signal) => fetch(endpoint("/api/phone/frame"), { signal }),
+    original: (signal) => fetch(endpoint("/api/phone/original"), { signal }),
     upload: (sessionId, file, onProgress) => api.upload(sessionId, file, onProgress, {
       XMLHttpRequest, readBody: false, error: (message) => new Error(message),
       failed: t("phone.mobile.uploadFailed"), interrupted: t("phone.mobile.uploadInterrupted"), cancelled: t("phone.mobile.uploadCancelled"),

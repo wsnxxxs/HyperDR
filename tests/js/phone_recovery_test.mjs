@@ -6,7 +6,7 @@ const read = (path) => fs.readFileSync(new URL(`../../apps/panel/web/${path}`, i
 const desktop = read("js/ui/phone-workbench.js").replace(/^import .*;\r?\n/gm, "").replace(/^export /gm, "");
 import { createPhoneConnection } from "../../apps/panel/web/phone/connection.js";
 import { createPhoneState } from "../../apps/panel/web/phone/state.js";
-import { createPhoneApi } from "../../apps/panel/web/js/core/api.js";
+import { createPhoneApi, createWorkbenchRequest } from "../../apps/panel/web/js/core/api.js";
 const flush = () => new Promise(setImmediate);
 const deferred = () => { let resolve; const promise = new Promise((done) => { resolve = done; }); return { promise, resolve }; };
 const response = (data, status = 200) => ({ ok: status < 400, status, json: async () => data });
@@ -32,11 +32,13 @@ function desktopPage(fetch, publishResponse) {
     el: (tag, attributes = {}) => { const item = Object.assign(node(), { tag, className: attributes.class }); nodes.push(item); return item; }, debounce: (fn) => fn,
     store: { get: () => state, set: (value) => Object.assign(state, value), subscribe() {} }, toOptions: () => ({}),
     sessionStorage: { getItem: (key) => storage.get(key), setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key) },
-    fetch: (url, options) => {
-      if (url.endsWith("/publish")) { published++; return publishResponse ? publishResponse(next) : Promise.resolve(response(next)); }
-      return fetch(url, options, next);
-    }, stage: { reload: async () => { reloaded++; } }, toast() {},
+    stage: { reload: async () => { reloaded++; } }, toast() {},
   });
+  // The page's requests go through core/api.js, bound to this page's clock.
+  ctx.phoneRequest = createWorkbenchRequest({ ...clock, fetch: (url, options) => {
+    if (url.endsWith("/publish")) { published++; return publishResponse ? publishResponse(next) : Promise.resolve(response(next)); }
+    return fetch(url, options, next);
+  } });
   vm.runInContext(desktop + "\nvar page = mountPhoneWorkbench({stage, toast});", ctx);
   return { ctx, clock, storage, nodes, state, opener, published: () => published, reloaded: () => reloaded };
 }

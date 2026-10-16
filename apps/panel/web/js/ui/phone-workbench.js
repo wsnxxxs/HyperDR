@@ -4,31 +4,7 @@ import { toOptions } from "../settings/schema.js";
 import { t, onLocaleChange } from "../i18n/index.js";
 import qrcode from "../vendor/qrcode.mjs";
 import { openDialog } from "./dialogs.js";
-
-const REQUEST_TIMEOUT_MS = 8000;
-
-export async function phoneRequest(path, body, { timeout = REQUEST_TIMEOUT_MS } = {}) {
-  // Bounded so a request stuck behind the service's connection lock cannot
-  // pin the `sending`/`busy` flags and block every later publish.
-  const control = new AbortController();
-  const timer = setTimeout(() => control.abort(), timeout);
-  try {
-    const response = await fetch(`/api/phone/${path}`, {
-      ...(body === undefined ? {} : {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-      }),
-      signal: control.signal,
-    });
-    const data = await response.json();
-    if (!response.ok) throw Object.assign(new Error(data.error || t("phone.failed")), { code: data.code });
-    return data;
-  } catch (error) {
-    if (error.name === "AbortError") throw Object.assign(new Error(t("phone.timeout")), { code: "timeout" });
-    throw error;
-  } finally {
-    clearTimeout(timer);
-  }
-}
+import { workbenchRequest as phoneRequest } from "../core/api.js";
 
 export function mountPhoneWorkbench({ stage, toast }) {
   let owner = sessionStorage.getItem("hyperdr.phone.owner");

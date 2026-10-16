@@ -6,12 +6,15 @@
   <title>HyperDR</title>
   <link rel="icon" href="./icon.svg" type="image/svg+xml">
   <style>
-    /* Standalone shell: values mirror the desktop's dark tokens.css palette. */
+    /* Standalone shell: shown before the panel's server is up, so it cannot
+       load apps/panel/web/css/tokens.css. These values mirror that file's dark
+       palette and font stacks; change them together. */
     :root {
       color-scheme: dark;
       --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text",
-        "Segoe UI", Inter, system-ui, "PingFang SC", "HarmonyOS Sans SC",
-        "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+        "Segoe UI", Roboto, Inter, system-ui, "PingFang SC", "HarmonyOS Sans SC",
+        "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC",
+        "Source Han Sans SC", sans-serif;
       --surface-page: #17181b;
       --surface-panel: #1e1f23;
       --surface-sunken: #191a1e;
@@ -25,7 +28,9 @@
     html, body { margin: 0; width: 100%; min-height: 100%; }
     body {
       display: grid; place-items: center; min-height: 100dvh;
-      padding: 24px; background: var(--surface-page); color: var(--ink);
+      padding: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right))
+        max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
+      background: var(--surface-page); color: var(--ink);
       font: 14px/1.6 var(--font-ui); user-select: none;
     }
     .splash-card {

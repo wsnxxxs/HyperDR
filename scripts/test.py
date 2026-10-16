@@ -19,7 +19,10 @@ def run(*command: str, label: str | None = None, **kwargs) -> None:
 
 def panel() -> None:
     run(sys.executable, "-m", "pytest", "tests/python", "-q")
-    run("pwsh", "-NoProfile", "-File", "tests/powershell/test_hyperdr_tls.ps1")
+    if shutil.which("pwsh"):
+        run("pwsh", "-NoProfile", "-File", "tests/powershell/test_hyperdr_tls.ps1")
+    else:
+        print("Skipping TLS PowerShell tests: pwsh is unavailable", flush=True)
 
 
 def frontend() -> None:
@@ -43,12 +46,13 @@ def native(build_dir: Path, config: str) -> None:
     run("ctest", "--test-dir", str(build_dir), "-C", config,
         "--output-on-failure", "--no-tests=error")
     # CMake's module layout, plus the older root output layout in local builds.
-    candidates = [build_dir / folder / "HyperDR.exe" for folder in (
+    name = "HyperDR.exe" if os.name == "nt" else "HyperDR"
+    candidates = [build_dir / folder / name for folder in (
         f"modules/app/{config}", "modules/app", config, "",
     )]
     executable = next((path for path in candidates if path.is_file()), None)
     if executable is None:
-        raise RuntimeError(f"No HyperDR.exe in {build_dir} for {config}")
+        raise RuntimeError(f"No {name} in {build_dir} for {config}")
     env = dict(os.environ, HYPERDR_EXECUTABLE=str(executable))
     run(sys.executable, "-m", "unittest", "discover", "-s", "tests/native", env=env)
     json.loads((ROOT / "schema/report.json").read_text(encoding="utf-8"))

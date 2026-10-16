@@ -38,8 +38,8 @@ void append_float_image(std::vector<std::uint8_t>& bytes,
 
 void set_stdout_binary() {
 #ifdef _WIN32
-  // The model-gain packet is a byte protocol, not text. Prevent the CRT from
-  // translating its header/newlines when the CLI is piped to the panel.
+  // Packets and JSON streams have byte-exact contracts. Prevent the CRT from
+  // translating their newlines when the CLI is piped to a caller.
   _setmode(_fileno(stdout), _O_BINARY);
 #endif
 }

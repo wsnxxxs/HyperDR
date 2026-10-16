@@ -5,8 +5,6 @@
 
 #include <net.h>
 
-#include <windows.h>
-
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -20,41 +18,22 @@
 #include <vector>
 
 namespace hyperdr {
+namespace model_assets {
+extern const unsigned char research_cnn_v1_param[];
+extern const std::size_t research_cnn_v1_param_size;
+extern const unsigned char research_cnn_v1_bin[];
+extern const std::size_t research_cnn_v1_bin_size;
+extern const unsigned char research_exif_v1_param[];
+extern const std::size_t research_exif_v1_param_size;
+extern const unsigned char research_exif_v1_bin[];
+extern const std::size_t research_exif_v1_bin_size;
+}  // namespace model_assets
 namespace {
 
-// One RCDATA pair per model. The numbers are frozen in cmake/HyperDRModel.rc.in
-// and the resource compiler reads the exact bytes HyperDRModel.cmake selected,
-// so a build that is missing an asset fails at startup rather than at the first
-// request.
-constexpr int kResearchCnnParamResource = 103;
-constexpr int kResearchCnnBinResource = 104;
-constexpr int kResearchExifParamResource = 105;
-constexpr int kResearchExifBinResource = 106;
-
-struct ResourceBytes {
-  const unsigned char* data{};
-  std::size_t size{};
+struct ModelBytes {
+  const unsigned char* data;
+  std::size_t size;
 };
-
-ResourceBytes embedded_resource(int resource_id) {
-  const HMODULE module = GetModuleHandleW(nullptr);
-  if (module == nullptr) {
-    throw std::runtime_error("could not locate HyperDR.exe module");
-  }
-  const HRSRC resource = FindResourceW(
-      module, MAKEINTRESOURCEW(resource_id), MAKEINTRESOURCEW(10));
-  if (resource == nullptr) {
-    throw std::runtime_error("embedded ncnn model resource is missing");
-  }
-  const HGLOBAL loaded = LoadResource(module, resource);
-  const DWORD size = SizeofResource(module, resource);
-  const auto* data = static_cast<const unsigned char*>(
-      loaded == nullptr ? nullptr : LockResource(loaded));
-  if (data == nullptr || size == 0U) {
-    throw std::runtime_error("embedded ncnn model resource is empty");
-  }
-  return {data, static_cast<std::size_t>(size)};
-}
 
 // One loaded network. Each model owns its own instance rather than sharing one
 // global Net whose blobs would have to be swapped per request: the panel runs
@@ -62,19 +41,13 @@ ResourceBytes embedded_resource(int resource_id) {
 // creation and its use is the kind of race that only shows up as a wrong
 // picture.
 struct EmbeddedNcnnRuntime {
-  // ncnn retains pointers into the binary model and requires a 32-bit aligned
-  // buffer. A PE RCDATA address is not a portable alignment guarantee, so
-  // retain an ordinary heap copy for the lifetime of the Net.
-  std::vector<unsigned char> weights;
+  // ncnn retains pointers into the 16-byte-aligned generated model array.
   ncnn::Net network;
 
-  EmbeddedNcnnRuntime(int param_resource, int bin_resource) {
-    const auto param = embedded_resource(param_resource);
-    const auto weight_resource = embedded_resource(bin_resource);
-
+  EmbeddedNcnnRuntime(ModelBytes param, ModelBytes weights) {
     // load_param_mem expects a NUL-terminated text buffer.  Keep the copy
     // alive only through loading; ncnn owns the parsed layer metadata after
-    // this call.  The binary model is consumed directly from the resource.
+    // this call.  The binary model is consumed directly from the generated array.
     std::string param_text(reinterpret_cast<const char*>(param.data),
                            param.size);
     param_text.push_back('\0');
@@ -84,11 +57,9 @@ struct EmbeddedNcnnRuntime {
     if (network.load_param_mem(param_text.c_str()) != 0) {
       throw std::runtime_error("failed to load embedded ncnn param");
     }
-    this->weights.assign(weight_resource.data,
-                         weight_resource.data + weight_resource.size);
     // The memory overload returns the number of bytes consumed, not an error
     // code like the file/DataReader overloads; zero denotes failure.
-    if (network.load_model(this->weights.data()) == 0U) {
+    if (network.load_model(weights.data) == 0U) {
       throw std::runtime_error("failed to load embedded ncnn weights");
     }
   }
@@ -97,14 +68,17 @@ struct EmbeddedNcnnRuntime {
 const EmbeddedNcnnRuntime& runtime_for(std::string_view canonical_id) {
   // Static locals initialize once, under the language's own guard, so two
   // threads asking for the same model at the same time cannot each build it.
+  using namespace model_assets;
   if (canonical_id == kResearchCnnModelId) {
-    static const EmbeddedNcnnRuntime runtime(kResearchCnnParamResource,
-                                             kResearchCnnBinResource);
+    static const EmbeddedNcnnRuntime runtime(
+        {research_cnn_v1_param, research_cnn_v1_param_size},
+        {research_cnn_v1_bin, research_cnn_v1_bin_size});
     return runtime;
   }
   if (canonical_id == kResearchExifModelId) {
-    static const EmbeddedNcnnRuntime runtime(kResearchExifParamResource,
-                                             kResearchExifBinResource);
+    static const EmbeddedNcnnRuntime runtime(
+        {research_exif_v1_param, research_exif_v1_param_size},
+        {research_exif_v1_bin, research_exif_v1_bin_size});
     return runtime;
   }
   throw std::invalid_argument("no embedded ncnn asset for model id " +

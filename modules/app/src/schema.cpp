@@ -409,6 +409,8 @@ void apply_preset_document(const json::Value& document, ConvertOptions& options)
     validate_setting_value(*setting, value);
     setting->apply(options, value);
   }
+  apply_render_defaults(options, document.find("contrast") != nullptr,
+                         document.find("vibrance") != nullptr);
 }
 
 std::string settings_usage_text() {

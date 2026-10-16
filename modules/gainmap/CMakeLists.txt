@@ -19,7 +19,8 @@ hyperdr_add_module(gainmap
   DEPENDS HyperDR::look HyperDR::container)
 
 if(HYPERDR_WITH_NCNN)
-  target_sources(hyperdr_gainmap PRIVATE src/ncnn_runtime.cpp)
+  add_dependencies(hyperdr_gainmap HyperDRModelEmbedded)
+  target_sources(hyperdr_gainmap PRIVATE src/ncnn_runtime.cpp ${HYPERDR_MODEL_SOURCES})
   target_link_libraries(hyperdr_gainmap PRIVATE ${HYPERDR_NCNN_TARGET})
 endif()
 

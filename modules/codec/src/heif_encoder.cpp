@@ -565,6 +565,9 @@ std::vector<std::uint8_t> encode_parallel_heic(
 std::vector<std::uint8_t> encode_adaptive_heic(const GainMapResult& images,
                                                const PhotoMetadata& metadata, int quality,
                                                int depth, HevcPreset preset) {
+  if (!heif_have_encoder_for_format(heif_compression_HEVC)) {
+    throw std::runtime_error("this build has no HEVC encoder");
+  }
   // Adaptive HEIC is the Apple-interoperable writer. Keep this check at the
   // codec boundary as well as in the renderer so a future alternate producer
   // cannot silently emit generic ISO metadata through this path.
@@ -630,6 +633,9 @@ std::vector<std::uint8_t> encode_adaptive_heic(const GainMapResult& images,
 std::vector<std::uint8_t> encode_hdr_heic(const PhotoRenditions& images,
                                           const PhotoMetadata& metadata, int quality,
                                           HdrEncoding encoding, HevcPreset preset) {
+  if (!heif_have_encoder_for_format(heif_compression_HEVC)) {
+    throw std::runtime_error("this build has no HEVC encoder");
+  }
   if (encoding != HdrEncoding::Pq && encoding != HdrEncoding::Hlg) {
     throw std::invalid_argument("encode_hdr_heic requires PQ or HLG");
   }

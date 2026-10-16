@@ -135,20 +135,7 @@ void parse_settings(int argc, char** argv, int first, ConvertOptions& options,
       throw std::invalid_argument("unknown option: " + std::string(arg));
     }
   }
-  if (!options.raw.profile.empty()) {
-    // The profile already supplies its base look. Only explicit creative
-    // controls should change it; argument order must not affect this choice.
-    if (!contrast_set) options.gain.look.contrast = 1.0F;
-    if (!vibrance_set) options.gain.look.vibrance = 0.0F;
-  }
-  if (is_hlg_encoding(options.encoding)) {
-    // HLG's range above diffuse white is fixed by the standard, so a higher
-    // ceiling cannot be honoured. Lowering it silently is right for the
-    // automatic case; an explicit request above it is an error, reported by
-    // validate_convert_options.
-    options.gain.look.headroom_max_stops =
-        std::min(options.gain.look.headroom_max_stops, kHlgHeadroomStops);
-  }
+  apply_render_defaults(options, contrast_set, vibrance_set);
 }
 
 }  // namespace hyperdr::app::detail

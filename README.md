@@ -133,6 +133,47 @@ Build trees belong in one of the four names the tooling already knows —
 with their consumers in the
 [project structure guide](docs/project-structure.md).
 
+## Build on macOS (Apple Silicon)
+
+Install the Command Line Tools (`xcode-select --install`), Homebrew, and Git.
+Full Xcode is not required for the native CLI and C ABI libraries.
+
+```sh
+brew install cmake ninja node python@3.12 pkg-config
+export PATH="$(brew --prefix python@3.12)/libexec/bin:$PATH"
+
+# Dependency-free renderer, CLI, and C ABI.
+cmake --preset macos-arm64-core
+cmake --build --preset macos-arm64-core
+ctest --preset macos-arm64-core
+python3 scripts/test.py native --build-dir build-core
+python3 scripts/test.py frontend
+```
+
+For image decoding, JPEG/TIFF, Ultra HDR JPEG/R and PQ/HLG AVIF exports,
+install the pinned vcpkg checkout and build with codecs:
+
+```sh
+git clone https://github.com/microsoft/vcpkg.git "$HOME/vcpkg"
+git -C "$HOME/vcpkg" checkout 43643e1f5cf73db40d0d4bd610183348eb09b24e
+"$HOME/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+cmake --preset macos-arm64-codecs
+cmake --build --preset macos-arm64-codecs
+ctest --preset macos-arm64-codecs
+build/HyperDR model-list --json
+```
+
+These presets target macOS 26 and write only to `build-core/` and `build/`.
+Both builds produce `HyperDR`, `libhyperdr.a`, and `libhyperdr.dylib` at the
+build root. The C11 header is `modules/capi/include/hyperdr/hyperdr.h`.
+The codec preset uses `cmake/triplets/arm64-osx.cmake` to keep the transitional
+libheif/libde265 decoder libraries dynamic. It disables LibRaw OpenMP and
+libheif's x265 feature: this macOS build reads HEIC but HEVC exports fail with
+`this build has no HEVC encoder` until the VideoToolbox backend is added.
+HEVC fixture-generation tests report their skip; AVIF and JPEG/R tests still run.
+This transitional libheif build is for direct desktop development/distribution;
+it is not the planned App Store build.
+
 ## Usage
 
 ```text

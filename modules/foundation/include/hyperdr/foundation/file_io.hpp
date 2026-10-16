@@ -46,8 +46,8 @@ void write_text_file_atomic(const std::filesystem::path& path,
 [[nodiscard]] std::string path_utf8(const std::filesystem::path& path);
 [[nodiscard]] std::filesystem::path path_from_utf8(std::string_view text);
 
-// Windows path comparison keys use native wide strings and fold case.
-using PathKey = std::wstring;
+// Windows and Apple fold case; Linux and Android compare native bytes exactly.
+using PathKey = std::filesystem::path::string_type;
 
 [[nodiscard]] PathKey path_key(const std::filesystem::path& path);
 [[nodiscard]] bool same_path(const std::filesystem::path& left,
@@ -59,7 +59,7 @@ using PathKey = std::wstring;
 // dispatch. ASCII only: no supported image extension is non-ASCII.
 [[nodiscard]] std::string lower_extension(const std::filesystem::path& path);
 
-// Bytes of physical memory currently available, or 0 if Windows cannot report it.
+// Bytes of physical memory currently available, or 0 if the platform cannot report it.
 [[nodiscard]] std::uint64_t available_memory_bytes();
 
 }  // namespace hyperdr

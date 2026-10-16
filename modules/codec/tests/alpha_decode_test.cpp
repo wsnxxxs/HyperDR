@@ -138,7 +138,9 @@ int main() {
       ("hyperdr-alpha-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
   try {
     std::filesystem::create_directory(root);
+    const bool have_hevc = heif_have_encoder_for_format(heif_compression_HEVC);
     for(bool avif:{false,true}) for(bool premultiplied:{false,true}) {
+      if (!avif && !have_hevc) continue;
       const auto path=root/(avif?"fixture.avif":"fixture.heic");
       if(avif) encode_avif(path,premultiplied); else encode_heif(path,premultiplied);
       const auto full=hyperdr::decode_image(path);
@@ -153,6 +155,11 @@ int main() {
       require(std::abs(mean(full.linear_p3)-mean(small.linear_p3))<1e-5,
               "alpha reduction did not preserve linear composited energy");
       std::cout<<(avif?"AVIF":"HEIF")<<" premultiplied="<<premultiplied<<" mean="<<mean(full.linear_p3)<<'\n';
+    }
+    if (!have_hevc) {
+      std::cout << "HEVC alpha fixtures skipped: no HEVC encoder\n";
+      std::filesystem::remove_all(root);
+      return 0;
     }
     const auto adaptive=root/"adaptive.heic";
     encode_heif(adaptive,false,true);

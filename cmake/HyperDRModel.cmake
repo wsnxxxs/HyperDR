@@ -76,22 +76,31 @@ function(hyperdr_configure_model)
     set_property(TARGET HyperDR::model_assets PROPERTY
       INTERFACE_LINK_LIBRARIES "${HYPERDR_NCNN_TARGET}")
 
-    # The resource compiler embeds the exact checked-in (or deliberately
-    # regenerated) bytes in HyperDR.exe.  Runtime inference never opens a
-    # user-controlled .param/.bin path.
-    set(HYPERDR_MODEL_RESOURCE_FILE
-        "${CMAKE_BINARY_DIR}/hyperdr_ncnn_model.rc")
-    configure_file(
-      "${PROJECT_SOURCE_DIR}/cmake/HyperDRModel.rc.in"
-      "${HYPERDR_MODEL_RESOURCE_FILE}" @ONLY)
-    set(HYPERDR_MODEL_RESOURCE_FILE "${HYPERDR_MODEL_RESOURCE_FILE}"
-        CACHE INTERNAL "Generated ncnn RCDATA resource file")
+    set(model_sources)
+    foreach(model research-cnn-v1 research-exif-v1)
+      foreach(kind param bin)
+        string(REPLACE "-" "_" symbol "${model}_${kind}")
+        set(output "${CMAKE_BINARY_DIR}/generated/${symbol}.cpp")
+        add_custom_command(OUTPUT "${output}"
+          COMMAND ${CMAKE_COMMAND}
+            "-DINPUT=${HYPERDR_MODEL_ASSET_DIR}/${model}.ncnn.${kind}"
+            "-DOUTPUT=${output}" "-DSYMBOL=${symbol}"
+            -P "${PROJECT_SOURCE_DIR}/cmake/embed_binary.cmake"
+          DEPENDS "${HYPERDR_MODEL_ASSET_DIR}/${model}.ncnn.${kind}"
+                  "${PROJECT_SOURCE_DIR}/cmake/embed_binary.cmake"
+          VERBATIM)
+        list(APPEND model_sources "${output}")
+      endforeach()
+    endforeach()
+    add_custom_target(HyperDRModelEmbedded DEPENDS ${model_sources})
+    set(HYPERDR_MODEL_SOURCES "${model_sources}" CACHE INTERNAL
+        "Generated aligned ncnn model arrays")
   endif()
 endfunction()
 
 function(hyperdr_install_model_assets)
-  # The release executable owns the model bytes as RCDATA resources.  Keep
+  # The native library owns the model bytes as aligned arrays.  Keep
   # ONNX and ncnn files in the source tree for offline conversion/auditing,
   # but do not install an external model path that could drift from the
-  # embedded resources (and do not install a PyTorch runtime).
+  # embedded arrays (and do not install a PyTorch runtime).
 endfunction()

@@ -5,9 +5,10 @@ resolves the dependencies below through vcpkg or CMake `FetchContent`.
 
 | Component | Purpose | Upstream license information |
 | --- | --- | --- |
-| LibRaw | Camera RAW decoding | LGPL-2.1-or-later or CDDL-1.0 |
+| LibRaw | Camera RAW decoding | CDDL-1.0 (selected from the upstream dual license) |
 | Little CMS 2 | ICC profile construction | MIT |
-| libheif | HEIF container and image encoding | LGPL-2.1-or-later |
+| libheif | Transitional HEIF container, decoding and Windows encoding | LGPL-3.0-or-later |
+| libde265 | HEVC decoding selected by libheif | LGPL-3.0-or-later |
 | x265 | HEVC encoding selected by libheif's `hevc` feature | GPL-2.0-or-later |
 | libavif | AVIF container and image encoding | BSD-2-Clause |
 | Alliance for Open Media libaom | AV1 codec selected by libavif's `aom` feature | BSD-2-Clause-style license and patent grant; see upstream `LICENSE` and `PATENTS` |
@@ -17,6 +18,30 @@ resolves the dependencies below through vcpkg or CMake `FetchContent`.
 | zlib | TIFF Deflate compression and Adobe XMP look decoding | zlib license |
 | Google libultrahdr 1.4.0 | Ultra HDR JPEG/R reference codec | Apache-2.0 or MIT |
 | ncnn | Embedded native gain-map inference runtime | BSD-3-Clause |
+
+LibRaw is used under **CDDL-1.0**, without the optional GPL demosaic packs.
+Distributors must provide its corresponding source and any modifications under
+that license; dependency license texts are available in vcpkg's installed
+`share/<port>/copyright` files.
+
+## Platform codec configurations
+
+- **Windows (transition):** libheif and libde265 are dynamic libraries. The
+  existing x265 encoding feature remains during P0–P3a; it is GPL-2.0-or-later
+  and must be removed in P3b before a GPL-free product release.
+- **macOS direct desktop build (transition):** libheif and libde265 are dynamic
+  decoder libraries under LGPL-3.0-or-later. No x265 or LibRaw OpenMP is built.
+  Corresponding source and replacement/relinking instructions must accompany
+  distributed LGPL libraries. These libraries are removed from Apple builds
+  before App Store distribution when the native HEIF/VideoToolbox backend lands.
+- **iOS / Android:** native application builds are not implemented in this
+  batch. The planned iOS build has no libheif/libde265/x265; Android retains a
+  dynamic libde265 decoder. Their final dependency notices are supplied with
+  those platform builds.
+
+The remaining codec components in the table apply to both implemented desktop
+configurations. Libultrahdr's Adobe HDR Gain Map license is retained separately
+from its Apache-2.0/MIT implementation license.
 
 Phone HTTPS certificate generation uses [cryptography](https://github.com/pyca/cryptography)
 under Apache-2.0 or BSD-3-Clause. The desktop sidecar bundles this dependency;
@@ -34,8 +59,8 @@ substitute for those license texts.
 The ONNX export and ncnn conversion tools listed in
 [`HyperDR_Model/requirements.txt`](HyperDR_Model/requirements.txt) are
 build-time tooling only. They are not required by, or installed with, the
-native release executable; its ncnn model bytes are embedded as Windows
-resources.
+native release executable; its ncnn model bytes are embedded as aligned C++
+byte arrays on every platform.
 
 `libavif` and its libaom codec are build dependencies for the two AVIF output
 formats; they are not merely reference implementations. Google's libultrahdr

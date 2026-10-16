@@ -221,6 +221,10 @@ int main() {
                           "tests/macos_t2/fixtures/gamma-2-probe.heic";
       real_resume.output_directory = root / "real-resume-output";
       real_resume.report_path = root / "real-resume-report.json";
+#ifdef __APPLE__
+      // The transitional Apple build decodes HEIC without a HEVC encoder.
+      real_resume.encoding = hyperdr::HdrEncoding::SdrJpeg;
+#endif
       real_resume.skip_existing = true;
       real_resume.verify_output = false;
       require(hyperdr::run_conversion(real_resume) == 0,

@@ -312,6 +312,10 @@ void compare_files(const std::vector<std::uint8_t>& serial,
 }  // namespace
 
 int main() {
+  if (!heif_have_encoder_for_format(heif_compression_HEVC)) {
+    std::cout << "HEVC encoder unavailable; tile equivalence skipped\n";
+    return 77;
+  }
   try {
     hyperdr::PhotoMetadata metadata;
     metadata.model = "HEIC parallel regression";

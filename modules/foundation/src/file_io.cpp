@@ -1,77 +1,17 @@
 #include "hyperdr/foundation/file_io.hpp"
+#include "file_io_platform.hpp"
 
 #include <algorithm>
-#include <atomic>
 #include <cctype>
 #include <cwctype>
 #include <fstream>
 #include <stdexcept>
-#include <system_error>
 
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
+#ifdef __APPLE__
+#include <CoreFoundation/CoreFoundation.h>
 #endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
 
 namespace hyperdr {
-namespace {
-
-std::filesystem::path unique_temporary_for(const std::filesystem::path& path) {
-  static std::atomic_uint64_t sequence{0};
-  const auto process_id = static_cast<std::uint64_t>(GetCurrentProcessId());
-  std::filesystem::path temporary;
-  do {
-    temporary = path;
-    temporary += ".tmp." + std::to_string(process_id) + "." +
-                 std::to_string(sequence.fetch_add(1, std::memory_order_relaxed));
-  } while (std::filesystem::exists(temporary));
-  return temporary;
-}
-
-void publish(const std::filesystem::path& temporary,
-             const std::filesystem::path& path, bool overwrite) {
-  DWORD flags = MOVEFILE_WRITE_THROUGH;
-  if (overwrite) flags |= MOVEFILE_REPLACE_EXISTING;
-  if (!MoveFileExW(temporary.c_str(), path.c_str(), flags)) {
-    const auto error = static_cast<int>(GetLastError());
-    std::error_code ignored;
-    std::filesystem::remove(temporary, ignored);
-    throw std::system_error(error, std::system_category(),
-                            "cannot atomically publish output");
-  }
-}
-
-void write_bytes_atomic(const std::filesystem::path& path, const char* data,
-                        std::size_t size, bool overwrite) {
-  if (!overwrite && std::filesystem::exists(path)) {
-    throw std::runtime_error("output exists: " + path_utf8(path));
-  }
-  if (!path.parent_path().empty()) {
-    std::filesystem::create_directories(path.parent_path());
-  }
-  const auto temporary = unique_temporary_for(path);
-  {
-    std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
-    const auto fail = [&](const char* message) {
-      out.close();
-      std::error_code ignored;
-      std::filesystem::remove(temporary, ignored);
-      throw std::runtime_error(message);
-    };
-    if (!out || (size != 0 &&
-                 !out.write(data, static_cast<std::streamsize>(size)))) {
-      fail("cannot write temporary output");
-    }
-    out.flush();
-    if (!out) fail("cannot flush temporary output");
-  }
-  publish(temporary, path, overwrite);
-}
-
-}  // namespace
 
 std::vector<std::uint8_t> read_binary_file(const std::filesystem::path& path) {
   std::ifstream in(path, std::ios::binary | std::ios::ate);
@@ -101,13 +41,13 @@ std::vector<std::uint8_t> read_binary_prefix(const std::filesystem::path& path,
 void write_binary_file_atomic(const std::filesystem::path& path,
                               const std::vector<std::uint8_t>& bytes,
                               bool overwrite) {
-  write_bytes_atomic(path, reinterpret_cast<const char*>(bytes.data()),
-                     bytes.size(), overwrite);
+  detail::write_bytes_atomic(path, reinterpret_cast<const char*>(bytes.data()),
+                             bytes.size(), overwrite);
 }
 
 void write_text_file_atomic(const std::filesystem::path& path,
                             std::string_view text, bool overwrite) {
-  write_bytes_atomic(path, text.data(), text.size(), overwrite);
+  detail::write_bytes_atomic(path, text.data(), text.size(), overwrite);
 }
 
 std::string path_utf8(const std::filesystem::path& path) {
@@ -122,9 +62,27 @@ std::filesystem::path path_from_utf8(std::string_view text) {
 
 PathKey path_key(const std::filesystem::path& path) {
   const auto normalized = std::filesystem::absolute(path).lexically_normal();
-  auto key = normalized.wstring();
+  auto key = normalized.native();
+#ifdef _WIN32
   std::transform(key.begin(), key.end(), key.begin(),
                  [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
+#elif defined(__APPLE__)
+  // Apple filesystems commonly fold Unicode case and canonical equivalents.
+  const auto text = CFStringCreateWithBytes(
+      kCFAllocatorDefault, reinterpret_cast<const UInt8*>(key.data()),
+      static_cast<CFIndex>(key.size()), kCFStringEncodingUTF8, false);
+  if (text == nullptr) throw std::runtime_error("path is not valid UTF-8");
+  const auto folded = CFStringCreateMutableCopy(kCFAllocatorDefault, 0, text);
+  CFRelease(text);
+  CFStringNormalize(folded, kCFStringNormalizationFormD);
+  CFStringFold(folded, kCFCompareCaseInsensitive, nullptr);
+  key.resize(static_cast<std::size_t>(CFStringGetMaximumSizeForEncoding(
+                 CFStringGetLength(folded), kCFStringEncodingUTF8)) + 1);
+  CFStringGetCString(folded, key.data(), static_cast<CFIndex>(key.size()),
+                     kCFStringEncodingUTF8);
+  CFRelease(folded);
+  key.resize(std::char_traits<char>::length(key.c_str()));
+#endif
   return key;
 }
 
@@ -149,15 +107,6 @@ std::string lower_extension(const std::filesystem::path& path) {
   std::transform(extension.begin(), extension.end(), extension.begin(),
                  [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
   return extension;
-}
-
-std::uint64_t available_memory_bytes() {
-  MEMORYSTATUSEX status{};
-  status.dwLength = sizeof(status);
-  if (GlobalMemoryStatusEx(&status) != 0) {
-    return static_cast<std::uint64_t>(status.ullAvailPhys);
-  }
-  return 0;
 }
 
 }  // namespace hyperdr

@@ -9,14 +9,27 @@ function(hyperdr_configure_target target)
   set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF)
   # NOMINMAX and WIN32_LEAN_AND_MEAN are public: any consumer that includes
   # <windows.h> after our headers needs the same view of it.
-  target_compile_definitions(${target} PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
+  if(WIN32)
+    target_compile_definitions(${target} PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
+  endif()
   target_compile_definitions(${target}
     PUBLIC HYPERDR_WITH_CODECS=$<IF:$<BOOL:${HYPERDR_WITH_CODECS}>,1,0>)
   target_compile_definitions(${target}
     PUBLIC HYPERDR_WITH_NCNN=$<IF:$<BOOL:${HYPERDR_WITH_NCNN}>,1,0>)
-  target_compile_options(${target} PRIVATE /W4 /permissive- /utf-8)
-  target_compile_options(${target} PRIVATE
-    $<$<AND:$<CONFIG:Release>,$<BOOL:${HYPERDR_ENABLE_AVX2}>>:/arch:AVX2>)
+  if(MSVC)
+    target_compile_options(${target} PRIVATE /W4 /permissive- /utf-8)
+  else()
+    target_compile_options(${target} PRIVATE -Wall -Wextra -ffp-contract=off)
+  endif()
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
+    if(MSVC)
+      target_compile_options(${target} PRIVATE
+        $<$<AND:$<CONFIG:Release>,$<BOOL:${HYPERDR_ENABLE_AVX2}>>:/arch:AVX2>)
+    else()
+      target_compile_options(${target} PRIVATE
+        $<$<AND:$<CONFIG:Release>,$<BOOL:${HYPERDR_ENABLE_AVX2}>>:-mavx2>)
+    endif()
+  endif()
   # Every executable lands at the top of the build tree, where the Windows
   # runtime DLLs (libheif, libx265's dual 8/10-bit pair, libultrahdr) are staged.
   # Scattering them across module subdirectories would mean staging those DLLs

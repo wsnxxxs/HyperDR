@@ -97,6 +97,11 @@ struct ConvertOptions {
 // Rejects combinations no encoder can honour, before any file is opened.
 void validate_convert_options(const ConvertOptions& options);
 [[nodiscard]] ColorGamut resolved_sdr_gamut(const ConvertOptions& options);
+// Resolve defaults after settings are applied. Explicit creative controls win
+// over camera-profile defaults; HLG uses its format-specific headroom ceiling.
+void apply_render_defaults(ConvertOptions& options, bool contrast_set,
+                            bool vibrance_set);
+
 void apply_output_color_options(ConvertOptions& options);
 
 // Whether this run selected a native model at all.

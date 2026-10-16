@@ -25,6 +25,7 @@ int curve_command(int argc, char** argv) {
   ConvertOptions options;
   unsigned samples = 257;
   parse_settings(argc, argv, 2, options, &samples);
+  set_stdout_binary();
   std::cout << look_curve_json(options.gain, samples) << '\n';
   return 0;
 }
@@ -35,6 +36,7 @@ int schema_command(int argc, char** argv) {
       throw std::invalid_argument("unknown schema option: " + std::string(argv[i]));
     }
   }
+  set_stdout_binary();
   std::cout << schema_json();
   return 0;
 }

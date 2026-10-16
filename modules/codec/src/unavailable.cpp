@@ -21,13 +21,20 @@
 #include <system_error>
 #include <vector>
 
+#ifdef _WIN32
 #include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace hyperdr {
 
 namespace {
 
 std::filesystem::path current_executable_path() {
+#ifdef _WIN32
   std::array<wchar_t, 32768> buffer{};
   const DWORD length = GetModuleFileNameW(
       nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
@@ -35,9 +42,28 @@ std::filesystem::path current_executable_path() {
     throw std::runtime_error("cannot identify the running executable");
   }
   return std::filesystem::path(std::wstring(buffer.data(), length));
+#elif defined(__APPLE__)
+  std::uint32_t size = 0;
+  _NSGetExecutablePath(nullptr, &size);
+  std::vector<char> buffer(size);
+  if (_NSGetExecutablePath(buffer.data(), &size) != 0) {
+    throw std::runtime_error("cannot identify the running executable");
+  }
+  return std::filesystem::canonical(buffer.data());
+#else
+  std::vector<char> buffer(1024);
+  for (;;) {
+    const auto size = readlink("/proc/self/exe", buffer.data(), buffer.size());
+    if (size < 0) throw std::runtime_error("cannot identify the running executable");
+    if (static_cast<std::size_t>(size) < buffer.size()) {
+      return std::filesystem::path(std::string(buffer.data(), size));
+    }
+    buffer.resize(buffer.size() * 2);
+  }
+#endif
 }
 
-std::string lowercase_extension(const std::filesystem::path& path) {
+[[maybe_unused]] std::string lowercase_extension(const std::filesystem::path& path) {
   std::string extension = path.extension().string();
   std::transform(extension.begin(), extension.end(), extension.begin(),
                  [](const unsigned char value) {
@@ -53,6 +79,16 @@ std::string codec_runtime_fingerprint() {
   std::string out = "binary=" + sha256_file_hex(executable);
 #if HYPERDR_WITH_CODECS
   out += "|codecs=enabled";
+#ifdef _WIN32
+  constexpr auto runtime_extension = ".dll";
+  constexpr auto runtime_label = "|dll:";
+#elif defined(__APPLE__)
+  constexpr auto runtime_extension = ".dylib";
+  constexpr auto runtime_label = "|dylib:";
+#else
+  constexpr auto runtime_extension = ".so";
+  constexpr auto runtime_label = "|so:";
+#endif
   std::vector<std::filesystem::path> libraries;
   std::error_code error;
   for (std::filesystem::directory_iterator it(executable.parent_path(), error),
@@ -60,7 +96,7 @@ std::string codec_runtime_fingerprint() {
        !error && it != end; it.increment(error)) {
     std::error_code file_error;
     if (!it->is_regular_file(file_error) || file_error ||
-        lowercase_extension(it->path()) != ".dll") {
+        lowercase_extension(it->path()) != runtime_extension) {
       continue;
     }
     libraries.push_back(it->path());
@@ -70,7 +106,7 @@ std::string codec_runtime_fingerprint() {
     return path_utf8(left.filename()) < path_utf8(right.filename());
   });
   for (const auto& library : libraries) {
-    out += "|dll:" + path_utf8(library.filename()) + "=" +
+    out += runtime_label + path_utf8(library.filename()) + "=" +
            sha256_file_hex(library);
   }
 #else

@@ -1350,7 +1350,11 @@ DecodedImage decode_raw(const std::filesystem::path& path,
   }
   if (other.timestamp > 0) {
     std::tm time{};
+#ifdef _WIN32
     localtime_s(&time, &other.timestamp);
+#else
+    localtime_r(&other.timestamp, &time);
+#endif
     char buffer[32]{};
     if (std::strftime(buffer, sizeof(buffer), "%Y:%m:%d %H:%M:%S", &time)) result.metadata.date_time = buffer;
   }

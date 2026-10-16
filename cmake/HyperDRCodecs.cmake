@@ -37,7 +37,7 @@ endfunction()
 # Main10. The helper script prepares a dual 8/10-bit runtime once; this hook
 # restores it after every rebuild, which would otherwise overwrite it.
 function(hyperdr_restore_x265_multibit target)
-  if(HYPERDR_WITH_CODECS)
+  if(WIN32 AND HYPERDR_WITH_CODECS)
     add_custom_command(TARGET ${target} POST_BUILD
       COMMAND powershell -NoProfile -ExecutionPolicy Bypass -File
               "${PROJECT_SOURCE_DIR}/scripts/restore_x265_multibit.ps1"

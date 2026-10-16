@@ -9,6 +9,24 @@
 
 namespace hyperdr {
 
+void apply_render_defaults(ConvertOptions& options, bool contrast_set,
+                            bool vibrance_set) {
+  if (!options.raw.profile.empty()) {
+    // The profile already supplies its base look. Only explicit creative
+    // controls should change it; argument order must not affect this choice.
+    if (!contrast_set) options.gain.look.contrast = 1.0F;
+    if (!vibrance_set) options.gain.look.vibrance = 0.0F;
+  }
+  if (is_hlg_encoding(options.encoding)) {
+    // HLG's range above diffuse white is fixed by the standard, so a higher
+    // ceiling cannot be honoured. Lowering it silently is right for the
+    // automatic case; an explicit request above it is an error, reported by
+    // validate_convert_options.
+    options.gain.look.headroom_max_stops =
+        std::min(options.gain.look.headroom_max_stops, kHlgHeadroomStops);
+  }
+}
+
 ColorGamut resolved_sdr_gamut(const ConvertOptions& options) {
   return options.output_gamut.value_or(options.encoding == OutputEncoding::SdrJpeg
       ? ColorGamut::kSrgb : ColorGamut::kDisplayP3);

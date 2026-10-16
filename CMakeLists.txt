@@ -1,9 +1,10 @@
 cmake_minimum_required(VERSION 3.25)
-project(HyperDR VERSION 1.0.0 LANGUAGES CXX RC)
+project(HyperDR VERSION 1.0.0 LANGUAGES CXX)
 
-if(NOT WIN32 OR NOT MSVC)
-  message(FATAL_ERROR "HyperDR requires Windows with MSVC")
-endif()
+# Core modules are also linked into the C ABI shared library.
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
 # HyperDR is built as seven layered modules under modules/, each with its own
 # public include root:
@@ -38,7 +39,7 @@ include(HyperDRModel)
 
 find_package(Threads REQUIRED)
 
-if(HYPERDR_WITH_CODECS)
+if(WIN32 AND HYPERDR_WITH_CODECS)
   # LibRaw's OpenMP build requires the MSVC OpenMP runtime.
   set(CMAKE_INSTALL_OPENMP_LIBRARIES TRUE)
 endif()
@@ -64,17 +65,20 @@ add_subdirectory(modules/container)
 add_subdirectory(modules/gainmap)
 add_subdirectory(modules/codec)
 add_subdirectory(modules/app)
+add_subdirectory(modules/capi)
 
 # --- install and package ----------------------------------------------------
 
 install(TARGETS HyperDR RUNTIME DESTINATION bin COMPONENT Runtime)
-install(FILES $<TARGET_RUNTIME_DLLS:HyperDR> DESTINATION bin COMPONENT Runtime)
+if(WIN32)
+  install(FILES $<TARGET_RUNTIME_DLLS:HyperDR> DESTINATION bin COMPONENT Runtime)
+endif()
 # TARGET_RUNTIME_DLLS covers the executable's direct link dependencies, but
 # several codec DLLs load their own vcpkg DLLs (AOM, zlib, JPEG, PNG, libyuv,
 # libde265). Ship the release triplet's runtime set so a clean machine does not
 # fail before main(). The prepared Main10 x265 pair below is installed last and
 # deliberately replaces vcpkg's ordinary 8-bit libx265.dll.
-if(HYPERDR_WITH_CODECS AND DEFINED VCPKG_INSTALLED_DIR AND
+if(WIN32 AND HYPERDR_WITH_CODECS AND DEFINED VCPKG_INSTALLED_DIR AND
    DEFINED VCPKG_TARGET_TRIPLET)
   install(DIRECTORY
     "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin/"
@@ -86,7 +90,7 @@ endif()
 # runtime, and the staged libx265.dll deliberately replaces vcpkg's 8-bit DLL.
 # Install the prepared pair last so CPack cannot silently ship an 8-bit-only
 # archive that advertises PQ/HLG support.
-if(HYPERDR_WITH_CODECS)
+if(WIN32 AND HYPERDR_WITH_CODECS)
   install(FILES
     "${CMAKE_BINARY_DIR}/x265-runtime/$<CONFIG>/libx265.dll"
     "${CMAKE_BINARY_DIR}/x265-runtime/$<CONFIG>/libx265_main.dll"
@@ -103,7 +107,7 @@ hyperdr_install_model_assets()
 # PyTorch checkpoints, optimizer state, virtual environments and private
 # training data are intentionally not installed. The inference-only ONNX and
 # ncnn files remain offline build assets; the release executable contains the
-# fixed ncnn model as Windows resources.
+# fixed ncnn models as aligned byte arrays.
 # The panel derives its settings vocabulary from this file, so it ships too.
 install(FILES schema/settings.json schema/report.json DESTINATION schema COMPONENT Runtime)
 install(FILES Start.bat Setup-HTTPS.bat DESTINATION . COMPONENT Runtime)
@@ -117,13 +121,22 @@ install(FILES
   scripts/configure_hyperdr_firewall.ps1
   DESTINATION scripts COMPONENT Runtime)
 install(FILES LICENSE THIRD_PARTY_NOTICES.md CHANGELOG.md DESTINATION . COMPONENT Runtime)
-install(FILES docs/iphone-lan.md DESTINATION docs COMPONENT Runtime)
 install(FILES packaging/INSTALL.md DESTINATION . RENAME INSTALL.md COMPONENT Runtime)
 
 set(CPACK_PACKAGE_NAME "HyperDR")
 set(CPACK_PACKAGE_VENDOR "Renhe Wang")
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
-set(CPACK_PACKAGE_FILE_NAME "${PROJECT_NAME}-${PROJECT_VERSION}-windows-x64")
+if(WIN32)
+  set(HYPERDR_PACKAGE_PLATFORM windows-x64)
+elseif(APPLE)
+  set(HYPERDR_PACKAGE_PLATFORM macos-${CMAKE_SYSTEM_PROCESSOR})
+else()
+  set(HYPERDR_PACKAGE_PLATFORM linux-${CMAKE_SYSTEM_PROCESSOR})
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
+    set(HYPERDR_PACKAGE_PLATFORM linux-x64)
+  endif()
+endif()
+set(CPACK_PACKAGE_FILE_NAME "${PROJECT_NAME}-${PROJECT_VERSION}-${HYPERDR_PACKAGE_PLATFORM}")
 set(CPACK_GENERATOR "ZIP")
 set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)
 include(CPack)

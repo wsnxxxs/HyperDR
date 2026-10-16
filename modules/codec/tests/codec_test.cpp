@@ -1362,10 +1362,36 @@ int main() {
     check_rgb_ultrahdr(metadata);
     check_ultrahdr_pair(metadata);
     check_ultrahdr_icc(metadata);
-    check_icc_only_heic();
-    check_apple_legacy_heic();
+    const bool have_hevc = heif_have_encoder_for_format(heif_compression_HEVC);
+    if (have_hevc) {
+      check_icc_only_heic();
+      check_apple_legacy_heic();
+    }
     check_avif_gain_map(false);
     check_avif_gain_map(true);
+
+    if (!have_hevc) {
+      // The transitional macOS build intentionally has a decoder only. Keep
+      // its JPEG/R and AVIF round trips active without generating HEVC fixtures.
+      const auto small = make_synthetic(64, 32);
+      const auto gain = hyperdr::make_gain_map(small, options);
+      const auto expected = hyperdr::reconstruct_gain_map(
+          gain.base_linear, gain.gain_map, gain.metadata, gain.headroom_stops);
+      const auto jpeg = hyperdr::encode_ultrahdr_jpeg(gain, metadata, 90);
+      hyperdr::verify_ultrahdr_jpeg(jpeg);
+      require_linear_round_trip(decode_ultrahdr_input(jpeg), expected,
+                                "Ultra HDR round trip changed brightness");
+      for (const auto encoding : {hyperdr::HdrEncoding::AvifPq,
+                                  hyperdr::HdrEncoding::AvifHlg}) {
+        const auto bytes = hyperdr::encode_avif(gain, metadata, 80, encoding);
+        hyperdr::verify_avif_decodable(bytes);
+        require_linear_round_trip(decode_encoded_input(bytes, "avif", ".avif"), expected,
+                                  "AVIF round trip changed brightness");
+      }
+      check_png_cicp_headroom();
+      std::cout << "codec round trips passed; HEVC fixtures skipped (no encoder)\n";
+      return 0;
+    }
 
     // Default 8-bit output through the grid path (wider than one 2048 tile), with a
     // full decode and gain-map reconstruction regression, not just structure checks.

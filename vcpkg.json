@@ -1,4 +1,4 @@
-﻿{
+{
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
   "name": "hyperdr",
   "version-string": "1.0.0",
@@ -6,11 +6,20 @@
   "dependencies": [
     {
       "name": "libraw",
-      "features": [ "openmp" ]
+      "default-features": false
+    },
+    {
+      "name": "libraw",
+      "features": [
+        "openmp"
+      ],
+      "platform": "windows"
     },
     {
       "name": "libavif",
-      "features": [ "aom" ]
+      "features": [
+        "aom"
+      ]
     },
     "libjpeg-turbo",
     "libpng",
@@ -19,7 +28,15 @@
     "ncnn",
     {
       "name": "libheif",
-      "features": [ "hevc" ]
+      "default-features": false
+    },
+    {
+      "name": "libheif",
+      "default-features": false,
+      "features": [
+        "hevc"
+      ],
+      "platform": "windows"
     }
   ]
 }

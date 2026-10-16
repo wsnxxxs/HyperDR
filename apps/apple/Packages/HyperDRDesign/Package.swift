@@ -1,0 +1,18 @@
+// swift-tools-version: 6.2
+import PackageDescription
+
+let package = Package(
+    name: "HyperDRDesign",
+    defaultLocalization: "en",
+    platforms: [.macOS(.v26)],
+    products: [
+        .library(name: "HyperDRDesign", targets: ["HyperDRDesign"]),
+    ],
+    targets: [
+        .target(
+            name: "HyperDRDesign",
+            resources: [.process("Resources")]
+        ),
+        .testTarget(name: "HyperDRDesignTests", dependencies: ["HyperDRDesign"]),
+    ]
+)

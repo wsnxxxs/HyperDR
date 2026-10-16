@@ -1,7 +1,7 @@
 # HyperDR
 
 `HyperDR` is a C++20 command-line converter for ARW, DNG, JPEG, PNG, HEIC,
-HEIF/HIF, and AVIF images, developed on Windows. It exports graded SDR JPEGs and six real HDR
+HEIF/HIF, and AVIF images, now targeting macOS 26 on Apple Silicon. It exports graded SDR JPEGs and six real HDR
 representations: Apple-compatible Adaptive HDR HEIC (a Display P3 SDR base plus
 an ISO 21496-1 single-channel gain map), Google Ultra HDR JPEG/R, 10-bit ITU-R
 BT.2100 PQ and HLG HEIC, and the same two BT.2100 renditions as 10-bit AVIF. PQ,
@@ -44,8 +44,9 @@ qualified highlights into HDR headroom, and applies shared chroma processing
 before the two luminance outputs split. It is the only renderer; the earlier
 `neutral` one has been removed, and `--look neutral` is now rejected.
 
-HyperDR has three user-facing surfaces: the folder-capable CLI, the local
-browser/iPhone panel, and the Windows desktop shell. The optional “优化” action
+HyperDR now targets macOS on Apple Silicon with a native SwiftUI application
+and a folder-capable CLI. The Python/Web panel and Windows desktop shell remain
+as migration references. The optional “优化” action
 adds a model-produced gain map without replacing the normal renderer. Start a
 change from the [feature ownership map](docs/project-structure.md); the native
 converter's internal layers are documented there only as a secondary concern.
@@ -55,8 +56,8 @@ converter's internal layers are documented there only as a secondary concern.
 - [`modules/`](modules/) contains the layered C++ core and command-line app.
 - [`apps/panel/`](apps/panel/) contains the Python browser-panel server and its
   web client.
-- [`apps/desktop/`](apps/desktop/) contains the Windows desktop shell that owns
-  the panel sidecar and native window lifecycle.
+- [`apps/apple/`](apps/apple/) contains the new SwiftUI application and Swift packages.
+- [`apps/desktop/`](apps/desktop/) retains the archived Windows desktop shell.
 - [`HyperDR_Model/`](HyperDR_Model/) contains the optional ML training and
   inference project.
 - [`tests/`](tests/) contains cross-component Python, JavaScript, PowerShell,
@@ -72,66 +73,14 @@ directory names, and cleanup conventions.
 
 ## Quick start
 
-For a packaged Windows release:
+Build the macOS CLI and C ABI using the instructions below. The native SwiftUI
+application is being developed in `apps/apple/`.
 
-1. Extract the ZIP to a writable directory. Any location works; nothing is
-   stored next to the program.
-2. Install Python 3.11 or newer if you want the browser panel.
-3. Double-click `Setup-HTTPS.bat` once if you want the iPhone HDR preview; it
-   issues a certificate authority unique to this computer and prints the two
-   iPhone trust steps.
-4. Double-click `Start.bat`, or run `bin\HyperDR.exe --help` for command-line use.
+## Windows archive
 
-The release process converts and self-verifies a generated test image in all six
-output encodings after extracting the archive. See
-[packaging/INSTALL.md](packaging/INSTALL.md) for installation, LAN, and runtime
-details, or [packaging/README.md](packaging/README.md) to build a release.
-
-To build from source, use the instructions below.
-
-## Build on Windows
-
-Install Visual Studio 2022 Build Tools with **Desktop development with C++**,
-CMake, Git, and vcpkg. From a Developer PowerShell:
-
-```powershell
-cmake -S . -B build -G Ninja `
-  -DCMAKE_TOOLCHAIN_FILE=C:\tools\vcpkg\scripts\buildsystems\vcpkg.cmake `
-  -DVCPKG_TARGET_TRIPLET=x64-windows
-cmake --build build --config Release
-ctest --test-dir build -C Release --output-on-failure
-```
-
-Codec-enabled configuration fetches Google's pinned `libultrahdr` v1.4.0
-reference codec and builds it alongside the project.
-
-For the dependency-free core only:
-
-```powershell
-cmake -S . -B build-core -DHYPERDR_WITH_CODECS=OFF
-cmake --build build-core --config Release
-ctest --test-dir build-core -C Release --output-on-failure
-```
-
-`--depth 8` is the broadly compatible default. Use `--depth 10` for smooth skies
-and large gradients when a Main10-capable x265 DLL is installed; the included
-`scripts/prepare_x265_multibit.ps1` prepares that runtime.
-PQ and HLG require it. Run the script once after the first codec-enabled build:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\prepare_x265_multibit.ps1 `
-  -VcpkgRoot C:\tools\vcpkg -BuildDirectory .\build -Configuration Release
-```
-
-After that, the CMake post-build hook preserves the Main10 + 8-bit dual runtime
-across normal rebuilds. If upgrading from a build made before parallel HEIC
-tile encoding, run the preparation script again: it also fixes x265 4.2's
-shared recursion guard so concurrent tiles can safely load the 8-bit fallback.
-
-Build trees belong in one of the four names the tooling already knows —
-`build/`, `build-core/`, `build-release/`, `build-codecs-win/`. They are listed
-with their consumers in the
-[project structure guide](docs/project-structure.md).
+Windows development ended at [`a43d46a`](https://github.com/wsnxxxs/HyperDR/tree/a43d46a).
+Use that revision for Windows build and release instructions. The current branch
+supports macOS on Apple Silicon; iPhone and iPad work is deferred.
 
 ## Build on macOS (Apple Silicon)
 
@@ -168,7 +117,7 @@ Both builds produce `HyperDR`, `libhyperdr.a`, and `libhyperdr.dylib` at the
 build root. The C11 header is `modules/capi/include/hyperdr/hyperdr.h`.
 The codec preset uses `cmake/triplets/arm64-osx.cmake` to keep the transitional
 libheif/libde265 decoder libraries dynamic. It disables LibRaw OpenMP and
-libheif's x265 feature: this macOS build reads HEIC but HEVC exports fail with
+libheif's GPL HEVC encoder feature: this macOS build reads HEIC but HEVC exports fail with
 `this build has no HEVC encoder` until the VideoToolbox backend is added.
 HEVC fixture-generation tests report their skip; AVIF and JPEG/R tests still run.
 This transitional libheif build is for direct desktop development/distribution;
@@ -207,7 +156,7 @@ and look-control ranges are in
 What the renderer promises about its output, and the manual scene checklist a
 release still has to pass, are in [docs/rendering.md](docs/rendering.md).
 
-## Report schema 8
+## Report schema 11
 
 The `--report` contents, geometry fields, and headroom fields are documented in
 [docs/report-schema.md](docs/report-schema.md), alongside the machine-readable
@@ -243,10 +192,10 @@ Run it after configuring `build-core`, or select `panel`, `frontend`, or `native
 for a focused check. The [development guide](docs/development.md#validate-only-the-affected-behaviour)
 lists prerequisites and build options.
 
-CI builds the Windows core in Debug and Release, runs panel tests on two Python
-versions, checks front-end behavior and wiring, and compares native curve/schema
-contracts with the selected build. Full codec builds and extracted-release
-smoke tests cover both SSE and AVX2. All jobs must pass before merging.
+CI defines macOS core Debug/Release jobs, a codec build with a GPL dependency
+gate, ASan/UBSan C ABI checks, and the reference frontend suite.
+Run `actionlint .github/workflows/ci.yml` locally. Hosted execution is verified
+after an authorized push.
 
 ## Scope and limitations
 
@@ -255,16 +204,14 @@ are not copied; essential photographic metadata is rebuilt into compact Exif and
 standards-oriented XMP, now including artist, copyright, lens make and model,
 35 mm equivalent focal length, a Software tag, and the camera's GPS fix when it
 recorded one. A fix that LibRaw did not parse is omitted rather than guessed.
-GPU encoding remains outside this project's scope.
+HEVC encoding will use the planned VideoToolbox backend.
 
 ## iPhone LAN panel
 
-Double-click `Start.bat` and open the printed tokenized iPhone URL to upload
-photos, tune settings with a live preview, and download the converted HEIC or
-Ultra HDR JPEG. Plain HTTP covers upload and conversion; the true-HDR WebGPU
-preview needs trusted HTTPS, which `Setup-HTTPS.bat` sets up once per computer.
-The full guide, covering the two iPhone trust steps, manual certificate setup,
-and security notes, is in [docs/iphone-lan.md](docs/iphone-lan.md).
+The Windows LAN launchers are retained as migration references. Use the
+[frozen Windows revision](https://github.com/wsnxxxs/HyperDR/tree/a43d46a) and
+[LAN guide](docs/iphone-lan.md) for that version. The current application targets
+macOS; native iPhone and iPad work is deferred.
 
 ## Development and security
 

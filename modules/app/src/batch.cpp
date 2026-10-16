@@ -21,7 +21,8 @@
 #include <cctype>
 #include <chrono>
 #include <cmath>
-#include <iostream>
+#include <sstream>
+#include "hyperdr/foundation/cancel.hpp"
 #include <new>
 #include <optional>
 #include <set>
@@ -252,6 +253,8 @@ Staged decode_stage(const std::filesystem::path& path,
     staged.image = decode_cached_image(path, options, raw, &staged.analysis_cache);
     staged.decode_ms = milliseconds(start, Clock::now());
     staged.decoded = true;
+  } catch (const Cancelled&) {
+    throw;
   } catch (const std::bad_alloc&) {
     staged.decoded = false;
     staged.result.message = options.decode_intent == DecodeIntent::Export
@@ -301,7 +304,7 @@ void verify_encoded(const std::vector<std::uint8_t>& bytes,
 }
 
 void finish_stage(Staged& staged, const ConvertOptions& options,
-                  const std::string& fingerprint) {
+                  const std::string& fingerprint, ProgressSink* sink) {
   if (!staged.decoded) return;
   auto& result = staged.result;
   try {
@@ -433,6 +436,12 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     staged.image.authored_sdr.reset();
     const auto processed = Clock::now();
 
+    check_cancelled();
+    if (sink) {
+      const auto path = path_utf8(result.input);
+      sink->on_progress({"encode", path, .7, {}});
+    }
+    check_cancelled();
     auto bytes = encode_for(photo, gain, staged.image.metadata, options);
     if (codec_gain) {
       const auto info = probe_ultrahdr_jpeg(bytes);
@@ -446,6 +455,11 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     photo = {};
     gain = {};  // Free the float base and gain before the decoder allocates.
     if (options.verify_output) {
+      if (sink) {
+        const auto path = path_utf8(result.input);
+        sink->on_progress({"verify", path, .9, {}});
+      }
+      check_cancelled();
       verify_encoded(bytes, options);
       result.self_verified = true;
     }
@@ -456,6 +470,7 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     // --skip-existing means "keep this exact render if current, otherwise
     // replace it". A stale or provenance-less output must therefore be
     // publishable even when the user did not also spell --overwrite.
+    check_cancelled();
     write_binary_file_atomic(result.output, bytes,
                              options.overwrite || options.skip_existing);
     const auto encoded = Clock::now();
@@ -468,6 +483,8 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     result.success = true;
     result.message = "ok";
     write_resume_state(result.output, result.input, staged.input_stamp, options, fingerprint);
+  } catch (const Cancelled&) {
+    throw;
   } catch (const std::bad_alloc&) {
     result.success = false;
     result.message = options.decode_intent == DecodeIntent::Export
@@ -516,15 +533,21 @@ void require_decode_resolution(const ConvertOptions& options,
 
 FileResult convert_file(const std::filesystem::path& input,
                         const ConvertOptions& requested_options,
-                        const std::string& fingerprint) {
+                        const std::string& fingerprint, ProgressSink* sink) {
   auto options = requested_options;
   apply_output_color_options(options);
   auto staged = decode_stage(input, options, fingerprint);
-  finish_stage(staged, options, fingerprint);
+  check_cancelled();
+  if (sink && staged.decoded) {
+    const auto path = path_utf8(input);
+    sink->on_progress({"process", path, .3, {}});
+  }
+  finish_stage(staged, options, fingerprint, sink);
   return staged.result;
 }
 
-int run_conversion(const ConvertOptions& requested_options) {
+int run_conversion(const ConvertOptions& requested_options, ProgressSink* sink, std::string* report) {
+  check_cancelled();
   auto options = requested_options;
   apply_output_color_options(options);
   validate_convert_options(options);
@@ -541,45 +564,55 @@ int run_conversion(const ConvertOptions& requested_options) {
   std::vector<FileResult> results(files.size());
   const auto announce = [&](const FileResult& result,
                             const std::filesystem::path& file) {
-    std::cerr << (result.skipped ? "skip: " : (result.success ? "ok: " : "error: "))
+    if (!sink) return;
+    std::ostringstream text;
+    text << (result.skipped ? "skip: " : (result.success ? "ok: " : "error: "))
               << path_utf8(file);
-    if (!result.success) std::cerr << ": " << result.message;
-    std::cerr << '\n';
+    if (!result.success) text << ": " << result.message;
+    text << '\n';
     // A degraded decode still succeeds for non-resolution conditions such as
     // rejected crop metadata. Resolution is not a degradable export property:
     // RAW half-size is selected explicitly by preview callers only.
     if (result.success && result.decode_degraded) {
-      std::cerr << "warning: " << path_utf8(file) << ": ";
+      text << "warning: " << path_utf8(file) << ": ";
       // Only phrase this as a shortfall against the target when the target was
       // actually applied; otherwise target_* is the request that was refused
       // and comparing the two would read as a resolution loss it is not. A
       // degradation that left the geometry alone (no camera matrix, an SDR
       // fallback) is not described as one at all.
       if (!result.target_dimensions_applied) {
-        std::cerr << "decoded at " << result.decoded_width << 'x' << result.decoded_height
+        text << "decoded at " << result.decoded_width << 'x' << result.decoded_height
                   << ", ignoring the recorded " << result.target_width << 'x'
                   << result.target_height << " crop";
       } else if (result.decoded_width != result.target_width ||
                  result.decoded_height != result.target_height) {
-        std::cerr << "decoded at " << result.decoded_width << 'x' << result.decoded_height
+        text << "decoded at " << result.decoded_width << 'x' << result.decoded_height
                   << " instead of " << result.target_width << 'x' << result.target_height;
       } else {
-        std::cerr << "decode degraded";
+        text << "decode degraded";
       }
-      std::cerr << " (";
+      text << " (";
       for (std::size_t i = 0; i < result.decode_degradation_reasons.size(); ++i) {
-        if (i != 0) std::cerr << ", ";
-        std::cerr << result.decode_degradation_reasons[i];
+        if (i != 0) text << ", ";
+        text << result.decode_degradation_reasons[i];
       }
-      std::cerr << ")\n";
+      text << ")\n";
     }
+    const auto path = path_utf8(file);
+    const auto message = text.str();
+    sink->on_progress({result.success ? "complete" : "error", path, 1.0, message});
   };
 
   for (std::size_t index = 0; index < files.size(); ++index) {
-    results[index] = convert_file(files[index], options, fingerprint);
+    check_cancelled();
+    const auto path = path_utf8(files[index]);
+    if (sink) sink->on_progress({"decode", path, 0.0, {}});
+    results[index] = convert_file(files[index], options, fingerprint, sink);
     announce(results[index], files[index]);
   }
+  check_cancelled();
   write_run_report(options.report_path, results, options);
+  if (report) *report = run_report_json(results, options);
   return std::all_of(results.begin(), results.end(),
                      [](const FileResult& r) { return r.success; })
              ? 0

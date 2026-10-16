@@ -44,9 +44,8 @@ std::string settings_signature(const ConvertOptions& options) {
   std::string out = std::string("hyperdr:") + kVersion +
                     "|render_pipeline=" +
                     std::to_string(kRenderPipelineRevision);
-  // A settings-only signature is insufficient for --skip-existing: changing
-  // the executable or any side-by-side codec DLL can change the bytes while
-  // leaving every user-facing option untouched.
+  // Build identity includes source, model assets and installed codec versions;
+  // it is shared by CLI, static C ABI and the dynamic library.
   out += "|runtime=" + codec_runtime_fingerprint();
   for (const auto& setting : settings()) {
     if (!setting.affects_output_bytes) continue;

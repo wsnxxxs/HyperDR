@@ -39,8 +39,5 @@ Documents, which may be redirected into a cloud-synced folder. The server
 private key is restricted to the current Windows user. The authority's own key
 stays where `mkcert` puts it and is never read or copied by HyperDR.
 
-A release archive containing a `.pem`, `.key`, `.pfx`, `.p12`, `.crt`, or `.cer`
-file is a defect, not a convenience. `packaging/test-release.ps1` unpacks an
-archive and fails if it finds one. It runs on every CI build and again from
-`packaging/package-release.ps1`, so key material cannot reach a published
-package by accident.
+The Windows version is frozen at [`a43d46a`](https://github.com/wsnxxxs/HyperDR/tree/a43d46a);
+see that revision for its release and packaging instructions.

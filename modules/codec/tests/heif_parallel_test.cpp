@@ -1,3 +1,4 @@
+#include "hyperdr/foundation/progress.hpp"
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/container/heif_tmap.hpp"
 #include "hyperdr/container/inspect.hpp"
@@ -41,36 +42,12 @@ struct ImageDeleter {
   void operator()(heif_image* p) const { heif_image_release(p); }
 };
 
-void set_workers(const char* value) {
-#ifdef _WIN32
-  require(_putenv_s("HYPERDR_HEIC_TILE_WORKERS", value) == 0,
-          "cannot set HEIC tile worker override");
-#else
-  require((value[0] ? setenv("HYPERDR_HEIC_TILE_WORKERS", value, 1)
-                    : unsetenv("HYPERDR_HEIC_TILE_WORKERS")) == 0,
-          "cannot set HEIC tile worker override");
-#endif
-}
-
 class WorkerOverride {
  public:
-  explicit WorkerOverride(const char* value) {
-    if (const char* previous = std::getenv("HYPERDR_HEIC_TILE_WORKERS")) {
-      previous_ = previous;
-    }
-    set_workers(value);
-  }
-  ~WorkerOverride() {
-    try {
-      set_workers(previous_ ? previous_->c_str() : "");
-    } catch (...) {
-    }
-  }
-  WorkerOverride(const WorkerOverride&) = delete;
-  WorkerOverride& operator=(const WorkerOverride&) = delete;
-
+  explicit WorkerOverride(const char* value)
+      : scope_({static_cast<unsigned>(std::strtoul(value, nullptr, 10)), 0}) {}
  private:
-  std::optional<std::string> previous_;
+  hyperdr::ExecutionScope scope_;
 };
 
 hyperdr::FloatImage make_image(std::uint32_t width, std::uint32_t height) {

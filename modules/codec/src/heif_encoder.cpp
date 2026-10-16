@@ -3,6 +3,7 @@
 #include "hyperdr/image/color.hpp"
 #include "hyperdr/image/transfer.hpp"
 #include "hyperdr/foundation/parallel.hpp"
+#include "hyperdr/foundation/progress.hpp"
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/container/inspect.hpp"
@@ -208,6 +209,7 @@ std::unique_ptr<heif_image, ImageDeleter> make_gain(const FloatImage& image) {
   auto* plane = heif_image_get_plane(raw, heif_channel_Y, &stride);
   if (!plane || stride <= 0) throw std::runtime_error("allocated gain luma plane is unavailable");
   for (std::uint32_t y = 0; y < image.height; ++y) {
+    check_cancelled();
     for (std::uint32_t x = 0; x < image.width; ++x)
       plane[static_cast<std::size_t>(y) * stride + x] = static_cast<std::uint8_t>(std::lround(std::clamp(image.at(x, y, 0), 0.0F, 1.0F) * 255.0F));
   }
@@ -321,6 +323,7 @@ std::unique_ptr<heif_image_handle, HandleDeleter> encode_base(
              "create base grid");
   std::unique_ptr<heif_image_handle, HandleDeleter> handle(handle_raw);
   for (std::uint32_t y = 0; y < rows; ++y) {
+    check_cancelled();
     for (std::uint32_t x = 0; x < columns; ++x) {
       heif_image* tile_raw = nullptr;
       check_heif(heif_image_extract_area(image,
@@ -360,6 +363,7 @@ std::unique_ptr<heif_image_handle, HandleDeleter> encode_gain_map_item(
              "create gain map grid");
   std::unique_ptr<heif_image_handle, HandleDeleter> handle(handle_raw);
   for (std::uint32_t y = 0; y < rows; ++y) {
+    check_cancelled();
     for (std::uint32_t x = 0; x < columns; ++x) {
       heif_image* tile_raw = nullptr;
       check_heif(heif_image_extract_area(image, static_cast<int>(x * tile_size),
@@ -402,6 +406,7 @@ std::unique_ptr<heif_image_handle, HandleDeleter> encode_hdr_image(
   std::unique_ptr<heif_image_handle, HandleDeleter> handle(handle_raw);
   heif_image_handle_set_content_light_level(handle.get(), &light_level);
   for (std::uint32_t y = 0; y < rows; ++y) {
+    check_cancelled();
     for (std::uint32_t x = 0; x < columns; ++x) {
       heif_image* tile_raw = nullptr;
       check_heif(heif_image_extract_area(image, static_cast<int>(x * tile_size),
@@ -433,12 +438,8 @@ unsigned heic_tile_workers() {
   // Each x265 encoder already has its own WPP workers. Limit simultaneous
   // pictures, rather than starting one encoder for every tile of a large RAW.
   const unsigned automatic = std::clamp(std::thread::hardware_concurrency() / 4U, 1U, 4U);
-  const char* value = std::getenv("HYPERDR_HEIC_TILE_WORKERS");
-  if (!value || !*value) return automatic;
-  char* end = nullptr;
-  const long requested = std::strtol(value, &end, 10);
-  return *end == '\0' && requested >= 1 && requested <= 4
-             ? static_cast<unsigned>(requested) : automatic;
+  const auto requested = current_execution_config.heic_tile_workers;
+  return requested ? requested : automatic;
 }
 
 struct HeicTileSource {
@@ -522,9 +523,12 @@ std::vector<std::uint8_t> encode_parallel_heic(
   std::atomic<std::size_t> next{0};
   std::exception_ptr failure;
   std::mutex failure_mutex;
-  const auto run = [&] {
+  const auto run = [&, token = current_cancel_token, config = current_execution_config] {
+    CancelScope cancel(token);
+    ExecutionScope execution(config);
     try {
       for (;;) {
+        check_cancelled();
         const auto index = next.fetch_add(1);
         if (index >= jobs.size()) break;
         const auto [s, t] = jobs[index];
@@ -958,6 +962,7 @@ DecodedGainMapHeic decode_gain_map_heic_components(
   const float gain_max =
       static_cast<float>((1U << std::min(gain_bits, 16)) - 1U);
   for (std::uint32_t y = 0; y < height; ++y) {
+    check_cancelled();
     if (base_bits > 8) {
       const auto* row = reinterpret_cast<const std::uint16_t*>(
           base_plane + static_cast<std::size_t>(y) * base_stride);
@@ -978,6 +983,7 @@ DecodedGainMapHeic decode_gain_map_heic_components(
     }
   }
   for (std::uint32_t y = 0; y < gain_height; ++y) {
+    check_cancelled();
     if (gain_bits <= 8) {
       for (std::uint32_t x = 0; x < gain_width; ++x) {
         gain.at(x, y, 0) =
@@ -1044,6 +1050,7 @@ void reconstruct_heic_to_tiff(const std::filesystem::path& input,
   const float base_max = static_cast<float>((1U << std::min(base_bits, 16)) - 1U);
   const float gain_max = static_cast<float>((1U << std::min(gain_bits, 16)) - 1U);
   for (std::uint32_t y = 0; y < height; ++y) {
+    check_cancelled();
     if (base_bits > 8) {
       const auto* row = reinterpret_cast<const std::uint16_t*>(base_plane + static_cast<std::size_t>(y) * base_stride);
       for (std::uint32_t x = 0; x < width; ++x)
@@ -1055,6 +1062,7 @@ void reconstruct_heic_to_tiff(const std::filesystem::path& input,
     }
   }
   for (std::uint32_t y = 0; y < gain_height; ++y) {
+    check_cancelled();
     if (gain_bits <= 8) {
       for (std::uint32_t x = 0; x < gain_width; ++x) gain.at(x, y, 0) = gain_plane[static_cast<std::size_t>(y) * gain_stride + x] / gain_max;
     } else {

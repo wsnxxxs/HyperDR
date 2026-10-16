@@ -9,13 +9,6 @@
       "default-features": false
     },
     {
-      "name": "libraw",
-      "features": [
-        "openmp"
-      ],
-      "platform": "windows"
-    },
-    {
       "name": "libavif",
       "features": [
         "aom"
@@ -29,14 +22,6 @@
     {
       "name": "libheif",
       "default-features": false
-    },
-    {
-      "name": "libheif",
-      "default-features": false,
-      "features": [
-        "hevc"
-      ],
-      "platform": "windows"
     }
   ]
 }

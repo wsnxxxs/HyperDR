@@ -40,6 +40,7 @@ namespace hyperdr {
 namespace {
 
 void check_raw(int code, const char* operation) {
+  check_cancelled();
   // LibRaw uses negative values for its own enum and positive values for errno.
   // Both LIBRAW_UNSUFFICIENT_MEMORY and the system ENOMEM therefore mean the
   // same thing even though their signs differ.
@@ -64,6 +65,8 @@ void check_raw_memory_admission(std::uint64_t raw_width,
                                 std::uint64_t output_height) {
   const auto required = codec::raw_pipeline_bytes(
       raw_width, raw_height, output_width, output_height);
+  const auto budget = current_execution_config.memory_budget_bytes;
+  if (budget && required > budget) throw RawMemoryError("RAW decode exceeds the configured memory budget");
   const auto available = available_memory_bytes();
   if (available != 0 &&
       (available <= kSystemReserveBytes ||
@@ -148,7 +151,13 @@ class RawCallbackScope {
 
 class CallbackLibRaw : public LibRaw {
  public:
-  CallbackLibRaw() { set_exifparser_handler(read_calibration_signature, this); }
+  CallbackLibRaw() {
+    set_exifparser_handler(read_calibration_signature, this);
+    set_progress_handler([](void* context, enum LibRaw_progress, int, int) -> int {
+      const auto* token = static_cast<const CancelToken*>(context);
+      return token && token->requested() ? 1 : 0;
+    }, const_cast<CancelToken*>(current_cancel_token));
+  }
 
   bool camera_calibration_matches_signature(const std::string& signature) const {
     return camera_calibration_signature_ == signature;

@@ -10,9 +10,22 @@ foreach(linkage shared static)
   endif()
   add_test(NAME capi_${linkage}_test COMMAND capi_${linkage}_test)
 endforeach()
+if(APPLE)
+  add_library(capi_test_clock SHARED frozen_time.c)
+  set_target_properties(capi_test_clock PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+endif()
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_FOUND)
-  add_test(NAME capi_contract_test COMMAND ${Python3_EXECUTABLE}
+  # Homebrew's launcher reexecutes Python.app; preload sanitizers/test clock into
+  # the interpreter itself. Other Python distributions use sys.executable.
+  execute_process(COMMAND ${Python3_EXECUTABLE} -c
+    "import pathlib,sys; p=pathlib.Path(sys.base_prefix)/'Resources/Python.app/Contents/MacOS/Python'; print(p if p.is_file() else sys.executable)"
+    OUTPUT_VARIABLE HYPERDR_CONTRACT_PYTHON OUTPUT_STRIP_TRAILING_WHITESPACE)
+  add_test(NAME capi_contract_test COMMAND ${HYPERDR_CONTRACT_PYTHON}
     ${CMAKE_CURRENT_SOURCE_DIR}/contract_test.py
     $<TARGET_FILE:HyperDR> $<TARGET_FILE:hyperdr_capi>)
+  if(APPLE)
+    set_tests_properties(capi_contract_test PROPERTIES ENVIRONMENT
+      "DYLD_INSERT_LIBRARIES=$<TARGET_FILE:capi_test_clock>")
+  endif()
 endif()

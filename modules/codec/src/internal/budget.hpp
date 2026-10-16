@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include "hyperdr/foundation/progress.hpp"
 #include <limits>
 #include <stdexcept>
 
@@ -103,7 +104,9 @@ inline constexpr std::uint64_t kMaxRawPixels =
   }
   const auto pixels = width * height;
   return pixels <= kMaxRasterPixels &&
-         pixels <= kMaxRasterPeakBytes / 15U;
+         pixels <= kMaxRasterPeakBytes / 15U &&
+         (!current_execution_config.memory_budget_bytes ||
+          pixels <= current_execution_config.memory_budget_bytes / 15U);
 }
 
 struct RasterDecodePlan {

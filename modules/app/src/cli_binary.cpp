@@ -1,4 +1,4 @@
-#include "cli_commands.hpp"
+#include "preview_binary.hpp"
 
 #include "hyperdr/foundation/parallel.hpp"
 
@@ -12,7 +12,7 @@
 #include <io.h>
 #endif
 
-namespace hyperdr::app::detail {
+namespace hyperdr {
 
 void append_u32_le(std::vector<std::uint8_t>& bytes, std::uint32_t value) {
   bytes.push_back(static_cast<std::uint8_t>(value));
@@ -35,6 +35,10 @@ void append_float_image(std::vector<std::uint8_t>& bytes,
                 row, row_size * sizeof(float));
   });
 }
+
+}  // namespace hyperdr
+
+namespace hyperdr::app::detail {
 
 void set_stdout_binary() {
 #ifdef _WIN32

@@ -1,4 +1,4 @@
-# The image codecs, and the Windows runtime juggling they require.
+# Pinned image codec dependencies.
 #
 # Everything here is conditional on HYPERDR_WITH_CODECS. The dependency-free
 # core build carries the whole renderer and its test suite, so this file is the
@@ -31,19 +31,6 @@ function(hyperdr_fetch_libultrahdr)
   set(UHDR_WRITE_XMP ON)
   set(UHDR_WRITE_ISO ON)
   FetchContent_MakeAvailable(libuhdr)
-endfunction()
-
-# x265 ships as a single-bit-depth DLL per configuration, and PQ/HLG need
-# Main10. The helper script prepares a dual 8/10-bit runtime once; this hook
-# restores it after every rebuild, which would otherwise overwrite it.
-function(hyperdr_restore_x265_multibit target)
-  if(WIN32 AND HYPERDR_WITH_CODECS)
-    add_custom_command(TARGET ${target} POST_BUILD
-      COMMAND powershell -NoProfile -ExecutionPolicy Bypass -File
-              "${PROJECT_SOURCE_DIR}/scripts/restore_x265_multibit.ps1"
-              -BuildDirectory "${CMAKE_BINARY_DIR}" -Configuration "$<CONFIG>"
-      VERBATIM)
-  endif()
 endfunction()
 
 # libultrahdr is built as a shared library, so consumers need it beside them.

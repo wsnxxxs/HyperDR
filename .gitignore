@@ -73,3 +73,6 @@ __pycache__/
 
 # Keep documentation local.
 /docs/
+
+# Finder metadata
+.DS_Store

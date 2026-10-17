@@ -11,53 +11,96 @@ enum PhotoDropState: Equatable {
     case rejects
 }
 
-/// Accepts file URLs dropped on the canvas. The files are checked while the
-/// drag is still over the window, so an unsupported file shows as refused
-/// before it is released (parity G-05 / O-03). Several files open the first
-/// openable one without comment (batch 3 §12 Q12).
+/// The drag-and-drop state of one canvas, across drag sessions.
+///
+/// The dragged files are checked while the drag is still over the window, so
+/// an unsupported file shows as refused before it is released (parity G-05 /
+/// O-03). Reading the URLs is asynchronous and can finish after the drag has
+/// left, been dropped or been replaced by another drag; each drag is
+/// therefore a session, and only the current session's check may publish a
+/// state. Several files open the first openable one without comment
+/// (batch 3 §12 Q12).
+@MainActor @Observable final class PhotoDropCoordinator {
+    /// Reads a drag's file URLs, in drag order.
+    typealias Loader = @MainActor () async -> [URL]
+
+    private(set) var state = PhotoDropState.idle
+
+    /// Bumped by every enter, exit and drop; a check publishes only if the
+    /// session it started in is still current.
+    @ObservationIgnored private var session = 0
+    /// Bumped by every drop; a dropped drag opens only if no later drop has
+    /// been made while its URLs were read.
+    @ObservationIgnored private var drop = 0
+
+    /// A drag entered the canvas.
+    func entered(model: EditorModel, load: @escaping Loader) {
+        session += 1
+        guard model.engine.failure == nil else { state = .rejects; return }
+        state = .accepts
+        let current = session
+        Task {
+            let urls = await load()
+            guard current == session else { return }
+            state = urls.contains(where: model.canOpen) ? .accepts : .rejects
+        }
+    }
+
+    /// The drag left the canvas without dropping.
+    func exited() {
+        session += 1
+        state = .idle
+    }
+
+    /// The drag was released on the canvas. Returns whether the drop is
+    /// accepted: false when its files were already found unopenable.
+    func dropped(model: EditorModel, load: @escaping Loader) -> Bool {
+        let refused = state == .rejects
+        session += 1
+        state = .idle
+        guard !refused else { return false }
+        drop += 1
+        let current = drop
+        Task {
+            let urls = await load()
+            guard current == drop, !urls.isEmpty else { return }
+            model.open(urls)
+        }
+        return true
+    }
+}
+
+/// Feeds the canvas's drops to its `PhotoDropCoordinator`.
 struct PhotoDropDelegate: DropDelegate {
     let model: EditorModel
-    @Binding var state: PhotoDropState
+    let coordinator: PhotoDropCoordinator
 
     func validateDrop(info: DropInfo) -> Bool {
         info.hasItemsConforming(to: [.fileURL])
     }
 
     func dropEntered(info: DropInfo) {
-        guard model.engine.failure == nil else { state = .rejects; return }
-        state = .accepts
-        let providers = info.itemProviders(for: [.fileURL])
-        let model = model, state = $state
-        Task {
-            let urls = await Self.urls(from: providers)
-            // The drag may have left, or been dropped, while the URLs loaded.
-            guard state.wrappedValue != .idle else { return }
-            state.wrappedValue = urls.contains(where: model.canOpen) ? .accepts : .rejects
-        }
+        coordinator.entered(model: model, load: Self.loader(info))
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: state == .rejects ? .forbidden : .copy)
+        DropProposal(operation: coordinator.state == .rejects ? .forbidden : .copy)
     }
 
     func dropExited(info: DropInfo) {
-        state = .idle
+        coordinator.exited()
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        let refused = state == .rejects
-        state = .idle
-        guard !refused else { return false }
-        let providers = info.itemProviders(for: [.fileURL])
-        let model = model
-        Task {
-            let urls = await Self.urls(from: providers)
-            if !urls.isEmpty { model.open(urls) }
-        }
-        return true
+        coordinator.dropped(model: model, load: Self.loader(info))
     }
 
-    /// The dropped file URLs, in drag order.
+    /// Reads the providers now: they belong to this drag only.
+    private static func loader(_ info: DropInfo) -> PhotoDropCoordinator.Loader {
+        let providers = info.itemProviders(for: [.fileURL])
+        return { await urls(from: providers) }
+    }
+
     private static func urls(from providers: [NSItemProvider]) async -> [URL] {
         var urls: [URL] = []
         for provider in providers {

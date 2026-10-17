@@ -8,7 +8,9 @@ struct CanvasView: View {
     let window: EditorWindowState
     var padding: CGFloat
 
-    @State private var drop = PhotoDropState.idle
+    @State private var dropCoordinator = PhotoDropCoordinator()
+
+    private var drop: PhotoDropState { dropCoordinator.state }
 
     var body: some View {
         Group {
@@ -20,7 +22,7 @@ struct CanvasView: View {
         .padding(padding)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.hdr.surfacePage)
-        .onDrop(of: [.fileURL], delegate: PhotoDropDelegate(model: model, state: $drop))
+        .onDrop(of: [.fileURL], delegate: PhotoDropDelegate(model: model, coordinator: dropCoordinator))
     }
 
     private var viewport: some View {

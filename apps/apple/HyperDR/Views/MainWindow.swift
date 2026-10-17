@@ -53,9 +53,18 @@ private struct EditorWindow: View {
             .foregroundStyle(Color.hdr.ink)
             .fileImporter(isPresented: Bindable(window).isImporting,
                           allowedContentTypes: model.openableContentTypes) { result in
-                // Cancelling the panel is not an error; a failure to resolve
-                // the chosen file surfaces when the model tries to open it.
-                if case .success(let url) = result { model.open([url]) }
+                switch result {
+                case .success(let url):
+                    model.open([url])
+                case .failure(let error as CocoaError) where error.code == .userCancelled:
+                    // Cancelling the panel is not an error.
+                    break
+                case .failure:
+                    // TODO(A2): show this through the model's error entry
+                    // point (batch 3 A2 adds one); until then the panel's
+                    // failure is dropped.
+                    break
+                }
             }
             .alert(alertTitle, isPresented: alertPresented, presenting: model.alert) { _ in
                 // No actions: the system supplies a localized OK.

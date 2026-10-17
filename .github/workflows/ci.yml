@@ -133,6 +133,65 @@ jobs:
           DYLD_INSERT_LIBRARIES="$runtime:$PWD/build-asan/libcapi_test_clock.dylib" \
             "$interpreter" tests/capi/contract_test.py build-asan/HyperDR build-asan/libhyperdr.dylib
 
+  apple-app:
+    name: Apple app (macOS 26 arm64)
+    runs-on: macos-26
+    env:
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+      VCPKG_ROOT: ${{ github.workspace }}/build-vcpkg
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/build-vcpkg-cache,readwrite
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install build tools
+        run: brew install ninja pkg-config
+      - name: Show tool versions
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcrun swift --version
+      - name: Check out pinned vcpkg baseline
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: 43643e1f5cf73db40d0d4bd610183348eb09b24e
+          path: build-vcpkg
+      - name: Bootstrap vcpkg
+        run: build-vcpkg/bootstrap-vcpkg.sh -disableMetrics
+      - uses: actions/cache@v4
+        with:
+          path: build-vcpkg-cache
+          key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg.json', 'cmake/triplets/**') }}
+          restore-keys: vcpkg-${{ runner.os }}-${{ runner.arch }}-
+      - name: Cache RAW test fixtures
+        uses: actions/cache@v4
+        with:
+          path: build/fixtures
+          key: raw-fixtures-${{ hashFiles('tests/fixtures/manifest.json') }}
+      - name: Fetch and verify RAW test fixtures
+        run: python3 scripts/fetch_test_fixtures.py
+      - name: Ensure Metal Toolchain
+        run: |
+          if ! xcodebuild -showComponent MetalToolchain 2>/dev/null | grep -q 'Status: installed'; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+      - name: Test Apple app and Swift packages
+        run: python3 scripts/test.py apple
+      - name: Upload Apple logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-app-logs
+          path: |
+            build-apple/DerivedData/Logs
+            build-apple/**/*.xcresult
+          if-no-files-found: ignore
+
   frontend:
     name: Frontend reference contracts
     runs-on: macos-26

@@ -273,8 +273,13 @@ private final class Events: @unchecked Sendable {
         #expect(session.isReserved)
         do { _ = try await session.renderFrame(request); Issue.record("Expected busy") }
         catch let error as HyperDRError { #expect(error.code == "busy") }
-        // Allow the native decode to begin; the large source keeps it in flight.
+        // `isReserved` proves the wrapper holds the session, not that the native
+        // decoder has entered. The large source plus this delay makes the decode
+        // likely in flight, but it is not a synchronization proof; the C ABI
+        // contract test covers native-active cancellation directly. This test
+        // covers the Swift cancellation bridge and keeps the reservation alive.
         try await Task.sleep(for: .milliseconds(10))
+        #expect(session.isReserved)
         let start = ContinuousClock.now
         task.cancel()
         do { _ = try await task.value; Issue.record("Expected cancelled render") }
@@ -340,6 +345,7 @@ private final class Events: @unchecked Sendable {
         #expect(FileManager.default.fileExists(atPath: raw.path), "Run scripts/fetch_test_fixtures.py first")
         let engine = try await Engine()
         let probe = try await engine.probe(raw)
+        #expect(probe.rawJSON == (try await cli(["probe", raw.path, "--json"])))
         let metadata = try await engine.rawMetadata(raw)
         #expect(!metadata.make.isEmpty && !metadata.model.isEmpty)
         let session = try engine.openPreview(source: raw)

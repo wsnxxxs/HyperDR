@@ -12,6 +12,9 @@ struct EditorCommands: Commands {
         CommandGroup(replacing: .newItem) {
             OpenCommand()
         }
+        CommandGroup(after: .importExport) {
+            FrameCommand()
+        }
         CommandGroup(before: .toolbar) {
             ZoomCommands()
             Divider()
@@ -36,6 +39,18 @@ private struct OpenCommand: View {
         Button("mac.menu.open") { window?.isImporting = true }
             .keyboardShortcut("o")
             .disabled(window == nil || model?.engine.failure != nil)
+    }
+}
+
+/// File ▸ Frame… (⇧⌘B): the frame sheet for the frontmost editor's photo.
+private struct FrameCommand: View {
+    @FocusedValue(EditorModel.self) private var model
+    @FocusedValue(EditorWindowState.self) private var window
+
+    var body: some View {
+        Button("frame.menu") { window?.isFraming = true }
+            .keyboardShortcut("b", modifiers: [.command, .shift])
+            .disabled(window == nil || model?.hasEditedFrame != true)
     }
 }
 

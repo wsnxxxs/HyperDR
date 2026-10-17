@@ -48,6 +48,12 @@ struct MainToolbar: ToolbarContent {
             }
 
             ToolbarItem(placement: .primaryAction) {
+                Button("frame.toolbar", systemImage: "photo.artframe") { window.isFraming = true }
+                    .help("frame.toolbar.help")
+                    .disabled(!model.hasEditedFrame)
+            }
+
+            ToolbarItem(placement: .primaryAction) {
                 // Prominent again once M3 enables it: a disabled prominent
                 // button still reads as the window's main action.
                 Button("editor.export", systemImage: "square.and.arrow.up") {}

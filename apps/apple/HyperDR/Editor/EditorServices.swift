@@ -12,6 +12,8 @@ import UniformTypeIdentifiers
     func previews(for photo: EditorPhoto, includingReference: Bool,
                   adjustments: [String: Double]) -> AsyncStream<EditorPreviewEvent>
     func displayUpdates() -> AsyncStream<DisplayState>
+    /// The photograph's Exif for a frame caption; empty when it has none.
+    func captureFacts(for photo: EditorPhoto) async -> CaptureFacts
     func close(_ photo: EditorPhoto) async
 }
 
@@ -138,6 +140,11 @@ enum EditorPreviewEvent {
         displayState = state
         for continuation in displays.values { continuation.yield(state) }
     }
+
+    var facts = CaptureFacts(make: "SONY", model: "ILCE-7RM5", lens: "FE 24-70mm F2.8 GM II",
+        focalLength: 35, fNumber: 8, exposureTime: 1.0 / 250, iso: 100, dateTimeOriginal: "2026:09:21 17:42:10")
+
+    func captureFacts(for photo: EditorPhoto) async -> CaptureFacts { facts }
 
     func close(_ photo: EditorPhoto) async {}
 }

@@ -1,4 +1,5 @@
 import Foundation
+import HyperDREngine
 import Observation
 import UniformTypeIdentifiers
 
@@ -9,6 +10,12 @@ import UniformTypeIdentifiers
     private(set) var display: DisplayState
     private(set) var alert: UserFacingError?
     let canvas = CanvasModel()
+    /// The presentation frame, remembered across launches.
+    var frame = FrameSettings.load() {
+        didSet { if frame != oldValue { frame.save() } }
+    }
+    /// The open photograph's Exif, once `loadCaptureFacts` has read it.
+    private(set) var captureFacts = CaptureFacts()
 
     private var selectedMode: ViewMode = .edited
     private(set) var hasReferenceFrame: Bool
@@ -129,6 +136,7 @@ import UniformTypeIdentifiers
                         // refresh or open may start before the stream ends.
                         photo = opened
                         adjustments = [:]
+                        captureFacts = CaptureFacts()
                         openRollback = nil
                         operation = nil
                         apply(event)
@@ -164,12 +172,33 @@ import UniformTypeIdentifiers
         hasEditedFrame = false
         selectedMode = .edited
         adjustments = [:]
+        captureFacts = CaptureFacts()
         display.gainWeight = nil
         editedGainWeight = nil
         canvas.setImageSize(nil)
     }
 
     func dismissAlert() { alert = nil }
+
+    // MARK: Frame
+
+    func loadCaptureFacts() async {
+        guard let photo else { return }
+        let facts = await services.captureFacts(for: photo)
+        guard self.photo == photo else { return }
+        captureFacts = facts
+    }
+
+    /// The caption the frame sets for this photograph.
+    var frameCaption: FrameCaption { frame.style.caption(frame, facts: captureFacts) }
+
+    /// The engine's layout of the frame around the full-size photograph, or of
+    /// the bare photograph while the frame is off. Nil without a photo size.
+    var frameLayout: FrameLayout? {
+        guard let size = document?.pixelSize else { return nil }
+        let spec = frame.isEnabled ? frame.engineFrame(hasCaption: !frameCaption.isEmpty) : [:]
+        return try? Engine.frameLayout(frame: spec, photoWidth: size.width, photoHeight: size.height)
+    }
 
     func adjust(_ key: String, to value: Double) {
         guard value.isFinite, adjustments[key] != value, let photo, hasEditedFrame,

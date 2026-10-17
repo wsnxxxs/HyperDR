@@ -55,6 +55,9 @@ final class EDRCanvasView: NSView {
         didSet { setNeedsRedraw() }
     }
 
+    /// Off for a canvas that only presents the fitted photo (the frame sheet).
+    var allowsZoom = true
+
     override var isOpaque: Bool { false }
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { false }
@@ -194,6 +197,7 @@ final class EDRCanvasView: NSView {
 
     /// Wheel zooms, anchored at the pointer, exactly like `view.js`.
     override func scrollWheel(with event: NSEvent) {
+        guard allowsZoom else { return super.scrollWheel(with: event) }
         // Line-based wheels report small deltas; the Web editor scales those by
         // 16 (`deltaMode === 1`) so a notch feels the same as a trackpad slide.
         let delta = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.deltaY * 16
@@ -203,6 +207,7 @@ final class EDRCanvasView: NSView {
     }
 
     override func magnify(with event: NSEvent) {
+        guard allowsZoom else { return super.magnify(with: event) }
         applyZoom(transform.zoom * (1 + event.magnification),
                   anchor: convert(event.locationInWindow, from: nil))
     }
@@ -216,7 +221,7 @@ final class EDRCanvasView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        guard transform.zoom > CanvasTransform.minZoom else { return }
+        guard allowsZoom, transform.zoom > CanvasTransform.minZoom else { return }
         dragOrigin = convert(event.locationInWindow, from: nil)
         NSCursor.closedHand.set()
     }

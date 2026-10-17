@@ -2,7 +2,8 @@ import SwiftUI
 import HyperDRDesign
 
 /// The recessed workspace: the drop area and picker without a photograph, the
-/// EDR preview with one. Both accept a photo dropped from Finder.
+/// EDR preview on its backdrop with one. Both accept a photo dropped from
+/// Finder.
 struct CanvasView: View {
     let model: EditorModel
     let window: EditorWindowState
@@ -26,12 +27,13 @@ struct CanvasView: View {
     }
 
     private var viewport: some View {
-        PreviewCanvas(model: model)
+        CanvasStage(model: model, window: window)
             .padding(Layout.canvasGutter)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.hdr.previewBackdrop, in: .rect(cornerRadius: Radius.standard))
+            .background(Color.hdr.previewBackdrop, in: .rect(cornerRadius: Radius.lg))
+            .clipShape(.rect(cornerRadius: Radius.lg))
             .overlay {
-                RoundedRectangle(cornerRadius: Radius.standard)
+                RoundedRectangle(cornerRadius: Radius.lg)
                     .strokeBorder(drop.borderColor(idle: Color.hdr.line), lineWidth: drop == .idle ? 1 : 2)
             }
             .overlay(alignment: .bottom) {

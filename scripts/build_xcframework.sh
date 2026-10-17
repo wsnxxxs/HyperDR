@@ -6,7 +6,26 @@ repo="$(cd "$(dirname "$0")/.." && pwd)"
 work="$repo/build-apple"
 out="$repo/build/xcframework"
 git -C "$repo" check-ignore -q "$work/probe" || { echo 'build-apple must be gitignored' >&2; exit 1; }
-cmake --preset macos-arm64-codecs -S "$repo" -B "$work" -DHYPERDR_BUILD_TESTS=OFF
+# CI checks vcpkg out separately; local checkouts commonly live at ~/vcpkg.
+# The first argument or VCPKG_ROOT selects an explicit toolchain.
+vcpkg_root="${1:-${VCPKG_ROOT:-}}"
+if [[ -z "$vcpkg_root" ]]; then
+  for candidate in "$HOME/vcpkg" "$repo/build-vcpkg"; do
+    if [[ -f "$candidate/scripts/buildsystems/vcpkg.cmake" ]]; then vcpkg_root="$candidate"; break; fi
+  done
+fi
+if [[ -z "$vcpkg_root" ]]; then
+  echo 'vcpkg toolchain not found. Set VCPKG_ROOT, pass the vcpkg checkout path as the first argument, or check out vcpkg at build-vcpkg.' >&2
+  exit 1
+fi
+toolchain="$vcpkg_root/scripts/buildsystems/vcpkg.cmake"
+if [[ ! -f "$toolchain" ]]; then
+  echo "vcpkg toolchain not found: $toolchain" >&2
+  exit 1
+fi
+echo "Using vcpkg toolchain: $toolchain"
+cmake --preset macos-arm64-codecs -S "$repo" -B "$work" -DHYPERDR_BUILD_TESTS=OFF \
+  -DCMAKE_TOOLCHAIN_FILE="$toolchain"
 cmake --build "$work" --target hyperdr_capi_static HyperDR uhdr-static
 rm -rf "$out/Runtime"
 mkdir -p "$out/headers" "$out/Runtime"

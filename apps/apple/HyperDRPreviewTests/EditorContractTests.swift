@@ -301,7 +301,7 @@ import XCTest
         }
     }
 
-    func testCanvasGeometryZoomAndEmptyPlaceholder() async throws {
+    func testCanvasGeometryZoomAndEmptyCanvas() async throws {
         let model = EditorModel.preview(.editingHDRDisplay)
         let canvas = model.canvas
         canvas.setViewport(CGSize(width: 1000, height: 800), backingScale: 2)
@@ -322,35 +322,47 @@ import XCTest
         model.closeDocument()
         XCTAssertNil(canvas.imageFrame)
         XCTAssertFalse(canvas.canZoomIn)
-        let view = PlaceholderCanvasView(model: model)
-        view.frame = CGRect(x: 0, y: 0, width: 1000, height: 800)
-        view.layoutSubtreeIfNeeded()
-        await Task.yield()
+        let view = EDRCanvasView()
         XCTAssertFalse(view.isOpaque)
         XCTAssertFalse(view.acceptsFirstResponder)
-        XCTAssertTrue(view.subviews.isEmpty)
     }
 
-    func testPlaceholderRampStaysInsidePublishedPhotoRectangle() async throws {
+    /// The canvas and the view layer agree on where the photo is: the same
+    /// rect drives the display pass and `canvas.imageFrame`.
+    func testCanvasDrawsOnlyThePublishedPhotoRect() async throws {
         let model = EditorModel.preview(.editingHDRDisplay)
-        let view = PlaceholderCanvasView(model: model)
-        view.frame = CGRect(x: 0, y: 0, width: 1000, height: 800)
-        view.needsLayout = true
-        view.layoutSubtreeIfNeeded()
-        try await waitUntil { view.subviews.count == 1 }
-        let ramp = try XCTUnwrap(view.subviews.first as? EDRMetalView)
-        XCTAssertEqual(ramp.frame, model.canvas.imageFrame)
+        let canvas = model.canvas
+        canvas.setViewport(CGSize(width: 1000, height: 800), backingScale: 2)
+        let view = EDRCanvasView()
+        view.frameProvider = { model.canvasFrame }
+        view.transform = canvas.transform
+        XCTAssertEqual(view.transform.viewport, CGSize(width: 1000, height: 800))
         XCTAssertFalse(view.isOpaque)
-        XCTAssertFalse(ramp.original)
-        model.viewMode = .original
-        view.needsLayout = true
-        view.layoutSubtreeIfNeeded()
-        try await waitUntil { ramp.original }
-        XCTAssertNil(model.display.gainWeight)
+        XCTAssertFalse(view.acceptsFirstResponder)
+        XCTAssertEqual(model.canvas.imageFrame, model.canvas.transform.imageFrame)
+        // A2 supplies the frames; until then the canvas has nothing to draw.
+        XCTAssertNil(model.canvasFrame)
+        canvas.zoomIn()
+        view.transform = canvas.transform
+        XCTAssertEqual(view.transform.zoom, 1.25, accuracy: 1e-9)
         model.closeDocument()
+        XCTAssertNil(model.canvas.imageFrame)
+    }
+
+    /// The canvas reports its own size so the model can publish `imageFrame`
+    /// for the overlays, and a gesture result flows back through `apply`.
+    func testCanvasReportsItsGeometryToTheModel() async throws {
+        let model = EditorModel.preview(.editingHDRDisplay)
+        let view = EDRCanvasView()
+        view.onViewportChange = { [weak model] size, scale in
+            model?.canvas.setViewport(size, backingScale: scale)
+        }
+        view.frameProvider = { model.canvasFrame }
+        view.onTransformChange = { [weak model] transform in model?.canvas.apply(transform) }
+        view.setFrameSize(CGSize(width: 900, height: 700))
         view.needsLayout = true
         view.layoutSubtreeIfNeeded()
-        try await waitUntil { view.subviews.isEmpty }
-        XCTAssertNil(model.canvas.imageFrame)
+        XCTAssertEqual(model.canvas.transform.viewport, CGSize(width: 900, height: 700))
+        XCTAssertNotNil(model.canvas.imageFrame)
     }
 }

@@ -53,6 +53,23 @@ int schema_command(int argc, char** argv) {
   return 0;
 }
 
+int frame_layout_command(int argc, char** argv) {
+  if (argc < 3) throw std::invalid_argument("frame-layout requires a frame file");
+  const auto bytes = read_binary_file(path_from_utf8(argv[2]));
+  std::optional<std::uint32_t> width, height;
+  for (int i = 3; i < argc; ++i) {
+    const std::string_view arg = argv[i];
+    if (arg == "--width") width = integer<std::uint32_t>(next_value(i, argc, argv, arg), "photo width");
+    else if (arg == "--height") height = integer<std::uint32_t>(next_value(i, argc, argv, arg), "photo height");
+    else throw std::invalid_argument("unknown frame-layout option: " + std::string(arg));
+  }
+  if (!width || !height) throw std::invalid_argument("frame-layout requires --width and --height");
+  const auto frame = json::parse(std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
+  set_stdout_binary();
+  std::cout << frame_layout(frame, *width, *height);
+  return 0;
+}
+
 int display_curve_command(int argc, char** argv) {
   if (argc < 5) {
     throw std::invalid_argument(

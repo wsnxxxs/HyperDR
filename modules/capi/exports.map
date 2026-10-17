@@ -4,6 +4,7 @@
     hyperdr_version;
     hyperdr_schema_json;
     hyperdr_curve_json;
+    hyperdr_frame_layout;
     hyperdr_string_free;
     hyperdr_error_free;
     hyperdr_engine_create;

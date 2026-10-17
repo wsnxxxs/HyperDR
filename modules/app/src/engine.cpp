@@ -85,6 +85,11 @@ std::string Engine::probe(const std::filesystem::path& source) const {
   return writer.take() + '\n';
 }
 
+std::string frame_layout(const json::Value& frame, std::uint32_t photo_width,
+                         std::uint32_t photo_height) {
+  return frame_layout_json(layout_frame(parse_frame_spec(frame), photo_width, photo_height)) + '\n';
+}
+
 std::string Engine::raw_metadata(const std::filesystem::path& source) const {
   const auto metadata = probe_raw_lens_metadata(source);
   json::Writer writer;

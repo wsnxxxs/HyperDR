@@ -21,6 +21,8 @@ LIB.hyperdr_schema_json.argtypes = [ctypes.POINTER(ctypes.c_void_p),
                                    ctypes.POINTER(ctypes.POINTER(Error))]
 LIB.hyperdr_curve_json.argtypes = [ctypes.c_char_p, ctypes.c_uint,
                                   *LIB.hyperdr_schema_json.argtypes]
+LIB.hyperdr_frame_layout.argtypes = [ctypes.c_char_p, ctypes.c_uint32, ctypes.c_uint32,
+                                    *LIB.hyperdr_schema_json.argtypes]
 LIB.hyperdr_string_free.argtypes = [ctypes.c_void_p]
 LIB.hyperdr_string_free.restype = None
 LIB.hyperdr_error_free.argtypes = [ctypes.POINTER(Error)]
@@ -63,6 +65,25 @@ class Contract(unittest.TestCase):
                 expected = subprocess.check_output(arguments)
                 self.assertEqual(result(LIB.hyperdr_curve_json,
                                         json.dumps(settings).encode(), samples), expected)
+
+    def test_frame_layout(self):
+        import tempfile
+        frames = [{"margins": 0.05, "caption": 0.1},
+                  {"background": "#F4F2EC", "margins": {"top": 0.06, "right": 0.05, "bottom": 0.04, "left": 0.05},
+                   "caption": 0.14, "reference": "long",
+                   "aspect": {"width": 9, "height": 16, "topShare": 0.3},
+                   "shadow": {"opacity": 0.1, "blur": 0.01, "offset": 0.004}},
+                  {"margins": 0.0333, "aspect": {"width": 1, "height": 1}}]
+        with tempfile.TemporaryDirectory() as folder:
+            for frame in frames:
+                for width, height in [(6000, 4000), (1001, 1501), (4032, 3024)]:
+                    with self.subTest(frame=frame, size=(width, height)):
+                        path = Path(folder) / "frame.json"
+                        path.write_text(json.dumps(frame))
+                        expected = subprocess.check_output([CLI, "frame-layout", str(path),
+                                                            "--width", str(width), "--height", str(height)])
+                        self.assertEqual(result(LIB.hyperdr_frame_layout, json.dumps(frame).encode(),
+                                                width, height), expected)
 
 
 

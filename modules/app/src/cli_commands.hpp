@@ -33,6 +33,7 @@ void parse_settings(int argc, char** argv, int first, ConvertOptions& options,
 int convert_command(int argc, char** argv);
 int curve_command(int argc, char** argv);
 int schema_command(int argc, char** argv);
+int frame_layout_command(int argc, char** argv);
 int display_curve_command(int argc, char** argv);
 
 int probe_command(int argc, char** argv);

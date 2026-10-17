@@ -75,6 +75,10 @@ class Engine {
 [[nodiscard]] std::string normalize_options(const json::Value& edit);
 [[nodiscard]] std::vector<std::string> command_line(const json::Value& normalized);
 [[nodiscard]] ConvertOptions request_options(const json::Value& request);
+// The pixel layout of a presentation frame (hyperdr.frame/v1) around a photo of
+// the given oriented size, as frame-layout prints it. Pure: no file is opened.
+[[nodiscard]] std::string frame_layout(const json::Value& frame, std::uint32_t photo_width,
+                                       std::uint32_t photo_height);
 [[nodiscard]] PreviewRegion request_region(const json::Value& request);
 
 }  // namespace hyperdr

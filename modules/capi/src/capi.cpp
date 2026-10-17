@@ -140,6 +140,13 @@ int hyperdr_curve_json(const char* settings_json, unsigned samples,
   });
 }
 
+int hyperdr_frame_layout(const char* frame_json, uint32_t photo_width, uint32_t photo_height,
+                         char** out, hyperdr_error** error) {
+  return json_result(out, error, [&] {
+    return hyperdr::frame_layout(document(frame_json), photo_width, photo_height);
+  });
+}
+
 void hyperdr_string_free(char* string) { std::free(string); }
 void hyperdr_error_free(hyperdr_error* error) { std::free(error); }
 

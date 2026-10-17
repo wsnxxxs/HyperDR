@@ -10,6 +10,11 @@ namespace hyperdr {
 namespace {
 using Object = std::map<std::string, json::Value>;
 using Value = json::Value;
+constexpr std::pair<const char*, const char*> kCreativeFlags[] = {
+    {"--contrast", "contrast"}, {"--vibrance", "vibrance"},
+    {"--gain-strength", "gain_strength"}, {"--headroom-max", "headroom_max"},
+    {"--pop", "pop"}, {"--exposure-bias", "exposure_bias"},
+    {"--expansion-start", "expansion_start"}, {"--area-coverage", "area_coverage"}};
 Value text(std::string value) { return Value::from_string(std::move(value)); }
 Value number(double value) { return Value::from_number(value); }
 Value boolean(bool value) { return Value::from_bool(value); }
@@ -110,7 +115,9 @@ std::string normalize_options(const Value& edit) {
   // document must preserve the Python adapter's numbers exactly.
   for (const auto& [key, value] : settings) validate_setting_value(*find_setting_by_key(key), value);
 
-  Object command;
+  // Command metadata identifies adapter output without changing the canonical
+  // renderer settings or the Python settings/argv golden documents.
+  Object command{{"adapter", text("panel-v1")}};
   for (auto key : {"input", "output", "report", "external_gain", "external_gain_report",
       "_raw_profile_path", "_raw_look_path", "_lens_profile_path", "_lut_path"}) {
     if (const auto* value = edit.find(key)) {
@@ -164,9 +171,7 @@ std::vector<std::string> command_line(const Value& normalized) {
   const auto flag = [&](const char* name, std::string val) { args.emplace_back(name); args.push_back(std::move(val)); };
   if (!model && !external) {
     flag("--look", value("look").string());
-    for (const auto& [name, key] : {std::pair{"--contrast","contrast"}, {"--vibrance","vibrance"},
-        {"--gain-strength","gain_strength"}, {"--headroom-max","headroom_max"}, {"--pop","pop"},
-        {"--exposure-bias","exposure_bias"}, {"--expansion-start","expansion_start"}, {"--area-coverage","area_coverage"}}) flag(name, fmt(value(key)));
+    for (const auto& [name, key] : kCreativeFlags) flag(name, fmt(value(key)));
     flag("--exposure", "auto");
     flag("--headroom", fmt(value("headroom")));
   } else flag("--gain-strength", fmt(value("gain_strength")));
@@ -200,8 +205,36 @@ std::vector<std::string> command_line(const Value& normalized) {
 
 ConvertOptions request_options(const Value& request) {
   ConvertOptions options;
-  apply_preset_document(canonical_settings(request), options);
-  if (const auto* command = request.find("command")) {
+  const auto* command = request.find("command");
+  bool panel_adapter = false;
+  if (command) {
+    if (const auto* adapter = command->find("adapter")) {
+      if (!adapter->is_string() || adapter->string() != "panel-v1") {
+        throw std::invalid_argument("unsupported edit options adapter");
+      }
+      panel_adapter = true;
+    }
+  }
+  const auto settings = canonical_settings(request);
+  apply_preset_document(settings, options);
+  if (panel_adapter) {
+    // Only normalize_options output follows the panel's three-decimal CLI
+    // formatting. Direct canonical requests retain full schema precision.
+    // Validate the original doubles above, then round before storing floats.
+    const auto rounded_setting = [&](const char* key) {
+      if (const auto* value = settings.find(key); value && value->is_number()) {
+        const auto& setting = *find_setting_by_key(key);
+        setting.apply(options, parse_setting_text(setting, fmt(*value)));
+      }
+    };
+    for (const auto& [flag, key] : kCreativeFlags) rounded_setting(key);
+    rounded_setting("headroom");
+    rounded_setting("lut_strength");
+  }
+  const auto request_real = [&](const Value& value) {
+    return static_cast<float>(panel_adapter ? std::stod(fmt(value)) : value.number());
+  };
+  if (command) {
     for (const auto& [key, value] : command->members()) {
       if (key == "input") options.input = path_from_utf8(value.string());
       else if (key == "output") options.output_directory = path_from_utf8(value.string());
@@ -220,16 +253,20 @@ ConvertOptions request_options(const Value& request) {
       else if (key == "_raw_look_path") options.raw.look_profile = path_from_utf8(value.string());
       else if (key == "_lens_profile_path") options.raw.lens_profile = path_from_utf8(value.string());
       else if (key == "_lut_path") options.color_lut.path = path_from_utf8(value.string());
-      else if (key == "--ai-brightness") options.ai_post.brightness_ev = static_cast<float>(value.number());
-      else if (key == "--ai-contrast") options.ai_post.contrast = static_cast<float>(value.number());
-      else if (key == "--ai-shadows") options.ai_post.shadows_ev = static_cast<float>(value.number());
-      else if (key == "--ai-highlights") options.ai_post.highlights_stops = static_cast<float>(value.number());
-      else if (key == "--ai-hdr-range") options.ai_post.hdr_range_stops = static_cast<float>(value.number());
-      else if (key == "--ai-expansion-start") options.ai_post.expansion_start = static_cast<float>(value.number());
+      else if (key == "--ai-brightness") options.ai_post.brightness_ev = request_real(value);
+      else if (key == "--ai-contrast") options.ai_post.contrast = request_real(value);
+      else if (key == "--ai-shadows") options.ai_post.shadows_ev = request_real(value);
+      else if (key == "--ai-highlights") options.ai_post.highlights_stops = request_real(value);
+      else if (key == "--ai-hdr-range") options.ai_post.hdr_range_stops = request_real(value);
+      else if (key == "--ai-expansion-start") options.ai_post.expansion_start = request_real(value);
       else if (key != "model_mode" && key != "color_explicit" && key != "output_explicit" &&
-               key != "compact" && key != "region") throw std::invalid_argument("unknown command key: " + key);
+               key != "compact" && key != "region" && key != "adapter") throw std::invalid_argument("unknown command key: " + key);
     }
   }
+  // A profile may arrive in command rather than in the canonical settings.
+  // Resolve its defaults after every path is known; explicit controls still win.
+  apply_render_defaults(options, settings.find("contrast") != nullptr,
+                         settings.find("vibrance") != nullptr);
   return options;
 }
 PreviewRegion request_region(const Value& request) {

@@ -49,6 +49,9 @@ class Contract(unittest.TestCase):
         for settings, samples in [({}, 257), ({"contrast": 1.2, "vibrance": 0.2,
                                              "exposure_bias": -0.5}, 33),
                                    ({"headroom": 2.0, "gain_strength": 0.7}, 4096),
+                                   ({"contrast": 1.123456}, 33),
+                                   ({"contrast": 1.123456, "vibrance": -.234567,
+                                     "exposure_bias": .612345}, 33),
                                    ({"encoding": "avif-hlg", "headroom_max": 4.0}, 65),
                                    ({"raw_profile": "camera.dcp"}, 65),
                                    ({"raw_profile": "camera.dcp", "contrast": 1.2,
@@ -131,6 +134,22 @@ def png(path, width, height):
     path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
                      + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
 
+def dcp(path):
+    # Minimal identity camera profile; no external camera assets are required.
+    matrix = b"".join(struct.pack("<ii", int(i % 4 == 0), 1) for i in range(9))
+    fields = [(50708, 2, 10, b"Synthetic\0"), (50721, 10, 9, matrix),
+              (50778, 3, 1, struct.pack("<H", 21)), (50936, 2, 10, b"Synthetic\0")]
+    entries, payload = bytearray(), bytearray()
+    for tag, kind, count, data in fields:
+        entries += struct.pack("<HHI", tag, kind, count)
+        if len(data) <= 4:
+            entries += data.ljust(4, b"\0")
+        else:
+            entries += struct.pack("<I", 14 + 12 * len(fields) + len(payload))
+            payload += data
+    path.write_bytes(b"II" + struct.pack("<HIH", 0x4352, 8, len(fields))
+                     + entries + b"\0" * 4 + payload)
+
 class EngineContract(unittest.TestCase):
     def setUp(self):
         self.engine = Handle()
@@ -150,9 +169,187 @@ class EngineContract(unittest.TestCase):
                 else:
                     normalized = result(LIB.hyperdr_normalize_options, encoded(case["options"]))
                     settings = json.loads(normalized)
-                    settings.pop("command")
+                    self.assertEqual(settings.pop("command")["adapter"], "panel-v1")
                     self.assertEqual(settings, case["settings"])
                     self.assertEqual(json.loads(result(LIB.hyperdr_command_line, normalized)), case["argv"])
+
+    def test_canonical_decimal_preview_and_exports_match_cli(self):
+        if not self.capabilities["codecs"]:
+            self.skipTest("requires codec-enabled build")
+        with tempfile.TemporaryDirectory(prefix="hyperdr-canonical-decimals-") as temporary:
+            root = Path(temporary)
+            source = root / "sample.png"
+            png(source, 128, 96)
+            settings = {"contrast": 1.123456, "vibrance": -.234567,
+                        "exposure_bias": .612345, "gain_strength": .456789,
+                        "headroom": 2.345678, "expansion_start": .345678,
+                        "area_coverage": .678912}
+            flags = [item for key, value in settings.items()
+                     for item in ("--" + key.replace("_", "-"), str(value))]
+            session = Handle()
+            checked(LIB.hyperdr_preview_open, self.engine, os.fsencode(source), None,
+                    ctypes.byref(session))
+            try:
+                target = root / "preview.hpf"
+                subprocess.run([CLI, "preview-frame", str(source), "--output", str(target),
+                                *flags], capture_output=True, check=True)
+                # Command metadata and the optional settings wrapper do not
+                # turn a direct canonical request into a panel adapter request.
+                for wrapped in (False, True):
+                    request = {"settings": settings} if wrapped else dict(settings)
+                    request["command"] = {"compact": False, "model_mode": False}
+                    with self.subTest(wrapped=wrapped, operation="preview"):
+                        self.assertEqual(self.packet(LIB.hyperdr_preview_render, session, request),
+                                         target.read_bytes())
+                    for encoding, extension in (("sdr-jpeg", "jpg"), ("ultrahdr", "jpg"),
+                                                 ("avif-pq", "avif")):
+                        with self.subTest(wrapped=wrapped, encoding=encoding):
+                            destination, report_path = root / encoding, root / "report.json"
+                            canonical = {**settings, "encoding": encoding}
+                            export = {"settings": canonical} if wrapped else canonical
+                            export["command"] = {"input": str(source), "output": str(destination),
+                                                 "overwrite": True, "model_mode": False}
+                            arguments = ["convert", str(source), "--output", str(destination),
+                                         "--encoding", encoding, "--report", str(report_path), *flags]
+                            report, cli_report = self.compare_export(export, arguments,
+                                destination / ("sample-hyperdr." + extension), report_path)
+                            self.assertEqual(report["settings"], cli_report["settings"])
+            finally:
+                LIB.hyperdr_preview_close(session)
+
+    def test_canonical_ai_decimal_export_matches_cli(self):
+        if not self.capabilities["codecs"] or not self.capabilities["models"]["runtimeAvailable"]:
+            self.skipTest("requires codec-enabled build with native model runtime")
+        with tempfile.TemporaryDirectory(prefix="hyperdr-canonical-ai-decimals-") as temporary:
+            root = Path(temporary)
+            source, destination, report_path = root / "sample.png", root / "export", root / "report.json"
+            png(source, 128, 96)
+            post = {"--ai-brightness": .123456, "--ai-contrast": 1.123456,
+                    "--ai-shadows": -.234567, "--ai-highlights": .345678,
+                    "--ai-hdr-range": 2.123456, "--ai-expansion-start": .345678}
+            request = {"encoding": "ultrahdr", "gain_strength": .654321, "command": {
+                "input": str(source), "output": str(destination),
+                "model_id": "research-cnn-v1", "model_mode": True, "overwrite": True, **post}}
+            flags = [item for key, value in post.items() for item in (key, str(value))]
+            arguments = ["convert", str(source), "--output", str(destination),
+                         "--encoding", "ultrahdr", "--report", str(report_path),
+                         "--gain-strength", ".654321", "--ai-model", "research-cnn-v1", *flags]
+            report, cli_report = self.compare_export(request, arguments,
+                destination / "sample-hyperdr.jpg", report_path)
+            self.assertEqual(report["settings"], cli_report["settings"])
+
+    def test_unknown_adapter_is_rejected(self):
+        for adapter in ("panel-v2", True):
+            with self.subTest(adapter=adapter), self.assertRaisesRegex(
+                    AssertionError, "unsupported edit options adapter"):
+                result(LIB.hyperdr_curve_json, encoded({"contrast": 1.123456,
+                       "command": {"adapter": adapter}}), 33)
+
+    def compare_export(self, request, arguments, target, report_path):
+        report = json.loads(result(LIB.hyperdr_convert, self.engine, encoded(request),
+                                   CALLBACK(), None, None))
+        self.assertEqual(len(report["files"]), 1)
+        self.assertTrue(report["files"][0]["success"], report["files"][0]["message"])
+        exported = target.read_bytes()
+        # CTest preloads frozen_time.c into both processes, preserving the
+        # original bytes including the ICC profile's creation timestamp.
+        subprocess.run([CLI, *arguments, "--overwrite"], capture_output=True, check=True)
+        self.assertEqual(exported, target.read_bytes())
+        return report, json.loads(report_path.read_bytes())
+
+    def test_command_profile_defaults_match_cli(self):
+        if not self.capabilities["codecs"]:
+            self.skipTest("requires codec-enabled build")
+        with tempfile.TemporaryDirectory(prefix="hyperdr-profile-options-") as temporary:
+            root = Path(temporary)
+            source, profile = root / "sample.png", root / "camera.dcp"
+            png(source, 128, 96)
+            dcp(profile)
+            # A raster isolates request/default handling from RAW development.
+            # Test the two explicit flags independently, as the CLI does.
+            for has_profile in (False, True):
+                for contrast in (None, 1.19):
+                    for vibrance in (None, .23):
+                        with self.subTest(profile=has_profile, contrast=contrast, vibrance=vibrance):
+                            destination, report_path = root / "export", root / "report.json"
+                            request = {"encoding": "sdr-jpeg", "command": {
+                                "input": str(source), "output": str(destination), "overwrite": True}}
+                            arguments = ["convert", str(source), "--output", str(destination),
+                                         "--encoding", "sdr-jpeg", "--report", str(report_path)]
+                            if has_profile:
+                                request["command"]["_raw_profile_path"] = str(profile)
+                                arguments += ["--raw-profile", str(profile)]
+                            for key, value in (("contrast", contrast), ("vibrance", vibrance)):
+                                if value is not None:
+                                    request[key] = value
+                                    arguments += ["--" + key, str(value)]
+                            report, cli_report = self.compare_export(request, arguments,
+                                destination / "sample-hyperdr.jpg", report_path)
+                            self.assertEqual(report["settings"], cli_report["settings"])
+                            self.assertAlmostEqual(report["settings"]["contrast"],
+                                contrast if contrast is not None else 1 if has_profile else 1.08)
+                            self.assertAlmostEqual(report["settings"]["vibrance"],
+                                vibrance if vibrance is not None else 0 if has_profile else .12)
+
+    def test_normalized_decimal_exports_match_cli(self):
+        if not self.capabilities["codecs"]:
+            self.skipTest("requires codec-enabled build")
+        with tempfile.TemporaryDirectory(prefix="hyperdr-decimal-options-") as temporary:
+            root = Path(temporary)
+            source, lut = root / "sample.png", root / "look.cube"
+            png(source, 128, 96)
+            lut.write_text("LUT_3D_SIZE 2\n" + "\n".join(
+                f"{r * .9} {g * .8} {b * .7}" for b in range(2)
+                for g in range(2) for r in range(2)) + "\n")
+            cases = [
+                {"brightness": .612345, "contrast": 1.123456},
+                {"brightness": -.6125, "contrast": 1.2345, "vibrance": -.234567,
+                 "hdrStrength": .456789, "hdrRange": 2.345678,
+                 "expansionStart": .345678, "areaCoverage": .678912,
+                 "lutStrength": .543219, "_lut_path": str(lut)},
+            ]
+            for controls in cases:
+                for encoding, extension in (("sdr-jpeg", "jpg"), ("ultrahdr", "jpg"),
+                                             ("avif-pq", "avif")):
+                    with self.subTest(controls=controls, encoding=encoding):
+                        destination, report_path = root / encoding, root / "report.json"
+                        edit = {**controls, "encoding": encoding, "input": str(source),
+                                "output": str(destination), "report": str(report_path)}
+                        normalized = result(LIB.hyperdr_normalize_options, encoded(edit))
+                        request = json.loads(normalized)
+                        self.assertEqual(request["exposure_bias"], controls["brightness"])
+                        self.assertEqual(request["contrast"], controls["contrast"])
+                        arguments = json.loads(result(LIB.hyperdr_command_line, normalized))[1:]
+                        self.assertEqual(arguments[arguments.index("--exposure-bias") + 1],
+                                         ("%.3f" % controls["brightness"]).rstrip("0").rstrip("."))
+                        self.assertEqual(arguments[arguments.index("--contrast") + 1],
+                                         ("%.3f" % controls["contrast"]).rstrip("0").rstrip("."))
+                        request["command"]["overwrite"] = True
+                        report, cli_report = self.compare_export(request, arguments,
+                            destination / ("sample-hyperdr." + extension), report_path)
+                        self.assertEqual(report["settings"], cli_report["settings"])
+                        self.assertEqual(report["color_lut"], cli_report["color_lut"])
+
+    def test_normalized_ai_decimal_export_matches_cli(self):
+        if not self.capabilities["codecs"] or not self.capabilities["models"]["runtimeAvailable"]:
+            self.skipTest("requires codec-enabled build with native model runtime")
+        with tempfile.TemporaryDirectory(prefix="hyperdr-ai-decimal-options-") as temporary:
+            root = Path(temporary)
+            source, destination, report_path = root / "sample.png", root / "export", root / "report.json"
+            png(source, 128, 96)
+            edit = {"encoding": "ultrahdr", "input": str(source), "output": str(destination),
+                    "report": str(report_path), "_model_mode": True, "_model_id": "research-cnn-v1",
+                    "hdrStrength": .654321, "aiBrightness": .123456, "aiContrast": 1.123456,
+                    "aiShadows": -.234567, "aiHighlights": .345678,
+                    "aiHdrRange": 2.123456, "aiExpansionStart": .345678}
+            normalized = result(LIB.hyperdr_normalize_options, encoded(edit))
+            request = json.loads(normalized)
+            self.assertEqual(request["command"]["--ai-brightness"], edit["aiBrightness"])
+            arguments = json.loads(result(LIB.hyperdr_command_line, normalized))[1:]
+            report, cli_report = self.compare_export(request, arguments,
+                destination / "sample-hyperdr.jpg", report_path)
+            self.assertEqual(report["settings"]["ai_post"], cli_report["settings"]["ai_post"])
+            self.assertEqual(report["settings"]["gain_strength"], cli_report["settings"]["gain_strength"])
 
     def test_cancel_before_export(self):
         cancel = LIB.hyperdr_cancel_create()

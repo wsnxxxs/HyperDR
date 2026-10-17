@@ -1,3 +1,4 @@
+#include "hyperdr/foundation/configuration_error.hpp"
 #include "hyperdr/image/color.hpp"
 #include "hyperdr/image/dng_color.hpp"
 #include "hyperdr/codec/dcp_profile.hpp"
@@ -49,9 +50,16 @@ void check_raw(int code, const char* operation) {
                          ": insufficient memory for requested-resolution RAW processing");
   }
   if (code != LIBRAW_SUCCESS) {
-    throw std::runtime_error(std::string(operation) + ": " +
-                             libraw_strerror(code));
+    const auto message = std::string(operation) + ": " + libraw_strerror(code);
+    throw DecodeFailed(message);
   }
+}
+
+void check_raw_open(int code, const char* operation, const std::filesystem::path& path) {
+  check_cancelled();
+  if (code != LIBRAW_SUCCESS && !std::ifstream(path, std::ios::binary))
+    throw SourceUnreadable(std::string(operation) + ": " + libraw_strerror(code));
+  check_raw(code, operation);
 }
 
 std::string safe_string(const char* value) { return value ? std::string(value) : std::string{}; }
@@ -334,7 +342,7 @@ void require_calibration_file(const std::filesystem::path& path,
   if (path.empty()) return;
   std::error_code ec;
   if (!std::filesystem::is_regular_file(path, ec) || ec) {
-    throw std::invalid_argument(std::string(label) + " does not exist: " +
+    throw ConfigurationError(std::string(label) + " does not exist: " +
                                 path_utf8(path));
   }
 }
@@ -400,7 +408,7 @@ std::size_t checked_count(double value, const char* label) {
   return static_cast<std::size_t>(value);
 }
 
-LinearizationLut read_linearization_lut(const std::filesystem::path& path) {
+static LinearizationLut read_linearization_lut_impl(const std::filesystem::path& path) {
   if (path.empty()) return {};
   const auto values = read_numeric_text(path, "RAW linearization LUT");
   const auto count = checked_count(values.front(), "RAW linearization LUT length");
@@ -428,7 +436,11 @@ LinearizationLut read_linearization_lut(const std::filesystem::path& path) {
   return lut;
 }
 
-LensShadingMap read_lens_shading_map(const std::filesystem::path& path) {
+LinearizationLut read_linearization_lut(const std::filesystem::path& path) {
+  return configuration_resource([&] { return read_linearization_lut_impl(path); });
+}
+
+static LensShadingMap read_lens_shading_map_impl(const std::filesystem::path& path) {
   if (path.empty()) return {};
   const auto values = read_numeric_text(path, "RAW lens-shading map");
   if (values.size() < 4) {
@@ -464,6 +476,10 @@ LensShadingMap read_lens_shading_map(const std::filesystem::path& path) {
     map.gains.push_back(static_cast<float>(value));
   }
   return map;
+}
+
+LensShadingMap read_lens_shading_map(const std::filesystem::path& path) {
+  return configuration_resource([&] { return read_lens_shading_map_impl(path); });
 }
 
 float bilinear_gain(const LensShadingMap& map, float x, float y,
@@ -674,7 +690,7 @@ float linearized_code(float value, const RawCalibration& calibration) {
   return lut.normalized ? mapped * calibration.white : mapped;
 }
 
-std::vector<std::uint16_t> read_dark_frame(const std::filesystem::path& path,
+static std::vector<std::uint16_t> read_dark_frame_impl(const std::filesystem::path& path,
                                           unsigned width, unsigned height) {
   if (path.empty()) return {};
   std::ifstream input(path, std::ios::binary);
@@ -703,6 +719,11 @@ std::vector<std::uint16_t> read_dark_frame(const std::filesystem::path& path,
   // PGM samples are big endian; supported Windows targets are little endian.
   for (auto& value : dark) value = static_cast<std::uint16_t>((value >> 8) | (value << 8));
   return dark;
+}
+
+std::vector<std::uint16_t> read_dark_frame(const std::filesystem::path& path,
+                                          unsigned width, unsigned height) {
+  return configuration_resource([&] { return read_dark_frame_impl(path, width, height); });
 }
 
 RawCalibration prepare_calibration(CallbackLibRaw& raw, const LinearizationLut& lut,
@@ -821,7 +842,7 @@ void apply_code_calibration(CallbackLibRaw& raw, const RawCalibration& calibrati
   raw.imgdata.params.adjust_maximum_thr = 0.0F;
 }
 
-void apply_bad_pixel_map(CallbackLibRaw& raw, const std::filesystem::path& path) {
+static void apply_bad_pixel_map_impl(CallbackLibRaw& raw, const std::filesystem::path& path) {
   if (path.empty()) return;
   auto& data = raw.imgdata.rawdata;
   if (!data.raw_image || !raw.imgdata.idata.filters)
@@ -861,13 +882,17 @@ void apply_bad_pixel_map(CallbackLibRaw& raw, const std::filesystem::path& path)
   }
 }
 
+void apply_bad_pixel_map(CallbackLibRaw& raw, const std::filesystem::path& path) {
+  return configuration_resource([&] { return apply_bad_pixel_map_impl(raw, path); });
+}
+
 void correct_auto_bad_pixels(CallbackLibRaw& raw) {
   if (raw.imgdata.rawdata.raw_image == nullptr) {
-    throw std::runtime_error(
+    throw ConfigurationError(
         "automatic RAW bad-pixel correction requires a Bayer buffer");
   }
   if (raw.imgdata.idata.filters == 0 || raw.imgdata.idata.filters < 1000) {
-    throw std::runtime_error(
+    throw ConfigurationError(
         "automatic RAW bad-pixel correction supports Bayer RAW only");
   }
   const auto& sizes = raw.imgdata.rawdata.sizes;
@@ -951,7 +976,7 @@ BayerPattern detect_bayer_pattern(LibRaw& raw, std::uint32_t width,
 
 RawLensMetadata probe_raw_lens_metadata(const std::filesystem::path& path) {
   LibRaw raw;
-  check_raw(raw.open_file(path.c_str()), "LibRaw metadata open");
+  check_raw_open(raw.open_file(path.c_str()), "LibRaw metadata open", path);
   const std::string lens = raw.imgdata.lens.Lens[0] ? raw.imgdata.lens.Lens
                                                   : raw.imgdata.lens.makernotes.Lens;
   return {safe_string(raw.imgdata.idata.make), safe_string(raw.imgdata.idata.model),
@@ -1072,7 +1097,7 @@ DecodedImage decode_raw(const std::filesystem::path& path,
   // Correct channel overflow before demosaic; this is specifically intended to
   // prevent artefacts such as magenta clouds.
   params.adjust_maximum_thr = options.profile.empty() ? 0.75F : 0.0F;
-  check_raw(raw.open_file(path.c_str()), "LibRaw open");
+  check_raw_open(raw.open_file(path.c_str()), "LibRaw open", path);
   std::shared_ptr<const DcpProfile> external_profile;
   if (!options.profile.empty()) {
     auto profile = read_dcp_profile(options.profile);
@@ -1223,6 +1248,12 @@ DecodedImage decode_raw(const std::filesystem::path& path,
       callback_context.lens_shading_scale = std::max(1.0F, high);
     }
   }
+  // Pure geometry at full resolution, before LibRaw selects its half-size
+  // working raster. No extra unpack/demosaic or full-resolution pixels needed.
+  const auto source_size = codec::raw_output_dimensions(sizes.width, sizes.height,
+      {static_cast<unsigned>(raw.is_fuji_rotated()), 1, sizes.pixel_aspect, sizes.flip});
+  decode.source_width = source_size.first;
+  decode.source_height = source_size.second;
   {
     RawCallbackScope callback_scope(callback_context);
     raw.set_pre_preinterpolate_callback(raw_pre_preinterpolate_callback);
@@ -1495,7 +1526,7 @@ RawMosaic decode_raw_mosaic(const std::filesystem::path& path,
   params.half_size = 0;
   params.use_p1_correction = 1;
 
-  check_raw(raw.open_file(path.c_str()), "LibRaw open RAW mosaic");
+  check_raw_open(raw.open_file(path.c_str()), "LibRaw open RAW mosaic", path);
   const auto& sizes = raw.imgdata.sizes;
   const std::uint64_t width = sizes.width;
   const std::uint64_t height = sizes.height;

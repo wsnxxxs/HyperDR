@@ -96,6 +96,7 @@ for name, args in {
     "engine_create": [ctypes.c_char_p, ctypes.POINTER(Handle), ErrorOut],
     "engine_destroy": [Handle], "capabilities": [Handle, StringOut, ErrorOut],
     "probe": [Handle, ctypes.c_char_p, StringOut, ErrorOut],
+    "raw_metadata": [Handle, ctypes.c_char_p, StringOut, ErrorOut],
     "normalize_options": [ctypes.c_char_p, StringOut, ErrorOut],
     "command_line": [ctypes.c_char_p, StringOut, ErrorOut],
     "preview_open": [Handle, ctypes.c_char_p, ctypes.c_char_p, ctypes.POINTER(Handle), ErrorOut],
@@ -134,10 +135,11 @@ def png(path, width, height):
     path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
                      + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
 
-def dcp(path):
+def dcp(path, camera_model="Synthetic"):
     # Minimal identity camera profile; no external camera assets are required.
     matrix = b"".join(struct.pack("<ii", int(i % 4 == 0), 1) for i in range(9))
-    fields = [(50708, 2, 10, b"Synthetic\0"), (50721, 10, 9, matrix),
+    camera = camera_model.encode() + b"\0"
+    fields = [(50708, 2, len(camera), camera), (50721, 10, 9, matrix),
               (50778, 3, 1, struct.pack("<H", 21)), (50936, 2, 10, b"Synthetic\0")]
     entries, payload = bytearray(), bytearray()
     for tag, kind, count, data in fields:
@@ -150,6 +152,50 @@ def dcp(path):
     path.write_bytes(b"II" + struct.pack("<HIH", 0x4352, 8, len(fields))
                      + entries + b"\0" * 4 + payload)
 
+def raw_fixture(fixture_id):
+    root = Path(__file__).resolve().parents[2]
+    manifest = json.loads((root / "tests/fixtures/manifest.json").read_text())
+    fixture = next(value for value in manifest["fixtures"] if value["id"] == fixture_id)
+    path = root / "build/fixtures" / fixture["filename"]
+    if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != fixture["sha256"]:
+        raise AssertionError(f"Required RAW fixture missing or corrupt: {path}. "
+                             "Run python3 scripts/fetch_test_fixtures.py")
+    return path
+
+
+def synthetic_dng(path):
+    # Tiny uncompressed Bayer DNG: non-square default crop, rotated 90 degrees.
+    width, height = 96, 80
+    short = lambda n: struct.pack("<H", n)
+    long = lambda n: struct.pack("<I", n)
+    matrix = b"".join(struct.pack("<ii", int(i % 4 == 0), 1) for i in range(9))
+    pixels = b"".join(short(1000 + 300 * x + 100 * y) for y in range(height) for x in range(width))
+    fields = [(256, 4, 1, long(width)), (257, 4, 1, long(height)),
+              (258, 3, 1, short(16)), (259, 3, 1, short(1)), (262, 3, 1, short(32803)),
+              (273, 4, 1, long(0)), (274, 3, 1, short(6)), (277, 3, 1, short(1)),
+              (278, 4, 1, long(height)), (279, 4, 1, long(len(pixels))),
+              (284, 3, 1, short(1)), (33421, 3, 2, short(2) * 2),
+              (33422, 1, 4, bytes((0, 1, 1, 2))), (50706, 1, 4, bytes((1, 4, 0, 0))),
+              (50707, 1, 4, bytes((1, 1, 0, 0))), (50708, 2, 10, b"Synthetic\0"),
+              (50717, 4, 1, long(65535)), (50719, 4, 2, long(8) * 2),
+              (50720, 4, 2, long(80) + long(64)), (50721, 10, 9, matrix),
+              (50728, 5, 3, struct.pack("<IIIIII", 1, 1, 1, 1, 1, 1)),
+              (50778, 3, 1, short(21))]
+    base = 14 + 12 * len(fields)
+    overflow = bytearray()
+    slots = []
+    for tag, kind, count, value in fields:
+        slots.append(value.ljust(4, b"\0") if len(value) <= 4 else long(base + len(overflow)))
+        if len(value) > 4:
+            overflow += value
+            if len(overflow) % 2: overflow += b"\0"
+    entries = bytearray()
+    for (tag, kind, count, _), value in zip(fields, slots):
+        entries += struct.pack("<HHI", tag, kind, count)
+        entries += long(base + len(overflow)) if tag == 273 else value
+    path.write_bytes(b"II" + struct.pack("<HIH", 42, 8, len(fields)) + entries + long(0) + overflow + pixels)
+
+
 class EngineContract(unittest.TestCase):
     def setUp(self):
         self.engine = Handle()
@@ -158,6 +204,187 @@ class EngineContract(unittest.TestCase):
 
     def tearDown(self):
         LIB.hyperdr_engine_destroy(self.engine)
+
+    def assert_source_geometry(self, source, expected=None, half_size=False):
+        probe = json.loads(result(LIB.hyperdr_probe, self.engine, os.fsencode(source)))
+        dimensions = (probe["width"], probe["height"])
+        if expected is not None:
+            self.assertEqual(dimensions, expected)
+        session = Handle()
+        checked(LIB.hyperdr_preview_open, self.engine, os.fsencode(source), None, ctypes.byref(session))
+        try:
+            for compact in (False, True):
+                request = {"preview_max_edge": 64, "command": {"compact": compact}}
+                if half_size:
+                    # half_size is internal/read-only in canonical settings;
+                    # CLI --fast-preview explicitly selects that decode path.
+                    with tempfile.TemporaryDirectory(prefix="hyperdr-fast-preview-") as temporary:
+                        target = Path(temporary) / "preview.hpf"
+                        arguments = [str(source), "--output", str(target),
+                                     "--preview-max-edge", "64", "--fast-preview"]
+                        if compact:
+                            stream = subprocess.run([CLI, "preview-worker"],
+                                input=encoded(arguments) + b"\n", capture_output=True, check=True).stdout
+                            _, header, packet = stream.split(b"\n", 2)
+                            self.assertEqual(len(packet), json.loads(header)["size"])
+                        else:
+                            subprocess.run([CLI, "preview-frame", *arguments], capture_output=True, check=True)
+                            packet = target.read_bytes()
+                else:
+                    packet = self.packet(LIB.hyperdr_preview_render, session, request)
+                length = struct.unpack_from("<I", packet, 8)[0]
+                metadata = json.loads(packet[12:12 + length])
+                self.assertEqual(packet[:8], b"HYPREV2\n" if compact else b"HYPREV1\n")
+                self.assertEqual((metadata["sourceWidth"], metadata["sourceHeight"]), dimensions)
+                self.assertLessEqual(max(metadata["width"], metadata["height"]), 64)
+                if compact:
+                    span = metadata["alternateHeadroom"] - metadata["baseHeadroom"]
+                    weight = 0 if abs(span) < 1e-8 else max(0, min(1,
+                        (metadata["headroomStops"] - metadata["baseHeadroom"]) / span))
+                    self.assertAlmostEqual(metadata["gainWeight"], weight, places=5)
+        finally:
+            LIB.hyperdr_preview_close(session)
+
+    def test_raw_and_heic_source_geometry_and_raw_metadata(self):
+        if not self.capabilities["codecs"]:
+            self.skipTest("requires codec-enabled build")
+        source = raw_fixture("sony-ilce-7s-arw") # Required, never silently skipped.
+        with tempfile.TemporaryDirectory(prefix="hyperdr-source-geometry-") as temporary:
+            dng_path = Path(temporary) / "crop.dng"
+            synthetic_dng(dng_path)
+            for raw in (dng_path, source):
+                with self.subTest(source=raw.name):
+                    self.assert_source_geometry(raw, (64, 80) if raw == dng_path else None)
+                    self.assert_source_geometry(raw, half_size=True)
+                    expected = subprocess.check_output([CLI, "raw-metadata", str(raw)])
+                    self.assertTrue(expected.endswith(b"\n"))
+                    for _ in range(3):
+                        self.assertEqual(result(LIB.hyperdr_raw_metadata, self.engine, os.fsencode(raw)), expected)
+            fixtures = Path(__file__).resolve().parents[1] / "macos_t2/fixtures"
+            heics = sorted(fixtures.glob("*.heic"))
+            self.assertTrue(heics, "Required HEIC fixtures are missing")
+            for heic in heics:
+                with self.subTest(source=heic.name):
+                    self.assert_source_geometry(heic)
+
+    def test_invalid_resources_are_options_not_source_failures(self):
+        if not self.capabilities["codecs"]:
+            self.skipTest("requires codec-enabled build")
+        with tempfile.TemporaryDirectory(prefix="hyperdr-resource-errors-") as temporary:
+            root = Path(temporary)
+            source, profile = root / "valid.dng", root / "valid.dcp"
+            synthetic_dng(source)
+            dcp(profile, camera_model="")
+            session = Handle()
+            checked(LIB.hyperdr_preview_open, self.engine, os.fsencode(source), None, ctypes.byref(session))
+            try:
+                # Establish that the photograph and the profile used by XMP
+                # cases are valid; only the resource under test is broken.
+                self.packet(LIB.hyperdr_preview_render, session,
+                            {"command": {"_raw_profile_path": str(profile)}})
+                for suffix, command_key, flag, diagnostic in [
+                    ("dcp", "_raw_profile_path", "--raw-profile", b"DCP profile:"),
+                    ("xmp", "_raw_look_path", "--raw-look", b"XMP look:"),
+                    ("lcp", "_lens_profile_path", "--raw-lens-profile", b"LCP"),
+                    ("cube", "_lut_path", "--lut", b"colour LUT")]:
+                    for missing in (False, True):
+                        with self.subTest(resource=suffix, missing=missing):
+                            resource = root / (("missing." if missing else "broken.") + suffix)
+                            if not missing:
+                                resource.write_bytes(b"<broken" if suffix == "xmp" else b"broken")
+                            command = {command_key: str(resource)}
+                            arguments = [CLI, "preview-frame", str(source), "--output", str(root / "unused.hpf")]
+                            if suffix == "xmp":
+                                command["_raw_profile_path"] = str(profile)
+                                arguments += ["--raw-profile", str(profile)]
+                            arguments += [flag, str(resource)]
+                            for frame_result in (False, True):
+                                output = Frame() if frame_result else Buffer()
+                                error = ctypes.POINTER(Error)()
+                                function = LIB.hyperdr_preview_render_frame if frame_result else LIB.hyperdr_preview_render
+                                try:
+                                    status = function(session, encoded({"command": command}), None,
+                                                      ctypes.byref(output), ctypes.byref(error))
+                                    self.assertNotEqual(status, 0)
+                                    self.assertEqual(error.contents.code, b"invalid_options")
+                                    self.assertFalse(output.owner)
+                                    if not missing:
+                                        self.assertIn(diagnostic, error.contents.message)
+                                    cli = subprocess.run(arguments, capture_output=True)
+                                    self.assertNotEqual(cli.returncode, 0)
+                                    # Missing resources may be rejected earlier by
+                                    # CLI option validation; malformed parsers keep
+                                    # their exact diagnostic through both adapters.
+                                    if not missing:
+                                        self.assertIn(error.contents.message, cli.stderr)
+                                finally:
+                                    LIB.hyperdr_error_free(error)
+                                    if frame_result:
+                                        LIB.hyperdr_frame_free(ctypes.byref(output))
+                                    else:
+                                        LIB.hyperdr_buffer_free(ctypes.byref(output))
+            finally:
+                LIB.hyperdr_preview_close(session)
+
+    def test_input_error_codes_preserve_cli_diagnostics(self):
+        if not self.capabilities["codecs"]:
+            self.skipTest("requires codec-enabled build")
+        with tempfile.TemporaryDirectory(prefix="hyperdr-input-errors-") as temporary:
+            root = Path(temporary)
+            cases = [(root / "missing.jpg", "source_unreadable"),
+                     (root / "unknown.xyz", "unsupported_format"),
+                     (root / "corrupt.png", "decode_failed"),
+                     (root / "corrupt.jpg", "decode_failed"),
+                     (root / "corrupt.ARW", "decode_failed"),
+                     (root / "missing.ARW", "source_unreadable")]
+            for path, _ in cases:
+                if not path.stem.startswith("missing"):
+                    path.write_bytes(b"not an image")
+            (root / "corrupt.png").write_bytes(b"\x89PNG\r\n\x1a\ntruncated")
+            (root / "corrupt.jpg").write_bytes(b"\xff\xd8\xff\xe1\x00\x10truncated")
+            unreadable = root / "unreadable.png"
+            png(unreadable, 2, 2)
+            unreadable.chmod(0)
+            if os.access(unreadable, os.R_OK):
+                self.fail("Permission-denied test requires an unprivileged test process")
+            cases.append((unreadable, "source_unreadable"))
+            try:
+                for path, expected_code in cases:
+                    with self.subTest(source=path.name):
+                        output = ctypes.c_void_p(1)
+                        error = ctypes.POINTER(Error)()
+                        status = LIB.hyperdr_probe(self.engine, os.fsencode(path), ctypes.byref(output), ctypes.byref(error))
+                        try:
+                            self.assertNotEqual(status, 0)
+                            self.assertIsNone(output.value)
+                            self.assertEqual(error.contents.code.decode(), expected_code)
+                            cli = subprocess.run([CLI, "probe", str(path)], capture_output=True)
+                            self.assertNotEqual(cli.returncode, 0)
+                            self.assertIn(error.contents.message, cli.stderr)
+                        finally:
+                            LIB.hyperdr_error_free(error)
+                        session = Handle()
+                        checked(LIB.hyperdr_preview_open, self.engine, os.fsencode(path), None, ctypes.byref(session))
+                        buffer, error = Buffer(), ctypes.POINTER(Error)()
+                        try:
+                            self.assertNotEqual(LIB.hyperdr_preview_render(session, b"{}", None, ctypes.byref(buffer), ctypes.byref(error)), 0)
+                            self.assertEqual(error.contents.code.decode(), expected_code)
+                            self.assertFalse(buffer.owner)
+                        finally:
+                            LIB.hyperdr_error_free(error)
+                            LIB.hyperdr_buffer_free(ctypes.byref(buffer))
+                            LIB.hyperdr_preview_close(session)
+                for path in (root / "missing.ARW", root / "corrupt.ARW"):
+                    output, error = ctypes.c_void_p(1), ctypes.POINTER(Error)()
+                    status = LIB.hyperdr_raw_metadata(self.engine, os.fsencode(path), ctypes.byref(output), ctypes.byref(error))
+                    try:
+                        self.assertNotEqual(status, 0)
+                        self.assertIsNone(output.value)
+                        self.assertEqual(error.contents.code, b"source_unreadable" if path.stem == "missing" else b"decode_failed")
+                    finally:
+                        LIB.hyperdr_error_free(error)
+            finally:
+                unreadable.chmod(0o600)
 
     def test_python_goldens(self):
         for case in json.loads(Path(__file__).with_name("golden").joinpath("edit_options.json").read_text()):
@@ -401,6 +628,7 @@ class EngineContract(unittest.TestCase):
             oriented.write_bytes(jpeg[:2]+b"\xff\xe1"+struct.pack(">H",len(exif)+2)+exif+jpeg[2:])
             oriented_probe = json.loads(result(LIB.hyperdr_probe, self.engine, os.fsencode(oriented)))
             self.assertEqual((oriented_probe["width"], oriented_probe["height"]), (96, 128))
+            self.assert_source_geometry(oriented, (96, 128))
             session = Handle()
             checked(LIB.hyperdr_preview_open, self.engine, os.fsencode(source), None, ctypes.byref(session))
             try:

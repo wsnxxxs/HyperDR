@@ -1,3 +1,4 @@
+#include "hyperdr/foundation/configuration_error.hpp"
 #include "hyperdr/codec/lens_profile.hpp"
 #include "hyperdr/foundation/parallel.hpp"
 #include <algorithm>
@@ -184,7 +185,7 @@ std::optional<LensModel> interpolate(const LensProfile& p, double focal, double 
 }
 }  // namespace
 
-LensProfile read_lens_profile(const std::filesystem::path& path) {
+static LensProfile read_lens_profile_impl(const std::filesystem::path& path) {
   std::ifstream in(path, std::ios::binary);
   if (!in) throw std::invalid_argument("Cannot read LCP profile");
   const std::string xml{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
@@ -192,6 +193,10 @@ LensProfile read_lens_profile(const std::filesystem::path& path) {
   collect(parse(xml), p);
   if (p.calibrations.empty()) throw std::invalid_argument("LCP has no supported perspective calibration");
   return p;
+}
+
+LensProfile read_lens_profile(const std::filesystem::path& path) {
+  return configuration_resource([&] { return read_lens_profile_impl(path); });
 }
 
 std::string apply_lens_profile(FloatImage& image, const LensProfile& profile,

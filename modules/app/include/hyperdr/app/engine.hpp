@@ -60,6 +60,7 @@ class Engine {
       const std::filesystem::path& source, std::string sha256 = {}) const;
   [[nodiscard]] std::string capabilities() const;
   [[nodiscard]] std::string probe(const std::filesystem::path& source) const;
+  [[nodiscard]] std::string raw_metadata(const std::filesystem::path& source) const;
   // A completed batch returns its report; inspect per-file success. exit_code
   // optionally provides the CLI aggregate status. Cancellation throws Cancelled.
   [[nodiscard]] std::string convert(ConvertOptions options, ProgressSink* sink = nullptr,

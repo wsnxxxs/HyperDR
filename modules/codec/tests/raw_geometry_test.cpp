@@ -31,6 +31,8 @@ int main() {
         hyperdr::codec::RawOutputGeometry geometry;
         geometry.flip = flip;
         const auto out = hyperdr::codec::apply_raw_output_geometry(field(3, 2, channels), geometry);
+        require(hyperdr::codec::raw_output_dimensions(3, 2, geometry) ==
+                    std::pair(out.width, out.height), "RAW metadata geometry disagrees with output");
         require(out.width == ((flip & 4) ? 2U : 3U) && out.height == ((flip & 4) ? 3U : 2U),
                 "RAW flip dimensions changed");
         for (unsigned i = 0; i < 6; ++i)
@@ -41,6 +43,8 @@ int main() {
         hyperdr::codec::RawOutputGeometry geometry;
         geometry.pixel_aspect = aspect;
         const auto out = hyperdr::codec::apply_raw_output_geometry(field(3, 2, channels), geometry);
+        require(hyperdr::codec::raw_output_dimensions(3, 2, geometry) ==
+                    std::pair(out.width, out.height), "RAW metadata geometry disagrees with output");
         require(out.width == (aspect < 1 ? 3U : 6U) && out.height == (aspect < 1 ? 4U : 2U),
                 "RAW aspect dimensions changed");
         for (unsigned y = 0; y < out.height; ++y)
@@ -54,6 +58,8 @@ int main() {
         geometry.fuji_width = 5;
         geometry.sample_step = sample_step;
         const auto out = hyperdr::codec::apply_raw_output_geometry(field(4, 8, channels), geometry);
+        require(hyperdr::codec::raw_output_dimensions(4, 8, geometry) ==
+                    std::pair(out.width, out.height), "Fuji metadata geometry disagrees with output");
         const unsigned f = sample_step == 1 ? 4 : 2;
         require(out.width == (sample_step == 1 ? 5U : 2U) && out.height == (sample_step == 1 ? 5U : 8U),
                 "RAW Fuji dimensions changed");

@@ -46,6 +46,12 @@ int boundary(hyperdr_error** error, Function function) noexcept {
     set_error(error, "busy", exception.what());
   } catch (const hyperdr::RawMemoryError& exception) {
     set_error(error, "raw_budget", exception.what());
+  } catch (const hyperdr::SourceUnreadable& exception) {
+    set_error(error, "source_unreadable", exception.what());
+  } catch (const hyperdr::UnsupportedFormat& exception) {
+    set_error(error, "unsupported_format", exception.what());
+  } catch (const hyperdr::DecodeFailed& exception) {
+    set_error(error, "decode_failed", exception.what());
   } catch (const std::invalid_argument& exception) {
     set_error(error, "invalid_options", exception.what());
   } catch (const std::bad_alloc&) {
@@ -167,6 +173,12 @@ int hyperdr_probe(hyperdr_engine* engine, const char* path, char** out, hyperdr_
   return json_result(out, error, [&] {
     if (!path) throw std::invalid_argument("source path is required");
     return required(engine).value.probe(hyperdr::path_from_utf8(path));
+  });
+}
+int hyperdr_raw_metadata(hyperdr_engine* engine, const char* path, char** out, hyperdr_error** error) {
+  return json_result(out, error, [&] {
+    if (!path) throw std::invalid_argument("source path is required");
+    return required(engine).value.raw_metadata(hyperdr::path_from_utf8(path));
   });
 }
 int hyperdr_normalize_options(const char* edit, char** out, hyperdr_error** error) {

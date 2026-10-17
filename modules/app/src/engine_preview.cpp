@@ -60,6 +60,8 @@ PreviewPixels photo_preview_frame(PhotoRenditions result,
       .member("schema", "hyperdr.native-preview/v1")
       .member("width", result.sdr.width)
       .member("height", result.sdr.height)
+      .member("sourceWidth", decode.source_width ? decode.source_width : result.sdr.width)
+      .member("sourceHeight", decode.source_height ? decode.source_height : result.sdr.height)
       .member("channels", 3)
       .member("layout", "HWC")
       .member("sampleType", "float32-le")

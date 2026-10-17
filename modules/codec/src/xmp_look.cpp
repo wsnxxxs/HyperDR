@@ -1,3 +1,4 @@
+#include "hyperdr/foundation/configuration_error.hpp"
 #include "hyperdr/codec/dcp_profile.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/foundation/hash.hpp"
@@ -203,7 +204,7 @@ DcpHueSatMap look_table(std::string_view encoded) {
 #endif
 } // namespace
 
-void apply_xmp_look(DcpProfile& profile, const std::filesystem::path& path) {
+static void apply_xmp_look_impl(DcpProfile& profile, const std::filesystem::path& path) {
 #if HYPERDR_WITH_CODECS
   if (std::filesystem::file_size(path) > 32*1024*1024) invalid("file exceeds 32 MB");
   const auto bytes = read_binary_file(path);
@@ -263,5 +264,9 @@ void apply_xmp_look(DcpProfile& profile, const std::filesystem::path& path) {
   (void)profile; (void)path;
   invalid("requires a codec-enabled build");
 #endif
+}
+
+void apply_xmp_look(DcpProfile& profile, const std::filesystem::path& path) {
+  return configuration_resource([&] { return apply_xmp_look_impl(profile, path); });
 }
 } // namespace hyperdr

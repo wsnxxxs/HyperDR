@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "fixtures": [
+    {
+      "id": "sony-ilce-7s-arw",
+      "filename": "sony-ilce-7s.ARW",
+      "camera": "Sony ILCE-7S",
+      "description": "14-bit compressed, APS-C crop; raw.pixls.us sample 1582",
+      "url": "https://raw.pixls.us/getfile.php/1582/nice/Sony%20-%20ILCE-7S%20-%2014bit%2014bit%20compressed%20%283:2%29.ARW",
+      "sha256": "a35ebb2fbec929daa5beb20d1ce5c15a8aac7b1a7a231455387f3df8a7442e07",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_page": "https://raw.pixls.us/"
+    }
+  ]
+}

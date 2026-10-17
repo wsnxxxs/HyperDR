@@ -85,4 +85,13 @@ std::string Engine::probe(const std::filesystem::path& source) const {
   return writer.take() + '\n';
 }
 
+std::string Engine::raw_metadata(const std::filesystem::path& source) const {
+  const auto metadata = probe_raw_lens_metadata(source);
+  json::Writer writer;
+  writer.begin_object().member("make", metadata.make).member("model", metadata.model)
+      .member("lens", metadata.lens).member("focalLength", metadata.focal_length)
+      .member("aperture", metadata.aperture).end_object();
+  return writer.take() + '\n';
+}
+
 }  // namespace hyperdr

@@ -10,6 +10,7 @@
     hyperdr_engine_destroy;
     hyperdr_capabilities;
     hyperdr_probe;
+    hyperdr_raw_metadata;
     hyperdr_normalize_options;
     hyperdr_command_line;
     hyperdr_preview_open;

@@ -57,6 +57,31 @@ python3 scripts/test.py apple                    # xcframework, Swift packages, 
   which selects the panel's three-decimal rounding. Keep it when editing such a
   request; plain requests keep full precision.
 
+## Presentation frames
+
+A frame (`hyperdr.frame/v1`) puts the photograph on a mat with an optional print
+shadow and caption. The frame must stay SDR: `frame_image` writes every frame
+pixel from the spec alone into both renditions, so every gain-map writer stores
+zero gain there (`frame_gain_test` checks all five packaging paths). Do not
+draw anything into the frame that depends on the photo's HDR pixels.
+
+- Engine: `modules/image/src/frame.cpp` (spec, even-pixel layout, compositing);
+  export places it in `batch.cpp` after grading, before packaging. Model and
+  external gain maps are then repackaged as an authored pair. CLI `--frame`,
+  request `command.frame`, `hyperdr_frame_layout` / `frame-layout`.
+- App: `HyperDR/Frame/` (styles, tones, caption typography, Exif via ImageIO,
+  overlay renderer, `FrameExportPlan`) and `HyperDR/Views/Frame/` (the sheet).
+  The caption overlay is a straight-alpha Display P3 PNG exactly the size of
+  the layout's caption band; `FrameCaptionView` draws both preview and overlay.
+- Still to do: A2 implements `EditorServices.captureFacts` (read inside the
+  photo's security scope) and must set `document.pixelSize` to the full-size
+  oriented dimensions the layout uses; M3 calls `FrameExportPlan.make` with the
+  export's own pixel size and sets `command.frame`. The SDR comparison
+  (press-and-hold) in the design is not built. On iPhone the same views run
+  inside a full-screen sheet; `FramePreviewCanvas` needs a UIKit counterpart.
+- The Swift side was written without Xcode and has not been built: expect
+  compile fixes on first build.
+
 ## Status (2026-10-18)
 
 Done: the C ABI and its Swift wrapper, the editor view-model contract with fake

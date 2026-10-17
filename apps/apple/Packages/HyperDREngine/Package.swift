@@ -13,7 +13,7 @@ let package = Package(
         .binaryTarget(name: "HyperDREngineCore", path: "Artifacts/HyperDREngineCore.xcframework"),
         .target(name: "HyperDREngine", dependencies: ["HyperDREngineCore"], linkerSettings: [
             .linkedLibrary("c++"), .linkedLibrary("heif"),
-            .linkedFramework("CoreFoundation"),
+            .linkedFramework("CoreFoundation"), .linkedFramework("Metal"),
             .linkedFramework("Accelerate"),
             .linkedFramework("VideoToolbox"), .linkedFramework("CoreMedia"),
             .linkedFramework("CoreVideo"),

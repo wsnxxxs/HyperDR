@@ -85,6 +85,11 @@ typedef struct hyperdr_frame {
  * Preview ignores command.input (the session is bound to source_utf8).
  * command.compact defaults true, false matches preview-frame's file output.
  * normalize_options adds `command` to the Python-compatible renderer settings.
+ * normalize_options adds command.adapter = "panel-v1". Preserve this marker
+ * verbatim when changing command keys. Only panel-v1 requests use the Python
+ * panel's three-decimal quantization; untagged canonical requests retain full
+ * precision. Unknown adapters are rejected as invalid_options. Normalization
+ * and consumption must use the same version of this library.
  * command_line returns a JSON argv array, without shell quoting.
  * preview_open is lazy: decoding happens on the first render/model call.
  * convert returns a completed batch report; inspect per-file success in it.

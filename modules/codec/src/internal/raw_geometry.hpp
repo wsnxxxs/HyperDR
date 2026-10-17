@@ -15,6 +15,33 @@ struct RawOutputGeometry {
   int flip{};
 };
 
+// Same dimension arithmetic as the float geometry below, without allocating
+// an image. A sample_step of 1 reports the full photo even in a half-size decode.
+inline std::pair<unsigned, unsigned> raw_output_dimensions(
+    unsigned width, unsigned height, const RawOutputGeometry& geometry) {
+  const auto dimension = [](double value) {
+    if (!std::isfinite(value) || value < 1 || value > std::numeric_limits<unsigned>::max())
+      throw std::runtime_error("invalid RAW output dimension");
+    return static_cast<unsigned>(value);
+  };
+  if (geometry.fuji_width) {
+    if (geometry.sample_step != 1 && geometry.sample_step != 2)
+      throw std::runtime_error("invalid RAW geometry sample step");
+    const unsigned shrink = geometry.sample_step == 2 ? 1 : 0;
+    const unsigned f = (geometry.fuji_width - 1 + shrink) >> shrink;
+    const double step = std::sqrt(0.5);
+    width = dimension(f / step);
+    height = dimension((static_cast<double>(height) - f) / step);
+  }
+  const auto aspect = geometry.pixel_aspect;
+  if (!std::isfinite(aspect) || aspect <= 0)
+    throw std::runtime_error("invalid RAW pixel aspect ratio");
+  if (aspect < 1) height = dimension(height / aspect + 0.5);
+  else if (aspect > 1) width = dimension(width * aspect + 0.5);
+  if (geometry.flip & 4) std::swap(width, height);
+  return {width, height};
+}
+
 inline FloatImage apply_raw_output_geometry(FloatImage image, const RawOutputGeometry& geometry) {
   image.require_consistent("RAW camera geometry");
   const auto dimension = [](double value) {

@@ -60,6 +60,13 @@ jobs:
           path: build-vcpkg-cache
           key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg.json', 'cmake/triplets/**') }}
           restore-keys: vcpkg-${{ runner.os }}-${{ runner.arch }}-
+      - name: Cache RAW test fixtures
+        uses: actions/cache@v4
+        with:
+          path: build/fixtures
+          key: raw-fixtures-${{ hashFiles('tests/fixtures/manifest.json') }}
+      - name: Fetch and verify RAW test fixtures
+        run: python3 scripts/fetch_test_fixtures.py
       - name: Configure codecs
         run: >-
           cmake --preset macos-arm64-codecs
@@ -96,6 +103,13 @@ jobs:
           path: build-vcpkg-cache
           key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg.json', 'cmake/triplets/**') }}
           restore-keys: vcpkg-${{ runner.os }}-${{ runner.arch }}-
+      - name: Cache RAW test fixtures
+        uses: actions/cache@v4
+        with:
+          path: build/fixtures
+          key: raw-fixtures-${{ hashFiles('tests/fixtures/manifest.json') }}
+      - name: Fetch and verify RAW test fixtures
+        run: python3 scripts/fetch_test_fixtures.py
       - name: Configure sanitizers
         run: >-
           cmake --preset macos-arm64-codecs -B build-asan

@@ -1,3 +1,4 @@
+#include "hyperdr/foundation/configuration_error.hpp"
 #include "hyperdr/look/color_lut.hpp"
 #include "hyperdr/foundation/parallel.hpp"
 #include "hyperdr/image/color.hpp"
@@ -53,7 +54,7 @@ float slog3_decode(float x) {
 }
 }
 
-ColorLut read_color_lut(const std::filesystem::path& path) {
+static ColorLut read_color_lut_impl(const std::filesystem::path& path) {
   std::ifstream file(path);
   if (!file) throw std::invalid_argument("cannot open colour LUT");
   ColorLut lut;
@@ -99,6 +100,10 @@ ColorLut read_color_lut(const std::filesystem::path& path) {
   if (!lut.size || lut.values.size()!=expected) bad("incomplete table");
   for (int c=0;c<3;++c) if (!(std::isfinite(lut.domain_min[c]) && std::isfinite(lut.domain_max[c]) && lut.domain_max[c]>lut.domain_min[c])) bad("invalid domain");
   return lut;
+}
+
+ColorLut read_color_lut(const std::filesystem::path& path) {
+  return configuration_resource([&] { return read_color_lut_impl(path); });
 }
 
 std::array<float,3> ColorLut::sample(std::array<float,3> rgb) const {

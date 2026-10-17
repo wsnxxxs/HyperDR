@@ -1,3 +1,4 @@
+#include "hyperdr/foundation/configuration_error.hpp"
 #include "hyperdr/look/dcp_render.hpp"
 #include "hyperdr/image/color.hpp"
 #include "hyperdr/container/exif.hpp"
@@ -40,6 +41,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <fstream>
 #include <limits>
 #include <optional>
 #include <stdexcept>
@@ -1009,7 +1011,7 @@ std::optional<DecodedImage> decode_apple_legacy_heic(
 }
 }  // namespace codec
 
-DecodedImage decode_image(const std::filesystem::path& path, const RawDecodeOptions& options) {
+static DecodedImage decode_image_impl(const std::filesystem::path& path, const RawDecodeOptions& options) {
   const auto ext = lower_extension(path);
 
   // RAW stays name-decided, and has to. Most RAW containers *are* TIFF, so a
@@ -1026,63 +1028,92 @@ DecodedImage decode_image(const std::filesystem::path& path, const RawDecodeOpti
   const auto head = read_binary_prefix(path, kSignaturePrefixBytes);
   const auto format = probe_input_signature(head);
   if (format == InputFormat::Unknown) {
-    throw std::invalid_argument("unsupported input format: " + ext +
-                                " (contents match no supported signature)");
+    const auto message = "unsupported input format: " + ext +
+                         " (contents match no supported signature)";
+    // Prefix reads historically return empty for unreadable paths. Preserve
+    // that CLI diagnostic, but distinguish unreadability from rejected bytes.
+    if (!std::ifstream(path, std::ios::binary)) throw SourceUnreadable(message);
+    const bool raster = std::find(kRasterInputExtensions.begin(),
+        kRasterInputExtensions.end(), ext) != kRasterInputExtensions.end();
+    if (raster) throw DecodeFailed(message);
+    throw UnsupportedFormat(message);
   }
 
   // The one read. Every probe and decoder below works from this buffer, so a
   // JPEG is no longer opened twice -- once to ask whether it carries a gain map
   // and once to decode it.
-  const auto bytes = read_binary_file(path);
+  const auto bytes = [&] {
+    try { return read_binary_file(path); }
+    catch (const std::runtime_error& error) { throw SourceUnreadable(error.what()); }
+  }();
 
-  switch (format) {
-    case InputFormat::Jpeg:
-      // A JPEG/R carries an SDR primary plus a gain map. Reading only the
-      // primary would discard the captured highlight range before any look
-      // decision, so the gain map is applied first and the plain-JPEG path is
-      // the fallback.
-      if (!options.ignore_embedded_gain_map && codec::is_ultrahdr_bytes(bytes)) {
-        try {
-          return codec::decode_ultrahdr_bytes(bytes, options.default_gamut);
-        } catch (const std::exception&) {
-          // Keep the backward-compatible primary usable, but never pretend that
-          // losing the advertised HDR rendition was an ordinary successful
-          // decode.  Export/report callers already surface DecodeInfo degraded
-          // state and the panel carries it in the native preview contract.
-          //
-          // decode_jpeg leaves the domain at display-referred SDR, which is what
-          // this fallback actually produced. That is the whole reason the domain
-          // is set by the decoder: the file still advertises a gain map, and a
-          // name-based classifier would have handed these SDR pixels to the
-          // highlight-splitting renderer.
-          auto fallback = decode_jpeg(bytes, options.preview_max_edge,
-                                      options.default_gamut);
-          fallback.decode.degraded = true;
-          fallback.decode.degradation_reasons.push_back(
-              "ultrahdr_decode_failed_sdr_fallback");
-          return fallback;
+  // Only source bytes reach this boundary. RAW resource parsing is separate
+  // above; option/resource failures never get inferred from runtime_error.
+  try {
+    switch (format) {
+      case InputFormat::Jpeg:
+        // A JPEG/R carries an SDR primary plus a gain map. Reading only the
+        // primary would discard the captured highlight range before any look
+        // decision, so the gain map is applied first and the plain-JPEG path is
+        // the fallback.
+        if (!options.ignore_embedded_gain_map && codec::is_ultrahdr_bytes(bytes)) {
+          try {
+            return codec::decode_ultrahdr_bytes(bytes, options.default_gamut);
+          } catch (const std::exception&) {
+            // Keep the backward-compatible primary usable, but never pretend that
+            // losing the advertised HDR rendition was an ordinary successful
+            // decode.  Export/report callers already surface DecodeInfo degraded
+            // state and the panel carries it in the native preview contract.
+            //
+            // decode_jpeg leaves the domain at display-referred SDR, which is what
+            // this fallback actually produced. That is the whole reason the domain
+            // is set by the decoder: the file still advertises a gain map, and a
+            // name-based classifier would have handed these SDR pixels to the
+            // highlight-splitting renderer.
+            auto fallback = decode_jpeg(bytes, options.preview_max_edge,
+                                        options.default_gamut);
+            fallback.decode.degraded = true;
+            fallback.decode.degradation_reasons.push_back(
+                "ultrahdr_decode_failed_sdr_fallback");
+            return fallback;
+          }
         }
-      }
-      return decode_jpeg(bytes, options.preview_max_edge, options.default_gamut);
-    case InputFormat::Png:
-      return decode_png(bytes, options.preview_max_edge, options.default_gamut);
-    case InputFormat::Tiff:
-      return codec::decode_tiff_bytes(bytes, options.preview_max_edge,
-                                      options.default_gamut);
-    case InputFormat::Isobmff:
-      // HEIF and AVIF are the same container family; the payload codec decides,
-      // because libheif would otherwise reject an AV1 payload with an error
-      // about the codec rather than simply reading it.
-      if (codec::is_avif_bytes(bytes)) {
-        return codec::decode_avif_bytes(bytes, options.preview_max_edge,
-                                       options.default_gamut);
-      }
-      return decode_heic(bytes, options.ignore_embedded_gain_map,
-                         options.preview_max_edge, options.default_gamut);
-    case InputFormat::Unknown:
-      break;
+        return decode_jpeg(bytes, options.preview_max_edge, options.default_gamut);
+      case InputFormat::Png:
+        return decode_png(bytes, options.preview_max_edge, options.default_gamut);
+      case InputFormat::Tiff:
+        return codec::decode_tiff_bytes(bytes, options.preview_max_edge,
+                                        options.default_gamut);
+      case InputFormat::Isobmff:
+        // HEIF and AVIF are the same container family; the payload codec decides,
+        // because libheif would otherwise reject an AV1 payload with an error
+        // about the codec rather than simply reading it.
+        if (codec::is_avif_bytes(bytes)) {
+          return codec::decode_avif_bytes(bytes, options.preview_max_edge,
+                                         options.default_gamut);
+        }
+        return decode_heic(bytes, options.ignore_embedded_gain_map,
+                           options.preview_max_edge, options.default_gamut);
+      case InputFormat::Unknown:
+        break;
+    }
+    throw UnsupportedFormat("unsupported input format: " + ext);
+  } catch (const Cancelled&) { throw; }
+    catch (const std::bad_alloc&) { throw; }
+    catch (const ConfigurationError&) { throw; }
+    catch (const UnsupportedFormat&) { throw; }
+    catch (const std::exception& error) { throw DecodeFailed(error.what()); }
+}
+
+DecodedImage decode_image(const std::filesystem::path& path, const RawDecodeOptions& options) {
+  auto result = decode_image_impl(path, options);
+  // Raster decoders already record their full, oriented dimensions in target_*.
+  // RAW supplies source_* explicitly before half-size demosaic/preview resize.
+  if (!result.decode.source_width) {
+    result.decode.source_width = result.decode.target_width;
+    result.decode.source_height = result.decode.target_height;
   }
-  throw std::invalid_argument("unsupported input format: " + ext);
+  return result;
 }
 
 // How far above the display range this preview has to reach.

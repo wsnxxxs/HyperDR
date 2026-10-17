@@ -69,6 +69,9 @@ typedef struct hyperdr_plane {
   uint32_t width, height, channels, format;
 } hyperdr_plane;
 typedef struct hyperdr_frame {
+  /* v1/v2 sourceWidth/Height are full-resolution, oriented, default-cropped
+   * dimensions. v2 baseHeadroom/alternateHeadroom are log2 stops, as used to
+   * compute gainWeight from headroomStops (not linear headroom multiples). */
   const char* metadata_json;
   hyperdr_plane base;
   hyperdr_plane gain; /* v2: encoded mono gain; v1: linear P3 HDR RGB. */
@@ -93,6 +96,9 @@ HYPERDR_API int hyperdr_engine_create(const char* config_json, hyperdr_engine** 
 HYPERDR_API void hyperdr_engine_destroy(hyperdr_engine*);
 HYPERDR_API int hyperdr_capabilities(hyperdr_engine*, char** out_json, hyperdr_error** err);
 HYPERDR_API int hyperdr_probe(hyperdr_engine*, const char* path_utf8, char** out_json, hyperdr_error** err);
+/* RAW capture/lens metadata, byte-identical to CLI raw-metadata (trailing newline).
+ * Decoding calls distinguish source_unreadable, unsupported_format and decode_failed. */
+HYPERDR_API int hyperdr_raw_metadata(hyperdr_engine*, const char* path_utf8, char** out_json, hyperdr_error** err);
 HYPERDR_API int hyperdr_normalize_options(const char* edit_options_json, char** settings_json, hyperdr_error** err);
 HYPERDR_API int hyperdr_command_line(const char* settings_json, char** out, hyperdr_error** err);
 HYPERDR_API int hyperdr_preview_open(hyperdr_engine*, const char* source_utf8, const char* source_sha256,

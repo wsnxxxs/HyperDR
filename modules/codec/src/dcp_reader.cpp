@@ -1,3 +1,4 @@
+#include "hyperdr/foundation/configuration_error.hpp"
 #include "hyperdr/codec/dcp_profile.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/foundation/hash.hpp"
@@ -153,7 +154,7 @@ std::string normalized(std::string_view text) {
   return out;
 }
 }  // namespace
-DcpProfile read_dcp_profile(const std::filesystem::path& path) {
+static DcpProfile read_dcp_profile_impl(const std::filesystem::path& path) {
   Reader reader(path);
   // These tags change the rendering model and must never be silently ignored.
   for (unsigned tag : {52525U,52528U,52529U,52530U,52531U,52532U,52533U,
@@ -195,6 +196,10 @@ DcpProfile read_dcp_profile(const std::filesystem::path& path) {
   out.default_black_render_none = black == 1;
   if (!dng_camera_color_transform(out.color, {1,1,1})) invalid("invalid camera matrices");
   return out;
+}
+
+DcpProfile read_dcp_profile(const std::filesystem::path& path) {
+  return configuration_resource([&] { return read_dcp_profile_impl(path); });
 }
 bool dcp_matches_camera(const DcpProfile& profile, std::string_view make, std::string_view model) {
   const auto wanted = normalized(profile.camera_model);

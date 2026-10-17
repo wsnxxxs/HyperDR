@@ -8,6 +8,7 @@ _hyperdr_engine_create
 _hyperdr_engine_destroy
 _hyperdr_capabilities
 _hyperdr_probe
+_hyperdr_raw_metadata
 _hyperdr_normalize_options
 _hyperdr_command_line
 _hyperdr_preview_open

@@ -39,6 +39,9 @@ void round_trip(const std::filesystem::path& path,
   require(hyperdr::capture_parameters_complete(miss.capture) ==
               hyperdr::capture_parameters_complete(hit.capture),
           "cache changed the EXIF fallback decision");
+  require(source.decode.source_width == cached.decode.source_width &&
+              source.decode.source_height == cached.decode.source_height,
+          "cache lost the upright full-resolution source dimensions");
   require(source.linear_p3.pixels == cached.linear_p3.pixels,
           "cache changed decoded pixels");
   require(source.source_color.name == cached.source_color.name &&
@@ -129,6 +132,8 @@ int main() {
     const auto path = directory / "capture.hdrcache";
     hyperdr::DecodedImage source;
     source.linear_p3 = hyperdr::FloatImage(16, 16, 3);
+    source.decode.source_width = 6000;
+    source.decode.source_height = 4000;
     source.source_color = {"Display P3", "Display P3", "sRGB", "icc"};
     source.raw_lens_profile_path = directory / "lens.lcp";
     source.raw_lens_correction = "distortion,vignette";

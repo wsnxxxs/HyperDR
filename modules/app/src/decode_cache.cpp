@@ -1,3 +1,4 @@
+#include "hyperdr/foundation/configuration_error.hpp"
 #include "hyperdr/app/decode_cache.hpp"
 #include "hyperdr/codec/dcp_profile.hpp"
 
@@ -54,7 +55,8 @@ constexpr std::array<char, 8> kMagic{'H', 'D', 'R', 'C', 'A', 'C', 'H', '3'};
 // 32 measures Adaptive and legacy Apple usable headroom from the reconstructed peak.
 // 33 persists the optional static XMP look layered over the camera DCP.
 // 34 persists the input colour interpretation shown in previews and reports.
-constexpr std::uint32_t kCacheSchema = 34;
+// 35 retains upright full-resolution photo dimensions before preview reduction.
+constexpr std::uint32_t kCacheSchema = 35;
 
 // x86-64 and arm64, the only targets this project builds for, are both little
 // endian; the cache is a local scratch format and is never transported.
@@ -142,6 +144,8 @@ std::string metadata_json(const DecodedImage& value) {
       .member("source_color_primaries", value.source_color.primaries)
       .member("source_color_transfer", value.source_color.transfer)
       .member("source_color_source", value.source_color.source)
+      .member("decode_source_width", d.source_width)
+      .member("decode_source_height", d.source_height)
       .member("decode_sensor_width", d.sensor_width)
       .member("decode_sensor_height", d.sensor_height)
       .member("decode_target_width", d.target_width)
@@ -317,6 +321,8 @@ void apply_metadata_json(const std::string& text, DecodedImage& out) {
   out.capture.exposure_bias_ev = read_optional(document, "capture_exposure_bias_ev");
   out.capture.focal_length_mm = read_optional(document, "capture_focal_length_mm");
   out.capture.focal_length_35mm = read_optional(document, "capture_focal_length_35mm");
+  out.decode.source_width = static_cast<std::uint32_t>(number_at("decode_source_width"));
+  out.decode.source_height = static_cast<std::uint32_t>(number_at("decode_source_height"));
   out.decode.sensor_width =
       static_cast<std::uint32_t>(number_at("decode_sensor_width"));
   out.decode.sensor_height =
@@ -412,7 +418,7 @@ std::string decode_cache_variant(const ConvertOptions& options,
     variant += '=';
     variant += path_utf8(resource.path);
     variant += ':';
-    variant += sha256_file_hex(resource.path);
+    variant += configuration_resource([&] { return sha256_file_hex(resource.path); });
   }
   return variant;
 }

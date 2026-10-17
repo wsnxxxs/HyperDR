@@ -268,12 +268,7 @@ int thumbnail_command(int argc, char** argv) {
 
 int raw_metadata_command(int argc, char** argv) {
   if (argc != 3) throw std::invalid_argument("raw-metadata requires one RAW path");
-  const auto metadata = probe_raw_lens_metadata(path_from_utf8(argv[2]));
-  json::Writer writer;
-  writer.begin_object().member("make", metadata.make).member("model", metadata.model)
-      .member("lens", metadata.lens).member("focalLength", metadata.focal_length)
-      .member("aperture", metadata.aperture).end_object();
-  std::cout << writer.take() << '\n';
+  std::cout << Engine().raw_metadata(path_from_utf8(argv[2]));
   return 0;
 }
 

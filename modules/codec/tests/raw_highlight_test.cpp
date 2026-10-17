@@ -523,6 +523,9 @@ int main(int argc, char** argv) {
       require(result.linear_p3.width == kCropHeight &&
                   result.linear_p3.height == kCropWidth,
                std::string("unexpected decoded size for ") + name);
+      require(result.decode.source_width == kCropHeight &&
+                  result.decode.source_height == kCropWidth,
+              "RAW source dimensions must describe the delivered upright crop");
       require(result.decode.target_width == kCropHeight &&
                   result.decode.target_height == kCropWidth,
               std::string("DefaultCrop target not reported for ") + name);
@@ -593,6 +596,9 @@ int main(int argc, char** argv) {
     const auto odd = hyperdr::decode_image(path);
     require(odd.decode.target_width == 63 && odd.decode.target_height == 79,
             "odd requested DefaultCrop was not reported after orientation");
+    require(odd.decode.source_width == odd.linear_p3.width &&
+                odd.decode.source_height == odd.linear_p3.height,
+            "odd source dimensions must match delivered full-resolution pixels");
     require(odd.decode.decoded_width == odd.linear_p3.width &&
                 odd.decode.decoded_height == odd.linear_p3.height,
             "odd delivered crop does not match LibRaw's returned raster");
@@ -622,6 +628,8 @@ int main(int argc, char** argv) {
     require(rejected.decode.target_width == 48 &&
                 rejected.decode.target_height == 32,
             "rejected DefaultCrop target dimensions were lost or unrotated");
+    require(rejected.decode.source_width == kHeight && rejected.decode.source_height == kWidth,
+            "rejected crop source dimensions must describe the delivered visible area");
     require(rejected.linear_p3.width == kHeight &&
                 rejected.linear_p3.height == kWidth,
             "rejected DefaultCrop did not fall back to the visible area");

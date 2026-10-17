@@ -1,3 +1,4 @@
+#include "hyperdr/foundation/configuration_error.hpp"
 #include "hyperdr/app/fingerprint.hpp"
 
 #include "hyperdr/app/schema.hpp"
@@ -104,7 +105,7 @@ std::string settings_signature(const ConvertOptions& options) {
     out += '=';
     out += path_utf8(path);
     out += ':';
-    out += sha256_file_hex(path);
+    out += configuration_resource([&] { return sha256_file_hex(path); });
   };
   // Calibration files are external inputs, not schema scalar settings. Their
   // paths and contents still belong in the resume fingerprint: changing a
@@ -139,7 +140,7 @@ std::string model_preprocessing_fingerprint(const ConvertOptions& options) {
   }
   for (const auto& resource : resources) {
     identity += '|' + std::string(resource.key) + '=';
-    if (!resource.path.empty()) identity += sha256_file_hex(resource.path);
+    if (!resource.path.empty()) identity += configuration_resource([&] { return sha256_file_hex(resource.path); });
   }
   return fnv1a_hex(identity);
 }

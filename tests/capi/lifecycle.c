@@ -34,6 +34,13 @@ int main(void) {
   hyperdr_error_free(error);
   hyperdr_engine* engine = NULL;
   REQUIRE(hyperdr_engine_create("{}", &engine, &error) == 0 && engine != NULL);
+  REQUIRE(hyperdr_raw_metadata(engine, NULL, &output, &error) != 0);
+  REQUIRE(output == NULL && error != NULL && strcmp(error->code, "invalid_options") == 0);
+  hyperdr_error_free(error);
+  REQUIRE(hyperdr_raw_metadata(NULL, "image.dng", &output, &error) != 0);
+  REQUIRE(output == NULL && error != NULL && strcmp(error->code, "invalid_options") == 0);
+  hyperdr_error_free(error);
+  REQUIRE(hyperdr_raw_metadata(engine, NULL, &output, NULL) != 0 && output == NULL);
   REQUIRE(hyperdr_capabilities(engine, &output, &error) == 0);
   REQUIRE(strstr(output, "buildFingerprint") != NULL);
   hyperdr_string_free(output);

@@ -1,3 +1,4 @@
+#include "hyperdr/foundation/configuration_error.hpp"
 #include "hyperdr/codec/dcp_profile.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include <bit>
@@ -80,13 +81,13 @@ int main(int argc, char** argv) {
       auto f=fixture(true); f.numbers(tag,4,{1});
       hyperdr::write_binary_file_atomic(path,f.bytes(),true);
       bool rejected=false;
-      try { (void)hyperdr::read_dcp_profile(path); } catch(const std::runtime_error&) { rejected=true; }
+      try { (void)hyperdr::read_dcp_profile(path); } catch(const hyperdr::ConfigurationError&) { rejected=true; }
       require(rejected,"unsupported rendering tags rejected");
     }
     auto truncated=fixture(true).bytes(); truncated.pop_back();
     hyperdr::write_binary_file_atomic(path,truncated,true);
     bool rejected=false;
-    try { (void)hyperdr::read_dcp_profile(path); } catch(const std::runtime_error&) { rejected=true; }
+    try { (void)hyperdr::read_dcp_profile(path); } catch(const hyperdr::ConfigurationError&) { rejected=true; }
     require(rejected,"truncated payload rejected");
     std::filesystem::remove(path);
     // Optional local profiles are never checked into the test fixtures.

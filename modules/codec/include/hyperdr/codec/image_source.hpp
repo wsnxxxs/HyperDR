@@ -50,6 +50,21 @@ class RawMemoryError : public std::runtime_error {
   using std::runtime_error::runtime_error;
 };
 
+// Input failures retain the decoder's diagnostic text while the C ABI maps
+// their types to stable error codes. Options and resource admission stay separate.
+class SourceUnreadable : public std::runtime_error {
+ public:
+  using std::runtime_error::runtime_error;
+};
+class UnsupportedFormat : public std::runtime_error {
+ public:
+  using std::runtime_error::runtime_error;
+};
+class DecodeFailed : public std::runtime_error {
+ public:
+  using std::runtime_error::runtime_error;
+};
+
 enum class HighlightRecovery {
   Clip,
   Unclip,
@@ -151,6 +166,11 @@ struct RawDecodeOptions {
 };
 
 struct DecodeInfo {
+  // Upright full-resolution output after the accepted default crop and RAW
+  // geometry (including pixel aspect/Fuji). Recorded before preview reduction;
+  // unlike target_* these describe the delivered photo even if a crop is rejected.
+  std::uint32_t source_width{};
+  std::uint32_t source_height{};
   // The stored RAW sensor raster, including margins when the format exposes
   // them. These are sensor coordinates and are deliberately *not* rotated by
   // the capture orientation, unlike target_* and decoded_*: this is the shape

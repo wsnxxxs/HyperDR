@@ -555,6 +555,41 @@
             "type": "string"
           }
         },
+        "frame": {
+          "description": "Present when a presentation frame was placed: width and height are then the canvas, and photo is where the photograph sits on it.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["width", "height", "photo"],
+          "properties": {
+            "width": {
+              "$ref": "#/$defs/dimension"
+            },
+            "height": {
+              "$ref": "#/$defs/dimension"
+            },
+            "photo": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["x", "y", "width", "height"],
+              "properties": {
+                "x": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "y": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "width": {
+                  "$ref": "#/$defs/dimension"
+                },
+                "height": {
+                  "$ref": "#/$defs/dimension"
+                }
+              }
+            }
+          }
+        },
         "width": {
           "$ref": "#/$defs/dimension"
         },

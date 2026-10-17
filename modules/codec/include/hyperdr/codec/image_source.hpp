@@ -11,6 +11,7 @@
 
 #include "hyperdr/container/exif.hpp"
 #include "hyperdr/image/color.hpp"
+#include "hyperdr/image/frame.hpp"
 #include "hyperdr/image/image.hpp"
 #include "hyperdr/image/source_color.hpp"
 #include "hyperdr/look/options.hpp"
@@ -307,6 +308,11 @@ struct DecodedImage {
 
 [[nodiscard]] DecodedImage decode_image(const std::filesystem::path& path,
                                         const RawDecodeOptions& options = {});
+
+// A presentation frame's caption overlay: a PNG drawn in Display P3, read as
+// straight-alpha RGBA at its own size, with no colour conversion or resampling
+// (the frame composites it exactly as the app drew it).
+[[nodiscard]] FrameOverlay decode_frame_overlay(const std::filesystem::path& path);
 
 // Decode a Bayer RAW without demosaicing. This is the RAW-domain entry point
 // for denoising, HDR fusion, low-light enhancement, and neural-network input.

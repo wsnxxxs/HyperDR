@@ -70,6 +70,14 @@ void parse_settings(int argc, char** argv, int first, ConvertOptions& options,
       options.external_gain_path = path_from_utf8(next_value(i, argc, argv, arg));
     } else if (arg == "--external-gain-report") {
       options.external_gain_report = path_from_utf8(next_value(i, argc, argv, arg));
+    } else if (arg == "--frame") {
+      // Read now so a malformed spec fails before any photo is decoded. A
+      // relative overlay path is relative to the spec file, not the shell.
+      const auto path = path_from_utf8(next_value(i, argc, argv, arg));
+      const auto bytes = read_binary_file(path);
+      options.frame = parse_frame_spec(
+          json::parse(std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size())),
+          path.parent_path());
     } else if (arg == "--allow-legacy-external-gain") {
       options.allow_legacy_external_gain = true;
     } else if (arg == "--ai-model") {

@@ -6,10 +6,12 @@
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/gainmap/native_model.hpp"
 #include "hyperdr/gainmap/types.hpp"
+#include "hyperdr/image/frame.hpp"
 #include "hyperdr/look/color_lut.hpp"
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -48,6 +50,11 @@ struct ConvertOptions {
   RawDecodeOptions raw;
   GainMapOptions gain;
   std::filesystem::path report_path;
+  // Optional presentation frame (hyperdr.frame/v1) around every export. It is
+  // placed after grading and before packaging, with the same pixels in both
+  // renditions, so it carries no gain. Interactive previews ignore it: the app
+  // draws the frame around its live canvas from the same layout.
+  std::optional<FrameSpec> frame;
   // Optional raw gain-grid output from an external model. The JSON sidecar is
   // required because the raw file carries neither dimensions nor scale.
   std::filesystem::path external_gain_path;
@@ -198,6 +205,9 @@ struct FileResult {
   // API3 measures gain against the final JPEG; only header statistics are read
   // back. The renderer's pre-compression gain distribution does not describe it.
   bool codec_gain{false};
+  // Set when a frame was placed: `width`/`height` above are then the canvas,
+  // and this says where the photograph sits on it.
+  std::optional<FrameLayout> frame;
   double decode_ms{};
   double process_ms{};
   double encode_ms{};

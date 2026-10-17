@@ -111,6 +111,13 @@ std::string settings_signature(const ConvertOptions& options) {
   // paths and contents still belong in the resume fingerprint: changing a
   // dark frame or lens grid must never be hidden by --skip-existing.
   append_raw_file("color_lut", options.color_lut.path);
+  // A frame changes every output byte. Its canonical text covers the layout
+  // and colours, and the overlay is hashed like any other external input.
+  if (options.frame) {
+    out += "|frame=";
+    out += frame_spec_json(*options.frame);
+    append_raw_file("frame_overlay", options.frame->overlay);
+  }
   for (const auto& resource : raw_decode_resources(options.raw)) {
     append_raw_file(resource.key, resource.path);
   }

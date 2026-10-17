@@ -1249,4 +1249,49 @@ PreviewJpeg encode_preview_jpeg(const std::filesystem::path& path,
   return {std::move(result), scale, exposure_ev};
 }
 
+FrameOverlay decode_frame_overlay(const std::filesystem::path& path) {
+  const auto bytes = read_binary_file(path);
+  PngReader reader(bytes);
+  auto* png = reader.png;
+  auto* info = reader.info;
+  png_uint_32 width = 0, height = 0;
+  int bit_depth = 0, color_type = 0, interlace = 0;
+  checked_png_read(png, [&] {
+    png_read_info(png, info);
+    png_get_IHDR(png, info, &width, &height, &bit_depth, &color_type, &interlace, nullptr, nullptr);
+    const bool transparency = png_get_valid(png, info, PNG_INFO_tRNS) != 0;
+    if (color_type == PNG_COLOR_TYPE_PALETTE) png_set_palette_to_rgb(png);
+    if (color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8) png_set_expand_gray_1_2_4_to_8(png);
+    if (transparency) png_set_tRNS_to_alpha(png);
+    if (!(color_type & PNG_COLOR_MASK_COLOR)) png_set_gray_to_rgb(png);
+    // An opaque overlay is allowed; it simply covers the band.
+    if (!(color_type & PNG_COLOR_MASK_ALPHA) && !transparency)
+      png_set_add_alpha(png, bit_depth == 16 ? 0xFFFF : 0xFF, PNG_FILLER_AFTER);
+    if (bit_depth == 16) png_set_swap(png);
+    png_set_interlace_handling(png);
+    png_read_update_info(png, info);
+  });
+  const int bytes_per_sample = bit_depth == 16 ? 2 : 1;
+  const std::size_t row_bytes = png_get_rowbytes(png, info);
+  if (png_get_channels(png, info) != 4 ||
+      row_bytes != static_cast<std::size_t>(width) * 4 * bytes_per_sample)
+    throw std::runtime_error("unsupported frame overlay PNG layout");
+  check_raster_budget(width, height);
+  std::vector<unsigned char> raster(row_bytes * height);
+  std::vector<png_bytep> rows(height);
+  for (png_uint_32 y = 0; y < height; ++y) rows[y] = raster.data() + y * row_bytes;
+  checked_png_read(png, [&] { png_read_image(png, rows.data()); });
+
+  FrameOverlay overlay{width, height, {}};
+  overlay.rgba.resize(static_cast<std::size_t>(width) * height * 4);
+  const float scale = bytes_per_sample == 2 ? 1.0F / 65535.0F : 1.0F / 255.0F;
+  for (std::size_t i = 0; i < overlay.rgba.size(); ++i) {
+    const unsigned sample = bytes_per_sample == 2
+        ? static_cast<unsigned>(raster[i * 2]) | (static_cast<unsigned>(raster[i * 2 + 1]) << 8)
+        : raster[i];
+    overlay.rgba[i] = static_cast<float>(sample) * scale;
+  }
+  return overlay;
+}
+
 }  // namespace hyperdr

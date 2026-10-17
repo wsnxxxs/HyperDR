@@ -49,6 +49,8 @@ void usage() {
       << "\nConvert plumbing:\n"
          "  --output <directory>               Where converted images are written\n"
          "  --report <file.json>               Write a structured run report\n"
+         "  --frame <frame.json>               Place an SDR presentation frame around\n"
+         "                                     each export (hyperdr.frame/v1)\n"
          "  --external-gain <file.f32>         Use an external canonical gain grid\n"
          "  --external-gain-report <file.json> Required sidecar for that gain grid\n"
          "  --ai-model [<id>]                   Run an embedded native gain model\n"

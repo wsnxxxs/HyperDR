@@ -1,5 +1,6 @@
 hyperdr_add_test(cli_test LINK HyperDR::app)
 hyperdr_add_test(preview_test LINK HyperDR::app)
+hyperdr_add_test(frame_request_test LINK HyperDR::app)
 hyperdr_add_test(analysis_cache_test LINK HyperDR::app)
 hyperdr_add_test(decode_cache_test LINK HyperDR::app)
 hyperdr_add_test(discovery_test LINK HyperDR::app)

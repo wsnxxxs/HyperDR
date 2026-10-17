@@ -1,40 +1,51 @@
 import SwiftUI
 import HyperDRDesign
 
-/// The trailing inspector: the histogram on top, then the processing mode and
-/// the adjustment groups. Without a photograph it shows the three steps instead.
+/// The trailing inspector: the histogram on top, then the photograph's facts,
+/// the processing mode and the adjustment groups. Without a photograph it
+/// shows the three steps instead.
+///
+/// M1 renders the photograph without adjustments, so the controls show their
+/// defaults and are disabled as a whole (M2 binds them), and the histogram
+/// area draws no curve rather than one that is not this photograph's.
 struct InspectorView: View {
-    var workspace: Workspace
+    let model: EditorModel
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                switch workspace {
-                case .editing:
+                if model.workspace == .editing, let document = model.document {
                     ScopeSection()
                     Divider()
-                    WorkflowSection()
+                    PhotoInfoSection(document: document)
                     Divider()
-                    AdjustmentSection()
-                    ParameterGroup("adjust.region", systemImage: "square.dashed.inset.filled") {
-                        ParameterSlider("ctrl.expansionStart.label", value: 0.25, in: 0.18...0.75, format: .percent)
-                        ParameterSlider("ctrl.areaCoverage.label", value: 1, in: 0...1, format: .percent)
-                        Text("inspector.regionNote")
-                            .font(Font.hdr.caption)
-                            .foregroundStyle(Color.hdr.inkMuted)
-                    }
-                    ParameterGroup("lut.title", systemImage: "swatchpalette") {
-                        LookPicker()
-                        ParameterSlider("lut.strength", value: 1, in: 0...1, format: .percent)
-                    }
+                    adjustments
+                        .disabled(true)
                     Divider()
-                case .empty:
+                } else {
                     Welcome()
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(Color.hdr.surfacePanel)
+    }
+
+    @ViewBuilder private var adjustments: some View {
+        WorkflowSection()
+        Divider()
+        AdjustmentSection()
+        ParameterGroup("adjust.region", systemImage: "square.dashed.inset.filled") {
+            ParameterSlider("ctrl.expansionStart.label", value: 0.25, in: 0.18...0.75, format: .percent)
+            ParameterSlider("ctrl.areaCoverage.label", value: 1, in: 0...1, format: .percent)
+            Text("inspector.regionNote")
+                .font(Font.hdr.caption)
+                .foregroundStyle(Color.hdr.inkMuted)
+        }
+        ParameterGroup("lut.title", systemImage: "swatchpalette") {
+            LookPicker()
+            ParameterSlider("lut.strength", value: 1, in: 0...1, format: .percent)
+        }
     }
 }
 
@@ -56,13 +67,10 @@ private struct ScopeSection: View {
                 .labelsHidden()
                 .controlSize(.small)
                 .fixedSize()
+                .disabled(true)
             }
-            HistogramPlaceholder()
+            HistogramFrame()
                 .frame(height: 132)
-            HStack(spacing: Space.s4) {
-                Legend(color: Color.hdr.histogramLuma, title: "scope.source")
-                Legend(color: Color.hdr.histogramOutput, title: "scope.output")
-            }
             VStack(spacing: Space.s1) {
                 Capsule().fill(Color.hdr.histogramRamp).frame(height: 4)
                 HStack {
@@ -82,9 +90,9 @@ private struct ScopeSection: View {
     }
 }
 
-/// A fixed curve standing in for the measured distribution: the source as a
-/// filled area, the edit as a line that reaches into the HDR range.
-private struct HistogramPlaceholder: View {
+/// The plot area with its grid and no data: the histogram is measured from
+/// the preview frames in M2 (parity S-01).
+private struct HistogramFrame: View {
     var body: some View {
         Canvas { context, size in
             for step in 1..<4 {
@@ -92,43 +100,81 @@ private struct HistogramPlaceholder: View {
                 context.stroke(Path { $0.move(to: .init(x: x, y: 0)); $0.addLine(to: .init(x: x, y: size.height)) },
                                with: .color(Color.hdr.histogramGrid))
             }
-            context.fill(curve(in: size, peak: 0.32, spread: 0.16, closed: true), with: .color(Color.hdr.histogramLuma))
-            context.stroke(curve(in: size, peak: 0.46, spread: 0.22, closed: false), with: .color(Color.hdr.histogramOutput), lineWidth: 1.5)
+        }
+        .overlay {
+            Text("mac.scope.unavailable")
+                .font(Font.hdr.caption)
+                .foregroundStyle(Color.hdr.inkMuted)
         }
         .background(Color.hdr.histogramBackdrop, in: .rect(cornerRadius: Radius.sm))
         .clipShape(.rect(cornerRadius: Radius.sm))
-        .accessibilityLabel("scope.graph")
-    }
-
-    private func curve(in size: CGSize, peak: CGFloat, spread: CGFloat, closed: Bool) -> Path {
-        Path { path in
-            let samples = 64
-            for index in 0...samples {
-                let t = CGFloat(index) / CGFloat(samples)
-                let bump = exp(-pow((t - peak) / spread, 2)) + 0.35 * exp(-pow((t - 0.8) / 0.08, 2))
-                let point = CGPoint(x: t * size.width, y: size.height * (1 - 0.82 * bump))
-                index == 0 ? path.move(to: point) : path.addLine(to: point)
-            }
-            if closed {
-                path.addLine(to: CGPoint(x: size.width, y: size.height))
-                path.addLine(to: CGPoint(x: 0, y: size.height))
-                path.closeSubpath()
-            }
-        }
     }
 }
 
-private struct Legend: View {
-    var color: Color
-    var title: LocalizedStringKey
+// MARK: - Photo
+
+/// What M1 knows about the open photograph: the file's own facts, then what
+/// the decoder reported with the reference frame. A fact not known yet reads
+/// as a dash.
+private struct PhotoInfoSection: View {
+    let document: DocumentState
 
     var body: some View {
-        HStack(spacing: Space.s1 + 2) {
-            RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 10, height: 10)
-            Text(title)
+        VStack(alignment: .leading, spacing: Space.s3) {
+            SectionHeading("mac.info.title")
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Space.s4, verticalSpacing: Space.s2) {
+                row("mac.info.dimensions", dimensions.map { Text(verbatim: $0) })
+                row("mac.info.format", Text(verbatim: document.formatLabel))
+                row("mac.info.size", fileSize.map { Text(verbatim: $0) })
+                row("mac.info.type", document.source.map { Text($0.domain.label) })
+                row("mac.info.color", document.source.map { Text(verbatim: $0.colorName) })
+            }
+            if let reasons = document.source?.degradationReasons, !reasons.isEmpty {
+                Label {
+                    Text("mac.info.degraded \(reasons.joined(separator: ", "))")
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                }
+                .font(Font.hdr.caption)
+                .foregroundStyle(Color.hdr.warn)
+            }
         }
-        .font(Font.hdr.caption)
-        .foregroundStyle(Color.hdr.inkMuted)
+        .padding(20)
+    }
+
+    private func row(_ title: LocalizedStringKey, _ value: Text?) -> some View {
+        GridRow {
+            Text(title)
+                .font(Font.hdr.caption)
+                .foregroundStyle(Color.hdr.inkMuted)
+            (value ?? Text(verbatim: "—"))
+                .font(Font.hdr.readout)
+                .foregroundStyle(Color.hdr.ink)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+        }
+    }
+
+    private var dimensions: String? {
+        document.pixelSize.map { "\($0.width) × \($0.height)" }
+    }
+
+    private var fileSize: String? {
+        document.byteCount > 0 ? document.byteCount.formatted(.byteCount(style: .file)) : nil
+    }
+}
+
+extension InputDomain {
+    /// The photograph's kind as the status bar and inspector name it.
+    var label: LocalizedStringKey {
+        switch self {
+        case .sceneReferred: "stage.input.scene"
+        case .sdr: "stage.input.sdr"
+        case .hdr: "stage.input.hdr"
+        case .dual: "stage.input.dual"
+        case .unknown: "stage.input.unknown"
+        }
     }
 }
 
@@ -162,8 +208,9 @@ private struct AdjustmentSection: View {
             HStack {
                 SectionHeading("inspector.adjustments")
                 Spacer()
+                // Borderless rather than link: a disabled link keeps its color.
                 Button("adjust.reset") {}
-                    .buttonStyle(.link)
+                    .buttonStyle(.borderless)
                     .font(Font.hdr.caption)
                     .help("adjust.resetTitle")
             }
@@ -258,10 +305,10 @@ private struct LookPicker: View {
     @State private var look = "none"
     @State private var enabled = true
 
+    // The library's looks are listed once M2 loads it.
     var body: some View {
         Picker("lut.select", selection: $look) {
             Text("lut.none").tag("none")
-            Text(verbatim: "Kodak 2383").tag("kodak")
         }
         .labelsHidden()
         Toggle("lut.enabled", isOn: $enabled)

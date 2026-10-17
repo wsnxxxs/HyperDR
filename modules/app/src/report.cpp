@@ -176,6 +176,15 @@ std::string run_report_json(const std::vector<FileResult>& results,
       writer.element(reason);
     }
     writer.end_array();
+    if (result.frame) {
+      const auto& frame = *result.frame;
+      writer.begin_object("frame")
+          .member("width", frame.width).member("height", frame.height)
+          .begin_object("photo")
+          .member("x", frame.photo.x).member("y", frame.photo.y)
+          .member("width", frame.photo.width).member("height", frame.photo.height)
+          .end_object().end_object();
+    }
     writer.member("width", result.width)
         .member("height", result.height)
         .member("exposure_ev", result.exposure_ev)

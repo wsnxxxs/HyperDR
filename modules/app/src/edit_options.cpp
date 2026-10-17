@@ -166,6 +166,10 @@ std::vector<std::string> command_line(const Value& normalized) {
   const auto cmd = [&](std::string_view key) -> const Value& { return required(command, key); };
   const bool model = cmd("model_mode").boolean();
   const bool external = truthy(get(command, "external_gain", Value{}));
+  // A frame is an inline document here and a file on the command line; there
+  // is no faithful argv for it, and dropping it would describe another export.
+  if (const auto* frame = command.find("frame"); frame && !frame->is_null())
+    throw std::invalid_argument("a framed request has no command-line form; write the frame to a file for --frame");
   std::vector<std::string> args{"HyperDR", "convert", cmd("input").string(), "--output", cmd("output").string(),
       "--encoding", value("encoding").string()};
   const auto flag = [&](const char* name, std::string val) { args.emplace_back(name); args.push_back(std::move(val)); };
@@ -253,6 +257,9 @@ ConvertOptions request_options(const Value& request) {
       else if (key == "_raw_look_path") options.raw.look_profile = path_from_utf8(value.string());
       else if (key == "_lens_profile_path") options.raw.lens_profile = path_from_utf8(value.string());
       else if (key == "_lut_path") options.color_lut.path = path_from_utf8(value.string());
+      else if (key == "frame") {
+        if (!value.is_null()) options.frame = parse_frame_spec(value);
+      }
       else if (key == "--ai-brightness") options.ai_post.brightness_ev = request_real(value);
       else if (key == "--ai-contrast") options.ai_post.contrast = request_real(value);
       else if (key == "--ai-shadows") options.ai_post.shadows_ev = request_real(value);

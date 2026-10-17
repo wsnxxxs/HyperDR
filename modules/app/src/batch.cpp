@@ -267,6 +267,38 @@ Staged decode_stage(const std::filesystem::path& path,
   return staged;
 }
 
+// Places the presentation frame around both renditions. Every frame pixel is
+// identical in SDR and HDR, so whichever writer packages the pair stores zero
+// gain there and the frame shows at its SDR value on every HDR display.
+FrameLayout frame_photo(PhotoRenditions& photo, const FrameSpec& spec) {
+  const auto layout = layout_frame(spec, photo.sdr.width, photo.sdr.height);
+  std::optional<FrameOverlay> overlay;
+  if (!spec.overlay.empty()) overlay = decode_frame_overlay(spec.overlay);
+  const FrameOverlay* ink = overlay ? &*overlay : nullptr;
+  photo.sdr = frame_image(photo.sdr, spec, layout, ink);
+  if (!photo.hdr.pixels.empty()) photo.hdr = frame_image(photo.hdr, spec, layout, ink);
+  // A frame pixel is the same in both renditions, which is exactly what the
+  // below-knee check asks of a pixel; the report then measures the frame too.
+  photo.below_knee = frame_mask(photo.below_knee, layout, 1);
+  return layout;
+}
+
+// A model or external gain grid describes the photograph alone and cannot be
+// padded: a zero-gain code may not exist in its range, and its offsets make
+// "no gain" depend on the pixel. Its reconstructed pair is an authored dual
+// rendition, so it is packaged as one, keeping signed gain and those offsets.
+void adopt_as_authored(PhotoRenditions& photo, const GainMapMetadata& metadata) {
+  const auto channels = gain_map_channel_count(metadata);
+  photo.dual_rendition = true;
+  photo.authored_gain_channels = static_cast<std::uint32_t>(channels);
+  photo.authored_gain_map.channels = static_cast<std::uint32_t>(channels);
+  for (unsigned c = 0; c < 3; ++c) {
+    const auto channel = gain_map_channel(metadata, channels == 1 ? 0 : c);
+    photo.authored_gain_map.base_offset[c] = rational_value(channel.base_offset);
+    photo.authored_gain_map.alternate_offset[c] = rational_value(channel.alternate_offset);
+  }
+}
+
 std::vector<std::uint8_t> encode_for(const PhotoRenditions& photo, const GainMapResult& images,
                                      const PhotoMetadata& metadata,
                                      const ConvertOptions& options) {
@@ -366,13 +398,18 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     } else {
       photo = render_graded_gain_map(gain, options.color_lut, target == RenderTarget::Hdr);
     }
+    const bool predicted_gain = !options.ai_model_path.empty() || external.has_value();
+    if (options.frame) {
+      if (predicted_gain && target == RenderTarget::Hdr) adopt_as_authored(photo, gain.metadata);
+      result.frame = frame_photo(photo, *options.frame);
+    }
     if (is_sdr_encoding(options.encoding) && resolved_sdr_gamut(options) == ColorGamut::kSrgb)
       fit_sdr_to_srgb(photo.sdr);
     const bool codec_gain = options.encoding == OutputEncoding::UltraHdr &&
-        options.ai_model_path.empty() && !external && !photo.hdr_is_source;
+        !predicted_gain && !photo.hdr_is_source;
     const bool explicit_gain = is_gain_map_encoding(options.encoding) && !codec_gain;
     if (explicit_gain) {
-      if (options.ai_model_path.empty() && !external) {
+      if (!predicted_gain || result.frame) {
         gain = gain_map_from_renditions(std::move(photo),
             options.encoding == OutputEncoding::UltraHdr ? GainMapWriterProfile::iso_generic
                                                         : GainMapWriterProfile::apple_strict);

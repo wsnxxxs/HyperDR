@@ -58,9 +58,25 @@ public struct ReportFile: Codable, Sendable {
     public let success, skipped: Bool
     public let message: String
     public let width, height: Int?
+
+    public init(input: String, output: String, success: Bool, skipped: Bool,
+                message: String, width: Int?, height: Int?) {
+        self.input = input
+        self.output = output
+        self.success = success
+        self.skipped = skipped
+        self.message = message
+        self.width = width
+        self.height = height
+    }
 }
 public struct ConvertReport: Sendable {
     public let json: Data
     public let files: [ReportFile]
+
+    public init(json: Data, files: [ReportFile]) {
+        self.json = json
+        self.files = files
+    }
 }
 struct ReportDocument: Decodable { let files: [ReportFile] }

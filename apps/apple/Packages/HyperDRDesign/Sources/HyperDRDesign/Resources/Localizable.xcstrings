@@ -1,0 +1,48 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "design.curve.sdrWhite" : {
+      "comment" : "Right end of the curve editor's SDR axis: SDR white.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "SDR white" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "SDR 白" } }
+      }
+    },
+    "design.curve.stops %@" : {
+      "comment" : "Top of the curve editor's gain axis, e.g. \"3 stops\".",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ stops" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 档" } }
+      }
+    },
+    "design.group.collapsed" : {
+      "comment" : "VoiceOver value of a collapsed inspector group.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Collapsed" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已折叠" } }
+      }
+    },
+    "design.group.expanded" : {
+      "comment" : "VoiceOver value of an expanded inspector group.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Expanded" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已展开" } }
+      }
+    },
+    "design.slider.reset" : {
+      "comment" : "Context menu item and VoiceOver action: return a slider to its default.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reset to Default" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "恢复默认值" } }
+      }
+    },
+    "design.slider.valueHint" : {
+      "comment" : "VoiceOver hint of a slider's value field.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Type an exact value. Up and Down Arrow change it by one step." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "输入精确数值；上下方向键按步长调整。" } }
+      }
+    }
+  },
+  "version" : "1.0"
+}

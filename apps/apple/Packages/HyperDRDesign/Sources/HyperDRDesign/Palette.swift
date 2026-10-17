@@ -181,10 +181,11 @@ public struct Palette: Sendable {
     // MARK: Control
 
     /// Slider track up to the value. Neutral: the value is read from the number field, not the colour.
+    /// Darker under Increase Contrast (native addition; the web had no variant).
     /// CSS `--control-fill`.
     public var controlFill: Color { Color("controlFill", bundle: .module) }
 
-    /// Slider track after the value.
+    /// Slider track after the value. Stronger under Increase Contrast (native addition).
     /// CSS `--control-track`.
     public var controlTrack: Color { Color("controlTrack", bundle: .module) }
 
@@ -192,7 +193,7 @@ public struct Palette: Sendable {
     /// CSS `--control-thumb`.
     public var controlThumb: Color { Color("controlThumb", bundle: .module) }
 
-    /// Slider thumb outline.
+    /// Slider thumb outline. Stronger under Increase Contrast (native addition).
     /// CSS `--control-ring`.
     public var controlRing: Color { Color("controlRing", bundle: .module) }
 

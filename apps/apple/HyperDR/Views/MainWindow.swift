@@ -74,7 +74,10 @@ private struct EditorWindow: View {
             .focusedSceneValue(model)
             .focusedSceneValue(window)
             #if DEBUG
-            .task { StressWindow.runIfRequested() }
+            .task {
+                StressWindow.runIfRequested()
+                ControlsGalleryWindow.showIfRequested()
+            }
             #endif
     }
 

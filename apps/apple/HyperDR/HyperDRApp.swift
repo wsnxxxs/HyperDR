@@ -13,7 +13,7 @@ import SwiftUI
         .windowResizability(.contentMinSize)
         .commands { EditorCommands() }
 
-        Window("引擎诊断", id: "engine-diagnostics") {
+        Window("mac.diagnostics.title", id: "engine-diagnostics") {
             AppContentView()
         }
         .defaultSize(width: 1080, height: 650)

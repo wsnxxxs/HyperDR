@@ -16,16 +16,16 @@ struct InspectorView: View {
                     WorkflowSection()
                     Divider()
                     AdjustmentSection()
-                    ParameterGroup("作用区域", systemImage: "square.dashed.inset.filled") {
-                        ParameterSlider("扩展起点", value: 0.25, in: 0.18...0.75, format: .percent)
-                        ParameterSlider("大面积亮部权重", value: 1, in: 0...1, format: .percent)
-                        Text("亮度较高的区域优先获得扩展。")
+                    ParameterGroup("adjust.region", systemImage: "square.dashed.inset.filled") {
+                        ParameterSlider("ctrl.expansionStart.label", value: 0.25, in: 0.18...0.75, format: .percent)
+                        ParameterSlider("ctrl.areaCoverage.label", value: 1, in: 0...1, format: .percent)
+                        Text("inspector.regionNote")
                             .font(Font.hdr.caption)
                             .foregroundStyle(Color.hdr.inkMuted)
                     }
-                    ParameterGroup("颜色 LUT", systemImage: "swatchpalette") {
+                    ParameterGroup("lut.title", systemImage: "swatchpalette") {
                         LookPicker()
-                        ParameterSlider("LUT 强度", value: 1, in: 0...1, format: .percent)
+                        ParameterSlider("lut.strength", value: 1, in: 0...1, format: .percent)
                     }
                     Divider()
                 case .empty:
@@ -46,11 +46,11 @@ private struct ScopeSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s3) {
             HStack {
-                SectionHeading("直方图")
+                SectionHeading("editor.histogram")
                 Spacer()
-                Picker("直方图模式", selection: $mode) {
-                    Text("亮度").tag(0)
-                    Text("RGB").tag(1)
+                Picker("scope.histMode", selection: $mode) {
+                    Text("scope.luma").tag(0)
+                    Text("scope.rgb").tag(1)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -60,19 +60,19 @@ private struct ScopeSection: View {
             HistogramPlaceholder()
                 .frame(height: 132)
             HStack(spacing: Space.s4) {
-                Legend(color: Color.hdr.histogramLuma, title: "原图")
-                Legend(color: Color.hdr.histogramOutput, title: "调整后")
+                Legend(color: Color.hdr.histogramLuma, title: "scope.source")
+                Legend(color: Color.hdr.histogramOutput, title: "scope.output")
             }
             VStack(spacing: Space.s1) {
                 Capsule().fill(Color.hdr.histogramRamp).frame(height: 4)
                 HStack {
-                    Text("0")
+                    Text(verbatim: "0")
                     Spacer()
-                    Text("SDR 100%")
+                    Text(verbatim: "SDR 100%")
                     Spacer()
-                    Text("+2")
+                    Text(verbatim: "+2")
                     Spacer()
-                    Text("+4 EV")
+                    Text(verbatim: "+4 EV")
                 }
                 .font(Font.hdr.mono(10))
                 .foregroundStyle(Color.hdr.inkMuted)
@@ -97,7 +97,7 @@ private struct HistogramPlaceholder: View {
         }
         .background(Color.hdr.histogramBackdrop, in: .rect(cornerRadius: Radius.sm))
         .clipShape(.rect(cornerRadius: Radius.sm))
-        .accessibilityLabel("原图分布（填充）与调整后分布（实线）")
+        .accessibilityLabel("scope.graph")
     }
 
     private func curve(in size: CGSize, peak: CGFloat, spread: CGFloat, closed: Bool) -> Path {
@@ -139,14 +139,14 @@ private struct WorkflowSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s3) {
-            SectionHeading("处理模式")
-            Picker("处理模式", selection: $hdr) {
-                Text("仅调色").tag(false)
-                Text("HDR 增强").tag(true)
+            SectionHeading("workflow.title")
+            Picker("workflow.title", selection: $hdr) {
+                Text("workflow.color").tag(false)
+                Text("workflow.hdr").tag(true)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            Text(hdr ? "增强高光层次，也可以搭配 LUT 调色。" : "套用 LUT、调整光线，保存普通 JPEG。")
+            Text(hdr ? "workflow.hdrHint" : "workflow.colorHint")
                 .font(Font.hdr.caption)
                 .foregroundStyle(Color.hdr.inkMuted)
         }
@@ -160,25 +160,25 @@ private struct AdjustmentSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s4) {
             HStack {
-                SectionHeading("画面调整")
+                SectionHeading("inspector.adjustments")
                 Spacer()
-                Button("重置") {}
+                Button("adjust.reset") {}
                     .buttonStyle(.link)
                     .font(Font.hdr.caption)
-                    .help("重置画面调整参数")
+                    .help("adjust.resetTitle")
             }
-            Picker("预览处理方式", selection: $ai) {
-                Text("手动调整").tag(false)
-                Text("AI 优化").tag(true)
+            Picker("adjust.mode", selection: $ai) {
+                Text("inspector.manual").tag(false)
+                Text("adjust.ai").tag(true)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            Text("先调整整体亮度，再按需增强高光。")
+            Text("inspector.manualNote")
                 .font(Font.hdr.caption)
                 .foregroundStyle(Color.hdr.inkMuted)
-            ParameterSlider("整体亮度", value: 0, in: -2...2, format: .ev)
-            ParameterSlider("HDR 扩展强度", value: 0.4, in: 0...1, format: .percent)
-            ParameterSlider("HDR 扩展范围", value: 2.5, in: 0...3, format: .stops)
+            ParameterSlider("ctrl.brightness.label", value: 0, in: -2...2, format: .ev)
+            ParameterSlider("ctrl.hdrStrength.label", value: 0.4, in: 0...1, format: .percent)
+            ParameterSlider("ctrl.hdrRange.label", value: 2.5, in: 0...3, format: .stops)
         }
         .padding(20)
     }
@@ -249,7 +249,7 @@ private struct ParameterSlider: View {
         switch format {
         case .percent: value.formatted(.percent.precision(.fractionLength(0)))
         case .ev: (value >= 0 ? "+" : "") + value.formatted(.number.precision(.fractionLength(2))) + " EV"
-        case .stops: value.formatted(.number.precision(.fractionLength(1))) + " EV"
+        case .stops: String(localized: "unit.stops \(value.formatted(.number.precision(.fractionLength(1))))")
         }
     }
 }
@@ -259,12 +259,12 @@ private struct LookPicker: View {
     @State private var enabled = true
 
     var body: some View {
-        Picker("选择 LUT 风格", selection: $look) {
-            Text("不使用 LUT").tag("none")
-            Text("Kodak 2383").tag("kodak")
+        Picker("lut.select", selection: $look) {
+            Text("lut.none").tag("none")
+            Text(verbatim: "Kodak 2383").tag("kodak")
         }
         .labelsHidden()
-        Toggle("启用 LUT", isOn: $enabled)
+        Toggle("lut.enabled", isOn: $enabled)
             .font(Font.hdr.control)
     }
 }
@@ -274,18 +274,18 @@ private struct LookPicker: View {
 private struct Welcome: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("从一张照片开始")
+            Text("welcome.title")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(Color.hdr.inkStrong)
-            Text("打开照片后，在这里调整光线与高光层次。")
+            Text("mac.welcome.description")
                 .font(Font.hdr.control)
                 .foregroundStyle(Color.hdr.inkMuted)
                 .lineSpacing(5)
                 .padding(.top, 10)
             VStack(alignment: .leading, spacing: 26) {
-                Step(number: "01", title: "打开照片", note: "拖入文件，或从本机选择。")
-                Step(number: "02", title: "调整光线", note: "手动微调，或使用 AI 优化。")
-                Step(number: "03", title: "保存 HDR 照片", note: "导出时选择格式与色域。")
+                Step(number: "01", title: "welcome.import", note: "welcome.importNote")
+                Step(number: "02", title: "welcome.adjust", note: "welcome.adjustNote")
+                Step(number: "03", title: "welcome.export", note: "welcome.exportNote")
             }
             .padding(.top, Space.s6)
         }

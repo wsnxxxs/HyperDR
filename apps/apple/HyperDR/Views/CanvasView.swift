@@ -46,7 +46,7 @@ private struct PhotoPlaceholder: View {
                 }
             }
             .overlay {
-                Label("画布占位", systemImage: "photo")
+                Label("mac.canvas.placeholder", systemImage: "photo")
                     .font(Font.hdr.control)
                     .hdrOverlayChip()
             }
@@ -57,7 +57,7 @@ private struct PhotoPlaceholder: View {
             }
             .aspectRatio(3 / 2, contentMode: .fit)
             .elevation(.lg)
-            .accessibilityLabel("图片预览")
+            .accessibilityLabel("stage.label")
     }
 }
 
@@ -69,14 +69,14 @@ private struct DropTarget: View {
                 .font(.system(size: 40, weight: .light))
                 .foregroundStyle(Color.hdr.inkMuted)
             VStack(spacing: Space.s2) {
-                Text("打开照片开始编辑")
+                Text("stage.empty")
                     .font(Font.hdr.title)
                     .foregroundStyle(Color.hdr.inkStrong)
-                Text("支持 RAW · HEIC · JPG · PNG · AVIF")
+                Text("stage.support")
                     .font(Font.hdr.caption)
                     .foregroundStyle(Color.hdr.inkMuted)
             }
-            Button("选择照片") {}
+            Button("stage.select") {}
                 .buttonStyle(.hdrPrimary)
                 .padding(.top, Space.s2)
         }

@@ -10,14 +10,6 @@ enum Workspace: Equatable {
 /// How the canvas presents the photograph.
 enum ViewMode: Hashable, CaseIterable {
     case original, edited, compare
-
-    var title: LocalizedStringKey {
-        switch self {
-        case .original: "原图"
-        case .edited: "调整后"
-        case .compare: "分屏对比"
-        }
-    }
 }
 
 struct UserFacingError: Error, Equatable, Identifiable, Sendable {

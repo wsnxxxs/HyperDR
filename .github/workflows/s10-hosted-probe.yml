@@ -1,0 +1,51 @@
+name: S10 hosted macOS probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Metal and VideoToolbox probe
+    runs-on: macos-26
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record hosted environment
+        run: |
+          set -euo pipefail
+          mkdir -p build-apple/S10
+          {
+            sw_vers
+            echo
+            xcodebuild -version
+            echo
+            xcrun swift --version
+            echo
+            xcode-select -p
+            echo
+            shopt -s nullglob
+            for app in /Applications/Xcode*.app; do basename "$app"; done
+            echo
+            system_profiler SPHardwareDataType SPDisplaysDataType
+          } | tee build-apple/S10/environment.txt
+      - name: Probe Metal and one-frame HEVC encoding
+        run: |
+          set -euo pipefail
+          xcrun swiftc scripts/s10_probe.swift -o build-apple/S10/s10_probe
+          build-apple/S10/s10_probe build-apple/S10 | tee build-apple/S10/probe.txt
+      - name: Upload S10 probe results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: s10-hosted-probe
+          path: build-apple/S10/
+          if-no-files-found: warn
+          retention-days: 14

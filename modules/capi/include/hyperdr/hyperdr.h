@@ -43,6 +43,12 @@ HYPERDR_API int hyperdr_schema_json(char** out, hyperdr_error** err);
  */
 HYPERDR_API int hyperdr_curve_json(const char* settings_json, unsigned samples,
                                  char** out, hyperdr_error** err);
+/* Pixel layout of a presentation frame (hyperdr.frame/v1 JSON) around a photo
+ * of the given oriented size: canvas, photo and caption-band rectangles. Pure
+ * and byte-identical to CLI frame-layout. Apps lay out their preview and size
+ * the caption overlay with it; convert recomputes it from the rendered photo. */
+HYPERDR_API int hyperdr_frame_layout(const char* frame_json, uint32_t photo_width,
+                                     uint32_t photo_height, char** out, hyperdr_error** err);
 HYPERDR_API void hyperdr_string_free(char* string);
 HYPERDR_API void hyperdr_error_free(hyperdr_error* error);
 

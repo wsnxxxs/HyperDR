@@ -58,9 +58,11 @@ public struct ReportFile: Codable, Sendable {
     public let success, skipped: Bool
     public let message: String
     public let width, height: Int?
+    /// Present for a framed export: `width`/`height` are then the canvas.
+    public let frame: ReportFrame?
 
     public init(input: String, output: String, success: Bool, skipped: Bool,
-                message: String, width: Int?, height: Int?) {
+                message: String, width: Int?, height: Int?, frame: ReportFrame? = nil) {
         self.input = input
         self.output = output
         self.success = success
@@ -68,6 +70,7 @@ public struct ReportFile: Codable, Sendable {
         self.message = message
         self.width = width
         self.height = height
+        self.frame = frame
     }
 }
 public struct ConvertReport: Sendable {

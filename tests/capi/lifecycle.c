@@ -27,6 +27,14 @@ int main(void) {
     REQUIRE(output == NULL && error != NULL);
     hyperdr_error_free(error);
   }
+  REQUIRE(hyperdr_frame_layout("{\"margins\":0.05,\"caption\":0.1}", 3000, 2000, &output, &error) == 0);
+  REQUIRE(error == NULL && strstr(output, "\"width\":3200") != NULL);
+  hyperdr_string_free(output);
+  REQUIRE(hyperdr_frame_layout("{\"margin\":0.05}", 3000, 2000, &output, &error) != 0);
+  REQUIRE(output == NULL && error != NULL && strcmp(error->code, "invalid_options") == 0);
+  hyperdr_error_free(error);
+  REQUIRE(hyperdr_frame_layout("{}", 0, 2000, &output, &error) != 0 && output == NULL);
+  hyperdr_error_free(error);
   REQUIRE(hyperdr_schema_json(NULL, &error) != 0 && error != NULL);
   hyperdr_error_free(error);
   REQUIRE(hyperdr_curve_json(NULL, 33, &output, NULL) != 0 && output == NULL);

@@ -43,7 +43,9 @@ void usage() {
          "  HyperDR model-input <image> --output <linear-p3.f32> --report <recipe.json>\n"
          "                            [--long-side <pixels>] [--half-size] [look options]\n"
          "  HyperDR curve [look options] [--samples <N>]   Emit the tone curve as JSON\n"
-         "  HyperDR schema                                 Emit the settings schema as JSON\n\n"
+         "  HyperDR schema                                 Emit the settings schema as JSON\n"
+         "  HyperDR frame-layout <frame.json> --width <px> --height <px>\n"
+         "                            Emit a presentation frame's pixel layout as JSON\n\n"
          "Convert settings:\n"
       << settings_usage_text()
       << "\nConvert plumbing:\n"
@@ -93,6 +95,7 @@ int run_cli(int argc, char** argv) {
   if (command == "convert") return convert_command(argc, argv);
   if (command == "curve") return curve_command(argc, argv);
   if (command == "schema") return schema_command(argc, argv);
+  if (command == "frame-layout") return frame_layout_command(argc, argv);
   if (command == "display-curve") return display_curve_command(argc, argv);
   if (command == "raw-metadata") return raw_metadata_command(argc, argv);
   if (command == "probe") return probe_command(argc, argv);

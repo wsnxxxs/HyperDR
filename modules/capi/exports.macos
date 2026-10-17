@@ -2,6 +2,7 @@ _hyperdr_abi_version
 _hyperdr_version
 _hyperdr_schema_json
 _hyperdr_curve_json
+_hyperdr_frame_layout
 _hyperdr_string_free
 _hyperdr_error_free
 _hyperdr_engine_create

@@ -5,6 +5,14 @@ semantic versioning; dates use ISO 8601.
 
 ## Unreleased
 
+- Exports can carry a presentation frame: a paper mat, an optional print shadow
+  and a caption with the photograph's exposure, camera and lens. The frame is
+  written identically into the SDR and HDR renditions, so it carries no gain:
+  on an HDR display it stays at reference white while the photograph keeps its
+  headroom. The CLI accepts `--frame <frame.json>`; `HyperDR frame-layout`
+  prints the pixel layout, and reports record where the photo sits on the
+  canvas. The macOS app previews five styles in File > Frame….
+
 - RAW photos can use supported static XMP looks from the local Adobe installation
   on top of their matching DCP. The panel discovers compatible looks; the CLI
   accepts `--raw-look`. Adaptive profiles and unsupported adjustment properties

@@ -23,6 +23,8 @@ struct MainWindow: View {
     /// Whether the open panel is showing; the toolbar, the empty canvas and
     /// File ▸ Open… all set it.
     var isImporting = false
+    /// Whether the frame sheet is showing; the toolbar and File ▸ Frame… set it.
+    var isFraming = false
 }
 
 private struct EditorWindow: View {
@@ -65,6 +67,9 @@ private struct EditorWindow: View {
                     // failure is dropped.
                     break
                 }
+            }
+            .sheet(isPresented: Bindable(window).isFraming) {
+                FrameSheet(model: model)
             }
             .alert(alertTitle, isPresented: alertPresented, presenting: model.alert) { _ in
                 // No actions: the system supplies a localized OK.

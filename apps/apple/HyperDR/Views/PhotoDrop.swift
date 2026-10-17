@@ -29,8 +29,9 @@ enum PhotoDropState: Equatable {
     /// Bumped by every enter, exit and drop; a check publishes only if the
     /// session it started in is still current.
     @ObservationIgnored private var session = 0
-    /// Bumped by every drop; a dropped drag opens only if no later drop has
-    /// been made while its URLs were read.
+    /// Bumped by every accepted drop; a dropped drag opens only if no later
+    /// drop has been accepted while its URLs were read. A refused drop leaves
+    /// an earlier accepted one to open.
     @ObservationIgnored private var drop = 0
 
     /// A drag entered the canvas.

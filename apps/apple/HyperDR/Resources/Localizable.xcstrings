@@ -273,6 +273,23 @@
         }
       }
     },
+    "editor.fit" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fit"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "适应窗口"
+          }
+        }
+      }
+    },
     "editor.histogram" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -341,19 +358,53 @@
         }
       }
     },
-    "editor.view" : {
+    "editor.zoomHint" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Preview mode"
+            "value" : "Zoom level; 100% fits the window"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "预览方式"
+            "value" : "缩放比例，以适应窗口为 100%"
+          }
+        }
+      }
+    },
+    "editor.zoomIn" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zoom in"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "放大预览"
+          }
+        }
+      }
+    },
+    "editor.zoomOut" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zoom out"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "缩小预览"
           }
         }
       }
@@ -1123,6 +1174,40 @@
         }
       }
     },
+    "mac.canvas.chooseAnother" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose Another Photo…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择其他照片…"
+          }
+        }
+      }
+    },
+    "mac.canvas.refreshing" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Updating the preview…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在更新预览…"
+          }
+        }
+      }
+    },
     "mac.diagnostics.title" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1136,6 +1221,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "引擎诊断"
+          }
+        }
+      }
+    },
+    "mac.display.edr %@ %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR display · now %1$@, up to %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR 显示 · 当前 %1$@，最高 %2$@"
+          }
+        }
+      }
+    },
+    "mac.display.sdr" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SDR display: previewing in SDR, export unaffected"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SDR 显示器：按 SDR 预览，导出不受影响"
           }
         }
       }
@@ -1922,6 +2041,23 @@
         }
       }
     },
+    "mac.menu.actualSize" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Actual Size"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实际像素"
+          }
+        }
+      }
+    },
     "mac.menu.developer" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1952,6 +2088,57 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开…"
+          }
+        }
+      }
+    },
+    "mac.menu.zoomIn" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zoom In"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "放大"
+          }
+        }
+      }
+    },
+    "mac.menu.zoomOut" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zoom Out"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "缩小"
+          }
+        }
+      }
+    },
+    "mac.menu.zoomToFit" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zoom to Fit"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "适应窗口"
           }
         }
       }
@@ -2024,6 +2211,23 @@
         }
       }
     },
+    "mac.toolbar.shown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shown"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前显示"
+          }
+        }
+      }
+    },
     "mac.welcome.description" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2092,6 +2296,23 @@
         }
       }
     },
+    "stage.badgeOriginal" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Original"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "原图"
+          }
+        }
+      }
+    },
     "stage.empty" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2105,6 +2326,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开照片开始编辑"
+          }
+        }
+      }
+    },
+    "stage.generating" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Building the preview…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在生成预览…"
           }
         }
       }
@@ -2211,6 +2449,23 @@
         }
       }
     },
+    "stage.reading" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reading the photo…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在读取照片…"
+          }
+        }
+      }
+    },
     "stage.select" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2241,6 +2496,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "支持 RAW · HEIC · JPEG · PNG · TIFF · AVIF"
+          }
+        }
+      }
+    },
+    "stage.titleHdr" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Showing true HDR output; the photo type is in the status bar"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在显示真实 HDR 输出；照片类型见底部状态栏"
+          }
+        }
+      }
+    },
+    "stage.titleOriginal" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zero-adjustment reference; RAW retains base exposure, white balance and display mapping"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "零调整基准；RAW 保留基础曝光、白平衡和显示映射"
           }
         }
       }

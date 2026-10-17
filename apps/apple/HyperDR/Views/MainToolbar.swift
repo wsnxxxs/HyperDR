@@ -1,4 +1,5 @@
 import SwiftUI
+import HyperDRDesign
 
 /// The window toolbar. It replaces the web header: the wordmark becomes the
 /// window title, the theme toggle follows the system appearance, preferences
@@ -24,27 +25,23 @@ struct MainToolbar: ToolbarContent {
         }
 
         if model.workspace == .editing {
-            ToolbarItem(placement: .principal) {
-                // Toggle buttons rather than a segmented Picker: in the
-                // toolbar a Picker shows unavailable segments (and a wholly
-                // disabled picker) exactly like available ones.
-                ControlGroup {
-                    ForEach(ViewMode.allCases, id: \.self) { mode in
-                        Toggle(isOn: selects(mode)) { Text(mode.label) }
-                            .disabled(!model.isAvailable(mode))
-                    }
+            // Buttons rather than a segmented Picker or toggles: in the toolbar
+            // a Picker shows unavailable segments (and a wholly disabled
+            // picker) exactly like available ones, and toggle buttons (alone
+            // or in a ControlGroup) have no accessibility name.
+            ToolbarItemGroup(placement: .principal) {
+                ForEach(ViewMode.allCases, id: \.self) { mode in
+                    ViewModeButton(mode: mode, model: model)
                 }
-                .toggleStyle(.button)
-                .fixedSize()
-                .accessibilityLabel("editor.view")
             }
 
             ToolbarItemGroup(placement: .primaryAction) {
-                ControlGroup {
-                    Button("edit.undo", systemImage: "arrow.uturn.backward") {}
-                    Button("edit.redo", systemImage: "arrow.uturn.forward") {}
-                }
-                .disabled(true)
+                Button("edit.undo", systemImage: "arrow.uturn.backward") {}
+                    .help("edit.undo")
+                    .disabled(true)
+                Button("edit.redo", systemImage: "arrow.uturn.forward") {}
+                    .help("edit.redo")
+                    .disabled(true)
                 Button("workspace.versions", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90") {}
                     .help("workspace.versions")
                     .disabled(true)
@@ -75,9 +72,30 @@ struct MainToolbar: ToolbarContent {
         }
     }
 
-    /// On while `mode` is shown; turning it on shows it, turning the shown
-    /// mode off does nothing (one mode is always shown).
-    private func selects(_ mode: ViewMode) -> Binding<Bool> {
-        Binding(get: { model.viewMode == mode }, set: { if $0 { model.viewMode = mode } })
+}
+
+/// One of Original / Edited / Compare: an accent-filled capsule while shown,
+/// dimmed while unavailable, and announced as shown.
+private struct ViewModeButton: View {
+    let mode: ViewMode
+    let model: EditorModel
+
+    var body: some View {
+        let selected = model.viewMode == mode
+        let available = model.isAvailable(mode)
+        Button { model.viewMode = mode } label: {
+            Text(mode.label)
+                .font(.system(size: 13, weight: selected ? .semibold : .regular))
+                .foregroundStyle(selected ? Color.hdr.accentInk : available ? Color.hdr.ink : Color.hdr.inkDisabled)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(selected ? Color.hdr.accentFill : Color.clear, in: .capsule)
+                .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .disabled(!available)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        // The trait does not reach AppKit from a toolbar item; say it.
+        .accessibilityValue(selected ? Text("mac.toolbar.shown") : Text(verbatim: ""))
     }
 }

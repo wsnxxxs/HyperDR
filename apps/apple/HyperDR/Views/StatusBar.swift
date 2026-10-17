@@ -1,21 +1,28 @@
 import SwiftUI
 import HyperDRDesign
 
-/// The strip under the canvas: engine state and, with a photograph, its kind.
-/// Keyboard shortcuts live in the menus, so the web's shortcut button has no
-/// counterpart here. What the display is showing and the zoom controls join
-/// in F3, once they are bound to the display and canvas models.
+/// The strip under the canvas: engine state, the photograph's kind, what the
+/// display is showing, and the zoom. Keyboard shortcuts live in the menus, so
+/// the web's shortcut button has no counterpart here.
 struct StatusBar: View {
     let model: EditorModel
 
     var body: some View {
         HStack(spacing: Space.s4) {
             engine
-            if model.workspace == .editing, let source = model.document?.source {
-                Text(source.domain.label)
-                    .lineLimit(1)
+            if model.workspace == .editing {
+                HStack(spacing: Space.s4) {
+                    if let source = model.document?.source {
+                        Text(source.domain.label)
+                    }
+                    displayText
+                }
+                .lineLimit(1)
+                .truncationMode(.tail)
             }
             Spacer(minLength: Space.s4)
+            ZoomControls(canvas: model.canvas)
+                .layoutPriority(1)
         }
         .font(Font.hdr.caption)
         .foregroundStyle(Color.hdr.inkMuted)
@@ -23,6 +30,21 @@ struct StatusBar: View {
         .frame(height: Layout.statusBarHeight)
         .background(Color.hdr.surfacePanel)
         .overlay(alignment: .top) { Divider() }
+    }
+
+    /// "HDR display · now 2.4×, up to 10.2×", or that an SDR display
+    /// previews in SDR. Follows the display as its headroom changes (the
+    /// model throttles this to about 4 Hz).
+    private var displayText: some View {
+        let display = model.display
+        let text = display.supportsEDR
+            ? Text("mac.display.edr \(Self.headroom(display.currentHeadroom)) \(Self.headroom(display.potentialHeadroom))")
+            : Text("mac.display.sdr")
+        return text.help(Text(verbatim: display.screenName))
+    }
+
+    private static func headroom(_ value: Double) -> String {
+        value.formatted(.number.precision(.fractionLength(1))) + "×"
     }
 
     @ViewBuilder private var engine: some View {
@@ -47,5 +69,37 @@ struct StatusBar: View {
             }
             .help(Text(verbatim: text.body))
         }
+    }
+}
+
+/// Fit, zoom out, the zoom level and zoom in, bound to the canvas. Without a
+/// photo on the canvas there is nothing to zoom and all of it is disabled.
+private struct ZoomControls: View {
+    let canvas: CanvasModel
+
+    var body: some View {
+        let hasPhoto = canvas.imageFrame != nil
+        HStack(spacing: Space.s1) {
+            let canFit = hasPhoto && canvas.zoom != .fit
+            // The bar's muted foreground would otherwise hide whether it is enabled.
+            Button("editor.fit") { canvas.fitToWindow() }
+                .buttonStyle(.link)
+                .foregroundStyle(canFit ? Color.hdr.accent : Color.hdr.inkDisabled)
+                .padding(.trailing, Space.s2)
+                .disabled(!canFit)
+            Button("editor.zoomOut", systemImage: "minus") { canvas.zoomOut() }
+                .labelStyle(.iconOnly)
+                .disabled(!canvas.canZoomOut)
+            Text(verbatim: hasPhoto ? "\(canvas.zoomPercent)%" : "—")
+                .font(Font.hdr.readout)
+                .foregroundStyle(hasPhoto ? Color.hdr.ink : Color.hdr.inkDisabled)
+                .frame(minWidth: 42)
+                .help("editor.zoomHint")
+            Button("editor.zoomIn", systemImage: "plus") { canvas.zoomIn() }
+                .labelStyle(.iconOnly)
+                .disabled(!canvas.canZoomIn)
+        }
+        .buttonStyle(.borderless)
+        .controlSize(.small)
     }
 }

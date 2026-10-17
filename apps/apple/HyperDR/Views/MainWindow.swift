@@ -1,25 +1,6 @@
 import SwiftUI
 import HyperDRDesign
 
-/// Whether a photograph is open. Without one the canvas offers the picker and
-/// the inspector explains the three steps; editing controls stay out of sight.
-enum Workspace {
-    case empty, editing
-}
-
-/// How the canvas presents the photograph.
-enum ViewMode: Hashable, CaseIterable {
-    case original, edited, compare
-
-    var title: LocalizedStringKey {
-        switch self {
-        case .original: "原图"
-        case .edited: "调整后"
-        case .compare: "分屏对比"
-        }
-    }
-}
-
 /// The main window: the canvas with its status bar, and the inspector beside
 /// them. The window's own toolbar carries the document actions, so the
 /// title bar, traffic lights and full screen stay the system's.

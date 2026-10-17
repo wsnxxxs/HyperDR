@@ -9,11 +9,18 @@ import HyperDRDesign
 /// With focus, F fits the photo to the window and + / − zoom (§12 Q9). The
 /// keys are taken here, not by `PreviewCanvas`, and only while the canvas
 /// itself has focus, so a focused text field keeps them.
+///
+/// The canvas takes focus itself when a photo opens and when it is clicked;
+/// a ring then would frame it permanently. Like the web stage's
+/// `:focus-visible`, the ring shows only when focus arrives another way --
+/// Tab, or an assistive technology (parity G-16).
 struct CanvasStage: View {
     let model: EditorModel
     let window: EditorWindowState
 
     @FocusState private var focused: Bool
+    /// The current focus was given by the canvas itself, not the keyboard.
+    @State private var focusedByPointer = false
 
     var body: some View {
         PreviewCanvas(model: model)
@@ -21,16 +28,22 @@ struct CanvasStage: View {
             .overlay { PhotoCorners(frame: model.canvas.imageFrame) }
             .overlay { PhotoBadge(model: model) }
             .overlay { CanvasStatus(model: model, window: window) }
+            .overlay { if focused && !focusedByPointer { FocusRing() } }
             .focusable()
-            // The canvas takes focus whenever a photo opens, so the system
-            // ring would frame it permanently; the web stage likewise shows
-            // no ring unless focused from the keyboard.
             .focusEffectDisabled()
             .focused($focused)
+            .onChange(of: focused) { _, now in if !now { focusedByPointer = false } }
             .onKeyPress(characters: Self.keys, action: handle)
-            .simultaneousGesture(TapGesture().onEnded { focused = true })
+            .simultaneousGesture(TapGesture().onEnded { takeFocus() })
             // A newly opened photo takes the keys, as the web stage does.
-            .onChange(of: model.document?.name, initial: true) { focused = model.document != nil }
+            .onChange(of: model.document?.name, initial: true) {
+                if model.document != nil { takeFocus() } else { focused = false }
+            }
+    }
+
+    private func takeFocus() {
+        focusedByPointer = true
+        focused = true
     }
 
     private static let keys = CharacterSet(charactersIn: "fF+=-")
@@ -51,6 +64,17 @@ struct CanvasStage: View {
 }
 
 // MARK: - Frame
+
+/// The keyboard focus ring, in the colour used for focus on the photograph
+/// (the accent is too dark against the backdrop).
+private struct FocusRing: View {
+    var body: some View {
+        RoundedRectangle(cornerRadius: Radius.sm)
+            .strokeBorder(Color.hdr.overlayInk, lineWidth: 2)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
 
 /// The photo's shadow, drawn on the backdrop under the transparent canvas.
 private struct PhotoShadow: View {
@@ -105,23 +129,37 @@ private struct PhotoBadge: View {
     }
 
     private var badge: AnyView? {
-        switch model.viewMode {
-        case .original where model.isAvailable(.original):
+        switch PhotoBadgeKind(viewMode: model.viewMode, originalAvailable: model.isAvailable(.original),
+                              domain: model.document?.source?.domain, gainWeight: model.display.gainWeight) {
+        case .original:
             AnyView(Text("stage.badgeOriginal")
                 .hdrOverlayChip()
                 .help("stage.titleOriginal"))
-        case .edited where hasExtendedRange:
+        case .hdr:
             AnyView(HDRBadge().help("stage.titleHdr"))
-        default:
+        case nil:
             nil
         }
     }
+}
 
-    /// The photo is HDR or carries an HDR rendition, or the edited frame
-    /// shows gain above SDR white.
-    private var hasExtendedRange: Bool {
-        if let domain = model.document?.source?.domain, domain == .hdr || domain == .dual { return true }
-        return (model.display.gainWeight ?? 0) > 0
+/// Which badge the photo carries (parity G-14).
+enum PhotoBadgeKind: Equatable {
+    case original, hdr
+
+    /// "Original" while the original is shown. "HDR" over the edited photo
+    /// when the source is HDR or has an HDR rendition, or when the edited
+    /// frame has gain: `gainWeight` is non-nil exactly then, and may be 0 on
+    /// an SDR display or with no headroom left, which still counts.
+    init?(viewMode: ViewMode, originalAvailable: Bool, domain: InputDomain?, gainWeight: Double?) {
+        switch viewMode {
+        case .original where originalAvailable:
+            self = .original
+        case .edited where domain == .hdr || domain == .dual || gainWeight != nil:
+            self = .hdr
+        default:
+            return nil
+        }
     }
 }
 

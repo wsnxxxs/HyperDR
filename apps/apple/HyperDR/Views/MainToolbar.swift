@@ -12,17 +12,17 @@ struct MainToolbar: ToolbarContent {
 
     var body: some ToolbarContent {
         ToolbarItemGroup(placement: .navigation) {
-            Button("打开照片", systemImage: "folder") {}
-                .help("打开照片（⌘O）")
-            Button("LUT 库", systemImage: "swatchpalette") {}
-                .help("LUT 库")
+            Button("editor.open", systemImage: "folder") {}
+                .help("mac.help.open")
+            Button("lut.browse", systemImage: "swatchpalette") {}
+                .help("lut.browse")
         }
 
         if workspace == .editing {
             ToolbarItem(placement: .principal) {
-                Picker("预览方式", selection: $viewMode) {
+                Picker("editor.view", selection: $viewMode) {
                     ForEach(ViewMode.allCases, id: \.self) { mode in
-                        Text(mode.title).tag(mode)
+                        Text(mode.label).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -31,24 +31,24 @@ struct MainToolbar: ToolbarContent {
 
             ToolbarItemGroup(placement: .primaryAction) {
                 ControlGroup {
-                    Button("撤销", systemImage: "arrow.uturn.backward") {}
-                    Button("重做", systemImage: "arrow.uturn.forward") {}
+                    Button("edit.undo", systemImage: "arrow.uturn.backward") {}
+                    Button("edit.redo", systemImage: "arrow.uturn.forward") {}
                         .disabled(true)
                 }
-                Button("导出记录", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90") {}
-                    .help("导出记录")
+                Button("workspace.versions", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90") {}
+                    .help("workspace.versions")
             }
 
             ToolbarItem(placement: .primaryAction) {
-                Button("导出", systemImage: "square.and.arrow.up") {}
+                Button("editor.export", systemImage: "square.and.arrow.up") {}
                     .buttonStyle(.borderedProminent)
-                    .help("导出照片（⌘E）")
+                    .help("mac.help.export")
             }
         }
 
         ToolbarItem(placement: .primaryAction) {
-            Button("检查器", systemImage: "sidebar.trailing") { showsInspector.toggle() }
-                .help(showsInspector ? "隐藏检查器" : "显示检查器")
+            Button("mac.toolbar.inspector", systemImage: "sidebar.trailing") { showsInspector.toggle() }
+                .help(showsInspector ? "mac.toolbar.hideInspector" : "mac.toolbar.showInspector")
         }
     }
 }

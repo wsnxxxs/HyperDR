@@ -11,11 +11,14 @@ struct StatusBar: View {
         HStack(spacing: Space.s4) {
             HStack(spacing: Space.s2) {
                 Circle().fill(Color.hdr.successLine).frame(width: 7, height: 7)
-                Text("本地处理服务已就绪")
+                Text("app.service.ready")
             }
             if workspace == .editing {
-                Text("HDR 照片 · 当前 headroom 4.0×")
-                    .lineLimit(1)
+                HStack(spacing: Space.s2) {
+                    Text("stage.input.hdr")
+                    Text("mac.display.edr \("4.0×") \("10.2×")")
+                }
+                .lineLimit(1)
                 Spacer(minLength: Space.s4)
                 zoom
             } else {
@@ -32,17 +35,17 @@ struct StatusBar: View {
 
     private var zoom: some View {
         HStack(spacing: Space.s1) {
-            Button("适应窗口") {}
+            Button("editor.fit") {}
                 .buttonStyle(.link)
                 .padding(.trailing, Space.s2)
-            Button("缩小预览", systemImage: "minus") {}
+            Button("editor.zoomOut", systemImage: "minus") {}
                 .labelStyle(.iconOnly)
-            Text("100%")
+            Text(verbatim: "100%")
                 .font(Font.hdr.readout)
                 .foregroundStyle(Color.hdr.ink)
                 .frame(minWidth: 42)
-                .help("缩放比例，以适应窗口为 100%")
-            Button("放大预览", systemImage: "plus") {}
+                .help("editor.zoomHint")
+            Button("editor.zoomIn", systemImage: "plus") {}
                 .labelStyle(.iconOnly)
         }
         .buttonStyle(.borderless)

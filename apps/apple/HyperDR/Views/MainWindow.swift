@@ -35,19 +35,19 @@ struct MainWindow: View {
     }
 }
 
-#Preview("宽窗口 · 编辑", traits: .fixedLayout(width: 1440, height: 900)) {
+#Preview("Wide · editing", traits: .fixedLayout(width: 1440, height: 900)) {
     MainWindow(workspace: .editing)
 }
 
-#Preview("宽窗口 · 未打开照片", traits: .fixedLayout(width: 1440, height: 900)) {
+#Preview("Wide · empty", traits: .fixedLayout(width: 1440, height: 900)) {
     MainWindow(workspace: .empty)
 }
 
-#Preview("窄窗口 · 编辑", traits: .fixedLayout(width: 820, height: 640)) {
+#Preview("Narrow · editing", traits: .fixedLayout(width: 820, height: 640)) {
     MainWindow(workspace: .editing)
 }
 
-#Preview("宽窗口 · 深色", traits: .fixedLayout(width: 1440, height: 900)) {
+#Preview("Wide · dark", traits: .fixedLayout(width: 1440, height: 900)) {
     MainWindow(workspace: .editing)
         .preferredColorScheme(.dark)
 }

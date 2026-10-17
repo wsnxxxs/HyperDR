@@ -29,6 +29,46 @@
           "alpha": "1.000"
         }
       }
+    },
+    {
+      "idiom": "universal",
+      "appearances": [
+        {
+          "appearance": "contrast",
+          "value": "high"
+        }
+      ],
+      "color": {
+        "color-space": "srgb",
+        "components": {
+          "red": "0x5C",
+          "green": "0x5F",
+          "blue": "0x68",
+          "alpha": "1.000"
+        }
+      }
+    },
+    {
+      "idiom": "universal",
+      "appearances": [
+        {
+          "appearance": "luminosity",
+          "value": "dark"
+        },
+        {
+          "appearance": "contrast",
+          "value": "high"
+        }
+      ],
+      "color": {
+        "color-space": "srgb",
+        "components": {
+          "red": "0xB4",
+          "green": "0xB7",
+          "blue": "0xBF",
+          "alpha": "1.000"
+        }
+      }
     }
   ],
   "info": {

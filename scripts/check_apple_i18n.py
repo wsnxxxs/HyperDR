@@ -37,6 +37,14 @@ Interpolations become `%@`, which is what Swift generates for a `String`
 argument. Views therefore interpolate only `String`s into localized text:
 format numbers first, then interpolate.
 
+The design package (`Packages/HyperDRDesign`) has a catalogue of its own for
+the few strings its components say themselves (`design.*`: Reset to Default,
+Expanded / Collapsed). Its sources are checked against it the same way, with
+one more rule: a key there must be looked up with `bundle: .module`, or it
+would be looked up in the app's catalogue and show as the key. Chinese
+literals are an error in its `Inspector/` components; the token gallery shows
+Chinese type specimens on purpose.
+
 `--self-test` (also run before every check) applies mutations to the real
 sources in memory -- a missing key in a new namespace, a key in `verbatim:`,
 an SF Symbol in an explicit position -- and fails unless each is reported
@@ -53,6 +61,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 APP = REPO_ROOT / "apps" / "apple" / "HyperDR"
 VIEWS = APP / "Views"
 CATALOG = APP / "Resources" / "Localizable.xcstrings"
+DESIGN = REPO_ROOT / "apps" / "apple" / "Packages" / "HyperDRDesign" / "Sources" / "HyperDRDesign"
+DESIGN_CATALOG = DESIGN / "Resources" / "Localizable.xcstrings"
+DESIGN_COMPONENTS = DESIGN / "Inspector"
 LOCALES = ["en", "zh-Hans"]
 
 KEY_RE = re.compile(r"^([a-z][A-Za-z0-9]*)(?:\.[A-Za-z0-9_-]+)+(?: %@)*$")
@@ -152,11 +163,15 @@ NOT_TEXT_CONTEXT = re.compile(
 )
 VERBATIM_CONTEXT = re.compile(r"\bverbatim\s*:\s*$")
 CONTEXT_CHARS = 120
+# A package key's call names the package bundle within this many characters.
+MODULE_BUNDLE = re.compile(r"\bbundle\s*:\s*\.module\b")
+BUNDLE_CHARS = 240
 
 
-def check(files: list[tuple[str, bool, str]], entries: dict) -> list[str]:
-    """Problems for `files` -- (path for messages, under Views/, source) --
-    against the catalogue's `entries`."""
+def check(files: list[tuple[str, bool, str]], entries: dict, module_bundle: bool = False) -> list[str]:
+    """Problems for `files` -- (path for messages, held to the no-Chinese
+    rule, source) -- against the catalogue's `entries`. `module_bundle`: the
+    files are a package's, whose keys must be read with `bundle: .module`."""
     problems: list[str] = []
     namespaces = {m.group(1) for key in entries if (m := KEY_RE.match(key))}
 
@@ -178,7 +193,7 @@ def check(files: list[tuple[str, bool, str]], entries: dict) -> list[str]:
         for line, offset, text in literals(source):
             where = f"{relative}:{line}"
             if in_views and CJK_RE.search(text):
-                problems.append(f"{where}: Chinese literal in Views/, use a catalogue key: {text!r}")
+                problems.append(f"{where}: Chinese literal, use a catalogue key: {text!r}")
             match = KEY_RE.match(text)
             if not match:
                 continue
@@ -191,6 +206,8 @@ def check(files: list[tuple[str, bool, str]], entries: dict) -> list[str]:
                 continue
             if LOCALIZED_CONTEXT.search(context) or match.group(1) in namespaces:
                 used.setdefault(text, where)
+                if module_bundle and not MODULE_BUNDLE.search(source, offset, offset + BUNDLE_CHARS):
+                    problems.append(f"{where}: package key read without `bundle: .module`: {text!r}")
 
     for key, where in sorted(used.items()):
         if key not in entries:
@@ -243,6 +260,28 @@ def self_test(files: list[tuple[str, bool, str]], entries: dict) -> list[str]:
     return failures
 
 
+def design_self_test(files: list[tuple[str, bool, str]], entries: dict) -> list[str]:
+    """The package rules: a key read without `bundle: .module`, a missing
+    key, and Chinese in a component must each be reported."""
+    baseline = set(check(files, entries, module_bundle=True))
+    used_key = next(key for key in sorted(entries) if "%@" not in key)
+    component = "apps/apple/Packages/HyperDRDesign/Sources/HyperDRDesign/Inspector/SelfTest.swift"
+    mutations = [
+        ("a package key read from the app bundle",
+         f'Text("{used_key}")', ["without `bundle: .module`", repr(used_key)]),
+        ("a missing package key",
+         'Text("design.zzselftest", bundle: .module)', ["key not in catalogue", "'design.zzselftest'"]),
+        ("Chinese in a component",
+         'Text(verbatim: "重置")', ["Chinese literal"]),
+    ]
+    failures: list[str] = []
+    for name, source, expected in mutations:
+        found = set(check([*files, (component, True, source + "\n")], entries, module_bundle=True)) - baseline
+        if not any(all(fragment in problem for fragment in expected) for problem in found):
+            failures.append(f"self-test: {name}: not reported (got {sorted(found)})")
+    return failures
+
+
 def main() -> int:
     try:
         catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
@@ -255,11 +294,24 @@ def main() -> int:
         for path in sorted(APP.rglob("*.swift"))
     ]
 
-    problems = self_test(files, entries)
+    try:
+        design_catalog = json.loads(DESIGN_CATALOG.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        print(f"cannot read {DESIGN_CATALOG.relative_to(REPO_ROOT)}: {error}")
+        return 1
+    design_entries: dict = design_catalog.get("strings", {})
+    design_files = [
+        (str(path.relative_to(REPO_ROOT)), DESIGN_COMPONENTS in path.parents, path.read_text(encoding="utf-8"))
+        for path in sorted(DESIGN.rglob("*.swift"))
+    ]
+
+    problems = self_test(files, entries) + design_self_test(design_files, design_entries)
     if "--self-test" not in sys.argv[1:]:
-        if catalog.get("sourceLanguage") != "en":
-            problems.append("catalogue sourceLanguage must be 'en'")
+        for name, document in (("app", catalog), ("design package", design_catalog)):
+            if document.get("sourceLanguage") != "en":
+                problems.append(f"{name} catalogue sourceLanguage must be 'en'")
         problems += check(files, entries)
+        problems += check(design_files, design_entries, module_bundle=True)
 
     for problem in problems:
         print(problem)
@@ -269,7 +321,8 @@ def main() -> int:
     if "--self-test" in sys.argv[1:]:
         print("ok: self-test")
     else:
-        print(f"ok: {len(entries)} keys, {len(LOCALES)} locales (self-test passed)")
+        print(f"ok: {len(entries)} app keys, {len(design_entries)} design package keys, "
+              f"{len(LOCALES)} locales (self-test passed)")
     return 0
 
 

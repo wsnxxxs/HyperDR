@@ -16,8 +16,15 @@ import SwiftUI
 ///   increment/decrement actions, and Reset to Default.
 ///
 /// Bind one value per control (S12): the row reads nothing else, so a change
-/// redraws only this row. `onEditingChanged` brackets each drag, keyboard
-/// step, typed commit and reset, for coalescing undo.
+/// redraws only this row. With the M2 contract (batch 3 §3.4), the value is
+/// the key's `ControlValue`, writes go to `adjust(key, to:)`, and
+/// `onEditingChanged` maps to `beginAdjusting` / `endAdjusting`.
+///
+/// `onEditingChanged` brackets pointer drags only: the drag is one undo step
+/// and previews at the draft size until it ends. A keyboard step, a typed
+/// value and a reset are single writes outside it, one undo step each, and
+/// render at full size at once. A drag that ends where it began still
+/// brackets; the model records no step for an unchanged value.
 public struct ParameterSlider: View {
     private let title: LocalizedStringKey
     @Binding private var value: Double
@@ -40,7 +47,7 @@ public struct ParameterSlider: View {
                 FieldTitle(title: title, help: help)
                     .accessibilityHidden(true)
                 Spacer(minLength: 0)
-                ParameterReadout(title: title, value: $value, spec: spec, onEditingChanged: onEditingChanged)
+                ParameterReadout(title: title, value: $value, spec: spec)
             }
             .frame(minHeight: 22)
             ParameterTrack(title: title, value: $value, spec: spec, onEditingChanged: onEditingChanged)
@@ -72,7 +79,6 @@ private struct ParameterReadout: View {
     let title: LocalizedStringKey
     @Binding var value: Double
     let spec: ParameterSpec
-    let onEditingChanged: (Bool) -> Void
 
     @FocusState private var focused: Bool
     @State private var draft = ""
@@ -143,11 +149,9 @@ private struct ParameterReadout: View {
         if let new = spec.parse(draft) { set(new) }
     }
 
+    /// A single write outside any drag: one undo step of its own.
     private func set(_ new: Double) {
-        guard new != value else { return }
-        onEditingChanged(true)
-        value = new
-        onEditingChanged(false)
+        if new != value { value = new }
     }
 }
 
@@ -271,10 +275,8 @@ private struct ParameterTrack: View {
 
     private func reset() { set(spec.defaultValue) }
 
+    /// A single write outside any drag: one undo step of its own.
     private func set(_ new: Double) {
-        guard new != value else { return }
-        onEditingChanged(true)
-        value = new
-        onEditingChanged(false)
+        if new != value { value = new }
     }
 }

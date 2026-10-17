@@ -57,8 +57,9 @@ public struct CurveEditor: View {
 
     static let inset: CGFloat = 10
 
-    /// `onEditingChanged(handle id, editing)` brackets each drag, step and
-    /// reset of a handle.
+    /// `onEditingChanged(handle id, editing)` brackets each pointer drag of a
+    /// handle (`beginAdjusting` / `endAdjusting`); keyboard steps and resets
+    /// are single writes outside it, as on `ParameterSlider`.
     public init(_ title: LocalizedStringKey, samples: [Double], stopsRange: ClosedRange<Double>,
                 handles: [CurveHandle] = [], onEditingChanged: @escaping (String, Bool) -> Void = { _, _ in }) {
         self.title = title
@@ -288,10 +289,8 @@ private struct CurveHandleView: View {
             }
     }
 
+    /// A single write outside any drag: one undo step of its own.
     private func set(_ new: Double) {
-        guard new != handle.value.wrappedValue else { return }
-        onEditingChanged(true)
-        handle.value.wrappedValue = new
-        onEditingChanged(false)
+        if new != handle.value.wrappedValue { handle.value.wrappedValue = new }
     }
 }

@@ -73,6 +73,9 @@ private struct EditorWindow: View {
             }
             .focusedSceneValue(model)
             .focusedSceneValue(window)
+            #if DEBUG
+            .task { StressWindow.runIfRequested() }
+            #endif
     }
 
     /// "6000 × 4000 · RAW"; only the format until the first frame names the size.

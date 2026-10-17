@@ -19,6 +19,8 @@ struct EditorCommands: Commands {
         #if DEBUG
         CommandMenu("mac.menu.developer") {
             DiagnosticsCommand()
+            // S12 spike tool; not localized.
+            Button { StressWindow.shared.show() } label: { Text(verbatim: "Inspector Stress (S12)") }
         }
         #endif
     }

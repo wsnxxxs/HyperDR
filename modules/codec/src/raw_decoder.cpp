@@ -975,7 +975,11 @@ BayerPattern detect_bayer_pattern(LibRaw& raw, std::uint32_t width,
 }  // namespace
 
 RawLensMetadata probe_raw_lens_metadata(const std::filesystem::path& path) {
-  LibRaw raw;
+  // LibRaw is ~768 KiB. GCD worker threads have roughly 512 KiB of stack, so a
+  // stack instance here crashes when this entry point is called off the main
+  // thread. Keep the object on the heap and use a reference below.
+  auto raw_storage = std::make_unique<LibRaw>();
+  LibRaw& raw = *raw_storage;
   check_raw_open(raw.open_file(path.c_str()), "LibRaw metadata open", path);
   const std::string lens = raw.imgdata.lens.Lens[0] ? raw.imgdata.lens.Lens
                                                   : raw.imgdata.lens.makernotes.Lens;
@@ -1064,7 +1068,9 @@ DecodedImage decode_raw(const std::filesystem::path& path,
       read_linearization_lut(options.linearization_lut);
   const auto lens_shading = read_lens_shading_map(options.lens_shading_map);
 
-  CallbackLibRaw raw;
+  // See probe_raw_lens_metadata: LibRaw must not live on the caller's stack.
+  auto raw_storage = std::make_unique<CallbackLibRaw>();
+  CallbackLibRaw& raw = *raw_storage;
   // Parameters that affect camera WB/matrix selection must be configured before
   // open_file(), when LibRaw copies camera calibration data into the pipeline.
   auto& params = raw.imgdata.params;
@@ -1511,7 +1517,9 @@ RawMosaic decode_raw_mosaic(const std::filesystem::path& path,
       read_linearization_lut(options.linearization_lut);
   const auto lens_shading = read_lens_shading_map(options.lens_shading_map);
 
-  CallbackLibRaw raw;
+  // See probe_raw_lens_metadata: LibRaw must not live on the caller's stack.
+  auto raw_storage = std::make_unique<CallbackLibRaw>();
+  CallbackLibRaw& raw = *raw_storage;
   auto& params = raw.imgdata.params;
   params.use_camera_wb = 0;
   params.use_auto_wb = 0;

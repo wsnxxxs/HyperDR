@@ -31,11 +31,10 @@ public actor JobRunner {
 
     public init(configuration: KitConfiguration, schema: SettingsSchema,
                 capabilities: Capabilities, sessions: SessionStore, engine: Engine) {
-        let models = PreviewService.modelAvailability(capabilities)
         self.init(configuration: configuration, sessions: sessions,
-            resolver: OptionResolver(schema: schema, knownModels: models.models,
-                modelsAvailable: models.ready, maxEdgeCeiling: configuration.previewMaxEdge,
-                defaultModelID: models.defaultID),
+            resolver: OptionResolver(schema: schema, models: ModelCatalog(capabilities: capabilities),
+                maxEdgeCeiling: configuration.previewMaxEdge,
+                sessionLUTs: SessionLUTResolver(configuration: configuration)),
             probe: { url in let result = try await engine.probe(url); return (result.width, result.height) },
             convert: { request, events in try await engine.convert(request, events: events) })
     }

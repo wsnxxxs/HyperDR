@@ -12,6 +12,8 @@ public final class HyperDRKit: Sendable {
     public let previews: PreviewService
     public let jobs: JobRunner
     public let exportTarget: ExportTarget
+    public let models: ModelCatalog
+    public let luts: LUTLibrary
 
     private final class CleanupState: @unchecked Sendable {
         let lock = NSLock()
@@ -43,6 +45,8 @@ public final class HyperDRKit: Sendable {
         self.formats = formats
         let sessions = SessionStore(configuration: configuration, formats: formats)
         self.sessions = sessions
+        self.models = ModelCatalog(capabilities: capabilities)
+        self.luts = LUTLibrary(configuration: configuration, sessions: sessions)
         self.cleanup = cleanup ?? { await sessions.cleanupExpired() }
         self.previews = PreviewService(configuration: configuration, schema: schema,
             capabilities: capabilities, sessions: sessions, engine: engine)

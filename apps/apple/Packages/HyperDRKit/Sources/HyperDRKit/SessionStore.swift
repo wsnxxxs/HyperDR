@@ -752,6 +752,27 @@ public actor SessionStore {
         }
     }
 
+    /// K4: immutable LUT copies are installed through the pinned session root,
+    /// without reopening an absolute resource path after an actor suspension.
+    func lutDirectory(_ id: SessionID) throws -> SessionExportFile {
+        guard id.isValid, let exportRoot else {
+            throw HyperDRError(code: "session_expired", message: "The session is unavailable")
+        }
+        guard let session = try? openDirectory(named: id.rawValue, in: exportRoot.descriptor) else {
+            throw HyperDRError(code: "session_expired", message: "The session is unavailable")
+        }
+        defer { Darwin.close(session) }
+        try requireTrustedDevice(session)
+        guard readFile(named: "session.json", in: session) != nil else {
+            throw HyperDRError(code: "session_expired", message: "The session is unavailable")
+        }
+        guard mkdirat(session, "luts", 0o700) == 0 || errno == EEXIST else { throw posixError("mkdirat", "luts") }
+        let directory = try openDirectory(named: "luts", in: session)
+        do { try requireTrustedDevice(directory) }
+        catch { Darwin.close(directory); throw error }
+        return SessionExportFile(descriptor: directory, name: "")
+    }
+
     // MARK: - Path containment
 
     private func sessionsRoot() throws -> URL {

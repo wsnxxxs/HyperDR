@@ -122,3 +122,37 @@ private actor Counter {
         #expect(await calls.value == 1)
     }
 }
+
+extension PreviewSupportTests {
+    @Test(.timeLimit(.minutes(1))) func differentSingleFlightKeysRemainIndependent() async throws {
+        let flight = SingleFlight<String, Int>()
+        let latch = KeyFlightLatch()
+        let first = Task { try await flight.run("a") { await latch.wait(); return 1 } }
+        defer { Task { await latch.release() } }
+        #expect(await supportEventually(timeout: .seconds(2)) { await latch.started })
+        // If keys were accidentally coalesced, this receives 1 or times out
+        // while the first operation is deliberately parked.
+        let second = Task { try await flight.run("b") { await latch.setSecond(); return 2 } }
+        #expect(await supportEventually(timeout: .seconds(2)) { await latch.second })
+        await latch.release()
+        #expect(try await first.value == 1)
+        #expect(try await second.value == 2)
+        #expect(await flight.inFlight == 0)
+    }
+}
+private actor KeyFlightLatch {
+    private var parked: CheckedContinuation<Void, Never>?
+    private(set) var started = false
+    private(set) var second = false
+    func wait() async { await withCheckedContinuation { parked = $0; started = true } }
+    func setSecond() { second = true }
+    func release() { parked?.resume(); parked = nil }
+}
+private func supportEventually(timeout: Duration, _ condition: @Sendable () async -> Bool) async -> Bool {
+    let deadline = ContinuousClock.now + timeout
+    while ContinuousClock.now < deadline {
+        if await condition() { return true }
+        try? await Task.sleep(for: .milliseconds(1))
+    }
+    return await condition()
+}

@@ -567,6 +567,10 @@
             "height": {
               "$ref": "#/$defs/dimension"
             },
+            "variant": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]{1,32}$"
+            },
             "photo": {
               "type": "object",
               "additionalProperties": false,

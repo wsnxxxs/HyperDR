@@ -5,6 +5,7 @@
 #include "hyperdr/image/transfer.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -85,6 +86,82 @@ std::string hex_text(const std::array<float, 3>& colour) {
   return text;
 }
 
+std::array<float, 4> read_margins(const json::Value& value) {
+  std::array<float, 4> result{};
+  if (value.is_number()) result.fill(fraction(value, "margins", 0, 0.5));
+  else {
+    object_of(value, "margins");
+    allow_members(value, "margins", {"top", "right", "bottom", "left"});
+    constexpr const char* sides[] = {"top", "right", "bottom", "left"};
+    for (std::size_t i = 0; i < 4; ++i)
+      if (const auto* side = value.find(sides[i]))
+        result[i] = fraction(*side, std::string("margins.") + sides[i], 0, 0.5);
+  }
+  return result;
+}
+
+FrameReference read_reference(const json::Value& value) {
+  if (value.is_string()) {
+    if (value.string() == "short") return FrameReference::kShortEdge;
+    if (value.string() == "long") return FrameReference::kLongEdge;
+  }
+  reject("reference must be short or long");
+}
+
+FrameAspect read_aspect(const json::Value& value) {
+  FrameAspect result;
+  if (value.is_null()) return result;
+  object_of(value, "aspect");
+  allow_members(value, "aspect", {"width", "height", "topShare"});
+  const auto* width = value.find("width");
+  const auto* height = value.find("height");
+  if (!width || !height) reject("aspect needs width and height");
+  result.width = whole(*width, "aspect.width");
+  result.height = whole(*height, "aspect.height");
+  const double ratio = static_cast<double>(result.width) / result.height;
+  if (ratio < 0.25 || ratio > 4.0) reject("aspect must be between 1:4 and 4:1");
+  if (const auto* share = value.find("topShare"))
+    result.top_share = fraction(*share, "aspect.topShare", 0, 1);
+  return result;
+}
+
+// Use the nearest IEEE double's shortest round-trip decimal, not the original JSON token.
+FrameRatio read_ratio(const json::Value& value, bool minimum) {
+  const char* key = minimum ? "minRatio" : "maxRatio";
+  if (!value.is_number()) reject(std::string(key) + " must be a number");
+  const double number = value.number();
+  if (!std::isfinite(number) || (minimum ? number <= 1 : number <= 0 || number >= 1))
+    reject(std::string(key) + (minimum ? " must be greater than 1" : " must be greater than 0 and less than 1"));
+  char text[64];
+  const auto [end, error] = std::to_chars(text, text + sizeof(text), number, std::chars_format::scientific);
+  if (error != std::errc{}) reject("ratio does not fit its text form");
+  FrameRatio ratio;
+  ratio.text.assign(text, end);
+  bool fractional = false;
+  const char* cursor = text;
+  for (; cursor != end && *cursor != 'e' && *cursor != 'E'; ++cursor) {
+    if (*cursor == '.') { fractional = true; continue; }
+    ratio.significand = ratio.significand * 10 + static_cast<unsigned>(*cursor - '0');
+    if (fractional) --ratio.exponent;
+  }
+  if (cursor != end) ratio.exponent += std::stoi(std::string(cursor + 1, static_cast<std::size_t>(end - cursor - 1)));
+  return ratio;
+}
+
+int compare_ratio(std::uint32_t width, std::uint32_t height, const FrameRatio& ratio) {
+  // 17 decimal digits times uint32 dimensions fit in 128 bits. A power of
+  // ten that overflows this type is already larger than the other operand.
+  using Wide = unsigned __int128;
+  Wide left = width, right = static_cast<Wide>(height) * ratio.significand;
+  Wide& scaled = ratio.exponent < 0 ? left : right;
+  const int power = std::abs(ratio.exponent);
+  for (int i = 0; i < power; ++i) {
+    if (scaled > ~Wide{0} / 10) return ratio.exponent < 0 ? 1 : -1;
+    scaled *= 10;
+  }
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 // An even pixel count for a fraction of the reference edge.
 std::uint64_t even_pixels(float value, double reference) {
   return 2ULL * static_cast<std::uint64_t>(std::llround(static_cast<double>(value) * reference / 2.0));
@@ -109,7 +186,7 @@ float blurred_coverage(double t, double low, double high, double sigma) {
 FrameSpec parse_frame_spec(const json::Value& document, const std::filesystem::path& base_directory) {
   object_of(document, "frame");
   allow_members(document, "frame",
-      {"schema", "background", "margins", "caption", "reference", "aspect", "shadow", "overlay"});
+      {"schema", "background", "margins", "caption", "reference", "aspect", "shadow", "overlay", "variants"});
   FrameSpec spec;
   if (const auto* schema = document.find("schema")) {
     if (!schema->is_string() || schema->string() != kFrameSchema)
@@ -117,38 +194,14 @@ FrameSpec parse_frame_spec(const json::Value& document, const std::filesystem::p
   }
   if (const auto* background = document.find("background")) spec.background = hex_colour(*background);
   if (const auto* margins = document.find("margins")) {
-    if (margins->is_number()) {
-      spec.top = spec.right = spec.bottom = spec.left = fraction(*margins, "margins", 0, 0.5);
-    } else {
-      object_of(*margins, "margins");
-      allow_members(*margins, "margins", {"top", "right", "bottom", "left"});
-      const auto side = [&](const char* key, float& out) {
-        if (const auto* value = margins->find(key)) out = fraction(*value, std::string("margins.") + key, 0, 0.5);
-      };
-      side("top", spec.top);
-      side("right", spec.right);
-      side("bottom", spec.bottom);
-      side("left", spec.left);
-    }
+    const auto sides = read_margins(*margins);
+    spec.top = sides[0]; spec.right = sides[1]; spec.bottom = sides[2]; spec.left = sides[3];
   }
   if (const auto* caption = document.find("caption")) spec.caption = fraction(*caption, "caption", 0, 1);
-  if (const auto* reference = document.find("reference")) {
-    if (!reference->is_string()) reject("reference must be short or long");
-    if (reference->string() == "short") spec.reference = FrameReference::kShortEdge;
-    else if (reference->string() == "long") spec.reference = FrameReference::kLongEdge;
-    else reject("reference must be short or long");
-  }
-  if (const auto* aspect = document.find("aspect"); aspect && !aspect->is_null()) {
-    object_of(*aspect, "aspect");
-    allow_members(*aspect, "aspect", {"width", "height", "topShare"});
-    const auto* width = aspect->find("width");
-    const auto* height = aspect->find("height");
-    if (!width || !height) reject("aspect needs width and height");
-    spec.aspect_width = whole(*width, "aspect.width");
-    spec.aspect_height = whole(*height, "aspect.height");
-    const double ratio = static_cast<double>(spec.aspect_width) / spec.aspect_height;
-    if (ratio < 0.25 || ratio > 4.0) reject("aspect must be between 1:4 and 4:1");
-    if (const auto* share = aspect->find("topShare")) spec.aspect_top_share = fraction(*share, "aspect.topShare", 0, 1);
+  if (const auto* reference = document.find("reference")) spec.reference = read_reference(*reference);
+  if (const auto* aspect = document.find("aspect")) {
+    const auto value = read_aspect(*aspect);
+    spec.aspect_width = value.width; spec.aspect_height = value.height; spec.aspect_top_share = value.top_share;
   }
   if (const auto* shadow = document.find("shadow"); shadow && !shadow->is_null()) {
     object_of(*shadow, "shadow");
@@ -162,6 +215,35 @@ FrameSpec parse_frame_spec(const json::Value& document, const std::filesystem::p
     auto path = path_from_utf8(overlay->string());
     if (path.is_relative() && !base_directory.empty()) path = base_directory / path;
     spec.overlay = std::move(path);
+  }
+  if (const auto* variants = document.find("variants")) {
+    object_of(*variants, "variants");
+    if (variants->members().size() > 4) reject("variants allows at most four entries");
+    bool has_minimum = false, has_maximum = false;
+    for (const auto& [name, value] : variants->members()) {
+      if (name.empty() || name.size() > 32 || !std::all_of(name.begin(), name.end(), [](char c) {
+          return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-'; }))
+        reject("variant name must contain 1 to 32 characters from [a-z0-9-]");
+      object_of(value, "variant " + name);
+      allow_members(value, "variant " + name, {"minRatio", "maxRatio", "margins", "caption", "reference", "aspect"});
+      const auto* minimum = value.find("minRatio");
+      const auto* maximum = value.find("maxRatio");
+      if ((minimum != nullptr) == (maximum != nullptr)) reject("variant " + name + " needs exactly one of minRatio or maxRatio");
+      FrameVariant variant;
+      variant.name = name;
+      variant.minimum = minimum != nullptr;
+      variant.threshold = read_ratio(minimum ? *minimum : *maximum, variant.minimum);
+      // Each permitted interval is an open ray. Two lower (or two upper)
+      // rays always overlap; opposite rays are disjoint by their bounds at 1.
+      bool& seen = variant.minimum ? has_minimum : has_maximum;
+      if (seen) reject("variant ratio intervals overlap at " + name);
+      seen = true;
+      if (const auto* margins = value.find("margins")) variant.margins = read_margins(*margins);
+      if (const auto* caption = value.find("caption")) variant.caption = fraction(*caption, "caption", 0, 1);
+      if (const auto* reference = value.find("reference")) variant.reference = read_reference(*reference);
+      if (const auto* aspect = value.find("aspect")) variant.aspect = read_aspect(*aspect);
+      spec.variants.push_back(std::move(variant));
+    }
   }
   return spec;
 }
@@ -184,11 +266,53 @@ std::string frame_spec_json(const FrameSpec& spec) {
   writer.begin_object("shadow").member("opacity", spec.shadow_opacity)
       .member("blur", spec.shadow_blur).member("offset", spec.shadow_offset).end_object();
   if (!spec.overlay.empty()) writer.member("overlay", path_utf8(spec.overlay));
+  if (!spec.variants.empty()) {
+    std::vector<const FrameVariant*> sorted;
+    for (const auto& variant : spec.variants) sorted.push_back(&variant);
+    std::sort(sorted.begin(), sorted.end(), [](const auto* a, const auto* b) { return a->name < b->name; });
+    writer.begin_object("variants");
+    for (const auto* variant : sorted) {
+      writer.begin_object(variant->name).raw_member(variant->minimum ? "minRatio" : "maxRatio", variant->threshold.text);
+      if (variant->margins) {
+        const auto& m = *variant->margins;
+        writer.begin_object("margins").member("top", m[0]).member("right", m[1])
+            .member("bottom", m[2]).member("left", m[3]).end_object();
+      }
+      if (variant->caption) writer.member("caption", *variant->caption);
+      if (variant->reference) writer.member("reference", *variant->reference == FrameReference::kShortEdge ? "short" : "long");
+      if (variant->aspect) {
+        const auto& aspect = *variant->aspect;
+        if (aspect.width == 0) writer.null_member("aspect");
+        else writer.begin_object("aspect").member("width", aspect.width).member("height", aspect.height)
+            .member("topShare", aspect.top_share).end_object();
+      }
+      writer.end_object();
+    }
+    writer.end_object();
+  }
   return writer.end_object().take();
 }
 
-FrameLayout layout_frame(const FrameSpec& spec, std::uint32_t photo_width, std::uint32_t photo_height) {
+FrameLayout layout_frame(const FrameSpec& requested, std::uint32_t photo_width, std::uint32_t photo_height) {
   if (photo_width == 0 || photo_height == 0) reject("photo dimensions must be positive");
+  auto spec = requested;
+  std::string selected;
+  for (const auto& variant : requested.variants) {
+    const int comparison = compare_ratio(photo_width, photo_height, variant.threshold);
+    if (variant.minimum ? comparison <= 0 : comparison >= 0) continue;
+    selected = variant.name;
+    if (variant.margins) {
+      const auto& m = *variant.margins;
+      spec.top = m[0]; spec.right = m[1]; spec.bottom = m[2]; spec.left = m[3];
+    }
+    if (variant.caption) spec.caption = *variant.caption;
+    if (variant.reference) spec.reference = *variant.reference;
+    if (variant.aspect) {
+      spec.aspect_width = variant.aspect->width; spec.aspect_height = variant.aspect->height;
+      spec.aspect_top_share = variant.aspect->top_share;
+    }
+    break;
+  }
   const std::uint32_t reference = spec.reference == FrameReference::kShortEdge
       ? std::min(photo_width, photo_height) : std::max(photo_width, photo_height);
   std::uint64_t top = even_pixels(spec.top, reference);
@@ -236,6 +360,7 @@ FrameLayout layout_frame(const FrameSpec& spec, std::uint32_t photo_width, std::
   const auto photo_bottom = layout.photo.y + photo_height;
   layout.caption = {0, photo_bottom, layout.width, layout.height - photo_bottom};
   layout.reference_edge = reference;
+  layout.variant = std::move(selected);
   return layout;
 }
 
@@ -250,6 +375,7 @@ std::string frame_layout_json(const FrameLayout& layout) {
   rect("photo", layout.photo);
   rect("caption", layout.caption);
   writer.member("referenceEdge", layout.reference_edge);
+  if (!layout.variant.empty()) writer.member("variant", layout.variant);
   return writer.end_object().take();
 }
 

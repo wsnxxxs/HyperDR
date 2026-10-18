@@ -16,16 +16,16 @@ struct HeadroomSnapshot: Equatable {
 /// keyboard handling belongs to the view layer and the menu commands (§3.5).
 @MainActor
 final class EDRCanvasView: NSView {
-    private var renderer: PreviewRenderer?
+    /// Draws on its own thread; this view only hands it snapshots (A2b-2).
+    private(set) var renderLoop: PreviewRenderLoop?
     private let onHeadroom: (HeadroomSnapshot) -> Void
     private let onError: (String) -> Void
     private var lastSnapshot: HeadroomSnapshot?
     private var displayTimer: Timer?
     private var link: CADisplayLink?
     private var dirty = true
-    private var cleared = false
+    private var generation: UInt64 = 0
     private var dragOrigin: CGPoint?
-    private var synthetic: FramePlanes?
 
     /// Supplies the frame to draw. A2 wires this to the live preview service;
     /// the diagnostic window supplies a synthetic ramp instead.
@@ -73,7 +73,6 @@ final class EDRCanvasView: NSView {
         wantsLayer = true
         do {
             let renderer = try suppliedRenderer ?? PreviewRenderer()
-            self.renderer = renderer
             metalLayer.device = renderer.device
             metalLayer.pixelFormat = .rgba16Float
             metalLayer.colorspace = CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3)
@@ -82,6 +81,11 @@ final class EDRCanvasView: NSView {
             // the SwiftUI backdrop shows through.
             metalLayer.isOpaque = false
             metalLayer.framebufferOnly = true
+            // The layer is configured before the loop exists; from here on
+            // only the loop changes it.
+            renderLoop = PreviewRenderLoop(renderer: renderer, layer: metalLayer) { [weak self] message in
+                MainActor.assumeIsolated { self?.onError(message) }
+            }
         } catch {
             let message = error.localizedDescription
             DispatchQueue.main.async { [weak self] in self?.onError(message) }
@@ -89,6 +93,8 @@ final class EDRCanvasView: NSView {
     }
 
     required init?(coder: NSCoder) { nil }
+
+    isolated deinit { renderLoop?.stop() }
 
     override func makeBackingLayer() -> CALayer { CAMetalLayer() }
     private var metalLayer: CAMetalLayer { layer as! CAMetalLayer }
@@ -128,11 +134,10 @@ final class EDRCanvasView: NSView {
         refreshDisplay()
     }
 
+    /// Only the geometry the next snapshot carries; the render loop resizes
+    /// the layer itself, between draws.
     private func updateDrawableSize() {
-        let scale = window?.backingScaleFactor ?? 1
-        metalLayer.contentsScale = scale
-        metalLayer.drawableSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
-        transform.backingScale = scale
+        transform.backingScale = window?.backingScaleFactor ?? 1
     }
 
     @objc private func step(_ link: CADisplayLink) {
@@ -140,52 +145,35 @@ final class EDRCanvasView: NSView {
         tick()
     }
 
-    /// One display tick. While the previous presentation is still on the GPU
-    /// (`isBusy`) the tick neither runs pass 1 nor asks for a drawable; it
-    /// stays dirty, and the first tick after completion draws the latest frame.
+    /// One display tick: if anything changed, capture a snapshot and hand it
+    /// to the render loop. Never draws, waits for a drawable or touches the
+    /// layer; the loop keeps only the newest snapshot and draws it once the
+    /// GPU has finished the previous one.
     func tick() {
-        guard dirty else { return }
-        if let renderer, renderer.isBusy {
-            renderer.noteBusyTick()   // stays dirty
-            return
-        }
+        guard dirty, let renderLoop else { return }
         dirty = false
-        render()
-        if renderer?.needsRetry == true { dirty = true }
+        let content: CanvasSnapshot.Content
+        if let frame = frameProvider?() {
+            content = .frame(frame.frame, original: frame.showsOriginal)
+        } else if showsSyntheticRamp {
+            if transform.imageSize == .zero { showImageSize(PreviewRenderer.syntheticRampSize) }
+            content = .synthetic(original: showsOriginal)
+        } else {
+            // Closing the photo must not leave the last frame on screen.
+            content = .empty
+        }
+        generation += 1
+        let scale = transform.backingScale
+        PreviewRenderer.signposter.emitEvent("Handoff")
+        renderLoop.submit(CanvasSnapshot(content: content, transform: transform,
+            drawableSize: CGSize(width: bounds.width * scale, height: bounds.height * scale),
+            contentsScale: scale, generation: generation))
     }
 
     func setNeedsRedraw() { dirty = true }
     var needsRedraw: Bool { dirty }
-
-    // MARK: - Drawing
-
-    private func render() {
-        guard let renderer else { return }
-        do {
-            if let frame = frameProvider?() {
-                try renderer.prepare(frame: frame.frame, original: frame.showsOriginal)
-                cleared = false
-            } else if showsSyntheticRamp {
-                if synthetic == nil { synthetic = try PreviewRenderer.syntheticRamp(device: renderer.device) }
-                if let synthetic {
-                    try renderer.prepare(planes: synthetic, original: showsOriginal)
-                    if transform.imageSize == .zero {
-                        showImageSize(CGSize(width: synthetic.width, height: synthetic.height))
-                    }
-                    cleared = false
-                }
-            } else {
-                // Closing the photo must not leave the last frame on screen: the
-                // layer keeps its last drawable until something presents again.
-                if !cleared { cleared = renderer.clear(in: metalLayer) }
-                return
-            }
-            renderer.draw(in: metalLayer, transform: transform)
-        } catch {
-            let message = error.localizedDescription
-            DispatchQueue.main.async { [weak self] in self?.onError(message) }
-        }
-    }
+    /// The generation of the last snapshot handed to the render loop.
+    var handedOverGeneration: UInt64 { generation }
 
     /// Adopts the frame's own dimensions once, without echoing geometry back to
     /// the model (that would fight `updateNSView`).

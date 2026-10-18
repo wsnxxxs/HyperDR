@@ -4,24 +4,6 @@ import QuartzCore
 import XCTest
 @testable import HyperDR
 
-/// Counts `nextDrawable` calls and keeps the last drawable for readback.
-@MainActor private final class DrawableProbe {
-    private(set) var requests = 0
-    private(set) var last: (any CAMetalDrawable)?
-    var handsOutNone = false
-
-    /// `standIn` replaces the layer asked for: a view's own backing layer,
-    /// outside a window, can block in `nextDrawable` far past its timeout.
-    func install(on renderer: PreviewRenderer, standIn: CAMetalLayer? = nil) {
-        renderer.drawableSource = { [unowned self] layer in
-            requests += 1
-            let drawable = handsOutNone ? nil : (standIn ?? layer).nextDrawable()
-            last = drawable
-            return drawable
-        }
-    }
-}
-
 /// A2b-1: at most one presenting command buffer in flight. Headless: an
 /// offscreen `CAMetalLayer` and an injected drawable source, no window.
 @MainActor final class PreviewGateTests: XCTestCase {
@@ -149,54 +131,4 @@ import XCTest
         XCTAssertEqual(renderer.inFlight, 1)
     }
 
-    /// The view's display tick: a busy tick neither asks for the frame (so no
-    /// pass 1) nor for a drawable, and stays dirty; the first tick after
-    /// completion draws.
-    func testCanvasTickSkipsWhileBusyAndDrawsAfterCompletion() async throws {
-        let renderer = try makePreviewRenderer()
-        let probe = DrawableProbe()
-        probe.install(on: renderer, standIn: makeLayer(renderer))
-        let view = EDRCanvasView(renderer: renderer)
-        view.frame = CGRect(x: 0, y: 0, width: side, height: side)
-        view.layout()
-        var frameRequests = 0
-        view.frameProvider = { frameRequests += 1; return nil }
-        view.showsSyntheticRamp = true
-        // The ramp's own size, so the first tick does not adopt it (and redirty).
-        view.transform.imageSize = CGSize(width: 512, height: 128)
-
-        view.tick()
-        XCTAssertEqual(frameRequests, 1)
-        XCTAssertEqual(probe.requests, 1)
-        XCTAssertFalse(view.needsRedraw)
-        XCTAssertTrue(renderer.isBusy)
-
-        view.showsOriginal = true
-        view.tick()
-        view.tick()
-        XCTAssertEqual(frameRequests, 1, "a busy tick does not run pass 1")
-        XCTAssertEqual(probe.requests, 1, "a busy tick does not ask for a drawable")
-        XCTAssertTrue(view.needsRedraw)
-
-        await eventually("the presentation to complete") { !renderer.isBusy }
-        view.tick()
-        XCTAssertEqual(frameRequests, 2)
-        XCTAssertEqual(probe.requests, 2)
-        XCTAssertFalse(view.needsRedraw)
-
-        // Closing the photo clears once; a busy tick afterwards must not leave
-        // the canvas retrying on every tick when there is nothing to present.
-        view.showsSyntheticRamp = false
-        await eventually("the presentation to complete") { !renderer.isBusy }
-        view.tick()
-        XCTAssertEqual(probe.requests, 3, "the clear presents")
-        XCTAssertFalse(view.needsRedraw)
-        view.setNeedsRedraw()
-        view.tick()
-        XCTAssertTrue(view.needsRedraw)
-        await eventually("the clear to complete") { !renderer.isBusy }
-        view.tick()
-        XCTAssertFalse(view.needsRedraw, "nothing to present ends the retry")
-        XCTAssertEqual(probe.requests, 3)
-    }
 }

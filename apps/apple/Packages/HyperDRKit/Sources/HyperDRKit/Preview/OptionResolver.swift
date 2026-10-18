@@ -27,7 +27,18 @@ struct OptionResolver: Sendable {
     }
 
     func resolve(_ request: PreviewRequest, session: PhotoSession) throws -> EngineRequest {
+        try resolve(request, session: session, preview: true)
+    }
+
+    func resolveExport(_ options: EditOptions, session: PhotoSession) throws -> EngineRequest {
+        try resolve(PreviewRequest(session: session.id, options: options, maxEdge: maxEdgeCeiling), session: session, preview: false)
+    }
+
+    private func resolve(_ request: PreviewRequest, session: PhotoSession, preview: Bool) throws -> EngineRequest {
         var options = request.options.values
+        guard options["frame"] == nil else {
+            throw HyperDRError(code: "invalid_options", message: "Frames must be supplied separately")
+        }
         if options["external_gain"] != nil || options["external_gain_report"] != nil {
             throw HyperDRError(code: "invalid_options",
                 message: "Preview requests cannot supply external gain paths")
@@ -99,7 +110,7 @@ struct OptionResolver: Sendable {
             : max(320, maxEdgeCeiling)
         let normalized = try Engine.normalize(options)
         var resolved = normalized
-        resolved.setSetting("preview_max_edge", .number(Double(edge)))
+        if preview { resolved.setSetting("preview_max_edge", .number(Double(edge))) }
         try resolved.setCommand("input", .string(session.sourceURL.path))
         try resolved.setCommand("output", .string(""))
         try resolved.setCommand("report", .string(""))

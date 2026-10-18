@@ -20,7 +20,13 @@ if(HYPERDR_WITH_CODECS)
     src/tiff_codec.cpp
     src/raw_decoder.cpp
     src/ultrahdr_decoder.cpp
-    src/ultrahdr_encoder.cpp)
+    src/ultrahdr_encoder.cpp
+    src/hevc/probe.cpp
+    src/hevc/quality_map.cpp
+    src/hevc/vt_common.cpp
+    src/hevc/vt_decoder.cpp
+    src/hevc/vt_encoder.cpp
+    src/hevc/yuv.cpp)
 endif()
 
 hyperdr_add_module(codec
@@ -44,6 +50,10 @@ if(HYPERDR_WITH_CODECS)
   target_link_libraries(hyperdr_codec PRIVATE
     libraw::raw_r heif lcms2::lcms2 JPEG::JPEG PNG::PNG TIFF::TIFF ZLIB::ZLIB uhdr avif)
   target_include_directories(hyperdr_codec PRIVATE ${LIBUHDR_SOURCE_DIR})
+  # HEVC is VideoToolbox's (src/hevc); the frameworks are C APIs.
+  target_link_libraries(hyperdr_codec PRIVATE
+    "-framework VideoToolbox" "-framework CoreMedia" "-framework CoreVideo"
+    "-framework CoreFoundation")
 endif()
 
 add_subdirectory(tests)

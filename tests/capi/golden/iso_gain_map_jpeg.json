@@ -1,9 +1,9 @@
 {
-  "reason": "E4: self-authored ISO-only JPEG, removal of API-3, rendered headroom, recovery against final primary JPEG",
+  "reason": "E4: self-authored ISO-only JPEG, removal of API-3, rendered headroom, E4q: plain gain from the uncompressed renditions, content-chosen channels, 4:2:0 base, gain quality max(90, quality)",
   "backend": "libjpeg-turbo + HyperDR ISO/MPF writer",
   "source": "png(sample.png, 128, 96) from contract_test.py",
   "encoding": "iso-gainmap-jpeg",
   "quality": 90,
   "clock": "tests/capi/frozen_time.c",
-  "sha256": "6147eec2d2539d6017b957717170b5cfefaa2b05a2f36db267d3faeaee80fb3f"
+  "sha256": "4a3c15fee535adb31ce709adc71e32e2ada0d3be2a40291bd042a2155a35301c"
 }

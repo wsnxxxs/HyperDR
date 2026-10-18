@@ -319,6 +319,7 @@ void adopt_as_authored(PhotoRenditions& photo, const GainMapMetadata& metadata) 
   const auto channels = gain_map_channel_count(metadata);
   photo.dual_rendition = true;
   photo.authored_gain_channels = static_cast<std::uint32_t>(channels);
+  photo.fixed_gain_channels = true;
   photo.authored_gain_map.channels = static_cast<std::uint32_t>(channels);
   for (unsigned c = 0; c < 3; ++c) {
     const auto channel = gain_map_channel(metadata, channels == 1 ? 0 : c);
@@ -329,7 +330,7 @@ void adopt_as_authored(PhotoRenditions& photo, const GainMapMetadata& metadata) 
 
 std::vector<std::uint8_t> encode_for(const PhotoRenditions& photo, const GainMapResult& images,
                                      const PhotoMetadata& metadata,
-                                     const ConvertOptions& options, FileResult& result) {
+                                     const ConvertOptions& options) {
   switch (options.encoding) {
     case HdrEncoding::SdrJpeg:
       return encode_sdr_jpeg(photo.sdr, metadata, options.quality, resolved_sdr_gamut(options));
@@ -338,17 +339,8 @@ std::vector<std::uint8_t> encode_for(const PhotoRenditions& photo, const GainMap
     case HdrEncoding::Adaptive:
       return encode_adaptive_heic(images, metadata, options.quality, options.depth,
                                   options.hevc_preset);
-    case HdrEncoding::IsoGainMapJpeg: {
-      auto encoded = encode_gain_map_jpeg_measured(images, metadata, options.quality,
-          result.frame ? &*result.frame : nullptr);
-      result.stats = encoded.stats;
-      // A file without headroom declares only a token one; report none.
-      const float declared = rational_value(encoded.metadata.alternate_headroom);
-      result.headroom_stops = declared > kEpsilon ? declared : 0.0F;
-      result.gain_min = encoded.stats.gain_min_stops;
-      result.gain_max = encoded.stats.gain_max_stops;
-      return std::move(encoded.bytes);
-    }
+    case HdrEncoding::IsoGainMapJpeg:
+      return encode_gain_map_jpeg(images, metadata, options.quality);
     case HdrEncoding::AvifPq:
     case HdrEncoding::AvifHlg:
       return encode_avif(photo, metadata, options.quality, options.encoding);
@@ -524,7 +516,7 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
       sink->on_progress({"encode", path, .7, {}});
     }
     check_cancelled();
-    auto bytes = encode_for(photo, gain, staged.image.metadata, options, result);
+    auto bytes = encode_for(photo, gain, staged.image.metadata, options);
     const auto codec_finished = Clock::now();
     photo = {};
     gain = {};  // Free the float base and gain before the decoder allocates.

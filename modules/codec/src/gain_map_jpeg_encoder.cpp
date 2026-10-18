@@ -11,9 +11,7 @@
 
 #include <jpeglib.h>
 #include "hyperdr/container/gain_map_jpeg.hpp"
-#include "hyperdr/gainmap/reconstruct.hpp"
 #include "hyperdr/gainmap/rendition.hpp"
-#include "hyperdr/image/frame.hpp"
 #include <lcms2.h>
 
 #include <algorithm>
@@ -166,7 +164,7 @@ std::vector<std::uint8_t> compress_jpeg(const std::uint8_t* pixels, std::uint32_
 
 std::vector<std::uint8_t> make_base_jpeg(const FloatImage& image,
                                          const PhotoMetadata& metadata, int quality,
-                                         bool clamp_srgb, bool full_chroma) {
+                                         bool clamp_srgb) {
   image.require_consistent("gain-map JPEG base");
   check_jpeg_dimensions(image.width, image.height);
   if (image.channels != 3) throw std::invalid_argument("gain-map JPEG base must be RGB");
@@ -193,7 +191,7 @@ std::vector<std::uint8_t> make_base_jpeg(const FloatImage& image,
   // Both modes therefore store Display P3 primaries with the sRGB transfer.
   const auto icc = codec::display_p3_profile();
   return compress_jpeg(rgb.data(), image.width, image.height, 3, JCS_RGB, quality, &exif,
-                       &icc, full_chroma);
+                       &icc);
 }
 
 std::vector<std::uint8_t> make_gain_jpeg(const FloatImage& image, int quality) {
@@ -239,7 +237,7 @@ std::vector<std::uint8_t> encode_sdr_jpeg(const FloatImage& image,
 }
 
 namespace {
-std::array<unsigned, 3> decode_jpeg_for_verification(const std::uint8_t* bytes, std::size_t size, FloatImage* linear = nullptr) {
+std::array<unsigned, 3> decode_jpeg_for_verification(const std::uint8_t* bytes, std::size_t size) {
   struct State { jpeg_decompress_struct info{}; JpegError error{}; };
   auto state = std::make_unique<State>();
   auto& info = state->info;
@@ -254,20 +252,12 @@ std::array<unsigned, 3> decode_jpeg_for_verification(const std::uint8_t* bytes, 
     jpeg_mem_src(&info, bytes, static_cast<unsigned long>(size));
     jpeg_read_header(&info, TRUE);
     const std::array<unsigned, 3> result{info.image_width, info.image_height, static_cast<unsigned>(info.num_components)};
-    if (linear) {
-      info.out_color_space = JCS_RGB;
-      *linear = FloatImage(info.image_width, info.image_height, 3);
-    }
     jpeg_start_decompress(&info);
     auto row = (*info.mem->alloc_sarray)(reinterpret_cast<j_common_ptr>(&info), JPOOL_IMAGE,
         info.output_width * info.output_components, 1);
     while (info.output_scanline < info.output_height) {
       check_cancelled();
-      const auto y = info.output_scanline;
       jpeg_read_scanlines(&info, row, 1);
-      if (linear) for (std::uint32_t x = 0; x < info.output_width; ++x)
-        for (unsigned c = 0; c < 3; ++c)
-          linear->at(x,y,c) = srgb_eotf(row[0][x*3+c] / 255.0F);
     }
     jpeg_finish_decompress(&info);
     const bool warnings = info.err->num_warnings != 0;
@@ -304,79 +294,15 @@ std::vector<std::uint8_t> encode_gain_map_jpeg(const GainMapResult& images,
   if (images.gain_map.channels != channels) {
     throw std::invalid_argument("gain-map JPEG recovery pixels and metadata must have matching channels");
   }
-  // A full-resolution gain map exists to put every HDR pixel back where it was
-  // (an HDR source's own highlights). Subsampling the base's chroma would throw
-  // away half of the colour resolution that map multiplies, which measured on a
-  // Sony HLG frame as most of the remaining error at saturated highlight edges.
-  // A mathematical map is low-frequency and keeps the smaller 4:2:0 base.
-  const bool full_resolution_gain = images.gain_map.width == images.base_linear.width &&
-                                     images.gain_map.height == images.base_linear.height;
-  auto base_bytes = make_base_jpeg(images.base_linear, metadata, quality,
-                                   images.clamp_srgb, full_resolution_gain);
-  // The format guidance recommends 85-90 for the recovery map. Keep HDR
-  // reconstruction stable even when the caller deliberately lowers base quality.
-  auto gain_bytes = make_gain_jpeg(images.gain_map, std::max(85, quality));
+  // The gain map relates the two uncompressed renditions; it does not correct
+  // the base's compression error. The base is therefore an ordinary 4:2:0 JPEG
+  // like an SDR export, and the HDR rendition is as faithful as that base.
+  auto base_bytes = make_base_jpeg(images.base_linear, metadata, quality, images.clamp_srgb);
+  // A lower base quality should not also coarsen the gain, so the gain map
+  // never drops below 90.
+  auto gain_bytes = make_gain_jpeg(images.gain_map, std::max(90, quality));
 
   return assemble_gain_map_jpeg(base_bytes, gain_bytes, images.metadata);
-}
-
-GainMapJpegEncoding encode_gain_map_jpeg_measured(const GainMapResult& images,
-    const PhotoMetadata& metadata, int quality, const FrameLayout* frame) {
-  if (quality < 0 || quality > 100) throw std::invalid_argument("quality must be in [0,100]");
-  validate_gain_map_metadata(images.metadata, GainMapWriterProfile::iso_generic);
-  images.base_linear.require_consistent("gain-map JPEG base");
-  images.gain_map.require_consistent("gain-map JPEG recovery map");
-  check_jpeg_dimensions(images.base_linear.width, images.base_linear.height);
-  const bool full_resolution = images.base_linear.width == images.gain_map.width &&
-      images.base_linear.height == images.gain_map.height;
-  auto primary = make_base_jpeg(images.base_linear, metadata, quality, images.clamp_srgb, full_resolution);
-  if (!(rational_value(images.metadata.alternate_headroom) > kEpsilon)) {
-    // A map declaring no headroom (only the token one) has no HDR to restore:
-    // its zero gain stands as packaged, and correcting the base's compression
-    // error would only store noise.
-    GainMapJpegEncoding out;
-    out.bytes = assemble_gain_map_jpeg(primary, make_gain_jpeg(images.gain_map, std::max(85, quality)),
-                                       images.metadata);
-    out.metadata = images.metadata;
-    out.stats = images.stats;
-    return out;
-  }
-  PhotoRenditions pair;
-  pair.hdr = reconstruct_gain_map(images.base_linear, images.gain_map, images.metadata,
-      rational_value(images.metadata.alternate_headroom));
-  (void)decode_jpeg_for_verification(primary.data(), primary.size(), &pair.sdr);
-  if (frame) {
-    if (frame->width != pair.sdr.width || frame->height != pair.sdr.height)
-      throw std::invalid_argument("JPEG frame mask dimensions do not match the base");
-    // JPEG recovery corrects the photograph only. The mat remains the decoded
-    // SDR primary; no correction in the mat is derived from HDR photo pixels.
-    for (std::uint32_t y = 0; y < pair.sdr.height; ++y) {
-      check_cancelled();
-      for (std::uint32_t x = 0; x < pair.sdr.width; ++x) {
-        if (x >= frame->photo.x && x - frame->photo.x < frame->photo.width &&
-            y >= frame->photo.y && y - frame->photo.y < frame->photo.height) continue;
-        for (unsigned c = 0; c < 3; ++c) pair.hdr.at(x,y,c) = pair.sdr.at(x,y,c);
-      }
-    }
-  }
-  pair.stats = images.stats;
-  pair.stats.headroom_stops = rational_value(images.metadata.alternate_headroom);
-  pair.dual_rendition = true;
-  pair.authored_gain_channels = images.gain_map.channels;
-  for (unsigned c = 0; c < 3; ++c) {
-    const auto channel = gain_map_channel(images.metadata, images.gain_map.channels == 1 ? 0 : c);
-    pair.authored_gain_map.base_offset[c] = rational_value(channel.base_offset);
-    pair.authored_gain_map.alternate_offset[c] = rational_value(channel.alternate_offset);
-  }
-  auto corrected = gain_map_from_renditions(std::move(pair), GainMapWriterProfile::iso_generic);
-  // Recovery codes contain sharp channel corrections for the lossy primary.
-  // Unit quantizers keep those corrections inside the HDR peak/error limits.
-  auto gain = make_gain_jpeg(corrected.gain_map, 100);
-  GainMapJpegEncoding out;
-  out.bytes = assemble_gain_map_jpeg(primary, gain, corrected.metadata);
-  out.metadata = std::move(corrected.metadata);
-  out.stats = corrected.stats;
-  return out;
 }
 
 void verify_gain_map_jpeg(const std::vector<std::uint8_t>& bytes) {

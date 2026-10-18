@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <stdexcept>
 #include <vector>
 namespace hyperdr {
@@ -171,6 +172,61 @@ GainMapResult exact_gain_map_from_renditions(PhotoRenditions images) {
 // exp2(): libultrahdr turns it into a linear capacity that must exceed 1.
 constexpr Rational kMinimumAlternateHeadroom{1, 1U << 23};
 
+// The stored form of quantized RGB gain codes, decided by their content so the
+// same pair always gives the same bytes. Three channels whose codes differ by
+// at most one step anywhere carry no colour of their own: they become one
+// channel holding the rounded mean. A map that is one code everywhere (a
+// rendering with no headroom) becomes one channel shrunk by the largest of
+// 16, 8, 4 and 2 that divides both sides; reconstruction is unchanged.
+// One channel needs one set of offsets, so differing offsets keep RGB.
+void shrink_gain_codes(FloatImage& codes, const std::array<float, 3>& base_offsets,
+                       const std::array<float, 3>& alternate_offsets) {
+  const auto width = codes.width, height = codes.height;
+  const bool common = base_offsets[0] == base_offsets[1] && base_offsets[0] == base_offsets[2] &&
+                      alternate_offsets[0] == alternate_offsets[1] &&
+                      alternate_offsets[0] == alternate_offsets[2];
+  if (codes.channels == 3 && !common) return;
+  const auto step = [&](std::size_t i) { return std::lround(codes.pixels[i] * 255.0F); };
+  const auto first = step(0);
+  std::vector<std::uint8_t> row_spread(height), row_constant(height);
+  parallel_for_rows(height, [&](std::uint32_t y) {
+    bool narrow = true, constant = true;
+    for (std::uint32_t x = 0; x < width; ++x) {
+      const auto i = (static_cast<std::size_t>(y) * width + x) * codes.channels;
+      long low = step(i), high = low;
+      for (unsigned c = 1; c < codes.channels; ++c) {
+        low = std::min(low, step(i + c)); high = std::max(high, step(i + c));
+      }
+      narrow = narrow && high - low <= 1;
+      constant = constant && low == first && high == first;
+    }
+    row_spread[y] = narrow; row_constant[y] = constant;
+  });
+  const auto all = [](const std::vector<std::uint8_t>& rows) {
+    return std::all_of(rows.begin(), rows.end(), [](std::uint8_t v) { return v != 0; });
+  };
+  if (all(row_constant)) {
+    std::uint32_t factor = 1;
+    for (std::uint32_t f : {16U, 8U, 4U, 2U}) {
+      if (width % f == 0 && height % f == 0) { factor = f; break; }
+    }
+    FloatImage shrunk(width / factor, height / factor, 1);
+    std::fill(shrunk.pixels.begin(), shrunk.pixels.end(), static_cast<float>(first) / 255.0F);
+    codes = std::move(shrunk);
+    return;
+  }
+  if (codes.channels != 3 || !all(row_spread)) return;
+  FloatImage mono(width, height, 1);
+  parallel_for_rows(height, [&](std::uint32_t y) {
+    for (std::uint32_t x = 0; x < width; ++x) {
+      const auto pixel = static_cast<std::size_t>(y) * width + x;
+      const long sum = step(pixel * 3) + step(pixel * 3 + 1) + step(pixel * 3 + 2);
+      mono.pixels[pixel] = static_cast<float>((sum + 1) / 3) / 255.0F;
+    }
+  });
+  codes = std::move(mono);
+}
+
 // Preserve both endpoints when grading gives them independent RGB ratios.
 // Offsets use the same SDR-white-relative units on encode and reconstruction;
 // they keep a LUT's zero-valued channel representable without infinite gain.
@@ -182,7 +238,7 @@ GainMapResult rgb_gain_map_from_renditions(PhotoRenditions images) {
   // requested format, honestly: zero gain everywhere, so the HDR rendition is
   // the SDR one, with no correction of anything.
   const bool no_headroom = !(images.stats.headroom_stops > kEpsilon);
-  const unsigned channels = images.dual_rendition && images.authored_gain_channels == 1 ? 1 : 3;
+  unsigned channels = images.dual_rendition && images.authored_gain_channels == 1 ? 1 : 3;
   std::array<float, 3> base_offsets{offset, offset, offset}, alternate_offsets{offset, offset, offset};
   if (images.dual_rendition &&
       (images.authored_gain_map.base_offset[0] != images.authored_gain_map.base_offset[1] ||
@@ -237,6 +293,8 @@ GainMapResult rgb_gain_map_from_renditions(PhotoRenditions images) {
          i < static_cast<std::size_t>(y + 1) * width * channels; ++i)
       codes.pixels[i] = std::round(encode_gain_code(codes.pixels[i], gamma) * 255.0F) / 255.0F;
   });
+  if (!images.fixed_gain_channels) shrink_gain_codes(codes, base_offsets, alternate_offsets);
+  channels = codes.channels;
   metadata.base_offset = offset_rational(base_offsets[0]);
   metadata.alternate_offset = offset_rational(alternate_offsets[0]);
   metadata.base_headroom = {0, 1};

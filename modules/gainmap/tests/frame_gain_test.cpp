@@ -21,7 +21,7 @@ void require(bool ok, const char* message) {
   if (!ok) throw std::runtime_error(message);
 }
 
-PhotoRenditions render_scene() {
+PhotoRenditions render_scene(bool coloured) {
   // A dim gradient with a bright window: plenty of gain in one corner and
   // none in the rest, like a real photograph.
   FloatImage source(96, 64, 3);
@@ -38,7 +38,15 @@ PhotoRenditions render_scene() {
   InputDescription input;
   input.domain = InputDomain::kDisplayReferredHdr;
   input.headroom = 6.0F;
-  return render_renditions(source, options, {}, input, RenderTarget::Hdr);
+  auto photo = render_renditions(source, options, {}, input, RenderTarget::Hdr);
+  // A coloured gain (blue lifted less than red, as a LUT can make it) keeps
+  // the ISO writer's three channels; a neutral one is stored as one.
+  if (coloured)
+    for (std::size_t i = 0; i < photo.hdr.pixels.size(); i += 3) {
+      const float sdr = photo.sdr.pixels[i + 2], hdr = photo.hdr.pixels[i + 2];
+      if (hdr > sdr) photo.hdr.pixels[i + 2] = sdr + 0.6F * (hdr - sdr);
+    }
+  return photo;
 }
 
 PhotoRenditions framed(PhotoRenditions photo, const FrameSpec& spec, const FrameLayout& layout) {
@@ -51,6 +59,7 @@ PhotoRenditions framed(PhotoRenditions photo, const FrameSpec& spec, const Frame
 struct Packaged {
   FloatImage base, hdr;
   float headroom{};
+  unsigned channels{};
 };
 
 Packaged package(PhotoRenditions photo, GainMapWriterProfile profile) {
@@ -58,7 +67,7 @@ Packaged package(PhotoRenditions photo, GainMapWriterProfile profile) {
   return {result.base_linear,
           reconstruct_gain_map(result.base_linear, result.gain_map, result.metadata,
                                result.headroom_stops, nullptr, result.clamp_srgb),
-          result.headroom_stops};
+          result.headroom_stops, result.gain_map.channels};
 }
 
 float luminance(const FloatImage& image, std::uint32_t x, std::uint32_t y) {
@@ -75,10 +84,11 @@ void as_authored(PhotoRenditions& photo) {
   photo.authored_gain_map.alternate_offset.fill(1.0F / 64.0F);
 }
 
-void check(const char* name, bool hdr_is_source, GainMapWriterProfile profile, bool authored = false) {
+void check(const char* name, bool hdr_is_source, GainMapWriterProfile profile, bool authored = false,
+           bool coloured = false, unsigned channels = 1) {
   const auto spec = parse_frame_spec(json::parse(R"({"background": "#F4F2EC", "margins": 0.08,
       "caption": 0.12, "shadow": {"opacity": 0.12, "blur": 0.02, "offset": 0.006}})"));
-  auto photo = render_scene();
+  auto photo = render_scene(coloured);
   photo.hdr_is_source = hdr_is_source;
   if (authored) as_authored(photo);
   const auto layout = layout_frame(spec, photo.sdr.width, photo.sdr.height);
@@ -115,6 +125,8 @@ void check(const char* name, bool hdr_is_source, GainMapWriterProfile profile, b
           "the photograph must keep its peak");
   require(std::abs(frame.headroom - plain.headroom) < 0.02F, "declared headroom must not change");
   require(photo_peak > 4.0F, "the scene must actually use its headroom");
+  require(plain.channels == channels && frame.channels == channels,
+          "the gain map must be stored with the expected channel count");
 }
 
 }  // namespace
@@ -123,6 +135,7 @@ int main() {
   try {
     check("adaptive", false, GainMapWriterProfile::apple_strict);
     check("iso rgb", false, GainMapWriterProfile::iso_generic);
+    check("iso rgb colour", false, GainMapWriterProfile::iso_generic, false, true, 3);
     check("hdr source", true, GainMapWriterProfile::apple_strict);
     check("model adaptive", false, GainMapWriterProfile::apple_strict, true);
     check("model iso rgb", false, GainMapWriterProfile::iso_generic, true);

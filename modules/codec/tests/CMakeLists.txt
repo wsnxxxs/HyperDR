@@ -22,6 +22,13 @@ if(HYPERDR_WITH_CODECS)
   # codec paths fails to compile, which is how it came to be skipped silently.
   hyperdr_add_test(codec_test LINK HyperDR::codec heif avif PNG::PNG lcms2::lcms2)
   hyperdr_add_test(heif_parallel_test LINK HyperDR::codec heif)
+  # VideoToolbox HEVC: 77 (skipped) only where no encoder exists at all.
+  hyperdr_add_test(hevc_vt_test LINK HyperDR::codec)
+  if(TARGET hevc_vt_test)
+    target_include_directories(hevc_vt_test PRIVATE ${PROJECT_SOURCE_DIR}/modules/codec/src)
+    set_tests_properties(hevc_vt_test PROPERTIES SKIP_RETURN_CODE 77)
+    hyperdr_copy_libultrahdr(hevc_vt_test)
+  endif()
   hyperdr_add_test(alpha_decode_test LINK HyperDR::codec heif avif)
   if(TARGET heif_parallel_test)
     set_tests_properties(heif_parallel_test PROPERTIES SKIP_RETURN_CODE 77)

@@ -6,6 +6,15 @@ extension FrameColor {
     var color: Color { Color(.displayP3, red: red, green: green, blue: blue) }
 }
 
+enum FrameCaptionSpace { static let name = "FrameCaptionBand" }
+
+private struct FrameLineFramesKey: PreferenceKey {
+    static let defaultValue: [Int: CGRect] = [:]
+    static func reduce(value: inout [Int: CGRect], nextValue: () -> [Int: CGRect]) {
+        value.merge(nextValue()) { $1 }
+    }
+}
+
 /// The caption band under the photograph. The preview draws it at screen size;
 /// export renders this same view at one point per pixel into the overlay the
 /// engine composites, so both carry identical typography.
@@ -15,6 +24,9 @@ struct FrameCaptionView: View {
     let layout: FramePixelLayout
     /// Points per engine pixel.
     let scale: CGFloat
+    /// Told where each line was laid out, by line id, in the band's own
+    /// coordinates; tests use it to check that no line is cut off.
+    var onLineFrames: (([Int: CGRect]) -> Void)? = nil
 
     private var reference: CGFloat { CGFloat(layout.referenceEdge) * scale }
 
@@ -22,19 +34,42 @@ struct FrameCaptionView: View {
         let band = CGSize(width: CGFloat(layout.caption.width) * scale,
                           height: CGFloat(layout.caption.height) * scale)
         let place = placement(in: band.height)
+        let margins = settings.style.geometry.applying(layout.variant)
+        // Long text shrinks to 70% of its size, then is cut with an ellipsis,
+        // on one line: a column never grows past its share of the band.
+        let centerWidth = max(0, band.width - CGFloat(margins.left + margins.right) * reference)
+        let leftPad = CGFloat(layout.photo.x) * scale
+        let rightPad = CGFloat(layout.width - layout.photo.x - layout.photo.width) * scale
         ZStack(alignment: place.alignment) {
-            column(caption.center, alignment: .center)
-                .frame(maxWidth: .infinity, alignment: .center)
-            column(caption.leading, alignment: .leading)
-                .padding(.leading, CGFloat(layout.photo.x) * scale)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            column(caption.trailing, alignment: .trailing)
-                .padding(.trailing, CGFloat(layout.width - layout.photo.x - layout.photo.width) * scale)
-                .frame(maxWidth: .infinity, alignment: .trailing)
+            if !caption.center.isEmpty {
+                column(caption.center, alignment: .center)
+                    .frame(maxWidth: centerWidth)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+            if !caption.leading.isEmpty || !caption.trailing.isEmpty {
+                // Two columns keep a gap between them; the right one takes at
+                // most 40% of the card, the left one the rest.
+                HStack(alignment: place.alignment.vertical, spacing: 0.02 * reference) {
+                    if caption.leading.isEmpty {
+                        Spacer(minLength: 0)
+                    } else {
+                        column(caption.leading, alignment: .leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if !caption.trailing.isEmpty {
+                        column(caption.trailing, alignment: .trailing)
+                            .frame(maxWidth: band.width * 0.4, alignment: .trailing)
+                    }
+                }
+                .padding(.leading, leftPad)
+                .padding(.trailing, rightPad)
+            }
         }
         .frame(width: band.width, height: place.height, alignment: place.alignment)
         .padding(.top, place.offset)
         .frame(width: band.width, height: band.height, alignment: .top)
+        .coordinateSpace(name: FrameCaptionSpace.name)
+        .onPreferenceChange(FrameLineFramesKey.self) { onLineFrames?($0) }
         .accessibilityElement(children: .combine)
     }
 
@@ -48,7 +83,8 @@ struct FrameCaptionView: View {
     private func placement(in height: CGFloat) -> Placement {
         switch caption.placement {
         case .middle(let abovePaperMargin):
-            let margin = abovePaperMargin ? settings.style.geometry.bottom * reference : 0
+            let margin = abovePaperMargin
+                ? settings.style.geometry.applying(layout.variant).bottom * reference : 0
             return Placement(offset: 0, height: max(0, height - margin), alignment: .center)
         case .top(let fraction):
             let offset = fraction * reference
@@ -59,12 +95,23 @@ struct FrameCaptionView: View {
     private func column(_ lines: [FrameCaptionLine], alignment: HorizontalAlignment) -> some View {
         VStack(alignment: alignment, spacing: 0) {
             ForEach(lines) { line in
-                Text(verbatim: line.text)
+                // Text that fits is set at its size, exactly; only text over the
+                // column's width shrinks (to 70%), then is cut with an ellipsis.
+                let text = Text(verbatim: line.text)
                     .font(font(line))
                     .tracking(line.tracking * line.size * reference)
                     .foregroundStyle((line.ink == .primary ? settings.tone.primaryInk : settings.tone.secondaryInk).color)
                     .lineLimit(1)
-                    .fixedSize()
+                ViewThatFits(in: .horizontal) {
+                    text.fixedSize()
+                    text.minimumScaleFactor(0.7)
+                }
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear.preference(key: FrameLineFramesKey.self,
+                                                   value: [line.id: proxy.frame(in: .named(FrameCaptionSpace.name))])
+                        }
+                    }
                     .padding(.top, line.gap * reference)
             }
         }

@@ -27,7 +27,14 @@ enum FrameStyle: String, CaseIterable, Identifiable, Codable {
                           shadow: FrameShadow(opacity: 0.08, blur: 0.010, offset: 0.003))
         case .story:
             FrameGeometry(top: 0.055, right: 0.055, bottom: 0.04, left: 0.055, caption: 0.16,
-                          aspect: FrameAspect(width: 9, height: 16, topShare: 0.42))
+                          aspect: FrameAspect(width: 9, height: 16, topShare: 0.42),
+                          variants: [
+                              // A panorama: a landscape card, margins and caption by the long edge.
+                              FrameVariant(name: "wide", minRatio: 2.5, margin: 0.02, caption: 0.06,
+                                           referencesLongEdge: true),
+                              // A very tall photo: the 9:16 canvas gives way to the plain mat.
+                              FrameVariant(name: "tall", maxRatio: 0.125),
+                          ])
         case .instant:
             FrameGeometry(top: 0.045, right: 0.045, bottom: 0.03, left: 0.045, caption: 0.19)
         case .hairline:
@@ -45,6 +52,32 @@ struct FrameGeometry: Equatable {
     var caption: Double
     var aspect: FrameAspect? = nil
     var shadow: FrameShadow? = nil
+    var variants: [FrameVariant] = []
+
+    /// What the engine lays out for the variant it picked: the margins, band
+    /// and reference the variant overrides, and no forced canvas proportion.
+    func applying(_ name: String?) -> FrameGeometry {
+        guard let name, let variant = variants.first(where: { $0.name == name }) else { return self }
+        var result = self
+        if let margin = variant.margin { result.top = margin; result.right = margin; result.bottom = margin; result.left = margin }
+        if let caption = variant.caption { result.caption = caption }
+        result.aspect = nil
+        result.variants = []
+        return result
+    }
+}
+
+/// An alternative layout the engine picks by the photograph's width / height:
+/// `minRatio` for photographs wider than it, `maxRatio` for narrower. Keys it
+/// does not override come from the style. See the engine's `variants`.
+struct FrameVariant: Equatable {
+    var name: String
+    var minRatio: Double? = nil
+    var maxRatio: Double? = nil
+    /// The same mat on all four sides.
+    var margin: Double? = nil
+    var caption: Double? = nil
+    var referencesLongEdge = false
 }
 
 /// A fixed canvas proportion; `topShare` of the added height goes above the photo.
@@ -135,6 +168,22 @@ struct FrameSettings: Equatable, Codable {
             "caption": .number(hasCaption ? geometry.caption : 0),
             "reference": .string("short"),
         ]
+        if !geometry.variants.isEmpty {
+            frame["variants"] = .object(Dictionary(uniqueKeysWithValues: geometry.variants.map { variant in
+                var entry: [String: JSONValue] = ["aspect": .null]
+                if let minRatio = variant.minRatio { entry["minRatio"] = .number(minRatio) }
+                if let maxRatio = variant.maxRatio { entry["maxRatio"] = .number(maxRatio) }
+                if let margin = variant.margin {
+                    entry["margins"] = .object(["top": .number(margin), "right": .number(margin),
+                                                "bottom": .number(margin), "left": .number(margin)])
+                }
+                // Without a caption the band goes in every layout, not just the default.
+                if let caption = variant.caption { entry["caption"] = .number(hasCaption ? caption : 0) }
+                else if !hasCaption { entry["caption"] = .number(0) }
+                if variant.referencesLongEdge { entry["reference"] = .string("long") }
+                return (variant.name, .object(entry))
+            }))
+        }
         if let aspect = geometry.aspect {
             frame["aspect"] = .object(["width": .number(Double(aspect.width)),
                                        "height": .number(Double(aspect.height)),
@@ -195,9 +244,32 @@ struct FrameCaption: Equatable {
     var isEmpty: Bool { leading.isEmpty && center.isEmpty && trailing.isEmpty }
 }
 
+extension FrameCaption {
+    /// The height the text takes below the photograph, in units of the
+    /// reference edge, with lines `lineHeight` times their size tall.
+    func contentHeight(lineHeight: Double = 1.2) -> Double {
+        var offset = 0.0
+        if case .top(let fraction) = placement { offset = fraction }
+        let columns = [leading, center, trailing].map { column in
+            column.reduce(0) { $0 + $1.gap + $1.size * lineHeight }
+        }
+        return offset + (columns.max() ?? 0)
+    }
+}
+
 extension FrameStyle {
+    /// The size of this style's smallest body text, per reference edge, when
+    /// the engine picked `variant`: what the preview keeps readable.
+    func bodySize(variant: String?) -> Double? {
+        self == .story && variant == "wide" ? 0.010 : nil
+    }
+
     /// The caption this style sets for these settings and this photograph.
-    func caption(_ settings: FrameSettings, facts: CaptureFacts) -> FrameCaption {
+    /// `variant` is the layout the engine picked (`FramePixelLayout.variant`);
+    /// `bandHeight` the caption band in units of the reference edge. When the
+    /// text at full spacing is taller than the band, story sets it tighter.
+    func caption(_ settings: FrameSettings, facts: CaptureFacts, variant: String? = nil,
+                 bandHeight: Double? = nil) -> FrameCaption {
         var caption = FrameCaption()
         var next = 0
         func line(_ text: String?, _ ink: FrameCaptionLine.Ink, _ face: FrameCaptionLine.Face,
@@ -212,15 +284,35 @@ extension FrameStyle {
         let date = settings.showsDate ? facts.dateLine : nil
 
         switch self {
+        case .story where variant == "wide":
+            // Two columns in a short band, centred in it above the bottom mat.
+            caption.leading = [
+                line(exposure, .primary, .text, 0.014),
+                line(settings.showsCamera ? facts.cameraLine : nil, .secondary, .text, 0.010, gap: 0.004),
+            ].compactMap { $0 }
+            caption.trailing = [
+                line(signature, .primary, .signature, 0.016),
+                line(date, .secondary, .text, 0.008, gap: 0.003),
+            ].compactMap { $0 }
+            caption.placement = .middle(abovePaperMargin: true)
         case .gallery, .story:
             let large = self == .story
-            caption.center = [
-                line(exposure, .primary, .text, large ? 0.03 : 0.024),
-                line(settings.showsCamera ? facts.cameraLine : nil, .secondary, .text, large ? 0.02 : 0.0175, gap: 0.012),
-                line(date, .secondary, .text, 0.016, gap: 0.008),
-                line(signature, .primary, .signature, large ? 0.036 : 0.03, gap: large ? 0.05 : 0.022),
-            ].compactMap { $0 }
+            func column(compact: Bool) -> [FrameCaptionLine] {
+                next = 0
+                return [
+                    line(exposure, .primary, .text, large ? 0.03 : 0.024),
+                    line(settings.showsCamera ? facts.cameraLine : nil, .secondary, .text, large ? 0.02 : 0.0175, gap: 0.012),
+                    line(date, .secondary, .text, 0.016, gap: 0.008),
+                    line(signature, .primary, .signature, large ? (compact ? 0.030 : 0.036) : 0.03,
+                         gap: large ? (compact ? 0.030 : 0.05) : 0.022),
+                ].compactMap { $0 }
+            }
+            caption.center = column(compact: false)
             caption.placement = large ? .top(0.045) : .middle(abovePaperMargin: false)
+            if large, let bandHeight, caption.contentHeight() > bandHeight {
+                caption.center = column(compact: true)
+                caption.placement = .top(0.035)
+            }
         case .label:
             caption.leading = [
                 line(settings.showsCamera ? facts.cameraLabel : nil, .primary, .semibold, 0.019, tracking: 0.14),

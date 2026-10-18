@@ -34,14 +34,17 @@ struct FrameExportPlan {
     let layout: FramePixelLayout
 
     /// Nil when the frame is off. Throws the engine's error when the style
-    /// cannot frame a photo of this size (story around a wide panorama).
+    /// rejects the frame (a hand-written spec, or a canvas over its size limits).
     static func make(settings: FrameSettings, facts: CaptureFacts,
                      photoSize: PixelSize) throws -> FrameExportPlan? {
         guard settings.isEnabled else { return nil }
-        let caption = settings.style.caption(settings, facts: facts)
-        let frame = settings.engineFrame(hasCaption: !caption.isEmpty)
+        // Whether there is text does not depend on the layout the engine picks.
+        let hasCaption = !settings.style.caption(settings, facts: facts).isEmpty
+        let frame = settings.engineFrame(hasCaption: hasCaption)
         let layout = FramePixelLayout(try Engine.frameLayout(frame: frame, photoWidth: photoSize.width,
                                                              photoHeight: photoSize.height))
+        let caption = settings.style.caption(settings, facts: facts, variant: layout.variant,
+                                             bandHeight: Double(layout.caption.height) / Double(layout.referenceEdge))
         let overlay = !caption.isEmpty && layout.caption.height > 0
             ? try FrameOverlayRenderer.png(caption, settings: settings, layout: layout) : nil
         return FrameExportPlan(frame: frame, overlayPNG: overlay, layout: layout)

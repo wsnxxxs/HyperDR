@@ -43,6 +43,9 @@ def result(function, *args):
 
 
 class Contract(unittest.TestCase):
+
+
+
     def test_schema(self):
         self.assertEqual(result(LIB.hyperdr_schema_json),
                          subprocess.check_output([CLI, "schema"]))
@@ -266,6 +269,48 @@ class EngineContract(unittest.TestCase):
         finally:
             LIB.hyperdr_preview_close(session)
 
+    def test_curve_with_frame_path_remains_pure(self):
+        plain = result(LIB.hyperdr_curve_json, b"{}", 33)
+        with_path = result(LIB.hyperdr_curve_json,
+            encoded({"command": {"frame": "/missing/frame.json"}}), 33)
+        self.assertEqual(plain, with_path)
+
+    def test_missing_frame_overlay_names_path_before_decoding(self):
+        with tempfile.TemporaryDirectory(prefix="hyperdr-missing-overlay-") as temporary:
+            root = Path(temporary)
+            directory = root / "directory.png"
+            directory.mkdir()
+            for overlay in (root / "caption.png", directory):
+                with self.subTest(overlay=overlay.name):
+                    spec = {"caption": 0.1, "overlay": overlay.name}
+                    frame_file = root / "frame.json"
+                    frame_file.write_text(json.dumps(spec))
+                    output = root / "output"
+                    source = root / "missing.jpg"
+                    cli = subprocess.run([CLI, "convert", str(source), "--output", str(output),
+                                          "--frame", str(frame_file)], capture_output=True)
+                    self.assertEqual(cli.returncode, 2)
+                    self.assertIn(b"frame: overlay", cli.stderr)
+                    self.assertIn(os.fsencode(overlay), cli.stderr)
+                    request = {"command": {"input": str(source), "output": str(output),
+                                          "frame": str(frame_file)}}
+                    value = ctypes.c_void_p()
+                    error = ctypes.POINTER(Error)()
+                    status = LIB.hyperdr_convert(self.engine, encoded(request), CALLBACK(), None,
+                                                 None, ctypes.byref(value), ctypes.byref(error))
+                    try:
+                        self.assertNotEqual(status, 0)
+                        self.assertFalse(value.value)
+                        self.assertEqual(error.contents.code, b"invalid_options", error.contents.message)
+                        self.assertIn(error.contents.message, cli.stderr)
+                    finally:
+                        LIB.hyperdr_string_free(value)
+                        LIB.hyperdr_error_free(error)
+                    self.assertFalse(output.exists())
+                    # Synchronous geometry remains independent of filesystem state.
+                    self.assertTrue(result(LIB.hyperdr_frame_layout,
+                                           encoded({**spec, "overlay": str(overlay)}), 6000, 4000))
+
     def test_raw_and_heic_source_geometry_and_raw_metadata(self):
         if not self.capabilities["codecs"]:
             self.skipTest("requires codec-enabled build")
@@ -327,7 +372,7 @@ class EngineContract(unittest.TestCase):
                                     status = function(session, encoded({"command": command}), None,
                                                       ctypes.byref(output), ctypes.byref(error))
                                     self.assertNotEqual(status, 0)
-                                    self.assertEqual(error.contents.code, b"invalid_options")
+                                    self.assertEqual(error.contents.code, b"invalid_options", error.contents.message)
                                     self.assertFalse(output.owner)
                                     if not missing:
                                         self.assertIn(diagnostic, error.contents.message)
@@ -578,6 +623,145 @@ class EngineContract(unittest.TestCase):
                         self.assertEqual(report["settings"], cli_report["settings"])
                         self.assertEqual(report["color_lut"], cli_report["color_lut"])
 
+
+    def test_frame_resources_are_one_snapshot_for_the_whole_batch(self):
+        if not self.capabilities["codecs"]:
+            self.skipTest("requires codec-enabled build")
+        for mutation in ("spec", "file-overlay", "inline-overlay"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory(prefix="hyperdr-frame-snapshot-") as temporary:
+                root = Path(temporary)
+                inputs = root / "inputs"
+                inputs.mkdir()
+                for name in ("first", "second"):
+                    png(inputs / (name + ".png"), 128, 96)
+                overlay = root / "caption.png"
+                a = {"margins": .05}
+                b = {"margins": .2}
+                if mutation != "spec":
+                    a.update(caption=.1, overlay=str(overlay))
+                    layout = json.loads(result(LIB.hyperdr_frame_layout, encoded(a), 128, 96))
+                    width, height = layout["caption"]["width"], layout["caption"]["height"]
+                    png(overlay, width, height)
+                    overlay_a = overlay.read_bytes()
+                    # A valid, visibly different PNG of exactly the same size.
+                    def chunk(kind, data):
+                        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+                    overlay_b = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+                        + chunk(b"IDAT", zlib.compress((b"\0" + b"\xff\0\0" * width) * height)) + chunk(b"IEND", b""))
+                frame = root / "frame.json"
+                frame.write_text(json.dumps(a))
+                request = json.loads(result(LIB.hyperdr_normalize_options, encoded({
+                    "input": str(inputs), "output": str(root / "baseline"),
+                    "report": str(root / "report.json"), "encoding": "sdr-jpeg"})))
+                request["command"]["frame"] = a if mutation == "inline-overlay" else str(frame)
+
+                def convert(callback=CALLBACK()):
+                    report = json.loads(result(LIB.hyperdr_convert, self.engine, encoded(request), callback, None, None))
+                    self.assertEqual(len(report["files"]), 2)
+                    self.assertTrue(all(f["success"] for f in report["files"]), report)
+                    return report["files"]
+
+                def images(files):
+                    return {Path(f["output"]).name: Path(f["output"]).read_bytes() for f in files}
+
+                baseline = convert()
+                expected = images(baseline)
+                request["command"]["output"] = str(root / "race")
+                events, errors = [], []
+                phase = "decode" if mutation == "spec" else "process"
+                def change_resource(_, message):
+                    try:
+                        if json.loads(message)["phase"] == phase:
+                            events.append(phase)
+                            if mutation == "spec":
+                                frame.write_text(json.dumps(b))
+                            else:
+                                overlay.write_bytes(overlay_b)
+                    except Exception as error:
+                        errors.append(error)
+                raced = convert(CALLBACK(change_resource))
+                self.assertFalse(errors)
+                self.assertEqual(len(events), 2)
+                self.assertTrue(images(raced) == expected, "both batch files must use A's entry snapshot")
+                self.assertTrue(all(f["frame"] == baseline[0]["frame"] for f in raced))
+                frame.write_text(json.dumps(a))
+                if mutation != "spec":
+                    overlay.write_bytes(overlay_a)
+                request["command"]["skip_existing"] = True
+                resumed = convert()
+                self.assertTrue(all(f["skipped"] for f in resumed))
+                self.assertEqual(images(resumed), expected)
+                if mutation != "inline-overlay":
+                    arguments = json.loads(result(LIB.hyperdr_command_line, encoded(request)))[1:]
+                    subprocess.run([CLI, *arguments, "--skip-existing"], capture_output=True, check=True)
+                    cli_files = json.loads((root / "report.json").read_bytes())["files"]
+                    self.assertTrue(all(f["skipped"] for f in cli_files))
+                    self.assertEqual(images(cli_files), expected)
+                # A new call must capture B, rather than retain the old snapshot.
+                if mutation == "spec":
+                    frame.write_text(json.dumps(b))
+                else:
+                    overlay.write_bytes(overlay_b)
+                changed = convert()
+                self.assertTrue(all(not f["skipped"] for f in changed))
+                self.assertNotEqual(images(changed), expected)
+
+    def test_frame_file_argv_parity_and_resume_content_identity(self):
+        if not self.capabilities["codecs"]:
+            self.skipTest("requires codec-enabled build")
+        with tempfile.TemporaryDirectory(prefix="hyperdr-frame-file-") as temporary:
+            root = Path(temporary)
+            source, output, report_path = root / "sample.png", root / "output", root / "report.json"
+            png(source, 128, 96)
+            spec = {"margins": 0.05, "caption": 0.1, "overlay": "caption.png"}
+            layout = json.loads(result(LIB.hyperdr_frame_layout, encoded(spec), 128, 96))
+            overlay = root / "caption.png"
+            png(overlay, layout["caption"]["width"], layout["caption"]["height"])
+            frame_file = root / "边框 with spaces.json"
+            frame_file.write_text(json.dumps(spec))
+            request = json.loads(result(LIB.hyperdr_normalize_options, encoded({
+                "input": str(source), "output": str(output), "report": str(report_path),
+                "encoding": "sdr-jpeg"})))
+            request["command"]["frame"] = str(frame_file)
+            arguments = json.loads(result(LIB.hyperdr_command_line, encoded(request)))[1:]
+            self.assertEqual(arguments[arguments.index("--frame") + 1], str(frame_file))
+            report, cli_report = self.compare_export(request, arguments, output / "sample-hyperdr.jpg", report_path)
+            self.assertEqual(report["schema"], 12)
+            self.assertEqual(report["files"][0]["frame"]["width"], layout["width"])
+            self.assertEqual(report["files"][0]["frame"], cli_report["files"][0]["frame"])
+            def resume():
+                subprocess.run([CLI, *arguments, "--skip-existing"], capture_output=True, check=True)
+                return json.loads(report_path.read_bytes())["files"][0]
+            self.assertTrue(resume()["skipped"])
+            relocated = root / "relocated"
+            relocated.mkdir()
+            (relocated / "caption.png").write_bytes(overlay.read_bytes())
+            other_spec = relocated / "frame.json"
+            other_spec.write_text(json.dumps(spec, indent=2))
+            arguments[arguments.index("--frame") + 1] = str(other_spec)
+            self.assertTrue(resume()["skipped"], "equivalent content at another path must resume")
+            target = output / "sample-hyperdr.jpg"
+            before = target.read_bytes()
+            # A valid PNG with identical dimensions but changed pixel values.
+            data = (relocated / "caption.png").read_bytes()
+            offset = data.index(b"IDAT")
+            size = struct.unpack_from(">I", data, offset - 4)[0]
+            rows = bytearray(zlib.decompress(data[offset + 4:offset + 4 + size]))
+            stride = layout["caption"]["width"] * 3 + 1
+            for row in range(layout["caption"]["height"]):
+                for column in range(layout["caption"]["width"]):
+                    rows[row * stride + 1 + column * 3] ^= 255
+            payload = zlib.compress(rows)
+            chunk = b"IDAT" + payload
+            (relocated / "caption.png").write_bytes(data[:offset - 4] + struct.pack(">I", len(payload))
+                + chunk + struct.pack(">I", zlib.crc32(chunk)) + data[offset + 8 + size:])
+            self.assertFalse(resume()["skipped"], "changed overlay bytes must re-export")
+            self.assertNotEqual(before, target.read_bytes())
+            self.assertTrue(resume()["skipped"])
+            spec["background"] = "#000000"
+            other_spec.write_text(json.dumps(spec))
+            self.assertFalse(resume()["skipped"], "changed frame content must re-export")
+
     def test_normalized_ai_decimal_export_matches_cli(self):
         if not self.capabilities["codecs"] or not self.capabilities["models"]["runtimeAvailable"]:
             self.skipTest("requires codec-enabled build with native model runtime")
@@ -704,8 +888,8 @@ class EngineContract(unittest.TestCase):
                     self.assertEqual("".join(e["text"] for e in events).encode(), cli.stderr)
                     self.assertEqual(events[0]["phase"], "decode")
                     self.assertEqual(events[-1]["phase"], "complete")
-                    # Report remains the existing schema 11.
-                    self.assertEqual(report["schema"], 11)
+                    # Presentation-frame geometry extends the report to schema 12.
+                    self.assertEqual(report["schema"], 12)
                 models = json.loads(subprocess.check_output([CLI, "model-list", "--json"]))
                 # Core-only ncnn is intentionally absent. The model table owns
                 # availability; no second registry is maintained by this test.

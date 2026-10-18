@@ -111,6 +111,16 @@ struct Sha256 {
 
 }  // namespace
 
+std::string sha256_hex(std::span<const std::uint8_t> bytes) {
+  Sha256 hash;
+  for (std::size_t offset = 0; offset < bytes.size(); offset += 65536) {
+    check_cancelled();
+    const auto chunk = bytes.subspan(offset, std::min<std::size_t>(65536, bytes.size() - offset));
+    hash.update(chunk.data(), chunk.size());
+  }
+  return hash.finish();
+}
+
 std::string sha256_file_hex(const std::filesystem::path& path) {
   std::ifstream input(path, std::ios::binary);
   if (!input) throw std::runtime_error("cannot open file for hashing");

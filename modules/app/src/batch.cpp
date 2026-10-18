@@ -11,6 +11,7 @@
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/foundation/file_io.hpp"
+#include "hyperdr/foundation/configuration_error.hpp"
 #include "hyperdr/foundation/hash.hpp"
 #include "hyperdr/gainmap/external.hpp"
 #include "hyperdr/gainmap/gain_map.hpp"
@@ -21,6 +22,7 @@
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <fstream>
 #include <sstream>
 #include "hyperdr/foundation/cancel.hpp"
 #include <new>
@@ -267,14 +269,38 @@ Staged decode_stage(const std::filesystem::path& path,
   return staged;
 }
 
+// Freeze external frame inputs before fingerprinting, callbacks or photo I/O.
+void prepare_frame_snapshot(ConvertOptions& options) {
+  if (options.frame_snapshot || (!options.frame && options.frame_spec_path.empty())) return;
+  auto snapshot = std::make_shared<FrameSnapshot>();
+  configuration_resource([&] {
+    if (!options.frame_spec_path.empty()) {
+      snapshot->specification_bytes = read_binary_file(options.frame_spec_path);
+      const auto& bytes = snapshot->specification_bytes;
+      snapshot->spec = parse_frame_spec(json::parse(std::string_view(
+          reinterpret_cast<const char*>(bytes.data()), bytes.size())), options.frame_spec_path.parent_path());
+    } else {
+      snapshot->spec = *options.frame;
+    }
+    validate_frame_resources(snapshot->spec);
+    if (!snapshot->spec.overlay.empty()) {
+      snapshot->overlay_bytes = read_binary_file(snapshot->spec.overlay);
+      snapshot->overlay_sha256 = sha256_hex(snapshot->overlay_bytes);
+      snapshot->overlay = decode_frame_overlay(snapshot->overlay_bytes);
+    }
+  });
+  options.frame = snapshot->spec;
+  options.frame_spec_path.clear();
+  options.frame_snapshot = std::move(snapshot);
+}
+
 // Places the presentation frame around both renditions. Every frame pixel is
 // identical in SDR and HDR, so whichever writer packages the pair stores zero
 // gain there and the frame shows at its SDR value on every HDR display.
-FrameLayout frame_photo(PhotoRenditions& photo, const FrameSpec& spec) {
+FrameLayout frame_photo(PhotoRenditions& photo, const FrameSnapshot& snapshot) {
+  const auto& spec = snapshot.spec;
   const auto layout = layout_frame(spec, photo.sdr.width, photo.sdr.height);
-  std::optional<FrameOverlay> overlay;
-  if (!spec.overlay.empty()) overlay = decode_frame_overlay(spec.overlay);
-  const FrameOverlay* ink = overlay ? &*overlay : nullptr;
+  const FrameOverlay* ink = spec.overlay.empty() ? nullptr : &snapshot.overlay;
   photo.sdr = frame_image(photo.sdr, spec, layout, ink);
   if (!photo.hdr.pixels.empty()) photo.hdr = frame_image(photo.hdr, spec, layout, ink);
   // A frame pixel is the same in both renditions, which is exactly what the
@@ -401,7 +427,7 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     const bool predicted_gain = !options.ai_model_path.empty() || external.has_value();
     if (options.frame) {
       if (predicted_gain && target == RenderTarget::Hdr) adopt_as_authored(photo, gain.metadata);
-      result.frame = frame_photo(photo, *options.frame);
+      result.frame = frame_photo(photo, *options.frame_snapshot);
     }
     if (is_sdr_encoding(options.encoding) && resolved_sdr_gamut(options) == ColorGamut::kSrgb)
       fit_sdr_to_srgb(photo.sdr);
@@ -572,20 +598,46 @@ FileResult convert_file(const std::filesystem::path& input,
                         const ConvertOptions& requested_options,
                         const std::string& fingerprint, ProgressSink* sink) {
   auto options = requested_options;
+  const bool frame_prepared = options.frame_snapshot != nullptr;
+  prepare_frame_snapshot(options);
   apply_output_color_options(options);
-  auto staged = decode_stage(input, options, fingerprint);
+  // run_conversion passes the fingerprint of its shared snapshot. Standalone
+  // callers must fingerprint the resources captured here, not an earlier read.
+  const auto captured_fingerprint = !frame_prepared && options.frame_snapshot
+      ? settings_fingerprint(options) : fingerprint;
+  auto staged = decode_stage(input, options, captured_fingerprint);
   check_cancelled();
   if (sink && staged.decoded) {
     const auto path = path_utf8(input);
     sink->on_progress({"process", path, .3, {}});
   }
-  finish_stage(staged, options, fingerprint, sink);
+  finish_stage(staged, options, captured_fingerprint, sink);
   return staged.result;
+}
+
+FrameSpec read_frame_spec(const std::filesystem::path& path) {
+  return configuration_resource([&] {
+    const auto bytes = read_binary_file(path);
+    auto frame = parse_frame_spec(json::parse(std::string_view(
+        reinterpret_cast<const char*>(bytes.data()), bytes.size())), path.parent_path());
+    validate_frame_resources(frame);
+    return frame;
+  });
+}
+
+void validate_frame_resources(const FrameSpec& frame) {
+  if (frame.overlay.empty()) return;
+  std::error_code error;
+  if (!std::filesystem::is_regular_file(frame.overlay, error) ||
+      !std::ifstream(frame.overlay, std::ios::binary).is_open()) {
+    throw std::invalid_argument("frame: overlay is not a readable regular file: " + path_utf8(frame.overlay));
+  }
 }
 
 int run_conversion(const ConvertOptions& requested_options, ProgressSink* sink, std::string* report) {
   check_cancelled();
   auto options = requested_options;
+  prepare_frame_snapshot(options);
   apply_output_color_options(options);
   validate_convert_options(options);
   const auto files = discover_input_files(options);

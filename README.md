@@ -156,7 +156,7 @@ and look-control ranges are in
 What the renderer promises about its output, and the manual scene checklist a
 release still has to pass, are in [docs/rendering.md](docs/rendering.md).
 
-## Report schema 11
+## Report schema 12
 
 The `--report` contents, geometry fields, and headroom fields are documented in
 [docs/report-schema.md](docs/report-schema.md), alongside the machine-readable

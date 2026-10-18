@@ -1250,7 +1250,10 @@ PreviewJpeg encode_preview_jpeg(const std::filesystem::path& path,
 }
 
 FrameOverlay decode_frame_overlay(const std::filesystem::path& path) {
-  const auto bytes = read_binary_file(path);
+  return decode_frame_overlay(read_binary_file(path));
+}
+
+FrameOverlay decode_frame_overlay(const std::vector<std::uint8_t>& bytes) {
   PngReader reader(bytes);
   auto* png = reader.png;
   auto* info = reader.info;

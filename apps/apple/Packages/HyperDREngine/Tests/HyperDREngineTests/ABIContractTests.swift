@@ -288,6 +288,32 @@ private final class Events: @unchecked Sendable {
         _ = try await session.renderFrame(EngineRequest(settings: ["preview_max_edge": .number(32)]))
     }
 
+    @Test func frameFileExportDecodesSchema12Geometry() async throws {
+        let fixture = try Fixture()
+        let spec: [String: JSONValue] = ["margins": .number(0.05), "caption": .number(0.1)]
+        let layout = try Engine.frameLayout(frame: spec, photoWidth: 128, photoHeight: 96)
+        let path = fixture.directory.appendingPathComponent("frame with spaces.json")
+        try JSONEncoder().encode(spec).write(to: path)
+        var request = try Engine.normalize(["input": .string(fixture.source.path),
+            "output": .string(fixture.directory.appendingPathComponent("export").path),
+            "report": .string(fixture.directory.appendingPathComponent("report.json").path),
+            "encoding": .string("sdr-jpeg")])
+        try request.setCommand("frame", .string(path.path))
+        let argv = try Engine.commandLine(request)
+        let index = try #require(argv.firstIndex(of: "--frame"))
+        #expect(argv[index + 1] == path.path)
+        #expect(request.adapter == "panel-v1")
+        let engine = try await Engine()
+        let report = try await engine.convert(request)
+        let file = try #require(report.files.first)
+        #expect(file.success)
+        let frame = try #require(file.frame)
+        #expect(frame.width == layout.width && frame.height == layout.height)
+        #expect(frame.photo == layout.photo)
+        let document = try #require(JSONSerialization.jsonObject(with: report.json) as? [String: Any])
+        #expect(document["schema"] as? Int == 12)
+    }
+
     @Test func exportBytesProgressAndActiveCancellation() async throws {
         let fixture = try Fixture()
         let engine = try await Engine()

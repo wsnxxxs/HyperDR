@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -20,6 +21,16 @@ namespace hyperdr {
 enum class DecodeIntent {
   Export,
   Preview,
+};
+
+// Prepared once per conversion, shared read-only by its files and option copies.
+// The digest and decoded caption both consume overlay_bytes, never its path.
+struct FrameSnapshot {
+  FrameSpec spec;
+  std::vector<std::uint8_t> specification_bytes;
+  std::vector<std::uint8_t> overlay_bytes;
+  std::string overlay_sha256;
+  FrameOverlay overlay;
 };
 
 struct ConvertOptions {
@@ -55,6 +66,10 @@ struct ConvertOptions {
   // renditions, so it carries no gain. Interactive previews ignore it: the app
   // draws the frame around its live canvas from the same layout.
   std::optional<FrameSpec> frame;
+  // Deferred until conversion: pure request/curve computations never read it.
+  std::filesystem::path frame_spec_path;
+  // Internal to one conversion; request decoding leaves this empty.
+  std::shared_ptr<const FrameSnapshot> frame_snapshot;
   // Optional raw gain-grid output from an external model. The JSON sidecar is
   // required because the raw file carries neither dimensions nor scale.
   std::filesystem::path external_gain_path;

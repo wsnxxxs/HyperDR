@@ -234,4 +234,35 @@ extension LUTLibraryTests {
         } catch let error as HyperDRError { #expect(error.code == "lut_invalid") }
         await env.sessions.close(photo.id)
     }
+
+    /// The review probe (K3-K4-K6-rereview §1a): rewrite the session copy in
+    /// place with the same number of bytes and put the mtime back to the
+    /// nanosecond. Only the ctime moves, and that must be enough to rehash.
+    @Test func sameSizeRewriteWithRestoredMtimeIsRejected() async throws {
+        let env = try LUTEnvironment()
+        let photo = try await env.photo()
+        let entry = try await env.luts.importLUT(env.source(), into: photo.id)
+        let resolver = try env.optionResolver()
+        _ = try resolver.resolveExport(env.options(entry), session: photo)   // identity recorded
+        let path = try #require(try env.resolver.resolve(.string(entry.id.rawValue), session: photo.id))
+        let fd = open(path.path, O_RDWR | O_CLOEXEC)
+        try #require(fd >= 0)
+        defer { close(fd) }
+        var before = stat()
+        try #require(fstat(fd, &before) == 0)
+        let replacement = Data("LUT_1D_SIZE 2\n0 0 0\n1 .7 .8\n".utf8)
+        try #require(replacement.count == creativeCube.count)
+        let written = replacement.withUnsafeBytes { pwrite(fd, $0.baseAddress, $0.count, 0) }
+        try #require(written == replacement.count)
+        var times = [before.st_atimespec, before.st_mtimespec]
+        try #require(futimens(fd, &times) == 0)
+        var after = stat()
+        try #require(fstat(fd, &after) == 0)
+        #expect(after.st_size == before.st_size)
+        #expect(after.st_mtimespec.tv_sec == before.st_mtimespec.tv_sec
+            && after.st_mtimespec.tv_nsec == before.st_mtimespec.tv_nsec)
+        let code = await lutCode { _ = try resolver.resolveExport(env.options(entry), session: photo) }
+        #expect(code == "lut_invalid", "a same-size rewrite with the mtime restored kept LUT A's identity")
+        await env.sessions.close(photo.id)
+    }
 }

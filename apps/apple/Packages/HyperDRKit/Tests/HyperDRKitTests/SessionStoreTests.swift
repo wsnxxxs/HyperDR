@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 import HyperDREngine
 import Testing
@@ -46,6 +47,25 @@ private final class TestEnvironment {
     func sessionDirectory(_ id: SessionID) -> URL {
         support.appendingPathComponent("sessions").appendingPathComponent(id.rawValue)
     }
+}
+
+/// Rewrites `url` in place with as many bytes as it had, then puts the
+/// access and modification times back to the nanosecond: only the ctime moves.
+private func rewriteKeepingTimes(_ url: URL, _ bytes: [UInt8]) throws {
+    let fd = open(url.path, O_RDWR | O_CLOEXEC)
+    try #require(fd >= 0)
+    defer { close(fd) }
+    var before = stat()
+    try #require(fstat(fd, &before) == 0)
+    try #require(Int(before.st_size) == bytes.count)
+    try #require(bytes.withUnsafeBytes { pwrite(fd, $0.baseAddress, $0.count, 0) } == bytes.count)
+    var times = [before.st_atimespec, before.st_mtimespec]
+    try #require(futimens(fd, &times) == 0)
+    var after = stat()
+    try #require(fstat(fd, &after) == 0)
+    try #require(after.st_size == before.st_size
+        && after.st_mtimespec.tv_sec == before.st_mtimespec.tv_sec
+        && after.st_mtimespec.tv_nsec == before.st_mtimespec.tv_nsec)
 }
 
 private func sha256(_ bytes: [UInt8]) -> String {
@@ -167,6 +187,58 @@ private func sha256(_ bytes: [UInt8]) -> String {
         #expect(refreshed.sha256 == sha256(changed))
         #expect(refreshed.sha256 != first.sha256)
         await store.close(first.id)
+    }
+
+    /// Stricter than the Python reference, which keys on size + mtime_ns only:
+    /// a same-size rewrite with the mtime restored changes the digest, both for
+    /// an open session and for a session activated by a new store.
+    @Test func sameSizeRewriteWithRestoredMtimeChangesTheDigest() async throws {
+        let environment = try TestEnvironment()
+        let source = try environment.source("photo.png")
+        let store = environment.store()
+        let first = try await store.open(source)
+        var changed = pngBytes
+        changed[changed.count - 1] = 0x21
+        try rewriteKeepingTimes(source, changed)
+        let refreshed = try await store.session(first.id)
+        #expect(refreshed.id == first.id)
+        #expect(refreshed.sha256 == sha256(changed))
+        await store.close(first.id)
+
+        var again = pngBytes
+        again[again.count - 1] = 0x22
+        try rewriteKeepingTimes(source, again)
+        let otherStore = environment.store()
+        let activated = try await otherStore.session(first.id)
+        #expect(activated.sha256 == sha256(again))
+        await otherStore.close(first.id)
+    }
+
+    /// The digest is reused while the source facts are unchanged, and computed
+    /// again only after they change (`test_external_digest_rehashes_only_after_size_or_mtime_changes`).
+    /// A chmod moves the ctime, so it costs one more hash; that is accepted.
+    @Test func unchangedSourceIsNotHashedAgain() async throws {
+        let environment = try TestEnvironment()
+        let source = try environment.source("photo.png")
+        let store = environment.store()
+        let photo = try await store.open(source)
+        #expect(await store.digestComputations == 1)
+        _ = try await store.session(photo.id)
+        _ = try await store.open(source)
+        _ = try await store.session(photo.id)
+        #expect(await store.digestComputations == 1, "unchanged source was hashed again")
+
+        let changed = pngBytes + [0x03]
+        try Data(changed).write(to: source)
+        #expect(try await store.session(photo.id).sha256 == sha256(changed))
+        #expect(await store.digestComputations == 2)
+        _ = try await store.session(photo.id)
+        #expect(await store.digestComputations == 2)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: source.path)
+        #expect(try await store.session(photo.id).sha256 == sha256(changed))
+        #expect(await store.digestComputations == 3)
+        await store.close(photo.id)
     }
 
     @Test func missingSourceAndCorruptBookmarkReportSourceMissing() async throws {

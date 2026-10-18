@@ -134,6 +134,36 @@ public actor SessionStore {
         var format: InputFormat
         var createdAt: Date
         var lastUsedAt: Date
+        // Absent in records written before the ctime check: such a record
+        // never matches, so its source is hashed once more and then recorded.
+        var changedAt: Int64? = nil
+        var device: Int64? = nil
+        var inode: UInt64? = nil
+
+        var facts: SourceFacts? {
+            guard let changedAt, let device, let inode else { return nil }
+            return SourceFacts(size: byteCount, modifiedAt: modifiedAt, changedAt: changedAt,
+                               device: device, inode: inode)
+        }
+        mutating func record(_ facts: SourceFacts) {
+            byteCount = facts.size
+            modifiedAt = facts.modifiedAt
+            changedAt = facts.changedAt
+            device = facts.device
+            inode = facts.inode
+        }
+    }
+    /// What says the source's bytes are unchanged without reading them. Stricter
+    /// than the Python reference (`session.py`, size + mtime_ns): the ctime
+    /// cannot be set back from user space, so a same-size rewrite that restores
+    /// the mtime is still noticed. A chmod or xattr change also moves the ctime
+    /// and costs one more hash; that is accepted.
+    struct SourceFacts: Equatable {
+        let size: Int64
+        let modifiedAt: Int64
+        let changedAt: Int64
+        let device: Int64
+        let inode: UInt64
     }
     private struct LastSession: Codable { let sessionID: SessionID }
     private struct PendingExport: Codable {
@@ -172,8 +202,7 @@ public actor SessionStore {
         }
     }
     private struct CachedDigest {
-        let size: Int64
-        let modifiedAt: Int64
+        let facts: SourceFacts
         let digest: String
     }
 
@@ -200,6 +229,8 @@ public actor SessionStore {
     private var openingPaths: Set<String> = []
     private var exporting: [SessionID: Set<ExportID>] = [:]
     private var digestCache: [String: CachedDigest] = [:]
+    /// How many times a source was read in full to hash it (tests).
+    private(set) var digestComputations = 0
 
     public init(configuration: KitConfiguration, formats: InputFormats) {
         self.init(configuration: configuration, formats: formats,
@@ -295,9 +326,9 @@ public actor SessionStore {
     private func performOpen(source: URL, originalURL: URL, lease: SecurityScopeLease,
                              token: UUID) async throws -> PhotoSession {
         do {
-            let (size, modifiedAt) = try fileFacts(source)
+            let facts = try fileFacts(source)
             let format = try formats.classify(source)
-            let digest = try await digest(for: source, size: size, modifiedAt: modifiedAt)
+            let digest = try await digest(for: source, facts: facts)
             guard openingFlights[source.path]?.token == token, !Task.isCancelled else {
                 throw CancellationError()
             }
@@ -306,8 +337,7 @@ public actor SessionStore {
             let stored: StoredSession
             if var reusable = try reusableSession(path: source.path, digest: digest, now: now) {
                 reusable.sourceBookmark = bookmark
-                reusable.byteCount = size
-                reusable.modifiedAt = modifiedAt
+                reusable.record(facts)
                 reusable.format = format
                 reusable.lastUsedAt = now
                 try save(reusable)
@@ -317,9 +347,11 @@ public actor SessionStore {
                 let directory = try sessionDirectory(id)
                 try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
                 try createResourceDirectories(directory)
-                let created = StoredSession(id: id, sourcePath: source.path, sourceBookmark: bookmark,
-                    displayName: source.lastPathComponent, byteCount: size, modifiedAt: modifiedAt,
-                    sha256: digest, format: format, createdAt: now, lastUsedAt: now)
+                var created = StoredSession(id: id, sourcePath: source.path, sourceBookmark: bookmark,
+                    displayName: source.lastPathComponent, byteCount: facts.size,
+                    modifiedAt: facts.modifiedAt, sha256: digest, format: format,
+                    createdAt: now, lastUsedAt: now)
+                created.record(facts)
                 try save(created)
                 stored = created
             }
@@ -329,11 +361,11 @@ public actor SessionStore {
             if let existing = openSessions[stored.id] {
                 lease.stop()
                 openSessions[stored.id] = OpenSession(url: existing.url, lease: existing.lease,
-                    session: session, modifiedAt: modifiedAt, generation: existing.generation,
+                    session: session, modifiedAt: facts.modifiedAt, generation: existing.generation,
                     lastPersistedAt: existing.lastPersistedAt)
             } else {
                 openSessions[stored.id] = OpenSession(url: source, lease: lease,
-                    session: session, modifiedAt: modifiedAt, generation: UUID(),
+                    session: session, modifiedAt: facts.modifiedAt, generation: UUID(),
                     lastPersistedAt: now)
             }
             return session
@@ -798,28 +830,31 @@ public actor SessionStore {
         return resolved
     }
 
-    private func fileAttributes(_ url: URL) throws -> (type: FileAttributeType, size: Int64, modified: Date) {
-        let values: [FileAttributeKey: Any]
-        do { values = try fileManager.attributesOfItem(atPath: url.path) }
-        catch {
+    /// fstat of the opened leaf: no FIFO wait (O_NONBLOCK), no symlink leaf.
+    private func fileFacts(_ url: URL) throws -> SourceFacts {
+        let fd = Darwin.open(url.path, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
+        guard fd >= 0 else {
+            let reason = String(cString: strerror(errno))
             throw HyperDRError(code: "source_unreadable",
-                message: "Unable to inspect \(url.lastPathComponent): \(error.localizedDescription)")
+                message: "Unable to inspect \(url.lastPathComponent): \(reason)")
         }
-        let type = values[.type] as? FileAttributeType ?? .typeUnknown
-        let size = (values[.size] as? NSNumber)?.int64Value ?? 0
-        let modified = values[.modificationDate] as? Date ?? .distantPast
-        return (type, size, modified)
-    }
-
-    private func fileFacts(_ url: URL) throws -> (size: Int64, modifiedAt: Int64) {
-        let values = try fileAttributes(url)
-        guard values.type == .typeRegular else {
+        defer { Darwin.close(fd) }
+        var info = stat()
+        guard fstat(fd, &info) == 0 else {
+            let reason = String(cString: strerror(errno))
+            throw HyperDRError(code: "source_unreadable",
+                message: "Unable to inspect \(url.lastPathComponent): \(reason)")
+        }
+        guard info.st_mode & S_IFMT == S_IFREG else {
             throw HyperDRError(code: "source_unreadable", message: "The source is not a regular file")
         }
-        guard values.size > 0 else {
+        guard info.st_size > 0 else {
             throw HyperDRError(code: "file_empty", message: "The source file is empty")
         }
-        return (values.size, Int64((values.modified.timeIntervalSince1970 * 1_000_000_000).rounded()))
+        func nanoseconds(_ time: timespec) -> Int64 { Int64(time.tv_sec) * 1_000_000_000 + Int64(time.tv_nsec) }
+        return SourceFacts(size: Int64(info.st_size), modifiedAt: nanoseconds(info.st_mtimespec),
+                           changedAt: nanoseconds(info.st_ctimespec),
+                           device: Int64(info.st_dev), inode: UInt64(info.st_ino))
     }
 
     private func pathComponents(_ url: URL) -> [String] { url.standardizedFileURL.pathComponents }
@@ -1218,16 +1253,15 @@ public actor SessionStore {
         do {
             guard activating[id]?.token == token else { throw CancellationError() }
             let source = try canonicalURL(url)
-            let (size, modifiedAt) = try fileFacts(source)
+            let facts = try fileFacts(source)
             var stored = initial
-            if size != stored.byteCount || modifiedAt != stored.modifiedAt || stored.sha256.isEmpty {
-                let digest = try await digest(for: source, size: size, modifiedAt: modifiedAt)
+            if stored.facts != facts || stored.sha256.isEmpty {
+                let digest = try await digest(for: source, facts: facts)
                 guard activating[id]?.token == token, !Task.isCancelled else {
                     throw CancellationError()
                 }
                 stored.sha256 = digest
-                stored.byteCount = size
-                stored.modifiedAt = modifiedAt
+                stored.record(facts)
                 stored.sourcePath = source.path
             }
             if stale { stored.sourceBookmark = try makeBookmark(url) }
@@ -1258,21 +1292,20 @@ public actor SessionStore {
         guard fileManager.fileExists(atPath: open.url.path) else {
             throw HyperDRError(code: "source_missing", message: "The source file has moved or been deleted")
         }
-        let (size, modifiedAt) = try fileFacts(open.url)
+        let facts = try fileFacts(open.url)
         var stored = try loadStored(id)
         guard openSessions[id]?.generation == generation, !Task.isCancelled else {
             throw CancellationError()
         }
         var sourceChanged = false
-        if size != stored.byteCount || modifiedAt != stored.modifiedAt || stored.sha256.isEmpty {
-            let digest = try await digest(for: open.url, size: size, modifiedAt: modifiedAt)
+        if stored.facts != facts || stored.sha256.isEmpty {
+            let digest = try await digest(for: open.url, facts: facts)
             guard openSessions[id]?.generation == generation, !Task.isCancelled else {
                 throw CancellationError()
             }
             sourceChanged = true
             stored.sha256 = digest
-            stored.byteCount = size
-            stored.modifiedAt = modifiedAt
+            stored.record(facts)
             stored.sourcePath = open.url.path
         }
         // Do not write a captured generation back after an await: close() or a
@@ -1300,8 +1333,8 @@ public actor SessionStore {
         let lease = SecurityScopeLease(url: url, access: access)
         defer { lease.stop() }
         let source = try canonicalURL(url)
-        let (size, modifiedAt) = try fileFacts(source)
-        if size == stored.byteCount && modifiedAt == stored.modifiedAt && !stored.sha256.isEmpty {
+        let facts = try fileFacts(source)
+        if stored.facts == facts && !stored.sha256.isEmpty {
             if stale {
                 var refreshed = stored
                 refreshed.sourceBookmark = try makeBookmark(url)
@@ -1309,23 +1342,23 @@ public actor SessionStore {
             }
             return stored.sha256
         }
-        let digest = try await digest(for: source, size: size, modifiedAt: modifiedAt)
+        let digest = try await digest(for: source, facts: facts)
         var updated = stored
         updated.sha256 = digest
-        updated.byteCount = size
-        updated.modifiedAt = modifiedAt
+        updated.record(facts)
         updated.sourcePath = source.path
         if stale { updated.sourceBookmark = try makeBookmark(url) }
         try save(updated)
         return digest
     }
 
-    private func digest(for url: URL, size: Int64, modifiedAt: Int64) async throws -> String {
-        if let cached = digestCache[url.path], cached.size == size, cached.modifiedAt == modifiedAt {
+    private func digest(for url: URL, facts: SourceFacts) async throws -> String {
+        if let cached = digestCache[url.path], cached.facts == facts {
             return cached.digest
         }
+        digestComputations += 1
         let digest = try await sha256(url)
-        digestCache[url.path] = CachedDigest(size: size, modifiedAt: modifiedAt, digest: digest)
+        digestCache[url.path] = CachedDigest(facts: facts, digest: digest)
         return digest
     }
 

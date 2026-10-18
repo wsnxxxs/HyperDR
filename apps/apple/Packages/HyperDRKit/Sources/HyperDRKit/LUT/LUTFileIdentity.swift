@@ -16,12 +16,17 @@ final class LUTFileIdentityCache: @unchecked Sendable {
         let size: off_t
         let seconds: Int
         let nanoseconds: Int
+        /// ctime cannot be set back from user space, so a same-size in-place
+        /// rewrite that restores mtime still changes the identity.
+        let changeSeconds: Int
+        let changeNanoseconds: Int
         init(_ file: Int32) throws {
             var info = stat()
             guard fstat(file, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
                   info.st_size > 0, info.st_size <= LUTFiles.maximumBytes else { throw LUTFiles.invalid() }
             device = info.st_dev; inode = info.st_ino; size = info.st_size
             seconds = info.st_mtimespec.tv_sec; nanoseconds = info.st_mtimespec.tv_nsec
+            changeSeconds = info.st_ctimespec.tv_sec; changeNanoseconds = info.st_ctimespec.tv_nsec
         }
     }
     private let lock = NSLock()

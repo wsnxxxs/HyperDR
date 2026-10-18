@@ -118,6 +118,9 @@ enum LUTFiles {
         } else {
             // Record the inode actually hashed/written, never a reopened name.
             // If the directory entry was swapped, resolve will detect it.
+            // Unlinking the staging name changes the ctime, so record after it
+            // or the first resolve would hash again.
+            unlinkat(directory, temporary, 0)
             try identities.rememberInstalled(fd, in: directory, id: id)
         }
         guard fsync(directory) == 0 else { throw invalid("Unable to sync LUT directory") }

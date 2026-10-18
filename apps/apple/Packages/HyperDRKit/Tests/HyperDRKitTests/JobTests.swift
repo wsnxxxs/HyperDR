@@ -389,6 +389,42 @@ private func failureCode(_ operation: () async throws -> Void) async -> String? 
     }
 }
 
+extension JobTests {
+    @Test func invalidSettingsLeaveThePublishedVersionAndJobUntouched() async throws {
+        let env = try JobEnvironment()
+        let photo = try await env.photo()
+        let runner = env.runner()
+        let unknown = JobID(rawValue: "unknown-job")
+        #expect(await runner.cancel(unknown) == false)
+        #expect(await runner.read(unknown, offset: 0) == nil)
+        let good = try await runner.start(session: photo.id, options: EditOptions())
+        try #require(await eventually { await runner.read(good.job, offset: 0)?.summary.done == true })
+        let saved = try await env.sessions.resultURL(photo.id, export: good.export)
+        #expect(await failureCode { _ = try await runner.start(session: photo.id,
+            options: EditOptions(["contrast": .string("wrong-type")])) } == "invalid_options")
+        #expect(await runner.read(good.job, offset: 0)?.summary.done == true)
+        #expect(await env.sessions.exports(for: photo.id).map(\.id) == [good.export])
+        #expect(try Data(contentsOf: saved) == Data([1,2,3]))
+    }
+}
+
+extension ExportTargetTests {
+    @Test func persistedRootFolderStillHasANonemptyPrivateLabel() async throws {
+        let env = try JobEnvironment()
+        _ = try await env.photo()
+        // Restore an existing directory preference. This only reads root; it
+        // never probes or creates a file in a system directory.
+        let bookmark = try URL(fileURLWithPath: "/", isDirectory: true).bookmarkData(
+            options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
+        try bookmark.write(to: env.configuration.supportDirectory.appendingPathComponent("export-folder.bookmark"))
+        let restored = ExportTarget(configuration: env.configuration, sessions: env.sessions)
+        let folder = await restored.folder
+        #expect(folder.ready)
+        #expect(folder.label == "…")
+        #expect(folder.label != "/")
+    }
+}
+
 private final class StagingInodeSwap: @unchecked Sendable {
     let destination: URL
     private let lock = NSLock()

@@ -83,3 +83,41 @@ private let avif = [UInt8](arrayLiteral: 0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x7
         }
     }
 }
+
+extension InputFormatsTests {
+    @Test func inputVocabularyUsesEverySchemaRawSuffixAndCanonicalRasterExtension() throws {
+        let schema = try Engine.schema()
+        let formats = try InputFormats(schema: schema)
+        let document = try #require(JSONSerialization.jsonObject(with: schema.rawJSON) as? [String: Any])
+        let inputs = try #require(document["inputs"] as? [String: Any])
+        let extensions = try #require(inputs["extensions"] as? [String: Any])
+        let raw = try #require(extensions["raw"] as? [String])
+        let raster = try #require(extensions["raster"] as? [String: [String]])
+        let canonical = try #require(inputs["canonicalExtensions"] as? [String: String])
+        #expect(!raw.isEmpty)
+        #expect(formats.prefixBytes == inputs["prefixBytes"] as? Int)
+        #expect(formats.prefixBytes >= 16)
+        try withTemporaryDirectory { directory in
+            for suffix in raw {
+                // RAW suffix takes precedence over TIFF/HEIF container magic.
+                let file = try write("capture" + suffix.uppercased(), heic, in: directory)
+                #expect(try formats.classify(file) == .raw(suffix.lowercased()))
+            }
+            for (family, aliases) in raster {
+                let suffix = try #require(canonical[family])
+                #expect(aliases.contains(suffix))
+                let header: [UInt8]
+                switch family {
+                case "jpeg": header = jpeg
+                case "png": header = png
+                case "tiff": header = tiff
+                default: header = heic
+                }
+                let file = try write("photo" + suffix, Array(header.prefix(formats.prefixBytes)), in: directory)
+                _ = try formats.classify(file)
+            }
+            let bigEndianTIFF = try write("big-endian.tiff", [0x4d, 0x4d, 0x00, 0x2a] + [UInt8](repeating: 0, count: 12), in: directory)
+            #expect(try formats.classify(bigEndianTIFF) == .tiff)
+        }
+    }
+}

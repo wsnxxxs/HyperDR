@@ -390,3 +390,70 @@ extension SessionStoreTests {
         print("review restore after explicit cleanup: starts/stops=\(access.counts)")
     }
 }
+
+extension SessionStoreTests {
+    @Test func publishedVersionsSurviveStoreRecreationAndRejectMissingFailedOrEscapingReports() async throws {
+        let env = try TestEnvironment()
+        let store = env.store()
+        let source = try env.source("versions.png")
+        let photo = try await store.open(source)
+        var published: [(ExportID, URL)] = []
+        for name in ["photo.jpg", "photo.heic", "photo.avif", "photo.tif"] {
+            let (id, directory) = try await store.prepareExport(photo.id, options: [:])
+            let output = directory.appendingPathComponent(name)
+            try Data(name.utf8).write(to: output)
+            let report = ConvertReport(json: Data("{}".utf8), files: [ReportFile(input: source.path,
+                output: output.path, success: true, skipped: false, message: "", width: 1, height: 1)])
+            _ = try await store.publishExport(photo.id, export: id, report: report)
+            published.append((id, output))
+        }
+        await store.close(photo.id)
+        let recreated = env.store()
+        _ = try await recreated.session(photo.id)
+        #expect(await recreated.exports(for: photo.id).count == 4)
+        for (id, url) in published {
+            #expect(try await recreated.resultURL(photo.id, export: id) == url)
+            #expect(try Data(contentsOf: url) == Data(url.lastPathComponent.utf8))
+        }
+        for mode in ["empty-report", "missing", "failed", "outside"] {
+            let (id, directory) = try await recreated.prepareExport(photo.id, options: [:])
+            let output = mode == "outside" ? env.root.appendingPathComponent("outside.jpg") : directory.appendingPathComponent("result.jpg")
+            if mode != "missing" { try Data([9]).write(to: output) }
+            let report = ConvertReport(json: Data("{}".utf8), files: [ReportFile(input: source.path,
+                output: output.path, success: mode != "failed", skipped: false, message: "", width: 1, height: 1)])
+            let supplied = mode == "empty-report" ? ConvertReport(json: Data("{}".utf8), files: []) : report
+            do { _ = try await recreated.publishExport(photo.id, export: id, report: supplied); Issue.record("Invalid report published: \(mode)") }
+            catch let error as HyperDRError { #expect(error.code == (mode == "outside" ? "invalid_options" : "internal_error")) }
+            await recreated.discardExport(photo.id, export: id)
+            #expect(await recreated.exports(for: photo.id).count == 4)
+        }
+        await recreated.close(photo.id)
+    }
+
+    @Test func cleanupIgnoresOldDirectoriesWhoseNamesAreNotSessionIDs() async throws {
+        let env = try TestEnvironment()
+        let store = env.store(ttl: .seconds(1))
+        let photo = try await store.open(try env.source("idle.png"))
+        await store.close(photo.id)
+        let stray = env.support.appendingPathComponent("sessions/not-a-session")
+        try FileManager.default.createDirectory(at: stray, withIntermediateDirectories: true)
+        let marker = stray.appendingPathComponent("keep-me")
+        try Data([42]).write(to: marker)
+        #expect(await store.cleanupExpired(now: Date().addingTimeInterval(100)) == 1)
+        #expect(try Data(contentsOf: marker) == Data([42]))
+    }
+}
+
+extension SessionStoreTests {
+    @Test func sessionIdentifiersRejectTraversalAndMalformedHex() async throws {
+        let env = try TestEnvironment()
+        let store = env.store()
+        for raw in ["", "..", "../etc", String(repeating: "z", count: 32), String(repeating: "0", count: 31)] {
+            let id = SessionID(rawValue: raw)
+            do { _ = try await store.session(id); Issue.record("Invalid session ID accepted: \(raw)") }
+            catch let error as HyperDRError { #expect(error.code == "invalid_options") }
+        }
+        do { _ = try await store.session(SessionID(rawValue: String(repeating: "0", count: 32))); Issue.record("Missing session accepted") }
+        catch let error as HyperDRError { #expect(error.code == "session_expired") }
+    }
+}

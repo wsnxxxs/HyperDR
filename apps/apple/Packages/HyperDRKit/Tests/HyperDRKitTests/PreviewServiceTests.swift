@@ -1236,3 +1236,53 @@ extension PreviewServiceTests {
         await service.detach(photo.id)
     }
 }
+
+extension PreviewServiceTests {
+    @Test func rawAndModelModePreviewsUseTheSameBudgetAndFailureReturnsTheSlot() async throws {
+        let renderer = FakeRenderer(frame: try await makeFrame())
+        let photo = fakeSession(.raw(".arw"))
+        let service = try makeService(renderer, photo, rawTimeout: .milliseconds(20))
+        try await service.attach(photo)
+        let held = try await service.rawGate.acquire(timeout: .seconds(1))
+        for modelMode in [false, true] {
+            var value = request(photo)
+            value.options["useModel"] = .bool(modelMode)
+            do { _ = try await service.render(value); Issue.record("Expected shared raw_budget") }
+            catch let error as HyperDRError { #expect(error.code == "raw_budget") }
+        }
+        #expect(await renderer.calls == 0)
+        await held.release()
+        await renderer.setFailure(HyperDRError(code: "decode_failed", message: "bad RAW"))
+        do { _ = try await service.render(request(photo)); Issue.record("Expected decode_failed") }
+        catch let error as HyperDRError { #expect(error.code == "decode_failed") }
+        await renderer.setFailure(nil)
+        let recovered = try await service.render(request(photo))
+        #expect(!recovered.fromCache)
+        #expect(await renderer.calls == 2, "The failed RAW render must return its gate ticket")
+        await service.detach(photo.id)
+    }
+    @Test func changingTheEngineBuildFingerprintInvalidatesPreviewIdentity() throws {
+        let photo = fakeSession()
+        let resolver = OptionResolver(schema: try Engine.schema(), knownModels: [:], maxEdgeCeiling: 2048)
+        let prepared = try resolver.resolve(request(photo), session: photo)
+        let old = try PreviewCacheKey(session: photo, request: prepared, buildFingerprint: "engine-before")
+        let new = try PreviewCacheKey(session: photo, request: prepared, buildFingerprint: "engine-after")
+        #expect(old != new)
+        #expect(old.sourceDigest == new.sourceDigest && old.requestJSON == new.requestJSON)
+    }
+}
+
+extension PreviewServiceTests {
+    @Test func degradedMetadataRetainsStatusAndReasons() async throws {
+        let frame = try await makeFrame()
+        var document = try #require(JSONSerialization.jsonObject(with: frame.metadataJSON) as? [String: Any])
+        document["status"] = "degraded"
+        document["degradationReasons"] = ["ultrahdr_decode_failed_sdr_fallback"] // E4r alias migration follows engine.
+        let bytes = try JSONSerialization.data(withJSONObject: document)
+        let decoded = try JSONDecoder().decode(PreviewMetadata.self, from: bytes)
+        #expect(decoded.status == "degraded")
+        #expect(decoded.degradationReasons == ["ultrahdr_decode_failed_sdr_fallback"])
+        #expect(decoded.colorSpace == frame.metadata.colorSpace)
+        #expect(decoded.width == frame.base.width && decoded.height == frame.base.height)
+    }
+}

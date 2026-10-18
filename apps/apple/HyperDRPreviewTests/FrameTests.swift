@@ -399,6 +399,33 @@ import UniformTypeIdentifiers
         }
     }
 
+    /// Text a little too long for its column is first set smaller -- down to
+    /// 70% -- and only then cut: the line is shorter than at full size, never
+    /// below the floor, and still within the column.
+    func testLongTextShrinksBeforeItIsCut() throws {
+        var settings = FrameSettings()
+        settings.isEnabled = true
+        settings.style = .story
+        settings.showsDate = true
+        let layout = try storyLayout(4000, 1000)
+        XCTAssertEqual(layout.variant, "wide")
+        func signatureFrame(_ signature: String) throws -> CGRect {
+            settings.signature = signature
+            let (caption, frames) = lineFrames(settings, facts: sony, layout: layout)
+            let line = try XCTUnwrap(caption.trailing.first { $0.face == .signature })
+            return try XCTUnwrap(frames[line.id])
+        }
+        let full = try signatureFrame("Alexandra Smith")
+        // Five repeats are about 20% over the column and fit once shrunk;
+        // eight still need the ellipsis after shrinking to the floor.
+        for count in [5, 8] {
+            let long = try signatureFrame(Array(repeating: "Alexandra Smith", count: count).joined(separator: " "))
+            XCTAssertLessThan(long.height, full.height * 0.85, "\(count): shrunk")
+            XCTAssertGreaterThan(long.height, full.height * 0.65, "\(count): not below 70%")
+            XCTAssertLessThanOrEqual(long.width, CGFloat(layout.width) * 0.4 + 0.5, "\(count): in its column")
+        }
+    }
+
     /// With no text there is nothing to keep readable: the preview fits the
     /// window instead of forcing a scroll at the minimum size.
     func testPreviewScaleIgnoresAnEmptyCaption() throws {

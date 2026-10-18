@@ -12,6 +12,11 @@ import HyperDREngine
 ///
 /// The photo itself is keyed by the session and its source digest, the
 /// engine build by the build fingerprint.
+///
+/// Decode settings that reach the model but are left out: the panel-v1
+/// adapter (`normalize_options`) always writes `look` as `photographic`, and
+/// never writes `raw_gain` or `raw_auto_bad_pixels`, so they stay at the
+/// engine's defaults. Key them once a caller can change them.
 enum ModelGainInputs {
     enum Location: String, Sendable { case settings, command }
 

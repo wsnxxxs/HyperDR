@@ -263,10 +263,10 @@ import UniformTypeIdentifiers
         do {
             var base = record.base
             if includingReference {
-                // photo.js: neutral settings, no model, blend highlight recovery.
+                // photo.js: neutral settings, no model; the adapter supplies
+                // blend highlight recovery.
                 var options = EditDefaults.reference(encoding: Self.encoding, workflow: base)
                 options["useModel"] = .bool(false)
-                options["highlightRecovery"] = .string("blend")
                 let result = try await kit.previews.render(PreviewRequest(session: id, options: options,
                     maxEdge: maxEdge, purpose: .reference))
                 try Task.checkCancellation()

@@ -2,12 +2,14 @@ import CoreGraphics
 import Foundation
 import HyperDREngine
 import ImageIO
+import Synchronization
 import Testing
 @testable import HyperDRKit
 
 /// Counts gain computations; the packet names the computation.
 private actor CountingGainRenderer: PreviewRenderSession {
     private(set) var requests: [EngineRequest] = []
+    private(set) var cancellations = 0
     private let delay: Duration
 
     init(delay: Duration = .zero) { self.delay = delay }
@@ -18,8 +20,9 @@ private actor CountingGainRenderer: PreviewRenderSession {
 
     func modelGain(_ request: EngineRequest) async throws -> Data {
         requests.append(request)
-        try await Task.sleep(for: delay)
-        return Data("gain-\(requests.count)".utf8)
+        let index = requests.count
+        do { try await Task.sleep(for: delay) } catch { cancellations += 1; throw error }
+        return Data("gain-\(index)".utf8)
     }
 
     func close() async {}
@@ -34,11 +37,33 @@ private func photo(_ url: URL = URL(fileURLWithPath: "/tmp/gain.png"), format: I
 private func service(_ photo: PhotoSession, cacheEntries: Int = 2, cacheBytes: Int = 4 << 20,
                      factory: @escaping @Sendable (PhotoSession) throws -> any PreviewRenderSession)
     throws -> PreviewService {
+    try service(provider: { photo }, cacheEntries: cacheEntries, cacheBytes: cacheBytes, factory: factory)
+}
+
+private func service(provider: @escaping @Sendable () -> PhotoSession, cacheEntries: Int = 2,
+                     cacheBytes: Int = 4 << 20,
+                     factory: @escaping @Sendable (PhotoSession) throws -> any PreviewRenderSession)
+    throws -> PreviewService {
     PreviewService(schema: try Engine.schema(), buildFingerprint: "test-build",
         knownModels: ["research-cnn-v1": true, "research-exif-v1": true], previewMaxEdge: 2048,
         previewTimeout: .seconds(5), rawDecodeSlots: 1, rawDecodeTimeout: .seconds(1),
         cacheEntries: cacheEntries, cacheBytes: cacheBytes,
-        sessionProvider: { _ in photo }, rendererFactory: factory)
+        sessionProvider: { _ in provider() }, rendererFactory: factory)
+}
+
+/// The session's source digest, which a test can replace mid-computation.
+private final class SourceDigest: Sendable {
+    private let digest = Mutex("digest-a")
+    var current: PhotoSession { digest.withLock { photo(digest: $0) } }
+    func replace(with value: String) { digest.withLock { $0 = value } }
+}
+
+private func waitUntil(_ condition: @Sendable () async -> Bool) async throws {
+    for _ in 0..<500 {
+        if await condition() { return }
+        try await Task.sleep(for: .milliseconds(5))
+    }
+    Issue.record("timed out waiting")
 }
 
 private let base = EditDefaults.initial(encoding: "adaptive", sourceDomain: nil, unadjusted: nil)
@@ -193,6 +218,61 @@ private func untaggedPNG(at url: URL) throws {
         await service.detach(photo.id)
         try await service.attach(photo)
         #expect(try await !service.modelGain(session: photo.id, options: base).fromCache)
+        await service.detach(photo.id)
+    }
+
+    /// Detaching cancels an inference in flight instead of waiting for it.
+    @Test func detachCancelsTheGainInFlight() async throws {
+        let renderer = CountingGainRenderer(delay: .seconds(10))
+        let photo = photo()
+        let service = try service(photo) { _ in renderer }
+        try await service.attach(photo)
+        let work = Task { try await service.modelGain(session: photo.id, options: base) }
+        try await waitUntil { await renderer.requests.count == 1 }
+        let elapsed = await ContinuousClock().measure { await service.detach(photo.id) }
+        #expect(elapsed < .seconds(2))
+        #expect(await renderer.cancellations == 1)
+        await #expect(throws: (any Error).self) { try await work.value }
+    }
+
+    /// Replacing the source cancels the old computation, and the new key
+    /// carries the new digest.
+    @Test func replacingTheSourceCancelsTheGainInFlight() async throws {
+        let renderer = CountingGainRenderer(delay: .seconds(10))
+        let source = SourceDigest()
+        let service = try service(provider: { source.current }) { _ in renderer }
+        try await service.attach(source.current)
+        let work = Task { try await service.modelGain(session: source.current.id, options: base) }
+        try await waitUntil { await renderer.requests.count == 1 }
+        source.replace(with: "digest-b")
+        var key: ModelGainKey?
+        let elapsed = try await ContinuousClock().measure {
+            key = try await service.modelGainKey(session: source.current.id, options: base)
+        }
+        #expect(elapsed < .seconds(2))
+        #expect(await renderer.cancellations == 1)
+        await #expect(throws: (any Error).self) { try await work.value }
+        #expect(key?.sourceDigest == "digest-b")
+        await service.detach(source.current.id)
+    }
+
+    /// A caller sharing a computation retries when the caller that started
+    /// it is cancelled.
+    @Test func aFollowerRetriesWhenTheLeaderIsCancelled() async throws {
+        let renderer = CountingGainRenderer(delay: .milliseconds(300))
+        let photo = photo()
+        let service = try service(photo) { _ in renderer }
+        try await service.attach(photo)
+        let leader = Task { try await service.modelGain(session: photo.id, options: base) }
+        try await waitUntil { await renderer.requests.count == 1 }
+        let follower = Task { try await service.modelGain(session: photo.id, options: base) }
+        try await Task.sleep(for: .milliseconds(50))
+        leader.cancel()
+        let result = try await follower.value
+        #expect(!result.fromCache)
+        #expect(result.packet == Data("gain-2".utf8))
+        #expect(await renderer.requests.count == 2)
+        await #expect(throws: (any Error).self) { try await leader.value }
         await service.detach(photo.id)
     }
 

@@ -15,6 +15,7 @@
 #include "hyperdr/image/image.hpp"
 #include "hyperdr/image/source_color.hpp"
 #include "hyperdr/look/options.hpp"
+#include "hyperdr/codec/resource_snapshot.hpp"
 
 #include <optional>
 #include <stdexcept>
@@ -110,6 +111,12 @@ struct RawLensMetadata {
 [[nodiscard]] RawLensMetadata probe_raw_lens_metadata(const std::filesystem::path& path);
 
 struct RawDecodeOptions {
+  std::shared_ptr<const ResourceSnapshots> snapshots;
+  const ResourceSnapshot* resource(const std::filesystem::path& path) const {
+    if (!snapshots) return nullptr;
+    const auto found = snapshots->find(path);
+    return found == snapshots->end() ? nullptr : &found->second;
+  }
   // User-owned DCP camera profile; empty preserves the native rendering path.
   std::filesystem::path profile;
   std::filesystem::path look_profile;

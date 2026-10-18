@@ -1,4 +1,5 @@
 #pragma once
+#include "hyperdr/codec/resource_snapshot.hpp"
 #include "hyperdr/image/image.hpp"
 #include <array>
 #include <filesystem>
@@ -23,7 +24,7 @@ struct LensCalibration {
 struct LensProfile {
   std::vector<LensCalibration> calibrations;
 };
-[[nodiscard]] LensProfile read_lens_profile(const std::filesystem::path& path);
+[[nodiscard]] LensProfile read_lens_profile(const std::filesystem::path& path, const ResourceSnapshot* snapshot = nullptr);
 // The LibRaw orientation is accounted for in sensor coordinates. The scalar
 // vignette gain is applied to linear pixels and commutes with the colour matrix.
 // Geometry uses bounded Catmull-Rom interpolation; vignette-only profiles are

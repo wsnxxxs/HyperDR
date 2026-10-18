@@ -2,6 +2,8 @@
 #include "hyperdr/look/rendition.hpp"
 #include <filesystem>
 #include <optional>
+#include <memory>
+#include <cstdint>
 #include <string>
 #include <string_view>
 
@@ -9,11 +11,14 @@ namespace hyperdr {
 enum class LutSpace { Srgb, DisplayP3, Rec709, Hlg, Pq, SLog3 };
 const char* lut_space_name(LutSpace space);
 std::optional<LutSpace> lut_space_from_name(std::string_view name);
+struct ColorLutSnapshot;
 struct ColorLutOptions {
   std::filesystem::path path;
   LutSpace input{LutSpace::Srgb};
   LutSpace output{LutSpace::Srgb};
   float strength{1};
+  // Shared only within an operation; request parsing never retains a snapshot.
+  std::shared_ptr<const ColorLutSnapshot> snapshot;
 };
 // Adobe/IRIDAS .cube: standalone 1D or 3D, red-fastest RGB table.
 // Values outside DOMAIN_MIN/MAX use the nearest boundary, without extrapolation.
@@ -25,7 +30,13 @@ struct ColorLut {
   std::vector<std::array<float,3>> values;
   std::array<float,3> sample(std::array<float,3> rgb) const;
 };
+struct ColorLutSnapshot {
+  std::vector<std::uint8_t> bytes;
+  std::string sha256;
+  ColorLut lut;
+};
 ColorLut read_color_lut(const std::filesystem::path& path);
+ColorLut parse_color_lut(std::string_view text);
 std::array<float,3> encode_lut_space(std::array<float,3> linear_p3, LutSpace space);
 std::array<float,3> decode_lut_space(std::array<float,3> rgb, LutSpace space);
 void validate_color_lut_options(const ColorLutOptions& options);

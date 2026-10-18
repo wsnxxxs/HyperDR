@@ -204,10 +204,11 @@ DcpHueSatMap look_table(std::string_view encoded) {
 #endif
 } // namespace
 
-static void apply_xmp_look_impl(DcpProfile& profile, const std::filesystem::path& path) {
+static void apply_xmp_look_impl(DcpProfile& profile, const std::filesystem::path& path, const ResourceSnapshot* snapshot) {
 #if HYPERDR_WITH_CODECS
-  if (std::filesystem::file_size(path) > 32*1024*1024) invalid("file exceeds 32 MB");
-  const auto bytes = read_binary_file(path);
+  if (!snapshot && std::filesystem::file_size(path) > 32*1024*1024) invalid("file exceeds 32 MB");
+  const auto bytes = resource_bytes(path, snapshot);
+  if (bytes.size() > 32*1024*1024) invalid("file exceeds 32 MB");
   const auto root = parse_xml(std::string(bytes.begin(), bytes.end()));
   const auto* desc = find_description(root);
   if (!desc || property(*desc, "PresetType") != "Look") invalid("select a static profile, not an edit preset");
@@ -259,14 +260,14 @@ static void apply_xmp_look_impl(DcpProfile& profile, const std::filesystem::path
   profile.xmp_look_table = std::move(table);
   profile.xmp_tone_curve = points;
   profile.xmp_look_name = name;
-  profile.xmp_look_sha256 = sha256_file_hex(path);
+  profile.xmp_look_sha256 = sha256_hex(bytes);
 #else
-  (void)profile; (void)path;
+  (void)profile; (void)path; (void)snapshot;
   invalid("requires a codec-enabled build");
 #endif
 }
 
-void apply_xmp_look(DcpProfile& profile, const std::filesystem::path& path) {
-  return configuration_resource([&] { return apply_xmp_look_impl(profile, path); });
+void apply_xmp_look(DcpProfile& profile, const std::filesystem::path& path, const ResourceSnapshot* snapshot) {
+  return configuration_resource([&] { return apply_xmp_look_impl(profile, path, snapshot); });
 }
 } // namespace hyperdr

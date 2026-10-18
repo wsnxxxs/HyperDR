@@ -65,11 +65,13 @@ std::string settings_signature(const ConvertOptions& options) {
     out += "|external_gain=";
     out += path_utf8(options.external_gain_path);
     out += '=';
-    out += sha256_file_hex(options.external_gain_path);
+    out += options.external_gain_snapshot ? options.external_gain_snapshot->gain_sha256
+                                         : sha256_file_hex(options.external_gain_path);
     out += "|external_gain_report=";
     out += path_utf8(options.external_gain_report);
     out += '=';
-    out += sha256_file_hex(options.external_gain_report);
+    out += options.external_gain_snapshot ? options.external_gain_snapshot->report_sha256
+                                         : sha256_file_hex(options.external_gain_report);
     out += "|allow_legacy_external_gain=";
     out += options.allow_legacy_external_gain ? "1" : "0";
   }
@@ -105,12 +107,17 @@ std::string settings_signature(const ConvertOptions& options) {
     out += '=';
     out += path_utf8(path);
     out += ':';
-    out += configuration_resource([&] { return sha256_file_hex(path); });
+    out += options.raw.resource(path) ? options.raw.resource(path)->sha256
+        : configuration_resource([&] { return sha256_file_hex(path); });
   };
   // Calibration files are external inputs, not schema scalar settings. Their
   // paths and contents still belong in the resume fingerprint: changing a
   // dark frame or lens grid must never be hidden by --skip-existing.
-  append_raw_file("color_lut", options.color_lut.path);
+  if (!options.color_lut.path.empty() && options.color_lut.snapshot) {
+    out += "|color_lut=" + path_utf8(options.color_lut.path) + ':' + options.color_lut.snapshot->sha256;
+  } else {
+    append_raw_file("color_lut", options.color_lut.path);
+  }
   // A frame changes every output byte. Its canonical text covers the layout
   // and colours, and the overlay is hashed like any other external input.
   if (options.frame) {
@@ -153,7 +160,9 @@ std::string model_preprocessing_fingerprint(const ConvertOptions& options) {
   }
   for (const auto& resource : resources) {
     identity += '|' + std::string(resource.key) + '=';
-    if (!resource.path.empty()) identity += configuration_resource([&] { return sha256_file_hex(resource.path); });
+    if (!resource.path.empty()) identity += options.raw.resource(resource.path)
+        ? options.raw.resource(resource.path)->sha256
+        : configuration_resource([&] { return sha256_file_hex(resource.path); });
   }
   return fnv1a_hex(identity);
 }

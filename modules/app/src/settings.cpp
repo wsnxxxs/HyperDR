@@ -1,13 +1,73 @@
 #include "hyperdr/app/settings.hpp"
+#include "hyperdr/app/fingerprint.hpp"
 
 #include "hyperdr/codec/availability.hpp"
 #include "hyperdr/foundation/file_io.hpp"
+#include "hyperdr/foundation/hash.hpp"
+#include "hyperdr/foundation/configuration_error.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
+#include <iterator>
+#include <map>
 #include <stdexcept>
 
 namespace hyperdr {
+
+void prepare_raw_resources(RawDecodeOptions& raw) {
+  if (!raw.snapshots) {
+    auto snapshots = std::make_shared<ResourceSnapshots>();
+    configuration_resource([&] {
+      for (const auto& resource : raw_decode_resources(raw)) {
+        if (resource.path.empty() || snapshots->contains(resource.path)) continue;
+        // Same wording as the decoder's own check, which used to report these.
+        static const std::map<std::string_view, const char*> labels{
+            {"raw_profile", "RAW DCP profile"}, {"raw_look", "RAW XMP look"},
+            {"raw_lens_profile", "RAW lens profile"}, {"raw_bad_pixel_map", "RAW bad-pixel map"},
+            {"raw_dark_frame", "RAW dark frame"}, {"raw_linearization_lut", "RAW linearization LUT"},
+            {"raw_lens_shading_map", "RAW lens-shading map"}};
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(resource.path, ec) || ec)
+          throw std::invalid_argument(std::string(labels.at(resource.key)) + " does not exist: " +
+                                      path_utf8(resource.path));
+        if (resource.key == "raw_look" && std::filesystem::file_size(resource.path) > 32*1024*1024)
+          throw std::invalid_argument("XMP look: file exceeds 32 MB");
+        ResourceSnapshot captured;
+        captured.bytes = read_binary_file(resource.path);
+        captured.sha256 = sha256_hex(captured.bytes);
+        snapshots->emplace(resource.path, std::move(captured));
+      }
+    });
+    raw.snapshots = std::move(snapshots);
+  }
+}
+
+void prepare_conversion_resources(ConvertOptions& options) {
+  prepare_raw_resources(options.raw);
+  if (!options.color_lut.path.empty() && !options.color_lut.snapshot) {
+    auto snapshot = std::make_shared<ColorLutSnapshot>();
+    configuration_resource([&] {
+      // Read as read_color_lut does, so failures keep its messages.
+      std::ifstream file(options.color_lut.path, std::ios::binary);
+      if (!file) throw std::invalid_argument("cannot open colour LUT");
+      snapshot->bytes.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+      snapshot->sha256 = sha256_hex(snapshot->bytes);
+      snapshot->lut = parse_color_lut(std::string_view(
+          reinterpret_cast<const char*>(snapshot->bytes.data()), snapshot->bytes.size()));
+    });
+    options.color_lut.snapshot = std::move(snapshot);
+  }
+  if (!options.external_gain_path.empty() && !options.external_gain_report.empty() &&
+      !options.external_gain_snapshot) {
+    auto snapshot = std::make_shared<ExternalGainSnapshot>();
+    snapshot->gain_bytes = read_binary_file(options.external_gain_path);
+    snapshot->report_bytes = read_binary_file(options.external_gain_report);
+    snapshot->gain_sha256 = sha256_hex(snapshot->gain_bytes);
+    snapshot->report_sha256 = sha256_hex(snapshot->report_bytes);
+    options.external_gain_snapshot = std::move(snapshot);
+  }
+}
 
 void apply_render_defaults(ConvertOptions& options, bool contrast_set,
                             bool vibrance_set) {
@@ -114,7 +174,7 @@ void validate_convert_options(const ConvertOptions& options) {
   (void)selected_native_model_id(options);
   validate_color_lut_options(options.color_lut);
   if (!options.color_lut.path.empty()) {
-    (void)read_color_lut(options.color_lut.path);
+    if (!options.color_lut.snapshot) (void)read_color_lut(options.color_lut.path);
     if ((!options.ai_model_path.empty() || has_external_gain) &&
         (options.color_lut.input == LutSpace::SLog3 || options.color_lut.input == LutSpace::Hlg || options.color_lut.input == LutSpace::Pq))
       throw std::invalid_argument("AI/external gain supports SDR creative LUTs; use manual rendering for Log/HLG/PQ LUTs");
@@ -122,7 +182,7 @@ void validate_convert_options(const ConvertOptions& options) {
   if (options.encoding == HdrEncoding::SdrJpeg && options.depth != 8)
     throw std::invalid_argument("SDR JPEG requires --depth 8");
   validate_native_model_post_options(options.ai_post);
-  if (has_external_gain) {
+  if (has_external_gain && !options.external_gain_snapshot) {
     std::error_code ec;
     if (!std::filesystem::is_regular_file(options.external_gain_path, ec) || ec) {
       throw std::invalid_argument("external gain file does not exist");
@@ -136,9 +196,9 @@ void validate_convert_options(const ConvertOptions& options) {
         options.raw.digital_gain > 0.0F && options.raw.digital_gain <= 64.0F)) {
     throw std::invalid_argument("RAW digital gain must be finite and in (0,64]");
   }
-  const auto validate_raw_file = [](const std::filesystem::path& path,
+  const auto validate_raw_file = [&](const std::filesystem::path& path,
                                     const char* label) {
-    if (path.empty()) return;
+    if (path.empty() || options.raw.resource(path)) return;
     std::error_code ec;
     if (!std::filesystem::is_regular_file(path, ec) || ec) {
       throw std::invalid_argument(std::string(label) + " does not exist");

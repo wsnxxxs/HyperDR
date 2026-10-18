@@ -246,7 +246,7 @@ def raw_fixture(fixture_id):
     return path
 
 
-def synthetic_dng(path):
+def synthetic_dng(path, focal_length=False):
     # Tiny uncompressed Bayer DNG: non-square default crop, rotated 90 degrees.
     width, height = 96, 80
     short = lambda n: struct.pack("<H", n)
@@ -264,6 +264,8 @@ def synthetic_dng(path):
               (50720, 4, 2, long(80) + long(64)), (50721, 10, 9, matrix),
               (50728, 5, 3, struct.pack("<IIIIII", 1, 1, 1, 1, 1, 1)),
               (50778, 3, 1, short(21))]
+    if focal_length:
+        fields.append((37386, 5, 1, struct.pack("<II", 35, 1)))
     base = 14 + 12 * len(fields)
     overflow = bytearray()
     slots = []
@@ -712,6 +714,134 @@ class EngineContract(unittest.TestCase):
                         self.assertEqual(frame["variant"], "wide")
                         self.assertEqual((frame["width"], frame["height"]), (layout["width"], layout["height"]))
                         self.assertEqual(frame, cli_report["files"][0]["frame"])
+
+    def test_lut_resources_are_one_snapshot_for_the_whole_batch(self):
+        if not self.capabilities["codecs"]:
+            self.skipTest("requires codec-enabled build")
+        with tempfile.TemporaryDirectory(prefix="hyperdr-lut-snapshot-") as temporary:
+            root = Path(temporary)
+            inputs = root / "inputs"
+            inputs.mkdir()
+            for name in ("first", "second"):
+                png(inputs / (name + ".png"), 128, 96)
+            lut = root / "look.cube"
+            a = 'LUT_3D_SIZE 2\n' + ''.join(f'{r} {g} {b}\n' for b in (0, 1) for g in (0, 1) for r in (0, 1))
+            b = 'LUT_3D_SIZE 2\n' + ''.join(f'{1-r} {g} {bl}\n' for bl in (0, 1) for g in (0, 1) for r in (0, 1))
+            lut.write_text(a)
+            request = json.loads(result(LIB.hyperdr_normalize_options, encoded({
+                "input": str(inputs), "output": str(root / "baseline"), "encoding": "sdr-jpeg",
+                "report": str(root / "report.json"), "_lut_path": str(lut)})))
+
+            def convert(callback=CALLBACK()):
+                report = json.loads(result(LIB.hyperdr_convert, self.engine, encoded(request), callback, None, None))
+                self.assertTrue(all(f["success"] for f in report["files"]), report)
+                files = {Path(f["output"]).name: Path(f["output"]).read_bytes() for f in report["files"]}
+                return report, files
+
+            baseline, expected = convert()
+            request["command"]["output"] = str(root / "race")
+            events = []
+            def mutate(_, message):
+                if json.loads(message)["phase"] == "process":
+                    events.append(1)
+                    lut.write_text(b)
+            raced, actual = convert(CALLBACK(mutate))
+            self.assertEqual(len(events), 2)
+            self.assertEqual(actual, expected)
+            self.assertEqual(raced["color_lut"], baseline["color_lut"])
+            # Reports must not reopen a path even if it disappears mid-convert.
+            lut.write_text(a)
+            request["command"]["output"] = str(root / "removed")
+            def remove(_, message):
+                if json.loads(message)["phase"] == "process":
+                    lut.unlink(missing_ok=True)
+            removed, actual = convert(CALLBACK(remove))
+            self.assertEqual(actual, expected)
+            self.assertEqual(removed["color_lut"], baseline["color_lut"])
+            lut.write_text(a)
+            request["command"]["output"] = str(root / "race")
+            request["command"]["skip_existing"] = True
+            resumed, actual = convert()
+            self.assertTrue(all(f["skipped"] for f in resumed["files"]))
+            self.assertEqual(actual, expected)
+            arguments = json.loads(result(LIB.hyperdr_command_line, encoded(request)))[1:]
+            subprocess.run([CLI, *arguments, "--skip-existing"], capture_output=True, check=True)
+            self.assertTrue(all(f["skipped"] for f in json.loads((root / "report.json").read_bytes())["files"]))
+            lut.write_text(b)
+            changed, actual = convert()
+            self.assertTrue(all(not f["skipped"] for f in changed["files"]))
+            self.assertNotEqual(actual, expected)
+
+    def test_raw_profiles_and_external_gain_use_captured_bytes(self):
+        if not self.capabilities["codecs"]:
+            self.skipTest("requires codec-enabled build")
+        for resource in ("dcp", "xmp", "lcp", "external-gain", "external-report"):
+            with self.subTest(resource=resource), tempfile.TemporaryDirectory(prefix="hyperdr-calibration-snapshot-") as temporary:
+                root = Path(temporary)
+                source = root / "source.dng"
+                synthetic_dng(source, focal_length=True)
+                profile = root / "camera.dcp"
+                dcp(profile, camera_model="")
+                target = profile
+                edit = {"input": str(source), "output": str(root / "baseline"), "encoding": "sdr-jpeg",
+                        "report": str(root / "report.json")}
+                if resource in ("dcp", "xmp"):
+                    edit["_raw_profile_path"] = str(profile)
+                if resource == "xmp":
+                    target = root / "look.xmp"
+                    target.write_text('<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="rdf"><rdf:Description xmlns:crs="crs" crs:PresetType="Look" crs:CameraProfile="Synthetic"><crs:ToneCurvePV2012><rdf:Seq><rdf:li>0,0</rdf:li><rdf:li>128,160</rdf:li><rdf:li>255,255</rdf:li></rdf:Seq></crs:ToneCurvePV2012></rdf:Description></rdf:RDF></x:xmpmeta>')
+                    edit["_raw_look_path"] = str(target)
+                if resource == "lcp":
+                    target = root / "lens.lcp"
+                    target.write_text('<rdf:RDF><rdf:Description stCamera:CameraRawProfile="True" stCamera:SensorFormatFactor="1"><rdf:li><rdf:Description stCamera:FocalLength="35" stCamera:ApertureValue="2"><stCamera:PerspectiveModel stCamera:Version="2" stCamera:RadialDistortParam1="-0.1"/></rdf:Description></rdf:li></rdf:Description></rdf:RDF>')
+                    edit["_lens_profile_path"] = str(target)
+                if resource.startswith("external"):
+                    source = root / "source.png"
+                    png(source, 128, 96)
+                    gain, report = root / "gain.f32", root / "gain.json"
+                    gain.write_bytes(struct.pack('<4f', 0, .5, 1, .25))
+                    report.write_text(json.dumps({"gain_grid_size": [2, 2], "label_contract_id": "hyperdr.apple-gain-label/v2",
+                        "gain_metadata": {key: {"numerator": value, "denominator": 1} for key, value in
+                            (("base_headroom", 0), ("alternate_headroom", 3), ("gain_min", 0), ("gain_max", 3),
+                             ("gamma", 1), ("base_offset", 0), ("alternate_offset", 0))},
+                        "gain_file": {"format": "raw_float32_with_required_json_sidecar", "endianness": "little",
+                        "scale": "signed_log2_gain", "width": 2, "height": 2, "byte_length": 16,
+                        "sha256": hashlib.sha256(gain.read_bytes()).hexdigest()}}))
+                    edit.update(input=str(source), external_gain=str(gain), external_gain_report=str(report))
+                    target = gain if resource == "external-gain" else report
+                original = target.read_bytes()
+                request = json.loads(result(LIB.hyperdr_normalize_options, encoded(edit)))
+                # Force cache reconstruction as well as the normal decoder.
+                for cache in (False, True):
+                    LIB.hyperdr_engine_destroy(self.engine)
+                    self.engine = Handle()
+                    configuration = {"cache_directory": str(root / "cache")} if cache else {}
+                    checked(LIB.hyperdr_engine_create, encoded(configuration), ctypes.byref(self.engine))
+                    def convert(callback=CALLBACK()):
+                        report = json.loads(result(LIB.hyperdr_convert, self.engine, encoded(request), callback, None, None))
+                        file = report["files"][0]
+                        self.assertTrue(file["success"], report)
+                        return file, Path(file["output"]).read_bytes()
+                    target.write_bytes(original)
+                    request["command"]["output"] = str(root / ("cache-baseline" if cache else "baseline"))
+                    _, expected = convert()
+                    request["command"]["output"] = str(root / ("cache-race" if cache else "race"))
+                    events = []
+                    def mutate(_, message):
+                        if json.loads(message)["phase"] == "decode":
+                            events.append(1)
+                            target.unlink(missing_ok=True)
+                    _, actual = convert(CALLBACK(mutate))
+                    self.assertTrue(events)
+                    self.assertEqual(actual, expected)
+                    target.write_bytes(original)
+                    request["command"]["skip_existing"] = True
+                    resumed, actual = convert()
+                    self.assertTrue(resumed["skipped"])
+                    self.assertEqual(actual, expected)
+                    arguments = json.loads(result(LIB.hyperdr_command_line, encoded(request)))[1:]
+                    subprocess.run([CLI, *arguments, "--skip-existing"], capture_output=True, check=True)
+                    request["command"]["skip_existing"] = False
 
     def test_frame_resources_are_one_snapshot_for_the_whole_batch(self):
         if not self.capabilities["codecs"]:

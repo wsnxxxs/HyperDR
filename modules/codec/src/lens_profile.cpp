@@ -185,9 +185,8 @@ std::optional<LensModel> interpolate(const LensProfile& p, double focal, double 
 }
 }  // namespace
 
-static LensProfile read_lens_profile_impl(const std::filesystem::path& path) {
-  std::ifstream in(path, std::ios::binary);
-  if (!in) throw std::invalid_argument("Cannot read LCP profile");
+static LensProfile read_lens_profile_impl(const std::filesystem::path& path, const ResourceSnapshot* snapshot) {
+  auto in = resource_stream(path, snapshot);
   const std::string xml{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
   LensProfile p;
   collect(parse(xml), p);
@@ -195,8 +194,8 @@ static LensProfile read_lens_profile_impl(const std::filesystem::path& path) {
   return p;
 }
 
-LensProfile read_lens_profile(const std::filesystem::path& path) {
-  return configuration_resource([&] { return read_lens_profile_impl(path); });
+LensProfile read_lens_profile(const std::filesystem::path& path, const ResourceSnapshot* snapshot) {
+  return configuration_resource([&] { return read_lens_profile_impl(path, snapshot); });
 }
 
 std::string apply_lens_profile(FloatImage& image, const LensProfile& profile,

@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <span>
 #include <string>
 
 namespace hyperdr {
@@ -81,6 +82,12 @@ struct ExternalGainMap {
 [[nodiscard]] ExternalGainMap read_external_gain_map(
     const std::filesystem::path& gain_path,
     const std::filesystem::path& report_path,
+    bool allow_legacy_external_gain = false);
+
+// Byte overload lets fingerprints and decoding consume the same captured files.
+[[nodiscard]] ExternalGainMap parse_external_gain_map(
+    std::span<const std::uint8_t> gain_bytes,
+    std::span<const std::uint8_t> report_bytes,
     bool allow_legacy_external_gain = false);
 
 // Builds the normal rendition first and then replaces only its gain grid.  The

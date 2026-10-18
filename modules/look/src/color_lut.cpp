@@ -54,9 +54,7 @@ float slog3_decode(float x) {
 }
 }
 
-static ColorLut read_color_lut_impl(const std::filesystem::path& path) {
-  std::ifstream file(path);
-  if (!file) throw std::invalid_argument("cannot open colour LUT");
+static ColorLut read_color_lut_impl(std::istream& file) {
   ColorLut lut;
   std::string line;
   unsigned line_number = 0;
@@ -103,7 +101,18 @@ static ColorLut read_color_lut_impl(const std::filesystem::path& path) {
 }
 
 ColorLut read_color_lut(const std::filesystem::path& path) {
-  return configuration_resource([&] { return read_color_lut_impl(path); });
+  return configuration_resource([&] {
+    std::ifstream file(path);
+    if (!file) throw std::invalid_argument("cannot open colour LUT");
+    return read_color_lut_impl(file);
+  });
+}
+
+ColorLut parse_color_lut(std::string_view text) {
+  return configuration_resource([&] {
+    std::istringstream file{std::string(text)};
+    return read_color_lut_impl(file);
+  });
 }
 
 std::array<float,3> ColorLut::sample(std::array<float,3> rgb) const {
@@ -173,6 +182,7 @@ void apply_rendition_lut(PhotoRenditions& out, const ColorLutOptions& grade, con
   if(grade.path.empty() || grade.strength==0) return;
   out.hdr_is_source = false;
   if(!sdr_space(grade.input)) throw std::invalid_argument("AI/external gain requires an SDR creative LUT");
+  if (!supplied && grade.snapshot) supplied = &grade.snapshot->lut;
   const auto owned=supplied ? ColorLut{} : read_color_lut(grade.path);
   const auto& lut=supplied?*supplied:owned;
   const float peak=std::exp2(out.stats.headroom_stops);
@@ -216,6 +226,7 @@ PhotoRenditions render_graded_photo(const FloatImage& source,
   const auto options=render_options_for_target(requested_options,target);
   const auto baseline=[&]() {return render_renditions(source,options,capture,input,target,analysis,preparation);};
   if (grade.path.empty() || grade.strength==0) return baseline();
+  if (!supplied && grade.snapshot) supplied = &grade.snapshot->lut;
   const auto owned=supplied ? ColorLut{} : read_color_lut(grade.path);
   const auto& lut=supplied?*supplied:owned;
   const auto transform_rgb=[&](std::array<float,3> rgb) {

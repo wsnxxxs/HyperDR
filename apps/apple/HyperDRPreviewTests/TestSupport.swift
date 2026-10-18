@@ -1,5 +1,6 @@
 import Foundation
 import Metal
+import QuartzCore
 import XCTest
 @testable import HyperDR
 
@@ -96,4 +97,52 @@ func tracePreviewPixels(_ label: String, _ pixels: [Float]) throws {
     let directory = URL(fileURLWithPath: path)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     try pixels.withUnsafeBytes { try Data($0).write(to: directory.appendingPathComponent(label + ".f32le")) }
+}
+
+/// Counts `nextDrawable` calls, records whether any came from the main thread,
+/// and can stand in for the layer asked: a view's own backing layer, outside
+/// a window, can block in `nextDrawable` far past its timeout. `block` makes
+/// each call wait (a compositor holding drawables); `handsOutNone` returns nil.
+nonisolated final class DrawableProbe: @unchecked Sendable {   // all state behind `lock`
+    private let lock = NSLock()
+    private var _requests = 0, _mainThreadRequests = 0
+    private var _last: (any CAMetalDrawable)?
+    private var _handsOutNone = false, _blocking = false
+    private var _block: TimeInterval = 0
+    private let standIn: CAMetalLayer?
+
+    init(standIn: CAMetalLayer? = nil) { self.standIn = standIn }
+
+    var requests: Int { lock.withLock { _requests } }
+    var mainThreadRequests: Int { lock.withLock { _mainThreadRequests } }
+    var last: (any CAMetalDrawable)? { lock.withLock { _last } }
+    var isBlocking: Bool { lock.withLock { _blocking } }
+    var handsOutNone: Bool {
+        get { lock.withLock { _handsOutNone } }
+        set { lock.withLock { _handsOutNone = newValue } }
+    }
+    var block: TimeInterval {
+        get { lock.withLock { _block } }
+        set { lock.withLock { _block = newValue } }
+    }
+
+    func install(on renderer: PreviewRenderer) {
+        renderer.drawableSource = { [self] layer in request(layer) }
+    }
+
+    private func request(_ layer: CAMetalLayer) -> (any CAMetalDrawable)? {
+        lock.lock()
+        _requests += 1
+        if Thread.isMainThread { _mainThreadRequests += 1 }
+        _blocking = true
+        let (none, delay) = (_handsOutNone, _block)
+        lock.unlock()
+        if delay > 0 { Thread.sleep(forTimeInterval: delay) }
+        let drawable = none ? nil : (standIn ?? layer).nextDrawable()
+        lock.lock()
+        _last = drawable
+        _blocking = false
+        lock.unlock()
+        return drawable
+    }
 }

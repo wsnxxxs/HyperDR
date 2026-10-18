@@ -4,7 +4,7 @@ import Foundation
 /// Pure geometry for the preview canvas: fit, pointer-anchored zoom and pan
 /// clamping. Ported from the Web editor's `preview/stage/geometry.js` so both
 /// front ends agree on the zoom range (1–4× the fitted size) and the pan limit.
-struct CanvasTransform: Equatable {
+nonisolated struct CanvasTransform: Equatable, Sendable {
     /// `view.js` caps pinch and wheel zoom at fit × 4 and never goes below fit.
     static let minZoom = 1.0
     static let maxZoom = 4.0

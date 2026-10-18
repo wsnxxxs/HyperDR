@@ -4,10 +4,11 @@ import HyperDREngine
 import Metal
 import os
 import QuartzCore
+import Synchronization
 
 /// The native float planes a frame hands to Metal. They are the frame's own
 /// storage (no copy); tests build the same shape from Swift arrays.
-struct FramePlanes {
+nonisolated struct FramePlanes: @unchecked Sendable {
     let base: any MTLBuffer
     let baseRowBytes: Int
     let gain: any MTLBuffer
@@ -64,7 +65,7 @@ struct FramePlanes {
 
 /// Matches `ReconstructParams` in Preview.metal: all members are 4 bytes and
 /// the stride is asserted in `init` so a layout drift fails loudly.
-struct ReconstructParams {
+nonisolated struct ReconstructParams {
     var width: UInt32 = 0
     var height: UInt32 = 0
     var baseRowBytes: UInt32 = 0
@@ -99,14 +100,14 @@ struct ReconstructParams {
 }
 
 /// Matches `DisplayParams` in Preview.metal.
-struct DisplayParams {
+nonisolated struct DisplayParams {
     var rect: SIMD4<Float>
 }
 
 /// A renderer failure. The message is a developer-facing English detail: the
 /// model reports it as `metal_unavailable`, whose title and message come from
 /// the catalogue, and `ErrorText` shows the detail untranslated.
-enum PreviewError: LocalizedError {
+nonisolated enum PreviewError: LocalizedError {
     case unavailable(String)
     var errorDescription: String? {
         switch self { case .unavailable(let message): return message }
@@ -116,8 +117,11 @@ enum PreviewError: LocalizedError {
 /// Two-pass renderer: reconstruct the frame into an `rgba16Float` intermediate
 /// from the engine's native planes, then draw that intermediate through
 /// `CanvasTransform` into the EDR drawable.
-@MainActor
-final class PreviewRenderer {
+///
+/// Not tied to an actor: a canvas confines its renderer to its own render
+/// thread (`PreviewRenderLoop`); tests drive one from a single thread too. Only
+/// the in-flight count is shared, and it is locked.
+nonisolated final class PreviewRenderer: @unchecked Sendable {
     let device: any MTLDevice
     let library: any MTLLibrary
     let queue: any MTLCommandQueue
@@ -139,8 +143,12 @@ final class PreviewRenderer {
     /// Intervals for A3's frame-time table: pass 1, waiting for a drawable,
     /// pass 2 encoding, present + commit, and each presenting command buffer
     /// from commit to GPU completion. Busy ticks are events.
-    nonisolated static let signposter = OSSignposter(subsystem: "com.hyperdr.HyperDR",
-                                                     category: "Canvas")
+    static let signposter = OSSignposter(subsystem: "com.hyperdr.HyperDR", category: "Canvas")
+    /// One id per renderer: the main canvas and the frame sheet's canvas run
+    /// at once, and their intervals must not pair with each other's.
+    let signpostID = PreviewRenderer.signposter.makeSignpostID()
+    /// Width and height of `syntheticRamp()`'s default planes.
+    static let syntheticRampSize = CGSize(width: 512, height: 128)
 
     /// At most this many presenting command buffers may be uncompleted before
     /// `draw` / `clear` stop asking for drawables (A2b-1, the in-flight gate).
@@ -148,14 +156,26 @@ final class PreviewRenderer {
     /// Presenting command buffers committed and not yet completed. Pass 1
     /// buffers are not counted: they share the queue, so a presenting buffer
     /// completes only after every pass 1 committed before it.
-    private(set) var inFlight = 0
+    var inFlight: Int { inFlightCount.withLock { $0 } }
+    private let inFlightCount = Mutex(0)
+    /// The most presentations ever in flight at once (tests).
+    var maxInFlightObserved: Int { maxObserved.withLock { $0 } }
+    private let maxObserved = Mutex(0)
+    /// How many times pass 1 rebuilt the intermediate (tests).
+    var pass1Runs: Int { pass1Count.withLock { $0 } }
+    private let pass1Count = Mutex(0)
     /// True while the GPU has not caught up: a draw now would wait in
-    /// `nextDrawable`, so the caller should skip the tick and retry.
+    /// `nextDrawable`, so the caller should wait and retry.
     var isBusy: Bool { inFlight >= Self.maxInFlight }
+    /// Called on Metal's completion thread after the count dropped.
+    var onPresentationCompleted: (@Sendable () -> Void)?
 
     /// Where drawables come from. Tests count or replace the calls; the app
     /// always asks the layer.
-    var drawableSource: (CAMetalLayer) -> (any CAMetalDrawable)? = { $0.nextDrawable() }
+    var drawableSource: @Sendable (CAMetalLayer) -> (any CAMetalDrawable)? = { $0.nextDrawable() }
+    /// Test hook: sees each presenting command buffer before anything is
+    /// encoded into it (to delay its GPU completion).
+    var presentingCommandHook: (@Sendable (any MTLCommandBuffer) -> Void)?
 
     init(library suppliedLibrary: (any MTLLibrary)? = nil) throws {
         guard let device = suppliedLibrary?.device ?? MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue() else {
@@ -210,7 +230,8 @@ final class PreviewRenderer {
 
     private func prepare(planes: FramePlanes, original: Bool,
                          source: AnyObject) throws -> any MTLTexture {
-        let signpost = Self.signposter.beginInterval("Pass1")
+        pass1Count.withLock { $0 += 1 }
+        let signpost = Self.signposter.beginInterval("Pass1", id: signpostID)
         defer { Self.signposter.endInterval("Pass1", signpost) }
         let texture = try Self.intermediateTexture(device: device,
             width: planes.width, height: planes.height)
@@ -223,6 +244,9 @@ final class PreviewRenderer {
     /// Whether the cached intermediate was built from `source` (a frame, or a
     /// caller's base buffer), which the cache then holds.
     func isPrepared(from source: AnyObject) -> Bool { prepared?.source === source }
+
+    /// Lets go of the intermediate and the frame it was built from.
+    func releaseFrame() { prepared = nil }
 
     /// The frame or buffer whose planes the intermediate currently owns, if any.
     var readyFrameIdentity: ObjectIdentifier? { prepared.map { ObjectIdentifier($0.source) } }
@@ -322,12 +346,14 @@ final class PreviewRenderer {
     /// unrelated change. Cleared by the next call that presents.
     private(set) var needsRetry = false
 
-    /// Records a tick skipped because `isBusy`. A caller that skips before
-    /// calling `draw` / `clear` keeps its own retry state: `needsRetry` is
-    /// left alone, or a tick with nothing to present could not reset it.
+    /// Records a draw refused because `isBusy`. The render loop waits for
+    /// completion instead of asking, so in the app this stays at zero.
     func noteBusyTick() {
-        Self.signposter.emitEvent("Busy")
+        busyCount.withLock { $0 += 1 }
+        Self.signposter.emitEvent("Busy", id: signpostID)
     }
+    var busyRefusals: Int { busyCount.withLock { $0 } }
+    private let busyCount = Mutex(0)
 
     /// Presents the prepared frame; false when nothing was presented and the
     /// call must be retried (`needsRetry` is set): a presenting command buffer
@@ -342,17 +368,36 @@ final class PreviewRenderer {
     /// (A2b-2 moves the wait off the main thread).
     @discardableResult
     func draw(in layer: CAMetalLayer, transform: CanvasTransform) -> Bool {
-        guard layer.drawableSize.width > 0, layer.drawableSize.height > 0, let prepared else {
+        guard prepared != nil else {
             needsRetry = false   // nothing to present: not a miss
             return true
         }
-        guard let drawable = acquireDrawable(layer),
-              let command = queue.makeCommandBuffer() else {
+        // A prepared frame needs no pass 1.
+        return (try? draw(in: layer, transform: transform, preparing: {})) ?? false
+    }
+
+    /// The executor's draw: the gate, then the drawable, and only then pass 1
+    /// (`prepare`), so a missing drawable never runs pass 1 (A2b-1 review
+    /// P3-2). Pass 1 errors are thrown; nothing is presented then.
+    @discardableResult
+    func draw(in layer: CAMetalLayer, transform: CanvasTransform,
+              preparing prepare: () throws -> Void) throws -> Bool {
+        guard layer.drawableSize.width > 0, layer.drawableSize.height > 0 else {
+            needsRetry = false   // nothing to present: not a miss
+            return true
+        }
+        guard let drawable = acquireDrawable(layer) else { return false }
+        try prepare()
+        guard let prepared else {
+            needsRetry = false   // nothing to present: not a miss
+            return true
+        }
+        guard let command = makePresentingCommand() else {
             needsRetry = true
             return false
         }
         needsRetry = false
-        let encoding = Self.signposter.beginInterval("Encode")
+        let encoding = Self.signposter.beginInterval("Encode", id: signpostID)
         let pass = Self.clearPass(drawable)
         if let encoder = command.makeRenderCommandEncoder(descriptor: pass) {
             encoder.setRenderPipelineState(displayPipeline)
@@ -380,8 +425,7 @@ final class PreviewRenderer {
             needsRetry = false   // nothing to present: not a miss
             return true
         }
-        guard let drawable = acquireDrawable(layer),
-              let command = queue.makeCommandBuffer() else {
+        guard let drawable = acquireDrawable(layer), let command = makePresentingCommand() else {
             needsRetry = true
             return false
         }
@@ -401,7 +445,7 @@ final class PreviewRenderer {
             needsRetry = true
             return nil
         }
-        let signpost = Self.signposter.beginInterval("NextDrawable")
+        let signpost = Self.signposter.beginInterval("NextDrawable", id: signpostID)
         let drawable = drawableSource(layer)
         Self.signposter.endInterval("NextDrawable", signpost)
         if drawable == nil { needsRetry = true }
@@ -417,16 +461,26 @@ final class PreviewRenderer {
         return pass
     }
 
+    private func makePresentingCommand() -> (any MTLCommandBuffer)? {
+        guard let command = queue.makeCommandBuffer() else { return nil }
+        presentingCommandHook?(command)
+        return command
+    }
+
     /// Presents and commits, counting the buffer in flight until the GPU
-    /// completes it. The completion handler hops to the main queue, so the
-    /// gate opens on a later tick, never in the middle of one.
+    /// completes it; the completion handler drops the count and then tells
+    /// the owner (the render loop wakes and draws its newest snapshot).
     private func submit(_ command: any MTLCommandBuffer, presenting drawable: any CAMetalDrawable) {
-        let presenting = Self.signposter.beginInterval("Present")
-        let gpu = Self.signposter.beginInterval("InFlight")
-        inFlight += 1
-        command.addCompletedHandler { [weak self] _ in
+        let presenting = Self.signposter.beginInterval("Present", id: signpostID)
+        let gpu = Self.signposter.beginInterval("InFlight", id: signpostID)
+        let count = inFlightCount.withLock { value in value += 1; return value }
+        maxObserved.withLock { $0 = max($0, count) }
+        let completed = onPresentationCompleted
+        // Holds the renderer until the GPU is done with its textures.
+        command.addCompletedHandler { [self] _ in
             Self.signposter.endInterval("InFlight", gpu)
-            DispatchQueue.main.async { self?.inFlight -= 1 }
+            inFlightCount.withLock { $0 -= 1 }
+            completed?()
         }
         command.present(drawable)
         command.commit()

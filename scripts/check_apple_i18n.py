@@ -13,9 +13,17 @@ script is the guard, the native counterpart of check_panel_i18n.py:
 * a semantic key passed as `verbatim:` is an error: it would show the key
   itself, and it does not count as a use of the entry;
 * no string literal under `Views/` contains Chinese: user-visible text goes
-  through the catalogue. Only `Views/` is held to this; the engine diagnostics
-  window (`Shared/AppContentView.swift`) is a developer tool and is
-  deliberately left unlocalized.
+  through the catalogue.
+* nor in `Editor/`, `Frame/`, `macOS/` or `Shared/` (comments do not count):
+  what those layers produce reaches the user as text too (§13 R5). Their
+  diagnostics -- error details, the engine diagnostics window
+  (`Shared/AppContentView.swift`) -- are in English and not translated.
+  `CJK_OUTSIDE_VIEWS_STRICT = False` would turn this back into a warning.
+
+One rule here is not about strings but sits with them because it reads the
+same sources: nothing under `Views/` imports `HyperDREngine`. Views talk only
+to the editor models (batch 3 §3.4); engine types and calls stay in
+`Editor/`, `Frame/` and the services, which hand views app-owned values.
 
 Which literals are keys:
 
@@ -47,7 +55,7 @@ Chinese type specimens on purpose.
 
 `--self-test` (also run before every check) applies mutations to the real
 sources in memory -- a missing key in a new namespace, a key in `verbatim:`,
-an SF Symbol in an explicit position -- and fails unless each is reported
+an SF Symbol in an explicit position, an engine import in a view -- and fails unless each is reported
 (or, for the symbol, not reported).
 """
 from __future__ import annotations
@@ -68,41 +76,68 @@ LOCALES = ["en", "zh-Hans"]
 
 KEY_RE = re.compile(r"^([a-z][A-Za-z0-9]*)(?:\.[A-Za-z0-9_-]+)+(?: %@)*$")
 CJK_RE = re.compile(r"[　-〿㐀-鿿＀-￯]")
+# Layers outside Views/ held to the no-Chinese rule, and whether it fails.
+CJK_OUTSIDE_VIEWS = ("Editor", "Frame", "macOS", "Shared")
+CJK_OUTSIDE_VIEWS_STRICT = True
 # %@, %lld, %1$@ ... ; "%%" is a literal percent sign.
 SPECIFIER_RE = re.compile(r"%(?:\d+\$)?(?:@|l{0,2}[dfu]|\.\d+f)")
 
 
+RAW_QUOTE_RE = re.compile(r'(#*)("""|")')
+
+
+def comment_end(source: str, j: int) -> int | None:
+    """Just after the comment starting at `j` -- a line comment up to its
+    newline, or a block comment with any nested in it, as Swift nests them --
+    or None when none starts there."""
+    if source.startswith("//", j):
+        end = source.find("\n", j)
+        return len(source) if end < 0 else end
+    if source.startswith("/*", j):
+        depth, end, n = 1, j + 2, len(source)
+        while end < n and depth:
+            if source.startswith("/*", end):
+                depth, end = depth + 1, end + 2
+            elif source.startswith("*/", end):
+                depth, end = depth - 1, end + 2
+            else:
+                end += 1
+        return end
+    return None
+
+
 def literals(source: str) -> list[tuple[int, int, str]]:
-    """(line, offset of the opening quote, text) for every string literal
-    outside comments.
+    """(line, offset of the opening delimiter, text) for every string literal
+    outside comments, raw (`#"..."#`) and multi-line ones included.
 
     Interpolations are replaced by `%@`; string literals nested inside an
-    interpolation are returned as literals of their own.
+    interpolation are returned as literals of their own, and comments there
+    are skipped as anywhere else.
     """
     found: list[tuple[int, int, str]] = []
     i, line, n = 0, 1, len(source)
 
-    def read_string(start: int, line: int, multiline: bool) -> tuple[int, int]:
-        """Read from just after the opening quote; return (index after the
-        closing quote, line)."""
-        quote = '"""' if multiline else '"'
-        opening = start - len(quote)
+    def read_string(opening: int, start: int, line: int, hashes: str, quote: str) -> tuple[int, int]:
+        """Read from just after the opening delimiter; return (index after
+        the closing one, line)."""
+        close = quote + hashes
+        escape = "\\" + hashes
         j = start
         text: list[str] = []
         begin = line
         while j < n:
-            if source.startswith(quote, j):
+            if source.startswith(close, j):
                 found.append((begin, opening, "".join(text)))
-                return j + len(quote), line
-            ch = source[j]
-            if ch == "\\" and j + 1 < n and source[j + 1] == "(":
-                j, line = skip_interpolation(j + 2, line)
+                return j + len(close), line
+            if source.startswith(escape + "(", j):
+                j, line = skip_interpolation(j + len(escape) + 1, line)
                 text.append("%@")
                 continue
-            if ch == "\\":
-                text.append(source[j:j + 2])
-                j += 2
+            if source.startswith(escape, j):
+                text.append(source[j:j + len(escape) + 1])
+                j += len(escape) + 1
                 continue
+            ch = source[j]
             if ch == "\n":
                 line += 1
             text.append(ch)
@@ -112,13 +147,15 @@ def literals(source: str) -> list[tuple[int, int, str]]:
     def skip_interpolation(j: int, line: int) -> tuple[int, int]:
         depth = 1
         while j < n and depth:
-            if source.startswith('"""', j):
-                j, line = read_string(j + 3, line, True)
+            end = comment_end(source, j)
+            if end is not None:
+                line += source.count("\n", j, end)
+                j = end
+                continue
+            if match := RAW_QUOTE_RE.match(source, j):
+                j, line = read_string(j, match.end(), line, match.group(1), match.group(2))
                 continue
             ch = source[j]
-            if ch == '"':
-                j, line = read_string(j + 1, line, False)
-                continue
             if ch == "(":
                 depth += 1
             elif ch == ")":
@@ -129,18 +166,12 @@ def literals(source: str) -> list[tuple[int, int, str]]:
         return j, line
 
     while i < n:
-        if source.startswith("//", i):
-            end = source.find("\n", i)
-            i = n if end < 0 else end
-        elif source.startswith("/*", i):
-            end = source.find("*/", i + 2)
-            end = n if end < 0 else end + 2
+        end = comment_end(source, i)
+        if end is not None:
             line += source.count("\n", i, end)
             i = end
-        elif source.startswith('"""', i):
-            i, line = read_string(i + 3, line, True)
-        elif source[i] == '"':
-            i, line = read_string(i + 1, line, False)
+        elif match := RAW_QUOTE_RE.match(source, i):
+            i, line = read_string(i, match.end(), line, match.group(1), match.group(2))
         else:
             if source[i] == "\n":
                 line += 1
@@ -215,6 +246,191 @@ def check(files: list[tuple[str, bool, str]], entries: dict, module_bundle: bool
     for key in sorted(set(entries) - set(used)):
         problems.append(f"unused catalogue key: {key!r}")
     return problems
+
+
+# An import of the engine in code (comments and strings already blanked):
+# any attributes (`@testable`, `@_exported`, `@_spi(X)`, `@preconcurrency`)
+# and access level (`internal import`, `public import` ...), on the same line
+# or the lines before, then an optional kind (`import struct HyperDREngine.X`).
+ENGINE_IMPORT_RE = re.compile(
+    r"^[ \t]*(?:(?:@\w+(?:\([^()]*\))?|open|public|package|internal|fileprivate|private)\s+)*"
+    r"(?P<keyword>import)\s+(?:(?:struct|class|enum|protocol|func|typealias|var|let)\s+)?"
+    r"HyperDREngine\b", re.MULTILINE)
+
+
+def code_only(source: str) -> str:
+    """`source` with comments and string literals blanked to spaces, newlines
+    kept, so a match's line number is still right. Handles nested block
+    comments, multi-line and raw strings, and interpolations (code again,
+    with strings of their own)."""
+    out = list(source)
+    n = len(source)
+
+    def blank(start: int, end: int) -> None:
+        for k in range(start, end):
+            if out[k] != "\n":
+                out[k] = " "
+
+    def string_end(j: int, hashes: str, quote: str) -> int:
+        """From just after the opening delimiter to just after the closing one."""
+        close = quote + hashes
+        escape = "\\" + hashes
+        while j < n:
+            if source.startswith(close, j):
+                return j + len(close)
+            if quote == '"' and source[j] == "\n":
+                return j  # unterminated: stop at the line's end
+            if source.startswith(escape + "(", j):
+                j = code_end(j + len(escape) + 1)
+                continue
+            if source.startswith(escape, j):
+                j += len(escape) + 1
+                continue
+            j += 1
+        return n
+
+    def code_end(j: int) -> int:
+        """From just inside an interpolation's `(` to just after its `)`.
+        The interpolation is code, so its comments and strings are skipped
+        the same way as outside (a quote in a comment there opens nothing);
+        all of it stays blanked with the string around it."""
+        depth = 1
+        while j < n and depth:
+            end = token_end(j)
+            if end is not None:
+                j = end
+                continue
+            depth += {"(": 1, ")": -1}.get(source[j], 0)
+            j += 1
+        return j
+
+    def token_end(j: int) -> int | None:
+        """Just after the comment or string literal starting at `j`, or None
+        when none starts there."""
+        end = comment_end(source, j)
+        if end is not None:
+            return end
+        if match := RAW_QUOTE_RE.match(source, j):
+            return string_end(match.end(), match.group(1), match.group(2))
+        return None
+
+    i = 0
+    while i < n:
+        end = token_end(i)
+        if end is None:
+            i += 1
+            continue
+        blank(i, end)
+        i = end
+    return "".join(out)
+
+
+def engine_imports(files: list[tuple[str, bool, str]]) -> list[str]:
+    """Views that import the engine: `files` as for `check`, where the flag
+    marks a file under `Views/`."""
+    problems = []
+    for relative, in_views, source in files:
+        if not in_views:
+            continue
+        code = code_only(source)
+        for match in ENGINE_IMPORT_RE.finditer(code):
+            line = code.count("\n", 0, match.start("keyword")) + 1
+            problems.append(f"{relative}:{line}: views must not import HyperDREngine; go through the editor model")
+    return problems
+
+
+def chinese_outside_views(files: list[tuple[str, bool, str]]) -> list[str]:
+    """Chinese string literals in the app's layers outside `Views/`."""
+    app = str(APP.relative_to(REPO_ROOT)) + "/"
+    found = []
+    for relative, _, source in files:
+        layer = relative[len(app):].split("/")[0] if relative.startswith(app) else ""
+        if layer not in CJK_OUTSIDE_VIEWS:
+            continue
+        for line, _, text in literals(source):
+            if CJK_RE.search(text):
+                found.append(f"{relative}:{line}: Chinese literal outside Views/, use a catalogue key "
+                             f"or an English diagnostic: {text!r}")
+    return found
+
+
+def chinese_self_test(files: list[tuple[str, bool, str]]) -> list[str]:
+    """A Chinese literal in each watched layer is found; one in a comment,
+    or in a layer not watched, is not."""
+    baseline = set(chinese_outside_views(files))
+    failures: list[str] = []
+    app = str(APP.relative_to(REPO_ROOT))
+    for layer in CJK_OUTSIDE_VIEWS:
+        mutant = (f"{app}/{layer}/SelfTest.swift", False, 'let s = "等待"\n')
+        if not set(chinese_outside_views([*files, mutant])) - baseline:
+            failures.append(f"self-test: Chinese literal in {layer}/ not found")
+    # Found on the right line after comments that end late: a nested block
+    # comment, and a comment with a quote inside an interpolation.
+    for source, line in [('/* Outer /* inner */\n*/\nlet s = "等待"\n', 3),
+                         ('let t = "\\(1 /* " */)"\nlet s = "等待"\n', 2),
+                         ('let raw = #"a "quoted" \\#(x) b"#\nlet s = "等待"\n', 2)]:
+        mutant = (f"{app}/Editor/SelfTest.swift", False, source)
+        if not any(f"SelfTest.swift:{line}:" in p for p in set(chinese_outside_views([*files, mutant])) - baseline):
+            failures.append(f"self-test: Chinese literal after a comment not found: {source.strip()!r}")
+    for mutant in [(f"{app}/Editor/SelfTest.swift", False, "// 等待\n/* 等待 */\n"),
+                   (f"{app}/Editor/SelfTest.swift", False, '/* Outer /* inner */\nlet text = "等待"\n*/\n'),
+                   (f"{app}/Editor/SelfTest.swift", False, 'let t = "\\(1 /* "等待" */)"\n'),
+                   (f"{app}/Resources/SelfTest.swift", False, 'let s = "等待"\n')]:
+        if set(chinese_outside_views([*files, mutant])) - baseline:
+            failures.append(f"self-test: not a watched Chinese literal, but found: {mutant[0]}")
+    return failures
+
+
+def boundary_self_test(files: list[tuple[str, bool, str]]) -> list[str]:
+    """An engine import must be reported in a view, on the line of its
+    `import`, and nowhere else: not outside `Views/`, and not in a comment or
+    a string."""
+    baseline = set(engine_imports(files))
+    failures: list[str] = []
+    # (source after "import SwiftUI\n", line of the `import` keyword)
+    imports = [
+        ("import HyperDREngine\n", 2),
+        ("@preconcurrency import HyperDREngine\n", 2),
+        ("import struct HyperDREngine.FrameLayout\n", 2),
+        ("internal import HyperDREngine\n", 2),
+        ("public import HyperDREngine\n", 2),
+        ("package import HyperDREngine\n", 2),
+        ("fileprivate import HyperDREngine\n", 2),
+        ("private import HyperDREngine\n", 2),
+        ("@_exported import HyperDREngine\n", 2),
+        ("@_spi(Testing) @preconcurrency internal import HyperDREngine\n", 2),
+        ("@_exported\nimport HyperDREngine\n", 3),
+        ('let a = "/*" // */\nimport HyperDREngine\n', 3),
+        # Reviewer-sol's edge cases (Frontend-P2-rereview): a quote in a
+        # comment inside an interpolation must not swallow the rest of the
+        # file; attributes and a comment before an access-level kind import.
+        ('let text = "\\(1 /* " */)"\nimport HyperDREngine\n', 3),
+        ('let text = """\n\\(1 // "\n)\n"""\nimport HyperDREngine\n', 6),
+        ('@_spi(Testing)\n/* c */\ninternal import struct HyperDREngine.FrameLayout\n', 4),
+    ]
+    for source, line in imports:
+        view = ("apps/apple/HyperDR/Views/SelfTest.swift", True, "import SwiftUI\n" + source)
+        if not any(f"SelfTest.swift:{line}:" in p for p in set(engine_imports([*files, view])) - baseline):
+            failures.append(f"self-test: engine import in a view not reported: {source.strip()!r}")
+    not_imports = [
+        "// import HyperDREngine\n",
+        "/*\nimport HyperDREngine\n*/\n",
+        "/* outer /* inner */\nimport HyperDREngine\n*/\n",
+        'let text = """\nimport HyperDREngine\n"""\n',
+        'let raw = #"""\nimport HyperDREngine\n"""#\n',
+        'let raw = ##"""\nimport HyperDREngine\n"""##\n',
+        'let text = "\\(1 /* \\(") */)"\n/*\nimport HyperDREngine\n*/\n',
+        'let mixed = """\n\\(f("x"))\nimport HyperDREngine\n"""\n',
+        "import HyperDREngineExtras\n",
+    ]
+    for source in not_imports:
+        view = ("apps/apple/HyperDR/Views/SelfTest.swift", True, "import SwiftUI\n" + source)
+        if set(engine_imports([*files, view])) - baseline:
+            failures.append(f"self-test: not an engine import, but reported: {source.strip()!r}")
+    editor = ("apps/apple/HyperDR/Editor/SelfTest.swift", False, "import HyperDREngine\n")
+    if set(engine_imports([*files, editor])) - baseline:
+        failures.append("self-test: engine import outside Views/ reported")
+    return failures
 
 
 def self_test(files: list[tuple[str, bool, str]], entries: dict) -> list[str]:
@@ -305,12 +521,20 @@ def main() -> int:
         for path in sorted(DESIGN.rglob("*.swift"))
     ]
 
-    problems = self_test(files, entries) + design_self_test(design_files, design_entries)
+    problems = (self_test(files, entries) + design_self_test(design_files, design_entries)
+                + boundary_self_test(files) + chinese_self_test(files))
     if "--self-test" not in sys.argv[1:]:
         for name, document in (("app", catalog), ("design package", design_catalog)):
             if document.get("sourceLanguage") != "en":
                 problems.append(f"{name} catalogue sourceLanguage must be 'en'")
         problems += check(files, entries)
+        problems += engine_imports(files)
+        outside = chinese_outside_views(files)
+        if CJK_OUTSIDE_VIEWS_STRICT:
+            problems += outside
+        else:
+            for warning in outside:
+                print(f"warning: {warning}")
         problems += check(design_files, design_entries, module_bundle=True)
 
     for problem in problems:
@@ -322,7 +546,7 @@ def main() -> int:
         print("ok: self-test")
     else:
         print(f"ok: {len(entries)} app keys, {len(design_entries)} design package keys, "
-              f"{len(LOCALES)} locales (self-test passed)")
+              f"{len(LOCALES)} locales, no engine imports in views (self-test passed)")
     return 0
 
 

@@ -1,6 +1,5 @@
 import SwiftUI
 import HyperDRDesign
-import HyperDREngine
 
 /// File ▸ Frame…: the presentation frame around the photograph, previewed on
 /// a live EDR canvas. The frame is drawn in SDR, so on an HDR display it sits
@@ -21,7 +20,7 @@ struct FrameSheet: View {
                     .background(Color.hdr.previewBackdrop)
                 Divider()
                 ScrollView {
-                    FrameSettingsPanel(settings: $model.frame)
+                    FrameSettingsPanel(settings: $model.frame, photoSize: model.document?.pixelSize)
                         .padding(Layout.panelPadding)
                 }
                 .frame(width: 340)
@@ -51,9 +50,27 @@ struct FrameSheet: View {
         .padding(.vertical, Space.s4)
     }
 
+    /// Whether the chosen style can frame this photograph. When it cannot, the
+    /// photograph is shown without a frame and the panel says why.
+    /// Temporary guard until the new story design (U8) lands; remove it then.
+    private var styleFits: Bool { model.frame.style.fits(model.document?.pixelSize) }
+
+    /// The frame's layout, or the bare photograph's when the style does not fit.
+    private var layout: FramePixelLayout? {
+        guard model.frame.isEnabled, !styleFits else { return model.frameLayout }
+        return model.document?.pixelSize.map(FramePixelLayout.unframed)
+    }
+
+    /// The settings the preview draws: the frame off when the style does not fit.
+    private var previewSettings: FrameSettings {
+        var settings = model.frame
+        settings.isEnabled = settings.isEnabled && styleFits
+        return settings
+    }
+
     @ViewBuilder private var preview: some View {
-        if let layout = model.frameLayout {
-            FramedPhoto(layout: layout, settings: model.frame, caption: model.frameCaption) {
+        if let layout {
+            FramedPhoto(layout: layout, settings: previewSettings, caption: model.frameCaption) {
                 FramePreviewCanvas(model: model)
             }
             .padding(.horizontal, Space.s6)
@@ -69,7 +86,7 @@ struct FrameSheet: View {
 
     private var footer: some View {
         HStack {
-            if let layout = model.frameLayout {
+            if let layout {
                 Text("frame.output \("\(layout.width) × \(layout.height)")")
                     .font(Font.hdr.readout)
                     .foregroundStyle(Color.hdr.inkMuted)
@@ -110,6 +127,9 @@ private struct DisplayNote: View {
 /// caption and the print shadow.
 struct FrameSettingsPanel: View {
     @Binding var settings: FrameSettings
+    /// The photograph's size, which decides the styles that fit; nil before
+    /// it is known (every style is offered).
+    var photoSize: PixelSize? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s4) {
@@ -140,17 +160,31 @@ struct FrameSettingsPanel: View {
             SectionHeading("frame.style")
             HStack(spacing: Space.s2) {
                 ForEach(FrameStyle.allCases) { style in
+                    // fits: Temporary guard until the new story design (U8) lands; remove it then.
+                    let fits = style.fits(photoSize)
                     Button { withHDRAnimation { settings.style = style } } label: {
-                        StyleTile(style: style, tone: settings.tone, selected: settings.style == style)
+                        StyleTile(style: style, tone: settings.tone, photoSize: photoSize,
+                                  selected: settings.style == style)
                     }
                     .buttonStyle(.plain)
+                    .disabled(!fits)
+                    .help(fits ? Text(style.note) : Text("frame.style.tooWide"))
                     .accessibilityAddTraits(settings.style == style ? .isSelected : [])
                 }
             }
-            Text(settings.style.note)
-                .font(Font.hdr.caption)
-                .foregroundStyle(Color.hdr.inkMuted)
-                .fixedSize(horizontal: false, vertical: true)
+            if settings.style.fits(photoSize) {
+                Text(settings.style.note)
+                    .font(Font.hdr.caption)
+                    .foregroundStyle(Color.hdr.inkMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                // A style chosen for an earlier photograph that this one is too
+                // wide for. Temporary guard until the new story design (U8) lands; remove it then.
+                Label("frame.style.tooWide.selected", systemImage: "exclamationmark.triangle")
+                    .font(Font.hdr.caption)
+                    .foregroundStyle(Color.hdr.warn)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -206,20 +240,24 @@ struct FrameSettingsPanel: View {
     }
 }
 
-/// A style's proportions in miniature, laid out by the engine around a
-/// nominal 2:3 print, on the chosen paper.
+/// A style's proportions in miniature, laid out by the engine around this
+/// photograph (a nominal 2:3 print before its size is known), on the chosen
+/// paper. A style the photograph is too wide for shows its nominal shape,
+/// dimmed.
 private struct StyleTile: View {
     let style: FrameStyle
     let tone: FrameTone
+    let photoSize: PixelSize?
     let selected: Bool
+    @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
+        let layout = photoSize.flatMap {
+            EditorModel.frameLayout(for: style, photoWidth: $0.width, photoHeight: $0.height)
+        } ?? EditorModel.frameLayout(for: style)
         VStack(spacing: 6) {
             Canvas { context, size in
-                var settings = FrameSettings()
-                settings.style = style
-                guard let layout = try? Engine.frameLayout(frame: settings.engineFrame(hasCaption: style.hasCaption),
-                                                           photoWidth: 1000, photoHeight: 1500) else { return }
+                guard let layout else { return }
                 let scale = min(size.width / CGFloat(layout.width), size.height / CGFloat(layout.height))
                 let canvas = CGRect(x: (size.width - CGFloat(layout.width) * scale) / 2,
                                     y: (size.height - CGFloat(layout.height) * scale) / 2,
@@ -252,7 +290,35 @@ private struct StyleTile: View {
                 .font(selected ? Font.hdr.controlLabel : Font.hdr.caption)
                 .foregroundStyle(selected ? Color.hdr.inkStrong : Color.hdr.inkMuted)
         }
+        .opacity(isEnabled ? 1 : 0.4)
         .frame(maxWidth: .infinity)
+    }
+}
+
+extension FrameStyle {
+    /// Whether this style can frame a photograph of `size`; true while the
+    /// size is unknown. Story's fixed 9:16 canvas cannot take a panorama much
+    /// wider than 3.4:1: the engine refuses a canvas more than six times the
+    /// photograph's area, which also bounds export memory (§13 T3).
+    ///
+    /// Temporary guard until the new story design (U8) lands; remove it then. The
+    /// user chose to redesign story for panoramas rather than disable it;
+    /// until then this keeps the sheet (and an export plan, which would
+    /// throw) away from a layout the engine refuses.
+    func fits(_ size: PixelSize?) -> Bool {
+        guard let size else { return true }
+        return EditorModel.frameLayout(for: self, photoWidth: size.width, photoHeight: size.height) != nil
+    }
+}
+
+extension FramePixelLayout {
+    /// The bare photograph: no mat, no caption. Used by the story guard
+    /// above; remove with it.
+    static func unframed(_ size: PixelSize) -> FramePixelLayout {
+        FramePixelLayout(width: size.width, height: size.height,
+                         photo: Rect(x: 0, y: 0, width: size.width, height: size.height),
+                         caption: Rect(x: 0, y: size.height, width: size.width, height: 0),
+                         referenceEdge: min(size.width, size.height))
     }
 }
 

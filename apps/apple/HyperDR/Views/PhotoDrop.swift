@@ -20,9 +20,14 @@ enum PhotoDropState: Equatable {
 /// therefore a session, and only the current session's check may publish a
 /// state. Several files open the first openable one without comment
 /// (batch 3 §12 Q12).
+///
+/// A file whose URL cannot be read may be a photograph that would open, so:
+/// an openable URL among the others opens as usual; without one, a read
+/// error keeps the drag accepted and the drop reports that error through the
+/// model; only a drag read in full and found unopenable is refused.
 @MainActor @Observable final class PhotoDropCoordinator {
     /// Reads a drag's file URLs, in drag order.
-    typealias Loader = @MainActor () async -> [URL]
+    typealias Loader = @MainActor () async -> PhotoDropFiles
 
     private(set) var state = PhotoDropState.idle
 
@@ -41,9 +46,9 @@ enum PhotoDropState: Equatable {
         state = .accepts
         let current = session
         Task {
-            let urls = await load()
+            let files = await load()
             guard current == session else { return }
-            state = urls.contains(where: model.canOpen) ? .accepts : .rejects
+            state = files.urls.contains(where: model.canOpen) || files.firstError != nil ? .accepts : .rejects
         }
     }
 
@@ -63,12 +68,24 @@ enum PhotoDropState: Equatable {
         drop += 1
         let current = drop
         Task {
-            let urls = await load()
-            guard current == drop, !urls.isEmpty else { return }
-            model.open(urls)
+            let files = await load()
+            guard current == drop else { return }
+            if let error = files.firstError, !files.urls.contains(where: model.canOpen) {
+                model.report(openFailure: error)
+            } else if !files.urls.isEmpty {
+                // Opens the first openable URL, or alerts that none is.
+                model.open(files.urls)
+            }
         }
         return true
     }
+}
+
+/// What reading a drag's providers gave: the URLs read, in drag order, and
+/// the first error of those that could not be read.
+struct PhotoDropFiles: Sendable {
+    var urls: [URL] = []
+    var firstError: (any Error)? = nil
 }
 
 /// Feeds the canvas's drops to its `PhotoDropCoordinator`.
@@ -102,14 +119,31 @@ struct PhotoDropDelegate: DropDelegate {
         return { await urls(from: providers) }
     }
 
-    private static func urls(from providers: [NSItemProvider]) async -> [URL] {
-        var urls: [URL] = []
+    private static func urls(from providers: [NSItemProvider]) async -> PhotoDropFiles {
+        var results: [Result<URL, any Error>] = []
         for provider in providers {
-            let url = await withCheckedContinuation { (continuation: CheckedContinuation<URL?, Never>) in
-                _ = provider.loadObject(ofClass: URL.self) { url, _ in continuation.resume(returning: url) }
+            let result = await withCheckedContinuation {
+                (continuation: CheckedContinuation<Result<URL, any Error>?, Never>) in
+                _ = provider.loadObject(ofClass: URL.self) { url, error in
+                    continuation.resume(returning: url.map { .success($0) } ?? error.map { .failure($0) })
+                }
             }
-            if let url { urls.append(url) }
+            if let result { results.append(result) }
         }
-        return urls
+        return collect(results)
+    }
+
+    /// The URLs that were read, in order, and the first error. Keeping both
+    /// lets the coordinator tell an unreadable photograph from a drag that is
+    /// simply unsupported.
+    static func collect(_ results: [Result<URL, any Error>]) -> PhotoDropFiles {
+        var files = PhotoDropFiles()
+        for result in results {
+            switch result {
+            case .success(let url): files.urls.append(url)
+            case .failure(let error): files.firstError = files.firstError ?? error
+            }
+        }
+        return files
     }
 }

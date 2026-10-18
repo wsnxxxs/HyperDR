@@ -58,14 +58,9 @@ private struct EditorWindow: View {
                 switch result {
                 case .success(let url):
                     model.open([url])
-                case .failure(let error as CocoaError) where error.code == .userCancelled:
-                    // Cancelling the panel is not an error.
-                    break
-                case .failure:
-                    // TODO(A2): show this through the model's error entry
-                    // point (batch 3 A2 adds one); until then the panel's
-                    // failure is dropped.
-                    break
+                case .failure(let error):
+                    // The model ignores a cancelled panel.
+                    model.report(openFailure: error)
                 }
             }
             .sheet(isPresented: Bindable(window).isFraming) {

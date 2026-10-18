@@ -1,6 +1,5 @@
 import SwiftUI
 import HyperDRDesign
-import HyperDREngine
 
 extension FrameColor {
     /// The frame's colours are Display P3, as the engine reads the background.
@@ -13,7 +12,7 @@ extension FrameColor {
 struct FrameCaptionView: View {
     let caption: FrameCaption
     let settings: FrameSettings
-    let layout: FrameLayout
+    let layout: FramePixelLayout
     /// Points per engine pixel.
     let scale: CGFloat
 
@@ -86,7 +85,7 @@ struct FrameCaptionView: View {
 /// print's rect -- in the app the live EDR canvas -- so the frame, drawn here
 /// in SDR, sits at reference white beside the photograph's real highlights.
 struct FramedPhoto<Photo: View>: View {
-    let layout: FrameLayout
+    let layout: FramePixelLayout
     let settings: FrameSettings
     let caption: FrameCaption
     @ViewBuilder let photo: () -> Photo

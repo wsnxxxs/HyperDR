@@ -5,7 +5,7 @@ import Metal
 import QuartzCore
 
 struct HeadroomSnapshot: Equatable {
-    var screen = "等待显示器"
+    var screen = "waiting for display"
     var current: CGFloat = 1
     var potential: CGFloat = 1
     var reference: CGFloat = 1
@@ -202,7 +202,7 @@ final class EDRCanvasView: NSView {
         // 16 (`deltaMode === 1`) so a notch feels the same as a trackpad slide.
         let delta = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.deltaY * 16
         guard let next = CanvasTransform.wheelZoom(fromZoom: transform.zoom,
-                deltaY: delta, ctrl: event.modifierFlags.contains(.control)) else { return }
+                deltaY: -delta, ctrl: event.modifierFlags.contains(.control)) else { return }
         applyZoom(next, anchor: convert(event.locationInWindow, from: nil))
     }
 

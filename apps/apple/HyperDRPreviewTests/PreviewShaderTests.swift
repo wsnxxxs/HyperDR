@@ -1,6 +1,7 @@
 import Foundation
 import HyperDREngine
 import Metal
+import QuartzCore
 import XCTest
 @testable import HyperDR
 
@@ -16,8 +17,13 @@ private struct SampleHDRReference: Decodable {
     let cases: [Case]
 }
 
-private let repository = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-    .appendingPathComponent("../../..", isDirectory: true).standardized
+/// The JPEG bundled with the tests. Not a repository path: the sandboxed app
+/// cannot read one, and a missing file must fail rather than skip.
+private func fixturePhoto() throws -> URL {
+    let bundle = Bundle(for: PreviewShaderTests.self)
+    return try XCTUnwrap(bundle.url(forResource: "photo", withExtension: "jpg", subdirectory: "Fixtures")
+        ?? bundle.url(forResource: "photo", withExtension: "jpg"), "missing Fixtures/photo.jpg")
+}
 
 @MainActor final class PreviewShaderTests: XCTestCase {
     /// Pass 1 against the frozen `sampleHdr` reference from the Web editor.
@@ -85,30 +91,78 @@ private let repository = URL(fileURLWithPath: #filePath).deletingLastPathCompone
         // still reach the same 8× peak (and 1.0 in original mode).
         let ramp = try PreviewRenderer.syntheticRamp(device: renderer.device)
         let rampPixels = try renderer.readIntermediate(planes: ramp, original: false)
-        // The ramp is 0…3 stops of gain over a 0…1 base: the reconstructed
-        // value at column x is 8 · x/(width-1). The peak therefore sits at the
-        // right edge, and comparing against that column's own expected value
-        // checks the whole 0–8× curve instead of one magic constant.
-        let columns = stride(from: 0, to: rampPixels.count, by: 4).map { rampPixels[$0] }
-        let peak = columns.max() ?? 0
-        let peakColumn = (columns.firstIndex(of: peak) ?? 0) % ramp.width
-        let expected = 8 * Double(peakColumn) / Double(ramp.width - 1)
-        XCTAssertEqual(Double(peak), expected, accuracy: 0.25)
-        XCTAssertGreaterThanOrEqual(peakColumn, ramp.width - 2)
         let rampOriginal = try renderer.readIntermediate(planes: ramp, original: true)
-        // The same column in original mode shows the 0…1 base.
-        let basePeak = columns.isEmpty ? 0 : rampOriginal[peakColumn * 4]
-        XCTAssertEqual(basePeak, Float(expected / 8), accuracy: 0.001)
+        // At column x, v = x/(width-1): the base is v and the gain v · 3 stops,
+        // so the reconstructed value is v · 2^(3v), from 0 to 8 at the right
+        // edge. Every column of the white middle band is checked, in all three
+        // channels, so a misread base plane cannot pass.
+        let row = ramp.height / 2
+        var maximumError: Float = 0
+        for x in 0..<ramp.width {
+            let v = Float(x) / Float(ramp.width - 1)
+            let hdr = v * exp2(3 * v)
+            for channel in 0..<3 {
+                let index = (row * ramp.width + x) * 4 + channel
+                // Half-float storage: about 1/1000 of the value, plus a floor near 0.
+                let tolerance = max(0.002, hdr * 0.002)
+                maximumError = max(maximumError, abs(rampPixels[index] - hdr))
+                XCTAssertEqual(rampPixels[index], hdr, accuracy: tolerance, "HDR column \(x), channel \(channel)")
+                XCTAssertEqual(rampOriginal[index], v, accuracy: 0.002, "original column \(x), channel \(channel)")
+            }
+        }
+        XCTAssertEqual(rampPixels[(row * ramp.width + ramp.width - 1) * 4], 8, accuracy: 0.01)
+        print("synthetic ramp: \(ramp.width) columns × 3 channels vs v · 2^(3v), "
+            + "maximum absolute error=\(maximumError)")
+    }
+
+    /// The renderer holds the frame it prepared until a newer one replaces it
+    /// or the canvas is cleared. Before, it kept only the frame's address: a
+    /// new frame allocated where a released one had been was served the old
+    /// texture (40 of 40 in the A1 review probe).
+    func testNewFrameNeverGetsAReleasedFramesTexture() async throws {
+        let source = try fixturePhoto()
+        let engine = try await Engine()
+        let session = try engine.openPreview(source: source)
+        defer { session.close() }
+        let renderer = try PreviewRenderer()
+        // Builds every intermediate from scratch: the truth for each frame.
+        let reference = try PreviewRenderer()
+        func render(_ exposure: Double) async throws -> PreviewFrame {
+            try await session.renderFrame(EngineRequest(settings: ["preview_max_edge": .number(64),
+                                                                   "exposure": .number(exposure)]))
+        }
+        for attempt in 0..<20 {
+            var shownFrame: PreviewFrame? = try await render(-2)
+            let shownTexture = try renderer.prepare(frame: shownFrame!, original: false)
+            // The cache holds the frame object itself, so no newer frame can be
+            // allocated at its address while it is cached.
+            XCTAssertTrue(renderer.isPrepared(from: shownFrame!), "attempt \(attempt)")
+            // The model drops the frame it showed: under the old address-only
+            // cache, the next frame could land where it was.
+            shownFrame = nil
+
+            let next = try await render(Double(attempt % 3))
+            XCTAssertFalse(try renderer.prepare(frame: next, original: false) === shownTexture,
+                           "attempt \(attempt): a new frame was served the previous texture")
+            let shown = try renderer.readIntermediate(frame: next, original: false)
+            let truth = try reference.readIntermediate(planes: FramePlanes(next, device: reference.device),
+                                                       original: false)
+            XCTAssertEqual(shown, truth, "attempt \(attempt): the canvas shows another frame's pixels")
+        }
+
+        // Closing the photo lets go of the intermediate and its frame.
+        let last = try await render(1)
+        try renderer.prepare(frame: last, original: false)
+        XCTAssertTrue(renderer.isPrepared(from: last))
+        renderer.clear(in: CAMetalLayer())
+        XCTAssertFalse(renderer.isPrepared(from: last))
+        XCTAssertNil(renderer.readyFrameIdentity)
     }
 
     /// A real engine frame renders through the same pass, and the Metal buffers
     /// are the frame's own page-aligned planes: no pixel copy on the way in.
     func testEngineFramePlanesAreUsedWithoutCopying() async throws {
-        let source = repository.appendingPathComponent("build/smoke/input.jpg")
-        guard FileManager.default.fileExists(atPath: source.path) else {
-            print("skipping testEngineFramePlanesAreUsedWithoutCopying: run the smoke suite first")
-            return
-        }
+        let source = try fixturePhoto()
         let engine = try await Engine()
         let session = try engine.openPreview(source: source)
         defer { session.close() }

@@ -63,14 +63,16 @@ final class EDRCanvasView: NSView {
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { false }
 
-    init(onHeadroom: @escaping (HeadroomSnapshot) -> Void = { _ in },
+    /// `renderer` is a test seam; the app lets the view build its own.
+    init(renderer suppliedRenderer: PreviewRenderer? = nil,
+         onHeadroom: @escaping (HeadroomSnapshot) -> Void = { _ in },
          onError: @escaping (String) -> Void = { _ in }) {
         self.onHeadroom = onHeadroom
         self.onError = onError
         super.init(frame: .zero)
         wantsLayer = true
         do {
-            let renderer = try PreviewRenderer()
+            let renderer = try suppliedRenderer ?? PreviewRenderer()
             self.renderer = renderer
             metalLayer.device = renderer.device
             metalLayer.pixelFormat = .rgba16Float
@@ -134,13 +136,26 @@ final class EDRCanvasView: NSView {
     }
 
     @objc private func step(_ link: CADisplayLink) {
-        guard dirty, window?.isVisible == true else { return }
+        guard window?.isVisible == true else { return }
+        tick()
+    }
+
+    /// One display tick. While the previous presentation is still on the GPU
+    /// (`isBusy`) the tick neither runs pass 1 nor asks for a drawable; it
+    /// stays dirty, and the first tick after completion draws the latest frame.
+    func tick() {
+        guard dirty else { return }
+        if let renderer, renderer.isBusy {
+            renderer.noteBusyTick()   // stays dirty
+            return
+        }
         dirty = false
         render()
         if renderer?.needsRetry == true { dirty = true }
     }
 
     func setNeedsRedraw() { dirty = true }
+    var needsRedraw: Bool { dirty }
 
     // MARK: - Drawing
 

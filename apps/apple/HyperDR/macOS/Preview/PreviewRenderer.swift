@@ -2,6 +2,7 @@ import CoreGraphics
 import Foundation
 import HyperDREngine
 import Metal
+import os
 import QuartzCore
 
 /// The native float planes a frame hands to Metal. They are the frame's own
@@ -135,13 +136,34 @@ final class PreviewRenderer {
     }
     private var prepared: Prepared?
 
-    init() throws {
-        guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue() else {
+    /// Intervals for A3's frame-time table: pass 1, waiting for a drawable,
+    /// pass 2 encoding, present + commit, and each presenting command buffer
+    /// from commit to GPU completion. Busy ticks are events.
+    nonisolated static let signposter = OSSignposter(subsystem: "com.hyperdr.HyperDR",
+                                                     category: "Canvas")
+
+    /// At most this many presenting command buffers may be uncompleted before
+    /// `draw` / `clear` stop asking for drawables (A2b-1, the in-flight gate).
+    static let maxInFlight = 1
+    /// Presenting command buffers committed and not yet completed. Pass 1
+    /// buffers are not counted: they share the queue, so a presenting buffer
+    /// completes only after every pass 1 committed before it.
+    private(set) var inFlight = 0
+    /// True while the GPU has not caught up: a draw now would wait in
+    /// `nextDrawable`, so the caller should skip the tick and retry.
+    var isBusy: Bool { inFlight >= Self.maxInFlight }
+
+    /// Where drawables come from. Tests count or replace the calls; the app
+    /// always asks the layer.
+    var drawableSource: (CAMetalLayer) -> (any CAMetalDrawable)? = { $0.nextDrawable() }
+
+    init(library suppliedLibrary: (any MTLLibrary)? = nil) throws {
+        guard let device = suppliedLibrary?.device ?? MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue() else {
             throw PreviewError.unavailable("No Metal device")
         }
         self.device = device
         self.queue = queue
-        library = try device.makeDefaultLibrary(bundle: Bundle(for: PreviewRenderer.self))
+        library = try suppliedLibrary ?? device.makeDefaultLibrary(bundle: Bundle(for: PreviewRenderer.self))
         reconstructPipeline = try Self.computePipeline(device: device, library: library,
             name: "reconstructFrame")
         reconstruct32Pipeline = try Self.computePipeline(device: device, library: library,
@@ -188,6 +210,8 @@ final class PreviewRenderer {
 
     private func prepare(planes: FramePlanes, original: Bool,
                          source: AnyObject) throws -> any MTLTexture {
+        let signpost = Self.signposter.beginInterval("Pass1")
+        defer { Self.signposter.endInterval("Pass1", signpost) }
         let texture = try Self.intermediateTexture(device: device,
             width: planes.width, height: planes.height)
         encodeReconstruct(planes, original: original, into: texture, pipeline: reconstructPipeline)
@@ -292,40 +316,44 @@ final class PreviewRenderer {
 
     // MARK: - Pass 2
 
-    /// True after a `draw` or `clear` that found no drawable: nothing was
-    /// presented, so the caller must try again on the next display tick or the
-    /// canvas stays stale until some unrelated change. Cleared by the next
-    /// call that presents.
+    /// True after a `draw` or `clear` that presented nothing because no
+    /// drawable was available or the gate was closed: the caller must try
+    /// again on the next display tick or the canvas stays stale until some
+    /// unrelated change. Cleared by the next call that presents.
     private(set) var needsRetry = false
 
-    /// Presents the prepared frame; false when no drawable was available (the
-    /// layer's swap queue was exhausted or it is misconfigured), in which case
-    /// `needsRetry` is set. Nothing to draw (no frame, empty layer) is not a
-    /// failure.
+    /// Records a tick skipped because `isBusy`. A caller that skips before
+    /// calling `draw` / `clear` keeps its own retry state: `needsRetry` is
+    /// left alone, or a tick with nothing to present could not reset it.
+    func noteBusyTick() {
+        Self.signposter.emitEvent("Busy")
+    }
+
+    /// Presents the prepared frame; false when nothing was presented and the
+    /// call must be retried (`needsRetry` is set): a presenting command buffer
+    /// is still in flight, or no drawable was available (the layer's swap
+    /// queue was exhausted or it is misconfigured). Nothing to draw (no frame,
+    /// empty layer) is not a failure.
     ///
     /// `nextDrawable` blocks the calling thread, up to one second by default;
     /// `allowsNextDrawableTimeout = false` would make that unbounded, so the
-    /// bound is kept and a miss is retried a tick later instead.
+    /// bound is kept. The gate means the main thread asks only once the GPU
+    /// has caught up; a compositor holding drawables can still make it wait
+    /// (A2b-2 moves the wait off the main thread).
     @discardableResult
     func draw(in layer: CAMetalLayer, transform: CanvasTransform) -> Bool {
         guard layer.drawableSize.width > 0, layer.drawableSize.height > 0, let prepared else {
             needsRetry = false   // nothing to present: not a miss
             return true
         }
-        guard let drawable = layer.nextDrawable() else {
-            needsRetry = true
-            return false
-        }
-        guard let command = queue.makeCommandBuffer() else {
+        guard let drawable = acquireDrawable(layer),
+              let command = queue.makeCommandBuffer() else {
             needsRetry = true
             return false
         }
         needsRetry = false
-        let pass = MTLRenderPassDescriptor()
-        pass.colorAttachments[0].texture = drawable.texture
-        pass.colorAttachments[0].loadAction = .clear
-        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
-        pass.colorAttachments[0].storeAction = .store
+        let encoding = Self.signposter.beginInterval("Encode")
+        let pass = Self.clearPass(drawable)
         if let encoder = command.makeRenderCommandEncoder(descriptor: pass) {
             encoder.setRenderPipelineState(displayPipeline)
             var params = DisplayParams(rect: Self.normalisedRect(transform,
@@ -335,16 +363,16 @@ final class PreviewRenderer {
             encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
             encoder.endEncoding()
         }
-        command.present(drawable)
-        command.commit()
+        Self.signposter.endInterval("Encode", encoding)
+        submit(command, presenting: drawable)
         return true
     }
 
     /// Presents an empty (fully transparent) drawable, so closing a photo does
     /// not leave the previous frame on screen, and lets go of the intermediate
     /// and the frame it was built from.
-    /// False when no drawable was available (see `draw`); the frame is let go
-    /// of either way, and `needsRetry` is set so the clear is tried again.
+    /// False when nothing was presented (see `draw`); the frame is let go of
+    /// either way, and `needsRetry` is set so the clear is tried again.
     @discardableResult
     func clear(in layer: CAMetalLayer) -> Bool {
         prepared = nil
@@ -352,22 +380,57 @@ final class PreviewRenderer {
             needsRetry = false   // nothing to present: not a miss
             return true
         }
-        guard let drawable = layer.nextDrawable(), let command = queue.makeCommandBuffer() else {
+        guard let drawable = acquireDrawable(layer),
+              let command = queue.makeCommandBuffer() else {
             needsRetry = true
             return false
         }
         needsRetry = false
+        if let encoder = command.makeRenderCommandEncoder(descriptor: Self.clearPass(drawable)) {
+            encoder.endEncoding()
+        }
+        submit(command, presenting: drawable)
+        return true
+    }
+
+    /// The gate, then the drawable. Sets `needsRetry` when either is missing;
+    /// a closed gate never calls `nextDrawable`.
+    private func acquireDrawable(_ layer: CAMetalLayer) -> (any CAMetalDrawable)? {
+        guard !isBusy else {
+            noteBusyTick()
+            needsRetry = true
+            return nil
+        }
+        let signpost = Self.signposter.beginInterval("NextDrawable")
+        let drawable = drawableSource(layer)
+        Self.signposter.endInterval("NextDrawable", signpost)
+        if drawable == nil { needsRetry = true }
+        return drawable
+    }
+
+    private static func clearPass(_ drawable: any CAMetalDrawable) -> MTLRenderPassDescriptor {
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = drawable.texture
         pass.colorAttachments[0].loadAction = .clear
         pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
         pass.colorAttachments[0].storeAction = .store
-        if let encoder = command.makeRenderCommandEncoder(descriptor: pass) {
-            encoder.endEncoding()
+        return pass
+    }
+
+    /// Presents and commits, counting the buffer in flight until the GPU
+    /// completes it. The completion handler hops to the main queue, so the
+    /// gate opens on a later tick, never in the middle of one.
+    private func submit(_ command: any MTLCommandBuffer, presenting drawable: any CAMetalDrawable) {
+        let presenting = Self.signposter.beginInterval("Present")
+        let gpu = Self.signposter.beginInterval("InFlight")
+        inFlight += 1
+        command.addCompletedHandler { [weak self] _ in
+            Self.signposter.endInterval("InFlight", gpu)
+            DispatchQueue.main.async { self?.inFlight -= 1 }
         }
         command.present(drawable)
         command.commit()
-        return true
+        Self.signposter.endInterval("Present", presenting)
     }
 
     /// The photo rect in normalised device coordinates, y up. Edges snap to

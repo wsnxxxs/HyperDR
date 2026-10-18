@@ -20,7 +20,7 @@ private struct SampleHDRReference: Decodable {
 /// The JPEG bundled with the tests. Not a repository path: the sandboxed app
 /// cannot read one, and a missing file must fail rather than skip.
 private func fixturePhoto() throws -> URL {
-    let bundle = Bundle(for: PreviewShaderTests.self)
+    let bundle = previewFixtureBundle()
     return try XCTUnwrap(bundle.url(forResource: "photo", withExtension: "jpg", subdirectory: "Fixtures")
         ?? bundle.url(forResource: "photo", withExtension: "jpg"), "missing Fixtures/photo.jpg")
 }
@@ -30,7 +30,7 @@ private func fixturePhoto() throws -> URL {
     /// Both the v2 path (one monochrome gain plane, bilinear) and the v1 path
     /// (a full-size HDR plane) are covered by the fixture's four cases.
     func testPassOneMatchesFrozenWebReference() throws {
-        let renderer = try PreviewRenderer()
+        let renderer = try makePreviewRenderer()
         let device = renderer.device
         let width = 7, height = 5
         let base = (0..<(width * height * 3)).map { Float(($0 * 13) % 41) / 40 - 0.025 }
@@ -59,6 +59,7 @@ private func fixturePhoto() throws -> URL {
         for (compact, weight) in [(true, Float(0)), (true, 0.65), (true, 1), (false, Float(1))] {
             let actual = try renderer.reconstructFloat(planes: compact
                 ? compactPlanes(weight: weight) : v1Planes)
+            try tracePreviewPixels("sample-\(compact)-\(weight)", actual)
             let expected = try sampledReference(width: width, height: height,
                 compact: compact, weight: weight)
             for pixel in 0..<(width * height) {
@@ -78,12 +79,14 @@ private func fixturePhoto() throws -> URL {
     /// The presentation texture keeps extended values: a 3-stop gain reaching a
     /// white of 8.0, and the original mode showing the SDR base at 1.0.
     func testPresentationKeepsPeakWhiteAndOriginalMode() throws {
-        let renderer = try PreviewRenderer()
+        let renderer = try makePreviewRenderer()
         let planes = try Self.uniformPlanes(device: renderer.device, base: 1, gainMin: 3, gainMax: 3)
         let hdr = try renderer.readIntermediate(planes: planes, original: false)
+        try tracePreviewPixels("white-hdr", hdr)
         XCTAssertEqual(hdr[0], 8, accuracy: 0.01)
         XCTAssertEqual(hdr[1], 8, accuracy: 0.01)
         let original = try renderer.readIntermediate(planes: planes, original: true)
+        try tracePreviewPixels("white-original", original)
         XCTAssertEqual(original[0], 1, accuracy: 0.001)
         print("rgba16Float intermediate: HDR white=\(hdr[0]), SDR white=\(original[0])")
 
@@ -92,6 +95,8 @@ private func fixturePhoto() throws -> URL {
         let ramp = try PreviewRenderer.syntheticRamp(device: renderer.device)
         let rampPixels = try renderer.readIntermediate(planes: ramp, original: false)
         let rampOriginal = try renderer.readIntermediate(planes: ramp, original: true)
+        try tracePreviewPixels("ramp-hdr", rampPixels)
+        try tracePreviewPixels("ramp-original", rampOriginal)
         // At column x, v = x/(width-1): the base is v and the gain v · 3 stops,
         // so the reconstructed value is v · 2^(3v), from 0 to 8 at the right
         // edge. Every column of the white middle band is checked, in all three
@@ -124,9 +129,9 @@ private func fixturePhoto() throws -> URL {
         let engine = try await Engine()
         let session = try engine.openPreview(source: source)
         defer { session.close() }
-        let renderer = try PreviewRenderer()
+        let renderer = try makePreviewRenderer()
         // Builds every intermediate from scratch: the truth for each frame.
-        let reference = try PreviewRenderer()
+        let reference = try makePreviewRenderer()
         func render(_ exposure: Double) async throws -> PreviewFrame {
             try await session.renderFrame(EngineRequest(settings: ["preview_max_edge": .number(64),
                                                                    "exposure": .number(exposure)]))
@@ -147,6 +152,8 @@ private func fixturePhoto() throws -> URL {
             let shown = try renderer.readIntermediate(frame: next, original: false)
             let truth = try reference.readIntermediate(planes: FramePlanes(next, device: reference.device),
                                                        original: false)
+            try tracePreviewPixels("R1-\(attempt)-shown", shown)
+            try tracePreviewPixels("R1-\(attempt)-truth", truth)
             XCTAssertEqual(shown, truth, "attempt \(attempt): the canvas shows another frame's pixels")
         }
 
@@ -161,8 +168,8 @@ private func fixturePhoto() throws -> URL {
 
     /// No drawable (a layer without a device hands out none) presents nothing
     /// and is retried: the next call, with a working layer, draws.
-    func testNilDrawableIsRetriedOnTheNextDraw() throws {
-        let renderer = try PreviewRenderer()
+    func testNilDrawableIsRetriedOnTheNextDraw() async throws {
+        let renderer = try makePreviewRenderer()
         try renderer.prepare(planes: try PreviewRenderer.syntheticRamp(device: renderer.device), original: false)
         let transform = CanvasTransform(imageSize: CGSize(width: 16, height: 16),
                                         viewport: CGSize(width: 16, height: 16))
@@ -177,6 +184,8 @@ private func fixturePhoto() throws -> URL {
         layer.drawableSize = CGSize(width: 16, height: 16)
         XCTAssertTrue(renderer.draw(in: layer, transform: transform))
         XCTAssertFalse(renderer.needsRetry)
+        // The in-flight gate (A2b-1) holds further presents until it completes.
+        await eventually("the presentation to complete") { !renderer.isBusy }
 
         XCTAssertFalse(renderer.clear(in: broken))
         XCTAssertTrue(renderer.needsRetry)
@@ -188,7 +197,7 @@ private func fixturePhoto() throws -> URL {
     /// A miss followed by a layer with nothing to present (zero size, or no
     /// frame) must not leave `needsRetry` set, or the view retries every tick.
     func testNothingToPresentClearsTheRetryFlag() throws {
-        let renderer = try PreviewRenderer()
+        let renderer = try makePreviewRenderer()
         try renderer.prepare(planes: try PreviewRenderer.syntheticRamp(device: renderer.device), original: false)
         let transform = CanvasTransform(imageSize: CGSize(width: 16, height: 16),
                                         viewport: CGSize(width: 16, height: 16))
@@ -222,7 +231,7 @@ private func fixturePhoto() throws -> URL {
         defer { session.close() }
         let frame = try await session.renderFrame(EngineRequest(
             settings: ["preview_max_edge": .number(32)]))
-        let renderer = try PreviewRenderer()
+        let renderer = try makePreviewRenderer()
         let buffers = try frame.metalBuffers(device: renderer.device)
         let basePointer = frame.base.withUnsafeBytes { $0.baseAddress }
         let gainPointer = frame.gain.withUnsafeBytes { $0.baseAddress }
@@ -232,6 +241,7 @@ private func fixturePhoto() throws -> URL {
                        "the gain plane must be shared, not copied")
 
         let pixels = try renderer.readIntermediate(frame: frame, original: false)
+        try tracePreviewPixels("native-hdr", pixels)
         XCTAssertEqual(pixels.count, frame.base.width * frame.base.height * 4)
         // Spot-check the reconstruction against the same maths in Swift.
         let metadata = frame.metadata
@@ -240,6 +250,7 @@ private func fixturePhoto() throws -> URL {
         XCTAssertEqual(pixels[(y * frame.base.width + x) * 4 + 0], expected.0,
                        accuracy: max(1e-2, abs(expected.0) * 1e-3))
         let original = try renderer.readIntermediate(frame: frame, original: true)
+        try tracePreviewPixels("native-original", original)
         XCTAssertEqual(original[(y * frame.base.width + x) * 4 + 0], expected.3,
                        accuracy: max(1e-2, abs(expected.3) * 1e-3))
     }
@@ -300,7 +311,7 @@ private func fixturePhoto() throws -> URL {
     }
 
     private func sampledReference(width: Int, height: Int, compact: Bool, weight: Float) throws -> [Float] {
-        let url = try XCTUnwrap(Bundle(for: PreviewShaderTests.self)
+        let url = try XCTUnwrap(previewFixtureBundle()
             .url(forResource: "sample-hdr-reference", withExtension: "json"),
             "missing sample-hdr-reference.json")
         let reference = try JSONDecoder().decode(SampleHDRReference.self, from: Data(contentsOf: url))

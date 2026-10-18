@@ -1,4 +1,5 @@
 import Foundation
+import Metal
 import XCTest
 @testable import HyperDR
 
@@ -69,4 +70,30 @@ import XCTest
         waiter?.resume(throwing: CancellationError())
         waiter = nil
     }
+}
+
+// Headless rendering tests load the app's compiled Metal library explicitly;
+// the production initializer continues to load its own bundle by default.
+@MainActor func previewTestLibrary() throws -> (any MTLLibrary)? {
+    guard let path = ProcessInfo.processInfo.environment["HYPERDR_TEST_METALLIB"] else { return nil }
+    let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+    return try device.makeLibrary(URL: URL(fileURLWithPath: path))
+}
+@MainActor func makePreviewRenderer() throws -> PreviewRenderer {
+    try PreviewRenderer(library: previewTestLibrary())
+}
+func previewFixtureBundle() -> Bundle {
+#if SWIFT_PACKAGE
+    Bundle.module
+#else
+    Bundle(for: PreviewShaderTests.self)
+#endif
+}
+/// Optional raw bytes for same-machine before/after checks; no tolerance or
+/// float formatting can mask a changed bit in these traces.
+func tracePreviewPixels(_ label: String, _ pixels: [Float]) throws {
+    guard let path = ProcessInfo.processInfo.environment["HYPERDR_PIXEL_TRACE_DIRECTORY"] else { return }
+    let directory = URL(fileURLWithPath: path)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try pixels.withUnsafeBytes { try Data($0).write(to: directory.appendingPathComponent(label + ".f32le")) }
 }

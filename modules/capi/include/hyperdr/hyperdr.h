@@ -99,6 +99,8 @@ typedef struct hyperdr_frame {
  * command_line returns a JSON argv array, without shell quoting.
  * preview_open is lazy: decoding happens on the first render/model call.
  * convert returns a completed batch report; inspect per-file success in it.
+ * A JPEG dimension failure has per-file error_code=export_dimension_limit,
+ * with detail describing actual dimensions and the 65500 per-side limit.
  * Functions return zero on success, nonzero with a library-owned error on
  * failure. Output fields are cleared on failure. Pass NULL for optional err,
  * config_json, source_sha256, cancel or callback. F32 frames are always supported;

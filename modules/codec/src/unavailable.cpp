@@ -73,9 +73,14 @@ std::vector<std::uint8_t> encode_adaptive_heic(const GainMapResult&,
   fail_without_codecs("Adaptive HDR HEIC encoding");
 }
 
-std::vector<std::uint8_t> encode_ultrahdr_jpeg(const GainMapResult&,
+std::vector<std::uint8_t> encode_gain_map_jpeg(const GainMapResult&,
                                                const PhotoMetadata&, int) {
   fail_without_codecs("Ultra HDR JPEG encoding");
+}
+
+GainMapJpegEncoding encode_gain_map_jpeg_measured(const GainMapResult&,
+    const PhotoMetadata&, int, const FrameLayout*) {
+  fail_without_codecs("ISO gain-map JPEG encoding");
 }
 
 std::vector<std::uint8_t> encode_hdr_heic(const PhotoRenditions&,
@@ -83,22 +88,14 @@ std::vector<std::uint8_t> encode_hdr_heic(const PhotoRenditions&,
   fail_without_codecs("BT.2100 HEIC encoding");
 }
 
-std::vector<std::uint8_t> encode_ultrahdr_jpeg(const PhotoRenditions&,
-    const PhotoMetadata&, int) {
-  fail_without_codecs("Ultra HDR rendition encoding");
-}
-std::vector<std::uint8_t> encode_ultrahdr_jpeg(const FloatImage&,
-    const std::vector<std::uint8_t>&, ColorGamut, float, int) {
-  fail_without_codecs("Ultra HDR JPEG reuse");
-}
-UltraHdrInfo probe_ultrahdr_jpeg(const std::vector<std::uint8_t>&) {
-  fail_without_codecs("Ultra HDR metadata inspection");
-}
-
 std::vector<std::uint8_t> encode_avif(const PhotoRenditions&, const PhotoMetadata&,
                                       int, HdrEncoding) {
   fail_without_codecs("AVIF encoding");
 }
+
+namespace testing {
+void set_jpeg_progress_observer(void (*)(bool)) {}
+}  // namespace testing
 
 std::vector<std::uint8_t> encode_sdr_jpeg(const FloatImage&, const PhotoMetadata&, int, ColorGamut) {
   fail_without_codecs("SDR JPEG encoding");
@@ -121,11 +118,11 @@ void verify_heic_decodable(const std::filesystem::path&) {
   fail_without_codecs("HEIC decode verification");
 }
 
-void verify_ultrahdr_jpeg(const std::vector<std::uint8_t>&) {
+void verify_gain_map_jpeg(const std::vector<std::uint8_t>&) {
   fail_without_codecs("Ultra HDR JPEG verification");
 }
 
-void verify_ultrahdr_jpeg(const std::filesystem::path&) {
+void verify_gain_map_jpeg(const std::filesystem::path&) {
   fail_without_codecs("Ultra HDR JPEG verification");
 }
 

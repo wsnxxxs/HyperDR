@@ -432,6 +432,12 @@
         "message": {
           "type": "string"
         },
+        "error_code": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
         "sensor_width": {
           "$ref": "#/$defs/dimension"
         },

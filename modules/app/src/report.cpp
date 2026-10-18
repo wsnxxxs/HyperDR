@@ -60,7 +60,7 @@ void write_settings(json::Writer& writer, const ConvertOptions& options) {
       .end_object();
 }
 
-void write_stats(json::Writer& writer, const RenderStats& s, bool codec_gain) {
+void write_stats(json::Writer& writer, const RenderStats& s) {
   writer.begin_object("look")
       .member("exposure_ev", s.exposure_ev)
       .member("ev100", s.ev100)
@@ -78,16 +78,12 @@ void write_stats(json::Writer& writer, const RenderStats& s, bool codec_gain) {
       .member("wide_gamut_luminance_threshold", s.wide_gamut_luminance_threshold)
       .end_object();
   writer.begin_object("gain_map")
-      .member("encoder", codec_gain ? "libultrahdr-api3" : "hyperdr")
+      .member("encoder", "hyperdr")
       .member("adaptive_chroma_loss", s.adaptive_chroma_loss)
-      .member("distribution_measured", !codec_gain)
+      .member("distribution_measured", true)
       .member("gamma", s.gain_gamma)
       .member("min_stops", s.gain_min_stops)
       .member("max_stops", s.gain_max_stops);
-  if (codec_gain) {
-    writer.end_object();
-    return;
-  }
   writer.begin_object("percentiles_stops")
       .member("p50", s.gain_percentiles[0])
       .member("p75", s.gain_percentiles[1])
@@ -200,7 +196,10 @@ std::string run_report_json(const std::vector<FileResult>& results,
         .member("codec_ms", result.codec_ms)
         .member("verify_ms", result.verify_ms)
         .member("write_ms", result.write_ms);
-    write_stats(writer, result.stats, result.codec_gain);
+    if (!result.error_code.empty()) {
+      writer.member("error_code", result.error_code).member("detail", result.detail);
+    }
+    write_stats(writer, result.stats);
     writer.end_object();
   }
   return writer.end_array().end_object().take() + "\n";

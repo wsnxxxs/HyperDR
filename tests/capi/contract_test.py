@@ -11,6 +11,12 @@ CLI, LIBRARY = map(str, map(Path, sys.argv[1:3]))
 del sys.argv[1:3]
 DLL_DIRECTORY = os.add_dll_directory(str(Path(LIBRARY).parent)) if os.name == "nt" else None
 LIB = ctypes.CDLL(LIBRARY)
+# dlsym on the library handle also searches its dependencies, so a library
+# built with ASan or UBSan exposes the runtime's entry points.
+SANITIZED = any(hasattr(LIB, name) for name in ("__asan_init", "__ubsan_handle_add_overflow"))
+# Encode-stage cancellation must finish within 200 ms; sanitizer builds run
+# the same loops several times slower.
+ENCODE_CANCEL_LIMIT = 1.0 if SANITIZED else .2
 
 
 class Error(ctypes.Structure):
@@ -570,6 +576,140 @@ class EngineContract(unittest.TestCase):
                             self.assertEqual(report["settings"], cli_report["settings"])
             finally:
                 LIB.hyperdr_preview_close(session)
+
+    def test_iso_jpeg_structure_and_rendered_headroom(self):
+        if not self.capabilities["codecs"]:
+            self.skipTest("requires codecs")
+        with tempfile.TemporaryDirectory(prefix="hyperdr-iso-jpeg-") as temporary:
+            root = Path(temporary)
+            source, destination, report_path = root / "sample.png", root / "out", root / "report.json"
+            png(source, 128, 96)
+            request = {"encoding": "ultrahdr", "command": {
+                "input": str(source), "output": str(destination), "overwrite": True}}
+            report, _ = self.compare_export(request,
+                ["convert", str(source), "--output", str(destination), "--encoding", "ultrahdr",
+                 "--report", str(report_path)], destination / "sample-hyperdr.jpg", report_path)
+            golden = json.loads((Path(__file__).parent / "golden/iso_gain_map_jpeg.json").read_text())
+            self.assertEqual(hashlib.sha256((destination / "sample-hyperdr.jpg").read_bytes()).hexdigest(), golden["sha256"])
+            file = report["files"][0]
+            self.assertEqual(file["gain_map"]["encoder"], "hyperdr")
+            self.assertTrue(file["gain_map"]["distribution_measured"])
+            inspection = json.loads(subprocess.check_output(
+                [CLI, "inspect", str(destination / "sample-hyperdr.jpg"), "--json"]))
+            for key in ("primary_iso_segments", "gain_iso_segments", "mpf_segments"):
+                self.assertEqual(inspection[key], 1)
+            self.assertFalse(inspection["has_hdrgm"])
+            self.assertFalse(inspection["has_container_directory"])
+            self.assertAlmostEqual(inspection["alternate_headroom"], file["headroom_stops"], delta=.001)
+            self.assertAlmostEqual(file["headroom_stops"], file["render"]["headroom_stops"], delta=.01)
+            for channel in inspection["channel_metadata"]:
+                self.assertEqual(channel["base_offset"], 1 / 64)
+                self.assertEqual(channel["alternate_offset"], 1 / 64)
+
+    def test_iso_jpeg_at_zero_headroom_is_sdr_with_a_token_alternate(self):
+        # An explicit zero headroom keeps the format: zero gain, AlternateHeadroom
+        # one 2^-23 step over BaseHeadroom (ISO divides by their difference),
+        # and the report still says 0.
+        if not self.capabilities["codecs"]:
+            self.skipTest("requires codecs")
+        with tempfile.TemporaryDirectory(prefix="hyperdr-iso-jpeg-zero-") as temporary:
+            root = Path(temporary)
+            source, destination, report_path = root / "sample.png", root / "out", root / "report.json"
+            png(source, 128, 96)
+            request = {"encoding": "ultrahdr", "headroom": 0, "command": {
+                "input": str(source), "output": str(destination), "overwrite": True}}
+            reports = self.compare_export(request,
+                ["convert", str(source), "--output", str(destination), "--encoding", "ultrahdr",
+                 "--headroom", "0", "--report", str(report_path)],
+                destination / "sample-hyperdr.jpg", report_path)
+            for report in reports:
+                file = report["files"][0]
+                self.assertEqual(file["headroom_stops"], 0)
+                self.assertEqual(file["render"]["headroom_stops"], 0)
+            inspection = json.loads(subprocess.check_output(
+                [CLI, "inspect", str(destination / "sample-hyperdr.jpg"), "--json"]))
+            self.assertEqual(inspection["base_headroom"], 0)
+            self.assertAlmostEqual(inspection["alternate_headroom"], 2 ** -23, delta=1e-15)
+            for channel in inspection["channel_metadata"]:
+                self.assertEqual(channel["gain_min"], 0)
+                self.assertEqual(channel["gain_max"], 0)
+            subprocess.run([CLI, "verify", str(destination / "sample-hyperdr.jpg")],
+                           check=True, capture_output=True)
+
+    def test_iso_jpeg_cancel_during_encoding_leaves_no_file(self):
+        if not self.capabilities["codecs"]:
+            self.skipTest("requires codecs")
+        with tempfile.TemporaryDirectory(prefix="hyperdr-iso-cancel-") as temporary:
+            root = Path(temporary)
+            source = root / "large.png"
+            width, height = 4000, 3000
+            def chunk(kind, payload):
+                return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", zlib.crc32(kind + payload))
+            rows = (b"\0" + b"\x60\x90\xb0" * width) * height
+            source.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+                + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+            del rows
+            ready = threading.Event()
+            callback = CALLBACK(lambda _, event: ready.set() if json.loads(event).get("phase") == "encode" else None)
+            cancel = LIB.hyperdr_cancel_create()
+            error = ctypes.POINTER(Error)()
+            output = ctypes.c_void_p()
+            status = []
+            request = {"encoding": "ultrahdr", "command": {"input": str(source), "output": str(root / "out")}}
+            def work():
+                status.append(LIB.hyperdr_convert(self.engine, encoded(request), callback, None, cancel,
+                    ctypes.byref(output), ctypes.byref(error)))
+            thread = threading.Thread(target=work)
+            thread.start()
+            try:
+                self.assertTrue(ready.wait(30), "encoder did not start")
+                time.sleep(.05)
+                self.assertTrue(thread.is_alive(), "test image encoded before cancellation")
+                begin = time.perf_counter()
+                LIB.hyperdr_cancel_request(cancel)
+                thread.join(30)
+                elapsed = time.perf_counter() - begin
+                self.assertFalse(thread.is_alive())
+                self.assertNotEqual(status, [0])
+                self.assertEqual(error.contents.code, b"cancelled")
+                self.assertLess(elapsed, ENCODE_CANCEL_LIMIT)
+                self.assertFalse(list((root / "out").glob("*.jpg")))
+                self.assertFalse(list((root / "out").glob("*.tmp")))
+                print(f"ISO JPEG encode cancel: {elapsed * 1000:.2f} ms", flush=True)
+            finally:
+                LIB.hyperdr_cancel_request(cancel)
+                thread.join(30)
+                LIB.hyperdr_error_free(error)
+                LIB.hyperdr_string_free(output)
+                LIB.hyperdr_cancel_destroy(cancel)
+
+    def test_jpeg_dimension_limit_is_a_per_file_failure(self):
+        if not self.capabilities["codecs"]:
+            self.skipTest("requires codecs")
+        with tempfile.TemporaryDirectory(prefix="hyperdr-jpeg-limit-") as temporary:
+            root = Path(temporary)
+            source = root / "wide.png"
+            png(source, 65501, 2)
+            for encoding in ("sdr-jpeg", "ultrahdr"):
+                destination = root / encoding
+                request = {"encoding": encoding, "command": {
+                    "input": str(source), "output": str(destination), "overwrite": True}}
+                report = json.loads(result(LIB.hyperdr_convert, self.engine, encoded(request),
+                    CALLBACK(), None, None))
+                file = report["files"][0]
+                self.assertFalse(file["success"])
+                self.assertEqual(file["error_code"], "export_dimension_limit")
+                self.assertIn("65501x2", file["detail"])
+                self.assertIn("65500", file["detail"])
+                self.assertFalse(list(destination.glob("*.jpg")))
+                report_path = root / "report.json"
+                status = subprocess.run([CLI, "convert", str(source), "--output", str(destination),
+                    "--encoding", encoding, "--report", str(report_path)], capture_output=True)
+                self.assertNotEqual(status.returncode, 0)
+                cli_file = json.loads(report_path.read_bytes())["files"][0]
+                self.assertEqual(cli_file["error_code"], file["error_code"])
+                self.assertEqual(cli_file["detail"], file["detail"])
+                self.assertFalse(list(destination.glob("*.jpg")))
 
     def test_canonical_ai_decimal_export_matches_cli(self):
         if not self.capabilities["codecs"] or not self.capabilities["models"]["runtimeAvailable"]:

@@ -228,9 +228,9 @@ struct FileResult {
   double headroom_stops{};
   double gain_min{};
   double gain_max{};
-  // API3 measures gain against the final JPEG; only header statistics are read
-  // back. The renderer's pre-compression gain distribution does not describe it.
-  bool codec_gain{false};
+  // Present only for a typed per-file export failure.
+  std::string error_code;
+  std::string detail;
   // Set when a frame was placed: `width`/`height` above are then the canvas,
   // and this says where the photograph sits on it.
   std::optional<FrameLayout> frame;

@@ -1,4 +1,5 @@
 #include "hyperdr/gainmap/coding.hpp"
+#include "hyperdr/foundation/cancel.hpp"
 #include "hyperdr/gainmap/types.hpp"
 
 #include "hyperdr/foundation/math.hpp"
@@ -16,8 +17,13 @@ namespace hyperdr {
 void measure_quantized_gain(RenderStats& stats, const FloatImage& codes,
                             float gain_max, float gamma, float ceiling, float gain_min) {
   std::array<std::uint64_t, 256> histogram{};
-  for (float code : codes.pixels) {
-    ++histogram[static_cast<std::size_t>(std::clamp(std::lround(code * 255.0F), 0L, 255L))];
+  const auto stride = static_cast<std::size_t>(codes.width) * codes.channels;
+  for (std::uint32_t y = 0; y < codes.height; ++y) {
+    check_cancelled();
+    for (std::size_t i = y * stride; i < (y + 1) * stride; ++i) {
+      const auto code = codes.pixels[i];
+      ++histogram[static_cast<std::size_t>(std::clamp(std::lround(code * 255.0F), 0L, 255L))];
+    }
   }
   std::array<float, 256> decoded{};
   std::uint64_t over_half = 0, over_one = 0, over_two = 0, clipped = 0;

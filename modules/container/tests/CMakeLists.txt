@@ -20,3 +20,8 @@ if(HYPERDR_WITH_CODECS)
     set_tests_properties(heif_writer_interop_test PROPERTIES TIMEOUT 60)
   endif()
 endif()
+
+hyperdr_add_test(gain_map_jpeg_test LINK HyperDR::container)
+if(TARGET gain_map_jpeg_test)
+  target_compile_definitions(gain_map_jpeg_test PRIVATE HYPERDR_JPEG_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/gain_map_jpeg")
+endif()

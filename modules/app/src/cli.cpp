@@ -23,7 +23,7 @@ void usage() {
          "Usage:\n"
          "  HyperDR convert <file-or-directory> --output <directory> [options]\n"
          "  HyperDR probe <image> [--json]\n"
-         "  HyperDR inspect <file.heic> [--json]\n"
+         "  HyperDR inspect <file.heic|file.jpg> [--json]\n"
          "  HyperDR raw-metadata <raw-file>\n"
          "  HyperDR verify <file.heic|file.jpg|file.tiff> [--reconstruct <preview.tiff>]\n"
          "                         [--reference <source-image>]\n"

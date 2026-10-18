@@ -54,3 +54,15 @@ if(HYPERDR_WITH_CODECS)
   # The DNG opcode lists the RAW decoder applies, as bytes and arithmetic.
   hyperdr_add_test(dng_opcode_test)
 endif()
+
+if(HYPERDR_WITH_CODECS)
+  hyperdr_add_test(gain_map_jpeg_codec_test LINK HyperDR::codec)
+  if(TARGET gain_map_jpeg_codec_test)
+    # ImageIO reads the files back the way Photos and Preview do.
+    target_link_libraries(gain_map_jpeg_codec_test PRIVATE
+      "-framework ImageIO" "-framework CoreGraphics" "-framework CoreFoundation")
+    hyperdr_copy_libultrahdr(gain_map_jpeg_codec_test)
+  endif()
+  add_test(NAME gain_map_jpeg_panorama_test COMMAND gain_map_jpeg_codec_test panorama ${CMAKE_BINARY_DIR}/gain-map-panorama.jpg)
+  set_tests_properties(gain_map_jpeg_panorama_test PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
+endif()

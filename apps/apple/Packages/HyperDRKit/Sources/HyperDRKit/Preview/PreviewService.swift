@@ -6,6 +6,8 @@ import HyperDREngine
 /// without changing the production reservation semantics.
 protocol PreviewRenderSession: Sendable {
     func renderFrame(_ request: EngineRequest) async throws -> PreviewFrame
+    /// Must be idempotent: detach may race a source replacement, and both
+    /// paths can close the same renderer (serialized by its SessionGate).
     func close() async
 }
 
@@ -99,6 +101,10 @@ public actor PreviewService {
         /// the service owns so `detach` can cancel them instead of waiting for
         /// the engine call to finish on its own.
         var directWork: [UUID: Task<EngineRenderResult, Error>] = [:]
+        /// Set while a source refresh swaps this state for a new engine
+        /// session. Concurrent requests wait for it instead of opening a
+        /// second renderer next to the one being closed.
+        var replacement: Task<Void, Never>?
 
         init(epoch: UInt64, generation: UInt64, photo: PhotoSession,
              renderer: any PreviewRenderSession) {
@@ -244,9 +250,13 @@ public actor PreviewService {
         // lookup makes this request stale, and a source refresh does not.
         let entryDetachEpoch = detachEpochs[id] ?? 0
         let state: SessionState
-        do { state = try await attachedState(id, detachEpoch: entryDetachEpoch) }
+        do { state = try await attachedState(id, detachEpoch: entryDetachEpoch, submitOrder: order) }
         catch {
-            if isLatestSubmit(order, id), !isStaleDetach(entryDetachEpoch, id) {
+            // Cancellation here always means another request or a detach took
+            // over the session (§3.6 never shows `cancelled`), so it ends this
+            // request as superseded rather than as a failure.
+            if isLatestSubmit(order, id), !isStaleDetach(entryDetachEpoch, id),
+               !Self.isCancellation(error) {
                 eventHub.emit(.failed(request, asHyperDRError(error)), for: id)
             } else {
                 eventHub.emit(.superseded(request), for: id)
@@ -288,7 +298,7 @@ public actor PreviewService {
                 state.pending = nil
             }
             eventHub.emit(.started(request), for: id)
-            eventHub.emit(.finished(PreviewResult(request: request, frame: frame,
+            eventHub.emit(.finished(PreviewResult(request: request, frame: frame, sourceDigest: prepared.key.sourceDigest,
                 fromCache: true, timings: PreviewTimings())), for: id)
             return
         }
@@ -340,7 +350,7 @@ public actor PreviewService {
             guard states[request.session] === state, !state.detached else {
                 throw HyperDRError(code: "cancelled", message: "Preview session was detached")
             }
-            return PreviewResult(request: request, frame: frame, fromCache: true,
+            return PreviewResult(request: request, frame: frame, sourceDigest: prepared.key.sourceDigest, fromCache: true,
                 timings: PreviewTimings())
         }
         let flightKey = FlightKey(generation: state.generation, cacheKey: prepared.key)
@@ -356,14 +366,12 @@ public actor PreviewService {
                     try await self.performDirectRender(prepared, state: state)
                 }
             } catch {
-                let cancellation = error is CancellationError
-                    || (error as? HyperDRError)?.code == "cancelled"
-                guard cancellation, !Task.isCancelled, attempt < 2 else {
+                guard Self.isCancellation(error), !Task.isCancelled, attempt < 2 else {
                     if let error = error as? HyperDRError { throw error }
                     throw HyperDRError(code: "cancelled", message: "Preview cancelled")
                 }
                 if let frame = await cache.get(prepared.key) {
-                    return PreviewResult(request: request, frame: frame, fromCache: true,
+                    return PreviewResult(request: request, frame: frame, sourceDigest: prepared.key.sourceDigest, fromCache: true,
                         timings: PreviewTimings())
                 }
             }
@@ -371,17 +379,26 @@ public actor PreviewService {
         guard let result = outcome, states[request.session] === state, !state.detached else {
             throw HyperDRError(code: "cancelled", message: "Preview session was detached")
         }
-        return PreviewResult(request: request, frame: result.frame, fromCache: false,
+        return PreviewResult(request: request, frame: result.frame, sourceDigest: prepared.key.sourceDigest, fromCache: false,
             timings: result.timings)
     }
 
     // MARK: - Internals
 
-    private func attachedState(_ id: SessionID, detachEpoch: UInt64) async throws -> SessionState {
+    private func attachedState(_ id: SessionID, detachEpoch: UInt64,
+                               submitOrder: UInt64? = nil) async throws -> SessionState {
+        func requireCurrentLookup() throws {
+            guard !Task.isCancelled, !isStaleDetach(detachEpoch, id),
+                  submitOrder.map({ isLatestSubmit($0, id) }) ?? true else {
+                throw HyperDRError(code: "cancelled", message: "Preview lookup was superseded or detached")
+            }
+        }
+        try requireCurrentLookup()
         // Refresh the photo first: the store re-hashes a replaced source, and a
         // changed digest has to swap the engine session instead of serving
         // frames cached for the file that used to be there.
-        let photo = try await sessionProvider(id)
+        var photo = try await sessionProvider(id)
+        try requireCurrentLookup()
         guard photo.id == id else {
             // The provider answered for another session. Keep the state that is
             // already installed rather than swapping in a different photo.
@@ -389,17 +406,25 @@ public actor PreviewService {
             throw HyperDRError(code: "internal_error",
                 message: "Session provider returned a different session")
         }
-        guard !isStaleDetach(detachEpoch, id) else {
-            // The photo was closed while this request was resolving. Never
-            // install an engine session for a request nobody is waiting for.
-            throw HyperDRError(code: "cancelled", message: "Preview session was detached")
-        }
-        if let state = states[id], !state.detached,
-           state.photo.sha256 == photo.sha256, state.photo.sourceURL == photo.sourceURL {
-            return state
-        }
-        if let state = states[id], !state.detached {
-            return try await replaceRenderer(state, with: photo)
+        while true {
+            try requireCurrentLookup()
+            guard let state = states[id] else { break }
+            if let replacement = state.replacement {
+                // Another request is already swapping the engine session for
+                // a refreshed source. Wait for it and ask the store again:
+                // reusing this request's snapshot could swap back to an older
+                // digest when the file changed twice.
+                await replacement.value
+                try requireCurrentLookup()
+                let refreshed = try await sessionProvider(id)
+                try requireCurrentLookup()
+                if refreshed.id == id { photo = refreshed }
+                continue
+            }
+            if state.photo.sha256 == photo.sha256, state.photo.sourceURL == photo.sourceURL {
+                return state
+            }
+            state.replacement = Task { await self.replaceRenderer(state, with: photo) }
         }
         let renderer = try rendererFactory(photo)
         generationCounter += 1
@@ -412,11 +437,18 @@ public actor PreviewService {
 
     /// Swaps the engine session because the source file changed. The session's
     /// subscription survives: the events hub stays open and the newest request
-    /// continues on the new renderer.
-    private func replaceRenderer(_ state: SessionState,
-                                 with photo: PhotoSession) async throws -> SessionState {
+    /// continues on the new renderer. Callers never see this task's outcome
+    /// directly; they re-read `states` once it ends, so losing to a detach or a
+    /// failing renderer factory surfaces through the normal lookup path.
+    private func replaceRenderer(_ state: SessionState, with photo: PhotoSession) async {
         let id = photo.id
         state.detached = true
+        if let running = state.inFlightPrepared {
+            eventHub.emit(.superseded(running.request), for: id)
+        }
+        if let pending = state.pending {
+            eventHub.emit(.superseded(pending.request), for: id)
+        }
         state.inFlight?.cancel()
         state.inFlight = nil
         state.pending = nil
@@ -427,19 +459,22 @@ public actor PreviewService {
         await state.gate.acquire()
         await state.renderer.close()
         await state.gate.release()
-        guard states[id] === state else {
-            throw HyperDRError(code: "cancelled", message: "Preview session was detached")
-        }
-        let renderer = try rendererFactory(photo)
-        generationCounter += 1
-        let fresh = SessionState(epoch: state.epoch, generation: generationCounter,
-            photo: photo, renderer: renderer)
-        states[id] = fresh
+        // An explicit detach (or attach of another photo) took over meanwhile.
+        guard states[id] === state else { return }
         // Frames of the old source are unreachable now (the digest is part of
         // the key); drop them so they cannot hold 256 MB of native memory.
         let digest = state.photo.sha256
+        do {
+            let renderer = try rendererFactory(photo)
+            generationCounter += 1
+            states[id] = SessionState(epoch: state.epoch, generation: generationCounter,
+                photo: photo, renderer: renderer)
+        } catch {
+            // The old renderer is closed; drop the state so the next lookup
+            // opens a renderer itself and reports the factory error.
+            states.removeValue(forKey: id)
+        }
         await cache.removeAll(where: { $0.session == id && $0.sourceDigest == digest })
-        return fresh
     }
 
     private func isStaleDetach(_ epoch: UInt64, _ id: SessionID) -> Bool {
@@ -498,10 +533,10 @@ public actor PreviewService {
         state.inFlightPrepared = nil
         switch result {
         case .success(let value):
-            eventHub.emit(.finished(PreviewResult(request: published.request, frame: value.frame,
+            eventHub.emit(.finished(PreviewResult(request: published.request, frame: value.frame, sourceDigest: published.key.sourceDigest,
                 fromCache: false, timings: value.timings)), for: id)
         case .failure(let error):
-            if error is CancellationError || (error as? HyperDRError)?.code == "cancelled" {
+            if Self.isCancellation(error) {
                 eventHub.emit(.superseded(published.request), for: id)
             } else {
                 eventHub.emit(.failed(published.request, asHyperDRError(error)), for: id)
@@ -602,6 +637,10 @@ public actor PreviewService {
                 throw error
             }
         }
+    }
+
+    private static func isCancellation(_ error: Error) -> Bool {
+        error is CancellationError || (error as? HyperDRError)?.code == "cancelled"
     }
 
     private func asHyperDRError(_ error: Error) -> HyperDRError {

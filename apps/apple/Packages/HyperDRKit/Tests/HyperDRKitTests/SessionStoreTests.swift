@@ -53,6 +53,63 @@ private func sha256(_ bytes: [UInt8]) -> String {
 }
 
 @Suite struct SessionStoreTests {
+    @Test func restoreOutcomeDistinguishesHistoryFromUnavailableSource() async throws {
+        let environment = try TestEnvironment()
+        let store = environment.store()
+        guard case .none = await store.restoreLastOutcome() else {
+            Issue.record("Expected empty history"); return
+        }
+        let source = try environment.source("restore.png")
+        let photo = try await store.open(source)
+        await store.close(photo.id)
+        let restoredStore = environment.store()
+        guard case .restored(let restored) = await restoredStore.restoreLastOutcome() else {
+            Issue.record("Expected restored photo"); return
+        }
+        #expect(restored.id == photo.id)
+        await restoredStore.close(photo.id)
+        try FileManager.default.removeItem(at: source)
+        guard case .unavailable(let failure) = await store.restoreLastOutcome() else {
+            Issue.record("Expected unavailable source"); return
+        }
+        #expect(failure.code == "source_missing")
+        guard case .none = await store.restoreLastOutcome() else {
+            Issue.record("Expected cleared history"); return
+        }
+        #expect(await store.restoreLast() == nil)
+    }
+
+    @Test func cancelledRestorePreservesHistory() async throws {
+        let environment = try TestEnvironment()
+        let store = environment.store()
+        let photo = try await store.open(try environment.source("cancelled.png"))
+        await store.close(photo.id)
+        let outcome = await Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await store.restoreLastOutcome()
+        }.value
+        guard case .unavailable(let failure) = outcome else {
+            Issue.record("Expected cancelled restore"); return
+        }
+        #expect(failure.code == "cancelled")
+        guard case .restored(let restored) = await store.restoreLastOutcome() else {
+            Issue.record("Cancellation must preserve history"); return
+        }
+        #expect(restored.id == photo.id)
+        await store.close(photo.id)
+    }
+
+    @Test func expiredRestoreHistoryIsNormal() async throws {
+        let environment = try TestEnvironment()
+        let store = environment.store()
+        let photo = try await store.open(try environment.source("expired.png"))
+        await store.close(photo.id)
+        let expired = environment.store(ttl: .seconds(-1))
+        guard case .none = await expired.restoreLastOutcome() else {
+            Issue.record("Expected expired history to be absent"); return
+        }
+    }
+
     @Test func openStoresMetadataReusesDigestAndRestoresBookmark() async throws {
         let environment = try TestEnvironment()
         let source = try environment.source("photo.png")
@@ -260,5 +317,76 @@ private func sha256(_ bytes: [UInt8]) -> String {
         #expect(!FileManager.default.fileExists(atPath: cache.appendingPathComponent("old.bin").path))
         #expect(!FileManager.default.fileExists(atPath: cache.appendingPathComponent("a.bin").path))
         #expect(FileManager.default.fileExists(atPath: cache.appendingPathComponent("b.bin").path))
+    }
+}
+
+extension SessionStoreTests {
+    @Test(.timeLimit(.minutes(1))) func restoreRefreshesStaleBookmarkAfterMove() async throws {
+        let environment = try TestEnvironment()
+        let store = environment.store()
+        let source = try environment.source("before.png")
+        let photo = try await store.open(source)
+        await store.close(photo.id)
+        let manifest = environment.sessionDirectory(photo.id).appendingPathComponent("session.json")
+        let before = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: manifest)) as? [String: Any])
+        let base64 = try #require(before["sourceBookmark"] as? String)
+        let bookmark = try #require(Data(base64Encoded: base64))
+        let moved = source.deletingLastPathComponent().appendingPathComponent("after.png")
+        try FileManager.default.moveItem(at: source, to: moved)
+        var stale = false
+        let resolved = try URL(resolvingBookmarkData: bookmark,
+            options: [.withSecurityScope, .withoutUI], relativeTo: nil, bookmarkDataIsStale: &stale)
+        print("review restore moved bookmark: stale=\(stale), resolved=\(resolved.lastPathComponent)")
+        #expect(stale)
+        let restoredStore = environment.store()
+        guard case .restored(let restored) = await restoredStore.restoreLastOutcome() else {
+            Issue.record("Moved source could not restore"); return
+        }
+        #expect(restored.id == photo.id)
+        #expect(restored.sourceURL.path == moved.resolvingSymlinksInPath().path)
+        let after = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: manifest)) as? [String: Any])
+        #expect(after["sourceBookmark"] as? String != before["sourceBookmark"] as? String)
+        await restoredStore.close(photo.id)
+    }
+}
+
+private final class ReviewRestoreAccess: SecurityScopedAccess, @unchecked Sendable {
+    private let lock = NSLock()
+    private var startCount = 0
+    private var stopCount = 0
+    private var onStart: (@Sendable () -> Void)?
+    func arm(_ callback: @escaping @Sendable () -> Void) { lock.withLock { onStart = callback } }
+    func startAccessing(_ url: URL) -> Bool {
+        let callback = lock.withLock { startCount += 1; return onStart }
+        callback?()
+        return true
+    }
+    func stopAccessing(_ url: URL) { lock.withLock { stopCount += 1 } }
+    var counts: (Int, Int) { lock.withLock { (startCount, stopCount) } }
+}
+
+extension SessionStoreTests {
+    @Test(.timeLimit(.minutes(1))) func reviewCancellationDuringRestoreMustReleaseItsOnlyLease() async throws {
+        let environment = try TestEnvironment()
+        let access = ReviewRestoreAccess()
+        let store = SessionStore(configuration: KitConfiguration(supportDirectory: environment.support,
+            cacheDirectory: environment.cache, sessionTTL: .seconds(3600)), formats: environment.formats,
+            decodeCacheMaxAge: 3600, decodeCacheMaxBytes: 1 << 20, access: access)
+        let photo = try await store.open(try environment.source("during-restore.png"))
+        await store.close(photo.id)
+        let (start, signal) = AsyncStream.makeStream(of: Void.self)
+        let restoration = Task {
+            for await _ in start { break }
+            return await store.restoreLastOutcome()
+        }
+        access.arm { restoration.cancel() }
+        signal.yield(); signal.finish()
+        let outcome = await restoration.value
+        guard case .unavailable(let error) = outcome else { Issue.record("Expected cancellation"); return }
+        #expect(error.code == "cancelled")
+        print("review restore cancelled at lease acquisition: starts/stops=\(access.counts)")
+        #expect(access.counts.0 == access.counts.1, "The only restore caller left without a PhotoSession but still owns a lease")
+        await store.close(photo.id)
+        print("review restore after explicit cleanup: starts/stops=\(access.counts)")
     }
 }

@@ -52,6 +52,12 @@ public struct PhotoSession: Sendable, Identifiable, Hashable {
     }
 }
 
+public enum RestoreOutcome: Sendable {
+    case none
+    case restored(PhotoSession)
+    case unavailable(HyperDRError)
+}
+
 public struct ExportRecord: Sendable, Codable, Equatable {
     public let id: ExportID
     public let name: String
@@ -148,6 +154,8 @@ public actor SessionStore {
         let token: UUID
         let task: Task<PhotoSession, Error>
         var waiters: [UUID: Bool] = [:]
+        // An activation lease is retained only after a live caller claims it.
+        var claimed = false
 
         init(token: UUID, task: Task<PhotoSession, Error>) {
             self.token = token
@@ -354,21 +362,41 @@ public actor SessionStore {
     }
 
     public func restoreLast() async -> PhotoSession? {
-        guard let id = readLastSession() else { return nil }
+        if case .restored(let session) = await restoreLastOutcome() { return session }
+        return nil
+    }
+
+    /// An absent or expired history is normal; an inaccessible source is reported
+    /// once, then removed from history so launch does not repeatedly alert.
+    public func restoreLastOutcome() async -> RestoreOutcome {
+        guard let id = readLastSession() else { return .none }
         do {
+            try Task.checkCancellation()
             let stored = try loadStored(id)
             guard stored.lastUsedAt >= Date().addingTimeInterval(-sessionTTL) else {
-                clearLastSession()
-                return nil
+                if readLastSession() == id { clearLastSession() }
+                return .none
             }
-            return try await session(id)
+            // session checks cancellation at the ownership handoff. Do not
+            // reject an already claimed lease after that return boundary.
+            return .restored(try await session(id))
         } catch {
-            clearLastSession()
-            return nil
+            // Another open may have replaced the history while activation awaited.
+            // Cancellation must preserve the history for the next launch.
+            let failure = publicError(error)
+            if failure.code != "cancelled", readLastSession() == id { clearLastSession() }
+            return .unavailable(failure)
         }
     }
 
     public func session(_ id: SessionID) async throws -> PhotoSession {
+        if Task.isCancelled { throw publicError(CancellationError()) }
+        // Join even a completed activation until its callers have claimed or
+        // released it; the openSessions entry still belongs to that flight.
+        if let flight = activating[id] {
+            do { return try await awaitActivation(id: id, flight: flight) }
+            catch { throw publicError(error) }
+        }
         if let open = openSessions[id] {
             do { return try await refreshOpen(open, id: id) }
             catch { throw publicError(error) }
@@ -377,25 +405,13 @@ public actor SessionStore {
         do { stored = try loadStored(id) }
         catch { throw publicError(error) }
 
-        if let flight = activating[id] {
-            do { return try await awaitActivation(id: id, flight: flight) }
-            catch { throw publicError(error) }
-        }
-
         let token = UUID()
         openingSessions.insert(id)
         let task = Task { [weak self] in
             guard let self else {
                 throw HyperDRError(code: "internal_error", message: "Session store was released")
             }
-            do {
-                let session = try await self.activate(stored, id: id, token: token)
-                await self.finishActivation(id: id, token: token)
-                return session
-            } catch {
-                await self.finishActivation(id: id, token: token)
-                throw error
-            }
+            return try await self.activate(stored, id: id, token: token)
         }
         let flight = FlightState(token: token, task: task)
         activating[id] = flight
@@ -415,12 +431,6 @@ public actor SessionStore {
         }
     }
 
-    private func finishActivation(id: SessionID, token: UUID) {
-        guard activating[id]?.token == token else { return }
-        activating.removeValue(forKey: id)
-        openingSessions.remove(id)
-    }
-
     private func awaitActivation(id: SessionID, flight: FlightState) async throws -> PhotoSession {
         let waiter = UUID()
         flight.waiters[waiter] = false
@@ -430,7 +440,9 @@ public actor SessionStore {
         } onCancel: {
             Task { await self.cancelActivationWaiter(id: id, flight: flight, waiter: waiter) }
         }
-        if Task.isCancelled { throw CancellationError() }
+        try Task.checkCancellation()
+        guard activating[id]?.token == flight.token else { throw CancellationError() }
+        flight.claimed = true
         return session
     }
 
@@ -446,6 +458,10 @@ public actor SessionStore {
         if flight.waiters.isEmpty, activating[id]?.token == flight.token {
             activating.removeValue(forKey: id)
             openingSessions.remove(id)
+            if !flight.claimed, let open = openSessions[id], open.generation == flight.token {
+                openSessions.removeValue(forKey: id)
+                open.lease.stop()
+            }
         }
     }
 
@@ -1146,7 +1162,7 @@ public actor SessionStore {
                 existing.lease.stop()
             }
             openSessions[id] = OpenSession(url: source, lease: lease, session: session,
-                modifiedAt: stored.modifiedAt, generation: UUID(), lastPersistedAt: Date())
+                modifiedAt: stored.modifiedAt, generation: token, lastPersistedAt: Date())
             return session
         } catch {
             lease.stop()

@@ -141,10 +141,9 @@ public actor PreviewService {
     /// session per attached photo.
     public init(configuration: KitConfiguration, schema: SettingsSchema,
                 capabilities: Capabilities, sessions: SessionStore, engine: Engine) {
-        let models = Self.modelAvailability(capabilities)
+        let models = ModelCatalog(capabilities: capabilities)
         self.init(schema: schema, buildFingerprint: capabilities.buildFingerprint,
-            knownModels: models.models, defaultModelID: models.defaultID,
-            modelsAvailable: models.ready,
+            knownModels: [:], modelsAvailable: models.status.runtimeAvailable,
             previewMaxEdge: configuration.previewMaxEdge,
             previewTimeout: configuration.previewTimeout,
             rawDecodeSlots: configuration.rawDecodeSlots, rawDecodeTimeout: .seconds(3),
@@ -153,7 +152,7 @@ public actor PreviewService {
             sessionProvider: { id in try await sessions.session(id) },
             rendererFactory: { photo in
                 try engine.openPreview(source: photo.sourceURL, sha256: photo.sha256)
-            })
+            }, models: models, sessionLUTs: SessionLUTResolver(configuration: configuration))
     }
 
     internal init(schema: SettingsSchema, buildFingerprint: String,
@@ -163,10 +162,11 @@ public actor PreviewService {
                   previewTimeout: Duration, rawDecodeSlots: Int, rawDecodeTimeout: Duration,
                   cacheEntries: Int, cacheBytes: Int,
                   sessionProvider: @escaping @Sendable (SessionID) async throws -> PhotoSession,
-                  rendererFactory: @escaping @Sendable (PhotoSession) throws -> any PreviewRenderSession) {
-        self.resolver = OptionResolver(schema: schema, knownModels: knownModels,
-            modelsAvailable: modelsAvailable,
-            maxEdgeCeiling: previewMaxEdge, defaultModelID: defaultModelID)
+                  rendererFactory: @escaping @Sendable (PhotoSession) throws -> any PreviewRenderSession,
+                  models: ModelCatalog? = nil, sessionLUTs: SessionLUTResolver? = nil) {
+        self.resolver = OptionResolver(schema: schema, models: models ?? ModelCatalog(
+            knownModels: knownModels, defaultID: defaultModelID, runtimeAvailable: modelsAvailable),
+            maxEdgeCeiling: previewMaxEdge, sessionLUTs: sessionLUTs)
         self.buildFingerprint = buildFingerprint
         self.previewTimeout = previewTimeout
         self.rawDecodeTimeout = rawDecodeTimeout
@@ -651,35 +651,4 @@ public actor PreviewService {
         return HyperDRError(code: "internal_error", message: "\(error)")
     }
 
-    static func modelAvailability(_ capabilities: Capabilities)
-        -> (models: [String: Bool], defaultID: String, ready: Bool) {
-        let fallbackID = "research-cnn-v1"
-        guard case .object(let root) = capabilities.models,
-              case .array(let entries) = root["models"] else {
-            // An unreadable table means the model runtime cannot be trusted, so
-            // every request is `model_not_ready` rather than `model_unknown`.
-            return (models: [:], defaultID: fallbackID, ready: false)
-        }
-        // api.py checks the runtime first: without it every model is not ready,
-        // whatever the per-entry flags say.
-        var ready = false
-        if case .bool(let flag) = root["runtimeAvailable"] { ready = flag }
-        var result: [String: Bool] = [:]
-        var firstID: String?
-        for case .object(let entry) in entries {
-            guard case .string(let id) = entry["id"] else { continue }
-            if firstID == nil { firstID = id }
-            // Python requires `available is True`; a missing flag is not a yes.
-            if case .bool(let available) = entry["available"] {
-                result[id] = available && ready
-            } else {
-                result[id] = false
-            }
-        }
-        if case .string(let id) = root["defaultModelId"], !id.isEmpty {
-            return (result, id, ready)
-        }
-        if let firstID { return (result, firstID, ready) }
-        return (result, fallbackID, ready)
-    }
 }

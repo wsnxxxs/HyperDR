@@ -66,7 +66,7 @@ private func code(_ body: () throws -> Void) -> String? {
         #expect(code { _ = try resolver.resolve(makeRequest { $0["modelStrength"] = .number(2) },
             session: makeSession()) } == "invalid_options")
         #expect(code { _ = try resolver.resolve(makeRequest { $0["lutId"] = .string("abc") },
-            session: makeSession()) } == "invalid_options")
+            session: makeSession()) } == "lut_invalid")
         let invalidRegion = makeRequest(region: PreviewRegion(left: 0, top: 0, width: 0, height: 10))
         #expect(code { _ = try resolver.resolve(invalidRegion, session: makeSession()) } == "invalid_options")
     }

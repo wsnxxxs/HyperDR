@@ -1,29 +1,26 @@
 import Foundation
 import HyperDREngine
 
-/// Translates the panel vocabulary into a canonical engine preview request.
-/// Resource-library resolution (LUT/DCP/lens) is intentionally added by K4/K5;
-/// until then a non-empty resource selection fails rather than being silently
-/// dropped.
+/// Shared panel vocabulary for preview and export. K4 resources are resolved
+/// only from immutable session copies; private client paths are discarded.
 struct OptionResolver: Sendable {
     private static let fallbackHighlightChoices = ["blend", "reconstruct", "clip", "unclip"]
 
     let schema: SettingsSchema
-    let knownModels: [String: Bool]
-    /// False when the build's model table could not be read at all: every
-    /// request is then `model_not_ready` (Python checks the runtime first and
-    /// only then looks the id up).
-    let modelsAvailable: Bool
+    let models: ModelCatalog
+    let sessionLUTs: SessionLUTResolver?
     let maxEdgeCeiling: Int
-    let defaultModelID: String
 
     init(schema: SettingsSchema, knownModels: [String: Bool], modelsAvailable: Bool = true,
          maxEdgeCeiling: Int, defaultModelID: String = "research-cnn-v1") {
-        self.schema = schema
-        self.knownModels = knownModels
-        self.modelsAvailable = modelsAvailable
-        self.maxEdgeCeiling = maxEdgeCeiling
-        self.defaultModelID = defaultModelID
+        self.init(schema: schema, models: ModelCatalog(knownModels: knownModels,
+            defaultID: defaultModelID, runtimeAvailable: modelsAvailable), maxEdgeCeiling: maxEdgeCeiling)
+    }
+
+    init(schema: SettingsSchema, models: ModelCatalog, maxEdgeCeiling: Int,
+         sessionLUTs: SessionLUTResolver? = nil) {
+        self.schema = schema; self.models = models
+        self.maxEdgeCeiling = maxEdgeCeiling; self.sessionLUTs = sessionLUTs
     }
 
     func resolve(_ request: PreviewRequest, session: PhotoSession) throws -> EngineRequest {
@@ -51,35 +48,26 @@ struct OptionResolver: Sendable {
         let modelStrength = try modelStrength(options.removeValue(forKey: "modelStrength"))
         let requestedModel = options.removeValue(forKey: "modelId")
         if useModel {
-            guard modelsAvailable else {
-                throw HyperDRError(code: "model_not_ready",
-                    message: "The native model runtime is not available")
-            }
-            let id: String
-            if let requestedModel {
-                guard case .string(let value) = requestedModel else {
-                    throw HyperDRError(code: "invalid_options", message: "modelId must be a string")
-                }
-                // api.py treats an omitted or empty id as the build default;
-                // substituting a different explicit id would be wrong.
-                id = value.isEmpty ? defaultModelID : value
-            } else {
-                id = defaultModelID
-            }
-            guard let available = knownModels[id] else {
-                throw HyperDRError(code: "model_unknown", message: "Unknown model: \(id)")
-            }
-            guard available else {
-                throw HyperDRError(code: "model_not_ready", message: "Model is not available: \(id)")
-            }
+            let id = try models.resolveValue(requestedModel)
             options["_model_mode"] = .bool(true)
             options["_model_id"] = .string(id)
             options["hdrStrength"] = .number(modelStrength)
         }
 
-        if let value = options["lutId"], value != .string("") {
-            throw HyperDRError(code: "invalid_options",
-                message: "LUT resolution is not available in this build")
+        if let value = options["lutId"], value != .string(""), value != .null {
+            guard case .string(let raw) = value else { throw LUTFiles.invalid("Invalid LUT identifier") }
+            _ = try LUTID(rawValue: raw)
+            guard let sessionLUTs, let path = try sessionLUTs.resolve(value, session: session.id) else {
+                throw LUTFiles.invalid()
+            }
+            options["_lut_path"] = .string(path.path)
+            for key in ["lutInput", "lutOutput"] {
+                if let space = options[key] {
+                    guard case .string(let name) = space, LUTSpace(rawValue: name) != nil else {
+                        throw LUTFiles.invalid("Unknown LUT color space")
+                    }
+                }
+            }
         }
         if let value = options["rawProfile"], value != .string("") {
             throw HyperDRError(code: "invalid_options",

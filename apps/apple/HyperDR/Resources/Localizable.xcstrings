@@ -1378,40 +1378,6 @@
         }
       }
     },
-    "frame.style.tooWide" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This photo is too wide for this style."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这张照片太宽，放不下此样式。"
-          }
-        }
-      }
-    },
-    "frame.style.tooWide.selected" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This photo is too wide for this style, so no frame is shown. Choose another style."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这张照片太宽，放不下此样式，因此不显示边框。请换一种样式。"
-          }
-        }
-      }
-    },
     "frame.text" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3465,6 +3431,57 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "导出记录"
+          }
+        }
+      }
+    },
+    "frame.style.unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This style does not fit this photo, so no frame is shown. Choose another style."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此样式不适用于这张照片，因此不显示边框。请换一种样式。"
+          }
+        }
+      }
+    },
+    "frame.style.variant.wide" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Panoramas use a landscape card."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全景照片使用横向卡片。"
+          }
+        }
+      }
+    },
+    "frame.style.variant.tall" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Very tall photos get no side margins."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "长图不加左右留白。"
           }
         }
       }

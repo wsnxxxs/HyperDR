@@ -13,19 +13,22 @@ struct FramePixelLayout: Hashable, Sendable {
     let photo, caption: Rect
     /// The photo edge, in pixels, that the frame's fractions measure.
     let referenceEdge: Int
+    /// The layout variant the engine picked (story's "wide" or "tall"); nil for the style's default layout.
+    let variant: String?
 
-    init(width: Int, height: Int, photo: Rect, caption: Rect, referenceEdge: Int) {
+    init(width: Int, height: Int, photo: Rect, caption: Rect, referenceEdge: Int, variant: String? = nil) {
         self.width = width
         self.height = height
         self.photo = photo
         self.caption = caption
         self.referenceEdge = referenceEdge
+        self.variant = variant
     }
 
     init(_ layout: FrameLayout) {
         self.init(width: layout.width, height: layout.height,
                   photo: Rect(layout.photo), caption: Rect(layout.caption),
-                  referenceEdge: layout.referenceEdge)
+                  referenceEdge: layout.referenceEdge, variant: layout.variant)
     }
 }
 

@@ -1,0 +1,93 @@
+{
+  "spec": {
+    "schema": "hyperdr.frame/v1",
+    "background": "#E6E5E1",
+    "margins": {
+      "top": 0.055,
+      "right": 0.055,
+      "bottom": 0.04,
+      "left": 0.055
+    },
+    "caption": 0.16,
+    "reference": "short",
+    "aspect": {
+      "width": 9,
+      "height": 16,
+      "topShare": 0.42
+    },
+    "variants": {
+      "wide": {
+        "minRatio": 2.5,
+        "reference": "long",
+        "margins": {
+          "top": 0.02,
+          "right": 0.02,
+          "bottom": 0.02,
+          "left": 0.02
+        },
+        "caption": 0.06,
+        "aspect": null
+      },
+      "tall": {
+        "maxRatio": 0.125,
+        "aspect": null
+      }
+    }
+  },
+  "cases": [
+    {
+      "width": 1000,
+      "height": 4000,
+      "noCaption": false,
+      "expected": "{\"schema\":\"hyperdr.frame-layout/v1\",\"width\":2393,\"height\":4254,\"photo\":{\"x\":696,\"y\":54,\"width\":1000,\"height\":4000},\"caption\":{\"x\":0,\"y\":4054,\"width\":2393,\"height\":200},\"referenceEdge\":1000}\n"
+    },
+    {
+      "width": 4000,
+      "height": 1000,
+      "noCaption": false,
+      "expected": "{\"schema\":\"hyperdr.frame-layout/v1\",\"width\":4160,\"height\":1400,\"photo\":{\"x\":80,\"y\":80,\"width\":4000,\"height\":1000},\"caption\":{\"x\":0,\"y\":1080,\"width\":4160,\"height\":320},\"referenceEdge\":4000,\"variant\":\"wide\"}\n"
+    },
+    {
+      "width": 10000,
+      "height": 1000,
+      "noCaption": false,
+      "expected": "{\"schema\":\"hyperdr.frame-layout/v1\",\"width\":10400,\"height\":2000,\"photo\":{\"x\":200,\"y\":200,\"width\":10000,\"height\":1000},\"caption\":{\"x\":0,\"y\":1200,\"width\":10400,\"height\":800},\"referenceEdge\":10000,\"variant\":\"wide\"}\n"
+    },
+    {
+      "width": 2500,
+      "height": 1000,
+      "noCaption": false,
+      "expected": "{\"schema\":\"hyperdr.frame-layout/v1\",\"width\":2608,\"height\":4636,\"photo\":{\"x\":54,\"y\":1474,\"width\":2500,\"height\":1000},\"caption\":{\"x\":0,\"y\":2474,\"width\":2608,\"height\":2162},\"referenceEdge\":1000}\n"
+    },
+    {
+      "width": 2600,
+      "height": 1000,
+      "noCaption": false,
+      "expected": "{\"schema\":\"hyperdr.frame-layout/v1\",\"width\":2704,\"height\":1260,\"photo\":{\"x\":52,\"y\":52,\"width\":2600,\"height\":1000},\"caption\":{\"x\":0,\"y\":1052,\"width\":2704,\"height\":208},\"referenceEdge\":2600,\"variant\":\"wide\"}\n"
+    },
+    {
+      "width": 1000,
+      "height": 8000,
+      "noCaption": false,
+      "expected": "{\"schema\":\"hyperdr.frame-layout/v1\",\"width\":4643,\"height\":8254,\"photo\":{\"x\":1822,\"y\":54,\"width\":1000,\"height\":8000},\"caption\":{\"x\":0,\"y\":8054,\"width\":4643,\"height\":200},\"referenceEdge\":1000}\n"
+    },
+    {
+      "width": 1000,
+      "height": 9000,
+      "noCaption": false,
+      "expected": "{\"schema\":\"hyperdr.frame-layout/v1\",\"width\":1108,\"height\":9254,\"photo\":{\"x\":54,\"y\":54,\"width\":1000,\"height\":9000},\"caption\":{\"x\":0,\"y\":9054,\"width\":1108,\"height\":200},\"referenceEdge\":1000,\"variant\":\"tall\"}\n"
+    },
+    {
+      "width": 6000,
+      "height": 4000,
+      "noCaption": false,
+      "expected": "{\"schema\":\"hyperdr.frame-layout/v1\",\"width\":6440,\"height\":11449,\"photo\":{\"x\":220,\"y\":2920,\"width\":6000,\"height\":4000},\"caption\":{\"x\":0,\"y\":6920,\"width\":6440,\"height\":4529},\"referenceEdge\":4000}\n"
+    },
+    {
+      "width": 4000,
+      "height": 1000,
+      "noCaption": true,
+      "expected": "{\"schema\":\"hyperdr.frame-layout/v1\",\"width\":4160,\"height\":1160,\"photo\":{\"x\":80,\"y\":80,\"width\":4000,\"height\":1000},\"caption\":{\"x\":0,\"y\":1080,\"width\":4160,\"height\":80},\"referenceEdge\":4000,\"variant\":\"wide\"}\n"
+    }
+  ]
+}

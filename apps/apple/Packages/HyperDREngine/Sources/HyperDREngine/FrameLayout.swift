@@ -16,6 +16,7 @@ public struct FrameLayout: Codable, Sendable, Hashable {
     }
     public let schema: String
     public let width, height: Int
+    public let variant: String?
     public let photo, caption: Rect
     /// The photo edge, in pixels, that the frame's fractions measure.
     public let referenceEdge: Int
@@ -25,6 +26,7 @@ public struct FrameLayout: Codable, Sendable, Hashable {
 public struct ReportFrame: Codable, Sendable, Hashable {
     public let width, height: Int
     public let photo: FrameLayout.Rect
+    public let variant: String?
 }
 
 extension Engine {

@@ -16,6 +16,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -24,6 +25,29 @@ namespace hyperdr {
 // Which edge of the photograph the spec's fractions measure: the short edge
 // keeps a portrait and a landscape print on the same mat width.
 enum class FrameReference { kShortEdge, kLongEdge };
+
+// Exact decimal rational from the shortest round-tripping JSON number.
+// Keeping its power of ten avoids a floating-point decision at a boundary.
+struct FrameRatio {
+  std::uint64_t significand{};
+  int exponent{};
+  std::string text;
+};
+
+struct FrameAspect {
+  std::uint32_t width{}, height{};  // 0:0 explicitly removes the fixed aspect.
+  float top_share{0.5F};
+};
+
+struct FrameVariant {
+  std::string name;
+  bool minimum{};  // width/height > threshold; otherwise width/height < threshold.
+  FrameRatio threshold;
+  std::optional<std::array<float, 4>> margins;  // top, right, bottom, left
+  std::optional<float> caption;
+  std::optional<FrameReference> reference;
+  std::optional<FrameAspect> aspect;
+};
 
 struct FrameSpec {
   // Display P3 with the sRGB transfer, as a #RRGGBB colour is written. Always
@@ -45,6 +69,7 @@ struct FrameSpec {
   // Optional straight-alpha RGBA PNG exactly the size of the caption band,
   // in Display P3. Transparent pixels show the mat (and the shadow) beneath.
   std::filesystem::path overlay;
+  std::vector<FrameVariant> variants;
 };
 
 struct FrameRect {
@@ -58,6 +83,7 @@ struct FrameLayout {
   std::uint32_t width{}, height{};
   FrameRect photo, caption;
   std::uint32_t reference_edge{};
+  std::string variant;  // Empty means the unmodified top-level geometry.
   friend bool operator==(const FrameLayout&, const FrameLayout&) = default;
 };
 

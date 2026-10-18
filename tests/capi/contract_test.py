@@ -43,8 +43,67 @@ def result(function, *args):
 
 
 class Contract(unittest.TestCase):
+    def test_frame_variant_invalid_documents(self):
+        invalid = [
+            {"wide": {}}, {"wide": {"minRatio": 2.5, "maxRatio": 0.125}},
+            {"wide": {"minRatio": 1}}, {"tall": {"maxRatio": 1}},
+            {"a": {"minRatio": 2}, "b": {"minRatio": 3}},
+            {"a": {"maxRatio": 0.1}, "b": {"maxRatio": 0.2}},
+            {"Wide": {"minRatio": 2}}, {"": {"minRatio": 2}},
+            {"a" * 33: {"minRatio": 2}}, {str(i): {"minRatio": 2} for i in range(5)},
+        ]
+        invalid += [{"wide": {"minRatio": 2.5, key: None}} for key in
+                    ("background", "shadow", "overlay", "schema", "variants")]
+        with tempfile.TemporaryDirectory(prefix="hyperdr-invalid-variants-") as temporary:
+            path = Path(temporary) / "frame.json"
+            for variants in invalid:
+                with self.subTest(variants=variants):
+                    spec = {"variants": variants}
+                    path.write_text(json.dumps(spec))
+                    cli = subprocess.run([CLI, "frame-layout", str(path), "--width", "4000", "--height", "1000"], capture_output=True)
+                    self.assertEqual(cli.returncode, 2)
+                    self.assertIn(b"frame:", cli.stderr)
+                    with self.assertRaisesRegex(AssertionError, "frame:"):
+                        result(LIB.hyperdr_frame_layout, encoded(spec), 4000, 1000)
 
+    def test_frame_variant_design_goldens(self):
+        golden = json.loads((Path(__file__).parent / "golden/frame_variants.json").read_text())
+        with tempfile.TemporaryDirectory(prefix="hyperdr-frame-variants-") as temporary:
+            path = Path(temporary) / "frame.json"
+            for case in golden["cases"]:
+                spec = json.loads(json.dumps(golden["spec"]))
+                if case["noCaption"]:
+                    spec["caption"] = 0
+                    for variant in spec["variants"].values():
+                        if "caption" in variant:
+                            variant["caption"] = 0
+                path.write_text(json.dumps(spec))
+                expected = case["expected"].encode()
+                self.assertEqual(result(LIB.hyperdr_frame_layout, encoded(spec), case["width"], case["height"]), expected)
+                self.assertEqual(subprocess.check_output([CLI, "frame-layout", str(path),
+                    "--width", str(case["width"]), "--height", str(case["height"])]), expected)
 
+    def test_frame_variant_thresholds_use_double_value_semantics(self):
+        cases = [("wide", "minRatio", "2.5999999999999999", "2.6", 2600, 1000),
+                 ("tall", "maxRatio", "0.12500000000000001", "0.125", 1000, 8000)]
+        with tempfile.TemporaryDirectory(prefix="hyperdr-double-ratio-") as temporary:
+            path = Path(temporary) / "frame.json"
+            for name, key, literal, rounded, boundary, height in cases:
+                for width in (boundary - 1, boundary, boundary + 1):
+                    with self.subTest(name=name, width=width):
+                        outputs = []
+                        for threshold in (literal, rounded):
+                            # Preserve the raw numeric token for both adapters.
+                            document = '{"variants":{"%s":{"%s":%s}}}' % (name, key, threshold)
+                            abi = result(LIB.hyperdr_frame_layout, document.encode(), width, height)
+                            path.write_text(document)
+                            cli = subprocess.check_output([CLI, "frame-layout", str(path),
+                                "--width", str(width), "--height", str(height)])
+                            self.assertEqual(abi, cli)
+                            outputs.append(abi)
+                        self.assertEqual(outputs[0], outputs[1])
+                        selected = width > boundary if name == "wide" else width < boundary
+                        self.assertEqual(json.loads(outputs[0]).get("variant"), name if selected else None)
 
     def test_schema(self):
         self.assertEqual(result(LIB.hyperdr_schema_json),
@@ -623,6 +682,36 @@ class EngineContract(unittest.TestCase):
                         self.assertEqual(report["settings"], cli_report["settings"])
                         self.assertEqual(report["color_lut"], cli_report["color_lut"])
 
+    def test_wide_variant_export_matches_cli_with_caption_overlay(self):
+        if not self.capabilities["codecs"]:
+            self.skipTest("requires codec-enabled build")
+        golden = json.loads((Path(__file__).parent / "golden/frame_variants.json").read_text())
+        with tempfile.TemporaryDirectory(prefix="hyperdr-wide-frame-") as temporary:
+            root = Path(temporary)
+            for width in (400, 1000):
+                source = root / "sample.png"
+                png(source, width, 100)
+                spec = {**golden["spec"], "overlay": "caption.png"}
+                layout = json.loads(result(LIB.hyperdr_frame_layout, encoded(spec), width, 100))
+                self.assertEqual(layout["variant"], "wide")
+                png(root / "caption.png", layout["caption"]["width"], layout["caption"]["height"])
+                frame_file = root / "frame.json"
+                frame_file.write_text(json.dumps(spec))
+                for encoding, extension in (("ultrahdr", "jpg"), ("sdr-tiff", "tif")):
+                    with self.subTest(ratio=width / 100, encoding=encoding):
+                        output, report_path = root / encoding, root / "report.json"
+                        request = json.loads(result(LIB.hyperdr_normalize_options, encoded({
+                            "input": str(source), "output": str(output), "report": str(report_path),
+                            "encoding": encoding})))
+                        request["command"]["frame"] = str(frame_file)
+                        request["command"]["overwrite"] = True
+                        arguments = json.loads(result(LIB.hyperdr_command_line, encoded(request)))[1:]
+                        report, cli_report = self.compare_export(request, arguments,
+                            output / ("sample-hyperdr." + extension), report_path)
+                        frame = report["files"][0]["frame"]
+                        self.assertEqual(frame["variant"], "wide")
+                        self.assertEqual((frame["width"], frame["height"]), (layout["width"], layout["height"]))
+                        self.assertEqual(frame, cli_report["files"][0]["frame"])
 
     def test_frame_resources_are_one_snapshot_for_the_whole_batch(self):
         if not self.capabilities["codecs"]:

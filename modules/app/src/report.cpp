@@ -183,7 +183,9 @@ std::string run_report_json(const std::vector<FileResult>& results,
           .begin_object("photo")
           .member("x", frame.photo.x).member("y", frame.photo.y)
           .member("width", frame.photo.width).member("height", frame.photo.height)
-          .end_object().end_object();
+          .end_object();
+      if (!frame.variant.empty()) writer.member("variant", frame.variant);
+      writer.end_object();
     }
     writer.member("width", result.width)
         .member("height", result.height)

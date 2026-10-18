@@ -314,6 +314,28 @@ private final class Events: @unchecked Sendable {
         #expect(document["schema"] as? Int == 12)
     }
 
+    @Test func frameVariantSurvivesLayoutAndSchema12Export() async throws {
+        let fixture = try Fixture(width: 400, height: 100)
+        let spec: [String: JSONValue] = ["margins": .number(0.05),
+            "variants": .object(["wide": .object(["minRatio": .number(2.5),
+                "reference": .string("long"), "caption": .number(0.06)])])]
+        let layout = try Engine.frameLayout(frame: spec, photoWidth: 400, photoHeight: 100)
+        #expect(layout.variant == "wide")
+        let plain = try Engine.frameLayout(frame: spec, photoWidth: 250, photoHeight: 100)
+        #expect(plain.variant == nil)
+        var request = EngineRequest(settings: ["encoding": .string("sdr-tiff")])
+        try request.setCommand("frame", .object(spec))
+        try request.setCommand("input", .string(fixture.source.path))
+        try request.setCommand("output", .string(fixture.directory.appendingPathComponent("export").path))
+        let engine = try await Engine()
+        let report = try await engine.convert(request)
+        let file = try #require(report.files.first)
+        #expect(file.success)
+        let frame = try #require(file.frame)
+        #expect(frame.variant == "wide" && frame.photo == layout.photo)
+        #expect(frame.width == layout.width && frame.height == layout.height)
+    }
+
     @Test func exportBytesProgressAndActiveCancellation() async throws {
         let fixture = try Fixture()
         let engine = try await Engine()

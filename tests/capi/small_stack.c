@@ -265,7 +265,9 @@ static int run_operation(hyperdr_engine* engine, enum Operation operation,
       char* output = NULL;
       hyperdr_error* error = NULL;
       const int status = hyperdr_frame_layout(
-          "{\"margins\":0.05,\"caption\":0.1,\"shadow\":{\"opacity\":0.1,\"blur\":0.01}}",
+          "{\"margins\":0.05,\"caption\":0.1,\"shadow\":{\"opacity\":0.1,\"blur\":0.01},"
+          "\"variants\":{\"wide\":{\"minRatio\":1.25,\"reference\":\"long\",\"caption\":0.06,\"aspect\":null},"
+          "\"tall\":{\"maxRatio\":0.125,\"aspect\":null}}}",
           6000, 4000, &output, &error);
       return take_string(result, "frame_layout", status, output, error);
     }

@@ -194,6 +194,9 @@ private struct CurveHandleView: View {
 
     @State private var hovered = false
     @State private var start: Double?
+    @State private var bracket = EditingBracket()
+    /// True while the pointer gesture is live; reset by cancellation too.
+    @GestureState private var live = false
     @FocusState private var focused: Bool
     @Environment(\.isEnabled) private var isEnabled
 
@@ -226,6 +229,9 @@ private struct CurveHandleView: View {
             .contentShape(.circle)
             .onHover { hovered = isEnabled && $0 }
             .gesture(drag)
+            .onChange(of: live) { if !live { finishDrag() } }
+            .onChange(of: isEnabled) { if !isEnabled { finishDrag() } }
+            .onDisappear { finishDrag() }
             .simultaneousGesture(TapGesture(count: 2).onEnded { set(handle.spec.defaultValue) })
             .focusable(interactions: .activate)
             .focused($focused)
@@ -274,19 +280,22 @@ private struct CurveHandleView: View {
                 guard isPrimaryPointerEvent else { return }
                 if start == nil {
                     start = handle.value.wrappedValue
-                    onEditingChanged(true)
+                    bracket.begin(onEditingChanged)
                 }
                 let units = plot.unitsPerPoint(handle.axis)
                 let delta = handle.axis == .horizontal ? drag.translation.width * units : -drag.translation.height * units
                 let new = handle.spec.snapped((start ?? 0) + delta)
                 if new != handle.value.wrappedValue { handle.value.wrappedValue = new }
             }
-            .onEnded { _ in
-                // Nothing began (a secondary click): nothing to end.
-                guard start != nil else { return }
-                start = nil
-                onEditingChanged(false)
-            }
+            .updating($live) { _, state, _ in state = true }
+            .onEnded { _ in finishDrag() }
+    }
+
+    /// Ends the drag if one is open: normal end, cancelled gesture, handle
+    /// removed or disabled. Idempotent.
+    private func finishDrag() {
+        start = nil
+        bracket.finish(onEditingChanged)
     }
 
     /// A single write outside any drag: one undo step of its own.

@@ -109,7 +109,8 @@ std::string model_input_report(const std::filesystem::path& input,
       .begin_array("delivered_crop_origin_sensor")
           .element(d.delivered_crop_left).element(d.delivered_crop_top).end_array()
       .member("raw_profile_sha256", decoded.raw_profile ? decoded.raw_profile->profile->sha256 : "")
-      .member("raw_lens_profile_sha256", decoded.raw_lens_profile_path.empty() ? std::string{} : sha256_file_hex(decoded.raw_lens_profile_path))
+      .member("raw_lens_profile_sha256", decoded.raw_lens_profile_path.empty() ? std::string{} : (options.raw.resource(options.raw.lens_profile)
+          ? options.raw.resource(options.raw.lens_profile)->sha256 : sha256_file_hex(decoded.raw_lens_profile_path)))
       .member("raw_half_size", raw.half_size)
       .member("input_domain", input_domain_name(decoded.describe_input().domain))
       .begin_object("source_color")
@@ -196,6 +197,7 @@ int model_input_command(int argc, char** argv) {
   if (output.empty() || report.empty()) {
     throw std::invalid_argument("model-input requires --output and --report");
   }
+  prepare_raw_resources(options.raw);
   apply_output_color_options(options);
   const std::filesystem::path input = path_from_utf8(argv[2]);
   if (same_path(input, output) || same_path(input, report) || same_path(output, report)) {

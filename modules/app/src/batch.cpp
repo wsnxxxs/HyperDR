@@ -181,7 +181,9 @@ GainMapOptions replay_external_development(
 
   const auto profile_hash = image.raw_profile ? image.raw_profile->profile->sha256 : std::string{};
   if (binding.raw_profile_sha256 != profile_hash) reject("RAW DCP profile");
-  const auto lens_hash = image.raw_lens_profile_path.empty() ? std::string{} : sha256_file_hex(image.raw_lens_profile_path);
+  const auto lens_hash = image.raw_lens_profile_path.empty() ? std::string{} :
+      (options.raw.resource(options.raw.lens_profile) ? options.raw.resource(options.raw.lens_profile)->sha256
+                                                   : sha256_file_hex(image.raw_lens_profile_path));
   if (binding.raw_lens_profile_sha256 != lens_hash) reject("RAW LCP profile");
   const auto expected_recipe = image.raw_profile ? "raw-dcp-v1" :
       native_model_development_kind(image.describe_input().domain);
@@ -377,7 +379,12 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     }
     std::optional<ExternalGainMap> external;
     if (!options.external_gain_path.empty()) {
-      external = read_external_gain_map(options.external_gain_path,
+      // Parse per file so an invalid grid stays a per-file failure, as before.
+      external = options.external_gain_snapshot
+          ? parse_external_gain_map(options.external_gain_snapshot->gain_bytes,
+                                    options.external_gain_snapshot->report_bytes,
+                                    options.allow_legacy_external_gain)
+          : read_external_gain_map(options.external_gain_path,
                                          options.external_gain_report,
                                          options.allow_legacy_external_gain);
     }
@@ -598,12 +605,18 @@ FileResult convert_file(const std::filesystem::path& input,
                         const ConvertOptions& requested_options,
                         const std::string& fingerprint, ProgressSink* sink) {
   auto options = requested_options;
+  const auto raw_resources = raw_decode_resources(options.raw);
+  const bool resources_unprepared = (!options.raw.snapshots &&
+      std::any_of(raw_resources.begin(), raw_resources.end(), [](const auto& resource) { return !resource.path.empty(); })) ||
+      (!options.color_lut.path.empty() && !options.color_lut.snapshot) ||
+      (!options.external_gain_path.empty() && !options.external_gain_snapshot);
   const bool frame_prepared = options.frame_snapshot != nullptr;
   prepare_frame_snapshot(options);
+  prepare_conversion_resources(options);
   apply_output_color_options(options);
   // run_conversion passes the fingerprint of its shared snapshot. Standalone
   // callers must fingerprint the resources captured here, not an earlier read.
-  const auto captured_fingerprint = !frame_prepared && options.frame_snapshot
+  const auto captured_fingerprint = resources_unprepared || (!frame_prepared && options.frame_snapshot)
       ? settings_fingerprint(options) : fingerprint;
   auto staged = decode_stage(input, options, captured_fingerprint);
   check_cancelled();
@@ -639,7 +652,10 @@ int run_conversion(const ConvertOptions& requested_options, ProgressSink* sink, 
   auto options = requested_options;
   prepare_frame_snapshot(options);
   apply_output_color_options(options);
+  // Validate the paths first so missing or invalid resources keep their
+  // messages and precedence, then capture them before any callback.
   validate_convert_options(options);
+  prepare_conversion_resources(options);
   const auto files = discover_input_files(options);
   check_output_collisions(files, options);
 

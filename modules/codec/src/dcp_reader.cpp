@@ -17,7 +17,7 @@ namespace {
 struct Entry { std::uint16_t type; std::uint32_t count; std::size_t offset; };
 class Reader {
  public:
-  explicit Reader(const std::filesystem::path& path) : bytes(read_binary_file(path)) {
+  explicit Reader(const std::filesystem::path& path, const ResourceSnapshot* snapshot) : bytes(resource_bytes(path, snapshot)) {
     bounds(0, 8);
     little = bytes[0] == 'I' && bytes[1] == 'I';
     if (!little && !(bytes[0] == 'M' && bytes[1] == 'M')) invalid("invalid byte order");
@@ -105,6 +105,9 @@ class Reader {
     for (unsigned i = 0; i < 4; ++i) value |= std::uint32_t(bytes[at+i]) << (8*(little ? i : 3-i));
     return value;
   }
+ public:
+  std::string digest() const { return sha256_hex(bytes); }
+ private:
   std::vector<std::uint8_t> bytes;
   bool little{true};
   std::map<unsigned, Entry> entries;
@@ -154,8 +157,8 @@ std::string normalized(std::string_view text) {
   return out;
 }
 }  // namespace
-static DcpProfile read_dcp_profile_impl(const std::filesystem::path& path) {
-  Reader reader(path);
+static DcpProfile read_dcp_profile_impl(const std::filesystem::path& path, const ResourceSnapshot* snapshot) {
+  Reader reader(path, snapshot);
   // These tags change the rendering model and must never be silently ignored.
   for (unsigned tag : {52525U,52528U,52529U,52530U,52531U,52532U,52533U,
                        52534U,52535U,52536U,52537U,52544U,52551U}) {
@@ -166,7 +169,7 @@ static DcpProfile read_dcp_profile_impl(const std::filesystem::path& path) {
   out.camera_model = reader.text(50708);
   out.calibration_signature = reader.text(50932);
   out.copyright = reader.text(50942);
-  out.sha256 = sha256_file_hex(path);
+  out.sha256 = reader.digest();
   for (unsigned i = 0; i < 2; ++i) {
     auto& c = out.color.calibrations[i];
     const auto light = reader.scalar(50778 + i);
@@ -198,8 +201,8 @@ static DcpProfile read_dcp_profile_impl(const std::filesystem::path& path) {
   return out;
 }
 
-DcpProfile read_dcp_profile(const std::filesystem::path& path) {
-  return configuration_resource([&] { return read_dcp_profile_impl(path); });
+DcpProfile read_dcp_profile(const std::filesystem::path& path, const ResourceSnapshot* snapshot) {
+  return configuration_resource([&] { return read_dcp_profile_impl(path, snapshot); });
 }
 bool dcp_matches_camera(const DcpProfile& profile, std::string_view make, std::string_view model) {
   const auto wanted = normalized(profile.camera_model);

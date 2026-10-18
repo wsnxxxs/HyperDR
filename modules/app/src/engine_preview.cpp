@@ -146,7 +146,7 @@ struct PreviewSession::State {
         source->analysis_file = cache_file.parent_path() /
             (cache_file.stem().string() + ".analysis.hdrcache");
       }
-      const bool disk_hit = !cache_file.empty() && read_decode_cache(cache_file, source->image);
+      const bool disk_hit = !cache_file.empty() && read_decode_cache(cache_file, source->image, &options.raw);
       if (!disk_hit) {
         // LibRaw produces the same half-size pixels for every preview edge.
         // Keep one such decode, then derive the two bounded render sizes below.
@@ -213,6 +213,7 @@ PreviewPixels PreviewSession::render_pixels(ConvertOptions options, PreviewRegio
   ExecutionScope execution({config_.heic_tile_workers, config_.memory_budget_bytes});
   check_cancelled();
   if (!source_.empty()) options.input = source_;
+  prepare_conversion_resources(options);
   options.decode_intent = DecodeIntent::Preview;
   options.decode_cache_source_sha256 = sha256_;
   if (options.decode_cache_directory.empty()) options.decode_cache_directory = config_.cache_directory;
@@ -299,7 +300,8 @@ PreviewPixels PreviewSession::render_pixels(ConvertOptions options, PreviewRegio
                                   options.gain.gain_strength, options.ai_post);
     }
   } else if (!options.external_gain_path.empty()) {
-    auto external = read_external_gain_map(
+    auto external = options.external_gain_snapshot ? parse_external_gain_map(options.external_gain_snapshot->gain_bytes,
+        options.external_gain_snapshot->report_bytes, options.allow_legacy_external_gain) : read_external_gain_map(
         options.external_gain_path, options.external_gain_report,
         options.allow_legacy_external_gain);
     const auto development = replay_external_development(

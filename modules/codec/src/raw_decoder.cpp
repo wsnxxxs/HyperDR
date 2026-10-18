@@ -352,22 +352,22 @@ void validate_raw_options(const RawDecodeOptions& options) {
         options.digital_gain <= 64.0F)) {
     throw std::invalid_argument("RAW digital gain must be finite and in (0,64]");
   }
-  require_calibration_file(options.profile, "RAW DCP profile");
-  require_calibration_file(options.look_profile, "RAW XMP look");
+  if (!options.resource(options.profile)) require_calibration_file(options.profile, "RAW DCP profile");
+  if (!options.resource(options.look_profile)) require_calibration_file(options.look_profile, "RAW XMP look");
   if (!options.look_profile.empty() && options.profile.empty())
     throw std::invalid_argument("RAW XMP look requires a DCP profile");
-  require_calibration_file(options.lens_profile, "RAW lens profile");
-  require_calibration_file(options.bad_pixel_map, "RAW bad-pixel map");
-  require_calibration_file(options.dark_frame, "RAW dark frame");
-  require_calibration_file(options.linearization_lut,
+  if (!options.resource(options.lens_profile)) require_calibration_file(options.lens_profile, "RAW lens profile");
+  if (!options.resource(options.bad_pixel_map)) require_calibration_file(options.bad_pixel_map, "RAW bad-pixel map");
+  if (!options.resource(options.dark_frame)) require_calibration_file(options.dark_frame, "RAW dark frame");
+  if (!options.resource(options.linearization_lut)) require_calibration_file(options.linearization_lut,
                            "RAW linearization LUT");
-  require_calibration_file(options.lens_shading_map,
+  if (!options.resource(options.lens_shading_map)) require_calibration_file(options.lens_shading_map,
                            "RAW lens-shading map");
 }
 
 std::vector<double> read_numeric_text(const std::filesystem::path& path,
-                                       const char* label) {
-  std::ifstream input(path);
+                                       const char* label, const ResourceSnapshot* snapshot) {
+  auto input = resource_stream(path, snapshot);
   if (!input) {
     throw std::invalid_argument(std::string("cannot read ") + label + ": " +
                                 path_utf8(path));
@@ -408,9 +408,9 @@ std::size_t checked_count(double value, const char* label) {
   return static_cast<std::size_t>(value);
 }
 
-static LinearizationLut read_linearization_lut_impl(const std::filesystem::path& path) {
+static LinearizationLut read_linearization_lut_impl(const std::filesystem::path& path, const ResourceSnapshot* snapshot) {
   if (path.empty()) return {};
-  const auto values = read_numeric_text(path, "RAW linearization LUT");
+  const auto values = read_numeric_text(path, "RAW linearization LUT", snapshot);
   const auto count = checked_count(values.front(), "RAW linearization LUT length");
   if (count < 2 || values.size() != count + 1) {
     throw std::invalid_argument(
@@ -436,13 +436,13 @@ static LinearizationLut read_linearization_lut_impl(const std::filesystem::path&
   return lut;
 }
 
-LinearizationLut read_linearization_lut(const std::filesystem::path& path) {
-  return configuration_resource([&] { return read_linearization_lut_impl(path); });
+LinearizationLut read_linearization_lut(const std::filesystem::path& path, const ResourceSnapshot* snapshot) {
+  return configuration_resource([&] { return read_linearization_lut_impl(path, snapshot); });
 }
 
-static LensShadingMap read_lens_shading_map_impl(const std::filesystem::path& path) {
+static LensShadingMap read_lens_shading_map_impl(const std::filesystem::path& path, const ResourceSnapshot* snapshot) {
   if (path.empty()) return {};
-  const auto values = read_numeric_text(path, "RAW lens-shading map");
+  const auto values = read_numeric_text(path, "RAW lens-shading map", snapshot);
   if (values.size() < 4) {
     throw std::invalid_argument(
         "RAW lens-shading map must start with width height channels");
@@ -478,8 +478,8 @@ static LensShadingMap read_lens_shading_map_impl(const std::filesystem::path& pa
   return map;
 }
 
-LensShadingMap read_lens_shading_map(const std::filesystem::path& path) {
-  return configuration_resource([&] { return read_lens_shading_map_impl(path); });
+LensShadingMap read_lens_shading_map(const std::filesystem::path& path, const ResourceSnapshot* snapshot) {
+  return configuration_resource([&] { return read_lens_shading_map_impl(path, snapshot); });
 }
 
 float bilinear_gain(const LensShadingMap& map, float x, float y,
@@ -691,9 +691,9 @@ float linearized_code(float value, const RawCalibration& calibration) {
 }
 
 static std::vector<std::uint16_t> read_dark_frame_impl(const std::filesystem::path& path,
-                                          unsigned width, unsigned height) {
+                                          unsigned width, unsigned height, const ResourceSnapshot* snapshot) {
   if (path.empty()) return {};
-  std::ifstream input(path, std::ios::binary);
+  auto input = resource_stream(path, snapshot);
   const auto token = [&]() {
     std::string value;
     while (input >> std::ws && input.peek() == '#') {
@@ -722,8 +722,8 @@ static std::vector<std::uint16_t> read_dark_frame_impl(const std::filesystem::pa
 }
 
 std::vector<std::uint16_t> read_dark_frame(const std::filesystem::path& path,
-                                          unsigned width, unsigned height) {
-  return configuration_resource([&] { return read_dark_frame_impl(path, width, height); });
+                                          unsigned width, unsigned height, const ResourceSnapshot* snapshot) {
+  return configuration_resource([&] { return read_dark_frame_impl(path, width, height, snapshot); });
 }
 
 RawCalibration prepare_calibration(CallbackLibRaw& raw, const LinearizationLut& lut,
@@ -734,7 +734,7 @@ RawCalibration prepare_calibration(CallbackLibRaw& raw, const LinearizationLut& 
   calibration.white = std::max(1.0F, raw_white_level(raw));
   calibration.lut = &lut;
   raw.normalized_black_levels(calibration);
-  calibration.dark = read_dark_frame(options.dark_frame, calibration.sensor.width, calibration.sensor.height);
+  calibration.dark = read_dark_frame(options.dark_frame, calibration.sensor.width, calibration.sensor.height, options.resource(options.dark_frame));
   calibration.gain_maps = std::move(gain_maps);
   return calibration;
 }
@@ -842,13 +842,12 @@ void apply_code_calibration(CallbackLibRaw& raw, const RawCalibration& calibrati
   raw.imgdata.params.adjust_maximum_thr = 0.0F;
 }
 
-static void apply_bad_pixel_map_impl(CallbackLibRaw& raw, const std::filesystem::path& path) {
+static void apply_bad_pixel_map_impl(CallbackLibRaw& raw, const std::filesystem::path& path, const ResourceSnapshot* snapshot) {
   if (path.empty()) return;
   auto& data = raw.imgdata.rawdata;
   if (!data.raw_image || !raw.imgdata.idata.filters)
     throw std::invalid_argument("RAW bad-pixel map requires a CFA sensor buffer");
-  std::ifstream input(path);
-  if (!input) throw std::invalid_argument("cannot read RAW bad-pixel map");
+  auto input = resource_stream(path, snapshot);
   const auto& sizes = data.sizes;
   const auto sensor = raw.sensor_geometry();
   const auto sample = [&](unsigned x, unsigned y) -> std::uint16_t& {
@@ -882,8 +881,8 @@ static void apply_bad_pixel_map_impl(CallbackLibRaw& raw, const std::filesystem:
   }
 }
 
-void apply_bad_pixel_map(CallbackLibRaw& raw, const std::filesystem::path& path) {
-  return configuration_resource([&] { return apply_bad_pixel_map_impl(raw, path); });
+void apply_bad_pixel_map(CallbackLibRaw& raw, const std::filesystem::path& path, const ResourceSnapshot* snapshot) {
+  return configuration_resource([&] { return apply_bad_pixel_map_impl(raw, path, snapshot); });
 }
 
 void correct_auto_bad_pixels(CallbackLibRaw& raw) {
@@ -1065,8 +1064,8 @@ DecodedImage decode_raw(const std::filesystem::path& path,
                         const RawDecodeOptions& options) {
   validate_raw_options(options);
   const auto linearization_lut =
-      read_linearization_lut(options.linearization_lut);
-  const auto lens_shading = read_lens_shading_map(options.lens_shading_map);
+      read_linearization_lut(options.linearization_lut, options.resource(options.linearization_lut));
+  const auto lens_shading = read_lens_shading_map(options.lens_shading_map, options.resource(options.lens_shading_map));
 
   // See probe_raw_lens_metadata: LibRaw must not live on the caller's stack.
   auto raw_storage = std::make_unique<CallbackLibRaw>();
@@ -1106,8 +1105,8 @@ DecodedImage decode_raw(const std::filesystem::path& path,
   check_raw_open(raw.open_file(path.c_str()), "LibRaw open", path);
   std::shared_ptr<const DcpProfile> external_profile;
   if (!options.profile.empty()) {
-    auto profile = read_dcp_profile(options.profile);
-    if (!options.look_profile.empty()) apply_xmp_look(profile, options.look_profile);
+    auto profile = read_dcp_profile(options.profile, options.resource(options.profile));
+    if (!options.look_profile.empty()) apply_xmp_look(profile, options.look_profile, options.resource(options.look_profile));
     if (!dcp_matches_camera(profile, raw.imgdata.idata.make, raw.imgdata.idata.model))
       throw std::invalid_argument("DCP camera does not match RAW: " + profile.camera_model);
     if (raw.imgdata.idata.colors != 3 || raw.imgdata.color.as_shot_wb_applied)
@@ -1176,7 +1175,7 @@ DecodedImage decode_raw(const std::filesystem::path& path,
   if (opcodes_skipped) mark_degraded("dng_opcode_unsupported");
   const auto calibration =
       prepare_calibration(raw, linearization_lut, options, std::move(opcodes[1].gain_maps));
-  apply_bad_pixel_map(raw, options.bad_pixel_map);
+  apply_bad_pixel_map(raw, options.bad_pixel_map, options.resource(options.bad_pixel_map));
   if (options.auto_bad_pixel_correction) correct_auto_bad_pixels(raw);
   apply_code_calibration(raw, calibration);
 #if defined(LIBRAW_VERSION) && defined(LIBRAW_MAKE_VERSION)
@@ -1495,7 +1494,7 @@ DecodedImage decode_raw(const std::filesystem::path& path,
     result.linear_p3.pixels.resize(count * 3);
   }
   if (!options.lens_profile.empty()) {
-    auto profile = read_lens_profile(options.lens_profile);
+    auto profile = read_lens_profile(options.lens_profile, options.resource(options.lens_profile));
     // An embedded gain map has already calibrated this RAW's lens shading.
     if (embedded_vignette || !lens_shading.gains.empty())
       for (auto& c : profile.calibrations) c.vignette.reset();
@@ -1514,8 +1513,8 @@ RawMosaic decode_raw_mosaic(const std::filesystem::path& path,
                             const RawDecodeOptions& options) {
   validate_raw_options(options);
   const auto linearization_lut =
-      read_linearization_lut(options.linearization_lut);
-  const auto lens_shading = read_lens_shading_map(options.lens_shading_map);
+      read_linearization_lut(options.linearization_lut, options.resource(options.linearization_lut));
+  const auto lens_shading = read_lens_shading_map(options.lens_shading_map, options.resource(options.lens_shading_map));
 
   // See probe_raw_lens_metadata: LibRaw must not live on the caller's stack.
   auto raw_storage = std::make_unique<CallbackLibRaw>();
@@ -1559,7 +1558,7 @@ RawMosaic decode_raw_mosaic(const std::filesystem::path& path,
   static_cast<void>(apply_dng_bad_pixels(raw, opcodes[0]));
   const auto calibration =
       prepare_calibration(raw, linearization_lut, options, std::move(opcodes[1].gain_maps));
-  apply_bad_pixel_map(raw, options.bad_pixel_map);
+  apply_bad_pixel_map(raw, options.bad_pixel_map, options.resource(options.bad_pixel_map));
   if (options.auto_bad_pixel_correction) correct_auto_bad_pixels(raw);
   apply_code_calibration(raw, calibration);
 

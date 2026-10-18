@@ -176,6 +176,7 @@ std::vector<std::uint8_t> render_model_gain(ConvertOptions options,
     return native_model_gain_packet(prediction, "undeclared");
   }
 
+  prepare_raw_resources(options.raw);
   if (options.preview_max_edge == 0) options.preview_max_edge = 2048;
   options.decode_intent = DecodeIntent::Preview;
   options.raw.preview_max_edge = options.preview_max_edge;

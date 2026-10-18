@@ -41,7 +41,8 @@ void write_settings(json::Writer& writer, const ConvertOptions& options) {
   writer.end_object();
   writer.begin_object("color_lut")
       .member("path", path_utf8(options.color_lut.path))
-      .member("sha256", options.color_lut.path.empty() ? std::string{} : sha256_file_hex(options.color_lut.path))
+      .member("sha256", options.color_lut.path.empty() ? std::string{} : (options.color_lut.snapshot
+          ? options.color_lut.snapshot->sha256 : sha256_file_hex(options.color_lut.path)))
       .member("input", lut_space_name(options.color_lut.input))
       .member("output", lut_space_name(options.color_lut.output))
       .member("strength", options.color_lut.strength).end_object();

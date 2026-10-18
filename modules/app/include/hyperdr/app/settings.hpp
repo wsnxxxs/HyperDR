@@ -6,6 +6,7 @@
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/gainmap/native_model.hpp"
 #include "hyperdr/gainmap/types.hpp"
+#include "hyperdr/gainmap/external.hpp"
 #include "hyperdr/image/frame.hpp"
 #include "hyperdr/look/color_lut.hpp"
 
@@ -31,6 +32,11 @@ struct FrameSnapshot {
   std::vector<std::uint8_t> overlay_bytes;
   std::string overlay_sha256;
   FrameOverlay overlay;
+};
+
+struct ExternalGainSnapshot {
+  std::vector<std::uint8_t> gain_bytes, report_bytes;
+  std::string gain_sha256, report_sha256;
 };
 
 struct ConvertOptions {
@@ -74,6 +80,7 @@ struct ConvertOptions {
   // required because the raw file carries neither dimensions nor scale.
   std::filesystem::path external_gain_path;
   std::filesystem::path external_gain_report;
+  std::shared_ptr<const ExternalGainSnapshot> external_gain_snapshot;
   // Explicitly re-enable the frozen v1 normalized sidecar contract.
   bool allow_legacy_external_gain{false};
   // Enables one of the embedded in-process AI models. The runtime receives the
@@ -115,6 +122,10 @@ struct ConvertOptions {
   std::string decode_cache_source_sha256;
   std::uint64_t decode_cache_budget_bytes{2ULL * 1024ULL * 1024ULL * 1024ULL};
 };
+
+// Capture mutable creative resources before callbacks, decode, and fingerprints.
+void prepare_raw_resources(RawDecodeOptions& options);
+void prepare_conversion_resources(ConvertOptions& options);
 
 // Rejects combinations no encoder can honour, before any file is opened.
 void validate_convert_options(const ConvertOptions& options);

@@ -54,7 +54,8 @@ namespace hyperdr {
 
 // Returns false on any miss: absent file, wrong magic or version, truncated
 // payload, or dimensions that disagree with the payload length.
-[[nodiscard]] bool read_decode_cache(const std::filesystem::path& file, DecodedImage& out);
+[[nodiscard]] bool read_decode_cache(const std::filesystem::path& file, DecodedImage& out,
+                                     const RawDecodeOptions* raw = nullptr);
 
 // Writes atomically. Failures are reported so callers can decide whether to
 // warn; a failed write never invalidates the conversion itself.

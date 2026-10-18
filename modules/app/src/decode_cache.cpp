@@ -219,7 +219,7 @@ std::string metadata_json(const DecodedImage& value) {
   return writer.end_object().take();
 }
 
-void apply_metadata_json(const std::string& text, DecodedImage& out) {
+void apply_metadata_json(const std::string& text, DecodedImage& out, const RawDecodeOptions* raw) {
   const auto document = json::parse(text);
   const auto string_at = [&](std::string_view key) -> std::string {
     const auto* value = document.find(key);
@@ -300,9 +300,9 @@ void apply_metadata_json(const std::string& text, DecodedImage& out) {
   out.raw_lens_profile_path = path_from_utf8(string_at("raw_lens_profile_path"));
   out.raw_lens_correction = string_at("raw_lens_correction");
   if (!out.raw_profile_path.empty()) {
-    auto profile = read_dcp_profile(out.raw_profile_path);
+    auto profile = read_dcp_profile(out.raw_profile_path, raw ? raw->resource(raw->profile) : nullptr);
     if (!out.raw_look_path.empty()) {
-      apply_xmp_look(profile, out.raw_look_path);
+      apply_xmp_look(profile, out.raw_look_path, raw ? raw->resource(raw->look_profile) : nullptr);
       if (profile.xmp_look_sha256 != string_at("raw_look_sha256"))
         throw std::runtime_error("cached XMP look changed");
     }
@@ -418,7 +418,8 @@ std::string decode_cache_variant(const ConvertOptions& options,
     variant += '=';
     variant += path_utf8(resource.path);
     variant += ':';
-    variant += configuration_resource([&] { return sha256_file_hex(resource.path); });
+    variant += raw.resource(resource.path) ? raw.resource(resource.path)->sha256
+        : configuration_resource([&] { return sha256_file_hex(resource.path); });
   }
   return variant;
 }
@@ -439,7 +440,7 @@ DecodedImage decode_cached_image(const std::filesystem::path& input,
       *analysis_cache_file = cache_file.parent_path() /
           (cache_file.stem().string() + ".analysis.hdrcache");
     }
-    if (read_decode_cache(cache_file, cached)) return cached;
+    if (read_decode_cache(cache_file, cached, &raw)) return cached;
   }
 
   auto effective_raw = raw;
@@ -460,7 +461,7 @@ std::filesystem::path decode_cache_path(const std::filesystem::path& directory,
   return directory / (key + ".hdrcache");
 }
 
-bool read_decode_cache(const std::filesystem::path& file, DecodedImage& out) {
+bool read_decode_cache(const std::filesystem::path& file, DecodedImage& out, const RawDecodeOptions* raw) {
   std::error_code ec;
   if (!std::filesystem::is_regular_file(file, ec) || ec) return false;
   BinaryInput input(file);
@@ -498,7 +499,7 @@ bool read_decode_cache(const std::filesystem::path& file, DecodedImage& out) {
   try {
     loaded.linear_p3 = FloatImage(width, height, channels);
     if (planes == 2) loaded.authored_sdr.emplace(width, height, channels);
-    if (json_length != 0) apply_metadata_json(metadata_text, loaded);
+    if (json_length != 0) apply_metadata_json(metadata_text, loaded, raw);
   } catch (const std::exception&) {
     return false;
   }

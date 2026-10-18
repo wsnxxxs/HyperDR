@@ -360,6 +360,12 @@ ExternalGainMap read_external_gain_map(const std::filesystem::path& gain_path,
   }
 
   const auto report_bytes = read_binary_file(report_path);
+  const auto gain_bytes = read_binary_file(gain_path);
+  return parse_external_gain_map(gain_bytes, report_bytes, allow_legacy_external_gain);
+}
+
+ExternalGainMap parse_external_gain_map(std::span<const std::uint8_t> bytes,
+    std::span<const std::uint8_t> report_bytes, bool allow_legacy_external_gain) {
   const auto document = json::parse(std::string_view(
       reinterpret_cast<const char*>(report_bytes.data()), report_bytes.size()));
   if (!document.is_object()) {
@@ -429,13 +435,12 @@ ExternalGainMap read_external_gain_map(const std::filesystem::path& gain_path,
     }
   }
 
-  const auto bytes = read_binary_file(gain_path);
   const auto expected_bytes = pixel_count * sizeof(float);
   if (bytes.size() != expected_bytes) {
     throw std::invalid_argument("external gain byte length does not match its report");
   }
   if (const auto* hash = file.find("sha256"); hash && hash->is_string() &&
-      sha256_file_hex(gain_path) != hash->string()) {
+      sha256_hex(bytes) != hash->string()) {
     throw std::invalid_argument("external gain hash does not match its report");
   }
 

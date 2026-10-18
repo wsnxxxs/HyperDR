@@ -180,6 +180,8 @@ import UniformTypeIdentifiers
 
     func dismissAlert() { alert = nil }
 
+    func report(openFailure error: any Error) { alert = UserFacingError.importFailure(error) }
+
     // MARK: Frame
 
     func loadCaptureFacts() async {
@@ -191,14 +193,6 @@ import UniformTypeIdentifiers
 
     /// The caption the frame sets for this photograph.
     var frameCaption: FrameCaption { frame.style.caption(frame, facts: captureFacts) }
-
-    /// The engine's layout of the frame around the full-size photograph, or of
-    /// the bare photograph while the frame is off. Nil without a photo size.
-    var frameLayout: FrameLayout? {
-        guard let size = document?.pixelSize else { return nil }
-        let spec = frame.isEnabled ? frame.engineFrame(hasCaption: !frameCaption.isEmpty) : [:]
-        return try? Engine.frameLayout(frame: spec, photoWidth: size.width, photoHeight: size.height)
-    }
 
     func adjust(_ key: String, to value: Double) {
         guard value.isFinite, adjustments[key] != value, let photo, hasEditedFrame,

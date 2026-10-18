@@ -95,5 +95,7 @@ struct ErrorText {
         "hevc_main10_unavailable": Entry(title: "mac.err.hevc.title", message: "err.server.hevc_main10_unavailable"),
         "hevc_probe_failed": Entry(title: "mac.err.hevc.title", message: "err.server.hevc_probe_failed"),
         "hevc_encode_failed": Entry(title: "mac.err.hevc_encode_failed.title", message: "err.server.hevc_encode_failed"),
+        "export_memory_budget": Entry(title: "mac.err.export_memory_budget.title",
+            message: "err.server.export_memory_budget"),
     ]
 }

@@ -596,6 +596,23 @@
         }
       }
     },
+    "err.server.export_memory_budget" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exporting this photo would need more memory than this Mac can spare, so the file was not exported. Other files in the batch are not affected."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出这张照片所需的内存超过本机可用的额度，此文件未导出；同批的其他文件不受影响。"
+          }
+        }
+      }
+    },
     "err.server.file_empty" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1361,6 +1378,40 @@
         }
       }
     },
+    "frame.style.tooWide" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This photo is too wide for this style."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这张照片太宽，放不下此样式。"
+          }
+        }
+      }
+    },
+    "frame.style.tooWide.selected" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This photo is too wide for this style, so no frame is shown. Choose another style."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这张照片太宽，放不下此样式，因此不显示边框。请换一种样式。"
+          }
+        }
+      }
+    },
     "frame.text" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2122,6 +2173,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法写入保存文件夹"
+          }
+        }
+      }
+    },
+    "mac.err.export_memory_budget.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not enough memory to export"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "内存不足，无法导出"
           }
         }
       }

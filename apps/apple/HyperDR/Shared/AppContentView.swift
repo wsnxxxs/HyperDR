@@ -15,13 +15,13 @@ struct AppContentView: View {
                 Text("HyperDR").font(.largeTitle.bold())
                 Spacer()
                 VStack(alignment: .trailing) {
-                    Text("引擎 \(Engine.version) · ABI \(Engine.abiVersion)")
-                    if let schemaCount { Text("设置项：\(schemaCount)") }
+                    Text(verbatim: "Engine \(Engine.version) · ABI \(Engine.abiVersion)")
+                    if let schemaCount { Text(verbatim: "Settings: \(schemaCount)") }
                 }.font(.system(.body, design: .monospaced))
             }
-            if let engineError { Text(engineError).foregroundStyle(.red) }
-            Text("Metal EDR 预览原型").font(.title2)
-            Text("线性 Display P3 · 0–8× HDR 合成渐变").foregroundStyle(.secondary)
+            if let engineError { Text(verbatim: engineError).foregroundStyle(.red) }
+            Text(verbatim: "Metal EDR preview prototype").font(.title2)
+            Text(verbatim: "Linear Display P3 · synthetic 0–8× HDR ramp").foregroundStyle(.secondary)
             EDRPreview(original: original, onHeadroom: { headroom = $0 }, onError: { previewError = $0 })
                 .frame(minHeight: 200)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -32,13 +32,13 @@ struct AppContentView: View {
                 Spacer()
                 Text("8×")
             }.font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
-            Toggle("仅显示 SDR（限制在 1×）", isOn: $original)
+            Toggle(isOn: $original) { Text(verbatim: "SDR only (clamped to 1×)") }
             HStack(spacing: 24) {
-                Text(headroom.screen)
-                Text("当前 headroom：\(headroom.current, specifier: "%.2f")×")
-                Text("潜在 headroom：\(headroom.potential, specifier: "%.2f")×")
+                Text(verbatim: headroom.screen)
+                Text(verbatim: "Current headroom: \(String(format: "%.2f", headroom.current))×")
+                Text(verbatim: "Potential headroom: \(String(format: "%.2f", headroom.potential))×")
             }.font(.system(.body, design: .monospaced))
-            if let previewError { Text("预览未能运行：\(previewError)").foregroundStyle(.red) }
+            if let previewError { Text(verbatim: "Preview failed: \(previewError)").foregroundStyle(.red) }
         }
         .padding(32)
         .background(Color.hdr.surfacePage)
@@ -49,7 +49,7 @@ struct AppContentView: View {
                 let schema = try Engine.schema()
                 schemaCount = schema.settings.count
                 print("HyperDR engine=\(Engine.version) abi=\(Engine.abiVersion) settings=\(schema.settings.count)")
-            } catch { engineError = "无法读取引擎设置：\(error.localizedDescription)" }
+            } catch { engineError = "Cannot read the engine settings: \(error.localizedDescription)" }
         }
     }
 }

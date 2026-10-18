@@ -4,7 +4,10 @@ import ImageIO
 /// The capture facts a frame caption shows, read from the photograph's own
 /// Exif. Formatting is photographic, not locale dependent: a photographer
 /// reads "f/2.8" and "1/250 s" in any language.
-struct CaptureFacts: Equatable {
+///
+/// Plain values and pure functions, off the main actor: the services read
+/// the Exif in the background.
+nonisolated struct CaptureFacts: Equatable, Sendable {
     var make: String?
     var model: String?
     var lens: String?
@@ -26,24 +29,36 @@ struct CaptureFacts: Equatable {
 
     init(make: String? = nil, model: String? = nil, lens: String? = nil, focalLength: Double? = nil,
          fNumber: Double? = nil, exposureTime: Double? = nil, iso: Int? = nil, dateTimeOriginal: String? = nil) {
-        self.make = make
-        self.model = model
-        self.lens = lens
+        self.make = Self.recorded(make)
+        self.model = Self.recorded(model)
+        self.lens = Self.recorded(lens)
         self.focalLength = focalLength
         self.fNumber = fNumber
         self.exposureTime = exposureTime
         self.iso = iso
-        self.dateTimeOriginal = dateTimeOriginal
+        self.dateTimeOriginal = Self.recorded(dateTimeOriginal)
     }
+
+    /// The text, trimmed, or nil when nothing real was recorded: empty, a
+    /// placeholder of dashes, or "unknown", "n/a" or "none" in any case.
+    /// Sony writes LensModel "----" when no lens reported itself, which a
+    /// caption would otherwise print.
+    static func recorded(_ value: String?) -> String? {
+        guard let string = value?.trimmingCharacters(in: Self.padding),
+              string.contains(where: { $0 != "-" && !$0.isWhitespace }),
+              !Self.placeholders.contains(string.lowercased()) else { return nil }
+        return string
+    }
+
+    private static let placeholders: Set<String> = ["unknown", "n/a", "none"]
+
+    /// Whitespace, and the NULs that pad fixed-length Exif strings.
+    private static let padding = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "\0"))
 
     init(properties: [CFString: Any]) {
         let exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
         let tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any] ?? [:]
-        let text = { (value: Any?) -> String? in
-            guard let string = (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !string.isEmpty else { return nil }
-            return string
-        }
+        let text = { (value: Any?) -> String? in Self.recorded(value as? String) }
         let number = { (value: Any?) -> Double? in
             guard let value = (value as? NSNumber)?.doubleValue, value.isFinite, value > 0 else { return nil }
             return value
@@ -116,11 +131,12 @@ struct CaptureFacts: Equatable {
             ? String(Int(tenths / 10)) : String(format: "%.1f", tenths / 10)
     }
 
-    /// 1/250 s, 1/3 s, 0.8 s, 1.3 s, 30 s.
+    /// 1/250 s, 1/4 s, 0.3 s, 0.4 s, 0.6 s, 1.3 s, 30 s. From 0.3 s up, a
+    /// fraction would be wrong (0.4 s is not 1/3 s nor 1/2 s), so cameras
+    /// show tenths of a second; shorter times are the 1/n camera stops.
     static func shutter(_ seconds: Double) -> String {
-        let reciprocal = 1 / seconds
-        if reciprocal < 1.5 { return "\(decimal(seconds)) s" }
-        return "1/\(Int(reciprocal.rounded())) s"
+        if seconds >= 0.3 { return "\(decimal(seconds)) s" }
+        return "1/\(Int((1 / seconds).rounded())) s"
     }
 
     static func brand(_ make: String) -> String {

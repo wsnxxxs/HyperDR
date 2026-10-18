@@ -5,36 +5,46 @@ import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// What an export needs to carry a frame: the `command.frame` document and
-/// the layout the engine will produce for it.
+/// What an export needs to carry a frame: the `command.frame` document, the
+/// caption overlay to go with it, and the layout the engine will produce.
 ///
-/// M3 attaches it to the export request:
+/// Nothing is written here. The export (Kit, K3) saves `overlayPNG` in its
+/// own export directory and points the document's `overlay` at that file:
 ///
 ///     if let plan = try FrameExportPlan.make(settings: model.frame, facts: facts,
-///                                            photoSize: exportSize, directory: exportDirectory) {
-///         try request.setCommand("frame", .object(plan.frame))
+///                                            photoSize: exportSize) {
+///         var frame = plan.frame
+///         if let png = plan.overlayPNG {
+///             let overlay = exportDirectory.appendingPathComponent("frame-caption.png")
+///             try png.write(to: overlay)
+///             frame["overlay"] = .string(overlay.path)
+///         }
+///         try request.setCommand("frame", .object(frame))
 ///     }
 ///
 /// `photoSize` must be the size the engine renders the photograph at (its
 /// oriented, cropped size after any export size limit): the engine recomputes
 /// the layout from the rendered photo and rejects a caption of another size.
 struct FrameExportPlan {
+    /// `command.frame` without `overlay`.
     let frame: [String: JSONValue]
-    let layout: FrameLayout
+    /// The caption band as a PNG exactly `layout.caption`'s size; nil when
+    /// the frame has no caption.
+    let overlayPNG: Data?
+    let layout: FramePixelLayout
 
-    static func make(settings: FrameSettings, facts: CaptureFacts, photoSize: PixelSize,
-                     directory: URL) throws -> FrameExportPlan? {
+    /// Nil when the frame is off. Throws the engine's error when the style
+    /// cannot frame a photo of this size (story around a wide panorama).
+    static func make(settings: FrameSettings, facts: CaptureFacts,
+                     photoSize: PixelSize) throws -> FrameExportPlan? {
         guard settings.isEnabled else { return nil }
         let caption = settings.style.caption(settings, facts: facts)
-        var frame = settings.engineFrame(hasCaption: !caption.isEmpty)
-        let layout = try Engine.frameLayout(frame: frame, photoWidth: photoSize.width,
-                                            photoHeight: photoSize.height)
-        if !caption.isEmpty, layout.caption.height > 0 {
-            let overlay = directory.appendingPathComponent("frame-caption.png")
-            try FrameOverlayRenderer.write(caption, settings: settings, layout: layout, to: overlay)
-            frame["overlay"] = .string(overlay.path)
-        }
-        return FrameExportPlan(frame: frame, layout: layout)
+        let frame = settings.engineFrame(hasCaption: !caption.isEmpty)
+        let layout = FramePixelLayout(try Engine.frameLayout(frame: frame, photoWidth: photoSize.width,
+                                                             photoHeight: photoSize.height))
+        let overlay = !caption.isEmpty && layout.caption.height > 0
+            ? try FrameOverlayRenderer.png(caption, settings: settings, layout: layout) : nil
+        return FrameExportPlan(frame: frame, overlayPNG: overlay, layout: layout)
     }
 }
 
@@ -44,7 +54,7 @@ struct FrameExportPlan {
 enum FrameOverlayRenderer {
     struct Failure: Error {}
 
-    static func write(_ caption: FrameCaption, settings: FrameSettings, layout: FrameLayout, to url: URL) throws {
+    static func png(_ caption: FrameCaption, settings: FrameSettings, layout: FramePixelLayout) throws -> Data {
         let band = layout.caption
         guard band.width > 0, band.height > 0,
               let space = CGColorSpace(name: CGColorSpace.displayP3),
@@ -59,10 +69,13 @@ enum FrameOverlayRenderer {
         renderer.proposedSize = ProposedViewSize(width: CGFloat(band.width), height: CGFloat(band.height))
         renderer.scale = 1
         renderer.render { _, draw in draw(context) }
+        let data = NSMutableData()
         guard let image = context.makeImage(),
-              let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil)
+              let destination = CGImageDestinationCreateWithData(data as CFMutableData, UTType.png.identifier as CFString,
+                                                                 1, nil)
         else { throw Failure() }
         CGImageDestinationAddImage(destination, image, nil)
         guard CGImageDestinationFinalize(destination) else { throw Failure() }
+        return data as Data
     }
 }

@@ -102,6 +102,9 @@ struct DisplayParams {
     var rect: SIMD4<Float>
 }
 
+/// A renderer failure. The message is a developer-facing English detail: the
+/// model reports it as `metal_unavailable`, whose title and message come from
+/// the catalogue, and `ErrorText` shows the detail untranslated.
 enum PreviewError: LocalizedError {
     case unavailable(String)
     var errorDescription: String? {
@@ -120,8 +123,12 @@ final class PreviewRenderer {
     private let reconstructPipeline: any MTLComputePipelineState
     private let reconstruct32Pipeline: any MTLComputePipelineState
     private let displayPipeline: any MTLRenderPipelineState
+    /// The intermediate and what it was built from. `source` (the frame, or
+    /// the caller's base buffer) is held, so its address cannot be reused by a
+    /// newer object while the cache compares against it, and a frame's
+    /// no-copy planes stay valid as long as they are referenced here.
     private struct Prepared {
-        let identity: ObjectIdentifier
+        let source: AnyObject
         let original: Bool
         let texture: any MTLTexture
         let planes: FramePlanes
@@ -130,7 +137,7 @@ final class PreviewRenderer {
 
     init() throws {
         guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue() else {
-            throw PreviewError.unavailable("Metal 设备不可用")
+            throw PreviewError.unavailable("No Metal device")
         }
         self.device = device
         self.queue = queue
@@ -163,38 +170,38 @@ final class PreviewRenderer {
     /// Rebuilds the intermediate only when the frame or the view mode changed.
     @discardableResult
     func prepare(frame: PreviewFrame, original: Bool) throws -> any MTLTexture {
-        let identity = ObjectIdentifier(frame)
-        if let prepared, prepared.identity == identity, prepared.original == original {
+        if let prepared, prepared.source === frame, prepared.original == original {
             return prepared.texture
         }
         return try prepare(planes: FramePlanes(frame, device: device),
-            original: original, identity: identity)
+            original: original, source: frame)
     }
 
     /// Same pass for buffers the caller owns (the diagnostic ramp and tests).
     @discardableResult
     func prepare(planes: FramePlanes, original: Bool) throws -> any MTLTexture {
-        try prepare(planes: planes, original: original, identity: ObjectIdentifier(planes.base))
+        if let prepared, prepared.source === planes.base, prepared.original == original {
+            return prepared.texture
+        }
+        return try prepare(planes: planes, original: original, source: planes.base)
     }
 
     private func prepare(planes: FramePlanes, original: Bool,
-                         identity: ObjectIdentifier) throws -> any MTLTexture {
-        // The identity alone is not enough: an address can be reused by a new
-        // frame once the old one is released.
-        if let prepared, prepared.identity == identity, prepared.original == original,
-           prepared.planes.width == planes.width, prepared.planes.height == planes.height {
-            return prepared.texture
-        }
+                         source: AnyObject) throws -> any MTLTexture {
         let texture = try Self.intermediateTexture(device: device,
             width: planes.width, height: planes.height)
         encodeReconstruct(planes, original: original, into: texture, pipeline: reconstructPipeline)
-        prepared = Prepared(identity: identity, original: original, texture: texture,
+        prepared = Prepared(source: source, original: original, texture: texture,
                             planes: planes)
         return texture
     }
 
-    /// The frame whose planes the intermediate currently owns, if any.
-    var readyFrameIdentity: ObjectIdentifier? { prepared?.identity }
+    /// Whether the cached intermediate was built from `source` (a frame, or a
+    /// caller's base buffer), which the cache then holds.
+    func isPrepared(from source: AnyObject) -> Bool { prepared?.source === source }
+
+    /// The frame or buffer whose planes the intermediate currently owns, if any.
+    var readyFrameIdentity: ObjectIdentifier? { prepared.map { ObjectIdentifier($0.source) } }
 
     func encodeReconstruct(_ planes: FramePlanes, original: Bool, into texture: any MTLTexture,
                            pipeline: (any MTLComputePipelineState)? = nil) {
@@ -308,8 +315,10 @@ final class PreviewRenderer {
     }
 
     /// Presents an empty (fully transparent) drawable, so closing a photo does
-    /// not leave the previous frame on screen.
+    /// not leave the previous frame on screen, and lets go of the intermediate
+    /// and the frame it was built from.
     func clear(in layer: CAMetalLayer) {
+        prepared = nil
         guard layer.drawableSize.width > 0, layer.drawableSize.height > 0,
               let drawable = layer.nextDrawable(),
               let command = queue.makeCommandBuffer() else { return }
@@ -375,7 +384,7 @@ final class PreviewRenderer {
     /// The 0–8× ramp the diagnostic window shows in place of a photo.
     static func syntheticRamp(device: any MTLDevice, width: Int = 512, height: Int = 128) throws
         -> FramePlanes {
-        var base = [Float](repeating: 0, count: width * height * 4)
+        var base = [Float](repeating: 0, count: width * height * 3)
         var gain = [Float](repeating: 0, count: width * height)
         for y in 0..<height {
             for x in 0..<width {
@@ -383,11 +392,10 @@ final class PreviewRenderer {
                 let tint: SIMD3<Float> = y < height / 3
                     ? SIMD3(1, 0.65, 0.3)
                     : y < 2 * height / 3 ? SIMD3(repeating: 1) : SIMD3(0.2, 0.65, 1)
-                let index = (y * width + x) * 4
+                let index = (y * width + x) * 3
                 base[index] = min(1, tint.x * value)
                 base[index + 1] = min(1, tint.y * value)
                 base[index + 2] = min(1, tint.z * value)
-                base[index + 3] = 1
                 // 0…3 stops of gain reproduces the 0–8× ramp.
                 gain[y * width + x] = value
             }
@@ -396,9 +404,9 @@ final class PreviewRenderer {
                   length: base.count * MemoryLayout<Float>.size, options: .storageModeShared),
               let gainBuffer = device.makeBuffer(bytes: gain,
                   length: gain.count * MemoryLayout<Float>.size, options: .storageModeShared) else {
-            throw PreviewError.unavailable("无法分配 Metal 缓冲")
+            throw PreviewError.unavailable("Unable to allocate the synthetic ramp buffers")
         }
-        return FramePlanes(base: baseBuffer, baseRowBytes: width * 16,
+        return FramePlanes(base: baseBuffer, baseRowBytes: width * 12,
                            gain: gainBuffer, gainRowBytes: width * 4,
                            gainChannels: 1, width: width, height: height,
                            gainWidth: width, gainHeight: height,
@@ -408,7 +416,7 @@ final class PreviewRenderer {
     private static func requireTexture(device: any MTLDevice,
                                        descriptor: MTLTextureDescriptor) throws -> any MTLTexture {
         guard let texture = device.makeTexture(descriptor: descriptor) else {
-            throw PreviewError.unavailable("无法分配 Metal 纹理")
+            throw PreviewError.unavailable("Unable to allocate a Metal texture")
         }
         return texture
     }

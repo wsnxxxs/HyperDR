@@ -169,7 +169,7 @@ std::vector<std::uint8_t> make_base_jpeg(const FloatImage& image,
                                          bool clamp_srgb, bool full_chroma) {
   image.require_consistent("gain-map JPEG base");
   check_jpeg_dimensions(image.width, image.height);
-  if (image.channels != 3) throw std::invalid_argument("Ultra HDR base must be RGB");
+  if (image.channels != 3) throw std::invalid_argument("gain-map JPEG base must be RGB");
   std::vector<std::uint8_t> rgb(static_cast<std::size_t>(image.width) * image.height * 3);
   for (std::uint32_t y = 0; y < image.height; ++y) {
     check_cancelled();
@@ -198,7 +198,7 @@ std::vector<std::uint8_t> make_base_jpeg(const FloatImage& image,
 
 std::vector<std::uint8_t> make_gain_jpeg(const FloatImage& image, int quality) {
   if (image.channels != 1 && image.channels != 3) {
-    throw std::invalid_argument("Ultra HDR gain map must have one or three channels");
+    throw std::invalid_argument("gain-map JPEG recovery map must have one or three channels");
   }
   check_jpeg_dimensions(image.width, image.height);
   std::vector<std::uint8_t> pixels(image.pixels.size());
@@ -290,7 +290,7 @@ void verify_sdr_jpeg(const std::vector<std::uint8_t>& bytes) {
 std::vector<std::uint8_t> encode_gain_map_jpeg(const GainMapResult& images,
                                                const PhotoMetadata& metadata, int quality) {
   if (quality < 0 || quality > 100) throw std::invalid_argument("quality must be in [0,100]");
-  images.gain_map.require_consistent("Ultra HDR gain map");
+  images.gain_map.require_consistent("gain-map JPEG recovery map");
   validate_gain_map_metadata(images.metadata);
   const auto channels = gain_map_channel_count(images.metadata);
   images.base_linear.require_consistent("gain-map JPEG base");
@@ -302,7 +302,7 @@ std::vector<std::uint8_t> encode_gain_map_jpeg(const GainMapResult& images,
       images.base_linear.width / images.gain_map.width != images.base_linear.height / images.gain_map.height)
     throw std::invalid_argument("gain-map JPEG requires an integer image scale");
   if (images.gain_map.channels != channels) {
-    throw std::invalid_argument("Ultra HDR gain pixels and metadata must have matching channels");
+    throw std::invalid_argument("gain-map JPEG recovery pixels and metadata must have matching channels");
   }
   // A full-resolution gain map exists to put every HDR pixel back where it was
   // (an HDR source's own highlights). Subsampling the base's chroma would throw
@@ -381,8 +381,15 @@ GainMapJpegEncoding encode_gain_map_jpeg_measured(const GainMapResult& images,
 
 void verify_gain_map_jpeg(const std::vector<std::uint8_t>& bytes) {
   const auto parsed = parse_gain_map_jpeg(bytes);
-  if (parsed.has_hdrgm || parsed.has_container_directory)
-    throw std::runtime_error("gain-map JPEG contains XMP gain metadata");
+  // HyperDR writes ISO 21496-1 only. A file that also describes its gain map
+  // in Ultra HDR XMP (an Android 15 photo, for instance) is valid elsewhere
+  // but is not one of this program's exports.
+  if (parsed.has_hdrgm)
+    throw std::runtime_error("gain-map JPEG also carries Ultra HDR XMP (hdrgm) gain metadata; "
+                             "HyperDR exports carry ISO 21496-1 metadata only");
+  if (parsed.has_container_directory)
+    throw std::runtime_error("gain-map JPEG carries an XMP Container:Directory; "
+                             "HyperDR exports locate the gain map through MPF only");
   validate_gain_map_metadata(parsed.metadata, GainMapWriterProfile::iso_generic);
   bool icc = false;
   for (const auto& app : parsed.app_segments[0]) {

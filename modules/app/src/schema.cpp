@@ -15,7 +15,7 @@ namespace hyperdr {
 namespace {
 
 constexpr std::array<std::string_view, 8> kEncodingChoices{
-    "adaptive", "ultrahdr", "pq", "hlg", "avif-pq", "avif-hlg", "sdr-jpeg", "sdr-tiff"};
+    "adaptive", "iso-gainmap-jpeg", "pq", "hlg", "avif-pq", "avif-hlg", "sdr-jpeg", "sdr-tiff"};
 constexpr std::array<std::string_view, 6> kLutSpaceChoices{
     "srgb", "p3", "rec709", "hlg", "pq", "slog3-sgamut3cine"};
 constexpr std::array<std::string_view, 1> kLookChoices{"photographic"};
@@ -100,7 +100,7 @@ json::Value read_headroom(const ConvertOptions& o) {
 const std::array<Setting, 36>& table() {
   static const std::array<Setting, 36> kSettings{{
       {"encoding", "--encoding", SettingKind::kEnum, 0, 0, kEncodingChoices,
-       "adaptive|ultrahdr|pq|hlg|avif-pq|avif-hlg|sdr-jpeg|sdr-tiff", "Output representation", false,
+       "adaptive|iso-gainmap-jpeg|pq|hlg|avif-pq|avif-hlg|sdr-jpeg|sdr-tiff", "Output representation", false,
        true,
        [](std::string_view name) { return hdr_encoding_from_name(name).has_value(); },
        apply_encoding, read_encoding},
@@ -223,7 +223,7 @@ const std::array<Setting, 36>& table() {
          return json::Value::from_string(o.hevc_preset == HevcPreset::Medium ? "medium" : "slow");
        }},
       {"depth", "--depth", SettingKind::kInteger, 8, 10, {}, "<8|10>",
-       "HEIC base depth; Ultra HDR JPEG requires 8", false, true, nullptr,
+       "HEIC base depth; ISO gain-map JPEG requires 8", false, true, nullptr,
        [](ConvertOptions& o, const json::Value& v) {
          const auto depth = static_cast<int>(v.number());
          if (depth != 8 && depth != 10) throw std::invalid_argument("depth must be 8 or 10");

@@ -188,11 +188,16 @@ int verify_command(int argc, char** argv) {
       throw std::invalid_argument("--reconstruct is only available for gain-map HEIC");
     }
     const auto bytes = read_binary_file(input);
-    constexpr char iso[] = "urn:iso:std:iso:ts:21496:-1";
-    const bool has_iso = std::search(bytes.begin(), bytes.end(), iso, iso + sizeof(iso)) != bytes.end();
-    if (has_iso || is_ultrahdr_jpeg_file(input)) {
+    // Searched without the terminating NUL. An Ultra HDR v1 file describes its
+    // gain map only in `hdrgm` XMP, which this program no longer writes.
+    const auto contains = [&](std::string_view text) {
+      return std::search(bytes.begin(), bytes.end(), text.begin(), text.end()) != bytes.end();
+    };
+    if (contains("urn:iso:std:iso:ts:21496:-1")) {
       verify_gain_map_jpeg(bytes);
-      std::cout << "Ultra HDR JPEG/R: yes\n";
+      std::cout << "ISO gain-map JPEG: yes\n";
+    } else if (contains("http://ns.adobe.com/hdr-gain-map/1.0/")) {
+      throw std::invalid_argument("not an ISO gain-map JPEG: the gain map is described only in XMP");
     } else {
       verify_sdr_jpeg(bytes);
       std::cout << "SDR JPEG: yes\n";

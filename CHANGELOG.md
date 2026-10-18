@@ -5,6 +5,17 @@ semantic versioning; dates use ISO 8601.
 
 ## Unreleased
 
+- The gain-map JPEG encoding is now called `iso-gainmap-jpeg` and writes only
+  ISO 21496-1 metadata, without the Ultra HDR `hdrgm` XMP. Reports, schema
+  output and generated command lines use the new name. `ultrahdr` is still
+  accepted as input until the Web panel is retired; the other old encoding
+  aliases (`gain-map`, `ultra-hdr`, `jpegr`, `avif`, `sdr`, `tiff`) are
+  rejected. Reports no longer carry `gain_map.encoder` or
+  `gain_map.distribution_measured`. The resume fingerprint stores the
+  encoding name, so `--skip-existing` converts an existing gain-map JPEG
+  export once more after this change. `HyperDR verify` reports an ISO gain-map
+  JPEG as such and rejects a JPEG whose gain map is described only in XMP.
+
 - Exports can carry a presentation frame: a paper mat, an optional print shadow
   and a caption with the photograph's exposure, camera and lens. The frame is
   written identically into the SDR and HDR renditions, so it carries no gain:

@@ -56,7 +56,7 @@ std::string Engine::capabilities() const {
       .member("codecs", kCodecsAvailable).member("memoryBudgetBytes", config_.memory_budget_bytes)
       .member("heicTileWorkers", config_.heic_tile_workers)
       .raw_member("models", native_model_list_json()).begin_array("encodings");
-  for (auto encoding : {OutputEncoding::Adaptive, OutputEncoding::UltraHdr, OutputEncoding::Pq,
+  for (auto encoding : {OutputEncoding::Adaptive, OutputEncoding::IsoGainMapJpeg, OutputEncoding::Pq,
       OutputEncoding::Hlg, OutputEncoding::AvifPq, OutputEncoding::AvifHlg,
       OutputEncoding::SdrJpeg, OutputEncoding::SdrTiff}) {
     const bool hevc = encoding == OutputEncoding::Adaptive || encoding == OutputEncoding::Pq || encoding == OutputEncoding::Hlg;

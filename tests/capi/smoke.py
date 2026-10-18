@@ -14,6 +14,6 @@ with tempfile.TemporaryDirectory(prefix="hyperdr-smoke-") as directory:
         return struct.pack(">I",len(data))+kind+data+struct.pack(">I",zlib.crc32(kind+data))
     source.write_bytes(b"\x89PNG\r\n\x1a\n"+chunk(b"IHDR",struct.pack(">IIBBBBB",64,64,8,2,0,0,0))
         +chunk(b"IDAT",zlib.compress((b"\0"+b"\x60\x90\xb0"*64)*64))+chunk(b"IEND",b""))
-    for encoding in ("sdr-jpeg", "sdr-tiff", "ultrahdr", "avif-pq", "avif-hlg"):
+    for encoding in ("sdr-jpeg", "sdr-tiff", "iso-gainmap-jpeg", "avif-pq", "avif-hlg"):
         subprocess.run([cli,"convert",str(source),"--output",str(root/encoding),"--encoding",encoding],check=True)
     print("Five non-HEVC exports passed (including decoder verification)")

@@ -19,8 +19,8 @@ enum class OutputEncoding {
   // compatibility-first default: it renders as an ordinary photo everywhere and
   // as HDR where the gain map is understood.
   Adaptive,
-  // The same idea in JPEG: a backward-compatible SDR primary plus a gain map.
-  UltraHdr,
+  // The same idea in JPEG: an SDR primary plus an ISO 21496-1 gain map, no XMP.
+  IsoGainMapJpeg,
   // BT.2100 samples, 10-bit Rec.2020, in HEIF.
   Pq,
   Hlg,
@@ -38,7 +38,7 @@ using HdrEncoding = OutputEncoding;  // Source compatibility for existing client
 [[nodiscard]] constexpr bool is_sdr_encoding(OutputEncoding e) {
   return e == OutputEncoding::SdrJpeg || e == OutputEncoding::SdrTiff;
 }
-[[nodiscard]] constexpr bool is_gain_map_encoding(OutputEncoding e) { return e == OutputEncoding::Adaptive || e == OutputEncoding::UltraHdr; }
+[[nodiscard]] constexpr bool is_gain_map_encoding(OutputEncoding e) { return e == OutputEncoding::Adaptive || e == OutputEncoding::IsoGainMapJpeg; }
 
 // True for encodings whose sample values are BT.2100 rather than a Display-P3
 // SDR base plus a gain map.
@@ -61,8 +61,9 @@ using HdrEncoding = OutputEncoding;  // Source compatibility for existing client
 inline constexpr float kHlgHeadroomStops = 2.3F;
 
 [[nodiscard]] const char* hdr_encoding_name(HdrEncoding encoding);
-// Accepts the canonical name and the historical aliases. Returns nullopt for
-// anything else so the caller can report it.
+// Accepts the canonical name, and `ultrahdr` for `IsoGainMapJpeg` until the
+// Web reference panel is deleted (P2c). Returns nullopt for anything else so
+// the caller can report it.
 [[nodiscard]] std::optional<HdrEncoding> hdr_encoding_from_name(std::string_view name);
 // The extension a conversion writes for this encoding, including the dot.
 [[nodiscard]] const char* hdr_encoding_extension(HdrEncoding encoding);

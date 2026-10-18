@@ -530,8 +530,86 @@ class EngineContract(unittest.TestCase):
                     normalized = result(LIB.hyperdr_normalize_options, encoded(case["options"]))
                     settings = json.loads(normalized)
                     self.assertEqual(settings.pop("command")["adapter"], "panel-v1")
-                    self.assertEqual(settings, case["settings"])
-                    self.assertEqual(json.loads(result(LIB.hyperdr_command_line, normalized)), case["argv"])
+                    # The frozen Python output still says `ultrahdr`; the engine
+                    # writes the canonical name (U12).
+                    expected = dict(case["settings"])
+                    if expected["encoding"] == "ultrahdr":
+                        expected["encoding"] = "iso-gainmap-jpeg"
+                    argv = ["iso-gainmap-jpeg" if previous == "--encoding" and item == "ultrahdr" else item
+                            for previous, item in zip([None, *case["argv"]], case["argv"])]
+                    self.assertEqual(settings, expected)
+                    self.assertEqual(json.loads(result(LIB.hyperdr_command_line, normalized)), argv)
+
+    def test_ultrahdr_is_an_alias_until_p2c(self):
+        def normalize(options):
+            return result(LIB.hyperdr_normalize_options, encoded(options))
+        base = {"input": "/fixtures/source.jpg", "output": "/exports", "report": "/exports/report.json"}
+        canonical = normalize({**base, "encoding": "iso-gainmap-jpeg"})
+        self.assertEqual(normalize({**base, "encoding": "ultrahdr"}), canonical)
+        self.assertEqual(json.loads(canonical)["encoding"], "iso-gainmap-jpeg")
+        self.assertEqual(json.loads(canonical)["command"]["depth"], 8)
+        argv = json.loads(result(LIB.hyperdr_command_line, canonical))
+        self.assertEqual(argv[argv.index("--encoding") + 1], "iso-gainmap-jpeg")
+        self.assertNotIn(b"ultrahdr", result(LIB.hyperdr_schema_json))
+        for removed in ("gain-map", "ultra-hdr", "jpegr", "avif", "sdr", "tiff"):
+            with self.subTest(removed=removed):
+                with self.assertRaises(AssertionError):
+                    normalize({**base, "encoding": removed})
+                rejected = subprocess.run([CLI, "convert", "missing.png", "--output", "/nonexistent",
+                                           "--encoding", removed], capture_output=True)
+                self.assertNotEqual(rejected.returncode, 0)
+                self.assertIn(b"encoding", rejected.stderr)
+        if not self.capabilities["codecs"]:
+            return
+        with tempfile.TemporaryDirectory(prefix="hyperdr-encoding-alias-") as temporary:
+            root = Path(temporary)
+            source = root / "sample.png"
+            png(source, 64, 48)
+            outputs = {}
+            for name in ("iso-gainmap-jpeg", "ultrahdr"):
+                destination, report_path = root / name, root / (name + ".json")
+                request = {"encoding": name, "command": {
+                    "input": str(source), "output": str(destination), "overwrite": True}}
+                report, _ = self.compare_export(request,
+                    ["convert", str(source), "--output", str(destination), "--encoding", name,
+                     "--report", str(report_path)], destination / "sample-hyperdr.jpg", report_path)
+                self.assertEqual(report["settings"]["encoding"], "iso-gainmap-jpeg")
+                outputs[name] = (destination / "sample-hyperdr.jpg").read_bytes()
+            self.assertEqual(outputs["iso-gainmap-jpeg"], outputs["ultrahdr"])
+            verified = subprocess.run([CLI, "verify", str(root / "ultrahdr" / "sample-hyperdr.jpg")],
+                                      capture_output=True, text=True, check=True)
+            self.assertIn("ISO gain-map JPEG: yes", verified.stdout)
+            # A gain map described only in `hdrgm` XMP is not what this
+            # encoding writes, so verify refuses it instead of passing it as SDR.
+            sdr = root / "sdr"
+            subprocess.run([CLI, "convert", str(source), "--output", str(sdr), "--encoding", "sdr-jpeg"],
+                           capture_output=True, check=True)
+            plain = (sdr / "sample-hyperdr.jpg").read_bytes()
+            xmp = b"http://ns.adobe.com/xap/1.0/\0<x:xmpmeta xmlns:hdrgm=\"http://ns.adobe.com/hdr-gain-map/1.0/\"/>"
+            xmp_only = root / "xmp-only.jpg"
+            xmp_only.write_bytes(plain[:2] + b"\xff\xe1" + (len(xmp) + 2).to_bytes(2, "big") + xmp + plain[2:])
+            refused = subprocess.run([CLI, "verify", str(xmp_only)], capture_output=True, text=True)
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertIn("not an ISO gain-map JPEG", refused.stderr)
+            # ISO plus Ultra HDR XMP (as Android 15 writes) is named as such.
+            # The segment goes before MPF, so the gain image's MPF offset (relative
+            # to the MPF header) still holds; only the primary's size grows.
+            segment = b"\xff\xe1" + (len(xmp) + 2).to_bytes(2, "big") + xmp
+            both_bytes = bytearray(outputs["iso-gainmap-jpeg"][:2] + segment + outputs["iso-gainmap-jpeg"][2:])
+            header = both_bytes.index(b"MPF\0") + 4
+            order = "little" if both_bytes[header:header + 2] == b"II" else "big"
+            word = lambda at, n: int.from_bytes(both_bytes[at:at + n], order)
+            ifd = header + word(header + 4, 4)
+            for tag in range(word(ifd, 2)):
+                entry = ifd + 2 + tag * 12
+                if word(entry, 2) == 0xB002:
+                    size_at = header + word(entry + 8, 4) + 4
+                    both_bytes[size_at:size_at + 4] = (word(size_at, 4) + len(segment)).to_bytes(4, order)
+            both = root / "iso-and-xmp.jpg"
+            both.write_bytes(bytes(both_bytes))
+            refused = subprocess.run([CLI, "verify", str(both)], capture_output=True, text=True)
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertIn("also carries Ultra HDR XMP (hdrgm)", refused.stderr)
 
     def test_canonical_decimal_preview_and_exports_match_cli(self):
         if not self.capabilities["codecs"]:
@@ -561,7 +639,7 @@ class EngineContract(unittest.TestCase):
                     with self.subTest(wrapped=wrapped, operation="preview"):
                         self.assertEqual(self.packet(LIB.hyperdr_preview_render, session, request),
                                          target.read_bytes())
-                    for encoding, extension in (("sdr-jpeg", "jpg"), ("ultrahdr", "jpg"),
+                    for encoding, extension in (("sdr-jpeg", "jpg"), ("iso-gainmap-jpeg", "jpg"),
                                                  ("avif-pq", "avif")):
                         with self.subTest(wrapped=wrapped, encoding=encoding):
                             destination, report_path = root / encoding, root / "report.json"
@@ -584,16 +662,15 @@ class EngineContract(unittest.TestCase):
             root = Path(temporary)
             source, destination, report_path = root / "sample.png", root / "out", root / "report.json"
             png(source, 128, 96)
-            request = {"encoding": "ultrahdr", "command": {
+            request = {"encoding": "iso-gainmap-jpeg", "command": {
                 "input": str(source), "output": str(destination), "overwrite": True}}
             report, _ = self.compare_export(request,
-                ["convert", str(source), "--output", str(destination), "--encoding", "ultrahdr",
+                ["convert", str(source), "--output", str(destination), "--encoding", "iso-gainmap-jpeg",
                  "--report", str(report_path)], destination / "sample-hyperdr.jpg", report_path)
             golden = json.loads((Path(__file__).parent / "golden/iso_gain_map_jpeg.json").read_text())
             self.assertEqual(hashlib.sha256((destination / "sample-hyperdr.jpg").read_bytes()).hexdigest(), golden["sha256"])
             file = report["files"][0]
-            self.assertEqual(file["gain_map"]["encoder"], "hyperdr")
-            self.assertTrue(file["gain_map"]["distribution_measured"])
+            self.assertIn("percentiles_stops", file["gain_map"])
             inspection = json.loads(subprocess.check_output(
                 [CLI, "inspect", str(destination / "sample-hyperdr.jpg"), "--json"]))
             for key in ("primary_iso_segments", "gain_iso_segments", "mpf_segments"):
@@ -616,10 +693,10 @@ class EngineContract(unittest.TestCase):
             root = Path(temporary)
             source, destination, report_path = root / "sample.png", root / "out", root / "report.json"
             png(source, 128, 96)
-            request = {"encoding": "ultrahdr", "headroom": 0, "command": {
+            request = {"encoding": "iso-gainmap-jpeg", "headroom": 0, "command": {
                 "input": str(source), "output": str(destination), "overwrite": True}}
             reports = self.compare_export(request,
-                ["convert", str(source), "--output", str(destination), "--encoding", "ultrahdr",
+                ["convert", str(source), "--output", str(destination), "--encoding", "iso-gainmap-jpeg",
                  "--headroom", "0", "--report", str(report_path)],
                 destination / "sample-hyperdr.jpg", report_path)
             for report in reports:
@@ -655,7 +732,7 @@ class EngineContract(unittest.TestCase):
             error = ctypes.POINTER(Error)()
             output = ctypes.c_void_p()
             status = []
-            request = {"encoding": "ultrahdr", "command": {"input": str(source), "output": str(root / "out")}}
+            request = {"encoding": "iso-gainmap-jpeg", "command": {"input": str(source), "output": str(root / "out")}}
             def work():
                 status.append(LIB.hyperdr_convert(self.engine, encoded(request), callback, None, cancel,
                     ctypes.byref(output), ctypes.byref(error)))
@@ -690,7 +767,7 @@ class EngineContract(unittest.TestCase):
             root = Path(temporary)
             source = root / "wide.png"
             png(source, 65501, 2)
-            for encoding in ("sdr-jpeg", "ultrahdr"):
+            for encoding in ("sdr-jpeg", "iso-gainmap-jpeg"):
                 destination = root / encoding
                 request = {"encoding": encoding, "command": {
                     "input": str(source), "output": str(destination), "overwrite": True}}
@@ -721,12 +798,12 @@ class EngineContract(unittest.TestCase):
             post = {"--ai-brightness": .123456, "--ai-contrast": 1.123456,
                     "--ai-shadows": -.234567, "--ai-highlights": .345678,
                     "--ai-hdr-range": 2.123456, "--ai-expansion-start": .345678}
-            request = {"encoding": "ultrahdr", "gain_strength": .654321, "command": {
+            request = {"encoding": "iso-gainmap-jpeg", "gain_strength": .654321, "command": {
                 "input": str(source), "output": str(destination),
                 "model_id": "research-cnn-v1", "model_mode": True, "overwrite": True, **post}}
             flags = [item for key, value in post.items() for item in (key, str(value))]
             arguments = ["convert", str(source), "--output", str(destination),
-                         "--encoding", "ultrahdr", "--report", str(report_path),
+                         "--encoding", "iso-gainmap-jpeg", "--report", str(report_path),
                          "--gain-strength", ".654321", "--ai-model", "research-cnn-v1", *flags]
             report, cli_report = self.compare_export(request, arguments,
                 destination / "sample-hyperdr.jpg", report_path)
@@ -803,7 +880,7 @@ class EngineContract(unittest.TestCase):
                  "lutStrength": .543219, "_lut_path": str(lut)},
             ]
             for controls in cases:
-                for encoding, extension in (("sdr-jpeg", "jpg"), ("ultrahdr", "jpg"),
+                for encoding, extension in (("sdr-jpeg", "jpg"), ("iso-gainmap-jpeg", "jpg"),
                                              ("avif-pq", "avif")):
                     with self.subTest(controls=controls, encoding=encoding):
                         destination, report_path = root / encoding, root / "report.json"
@@ -839,7 +916,7 @@ class EngineContract(unittest.TestCase):
                 png(root / "caption.png", layout["caption"]["width"], layout["caption"]["height"])
                 frame_file = root / "frame.json"
                 frame_file.write_text(json.dumps(spec))
-                for encoding, extension in (("ultrahdr", "jpg"), ("sdr-tiff", "tif")):
+                for encoding, extension in (("iso-gainmap-jpeg", "jpg"), ("sdr-tiff", "tif")):
                     with self.subTest(ratio=width / 100, encoding=encoding):
                         output, report_path = root / encoding, root / "report.json"
                         request = json.loads(result(LIB.hyperdr_normalize_options, encoded({
@@ -1234,7 +1311,7 @@ class EngineContract(unittest.TestCase):
                         LIB.hyperdr_frame_free(ctypes.byref(frame))
                         self.assertFalse(frame.owner)
                 for encoding, extension in [("sdr-jpeg", "jpg"), ("sdr-tiff", "tif"),
-                        ("ultrahdr", "jpg"), ("avif-pq", "avif"), ("avif-hlg", "avif")]:
+                        ("iso-gainmap-jpeg", "jpg"), ("avif-pq", "avif"), ("avif-hlg", "avif")]:
                     destination = root / encoding
                     target = destination / ("sample-hyperdr." + extension)
                     request = {"encoding": encoding, "command": {"input": str(source), "output": str(destination), "overwrite": True}}

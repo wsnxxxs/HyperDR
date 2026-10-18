@@ -96,7 +96,7 @@ public struct ChoiceSpec: Sendable, Hashable {
 
 public enum EditChoices {
     public static let all: [ChoiceSpec] = [
-        ChoiceSpec("encoding", ["adaptive", "ultrahdr", "pq", "hlg", "avif-pq", "avif-hlg",
+        ChoiceSpec("encoding", ["adaptive", "iso-gainmap-jpeg", "pq", "hlg", "avif-pq", "avif-hlg",
                                 "sdr-jpeg", "sdr-tiff"], default: "adaptive"),
         ChoiceSpec("colorGamut", ["srgb", "p3", "rec2020"], default: "srgb"),
         ChoiceSpec("outputGamut", ["auto", "srgb", "p3"], default: "auto"),

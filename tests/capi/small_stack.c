@@ -237,7 +237,7 @@ static int run_convert(hyperdr_engine* engine, const char* arw, const char* outp
   char request[PATH_MAX * 2];
   const int length = snprintf(request, sizeof(request),
       "{\"encoding\":\"%s\",\"command\":{\"input\":\"%s\","
-      "\"output\":\"%s\",\"overwrite\":true}}", jpeg ? "ultrahdr" : "avif-pq", arw, output);
+      "\"output\":\"%s\",\"overwrite\":true}}", jpeg ? "iso-gainmap-jpeg" : "avif-pq", arw, output);
   if (length <= 0 || (size_t)length >= sizeof(request)) return 1;
   char* report = NULL;
   hyperdr_error* error = NULL;

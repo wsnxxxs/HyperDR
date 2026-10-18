@@ -100,7 +100,7 @@
         "encoding": {
           "enum": [
             "adaptive",
-            "ultrahdr",
+            "iso-gainmap-jpeg",
             "pq",
             "hlg",
             "avif-pq",
@@ -749,22 +749,11 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "encoder",
-        "distribution_measured",
         "gamma",
         "min_stops",
         "max_stops"
       ],
       "properties": {
-        "encoder": {
-          "enum": [
-            "hyperdr",
-            "libultrahdr-api3"
-          ]
-        },
-        "distribution_measured": {
-          "type": "boolean"
-        },
         "adaptive_chroma_loss": {
           "type": "boolean"
         },

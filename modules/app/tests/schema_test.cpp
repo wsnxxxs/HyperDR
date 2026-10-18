@@ -85,12 +85,16 @@ void test_parsing_enforces_ranges_and_types() {
   require(throws([&] { hyperdr::parse_setting_text(*contrast, "abc"); }),
           "non-numeric text was accepted");
 
-  // Aliases earlier releases accepted stay valid without being advertised as
-  // canonical choices, so stored presets and scripts keep working.
+  // `ultrahdr` is accepted (for the Web reference panel, until P2c) without
+  // being a documented choice; the older aliases are gone.
   const auto* encoding = hyperdr::find_setting_by_key("encoding");
-  for (const char* alias : {"gain-map", "ultra-hdr", "jpegr", "avif"}) {
-    require(hyperdr::parse_setting_text(*encoding, alias).string() == alias,
-            std::string("the legacy encoding alias ") + alias + " was rejected");
+  require(hyperdr::parse_setting_text(*encoding, "iso-gainmap-jpeg").string() == "iso-gainmap-jpeg",
+          "the canonical gain-map JPEG name was rejected");
+  require(hyperdr::parse_setting_text(*encoding, "ultrahdr").string() == "ultrahdr",
+          "the ultrahdr alias was rejected");
+  for (const char* removed : {"gain-map", "ultra-hdr", "jpegr", "avif", "sdr", "tiff"}) {
+    require(throws([&] { hyperdr::parse_setting_text(*encoding, removed); }),
+            std::string("the removed encoding alias ") + removed + " was accepted");
   }
   require(throws([&] { hyperdr::parse_setting_text(*encoding, "webp"); }),
           "an unknown encoding was accepted");

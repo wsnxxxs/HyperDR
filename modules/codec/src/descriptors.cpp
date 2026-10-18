@@ -10,7 +10,7 @@ const char* hdr_encoding_name(HdrEncoding encoding) {
     case HdrEncoding::SdrJpeg: return "sdr-jpeg";
     case HdrEncoding::SdrTiff: return "sdr-tiff";
     case HdrEncoding::Adaptive: return "adaptive";
-    case HdrEncoding::UltraHdr: return "ultrahdr";
+    case HdrEncoding::IsoGainMapJpeg: return "iso-gainmap-jpeg";
     case HdrEncoding::Pq: return "pq";
     case HdrEncoding::Hlg: return "hlg";
     case HdrEncoding::AvifPq: return "avif-pq";
@@ -20,24 +20,22 @@ const char* hdr_encoding_name(HdrEncoding encoding) {
 }
 
 std::optional<HdrEncoding> hdr_encoding_from_name(std::string_view name) {
-  // The aliases are the names earlier versions accepted. Keeping them costs one
-  // line each and avoids breaking scripts and stored presets.
-  if (name == "sdr-jpeg" || name == "sdr") return HdrEncoding::SdrJpeg;
-  if (name == "sdr-tiff" || name == "tiff") return HdrEncoding::SdrTiff;
-  if (name == "adaptive" || name == "gain-map") return HdrEncoding::Adaptive;
-  if (name == "ultrahdr" || name == "ultra-hdr" || name == "jpegr") {
-    return HdrEncoding::UltraHdr;
-  }
+  if (name == "sdr-jpeg") return HdrEncoding::SdrJpeg;
+  if (name == "sdr-tiff") return HdrEncoding::SdrTiff;
+  if (name == "adaptive") return HdrEncoding::Adaptive;
+  // `ultrahdr` is the name the Web reference panel still sends. It is accepted
+  // only until that panel is deleted (P2c); nothing ever writes it.
+  if (name == "iso-gainmap-jpeg" || name == "ultrahdr") return HdrEncoding::IsoGainMapJpeg;
   if (name == "pq") return HdrEncoding::Pq;
   if (name == "hlg") return HdrEncoding::Hlg;
-  if (name == "avif-pq" || name == "avif") return HdrEncoding::AvifPq;
+  if (name == "avif-pq") return HdrEncoding::AvifPq;
   if (name == "avif-hlg") return HdrEncoding::AvifHlg;
   return std::nullopt;
 }
 
 const char* hdr_encoding_extension(HdrEncoding encoding) {
   if (encoding == HdrEncoding::SdrTiff) return ".tif";
-  if (encoding == HdrEncoding::UltraHdr || encoding == HdrEncoding::SdrJpeg) return ".jpg";
+  if (encoding == HdrEncoding::IsoGainMapJpeg || encoding == HdrEncoding::SdrJpeg) return ".jpg";
   return is_avif_encoding(encoding) ? ".avif" : ".heic";
 }
 

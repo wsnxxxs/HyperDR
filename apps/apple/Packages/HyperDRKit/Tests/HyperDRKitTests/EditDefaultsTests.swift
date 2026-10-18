@@ -49,17 +49,33 @@ private func withoutAdapterSupplied(_ settings: [String: JSONValue]) -> [String:
     settings.filter { !adapterSupplied.contains($0.key) }
 }
 
+/// The fixture stays frozen with the Web's encoding names; E4r renamed
+/// `ultrahdr` to `iso-gainmap-jpeg` (the engine accepts the old name only
+/// until P2c), so the comparison translates it.
+private func renamed(_ encoding: String) -> String {
+    encoding == "ultrahdr" ? "iso-gainmap-jpeg" : encoding
+}
+
+private func renamed(_ settings: [String: JSONValue]) -> [String: JSONValue] {
+    var settings = settings
+    if case .string(let encoding)? = settings["encoding"] { settings["encoding"] = .string(renamed(encoding)) }
+    return settings
+}
+
 @Suite struct EditDefaultsTests {
     @Test func matchesFrozenWebInitialReference() throws {
         let reference = try loadReference()
         #expect(reference.schema == 1)
         #expect(reference.encodings.count == 8)
+        for encoding in reference.encodings {
+            #expect(EditDefaults.maxRange(for: renamed(encoding.id)) == encoding.maxRange, "\(encoding.id)")
+        }
         #expect(reference.domains.count == 5)
         #expect(reference.initial.count == 80)
         for entry in reference.initial {
-            let actual = EditDefaults.initial(encoding: entry.encoding,
+            let actual = EditDefaults.initial(encoding: renamed(entry.encoding),
                 sourceDomain: entry.sourceDomain, unadjusted: entry.unadjusted)
-            #expect(actual.values == withoutAdapterSupplied(entry.settings),
+            #expect(actual.values == withoutAdapterSupplied(renamed(entry.settings)),
                 "initial mismatch: \(entry.encoding) \(entry.sourceDomain ?? "nil") unadjusted=\(entry.unadjusted != nil)")
         }
     }
@@ -68,8 +84,8 @@ private func withoutAdapterSupplied(_ settings: [String: JSONValue]) -> [String:
         let reference = try loadReference()
         for entry in reference.reference {
             let workflow = EditOptions(entry.workflow)
-            let actual = EditDefaults.reference(encoding: entry.encoding, workflow: workflow)
-            #expect(actual.values == withoutAdapterSupplied(entry.settings), "reference mismatch: \(entry.encoding)")
+            let actual = EditDefaults.reference(encoding: renamed(entry.encoding), workflow: workflow)
+            #expect(actual.values == withoutAdapterSupplied(renamed(entry.settings)), "reference mismatch: \(entry.encoding)")
         }
         #expect(reference.reference.count == 8)
         for entry in reference.previewEdge {

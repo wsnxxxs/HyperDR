@@ -20,32 +20,10 @@ public enum EditDefaults {
         Encoding(id: "avif-hlg", maxRange: 2.3),
     ]
 
-    private static let controlDefaults: [String: JSONValue] = [
-        "lutStrength": .number(1),
-        "brightness": .number(0.6),
-        "hdrStrength": .number(0.4),
-        "hdrRange": .number(2.5),
-        "modelStrength": .number(1),
-        "aiBrightness": .number(0),
-        "aiContrast": .number(1),
-        "aiShadows": .number(0),
-        "aiHighlights": .number(0),
-        "aiHdrRange": .number(-1),
-        "aiExpansionStart": .number(-1),
-        "expansionStart": .number(0.25),
-        "areaCoverage": .number(1),
-        "highlightRecovery": .string("blend"),
-        "contrast": .number(1),
-        "vibrance": .number(0),
-        "quality": .number(90),
-    ]
+    private static let controlDefaults: [String: JSONValue] =
+        Dictionary(uniqueKeysWithValues: EditControls.all.map { ($0.key, $0.defaultSetting) })
 
-    static let controlKeys = [
-        "lutStrength", "brightness", "hdrStrength", "hdrRange", "modelStrength",
-        "aiBrightness", "aiContrast", "aiShadows", "aiHighlights", "aiHdrRange",
-        "aiExpansionStart", "expansionStart", "areaCoverage", "highlightRecovery",
-        "contrast", "vibrance", "quality",
-    ]
+    static let controlKeys = EditControls.all.map(\.key)
 
     private static let workflowOverrides = [
         "colorGamut", "outputGamut", "clampSrgb", "rawProfile", "rawLook", "lensCorrection",

@@ -26,7 +26,6 @@ private struct WebReference: Decodable {
     }
     let schema: Int
     let encodings: [Encoding]
-    let controls: [String: JSONValue]
     let imageAdjustmentKeys: [String]
     let domains: [String]
     let unadjusted: [String: Double]

@@ -3,6 +3,9 @@
 hyperdr_add_module(container
   SOURCES
     src/exif.cpp
+    src/hvcc.cpp
+    src/annexb.cpp
+    src/heif_writer.cpp
     src/heif_tmap.cpp
     src/heif_grid.cpp
     src/inspect.cpp

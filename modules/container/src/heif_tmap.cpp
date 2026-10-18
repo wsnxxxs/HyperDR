@@ -1,6 +1,8 @@
 #include "hyperdr/container/heif_tmap.hpp"
 
 #include "internal/items.hpp"
+#include "internal/tmap_write.hpp"
+#include "internal/write_limits.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -57,8 +59,9 @@ Bytes rebuild_iinf(std::span<const std::uint8_t> original, std::uint16_t gain_id
 struct Extent { std::uint64_t offset{}; std::uint64_t length{}; };
 struct Location { std::uint32_t id{}; std::uint16_t construction_method{}; std::uint16_t data_ref{}; std::uint64_t base{}; std::vector<Extent> extents; };
 
-constexpr std::uint64_t kMaxIlocLocations = 4096;
-constexpr std::uint64_t kMaxIlocExtents = 4096;
+// Every location may hold one extent; both follow the writers' item budget.
+constexpr std::uint64_t kMaxIlocLocations = container::kHeifMaxItems;
+constexpr std::uint64_t kMaxIlocExtents = container::kHeifMaxItems;
 
 std::vector<Location> parse_iloc(std::span<const std::uint8_t> box) {
   const auto version = fullbox_version(box);
@@ -159,12 +162,6 @@ Bytes rebuild_iloc(std::span<const std::uint8_t> original, std::uint32_t tmap_id
 struct Association { bool essential{}; std::uint16_t index{}; };
 struct IpmaEntry { std::uint32_t id{}; std::vector<Association> associations; };
 
-// ISO/IEC 21496-1 gain maps carried in HEIF: the gain-map image item is an
-// auxiliary image whose AuxiliaryTypeProperty carries this URN. macOS ImageIO
-// exposes no ISO gain map for a file that omits it, which is what gate T2
-// measured on 2026-08-09 (HyperDR_Model/reports/macos-t2-container-finding.md).
-constexpr std::string_view kIsoGainMapAuxType = "urn:iso:std:iso:ts:21496:-1";
-
 std::vector<IpmaEntry> parse_ipma(std::span<const std::uint8_t> ipma) {
   const auto version = fullbox_version(ipma);
   const auto flags = (static_cast<std::uint32_t>(ipma[9]) << 16) | (static_cast<std::uint32_t>(ipma[10]) << 8) | ipma[11];
@@ -216,13 +213,6 @@ Bytes serialize_ipma(std::span<const std::uint8_t> original, const std::vector<I
     }
   }
   return make_box("ipma", payload);
-}
-
-Bytes make_auxC(std::string_view aux_type) {
-  Bytes payload{0, 0, 0, 0};
-  payload.insert(payload.end(), aux_type.begin(), aux_type.end());
-  payload.push_back(0);
-  return make_box("auxC", payload);
 }
 
 Bytes rebuild_iprp(std::span<const std::uint8_t> original, std::uint32_t primary_id,
@@ -280,7 +270,7 @@ Bytes rebuild_iprp(std::span<const std::uint8_t> original, std::uint32_t primary
     if (b.type == "ipco" && !already_auxiliary) {
       Bytes ipco_payload(original.begin() + static_cast<std::ptrdiff_t>(b.offset + b.header),
                          original.begin() + static_cast<std::ptrdiff_t>(b.offset + b.size));
-      const auto auxc = make_auxC(kIsoGainMapAuxType);
+      const auto auxc = container::iso_gain_map_aux_property();
       ipco_payload.insert(ipco_payload.end(), auxc.begin(), auxc.end());
       const auto rebuilt = make_box("ipco", ipco_payload);
       payload.insert(payload.end(), rebuilt.begin(), rebuilt.end());
@@ -298,19 +288,12 @@ Bytes rebuild_iref(std::optional<std::span<const std::uint8_t>> original,
   Bytes payload;
   if (original) { version = static_cast<std::uint8_t>(fullbox_version(*original)); payload.assign(original->begin() + 8, original->end()); }
   else payload = {0, 0, 0, 0};
-  Bytes ref;
-  if (version == 0) { put16(ref, tmap_id); put16(ref, 2); put16(ref, base_id); put16(ref, gain_id); }
-  else { put32(ref, tmap_id); put16(ref, 2); put32(ref, base_id); put32(ref, gain_id); }
-  const auto dimg = make_box("dimg", ref);
-  payload.insert(payload.end(), dimg.begin(), dimg.end());
-  // The auxiliary image states which master image it belongs to. Without it the
-  // auxC property alone leaves the gain map unattached, and a reader looking for
-  // an auxiliary image of the base finds none.
-  Bytes aux;
-  if (version == 0) { put16(aux, gain_id); put16(aux, 1); put16(aux, base_id); }
-  else { put32(aux, gain_id); put16(aux, 1); put32(aux, base_id); }
-  const auto auxl = make_box("auxl", aux);
-  payload.insert(payload.end(), auxl.begin(), auxl.end());
+  const std::array<std::uint32_t,2> derived{base_id,gain_id};
+  const auto dimg=container::tmap_reference("dimg",tmap_id,derived,version!=0);
+  payload.insert(payload.end(),dimg.begin(),dimg.end());
+  const std::array<std::uint32_t,1> master{base_id};
+  const auto auxl=container::tmap_reference("auxl",gain_id,master,version!=0);
+  payload.insert(payload.end(),auxl.begin(),auxl.end());
   return make_box("iref", payload);
 }
 
@@ -319,9 +302,7 @@ Bytes rebuild_grpl(std::optional<std::span<const std::uint8_t>> original,
                    std::uint32_t primary_id) {
   Bytes payload;
   if (original) payload.assign(original->begin() + 8, original->end());
-  Bytes altr{0, 0, 0, 0};
-  put32(altr, group_id); put32(altr, 2); put32(altr, tmap_id); put32(altr, primary_id);
-  const auto group = make_box("altr", altr);
+  const auto group = container::tmap_alternative_group(group_id,tmap_id,primary_id);
   payload.insert(payload.end(), group.begin(), group.end());
   return make_box("grpl", payload);
 }

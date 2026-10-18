@@ -102,8 +102,10 @@ struct FrameOverlay {
 // is what the resume fingerprint and the report record.
 [[nodiscard]] std::string frame_spec_json(const FrameSpec& spec);
 
-// Deterministic integer layout. Every mat width, and so the photo origin, is
-// an even number of pixels so 4:2:0 chroma never straddles the print's edge.
+// Deterministic integer layout. The photo's origin (left and top mats) and the
+// canvas width and height are even, so 4:2:0 chroma never straddles the
+// print's top-left edge; the right mat and the band below the photo absorb
+// the remainder.
 [[nodiscard]] FrameLayout layout_frame(const FrameSpec& spec, std::uint32_t photo_width,
                                        std::uint32_t photo_height);
 [[nodiscard]] std::string frame_layout_json(const FrameLayout& layout);

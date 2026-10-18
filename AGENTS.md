@@ -65,7 +65,7 @@ pixel from the spec alone into both renditions, so every gain-map writer stores
 zero gain there (`frame_gain_test` checks all five packaging paths). Do not
 draw anything into the frame that depends on the photo's HDR pixels.
 
-- Engine: `modules/image/src/frame.cpp` (spec, even-pixel layout, compositing);
+- Engine: `modules/image/src/frame.cpp` (spec, layout with the photo at an even origin on an even canvas, compositing);
   export places it in `batch.cpp` after grading, before packaging. Model and
   external gain maps are then repackaged as an authored pair. CLI `--frame`,
   request `command.frame`, `hyperdr_frame_layout` / `frame-layout`.

@@ -348,6 +348,10 @@ FrameLayout layout_frame(const FrameSpec& requested, std::uint32_t photo_width, 
       width += added;
     }
   }
+  // An even canvas: the right mat and the band below the photo take the
+  // remainder, so 4:2:0 needs no padding and a constant gain map can shrink.
+  width += width % 2;
+  height += height % 2;
 
   const double photo_area = static_cast<double>(photo_width) * photo_height;
   if (static_cast<double>(width) * static_cast<double>(height) > kMaxCanvasToPhotoArea * photo_area + 1.0e6)

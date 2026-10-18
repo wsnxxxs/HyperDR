@@ -39,7 +39,7 @@
       "width": 1000,
       "height": 4000,
       "noCaption": false,
-      "expected": "{\"schema\":\"hyperdr.frame-layout/v1\",\"width\":2393,\"height\":4254,\"photo\":{\"x\":696,\"y\":54,\"width\":1000,\"height\":4000},\"caption\":{\"x\":0,\"y\":4054,\"width\":2393,\"height\":200},\"referenceEdge\":1000}\n"
+      "expected": "{\"schema\":\"hyperdr.frame-layout/v1\",\"width\":2394,\"height\":4254,\"photo\":{\"x\":696,\"y\":54,\"width\":1000,\"height\":4000},\"caption\":{\"x\":0,\"y\":4054,\"width\":2394,\"height\":200},\"referenceEdge\":1000}\n"
     },
     {
       "width": 4000,
@@ -69,7 +69,7 @@
       "width": 1000,
       "height": 8000,
       "noCaption": false,
-      "expected": "{\"schema\":\"hyperdr.frame-layout/v1\",\"width\":4643,\"height\":8254,\"photo\":{\"x\":1822,\"y\":54,\"width\":1000,\"height\":8000},\"caption\":{\"x\":0,\"y\":8054,\"width\":4643,\"height\":200},\"referenceEdge\":1000}\n"
+      "expected": "{\"schema\":\"hyperdr.frame-layout/v1\",\"width\":4644,\"height\":8254,\"photo\":{\"x\":1822,\"y\":54,\"width\":1000,\"height\":8000},\"caption\":{\"x\":0,\"y\":8054,\"width\":4644,\"height\":200},\"referenceEdge\":1000}\n"
     },
     {
       "width": 1000,
@@ -81,7 +81,7 @@
       "width": 6000,
       "height": 4000,
       "noCaption": false,
-      "expected": "{\"schema\":\"hyperdr.frame-layout/v1\",\"width\":6440,\"height\":11449,\"photo\":{\"x\":220,\"y\":2920,\"width\":6000,\"height\":4000},\"caption\":{\"x\":0,\"y\":6920,\"width\":6440,\"height\":4529},\"referenceEdge\":4000}\n"
+      "expected": "{\"schema\":\"hyperdr.frame-layout/v1\",\"width\":6440,\"height\":11450,\"photo\":{\"x\":220,\"y\":2920,\"width\":6000,\"height\":4000},\"caption\":{\"x\":0,\"y\":6920,\"width\":6440,\"height\":4530},\"referenceEdge\":4000}\n"
     },
     {
       "width": 4000,

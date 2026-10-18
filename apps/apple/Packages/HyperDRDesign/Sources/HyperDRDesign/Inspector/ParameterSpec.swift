@@ -76,8 +76,12 @@ public struct ParameterSpec: Sendable {
     /// The text a value is edited as: the displayed number without its unit
     /// or grouping, to the step's precision ("0.30", "25").
     public func editableText(_ value: Double) -> String {
+        // The fewest decimals that write a step exactly: .25 needs two, .1 one.
         let scaled = step * format.scale
-        let digits = max(0, -Int((log10(scaled) + 1e-9).rounded(.down)))
+        let digits = (0...6).first { d in
+            let shifted = scaled * pow(10, Double(d))
+            return abs(shifted - shifted.rounded()) < 1e-9 * max(1, shifted)
+        } ?? 6
         return String(format: "%.\(digits)f", value * format.scale)
     }
 

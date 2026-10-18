@@ -167,6 +167,10 @@ private struct ParameterTrack: View {
 
     @State private var hovered = false
     @State private var grab: CGFloat?
+    @State private var bracket = EditingBracket()
+    /// True while the pointer gesture is live; the system resets it to false
+    /// when the gesture is cancelled as well as when it ends.
+    @GestureState private var live = false
     @FocusState private var focused: Bool
     @Environment(\.isEnabled) private var isEnabled
 
@@ -224,6 +228,9 @@ private struct ParameterTrack: View {
             step((up ? 1 : -1) * (press.modifiers.contains(.shift) ? 10 : 1))
             return .handled
         }
+        .onChange(of: live) { if !live { finishDrag() } }
+        .onChange(of: isEnabled) { if !isEnabled { finishDrag() } }
+        .onDisappear { finishDrag() }
         .contextMenu {
             Button { reset() } label: { Text("design.slider.reset", bundle: .module) }
                 .disabled(value == spec.defaultValue)
@@ -257,18 +264,21 @@ private struct ParameterTrack: View {
                     // Elsewhere: the thumb jumps to the pointer.
                     let offset = drag.startLocation.x - thumbX
                     grab = abs(offset) <= Self.thumb / 2 + 2 ? offset : 0
-                    onEditingChanged(true)
+                    bracket.begin(onEditingChanged)
                 }
                 let fraction = (drag.location.x - (grab ?? 0) - Self.thumb / 2) / travel
                 let new = spec.value(atFraction: fraction)
                 if new != value { value = new }
             }
-            .onEnded { _ in
-                // Nothing began (a secondary click): nothing to end.
-                guard grab != nil else { return }
-                grab = nil
-                onEditingChanged(false)
-            }
+            .updating($live) { _, state, _ in state = true }
+            .onEnded { _ in finishDrag() }
+    }
+
+    /// Ends the drag if one is open: normal end, cancelled gesture, control
+    /// removed or disabled. Idempotent.
+    private func finishDrag() {
+        grab = nil
+        bracket.finish(onEditingChanged)
     }
 
     private func step(_ steps: Int) { set(spec.stepped(value, by: steps)) }

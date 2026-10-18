@@ -338,7 +338,7 @@ std::vector<std::uint8_t> encode_for(const PhotoRenditions& photo, const GainMap
     case HdrEncoding::Adaptive:
       return encode_adaptive_heic(images, metadata, options.quality, options.depth,
                                   options.hevc_preset);
-    case HdrEncoding::UltraHdr: {
+    case HdrEncoding::IsoGainMapJpeg: {
       auto encoded = encode_gain_map_jpeg_measured(images, metadata, options.quality,
           result.frame ? &*result.frame : nullptr);
       result.stats = encoded.stats;
@@ -364,7 +364,7 @@ void verify_encoded(const std::vector<std::uint8_t>& bytes,
                     const ConvertOptions& options) {
   if (options.encoding == HdrEncoding::SdrTiff) verify_sdr_tiff(bytes);
   else if (options.encoding == HdrEncoding::SdrJpeg) verify_sdr_jpeg(bytes);
-  else if (options.encoding == HdrEncoding::UltraHdr) verify_gain_map_jpeg(bytes);
+  else if (options.encoding == HdrEncoding::IsoGainMapJpeg) verify_gain_map_jpeg(bytes);
   else if (is_avif_encoding(options.encoding)) verify_avif_decodable(bytes);
   else verify_heic_decodable(bytes, options.encoding);
 }
@@ -376,7 +376,7 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
   try {
     const auto decoded = Clock::now();
     if (options.decode_intent == DecodeIntent::Export &&
-        (options.encoding == OutputEncoding::UltraHdr || options.encoding == OutputEncoding::SdrJpeg)) {
+        (options.encoding == OutputEncoding::IsoGainMapJpeg || options.encoding == OutputEncoding::SdrJpeg)) {
       const auto& dimensions = staged.image.decode;
       if (dimensions.target_width > 65500 || dimensions.target_height > 65500)
         throw ExportDimensionLimit(dimensions.target_width, dimensions.target_height);
@@ -451,12 +451,12 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     if (is_sdr_encoding(options.encoding) && resolved_sdr_gamut(options) == ColorGamut::kSrgb)
       fit_sdr_to_srgb(photo.sdr);
     const bool explicit_gain = is_gain_map_encoding(options.encoding);
-    if (predicted_gain && options.encoding == OutputEncoding::UltraHdr)
+    if (predicted_gain && options.encoding == OutputEncoding::IsoGainMapJpeg)
       adopt_as_authored(photo, gain.metadata);
     if (explicit_gain) {
-      if (!predicted_gain || result.frame || options.encoding == OutputEncoding::UltraHdr) {
+      if (!predicted_gain || result.frame || options.encoding == OutputEncoding::IsoGainMapJpeg) {
         gain = gain_map_from_renditions(std::move(photo),
-            options.encoding == OutputEncoding::UltraHdr ? GainMapWriterProfile::iso_generic
+            options.encoding == OutputEncoding::IsoGainMapJpeg ? GainMapWriterProfile::iso_generic
                                                         : GainMapWriterProfile::apple_strict);
       }
       else gain.base_linear = std::move(photo.sdr);

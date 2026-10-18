@@ -20,7 +20,7 @@ if(HYPERDR_WITH_CODECS)
     src/tiff_codec.cpp
     src/raw_decoder.cpp
     src/ultrahdr_decoder.cpp
-    src/ultrahdr_encoder.cpp
+    src/gain_map_jpeg_encoder.cpp
     src/hevc/probe.cpp
     src/hevc/quality_map.cpp
     src/hevc/vt_common.cpp

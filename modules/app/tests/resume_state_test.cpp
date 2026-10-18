@@ -57,7 +57,7 @@ void check_render_options_change_the_fingerprint() {
   require(changed([](auto& o) { o.gain.auto_headroom = false; }), "auto headroom");
   require(changed([](auto& o) { o.quality = 80; }), "quality");
   require(changed([](auto& o) { o.depth = 10; }), "depth");
-  require(changed([](auto& o) { o.encoding = hyperdr::HdrEncoding::UltraHdr; }), "encoding");
+  require(changed([](auto& o) { o.encoding = hyperdr::HdrEncoding::IsoGainMapJpeg; }), "encoding");
   require(changed([](auto& o) { o.preview_max_edge = 1600; }), "preview bound");
   require(changed([](auto& o) {
             o.raw.highlight_recovery = hyperdr::HighlightRecovery::Reconstruct;

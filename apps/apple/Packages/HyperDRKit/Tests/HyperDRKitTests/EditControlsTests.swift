@@ -39,7 +39,7 @@ private let choiceMapping = [
     "encoding": "encoding", "colorGamut": "color_gamut", "outputGamut": "output_gamut",
     "hevcPreset": "hevc_preset", "lutInput": "lut_input", "lutOutput": "lut_output",
 ]
-private let encodings = ["sdr-jpeg", "sdr-tiff", "adaptive", "pq", "hlg", "ultrahdr", "avif-pq", "avif-hlg"]
+private let encodings = ["sdr-jpeg", "sdr-tiff", "adaptive", "pq", "hlg", "iso-gainmap-jpeg", "avif-pq", "avif-hlg"]
 
 private let photo = PhotoSession(id: SessionID(rawValue: String(repeating: "c", count: 32)),
     sourceURL: URL(fileURLWithPath: "/tmp/defaults.jpg"), displayName: "defaults.jpg",

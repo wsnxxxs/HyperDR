@@ -78,9 +78,7 @@ void write_stats(json::Writer& writer, const RenderStats& s) {
       .member("wide_gamut_luminance_threshold", s.wide_gamut_luminance_threshold)
       .end_object();
   writer.begin_object("gain_map")
-      .member("encoder", "hyperdr")
       .member("adaptive_chroma_loss", s.adaptive_chroma_loss)
-      .member("distribution_measured", true)
       .member("gamma", s.gain_gamma)
       .member("min_stops", s.gain_min_stops)
       .member("max_stops", s.gain_max_stops);

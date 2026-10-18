@@ -332,9 +332,9 @@ PreviewPixels PreviewSession::render_pixels(ConvertOptions options, PreviewRegio
     if (is_sdr_encoding(options.encoding) &&
         resolved_sdr_gamut(options) == ColorGamut::kSrgb) fit_sdr_to_srgb(photo.sdr);
     if(options.encoding == OutputEncoding::Adaptive ||
-        (options.encoding == OutputEncoding::UltraHdr && photo.hdr_is_source)) {
+        (options.encoding == OutputEncoding::IsoGainMapJpeg && photo.hdr_is_source)) {
       result=gain_map_from_renditions(std::move(photo),
-          options.encoding == OutputEncoding::UltraHdr ? GainMapWriterProfile::iso_generic
+          options.encoding == OutputEncoding::IsoGainMapJpeg ? GainMapWriterProfile::iso_generic
                                                       : GainMapWriterProfile::apple_strict);
     }
     else {

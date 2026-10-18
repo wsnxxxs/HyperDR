@@ -3,7 +3,8 @@
 `HyperDR` is a C++20 command-line converter for ARW, DNG, JPEG, PNG, HEIC,
 HEIF/HIF, and AVIF images, now targeting macOS 26 on Apple Silicon. It exports graded SDR JPEGs and six real HDR
 representations: Apple-compatible Adaptive HDR HEIC (a Display P3 SDR base plus
-an ISO 21496-1 single-channel gain map), Google Ultra HDR JPEG/R, 10-bit ITU-R
+an ISO 21496-1 single-channel gain map), a JPEG with an ISO 21496-1 gain map
+(`iso-gainmap-jpeg`; `ultrahdr` is accepted as an alias for now), 10-bit ITU-R
 BT.2100 PQ and HLG HEIC, and the same two BT.2100 renditions as 10-bit AVIF. PQ,
 HLG and AVIF encode the directly rendered linear HDR image; SDR samples
 are never merely relabelled HDR.

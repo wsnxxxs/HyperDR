@@ -53,8 +53,8 @@ def main() -> None:
         frozen = dict(env, DYLD_INSERT_LIBRARIES=str(clock))
         source = root / "sample.png"
         source.write_bytes(png(128, 96))
-        cases = [(encoding, None) for encoding in ("sdr-jpeg", "sdr-tiff", "avif-pq", "avif-hlg", "ultrahdr")]
-        cases += [(encoding, style) for style in ("gallery", "story") for encoding in ("ultrahdr", "sdr-tiff")]
+        cases = [(encoding, None) for encoding in ("sdr-jpeg", "sdr-tiff", "avif-pq", "avif-hlg", "iso-gainmap-jpeg")]
+        cases += [(encoding, style) for style in ("gallery", "story") for encoding in ("iso-gainmap-jpeg", "sdr-tiff")]
         for index, (encoding, style) in enumerate(cases):
             case = root / str(index)
             case.mkdir()

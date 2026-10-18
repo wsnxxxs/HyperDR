@@ -10,7 +10,7 @@ public enum EditDefaults {
     /// (batch4 §2.2). Unknown ids fall back to Adaptive, like `initial`.
     private static let maxRanges: [String: Double] = [
         "sdr-jpeg": 4, "sdr-tiff": 4, "adaptive": 3, "pq": 4,
-        "hlg": 2.3, "ultrahdr": 4, "avif-pq": 4, "avif-hlg": 2.3,
+        "hlg": 2.3, "iso-gainmap-jpeg": 4, "avif-pq": 4, "avif-hlg": 2.3,
     ]
 
     private struct Encoding {

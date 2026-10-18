@@ -279,9 +279,7 @@ void test_run_report_is_parseable_and_complete() {
   codec_result.stats.gain_max_stops = 3;
   const auto codec_document = hyperdr::json::parse(hyperdr::run_report_json({codec_result}, options));
   const auto* codec_gain = codec_document.find("files")->array()[0].find("gain_map");
-  require(codec_gain->find("encoder")->string() == "hyperdr" &&
-      codec_gain->find("distribution_measured")->boolean() &&
-      codec_gain->find("percentiles_stops") != nullptr,
+  require(codec_gain->find("percentiles_stops") != nullptr,
       "gain map must report measured distribution");
   require(validates(schema, codec_document, schema, "$", schema_error), schema_error);
 }

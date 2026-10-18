@@ -8,7 +8,7 @@
       "kind": "enum",
       "choices": [
         "adaptive",
-        "ultrahdr",
+        "iso-gainmap-jpeg",
         "pq",
         "hlg",
         "avif-pq",
@@ -294,7 +294,7 @@
       "minimum": 8,
       "maximum": 10,
       "affects_output_bytes": true,
-      "help": "HEIC base depth; Ultra HDR JPEG requires 8",
+      "help": "HEIC base depth; ISO gain-map JPEG requires 8",
       "default": 8
     },
     {

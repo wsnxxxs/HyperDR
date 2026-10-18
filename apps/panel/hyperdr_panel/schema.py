@@ -68,7 +68,10 @@ def validate_value(key: str, value):
         raise ValueError("存在未知设置项：%s" % key)
     kind = entry["kind"]
     if kind == "enum":
-        if not isinstance(value, str) or value not in entry["choices"]:
+        # The engine renamed `ultrahdr` to `iso-gainmap-jpeg` and still accepts
+        # the old name, which this reference panel keeps sending until P2c.
+        accepted = [*entry["choices"], *(["ultrahdr"] if key == "encoding" else [])]
+        if not isinstance(value, str) or value not in accepted:
             raise ValueError(
                 "设置 %s 必须是 %s 之一。" % (key, "、".join(entry["choices"]))
             )

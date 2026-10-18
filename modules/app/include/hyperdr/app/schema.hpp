@@ -64,10 +64,10 @@ struct Setting {
   // resumable batch.
   bool affects_output_bytes{true};
 
-  // Enum names this setting accepts beyond `choices`. `choices` is the
-  // documented, canonical set; earlier releases accepted aliases for some of
-  // them (`--encoding gain-map`, `jpegr`, `avif`), and silently rejecting those
-  // would break stored presets and scripts. Null means "exactly `choices`".
+  // Enum names this setting accepts beyond `choices`, which stays the
+  // documented, canonical set. Only `--encoding ultrahdr` uses it: the Web
+  // reference panel sends that name until it is deleted (P2c). Null means
+  // "exactly `choices`".
   bool (*accepts_name)(std::string_view){nullptr};
 
   // The two halves of the reflection. `apply` is used by both the command-line

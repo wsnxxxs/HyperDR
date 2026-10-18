@@ -79,10 +79,15 @@ Value canonical_settings(const Value& request) {
 std::string normalize_options(const Value& edit) {
   if (!edit.is_object()) throw std::invalid_argument("edit options must be a JSON object");
   const bool model = truthy(get(edit, "_model_mode", Value{}));
-  const auto encoding = get(edit, "encoding", text("adaptive"));
-  const auto name = encoding.string();
-  const bool sdr = name == "sdr-jpeg" || name == "sdr-tiff";
-  const bool hlg = name == "hlg" || name == "avif-hlg";
+  // The canonical name goes into the document, so `ultrahdr` from the Web
+  // reference panel normalizes to the same bytes as `iso-gainmap-jpeg`.
+  const auto requested = get(edit, "encoding", text("adaptive"));
+  validate_setting_value(*find_setting_by_key("encoding"), requested);
+  const auto parsed = hdr_encoding_from_name(requested.string());
+  if (!parsed) throw std::invalid_argument("unknown encoding: " + requested.string());
+  const auto encoding = text(hdr_encoding_name(*parsed));
+  const bool sdr = is_sdr_encoding(*parsed);
+  const bool hlg = is_hlg_encoding(*parsed);
   const auto output = get(edit, "outputGamut", text("auto"));
   if (output.string() != "auto" && output.string() != "srgb" && output.string() != "p3") {
     throw std::invalid_argument("outputGamut must be auto, srgb or p3");
@@ -133,8 +138,9 @@ std::string normalize_options(const Value& edit) {
   command["color_explicit"] = boolean(edit.find("colorGamut") != nullptr);
   command["output_explicit"] = boolean(edit.find("outputGamut") != nullptr);
   const auto domain = get(edit, "sourceDomain", text("")).string();
-  command["depth"] = number(name == "adaptive" && (domain == "display-referred-hdr" || domain == "dual-rendition")
-      ? 10 : name == "adaptive" || name == "ultrahdr" || sdr ? 8 : 10);
+  const bool adaptive = *parsed == OutputEncoding::Adaptive;
+  command["depth"] = number(adaptive && (domain == "display-referred-hdr" || domain == "dual-rendition")
+      ? 10 : is_gain_map_encoding(*parsed) || sdr ? 8 : 10);
   if (model) {
     auto id = get(edit, "_model_id", text("embedded"));
     if (!id.is_string() || id.string().empty()) id = text("embedded");
@@ -170,7 +176,7 @@ std::vector<std::string> command_line(const Value& normalized) {
   if (frame && !frame->is_null() && (!frame->is_string() || frame->string().empty()))
     throw std::invalid_argument("a framed request has no command-line form; write the frame to a file for --frame");
   std::vector<std::string> args{"HyperDR", "convert", cmd("input").string(), "--output", cmd("output").string(),
-      "--encoding", value("encoding").string()};
+      "--encoding", hdr_encoding_name(validated.encoding)};
   const auto flag = [&](const char* name, std::string val) { args.emplace_back(name); args.push_back(std::move(val)); };
   if (frame && frame->is_string()) flag("--frame", frame->string());
   if (!model && !external) {

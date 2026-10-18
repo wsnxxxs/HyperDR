@@ -18,7 +18,7 @@ namespace {
 void usage() {
   std::cout
       << "HyperDR " << kVersion
-      << " - ARW/DNG/JPEG/PNG/HEIC/AVIF/Ultra HDR to Adaptive HDR, Ultra HDR,"
+      << " - ARW/DNG/JPEG/PNG/HEIC/AVIF/Ultra HDR to Adaptive HDR, ISO gain-map JPEG,"
          " PQ, HLG, AVIF\n\n"
          "Usage:\n"
          "  HyperDR convert <file-or-directory> --output <directory> [options]\n"

@@ -75,7 +75,7 @@ std::vector<std::uint8_t> encode_adaptive_heic(const GainMapResult&,
 
 std::vector<std::uint8_t> encode_gain_map_jpeg(const GainMapResult&,
                                                const PhotoMetadata&, int) {
-  fail_without_codecs("Ultra HDR JPEG encoding");
+  fail_without_codecs("ISO gain-map JPEG encoding");
 }
 
 GainMapJpegEncoding encode_gain_map_jpeg_measured(const GainMapResult&,
@@ -119,11 +119,11 @@ void verify_heic_decodable(const std::filesystem::path&) {
 }
 
 void verify_gain_map_jpeg(const std::vector<std::uint8_t>&) {
-  fail_without_codecs("Ultra HDR JPEG verification");
+  fail_without_codecs("ISO gain-map JPEG verification");
 }
 
 void verify_gain_map_jpeg(const std::filesystem::path&) {
-  fail_without_codecs("Ultra HDR JPEG verification");
+  fail_without_codecs("ISO gain-map JPEG verification");
 }
 
 void verify_avif_decodable(const std::vector<std::uint8_t>&) {

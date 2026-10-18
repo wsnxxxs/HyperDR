@@ -144,9 +144,9 @@ void validate_convert_options(const ConvertOptions& options) {
     throw std::invalid_argument(
         "RAW half-size decoding is permitted only for explicit previews");
   }
-  if (options.encoding == HdrEncoding::UltraHdr && options.depth != 8) {
+  if (options.encoding == HdrEncoding::IsoGainMapJpeg && options.depth != 8) {
     throw std::invalid_argument(
-        "Ultra HDR JPEG uses an 8-bit SDR base and requires --depth 8");
+        "ISO gain-map JPEG uses an 8-bit SDR base and requires --depth 8");
   }
   if (is_hlg_encoding(options.encoding) && !options.gain.auto_headroom &&
       options.gain.headroom_stops > kHlgHeadroomStops) {

@@ -99,9 +99,14 @@ private final class Events: @unchecked Sendable {
                 continue
             }
             var request = try Engine.normalize(golden.options)
-            #expect(request.settings == golden.settings)
+            // The goldens stay frozen with the Python panel's names (U12); E4r
+            // renamed `ultrahdr`, which the adapter still accepts until P2c.
+            var settings = golden.settings
+            if settings?["encoding"] == .string("ultrahdr") { settings?["encoding"] = .string("iso-gainmap-jpeg") }
+            let argv = golden.argv?.map { $0 == "ultrahdr" ? "iso-gainmap-jpeg" : $0 }
+            #expect(request.settings == settings)
             #expect(request.adapter == "panel-v1")
-            #expect(try Engine.commandLine(request) == golden.argv)
+            #expect(try Engine.commandLine(request) == argv)
             for key in ["input", "output", "region"] {
                 try request.setCommand(key, .string("changed"))
                 #expect(request.adapter == "panel-v1")

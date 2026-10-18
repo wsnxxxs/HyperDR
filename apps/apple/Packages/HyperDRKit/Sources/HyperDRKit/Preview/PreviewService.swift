@@ -6,6 +6,8 @@ import HyperDREngine
 /// without changing the production reservation semantics.
 protocol PreviewRenderSession: Sendable {
     func renderFrame(_ request: EngineRequest) async throws -> PreviewFrame
+    /// The engine's `HYPGAIN1` model gain packet for a model-mode request.
+    func modelGain(_ request: EngineRequest) async throws -> Data
     /// Must be idempotent: detach may race a source replacement, and both
     /// paths can close the same renderer (serialized by its SessionGate).
     func close() async
@@ -31,6 +33,32 @@ struct PreviewCacheKey: Hashable, Sendable {
                 message: "Unable to encode the normalized preview request: \(error)")
         }
     }
+}
+
+/// Frames and model gains share one LRU, so the two stay inside one memory
+/// budget (batch4 §2.6).
+enum PreviewServiceCacheKey: Hashable, Sendable {
+    case frame(PreviewCacheKey)
+    case gain(ModelGainKey)
+
+    var session: SessionID {
+        switch self {
+        case .frame(let key): key.session
+        case .gain(let key): key.session
+        }
+    }
+
+    var sourceDigest: String {
+        switch self {
+        case .frame(let key): key.sourceDigest
+        case .gain(let key): key.sourceDigest
+        }
+    }
+}
+
+enum PreviewServiceCacheValue: Sendable {
+    case frame(PreviewFrame)
+    case gain(Data)
 }
 
 private final class PreviewEventHub: @unchecked Sendable {
@@ -83,6 +111,11 @@ public actor PreviewService {
         let cacheKey: PreviewCacheKey
     }
 
+    private struct GainFlightKey: Hashable, Sendable {
+        let generation: UInt64
+        let key: ModelGainKey
+    }
+
     private final class SessionState: @unchecked Sendable {
         /// Lifetime of one subscription. An explicit detach ends it; replacing
         /// the engine session because the source file changed does not.
@@ -101,6 +134,7 @@ public actor PreviewService {
         /// the service owns so `detach` can cancel them instead of waiting for
         /// the engine call to finish on its own.
         var directWork: [UUID: Task<EngineRenderResult, Error>] = [:]
+        var gainWork: [UUID: Task<Data, Error>] = [:]
         /// Set while a source refresh swaps this state for a new engine
         /// session. Concurrent requests wait for it instead of opening a
         /// second renderer next to the one being closed.
@@ -121,8 +155,9 @@ public actor PreviewService {
     private let rawDecodeTimeout: Duration
     private let sessionProvider: @Sendable (SessionID) async throws -> PhotoSession
     private let rendererFactory: @Sendable (PhotoSession) throws -> any PreviewRenderSession
-    private let cache: PreviewCache<PreviewCacheKey, PreviewFrame>
+    private let cache: PreviewCache<PreviewServiceCacheKey, PreviewServiceCacheValue>
     private let singleFlight = SingleFlight<FlightKey, EngineRenderResult>()
+    private let gainFlight = SingleFlight<GainFlightKey, Data>()
     nonisolated let rawGate: RawDecodeGate
     private let eventHub = PreviewEventHub()
     private var states: [SessionID: SessionState] = [:]
@@ -216,6 +251,8 @@ public actor PreviewService {
         state.inFlightPrepared = nil
         for work in state.directWork.values { work.cancel() }
         state.directWork.removeAll()
+        for work in state.gainWork.values { work.cancel() }
+        state.gainWork.removeAll()
         // Finish old subscribers before any concurrent attach can install a
         // replacement state for the same id.
         eventHub.finish(id)
@@ -278,7 +315,7 @@ public actor PreviewService {
             return
         }
 
-        if let frame = await cache.get(prepared.key) {
+        if let frame = await cachedFrame(prepared.key) {
             guard isLatestSubmit(order, id), states[id] === state, !state.detached else {
                 // Either a newer submit took over or the session went away
                 // while the cache lookup was awaiting. Publish a terminal event
@@ -346,7 +383,7 @@ public actor PreviewService {
         let state = try await attachedState(request.session,
             detachEpoch: detachEpochs[request.session] ?? 0)
         let prepared = try prepare(request, state: state)
-        if let frame = await cache.get(prepared.key) {
+        if let frame = await cachedFrame(prepared.key) {
             guard states[request.session] === state, !state.detached else {
                 throw HyperDRError(code: "cancelled", message: "Preview session was detached")
             }
@@ -370,7 +407,7 @@ public actor PreviewService {
                     if let error = error as? HyperDRError { throw error }
                     throw HyperDRError(code: "cancelled", message: "Preview cancelled")
                 }
-                if let frame = await cache.get(prepared.key) {
+                if let frame = await cachedFrame(prepared.key) {
                     return PreviewResult(request: request, frame: frame, sourceDigest: prepared.key.sourceDigest, fromCache: true,
                         timings: PreviewTimings())
                 }
@@ -383,7 +420,125 @@ public actor PreviewService {
             timings: result.timings)
     }
 
+    // MARK: - Model gain
+
+    /// The cache key `modelGain` would use for these options now. The editor
+    /// compares it with the key of the gain it holds to know whether that
+    /// gain is still valid.
+    public func modelGainKey(session id: SessionID, options: EditOptions) async throws -> ModelGainKey {
+        let state = try await attachedState(id, detachEpoch: detachEpochs[id] ?? 0)
+        return try prepareModelGain(options, state: state).1
+    }
+
+    /// The AI model's gain for this photo and options, computed once per
+    /// `ModelGainKey` and kept in the preview cache. Only the options in
+    /// `ModelGainInputs.table` affect it.
+    public func modelGain(session id: SessionID, options: EditOptions) async throws -> ModelGainResult {
+        let state = try await attachedState(id, detachEpoch: detachEpochs[id] ?? 0)
+        let (request, key) = try prepareModelGain(options, state: state)
+        func current() throws {
+            guard states[id] === state, !state.detached else {
+                throw HyperDRError(code: "cancelled", message: "Preview session was detached")
+            }
+        }
+        if let packet = await cachedGain(key) {
+            try current()
+            return ModelGainResult(key: key, packet: packet, fromCache: true)
+        }
+        let flightKey = GainFlightKey(generation: state.generation, key: key)
+        // As in `render`: a caller still alive retries once when the merged
+        // flight's leader was cancelled.
+        var attempt = 0
+        var packet: Data?
+        while packet == nil {
+            attempt += 1
+            do {
+                packet = try await gainFlight.run(flightKey) {
+                    try await self.performModelGain(request, key: key, state: state)
+                }
+            } catch {
+                guard Self.isCancellation(error), !Task.isCancelled, attempt < 2 else {
+                    if let error = error as? HyperDRError { throw error }
+                    if Self.isCancellation(error) {
+                        throw HyperDRError(code: "cancelled", message: "Model gain cancelled")
+                    }
+                    throw asHyperDRError(error)
+                }
+                if let cached = await cachedGain(key) {
+                    try current()
+                    return ModelGainResult(key: key, packet: cached, fromCache: true)
+                }
+            }
+        }
+        try current()
+        return ModelGainResult(key: key, packet: packet!, fromCache: false)
+    }
+
+    private func prepareModelGain(_ options: EditOptions,
+                                  state: SessionState) throws -> (EngineRequest, ModelGainKey) {
+        let request = try resolver.resolveModelGain(options, session: state.photo)
+        return (request, try ModelGainKey(session: state.photo, request: request,
+            buildFingerprint: buildFingerprint))
+    }
+
+    private func performModelGain(_ request: EngineRequest, key: ModelGainKey,
+                                  state: SessionState) async throws -> Data {
+        let token = UUID()
+        let work = Task { try await self.computeModelGain(request, key: key, state: state) }
+        state.gainWork[token] = work
+        defer { state.gainWork.removeValue(forKey: token) }
+        return try await withTaskCancellationHandler {
+            try await work.value
+        } onCancel: {
+            work.cancel()
+        }
+    }
+
+    /// No preview timeout here: inference is expected to take longer than a
+    /// frame, and the caller (or a detach) cancels it instead.
+    private func computeModelGain(_ request: EngineRequest, key: ModelGainKey,
+                                  state: SessionState) async throws -> Data {
+        await state.gate.acquire()
+        do {
+            guard !Task.isCancelled, !state.detached, states[key.session] === state else {
+                throw CancellationError()
+            }
+            var ticket: RawDecodeGate.Ticket?
+            if state.photo.format.isRaw {
+                ticket = try await rawGate.acquire(timeout: rawDecodeTimeout)
+            }
+            do {
+                guard !Task.isCancelled, !state.detached, states[key.session] === state else {
+                    throw CancellationError()
+                }
+                let packet = try await state.renderer.modelGain(request)
+                if let ticket { await ticket.release() }
+                // Cached before the gate is released, like frames, so a
+                // detach cannot clear the cache and then see this put.
+                await cache.put(.gain(packet), bytes: packet.count, for: .gain(key), counted: false)
+                await state.gate.release()
+                return packet
+            } catch {
+                if let ticket { await ticket.release() }
+                throw error
+            }
+        } catch {
+            await state.gate.release()
+            throw error
+        }
+    }
+
     // MARK: - Internals
+
+    private func cachedFrame(_ key: PreviewCacheKey) async -> PreviewFrame? {
+        if case .frame(let frame)? = await cache.get(.frame(key)) { return frame }
+        return nil
+    }
+
+    private func cachedGain(_ key: ModelGainKey) async -> Data? {
+        if case .gain(let packet)? = await cache.get(.gain(key)) { return packet }
+        return nil
+    }
 
     private func attachedState(_ id: SessionID, detachEpoch: UInt64,
                                submitOrder: UInt64? = nil) async throws -> SessionState {
@@ -456,6 +611,8 @@ public actor PreviewService {
         state.inFlightPrepared = nil
         for work in state.directWork.values { work.cancel() }
         state.directWork.removeAll()
+        for work in state.gainWork.values { work.cancel() }
+        state.gainWork.removeAll()
         await state.gate.acquire()
         await state.renderer.close()
         await state.gate.release()
@@ -603,7 +760,7 @@ public actor PreviewService {
                 if let ticket { await ticket.release() }
                 // Cache before releasing the session gate so detach cannot
                 // clear the cache and still be followed by this put.
-                await cache.put(frame, bytes: frame.previewCacheBytes, for: prepared.key)
+                await cache.put(.frame(frame), bytes: frame.previewCacheBytes, for: .frame(prepared.key))
                 await state.gate.release()
                 return EngineRenderResult(frame: frame, timings: PreviewTimings(
                     queued: queued, gateWait: gateWait, engine: engine))

@@ -9,7 +9,6 @@ import {
 } from "../apps/panel/web/js/settings/schema.js";
 import { quantizedPreviewTier } from "../apps/panel/web/js/preview/stage/policy.js";
 import { sampleHdr } from "../apps/panel/web/js/preview/packet.js";
-import { t } from "../apps/panel/web/js/i18n/index.js";
 
 const fixture = fileURLToPath(new URL(
   "../apps/apple/Packages/HyperDRKit/Tests/HyperDRKitTests/Fixtures/web-reference.json",
@@ -70,30 +69,6 @@ const previewCases = [
 ].map((entry) => ({ ...entry,
   edge: quantizedPreviewTier(entry.ceiling, entry.width, entry.height, entry.scale) }));
 
-/* CONTROLS holds formatter functions; name each by what it prints, in the
- * current locale's own units, so the fixture does not depend on the locale. */
-function formatName(control) {
-  const format = control.format;
-  if (!format) return "integer";
-  const auto = t("unit.auto");
-  const [plus, minus] = [format(1.5), format(-1)];
-  if (plus === "+1.50 EV") return "ev";
-  if (plus === "+1.50") return "signed";
-  if (plus === "1.50") return "fixed2";
-  if (plus === "150%") return minus === auto ? "percentOrAuto" : "percent";
-  if (plus === t("unit.stops", { value: "1.5" })) return minus === auto ? "stopsOrAuto1" : "stops1";
-  throw new Error(`unrecognised format for ${control.key}`);
-}
-
-const controls = CONTROLS.map((control) => ({
-  key: control.key, kind: control.kind, group: control.group,
-  min: control.min ?? null, max: control.max ?? null, step: control.step ?? null,
-  default: control.default, format: formatName(control),
-  percent: control.unit === "percent", auto: control.auto === true, mask: control.mask,
-  label: control.label, help: control.help ?? null,
-  choices: control.choices ? control.choices.map(([id]) => id) : null,
-}));
-
 function sorted(value) {
   if (Array.isArray(value)) return value.map(sorted);
   if (value && typeof value === "object") {
@@ -105,7 +80,6 @@ function sorted(value) {
 const document = sorted({
   schema: 1,
   encodings: ENCODINGS.map(({ id, maxRange }) => ({ id, maxRange })),
-  controls,
   imageAdjustmentKeys: CONTROLS.map(({ key }) => key),
   domains,
   unadjusted,

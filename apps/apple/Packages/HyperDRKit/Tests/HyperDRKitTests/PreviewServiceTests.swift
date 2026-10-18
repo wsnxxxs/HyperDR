@@ -38,6 +38,20 @@ private actor FakeRenderer: PreviewRenderSession {
         return frame
     }
 
+    private(set) var gainRequests: [EngineRequest] = []
+
+    /// A packet that names the request, so tests can tell computations apart.
+    func modelGain(_ request: EngineRequest) async throws -> Data {
+        gainRequests.append(request)
+        do { try await Task.sleep(for: delay) }
+        catch {
+            cancellations += 1
+            throw error
+        }
+        if let failure { throw failure }
+        return Data("gain-\(gainRequests.count)".utf8)
+    }
+
     func close() async { closes += 1 }
 }
 
@@ -187,6 +201,8 @@ private actor TypedCancelRenderer: PreviewRenderSession {
         return frame
     }
 
+    func modelGain(_ request: EngineRequest) async throws -> Data { Data() }
+
     func close() async {}
 }
 
@@ -244,6 +260,8 @@ private actor BlockingCloseRenderer: PreviewRenderSession {
         calls += 1
         return frame
     }
+
+    func modelGain(_ request: EngineRequest) async throws -> Data { Data() }
 
     func close() async {
         closes += 1

@@ -1,27 +1,31 @@
 import Foundation
 import HyperDREngine
 
-/// Port of the Web editor's default/reference settings and preview tier rules.
-/// The frozen fixture in `HyperDRKitTests` is the source of truth for parity.
+/// Default and reference settings for a photo, and the preview tier rule.
+/// Values come from `EditControls` and `EditChoices`, which equal the
+/// panel-v1 adapter's defaults; keys the adapter fills itself
+/// (`highlightRecovery`, `contrast`, `vibrance`, `quality`) are omitted.
 public enum EditDefaults {
+    /// The highest `hdrRange` / `aiHdrRange` each output format accepts
+    /// (batch4 §2.2). Unknown ids fall back to Adaptive, like `initial`.
+    private static let maxRanges: [String: Double] = [
+        "sdr-jpeg": 4, "sdr-tiff": 4, "adaptive": 3, "pq": 4,
+        "hlg": 2.3, "ultrahdr": 4, "avif-pq": 4, "avif-hlg": 2.3,
+    ]
+
     private struct Encoding {
         let id: String
         let maxRange: Double
     }
 
-    private static let encodings: [Encoding] = [
-        Encoding(id: "sdr-jpeg", maxRange: 4),
-        Encoding(id: "sdr-tiff", maxRange: 4),
-        Encoding(id: "adaptive", maxRange: 3),
-        Encoding(id: "pq", maxRange: 4),
-        Encoding(id: "hlg", maxRange: 2.3),
-        Encoding(id: "ultrahdr", maxRange: 4),
-        Encoding(id: "avif-pq", maxRange: 4),
-        Encoding(id: "avif-hlg", maxRange: 2.3),
-    ]
+    public static func maxRange(for encoding: String) -> Double {
+        self.encoding(encoding).maxRange
+    }
 
     private static let controlDefaults: [String: JSONValue] =
-        Dictionary(uniqueKeysWithValues: EditControls.all.map { ($0.key, $0.defaultSetting) })
+        Dictionary(uniqueKeysWithValues: EditControls.all.map { ($0.key, .number($0.defaultValue)) })
+    private static let choiceDefaults: [String: JSONValue] =
+        Dictionary(uniqueKeysWithValues: EditChoices.all.map { ($0.key, .string($0.defaultID)) })
 
     static let controlKeys = EditControls.all.map(\.key)
 
@@ -30,7 +34,8 @@ public enum EditDefaults {
     ]
 
     private static func encoding(_ id: String) -> Encoding {
-        encodings.first { $0.id == id } ?? encodings.first { $0.id == "adaptive" }!
+        if let range = maxRanges[id] { return Encoding(id: id, maxRange: range) }
+        return Encoding(id: "adaptive", maxRange: maxRanges["adaptive"]!)
     }
 
     private static func isSdrEncoding(_ id: String) -> Bool {
@@ -42,11 +47,9 @@ public enum EditDefaults {
     }
 
     private static func defaults(encoding id: String) -> [String: JSONValue] {
+        // Settings without a ControlSpec or ChoiceSpec yet: switches (M3
+        // gives them their own value objects) and resource selections.
         var values: [String: JSONValue] = [
-            "encoding": .string(id),
-            "hevcPreset": .string("slow"),
-            "colorGamut": .string("srgb"),
-            "outputGamut": .string("auto"),
             "clampSrgb": .bool(false),
             "rawProfile": .string(""),
             "rawProfileName": .string(""),
@@ -56,11 +59,11 @@ public enum EditDefaults {
             "lensProfileName": .string(""),
             "lutId": .string(""),
             "lutName": .string(""),
-            "lutInput": .string("srgb"),
-            "lutOutput": .string("srgb"),
             "modelId": .string("research-cnn-v1"),
         ]
+        values.merge(choiceDefaults) { _, new in new }
         values.merge(controlDefaults) { _, new in new }
+        values["encoding"] = .string(id)
         return values
     }
 
@@ -71,8 +74,6 @@ public enum EditDefaults {
         for (key, value) in unadjusted { values[key] = .number(value) }
         let range = unadjusted["hdrRange"] ?? values["hdrRange"]?.numberValue ?? encoding.maxRange
         values["hdrRange"] = .number(min(range, encoding.maxRange))
-        values["contrast"] = .number(1)
-        values["vibrance"] = .number(0)
     }
 
     /// Defaults for a newly opened photo. HDR/dual sources keep their own
@@ -95,8 +96,6 @@ public enum EditDefaults {
         values["brightness"] = .number(0)
         values["hdrStrength"] = .number(0)
         values["hdrRange"] = .number(0)
-        values["contrast"] = .number(1)
-        values["vibrance"] = .number(0)
         values["areaCoverage"] = .number(0)
         values["lutStrength"] = .number(0)
         return values

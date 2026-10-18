@@ -31,6 +31,15 @@ struct OptionResolver: Sendable {
         try resolve(PreviewRequest(session: session.id, options: options, maxEdge: maxEdgeCeiling), session: session, preview: false)
     }
 
+    /// The request for `PreviewService.modelGain`: the edit with the model
+    /// turned on, at the engine's own model decode size (no preview edge).
+    func resolveModelGain(_ options: EditOptions, session: PhotoSession) throws -> EngineRequest {
+        var values = options.values
+        values["useModel"] = .bool(true)
+        return try resolve(PreviewRequest(session: session.id, options: EditOptions(values),
+            maxEdge: maxEdgeCeiling), session: session, preview: false)
+    }
+
     private func resolve(_ request: PreviewRequest, session: PhotoSession, preview: Bool) throws -> EngineRequest {
         var options = request.options.values
         guard options["frame"] == nil else {

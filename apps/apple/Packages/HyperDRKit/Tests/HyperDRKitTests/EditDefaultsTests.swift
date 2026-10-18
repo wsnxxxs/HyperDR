@@ -40,6 +40,15 @@ private func loadReference() throws -> WebReference {
     return try JSONDecoder().decode(WebReference.self, from: Data(contentsOf: url))
 }
 
+/// Settings the Web wrote with fixed values and Kit leaves to the panel-v1
+/// adapter (batch4 §2.1); `EditControlsTests` shows omitting them changes no
+/// request byte.
+private let adapterSupplied: Set<String> = ["highlightRecovery", "contrast", "vibrance", "quality"]
+
+private func withoutAdapterSupplied(_ settings: [String: JSONValue]) -> [String: JSONValue] {
+    settings.filter { !adapterSupplied.contains($0.key) }
+}
+
 @Suite struct EditDefaultsTests {
     @Test func matchesFrozenWebInitialReference() throws {
         let reference = try loadReference()
@@ -50,7 +59,7 @@ private func loadReference() throws -> WebReference {
         for entry in reference.initial {
             let actual = EditDefaults.initial(encoding: entry.encoding,
                 sourceDomain: entry.sourceDomain, unadjusted: entry.unadjusted)
-            #expect(actual.values == entry.settings,
+            #expect(actual.values == withoutAdapterSupplied(entry.settings),
                 "initial mismatch: \(entry.encoding) \(entry.sourceDomain ?? "nil") unadjusted=\(entry.unadjusted != nil)")
         }
     }
@@ -60,7 +69,7 @@ private func loadReference() throws -> WebReference {
         for entry in reference.reference {
             let workflow = EditOptions(entry.workflow)
             let actual = EditDefaults.reference(encoding: entry.encoding, workflow: workflow)
-            #expect(actual.values == entry.settings, "reference mismatch: \(entry.encoding)")
+            #expect(actual.values == withoutAdapterSupplied(entry.settings), "reference mismatch: \(entry.encoding)")
         }
         #expect(reference.reference.count == 8)
         for entry in reference.previewEdge {
@@ -74,7 +83,8 @@ private func loadReference() throws -> WebReference {
         let reference = try loadReference()
         let workflow = EditOptions(try #require(reference.reference.first).workflow)
         let adjustments = EditDefaults.imageAdjustments(workflow)
-        #expect(adjustments.values.keys.sorted() == reference.imageAdjustmentKeys.sorted())
+        #expect(adjustments.values.keys.sorted() ==
+                reference.imageAdjustmentKeys.filter { !adapterSupplied.contains($0) }.sorted())
         #expect(adjustments["encoding"] == nil)
         #expect(adjustments["colorGamut"] == nil)
         #expect(adjustments["hdrStrength"] == .number(0.4))

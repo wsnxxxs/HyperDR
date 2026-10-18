@@ -651,7 +651,7 @@ public actor PreviewService {
         return HyperDRError(code: "internal_error", message: "\(error)")
     }
 
-    private static func modelAvailability(_ capabilities: Capabilities)
+    static func modelAvailability(_ capabilities: Capabilities)
         -> (models: [String: Bool], defaultID: String, ready: Bool) {
         let fallbackID = "research-cnn-v1"
         guard case .object(let root) = capabilities.models,

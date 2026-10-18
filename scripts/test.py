@@ -109,6 +109,7 @@ def apple() -> None:
     run(*xcode, "test", "-test-timeouts-enabled", "YES",
         "-default-test-execution-time-allowance", "60", env=env)
     run(sys.executable, "scripts/check_apple_i18n.py")
+    run(sys.executable, "tests/apple/export_parity.py", env=env)
 
 
 def main() -> int:

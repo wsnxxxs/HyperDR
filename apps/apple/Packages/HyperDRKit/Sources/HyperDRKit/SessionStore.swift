@@ -111,6 +111,15 @@ final class SecurityScopeLease: @unchecked Sendable {
     deinit { stop() }
 }
 
+/// A validated open file, owned through asynchronous copying. Paths are labels;
+/// neither callers nor the copier reopen the source by its absolute path.
+final class SessionExportFile: @unchecked Sendable {
+    let descriptor: Int32
+    let name: String
+    init(descriptor: Int32, name: String) { self.descriptor = descriptor; self.name = name }
+    deinit { Darwin.close(descriptor) }
+}
+
 /// One photo session on disk. The source file is never copied; a security-scoped
 /// bookmark is the durable reference and access is held while the session is open.
 public actor SessionStore {
@@ -171,6 +180,9 @@ public actor SessionStore {
     private let supportDirectory: URL
     private let sessionsDirectory: URL
     private let sessionsDevice: dev_t
+    typealias OpenExportLeaf = @Sendable (Int32, String, Int32) -> Int32
+    private let openExportLeaf: OpenExportLeaf
+    private let exportRoot: SessionExportFile?
     private let cacheDirectory: URL
     private let sessionTTL: TimeInterval
     private let decodeCacheMaxAge: TimeInterval
@@ -186,7 +198,7 @@ public actor SessionStore {
     private var openingFlights: [String: FlightState] = [:]
     private var openingSessions: Set<SessionID> = []
     private var openingPaths: Set<String> = []
-    private var exporting: Set<SessionID> = []
+    private var exporting: [SessionID: Set<ExportID>] = [:]
     private var digestCache: [String: CachedDigest] = [:]
 
     public init(configuration: KitConfiguration, formats: InputFormats) {
@@ -196,7 +208,9 @@ public actor SessionStore {
 
     internal init(configuration: KitConfiguration, formats: InputFormats,
                   decodeCacheMaxAge: TimeInterval, decodeCacheMaxBytes: Int64,
-                  access: any SecurityScopedAccess = SystemSecurityScopedAccess()) {
+                  access: any SecurityScopedAccess = SystemSecurityScopedAccess(),
+                  openExportLeaf: @escaping OpenExportLeaf = { openat($0, $1, $2) }) {
+        self.openExportLeaf = openExportLeaf
         supportDirectory = configuration.supportDirectory.resolvingSymlinksInPath().standardizedFileURL
         sessionsDirectory = supportDirectory.appendingPathComponent("sessions", isDirectory: true)
         cacheDirectory = configuration.cacheDirectory.resolvingSymlinksInPath().standardizedFileURL
@@ -222,6 +236,8 @@ public actor SessionStore {
             fstatat(AT_FDCWD, $0, &rootInfo, 0)
         }
         sessionsDevice = status == 0 ? rootInfo.st_dev : 0
+        let descriptor = Darwin.open(sessionsDirectory.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        exportRoot = descriptor >= 0 ? SessionExportFile(descriptor: descriptor, name: "") : nil
     }
 
     // MARK: - Open / restore / close
@@ -479,7 +495,7 @@ public actor SessionStore {
         for directory in directories {
             let id = SessionID(rawValue: directory.lastPathComponent)
             guard id.isValid, openSessions[id] == nil, activating[id] == nil,
-                  !openingSessions.contains(id), !exporting.contains(id) else { continue }
+                  !openingSessions.contains(id), exporting[id] == nil else { continue }
             guard let stored = try? loadStored(id) else { continue }
             guard !openingPaths.contains(stored.sourcePath) else { continue }
             cleanupAbandonedExports(id)
@@ -530,30 +546,46 @@ public actor SessionStore {
 
     // MARK: - Exports
 
+    /// Keep the granted bookmark URL alive independently of an editor close.
+    func exportSource(_ id: SessionID) async throws -> (PhotoSession, SecurityScopeLease) {
+        let photo = try await session(id)
+        guard let open = openSessions[id] else {
+            throw HyperDRError(code: "session_expired", message: "Session closed during export preparation")
+        }
+        return (photo, SecurityScopeLease(url: open.lease.url, access: access))
+    }
+
+    private func releaseExport(_ id: SessionID, export: ExportID) {
+        exporting[id]?.remove(export)
+        if exporting[id]?.isEmpty == true { exporting.removeValue(forKey: id) }
+    }
+
     public func prepareExport(_ id: SessionID, options: [String: JSONValue]) async throws -> (id: ExportID, directory: URL) {
-        let session = try await self.session(id)
         let exportID = newExportID()
+        // Reserve before session lookup suspends: cleanup must not remove the
+        // workspace while a source refresh is hashing it.
+        exporting[id, default: []].insert(exportID)
         do {
+            let session = try await self.session(id)
             let folder = try exportDirectory(id, export: exportID)
             try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
             let pending = PendingExport(id: exportID, options: options, sourceDigest: session.sha256)
-            exporting.insert(id)
             do {
                 try write(pending, to: folder.appendingPathComponent("pending.json"))
                 return (exportID, folder)
             } catch {
                 try? removeExportDirectory(id, export: exportID)
-                exporting.remove(id)
                 throw error
             }
         } catch {
+            releaseExport(id, export: exportID)
             throw publicError(error)
         }
     }
 
     public func publishExport(_ id: SessionID, export: ExportID,
                               report: ConvertReport) async throws -> ExportRecord {
-        defer { exporting.remove(id) }
+        defer { releaseExport(id, export: export) }
         do {
             let folder = try exportDirectory(id, export: export)
             let folderFD = try openExportDirectoryFD(id, export: export)
@@ -616,7 +648,7 @@ public actor SessionStore {
     }
 
     public func discardExport(_ id: SessionID, export: ExportID) async {
-        defer { exporting.remove(id) }
+        defer { releaseExport(id, export: export) }
         guard id.isValid, export.isValid,
               let root = try? openDirectory(sessionsDirectory) else { return }
         defer { Darwin.close(root) }
@@ -677,6 +709,32 @@ public actor SessionStore {
             throw HyperDRError(code: "source_missing", message: "The exported file is missing")
         }
         return target
+    }
+
+    func exportFile(_ id: SessionID, export: ExportID) async throws -> SessionExportFile {
+        let records = await exports(for: id)
+        guard let record = records.first(where: { $0.id == export }), isSafeComponent(record.name),
+              !record.name.contains("\\"), let exportRoot else {
+            throw HyperDRError(code: "source_missing", message: "The exported file is missing")
+        }
+        // Start with the root held since store creation. Every descendant is
+        // opened separately with O_NOFOLLOW; no absolute path reopen follows
+        // a concurrently replaced session/export ancestor.
+        let directory = try openExportDirectoryFD(id, export: export, rootDescriptor: exportRoot.descriptor)
+        defer { Darwin.close(directory) }
+        let file = openExportLeaf(directory, record.name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
+        guard file >= 0 else { throw HyperDRError(code: "source_missing", message: "The exported file is missing") }
+        var info = stat()
+        guard fstat(file, &info) == 0, info.st_mode & S_IFMT == S_IFREG, info.st_size > 0 else {
+            Darwin.close(file)
+            throw HyperDRError(code: "source_missing", message: "The export is not a regular file")
+        }
+        let flags = fcntl(file, F_GETFL)
+        guard flags >= 0, fcntl(file, F_SETFL, flags & ~O_NONBLOCK) == 0 else {
+            Darwin.close(file)
+            throw HyperDRError(code: "source_missing", message: "Unable to read export")
+        }
+        return SessionExportFile(descriptor: file, name: record.name)
     }
 
     public func resourceDirectory(_ id: SessionID, _ kind: SessionResource) async throws -> URL {
@@ -803,11 +861,15 @@ public actor SessionStore {
         return try containedURL(exports.appendingPathComponent(export.rawValue, isDirectory: true), in: session)
     }
 
-    private func openExportDirectoryFD(_ id: SessionID, export: ExportID) throws -> Int32 {
+    private func openExportDirectoryFD(_ id: SessionID, export: ExportID, rootDescriptor: Int32? = nil) throws -> Int32 {
         guard id.isValid, export.isValid else {
             throw HyperDRError(code: "invalid_options", message: "Invalid session or export id")
         }
-        let root = try openDirectory(sessionsDirectory)
+        let root = try rootDescriptor.map { descriptor in
+            let copy = dup(descriptor)
+            guard copy >= 0 else { throw posixError("dup", "sessions") }
+            return copy
+        } ?? openDirectory(sessionsDirectory)
         defer { Darwin.close(root) }
         try requireTrustedDevice(root)
         let session = try openDirectory(named: id.rawValue, in: root)

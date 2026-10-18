@@ -10,6 +10,8 @@ public final class HyperDRKit: Sendable {
     public let formats: InputFormats
     public let sessions: SessionStore
     public let previews: PreviewService
+    public let jobs: JobRunner
+    public let exportTarget: ExportTarget
 
     private final class CleanupState: @unchecked Sendable {
         let lock = NSLock()
@@ -44,6 +46,9 @@ public final class HyperDRKit: Sendable {
         self.cleanup = cleanup ?? { await sessions.cleanupExpired() }
         self.previews = PreviewService(configuration: configuration, schema: schema,
             capabilities: capabilities, sessions: sessions, engine: engine)
+        self.jobs = JobRunner(configuration: configuration, schema: schema,
+            capabilities: capabilities, sessions: sessions, engine: engine)
+        self.exportTarget = ExportTarget(configuration: configuration, sessions: sessions)
         self.cleanupInterval = cleanupInterval
     }
 

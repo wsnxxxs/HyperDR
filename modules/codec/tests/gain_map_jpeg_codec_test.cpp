@@ -123,7 +123,8 @@ void large(const std::string& mode, const std::filesystem::path& output) {
     for(unsigned x=0;x<layout.photo.width;++x)
       p.gain_map.at(layout.photo.x+x,layout.photo.y+y,0)=1;
   p.metadata.base_offset=p.metadata.alternate_offset={1,64};
-  auto bytes=encode_gain_map_jpeg_measured(p,{},90,&layout).bytes;
+  p.metadata.gain_max={1,1}; p.metadata.alternate_headroom={1,1};
+  auto bytes=encode_gain_map_jpeg(p,{},90);
   p={};
   verify_gain_map_jpeg(bytes);
   const auto parsed=parse_gain_map_jpeg(bytes);
@@ -207,19 +208,18 @@ void zero_headroom() {
     };
     // The HDR rendition would carry gain at any real headroom.
     const auto map = renditions(1.5F, 0);
-    require(map.gain_map.channels == channels, "zero headroom changed the gain channels");
+    // A constant map is stored as one channel shrunk by 16.
+    require(map.gain_map.channels == 1 && map.gain_map.width == w / 16 && map.gain_map.height == h / 16,
+        "zero-headroom gain map was not shrunk");
     require(std::all_of(map.gain_map.pixels.begin(), map.gain_map.pixels.end(), [](float v) { return v == 0; }),
         "zero headroom left gain in the map");
     require(map.headroom_stops == 0 && map.stats.headroom_stops == 0, "zero headroom reported headroom");
     require(map.metadata.base_headroom.numerator == 0 && map.metadata.alternate_headroom.numerator == 1 &&
             map.metadata.alternate_headroom.denominator == 1U << 23, "zero headroom declared another alternate");
-    const auto encoded = encode_gain_map_jpeg_measured(map, {}, 95, nullptr);
-    verify_gain_map_jpeg(encoded.bytes);
-    require(encoded.stats.headroom_stops == 0, "zero headroom encoding reported headroom");
-    require(serialize_tmap_payload(parse_gain_map_jpeg(encoded.bytes).metadata) ==
+    const auto bytes = encode_gain_map_jpeg(map, {}, 95);
+    verify_gain_map_jpeg(bytes);
+    require(serialize_tmap_payload(parse_gain_map_jpeg(bytes).metadata) ==
             serialize_tmap_payload(map.metadata), "zero headroom metadata changed in packaging");
-    require(without_icc_dates(encoded.bytes) == without_icc_dates(encode_gain_map_jpeg(map, {}, 95)),
-            "zero headroom carried a residual");
 
     // The reference is the SDR rendition packaged at one stop with zero gain:
     // what each reader shows for a file whose HDR rendition is its base. A
@@ -234,17 +234,15 @@ void zero_headroom() {
       std::filesystem::remove(file);
       return decoded.linear_p3;
     };
-    const auto decoded = ultrahdr(encoded.bytes, "zero-headroom.jpg");
+    const auto decoded = ultrahdr(bytes, "zero-headroom.jpg");
     const auto expected = ultrahdr(reference, "reference.jpg");
     float worst = 0;
     for (std::size_t i = 0; i < decoded.pixels.size(); ++i)
       worst = std::max(worst, std::abs(srgb_code(decoded.pixels[i]) - srgb_code(expected.pixels[i])));
     require(worst <= 0.5F, "libultrahdr's HDR rendition differs from the SDR base");
 
-    const auto reading = read_with_imageio(encoded.bytes);
-    // ImageIO applies a three-channel ISO map but does not hand it out as
-    // auxiliary data (nor for files with real headroom); a mono map it does.
-    require(reading.has_gain || channels == 3, "ImageIO found no ISO gain map");
+    const auto reading = read_with_imageio(bytes);
+    require(reading.has_gain, "ImageIO found no ISO gain map");
     require(std::all_of(reading.gain.begin(), reading.gain.end(), [](std::uint8_t v) { return v == 0; }),
         "ImageIO read gain from a zero-headroom map");
     // ImageIO returns its HDR decode as 10-bit pixels encoded for the declared
@@ -306,7 +304,7 @@ void cancel() {
   request.join();require(cancelled,"encoding ignored cancellation");require(ms<280,"encoding cancellation exceeded 200 ms");
   std::cout << "cancel elapsed=" << ms << " ms (request at 80 ms)\n";
 }
-void reference(const std::filesystem::path& input, const std::filesystem::path& root, bool model, bool measured = true) {
+void reference(const std::filesystem::path& input, const std::filesystem::path& root, bool model) {
   std::filesystem::create_directories(root);
   auto decoded=decode_image(input,{});
   PhotoRenditions photo;
@@ -327,7 +325,8 @@ void reference(const std::filesystem::path& input, const std::filesystem::path& 
   }
   save_floats(root/"render.f32",photo.hdr);
   const auto p=gain_map_from_renditions(std::move(photo),GainMapWriterProfile::iso_generic);
-  auto bytes=measured ? encode_gain_map_jpeg_measured(p,decoded.metadata,90).bytes : encode_gain_map_jpeg(p,decoded.metadata,90);
+  save_floats(root/"sdr.f32",p.base_linear);
+  auto bytes=encode_gain_map_jpeg(p,decoded.metadata,90);
   verify_gain_map_jpeg(bytes);
   write_binary_file_atomic(root/"new.jpg",bytes,true);
   auto ours=decode_image(root/"new.jpg",{});
@@ -341,7 +340,7 @@ int main(int argc,char**argv) {
     if(mode=="fixtures" && argc==3) fixtures(argv[2]);
     else if((mode=="panorama"||mode=="portrait")&&argc==3) large(mode,argv[2]);
     else if(mode=="cancel")cancel();
-    else if((mode=="reference"||mode=="reference-model"||mode=="reference-plain")&&argc==4)reference(argv[2],argv[3],mode=="reference-model",mode!="reference-plain");
+    else if((mode=="reference"||mode=="reference-model")&&argc==4)reference(argv[2],argv[3],mode=="reference-model");
     else { packaging(); zero_headroom(); cancel_while_finishing(); }
     return 0;
   } catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}

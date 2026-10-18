@@ -16,6 +16,13 @@ semantic versioning; dates use ISO 8601.
   export once more after this change. `HyperDR verify` reports an ISO gain-map
   JPEG as such and rejects a JPEG whose gain map is described only in XMP.
 
+- In a gain-map JPEG the gain map relates the uncompressed SDR and HDR
+  renditions, so the HDR rendition is as faithful as the SDR base at the
+  chosen quality. The base is 4:2:0 like an SDR JPEG and the gain map is
+  stored at quality max(90, quality). Three gain channels are written only
+  when they differ; a photo without headroom gets a constant, shrunk map and
+  a file about the size of an SDR JPEG.
+
 - Exports can carry a presentation frame: a paper mat, an optional print shadow
   and a caption with the photograph's exposure, camera and lens. The frame is
   written identically into the SDR and HDR renditions, so it carries no gain:

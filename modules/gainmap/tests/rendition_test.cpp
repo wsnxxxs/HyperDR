@@ -688,6 +688,62 @@ void test_sdr_rolloff_ignores_expansion_start() {
       "a brightened SDR base must roll off from the 0.48 knee");
 }
 
+// E4q: the ISO packager stores RGB codes as three channels only when they
+// carry colour; agreeing codes become one channel and a constant map a small
+// single-channel tile. A model or external grid keeps its channel count.
+void test_iso_gain_channel_forms() {
+  const auto pair_of = [](float red, float green, float blue) {
+    PhotoRenditions photo;
+    photo.sdr = FloatImage(48, 32, 3); photo.hdr = FloatImage(48, 32, 3);
+    for (std::uint32_t y = 0; y < 32; ++y) for (std::uint32_t x = 0; x < 48; ++x) {
+      const float base = .05F + .9F * x / 47.0F;
+      const float lift = x >= 24 ? 1.0F : 0.0F;
+      const std::array<float, 3> gain{red, green, blue};
+      for (unsigned c = 0; c < 3; ++c) {
+        photo.sdr.at(x, y, c) = base;
+        photo.hdr.at(x, y, c) = base * std::exp2(lift * gain[c]);
+      }
+    }
+    photo.stats.headroom_stops = std::max({red, green, blue});
+    photo.stats.headroom_linear = std::exp2(photo.stats.headroom_stops);
+    return photo;
+  };
+  const auto pack = [](PhotoRenditions photo) {
+    return gain_map_from_renditions(std::move(photo), GainMapWriterProfile::iso_generic);
+  };
+  const auto colour = pack(pair_of(2.0F, 1.0F, .5F));
+  require(colour.gain_map.channels == 3 && gain_map_channel_count(colour.metadata) == 3 &&
+          colour.gain_map.width == 48, "RGB gain with colour must stay three channels");
+  const auto neutral = pack(pair_of(1.5F, 1.5F, 1.5F));
+  require(neutral.gain_map.channels == 1 && gain_map_channel_count(neutral.metadata) == 1 &&
+          neutral.gain_map.width == 48 && neutral.gain_map.height == 32,
+          "agreeing RGB gain codes must become one full-resolution channel");
+  require(pack(pair_of(1.5F, 1.5F, 1.5F)).gain_map.pixels == neutral.gain_map.pixels,
+          "the same pair must give the same codes");
+  const auto rebuilt = reconstruct_gain_map(neutral.base_linear, neutral.gain_map, neutral.metadata,
+                                            neutral.headroom_stops);
+  const auto source = pair_of(1.5F, 1.5F, 1.5F);
+  float worst = 0;
+  for (std::size_t i = 0; i < rebuilt.pixels.size(); ++i)
+    worst = std::max(worst, std::abs(std::log2(rebuilt.pixels[i] / source.hdr.pixels[i])));
+  require(worst < .02F, "one channel must reconstruct the agreeing RGB gain");
+  const auto flat = pack(pair_of(0, 0, 0));
+  require(flat.gain_map.channels == 1 && flat.gain_map.width == 3 && flat.gain_map.height == 2,
+          "a constant gain map must shrink by the largest common factor (16)");
+  const auto flat_rebuilt = reconstruct_gain_map(flat.base_linear, flat.gain_map, flat.metadata,
+                                                 flat.headroom_stops);
+  require(flat_rebuilt.pixels == flat.base_linear.pixels || [&] {
+            for (std::size_t i = 0; i < flat_rebuilt.pixels.size(); ++i)
+              if (std::abs(flat_rebuilt.pixels[i] - flat.base_linear.pixels[i]) > 1e-6F) return false;
+            return true; }(), "a shrunk constant map must reconstruct the base");
+  auto fixed = pair_of(1.5F, 1.5F, 1.5F);
+  fixed.dual_rendition = true; fixed.authored_gain_channels = 3; fixed.fixed_gain_channels = true;
+  for (unsigned c = 0; c < 3; ++c) {
+    fixed.authored_gain_map.base_offset[c] = 1.0F / 64; fixed.authored_gain_map.alternate_offset[c] = 1.0F / 64;
+  }
+  require(pack(std::move(fixed)).gain_map.channels == 3, "a model grid must keep its three channels");
+}
+
 int main() {
   try { test_zero_and_spatial_gain(); test_model_grading(); test_final_gain_statistics();
         test_hdr_source_reconstructs_itself(); test_hdr_source_outside_p3();
@@ -700,7 +756,8 @@ int main() {
         test_content_light_mapping(); test_authored_dual_renditions();
         test_dual_nonunit_base_headroom(); test_single_hdr_midtones_at_half_strength();
         test_dual_metadata_range_and_edited_mono(); test_dual_signed_rgb_gain();
-        test_mono_gain_with_zero_channels(); test_sdr_rolloff_ignores_expansion_start(); }
+        test_mono_gain_with_zero_channels(); test_sdr_rolloff_ignores_expansion_start();
+        test_iso_gain_channel_forms(); }
   catch(const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
   std::cout<<"graded model reconstruction and final gain statistics passed\n";
 }

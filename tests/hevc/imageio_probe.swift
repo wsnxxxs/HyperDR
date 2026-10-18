@@ -17,6 +17,10 @@
 //   image-specific luma scaling, no tone mapping) and its SDR decode, as
 //   linear extended Display P3: the peak channel value and peak luminance,
 //   and the content headroom ImageIO reports.
+// - With HYPERDR_PROBE_DUMP_HDR / HYPERDR_PROBE_DUMP_SDR set, those two decodes
+//   are also written to the named files as raw float32 linear Display P3
+//   (three uint32 width, height, 3, then RGB rows) for
+//   tests/hevc/gain_map_metrics.cpp.
 // - `regions`: for each `--region` (stored pixel coordinates, top-left
 //   origin, before any Exif orientation) minus every `--exclude`, per channel:
 //   log2(HDR / SDR) -- mean, maximum |·| and p99.9 |·| -- over the pixels whose
@@ -404,6 +408,17 @@ do {
     let sdrImage = try decode(file, hdr: false)
     let hdr = try render(hdrImage, in: linearSpace)
     let sdr = try render(sdrImage, in: linearSpace)
+    for (key, pixels) in [("HYPERDR_PROBE_DUMP_HDR", hdr), ("HYPERDR_PROBE_DUMP_SDR", sdr)] {
+        guard let output = ProcessInfo.processInfo.environment[key] else { continue }
+        let shape = [UInt32(pixels.width), UInt32(pixels.height), UInt32(3)]
+        var data = shape.withUnsafeBytes { Data($0) }
+        var rgb = [Float](); rgb.reserveCapacity(pixels.width * pixels.height * 3)
+        for i in stride(from: 0, to: pixels.values.count, by: 4) {
+            rgb.append(pixels.values[i]); rgb.append(pixels.values[i+1]); rgb.append(pixels.values[i+2])
+        }
+        rgb.withUnsafeBytes { data.append(contentsOf: $0) }
+        try data.write(to: URL(fileURLWithPath: output))
+    }
     report["hdr"] = peaks(hdr).merging(["content_headroom": Double(hdrImage.contentHeadroom)]) { a, _ in a }
     report["sdr"] = peaks(sdr).merging(["content_headroom": Double(sdrImage.contentHeadroom)]) { a, _ in a }
     if hdr.width != sdr.width || hdr.height != sdr.height {

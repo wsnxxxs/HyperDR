@@ -78,11 +78,6 @@ std::vector<std::uint8_t> encode_gain_map_jpeg(const GainMapResult&,
   fail_without_codecs("ISO gain-map JPEG encoding");
 }
 
-GainMapJpegEncoding encode_gain_map_jpeg_measured(const GainMapResult&,
-    const PhotoMetadata&, int, const FrameLayout*) {
-  fail_without_codecs("ISO gain-map JPEG encoding");
-}
-
 std::vector<std::uint8_t> encode_hdr_heic(const PhotoRenditions&,
                                           const PhotoMetadata&, int, HdrEncoding, HevcPreset) {
   fail_without_codecs("BT.2100 HEIC encoding");

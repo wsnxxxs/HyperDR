@@ -38,18 +38,6 @@ class ExportDimensionLimit : public std::runtime_error {
 [[nodiscard]] std::vector<std::uint8_t> encode_gain_map_jpeg(
     const GainMapResult& images, const PhotoMetadata& metadata, int quality);
 
-// The application variant derives recovery codes against the decoded final
-// primary JPEG. The returned measurements describe exactly those stored codes.
-struct FrameLayout;
-struct GainMapJpegEncoding {
-  std::vector<std::uint8_t> bytes;
-  GainMapMetadata metadata;
-  RenderStats stats;
-};
-[[nodiscard]] GainMapJpegEncoding encode_gain_map_jpeg_measured(
-    const GainMapResult& images, const PhotoMetadata& metadata, int quality,
-    const FrameLayout* frame = nullptr);
-
 // Compatibility overloads for callers that already own gain-map renditions.
 // The application uses the PhotoRenditions overloads below for direct HDR.
 [[nodiscard]] std::vector<std::uint8_t> encode_hdr_heic(

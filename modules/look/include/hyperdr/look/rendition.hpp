@@ -103,6 +103,9 @@ struct PhotoRenditions {
   bool hdr_is_source{false};
   bool dual_rendition{false};
   std::uint32_t authored_gain_channels{1};
+  // A model or external gain grid: the stored gain map keeps the grid's
+  // channel count instead of one chosen from the codes' content.
+  bool fixed_gain_channels{false};
   AuthoredGainMap authored_gain_map{};
   RenderStats stats;
   bool clamp_srgb{false};

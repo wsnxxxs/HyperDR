@@ -77,10 +77,7 @@ draw anything into the frame that depends on the photo's HDR pixels.
   photo's security scope) and must set `document.pixelSize` to the full-size
   oriented dimensions the layout uses; M3 calls `FrameExportPlan.make` with the
   export's own pixel size and sets `command.frame`. The SDR comparison
-  (press-and-hold) in the design is not built. On iPhone the same views run
-  inside a full-screen sheet; `FramePreviewCanvas` needs a UIKit counterpart.
-- The Swift side was written without Xcode and has not been built: expect
-  compile fixes on first build.
+  (press-and-hold) in the design is not built.
 
 ## Status (2026-10-18)
 

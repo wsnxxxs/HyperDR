@@ -26,14 +26,17 @@ public struct PreviewRequest: Sendable, Hashable {
     public var region: PreviewRegion?
     /// Only classifies events; it is not part of the cache key.
     public var purpose: Purpose
+    /// Caller identity for terminal events; excluded from render/cache identity.
+    public var submissionID: UUID?
 
     public init(session: SessionID, options: EditOptions, maxEdge: Int,
-                region: PreviewRegion? = nil, purpose: Purpose = .edit) {
+                region: PreviewRegion? = nil, purpose: Purpose = .edit, submissionID: UUID? = nil) {
         self.session = session
         self.options = options
         self.maxEdge = maxEdge
         self.region = region
         self.purpose = purpose
+        self.submissionID = submissionID
     }
 }
 
@@ -50,6 +53,8 @@ public struct PreviewTimings: Sendable, Hashable {
 public struct PreviewResult: Sendable {
     public let request: PreviewRequest
     public let frame: PreviewFrame
+    /// Digest of the source used to render this frame, including cache hits.
+    public let sourceDigest: String
     public let fromCache: Bool
     public let timings: PreviewTimings
 }

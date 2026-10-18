@@ -190,7 +190,118 @@ private actor TypedCancelRenderer: PreviewRenderSession {
     func close() async {}
 }
 
-@Suite struct PreviewServiceTests {
+/// Parks one chosen session lookup until the test releases it, and answers
+/// every lookup with the current (replaceable) photo.
+private actor ParkingProvider {
+    private var photo: PhotoSession
+    private let parkedCall: Int
+    private var calls = 0
+    private var parked: CheckedContinuation<Void, Never>?
+
+    init(_ photo: PhotoSession, parkedCall: Int) {
+        self.photo = photo
+        self.parkedCall = parkedCall
+    }
+
+    var lookupCount: Int { calls }
+    var isParked: Bool { parked != nil }
+
+    func lookup(_ id: SessionID) async -> PhotoSession {
+        calls += 1
+        if calls == parkedCall { await withCheckedContinuation { parked = $0 } }
+        return photo
+    }
+
+    func replaceDigest(_ digest: String) {
+        photo = PhotoSession(id: photo.id, sourceURL: photo.sourceURL,
+            displayName: photo.displayName, byteCount: photo.byteCount,
+            sha256: digest, format: photo.format)
+    }
+
+    func release() {
+        parked?.resume()
+        parked = nil
+    }
+}
+
+/// A renderer whose first `close()` blocks until released, so a source-refresh
+/// replacement can be held open while another request resolves its session.
+private actor BlockingCloseRenderer: PreviewRenderSession {
+    let frame: PreviewFrame
+    private(set) var calls = 0
+    private(set) var closes = 0
+    private var blocked: CheckedContinuation<Void, Never>?
+    private var blocksClose: Bool
+
+    init(_ frame: PreviewFrame, blocksClose: Bool) {
+        self.frame = frame
+        self.blocksClose = blocksClose
+    }
+
+    var isClosing: Bool { blocked != nil }
+
+    func renderFrame(_ request: EngineRequest) async throws -> PreviewFrame {
+        calls += 1
+        return frame
+    }
+
+    func close() async {
+        closes += 1
+        if blocksClose {
+            blocksClose = false
+            await withCheckedContinuation { blocked = $0 }
+        }
+    }
+
+    func releaseClose() {
+        blocked?.resume()
+        blocked = nil
+    }
+}
+
+@Suite(.timeLimit(.minutes(1))) struct PreviewServiceTests {
+    @Test func repeatedValuesKeepDistinctTerminalIdentitiesWithoutMissingTheCache() async throws {
+        let photo = fakeSession()
+        let renderer = FakeRenderer(frame: try await makeFrame())
+        let service = try makeService(renderer, photo)
+        var first = request(photo)
+        first.submissionID = UUID()
+        var latest = first
+        latest.submissionID = UUID()
+        #expect(first != latest)
+        let rendered = try await service.render(first)
+        let cached = try await service.render(latest)
+        #expect(rendered.request == first)
+        #expect(cached.request == latest && cached.fromCache)
+        #expect(await renderer.calls == 1)
+        await service.detach(photo.id)
+    }
+
+    @Test func equalValueSubmitSupersedesOnlyTheOlderIdentity() async throws {
+        let photo = fakeSession()
+        let renderer = FakeRenderer(frame: try await makeFrame(), delay: .milliseconds(80))
+        let service = try makeService(renderer, photo)
+        let stream = service.events(for: photo.id)
+        let recorder = EventRecorder()
+        let observer = Task { for await event in stream { await recorder.append(event) } }
+        defer { observer.cancel() }
+        var first = request(photo)
+        first.submissionID = UUID()
+        var latest = first
+        latest.submissionID = UUID()
+        await service.submit(first)
+        try #require(await waitUntil { await renderer.calls == 1 })
+        let newest = latest
+        await service.submit(newest)
+        try #require(await waitUntil { finished(newest, in: await recorder.snapshot()) != nil })
+        let events = await recorder.snapshot()
+        #expect(superseded(first, in: events))
+        #expect(!superseded(latest, in: events))
+        #expect(finished(first, in: events) == nil)
+        #expect(await renderer.calls == 1)
+        await service.detach(photo.id)
+    }
+
     @Test func renderCoalescesAndCaches() async throws {
         let frame = try await makeFrame()
         let renderer = FakeRenderer(frame: frame, delay: .milliseconds(60))
@@ -612,12 +723,16 @@ private actor TypedCancelRenderer: PreviewRenderSession {
         let value = request(session)
         let first = try await service.render(value)
         #expect(!first.fromCache)
+        #expect(first.sourceDigest == session.sha256)
         #expect(factoryCalls.value == 1)
-        #expect(try await service.render(value).fromCache)
+        let cached = try await service.render(value)
+        #expect(cached.fromCache)
+        #expect(cached.sourceDigest == session.sha256)
         // The file behind the session was replaced: same id, new digest.
         await provider.replaceDigest("replacement-digest")
         let refreshed = try await service.render(value)
         #expect(!refreshed.fromCache, "a replaced source must not serve the old frame")
+        #expect(refreshed.sourceDigest == "replacement-digest")
         #expect(await renderer.calls == 2)
         #expect(factoryCalls.value == 2, "the stale engine session must be replaced")
     }
@@ -882,5 +997,242 @@ private actor TypedCancelRenderer: PreviewRenderSession {
             Issue.record("A live follower inherited \(error.code)")
         }
         #expect(await renderer.calls == 2)
+    }
+
+    /// Two submits both see a changed source digest. The newer one starts
+    /// replacing the engine session; the older one finishes its lookup while
+    /// that replacement is still closing the old renderer. The newer request
+    /// must still render (or at worst be superseded), never be reported as a
+    /// `cancelled` failure, and no second replacement renderer may be opened
+    /// while the old one is closing.
+    @Test(arguments: [false, true]) func concurrentSubmitsAcrossASourceRefreshAreNotReportedAsFailures(closeFirst: Bool) async throws {
+        let frame = try await makeFrame()
+        let original = BlockingCloseRenderer(frame, blocksClose: true)
+        let replacement = BlockingCloseRenderer(frame, blocksClose: false)
+        let session = fakeSession()
+        // Lookup 1 is the explicit attach below; lookup 2 is the older submit.
+        let provider = ParkingProvider(session, parkedCall: 2)
+        let factoryCalls = LockedCounter()
+        let service = try PreviewService(schema: Engine.schema(), buildFingerprint: "test-build",
+            knownModels: ["research-cnn-v1": true], previewMaxEdge: 2048,
+            previewTimeout: .seconds(2), rawDecodeSlots: 1, rawDecodeTimeout: .seconds(1),
+            cacheEntries: 2, cacheBytes: 4 << 20,
+            sessionProvider: { id in await provider.lookup(id) },
+            rendererFactory: { _ in
+                factoryCalls.increment()
+                return factoryCalls.value == 1 ? original : replacement
+            })
+        _ = try await service.render(request(session, contrast: 0.9))
+        #expect(factoryCalls.value == 1)
+        let recorder = EventRecorder()
+        let eventStream = service.events(for: session.id)
+        let collector = Task { for await event in eventStream { await recorder.append(event) } }
+        await provider.replaceDigest("replacement-digest")
+        let older = request(session, contrast: 1.1)
+        let newer = request(session, contrast: 1.2)
+        let olderSubmit = Task { await service.submit(older) }
+        try #require(await waitUntil { await provider.isParked })
+        let newerSubmit = Task { await service.submit(newer) }
+        // The newer submit is now inside the replacement, holding the old
+        // renderer's gate while it closes.
+        try #require(await waitUntil { await original.isClosing })
+        if closeFirst { await original.releaseClose() }
+        await provider.release()
+        // The older submit now has its (refreshed) photo too. It must wait for
+        // the replacement rather than open a renderer beside the closing one.
+        if !closeFirst {
+            #expect(await waitUntil(timeout: .milliseconds(200)) { factoryCalls.value > 1 } == false,
+                "a second renderer must not open while the replaced one is closing")
+        }
+        await original.releaseClose()
+        await olderSubmit.value
+        await newerSubmit.value
+        #expect(await waitUntil { finished(newer, in: await recorder.snapshot()) != nil })
+        let events = await recorder.snapshot()
+        let failures = events.compactMap { event -> String? in
+            if case .failed(_, let error) = event { return error.code }
+            return nil
+        }
+        #expect(failures.isEmpty, "unexpected failures: \(failures)")
+        #expect(superseded(older, in: events))
+        #expect(finished(older, in: events) == nil)
+        #expect(finished(newer, in: events)?.sourceDigest == "replacement-digest")
+        #expect(factoryCalls.value == 2)
+        #expect(await original.closes == 1)
+        #expect(await replacement.calls == 1)
+        collector.cancel()
+    }
+}
+
+extension PreviewServiceTests {
+    @Test(.timeLimit(.minutes(1))) func detachDuringReplacementClosesIdempotentlyAndFinishesStream() async throws {
+        let frame = try await makeFrame()
+        let original = BlockingCloseRenderer(frame, blocksClose: true)
+        let replacement = BlockingCloseRenderer(frame, blocksClose: false)
+        let session = fakeSession()
+        let provider = DigestProvider(session)
+        let factories = LockedCounter()
+        let streamFinished = LockedCounter()
+        let service = try PreviewService(schema: Engine.schema(), buildFingerprint: "review",
+            knownModels: ["research-cnn-v1": true], previewMaxEdge: 2048,
+            previewTimeout: .seconds(2), rawDecodeSlots: 1, rawDecodeTimeout: .seconds(1),
+            cacheEntries: 2, cacheBytes: 4 << 20,
+            sessionProvider: { id in await provider.session(id) },
+            rendererFactory: { _ in
+                factories.increment()
+                return factories.value == 1 ? original : replacement
+            })
+        _ = try await service.render(request(session))
+        let stream = service.events(for: session.id)
+        let collector = Task { for await _ in stream {} ; streamFinished.increment() }
+        await provider.replaceDigest("changed")
+        let submit = Task { await service.submit(request(session, contrast: 1.2)) }
+        try #require(await waitUntil { await original.isClosing })
+        let detach = Task { await service.detach(session.id) }
+        try #require(await waitUntil { streamFinished.value == 1 })
+        await original.releaseClose()
+        await submit.value
+        await detach.value
+        await collector.value
+        #expect(factories.value == 1)
+        #expect(await original.closes == 2)
+        print("review detach/replacement: close calls=\(await original.closes), stream finished=\(streamFinished.value), factories=\(factories.value)")
+    }
+
+    @Test(.timeLimit(.minutes(1))) func lookupCancellationHasTerminalSuperseded() async throws {
+        let session = fakeSession()
+        let frame = try await makeFrame()
+        let renderer = FakeRenderer(frame: frame)
+        let service = try PreviewService(schema: Engine.schema(), buildFingerprint: "review",
+            knownModels: ["research-cnn-v1": true], previewMaxEdge: 2048,
+            previewTimeout: .seconds(2), rawDecodeSlots: 1, rawDecodeTimeout: .seconds(1),
+            cacheEntries: 2, cacheBytes: 4 << 20,
+            sessionProvider: { _ in throw HyperDRError(code: "cancelled", message: "Store closed") },
+            rendererFactory: { _ in renderer })
+        let recorder = EventRecorder()
+        let stream = service.events(for: session.id)
+        let collector = Task { for await event in stream { await recorder.append(event) } }
+        let value = request(session)
+        await service.submit(value)
+        try #require(await waitUntil { superseded(value, in: await recorder.snapshot()) })
+        let events = await recorder.snapshot()
+        #expect(events.count == 1)
+        collector.cancel()
+    }
+}
+
+private actor SnapshotProvider {
+    private var photo: PhotoSession
+    private var calls = 0
+    private var parked: CheckedContinuation<Void, Never>?
+    init(_ photo: PhotoSession) { self.photo = photo }
+    var isParked: Bool { parked != nil }
+    func lookup(_ id: SessionID) async -> PhotoSession {
+        calls += 1
+        let snapshot = photo
+        if calls == 2 { await withCheckedContinuation { parked = $0 } }
+        return snapshot
+    }
+    func replaceDigest(_ digest: String) {
+        photo = PhotoSession(id: photo.id, sourceURL: photo.sourceURL,
+            displayName: photo.displayName, byteCount: photo.byteCount, sha256: digest, format: photo.format)
+    }
+    func release() { parked?.resume(); parked = nil }
+}
+
+extension PreviewServiceTests {
+    @Test(.timeLimit(.minutes(1))) func olderSnapshotMustNotCancelANewerSourceRender() async throws {
+        let frame = try await makeFrame()
+        let original = FakeRenderer(frame: frame)
+        let current = FakeRenderer(frame: frame, delay: .milliseconds(600))
+        let photo = fakeSession()
+        let provider = SnapshotProvider(photo)
+        let factories = LockedCounter()
+        let service = try PreviewService(schema: Engine.schema(), buildFingerprint: "review",
+            knownModels: ["research-cnn-v1": true], previewMaxEdge: 2048,
+            previewTimeout: .seconds(2), rawDecodeSlots: 1, rawDecodeTimeout: .seconds(1),
+            cacheEntries: 2, cacheBytes: 4 << 20,
+            sessionProvider: { id in await provider.lookup(id) },
+            rendererFactory: { _ in
+                factories.increment()
+                if factories.value == 1 { return original }
+                return current
+            })
+        _ = try await service.render(request(photo, contrast: 0.9))
+        let recorder = EventRecorder()
+        let stream = service.events(for: photo.id)
+        let collector = Task { for await e in stream { await recorder.append(e) } }
+        await provider.replaceDigest("B")
+        let older = request(photo, contrast: 1.1)
+        let newer = request(photo, contrast: 1.2)
+        let oldTask = Task { await service.submit(older) }
+        try #require(await waitUntil { await provider.isParked })
+        await provider.replaceDigest("C")
+        await service.submit(newer)
+        try #require(await waitUntil { await current.calls == 1 })
+        await provider.release()
+        await oldTask.value
+        try await Task.sleep(for: .milliseconds(700))
+        let events = await recorder.snapshot()
+        print("review stale snapshot: factories=\(factories.value), latest cancellations=\(await current.cancellations), latest finished=\(finished(newer, in: events) != nil), latest superseded=\(superseded(newer, in: events))")
+        #expect(await current.cancellations == 0, "An older snapshot cancelled the current source's latest render")
+        #expect(finished(newer, in: events)?.sourceDigest == "C")
+        #expect(factories.value == 2, "Old lookup must not roll C back to B then forward again")
+        collector.cancel()
+        await service.detach(photo.id)
+    }
+}
+
+extension PreviewServiceTests {
+    @Test(.timeLimit(.minutes(1))) func replacementTerminatesBothRunningAndPendingSubmits() async throws {
+        let frame = try await makeFrame()
+        let original = FakeRenderer(frame: frame, delay: .milliseconds(600))
+        let replacement = FakeRenderer(frame: frame)
+        let photo = fakeSession()
+        let provider = DigestProvider(photo)
+        let factories = LockedCounter()
+        let service = try PreviewService(schema: Engine.schema(), buildFingerprint: "test-build",
+            knownModels: ["research-cnn-v1": true], previewMaxEdge: 2048,
+            previewTimeout: .seconds(2), rawDecodeSlots: 1, rawDecodeTimeout: .seconds(1),
+            cacheEntries: 2, cacheBytes: 4 << 20,
+            sessionProvider: { id in await provider.session(id) },
+            rendererFactory: { _ in
+                factories.increment()
+                return factories.value == 1 ? original : replacement
+            })
+        let recorder = EventRecorder()
+        let stream = service.events(for: photo.id)
+        let collector = Task { for await event in stream { await recorder.append(event) } }
+        defer { collector.cancel() }
+        let running = request(photo, contrast: 1.1)
+        let pending = request(photo, contrast: 1.2)
+        await service.submit(running)
+        try #require(await waitUntil { await original.calls == 1 })
+        await service.submit(pending)
+        await provider.replaceDigest("new-source")
+        // A direct reference render also replaces a changed source, and must
+        // end both edit requests whose engine state is being discarded.
+        var reference = request(photo, contrast: 0.9)
+        reference.purpose = .reference
+        let result = try await service.render(reference)
+        #expect(result.sourceDigest == "new-source")
+        try #require(await waitUntil {
+            let events = await recorder.snapshot()
+            return superseded(running, in: events) && superseded(pending, in: events)
+        })
+        let events = await recorder.snapshot()
+        for request in [running, pending] {
+            let terminals = events.filter {
+                switch $0 {
+                case .superseded(let value): value == request
+                case .failed(let value, _): value == request
+                case .finished(let value): value.request == request
+                default: false
+                }
+            }
+            #expect(terminals.count == 1, "every discarded request ends exactly once")
+        }
+        #expect(await original.cancellations == 1)
+        await service.detach(photo.id)
     }
 }

@@ -583,3 +583,50 @@ private func requireHyperDRError(_ body: () async throws -> Void) async -> Strin
         #expect(FileManager.default.fileExists(atPath: marker.path))
     }
 }
+
+
+extension K1ReviewRegressionTests {
+    @Test(.timeLimit(.minutes(1))) func cancelledActivationCreatorKeepsASurvivingWaitersLease() async throws {
+        let environment = try ReviewEnvironment()
+        let store = environment.store()
+        let source = try environment.largeSource("activation-shared.png", megabytes: 512)
+        let photo = try await store.open(source)
+        await store.close(photo.id)
+        try environment.appendByte(to: source)
+        let access = environment.access
+        let creator = Task { await store.restoreLastOutcome() }
+        try #require(await waitUntil { access.counts.starts == 2 })
+        let survivor = Task { try await store.session(photo.id) }
+        // The changed 512 MB source holds activation in its asynchronous hash;
+        // give the second waiter an actor turn before cancelling the creator.
+        try await Task.sleep(for: .milliseconds(20))
+        creator.cancel()
+        guard case .unavailable(let failure) = await creator.value else {
+            Issue.record("Expected cancelled creator"); return
+        }
+        #expect(failure.code == "cancelled")
+        let claimed = try await survivor.value
+        #expect(claimed.id == photo.id)
+        #expect(environment.access.counts == (2, 1))
+        await store.close(photo.id)
+        #expect(environment.access.counts == (2, 2))
+    }
+
+    @Test(.timeLimit(.minutes(1))) func cancelledRefreshDoesNotReleaseAnAlreadyOpenLease() async throws {
+        let environment = try ReviewEnvironment()
+        let store = environment.store()
+        let photo = try await store.open(environment.source("already-open.png"))
+        let caller = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await store.restoreLastOutcome()
+        }
+        guard case .unavailable(let failure) = await caller.value else {
+            Issue.record("Expected cancellation"); return
+        }
+        #expect(failure.code == "cancelled")
+        #expect(environment.access.counts == (1, 0))
+        #expect(try await store.session(photo.id).id == photo.id)
+        await store.close(photo.id)
+        #expect(environment.access.counts == (1, 1))
+    }
+}

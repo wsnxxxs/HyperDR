@@ -105,6 +105,64 @@ private struct SwapExportAncestorAccess: SecurityScopedAccess {
     }
 }
 
+@Suite(.timeLimit(.minutes(1))) struct ExportTargetStagingTests {
+    private func finishedExport(_ env: JobEnvironment) async throws -> (PhotoSession, JobTicket) {
+        let photo = try await env.photo()
+        let runner = env.runner()
+        let ticket = try await runner.start(session: photo.id, options: EditOptions())
+        try #require(await eventually { await runner.read(ticket.job, offset: 0)?.summary.done == true })
+        return (photo, ticket)
+    }
+    private func leftovers(_ folder: URL) throws -> [String] {
+        try FileManager.default.contentsOfDirectory(atPath: folder.path).filter { $0.hasPrefix(".hyperdr-export-") }
+    }
+
+    /// K3-K4-K6 rereview §4: a staging directory that cannot be opened, or
+    /// that fails the owner/0700 check, is removed rather than left hidden in
+    /// the user's folder.
+    @Test func failedStagingChecksLeaveNoPrivateDirectory() async throws {
+        let env = try JobEnvironment()
+        let (photo, ticket) = try await finishedExport(env)
+        let destination = env.root.appendingPathComponent("destination")
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        var unopenable = ExportTarget.CopyHooks()
+        unopenable.openStaging = { _, _ in errno = EACCES; return -1 }
+        // Opens the destination itself: a directory that is not 0700.
+        var wrongDirectory = ExportTarget.CopyHooks()
+        wrongDirectory.openStaging = { parent, _ in openat(parent, ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC) }
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: destination.path)
+        for hooks in [unopenable, wrongDirectory] {
+            let target = ExportTarget(configuration: env.configuration, sessions: env.sessions,
+                access: SystemSecurityScopedAccess(), hooks: hooks)
+            #expect(await failureCode { _ = try await target.save(session: photo.id, export: ticket.export,
+                oneOff: destination) } == "export_folder_unwritable")
+            #expect(try leftovers(destination) == [])
+        }
+        #expect(try FileManager.default.contentsOfDirectory(atPath: destination.path) == [])
+    }
+
+    /// K3-K4-K6 rereview §4: once the file is published, a failed folder sync
+    /// is a successful save that says the sync was not confirmed, not
+    /// `export_folder_unwritable` (a retry would save "photo (2).tif").
+    @Test func folderSyncFailureAfterPublishingIsASavedExport() async throws {
+        let env = try JobEnvironment()
+        let (photo, ticket) = try await finishedExport(env)
+        let destination = env.root.appendingPathComponent("destination")
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        var hooks = ExportTarget.CopyHooks()
+        hooks.syncFolder = { _ in errno = EIO; return -1 }
+        let target = ExportTarget(configuration: env.configuration, sessions: env.sessions,
+            access: SystemSecurityScopedAccess(), hooks: hooks)
+        let saved = try await target.save(session: photo.id, export: ticket.export, oneOff: destination)
+        #expect(saved.syncConfirmed == false)
+        #expect(saved.name == "photo.tif")
+        #expect(try Data(contentsOf: saved.url) == Data([1,2,3]))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: destination.path) == ["photo.tif"])
+        let normal = ExportTarget(configuration: env.configuration, sessions: env.sessions)
+        #expect(try await normal.save(session: photo.id, export: ticket.export, oneOff: destination).syncConfirmed)
+    }
+}
+
 @Suite(.timeLimit(.minutes(1))) struct ExportTargetTests {
     @Test func copiesAreExclusiveAndOneOffDoesNotReplaceTheRememberedFolder() async throws {
         let env = try JobEnvironment()
@@ -246,6 +304,26 @@ private func failureCode(_ operation: () async throws -> Void) async -> String? 
         short.append("brief\n")
         #expect(!short.read(0).truncated && short.read(0).text == "brief\n")
         #expect(short.read(-1).truncated)
+        // test_the_log_is_served_incrementally_by_offset: a non-zero offset
+        // inside the retained range returns the suffix; `end` returns nothing.
+        #expect(short.read(3).text == "ef\n" && !short.read(3).truncated)
+        #expect(short.read(short.end).text.isEmpty && !short.read(short.end).truncated)
+        #expect(log.read(2).text == "\u{301}ab")   // `truncated` reports the dropped head
+        #expect(log.read(log.end).text.isEmpty)
+    }
+    /// The runner hands back `end` as the next offset; reading from it again
+    /// returns nothing until more is logged.
+    @Test func runnerLogOffsetResumesAtTheEnd() async throws {
+        let env = try JobEnvironment()
+        let photo = try await env.photo()
+        let runner = env.runner()
+        let ticket = try await runner.start(session: photo.id, options: EditOptions())
+        try #require(await eventually { await runner.read(ticket.job, offset: 0)?.summary.done == true })
+        let first = try #require(await runner.read(ticket.job, offset: 0))
+        #expect(!first.text.isEmpty)
+        #expect(first.offset == first.logStart + first.text.unicodeScalars.count)
+        let next = try #require(await runner.read(ticket.job, offset: first.offset))
+        #expect(next.text.isEmpty && !next.truncated && next.offset == first.offset)
     }
     @Test func publicationPrecedesTerminalAndProgressRemainsOrdered() async throws {
         let env = try JobEnvironment()

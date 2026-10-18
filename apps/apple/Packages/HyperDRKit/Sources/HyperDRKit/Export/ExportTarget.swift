@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import HyperDREngine
+import os
 
 public struct ExportFolderState: Sendable {
     public let label: String
@@ -10,24 +11,39 @@ public struct SavedExport: Sendable {
     public let url: URL
     public let name: String
     public let folderLabel: String
+    /// False when the file was published under its name but syncing the
+    /// folder failed: the export exists and must not be retried as a failure
+    /// (that would save a second copy), yet a crash could still lose the name.
+    public let syncConfirmed: Bool
 }
 
 public actor ExportTarget {
     typealias CopyRead = @Sendable (Int32, UnsafeMutableRawPointer?, Int) -> Int
+    /// Test seams for the private staging directory and the final folder sync.
+    struct CopyHooks: Sendable {
+        var read: CopyRead = { Darwin.read($0, $1, $2) }
+        var openStaging: @Sendable (Int32, String) -> Int32 = {
+            openat($0, $1, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        }
+        var syncFolder: @Sendable (Int32) -> Int32 = { fsync($0) }
+    }
+    private static let log = Logger(subsystem: "com.hyperdr.HyperDR", category: "Export")
     private let sessions: SessionStore
     private let roots: [URL]
     private let bookmarkFile: URL
     private let access: any SecurityScopedAccess
-    private let copyRead: CopyRead
+    private let hooks: CopyHooks
     private var selected: URL?
 
     public init(configuration: KitConfiguration, sessions: SessionStore) {
         self.init(configuration: configuration, sessions: sessions, access: SystemSecurityScopedAccess())
     }
     init(configuration: KitConfiguration, sessions: SessionStore, access: any SecurityScopedAccess,
-         copyRead: @escaping CopyRead = { Darwin.read($0, $1, $2) }) {
+         copyRead: CopyRead? = nil, hooks: CopyHooks = CopyHooks()) {
         self.sessions = sessions; self.access = access
-        self.copyRead = copyRead
+        var hooks = hooks
+        if let copyRead { hooks.read = copyRead }
+        self.hooks = hooks
         roots = [configuration.supportDirectory, configuration.cacheDirectory]
         bookmarkFile = configuration.supportDirectory.appendingPathComponent("export-folder.bookmark")
         if let data = try? Data(contentsOf: bookmarkFile) {
@@ -75,11 +91,11 @@ public actor ExportTarget {
         guard let destination = oneOff ?? selected else { throw Self.error("export_folder_unset") }
         let source = try await sessions.exportFile(session, export: export)
         let roots = self.roots
-        let read = copyRead
+        let hooks = self.hooks
         let lease = SecurityScopeLease(url: destination, access: access)
         defer { lease.stop() }
         let task = Task.detached {
-            try Self.copy(source, to: destination, excluding: roots, read: read)
+            try Self.copy(source, to: destination, excluding: roots, hooks: hooks)
         }
         return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
     }
@@ -130,7 +146,8 @@ public actor ExportTarget {
             return descriptor
         } catch { Darwin.close(descriptor); throw error }
     }
-    private static func copy(_ source: SessionExportFile, to folder: URL, excluding roots: [URL], read: CopyRead) throws -> SavedExport {
+    private static func copy(_ source: SessionExportFile, to folder: URL, excluding roots: [URL],
+                             hooks: CopyHooks) throws -> SavedExport {
         let directory = try openFolder(folder, excluding: roots)
         defer { Darwin.close(directory) }
         let input = source.descriptor
@@ -138,12 +155,19 @@ public actor ExportTarget {
         guard fstat(input, &info) == 0, info.st_mode & S_IFMT == S_IFREG else { throw error("source_missing") }
         let temporary = ".hyperdr-export-\(UUID().uuidString)"
         guard mkdirat(directory, temporary, 0o700) == 0 else { throw error("export_folder_unwritable") }
-        let staging = openat(directory, temporary, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-        guard staging >= 0 else { throw error("export_folder_unwritable") }
+        // Without a verified descriptor the directory cannot be cleaned by
+        // identity; remove the name we just created only if it is still an
+        // empty directory (AT_REMOVEDIR), so nothing with contents is touched.
+        let staging = hooks.openStaging(directory, temporary)
+        guard staging >= 0 else {
+            unlinkat(directory, temporary, AT_REMOVEDIR)
+            throw error("export_folder_unwritable")
+        }
         var stagingInfo = stat()
         guard fstat(staging, &stagingInfo) == 0, stagingInfo.st_uid == geteuid(),
               stagingInfo.st_mode & 0o777 == 0o700 else {
             Darwin.close(staging)
+            unlinkat(directory, temporary, AT_REMOVEDIR)
             throw error("export_folder_unwritable")
         }
         let leaf = "payload"
@@ -173,7 +197,7 @@ public actor ExportTarget {
         var buffer = [UInt8](repeating: 0, count: 1 << 20)
         while true {
             try Task.checkCancellation()
-            let count = read(input, &buffer, buffer.count)
+            let count = hooks.read(input, &buffer, buffer.count)
             if count < 0 { if errno == EINTR { continue }; throw error("export_folder_unwritable") }
             if count == 0 { break }
             try buffer.withUnsafeBytes { bytes in
@@ -208,7 +232,15 @@ public actor ExportTarget {
             guard errno == EEXIST else { throw error("export_folder_unwritable") }
             number += 1
         }
-        guard fsync(directory) == 0 else { throw error("export_folder_unwritable") }
-        return SavedExport(url: canonical.appendingPathComponent(name), name: name, folderLabel: label(canonical))
+        // The file is already published under `name`. Reporting a failure now
+        // would make the user retry and get "name (2)"; report success and say
+        // the folder sync was not confirmed.
+        let synced = hooks.syncFolder(directory) == 0
+        if !synced {
+            let reason = String(cString: strerror(errno))
+            log.warning("Saved \(name, privacy: .public) but could not sync its folder: \(reason, privacy: .public)")
+        }
+        return SavedExport(url: canonical.appendingPathComponent(name), name: name,
+                           folderLabel: label(canonical), syncConfirmed: synced)
     }
 }

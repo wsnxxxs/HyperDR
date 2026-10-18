@@ -19,15 +19,16 @@ if(APPLE)
     # lazy static tables, then require byte-identical results.
     # AVIF PQ carries no LittleCMS creation timestamp, so worker/main export
     # bytes are deterministic without a clock interposer or test environment.
-    add_executable(capi_small_stack_test small_stack.c)
+    add_executable(capi_small_stack_test small_stack.c jpeg_inspect.cpp)
     set_target_properties(capi_small_stack_test PROPERTIES
       C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
       RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
-    target_link_libraries(capi_small_stack_test PRIVATE HyperDR::capi Threads::Threads)
+    target_link_libraries(capi_small_stack_test PRIVATE HyperDR::capi HyperDR::app Threads::Threads)
     add_test(NAME capi_small_stack_test COMMAND capi_small_stack_test
       ${PROJECT_SOURCE_DIR}/build/fixtures/sony-ilce-7s.ARW
       ${PROJECT_SOURCE_DIR}/tests/macos_t2/fixtures/gamma-1-control.heic)
-    set_tests_properties(capi_small_stack_test PROPERTIES TIMEOUT 180)
+    set_tests_properties(capi_small_stack_test PROPERTIES TIMEOUT 180
+      ENVIRONMENT "DYLD_INSERT_LIBRARIES=$<TARGET_FILE:capi_test_clock>")
   endif()
 endif()
 find_package(Python3 COMPONENTS Interpreter QUIET)

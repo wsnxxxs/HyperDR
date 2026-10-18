@@ -329,7 +329,7 @@ void adopt_as_authored(PhotoRenditions& photo, const GainMapMetadata& metadata) 
 
 std::vector<std::uint8_t> encode_for(const PhotoRenditions& photo, const GainMapResult& images,
                                      const PhotoMetadata& metadata,
-                                     const ConvertOptions& options) {
+                                     const ConvertOptions& options, FileResult& result) {
   switch (options.encoding) {
     case HdrEncoding::SdrJpeg:
       return encode_sdr_jpeg(photo.sdr, metadata, options.quality, resolved_sdr_gamut(options));
@@ -338,11 +338,17 @@ std::vector<std::uint8_t> encode_for(const PhotoRenditions& photo, const GainMap
     case HdrEncoding::Adaptive:
       return encode_adaptive_heic(images, metadata, options.quality, options.depth,
                                   options.hevc_preset);
-    case HdrEncoding::UltraHdr:
-      if (images.gain_map.pixels.empty()) {
-        return encode_ultrahdr_jpeg(photo, metadata, options.quality);
-      }
-      return encode_ultrahdr_jpeg(images, metadata, options.quality);
+    case HdrEncoding::UltraHdr: {
+      auto encoded = encode_gain_map_jpeg_measured(images, metadata, options.quality,
+          result.frame ? &*result.frame : nullptr);
+      result.stats = encoded.stats;
+      // A file without headroom declares only a token one; report none.
+      const float declared = rational_value(encoded.metadata.alternate_headroom);
+      result.headroom_stops = declared > kEpsilon ? declared : 0.0F;
+      result.gain_min = encoded.stats.gain_min_stops;
+      result.gain_max = encoded.stats.gain_max_stops;
+      return std::move(encoded.bytes);
+    }
     case HdrEncoding::AvifPq:
     case HdrEncoding::AvifHlg:
       return encode_avif(photo, metadata, options.quality, options.encoding);
@@ -358,7 +364,7 @@ void verify_encoded(const std::vector<std::uint8_t>& bytes,
                     const ConvertOptions& options) {
   if (options.encoding == HdrEncoding::SdrTiff) verify_sdr_tiff(bytes);
   else if (options.encoding == HdrEncoding::SdrJpeg) verify_sdr_jpeg(bytes);
-  else if (options.encoding == HdrEncoding::UltraHdr) verify_ultrahdr_jpeg(bytes);
+  else if (options.encoding == HdrEncoding::UltraHdr) verify_gain_map_jpeg(bytes);
   else if (is_avif_encoding(options.encoding)) verify_avif_decodable(bytes);
   else verify_heic_decodable(bytes, options.encoding);
 }
@@ -369,6 +375,12 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
   auto& result = staged.result;
   try {
     const auto decoded = Clock::now();
+    if (options.decode_intent == DecodeIntent::Export &&
+        (options.encoding == OutputEncoding::UltraHdr || options.encoding == OutputEncoding::SdrJpeg)) {
+      const auto& dimensions = staged.image.decode;
+      if (dimensions.target_width > 65500 || dimensions.target_height > 65500)
+        throw ExportDimensionLimit(dimensions.target_width, dimensions.target_height);
+    }
     require_decode_resolution(options, staged.image.decode);
     const auto domain = staged.image.describe_input().domain;
     if ((domain == InputDomain::kDisplayReferredHdr ||
@@ -438,11 +450,11 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     }
     if (is_sdr_encoding(options.encoding) && resolved_sdr_gamut(options) == ColorGamut::kSrgb)
       fit_sdr_to_srgb(photo.sdr);
-    const bool codec_gain = options.encoding == OutputEncoding::UltraHdr &&
-        !predicted_gain && !photo.hdr_is_source;
-    const bool explicit_gain = is_gain_map_encoding(options.encoding) && !codec_gain;
+    const bool explicit_gain = is_gain_map_encoding(options.encoding);
+    if (predicted_gain && options.encoding == OutputEncoding::UltraHdr)
+      adopt_as_authored(photo, gain.metadata);
     if (explicit_gain) {
-      if (!predicted_gain || result.frame) {
+      if (!predicted_gain || result.frame || options.encoding == OutputEncoding::UltraHdr) {
         gain = gain_map_from_renditions(std::move(photo),
             options.encoding == OutputEncoding::UltraHdr ? GainMapWriterProfile::iso_generic
                                                         : GainMapWriterProfile::apple_strict);
@@ -512,15 +524,7 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
       sink->on_progress({"encode", path, .7, {}});
     }
     check_cancelled();
-    auto bytes = encode_for(photo, gain, staged.image.metadata, options);
-    if (codec_gain) {
-      const auto info = probe_ultrahdr_jpeg(bytes);
-      result.codec_gain = true;
-      result.gain_min = result.stats.gain_min_stops = *std::min_element(info.gain_min.begin(), info.gain_min.end());
-      result.gain_max = result.stats.gain_max_stops = *std::max_element(info.gain_max.begin(), info.gain_max.end());
-      result.stats.gain_gamma = info.gamma[0]; // XMP writer uses shared channel metadata.
-      result.headroom_stops = info.headroom_stops;
-    }
+    auto bytes = encode_for(photo, gain, staged.image.metadata, options, result);
     const auto codec_finished = Clock::now();
     photo = {};
     gain = {};  // Free the float base and gain before the decoder allocates.
@@ -555,6 +559,11 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     write_resume_state(result.output, result.input, staged.input_stamp, options, fingerprint);
   } catch (const Cancelled&) {
     throw;
+  } catch (const ExportDimensionLimit& e) {
+    result.success = false;
+    result.error_code = "export_dimension_limit";
+    result.detail = e.what();
+    result.message = e.what();
   } catch (const std::bad_alloc&) {
     result.success = false;
     result.message = options.decode_intent == DecodeIntent::Export

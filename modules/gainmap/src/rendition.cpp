@@ -162,6 +162,15 @@ GainMapResult exact_gain_map_from_renditions(PhotoRenditions images) {
   return out;
 }
 
+// ISO 21496-1 weights the gain by (H - BaseHeadroom) / (AlternateHeadroom -
+// BaseHeadroom), so a file must declare AlternateHeadroom above BaseHeadroom
+// even when it carries no HDR; libultrahdr rejects a file where they are equal.
+// A rendering with no headroom declares this smallest step over a base
+// headroom of 0 together with zero gain, so every reader shows its SDR base.
+// The step is the smallest that still survives a reader's single-precision
+// exp2(): libultrahdr turns it into a linear capacity that must exceed 1.
+constexpr Rational kMinimumAlternateHeadroom{1, 1U << 23};
+
 // Preserve both endpoints when grading gives them independent RGB ratios.
 // Offsets use the same SDR-white-relative units on encode and reconstruction;
 // they keep a LUT's zero-valued channel representable without infinite gain.
@@ -169,39 +178,81 @@ GainMapResult exact_gain_map_from_renditions(PhotoRenditions images) {
 GainMapResult rgb_gain_map_from_renditions(PhotoRenditions images) {
   constexpr float offset = 1.0F / 64.0F;
   const auto width = images.sdr.width, height = images.sdr.height;
-  FloatImage codes(width, height, 3);
+  // A rendering without headroom (an explicit --headroom 0) still writes the
+  // requested format, honestly: zero gain everywhere, so the HDR rendition is
+  // the SDR one, with no correction of anything.
+  const bool no_headroom = !(images.stats.headroom_stops > kEpsilon);
+  const unsigned channels = images.dual_rendition && images.authored_gain_channels == 1 ? 1 : 3;
+  std::array<float, 3> base_offsets{offset, offset, offset}, alternate_offsets{offset, offset, offset};
+  if (images.dual_rendition &&
+      (images.authored_gain_map.base_offset[0] != images.authored_gain_map.base_offset[1] ||
+       images.authored_gain_map.base_offset[0] != images.authored_gain_map.base_offset[2] ||
+       images.authored_gain_map.alternate_offset[0] != images.authored_gain_map.alternate_offset[1] ||
+       images.authored_gain_map.alternate_offset[0] != images.authored_gain_map.alternate_offset[2])) {
+    base_offsets = images.authored_gain_map.base_offset;
+    alternate_offsets = images.authored_gain_map.alternate_offset;
+  }
+  const auto offset_rational = [](float value) {
+    return value == offset ? Rational{1,64} : rational_from_float(value, 1U << 24);
+  };
+  FloatImage codes(width, height, channels);
   parallel_for_rows(height, [&](std::uint32_t y) {
-    const auto end = static_cast<std::size_t>(y + 1) * width * 3;
-    for (auto i = static_cast<std::size_t>(y) * width * 3; i < end; ++i) {
-      codes.pixels[i] = std::log2((std::max(0.0F, images.hdr.pixels[i]) + offset) /
-                                (std::max(0.0F, images.sdr.pixels[i]) + offset));
+    for (std::uint32_t x = 0; x < width; ++x) {
+      const auto pixel = static_cast<std::size_t>(y) * width + x;
+      for (unsigned c = 0; c < channels; ++c) {
+        const auto i = pixel * 3;
+        const auto base = channels == 1 ? p3_luminance(images.sdr.pixels[i], images.sdr.pixels[i+1], images.sdr.pixels[i+2]) : images.sdr.pixels[i+c];
+        const auto alternate = channels == 1 ? p3_luminance(images.hdr.pixels[i], images.hdr.pixels[i+1], images.hdr.pixels[i+2]) : images.hdr.pixels[i+c];
+        const float denominator = std::max(0.0F, base) + base_offsets[c];
+        const float numerator = std::max(0.0F, alternate) + alternate_offsets[c];
+        codes.pixels[pixel * channels + c] =
+            !no_headroom && denominator > 0 && numerator > 0 ? std::log2(numerator / denominator) : 0;
+      }
     }
   });
-  const auto [minimum, maximum] = std::minmax_element(codes.pixels.begin(), codes.pixels.end());
+  std::vector<float> row_min(height), row_max(height);
+  parallel_for_rows(height, [&](std::uint32_t y) {
+    const auto begin = codes.pixels.begin() + static_cast<std::size_t>(y) * width * channels;
+    const auto bounds = std::minmax_element(begin, begin + static_cast<std::size_t>(width) * channels);
+    row_min[y] = *bounds.first; row_max[y] = *bounds.second;
+  });
+  const float minimum = *std::min_element(row_min.begin(), row_min.end());
+  const float maximum = *std::max_element(row_max.begin(), row_max.end());
   GainMapResult out;
   auto& metadata = out.metadata;
-  metadata.gain_min = rational_from_float(std::min(0.0F, *minimum));
-  metadata.gain_max = rational_from_float(std::max(0.0F, *maximum));
+  metadata.gain_min = rational_from_float(std::min(0.0F, minimum));
+  metadata.gain_max = rational_from_float(std::max(0.0F, maximum));
   const float min_gain = rational_value(metadata.gain_min);
   const float max_gain = rational_value(metadata.gain_max);
   const float range = max_gain - min_gain;
-  for (float& gain : codes.pixels) {
-    gain = range > kEpsilon ? std::clamp((gain - min_gain) / range, 0.0F, 1.0F) : 0.0F;
-  }
+  parallel_for_rows(height, [&](std::uint32_t y) {
+    for (std::size_t i = static_cast<std::size_t>(y) * width * channels;
+         i < static_cast<std::size_t>(y + 1) * width * channels; ++i)
+      codes.pixels[i] = range > kEpsilon ? std::clamp((codes.pixels[i] - min_gain) / range, 0.0F, 1.0F) : 0.0F;
+  });
   metadata.gamma = rational_from_float(range > kEpsilon ? choose_gain_gamma(codes.pixels) : 1.0F);
   const float gamma = rational_value(metadata.gamma);
-  for (float& gain : codes.pixels) {
-    gain = std::round(encode_gain_code(gain, gamma) * 255.0F) / 255.0F;
-  }
-  metadata.base_offset = metadata.alternate_offset = {1, 64};
+  parallel_for_rows(height, [&](std::uint32_t y) {
+    for (std::size_t i = static_cast<std::size_t>(y) * width * channels;
+         i < static_cast<std::size_t>(y + 1) * width * channels; ++i)
+      codes.pixels[i] = std::round(encode_gain_code(codes.pixels[i], gamma) * 255.0F) / 255.0F;
+  });
+  metadata.base_offset = offset_rational(base_offsets[0]);
+  metadata.alternate_offset = offset_rational(alternate_offsets[0]);
   metadata.base_headroom = {0, 1};
-  // The declared usable range must match the gain actually encoded. A lower
-  // declaration makes re-import attenuate the authored HDR alternate.
-  metadata.alternate_headroom = metadata.gain_max;
-  const auto channel = gain_map_channel(metadata, 0);
-  metadata.flags |= 0x80;
-  metadata.channels.assign(3, channel);
-  out.headroom_stops = rational_value(metadata.alternate_headroom);
+  // Display capacity is the rendered peak, independent of channel gain extrema.
+  metadata.alternate_headroom = no_headroom ? kMinimumAlternateHeadroom
+                                            : rational_from_float(images.stats.headroom_stops);
+  if (channels == 3) {
+    const auto channel = gain_map_channel(metadata, 0);
+    metadata.flags |= 0x80;
+    metadata.channels.assign(3, channel);
+    for (unsigned c = 0; c < 3; ++c) {
+      metadata.channels[c].base_offset = offset_rational(base_offsets[c]);
+      metadata.channels[c].alternate_offset = offset_rational(alternate_offsets[c]);
+    }
+  }
+  out.headroom_stops = no_headroom ? 0.0F : rational_value(metadata.alternate_headroom);
   out.exposure_ev = images.stats.exposure_ev;
   out.clamp_srgb = images.clamp_srgb;
   out.base_linear = std::move(images.sdr);
@@ -210,9 +261,7 @@ GainMapResult rgb_gain_map_from_renditions(PhotoRenditions images) {
   out.stats.gain_min_stops = min_gain;
   out.stats.gain_max_stops = max_gain;
   out.stats.gain_gamma = gamma;
-  // These ratios were measured, not clipped to the display headroom.
-  measure_quantized_gain(out.stats, out.gain_map, max_gain, gamma,
-                         0.0F, min_gain);
+  measure_quantized_gain(out.stats, out.gain_map, max_gain, gamma, 0.0F, min_gain);
   images.hdr = {};
   const auto reconstructed = reconstruct_gain_map(out.base_linear, out.gain_map,
       metadata, out.headroom_stops, nullptr, out.clamp_srgb);
@@ -356,11 +405,10 @@ GainMapResult gain_map_from_renditions(PhotoRenditions images, GainMapWriterProf
     result.stats.adaptive_chroma_loss = true;
     return result;
   }
-  if (images.hdr_is_source) return exact_gain_map_from_renditions(std::move(images));
-  if (profile == GainMapWriterProfile::iso_generic &&
-      images.stats.headroom_stops > kEpsilon) {
+  if (profile == GainMapWriterProfile::iso_generic) {
     return rgb_gain_map_from_renditions(std::move(images));
   }
+  if (images.hdr_is_source) return exact_gain_map_from_renditions(std::move(images));
   // Apple-compatible output has one shared RGB multiplier. Derive it from the
   // final endpoints at full resolution: a second cell average would blur the
   // renderer's already-spatial gain and make bright edges reconstruct darker.

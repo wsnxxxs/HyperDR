@@ -44,12 +44,13 @@ enum Operation {
   OP_PREVIEW_HEIC,
   OP_MODEL_GAIN,
   OP_CONVERT,
+  OP_CONVERT_JPEG,
   OP_COUNT
 };
 
 static const char* const kOperationNames[OP_COUNT] = {
     "frame_layout", "probe(ARW)", "probe(HEIC)", "raw_metadata(ARW)", "preview(ARW)",
-    "preview(HEIC)", "model_gain(ARW)", "convert(HEIC, AVIF PQ)"};
+    "preview(HEIC)", "model_gain(ARW)", "convert(HEIC, AVIF PQ)", "convert+inspect(ISO JPEG)"};
 
 typedef struct {
   int status;
@@ -228,12 +229,15 @@ static int exported_file(const char* directory, char* path, size_t capacity) {
   return found ? 0 : 1;
 }
 
+extern int e4_inspect_jpeg(const char* path, char** output);
+
 static int run_convert(hyperdr_engine* engine, const char* arw, const char* output,
+                       int jpeg,
                        Result* result) {
   char request[PATH_MAX * 2];
   const int length = snprintf(request, sizeof(request),
-      "{\"encoding\":\"avif-pq\",\"command\":{\"input\":\"%s\","
-      "\"output\":\"%s\",\"overwrite\":true}}", arw, output);
+      "{\"encoding\":\"%s\",\"command\":{\"input\":\"%s\","
+      "\"output\":\"%s\",\"overwrite\":true}}", jpeg ? "ultrahdr" : "avif-pq", arw, output);
   if (length <= 0 || (size_t)length >= sizeof(request)) return 1;
   char* report = NULL;
   hyperdr_error* error = NULL;
@@ -252,7 +256,15 @@ static int run_convert(hyperdr_engine* engine, const char* arw, const char* outp
     return 1;
   }
   result->status = status;
-  const int failure = read_file(file, result);
+  int failure = read_file(file, result);
+  if (jpeg && failure == 0) {
+    char* inspection = NULL;
+    failure = e4_inspect_jpeg(file, &inspection);
+    if (failure == 0 && inspection != NULL)
+      failure = result_append(result, inspection, strlen(inspection));
+    else failure = 1;
+    free(inspection);
+  }
   remove(file);
   return failure;
 }
@@ -284,11 +296,12 @@ static int run_operation(hyperdr_engine* engine, enum Operation operation,
       return run_preview(engine, heic, 0, result);
     case OP_MODEL_GAIN:
       return run_model_gain(engine, arw, result);
-    case OP_CONVERT: {
+    case OP_CONVERT:
+    case OP_CONVERT_JPEG: {
       char output[PATH_MAX];
       const int length = snprintf(output, sizeof(output), "%s/out", root);
       if (length <= 0 || (size_t)length >= sizeof(output)) return 1;
-      return run_convert(engine, heic, output, result);
+      return run_convert(engine, heic, output, operation == OP_CONVERT_JPEG, result);
     }
     case OP_COUNT:
       break;

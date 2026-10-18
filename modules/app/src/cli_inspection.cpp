@@ -4,6 +4,7 @@
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/container/inspect.hpp"
+#include "hyperdr/container/gain_map_jpeg.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/foundation/json.hpp"
 #include "hyperdr/gainmap/reconstruct.hpp"
@@ -11,6 +12,7 @@
 #include "hyperdr/image/resample.hpp"
 
 #include <cmath>
+#include <algorithm>
 #include <iomanip>
 #include <iostream>
 #include <utility>
@@ -43,8 +45,40 @@ void print_inspection(const HeifInspection& i) {
 }
 
 int inspect_command(int argc, char** argv) {
-  if (argc < 3 || argc > 4) throw std::invalid_argument("inspect requires one HEIC path");
-  const auto inspection = inspect_heif(read_binary_file(path_from_utf8(argv[2])));
+  if (argc < 3 || argc > 4) throw std::invalid_argument("inspect requires one HEIC or gain-map JPEG path");
+  if (argc == 4 && std::string_view(argv[3]) != "--json")
+    throw std::invalid_argument("unknown inspect option: " + std::string(argv[3]));
+  const auto bytes = read_binary_file(path_from_utf8(argv[2]));
+  if (bytes.size() >= 2 && bytes[0] == 0xff && bytes[1] == 0xd8) {
+    const auto parsed = parse_gain_map_jpeg(bytes);
+    verify_gain_map_jpeg(bytes);
+    json::Writer writer;
+    writer.begin_object().member("structurally_valid", true)
+        .member("primary_iso_segments", parsed.primary_iso_count)
+        .member("gain_iso_segments", parsed.gain_iso_count)
+        .member("mpf_segments", parsed.mpf_count)
+        .member("primary_size", parsed.primary_size)
+        .member("gain_offset", parsed.gain_offset)
+        .member("gain_size", parsed.gain_size)
+        .member("base_headroom", static_cast<double>(rational_value(parsed.metadata.base_headroom)))
+        .member("alternate_headroom", static_cast<double>(rational_value(parsed.metadata.alternate_headroom)))
+        .member("channels", gain_map_channel_count(parsed.metadata))
+        .member("has_hdrgm", parsed.has_hdrgm)
+        .member("has_container_directory", parsed.has_container_directory)
+        .begin_array("channel_metadata");
+    for (std::size_t i = 0; i < gain_map_channel_count(parsed.metadata); ++i) {
+      const auto channel = gain_map_channel(parsed.metadata, i);
+      writer.begin_object().member("gain_min", static_cast<double>(rational_value(channel.gain_min)))
+          .member("gain_max", static_cast<double>(rational_value(channel.gain_max)))
+          .member("gamma", static_cast<double>(rational_value(channel.gamma)))
+          .member("base_offset", static_cast<double>(rational_value(channel.base_offset)))
+          .member("alternate_offset", static_cast<double>(rational_value(channel.alternate_offset))).end_object();
+    }
+    writer.end_array().end_object();
+    std::cout << writer.take() << '\n';
+    return 0;
+  }
+  const auto inspection = inspect_heif(bytes);
   if (argc == 4) {
     if (std::string_view(argv[3]) != "--json") {
       throw std::invalid_argument("unknown inspect option: " + std::string(argv[3]));
@@ -153,11 +187,14 @@ int verify_command(int argc, char** argv) {
     if (!reconstruct.empty()) {
       throw std::invalid_argument("--reconstruct is only available for gain-map HEIC");
     }
-    if (is_ultrahdr_jpeg_file(input)) {
-      verify_ultrahdr_jpeg(read_binary_file(input));
+    const auto bytes = read_binary_file(input);
+    constexpr char iso[] = "urn:iso:std:iso:ts:21496:-1";
+    const bool has_iso = std::search(bytes.begin(), bytes.end(), iso, iso + sizeof(iso)) != bytes.end();
+    if (has_iso || is_ultrahdr_jpeg_file(input)) {
+      verify_gain_map_jpeg(bytes);
       std::cout << "Ultra HDR JPEG/R: yes\n";
     } else {
-      verify_sdr_jpeg(read_binary_file(input));
+      verify_sdr_jpeg(bytes);
       std::cout << "SDR JPEG: yes\n";
     }
     if (!reference.empty()) print_fidelity(reference, input);

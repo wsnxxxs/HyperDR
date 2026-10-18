@@ -15,9 +15,18 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace hyperdr {
+class ExportDimensionLimit : public std::runtime_error {
+ public:
+  ExportDimensionLimit(std::uint32_t width, std::uint32_t height)
+      : std::runtime_error("JPEG " + std::to_string(width) + "x" + std::to_string(height) +
+                           " exceeds per-side limit 65500") {}
+};
+
 
 // Display P3 SDR base plus an ISO 21496-1 gain map, related by a `tmap` derived
 // item. `depth` selects the base image's bit depth; the gain map is always 8-bit.
@@ -25,32 +34,21 @@ namespace hyperdr {
     const GainMapResult& images, const PhotoMetadata& metadata, int quality,
     int depth, HevcPreset preset = HevcPreset::Slow);
 
-// Backward-compatible JPEG/R, carrying both Ultra HDR v1 XMP and ISO 21496-1
-// metadata. Requires an 8-bit base.
-[[nodiscard]] std::vector<std::uint8_t> encode_ultrahdr_jpeg(
+// SDR Display P3 primary plus an ISO 21496-1 gain map. No XMP metadata.
+[[nodiscard]] std::vector<std::uint8_t> encode_gain_map_jpeg(
     const GainMapResult& images, const PhotoMetadata& metadata, int quality);
 
-// API3: compute RGB gain against the decoded final JPEG, reusing its compressed
-// base. HDR is linear Display P3, white 1 = 203 nits, with matching raster size
-// and orientation. The JPEG must use sRGB transfer and the declared gamut (or
-// a matching supported ICC profile). No PQ/HLG file is needed.
-// XMP compatibility computes gain in the base gamut: an sRGB base can clip HDR
-// colours outside sRGB. Prefer a P3 base for P3 HDR. JPEG markers are rewritten;
-// the compressed primary image is retained, not the complete file byte-for-byte.
-[[nodiscard]] std::vector<std::uint8_t> encode_ultrahdr_jpeg(
-    const FloatImage& hdr, const std::vector<std::uint8_t>& sdr_jpeg,
-    ColorGamut sdr_gamut, float headroom_stops, int gain_quality = 95);
-[[nodiscard]] std::vector<std::uint8_t> encode_ultrahdr_jpeg(
-    const PhotoRenditions& images, const PhotoMetadata& metadata, int quality);
-
-// Header-only inspection; no full HDR allocation or decode. Gain ranges are
-// log2 stops, independently of the display capacity. Arrays describe RGB.
-struct UltraHdrInfo {
-  std::uint32_t width{}, height{}, gain_width{}, gain_height{};
-  std::array<float, 3> gain_min{}, gain_max{}, gamma{};
-  float headroom_stops{};
+// The application variant derives recovery codes against the decoded final
+// primary JPEG. The returned measurements describe exactly those stored codes.
+struct FrameLayout;
+struct GainMapJpegEncoding {
+  std::vector<std::uint8_t> bytes;
+  GainMapMetadata metadata;
+  RenderStats stats;
 };
-[[nodiscard]] UltraHdrInfo probe_ultrahdr_jpeg(const std::vector<std::uint8_t>& bytes);
+[[nodiscard]] GainMapJpegEncoding encode_gain_map_jpeg_measured(
+    const GainMapResult& images, const PhotoMetadata& metadata, int quality,
+    const FrameLayout* frame = nullptr);
 
 // Compatibility overloads for callers that already own gain-map renditions.
 // The application uses the PhotoRenditions overloads below for direct HDR.
@@ -81,8 +79,8 @@ void verify_heic_decodable(const std::vector<std::uint8_t>& bytes);
 void verify_heic_decodable(const std::vector<std::uint8_t>& bytes,
                            HdrEncoding encoding);
 void verify_heic_decodable(const std::filesystem::path& input);
-void verify_ultrahdr_jpeg(const std::vector<std::uint8_t>& bytes);
-void verify_ultrahdr_jpeg(const std::filesystem::path& input);
+void verify_gain_map_jpeg(const std::vector<std::uint8_t>& bytes);
+void verify_gain_map_jpeg(const std::filesystem::path& input);
 void verify_avif_decodable(const std::vector<std::uint8_t>& bytes);
 
 // Reconstructs a gain-map HEIC into a 16-bit linear TIFF, so the HDR rendition
@@ -115,5 +113,14 @@ struct DisplayCurveResult {
     const std::filesystem::path& reference,
     const std::filesystem::path& candidate,
     const std::vector<float>& display_headroom_stops);
+
+namespace testing {
+// Test seam for JPEG encoding: when set, every libjpeg progress callback calls
+// `observer` on the encoding thread just before it checks for cancellation;
+// `finishing` is true inside jpeg_finish_compress, where optimize_coding does
+// the entropy coding. A test can request cancellation there. Not thread-safe;
+// set it only while no encode runs.
+void set_jpeg_progress_observer(void (*observer)(bool finishing));
+}  // namespace testing
 
 }  // namespace hyperdr

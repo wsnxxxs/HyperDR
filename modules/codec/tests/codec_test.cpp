@@ -1,6 +1,7 @@
 #include "hyperdr/container/heif_tmap.hpp"
 #include "hyperdr/container/exif.hpp"
 #include "hyperdr/container/inspect.hpp"
+#include "hyperdr/container/gain_map_jpeg.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/gainmap/gain_map.hpp"
 #include "hyperdr/codec/encoders.hpp"
@@ -823,8 +824,8 @@ void check_hdr_source_gain_maps(const hyperdr::PhotoMetadata& metadata) {
   check(decode_encoded_input(adaptive, "hdr-source-adaptive"), "HLG source to Adaptive HEIC",
         1.5, 3.0);
 
-  const auto ultrahdr = hyperdr::encode_ultrahdr_jpeg(gain, metadata, 95);
-  hyperdr::verify_ultrahdr_jpeg(ultrahdr);
+  const auto ultrahdr = hyperdr::encode_gain_map_jpeg(gain, metadata, 95);
+  hyperdr::verify_gain_map_jpeg(ultrahdr);
   check(decode_ultrahdr_input(ultrahdr), "HLG source to Ultra HDR", 2.5, 3.0);
 }
 
@@ -844,8 +845,8 @@ void check_rgb_ultrahdr(const hyperdr::PhotoMetadata& metadata) {
   }
   const auto packed = hyperdr::gain_map_from_renditions(photo,
       hyperdr::GainMapWriterProfile::iso_generic);
-  const auto bytes = hyperdr::encode_ultrahdr_jpeg(packed, metadata, 95);
-  hyperdr::verify_ultrahdr_jpeg(bytes);
+  const auto bytes = hyperdr::encode_gain_map_jpeg(packed, metadata, 95);
+  hyperdr::verify_gain_map_jpeg(bytes);
   const auto decoded = decode_ultrahdr_input(bytes);
   const float measured_peak = std::max(1.0F,
       *std::max_element(decoded.linear_p3.pixels.begin(), decoded.linear_p3.pixels.end()));
@@ -874,9 +875,10 @@ void check_ultrahdr_icc(const hyperdr::PhotoMetadata& metadata) {
   photo.stats.headroom_linear = 2;
   for (bool clamp : {false, true}) for (bool pair : {false, true}) {
     photo.clamp_srgb = clamp;
-    auto bytes = pair ? hyperdr::encode_ultrahdr_jpeg(photo, metadata, 95)
-        : hyperdr::encode_ultrahdr_jpeg(hyperdr::gain_map_from_renditions(photo), metadata, 95);
-    hyperdr::verify_ultrahdr_jpeg(bytes);
+    auto bytes = hyperdr::encode_gain_map_jpeg(hyperdr::gain_map_from_renditions(photo,
+        hyperdr::GainMapWriterProfile::iso_generic), metadata, 95);
+    (void)pair;
+    hyperdr::verify_gain_map_jpeg(bytes);
     constexpr std::string_view signature = "ICC_PROFILE";
     const auto marker = std::search(bytes.begin(), bytes.end(), signature.begin(), signature.end());
     require(marker != bytes.end(), "Ultra HDR primary must carry an ICC profile");
@@ -894,9 +896,9 @@ void check_ultrahdr_icc(const hyperdr::PhotoMetadata& metadata) {
     // Hide only the identifier, preserving JPEG lengths and MPF offsets.
     *marker = 'X';
     bool rejected = false;
-    try { hyperdr::verify_ultrahdr_jpeg(bytes); }
+    try { hyperdr::verify_gain_map_jpeg(bytes); }
     catch (const std::runtime_error& error) {
-      rejected = std::string_view(error.what()).find("incomplete base/gain-map data") != std::string_view::npos;
+      rejected = std::string_view(error.what()).find("no primary ICC profile") != std::string_view::npos;
     }
     require(rejected, "Ultra HDR verification must reject an empty ICC block even when its pointer exists");
   }
@@ -1168,58 +1170,40 @@ void check_ultrahdr_pair(const hyperdr::PhotoMetadata& metadata) {
     }
   }
   const auto check_hdr = [&](const std::vector<std::uint8_t>& bytes) {
-    hyperdr::verify_ultrahdr_jpeg(bytes);
-    const auto info = hyperdr::probe_ultrahdr_jpeg(bytes);
-    require(info.width == 65 && info.height == 33 &&
-        info.gain_width == 65 && info.gain_height == 33, "API3 must retain full raster size");
-    require(info.gain_min[0] < 0 && info.gain_max[0] > 0, "API3 must support signed RGB gain");
-    require(std::abs(info.headroom_stops -
-                     *std::max_element(info.gain_max.begin(), info.gain_max.end())) < .001F,
-            "API3 must declare its actual maximum gain");
+    hyperdr::verify_gain_map_jpeg(bytes);
+    const auto parsed = hyperdr::parse_gain_map_jpeg(bytes);
+    require(hyperdr::rational_value(hyperdr::gain_map_channel(parsed.metadata, 0).gain_min) < 0, "ISO JPEG must support signed RGB gain");
+    require(std::abs(hyperdr::rational_value(parsed.metadata.alternate_headroom) - 2) < .001F,
+        "ISO JPEG capacity must describe the rendered peak");
     const auto decoded = decode_ultrahdr_input(bytes);
     const float measured_peak = std::max(1.0F,
         *std::max_element(decoded.linear_p3.pixels.begin(), decoded.linear_p3.pixels.end()));
     require(decoded.domain == hyperdr::InputDomain::kDualRendition &&
                 decoded.authored_sdr.has_value() &&
                 std::abs(decoded.hdr_headroom - measured_peak) < 1e-5F,
-            "API3 must retain both authored renditions and measured headroom");
-    require(decoded.metadata.model == metadata.model, "API3 must preserve EXIF");
+            "ISO JPEG must retain both authored renditions and measured headroom");
+    require(decoded.metadata.model == metadata.model, "ISO JPEG must preserve EXIF");
     double error = 0;
     for (std::size_t i = 0; i < photo.hdr.pixels.size(); ++i) {
       const float expected = photo.hdr.pixels[i];
       const float delta = decoded.linear_p3.pixels[i] - expected;
       if (std::abs(delta) >= .08F * std::max(expected, .1F)) {
-        std::cerr << "API3 mismatch sample " << i << ": got " << decoded.linear_p3.pixels[i]
+        std::cerr << "ISO JPEG mismatch sample " << i << ": got " << decoded.linear_p3.pixels[i]
                   << " expected " << expected << '\n';
       }
       require(std::abs(delta) < .08F * std::max(expected, .1F),
-          "API3 must reconstruct independent channel ratios");
+          "ISO JPEG must reconstruct independent channel ratios");
       error += delta * delta;
     }
-    std::cout << "API3 RGB Ultra HDR MSE: " << error / photo.hdr.pixels.size() << '\n';
+    std::cout << "ISO JPEG RGB Ultra HDR MSE: " << error / photo.hdr.pixels.size() << '\n';
   };
-  check_hdr(hyperdr::encode_ultrahdr_jpeg(photo, metadata, 90));
-  // Existing sRGB JPEG carries its own ICC. It is intentionally low quality:
-  // gain must be computed from its decoded samples, not the original floats.
-  const auto jpeg = hyperdr::encode_sdr_jpeg(photo.sdr, metadata, 20);
-  const auto reused = hyperdr::encode_ultrahdr_jpeg(photo.hdr, jpeg,
-      hyperdr::ColorGamut::kSrgb, 2, 95);
-  check_hdr(reused);
-  const std::array<std::uint8_t, 2> sos{0xff, 0xda};
-  const auto scan = std::search(jpeg.begin(), jpeg.end(), sos.begin(), sos.end());
-  require(scan != jpeg.end() &&
-      std::search(reused.begin(), reused.end(), scan, jpeg.end()) != reused.end(),
-      "API3 must reuse the original compressed JPEG scan without re-encoding");
-  bool rejected = false;
-  try {
-    (void)hyperdr::encode_ultrahdr_jpeg(hyperdr::FloatImage(64, 33, 3), jpeg,
-        hyperdr::ColorGamut::kSrgb, 2, 95);
-  } catch (const std::exception&) { rejected = true; }
-  require(rejected, "API3 must reject misaligned raster dimensions");
-  // Zero headroom remains a valid SDR-compatible Ultra HDR file.
+  const auto packed = hyperdr::gain_map_from_renditions(photo, hyperdr::GainMapWriterProfile::iso_generic);
+  check_hdr(hyperdr::encode_gain_map_jpeg(packed, metadata, 90));
+  // Zero headroom is a valid SDR-compatible ISO gain-map JPEG.
   photo.hdr = photo.sdr;
   photo.stats.headroom_stops = 0;
-  hyperdr::verify_ultrahdr_jpeg(hyperdr::encode_ultrahdr_jpeg(photo, metadata, 90));
+  hyperdr::verify_gain_map_jpeg(hyperdr::encode_gain_map_jpeg(
+      hyperdr::gain_map_from_renditions(photo, hyperdr::GainMapWriterProfile::iso_generic), metadata, 90));
 }
 
 }  // namespace
@@ -1377,8 +1361,8 @@ int main() {
       const auto gain = hyperdr::make_gain_map(small, options);
       const auto expected = hyperdr::reconstruct_gain_map(
           gain.base_linear, gain.gain_map, gain.metadata, gain.headroom_stops);
-      const auto jpeg = hyperdr::encode_ultrahdr_jpeg(gain, metadata, 90);
-      hyperdr::verify_ultrahdr_jpeg(jpeg);
+      const auto jpeg = hyperdr::encode_gain_map_jpeg(gain, metadata, 90);
+      hyperdr::verify_gain_map_jpeg(jpeg);
       require_linear_round_trip(decode_ultrahdr_input(jpeg), expected,
                                 "Ultra HDR round trip changed brightness");
       for (const auto encoding : {hyperdr::HdrEncoding::AvifPq,
@@ -1427,7 +1411,7 @@ int main() {
                 "a renamed HEIC did not decode to the same pixels");
       }
 
-      const auto jpeg = hyperdr::encode_ultrahdr_jpeg(small_gain, metadata, 90);
+      const auto jpeg = hyperdr::encode_gain_map_jpeg(small_gain, metadata, 90);
       const auto jpeg_truthful = decode_encoded_input(jpeg, "signature-jpeg", ".jpg");
       const auto jpeg_renamed = decode_encoded_input(jpeg, "signature-jpeg", ".png");
       require(jpeg_renamed.linear_p3.pixels == jpeg_truthful.linear_p3.pixels,
@@ -1457,7 +1441,7 @@ int main() {
     hyperdr::RawDecodeOptions base_only;
     base_only.ignore_embedded_gain_map = true;
     const auto oriented_jpeg_bytes =
-        hyperdr::encode_ultrahdr_jpeg(small_gain, portrait_metadata, 90);
+        hyperdr::encode_gain_map_jpeg(small_gain, portrait_metadata, 90);
     const auto oriented_jpeg_path = std::filesystem::temp_directory_path() /
                                     "hyperdr-codec-oriented-jpeg.jpg";
     hyperdr::write_binary_file_atomic(oriented_jpeg_path, oriented_jpeg_bytes,
@@ -1564,10 +1548,10 @@ int main() {
                 oriented_heic.metadata.orientation == 1,
             "HEIC Exif orientation did not normalize pixels, geometry and metadata");
 
-    const auto ultrahdr = hyperdr::encode_ultrahdr_jpeg(small_gain, metadata, 90);
+    const auto ultrahdr = hyperdr::encode_gain_map_jpeg(small_gain, metadata, 90);
     require(ultrahdr.size() > 512 && ultrahdr[0] == 0xFF && ultrahdr[1] == 0xD8,
             "Ultra HDR output is not a JPEG/R stream");
-    hyperdr::verify_ultrahdr_jpeg(ultrahdr);
+    hyperdr::verify_gain_map_jpeg(ultrahdr);
     const auto expected_ultrahdr = hyperdr::reconstruct_gain_map(
         small_gain.base_linear, small_gain.gain_map, small_gain.metadata,
         small_gain.headroom_stops);
@@ -1636,8 +1620,8 @@ int main() {
     auto no_headroom_options = options;
     no_headroom_options.headroom_stops = 0.0F;
     const auto no_headroom_gain = hyperdr::make_gain_map(small, no_headroom_options);
-    hyperdr::verify_ultrahdr_jpeg(
-        hyperdr::encode_ultrahdr_jpeg(no_headroom_gain, metadata, 20));
+    hyperdr::verify_gain_map_jpeg(
+        hyperdr::encode_gain_map_jpeg(no_headroom_gain, metadata, 20));
     auto gain_probe = small_gain;
     for (std::size_t i = 0; i < gain_probe.gain_map.pixels.size(); ++i) {
       const auto code = i % 7 == 0 ? 0U : (i % 11 == 0 ? 255U : static_cast<unsigned>((i * 37U) % 255U));

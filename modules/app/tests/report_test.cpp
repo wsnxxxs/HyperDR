@@ -273,15 +273,16 @@ void test_run_report_is_parseable_and_complete() {
   std::string schema_error;
   require(validates(schema, document, schema, "$", schema_error), schema_error);
   auto codec_result = hyperdr::FileResult{};
-  codec_result.codec_gain = true;
+  codec_result.error_code = "export_dimension_limit";
+  codec_result.detail = "JPEG 65501x2 exceeds per-side limit 65500";
   codec_result.stats.gain_min_stops = -2;
   codec_result.stats.gain_max_stops = 3;
   const auto codec_document = hyperdr::json::parse(hyperdr::run_report_json({codec_result}, options));
   const auto* codec_gain = codec_document.find("files")->array()[0].find("gain_map");
-  require(codec_gain->find("encoder")->string() == "libultrahdr-api3" &&
-      !codec_gain->find("distribution_measured")->boolean() &&
-      codec_gain->find("percentiles_stops") == nullptr,
-      "API3 must not report an unmeasured gain distribution");
+  require(codec_gain->find("encoder")->string() == "hyperdr" &&
+      codec_gain->find("distribution_measured")->boolean() &&
+      codec_gain->find("percentiles_stops") != nullptr,
+      "gain map must report measured distribution");
   require(validates(schema, codec_document, schema, "$", schema_error), schema_error);
 }
 

@@ -377,9 +377,9 @@ void test_independent_rgb_renditions() {
   require(packed.gain_map.channels == 3 && packed.gain_map.width == 5 && packed.gain_map.height == 3,
       "independent endpoints need full-resolution RGB gain");
   require(rational_value(packed.metadata.gain_min) < 0, "RGB packaging must retain negative gains");
-  require(packed.headroom_stops == rational_value(packed.metadata.gain_max) &&
-      packed.headroom_stops > 4,
-      "the declared range must include the actual maximum gain");
+  require(packed.headroom_stops == photo.stats.headroom_stops &&
+      rational_value(packed.metadata.gain_max) > 4,
+      "display capacity must retain rendered headroom independently of gain extrema");
   require(packed.stats.gain_clipped_fraction == 0,
       "a channel ratio above display headroom is not clipped content");
   const auto metadata = parse_tmap_payload(serialize_tmap_payload(packed.metadata));
@@ -493,8 +493,8 @@ void test_authored_dual_renditions() {
   require(photo.sdr.pixels==base.pixels && photo.hdr.pixels==hdr.pixels,
       "neutral dual rendering must retain both authored endpoints");
   const auto rgb=gain_map_from_renditions(photo,GainMapWriterProfile::iso_generic);
-  require(rgb.base_linear.pixels==base.pixels && rgb.gain_map.channels==3,
-      "Ultra HDR must retain the authored base and use RGB gain");
+  require(rgb.base_linear.pixels==base.pixels && rgb.gain_map.channels==1,
+      "ISO JPEG must retain the authored base and gain channel count");
   const auto restored=reconstruct_gain_map(rgb.base_linear,rgb.gain_map,rgb.metadata,rgb.headroom_stops);
   for (std::size_t i=0;i<hdr.pixels.size();++i)
     require(std::abs(restored.pixels[i]-hdr.pixels[i])<.02F,

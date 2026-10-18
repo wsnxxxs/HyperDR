@@ -106,7 +106,8 @@ def apple() -> None:
     xcode = ("xcodebuild", "-project", "apps/apple/HyperDR.xcodeproj", "-scheme", "HyperDR",
              "-destination", "platform=macOS", "-derivedDataPath", "build-apple/DerivedData")
     run(*xcode, "build", env=env)
-    run(*xcode, "test", env=env)
+    run(*xcode, "test", "-test-timeouts-enabled", "YES",
+        "-default-test-execution-time-allowance", "60", env=env)
     run(sys.executable, "scripts/check_apple_i18n.py")
 
 

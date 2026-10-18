@@ -1,11 +1,22 @@
+import AppKit
 import SwiftUI
 
 @main struct HyperDRApp: App {
-    @State private var editor = EditorModel()
+    @State private var editor: EditorModel
+
+    init() {
+        let isTesting = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            || ProcessInfo.processInfo.environment["XCTestBundlePath"] != nil
+        if isTesting { NSApplication.shared.setActivationPolicy(.prohibited) }
+        _editor = State(initialValue: EditorModel(services: isTesting
+            ? FakeEditorServices() : LiveEditorServices()))
+    }
 
     var body: some Scene {
         Window("HyperDR", id: "editor") {
             MainWindow()
+                .task { editor.launch() }
+                .onOpenURL { editor.open([$0]) }
         }
         .environment(editor)
         .windowToolbarStyle(.unified)

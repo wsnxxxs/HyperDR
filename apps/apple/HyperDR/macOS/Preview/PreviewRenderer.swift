@@ -292,10 +292,35 @@ final class PreviewRenderer {
 
     // MARK: - Pass 2
 
-    func draw(in layer: CAMetalLayer, transform: CanvasTransform) {
-        guard layer.drawableSize.width > 0, layer.drawableSize.height > 0,
-              let prepared, let drawable = layer.nextDrawable(),
-              let command = queue.makeCommandBuffer() else { return }
+    /// True after a `draw` or `clear` that found no drawable: nothing was
+    /// presented, so the caller must try again on the next display tick or the
+    /// canvas stays stale until some unrelated change. Cleared by the next
+    /// call that presents.
+    private(set) var needsRetry = false
+
+    /// Presents the prepared frame; false when no drawable was available (the
+    /// layer's swap queue was exhausted or it is misconfigured), in which case
+    /// `needsRetry` is set. Nothing to draw (no frame, empty layer) is not a
+    /// failure.
+    ///
+    /// `nextDrawable` blocks the calling thread, up to one second by default;
+    /// `allowsNextDrawableTimeout = false` would make that unbounded, so the
+    /// bound is kept and a miss is retried a tick later instead.
+    @discardableResult
+    func draw(in layer: CAMetalLayer, transform: CanvasTransform) -> Bool {
+        guard layer.drawableSize.width > 0, layer.drawableSize.height > 0, let prepared else {
+            needsRetry = false   // nothing to present: not a miss
+            return true
+        }
+        guard let drawable = layer.nextDrawable() else {
+            needsRetry = true
+            return false
+        }
+        guard let command = queue.makeCommandBuffer() else {
+            needsRetry = true
+            return false
+        }
+        needsRetry = false
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = drawable.texture
         pass.colorAttachments[0].loadAction = .clear
@@ -312,16 +337,26 @@ final class PreviewRenderer {
         }
         command.present(drawable)
         command.commit()
+        return true
     }
 
     /// Presents an empty (fully transparent) drawable, so closing a photo does
     /// not leave the previous frame on screen, and lets go of the intermediate
     /// and the frame it was built from.
-    func clear(in layer: CAMetalLayer) {
+    /// False when no drawable was available (see `draw`); the frame is let go
+    /// of either way, and `needsRetry` is set so the clear is tried again.
+    @discardableResult
+    func clear(in layer: CAMetalLayer) -> Bool {
         prepared = nil
-        guard layer.drawableSize.width > 0, layer.drawableSize.height > 0,
-              let drawable = layer.nextDrawable(),
-              let command = queue.makeCommandBuffer() else { return }
+        guard layer.drawableSize.width > 0, layer.drawableSize.height > 0 else {
+            needsRetry = false   // nothing to present: not a miss
+            return true
+        }
+        guard let drawable = layer.nextDrawable(), let command = queue.makeCommandBuffer() else {
+            needsRetry = true
+            return false
+        }
+        needsRetry = false
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = drawable.texture
         pass.colorAttachments[0].loadAction = .clear
@@ -332,6 +367,7 @@ final class PreviewRenderer {
         }
         command.present(drawable)
         command.commit()
+        return true
     }
 
     /// The photo rect in normalised device coordinates, y up. Edges snap to

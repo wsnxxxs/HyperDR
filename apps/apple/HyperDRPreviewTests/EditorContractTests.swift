@@ -7,11 +7,7 @@ import XCTest
 
     private func waitUntil(_ condition: @MainActor () -> Bool,
                            file: StaticString = #filePath, line: UInt = #line) async throws {
-        let deadline = ContinuousClock.now + .seconds(3)
-        while !condition(), ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(5))
-        }
-        XCTAssertTrue(condition(), "State transition timed out", file: file, line: line)
+        await eventually(timeout: .seconds(3), "state transition", file: file, line: line, condition)
     }
 
     func testOpenTransitionsThroughReferenceAndEditedFrames() async throws {
@@ -74,10 +70,13 @@ import XCTest
 
     func testOpeningKeepsOldFrameUntilReferenceAndRestoresEditStateOnFailure() async throws {
         let services = FakeEditorServices(openDelay: .milliseconds(10), previewDelay: .milliseconds(10))
-        let model = EditorModel(services: services)
+        let ticker = ManualFrameTicker()
+        let model = EditorModel(services: services, ticker: ticker)
         model.open([source])
         try await waitUntil { model.document?.phase == .ready }
         model.adjust("brightness", to: 0.612345)
+        await eventually { ticker.isWaiting }
+        ticker.tick()
         try await waitUntil { model.document?.isRefreshing == false }
         model.canvas.setViewport(CGSize(width: 1000, height: 800), backingScale: 2)
         model.canvas.zoomIn()
@@ -114,6 +113,8 @@ import XCTest
         services.previewFailure = nil
         services.preview = previousPreview
         model.adjust("contrast", to: 1.123456)
+        await eventually { ticker.isWaiting }
+        ticker.tick()
         try await waitUntil { model.document?.isRefreshing == false }
         XCTAssertEqual(services.receivedAdjustments.last?["brightness"], 0.612345)
         XCTAssertEqual(services.receivedAdjustments.last?["contrast"], 1.123456)
@@ -163,16 +164,21 @@ import XCTest
 
     func testRefreshRetainsFrameAndOriginalDoubleValues() async throws {
         let services = FakeEditorServices(openDelay: .zero, previewDelay: .milliseconds(10))
-        let model = EditorModel(services: services)
+        let ticker = ManualFrameTicker()
+        let model = EditorModel(services: services, ticker: ticker)
         model.open([source])
         try await waitUntil { model.document?.phase == .ready }
         model.adjust("brightness", to: 0.612345)
+        await eventually { ticker.isWaiting }
+        ticker.tick()
         XCTAssertEqual(model.document?.isRefreshing, true)
         XCTAssertTrue(model.hasPreviewFrame)
         try await waitUntil { model.document?.isRefreshing == false }
         XCTAssertEqual(services.receivedAdjustments.last?["brightness"], 0.612345)
         services.previewFailure = UserFacingError(code: "raw_budget")
         model.adjust("brightness", to: 0.712345)
+        await eventually { ticker.isWaiting }
+        ticker.tick()
         try await waitUntil { model.document?.previewError?.code == "raw_budget" }
         XCTAssertEqual(model.document?.phase, .ready)
         XCTAssertTrue(model.hasPreviewFrame)
@@ -206,11 +212,14 @@ import XCTest
 
     func testCanvasFailureDuringRefreshCannotBeOverwrittenByLateEditedFrame() async throws {
         let services = FakeEditorServices(openDelay: .zero, previewDelay: .milliseconds(5))
-        let model = EditorModel(services: services)
+        let ticker = ManualFrameTicker()
+        let model = EditorModel(services: services, ticker: ticker)
         model.open([source])
         try await waitUntil { model.document?.phase == .ready }
         services.previewDelay = .milliseconds(100)
         model.adjust("brightness", to: 0.712345)
+        await eventually { ticker.isWaiting }
+        ticker.tick()
         XCTAssertEqual(model.document?.isRefreshing, true)
         // Allow the refresh operation to start before the renderer fails.
         try await Task.sleep(for: .milliseconds(20))

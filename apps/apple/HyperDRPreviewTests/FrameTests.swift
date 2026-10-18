@@ -204,8 +204,8 @@ import UniformTypeIdentifiers
 
     /// story's layouts by photograph proportion (frame-story-panorama §5.1).
     func testStoryVariantsFollowThePhotoProportion() throws {
-        expect(try storyLayout(1000, 4000), 2393, 4254, photo: [696, 54, 1000, 4000],
-               caption: [0, 4054, 2393, 200], reference: 1000, variant: nil)
+        expect(try storyLayout(1000, 4000), 2394, 4254, photo: [696, 54, 1000, 4000],
+               caption: [0, 4054, 2394, 200], reference: 1000, variant: nil)
         expect(try storyLayout(4000, 1000), 4160, 1400, photo: [80, 80, 4000, 1000],
                caption: [0, 1080, 4160, 320], reference: 4000, variant: "wide")
         expect(try storyLayout(10000, 1000), 10400, 2000, photo: [200, 200, 10000, 1000],
@@ -216,8 +216,8 @@ import UniformTypeIdentifiers
                caption: [0, 1052, 2704, 208], reference: 2600, variant: "wide")
         expect(try storyLayout(1000, 9000), 1108, 9254, photo: [54, 54, 1000, 9000],
                caption: [0, 9054, 1108, 200], reference: 1000, variant: "tall")
-        expect(try storyLayout(6000, 4000), 6440, 11449, photo: [220, 2920, 6000, 4000],
-               caption: [0, 6920, 6440, 4529], reference: 4000, variant: nil)
+        expect(try storyLayout(6000, 4000), 6440, 11450, photo: [220, 2920, 6000, 4000],
+               caption: [0, 6920, 6440, 4530], reference: 4000, variant: nil)
         // Without text the band shrinks to the mat, in the variant as well.
         expect(try storyLayout(4000, 1000, hasCaption: false), 4160, 1160, photo: [80, 80, 4000, 1000],
                caption: [0, 1080, 4160, 80], reference: 4000, variant: "wide")

@@ -15,14 +15,14 @@ const char* story = R"json({"schema":"hyperdr.frame/v1","background":"#E6E5E1","
 void goldens() {
   struct Case { unsigned width, height; bool no_caption; const char* expected; };
   const Case cases[] = {
-    {1000, 4000, false, R"json({"schema":"hyperdr.frame-layout/v1","width":2393,"height":4254,"photo":{"x":696,"y":54,"width":1000,"height":4000},"caption":{"x":0,"y":4054,"width":2393,"height":200},"referenceEdge":1000})json"},
+    {1000, 4000, false, R"json({"schema":"hyperdr.frame-layout/v1","width":2394,"height":4254,"photo":{"x":696,"y":54,"width":1000,"height":4000},"caption":{"x":0,"y":4054,"width":2394,"height":200},"referenceEdge":1000})json"},
     {4000, 1000, false, R"json({"schema":"hyperdr.frame-layout/v1","width":4160,"height":1400,"photo":{"x":80,"y":80,"width":4000,"height":1000},"caption":{"x":0,"y":1080,"width":4160,"height":320},"referenceEdge":4000,"variant":"wide"})json"},
     {10000, 1000, false, R"json({"schema":"hyperdr.frame-layout/v1","width":10400,"height":2000,"photo":{"x":200,"y":200,"width":10000,"height":1000},"caption":{"x":0,"y":1200,"width":10400,"height":800},"referenceEdge":10000,"variant":"wide"})json"},
     {2500, 1000, false, R"json({"schema":"hyperdr.frame-layout/v1","width":2608,"height":4636,"photo":{"x":54,"y":1474,"width":2500,"height":1000},"caption":{"x":0,"y":2474,"width":2608,"height":2162},"referenceEdge":1000})json"},
     {2600, 1000, false, R"json({"schema":"hyperdr.frame-layout/v1","width":2704,"height":1260,"photo":{"x":52,"y":52,"width":2600,"height":1000},"caption":{"x":0,"y":1052,"width":2704,"height":208},"referenceEdge":2600,"variant":"wide"})json"},
-    {1000, 8000, false, R"json({"schema":"hyperdr.frame-layout/v1","width":4643,"height":8254,"photo":{"x":1822,"y":54,"width":1000,"height":8000},"caption":{"x":0,"y":8054,"width":4643,"height":200},"referenceEdge":1000})json"},
+    {1000, 8000, false, R"json({"schema":"hyperdr.frame-layout/v1","width":4644,"height":8254,"photo":{"x":1822,"y":54,"width":1000,"height":8000},"caption":{"x":0,"y":8054,"width":4644,"height":200},"referenceEdge":1000})json"},
     {1000, 9000, false, R"json({"schema":"hyperdr.frame-layout/v1","width":1108,"height":9254,"photo":{"x":54,"y":54,"width":1000,"height":9000},"caption":{"x":0,"y":9054,"width":1108,"height":200},"referenceEdge":1000,"variant":"tall"})json"},
-    {6000, 4000, false, R"json({"schema":"hyperdr.frame-layout/v1","width":6440,"height":11449,"photo":{"x":220,"y":2920,"width":6000,"height":4000},"caption":{"x":0,"y":6920,"width":6440,"height":4529},"referenceEdge":4000})json"},
+    {6000, 4000, false, R"json({"schema":"hyperdr.frame-layout/v1","width":6440,"height":11450,"photo":{"x":220,"y":2920,"width":6000,"height":4000},"caption":{"x":0,"y":6920,"width":6440,"height":4530},"referenceEdge":4000})json"},
     {4000, 1000, true, R"json({"schema":"hyperdr.frame-layout/v1","width":4160,"height":1160,"photo":{"x":80,"y":80,"width":4000,"height":1000},"caption":{"x":0,"y":1080,"width":4160,"height":80},"referenceEdge":4000,"variant":"wide"})json"},
   };
   for (const auto& test : cases) {
@@ -52,7 +52,7 @@ void ratio_boundaries() {
   const auto extreme = parse(R"({"variants":{"wide":{"minRatio":1e308},"tall":{"maxRatio":5e-324}}})");
   require(hyperdr::layout_frame(extreme,1000,1000).variant.empty(), "extreme positive thresholds must compare without overflow");
   const auto huge = parse(R"({"variants":{"wide":{"minRatio":2.5}}})");
-  require(hyperdr::layout_frame(huge,4294967295U,1717986918U).variant.empty(), "large integer boundary must remain exact");
+  require(hyperdr::layout_frame(huge,4294967290U,1717986916U).variant.empty(), "large integer boundary must remain exact");
   require(hyperdr::layout_frame(huge,4294967294U,1717986917U).variant == "wide", "large products must not overflow");
   const auto tiny_delta = parse(R"({"variants":{"wide":{"minRatio":2.500000000000001}}})");
   require(hyperdr::frame_spec_json(tiny_delta) != hyperdr::frame_spec_json(huge), "canonical ratio must retain full precision");

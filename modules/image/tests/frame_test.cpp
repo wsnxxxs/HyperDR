@@ -115,11 +115,15 @@ void check_natural_layout() {
   require(layout.caption == FrameRect{0, 2100, 3200, 300}, "caption band below the photo");
   require(layout.reference_edge == 2000, "reference edge");
 
-  // A spec without a mat is the identity layout.
+  // A spec without a mat keeps the photo in place; an odd photo still gets
+  // an even canvas, with the extra column on the right and row below.
   const auto none = hyperdr::layout_frame(FrameSpec{}, 31, 17);
-  require(none.width == 31 && none.height == 17 && none.photo == FrameRect{0, 0, 31, 17} &&
-              none.caption.height == 0,
-          "an empty spec leaves the canvas at the photo size");
+  require(none.width == 32 && none.height == 18 && none.photo == FrameRect{0, 0, 31, 17} &&
+              none.caption == FrameRect{0, 17, 32, 1},
+          "an empty spec pads an odd photo to an even canvas");
+  const auto even = hyperdr::layout_frame(FrameSpec{}, 32, 18);
+  require(even.width == 32 && even.height == 18 && even.caption.height == 0,
+          "an empty spec leaves an even photo's canvas at the photo size");
 }
 
 void check_even_mats() {
@@ -127,8 +131,9 @@ void check_even_mats() {
   const auto spec = spec_from(R"({"margins": 0.0333, "caption": 0.0711})");
   const auto layout = hyperdr::layout_frame(spec, 1001, 1501);
   require(layout.photo.x == 34 && layout.photo.y == 34, "mats round to even pixels");
-  require(layout.width == 1001 + 68, "canvas width keeps the photo's own parity");
-  require(layout.caption.height == 34 + 72, "bottom mat plus an even caption band");
+  require(layout.width == 1001 + 68 + 1, "an odd canvas width gains a column on the right");
+  require(layout.width - layout.photo.x - layout.photo.width == 35, "the right mat takes it");
+  require(layout.caption.height == 34 + 72 + 1, "bottom mat plus caption band, plus a row for an even canvas");
 }
 
 void check_fixed_aspect() {
@@ -138,9 +143,9 @@ void check_fixed_aspect() {
       "aspect": {"width": 9, "height": 16, "topShare": 0.25}})");
   const auto tall = hyperdr::layout_frame(story, 1000, 1500);
   require(tall.width == 1120, "story width is the natural width");
-  require(tall.height == 1991, "story height is width * 16 / 9");
+  require(tall.height == 1992, "story height is width * 16 / 9, rounded up to even");
   const auto natural_height = 60U + 1500U + 60U + 120U;
-  const auto added = tall.height - natural_height;
+  const auto added = 1991U - natural_height;  // before the row that makes the canvas even
   require(tall.photo.y == 60 + 2 * static_cast<std::uint32_t>(std::lround(added * 0.25 / 2)),
           "a quarter of the added height goes above the photo, in even pixels");
   require(tall.photo.y % 2 == 0, "photo origin stays even");

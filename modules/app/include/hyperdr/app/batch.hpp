@@ -10,6 +10,13 @@
 
 namespace hyperdr {
 
+// Reads a UTF-8 frame document; relative overlays resolve beside the document.
+[[nodiscard]] FrameSpec read_frame_spec(const std::filesystem::path& path);
+
+// Checks export-only frame resources before decoding or creating output paths.
+// Layout and canonical request computations intentionally do not perform I/O.
+void validate_frame_resources(const FrameSpec& frame);
+
 // Enforces the non-degradable resolution contract before any gain-map work or
 // output allocation begins. Public so the invariant has a fixture-free test.
 void require_decode_resolution(const ConvertOptions& options,

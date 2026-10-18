@@ -3,10 +3,12 @@
 // pin that agreement without decoding a photograph.
 
 #include "hyperdr/app/cli.hpp"
+#include "hyperdr/app/batch.hpp"
 #include "hyperdr/app/engine.hpp"
 #include "hyperdr/app/fingerprint.hpp"
 #include "hyperdr/app/report.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -70,6 +72,19 @@ void test_framed_request_has_no_argv() {
   require(!hyperdr::command_line(normalized()).empty(), "an unframed request still has argv");
 }
 
+void test_frame_path_is_deferred_and_has_argv() {
+  const auto request = with_frame(normalized(), R"("/missing/spec with spaces.json")");
+  const auto options = hyperdr::request_options(request);
+  require(!options.frame && options.frame_spec_path == "/missing/spec with spaces.json",
+          "request parsing must defer file reads to conversion");
+  const auto args = hyperdr::command_line(request);
+  const auto flag = std::find(args.begin(), args.end(), "--frame");
+  require(flag != args.end() && std::next(flag) != args.end() &&
+          *std::next(flag) == options.frame_spec_path, "frame file must survive argv unchanged");
+  require(!failure([&] { (void)hyperdr::request_options(with_frame(normalized(), R"("")")); }).empty(),
+          "empty frame path must fail");
+}
+
 void test_fingerprint_covers_the_frame() {
   const auto plain = hyperdr::request_options(normalized());
   const auto framed = hyperdr::request_options(with_frame(normalized(), R"({"margins": 0.05})"));
@@ -96,6 +111,16 @@ void test_fingerprint_covers_the_frame() {
   };
   std::ofstream(overlay, std::ios::binary) << "first";
   const auto first = hyperdr::settings_signature(with_overlay());
+  const auto copied = folder / "copied.png";
+  std::filesystem::copy_file(overlay, copied, std::filesystem::copy_options::overwrite_existing);
+  auto relocated = with_overlay();
+  relocated.frame->overlay = copied;
+  require(first == hyperdr::settings_signature(relocated), "equal overlay bytes at another path must share a fingerprint");
+  const auto spec = folder / "frame.json";
+  std::ofstream(spec) << R"({"margins":0.05,"overlay":"caption.png"})";
+  auto from_file = with_overlay();
+  from_file.frame = hyperdr::read_frame_spec(spec);
+  require(first == hyperdr::settings_signature(from_file), "file and inline specifications share content identity");
   std::ofstream(overlay, std::ios::binary) << "second";
   const auto second = hyperdr::settings_signature(with_overlay());
   std::filesystem::remove_all(folder);
@@ -117,6 +142,37 @@ void test_cli_reads_the_frame_file_first() {
   // The spec is rejected before the missing input is ever looked for.
   require(error.find("frame: unknown member frame.colour") != std::string::npos,
           "a malformed --frame file must fail first: " + error);
+}
+
+void test_missing_overlay_fails_before_input_or_output() {
+  const auto folder = std::filesystem::temp_directory_path() / "hyperdr-frame-missing-overlay-test";
+  std::filesystem::remove_all(folder);
+  std::filesystem::create_directories(folder);
+  const auto spec = folder / "frame.json";
+  const auto overlay = folder / "caption.png";
+  std::ofstream(spec) << R"({"caption":0.1,"overlay":"caption.png"})";
+  std::string program = "HyperDR", command = "convert", input = (folder / "missing.jpg").string(),
+              output = "--output", destination = (folder / "out").string(), flag = "--frame",
+              path = spec.string();
+  char* argv[] = {program.data(), command.data(), input.data(), output.data(),
+                  destination.data(), flag.data(), path.data()};
+  const auto cli_error = failure([&] { (void)hyperdr::run_cli(7, argv); });
+  require(cli_error.find("frame: overlay") != std::string::npos &&
+              cli_error.find(overlay.generic_string()) != std::string::npos,
+          "CLI must name the missing overlay and resolved path: " + cli_error);
+  auto options = hyperdr::request_options(with_frame(normalized(),
+      R"({"caption":0.1,"overlay":")" + overlay.generic_string() + R"("})"));
+  options.input = folder / "missing.jpg";
+  options.output_directory = folder / "out";
+  hyperdr::Engine engine;
+  const auto abi_error = failure([&] { (void)engine.convert(options); });
+  require(abi_error == cli_error, "engine and CLI must reject the overlay identically: " + abi_error);
+  require(!std::filesystem::exists(options.output_directory), "missing overlay must not create output");
+  // Geometry stays a pure computation, even when a spec names a missing overlay.
+  require(!hyperdr::frame_layout(hyperdr::json::parse(
+      R"({"caption":0.1,"overlay":")" + overlay.generic_string() + R"("})"), 6000, 4000).empty(),
+      "frame_layout must not read the overlay");
+  std::filesystem::remove_all(folder);
 }
 
 void test_report_places_the_photo() {
@@ -145,8 +201,10 @@ int main() {
   try {
     test_request_carries_the_frame();
     test_framed_request_has_no_argv();
+    test_frame_path_is_deferred_and_has_argv();
     test_fingerprint_covers_the_frame();
     test_cli_reads_the_frame_file_first();
+    test_missing_overlay_fails_before_input_or_output();
     test_report_places_the_photo();
   } catch (const std::exception& error) {
     std::cerr << "frame_request_test failed: " << error.what() << '\n';

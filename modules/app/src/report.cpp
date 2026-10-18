@@ -113,7 +113,7 @@ std::string run_report_json(const std::vector<FileResult>& results,
   json::Writer writer(json::Writer::Style::kIndented);
   // 10: API3 reports encoded gain ranges; unmeasured distribution fields are
   // omitted instead of publishing the renderer's different pre-JPEG grid.
-  writer.begin_object().member("schema", 11).member("tool", kVersion);
+  writer.begin_object().member("schema", 12).member("tool", kVersion);
   write_settings(writer, options);
   writer.begin_array("files");
   for (const auto& result : results) {

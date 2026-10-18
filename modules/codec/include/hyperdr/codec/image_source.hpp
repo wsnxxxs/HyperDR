@@ -313,6 +313,8 @@ struct DecodedImage {
 // straight-alpha RGBA at its own size, with no colour conversion or resampling
 // (the frame composites it exactly as the app drew it).
 [[nodiscard]] FrameOverlay decode_frame_overlay(const std::filesystem::path& path);
+// Decode the exact bytes captured for a conversion's content fingerprint.
+[[nodiscard]] FrameOverlay decode_frame_overlay(const std::vector<std::uint8_t>& bytes);
 
 // Decode a Bayer RAW without demosaicing. This is the RAW-domain entry point
 // for denoising, HDR fusion, low-light enhancement, and neural-network input.

@@ -115,8 +115,14 @@ std::string settings_signature(const ConvertOptions& options) {
   // and colours, and the overlay is hashed like any other external input.
   if (options.frame) {
     out += "|frame=";
-    out += frame_spec_json(*options.frame);
-    append_raw_file("frame_overlay", options.frame->overlay);
+    auto canonical = options.frame_snapshot ? options.frame_snapshot->spec : *options.frame;
+    canonical.overlay.clear();
+    out += frame_spec_json(canonical);
+    if (!options.frame->overlay.empty()) {
+      out += "|frame_overlay=";
+      out += options.frame_snapshot ? options.frame_snapshot->overlay_sha256
+                                   : configuration_resource([&] { return sha256_file_hex(options.frame->overlay); });
+    }
   }
   for (const auto& resource : raw_decode_resources(options.raw)) {
     append_raw_file(resource.key, resource.path);

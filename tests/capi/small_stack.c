@@ -36,6 +36,7 @@
 } while (0)
 
 enum Operation {
+  OP_FRAME_LAYOUT,
   OP_PROBE_ARW,
   OP_PROBE_HEIC,
   OP_RAW_METADATA,
@@ -47,7 +48,7 @@ enum Operation {
 };
 
 static const char* const kOperationNames[OP_COUNT] = {
-    "probe(ARW)", "probe(HEIC)", "raw_metadata(ARW)", "preview(ARW)",
+    "frame_layout", "probe(ARW)", "probe(HEIC)", "raw_metadata(ARW)", "preview(ARW)",
     "preview(HEIC)", "model_gain(ARW)", "convert(HEIC, AVIF PQ)"};
 
 typedef struct {
@@ -260,6 +261,14 @@ static int run_operation(hyperdr_engine* engine, enum Operation operation,
                          const char* arw, const char* heic, const char* root,
                          Result* result) {
   switch (operation) {
+    case OP_FRAME_LAYOUT: {
+      char* output = NULL;
+      hyperdr_error* error = NULL;
+      const int status = hyperdr_frame_layout(
+          "{\"margins\":0.05,\"caption\":0.1,\"shadow\":{\"opacity\":0.1,\"blur\":0.01}}",
+          6000, 4000, &output, &error);
+      return take_string(result, "frame_layout", status, output, error);
+    }
     case OP_PROBE_ARW:
       return run_probe(engine, arw, result);
     case OP_PROBE_HEIC:

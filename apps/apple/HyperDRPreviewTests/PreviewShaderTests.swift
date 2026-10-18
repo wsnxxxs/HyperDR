@@ -159,6 +159,60 @@ private func fixturePhoto() throws -> URL {
         XCTAssertNil(renderer.readyFrameIdentity)
     }
 
+    /// No drawable (a layer without a device hands out none) presents nothing
+    /// and is retried: the next call, with a working layer, draws.
+    func testNilDrawableIsRetriedOnTheNextDraw() throws {
+        let renderer = try PreviewRenderer()
+        try renderer.prepare(planes: try PreviewRenderer.syntheticRamp(device: renderer.device), original: false)
+        let transform = CanvasTransform(imageSize: CGSize(width: 16, height: 16),
+                                        viewport: CGSize(width: 16, height: 16))
+        let broken = CAMetalLayer()
+        broken.drawableSize = CGSize(width: 16, height: 16)
+        XCTAssertFalse(renderer.draw(in: broken, transform: transform))
+        XCTAssertTrue(renderer.needsRetry)
+
+        let layer = CAMetalLayer()
+        layer.device = renderer.device
+        layer.pixelFormat = .rgba16Float
+        layer.drawableSize = CGSize(width: 16, height: 16)
+        XCTAssertTrue(renderer.draw(in: layer, transform: transform))
+        XCTAssertFalse(renderer.needsRetry)
+
+        XCTAssertFalse(renderer.clear(in: broken))
+        XCTAssertTrue(renderer.needsRetry)
+        XCTAssertNil(renderer.readyFrameIdentity, "clear lets go of the frame even when it cannot present")
+        XCTAssertTrue(renderer.clear(in: layer))
+        XCTAssertFalse(renderer.needsRetry)
+    }
+
+    /// A miss followed by a layer with nothing to present (zero size, or no
+    /// frame) must not leave `needsRetry` set, or the view retries every tick.
+    func testNothingToPresentClearsTheRetryFlag() throws {
+        let renderer = try PreviewRenderer()
+        try renderer.prepare(planes: try PreviewRenderer.syntheticRamp(device: renderer.device), original: false)
+        let transform = CanvasTransform(imageSize: CGSize(width: 16, height: 16),
+                                        viewport: CGSize(width: 16, height: 16))
+        let broken = CAMetalLayer()
+        broken.drawableSize = CGSize(width: 16, height: 16)
+        let empty = CAMetalLayer()
+
+        XCTAssertFalse(renderer.draw(in: broken, transform: transform))
+        XCTAssertTrue(renderer.needsRetry)
+        XCTAssertTrue(renderer.draw(in: empty, transform: transform))
+        XCTAssertFalse(renderer.needsRetry, "zero-size layer")
+
+        XCTAssertFalse(renderer.draw(in: broken, transform: transform))
+        XCTAssertFalse(renderer.clear(in: broken))      // also drops the frame
+        XCTAssertTrue(renderer.needsRetry)
+        XCTAssertTrue(renderer.clear(in: empty))
+        XCTAssertFalse(renderer.needsRetry, "zero-size clear")
+
+        XCTAssertFalse(renderer.clear(in: broken))
+        XCTAssertTrue(renderer.needsRetry)
+        XCTAssertTrue(renderer.draw(in: broken, transform: transform), "no frame: nothing to draw")
+        XCTAssertFalse(renderer.needsRetry, "no frame")
+    }
+
     /// A real engine frame renders through the same pass, and the Metal buffers
     /// are the frame's own page-aligned planes: no pixel copy on the way in.
     func testEngineFramePlanesAreUsedWithoutCopying() async throws {

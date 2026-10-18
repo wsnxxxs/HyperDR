@@ -39,8 +39,9 @@ struct PreviewCanvas: NSViewRepresentable {
         view.frameProvider = { [weak model] in model?.canvasFrame }
         view.onTransformChange = { [weak model] transform in model?.canvas.apply(transform) }
         view.onViewportChange = { [weak model] size, scale in
-            model?.canvas.setViewport(size, backingScale: scale)
+            model?.updateViewport(size, backingScale: scale)
         }
+        view.onRefreshRateChange = { [weak model] rate in model?.updateRefreshRate(rate) }
         view.setNeedsRedraw()
         return view
     }
@@ -48,7 +49,7 @@ struct PreviewCanvas: NSViewRepresentable {
     func updateNSView(_ view: EDRCanvasView, context: Context) {
         // Observe the frame, the mode and the geometry so a new frame, a view
         // mode switch or a menu zoom actually repaints.
-        _ = model.hasPreviewFrame
+        _ = model.frameRevision
         _ = model.viewMode
         _ = model.canvas.imageFrame
         _ = model.canvas.zoom

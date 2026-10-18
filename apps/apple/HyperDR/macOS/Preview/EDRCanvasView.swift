@@ -37,6 +37,7 @@ final class EDRCanvasView: NSView {
     /// scale). Keeps `CanvasModel.imageFrame` alive without echoing the frame's
     /// own dimensions back into the model.
     var onViewportChange: ((CGSize, Double) -> Void)?
+    var onRefreshRateChange: ((Int) -> Void)?
     /// Geometry the canvas draws with: fit, zoom and pan in view points.
     var transform = CanvasTransform(imageSize: .zero, viewport: .zero) {
         didSet {
@@ -136,6 +137,7 @@ final class EDRCanvasView: NSView {
         guard dirty, window?.isVisible == true else { return }
         dirty = false
         render()
+        if renderer?.needsRetry == true { dirty = true }
     }
 
     func setNeedsRedraw() { dirty = true }
@@ -147,8 +149,6 @@ final class EDRCanvasView: NSView {
         do {
             if let frame = frameProvider?() {
                 try renderer.prepare(frame: frame.frame, original: frame.showsOriginal)
-                showImageSize(CGSize(width: frame.frame.base.width,
-                                     height: frame.frame.base.height))
                 cleared = false
             } else if showsSyntheticRamp {
                 if synthetic == nil { synthetic = try PreviewRenderer.syntheticRamp(device: renderer.device) }
@@ -162,7 +162,7 @@ final class EDRCanvasView: NSView {
             } else {
                 // Closing the photo must not leave the last frame on screen: the
                 // layer keeps its last drawable until something presents again.
-                if !cleared { renderer.clear(in: metalLayer); cleared = true }
+                if !cleared { cleared = renderer.clear(in: metalLayer) }
                 return
             }
             renderer.draw(in: metalLayer, transform: transform)
@@ -182,6 +182,7 @@ final class EDRCanvasView: NSView {
     private func refreshDisplay() {
         updateDrawableSize()
         if let screen = window?.screen {
+            onRefreshRateChange?(screen.maximumFramesPerSecond)
             let snapshot = HeadroomSnapshot(screen: screen.localizedName,
                 current: screen.maximumExtendedDynamicRangeColorComponentValue,
                 potential: screen.maximumPotentialExtendedDynamicRangeColorComponentValue,

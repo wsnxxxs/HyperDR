@@ -31,7 +31,6 @@ struct FrameSheet: View {
         }
         .frame(minWidth: 960, idealWidth: 1120, minHeight: 640, idealHeight: 740)
         .background(Color.hdr.surfacePanel)
-        .task(id: model.document?.name) { await model.loadCaptureFacts() }
     }
 
     private var header: some View {

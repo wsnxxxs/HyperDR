@@ -155,6 +155,8 @@ extension UserDefaults {
         ModelChoice(id: "research-exif-v1", name: "EXIF", nameKey: "model.research-exif-v1",
                     summaryKey: "model.research-exif-v1.summary", isEnabled: true, requiresCapture: true),
     ])
+    var diagnosticHandler: ((EditorPhoto, EditOptions, ExportFrame?) async throws -> [String])?
+    fileprivate(set) var diagnosticCalls = 0
     var exportStartHandler: (() async throws -> Void)?
     var exportCancelHandler: (() async -> Void)?
     var exportSaveHandler: ((String, URL?) async throws -> SavedLocation)?
@@ -383,7 +385,11 @@ extension FakeEditorServices {
         try await metadataHandler?(); return historyByURL[photo.url] ?? []
     }
     func exportTimingHistory() async -> [ExportTimingSample] { timings }
-    func commandLine(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?) async throws -> [String] { ["HyperDR", "--output", "<export>"] }
+    func commandLine(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?) async throws -> [String] {
+        diagnosticCalls += 1
+        if let diagnosticHandler { return try await diagnosticHandler(photo, options, frame) }
+        return ["HyperDR", "convert", "photo." + photo.url.pathExtension, "--output", "out", "--report", "out/report.json"]
+    }
     func exportKey(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?) async throws -> String {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         return String(decoding: try encoder.encode(options.values), as: UTF8.self) + String(describing: frame)

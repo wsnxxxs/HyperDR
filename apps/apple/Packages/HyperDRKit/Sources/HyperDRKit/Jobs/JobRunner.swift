@@ -90,13 +90,20 @@ public actor JobRunner {
         }
     }
 
+    /// Privacy-safe argv for diagnostics; never contains session/output paths.
     public func commandLine(session id: SessionID, options: EditOptions,
                             frame: ExportFrame? = nil) async throws -> [String] {
-        var request = try resolver.resolveExport(options, session: await sessions.session(id))
+        var request = try resolver.resolveExport(options, session: await sessions.session(id), diagnosticPaths: true)
         if let frame { _ = try ExportFrameRecord(frame) }
-        try request.setCommand("output", .string("<导出文件夹>"))
-        try request.setCommand("report", .string("<导出文件夹>/report.json"))
-        if frame != nil { try request.setCommand("frame", .string("<导出文件夹>/frame.json")) }
+        try request.setCommand("output", .string("out"))
+        try request.setCommand("report", .string("out/report.json"))
+        if frame != nil { try request.setCommand("frame", .string("frame.json")) }
+        // Defensive for future internal routing; public options reject these.
+        for (key, path) in [("external_gain", "gain.png"), ("external_gain_report", "gain-report.json")] {
+            if let value = request.command[key], value != .null, value != .string("") {
+                try request.setCommand(key, .string(path))
+            }
+        }
         var argv = try Engine.commandLine(request)
         argv[0] = "HyperDR"
         return argv

@@ -122,7 +122,6 @@ nonisolated extension Duration {
     var result: ExportResult?
     var isResultStale = false
     var blockerKey: String?
-    var commandLine: [String] = []
     var destination: ExportDestination?
     /// Every encoding id is present; a present optional nil means available.
     var encodingAvailability: [String: String?] = [:]

@@ -26,8 +26,8 @@ struct OptionResolver: Sendable {
         try resolve(request, session: session, preview: true)
     }
 
-    func resolveExport(_ options: EditOptions, session: PhotoSession) throws -> EngineRequest {
-        try resolve(PreviewRequest(session: session.id, options: options, maxEdge: maxEdgeCeiling), session: session, preview: false)
+    func resolveExport(_ options: EditOptions, session: PhotoSession, diagnosticPaths: Bool = false) throws -> EngineRequest {
+        try resolve(PreviewRequest(session: session.id, options: options, maxEdge: maxEdgeCeiling), session: session, preview: false, diagnosticPaths: diagnosticPaths)
     }
 
     /// The request for `PreviewService.modelGain`: the edit with the model
@@ -39,7 +39,7 @@ struct OptionResolver: Sendable {
             maxEdge: maxEdgeCeiling), session: session, preview: false)
     }
 
-    private func resolve(_ request: PreviewRequest, session: PhotoSession, preview: Bool) throws -> EngineRequest {
+    private func resolve(_ request: PreviewRequest, session: PhotoSession, preview: Bool, diagnosticPaths: Bool = false) throws -> EngineRequest {
         var options = request.options.values
         guard options["frame"] == nil else {
             throw HyperDRError(code: "invalid_options", message: "Frames must be supplied separately")
@@ -67,7 +67,7 @@ struct OptionResolver: Sendable {
             guard let sessionLUTs, let path = try sessionLUTs.resolve(value, session: session.id) else {
                 throw LUTFiles.invalid()
             }
-            options["_lut_path"] = .string(path.path)
+            options["_lut_path"] = .string(diagnosticPaths ? "look.cube" : path.path)
             for key in ["lutInput", "lutOutput"] {
                 if let space = options[key] {
                     guard case .string(let name) = space, LUTSpace(rawValue: name) != nil else {
@@ -88,7 +88,7 @@ struct OptionResolver: Sendable {
         let normalized = try Engine.normalize(options)
         var resolved = normalized
         if preview { resolved.setSetting("preview_max_edge", .number(Double(edge))) }
-        try resolved.setCommand("input", .string(session.sourceURL.path))
+        try resolved.setCommand("input", .string(diagnosticPaths ? "photo" + session.sourceURL.pathExtension.withLeadingDot : session.sourceURL.path))
         try resolved.setCommand("output", .string(""))
         try resolved.setCommand("report", .string(""))
         if let region = request.region {
@@ -124,4 +124,8 @@ struct OptionResolver: Sendable {
         }
         return strength
     }
+}
+
+private extension String {
+    var withLeadingDot: String { isEmpty ? "" : "." + self }
 }

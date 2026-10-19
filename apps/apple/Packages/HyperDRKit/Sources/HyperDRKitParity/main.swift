@@ -13,9 +13,14 @@ import HyperDRKit
             supportDirectory: workspace.appendingPathComponent("support"),
             cacheDirectory: workspace.appendingPathComponent("cache")))
         let photo = try await kit.sessions.open(URL(fileURLWithPath: arguments[1]))
-        let options = try JSONDecoder().decode(EditOptions.self, from: Data(contentsOf: URL(fileURLWithPath: arguments[2])))
+        var options = try JSONDecoder().decode(EditOptions.self, from: Data(contentsOf: URL(fileURLWithPath: arguments[2])))
+        if let path = ProcessInfo.processInfo.environment["HYPERDR_PARITY_LUT"] {
+            let entry = try await kit.luts.importLUT(URL(fileURLWithPath: path), into: photo.id)
+            options.values["lutId"] = .string(entry.id.rawValue)
+        }
         let frame = try arguments.count == 6 ? JSONDecoder().decode(ExportFrame.self,
             from: Data(contentsOf: URL(fileURLWithPath: arguments[5]))) : nil
+        let diagnosticArgv = try await kit.jobs.commandLine(session: photo.id, options: options, frame: frame)
         let ticket = try await kit.jobs.start(session: photo.id, options: options, frame: frame)
         for await event in kit.jobs.events(ticket.job) {
             if case .finished(let result) = event {
@@ -26,7 +31,7 @@ import HyperDRKit
         let saved = try await kit.exportTarget.save(session: photo.id, export: ticket.export,
             oneOff: URL(fileURLWithPath: arguments[4], isDirectory: true))
         await kit.sessions.close(photo.id)
-        let json = try JSONSerialization.data(withJSONObject: ["path": saved.url.path, "argv": ticket.argv], options: [.sortedKeys])
+        let json = try JSONSerialization.data(withJSONObject: ["path": saved.url.path, "argv": ticket.argv, "diagnosticArgv": diagnosticArgv], options: [.sortedKeys])
         print(String(decoding: json, as: UTF8.self))
     }
 }

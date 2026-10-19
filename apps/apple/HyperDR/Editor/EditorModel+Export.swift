@@ -96,7 +96,6 @@ extension EditorModel {
                 export.durations = ExportETA.durations(history: timingHistory, kind: .init(isRAW: photo.formatLabel == "RAW",
                     encoding: snapshot.encoding, isAI: snapshot.aiMode == .optimized, hasFrame: framed, verifies: snapshot.verifies), pixels: pixels)
                 let ticket = try await services.startExport(photo, options: options, frame: frame, destination: destination)
-                export.commandLine = ticket.argv
                 if export.phase == .preparing { export.phase = .running }
                 var terminal = false
                 for await event in services.exportEvents(ticket.job) {
@@ -182,8 +181,6 @@ extension EditorModel {
                 try Task.checkCancellation()
                 let history = try await services.exports(for: photo)
                 try Task.checkCancellation()
-                let command = try await services.commandLine(photo, options: options, frame: frame)
-                try Task.checkCancellation()
                 let name = try await services.suggestedFileName(photo, options: options)
                 try Task.checkCancellation()
                 let timings = await services.exportTimingHistory()
@@ -199,7 +196,7 @@ extension EditorModel {
                     }
                     export.result = result; export.isResultStale = false
                 } else { export.isResultStale = export.result != nil }
-                export.commandLine = command; suggestedFileName = name; timingHistory = timings
+                suggestedFileName = name; timingHistory = timings
             } catch {
                 guard let self, !Task.isCancelled, self.photo == photo, exportMetadataTicket == ticket else { return }
                 handleExportError(UserFacingError.service(error))
@@ -317,7 +314,22 @@ extension EditorModel {
             + "\nCamera: \(captureFacts.model ?? "—") · Lens: \(captureFacts.lens ?? "—")"
             + "\nLens correction: " + support
     }
+    /// Generate only on explicit copy, capturing one coherent edit snapshot.
     var diagnosticText: String {
+        get async {
+            let header = diagnosticHeader
+            guard let photo else { return header + "\nEquivalent CLI command: no photo open" }
+            let options = effectiveOptions()
+            do {
+                let frame = try makeExportFrame()
+                let argv = try await services.commandLine(photo, options: options, frame: frame)
+                return header + "\n" + DiagnosticCommand.text(argv)
+            } catch {
+                return header + "\nEquivalent CLI command: unavailable (" + UserFacingError.service(error).code + ")"
+            }
+        }
+    }
+    private var diagnosticHeader: String {
         preferences.diagnostics + rawDiagnostics + "\nDisplay: " + display.screenName
             + "\nHeadroom: \(display.currentHeadroom) / \(display.potentialHeadroom)"
             + "\nInputs: " + openableContentTypes.map(\.identifier).joined(separator: ", ")

@@ -8,7 +8,7 @@ script is the guard, the native counterpart of check_panel_i18n.py:
 
 * every key the app's Swift uses exists in the catalogue;
 * every catalogue key is used (no dead entries), except the keys under
-  `DYNAMIC_PREFIXES` and `PENDING_PREFIXES` below;
+  `DYNAMIC_PREFIXES` below;
 * every entry has a translated, non-empty `en` and `zh-Hans` value, and both
   values take as many arguments as the key has `%@` placeholders;
 * a semantic key passed as `verbatim:` is an error: it would show the key
@@ -87,12 +87,7 @@ LOCALES = ["en", "zh-Hans"]
 # Keys read through a name built at run time (see the module docstring); never
 # reported as unused. Their completeness is the Swift coverage test's.
 DYNAMIC_PREFIXES = ("ctrl.", "choice.", "field.")
-# Keys whose literal users arrive with a branch that is not merged yet (the
-# editor model's undo names and AI reasons, the canvas hints). Not reported
-# as unused until then; delete this tuple once that branch has landed, so
-# these are checked like any other key.
-PENDING_PREFIXES = ("undo.", "ai.unavailable.", "canvas.hint.", "canvas.peeking")
-UNUSED_EXEMPT = DYNAMIC_PREFIXES + PENDING_PREFIXES
+UNUSED_EXEMPT = DYNAMIC_PREFIXES
 
 KEY_RE = re.compile(r"^([a-z][A-Za-z0-9]*)(?:\.[A-Za-z0-9_-]+)+(?: %@)*$")
 CJK_RE = re.compile(r"[　-〿㐀-鿿＀-￯]")

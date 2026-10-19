@@ -51,7 +51,8 @@ private func publishThumbnail(_ env: JobEnvironment, _ photo: PhotoSession, thum
     }
 
     @Test func baseOnlyLinearAreaAveragePreservesSizeAndIgnoresGain() async throws {
-        let engine = try await Engine(), session = try engine.openPreview(source: TinyPhoto.url)
+        let photo = try TinyPhoto(); defer { photo.remove() }
+        let engine = try await Engine(), session = try engine.openPreview(source: photo.url)
         defer { session.close() }
         let a = try await session.renderFrame(EngineRequest(settings: ["preview_max_edge": .number(8), "gain_strength": .number(0)]))
         let b = try await session.renderFrame(EngineRequest(settings: ["preview_max_edge": .number(8), "gain_strength": .number(2)]))
@@ -161,5 +162,18 @@ private func publishThumbnail(_ env: JobEnvironment, _ photo: PhotoSession, thum
             }
             #expect(await env.sessions.exportThumbnail(photo.id, export: ticket.export) == thumbnail.jpegData)
         }
+    }
+}
+
+/// The generated test photo leaves nothing behind (R6-TINY-1).
+@Suite struct TinyPhotoCleanupTests {
+    @Test func aPhotoIsPrivateAndItsDirectoryGoesWithIt() throws {
+        // Not a count of the temporary folder: other tests make photos at the same time.
+        let first = try TinyPhoto(), second = try TinyPhoto()
+        #expect(first.url.deletingLastPathComponent() != second.url.deletingLastPathComponent())
+        #expect(FileManager.default.fileExists(atPath: first.url.path))
+        first.remove(); first.remove(); second.remove()
+        #expect(!FileManager.default.fileExists(atPath: first.url.deletingLastPathComponent().path))
+        #expect(!FileManager.default.fileExists(atPath: second.url.deletingLastPathComponent().path))
     }
 }

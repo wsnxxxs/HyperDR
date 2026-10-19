@@ -1,4 +1,5 @@
 #include "hyperdr/container/heif_grid.hpp"
+#include "heif_writer_fixture.hpp"
 #include "hyperdr/container/heif_tmap.hpp"
 #include "hyperdr/container/iso_gain_map.hpp"
 
@@ -48,13 +49,14 @@ Bytes leaf(std::uint8_t marker, std::string_view brand = "heic") {
   append(iinf_payload, make_box("infe", infe_payload));
   const auto iinf = make_box("iinf", iinf_payload);
 
-  const auto hvcc = make_box("hvcC", Bytes{marker, 1, 2, 3});
+  const auto sequence = writer_fixture::sequence(8, 1);
+  const auto hvcc = make_box("hvcC", hyperdr::make_hevc_configuration(sequence.vps, sequence.sps, sequence.pps).record);
   Bytes ispe_payload{0, 0, 0, 0};
   put32(ispe_payload, 2);
   put32(ispe_payload, 2);
   const auto ispe = make_box("ispe", ispe_payload);
   const auto pixi = make_box("pixi", Bytes{0, 0, 0, 0, 3, 8, 8, 8});
-  const auto colr = make_box("colr", Bytes{'n', 'c', 'l', 'x', 0, 1});
+  const auto colr = make_box("colr", Bytes{'n', 'c', 'l', 'x', 0, 1, 0, 13, 0, 1, 128});
   Bytes ipco_payload;
   for (const auto& property : {hvcc, ispe, pixi, colr}) append(ipco_payload, property);
   const auto ipco = make_box("ipco", ipco_payload);
@@ -123,7 +125,7 @@ void test_grid_and_single_image() {
   hyperdr::EncodedHeifGrid gain{4, 2, 2, 1, {leaf(0x11), leaf(0x22)}};
   hyperdr::EncodedHeifGrid base{2, 2, 1, 1, {leaf(0x33, "heix")}};
   const auto result = hyperdr::assemble_heif_grids(
-      {gain, base}, 1, {'I', 'I', 42, 0}, "<xmp/>");
+      {gain, base}, 1, {'I', 'I', 42, 0, 8, 0, 0, 0}, "<xmp/>");
   const auto top = children(result, 0, result.size());
   require(top.size() == 3 && top[0].type == "ftyp" && top[1].type == "meta" &&
               top[2].type == "mdat", "assembled HEIF top-level boxes are wrong");

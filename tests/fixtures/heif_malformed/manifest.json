@@ -1,0 +1,322 @@
+[
+  {
+    "file": "valid.heic",
+    "code": "ok",
+    "feature": ""
+  },
+  {
+    "file": "empty.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "ftyp-only.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "half.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "tail.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "ftyp-length.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "meta-length.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "bad-nal-header.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "bad-nal-length.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "no-slice.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "bad-inband-parameter.heic",
+    "code": "unsupported_format",
+    "feature": "hevc_parameter_change"
+  },
+  {
+    "file": "layer-id.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "temporal-id-zero.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "missing-pitm.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "missing-primary.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "duplicate-id.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "extent-eof.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "offset-overflow.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "idat-eof.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "construction-method-2.heic",
+    "code": "unsupported_format",
+    "feature": "construction_method"
+  },
+  {
+    "file": "bad-location-width.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "property-index.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "essential-property.heic",
+    "code": "unsupported_format",
+    "feature": "essential_property"
+  },
+  {
+    "file": "optional-property.heic",
+    "code": "ok",
+    "feature": ""
+  },
+  {
+    "file": "ispe-0.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "ispe-2147483648.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "hvcc-truncated.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "hvcc-length-size-3.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "hvcc-many-nals.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "clap-zero-denominator.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "clap-fractional.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "irot-reserved.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "imir-reserved.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "exif-offset.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "tmap-version.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "tmap-self.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "iref-cycle.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "grid-self.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "grid-nested.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "iden-long.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "grid-tile-count.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "grid-coverage.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "valid-grid.heic",
+    "code": "ok",
+    "feature": ""
+  },
+  {
+    "file": "valid-wide-ids.heic",
+    "code": "ok",
+    "feature": ""
+  },
+  {
+    "file": "meta-depth-1000.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "box-size-7.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "largesize-15.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "nested-size-zero.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "icc-claim-100mb.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "image-sequence.heic",
+    "code": "unsupported_format",
+    "feature": "image_sequence"
+  },
+  {
+    "file": "valid-idat.heic",
+    "code": "ok",
+    "feature": ""
+  },
+  {
+    "file": "valid-iden-grid.heic",
+    "code": "ok",
+    "feature": ""
+  },
+  {
+    "file": "valid-alpha-1.heic",
+    "code": "ok",
+    "feature": ""
+  },
+  {
+    "file": "valid-alpha-2.heic",
+    "code": "ok",
+    "feature": ""
+  },
+  {
+    "file": "valid-legacy-gain.heic",
+    "code": "ok",
+    "feature": ""
+  },
+  {
+    "file": "unknown-essential-unused.heic",
+    "code": "ok",
+    "feature": ""
+  },
+  {
+    "file": "valid-transforms.heic",
+    "code": "ok",
+    "feature": ""
+  },
+  {
+    "file": "inspect-short-iref.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "tmap-two-channel-body.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "gain-larger-than-base.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "clap-outside.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "valid-irot-max.heic",
+    "code": "ok",
+    "feature": ""
+  },
+  {
+    "file": "reserved-irap.heic",
+    "code": "decode_failed",
+    "feature": ""
+  },
+  {
+    "file": "duplicate-tmap-altr.heic",
+    "code": "decode_failed",
+    "feature": ""
+  }
+]

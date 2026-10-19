@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include "hyperdr/foundation/raster_budget.hpp"
 #include "hyperdr/foundation/progress.hpp"
 #include <limits>
 #include <stdexcept>
@@ -10,8 +11,8 @@ namespace hyperdr::codec {
 // The product supports raster inputs up to 11656x8742 in either orientation.
 // Keep the dimensions explicit: an area-only check would accept an image with
 // one axis beyond the supported decoder geometry.
-inline constexpr std::uint64_t kMaxRasterWidth = 11656ULL;
-inline constexpr std::uint64_t kMaxRasterHeight = 8742ULL;
+inline constexpr std::uint64_t kMaxRasterWidth = kRasterWidthLimit;
+inline constexpr std::uint64_t kMaxRasterHeight = kRasterHeightLimit;
 inline constexpr std::uint64_t kMaxRasterPixels =
     kMaxRasterWidth * kMaxRasterHeight;
 // The raster pipeline's working-set estimate is 15 bytes per input pixel. It
@@ -80,17 +81,7 @@ inline constexpr std::uint64_t kMaxRawPixels =
 
 [[nodiscard]] inline bool raster_budget_ok(std::uint64_t width,
                                            std::uint64_t height) {
-  const bool dimensions_ok =
-      (width <= kMaxRasterWidth && height <= kMaxRasterHeight) ||
-      (height <= kMaxRasterWidth && width <= kMaxRasterHeight);
-  if (!dimensions_ok || !pixel_count_ok(width, height, kMaxRasterPixels)) {
-    return false;
-  }
-  const auto pixels = width * height;
-  return pixels <= kMaxRasterPixels &&
-         pixels <= kMaxRasterPeakBytes / 15U &&
-         (!current_execution_config.memory_budget_bytes ||
-          pixels <= current_execution_config.memory_budget_bytes / 15U);
+  return raster_input_budget_ok(width, height);
 }
 
 struct RasterDecodePlan {

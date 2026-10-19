@@ -1,4 +1,5 @@
 #include "hyperdr/container/heif_tmap.hpp"
+#include "hyperdr/container/heif_reader.hpp"
 
 #include "internal/items.hpp"
 #include "internal/tmap_write.hpp"
@@ -383,103 +384,16 @@ Bytes build_meta(std::span<const std::uint8_t> original, std::uint16_t primary_i
 }  // namespace
 
 Bytes extract_tmap_payload(const Bytes& bytes) {
-  const auto top = children(bytes, 0, bytes.size());
-  const auto meta_it = std::find_if(top.begin(), top.end(),
-                                    [](const Box& b) { return b.type == "meta"; });
-  if (meta_it == top.end()) throw std::runtime_error("missing meta box");
-  const auto meta_view = std::span<const std::uint8_t>(bytes).subspan(meta_it->offset,
-                                                                      meta_it->size);
-  const auto kids = children(meta_view, 12, meta_view.size());
-  std::uint32_t tmap_id = 0;
-  std::optional<Box> iloc_box;
-  std::optional<Box> idat_box;
-  for (const auto& box : kids) {
-    if (box.type == "iinf") {
-      for (const auto& item : parse_iinf(meta_view.subspan(box.offset, box.size))) {
-        if (item.type == "tmap") {
-          if (tmap_id != 0) throw std::runtime_error("multiple tmap items");
-          tmap_id = item.id;
-        }
-      }
-    } else if (box.type == "iloc") {
-      iloc_box = box;
-    } else if (box.type == "idat") {
-      idat_box = box;
-    }
-  }
-  if (tmap_id == 0 || !iloc_box) throw std::runtime_error("missing tmap iloc");
-  const auto locations =
-      parse_iloc(meta_view.subspan(iloc_box->offset, iloc_box->size));
-  const auto location = std::find_if(locations.begin(), locations.end(),
-                                     [&](const Location& loc) { return loc.id == tmap_id; });
-  if (location == locations.end() || location->extents.empty()) {
-    throw std::runtime_error("tmap item has no extents");
-  }
-  if (location->data_ref != 0) throw std::runtime_error("external tmap data reference is unsupported");
-
-  Bytes payload;
-  for (const auto& extent : location->extents) {
-    if (extent.offset > std::numeric_limits<std::uint64_t>::max() - location->base) {
-      throw std::runtime_error("tmap extent offset overflows");
-    }
-    std::uint64_t offset = location->base + extent.offset;
-    if (location->construction_method == 1) {
-      if (!idat_box) throw std::runtime_error("tmap uses idat but idat is missing");
-      const std::uint64_t idat_offset = meta_it->offset + idat_box->offset + idat_box->header;
-      if (offset > std::numeric_limits<std::uint64_t>::max() - idat_offset) {
-        throw std::runtime_error("tmap idat offset overflows");
-      }
-      offset += idat_offset;
-    }
-    if (offset > bytes.size() || extent.length > bytes.size() - offset) {
-      throw std::runtime_error("tmap extent is out of bounds");
-    }
-    if (extent.length > 1024U * 1024U || payload.size() > 1024U * 1024U - extent.length) {
-      throw std::runtime_error("tmap payload is unreasonably large");
-    }
-    payload.insert(payload.end(),
-                   bytes.begin() + static_cast<std::ptrdiff_t>(offset),
-                   bytes.begin() + static_cast<std::ptrdiff_t>(offset + extent.length));
-  }
-  // Semantic validation is the gain-map layer's business: every caller parses
-  // this payload immediately, and doing it here as well would make the
-  // container module depend upward on ISO 21496-1.
-  return payload;
+  const auto file = read_heif(bytes);
+  const auto references = file.tmap_references();
+  if (!references) throw std::runtime_error("file has no tmap item with dimg references");
+  return file.item_bytes(references->tmap_id, 4096);
 }
 
 TmapReferences find_tmap_references(const Bytes& bytes) {
-  for (const auto& box : children(bytes, 0, bytes.size())) {
-    if (box.type != "meta") continue;
-    const auto meta_view = std::span<const std::uint8_t>(bytes).subspan(box.offset, box.size);
-    const auto kids = children(meta_view, 12, meta_view.size());
-    std::uint32_t tmap_id = 0;
-    for (const auto& b : kids) {
-      if (b.type != "iinf") continue;
-      for (const auto& item : parse_iinf(meta_view.subspan(b.offset, b.size)))
-        if (item.type == "tmap") tmap_id = item.id;
-    }
-    if (tmap_id == 0) continue;
-    for (const auto& b : kids) {
-      if (b.type != "iref") continue;
-      const auto view = meta_view.subspan(b.offset, b.size);
-      const unsigned id_size = fullbox_version(view) == 0 ? 2U : 4U;
-      for (const auto& ref : children(view, 12, view.size())) {
-        if (ref.type != "dimg") continue;
-        std::size_t p = ref.offset + 8;
-        const auto from = static_cast<std::uint32_t>(read_n(view, p, id_size));
-        const auto count = read_n(view, p, 2);
-        if (from != tmap_id) continue;
-        if (count != 2) throw std::runtime_error("tmap dimg must contain exactly [base, gain]");
-        const auto base = static_cast<std::uint32_t>(read_n(view, p, id_size));
-        const auto gain = static_cast<std::uint32_t>(read_n(view, p, id_size));
-        if (base == 0 || gain == 0 || base == gain || base == tmap_id || gain == tmap_id) {
-          throw std::runtime_error("invalid tmap dimg item ids");
-        }
-        return {tmap_id, base, gain};
-      }
-    }
-  }
-  throw std::runtime_error("file has no tmap item with dimg references");
+  const auto references = read_heif(bytes).tmap_references();
+  if (!references) throw std::runtime_error("file has no tmap item with dimg references");
+  return *references;
 }
 
 Bytes add_tmap_to_two_image_heif(const Bytes& source, const Bytes& tmap_payload) {

@@ -1,6 +1,8 @@
 #include "hyperdr/container/inspect.hpp"
 
 #include "hyperdr/container/heif_tmap.hpp"
+#include "hyperdr/container/heif_reader.hpp"
+#include "internal/bmff.hpp"
 #include "hyperdr/container/iso_gain_map.hpp"
 #include "hyperdr/foundation/json.hpp"
 #include "internal/items.hpp"
@@ -29,13 +31,15 @@ bool container_type(std::string_view type) {
   return types.contains(type);
 }
 
-constexpr unsigned kMaxBoxDepth = 64;
-constexpr std::size_t kMaxBoxCount = 16384;
+constexpr unsigned kMaxBoxDepth = heif_limits::box_depth;
+constexpr std::size_t kMaxBoxCount = heif_limits::boxes;
 
 void walk_boxes(std::span<const std::uint8_t> bytes, std::size_t begin, std::size_t end,
                 unsigned depth, HeifInspection& result) {
+  if (begin > end || end > bytes.size()) throw std::runtime_error("truncated HEIF container");
   if (depth > kMaxBoxDepth) throw std::runtime_error("HEIF box nesting is too deep");
-  for (const auto& box : children(bytes, begin, end)) {
+  std::size_t count=result.boxes.size();
+  for (const auto& box : container::bmff_boxes(std::span<const std::uint8_t>(bytes).subspan(begin,end-begin),begin,depth,count)) {
     if (result.boxes.size() >= kMaxBoxCount) {
       throw std::runtime_error("HEIF contains too many boxes");
     }
@@ -55,7 +59,10 @@ void walk_boxes(std::span<const std::uint8_t> bytes, std::size_t begin, std::siz
     }
     if (container_type(box.type)) {
       const auto skip = (box.type == "meta" || box.type == "iref") ? 4U : 0U;
-      walk_boxes(bytes, box.offset + box.header + skip, box.offset + box.size, depth + 1, result);
+      const auto child_begin=box.offset + box.header + skip;
+      const auto child_end=box.offset + box.size;
+      if(child_begin>child_end)throw std::runtime_error("truncated HEIF container");
+      if(child_begin<child_end)walk_boxes(bytes, child_begin, child_end, depth + 1, result);
     }
   }
 }
@@ -183,10 +190,11 @@ void describe_gain_map_auxiliary(std::span<const std::uint8_t> bytes, std::uint3
 HeifInspection inspect_heif(const Bytes& bytes) {
   HeifInspection result;
   try {
-    const auto top = children(bytes, 0, bytes.size());
-    const auto ftyp = std::find_if(top.begin(), top.end(), [](const Box& b) { return b.type == "ftyp"; });
+    std::size_t box_count=0;
+    const auto top = container::bmff_boxes(bytes,0,0,box_count);
+    const auto ftyp = std::find_if(top.begin(), top.end(), [](const auto& b) { return b.type == "ftyp"; });
     if (ftyp == top.end()) throw std::runtime_error("missing ftyp box");
-    if (ftyp->size < 16) throw std::runtime_error("truncated ftyp box");
+    if (ftyp->size < ftyp->header + 8) throw std::runtime_error("truncated ftyp box");
     const auto note_brand = [&](std::size_t at) {
       const std::string brand(reinterpret_cast<const char*>(bytes.data() + at), 4);
       if (brand == "heic" || brand == "heix") result.has_heic_brand = true;
@@ -194,11 +202,32 @@ HeifInspection inspect_heif(const Bytes& bytes) {
     };
     // major_brand, then compatible_brands: the 4-byte minor_version between them
     // is a number, not a brand, and must not be matched against brand names.
-    note_brand(ftyp->offset + 8);
-    for (std::size_t p = ftyp->offset + 16; p + 4 <= ftyp->offset + ftyp->size; p += 4) {
+    note_brand(ftyp->offset + ftyp->header);
+    for (std::size_t p = ftyp->offset + ftyp->header + 8; p + 4 <= ftyp->offset + ftyp->size; p += 4) {
       note_brand(p);
     }
-    walk_boxes(bytes, 0, bytes.size(), 0, result);
+    if (std::any_of(top.begin(), top.end(), [](const auto& b) { return b.type == "meta"; })) {
+      const auto file = read_heif(bytes);
+      // The public diagnostic tree historically treats iinf and dinf as leaves.
+      // Preserve its exact JSON while the reader also visits their children.
+      std::optional<unsigned> leaf_depth;
+      for (const auto& box : file.boxes) {
+        if (leaf_depth && box.depth > *leaf_depth) continue;
+        leaf_depth.reset();
+        result.boxes.push_back(box);
+        if (box.type == "iinf" || box.type == "dinf") leaf_depth = box.depth;
+      }
+      for (const auto& [id, item] : file.items) {
+        (void)id;
+        result.has_tmap_item |= item.type == "tmap";
+        result.has_exif |= item.type == "Exif";
+        result.has_xmp |= item.type == "mime";
+      }
+      result.primary_item_id = file.primary_item_id;
+    } else {
+      // Structural inspection also supports fragments without a pict meta.
+      walk_boxes(bytes, 0, bytes.size(), 0, result);
+    }
     result.has_data_information = meta_has_data_information(bytes);
     // Grid images also use dimg, so bind both checks to the actual tmap item
     // instead of accepting any unrelated dimg/altr box.

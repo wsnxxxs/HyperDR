@@ -81,3 +81,8 @@ set(CPACK_PACKAGE_FILE_NAME "${PROJECT_NAME}-${PROJECT_VERSION}-${HYPERDR_PACKAG
 set(CPACK_GENERATOR "ZIP")
 set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)
 include(CPack)
+
+option(HYPERDR_BUILD_FUZZERS "Build opt-in LLVM parser fuzz targets" OFF)
+if(HYPERDR_BUILD_FUZZERS)
+  add_subdirectory(tests/fuzz)
+endif()

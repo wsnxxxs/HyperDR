@@ -51,14 +51,17 @@ extension EditorModel {
             headroom: display.currentHeadroom,
             overlays: CanvasOverlays(highlights: showsHighlightZebra, shadows: showsShadowZebra,
                                      mask: maskKey != nil, hdrRange: Float(outputCeilingStops)), previewsAsSDR: previewsAsSDR,
-            presentationTrace: mode == .original ? referencePresentationTrace : editedPresentationTrace)
+            presentationTrace: mode == .original ? referencePresentationTrace : editedPresentationTrace,
+            originalDetailTrace: originalDetailTrace, editedDetailTrace: editedDetailTrace)
     }
 
     func invalidateDetails(editedOnly: Bool = false) {
         detailTask?.cancel(); detailTask = nil
         detailTicket &+= 1
-        if editedDetailFrame != nil { editedDetailFrame = nil; bumpFrameRevision() }
-        if !editedOnly, originalDetailFrame != nil { originalDetailFrame = nil; bumpFrameRevision() }
+        editedDetailTrace = nil
+        if !editedOnly { originalDetailTrace = nil }
+        if editedDetailFrame != nil { editedDetailFrame = nil; editedDetailTrace = nil; bumpFrameRevision() }
+        if !editedOnly, originalDetailFrame != nil { originalDetailFrame = nil; originalDetailTrace = nil; bumpFrameRevision() }
     }
 
     /// Called by CanvasModel for buttons, gestures, viewport and scale changes.
@@ -68,10 +71,10 @@ extension EditorModel {
             return
         }
         if let frame = editedDetailFrame, CanvasCompositor.region(frame)?.contains(visible) != true {
-            editedDetailFrame = nil; bumpFrameRevision()
+            editedDetailFrame = nil; editedDetailTrace = nil; bumpFrameRevision()
         }
         if let frame = originalDetailFrame, CanvasCompositor.region(frame)?.contains(visible) != true {
-            originalDetailFrame = nil; bumpFrameRevision()
+            originalDetailFrame = nil; originalDetailTrace = nil; bumpFrameRevision()
         }
         scheduleDetails()
     }
@@ -96,12 +99,12 @@ extension EditorModel {
                 if needsOriginal {
                     let result = try await services.renderDetail(photo, options: reference, region: region, original: true)
                     guard let self, !Task.isCancelled, detailTicket == ticket, self.photo == photo else { return }
-                    if let frame = result?.frame { originalDetailFrame = frame; bumpFrameRevision() }
+                    if let frame = result?.frame { originalDetailFrame = frame; originalDetailTrace = result?.trace; bumpFrameRevision() }
                 }
                 if needsEdited {
                     let result = try await services.renderDetail(photo, options: options, region: region, original: false)
                     guard let self, !Task.isCancelled, detailTicket == ticket, self.photo == photo else { return }
-                    if let frame = result?.frame { editedDetailFrame = frame; bumpFrameRevision() }
+                    if let frame = result?.frame { editedDetailFrame = frame; editedDetailTrace = result?.trace; bumpFrameRevision() }
                 }
             } catch EditorDetailError.sourceReplaced {
                 guard let self, !Task.isCancelled, detailTicket == ticket, self.photo == photo else { return }

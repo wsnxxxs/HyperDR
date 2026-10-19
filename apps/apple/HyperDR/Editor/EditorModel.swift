@@ -147,6 +147,8 @@ import UniformTypeIdentifiers
     @ObservationIgnored var referenceOptions: EditOptions?
     @ObservationIgnored var detailTask: Task<Void, Never>?
     @ObservationIgnored var detailTicket = 0
+    @ObservationIgnored var originalDetailTrace: PreviewTrace?
+    @ObservationIgnored var editedDetailTrace: PreviewTrace?
     @ObservationIgnored var editedDetailFrame: PreviewFrame?
     @ObservationIgnored var originalDetailFrame: PreviewFrame?
     private(set) var maskKey: String?

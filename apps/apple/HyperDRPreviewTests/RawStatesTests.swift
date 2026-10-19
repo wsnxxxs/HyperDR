@@ -416,6 +416,48 @@ import HyperDRDesign
         model.closeDocument()
     }
 
+    /// R7-1301: a render that gives nothing back is not waited for: the original
+    /// on screen is still the one asked for, and the next tier change asks again.
+    func testARenderWithNoResultIsNotWaitedFor() async throws {
+        let (model, services) = try await openRAW(supported: true, viewport: CGSize(width: 800, height: 600))
+        services.referenceHandler = { _ in nil }
+        model.updateViewport(CGSize(width: 1000, height: 700), backingScale: 1)   // 1280
+        await eventually(timeout: .seconds(5)) { services.referenceEdges == [1280] }
+        await eventually(timeout: .seconds(5)) { !model.isReferenceRenderPending }
+        XCTAssertEqual(model.requestedReferenceEdge, 960)
+        XCTAssertEqual(model.shownReferenceEdge, 960)
+        XCTAssertEqual(model.referenceOptions, model.shownReferenceOptions)
+        model.updateViewport(CGSize(width: 1600, height: 1000), backingScale: 2)   // 2048
+        await eventually(timeout: .seconds(5)) { services.referenceEdges == [1280, 2048] }
+        model.closeDocument()
+    }
+
+    /// R7-1301: a render in flight while another photo is opened, and that open
+    /// fails: the photo that comes back is not left waiting for the render, and
+    /// is brought up to the tier it was asked for.
+    func testARenderInFlightWhenAnOpenFailsDoesNotLeaveTheOriginalWaiting() async throws {
+        let (model, services) = try await openRAW(supported: true, viewport: CGSize(width: 800, height: 600))
+        var gates: [CheckedContinuation<EditorPreview?, Error>] = []
+        services.referenceHandler = { _ in try await withCheckedThrowingContinuation { gates.append($0) } }
+        model.updateViewport(CGSize(width: 1000, height: 700), backingScale: 1)   // 1280
+        await eventually(timeout: .seconds(5)) { gates.count == 1 }
+        XCTAssertTrue(model.isReferenceRenderPending)
+        let other = URL(fileURLWithPath: "/fixtures/other.ARW")
+        model.open([other])
+        await eventually(timeout: .seconds(5)) { services.streams[other] != nil }
+        gates[0].resume(returning: rawReference)    // arrives for a generation that has moved on
+        try await Task.sleep(for: .milliseconds(100))
+        services.streams[other]?.yield(.failed(UserFacingError(code: "decode_failed")))
+        await eventually(timeout: .seconds(5)) { model.alert?.code == "decode_failed" }
+        // The photo is back; the tier it was asked for is asked for again, once.
+        await eventually(timeout: .seconds(5)) { gates.count == 2 }
+        XCTAssertEqual(services.referenceEdges, [1280, 1280])
+        gates[1].resume(returning: rawReference)
+        await eventually(timeout: .seconds(5)) { model.shownReferenceEdge == 1280 }
+        XCTAssertFalse(model.isReferenceRenderPending)
+        model.closeDocument()
+    }
+
     func testAnOriginalRenderingWhenThePhotoIsClosedIsDiscarded() async throws {
         let (model, services) = try await openRAW(supported: true)
         var gate: CheckedContinuation<EditorPreview?, Error>?

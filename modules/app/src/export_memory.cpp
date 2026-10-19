@@ -35,7 +35,7 @@ ExportMemoryEstimate estimate_export_memory(std::uint32_t pw, std::uint32_t ph,
   // block renderer adds one 512-row RGBA block. Raster decode uses 15 B/px;
   // an imported dual rendition holds its HDR and SDR float planes beside the
   // gain map: 37.6 B/px measured for an ISO HEIC, 26.1 for an older Apple one.
-  const bool pair = authored_pair_only && retained_renditions && !raw;
+  const bool pair = authored_pair_only && retained_renditions && !raw;  // see rendition_retention()
   const auto resident = raw ? plane(sensor,16) : 0;
   ExportMemoryEstimate e;
   e.decode = raw ? sum({overhead,resident,plane(photo,12),plane(std::uint64_t(pw)*512,16)})
@@ -50,7 +50,10 @@ ExportMemoryEstimate estimate_export_memory(std::uint32_t pw, std::uint32_t ph,
   // and the stages after it keep the graded photo (24 B/px) next to the canvas.
   const bool raster=!raw && !retained_renditions;
   // An imported pair alone (no LUT, model or grid) measured 49-55 B/px for HDR
-  // outputs and 38-43 for SDR outputs (HEIC and Ultra HDR JPEG inputs).
+  // outputs and 38-43 for SDR outputs (HEIC and Ultra HDR JPEG inputs). A pair is
+  // deliberately not `raster` for the stages after the render: the composite and
+  // packaging coefficients below were measured on single-rendition sources, and
+  // the pair rows of the HEIC matrix hold with the RAW ones.
   const auto render_planes=pair ? (sdr ? 48 : 64)
       : retained_renditions ? (external_gain_pixels && sdr ? 56 : 80)
       : raster ? (sdr ? 27 : 48) : (sdr ? 24 : 44);
@@ -108,7 +111,8 @@ ExportMemoryEstimate estimate_export_memory(std::uint32_t pw, std::uint32_t ph,
         // HDR float + RGB16 + YUV444 + libaom reference/work planes.
         // Unframed, the graded photo is still resident next to the canvas (R7-301:
         // 77 B/px measured at 24 MP; framed exports free it after compositing).
-        e.encode=sum({overhead,resident,plane(canvas,raster && !framed ? 78 : 66)});
+        // Any non-RAW source does so, an imported pair included (R7-1201).
+        e.encode=sum({overhead,resident,plane(canvas,!raw && !framed ? 78 : 66)});
         e.verify=sum({overhead,resident,plane(canvas,20)});
       }
       break;
@@ -130,6 +134,11 @@ ExportMemoryEstimate estimate_export_memory(std::uint32_t pw, std::uint32_t ph,
   for(auto* stage : {&e.decode,&e.render,&e.composite,&e.packaging,&e.encode,&e.verify})
     *stage=sum({*stage,retained_resource_bytes});
   return e;
+}
+RenditionRetention rendition_retention(bool authored_sdr, bool model_gain,
+                                       bool external_gain, bool lut_active) noexcept {
+  return {authored_sdr || model_gain || external_gain || lut_active,
+          authored_sdr && !model_gain && !external_gain && !lut_active};
 }
 std::uint64_t export_resource_bytes(const ConvertOptions& options) {
   std::uint64_t retained=0;

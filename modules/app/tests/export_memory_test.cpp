@@ -102,6 +102,19 @@ void avif_grid_estimates() {
   // Exports whose canvas is a grid fit a budget the single-item estimate would blow.
   require(above.peak()<8ULL<<30,"a 144 MP AVIF export should fit eight gigabytes as a grid");
 }
+void rendition_retention_flags() {
+  require(!rendition_retention(false,false,false,false).retained,"a plain photo retains nothing");
+  const auto pair=rendition_retention(true,false,false,false);
+  require(pair.retained && pair.imported_pair_only,"an imported pair alone");
+  for(int extra=0;extra<3;++extra) {
+    const auto mixed=rendition_retention(true,extra==0,extra==1,extra==2);
+    require(mixed.retained && !mixed.imported_pair_only,"a pair with a model, grid or LUT is not a pair alone");
+  }
+  for(int source=0;source<3;++source) {
+    const auto working=rendition_retention(false,source==0,source==1,source==2);
+    require(working.retained && !working.imported_pair_only,"model, grid and LUT conversions are not a pair");
+  }
+}
 void estimates() {
   constexpr std::uint64_t MiB=1024*1024;
   require(export_memory_budget(0,8*1024*MiB)==7680*MiB,"host reserve");
@@ -389,6 +402,7 @@ void admission() {
 }
 int main() try {
   estimates();
+  rendition_retention_flags();
   avif_grid_estimates();
   measured_peaks();
   heic_input_peaks();

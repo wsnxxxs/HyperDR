@@ -18,6 +18,7 @@ import UniformTypeIdentifiers
         set {
             guard !export.isInFlight, newValue != storedFrame else { return }
             storedFrame = newValue; frameSettingsRevision &+= 1
+            pendingExportToken = nil
             newValue.save(to: services.preferences)
             syncExportState(); refreshExportMetadata()
         }
@@ -65,7 +66,13 @@ import UniformTypeIdentifiers
 
     // MARK: Editing state (EditorModel+Editing.swift)
     /// The values every request is built from.
-    @ObservationIgnored var edit: EditSnapshot
+    @ObservationIgnored var edit: EditSnapshot {
+        didSet {
+            if oldValue != edit { editGeneration &+= 1; pendingExportToken = nil }
+        }
+    }
+    @ObservationIgnored var editGeneration = 0
+    @ObservationIgnored var pendingExportToken: UUID?
     /// What the photo was opened with, for the current encoding's defaults.
     @ObservationIgnored var source = PhotoSource()
     @ObservationIgnored var controlValues: [String: ControlValue] = [:]

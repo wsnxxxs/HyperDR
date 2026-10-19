@@ -6,6 +6,14 @@ struct ExportFrameCacheKey: Equatable {
     var settings: FrameSettings; var facts: CaptureFacts; var size: PixelSize
 }
 
+/// An opaque, single-use save-panel capability. Its issuer owns validity.
+nonisolated struct ExportPreparationToken: Equatable, Sendable {
+    fileprivate let id: UUID
+    fileprivate let photoSerial: Int
+    fileprivate let openGeneration: Int
+    fileprivate let editGeneration: Int
+}
+
 extension EditorModel {
     static func fileExtension(_ encoding: String) -> String {
         switch encoding {
@@ -73,6 +81,26 @@ extension EditorModel {
         cachedExportFrame = result; cachedFrameKey = key
         return result
     }
+    /// Capture immediately before presenting the save panel (or starting a
+    /// fixed-folder export). Only the most recently issued token remains valid.
+    func prepareExport() -> ExportPreparationToken? {
+        finishGestureBeforeEdit()
+        syncExportState()
+        guard export.blockerKey == nil, photo != nil else { return nil }
+        let id = UUID()
+        pendingExportToken = id
+        return ExportPreparationToken(id: id, photoSerial: photoSerial,
+            openGeneration: generation, editGeneration: editGeneration)
+    }
+
+    /// Stale panel callbacks are silent and must not mutate the new photo.
+    func startExport(destination: URL?, token: ExportPreparationToken) {
+        guard pendingExportToken == token.id, photoSerial == token.photoSerial,
+              generation == token.openGeneration, editGeneration == token.editGeneration else { return }
+        pendingExportToken = nil
+        startExport(destination: destination)
+    }
+
     /// A nil destination is meaningful only in fixed-folder mode. Cancelling
     /// the save panel does not call this method and cannot create a job/version.
     func startExport(destination: URL?) {
@@ -80,6 +108,7 @@ extension EditorModel {
         guard export.blockerKey == nil, let photo else { return }
         guard destination != nil || preferences.value.saveMode == .folder else { return }
         finishGestureBeforeEdit()
+        pendingExportToken = nil
         export.reset(); export.phase = .preparing; export.startedAt = now(); export.stageAt = export.startedAt
         let options = effectiveOptions(), snapshot = edit
         let fixedFolder = destination == nil ? preferences.exportFolder.target : nil
@@ -258,6 +287,7 @@ extension EditorModel {
         } else if error.code == "engine_unavailable" || error.code == "internal_error" { publishAlert(error) }
     }
     func prepareForPhotoSwitch() {
+        pendingExportToken = nil
         exportMetadataTask?.cancel(); exportMetadataTicket += 1
         cachedFrameKey = nil; cachedExportFrame = nil
         export.reset(); exportVersions = []; exportSaveStates = [:]; exportHistory = []; currentExportKey = nil; suggestedFileName = ""

@@ -558,7 +558,7 @@ extension ExportTargetTests {
         let restored = ExportTarget(configuration: env.configuration, sessions: env.sessions)
         let folder = await restored.folder
         #expect(folder.ready)
-        #expect(folder.label == "…")
+        #expect(folder.label == "…/" + FileManager.default.displayName(atPath: "/"))
         #expect(folder.label != "/")
     }
 }
@@ -826,13 +826,13 @@ private final class BlockingJobGate: @unchecked Sendable {
         let result = try await env.sessions.resultURL(photo.id, export: ticket.export)
         let manifest = result.deletingLastPathComponent().appendingPathComponent("result.json")
         let original = try Data(contentsOf: manifest)
-        let first = SavedMark(fileName: "first.tif", folderLabel: "…/Photos")
+        let first = SavedMark(fileName: "first.tif", folderDisplayName: "Photos")
         try await env.sessions.markSaved(photo.id, export: ticket.export, saved: first)
         #expect(await env.sessions.exports(for: photo.id).first?.saved?.fileName == first.fileName)
-        let last = SavedMark(fileName: "last.tif", folderLabel: "…/Exports")
+        let last = SavedMark(fileName: "last.tif", folderDisplayName: "Exports")
         try await env.sessions.markSaved(photo.id, export: ticket.export, saved: last)
         #expect(await env.sessions.exports(for: photo.id).first?.saved?.fileName == last.fileName)
-        #expect(await env.sessions.exports(for: photo.id).first?.saved?.folderLabel == last.folderLabel)
+        #expect(await env.sessions.exports(for: photo.id).first?.saved?.folderDisplayName == last.folderDisplayName)
         let savedAt = try #require(await env.sessions.exports(for: photo.id).first?.saved?.savedAt)
         #expect(abs(savedAt.timeIntervalSince(last.savedAt)) < 0.001)
         #expect(try Data(contentsOf: manifest) == original)
@@ -877,7 +877,7 @@ private final class BlockingJobGate: @unchecked Sendable {
         #expect(FileManager.default.fileExists(atPath: orphan.path))
         _ = try await publish(env, b)
         #expect(await env.sessions.exports(for: b.id).map(\.sequence).sorted() == Array(2...21))
-        try await env.sessions.markSaved(a.id, export: first.id, saved: SavedMark(fileName: "trimmed.tif", folderLabel: "…/out"))
+        try await env.sessions.markSaved(a.id, export: first.id, saved: SavedMark(fileName: "trimmed.tif", folderDisplayName: "out"))
         #expect(!FileManager.default.fileExists(atPath: pending.directory.deletingLastPathComponent().appendingPathComponent(first.id.rawValue).path))
         await env.sessions.discardExport(a.id, export: pending.id)
     }
@@ -921,7 +921,7 @@ private final class BlockingJobGate: @unchecked Sendable {
         let result = try await save.value
         #expect(!gate.didTimeOut)
         #expect(try Data(contentsOf: result.url) == Data([1,2,3]))
-        try await env.sessions.markSaved(photo.id, export: first.id, saved: SavedMark(fileName: result.name, folderLabel: result.folderLabel))
+        try await env.sessions.markSaved(photo.id, export: first.id, saved: SavedMark(fileName: result.name, folderDisplayName: result.folderDisplayName))
         #expect(await env.sessions.exports(for: photo.id).count == 1)
     }
 }

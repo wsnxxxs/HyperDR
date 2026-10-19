@@ -466,7 +466,7 @@ extension LiveEditorServices {
                     case .finished(let summary):
                         var result = await Task.detached { summary.result.map { ExportHistoryItem($0).version.result } }.value
                         if let saved = summary.saved {
-                            result?.saved = SavedLocation(fileName: saved.name, folderLabel: saved.folderLabel, url: saved.url)
+                            result?.saved = Self.savedLocation(saved)
                         }
                         sink.yield(.finished(result: result, failure: summary.failure.map(UserFacingError.init)))
                     }
@@ -508,14 +508,18 @@ extension LiveEditorServices {
     func validateDestination(_ url: URL, expectedExtension: String) async throws {
         try await requireKit().exportTarget.validateDestination(url, expectedExtension: expectedExtension)
     }
+    private static func savedLocation(_ saved: SavedExport) -> SavedLocation {
+        SavedLocation(fileName: saved.name, folderLabel: SavedLocation.label(displayName: saved.folderDisplayName), reveal: { saved.reveal() })
+    }
+
     func saveExport(_ photo: EditorPhoto, export: String, destination: URL?) async throws -> SavedLocation {
         let id = try exportSession(photo), kit = try await requireKit(), version = ExportID(rawValue: export)
         let saved: SavedExport
         if let destination { saved = try await kit.exportTarget.save(session: id, export: version, to: destination) }
         else { saved = try await kit.exportTarget.save(session: id, export: version) }
-        do { try await kit.sessions.markSaved(id, export: version, saved: SavedMark(fileName: saved.name, folderLabel: saved.folderLabel)) }
+        do { try await kit.sessions.markSaved(id, export: version, saved: SavedMark(fileName: saved.name, folderDisplayName: saved.folderDisplayName)) }
         catch { Logger(subsystem: "com.hyperdr.HyperDR", category: "Export").warning("Export saved but its history mark could not be persisted") }
-        return SavedLocation(fileName: saved.name, folderLabel: saved.folderLabel, url: saved.url)
+        return Self.savedLocation(saved)
     }
     func exportFolder() async -> ExportFolder {
         guard let kit = try? await requireKit() else { return ExportFolder() }
@@ -527,9 +531,9 @@ extension LiveEditorServices {
                 guard let self else { throw UserFacingError(code: "engine_unavailable") }
                 let id = try exportSession(photo), version = ExportID(rawValue: export)
                 let saved = try await kit.exportTarget.save(session: id, export: version, folder: snapshot)
-                do { try await kit.sessions.markSaved(id, export: version, saved: SavedMark(fileName: saved.name, folderLabel: saved.folderLabel)) }
+                do { try await kit.sessions.markSaved(id, export: version, saved: SavedMark(fileName: saved.name, folderDisplayName: saved.folderDisplayName)) }
                 catch { Logger(subsystem: "com.hyperdr.HyperDR", category: "Export").warning("Export saved but its history mark could not be persisted") }
-                return SavedLocation(fileName: saved.name, folderLabel: saved.folderLabel, url: saved.url)
+                return Self.savedLocation(saved)
             }
             return ExportFolder(label: snapshot.label, ready: true, target: target)
         } catch { return ExportFolder(label: folder.label, ready: false) }

@@ -219,8 +219,9 @@ extension EditorModel {
                 }
                 if let match = exportVersions.first(where: \.matchesCurrent), export.phase != .cancelled {
                     var result = match.result
-                    if result.saved?.url == nil, export.result?.export == result.export {
-                        result.saved?.url = export.result?.saved?.url
+                    if result.saved?.canReveal != true, export.result?.export == result.export,
+                       export.result?.saved?.canReveal == true {
+                        result.saved = export.result?.saved
                     }
                     export.result = result; export.isResultStale = false
                 } else { export.isResultStale = export.result != nil }

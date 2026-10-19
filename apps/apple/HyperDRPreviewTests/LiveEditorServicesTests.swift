@@ -193,10 +193,14 @@ extension LiveEditorServicesTests {
         await eventually(timeout:.seconds(30),"export delivered") { !model.export.isInFlight }
         XCTAssertEqual(model.export.phase,.succeeded)
         XCTAssertNil(model.export.failure);XCTAssertNil(model.export.saveFailure)
-        XCTAssertEqual(model.export.result?.saved?.url?.resolvingSymlinksInPath(),target.resolvingSymlinksInPath())
+        XCTAssertEqual(model.export.result?.saved?.folderLabel, "…/" + FileManager.default.displayName(atPath: root.path))
+        XCTAssertEqual(model.export.result?.saved?.canReveal, true)
         XCTAssertGreaterThan(try Data(contentsOf:target).count,0)
         await eventually(timeout:.seconds(10)) { model.exportVersions.count == 1 && model.exportVersions[0].matchesCurrent }
         XCTAssertEqual(model.exportVersions[0].number,1);XCTAssertEqual(model.documentStatus,.saved)
+        XCTAssertEqual(model.exportVersions[0].saved?.folderLabel, "…/" + FileManager.default.displayName(atPath: root.path))
+        XCTAssertEqual(model.exportVersions[0].saved?.canReveal, false, "History carries labels, not file authority")
+        XCTAssertEqual(model.export.result?.saved?.canReveal, true, "Refreshing history preserves the current save action")
         XCTAssertEqual(model.exportVersions[0].pixelSize,model.document?.pixelSize)
         XCTAssertTrue(model.exportVersions[0].result.selfVerified)
         let timings = await services.exportTimingHistory()

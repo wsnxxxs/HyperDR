@@ -11,7 +11,9 @@ public struct ExportFolderState: Sendable {
 public struct SavedExport: Sendable {
     public let url: URL
     public let name: String
-    public let folderLabel: String
+    public let folderDisplayName: String
+    public var folderLabel: String { "…/" + folderDisplayName }
+    @MainActor public func reveal() { NSWorkspace.shared.activateFileViewerSelecting([url]) }
     /// False when the file was published under its name but syncing the
     /// folder failed or file-only authority prevented requesting a directory sync: the export exists and must not be retried as a failure
     /// (that would save a second copy), yet a crash could still lose the name.
@@ -362,7 +364,7 @@ public actor ExportTarget {
                 // File data was fsynced before publication; file-only authority
                 // cannot fsync the parent directory. Do not claim name durability.
                 return SavedExport(url: verified, name: verified.lastPathComponent,
-                    folderLabel: label(verified.deletingLastPathComponent()), syncConfirmed: false)
+                    folderDisplayName: FileManager.default.displayName(atPath: verified.deletingLastPathComponent().path), syncConfirmed: false)
             }
         }
         if let outcome {
@@ -437,12 +439,11 @@ public actor ExportTarget {
         published = true
         let synced = directory.map { hooks.syncFolder($0) == 0 } ?? false
         if !synced { log.warning("Saved selected file but could not sync its folder") }
-        return SavedExport(url: destination, name: name, folderLabel: label(destination.deletingLastPathComponent()), syncConfirmed: synced)
+        return SavedExport(url: destination, name: name, folderDisplayName: FileManager.default.displayName(atPath: destination.deletingLastPathComponent().path), syncConfirmed: synced)
     }
 
     private static func label(_ url: URL) -> String {
-        let parts = url.pathComponents.filter { $0 != "/" }
-        return parts.isEmpty ? "…" : "…/" + parts.suffix(2).joined(separator: "/")
+        "…/" + FileManager.default.displayName(atPath: url.path)
     }
     private static func error(_ code: String) -> HyperDRError {
         HyperDRError(code: code, message: code)
@@ -598,6 +599,6 @@ public actor ExportTarget {
             log.warning("Saved \(name, privacy: .public) but could not sync its folder: \(reason, privacy: .public)")
         }
         return SavedExport(url: canonical.appendingPathComponent(name), name: name,
-                           folderLabel: label(canonical), syncConfirmed: synced)
+                           folderDisplayName: FileManager.default.displayName(atPath: canonical.path), syncConfirmed: synced)
     }
 }

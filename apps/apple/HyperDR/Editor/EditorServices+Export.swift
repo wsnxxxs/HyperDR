@@ -50,7 +50,7 @@ extension ExportHistoryItem {
         let result = ExportResult(export: record.id.rawValue, fileName: record.name, byteCount: record.byteCount,
             pixelSize: size, headroomStops: file["headroom_stops"] as? Double,
             selfVerified: file["self_verified"] as? Bool ?? false, elapsed: .seconds(stages.reduce(0,+)),
-            warnings: warnings, saved: record.saved.map { SavedLocation(fileName: $0.fileName, folderLabel: $0.folderLabel) })
+            warnings: warnings, saved: record.saved.map { SavedLocation(fileName: $0.fileName, folderLabel: SavedLocation.label(displayName: $0.folderDisplayName)) })
         version = ExportVersion(number: record.sequence, createdAt: record.createdAt, encodingID: options.encoding,
             modelName: (file["model_id"] as? String).flatMap { $0.isEmpty ? nil : $0 },
             fallbackReason: record.modelFallbackReason.map {

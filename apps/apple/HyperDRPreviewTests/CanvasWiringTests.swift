@@ -240,6 +240,43 @@ import HyperDRDesign
         XCTAssertEqual(model.control("brightness").value, before)
     }
 
+    func testEmptyTextHistoryDisablesUndoInsteadOfFallingBackToThePhoto() async {
+        let services = FakeEditorServices(openDelay: .zero, previewDelay: .milliseconds(1))
+        let model = EditorModel(services: services)
+        model.open([URL(fileURLWithPath: "/fixtures/a.jpg")])
+        await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
+        model.adjust("brightness", to: 0.9)
+        let edited = model.control("brightness").value
+        XCTAssertTrue(model.canUndo)
+
+        // A text view with nothing to undo: the commands are off, they do not
+        // reach the photo's history, and they name the text's own (empty) one.
+        let text = NSTextView()
+        XCTAssertFalse(UndoRouting.canUndo(model: model, responder: text))
+        XCTAssertFalse(UndoRouting.canRedo(model: model, responder: text))
+        UndoRouting.undo(model: model, responder: text)
+        XCTAssertEqual(model.control("brightness").value, edited)
+        XCTAssertTrue(model.canUndo)
+        XCTAssertFalse(UndoRouting.undoTitle(model: model, responder: text).contains(EditorModel.undoActionName("brightness")))
+
+        // A text field's own history, once it has a step, is what is enabled.
+        let history = UndoManager()
+        var typed = "a"
+        history.registerUndo(withTarget: history) { _ in typed = "" }
+        history.setActionName("Typing")
+        final class Field: NSTextField {
+            var manager: UndoManager?
+            override var undoManager: UndoManager? { manager }
+        }
+        let field = Field()
+        field.manager = history
+        XCTAssertTrue(UndoRouting.canUndo(model: model, responder: field))
+        XCTAssertEqual(UndoRouting.undoTitle(model: model, responder: field), history.undoMenuItemTitle)
+        UndoRouting.undo(model: model, responder: field)
+        XCTAssertEqual(typed, "")
+        XCTAssertEqual(model.control("brightness").value, edited)
+    }
+
     func testMenuStateBumpsWhenAnUndoGroupCloses() {
         let state = UndoMenuState()
         let center = NotificationCenter()

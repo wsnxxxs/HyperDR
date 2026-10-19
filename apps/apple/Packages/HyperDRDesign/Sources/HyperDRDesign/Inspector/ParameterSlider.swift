@@ -1,5 +1,20 @@
 import SwiftUI
 
+/// A request to show where a control acts on the photograph: the mask mark
+/// after its title, and the callback that asks the model for the mask.
+public struct ParameterMaskLink {
+    /// Whether this control's mask is on the canvas now (the model's state).
+    public var isShowing: Bool
+    /// `true` when the first of hover, focus and drag takes hold, `false`
+    /// when the last lets go.
+    public var onChange: (Bool) -> Void
+
+    public init(isShowing: Bool, onChange: @escaping (Bool) -> Void) {
+        self.isShowing = isShowing
+        self.onChange = onChange
+    }
+}
+
 /// An inspector slider row (CSS `.field--range`): the title, a readout that is
 /// also where an exact value is typed, and the track.
 ///
@@ -7,13 +22,21 @@ import SwiftUI
 ///   the centre for a signed parameter, whose zero is marked.
 /// - Drag or click anywhere on the track; a click on the thumb grabs it
 ///   where it is. Double-click, or Reset to Default in the context menu,
-///   returns to the default.
+///   returns to the default (`onReset`, when given, does it instead of a
+///   write of `spec.defaultValue`: only the model knows a HDR photo's own).
 /// - With keyboard navigation on, the track takes focus; ← → ↑ ↓ step it,
 ///   with Shift ten steps.
 /// - The readout shows the formatted value until focused, then the bare
 ///   number. Return commits and stays, Escape abandons, ↑ ↓ step.
+/// - A spec with an `automatic` state shows it as the word "Auto" and a
+///   dashed track with no thumb. Elsewhere a small Auto button sits by the
+///   readout; clearing the readout or typing "auto" also returns to it, and
+///   a click, drag, key or typed number leaves it.
+/// - With a `mask`, a small mark follows the title, and hovering the row,
+///   focusing the readout or dragging asks for the mask on the photograph.
 /// - VoiceOver sees a system slider with the formatted value, the
-///   increment/decrement actions, and Reset to Default.
+///   increment/decrement actions, Reset to Default and, when the control
+///   has one, Set to Auto.
 ///
 /// Bind one value per control (S12): the row reads nothing else, so a change
 /// redraws only this row. With the M2 contract (batch 3 §3.4), the value is
@@ -30,55 +53,124 @@ public struct ParameterSlider: View {
     @Binding private var value: Double
     private let spec: ParameterSpec
     private let help: LocalizedStringKey?
+    private let mask: ParameterMaskLink?
+    private let onReset: (() -> Void)?
+    private let readoutHelp: Text?
     private let onEditingChanged: (Bool) -> Void
 
+    @State private var maskHold = MaskHold()
+    @Environment(\.isEnabled) private var isEnabled
+
     public init(_ title: LocalizedStringKey, value: Binding<Double>, spec: ParameterSpec,
-                help: LocalizedStringKey? = nil, onEditingChanged: @escaping (Bool) -> Void = { _ in }) {
+                help: LocalizedStringKey? = nil, mask: ParameterMaskLink? = nil, readoutHelp: Text? = nil,
+                onEditingChanged: @escaping (Bool) -> Void = { _ in }, onReset: (() -> Void)? = nil) {
         self.title = title
         _value = value
         self.spec = spec
         self.help = help
+        self.mask = mask
+        self.onReset = onReset
+        self.readoutHelp = readoutHelp
         self.onEditingChanged = onEditingChanged
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: Space.s1) {
             HStack(spacing: 10) {
-                FieldTitle(title: title, help: help)
+                FieldTitle(title: title, help: help, mask: mask)
                     .accessibilityHidden(true)
                 Spacer(minLength: 0)
-                ParameterReadout(title: title, value: $value, spec: spec)
+                if let automatic = spec.automatic, !spec.isAutomatic(value) {
+                    AutoButton { if value != automatic.value { value = automatic.value } }
+                }
+                ParameterReadout(title: title, value: $value, spec: spec, help: readoutHelp) { focused in
+                    hold(.focus, focused)
+                }
             }
             .frame(minHeight: 22)
-            ParameterTrack(title: title, value: $value, spec: spec, onEditingChanged: onEditingChanged)
+            ParameterTrack(title: title, value: $value, spec: spec, onReset: onReset) { editing in
+                hold(.drag, editing)
+                onEditingChanged(editing)
+            }
         }
+        .onHover { hold(.hover, $0 && isEnabled) }
+        .onChange(of: isEnabled) { if !isEnabled { release() } }
+        .onDisappear { release() }
+    }
+
+    private func hold(_ source: MaskHold.Source, _ on: Bool) {
+        guard let mask else { return }
+        maskHold.set(source, on, notify: mask.onChange)
+    }
+
+    private func release() {
+        guard let mask else { return }
+        maskHold.releaseAll(notify: mask.onChange)
     }
 }
 
 /// The 12 pt title of a field (CSS `.field-title b`); the help text, if any,
-/// is its tooltip.
+/// is its tooltip. A control with a mask carries a small mark after it.
 struct FieldTitle: View {
     let title: LocalizedStringKey
     let help: LocalizedStringKey?
+    var mask: ParameterMaskLink?
     @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
-        let text = Text(title)
-            .font(.hdr.caption)
-            .foregroundStyle(isEnabled ? Color.hdr.ink : Color.hdr.inkDisabled)
-            .lineLimit(1)
-        if let help { text.help(Text(help)) } else { text }
+        HStack(spacing: 5) {
+            let text = Text(title)
+                .font(.hdr.caption)
+                .foregroundStyle(isEnabled ? Color.hdr.ink : Color.hdr.inkDisabled)
+                .lineLimit(1)
+            if let help { text.help(Text(help)) } else { text }
+            if let mask {
+                Image(systemName: "square.dashed")
+                    .font(.system(size: 10))
+                    .foregroundStyle(!isEnabled ? Color.hdr.inkDisabled : mask.isShowing ? Color.hdr.maskTint : Color.hdr.inkMuted)
+                    .help(Text("design.slider.maskHint", bundle: .module))
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+}
+
+/// The small "Auto" button left of the readout (20 pt high, outlined) that
+/// returns a parameter to its Auto state.
+private struct AutoButton: View {
+    let action: () -> Void
+    @State private var hovered = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        Button(action: action) {
+            Text("design.slider.auto", bundle: .module)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(!isEnabled ? Color.hdr.inkDisabled : hovered ? Color.hdr.inkStrong : Color.hdr.inkMuted)
+                .padding(.horizontal, 7)
+                .frame(height: 20)
+                .overlay { RoundedRectangle(cornerRadius: Radius.xs).strokeBorder(Color.hdr.line) }
+                .contentShape(.rect(cornerRadius: Radius.xs))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = isEnabled && $0 }
+        .hdrAnimation(Motion.fast, value: hovered)
+        .help(Text("design.slider.setAuto", bundle: .module))
+        .accessibilityLabel(Text("design.slider.setAuto", bundle: .module))
     }
 }
 
 // MARK: - Readout
 
-/// The value field (CSS `.field-value`): 80 × 24, sunken, monospaced,
-/// right-aligned.
+/// The value field (CSS `.field-value`): 80 × 24, sunken, system face with
+/// tabular digits (`Font.hdr.readout`), right-aligned. In the Auto state it
+/// says "Auto" and, once focused, is empty with "Auto" as its placeholder.
 private struct ParameterReadout: View {
     let title: LocalizedStringKey
     @Binding var value: Double
     let spec: ParameterSpec
+    let help: Text?
+    let onFocusChange: (Bool) -> Void
 
     @FocusState private var focused: Bool
     @State private var draft = ""
@@ -90,17 +182,16 @@ private struct ParameterReadout: View {
     @State private var selection: TextSelection?
     @State private var hovered = false
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.locale) private var locale
 
     var body: some View {
-        TextField(text: Binding(get: { focused ? draft : spec.formatted(value) },
-                                set: { new in if new != draft { draft = new; typed = true } }),
-                  selection: $selection) { Text(title) }
+        let isAuto = spec.isAutomatic(value)
+        field(isAuto: isAuto)
             .textFieldStyle(.plain)
             .labelsHidden()
-            .font(.hdr.mono())
-            .monospacedDigit()
+            .font(.hdr.readout)
             .multilineTextAlignment(.trailing)
-            .foregroundStyle(isEnabled ? Color.hdr.inkStrong : Color.hdr.inkDisabled)
+            .foregroundStyle(!isEnabled ? Color.hdr.inkDisabled : isAuto && !focused ? Color.hdr.inkMuted : Color.hdr.inkStrong)
             .padding(.horizontal, 7)
             .frame(width: 80, height: 24)
             .background(focused ? Color.hdr.surfaceCard : Color.hdr.surfaceSunken, in: .rect(cornerRadius: Radius.xs))
@@ -113,7 +204,11 @@ private struct ParameterReadout: View {
             .focused($focused)
             .focusEffectDisabled()
             .onHover { hovered = $0 }
-            .onChange(of: focused) { _, now in now ? beginTyping() : commit() }
+            .modifier(OptionalHelp(text: help))
+            .onChange(of: focused) { _, now in
+                now ? beginTyping() : commit()
+                onFocusChange(now)
+            }
             .onChange(of: value) { if focused { beginTyping() } }
             .onSubmit {
                 // Commit and stay, with the value as stored, so another number
@@ -137,6 +232,17 @@ private struct ParameterReadout: View {
             .accessibilityHint(Text("design.slider.valueHint", bundle: .module))
     }
 
+    @ViewBuilder private func field(isAuto: Bool) -> some View {
+        let text = Binding(get: { focused ? draft : spec.formatted(value, locale: locale) },
+                           set: { new in if new != draft { draft = new; typed = true } })
+        if spec.automatic != nil {
+            TextField(text: text, selection: $selection,
+                      prompt: Text("design.slider.auto", bundle: .module).foregroundStyle(Color.hdr.inkDisabled)) { Text(title) }
+        } else {
+            TextField(text: text, selection: $selection) { Text(title) }
+        }
+    }
+
     private func beginTyping() {
         draft = spec.editableText(value)
         typed = false
@@ -155,14 +261,25 @@ private struct ParameterReadout: View {
     }
 }
 
+/// `.help` for a tooltip that may not be there.
+private struct OptionalHelp: ViewModifier {
+    let text: Text?
+
+    func body(content: Content) -> some View {
+        if let text { content.help(text) } else { content }
+    }
+}
+
 // MARK: - Track
 
 /// The track (CSS `.field input[type="range"]`): a 3 pt line, the fill from
-/// the origin, a 13 pt thumb with a halo on hover and while dragging.
+/// the origin, a 13 pt thumb with a halo on hover and while dragging. In the
+/// Auto state it is a dashed line with neither fill nor thumb.
 private struct ParameterTrack: View {
     let title: LocalizedStringKey
     @Binding var value: Double
     let spec: ParameterSpec
+    let onReset: (() -> Void)?
     let onEditingChanged: (Bool) -> Void
 
     @State private var hovered = false
@@ -173,6 +290,7 @@ private struct ParameterTrack: View {
     @GestureState private var live = false
     @FocusState private var focused: Bool
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.locale) private var locale
 
     static let thumb: CGFloat = 13
     static let height: CGFloat = 16
@@ -182,30 +300,40 @@ private struct ParameterTrack: View {
             let width = geometry.size.width
             let travel = max(width - Self.thumb, 1)
             let x = { (fraction: Double) in Self.thumb / 2 + travel * fraction }
+            let isAuto = spec.isAutomatic(value)
             let fill = spec.fill(for: value)
             let thumbX = x(spec.fraction(of: value))
             let mid = Self.height / 2
             ZStack(alignment: .topLeading) {
-                Capsule()
-                    .fill(Color.hdr.controlTrack)
-                    .frame(width: width, height: 3)
-                    .offset(y: mid - 1.5)
-                Rectangle()
-                    .fill(isEnabled ? Color.hdr.controlFill : Color.hdr.controlTrack)
-                    .frame(width: max(x(fill.upperBound) - x(fill.lowerBound), 0), height: 3)
-                    .offset(x: x(fill.lowerBound), y: mid - 1.5)
-                if spec.isCentred {
-                    // The zero of a signed parameter.
+                if isAuto {
+                    // Not a position but a state: a dashed line, nothing on it.
+                    Path { path in
+                        path.move(to: CGPoint(x: 0, y: mid))
+                        path.addLine(to: CGPoint(x: width, y: mid))
+                    }
+                    .stroke(Color.hdr.controlTrack, style: StrokeStyle(lineWidth: 3, lineCap: .butt, dash: [4, 4]))
+                } else {
+                    Capsule()
+                        .fill(Color.hdr.controlTrack)
+                        .frame(width: width, height: 3)
+                        .offset(y: mid - 1.5)
                     Rectangle()
-                        .fill(Color.hdr.lineStrong)
-                        .frame(width: 1, height: 9)
-                        .offset(x: x(spec.fraction(of: spec.origin)) - 0.5, y: mid - 4.5)
+                        .fill(isEnabled ? Color.hdr.controlFill : Color.hdr.controlTrack)
+                        .frame(width: max(x(fill.upperBound) - x(fill.lowerBound), 0), height: 3)
+                        .offset(x: x(fill.lowerBound), y: mid - 1.5)
+                    if spec.isCentred {
+                        // The zero of a signed parameter.
+                        Rectangle()
+                            .fill(Color.hdr.lineStrong)
+                            .frame(width: 1, height: 9)
+                            .offset(x: x(spec.fraction(of: spec.origin)) - 0.5, y: mid - 4.5)
+                    }
+                    thumb.offset(x: thumbX - Self.thumb / 2, y: mid - Self.thumb / 2)
                 }
-                thumb.offset(x: thumbX - Self.thumb / 2, y: mid - Self.thumb / 2)
             }
             .frame(width: width, height: Self.height)
             .contentShape(.rect)
-            .gesture(drag(travel: travel, thumbX: thumbX))
+            .gesture(drag(travel: travel, thumbX: thumbX, isAuto: isAuto))
             .simultaneousGesture(TapGesture(count: 2).onEnded { reset() })
         }
         .frame(height: Self.height)
@@ -234,12 +362,23 @@ private struct ParameterTrack: View {
         .contextMenu {
             Button { reset() } label: { Text("design.slider.reset", bundle: .module) }
                 .disabled(value == spec.defaultValue)
+            if let automatic = spec.automatic {
+                Button { set(automatic.value) } label: { Text("design.slider.setAuto", bundle: .module) }
+                    .disabled(spec.isAutomatic(value))
+            }
         }
         .accessibilityRepresentation {
-            Slider(value: Binding(get: { value }, set: { new in set(spec.snapped(new)) }),
+            // From Auto a step lands on the resume value, as a key press does.
+            Slider(value: Binding(get: { spec.isAutomatic(value) ? spec.range.lowerBound : value },
+                                  set: { new in set(spec.isAutomatic(value) ? spec.resumeValue : spec.snapped(new)) }),
                    in: spec.range, step: spec.step) { Text(title) }
-                .accessibilityValue(Text(verbatim: spec.formatted(value)))
+                .accessibilityValue(Text(verbatim: spec.formatted(value, locale: locale)))
                 .accessibilityAction(named: Text("design.slider.reset", bundle: .module)) { reset() }
+                .accessibilityActions {
+                    if let automatic = spec.automatic {
+                        Button { set(automatic.value) } label: { Text("design.slider.setAuto", bundle: .module) }
+                    }
+                }
         }
     }
 
@@ -254,7 +393,7 @@ private struct ParameterTrack: View {
             }
     }
 
-    private func drag(travel: CGFloat, thumbX: CGFloat) -> some Gesture {
+    private func drag(travel: CGFloat, thumbX: CGFloat, isAuto: Bool) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { drag in
                 // Secondary clicks and drags belong to the context menu.
@@ -263,7 +402,7 @@ private struct ParameterTrack: View {
                     // On the thumb: keep the pointer where it took hold.
                     // Elsewhere: the thumb jumps to the pointer.
                     let offset = drag.startLocation.x - thumbX
-                    grab = abs(offset) <= Self.thumb / 2 + 2 ? offset : 0
+                    grab = !isAuto && abs(offset) <= Self.thumb / 2 + 2 ? offset : 0
                     bracket.begin(onEditingChanged)
                 }
                 let fraction = (drag.location.x - (grab ?? 0) - Self.thumb / 2) / travel
@@ -283,7 +422,9 @@ private struct ParameterTrack: View {
 
     private func step(_ steps: Int) { set(spec.stepped(value, by: steps)) }
 
-    private func reset() { set(spec.defaultValue) }
+    private func reset() {
+        if let onReset { onReset() } else { set(spec.defaultValue) }
+    }
 
     /// A single write outside any drag: one undo step of its own.
     private func set(_ new: Double) {

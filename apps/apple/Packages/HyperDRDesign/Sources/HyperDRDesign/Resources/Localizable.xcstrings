@@ -29,11 +29,32 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已展开" } }
       }
     },
+    "design.slider.auto" : {
+      "comment" : "The Auto state of a slider: its readout, field placeholder and the small button.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Auto" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "自动" } }
+      }
+    },
+    "design.slider.maskHint" : {
+      "comment" : "Tooltip of the mask mark after a slider title.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Hover to see where this acts on the photo" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "悬停可在画面上查看作用区域" } }
+      }
+    },
     "design.slider.reset" : {
       "comment" : "Context menu item and VoiceOver action: return a slider to its default.",
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Reset to Default" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "恢复默认值" } }
+      }
+    },
+    "design.slider.setAuto" : {
+      "comment" : "Tooltip of the small Auto button, context menu item and VoiceOver action.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Set to Auto" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "设为自动" } }
       }
     },
     "design.slider.valueHint" : {

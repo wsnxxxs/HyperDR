@@ -286,6 +286,56 @@ import HyperDRDesign
         XCTAssertEqual(model.cameraSummaryKey, "camera.summary.off")
     }
 
+    /// The original is the same development of the file, so it follows the
+    /// switch (geometry must match when comparing); its adjustments stay neutral.
+    func testTheOriginalFollowsTheLensCorrectionSwitchAndUndo() async throws {
+        let (model, services) = try await openRAW(supported: true)
+        let initial = try XCTUnwrap(model.referenceOptions)
+        XCTAssertEqual(initial["lensCorrection"], .bool(true))
+        services.referenceHandler = { _ in model.edit.lensCorrection ? nil : EditorPreview(pixelSize: PixelSize(width: 9504, height: 6336),
+            source: SourceSummary(domain: .sceneReferred, colorName: "Display P3", degradationReasons: []), hasGain: false) }
+        let revision = model.frameRevision
+        model.setLensCorrection(false)
+        XCTAssertEqual(model.referenceOptions?["lensCorrection"], .bool(false))
+        await eventually(timeout: .seconds(5)) { services.referenceRenders.count == 1 }
+        XCTAssertEqual(services.referenceRenders.last?["lensCorrection"], .bool(false))
+        var expected = initial
+        expected["lensCorrection"] = .bool(false)
+        XCTAssertEqual(services.referenceRenders.last, expected)
+        await eventually(timeout: .seconds(5)) { model.frameRevision != revision }
+        model.undo()
+        XCTAssertEqual(model.referenceOptions, initial)
+        await eventually(timeout: .seconds(5)) { services.referenceRenders.count == 2 }
+        XCTAssertEqual(services.referenceRenders.last, initial)
+    }
+
+    func testAnOriginalRenderedBeforeASecondSwitchIsDiscarded() async throws {
+        let (model, services) = try await openRAW(supported: true)
+        services.referenceHandler = { options in
+            if options["lensCorrection"] == .bool(false) { try await Task.sleep(for: .seconds(30)) }
+            return EditorPreview(pixelSize: PixelSize(width: 9504, height: 6336),
+                source: SourceSummary(domain: .sceneReferred, colorName: "Display P3", degradationReasons: []), hasGain: false)
+        }
+        let revision = model.frameRevision
+        model.setLensCorrection(false)
+        await eventually(timeout: .seconds(5)) { services.referenceRenders.count == 1 }
+        model.setLensCorrection(true)
+        await eventually(timeout: .seconds(5)) { services.referenceRenders.count == 2 }
+        await eventually(timeout: .seconds(5)) { model.frameRevision != revision }
+        XCTAssertEqual(model.referenceOptions?["lensCorrection"], .bool(true))
+        XCTAssertEqual(model.frameRevision, revision &+ 1)
+    }
+
+    func testNoOriginalIsRenderedWhenThereIsNoSwitchToTurn() async throws {
+        let (unsupported, services) = try await openRAW(supported: false)
+        unsupported.setLensCorrection(false)
+        let (jpeg, jpegServices) = try await openJPEG()
+        jpeg.setLensCorrection(false)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertTrue(services.referenceRenders.isEmpty)
+        XCTAssertTrue(jpegServices.referenceRenders.isEmpty)
+    }
+
     func testAnUnsupportedLensOrAnotherKindOfPhotoHasNoSwitchToTurn() async throws {
         let (unsupported, _) = try await openRAW(supported: false)
         XCTAssertEqual(unsupported.cameraSummaryKey, "camera.summary.unsupported")

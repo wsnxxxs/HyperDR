@@ -33,6 +33,10 @@ import UniformTypeIdentifiers
     /// services keep at most the newest request (latest wins).
     func submit(_ photo: EditorPhoto, options: EditOptions, maxEdge: Int)
     /// The models this engine build offers.
+    /// The whole-frame "original" again, after something that changes the
+    /// decoded picture itself (the lens correction switch). `options` are the
+    /// reference options; nil when the photo is gone.
+    func renderReference(_ photo: EditorPhoto, options: EditOptions, maxEdge: Int) async throws -> EditorPreview?
     func renderDetail(_ photo: EditorPhoto, options: EditOptions, region: PreviewRegion,
                       original: Bool) async throws -> EditorPreview?
     func modelTable() -> ModelTable
@@ -153,6 +157,9 @@ extension UserDefaults {
     private(set) var renderedPurposes: [Bool] = [] // true = reference, false = edit
     private(set) var receivedOptions: [EditOptions] = []
     private(set) var receivedEdges: [Int] = []
+    /// The options of every "original" frame asked for after the opening one.
+    private(set) var referenceRenders: [EditOptions] = []
+    var referenceHandler: ((EditOptions) async throws -> EditorPreview?)?
     var models = ModelTable(runtimeReady: true, defaultID: "research-cnn-v1", models: [
         ModelChoice(id: "research-cnn-v1", name: "CNN", nameKey: "model.research-cnn-v1",
                     summaryKey: "model.research-cnn-v1.summary", isEnabled: true, requiresCapture: false),
@@ -291,6 +298,11 @@ extension UserDefaults {
         }
     }
 
+    func renderReference(_ photo: EditorPhoto, options: EditOptions, maxEdge: Int) async throws -> EditorPreview? {
+        referenceRenders.append(options)
+        return try await referenceHandler?(options) ?? preview
+    }
+
     /// Renders after `previewDelay`; a newer submit wins, as in PreviewService.
     func submit(_ photo: EditorPhoto, options: EditOptions, maxEdge: Int) {
         latestSubmit += 1
@@ -370,6 +382,7 @@ extension EditorServices {
     /// Fakes without native pixels have no detail image.
     func renderDetail(_ photo: EditorPhoto, options: EditOptions, region: PreviewRegion,
                       original: Bool) async throws -> EditorPreview? { nil }
+    func renderReference(_ photo: EditorPhoto, options: EditOptions, maxEdge: Int) async throws -> EditorPreview? { nil }
 }
 
 enum EditorDetailError: Error { case sourceReplaced }

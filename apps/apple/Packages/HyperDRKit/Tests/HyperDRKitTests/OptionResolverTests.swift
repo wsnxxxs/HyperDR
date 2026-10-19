@@ -69,6 +69,29 @@ private func code(_ body: () throws -> Void) -> String? {
             != ExportKey(request: resolver.resolveExport(off.options, session: session), frame: nil))
     }
 
+    /// The "original" frame follows the lens correction switch: its request
+    /// carries `raw_lens_correction` and has a cache key of its own, while the
+    /// adjustments in it stay neutral.
+    @Test func theReferenceFrameFollowsTheLensCorrection() throws {
+        let resolver = try makeResolver()
+        let session = makeSession()
+        func reference(_ lens: Bool) throws -> EngineRequest {
+            var workflow = EditDefaults.initial(encoding: "adaptive", sourceDomain: nil, unadjusted: nil)
+            workflow["lensCorrection"] = .bool(lens)
+            return try resolver.resolve(PreviewRequest(session: session.id,
+                options: EditDefaults.reference(encoding: "adaptive", workflow: workflow),
+                maxEdge: 960, purpose: .reference), session: session)
+        }
+        let on = try reference(true), off = try reference(false)
+        #expect(on.settings["raw_lens_correction"] == .bool(true))
+        #expect(off.settings["raw_lens_correction"] == .bool(false))
+        #expect(try PreviewCacheKey(session: session, request: on, buildFingerprint: "r")
+            != PreviewCacheKey(session: session, request: off, buildFingerprint: "r"))
+        var onSettings = on.settings, offSettings = off.settings
+        onSettings["raw_lens_correction"] = nil; offSettings["raw_lens_correction"] = nil
+        #expect(onSettings == offSettings)
+    }
+
     @Test func validatesPreviewOnlyOptions() throws {
         let resolver = try makeResolver()
         #expect(code { _ = try resolver.resolve(makeRequest { $0["external_gain"] = .string("/tmp/gain") },

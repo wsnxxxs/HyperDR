@@ -16,6 +16,8 @@ import XCTest
     var refresh: AsyncStream<EditorRefreshEvent>.Continuation?
     var closed: [EditorPhoto] = []
     var submitted: [EditOptions] = []
+    var referenceRenders: [EditOptions] = []
+    var referenceHandler: ((EditOptions) async throws -> EditorPreview?)?
     var restoreWaiter: CheckedContinuation<RestoreResult, Never>?
     var startHandler: (() async -> Void)?
     var startsCompleted = 0
@@ -56,6 +58,10 @@ import XCTest
     }
     func submit(_ photo: EditorPhoto, options: EditOptions, maxEdge: Int) {
         submitted.append(options)
+    }
+    func renderReference(_ photo: EditorPhoto, options: EditOptions, maxEdge: Int) async throws -> EditorPreview? {
+        referenceRenders.append(options)
+        return try await referenceHandler?(options)
     }
     func modelTable() -> ModelTable { .unavailable }
     func modelGainToken(for photo: EditorPhoto, options: EditOptions) async throws -> ModelGainToken {

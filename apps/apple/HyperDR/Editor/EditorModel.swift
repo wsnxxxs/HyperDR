@@ -165,6 +165,7 @@ import UniformTypeIdentifiers
     @ObservationIgnored private var busyTask: Task<Void, Never>?
     @ObservationIgnored var renderOutstanding = false
     @ObservationIgnored var referenceOptions: EditOptions?
+    @ObservationIgnored var referenceRefreshTask: Task<Void, Never>?
     @ObservationIgnored var detailTask: Task<Void, Never>?
     @ObservationIgnored var detailTicket = 0
     @ObservationIgnored var originalDetailTrace: PreviewTrace?
@@ -717,6 +718,16 @@ import UniformTypeIdentifiers
         }
         thumbnailFrameDidChange()
         syncControls()
+    }
+
+    /// A newer "original" frame for the same photo (the lens correction
+    /// switch changed); everything else on the canvas stays as it is.
+    func replaceReference(_ preview: EditorPreview) {
+        guard hasReferenceFrame else { return }
+        referenceFrame = preview.frame
+        referencePresentationTrace = preview.trace
+        frameRevision &+= 1
+        thumbnailFrameDidChange()
     }
 
     var hasPreviewFrame: Bool {

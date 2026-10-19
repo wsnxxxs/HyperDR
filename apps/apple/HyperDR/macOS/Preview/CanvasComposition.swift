@@ -44,6 +44,8 @@ nonisolated struct CompositionParams {
     var stripe = SIMD4<Float>(CanvasOverlayStyle.stripePeriodPoints, CanvasOverlayStyle.stripeWidthPoints, CanvasOverlayStyle.stripeDirection.x, CanvasOverlayStyle.stripeDirection.y)
 }
 
+/// Each cache keeps ISO log gain in base alpha and a compact-plane marker in
+/// full-HDR alpha; display weighting never depends on a clipped rendition.
 /// Two whole-image caches and ONE local texture array (edited + original in
 /// separate slices). The array avoids retaining two independent local GPU
 /// allocations while keeping both sides equally sharp in comparison mode.

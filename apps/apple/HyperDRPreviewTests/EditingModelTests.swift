@@ -403,3 +403,34 @@ extension EditingModelTests {
         XCTAssertEqual(hdr.outputCeilingStops,2.3)
     }
 }
+
+extension EditingModelTests {
+    func testReviewerNSTextViewProbeThroughActualAttachAndRouting() async {
+        let (model, _, _) = await opened()
+        let shared = UndoManager()
+        model.attach(undoManager: shared)
+        let storage = NSTextStorage(), layout = NSLayoutManager()
+        let container = NSTextContainer(containerSize: NSSize(width:200,height:100))
+        storage.addLayoutManager(layout); layout.addTextContainer(container)
+        let text = NSTextView(frame:NSRect(x:0,y:0,width:200,height:100),textContainer:container)
+        let delegate = TextUndoDelegate(shared)
+        text.delegate = delegate; text.allowsUndo = true
+        text.insertText("hello",replacementRange:NSRange(location:0,length:0))
+        XCTAssertEqual(text.string,"hello")
+        if shared.groupingLevel > 0 { shared.endUndoGrouping() }
+        model.adjust("brightness",to:0.7)
+        model.undo(firstResponder:text)
+        XCTAssertEqual(text.string,"")
+        XCTAssertEqual(model.control("brightness").value,0.7)
+        model.redo(firstResponder:text)
+        XCTAssertEqual(text.string,"hello")
+        model.undo(firstResponder:NSResponder())
+        XCTAssertEqual(model.control("brightness").value,0.6)
+        text.isFieldEditor = true
+        XCTAssertTrue(EditorModel.routesUndoToText(text))
+        model.undo(firstResponder:text)
+        XCTAssertEqual(text.string,"")
+        XCTAssertTrue(shared.groupsByEvent)
+        model.closeDocument()
+    }
+}

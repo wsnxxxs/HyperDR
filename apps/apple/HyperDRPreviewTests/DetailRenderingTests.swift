@@ -129,3 +129,30 @@ extension DetailRenderingTests {
         model.closeDocument()
     }
 }
+
+extension DetailRenderingTests {
+    func testReviewerOriginalLatestRegionAndSourceEventInvalidateCachedDetails() async throws {
+        let (model,services,session)=try await opened(); defer { session.close() }
+        var gates:[CheckedContinuation<EditorPreview?,Error>] = []
+        services.detailHandler = { _,_ in try await withCheckedThrowingContinuation { gates.append($0) } }
+        model.viewMode = .original
+        model.canvas.zoomToActualPixels()
+        await eventually(timeout:.seconds(3)) { gates.count == 1 }
+        XCTAssertTrue(services.detailRequests[0].original)
+        var transform=model.canvas.transform
+        transform.pan=transform.clampedPan(CGPoint(x:20,y:10))
+        model.canvas.apply(transform)
+        await eventually(timeout:.seconds(3)) { gates.count == 2 }
+        gates[0].resume(returning:services.preview)
+        await settle(50)
+        XCTAssertNil(model.originalDetailFrame)
+        gates[1].resume(returning:services.preview)
+        await eventually(timeout: .seconds(3)) { model.originalDetailFrame != nil }
+        let old=try XCTUnwrap(model.photo)
+        services.sendRefresh(.sourceReplaced,for:old)
+        await eventually(timeout:.seconds(3)) { model.photo != old && model.document?.phase == .ready }
+        XCTAssertNil(model.originalDetailFrame)
+        XCTAssertNil(model.editedDetailFrame)
+        model.closeDocument()
+    }
+}

@@ -14,16 +14,9 @@ struct ReconstructParams {
     float gainMin, gainMax, inverseGamma, gainWeight, baseOffset, alternateOffset;
 };
 
-float3 reconstructPixel(uint2 xy, device const float* base, device const float* gain,
-                        constant ReconstructParams& p) {
-    const uint baseIndex = xy.y * (p.baseRowBytes / 4) + xy.x * 3;
-    const float3 sdr = float3(base[baseIndex], base[baseIndex + 1], base[baseIndex + 2]);
-    if (p.original != 0) return sdr;
-    if (p.gainChannels != 1) {
-        // v1: the gain plane is a full-size HDR image, already reconstructed.
-        const uint index = xy.y * (p.gainRowBytes / 4) + xy.x * 3;
-        return float3(gain[index], gain[index + 1], gain[index + 2]);
-    }
+// The decoded ISO log gain must survive even when the full rendition clips
+// to black. Shared by legacy reconstruction and the composition cache.
+float sampleLogGain(uint2 xy, device const float* gain, constant ReconstructParams& p) {
     // v2: one monochrome gain plane, bilinearly resampled and decoded.
     const float2 size = float2(p.gainWidth, p.gainHeight);
     const float2 g = clamp((float2(xy) + 0.5) * size / float2(p.width, p.height) - 0.5,
@@ -35,9 +28,21 @@ float3 reconstructPixel(uint2 xy, device const float* base, device const float* 
     const float code = clamp(mix(mix(gain[lo.y * stride + lo.x], gain[lo.y * stride + hi.x], w.x),
                                  mix(gain[hi.y * stride + lo.x], gain[hi.y * stride + hi.x], w.x), w.y),
                              0.0, 1.0);
-    const float multiplier = exp2((p.gainMin + (p.gainMax - p.gainMin) * pow(code, p.inverseGamma))
-                                  * p.gainWeight);
-    return max(float3(0.0), (sdr + p.baseOffset) * multiplier - p.alternateOffset);
+    return p.gainMin + (p.gainMax - p.gainMin) * pow(code, p.inverseGamma);
+}
+
+float3 reconstructPixel(uint2 xy, device const float* base, device const float* gain,
+                        constant ReconstructParams& p) {
+    const uint baseIndex = xy.y * (p.baseRowBytes / 4) + xy.x * 3;
+    const float3 sdr = float3(base[baseIndex], base[baseIndex + 1], base[baseIndex + 2]);
+    if (p.original != 0) return sdr;
+    if (p.gainChannels != 1) {
+        // v1: the gain plane is a full-size HDR image, already reconstructed.
+        const uint index = xy.y * (p.gainRowBytes / 4) + xy.x * 3;
+        return float3(gain[index], gain[index + 1], gain[index + 2]);
+    }
+    return max(float3(0.0), (sdr + p.baseOffset) * exp2(sampleLogGain(xy, gain, p) * p.gainWeight)
+                            - p.alternateOffset);
 }
 
 // Production intermediate: rgba16Float, one texel per source pixel.
@@ -95,8 +100,10 @@ fragment float4 previewDisplayFragment(DisplayVertex in [[stage_in]],
     return image.sample(displaySampler, in.uv);
 }
 
-// M2-R: one array stores the SDR base and the full-gain rendition. Pass 2
-// changes headroom/SDR/overlays without rerunning reconstruction.
+// M2-R: each two-slice cache stores (base RGB, ISO log gain) and
+// (full-gain RGB, compact-plane marker). The alpha channels retain enough
+// information for any headroom weight, without another allocation or pass 1.
+// RGB/v1 frames keep their supplied full rendition and existing interpolation.
 kernel void reconstructComposition(device const float* base [[buffer(0)]],
                                    device const float* gain [[buffer(1)]],
                                    constant ReconstructParams& input [[buffer(2)]],
@@ -104,12 +111,15 @@ kernel void reconstructComposition(device const float* base [[buffer(0)]],
                                    texture2d_array<float, access::write> out [[texture(0)]],
                                    uint3 xy [[thread_position_in_grid]]) {
     if (xy.x >= input.width || xy.y >= input.height || xy.z > 1) return;
-    // reconstructPixel receives constant address space, so the base is read
-    // directly for slice 0 and the full-gain parameters remain immutable.
     uint i = xy.y * (input.baseRowBytes / 4) + xy.x * 3;
-    float3 value = xy.z == 0 ? float3(base[i], base[i+1], base[i+2])
-                            : reconstructPixel(xy.xy, base, gain, input);
-    out.write(float4(value, 1), xy.xy, firstSlice + xy.z);
+    bool compact = input.gainChannels == 1;
+    float4 value;
+    if (xy.z == 0) {
+        value = float4(base[i], base[i+1], base[i+2], compact ? sampleLogGain(xy.xy, gain, input) : 0.0);
+    } else {
+        value = float4(reconstructPixel(xy.xy, base, gain, input), compact ? 1.0 : 0.0);
+    }
+    out.write(value, xy.xy, firstSlice + xy.z);
 }
 
 struct CompositionParams {
@@ -136,10 +146,17 @@ fragment float4 compositionFragment(DisplayVertex in [[stage_in]],
     constexpr sampler s(filter::linear, mip_filter::linear, address::clamp_to_edge);
     float2 texel = 0.5 / float2(image.get_width(), image.get_height());
     float2 uv = clamp(in.uv, texel, p.uvScale - texel);
-    float3 base = image.sample(s,uv,p.slice).rgb;
-    float3 hdr = image.sample(s,uv,p.slice+1).rgb;
+    float4 cachedBase = image.sample(s,uv,p.slice);
+    float4 cachedHDR = image.sample(s,uv,p.slice+1);
+    float3 base = cachedBase.rgb;
+    float3 hdr = cachedHDR.rgb;
     float3 value = hdr;
-    if ((p.flags & 1) || p.weight <= 0) value = base;
+    if (p.flags & 1) value = base;
+    else if (cachedHDR.a > 0.5 && p.weight < 1) {
+        // ISO reconstruction: never infer gain from a clipped full rendition.
+        // Weight zero still applies both offsets; SDR preview is explicit.
+        value = max(float3(0), (base + p.baseOffset) * exp2(cachedBase.a * clamp(p.weight, 0.0, 1.0)) - p.alternateOffset);
+    } else if (p.weight <= 0) value = base;
     else if (p.weight < 1) {
         float3 ratio = max(float3(1e-6), (hdr + p.alternateOffset) / max(float3(1e-6), base + p.baseOffset));
         value = max(float3(0), (base + p.baseOffset) * pow(ratio, p.weight) - p.alternateOffset);

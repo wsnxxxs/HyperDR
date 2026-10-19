@@ -269,3 +269,214 @@ extension CanvasCompositionTests {
         await eventually(timeout:.seconds(3)) { loop.state.hasStopped }
     }
 }
+
+extension CanvasCompositionTests {
+    func testReviewerReconstructionRetainsGainWhenFullRenditionClipsToBlack() throws {
+        let renderer = try makePreviewRenderer()
+        let compositor = try CanvasCompositor(device:renderer.device,queue:renderer.queue,library:renderer.library)
+        let command = try XCTUnwrap(renderer.queue.makeCommandBuffer())
+        let b:[Float] = [0.1,0.1,0.1], g:[Float] = [0]
+        let source = FramePlanes(base:try XCTUnwrap(renderer.device.makeBuffer(bytes:b,length:12)),baseRowBytes:12,
+            gain:try XCTUnwrap(renderer.device.makeBuffer(bytes:g,length:4)),gainRowBytes:4,gainChannels:1,
+            width:1,height:1,gainWidth:1,gainHeight:1,gainMin:-1,gainMax:2,
+            gainWeight:0.5,baseOffset:0,alternateOffset:0.08)
+        let image = try compositor.makeTestTexture(source,command:command)
+        let out = try target(renderer.device,width:1,height:1)
+        let pass = MTLRenderPassDescriptor(); pass.colorAttachments[0].texture=out
+        pass.colorAttachments[0].loadAction = .clear; pass.colorAttachments[0].storeAction = .store
+        let encoder = try XCTUnwrap(command.makeRenderCommandEncoder(descriptor:pass))
+        var params=CompositionParams(rect:SIMD4(-1,-1,1,1))
+        params.weight=0.5; params.alternateOffset=0.08
+        compositor.draw(encoder,texture:image,params:params); encoder.endEncoding()
+        let actual=try read(out,after:command)
+        let expected=max(Float(0),Float(0.1)*exp2(-0.5)-0.08)
+        XCTAssertEqual(expected,0)
+        FileHandle.standardError.write(Data("clipped-gain GPU actual=\(actual) expected=\(expected)\n".utf8))
+        XCTAssertTrue(abs(actual[0]-expected) < 0.0002,"clipped full HDR must not erase the ISO gain")
+    }
+
+    func testReviewerOriginalCacheTracksReferenceIdentity() async throws {
+        let session=try await session(); defer { session.close() }
+        let a=try await frame(session,exposure:-1), b=try await frame(session,exposure:1)
+        let edit=try await frame(session,exposure:0)
+        let renderer=try makePreviewRenderer()
+        let compositor=try CanvasCompositor(device:renderer.device,queue:renderer.queue,library:renderer.library)
+        let out=try target(renderer.device,width:edit.base.width,height:edit.base.height)
+        let geometry=CanvasTransform(imageSize:CGSize(width:edit.base.width,height:edit.base.height),viewport:CGSize(width:out.width,height:out.height))
+        func render(_ original:PreviewFrame) throws -> [Float] {
+            let command=try XCTUnwrap(renderer.queue.makeCommandBuffer())
+            try compositor.encode(CanvasComposition(original:original,edited:edit,mode:.original,headroom:16),transform:geometry,target:out,command:command)
+            return try read(out,after:command)
+        }
+        let first=try render(a), second=try render(b)
+        XCTAssertNotEqual(first,second)
+        XCTAssertEqual(compositor.rebuilds,3)
+        _ = try render(b)
+        XCTAssertEqual(compositor.rebuilds,3)
+        compositor.releaseFrames()
+        _ = try render(b)
+        XCTAssertEqual(compositor.rebuilds,5)
+    }
+}
+
+extension CanvasCompositionTests {
+    func testReviewerBothDetailLayersCrossTheDividerOnHighFrequencyPixels() async throws {
+        let url=FileManager.default.temporaryDirectory.appendingPathComponent("checker-\(UUID()).png")
+        defer { try? FileManager.default.removeItem(at:url) }
+        let context=try XCTUnwrap(CGContext(data:nil,width:64,height:48,bitsPerComponent:8,bytesPerRow:0,
+            space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue))
+        for y in 0..<48 { for x in 0..<64 {
+            context.setFillColor(CGColor(gray:(x+y)%2 == 0 ? 0.15 : 0.75,alpha:1))
+            context.fill(CGRect(x:x,y:y,width:1,height:1))
+        } }
+        let destination=try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL,"public.png" as CFString,1,nil))
+        CGImageDestinationAddImage(destination,try XCTUnwrap(context.makeImage()),nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        let engine=try await Engine(), session=try engine.openPreview(source:url)
+        defer { session.close() }
+        let crop=CGRect(x:16,y:16,width:32,height:16)
+        func make(_ exposure:Double,detail:Bool) async throws -> PreviewFrame {
+            var r=EngineRequest(settings:["preview_max_edge":.number(detail ? 64 : 16),"exposure":.number(exposure),"headroom":.number(2)])
+            if detail { try r.setCommand("region",.object(["left":.number(16),"top":.number(16),"width":.number(32),"height":.number(16)])) }
+            return try await session.renderFrame(r)
+        }
+        let original=try await make(0,detail:false), edit=try await make(0.5,detail:false)
+        let originalTile=try await make(0,detail:true), editedTile=try await make(0.5,detail:true)
+        let renderer=try makePreviewRenderer()
+        let compositor=try CanvasCompositor(device:renderer.device,queue:renderer.queue,library:renderer.library)
+        let out=try target(renderer.device,width:64,height:48)
+        func render(_ content:CanvasComposition,geometry:CanvasTransform,target:any MTLTexture) throws -> [Float] {
+            let command=try XCTUnwrap(renderer.queue.makeCommandBuffer())
+            try compositor.encode(content,transform:geometry,target:target,command:command)
+            return try read(target,after:command)
+        }
+        let geometry=CanvasTransform(imageSize:CGSize(width:64,height:48),viewport:CGSize(width:64,height:48))
+        var content=CanvasComposition(original:original,edited:edit,mode:.compare,headroom:16)
+        let low=try render(content,geometry:geometry,target:out)
+        content.originalDetail=originalTile; content.editedDetail=editedTile
+        let high=try render(content,geometry:geometry,target:out)
+        for (tile,left) in [(originalTile,true),(editedTile,false)] {
+            let tileOut=try target(renderer.device,width:32,height:16)
+            let expected=try render(CanvasComposition(edited:tile,headroom:16),
+                geometry:CanvasTransform(imageSize:crop.size,viewport:crop.size),target:tileOut)
+            var changed=false
+            for y in 0..<16 { for x in 0..<32 where (x+16 < 32) == left {
+                let i=((y+16)*64+x+16)*4
+                for c in 0..<3 { XCTAssertEqual(high[i+c],expected[(y*32+x)*4+c],accuracy:0.005) }
+                changed = changed || abs(high[i]-low[i]) > 0.01
+            } }
+            XCTAssertTrue(changed,"the fixture must detect loss of either local side")
+        }
+    }
+}
+
+extension CanvasCompositionTests {
+    func testReviewerOriginalActuallyHidesAnActiveOverlay() async throws {
+        let session=try await session(); defer { session.close() }
+        let frame=try await frame(session,exposure:3)
+        let renderer=try makePreviewRenderer()
+        let compositor=try CanvasCompositor(device:renderer.device,queue:renderer.queue,library:renderer.library)
+        let out=try target(renderer.device,width:frame.base.width,height:frame.base.height)
+        let geometry=CanvasTransform(imageSize:CGSize(width:out.width,height:out.height),viewport:CGSize(width:out.width,height:out.height))
+        func render(_ mode:CanvasComposition.Mode,_ overlay:CanvasOverlays) throws -> [Float] {
+            let command=try XCTUnwrap(renderer.queue.makeCommandBuffer())
+            try compositor.encode(CanvasComposition(original:frame,edited:frame,mode:mode,headroom:16,overlays:overlay),transform:geometry,target:out,command:command)
+            return try read(out,after:command)
+        }
+        let overlay=CanvasOverlays(highlights:true,shadows:true,mask:true,hdrRange:0)
+        let plain=try render(.edited,CanvasOverlays())
+        let covered=try render(.edited,overlay)
+        XCTAssertNotEqual(plain,covered,"fixture must activate the overlay")
+        let original=try render(.original,overlay)
+        XCTAssertEqual(original,plain)
+    }
+}
+
+extension CanvasCompositionTests {
+    /// Negative gain and offsets can clip the full rendition while intermediate
+    /// weights remain distinct. Check both a scalar ISO reference and the
+    /// independent legacy float output, with RGB bases and compact bilinear gain.
+    func testISOLogGainCacheMatchesReconstructionAcrossWeightsAndOffsets() throws {
+        let renderer = try makePreviewRenderer()
+        let compositor = try CanvasCompositor(device: renderer.device, queue: renderer.queue, library: renderer.library)
+        let base: [Float] = [0,0.1,0.55, 0.02,0.1,0.9, 0.05,0.1,0.3, 0.1,0.2,1]
+        let baseBuffer = try XCTUnwrap(renderer.device.makeBuffer(bytes: base, length: base.count*4))
+        let gains: [Float] = [0,0.8]
+        let gainBuffer = try XCTUnwrap(renderer.device.makeBuffer(bytes: gains, length: gains.count*4))
+        let cases: [(Float,Float,Float,Float,Float)] = [
+            (-1,2,1,0,0.08), // reviewer: full rendition clips, intermediate must stay black
+            (-2,-2,1,0.08,0.08), // equal offsets: 0.1 * 0.5 gain => 0.01 at half weight
+            (-3,1,1.7,0.15,0.02),
+            (-0.5,3,0.7,0.015,0.025),
+        ]
+        for (minimum,maximum,gamma,baseOffset,alternateOffset) in cases {
+            func source(_ weight: Float) -> FramePlanes {
+                FramePlanes(base: baseBuffer, baseRowBytes: 4*12, gain: gainBuffer, gainRowBytes: 2*4,
+                    gainChannels: 1, width: 4, height: 1, gainWidth: 2, gainHeight: 1,
+                    gainMin: minimum, gainMax: maximum, gainGamma: gamma, gainWeight: weight,
+                    baseOffset: baseOffset, alternateOffset: alternateOffset)
+            }
+            let setup = try XCTUnwrap(renderer.queue.makeCommandBuffer())
+            let texture = try compositor.makeTestTexture(source(1), command: setup)
+            setup.commit(); setup.waitUntilCompleted()
+            XCTAssertNil(setup.error)
+            let rebuilds = compositor.rebuilds
+            for weight: Float in [0,0.25,0.5,0.65,1] {
+                let command = try XCTUnwrap(renderer.queue.makeCommandBuffer())
+                let out = try target(renderer.device,width:4,height:1)
+                let pass = MTLRenderPassDescriptor(); pass.colorAttachments[0].texture = out
+                pass.colorAttachments[0].loadAction = .clear; pass.colorAttachments[0].storeAction = .store
+                let encoder = try XCTUnwrap(command.makeRenderCommandEncoder(descriptor:pass))
+                var params = CompositionParams(rect: SIMD4(-1,-1,1,1))
+                params.weight = weight; params.baseOffset = baseOffset; params.alternateOffset = alternateOffset
+                compositor.draw(encoder,texture:texture,params:params); encoder.endEncoding()
+                let actual = try read(out,after:command)
+                let legacy = try renderer.reconstructFloat(planes: source(weight))
+                for x in 0..<4 {
+                    let location = min(1,max(0,(Float(x)+0.5)*0.5-0.5))
+                    let code = gains[0]*(1-location)+gains[1]*location
+                    let logGain = minimum+(maximum-minimum)*pow(code,1/gamma)
+                    for c in 0..<3 {
+                        let expected = max(0,(base[x*3+c]+baseOffset)*exp2(logGain*weight)-alternateOffset)
+                        let tolerance = 0.002*max(1,abs(expected))
+                        XCTAssertEqual(actual[x*4+c],expected,accuracy:tolerance,
+                            "weight=\(weight), offsets=\(baseOffset)/\(alternateOffset), x=\(x), c=\(c)")
+                        XCTAssertEqual(actual[x*4+c],legacy[x*4+c],accuracy:tolerance)
+                    }
+                }
+                XCTAssertEqual(compositor.rebuilds,rebuilds,"weight changes only encode the display pass")
+            }
+        }
+    }
+
+    func testRGBRenditionKeepsExistingInterpolationAndExplicitSDROverride() throws {
+        let renderer = try makePreviewRenderer()
+        let compositor = try CanvasCompositor(device:renderer.device,queue:renderer.queue,library:renderer.library)
+        let base: [Float] = [0.1,0.2,0.5], hdr: [Float] = [0,0.8,4]
+        let source = FramePlanes(base:try XCTUnwrap(renderer.device.makeBuffer(bytes:base,length:12)),baseRowBytes:12,
+            gain:try XCTUnwrap(renderer.device.makeBuffer(bytes:hdr,length:12)),gainRowBytes:12,gainChannels:3,
+            width:1,height:1,gainWidth:1,gainHeight:1,baseOffset:0.02,alternateOffset:0.08)
+        let setup = try XCTUnwrap(renderer.queue.makeCommandBuffer())
+        let texture = try compositor.makeTestTexture(source,command:setup)
+        setup.commit(); setup.waitUntilCompleted(); XCTAssertNil(setup.error)
+        let legacy = try renderer.reconstructFloat(planes:source)
+        for (weight,flags) in [(Float(0),UInt32(0)),(0.5,0),(1,0),(0.5,1)] {
+            let command = try XCTUnwrap(renderer.queue.makeCommandBuffer())
+            let out = try target(renderer.device,width:1,height:1)
+            let pass = MTLRenderPassDescriptor(); pass.colorAttachments[0].texture = out
+            pass.colorAttachments[0].loadAction = .clear; pass.colorAttachments[0].storeAction = .store
+            let encoder = try XCTUnwrap(command.makeRenderCommandEncoder(descriptor:pass))
+            var params = CompositionParams(rect:SIMD4(-1,-1,1,1))
+            params.weight = weight; params.flags = flags; params.baseOffset = 0.02; params.alternateOffset = 0.08
+            compositor.draw(encoder,texture:texture,params:params); encoder.endEncoding()
+            let actual = try read(out,after:command)
+            for c in 0..<3 {
+                let expected: Float = flags == 1 || weight == 0 ? base[c] : weight == 1 ? hdr[c]
+                    : max(0,(base[c]+0.02)*pow((hdr[c]+0.08)/(base[c]+0.02),weight)-0.08)
+                XCTAssertEqual(actual[c],expected,accuracy:0.002)
+                if weight == 1 { XCTAssertEqual(actual[c],legacy[c],accuracy:0.002) }
+            }
+        }
+        XCTAssertEqual(compositor.rebuilds,1)
+    }
+}

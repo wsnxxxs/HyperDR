@@ -20,7 +20,8 @@ struct FrameSheet: View {
                     .background(Color.hdr.previewBackdrop)
                 Divider()
                 ScrollView {
-                    FrameSettingsPanel(settings: $model.frame, photoSize: model.document?.pixelSize)
+                    FrameSettingsPanel(settings: $model.frame, photoSize: model.document?.pixelSize,
+                                       lock: model.editingLockReason)
                         .padding(Layout.panelPadding)
                 }
                 .frame(width: 340)
@@ -158,8 +159,26 @@ struct FrameSettingsPanel: View {
     /// The photograph's size, which shapes the style miniatures; nil before
     /// it is known (a nominal 2:3 print).
     var photoSize: PixelSize? = nil
+    /// Why the photograph can't change now. The settings follow the inspector:
+    /// system-disabled and still readable, and while an export runs they say
+    /// why (M3 §5.2).
+    var lock: EditingLockReason? = nil
 
     var body: some View {
+        VStack(alignment: .leading, spacing: Space.s4) {
+            if lock == .exporting {
+                Label("exportLock.help", systemImage: "lock.fill")
+                    .font(Font.hdr.caption)
+                    .foregroundStyle(Color.hdr.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            controls
+                .disabled(lock != nil)
+                .help(lock == .exporting ? Text("exportLock.help") : Text(verbatim: ""))
+        }
+    }
+
+    private var controls: some View {
         VStack(alignment: .leading, spacing: Space.s4) {
             VStack(alignment: .leading, spacing: Space.s1) {
                 Toggle("frame.enabled", isOn: $settings.isEnabled)

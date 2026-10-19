@@ -636,3 +636,22 @@ private struct ReferenceFrameCaptionView: View {
         }
     }
 }
+
+@MainActor final class FrameLockTests: XCTestCase {
+    /// The panel as the sheet draws it, at two lock states, rendered in a window.
+    private func render(_ lock: EditingLockReason?) throws -> Data {
+        let view = FrameSettingsPanel(settings: .constant(FrameSettings()), photoSize: PixelSize(width: 6000, height: 4000), lock: lock)
+            .padding(Layout.panelPadding).frame(width: 340, height: 700, alignment: .top)
+            .environment(\.locale, Locale(identifier: "en"))
+        let renderer = ImageRenderer(content: view); renderer.scale = 1
+        let tiff = try XCTUnwrap(renderer.nsImage?.tiffRepresentation)
+        return try XCTUnwrap(NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]))
+    }
+
+    func testTheSettingsLookDifferentWhileLockedAndSayWhyOnlyForAnExport() throws {
+        let free = try render(nil), exporting = try render(.exporting), loading = try render(.loading)
+        XCTAssertNotEqual(free, exporting)
+        XCTAssertNotEqual(free, loading)
+        XCTAssertNotEqual(exporting, loading, "only an export adds the lock note")
+    }
+}

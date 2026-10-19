@@ -83,6 +83,11 @@ private func waitUntil(timeout: Duration = .seconds(2),
     return await condition()
 }
 
+private func eventually(timeout: Duration,
+                        _ condition: @Sendable () async -> Bool) async -> Bool {
+    await waitUntil(timeout: timeout, condition)
+}
+
 private func makeFrame() async throws -> PreviewFrame {
     let engine = try await Engine()
     let session = try engine.openPreview(source: repository.appendingPathComponent("build/smoke/input.jpg"))
@@ -186,19 +191,38 @@ private actor DigestProvider {
     }
 }
 
-/// Translates cancellation into the engine's typed `cancelled` error, as the
-/// native wrapper does for a cancelled C call.
+/// The first call cannot finish until explicitly released or cancelled. Later
+/// calls succeed immediately, so a live follower can retry a cancelled flight.
 private actor TypedCancelRenderer: PreviewRenderSession {
     let frame: PreviewFrame
     private(set) var calls = 0
+    private(set) var cancellations = 0
+    private var first: CheckedContinuation<Void, Error>?
 
     init(_ frame: PreviewFrame) { self.frame = frame }
 
     func renderFrame(_ request: EngineRequest) async throws -> PreviewFrame {
         calls += 1
-        do { try await Task.sleep(for: .milliseconds(120)) }
-        catch { throw HyperDRError(code: "cancelled", message: "Native cancellation") }
+        if calls == 1 {
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { first = $0 }
+            } onCancel: {
+                Task { await self.cancelFirst() }
+            }
+        }
         return frame
+    }
+
+    func releaseFirst() {
+        first?.resume()
+        first = nil
+    }
+
+    private func cancelFirst() {
+        guard let first else { return }
+        self.first = nil
+        cancellations += 1
+        first.resume(throwing: HyperDRError(code: "cancelled", message: "Native cancellation"))
     }
 
     func modelGain(_ request: EngineRequest) async throws -> Data { Data() }
@@ -649,23 +673,43 @@ private actor BlockingCloseRenderer: PreviewRenderSession {
         #expect(await renderer.calls == 2)
     }
 
-    @Test func rasterPreviewDoesNotWaitForTheRawSlot() async throws {
+    @Test(.timeLimit(.minutes(1))) func rasterPreviewDoesNotWaitForTheRawSlot() async throws {
         let frame = try await makeFrame()
         let renderer = FakeRenderer(frame: frame)
         let raw = fakeSession(.raw(".arw"))
         let jpeg = PhotoSession(id: SessionID(rawValue: String(repeating: "c", count: 32)),
             sourceURL: URL(fileURLWithPath: "/tmp/other.jpg"), displayName: "other.jpg",
             byteCount: 1, sha256: "jpeg-digest", format: .jpeg)
-        let service = try makeService(renderer, raw)
+        let service = try PreviewService(schema: Engine.schema(), buildFingerprint: "test-build",
+            knownModels: ["research-cnn-v1": true], previewMaxEdge: 2048,
+            previewTimeout: .seconds(30), rawDecodeSlots: 1, rawDecodeTimeout: .seconds(30),
+            cacheEntries: 2, cacheBytes: 4 << 20,
+            sessionProvider: { id in id == raw.id ? raw : jpeg },
+            rendererFactory: { _ in renderer })
         try await service.attach(raw)
         try await service.attach(jpeg)
-        let ticket = try await service.rawGate.acquire(timeout: .seconds(1))
-        let clock = ContinuousClock()
-        let started = clock.now
-        let result = try await service.render(request(jpeg))
-        #expect(!result.fromCache)
-        #expect(started.duration(to: clock.now) < .milliseconds(300))
-        await ticket.release()
+        let ticket = try await service.rawGate.acquire(timeout: .seconds(5))
+        let completed = LockedCounter()
+        let render = Task {
+            let result = try await service.render(request(jpeg))
+            completed.increment()
+            return result
+        }
+        do {
+            // Keep the RAW slot occupied until the JPEG result exists. The
+            // timeout is only a hang guard, not a rendering latency assertion.
+            try #require(await eventually(timeout: .seconds(10)) { completed.value == 1 })
+            let result = try await render.value
+            #expect(!result.fromCache)
+            #expect(result.frame === frame)
+            #expect(await renderer.calls == 1)
+            await ticket.release()
+        } catch {
+            render.cancel()
+            await ticket.release()
+            _ = try? await render.value
+            throw error
+        }
     }
 
     @Test func olderSubmitMustNotReplaceANewerSubmitAfterProviderAwait() async throws {
@@ -995,26 +1039,50 @@ private actor BlockingCloseRenderer: PreviewRenderSession {
         await kit.sessions.close(photo.id)
     }
 
-    @Test func aLiveFollowerRetriesTheLeadersTypedCancellation() async throws {
+    @Test(.timeLimit(.minutes(1)), arguments: [false, true])
+    func aLiveFollowerRetriesTheLeadersTypedCancellation(leaderFinishesFirst: Bool) async throws {
         let frame = try await makeFrame()
         let renderer = TypedCancelRenderer(frame)
         let session = fakeSession()
-        let service = try makeService(renderer, session, timeout: .seconds(2))
+        let service = try makeService(renderer, session, timeout: .seconds(30))
         try await service.attach(session)
         let value = request(session)
         let leader = Task { try await service.render(value) }
-        #expect(await waitUntil { await renderer.calls == 1 })
-        let follower = Task { try await service.render(value) }
-        try await Task.sleep(for: .milliseconds(20))
-        leader.cancel()
-        _ = try? await leader.value
+        var follower: Task<PreviewResult, Error>?
         do {
-            let result = try await follower.value
+            try #require(await eventually(timeout: .seconds(10)) { await renderer.calls == 1 })
+            let joined = Task { try await service.render(value) }
+            follower = joined
+            // Observe actual admission to SingleFlight, not merely task creation
+            // or session lookup. The first renderer remains parked throughout.
+            try #require(await eventually(timeout: .seconds(10)) { await service.directRenderFollowerCount == 1 })
+            if leaderFinishesFirst {
+                await renderer.releaseFirst()
+                #expect(try await leader.value.frame === frame)
+                leader.cancel() // Cancellation after success must not invent a retry.
+            } else {
+                leader.cancel()
+                do {
+                    _ = try await leader.value
+                    Issue.record("Expected the leader's typed cancellation")
+                } catch let error as HyperDRError {
+                    #expect(error.code == "cancelled")
+                }
+            }
+            let result = try await joined.value
+            #expect(result.frame === frame)
             #expect(!result.fromCache)
-        } catch let error as HyperDRError {
-            Issue.record("A live follower inherited \(error.code)")
+            #expect(await renderer.calls == (leaderFinishesFirst ? 1 : 2))
+            #expect(await renderer.cancellations == (leaderFinishesFirst ? 0 : 1))
+        } catch {
+            leader.cancel()
+            follower?.cancel()
+            await renderer.releaseFirst()
+            _ = try? await leader.value
+            _ = try? await follower?.value
+            throw error
         }
-        #expect(await renderer.calls == 2)
+        await service.detach(session.id)
     }
 
     /// Two submits both see a changed source digest. The newer one starts

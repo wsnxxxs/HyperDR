@@ -211,6 +211,11 @@ public actor PreviewService {
         self.rawGate = RawDecodeGate(slots: rawDecodeSlots)
     }
 
+    /// Internal observation only; does not change flight admission or cancellation.
+    var directRenderFollowerCount: Int {
+        get async { await singleFlight.waiterCount }
+    }
+
     // MARK: - Lifecycle and events
 
     public func attach(_ session: PhotoSession) async throws {

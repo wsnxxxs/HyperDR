@@ -1,0 +1,433 @@
+import Foundation
+import HyperDRKit
+
+/// What the open photo told the model about itself.
+struct PhotoSource: Equatable {
+    var domain: InputDomain?
+    /// An HDR source's own control values (its identity rendering).
+    var unadjusted: [String: Double]?
+    var colorSource: String?
+    var hasCaptureMetadata = false
+}
+
+/// What colour-only mode remembers to restore on the way back to HDR.
+struct RememberedHDR: Equatable {
+    var encoding: String?
+    var aiMode: AIMode = .manual
+}
+
+/// One render the scheduler may submit: the request, and whether it is a
+/// draft (the smaller edge used while a control is dragged).
+struct RenderJob: Equatable {
+    let options: EditOptions
+    let draft: Bool
+}
+
+extension EditorModel {
+    /// The draft long edge while dragging (batch3 §3.4; A3 may change it).
+    static let draftEdge = 640
+
+    // MARK: - Lock
+
+    /// One switch for everything that must not change the photo: before the
+    /// first frame, while opening or restoring, while AI computes (batch4
+    /// §2.12). Control enablement, undo, the processing mode and open derive
+    /// from it; views never combine their own conditions.
+    var isEditingLocked: Bool {
+        guard hasEditedFrame, document?.phase == .ready, photo != nil else { return true }
+        return ai.isComputing
+    }
+
+    var canSetWorkflow: Bool { !isEditingLocked }
+    /// User commands stay enabled in an empty workspace and for replacing
+    /// a ready/failed photo. Finder/drop/programmatic open can supersede an
+    /// in-progress open (Q14); AI computation blocks both entry points.
+    var canOpenDocument: Bool {
+        guard !ai.isComputing else { return false }
+        return document?.phase != .opening && document?.phase != .rendering
+    }
+    var canResetAll: Bool { !isEditingLocked }
+
+    // MARK: - Controls
+
+    /// The same object for a key while the model lives.
+    func control(_ key: String) -> ControlValue {
+        if let value = controlValues[key] { return value }
+        preconditionFailure("Unknown control \(key)")
+    }
+
+    var controls: [ControlValue] { EditControls.all.compactMap { controlValues[$0.key] } }
+
+    /// Sets a value: clamped to the effective range, then rounded to what the
+    /// readout shows (batch4 §2.2). Outside a drag every call is one undo
+    /// step; inside one, `endAdjusting` records the whole drag.
+    func adjust(_ key: String, to value: Double) {
+        guard value.isFinite, !isEditingLocked, let control = controlValues[key] else { return }
+        if let gesture, gesture.key != key { endAdjusting(gesture.key) }
+        let next: Double
+        if control.spec.allowsAuto && value < 0 {
+            next = -1
+        } else {
+            let range = control.range
+            next = min(range.upperBound, max(range.lowerBound, control.spec.format.quantize(
+                min(range.upperBound, max(range.lowerBound, value)))))
+        }
+        guard edit.controls[key] != next else { return }
+        let previous = edit
+        edit.controls[key] = next
+        control.update(value: next)
+        if let gesture, gesture.key == key {
+            scheduleRender(draft: true)
+        } else {
+            recordStep(from: previous, action: key)
+            scheduleRender()
+        }
+    }
+
+    func beginAdjusting(_ key: String) {
+        guard !isEditingLocked, controlValues[key] != nil else { return }
+        if let gesture, gesture.key != key { endAdjusting(gesture.key) }
+        if gesture == nil { gesture = (key, edit) }
+    }
+
+    func endAdjusting(_ key: String) {
+        guard let started = gesture, started.key == key else { return }
+        gesture = nil
+        if let control = controlValues[key], let value = edit.controls[key],
+           !(control.spec.allowsAuto && value < 0) {
+            let range = ControlRules.range(control.spec, encoding: edit.encoding, domain: source.domain)
+            edit.controls[key] = min(range.upperBound, max(range.lowerBound, value))
+        }
+        recordStep(from: started.start, action: key)
+        syncControls()
+        // Replace the draft frame with a full one.
+        if lastJob?.draft == true { scheduleRender() }
+    }
+
+    /// Double-click: back to this photo's default for the current format.
+    func resetControl(_ key: String) {
+        guard let value = defaultsForCurrentEncoding().controls[key] else { return }
+        guard !isEditingLocked else { return }
+        finishGestureBeforeEdit()
+        guard edit.controls[key] != value else { return }
+        let previous = edit
+        edit.controls[key] = value
+        syncControls()
+        recordStep(from: previous, action: key)
+        scheduleRender()
+    }
+
+    /// Auto-capable controls only; writes −1.
+    func setAuto(_ key: String) {
+        guard !isEditingLocked, controlValues[key]?.spec.allowsAuto == true else { return }
+        finishGestureBeforeEdit()
+        adjust(key, to: -1)
+    }
+
+    /// Back to how this photo opened, for the current output format: AI back
+    /// to manual (its gain stays cached), the encoding and mode unchanged.
+    func resetAll() {
+        guard !isEditingLocked else { return }
+        finishGestureBeforeEdit()
+        var target = defaultsForCurrentEncoding()
+        target.selectedModel = edit.selectedModel
+        target.aiMode = .manual
+        let previous = edit
+        notice = .resetDone
+        guard target != edit else { return }
+        edit = target
+        recordStep(from: previous, action: "reset")
+        editChanged()
+    }
+
+    func defaultsForCurrentEncoding() -> EditSnapshot {
+        EditSnapshot(EditBaseline.initial(encoding: edit.encoding, domain: source.domain,
+                                          unadjusted: source.unadjusted))
+    }
+
+    // MARK: - Processing mode, format, input colour
+
+    /// One undo step. Colour-only remembers the HDR encoding and AI mode and
+    /// restores both on the way back (AI only while it can run).
+    func setWorkflow(_ workflow: Workflow) {
+        guard !isEditingLocked, workflow != edit.workflow else { return }
+        switch workflow {
+        case .colorOnly: changeEncoding(to: "sdr-jpeg", action: "workflow")
+        case .hdr: changeEncoding(to: remembered.encoding ?? "adaptive", action: "workflow")
+        }
+    }
+
+    /// The output format. M2's interface only switches it through the
+    /// processing mode; the export interface (M3) uses this directly.
+    func selectEncoding(_ id: String) {
+        guard !isEditingLocked, id != edit.encoding,
+              EditChoices.byKey["encoding"]?.options.contains(where: { $0.id == id }) == true else { return }
+        changeEncoding(to: id, action: "encoding")
+    }
+
+    private func changeEncoding(to id: String, action: String) {
+        finishGestureBeforeEdit()
+        let previous = edit
+        let from = Workflow(encoding: previous.encoding), to = Workflow(encoding: id)
+        edit.choices["encoding"] = id
+        if from == .hdr && to == .colorOnly {
+            remembered = RememberedHDR(encoding: previous.encoding, aiMode: previous.aiMode)
+            edit.aiMode = .manual
+        } else if from == .colorOnly && to == .hdr {
+            let canRun = aiBlockReason(workflow: .hdr) == nil && aiFailureReason == nil
+            edit.aiMode = canRun ? remembered.aiMode : .manual
+        }
+        clampForEncoding(from: previous.encoding)
+        recordStep(from: previous, action: action)
+        editChanged()
+    }
+
+    /// The HDR range ceilings follow the format. The value of a control being
+    /// dragged is left alone; `endAdjusting` corrects it.
+    private func clampForEncoding(from old: String) {
+        let new = edit.encoding
+        for key in ["hdrRange", "aiHdrRange"] where gesture?.key != key {
+            guard let control = controlValues[key], var value = edit.controls[key] else { continue }
+            let range = ControlRules.range(control.spec, encoding: new, domain: source.domain)
+            if key == "hdrRange", let identity = hdrIdentityRange(at: old), value == identity,
+               let restored = hdrIdentityRange(at: new) {
+                // An HDR source still at its own rendering follows the
+                // format's ceiling both ways (Web `controls.js`).
+                value = restored
+            }
+            if !(control.spec.allowsAuto && value < 0) {
+                value = min(range.upperBound, max(range.lowerBound, value))
+            }
+            edit.controls[key] = value
+        }
+    }
+
+    /// An HDR source's own range at this encoding, while brightness and
+    /// strength are still the source's own; nil otherwise.
+    private func hdrIdentityRange(at encoding: String) -> Double? {
+        guard source.domain == .hdr || source.domain == .dual,
+              let unadjusted = source.unadjusted, let range = unadjusted["hdrRange"],
+              edit.controls["brightness"] == unadjusted["brightness"],
+              edit.controls["hdrStrength"] == unadjusted["hdrStrength"] else { return nil }
+        return min(range, EditBaseline.maxRange(for: encoding))
+    }
+
+    /// Untagged RGB only (`colorSource == "assumed"`); RAW hides it.
+    func selectInputColor(_ id: String) {
+        guard !isEditingLocked, inputColor.isEnabled, id != edit.choices["colorGamut"],
+              inputColor.choices.contains(where: { $0.id == id }) else { return }
+        finishGestureBeforeEdit()
+        let previous = edit
+        edit.choices["colorGamut"] = id
+        aiFailureReason = nil
+        recordStep(from: previous, action: "inputColor")
+        editChanged()
+    }
+
+    // MARK: - Undo (batch4 §2.4)
+
+    /// The window installs its UndoManager before editing (with no active
+    /// groups), and detaches it on disappearance. While attached, this model
+    /// owns edit grouping: each commit is explicit, independent of run-loop
+    /// events. UndoManager owns the inverse group during undo/redo. Detaching
+    /// restores the window's prior grouping policy and removes our actions.
+    func attach(undoManager: UndoManager?) {
+        guard undoManager !== self.undoManager else { return }
+        self.undoManager?.removeAllActions(withTarget: self)
+        if let previousUndoPolicy {
+            self.undoManager?.groupsByEvent = previousUndoPolicy.groupsByEvent
+            self.undoManager?.levelsOfUndo = previousUndoPolicy.levels
+        }
+        previousUndoPolicy = undoManager.map { ($0.groupsByEvent, $0.levelsOfUndo) }
+        self.undoManager = undoManager
+        undoManager?.groupsByEvent = false
+        undoManager?.levelsOfUndo = 0
+        bumpUndoRevision()
+    }
+
+    var canUndo: Bool {
+        _ = undoRevision
+        return !isEditingLocked && gesture == nil && undoManager?.canUndo == true
+    }
+
+    var canRedo: Bool {
+        _ = undoRevision
+        return !isEditingLocked && gesture == nil && undoManager?.canRedo == true
+    }
+
+    func undo() {
+        guard canUndo else { return }
+        undoManager?.undo()
+        bumpUndoRevision()
+    }
+
+    func redo() {
+        guard canRedo else { return }
+        undoManager?.redo()
+        bumpUndoRevision()
+    }
+
+    /// One step back to `previous`, unless nothing changed. The menu title is
+    /// the localized `undo.<action>`.
+    func recordStep(from previous: EditSnapshot, action: String) {
+        guard previous != edit, let undoManager else { return }
+        undoManager.beginUndoGrouping()
+        undoManager.registerUndo(withTarget: self) { model in
+            MainActor.assumeIsolated { model.restoreStep(previous, action: action) }
+        }
+        undoManager.setActionName(Self.undoActionName(action))
+        undoManager.endUndoGrouping()
+        bumpUndoRevision()
+    }
+
+    /// Undo / redo: restores the values and registers the way back.
+    private func restoreStep(_ snapshot: EditSnapshot, action: String) {
+        let current = edit
+        undoManager?.registerUndo(withTarget: self) { model in
+            MainActor.assumeIsolated { model.restoreStep(current, action: action) }
+        }
+        undoManager?.setActionName(Self.undoActionName(action))
+        gesture = nil
+        edit = snapshot
+        editChanged()
+        bumpUndoRevision()
+    }
+
+    func clearUndo() {
+        undoManager?.removeAllActions(withTarget: self)
+        gesture = nil
+        bumpUndoRevision()
+    }
+
+    func endGesture() { gesture = nil }
+
+    /// Every discrete edit first commits the active drag/repeat. Its undo
+    /// step therefore cannot absorb a format, mode, reset or model change.
+    func finishGestureBeforeEdit() {
+        if let gesture { endAdjusting(gesture.key) }
+    }
+
+    // MARK: - Photo lifetime
+
+    /// The opened photo's values: `EditDefaults.initial` for the run's
+    /// encoding and this reference frame, AI manual, view state reset.
+    func beginEditing(encoding: String, reference: EditorPreview) {
+        source = PhotoSource(domain: reference.source.domain, unadjusted: reference.unadjusted,
+                             colorSource: reference.source.colorSource,
+                             hasCaptureMetadata: reference.hasCaptureMetadata)
+        edit = EditSnapshot(EditBaseline.initial(encoding: encoding, preview: reference))
+        let models = photoModels()
+        if !models.contains(where: { $0.id == edit.selectedModel && $0.isEnabled }) {
+            let table = services.modelTable()
+            edit.selectedModel = models.first(where: { $0.id == table.defaultID && $0.isEnabled })?.id
+                ?? models.first(where: \.isEnabled)?.id ?? edit.selectedModel
+        }
+        runEncoding = edit.encoding
+        lastJob = RenderJob(options: edit.options(), draft: false)
+        displayedAIGain = nil
+        readyGain = nil
+        gainToken = nil
+        aiFailureReason = nil
+        ai.update(fallbackMissingFields: [])
+        setSplitRatioValue(0.5)
+        setPeeking(false)
+        notice = nil
+        clearUndo()
+        scopes.update(original: .some(nil), current: .some(nil), waveform: .some(nil))
+        syncControls()
+        revalidateGain()
+    }
+
+    /// No photo: the controls show the defaults and are disabled.
+    func endEditing() {
+        source = PhotoSource()
+        edit = EditSnapshot(EditDefaults.initial(encoding: runEncoding, sourceDomain: nil, unadjusted: nil))
+        lastJob = nil
+        displayedAIGain = nil
+        readyGain = nil
+        gainToken = nil
+        aiFailureReason = nil
+        setSplitRatioValue(0.5)
+        setPeeking(false)
+        notice = nil
+        scopeTask?.cancel()
+        originalScopeTask?.cancel()
+        scopes.update(original: .some(nil), current: .some(nil), waveform: .some(nil))
+        clearUndo()
+        syncControls()
+    }
+
+    /// After any change to `edit` other than a slider: publish, render,
+    /// and check whether the AI gain still applies.
+    func editChanged() {
+        runEncoding = edit.encoding
+        syncControls()
+        revalidateGain()
+        scheduleRender()
+    }
+
+    // MARK: - Publishing
+
+    /// Writes the value objects from `edit` and the lock. Each object only
+    /// changes the properties whose value differs.
+    func syncControls() {
+        let locked = isEditingLocked
+        let snapshot = edit
+        setWorkflowValue(snapshot.workflow)
+        for spec in EditControls.all {
+            guard let control = controlValues[spec.key] else { continue }
+            let dragging = gesture?.key == spec.key
+            control.update(value: snapshot.controls[spec.key],
+                           range: dragging ? nil : ControlRules.range(control.spec, encoding: snapshot.encoding,
+                                                                   domain: source.domain),
+                           isVisible: ControlRules.isVisible(spec.key, workflow: snapshot.workflow,
+                                                             domain: source.domain, aiMode: snapshot.aiMode),
+                           isEnabled: !locked)
+        }
+        let tagged = source.colorSource != nil && source.colorSource != "assumed"
+        inputColor.update(selection: snapshot.choices["colorGamut"] ?? "srgb",
+                          isVisible: document != nil && source.domain != .sceneReferred,
+                          isEnabled: !locked && !tagged && source.colorSource != nil,
+                          disabledReasonKey: .some(tagged ? "inputColor.disabled.tagged" : nil))
+        updateAIState()
+    }
+
+    /// Queues a render of the current values unless the scheduler already has
+    /// exactly this one. `force` re-renders the same values (a new edge).
+    func scheduleRender(draft: Bool = false, force: Bool = false) {
+        guard photo != nil, document?.phase == .ready, !ai.isComputing else { return }
+        let job = RenderJob(options: edit.options(), draft: draft)
+        guard force || job != lastJob else { return }
+        lastJob = job
+        clearPreviewError()
+        requestBusy()
+        renderScheduler?.update(job)
+    }
+}
+
+extension EditorModel {
+    static func undoActionName(_ action: String) -> String {
+        switch action {
+        case "brightness": String(localized: "undo.brightness")
+        case "hdrStrength": String(localized: "undo.hdrStrength")
+        case "hdrRange": String(localized: "undo.hdrRange")
+        case "lutStrength": String(localized: "undo.lutStrength")
+        case "modelStrength": String(localized: "undo.modelStrength")
+        case "aiBrightness": String(localized: "undo.aiBrightness")
+        case "aiContrast": String(localized: "undo.aiContrast")
+        case "aiShadows": String(localized: "undo.aiShadows")
+        case "aiHighlights": String(localized: "undo.aiHighlights")
+        case "aiHdrRange": String(localized: "undo.aiHdrRange")
+        case "aiExpansionStart": String(localized: "undo.aiExpansionStart")
+        case "expansionStart": String(localized: "undo.expansionStart")
+        case "areaCoverage": String(localized: "undo.areaCoverage")
+        case "workflow": String(localized: "undo.workflow")
+        case "encoding": String(localized: "undo.encoding")
+        case "inputColor": String(localized: "undo.inputColor")
+        case "aiMode": String(localized: "undo.aiMode")
+        case "model": String(localized: "undo.model")
+        case "reset": String(localized: "undo.reset")
+        default: String(localized: "undo.adjust")
+        }
+    }
+}

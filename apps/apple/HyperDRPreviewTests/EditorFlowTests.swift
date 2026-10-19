@@ -1,4 +1,5 @@
 import Foundation
+import HyperDRKit
 import UniformTypeIdentifiers
 import XCTest
 @testable import HyperDR
@@ -12,7 +13,7 @@ import XCTest
     var streams: [URL: AsyncStream<EditorPreviewEvent>.Continuation] = [:]
     var refresh: AsyncStream<EditorRefreshEvent>.Continuation?
     var closed: [EditorPhoto] = []
-    var submitted: [[String: Double]] = []
+    var submitted: [EditOptions] = []
     var restoreWaiter: CheckedContinuation<RestoreResult, Never>?
     var starts = 0
     var subscriptions = 0
@@ -35,16 +36,22 @@ import XCTest
         guard usesRestoreGate else { return .none }
         return await withCheckedContinuation { restoreWaiter = $0 }
     }
-    func previews(for photo: EditorPhoto, includingReference: Bool,
-                  adjustments: [String: Double], maxEdge: Int) -> AsyncStream<EditorPreviewEvent> {
+    func previews(for photo: EditorPhoto, encoding: String, maxEdge: Int) -> AsyncStream<EditorPreviewEvent> {
         AsyncStream { streams[photo.url] = $0 }
     }
     func refreshes(for photo: EditorPhoto) -> AsyncStream<EditorRefreshEvent> {
         subscriptions += 1
         return AsyncStream { refresh = $0 }
     }
-    func submit(_ photo: EditorPhoto, adjustments: [String: Double], maxEdge: Int) {
-        submitted.append(adjustments)
+    func submit(_ photo: EditorPhoto, options: EditOptions, maxEdge: Int) {
+        submitted.append(options)
+    }
+    func modelTable() -> ModelTable { .unavailable }
+    func modelGainToken(for photo: EditorPhoto, options: EditOptions) async throws -> ModelGainToken {
+        throw UserFacingError(code: "model_not_ready")
+    }
+    func computeModelGain(for photo: EditorPhoto, options: EditOptions) async throws -> ModelGainOutcome {
+        throw UserFacingError(code: "model_not_ready")
     }
     func captureFacts(for photo: EditorPhoto) async -> CaptureFacts {
         factsCalls += 1
@@ -152,7 +159,7 @@ import XCTest
                 await settle()
             }
         }
-        await eventually { services.submitted.last?["brightness"] == 1 }
+        await eventually { services.submitted.last?["brightness"] == .number(1) }
         XCTAssertLessThanOrEqual(services.submitted.count, ticker.ticks + 1)
         services.refresh?.yield(.edited(preview, isLatest: true))
         await eventually { model.document?.isRefreshing == false }
@@ -205,7 +212,7 @@ extension EditorFlowTests {
         let ticker = ManualFrameTicker()
         let model = EditorModel(services: services, ticker: ticker)
         await opened(model, services, url: a)
-        model.adjust("brightness", to: 0.6)
+        model.adjust("brightness", to: 0.7)
         await eventually { ticker.isWaiting }
         model.open([b])
         await eventually { services.streams[self.b] != nil }
@@ -216,11 +223,11 @@ extension EditorFlowTests {
         await settle(100)
         // Repeating the same value is normally a no-op, so it cannot repair
         // the mismatch if rollback discarded the only dirty slot.
-        model.adjust("brightness", to: 0.6)
+        model.adjust("brightness", to: 0.7)
         ticker.tick()
         await settle(100)
         print("review rollback pending: submitted=\(services.submitted), refreshing=\(String(describing: model.document?.isRefreshing))")
-        XCTAssertEqual(services.submitted.last?["brightness"], 0.6)
+        XCTAssertEqual(services.submitted.last?["brightness"], .number(0.7))
         model.closeDocument()
     }
 
@@ -250,7 +257,7 @@ extension EditorFlowTests {
         let ticker = ManualFrameTicker()
         let model = EditorModel(services: services, ticker: ticker)
         await opened(model, services, url: a)
-        model.adjust("brightness", to: 0.6)
+        model.adjust("brightness", to: 0.7)
         await eventually { ticker.isWaiting }
         ticker.tick()
         await eventually { !services.submitted.isEmpty }
@@ -294,7 +301,7 @@ extension EditorFlowTests {
         let ticker = ManualFrameTicker()
         let model = EditorModel(services: services, ticker: ticker)
         await opened(model, services, url: a)
-        model.adjust("brightness", to: 0.6)
+        model.adjust("brightness", to: 0.7)
         await eventually { ticker.isWaiting }
         ticker.tick()
         await eventually { services.submitted.count == 1 }
@@ -306,8 +313,8 @@ extension EditorFlowTests {
         await eventually { ticker.isWaiting }
         ticker.tick()
         await eventually { services.submitted.count == 2 }
-        XCTAssertEqual(services.submitted.last?["brightness"], 0.6)
-        XCTAssertTrue(model.document?.isRefreshing == true)
+        XCTAssertEqual(services.submitted.last?["brightness"], .number(0.7))
+        await eventually(timeout: .seconds(2)) { model.document?.isRefreshing == true }
         services.refresh?.yield(.edited(preview, isLatest: true))
         await eventually { model.document?.isRefreshing == false }
         model.closeDocument()
@@ -318,17 +325,17 @@ extension EditorFlowTests {
         let ticker = ManualFrameTicker()
         let model = EditorModel(services: services, ticker: ticker)
         await opened(model, services, url: a)
-        model.adjust("brightness", to: 0.6)
+        model.adjust("brightness", to: 0.7)
         await eventually { ticker.isWaiting }
         ticker.tick()
         await eventually { services.submitted.count == 1 }
         services.refresh?.yield(.superseded(isLatest: false))
         await settle(100)
-        XCTAssertTrue(model.document?.isRefreshing == true)
+        await eventually(timeout: .seconds(2)) { model.document?.isRefreshing == true }
         XCTAssertEqual(services.subscriptions, 1)
         services.refresh?.yield(.superseded(isLatest: true))
         await eventually { model.document?.isRefreshing == false && services.subscriptions == 2 }
-        model.adjust("brightness", to: 0.7)
+        model.adjust("brightness", to: 0.8)
         await eventually { ticker.isWaiting }
         ticker.tick()
         await eventually { services.submitted.count == 2 }
@@ -342,13 +349,13 @@ extension EditorFlowTests {
         let ticker = ManualFrameTicker()
         let model = EditorModel(services: services, ticker: ticker)
         await opened(model, services, url: a)
-        model.adjust("brightness", to: 0.6)
+        model.adjust("brightness", to: 0.7)
         await eventually { ticker.isWaiting }
         ticker.tick()
         await eventually { services.submitted.count == 1 }
         services.refresh?.finish()
         await eventually { model.document?.isRefreshing == false && services.subscriptions == 2 }
-        model.adjust("brightness", to: 0.7)
+        model.adjust("brightness", to: 0.8)
         await eventually { ticker.isWaiting }
         ticker.tick()
         await eventually { services.submitted.count == 2 }

@@ -21,10 +21,55 @@ import UniformTypeIdentifiers
     private var selectedMode: ViewMode = .edited
     private(set) var hasReferenceFrame: Bool
     private(set) var hasEditedFrame: Bool
-    @ObservationIgnored private let services: any EditorServices
-    @ObservationIgnored private var photo: EditorPhoto?
-    @ObservationIgnored private var adjustments: [String: Double] = [:]
-    @ObservationIgnored private var generation = 0
+    @ObservationIgnored let services: any EditorServices
+    @ObservationIgnored var photo: EditorPhoto?
+    @ObservationIgnored var generation = 0
+
+    // MARK: Editing state (EditorModel+Editing.swift)
+    /// The values every request is built from.
+    @ObservationIgnored var edit: EditSnapshot
+    /// What the photo was opened with, for the current encoding's defaults.
+    @ObservationIgnored var source = PhotoSource()
+    @ObservationIgnored var controlValues: [String: ControlValue] = [:]
+    let inputColor: ChoiceValue<String>
+    let ai = AIState()
+    let scopes = ScopeState()
+    private(set) var workflow: Workflow = .hdr
+    /// A one-shot message shown in place; the view clears it.
+    var notice: EditorNotice?
+    /// Bumped whenever the undo stack changes, so menu items re-evaluate.
+    private(set) var undoRevision: UInt64 = 0
+    @ObservationIgnored weak var undoManager: UndoManager?
+    @ObservationIgnored var previousUndoPolicy: (groupsByEvent: Bool, levels: Int)?
+    /// The control being dragged and the values when the drag began.
+    @ObservationIgnored var gesture: (key: String, start: EditSnapshot)?
+    /// The encoding the next photo opens with; kept for this run.
+    @ObservationIgnored var runEncoding = "adaptive"
+    @ObservationIgnored var remembered = RememberedHDR()
+    @ObservationIgnored var lastJob: RenderJob?
+
+    // MARK: AI state (EditorModel+AI.swift)
+    @ObservationIgnored var gainToken: ModelGainToken?
+    @ObservationIgnored var readyGain: ModelGainToken?
+    @ObservationIgnored var aiTask: Task<Void, Never>?
+    @ObservationIgnored var tokenTask: Task<Void, Never>?
+    @ObservationIgnored var aiTicket = 0
+    /// Why the last AI computation failed; AI stays unavailable until the
+    /// inputs or the photo change.
+    @ObservationIgnored var aiFailureReason: String?
+
+    // MARK: Viewer state (EditorModel+Viewer.swift)
+    private(set) var splitRatio = 0.5
+    private(set) var isPeekingOriginal = false
+    @ObservationIgnored var scopeTask: Task<Void, Never>?
+    @ObservationIgnored var originalScopeTask: Task<Void, Never>?
+
+    func setSplitRatioValue(_ value: Double) { if value != splitRatio { splitRatio = value } }
+    func setPeeking(_ value: Bool) { if value != isPeekingOriginal { isPeekingOriginal = value } }
+    func setWorkflowValue(_ value: Workflow) { if value != workflow { workflow = value } }
+    func bumpFrameRevision() { frameRevision &+= 1 }
+    func clearPreviewError() { if document?.previewError != nil { document?.previewError = nil } }
+    func bumpUndoRevision() { undoRevision &+= 1 }
     @ObservationIgnored private var operation: Task<Void, Never>?
     @ObservationIgnored private var captureFactsTask: Task<Void, Never>?
     @ObservationIgnored private var displayObserver: Task<Void, Never>?
@@ -41,9 +86,14 @@ import UniformTypeIdentifiers
     @ObservationIgnored private var didLaunch = false
     @ObservationIgnored private var canRestoreAtLaunch = true
     @ObservationIgnored private var refreshObserver: Task<Void, Never>?
-    @ObservationIgnored private var renderScheduler: RenderScheduler<[String: Double]>?
+    @ObservationIgnored var renderScheduler: RenderScheduler<RenderJob>?
     @ObservationIgnored private let ticker: any FrameTicker
     @ObservationIgnored private var submittedEdge = 2048
+    @ObservationIgnored var lastSubmitWasDraft = false
+    @ObservationIgnored var submittedJob: RenderJob?
+    @ObservationIgnored var displayedAIGain: ModelGainToken?
+    @ObservationIgnored private var busyTask: Task<Void, Never>?
+    @ObservationIgnored private var renderOutstanding = false
 
     private struct OpenSnapshot {
         var document: DocumentState?
@@ -52,7 +102,6 @@ import UniformTypeIdentifiers
         let edited: Bool
         let viewMode: ViewMode
         let transform: CanvasTransform
-        let adjustments: [String: Double]
         let needsRefresh: Bool
         let display: DisplayState
         let editedGainWeight: Double?
@@ -66,6 +115,12 @@ import UniformTypeIdentifiers
          hasReferenceFrame: Bool = false, hasEditedFrame: Bool = false, ticker: (any FrameTicker)? = nil) {
         self.services = services
         self.ticker = ticker ?? ClockFrameTicker()
+        let initial = EditDefaults.initial(encoding: "adaptive", sourceDomain: nil, unadjusted: nil)
+        edit = EditSnapshot(initial)
+        let colors = EditChoices.byKey["colorGamut"]?.options ?? []
+        inputColor = ChoiceValue(key: "colorGamut", selection: edit.choices["colorGamut"] ?? "srgb",
+            choices: colors.map { Choice(id: $0.id, labelKey: $0.labelKey, isEnabled: true) })
+        for spec in EditControls.all { controlValues[spec.key] = ControlValue(spec: ControlSpecView(spec)) }
         frame = FrameSettings.load(from: services.preferences)
         engine = services.engineStatus
         display = services.displayState
@@ -78,6 +133,8 @@ import UniformTypeIdentifiers
         editedGainWeight = hasEditedFrame ? services.displayState.gainWeight : nil
         if !hasEditedFrame { display.gainWeight = nil }
         canvas.setImageSize(hasEditedFrame ? document?.pixelSize : nil)
+        source.domain = document?.source?.domain
+        syncControls()
         let statuses = services.engineUpdates()
         engineObserver = Task { [weak self] in
             for await status in statuses {
@@ -96,6 +153,11 @@ import UniformTypeIdentifiers
 
     deinit {
         operation?.cancel()
+        busyTask?.cancel()
+        aiTask?.cancel()
+        tokenTask?.cancel()
+        scopeTask?.cancel()
+        originalScopeTask?.cancel()
         captureFactsTask?.cancel()
         launchTask?.cancel()
         engineObserver?.cancel()
@@ -109,7 +171,7 @@ import UniformTypeIdentifiers
         set {
             guard isAvailable(newValue) else { return }
             selectedMode = newValue
-            display.gainWeight = newValue == .edited ? editedGainWeight : nil
+            display.gainWeight = newValue != .original ? editedGainWeight : nil
         }
     }
 
@@ -120,7 +182,7 @@ import UniformTypeIdentifiers
         switch mode {
         case .original: hasReferenceFrame
         case .edited: hasEditedFrame
-        case .compare: false
+        case .compare: hasReferenceFrame && hasEditedFrame
         }
     }
 
@@ -128,6 +190,7 @@ import UniformTypeIdentifiers
     /// frames, mode and canvas geometry stay visible until its reference arrives.
     /// Any open failure restores the complete previous state, or the empty state.
     func open(_ urls: [URL]) {
+        guard !ai.isComputing else { return }
         canRestoreAtLaunch = false
         beginOpen(urls)
     }
@@ -168,12 +231,15 @@ import UniformTypeIdentifiers
 
         operation?.cancel()
         captureFactsTask?.cancel()
+        cancelAI()
+        endGesture()
         generation += 1
         let ticket = generation
+        let encoding = runEncoding
         var previous = openRollback ?? OpenSnapshot(document: document, photo: photo,
             reference: hasReferenceFrame, edited: hasEditedFrame, viewMode: selectedMode,
-            transform: canvas.transform, adjustments: adjustments,
-            needsRefresh: document?.isRefreshing == true || renderScheduler?.hasPending == true,
+            transform: canvas.transform,
+            needsRefresh: renderOutstanding || document?.isRefreshing == true || renderScheduler?.hasPending == true,
             display: display, editedGainWeight: editedGainWeight,
             referenceFrame: referenceFrame, editedFrame: editedFrame, captureFacts: captureFacts)
         stopRefreshing()
@@ -182,6 +248,7 @@ import UniformTypeIdentifiers
         document = services.placeholder(for: url).openingDocument
         workspace = .editing
         alert = nil
+        syncControls()
 
         operation = Task { [weak self, services] in
             guard let self else { return }
@@ -195,19 +262,22 @@ import UniformTypeIdentifiers
                 guard generation == ticket else { await services.close(opened); return }
                 document = opened.openingDocument
                 document?.phase = .rendering
-                for await event in services.previews(for: opened, includingReference: true, adjustments: [:], maxEdge: previewEdge) {
+                var reference: EditorPreview?
+                for await event in services.previews(for: opened, encoding: encoding, maxEdge: previewEdge) {
                     try Task.checkCancellation()
                     guard generation == ticket else { throw CancellationError() }
                     if case .failed(let error) = event { throw error }
-                    if case .edited = event {
+                    if case .reference(let preview) = event { reference = preview }
+                    if case .edited(let preview) = event {
                         // Commit the opened photo before publishing ready. A new
                         // refresh or open may start before the stream ends.
                         photo = opened
-                        adjustments = [:]
                         captureFacts = CaptureFacts()
                         openRollback = nil
                         operation = nil
+                        beginEditing(encoding: encoding, reference: reference ?? preview)
                         apply(event)
+                        startScopes(original: true)
                         startCaptureFacts(opened)
                         startRefreshing(opened)
                         if let old = previous.photo, old != opened { await services.close(old) }
@@ -244,14 +314,17 @@ import UniformTypeIdentifiers
         hasReferenceFrame = false
         hasEditedFrame = false
         selectedMode = .edited
-        adjustments = [:]
         captureFacts = CaptureFacts()
+        cancelAI()
+        endGesture()
+        endEditing()
         display.gainWeight = nil
         editedGainWeight = nil
         referenceFrame = nil
         editedFrame = nil
         frameRevision &+= 1
         canvas.setImageSize(nil)
+        syncControls()
     }
 
     func dismissAlert() { alert = nil }
@@ -273,7 +346,7 @@ import UniformTypeIdentifiers
     var frameCaption: FrameCaption { frame.style.caption(frame, facts: captureFacts) }
 
     var canvasFrame: PreviewCanvasFrame? {
-        if selectedMode == .original, let referenceFrame {
+        if selectedMode == .original || isPeekingOriginal, let referenceFrame {
             return PreviewCanvasFrame(frame: referenceFrame, showsOriginal: true)
         }
         if let editedFrame { return PreviewCanvasFrame(frame: editedFrame, showsOriginal: false) }
@@ -284,7 +357,16 @@ import UniformTypeIdentifiers
         (editedFrame ?? referenceFrame).map { PreviewCanvasFrame(frame: $0, showsOriginal: false) }
     }
 
-    private var previewEdge: Int {
+    /// The original side of the split view (renderer, M2-R).
+    var originalCanvasFrame: PreviewCanvasFrame? {
+        referenceFrame.map { PreviewCanvasFrame(frame: $0, showsOriginal: true) }
+    }
+
+    /// Frames for the scope analyser.
+    var currentEditedFrame: PreviewFrame? { editedFrame }
+    var currentReferenceFrame: PreviewFrame? { referenceFrame }
+
+    var previewEdge: Int {
         let transform = canvas.transform
         guard transform.viewport.width > 0, transform.viewport.height > 0 else { return 2048 }
         return EditDefaults.previewEdge(ceiling: 2048, boxWidth: transform.viewport.width,
@@ -294,28 +376,38 @@ import UniformTypeIdentifiers
     func updateViewport(_ size: CGSize, backingScale: Double) {
         canvas.setViewport(size, backingScale: backingScale)
         guard document?.phase == .ready, submittedEdge != previewEdge else { return }
-        setRefreshing(true)
-        renderScheduler?.update(adjustments)
+        scheduleRender(force: true)
     }
 
     func updateRefreshRate(_ framesPerSecond: Int) {
         (ticker as? ClockFrameTicker)?.framesPerSecond = framesPerSecond
     }
 
-    func adjust(_ key: String, to value: Double) {
-        guard value.isFinite, adjustments[key] != value, photo != nil, hasEditedFrame,
-              document?.phase == .ready else { return }
-        adjustments[key] = value
-        setRefreshing(true)
-        if document?.previewError != nil { document?.previewError = nil }
-        renderScheduler?.update(adjustments)
+    /// The latest adjustment starts a fresh 300 ms grace period. Fast frames
+    /// never publish busy; an already-visible busy indicator stays until a frame.
+    func requestBusy() {
+        renderOutstanding = true
+        busyTask?.cancel()
+        guard document?.isRefreshing != true else { busyTask = nil; return }
+        busyTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
+            guard let self, !Task.isCancelled, renderOutstanding else { return }
+            if document?.isRefreshing != true { document?.isRefreshing = true }
+            busyTask = nil
+        }
     }
 
-    private func setRefreshing(_ refreshing: Bool) {
+    func setRefreshing(_ refreshing: Bool) {
+        if !refreshing {
+            busyTask?.cancel()
+            busyTask = nil
+            renderOutstanding = false
+        }
         if document?.isRefreshing != refreshing { document?.isRefreshing = refreshing }
     }
 
     private func stopRefreshing() {
+        setRefreshing(false)
         refreshObserver?.cancel()
         refreshObserver = nil
         renderScheduler?.cancel()
@@ -336,14 +428,27 @@ import UniformTypeIdentifiers
                           document?.phase == .ready else { return }
                     switch event {
                     case .edited(let preview, let isLatest):
-                        apply(.edited(preview), finishesRefresh: isLatest && renderScheduler?.hasPending != true)
+                        let final = isLatest && renderScheduler?.hasPending != true
+                        apply(.edited(preview), finishesRefresh: final)
+                        if final {
+                            displayedAIGain = submittedJob?.options["useModel"] == .bool(true) ? readyGain : nil
+                            updateAIState()
+                            if !lastSubmitWasDraft { startScopes(original: false) }
+                        }
                     case .failed(let error):
-                        if renderScheduler?.hasPending != true { apply(.failed(error)) }
+                        if renderScheduler?.hasPending != true {
+                            apply(.failed(error))
+                            if edit.aiMode == .optimized, !ai.isComputing,
+                               submittedJob?.options == edit.options() { failAI(error) }
+                        }
                     case .superseded(let isLatest):
                         guard isLatest else { continue }
                         if renderScheduler?.hasPending != true { setRefreshing(false) }
                         restart = true
                     case .sourceReplaced:
+                        cancelAI()
+                        readyGain = nil
+                        gainToken = nil
                         open([photo.url])
                         return
                     }
@@ -359,15 +464,17 @@ import UniformTypeIdentifiers
                 guard self?.generation == ticket, self?.photo == photo else { return }
             }
         }
-        renderScheduler = RenderScheduler(ticker: ticker) { [weak self] values in
+        renderScheduler = RenderScheduler(ticker: ticker) { [weak self] job in
             guard let self, generation == ticket, self.photo == photo, document?.phase == .ready else { return }
-            submittedEdge = previewEdge
-            setRefreshing(true)
-            services.submit(photo, adjustments: values, maxEdge: submittedEdge)
+            guard !ai.isComputing else { return }
+            submittedJob = job
+            submittedEdge = job.draft ? Self.draftEdge : previewEdge
+            lastSubmitWasDraft = job.draft
+            services.submit(photo, options: job.options, maxEdge: submittedEdge)
         }
     }
 
-    private func apply(_ event: EditorPreviewEvent, finishesRefresh: Bool = true) {
+    func apply(_ event: EditorPreviewEvent, finishesRefresh: Bool = true) {
         switch event {
         case .reference(let frame):
             referenceFrame = frame.frame
@@ -381,6 +488,7 @@ import UniformTypeIdentifiers
             document?.pixelSize = frame.pixelSize
             document?.source = frame.source
             canvas.setImageSize(frame.pixelSize)
+            setPeeking(false)
         case .edited(let frame):
             editedFrame = frame.frame
             frameRevision &+= 1
@@ -391,11 +499,12 @@ import UniformTypeIdentifiers
             document?.previewError = nil
             canvas.setImageSize(frame.pixelSize, zoom: canvas.zoom)
             editedGainWeight = frame.hasGain ? frame.gainWeight ?? services.displayState.gainWeight ?? 1 : nil
-            display.gainWeight = selectedMode == .edited ? editedGainWeight : nil
+            display.gainWeight = selectedMode != .original ? editedGainWeight : nil
         case .failed(let error):
             setRefreshing(false)
             document?.previewError = error
         }
+        syncControls()
     }
 
     var hasPreviewFrame: Bool {
@@ -410,8 +519,8 @@ import UniformTypeIdentifiers
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
             guard let self, let state = pendingDisplay else { return }
             display = state
-            if hasEditedFrame, selectedMode == .edited { editedGainWeight = state.gainWeight }
-            display.gainWeight = hasEditedFrame && selectedMode == .edited ? editedGainWeight : nil
+            if hasEditedFrame, selectedMode != .original { editedGainWeight = state.gainWeight }
+            display.gainWeight = hasEditedFrame && selectedMode != .original ? editedGainWeight : nil
             pendingDisplay = nil
             displayPublication = nil
         }
@@ -424,6 +533,8 @@ import UniformTypeIdentifiers
         generation += 1
         operation?.cancel()
         captureFactsTask?.cancel()
+        cancelAI()
+        endGesture()
         operation = nil
         stopRefreshing()
         let error = UserFacingError(code: "metal_unavailable", detail: detail)
@@ -442,13 +553,13 @@ import UniformTypeIdentifiers
             editedGainWeight = nil
             display.gainWeight = nil
             canvas.setImageSize(nil)
+            syncControls()
         }
     }
 
     private func restore(_ previous: OpenSnapshot, error: UserFacingError) {
         document = previous.document
         photo = previous.photo
-        adjustments = previous.adjustments
         hasReferenceFrame = previous.reference
         hasEditedFrame = previous.edited
         selectedMode = previous.viewMode
@@ -466,13 +577,14 @@ import UniformTypeIdentifiers
         workspace = document == nil ? .empty : .editing
         alert = error
         openRollback = nil
+        clearUndo()
+        if photo == nil { endEditing() }
+        syncControls()
         if let photo {
             startCaptureFacts(photo)
             startRefreshing(photo)
-            if previous.needsRefresh {
-                setRefreshing(true)
-                renderScheduler?.update(adjustments)
-            }
+            if previous.needsRefresh { scheduleRender(force: true) }
+            revalidateGain()
         }
     }
 }

@@ -13,10 +13,6 @@ import UniformTypeIdentifiers
         var stop: @MainActor (HyperDRKit) -> Void = { $0.stop() }
     }
 
-    /// The Web editor's default output; the export interface (M3) makes it a
-    /// workflow choice.
-    static let encoding = "adaptive"
-
     private(set) var engineStatus: EngineStatus = .starting
     private(set) var displayState = DisplayState(screenName: "", currentHeadroom: 1,
                                                  potentialHeadroom: 1, gainWeight: nil)
@@ -33,7 +29,6 @@ import UniformTypeIdentifiers
 
     private struct Record {
         let session: PhotoSession
-        var base: EditOptions
         var reference: PreviewFrame?
         var edited: PreviewFrame?
         // The task is also the cached result, including an empty result. Store
@@ -192,8 +187,7 @@ import UniformTypeIdentifiers
     private func adopt(_ session: PhotoSession, kit: HyperDRKit) async throws -> EditorPhoto {
         let photo = EditorPhoto(url: session.sourceURL, name: session.displayName,
                                 formatLabel: session.format.displayLabel, byteCount: session.byteCount)
-        let workflow = EditDefaults.initial(encoding: Self.encoding, sourceDomain: nil, unadjusted: nil)
-        records[photo.handle] = Record(session: session, base: workflow)
+        records[photo.handle] = Record(session: session)
         do {
             try await kit.previews.attach(session)
             try Task.checkCancellation()
@@ -239,19 +233,18 @@ import UniformTypeIdentifiers
         return (record?.reference, record?.edited)
     }
 
-    func previews(for photo: EditorPhoto, includingReference: Bool,
-                  adjustments: [String: Double], maxEdge: Int) -> AsyncStream<EditorPreviewEvent> {
+    func previews(for photo: EditorPhoto, encoding: String,
+                  maxEdge: Int) -> AsyncStream<EditorPreviewEvent> {
         AsyncStream { continuation in
             let task = Task { @MainActor [weak self] in
-                await self?.render(photo, includingReference: includingReference,
-                                   adjustments: adjustments, maxEdge: maxEdge, into: continuation)
+                await self?.render(photo, encoding: encoding, maxEdge: maxEdge, into: continuation)
                 continuation.finish()
             }
             continuation.onTermination = { _ in task.cancel() }
         }
     }
 
-    private func render(_ photo: EditorPhoto, includingReference: Bool, adjustments: [String: Double], maxEdge: Int,
+    private func render(_ photo: EditorPhoto, encoding: String, maxEdge: Int,
                         into continuation: AsyncStream<EditorPreviewEvent>.Continuation) async {
         guard let kit, let record = records[photo.handle] else {
             continuation.yield(.failed(UserFacingError(code: "source_missing")))
@@ -261,27 +254,21 @@ import UniformTypeIdentifiers
         // Subscribe before submitting so the result cannot be missed.
         let events = kit.previews.events(for: id)
         do {
-            var base = record.base
-            if includingReference {
-                // photo.js: neutral settings, no model; the adapter supplies
-                // blend highlight recovery.
-                var options = EditDefaults.reference(encoding: Self.encoding, workflow: base)
-                options["useModel"] = .bool(false)
-                let result = try await kit.previews.render(PreviewRequest(session: id, options: options,
-                    maxEdge: maxEdge, purpose: .reference))
-                try Task.checkCancellation()
-                guard records[photo.handle] != nil else { throw CancellationError() }
-                guard result.sourceDigest == record.session.sha256 else {
-                    throw HyperDRError(code: "source_missing", message: "Source changed while opening")
-                }
-                let metadata = result.frame.metadata
-                base = EditDefaults.initial(encoding: Self.encoding, sourceDomain: metadata.inputDomain,
-                                            unadjusted: metadata.unadjusted.values)
-                records[photo.handle]?.base = base
-                records[photo.handle]?.reference = result.frame
-                continuation.yield(.reference(Self.preview(result.frame)))
+            // The neutral comparison frame: no model, the photo's own colour.
+            let workflow = EditDefaults.initial(encoding: encoding, sourceDomain: nil, unadjusted: nil)
+            let result = try await kit.previews.render(PreviewRequest(session: id,
+                options: EditDefaults.reference(encoding: encoding, workflow: workflow),
+                maxEdge: maxEdge, purpose: .reference))
+            try Task.checkCancellation()
+            guard records[photo.handle] != nil else { throw CancellationError() }
+            guard result.sourceDigest == record.session.sha256 else {
+                throw HyperDRError(code: "source_missing", message: "Source changed while opening")
+
             }
-            for (key, value) in adjustments { base[key] = .number(value) }
+            records[photo.handle]?.reference = result.frame
+            let reference = Self.preview(result.frame)
+            continuation.yield(.reference(reference))
+            let base = EditBaseline.initial(encoding: encoding, preview: reference)
             let request = PreviewRequest(session: id, options: base, maxEdge: maxEdge, purpose: .edit)
             await kit.previews.submit(request)
             for await event in events {
@@ -317,9 +304,12 @@ import UniformTypeIdentifiers
                                  height: metadata.sourceHeight ?? metadata.height),
             source: SourceSummary(domain: InputDomain(rawValue: metadata.inputDomain) ?? .unknown,
                                   colorName: metadata.sourceColor.name,
-                                  degradationReasons: metadata.degradationReasons),
+                                  degradationReasons: metadata.degradationReasons,
+                                  colorSource: metadata.sourceColor.source),
             hasGain: frame.isCompact || metadata.headroomStops > 0,
-            gainWeight: metadata.gainWeight, frame: frame)
+            gainWeight: metadata.gainWeight, frame: frame,
+            unadjusted: metadata.unadjusted.values,
+            hasCaptureMetadata: metadata.hasCaptureMetadata)
     }
 
     private func installSubmitPump(_ kit: HyperDRKit) {
@@ -337,11 +327,9 @@ import UniformTypeIdentifiers
         }
     }
 
-    func submit(_ photo: EditorPhoto, adjustments: [String: Double], maxEdge: Int) {
+    func submit(_ photo: EditorPhoto, options: EditOptions, maxEdge: Int) {
         guard let record = records[photo.handle], let kit, !stopped else { return }
         installSubmitPump(kit)
-        var options = record.base
-        for (key, value) in adjustments { options[key] = .number(value) }
         let request = PreviewRequest(session: record.session.id, options: options, maxEdge: maxEdge,
                                      submissionID: UUID())
         latestRequests[photo.handle] = request
@@ -374,6 +362,52 @@ import UniformTypeIdentifiers
             }
             continuation.onTermination = { _ in observer.cancel() }
         }
+    }
+
+    // MARK: - AI
+
+    func modelTable() -> ModelTable {
+        guard let catalog = kit?.models else { return .unavailable }
+        return ModelTable(runtimeReady: catalog.status.runtimeAvailable, defaultID: catalog.defaultID,
+            models: catalog.models.map { entry in
+                var key = "model.\(entry.id)"
+                if case .string(let declared)? = entry.document["displayKey"] { key = declared }
+                return ModelChoice(id: entry.id, name: entry.displayName, nameKey: key,
+                    summaryKey: key + ".summary", isEnabled: entry.available,
+                    requiresCapture: entry.document["requiresExif"] == .bool(true))
+            })
+    }
+
+    func modelGainToken(for photo: EditorPhoto, options: EditOptions) async throws -> ModelGainToken {
+        guard let kit, let record = records[photo.handle] else { throw UserFacingError(code: "source_missing") }
+        do {
+            return ModelGainToken(value: try await kit.previews.modelGainKey(session: record.session.id,
+                                                                            options: options))
+        } catch { throw UserFacingError.service(error) }
+    }
+
+    func computeModelGain(for photo: EditorPhoto, options: EditOptions) async throws -> ModelGainOutcome {
+        guard let kit, let record = records[photo.handle] else { throw UserFacingError(code: "source_missing") }
+        do {
+            let result = try await kit.previews.modelGain(session: record.session.id, options: options)
+            return ModelGainOutcome(token: ModelGainToken(value: result.key),
+                                    missingCaptureFields: Self.missingCaptureFields(result.packet))
+        } catch { throw UserFacingError.service(error) }
+    }
+
+    /// The capture fields a model fell back without, from the `HYPGAIN1`
+    /// packet's `fallbackReason` (`missing_capture_fields:iso,f_number`).
+    static func missingCaptureFields(_ packet: Data) -> [String] {
+        let magic = Array("HYPGAIN1\n".utf8)
+        guard packet.count >= 13, Array(packet.prefix(9)) == magic else { return [] }
+        let size = packet.withUnsafeBytes { Int(UInt32(littleEndian: $0.loadUnaligned(fromByteOffset: 9, as: UInt32.self))) }
+        guard size > 0, 13 + size <= packet.count,
+              let header = try? JSONDecoder().decode([String: JSONValue].self,
+                                                     from: packet.subdata(in: 13..<13 + size)),
+              case .string(let reason)? = header["fallbackReason"] else { return [] }
+        let prefix = "missing_capture_fields:"
+        guard reason.hasPrefix(prefix) else { return [] }
+        return reason.dropFirst(prefix.count).split(separator: ",").map(String.init)
     }
 
     // MARK: - Display

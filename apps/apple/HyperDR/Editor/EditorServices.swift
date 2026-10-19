@@ -1,5 +1,6 @@
 import Foundation
 import HyperDREngine
+import HyperDRKit
 import UniformTypeIdentifiers
 
 // App-internal boundary. A2 supplies live services without changing Views.
@@ -19,15 +20,22 @@ import UniformTypeIdentifiers
     func open(_ url: URL) async throws -> EditorPhoto
     /// The photo remembered from the last launch, opened and attached.
     func restoreLast() async -> RestoreResult
-    /// One open: the reference frame (when asked) and then the first edit
-    /// frame. The stream ends after the edit frame or a failure.
-    func previews(for photo: EditorPhoto, includingReference: Bool,
-                  adjustments: [String: Double], maxEdge: Int) -> AsyncStream<EditorPreviewEvent>
+    /// One open: the reference frame, then the first edit frame rendered
+    /// with `EditBaseline.initial(encoding:preview:)` of that reference. The
+    /// stream ends after the edit frame or a failure.
+    func previews(for photo: EditorPhoto, encoding: String,
+                  maxEdge: Int) -> AsyncStream<EditorPreviewEvent>
     /// The results of `submit` for an opened photo, for as long as it is open.
     func refreshes(for photo: EditorPhoto) -> AsyncStream<EditorRefreshEvent>
     /// Queues a refresh with the newest values and returns immediately; the
     /// services keep at most the newest request (latest wins).
-    func submit(_ photo: EditorPhoto, adjustments: [String: Double], maxEdge: Int)
+    func submit(_ photo: EditorPhoto, options: EditOptions, maxEdge: Int)
+    /// The models this engine build offers.
+    func modelTable() -> ModelTable
+    /// The identity a gain for these options would have now.
+    func modelGainToken(for photo: EditorPhoto, options: EditOptions) async throws -> ModelGainToken
+    /// Computes (or finds cached) the AI gain for these options.
+    func computeModelGain(for photo: EditorPhoto, options: EditOptions) async throws -> ModelGainOutcome
     func displayUpdates() -> AsyncStream<DisplayState>
     /// The photograph's Exif for a frame caption; empty when it has none.
     func captureFacts(for photo: EditorPhoto) async -> CaptureFacts
@@ -68,6 +76,10 @@ struct EditorPreview {
     var gainWeight: Double?
     /// The engine frame to draw; the fakes have none.
     var frame: PreviewFrame?
+    /// An HDR source's own control values (its identity rendering).
+    var unadjusted: [String: Double]? = nil
+    /// The photo has the capture parameters the EXIF model needs.
+    var hasCaptureMetadata = false
 }
 
 enum EditorPreviewEvent {
@@ -111,7 +123,20 @@ extension UserDefaults {
     let preferences: UserDefaults
     private let preferencesName: String
     private(set) var renderedPurposes: [Bool] = [] // true = reference, false = edit
-    private(set) var receivedAdjustments: [[String: Double]] = []
+    private(set) var receivedOptions: [EditOptions] = []
+    private(set) var receivedEdges: [Int] = []
+    var models = ModelTable(runtimeReady: true, defaultID: "research-cnn-v1", models: [
+        ModelChoice(id: "research-cnn-v1", name: "CNN", nameKey: "model.research-cnn-v1",
+                    summaryKey: "model.research-cnn-v1.summary", isEnabled: true, requiresCapture: false),
+        ModelChoice(id: "research-exif-v1", name: "EXIF", nameKey: "model.research-exif-v1",
+                    summaryKey: "model.research-exif-v1.summary", isEnabled: true, requiresCapture: true),
+    ])
+    var autoCompletesRefreshes = true
+    var gainGate: (() async throws -> Void)?
+    var gainDelay: Duration = .milliseconds(20)
+    var gainFailure: UserFacingError?
+    var missingCaptureFields: [String] = []
+    private(set) var gainComputations: [EditOptions] = []
     private(set) var startCount = 0
     private(set) var closed: [EditorPhoto] = []
     private var displays: [UUID: AsyncStream<DisplayState>.Continuation] = [:]
@@ -173,27 +198,26 @@ extension UserDefaults {
 
     func restoreLast() async -> RestoreResult { restoreResult }
 
-    func previews(for photo: EditorPhoto, includingReference: Bool,
-                  adjustments: [String: Double], maxEdge: Int) -> AsyncStream<EditorPreviewEvent> {
+    func previews(for photo: EditorPhoto, encoding: String,
+                  maxEdge: Int) -> AsyncStream<EditorPreviewEvent> {
         AsyncStream { continuation in
             let task = Task { @MainActor [weak self] in
                 guard let self else { continuation.finish(); return }
                 do {
-                    if includingReference {
-                        try await Task.sleep(for: previewDelay)
-                        try Task.checkCancellation()
-                        if let error = previewFailure {
-                            continuation.yield(.failed(error)); continuation.finish(); return
-                        }
-                        renderedPurposes.append(true)
-                        continuation.yield(.reference(preview))
+                    try await Task.sleep(for: previewDelay)
+                    try Task.checkCancellation()
+                    if let error = previewFailure {
+                        continuation.yield(.failed(error)); continuation.finish(); return
                     }
+                    renderedPurposes.append(true)
+                    let reference = preview
+                    continuation.yield(.reference(reference))
                     try await Task.sleep(for: previewDelay)
                     try Task.checkCancellation()
                     if let error = previewFailure { continuation.yield(.failed(error)) }
                     else {
                         renderedPurposes.append(false)
-                        receivedAdjustments.append(adjustments)
+                        receivedOptions.append(EditBaseline.initial(encoding: encoding, preview: reference))
                         continuation.yield(.edited(preview))
                     }
                 } catch { /* Stream termination owns cancellation. */ }
@@ -214,10 +238,12 @@ extension UserDefaults {
     }
 
     /// Renders after `previewDelay`; a newer submit wins, as in PreviewService.
-    func submit(_ photo: EditorPhoto, adjustments: [String: Double], maxEdge: Int) {
+    func submit(_ photo: EditorPhoto, options: EditOptions, maxEdge: Int) {
         latestSubmit += 1
         let ticket = latestSubmit
-        receivedAdjustments.append(adjustments)
+        receivedOptions.append(options)
+        receivedEdges.append(maxEdge)
+        guard autoCompletesRefreshes else { return }
         Task { @MainActor [weak self] in
             guard let delay = self?.previewDelay else { return }
             try? await Task.sleep(for: delay)
@@ -256,4 +282,26 @@ extension UserDefaults {
     func captureFacts(for photo: EditorPhoto) async -> CaptureFacts { facts }
 
     func close(_ photo: EditorPhoto) async { closed.append(photo) }
+
+    func modelTable() -> ModelTable { models }
+
+    /// The fake's stand-in for the Kit's `ModelGainInputs`: model, input
+    /// colour and the sRGB clamp.
+    static func gainInputs(_ options: EditOptions) -> [String: JSONValue] {
+        ["modelId": options["modelId"] ?? .null, "colorGamut": options["colorGamut"] ?? .null,
+         "clampSrgb": options["clampSrgb"] ?? .null]
+    }
+
+    func modelGainToken(for photo: EditorPhoto, options: EditOptions) async throws -> ModelGainToken {
+        ModelGainToken(value: Self.gainInputs(options))
+    }
+
+    func computeModelGain(for photo: EditorPhoto, options: EditOptions) async throws -> ModelGainOutcome {
+        gainComputations.append(options)
+        if let gainGate { try await gainGate() }
+        else { try await Task.sleep(for: gainDelay) }
+        if let gainFailure { throw gainFailure }
+        return ModelGainOutcome(token: ModelGainToken(value: Self.gainInputs(options)),
+                                missingCaptureFields: missingCaptureFields)
+    }
 }

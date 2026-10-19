@@ -114,8 +114,13 @@ void run() {
   std::filesystem::create_directories(root);
   const auto input = root / "photo.tif";
   {
+    // A ramp in both directions (0.45..0.95), so the base's own quantisation at
+    // 8 and 10 bits takes part in the comparison and the two depths differ.
     FloatImage photo(128, 128, 3);
-    std::fill(photo.pixels.begin(), photo.pixels.end(), .8F);
+    for (unsigned y = 0; y < 128; ++y)
+      for (unsigned x = 0; x < 128; ++x)
+        for (unsigned c = 0; c < 3; ++c)
+          photo.pixels[(std::size_t(y) * 128 + x) * 3 + c] = .45F + .5F * (.6F * float(x) + .4F * float(y)) / 127.F * (c == 2 ? .95F : 1.F);
     write_binary_file_atomic(input, encode_sdr_tiff(photo, {}), true);
   }
   struct Case { const char* name; unsigned width, height; Shape shape; };
@@ -147,8 +152,9 @@ void run() {
       const double mean = sum / double(adaptive.values.size());
       const auto label = std::string(c.name) + " depth " + std::to_string(depth) + ": mean |dlog2| " +
                          std::to_string(mean) + ", worst " + std::to_string(worst);
-      // Measured 0.008-0.010 / 0.04-0.06 for every case here; the failure this
-      // guards against (a mis-scaled or flipped grid) is several times larger.
+      // Measured 0.0046-0.0078 mean / 0.030-0.043 worst for every case here; the
+      // failure this guards against (a mis-scaled, flipped or aspect-shrunk
+      // grid: 0.023 mean / 0.52 worst for edge-tall) is several times larger.
       require(mean < .02 && worst < .15, label);
       require(std::fabs(std::log2(adaptive_peak / peak)) < .1, label + " (peak differs)");
     }

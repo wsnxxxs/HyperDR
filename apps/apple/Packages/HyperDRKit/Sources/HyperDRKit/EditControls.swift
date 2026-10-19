@@ -43,10 +43,11 @@ public struct ControlSpec: Sendable, Hashable {
 /// The inspector's continuous controls. This table is the specification
 /// (batch4 §2.1, §8): ranges must lie inside the engine schema and defaults
 /// equal the panel-v1 adapter's; the Web `CONTROLS` was only its starting
-/// point. `contrast`, `vibrance` and `quality` have no
+/// point. `contrast` and `vibrance` have no
 /// control and are left out of requests; the adapter supplies them.
 public enum EditControls {
     public static let all: [ControlSpec] = [
+        .range("quality", .tone, 0...100, step: 1, default: 90, format: .integer),
         .range("lutStrength", .lut, 0...1, step: 0.01, default: 1, format: .percent, percent: true),
         .range("brightness", .tone, -2...2, step: 0.05, default: 0.6, format: .ev),
         .range("hdrStrength", .tone, 0...1, step: 0.05, default: 0.4, format: .percent,

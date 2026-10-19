@@ -20,6 +20,7 @@ private func engineSettings() throws -> [String: EngineSetting] {
 /// Panel key → engine setting, as `normalize_options` (panel-v1) maps it.
 /// `equal`: the panel range is the engine's; otherwise it lies inside it.
 private let engineMapping: [(panel: String, engine: String, equal: Bool)] = [
+    ("quality", "quality", true),
     ("lutStrength", "lut_strength", true),
     ("brightness", "exposure_bias", true),
     ("hdrStrength", "gain_strength", false),
@@ -80,7 +81,7 @@ private func bytes(_ request: EngineRequest) throws -> Data {
 
     /// Settings the adapter fills itself have no control (batch4 §2.1).
     @Test func adapterSuppliedSettingsAreNotControls() {
-        for key in ["highlightRecovery", "contrast", "vibrance", "quality"] {
+        for key in ["highlightRecovery", "contrast", "vibrance"] {
             #expect(EditControls.byKey[key] == nil && EditChoices.byKey[key] == nil, "\(key)")
             #expect(EditDefaults.initial(encoding: "pq", sourceDomain: nil, unadjusted: nil)[key] == nil)
         }

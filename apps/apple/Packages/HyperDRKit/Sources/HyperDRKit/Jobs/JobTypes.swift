@@ -81,6 +81,7 @@ public struct JobSnapshot: Sendable {
     public let truncated: Bool
 }
 public enum JobEvent: Sendable {
+    case publishing, saving
     case progress(ConvertEvent)
     case log(String)
     case finished(JobSummary)

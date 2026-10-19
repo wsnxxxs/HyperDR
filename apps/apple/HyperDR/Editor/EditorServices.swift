@@ -159,6 +159,7 @@ extension UserDefaults {
     fileprivate(set) var diagnosticCalls = 0
     var exportStartHandler: (() async throws -> Void)?
     var exportCancelHandler: (() async -> Void)?
+    var exportFileURLHandler: (() async throws -> URL)?
     var exportSaveHandler: ((String, URL?) async throws -> SavedLocation)?
     var metadataHandler: (() async throws -> Void)?
     var historyByURL: [URL: [ExportHistoryItem]] = [:]
@@ -418,4 +419,11 @@ extension FakeEditorServices {
         library[i].input = input; library[i].output = output; return library[i]
     }
     func removeLUT(_ id: String) async throws { library.removeAll { $0.id == id } }
+}
+
+extension FakeEditorServices {
+    func exportFileURL(_ photo: EditorPhoto, export: String) async throws -> URL {
+        if let exportFileURLHandler { return try await exportFileURLHandler() }
+        throw UserFacingError(code: "session_expired")
+    }
 }

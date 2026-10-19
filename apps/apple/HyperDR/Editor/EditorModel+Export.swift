@@ -227,7 +227,7 @@ extension EditorModel {
                 if export.result?.export == version { export.result?.saved = saved; export.saveFailure = nil }
                 refreshExportMetadata()
             } catch {
-                guard let self, self.photo == photo else { return }
+                guard let self, self.photo == photo, !Task.isCancelled else { return }
                 let error = UserFacingError.service(error)
                 exportSaveStates[version] = error.code == "session_expired" ? .expired : error.code == "cancelled" ? nil : .failed(error)
                 if error.code != "cancelled" { export.saveFailure = error; handleExportError(error) }
@@ -236,8 +236,14 @@ extension EditorModel {
     }
     func exportFileURL(_ version: String) async -> URL? {
         guard let photo else { return nil }
-        do { return try await services.exportFileURL(photo, export: version) }
-        catch { handleExportError(UserFacingError.service(error)); return nil }
+        do {
+            let url = try await services.exportFileURL(photo, export: version)
+            guard self.photo == photo, !Task.isCancelled else { return nil }
+            return url
+        } catch {
+            guard self.photo == photo, !Task.isCancelled else { return nil }
+            handleExportError(UserFacingError.service(error)); return nil
+        }
     }
     func handleExportError(_ error: UserFacingError) {
         if error.code == "session_expired" {

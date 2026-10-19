@@ -455,3 +455,35 @@ extension ExportModelTests {
         await eventually(timeout: .seconds(3)) { !m.export.isInFlight }
     }
 }
+
+@MainActor extension ExportModelTests {
+    func testFixedFolderDestinationIsCapturedAtStart() async {
+        let (m,s)=await ready()
+        await m.setExportFolder(URL(fileURLWithPath:"/tmp/alpha"))
+        var p=m.preferences.value;p.saveMode = .folder;m.updatePreferences(p)
+        m.startExport(destination:nil)
+        await eventually(timeout:.seconds(10)) { s.hasExportSubscriber }
+        XCTAssertEqual(m.export.destination,.folder(label:"alpha"))
+        await m.setExportFolder(URL(fileURLWithPath:"/tmp/beta"))
+        s.sendExport(.finished(result:result(),failure:nil))
+        await eventually(timeout:.seconds(10)) { !m.export.isInFlight }
+        XCTAssertEqual(m.export.result?.saved?.folderLabel,"alpha","Changing preferences must not redirect an export already running toward alpha")
+    }
+    func testFolderChangeBeforeExportTaskStartsOnlyAffectsTheNextExport() async {
+        let (m,s) = await ready()
+        await m.setExportFolder(URL(fileURLWithPath: "/tmp/alpha"))
+        var preferences = m.preferences.value; preferences.saveMode = .folder; m.updatePreferences(preferences)
+        m.startExport(destination: nil)
+        let next = try? await s.setExportFolder(URL(fileURLWithPath: "/tmp/beta"))
+        if let next { m.preferences.exportFolder = next }
+        await eventually(timeout: .seconds(3)) { s.hasExportSubscriber }
+        s.sendExport(.finished(result: result(), failure: nil))
+        await eventually(timeout: .seconds(3)) { !m.export.isInFlight }
+        XCTAssertEqual(m.export.result?.saved?.folderLabel, "alpha")
+        m.startExport(destination: nil)
+        await eventually(timeout: .seconds(3)) { s.exportCalls.count == 2 && s.hasExportSubscriber }
+        s.sendExport(.finished(result: result("next"), failure: nil))
+        await eventually(timeout: .seconds(3)) { !m.export.isInFlight }
+        XCTAssertEqual(m.export.result?.saved?.folderLabel, "beta")
+    }
+}

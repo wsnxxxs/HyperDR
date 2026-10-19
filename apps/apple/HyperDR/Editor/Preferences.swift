@@ -44,7 +44,20 @@ nonisolated struct Preferences: Equatable {
             "output": output.filter { Self.valid(key: $0.key, value: $0.value) }], forKey: Self.key)
     }
 }
-nonisolated struct ExportFolder: Equatable, Sendable { var label = ""; var ready = false }
+nonisolated struct ExportFolder: Equatable, Sendable {
+    var label = ""
+    var ready = false
+    var target: ExportFolderTarget? = nil
+}
+/// App-owned opaque authority. Views use only ExportFolder's label and ready.
+@MainActor final class ExportFolderTarget: Equatable {
+    private let action: (EditorPhoto, String) async throws -> SavedLocation
+    init(save: @escaping (EditorPhoto, String) async throws -> SavedLocation) { action = save }
+    func save(_ photo: EditorPhoto, export: String) async throws -> SavedLocation {
+        try await action(photo, export)
+    }
+    nonisolated static func == (lhs: ExportFolderTarget, rhs: ExportFolderTarget) -> Bool { lhs === rhs }
+}
 @MainActor @Observable final class PreferencesState {
     var value: Preferences
     var exportFolder = ExportFolder()

@@ -40,7 +40,7 @@ extension EditorModel {
         else if export.isInFlight { blocker = "export.blocker.inProgress" }
         else if case .failed = engine { blocker = "err.server.engine_unavailable" }
         else if case .starting = engine { blocker = "err.server.engine_unavailable" }
-        else if preferences.value.saveMode == .folder && !preferences.exportFolder.ready { blocker = preferences.exportFolder.label.isEmpty ? "err.server.export_folder_unset" : "err.server.export_folder_unwritable" }
+        else if preferences.value.saveMode == .folder && (!preferences.exportFolder.ready || preferences.exportFolder.target == nil) { blocker = preferences.exportFolder.label.isEmpty ? "err.server.export_folder_unset" : "err.server.export_folder_unwritable" }
         else { blocker = nil }
         if export.blockerKey != blocker { export.blockerKey = blocker }
         let lutBlock: String?
@@ -81,7 +81,7 @@ extension EditorModel {
         finishGestureBeforeEdit()
         export.reset(); export.phase = .preparing; export.startedAt = now(); export.stageAt = export.startedAt
         let options = effectiveOptions(), snapshot = edit
-        let fixedFolder = destination == nil
+        let fixedFolder = destination == nil ? preferences.exportFolder.target : nil
         export.destination = destination.map(ExportDestination.file) ?? .folder(label: preferences.exportFolder.label)
         let framed = supportsFrameExport && frame.isEnabled
         syncControls()
@@ -108,9 +108,9 @@ extension EditorModel {
                     case .saving: export.phase = .saving
                     case .finished(var result, let failure):
                         terminal = true
-                        if let resultValue = result, failure == nil, fixedFolder {
+                        if let resultValue = result, failure == nil, let fixedFolder {
                             export.phase = .saving
-                            do { result?.saved = try await services.saveExport(photo, export: resultValue.export, destination: nil) }
+                            do { result?.saved = try await fixedFolder.save(photo, export: resultValue.export) }
                             catch { if self.photo == photo, !export.isStopping { finishExport(result: result, failure: UserFacingError.service(error), snapshot: snapshot, framed: framed) }; return }
                         }
                         guard self.photo == photo, !export.isStopping else { return }

@@ -30,7 +30,6 @@ extension EditorServices {
     }
     func aboutInformation() async -> AboutInformation { AboutInformation() }
     func diagnostics() async -> String { "" }
-    func exportFileURL(_ photo: EditorPhoto, export: String) async throws -> URL { throw UserFacingError(code: "session_expired") }
     func lutEntries() async -> [LUTItem] { [] }
     func importLUT(_ url: URL) async throws -> LUTItem { throw UserFacingError(code: "lut_invalid") }
     func applyLUT(_ id: String, to photo: EditorPhoto) async throws -> LUTItem { throw UserFacingError(code: "lut_invalid") }

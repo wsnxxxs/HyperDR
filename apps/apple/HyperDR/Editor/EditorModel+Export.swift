@@ -263,17 +263,6 @@ extension EditorModel {
             }
         }
     }
-    func exportFileURL(_ version: String) async -> URL? {
-        guard let photo else { return nil }
-        do {
-            let url = try await services.exportFileURL(photo, export: version)
-            guard self.photo == photo, !Task.isCancelled else { return nil }
-            return url
-        } catch {
-            guard self.photo == photo, !Task.isCancelled else { return nil }
-            handleExportError(UserFacingError.service(error)); return nil
-        }
-    }
     func handleExportError(_ error: UserFacingError) {
         if error.code == "session_expired" {
             exportTask?.cancel(); exportTask = nil

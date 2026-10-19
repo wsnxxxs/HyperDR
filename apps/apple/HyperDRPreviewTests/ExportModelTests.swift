@@ -386,16 +386,6 @@ extension ExportModelTests {
 }
 
 @MainActor extension ExportModelTests {
-    func testLateFinderExpirationMustNotCloseNewPhoto() async {
-        let (m,s)=await ready();let gate=ExportModelGate()
-        s.exportFileURLHandler={ await gate.wait();throw UserFacingError(code:"session_expired") }
-        let lookup=Task { await m.exportFileURL("old-version") }
-        await eventually(timeout:.seconds(10)) { gate.isWaiting }
-        m.open([second]);await eventually(timeout:.seconds(10)) { m.photo?.url == self.second && m.document?.phase == .ready }
-        gate.release();_ = await lookup.value
-        XCTAssertEqual(m.photo?.url,second,"A late Finder lookup for the previous session must not clear the current photo")
-        XCTAssertNil(m.alert,"A previous session's expiration must not become the new photo's alert")
-    }
     func testLateHistorySaveExpirationMustNotCloseNewPhoto() async throws {
         let (m,s)=await ready();let gate=ExportModelGate()
         let key=try await s.exportKey(m.photo!,options:m.effectiveOptions(),frame:nil)
@@ -407,30 +397,6 @@ extension ExportModelTests {
         m.open([second]);await eventually(timeout:.seconds(10)) { m.photo?.url == self.second && m.document?.phase == .ready }
         gate.release();await eventually(timeout:.seconds(10)) { m.saveTasks.isEmpty }
         XCTAssertEqual(m.photo?.url,second);XCTAssertNil(m.alert)
-    }
-
-    func testFinderSuccessAndFailureAreDiscardedAfterCancellationOrReopen() async {
-        for cancelled in [false, true] {
-            for fails in [false, true] {
-                let (m,s) = await ready(); let gate = ExportModelGate()
-                s.exportFileURLHandler = {
-                    await gate.wait()
-                    if fails { throw UserFacingError(code: "session_expired") }
-                    return self.target
-                }
-                let previous = m.photo
-                let query = Task { await m.exportFileURL("old-version") }
-                await eventually(timeout: .seconds(3)) { gate.isWaiting }
-                if cancelled { query.cancel() }
-                else {
-                    m.open([source])
-                    await eventually(timeout: .seconds(3)) { m.photo != previous && m.document?.phase == .ready }
-                }
-                gate.release()
-                let value = await query.value
-                XCTAssertNil(value); XCTAssertNotNil(m.photo); XCTAssertNil(m.alert)
-            }
-        }
     }
 }
 

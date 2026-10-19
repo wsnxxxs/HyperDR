@@ -276,7 +276,9 @@ void check_model_binding_rejects_stale_gain() {
 
   hyperdr::ExternalGainMap external;
   hyperdr::ExternalGainBinding binding;
-  binding.preprocessing_fingerprint = hyperdr::model_preprocessing_fingerprint(base_options());
+  auto preprocessing_options = base_options();
+  preprocessing_options.input = source;
+  binding.preprocessing_fingerprint = hyperdr::model_preprocessing_fingerprint(preprocessing_options);
   binding.source_sha256 = hyperdr::sha256_file_hex(source);
   binding.highlight_recovery = "blend";
   binding.orientation = 1;

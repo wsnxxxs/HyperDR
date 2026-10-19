@@ -92,11 +92,13 @@ std::string model_input_report(const std::filesystem::path& input,
                                const ConvertOptions& options,
                                const FloatImage& tensor) {
   const auto& d = decoded.decode;
+  auto preprocessing_options = options;
+  preprocessing_options.input = input;
   json::Writer writer(json::Writer::Style::kIndented);
   writer.begin_object()
       .member("schema", "hyperdr.model-input/v2")
       .member("pipeline_revision", kRenderPipelineRevision)
-      .member("preprocessing_fingerprint", model_preprocessing_fingerprint(options))
+      .member("preprocessing_fingerprint", model_preprocessing_fingerprint(preprocessing_options))
       .member("source", path_utf8(input))
       .member("source_sha256", sha256_file_hex(input))
       .member("highlight_recovery", highlight_recovery_name(raw.highlight_recovery))

@@ -297,6 +297,7 @@ def main() -> None:
         gain_size = [int(gain_stops.shape[1]), int(gain_stops.shape[0])]
         report["model_binding"] = {
             "contract": "hyperdr.model-gain-binding/v2",
+            # Forward the engine identity verbatim, including the Apple RAW OS build.
             "preprocessing_fingerprint": model_input_descriptor["preprocessing_fingerprint"],
             "source": {
                 "sha256": model_input_descriptor["source_sha256"],

@@ -131,7 +131,9 @@ GainMapOptions replay_external_development(
   if (sha256_file_hex(input) != binding.source_sha256) {
     reject("source sha256");
   }
-  if (binding.preprocessing_fingerprint != model_preprocessing_fingerprint(options)) {
+  auto preprocessing_options = options;
+  preprocessing_options.input = input;
+  if (binding.preprocessing_fingerprint != model_preprocessing_fingerprint(preprocessing_options)) {
     reject("preprocessing changed; regenerate the model input and gain");
   }
   if (!decoded.raw && binding.highlight_recovery !=

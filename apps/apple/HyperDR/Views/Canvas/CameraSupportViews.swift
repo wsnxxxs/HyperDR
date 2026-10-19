@@ -85,10 +85,14 @@ struct CameraSupportCard: View {
 }
 
 /// What VoiceOver says when the prompt appears and when it is cancelled.
-enum CameraSupportAnnouncement {
+@MainActor enum CameraSupportAnnouncement {
+    /// Where the finished sentence goes. Tests put a recorder here, so a run
+    /// on a machine with VoiceOver on never speaks.
+    static var deliver: (String) -> Void = { AccessibilityNotification.Announcement($0).post() }
+
     static func post(_ key: String, locale: Locale, _ arguments: CVarArg...) {
         let text = arguments.isEmpty ? AppStrings.string(key, locale: locale)
             : String(format: AppStrings.string(key, locale: locale), locale: locale, arguments: arguments)
-        AccessibilityNotification.Announcement(text).post()
+        deliver(text)
     }
 }

@@ -106,7 +106,10 @@ private struct DelayedSpinner: View {
     @State private var gate = SpinnerGate()
 
     var body: some View {
-        Group {
+        // The task hangs on a view that is always there: with nothing in the
+        // body before the spinner shows, a task on it would never start.
+        ZStack {
+            Color.clear
             if gate.isShown { ProgressView().controlSize(.small) }
         }
         .task { await gate.wait(delay) }

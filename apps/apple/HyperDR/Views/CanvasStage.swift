@@ -64,18 +64,17 @@ struct CanvasStage: View {
                 releaseHolds()
                 return .handled
             }
-            .onChange(of: model.viewerHintKey, initial: true) { _, key in
-                hint.update(key: key, session: session, covered: legendIsShowing)
+            // One observation for both what the hint says and which photo it
+            // is for, so the first photo's hint is announced once.
+            .onChange(of: HintTrigger(serial: model.photoSerial, key: model.viewerHintKey), initial: true) { _, trigger in
+                hint.observe(serial: trigger.serial, key: trigger.key, session: session, covered: legendIsShowing)
             }
             // The legend takes the hint's place, and the hint does not come
             // back when the legend goes.
             .onChange(of: legendIsShowing) { if legendIsShowing { hint.dismiss() } }
-            // A new photo announces itself again, even one with the same
-            // name that arrives while the old frame is still on the canvas.
+            // Closing the document, or a photo with another name, starts the
+            // next hint afresh.
             .onChange(of: model.document?.name) { hint.reset() }
-            .onChange(of: model.photoSerial) {
-                hint.photoChanged(key: model.viewerHintKey, session: session, covered: legendIsShowing)
-            }
             .onDisappear { releaseHolds() }
             .task(id: hint.shown) {
                 guard hint.shown != nil else { return }
@@ -149,6 +148,12 @@ struct CanvasStage: View {
         }
         return .handled
     }
+}
+
+/// What decides the hint: the photo on the canvas and what can be done now.
+private struct HintTrigger: Equatable {
+    var serial: Int
+    var key: String?
 }
 
 // MARK: - Frame

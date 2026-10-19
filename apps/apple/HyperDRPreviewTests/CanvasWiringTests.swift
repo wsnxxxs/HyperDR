@@ -431,3 +431,55 @@ import HyperDRDesign
         XCTAssertEqual(hint.shown, model.viewerHintKey)
     }
 }
+
+// MARK: One hint per photo (M2-V review P3-V3)
+
+extension CanvasWiringTests {
+    func testTheFirstPhotoClaimsItsHintOnceWhenTheSerialAndKeyChangeTogether() {
+        let session = ViewerSessionState()
+        let hint = CanvasHintState()
+        hint.observe(serial: 0, key: nil, session: session)
+        hint.observe(serial: 1, key: "canvas.hint.peek", session: session)
+        XCTAssertEqual(hint.shown, "canvas.hint.peek")
+        XCTAssertEqual(session.hintCount("canvas.hint.peek"), 1)
+        hint.observe(serial: 1, key: "canvas.hint.peek", session: session)
+        XCTAssertEqual(session.hintCount("canvas.hint.peek"), 1, "the same observation again claims nothing")
+    }
+
+    func testANewKeyOnTheSamePhotoAndANewPhotoWithTheSameKeyEachClaimOnce() {
+        let session = ViewerSessionState()
+        let hint = CanvasHintState()
+        hint.observe(serial: 1, key: "canvas.hint.peek", session: session)
+        hint.observe(serial: 1, key: "canvas.hint.pan", session: session)
+        XCTAssertEqual(hint.shown, "canvas.hint.pan")
+        hint.observe(serial: 2, key: "canvas.hint.pan", session: session)
+        XCTAssertEqual(hint.shown, "canvas.hint.pan", "a new photo announces the hint again")
+        XCTAssertEqual(session.hintCount("canvas.hint.pan"), 2)
+        XCTAssertEqual(session.hintCount("canvas.hint.peek"), 1)
+    }
+
+    /// The real view, in a window that is never shown: opening one photo
+    /// consumes one showing of its hint, not one per observation.
+    func testFirstPhotoConsumesOneHintAppearanceInTheRealStage() async {
+        let service = FakeEditorServices(openDelay: .milliseconds(20), previewDelay: .milliseconds(20))
+        let model = EditorModel(services: service)
+        let session = ViewerSessionState()
+        let root = CanvasStage(model: model, window: EditorWindowState())
+            .environment(session).frame(width: 600, height: 400)
+        let host = NSHostingView(rootView: root)
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 600, height: 400),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        // Never ordered front or activated.
+        try? await Task.sleep(for: .milliseconds(100))
+        model.open([URL(fileURLWithPath: "/fixtures/hint-integration.jpg")])
+        await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
+        try? await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(session.hintCount("canvas.hint.peek"), 1,
+                       "one edited frame consumes one appearance, not one per onChange callback")
+        model.closeDocument()
+        withExtendedLifetime(window) {}
+    }
+}
+

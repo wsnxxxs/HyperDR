@@ -82,7 +82,7 @@ private let variants: [(String, ColorScheme, ColorSchemeContrast, String)] = [
     #expect(Set(statuses).count == statuses.count, "running, flashing, stopping, saved, not saved and failed cards differ")
 
     func result(_ stale: Bool, _ save: ExportSaveRow) throws -> Data {
-        try png(snapshot(ExportResultCard(thumbnail: nil, fileName: "a.jpg", facts: [], isStale: stale, saveRow: save), width: 400))
+        try png(snapshot(ExportResultCard(thumbnail: .unavailable, fileName: "a.jpg", facts: [], isStale: stale, saveRow: save), width: 400))
     }
     let results = try [result(false, .saved(Text(verbatim: "Saved"), showInFinder: {})), result(true, .saved(Text(verbatim: "Saved"), showInFinder: {})),
                        result(false, .saving), result(false, .failed(Text(verbatim: "No"), saveAs: {}))]

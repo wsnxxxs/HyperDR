@@ -388,7 +388,7 @@ private struct ExportResultView: View {
             ExportTitleBar(model: model)
             VStack(alignment: .leading, spacing: Space.s4) {
                 if let result = model.export.result {
-                    ExportResultCard(thumbnail: nil, fileName: result.fileName, facts: facts(result),
+                    ExportResultCard(thumbnail: .unavailable, fileName: result.fileName, facts: facts(result),
                                      warnings: result.warnings.map { Text(verbatim: $0) }, isStale: stale,
                                      saveRow: saveRow(result))
                 }

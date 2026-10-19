@@ -55,14 +55,14 @@ public enum ExportSaveRow {
 /// warnings from the engine's report, and whether it reached the chosen
 /// place. `isStale` marks a result the user has adjusted past.
 public struct ExportResultCard: View {
-    private let thumbnail: Image?
+    private let thumbnail: ThumbnailContent
     private let fileName: String
     private let facts: [ExportFact]
     private let warnings: [Text]
     private let isStale: Bool
     private let saveRow: ExportSaveRow
 
-    public init(thumbnail: Image?, fileName: String, facts: [ExportFact], warnings: [Text] = [], isStale: Bool = false,
+    public init(thumbnail: ThumbnailContent, fileName: String, facts: [ExportFact], warnings: [Text] = [], isStale: Bool = false,
                 saveRow: ExportSaveRow) {
         self.thumbnail = thumbnail
         self.fileName = fileName
@@ -84,7 +84,7 @@ public struct ExportResultCard: View {
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
             HStack(alignment: .top, spacing: Space.s3) {
-                Thumbnail(image: thumbnail, width: 96, height: 64)
+                Thumbnail(thumbnail, width: 96, height: 64)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(verbatim: fileName).font(.system(size: TypeScale.Size.control, weight: .semibold))
                         .foregroundStyle(Color.hdr.inkStrong).lineLimit(1).truncationMode(.middle)
@@ -136,34 +136,5 @@ public struct ExportResultCard: View {
                 }
             }
         }
-    }
-}
-
-/// A photo's thumbnail, or a quiet placeholder while there is none.
-public struct Thumbnail: View {
-    let image: Image?
-    let width: CGFloat
-    let height: CGFloat
-
-    public init(image: Image?, width: CGFloat, height: CGFloat) {
-        self.image = image
-        self.width = width
-        self.height = height
-    }
-
-    public var body: some View {
-        ZStack {
-            Color.hdr.surfaceSunken
-            if let image {
-                image.resizable().scaledToFill()
-            } else {
-                Image(systemName: "photo").font(.system(size: min(width, height) / 3))
-                    .foregroundStyle(Color.hdr.inkDisabled)
-            }
-        }
-        .frame(width: width, height: height)
-        .clipShape(.rect(cornerRadius: Radius.sm))
-        .overlay { RoundedRectangle(cornerRadius: Radius.sm).strokeBorder(Color.hdr.line) }
-        .accessibilityHidden(true)
     }
 }

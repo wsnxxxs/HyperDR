@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-SCRIPT = Path(__file__).resolve().parents[2] / "HyperDR_Model/scripts/build_deployment_cache.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts/build_deployment_cache.py"
 spec = importlib.util.spec_from_file_location("deployment_cache_test_target", SCRIPT)
 cache = importlib.util.module_from_spec(spec)
 # These tests do not request paired targets, the only operation using OpenCV.

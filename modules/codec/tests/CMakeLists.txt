@@ -30,7 +30,10 @@ if(HYPERDR_WITH_CODECS)
     add_test(NAME hevc_vt_decode_memory_test COMMAND hevc_vt_decode_test memory)
     set_tests_properties(hevc_vt_decode_test hevc_vt_decode_memory_test PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)
   endif()
-  hyperdr_add_test(alpha_decode_test LINK HyperDR::codec heif avif)
+  hyperdr_add_test(alpha_decode_test LINK HyperDR::codec avif)
+  if(TARGET alpha_decode_test)
+    target_include_directories(alpha_decode_test PRIVATE ${PROJECT_SOURCE_DIR}/modules/codec/src ${PROJECT_SOURCE_DIR}/modules/container/src)
+  endif()
   if(TARGET heif_parallel_test)
     set_tests_properties(heif_parallel_test PROPERTIES SKIP_RETURN_CODE 77
       ENVIRONMENT "DYLD_INSERT_LIBRARIES=$<TARGET_FILE:capi_test_clock>")
@@ -116,4 +119,29 @@ if(HYPERDR_WITH_CODECS AND HYPERDR_BUILD_TESTS)
     $<TARGET_FILE:color_lut_test> $<TARGET_FILE:discovery_test>
     --failure $<TARGET_FILE:tiff_codec_failure_test>)
   set_tests_properties(native_temp_isolation_test PROPERTIES TIMEOUT 180)
+endif()
+
+if(HYPERDR_WITH_CODECS AND HYPERDR_BUILD_TESTS)
+  # Deliberately replaces only the YUV conversion object in this executable.
+  # The codec library always contains its normal bilinear implementation.
+  add_executable(heif_input_probe EXCLUDE_FROM_ALL
+    heif_input_probe.cpp ../src/hevc/yuv_to_rgb.cpp)
+  target_compile_definitions(heif_input_probe PRIVATE HYPERDR_HEIF_CHROMA_DIAGNOSTIC=1)
+  target_include_directories(heif_input_probe PRIVATE ${PROJECT_SOURCE_DIR}/modules/codec/src)
+  target_link_libraries(heif_input_probe PRIVATE HyperDR::codec)
+  hyperdr_configure_target(heif_input_probe)
+endif()
+
+if(HYPERDR_WITH_CODECS AND HYPERDR_BUILD_TESTS)
+  # Reads headerless oriented linear-P3 float dumps; no decoder dependency.
+  add_executable(heif_input_metrics EXCLUDE_FROM_ALL heif_input_metrics.cpp)
+  target_link_libraries(heif_input_metrics PRIVATE HyperDR::image HyperDR::foundation)
+  hyperdr_configure_target(heif_input_metrics)
+endif()
+
+if(HYPERDR_WITH_CODECS)
+  hyperdr_add_test(heif_input_test LINK HyperDR::codec lcms2::lcms2)
+  if(TARGET heif_input_test)
+    target_include_directories(heif_input_test PRIVATE ${PROJECT_SOURCE_DIR}/modules/codec/src)
+  endif()
 endif()

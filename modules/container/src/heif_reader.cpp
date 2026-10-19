@@ -559,6 +559,16 @@ HeifImagePlan resolve(const HeifFile& f, std::uint32_t id, unsigned depth,
       }
       require_heif(config && width && height, "HEIF grid tile lacks ispe or hvcC");
       if (out.tiles.empty()) {
+        // A derived image may omit its colour properties and inherit those of
+        // its first coded input (for example Sony HLG grids). Explicit grid
+        // properties take precedence over the coded input.
+        HeifImagePlan input;
+        (void)describe(f, tile, input);
+        if (!out.color) out.color = input.color;
+        if (out.icc.empty()) out.icc = input.icc;
+        if (!out.light) out.light = input.light;
+        if (out.mastering_display.empty()) out.mastering_display = input.mastering_display;
+        if (out.channel_bits.empty()) out.channel_bits = std::move(input.channel_bits);
         out.config = parse_hevc_configuration(config->payload);
         out.tile_width = out.config.width;
         out.tile_height = out.config.height;

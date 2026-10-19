@@ -216,11 +216,10 @@ struct YuvRgbParams {
 };
 [[nodiscard]] YuvRgbParams conversion_params(const HvcConfig &,
                                              const HeifNclx *nclx = nullptr);
-// A sink receives unshifted, rounded/clamped R'G'B' codes at the source bit
-// depth. Rows may run concurrently; each owns its temporary span only during
-// the callback. Gain-map users can instead consume luma_at without conversion.
-using RgbCodeRowSink =
-    std::function<void(unsigned row, std::span<const std::uint16_t>)>;
-void yuv_to_rgb(const DecodedPicture &, const YuvRgbParams &,
-                const RgbCodeRowSink &);
-} // namespace hyperdr::codec::hevc
+// Normalized encoded R'G'B', before transfer decoding. Preserve excursions
+// below zero and above one: these are gamut information, not invalid samples.
+// Rows may run concurrently; each span is valid only during the callback.
+// Monochrome gain maps consume luma_at directly, without this conversion.
+using RgbFloatRowSink = std::function<void(unsigned row, std::span<const float>)>;
+void yuv_to_rgb(const DecodedPicture &, const YuvRgbParams &, const RgbFloatRowSink &);
+}  // namespace hyperdr::codec::hevc

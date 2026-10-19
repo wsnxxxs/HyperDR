@@ -60,7 +60,7 @@ constexpr std::array<char, 8> kMagic{'H', 'D', 'R', 'C', 'A', 'C', 'H', '3'};
 // 38 translates XMP JPEG gain maps through ImageIO.
 // 39 removes external RAW resources.
 // 40 removes legacy RAW white-balance/matrix fields and half-size identity.
-constexpr std::uint32_t kCacheSchema = 40;
+constexpr std::uint32_t kCacheSchema = 41;
 
 // x86-64 and arm64, the only targets this project builds for, are both little
 // endian; the cache is a local scratch format and is never transported.

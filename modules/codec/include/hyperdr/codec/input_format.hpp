@@ -59,8 +59,8 @@ inline constexpr auto kRasterInputExtensions = join_raster_extensions();
 // The raster families the dispatcher can tell apart from bytes alone.
 //
 // `Isobmff` deliberately stops at the container. HEIF and AVIF are the same box
-// structure and differ only in the codec inside, which libheif and libavif
-// answer far better than a brand-string table would; `decode_image` asks
+// structure and differ only in the codec inside, which our HEIF reader and libavif
+// resolve after the container dispatch; `decode_image` asks
 // `is_avif_bytes` once it has the file. RAW is absent for the opposite reason:
 // most RAW formats *are* TIFF, so a signature cannot separate a `.dng` from an
 // unrelated TIFF or distinguish one camera format from another. The extension

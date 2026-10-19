@@ -12,3 +12,12 @@ struct AuditedSequence {
 [[nodiscard]] std::vector<std::uint8_t> repack_sample(const std::vector<std::uint8_t>& sample,
     int length_size,const EncodedSequence& parameter_sets);
 }
+
+#ifdef HYPERDR_HEIF_CHROMA_DIAGNOSTIC
+namespace hyperdr::codec::hevc::testing {
+// Available only in the separately compiled diagnostic executable.
+void set_nearest_chroma(bool nearest);
+void set_rounded_chroma(bool rounded);
+void set_integer_rgb(bool integer);
+}
+#endif

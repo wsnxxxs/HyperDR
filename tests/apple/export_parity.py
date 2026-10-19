@@ -57,6 +57,7 @@ def main() -> None:
         cases += [(encoding, style) for style in ("gallery", "story") for encoding in ("iso-gainmap-jpeg", "sdr-tiff")]
         cases += [("iso-gainmap-jpeg", "raw"), ("sdr-tiff", "lut"), ("iso-gainmap-jpeg", "ai")]
         cases += [("adaptive", None), ("adaptive", "depth10"), ("pq", None), ("hlg", None)]
+        cases += [("sdr-tiff", "heic-input"), ("adaptive", "heic-input")]
         lut = root / "private-look.cube"
         lut.write_text('LUT_3D_SIZE 2\n' + '\n'.join(
             f'{r} {g} {b}' for b in (0, 1) for g in (0, 1) for r in (0, 1)) + '\n')
@@ -64,15 +65,17 @@ def main() -> None:
             adaptive10 = style == "depth10"
             depth = 10 if adaptive10 or encoding in ("pq", "hlg") else 8
             style = None if adaptive10 else style
-            case_source = (ROOT / "tests/fixtures/gain-map-jpeg/iso-mono.jpg" if adaptive10 else
+            heic_input = style == "heic-input"
+            case_source = (ROOT / "tests/macos_t2/probes/normal-512x384-repaired.heic" if heic_input else
+                           ROOT / "tests/fixtures/gain-map-jpeg/iso-mono.jpg" if adaptive10 else
                            ROOT / "build/fixtures/sony-ilce-7s.ARW" if style == "raw" else source)
             mode = style
-            style = None if style in ("raw", "lut", "ai") else style
+            style = None if style in ("raw", "lut", "ai", "heic-input") else style
             case = root / str(index)
             case.mkdir()
             options = case / "options.json"
             values = {"encoding": encoding, "brightness": .612345, "contrast": 1.123456}
-            if adaptive10:
+            if adaptive10 or heic_input:
                 # The editor normally supplies the actual source domain. This
                 # fixture is an authored ISO HDR JPEG, so select its HDR default.
                 values["sourceDomain"] = "dual-rendition"

@@ -6,7 +6,21 @@
 #include "hyperdr/container/heif_reader.hpp"
 #include "hyperdr/foundation/parallel.hpp"
 #include "hyperdr/foundation/raster_budget.hpp"
+#ifdef HYPERDR_HEIF_CHROMA_DIAGNOSTIC
+#include <atomic>
+#include "hevc/testing.hpp"
+#endif
 namespace hyperdr::codec::hevc {
+#ifdef HYPERDR_HEIF_CHROMA_DIAGNOSTIC
+namespace testing {
+namespace {
+std::atomic<bool> nearest_chroma{false}, rounded_chroma{false}, integer_rgb{false};
+}
+void set_nearest_chroma(bool nearest) { nearest_chroma.store(nearest); }
+void set_rounded_chroma(bool rounded) { rounded_chroma.store(rounded); }
+void set_integer_rgb(bool integer) { integer_rgb.store(integer); }
+}  // namespace testing
+#endif
 unsigned DecodedPicture::chroma_width() const noexcept {
   return chroma_format == 0 ? 0
                             : (width + (chroma_format < 3 ? 1 : 0)) / (chroma_format < 3 ? 2 : 1);
@@ -26,6 +40,12 @@ unsigned code_at(const std::vector<std::uint8_t>& bytes, std::size_t index,
 }
 double chroma_sample(const DecodedPicture& p, unsigned x, unsigned y, bool cr, unsigned location) {
   const unsigned sx = p.chroma_format < 3 ? 2 : 1, sy = p.chroma_format == 1 ? 2 : 1;
+#ifdef HYPERDR_HEIF_CHROMA_DIAGNOSTIC
+  // Compiled only into heif_input_probe, never the codec library or app.
+  // Changes only the interpolation for the old-path attribution audit.
+  if (testing::nearest_chroma.load())
+    return cr ? p.cr_at(x / sx, y / sy) : p.cb_at(x / sx, y / sy);
+#endif
   // H.265 E.2.1: 0/2/4 horizontal co-sited; 1/3/5 half a luma sample.
   const double ox = sx == 1 ? 0 : (location & 1 ? .5 : 0);
   const double oy = sy == 1 ? 0 : (location < 2 ? .5 : location < 4 ? 0 : 1);
@@ -39,7 +59,11 @@ double chroma_sample(const DecodedPicture& p, unsigned x, unsigned y, bool cr, u
   };
   const auto a = read(x0, y0) + (read(x1, y0) - read(x0, y0)) * (fx - x0);
   const auto b = read(x0, y1) + (read(x1, y1) - read(x0, y1)) * (fx - x0);
-  return a + (b - a) * (fy - y0);
+  const auto interpolated = a + (b - a) * (fy - y0);
+#ifdef HYPERDR_HEIF_CHROMA_DIAGNOSTIC
+  if (testing::rounded_chroma.load()) return std::floor(interpolated + .5);
+#endif
+  return interpolated;
 }
 }  // namespace
 unsigned DecodedPicture::luma_at(unsigned x, unsigned y) const noexcept {
@@ -61,7 +85,7 @@ YuvRgbParams conversion_params(const HvcConfig& config, const HeifNclx* nclx) {
   out.chroma_location = config.chroma_location_top.value_or(1);
   return out;
 }
-void yuv_to_rgb(const DecodedPicture& p, const YuvRgbParams& params, const RgbCodeRowSink& sink) {
+void yuv_to_rgb(const DecodedPicture& p, const YuvRgbParams& params, const RgbFloatRowSink& sink) {
   CancelScope cancellation(params.cancel ? params.cancel : current_cancel_token);
   check_cancelled();
   if (!sink || !raster_input_budget_ok(p.width, p.height) ||
@@ -95,12 +119,16 @@ void yuv_to_rgb(const DecodedPicture& p, const YuvRgbParams& params, const RgbCo
   const double yrange = params.full_range ? maximum : 219 * scale;
   const double crange = params.full_range ? maximum : 224 * scale;
   const double center = 1U << (p.bit_depth - 1);
-  const auto rounded = [&](double value) {
-    return static_cast<std::uint16_t>(std::floor(std::clamp(value, 0.0, 1.0) * maximum + .5));
+  const auto encoded = [&](double value) {
+#ifdef HYPERDR_HEIF_CHROMA_DIAGNOSTIC
+    if (testing::integer_rgb.load())
+      value = std::floor(std::clamp(value, 0.0, 1.0) * maximum + .5) / maximum;
+#endif
+    return static_cast<float>(value);
   };
   const auto row = [&](unsigned y) {
     check_cancelled();
-    std::vector<std::uint16_t> rgb(std::size_t(p.width) * 3);
+    std::vector<float> rgb(std::size_t(p.width) * 3);
     for (unsigned x = 0; x < p.width; ++x) {
       const double yy = (double(p.luma_at(x, y)) - offset) / yrange;
       double r = yy, g = yy, b = yy;
@@ -117,9 +145,9 @@ void yuv_to_rgb(const DecodedPicture& p, const YuvRgbParams& params, const RgbCo
           g = (yy - kr * r - kb * b) / (1 - kr - kb);
         }
       }
-      rgb[x * 3] = rounded(r);
-      rgb[x * 3 + 1] = rounded(g);
-      rgb[x * 3 + 2] = rounded(b);
+      rgb[x * 3] = encoded(r);
+      rgb[x * 3 + 1] = encoded(g);
+      rgb[x * 3 + 2] = encoded(b);
     }
     sink(y, rgb);
   };

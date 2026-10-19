@@ -72,6 +72,29 @@ void run(bool generate) {
                   plan.color->matrix == 9 && plan.color->full_range && plan.light &&
                   plan.light->maximum == 1000 && plan.light->average == 400,
               "grid colour/content-light roundtrip differs");
+      // Sony HLG stores colr on the coded input rather than the grid.
+      // Exercise inheritance without changing the writer's own contract.
+      if (file.item(file.primary_item_id).type == "grid") {
+        auto inherited = file;
+        auto& parent = inherited.items.at(inherited.primary_item_id);
+        auto& first = inherited.items.at(plan.tiles.front().id);
+        std::erase_if(first.properties, [&](const HeifAssociation& a) {
+          const auto& type = inherited.properties.at(a.index - 1).type;
+          return type == "colr" || type == "clli";
+        });
+        std::erase_if(parent.properties, [&](const HeifAssociation& a) {
+          const auto& type = inherited.properties.at(a.index - 1).type;
+          if (type != "colr" && type != "clli") return false;
+          first.properties.push_back(a);
+          return true;
+        });
+        const auto fallback = inherited.resolve_image();
+        require(fallback.color && fallback.color->primaries == 9 &&
+                    fallback.color->transfer == 18 && fallback.color->matrix == 9 &&
+                    fallback.color->full_range && fallback.light &&
+                    fallback.light->maximum == 1000 && fallback.light->average == 400,
+                "grid lost coded-input colour/content-light properties");
+      }
     }
   for (const auto& name : {"fixtures/gamma-1-control", "fixtures/gamma-2-probe",
                            "fixtures-prerepair/gamma-1-control", "fixtures-prerepair/gamma-2-probe",

@@ -99,7 +99,7 @@ std::vector<std::uint8_t> encode_hdr_heic(const PhotoRenditions&,
 }
 
 std::vector<std::uint8_t> encode_avif(const PhotoRenditions&, const PhotoMetadata&,
-                                      int, HdrEncoding) {
+                                      int, HdrEncoding, const AvifGridLayout*) {
   fail_without_codecs("AVIF encoding");
 }
 

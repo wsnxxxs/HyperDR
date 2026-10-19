@@ -7,6 +7,7 @@
 // project most needs to catch before the user does, and the only reliable check
 // is to decode what was just written.
 
+#include "hyperdr/codec/avif_grid.hpp"
 #include "hyperdr/codec/encoding.hpp"
 #include "hyperdr/container/exif.hpp"
 #include "hyperdr/gainmap/types.hpp"
@@ -52,8 +53,11 @@ void verify_sdr_tiff(const std::vector<std::uint8_t>& bytes);
 [[nodiscard]] std::vector<std::uint8_t> encode_hdr_heic(
     const PhotoRenditions& images, const PhotoMetadata& metadata, int quality, HdrEncoding encoding,
     HevcPreset preset = HevcPreset::Slow);
+// Canvases libaom cannot hold as one frame are written as a grid of cells (see
+// avif_grid.hpp); `layout` overrides that choice, for tests.
 [[nodiscard]] std::vector<std::uint8_t> encode_avif(
-    const PhotoRenditions& images, const PhotoMetadata& metadata, int quality, HdrEncoding encoding);
+    const PhotoRenditions& images, const PhotoMetadata& metadata, int quality, HdrEncoding encoding,
+    const AvifGridLayout* layout = nullptr);
 
 // Decode-verification. Each throws with a specific reason on failure.
 void verify_heic_decodable(const std::vector<std::uint8_t>& bytes);

@@ -27,6 +27,13 @@ public enum ExportProgressStyle: Sendable, Equatable {
     static func clamp(_ value: Double) -> Double { value.isNaN ? 0 : min(max(value, 0), 1) }
 }
 
+extension EnvironmentValues {
+    /// The instant the moving parts of the export's progress views (the band, the
+    /// stripes, the ring) are drawn at. Left nil they follow the wall clock; a
+    /// picture of one sets it so the picture is the same every time.
+    @Entry public var exportProgressClock: Date? = nil
+}
+
 /// The export's progress bar: 4 pt in the inspector's status card, 8 pt in
 /// the export panel. A fixed fill for a known fraction; for the others a
 /// band that moves (a slow fade instead under Reduce Motion).
@@ -77,9 +84,11 @@ private struct Indeterminate: View {
     let width: CGFloat
     let reduceMotion: Bool
 
+    @Environment(\.exportProgressClock) private var clock
+
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
-            let t = context.date.timeIntervalSinceReferenceDate
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: clock != nil)) { context in
+            let t = (clock ?? context.date).timeIntervalSinceReferenceDate
             if reduceMotion {
                 Capsule().fill(Color.hdr.accent)
                     .opacity(0.4 + 0.15 * sin(t * 2 * .pi / 1.4))
@@ -101,9 +110,11 @@ private struct Indeterminate: View {
 private struct Stripes: View {
     let animated: Bool
 
+    @Environment(\.exportProgressClock) private var clock
+
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !animated)) { context in
-            let drift = animated ? context.date.timeIntervalSinceReferenceDate * 10 : 0
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !animated || clock != nil)) { context in
+            let drift = animated ? (clock ?? context.date).timeIntervalSinceReferenceDate * 10 : 0
             Canvas { graphics, size in
                 let pitch: CGFloat = 12
                 let start = CGFloat(drift.truncatingRemainder(dividingBy: Double(pitch))) - pitch * 2
@@ -132,6 +143,7 @@ public struct ProgressRing: View {
     private let tint: Color
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.exportProgressClock) private var clock
 
     public init(fraction: Double?, size: CGFloat = 14, tint: Color = Color.hdr.accentInk) {
         self.fraction = fraction
@@ -147,8 +159,8 @@ public struct ProgressRing: View {
             } else if reduceMotion {
                 arc(from: 0, to: 0.25)
             } else {
-                TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
-                    let turn = (context.date.timeIntervalSinceReferenceDate / 0.9).truncatingRemainder(dividingBy: 1)
+                TimelineView(.animation(minimumInterval: 1.0 / 30, paused: clock != nil)) { context in
+                    let turn = ((clock ?? context.date).timeIntervalSinceReferenceDate / 0.9).truncatingRemainder(dividingBy: 1)
                     arc(from: 0, to: 0.28).rotationEffect(.degrees(turn * 360))
                 }
             }

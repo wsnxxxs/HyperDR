@@ -91,8 +91,8 @@ void tiles(const HeifFile& file, const HeifImagePlan& plan, const hevc::DecodedT
   if (progress) progress->done += plan.tiles.size();
 }
 // Full-size writes are disjoint even after rotation. A reduced output
-// accumulates weighted sums, so its callers must run serially in a fixed
-// tile/row/pixel order; `reduced` tells them when.
+// accumulates weighted sums, so `put` must then be called serially in a fixed
+// tile/row/pixel order (callers stage converted rows; `reduced` tells them).
 class Output {
  public:
   Geometry geometry;
@@ -151,13 +151,24 @@ FloatImage code_plane(const HeifFile& file, const HeifImagePlan& plan, unsigned 
           }
         } else {
           auto params = hevc::conversion_params(plan.config, plan.color ? &*plan.color : nullptr);
-          params.parallel_rows = !out.reduced;
+          // Rows convert in parallel either way. A reduced output accumulates
+          // weighted sums, so those rows are staged and added in order after.
+          std::vector<float> staged(out.reduced ? std::size_t(p.height) * p.width * 3 : 0);
           hevc::yuv_to_rgb(p, params, [&](unsigned y, std::span<const float> row) {
+            if (out.reduced) {
+              std::copy_n(row.data(), std::size_t(p.width) * 3,
+                          staged.data() + std::size_t(y) * p.width * 3);
+              return;
+            }
             for (unsigned x = 0; x < p.width && x0 + x < plan.width && y0 + y < plan.height; ++x) {
               float v[3]{row[x * 3], row[x * 3 + 1], row[x * 3 + 2]};
               out.put(x0 + x, y0 + y, v);
             }
           });
+          if (out.reduced)
+            for (unsigned y = 0; y < p.height; ++y)
+              for (unsigned x = 0; x < p.width && x0 + x < plan.width && y0 + y < plan.height; ++x)
+                out.put(x0 + x, y0 + y, staged.data() + (std::size_t(y) * p.width + x) * 3);
         }
       },
       progress);
@@ -268,7 +279,10 @@ DecodedImage primary(const HeifFile& file, const HeifImagePlan& plan, ColorGamut
         auto x0 = unsigned(index % plan.columns) * plan.tile_width,
              y0 = unsigned(index / plan.columns) * plan.tile_height;
         auto params = hevc::conversion_params(plan.config, plan.color ? &*plan.color : nullptr);
-        params.parallel_rows = !out.reduced;
+        // The conversion and the colour transform run on parallel rows; a
+        // reduced output stages the converted rows and accumulates them in a
+        // fixed order afterwards, so worker count cannot change a sum.
+        std::vector<float> staged(out.reduced ? std::size_t(p.height) * p.width * 3 : 0);
         hevc::yuv_to_rgb(p, params, [&](unsigned y, std::span<const float> row) {
           if (y0 + y >= plan.height) return;
           std::vector<float> unassociated;
@@ -295,9 +309,17 @@ DecodedImage primary(const HeifFile& file, const HeifImagePlan& plan, ColorGamut
               for (unsigned c = 0; c < 3; ++c) linear[x * 3 + c] *= a;
             }
           }
+          if (out.reduced) {
+            std::copy(linear.begin(), linear.end(), staged.begin() + std::size_t(y) * p.width * 3);
+            return;
+          }
           for (unsigned x = 0; x < p.width && x0 + x < plan.width; ++x)
             out.put(x0 + x, y0 + y, linear.data() + x * 3);
         });
+        if (out.reduced)
+          for (unsigned y = 0; y < p.height && y0 + y < plan.height; ++y)
+            for (unsigned x = 0; x < p.width && x0 + x < plan.width; ++x)
+              out.put(x0 + x, y0 + y, staged.data() + (std::size_t(y) * p.width + x) * 3);
       },
       progress);
   DecodedImage result;

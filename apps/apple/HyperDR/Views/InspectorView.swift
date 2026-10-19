@@ -45,6 +45,7 @@ struct InspectorContent: View {
                         FineTuneGroup(model: model)
                         RegionGroup(model: model)
                         LUTGroup(model: model, window: window)
+                        CameraGroup(model: model)
                     }
                 }
             } else {

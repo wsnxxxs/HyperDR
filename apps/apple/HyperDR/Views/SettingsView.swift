@@ -167,11 +167,14 @@ private struct AboutSettings: View {
     /// The read-only rows: the AI models, HEVC encoding, this display, what
     /// the app opens and the system.
     private var rows: [(key: String, value: String)] {
-        [("settings.diag.model", SettingsDiagnostics.models(model, locale: locale)),
-         ("settings.diag.hevc", SettingsDiagnostics.hevc(model, locale: locale)),
-         ("settings.diag.display", SettingsDiagnostics.display(model.display, locale: locale)),
-         ("settings.diag.opens", SettingsDiagnostics.opens(model)),
-         ("settings.diag.system", ProcessInfo.processInfo.operatingSystemVersionString)]
+        var rows = [("settings.diag.model", SettingsDiagnostics.models(model, locale: locale)),
+                    ("settings.diag.hevc", SettingsDiagnostics.hevc(model, locale: locale)),
+                    ("settings.diag.display", SettingsDiagnostics.display(model.display, locale: locale)),
+                    ("settings.diag.opens", SettingsDiagnostics.opens(model))]
+        // Only while a RAW is open: the decoder and system build that developed it.
+        if let raw = SettingsDiagnostics.raw(model, locale: locale) { rows.append(("settings.diag.raw", raw)) }
+        rows.append(("settings.diag.system", SettingsDiagnostics.system()))
+        return rows
     }
 }
 
@@ -197,6 +200,18 @@ enum SettingsDiagnostics {
         return name + AppStrings.format("settings.diag.hdr %@ %@", locale: locale,
                                         log2(display.currentHeadroom).formatted(number),
                                         log2(display.potentialHeadroom).formatted(number))
+    }
+
+    /// "Decoder 8 · macOS build 25A123" from the open RAW's own report; nothing without one.
+    static func raw(_ model: EditorModel, locale: Locale) -> String? {
+        guard let raw = model.document?.source?.raw else { return nil }
+        return AppStrings.format("settings.diag.rawValue %@ %@", locale: locale, raw.decoderVersion, raw.osBuild)
+    }
+
+    /// "macOS 27.0.1": the version only, without the build number.
+    static func system() -> String {
+        let version = ProcessInfo.processInfo.operatingSystemVersion
+        return "macOS \(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
     }
 
     static func opens(_ model: EditorModel) -> String {

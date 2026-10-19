@@ -8211,23 +8211,6 @@
         }
       }
     },
-    "camera.summary.off" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Lens correction off"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "镜头校正关"
-          }
-        }
-      }
-    },
     "camera.summary.unsupported" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9227,6 +9210,261 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "HDR · 余量 %1$@ / %2$@ 档"
+          }
+        }
+      }
+    },
+    "raw.preparing.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preparing camera support…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在准备相机支持…"
+          }
+        }
+      }
+    },
+    "raw.preparing.firstTime" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The first time you open a photo from this camera, macOS may need to download support for it. This usually takes a few seconds."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第一次打开这台相机拍的照片时，macOS 可能要先下载相机支持，通常几秒内完成。"
+          }
+        }
+      }
+    },
+    "raw.preparing.short" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS may need to download support for this camera. This usually takes a few seconds."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS 可能要先下载这台相机的支持，通常几秒内完成。"
+          }
+        }
+      }
+    },
+    "raw.preparing.cancel" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancel"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消"
+          }
+        }
+      }
+    },
+    "raw.preparing.announce" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preparing camera support"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在准备相机支持"
+          }
+        }
+      }
+    },
+    "raw.preparing.cancelled" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Opening cancelled"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已取消打开"
+          }
+        }
+      }
+    },
+    "mac.err.raw_unsupported.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This camera’s RAW isn’t supported"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不支持这台相机的 RAW"
+          }
+        }
+      }
+    },
+    "mac.err.raw_unsupported.dng.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can’t open this DNG"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法打开这个 DNG"
+          }
+        }
+      }
+    },
+    "camera.engine" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Engine"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RAW 显影"
+          }
+        }
+      }
+    },
+    "camera.engine.value %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS · decoder %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS 系统 · 解码器 %@"
+          }
+        }
+      }
+    },
+    "camera.engine.valueDNG %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS · decoder %@ · DNG"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS 系统 · 解码器 %@ · DNG"
+          }
+        }
+      }
+    },
+    "camera.engine.help" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uses the decoder version macOS picks for this camera. A macOS update can change it, and the image may change slightly."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用 macOS 为这台相机选择的解码器版本。系统更新后版本可能变化，画面会略有不同。"
+          }
+        }
+      }
+    },
+    "camera.lensCorrection.on" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开"
+          }
+        }
+      }
+    },
+    "settings.diag.raw" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RAW development"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RAW 显影"
+          }
+        }
+      }
+    },
+    "settings.diag.rawValue %@ %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Decoder %@ · macOS build %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解码器 %@ · macOS 构建 %@"
           }
         }
       }

@@ -10352,6 +10352,23 @@
           }
         }
       }
+    },
+    "source.missing.checking" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checking…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在核对…"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

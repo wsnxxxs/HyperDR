@@ -28,6 +28,9 @@ struct MainWindow: View {
     /// Asks for the photo's file again (the open panel, answered by
     /// `locateSource` instead of an open).
     func locateSource() { isLocating = true; isImporting = true }
+    /// The panel closed, with a choice or without one (a cancelled panel never
+    /// calls the completion handler): the next one is an ordinary open again.
+    func importPanelEnded() { isLocating = false }
     /// Whether the frame sheet is showing; the toolbar and File ▸ Frame… set it.
     var isFraming = false
     /// The export panel, export history and LUT library sheets; the
@@ -90,6 +93,31 @@ struct MainWindow: View {
     }
 }
 
+/// The open panel: File ▸ Open…, and the banner's "Locate Photo…" (which
+/// answers with `locateSource` instead of an open).
+private struct PhotoImporter: ViewModifier {
+    let model: EditorModel
+    let window: EditorWindowState
+
+    func body(content: Content) -> some View {
+        content.fileImporter(isPresented: Bindable(window).isImporting,
+                             allowedContentTypes: model.openableContentTypes,
+                             allowsMultipleSelection: false) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { break }
+                if window.isLocating { model.locateSource(url) } else { model.open([url]) }
+            case .failure(let error):
+                // The model ignores a cancelled panel.
+                if !window.isLocating { model.report(openFailure: error) }
+            }
+            window.importPanelEnded()
+        } onCancellation: {
+            window.importPanelEnded()
+        }
+    }
+}
+
 private struct EditorWindow: View {
     let model: EditorModel
 
@@ -120,17 +148,7 @@ private struct EditorWindow: View {
             .frame(minWidth: 760, minHeight: 520)
             .background(Color.hdr.surfacePage)
             .foregroundStyle(Color.hdr.ink)
-            .fileImporter(isPresented: Bindable(window).isImporting,
-                          allowedContentTypes: model.openableContentTypes) { result in
-                switch result {
-                case .success(let url):
-                    if window.isLocating { model.locateSource(url) } else { model.open([url]) }
-                case .failure(let error):
-                    // The model ignores a cancelled panel.
-                    if !window.isLocating { model.report(openFailure: error) }
-                }
-                window.isLocating = false
-            }
+            .modifier(PhotoImporter(model: model, window: window))
             .sheet(isPresented: Bindable(window).isFraming, onDismiss: {
                 window.frameSheetDismissed(hasPhoto: model.document != nil, isAskingToSwitch: model.pendingPhotoSwitch != nil)
             }) {

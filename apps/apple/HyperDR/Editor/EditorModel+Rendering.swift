@@ -83,6 +83,7 @@ extension EditorModel {
         detailTask?.cancel()
         detailTicket &+= 1
         guard !isEditingLocked, !renderOutstanding, gesture == nil, !lastSubmitWasDraft,
+              sourceUnavailable == nil || isRetryingSource,
               canvas.needsDetail, let visible = canvas.visibleSourceRect, let photo else { return }
         let ticket = detailTicket
         let region = DetailPolicy.region(visible: visible, source: canvas.transform.imageSize)

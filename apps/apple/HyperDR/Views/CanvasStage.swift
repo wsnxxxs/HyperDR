@@ -375,7 +375,7 @@ struct CanvasStatus: View {
             if let document = model.document {
                 if hasFrame {
                     if model.sourceUnavailable != nil {
-                        SourceMissingBanner { window.locateSource() }
+                        SourceMissingBanner(isChecking: model.isRelinking) { window.locateSource() }
                             .frame(maxHeight: .infinity, alignment: .top)
                             .padding(Space.s3)
                     } else if let error = document.previewError {

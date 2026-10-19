@@ -90,9 +90,16 @@ struct RestoreMissingNotice: View {
     let dismiss: () -> Void
     @Environment(\.locale) private var locale
 
-    var title: String {
+    var title: String { Self.title(name: name, locale: locale) }
+
+    static func title(name: String?, locale: Locale) -> String {
         guard let name, !name.isEmpty else { return AppStrings.string("restore.missing.unnamed", locale: locale) }
         return AppStrings.format("restore.missing.title %@", locale: locale, name)
+    }
+
+    /// The sentence VoiceOver reads once, when the model learns the photo is gone.
+    static func announcement(name: String?, locale: Locale) -> String {
+        "\(title(name: name, locale: locale)). \(AppStrings.string("restore.missing.body", locale: locale))"
     }
 
     var body: some View {
@@ -109,13 +116,14 @@ struct RestoreMissingNotice: View {
                 .accessibilityLabel(Text("restore.dismiss"))
         }
         .frame(maxWidth: 420, alignment: .leading)
-        .task { NoticeAnnouncement.post("\(title). \(AppStrings.string("restore.missing.body", locale: locale))", highPriority: true) }
     }
 }
 
 /// The photo's file cannot be found. Not a dismissable notice: it states
 /// something that stays true until the file is back, and goes by itself then.
 struct SourceMissingBanner: View {
+    /// A chosen file is being checked: the button waits for that to finish.
+    var isChecking = false
     let locate: () -> Void
     @State private var hovered = false
 
@@ -129,7 +137,7 @@ struct SourceMissingBanner: View {
             }
             .accessibilityElement(children: .combine)
             Button(action: locate) {
-                Text("source.missing.locate")
+                Text(isChecking ? "source.missing.checking" : "source.missing.locate")
                     .font(.system(size: TypeScale.Size.caption, weight: .semibold))
                     .foregroundStyle(Color.hdr.overlayInk)
                     .padding(.horizontal, Space.s2)
@@ -138,6 +146,7 @@ struct SourceMissingBanner: View {
                     .contentShape(.rect(cornerRadius: Radius.md))
             }
             .buttonStyle(.plain)
+            .disabled(isChecking)
             .onHover { hovered = $0 }
         }
         .frame(maxWidth: 520, alignment: .leading)

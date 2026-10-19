@@ -92,6 +92,12 @@ enum RestoreResult {
 
 /// One opened photo. `handle` makes every open distinct, so closing an
 /// earlier open of the same file never closes a later one.
+///
+/// Equality and hashing look at `handle` only. A photo reconnected to a moved
+/// file keeps its handle but gets a new `url` and `name`, and every task and
+/// cache keyed on "the open photo" must carry on across that. So never use the
+/// photo itself as an id to notice a rename (`onChange(of: photo)`, `.task(id:)`);
+/// compare `url` or `name` explicitly, or use `photoSerial`.
 struct EditorPhoto: Hashable {
     var url: URL
     var name: String

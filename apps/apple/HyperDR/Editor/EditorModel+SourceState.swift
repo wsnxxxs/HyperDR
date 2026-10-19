@@ -64,7 +64,9 @@ extension EditorModel {
     func locateSource(_ url: URL) {
         guard let photo, sourceUnavailable != nil, locateTask == nil else { return }
         let ticket = generation
+        isRelinking = true
         locateTask = Task { [weak self, services] in
+            defer { self?.isRelinking = false }
             do {
                 let relinked = try await services.relink(photo, to: url)
                 guard let self, !Task.isCancelled, generation == ticket, self.photo == photo else { return }

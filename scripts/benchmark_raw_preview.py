@@ -1,7 +1,7 @@
 """Measure cold/refinement/cache-hit RAW frames in the real native worker.
 
 Run before and after builds sequentially, with no concurrent build or export.
-Uses the panel's precomputed source digest and no on-disk preview cache.
+Uses a precomputed source digest and no on-disk preview cache.
 """
 from __future__ import annotations
 

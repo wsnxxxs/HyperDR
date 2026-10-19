@@ -4,7 +4,7 @@
 The app uses semantic keys (`editor.open`, `err.server.raw_budget`,
 `mac.display.edr %@ %@`) rather than English source text, so a key missing from
 `Localizable.xcstrings` is not a build error: SwiftUI just shows the key. This
-script is the guard, the native counterpart of check_panel_i18n.py:
+script is the guard:
 
 * every key the app's Swift uses exists in the catalogue;
 * every catalogue key is used (no dead entries), except the keys under

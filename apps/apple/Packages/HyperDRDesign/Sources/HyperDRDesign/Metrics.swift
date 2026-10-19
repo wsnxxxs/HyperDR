@@ -1,4 +1,4 @@
-// Sizes converted from apps/panel/web/css/tokens.css and dialogs.css (2026-10-17).
+// Sizes converted from the web front end's tokens.css and dialogs.css (2026-10-17; the web front end was deleted on 2026-10-20).
 // This file is now their only definition.
 
 import CoreGraphics

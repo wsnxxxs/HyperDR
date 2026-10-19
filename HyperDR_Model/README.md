@@ -237,7 +237,7 @@ PYTHONPATH=. .venv/bin/python infer_gain.py \
 ```
 
 The research inference command above remains useful for evaluating checkpoints
-and sidecar compatibility; it is not used by the packaged panel. Production
+and sidecar compatibility; it is not used by the application. Production
 deployment exports inference-only ONNX with `export_onnx.py`, converts the
 five-plane ONNX view with `scripts/convert_ncnn.py`, and embeds the resulting
 ncnn param/bin in `HyperDR.exe`.
@@ -347,5 +347,5 @@ PYTHONPATH=. .venv/bin/python infer_gain.py --help
 
 There is no separate model test suite in this runtime copy. During an iteration,
 run the dataset audit, training, evaluation, or inference command that owns the
-behaviour being changed. The panel's model orchestration contract is covered by
-the repository's focused Python checks under `tests/python/`.
+behaviour being changed. The deployment-cache resume contract is covered by
+`tests/test_deployment_cache.py` (run with `python3 -m unittest discover -s tests`).

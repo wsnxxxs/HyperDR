@@ -70,6 +70,8 @@ public struct JobSummary: Sendable {
     public let timedOut: Bool
     public let failure: HyperDRError?
     public let result: ExportRecord?
+    /// Non-nil only after automatic delivery to a preselected save-panel URL.
+    public let saved: SavedExport?
 }
 public struct JobSnapshot: Sendable {
     public let summary: JobSummary

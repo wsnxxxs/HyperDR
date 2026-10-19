@@ -21,6 +21,10 @@ public actor ExportTarget {
     typealias CopyRead = @Sendable (Int32, UnsafeMutableRawPointer?, Int) -> Int
     /// Test seams for the private staging directory and the final folder sync.
     struct CopyHooks: Sendable {
+        var replacementDirectory: @Sendable (URL) throws -> URL = {
+            try FileManager.default.url(for: .itemReplacementDirectory, in: .userDomainMask,
+                appropriateFor: $0, create: true)
+        }
         var read: CopyRead = { Darwin.read($0, $1, $2) }
         var openStaging: @Sendable (Int32, String) -> Int32 = {
             openat($0, $1, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
@@ -100,8 +104,36 @@ public actor ExportTarget {
         return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
     }
 
+    /// The caller supplies the extension from suggestedFileName for its chosen
+    /// encoding. No destination file is created or modified during validation.
+    public func validateDestination(_ fileURL: URL, expectedExtension: String) throws {
+        let lease = try leaseDestination(fileURL, expectedExtension: expectedExtension)
+        lease.stop()
+    }
+
+    func leaseDestination(_ fileURL: URL, expectedExtension: String) throws -> SecurityScopeLease {
+        guard fileURL.isFileURL, !fileURL.hasDirectoryPath, !fileURL.lastPathComponent.isEmpty,
+              fileURL.pathExtension.lowercased() == expectedExtension.lowercased() else {
+            throw HyperDRError(code: "invalid_options", message: "Invalid save destination or extension")
+        }
+        let lease = SecurityScopeLease(url: fileURL, access: access)
+        let folder = try Self.openFolder(fileURL.deletingLastPathComponent(), excluding: roots)
+        defer { Darwin.close(folder) }
+        var info = stat()
+        guard fstat(folder, &info) == 0, info.st_mode & 0o222 != 0 else { throw Self.error("export_folder_unwritable") }
+        if let temporary = try? hooks.replacementDirectory(fileURL) {
+            try? FileManager.default.removeItem(at: temporary)
+        } else {
+            // Without an atomic replacement location, never truncate an old
+            // file. A new file can use exclusive direct creation at save time.
+            guard fstatat(folder, fileURL.lastPathComponent, &info, AT_SYMLINK_NOFOLLOW) != 0,
+                  errno == ENOENT else { throw Self.error("export_folder_unwritable") }
+        }
+        return lease
+    }
+
     /// The save panel has already confirmed replacement. Keep its exact URL
-    /// for security-scoped access; only the held parent descriptor publishes it.
+    /// for security-scoped access and use the system item-replacement directory.
     public func save(session: SessionID, export: ExportID, to fileURL: URL) async throws -> SavedExport {
         let source = try await sessions.exportFile(session, export: export)
         let name = fileURL.lastPathComponent
@@ -113,10 +145,103 @@ public actor ExportTarget {
         let lease = SecurityScopeLease(url: fileURL, access: access)
         defer { lease.stop() }
         let task = Task.detached {
-            try Self.copy(source, to: fileURL.deletingLastPathComponent(), excluding: roots,
-                          hooks: hooks, replacing: name)
+            try Self.copySelected(source, to: fileURL, excluding: roots, hooks: hooks)
         }
         return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+    }
+
+    private static func copySelected(_ source: SessionExportFile, to fileURL: URL,
+                                     excluding roots: [URL], hooks: CopyHooks) throws -> SavedExport {
+        let directory = try openFolder(fileURL.deletingLastPathComponent(), excluding: roots)
+        defer { Darwin.close(directory) }
+        let canonical = try directoryURL(directory)
+        let destination = canonical.appendingPathComponent(fileURL.lastPathComponent)
+        let temporary: URL
+        do { temporary = try hooks.replacementDirectory(fileURL) }
+        catch { return try copyDirectNewFile(source, to: destination, directory: directory, hooks: hooks) }
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        // The system grants this private replacement directory itself. Do
+        // not walk its ancestors (TemporaryItems may deny that traversal).
+        let temporaryFD = Darwin.open(temporary.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard temporaryFD >= 0 else { throw error("export_folder_unwritable") }
+        defer { Darwin.close(temporaryFD) }
+        var originalInfo = stat(), temporaryInfo = stat()
+        guard fstat(directory, &originalInfo) == 0, fstat(temporaryFD, &temporaryInfo) == 0 else {
+            throw error("export_folder_unwritable")
+        }
+        guard originalInfo.st_dev == temporaryInfo.st_dev else {
+            return try copyDirectNewFile(source, to: destination, directory: directory, hooks: hooks)
+        }
+        var stagingHooks = hooks
+        stagingHooks.syncFolder = { fsync($0) }
+        let staged = try copyDirectNewFile(source, to: temporary.appendingPathComponent("payload"),
+            directory: temporaryFD, hooks: stagingHooks)
+        try Task.checkCancellation()
+        var info = stat()
+        let exists = fstatat(directory, destination.lastPathComponent, &info, AT_SYMLINK_NOFOLLOW) == 0
+        if exists, info.st_mode & S_IFMT != S_IFREG { throw error("invalid_options") }
+        do {
+            if exists {
+                _ = try FileManager.default.replaceItemAt(destination, withItemAt: staged.url,
+                    backupItemName: nil, options: .usingNewMetadataOnly)
+            } else {
+                try FileManager.default.moveItem(at: staged.url, to: destination)
+            }
+        } catch { throw HyperDRError(code: "export_folder_unwritable", message: "Unable to publish selected file", detail: String(describing: error)) }
+        let synced = hooks.syncFolder(directory) == 0
+        if !synced { log.warning("Saved selected file but could not sync its folder") }
+        return SavedExport(url: destination, name: destination.lastPathComponent,
+                           folderLabel: label(canonical), syncConfirmed: synced)
+    }
+
+    /// External volumes may not supply an item-replacement directory. Direct
+    /// writing is allowed only for a NEW file, so failure cannot destroy an
+    /// existing file the user had agreed to replace.
+    private static func copyDirectNewFile(_ source: SessionExportFile, to destination: URL,
+                                          directory: Int32, hooks: CopyHooks) throws -> SavedExport {
+        let name = destination.lastPathComponent
+        let output = openat(directory, name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard output >= 0 else { throw error("export_folder_unwritable") }
+        var opened = stat()
+        guard fstat(output, &opened) == 0 else { Darwin.close(output); throw error("export_folder_unwritable") }
+        var published = false
+        defer {
+            if !published {
+                var named = stat()
+                if fstatat(directory, name, &named, AT_SYMLINK_NOFOLLOW) == 0,
+                   named.st_dev == opened.st_dev, named.st_ino == opened.st_ino {
+                    unlinkat(directory, name, 0)
+                }
+            }
+            Darwin.close(output)
+        }
+        var buffer = [UInt8](repeating: 0, count: 1 << 20)
+        while true {
+            try Task.checkCancellation()
+            let count = hooks.read(source.descriptor, &buffer, buffer.count)
+            if count < 0 { if errno == EINTR { continue }; throw error("export_folder_unwritable") }
+            if count == 0 { break }
+            try buffer.withUnsafeBytes { bytes in
+                var offset = 0
+                while offset < count {
+                    let written = Darwin.write(output, bytes.baseAddress!.advanced(by: offset), count-offset)
+                    if written < 0, errno == EINTR { continue }
+                    guard written > 0 else { throw error("export_folder_unwritable") }
+                    offset += written
+                }
+            }
+        }
+        try Task.checkCancellation()
+        guard fsync(output) == 0 else { throw error("export_folder_unwritable") }
+        var named = stat()
+        guard fstatat(directory, name, &named, AT_SYMLINK_NOFOLLOW) == 0,
+              named.st_dev == opened.st_dev, named.st_ino == opened.st_ino else {
+            throw error("export_folder_unwritable")
+        }
+        published = true
+        let synced = hooks.syncFolder(directory) == 0
+        if !synced { log.warning("Saved selected file but could not sync its folder") }
+        return SavedExport(url: destination, name: name, folderLabel: label(destination.deletingLastPathComponent()), syncConfirmed: synced)
     }
 
     private static func label(_ url: URL) -> String {
@@ -166,7 +291,7 @@ public actor ExportTarget {
         } catch { Darwin.close(descriptor); throw error }
     }
     private static func copy(_ source: SessionExportFile, to folder: URL, excluding roots: [URL],
-                             hooks: CopyHooks, replacing: String? = nil) throws -> SavedExport {
+                             hooks: CopyHooks) throws -> SavedExport {
         let directory = try openFolder(folder, excluding: roots)
         defer { Darwin.close(directory) }
         let input = source.descriptor
@@ -239,7 +364,7 @@ public actor ExportTarget {
         var name = source.name
         while true {
             try Task.checkCancellation()
-            name = replacing ?? (number == 1 ? source.name : "\(stem) (\(number))\(suffix)")
+            name = number == 1 ? source.name : "\(stem) (\(number))\(suffix)"
             var opened = stat(), named = stat()
             guard fstat(output, &opened) == 0,
                   fstatat(staging, leaf, &named, AT_SYMLINK_NOFOLLOW) == 0,
@@ -247,8 +372,8 @@ public actor ExportTarget {
                   opened.st_dev == named.st_dev, opened.st_ino == named.st_ino else {
                 throw error("export_folder_unwritable")
             }
-            if renameatx_np(staging, leaf, directory, name, replacing == nil ? UInt32(RENAME_EXCL) : 0) == 0 { break }
-            guard replacing == nil, errno == EEXIST else { throw error("export_folder_unwritable") }
+            if renameatx_np(staging, leaf, directory, name, UInt32(RENAME_EXCL)) == 0 { break }
+            guard errno == EEXIST else { throw error("export_folder_unwritable") }
             number += 1
         }
         // The file is already published under `name`. Reporting a failure now

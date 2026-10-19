@@ -7,7 +7,7 @@ import Testing
 import Synchronization
 @testable import HyperDRKit
 
-private final class JobEnvironment: Sendable {
+final class JobEnvironment: Sendable {
     let root: URL
     let configuration: KitConfiguration
     let sessions: SessionStore
@@ -31,9 +31,10 @@ private final class JobEnvironment: Sendable {
     }
     func runner(probe: @escaping @Sendable (URL) async throws -> (Int, Int) = { _ in (800, 600) },
                 convert: @escaping JobRunner.Converter = fakeConversion,
-                beforePublish: @escaping @Sendable () async -> Void = {}) -> JobRunner {
+                beforePublish: @escaping @Sendable () async -> Void = {},
+                exportTarget: ExportTarget? = nil) -> JobRunner {
         JobRunner(configuration: configuration, sessions: sessions, resolver: resolver,
-            probe: probe, convert: convert, beforePublish: beforePublish)
+            probe: probe, convert: convert, beforePublish: beforePublish, exportTarget: exportTarget)
     }
 }
 

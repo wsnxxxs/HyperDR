@@ -1,5 +1,6 @@
 import Foundation
 import HyperDREngine
+import os
 
 public actor JobRunner {
     typealias Converter = @Sendable (EngineRequest, @escaping @Sendable (ConvertEvent) -> Void) async throws -> ConvertReport
@@ -13,12 +14,17 @@ public actor JobRunner {
         var committing = false
         var failure: HyperDRError?
         var result: ExportRecord?
+        var saved: SavedExport?
+        var hasDestination = false
+        var stopSaving = false
+        var delivery: Task<SavedExport, Error>?
         var task: Task<Void, Never>?
         var summary: JobSummary {
             JobSummary(id: id, session: session, done: done, cancelled: cancelled,
-                timedOut: timedOut, failure: failure, result: result)
+                timedOut: timedOut, failure: failure, result: result, saved: saved)
         }
     }
+    private let target: ExportTarget
     private let sessions: SessionStore
     private let resolver: OptionResolver
     private let convert: Converter
@@ -45,7 +51,10 @@ public actor JobRunner {
             preparation.cancel()
             _ = try? await preparation.value
         } else if let task = record?.task {
-            if record?.committing != true {
+            if record?.hasDestination == true, record?.committing == true {
+                record?.stopSaving = true
+                record?.delivery?.cancel()
+            } else if record?.committing != true {
                 record?.cancelled = true
                 task.cancel()
             }
@@ -57,6 +66,23 @@ public actor JobRunner {
                           frame: ExportFrame? = nil) async throws -> ExportKey {
         let request = try resolver.resolveExport(options, session: await sessions.session(id))
         return try ExportKey(request: request, frame: frame.map { try ExportFrameRecord($0) })
+    }
+
+    public func suggestedFileName(session id: SessionID, options: EditOptions) async throws -> String {
+        let photo = try await sessions.session(id)
+        let request = try resolver.resolveExport(options, session: photo)
+        return photo.sourceURL.deletingPathExtension().lastPathComponent + "-hyperdr." + (try Self.fileExtension(request))
+    }
+
+    /// Panel-v1 format ids, checked against actual engine filenames in tests.
+    private static func fileExtension(_ request: EngineRequest) throws -> String {
+        switch request.settings["encoding"]?.stringValue {
+        case "sdr-tiff": "tif"
+        case "sdr-jpeg", "iso-gainmap-jpeg": "jpg"
+        case "avif-pq", "avif-hlg": "avif"
+        case "adaptive", "pq", "hlg": "heic"
+        default: throw HyperDRError(code: "invalid_options", message: "Unknown export encoding")
+        }
     }
 
     public func commandLine(session id: SessionID, options: EditOptions,
@@ -83,30 +109,36 @@ public actor JobRunner {
 
     init(configuration: KitConfiguration, sessions: SessionStore, resolver: OptionResolver,
          probe: @escaping @Sendable (URL) async throws -> (Int, Int),
-         convert: @escaping Converter, beforePublish: @escaping @Sendable () async -> Void = {}) {
+         convert: @escaping Converter, beforePublish: @escaping @Sendable () async -> Void = {},
+         exportTarget: ExportTarget? = nil) {
+        self.target = exportTarget ?? ExportTarget(configuration: configuration, sessions: sessions)
         self.beforePublish = beforePublish
         self.configuration = configuration; self.sessions = sessions
         self.resolver = resolver; self.probe = probe; self.convert = convert
     }
 
     public func start(session id: SessionID, options: EditOptions,
-                      frame: ExportFrame? = nil) async throws -> JobTicket {
+                      frame: ExportFrame? = nil, destination: URL? = nil) async throws -> JobTicket {
         guard admission == nil else {
             throw HyperDRError(code: "convert_in_progress", message: "An export is already running")
         }
         let token = UUID()
         admission = token
-        let task = Task { try await self.prepare(session: id, options: options, frame: frame, token: token) }
+        let task = Task { try await self.prepare(session: id, options: options, frame: frame, destination: destination, token: token) }
         preparation = task
         defer { if admission == token || admission == nil { preparation = nil } }
         return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
     }
 
-    private func prepare(session id: SessionID, options: EditOptions, frame: ExportFrame?, token: UUID) async throws -> JobTicket {
+    private func prepare(session id: SessionID, options: EditOptions, frame: ExportFrame?, destination: URL?, token: UUID) async throws -> JobTicket {
         var pending: ExportID?
         do {
             let (photo, lease) = try await sessions.exportSource(id)
             var request = try resolver.resolveExport(options, session: photo)
+            let destinationLease: SecurityScopeLease?
+            if let destination {
+                destinationLease = try await target.leaseDestination(destination, expectedExtension: Self.fileExtension(request))
+            } else { destinationLease = nil }
             // Also validate command serialization before allocating a version.
             _ = try Engine.commandLine(request)
             if let frame {
@@ -147,8 +179,9 @@ public actor JobRunner {
             let job = JobID(rawValue: UUID().uuidString.lowercased())
             hub.begin(job)
             record = Record(id: job, session: id, log: JobLog(limit: configuration.maxJobLogCharacters))
+            record?.hasDestination = destination != nil
             let task = Task { await self.run(job: job, session: id, export: version.id,
-                request: request, lease: lease) }
+                request: request, lease: lease, destination: destination, destinationLease: destinationLease) }
             record?.task = task
             preparation = nil
             return JobTicket(job: job, export: version.id, argv: argv)
@@ -161,6 +194,10 @@ public actor JobRunner {
     }
 
     public func cancel(_ id: JobID) async -> Bool {
+        if record?.id == id, let delivery = record?.delivery {
+            delivery.cancel()
+            return true
+        }
         guard record?.id == id, record?.done == false, record?.committing == false else { return false }
         record?.cancelled = true
         record?.task?.cancel()
@@ -179,8 +216,9 @@ public actor JobRunner {
     }
 
     private func run(job: JobID, session: SessionID, export: ExportID,
-                     request: EngineRequest, lease: SecurityScopeLease) async {
-        defer { lease.stop() }
+                     request: EngineRequest, lease: SecurityScopeLease, destination: URL?,
+                     destinationLease: SecurityScopeLease?) async {
+        defer { lease.stop(); destinationLease?.stop() }
         // Engine callbacks synchronously enqueue into this single FIFO. Drain
         // it before publishing the terminal event, including on cancellation.
         let (stream, sink) = AsyncStream.makeStream(of: ConvertEvent.self)
@@ -219,7 +257,35 @@ public actor JobRunner {
             do { record?.result = try await sessions.publishExport(session, export: export, report: report) }
             catch { failure = error as? HyperDRError ?? HyperDRError(code: "internal_error", message: String(describing: error)) }
         }
-        if failure != nil || report == nil { await sessions.discardExport(session, export: export) }
+        if let destination, failure == nil, record?.result != nil {
+            do {
+                if record?.stopSaving == true { throw CancellationError() }
+                let delivery = Task { try await target.save(session: session, export: export, to: destination) }
+                record?.delivery = delivery
+                let saved = try await delivery.value
+                let mark = SavedMark(fileName: saved.name, folderLabel: saved.folderLabel)
+                record?.saved = saved
+                record?.result?.saved = mark
+                do { try await sessions.markSaved(session, export: export, saved: mark) }
+                catch {
+                    // Delivery already committed. A history-sidecar failure
+                    // must not make the user save a second copy.
+                    Logger(subsystem: "com.hyperdr.HyperDR", category: "Export")
+                        .warning("Export delivered but its saved mark could not be persisted")
+                }
+            } catch {
+                // The export remains valid history even if delivery fails or
+                // is cancelled. A terminal success always means the chosen
+                // file is already in place, never merely in the workspace.
+                failure = error as? HyperDRError ?? HyperDRError(
+                    code: error is CancellationError ? "cancelled" : "export_failed",
+                    message: "Unable to save the completed export", detail: String(describing: error))
+            }
+            record?.delivery = nil
+        }
+        if record?.result == nil, failure != nil || report == nil {
+            await sessions.discardExport(session, export: export)
+        }
         record?.failure = failure
         record?.done = true
         record?.task = nil

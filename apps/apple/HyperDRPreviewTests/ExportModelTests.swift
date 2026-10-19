@@ -432,3 +432,26 @@ extension ExportModelTests {
         }
     }
 }
+
+@MainActor extension ExportModelTests {
+    func testRAWDecodeEventsReachTheETAWithRealBlockFractions() async throws {
+        let s = FakeEditorServices(openDelay: .zero, previewDelay: .zero)
+        let start = Date(timeIntervalSince1970: 100)
+        let m = EditorModel(services: s, now: { start })
+        m.open([URL(fileURLWithPath: "/tmp/source.ARW")])
+        await eventually(timeout: .seconds(3)) { m.document?.phase == .ready }
+        m.timingHistory = [.init(kind: .init(isRAW: true, encoding: "adaptive", isAI: false, hasFrame: false, verifies: true),
+            pixels: 24e6, stages: [100,20,10,5])]
+        await running(m,s)
+        s.sendExport(.progress(stage: "decode", fraction: 0.1, at: start+10))
+        await eventually(timeout: .seconds(3)) { m.export.fraction == 0.1 }
+        let low = try XCTUnwrap(m.export.estimate(at: start+10))
+        s.sendExport(.progress(stage: "decode", fraction: 0.9, at: start+10))
+        await eventually(timeout: .seconds(3)) { m.export.fraction == 0.9 }
+        let high = try XCTUnwrap(m.export.estimate(at: start+10))
+        XCTAssertLessThan(try XCTUnwrap(high.remaining), try XCTUnwrap(low.remaining))
+        XCTAssertGreaterThanOrEqual(high.fraction, low.fraction)
+        m.cancelExport()
+        await eventually(timeout: .seconds(3)) { !m.export.isInFlight }
+    }
+}

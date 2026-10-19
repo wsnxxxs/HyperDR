@@ -56,3 +56,45 @@ import XCTest
         p.save(to:d);XCTAssertEqual(Preferences.load(from:d),p)
     }
 }
+
+@MainActor extension ExportETATests {
+    func testRAWDecodeBlockProgressCorrectsRemainingWithIdenticalHistoryAndElapsed() throws {
+        let start = Date(timeIntervalSince1970: 100)
+        func state(_ fraction: Double) -> ExportState {
+            let value = ExportState(); value.startedAt = start; value.stageAt = start
+            value.durations = [100,20,10,5]; value.phase = .running
+            value.progress(stage: "decode", fraction: 0, at: start)
+            value.progress(stage: "decode", fraction: fraction, at: start+10)
+            return value
+        }
+        let low = state(0.1), high = state(0.9)
+        XCTAssertEqual(try XCTUnwrap(low.estimate(at: start+10)?.remaining).seconds, 125, accuracy: 1e-10)
+        XCTAssertEqual(try XCTUnwrap(high.estimate(at: start+10)?.remaining).seconds, 45, accuracy: 1e-10)
+        let floor = high.fractionFloor
+        XCTAssertEqual(high.estimate(at: start+15), high.estimate(at: start+15))
+        XCTAssertEqual(high.fractionFloor, floor, "Reading the pure estimator cannot mutate state")
+        XCTAssertEqual(try XCTUnwrap(high.estimate(at: start+15)?.remaining).seconds, 40, accuracy: 1e-10)
+        high.durations = nil
+        XCTAssertNil(high.estimate(at: start+15), "Real progress cannot invent an ETA for the first export")
+    }
+    func testRAWProgressRejectsInvalidAndRegressingEventsAndKeepsFloor() throws {
+        let state = ExportState(), start = Date(timeIntervalSince1970: 0)
+        state.startedAt = start; state.stageAt = start; state.durations = [100,20,10,5]; state.phase = .running
+        state.progress(stage: "decode", fraction: 0.9, at: start+10)
+        let good = try XCTUnwrap(state.estimate(at: start+10))
+        for fraction in [Double.nan, .infinity, -1, 0, 2, 0.1, 0.9] {
+            state.progress(stage: "decode", fraction: fraction, at: start+10)
+            XCTAssertEqual(state.fraction, 0.9)
+            XCTAssertEqual(state.estimate(at: start+10), good)
+        }
+        state.progress(stage: "decode", fraction: 1, at: start+20)
+        let decoded = try XCTUnwrap(state.estimate(at: start+20))
+        state.progress(stage: "process", fraction: 0.3, at: start+20)
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(state.estimate(at: start+20)).fraction, decoded.fraction)
+        XCTAssertEqual(try XCTUnwrap(state.estimate(at: start+20)?.remaining).seconds, 35, accuracy: 1e-10,
+                       "process=.3 is a milestone, not 30% of processing")
+        state.progress(stage: "decode", fraction: 0.5, at: start+21)
+        XCTAssertEqual(state.stage, "process")
+        XCTAssertLessThanOrEqual(try XCTUnwrap(state.estimate(at: start+1000)).fraction, 0.99)
+    }
+}

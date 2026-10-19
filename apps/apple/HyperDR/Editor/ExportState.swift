@@ -90,13 +90,21 @@ nonisolated enum ExportETA {
         }
     }
     static func estimate(at: Date, startedAt: Date, stageAt: Date, stage: String?, durations: [Double]?,
-                         fractionFloor: Double, saving: Bool = false, completed: Bool = false) -> ExportEstimate? {
+                         fractionFloor: Double, fraction: Double? = nil, fractionAt: Date? = nil, saving: Bool = false, completed: Bool = false) -> ExportEstimate? {
         if completed { return ExportEstimate(fraction: 1, remaining: .zero, isOverdue: false) }
         if saving { return ExportEstimate(fraction: 0.99, remaining: nil, isOverdue: false) }
         guard let durations else { return nil }
         let index = stages.firstIndex(of: stage ?? "decode") ?? 0
-        let remaining = max(0, durations[index] - max(0, at.timeIntervalSince(stageAt)))
-            + durations.dropFirst(index + 1).reduce(0, +)
+        let stageRemaining: Double
+        // ABI2 emits real RAW block completion only in decode. process=.3,
+        // encode=.7 and verify=.9 are whole-job milestones, not stage ratios.
+        if stage == "decode", let fraction, fraction.isFinite, fraction > 0, fraction <= 1 {
+            stageRemaining = max(0, durations[index] * (1 - fraction)
+                - max(0, at.timeIntervalSince(fractionAt ?? stageAt)))
+        } else {
+            stageRemaining = max(0, durations[index] - max(0, at.timeIntervalSince(stageAt)))
+        }
+        let remaining = stageRemaining + durations.dropFirst(index + 1).reduce(0, +)
         let elapsed = max(0, at.timeIntervalSince(startedAt))
         let fraction = elapsed + remaining > 0 ? elapsed / (elapsed + remaining) : 0.99
         return ExportEstimate(fraction: min(0.99, max(fractionFloor, fraction)),
@@ -129,19 +137,26 @@ nonisolated extension Duration {
     @ObservationIgnored var stageAt: Date?
     @ObservationIgnored var durations: [Double]?
     @ObservationIgnored var fractionFloor = 0.0
+    @ObservationIgnored var fractionAt: Date?
     var isInFlight: Bool { [.preparing, .running, .finishing, .saving].contains(phase) }
     func estimate(at date: Date) -> ExportEstimate? {
         guard isInFlight || phase == .succeeded, let startedAt else { return nil }
         return ExportETA.estimate(at: date, startedAt: startedAt, stageAt: stageAt ?? startedAt,
-            stage: stage, durations: durations, fractionFloor: fractionFloor,
+            stage: stage, durations: durations, fractionFloor: fractionFloor, fraction: fraction, fractionAt: fractionAt,
             saving: phase == .saving || phase == .finishing, completed: phase == .succeeded)
     }
     func progress(stage newStage: String, fraction: Double, at date: Date) {
+        if let current = ExportETA.stages.firstIndex(of: stage ?? ""),
+           let next = ExportETA.stages.firstIndex(of: newStage), next < current { return }
+        fractionFloor = max(fractionFloor, estimate(at: date)?.fraction ?? 0)
         if newStage != stage {
-            fractionFloor = max(fractionFloor, estimate(at: date)?.fraction ?? 0)
             stageAt = date; stage = newStage
+            self.fraction = nil; fractionAt = nil
         }
-        self.fraction = fraction.isFinite && fraction > 0 ? min(1, fraction) : nil
+        if fraction.isFinite, fraction > 0, fraction <= 1,
+           newStage != "decode" || fraction > (self.fraction ?? 0) {
+            self.fraction = fraction; fractionAt = date
+        }
         phase = .running
     }
     func dismissOutcome() {
@@ -151,7 +166,7 @@ nonisolated extension Duration {
     func reset() {
         phase = .idle; startedAt = nil; stage = nil; fraction = nil; lastLine = nil
         failure = nil; saveFailure = nil; result = nil; isResultStale = false
-        destination = nil; isStopping = false; durations = nil; fractionFloor = 0; stageAt = nil
+        destination = nil; isStopping = false; durations = nil; fractionFloor = 0; fractionAt = nil; stageAt = nil
     }
 }
 nonisolated struct PhotoSwitchRequest: Equatable {

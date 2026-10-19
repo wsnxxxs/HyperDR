@@ -2,6 +2,7 @@
 
 #include "internal/boxes.hpp"
 #include "internal/items.hpp"
+#include "internal/write_limits.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -27,8 +28,8 @@ using container::put32;
 using container::read_n;
 using container::slice;
 
-constexpr std::size_t kMaxTiles = 4096;
-constexpr std::size_t kMaxItems = 8192;
+constexpr std::size_t kMaxTiles = container::kHeifMaxTiles;
+constexpr std::size_t kMaxItems = container::kHeifMaxItems;
 
 void append(Bytes& dst, const Bytes& source) {
   dst.insert(dst.end(), source.begin(), source.end());

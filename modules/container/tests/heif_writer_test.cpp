@@ -8,6 +8,8 @@
 #include "internal/write_limits.hpp"
 #include <array>
 #include <iostream>
+#include <fstream>
+#include <sstream>
 #include <map>
 #include <pthread.h>
 
@@ -35,6 +37,27 @@ Bytes with_rbsp_bits(const Bytes& nal,std::size_t index,std::uint8_t bits) {
 template<class Function> std::string rejection(Function fn) {
   try { fn(); } catch (const std::invalid_argument& e) { return e.what(); }
   throw std::runtime_error("invalid writer input accepted");
+}
+void parameter_corpus() {
+  std::ifstream input(writer_fixture::root()/"parameter-cases.txt");
+  require(input.good(), "missing independent parameter corpus");
+  std::string line;unsigned count=0,legal_count=0;
+  const auto unhex=[](const std::string& text) {
+    require(text.size()%2==0,"odd parameter hex length");Bytes bytes;
+    for(std::size_t i=0;i<text.size();i+=2)
+      bytes.push_back(static_cast<std::uint8_t>(std::stoul(text.substr(i,2),nullptr,16)));
+    return bytes;
+  };
+  while(std::getline(input,line)) {
+    std::istringstream fields(line);std::string name,v,s,p;int legal=-1;
+    require(static_cast<bool>(fields>>name>>legal>>v>>s>>p),"malformed parameter case");
+    bool accepted=true;
+    try {(void)make_hevc_configuration(unhex(v),unhex(s),unhex(p));}
+    catch(const std::invalid_argument&){accepted=false;}
+    if(accepted!=(legal==1))throw std::runtime_error("parameter corpus mismatch: "+name);
+    ++count;legal_count+=legal==1;
+  }
+  require(count==47 && legal_count==36,"incomplete independent parameter corpus");
 }
 void framing() {
   const Bytes annex{0,0,0,1,0x40,1,0x80,0,0,1,0x26,1,0x80,0,0};
@@ -277,7 +300,7 @@ void grid_limits() {
 }
 int main(int argc,char** argv) {
   try {
-    framing();configuration();invalid_images();
+    framing();configuration();parameter_corpus();invalid_images();
     std::vector<Bytes> files;
     for(const auto& name:writer_fixture::names()) {
       auto bytes=writer_fixture::file(name);structure(name,bytes);

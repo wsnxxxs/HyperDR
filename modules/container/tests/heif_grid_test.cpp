@@ -161,6 +161,25 @@ void test_grid_and_single_image() {
     if (box.type == "cdsc") cdsc = true;
   }
   require(dimg && cdsc, "grid or metadata references are missing");
+  // A tiny ipma must reject an attacker-controlled count before reserve.
+  for (const std::uint32_t count : {8193U, 0xFFFFFFFFU}) {
+    auto malformed=result;bool edited=false;
+    for (const auto& box:kids) if(box.type=="iprp") {
+      for(const auto& property:children(meta,box.offset+8,box.offset+box.size))
+        if(property.type=="ipma") {
+          const auto offset=top[1].offset+property.offset+12;
+          for(unsigned b=0;b<4;++b)malformed[offset+b]=count>>(24-8*b);
+          edited=true;
+        }
+    }
+    require(edited,"missing regression ipma");bool rejected=false;
+    try {(void)hyperdr::add_tmap_to_two_image_heif(malformed,
+              hyperdr::serialize_tmap_payload(hyperdr::GainMapMetadata{}));}
+    catch(const std::runtime_error& e) {
+      rejected=std::string(e.what()).find("ipma entry count")!=std::string::npos;
+    }
+    require(rejected,"unbounded ipma count accepted");
+  }
   const auto tmap = hyperdr::add_tmap_to_two_image_heif(
       result, hyperdr::serialize_tmap_payload(hyperdr::GainMapMetadata{}));
   const auto references = hyperdr::find_tmap_references(tmap);

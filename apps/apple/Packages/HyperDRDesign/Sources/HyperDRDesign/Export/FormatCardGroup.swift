@@ -19,14 +19,18 @@ public struct FormatCardItem<ID: Hashable>: Identifiable {
     public var isAvailable: Bool { unavailableReason == nil }
 }
 
-/// A titled group of `FormatCard`s in a grid, one of them selected. A radio
-/// group to VoiceOver; the arrow keys move the selection to the next
-/// format that can be chosen.
+/// A titled group of `FormatCard`s in a grid, one of them selected. To
+/// VoiceOver it is a native radio group (the accessibility representation
+/// is a `Picker` in the radio-group style, with the unavailable formats
+/// disabled and their reason in the label). The arrow keys move the
+/// selection to the next format that can be chosen, and keyboard focus goes
+/// with it, so Space acts on the format just selected.
 public struct FormatCardGroup<ID: Hashable>: View {
     private let title: Text
     private let items: [FormatCardItem<ID>]
     @Binding private var selection: ID
     private let columns: Int
+    @FocusState private var focused: ID?
 
     public init(title: Text, items: [FormatCardItem<ID>], selection: Binding<ID>, columns: Int) {
         self.title = title
@@ -48,14 +52,35 @@ public struct FormatCardGroup<ID: Hashable>: View {
                                unavailableReason: item.unavailableReason, help: item.help) {
                         selection = item.id
                     }
+                    .focused($focused, equals: item.id)
                 }
             }
             .onMoveCommand { direction in
-                if let next = Self.neighbor(of: selection, in: items, direction: direction) { selection = next }
+                guard let next = Self.neighbor(of: focused ?? selection, in: items, direction: direction) else { return }
+                selection = next
+                focused = next
             }
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityAddTraits(.isTabBar)
+        .accessibilityRepresentation { radioGroup }
+    }
+
+    /// What assistive technology sees instead of the cards: a radio group
+    /// whose buttons are the formats.
+    private var radioGroup: some View {
+        Picker(selection: $selection) {
+            ForEach(items) { item in
+                Self.label(of: item).tag(item.id).disabled(!item.isAvailable)
+            }
+        } label: {
+            title
+        }
+        .pickerStyle(.radioGroup)
+    }
+
+    /// A format's name, followed by why it cannot be chosen when it cannot.
+    static func label(of item: FormatCardItem<ID>) -> Text {
+        guard let reason = item.unavailableReason else { return item.name }
+        return item.name + Text(verbatim: ", ") + reason
     }
 
     /// The format an arrow key moves to from `current`: the nearest one in

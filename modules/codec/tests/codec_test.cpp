@@ -385,9 +385,7 @@ void decode_and_check(const std::vector<std::uint8_t>& bytes, std::uint32_t widt
       ordered = unsigned(sample[0])+2 >= sample[1] && unsigned(sample[1])+2 >= sample[2];
     } else {
       const auto* sample = plane + row + x;
-      // At the almost-white sample the original channel separation can be
-      // less than one code. Lossy VT quantisation may reverse it by two codes.
-      ordered = unsigned(sample[0])+2 >= sample[1] && unsigned(sample[1])+2 >= sample[2];
+      ordered = sample[0] >= sample[1] && sample[1] >= sample[2];
     }
     const auto middle=static_cast<std::size_t>(width/3)*3;
     bool distinct=false;

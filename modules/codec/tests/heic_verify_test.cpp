@@ -12,7 +12,9 @@
 #include "../../../tests/support/temp_directory.hpp"
 #include "heif_fixture_edit.hpp"
 #include "hyperdr/codec/encoders.hpp"
+#include "hevc/hevc.hpp"
 #include "internal/heif_decoder.hpp"
+#include "internal/icc_profiles.hpp"
 #include "hyperdr/container/heif_reader.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/foundation/progress.hpp"
@@ -135,6 +137,34 @@ void tile_checks(const Bytes& bytes) {
   // a wrong configuration is caught by the structure check (above), not here.
 }
 
+// A pair our encoder never writes, built with the HEVC and HEIF writers
+// directly: the gain map's size and bit depth are the caller's.
+Bytes custom_pair(unsigned base_width, unsigned base_height, unsigned gain_width,
+                  unsigned gain_height, bool gain_main10) {
+  namespace h = codec::hevc;
+  const auto encode_flat = [](unsigned width, unsigned height, bool main10, bool rgb) {
+    const auto grid = h::tile_grid(width, height);
+    h::EncodeParams params;
+    params.main10 = main10;
+    params.color = rgb ? h::ColorDescription{12, 13, 1} : h::ColorDescription{2, 2, 1};
+    return h::encode(grid.count(), [&](std::size_t index, h::YuvTile& tile) {
+      if (rgb)
+        h::rgb_tile(grid, index, [](auto, auto, auto n, float* v) { std::fill_n(v, n * 3, .5F); },
+                    1, true, tile);
+      else
+        h::luma_tile(grid, index, [](auto, auto, auto n, float* v) { std::fill_n(v, n, .5F); }, tile);
+    }, params);
+  };
+  const auto base = encode_flat(base_width, base_height, false, true);
+  const auto gain = encode_flat(gain_width, gain_height, gain_main10, false);
+  const auto icc = codec::display_p3_profile();
+  HeifEncodedImage b{base, base_width, base_height, {}, std::nullopt, icc};
+  HeifEncodedImage g{gain, gain_width, gain_height, {2, 2, 1, true}, std::nullopt, {}};
+  HeifWriteOptions options;
+  options.gain_metadata = GainMapMetadata{};
+  return write_heif(b, &g, options);
+}
+
 void adaptive_cases(int depth) {
   const auto bytes = encode_adaptive_heic(make_gain(96, 64), {}, 90, depth);
   const std::string label = "adaptive" + std::to_string(depth);
@@ -192,6 +222,55 @@ void adaptive_cases(int depth) {
       });
     });
     rejects("gain nclx limited range", verify(broken), "Gain Map");
+  }
+  {  // With an ICC profile present, the base's nclx still has to describe an SDR picture.
+    const auto bad_base = [&](const char* name, const std::function<void(Box&)>& edit) {
+      auto broken = with_boxes(bytes, [&](auto& meta) {
+        bool found = false;
+        each_property(meta, "colr", [&](Box& c) {
+          if (is_nclx(c) && heif_fixture::get(c.data, 4, 2) != 2) {
+            edit(c);
+            found = true;
+          }
+        });
+        require(found, "no base nclx");
+      });
+      rejects(name, verify(broken), "SDR base");
+    };
+    bad_base("base nclx PQ transfer", [](Box& c) { heif_fixture::put(c.data, 6, 16, 2); });
+    bad_base("base nclx BT.2020 primaries", [](Box& c) { heif_fixture::put(c.data, 4, 9, 2); });
+    bad_base("base nclx BT.2020 matrix", [](Box& c) { heif_fixture::put(c.data, 8, 9, 2); });
+    bad_base("base nclx limited range", [](Box& c) { c.data[10] = 0; });
+  }
+  {  // The gain map may not be larger than its base, nor anything but 8-bit.
+    verify_heic_decodable(custom_pair(64, 64, 32, 32, false));
+    // The writer refuses a larger gain map, so shrink a valid pair's base: the
+    // base grid's ispe and its grid descriptor both say 32x32 while the gain map
+    // stays 64x64.
+    auto smaller_base = custom_pair(128, 128, 64, 64, false);
+    {
+      const auto parsed = read_heif(smaller_base);
+      const auto& grid = parsed.item(parsed.resolve_image().item_id);
+      require(grid.type == "grid" && grid.extents.size() == 1 && grid.extents[0].length == 8,
+              "base grid descriptor not found");
+      const auto at = grid.extents[0].offset;  // version, flags, rows-1, columns-1, width, height
+      require(smaller_base[at + 1] == 0, "grid descriptor uses 32-bit sizes");
+      smaller_base[at + 4] = smaller_base[at + 6] = 0;
+      smaller_base[at + 5] = smaller_base[at + 7] = 32;
+    }
+    smaller_base = with_boxes(smaller_base, [](auto& meta) {
+      each_property(meta, "ispe", [](Box& b) {
+        if (heif_fixture::get(b.data, 4, 4) == 128 && heif_fixture::get(b.data, 8, 4) == 128) {
+          heif_fixture::put(b.data, 4, 32, 4);
+          heif_fixture::put(b.data, 8, 32, 4);
+        }
+      });
+    });
+    // The reader refuses it before the verifier's own size check is reached.
+    rejects("gain map larger than base", [&] { verify_heic_decodable(smaller_base); },
+            "exceeds base dimensions");
+    rejects("gain map 10-bit", [] { verify_heic_decodable(custom_pair(64, 64, 32, 32, true)); },
+            "invalid dimensions or depth");
   }
   {  // The gain map is coded 4:2:0; the configuration now claims monochrome.
     auto broken = with_boxes(bytes, [](auto& meta) {
@@ -301,9 +380,16 @@ void diagnostics_see_the_whole_canvas() {
             "do not work on a reduced copy");
     require(!std::filesystem::exists(root / "tight.tiff"), "a rejected reconstruct left a file");
   }
+  {  // Display-curve holds both files at once: one fits 40 B/px, two (52 in all) do not.
+    ExecutionScope between({0, 12000ULL * 256 * 45});
+    reconstruct_heic_to_tiff(file, root / "between.tiff");
+    rejects("display-curve with two files", [&] { compare_gain_map_heic_curve(file, file, {1.F}); },
+            "do not work on a reduced copy");
+  }
   {
     ExecutionScope enough({0, 12000ULL * 256 * 64});
     reconstruct_heic_to_tiff(file, root / "enough.tiff");
+    (void)compare_gain_map_heic_curve(file, file, {1.F});
   }
   std::filesystem::remove_all(root);
 }

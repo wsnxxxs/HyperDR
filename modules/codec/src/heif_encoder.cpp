@@ -269,33 +269,48 @@ void verify_heic_decodable(const std::filesystem::path& input) {
 namespace {
 // Lenient about unprofiled gain maps (Apple's), strict about present profiles;
 // the same decoding as the input path. Diagnostics see the whole canvas, never a
-// reduced copy: when the planes it needs (`bytes_per_pixel` of canvas, the base,
-// the reconstruction and what the caller adds) do not fit the memory budget, the
+// reduced copy: when the planes they need do not fit the memory budget, the
 // command stops with that figure instead of quietly working on fewer pixels.
-codec::HeifAdaptiveParts adaptive_parts(const std::filesystem::path& input,
-                                        std::uint64_t bytes_per_pixel) {
-  const auto bytes = read_binary_file(input);
-  const auto file = read_heif(bytes);
-  const auto plan = file.resolve_gain_map(HeifCanvas::Tiled);
+struct OpenedAdaptive {
+  std::vector<std::uint8_t> bytes;
+  HeifFile file;
+  HeifGainMapPlan plan;
+  [[nodiscard]] std::uint64_t pixels() const {
+    return std::uint64_t(plan.base.width) * plan.base.height;
+  }
+};
+std::unique_ptr<OpenedAdaptive> open_adaptive(const std::filesystem::path& input) {
+  // HeifFile and its plans borrow the bytes, so they are filled in place.
+  auto opened = std::make_unique<OpenedAdaptive>();
+  opened->bytes = read_binary_file(input);
+  opened->file = read_heif(opened->bytes);
+  auto plan = opened->file.resolve_gain_map(HeifCanvas::Tiled);
   if (!plan || !plan->metadata) throw std::runtime_error("Adaptive HDR HEIC lacks a gain map");
   validate_base_profile(plan->base);
   validate_gain_profile(plan->gain);
+  opened->plan = std::move(*plan);
+  return opened;
+}
+// `bytes_per_pixel` is what the command holds per canvas pixel, summed over
+// every file it keeps in memory at once (`pixels` is that total).
+void require_whole_canvas(const OpenedAdaptive& shown, std::uint64_t pixels,
+                          std::uint64_t bytes_per_pixel) {
   const auto budget = current_execution_config.memory_budget_bytes;
-  const auto pixels = std::uint64_t(plan->base.width) * plan->base.height;
   if (budget && pixels > budget / bytes_per_pixel) {
-    throw std::runtime_error("the whole " + std::to_string(plan->base.width) + "x" +
-                             std::to_string(plan->base.height) + " canvas needs about " +
+    throw std::runtime_error("the whole " + std::to_string(shown.plan.base.width) + "x" +
+                             std::to_string(shown.plan.base.height) + " canvas needs about " +
                              std::to_string(pixels * bytes_per_pixel >> 20) +
                              " MiB, over the memory budget of " + std::to_string(budget >> 20) +
                              " MiB; diagnostics do not work on a reduced copy");
   }
-  return codec::decode_heif_adaptive_parts(file, *plan);
 }
 }  // namespace
 
 void reconstruct_heic_to_tiff(const std::filesystem::path& input,
                               const std::filesystem::path& output) {
-  auto parts = adaptive_parts(input, 40);
+  const auto opened = open_adaptive(input);
+  require_whole_canvas(*opened, opened->pixels(), 40);
+  auto parts = codec::decode_heif_adaptive_parts(opened->file, opened->plan);
   const auto& metadata = parts.metadata;
   const std::uint32_t width = parts.base.width, height = parts.base.height;
   const float stops = static_cast<float>(metadata.alternate_headroom.numerator) /
@@ -363,8 +378,16 @@ DisplayCurveResult compare_gain_map_heic_curve(
   if (display_headroom_stops.empty()) {
     throw std::invalid_argument("display curve requires at least one headroom");
   }
-  auto reference_components = adaptive_parts(reference, 32);
-  auto candidate_components = adaptive_parts(candidate, 32);
+  // Both files are in memory together (about 26 B/px each: base float RGB, gain
+  // plane, reconstruction and the comparison's share), so check the sum once,
+  // before either is decoded.
+  const auto reference_file = open_adaptive(reference);
+  const auto candidate_file = open_adaptive(candidate);
+  require_whole_canvas(*reference_file, reference_file->pixels() + candidate_file->pixels(), 26);
+  auto reference_components =
+      codec::decode_heif_adaptive_parts(reference_file->file, reference_file->plan);
+  auto candidate_components =
+      codec::decode_heif_adaptive_parts(candidate_file->file, candidate_file->plan);
   if (reference_components.base.width != candidate_components.base.width ||
       reference_components.base.height != candidate_components.base.height ||
       reference_components.base.channels != candidate_components.base.channels) {

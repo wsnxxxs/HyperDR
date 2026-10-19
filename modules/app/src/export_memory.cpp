@@ -72,16 +72,18 @@ ExportMemoryEstimate estimate_export_memory(std::uint32_t pw, std::uint32_t ph,
   // frames, and accumulated compressed samples/container copies.
   const bool main10=depth==10 || encoding==OutputEncoding::Pq || encoding==OutputEncoding::Hlg;
   const auto vt=sum({plane(count*512*512,main10 ? 3 : 2),32*MiB,plane(canvas,4)});
+  // HEIC verification reads the compressed file back tile by tile: 4 B/px of
+  // canvas covers the file and the tile queue (0.4-1.3 B/px measured).
   switch (encoding) {
     case OutputEncoding::IsoGainMapJpeg:
       e.encode=sum({overhead,resident,plane(canvas,27)});
       e.verify=sum({overhead,resident,plane(canvas,16)}); break;
     case OutputEncoding::Adaptive:
       e.encode=sum({overhead,resident,plane(canvas,16),vt});
-      e.verify=sum({overhead,resident,plane(canvas,depth==10 ? 22 : 16)}); break;
+      e.verify=sum({overhead,resident,plane(canvas,4)}); break;
     case OutputEncoding::Pq: case OutputEncoding::Hlg:
       e.encode=sum({overhead,resident,plane(canvas,12),vt});
-      e.verify=sum({overhead,resident,plane(canvas,22)}); break;
+      e.verify=sum({overhead,resident,plane(canvas,4)}); break;
     case OutputEncoding::AvifPq: case OutputEncoding::AvifHlg:
       if (const auto cells=avif_grid_layout(cw,ch); cells.is_grid()) {
         // A grid (E8) converts and codes one cell at a time. The canvas keeps its

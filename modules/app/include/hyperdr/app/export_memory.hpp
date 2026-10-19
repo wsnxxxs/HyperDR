@@ -6,8 +6,9 @@
 
 namespace hyperdr {
 // Peak footprint of each successive stage, not the sum of all stages. HEIC
-// verification still includes libheif's full RGB/YUV decode; remeasure this
-// stage when P3b replaces it with tile-wise VideoToolbox decoding.
+// verification decodes tile by tile through our HEIF reader and VideoToolbox:
+// it holds the compressed file and a few tiles, never a canvas-sized raster
+// (measured 41-79 MB for a 185 MP story canvas).
 struct ExportMemoryEstimate {
   std::uint64_t decode{}, render{}, composite{}, packaging{}, encode{}, verify{};
   [[nodiscard]] std::uint64_t peak() const noexcept {

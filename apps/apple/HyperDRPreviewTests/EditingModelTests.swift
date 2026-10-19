@@ -1,4 +1,6 @@
 import AppKit
+import Observation
+import Synchronization
 import HyperDRKit
 import XCTest
 @testable import HyperDR
@@ -132,6 +134,8 @@ import XCTest
         XCTAssertEqual(model.control("hdrRange").value, 3)
         model.selectEncoding("pq")
         XCTAssertEqual(model.control("hdrRange").value, 3.80731)
+        XCTAssertEqual(model.control("hdrRange").defaultValue, 3.80731)
+        XCTAssertEqual(model.outputCeilingStops, 3.80731)
         model.adjust("hdrRange", to: 3.2)
         model.resetControl("hdrRange")
         XCTAssertEqual(model.control("hdrRange").value, 3.80731)
@@ -374,5 +378,28 @@ extension EditingModelTests {
         model.redo(firstResponder:nil)
         XCTAssertEqual(model.control("brightness").value,0.8)
         XCTAssertTrue(shared.groupsByEvent)
+    }
+}
+
+extension EditingModelTests {
+    func testMaskAndOutputCeilingAreObservableAndUseCurrentDefaults() async {
+        let (model,_,_) = await opened()
+        let maskChanges = Mutex(0), ceilingChanges = Mutex(0)
+        withObservationTracking { _ = model.maskKey } onChange: { maskChanges.withLock { $0 += 1 } }
+        model.showMask(for:"hdrStrength")
+        XCTAssertEqual(maskChanges.withLock { $0 },1)
+        withObservationTracking { _ = model.outputCeilingStops } onChange: { ceilingChanges.withLock { $0 += 1 } }
+        model.adjust("hdrRange",to:2.8)
+        XCTAssertEqual(ceilingChanges.withLock { $0 },1)
+        XCTAssertEqual(model.outputCeilingStops,2.8)
+        model.setWorkflow(.colorOnly)
+        XCTAssertEqual(model.outputCeilingStops,0)
+        XCTAssertNil(model.maskKey)
+        let (hdr,_,_) = await opened(domain:.hdr,identity:["brightness":0,"hdrStrength":1,"hdrRange":3.80731])
+        hdr.selectEncoding("pq")
+        XCTAssertEqual(hdr.control("hdrRange").defaultValue,3.80731)
+        hdr.selectEncoding("hlg")
+        XCTAssertEqual(hdr.control("hdrRange").defaultValue,2.3)
+        XCTAssertEqual(hdr.outputCeilingStops,2.3)
     }
 }

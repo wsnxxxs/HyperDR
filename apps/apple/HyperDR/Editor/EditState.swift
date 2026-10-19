@@ -153,6 +153,7 @@ struct ControlSpecView: Equatable, Sendable {
     let key: String
     let spec: ControlSpecView
     private(set) var value: Double
+    private(set) var defaultValue: Double
     private(set) var range: ClosedRange<Double>
     private(set) var isVisible = true
     private(set) var isEnabled = false
@@ -163,14 +164,16 @@ struct ControlSpecView: Equatable, Sendable {
         key = spec.key
         self.spec = spec
         value = spec.defaultValue
+        defaultValue = spec.defaultValue
         range = spec.range
     }
 
     /// Model only. Writes only what changed, so observers of one property are
     /// not invalidated by another.
-    func update(value: Double? = nil, range: ClosedRange<Double>? = nil,
+    func update(value: Double? = nil, defaultValue: Double? = nil, range: ClosedRange<Double>? = nil,
                 isVisible: Bool? = nil, isEnabled: Bool? = nil) {
         if let value, value != self.value { self.value = value }
+        if let defaultValue, defaultValue != self.defaultValue { self.defaultValue = defaultValue }
         if let range, range != self.range { self.range = range }
         if let isVisible, isVisible != self.isVisible { self.isVisible = isVisible }
         if let isEnabled, isEnabled != self.isEnabled { self.isEnabled = isEnabled }

@@ -9,6 +9,7 @@ import QuartzCore
 nonisolated struct CanvasSnapshot: @unchecked Sendable {
     enum Content {
         case frame(PreviewFrame, original: Bool)
+        case composition(CanvasComposition)
         /// The diagnostic window's 0–8× ramp.
         case synthetic(original: Bool)
         /// No photo: present a transparent drawable once and let go of the frame.
@@ -190,6 +191,10 @@ nonisolated final class PreviewRenderLoop: @unchecked Sendable {
                 guard renderer.clear(in: layer) else { return false }
                 showsEmpty = true
                 return true
+            case .composition(let content):
+                let drawn = try renderer.draw(in: layer, composition: content, transform: snapshot.transform)
+                if drawn { showsEmpty = false }
+                return drawn
             case .frame(let frame, let original):
                 let drawn = try renderer.draw(in: layer, transform: snapshot.transform) {
                     try renderer.prepare(frame: frame, original: original)

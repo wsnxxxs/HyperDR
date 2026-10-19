@@ -94,7 +94,17 @@ import UniformTypeIdentifiers
     @ObservationIgnored var submittedJob: RenderJob?
     @ObservationIgnored var displayedAIGain: ModelGainToken?
     @ObservationIgnored private var busyTask: Task<Void, Never>?
-    @ObservationIgnored private var renderOutstanding = false
+    @ObservationIgnored var renderOutstanding = false
+    @ObservationIgnored var referenceOptions: EditOptions?
+    @ObservationIgnored var detailTask: Task<Void, Never>?
+    @ObservationIgnored var detailTicket = 0
+    @ObservationIgnored var editedDetailFrame: PreviewFrame?
+    @ObservationIgnored var originalDetailFrame: PreviewFrame?
+    private(set) var maskKey: String?
+    func setMaskKey(_ value: String?) { maskKey = value }
+    var showsHighlightZebra = false { didSet { if showsHighlightZebra != oldValue { bumpFrameRevision() } } }
+    var showsShadowZebra = false { didSet { if showsShadowZebra != oldValue { bumpFrameRevision() } } }
+    var previewsAsSDR = false { didSet { if previewsAsSDR != oldValue { bumpFrameRevision() } } }
 
     private struct OpenSnapshot {
         var document: DocumentState?
@@ -138,6 +148,7 @@ import UniformTypeIdentifiers
         canvas.setImageSize(hasEditedFrame ? document?.pixelSize : nil)
         source.domain = document?.source?.domain
         syncControls()
+        canvas.onGeometryChange = { [weak self] in self?.canvasGeometryChanged() }
         let statuses = services.engineUpdates()
         engineObserver = Task { [weak self] in
             for await status in statuses {
@@ -156,6 +167,7 @@ import UniformTypeIdentifiers
 
     deinit {
         operation?.cancel()
+        detailTask?.cancel()
         busyTask?.cancel()
         aiTask?.cancel()
         tokenTask?.cancel()
@@ -174,6 +186,7 @@ import UniformTypeIdentifiers
         set {
             guard isAvailable(newValue) else { return }
             selectedMode = newValue
+            scheduleDetails()
             display.gainWeight = newValue != .original ? editedGainWeight : nil
         }
     }
@@ -238,6 +251,7 @@ import UniformTypeIdentifiers
 
         operation?.cancel()
         captureFactsTask?.cancel()
+        invalidateDetails()
         cancelAI()
         endGesture()
         generation += 1
@@ -315,6 +329,7 @@ import UniformTypeIdentifiers
         stopRefreshing()
         if let photo { Task { [services] in await services.close(photo) } }
         photo = nil
+        invalidateDetails()
         openRollback = nil
         document = nil
         workspace = .empty
@@ -441,7 +456,10 @@ import UniformTypeIdentifiers
                         if final {
                             displayedAIGain = submittedJob?.options["useModel"] == .bool(true) ? readyGain : nil
                             updateAIState()
-                            if !lastSubmitWasDraft { startScopes(original: false) }
+                            if !lastSubmitWasDraft {
+                                startScopes(original: false)
+                                scheduleDetails()
+                            }
                         }
                     case .failed(let error):
                         if renderScheduler?.hasPending != true {
@@ -499,6 +517,7 @@ import UniformTypeIdentifiers
             setPeeking(false)
         case .edited(let frame):
             editedFrame = frame.frame
+            canvas.previewPixelSize = frame.frame.map { CGSize(width: $0.base.width, height: $0.base.height) }
             frameRevision &+= 1
             hasEditedFrame = true
             document?.pixelSize = frame.pixelSize
@@ -545,6 +564,7 @@ import UniformTypeIdentifiers
         endGesture()
         operation = nil
         stopRefreshing()
+        invalidateDetails()
         let error = UserFacingError(code: "metal_unavailable", detail: detail)
         if let previous = openRollback {
             restore(previous, error: error)

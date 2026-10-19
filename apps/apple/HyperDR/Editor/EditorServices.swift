@@ -31,6 +31,8 @@ import UniformTypeIdentifiers
     /// services keep at most the newest request (latest wins).
     func submit(_ photo: EditorPhoto, options: EditOptions, maxEdge: Int)
     /// The models this engine build offers.
+    func renderDetail(_ photo: EditorPhoto, options: EditOptions, region: PreviewRegion,
+                      original: Bool) async throws -> EditorPreview?
     func modelTable() -> ModelTable
     /// The identity a gain for these options would have now.
     func modelGainToken(for photo: EditorPhoto, options: EditOptions) async throws -> ModelGainToken
@@ -131,6 +133,8 @@ extension UserDefaults {
         ModelChoice(id: "research-exif-v1", name: "EXIF", nameKey: "model.research-exif-v1",
                     summaryKey: "model.research-exif-v1.summary", isEnabled: true, requiresCapture: true),
     ])
+    var detailHandler: ((PreviewRegion, Bool) async throws -> EditorPreview?)?
+    private(set) var detailRequests: [(region: PreviewRegion, original: Bool)] = []
     var autoCompletesRefreshes = true
     var gainGate: (() async throws -> Void)?
     var gainDelay: Duration = .milliseconds(20)
@@ -283,6 +287,12 @@ extension UserDefaults {
 
     func close(_ photo: EditorPhoto) async { closed.append(photo) }
 
+    func renderDetail(_ photo: EditorPhoto, options: EditOptions, region: PreviewRegion,
+                      original: Bool) async throws -> EditorPreview? {
+        detailRequests.append((region, original))
+        return try await detailHandler?(region, original)
+    }
+
     func modelTable() -> ModelTable { models }
 
     /// The fake's stand-in for the Kit's `ModelGainInputs`: model, input
@@ -305,3 +315,11 @@ extension UserDefaults {
                                 missingCaptureFields: missingCaptureFields)
     }
 }
+
+extension EditorServices {
+    /// Fakes without native pixels have no detail image.
+    func renderDetail(_ photo: EditorPhoto, options: EditOptions, region: PreviewRegion,
+                      original: Bool) async throws -> EditorPreview? { nil }
+}
+
+enum EditorDetailError: Error { case sourceReplaced }

@@ -89,7 +89,7 @@ nonisolated struct ReconstructParams {
         gainHeight = UInt32(planes.gainHeight)
         gainRowBytes = UInt32(planes.gainRowBytes)
         gainChannels = UInt32(planes.gainChannels)
-        self.original = original ? 1 : 0
+        self.original = 0 // original photos reconstruct their OWN HDR gain
         gainMin = planes.gainMin
         gainMax = planes.gainMax
         inverseGamma = 1 / max(planes.gainGamma, 0.0001)
@@ -139,6 +139,7 @@ nonisolated final class PreviewRenderer: @unchecked Sendable {
         let planes: FramePlanes
     }
     private var prepared: Prepared?
+    private var compositor: CanvasCompositor?
 
     /// Intervals for A3's frame-time table: pass 1, waiting for a drawable,
     /// pass 2 encoding, present + commit, and each presenting command buffer
@@ -267,7 +268,7 @@ nonisolated final class PreviewRenderer: @unchecked Sendable {
     func isPrepared(from source: AnyObject) -> Bool { prepared?.source === source }
 
     /// Lets go of the intermediate and the frame it was built from.
-    func releaseFrame() { prepared = nil }
+    func releaseFrame() { prepared = nil; compositor?.releaseFrames() }
 
     /// The frame or buffer whose planes the intermediate currently owns, if any.
     var readyFrameIdentity: ObjectIdentifier? { prepared.map { ObjectIdentifier($0.source) } }
@@ -434,6 +435,20 @@ nonisolated final class PreviewRenderer: @unchecked Sendable {
         return true
     }
 
+    /// Composition obeys the same gate and submits ONE command buffer for
+    /// both sides, every local layer and every overlay.
+    func draw(in layer: CAMetalLayer, composition: CanvasComposition, transform: CanvasTransform) throws -> Bool {
+        guard layer.drawableSize.width > 0, layer.drawableSize.height > 0 else { return true }
+        guard let drawable = acquireDrawable(layer), let command = makePresentingCommand() else { return false }
+        if compositor == nil { compositor = try CanvasCompositor(device: device, queue: queue, library: library) }
+        let interval = Self.signposter.beginInterval("Encode",id:signpostID)
+        defer { Self.signposter.endInterval("Encode",interval) }
+        try compositor?.encode(composition, transform: transform, target: drawable.texture, command: command)
+        needsRetry = false
+        submit(command, presenting: drawable)
+        return true
+    }
+
     /// Presents an empty (fully transparent) drawable, so closing a photo does
     /// not leave the previous frame on screen, and lets go of the intermediate
     /// and the frame it was built from.
@@ -441,7 +456,7 @@ nonisolated final class PreviewRenderer: @unchecked Sendable {
     /// either way, and `needsRetry` is set so the clear is tried again.
     @discardableResult
     func clear(in layer: CAMetalLayer) -> Bool {
-        prepared = nil
+        releaseFrame()
         guard layer.drawableSize.width > 0, layer.drawableSize.height > 0 else {
             needsRetry = true    // no drawable was cleared at this size
             return false

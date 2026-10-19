@@ -14,6 +14,24 @@ enum ZoomReadout: Equatable {
     @ObservationIgnored private var geometry = CanvasTransform(
         imageSize: .zero, viewport: .zero)
     @ObservationIgnored private var imageSize: PixelSize?
+    @ObservationIgnored var onGeometryChange: (() -> Void)?
+    @ObservationIgnored var previewPixelSize: CGSize?
+
+    var needsDetail: Bool {
+        guard let previewPixelSize, geometry.displayedSize.width > 0,
+              previewPixelSize.width + 0.5 < geometry.imageSize.width else { return false }
+        return previewPixelSize.width + 0.5 < geometry.displayedSize.width * geometry.backingScale
+    }
+
+    var visibleSourceRect: CGRect? {
+        let image = geometry.imageFrame
+        guard image.width > 0, image.height > 0 else { return nil }
+        let visible = image.intersection(CGRect(origin: .zero, size: geometry.viewport))
+        guard !visible.isNull, !visible.isEmpty else { return nil }
+        let sx = geometry.imageSize.width / image.width, sy = geometry.imageSize.height / image.height
+        return CGRect(x: (visible.minX-image.minX)*sx, y: (visible.minY-image.minY)*sy,
+                      width: visible.width*sx, height: visible.height*sy)
+    }
 
     private(set) var zoomReadout: ZoomReadout = .fit
     private(set) var zoomPercent = 100
@@ -93,6 +111,7 @@ enum ZoomReadout: Equatable {
         zoomReadout = geometry.zoom <= CanvasTransform.minZoom ? .fit : .percent(zoomPercent)
         zoom = geometry.zoom <= CanvasTransform.minZoom ? .fit : .scale(geometry.zoom)
         imageFrame = fittedSize == nil ? nil : geometry.imageFrame
+        onGeometryChange?()
     }
 }
 

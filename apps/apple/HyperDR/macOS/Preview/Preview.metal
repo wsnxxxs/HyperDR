@@ -94,3 +94,67 @@ fragment float4 previewDisplayFragment(DisplayVertex in [[stage_in]],
                                      address::clamp_to_edge);
     return image.sample(displaySampler, in.uv);
 }
+
+// M2-R: one array stores the SDR base and the full-gain rendition. Pass 2
+// changes headroom/SDR/overlays without rerunning reconstruction.
+kernel void reconstructComposition(device const float* base [[buffer(0)]],
+                                   device const float* gain [[buffer(1)]],
+                                   constant ReconstructParams& input [[buffer(2)]],
+                                   constant uint& firstSlice [[buffer(3)]],
+                                   texture2d_array<float, access::write> out [[texture(0)]],
+                                   uint3 xy [[thread_position_in_grid]]) {
+    if (xy.x >= input.width || xy.y >= input.height || xy.z > 1) return;
+    // reconstructPixel receives constant address space, so the base is read
+    // directly for slice 0 and the full-gain parameters remain immutable.
+    uint i = xy.y * (input.baseRowBytes / 4) + xy.x * 3;
+    float3 value = xy.z == 0 ? float3(base[i], base[i+1], base[i+2])
+                            : reconstructPixel(xy.xy, base, gain, input);
+    out.write(float4(value, 1), xy.xy, firstSlice + xy.z);
+}
+
+struct CompositionParams {
+    float4 rect;
+    float2 uvScale;
+    uint slice, flags;
+    float weight, hdrRange, backingScale, baseOffset, alternateOffset, padding;
+    float4 maskColor, highlightColor, shadowColor, stripe;
+};
+
+vertex DisplayVertex compositionVertex(uint index [[vertex_id]],
+                                        constant CompositionParams& p [[buffer(0)]]) {
+    const float2 corners[4] = {float2(0,0),float2(1,0),float2(0,1),float2(1,1)};
+    float2 c = corners[index];
+    DisplayVertex out;
+    out.position = float4(mix(p.rect.x,p.rect.z,c.x),mix(p.rect.y,p.rect.w,c.y),0,1);
+    out.uv = float2(c.x,1-c.y) * p.uvScale;
+    return out;
+}
+
+fragment float4 compositionFragment(DisplayVertex in [[stage_in]],
+                                      constant CompositionParams& p [[buffer(0)]],
+                                      texture2d_array<float> image [[texture(0)]]) {
+    constexpr sampler s(filter::linear, mip_filter::linear, address::clamp_to_edge);
+    float2 texel = 0.5 / float2(image.get_width(), image.get_height());
+    float2 uv = clamp(in.uv, texel, p.uvScale - texel);
+    float3 base = image.sample(s,uv,p.slice).rgb;
+    float3 hdr = image.sample(s,uv,p.slice+1).rgb;
+    float3 value = hdr;
+    if ((p.flags & 1) || p.weight <= 0) value = base;
+    else if (p.weight < 1) {
+        float3 ratio = max(float3(1e-6), (hdr + p.alternateOffset) / max(float3(1e-6), base + p.baseOffset));
+        value = max(float3(0), (base + p.baseOffset) * pow(ratio, p.weight) - p.alternateOffset);
+    }
+    if (p.flags & 8) {
+        float3 Y = float3(0.2289746,0.6917385,0.0792869);
+        float stops = max(0.0,log2(max(dot(hdr,Y),1e-6) / max(dot(base,Y),1e-6)));
+        float w = p.hdrRange > 0 ? clamp(stops/p.hdrRange,0.0,1.0) : 0;
+        if (w > 0.01) value = mix(value,p.maskColor.rgb,w*p.maskColor.a);
+    }
+    // Screen-point coordinates: the period never grows with photo zoom.
+    bool stripe = fmod(dot(in.position.xy,p.stripe.zw),p.stripe.x) < p.stripe.y;
+    if (stripe && (p.flags & 2) && max(hdr.r,max(hdr.g,hdr.b)) >= max(1.0,exp2(p.hdrRange))*exp2(-0.01))
+        value = mix(value,p.highlightColor.rgb,p.highlightColor.a);
+    if (stripe && (p.flags & 4) && max(base.r,max(base.g,base.b)) < 0.5/255.0/12.92)
+        value = mix(value,p.shadowColor.rgb,p.shadowColor.a);
+    return float4(value,1);
+}

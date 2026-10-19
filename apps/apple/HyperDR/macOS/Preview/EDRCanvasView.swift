@@ -29,6 +29,7 @@ final class EDRCanvasView: NSView {
 
     /// Supplies the frame to draw. A2 wires this to the live preview service;
     /// the diagnostic window supplies a synthetic ramp instead.
+    var compositionProvider: (() -> CanvasComposition?)?
     var frameProvider: (() -> PreviewCanvasFrame?)?
     /// Called when a gesture changed the transform; the representable mirrors
     /// it into `CanvasModel` so overlays stay aligned.
@@ -153,7 +154,9 @@ final class EDRCanvasView: NSView {
         guard dirty, let renderLoop else { return }
         dirty = false
         let content: CanvasSnapshot.Content
-        if let frame = frameProvider?() {
+        if let composition = compositionProvider?() {
+            content = .composition(composition)
+        } else if let frame = frameProvider?() {
             content = .frame(frame.frame, original: frame.showsOriginal)
         } else if showsSyntheticRamp {
             if transform.imageSize == .zero { showImageSize(PreviewRenderer.syntheticRampSize) }

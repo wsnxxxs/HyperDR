@@ -61,7 +61,10 @@ int boundary(hyperdr_error** error, Function function) noexcept {
   } catch (const hyperdr::SourceUnreadable& exception) {
     set_error(error, "source_unreadable", exception.what());
   } catch (const hyperdr::UnsupportedFormat& exception) {
-    set_error(error, "unsupported_format", exception.what());
+    try {
+      const auto detail=exception.detail_json();
+      set_error(error,"unsupported_format",exception.what(),detail.empty()?nullptr:detail.c_str());
+    } catch (...) { set_error(error,"out_of_memory","cannot allocate native error detail"); }
   } catch (const hyperdr::DecodeFailed& exception) {
     set_error(error, "decode_failed", exception.what());
   } catch (const std::invalid_argument& exception) {

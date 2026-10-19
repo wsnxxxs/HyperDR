@@ -1,6 +1,9 @@
 #include "../src/internal/cicp.hpp"
+#include "../src/internal/heif_color.hpp"
+#include "../src/internal/icc_profiles.hpp"
 
 #include <iostream>
+#include <cstring>
 
 namespace {
 
@@ -76,8 +79,43 @@ void check_odd_reduction(const hyperdr::codec::SourceColor& color) {
 
 }  // namespace
 
+void check_float_heif_colour() {
+  using namespace hyperdr;
+  using namespace hyperdr::codec;
+  SourceColor color;
+  color.icc=display_p3_profile();
+  FloatRgbRowTransform icc(color);
+  const float encoded[]{-.125F,1.25F,.5F};
+  float output[3];
+  icc.convert(encoded,output,1);
+  const float expected[]{-.125F/12.92F,std::pow((1.25F+.055F)/1.055F,2.4F),srgb_eotf(.5F)};
+  for (unsigned c=0;c<3;++c)
+    if (std::abs(output[c]-expected[c])>3e-4F)
+      throw std::runtime_error("HEIF float ICC clipped/quantized an encoded excursion");
+  std::vector<float> parallel(128*3),serial(128*3);
+  for(unsigned y=0;y<128;++y) icc.convert(encoded,serial.data()+y*3,1);
+  parallel_for_rows(128,[&](unsigned y){icc.convert(encoded,parallel.data()+y*3,1);});
+  if(std::memcmp(parallel.data(),serial.data(),parallel.size()*sizeof(float)))
+    throw std::runtime_error("float ICC serial/parallel bytes differ");
+  color.icc.clear();
+  for(int primaries:{1,9,12}) for(int transfer:{1,8,13,16,18}) {
+    color.primaries=primaries;color.transfer=transfer;
+    FloatRgbRowTransform transform(color);
+    transform.convert(encoded,output,1);
+    std::array<float,3> linear;
+    for(unsigned c=0;c<3;++c) linear[c]=transfer==18 ? hlg_inverse_oetf_scene(encoded[c])
+        : std::copysign(decode_transfer(std::abs(encoded[c]),transfer),encoded[c]);
+    if(transfer==18)linear=hlg_ootf(linear,cicp_luminance_weights(primaries));
+    const auto expected=encoded_to_linear_p3(linear[0],linear[1],linear[2],primaries,8);
+    for(unsigned c=0;c<3;++c)
+      if(std::abs(output[c]-expected[c])>1e-3F+std::abs(expected[c])*3e-5F)
+        throw std::runtime_error("HEIF float CICP lost extended encoded RGB");
+  }
+}
+
 int main() {
   try {
+    check_float_heif_colour();
     hyperdr::codec::SourceColor color;
     color.icc = linear_rec2020_profile();
     for (int bits : {16, 10, 12}) check_depth(bits, color);

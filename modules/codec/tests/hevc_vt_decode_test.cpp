@@ -36,10 +36,10 @@ void put(std::vector<std::uint8_t>& p, std::size_t index, unsigned depth, unsign
   }
 }
 std::atomic<bool> conversion_worker_seen{false};
-std::vector<std::uint16_t> rgb(const h::DecodedPicture& p, h::YuvRgbParams params) {
+std::vector<float> rgb(const h::DecodedPicture& p, h::YuvRgbParams params) {
   const auto caller = std::this_thread::get_id();
-  std::vector<std::uint16_t> out(std::size_t(p.width) * p.height * 3);
-  h::yuv_to_rgb(p, params, [&](unsigned y, std::span<const std::uint16_t> row) {
+  std::vector<float> out(std::size_t(p.width) * p.height * 3);
+  h::yuv_to_rgb(p, params, [&](unsigned y, std::span<const float> row) {
     if (std::this_thread::get_id() != caller)
       conversion_worker_seen.store(true, std::memory_order_relaxed);
     std::copy(row.begin(), row.end(), out.begin() + std::size_t(y) * p.width * 3);
@@ -154,7 +154,10 @@ void conversion() {
               h::YuvRgbParams params{matrix, full, location, false};
               auto actual = rgb(p, params);
               params.parallel_rows = true;
-              require(actual == rgb(p, params), "serial/parallel RGB differs");
+              const auto parallel = rgb(p, params);
+              require(actual.size() == parallel.size() &&
+                          std::memcmp(actual.data(), parallel.data(), actual.size()*sizeof(float)) == 0,
+                      "serial/parallel float RGB bytes differ");
               const double yspan = full ? maximum : 219 * scale,
                            cspan = full ? maximum : 224 * scale, off = full ? 0 : 16 * scale,
                            mid = 128 * scale;
@@ -183,9 +186,10 @@ void conversion() {
                   const double expected[] = {r, g, b};
                   for (unsigned c = 0; c < 3; ++c) {
                     double error = std::abs(actual[(std::size_t(y) * p.width + x) * 3 + c] -
-                                            std::clamp(expected[c], 0., 1.) * maximum);
+                                            expected[c]);
+                    error *= maximum;
                     worst = std::max(worst, error);
-                    require(error <= .500000001, "RGB analytic error above half a code");
+                    require(error <= .001, "unclipped float RGB analytic error above .001 code");
                   }
                 }
               ++cases;
@@ -193,7 +197,7 @@ void conversion() {
   h::DecodedPicture invalid{0xFFFFFFFFU, 0xFFFFFFFFU, 10, 3, {}, {}};
   bool invalid_rejected = false;
   try {
-    h::yuv_to_rgb(invalid, {}, [](unsigned, std::span<const std::uint16_t>) {});
+    h::yuv_to_rgb(invalid, {}, [](unsigned, std::span<const float>) {});
   } catch (const std::exception&) {
     invalid_rejected = true;
   }
@@ -431,13 +435,13 @@ void memory_grid() {
         f.config, cols * rows, [&](std::size_t) { return std::span(f.sample); },
         [&](std::size_t index, h::DecodedPicture&& p) {
           auto params = h::conversion_params(f.config);
-          h::yuv_to_rgb(p, params, [&](unsigned y, std::span<const std::uint16_t> rgb) {
+          h::yuv_to_rgb(p, params, [&](unsigned y, std::span<const float> rgb) {
             auto dy = unsigned(index / cols) * 512 + y;
             if (dy >= hgt) return;
             auto x0 = unsigned(index % cols) * 512;
             auto count = std::min(512U, w - x0);
             auto* dst = output.data() + (std::size_t(dy) * w + x0) * 3;
-            for (unsigned x = 0; x < count * 3; ++x) dst[x] = rgb[x] / 255.F;
+            for (unsigned x = 0; x < count * 3; ++x) dst[x] = rgb[x];
           });
         });
   } catch (...) {

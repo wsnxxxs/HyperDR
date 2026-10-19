@@ -246,6 +246,9 @@ Staged decode_stage(const std::filesystem::path& path,
     staged.decoded = true;
   } catch (const Cancelled&) {
     throw;
+  } catch (const UnsupportedFormat& e) {
+    staged.decoded=false;staged.result.message=e.what();staged.result.detail=e.what();
+    staged.result.error_code="unsupported_format";staged.result.error_detail_json=e.detail_json();
   } catch (const RawUnsupported& e) {
     staged.decoded=false;staged.result.message=e.what();staged.result.detail=e.what();
     staged.result.error_code="raw_unsupported";staged.result.error_detail_json=e.detail_json();

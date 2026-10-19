@@ -68,6 +68,10 @@ class SourceUnreadable : public std::runtime_error {
 class UnsupportedFormat : public std::runtime_error {
  public:
   using std::runtime_error::runtime_error;
+  UnsupportedFormat(std::string message, std::string feature);
+  [[nodiscard]] std::string detail_json() const;
+ private:
+  std::string feature_;
 };
 class DecodeFailed : public std::runtime_error {
  public:

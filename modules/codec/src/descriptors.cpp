@@ -5,6 +5,13 @@
 #include "hyperdr/foundation/json.hpp"
 
 namespace hyperdr {
+UnsupportedFormat::UnsupportedFormat(std::string message, std::string feature)
+    : std::runtime_error(std::move(message)), feature_(std::move(feature)) {}
+std::string UnsupportedFormat::detail_json() const {
+  if(feature_.empty())return {};
+  json::Writer writer;return writer.begin_object().member("container","heif")
+      .member("feature",feature_).end_object().take();
+}
 RawUnsupported::RawUnsupported(std::string kind, std::string camera)
     : std::runtime_error(kind=="dng" ? "This DNG cannot be decoded by this version of macOS"
         : camera.empty() ? "This camera RAW cannot be decoded by this version of macOS"

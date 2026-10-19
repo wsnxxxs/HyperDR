@@ -1,0 +1,384 @@
+#include "internal/heif_decoder.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+
+#include "hevc/hevc.hpp"
+#include "hyperdr/gainmap/reconstruct.hpp"
+#include "hyperdr/image/resample.hpp"
+#include "hyperdr/image/transfer.hpp"
+#include "hyperdr/look/grid.hpp"
+#include "internal/budget.hpp"
+#include "internal/cicp.hpp"
+#include "internal/heif_color.hpp"
+#include "internal/metadata.hpp"
+namespace hyperdr::codec {
+namespace {
+struct Geometry {
+  int a = 1, b = 0, c = 0, d = 1;
+  std::int64_t tx = 0, ty = 0;
+  unsigned width, height;
+  explicit Geometry(const HeifImagePlan& plan) : width(plan.width), height(plan.height) {
+    auto compose = [&](int aa, int bb, int cc, int dd, std::int64_t x, std::int64_t y) {
+      const auto na = aa * a + bb * c, nb = aa * b + bb * d, nc = cc * a + dd * c,
+                 nd = cc * b + dd * d;
+      const auto nx = aa * tx + bb * ty + x, ny = cc * tx + dd * ty + y;
+      a = na;
+      b = nb;
+      c = nc;
+      d = nd;
+      tx = nx;
+      ty = ny;
+    };
+    for (const auto& t : plan.transforms) {
+      if (t.type == "clap") {
+        compose(1, 0, 0, 1, -std::int64_t(t.left), -std::int64_t(t.top));
+        width = t.width;
+        height = t.height;
+      } else if (t.type == "imir") {
+        if (t.value == 0)
+          compose(-1, 0, 0, 1, width - 1, 0);
+        else
+          compose(1, 0, 0, -1, 0, height - 1);
+      } else if (t.type == "irot") {
+        if (t.value == 1) {
+          compose(0, 1, -1, 0, 0, width - 1);
+          std::swap(width, height);
+        } else if (t.value == 2)
+          compose(-1, 0, 0, -1, width - 1, height - 1);
+        else if (t.value == 3) {
+          compose(0, -1, 1, 0, height - 1, 0);
+          std::swap(width, height);
+        }
+      }
+    }
+  }
+  std::pair<std::int64_t, std::int64_t> map(unsigned x, unsigned y) const {
+    return {a * std::int64_t(x) + b * std::int64_t(y) + tx,
+            c * std::int64_t(x) + d * std::int64_t(y) + ty};
+  }
+};
+struct Progress {
+  const RawDecodeOptions& options;
+  std::string_view path;
+  std::size_t done = 0, total = 0;
+  void tick(std::size_t n) {
+    if (options.progress_sink)
+      options.progress_sink->on_progress(
+          {"decode", path, .9 * double(done + n) / std::max<std::size_t>(1, total), {}});
+  }
+  void finish() {
+    if (options.progress_sink) options.progress_sink->on_progress({"decode", path, 1, {}});
+  }
+};
+void tiles(const HeifFile& file, const HeifImagePlan& plan, const hevc::DecodedTileSink& sink,
+           Progress* progress = nullptr) {
+  std::vector<std::uint8_t> joined;
+  hevc::DecodeParams params;
+  if (progress) params.progress = [&](std::size_t n, std::size_t) { progress->tick(n); };
+  hevc::decode_item(
+      plan.config, plan.tiles.size(),
+      [&](std::size_t i) -> std::span<const std::uint8_t> {
+        const auto extents = plan.tiles[i].extents;
+        if (extents.size() == 1) return file.bytes.subspan(extents[0].offset, extents[0].length);
+        joined = file.item_bytes(plan.tiles[i].id);
+        return joined;
+      },
+      sink, params);
+  if (progress) progress->done += plan.tiles.size();
+}
+// Full-size writes are disjoint even after rotation. Reduced previews use a
+// fixed tile/row/pixel order so weighted sums cannot depend on worker count.
+class Output {
+ public:
+  Geometry geometry;
+  FloatImage image;
+  bool reduced, budget_limited;
+  Output(const HeifImagePlan& plan, unsigned channels, unsigned edge = 0) : geometry(plan) {
+    auto size = raster_decode_plan(geometry.width, geometry.height, edge);
+    image = FloatImage(size.width, size.height, channels);
+    budget_limited = size.budget_limited;
+    reduced = size.width != geometry.width || size.height != geometry.height;
+  }
+  void put(unsigned sx, unsigned sy, const float* value) {
+    const auto [x, y] = geometry.map(sx, sy);
+    if (x < 0 || y < 0 || x >= geometry.width || y >= geometry.height) return;
+    if (!reduced) {
+      std::copy_n(value, image.channels,
+                  image.pixels.data() + (std::size_t(y) * image.width + x) * image.channels);
+      return;
+    }
+    const double left = double(x) * image.width / geometry.width,
+                 right = double(x + 1) * image.width / geometry.width;
+    const double top = double(y) * image.height / geometry.height,
+                 bottom = double(y + 1) * image.height / geometry.height;
+    for (unsigned yy = unsigned(top); yy < std::min(image.height, unsigned(std::ceil(bottom)));
+         ++yy)
+      for (unsigned xx = unsigned(left); xx < std::min(image.width, unsigned(std::ceil(right)));
+           ++xx) {
+        const float weight = (std::min(right, double(xx + 1)) - std::max(left, double(xx))) *
+                             (std::min(bottom, double(yy + 1)) - std::max(top, double(yy)));
+        auto* p = image.pixels.data() + (std::size_t(yy) * image.width + xx) * image.channels;
+        for (unsigned ch = 0; ch < image.channels; ++ch) p[ch] += value[ch] * weight;
+      }
+  }
+};
+FloatImage code_plane(const HeifFile& file, const HeifImagePlan& plan, unsigned channels,
+                      Progress* progress) {
+  if (channels != 1 && channels != 3) throw HeifReadError("invalid HEIF gain channels");
+  Output out(plan, channels);
+  const float maximum = (1U << plan.config.bit_depth) - 1;
+  tiles(
+      file, plan,
+      [&](std::size_t index, hevc::DecodedPicture&& p) {
+        auto x0 = unsigned(index % plan.columns) * plan.tile_width,
+             y0 = unsigned(index / plan.columns) * plan.tile_height;
+        if (channels == 1) {
+          parallel_for_rows(p.height, [&](unsigned y) {
+            for (unsigned x = 0; x < p.width && x0 + x < plan.width && y0 + y < plan.height; ++x) {
+              float v = p.luma_at(x, y) / maximum;
+              out.put(x0 + x, y0 + y, &v);
+            }
+          });
+        } else {
+          auto params = hevc::conversion_params(plan.config, plan.color ? &*plan.color : nullptr);
+          hevc::yuv_to_rgb(p, params, [&](unsigned y, std::span<const float> row) {
+            for (unsigned x = 0; x < p.width && x0 + x < plan.width && y0 + y < plan.height; ++x) {
+              float v[3]{row[x * 3], row[x * 3 + 1], row[x * 3 + 2]};
+              out.put(x0 + x, y0 + y, v);
+            }
+          });
+        }
+      },
+      progress);
+  return std::move(out.image);
+}
+SourceColor color_for(const HeifImagePlan& plan, ColorGamut gamut) {
+  SourceColor color(gamut);
+  color.icc.assign(plan.icc.begin(), plan.icc.end());
+  if (!color.icc.empty()) color.source = "icc";
+  if (plan.color) {
+    auto transfer = plan.color->transfer;
+    if (color.icc.empty() || transfer == kCicpTransferPq || transfer == kCicpTransferHlg) {
+      color.source = "cicp";
+      color.primaries = plan.color->primaries;
+      color.transfer = transfer;
+      if (transfer == kCicpTransferPq || transfer == kCicpTransferHlg) color.icc.clear();
+      if (cicp_primaries_unspecified(color.primaries))
+        color.primaries = cicp_primaries_for_gamut(gamut);
+    }
+  }
+  return color;
+}
+DecodedImage primary(const HeifFile& file, const HeifImagePlan& plan, ColorGamut gamut,
+                     unsigned edge, bool preserve_alpha, FloatImage* alpha_out,
+                     Progress* progress) {
+  const auto color = color_for(plan, gamut);
+  auto alpha_plan = file.resolve_alpha(plan.item_id);
+  FloatImage alpha;
+  if (alpha_plan) alpha = code_plane(file, alpha_plan->image, 1, progress);
+  Output out(plan, 3, edge);
+  if (alpha_plan && (alpha.width != out.geometry.width || alpha.height != out.geometry.height))
+    throw HeifReadError("HEIF alpha dimensions differ after transforms");
+  const auto alpha_type = !alpha_plan                 ? RgbAlpha::None
+                          : alpha_plan->premultiplied ? RgbAlpha::Premultiplied
+                                                      : RgbAlpha::Straight;
+  const FloatRgbRowTransform transform(color);
+  tiles(
+      file, plan,
+      [&](std::size_t index, hevc::DecodedPicture&& p) {
+        auto x0 = unsigned(index % plan.columns) * plan.tile_width,
+             y0 = unsigned(index / plan.columns) * plan.tile_height;
+        auto params = hevc::conversion_params(plan.config, plan.color ? &*plan.color : nullptr);
+        params.parallel_rows = !out.reduced;
+        hevc::yuv_to_rgb(p, params, [&](unsigned y, std::span<const float> row) {
+          if (y0 + y >= plan.height) return;
+          std::vector<float> unassociated;
+          std::vector<float> linear(std::size_t(p.width) * 3);
+          if (alpha_type == RgbAlpha::Premultiplied) {
+            unassociated.assign(row.begin(), row.end());
+            for (unsigned x = 0; x < p.width; ++x) {
+              const auto [ax, ay] = out.geometry.map(x0 + x, y0 + y);
+              const float a = ax >= 0 && ay >= 0 && ax < alpha.width && ay < alpha.height
+                                  ? alpha.at(ax, ay, 0)
+                                  : 0;
+              for (unsigned c = 0; c < 3; ++c)
+                unassociated[x * 3 + c] = a > 0 ? unassociated[x * 3 + c] / a : 0;
+            }
+            row = unassociated;
+          }
+          transform.convert(row.data(), linear.data(), p.width);
+          if (alpha_plan && !preserve_alpha) {
+            for (unsigned x = 0; x < p.width; ++x) {
+              const auto [ax, ay] = out.geometry.map(x0 + x, y0 + y);
+              const float a = ax >= 0 && ay >= 0 && ax < alpha.width && ay < alpha.height
+                                  ? alpha.at(ax, ay, 0)
+                                  : 0;
+              for (unsigned c = 0; c < 3; ++c) linear[x * 3 + c] *= a;
+            }
+          }
+          for (unsigned x = 0; x < p.width && x0 + x < plan.width; ++x)
+            out.put(x0 + x, y0 + y, linear.data() + x * 3);
+        });
+      },
+      progress);
+  DecodedImage result;
+  result.source_color = describe_source_color(color);
+  result.linear_p3 = std::move(out.image);
+  result.decode.sensor_width = plan.width;
+  result.decode.sensor_height = plan.height;
+  result.decode.target_width = out.geometry.width;
+  result.decode.target_height = out.geometry.height;
+  result.decode.resolution_reduced = out.budget_limited;
+  result.decode.decoded_width = result.linear_p3.width;
+  result.decode.decoded_height = result.linear_p3.height;
+  result.hdr_headroom = transfer_headroom(color.transfer);
+  if (result.hdr_headroom > 1 && plan.light && plan.light->maximum)
+    result.content_peak_nits = plan.light->maximum;
+  result.domain = display_referred_domain(result.hdr_headroom);
+  if (alpha_out) *alpha_out = std::move(alpha);
+  return result;
+}
+void composite(DecodedImage& result, const FloatImage& alpha) {
+  if (alpha.pixels.empty()) return;
+  parallel_for_rows(result.linear_p3.height, [&](unsigned y) {
+    for (unsigned x = 0; x < result.linear_p3.width; ++x)
+      for (unsigned c = 0; c < 3; ++c) {
+        result.linear_p3.at(x, y, c) *= alpha.at(x, y, 0);
+        if (result.authored_sdr) result.authored_sdr->at(x, y, c) *= alpha.at(x, y, 0);
+      }
+  });
+}
+}  // namespace
+FloatImage decode_heif_gain(const HeifFile& file, const HeifImagePlan& plan, unsigned channels) {
+  return code_plane(file, plan, channels, nullptr);
+}
+DecodedImage decode_heic_bytes(const std::vector<std::uint8_t>& bytes,
+                               const RawDecodeOptions& options, std::string_view path) {
+  const auto file = read_heif(bytes);
+  const auto plan = file.resolve_image();
+  auto exif_bytes = file.exif();
+  auto exif = read_exif(exif_bytes.data(), exif_bytes.size());
+  auto orientation = plan.transforms.empty() ? exif.orientation.value_or(1) : 1;
+  const bool iso = std::find(file.brands.begin(), file.brands.end(), "tmap") != file.brands.end() ||
+                   file.tmap_references().has_value();
+  std::optional<HeifGainMapPlan> gain;
+  std::optional<float> legacy_headroom;
+  std::string fallback;
+  if (iso) {
+    const auto inspection = inspect_heif(bytes);
+    if (!inspection.structurally_valid || !inspection.has_tmap_brand || !inspection.has_tmap_item ||
+        !inspection.has_dimg_reference)
+      throw HeifReadError("Adaptive HDR HEIC has invalid tmap structure");
+    gain = file.resolve_gain_map();
+    if (!gain || !gain->metadata) throw HeifReadError("Adaptive HDR HEIC lacks gain map");
+  } else if (!options.ignore_embedded_gain_map) {
+    for (const auto& [id, item] : file.items) {
+      auto refs = file.targets(id, "auxl");
+      if (std::find(refs.begin(), refs.end(), file.primary_item_id) == refs.end() ||
+          file.auxiliary_type(id) != "urn:com:apple:photo:2020:aux:hdrgainmap")
+        continue;
+      legacy_headroom = read_apple_legacy_gain_headroom(exif_bytes.data(), exif_bytes.size());
+      if (!legacy_headroom || *legacy_headroom < 1) {
+        fallback = "missing MakerNote headroom";
+        break;
+      }
+      try {
+        gain = HeifGainMapPlan{plan, file.resolve_image(id), {}, 0};
+        if (gain->gain.config.bit_depth != 8 || gain->gain.width > plan.width ||
+            gain->gain.height > plan.height) {
+          gain.reset();
+          fallback = "invalid gain map pixels";
+        }
+      } catch (const Cancelled&) {
+        throw;
+      } catch (const std::bad_alloc&) {
+        throw;
+      } catch (const std::exception& e) {
+        fallback = e.what();
+      }
+      break;
+    }
+  }
+  const bool reconstruct = gain && !options.ignore_embedded_gain_map;
+  auto alpha_plan = file.resolve_alpha();
+  Progress progress{options, path, 0,
+                    plan.tiles.size() + (alpha_plan ? alpha_plan->image.tiles.size() : 0) +
+                        (reconstruct ? gain->gain.tiles.size() : 0)};
+  FloatImage alpha;
+  auto result = primary(file, plan, options.default_gamut,
+                        reconstruct ? 0 : options.preview_max_edge, reconstruct, &alpha, &progress);
+  apply_exif(result, exif);
+  if (reconstruct) {
+    FloatImage encoded;
+    try {
+      encoded = code_plane(file, gain->gain,
+                           gain->metadata ? gain_map_channel_count(*gain->metadata) : 1, &progress);
+    } catch (const Cancelled&) {
+      throw;
+    } catch (const std::bad_alloc&) {
+      throw;
+    } catch (const std::exception& e) {
+      if (iso) throw;
+      fallback = e.what();
+      gain.reset();
+    }
+    if (gain) {
+      result.authored_sdr = result.linear_p3;
+      if (gain->metadata) {
+        const auto& metadata = *gain->metadata;
+        const auto count = gain_map_channel_count(metadata);
+        result.gain_map.channels = count;
+        result.gain_map.base_headroom = std::exp2(rational_value(metadata.base_headroom));
+        const float headroom = rational_value(metadata.alternate_headroom);
+        result.gain_map.alternate_headroom = std::exp2(headroom);
+        for (unsigned c = 0; c < 3; ++c) {
+          auto channel = gain_map_channel(metadata, count == 1 ? 0 : c);
+          result.gain_map.base_offset[c] = rational_value(channel.base_offset);
+          result.gain_map.alternate_offset[c] = rational_value(channel.alternate_offset);
+        }
+        result.linear_p3 = reconstruct_gain_map(*result.authored_sdr, encoded, metadata, headroom);
+        result.source_color.name = "Adaptive HDR (base: " + result.source_color.name + ")";
+      } else {
+        result.gain_map.channels = 1;
+        result.gain_map.base_headroom = 1;
+        result.gain_map.alternate_headroom = *legacy_headroom;
+        const BilinearGridSampler sampler(encoded.width, encoded.height, result.linear_p3.width,
+                                          result.linear_p3.height);
+        const GridView grid(encoded.pixels, encoded.width, encoded.height);
+        parallel_for_rows(result.linear_p3.height, [&](unsigned y) {
+          for (unsigned x = 0; x < result.linear_p3.width; ++x) {
+            const float multiplier =
+                1.F + (*legacy_headroom - 1.F) * bt709_inverse_oetf(sampler.sample(grid, x, y));
+            for (unsigned c = 0; c < 3; ++c) result.linear_p3.at(x, y, c) *= multiplier;
+          }
+        });
+      }
+      result.hdr_headroom = measured_alternate_headroom(result.linear_p3);
+      result.content_peak_nits.reset();
+      result.domain = InputDomain::kDualRendition;
+    }
+    composite(result, alpha);
+  }
+  if (!fallback.empty()) {
+    result.decode.degraded = true;
+    result.decode.degradation_reasons.push_back("apple_legacy_gain_map_unusable_sdr_fallback:" +
+                                                fallback);
+  }
+  if (reconstruct && options.preview_max_edge) {
+    const auto size = raster_decode_plan(result.linear_p3.width, result.linear_p3.height,
+                                         options.preview_max_edge);
+    if (size.width != result.linear_p3.width || size.height != result.linear_p3.height) {
+      result.linear_p3 = resample_to(std::move(result.linear_p3), size.width, size.height);
+      if (result.authored_sdr)
+        result.authored_sdr = resample_to(std::move(*result.authored_sdr), size.width, size.height);
+      result.decode.decoded_width = size.width;
+      result.decode.decoded_height = size.height;
+    }
+  }
+  normalize_orientation(result, orientation);
+  progress.finish();
+  return result;
+}
+}  // namespace hyperdr::codec

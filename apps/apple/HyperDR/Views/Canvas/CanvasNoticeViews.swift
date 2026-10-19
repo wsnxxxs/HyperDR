@@ -90,8 +90,6 @@ struct RestoreMissingNotice: View {
     let dismiss: () -> Void
     @Environment(\.locale) private var locale
 
-    var title: String { Self.title(name: name, locale: locale) }
-
     static func title(name: String?, locale: Locale) -> String {
         guard let name, !name.isEmpty else { return AppStrings.string("restore.missing.unnamed", locale: locale) }
         return AppStrings.format("restore.missing.title %@", locale: locale, name)
@@ -106,7 +104,7 @@ struct RestoreMissingNotice: View {
         HStack(alignment: .top, spacing: Space.s2) {
             Image(systemName: "exclamationmark.triangle").foregroundStyle(Color.hdr.warn).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text(verbatim: title).font(Font.hdr.controlLabel).foregroundStyle(Color.hdr.ink)
+                Text(verbatim: Self.title(name: name, locale: locale)).font(Font.hdr.controlLabel).foregroundStyle(Color.hdr.ink)
                 Text("restore.missing.body").font(Font.hdr.caption).foregroundStyle(Color.hdr.inkMuted)
                     .fixedSize(horizontal: false, vertical: true)
             }

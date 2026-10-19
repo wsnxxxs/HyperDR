@@ -1,4 +1,5 @@
 #include "hevc/vt_common.hpp"
+#include "hevc/testing.hpp"
 
 #include "hyperdr/foundation/cancel.hpp"
 
@@ -43,6 +44,7 @@ struct OutputState {
   ParameterSets sets;
   std::vector<std::vector<std::uint8_t>> samples;
   std::vector<bool> present;
+  std::vector<std::vector<std::uint8_t>> with_unspecified;
 };
 
 void fail(OutputState& state, std::string message) {
@@ -85,7 +87,7 @@ ParameterSets parameter_sets(CMFormatDescriptionRef format, int& length_size) {
 // The picture's NAL units with 4-byte lengths, without access unit delimiters,
 // SEI or in-band parameter sets (hvcC carries those). Every slice must be IDR.
 std::vector<std::uint8_t> repack_sample(const std::vector<std::uint8_t>& data, int length_size,
-                                        const ParameterSets& sets) {
+                                        const ParameterSets& sets, std::vector<std::uint8_t>* with_unspecified = nullptr) {
   std::vector<std::uint8_t> out;
   out.reserve(data.size());
   bool has_slice = false;
@@ -99,6 +101,8 @@ std::vector<std::uint8_t> repack_sample(const std::vector<std::uint8_t>& data, i
     if (length < 2 || length > data.size() - at) throw VtError("HEVC NAL length overruns the sample");
     const std::uint8_t* nal = data.data() + at;
     at += length;
+    if ((nal[0] & 0x81U) || (nal[1] >> 3U) || !(nal[1] & 7U))
+      throw VtError("HEVC sample has an invalid single-layer NAL header");
     const int type = nal_type(nal);
     if (type == kNalAud || type == kNalPrefixSei || type == kNalSuffixSei) continue;
     if (type == kNalVps || type == kNalSps || type == kNalPps) {
@@ -108,15 +112,24 @@ std::vector<std::uint8_t> repack_sample(const std::vector<std::uint8_t>& data, i
       }
       continue;
     }
+    const bool unspecified = type >= 48; // H.265: decoder shall ignore UNSPEC48..63.
     if (type < 32) {
       if (type != kNalIdrWRadl && type != kNalIdrNLp) throw VtError("HEVC picture is not IDR");
       has_slice = true;
+    } else if (!unspecified && type != 38) {
+      // AUD/SEI were removed above, matching the existing HEIF policy. Filler
+      // is allowed by the writer. Reserved types (41..47), EOS/EOB and any
+      // other unexpected non-VCL type must never be silently discarded.
+      throw VtError("unexpected HEVC NAL type " + std::to_string(type));
     }
-    if (length > 0xFFFFFFFFU) throw VtError("HEVC NAL unit is too large");
-    for (int shift = 24; shift >= 0; shift -= 8) {
-      out.push_back(static_cast<std::uint8_t>((length >> static_cast<unsigned>(shift)) & 0xFFU));
-    }
-    out.insert(out.end(), nal, nal + length);
+    const auto append = [&](std::vector<std::uint8_t>& target) {
+      if (length > 0xFFFFFFFFU) throw VtError("HEVC NAL unit is too large");
+      for (int shift = 24; shift >= 0; shift -= 8)
+        target.push_back(static_cast<std::uint8_t>((length >> static_cast<unsigned>(shift)) & 0xFFU));
+      target.insert(target.end(), nal, nal + length);
+    };
+    if (with_unspecified) append(*with_unspecified);
+    if (!unspecified) append(out);
   }
   if (!has_slice) throw VtError("HEVC sample has no slice");
   return out;
@@ -145,7 +158,8 @@ void record_frame(OutputState& state, std::size_t index, OSStatus status,
   std::vector<std::uint8_t> data(CMBlockBufferGetDataLength(block));
   check_status(CMBlockBufferCopyDataBytes(block, 0, data.size(), data.data()),
                "copy HEVC sample");
-  state.samples[index] = repack_sample(data, length_size, state.sets);
+  state.samples[index] = repack_sample(data, length_size, state.sets,
+      state.with_unspecified.empty() ? nullptr : &state.with_unspecified[index]);
   state.present[index] = true;
 }
 
@@ -238,7 +252,7 @@ void configure(VTCompressionSessionRef session, const EncodeParams& params) {
   }
 }
 
-EncodedSequence run(std::size_t count, const TileProducer& produce, const EncodeParams& params) {
+EncodedSequence run(std::size_t count, const TileProducer& produce, const EncodeParams& params, EncodedSequence* audit = nullptr) {
   if (count == 0) throw std::invalid_argument("HEVC sequence has no tiles");
   const int bit_depth = params.main10 ? 10 : 8;
   // Rejects unsupported colour code points before any session exists.
@@ -249,6 +263,7 @@ EncodedSequence run(std::size_t count, const TileProducer& produce, const Encode
   OutputState state;
   state.count = count;
   state.samples.resize(count);
+  if (audit) state.with_unspecified.resize(count);
   state.present.assign(count, false);
 
   const auto attributes = cf_dictionary();
@@ -340,6 +355,10 @@ EncodedSequence run(std::size_t count, const TileProducer& produce, const Encode
   result.sps = std::move(state.sets.sps);
   result.pps = std::move(state.sets.pps);
   result.samples = std::move(state.samples);
+  if (audit) {
+    audit->vps=result.vps;audit->sps=result.sps;audit->pps=result.pps;
+    audit->samples=std::move(state.with_unspecified);
+  }
   return result;
 }
 
@@ -368,5 +387,15 @@ EncodedSequence encode(std::span<const YuvTile> tiles, const EncodeParams& param
     std::memcpy(tile.chroma.data(), source.chroma.data(), tile.chroma.size());
   }, params);
 }
+
+namespace testing {
+AuditedSequence encode_audited(std::size_t count,const TileProducer& produce,const EncodeParams& params) {
+  AuditedSequence result;result.filtered=run(count,produce,params,&result.with_unspecified);return result;
+}
+std::vector<std::uint8_t> repack_sample(const std::vector<std::uint8_t>& sample,int length_size,
+    const EncodedSequence& sets) {
+  return ::hyperdr::codec::hevc::repack_sample(sample,length_size,{sets.vps,sets.sps,sets.pps});
+}
+} // namespace testing
 
 }  // namespace hyperdr::codec::hevc

@@ -11,6 +11,7 @@ import Observation
 @MainActor @Observable final class CanvasHintState {
     private(set) var shown: String?
     @ObservationIgnored private var lastKey: String?
+    @ObservationIgnored private var lastSerial = 0
     static let peeking = "canvas.peeking"
 
     /// `key` is the model's current hint key. While the legend is on the
@@ -25,6 +26,20 @@ import Observation
         lastKey = key
         if covered { shown = nil; return }
         if let key, session.claimHint(key) { shown = key } else { shown = nil }
+    }
+
+    /// The one entry the canvas uses: the photo's serial and the model's
+    /// hint key together. A new serial is a new photo, which announces
+    /// itself again; otherwise only a new key does. Both can change in one
+    /// turn (the first photo gives a serial and a key at once), and the hint
+    /// is claimed once for that turn, not once per observation.
+    func observe(serial: Int, key: String?, session: ViewerSessionState, covered: Bool = false) {
+        if serial != lastSerial {
+            lastSerial = serial
+            photoChanged(key: key, session: session, covered: covered)
+        } else {
+            update(key: key, session: session, covered: covered)
+        }
     }
 
     /// A different photo is on the canvas, even one with the same name that

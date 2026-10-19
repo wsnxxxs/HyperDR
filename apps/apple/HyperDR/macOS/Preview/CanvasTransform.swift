@@ -1,17 +1,40 @@
 import CoreGraphics
 import Foundation
 
-/// Pure geometry for the preview canvas: fit, pointer-anchored zoom and pan
-/// clamping. Ported from the Web editor's `preview/stage/geometry.js` so both
-/// front ends agree on the zoom range (1–4× the fitted size) and the pan limit.
+/// Canvas geometry is measured relative to fit. Limits and button stops
+/// account for the original photo's pixels and the display backing scale.
 nonisolated struct CanvasTransform: Equatable, Sendable {
-    /// `view.js` caps pinch and wheel zoom at fit × 4 and never goes below fit.
     static let minZoom = 1.0
-    static let maxZoom = 4.0
+
+    /// The fit-relative zoom at one source pixel per backing pixel.
+    var actualPixelsZoom: Double {
+        let fitted = fittedSize
+        guard fitted.width > 0, backingScale > 0 else { return 1 }
+        return imageSize.width / (fitted.width * backingScale)
+    }
+
+    var maxZoom: Double { max(4, 4 * actualPixelsZoom) }
+
+    /// Actual-pixel stops with fit and the upper limit inserted. Small
+    /// percentages continue by halves for very large source photos.
+    var zoomStops: [Double] {
+        var percentages: [Double] = [0.25, 1 / 3, 0.5, 2 / 3, 1, 2, 3, 4]
+        var small = 0.125
+        while small * actualPixelsZoom > Self.minZoom {
+            percentages.append(small)
+            small /= 2
+        }
+        let candidates = ([Self.minZoom, maxZoom] + percentages.map { $0 * actualPixelsZoom })
+            .filter { $0 >= Self.minZoom && $0 <= maxZoom }.sorted()
+        return candidates.reduce(into: []) { result, value in
+            if let last = result.last, abs(last - value) < 1e-9 { return }
+            result.append(value)
+        }
+    }
 
     var imageSize: CGSize
     var viewport: CGSize
-    /// 1 = fit the window, 4 = 400% of the fitted size.
+    /// 1 = fit the window; actual-pixel zoom depends on the geometry.
     var zoom: Double = 1
     /// Offset from the centred position, in view points.
     var pan: CGPoint = .zero
@@ -61,7 +84,7 @@ nonisolated struct CanvasTransform: Equatable, Sendable {
     /// Pointer-anchored zoom: the detail under the pointer stays put
     /// (`zoomAtPointer` in `geometry.js`).
     func zoomed(to factor: Double, anchorInView: CGPoint) -> CanvasTransform {
-        let next = min(Self.maxZoom, max(Self.minZoom, factor))
+        let next = min(maxZoom, max(Self.minZoom, factor))
         guard next != zoom else { return self }
         let centre = CGPoint(x: viewport.width / 2, y: viewport.height / 2)
         let offset = CGPoint(x: anchorInView.x - centre.x, y: anchorInView.y - centre.y)
@@ -85,9 +108,9 @@ nonisolated struct CanvasTransform: Equatable, Sendable {
 
     /// `wheelZoomLevel` from `geometry.js`: a trackpad pinch arrives as a
     /// ctrl-wheel and zooms faster than a plain wheel. `nil` means "no change".
-    static func wheelZoom(fromZoom zoom: Double, deltaY: CGFloat, ctrl: Bool) -> Double? {
+    func wheelZoom(fromZoom zoom: Double, deltaY: CGFloat, ctrl: Bool) -> Double? {
         let pixels = deltaY
-        let next = min(maxZoom, max(minZoom, zoom * Foundation.exp(-Double(pixels) * (ctrl ? 0.01 : 0.0015))))
+        let next = min(maxZoom, max(Self.minZoom, zoom * Foundation.exp(-Double(pixels) * (ctrl ? 0.01 : 0.0015))))
         return abs(next - zoom) < 1e-4 ? nil : next
     }
 }

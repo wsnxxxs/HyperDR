@@ -43,10 +43,10 @@ import XCTest
         XCTAssertEqual(fit.zoom, 2, accuracy: 1e-9)
     }
 
-    func testZoomIsClampedToTheWebRange() {
+    func testZoomIsClampedToActualPixelRange() {
         var fit = transform()
-        fit = fit.zoomed(to: 9, anchorInView: CGPoint(x: 450, y: 300))
-        XCTAssertEqual(fit.zoom, 4, accuracy: 1e-9)
+        fit = fit.zoomed(to: 99, anchorInView: CGPoint(x: 450, y: 300))
+        XCTAssertEqual(fit.zoom, 4 * 6000 / 1800, accuracy: 1e-9)
         fit = fit.zoomed(to: 0.2, anchorInView: CGPoint(x: 450, y: 300))
         XCTAssertEqual(fit.zoom, 1, accuracy: 1e-9)
         XCTAssertEqual(fit.pan, .zero)
@@ -69,13 +69,13 @@ import XCTest
     /// `wheelZoomLevel`: a trackpad pinch (ctrl-wheel) zooms faster, and a
     /// sub-threshold delta is ignored so the canvas does not jitter.
     func testWheelZoomMatchesTheWebCurve() {
-        let plain = try? XCTUnwrap(CanvasTransform.wheelZoom(fromZoom: 1, deltaY: -100, ctrl: false))
+        let plain = try? XCTUnwrap(transform().wheelZoom(fromZoom: 1, deltaY: -100, ctrl: false))
         XCTAssertEqual(plain ?? 0, exp(0.15), accuracy: 1e-6)
-        let pinch = try? XCTUnwrap(CanvasTransform.wheelZoom(fromZoom: 1, deltaY: -100, ctrl: true))
+        let pinch = try? XCTUnwrap(transform().wheelZoom(fromZoom: 1, deltaY: -100, ctrl: true))
         XCTAssertEqual(pinch ?? 0, exp(1.0), accuracy: 1e-6)
-        XCTAssertNil(CanvasTransform.wheelZoom(fromZoom: 1, deltaY: -0.01, ctrl: false))
-        XCTAssertEqual(CanvasTransform.wheelZoom(fromZoom: 3.9, deltaY: -100, ctrl: true) ?? 0,
-                       4, accuracy: 1e-9)
+        XCTAssertNil(transform().wheelZoom(fromZoom: 1, deltaY: -0.01, ctrl: false))
+        XCTAssertEqual(transform().wheelZoom(fromZoom: 13, deltaY: -100, ctrl: true) ?? 0,
+                       4 * 6000 / 1800, accuracy: 1e-9)
     }
 
     /// The photo rect is published in the same coordinates the overlays use,
@@ -103,5 +103,57 @@ import XCTest
         let rect = PreviewRenderer.normalisedRect(fit, drawableSize: CGSize(width: 1800, height: 1200))
         let deviceWidth = (Double(rect.z) - Double(rect.x)) / 2 * 1800
         XCTAssertEqual(deviceWidth, 6000, accuracy: 1)
+    }
+}
+
+extension CanvasTransformTests {
+    func testLargePhotoCanReachActualPixelsAndFourHundredPercent() {
+        let canvas = CanvasModel()
+        canvas.setViewport(CGSize(width: 800, height: 600), backingScale: 2)
+        canvas.setImageSize(PixelSize(width: 9504, height: 6336))
+        XCTAssertEqual(canvas.zoomReadout, .fit)
+        XCTAssertEqual(canvas.zoomPercent, 17)
+        canvas.zoomToActualPixels()
+        XCTAssertEqual(canvas.transform.zoom, 5.94, accuracy: 1e-9)
+        XCTAssertEqual(canvas.zoomReadout, .percent(100))
+        for _ in 0..<20 { canvas.zoomIn() }
+        XCTAssertEqual(canvas.zoomReadout, .percent(400))
+        XCTAssertFalse(canvas.canZoomIn)
+        XCTAssertEqual(canvas.transform.maxZoom, 23.76, accuracy: 1e-9)
+        canvas.zoomOut()
+        XCTAssertEqual(canvas.zoomReadout, .percent(300))
+        canvas.zoomOut()
+        XCTAssertEqual(canvas.zoomReadout, .percent(200))
+        canvas.fitToWindow()
+        canvas.zoomIn()
+        XCTAssertEqual(canvas.zoomReadout, .percent(25))
+        canvas.zoomOut()
+        XCTAssertEqual(canvas.zoomReadout, .fit)
+    }
+
+    func testStopsIncludeFitAndFractionsWithoutDuplicateSteps() {
+        let fit = transform(imageW: 16000, imageH: 12000, viewW: 1000, viewH: 750)
+        XCTAssertEqual(fit.zoomStops, [1, 2, 8 / 3, 4, 16 / 3, 8, 16, 24, 32])
+        XCTAssertEqual(fit.zoomStops.filter { $0 == 1 }.count, 1)
+        let tiny = transform(imageW: 100, imageH: 100, viewW: 1000, viewH: 1000)
+        XCTAssertEqual(tiny.maxZoom, 4)
+        XCTAssertEqual(tiny.zoomStops, [1, 4])
+    }
+
+    func testWheelAndPinchClampAtDynamicLimitAndResizeCorrectsPan() {
+        let fit = transform(imageW: 9504, viewW: 800)
+        XCTAssertEqual(fit.wheelZoom(fromZoom: 20, deltaY: -100000, ctrl: true), fit.maxZoom)
+        XCTAssertEqual(fit.zoomed(to: 10000, anchorInView: .zero).zoom, fit.maxZoom)
+        let canvas = CanvasModel()
+        canvas.setViewport(CGSize(width: 800, height: 600), backingScale: 1)
+        canvas.setImageSize(PixelSize(width: 6000, height: 4000))
+        for _ in 0..<30 { canvas.zoomIn() }
+        var moved = canvas.transform.panned(by: CGSize(width: 50000, height: 50000))
+        canvas.apply(moved)
+        canvas.setViewport(CGSize(width: 1200, height: 900), backingScale: 2)
+        moved = canvas.transform
+        XCTAssertEqual(canvas.zoomPercent, 400)
+        XCTAssertEqual(moved.zoom, moved.maxZoom)
+        XCTAssertEqual(moved.pan, moved.clampedPan(moved.pan))
     }
 }

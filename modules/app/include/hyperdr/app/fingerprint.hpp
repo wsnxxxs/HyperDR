@@ -11,23 +11,11 @@
 
 #include "hyperdr/app/settings.hpp"
 
-#include <array>
 #include <filesystem>
 #include <string>
 #include <string_view>
 
 namespace hyperdr {
-
-struct RawDecodeResource {
-  std::string_view key;
-  std::filesystem::path path;
-};
-
-// External calibration inputs used by both the decode cache and the resumable
-// output fingerprint. Keeping this list here prevents those two identities
-// from drifting when another RAW resource is introduced.
-[[nodiscard]] std::array<RawDecodeResource, 7> raw_decode_resources(
-    const RawDecodeOptions& options);
 
 // Human-readable, and the exact input to the hash. Recorded in the sidecar so a
 // stale skip can be diagnosed by reading it.
@@ -35,8 +23,7 @@ struct RawDecodeResource {
 [[nodiscard]] std::string settings_fingerprint(const ConvertOptions& options);
 
 // Identity of the decoded colour/calibration and canonical model base.
-// Geometry is checked separately so a half-size model input can serve a full
-// export. Resource contents, rather than paths, allow moving calibration files.
+// Geometry and decoder/scale are checked separately; RAW OS build is included.
 [[nodiscard]] std::string model_preprocessing_fingerprint(const ConvertOptions& options);
 
 }  // namespace hyperdr

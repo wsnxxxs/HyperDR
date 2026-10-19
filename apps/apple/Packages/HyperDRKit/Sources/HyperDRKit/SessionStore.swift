@@ -76,9 +76,6 @@ public struct ExportRecord: Sendable, Codable, Equatable {
 
 public enum SessionResource: String, Sendable, Codable {
     case luts
-    case rawProfiles = "raw-profiles"
-    case rawLooks = "raw-looks"
-    case lensProfiles = "lens-profiles"
 }
 
 protocol SecurityScopedAccess: Sendable {
@@ -1490,8 +1487,7 @@ public actor SessionStore {
     }
 
     private func createResourceDirectories(_ directory: URL) throws {
-        for name in ["exports", SessionResource.luts.rawValue, SessionResource.rawProfiles.rawValue,
-                     SessionResource.rawLooks.rawValue, SessionResource.lensProfiles.rawValue] {
+        for name in ["exports", SessionResource.luts.rawValue] {
             let target = try containedURL(directory.appendingPathComponent(name, isDirectory: true), in: directory)
             try fileManager.createDirectory(at: target, withIntermediateDirectories: true)
         }

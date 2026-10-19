@@ -11,7 +11,6 @@
 #include "hyperdr/foundation/json.hpp"
 #include "hyperdr/foundation/version.hpp"
 #include "hyperdr/gainmap/native_model.hpp"
-#include "hyperdr/image/dcp_profile.hpp"
 #include "hyperdr/image/resample.hpp"
 
 #include <bit>
@@ -88,7 +87,6 @@ std::string model_input_report(const std::filesystem::path& input,
                                const DecodedImage& decoded,
                                const GainMapResult& developed,
                                const GainMapOptions& gain,
-                               const RawDecodeOptions& raw,
                                const ConvertOptions& options,
                                const FloatImage& tensor) {
   const auto& d = decoded.decode;
@@ -101,7 +99,6 @@ std::string model_input_report(const std::filesystem::path& input,
       .member("preprocessing_fingerprint", model_preprocessing_fingerprint(preprocessing_options))
       .member("source", path_utf8(input))
       .member("source_sha256", sha256_file_hex(input))
-      .member("highlight_recovery", highlight_recovery_name(raw.highlight_recovery))
       .member("orientation", decoded.metadata.orientation)
       .begin_array("sensor_size").element(d.sensor_width).element(d.sensor_height).end_array()
       .begin_array("requested_crop").element(d.target_width).element(d.target_height).end_array()
@@ -110,9 +107,6 @@ std::string model_input_report(const std::filesystem::path& input,
           .element(d.requested_crop_left).element(d.requested_crop_top).end_array()
       .begin_array("delivered_crop_origin_sensor")
           .element(d.delivered_crop_left).element(d.delivered_crop_top).end_array()
-      .member("raw_profile_sha256", decoded.raw_profile ? decoded.raw_profile->profile->sha256 : "")
-      .member("raw_lens_profile_sha256", decoded.raw_lens_profile_path.empty() ? std::string{} : (options.raw.resource(options.raw.lens_profile)
-          ? options.raw.resource(options.raw.lens_profile)->sha256 : sha256_file_hex(decoded.raw_lens_profile_path)))
       .member("raw_half_size", false)
       .member("raw_decoder_version",d.raw ? d.raw->decoder_version : "")
       .member("raw_scale",d.raw ? d.raw->scale : 1.F)
@@ -126,7 +120,7 @@ std::string model_input_report(const std::filesystem::path& input,
       .member("default_crop_present", d.default_crop_present)
       .member("requested_crop_applied", d.target_dimensions_applied)
       .begin_object("development_recipe")
-      .member("id", decoded.raw_profile ? "raw-dcp-v1" : native_model_development_kind(
+      .member("id", native_model_development_kind(
                         decoded.describe_input().domain))
       .member("exposure_bias_ev", gain.exposure_bias_ev)
       .member("exposure_ev", developed.exposure_ev)
@@ -186,14 +180,6 @@ int model_input_command(int argc, char** argv) {
                                          "model long side");
     } else if (arg == "--half-size") {
       options.raw.half_size = true;
-    } else if (arg == "--raw-bad-pixels") {
-      options.raw.bad_pixel_map = path_from_utf8(next_value(i, argc, argv, arg));
-    } else if (arg == "--raw-dark-frame") {
-      options.raw.dark_frame = path_from_utf8(next_value(i, argc, argv, arg));
-    } else if (arg == "--raw-linearization-lut") {
-      options.raw.linearization_lut = path_from_utf8(next_value(i, argc, argv, arg));
-    } else if (arg == "--raw-lens-shading") {
-      options.raw.lens_shading_map = path_from_utf8(next_value(i, argc, argv, arg));
     } else {
       throw std::invalid_argument("unknown model-input option: " + std::string(arg));
     }
@@ -234,7 +220,7 @@ int model_input_command(int argc, char** argv) {
   write_binary_file_atomic(output, float32_le_bytes(tensor), true);
   write_text_file_atomic(report,
                          model_input_report(input, output, decoded, developed,
-                                            development_options, options.raw, options, tensor),
+                                            development_options, options, tensor),
                          true);
   return 0;
 }

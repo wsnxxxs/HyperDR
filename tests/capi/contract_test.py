@@ -123,9 +123,7 @@ class Contract(unittest.TestCase):
                                    ({"contrast": 1.123456, "vibrance": -.234567,
                                      "exposure_bias": .612345}, 33),
                                    ({"encoding": "avif-hlg", "headroom_max": 4.0}, 65),
-                                   ({"raw_profile": "camera.dcp"}, 65),
-                                   ({"raw_profile": "camera.dcp", "contrast": 1.2,
-                                     "vibrance": 0.2}, 65)]:
+                                   ({"raw_gain": 2.0}, 65)]:
             with self.subTest(settings=settings, samples=samples):
                 arguments = [CLI, "curve", "--samples", str(samples)]
                 for key, value in settings.items():
@@ -509,9 +507,6 @@ class EngineContract(unittest.TestCase):
                 # cases are valid; only the resource under test is broken.
                 self.packet(LIB.hyperdr_preview_render, session, {})
                 for suffix, command_key, flag, diagnostic in [
-                    ("dcp", "_raw_profile_path", "--raw-profile", "Apple RAW 引擎不支持该选项".encode()),
-                    ("xmp", "_raw_look_path", "--raw-look", "Apple RAW 引擎不支持该选项".encode()),
-                    ("lcp", "_lens_profile_path", "--raw-lens-profile", "Apple RAW 引擎不支持该选项".encode()),
                     ("cube", "_lut_path", "--lut", b"colour LUT")]:
                     for missing in (False, True):
                         with self.subTest(resource=suffix, missing=missing):
@@ -626,13 +621,48 @@ class EngineContract(unittest.TestCase):
                     # The frozen Python output still says `ultrahdr`; the engine
                     # writes the canonical name (U12).
                     expected = dict(case["settings"])
+                    # R2 intentionally diverges from the frozen Web adapter.
+                    expected.pop("highlight_recovery", None)
                     expected["raw_lens_correction"]=case["options"].get("lensCorrection", True)
                     if expected["encoding"] == "ultrahdr":
                         expected["encoding"] = "iso-gainmap-jpeg"
                     argv = ["iso-gainmap-jpeg" if previous == "--encoding" and item == "ultrahdr" else item
                             for previous, item in zip([None, *case["argv"]], case["argv"])]
+                    removed = {"--highlight-recovery", "--raw-profile", "--raw-look", "--raw-lens-profile"}
+                    filtered = []
+                    index = 0
+                    while index < len(argv):
+                        if argv[index] in removed:
+                            index += 2
+                        else:
+                            filtered.append(argv[index])
+                            index += 1
+                    argv = filtered
                     self.assertEqual(settings, expected)
                     self.assertEqual(json.loads(result(LIB.hyperdr_command_line, normalized)), argv)
+
+    def test_removed_raw_options_and_ignored_highlight_control(self):
+        # Deleted controls cannot reach an engine entry through canonical
+        # settings or private routing. Obsolete highlight values are inert.
+        for key in ("raw_profile", "raw_look", "raw_lens_profile", "raw_auto_bad_pixels"):
+            with self.subTest(key=key):
+                with self.assertRaises(AssertionError):
+                    result(LIB.hyperdr_curve_json, encoded({key: "obsolete"}), 33)
+        for key in ("_raw_profile_path", "_raw_look_path", "_lens_profile_path"):
+            with self.assertRaises(AssertionError):
+                result(LIB.hyperdr_command_line, encoded({"command": {key: "obsolete"}}))
+        for flag in ("--raw-profile", "--raw-look", "--raw-lens-profile", "--raw-auto-bad-pixels",
+                     "--raw-bad-pixels", "--raw-dark-frame", "--raw-linearization-lut", "--raw-lens-shading",
+                     "--highlight-recovery"):
+            rejected = subprocess.run([CLI, "curve", flag, "obsolete"], capture_output=True)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn(b"unknown", rejected.stderr)
+        expected = result(LIB.hyperdr_curve_json, b"{}", 33)
+        for key in ("highlight_recovery", "highlightRecovery"):
+            for value in ("clip", "invalid", 42, None, {"old": True}):
+                self.assertEqual(result(LIB.hyperdr_curve_json, encoded({key: value}), 33), expected)
+        normalized = result(LIB.hyperdr_normalize_options, b"{}")
+        self.assertEqual(result(LIB.hyperdr_normalize_options, encoded({"highlightRecovery": {"old": True}})), normalized)
 
     def test_ultrahdr_is_an_alias_until_p2c(self):
         def normalize(options):

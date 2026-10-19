@@ -4,7 +4,7 @@ import HyperDREngine
 /// Default and reference settings for a photo, and the preview tier rule.
 /// Values come from `EditControls` and `EditChoices`, which equal the
 /// panel-v1 adapter's defaults; keys the adapter fills itself
-/// (`highlightRecovery`, `contrast`, `vibrance`, `quality`) are omitted.
+/// (`contrast`, `vibrance`, `quality`) are omitted.
 public enum EditDefaults {
     /// The highest `hdrRange` / `aiHdrRange` each output format accepts
     /// (batch4 §2.2). Unknown ids fall back to Adaptive, like `initial`.
@@ -30,7 +30,7 @@ public enum EditDefaults {
     static let controlKeys = EditControls.all.map(\.key)
 
     private static let workflowOverrides = [
-        "colorGamut", "outputGamut", "clampSrgb", "rawProfile", "rawLook", "lensCorrection",
+        "colorGamut", "outputGamut", "clampSrgb", "lensCorrection",
     ]
 
     private static func encoding(_ id: String) -> Encoding {
@@ -51,12 +51,7 @@ public enum EditDefaults {
         // gives them their own value objects) and resource selections.
         var values: [String: JSONValue] = [
             "clampSrgb": .bool(false),
-            "rawProfile": .string(""),
-            "rawProfileName": .string(""),
-            "rawLook": .string(""),
-            "rawLookName": .string(""),
             "lensCorrection": .bool(true),
-            "lensProfileName": .string(""),
             "lutId": .string(""),
             "lutName": .string(""),
             "modelId": .string("research-cnn-v1"),

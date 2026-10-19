@@ -101,7 +101,6 @@ std::string normalize_options(const Value& edit) {
       {"encoding", encoding}, {"look", text("photographic")},
       {"color_gamut", get(edit, "colorGamut", text("srgb"))},
       {"clamp_srgb", sdr ? boolean(false) : get(edit, "clampSrgb", boolean(false))},
-      {"highlight_recovery", get(edit, "highlightRecovery", text("blend"))},
       {"raw_lens_correction",get(edit,"lensCorrection",boolean(true))},
       {"lut_input", get(edit, "lutInput", text("srgb"))},
       {"lut_output", get(edit, "lutOutput", text("srgb"))},
@@ -125,7 +124,7 @@ std::string normalize_options(const Value& edit) {
   // renderer settings or the Python settings/argv golden documents.
   Object command{{"adapter", text("panel-v1")}};
   for (auto key : {"input", "output", "report", "external_gain", "external_gain_report",
-      "_raw_profile_path", "_raw_look_path", "_lens_profile_path", "_lut_path"}) {
+      "_lut_path"}) {
     if (const auto* value = edit.find(key)) {
       value->string();
       command.emplace(key, *value);
@@ -187,7 +186,6 @@ std::vector<std::string> command_line(const Value& normalized) {
     flag("--headroom", fmt(value("headroom")));
   } else flag("--gain-strength", fmt(value("gain_strength")));
   if (!value("raw_lens_correction").boolean()) args.emplace_back("--no-raw-lens-correction");
-  flag("--highlight-recovery", value("highlight_recovery").string());
   flag("--quality", fmt(value("quality")));
   flag("--depth", fmt(cmd("depth")));
   flag("--report", cmd("report").string());
@@ -199,8 +197,7 @@ std::vector<std::string> command_line(const Value& normalized) {
   if (cmd("color_explicit").boolean()) flag("--color-gamut", value("color_gamut").string());
   if (cmd("output_explicit").boolean() && is_sdr_encoding(validated.encoding)) flag("--output-gamut", value("output_gamut").string());
   if (value("clamp_srgb").boolean()) args.emplace_back("--clamp-srgb");
-  for (const auto& [key, name] : {std::pair{"_raw_profile_path","--raw-profile"}, {"_raw_look_path","--raw-look"},
-      {"_lens_profile_path","--raw-lens-profile"}, {"_lut_path","--lut"}}) {
+  for (const auto& [key, name] : {std::pair{"_lut_path","--lut"}}) {
     if (const auto* path = command.find(key); path && !path->string().empty()) {
       flag(name, path->string());
       if (std::string_view(key) == "_lut_path") {
@@ -261,9 +258,6 @@ ConvertOptions request_options(const Value& request) {
       else if (key == "external_gain") options.external_gain_path = path_from_utf8(value.string());
       else if (key == "external_gain_report") options.external_gain_report = path_from_utf8(value.string());
       else if (key == "model_id") options.ai_model_path = path_from_utf8(value.string());
-      else if (key == "_raw_profile_path") options.raw.profile = path_from_utf8(value.string());
-      else if (key == "_raw_look_path") options.raw.look_profile = path_from_utf8(value.string());
-      else if (key == "_lens_profile_path") options.raw.lens_profile = path_from_utf8(value.string());
       else if (key == "_lut_path") options.color_lut.path = path_from_utf8(value.string());
       else if (key == "frame") {
         if (value.is_string()) {
@@ -281,10 +275,7 @@ ConvertOptions request_options(const Value& request) {
                key != "compact" && key != "region" && key != "adapter") throw std::invalid_argument("unknown command key: " + key);
     }
   }
-  // A profile may arrive in command rather than in the canonical settings.
-  // Resolve its defaults after every path is known; explicit controls still win.
-  apply_render_defaults(options, settings.find("contrast") != nullptr,
-                         settings.find("vibrance") != nullptr);
+  apply_render_defaults(options);
   return options;
 }
 PreviewRegion request_region(const Value& request) {

@@ -170,6 +170,14 @@ void test_presets_reject_anything_unexpected() {
   require(throws([&] { apply(R"([1,2])"); }), "a non-object preset was accepted");
   // Internal settings are fingerprinted but must not be settable from a preset.
   require(throws([&] { apply(R"({"toe_end":0.1})"); }), "an internal setting was settable");
+  // U14: the removed highlight control is ignored for every value type.
+  const auto identity = hyperdr::settings_fingerprint(options);
+  apply(R"({"highlight_recovery":{"obsolete":true},"highlightRecovery":42})");
+  require(hyperdr::settings_fingerprint(options) == identity, "obsolete highlight request changed settings");
+  for (const char* key : {"highlight_recovery", "raw_profile", "raw_look", "raw_lens_profile", "raw_auto_bad_pixels"})
+    require(hyperdr::find_setting_by_key(key) == nullptr, "removed RAW setting remains in schema");
+  for (const char* key : {"raw_profile", "raw_look", "raw_lens_profile", "raw_auto_bad_pixels"})
+    require(throws([&] { apply(std::string("{\"") + key + "\":true}"); }), "removed RAW setting was accepted");
   // A report file is not a preset, but its "schema" member should not be the
   // error the user hears about first.
   apply(R"({"schema":5})");
@@ -221,8 +229,7 @@ void test_fingerprint_covers_exactly_the_byte_affecting_settings() {
 
 void test_decode_cache_controls_are_declared_in_the_settings_table() {
   const std::set<std::string> expected{
-      "color_gamut", "half_size", "highlight_recovery", "preview_max_edge", "raw_gain",
-      "raw_auto_bad_pixels", "raw_profile", "raw_look", "raw_lens_profile", "raw_lens_correction"};
+      "color_gamut", "half_size", "preview_max_edge", "raw_gain", "raw_lens_correction"};
   std::set<std::string> actual;
   for (const auto& setting : hyperdr::settings()) {
     if (setting.affects_decoded_pixels) actual.insert(std::string(setting.key));

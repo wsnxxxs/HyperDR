@@ -7,7 +7,7 @@
 // pop, headroom, expansion start and area coverage all act *after* the decode,
 // so re-reading the sensor data for each of them is pure waste. Keying the
 // post-resample linear Display-P3 buffer on the decode-affecting inputs alone
-// lets every subsequent slider move skip LibRaw entirely.
+// lets every subsequent slider move skip the Apple RAW render entirely.
 //
 // The cache is a plain directory of self-describing files rather than process
 // state, so it survives the converter being a short-lived subprocess and needs
@@ -54,8 +54,7 @@ namespace hyperdr {
 
 // Returns false on any miss: absent file, wrong magic or version, truncated
 // payload, or dimensions that disagree with the payload length.
-[[nodiscard]] bool read_decode_cache(const std::filesystem::path& file, DecodedImage& out,
-                                     const RawDecodeOptions* raw = nullptr);
+[[nodiscard]] bool read_decode_cache(const std::filesystem::path& file, DecodedImage& out);
 
 // Writes atomically. Failures are reported so callers can decide whether to
 // warn; a failed write never invalidates the conversion itself.

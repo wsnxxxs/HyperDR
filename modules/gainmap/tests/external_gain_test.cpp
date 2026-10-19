@@ -201,7 +201,6 @@ void test_v2_signed_canonical_sidecar() {
     "preprocessing_fingerprint": "1234567890abcdef",
     "source": {
       "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "highlight_recovery": "blend",
       "orientation": 1,
       "sensor_size": [2, 1],
       "requested_crop": [2, 1],

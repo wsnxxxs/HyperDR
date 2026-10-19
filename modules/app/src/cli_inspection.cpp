@@ -279,11 +279,6 @@ int thumbnail_command(int argc, char** argv) {
       if (quality < 1 || quality > 100) {
         throw std::invalid_argument("preview quality must be in [1,100]");
       }
-    } else if (arg == "--highlight-recovery") {
-      const std::string name(next_value(i, argc, argv, arg));
-      const auto mode = highlight_recovery_from_name(name);
-      if (!mode) throw std::invalid_argument("unknown highlight recovery: " + name);
-      raw.highlight_recovery = *mode;
     } else if (arg == "--half-size") {
       // The preview is bounded by --max-edge anyway, so half-size demosaic
       // costs nothing visible and roughly quarters the decode.
@@ -292,20 +287,6 @@ int thumbnail_command(int argc, char** argv) {
       raw.ignore_embedded_gain_map = true;
     } else if (arg == "--model-input") {
       model_input = true;
-    } else if (arg == "--raw-bad-pixels") {
-      raw.bad_pixel_map = path_from_utf8(next_value(i, argc, argv, arg));
-    } else if (arg == "--raw-dark-frame") {
-      raw.dark_frame = path_from_utf8(next_value(i, argc, argv, arg));
-    } else if (arg == "--raw-linearization-lut") {
-      raw.linearization_lut = path_from_utf8(next_value(i, argc, argv, arg));
-    } else if (arg == "--raw-profile") {
-      raw.profile = path_from_utf8(next_value(i, argc, argv, arg));
-    } else if (arg == "--raw-lens-profile") {
-      raw.lens_profile = path_from_utf8(next_value(i, argc, argv, arg));
-    } else if (arg == "--raw-lens-shading") {
-      raw.lens_shading_map = path_from_utf8(next_value(i, argc, argv, arg));
-    } else if (arg == "--raw-auto-bad-pixels") {
-      raw.auto_bad_pixel_correction = true;
     } else if (arg == "--raw-gain") {
       raw.digital_gain = real(next_value(i, argc, argv, arg), "RAW digital gain");
     } else {

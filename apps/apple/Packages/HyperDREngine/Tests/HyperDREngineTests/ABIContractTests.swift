@@ -102,8 +102,17 @@ private final class Events: @unchecked Sendable {
             // The goldens stay frozen with the Python panel's names (U12); E4r
             // renamed `ultrahdr`, which the adapter still accepts until P2c.
             var settings = golden.settings
+            // R2 intentionally removes the frozen Web adapter's RAW controls.
+            settings?.removeValue(forKey: "highlight_recovery")
             if settings?["encoding"] == .string("ultrahdr") { settings?["encoding"] = .string("iso-gainmap-jpeg") }
-            let argv = golden.argv?.map { $0 == "ultrahdr" ? "iso-gainmap-jpeg" : $0 }
+            let original = try #require(golden.argv).map { $0 == "ultrahdr" ? "iso-gainmap-jpeg" : $0 }
+            let removed: Set<String> = ["--highlight-recovery", "--raw-profile", "--raw-look", "--raw-lens-profile"]
+            var argv: [String] = []
+            var index = 0
+            while index < original.count {
+                if removed.contains(original[index]) { index += 2 }
+                else { argv.append(original[index]); index += 1 }
+            }
             #expect(request.settings == settings)
             #expect(request.adapter == "panel-v1")
             #expect(try Engine.commandLine(request) == argv)

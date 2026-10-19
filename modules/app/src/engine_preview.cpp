@@ -148,7 +148,7 @@ struct PreviewSession::State {
         source->analysis_file = cache_file.parent_path() /
             (cache_file.stem().string() + ".analysis.hdrcache");
       }
-      const bool disk_hit = !cache_file.empty() && read_decode_cache(cache_file, source->image, &options.raw);
+      const bool disk_hit = !cache_file.empty() && read_decode_cache(cache_file, source->image);
       if (!disk_hit) {
         // One CIRAWFilter render per scale bucket serves all bounded edges.
         auto master_options = options;
@@ -190,7 +190,7 @@ struct PreviewSession::State {
       raw_masters.clear();
       source->image = decode_cached_image(options.input, options, options.raw, &source->analysis_file);
     }
-    if (!source->image.raw_profile && source->image.domain == InputDomain::kSceneReferred) {
+    if (source->image.domain == InputDomain::kSceneReferred) {
       source->analysis = cached_photographic_analysis(source->image.linear_p3,
           source->analysis_file, options.decode_cache_budget_bytes);
     }
@@ -294,7 +294,7 @@ PreviewPixels PreviewSession::render_pixels(ConvertOptions options, PreviewRegio
   };
   GainMapResult result;
   if (!options.ai_model_path.empty()) {
-    const auto* analysis = !decoded.raw_profile && input.domain == InputDomain::kSceneReferred
+    const auto* analysis = input.domain == InputDomain::kSceneReferred
         ? &cached.analysis : nullptr;
     // The model id is part of the cache key, not just the request: without it a
     // cached model-1 base would be reused for model 2 and the preview would show
@@ -343,7 +343,7 @@ PreviewPixels PreviewSession::render_pixels(ConvertOptions options, PreviewRegio
     auto photo=render_graded_photo(decoded.linear_p3,options.gain,decoded.capture,input,
         is_sdr_encoding(options.encoding) ? RenderTarget::Sdr : RenderTarget::Hdr,
         options.color_lut, nullptr,
-        !decoded.raw_profile && input.domain==InputDomain::kSceneReferred ? &cached.analysis : nullptr,
+        input.domain==InputDomain::kSceneReferred ? &cached.analysis : nullptr,
         &cached.preparation);
     if (is_sdr_encoding(options.encoding) &&
         resolved_sdr_gamut(options) == ColorGamut::kSrgb) fit_sdr_to_srgb(photo.sdr);

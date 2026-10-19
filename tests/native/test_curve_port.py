@@ -16,9 +16,6 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO_ROOT / "apps" / "panel"))
-
-from hyperdr_panel.command import build_curve_argv  # noqa: E402
 
 
 CASES = [
@@ -54,15 +51,16 @@ class BrowserCurvePortTest(unittest.TestCase):
         return json.loads(completed.stdout)
 
     def cpp_curve(self, case: dict) -> list[float]:
-        options = {
-            "contrast": case["contrast"],
-            "hdrRange": case["hdrRange"],
-            "expansionStart": case["expansionStart"],
-            # Must not affect the one-dimensional global curve.
-            "areaCoverage": case["areaCoverage"],
-        }
+        # Keep the browser-math comparison independent of the retired Python
+        # adapter, whose fixed RAW/highlight vocabulary diverges after R2.
+        arguments = [self.exe, "curve", "--samples", str(case["samples"]),
+                     "--look", "photographic", "--contrast", str(case["contrast"]),
+                     "--vibrance", "0", "--pop", "0", "--gain-strength", "0.4",
+                     "--exposure-bias", "0.6", "--expansion-start", str(case["expansionStart"]),
+                     "--area-coverage", str(case["areaCoverage"]),
+                     "--headroom-max", str(case["hdrRange"]), "--headroom", str(case["hdrRange"])]
         completed = subprocess.run(
-            build_curve_argv(self.exe, options, case["samples"]),
+            arguments,
             capture_output=True,
             timeout=30,
         )

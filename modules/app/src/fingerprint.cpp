@@ -27,17 +27,6 @@ std::string exact_number_text(double value) {
 
 }  // namespace
 
-std::array<RawDecodeResource, 7> raw_decode_resources(
-    const RawDecodeOptions& options) {
-  return {{{"raw_profile", options.profile},
-           {"raw_look", options.look_profile},
-           {"raw_lens_profile", options.lens_profile},
-           {"raw_bad_pixel_map", options.bad_pixel_map},
-           {"raw_dark_frame", options.dark_frame},
-           {"raw_linearization_lut", options.linearization_lut},
-           {"raw_lens_shading_map", options.lens_shading_map}}};
-}
-
 std::string settings_signature(const ConvertOptions& options) {
   // Both the public version and the renderer revision are part of the
   // signature. The latter invalidates sidecars from a rendering fix without
@@ -99,7 +88,7 @@ std::string settings_signature(const ConvertOptions& options) {
     out += "|ai_expansion_start=";
     out += exact_number_text(options.ai_post.expansion_start);
   }
-  const auto append_raw_file = [&](std::string_view key,
+  const auto append_external_file = [&](std::string_view key,
                                    const std::filesystem::path& path) {
     if (path.empty()) return;
     out += '|';
@@ -107,16 +96,13 @@ std::string settings_signature(const ConvertOptions& options) {
     out += '=';
     out += path_utf8(path);
     out += ':';
-    out += options.raw.resource(path) ? options.raw.resource(path)->sha256
-        : configuration_resource([&] { return sha256_file_hex(path); });
+    out += configuration_resource([&] { return sha256_file_hex(path); });
   };
-  // Calibration files are external inputs, not schema scalar settings. Their
-  // paths and contents still belong in the resume fingerprint: changing a
-  // dark frame or lens grid must never be hidden by --skip-existing.
+  // A selected LUT is an external input, captured once for the whole batch.
   if (!options.color_lut.path.empty() && options.color_lut.snapshot) {
     out += "|color_lut=" + path_utf8(options.color_lut.path) + ':' + options.color_lut.snapshot->sha256;
   } else {
-    append_raw_file("color_lut", options.color_lut.path);
+    append_external_file("color_lut", options.color_lut.path);
   }
   // A frame changes every output byte. Its canonical text covers the layout
   // and colours, and the overlay is hashed like any other external input.
@@ -131,9 +117,6 @@ std::string settings_signature(const ConvertOptions& options) {
                                    : configuration_resource([&] { return sha256_file_hex(options.frame->overlay); });
     }
   }
-  for (const auto& resource : raw_decode_resources(options.raw)) {
-    append_raw_file(resource.key, resource.path);
-  }
   return out;
 }
 
@@ -147,24 +130,14 @@ std::string model_preprocessing_fingerprint(const ConvertOptions& options) {
       "|clamp_srgb=" + (options.clamp_srgb ? "1" : "0");
   if (is_raw_extension(lower_extension(options.input)))
     identity += "|raw_os_build=" + raw_os_build();
-  const auto resources = raw_decode_resources(options.raw);
   for (const auto& setting : settings()) {
-    if (!setting.affects_decoded_pixels || setting.key == "half_size" || setting.key == "highlight_recovery" ||
+    if (!setting.affects_decoded_pixels || setting.key == "half_size" ||
         setting.key == "preview_max_edge") continue;
-    if (std::any_of(resources.begin(), resources.end(), [&](const auto& resource) {
-          return resource.key == setting.key;
-        })) continue;
     const auto value = setting.read(options);
     identity += '|' + std::string(setting.key) + '=';
     if (value.is_string()) identity += value.string();
     else if (value.is_bool()) identity += value.boolean() ? "1" : "0";
     else identity += exact_number_text(value.number());
-  }
-  for (const auto& resource : resources) {
-    identity += '|' + std::string(resource.key) + '=';
-    if (!resource.path.empty()) identity += options.raw.resource(resource.path)
-        ? options.raw.resource(resource.path)->sha256
-        : configuration_resource([&] { return sha256_file_hex(resource.path); });
   }
   return fnv1a_hex(identity);
 }

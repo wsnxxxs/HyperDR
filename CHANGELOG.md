@@ -5,6 +5,10 @@ semantic versioning; dates use ISO 8601.
 
 ## Unreleased
 
+- Remove external RAW DCP/XMP/LCP profiles, highlight-mode controls and sensor
+  calibration flags from the engine and Kit. RAW gain and automatic Apple lens
+  correction remain available. Obsolete highlight request keys are ignored.
+
 - Read XMP-only gain-map JPEG inputs through ImageIO and the shared HDR
   reconstruction pipeline. MPF segments after quantization tables are moved
   only in a private memory copy. Some older Android JPEGs may fall back to SDR

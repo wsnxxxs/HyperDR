@@ -19,8 +19,6 @@ constexpr std::array<std::string_view, 8> kEncodingChoices{
 constexpr std::array<std::string_view, 6> kLutSpaceChoices{
     "srgb", "p3", "rec709", "hlg", "pq", "slog3-sgamut3cine"};
 constexpr std::array<std::string_view, 1> kLookChoices{"photographic"};
-constexpr std::array<std::string_view, 4> kHighlightRecoveryChoices{
-    "blend", "reconstruct", "clip", "unclip"};
 constexpr std::array<std::string_view, 3> kColorGamutChoices{
     "srgb", "p3", "rec2020"};
 constexpr std::array<std::string_view, 3> kOutputGamutChoices{"auto", "srgb", "p3"};
@@ -49,15 +47,6 @@ void apply_look(ConvertOptions& o, const json::Value& v) {
 }
 json::Value read_look(const ConvertOptions& o) {
   return json::Value::from_string(look_mode_name(o.gain.look.mode));
-}
-
-void apply_highlight_recovery(ConvertOptions& o, const json::Value& v) {
-  const auto mode = highlight_recovery_from_name(v.string());
-  if (!mode) throw std::invalid_argument("unknown highlight recovery: " + v.string());
-  o.raw.highlight_recovery = *mode;
-}
-json::Value read_highlight_recovery(const ConvertOptions& o) {
-  return json::Value::from_string(highlight_recovery_name(o.raw.highlight_recovery));
 }
 
 void apply_color_gamut(ConvertOptions& o, const json::Value& v) {
@@ -97,8 +86,8 @@ json::Value read_headroom(const ConvertOptions& o) {
                               : json::Value::from_number(o.gain.headroom_stops);
 }
 
-const std::array<Setting, 37>& table() {
-  static const std::array<Setting, 37> kSettings{{
+const std::array<Setting, 32>& table() {
+  static const std::array<Setting, 32> kSettings{{
       {"encoding", "--encoding", SettingKind::kEnum, 0, 0, kEncodingChoices,
        "adaptive|iso-gainmap-jpeg|pq|hlg|avif-pq|avif-hlg|sdr-jpeg|sdr-tiff", "Output representation", false,
        true,
@@ -124,22 +113,6 @@ const std::array<Setting, 37>& table() {
        "photographic",
        "Renderer", false, true, nullptr, apply_look,
        read_look},
-      {"highlight_recovery", "--highlight-recovery", SettingKind::kEnum, 0, 0,
-       kHighlightRecoveryChoices, "blend|reconstruct|clip|unclip",
-       "RAW clipped-highlight handling", false, true, nullptr,
-       apply_highlight_recovery, read_highlight_recovery, true},
-      {"raw_profile", "--raw-profile", SettingKind::kString, 0, 0, {},
-       "<file.dcp>", "RAW DCP profile (auto exposure uses the profile baseline)", false, true, nullptr,
-       [](ConvertOptions& o, const json::Value& v) { o.raw.profile = path_from_utf8(v.string()); },
-       [](const ConvertOptions& o) { return json::Value::from_string(path_utf8(o.raw.profile)); }, true},
-      {"raw_lens_profile", "--raw-lens-profile", SettingKind::kString, 0, 0, {},
-       "<file.lcp>", "RAW Lightroom lens correction profile", false, true, nullptr,
-       [](ConvertOptions& o, const json::Value& v) { o.raw.lens_profile = path_from_utf8(v.string()); },
-       [](const ConvertOptions& o) { return json::Value::from_string(path_utf8(o.raw.lens_profile)); }, true},
-      {"raw_look", "--raw-look", SettingKind::kString, 0, 0, {},
-       "<file.xmp>", "Static Adobe XMP look (requires matching --raw-profile)", false, true, nullptr,
-       [](ConvertOptions& o, const json::Value& v) { o.raw.look_profile = path_from_utf8(v.string()); },
-       [](const ConvertOptions& o) { return json::Value::from_string(path_utf8(o.raw.look_profile)); }, true},
       {"raw_lens_correction", "--no-raw-lens-correction", SettingKind::kBoolean, 0, 0, {}, {},
        "Disable automatic Apple RAW lens correction", true, true, nullptr,
        [](ConvertOptions& o, const json::Value& v) { o.raw.lens_correction=v.boolean(); },
@@ -152,16 +125,6 @@ const std::array<Setting, 37>& table() {
        [](const ConvertOptions& o) {
          return json::Value::from_number(o.raw.digital_gain);
        }, true},
-      {"raw_auto_bad_pixels", "--raw-auto-bad-pixels", SettingKind::kBoolean,
-       0, 0, {}, {}, "Conservative RAW hot/dead pixel correction", false, true,
-       nullptr,
-       [](ConvertOptions& o, const json::Value& v) {
-         o.raw.auto_bad_pixel_correction = v.boolean();
-       },
-       [](const ConvertOptions& o) {
-         return json::Value::from_bool(o.raw.auto_bad_pixel_correction);
-       }, true},
-
       {"lut_input", "--lut-input", SettingKind::kEnum, 0, 0, kLutSpaceChoices,
        "<space>", "LUT input transfer and primaries (rec709 = gamma 2.4)", false, true, nullptr,
        [](ConvertOptions& o, const json::Value& v) { o.color_lut.input = *lut_space_from_name(v.string()); },
@@ -405,7 +368,7 @@ void apply_preset_document(const json::Value& document, ConvertOptions& options)
   for (const auto& [key, value] : document.members()) {
     // A report file also has a "schema" member; accepting and ignoring it turns
     // "you handed me a report" into a clear message rather than an unknown-key one.
-    if (key == "schema") continue;
+    if (key == "schema" || key == "highlight_recovery" || key == "highlightRecovery") continue;
     const Setting* setting = find_setting_by_key(key);
     if (setting == nullptr || !setting->presetable() || setting->apply == nullptr) {
       throw std::invalid_argument("unknown preset key: \"" + key + "\"");
@@ -413,8 +376,7 @@ void apply_preset_document(const json::Value& document, ConvertOptions& options)
     validate_setting_value(*setting, value);
     setting->apply(options, value);
   }
-  apply_render_defaults(options, document.find("contrast") != nullptr,
-                         document.find("vibrance") != nullptr);
+  apply_render_defaults(options);
 }
 
 std::string settings_usage_text() {

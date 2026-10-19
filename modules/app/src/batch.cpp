@@ -1,4 +1,3 @@
-#include "hyperdr/image/dcp_profile.hpp"
 #include "hyperdr/app/batch.hpp"
 #include "hyperdr/app/analysis_cache.hpp"
 
@@ -70,7 +69,7 @@ GainMapResult render_decoded_image(const DecodedImage& image,
                                    const GainMapOptions& options,
                                    const std::filesystem::path& analysis_cache,
                                    std::uint64_t cache_budget_bytes) {
-  if (!image.raw_profile && !analysis_cache.empty() && image.describe_input().domain == InputDomain::kSceneReferred) {
+  if (!analysis_cache.empty() && image.describe_input().domain == InputDomain::kSceneReferred) {
     const auto analysis = cached_photographic_analysis(image.linear_p3, analysis_cache, cache_budget_bytes);
     return make_gain_map(image.linear_p3, options, image.capture, image.describe_input(), &analysis);
   }
@@ -109,11 +108,11 @@ GainMapResult render_native_model_base(const DecodedImage& image,
   // mathematical gain is requested. Zero gain therefore selects its exact
   // linear Display-P3 passthrough result; the inferred gain replaces the zero
   // grid immediately afterwards.
-  if (image.raw_profile || image.describe_input().domain == InputDomain::kDisplayReferredSdr) {
+  if (image.describe_input().domain == InputDomain::kDisplayReferredSdr) {
     development.gain_strength = 0.0F;
   }
   return make_gain_map(image.linear_p3, development, image.capture,
-      image.describe_input(), image.raw_profile ? nullptr : analysis);
+      image.describe_input(), analysis);
 }
 
 GainMapOptions replay_external_development(
@@ -135,10 +134,6 @@ GainMapOptions replay_external_development(
   preprocessing_options.input = input;
   if (binding.preprocessing_fingerprint != model_preprocessing_fingerprint(preprocessing_options)) {
     reject("preprocessing changed; regenerate the model input and gain");
-  }
-  if (!decoded.raw && binding.highlight_recovery !=
-      highlight_recovery_name(options.raw.highlight_recovery)) {
-    reject("highlight recovery");
   }
   if (binding.orientation != image.metadata.orientation) {
     reject("orientation");
@@ -162,7 +157,7 @@ GainMapOptions replay_external_development(
       binding.delivered_crop_height == decoded.decoded_height;
   const bool raster_preview = options.decode_intent == DecodeIntent::Preview &&
       (image.domain == InputDomain::kDisplayReferredSdr ||
-       image.domain == InputDomain::kDisplayReferredHdr) && !image.raw_profile &&
+       image.domain == InputDomain::kDisplayReferredHdr) &&
       binding.delivered_crop_width == decoded.target_width &&
       binding.delivered_crop_height == decoded.target_height &&
       raster_preview_matches_full(decoded);
@@ -171,20 +166,12 @@ GainMapOptions replay_external_development(
       : raster_preview || same_delivered_size;
   if (!delivered_matches) reject("delivered crop");
 
-  const auto profile_hash = image.raw_profile ? image.raw_profile->profile->sha256 : std::string{};
-  if (binding.raw_profile_sha256 != profile_hash) reject("RAW DCP profile");
-  const auto lens_hash = image.raw_lens_profile_path.empty() ? std::string{} :
-      (options.raw.resource(options.raw.lens_profile) ? options.raw.resource(options.raw.lens_profile)->sha256
-                                                   : sha256_file_hex(image.raw_lens_profile_path));
-  if (binding.raw_lens_profile_sha256 != lens_hash) reject("RAW LCP profile");
-  const auto expected_recipe = image.raw_profile ? "raw-dcp-v1" :
+  const auto expected_recipe =
       native_model_development_kind(image.describe_input().domain);
   if(binding.recipe.id != expected_recipe) reject("配方不匹配，请用新版本重新生成");
   GainMapOptions replay = options.gain;
   replay.auto_exposure = false;
   replay.exposure_ev = binding.recipe.exposure_ev;
-  if (image.raw_profile) replay.exposure_ev -= image.raw_profile->baseline_exposure +
-      image.raw_profile->profile->baseline_exposure_offset;
   replay.exposure_bias_ev = 0.0F;
   replay.auto_headroom = false;
   replay.headroom_stops = binding.recipe.headroom_stops;
@@ -456,19 +443,6 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     result.sensor_width = staged.image.decode.sensor_width;
     result.source_color = staged.image.source_color;
     result.raw_processing = staged.image.decode.raw;
-    result.raw_white_balance = staged.image.raw_white_balance;
-    result.raw_color_matrix = staged.image.raw_color_matrix;
-    result.raw_lens_profile = path_utf8(staged.image.raw_lens_profile_path);
-    result.raw_lens_correction = staged.image.raw_lens_correction;
-    if (staged.image.raw_profile) {
-      const auto& context = *staged.image.raw_profile;
-      const auto& profile = *context.profile;
-      result.raw_profile_name = profile.name;
-      result.raw_profile_sha256 = profile.sha256;
-      result.raw_profile_camera = profile.camera_model;
-      result.raw_profile_tone = profile.tone_curve.empty() ? "adobe-sdk-acr3" : "profile";
-      result.raw_profile_baseline_ev = context.baseline_exposure + profile.baseline_exposure_offset;
-    }
     result.sensor_height = staged.image.decode.sensor_height;
     result.target_width = staged.image.decode.target_width;
     result.target_height = staged.image.decode.target_height;
@@ -490,7 +464,7 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     result.input_content_peak_nits = described.content_peak_nits;
     result.model_development = options.ai_model_path.empty()
                                    ? "none"
-                                   : staged.image.raw_profile ? "raw-dcp-v1" : native_model_development_kind(
+                                   : native_model_development_kind(
                                          described.domain);
     result.width = rendered_base.width;
     result.height = rendered_base.height;
@@ -602,9 +576,7 @@ FileResult convert_file(const std::filesystem::path& input,
                         const std::string& fingerprint, ProgressSink* sink) {
   auto options = requested_options;
   options.raw.progress_sink = sink;
-  const auto raw_resources = raw_decode_resources(options.raw);
-  const bool resources_unprepared = (!options.raw.snapshots &&
-      std::any_of(raw_resources.begin(), raw_resources.end(), [](const auto& resource) { return !resource.path.empty(); })) ||
+  const bool resources_unprepared =
       (!options.color_lut.path.empty() && !options.color_lut.snapshot) ||
       (!options.external_gain_path.empty() && !options.external_gain_snapshot);
   const bool frame_prepared = options.frame_snapshot != nullptr;

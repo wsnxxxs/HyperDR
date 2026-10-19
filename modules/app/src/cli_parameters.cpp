@@ -31,11 +31,8 @@ std::string next_value(int& i, int argc, char** argv, std::string_view option) {
 // Settings come from the schema; only the plumbing is listed here.
 void parse_settings(int argc, char** argv, int first, ConvertOptions& options,
                     unsigned* curve_samples, PreviewRegion* region) {
-  bool contrast_set = false, vibrance_set = false;
   for (int i = first; i < argc; ++i) {
     const std::string_view arg = argv[i];
-    contrast_set = contrast_set || arg == "--contrast";
-    vibrance_set = vibrance_set || arg == "--vibrance";
     if (const Setting* setting = find_setting_by_flag(arg)) {
       const std::string text = setting->kind == SettingKind::kBoolean
                                    ? std::string{}
@@ -121,25 +118,15 @@ void parse_settings(int argc, char** argv, int first, ConvertOptions& options,
       // short-lived preview CLI need not read a large RAW again just to name an
       // already-decoded cache entry.
       options.decode_cache_source_sha256 = next_value(i, argc, argv, arg);
-    } else if (arg == "--raw-bad-pixels") {
-      options.raw.bad_pixel_map = path_from_utf8(next_value(i, argc, argv, arg));
-    } else if (arg == "--raw-dark-frame") {
-      options.raw.dark_frame = path_from_utf8(next_value(i, argc, argv, arg));
     } else if (arg == "--lut") {
       options.color_lut.path = path_from_utf8(next_value(i, argc, argv, arg));
-    } else if (arg == "--raw-linearization-lut") {
-      options.raw.linearization_lut = path_from_utf8(next_value(i, argc, argv, arg));
-    } else if (arg == "--raw-lens-shading") {
-      options.raw.lens_shading_map = path_from_utf8(next_value(i, argc, argv, arg));
-    } else if (arg == "--raw-auto-bad-pixels") {
-      options.raw.auto_bad_pixel_correction = true;
     } else if (arg == "--raw-gain") {
       options.raw.digital_gain = real(next_value(i, argc, argv, arg), "RAW digital gain");
     } else {
       throw std::invalid_argument("unknown option: " + std::string(arg));
     }
   }
-  apply_render_defaults(options, contrast_set, vibrance_set);
+  apply_render_defaults(options);
 }
 
 }  // namespace hyperdr::app::detail

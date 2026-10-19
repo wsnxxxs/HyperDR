@@ -130,10 +130,8 @@ void prepare_conversion_resources(ConvertOptions& options);
 // Rejects combinations no encoder can honour, before any file is opened.
 void validate_convert_options(const ConvertOptions& options);
 [[nodiscard]] ColorGamut resolved_sdr_gamut(const ConvertOptions& options);
-// Resolve defaults after settings are applied. Explicit creative controls win
-// over camera-profile defaults; HLG uses its format-specific headroom ceiling.
-void apply_render_defaults(ConvertOptions& options, bool contrast_set,
-                            bool vibrance_set);
+// Apply the format-specific headroom ceiling after settings are resolved.
+void apply_render_defaults(ConvertOptions& options);
 
 void apply_output_color_options(ConvertOptions& options);
 
@@ -191,11 +189,6 @@ struct FileResult {
   bool default_crop_present{false};
   bool decode_degraded{false};
   std::optional<RawProcessing> raw_processing;
-  std::string raw_white_balance;
-  std::string raw_color_matrix;
-  std::string raw_profile_name, raw_profile_sha256, raw_profile_camera, raw_profile_tone;
-  std::string raw_lens_profile, raw_lens_correction;
-  float raw_profile_baseline_ev{};
   std::vector<std::string> decode_degradation_reasons;
   // Which renderer ran, and the headroom it was told the input carried. These
   // are the two facts that decide what every other number in this record means:

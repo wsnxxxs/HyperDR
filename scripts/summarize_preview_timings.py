@@ -42,7 +42,7 @@ def records(text):
             yield "stress", "stress", marker[1], int(marker[2])
 
 
-def summarize(events, edge=None, stress_only=False):
+def summarize(events, edge=None, stress_only=False, start_ns=None, end_ns=None):
     events = list(events)
     windows, begin = [], None
     for _, stage, event, ns in sorted(events, key=lambda e: e[3]):
@@ -60,6 +60,8 @@ def summarize(events, edge=None, stress_only=False):
         if not starts:
             continue
         start = starts[0]
+        if (start_ns is not None and start < start_ns) or (end_ns is not None and start > end_ns):
+            continue
         if stress_only and not any(a <= start <= b for a, b in windows):
             continue
         presented = [n for n, s, e in values if s == "presented" and n >= start]
@@ -117,6 +119,11 @@ def self_test():
     marked = events + [("stress", "stress", "begin", 19_000_000), ("stress", "stress", "end", 21_000_000)]
     assert [r["trace"] for r in summarize(marked, stress_only=True)] == ["b"]
     assert not summarize(events, stress_only=True)
+    assert [r["trace"] for r in summarize(events, start_ns=0, end_ns=0)] == ["a"]
+    assert [r["trace"] for r in summarize(events, start_ns=1)] == ["b"]
+    assert not summarize(events, start_ns=1, end_ns=19_999_999)
+    assert summarize(events, end_ns=0)[0]["request_to_present_ms"] == 10
+    assert not summarize(marked, stress_only=True, end_ns=19_999_999)
     message = "A3 trace=a stage=request event=begin ns=1"
     for text in (json.dumps([{"eventMessage": message}]), json.dumps({"eventMessage": message}) + "\n{}", message):
         assert list(records(text)) == [("a", "request", "begin", 1)]
@@ -133,13 +140,19 @@ def main():
     parser.add_argument("--csv", type=Path)
     parser.add_argument("--edge", type=int)
     parser.add_argument("--stress-only", action="store_true", help="Only requests started during a completed A3Stress run")
+    parser.add_argument("--start", type=int, metavar="UPTIME_NS", help="Inclusive request-start boundary in host monotonic nanoseconds (A3 ns= field)")
+    parser.add_argument("--end", type=int, metavar="UPTIME_NS", help="Inclusive request-end boundary in host monotonic nanoseconds; later presentation is retained")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
     if args.self_test:
         self_test(); return
     if args.input is None:
         parser.error("provide a log show JSON/NDJSON file")
-    rows = summarize(records(args.input.read_text()), args.edge, args.stress_only)
+    if (args.start is not None and args.start < 0) or (args.end is not None and args.end < 0):
+        parser.error("--start and --end must be nonnegative host monotonic nanoseconds")
+    if args.start is not None and args.end is not None and args.start > args.end:
+        parser.error("--start must not exceed --end")
+    rows = summarize(records(args.input.read_text()), args.edge, args.stress_only, args.start, args.end)
     if not rows:
         parser.error("no matching A3 requests found; enable -HDRPreviewTimings YES and include PreviewStress markers for --stress-only")
     print(table(rows))

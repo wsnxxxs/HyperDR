@@ -57,20 +57,29 @@ public struct ReportFile: Codable, Sendable {
     public let input, output: String
     public let success, skipped: Bool
     public let message: String
+    public let errorCode: String?
+    public let detail: String?
     public let width, height: Int?
     /// Present for a framed export: `width`/`height` are then the canvas.
     public let frame: ReportFrame?
 
     public init(input: String, output: String, success: Bool, skipped: Bool,
-                message: String, width: Int?, height: Int?, frame: ReportFrame? = nil) {
+                message: String, width: Int?, height: Int?, frame: ReportFrame? = nil,
+                errorCode: String? = nil, detail: String? = nil) {
         self.input = input
         self.output = output
         self.success = success
         self.skipped = skipped
         self.message = message
+        self.errorCode = errorCode
+        self.detail = detail
         self.width = width
         self.height = height
         self.frame = frame
+    }
+    private enum CodingKeys: String, CodingKey {
+        case input, output, success, skipped, message, width, height, frame, detail
+        case errorCode = "error_code"
     }
 }
 public struct ConvertReport: Sendable {

@@ -419,6 +419,29 @@ private func failureCode(_ operation: () async throws -> Void) async -> String? 
         #expect(await eventually { await runner.read(ticket.job, offset: 0)?.summary.done == true })
     }
 
+    @Test func perFileFailuresPreserveCodesDetailsAndDiscardWork() async throws {
+        for code in ["export_dimension_limit", "export_memory_budget", "export_failed"] {
+            let env = try JobEnvironment()
+            let photo = try await env.photo()
+            let data = Data("""
+                {"input":"photo.png","output":"","success":false,"skipped":false,
+                 "message":"Failed export","error_code":\(code == "export_failed" ? "null" : "\"\(code)\""),
+                 "detail":"full error detail"}
+                """.utf8)
+            let file = try JSONDecoder().decode(ReportFile.self, from: data)
+            let runner = env.runner(convert: { _, _ in ConvertReport(json: data, files: [file]) })
+            let ticket = try await runner.start(session: photo.id, options: EditOptions())
+            try #require(await eventually(timeout: .seconds(2)) { await runner.read(ticket.job, offset: 0)?.summary.done == true })
+            let result = try #require(await runner.read(ticket.job, offset: 0))
+            #expect(result.summary.failure?.code == code)
+            #expect(result.summary.failure?.message == "Failed export")
+            #expect(result.summary.failure?.detail == "full error detail")
+            #expect(await env.sessions.exports(for: photo.id).isEmpty)
+            let directory = env.configuration.supportDirectory.appendingPathComponent("sessions/\(photo.id)/exports")
+            #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+        }
+    }
+
     @Test func failurePreservesPublishedVersionsAndCleansTheFailedVersion() async throws {
         let env = try JobEnvironment()
         let photo = try await env.photo()
@@ -430,7 +453,7 @@ private func failureCode(_ operation: () async throws -> Void) async -> String? 
         })
         let second = try await bad.start(session: photo.id, options: EditOptions())
         try #require(await eventually { await bad.read(second.job, offset: 0)?.summary.done == true })
-        #expect(await bad.read(second.job, offset: 0)?.summary.failure?.code == "internal_error")
+        #expect(await bad.read(second.job, offset: 0)?.summary.failure?.code == "export_failed")
         #expect(await env.sessions.exports(for: photo.id).map(\.id) == [first.export])
         #expect(try Data(contentsOf: await env.sessions.resultURL(photo.id, export: first.export)) == Data([1,2,3]))
     }

@@ -152,143 +152,121 @@ import XCTest
         try loop(stuck).stop()
     }
 
-    // MARK: - Judgement 2: main-thread blocking under pressure
+    // MARK: - Judgement 2: progress while the renderer is backpressured
 
-    private struct Pressure {
-        var tickDurations: [Duration] = []
-        var probeGaps: [Duration] = []
-        var maxProbeGap: Duration { probeGaps.max() ?? .zero }
-        var p99ProbeGap: Duration { Self.p99(probeGaps) }
-        var p99: Duration { Self.p99(tickDurations) }
-        static func p99(_ values: [Duration]) -> Duration {
-            let sorted = values.sorted()
-            guard !sorted.isEmpty else { return .zero }
-            return sorted[Swift.max(0, Int((Double(sorted.count) * 0.99).rounded(.up)) - 1)]
-        }
-        var max: Duration { tickDurations.max() ?? .zero }
-    }
-
-    /// 120 Hz of transform changes and ticks for `seconds`, with a main-queue
-    /// probe firing every 4 ms; records each tick's time in canvas code and
-    /// the longest gap between probe firings.
-    private func drive(_ view: EDRCanvasView, seconds: Double) async -> Pressure {
-        var result = Pressure()
-        var firings: [ContinuousClock.Instant] = []
-        let timer = DispatchSource.makeTimerSource(flags: .strict, queue: .main)
-        timer.schedule(deadline: .now(), repeating: .milliseconds(4), leeway: .nanoseconds(0))
-        timer.setEventHandler { MainActor.assumeIsolated { firings.append(.now) } }
-        timer.resume()
-        let clock = ContinuousClock()
-        let end = clock.now + .milliseconds(Int(seconds * 1000))
-        var step = 0
-        while clock.now < end {
-            step += 1
-            let start = clock.now
+    /// Exercise a fixed number of updates while a test-controlled gate remains
+    /// closed. A main-queue marker must run before relief, independently of the
+    /// render executor. Latencies are diagnostic measurements, not assertions
+    /// about how promptly the OS schedules a timer on a busy test machine.
+    private func driveWhileBlocked(_ view: EDRCanvasView, scenario: String,
+                                   isBlocked: () -> Bool) async {
+        XCTAssertTrue(isBlocked(), "\(scenario): pressure must be established first")
+        var durations: [Duration] = []
+        for step in 0..<240 {
+            let start = ContinuousClock.now
             view.transform.zoom = step.isMultiple(of: 2) ? 1 : 1.5
             view.setNeedsRedraw()
             view.tick()
-            result.tickDurations.append(clock.now - start)
-            try? await Task.sleep(for: .microseconds(8333))
+            durations.append(ContinuousClock.now - start)
         }
-        timer.cancel()
-        result.probeGaps = zip(firings, firings.dropFirst()).map { $1 - $0 }
-        return result
+        var mainQueueServiced = false
+        DispatchQueue.main.async { MainActor.assumeIsolated { mainQueueServiced = true } }
+        await eventually(timeout: .seconds(10), "main queue progresses before pressure relief") { mainQueueServiced }
+        XCTAssertTrue(isBlocked(), "\(scenario): updates and main-queue work completed without relief")
+        let ordered = durations.sorted()
+        print("A2b-2 \(scenario): 240 updates while blocked; tick p99=\(ordered[237]) max=\(ordered[239])")
+        XCTAssertLessThanOrEqual(ordered[237], .milliseconds(1), "\(scenario): canvas tick p99")
+        XCTAssertLessThanOrEqual(ordered[239], .milliseconds(4), "\(scenario): canvas tick max")
     }
 
-    private func check(_ pressure: Pressure, _ scenario: String,
-                       file: StaticString = #filePath, line: UInt = #line) {
-        print("A2b-2 \(scenario): ticks=\(pressure.tickDurations.count) p99=\(pressure.p99) "
-            + "max=\(pressure.max) probeP99Gap=\(pressure.p99ProbeGap) probeMaxGap=\(pressure.maxProbeGap)")
-        XCTAssertGreaterThan(pressure.tickDurations.count, 100, scenario, file: file, line: line)
-        XCTAssertLessThanOrEqual(pressure.p99, .milliseconds(1), "\(scenario) p99", file: file, line: line)
-        XCTAssertLessThanOrEqual(pressure.max, .milliseconds(4), "\(scenario) max", file: file, line: line)
-        // A 4 ms timer, so a 16 ms delay is a 20 ms gap. The canvas code
-        // itself is bounded above; the main queue also serves XCTest and
-        // shares a busy machine, so one outlier is allowed up to two 120 Hz
-        // frames (seen once in 12 runs: 20.5 ms while ticks peaked at 0.5 ms).
-        XCTAssertLessThanOrEqual(pressure.p99ProbeGap, .milliseconds(20), "\(scenario) probe p99",
-                                 file: file, line: line)
-        XCTAssertLessThanOrEqual(pressure.maxProbeGap, .milliseconds(36), "\(scenario) probe max",
-                                 file: file, line: line)
-    }
-
-    /// Drawables exhausted: every request waits 1 s, alternating with nil.
+    /// A drawable source stays suspended until the test opens its gate, then
+    /// returns nil once. No elapsed-time assumption about nextDrawable's timeout.
     func testPressureDrawableSourceBlocks() async throws {
         let (view, renderer, probe, _) = try canvas()
         let loop = try loop(view)
-        probe.block = 1
-        probe.handsOutNone = true
-        check(await drive(view, seconds: 5), "drawable source blocks 1 s / nil")
-        XCTAssertEqual(probe.mainThreadRequests, 0)
-        probe.block = 0
-        probe.handsOutNone = false
-        view.setNeedsRedraw()
-        view.tick()
-        await eventually(timeout: .milliseconds(1500), "newest snapshot after relief") {
-            loop.state.lastPresented == view.handedOverGeneration
+        let gate = DrawablePressureGate()
+        let source = renderer.drawableSource
+        let requests = Mutex(0)
+        renderer.drawableSource = { layer in
+            let first = requests.withLock { count in count += 1; return count == 1 }
+            if first { gate.waitForRelease(); return nil }
+            return source(layer)
         }
+        defer { gate.release() }
+        view.tick()
+        await eventually(timeout: .seconds(10), "drawable source entered gate") { gate.isWaiting }
+        await driveWhileBlocked(view, scenario: "drawable source blocked / nil", isBlocked: { gate.isWaiting })
+        XCTAssertEqual(requests.withLock { $0 }, 1, "coalesced updates must not request more drawables")
+        XCTAssertEqual(loop.state.presentations, 0)
+        XCTAssertEqual(renderer.pass1Runs, 0, "no pass 1 while waiting for a drawable")
+        gate.release()
+        await eventually(timeout: .seconds(10), "newest snapshot after relief without another tick") {
+            loop.state.lastPresented == view.handedOverGeneration && loop.state.idle
+        }
+        XCTAssertFalse(gate.didTimeOut)
+        XCTAssertEqual(gate.mainThreadRequests + probe.mainThreadRequests, 0)
         XCTAssertLessThanOrEqual(renderer.maxInFlightObserved, 1)
         XCTAssertFalse(loop.state.presentedOutOfOrder)
     }
 
-    /// GPU backlog: every presenting command buffer waits 250 ms on the GPU
-    /// for a shared event before it can complete.
+    /// The shared event is signalled by the test only after pending updates and
+    /// a main-queue marker complete; no 250 ms timer or presentation-rate budget.
     func testPressureGPUBacklog() async throws {
         let (view, renderer, probe, _) = try canvas()
         let loop = try loop(view)
         let event = try XCTUnwrap(renderer.device.makeSharedEvent())
-        let next = Mutex<UInt64>(0)
+        let commands = Mutex(0)
         renderer.presentingCommandHook = { command in
-            let value = next.withLock { $0 += 1; return $0 }
-            command.encodeWaitForEvent(event, value: value)
-            DispatchQueue.global().asyncAfter(deadline: .now() + 0.25) { event.signaledValue = value }
+            commands.withLock { $0 += 1 }
+            command.encodeWaitForEvent(event, value: 1)
         }
-        check(await drive(view, seconds: 5), "GPU completes 250 ms late")
-        XCTAssertEqual(renderer.busyRefusals, 0, "the loop waits for completion rather than polling")
-        let presentations = loop.state.presentations
-        XCTAssertGreaterThan(presentations, 5)
-        XCTAssertLessThan(presentations, 30, "at most one draw per 250 ms in flight")
-        renderer.presentingCommandHook = nil
-        view.setNeedsRedraw()
+        defer { event.signaledValue = 1 }
         view.tick()
-        await eventually(timeout: .milliseconds(800), "newest snapshot after relief") {
-            loop.state.lastPresented == view.handedOverGeneration
+        await eventually(timeout: .seconds(10), "GPU command parked on shared event") {
+            commands.withLock { $0 } == 1 && renderer.inFlight == 1
+        }
+        await driveWhileBlocked(view, scenario: "GPU command awaiting event", isBlocked: {
+            event.signaledValue == 0 && renderer.inFlight == 1
+        })
+        XCTAssertEqual(commands.withLock { $0 }, 1, "pending snapshots must not submit a second command")
+        XCTAssertEqual(renderer.busyRefusals, 0, "the loop waits for completion rather than polling")
+        renderer.presentingCommandHook = nil
+        event.signaledValue = 1
+        await eventually(timeout: .seconds(10), "newest snapshot after GPU relief") {
+            loop.state.lastPresented == view.handedOverGeneration && loop.state.idle
         }
         XCTAssertEqual(probe.mainThreadRequests, 0)
         XCTAssertLessThanOrEqual(renderer.maxInFlightObserved, 1)
         XCTAssertFalse(loop.state.presentedOutOfOrder)
     }
 
-    /// Drawables held: the test keeps every drawable of the layer for 5 s,
-    /// so the loop's `nextDrawable` times out after 1 s again and again.
+    /// Hold the real offscreen layer's complete pool off the main thread. The
+    /// source gate explicitly models compositor ownership until release rather
+    /// than relying on CAMetalLayer's undocumented overflow-after-timeout policy.
     func testPressureDrawablesHeld() async throws {
         let (view, renderer, probe, layer) = try canvas()
         let loop = try loop(view)
+        let gate = DrawablePressureGate(layer: layer)
+        defer { gate.release() }
+        let held = await Task.detached { gate.holdDrawables() }.value
+        XCTAssertEqual(held, layer.maximumDrawableCount)
+        let source = renderer.drawableSource
+        renderer.drawableSource = { layer in gate.waitForRelease(); return source(layer) }
         view.tick()
-        await eventually("first presentation") { loop.state.presentations >= 1 && loop.state.idle }
-        var held: [any CAMetalDrawable] = []
-        for _ in 0..<layer.maximumDrawableCount {
-            if let drawable = layer.nextDrawable() { held.append(drawable) }
+        await eventually(timeout: .seconds(10), "renderer waiting for held pool") { gate.isWaiting }
+        await driveWhileBlocked(view, scenario: "all drawables held", isBlocked: { gate.isWaiting })
+        XCTAssertEqual(loop.state.presentations, 0)
+        XCTAssertEqual(renderer.pass1Runs, 0)
+        gate.release()
+        await eventually(timeout: .seconds(10), "newest snapshot after returning held drawables") {
+            loop.state.lastPresented == view.handedOverGeneration && loop.state.idle
         }
-        XCTAssertEqual(held.count, layer.maximumDrawableCount)
-        let before = loop.state.presentations
-        check(await drive(view, seconds: 5), "all drawables held")
-        // After its 1 s timeout `nextDrawable` hands out an extra drawable
-        // anyway (also seen in the A2b-1 review's pool probe), so drawing slows
-        // down rather than stops.
-        let during = loop.state.presentations - before
-        print("A2b-2 all drawables held: \(during) presentations in 5 s")
-        XCTAssertLessThanOrEqual(during, 15)
-        held.removeAll()
-        view.setNeedsRedraw()
-        view.tick()
-        await eventually(timeout: .milliseconds(1500), "newest snapshot after relief") {
-            loop.state.lastPresented == view.handedOverGeneration
-        }
-        XCTAssertEqual(probe.mainThreadRequests, 0)
+        XCTAssertFalse(gate.didTimeOut)
+        XCTAssertEqual(gate.mainThreadRequests + probe.mainThreadRequests, 0)
         XCTAssertLessThanOrEqual(renderer.maxInFlightObserved, 1)
         XCTAssertFalse(loop.state.presentedOutOfOrder)
     }
+
 }
 
 extension PreviewRenderLoopTests {
@@ -409,5 +387,50 @@ extension PreviewRenderLoopTests {
             executor.state.lastPresented == view.handedOverGeneration && executor.state.idle
         }
         XCTAssertEqual(probe.mainThreadRequests, 0)
+    }
+}
+
+/// Only the render executor waits on this condition; the test/main actor opens
+/// it. The deadline is a cleanup backstop, never a scheduling/performance oracle.
+nonisolated private final class DrawablePressureGate: @unchecked Sendable {
+    private let condition = NSCondition()
+    private let layer: CAMetalLayer?
+    private var held: [any CAMetalDrawable] = []
+    private var released = false
+    private var waiting = false
+    private var timedOut = false
+    private var mainRequests = 0
+
+    init(layer: CAMetalLayer? = nil) { self.layer = layer }
+    var isWaiting: Bool { condition.withLock { waiting } }
+    var didTimeOut: Bool { condition.withLock { timedOut } }
+    var mainThreadRequests: Int { condition.withLock { mainRequests } }
+
+    func holdDrawables() -> Int {
+        guard let layer else { return 0 }
+        let drawables = autoreleasepool {
+            (0..<layer.maximumDrawableCount).compactMap { _ in layer.nextDrawable() }
+        }
+        return condition.withLock { held = drawables; return held.count }
+    }
+
+    func waitForRelease() {
+        condition.lock()
+        defer { condition.unlock() }
+        if Thread.isMainThread { mainRequests += 1 }
+        waiting = true
+        let deadline = Date().addingTimeInterval(30)
+        while !released {
+            if !condition.wait(until: deadline) { timedOut = true; break }
+        }
+        waiting = false
+    }
+
+    func release() {
+        condition.lock()
+        held.removeAll()
+        released = true
+        condition.broadcast()
+        condition.unlock()
     }
 }

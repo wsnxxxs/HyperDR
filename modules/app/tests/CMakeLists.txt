@@ -22,6 +22,10 @@ if(HYPERDR_WITH_CODECS)
     target_link_libraries(external_gain_hdr_test PRIVATE
       "-framework ImageIO" "-framework CoreGraphics" "-framework CoreFoundation")
   endif()
+  hyperdr_add_test(story_export_test LINK HyperDR::app)
+  if(TARGET story_export_test)
+    set_tests_properties(story_export_test PROPERTIES TIMEOUT 600 RUN_SERIAL TRUE)
+  endif()
 endif()
 
 hyperdr_add_test(resource_snapshot_test LINK HyperDR::app)

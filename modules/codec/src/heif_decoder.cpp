@@ -359,6 +359,24 @@ void composite(DecodedImage& result, const AlphaPlane& source_alpha) {
 FloatImage decode_heif_gain(const HeifFile& file, const HeifImagePlan& plan, unsigned channels) {
   return code_plane(file, plan, channels, nullptr);
 }
+void verify_heif_tiles(const HeifFile& file, const HeifImagePlan& plan) {
+  std::size_t seen = 0;
+  tiles(file, plan, [&](std::size_t, hevc::DecodedPicture&& p) {
+    if (p.width != plan.tile_width || p.height != plan.tile_height ||
+        p.bit_depth != plan.config.bit_depth || p.chroma_format != plan.config.chroma_format)
+      throw HeifReadError("decoded HEVC tile differs from its configuration");
+    ++seen;
+  });
+  if (seen != plan.tiles.size()) throw HeifReadError("HEVC decoder returned the wrong tile count");
+}
+HeifAdaptiveParts decode_heif_adaptive_parts(const std::vector<std::uint8_t>& bytes) {
+  const auto file = read_heif(bytes);
+  const auto plan = file.resolve_gain_map(HeifCanvas::Tiled);
+  if (!plan || !plan->metadata) throw HeifReadError("Adaptive HDR HEIC lacks gain map");
+  auto base = primary(file, plan->base, RawDecodeOptions{}.default_gamut, 0, true, nullptr, nullptr);
+  auto gain = code_plane(file, plan->gain, gain_map_channel_count(*plan->metadata), nullptr);
+  return {std::move(base.linear_p3), std::move(gain), *plan->metadata};
+}
 DecodedImage decode_heic_bytes(const std::vector<std::uint8_t>& bytes,
                                const RawDecodeOptions& options, std::string_view path) {
   const auto file = read_heif(bytes);

@@ -47,6 +47,7 @@ import UniformTypeIdentifiers
     @ObservationIgnored var exportCapabilities: EditorCapabilities?
     @ObservationIgnored var pendingSwitchStops = false
     @ObservationIgnored var lutMetadataTask: Task<Void, Never>?
+    @ObservationIgnored var lutMetadataWrites: [String: LUTMetadataWrite] = [:]
     @ObservationIgnored var lutTask: Task<Void, Never>?
     @ObservationIgnored var lutTicket = 0
     @ObservationIgnored let now: () -> Date
@@ -221,6 +222,7 @@ import UniformTypeIdentifiers
         exportMetadataTask?.cancel()
         lutTask?.cancel()
         lutMetadataTask?.cancel()
+        for write in lutMetadataWrites.values { write.task?.cancel() }
         for task in saveTasks.values { task.cancel() }
         cameraSupportTask?.cancel()
         operation?.cancel()

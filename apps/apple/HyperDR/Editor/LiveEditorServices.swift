@@ -181,7 +181,7 @@ import os
         guard let kit = try? await requireKit() else { return .none }
         switch await kit.sessions.restoreLastOutcome() {
         case .none: return .none
-        case .unavailable(let error): return .unavailable(UserFacingError(error))
+        case .unavailable(let error, _): return .unavailable(UserFacingError(error))
         case .restored(let session):
             do { return .restored(try await adopt(session, kit: kit)) }
             catch { return .unavailable(UserFacingError.service(error)) }

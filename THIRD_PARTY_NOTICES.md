@@ -39,8 +39,7 @@ that license; dependency license texts are available in vcpkg's installed
   those platform builds.
 
 The remaining codec components in the table apply to both implemented desktop
-configurations. Libultrahdr's Adobe HDR Gain Map license is retained separately
-from its Apache-2.0/MIT implementation license.
+configurations.
 
 Phone HTTPS certificate generation uses [cryptography](https://github.com/pyca/cryptography)
 under Apache-2.0 or BSD-3-Clause. The desktop sidecar bundles this dependency;

@@ -23,6 +23,7 @@ import os
     private struct PendingSubmission {
         let handle: UUID
         let request: PreviewRequest
+        let trace: PreviewTrace?
     }
     private var submitContinuation: AsyncStream<PendingSubmission>.Continuation?
     private var submitPump: Task<Void, Never>?
@@ -267,7 +268,7 @@ import os
 
             }
             records[photo.handle]?.reference = result.frame
-            let reference = Self.preview(result.frame)
+            let reference = Self.preview(result.frame, trace: result.trace)
             continuation.yield(.reference(reference))
             let base = EditBaseline.initial(encoding: encoding, preview: reference)
             let request = PreviewRequest(session: id, options: base, maxEdge: maxEdge, purpose: .edit)
@@ -281,7 +282,7 @@ import os
                         throw HyperDRError(code: "source_missing", message: "Source changed while opening")
                     }
                     records[photo.handle]?.edited = result.frame
-                    continuation.yield(.edited(Self.preview(result.frame)))
+                    continuation.yield(.edited(Self.preview(result.frame, trace: result.trace)))
                     return
                 case .failed(let failed, let error) where failed == request:
                     continuation.yield(.failed(UserFacingError(error)))
@@ -298,7 +299,7 @@ import os
         }
     }
 
-    static func preview(_ frame: PreviewFrame) -> EditorPreview {
+    static func preview(_ frame: PreviewFrame, trace: PreviewTrace? = nil) -> EditorPreview {
         let metadata = frame.metadata
         return EditorPreview(
             pixelSize: PixelSize(width: metadata.sourceWidth ?? metadata.width,
@@ -307,7 +308,7 @@ import os
             hasGain: frame.isCompact || metadata.headroomStops > 0,
             gainWeight: metadata.gainWeight, frame: frame,
             unadjusted: metadata.unadjusted.values,
-            hasCaptureMetadata: metadata.hasCaptureMetadata)
+            hasCaptureMetadata: metadata.hasCaptureMetadata, trace: trace)
     }
 
     private func installSubmitPump(_ kit: HyperDRKit) {
@@ -320,7 +321,9 @@ import os
                 guard !Task.isCancelled else { return }
                 guard let self, records[pending.handle] != nil,
                       latestRequests[pending.handle] == pending.request else { continue }
-                await kit.previews.submit(pending.request)
+                await PreviewTrace.$current.withValue(pending.trace) {
+                    await kit.previews.submit(pending.request)
+                }
             }
         }
     }
@@ -331,7 +334,7 @@ import os
         let request = PreviewRequest(session: record.session.id, options: options, maxEdge: maxEdge,
                                      submissionID: UUID())
         latestRequests[photo.handle] = request
-        submitContinuation?.yield(PendingSubmission(handle: photo.handle, request: request))
+        submitContinuation?.yield(PendingSubmission(handle: photo.handle, request: request, trace: PreviewTrace.current))
     }
 
     func renderDetail(_ photo: EditorPhoto, options: EditOptions, region: PreviewRegion,
@@ -343,7 +346,7 @@ import os
         try Task.checkCancellation()
         guard records[photo.handle] != nil else { throw CancellationError() }
         guard result.sourceDigest == record.session.sha256 else { throw EditorDetailError.sourceReplaced }
-        return Self.preview(result.frame)
+        return Self.preview(result.frame, trace: result.trace)
     }
 
     func refreshes(for photo: EditorPhoto) -> AsyncStream<EditorRefreshEvent> {
@@ -359,7 +362,7 @@ import os
                             continuation.yield(.sourceReplaced); continuation.finish(); return
                         }
                         records[photo.handle]?.edited = result.frame
-                        continuation.yield(.edited(Self.preview(result.frame),
+                        continuation.yield(.edited(Self.preview(result.frame, trace: result.trace),
                             isLatest: latestRequests[photo.handle] == result.request))
                     case .failed(let request, let error) where latestRequests[photo.handle] == request:
                         continuation.yield(.failed(UserFacingError(error)))

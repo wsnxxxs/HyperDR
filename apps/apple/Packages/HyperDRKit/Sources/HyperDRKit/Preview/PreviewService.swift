@@ -95,6 +95,7 @@ public actor PreviewService {
         let request: PreviewRequest
         let engineRequest: EngineRequest
         let key: PreviewCacheKey
+        let trace: PreviewTrace
         let submittedAt: ContinuousClock.Instant
     }
 
@@ -286,6 +287,10 @@ public actor PreviewService {
     // MARK: - Latest-wins submission
 
     public func submit(_ request: PreviewRequest) async {
+        let trace = PreviewTrace.current ?? PreviewTrace()
+        trace.record("service", "point")
+        trace.record("edge_\(request.maxEdge)", "point")
+        trace.record(request.purpose == .edit ? "edit" : "reference", "point")
         let id = request.session
         // The ticket is allocated before the first await. Everything this call
         // publishes afterwards is dropped (as superseded) when a later submit
@@ -314,7 +319,7 @@ public actor PreviewService {
             return
         }
         let prepared: Prepared
-        do { prepared = try prepare(request, state: state) }
+        do { prepared = try prepare(request, state: state, trace: trace) }
         catch {
             if isLatestSubmit(order, id) {
                 eventHub.emit(.failed(request, asHyperDRError(error)), for: id)
@@ -345,7 +350,7 @@ public actor PreviewService {
             }
             eventHub.emit(.started(request), for: id)
             eventHub.emit(.finished(PreviewResult(request: request, frame: frame, sourceDigest: prepared.key.sourceDigest,
-                fromCache: true, timings: PreviewTimings())), for: id)
+                fromCache: true, timings: PreviewTimings(), trace: prepared.trace)), for: id)
             return
         }
 
@@ -389,15 +394,19 @@ public actor PreviewService {
     // MARK: - Direct render / SingleFlight
 
     public func render(_ request: PreviewRequest) async throws -> PreviewResult {
+        let trace = PreviewTrace.current ?? PreviewTrace()
+        trace.record("service", "point")
+        trace.record("edge_\(request.maxEdge)", "point")
+        trace.record(request.purpose == .edit ? "edit" : "reference", "point")
         let state = try await attachedState(request.session,
             detachEpoch: detachEpochs[request.session] ?? 0)
-        let prepared = try prepare(request, state: state)
+        let prepared = try prepare(request, state: state, trace: trace)
         if let frame = await cachedFrame(prepared.key) {
             guard states[request.session] === state, !state.detached else {
                 throw HyperDRError(code: "cancelled", message: "Preview session was detached")
             }
             return PreviewResult(request: request, frame: frame, sourceDigest: prepared.key.sourceDigest, fromCache: true,
-                timings: PreviewTimings())
+                timings: PreviewTimings(), trace: prepared.trace)
         }
         let flightKey = FlightKey(generation: state.generation, cacheKey: prepared.key)
         // A merged flight reports its leader's cancellation to every waiter. A
@@ -418,7 +427,7 @@ public actor PreviewService {
                 }
                 if let frame = await cachedFrame(prepared.key) {
                     return PreviewResult(request: request, frame: frame, sourceDigest: prepared.key.sourceDigest, fromCache: true,
-                        timings: PreviewTimings())
+                        timings: PreviewTimings(), trace: prepared.trace)
                 }
             }
         }
@@ -426,7 +435,7 @@ public actor PreviewService {
             throw HyperDRError(code: "cancelled", message: "Preview session was detached")
         }
         return PreviewResult(request: request, frame: result.frame, sourceDigest: prepared.key.sourceDigest, fromCache: false,
-            timings: result.timings)
+            timings: result.timings, trace: prepared.trace)
     }
 
     // MARK: - Model gain
@@ -657,12 +666,12 @@ public actor PreviewService {
         latestSubmit[id] == order
     }
 
-    private func prepare(_ request: PreviewRequest, state: SessionState) throws -> Prepared {
+    private func prepare(_ request: PreviewRequest, state: SessionState, trace: PreviewTrace) throws -> Prepared {
         let engineRequest = try resolver.resolve(request, session: state.photo)
         let key = try PreviewCacheKey(session: state.photo, request: engineRequest,
             buildFingerprint: buildFingerprint)
         return Prepared(request: request, engineRequest: engineRequest, key: key,
-            submittedAt: ContinuousClock.now)
+            trace: trace, submittedAt: ContinuousClock.now)
     }
 
     private func start(_ prepared: Prepared, state: SessionState) {
@@ -700,7 +709,7 @@ public actor PreviewService {
         switch result {
         case .success(let value):
             eventHub.emit(.finished(PreviewResult(request: published.request, frame: value.frame, sourceDigest: published.key.sourceDigest,
-                fromCache: false, timings: value.timings)), for: id)
+                fromCache: false, timings: value.timings, trace: published.trace)), for: id)
         case .failure(let error):
             if Self.isCancellation(error) {
                 eventHub.emit(.superseded(published.request), for: id)
@@ -764,7 +773,9 @@ public actor PreviewService {
                     throw CancellationError()
                 }
                 let engineStarted = clock.now
-                let frame = try await renderWithTimeout(state.renderer, prepared.engineRequest)
+                let frame = try await PreviewTrace.$current.withValue(prepared.trace) {
+                    try await renderWithTimeout(state.renderer, prepared.engineRequest)
+                }
                 let engine = engineStarted.duration(to: clock.now)
                 if let ticket { await ticket.release() }
                 // Cache before releasing the session gate so detach cannot

@@ -46,8 +46,8 @@ nonisolated struct FramePlanes: @unchecked Sendable {
         self.alternateOffset = alternateOffset
     }
 
-    init(_ frame: PreviewFrame, device: any MTLDevice) throws {
-        let planes = try frame.metalBuffers(device: device)
+    init(_ frame: PreviewFrame, device: any MTLDevice, trace: PreviewTrace? = nil) throws {
+        let planes = try frame.metalBuffers(device: device, trace: trace)
         let metadata = frame.metadata
         self.init(base: planes.base, baseRowBytes: frame.base.rowBytes,
                   gain: planes.gain, gainRowBytes: frame.gain.rowBytes,
@@ -445,7 +445,7 @@ nonisolated final class PreviewRenderer: @unchecked Sendable {
         defer { Self.signposter.endInterval("Encode",interval) }
         try compositor?.encode(composition, transform: transform, target: drawable.texture, command: command)
         needsRetry = false
-        submit(command, presenting: drawable)
+        submit(command, presenting: drawable, trace: composition.presentationTrace ?? (composition.mode == .original ? composition.original?.trace : composition.edited.trace))
         return true
     }
 
@@ -506,14 +506,18 @@ nonisolated final class PreviewRenderer: @unchecked Sendable {
     /// Presents and commits, counting the buffer in flight until the GPU
     /// completes it; the completion handler drops the count and then tells
     /// the owner (the render loop wakes and draws its newest snapshot).
-    private func submit(_ command: any MTLCommandBuffer, presenting drawable: any CAMetalDrawable) {
+    private func submit(_ command: any MTLCommandBuffer, presenting drawable: any CAMetalDrawable, trace: PreviewTrace? = nil) {
+        let timing = trace?.begin("commit_to_gpu_complete")
+        if let trace { drawable.addPresentedHandler { drawable in trace.didPresent(at: drawable.presentedTime) } }
         let presenting = Self.signposter.beginInterval("Present", id: signpostID)
         let gpu = Self.signposter.beginInterval("InFlight", id: signpostID)
         let count = inFlightCount.withLock { value in value += 1; return value }
         maxObserved.withLock { $0 = max($0, count) }
         let completed = onPresentationCompleted
         // Holds the renderer until the GPU is done with its textures.
-        command.addCompletedHandler { [self] _ in
+        command.addCompletedHandler { [self] completedCommand in
+            if let timing { trace?.end("commit_to_gpu_complete", timing) }
+            if completedCommand.status == .error { trace?.record("gpu", "failed") }
             Self.signposter.endInterval("InFlight", gpu)
             inFlightCount.withLock { $0 -= 1 }
             completed?()

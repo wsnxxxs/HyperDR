@@ -106,7 +106,10 @@ public final class PreviewSession: @unchecked Sendable {
         try reserve()
         defer { release() }
         let session = try handle()
+        let trace = PreviewTrace.current ?? PreviewTrace()
         return try await EngineExecutor.run { cancellation in
+            let interval = trace.begin("render_frame")
+            defer { trace.end("render_frame", interval) }
             var frame = hyperdr_frame()
             var error: UnsafeMutablePointer<hyperdr_error>?
             let status = try encodeJSON(request).withCString {
@@ -115,7 +118,7 @@ public final class PreviewSession: @unchecked Sendable {
             // Own even partially populated results before checking status.
             let storage = FrameStorage(frame)
             try checkStatus(status, error)
-            return try PreviewFrame(storage: storage)
+            return try PreviewFrame(storage: storage, trace: trace)
         }
     }
     public func renderPacket(_ request: EngineRequest) async throws -> Data {

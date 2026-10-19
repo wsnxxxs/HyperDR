@@ -57,6 +57,8 @@ public struct PreviewResult: Sendable {
     public let sourceDigest: String
     public let fromCache: Bool
     public let timings: PreviewTimings
+    /// Publication identity is fresh even when pixel storage comes from cache.
+    public var trace: PreviewTrace? = nil
 }
 
 public enum PreviewEvent: Sendable {

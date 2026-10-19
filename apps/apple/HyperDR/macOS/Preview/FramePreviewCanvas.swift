@@ -10,7 +10,7 @@ struct FramePreviewCanvas: NSViewRepresentable {
         let view = EDRCanvasView(onError: { [weak model] detail in model?.reportCanvasFailure(detail) })
         view.allowsZoom = false
         view.compositionProvider = { [weak model] in
-            model?.editedCanvasFrame.map { CanvasComposition(edited: $0.frame) }
+            model?.editedCanvasFrame.map { CanvasComposition(edited: $0.frame, presentationTrace: model?.editedPresentationTrace) }
         }
         view.setNeedsRedraw()
         return view
@@ -20,7 +20,7 @@ struct FramePreviewCanvas: NSViewRepresentable {
         // Observe the frames so a new edit repaints the sheet too.
         _ = model.frameRevision
         view.compositionProvider = { [weak model] in
-            model?.editedCanvasFrame.map { CanvasComposition(edited: $0.frame) }
+            model?.editedCanvasFrame.map { CanvasComposition(edited: $0.frame, presentationTrace: model?.editedPresentationTrace) }
         }
         view.showsOriginal = false
         if let size = model.document?.pixelSize {

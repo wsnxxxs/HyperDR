@@ -81,8 +81,8 @@ final class EDRCanvasView: NSView {
             // the SwiftUI backdrop shows through.
             metalLayer.isOpaque = false
             metalLayer.framebufferOnly = true
-            // The layer is configured before the loop exists; from here on
-            // only the loop changes it.
+            // AppKit owns contentsScale; the loop updates only drawableSize
+            // between draws from immutable geometry snapshots.
             renderLoop = PreviewRenderLoop(renderer: renderer, layer: metalLayer) { [weak self] message in
                 MainActor.assumeIsolated { self?.onError(message) }
             }
@@ -167,7 +167,7 @@ final class EDRCanvasView: NSView {
         PreviewRenderer.signposter.emitEvent("Handoff")
         renderLoop.submit(CanvasSnapshot(content: content, transform: transform,
             drawableSize: CGSize(width: bounds.width * scale, height: bounds.height * scale),
-            contentsScale: scale, generation: generation))
+            generation: generation))
     }
 
     func setNeedsRedraw() { dirty = true }

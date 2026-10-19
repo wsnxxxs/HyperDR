@@ -14,7 +14,8 @@ import HyperDREngine
     }
 
     func testEveryFeatureTheReaderReportsGetsItsOwnSentence() {
-        XCTAssertEqual(ErrorText.heifFeatures.count, 15)
+        // Which features the engine throws is checked against this list by scripts/check_apple_i18n.py.
+        XCTAssertEqual(ErrorText.heifFeatures.count, 16)
         var seen = Set<String>()
         for feature in ErrorText.heifFeatures {
             let mapped = error(feature: feature)
@@ -42,6 +43,11 @@ import HyperDREngine
         XCTAssertTrue(ErrorText(error(feature: "image_sequence")).body(locale: en).contains("image sequence"))
         XCTAssertTrue(ErrorText(error(feature: "hevc_444")).body(locale: en).contains("4:4:4"))
         XCTAssertTrue(ErrorText(error(feature: "hevc_422")).body(locale: zh).contains("4:2:2"))
+        // A decoder that refuses an HEVC photo is not a photo that isn't HEVC.
+        let refused = ErrorText(error(feature: "hevc_decoder")).body(locale: en)
+        XCTAssertTrue(refused.contains("video decoder"), refused)
+        XCTAssertFalse(refused.contains("isn’t compressed"), refused)
+        XCTAssertTrue(ErrorText(error(feature: "hevc_decoder")).body(locale: zh).contains("视频解码器"))
         XCTAssertTrue(ErrorText(error(feature: "protected_item")).body(locale: zh).contains("保护"))
         XCTAssertEqual(ErrorText(error(feature: "hevc_12bit")).body(locale: en),
                        "This photo is 12-bit, which HyperDR doesn’t support. It reads 8-bit and 10-bit photos.")
@@ -63,26 +69,5 @@ import HyperDREngine
             XCTAssertNil(mapped.variant)
             XCTAssertEqual(ErrorText(mapped).body(locale: en).prefix(34), "Choose a RAW, JPEG, PNG, TIFF, HEI")
         }
-    }
-
-    func testTheFeatureListMatchesTheOnesTheEngineSources() throws {
-        // Every feature string the reader and decoder throw, found in the sources, has a sentence.
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-        let files = ["modules/container/src/heif_reader.cpp", "modules/container/src/hvcc.cpp",
-                     "modules/codec/src/hevc/vt_decoder.cpp", "modules/codec/src/hevc/yuv_to_rgb.cpp"]
-        let pattern = try NSRegularExpression(pattern: #"HeifReadError\([^;]*?,\s*(?:[^;"]*\?\s*)?"([a-z0-9_]+)""#,
-                                              options: [.dotMatchesLineSeparators])
-        var found = Set<String>()
-        for file in files {
-            guard let text = try? String(contentsOf: root.appendingPathComponent(file), encoding: .utf8) else {
-                throw XCTSkip("engine sources are not next to the tests")
-            }
-            for match in pattern.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
-                found.insert(String(text[Range(match.range(at: 1), in: text)!]))
-            }
-        }
-        XCTAssertFalse(found.isEmpty)
-        XCTAssertTrue(found.isSubset(of: Set(ErrorText.heifFeatures)), "unmapped: \(found.subtracting(ErrorText.heifFeatures))")
     }
 }

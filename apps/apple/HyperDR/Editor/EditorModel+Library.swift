@@ -61,16 +61,9 @@ extension EditorModel {
         let previous = edit
         edit.choices["lutInput"] = input.rawValue; edit.choices["lutOutput"] = output.rawValue
         recordStep(from: previous, action: "lut"); editChanged()
-        let id = edit.lutID, previousWrite = lutMetadataTask
-        lutMetadataTask = Task { [weak self, services] in
-            await previousWrite?.value
-            guard !Task.isCancelled else { return }
-            do {
-                let item = try await services.updateLUT(id, input: input, output: output)
-                if let index = self?.lut.library.firstIndex(where: { $0.id == id }) { self?.lut.library[index] = item }
-            } catch { self?.lut.failures = [UserFacingError.service(error)] }
-        }
+        enqueueLUTSpaces(edit.lutID, input: input, output: output, selectedPhoto: photo)
     }
+
     func importLUTs(_ urls: [URL]) async {
         guard editingLockReason == nil, !lut.isBusy else { return }
         lut.isBusy = true; lut.failures = []
@@ -84,12 +77,12 @@ extension EditorModel {
                     detail: url.lastPathComponent, variant: failure.variant))
             }
         }
-        lut.library = await services.lutEntries()
+        mergeLUTLibrary(await services.lutEntries())
     }
     func removeLUT(_ id: String) {
         guard !isEditingLocked else { return }
         Task { [weak self, services] in
-            do { try await services.removeLUT(id); self?.lut.library = await services.lutEntries() }
+            do { try await services.removeLUT(id); self?.mergeLUTLibrary(await services.lutEntries()) }
             catch { self?.lut.failures = [UserFacingError.service(error)] }
         }
     }

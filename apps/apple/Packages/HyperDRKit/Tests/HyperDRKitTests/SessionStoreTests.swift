@@ -683,3 +683,24 @@ extension SessionStoreTests {
         #expect(restored.sourceURL.lastPathComponent == "renamed.png")
     }
 }
+
+@Suite(.timeLimit(.minutes(1))) struct VersionsWithoutTheSourceTests {
+    @Test func theRetainedVersionsStayListedAndTransferableWhenTheSourceIsGone() async throws {
+        let environment = try TestEnvironment()
+        let store = environment.store()
+        let original = try environment.source("photo.png")
+        let session = try await store.open(original)
+        let (id, directory) = try await store.prepareExport(session.id, options: [:], key: ExportKey(rawValue: "fixture"))
+        let output = directory.appendingPathComponent("one.heic")
+        try Data([1, 2, 3]).write(to: output)
+        let report = ConvertReport(json: Data("{}".utf8), files: [ReportFile(
+            input: "", output: output.path, success: true, skipped: false, message: "", width: 1, height: 1)])
+        let record = try await store.publishExport(session.id, export: id, report: report)
+        try FileManager.default.removeItem(at: original)
+        await #expect(throws: HyperDRError.self) { _ = try await store.session(session.id) }
+        let listed = await store.exports(for: session.id)
+        #expect(listed.map(\.id) == [record.id])
+        let copy = try await store.stageExportForTransfer(session.id, export: record.id)
+        #expect(try Data(contentsOf: copy) == Data([1, 2, 3]))
+    }
+}

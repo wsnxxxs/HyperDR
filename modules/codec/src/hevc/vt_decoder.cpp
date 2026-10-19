@@ -210,7 +210,7 @@ void decode_item(const HvcConfig& config, std::size_t count, const EncodedTileRe
     throw HeifReadError("cannot create HEVC decoder (OSStatus " + std::to_string(status) + ")",
                         unsupported ? (config.chroma_format == 3   ? "hevc_444"
                                        : config.chroma_format == 2 ? "hevc_422"
-                                                                   : "codec")
+                                                                   : "hevc_decoder")
                                     : "");
   }
   const std::uint64_t native_bytes = std::uint64_t(config.width) * config.height *

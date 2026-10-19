@@ -1,11 +1,15 @@
+#include <chrono>
 #include <iostream>
+#include <thread>
 
 #include "../../../tests/support/temp_directory.hpp"
 #include "heif_fixture_edit.hpp"
 #include "hevc/hevc.hpp"
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/container/heif_reader.hpp"
+#include "hyperdr/foundation/cancel.hpp"
 #include "hyperdr/foundation/file_io.hpp"
+#include "hyperdr/foundation/progress.hpp"
 #include "hyperdr/image/orientation.hpp"
 #include "internal/icc_profiles.hpp"
 using namespace hyperdr;
@@ -76,6 +80,41 @@ void run() {
   require(base.linear_p3.width == 700 && base.linear_p3.height == 600 &&
               base.decode.sensor_width == 700,
           "grid input geometry changed");
+  const auto repeated = decode(bytes);
+  require(base.linear_p3.pixels == repeated.linear_p3.pixels, "repeated HEIC input pixels changed");
+  struct Sink : ProgressSink {
+    std::thread::id caller = std::this_thread::get_id();
+    double last = 0;
+    CancelToken* cancel = nullptr;
+    void on_progress(const ProgressEvent& e) override {
+      require(std::this_thread::get_id() == caller && e.fraction >= last && e.fraction <= 1,
+              "HEIC progress is not monotonic on caller");
+      last = e.fraction;
+      if (cancel && last > 0) cancel->request();
+    }
+  } sink;
+  RawDecodeOptions progress_options;
+  progress_options.progress_sink = &sink;
+  require(
+      decode(bytes, progress_options).linear_p3.pixels == base.linear_p3.pixels && sink.last == 1,
+      "progress changed HEIC input or did not finish");
+  CancelToken token;
+  sink.last = 0;
+  sink.cancel = &token;
+  const auto start = std::chrono::steady_clock::now();
+  bool cancelled = false;
+  {
+    CancelScope scope(&token);
+    try {
+      (void)decode(bytes, progress_options);
+    } catch (const Cancelled&) {
+      cancelled = true;
+    }
+  }
+  const auto cancel_ms =
+      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+  require(cancelled && sink.last < 1 && cancel_ms <= 200, "HEIC input cancellation above 200ms");
+  std::cout << "input tile cancellation including setup: " << cancel_ms << " ms\n";
   const auto transformed = properties(bytes, {{"imir", {0}}, {"irot", {1}}});
   auto expected = apply_exif_orientation(apply_exif_orientation(base.linear_p3, 2), 8);
   const auto rotated = decode(transformed);

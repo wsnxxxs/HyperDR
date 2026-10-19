@@ -63,9 +63,9 @@ def main() -> None:
             f'{r} {g} {b}' for b in (0, 1) for g in (0, 1) for r in (0, 1)) + '\n')
         for index, (encoding, style) in enumerate(cases):
             adaptive10 = style == "depth10"
-            depth = 10 if adaptive10 or encoding in ("pq", "hlg") else 8
-            style = None if adaptive10 else style
             heic_input = style == "heic-input"
+            depth = 10 if adaptive10 or encoding in ("pq", "hlg") or (heic_input and encoding == "adaptive") else 8
+            style = None if adaptive10 else style
             case_source = (ROOT / "tests/macos_t2/probes/normal-512x384-repaired.heic" if heic_input else
                            ROOT / "tests/fixtures/gain-map-jpeg/iso-mono.jpg" if adaptive10 else
                            ROOT / "build/fixtures/sony-ilce-7s.ARW" if style == "raw" else source)

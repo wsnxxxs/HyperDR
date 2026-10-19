@@ -195,8 +195,9 @@ extension EditorModel {
             edit.aiMode = canRun ? remembered.aiMode : .manual
         }
         clampForEncoding(from: previous.encoding)
-        // Either range may be the one the format lowers: aiHdrRange is the one in use with the model on.
-        if ["hdrRange", "aiHdrRange"].contains(where: { (edit.controls[$0] ?? 0) < (previous.controls[$0] ?? 0) }) {
+        // Only the range in use is worth a notice: aiHdrRange with the model on, hdrRange otherwise.
+        let inUse = edit.aiMode == .optimized ? "aiHdrRange" : "hdrRange"
+        if (edit.controls[inUse] ?? 0) < (previous.controls[inUse] ?? 0) {
             notice = .rangeClamped(maxStops: EditBaseline.maxRange(for: id))
         }
         recordStep(from: previous, action: action)

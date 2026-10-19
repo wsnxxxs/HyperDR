@@ -165,18 +165,38 @@ import XCTest
         XCTAssertEqual(model.control("hdrRange").range.upperBound, 3)
     }
 
-    func testTheRangeNoticeAlsoCoversTheModelsRange() async {
-        let (model, _, _) = await opened()
+    func testTheRangeNoticeFollowsTheRangeInUse() async {
+        // The model is off: only hdrRange is in use, and it was not lowered.
+        var (model, _, _) = await opened()
         model.selectEncoding("pq")
         model.adjust("hdrRange", to: 1)
         model.edit.controls["aiHdrRange"] = 3.8
         model.notice = nil
         model.selectEncoding("hlg")
         XCTAssertEqual(model.edit.controls["aiHdrRange"], 2.3)
-        XCTAssertEqual(model.notice, .rangeClamped(maxStops: 2.3), "only the model's range was lowered, and the notice still says so")
+        XCTAssertNil(model.notice, "the model is off, and the range in use (1 stop) was not lowered")
         model.notice = nil
         model.selectEncoding("pq")
         XCTAssertNil(model.notice, "a higher ceiling lowers nothing")
+        // The model is on: aiHdrRange is the one in use.
+        (model, _, _) = await opened()
+        model.selectEncoding("pq")
+        model.edit.aiMode = .optimized
+        model.edit.controls["aiHdrRange"] = 3.8
+        model.edit.controls["hdrRange"] = 1
+        model.notice = nil
+        model.selectEncoding("hlg")
+        XCTAssertEqual(model.notice, .rangeClamped(maxStops: 2.3))
+        // The model is on and its range was not lowered; the unused manual range was.
+        (model, _, _) = await opened()
+        model.selectEncoding("pq")
+        model.edit.aiMode = .optimized
+        model.edit.controls["aiHdrRange"] = 1
+        model.edit.controls["hdrRange"] = 3.8
+        model.notice = nil
+        model.selectEncoding("hlg")
+        XCTAssertEqual(model.edit.controls["hdrRange"], 2.3)
+        XCTAssertNil(model.notice, "with the model on, lowering the unused manual range is not news")
     }
 
     func testSourceIdentityStaysUnquantizedAndTracksFormatCeilings() async {

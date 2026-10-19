@@ -21,7 +21,8 @@ std::uint64_t plane(std::uint64_t pixels, std::uint64_t bytes) {
 }
 ExportMemoryEstimate estimate_export_memory(std::uint32_t pw, std::uint32_t ph,
     std::uint32_t cw, std::uint32_t ch, OutputEncoding encoding, int depth,
-    bool raw, std::uint32_t sw, std::uint32_t sh, unsigned workers, bool retained_renditions, std::uint64_t retained_resource_bytes) {
+    bool raw, std::uint32_t sw, std::uint32_t sh, unsigned workers, bool retained_renditions, std::uint64_t retained_resource_bytes,
+    std::uint64_t external_gain_pixels) {
   const auto photo = std::uint64_t(pw) * ph, canvas = std::uint64_t(cw) * ch;
   const auto sensor = sw && sh ? std::uint64_t(sw) * sh : photo;
   const bool sdr = is_sdr_encoding(encoding), gain = is_gain_map_encoding(encoding);
@@ -37,8 +38,20 @@ ExportMemoryEstimate estimate_export_memory(std::uint32_t pw, std::uint32_t ph,
                  : sum({overhead,plane(photo,15)});
   // Imported dual renditions, LUT working renditions and model/external grids retain additional
   // bases, HDR samples and RGB gain planes while grading reconstructs a pair.
-  const auto render_planes=retained_renditions ? 80 : (sdr ? 24 : 44);
+  // Measured with external grids: an SDR-only export of one holds about 48 B/px
+  // above the grid, far below the 80 B/px that covers dual HDR renditions.
+  const auto render_planes=retained_renditions ? (external_gain_pixels && sdr ? 56 : 80) : (sdr ? 24 : 44);
   e.render = sum({overhead,resident,plane(photo,render_planes)});
+  // The sidecar grid has its own size, independent of the photo and the canvas.
+  // Parsing and applying it hold, besides the snapshot counted in the retained
+  // resources, the parsed grid, the canonical/code grid, the decoded stops and
+  // the statistics copy: four float grids beside the photo's decoded and
+  // base-rendered planes. Afterwards the grid, and the freed stops and copy
+  // (malloc keeps large blocks), stay resident into compositing.
+  const auto grid = plane(external_gain_pixels,sizeof(float));
+  if (external_gain_pixels)
+    e.render = std::max(sum({e.render,plane(grid,3)}),
+                        sum({overhead,resident,plane(photo,36),plane(grid,4)}));
   e.composite = sum({overhead,resident,plane(photo,sdr ? 12 : 24),plane(canvas,13)});
   // ISO expansion overlaps SDR + RGB gain canvases, byte ROI codes, and a
   // byte mask. Apple packaging overlaps SDR + mono stops/quantization + mask.
@@ -70,7 +83,17 @@ ExportMemoryEstimate estimate_export_memory(std::uint32_t pw, std::uint32_t ph,
       e.encode=sum({overhead,resident,plane(canvas,20)});
       e.verify=sum({overhead,resident,plane(canvas,16)}); break;
   }
+  // With an external grid, its float base and the planes the render left behind
+  // (measured about 24 B/px together) stay alive beside the framed pair until
+  // the gain is released, and so does the grid.
   if (!framed) e.composite=0;
+  else if (external_gain_pixels) e.composite=sum({e.composite,plane(photo,24),plane(grid,3)});
+  // Framed and ISO exports repackage the pair and drop the grid before packaging;
+  // an unframed Apple pair keeps it through packaging and encoding.
+  const bool grid_kept=encoding==OutputEncoding::Adaptive && !framed;
+  e.packaging=sum({e.packaging,plane(grid,2+(grid_kept?1:0))});
+  e.encode=sum({e.encode,plane(grid,2+(grid_kept?1:0))});
+  e.verify=sum({e.verify,plane(grid,2)});
   for(auto* stage : {&e.decode,&e.render,&e.composite,&e.packaging,&e.encode,&e.verify})
     *stage=sum({*stage,retained_resource_bytes});
   return e;

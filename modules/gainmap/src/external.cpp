@@ -339,29 +339,30 @@ GainMapMetadata read_v2_metadata(const json::Value& document) {
   return metadata;
 }
 
-}  // namespace
+struct SidecarHeader {
+  std::uint32_t width{}, height{};
+  std::size_t pixel_count{};
+  float max_stops{};
+  GainMapMetadata metadata{};
+  bool canonical_log2{false}, v2{false};
+};
 
-ExternalGainMap read_external_gain_map(const std::filesystem::path& gain_path,
-                                       const std::filesystem::path& report_path,
-                                       bool allow_legacy_external_gain) {
-  if (gain_path.empty() || report_path.empty()) {
-    throw std::invalid_argument(
-        "external gain requires both --external-gain and --external-gain-report");
-  }
-
-  const auto report_bytes = read_binary_file(report_path);
-  const auto gain_bytes = read_binary_file(gain_path);
-  return parse_external_gain_map(gain_bytes, report_bytes, allow_legacy_external_gain);
-}
-
-ExternalGainMap parse_external_gain_map(std::span<const std::uint8_t> bytes,
-    std::span<const std::uint8_t> report_bytes, bool allow_legacy_external_gain) {
-  const auto document = json::parse(std::string_view(
+json::Value parse_sidecar_document(std::span<const std::uint8_t> report_bytes) {
+  auto document = json::parse(std::string_view(
       reinterpret_cast<const char*>(report_bytes.data()), report_bytes.size()));
   if (!document.is_object()) {
     throw std::invalid_argument("external gain report must be a JSON object");
   }
+  return document;
+}
 
+// Everything parse_external_gain_map checks before it hashes or allocates a
+// pixel. The export memory estimate calls the same code, so what it counts is
+// exactly what the parser will allocate.
+SidecarHeader read_sidecar_header(const json::Value& document,
+                                  std::size_t gain_byte_count,
+                                  bool allow_legacy_external_gain) {
+  SidecarHeader header;
   const auto& grid = required_member(document, "gain_grid_size");
   if (!grid.is_array() || grid.array().size() != 2) {
     throw std::invalid_argument("external gain report has invalid gain_grid_size");
@@ -426,9 +427,44 @@ ExternalGainMap parse_external_gain_map(std::span<const std::uint8_t> bytes,
   }
 
   const auto expected_bytes = pixel_count * sizeof(float);
-  if (bytes.size() != expected_bytes) {
+  if (gain_byte_count != expected_bytes) {
     throw std::invalid_argument("external gain byte length does not match its report");
   }
+  header.width = width;
+  header.height = height;
+  header.pixel_count = pixel_count;
+  header.max_stops = max_stops;
+  header.metadata = metadata;
+  header.canonical_log2 = canonical_log2;
+  header.v2 = v2;
+  return header;
+}
+
+}  // namespace
+
+ExternalGainMap read_external_gain_map(const std::filesystem::path& gain_path,
+                                       const std::filesystem::path& report_path,
+                                       bool allow_legacy_external_gain) {
+  if (gain_path.empty() || report_path.empty()) {
+    throw std::invalid_argument(
+        "external gain requires both --external-gain and --external-gain-report");
+  }
+
+  const auto report_bytes = read_binary_file(report_path);
+  const auto gain_bytes = read_binary_file(gain_path);
+  return parse_external_gain_map(gain_bytes, report_bytes, allow_legacy_external_gain);
+}
+
+ExternalGainMap parse_external_gain_map(std::span<const std::uint8_t> bytes,
+    std::span<const std::uint8_t> report_bytes, bool allow_legacy_external_gain) {
+  const auto document = parse_sidecar_document(report_bytes);
+  const auto header = read_sidecar_header(document, bytes.size(), allow_legacy_external_gain);
+  const auto width = header.width, height = header.height;
+  const auto pixel_count = header.pixel_count;
+  const auto max_stops = header.max_stops;
+  const auto& metadata = header.metadata;
+  const bool canonical_log2 = header.canonical_log2, v2 = header.v2;
+  const auto& file = required_member(document, "gain_file");
   if (const auto* hash = file.find("sha256"); hash && hash->is_string() &&
       sha256_hex(bytes) != hash->string()) {
     throw std::invalid_argument("external gain hash does not match its report");
@@ -460,6 +496,18 @@ ExternalGainMap parse_external_gain_map(std::span<const std::uint8_t> bytes,
     result.gain_map.pixels[index] = value;
   }
   return result;
+}
+
+std::optional<ExternalGainGrid> peek_external_gain_grid(
+    std::span<const std::uint8_t> gain_bytes, std::span<const std::uint8_t> report_bytes,
+    bool allow_legacy_external_gain) noexcept {
+  try {
+    const auto header = read_sidecar_header(parse_sidecar_document(report_bytes),
+                                            gain_bytes.size(), allow_legacy_external_gain);
+    return ExternalGainGrid{header.width, header.height, header.canonical_log2};
+  } catch (...) {
+    return std::nullopt;
+  }
 }
 
 void apply_external_gain_map(GainMapResult& result, ExternalGainMap external,

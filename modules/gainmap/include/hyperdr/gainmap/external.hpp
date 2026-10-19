@@ -88,6 +88,22 @@ struct ExternalGainMap {
     std::span<const std::uint8_t> report_bytes,
     bool allow_legacy_external_gain = false);
 
+// The grid parse_external_gain_map would allocate for exactly these two inputs.
+struct ExternalGainGrid {
+  std::uint32_t width{}, height{};
+  bool canonical_log2{false};
+};
+
+// Export admission needs the grid size before the first float is allocated.
+// This runs the parser's own pre-allocation checks (sidecar fields, grid limit,
+// byte length; no hash, no pixel decode) and returns nullopt when the parser
+// would reject the pair there, so the real error stays the parser's. Never
+// throws; the JSON reader is depth-limited and the sidecar is already in memory.
+[[nodiscard]] std::optional<ExternalGainGrid> peek_external_gain_grid(
+    std::span<const std::uint8_t> gain_bytes,
+    std::span<const std::uint8_t> report_bytes,
+    bool allow_legacy_external_gain = false) noexcept;
+
 // Builds the normal rendition first and then replaces only its gain grid.  The
 // mathematical path therefore remains the single owner of the SDR base,
 // exposure, tone curve, gamut mapping, contrast and vibrance.

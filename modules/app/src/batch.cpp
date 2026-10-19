@@ -390,6 +390,13 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     }
     const auto pw = staged.image.linear_p3.width, ph = staged.image.linear_p3.height;
     const auto layout = options.frame ? layout_frame(*options.frame, pw, ph) : FrameLayout{};
+    // The grid size comes from the frozen sidecar before anything is allocated.
+    // A pair the parser rejects counts nothing: the parse below reports why.
+    std::uint64_t external_pixels = 0;
+    if (const auto& snapshot = options.external_gain_snapshot; snapshot && !options.external_gain_path.empty())
+      if (const auto grid = peek_external_gain_grid(snapshot->gain_bytes, snapshot->report_bytes,
+                                                    options.allow_legacy_external_gain))
+        external_pixels = std::uint64_t(grid->width) * grid->height;
     const auto estimate = estimate_export_memory(pw, ph, options.frame ? layout.width : pw,
         options.frame ? layout.height : ph, options.encoding, options.depth,
         staged.image.decode.raw.has_value(), staged.image.decode.sensor_width,
@@ -397,7 +404,7 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
         staged.image.authored_sdr.has_value() || !options.ai_model_path.empty() ||
         !options.external_gain_path.empty() ||
         (options.color_lut.snapshot && options.color_lut.strength > 0),
-        export_resource_bytes(options));
+        export_resource_bytes(options), external_pixels);
     const auto physical = physical_memory_bytes();
     const auto budget = export_memory_budget(current_execution_config.memory_budget_bytes, physical);
     if ((physical || current_execution_config.memory_budget_bytes) && estimate.peak() > budget)

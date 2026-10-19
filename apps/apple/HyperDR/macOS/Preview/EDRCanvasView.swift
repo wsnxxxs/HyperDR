@@ -205,7 +205,7 @@ final class EDRCanvasView: NSView {
         // Line-based wheels report small deltas; the Web editor scales those by
         // 16 (`deltaMode === 1`) so a notch feels the same as a trackpad slide.
         let delta = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.deltaY * 16
-        guard let next = CanvasTransform.wheelZoom(fromZoom: transform.zoom,
+        guard let next = transform.wheelZoom(fromZoom: transform.zoom,
                 deltaY: -delta, ctrl: event.modifierFlags.contains(.control)) else { return }
         applyZoom(next, anchor: convert(event.locationInWindow, from: nil))
     }

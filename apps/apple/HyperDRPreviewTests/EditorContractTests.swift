@@ -62,7 +62,7 @@ import XCTest
         XCTAssertEqual(model.document, old)
         XCTAssertEqual(model.workspace, .editing)
         XCTAssertEqual(model.viewMode, .original)
-        XCTAssertEqual(model.canvas.zoomPercent, 125)
+        XCTAssertEqual(model.canvas.zoomPercent, 50)
         XCTAssertTrue(model.hasPreviewFrame)
         model.dismissAlert()
         XCTAssertNil(model.alert)
@@ -107,7 +107,7 @@ import XCTest
         try await waitUntil { model.alert == error }
         XCTAssertEqual(model.document, previousDocument)
         XCTAssertEqual(model.canvas.imageFrame, previousFrame)
-        XCTAssertEqual(model.canvas.zoomPercent, 125)
+        XCTAssertEqual(model.canvas.zoomPercent, 50)
         XCTAssertEqual(model.viewMode, .original)
         XCTAssertTrue(model.hasEditedFrame)
         services.previewFailure = nil
@@ -314,18 +314,18 @@ import XCTest
         let model = EditorModel.preview(.editingHDRDisplay)
         let canvas = model.canvas
         canvas.setViewport(CGSize(width: 1000, height: 800), backingScale: 2)
-        XCTAssertEqual(canvas.zoomPercent, 100)
+        XCTAssertEqual(canvas.zoomPercent, 33)
         let fitted = try XCTUnwrap(canvas.imageFrame)
         XCTAssertEqual(fitted.width, 1000, accuracy: 1e-6)
         XCTAssertEqual(fitted.height, 2000.0 / 3, accuracy: 1e-6)
         XCTAssertEqual(fitted.minY, 200.0 / 3, accuracy: 1e-6)
         canvas.zoomToActualPixels()
-        XCTAssertEqual(canvas.zoomPercent, 300)
+        XCTAssertEqual(canvas.zoomPercent, 100)
         for _ in 0..<20 { canvas.zoomIn() }
         XCTAssertEqual(canvas.zoomPercent, 400)
         XCTAssertFalse(canvas.canZoomIn)
         canvas.zoomOut()
-        XCTAssertEqual(canvas.zoomPercent, 375)
+        XCTAssertEqual(canvas.zoomPercent, 300)
         canvas.fitToWindow()
         XCTAssertFalse(canvas.canZoomOut)
         model.closeDocument()
@@ -353,7 +353,7 @@ import XCTest
         XCTAssertNil(model.canvasFrame)
         canvas.zoomIn()
         view.transform = canvas.transform
-        XCTAssertEqual(view.transform.zoom, 1.25, accuracy: 1e-9)
+        XCTAssertEqual(view.transform.zoom, 1.5, accuracy: 1e-9)
         model.closeDocument()
         XCTAssertNil(model.canvas.imageFrame)
     }

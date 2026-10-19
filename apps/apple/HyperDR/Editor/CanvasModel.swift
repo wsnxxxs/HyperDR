@@ -2,6 +2,11 @@ import CoreGraphics
 import Foundation
 import Observation
 
+enum ZoomReadout: Equatable {
+    case fit
+    case percent(Int)
+}
+
 @MainActor @Observable final class CanvasModel {
     private(set) var zoom: ZoomLevel = .fit
     private(set) var imageFrame: CGRect?
@@ -10,9 +15,10 @@ import Observation
         imageSize: .zero, viewport: .zero)
     @ObservationIgnored private var imageSize: PixelSize?
 
-    var zoomPercent: Int { Int((geometry.zoom * 100).rounded()) }
-    var canZoomIn: Bool { imageSize != nil && geometry.zoom < CanvasTransform.maxZoom }
-    var canZoomOut: Bool { imageSize != nil && geometry.zoom > CanvasTransform.minZoom }
+    private(set) var zoomReadout: ZoomReadout = .fit
+    private(set) var zoomPercent = 100
+    var canZoomIn: Bool { imageFrame != nil && zoom.factor < geometry.maxZoom - 1e-9 }
+    var canZoomOut: Bool { imageFrame != nil && zoom.factor > CanvasTransform.minZoom + 1e-9 }
 
     /// Renderer-facing geometry. Views only consume the contract in §3.4; the
     /// canvas reads `transform` and pushes gesture results back through
@@ -27,12 +33,12 @@ import Observation
     /// Q9: menu Cmd+/Cmd- and focused +/- use these same actions.
     func zoomIn() {
         guard canZoomIn else { return }
-        setZoom((floor(geometry.zoom / 0.25 + 1e-6) + 1) * 0.25)
+        if let next = geometry.zoomStops.first(where: { $0 > geometry.zoom + 1e-9 }) { setZoom(next) }
     }
 
     func zoomOut() {
         guard canZoomOut else { return }
-        setZoom((ceil(geometry.zoom / 0.25 - 1e-6) - 1) * 0.25)
+        if let next = geometry.zoomStops.last(where: { $0 < geometry.zoom - 1e-9 }) { setZoom(next) }
     }
 
     /// Menu Cmd0 or focused F; all keyboard event handling belongs to Views.
@@ -44,9 +50,8 @@ import Observation
 
     /// Menu Cmd1; one source pixel per backing pixel, within the viewer's bounds.
     func zoomToActualPixels() {
-        guard let size = imageSize, let fitted = fittedSize else { return }
-        let scale = max(1, geometry.backingScale)
-        setZoom(Double(size.width) / (fitted.width * scale), anchor: nil)
+        guard imageSize != nil, fittedSize != nil else { return }
+        setZoom(geometry.actualPixelsZoom)
     }
 
     // Renderer-facing geometry; Views only consume the contract above.
@@ -70,7 +75,7 @@ import Observation
     }
 
     private func setZoom(_ value: Double, anchor: CGPoint? = nil) {
-        let clamped = min(CanvasTransform.maxZoom, max(CanvasTransform.minZoom, value))
+        let clamped = min(geometry.maxZoom, max(CanvasTransform.minZoom, value))
         if let anchor {
             geometry = geometry.zoomed(to: clamped, anchorInView: anchor)
         } else {
@@ -82,6 +87,10 @@ import Observation
     }
 
     private func publish() {
+        geometry.zoom = min(geometry.maxZoom, max(CanvasTransform.minZoom, geometry.zoom))
+        geometry.pan = geometry.clampedPan(geometry.pan)
+        zoomPercent = Int((geometry.zoom / geometry.actualPixelsZoom * 100).rounded())
+        zoomReadout = geometry.zoom <= CanvasTransform.minZoom ? .fit : .percent(zoomPercent)
         zoom = geometry.zoom <= CanvasTransform.minZoom ? .fit : .scale(geometry.zoom)
         imageFrame = fittedSize == nil ? nil : geometry.imageFrame
     }

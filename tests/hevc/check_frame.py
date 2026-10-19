@@ -122,15 +122,15 @@ def check_frames(cli, reader, probe, directory, export, source):
                 plain_cache[key] = dump
             metrics = json.loads(invoke(reader,"--compare-photo",work/"hdr.f32",plain_cache[key],photo["x"],photo["y"],k,mode))
             if name in baseline["cases"]:
-                # Seven pre-E5 codec errors: Lead approved a non-regression
-                # gate, preserving the original limits for every other case.
+                # Lead-approved pre-E5 and HEIC-input exceptions use the same
+                # non-regression gate; all other cases retain absolute limits.
                 pre = baseline["cases"][name]
                 require(metrics["mean_abs_log2"] - pre["mean_abs_log2"] <= baseline["max_mean_increase_stops"] and
                         metrics["peak_relative_error"] - pre["peak_relative_error"] <= baseline["max_peak_increase_fraction"],
                         f"pre-existing photo error regressed: {name}: pre={pre}, post={metrics}")
                 baseline_seen.add(name)
                 summary["photo_gate"] = {"policy":"pre-existing; P3a-2", "pre":pre,
-                                         "source_commit":baseline["source_commit"]}
+                                         "source_commit":pre.get("source_commit",baseline["source_commit"])}
             else:
                 require(metrics["mean_abs_log2"] <= .02 and metrics["peak_relative_error"] <= .01,
                         f"photo preservation: {name}: {metrics}")

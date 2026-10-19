@@ -44,6 +44,26 @@ int main() {
             "overflowing dimensions were accepted");
     require(!raw_input_budget_ok(20000, 13000),
             "oversized sensor margins were admitted");
+    // The tiled canvas is bounded by structure, not by the raster budget: the
+    // 10200x18134 story fits, its coded pictures still obey the raster geometry.
+    using hyperdr::raster_geometry_ok;
+    using hyperdr::tiled_canvas_ok;
+    require(tiled_canvas_ok(10200, 18134) && tiled_canvas_ok(12000, 512),
+            "a story or wide canvas was refused as tiled");
+    require(tiled_canvas_ok(16384, 16384) && !tiled_canvas_ok(16385, 16384),
+            "the tiled pixel limit moved");
+    require(tiled_canvas_ok(65535, 4096) && !tiled_canvas_ok(65536, 1) &&
+                !tiled_canvas_ok(1, 65536) && !tiled_canvas_ok(0, 512) &&
+                !tiled_canvas_ok(std::numeric_limits<std::uint64_t>::max(), 2),
+            "the tiled edge or overflow guard is wrong");
+    require(raster_geometry_ok(11656, 8742) && !raster_geometry_ok(11657, 8742) &&
+                !raster_geometry_ok(8742, 11657),
+            "raster geometry boundary changed");
+    {
+      hyperdr::ExecutionScope scope({0, 15ULL * 700 * 600 - 1});
+      require(!hyperdr::raster_input_budget_ok(700, 600) && raster_geometry_ok(700, 600),
+              "a memory budget must limit raster input but not a coded picture's geometry");
+    }
     std::cout << "budget tests passed\n";
   } catch (const std::exception& e) {
     std::cerr << "budget test failure: " << e.what() << '\n';

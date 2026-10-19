@@ -3,6 +3,7 @@
 #include "hyperdr/container/heif_tmap.hpp"
 #include "hyperdr/container/iso_gain_map.hpp"
 #include "hyperdr/foundation/file_io.hpp"
+#include "hyperdr/foundation/progress.hpp"
 #include <avif/avif.h>
 #include "heif_test_file.hpp"
 #include <algorithm>
@@ -116,6 +117,31 @@ int main() try {
     for(unsigned band=0;band<4;++band) for(unsigned c=0;c<3;++c)
       require(std::abs(base.linear_p3.at(band*8+4,16,c)-alpha[band])<0.01F,
               "Adaptive HDR base-only decode did not composite alpha on black");
+    {
+      // A budget below the canvas reduces the decode; alpha is still applied at
+      // source resolution (straight, premultiplied) or after the gain-map
+      // reconstruction (Adaptive), then averaged onto the reduced grid.
+      hyperdr::ExecutionScope scope({0, 15ULL*size*size-1});
+      constexpr float bands[]{0,128.0F/255,1,128.0F/255};
+      for(bool premultiplied:{false,true}) {
+        const auto path=root/"reduced.heic";
+        encode_heif(path,premultiplied);
+        const auto reduced=hyperdr::decode_image(path);
+        require(reduced.linear_p3.width==16 && reduced.linear_p3.height==16 &&
+                    reduced.decode.resolution_reduced,"alpha fixture was not budget-reduced");
+        for(unsigned band=0;band<4;++band) for(unsigned c=0;c<3;++c)
+          require(std::abs(reduced.linear_p3.at(band*4+2,8,c)-bands[band])<0.01F,
+                  "budget-reduced HEIF lost its per-pixel alpha");
+      }
+      const auto path=root/"reduced-adaptive.heic";
+      encode_heif(path,false,true);
+      const auto reduced=hyperdr::decode_image(path);
+      require(reduced.authored_sdr && reduced.linear_p3.width==16 && reduced.authored_sdr->width==16 &&
+                  reduced.decode.resolution_reduced,"Adaptive alpha fixture was not budget-reduced");
+      for(unsigned band=0;band<4;++band) for(unsigned c=0;c<3;++c)
+        require(std::abs(reduced.linear_p3.at(band*4+2,8,c)-2.375F*bands[band])<0.025F,
+                "budget-reduced Adaptive HDR alpha was composited before reconstruction");
+    }
     std::filesystem::remove_all(root);
     return 0;
   } catch(const std::exception& error) {

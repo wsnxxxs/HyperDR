@@ -187,7 +187,7 @@ void decode_item(const HvcConfig& config, std::size_t count, const EncodedTileRe
   check_cancelled();
   if (!reader || !sink || !count || count > heif_limits::grid_tiles)
     throw std::invalid_argument("invalid HEVC item callbacks or tile count");
-  if (!raster_input_budget_ok(config.width, config.height))
+  if (!raster_geometry_ok(config.width, config.height))
     throw HeifReadError("HEVC tile exceeds raster budget");
   const auto pixels = output_format(config);
   const auto format = format_for(config);

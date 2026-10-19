@@ -1,4 +1,10 @@
+#include <CoreFoundation/CoreFoundation.h>
+#include <ImageIO/ImageIO.h>
+#include <mach/mach.h>
+
+#include <atomic>
 #include <chrono>
+#include <cmath>
 #include <iostream>
 #include <thread>
 
@@ -21,6 +27,30 @@ DecodedImage decode(const std::vector<std::uint8_t>& bytes, RawDecodeOptions opt
   auto p = test::temporary_directory() / "input-reader.heic";
   write_binary_file_atomic(p, bytes, true);
   return decode_image(p, options);
+}
+// The orientation ImageIO derives from the container's transforms (and Exif).
+unsigned imageio_orientation(const std::vector<std::uint8_t>& bytes) {
+  const auto data = CFDataCreate(nullptr, bytes.data(), CFIndex(bytes.size()));
+  const auto source = CGImageSourceCreateWithData(data, nullptr);
+  require(source != nullptr, "ImageIO cannot open the synthetic HEIC");
+  const auto info = CGImageSourceCopyPropertiesAtIndex(source, 0, nullptr);
+  require(info != nullptr, "ImageIO has no properties for the synthetic HEIC");
+  int value = 0;
+  const auto number = static_cast<CFNumberRef>(
+      CFDictionaryGetValue(info, kCGImagePropertyOrientation));
+  if (number) CFNumberGetValue(number, kCFNumberIntType, &value);
+  CFRelease(info);
+  CFRelease(source);
+  CFRelease(data);
+  return unsigned(value ? value : 1);
+}
+std::uint64_t footprint() {
+  task_vm_info_data_t info{};
+  mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+  require(task_info(mach_task_self(), TASK_VM_INFO, reinterpret_cast<task_info_t>(&info), &count) ==
+              KERN_SUCCESS,
+          "task footprint failed");
+  return info.phys_footprint;
 }
 std::vector<std::uint8_t> properties(std::vector<std::uint8_t> bytes,
                                      std::vector<heif_fixture::Box> extra) {
@@ -115,12 +145,58 @@ void run() {
       std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
   require(cancelled && sink.last < 1 && cancel_ms <= 200, "HEIC input cancellation above 200ms");
   std::cout << "input tile cancellation including setup: " << cancel_ms << " ms\n";
-  const auto transformed = properties(bytes, {{"imir", {0}}, {"irot", {1}}});
-  auto expected = apply_exif_orientation(apply_exif_orientation(base.linear_p3, 2), 8);
-  const auto rotated = decode(transformed);
-  require(rotated.linear_p3.width == 600 && rotated.linear_p3.height == 700 &&
-              rotated.linear_p3.pixels == expected.pixels,
-          "ordered mirror/rotate did not preserve grid pixels");
+  // imir axis 0 exchanges top and bottom, axis 1 left and right (ImageIO and
+  // the previous libheif path agree). Check each ordering against ImageIO's own
+  // reading of the same bytes, on a non-square image whose four tiles differ.
+  struct Case {
+    const char* name;
+    std::vector<heif_fixture::Box> boxes;
+    unsigned fixed_orientation;  // what the axis meaning alone requires; 0 = no claim
+  };
+  const std::vector<Case> cases{
+      {"imir0", {{"imir", {0}}}, 4},
+      {"imir1", {{"imir", {1}}}, 2},
+      {"imir0+irot1", {{"imir", {0}}, {"irot", {1}}}, 0},
+      {"irot1+imir0", {{"irot", {1}}, {"imir", {0}}}, 0},
+      {"imir1+irot1", {{"imir", {1}}, {"irot", {1}}}, 0},
+      {"irot2+imir1", {{"irot", {2}}, {"imir", {1}}}, 0},
+      {"imir0+irot3", {{"imir", {0}}, {"irot", {3}}}, 0}};
+  for (const auto& c : cases) {
+    const auto transformed = properties(bytes, c.boxes);
+    const auto orientation = imageio_orientation(transformed);
+    if (c.fixed_orientation)
+      require(orientation == c.fixed_orientation, "ImageIO reads an unexpected imir axis meaning");
+    const auto expected = apply_exif_orientation(base.linear_p3, orientation);
+    const auto got = decode(transformed);
+    if (got.linear_p3.width != expected.width || got.linear_p3.height != expected.height ||
+        got.linear_p3.pixels != expected.pixels) {
+      std::cerr << "transform case " << c.name << " (ImageIO orientation " << orientation << ")\n";
+      require(false, "container transforms differ from ImageIO's reading");
+    }
+  }
+  {
+    // A crop is not an orientation: Exif still applies after it, while a
+    // rotation or mirror property replaces Exif even when it is the identity.
+    std::vector<std::uint8_t> clap;
+    const auto put32 = [&](std::uint32_t v) {
+      for (int i = 3; i >= 0; --i) clap.push_back(std::uint8_t(v >> (8 * i)));
+    };
+    for (auto v : {640U, 1U, 600U, 1U, 0U, 1U, 0U, 1U}) put32(v);
+    HeifWriteOptions with_exif;
+    // Big-endian TIFF with IFD0 Orientation = 6.
+    with_exif.exif = {'M', 'M', 0, 42, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0,
+                      0,   1,   0, 6,  0, 0, 0, 0, 0, 0, 0,    0};
+    const auto tagged = write_heif(image, nullptr, with_exif);
+    const auto cropped = decode(properties(tagged, {{"clap", clap}}));
+    require(cropped.linear_p3.width == 600 && cropped.linear_p3.height == 640,
+            "a clap alone suppressed the Exif orientation");
+    const auto identity_rotation = decode(properties(tagged, {{"irot", {0}}}));
+    require(identity_rotation.linear_p3.width == 700 && identity_rotation.linear_p3.height == 600,
+            "irot 0 did not replace the Exif orientation");
+    const auto exif_only = decode(tagged);
+    require(exif_only.linear_p3.width == 600 && exif_only.linear_p3.height == 700,
+            "Exif orientation was not applied");
+  }
   RawDecodeOptions preview;
   preview.preview_max_edge = 128;
   const auto small = decode(bytes, preview);
@@ -179,6 +255,113 @@ void run() {
   require(pq.source_color.source == "cicp" && pq.source_color.transfer == "PQ" &&
               pq.content_peak_nits == 1200,
           "PQ nclx did not precede SDR ICC or lost clli");
+  {
+    // A canvas the raster budget cannot hold whole is decoded tile by tile and
+    // reduced as it arrives, not refused. The reduction must not depend on how
+    // many workers decode tiles.
+    const auto reduce = [&](unsigned workers, std::uint64_t memory) {
+      ExecutionScope scope({workers, memory});
+      return decode(bytes);
+    };
+    const auto full = base.linear_p3;
+    for (unsigned workers : {1U, 4U}) {
+      const auto small = reduce(workers, 15ULL * 700 * 600 - 1);
+      require(small.linear_p3.width == 350 && small.linear_p3.height == 300 &&
+                  small.decode.target_width == 700 && small.decode.resolution_reduced,
+              "a memory budget below the canvas did not reduce the decode");
+      // Inside a tile the reduction is the exact 2x2 mean.
+      for (unsigned c = 0; c < 3; ++c)
+        require(std::abs(small.linear_p3.at(100, 100, c) -
+                         (full.at(200, 200, c) + full.at(201, 200, c) + full.at(200, 201, c) +
+                          full.at(201, 201, c)) /
+                             4) < 1e-4F,
+                "reduced HEIC pixels are not the box mean of the full decode");
+      require(reduce(workers, 15ULL * 700 * 600 - 1).linear_p3.pixels ==
+                  reduce(1, 15ULL * 700 * 600 - 1).linear_p3.pixels,
+              "reduced HEIC pixels depend on the worker count");
+    }
+    // 12000x512 is wider than the raster width limit although it is small.
+    h::EncodeParams wide_params = params;
+    wide_params.quality = 50;
+    const auto wide_grid = h::tile_grid(12000, 512);
+    auto wide_stream = h::encode(
+        wide_grid.columns * wide_grid.rows,
+        [&](std::size_t i, h::YuvTile& tile) {
+          h::rgb_tile(
+              wide_grid, i,
+              [&](auto, auto, auto n, float* row) {
+                for (unsigned x = 0; x < n * 3; ++x) row[x] = .4F;
+              },
+              1, false, tile);
+        },
+        wide_params);
+    const auto wide = decode(write_heif({wide_stream, 12000, 512, {12, 13, 1, true}, std::nullopt, {}}));
+    require(wide.linear_p3.width == 6000 && wide.linear_p3.height == 256 &&
+                wide.decode.target_width == 12000 && wide.decode.resolution_reduced,
+            "a 12000x512 HEIC was not decoded reduced");
+  }
+  {
+    // The 61 MP story canvas we export (10200x18134, 720 tiles) must open, and
+    // the reduction must not hold the full-resolution planes. One coded tile is
+    // referenced by every cell, which the format allows.
+    auto one = h::encode(
+        1,
+        [](std::size_t, h::YuvTile& tile) {
+          std::fill(tile.luma.begin(), tile.luma.end(), 100);
+          std::fill(tile.chroma.begin(), tile.chroma.end(), 128);
+        },
+        params);
+    const auto story_grid = h::tile_grid(10200, 18134);
+    const auto sample = one.samples[0];
+    one.samples.assign(story_grid.columns * story_grid.rows, sample);
+    const auto story = write_heif({one, 10200, 18134, {12, 13, 1, true}, std::nullopt, {}});
+    require(read_heif(story).resolve_image(0, HeifCanvas::Tiled).tiles.size() == 720,
+            "story fixture tile count");
+    bool raster_refused = false;
+    try {
+      (void)read_heif(story).resolve_image();
+    } catch (const HeifReadError&) {
+      raster_refused = true;
+    }
+    require(raster_refused, "the raster canvas admitted the story size");
+#if !defined(__has_feature)
+#define __has_feature(x) 0
+#endif
+#if !__has_feature(address_sanitizer)  // 720 instrumented tile decodes take minutes
+    const auto before = footprint();
+    std::atomic<bool> stop = false;
+    std::atomic<std::uint64_t> peak = before;
+    std::thread sampler([&] {
+      while (!stop.load()) {
+        const auto now = footprint();
+        auto old = peak.load();
+        while (old < now && !peak.compare_exchange_weak(old, now)) {
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+    });
+    DecodedImage opened;
+    try {
+      opened = decode(story);
+    } catch (...) {
+      stop = true;
+      sampler.join();
+      throw;
+    }
+    stop = true;
+    sampler.join();
+    const auto output_bytes = opened.linear_p3.pixels.size() * sizeof(float);
+    std::cout << "story " << opened.linear_p3.width << "x" << opened.linear_p3.height
+              << " output " << output_bytes << "B peak " << peak.load() << "B baseline " << before
+              << "B\n";
+    require(opened.linear_p3.width == 5100 && opened.linear_p3.height == 9067 &&
+                opened.decode.target_width == 10200 && opened.decode.target_height == 18134 &&
+                opened.decode.resolution_reduced,
+            "the story canvas was not reduced to half size");
+    require(peak.load() <= before + output_bytes + 128U * 1024 * 1024,
+            "story decode held more than its output plus 128 MiB");
+#endif
+  }
   const auto unsupported = heif_fixture::edit(bytes, [](auto& meta) {
     heif_fixture::properties(meta, [](auto& prop) {
       if (prop.type == "hvcC") prop.type = "zzzz";

@@ -143,5 +143,9 @@ if(HYPERDR_WITH_CODECS)
   hyperdr_add_test(heif_input_test LINK HyperDR::codec lcms2::lcms2)
   if(TARGET heif_input_test)
     target_include_directories(heif_input_test PRIVATE ${PROJECT_SOURCE_DIR}/modules/codec/src)
+    # ImageIO is the independent reference for imir/irot orientation.
+    target_link_libraries(heif_input_test PRIVATE
+      "-framework ImageIO" "-framework CoreFoundation")
+    set_tests_properties(heif_input_test PROPERTIES TIMEOUT 300)
   endif()
 endif()

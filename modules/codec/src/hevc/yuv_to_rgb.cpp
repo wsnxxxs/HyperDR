@@ -88,7 +88,7 @@ YuvRgbParams conversion_params(const HvcConfig& config, const HeifNclx* nclx) {
 void yuv_to_rgb(const DecodedPicture& p, const YuvRgbParams& params, const RgbFloatRowSink& sink) {
   CancelScope cancellation(params.cancel ? params.cancel : current_cancel_token);
   check_cancelled();
-  if (!sink || !raster_input_budget_ok(p.width, p.height) ||
+  if (!sink || !raster_geometry_ok(p.width, p.height) ||
       (p.bit_depth != 8 && p.bit_depth != 10) || p.chroma_format > 3 ||
       params.chroma_location > 5 || p.luma.size() != p.luma_row_bytes() * p.height ||
       p.chroma.size() != p.chroma_row_bytes() * p.chroma_height())

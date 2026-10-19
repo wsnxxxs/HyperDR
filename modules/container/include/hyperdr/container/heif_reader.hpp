@@ -96,6 +96,11 @@ struct HeifAlphaPlan {
   HeifImagePlan image;
   bool premultiplied{};
 };
+// Raster (the default) admits only canvases the raster budget can hold whole.
+// Tiled admits any canvas within the structural limits (tiled_canvas_ok) so a
+// caller that decodes tile by tile and reduces as it goes can open an image
+// larger than the budget; coded pictures keep raster_geometry_ok either way.
+enum class HeifCanvas { Raster, Tiled };
 class HeifFile {
  public:
   std::span<const std::uint8_t> bytes;
@@ -111,10 +116,16 @@ class HeifFile {
   [[nodiscard]] std::vector<std::uint8_t> item_bytes(
       std::uint32_t id, std::size_t limit = heif_limits::sample_bytes) const;
   [[nodiscard]] std::vector<std::uint32_t> targets(std::uint32_t id, const std::string& type) const;
-  [[nodiscard]] HeifImagePlan resolve_image(std::uint32_t id = 0) const;
+  [[nodiscard]] HeifImagePlan resolve_image(std::uint32_t id = 0,
+                                              HeifCanvas canvas = HeifCanvas::Raster) const;
   [[nodiscard]] std::optional<TmapReferences> tmap_references() const;
-  [[nodiscard]] std::optional<HeifGainMapPlan> resolve_gain_map() const;
-  [[nodiscard]] std::optional<HeifAlphaPlan> resolve_alpha(std::uint32_t base = 0) const;
+  [[nodiscard]] std::optional<HeifGainMapPlan> resolve_gain_map(
+      HeifCanvas canvas = HeifCanvas::Raster) const;
+  // `resolved_base`, when given, is this file's own plan for `base` (the same
+  // canvas), so the alpha dimension check does not resolve the base again.
+  [[nodiscard]] std::optional<HeifAlphaPlan> resolve_alpha(
+      std::uint32_t base = 0, HeifCanvas canvas = HeifCanvas::Raster,
+      const HeifImagePlan* resolved_base = nullptr) const;
   [[nodiscard]] std::string auxiliary_type(std::uint32_t id) const;
   [[nodiscard]] std::vector<std::uint8_t> exif(std::uint32_t image = 0) const;
   [[nodiscard]] std::string xmp(std::uint32_t image = 0) const;

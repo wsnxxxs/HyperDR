@@ -390,8 +390,15 @@ HeifFile Parser::parse() {
 }
 const std::set<std::string> known_properties{"ispe", "pixi", "colr", "clli", "mdcv",
                                              "irot", "imir", "clap", "auxC", "hvcC"};
-void admit_raster(std::uint32_t width, std::uint32_t height) {
-  require_heif(raster_input_budget_ok(width, height), "HEIF image exceeds raster budget");
+void admit_canvas(std::uint32_t width, std::uint32_t height, HeifCanvas canvas) {
+  if (canvas == HeifCanvas::Tiled)
+    require_heif(tiled_canvas_ok(width, height), "HEIF image exceeds the tiled canvas limit");
+  else
+    require_heif(raster_input_budget_ok(width, height), "HEIF image exceeds raster budget");
+}
+// A coded picture is decoded whole whichever canvas the caller asked for.
+void admit_picture(std::uint32_t width, std::uint32_t height) {
+  require_heif(raster_geometry_ok(width, height), "HEIF coded picture exceeds raster geometry");
 }
 struct Description {
   std::uint32_t width{}, height{};
@@ -493,7 +500,7 @@ void transforms(const Description& d, HeifImagePlan& out) {
   }
 }
 HeifImagePlan resolve(const HeifFile& f, std::uint32_t id, unsigned depth,
-                      std::set<std::uint32_t>& visited) {
+                      std::set<std::uint32_t>& visited, HeifCanvas canvas) {
   require_heif(depth <= 2 && visited.insert(id).second,
                "HEIF derived image chain is too deep or cyclic");
   const auto& item = f.item(id);
@@ -502,8 +509,9 @@ HeifImagePlan resolve(const HeifFile& f, std::uint32_t id, unsigned depth,
   auto d = describe(f, item, out);
   out.width = d.width;
   out.height = d.height;
-  admit_raster(out.width, out.height);
+  admit_canvas(out.width, out.height, canvas);
   if (item.type == "hvc1" || item.type == "hev1") {
+    admit_picture(out.width, out.height);
     require_heif(d.config.has_value(), "HEVC item lacks hvcC");
     out.config = *d.config;
     out.tile_width = out.config.width;
@@ -572,6 +580,7 @@ HeifImagePlan resolve(const HeifFile& f, std::uint32_t id, unsigned depth,
         out.config = parse_hevc_configuration(config->payload);
         out.tile_width = out.config.width;
         out.tile_height = out.config.height;
+        admit_picture(out.tile_width, out.tile_height);
       }
       require_heif(
           width == out.tile_width && height == out.tile_height &&
@@ -596,7 +605,7 @@ HeifImagePlan resolve(const HeifFile& f, std::uint32_t id, unsigned depth,
     auto refs = f.targets(id, "dimg");
     require_heif(refs.size() == 1, "HEIF identity image must reference one image");
     require_heif(f.item(refs[0]).type != "iden", "HEIF identity chain is too deep");
-    auto child = resolve(f, refs[0], depth + 1, visited);
+    auto child = resolve(f, refs[0], depth + 1, visited, canvas);
     require_heif(child.width == out.width && child.height == out.height,
                  "HEIF identity dimensions differ from source");
     if (!out.color) out.color = child.color;
@@ -653,9 +662,9 @@ std::vector<std::uint32_t> HeifFile::targets(std::uint32_t id, const std::string
     if (r.from == id && r.type == type) return r.to;
   return {};
 }
-HeifImagePlan HeifFile::resolve_image(std::uint32_t id) const {
+HeifImagePlan HeifFile::resolve_image(std::uint32_t id, HeifCanvas canvas) const {
   std::set<std::uint32_t> path;
-  return resolve(*this, id ? id : primary_item_id, 0, path);
+  return resolve(*this, id ? id : primary_item_id, 0, path, canvas);
 }
 std::optional<TmapReferences> HeifFile::tmap_references() const {
   std::optional<TmapReferences> out;
@@ -690,7 +699,7 @@ std::string HeifFile::auxiliary_type(std::uint32_t id) const {
   }
   return {};
 }
-std::optional<HeifGainMapPlan> HeifFile::resolve_gain_map() const {
+std::optional<HeifGainMapPlan> HeifFile::resolve_gain_map(HeifCanvas canvas) const {
   if (auto refs = tmap_references()) {
     container::require_heif(refs->base_id == primary_item_id, "tmap base is not the primary image");
     bool group = false;
@@ -702,7 +711,7 @@ std::optional<HeifGainMapPlan> HeifFile::resolve_gain_map() const {
       }
     container::require_heif(group, "missing tmap altr group");
     auto data = item_bytes(refs->tmap_id, 4096);
-    HeifGainMapPlan out{resolve_image(refs->base_id), resolve_image(refs->gain_id),
+    HeifGainMapPlan out{resolve_image(refs->base_id, canvas), resolve_image(refs->gain_id, canvas),
                         parse_tmap_payload(data), refs->tmap_id};
     container::require_heif(out.gain.width <= out.base.width && out.gain.height <= out.base.height,
                             "HEIF gain map exceeds base dimensions");
@@ -716,7 +725,7 @@ std::optional<HeifGainMapPlan> HeifFile::resolve_gain_map() const {
     auto targets_ = targets(id, "auxl");
     if (std::find(targets_.begin(), targets_.end(), primary_item_id) != targets_.end() &&
         auxiliary_type(id) == "urn:com:apple:photo:2020:aux:hdrgainmap") {
-      HeifGainMapPlan plan{resolve_image(), resolve_image(id), std::nullopt, 0};
+      HeifGainMapPlan plan{resolve_image(0, canvas), resolve_image(id, canvas), std::nullopt, 0};
       container::require_heif(
           plan.gain.width <= plan.base.width && plan.gain.height <= plan.base.height,
           "HEIF gain map exceeds base dimensions");
@@ -725,7 +734,8 @@ std::optional<HeifGainMapPlan> HeifFile::resolve_gain_map() const {
   }
   return {};
 }
-std::optional<HeifAlphaPlan> HeifFile::resolve_alpha(std::uint32_t base) const {
+std::optional<HeifAlphaPlan> HeifFile::resolve_alpha(std::uint32_t base, HeifCanvas canvas,
+                                                       const HeifImagePlan* resolved_base) const {
   if (!base) base = primary_item_id;
   std::optional<HeifAlphaPlan> out;
   for (const auto& [id, item] : items) {
@@ -737,8 +747,10 @@ std::optional<HeifAlphaPlan> HeifFile::resolve_alpha(std::uint32_t base) const {
       continue;
     container::require_heif(!out, "multiple HEIF alpha images");
     auto prem = targets(base, "prem");
-    auto image = resolve_image(id);
-    auto primary = resolve_image(base);
+    auto image = resolve_image(id, canvas);
+    const auto owned = resolved_base ? std::optional<HeifImagePlan>{}
+                                     : std::optional<HeifImagePlan>{resolve_image(base, canvas)};
+    const auto& primary = resolved_base ? *resolved_base : *owned;
     container::require_heif(image.width == primary.width && image.height == primary.height,
                             "HEIF alpha dimensions differ from base");
     out = HeifAlphaPlan{std::move(image), std::find(prem.begin(), prem.end(), id) != prem.end()};

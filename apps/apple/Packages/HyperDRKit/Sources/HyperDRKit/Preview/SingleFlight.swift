@@ -17,6 +17,9 @@ actor SingleFlight<Key: Hashable & Sendable, Value: Sendable> {
 
     var inFlight: Int { flights.count }
 
+    /// Read-only scheduling observation for deterministic concurrency tests.
+    var waiterCount: Int { flights.values.reduce(0) { $0 + $1.waiters.count } }
+
     func run(_ key: Key, operation: @Sendable () async throws -> Value) async throws -> Value {
         if let flight = flights[key] {
             let waiter = UUID()

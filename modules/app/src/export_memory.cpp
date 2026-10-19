@@ -16,6 +16,7 @@ std::uint64_t sum(std::initializer_list<std::uint64_t> parts) {
   return total;
 }
 std::uint64_t plane(std::uint64_t pixels, std::uint64_t bytes) {
+  if (!bytes) return 0;
   return pixels > std::numeric_limits<std::uint64_t>::max() / bytes
       ? std::numeric_limits<std::uint64_t>::max() : pixels * bytes;
 }

@@ -13,6 +13,7 @@
 #include <iostream>
 #include <thread>
 #include <pthread.h>
+#include <exception>
 using namespace hyperdr;
 namespace {
 void require(bool value,const char* message) {if(!value)throw std::runtime_error(message);}

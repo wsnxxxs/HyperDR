@@ -46,6 +46,7 @@ enum Operation {
   OP_MODEL_GAIN,
   OP_CONVERT,
   OP_CONVERT_JPEG,
+  OP_CONVERT_ADAPTIVE,
   OP_PROBE_ISO, OP_PREVIEW_ISO, OP_CONVERT_ISO,
   OP_PROBE_XMP, OP_PREVIEW_XMP, OP_CONVERT_XMP,
   OP_COUNT
@@ -54,6 +55,7 @@ enum Operation {
 static const char* const kOperationNames[OP_COUNT] = {
     "capabilities", "frame_layout", "probe(ARW)", "probe(HEIC)", "raw_metadata(ARW)", "preview(ARW)",
     "preview(HEIC)", "model_gain(ARW)", "convert(HEIC, AVIF PQ)", "convert+inspect(ISO JPEG)",
+    "convert(HEIC, Adaptive HEIC + write-time verification)",
     "probe(ISO JPEG)","preview(ISO JPEG)","convert(ISO JPEG)",
     "probe(XMP JPEG)","preview(XMP JPEG)","convert(XMP JPEG)"};
 
@@ -237,12 +239,12 @@ static int exported_file(const char* directory, char* path, size_t capacity) {
 extern int e4_inspect_jpeg(const char* path, char** output);
 
 static int run_convert(hyperdr_engine* engine, const char* arw, const char* output,
-                       int jpeg,
+                       const char* encoding, int jpeg,
                        Result* result) {
   char request[PATH_MAX * 2];
   const int length = snprintf(request, sizeof(request),
       "{\"encoding\":\"%s\",\"command\":{\"input\":\"%s\","
-      "\"output\":\"%s\",\"overwrite\":true}}", jpeg ? "iso-gainmap-jpeg" : "avif-pq", arw, output);
+      "\"output\":\"%s\",\"overwrite\":true}}", encoding, arw, output);
   if (length <= 0 || (size_t)length >= sizeof(request)) return 1;
   char* report = NULL;
   hyperdr_error* error = NULL;
@@ -308,11 +310,15 @@ static int run_operation(hyperdr_engine* engine, enum Operation operation,
     case OP_MODEL_GAIN:
       return run_model_gain(engine, arw, result);
     case OP_CONVERT:
-    case OP_CONVERT_JPEG: {
+    case OP_CONVERT_JPEG:
+    case OP_CONVERT_ADAPTIVE: {
       char output[PATH_MAX];
       const int length = snprintf(output, sizeof(output), "%s/out", root);
       if (length <= 0 || (size_t)length >= sizeof(output)) return 1;
-      return run_convert(engine, heic, output, operation == OP_CONVERT_JPEG, result);
+      return run_convert(engine, heic, output,
+          operation == OP_CONVERT_JPEG ? "iso-gainmap-jpeg"
+          : operation == OP_CONVERT_ADAPTIVE ? "adaptive" : "avif-pq",
+          operation == OP_CONVERT_JPEG, result);
     }
     case OP_PROBE_ISO: case OP_PREVIEW_ISO: case OP_CONVERT_ISO:
     case OP_PROBE_XMP: case OP_PREVIEW_XMP: case OP_CONVERT_XMP: {
@@ -323,7 +329,7 @@ static int run_operation(hyperdr_engine* engine, enum Operation operation,
       char output[PATH_MAX];
       const int length=snprintf(output,sizeof(output),"%s/out",root);
       if(length<=0 || (size_t)length>=sizeof(output))return 1;
-      return run_convert(engine,source,output,1,result);
+      return run_convert(engine,source,output,"iso-gainmap-jpeg",1,result);
     }
     case OP_COUNT:
       break;

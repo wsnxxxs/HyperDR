@@ -44,6 +44,17 @@ import XCTest
         XCTAssertEqual(SettingsDiagnostics.models(model, locale: zh), "不可用 · 此版本没有包含模型运行时")
     }
 
+    /// R7-805: while the engine starts, nothing is known about the runtime yet.
+    func testTheModelRowSaysStartingWhileTheEngineStarts() {
+        let services = FakeEditorServices()
+        services.engineStatus = .starting
+        services.models = .unavailable
+        let model = EditorModel(services: services)
+        XCTAssertEqual(SettingsDiagnostics.models(model, locale: en), "Starting…")
+        XCTAssertEqual(SettingsDiagnostics.models(model, locale: zh), "正在启动…")
+        XCTAssertEqual(SettingsDiagnostics.engine(model, locale: en), "Starting…")
+    }
+
     func testAModelWithoutAVersionIsListedByName() {
         XCTAssertNil(SettingsDiagnostics.shortVersion(nil))
         XCTAssertNil(SettingsDiagnostics.shortVersion(""))
@@ -94,5 +105,27 @@ import XCTest
         XCTAssertTrue(text.contains("\nHDR preview: "), text)
         XCTAssertTrue(text.contains("\nMachine: macOS "), text)
         XCTAssertTrue(text.contains("\nModels: "), text)
+    }
+
+    /// R7-806: the degradation the copied report names is the export's when there is
+    /// an export report of the current edit, and the preview's, said so, otherwise.
+    func testTheCopiedDegradationComesFromTheExportReportWhenThereIsOne() async {
+        let source = SourceSummary(domain: .sdr, colorName: "sRGB", degradationReasons: ["preview_reason"])
+        let document = DocumentState(name: "a", formatLabel: "JPEG", byteCount: 1, phase: .ready, isRefreshing: false, source: source)
+        let model = EditorModel(document: document)
+        var text = await model.diagnosticText
+        XCTAssertTrue(text.contains("\nDecode degradation (preview): preview_reason"), text)
+        XCTAssertFalse(text.contains("export report"), text)
+        model.export.result = ExportResult(export: "v1", fileName: "a.heic", byteCount: 1, pixelSize: nil,
+                                           warnings: ["export_reason", "other_reason"])
+        text = await model.diagnosticText
+        XCTAssertTrue(text.contains("\nDecode degradation (export report): export_reason, other_reason"), text)
+        XCTAssertFalse(text.contains("preview_reason"), text)
+        model.export.result?.warnings = []
+        text = await model.diagnosticText
+        XCTAssertTrue(text.contains("\nDecode degradation (export report): none"), text)
+        model.export.isResultStale = true   // the edit moved on: the report no longer describes it
+        text = await model.diagnosticText
+        XCTAssertTrue(text.contains("\nDecode degradation (preview): preview_reason"), text)
     }
 }

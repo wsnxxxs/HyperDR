@@ -27,7 +27,7 @@ public struct InspectorNotice: View {
                 .font(.hdr.caption)
                 .foregroundStyle(style == .info || style == .progress ? Color.hdr.inkMuted : Color.hdr.ink)
                 .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(style == .warning ? EdgeInsets(top: 7, leading: 9, bottom: 7, trailing: 9) : EdgeInsets())
         .background {

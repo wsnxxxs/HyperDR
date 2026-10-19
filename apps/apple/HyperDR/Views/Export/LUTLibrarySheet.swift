@@ -56,8 +56,10 @@ struct LUTLibrarySheet: View {
         VStack(alignment: .leading, spacing: Space.s3) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("lut.library.title").font(Font.hdr.title).foregroundStyle(Color.hdr.inkStrong)
-                Text("lut.library.count \(model.lut.library.count.formatted(.number.locale(locale)))")
-                    .font(Font.hdr.caption).foregroundStyle(Color.hdr.inkMuted)
+                if !model.lut.library.isEmpty {
+                    Text("lut.library.count \(model.lut.library.count.formatted(.number.locale(locale)))")
+                        .font(Font.hdr.caption).foregroundStyle(Color.hdr.inkMuted)
+                }
             }
             HStack(spacing: Space.s2) {
                 HStack(spacing: Space.s2) {
@@ -66,8 +68,9 @@ struct LUTLibrarySheet: View {
                 }
                 .padding(.horizontal, Space.s2).frame(height: 28)
                 .background(Color.hdr.surfaceSunken, in: .rect(cornerRadius: Radius.sm))
-                Button("lut.library.import") { isPickingFiles = true }
+                Button { isPickingFiles = true } label: { Label("lut.library.import", systemImage: "plus") }
                     .buttonStyle(.hdrSecondary)
+                    .frame(height: 28)
                     .disabled(model.lut.importBlockerKey != nil || model.lut.isBusy)
             }
             notices
@@ -90,8 +93,9 @@ struct LUTLibrarySheet: View {
                     Text("lut.library.importResult \(importedCount.formatted(.number.locale(locale)))")
                 }
                 ForEach(model.lut.failures) { failure in
-                    let body = ErrorText(failure).body(locale: locale)
-                    // The model keeps the file name, and only the name, in `detail`.
+                    // The model keeps the file name, and only the name, in `detail`: it
+                    // leads the line, so the sentence is worded without the detail block.
+                    let body = ErrorText(UserFacingError(code: failure.code, variant: failure.variant)).body(locale: locale)
                     Text(verbatim: failure.detail.map { AppStrings.format("lut.library.failure %@ %@", locale: locale, $0, body) } ?? body)
                 }
             }

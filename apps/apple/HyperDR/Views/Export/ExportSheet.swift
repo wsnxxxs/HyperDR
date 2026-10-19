@@ -77,7 +77,7 @@ private struct ExportSettingsView: View {
                     .frame(width: 212)
                 Divider()
                 settings
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
             .fixedSize(horizontal: false, vertical: true)
             Divider()
@@ -98,6 +98,7 @@ private struct ExportSettingsView: View {
                 .font(Font.hdr.caption)
                 .foregroundStyle(Color.hdr.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)
+            Divider()
             if case .rangeClamped(let maxStops)? = model.notice {
                 InspectorNotice(Text("export.rangeClamped \(AppStrings.string("enc.\(model.export.encodingID).label", locale: locale)) \(maxStops.formatted(.number.precision(.fractionLength(1)).locale(locale)))"),
                                 style: .info)
@@ -246,7 +247,7 @@ private struct ExportSummaryColumn: View {
     }
 
     private var lut: Text {
-        guard let selection = model.lut.selection else { return Text("lut.none") }
+        guard let selection = model.lut.selection else { return Text("export.summary.none") }
         if model.lut.spaceIssueKey != nil || !model.lut.isEnabled {
             return Text("export.summary.lutInactive \(selection.name)")
         }
@@ -379,6 +380,7 @@ private struct ExportResultView: View {
     let again: () -> Void
 
     @Environment(\.locale) private var locale
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         let stale = model.export.isResultStale
@@ -426,13 +428,17 @@ private struct ExportResultView: View {
     private func saveRow(_ result: ExportResult) -> ExportSaveRow {
         let version = result.export
         if let failure = model.export.saveFailure {
-            return .failed(Text(verbatim: failure.code == "export_folder_unwritable" || failure.code == "session_expired"
-                                ? ErrorText(failure).body(locale: locale) : AppStrings.string("export.save.failed", locale: locale))) {
+            // The sentence follows the way of saving, not the error code: a place
+            // picked in the save panel and the fixed folder both fail with the
+            // folder's code, but only the fixed folder is fixed in Settings.
+            let isFolder = model.preferences.value.saveMode == .folder
+            let sentence = ExportPresentation.saveFailureSentence(failure, mode: model.preferences.value.saveMode, locale: locale)
+            return .failed(Text(verbatim: sentence), saveAs: {
                 ExportFlow.saveAs(model: model, version: version, choosePlace: ExportSavePanel.chooser(on: NSApp.keyWindow))
-            }
+            }, openSettings: isFolder && failure.code != "session_expired" ? { openSettings() } : nil)
         }
         if model.exportSaveStates[version] == .saving || model.export.phase == .saving { return .saving }
-        let place = result.saved?.folderLabel ?? ""
+        let place = ExportPresentation.savedFolder(result.saved)
         return .saved(Text("export.save.savedTo \(place)")) {
             ExportFlow.showInFinder(model: model, version: version)
         }

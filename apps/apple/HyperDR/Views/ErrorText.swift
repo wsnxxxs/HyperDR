@@ -47,6 +47,13 @@ struct ErrorText {
         return text + "\n\n" + String(localized: detailLabel)
     }
 
+    /// The title in the language of `locale`.
+    func title(locale: Locale) -> String {
+        var title = self.title
+        title.locale = locale
+        return String(localized: title)
+    }
+
     /// Whether the code is one this table describes; the rest fall back to
     /// the generic text.
     static func isKnown(_ code: String) -> Bool { entries[code] != nil }

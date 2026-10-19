@@ -43,9 +43,9 @@ import HyperDRDesign
             services.timings = [ExportTimingSample(kind: .init(isRAW: false, encoding: "adaptive", isAI: false, hasFrame: false, verifies: true),
                                                    pixels: 24_000_000, stages: [3, 9, 6, 2])]
         }
-        services.library = [LUTItem(id: "a", name: "Kodak Portra 400", input: .srgb, output: .srgb),
-                            LUTItem(id: "b", name: "Fuji Classic Neg", input: .rec709, output: .p3),
-                            LUTItem(id: "c", name: "Cinema Teal", input: .slog3SGamut3Cine, output: .rec709)]
+        services.library = [LUTItem(id: "a", name: "Kodak Portra 400", input: .srgb, output: .srgb, byteCount: 1_200_000),
+                            LUTItem(id: "b", name: "Fuji Classic Neg", input: .rec709, output: .p3, byteCount: 940_000),
+                            LUTItem(id: "c", name: "Cinema Teal", input: .slog3SGamut3Cine, output: .rec709, byteCount: 38_000)]
         services.folder = ExportFolder(label: "…/Pictures", ready: true)
         let clock = clock
         let model = EditorModel(services: services, ticker: ManualFrameTicker(), now: { clock.now })
@@ -83,7 +83,8 @@ import HyperDRDesign
     private func finishedResult(saved: Bool = true) -> ExportResult {
         ExportResult(export: "v1", fileName: "DSC04127.heic", byteCount: 18_400_000,
                      pixelSize: PixelSize(width: 6000, height: 4000), headroomStops: 2.5, selfVerified: true, elapsed: .seconds(21),
-                     saved: saved ? SavedLocation(fileName: "DSC04127.heic", folderLabel: "…/Pictures", url: target) : nil)
+                     saved: saved ? SavedLocation(fileName: "DSC04127.heic", folderLabel: "…/Pictures",
+                                              url: URL(fileURLWithPath: "/fixtures/Pictures/DSC04127.heic")) : nil)
     }
 
     // MARK: Rendering
@@ -272,6 +273,9 @@ import HyperDRDesign
         XCTAssertEqual(model.editingLockReason, .exporting)
         let window = EditorWindowState()
         try snapshots("locked", minimumHeight: 700) { inspector(model, window) }
+        // The card while the lock answers a touch: the outline, the glow and the note in the accent.
+        let flashWindow = EditorWindowState()
+        try snapshots("locked-flash", minimumHeight: 700) { flashWindow.emphasizeLock(); return inspector(model, flashWindow) }
         // Touching the lock lights the card.
         window.emphasizeLock()
         let calm = try render(inspector(model, EditorWindowState()), scheme: .light, locale: "en", width: nil)
@@ -290,9 +294,14 @@ import HyperDRDesign
         XCTAssertEqual(model.export.phase, .idle)
 
         await start(model, services)
-        services.sendExport(.finished(result: nil, failure: UserFacingError(code: "export_failed")))
+        services.sendExport(.finished(result: nil, failure: UserFacingError(code: "export_memory_budget", variant: "noFrame")))
         await eventually(timeout: .seconds(10)) { model.export.phase == .failed }
         try snapshots("ended-failed", minimumHeight: 700) { inspector(model, window) }
+        // The generic failure does not say "Export failed" twice.
+        XCTAssertEqual(ExportStatusHost.failureLine(UserFacingError(code: "export_failed"), locale: Locale(identifier: "en")),
+                       "The export didn’t finish.")
+        XCTAssertEqual(ExportStatusHost.failureLine(UserFacingError(code: "export_memory_budget", variant: "noFrame"), locale: Locale(identifier: "en")),
+                       "Not enough memory to export")
     }
 
     func testLUTGroupStates() async throws {
@@ -312,9 +321,10 @@ import HyperDRDesign
         let (model, services) = await ready()
         let first = try await services.exportKey(model.photo!, options: model.effectiveOptions(), frame: nil)
         let now = clock.now
+        // Version 3 is the newest, so it is the latest time and the top row.
         func item(_ n: Int, key: String, saved: Bool, model name: String?) -> ExportHistoryItem {
             var result = finishedResult(saved: saved); result.export = "v\(n)"; result.fileName = "DSC04127-\(n).heic"
-            return ExportHistoryItem(version: ExportVersion(number: n, createdAt: now.addingTimeInterval(Double(-n) * 3600),
+            return ExportHistoryItem(version: ExportVersion(number: n, createdAt: now.addingTimeInterval(Double(n - 4) * 3600),
                 encodingID: n == 2 ? "iso-gainmap-jpeg" : "adaptive", modelName: name,
                 fallbackNote: n == 2 ? "Missing aperture; used the CNN alone" : nil, hasFrame: n == 3, result: result),
                 key: key, options: model.edit)

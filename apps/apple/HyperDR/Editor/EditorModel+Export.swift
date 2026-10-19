@@ -103,6 +103,7 @@ extension EditorModel {
         // cancelled save panel must not call startExport at all.
         syncExportState()
         guard export.blockerKey == nil, let photo else { return }
+        clearRestoreNotice()
         guard destination != nil || preferences.value.saveMode == .folder else { return }
         finishGestureBeforeEdit()
         pendingExportToken = nil
@@ -251,6 +252,7 @@ extension EditorModel {
                     export.result = result; export.isResultStale = false
                 } else { export.isResultStale = export.result != nil }
                 suggestedFileName = name; timingHistory = timings
+                showRestoreNoticeIfPending()
             } catch {
                 guard let self, !Task.isCancelled, self.photo == photo, exportMetadataTicket == ticket else { return }
                 handleExportError(UserFacingError.service(error))
@@ -296,6 +298,7 @@ extension EditorModel {
         } else if error.code == "engine_unavailable" || error.code == "internal_error" { publishAlert(error) }
     }
     func prepareForPhotoSwitch() {
+        clearRestoreNotice()
         resetThumbnailsForPhotoSwitch()
         pendingExportToken = nil
         exportMetadataTask?.cancel(); exportMetadataTicket += 1

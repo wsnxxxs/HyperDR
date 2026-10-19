@@ -316,6 +316,14 @@ struct CanvasFloating: View {
                                     lift: CanvasBottomReserve.capsuleLift(foot, capsule: extent("capsule"), chip: extent("chip")))
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             }
+            if let notice = model.canvasNotice, dropNotice == nil {
+                let lift = CanvasBottomReserve.lift(foot, columns: extent("notice"), chip: extent("chip"))
+                CanvasNoticeChip(notice: notice) { model.dismissRestoreNotice() }
+                    .reportsCanvasFrame(name: "notice")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, lift > 0 ? lift + Space.s2 : Space.s4 - Layout.canvasGutter)
+                    .transition(.opacity)
+            }
             if let dropNotice {
                 let lift = CanvasBottomReserve.lift(foot, columns: extent("drop"), chip: extent("chip"))
                 DropNoticeChip(notice: dropNotice)
@@ -333,7 +341,10 @@ struct CanvasFloating: View {
             if next != columns { columns = next }
         }
         // A drag over the canvas is the user acting on it: the hint steps aside.
-        .onChange(of: dropNotice != nil) { _, dragging in if dragging { hint.dismiss() } }
+        .onChange(of: dropNotice != nil) { _, dragging in
+            if dragging { hint.dismiss(); if model.canvasNotice != nil { model.dismissRestoreNotice() } }
+        }
+        .hdrAnimation(value: model.canvasNotice)
     }
 }
 

@@ -100,6 +100,13 @@ import UniformTypeIdentifiers
     private(set) var workflow: Workflow = .hdr
     /// A one-shot message shown in place; the view clears it.
     var notice: EditorNotice?
+    /// What the canvas says about the photo that was reopened at launch, or
+    /// about the one it could not find (parity batch 7 §2).
+    var restoreNotice: RestoreNotice?
+    /// A reopened photo waits for its first export-history refresh before it
+    /// says so, so the sentence is not changed after it appears.
+    @ObservationIgnored var restoreNoticePending = false
+    @ObservationIgnored var restoreNoticeTask: Task<Void, Never>?
     /// Bumped whenever the undo stack changes, so menu items re-evaluate.
     private(set) var undoRevision: UInt64 = 0
     /// Editor history never shares policy or registrations with AppKit text.
@@ -334,7 +341,11 @@ import UniformTypeIdentifiers
             }
             switch result {
             case .none: break
-            case .unavailable(let error): alert = error
+            case .unavailable(let error, let name):
+                // The photo is gone: say so where the picker is, not in a
+                // dialog nobody asked for. Other failures keep the alert.
+                if error.code == "source_missing" || error.code == "session_expired" { restoreNotice = .missing(name: name) }
+                else { alert = error }
             case .restored(let photo): beginOpen([photo.url], restored: photo, openedAt: openedAt)
             }
         }
@@ -344,6 +355,7 @@ import UniformTypeIdentifiers
 
     private func beginOpen(_ urls: [URL], restored: EditorPhoto? = nil, openedAt: Duration? = nil) {
         isRestoring = false
+        clearRestoreNotice()
         if case .failed(let error) = engine {
             alert = UserFacingError(code: "engine_unavailable", detail: error.detail)
             return
@@ -412,6 +424,7 @@ import UniformTypeIdentifiers
                         startCaptureFacts(opened)
                         startRefreshing(opened)
                         applyInitialPreferences()
+                        if restored != nil { armRestoreNotice() }
                         refreshExportMetadata()
                         if let old = previous.photo, old != opened { await services.close(old) }
                         return

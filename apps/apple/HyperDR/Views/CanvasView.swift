@@ -121,6 +121,9 @@ private struct DropTarget: View {
                         if !Task.isCancelled, model.notice == .clipboardImageUnsupported { model.notice = nil }
                     }
             }
+            if case .missing(let name) = model.restoreNotice {
+                RestoreMissingNotice(name: name) { model.dismissRestoreNotice() }
+            }
             Text("editor.local")
                 .font(Font.hdr.caption)
                 .foregroundStyle(Color.hdr.inkMuted)

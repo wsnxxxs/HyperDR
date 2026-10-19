@@ -36,7 +36,7 @@ extension EditorModel {
         let ticket = summaryThumbnailTicket, epoch = thumbnailEpoch
         let framing = thumbnailFraming()
         let deadline = summaryThumbnailLastStart.map { $0 + .milliseconds(200) }
-        summaryThumbnailTask = Task { [weak self, services] in
+        summaryThumbnailTask = Task { [weak self] in
             if let deadline { do { try await ContinuousClock().sleep(until: deadline) } catch { return } }
             guard let self, !Task.isCancelled, thumbnailEpoch == epoch else { return }
             summaryThumbnailLastStart = .now

@@ -217,7 +217,14 @@ extension EditorModel {
         let ticket = exportMetadataTicket, options = effectiveOptions()
         // Capture frame values at the same revision as options, before suspending.
         let frame: ExportFrame?
-        do { frame = try makeExportFrame() } catch { return }
+        do { frame = try makeExportFrame() } catch {
+            // The style does not fit this photograph: no export can match the
+            // current settings, so nothing from the history may say it does.
+            export.isResultStale = export.result != nil
+            for index in exportVersions.indices { exportVersions[index].matchesCurrent = false }
+            currentExportKey = nil
+            return
+        }
         exportMetadataTask = Task { [weak self, services] in
             do {
                 try Task.checkCancellation()

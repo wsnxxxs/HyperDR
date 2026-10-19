@@ -9655,6 +9655,23 @@
           }
         }
       }
+    },
+    "frame.enabled.unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exporting with a frame isn’t available yet"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "带边框导出暂未开放"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

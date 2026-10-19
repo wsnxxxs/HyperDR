@@ -654,4 +654,39 @@ private struct ReferenceFrameCaptionView: View {
         XCTAssertNotEqual(free, loading)
         XCTAssertNotEqual(exporting, loading, "only an export adds the lock note")
     }
+
+    private func render(settings: FrameSettings, exportAvailable: Bool) throws -> NSBitmapImageRep {
+        let view = FrameSettingsPanel(settings: .constant(settings), photoSize: PixelSize(width: 6000, height: 4000),
+                                      exportAvailable: exportAvailable)
+            .padding(Layout.panelPadding).frame(width: 340, height: 700, alignment: .top)
+            .environment(\.locale, Locale(identifier: "en"))
+        let renderer = ImageRenderer(content: view); renderer.scale = 1
+        let tiff = try XCTUnwrap(renderer.nsImage?.tiffRepresentation)
+        return try XCTUnwrap(NSBitmapImageRep(data: tiff))
+    }
+
+    /// Share of pixels that differ visibly (the canvas tiles are not bit-repeatable).
+    private func difference(_ a: NSBitmapImageRep, _ b: NSBitmapImageRep) -> Double {
+        guard a.pixelsWide == b.pixelsWide, a.pixelsHigh == b.pixelsHigh else { return 1 }
+        var differing = 0
+        for y in 0..<a.pixelsHigh {
+            for x in 0..<a.pixelsWide {
+                guard let p = a.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB), let q = b.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+                if abs(p.redComponent - q.redComponent) + abs(p.greenComponent - q.greenComponent) + abs(p.blueComponent - q.blueComponent) > 0.1 { differing += 1 }
+            }
+        }
+        return Double(differing) / Double(a.pixelsWide * a.pixelsHigh)
+    }
+
+    func testTheSwitchIsOffAndTheRestWorksWhileNoExportCanCarryTheFrame() throws {
+        var on = FrameSettings(); on.isEnabled = true
+        var off = FrameSettings(); off.isEnabled = false
+        // Available: the stored choice decides what the panel shows.
+        XCTAssertGreaterThan(difference(try render(settings: on, exportAvailable: true), try render(settings: off, exportAvailable: true)), 0.01)
+        // Unavailable: a stored "on" is shown as off and the settings below stay usable,
+        // exactly as a stored "off" shows.
+        XCTAssertLessThan(difference(try render(settings: on, exportAvailable: false), try render(settings: off, exportAvailable: false)), 0.001)
+        // And that is not how an available "off" looks (dimmed settings, a live switch).
+        XCTAssertGreaterThan(difference(try render(settings: off, exportAvailable: false), try render(settings: off, exportAvailable: true)), 0.01)
+    }
 }

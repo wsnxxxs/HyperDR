@@ -14,6 +14,7 @@ if(HYPERDR_WITH_CODECS)
   endif()
   hyperdr_add_test(heif_parallel_test LINK HyperDR::codec heif)
   if(TARGET heif_parallel_test)
+    add_test(NAME hevc_probe_policy_test COMMAND heif_parallel_test --probe-policy-test)
     target_include_directories(heif_parallel_test PRIVATE ${PROJECT_SOURCE_DIR}/modules/codec/src)
   endif()
   # VideoToolbox HEVC: 77 (skipped) only where no encoder exists at all.

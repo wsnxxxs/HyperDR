@@ -4,6 +4,7 @@
 // the machine has no HEVC encoder at all.
 
 #include "hevc/hevc.hpp"
+#include "hevc_probe_policy.hpp"
 #include "hevc/testing.hpp"
 #include "hyperdr/gainmap/rendition.hpp"
 #include "hyperdr/image/transfer.hpp"
@@ -590,23 +591,16 @@ int main() {
     const auto caps = hevc::encoder_caps(directory);
     std::cout << "encoder: main8=" << caps.main8 << " main10=" << caps.main10 << " reason="
               << caps.reason_code << " detail=" << caps.detail << "\n";
-    if (!caps.main8) {
-      if (caps.reason_code == hevc::kReasonUnavailable) {
-        std::cout << "SKIPPED: no HEVC encoder on this machine\n";
-        return 77;
-      }
-      throw std::runtime_error("HEVC probe failed: " + caps.detail);
+    const int probe_status = hyperdr::codec::testing::probe_exit_code(caps);
+    if (probe_status == 77) {
+      std::cout << "SKIPPED: no HEVC encoder on this machine\n";
+      return 77;
     }
-    require(caps.reason_code.empty() || caps.reason_code == hevc::kReasonMain10Unavailable,
-            "reason code with 8-bit available");
+    require(probe_status == 0, "HEVC probe failed or Main10 unavailable: " + caps.reason_code + " " + caps.detail);
     require(hevc::encoder_caps(directory).main8, "second query is cached");
 
     test_sequence(8);
     test_small_stack();
-    if (!caps.main10) {
-      std::cout << "SKIPPED: Main10 unavailable (" << caps.detail << ")\n";
-      return 77;
-    }
     test_sequence(10);
     test_failures_keep_cache(directory);
     test_producer_tile_validation(directory);

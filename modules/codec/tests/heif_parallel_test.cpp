@@ -6,6 +6,7 @@
 
 #include <libheif/heif.h>
 #include "hevc/hevc.hpp"
+#include "hevc_probe_policy.hpp"
 #include <libheif/heif_items.h>
 #include <libheif/heif_tiling.h>
 
@@ -18,6 +19,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -290,12 +292,32 @@ void compare_files(const std::vector<std::uint8_t>& serial,
 
 }  // namespace
 
-int main() {
-  if (!hyperdr::codec::hevc::encoder_caps().main10) {
-    std::cout << "HEVC encoder unavailable; tile equivalence skipped\n";
-    return 77;
-  }
+int main(int argc, char** argv) {
   try {
+    using hyperdr::codec::testing::probe_exit_code;
+    if (argc == 2 && std::string_view(argv[1]) == "--probe-policy-test") {
+      using hyperdr::codec::hevc::EncoderCaps;
+      struct Case { EncoderCaps caps; int expected; };
+      for (const auto& test : {
+          Case{{false, false, "hevc_unavailable", {}}, 77},
+          Case{{false, false, "hevc_probe_failed", {}}, 1},
+          Case{{true, false, "hevc_main10_unavailable", {}}, 1},
+          Case{{false, false, {}, {}}, 1},
+          Case{{true, false, {}, {}}, 1},
+          Case{{true, true, "hevc_probe_failed", {}}, 1},
+          Case{{true, true, {}, {}}, 0}}) {
+        require(probe_exit_code(test.caps) == test.expected,
+                "probe failure or missing Main10 must fail, not skip");
+      }
+      std::cout << "HEVC probe policy: seven deterministic cases passed\n";
+      return 0;
+    }
+    const auto caps = hyperdr::codec::hevc::encoder_caps();
+    const int probe_status = probe_exit_code(caps);
+    if (probe_status != 0) {
+      std::cerr << "HEVC probe: " << caps.reason_code << " " << caps.detail << '\n';
+      return probe_status;
+    }
     hyperdr::PhotoMetadata metadata;
     metadata.model = "HEIC parallel regression";
     metadata.date_time = "2026:09:23 12:00:00";

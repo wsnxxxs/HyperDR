@@ -46,6 +46,8 @@ import UniformTypeIdentifiers
     @ObservationIgnored var currentExportKey: String?
     @ObservationIgnored var exportCapabilities: EditorCapabilities?
     @ObservationIgnored var pendingSwitchStops = false
+    @ObservationIgnored var lutLibraryReadSequence = 0
+    @ObservationIgnored var lutLibraryAcceptedSequence = 0
     @ObservationIgnored var lutMetadataTask: Task<Void, Never>?
     @ObservationIgnored var lutMetadataWrites: [String: LUTMetadataWrite] = [:]
     @ObservationIgnored var lutTask: Task<Void, Never>?

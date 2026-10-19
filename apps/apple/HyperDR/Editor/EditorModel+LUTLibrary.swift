@@ -40,8 +40,15 @@ extension EditorModel {
                 // Even an obsolete success advances the persisted rollback base.
                 lutMetadataWrites[id]?.confirmed = item
                 guard lutMetadataWrites[id]?.revision == revision else { return }
-                if let index = lut.library.firstIndex(where: { $0.id == id }) { lut.library[index] = item }
                 lutMetadataWrites[id]?.task = nil
+                if let index = lut.library.firstIndex(where: { $0.id == id }) {
+                    lut.library[index] = item
+                } else {
+                    // A newer membership read may have removed this id. Re-read
+                    // disk rather than dropping a successful write or reviving
+                    // a deliberately deleted item from its obsolete response.
+                    await refreshLUTLibrary()
+                }
             } catch {
                 guard let self, !Task.isCancelled else { return }
                 lut.failures = [UserFacingError.service(error)]
@@ -73,11 +80,22 @@ extension EditorModel {
         lutMetadataWrites.mapValues { LUTLibraryReadVersion(revision: $0.revision, wasWriting: $0.task != nil) }
     }
 
-    /// Capture the read's ordering before suspending, not when its result arrives.
+    /// A membership mutation fences every earlier read, even if its own
+    /// post-mutation refresh has not returned yet.
+    func invalidateLUTLibraryReads() {
+        lutLibraryReadSequence &+= 1
+        lutLibraryAcceptedSequence = lutLibraryReadSequence
+    }
+
+    /// Capture field and membership ordering before suspending. Once a newer
+    /// list commits, an older whole list cannot add or remove any members.
     func refreshLUTLibrary() async {
+        lutLibraryReadSequence &+= 1
+        let sequence = lutLibraryReadSequence
         let versions = lutLibraryReadVersions()
         let entries = await services.lutEntries()
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, sequence > lutLibraryAcceptedSequence else { return }
+        lutLibraryAcceptedSequence = sequence
         mergeLUTLibrary(entries, reading: versions)
     }
 

@@ -169,6 +169,7 @@ extension UserDefaults {
     var capabilityFixture: EditorCapabilities?
     var library: [LUTItem] = []
     var lutEntriesHandler: (() async -> [LUTItem])?
+    var removeLUTHandler: ((String) async throws -> Void)?
     var importedLUT: LUTItem?
     var updateLUTHandler: ((String, LUTColorSpace, LUTColorSpace) async throws -> LUTItem)?
     private(set) var exportCalls: [(photo: EditorPhoto, options: EditOptions, frame: ExportFrame?, destination: URL?)] = []
@@ -433,7 +434,10 @@ extension FakeEditorServices {
         guard let i = library.firstIndex(where: { $0.id == id }) else { throw UserFacingError(code: "lut_invalid") }
         library[i].input = input; library[i].output = output; return library[i]
     }
-    func removeLUT(_ id: String) async throws { library.removeAll { $0.id == id } }
+    func removeLUT(_ id: String) async throws {
+        if let removeLUTHandler { try await removeLUTHandler(id); return }
+        library.removeAll { $0.id == id }
+    }
 }
 
 extension FakeEditorServices {

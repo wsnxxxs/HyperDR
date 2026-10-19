@@ -3060,23 +3060,6 @@
         }
       }
     },
-    "mac.info.degraded %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Decoded with limitations: %@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "解码有降级：%@"
-          }
-        }
-      }
-    },
     "mac.info.dimensions" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10162,6 +10145,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Apple 芯片"
+          }
+        }
+      }
+    },
+    "warn.decode.hdrUnusable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The photo’s HDR data couldn’t be used, so it was treated as a standard photo."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这张照片的 HDR 数据无法使用，已按普通照片处理。"
+          }
+        }
+      }
+    },
+    "warn.decode.other" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The photo was read with limitations. Details are in the diagnostic information."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这张照片的读取受到限制，详情见诊断信息。"
           }
         }
       }

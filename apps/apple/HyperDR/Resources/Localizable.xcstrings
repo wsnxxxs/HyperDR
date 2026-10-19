@@ -1343,6 +1343,176 @@
         }
       }
     },
+    "frame.compare.sdr" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hold for SDR"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按住看 SDR"
+          }
+        }
+      }
+    },
+    "frame.compare.sdr.a11y" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Compare with SDR"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "对照 SDR 版本"
+          }
+        }
+      }
+    },
+    "frame.compare.sdr.a11y.hint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switches the preview to the SDR version. Activate again to return."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把预览换成 SDR 版本，再次激活即返回。"
+          }
+        }
+      }
+    },
+    "frame.compare.sdr.a11y.off" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Showing HDR"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在显示 HDR"
+          }
+        }
+      }
+    },
+    "frame.compare.sdr.a11y.on" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Showing the SDR version"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在显示 SDR 版本"
+          }
+        }
+      }
+    },
+    "frame.compare.sdr.help" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hold here, on the preview, or Space to see the SDR version: the photograph’s highlights stop at the frame’s white."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按住这里、预览画面或空格键，查看 SDR 版本：照片的高光不再亮过边框的白。"
+          }
+        }
+      }
+    },
+    "frame.compare.sdr.latched" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SDR version"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SDR 版本"
+          }
+        }
+      }
+    },
+    "frame.compare.sdr.noHDR" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This export has no HDR, so the SDR version looks the same."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这次导出没有 HDR 部分，SDR 版本看起来一样。"
+          }
+        }
+      }
+    },
+    "frame.compare.sdr.note" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SDR version: highlights stop at the frame’s white"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SDR 版本：高光不超过边框的白"
+          }
+        }
+      }
+    },
+    "frame.compare.sdr.showing" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SDR version · release to return"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SDR 版本 · 松开返回"
+          }
+        }
+      }
+    },
     "frame.done" : {
       "extractionState" : "manual",
       "localizations" : {

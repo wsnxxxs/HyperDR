@@ -171,7 +171,7 @@ private struct HintTrigger: Equatable {
 
 /// The keyboard focus ring, in the colour used for focus on the photograph
 /// (the accent is too dark against the backdrop).
-private struct FocusRing: View {
+struct FocusRing: View {
     var body: some View {
         RoundedRectangle(cornerRadius: Radius.sm)
             .strokeBorder(Color.hdr.overlayInk, lineWidth: 2)

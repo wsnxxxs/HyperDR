@@ -563,6 +563,35 @@ extension SessionStoreTests {
         #expect(again.deletingLastPathComponent() != copy.deletingLastPathComponent())
     }
 
+    @Test func theFallbackCopyHasTheSameBytesAndPermissionsAsAClone() async throws {
+        let environment = try TestEnvironment()
+        let store = environment.store()
+        let session = try await store.open(try environment.source("photo.png"))
+        let (record, original) = try await publishOne(store, session, name: "one.heic", bytes: Array(repeating: 7, count: 3_000_000))
+        chmod(original.path, 0o644)
+        let cloned = try await store.stageExportForTransfer(session.id, export: record.id)
+        await store.setCloneEnabled(false)
+        let copied = try await store.stageExportForTransfer(session.id, export: record.id)
+        #expect(try Data(contentsOf: copied) == Data(repeating: 7, count: 3_000_000))
+        var a = stat(), b = stat(), c = stat()
+        #expect(stat(cloned.path, &a) == 0 && stat(copied.path, &b) == 0 && stat(original.path, &c) == 0)
+        #expect(a.st_mode & 0o777 == 0o644 && b.st_mode & 0o777 == 0o644 && b.st_ino != c.st_ino)
+        try? FileManager.default.removeItem(at: cloned.deletingLastPathComponent())
+    }
+
+    @Test func aRecordKeepsItsSavedMarkThroughCodable() async throws {
+        let environment = try TestEnvironment()
+        let store = environment.store()
+        let session = try await store.open(try environment.source("photo.png"))
+        let (record, _) = try await publishOne(store, session, name: "one.heic", bytes: [1])
+        try await store.markSaved(session.id, export: record.id, saved: SavedMark(fileName: "b.heic", folderDisplayName: "Pictures"))
+        let listed = try #require(await store.exports(for: session.id).first)
+        #expect(listed.saved?.fileName == "b.heic")
+        let again = try JSONDecoder().decode(ExportRecord.self, from: try JSONEncoder().encode(listed))
+        #expect(again.saved == listed.saved, "the saved mark is part of the coded form")
+        #expect(again.fileAvailable, "the file's availability is not")
+    }
+
     @Test func theNameTheReceiverSeesIsOneSafeComponent() async throws {
         let environment = try TestEnvironment()
         let store = environment.store()

@@ -81,7 +81,7 @@ public struct ExportRecord: Sendable, Codable, Equatable {
     public internal(set) var fileAvailable: Bool = true
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, byteCount, createdAt, sourceDigest, options, reportJSON, sequence, key, frame
+        case id, name, byteCount, createdAt, sourceDigest, options, reportJSON, sequence, key, frame, saved
     }
 }
 
@@ -242,6 +242,10 @@ public actor SessionStore {
     private let fileManager = FileManager.default
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+
+    /// Tests turn cloning off to exercise the plain copy.
+    private(set) var cloneEnabled = true
+    func setCloneEnabled(_ enabled: Bool) { cloneEnabled = enabled }
 
     private var openSessions: [SessionID: OpenSession] = [:]
     private var activating: [SessionID: FlightState] = [:]
@@ -658,8 +662,13 @@ public actor SessionStore {
             try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
             let directory = try openDirectory(folder)
             defer { Darwin.close(directory) }
-            if fclonefileat(source.descriptor, directory, name, 0) != 0 {
-                try copyContents(of: source.descriptor, named: name, into: directory)
+            if !cloneEnabled || fclonefileat(source.descriptor, directory, name, 0) != 0 {
+                // Off the actor: a large file must not hold up opening and publishing.
+                let descriptor = source.descriptor
+                try await Task.detached(priority: .userInitiated) {
+                    try Self.copyContents(of: descriptor, named: name, into: directory)
+                }.value
+                withExtendedLifetime(source) {}
             }
         } catch {
             try? fileManager.removeItem(at: folder)
@@ -668,9 +677,10 @@ public actor SessionStore {
         return folder.appendingPathComponent(name)
     }
 
-    /// The fallback when the volume cannot clone: a plain chunked copy.
-    private func copyContents(of descriptor: Int32, named name: String, into directory: Int32) throws {
-        let target = Darwin.openat(directory, name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+    /// The fallback when the volume cannot clone: a plain chunked copy, with
+    /// the permissions a clone would have kept.
+    private static func copyContents(of descriptor: Int32, named name: String, into directory: Int32) throws {
+        let target = Darwin.openat(directory, name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o644)
         guard target >= 0 else { throw posixError("create", name) }
         defer { Darwin.close(target) }
         var buffer = [UInt8](repeating: 0, count: 1 << 20)
@@ -1235,6 +1245,10 @@ public actor SessionStore {
     }
 
     private func posixError(_ operation: String, _ name: String) -> HyperDRError {
+        Self.posixError(operation, name)
+    }
+
+    private static func posixError(_ operation: String, _ name: String) -> HyperDRError {
         HyperDRError(code: "internal_error",
             message: "\(operation) \(name) failed: \(String(cString: strerror(errno)))")
     }

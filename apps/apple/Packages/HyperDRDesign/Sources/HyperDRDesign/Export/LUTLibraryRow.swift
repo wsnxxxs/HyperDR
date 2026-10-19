@@ -6,12 +6,12 @@ import SwiftUI
 public struct LUTLibraryRow: View {
     private let name: String
     private let spaces: Text
-    private let size: String
+    private let size: String?
     private let isInUse: Bool
     private let onSpaces: () -> Void
     private let onRemove: () -> Void
 
-    public init(name: String, spaces: Text, size: String, isInUse: Bool, onSpaces: @escaping () -> Void,
+    public init(name: String, spaces: Text, size: String? = nil, isInUse: Bool, onSpaces: @escaping () -> Void,
                 onRemove: @escaping () -> Void) {
         self.name = name
         self.spaces = spaces
@@ -36,7 +36,7 @@ public struct LUTLibraryRow: View {
                         .foregroundStyle(Color.hdr.inkStrong).lineLimit(1).truncationMode(.tail)
                     if isInUse { HDRTag(Text("design.lut.inUse", bundle: .module), tint: .accent) }
                 }
-                Text("\(spaces)  ·  \(size)").font(.hdr.caption).foregroundStyle(Color.hdr.inkMuted).lineLimit(1)
+                (size.map { Text("\(spaces)  ·  \($0)") } ?? spaces).font(.hdr.caption).foregroundStyle(Color.hdr.inkMuted).lineLimit(1)
             }
             Spacer(minLength: Space.s2)
             Button(action: onSpaces) { Text("design.lut.spaces", bundle: .module) }

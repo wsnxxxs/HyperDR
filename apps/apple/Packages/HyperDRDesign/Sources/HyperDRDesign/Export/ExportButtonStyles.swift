@@ -2,12 +2,14 @@ import SwiftUI
 
 /// The small buttons inside cards and rows (24 pt high, 12 pt type): the
 /// full-size `HDRButtonStyle` is for dialogs and toolbars.
-struct CompactButtonStyle: ButtonStyle {
-    enum Kind { case secondary, stop, primary, link, plain }
+public struct CompactButtonStyle: ButtonStyle {
+    public enum Kind: Sendable { case secondary, stop, primary, link, plain }
 
     let kind: Kind
 
-    func makeBody(configuration: Configuration) -> some View {
+    public init(kind: Kind) { self.kind = kind }
+
+    public func makeBody(configuration: Configuration) -> some View {
         CompactButtonBody(kind: kind, configuration: configuration)
     }
 }
@@ -64,4 +66,10 @@ private struct CompactButtonBody: View {
         case .link, .plain: return .clear
         }
     }
+}
+
+public extension ButtonStyle where Self == CompactButtonStyle {
+    /// A 24 pt button in the colour of what it does: `.stop` in red, `.link`
+    /// as a bare accent link.
+    static func hdrCompact(_ kind: CompactButtonStyle.Kind) -> CompactButtonStyle { CompactButtonStyle(kind: kind) }
 }

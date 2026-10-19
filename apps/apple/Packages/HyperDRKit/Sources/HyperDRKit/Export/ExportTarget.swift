@@ -189,37 +189,49 @@ public actor ExportTarget {
     }
 
     func leaseDestination(_ fileURL: URL, expectedExtension: String) throws -> SecurityScopeLease {
-        guard fileURL.isFileURL, !fileURL.hasDirectoryPath, !fileURL.lastPathComponent.isEmpty,
-              fileURL.pathExtension.lowercased() == expectedExtension.lowercased() else {
-            throw HyperDRError(code: "invalid_options", message: "Invalid save destination or extension")
-        }
-        let lease = SecurityScopeLease(url: fileURL, access: access)
-        let destination = try SelectedDestination(fileURL, excluding: roots)
-        if let temporary = try? hooks.replacementDirectory(fileURL) {
-            try? FileManager.default.removeItem(at: temporary)
-        } else {
-            // Never truncate an existing file when atomic replacement is unavailable.
-            guard destination.fileIdentity == nil else { throw Self.error("export_folder_unwritable") }
-        }
-        return lease
+        do {
+            guard fileURL.isFileURL, !fileURL.hasDirectoryPath, !fileURL.lastPathComponent.isEmpty,
+                  fileURL.pathExtension.lowercased() == expectedExtension.lowercased() else {
+                throw HyperDRError(code: "invalid_options", message: "Invalid save destination or extension")
+            }
+            let lease = SecurityScopeLease(url: fileURL, access: access)
+            let destination = try SelectedDestination(fileURL, excluding: roots)
+            if let temporary = try? hooks.replacementDirectory(fileURL) {
+                try? FileManager.default.removeItem(at: temporary)
+            } else {
+                // Never truncate an existing file when atomic replacement is unavailable.
+                guard destination.fileIdentity == nil else { throw Self.error("export_folder_unwritable") }
+            }
+            return lease
+        } catch { throw Self.destinationFailure(error) }
     }
 
     /// The save panel has already confirmed replacement. Keep its exact URL
     /// for security-scoped access and use the system item-replacement directory.
     public func save(session: SessionID, export: ExportID, to fileURL: URL) async throws -> SavedExport {
-        let source = try await sessions.exportFile(session, export: export)
-        let name = fileURL.lastPathComponent
-        guard fileURL.isFileURL, !name.isEmpty, name != ".", name != "..",
-              fileURL.pathExtension.lowercased() == URL(fileURLWithPath: source.name).pathExtension.lowercased() else {
-            throw HyperDRError(code: "invalid_options", message: "Save destination must use the export's file extension")
-        }
-        let roots = self.roots, hooks = self.hooks
-        let lease = SecurityScopeLease(url: fileURL, access: access)
-        defer { lease.stop() }
-        let task = Task.detached {
-            try Self.copySelected(source, to: fileURL, excluding: roots, hooks: hooks)
-        }
-        return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        do {
+            let source = try await sessions.exportFile(session, export: export)
+            let name = fileURL.lastPathComponent
+            guard fileURL.isFileURL, !name.isEmpty, name != ".", name != "..",
+                  fileURL.pathExtension.lowercased() == URL(fileURLWithPath: source.name).pathExtension.lowercased() else {
+                throw HyperDRError(code: "invalid_options", message: "Save destination must use the export's file extension")
+            }
+            let roots = self.roots, hooks = self.hooks
+            let lease = SecurityScopeLease(url: fileURL, access: access)
+            defer { lease.stop() }
+            let task = Task.detached {
+                try Self.copySelected(source, to: fileURL, excluding: roots, hooks: hooks)
+            }
+            return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        } catch { throw Self.destinationFailure(error) }
+    }
+
+    private static func destinationFailure(_ failure: any Error) -> any Error {
+        guard let failure = failure as? HyperDRError, failure.code == "export_folder_unwritable" else { return failure }
+        var fields: [String: JSONValue] = [:]
+        if case .object(let detail) = failure.detail { fields = detail }
+        fields["save_mode"] = .string("destination")
+        return HyperDRError(code: failure.code, message: failure.message, detail: .object(fields), messageDetail: failure.messageDetail)
     }
 
     private struct FileIdentity: Equatable {

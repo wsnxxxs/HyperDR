@@ -100,9 +100,40 @@ private func eventually(timeout: Duration, _ check: @Sendable () async -> Bool) 
         let ticket = try await runner.start(session: photo.id, options: EditOptions(["encoding": .string("sdr-tiff")]), destination: url)
         let result = try await finish(runner, ticket)
         #expect(result.failure?.code == "export_folder_unwritable")
+        #expect(result.failure?.detail == .object(["save_mode": .string("destination")]))
         #expect(result.result?.id == ticket.export)
         #expect(result.saved == nil && result.result?.saved == nil)
         #expect(await env.sessions.exports(for: photo.id).count == 1)
+        #expect(try Data(contentsOf: url) == Data([9]))
+    }
+
+    @Test func selectedValidationAndDeliveryAreDistinctFromFixedFolderFailures() async throws {
+        let env = try JobEnvironment(), photo = try await env.photo(), url = try destination(env)
+        var hooks = ExportTarget.CopyHooks()
+        hooks.replacementDirectory = { _ in throw CocoaError(.fileWriteNoPermission) }
+        let validation = ExportTarget(configuration: env.configuration, sessions: env.sessions,
+            access: SystemSecurityScopedAccess(), hooks: hooks)
+        do {
+            try await validation.validateDestination(url, expectedExtension: "tif")
+            Issue.record("Existing destination cannot be replaced without atomic staging")
+        } catch let error as HyperDRError {
+            #expect(error.code == "export_folder_unwritable")
+            #expect(error.detail == .object(["save_mode": .string("destination")]))
+        }
+        let runner = env.runner()
+        let ticket = try await runner.start(session: photo.id, options: EditOptions(["encoding": .string("sdr-tiff")]))
+        _ = try await finish(runner, ticket)
+        let fail = ExportTarget(configuration: env.configuration, sessions: env.sessions,
+            access: SystemSecurityScopedAccess(), copyRead: { _, _, _ in errno = EIO; return -1 })
+        do { _ = try await fail.save(session: photo.id, export: ticket.export, to: url); Issue.record("Expected selected copy failure") }
+        catch let error as HyperDRError { #expect(error.detail == .object(["save_mode": .string("destination")])) }
+        _ = try await fail.setFolder(url.deletingLastPathComponent())
+        let folder = try await fail.captureFolder()
+        do { _ = try await fail.save(session: photo.id, export: ticket.export, folder: folder); Issue.record("Expected folder copy failure") }
+        catch let error as HyperDRError {
+            #expect(error.code == "export_folder_unwritable")
+            #expect(error.detail == nil)
+        }
         #expect(try Data(contentsOf: url) == Data([9]))
     }
 

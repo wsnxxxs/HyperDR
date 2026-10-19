@@ -12,6 +12,7 @@ extension UserFacingError {
         case ("raw_unsupported", "dng"): "err.server.raw_unsupported.dng"
         case ("raw_unsupported", _) where detail != nil: "err.server.raw_unsupported.model %@"
         case ("raw_unsupported", _): "err.server.raw_unsupported"
+        case ("export_folder_unwritable", "destination"): "err.server.export_folder_unwritable.destination"
         case ("export_failed", _): "err.server.export_failed"
         case ("convert_timeout", _): "err.server.convert_timeout"
         default: nil

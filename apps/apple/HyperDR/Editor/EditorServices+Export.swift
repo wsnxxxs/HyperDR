@@ -53,7 +53,10 @@ extension ExportHistoryItem {
             warnings: warnings, saved: record.saved.map { SavedLocation(fileName: $0.fileName, folderLabel: $0.folderLabel) })
         version = ExportVersion(number: record.sequence, createdAt: record.createdAt, encodingID: options.encoding,
             modelName: (file["model_id"] as? String).flatMap { $0.isEmpty ? nil : $0 },
-            fallbackNote: (file["model_fallback_reason"] as? String).flatMap { $0.isEmpty ? nil : $0 },
+            fallbackReason: record.modelFallbackReason.map {
+                ExportFallbackReason(code: $0.code == .missingCaptureFields ? .missingCaptureFields : .unknown,
+                    missingCaptureFields: $0.missingCaptureFields.map(\.rawValue))
+            },
             hasFrame: record.frame != nil, result: result)
         key = record.key.rawValue; self.options = options
         // Report input_domain alone cannot distinguish RAW from other scene inputs;

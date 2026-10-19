@@ -16,6 +16,9 @@ extension UserFacingError {
             if case .string(let value) = fields["model"], !value.isEmpty { model = value }
             else { model = nil }
             self.init(code: error.code, detail: model, variant: container)
+        } else if error.code == "export_folder_unwritable",
+                  case .object(let fields) = error.detail, fields["save_mode"] == .string("destination") {
+            self.init(code: error.code, detail: error.messageDetail ?? error.message, variant: "destination")
         } else {
             self.init(code: error.code, detail: error.messageDetail ?? error.message)
         }

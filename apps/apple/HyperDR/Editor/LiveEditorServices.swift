@@ -406,7 +406,7 @@ import os
     }
 
     /// The capture fields a model fell back without, from the `HYPGAIN1`
-    /// packet's `fallbackReason` (`missing_capture_fields:iso,f_number`).
+    /// packet's `fallbackReason` (`missing_capture_fields:iso:f_number`).
     static func missingCaptureFields(_ packet: Data) -> [String] {
         let magic = Array("HYPGAIN1\n".utf8)
         guard packet.count >= 13, Array(packet.prefix(9)) == magic else { return [] }
@@ -415,9 +415,7 @@ import os
               let header = try? JSONDecoder().decode([String: JSONValue].self,
                                                      from: packet.subdata(in: 13..<13 + size)),
               case .string(let reason)? = header["fallbackReason"] else { return [] }
-        let prefix = "missing_capture_fields:"
-        guard reason.hasPrefix(prefix) else { return [] }
-        return reason.dropFirst(prefix.count).split(separator: ",").map(String.init)
+        return ModelFallbackReason(engineReason: reason)?.missingCaptureFields.map(\.rawValue) ?? []
     }
 
     // MARK: - Display

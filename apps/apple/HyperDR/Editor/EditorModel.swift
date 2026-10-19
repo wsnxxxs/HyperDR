@@ -517,6 +517,8 @@ import UniformTypeIdentifiers
     }
 
     /// Frames for the scope analyser.
+    @ObservationIgnored var editedPresentationTrace: PreviewTrace?
+    @ObservationIgnored var referencePresentationTrace: PreviewTrace?
     var currentEditedFrame: PreviewFrame? { editedFrame }
     var currentReferenceFrame: PreviewFrame? { referenceFrame }
 
@@ -627,7 +629,9 @@ import UniformTypeIdentifiers
             submittedJob = job
             submittedEdge = job.draft ? Self.draftEdge : previewEdge
             lastSubmitWasDraft = job.draft
-            services.submit(photo, options: job.options, maxEdge: submittedEdge)
+            PreviewTrace.$current.withValue(job.trace) {
+                services.submit(photo, options: job.options, maxEdge: submittedEdge)
+            }
         }
     }
 
@@ -639,6 +643,8 @@ import UniformTypeIdentifiers
             document?.isPreparingCameraSupport = false
             document?.phase = .rendering
             referenceFrame = frame.frame
+            referencePresentationTrace = frame.trace
+            editedPresentationTrace = nil
             editedFrame = nil
             frameRevision &+= 1
             hasReferenceFrame = true
@@ -655,6 +661,7 @@ import UniformTypeIdentifiers
             cameraSupportTask = nil
             document?.isPreparingCameraSupport = false
             editedFrame = frame.frame
+            editedPresentationTrace = frame.trace
             canvas.previewPixelSize = frame.frame.map { CGSize(width: $0.base.width, height: $0.base.height) }
             frameRevision &+= 1
             hasEditedFrame = true
@@ -734,6 +741,7 @@ import UniformTypeIdentifiers
         selectedMode = previous.viewMode
         display = previous.display
         editedGainWeight = previous.editedGainWeight
+        referencePresentationTrace = nil; editedPresentationTrace = nil
         referenceFrame = previous.referenceFrame
         editedFrame = previous.editedFrame
         captureFacts = previous.captureFacts

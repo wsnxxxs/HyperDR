@@ -77,12 +77,14 @@ public struct FramePlane: Sendable {
 }
 
 public final class PreviewFrame: Sendable {
+    public let trace: PreviewTrace?
     public let metadata: PreviewMetadata
     public let metadataJSON: Data
     public let base, gain: FramePlane
     // Internal for @testable ownership verification; never expose native handles.
     let storage: FrameStorage
-    init(storage: FrameStorage) throws {
+    init(storage: FrameStorage, trace: PreviewTrace? = nil) throws {
+        self.trace = trace
         self.storage = storage
         guard let json = storage.value.metadata_json else {
             throw HyperDRError(code: "internal_error", message: "Missing frame metadata")
@@ -96,7 +98,10 @@ public final class PreviewFrame: Sendable {
     /// Zero-copy. Each MTLBuffer retains native storage through its deallocator.
     /// Use normal retained-reference command buffers: NEVER use
     /// makeCommandBufferWithUnretainedReferences(). Release after GPU completion.
-    public func metalBuffers(device: any MTLDevice) throws -> (base: any MTLBuffer, gain: any MTLBuffer) {
-        (try base.metalBuffer(device: device), try gain.metalBuffer(device: device))
+    public func metalBuffers(device: any MTLDevice, trace: PreviewTrace? = nil) throws -> (base: any MTLBuffer, gain: any MTLBuffer) {
+        let trace = trace ?? self.trace
+        let interval = trace?.begin("metalBuffers")
+        defer { if let interval { trace?.end("metalBuffers", interval) } }
+        return (try base.metalBuffer(device: device), try gain.metalBuffer(device: device))
     }
 }

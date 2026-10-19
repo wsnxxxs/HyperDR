@@ -50,7 +50,8 @@ extension EditorModel {
             mode: currentReferenceFrame == nil ? .edited : mode, splitRatio: splitRatio,
             headroom: display.currentHeadroom,
             overlays: CanvasOverlays(highlights: showsHighlightZebra, shadows: showsShadowZebra,
-                                     mask: maskKey != nil, hdrRange: Float(outputCeilingStops)), previewsAsSDR: previewsAsSDR)
+                                     mask: maskKey != nil, hdrRange: Float(outputCeilingStops)), previewsAsSDR: previewsAsSDR,
+            presentationTrace: mode == .original ? referencePresentationTrace : editedPresentationTrace)
     }
 
     func invalidateDetails(editedOnly: Bool = false) {

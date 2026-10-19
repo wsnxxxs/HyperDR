@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import HyperDRKit
+import HyperDREngine
 
 /// What the open photo told the model about itself.
 struct PhotoSource: Equatable {
@@ -22,6 +23,8 @@ struct RememberedHDR: Equatable {
 struct RenderJob: Equatable {
     let options: EditOptions
     let draft: Bool
+    var trace: PreviewTrace? = nil
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.options == rhs.options && lhs.draft == rhs.draft }
 }
 
 extension EditorModel {
@@ -440,8 +443,9 @@ extension EditorModel {
     func scheduleRender(draft: Bool = false, force: Bool = false) {
         refreshExportMetadata()
         guard photo != nil, document?.phase == .ready, !ai.isComputing else { return }
-        let job = RenderJob(options: effectiveOptions(), draft: draft)
+        var job = RenderJob(options: effectiveOptions(), draft: draft)
         guard force || job != lastJob else { return }
+        job.trace = PreviewTrace()
         lastJob = job
         clearPreviewError()
         requestBusy()

@@ -105,6 +105,7 @@ struct EditorPreview {
     var unadjusted: [String: Double]? = nil
     /// The photo has the capture parameters the EXIF model needs.
     var hasCaptureMetadata = false
+    var trace: PreviewTrace? = nil
 }
 
 enum EditorPreviewEvent {

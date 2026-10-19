@@ -16,6 +16,7 @@ nonisolated struct CanvasComposition: @unchecked Sendable {
     var headroom = 1.0
     var overlays = CanvasOverlays()
     var previewsAsSDR = false
+    var presentationTrace: PreviewTrace? = nil
 }
 
 nonisolated struct CanvasOverlays: Equatable, Sendable {
@@ -111,16 +112,18 @@ nonisolated final class CanvasCompositor {
     private func encode(_ frame: PreviewFrame, into texture: any MTLTexture, slice: UInt32,
                         weight: Float, weightedOnly: Bool = false, command: any MTLCommandBuffer) throws {
         let planes = try FramePlanes(frame, device: device)
-        try encode(planes, into: texture, slice: slice, weight: weight, weightedOnly: weightedOnly, command: command)
+        try encode(planes, into: texture, slice: slice, weight: weight, weightedOnly: weightedOnly, command: command, trace: frame.trace)
     }
 
     /// Also used by synthetic, offscreen pixel tests: exactly the production
     /// compute and display passes, with no independent test implementation.
     func encode(_ planes: FramePlanes, into texture: any MTLTexture, slice: UInt32,
-                weight: Float? = nil, weightedOnly: Bool = false, command: any MTLCommandBuffer) throws {
+                weight: Float? = nil, weightedOnly: Bool = false, command: any MTLCommandBuffer, trace: PreviewTrace? = nil) throws {
+        let timing = trace?.begin("pass1_encode")
+        defer { if let timing { trace?.end("pass1_encode", timing) } }
         let interval = PreviewRenderer.signposter.beginInterval("Pass1",id:signpostID)
         defer { PreviewRenderer.signposter.endInterval("Pass1",interval) }
-        guard let encoder = command.makeComputeCommandEncoder() else {
+        guard let encoder = PreviewGPUTiming.encoder(device: device, command: command, trace: trace) else {
             throw PreviewError.unavailable("Unable to create composition compute encoder")
         }
         var params = ReconstructParams(planes: planes, original: false)
@@ -158,17 +161,17 @@ nonisolated final class CanvasCompositor {
         rebuilds += 1
     }
 
-    private func prepare(_ frame: PreviewFrame, weight: Float, previous: Entry?, command: any MTLCommandBuffer) throws -> Entry {
+    private func prepare(_ frame: PreviewFrame, weight: Float, previous: Entry?, command: any MTLCommandBuffer, trace: PreviewTrace? = nil) throws -> Entry {
         if var previous, previous.source === frame {
             if GainWeight.needsRebuild(from: previous.weight, to: weight) {
-                try encode(previous.planes, into: previous.texture, slice: 0, weight: weight, weightedOnly: true, command: command)
+                try encode(previous.planes, into: previous.texture, slice: 0, weight: weight, weightedOnly: true, command: command, trace: trace ?? frame.trace)
                 previous.weight = weight
             }
             return previous
         }
         let result = try texture(width: frame.base.width, height: frame.base.height, slices: 3, mipmapped: true)
-        let planes = try FramePlanes(frame, device: device)
-        try encode(planes, into: result, slice: 0, weight: weight, command: command)
+        let planes = try FramePlanes(frame, device: device, trace: trace)
+        try encode(planes, into: result, slice: 0, weight: weight, command: command, trace: trace ?? frame.trace)
         return Entry(source: frame, texture: result, planes: planes, weight: weight)
     }
 
@@ -180,7 +183,7 @@ nonisolated final class CanvasCompositor {
     /// command buffer supplied by PreviewRenderer's in-flight gate.
     func encode(_ content: CanvasComposition, transform: CanvasTransform, target: any MTLTexture,
                 command: any MTLCommandBuffer) throws {
-        edited = try prepare(content.edited, weight: Self.weight(content.headroom, frame: content.edited), previous: edited, command: command)
+        edited = try prepare(content.edited, weight: Self.weight(content.headroom, frame: content.edited), previous: edited, command: command, trace: content.presentationTrace)
         if let frame = content.original, content.mode != .edited {
             original = try prepare(frame, weight: Self.weight(content.headroom, frame: frame), previous: original, command: command)
         }

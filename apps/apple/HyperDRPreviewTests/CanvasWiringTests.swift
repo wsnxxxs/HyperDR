@@ -1,0 +1,263 @@
+import AppKit
+import SwiftUI
+import XCTest
+import HyperDRDesign
+@testable import HyperDR
+
+/// The canvas's view-layer rules: when the divider and legend show, how a
+/// hint is announced and counted, press-and-hold, the zoom-in key and the
+/// undo commands.
+@MainActor final class CanvasWiringTests: XCTestCase {
+    // MARK: Divider and legend
+
+    func testDividerShowsOnlyInCompareWithBothFramesAndNoHold() {
+        func shows(_ mode: ViewMode = .compare, peeking: Bool = false, reference: Bool = true, edited: Bool = true) -> Bool {
+            CanvasAdornments.showsSplit(viewMode: mode, isPeeking: peeking, hasReference: reference, hasEdited: edited)
+        }
+        XCTAssertTrue(shows())
+        XCTAssertFalse(shows(.edited))
+        XCTAssertFalse(shows(peeking: true))
+        XCTAssertFalse(shows(reference: false))
+        XCTAssertFalse(shows(edited: false))
+    }
+
+    func testLegendNamesTheMaskAndShowsZebrasOnlyWithoutTheInspector() {
+        func rows(mask: String? = nil, hot: Bool = false, cold: Bool = false, inspector: Bool = true,
+                  mode: ViewMode = .edited, peeking: Bool = false) -> Int {
+            CanvasAdornments.legendRows(maskLabelKey: mask, highlightZebra: hot, shadowZebra: cold,
+                                        showsInspector: inspector, viewMode: mode, isPeeking: peeking).count
+        }
+        XCTAssertEqual(rows(mask: "ctrl.hdrStrength.label"), 1)
+        XCTAssertEqual(rows(hot: true, cold: true), 0, "the inspector's own switches are the legend")
+        XCTAssertEqual(rows(hot: true, cold: true, inspector: false), 2)
+        XCTAssertEqual(rows(mask: "ctrl.hdrStrength.label", hot: true, inspector: false), 2)
+        XCTAssertEqual(rows(mask: "ctrl.hdrStrength.label", mode: .original), 0)
+        XCTAssertEqual(rows(mask: "ctrl.hdrStrength.label", peeking: true), 0)
+        XCTAssertEqual(rows(mask: "ctrl.hdrStrength.label", mode: .compare), 1)
+    }
+
+    // MARK: Hints
+
+    func testAHintIsShownTwicePerKeyInARun() {
+        let session = ViewerSessionState()
+        let hint = CanvasHintState()
+        hint.update(key: "canvas.hint.peek", session: session)
+        XCTAssertEqual(hint.shown, "canvas.hint.peek")
+        hint.reset()
+        hint.update(key: "canvas.hint.peek", session: session)
+        XCTAssertEqual(hint.shown, "canvas.hint.peek")
+        hint.reset()
+        hint.update(key: "canvas.hint.peek", session: session)
+        XCTAssertNil(hint.shown, "a third showing is over the limit")
+        XCTAssertEqual(session.hintCount("canvas.hint.peek"), 2)
+        // Another key has its own count.
+        hint.update(key: "canvas.hint.pan", session: session)
+        XCTAssertEqual(hint.shown, "canvas.hint.pan")
+    }
+
+    func testHoldingTheOriginalDoesNotUseUpTheHintOrBringItBack() {
+        let session = ViewerSessionState()
+        let hint = CanvasHintState()
+        hint.update(key: "canvas.hint.peek", session: session)
+        hint.dismiss()
+        hint.update(key: "canvas.peeking", session: session)
+        XCTAssertNil(hint.shown)
+        hint.update(key: "canvas.hint.peek", session: session)
+        XCTAssertNil(hint.shown, "the same hint after a hold is not announced again")
+        XCTAssertEqual(session.hintCount("canvas.hint.peek"), 1)
+        XCTAssertEqual(session.hintCount("canvas.peeking"), 0, "the label is not a hint")
+    }
+
+    func testLosingTheKeyAndGettingItBackAnnouncesAgain() {
+        let session = ViewerSessionState()
+        let hint = CanvasHintState()
+        hint.update(key: "canvas.hint.peek", session: session)
+        hint.update(key: nil, session: session)
+        XCTAssertNil(hint.shown)
+        hint.update(key: "canvas.hint.split", session: session)
+        XCTAssertEqual(hint.shown, "canvas.hint.split")
+        hint.dismiss()
+        XCTAssertNil(hint.shown)
+    }
+
+    // MARK: Press and hold
+
+    private func waitForHold(_ hold: PressAndHold, _ expected: Bool) async {
+        await eventually(timeout: .seconds(2), "hold \(expected)") { hold.isHolding == expected }
+    }
+
+    func testAPressThatLastsBeginsAHoldAndReleasingEndsIt() async {
+        var events: [String] = []
+        let hold = PressAndHold(delay: .milliseconds(20), begin: { events.append("begin") }, end: { events.append("end") })
+        hold.press(at: CGPoint(x: 10, y: 10))
+        hold.drag(to: CGPoint(x: 12, y: 11))   // within 4 pt
+        await waitForHold(hold, true)
+        hold.drag(to: CGPoint(x: 200, y: 200)) // moving later does not end it
+        XCTAssertTrue(hold.isHolding)
+        hold.release()
+        XCTAssertEqual(events, ["begin", "end"])
+        XCTAssertFalse(hold.isHolding)
+    }
+
+    func testAPressThatMovesMoreThanFourPointsIsAPanAndNeverHolds() async {
+        var events: [String] = []
+        let hold = PressAndHold(delay: .milliseconds(30), begin: { events.append("begin") }, end: { events.append("end") })
+        hold.press(at: .zero)
+        hold.drag(to: CGPoint(x: 3, y: 3.5))   // 4.6 pt away
+        try? await Task.sleep(for: .milliseconds(120))
+        XCTAssertFalse(hold.isHolding)
+        hold.release()
+        XCTAssertEqual(events, [])
+    }
+
+    func testAQuickClickNeverHolds() async {
+        var began = false
+        let hold = PressAndHold(delay: .milliseconds(40), begin: { began = true }, end: {})
+        hold.press(at: .zero)
+        hold.release()
+        try? await Task.sleep(for: .milliseconds(120))
+        XCTAssertFalse(began)
+    }
+
+    func testTheDefaultDelayIs240Milliseconds() {
+        XCTAssertEqual(PressAndHold.delay, .milliseconds(240))
+        XCTAssertEqual(PressAndHold.tolerance, 4)
+    }
+
+    // MARK: ⌘= (M2-Q)
+
+    private func keyEvent(_ characters: String, flags: NSEvent.ModifierFlags) -> NSEvent {
+        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0,
+                         context: nil, characters: characters, charactersIgnoringModifiers: characters,
+                         isARepeat: false, keyCode: 24)!
+    }
+
+    private func canvas(withPhoto: Bool = true) -> CanvasModel {
+        let canvas = CanvasModel()
+        if withPhoto {
+            canvas.setViewport(CGSize(width: 900, height: 600), backingScale: 2)
+            canvas.setImageSize(PixelSize(width: 6000, height: 4000))
+        }
+        return canvas
+    }
+
+    private func context(key: Bool = true, sheet: Bool = false, modal: Bool = false,
+                         responder: NSResponder? = nil, menu: NSMenu? = nil) -> ZoomKeyRule.Context {
+        ZoomKeyRule.Context(isKeyWindow: key, hasAttachedSheet: sheet, hasModalWindow: modal,
+                            firstResponder: responder, mainMenu: menu)
+    }
+
+    func testCommandEqualsZoomsInOnce() {
+        let canvas = canvas()
+        XCTAssertEqual(canvas.zoom, .fit)
+        XCTAssertTrue(ZoomKeyRule.handle(keyEvent("=", flags: .command), context: context(), canvas: canvas))
+        XCTAssertNotEqual(canvas.zoom, .fit)
+    }
+
+    func testOtherModifierCombinationsPassThrough() {
+        for flags: NSEvent.ModifierFlags in [[.command, .shift], [.command, .option], [.command, .control],
+                                              [], [.shift], [.command, .option, .shift]] {
+            let canvas = canvas()
+            XCTAssertFalse(ZoomKeyRule.handle(keyEvent("=", flags: flags), context: context(), canvas: canvas),
+                           "\(flags)")
+            XCTAssertEqual(canvas.zoom, .fit)
+        }
+        XCTAssertFalse(ZoomKeyRule.handle(keyEvent("-", flags: .command), context: context(), canvas: canvas()))
+    }
+
+    func testTextFocusSheetsAndModalsAndAnInactiveWindowPassThrough() {
+        let field = NSTextField()
+        let textView = NSTextView()
+        for context in [context(responder: field), context(responder: textView), context(sheet: true),
+                        context(modal: true), context(key: false)] {
+            let canvas = canvas()
+            XCTAssertFalse(ZoomKeyRule.handle(keyEvent("=", flags: .command), context: context, canvas: canvas))
+            XCTAssertEqual(canvas.zoom, .fit)
+        }
+        // Another kind of first responder is fine.
+        XCTAssertTrue(ZoomKeyRule.handle(keyEvent("=", flags: .command), context: context(responder: NSView()),
+                                         canvas: canvas()))
+    }
+
+    func testWithoutAPhotoOrRoomToZoomTheKeyPassesThrough() {
+        XCTAssertFalse(ZoomKeyRule.handle(keyEvent("=", flags: .command), context: context(),
+                                          canvas: canvas(withPhoto: false)))
+        let canvas = canvas()
+        while canvas.canZoomIn { canvas.zoomIn() }
+        XCTAssertFalse(ZoomKeyRule.handle(keyEvent("=", flags: .command), context: context(), canvas: canvas))
+    }
+
+    func testAMenuItemWithTheSameKeyIsLeftToTheMenu() {
+        let menu = NSMenu()
+        let top = NSMenuItem()
+        let sub = NSMenu()
+        let item = NSMenuItem(title: "Zoom", action: nil, keyEquivalent: "=")
+        item.keyEquivalentModifierMask = .command
+        sub.addItem(item)
+        top.submenu = sub
+        menu.addItem(top)
+        let canvas = canvas()
+        XCTAssertFalse(ZoomKeyRule.handle(keyEvent("=", flags: .command), context: context(menu: menu), canvas: canvas))
+        XCTAssertEqual(canvas.zoom, .fit)
+        item.isEnabled = false
+        XCTAssertTrue(ZoomKeyRule.handle(keyEvent("=", flags: .command), context: context(menu: menu), canvas: canvas),
+                      "a disabled item claims nothing")
+        // The menu's own Zoom In is ⌘+ (⇧⌘=), which is not this key.
+        let plus = NSMenuItem(title: "Zoom In", action: nil, keyEquivalent: "+")
+        plus.keyEquivalentModifierMask = .command
+        XCTAssertFalse(ZoomKeyRule.menuClaims(keyEvent("=", flags: .command), in: { let m = NSMenu(); m.addItem(plus); return m }()))
+    }
+
+    // MARK: Undo routing
+
+    func testUndoGoesToTheTextHistoryForTextAndToTheEditorOtherwise() {
+        let services = FakeEditorServices(openDelay: .zero, previewDelay: .milliseconds(1))
+        let model = EditorModel(services: services)
+        let editorOnly = NSView()
+        XCTAssertFalse(UndoRouting.canUndo(model: model, responder: editorOnly))
+        XCTAssertTrue(UndoRouting.manager(model: model, responder: editorOnly) === model.undoManager)
+        let text = NSTextView()
+        XCTAssertFalse(UndoRouting.manager(model: model, responder: text) === model.undoManager)
+        XCTAssertNil(UndoRouting.manager(model: nil, responder: editorOnly))
+        XCTAssertFalse(UndoRouting.canUndo(model: nil, responder: editorOnly))
+        XCTAssertEqual(UndoRouting.undoTitle(model: nil, responder: editorOnly), UndoManager().undoMenuItemTitle)
+    }
+
+    func testTheMenuTitleNamesTheEditorStep() async {
+        let services = FakeEditorServices(openDelay: .zero, previewDelay: .milliseconds(1))
+        let model = EditorModel(services: services)
+        model.open([URL(fileURLWithPath: "/fixtures/a.jpg")])
+        await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
+        model.adjust("brightness", to: 0.9)
+        let title = UndoRouting.undoTitle(model: model, responder: NSView())
+        XCTAssertTrue(title.contains(EditorModel.undoActionName("brightness")), title)
+        XCTAssertTrue(UndoRouting.canUndo(model: model, responder: NSView()))
+        UndoRouting.undo(model: model, responder: NSView())
+        XCTAssertTrue(UndoRouting.canRedo(model: model, responder: NSView()))
+        // Text keeps its own history: the editor's is not touched.
+        let before = model.control("brightness").value
+        UndoRouting.redo(model: model, responder: NSTextView())
+        XCTAssertEqual(model.control("brightness").value, before)
+    }
+
+    func testMenuStateBumpsWhenAnUndoGroupCloses() {
+        let state = UndoMenuState()
+        let center = NotificationCenter()
+        state.install(center: center)
+        let start = state.revision
+        center.post(name: .NSUndoManagerDidCloseUndoGroup, object: nil)
+        let expectation = expectation(description: "bumped")
+        DispatchQueue.main.async { expectation.fulfill() }
+        wait(for: [expectation], timeout: 2)
+        XCTAssertGreaterThan(state.revision, start)
+    }
+
+    // MARK: Badge
+
+    func testCompareHasNoBadgeOfItsOwnAndTheLabelSharesTheHDRRule() {
+        XCTAssertNil(PhotoBadgeKind(viewMode: .compare, originalAvailable: true, domain: .hdr, gainWeight: 1))
+        XCTAssertTrue(PhotoBadgeKind.hasHDR(domain: .hdr, gainWeight: nil))
+        XCTAssertTrue(PhotoBadgeKind.hasHDR(domain: .sdr, gainWeight: 0))
+        XCTAssertFalse(PhotoBadgeKind.hasHDR(domain: .sdr, gainWeight: nil))
+    }
+}

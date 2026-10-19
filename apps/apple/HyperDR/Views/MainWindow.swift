@@ -33,9 +33,11 @@ private struct EditorWindow: View {
     @State private var window = EditorWindowState()
     @State private var showsInspector = true
     @State private var windowWidth: CGFloat = 1440
+    @State private var zoomKey = ZoomKeyMonitor()
 
     var body: some View {
-        CanvasView(model: model, window: window, padding: Layout.canvasPadding(forWindowWidth: windowWidth))
+        CanvasView(model: model, window: window, padding: Layout.canvasPadding(forWindowWidth: windowWidth),
+                   showsInspector: showsInspector)
             // Under the canvas column only: an inset outside `.inspector` does
             // not reach the split's columns, and zoom and display state belong
             // to the photograph anyway.
@@ -73,6 +75,12 @@ private struct EditorWindow: View {
             }
             .focusedSceneValue(model)
             .focusedSceneValue(window)
+            .environment(ViewerSessionState.shared)
+            // ⌘= zooms in while this window is key (M2-Q).
+            .background(WindowReader { found in
+                if let found { zoomKey.install(window: found, canvas: model.canvas) } else { zoomKey.remove() }
+            })
+            .onDisappear { zoomKey.remove() }
             #if DEBUG
             .task {
                 StressWindow.runIfRequested()

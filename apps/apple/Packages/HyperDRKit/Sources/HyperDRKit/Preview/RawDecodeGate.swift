@@ -2,7 +2,7 @@ import Foundation
 import HyperDREngine
 
 /// A bounded asynchronous semaphore. RAW previews and model-gain share one
-/// instance so their LibRaw working sets cannot overlap accidentally.
+/// instance so their RAW development working sets cannot overlap accidentally.
 actor RawDecodeGate {
     struct Ticket: Sendable {
         private let gate: RawDecodeGate

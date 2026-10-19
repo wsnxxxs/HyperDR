@@ -84,7 +84,6 @@
         "verify_output",
         "overwrite",
         "skip_existing",
-        "half_size",
         "toe_end",
         "toe_output_ratio",
         "positive_exposure_limit",
@@ -203,9 +202,6 @@
           "type": "boolean"
         },
         "skip_existing": {
-          "type": "boolean"
-        },
-        "half_size": {
           "type": "boolean"
         },
         "toe_end": {

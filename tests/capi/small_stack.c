@@ -1,7 +1,7 @@
 /* Language-independent regression for engine entry points on a 512 KiB stack.
  *
  * GCD worker threads and Swift's cooperative pool are far smaller than the
- * 8 MiB main thread. LibRaw alone is ~768 KiB, so this test intentionally runs
+ * 8 MiB main thread. Codec backends must fit worker stacks, so this test intentionally runs
  * every decoding entry point first on a small pthread, before the main thread
  * can initialize lazy static tables. */
 

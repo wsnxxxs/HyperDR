@@ -1,5 +1,4 @@
 #include "hyperdr/foundation/configuration_error.hpp"
-#include "hyperdr/look/dcp_render.hpp"
 #include "hyperdr/image/color.hpp"
 #include "hyperdr/container/exif.hpp"
 #include "hyperdr/container/heif_tmap.hpp"
@@ -20,7 +19,7 @@
 #include "internal/decode_bytes.hpp"
 #include "internal/cicp.hpp"
 #include "internal/metadata.hpp"
-#include "internal/raw.hpp"
+#include "internal/raw_ciraw.hpp"
 #include "hyperdr/image/resample.hpp"
 #include "hyperdr/image/transfer.hpp"
 
@@ -1069,7 +1068,7 @@ static DecodedImage decode_image_impl(const std::filesystem::path& path, const R
   const auto ext = lower_extension(path);
 
   // RAW stays name-decided, and has to. Most RAW containers *are* TIFF, so a
-  // signature cannot tell a .dng from any other TIFF, and LibRaw's memory
+  // signature cannot tell a .dng from any other TIFF, and the RAW memory
   // admission works from the path rather than from a buffer we would otherwise
   // have to hold alongside the sensor data.
   if (is_raw_extension(ext)) return decode_apple_raw(path, options);
@@ -1165,7 +1164,7 @@ static DecodedImage decode_image_impl(const std::filesystem::path& path, const R
 DecodedImage decode_image(const std::filesystem::path& path, const RawDecodeOptions& options) {
   auto result = decode_image_impl(path, options);
   // Raster decoders already record their full, oriented dimensions in target_*.
-  // RAW supplies source_* explicitly before half-size demosaic/preview resize.
+  // RAW supplies source_* explicitly before the system preview scale is applied.
   if (!result.decode.source_width) {
     result.decode.source_width = result.decode.target_width;
     result.decode.source_height = result.decode.target_height;
@@ -1235,15 +1234,13 @@ PreviewJpeg encode_preview_jpeg(const std::filesystem::path& path,
     throw std::invalid_argument("preview max edge must be in [1,8192]");
   }
   auto decoded = decode_image(path, options);
-  const bool profiled = static_cast<bool>(decoded.raw_profile);
-  if (profiled) decoded.linear_p3 = render_dcp_base(decoded.linear_p3, *decoded.raw_profile);
 
   // Measure before resampling so the exposure anchor is not a function of the
-  // requested preview size. Half-size RAW callers still intentionally trade
-  // demosaic detail for speed, but the exposure algorithm is shared with the
+  // requested preview size. Bounded RAW callers use a system preview scale,
+  // but the exposure algorithm is shared with the
   // formal photographic renderer.
   const float exposure_ev =
-      profiled ? 0.0F : raw_preview_exposure_ev(path, decoded.linear_p3, decoded.capture);
+      raw_preview_exposure_ev(path, decoded.linear_p3, decoded.capture);
   // Identical policy to the --preview-max-edge conversion path: repeated 2x2
   // area reduction in linear light, then one bilinear step to the exact size.
   auto source = resample_to_max_edge(std::move(decoded.linear_p3), max_edge);

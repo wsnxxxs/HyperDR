@@ -1,5 +1,4 @@
 hyperdr_add_test(color_dither_test LINK HyperDR::image)
-hyperdr_add_test(dng_color_test LINK HyperDR::image)
 hyperdr_add_test(fidelity_test LINK HyperDR::image)
 hyperdr_add_test(frame_test LINK HyperDR::image)
 hyperdr_add_test(frame_variant_test LINK HyperDR::image)

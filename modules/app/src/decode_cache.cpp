@@ -58,7 +58,9 @@ constexpr std::array<char, 8> kMagic{'H', 'D', 'R', 'C', 'A', 'C', 'H', '3'};
 // 36 decodes ISO gain-map JPEGs with our pixel-centred RGB reconstruction.
 // 37 uses Apple RAW pixels and records the system decoder, scale and build.
 // 38 translates XMP JPEG gain maps through ImageIO.
-constexpr std::uint32_t kCacheSchema = 39;
+// 39 removes external RAW resources.
+// 40 removes legacy RAW white-balance/matrix fields and half-size identity.
+constexpr std::uint32_t kCacheSchema = 40;
 
 // x86-64 and arm64, the only targets this project builds for, are both little
 // endian; the cache is a local scratch format and is never transported.
@@ -140,8 +142,6 @@ std::string metadata_json(const DecodedImage& value) {
       .member("aperture", m.aperture)
       .member("focal_length_mm", m.focal_length_mm)
       .member("focal_length_35mm", m.focal_length_35mm)
-      .member("raw_white_balance", value.raw_white_balance)
-      .member("raw_color_matrix", value.raw_color_matrix)
       .member("source_color_name", value.source_color.name)
       .member("source_color_primaries", value.source_color.primaries)
       .member("source_color_transfer", value.source_color.transfer)
@@ -305,8 +305,6 @@ void apply_metadata_json(const std::string& text, DecodedImage& out) {
   out.domain = input_domain_from_name(string_at("input_domain"))
                    .value_or(InputDomain::kDisplayReferredSdr);
   out.capture.iso = read_optional(document, "capture_iso");
-  out.raw_white_balance = string_at("raw_white_balance");
-  out.raw_color_matrix = string_at("raw_color_matrix");
   out.source_color.name = string_at("source_color_name");
   out.source_color.primaries = string_at("source_color_primaries");
   out.source_color.transfer = string_at("source_color_transfer");
@@ -404,7 +402,7 @@ std::string decode_cache_variant(const ConvertOptions& options,
   std::string variant = std::string(intent) + '/' +
       (raw.ignore_embedded_gain_map ? "base-only" : "embedded-gain");
   for (const auto& setting : settings()) {
-    if (!setting.affects_decoded_pixels || setting.key=="half_size") continue;
+    if (!setting.affects_decoded_pixels) continue;
     const auto value = setting.read(reflected);
     variant += '/';
     variant += setting.key;

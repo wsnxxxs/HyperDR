@@ -4,9 +4,6 @@
 # naming, the second defines every entry point for the build without codecs, so
 # the two configurations share one call graph and differ only in these leaves.
 set(HYPERDR_CODEC_SOURCES
-  src/dcp_reader.cpp
-  src/lens_profile.cpp
-  src/xmp_look.cpp
   src/rendition_encoders.cpp
   src/descriptors.cpp
   src/unavailable.cpp)
@@ -20,7 +17,6 @@ if(HYPERDR_WITH_CODECS)
     src/heif_encoder.cpp
     src/raster_decoder.cpp
     src/tiff_codec.cpp
-    src/raw_decoder.cpp
     src/raw_ciraw.mm
     src/gain_map_jpeg_imageio.mm
     src/gain_map_jpeg_decoder.cpp
@@ -39,7 +35,6 @@ hyperdr_add_module(codec
   PRIVATE_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 if(HYPERDR_WITH_CODECS)
-  find_package(libraw CONFIG REQUIRED)
   find_package(libheif CONFIG REQUIRED)
   find_package(lcms2 CONFIG REQUIRED)
   find_package(JPEG REQUIRED)
@@ -50,7 +45,7 @@ if(HYPERDR_WITH_CODECS)
   # PRIVATE: nothing above this module includes a codec header, which is the
   # point of the module existing.
   target_link_libraries(hyperdr_codec PRIVATE
-    libraw::raw_r heif lcms2::lcms2 JPEG::JPEG PNG::PNG TIFF::TIFF ZLIB::ZLIB avif)
+    heif lcms2::lcms2 JPEG::JPEG PNG::PNG TIFF::TIFF ZLIB::ZLIB avif)
   # HEVC is VideoToolbox's (src/hevc); the frameworks are C APIs.
   target_link_libraries(hyperdr_codec PRIVATE
     "-framework VideoToolbox" "-framework CoreMedia" "-framework CoreVideo"

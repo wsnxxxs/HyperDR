@@ -64,7 +64,7 @@ inline constexpr auto kRasterInputExtensions = join_raster_extensions();
 // `is_avif_bytes` once it has the file. RAW is absent for the opposite reason:
 // most RAW formats *are* TIFF, so a signature cannot separate a `.dng` from an
 // unrelated TIFF or distinguish one camera format from another. The extension
-// routes it to LibRaw, and LibRaw is the content authority.
+// routes it to CIRAWFilter, which is the content authority.
 enum class InputFormat : std::uint8_t {
   Unknown,
   Jpeg,

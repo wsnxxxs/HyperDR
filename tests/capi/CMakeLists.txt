@@ -14,8 +14,8 @@ if(APPLE)
   add_library(capi_test_clock SHARED frozen_time.c)
   set_target_properties(capi_test_clock PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
   if(HYPERDR_WITH_CODECS)
-    # G19: LibRaw is larger than a GCD worker stack. Exercise every decoding
-    # entry point on a 512 KiB pthread before the main thread can initialize
+    # G19: exercise every decoding entry on a GCD-sized worker stack.
+    # Run every entry point on a 512 KiB pthread before the main thread initializes
     # lazy static tables, then require byte-identical results.
     # AVIF PQ carries no LittleCMS creation timestamp, so worker/main export
     # bytes are deterministic without a clock interposer or test environment.

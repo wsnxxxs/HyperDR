@@ -59,10 +59,6 @@ void check_render_options_change_the_fingerprint() {
   require(changed([](auto& o) { o.depth = 10; }), "depth");
   require(changed([](auto& o) { o.encoding = hyperdr::HdrEncoding::IsoGainMapJpeg; }), "encoding");
   require(changed([](auto& o) { o.preview_max_edge = 1600; }), "preview bound");
-  require(!changed([](auto& o) {
-            o.raw.highlight_recovery = hyperdr::HighlightRecovery::Reconstruct;
-          }),
-          "ignored highlight recovery affected resume identity");
 }
 
 void check_scheduling_options_do_not_change_it() {
@@ -132,8 +128,6 @@ void check_decode_cache_roundtrip() {
   value.metadata.iso = 640;
   value.metadata.orientation = 1;
   value.capture.iso = 640.0F;
-  value.raw_white_balance = "auto";
-  value.raw_color_matrix = "libraw";
   value.capture.exposure_time_seconds = 1.0F / 250.0F;
   value.capture.aperture_f_number = 1.8F;
   value.decode.sensor_width = 9600;
@@ -163,8 +157,6 @@ void check_decode_cache_roundtrip() {
   require(loaded.linear_p3.width == 7 && loaded.linear_p3.height == 5, "dimensions");
   require(loaded.linear_p3.pixels == value.linear_p3.pixels, "pixels must round-trip exactly");
   require(loaded.metadata.model == "ILCE-7RM5", "metadata must round-trip");
-  require(loaded.raw_white_balance == "auto", "RAW WB fallback must survive a cache hit");
-  require(loaded.raw_color_matrix == "libraw", "RAW matrix source must survive a cache hit");
   require(loaded.metadata.lens == "FE 35mm F1.4 GM", "lens must round-trip");
   require(loaded.capture.aperture_f_number.has_value(), "optional capture value");
   require(loaded.decode.target_width == 9504, "decode target must round-trip");
@@ -230,14 +222,14 @@ void check_decode_cache_key_varies() {
     std::ofstream output(self, std::ios::binary);
     output << "fixture";
   }
-  const auto blend_full = hyperdr::decode_cache_key(self, "blend/full/0");
-  require(blend_full != hyperdr::decode_cache_key(self, "clip/full/0"),
-          "highlight recovery must change the cache key");
-  require(blend_full != hyperdr::decode_cache_key(self, "blend/half/0"),
-          "half-size decode must change the cache key");
-  require(blend_full != hyperdr::decode_cache_key(self, "blend/full/1600"),
+  const auto base_full = hyperdr::decode_cache_key(self, "gain1/full/0");
+  require(base_full != hyperdr::decode_cache_key(self, "gain2/full/0"),
+          "RAW digital gain must change the cache key");
+  require(base_full != hyperdr::decode_cache_key(self, "gain1/preview/0"),
+          "preview scale must change the cache key");
+  require(base_full != hyperdr::decode_cache_key(self, "gain1/full/1600"),
           "the preview bound must change the cache key");
-  require(blend_full == hyperdr::decode_cache_key(self, "blend/full/0"),
+  require(base_full == hyperdr::decode_cache_key(self, "gain1/full/0"),
           "the key must be stable for identical inputs");
   const auto original_time = std::filesystem::last_write_time(self);
   {
@@ -245,7 +237,7 @@ void check_decode_cache_key_varies() {
     output << "changed";
   }
   std::filesystem::last_write_time(self, original_time);
-  require(blend_full != hyperdr::decode_cache_key(self, "blend/full/0"),
+  require(base_full != hyperdr::decode_cache_key(self, "gain1/full/0"),
           "same-size same-time content replacement must change the cache key");
   std::filesystem::remove(self);
 }
@@ -287,7 +279,6 @@ void check_model_binding_rejects_stale_gain() {
   binding.requested_crop_height = 80;
   binding.delivered_crop_width = 64;
   binding.delivered_crop_height = 80;
-  binding.raw_half_size = false;
   binding.raw_decoder_version="7";binding.raw_scale=1;
   binding.model_width = 1024;
   binding.model_height = 1280;
@@ -358,7 +349,7 @@ void check_model_binding_rejects_stale_gain() {
     require(rejected,"legacy model recipe accepted");
   }
   // A full raster binding can drive JPEG/PNG/HEIF/AVIF previews at more than
-  // LibRaw's one fixed 2x reduction. Source and crop identity still match.
+  // the system RAW preview scales. Source and crop identity still match.
   auto raster = image;
   raster.domain = hyperdr::InputDomain::kDisplayReferredSdr;
   raster.decode.raw.reset();
@@ -417,10 +408,6 @@ void check_model_binding_rejects_stale_gain() {
   require(rejected([](auto& gain, auto&, auto&) {
             gain.binding->recipe.id = "display-p3-passthrough";
           }), "display recipe was accepted for scene-referred input");
-  require(!rejected([](auto&, auto&, auto& current) {
-            current.raw.highlight_recovery = hyperdr::HighlightRecovery::Reconstruct;
-          }),
-          "ignored highlight recovery invalidated RAW binding");
   require(rejected([](auto&, auto& current, auto&) { current.decode.raw->decoder_version="future"; }),
           "gain from a different RAW decoder was accepted");
   require(rejected([](auto&, auto&, auto& current) { current.raw.lens_correction=false; }),
@@ -437,21 +424,19 @@ void check_model_binding_rejects_stale_gain() {
             current.decode.decoded_width = 32;
             current.decode.decoded_height = 40;
           }),
-          "final export accepted the model's half-size delivered crop");
+          "final export accepted the model's preview delivered crop");
   require(rejected([](auto&, auto& current, auto& current_options) {
             current.decode.decoded_width = 31;
             current.decode.decoded_height = 40;
             current_options.decode_intent = hyperdr::DecodeIntent::Preview;
-            current_options.raw.half_size = true;
           }),
-          "half-size preview accepted a different delivered crop");
+          "scaled preview accepted a different delivered crop");
   std::filesystem::remove(source);
 }
 
 void check_model_preprocessing_identity() {
   const auto reference = hyperdr::model_preprocessing_fingerprint(base_options());
   auto preview = base_options();
-  preview.raw.half_size = true;
   preview.preview_max_edge = preview.raw.preview_max_edge = 640;
   preview.decode_intent = hyperdr::DecodeIntent::Preview;
   preview.quality = 70;

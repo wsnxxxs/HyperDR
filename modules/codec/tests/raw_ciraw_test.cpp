@@ -14,7 +14,6 @@
 #include <thread>
 
 #include "../src/internal/budget.hpp"
-#include "../src/internal/raw.hpp"
 #include "hyperdr/app/batch.hpp"
 #include "hyperdr/app/decode_cache.hpp"
 #include "hyperdr/app/engine.hpp"
@@ -31,6 +30,7 @@ void require(bool v, const char* message) {
 }
 const auto fixtures =
     std::filesystem::path(HYPERDR_SOURCE_DIR) / "build/fixtures";
+std::string model_baseline(const std::filesystem::path& path);
 void run() {
   const auto source = fixtures / "sony-ilce-7s.ARW";
   const auto root = std::filesystem::path(HYPERDR_SOURCE_DIR) /
@@ -107,6 +107,30 @@ void run() {
           "removed report fields retained");
   require(testing::raw_filter_open_count() == before + 1,
           "probe/preview/detail/export reopened filter");
+#ifdef NDEBUG
+  constexpr auto model_reference = "apple-model-7s.json";
+#else
+  constexpr auto model_reference = "apple-model-7s-debug.json";
+#endif
+  const auto reference_bytes = read_binary_file(
+      std::filesystem::path(HYPERDR_SOURCE_DIR) / "tests/fixtures/raw-ciraw" / model_reference);
+  const auto expected = json::parse(std::string(reference_bytes.begin(), reference_bytes.end()));
+  const auto actual = json::parse(model_baseline(source));
+  require(actual.find("os_build")->string() == expected.find("os_build")->string(),
+          "RAW model baseline OS build changed; evaluate before updating reference");
+  require(actual.find("decoder")->string() == expected.find("decoder")->string(),
+          "RAW model baseline decoder changed");
+  const auto& models = actual.find("models")->array();
+  const auto& reference = expected.find("models")->array();
+  require(models.size() == reference.size(), "RAW model baseline count changed");
+  for (std::size_t i = 0; i < models.size(); ++i) {
+    for (auto key : {"id", "effective", "sha256"})
+      require(models[i].find(key)->string() == reference[i].find(key)->string(),
+              "RAW model output changed after retiring LibRaw");
+    for (auto key : {"width", "height"})
+      require(models[i].find(key)->number() == reference[i].find(key)->number(),
+              "RAW model output geometry changed");
+  }
   auto full = decode_image(source);
   require(full.linear_p3.width == 2768 && full.linear_p3.height == 1848,
           "probe/full mismatch");
@@ -116,11 +140,6 @@ void run() {
   for (size_t i = 0; i < full.linear_p3.pixels.size(); ++i)
     require(full.linear_p3.pixels[i] * 2 == doubled.linear_p3.pixels[i],
             "RAW gain not applied after decode");
-  RawDecodeOptions recovery;
-  recovery.highlight_recovery = HighlightRecovery::Clip;
-  require(
-      decode_image(source, recovery).linear_p3.pixels == full.linear_p3.pixels,
-      "highlight recovery not ignored");
   for (auto name : {"canon-eos-5d-iii-lossy.dng", "leica-c-portrait.RWL"}) {
     const auto header = probe_apple_raw(fixtures / name);
     const std::string expected =
@@ -213,42 +232,7 @@ void run() {
     }
     require(rejected, "RAW admission ignored configured budget");
   }
-  for (unsigned i = 0; i < 8; ++i) {
-    RawDecodeOptions rejected;
-    switch (i) {
-      case 0:
-        rejected.profile = "x";
-        break;
-      case 1:
-        rejected.look_profile = "x";
-        break;
-      case 2:
-        rejected.lens_profile = "x";
-        break;
-      case 3:
-        rejected.dark_frame = "x";
-        break;
-      case 4:
-        rejected.bad_pixel_map = "x";
-        break;
-      case 5:
-        rejected.linearization_lut = "x";
-        break;
-      case 6:
-        rejected.lens_shading_map = "x";
-        break;
-      case 7:
-        rejected.auto_bad_pixel_correction = true;
-    }
-    bool invalid = false;
-    try {
-      decode_image(source, rejected);
-    } catch (const std::invalid_argument& e) {
-      invalid = std::string(e.what()).find("Apple RAW 引擎不支持该选项") !=
-                std::string::npos;
-    }
-    require(invalid, "LibRaw option accepted");
-  }
+
   // Canonical path aliases share an identity; an edited file and a changed
   // session digest must each replace the cached filter.
   const auto clone = root / "identity.ARW";
@@ -408,65 +392,37 @@ void run() {
   require(waiting_cancelled && tail < 200,
           "waiting RAW caller did not cancel promptly");
 }
-int model_measure(const std::filesystem::path& path) {
+// Frozen Apple model outputs replace the retired live LibRaw comparator.
+std::string model_baseline(const std::filesystem::path& path) {
   Engine engine;
-  RawDecodeOptions old_options;
-  old_options.half_size = true;
-  auto legacy = codec::decode_raw(path, old_options);
-  RawDecodeOptions new_options;
-  new_options.preview_max_edge = 2048;
-  const auto start = std::chrono::steady_clock::now();
-  auto own = decode_image(path, new_options);
-  const double decode_ms = std::chrono::duration<double, std::milli>(
-                               std::chrono::steady_clock::now() - start)
-                               .count();
-  json::Writer w;
-  w.begin_object()
-      .member("decode_ms", decode_ms)
-      .member("decoder", own.decode.raw->decoder_version)
-      .begin_array("models");
+  RawDecodeOptions options;
+  options.preview_max_edge = 2048;
+  const auto decoded = decode_image(path, options);
+  json::Writer writer;
+  writer.begin_object().member("os_build", raw_os_build())
+      .member("decoder", decoded.decode.raw->decoder_version).begin_array("models");
   for (auto id : {"research-cnn-v1", "research-exif-v1"}) {
-    ConvertOptions options;
-    options.ai_model_path = id;
-    auto a = infer_native_model(
-        native_model_request(options, legacy.metadata),
-        make_native_model_input(
-            render_native_model_base(legacy, false).base_linear));
-    auto b = infer_native_model(
-        native_model_request(options, own.metadata),
-        make_native_model_input(
-            render_native_model_base(own, false).base_linear));
-    const auto& x = a.signed_log2_gain;
-    const auto& y = b.signed_log2_gain;
-    std::vector<double> differences;
+    ConvertOptions conversion;
+    conversion.ai_model_path = id;
+    const auto inferred = infer_native_model(
+        native_model_request(conversion, decoded.metadata),
+        make_native_model_input(render_native_model_base(decoded, false).base_linear));
+    const auto& image = inferred.signed_log2_gain;
+    const auto* begin = reinterpret_cast<const std::uint8_t*>(image.pixels.data());
+    const std::vector<std::uint8_t> bytes(begin, begin + image.pixels.size() * sizeof(float));
     double sum = 0;
-    for (unsigned row = 0; row < x.height; ++row)
-      for (unsigned col = 0; col < x.width; ++col) {
-        const double sx =
-            std::clamp((col + .5) * y.width / x.width - .5, 0., y.width - 1.);
-        const double sy = std::clamp((row + .5) * y.height / x.height - .5, 0.,
-                                     y.height - 1.);
-        const unsigned x0 = sx, y0 = sy, x1 = std::min(x0 + 1, y.width - 1),
-                       y1 = std::min(y0 + 1, y.height - 1);
-        const double fx = sx - x0, fy = sy - y0;
-        const double v =
-            (y.at(x0, y0, 0) * (1 - fx) + y.at(x1, y0, 0) * fx) * (1 - fy) +
-            (y.at(x0, y1, 0) * (1 - fx) + y.at(x1, y1, 0) * fx) * fy;
-        const auto error = std::abs(x.at(col, row, 0) - v);
-        differences.push_back(error);
-        sum += error;
-      }
-    std::sort(differences.begin(), differences.end());
-    w.begin_object()
-        .member("id", id)
-        .member("mean", sum / differences.size())
-        .member("p99", differences[differences.size() * 99 / 100])
-        .member("max", differences.back())
-        .member("legacy_effective", a.effective_model_id)
-        .member("own_effective", b.effective_model_id)
-        .end_object();
+    for (float value : image.pixels) sum += value;
+    writer.begin_object().member("id", id).member("effective", inferred.effective_model_id)
+        .member("width", image.width).member("height", image.height)
+        .member("mean", sum / image.pixels.size())
+        .member("min", *std::min_element(image.pixels.begin(), image.pixels.end()))
+        .member("max", *std::max_element(image.pixels.begin(), image.pixels.end()))
+        .member("sha256", sha256_hex(bytes)).end_object();
   }
-  std::cout << w.end_array().end_object().take() << '\n';
+  return writer.end_array().end_object().take();
+}
+int model_measure(const std::filesystem::path& path) {
+  std::cout << model_baseline(path) << '\n';
   return 0;
 }
 int lens_measure(const std::filesystem::path& path) {

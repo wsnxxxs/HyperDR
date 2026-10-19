@@ -1,5 +1,4 @@
 // Shared Apple RAW pipeline for the CLI, C ABI and application.
-#include "internal/raw.hpp"
 #import <CoreImage/CoreImage.h>
 #import <Foundation/Foundation.h>
 #import <ImageIO/ImageIO.h>
@@ -258,11 +257,6 @@ RawLensMetadata probe_raw_lens_metadata(const std::filesystem::path& path) {
 }
 namespace codec {
 DecodedImage decode_apple_raw(const std::filesystem::path& path, const RawDecodeOptions& options) {
-  if (!options.profile.empty() || !options.look_profile.empty() || !options.lens_profile.empty() ||
-      !options.bad_pixel_map.empty() || !options.dark_frame.empty() ||
-      !options.linearization_lut.empty() || !options.lens_shading_map.empty() ||
-      options.auto_bad_pixel_correction)
-    throw std::invalid_argument("Apple RAW 引擎不支持该选项");
   if (!std::isfinite(options.digital_gain) || options.digital_gain <= 0)
     throw std::invalid_argument("invalid RAW digital gain");
   @autoreleasepool {

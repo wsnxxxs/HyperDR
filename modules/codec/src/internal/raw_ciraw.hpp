@@ -1,4 +1,5 @@
 #pragma once
+#include "hyperdr/codec/image_source.hpp"
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -11,3 +12,8 @@ void set_raw_open_hook(std::function<void()> hook);
 std::string raw_neutral_settings();
 void set_raw_block_hook(std::function<void(unsigned, unsigned)> hook);
 }  // namespace hyperdr::testing
+
+namespace hyperdr::codec {
+[[nodiscard]] DecodedImage decode_apple_raw(const std::filesystem::path& path,
+                                          const RawDecodeOptions& options = {});
+}

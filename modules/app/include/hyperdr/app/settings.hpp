@@ -124,7 +124,6 @@ struct ConvertOptions {
 };
 
 // Capture mutable creative resources before callbacks, decode, and fingerprints.
-void prepare_raw_resources(RawDecodeOptions& options);
 void prepare_conversion_resources(ConvertOptions& options);
 
 // Rejects combinations no encoder can honour, before any file is opened.

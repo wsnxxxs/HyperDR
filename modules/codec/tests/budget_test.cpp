@@ -16,7 +16,6 @@ void require(bool condition, const char* message) {
 int main() {
   try {
     using hyperdr::codec::raw_input_budget_ok;
-    using hyperdr::codec::raw_pipeline_bytes;
     using hyperdr::codec::raster_budget_ok;
     require(raster_budget_ok(4500, 8000),
             "supported 4500x8000 raster was rejected");
@@ -43,13 +42,6 @@ int main() {
     require(!raw_input_budget_ok(0, 12672), "zero width was accepted");
     require(!raw_input_budget_ok(std::numeric_limits<std::uint64_t>::max(), 2),
             "overflowing dimensions were accepted");
-    const auto full = raw_pipeline_bytes(9600, 6400, 9504, 6336);
-    const auto half = raw_pipeline_bytes(9600, 6400, 4752, 3168);
-    require(half > full / 4,
-            "half-size incorrectly quartered the full sensor mosaic");
-    require(half == 9600ULL * 6400ULL * 8ULL +
-                        4752ULL * 3168ULL * 24ULL,
-            "RAW memory estimate does not separate mosaic and output rasters");
     require(!raw_input_budget_ok(20000, 13000),
             "oversized sensor margins were admitted");
     std::cout << "budget tests passed\n";

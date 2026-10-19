@@ -3,7 +3,7 @@
 // Whether this build has the image codecs linked in.
 //
 // The dependency-free core build carries the renderer and all of its tests but
-// no LibRaw, libheif or libavif. That used to be expressed as
+// no Core Image, libheif or libavif. That used to be expressed as
 // `#if HYPERDR_WITH_CODECS` blocks inside conversion and CLI function bodies,
 // which meant the two configurations were not the same program: whole branches
 // existed only in one of them. Instead, the codec module always defines every

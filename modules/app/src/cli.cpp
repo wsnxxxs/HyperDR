@@ -30,7 +30,7 @@ void usage() {
          "  HyperDR display-curve <reference.heic> <candidate.heic>\n"
          "                         --headroom <stops> [--headroom <stops> ...]\n"
          "  HyperDR thumbnail <image> --output <preview.jpg> [--max-edge <pixels>]\n"
-         "                            [--quality <1..100>] [--half-size]\n"
+         "                            [--quality <1..100>]\n"
          "                            [--base-only]\n"
          "  HyperDR preview-frame <image> --output <preview.hpf> [look options]\n"
          "                            [--preview-max-edge <pixels>] [--fast-preview]\n"
@@ -40,7 +40,7 @@ void usage() {
          "                             --tensor-height <px>]\n"
          "  HyperDR model-list [--json]                    Emit the model table as JSON\n"
          "  HyperDR model-input <image> --output <linear-p3.f32> --report <recipe.json>\n"
-         "                            [--long-side <pixels>] [--half-size] [look options]\n"
+         "                            [--long-side <pixels>] [look options]\n"
          "  HyperDR curve [look options] [--samples <N>]   Emit the tone curve as JSON\n"
          "  HyperDR schema                                 Emit the settings schema as JSON\n"
          "  HyperDR frame-layout <frame.json> --width <px> --height <px>\n"
@@ -69,7 +69,7 @@ void usage() {
          "  --ai-expansion-start <0..1>        Post-model gain luma knee\n"
           "  --allow-legacy-external-gain      Allow frozen v1 normalized sidecars\n"
           "  --decode-cache <directory>         Reuse decoded buffers across look-only reruns\n"
-          "  --fast-preview                     Explicitly allow RAW half-size decoding\n"
+          "  --fast-preview                     Use a bounded preview decode\n"
           "  --lut <file.cube>                  Creative 1D/3D colour LUT\n";
   if (!kCodecsAvailable) {
     std::cout << "\nThis build was configured with HYPERDR_WITH_CODECS=OFF: the renderer\n"

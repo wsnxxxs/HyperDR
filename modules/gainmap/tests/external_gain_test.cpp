@@ -207,7 +207,7 @@ void test_v2_signed_canonical_sidecar() {
       "delivered_crop": [2, 1],
       "requested_crop_origin_sensor": [0, 0],
       "delivered_crop_origin_sensor": [0, 0],
-      "raw_half_size": false, "raw_decoder_version": "7", "raw_scale": 1
+      "raw_decoder_version": "7", "raw_scale": 1
     },
     "development_recipe": {
       "id": "raw-neutral-v2",

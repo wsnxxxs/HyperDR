@@ -15,7 +15,6 @@
 
 namespace hyperdr {
 
-struct DcpRenderContext;
 struct FloatImage;
 
 // The rendering mode is deliberately separate from the ISO gain-map metadata.
@@ -90,7 +89,6 @@ struct InputDescription {
   // How far above diffuse white the input's *encoding* can carry detail, as a
   // linear multiple. Read for single HDR and dual-rendition inputs.
   float headroom{1.0F};
-  std::shared_ptr<const DcpRenderContext> raw_profile;
   // Optional MaxCLL in cd/m². This bounds tone mapping, not transfer decoding;
   // a PQ image with a 203-nit peak is still an already rendered HDR input.
   std::optional<float> content_peak_nits;

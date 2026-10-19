@@ -294,7 +294,7 @@ class EngineContract(unittest.TestCase):
     def tearDown(self):
         LIB.hyperdr_engine_destroy(self.engine)
 
-    def assert_source_geometry(self, source, expected=None, half_size=False):
+    def assert_source_geometry(self, source, expected=None, fast_preview=False):
         probe = json.loads(result(LIB.hyperdr_probe, self.engine, os.fsencode(source)))
         dimensions = (probe["width"], probe["height"])
         if expected is not None:
@@ -304,9 +304,9 @@ class EngineContract(unittest.TestCase):
         try:
             for compact in (False, True):
                 request = {"preview_max_edge": 64, "command": {"compact": compact}}
-                if half_size:
-                    # half_size is internal/read-only in canonical settings;
-                    # CLI --fast-preview explicitly selects that decode path.
+                if fast_preview:
+                    # CLI --fast-preview selects preview intent; RAW scale follows
+                    # the requested edge rather than a fixed demosaic ratio.
                     with tempfile.TemporaryDirectory(prefix="hyperdr-fast-preview-") as temporary:
                         target = Path(temporary) / "preview.hpf"
                         arguments = [str(source), "--output", str(target),
@@ -386,7 +386,7 @@ class EngineContract(unittest.TestCase):
             for raw in (source, raw_fixture("canon-5d-iii-lossy-dng"), raw_fixture("leica-c-portrait-rwl")):
                 with self.subTest(source=raw.name):
                     self.assert_source_geometry(raw, (64, 80) if raw == dng_path else None)
-                    self.assert_source_geometry(raw, half_size=True)
+                    self.assert_source_geometry(raw, fast_preview=True)
                     expected = subprocess.check_output([CLI, "raw-metadata", str(raw)])
                     self.assertTrue(expected.endswith(b"\n"))
                     for _ in range(3):
@@ -644,7 +644,7 @@ class EngineContract(unittest.TestCase):
     def test_removed_raw_options_and_ignored_highlight_control(self):
         # Deleted controls cannot reach an engine entry through canonical
         # settings or private routing. Obsolete highlight values are inert.
-        for key in ("raw_profile", "raw_look", "raw_lens_profile", "raw_auto_bad_pixels"):
+        for key in ("raw_profile", "raw_look", "raw_lens_profile", "raw_auto_bad_pixels", "half_size"):
             with self.subTest(key=key):
                 with self.assertRaises(AssertionError):
                     result(LIB.hyperdr_curve_json, encoded({key: "obsolete"}), 33)
@@ -655,6 +655,10 @@ class EngineContract(unittest.TestCase):
                      "--raw-bad-pixels", "--raw-dark-frame", "--raw-linearization-lut", "--raw-lens-shading",
                      "--highlight-recovery"):
             rejected = subprocess.run([CLI, "curve", flag, "obsolete"], capture_output=True)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn(b"unknown", rejected.stderr)
+        for command in ("thumbnail", "model-input"):
+            rejected = subprocess.run([CLI, command, "unused.ARW", "--half-size"], capture_output=True)
             self.assertNotEqual(rejected.returncode, 0)
             self.assertIn(b"unknown", rejected.stderr)
         expected = result(LIB.hyperdr_curve_json, b"{}", 33)

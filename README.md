@@ -117,9 +117,8 @@ These presets target macOS 26 and write only to `build-core/` and `build/`.
 Both builds produce `HyperDR`, `libhyperdr.a`, and `libhyperdr.dylib` at the
 build root. The C11 header is `modules/capi/include/hyperdr/hyperdr.h`.
 The codec preset uses `cmake/triplets/arm64-osx.cmake` to keep the transitional
-libheif/libde265 decoder libraries dynamic. It disables LibRaw OpenMP and
-libheif's GPL HEVC encoder feature: this macOS build reads HEIC but HEVC exports fail with
-`this build has no HEVC encoder` until the VideoToolbox backend is added.
+libheif/libde265 decoder libraries dynamic. It disables libheif's GPL HEVC encoder feature; HEVC exports use VideoToolbox.
+Camera RAW inputs use the system CIRAWFilter decoder.
 HEVC fixture-generation tests report their skip; AVIF and JPEG/R tests still run.
 This transitional libheif build is for direct desktop development/distribution;
 it is not the planned App Store build.
@@ -189,8 +188,10 @@ own session; sessions and their exports expire after the configured idle time
 ## Continuous integration
 
 Local checks and `.github/workflows/ci.yml` share `python scripts/test.py`.
-Run it after configuring `build-core`, or select `panel`, `frontend`, or `native`
-for a focused check. The [development guide](docs/development.md#validate-only-the-affected-behaviour)
+Run it after configuring `build-core`, or select `frontend` or `native`
+for a focused check. The historical Python panel suite is retired and will be
+removed at P2c; the explicit `panel` target reports this and exits with failure.
+The [development guide](docs/development.md#validate-only-the-affected-behaviour)
 lists prerequisites and build options.
 
 CI defines macOS core Debug/Release jobs, a codec build with a GPL dependency
@@ -204,7 +205,7 @@ Only local files are processed. Existing maker notes and arbitrary private XMP
 are not copied; essential photographic metadata is rebuilt into compact Exif and
 standards-oriented XMP, now including artist, copyright, lens make and model,
 35 mm equivalent focal length, a Software tag, and the camera's GPS fix when it
-recorded one. A fix that LibRaw did not parse is omitted rather than guessed.
+recorded one. A fix absent from decoded camera metadata is omitted rather than guessed.
 HEVC encoding will use the planned VideoToolbox backend.
 
 ## iPhone LAN panel

@@ -66,7 +66,7 @@ extension EditorModel {
 
     /// Called by CanvasModel for buttons, gestures, viewport and scale changes.
     func canvasGeometryChanged() {
-        guard canvas.needsDetail, let visible = canvas.visibleSourceRect else {
+        guard canvas.needsEditedDetail || canvas.needsOriginalDetail, let visible = canvas.visibleSourceRect else {
             invalidateDetails()
             return
         }
@@ -84,15 +84,18 @@ extension EditorModel {
         detailTicket &+= 1
         guard !isEditingLocked, !renderOutstanding, gesture == nil, !lastSubmitWasDraft,
               sourceUnavailable == nil || isRetryingSource,
-              canvas.needsDetail, let visible = canvas.visibleSourceRect, let photo else { return }
+              canvas.needsEditedDetail || canvas.needsOriginalDetail,
+              let visible = canvas.visibleSourceRect, let photo else { return }
         let ticket = detailTicket
         let region = DetailPolicy.region(visible: visible, source: canvas.transform.imageSize)
         let options = effectiveOptions()
         let wantsOriginal = isPeekingOriginal || viewMode != .edited
         let wantsEdited = !isPeekingOriginal && viewMode != .original
         let reference = referenceOptions ?? EditDefaults.reference(encoding: edit.encoding, workflow: options)
-        let needsOriginal = wantsOriginal && originalDetailFrame == nil
-        let needsEdited = wantsEdited && editedDetailFrame == nil
+        // Each side asks for a detail only when its own frame is too small: the
+        // original may be a tier behind the edit (V-13).
+        let needsOriginal = wantsOriginal && originalDetailFrame == nil && canvas.needsOriginalDetail
+        let needsEdited = wantsEdited && editedDetailFrame == nil && canvas.needsEditedDetail
         guard needsOriginal || needsEdited else { return }
         detailTask = Task { [weak self, services] in
             do {

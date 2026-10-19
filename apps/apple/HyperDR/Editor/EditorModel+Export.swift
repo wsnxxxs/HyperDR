@@ -383,30 +383,53 @@ extension EditorModel {
     /// follows the switch while every adjustment in it stays neutral. Called from
     /// `editChanged`, so undo, redo and resets reach it as well.
     func followLensCorrectionWithReference() {
-        guard var options = referenceOptions, let photo,
-              options["lensCorrection"] != .bool(edit.lensCorrection) else { return }
+        guard var options = referenceOptions, options["lensCorrection"] != .bool(edit.lensCorrection) else { return }
         options["lensCorrection"] = .bool(edit.lensCorrection)
+        renderReferenceFrame(options: options, edge: previewEdge)
+    }
+    /// A larger preview tier (the window grew, or moved to a denser display)
+    /// asks for a larger "original" as well: the edit sharpens at once, and a
+    /// comparison against a stale small original would show a soft half beside
+    /// a sharp one (V-13). The smaller original stays up until the new one is
+    /// ready, and a smaller tier never re-renders.
+    func followPreviewEdgeWithReference() {
+        let edge = previewEdge
+        guard hasReferenceFrame, let options = referenceOptions, edge > requestedReferenceEdge else { return }
+        renderReferenceFrame(options: options, edge: edge)
+    }
+    /// Renders the "original" with `options` at `edge` and swaps it in; on a
+    /// failure the earlier original stays, with the options and edge it had.
+    private func renderReferenceFrame(options: EditOptions, edge: Int) {
+        guard let photo else { return }
+        let optionsChanged = referenceOptions != options
         referenceOptions = options
-        invalidateDetails(editedOnly: false)
+        requestedReferenceEdge = edge
+        // The details of the original on screen stay valid across a larger render
+        // of the same options; only different options make them stale.
+        if optionsChanged { invalidateDetails(editedOnly: false) }
         referenceRefreshTask?.cancel()
         let ticket = generation
-        referenceRefreshTask = Task { [weak self, services, previewEdge] in
+        referenceRefreshTask = Task { [weak self, services] in
             do {
-                guard let result = try await services.renderReference(photo, options: options, maxEdge: previewEdge) else { return }
+                guard let result = try await services.renderReference(photo, options: options, maxEdge: edge) else { return }
                 guard let self, !Task.isCancelled, generation == ticket, self.photo == photo,
-                      referenceOptions == options else { return }
+                      referenceOptions == options, requestedReferenceEdge == edge else { return }
                 shownReferenceOptions = options
+                shownReferenceEdge = edge
                 replaceReference(result)
+                invalidateDetails(editedOnly: false)
                 scheduleDetails()
             } catch EditorDetailError.sourceReplaced {
                 guard let self, !Task.isCancelled, generation == ticket, self.photo == photo else { return }
                 reopenReplacedSource(photo)
             } catch {
                 // The earlier original stays on screen, so its details must
-                // match it; the next switch tries again.
+                // match it; the next switch or tier change tries again.
                 guard let self, !Task.isCancelled, generation == ticket, self.photo == photo,
-                      referenceOptions == options, let shown = shownReferenceOptions else { return }
+                      referenceOptions == options, requestedReferenceEdge == edge,
+                      let shown = shownReferenceOptions else { return }
                 referenceOptions = shown
+                requestedReferenceEdge = shownReferenceEdge
                 invalidateDetails(editedOnly: false)
                 scheduleDetails()
             }

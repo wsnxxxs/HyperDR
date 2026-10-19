@@ -29,6 +29,27 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已展开" } }
       }
     },
+    "design.legend.highlights" : {
+      "comment" : "Canvas legend row for the highlight stripes.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Highlights: clipped on export" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "高光：导出时截断" } }
+      }
+    },
+    "design.legend.mask %@" : {
+      "comment" : "Canvas legend row for the mask; the argument is the control name.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Affected area: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "作用区域：%@" } }
+      }
+    },
+    "design.legend.shadows" : {
+      "comment" : "Canvas legend row for the shadow stripes.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Shadows: pure black in the SDR version" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暗部：SDR 版本中为纯黑" } }
+      }
+    },
     "design.scope.ceiling %@" : {
       "comment" : "Export limit label on the scope; the argument is a formatted number of stops, e.g. 2.5.",
       "localizations" : {
@@ -170,6 +191,13 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Type an exact value. Up and Down Arrow change it by one step." } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "输入精确数值；上下方向键按步长调整。" } }
+      }
+    },
+    "design.split.divider" : {
+      "comment" : "VoiceOver name of the compare divider.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Comparison divider" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "对比分界线" } }
       }
     },
     "design.zebra.highlights" : {

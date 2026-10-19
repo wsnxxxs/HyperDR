@@ -68,7 +68,7 @@ void round_trip(const std::filesystem::path& path,
 
 }  // namespace
 
-int main() {
+int main() try {
   const auto directory = hyperdr::test::temporary_directory() /
       ("hyperdr-decode-" + std::to_string(
           std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -132,4 +132,10 @@ int main() {
     std::cerr << error.what() << '\n';
     return 1;
   }
+} catch (const std::exception& error) {
+  std::cerr << "test failure: " << error.what() << '\n';
+  return 1;
+} catch (...) {
+  std::cerr << "unknown test failure\n";
+  return 1;
 }

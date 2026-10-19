@@ -351,7 +351,7 @@ void cancel_large() {
   require(cancelled,"50 MP decode did not propagate cancellation");
   require(ms<=200,"50 MP decode cancellation exceeded 200 ms");
 }
-int main(int argc,char**argv) {
+int main(int argc,char**argv) try {
   try {
     if(argc==2 && std::string(argv[1])=="cancel-progressive"){cancel_progressive_large();return 0;}
     if(argc==2 && std::string(argv[1])=="cancel-large"){cancel_large();return 0;}
@@ -410,4 +410,10 @@ int main(int argc,char**argv) {
     }
     return passed?0:1;
   }catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}
+} catch (const std::exception& error) {
+  std::cerr << "test failure: " << error.what() << '\n';
+  return 1;
+} catch (...) {
+  std::cerr << "unknown test failure\n";
+  return 1;
 }

@@ -400,7 +400,7 @@ void check_frame_overlay() {
   near(wide.rgba[2], 4660.0F / 65535, "gray overlay expands to RGB");
   near(wide.rgba[3], 1, "16-bit overlay alpha");
 }
-int main() {
+int main() try {
   int failures = 0;
   for (auto test : {check_gamma, check_srgb, check_chrm, check_hdr_priority, check_narrow_range, check_preview,
                     check_decode_errors, check_block_boundaries, check_alpha, check_content_peak,
@@ -410,4 +410,10 @@ int main() {
   }
   if (!failures) std::cout << "PNG color and linear preview tests passed\n";
   return failures ? 1 : 0;
+} catch (const std::exception& error) {
+  std::cerr << "test failure: " << error.what() << '\n';
+  return 1;
+} catch (...) {
+  std::cerr << "unknown test failure\n";
+  return 1;
 }

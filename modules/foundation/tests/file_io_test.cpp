@@ -74,7 +74,7 @@ void test_atomic_write_round_trips() {
 
 }  // namespace
 
-int main() {
+int main() try {
   try {
     require(hyperdr::available_memory_bytes() > 0, "available memory was not reported");
     test_path_comparison();
@@ -86,4 +86,10 @@ int main() {
     std::cerr << "test failure: " << e.what() << '\n';
     return 1;
   }
+} catch (const std::exception& error) {
+  std::cerr << "test failure: " << error.what() << '\n';
+  return 1;
+} catch (...) {
+  std::cerr << "unknown test failure\n";
+  return 1;
 }

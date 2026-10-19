@@ -299,7 +299,7 @@ void test_v2_signed_canonical_sidecar() {
 
 }  // namespace
 
-int main() {
+int main() try {
   try {
     test_external_gain_round_trip();
     test_v2_signed_canonical_sidecar();
@@ -309,4 +309,10 @@ int main() {
     std::cerr << "test failure: " << error.what() << '\n';
     return 1;
   }
+} catch (const std::exception& error) {
+  std::cerr << "test failure: " << error.what() << '\n';
+  return 1;
+} catch (...) {
+  std::cerr << "unknown test failure\n";
+  return 1;
 }

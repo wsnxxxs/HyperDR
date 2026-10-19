@@ -134,7 +134,7 @@ double mean(const hyperdr::FloatImage& image) {
 }
 }
 
-int main() {
+int main() try {
   const auto root=hyperdr::test::temporary_directory()/
       ("hyperdr-alpha-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
   try {
@@ -185,4 +185,10 @@ int main() {
     std::filesystem::remove_all(root,ignored);
     return 1;
   }
+} catch (const std::exception& error) {
+  std::cerr << "test failure: " << error.what() << '\n';
+  return 1;
+} catch (...) {
+  std::cerr << "unknown test failure\n";
+  return 1;
 }

@@ -231,7 +231,7 @@ void shrink_gain_codes(FloatImage& codes, const std::array<float, 3>& base_offse
 // Offsets use the same SDR-white-relative units on encode and reconstruction;
 // they keep a LUT's zero-valued channel representable without infinite gain.
 // A shared coding range/gamma also fits common XMP + ISO writers.
-GainMapResult rgb_gain_map_from_renditions(PhotoRenditions images) {
+GainMapResult rgb_gain_map_from_renditions(PhotoRenditions images, bool presentation_frame) {
   constexpr float offset = 1.0F / 64.0F;
   const auto width = images.sdr.width, height = images.sdr.height;
   // A rendering without headroom (an explicit --headroom 0) still writes the
@@ -278,6 +278,7 @@ GainMapResult rgb_gain_map_from_renditions(PhotoRenditions images) {
   auto& metadata = out.metadata;
   metadata.gain_min = rational_from_float(std::min(0.0F, minimum));
   metadata.gain_max = rational_from_float(std::max(0.0F, maximum));
+  if (presentation_frame) align_zero_gain(metadata.gain_min, metadata.gain_max);
   const float min_gain = rational_value(metadata.gain_min);
   const float max_gain = rational_value(metadata.gain_max);
   const float range = max_gain - min_gain;
@@ -286,7 +287,7 @@ GainMapResult rgb_gain_map_from_renditions(PhotoRenditions images) {
          i < static_cast<std::size_t>(y + 1) * width * channels; ++i)
       codes.pixels[i] = range > kEpsilon ? std::clamp((codes.pixels[i] - min_gain) / range, 0.0F, 1.0F) : 0.0F;
   });
-  metadata.gamma = rational_from_float(range > kEpsilon ? choose_gain_gamma(codes.pixels) : 1.0F);
+  metadata.gamma = rational_from_float(!presentation_frame && range > kEpsilon ? choose_gain_gamma(codes.pixels) : 1.0F);
   const float gamma = rational_value(metadata.gamma);
   parallel_for_rows(height, [&](std::uint32_t y) {
     for (std::size_t i = static_cast<std::size_t>(y) * width * channels;
@@ -352,7 +353,7 @@ float mono_gain_stops(float sdr_y, float hdr_y, float base_offset, float alterna
 // packager does. The HDR stays exact everywhere and any SDR change is confined
 // to those pixels: rejecting the whole frame for a few edges rebuilt every
 // saturated colour in a reduced iPhone export.
-GainMapResult authored_mono_gain_map(PhotoRenditions images) {
+GainMapResult authored_mono_gain_map(PhotoRenditions images, bool presentation_frame) {
   const auto width = images.sdr.width, height = images.sdr.height;
   FloatImage gains(width, height, 1);
   std::vector<std::uint8_t> rebuild(static_cast<std::size_t>(width) * height, 0);
@@ -386,6 +387,7 @@ GainMapResult authored_mono_gain_map(PhotoRenditions images) {
   GainMapResult out;
   out.metadata.gain_min = rational_from_float(std::min(0.0F, *minimum));
   out.metadata.gain_max = rational_from_float(std::max(0.0F, *maximum));
+  if (presentation_frame) align_zero_gain(out.metadata.gain_min, out.metadata.gain_max);
   out.metadata.gamma = {1,1};
   out.metadata.base_offset = rational_from_float(base_offset);
   out.metadata.alternate_offset = rational_from_float(alternate_offset);
@@ -448,7 +450,14 @@ bool common_offsets(const PhotoRenditions& images) {
 
 }  // namespace
 
-GainMapResult gain_map_from_renditions(PhotoRenditions images, GainMapWriterProfile profile) {
+static GainMapResult package_renditions(PhotoRenditions images, GainMapWriterProfile profile, bool presentation_frame) {
+  // A framed pair is re-authored from its final pixels. Equal offsets are
+  // necessary for identical SDR/HDR mat pixels to carry exactly zero stops,
+  // including sources whose original affine reconstruction offsets differed.
+  if (presentation_frame && images.dual_rendition) {
+    images.authored_gain_map.base_offset.fill(1.0F/64);
+    images.authored_gain_map.alternate_offset.fill(1.0F/64);
+  }
   images.sdr.require_consistent("gain-map SDR rendition");
   images.hdr.require_consistent("gain-map HDR rendition");
   const auto& sdr=images.sdr; const auto& hdr=images.hdr;
@@ -456,15 +465,15 @@ GainMapResult gain_map_from_renditions(PhotoRenditions images, GainMapWriterProf
     throw std::invalid_argument("gain-map packaging requires matching SDR and HDR renditions");
   if (images.dual_rendition) {
     if (profile == GainMapWriterProfile::iso_generic)
-      return rgb_gain_map_from_renditions(std::move(images));
+      return rgb_gain_map_from_renditions(std::move(images), presentation_frame);
     if (images.authored_gain_channels == 1 && common_offsets(images))
-      return authored_mono_gain_map(std::move(images));
+      return authored_mono_gain_map(std::move(images), presentation_frame);
     auto result = exact_gain_map_from_renditions(std::move(images));
     result.stats.adaptive_chroma_loss = true;
     return result;
   }
   if (profile == GainMapWriterProfile::iso_generic) {
-    return rgb_gain_map_from_renditions(std::move(images));
+    return rgb_gain_map_from_renditions(std::move(images), presentation_frame);
   }
   if (images.hdr_is_source) return exact_gain_map_from_renditions(std::move(images));
   // Apple-compatible output has one shared RGB multiplier. Derive it from the
@@ -501,5 +510,11 @@ GainMapResult gain_map_from_renditions(PhotoRenditions images, GainMapWriterProf
       out.metadata,out.headroom_stops,nullptr,out.clamp_srgb);
   measure_rendition_stats(out.stats,out.base_linear,reconstructed,images.below_knee);
   return out;
+}
+GainMapResult gain_map_from_renditions(PhotoRenditions images, GainMapWriterProfile profile,
+                                      bool presentation_frame) {
+  auto result = package_renditions(std::move(images), profile, presentation_frame);
+  result.presentation_frame = presentation_frame;
+  return result;
 }
 }  // namespace hyperdr

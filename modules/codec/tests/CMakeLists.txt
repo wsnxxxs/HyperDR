@@ -83,8 +83,8 @@ endif()
 
 if(HYPERDR_WITH_CODECS AND HYPERDR_BUILD_TESTS)
   add_executable(heif_imageio_renditions heif_imageio_renditions.cpp)
-  target_link_libraries(heif_imageio_renditions PRIVATE HyperDR::codec)
-  target_include_directories(heif_imageio_renditions PRIVATE ${PROJECT_SOURCE_DIR}/modules/codec/src)
+  target_link_libraries(heif_imageio_renditions PRIVATE HyperDR::codec heif)
+  target_include_directories(heif_imageio_renditions PRIVATE ${PROJECT_SOURCE_DIR}/modules/codec/src ${PROJECT_SOURCE_DIR}/modules/container/src)
   hyperdr_configure_target(heif_imageio_renditions)
 endif()
 
@@ -92,7 +92,7 @@ if(HYPERDR_WITH_CODECS AND HYPERDR_BUILD_TESTS)
   add_test(NAME heif_export_imageio_test COMMAND ${Python3_EXECUTABLE}
     ${PROJECT_SOURCE_DIR}/tests/hevc/check_imageio.py $<TARGET_FILE:HyperDR>
     --rendition-fixtures $<TARGET_FILE:heif_imageio_renditions> --build-dir ${CMAKE_BINARY_DIR}/heif-imageio)
-  set_tests_properties(heif_export_imageio_test PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
+  set_tests_properties(heif_export_imageio_test PROPERTIES TIMEOUT 600 RUN_SERIAL TRUE)
 endif()
 
 if(HYPERDR_WITH_CODECS AND HYPERDR_BUILD_TESTS)

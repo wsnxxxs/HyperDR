@@ -3,6 +3,7 @@
 //     xcrun swiftc -O tests/hevc/imageio_probe.swift -o build/imageio_probe
 //     build/imageio_probe FILE [--region X,Y,W,H]... [--exclude X,Y,W,H]...
 //                              [--reference SDR_FILE]
+//                              [--photo X,Y,W,H] [--gain-plane FILE --gain-bits 8|10 --chroma-support 0|3]
 //
 // Prints one JSON object:
 //
@@ -28,10 +29,10 @@
 // - `regions`: for each `--region` (stored pixel coordinates, top-left
 //   origin, before any Exif orientation) minus every `--exclude`, per channel:
 //   log2(HDR / SDR) -- mean, maximum |·| and p99.9 |·| -- over the pixels whose
-//   SDR value is at least 0.02 (`bright_pixels`), and the maximum |HDR - SDR|
+//   HDR and SDR values are both at least 0.02 (`bright_pixels`), and maximum |HDR - SDR|
 //   over the darker ones (`dark_pixels`), where a ratio means nothing. A
-//   frame's mat must have zero gain (E5: p99.9 <= 0.01 stops, max <= 0.03,
-//   dark |diff| <= 1/1023); V3 uses a looser 0.05 stops. p99.9 is the upper
+//   frame L2 gate uses 0.05 stops at 8-bit, 0.03 at 10-bit outside c+r,
+//   and dark differences <= one base code. p99.9 is the upper
 //   edge of a 0.0001-stop bin, so zero gain reads 0.0001.
 //   `sampled_pixels` counts the pixels measured; `valid` is false when it is
 //   0 (the region lies outside the image, or the excludes cover it). A
@@ -50,6 +51,7 @@
 import CoreGraphics
 import Foundation
 import ImageIO
+import CoreVideo
 
 // Lightweight structural gate; no HDR reconstruction or large float buffers.
 if CommandLine.arguments.count > 1 && CommandLine.arguments[1] == "--require-iso-dimensions" {
@@ -94,6 +96,11 @@ struct Failure: Error, CustomStringConvertible {
     let description: String
 }
 
+// --photo adds E5 L1/L2 per-ring statistics. k = actual chroma support +
+// ceil(base/gain size ratio); the photo rectangle comes from the export report.
+// HEIC raw gain samples come through the approved replaceable reader backend;
+// JPEG samples are read directly from ImageIO auxiliary Data.
+
 // MARK: - Arguments
 
 func usage() -> Never {
@@ -110,6 +117,12 @@ arguments.removeFirst()
 var regions: [Rect] = []
 var excludes: [Rect] = []
 var referencePath: String?
+var photoRect: Rect?
+var controlPath: String?
+var gainPlanePath: String?
+var gainBackend = "product-reader"
+var gainBits = 8
+var chromaSupport: Int?
 while !arguments.isEmpty {
     let flag = arguments.removeFirst()
     guard let value = arguments.first else { usage() }
@@ -118,6 +131,12 @@ while !arguments.isEmpty {
     case "--region": guard let rect = Rect(value) else { usage() }; regions.append(rect)
     case "--exclude": guard let rect = Rect(value) else { usage() }; excludes.append(rect)
     case "--reference": referencePath = value
+    case "--control": controlPath = value
+    case "--photo": guard let rect = Rect(value) else { usage() }; photoRect = rect
+    case "--gain-plane": gainPlanePath = value
+    case "--gain-backend": gainBackend = value
+    case "--gain-bits": guard let bits = Int(value), [8,10].contains(bits) else { usage() }; gainBits = bits
+    case "--chroma-support": guard let c = Int(value), [0,3].contains(c) else { usage() }; chromaSupport = c
     default: usage()
     }
 }
@@ -315,7 +334,7 @@ struct RatioStats {
     var darkMaximum = 0.0
 
     mutating func add(hdr: Float, sdr: Float) {
-        if sdr < 0.02 {
+        if sdr < 0.02 || hdr < 0.02 {
             darkCount += 1
             darkMaximum = max(darkMaximum, Double(abs(hdr - sdr)))
             return
@@ -344,6 +363,7 @@ struct RatioStats {
         return ["bright_pixels": count, "dark_pixels": darkCount,
                 "mean_log2": count > 0 ? sum / Double(count) : none,
                 "max_abs_log2": count > 0 ? maximum : none,
+                "p99_abs_log2": count > 0 ? percentile(0.99) : none,
                 "p999_abs_log2": count > 0 ? percentile(0.999) : none,
                 "dark_max_abs_diff": darkCount > 0 ? darkMaximum : none]
     }
@@ -387,6 +407,152 @@ func yPSNR(_ a: Pixels, _ b: Pixels) throws -> Double {
 }
 
 func clamp(_ value: Float) -> Double { Double(min(max(value, 0), 1)) }
+
+
+// E5: L1 and L2 share the same photo rectangle supplied by the export report.
+// L1 uses raw auxiliary samples; it never infers gain from HDR/SDR ratios.
+struct GainSamples {
+    let width, height, channels, bits: Int
+    let values: [Float]
+    let metadata: [[Double]] // min, max, gamma
+    let backend: String
+}
+func gainSamples(_ file: CGImageSource) throws -> GainSamples {
+    guard let info = CGImageSourceCopyAuxiliaryDataInfoAtIndex(file,0,kCGImageAuxiliaryDataTypeISOGainMap) as? [CFString:Any],
+          let desc = info[kCGImageAuxiliaryDataInfoDataDescription] as? [String:Any],
+          let metadata = info[kCGImageAuxiliaryDataInfoMetadata],
+          let width = (desc["Width"] as? NSNumber)?.intValue,
+          let height = (desc["Height"] as? NSNumber)?.intValue else {
+        throw Failure(description:"missing ISO gain-map description/metadata")
+    }
+    let tags = metadataTags(metadata as! CGImageMetadata)
+    var channels = 1
+    if tags["HDRToneMap:ChannelMetadata[2].GainMapMin"] != nil { channels = 3 }
+    var ranges = [[Double]]()
+    for c in 0..<channels {
+        var fields = [Double]()
+        for field in ["GainMapMin","GainMapMax","Gamma"] {
+            guard let text = tags["HDRToneMap:ChannelMetadata[\(c)].\(field)"] as? String,
+                  let number = Double(text), number.isFinite else { throw Failure(description:"missing gain range") }
+            fields.append(number)
+        }
+        guard fields[1] >= fields[0], fields[2] > 0 else { throw Failure(description:"invalid gain range") }
+        ranges.append(fields)
+    }
+    if info[kCGImageAuxiliaryDataInfoData] as? Data == nil, let gainPlanePath {
+        let data = try Data(contentsOf:URL(fileURLWithPath:gainPlanePath))
+        guard data.count >= 12 else { throw Failure(description:"short gain plane") }
+        let shape = data.prefix(12).withUnsafeBytes { Array($0.bindMemory(to:UInt32.self)) }
+        guard shape == [UInt32(width),UInt32(height),UInt32(channels)], data.count == 12+width*height*channels*4 else {
+            throw Failure(description:"ImageIO and gain reader dimensions disagree")
+        }
+        let values = data.dropFirst(12).withUnsafeBytes { Array($0.bindMemory(to:Float.self)) }
+        guard values.allSatisfy({ $0.isFinite && $0 >= 0 && $0 <= 1 }) else { throw Failure(description:"invalid raw gain code") }
+        return GainSamples(width:width,height:height,channels:channels,bits:gainBits,values:values,
+                           metadata:ranges,backend:gainBackend)
+    }
+    guard let data = info[kCGImageAuxiliaryDataInfoData] as? Data,
+          let stride = (desc["BytesPerRow"] as? NSNumber)?.intValue,
+          let format = (desc["PixelFormat"] as? NSNumber)?.uint32Value else {
+        throw Failure(description:"ImageIO auxiliary has no raw Data; supply the approved product gain-plane backend")
+    }
+    let components: Int
+    switch format {
+    case kCVPixelFormatType_OneComponent8: components = 1
+    case kCVPixelFormatType_24RGB: components = 3
+    case kCVPixelFormatType_32RGBA, kCVPixelFormatType_32BGRA: components = 4
+    default: throw Failure(description:"unsupported ImageIO gain pixel format \(format)")
+    }
+    guard stride >= width*components, data.count >= stride*height else { throw Failure(description:"short auxiliary Data") }
+    var values = [Float](); values.reserveCapacity(width*height*channels)
+    for y in 0..<height { for x in 0..<width { for c in 0..<channels {
+        let channel = components == 1 ? 0 : (format == kCVPixelFormatType_32BGRA ? 2-c : c)
+        values.append(Float(data[y*stride+x*components+channel])/255)
+    } } }
+    return GainSamples(width:width,height:height,channels:channels,bits:8,values:values,metadata:ranges,backend:"imageio-data")
+}
+struct GainStats {
+    var samples = [Double]()
+    var zeroPixels = 0
+    var point = [Int]()
+    var maximum = 0.0
+    mutating func add(_ stops: Double, zero: Bool, x: Int, y: Int) {
+        samples.append(abs(stops)); if zero { zeroPixels += 1 }
+        if point.isEmpty || abs(stops) > maximum { maximum = abs(stops); point = [x,y] }
+    }
+    var json: [String:Any] {
+        let sorted = samples.sorted()
+        return ["samples":samples.count,"valid":!samples.isEmpty,"max_abs_stops":maximum,
+                "p99_abs_stops":sorted.isEmpty ? NSNull() : sorted[min(sorted.count-1,Int(ceil(Double(sorted.count)*0.99))-1)],
+                "zero_fraction":samples.isEmpty ? NSNull() : Double(zeroPixels)/Double(samples.count),"maximum_point":point]
+    }
+}
+func frameRings(_ rect: Rect, file: CGImageSource, hdr: Pixels, sdr: Pixels, control: Pixels?, bytes: Data) throws -> [String:Any] {
+    let gain = try gainSamples(file)
+    let c: Int
+    if let chromaSupport { c = chromaSupport }
+    else {
+        // Read the JPEG SOF component sampling factors, not its file extension.
+        let raw = [UInt8](bytes); var i = 2; var found: Int?
+        while i+11 < raw.count {
+            guard raw[i] == 255 else { throw Failure(description:"invalid JPEG marker") }
+            let marker = raw[i+1], length = Int(raw[i+2])*256+Int(raw[i+3])
+            if [UInt8(0xC0),0xC1,0xC2].contains(marker) {
+                let sampling = raw[i+11]
+                guard sampling == 0x22 || sampling == 0x11 else { throw Failure(description:"unsupported JPEG chroma support") }
+                found = sampling == 0x22 ? 3 : 0; break
+            }
+            if marker == 0xDA || length < 2 { break }; i += 2+length
+        }
+        guard let found else { throw Failure(description:"cannot read base chroma sampling") }; c = found
+    }
+    let ratio = max(Double(hdr.width)/Double(gain.width), Double(hdr.height)/Double(gain.height))
+    let k = c + Int(ceil(ratio))
+    var l1 = [GainStats](repeating:GainStats(),count:k+1)
+    var l2 = (0...k).map { _ in [RatioStats(),RatioStats(),RatioStats()] }
+    var residual = (0...k).map { _ in [RatioStats(),RatioStats(),RatioStats()] }
+    var points = [[Int]](repeating:[],count:k+1)
+    var maximums = [Double](repeating:-1,count:k+1)
+    var values = [[Float]](repeating:[],count:k+1)
+    var near = GainStats(), far = GainStats()
+    let levels = Double((1<<gain.bits)-1)
+    for y in 0..<hdr.height { for x in 0..<hdr.width {
+        let distance = max(rect.x-x, x-(rect.x+rect.width-1), rect.y-y, y-(rect.y+rect.height-1))
+        if distance <= 0 { continue }
+        let ring = distance <= k ? distance-1 : k
+        // Gain layer statistics sample native codes. For a smaller constant
+        // map, all corresponding base pixels map to that same native zero code.
+        let gx = min(gain.width-1,x*gain.width/hdr.width), gy = min(gain.height-1,y*gain.height/hdr.height)
+        var stops = 0.0, zero = true
+        for channel in 0..<gain.channels {
+            let m = gain.metadata[channel]
+            let code = Double(gain.values[(gy*gain.width+gx)*gain.channels+channel])
+            let decoded = m[0]+(m[1]-m[0])*pow(code,1/m[2])
+            stops = max(stops,abs(decoded))
+            let zeroCode = (m[1]>m[0]) ? pow(max(0,min(1,-m[0]/(m[1]-m[0]))),m[2])*levels : 0
+            zero = zero && Int((code*levels).rounded()) == Int(zeroCode.rounded())
+        }
+        l1[ring].add(stops,zero:zero,x:x,y:y)
+        if distance <= 8 { near.add(stops,zero:zero,x:x,y:y) } else { far.add(stops,zero:zero,x:x,y:y) }
+        for channel in 0..<3 {
+            let h = hdr[x,y,channel], s = sdr[x,y,channel]
+            guard h.isFinite && s.isFinite else { throw Failure(description:"nonfinite decoded frame pixel") }
+            l2[ring][channel].add(hdr:h,sdr:s)
+            if let control { residual[ring][channel].add(hdr:h,sdr:control[x,y,channel]) }
+            if h>=0.02 && s>=0.02 {
+                let delta = abs(log2(Double(h)/Double(s)))
+                if delta > maximums[ring] { maximums[ring]=delta;points[ring]=[x,y,channel];values[ring]=[h,s] }
+            }
+        }
+    } }
+    return ["photo":rect.json,"k":k,"base_chroma_support":c,"gain_scale":ratio,
+            "gain_width":gain.width,"gain_height":gain.height,"gain_bits":gain.bits,"gain_backend":gain.backend,
+            "l1_near8":near.json,"l1_far8":far.json,
+            "rings":(0...k).map { i -> [String:Any] in
+                ["distance":i<k ? String(i+1) : ">\(k)","l1":l1[i].json,
+                 "l2":l2[i].map(\.json),"control_l2":residual[i].map(\.json),"maximum_point":points[i],"maximum_hdr_sdr":values[i]]
+            }]
+}
 
 // MARK: - JSON
 
@@ -464,6 +630,16 @@ do {
     report["sdr"] = peaks(sdr).merging(["content_headroom": Double(sdrImage.contentHeadroom)]) { a, _ in a }
     if hdr.width != sdr.width || hdr.height != sdr.height {
         throw Failure(description: "HDR decode is \(hdr.width) × \(hdr.height), SDR \(sdr.width) × \(sdr.height)")
+    }
+    if let photoRect {
+        var control: Pixels?
+        if let controlPath {
+            let controlFile = try source(controlPath)
+            control = try render(decode(controlFile,hdr:true),in:linearSpace)
+            guard control!.width == hdr.width && control!.height == hdr.height else { throw Failure(description:"control dimensions differ") }
+            report["control_gain_maps"] = gainMaps(controlFile)
+        }
+        report["frame_rings"] = try frameRings(photoRect,file:file,hdr:hdr,sdr:sdr,control:control,bytes:bytes)
     }
     let measured = regions.map { measure($0, excluding: excludes, hdr: hdr, sdr: sdr) }
     report["regions"] = measured

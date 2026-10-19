@@ -300,7 +300,11 @@ std::vector<std::uint8_t> encode_gain_map_jpeg(const GainMapResult& images,
   auto base_bytes = make_base_jpeg(images.base_linear, metadata, quality, images.clamp_srgb);
   // A lower base quality should not also coarsen the gain, so the gain map
   // never drops below 90.
-  auto gain_bytes = make_gain_jpeg(images.gain_map, std::max(90, quality));
+  // With a frame the photo/mat step can ring several codes into the mat at
+  // quality 95. Unit DCT quantizers bound this independently of base quality;
+  // unframed exports retain their exact previous byte stream.
+  auto gain_bytes = make_gain_jpeg(images.gain_map,
+      images.presentation_frame ? 100 : std::max(90, quality));
 
   return assemble_gain_map_jpeg(base_bytes, gain_bytes, images.metadata);
 }

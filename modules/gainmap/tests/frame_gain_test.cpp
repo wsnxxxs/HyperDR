@@ -4,6 +4,7 @@
 // (zero stops of gain) and the photograph must keep its own headroom.
 
 #include "hyperdr/gainmap/reconstruct.hpp"
+#include "hyperdr/gainmap/coding.hpp"
 #include "hyperdr/gainmap/rendition.hpp"
 #include "hyperdr/image/color.hpp"
 #include "hyperdr/image/frame.hpp"
@@ -62,8 +63,26 @@ struct Packaged {
   unsigned channels{};
 };
 
-Packaged package(PhotoRenditions photo, GainMapWriterProfile profile) {
-  const auto result = gain_map_from_renditions(std::move(photo), profile);
+Packaged package(PhotoRenditions photo, GainMapWriterProfile profile, const FrameLayout* frame = nullptr) {
+  const auto result = gain_map_from_renditions(std::move(photo), profile, frame != nullptr);
+  if (frame) {
+    const auto& map = result.gain_map;
+    for (unsigned y = 0; y < map.height; ++y) for (unsigned x = 0; x < map.width; ++x) {
+      const auto px = x * frame->width / map.width, py = y * frame->height / map.height;
+      if (px >= frame->photo.x && px < frame->photo.x + frame->photo.width &&
+          py >= frame->photo.y && py < frame->photo.y + frame->photo.height) continue;
+      for (unsigned c = 0; c < map.channels; ++c) {
+        const auto metadata = gain_map_channel(result.metadata, c);
+        const double low = double(metadata.gain_min.numerator)/metadata.gain_min.denominator,
+                     high = double(metadata.gain_max.numerator)/metadata.gain_max.denominator;
+        const auto zero = std::lround(-low / std::max(1e-15, high-low) * 255);
+        const auto code = std::lround(map.at(x,y,c) * 255);
+        require(code == zero, "L0: every mat pixel must be the integer zero-gain code");
+        const auto decoded = low + (high-low) * std::pow(double(code)/255, 1.0/double(rational_value(metadata.gamma)));
+        require(std::abs(decoded) <= 1e-6, "L0: stored mat code must decode to zero stops");
+      }
+    }
+  }
   return {result.base_linear,
           reconstruct_gain_map(result.base_linear, result.gain_map, result.metadata,
                                result.headroom_stops, nullptr, result.clamp_srgb),
@@ -85,15 +104,23 @@ void as_authored(PhotoRenditions& photo) {
 }
 
 void check(const char* name, bool hdr_is_source, GainMapWriterProfile profile, bool authored = false,
-           bool coloured = false, unsigned channels = 1) {
+           bool coloured = false, unsigned channels = 1, bool negative = false, bool unequal_offsets = false) {
   const auto spec = parse_frame_spec(json::parse(R"({"background": "#F4F2EC", "margins": 0.08,
       "caption": 0.12, "shadow": {"opacity": 0.12, "blur": 0.02, "offset": 0.006}})"));
   auto photo = render_scene(coloured);
+  if (negative) {
+    for (unsigned y = 0; y < photo.hdr.height; ++y) for (unsigned x = 0; x < 20; ++x)
+      for (unsigned c = 0; c < 3; ++c) photo.hdr.at(x,y,c) = photo.sdr.at(x,y,c) * .71F;
+  }
   photo.hdr_is_source = hdr_is_source;
-  if (authored) as_authored(photo);
+  if (authored) { as_authored(photo); if (coloured) photo.authored_gain_channels = 3; }
+  if (unequal_offsets) {
+    photo.authored_gain_map.base_offset.fill(1.F/32);
+    photo.authored_gain_map.alternate_offset.fill(1.F/128);
+  }
   const auto layout = layout_frame(spec, photo.sdr.width, photo.sdr.height);
   const auto plain = package(photo, profile);
-  const auto frame = package(framed(photo, spec, layout), profile);
+  const auto frame = package(framed(photo, spec, layout), profile, &layout);
   const auto mat = frame_image(photo.sdr, spec, layout);
 
   float photo_peak = 1.0F, frame_peak = 1.0F, mat_error = 0.0F, photo_error = 0.0F;
@@ -123,7 +150,11 @@ void check(const char* name, bool hdr_is_source, GainMapWriterProfile profile, b
   require(photo_error < 0.015F, "the photograph must keep its HDR rendition");
   require(std::abs(frame_peak - photo_peak) / photo_peak < 0.01F,
           "the photograph must keep its peak");
-  require(std::abs(frame.headroom - plain.headroom) < 0.02F, "declared headroom must not change");
+  // Re-authoring unequal affine offsets changes the gain range needed for
+  // the same endpoint pixels. The peak check above still guards those pixels;
+  // the original equal-offset cases retain the exact headroom gate.
+  if (!unequal_offsets)
+    require(std::abs(frame.headroom - plain.headroom) < 0.02F, "declared headroom must not change");
   require(photo_peak > 4.0F, "the scene must actually use its headroom");
   require(plain.channels == channels && frame.channels == channels,
           "the gain map must be stored with the expected channel count");
@@ -133,12 +164,31 @@ void check(const char* name, bool hdr_is_source, GainMapWriterProfile profile, b
 
 int main() {
   try {
+    for (unsigned bits : {8U, 10U}) for (unsigned channels : {1U, 3U}) {
+      for (auto pair : {std::array<float,2>{-.73123F,2.39123F}, {-30.713F,.00001F},
+                        {-.00001F,30.713F}, {-15.93231F,31.33191F}}) {
+        Rational low=rational_from_float(pair[0]), high=rational_from_float(pair[1]);
+        const double before=double(low.numerator)/low.denominator, upper=double(high.numerator)/high.denominator;
+        align_zero_gain(low, high, bits);
+        const double a=double(low.numerator)/low.denominator, b=double(high.numerator)/high.denominator;
+        const auto maximum=(1U<<bits)-1;
+        const auto zero=std::lround(-a/(b-a)*maximum);
+        require(a<=before && b>=upper, "zero alignment must cover both original endpoints");
+        for(unsigned c=0;c<channels;++c)
+          require(std::abs(a+(b-a)*double(zero)/maximum)<=1e-6, "8/10-bit mono/RGB integer zero must decode exactly");
+      }
+    }
     check("adaptive", false, GainMapWriterProfile::apple_strict);
     check("iso rgb", false, GainMapWriterProfile::iso_generic);
     check("iso rgb colour", false, GainMapWriterProfile::iso_generic, false, true, 3);
     check("hdr source", true, GainMapWriterProfile::apple_strict);
     check("model adaptive", false, GainMapWriterProfile::apple_strict, true);
     check("model iso rgb", false, GainMapWriterProfile::iso_generic, true);
+    check("negative authored mono", false, GainMapWriterProfile::apple_strict, true, false, 1, true);
+    check("negative rgb", false, GainMapWriterProfile::iso_generic, false, true, 3, true);
+    check("negative external rgb", false, GainMapWriterProfile::iso_generic, true, true, 3, true);
+    check("unequal authored offsets", false, GainMapWriterProfile::apple_strict, true, false, 1, false, true);
+    check("unequal external rgb offsets", false, GainMapWriterProfile::iso_generic, true, true, 3, false, true);
   } catch (const std::exception& error) {
     std::cerr << "frame_gain_test failed: " << error.what() << '\n';
     return 1;

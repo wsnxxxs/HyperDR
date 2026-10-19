@@ -1,0 +1,50 @@
+{
+  "source_commit": "1195083c7b4641ee286a05dab17ad3512d824a93",
+  "source": "Frozen pre-E5 HyperDR, macOS 27 arm64; same quality-95 fixtures and photo rectangles as check_frame.py. Lead approved 2026-10-19: existing codec errors deferred to P3a-2.",
+  "max_mean_increase_stops": 0.0001,
+  "max_peak_increase_fraction": 0.0001,
+  "cases": {
+    "frame-gallery-sdr-adaptive8": {
+      "mean_abs_log2": 0.0273526946261,
+      "reference_peak": 1.76564824581,
+      "candidate_peak": 1.74503731728,
+      "peak_relative_error": 0.0116732921451
+    },
+    "frame-gallery-sdr-avif-hlg10": {
+      "mean_abs_log2": 0.0132123564058,
+      "reference_peak": 1.34767508507,
+      "candidate_peak": 1.33130073547,
+      "peak_relative_error": 0.0121500724927
+    },
+    "frame-gallery-hdr-heic-adaptive8": {
+      "mean_abs_log2": 0.0151279700173,
+      "reference_peak": 2.59909272194,
+      "candidate_peak": 2.56319999695,
+      "peak_relative_error": 0.013809713535
+    },
+    "frame-gallery-hdr-heic-avif-hlg10": {
+      "mean_abs_log2": 0.00793893087007,
+      "reference_peak": 2.64949822426,
+      "candidate_peak": 2.61637091637,
+      "peak_relative_error": 0.0125032383949
+    },
+    "frame-gallery-model-adaptive8": {
+      "mean_abs_log2": 0.0276503787432,
+      "reference_peak": 1.59667575359,
+      "candidate_peak": 1.57813346386,
+      "peak_relative_error": 0.0116130588576
+    },
+    "frame-saturated-v3-adaptive8": {
+      "mean_abs_log2": 0.0150795982791,
+      "reference_peak": 2.59909272194,
+      "candidate_peak": 2.63180088997,
+      "peak_relative_error": 0.0125844562426
+    },
+    "frame-gallery-v3-model-adaptive8": {
+      "mean_abs_log2": 0.027650668955,
+      "reference_peak": 1.59667575359,
+      "candidate_peak": 1.56744027138,
+      "peak_relative_error": 0.0183102190495
+    }
+  }
+}

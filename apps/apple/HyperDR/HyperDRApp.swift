@@ -2,14 +2,16 @@ import AppKit
 import SwiftUI
 
 @main struct HyperDRApp: App {
+    @NSApplicationDelegateAdaptor(HyperDRApplicationDelegate.self) private var applicationDelegate
     @State private var editor: EditorModel
 
     init() {
         let isTesting = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
             || ProcessInfo.processInfo.environment["XCTestBundlePath"] != nil
         if isTesting { NSApplication.shared.setActivationPolicy(.prohibited) } else { UndoMenuState.shared.install() }
-        _editor = State(initialValue: EditorModel(services: isTesting
-            ? FakeEditorServices() : LiveEditorServices()))
+        let editor = EditorModel(services: isTesting ? FakeEditorServices() : LiveEditorServices())
+        _editor = State(initialValue: editor)
+        applicationDelegate.editor = editor
     }
 
     var body: some Scene {

@@ -82,7 +82,7 @@ extension EditorModel {
               canvas.needsDetail, let visible = canvas.visibleSourceRect, let photo else { return }
         let ticket = detailTicket
         let region = DetailPolicy.region(visible: visible, source: canvas.transform.imageSize)
-        let options = edit.options()
+        let options = effectiveOptions()
         let wantsOriginal = isPeekingOriginal || viewMode != .edited
         let wantsEdited = !isPeekingOriginal && viewMode != .original
         let reference = referenceOptions ?? EditDefaults.reference(encoding: edit.encoding, workflow: options)

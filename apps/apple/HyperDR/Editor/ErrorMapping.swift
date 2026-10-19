@@ -5,7 +5,7 @@ extension UserFacingError {
     /// A service-layer error keeps its §3.6 code; the message is the
     /// developer-facing detail, never shown as the title.
     init(_ error: HyperDRError) {
-        self.init(code: error.code, detail: error.message)
+        self.init(code: error.code, detail: error.detail ?? error.message)
     }
 
     /// Any error from the services: typed errors keep their code, the rest are

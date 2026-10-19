@@ -1,0 +1,166 @@
+import Foundation
+import Observation
+
+/// Editor-facing values. Views do not depend on Kit's jobs or durable manifests.
+nonisolated enum EditingLockReason: String { case loading, restoring, computingAI, exporting }
+nonisolated enum DocumentStatus { case waiting, notExported, modifiedSinceExport, exportedNotSaved, saved }
+nonisolated enum ExportDestination: Equatable { case file(URL), folder(label: String) }
+nonisolated struct SavedLocation: Equatable, Sendable {
+    var fileName: String
+    var folderLabel: String
+    var url: URL? = nil
+}
+nonisolated struct ExportResult: Equatable, Sendable {
+    var export: String
+    var fileName: String
+    var byteCount: Int64
+    var pixelSize: PixelSize?
+    var headroomStops: Double? = nil
+    var selfVerified = false
+    var elapsed: Duration = .zero
+    var warnings: [String] = []
+    var saved: SavedLocation? = nil
+}
+nonisolated struct ExportVersion: Identifiable, Equatable, Sendable {
+    var id: String { result.export }
+    var number: Int
+    var createdAt: Date
+    var encodingID: String
+    var modelName: String? = nil
+    var fallbackNote: String? = nil
+    var hasFrame = false
+    var matchesCurrent = false
+    var result: ExportResult
+    var fileName: String { result.fileName }
+    var byteCount: Int64 { result.byteCount }
+    var pixelSize: PixelSize? { result.pixelSize }
+    var saved: SavedLocation? { result.saved }
+}
+nonisolated enum ExportSaveState: Equatable { case saving, saved(SavedLocation), expired, failed(UserFacingError) }
+
+nonisolated struct ExportHistoryItem: Sendable {
+    var version: ExportVersion
+    var key: String
+    var options: EditSnapshot
+    var timing: ExportTimingSample?
+}
+nonisolated struct EditorExportTicket: Sendable { var job: String; var argv: [String] }
+nonisolated enum EditorExportEvent: Sendable {
+    case progress(stage: String, fraction: Double, at: Date)
+    case log(String)
+    case finishing, saving
+    case finished(result: ExportResult?, failure: UserFacingError?)
+}
+nonisolated struct ExportEstimate: Equatable {
+    enum RemainingBucket: Equatable { case soon, seconds(Int), minutes(Int) }
+    var fraction: Double
+    var remaining: Duration?
+    var isOverdue: Bool
+    var remainingBucket: RemainingBucket? {
+        guard let remaining else { return nil }
+        let seconds = max(0, remaining.seconds)
+        if seconds < 5 { return .soon }
+        if seconds < 60 { return .seconds(Int((seconds / 5).rounded(.up)) * 5) }
+        return .minutes(Int((seconds / 60).rounded(.up)))
+    }
+}
+nonisolated struct ExportTimingClass: Equatable, Sendable {
+    var isRAW: Bool; var encoding: String; var isAI: Bool; var hasFrame: Bool; var verifies: Bool
+}
+nonisolated struct ExportTimingSample: Sendable {
+    var kind: ExportTimingClass
+    var pixels: Double
+    /// Seconds in decode, process, encode, verify order.
+    var stages: [Double]
+}
+/// No clock, observation or mutation: callers supply all inputs.
+nonisolated enum ExportETA {
+    static let stages = ["decode", "process", "encode", "verify"]
+    static func durations(history: [ExportTimingSample], kind: ExportTimingClass, pixels: Double) -> [Double]? {
+        let valid = history.filter { $0.pixels > 0 && $0.pixels.isFinite && $0.stages.count == 4
+            && $0.stages.allSatisfy { $0.isFinite && $0 >= 0 } }
+        let same = valid.filter { $0.kind == kind }
+        let samples = same.isEmpty ? valid : same
+        guard !samples.isEmpty, pixels > 0, pixels.isFinite else { return nil }
+        return (0..<4).map { stage in
+            let values = samples.map { $0.stages[stage] / $0.pixels }.sorted()
+            let n = values.count
+            let median = n.isMultiple(of: 2) ? (values[n/2-1] + values[n/2])/2 : values[n/2]
+            return stage == 3 && !kind.verifies ? 0 : median * pixels
+        }
+    }
+    static func estimate(at: Date, startedAt: Date, stageAt: Date, stage: String?, durations: [Double]?,
+                         fractionFloor: Double, saving: Bool = false, completed: Bool = false) -> ExportEstimate? {
+        if completed { return ExportEstimate(fraction: 1, remaining: .zero, isOverdue: false) }
+        if saving { return ExportEstimate(fraction: 0.99, remaining: nil, isOverdue: false) }
+        guard let durations else { return nil }
+        let index = stages.firstIndex(of: stage ?? "decode") ?? 0
+        let remaining = max(0, durations[index] - max(0, at.timeIntervalSince(stageAt)))
+            + durations.dropFirst(index + 1).reduce(0, +)
+        let elapsed = max(0, at.timeIntervalSince(startedAt))
+        let fraction = elapsed + remaining > 0 ? elapsed / (elapsed + remaining) : 0.99
+        return ExportEstimate(fraction: min(0.99, max(fractionFloor, fraction)),
+            remaining: .seconds(remaining), isOverdue: remaining <= 0)
+    }
+}
+nonisolated extension Duration {
+    var seconds: Double { Double(components.seconds) + Double(components.attoseconds) / 1e18 }
+}
+
+@MainActor @Observable final class ExportState {
+    enum Phase: Equatable { case idle, preparing, running, finishing, saving, succeeded, failed, cancelled }
+    var encodingID = "adaptive"
+    var outputGamut = "srgb"
+    var clampSrgb = false
+    var phase: Phase = .idle
+    var startedAt: Date?
+    var stage: String?
+    var fraction: Double?
+    var lastLine: String?
+    var failure: UserFacingError?
+    var saveFailure: UserFacingError?
+    var result: ExportResult?
+    var isResultStale = false
+    var blockerKey: String?
+    var commandLine: [String] = []
+    var destination: ExportDestination?
+    /// Every encoding id is present; a present optional nil means available.
+    var encodingAvailability: [String: String?] = [:]
+    var isStopping = false
+    @ObservationIgnored var stageAt: Date?
+    @ObservationIgnored var durations: [Double]?
+    @ObservationIgnored var fractionFloor = 0.0
+    var isInFlight: Bool { [.preparing, .running, .finishing, .saving].contains(phase) }
+    func estimate(at date: Date) -> ExportEstimate? {
+        guard isInFlight || phase == .succeeded, let startedAt else { return nil }
+        return ExportETA.estimate(at: date, startedAt: startedAt, stageAt: stageAt ?? startedAt,
+            stage: stage, durations: durations, fractionFloor: fractionFloor,
+            saving: phase == .saving || phase == .finishing, completed: phase == .succeeded)
+    }
+    func progress(stage newStage: String, fraction: Double, at date: Date) {
+        if newStage != stage {
+            fractionFloor = max(fractionFloor, estimate(at: date)?.fraction ?? 0)
+            stageAt = date; stage = newStage
+        }
+        self.fraction = fraction.isFinite && fraction > 0 ? min(1, fraction) : nil
+        phase = .running
+    }
+    func dismissOutcome() {
+        guard !isInFlight else { return }
+        phase = .idle; failure = nil; saveFailure = nil
+    }
+    func reset() {
+        phase = .idle; startedAt = nil; stage = nil; fraction = nil; lastLine = nil
+        failure = nil; saveFailure = nil; result = nil; isResultStale = false
+        destination = nil; isStopping = false; durations = nil; fractionFloor = 0; stageAt = nil
+    }
+}
+nonisolated struct PhotoSwitchRequest: Equatable {
+    enum Kind: Equatable { case open(URL), close }
+    var kind: Kind
+    var displayName: String
+}
+
+nonisolated enum PhotoSwitchPolicy: Equatable {
+    case allowed, unavailable(reasonKey: String), confirmStoppingExport
+}

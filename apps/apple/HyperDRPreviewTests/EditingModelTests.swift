@@ -18,7 +18,8 @@ import XCTest
         let model = EditorModel(services: services)
         let undo = UndoManager()
         model.attach(undoManager: undo)
-        XCTAssertTrue(model.isEditingLocked)
+        XCTAssertNil(model.editingLockReason)
+        XCTAssertFalse(model.isEditingLocked)
         model.open([url])
         await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
         XCTAssertFalse(model.isEditingLocked)
@@ -213,7 +214,7 @@ import XCTest
         model.setAIMode(.optimized)
         model.closeDocument()
         XCTAssertFalse(model.ai.isComputing)
-        XCTAssertTrue(model.isEditingLocked)
+        XCTAssertFalse(model.isEditingLocked)
         XCTAssertFalse(model.canUndo)
         XCTAssertEqual(model.ai.availability, .unavailable(reasonKey: "ai.unavailable.noPhoto"))
     }

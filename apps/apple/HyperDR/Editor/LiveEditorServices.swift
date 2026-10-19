@@ -3,6 +3,7 @@ import Foundation
 import HyperDREngine
 import HyperDRKit
 import UniformTypeIdentifiers
+import os
 
 /// The editor's service boundary backed by the native Kit.
 @MainActor final class LiveEditorServices: EditorServices {
@@ -443,4 +444,123 @@ private extension PreviewMetadata.Unadjusted {
         ["brightness": brightness, "hdrStrength": hdrStrength, "hdrRange": hdrRange,
          "areaCoverage": areaCoverage, "lutStrength": lutStrength]
     }
+}
+
+extension LiveEditorServices {
+    private func exportSession(_ photo: EditorPhoto) throws -> SessionID {
+        guard let record = records[photo.handle] else { throw UserFacingError(code: "session_expired") }
+        return record.session.id
+    }
+    func startExport(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?, destination: URL?) async throws -> EditorExportTicket {
+        let id = try exportSession(photo), kit = try await requireKit()
+        let ticket = try await kit.jobs.start(session: id, options: options, frame: frame, destination: destination)
+        return EditorExportTicket(job: ticket.job.rawValue, argv: ticket.argv)
+    }
+    func exportEvents(_ job: String) -> AsyncStream<EditorExportEvent> {
+        guard let kit else { return AsyncStream { $0.finish() } }
+        let events = kit.jobs.events(JobID(rawValue: job))
+        return AsyncStream { sink in
+            let task = Task {
+                for await event in events {
+                    guard !Task.isCancelled else { break }
+                    switch event {
+                    case .publishing: sink.yield(.finishing)
+                    case .saving: sink.yield(.saving)
+                    case .progress(let p): sink.yield(.progress(stage: p.phase, fraction: p.fraction, at: Date()))
+                    case .log(let text): sink.yield(.log(text))
+                    case .finished(let summary):
+                        var result = await Task.detached { summary.result.map { ExportHistoryItem($0).version.result } }.value
+                        if let saved = summary.saved {
+                            result?.saved = SavedLocation(fileName: saved.name, folderLabel: saved.folderLabel, url: saved.url)
+                        }
+                        sink.yield(.finished(result: result, failure: summary.failure.map(UserFacingError.init)))
+                    }
+                }
+                sink.finish()
+            }
+            sink.onTermination = { _ in task.cancel() }
+        }
+    }
+    func cancelAllExports() async { if let kit = try? await requireKit() { await kit.jobs.cancelAll() } }
+    func hasExportActivity() async -> Bool {
+        guard let kit = try? await requireKit() else { return false }
+        return await kit.jobs.activity != .idle
+    }
+    func commandLine(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?) async throws -> [String] {
+        let id = try exportSession(photo), kit = try await requireKit()
+        return try await kit.jobs.commandLine(session: id, options: options, frame: frame)
+    }
+    func exportKey(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?) async throws -> String {
+        let id = try exportSession(photo), kit = try await requireKit()
+        return try await kit.jobs.exportKey(session: id, options: options, frame: frame).rawValue
+    }
+    func exports(for photo: EditorPhoto) async throws -> [ExportHistoryItem] {
+        let id = try exportSession(photo), kit = try await requireKit()
+        // exports(for:) returns [] for an expired session; check it first.
+        _ = try await kit.sessions.session(id)
+        let records = await kit.sessions.exports(for: id)
+        return await Task.detached { records.map(ExportHistoryItem.init) }.value
+    }
+    func exportTimingHistory() async -> [ExportTimingSample] {
+        guard let kit = try? await requireKit() else { return [] }
+        let records = await kit.sessions.recentExports()
+        return await Task.detached { records.compactMap { ExportHistoryItem($0).timing } }.value
+    }
+    func suggestedFileName(_ photo: EditorPhoto, options: EditOptions) async throws -> String {
+        let id = try exportSession(photo), kit = try await requireKit()
+        return try await kit.jobs.suggestedFileName(session: id, options: options)
+    }
+    func validateDestination(_ url: URL, expectedExtension: String) async throws {
+        try await requireKit().exportTarget.validateDestination(url, expectedExtension: expectedExtension)
+    }
+    func saveExport(_ photo: EditorPhoto, export: String, destination: URL?) async throws -> SavedLocation {
+        let id = try exportSession(photo), kit = try await requireKit(), version = ExportID(rawValue: export)
+        let saved: SavedExport
+        if let destination { saved = try await kit.exportTarget.save(session: id, export: version, to: destination) }
+        else { saved = try await kit.exportTarget.save(session: id, export: version) }
+        do { try await kit.sessions.markSaved(id, export: version, saved: SavedMark(fileName: saved.name, folderLabel: saved.folderLabel)) }
+        catch { Logger(subsystem: "com.hyperdr.HyperDR", category: "Export").warning("Export saved but its history mark could not be persisted") }
+        return SavedLocation(fileName: saved.name, folderLabel: saved.folderLabel, url: saved.url)
+    }
+    func exportFolder() async -> ExportFolder {
+        guard let kit = try? await requireKit() else { return ExportFolder() }
+        let folder = await kit.exportTarget.folder
+        return ExportFolder(label: folder.label, ready: folder.ready)
+    }
+    func setExportFolder(_ url: URL) async throws -> ExportFolder {
+        let kit = try await requireKit()
+        _ = try await kit.exportTarget.setFolder(url)
+        return await exportFolder()
+    }
+    func encodingCapabilities() async throws -> EditorCapabilities {
+        let c = try await requireKit().capabilities
+        return EditorCapabilities(encodings: Dictionary(uniqueKeysWithValues: c.encodings.map { ($0.id, .init(available: $0.available, reason: $0.reason)) }),
+            main8: c.encoder?.main8 ?? false, main10: c.encoder?.main10 ?? false, encoderReason: c.encoder?.reason)
+    }
+    func exportFileURL(_ photo: EditorPhoto, export: String) async throws -> URL {
+        let session = try exportSession(photo)
+        return try await requireKit().sessions.resultURL(session, export: ExportID(rawValue: export))
+    }
+    func diagnostics() async -> String {
+        guard let kit = try? await requireKit() else { return "" }
+        return String(decoding: kit.capabilities.rawJSON, as: UTF8.self) + "\n" + ProcessInfo.processInfo.operatingSystemVersionString
+    }
+    private func item(_ entry: LUTEntry) -> LUTItem {
+        LUTItem(id: entry.id.rawValue, name: entry.name,
+            input: LUTColorSpace(rawValue: entry.input.rawValue) ?? .srgb,
+            output: LUTColorSpace(rawValue: entry.output.rawValue) ?? .srgb)
+    }
+    func lutEntries() async -> [LUTItem] {
+        guard let kit = try? await requireKit() else { return [] }
+        return await kit.luts.entries().map(item)
+    }
+    func importLUT(_ url: URL) async throws -> LUTItem { item(try await requireKit().luts.importLUT(url)) }
+    func applyLUT(_ id: String, to photo: EditorPhoto) async throws -> LUTItem {
+        let session = try exportSession(photo)
+        return item(try await requireKit().luts.apply(LUTID(rawValue: id), to: session))
+    }
+    func updateLUT(_ id: String, input: LUTColorSpace, output: LUTColorSpace) async throws -> LUTItem {
+        item(try await requireKit().luts.update(LUTID(rawValue: id), input: LUTSpace(rawValue: input.rawValue)!, output: LUTSpace(rawValue: output.rawValue)!))
+    }
+    func removeLUT(_ id: String) async throws { try await requireKit().luts.remove(LUTID(rawValue: id)) }
 }

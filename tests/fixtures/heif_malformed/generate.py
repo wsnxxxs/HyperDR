@@ -20,7 +20,9 @@ FTYP=box('ftyp',b'heic'+bytes(4)+b'mif1heic')
 ISPE=box('ispe',bytes(4)+u32(512)+u32(512))
 COLR=box('colr',b'nclx'+u16(1)+u16(13)+u16(1)+b'\x80')
 
-def make(*,types=('hvc1',),samples=None,properties=None,associations=None,refs=(),primary=1,drop=(),method=0,widths=(4,4,0,0),base=0,offset_delta=0,force_offsets=None,duplicate_ids=False,iloc_version=1,infe_version=2,ipma_version=0,wide=False,groups=()):
+def make(*,types=('hvc1',),samples=None,properties=None,associations=None,refs=(),primary=1,drop=(),method=0,widths=(4,4,0,0),base=0,offset_delta=0,force_offsets=None,duplicate_ids=False,iloc_version=1,infe_version=2,ipma_version=0,wide=False,groups=(),large_boxes=()):
+    def box(t,p):
+        return u32(1)+t.encode()+u64(len(p)+16)+p if t in large_boxes else globals()["box"](t,p)
     samples=list(samples or [SAMPLE for _ in types]);props=list(properties if properties is not None else [ISPE,box('hvcC',HVCC),COLR]);assoc=associations or [[1,130,3] for _ in types]
     ids=[1 if duplicate_ids else i+1 for i in range(len(types))]
     idsize=4 if infe_version==3 else 2;uid=lambda i:i.to_bytes(idsize,'big')
@@ -114,5 +116,20 @@ add('clap-outside',make(properties=[ISPE,box('hvcC',HVCC),box('clap',b''.join(u3
 add('valid-irot-max',make(properties=[ISPE,box('hvcC',HVCC),box('irot',b'\3')]),'ok')
 add('reserved-irap',make(samples=[SAMPLE[:4]+bytes([44])+SAMPLE[5:]]))
 add('duplicate-tmap-altr',make(types=('hvc1','hvc1','tmap'),samples=[SAMPLE,SAMPLE,valid_tmap],associations=[[1,130,3],[1,130,3],[]],refs=[('dimg',3,[1,2])],groups=[('altr',4,[3,1]),('altr',5,[3,1])]))
+# Review regressions: consumed metadata properties and 64-bit box headers.
+for essential in [False, True]:
+    add('tmap-'+('essential' if essential else 'optional')+'-unknown',
+        make(types=('hvc1','hvc1','tmap'),samples=[SAMPLE,SAMPLE,valid_tmap],
+             properties=[ISPE,box('hvcC',HVCC),COLR,box('zzzz',b'')],
+             associations=[[1,130,3],[1,130,3],[132 if essential else 4]],
+             refs=[('dimg',3,[1,2])],groups=[('altr',4,[3,1])]),
+        'unsupported_format' if essential else 'ok','essential_property' if essential else '')
+for large in [('meta',),('iref',),('iprp',),('ipma',),('altr',),('meta','iref','iprp','ipma','altr')]:
+    add('valid-largesize-'+'-'.join(large),
+        make(types=('hvc1','hvc1','tmap'),samples=[SAMPLE,SAMPLE,valid_tmap],
+             properties=[ISPE,box('hvcC',HVCC),COLR,box('auxC',bytes(4)+b'urn:iso:std:iso:ts:21496:-1\0')],
+             associations=[[1,130,3],[1,130,3,4],[]],
+             refs=[('dimg',3,[1,2]),('auxl',2,[1])],groups=[('altr',4,[3,1])],
+             large_boxes=large),'ok')
 (ROOT/'manifest.json').write_text(json.dumps(cases,indent=2)+'\n')
 print(f'Generated {len(cases)} deterministic specimens')

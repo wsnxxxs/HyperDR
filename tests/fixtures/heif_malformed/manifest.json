@@ -318,5 +318,45 @@
     "file": "duplicate-tmap-altr.heic",
     "code": "decode_failed",
     "feature": ""
+  },
+  {
+    "file": "tmap-optional-unknown.heic",
+    "code": "ok",
+    "feature": ""
+  },
+  {
+    "file": "tmap-essential-unknown.heic",
+    "code": "unsupported_format",
+    "feature": "essential_property"
+  },
+  {
+    "file": "valid-largesize-meta.heic",
+    "code": "ok",
+    "feature": ""
+  },
+  {
+    "file": "valid-largesize-iref.heic",
+    "code": "ok",
+    "feature": ""
+  },
+  {
+    "file": "valid-largesize-iprp.heic",
+    "code": "ok",
+    "feature": ""
+  },
+  {
+    "file": "valid-largesize-ipma.heic",
+    "code": "ok",
+    "feature": ""
+  },
+  {
+    "file": "valid-largesize-altr.heic",
+    "code": "ok",
+    "feature": ""
+  },
+  {
+    "file": "valid-largesize-meta-iref-iprp-ipma-altr.heic",
+    "code": "ok",
+    "feature": ""
   }
 ]

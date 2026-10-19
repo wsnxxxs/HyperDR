@@ -1,6 +1,6 @@
 # Deterministic HEIF robustness specimens
 
-CC0 synthetic data. Rebuild all 64 files and `manifest.json` with Python 3.10+:
+CC0 synthetic data. Rebuild all 72 files and `manifest.json` with Python 3.10+:
 
 ```sh
 python3 tests/fixtures/heif_malformed/generate.py
@@ -10,7 +10,9 @@ Every specimen is below 64 KiB. The manifest specifies the complete reader plus
 image/gain/alpha resolver's error code and optional machine-readable feature.
 `ok` entries are positive controls, including v2/v3 item IDs, wide ipma indices,
 idat, grid, iden→grid, both alpha URNs/premultiplication, legacy Apple gain maps,
-ordered transforms, and an unused item's unknown essential property.
+ordered transforms, an unused item's unknown essential property, optional tmap
+properties, and largesize meta/iref/iprp/ipma/altr boxes. A consumed tmap item
+with an unknown essential property must fail with `essential_property`.
 
 `heif_malformed_test` also sends every file through structural inspection, runs
 on a 512 KiB stack, and enforces one second per specimen. Resource-limit boundary

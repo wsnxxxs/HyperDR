@@ -212,6 +212,8 @@ import HyperDRDesign
         let color = english(UserFacingError(code: "export_dimension_limit", variant: "color"))
         XCTAssertTrue(jpeg.contains("HEIC or TIFF"), jpeg)
         XCTAssertTrue(color.contains("16-bit TIFF"), color)
+        let avif = english(UserFacingError(code: "export_dimension_limit", variant: "avif"))
+        XCTAssertTrue(avif.contains("AVIF") && avif.contains("HEIC or TIFF") && avif.contains("less margin"), avif)
         for code in ["export_failed", "convert_timeout", "export_dimension_limit", "export_memory_budget"] {
             XCTAssertTrue(ErrorText.isKnown(code), code)
         }

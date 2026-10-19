@@ -26,6 +26,17 @@ class ExportDimensionLimit : public std::runtime_error {
   ExportDimensionLimit(std::uint32_t width, std::uint32_t height)
       : std::runtime_error("JPEG " + std::to_string(width) + "x" + std::to_string(height) +
                            " exceeds per-side limit 65500") {}
+  // The canvas is more than libavif decodes: written, it could not be opened (or
+  // verified), so the export is refused before any pixel is encoded.
+  [[nodiscard]] static ExportDimensionLimit avif(std::uint32_t width, std::uint32_t height) {
+    return ExportDimensionLimit("AVIF " + std::to_string(width) + "x" + std::to_string(height) +
+                                " exceeds the decodable limit of " + std::to_string(kAvifDecodeMaxPixels) +
+                                " pixels (16384x16384) and " + std::to_string(kAvifDecodeMaxSide) +
+                                " per side");
+  }
+
+ private:
+  explicit ExportDimensionLimit(const std::string& message) : std::runtime_error(message) {}
 };
 
 

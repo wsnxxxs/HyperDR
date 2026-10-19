@@ -1149,6 +1149,35 @@ class EngineContract(unittest.TestCase):
                 self.assertEqual(cli_file["detail"], file["detail"])
                 self.assertFalse(list(destination.glob("*.jpg")))
 
+    def test_avif_canvas_beyond_the_decodable_limit_is_refused_before_encoding(self):
+        if not self.capabilities["codecs"]:
+            self.skipTest("requires codecs")
+        with tempfile.TemporaryDirectory(prefix="hyperdr-avif-limit-") as temporary:
+            root = Path(temporary)
+            source = root / "wide.png"
+            png(source, 32769, 2)
+            for encoding in ("avif-pq", "avif-hlg"):
+                destination = root / encoding
+                request = {"encoding": encoding, "command": {
+                    "input": str(source), "output": str(destination), "overwrite": True}}
+                report = json.loads(result(LIB.hyperdr_convert, self.engine, encoded(request),
+                    CALLBACK(), None, None))
+                file = report["files"][0]
+                self.assertFalse(file["success"])
+                self.assertEqual(file["error_code"], "export_dimension_limit")
+                self.assertIn("32769x2", file["detail"])
+                self.assertIn("268435456", file["detail"])
+                self.assertIn("32768", file["detail"])
+                self.assertFalse(list(destination.glob("*.avif")))
+                report_path = root / "report.json"
+                status = subprocess.run([CLI, "convert", str(source), "--output", str(destination),
+                    "--encoding", encoding, "--report", str(report_path)], capture_output=True)
+                self.assertNotEqual(status.returncode, 0)
+                cli_file = json.loads(report_path.read_bytes())["files"][0]
+                self.assertEqual(cli_file["error_code"], file["error_code"])
+                self.assertEqual(cli_file["detail"], file["detail"])
+                self.assertFalse(list(destination.glob("*.avif")))
+
     def test_canonical_ai_decimal_export_matches_cli(self):
         if not self.capabilities["codecs"] or not self.capabilities["models"]["runtimeAvailable"]:
             self.skipTest("requires codec-enabled build with native model runtime")

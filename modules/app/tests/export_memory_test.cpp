@@ -87,7 +87,7 @@ void avif_grid_estimates() {
   const auto below=estimate_export_memory(8000,8000,11000,11000,OutputEncoding::AvifPq,10,false);
   require(below.encode>=std::uint64_t(11000)*11000*66,"a single-item AVIF canvas lost its libaom planes");
   const auto above=estimate_export_memory(8000,8000,12000,12000,OutputEncoding::AvifPq,10,false);
-  require(above.encode<std::uint64_t(12000)*12000*30,"a gridded canvas kept the single-item price");
+  require(above.encode<std::uint64_t(12000)*12000*40,"a gridded canvas kept the single-item price");
   // Exports whose canvas is a grid fit a budget the single-item estimate would blow.
   require(above.peak()<8ULL<<30,"a 144 MP AVIF export should fit eight gigabytes as a grid");
 }
@@ -311,6 +311,38 @@ void external_grid_larger_than_photo() {
   }
   std::filesystem::remove_all(root);
 }
+// R7-402: libavif cannot open an AVIF past 16384x16384 pixels or 32768 a side,
+// so the export is refused before anything is encoded.
+void avif_canvas_limit() {
+  // The reported case: a 61 MP photo on a story card with wide margins.
+  const auto wide=parse_frame_spec(json::parse(
+      R"({"margins":{"top":0.25,"right":0.25,"bottom":0.25,"left":0.25},"caption":0.16,"aspect":{"width":9,"height":16,"topShare":0.42}})"));
+  const auto layout=layout_frame(wide,9504,6336);
+  require(std::uint64_t(layout.width)*layout.height>kAvifDecodeMaxPixels && !avif_canvas_decodable(layout.width,layout.height),
+          "the 285 MP story canvas should be past the AVIF limit");
+  const auto root=hyperdr::test::temporary_directory()/"avif-canvas-limit";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+  // One side past 32768 (4 MP of pixels).
+  FloatImage strip(32769,2,3);
+  std::fill(strip.pixels.begin(),strip.pixels.end(),.3F);
+  write_binary_file_atomic(root/"strip.tif",encode_sdr_tiff(strip,{}),true);
+  for(auto mode : {OutputEncoding::AvifPq,OutputEncoding::AvifHlg}) {
+    Engine engine({});
+    ConvertOptions options;
+    options.input=root/"strip.tif";options.output_directory=root/(mode==OutputEncoding::AvifPq?"pq":"hlg");
+    options.encoding=mode;
+    const auto report=json::parse(engine.convert(options));
+    const auto& file=only_file(report);
+    require(!file.find("success")->boolean() && file.find("error_code") &&
+            file.find("error_code")->string()=="export_dimension_limit","an over-wide AVIF canvas was not refused");
+    const auto& detail=file.find("detail")->string();
+    require(detail.find("32769x2")!=std::string::npos && detail.find("268435456")!=std::string::npos &&
+            detail.find("32768")!=std::string::npos,detail.c_str());
+    require(!std::filesystem::exists(path_from_utf8(file.find("output")->string())),"refused output exists");
+  }
+  std::filesystem::remove_all(root);
+}
 void admission() {
   constexpr auto limit=50ULL*1024*1024;
   const auto root=hyperdr::test::temporary_directory()/"export-memory";
@@ -354,6 +386,7 @@ int main() try {
   admission();
   external_admission();
   external_grid_larger_than_photo();
+  avif_canvas_limit();
 #endif
   std::cout<<"export_memory_test passed\n";
 } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}

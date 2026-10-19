@@ -91,7 +91,10 @@ ExportMemoryEstimate estimate_export_memory(std::uint32_t pw, std::uint32_t ph,
         // against 12.2 GB for one item. The verifying decode assembles the
         // cells into one set of planes beside the canvas.
         const auto cell=std::uint64_t(cells.cell_width)*cells.cell_height;
-        e.encode=sum({overhead,resident,plane(canvas,18),plane(cell,42)});
+        // A raster source has no sensor-sized working set standing for the graded
+        // photo: its HDR float and SDR base (24 B/px) stay beside the cells until
+        // the encoder returns (R7-401: 22-26 B/px of canvas measured on 133-231 MP).
+        e.encode=sum({overhead,resident,plane(canvas,18),plane(cell,42),plane(photo,raster ? 24 : 0)});
         e.verify=sum({overhead,resident,plane(canvas,18),plane(cell,20)});
       } else {
         // HDR float + RGB16 + YUV444 + libaom reference/work planes.

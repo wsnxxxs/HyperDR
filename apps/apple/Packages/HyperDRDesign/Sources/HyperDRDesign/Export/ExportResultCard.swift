@@ -18,7 +18,7 @@ public struct ExportFact {
 /// What the result card's last row says about saving.
 public enum ExportSaveRow {
     /// Saved: the place ("Saved to …/Pictures") and a way to show it.
-    case saved(Text, showInFinder: () -> Void)
+    case saved(Text, showInFinder: () -> Void, canShowInFinder: Bool = true)
     /// Being written to the chosen place.
     case saving
     /// Could not be written: what to tell the user, and Save As….
@@ -83,7 +83,7 @@ public struct ExportResultCard: View {
 
     @ViewBuilder private var saveView: some View {
         switch saveRow {
-        case .saved(let place, let showInFinder):
+        case .saved(let place, let showInFinder, let canShowInFinder):
             HStack {
                 InspectorNotice(place, style: .success)
                 Spacer(minLength: 0)
@@ -91,6 +91,7 @@ public struct ExportResultCard: View {
                     Label { Text("design.export.showInFinder", bundle: .module) } icon: { Image(systemName: "folder") }
                 }
                 .buttonStyle(CompactButtonStyle(kind: .link))
+                .disabled(!canShowInFinder)
             }
         case .saving:
             InspectorNotice(Text("design.export.saving", bundle: .module), style: .progress)

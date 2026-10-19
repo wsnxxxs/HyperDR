@@ -40,8 +40,25 @@ import HyperDRDesign
         var revealed = 0
         model.export.result = ExportResult(export: "v1", fileName: "a.heic", byteCount: 1, pixelSize: PixelSize(width: 1, height: 1),
             saved: SavedLocation(fileName: "a.heic", folderLabel: "…/Pictures", reveal: { revealed += 1 }))
+        XCTAssertTrue(ExportFlow.canShowInFinder(model: model, version: "v1"))
         ExportFlow.showInFinder(model: model, version: "v1")
         XCTAssertEqual(revealed, 1)
+        XCTAssertFalse(ExportFlow.canShowInFinder(model: model, version: "other"), "another version has no authority")
+    }
+
+    /// Without a reveal authority the button is off and nothing else finds the
+    /// file: the view layer never asks the model for a file URL.
+    func testWithoutARevealAuthorityShowInFinderIsOffAndNoFileURLIsFetched() async {
+        let (model, services) = await ready()
+        var lookups = 0
+        services.exportFileURLHandler = { lookups += 1; return URL(fileURLWithPath: "/tmp/internal-cache.heic") }
+        let saved = SavedLocation(fileName: "a.heic", folderLabel: "…/Pictures")
+        XCTAssertFalse(saved.canReveal)
+        model.export.result = ExportResult(export: "v1", fileName: "a.heic", byteCount: 1, pixelSize: PixelSize(width: 1, height: 1), saved: saved)
+        XCTAssertFalse(ExportFlow.canShowInFinder(model: model, version: "v1"))
+        ExportFlow.showInFinder(model: model, version: "v1")
+        try? await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(lookups, 0, "no silent fall-back to an internal file")
     }
 
     // MARK: Presentation

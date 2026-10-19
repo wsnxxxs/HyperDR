@@ -39,6 +39,7 @@ public struct ExportStatusCard: View {
     private let onDetails: () -> Void
     private let onSave: (() -> Void)?
     private let onShowInFinder: (() -> Void)?
+    private let canShowInFinder: Bool
     private let onDismiss: (() -> Void)?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -46,7 +47,7 @@ public struct ExportStatusCard: View {
     public init(kind: ExportStatusKind, fileName: String, statusLine: Text? = nil, percent: Double? = nil,
                 progress: ExportProgressStyle? = nil, emphasis: Bool = false, isStale: Bool = false, onStop: (() -> Void)? = nil,
                 onDetails: @escaping () -> Void, onSave: (() -> Void)? = nil,
-                onShowInFinder: (() -> Void)? = nil, onDismiss: (() -> Void)? = nil) {
+                onShowInFinder: (() -> Void)? = nil, canShowInFinder: Bool = true, onDismiss: (() -> Void)? = nil) {
         self.kind = kind
         self.fileName = fileName
         self.statusLine = statusLine
@@ -58,6 +59,7 @@ public struct ExportStatusCard: View {
         self.onDetails = onDetails
         self.onSave = onSave
         self.onShowInFinder = onShowInFinder
+        self.canShowInFinder = canShowInFinder
         self.onDismiss = onDismiss
     }
 
@@ -223,6 +225,7 @@ public struct ExportStatusCard: View {
                         Label { Text("design.export.showInFinder", bundle: .module) } icon: { Image(systemName: "folder") }
                     }
                     .buttonStyle(CompactButtonStyle(kind: .link))
+                    .disabled(!canShowInFinder)
                 }
             }
         }

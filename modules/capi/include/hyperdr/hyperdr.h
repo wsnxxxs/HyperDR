@@ -93,6 +93,9 @@ typedef struct hyperdr_frame {
  * memory_budget_bytes sizes decoded output and export estimates: a decode that
  * would exceed it is reduced. A single coded HEVC picture (one tile, or an
  * untiled image) is not bounded by it, only by the fixed raster geometry limit.
+ * capabilities.memoryBudgetBytes echoes this setting; effectiveMemoryBudgetBytes is
+ * the limit an export is checked against (the setting, or the host's memory less
+ * a 512 MiB reserve when it is 0; 0 means unknown and unlimited).
  * capabilities.encoder reports backend, main8/main10, state and reason.
  * HEVC failures use existing per-file error_code: hevc_unavailable,
  * hevc_main10_unavailable or hevc_probe_failed. A requested 10-bit export

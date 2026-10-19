@@ -158,6 +158,9 @@ private final class Events: @unchecked Sendable {
         let decoded = try JSONDecoder().decode(Capabilities.self, from: capabilities.rawJSON)
         #expect(decoded.buildFingerprint == capabilities.buildFingerprint)
         #expect(capabilities.rawJSON.last == 10)
+        // A default engine configures no budget but still reports the limit an export is checked against.
+        #expect(capabilities.memoryBudgetBytes == 0)
+        #expect(capabilities.effectiveMemoryBudgetBytes > 0)
         let probe = try await engine.probe(fixture.source)
         #expect(probe.width == 128 && probe.height == 96)
         #expect(probe.rawJSON == (try await cli(["probe", fixture.source.path, "--json"])))

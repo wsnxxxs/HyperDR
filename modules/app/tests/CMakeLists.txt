@@ -16,6 +16,12 @@ endif()
 
 if(HYPERDR_WITH_CODECS)
   hyperdr_add_test(frame_variant_export_test LINK HyperDR::app)
+  # R7-502: ImageIO reads the unframed Adaptive output back the way Photos does.
+  hyperdr_add_test(external_gain_hdr_test LINK HyperDR::app)
+  if(TARGET external_gain_hdr_test)
+    target_link_libraries(external_gain_hdr_test PRIVATE
+      "-framework ImageIO" "-framework CoreGraphics" "-framework CoreFoundation")
+  endif()
 endif()
 
 hyperdr_add_test(resource_snapshot_test LINK HyperDR::app)

@@ -660,14 +660,21 @@ void fit_gain_map_to_base(GainMapResult& result) {
       (gain.width <= base.width && gain.height <= base.height)) {
     return;
   }
-  const double scale = std::min(static_cast<double>(base.width) / gain.width,
-                                static_cast<double>(base.height) / gain.height);
-  const auto fit = [scale](std::uint32_t size, std::uint32_t limit) {
-    return std::clamp<std::uint32_t>(static_cast<std::uint32_t>(std::lround(size * scale)), 1, limit);
-  };
-  // The map is already in the stored code domain; resampling it there keeps the
-  // decoder's own half-pixel/bilinear semantics, as lift_external_gain_map does.
-  gain = resample_to(std::move(gain), fit(gain.width, base.width), fit(gain.height, base.height));
+  // Each axis is clamped to the base on its own: decoders stretch the map over
+  // the whole base along both axes separately, so its aspect ratio need not
+  // match the photograph's (a 300x64 grid on a square photo is legal), and an
+  // axis that already fits keeps all its resolution.
+  //
+  // The map is already in the stored code domain and is area-averaged there, the
+  // same domain in which decoders interpolate it when they stretch it up. With
+  // gamma == 1 the codes are linear in log2 gain, so the average is the
+  // geometric mean of the linear gain. With gamma != 1 the average is over the
+  // gamma-encoded values instead, which differs from averaging log2 gain but
+  // stays inside [0, 1] and matches the decoder's own interpolation. The
+  // metadata (gain_min/max, gamma, alternate headroom) stays valid: an average
+  // never leaves the range of the codes it came from.
+  gain = resample_to(std::move(gain), std::min(gain.width, base.width),
+                     std::min(gain.height, base.height));
 }
 
 }  // namespace hyperdr

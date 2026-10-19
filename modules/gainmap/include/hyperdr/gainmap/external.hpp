@@ -136,8 +136,10 @@ void apply_external_gain_map(GainMapResult& result, ExternalGainMap external,
 
 // Packaging step for an authored gain map beside its base. A gain map larger
 // than the base is not a legal container (the Apple reader and our verifier
-// reject it), so an external grid finer than the photograph is averaged down to
-// fit, keeping its aspect ratio. A map that already fits is left untouched, so
+// reject it), so an external grid finer than the photograph is area-averaged
+// down along each axis that exceeds it, to at most the photograph's size on
+// that axis (no aspect-preserving scale; an axis that fits keeps its size).
+// A map that already fits is left untouched, so
 // outputs that never needed this are unchanged. Not applied while rendering:
 // the rendered photograph and framed or ISO repackaging keep seeing the grid
 // as supplied.

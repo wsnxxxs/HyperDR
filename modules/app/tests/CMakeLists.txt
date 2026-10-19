@@ -16,9 +16,6 @@ endif()
 
 if(HYPERDR_WITH_CODECS)
   hyperdr_add_test(frame_variant_export_test LINK HyperDR::app)
-  if(TARGET frame_variant_export_test)
-    hyperdr_copy_libultrahdr(frame_variant_export_test)
-  endif()
 endif()
 
 hyperdr_add_test(resource_snapshot_test LINK HyperDR::app)

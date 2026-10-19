@@ -26,7 +26,7 @@ fi
 echo "Using vcpkg toolchain: $toolchain"
 cmake --preset macos-arm64-codecs -S "$repo" -B "$work" -DHYPERDR_BUILD_TESTS=OFF \
   -DCMAKE_TOOLCHAIN_FILE="$toolchain"
-cmake --build "$work" --target hyperdr_capi_static HyperDR uhdr-static
+cmake --build "$work" --target hyperdr_capi_static HyperDR
 rm -rf "$out/Runtime"
 mkdir -p "$out/headers" "$out/Runtime"
 cp "$repo/modules/capi/include/hyperdr/hyperdr.h" "$out/headers/"
@@ -45,9 +45,6 @@ for token in tokens:
         path = pathlib.Path(token)
         path = path if path.is_absolute() else work / path
         if path not in archives: archives.append(path)
-# libultrahdr supplies an explicitly combined static target even while the CLI
-# uses its shared target. This leaves only the transitional LGPL decoders dynamic.
-archives.append(work / '_deps/libuhdr-build/libuhdr.a')
 # CMake enables Release LTO. Materialize bitcode before packaging: Xcode's
 # xcframework scanner cannot infer an architecture from LLVM-only members.
 subprocess.run(['xcrun', 'ld', '-r', '-arch', 'arm64', '-platform_version', 'macos', '26.0', '26.0',
@@ -56,7 +53,7 @@ subprocess.run(['xcrun', 'libtool', '-static', '-o', str(out / 'libHyperDREngine
                 str(out / 'HyperDREngineCore.o')], check=True)
 # Stage the non-system dylib closure; preserve replaceability and use @rpath IDs.
 pending = [pathlib.Path(t) if pathlib.Path(t).is_absolute() else work / t
-           for t in tokens if t.endswith('.dylib') and 'libuhdr' not in t]
+           for t in tokens if t.endswith('.dylib')]
 seen = set()
 while pending:
     source = pending.pop().resolve()

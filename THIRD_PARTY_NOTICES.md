@@ -16,7 +16,6 @@ resolves the dependencies below through vcpkg or CMake `FetchContent`.
 | libpng | PNG input decoding | libpng-2.0 |
 | libtiff | TIFF input and output | libtiff license (BSD-style) |
 | zlib | TIFF Deflate compression and Adobe XMP look decoding | zlib license |
-| Google libultrahdr 1.4.0 | Ultra HDR JPEG/R reference codec | Apache-2.0 or MIT |
 | ncnn | Embedded native gain-map inference runtime | BSD-3-Clause |
 
 LibRaw is used under **CDDL-1.0**, without the optional GPL demosaic packs.
@@ -63,9 +62,7 @@ native release executable; its ncnn model bytes are embedded as aligned C++
 byte arrays on every platform.
 
 `libavif` and its libaom codec are build dependencies for the two AVIF output
-formats; they are not merely reference implementations. Google's libultrahdr
-distribution includes Adobe HDR Gain Map technology under
-the terms in its `adobe-hdr-gain-map-license` directory. The ISO 21496 metadata
+formats; they are not merely reference implementations. The ISO 21496 metadata
 field ordering in `modules/container/src/iso_gain_map.cpp` follows published standard syntax and was
 cross-checked against libavif; no third-party source code is copied into that
 implementation.

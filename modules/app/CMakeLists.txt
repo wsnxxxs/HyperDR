@@ -28,6 +28,5 @@ hyperdr_add_module(app
 add_executable(HyperDR src/main.cpp)
 target_link_libraries(HyperDR PRIVATE HyperDR::app)
 hyperdr_configure_target(HyperDR)
-hyperdr_copy_libultrahdr(HyperDR)
 
 add_subdirectory(tests)

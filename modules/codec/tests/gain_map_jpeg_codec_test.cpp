@@ -239,7 +239,7 @@ void zero_headroom() {
     float worst = 0;
     for (std::size_t i = 0; i < decoded.pixels.size(); ++i)
       worst = std::max(worst, std::abs(srgb_code(decoded.pixels[i]) - srgb_code(expected.pixels[i])));
-    require(worst <= 0.5F, "libultrahdr's HDR rendition differs from the SDR base");
+    require(worst <= 0.5F, "native HDR rendition differs from the SDR base");
 
     const auto reading = read_with_imageio(bytes);
     require(reading.has_gain, "ImageIO found no ISO gain map");
@@ -255,7 +255,7 @@ void zero_headroom() {
     require(worst <= 1.0F, "ImageIO's HDR rendition differs from the SDR base");
   }
   std::filesystem::remove_all(scratch);
-  std::cout << "zero-headroom gain-map JPEG reads as SDR in libultrahdr and ImageIO\n";
+  std::cout << "zero-headroom gain-map JPEG reads as SDR in the native decoder and ImageIO\n";
 }
 // Cancelling inside jpeg_finish_compress, where optimize_coding writes most of
 // the output, must release the growing output buffer exactly once. Under ASan
@@ -330,7 +330,7 @@ void reference(const std::filesystem::path& input, const std::filesystem::path& 
   verify_gain_map_jpeg(bytes);
   write_binary_file_atomic(root/"new.jpg",bytes,true);
   auto ours=decode_image(root/"new.jpg",{});
-  save_floats(root/"libuhdr.f32",ours.linear_p3);
+  save_floats(root/"native.f32",ours.linear_p3);
   std::cout << "reference headroom=" << p.headroom_stops << " render=" << p.stats.headroom_stops << '\n';
 }
 }

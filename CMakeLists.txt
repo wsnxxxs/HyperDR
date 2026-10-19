@@ -23,7 +23,7 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 # an accidental upward dependency fails to compile rather than merely being
 # impolite.
 
-option(HYPERDR_WITH_CODECS "Build LibRaw/libheif/libavif/libultrahdr support" ON)
+option(HYPERDR_WITH_CODECS "Build Apple and vcpkg image codec support" ON)
 option(HYPERDR_BUILD_TESTS "Build unit tests" ON)
 option(HYPERDR_ENABLE_AVX2 "Enable AVX2 code generation for Release builds" OFF)
 
@@ -34,7 +34,6 @@ endif()
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(HyperDRCompiler)
 include(HyperDRTesting)
-include(HyperDRCodecs)
 include(HyperDRModel)
 
 find_package(Threads REQUIRED)

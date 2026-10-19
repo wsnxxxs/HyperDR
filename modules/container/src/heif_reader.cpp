@@ -651,6 +651,14 @@ std::optional<TmapReferences> HeifFile::tmap_references() const {
   std::optional<TmapReferences> out;
   for (const auto& [id, item] : items)
     if (item.type == "tmap") {
+      // A metadata item is consumed too: its essential properties have the same
+      // contract as those on the base and gain images, without requiring ispe.
+      for (const auto association : item.properties) {
+        const auto& property = properties.at(association.index - 1);
+        if (association.essential && !known_properties.contains(property.type))
+          throw HeifReadError("unknown essential HEIF tmap property: " + property.type,
+                              "essential_property");
+      }
       auto refs = targets(id, "dimg");
       container::require_heif(refs.size() == 2, "tmap dimg must contain exactly [base, gain]");
       auto base = refs[0], gain = refs[1];

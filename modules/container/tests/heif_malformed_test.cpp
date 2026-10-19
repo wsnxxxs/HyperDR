@@ -23,7 +23,15 @@ void run() {
     const auto start = std::chrono::steady_clock::now();
     // Structural fragments take a separate inspect route from full-file reads.
     // Fuzz regression: an 8-byte iref must never form a reversed subspan.
-    (void)inspection_json(inspect_heif(specimen));
+    const auto inspection = inspect_heif(specimen);
+    (void)inspection_json(inspection);
+    if (name.starts_with("valid-largesize-") &&
+        (!inspection.structurally_valid || !inspection.has_tmap_metadata ||
+         !inspection.has_altr_group || !inspection.gain_map_has_auxl_reference ||
+         inspection.gain_map_auxiliary_type != "urn:iso:std:iso:ts:21496:-1"))
+      throw std::runtime_error(name + ": largesize inspection differs from reader");
+    if (name == "tmap-essential-unknown.heic" && inspection.structurally_valid)
+      throw std::runtime_error("inspection accepted essential tmap property");
     try {
       auto file = read_heif(specimen);
       auto image = file.resolve_image();

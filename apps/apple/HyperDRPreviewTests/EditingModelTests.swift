@@ -129,6 +129,20 @@ import XCTest
         XCTAssertEqual(model.control("hdrRange").range.upperBound, 3)
     }
 
+    func testTheRangeNoticeAlsoCoversTheModelsRange() async {
+        let (model, _, _) = await opened()
+        model.selectEncoding("pq")
+        model.adjust("hdrRange", to: 1)
+        model.edit.controls["aiHdrRange"] = 3.8
+        model.notice = nil
+        model.selectEncoding("hlg")
+        XCTAssertEqual(model.edit.controls["aiHdrRange"], 2.3)
+        XCTAssertEqual(model.notice, .rangeClamped(maxStops: 2.3), "only the model's range was lowered, and the notice still says so")
+        model.notice = nil
+        model.selectEncoding("pq")
+        XCTAssertNil(model.notice, "a higher ceiling lowers nothing")
+    }
+
     func testSourceIdentityStaysUnquantizedAndTracksFormatCeilings() async {
         let identity = ["brightness": 0.0, "hdrStrength": 1.0, "hdrRange": 3.80731]
         let (model, _, _) = await opened(domain: .hdr, identity: identity)

@@ -74,7 +74,7 @@ struct MainToolbar: ToolbarContent {
             // The disabled button says why, in the alert's own words.
             button.disabled(true).help(Text(ErrorText(failure).title))
         } else {
-            button.help("mac.help.open")
+            button.disabled(!model.allowsOpenCommand).help("mac.help.open")
         }
     }
 

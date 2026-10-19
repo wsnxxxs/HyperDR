@@ -297,4 +297,28 @@ import HyperDRDesign
         XCTAssertTrue(PhotoBadgeKind.hasHDR(domain: .sdr, gainWeight: 0))
         XCTAssertFalse(PhotoBadgeKind.hasHDR(domain: .sdr, gainWeight: nil))
     }
+
+    // MARK: Open commands
+
+    func testTheOpenCommandsFollowTheModelsOpenGate() async {
+        let services = FakeEditorServices(openDelay: .seconds(10))
+        let model = EditorModel(services: services)
+        XCTAssertTrue(model.allowsOpenCommand, "nothing open: Open… is available")
+        model.open([URL(fileURLWithPath: "/fixtures/loading.jpg")])
+        XCTAssertFalse(model.canOpenDocument)
+        XCTAssertFalse(model.allowsOpenCommand, "opening: the menu and toolbar commands are off")
+        // The programmatic route (Finder, drop) is not gated by the command rule (Q14).
+        model.open([URL(fileURLWithPath: "/fixtures/other.jpg")])
+        XCTAssertNotNil(model.document)
+        model.closeDocument()
+    }
+
+    func testOpenCommandsAreOnOnceThePhotoIsReady() async {
+        let services = FakeEditorServices(openDelay: .zero, previewDelay: .milliseconds(1))
+        let model = EditorModel(services: services)
+        model.open([URL(fileURLWithPath: "/fixtures/a.jpg")])
+        await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
+        XCTAssertTrue(model.allowsOpenCommand)
+        model.closeDocument()
+    }
 }

@@ -45,7 +45,7 @@ private struct OpenCommand: View {
     var body: some View {
         Button("mac.menu.open") { window?.isImporting = true }
             .keyboardShortcut("o")
-            .disabled(window == nil || model?.engine.failure != nil)
+            .disabled(window == nil || model?.allowsOpenCommand != true)
     }
 }
 

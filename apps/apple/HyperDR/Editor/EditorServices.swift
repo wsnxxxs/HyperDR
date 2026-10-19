@@ -168,6 +168,7 @@ extension UserDefaults {
     var folder = ExportFolder()
     var capabilityFixture: EditorCapabilities?
     var library: [LUTItem] = []
+    var lutEntriesHandler: (() async -> [LUTItem])?
     var importedLUT: LUTItem?
     var updateLUTHandler: ((String, LUTColorSpace, LUTColorSpace) async throws -> LUTItem)?
     private(set) var exportCalls: [(photo: EditorPhoto, options: EditOptions, frame: ExportFrame?, destination: URL?)] = []
@@ -418,7 +419,7 @@ extension FakeEditorServices {
     func encodingCapabilities() async throws -> EditorCapabilities {
         capabilityFixture ?? EditorCapabilities(encodings: Dictionary(uniqueKeysWithValues: Preferences.encodings.map { ($0, .init(available: true, reason: "")) }), main8: true, main10: true)
     }
-    func lutEntries() async -> [LUTItem] { library }
+    func lutEntries() async -> [LUTItem] { if let lutEntriesHandler { return await lutEntriesHandler() }; return library }
     func importLUT(_ url: URL) async throws -> LUTItem {
         guard let importedLUT else { throw UserFacingError(code: "lut_invalid") }
         if !library.contains(where: { $0.id == importedLUT.id }) { library.append(importedLUT) }

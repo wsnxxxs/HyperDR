@@ -87,7 +87,7 @@ import SwiftUI
         model.setLibraryLUTSpaces("b", input: .rec709, output: .p3)
         await eventually(timeout: .seconds(3)) { gate.requests.count == 2 }
         let firstA = gate.requests.first { $0.id == "a" }!, firstB = gate.requests.first { $0.id == "b" }!
-        model.mergeLUTLibrary(services.library)
+        model.mergeLUTLibrary(services.library, reading: model.lutLibraryReadVersions())
         XCTAssertEqual(model.lut.library[0].output, .rec709, "An async refresh cannot erase the pending choice")
         firstA.fail(); firstB.succeed()
         await eventually(timeout: .seconds(3)) { gate.requests.count == 3 }
@@ -97,6 +97,69 @@ import SwiftUI
         XCTAssertEqual(model.lut.library[1].input, .rec709); XCTAssertEqual(model.lut.library[1].output, .p3)
         XCTAssertEqual(model.lut.failures.first?.code, "lut_invalid")
         XCTAssertFalse(model.canUndo)
+    }
+
+    func testReviewerOlderLibraryRefreshCannotEraseCompletedSpaceChoice() async {
+        let (model, services, gate) = fixture()
+        let original = services.library
+        model.setLibraryLUTSpaces("a", input: .p3, output: .rec709)
+        await eventually(timeout: .seconds(3)) { gate.requests.count == 1 }
+        var read: CheckedContinuation<[LUTItem], Never>?
+        services.lutEntriesHandler = { await withCheckedContinuation { read = $0 } }
+        let refresh = Task { await model.loadExportServices() }
+        await eventually(timeout: .seconds(3)) { read != nil }
+        gate.requests[0].succeed()
+        await model.lutMetadataTask?.value
+        XCTAssertEqual(model.lut.library[0].input, .p3); XCTAssertEqual(model.lut.library[0].output, .rec709)
+        read?.resume(returning: original); read = nil
+        await refresh.value
+        XCTAssertEqual(model.lut.library[0].input, .p3, "A list read during the write cannot undo its completed input")
+        XCTAssertEqual(model.lut.library[0].output, .rec709, "A list read during the write cannot undo its completed output")
+        // A later read, started after the write, must still accept fresh metadata.
+        services.lutEntriesHandler = nil
+        services.library[0].input = .rec709; services.library[0].output = .p3
+        await model.loadExportServices()
+        XCTAssertEqual(model.lut.library[0].input, .rec709); XCTAssertEqual(model.lut.library[0].output, .p3)
+    }
+
+    func testRefreshStartedBeforeNewWriteCannotReplaceItsCompletedValues() async {
+        let (model, services, gate) = fixture()
+        let original = services.library
+        var read: CheckedContinuation<[LUTItem], Never>?
+        services.lutEntriesHandler = { await withCheckedContinuation { read = $0 } }
+        let refresh = Task { await model.loadExportServices() }
+        await eventually(timeout: .seconds(3)) { read != nil }
+        model.setLibraryLUTSpaces("a", input: .p3, output: .rec709)
+        await eventually(timeout: .seconds(3)) { gate.requests.count == 1 }
+        gate.requests[0].succeed()
+        await model.lutMetadataTask?.value
+        read?.resume(returning: original); read = nil
+        await refresh.value
+        XCTAssertEqual(model.lut.library[0].input, .p3); XCTAssertEqual(model.lut.library[0].output, .rec709)
+        XCTAssertEqual(model.lut.library[1], original[1], "An unrelated id still accepts the list result")
+    }
+
+    func testStaleRefreshCannotReplaceFailureRollbackWithOlderPersistedValues() async {
+        let (model, services, gate) = fixture()
+        let original = services.library
+        model.setLibraryLUTSpaces("a", input: .p3, output: .srgb)
+        await eventually(timeout: .seconds(3)) { gate.requests.count == 1 }
+        // Simulate a replica/list snapshot older than both enqueued writes.
+        var read: CheckedContinuation<[LUTItem], Never>?
+        services.lutEntriesHandler = { await withCheckedContinuation { read = $0 } }
+        let refresh = Task { await model.loadExportServices() }
+        await eventually(timeout: .seconds(3)) { read != nil }
+        model.setLibraryLUTSpaces("a", input: .p3, output: .rec709)
+        gate.requests[0].succeed()
+        await eventually(timeout: .seconds(3)) { gate.requests.count == 2 }
+        gate.requests[1].fail()
+        await model.lutMetadataTask?.value
+        XCTAssertEqual(model.lut.library[0].input, .p3); XCTAssertEqual(model.lut.library[0].output, .srgb)
+        read?.resume(returning: original); read = nil
+        await refresh.value
+        XCTAssertEqual(model.lut.library[0].input, .p3, "Late lists cannot erase the confirmed rollback base")
+        XCTAssertEqual(model.lut.library[0].output, .srgb)
+        XCTAssertEqual(model.lut.failures.first?.code, "lut_invalid")
     }
 
     func testSelectedSpacesAreUndoableAndLibraryOnlyChangesAreNot() async {

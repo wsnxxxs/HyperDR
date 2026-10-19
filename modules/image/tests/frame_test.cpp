@@ -244,7 +244,7 @@ void check_overlay_compositing() {
 void check_mask() {
   const auto spec = spec_from(R"({"margins": 0.5})");
   const auto layout = hyperdr::layout_frame(spec, 2, 2);
-  const auto mask = hyperdr::frame_mask({0, 1, 0, 1}, layout, 7);
+  const auto mask = hyperdr::frame_mask(std::array<std::uint8_t,4>{0, 1, 0, 1}, layout, 7);
   require(mask.size() == static_cast<std::size_t>(layout.width) * layout.height, "mask size");
   require(mask[0] == 7, "frame pixels take the frame value");
   const auto at = [&](std::uint32_t x, std::uint32_t y) { return mask[y * layout.width + x]; };

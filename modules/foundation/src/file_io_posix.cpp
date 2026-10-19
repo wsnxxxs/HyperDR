@@ -14,6 +14,7 @@
 #include <string>
 #include <system_error>
 #include <unistd.h>
+#include <sys/sysctl.h>
 
 #ifdef __linux__
 #include <linux/fs.h>
@@ -124,6 +125,12 @@ void write_bytes_atomic(const std::filesystem::path& path, const char* data,
 }
 
 }  // namespace detail
+
+std::uint64_t physical_memory_bytes() {
+  std::uint64_t bytes = 0;
+  std::size_t size = sizeof(bytes);
+  return sysctlbyname("hw.memsize", &bytes, &size, nullptr, 0) == 0 ? bytes : 0;
+}
 
 std::uint64_t available_memory_bytes() {
 #ifdef __APPLE__

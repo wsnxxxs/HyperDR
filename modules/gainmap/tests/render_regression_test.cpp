@@ -65,14 +65,15 @@ hyperdr::FloatImage synthetic_scene(std::uint32_t width, std::uint32_t height) {
   return image;
 }
 
-double mean_of(const std::vector<float>& values) {
+double mean_of(std::span<const float> values) {
   if (values.empty()) return 0.0;
   double sum = 0.0;
   for (const float value : values) sum += value;
   return sum / static_cast<double>(values.size());
 }
 
-float percentile_of(std::vector<float> values, double fraction) {
+float percentile_of(std::span<const float> samples, double fraction) {
+  std::vector<float> values(samples.begin(),samples.end());
   if (values.empty()) return 0.0F;
   const auto index = std::min(values.size() - 1,
                               static_cast<std::size_t>(fraction * (values.size() - 1)));

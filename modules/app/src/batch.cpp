@@ -1,4 +1,5 @@
 #include "hyperdr/app/batch.hpp"
+#include "hyperdr/app/export_memory.hpp"
 #include "encoder_capabilities.hpp"
 #include "hyperdr/app/analysis_cache.hpp"
 
@@ -34,6 +35,12 @@ namespace hyperdr {
 namespace {
 
 using Clock = std::chrono::steady_clock;
+class ExportMemoryLimit : public std::runtime_error {
+ public:
+  ExportMemoryLimit(std::uint64_t estimated, std::uint64_t budget)
+      : std::runtime_error("export requires an estimated " + std::to_string(estimated) +
+          " bytes; memory budget is " + std::to_string(budget) + " bytes") {}
+};
 
 double milliseconds(Clock::time_point begin, Clock::time_point end) {
   return std::chrono::duration<double, std::milli>(end - begin).count();
@@ -279,15 +286,21 @@ void prepare_frame_snapshot(ConvertOptions& options) {
   options.frame_snapshot = std::move(snapshot);
 }
 
-// Places the presentation frame around both renditions. Every frame pixel is
-// identical in SDR and HDR, so whichever writer packages the pair stores zero
-// gain there and the frame shows at its SDR value on every HDR display.
-FrameLayout frame_photo(PhotoRenditions& photo, const FrameSnapshot& snapshot) {
+// Compose only the rendition the writer needs. Gain-map output keeps the HDR
+// photograph behind a virtual canvas whose mat reads identical SDR pixels.
+FrameLayout frame_photo(PhotoRenditions& photo, const FrameSnapshot& snapshot, OutputEncoding encoding) {
   const auto& spec = snapshot.spec;
   const auto layout = layout_frame(spec, photo.sdr.width, photo.sdr.height);
   const FrameOverlay* ink = spec.overlay.empty() ? nullptr : &snapshot.overlay;
-  photo.sdr = frame_image(photo.sdr, spec, layout, ink);
-  if (!photo.hdr.pixels.empty()) photo.hdr = frame_image(photo.hdr, spec, layout, ink);
+  if (is_gain_map_encoding(encoding)) {
+    photo.sdr = frame_image(photo.sdr, spec, layout, ink);
+    photo.hdr_photo = layout.photo;
+  } else if (is_sdr_encoding(encoding)) {
+    photo.sdr = frame_image(photo.sdr, spec, layout, ink);
+  } else {
+    photo.sdr = {};
+    photo.hdr = frame_image(photo.hdr, spec, layout, ink);
+  }
   // A frame pixel is the same in both renditions, which is exactly what the
   // below-knee check asks of a pixel; the report then measures the frame too.
   photo.below_knee = frame_mask(photo.below_knee, layout, 1);
@@ -311,7 +324,7 @@ void adopt_as_authored(PhotoRenditions& photo, const GainMapMetadata& metadata) 
   }
 }
 
-std::vector<std::uint8_t> encode_for(const PhotoRenditions& photo, const GainMapResult& images,
+std::vector<std::uint8_t> encode_for(const PhotoRenditions& photo, GainMapResult& images,
                                      const PhotoMetadata& metadata,
                                      const ConvertOptions& options) {
   switch (options.encoding) {
@@ -323,7 +336,7 @@ std::vector<std::uint8_t> encode_for(const PhotoRenditions& photo, const GainMap
       return encode_adaptive_heic(images, metadata, options.quality, options.depth,
                                   options.hevc_preset);
     case HdrEncoding::IsoGainMapJpeg:
-      return encode_gain_map_jpeg(images, metadata, options.quality);
+      return encode_gain_map_jpeg(std::move(images), metadata, options.quality);
     case HdrEncoding::AvifPq:
     case HdrEncoding::AvifHlg:
       return encode_avif(photo, metadata, options.quality, options.encoding);
@@ -375,6 +388,20 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
       throw std::invalid_argument(
           "--ai-model and --external-gain require SDR or RAW input; HDR and dual-rendition photos already contain authored HDR");
     }
+    const auto pw = staged.image.linear_p3.width, ph = staged.image.linear_p3.height;
+    const auto layout = options.frame ? layout_frame(*options.frame, pw, ph) : FrameLayout{};
+    const auto estimate = estimate_export_memory(pw, ph, options.frame ? layout.width : pw,
+        options.frame ? layout.height : ph, options.encoding, options.depth,
+        staged.image.decode.raw.has_value(), staged.image.decode.sensor_width,
+        staged.image.decode.sensor_height, current_execution_config.heic_tile_workers,
+        staged.image.authored_sdr.has_value() || !options.ai_model_path.empty() ||
+        !options.external_gain_path.empty() ||
+        (options.color_lut.snapshot && options.color_lut.strength > 0),
+        export_resource_bytes(options));
+    const auto physical = physical_memory_bytes();
+    const auto budget = export_memory_budget(current_execution_config.memory_budget_bytes, physical);
+    if ((physical || current_execution_config.memory_budget_bytes) && estimate.peak() > budget)
+      throw ExportMemoryLimit(estimate.peak(), budget);
     std::optional<ExternalGainMap> external;
     if (!options.external_gain_path.empty()) {
       // Parse per file so an invalid grid stays a per-file failure, as before.
@@ -429,16 +456,23 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     } else {
       photo = render_graded_gain_map(gain, options.color_lut, target == RenderTarget::Hdr);
     }
+    // All rendering/model/external consumers are finished. Preserve the domain
+    // before releasing authored SDR (describe_input carries a borrowed pointer).
+    const auto described = staged.image.describe_input();
+    staged.image.linear_p3 = {};
+    staged.image.authored_sdr.reset();
     const bool predicted_gain = !options.ai_model_path.empty() || external.has_value();
     if (options.frame) {
       if (predicted_gain && target == RenderTarget::Hdr) adopt_as_authored(photo, gain.metadata);
-      result.frame = frame_photo(photo, *options.frame_snapshot);
+      result.frame = frame_photo(photo, *options.frame_snapshot, options.encoding);
     }
     if (is_sdr_encoding(options.encoding) && resolved_sdr_gamut(options) == ColorGamut::kSrgb)
       fit_sdr_to_srgb(photo.sdr);
     const bool explicit_gain = is_gain_map_encoding(options.encoding);
     if (predicted_gain && options.encoding == OutputEncoding::IsoGainMapJpeg)
       adopt_as_authored(photo, gain.metadata);
+    if (!explicit_gain || !predicted_gain || result.frame || options.encoding == OutputEncoding::IsoGainMapJpeg)
+      gain = {};
     if (explicit_gain) {
       if (!predicted_gain || result.frame || options.encoding == OutputEncoding::IsoGainMapJpeg) {
         gain = gain_map_from_renditions(std::move(photo),
@@ -471,7 +505,6 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     result.decode_degraded = staged.image.decode.degraded;
     result.decode_degradation_reasons =
         staged.image.decode.degradation_reasons;
-    const auto described = staged.image.describe_input();
     result.input_domain = described.domain;
     result.input_headroom = described.headroom;
     result.input_content_peak_nits = described.content_peak_nits;
@@ -479,17 +512,13 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
                                    ? "none"
                                    : native_model_development_kind(
                                          described.domain);
-    result.width = rendered_base.width;
-    result.height = rendered_base.height;
+    result.width = result.frame ? result.frame->width : rendered_base.width;
+    result.height = result.frame ? result.frame->height : rendered_base.height;
     result.exposure_ev = rendered_stats.exposure_ev;
     result.headroom_stops = explicit_gain ? gain.headroom_stops : photo.stats.headroom_stops;
     result.stats = rendered_stats;
     result.gain_min = explicit_gain ? rational_value(gain.metadata.gain_min) : 0;
     result.gain_max = explicit_gain ? rational_value(gain.metadata.gain_max) : 0;
-    // Rendering is complete; release both decoded planes before the encoder
-    // allocates its own base, gain map, and output buffer.
-    staged.image.linear_p3 = {};
-    staged.image.authored_sdr.reset();
     const auto processed = Clock::now();
 
     check_cancelled();
@@ -533,6 +562,10 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     write_resume_state(result.output, result.input, staged.input_stamp, options, fingerprint);
   } catch (const Cancelled&) {
     throw;
+  } catch (const ExportMemoryLimit& e) {
+    result.success = false;
+    result.error_code = "export_memory_budget";
+    result.detail = result.message = e.what();
   } catch (const ExportDimensionLimit& e) {
     result.success = false;
     result.error_code = "export_dimension_limit";

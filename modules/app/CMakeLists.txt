@@ -8,6 +8,7 @@ hyperdr_add_module(app
     src/engine_model.cpp
     src/edit_options.cpp
     src/batch.cpp
+    src/export_memory.cpp
     src/cli.cpp
     src/cli_preview.cpp
     src/cli_model.cpp

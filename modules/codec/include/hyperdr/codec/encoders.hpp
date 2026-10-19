@@ -37,6 +37,9 @@ class ExportDimensionLimit : public std::runtime_error {
 // SDR Display P3 primary plus an ISO 21496-1 gain map. No XMP metadata.
 [[nodiscard]] std::vector<std::uint8_t> encode_gain_map_jpeg(
     const GainMapResult& images, const PhotoMetadata& metadata, int quality);
+// Owned export path releases float gain codes before allocating JPEG working planes.
+[[nodiscard]] std::vector<std::uint8_t> encode_gain_map_jpeg(
+    GainMapResult&& images, const PhotoMetadata& metadata, int quality);
 
 [[nodiscard]] std::vector<std::uint8_t> encode_sdr_jpeg(
     const FloatImage& image, const PhotoMetadata& metadata, int quality,

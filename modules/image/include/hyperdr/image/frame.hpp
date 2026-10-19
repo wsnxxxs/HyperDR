@@ -19,6 +19,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <span>
 
 namespace hyperdr {
 
@@ -118,7 +119,7 @@ struct FrameOverlay {
 
 // A per-pixel byte mask of the photo, placed the same way, with `frame_value`
 // in every frame pixel. An empty mask stays empty.
-[[nodiscard]] std::vector<std::uint8_t> frame_mask(const std::vector<std::uint8_t>& mask,
+[[nodiscard]] BytePlane frame_mask(std::span<const std::uint8_t> mask,
     const FrameLayout& layout, std::uint8_t frame_value);
 
 }  // namespace hyperdr

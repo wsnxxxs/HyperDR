@@ -121,6 +121,27 @@ void check(const char* name, bool hdr_is_source, GainMapWriterProfile profile, b
   const auto layout = layout_frame(spec, photo.sdr.width, photo.sdr.height);
   const auto plain = package(photo, profile);
   const auto frame = package(framed(photo, spec, layout), profile, &layout);
+  auto virtual_photo = photo;
+  virtual_photo.sdr = frame_image(photo.sdr, spec, layout);
+  virtual_photo.hdr_photo = layout.photo;
+  virtual_photo.below_knee = frame_mask(photo.below_knee, layout, 1);
+  const auto full = gain_map_from_renditions(framed(photo, spec, layout), profile, true);
+  const auto view = gain_map_from_renditions(std::move(virtual_photo), profile, true);
+  require(full.base_linear.pixels == view.base_linear.pixels &&
+          full.gain_map.width == view.gain_map.width && full.gain_map.height == view.gain_map.height &&
+          full.gain_map.channels == view.gain_map.channels && full.gain_map.pixels == view.gain_map.pixels,
+          "virtual HDR canvas must preserve every E5 base/gain sample");
+  require(serialize_tmap_payload(full.metadata) == serialize_tmap_payload(view.metadata),
+          "virtual HDR canvas must preserve E5 metadata");
+  auto stats = view.stats;
+  const auto reconstructed = reconstruct_gain_map(view.base_linear, view.gain_map,
+      view.metadata, view.headroom_stops, nullptr, view.clamp_srgb);
+  auto mask = frame_mask(photo.below_knee, layout, 1);
+  measure_rendition_stats(stats, view.base_linear, reconstructed, mask);
+  require(stats.rendered_peak == view.stats.rendered_peak &&
+          stats.headroom_utilization == view.stats.headroom_utilization &&
+          stats.below_knee_relative_difference_max == view.stats.below_knee_relative_difference_max,
+          "streaming statistics must equal full HDR reconstruction exactly");
   const auto mat = frame_image(photo.sdr, spec, layout);
 
   float photo_peak = 1.0F, frame_peak = 1.0F, mat_error = 0.0F, photo_error = 0.0F;

@@ -61,5 +61,6 @@ using PathKey = std::filesystem::path::string_type;
 
 // Bytes of physical memory currently available, or 0 if the platform cannot report it.
 [[nodiscard]] std::uint64_t available_memory_bytes();
+[[nodiscard]] std::uint64_t physical_memory_bytes();
 
 }  // namespace hyperdr

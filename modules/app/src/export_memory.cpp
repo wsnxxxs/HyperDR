@@ -1,0 +1,95 @@
+#include "hyperdr/app/export_memory.hpp"
+#include <limits>
+#include <thread>
+
+namespace hyperdr {
+namespace {
+constexpr std::uint64_t MiB = 1024 * 1024;
+std::uint64_t sum(std::initializer_list<std::uint64_t> parts) {
+  std::uint64_t total = 0;
+  for (auto part : parts) {
+    if (part > std::numeric_limits<std::uint64_t>::max() - total)
+      return std::numeric_limits<std::uint64_t>::max();
+    total += part;
+  }
+  return total;
+}
+std::uint64_t plane(std::uint64_t pixels, std::uint64_t bytes) {
+  return pixels > std::numeric_limits<std::uint64_t>::max() / bytes
+      ? std::numeric_limits<std::uint64_t>::max() : pixels * bytes;
+}
+}
+ExportMemoryEstimate estimate_export_memory(std::uint32_t pw, std::uint32_t ph,
+    std::uint32_t cw, std::uint32_t ch, OutputEncoding encoding, int depth,
+    bool raw, std::uint32_t sw, std::uint32_t sh, unsigned workers, bool retained_renditions, std::uint64_t retained_resource_bytes) {
+  const auto photo = std::uint64_t(pw) * ph, canvas = std::uint64_t(cw) * ch;
+  const auto sensor = sw && sh ? std::uint64_t(sw) * sh : photo;
+  const bool sdr = is_sdr_encoding(encoding), gain = is_gain_map_encoding(encoding);
+  const bool framed = cw != pw || ch != ph;
+  // Includes the RAW renderer's 150 MiB floor plus process/framework caches
+  // observed across repeated exports (malloc's cache varies with host pressure).
+  const auto overhead = raw ? 192 * MiB : 32 * MiB;
+  // CIRAW keeps a GPU working set as well as the decoded float plane; its
+  // block renderer adds one 512-row RGBA block. Raster decode uses 15 B/px.
+  const auto resident = raw ? plane(sensor,16) : 0;
+  ExportMemoryEstimate e;
+  e.decode = raw ? sum({overhead,resident,plane(photo,12),plane(std::uint64_t(pw)*512,16)})
+                 : sum({overhead,plane(photo,15)});
+  // Imported dual renditions, LUT working renditions and model/external grids retain additional
+  // bases, HDR samples and RGB gain planes while grading reconstructs a pair.
+  const auto render_planes=retained_renditions ? 80 : (sdr ? 24 : 44);
+  e.render = sum({overhead,resident,plane(photo,render_planes)});
+  e.composite = sum({overhead,resident,plane(photo,sdr ? 12 : 24),plane(canvas,13)});
+  // ISO expansion overlaps SDR + RGB gain canvases, byte ROI codes, and a
+  // byte mask. Apple packaging overlaps SDR + mono stops/quantization + mask.
+  e.packaging = gain ? (encoding == OutputEncoding::IsoGainMapJpeg
+      ? sum({overhead,resident,plane(photo,3),plane(canvas,25)})
+      : sum({overhead,resident,plane(photo,12),plane(canvas,21)})) : 0;
+  const auto auto_workers=std::clamp(std::thread::hardware_concurrency()/4U,1U,4U);
+  const auto tile_count=((std::uint64_t(cw)+511)/512)*((std::uint64_t(ch)+511)/512);
+  const auto count=std::min<std::uint64_t>(workers ? workers : auto_workers,tile_count);
+  // Bounded converted YUV batch (one tile/worker), VT IOSurfaces/in-flight
+  // frames, and accumulated compressed samples/container copies.
+  const bool main10=depth==10 || encoding==OutputEncoding::Pq || encoding==OutputEncoding::Hlg;
+  const auto vt=sum({plane(count*512*512,main10 ? 3 : 2),32*MiB,plane(canvas,4)});
+  switch (encoding) {
+    case OutputEncoding::IsoGainMapJpeg:
+      e.encode=sum({overhead,resident,plane(canvas,27)});
+      e.verify=sum({overhead,resident,plane(canvas,16)}); break;
+    case OutputEncoding::Adaptive:
+      e.encode=sum({overhead,resident,plane(canvas,16),vt});
+      e.verify=sum({overhead,resident,plane(canvas,depth==10 ? 22 : 16)}); break;
+    case OutputEncoding::Pq: case OutputEncoding::Hlg:
+      e.encode=sum({overhead,resident,plane(canvas,12),vt});
+      e.verify=sum({overhead,resident,plane(canvas,22)}); break;
+    case OutputEncoding::AvifPq: case OutputEncoding::AvifHlg:
+      // HDR float + RGB16 + YUV444 + libaom reference/work planes.
+      e.encode=sum({overhead,resident,plane(canvas,66)});
+      e.verify=sum({overhead,resident,plane(canvas,20)}); break;
+    case OutputEncoding::SdrJpeg: case OutputEncoding::SdrTiff:
+      e.encode=sum({overhead,resident,plane(canvas,20)});
+      e.verify=sum({overhead,resident,plane(canvas,16)}); break;
+  }
+  if (!framed) e.composite=0;
+  for(auto* stage : {&e.decode,&e.render,&e.composite,&e.packaging,&e.encode,&e.verify})
+    *stage=sum({*stage,retained_resource_bytes});
+  return e;
+}
+std::uint64_t export_resource_bytes(const ConvertOptions& options) {
+  std::uint64_t retained=0;
+  if(const auto& frame=options.frame_snapshot) retained=sum({retained,
+      frame->specification_bytes.capacity(),frame->overlay_bytes.capacity(),
+      plane(frame->overlay.rgba.capacity(),sizeof(float))});
+  if(const auto& lut=options.color_lut.snapshot) retained=sum({retained,lut->bytes.capacity(),
+      plane(lut->lut.values.capacity(),sizeof(std::array<float,3>))});
+  if(const auto& external=options.external_gain_snapshot) retained=sum({retained,
+      external->gain_bytes.capacity(),external->report_bytes.capacity()});
+  return retained;
+}
+std::uint64_t export_memory_budget(std::uint64_t configured, std::uint64_t physical) noexcept {
+  constexpr auto reserve=512*MiB;
+  if (!physical) return configured;
+  const auto host=physical>reserve ? physical-reserve : 0;
+  return configured ? std::min(configured,host) : host;
+}
+}  // namespace hyperdr

@@ -24,7 +24,7 @@ void test_model_grading() {
   for(bool rgb:{false,true}) {
     auto model=original;
     model.gain_map=FloatImage(2,1,rgb?3:1);
-    model.gain_map.pixels=rgb ? std::vector<float>{0,.5F,1,1,.5F,0} : std::vector<float>{0,1};
+    model.gain_map.pixels=rgb ? FloatPlane{0,.5F,1,1,.5F,0} : FloatPlane{0,1};
     if(rgb) {
       model.metadata.flags|=0x80;
       model.metadata.channels={

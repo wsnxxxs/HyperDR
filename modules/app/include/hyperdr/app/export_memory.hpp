@@ -1,0 +1,29 @@
+#pragma once
+
+#include "hyperdr/app/settings.hpp"
+#include <algorithm>
+#include <cstdint>
+
+namespace hyperdr {
+// Peak footprint of each successive stage, not the sum of all stages. HEIC
+// verification still includes libheif's full RGB/YUV decode; remeasure this
+// stage when P3b replaces it with tile-wise VideoToolbox decoding.
+struct ExportMemoryEstimate {
+  std::uint64_t decode{}, render{}, composite{}, packaging{}, encode{}, verify{};
+  [[nodiscard]] std::uint64_t peak() const noexcept {
+    return std::max({decode, render, composite, packaging, encode, verify});
+  }
+};
+[[nodiscard]] ExportMemoryEstimate estimate_export_memory(
+    std::uint32_t photo_width, std::uint32_t photo_height,
+    std::uint32_t canvas_width, std::uint32_t canvas_height,
+    OutputEncoding encoding, int depth, bool raw,
+    std::uint32_t sensor_width = 0, std::uint32_t sensor_height = 0,
+    unsigned tile_workers = 0, bool retained_renditions = false,
+    std::uint64_t retained_resource_bytes = 0);
+[[nodiscard]] std::uint64_t export_resource_bytes(const ConvertOptions& options);
+// Zero means that the host could not report its physical memory. A configured
+// limit still applies in that case. The system reserve matches RAW's 512 MiB.
+[[nodiscard]] std::uint64_t export_memory_budget(std::uint64_t configured,
+                                                std::uint64_t physical) noexcept;
+}  // namespace hyperdr

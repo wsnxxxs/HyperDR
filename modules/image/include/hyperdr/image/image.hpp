@@ -5,6 +5,7 @@
 // single-channel gain map and a three-channel base image share one container.
 
 #include "hyperdr/foundation/cancel.hpp"
+#include "hyperdr/foundation/plane_allocator.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -27,7 +28,7 @@ struct FloatImage {
   std::uint32_t width{};
   std::uint32_t height{};
   std::uint32_t channels{};
-  std::vector<float> pixels;
+  FloatPlane pixels;
 
   FloatImage() = default;
   FloatImage(std::uint32_t w, std::uint32_t h, std::uint32_t c)

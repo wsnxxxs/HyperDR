@@ -33,7 +33,9 @@ struct ExportHistorySheet: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text("history.title").font(Font.hdr.title).foregroundStyle(Color.hdr.inkStrong)
-            Text("\(model.document?.name ?? "") · \(AppStrings.format("history.versions %@", locale: locale, model.exportVersions.count.formatted(.number.locale(locale))))")
+            // No "0 versions": an empty record is told by the empty state below.
+            Text(model.exportVersions.isEmpty ? (model.document?.name ?? "")
+                 : "\(model.document?.name ?? "") · \(AppStrings.format("history.versions %@", locale: locale, model.exportVersions.count.formatted(.number.locale(locale))))")
                 .font(Font.hdr.caption).foregroundStyle(Color.hdr.inkMuted)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

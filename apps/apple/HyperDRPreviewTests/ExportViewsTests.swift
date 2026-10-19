@@ -203,6 +203,14 @@ import HyperDRDesign
         XCTAssertTrue(model.export.isInFlight)
     }
 
+    func testASaveFailureIsWordedByTheWayOfSavingNotByTheErrorCode() {
+        let failure = UserFacingError(code: "export_folder_unwritable")
+        XCTAssertTrue(ExportPresentation.saveFailureSentence(failure, mode: .ask, locale: en).hasPrefix("Not saved: HyperDR can’t write to the chosen place"))
+        XCTAssertTrue(ExportPresentation.saveFailureSentence(failure, mode: .folder, locale: en).contains("chosen folder"))
+        XCTAssertTrue(ExportPresentation.saveFailureSentence(UserFacingError(code: "session_expired"), mode: .ask, locale: en)
+            != AppStrings.string("export.save.failed", locale: en))
+    }
+
     func testASavePanelAnsweredAfterThePhotoChangedStartsNothing() async {
         let (model, services) = await ready()
         var finish: ((URL?) -> Void)?

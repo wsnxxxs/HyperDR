@@ -21,6 +21,18 @@ struct ExportStatusHost: View {
         }
     }
 
+    /// The one line under the card's "Export failed": the error's own headline,
+    /// or, when that is the same two words (the generic code), the first
+    /// sentence of what it says, so the card never repeats its title.
+    static func failureLine(_ failure: UserFacingError, locale: Locale) -> String {
+        let text = ErrorText(failure)
+        let generic = ErrorText(UserFacingError(code: "export_failed"))
+        guard text.title(locale: locale) == generic.title(locale: locale) else { return text.title(locale: locale) }
+        let body = text.body(locale: locale)
+        let end = body.firstIndex { "\u{3002}.!\u{FF01}".contains($0) }
+        return end.map { String(body[...$0]) } ?? body
+    }
+
     @ViewBuilder private var card: some View {
         if model.export.isInFlight {
             TimelineView(.periodic(from: .now, by: 1)) { _ in
@@ -40,12 +52,12 @@ struct ExportStatusHost: View {
                     onDetails: window.openExport)
             }
         } else if let failure = model.export.failure, model.export.phase == .failed {
-            ExportStatusCard(kind: .failed(title: Text(ErrorText(failure).title)),
+            ExportStatusCard(kind: .failed(title: Text(verbatim: Self.failureLine(failure, locale: locale))),
                              fileName: ExportPresentation.fileName(for: model),
                              onDetails: window.openExport, onDismiss: model.export.dismissOutcome)
         } else if let result = model.export.result {
             ExportStatusCard(
-                kind: model.export.saveFailure != nil ? .saveFailed : .exported(savedTo: result.saved?.folderLabel ?? ""),
+                kind: model.export.saveFailure != nil ? .saveFailed : .exported(savedTo: ExportPresentation.savedFolder(result.saved)),
                 fileName: result.fileName, isStale: model.export.isResultStale, onDetails: window.openExport,
                 onSave: { ExportFlow.saveAs(model: model, version: result.export,
                                             choosePlace: ExportSavePanel.chooser(on: NSApp.keyWindow)) },

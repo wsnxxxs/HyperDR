@@ -82,10 +82,15 @@ struct LUTGroup: View {
     @ViewBuilder private func selected(_ item: LUTItem) -> some View {
         let issue = model.lut.spaceIssueKey
         VStack(alignment: .leading, spacing: Space.s4) {
-            Toggle("lut.enabled", isOn: Binding(get: { model.lut.isEnabled }, set: { model.setLUTEnabled($0) }))
-                .toggleStyle(.switch)
-                .font(Font.hdr.control)
-                .disabled(model.isEditingLocked)
+            HStack {
+                Text("lut.enabled").font(Font.hdr.control).foregroundStyle(Color.hdr.ink)
+                Spacer(minLength: Space.s2)
+                Toggle("lut.enabled", isOn: Binding(get: { model.lut.isEnabled }, set: { model.setLUTEnabled($0) }))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+            }
+            .disabled(model.isEditingLocked)
             ControlSlider(model: model, key: "lutStrength")
                 .disabled(issue != nil)
             LUTSpacesRow(model: model, item: item, isWarning: issue != nil)

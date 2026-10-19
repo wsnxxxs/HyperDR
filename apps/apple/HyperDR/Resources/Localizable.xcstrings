@@ -92,7 +92,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "This export needs more memory than is available. Remove the frame or try a smaller frame style."
+            "value" : "Exporting this photo needs more memory than this Mac can spare, so nothing was exported. Remove the frame or choose a smaller frame style and try again."
           }
         },
         "zh-Hans" : {
@@ -109,7 +109,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "This export needs more memory than is available. Close other apps and try again."
+            "value" : "Exporting this photo needs more memory than this Mac can spare, so nothing was exported. Close other apps and try again."
           }
         },
         "zh-Hans" : {
@@ -9516,6 +9516,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%1$@：%2$@"
+          }
+        }
+      }
+    },
+    "export.summary.none" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "None"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无"
           }
         }
       }

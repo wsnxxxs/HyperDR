@@ -57,6 +57,12 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整已锁定，导出完成后可以继续。" } }
       }
     },
+    "design.export.openSettings" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Settings…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开设置…" } }
+      }
+    },
     "design.export.progress" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Export progress" } },

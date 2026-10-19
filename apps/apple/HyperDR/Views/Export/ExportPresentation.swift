@@ -223,10 +223,28 @@ extension ExportPresentation {
         return model.suggestedFileName
     }
 
+    /// Why a copy did not reach its place. A place picked in the save panel and
+    /// the fixed folder fail with the same code, but only the fixed folder is
+    /// something to fix in Settings, so the wording follows the way of saving.
+    static func saveFailureSentence(_ failure: UserFacingError, mode: Preferences.SaveMode, locale: Locale) -> String {
+        mode == .folder || failure.code == "session_expired"
+            ? ErrorText(failure).body(locale: locale) : AppStrings.string("export.save.failed", locale: locale)
+    }
+
+    /// "…/Pictures", the system's own name for the folder a copy was saved in
+    /// ("…/图片" on a Chinese system) when the copy's URL is known; the label
+    /// stored with the version otherwise.
+    static func savedFolder(_ saved: SavedLocation?) -> String {
+        guard let saved else { return "" }
+        guard let url = saved.url else { return saved.folderLabel }
+        let folder = url.deletingLastPathComponent()
+        return "…/" + FileManager.default.displayName(atPath: folder.path)
+    }
+
     /// "Pictures": where the export is going, for "DSC04127.jpg → Pictures".
     @MainActor static func folderName(for model: EditorModel) -> String {
         switch model.export.destination {
-        case .file(let url)?: url.deletingLastPathComponent().lastPathComponent
+        case .file(let url)?: FileManager.default.displayName(atPath: url.deletingLastPathComponent().path)
         case .folder(let label)?: label
         case nil: ""
         }

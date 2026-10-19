@@ -41,7 +41,10 @@ public struct FormatCard: View {
     private var isAvailable: Bool { unavailableReason == nil }
 
     public var body: some View {
-        Button(action: action) {
+        // An unavailable card is not `.disabled`: the system would dim its
+        // label, and the reason has to stay in the full warning colour. It only
+        // does not take the click.
+        Button(action: { if isAvailable { action() } }) {
             VStack(alignment: .leading, spacing: 3) {
                 name
                     .font(.system(size: TypeScale.Size.control, weight: .semibold))
@@ -87,16 +90,19 @@ public struct FormatCard: View {
             .contentShape(.rect(cornerRadius: Radius.md))
         }
         .buttonStyle(.plain)
-        .disabled(!isAvailable)
         .onHover { hovered = isEnabled && isAvailable && $0 }
         .hdrAnimation(Motion.fast, value: hovered)
         .help(help ?? Text(verbatim: ""))
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityRemoveTraits(isAvailable ? [] : .isButton)
     }
 
+    /// Unavailable reads muted but legible; only a locked card (the export is
+    /// running) goes to the disabled ink.
     private var nameColor: Color {
-        if !isAvailable || !isEnabled { return isSelected && isAvailable ? .hdr.inkMuted : .hdr.inkDisabled }
+        if !isEnabled { return isSelected && isAvailable ? .hdr.inkMuted : .hdr.inkDisabled }
+        if !isAvailable { return .hdr.inkMuted }
         return isSelected ? .hdr.selectedInk : .hdr.inkStrong
     }
 

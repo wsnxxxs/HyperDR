@@ -22,7 +22,7 @@ public enum ExportSaveRow {
     /// Being written to the chosen place.
     case saving
     /// Could not be written: what to tell the user, and Save As….
-    case failed(Text, saveAs: () -> Void)
+    case failed(Text, saveAs: () -> Void, openSettings: (() -> Void)? = nil)
 }
 
 /// The card in the export panel when an export is done: what was made, any
@@ -94,10 +94,14 @@ public struct ExportResultCard: View {
             }
         case .saving:
             InspectorNotice(Text("design.export.saving", bundle: .module), style: .progress)
-        case .failed(let message, let saveAs):
+        case .failed(let message, let saveAs, let openSettings):
             VStack(alignment: .leading, spacing: Space.s2) {
                 InspectorNotice(message, style: .warning)
                 HStack {
+                    if let openSettings {
+                        Button(action: openSettings) { Text("design.export.openSettings", bundle: .module) }
+                            .buttonStyle(CompactButtonStyle(kind: .plain))
+                    }
                     Spacer(minLength: 0)
                     Button(action: saveAs) { Text("design.export.saveAs", bundle: .module) }
                         .buttonStyle(CompactButtonStyle(kind: .primary))

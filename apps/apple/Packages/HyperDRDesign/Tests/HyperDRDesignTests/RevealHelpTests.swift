@@ -24,8 +24,8 @@ private func sentence(_ language: String) -> String { text("design.export.showIn
 }
 
 @Test func theRevealReasonIsTranslatedAndPointsToSaveAs() {
-    #expect(sentence("en") == "This version was saved earlier. Use Save As… to save it again.")
-    #expect(sentence("zh-Hans") == "这一版是之前保存的，请用“另存为…”再存一次。")
+    #expect(sentence("en") == "This version was saved in an earlier session, so HyperDR can’t show it. Drag it out, share it, or use Save As… to save it again.")
+    #expect(sentence("zh-Hans") == "这一版是之前保存的，HyperDR 不能再显示它。可以直接拖出、共享，或用“另存为…”再存一次。")
     #expect(sentence("en").contains(text("design.export.saveAs", "en")))
     #expect(sentence("zh-Hans").contains(text("design.export.saveAs", "zh-Hans")))
 }

@@ -12,6 +12,8 @@ resolves the dependencies below through vcpkg or CMake `FetchContent`.
 | libpng | PNG input decoding | libpng-2.0 |
 | libtiff | TIFF input and output | libtiff license (BSD-style) |
 | zlib | TIFF Deflate compression | zlib license |
+| liblzma (XZ Utils) | TIFF LZMA compression, through libtiff | 0BSD (the liblzma library) |
+| libyuv | Colour conversion and scaling inside libavif | BSD-3-Clause |
 | ncnn | Embedded native gain-map inference runtime | BSD-3-Clause |
 
 ## Platform codec configurations

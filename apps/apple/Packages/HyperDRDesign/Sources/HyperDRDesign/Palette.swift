@@ -1,6 +1,6 @@
-// Generated once from apps/panel/web/css/tokens.css (2026-10-17). This file and
+// Generated once from the web front end's tokens.css (2026-10-17; deleted on 2026-10-20). This file and
 // Resources/Colors.xcassets are now the only definition of HyperDR's colours:
-// edit them here, not in the retiring web stylesheet.
+// edit them here.
 
 import SwiftUI
 

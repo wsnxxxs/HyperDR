@@ -15,29 +15,17 @@ That address is for vulnerabilities only; use the issue tracker for questions.
 
 ## Threat model
 
-HyperDR converts local files. The one component with an attack surface is the
-browser panel, which accepts uploads over the LAN and can optionally serve them
-over TLS. Treat it as a local, trusted-network tool: do not expose it directly
-to the public internet, and do not port-forward its port on a router.
+HyperDR converts local files. The application and the CLI open no network
+listener and make no network requests; their attack surface is the image,
+container and metadata parsers that read files you choose to open. The HEIF
+reader and the other parsers are fuzzed (`tests/fuzz`). Treat photographs from
+untrusted sources as untrusted input.
 
-The panel refuses client-supplied Windows paths, output directories, and
-executable paths; uploads and outputs are confined to a randomly named session
-directory under `hdr-workspace/`. See "安全边界" in `docs/iphone-lan.md` for the
-full boundary.
+The macOS application runs in the App Sandbox: it reads only files you open or
+drop, and writes only to locations you choose or the folder you keep for
+exports.
 
-## Certificates
-
-`Setup-HTTPS.bat` generates a certificate authority that belongs to a single
-computer. No certificate authority, and no private key of any kind, is included
-in this repository or in any release archive. A shared authority would be a
-serious vulnerability rather than a convenience: anyone holding its private key
-could issue a trusted certificate for any site, for every phone that installed
-it.
-
-Certificates live in `%LOCALAPPDATA%\HyperDR\tls`, deliberately not in
-Documents, which may be redirected into a cloud-synced folder. The server
-private key is restricted to the current Windows user. The authority's own key
-stays where `mkcert` puts it and is never read or copied by HyperDR.
-
-The Windows version is frozen at [`a43d46a`](https://github.com/wsnxxxs/HyperDR/tree/a43d46a);
-see that revision for its release and packaging instructions.
+The earlier browser panel, which accepted uploads over the LAN and could serve
+them over TLS, was deleted on 2026-10-20 (last visible at `50f734c6`). The
+Windows version is frozen at [`a43d46a`](https://github.com/wsnxxxs/HyperDR/tree/a43d46a);
+see that revision for its release, packaging and certificate handling.

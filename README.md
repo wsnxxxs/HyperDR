@@ -46,8 +46,8 @@ before the two luminance outputs split. It is the only renderer; the earlier
 `neutral` one has been removed, and `--look neutral` is now rejected.
 
 HyperDR now targets macOS on Apple Silicon with a native SwiftUI application
-and a folder-capable CLI. The Python/Web panel and Windows desktop shell remain
-as migration references. The optional “优化” action
+and a folder-capable CLI. The earlier Python/Web panel and Windows desktop shell
+were deleted on 2026-10-20 (last visible at `50f734c6`). The optional “优化” action
 adds a model-produced gain map without replacing the normal renderer. Start a
 change from the [feature ownership map](docs/project-structure.md); the native
 converter's internal layers are documented there only as a secondary concern.
@@ -55,17 +55,13 @@ converter's internal layers are documented there only as a secondary concern.
 ## Repository guide
 
 - [`modules/`](modules/) contains the layered C++ core and command-line app.
-- [`apps/panel/`](apps/panel/) contains the Python browser-panel server and its
-  web client.
 - [`apps/apple/`](apps/apple/) contains the new SwiftUI application and Swift packages.
-- [`apps/desktop/`](apps/desktop/) retains the archived Windows desktop shell.
 - [`HyperDR_Model/`](HyperDR_Model/) contains the optional ML training and
   inference project.
-- [`tests/`](tests/) contains cross-component Python, JavaScript, PowerShell,
-  Swift, and C++ gate tests; module-local C++ tests stay beside their modules.
+- [`tests/`](tests/) contains cross-component Python, Swift, and C++ gate tests; module-local C++ tests stay beside their modules.
 - [`docs/`](docs/README.md) indexes every guide and reference in the project,
   while [`scripts/`](scripts/) and [`packaging/`](packaging/) contain
-  development, Windows setup, and release tooling.
+  development and release tooling.
 
 Generated build trees, release archives, caches, local model reports, and
 temporary diagnostics are not part of the source tree. See the
@@ -97,7 +93,6 @@ cmake --preset macos-arm64-core
 cmake --build --preset macos-arm64-core
 ctest --preset macos-arm64-core
 python3 scripts/test.py native --build-dir build-core
-python3 scripts/test.py frontend
 ```
 
 For image decoding, JPEG/TIFF, Ultra HDR JPEG/R and PQ/HLG AVIF exports,
@@ -141,10 +136,7 @@ Within the converter, every setting is declared once, in one C++ table.
 `--help`, the command-line parser, the resume fingerprint and the report's
 settings block are all generated from it, so those converter surfaces cannot
 drift apart. `HyperDR schema` prints that table as JSON, and the checked-in
-`schema/settings.json` is the generated contract used by the panel backend and
-contract checks. The browser UI also has a small local schema for labels,
-widgets and request mapping; update that adapter when a setting is exposed in
-the UI.
+`schema/settings.json` is the generated contract used by the contract checks.
 
 The full option list, exit codes, per-encoding behaviour, resume fingerprinting,
 and look-control ranges are in
@@ -178,23 +170,19 @@ decoder is touched, and anything rendered with *different* settings is
 regenerated. Re-running after a card copy therefore converges on whatever is
 actually on disk.
 
-The graphical panel edits one photograph at a time, with undo/redo, per-tab
-refresh recovery, and a history of immutable exports. A failed or cancelled
-retry leaves earlier results available for download. Each new photo gets its
-own session; sessions and their exports expire after the configured idle time
-(24 hours by default). Use the CLI for a folder that should share one look.
+The macOS application edits one photograph at a time, with undo/redo and a
+history of exports. Use the CLI for a folder that should share one look.
 
 ## Continuous integration
 
 Local checks and `.github/workflows/ci.yml` share `python scripts/test.py`.
-Run it after configuring `build-core`, or select `frontend` or `native`
-for a focused check. The historical Python panel suite is retired and will be
-removed at P2c; the explicit `panel` target reports this and exits with failure.
+Run it after configuring `build-core`, or select `native` or `apple` for a
+focused check.
 The [development guide](docs/development.md#validate-only-the-affected-behaviour)
 lists prerequisites and build options.
 
 CI defines macOS core Debug/Release jobs, a codec build with a GPL dependency
-gate, ASan/UBSan C ABI checks, and the reference frontend suite.
+gate, ASan/UBSan C ABI checks, and the Apple app suite.
 Run `actionlint .github/workflows/ci.yml` locally. Hosted execution is verified
 after an authorized push.
 
@@ -207,19 +195,17 @@ standards-oriented XMP, now including artist, copyright, lens make and model,
 recorded one. A fix absent from decoded camera metadata is omitted rather than guessed.
 HEVC encoding will use the planned VideoToolbox backend.
 
-## iPhone LAN panel
+## Windows and iPhone
 
-The Windows LAN launchers are retained as migration references. Use the
-[frozen Windows revision](https://github.com/wsnxxxs/HyperDR/tree/a43d46a) and
-[LAN guide](docs/iphone-lan.md) for that version. The current application targets
-macOS; native iPhone and iPad work is deferred.
+The Windows version, including the LAN launchers and the iPhone browser panel,
+is frozen at [`a43d46a`](https://github.com/wsnxxxs/HyperDR/tree/a43d46a). The
+current application targets macOS; native iPhone and iPad work is deferred.
 
 ## Development and security
 
 The [feature-first development guide](docs/development.md) maps user-visible
 behaviour to its owner and lists the smallest useful checks for each area.
-[SECURITY.md](SECURITY.md) records the panel's threat model and how certificates
-and private keys are handled. User-visible changes are recorded in
+[SECURITY.md](SECURITY.md) records the threat model. User-visible changes are recorded in
 [CHANGELOG.md](CHANGELOG.md).
 
 ## License

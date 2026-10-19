@@ -9,6 +9,10 @@ semantic versioning; dates use ISO 8601.
   reader and decoded by VideoToolbox, and the write-time check of HEIC exports
   uses the same reader. The app and the command-line tool no longer carry any
   LGPL library, and the app bundle embeds no dylibs.
+- Delete the Python panel, the LAN server, the web front end, the Tauri shell,
+  the Windows launch and certificate scripts and their tests. The last
+  revision that contains them is `50f734c6`; the Windows version stays at
+  `a43d46a`. The engine's `panel-v1` request adapter is unchanged.
 
 - Remove external RAW DCP/XMP/LCP profiles, highlight-mode controls and sensor
   calibration flags from the engine and Kit. RAW gain and automatic Apple lens

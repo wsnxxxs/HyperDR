@@ -21,8 +21,9 @@ this checkout. This file summarizes what they decide.
   still decodes through libheif and libde265 until P3b-3 is merged, and both
   libraries are then deleted outright (P3b-5), tests included.
 - RAW is developed through `CIRAWFilter`; LibRaw is gone.
-- The Python panel, LAN server, web front end and Tauri shell are kept only as
-  behaviour references until the SwiftUI app reaches parity, then deleted.
+- The Python panel, LAN server, web front end and Tauri shell were deleted on
+  2026-10-20 (last visible at `50f734c6`). The engine keeps the
+  `command.adapter = "panel-v1"` request adapter; its name is unchanged.
 - New code is Apple/POSIX only, with no `_WIN32` branches.
 
 ## Layout
@@ -36,7 +37,6 @@ this checkout. This file summarizes what they decide.
 | `apps/apple/HyperDR/Editor` | `EditorModel` / `CanvasModel`, the contract the views bind to, running on the real `HyperDRKit` services |
 | `apps/apple/HyperDR/Views` | SwiftUI views; they only talk to the editor models |
 | `apps/apple/HyperDR/macOS/Preview` | Metal EDR canvas: a compute pass rebuilds the frame, a second pass draws it at the canvas zoom and pan |
-| `apps/panel/web` | Web front end, the reference for features and default values |
 
 ## Building and testing
 
@@ -127,5 +127,4 @@ diagnostics on our reader, deleting libheif and libde265, acceptance); E8 (61 MP
 canvases fail in libaom for AVIF); D1 (one set of default values; D1-a
 measurement not started, CC0 RAW candidates listed); P3a-2 (encoder quality,
 including the photo-area errors E5 froze as non-regression cases); the
-hands-on checks in `docs/design/user-acceptance.md`; deleting the Python panel,
-LAN server, web front end and Tauri shell once the app reaches parity.
+hands-on checks in `docs/design/user-acceptance.md`.

@@ -109,12 +109,13 @@ import UniformTypeIdentifiers
     func bumpFrameRevision() { frameRevision &+= 1 }
     func clearPreviewError() { if document?.previewError != nil { document?.previewError = nil } }
     func bumpUndoRevision() { undoRevision &+= 1 }
+    @ObservationIgnored private var cameraSupportTask: Task<Void, Never>?
     @ObservationIgnored private var operation: Task<Void, Never>?
     @ObservationIgnored private var captureFactsTask: Task<Void, Never>?
     @ObservationIgnored private var displayObserver: Task<Void, Never>?
     @ObservationIgnored private var displayPublication: Task<Void, Never>?
     @ObservationIgnored private var pendingDisplay: DisplayState?
-    @ObservationIgnored private var openRollback: OpenSnapshot?
+    private var openRollback: OpenSnapshot?
     @ObservationIgnored private var editedGainWeight: Double?
 
     private(set) var frameRevision: UInt64 = 0
@@ -214,6 +215,7 @@ import UniformTypeIdentifiers
         lutTask?.cancel()
         lutMetadataTask?.cancel()
         for task in saveTasks.values { task.cancel() }
+        cameraSupportTask?.cancel()
         operation?.cancel()
         detailTask?.cancel()
         busyTask?.cancel()
@@ -273,6 +275,7 @@ import UniformTypeIdentifiers
         isRestoring = canRestoreAtLaunch && document == nil && photo == nil && openRollback == nil
         syncControls()
         let ticket = generation
+        let openedAt = services.openClock.now
         launchTask = Task { [weak self, services] in
             defer { if self?.generation == ticket { self?.isRestoring = false; self?.syncControls() } }
             await services.start()
@@ -287,14 +290,14 @@ import UniformTypeIdentifiers
             switch result {
             case .none: break
             case .unavailable(let error): alert = error
-            case .restored(let photo): beginOpen([photo.url], restored: photo)
+            case .restored(let photo): beginOpen([photo.url], restored: photo, openedAt: openedAt)
             }
         }
     }
 
     func report(openFailure error: any Error) { alert = UserFacingError.importFailure(error) }
 
-    private func beginOpen(_ urls: [URL], restored: EditorPhoto? = nil) {
+    private func beginOpen(_ urls: [URL], restored: EditorPhoto? = nil, openedAt: Duration? = nil) {
         isRestoring = false
         if case .failed(let error) = engine {
             alert = UserFacingError(code: "engine_unavailable", detail: error.detail)
@@ -305,6 +308,7 @@ import UniformTypeIdentifiers
             return
         }
 
+        cameraSupportTask?.cancel()
         operation?.cancel()
         captureFactsTask?.cancel()
         invalidateDetails()
@@ -327,6 +331,7 @@ import UniformTypeIdentifiers
         alert = nil
         syncControls()
 
+        startCameraSupportDeadline(openedAt: openedAt ?? services.openClock.now, ticket: ticket)
         operation = Task { [weak self, services] in
             guard let self else { return }
             var candidate: EditorPhoto?
@@ -337,8 +342,9 @@ import UniformTypeIdentifiers
                 candidate = opened
                 try Task.checkCancellation()
                 guard generation == ticket else { await services.close(opened); return }
+                let preparing = document?.isPreparingCameraSupport == true
                 document = opened.openingDocument
-                document?.phase = .rendering
+                document?.isPreparingCameraSupport = preparing
                 var reference: EditorPreview?
                 for await event in services.previews(for: opened, encoding: encoding, maxEdge: previewEdge) {
                     try Task.checkCancellation()
@@ -371,10 +377,35 @@ import UniformTypeIdentifiers
             } catch {
                 if let candidate, candidate != previous.photo { await services.close(candidate) }
                 guard generation == ticket, !Task.isCancelled else { return }
-                let error = error as? UserFacingError ?? UserFacingError(code: "internal_error", detail: String(describing: error))
+                let error = UserFacingError.service(error)
                 restore(previous, error: error)
                 operation = nil
             }
+        }
+    }
+
+    var canCancelOpen: Bool { openRollback != nil }
+
+    /// Silent Q14 rollback. A cancelled native open may finish later; its task
+    /// still owns and closes the candidate, never the restored photograph.
+    func cancelOpen() {
+        guard let previous = openRollback else { return }
+        cameraSupportTask?.cancel()
+        operation?.cancel()
+        operation = nil
+        generation += 1
+        restore(previous, error: nil)
+    }
+
+    private func startCameraSupportDeadline(openedAt: Duration, ticket: Int) {
+        guard document?.formatLabel == "RAW" else { return }
+        let clock = services.openClock
+        cameraSupportTask = Task { [weak self] in
+            do { try await clock.sleep(until: openedAt + .milliseconds(1500)) }
+            catch { return }
+            guard let self, !Task.isCancelled, generation == ticket,
+                  openRollback != nil, document?.phase == .opening else { return }
+            document?.isPreparingCameraSupport = true
         }
     }
 
@@ -387,6 +418,7 @@ import UniformTypeIdentifiers
         canRestoreAtLaunch = false
         isRestoring = false
         generation += 1
+        cameraSupportTask?.cancel()
         operation?.cancel()
         captureFactsTask?.cancel()
         operation = nil
@@ -570,6 +602,10 @@ import UniformTypeIdentifiers
     func apply(_ event: EditorPreviewEvent, finishesRefresh: Bool = true) {
         switch event {
         case .reference(let frame):
+            cameraSupportTask?.cancel()
+            cameraSupportTask = nil
+            document?.isPreparingCameraSupport = false
+            document?.phase = .rendering
             referenceFrame = frame.frame
             editedFrame = nil
             frameRevision &+= 1
@@ -583,6 +619,9 @@ import UniformTypeIdentifiers
             canvas.setImageSize(frame.pixelSize)
             setPeeking(false)
         case .edited(let frame):
+            cameraSupportTask?.cancel()
+            cameraSupportTask = nil
+            document?.isPreparingCameraSupport = false
             editedFrame = frame.frame
             canvas.previewPixelSize = frame.frame.map { CGSize(width: $0.base.width, height: $0.base.height) }
             frameRevision &+= 1
@@ -625,6 +664,7 @@ import UniformTypeIdentifiers
         // Invalidate both opening and refresh work so a late edited frame
         // cannot replace the renderer failure with a ready document.
         generation += 1
+        cameraSupportTask?.cancel()
         operation?.cancel()
         captureFactsTask?.cancel()
         cancelAI()
@@ -652,7 +692,9 @@ import UniformTypeIdentifiers
         }
     }
 
-    private func restore(_ previous: OpenSnapshot, error: UserFacingError) {
+    private func restore(_ previous: OpenSnapshot, error: UserFacingError?) {
+        cameraSupportTask?.cancel()
+        cameraSupportTask = nil
         document = previous.document
         photo = previous.photo
         hasReferenceFrame = previous.reference

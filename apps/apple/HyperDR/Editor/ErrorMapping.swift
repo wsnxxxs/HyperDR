@@ -5,7 +5,20 @@ extension UserFacingError {
     /// A service-layer error keeps its §3.6 code; the message is the
     /// developer-facing detail, never shown as the title.
     init(_ error: HyperDRError) {
-        self.init(code: error.code, detail: error.detail ?? error.message)
+        if error.code == "raw_unsupported" {
+            guard case .object(let fields) = error.detail,
+                  case .string(let container) = fields["container"],
+                  container == "camera" || container == "dng" else {
+                self.init(code: error.code, variant: "camera")
+                return
+            }
+            let model: String?
+            if case .string(let value) = fields["model"], !value.isEmpty { model = value }
+            else { model = nil }
+            self.init(code: error.code, detail: model, variant: container)
+        } else {
+            self.init(code: error.code, detail: error.messageDetail ?? error.message)
+        }
     }
 
     /// Any error from the services: typed errors keep their code, the rest are

@@ -30,16 +30,27 @@ public struct Capabilities: Codable, Sendable {
 public struct SourceColor: Codable, Sendable {
     public let name, primaries, transfer, source: String
 }
+/// RAW capabilities supplied by the engine, including its cache-key OS build.
+public struct RawCapabilities: Codable, Equatable, Sendable {
+    public let supported, lensCorrectionSupported: Bool
+    public let decoderVersion, osBuild: String
+
+    public init(supported: Bool, lensCorrectionSupported: Bool, decoderVersion: String, osBuild: String) {
+        self.supported = supported; self.lensCorrectionSupported = lensCorrectionSupported
+        self.decoderVersion = decoderVersion; self.osBuild = osBuild
+    }
+}
 public struct ProbeResult: Codable, Sendable {
     public let schema, path: String
     public let width, height, orientation: Int
     public let inputDomain: String
     public let headroom: Double
+    public let raw: RawCapabilities?
     public let degraded: Bool
     public let sourceColor: SourceColor
     public internal(set) var rawJSON = Data()
     private enum CodingKeys: String, CodingKey {
-        case schema, path, width, height, orientation, inputDomain, headroom, degraded, sourceColor
+        case schema, path, width, height, orientation, inputDomain, headroom, degraded, sourceColor, raw
     }
 }
 public struct RawMetadata: Codable, Sendable {
@@ -58,6 +69,7 @@ public struct ReportFile: Codable, Sendable {
     public let success, skipped: Bool
     public let message: String
     public let errorCode: String?
+    public let errorDetail: JSONValue?
     public let detail: String?
     public let width, height: Int?
     /// Present for a framed export: `width`/`height` are then the canvas.
@@ -65,13 +77,14 @@ public struct ReportFile: Codable, Sendable {
 
     public init(input: String, output: String, success: Bool, skipped: Bool,
                 message: String, width: Int?, height: Int?, frame: ReportFrame? = nil,
-                errorCode: String? = nil, detail: String? = nil) {
+                errorCode: String? = nil, detail: String? = nil, errorDetail: JSONValue? = nil) {
         self.input = input
         self.output = output
         self.success = success
         self.skipped = skipped
         self.message = message
         self.errorCode = errorCode
+        self.errorDetail = errorDetail
         self.detail = detail
         self.width = width
         self.height = height
@@ -80,6 +93,7 @@ public struct ReportFile: Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case input, output, success, skipped, message, width, height, frame, detail
         case errorCode = "error_code"
+        case errorDetail = "error_detail"
     }
 }
 public struct ConvertReport: Sendable {

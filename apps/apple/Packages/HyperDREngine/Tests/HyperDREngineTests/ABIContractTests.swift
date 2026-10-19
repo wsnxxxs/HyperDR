@@ -414,6 +414,11 @@ private final class Events: @unchecked Sendable {
         var request = EngineRequest(settings: ["preview_max_edge": .number(64)])
         try request.setCommand("compact", .bool(true))
         let frame = try await session.renderFrame(request)
+        let rawCapabilities = try #require(probe.raw)
+        #expect(rawCapabilities.supported)
+        #expect(!rawCapabilities.decoderVersion.isEmpty)
+        #expect(!rawCapabilities.osBuild.isEmpty)
+        #expect(frame.metadata.raw == rawCapabilities)
         #expect(frame.metadata.sourceWidth == probe.width)
         #expect(frame.metadata.sourceHeight == probe.height)
         #expect(frame.base.width <= 64 && frame.base.height <= 64)
@@ -421,6 +426,34 @@ private final class Events: @unchecked Sendable {
         try gainRequest.setCommand("model_id", .string("research-cnn-v1"))
         let gain = try await session.modelGain(gainRequest)
         #expect(String(decoding: gain.prefix(8), as: UTF8.self) == "HYPGAIN1")
+    }
+
+    @Test func rawUnsupportedCarriesStructuredDetailAcrossABIAndReport() async throws {
+        let fixture = try Fixture()
+        let source = fixture.directory.appendingPathComponent("unsupported.dng")
+        // TIFF IFD0 containing DNGVersion; intentionally no decodable image.
+        let bytes = Data([0x49, 0x49, 42, 0, 8, 0, 0, 0, 1, 0,
+                          0x12, 0xc6, 1, 0, 4, 0, 0, 0, 1, 4, 0, 0, 0, 0, 0, 0])
+        try bytes.write(to: source)
+        let expected = JSONValue.object(["container": .string("dng"), "model": .string("")])
+        let engine = try await Engine()
+        for suffix in ["dng", "ARW"] {
+            let renamed = fixture.directory.appendingPathComponent("unsupported." + suffix)
+            try bytes.write(to: renamed)
+            do { _ = try await engine.probe(renamed); Issue.record("Expected raw_unsupported") }
+            catch let error as HyperDRError {
+                #expect(error.code == "raw_unsupported")
+                #expect(error.detail == expected)
+            }
+        }
+        let request = try Engine.normalize(["input": .string(source.path),
+            "output": .string(fixture.directory.appendingPathComponent("output").path),
+            "encoding": .string("sdr-jpeg")])
+        let report = try await engine.convert(request)
+        let file = try #require(report.files.first)
+        #expect(!file.success)
+        #expect(file.errorCode == "raw_unsupported")
+        #expect(file.errorDetail == expected)
     }
 
     @Test func errorsAndLazyOpen() async throws {

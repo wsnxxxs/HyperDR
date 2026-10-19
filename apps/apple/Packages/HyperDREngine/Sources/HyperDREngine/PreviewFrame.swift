@@ -11,6 +11,7 @@ public struct PreviewMetadata: Codable, Sendable {
     public let layout, sampleType, colorSpace: String
     public let relativeSdrWhite, headroomStops: Double
     public let inputDomain, status: String
+    public let raw: RawCapabilities?
     public let sourceColor: SourceColor
     public let degradationReasons: [String]
     public let unadjusted: Unadjusted

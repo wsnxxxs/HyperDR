@@ -1,4 +1,5 @@
 import Foundation
+import HyperDREngine
 import SwiftUI
 
 /// Whether a photograph is open. Without one the canvas offers the picker and
@@ -48,6 +49,16 @@ nonisolated struct SourceSummary: Equatable {
     /// (`icc`, `cicp`, `png-srgb`, `assumed`, …); `assumed` means the file
     /// states none and the input colour choice applies.
     var colorSource: String? = nil
+    var raw: RawCapabilities? = nil
+}
+
+extension SourceSummary {
+    init(_ metadata: PreviewMetadata) {
+        self.init(domain: InputDomain(rawValue: metadata.inputDomain) ?? .unknown,
+                  colorName: metadata.sourceColor.name,
+                  degradationReasons: metadata.degradationReasons,
+                  colorSource: metadata.sourceColor.source, raw: metadata.raw)
+    }
 }
 
 nonisolated enum DocumentPhase: Equatable {
@@ -66,6 +77,7 @@ nonisolated struct DocumentState: Equatable {
     var isRefreshing: Bool
     var source: SourceSummary?
     var previewError: UserFacingError?
+    var isPreparingCameraSupport = false
 }
 
 nonisolated struct DisplayState: Equatable {

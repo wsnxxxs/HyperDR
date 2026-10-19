@@ -4,9 +4,12 @@ import HyperDREngineCore
 public struct HyperDRError: Error, LocalizedError, Sendable {
     public let code: String
     public let message: String
-    public let detail: String?
-    public init(code: String, message: String, detail: String? = nil) {
-        self.code = code; self.message = message; self.detail = detail
+    /// Structured information whose schema is defined by `code`.
+    public let detail: JSONValue?
+    /// Human-readable per-file export detail, separate from ABI detail_json.
+    public let messageDetail: String?
+    public init(code: String, message: String, detail: JSONValue? = nil, messageDetail: String? = nil) {
+        self.code = code; self.message = message; self.detail = detail; self.messageDetail = messageDetail
     }
     public var errorDescription: String? { "\(message) (\(code))" }
 }
@@ -16,7 +19,10 @@ func checkStatus(_ status: Int32, _ error: UnsafeMutablePointer<hyperdr_error>?)
     guard status == 0 else {
         throw HyperDRError(
             code: error.flatMap { $0.pointee.code }.map { String(cString: $0) } ?? "out_of_memory",
-            message: error.flatMap { $0.pointee.message }.map { String(cString: $0) } ?? "Engine call failed")
+            message: error.flatMap { $0.pointee.message }.map { String(cString: $0) } ?? "Engine call failed",
+            detail: error.flatMap { $0.pointee.detail_json }.flatMap { pointer in
+                try? JSONDecoder().decode(JSONValue.self, from: Data(String(cString: pointer).utf8))
+            })
     }
 }
 

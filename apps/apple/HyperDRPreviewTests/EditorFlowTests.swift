@@ -4,7 +4,9 @@ import UniformTypeIdentifiers
 import XCTest
 @testable import HyperDR
 
-@MainActor private final class ScriptedEditorServices: EditorServices {
+@MainActor final class ScriptedEditorServices: EditorServices {
+    var openClock: any EditorOpenClock = SystemEditorOpenClock.shared
+    var openHandler: ((URL) async throws -> EditorPhoto)?
     var engineStatus: EngineStatus = .ready(version: "test")
     let displayState = DisplayState(screenName: "", currentHeadroom: 2, potentialHeadroom: 4, gainWeight: 1)
     let openableContentTypes: [UTType] = [.jpeg]
@@ -27,11 +29,14 @@ import XCTest
     func engineUpdates() -> AsyncStream<EngineStatus> { AsyncStream { $0.yield(engineStatus) } }
     func displayUpdates() -> AsyncStream<DisplayState> { AsyncStream { $0.yield(displayState) } }
     func start() async { starts += 1 }
-    func canOpen(_ url: URL) -> Bool { url.pathExtension == "jpg" }
+    func canOpen(_ url: URL) -> Bool { ["jpg", "ARW"].contains(url.pathExtension) }
     func placeholder(for url: URL) -> EditorPhoto {
-        EditorPhoto(url: url, name: url.lastPathComponent, formatLabel: "JPEG", byteCount: 1)
+        EditorPhoto(url: url, name: url.lastPathComponent, formatLabel: url.pathExtension == "ARW" ? "RAW" : "JPEG", byteCount: 1)
     }
-    func open(_ url: URL) async throws -> EditorPhoto { placeholder(for: url) }
+    func open(_ url: URL) async throws -> EditorPhoto {
+        if let openHandler { return try await openHandler(url) }
+        return placeholder(for: url)
+    }
     func restoreLast() async -> RestoreResult {
         guard usesRestoreGate else { return .none }
         return await withCheckedContinuation { restoreWaiter = $0 }

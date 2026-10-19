@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 // App-internal boundary. A2 supplies live services without changing Views.
 @MainActor protocol EditorServices: AnyObject {
     var engineStatus: EngineStatus { get }
+    var openClock: any EditorOpenClock { get }
     var displayState: DisplayState { get }
     var openableContentTypes: [UTType] { get }
     /// Where app preferences (the frame settings) live. Live services use the

@@ -1,6 +1,57 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "err.server.raw_unsupported" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HyperDR develops RAW with macOS, which doesn’t support this camera yet. macOS updates add new cameras; you can also convert the file to DNG or TIFF first."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HyperDR 用 macOS 自带的 RAW 显影，它还不支持这台相机。macOS 更新时会陆续加入新机型；也可以先把文件转成 DNG 或 TIFF 再打开。"
+          }
+        }
+      }
+    },
+    "err.server.raw_unsupported.model %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HyperDR develops RAW with macOS, which doesn’t support the %@ yet. macOS updates add new cameras; you can also convert the file to DNG or TIFF first."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HyperDR 用 macOS 自带的 RAW 显影，它还不支持 %@。macOS 更新时会陆续加入新机型；也可以先把文件转成 DNG 或 TIFF 再打开。"
+          }
+        }
+      }
+    },
+    "err.server.raw_unsupported.dng" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS can’t decode this DNG file. Export it again from the camera maker’s software or a DNG converter, then try again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS 无法解码这个 DNG 文件。可以用相机厂商的软件或 DNG 转换工具重新导出后再试。"
+          }
+        }
+      }
+    },
     "ctrl.quality.help" : {
       "extractionState" : "manual",
       "localizations" : {

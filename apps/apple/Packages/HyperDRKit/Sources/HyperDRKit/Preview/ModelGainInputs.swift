@@ -41,6 +41,7 @@ enum ModelGainInputs {
         // Decode size. Kit leaves it out (the engine then uses 2048), so it
         // is constant today; keyed in case a caller ever sets it.
         Entry(location: .settings, key: "preview_max_edge", panel: []),
+        // External RAW resource keys and highlightRecovery were removed in R2.
     ]
 
     /// The table's values in `request`, as canonical JSON. A missing key is

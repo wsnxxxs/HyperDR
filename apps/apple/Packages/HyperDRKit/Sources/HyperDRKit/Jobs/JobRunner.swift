@@ -252,7 +252,7 @@ public actor JobRunner {
             let file = report.files.first(where: { !$0.skipped }) ?? report.files.first
             failure = HyperDRError(code: file?.errorCode ?? "export_failed",
                 message: file?.message ?? "The conversion produced no successful output",
-                detail: file?.detail)
+                detail: file?.errorDetail, messageDetail: file?.detail)
         }
         if let report, failure == nil {
             // Publication is the commit point. After this actor turn cancel
@@ -286,7 +286,7 @@ public actor JobRunner {
                 // file is already in place, never merely in the workspace.
                 failure = error as? HyperDRError ?? HyperDRError(
                     code: error is CancellationError ? "cancelled" : "export_failed",
-                    message: "Unable to save the completed export", detail: String(describing: error))
+                    message: "Unable to save the completed export", messageDetail: String(describing: error))
             }
             record?.delivery = nil
         }

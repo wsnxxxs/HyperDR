@@ -303,10 +303,7 @@ import os
         return EditorPreview(
             pixelSize: PixelSize(width: metadata.sourceWidth ?? metadata.width,
                                  height: metadata.sourceHeight ?? metadata.height),
-            source: SourceSummary(domain: InputDomain(rawValue: metadata.inputDomain) ?? .unknown,
-                                  colorName: metadata.sourceColor.name,
-                                  degradationReasons: metadata.degradationReasons,
-                                  colorSource: metadata.sourceColor.source),
+            source: SourceSummary(metadata),
             hasGain: frame.isCompact || metadata.headroomStops > 0,
             gainWeight: metadata.gainWeight, frame: frame,
             unadjusted: metadata.unadjusted.values,
@@ -543,7 +540,10 @@ extension LiveEditorServices {
     }
     func diagnostics() async -> String {
         guard let kit = try? await requireKit() else { return "" }
-        return String(decoding: kit.capabilities.rawJSON, as: UTF8.self) + "\n" + ProcessInfo.processInfo.operatingSystemVersionString
+        let version = ProcessInfo.processInfo.operatingSystemVersion
+        // The RAW OS build comes exclusively from engine preview metadata.
+        return String(decoding: kit.capabilities.rawJSON, as: UTF8.self)
+            + "\nmacOS \(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
     }
     private func item(_ entry: LUTEntry) -> LUTItem {
         LUTItem(id: entry.id.rawValue, name: entry.name,

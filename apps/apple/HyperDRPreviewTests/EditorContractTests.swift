@@ -19,8 +19,6 @@ import XCTest
         XCTAssertEqual(model.workspace, .editing)
         XCTAssertEqual(model.document?.phase, .opening)
         XCTAssertNil(model.document?.pixelSize)
-        try await waitUntil { model.document?.phase == .rendering }
-        XCTAssertNil(model.document?.source)
         try await waitUntil { model.hasReferenceFrame }
         XCTAssertEqual(model.document?.phase, .rendering)
         XCTAssertEqual(model.document?.source, services.preview.source)
@@ -93,9 +91,6 @@ import XCTest
         model.open([replacement])
         XCTAssertEqual(model.document?.name, replacement.lastPathComponent)
         XCTAssertEqual(model.document?.phase, .opening)
-        XCTAssertEqual(model.canvas.imageFrame, previousFrame)
-        XCTAssertTrue(model.hasEditedFrame)
-        try await waitUntil { model.document?.phase == .rendering }
         XCTAssertEqual(model.canvas.imageFrame, previousFrame)
         XCTAssertTrue(model.hasEditedFrame)
         try await waitUntil { model.document?.pixelSize == services.preview.pixelSize }

@@ -214,7 +214,7 @@ private struct ExportSummaryColumn: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s3) {
-            Thumbnail(image: nil, width: 172, height: 115)
+            Thumbnail(model.exportSummaryThumbnail.content(showsSpinner: true), width: 172, height: 115)
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: model.document?.name ?? "")
                     .font(.system(size: TypeScale.Size.control, weight: .semibold))
@@ -235,6 +235,8 @@ private struct ExportSummaryColumn: View {
         .padding(Space.s4)
         .frame(maxHeight: .infinity, alignment: .topLeading)
         .background(Color.hdr.surfaceSunken.opacity(0.5))
+        // The picture is kept up to date only while this column is on screen.
+        .task { await model.trackExportSummaryThumbnail() }
     }
 
     private var processing: Text {
@@ -323,7 +325,7 @@ private struct ExportProgressView: View {
 
     private func summary(_ estimate: ExportEstimate?) -> some View {
         HStack(alignment: .center, spacing: Space.s3) {
-            Thumbnail(image: nil, width: 72, height: 48)
+            Thumbnail(model.export.thumbnail.content(), width: 72, height: 48)
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: ExportPresentation.fileName(for: model))
                     .font(.system(size: TypeScale.Size.control, weight: .semibold))
@@ -388,7 +390,7 @@ private struct ExportResultView: View {
             ExportTitleBar(model: model)
             VStack(alignment: .leading, spacing: Space.s4) {
                 if let result = model.export.result {
-                    ExportResultCard(thumbnail: .unavailable, fileName: result.fileName, facts: facts(result),
+                    ExportResultCard(thumbnail: model.export.thumbnail.content(), fileName: result.fileName, facts: facts(result),
                                      warnings: result.warnings.map { Text(verbatim: $0) }, isStale: stale,
                                      saveRow: saveRow(result))
                 }

@@ -72,7 +72,7 @@ struct ExportHistorySheet: View {
             }
         }
         return ExportHistoryRow(
-            thumbnail: .unavailable, number: version.number, fileName: version.fileName, tags: tags,
+            thumbnail: (model.versionThumbnails[version.id] ?? .loading).content(), number: version.number, fileName: version.fileName, tags: tags,
             meta: Text(verbatim: ExportPresentation.historyMeta(version, locale: locale)),
             note: version.fallbackReason.map { Text(verbatim: ExportPresentation.fallbackNote($0, model: model, locale: locale)) },
             primary: RowAction(title: Text("history.restore"),
@@ -84,6 +84,11 @@ struct ExportHistorySheet: View {
             Button("export.save.saveAs") {
                 ExportFlow.saveAs(model: model, version: version.id, choosePlace: ExportSavePanel.chooser(on: sheetWindow))
             }
+        }
+        // Read lazily, once the row is on screen; it asks again if the model
+        // let the picture go from its small cache.
+        .task(id: model.versionThumbnails[version.id] == nil) {
+            if model.versionThumbnails[version.id] == nil { _ = model.versionThumbnail(version.id) }
         }
     }
 

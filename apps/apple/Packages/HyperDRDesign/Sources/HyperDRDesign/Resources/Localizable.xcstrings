@@ -15,6 +15,126 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 档" } }
       }
     },
+    "design.export.detail" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Details" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "详细信息" } }
+      }
+    },
+    "design.export.dismiss" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Dismiss" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "关闭" } }
+      }
+    },
+    "design.export.earlier" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Earlier edit" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "上一版的结果" } }
+      }
+    },
+    "design.export.exported" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Exported" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已导出" } }
+      }
+    },
+    "design.export.exporting" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Exporting" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在导出" } }
+      }
+    },
+    "design.export.failed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Export failed" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "导出失败" } }
+      }
+    },
+    "design.export.lockNote" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Adjustments are locked. You can continue when the export finishes." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整已锁定，导出完成后可以继续。" } }
+      }
+    },
+    "design.export.progress" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Export progress" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "导出进度" } }
+      }
+    },
+    "design.export.saveAs" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Save As…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "另存为…" } }
+      }
+    },
+    "design.export.saveFailedShort" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not saved: can’t write to the chosen place." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有保存：无法写入所选位置。" } }
+      }
+    },
+    "design.export.savedTo %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Saved to %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已保存到 %@" } }
+      }
+    },
+    "design.export.saving" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Saving…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在保存…" } }
+      }
+    },
+    "design.export.showInFinder" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show in Finder" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在访达中显示" } }
+      }
+    },
+    "design.export.staleNote" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "You changed the photo after this export. Export again to include the changes." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "导出之后又调整过画面。再次导出才会包含这些改动。" } }
+      }
+    },
+    "design.export.stop" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stop Export" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "停止导出" } }
+      }
+    },
+    "design.export.stopPending" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stopping…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在停止…" } }
+      }
+    },
+    "design.export.stopping" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stopping Export" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在停止导出" } }
+      }
+    },
+    "design.export.toolbar.exporting %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Exporting %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "导出中 %@" } }
+      }
+    },
+    "design.export.toolbar.indeterminate" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Exporting…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "导出中…" } }
+      }
+    },
+    "design.export.viewDetails" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Details" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "查看详情" } }
+      }
+    },
     "design.group.collapsed" : {
       "comment" : "VoiceOver value of a collapsed inspector group.",
       "localizations" : {
@@ -48,6 +168,24 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Shadows: pure black in the SDR version" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暗部：SDR 版本中为纯黑" } }
+      }
+    },
+    "design.lut.inUse" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "In use" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前照片在用" } }
+      }
+    },
+    "design.lut.remove" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "移除" } }
+      }
+    },
+    "design.lut.spaces" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Spaces…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "空间…" } }
       }
     },
     "design.scope.ceiling %@" : {

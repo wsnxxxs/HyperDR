@@ -64,6 +64,10 @@ import UniformTypeIdentifiers
     /// A copy of one retained version's file, in a folder of its own, to hand to
     /// another app (drag, share). `fileName` is the name the receiver sees.
     func transferFile(_ photo: EditorPhoto, export: String, fileName: String?) async throws -> URL
+    /// Points an open photo whose file has moved at the file the user chose.
+    /// The same content keeps the session (and the handle); anything else
+    /// throws `source_different`.
+    func relink(_ photo: EditorPhoto, to url: URL) async throws -> EditorPhoto
     func exportFolder() async -> ExportFolder
     func setExportFolder(_ url: URL) async throws -> ExportFolder
     func encodingCapabilities() async throws -> EditorCapabilities
@@ -89,11 +93,16 @@ enum RestoreResult {
 /// One opened photo. `handle` makes every open distinct, so closing an
 /// earlier open of the same file never closes a later one.
 struct EditorPhoto: Hashable {
-    let url: URL
-    let name: String
+    var url: URL
+    var name: String
     let formatLabel: String
-    let byteCount: Int64
+    var byteCount: Int64
     var handle = UUID()
+
+    /// The handle is the identity: a photo reconnected to a moved file keeps
+    /// it, so everything keyed on the open photo carries on.
+    static func == (lhs: EditorPhoto, rhs: EditorPhoto) -> Bool { lhs.handle == rhs.handle }
+    func hash(into hasher: inout Hasher) { hasher.combine(handle) }
 
     var openingDocument: DocumentState {
         DocumentState(name: name, formatLabel: formatLabel, byteCount: byteCount,
@@ -179,6 +188,8 @@ extension UserDefaults {
     var exportStartHandler: (() async throws -> Void)?
     var exportCancelHandler: (() async -> Void)?
     var exportSaveHandler: ((String, URL?) async throws -> SavedLocation)?
+    var relinkHandler: ((URL) async throws -> EditorPhoto)?
+    private(set) var relinkCalls: [URL] = []
     var transferHandler: ((String, String?) async throws -> URL)?
     private(set) var transferCalls: [(export: String, fileName: String?)] = []
     var metadataHandler: (() async throws -> Void)?
@@ -436,6 +447,11 @@ extension FakeEditorServices {
         saveCalls.append((export, destination))
         if let exportSaveHandler { return try await exportSaveHandler(export, destination) }
         return SavedLocation(fileName: destination?.lastPathComponent ?? "saved.heic", folderLabel: folder.label)
+    }
+    func relink(_ photo: EditorPhoto, to url: URL) async throws -> EditorPhoto {
+        relinkCalls.append(url)
+        guard let relinkHandler else { throw UserFacingError(code: "source_different") }
+        return try await relinkHandler(url)
     }
     func transferFile(_ photo: EditorPhoto, export: String, fileName: String?) async throws -> URL {
         transferCalls.append((export, fileName))

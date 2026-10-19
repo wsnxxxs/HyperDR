@@ -10206,7 +10206,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The photo’s file was changed elsewhere"
+            "value" : "The photo file was changed elsewhere"
           }
         },
         "zh-Hans" : {
@@ -10223,13 +10223,132 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "“%@” was read again; adjustments start from the defaults."
+            "value" : "“%@” was read again and starts from the default adjustments."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "已重新读取“%@”，调整从默认开始。"
+          }
+        }
+      }
+    },
+    "source.missing.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can’t find this photo’s file"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找不到这张照片的文件"
+          }
+        }
+      }
+    },
+    "source.missing.body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "It may have been moved, renamed or deleted, or its disk isn’t connected. Reconnecting the disk resumes automatically."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它可能被移动、重命名或删除，或者所在的磁盘没有连接。重新接上磁盘会自动继续。"
+          }
+        }
+      }
+    },
+    "source.missing.locate" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Locate Photo…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新找到照片…"
+          }
+        }
+      }
+    },
+    "source.missing.announce %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can’t find the file for “%@”."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找不到“%@”的文件。"
+          }
+        }
+      }
+    },
+    "source.found.announce %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Found “%@” again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已重新找到“%@”。"
+          }
+        }
+      }
+    },
+    "export.blocker.sourceMissing" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can’t find the photo’s file, so it can’t be exported."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找不到照片的文件，无法导出。"
+          }
+        }
+      }
+    },
+    "ai.blocker.sourceMissing" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can’t find the photo’s file."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找不到照片的文件。"
           }
         }
       }

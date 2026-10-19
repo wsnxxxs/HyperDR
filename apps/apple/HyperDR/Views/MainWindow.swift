@@ -23,6 +23,11 @@ struct MainWindow: View {
     /// Whether the open panel is showing; the toolbar, the empty canvas and
     /// File ▸ Open… all set it.
     var isImporting = false
+    /// The panel was opened to find a photo's moved file, not to open a photo.
+    var isLocating = false
+    /// Asks for the photo's file again (the open panel, answered by
+    /// `locateSource` instead of an open).
+    func locateSource() { isLocating = true; isImporting = true }
     /// Whether the frame sheet is showing; the toolbar and File ▸ Frame… set it.
     var isFraming = false
     /// The export panel, export history and LUT library sheets; the
@@ -119,11 +124,12 @@ private struct EditorWindow: View {
                           allowedContentTypes: model.openableContentTypes) { result in
                 switch result {
                 case .success(let url):
-                    model.open([url])
+                    if window.isLocating { model.locateSource(url) } else { model.open([url]) }
                 case .failure(let error):
                     // The model ignores a cancelled panel.
-                    model.report(openFailure: error)
+                    if !window.isLocating { model.report(openFailure: error) }
                 }
+                window.isLocating = false
             }
             .sheet(isPresented: Bindable(window).isFraming, onDismiss: {
                 window.frameSheetDismissed(hasPhoto: model.document != nil, isAskingToSwitch: model.pendingPhotoSwitch != nil)

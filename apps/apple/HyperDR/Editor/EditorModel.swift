@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import HyperDREngine
 import HyperDRKit
@@ -107,6 +108,19 @@ import UniformTypeIdentifiers
     /// says so, so the sentence is not changed after it appears.
     @ObservationIgnored var restoreNoticePending = false
     @ObservationIgnored var restoreNoticeTask: Task<Void, Never>?
+    /// Set while the photo's file cannot be found; only for `source_missing`.
+    var sourceUnavailable: UserFacingError?
+    /// The name of a photo that was read again after another app changed its
+    /// file; shown as a chip over the canvas.
+    var sourceReplacedNotice: String?
+    @ObservationIgnored var sourceRetryTask: Task<Void, Never>?
+    @ObservationIgnored var sourceActivationObserver: (any NSObjectProtocol)?
+    @ObservationIgnored var sourceRetryInterval: Duration = .seconds(30)
+    /// Whether the app is in front: the timer retries only then.
+    @ObservationIgnored var appIsActive: () -> Bool = { NSApplication.shared.isActive }
+    @ObservationIgnored var isRetryingSource = false
+    @ObservationIgnored var locateTask: Task<Void, Never>?
+    @ObservationIgnored var replacedAwaitingExport: EditorPhoto?
     /// Bumped whenever the undo stack changes, so menu items re-evaluate.
     private(set) var undoRevision: UInt64 = 0
     /// Editor history never shares policy or registrations with AppKit text.
@@ -300,7 +314,7 @@ import UniformTypeIdentifiers
     /// Q14: document describes the new source immediately, but the previous
     /// frames, mode and canvas geometry stay visible until its reference arrives.
     /// Any open failure restores the complete previous state, or the empty state.
-    func open(_ urls: [URL]) {
+    func open(_ urls: [URL], afterReplacement replacedName: String? = nil) {
         if export.isInFlight {
             guard let url = urls.first(where: canOpen) else { return }
             pendingPhotoSwitch = PhotoSwitchRequest(kind: .open(url), displayName: url.lastPathComponent)
@@ -310,7 +324,7 @@ import UniformTypeIdentifiers
         canRestoreAtLaunch = false
         isRestoring = false
         prepareForPhotoSwitch()
-        beginOpen(urls)
+        beginOpen(urls, replacedName: replacedName)
     }
 
     func launch() {
@@ -353,7 +367,7 @@ import UniformTypeIdentifiers
 
     func report(openFailure error: any Error) { alert = UserFacingError.importFailure(error) }
 
-    private func beginOpen(_ urls: [URL], restored: EditorPhoto? = nil, openedAt: Duration? = nil) {
+    private func beginOpen(_ urls: [URL], restored: EditorPhoto? = nil, openedAt: Duration? = nil, replacedName: String? = nil) {
         isRestoring = false
         clearRestoreNotice()
         if case .failed(let error) = engine {
@@ -425,6 +439,7 @@ import UniformTypeIdentifiers
                         startRefreshing(opened)
                         applyInitialPreferences()
                         if restored != nil { armRestoreNotice() }
+                        if let replacedName { sourceReplacedNotice = replacedName }
                         refreshExportMetadata()
                         if let old = previous.photo, old != opened { await services.close(old) }
                         return
@@ -530,6 +545,7 @@ import UniformTypeIdentifiers
     }
 
     func publishAlert(_ error: UserFacingError?) { alert = error }
+    func renameDocument(_ name: String) { document?.name = name }
 
     func dismissAlert() { alert = nil }
 
@@ -663,7 +679,7 @@ import UniformTypeIdentifiers
                         cancelAI()
                         readyGain = nil
                         gainToken = nil
-                        open([photo.url])
+                        reopenReplacedSource(photo)
                         return
                     }
                     if restart { break }
@@ -726,12 +742,16 @@ import UniformTypeIdentifiers
             document?.phase = .ready
             if finishesRefresh { setRefreshing(false) }
             document?.previewError = nil
+            leaveSourceUnavailable(announce: true)
             canvas.setImageSize(frame.pixelSize, zoom: canvas.zoom)
             editedGainWeight = frame.hasGain ? frame.frame.map { Double(GainWeight.value(headroom: display.currentHeadroom, metadata: $0.metadata)) } ?? frame.gainWeight ?? services.displayState.gainWeight ?? 1 : nil
             display.gainWeight = selectedMode != .original ? editedGainWeight : nil
         case .failed(let error):
             setRefreshing(false)
             document?.previewError = error
+            // The work data is gone: nothing can be kept, as when an export finds out.
+            if error.code == "session_expired" { handleExportError(error) }
+            else { enterSourceUnavailable(error) }
         }
         thumbnailFrameDidChange()
         syncControls()

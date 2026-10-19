@@ -374,7 +374,11 @@ struct CanvasStatus: View {
         ZStack {
             if let document = model.document {
                 if hasFrame {
-                    if let error = document.previewError {
+                    if model.sourceUnavailable != nil {
+                        SourceMissingBanner { window.locateSource() }
+                            .frame(maxHeight: .infinity, alignment: .top)
+                            .padding(Space.s3)
+                    } else if let error = document.previewError {
                         PreviewErrorBanner(text: ErrorText(error))
                             .frame(maxHeight: .infinity, alignment: .top)
                             .padding(Space.s3)

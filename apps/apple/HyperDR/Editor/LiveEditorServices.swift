@@ -32,7 +32,7 @@ import os
     private var latestRequests: [UUID: PreviewRequest] = [:]
 
     private struct Record {
-        let session: PhotoSession
+        var session: PhotoSession
         var reference: PreviewFrame?
         var edited: PreviewFrame?
         // The task is also the cached result, including an empty result. Store
@@ -552,6 +552,17 @@ extension LiveEditorServices {
         do { try await kit.sessions.markSaved(id, export: version, saved: SavedMark(fileName: saved.name, folderDisplayName: saved.folderDisplayName)) }
         catch { Logger(subsystem: "com.hyperdr.HyperDR", category: "Export").warning("Export saved but its history mark could not be persisted") }
         return Self.savedLocation(saved)
+    }
+    func relink(_ photo: EditorPhoto, to url: URL) async throws -> EditorPhoto {
+        guard let kit, let record = records[photo.handle] else { throw UserFacingError(code: "source_missing") }
+        do {
+            let session = try await kit.sessions.relink(record.session.id, to: url)
+            try Task.checkCancellation()
+            guard records[photo.handle] != nil else { throw CancellationError() }
+            records[photo.handle]?.session = session
+            return EditorPhoto(url: session.sourceURL, name: session.displayName, formatLabel: photo.formatLabel,
+                               byteCount: session.byteCount, handle: photo.handle)
+        } catch { throw UserFacingError.service(error) }
     }
     func transferFile(_ photo: EditorPhoto, export: String, fileName: String?) async throws -> URL {
         let id = try exportSession(photo), kit = try await requireKit()

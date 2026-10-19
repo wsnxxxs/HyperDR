@@ -13,6 +13,7 @@ extension EditorModel {
     /// What the chip at the canvas's foot says, if anything.
     var canvasNotice: CanvasNotice? {
         if case .reopened(let hasHistory) = restoreNotice { return .restored(hasHistory: hasHistory) }
+        if let sourceReplacedNotice { return .sourceReplaced(name: sourceReplacedNotice) }
         return nil
     }
 
@@ -44,6 +45,7 @@ extension EditorModel {
         restoreNoticeTask?.cancel()
         restoreNoticeTask = nil
         if restoreNotice != nil { restoreNotice = nil }
+        if sourceReplacedNotice != nil { sourceReplacedNotice = nil }
     }
 
     func dismissRestoreNotice() { clearRestoreNotice() }

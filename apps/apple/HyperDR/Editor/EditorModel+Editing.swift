@@ -451,6 +451,9 @@ extension EditorModel {
         guard force || job != lastJob else { return }
         job.trace = PreviewTrace()
         lastJob = job
+        // The file cannot be found: the values are kept (and recorded for
+        // undo), but nothing is rendered until it is back.
+        if sourceUnavailable != nil, !isRetryingSource { return }
         clearPreviewError()
         requestBusy()
         renderScheduler?.update(job)

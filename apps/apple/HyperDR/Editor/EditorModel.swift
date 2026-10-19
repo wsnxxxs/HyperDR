@@ -173,7 +173,9 @@ import UniformTypeIdentifiers
     @ObservationIgnored private var editedGainWeight: Double?
 
     private(set) var frameRevision: UInt64 = 0
-    @ObservationIgnored private var referenceFrame: PreviewFrame?
+    @ObservationIgnored private var referenceFrame: PreviewFrame? {
+        didSet { canvas.referencePixelSize = referenceFrame.map { CGSize(width: $0.base.width, height: $0.base.height) } }
+    }
     @ObservationIgnored private var editedFrame: PreviewFrame?
     @ObservationIgnored private var engineObserver: Task<Void, Never>?
     @ObservationIgnored private var launchTask: Task<Void, Never>?
@@ -194,6 +196,10 @@ import UniformTypeIdentifiers
     /// while a new original is rendering.
     @ObservationIgnored var shownReferenceOptions: EditOptions?
     @ObservationIgnored var referenceRefreshTask: Task<Void, Never>?
+    /// The edge the "original" on screen was rendered at, and the edge of the
+    /// newest request for one (they differ while a larger original renders).
+    @ObservationIgnored var shownReferenceEdge = 0
+    @ObservationIgnored var requestedReferenceEdge = 0
     @ObservationIgnored var detailTask: Task<Void, Never>?
     @ObservationIgnored var detailTicket = 0
     @ObservationIgnored var originalDetailTrace: PreviewTrace?
@@ -426,7 +432,8 @@ import UniformTypeIdentifiers
                 document?.isPreparingCameraSupport = preparing
                 document?.isOpeningSlowly = slow
                 var reference: EditorPreview?
-                for await event in services.previews(for: opened, encoding: encoding, maxEdge: previewEdge) {
+                let openingEdge = previewEdge
+                for await event in services.previews(for: opened, encoding: encoding, maxEdge: openingEdge) {
                     try Task.checkCancellation()
                     guard generation == ticket else { throw CancellationError() }
                     if case .failed(let error) = event { throw error }
@@ -440,6 +447,7 @@ import UniformTypeIdentifiers
                         openRollback = nil
                         operation = nil
                         beginEditing(encoding: encoding, reference: reference ?? preview)
+                        shownReferenceEdge = openingEdge; requestedReferenceEdge = openingEdge
                         apply(event)
                         startScopes(original: true)
                         startCaptureFacts(opened)
@@ -609,7 +617,9 @@ import UniformTypeIdentifiers
 
     func updateViewport(_ size: CGSize, backingScale: Double) {
         canvas.setViewport(size, backingScale: backingScale)
-        guard document?.phase == .ready, submittedEdge != previewEdge else { return }
+        guard document?.phase == .ready else { return }
+        followPreviewEdgeWithReference()
+        guard submittedEdge != previewEdge else { return }
         scheduleRender(force: true)
     }
 

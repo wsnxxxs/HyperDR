@@ -59,6 +59,7 @@ import Synchronization
         model.viewMode = .compare
         model.canvas.setViewport(CGSize(width: 16, height: 16), backingScale: 1)
         model.canvas.previewPixelSize = CGSize(width: 1, height: 1)
+        model.canvas.referencePixelSize = CGSize(width: 1, height: 1)
         model.scheduleDetails()
         await model.detailTask?.value
         XCTAssertNotNil(model.originalDetailTrace)

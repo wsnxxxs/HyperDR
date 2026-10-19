@@ -178,6 +178,8 @@ extension UserDefaults {
     private(set) var receivedEdges: [Int] = []
     /// The options of every "original" frame asked for after the opening one.
     private(set) var referenceRenders: [EditOptions] = []
+    /// The `maxEdge` of each of those renders.
+    private(set) var referenceEdges: [Int] = []
     var referenceHandler: ((EditOptions) async throws -> EditorPreview?)?
     var models = ModelTable(runtimeReady: true, defaultID: "research-cnn-v1", models: [
         ModelChoice(id: "research-cnn-v1", name: "CNN", nameKey: "model.research-cnn-v1",
@@ -323,6 +325,7 @@ extension UserDefaults {
 
     func renderReference(_ photo: EditorPhoto, options: EditOptions, maxEdge: Int) async throws -> EditorPreview? {
         referenceRenders.append(options)
+        referenceEdges.append(maxEdge)
         return try await referenceHandler?(options) ?? preview
     }
 

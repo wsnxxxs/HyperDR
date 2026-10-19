@@ -111,6 +111,72 @@ import XCTest
         model.closeDocument()
     }
 
+    private func openedAtTier(_ viewport: CGSize, backingScale: Double) async throws -> (EditorModel,FakeEditorServices) {
+        let bundle = previewFixtureBundle()
+        let url = try XCTUnwrap(bundle.url(forResource:"photo",withExtension:"jpg",subdirectory:"Fixtures")
+            ?? bundle.url(forResource:"photo",withExtension:"jpg"))
+        let services = FakeEditorServices(openDelay:.zero,previewDelay:.milliseconds(1))
+        let model = EditorModel(services:services)
+        model.updateViewport(viewport,backingScale:backingScale)
+        model.open([url])
+        await eventually(timeout:.seconds(3)) { model.document?.phase == .ready }
+        return (model,services)
+    }
+
+    /// V-13: the "original" is rendered at the preview tier it was opened at, and
+    /// asks for a larger one when the window grows to a larger tier.
+    func testTheOriginalIsRenderedAgainWhenTheWindowGrowsToALargerTier() async throws {
+        let (model,services) = try await openedAtTier(CGSize(width:800,height:600),backingScale:1) // the 960 tier
+        XCTAssertEqual(model.previewEdge,960)
+        XCTAssertTrue(services.referenceEdges.isEmpty, "opening supplies the first original itself")
+
+        model.updateViewport(CGSize(width:1000,height:700),backingScale:1) // 1280
+        await eventually(timeout:.seconds(3)) { services.referenceEdges == [1280] }
+        model.updateViewport(CGSize(width:1600,height:1000),backingScale:2) // 2048
+        await eventually(timeout:.seconds(3)) { services.referenceEdges == [1280,2048] }
+        XCTAssertEqual(services.referenceRenders.last, model.referenceOptions, "the same neutral options at a larger edge")
+
+        model.updateViewport(CGSize(width:800,height:600),backingScale:1) // smaller tiers never re-render
+        await settle(100)
+        XCTAssertEqual(services.referenceEdges,[1280,2048])
+        model.updateViewport(CGSize(width:1600,height:1000),backingScale:2)
+        await settle(100)
+        XCTAssertEqual(services.referenceEdges,[1280,2048],"a tier already shown is not asked for again")
+        model.closeDocument()
+    }
+
+    /// V-13: a failed larger original leaves the smaller one up and is tried again.
+    func testAFailedLargerOriginalIsRetriedOnTheNextTierChange() async throws {
+        let (model,services) = try await openedAtTier(CGSize(width:800,height:600),backingScale:1)
+        services.referenceHandler = { _ in throw UserFacingError(code:"decode_failed") }
+        model.updateViewport(CGSize(width:1600,height:1000),backingScale:2)
+        await eventually(timeout:.seconds(3)) { services.referenceEdges == [2048] }
+        await settle(50)
+        XCTAssertEqual(model.shownReferenceEdge,960)
+        services.referenceHandler = nil
+        model.updateViewport(CGSize(width:1500,height:1000),backingScale:2)
+        await eventually(timeout:.seconds(3)) { services.referenceEdges == [2048,2048] }
+        await eventually(timeout:.seconds(3)) { model.shownReferenceEdge == 2048 }
+        model.closeDocument()
+    }
+
+    /// V-13: an original smaller than the canvas shows asks for its own detail
+    /// even when the edited frame is large enough.
+    func testTheOriginalNeedsDetailWhenItIsSmallerThanTheEditedFrame() {
+        let canvas = CanvasModel()
+        canvas.setImageSize(PixelSize(width:6000,height:4000))
+        canvas.setViewport(CGSize(width:1000,height:800),backingScale:2)
+        canvas.previewPixelSize = CGSize(width:2048,height:1365)
+        canvas.referencePixelSize = CGSize(width:960,height:640)
+        XCTAssertFalse(canvas.needsEditedDetail)
+        XCTAssertTrue(canvas.needsOriginalDetail)
+        canvas.referencePixelSize = CGSize(width:2048,height:1365)
+        XCTAssertFalse(canvas.needsOriginalDetail)
+        canvas.referencePixelSize = CGSize(width:6000,height:4000)
+        canvas.zoomToActualPixels()
+        XCTAssertFalse(canvas.needsOriginalDetail,"a full-resolution original has nothing more to give")
+    }
+
     func testDisplayOnlyOptionsAndPeekingDoNotSubmitNewEdits() async throws {
         let (model,services,session) = try await opened(); defer { session.close() }
         let before = services.receivedOptions.count

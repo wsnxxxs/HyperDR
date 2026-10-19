@@ -16,12 +16,20 @@ enum ZoomReadout: Equatable {
     @ObservationIgnored private var imageSize: PixelSize?
     @ObservationIgnored var onGeometryChange: (() -> Void)?
     @ObservationIgnored var previewPixelSize: CGSize?
+    /// The size of the "original" frame, which is rendered at its own tier and
+    /// so can be smaller than the edited frame (V-13).
+    @ObservationIgnored var referencePixelSize: CGSize?
 
-    var needsDetail: Bool {
-        guard let previewPixelSize, geometry.displayedSize.width > 0,
-              previewPixelSize.width + 0.5 < geometry.imageSize.width else { return false }
-        return previewPixelSize.width + 0.5 < geometry.displayedSize.width * geometry.backingScale
+    /// Whether `size`, a frame's pixel size, has fewer pixels than the canvas
+    /// shows and the source has more to give.
+    private func lacksPixels(_ size: CGSize?) -> Bool {
+        guard let size, geometry.displayedSize.width > 0,
+              size.width + 0.5 < geometry.imageSize.width else { return false }
+        return size.width + 0.5 < geometry.displayedSize.width * geometry.backingScale
     }
+    var needsDetail: Bool { needsEditedDetail }
+    var needsEditedDetail: Bool { lacksPixels(previewPixelSize) }
+    var needsOriginalDetail: Bool { lacksPixels(referencePixelSize) }
 
     var visibleSourceRect: CGRect? {
         let image = geometry.imageFrame

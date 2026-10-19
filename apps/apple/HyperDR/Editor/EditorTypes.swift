@@ -42,6 +42,10 @@ struct SourceSummary: Equatable {
     var domain: InputDomain
     var colorName: String
     var degradationReasons: [String]
+    /// Where the colour description came from, as the engine names it
+    /// (`icc`, `cicp`, `png-srgb`, `assumed`, …); `assumed` means the file
+    /// states none and the input colour choice applies.
+    var colorSource: String? = nil
 }
 
 enum DocumentPhase: Equatable {

@@ -33,8 +33,8 @@ import XCTest
         model.viewMode = .original
         XCTAssertNil(model.display.gainWeight)
         model.viewMode = .compare
-        XCTAssertEqual(model.viewMode, .original)
-        XCTAssertFalse(model.isAvailable(.compare))
+        XCTAssertEqual(model.viewMode, .compare)
+        XCTAssertTrue(model.isAvailable(.compare))
         model.viewMode = .edited
         XCTAssertNotNil(model.display.gainWeight)
     }
@@ -77,7 +77,7 @@ import XCTest
         model.adjust("brightness", to: 0.612345)
         await eventually { ticker.isWaiting }
         ticker.tick()
-        try await waitUntil { model.document?.isRefreshing == false }
+        try await waitUntil { services.renderedPurposes.count >= 3 }
         model.canvas.setViewport(CGSize(width: 1000, height: 800), backingScale: 2)
         model.canvas.zoomIn()
         model.viewMode = .original
@@ -112,12 +112,12 @@ import XCTest
         XCTAssertTrue(model.hasEditedFrame)
         services.previewFailure = nil
         services.preview = previousPreview
-        model.adjust("contrast", to: 1.123456)
+        model.adjust("hdrStrength", to: 0.723456)
         await eventually { ticker.isWaiting }
         ticker.tick()
-        try await waitUntil { model.document?.isRefreshing == false }
-        XCTAssertEqual(services.receivedAdjustments.last?["brightness"], 0.612345)
-        XCTAssertEqual(services.receivedAdjustments.last?["contrast"], 1.123456)
+        try await waitUntil { services.receivedOptions.last?["hdrStrength"] == .number(0.72) && services.renderedPurposes.count >= 4 }
+        XCTAssertEqual(services.receivedOptions.last?["brightness"], .number(0.61))
+        XCTAssertEqual(services.receivedOptions.last?["hdrStrength"], .number(0.72))
     }
 
     func testUnsupportedAndEngineFailureDoNotReplacePhoto() {
@@ -162,7 +162,7 @@ import XCTest
         XCTAssertNil(model.canvas.imageFrame)
     }
 
-    func testRefreshRetainsFrameAndOriginalDoubleValues() async throws {
+    func testRefreshRetainsFrameAndQuantizedValues() async throws {
         let services = FakeEditorServices(openDelay: .zero, previewDelay: .milliseconds(10))
         let ticker = ManualFrameTicker()
         let model = EditorModel(services: services, ticker: ticker)
@@ -171,10 +171,10 @@ import XCTest
         model.adjust("brightness", to: 0.612345)
         await eventually { ticker.isWaiting }
         ticker.tick()
-        XCTAssertEqual(model.document?.isRefreshing, true)
+        XCTAssertEqual(model.document?.isRefreshing, false)
         XCTAssertTrue(model.hasPreviewFrame)
-        try await waitUntil { model.document?.isRefreshing == false }
-        XCTAssertEqual(services.receivedAdjustments.last?["brightness"], 0.612345)
+        try await waitUntil { services.renderedPurposes.count >= 3 }
+        XCTAssertEqual(services.receivedOptions.last?["brightness"], .number(0.61))
         services.previewFailure = UserFacingError(code: "raw_budget")
         model.adjust("brightness", to: 0.712345)
         await eventually { ticker.isWaiting }
@@ -220,7 +220,7 @@ import XCTest
         model.adjust("brightness", to: 0.712345)
         await eventually { ticker.isWaiting }
         ticker.tick()
-        XCTAssertEqual(model.document?.isRefreshing, true)
+        XCTAssertEqual(model.document?.isRefreshing, false)
         // Allow the refresh operation to start before the renderer fails.
         try await Task.sleep(for: .milliseconds(20))
         model.reportCanvasFailure("fixture")
@@ -278,7 +278,7 @@ import XCTest
             XCTAssertEqual(model.document, repeated.document)
             XCTAssertEqual(model.engine, repeated.engine)
             XCTAssertEqual(model.alert, repeated.alert)
-            XCTAssertFalse(model.isAvailable(.compare))
+            XCTAssertEqual(model.isAvailable(.compare), model.hasReferenceFrame && model.hasEditedFrame)
             switch scenario {
             case .empty:
                 XCTAssertEqual(model.workspace, .empty)

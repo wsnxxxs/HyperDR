@@ -17,8 +17,11 @@ public actor LUTLibrary {
         let names = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
         return names.compactMap { name -> LUTEntry? in
             guard name.hasSuffix(".json"), let id = try? LUTID(rawValue: String(name.dropLast(5))),
-                  let entry = try? LUTFiles.metadata(name, in: directory), entry.id == id,
+                  var entry = try? LUTFiles.metadata(name, in: directory), entry.id == id,
                   let blob = try? LUTFiles.file(id.rawValue + ".cube", in: directory) else { return nil }
+            var info = stat()
+            guard fstat(blob, &info) == 0 else { Darwin.close(blob); return nil }
+            entry.byteCount = UInt64(max(0, info.st_size))
             Darwin.close(blob)
             return entry
         }.sorted { $0.name.lowercased() < $1.name.lowercased() }
@@ -46,7 +49,7 @@ public actor LUTLibrary {
             try LUTFiles.writeMetadata(entry, in: directory, replacing: false)
         }
         if let session { return try await apply(entry, from: directory, to: session) }
-        return entry
+        return try sized(entry, in: directory)
     }
     public func apply(_ id: LUTID, to session: SessionID) async throws -> LUTEntry {
         let directory = try LUTFiles.directory(root)
@@ -60,9 +63,13 @@ public actor LUTLibrary {
         // actor suspension. A concurrent removal cannot revoke this apply.
         let source = try LUTFiles.file(entry.id.rawValue + ".cube", in: library)
         defer { Darwin.close(source) }
+        var info = stat()
+        guard fstat(source, &info) == 0 else { throw LUTFiles.invalid() }
+        var result = entry
+        result.byteCount = UInt64(max(0, info.st_size))
         let destination = try await sessions.lutDirectory(session)
         _ = try LUTFiles.install(source, in: destination.descriptor, expected: entry.id)
-        return entry
+        return result
     }
     public func update(_ id: LUTID, input: LUTSpace, output: LUTSpace) throws -> LUTEntry {
         let directory = try LUTFiles.directory(root)
@@ -71,7 +78,16 @@ public actor LUTLibrary {
         guard entry.id == id else { throw LUTFiles.invalid() }
         entry.input = input; entry.output = output
         try LUTFiles.writeMetadata(entry, in: directory, replacing: true)
-        return entry
+        return try sized(entry, in: directory)
+    }
+    private func sized(_ entry: LUTEntry, in directory: Int32) throws -> LUTEntry {
+        let file = try LUTFiles.file(entry.id.rawValue + ".cube", in: directory)
+        defer { Darwin.close(file) }
+        var info = stat()
+        guard fstat(file, &info) == 0 else { throw LUTFiles.invalid() }
+        var result = entry
+        result.byteCount = UInt64(max(0, info.st_size))
+        return result
     }
     public func remove(_ id: LUTID) throws {
         let directory = try LUTFiles.directory(root)

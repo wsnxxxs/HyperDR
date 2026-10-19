@@ -78,7 +78,11 @@ extension EditorModel {
         for url in urls {
             guard !Task.isCancelled else { break }
             do { _ = try await services.importLUT(url) }
-            catch { lut.failures.append(UserFacingError.service(error)) }
+            catch {
+                let failure = UserFacingError.service(error)
+                lut.failures.append(UserFacingError(code: failure.code,
+                    detail: url.lastPathComponent, variant: failure.variant))
+            }
         }
         lut.library = await services.lutEntries()
     }
@@ -107,6 +111,17 @@ extension EditorModel {
         syncExportState()
     }
     func resetPreferences() { updatePreferences(Preferences()) }
+    func revealExportFolder() async {
+        guard preferences.exportFolder.ready, let target = preferences.exportFolder.target else { return }
+        do { try await target.reveal(); preferences.failure = nil }
+        catch { preferences.failure = UserFacingError.service(error) }
+    }
+    var aboutInformation: AboutInformation {
+        var information = preferences.about
+        information.osBuild = document?.source?.raw?.osBuild
+        information.decoderVersion = document?.source?.raw?.decoderVersion
+        return information
+    }
     func setExportFolder(_ url: URL) async {
         do { preferences.exportFolder = try await services.setExportFolder(url); preferences.failure = nil }
         catch { preferences.failure = UserFacingError.service(error) }

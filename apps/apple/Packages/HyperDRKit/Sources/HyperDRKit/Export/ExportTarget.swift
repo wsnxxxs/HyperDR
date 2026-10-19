@@ -1,3 +1,4 @@
+import AppKit
 import Darwin
 import Foundation
 import HyperDREngine
@@ -50,6 +51,7 @@ public actor ExportTarget {
     private let roots: [URL]
     private let bookmarkFile: URL
     private let access: any SecurityScopedAccess
+    private let openFolder: @Sendable (URL) async -> Bool
     private let hooks: CopyHooks
     private var selected: URL?
 
@@ -57,8 +59,11 @@ public actor ExportTarget {
         self.init(configuration: configuration, sessions: sessions, access: SystemSecurityScopedAccess())
     }
     init(configuration: KitConfiguration, sessions: SessionStore, access: any SecurityScopedAccess,
-         copyRead: CopyRead? = nil, hooks: CopyHooks = CopyHooks()) {
-        self.sessions = sessions; self.access = access
+         copyRead: CopyRead? = nil, hooks: CopyHooks = CopyHooks(),
+         openFolder: @escaping @Sendable (URL) async -> Bool = { url in
+             await MainActor.run { NSWorkspace.shared.open(url) }
+         }) {
+        self.sessions = sessions; self.access = access; self.openFolder = openFolder
         var hooks = hooks
         if let copyRead { hooks.read = copyRead }
         self.hooks = hooks
@@ -108,6 +113,14 @@ public actor ExportTarget {
         let lease = SecurityScopeLease(url: selected, access: access)
         let descriptor = try Self.openFolder(selected, excluding: roots)
         return ExportFolderSnapshot(label: Self.label(selected), descriptor: descriptor, lease: lease)
+    }
+
+    /// Resolve the pinned, security-scoped directory at invocation time. No URL
+    /// crosses the editor/view boundary and renaming cannot retarget the grant.
+    public func reveal(folder: ExportFolderSnapshot) async throws {
+        let url = try Self.directoryURL(folder.descriptor)
+        guard await openFolder(url) else { throw Self.error("export_folder_unwritable") }
+        withExtendedLifetime(folder) {}
     }
 
     public func save(session: SessionID, export: ExportID, folder: ExportFolderSnapshot) async throws -> SavedExport {

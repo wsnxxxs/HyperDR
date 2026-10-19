@@ -27,6 +27,8 @@ public struct LUTEntry: Sendable, Hashable, Codable, Identifiable {
     public let name: String
     public var input: LUTSpace
     public var output: LUTSpace
+    /// Derived from the installed file, never trusted from metadata.
+    public var byteCount: UInt64 = 0
     private enum CodingKeys: String, CodingKey {
         case id = "lutId", name = "lutName", input = "lutInput", output = "lutOutput"
     }

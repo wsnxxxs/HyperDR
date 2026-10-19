@@ -1,4 +1,5 @@
 import Foundation
+import HyperDREngine
 import Synchronization
 import Testing
 @testable import HyperDRKit
@@ -11,6 +12,30 @@ private final class FolderSnapshotAccess: SecurityScopedAccess {
 }
 
 struct ExportFolderSnapshotTests {
+    @Test func revealUsesCapturedAuthorityAfterRenameAndPreferenceChange() async throws {
+        let env = try JobEnvironment(), access = FolderSnapshotAccess()
+        let opened = Mutex<[URL]>([])
+        let target = ExportTarget(configuration: env.configuration, sessions: env.sessions, access: access,
+            openFolder: { url in
+                #expect(access.active > 0)
+                opened.withLock { $0.append(url) }
+                return true
+            })
+        let alpha = env.root.appendingPathComponent("alpha"), beta = env.root.appendingPathComponent("beta")
+        for url in [alpha, beta] { try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true) }
+        _ = try await target.setFolder(alpha)
+        let captured = try await target.captureFolder()
+        _ = try await target.setFolder(beta)
+        let moved = env.root.appendingPathComponent("moved")
+        try FileManager.default.moveItem(at: alpha, to: moved)
+        try FileManager.default.createSymbolicLink(at: alpha, withDestinationURL: beta)
+        try await target.reveal(folder: captured)
+        #expect(opened.withLock { $0.map { $0.resolvingSymlinksInPath().path } } == [moved.resolvingSymlinksInPath().path])
+        let denied = ExportTarget(configuration: env.configuration, sessions: env.sessions, access: access, openFolder: { _ in false })
+        do { try await denied.reveal(folder: captured); Issue.record("Expected opener failure") }
+        catch { #expect((error as? HyperDREngine.HyperDRError)?.code == "export_folder_unwritable") }
+    }
+
     @Test func capturedAuthoritySurvivesPreferenceChangesAndDirectoryRename() async throws {
         let env = try JobEnvironment(), access = FolderSnapshotAccess()
         let target = ExportTarget(configuration: env.configuration, sessions: env.sessions, access: access)

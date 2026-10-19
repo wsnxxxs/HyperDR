@@ -57,6 +57,7 @@ import UniformTypeIdentifiers
     func exportFolder() async -> ExportFolder
     func setExportFolder(_ url: URL) async throws -> ExportFolder
     func encodingCapabilities() async throws -> EditorCapabilities
+    func aboutInformation() async -> AboutInformation
     func diagnostics() async -> String
     func exportFileURL(_ photo: EditorPhoto, export: String) async throws -> URL
     func lutEntries() async -> [LUTItem]

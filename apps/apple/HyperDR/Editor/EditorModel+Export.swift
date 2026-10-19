@@ -58,6 +58,7 @@ extension EditorModel {
         catch { preferences.failure = UserFacingError.service(error) }
         preferences.exportFolder = await services.exportFolder()
         preferences.diagnostics = await services.diagnostics()
+        preferences.about = await services.aboutInformation()
         lut.library = await services.lutEntries()
         timingHistory = await services.exportTimingHistory()
         syncExportState()

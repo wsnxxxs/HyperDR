@@ -12,6 +12,9 @@ struct CanvasAdornments: View {
     let model: EditorModel
     let hint: CanvasHintState
     let showsInspector: Bool
+    /// How much of the canvas's foot is taken by the card, chip and capsule
+    /// (`CanvasBottomReserve.total`): the legend and the hint stay above it.
+    var bottomReserve: CGFloat = 0
     /// The divider was grabbed or let go; the user is acting on the canvas.
     var onSplitEditing: (Bool) -> Void = { _ in }
 
@@ -20,7 +23,7 @@ struct CanvasAdornments: View {
             if let image = model.canvas.imageFrame {
                 let visible = image.intersection(CGRect(origin: .zero, size: proxy.size))
                 if !visible.isNull, visible.width > 0, visible.height > 0 {
-                    adornments(image: image, visible: visible, canvasWidth: proxy.size.width)
+                    adornments(image: image, visible: visible, canvas: proxy.size)
                 }
             }
         }
@@ -28,7 +31,9 @@ struct CanvasAdornments: View {
 
     // MARK: Layout
 
-    @ViewBuilder private func adornments(image: CGRect, visible: CGRect, canvasWidth: CGFloat) -> some View {
+    @ViewBuilder private func adornments(image: CGRect, visible: CGRect, canvas: CGSize) -> some View {
+        let canvasWidth = canvas.width
+        let clearance = CanvasBottomReserve.clearance(reserve: bottomReserve, canvasHeight: canvas.height, visibleMaxY: visible.maxY)
         let peeking = model.isPeekingOriginal
         let comparing = Self.showsSplit(viewMode: model.viewMode, isPeeking: peeking,
                                         hasReference: model.hasReferenceFrame, hasEdited: model.hasEditedFrame)
@@ -54,8 +59,9 @@ struct CanvasAdornments: View {
             if !legend.isEmpty {
                 let dividerX = comparing ? SplitGeometry.dividerX(ratio: model.splitRatio, in: image) : visible.minX  // legend sits right of the divider
                 CanvasLegend(rows: legend)
+                    .reportsCanvasFrame(name: "legend")
                     .padding(.leading, 12 + max(0, dividerX - visible.minX))
-                    .padding(.bottom, 12)
+                    .padding(.bottom, 12 + clearance)
                     .frame(width: visible.width, height: visible.height, alignment: .bottomLeading)
                     .position(x: visible.midX, y: visible.midY)
                     .allowsHitTesting(false)
@@ -63,7 +69,8 @@ struct CanvasAdornments: View {
             if let key = hint.shown, legend.isEmpty {
                 CanvasHint(Text(LocalizedStringKey(key)))
                     .frame(maxWidth: max(0, canvasWidth - 32))
-                    .padding(.bottom, 16)
+                    .reportsCanvasFrame(name: "hint")
+                    .padding(.bottom, 16 + clearance)
                     .frame(width: visible.width, height: visible.height, alignment: .bottom)
                     .position(x: visible.midX, y: visible.midY)
                     .transition(.opacity)

@@ -48,12 +48,10 @@ struct CanvasStage: View {
             .background { PhotoShadow(frame: model.canvas.imageFrame) }
             .overlay { PhotoCorners(frame: model.canvas.imageFrame) }
             .overlay { PhotoBadge(model: model) }
-            .overlay { CanvasAdornments(model: model, hint: hint, showsInspector: showsInspector) { editing in
-                if editing { hint.dismiss() }
-            } }
-            .overlay { CanvasStatus(model: model, window: window) }
-            .overlay(alignment: .bottom) {
-                if !showsInspector { ExportCanvasCapsule(model: model, window: window) }
+            .overlay {
+                CanvasFloating(model: model, window: window, hint: hint, showsInspector: showsInspector) { editing in
+                    if editing { hint.dismiss() }
+                }
             }
             .overlay { if focused && !focusedByPointer { FocusRing() } }
             .focusable()
@@ -276,6 +274,36 @@ enum PhotoBadgeKind: Equatable {
     }
 }
 
+// MARK: - Floating things
+
+/// What floats over the photo: the compare divider and legend, the status
+/// card or chip, the export capsule. The foot of the canvas is shared: the
+/// card, chip and capsule report their height and the legend and hint keep
+/// above them (`CanvasBottomReserve`), however the sentences wrap.
+struct CanvasFloating: View {
+    let model: EditorModel
+    let window: EditorWindowState
+    let hint: CanvasHintState
+    let showsInspector: Bool
+    var onSplitEditing: (Bool) -> Void = { _ in }
+
+    /// What the card, chip and capsule take at the canvas's foot.
+    @State private var foot = CanvasBottomReserve()
+
+    var body: some View {
+        ZStack {
+            CanvasAdornments(model: model, hint: hint, showsInspector: showsInspector,
+                             bottomReserve: foot.total, onSplitEditing: onSplitEditing)
+            CanvasStatus(model: model, window: window)
+            if !showsInspector {
+                ExportCanvasCapsule(model: model, window: window, lift: foot.status)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            }
+        }
+        .onPreferenceChange(CanvasBottomReserveKey.self) { foot = $0 }
+    }
+}
+
 // MARK: - Status
 
 /// What the canvas is doing: reading or building the first frame, refreshing
@@ -301,12 +329,14 @@ struct CanvasStatus: View {
                     }
                     if document.isPreparingCameraSupport {
                         CameraSupportCard(fileName: document.name, canCancel: model.canCancelOpen, cancel: cancelOpen)
+                            .reportsCanvasFoot(\.status, gap: Space.s4, name: "status")
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                             .padding(Space.s4)
                             .transition(.opacity)
                     } else if showsBusy, let label = busyLabel(document) {
                         Label { Text(label) } icon: { CanvasSpinner(size: 12) }
                             .hdrOverlayChip()
+                            .reportsCanvasFoot(\.status, gap: Space.s3, name: "status")
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                             .padding(Space.s3)
                     }

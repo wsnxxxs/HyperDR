@@ -109,6 +109,8 @@ private struct LockCatcher: View {
 struct ExportCanvasCapsule: View {
     let model: EditorModel
     let window: EditorWindowState
+    /// How far the card (or chip) at the canvas's foot lifts the capsule.
+    var lift: CGFloat = 0
 
     @Environment(\.locale) private var locale
 
@@ -134,7 +136,8 @@ struct ExportCanvasCapsule: View {
                     Capsule().strokeBorder(Color.hdr.accent, lineWidth: window.isEmphasizingLock ? 2 : 0)
                 }
                 .hdrAnimation(Motion.standard, value: window.isEmphasizingLock)
-                .padding(.bottom, Space.s4)
+                .reportsCanvasFoot(\.capsule, gap: Space.s4, name: "capsule")
+                .padding(.bottom, Space.s4 + lift)
                 .accessibilityElement(children: .contain)
             }
             .transition(.opacity)

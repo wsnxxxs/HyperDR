@@ -17,7 +17,10 @@ struct ErrorText {
         let detail = error.detail.flatMap { $0.isEmpty ? nil : $0 }
         if let entry = Self.entries[error.code] {
             title = entry.title
-            if entry.messageTakesDetail, let detail {
+            if let variant = error.variant, let text = entry.variants[variant] {
+                message = text
+                self.detail = detail
+            } else if entry.messageTakesDetail, let detail {
                 message = entry.messageWithDetail(detail)
                 self.detail = nil
             } else {
@@ -48,6 +51,9 @@ struct ErrorText {
         /// For codes whose detail is a value the sentence names (the actual
         /// extension, the two camera models) rather than an engine message.
         var withDetail: ((String) -> LocalizedStringResource)? = nil
+        /// Sentences for an error's `variant` (the model's context for it:
+        /// whether the export had a frame, whether it was colour-only).
+        var variants: [String: LocalizedStringResource] = [:]
         var messageTakesDetail: Bool { withDetail != nil }
 
         func messageWithDetail(_ detail: String) -> LocalizedStringResource {
@@ -95,7 +101,15 @@ struct ErrorText {
         "hevc_main10_unavailable": Entry(title: "mac.err.hevc.title", message: "err.server.hevc_main10_unavailable"),
         "hevc_probe_failed": Entry(title: "mac.err.hevc.title", message: "err.server.hevc_probe_failed"),
         "hevc_encode_failed": Entry(title: "mac.err.hevc_encode_failed.title", message: "err.server.hevc_encode_failed"),
+        // The model tells whether the export had a frame; an unmarked one is read as without.
         "export_memory_budget": Entry(title: "mac.err.export_memory_budget.title",
-            message: "err.server.export_memory_budget"),
+            message: "err.server.export_memory_budget.noFrame",
+            variants: ["frame": "err.server.export_memory_budget.frame",
+                       "noFrame": "err.server.export_memory_budget.noFrame"]),
+        "export_dimension_limit": Entry(title: "mac.err.export_dimension_limit.title",
+            message: "err.server.export_dimension_limit",
+            variants: ["color": "err.server.export_dimension_limit.color"]),
+        "export_failed": Entry(title: "mac.err.export_failed.title", message: "err.server.export_failed"),
+        "convert_timeout": Entry(title: "mac.err.convert_timeout.title", message: "err.server.convert_timeout"),
     ]
 }

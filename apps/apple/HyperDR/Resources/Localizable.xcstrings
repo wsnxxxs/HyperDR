@@ -9441,13 +9441,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "RAW development"
+            "value" : "RAW (this photo)"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "RAW 显影"
+            "value" : "RAW 显影（当前照片）"
           }
         }
       }
@@ -9533,6 +9533,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无"
+          }
+        }
+      }
+    },
+    "settings.diag.rawValueDNG %@ %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Decoder %1$@ · DNG · macOS build %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解码器 %1$@ · DNG · macOS 构建 %2$@"
           }
         }
       }

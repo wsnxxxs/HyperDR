@@ -305,7 +305,7 @@ struct CanvasStatus: View {
                             .padding(Space.s4)
                             .transition(.opacity)
                     } else if showsBusy, let label = busyLabel(document) {
-                        Label { Text(label) } icon: { ProgressView().controlSize(.mini) }
+                        Label { Text(label) } icon: { CanvasSpinner(size: 12) }
                             .hdrOverlayChip()
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                             .padding(Space.s3)
@@ -389,7 +389,7 @@ private struct FirstFrameProgress: View {
 
     var body: some View {
         VStack(spacing: Space.s3) {
-            ProgressView().controlSize(.regular)
+            CanvasSpinner(size: 22)
             Text(label)
                 .font(Font.hdr.control)
         }

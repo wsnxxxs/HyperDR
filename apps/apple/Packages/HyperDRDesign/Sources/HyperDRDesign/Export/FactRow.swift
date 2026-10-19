@@ -10,6 +10,8 @@ public struct FactRow: View {
         case success
         /// Something to look at, in the warning colour.
         case warn
+        /// A value that is not there ("—"): quieter than a real one.
+        case muted
     }
 
     public static let labelWidth: CGFloat = 64
@@ -46,6 +48,7 @@ public struct FactRow: View {
         case .normal: .hdr.ink
         case .success: .hdr.success
         case .warn: .hdr.warn
+        case .muted: .hdr.inkMuted
         }
     }
 }

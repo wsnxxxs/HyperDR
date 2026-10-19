@@ -113,7 +113,7 @@ private struct ExportSettings: View {
 
 // MARK: - About
 
-private struct AboutSettings: View {
+struct AboutSettings: View {
     let model: EditorModel
 
     @Environment(\.locale) private var locale
@@ -207,7 +207,10 @@ enum SettingsDiagnostics {
     static func raw(_ model: EditorModel, locale: Locale) -> String? {
         let about = model.aboutInformation
         guard let decoder = about.decoderVersion, let build = about.osBuild else { return nil }
-        return AppStrings.format("settings.diag.rawValue %@ %@", locale: locale, decoder, build)
+        // "8.dng" is decoder 8 on a DNG, said the way the camera group says it.
+        let isDNG = decoder.hasSuffix(".dng")
+        return AppStrings.format(isDNG ? "settings.diag.rawValueDNG %@ %@" : "settings.diag.rawValue %@ %@", locale: locale,
+                                 isDNG ? String(decoder.dropLast(4)) : decoder, build)
     }
 
     /// "macOS 27.0.1": the version only, without the build number.

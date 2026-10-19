@@ -78,7 +78,6 @@ struct OptionResolver: Sendable {
         }
         options.removeValue(forKey: "lutId")
         options.removeValue(forKey: "lutName")
-        options.removeValue(forKey: "lensCorrection")
 
         // Detail requests always render at the ceiling; Python's _preview
         // forces MAX_EDGE for regions regardless of the normal preview tier.

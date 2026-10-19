@@ -100,7 +100,7 @@ private let outsideTheTable: [(String, JSONValue)] = [
 /// Panel options the table keys, with a value that must invalidate the gain.
 private let insideTheTable: [(String, JSONValue)] = [
     ("modelId", .string("research-exif-v1")), ("colorGamut", .string("p3")),
-    ("clampSrgb", .bool(true)),
+    ("clampSrgb", .bool(true)), ("lensCorrection", .bool(false)),
 ]
 
 /// An 8-bit PNG with no colour chunk, so the engine assumes `colorGamut`.
@@ -147,7 +147,7 @@ private func untaggedPNG(at url: URL) throws {
         #expect(Set(insideTheTable.map(\.0)).isSubset(of: tablePanel))
         // Resource selections the resolver resolves or strips; none reaches
         // the model (a LUT acts after the prediction).
-        let resources: Set = ["lutId", "lutName", "lensCorrection"]
+        let resources: Set = ["lutId", "lutName"]
         let written = Set(base.values.keys)
             .union(["highlightRecovery", "contrast", "vibrance", "quality", "useModel", "sourceDomain"])
         let classified = tablePanel.union(outside).union(resources)

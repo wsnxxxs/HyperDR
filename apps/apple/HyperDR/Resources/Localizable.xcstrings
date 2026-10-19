@@ -9554,23 +9554,6 @@
         }
       }
     },
-    "camera.lensCorrection.on" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "On"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "开"
-          }
-        }
-      }
-    },
     "settings.diag.raw" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9924,6 +9907,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "更改边框"
+          }
+        }
+      }
+    },
+    "undo.lensCorrection" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lens Correction"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "镜头校正"
+          }
+        }
+      }
+    },
+    "camera.summary.off" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lens correction off"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "镜头校正关"
           }
         }
       }

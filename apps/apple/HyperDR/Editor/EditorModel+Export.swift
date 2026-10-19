@@ -343,6 +343,22 @@ extension EditorModel {
         edit.choices["outputGamut"] = id
         recordStep(from: previous, action: "outputGamut"); editChanged()
     }
+    /// The RAW lens correction switch (M3 §12.4): one undo step, and a new
+    /// preview, model gain and export key through the request's
+    /// `raw_lens_correction`. Only a RAW whose lens macOS can correct has the switch.
+    func setLensCorrection(_ on: Bool) {
+        guard photo != nil, !isEditingLocked, document?.source?.raw?.lensCorrectionSupported == true,
+              edit.lensCorrection != on else { return }
+        finishGestureBeforeEdit(); let previous = edit
+        edit.lensCorrection = on
+        recordStep(from: previous, action: "lensCorrection"); editChanged()
+    }
+    /// The camera group's summary key; nil when the photo is not a RAW.
+    var cameraSummaryKey: String? {
+        guard let raw = document?.source?.raw else { return nil }
+        guard raw.lensCorrectionSupported else { return "camera.summary.unsupported" }
+        return edit.lensCorrection ? "camera.summary.on" : "camera.summary.off"
+    }
     func setClampSrgb(_ on: Bool) {
         guard photo != nil, !isEditingLocked, edit.clampSrgb != on else { return }
         finishGestureBeforeEdit(); let previous = edit
@@ -351,9 +367,7 @@ extension EditorModel {
     }
     private var rawDiagnostics: String {
         guard let raw = document?.source?.raw else { return "" }
-        // R1 uses the engine default raw_lens_correction=true. R2/M3-R
-        // will expose its switch; until then every supported RAW applies it.
-        let support = raw.lensCorrectionSupported ? "supported, on" : "unsupported"
+        let support = raw.lensCorrectionSupported ? (edit.lensCorrection ? "supported, on" : "supported, off") : "unsupported"
         return "\nRAW: apple-ciraw · decoder \(raw.decoderVersion) · macOS build \(raw.osBuild)"
             + "\nCamera: \(captureFacts.model ?? "—") · Lens: \(captureFacts.lens ?? "—")"
             + "\nLens correction: " + support

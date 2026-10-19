@@ -53,6 +53,22 @@ private func code(_ body: () throws -> Void) -> String? {
         #expect(object["center"] == .bool(true))
     }
 
+    /// The RAW lens correction reaches the engine's `raw_lens_correction` (on by
+    /// default), for the preview, the model gain and the export alike.
+    @Test func lensCorrectionReachesEveryKindOfRequest() throws {
+        let resolver = try makeResolver()
+        let session = makeSession()
+        let on = makeRequest()
+        let off = makeRequest { $0["lensCorrection"] = .bool(false) }
+        #expect(try resolver.resolve(on, session: session).settings["raw_lens_correction"] == .bool(true))
+        #expect(try resolver.resolve(off, session: session).settings["raw_lens_correction"] == .bool(false))
+        #expect(try resolver.resolveExport(off.options, session: session).settings["raw_lens_correction"] == .bool(false))
+        #expect(try resolver.resolveModelGain(off.options, session: session).settings["raw_lens_correction"] == .bool(false))
+        // A different export request, so a different history key.
+        #expect(try ExportKey(request: resolver.resolveExport(on.options, session: session), frame: nil)
+            != ExportKey(request: resolver.resolveExport(off.options, session: session), frame: nil))
+    }
+
     @Test func validatesPreviewOnlyOptions() throws {
         let resolver = try makeResolver()
         #expect(code { _ = try resolver.resolve(makeRequest { $0["external_gain"] = .string("/tmp/gain") },

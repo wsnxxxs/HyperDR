@@ -473,6 +473,7 @@ extension EditorModel {
         case "encoding": String(localized: "undo.encoding")
         case "inputColor": String(localized: "undo.inputColor")
         case "aiMode": String(localized: "undo.aiMode")
+        case "lensCorrection": String(localized: "undo.lensCorrection")
         case "model": String(localized: "undo.model")
         case "reset": String(localized: "undo.reset")
         default: String(localized: "undo.adjust")

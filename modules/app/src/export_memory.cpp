@@ -1,4 +1,5 @@
 #include "hyperdr/app/export_memory.hpp"
+#include "hyperdr/codec/avif_grid.hpp"
 #include <limits>
 #include <thread>
 
@@ -76,9 +77,22 @@ ExportMemoryEstimate estimate_export_memory(std::uint32_t pw, std::uint32_t ph,
       e.encode=sum({overhead,resident,plane(canvas,12),vt});
       e.verify=sum({overhead,resident,plane(canvas,22)}); break;
     case OutputEncoding::AvifPq: case OutputEncoding::AvifHlg:
-      // HDR float + RGB16 + YUV444 + libaom reference/work planes.
-      e.encode=sum({overhead,resident,plane(canvas,66)});
-      e.verify=sum({overhead,resident,plane(canvas,20)}); break;
+      if (const auto cells=avif_grid_layout(cw,ch); cells.is_grid()) {
+        // A grid (E8) converts and codes one cell at a time. The canvas keeps its
+        // HDR float image (12 B/px) and the finished YUV444 cells (6 B/px);
+        // only the cell's RGB16 and libaom planes (about 42 B/px, as for one
+        // item) are transient. Measured on a 185 MP story canvas: 4.3 GB
+        // against 12.2 GB for one item. The verifying decode assembles the
+        // cells into one set of planes beside the canvas.
+        const auto cell=std::uint64_t(cells.cell_width)*cells.cell_height;
+        e.encode=sum({overhead,resident,plane(canvas,18),plane(cell,42)});
+        e.verify=sum({overhead,resident,plane(canvas,18),plane(cell,20)});
+      } else {
+        // HDR float + RGB16 + YUV444 + libaom reference/work planes.
+        e.encode=sum({overhead,resident,plane(canvas,66)});
+        e.verify=sum({overhead,resident,plane(canvas,20)});
+      }
+      break;
     case OutputEncoding::SdrJpeg: case OutputEncoding::SdrTiff:
       e.encode=sum({overhead,resident,plane(canvas,20)});
       e.verify=sum({overhead,resident,plane(canvas,16)}); break;

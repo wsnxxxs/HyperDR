@@ -43,6 +43,8 @@ inline constexpr ExportMeasurement export_measurements[] = {
   {"large:gallery:avif-pq:10",9504,6336,10264,7920,hyperdr::OutputEncoding::AvifPq,10,4892759248ULL},
   {"large:gallery:sdr-jpeg:8",9504,6336,10264,7920,hyperdr::OutputEncoding::SdrJpeg,8,2473167344ULL},
   {"large:story:iso-gainmap-jpeg:8",9504,6336,10200,18134,hyperdr::OutputEncoding::IsoGainMapJpeg,8,4761964720ULL},
+  // E8: 10200x18134 is written as a 3x5 AVIF grid (libaom cannot hold it as one frame).
+  {"large:story:avif-pq:10",9504,6336,10200,18134,hyperdr::OutputEncoding::AvifPq,10,4321104240ULL},
   {"large:story:pq:10",9504,6336,10200,18134,hyperdr::OutputEncoding::Pq,10,3915501288ULL},
   {"large:story:sdr-jpeg:8",9504,6336,10200,18134,hyperdr::OutputEncoding::SdrJpeg,8,3718090088ULL},
 };

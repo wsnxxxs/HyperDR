@@ -58,6 +58,12 @@ if(HYPERDR_WITH_CODECS)
 endif()
 
 if(HYPERDR_WITH_CODECS)
+  # E8: AVIF grid output, decoded by libavif and by ImageIO.
+  hyperdr_add_test(avif_grid_test LINK HyperDR::codec avif)
+  if(TARGET avif_grid_test)
+    target_link_libraries(avif_grid_test PRIVATE "-framework ImageIO" "-framework CoreGraphics" "-framework CoreFoundation")
+    target_include_directories(avif_grid_test PRIVATE ${PROJECT_SOURCE_DIR}/modules/codec/src)
+  endif()
   hyperdr_add_test(gain_map_jpeg_imageio_test LINK HyperDR::codec)
   if(TARGET gain_map_jpeg_imageio_test)
     target_link_libraries(gain_map_jpeg_imageio_test PRIVATE "-framework ImageIO" "-framework CoreFoundation")

@@ -5,7 +5,10 @@
 #include "hyperdr/app/engine.hpp"
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/foundation/file_io.hpp"
+#include <algorithm>
 #include <fstream>
+#include <iterator>
+#include <string>
 #include <iostream>
 #include <vector>
 #include <limits>
@@ -56,6 +59,30 @@ void external_grid_estimates() {
   require(small.peak()>=20*grid,"a 16 MP grid over a 16 K-pixel photo must cost about 20 B per grid pixel");
   const auto overflow=estimate_export_memory(128,128,128,128,OutputEncoding::IsoGainMapJpeg,8,false,0,0,0,true,0,UINT64_MAX);
   require(overflow.peak()==UINT64_MAX,"grid overflow admitted export");
+}
+// E8: a canvas past libaom's single-frame limit is coded as an AVIF grid, one
+// cell at a time, and admission must count that and not the impossible one-item
+// encode (12 GB for the 185 MP story canvas).
+void avif_grid_estimates() {
+  for(auto mode : {OutputEncoding::AvifPq,OutputEncoding::AvifHlg}) {
+    const auto story=estimate_export_memory(9504,6336,10200,18134,mode,10,true);
+    const auto canvas=std::uint64_t(10200)*18134;
+    require(story.encode<canvas*30 && story.verify<canvas*30,"AVIF grid is still counted as one frame");
+    require(story.encode>canvas*18 && story.verify>canvas*18,"AVIF grid dropped the resident canvas");
+    // Measured on the real RAW, whose peak is sampled to sit in the encode stage.
+    const auto measured=std::find_if(std::begin(export_measurements),std::end(export_measurements),[](const auto& r){
+      return std::string(r.name)=="large:story:avif-pq:10";});
+    require(measured!=std::end(export_measurements),"AVIF grid measurement missing");
+    require(story.encode>=measured->footprint*9/10 && story.encode<=measured->footprint*3/2,
+            "AVIF grid encode estimate outside the measured band");
+  }
+  // Just below the grid threshold is still one frame, at the single-item price.
+  const auto below=estimate_export_memory(8000,8000,11000,11000,OutputEncoding::AvifPq,10,false);
+  require(below.encode>=std::uint64_t(11000)*11000*66,"a single-item AVIF canvas lost its libaom planes");
+  const auto above=estimate_export_memory(8000,8000,12000,12000,OutputEncoding::AvifPq,10,false);
+  require(above.encode<std::uint64_t(12000)*12000*30,"a gridded canvas kept the single-item price");
+  // Exports whose canvas is a grid fit a budget the single-item estimate would blow.
+  require(above.peak()<8ULL<<30,"a 144 MP AVIF export should fit eight gigabytes as a grid");
 }
 void estimates() {
   constexpr std::uint64_t MiB=1024*1024;
@@ -251,6 +278,7 @@ void admission() {
 }
 int main() try {
   estimates();
+  avif_grid_estimates();
   measured_peaks();
   external_grid_estimates();
   external_measured_peaks();

@@ -588,6 +588,28 @@ class EngineContract(unittest.TestCase):
                 self.assertEqual(report["files"][0]["raw_processing"]["os_build"],json.loads(probe)["raw"]["osBuild"])
                 self.assertEqual(hashlib.sha256((destination/(source.stem+"-hyperdr.jpg")).read_bytes()).hexdigest(),golden["cases"][ident]["export_sha256"])
 
+    def test_heif_unsupported_detail_reaches_abi_and_report(self):
+        if not self.capabilities["codecs"]:
+            self.skipTest("requires codec-enabled build")
+        source = Path(__file__).resolve().parents[1] / "fixtures/heif_malformed/essential-property.heic"
+        expected = {"container": "heif", "feature": "essential_property"}
+        output, error = ctypes.c_void_p(), ctypes.POINTER(Error)()
+        try:
+            self.assertNotEqual(LIB.hyperdr_probe(self.engine, os.fsencode(source),
+                ctypes.byref(output), ctypes.byref(error)), 0)
+            self.assertIsNone(output.value)
+            self.assertEqual(error.contents.code, b"unsupported_format")
+            self.assertEqual(json.loads(error.contents.detail_json), expected)
+        finally:
+            LIB.hyperdr_error_free(error)
+            LIB.hyperdr_string_free(output)
+        with tempfile.TemporaryDirectory(prefix="hyperdr-heif-error-") as temporary:
+            request = {"command": {"input": str(source), "output": temporary, "overwrite": True}}
+            report = json.loads(result(LIB.hyperdr_convert, self.engine,
+                encoded(request), CALLBACK(), None, None))
+            self.assertEqual(report["files"][0]["error_code"], "unsupported_format")
+            self.assertEqual(report["files"][0]["error_detail"], expected)
+
     def test_synthetic_dng_is_unsupported_by_system(self):
         if not self.capabilities["codecs"]:
             self.skipTest("requires codec-enabled build")

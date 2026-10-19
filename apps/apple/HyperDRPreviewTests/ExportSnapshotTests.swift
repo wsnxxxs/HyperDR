@@ -20,6 +20,9 @@ import HyperDRDesign
     /// running export shows the same elapsed time and the same percentage.
     private final class Clock { var now = Date(timeIntervalSinceReferenceDate: 810_000_000) }
     private let clock = Clock()
+    /// Where the progress bar's moving band and ring are held, so a picture of
+    /// an unknown-length export is the same every time.
+    private let progressClock = Date(timeIntervalSinceReferenceDate: 810_000_000.35)
     private let source = URL(fileURLWithPath: "/fixtures/DSC04127.jpg")
     private let target = URL(fileURLWithPath: "/fixtures/Pictures/DSC04127.heic")
 
@@ -87,6 +90,23 @@ import HyperDRDesign
                                               url: URL(fileURLWithPath: "/fixtures/Pictures/DSC04127.heic")) : nil)
     }
 
+    func testIndeterminateProgressIsTheSameEveryTime() throws {
+        func picture(_ clock: Date?) throws -> [UInt8] {
+            let host = NSHostingView(rootView: ExportProgressBar(progress: .indeterminate, height: 8)
+                .frame(width: 200).environment(\.exportProgressClock, clock))
+            host.frame = CGRect(x: 0, y: 0, width: 200, height: 8)
+            host.layoutSubtreeIfNeeded()
+            let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            return Array(UnsafeBufferPointer(start: bitmap.bitmapData, count: bitmap.bytesPerRow * bitmap.pixelsHigh))
+        }
+        let held = Date(timeIntervalSinceReferenceDate: 810_000_000.35)
+        let first = try picture(held)
+        Thread.sleep(forTimeInterval: 0.25)
+        XCTAssertEqual(try picture(held), first)
+        XCTAssertNotEqual(try picture(held.addingTimeInterval(0.35)), first, "the clock, not the wall, places the band")
+    }
+
     // MARK: Rendering
 
     private func render<V: View>(_ view: V, scheme: ColorScheme, locale: String, width: CGFloat? = nil) throws -> NSBitmapImageRep {
@@ -95,6 +115,7 @@ import HyperDRDesign
             .fixedSize(horizontal: width == nil, vertical: true)
             .frame(width: width)
             .environment(ViewerSessionState())
+            .environment(\.exportProgressClock, progressClock)
             .environment(\.colorScheme, scheme)
             .environment(\.locale, Locale(identifier: locale))
         let host = NSHostingView(rootView: root)

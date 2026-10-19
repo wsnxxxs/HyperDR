@@ -167,6 +167,9 @@ std::vector<IpmaEntry> parse_ipma(std::span<const std::uint8_t> ipma) {
   const auto flags = (static_cast<std::uint32_t>(ipma[9]) << 16) | (static_cast<std::uint32_t>(ipma[10]) << 8) | ipma[11];
   std::size_t p = 12;
   const auto count = be32(ipma, p); p += 4;
+  const std::size_t minimum_entry = version < 1 ? 3 : 5;
+  if (count > container::kHeifMaxItems || count > (ipma.size() - p) / minimum_entry)
+    throw std::runtime_error("ipma entry count exceeds item or box bounds");
   std::vector<IpmaEntry> entries;
   entries.reserve(count);
   for (std::uint32_t i = 0; i < count; ++i) {

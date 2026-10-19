@@ -1,4 +1,5 @@
 #include <mach/mach.h>
+#include <unistd.h>
 
 #include <atomic>
 #include <bit>
@@ -10,7 +11,9 @@
 #include <thread>
 
 #include "hevc/testing.hpp"
+#include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/image_source.hpp"
+#include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/foundation/json.hpp"
 namespace {
 void check_diagnostic_modes() {
@@ -44,11 +47,45 @@ void check_diagnostic_modes() {
       convert() != original)
     throw std::runtime_error("diagnostic mode did not isolate chroma sampling");
 }
+// This executable links its own diagnostic yuv_to_rgb object next to the codec
+// library, which carries the product's object with the same symbols. The link
+// resolves them to one definition only because the library's copy is never
+// pulled in; prove that the library's HEIC decoder runs the diagnostic one, so
+// a link-order change cannot silently turn the switches into no-ops.
+void check_library_path_uses_diagnostic_object() {
+  hyperdr::PhotoRenditions photo;
+  photo.hdr = hyperdr::FloatImage(64, 64, 3);
+  for (unsigned y = 0; y < 64; ++y)
+    for (unsigned x = 0; x < 64; ++x) {
+      photo.hdr.at(x, y, 0) = .02F + .9F * float(x) / 63;
+      photo.hdr.at(x, y, 1) = .02F + .9F * float(y) / 63;
+      photo.hdr.at(x, y, 2) = ((x / 3 + y / 3) % 2) ? .8F : .05F;  // chroma edges
+    }
+  photo.stats.headroom_stops = 1;
+  const auto path = std::filesystem::temp_directory_path() /
+                    ("heif-input-probe-self-test-" + std::to_string(::getpid()) + ".heic");
+  hyperdr::write_binary_file_atomic(
+      path, hyperdr::encode_hdr_heic(photo, {}, 95, hyperdr::HdrEncoding::Pq), true);
+  try {
+    const auto normal = hyperdr::decode_image(path).linear_p3.pixels;
+    hyperdr::codec::hevc::testing::set_nearest_chroma(true);
+    const auto nearest = hyperdr::decode_image(path).linear_p3.pixels;
+    hyperdr::codec::hevc::testing::set_nearest_chroma(false);
+    if (hyperdr::decode_image(path).linear_p3.pixels != normal || nearest == normal)
+      throw std::runtime_error("the codec library's HEIC decoder does not run the diagnostic conversion");
+  } catch (...) {
+    hyperdr::codec::hevc::testing::set_nearest_chroma(false);
+    std::filesystem::remove(path);
+    throw;
+  }
+  std::filesystem::remove(path);
+}
 }  // namespace
 int main(int argc, char** argv) {
   try {
     if (argc == 2 && std::string_view(argv[1]) == "--self-test") {
       check_diagnostic_modes();
+      check_library_path_uses_diagnostic_object();
       return 0;
     }
     if (argc < 3 || argc > 6) return 2;

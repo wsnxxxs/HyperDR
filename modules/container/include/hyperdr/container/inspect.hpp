@@ -5,7 +5,7 @@
 // `HyperDR verify` and the conversion self-check both need to answer "is this
 // really a gain-map HEIC" from the bytes alone, before any decoder is involved.
 // Parsing the box tree directly is what makes that answer independent of
-// whichever libheif version happens to be installed.
+// any decoder library.
 
 #include <cstdint>
 #include <string>

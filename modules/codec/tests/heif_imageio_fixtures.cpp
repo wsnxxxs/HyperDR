@@ -4,8 +4,7 @@
 #include "hyperdr/container/inspect.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "internal/icc_profiles.hpp"
-#include <libheif/heif.h>
-#include <libheif/heif_items.h>
+#include "hyperdr/container/heif_reader.hpp"
 #include <pthread.h>
 #include <algorithm>
 #include <array>
@@ -17,30 +16,22 @@
 namespace {
 using namespace hyperdr;
 void require(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
-void checked(heif_error e){if(e.code!=heif_error_Ok)throw std::runtime_error(e.message);}
 void check_items(const std::vector<std::uint8_t>& bytes,unsigned tiles,bool grid) {
-  std::unique_ptr<heif_context,decltype(&heif_context_free)> c(heif_context_alloc(),heif_context_free);
-  require(bool(c),"allocate grid verification context");
-  checked(heif_context_read_from_memory_without_copy(c.get(),bytes.data(),bytes.size(),nullptr));
+  const auto file=read_heif(bytes);
   const unsigned gain=grid?tiles+2:2,tmap=grid?2*(tiles+1)+1:3;
-  require(heif_context_get_number_of_items(c.get())==int(tmap),"grid item budget mismatch");
-  std::vector<heif_item_id> ids(tmap);
-  require(heif_context_get_list_of_item_IDs(c.get(),ids.data(),ids.size())==int(tmap),"incomplete item enumeration");
-  using Key=std::pair<unsigned,std::uint32_t>;
-  std::map<Key,std::vector<heif_item_id>> expected,actual;
-  auto type=[](const char* s){return heif_fourcc(s[0],s[1],s[2],s[3]);};
-  expected[{gain,type("auxl")} ]={1};expected[{tmap,type("dimg")} ]={1,gain};
-  if(grid)for(unsigned i=0;i<tiles;++i){expected[{1,type("dimg")} ].push_back(2+i);expected[{gain,type("dimg")} ].push_back(gain+1+i);}
-  for(auto id:ids){
+  require(file.items.size()==tmap,"grid item budget mismatch");
+  using Key=std::pair<unsigned,std::string>;
+  std::map<Key,std::vector<std::uint32_t>> expected,actual;
+  expected[{gain,"auxl"} ]={1};expected[{tmap,"dimg"} ]={1,gain};
+  if(grid)for(unsigned i=0;i<tiles;++i){expected[{1,"dimg"} ].push_back(2+i);expected[{gain,"dimg"} ].push_back(gain+1+i);}
+  for(const auto& [id,item]:file.items){
     require(id>=1 && id<=tmap,"unexpected item ID");
-    const auto wanted=id==tmap?type("tmap"):grid&&(id==1||id==gain)?type("grid"):type("hvc1");
-    require(heif_item_get_item_type(c.get(),id)==wanted,"incorrect item type");
-    for(int index=0;;++index){std::uint32_t kind=0;heif_item_id* targets=nullptr;
-      auto n=heif_context_get_item_references(c.get(),id,index,&kind,&targets);
-      if(!n){require(!targets,"empty item reference allocation");break;}
-      const Key key{id,kind};require(!actual.contains(key),"repeated reference group");
-      actual[key]={targets,targets+n};heif_release_item_references(c.get(),&targets);
-    }
+    const char* wanted=id==tmap?"tmap":grid&&(id==1||id==gain)?"grid":"hvc1";
+    require(item.type==wanted,"incorrect item type");
+  }
+  for(const auto& reference:file.references){
+    const Key key{reference.from,reference.type};require(!actual.contains(key),"repeated reference group");
+    actual[key]=reference.to;
   }
   require(actual==expected,"incomplete item/reference enumeration");
 }

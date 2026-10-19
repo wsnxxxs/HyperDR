@@ -178,7 +178,7 @@ Bytes make_dinf() {
 
 Bytes make_iloc(const std::vector<Item>& items, std::uint64_t media_start) {
   // The bounded writer uses one 32-bit absolute extent per item. This is the
-  // common libheif-compatible layout and keeps the tmap rewrite unchanged.
+  // common layout (version 1, 4-byte offsets and lengths).
   Bytes payload{1, 0, 0, 0, 0x44, 0};
   put16(payload, static_cast<std::uint16_t>(items.size()));
   for (const auto& item : items) {

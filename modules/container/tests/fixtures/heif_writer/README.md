@@ -16,9 +16,9 @@ profiles or consult the clock.
 
 The five `.heic` files are deterministic container goldens. Their NAL payloads
 are deliberately fake IDR bytes: **they are not decodable photographs**. Tests
-verify container structure, bit-for-bit writer output and libheif item/reference
-parsing, not picture decoding. Parameter sets are real so libheif can interpret
-512x512 dimensions and 8/10-bit configuration.
+verify container structure, bit-for-bit writer output and item/reference
+parsing by our own reader, not picture decoding. Parameter sets are real so the
+reader can interpret 512x512 dimensions and 8/10-bit configuration.
 
 - `single8`: one hvc1 item.
 - `single10-crop`: a 127x95 1×1 grid over one hidden 10-bit PQ hvc1, with clli.
@@ -35,8 +35,8 @@ to the bytes, metadata and `SHA256SUMS` together; do not refresh goldens to hide
 an unexpected test failure.
 
 The current writer is a write-only API over borrowed EncodedSequence bytes.
-libheif is an independent test oracle only, not a production dependency of
-container. Opening fake-payload goldens says nothing about real codec quality,
+The independent reader of the writer's real output is ImageIO
+(`heif_writer_imageio_test`). Opening fake-payload goldens says nothing about real codec quality,
 Apple HDR interpretation, or macOS 26 runtime compatibility; those are V3/V5
 checks.
 

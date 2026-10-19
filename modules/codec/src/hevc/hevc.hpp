@@ -207,7 +207,7 @@ void decode_item(const HvcConfig &, std::size_t count,
                  const EncodedTileReader &, const DecodedTileSink &,
                  const DecodeParams & = {});
 struct YuvRgbParams {
-  int matrix{6}; // unspecified (2) follows libheif 1.23's BT.601 default
+  int matrix{6}; // unspecified (2) is read as BT.601, as the input path always has
   bool full_range{false};
   unsigned chroma_location{
       1}; // absent VUI: centered; explicit H.265 types 0..5

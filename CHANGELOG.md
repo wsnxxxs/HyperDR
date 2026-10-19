@@ -5,6 +5,11 @@ semantic versioning; dates use ISO 8601.
 
 ## Unreleased
 
+- Remove libheif and libde265. HEIC and HEIF inputs are parsed by HyperDR's own
+  reader and decoded by VideoToolbox, and the write-time check of HEIC exports
+  uses the same reader. The app and the command-line tool no longer carry any
+  LGPL library, and the app bundle embeds no dylibs.
+
 - Remove external RAW DCP/XMP/LCP profiles, highlight-mode controls and sensor
   calibration flags from the engine and Kit. RAW gain and automatic Apple lens
   correction remain available. Obsolete highlight request keys are ignored.

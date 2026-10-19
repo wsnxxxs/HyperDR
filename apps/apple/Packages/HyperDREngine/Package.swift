@@ -1,9 +1,5 @@
 // swift-tools-version: 6.2
-import Foundation
 import PackageDescription
-
-let runtime = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-    .appendingPathComponent("../../../../build/xcframework/Runtime").standardized.path
 
 let package = Package(
     name: "HyperDREngine",
@@ -12,12 +8,11 @@ let package = Package(
     targets: [
         .binaryTarget(name: "HyperDREngineCore", path: "Artifacts/HyperDREngineCore.xcframework"),
         .target(name: "HyperDREngine", dependencies: ["HyperDREngineCore"], linkerSettings: [
-            .linkedLibrary("c++"), .linkedLibrary("heif"),
+            .linkedLibrary("c++"),
             .linkedFramework("CoreFoundation"), .linkedFramework("Metal"),
             .linkedFramework("Accelerate"),
             .linkedFramework("VideoToolbox"), .linkedFramework("CoreMedia"),
-            .linkedFramework("CoreVideo"),
-            .unsafeFlags(["-L", runtime, "-Xlinker", "-rpath", "-Xlinker", runtime])
+            .linkedFramework("CoreVideo")
         ]),
         .testTarget(name: "HyperDREngineTests", dependencies: ["HyperDREngine"])
     ]

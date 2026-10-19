@@ -1,8 +1,8 @@
 #include "../../../tests/support/temp_directory.hpp"
 // A 61 MP story card (10200x18134, 1445 HEIF items in the Adaptive file) must
 // export, pass the write-time verification of the native HEIF reader and open
-// again. libheif refused this file at 1000 items; the export used to stop at
-// the verification step.
+// again. The third-party reader used before P3b refused such a file at 1000
+// items, so the export used to stop at the verification step.
 #include "hyperdr/app/engine.hpp"
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/image_source.hpp"

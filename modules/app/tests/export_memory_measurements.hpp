@@ -4,9 +4,10 @@
 // Sources: public sony-ilce-7s.ARW and the read-only 61MP user RAW.
 // Failed codec cases are recorded in batch3-report.md, not used to claim a
 // completed encoding/verification peak. P3b-4: the HEIC rows were remeasured
-// with write-time verification on our own reader (all within 2% of the libheif
-// run: verification was never the peak) and the two large story Adaptive rows,
-// which libheif could not verify (1445 items), were added. The standalone
+// with write-time verification on our own reader (all within 2% of the
+// earlier run on the third-party reader: verification was never the peak) and
+// the two large story Adaptive rows, which that reader could not verify (1445
+// items), were added. The standalone
 // verification of the 61 MP file peaks at 40-78 MB (was 0.59-0.93 GB).
 struct ExportMeasurement {
   const char* name;

@@ -6,8 +6,6 @@ resolves the dependencies below through vcpkg or CMake `FetchContent`.
 | Component | Purpose | Upstream license information |
 | --- | --- | --- |
 | Little CMS 2 | ICC profile construction | MIT |
-| libheif | Transitional HEIF reading and decoding | LGPL-3.0-or-later |
-| libde265 | HEVC decoding selected by libheif | LGPL-3.0-or-later |
 | libavif | AVIF container and image encoding | BSD-2-Clause |
 | Alliance for Open Media libaom | AV1 codec selected by libavif's `aom` feature | BSD-2-Clause-style license and patent grant; see upstream `LICENSE` and `PATENTS` |
 | libjpeg-turbo | JPEG input, preview output, and Ultra HDR support | IJG, modified BSD, and zlib licenses |
@@ -19,12 +17,9 @@ resolves the dependencies below through vcpkg or CMake `FetchContent`.
 ## Platform codec configurations
 
 The native application targets macOS 26 and later on Apple Silicon. HEVC
-encoding uses Apple's VideoToolbox framework, and HEIF writing uses HyperDR's
-own writer. libheif and libde265 remain dynamic decoder libraries under
-LGPL-3.0-or-later; they are used only for HEIF reading and decoding.
-Corresponding source and replacement/relinking instructions must accompany
-these libraries when distributed. P3b will replace the remaining reader with
-HyperDR's HEIF parser and VideoToolbox decoding and remove these dependencies.
+encoding and decoding use Apple's VideoToolbox framework, and HEIF reading and
+writing use HyperDR's own code. No LGPL or GPL library is linked or shipped;
+every dependency above is statically linked.
 
 Phone HTTPS certificate generation uses [cryptography](https://github.com/pyca/cryptography)
 under Apache-2.0 or BSD-3-Clause. The desktop sidecar bundles this dependency;

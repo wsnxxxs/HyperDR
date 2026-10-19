@@ -38,7 +38,7 @@ struct Geometry {
         height = t.height;
       } else if (t.type == "imir") {
         // ISO/IEC 23008-12 axis 0 exchanges top and bottom (a vertical flip),
-        // axis 1 left and right; ImageIO and the previous libheif path agree.
+        // axis 1 left and right, as ImageIO reads them.
         if (t.value == 0)
           compose(1, 0, 0, -1, 0, height - 1);
         else
@@ -390,7 +390,7 @@ DecodedImage decode_heic_bytes(const std::vector<std::uint8_t>& bytes,
   auto exif_bytes = file.exif();
   auto exif = read_exif(exif_bytes.data(), exif_bytes.size());
   // Only a rotation or mirror property replaces the Exif orientation; a crop
-  // does not (the previous libheif path and ImageIO behave the same).
+  // does not (ImageIO behaves the same).
   const bool oriented_by_container =
       std::any_of(plan.transforms.begin(), plan.transforms.end(),
                   [](const HeifTransform& t) { return t.type == "irot" || t.type == "imir"; });

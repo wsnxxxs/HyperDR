@@ -2,7 +2,6 @@
 #include "hyperdr/container/heif_tmap.hpp"
 #include "hevc/hevc.hpp"
 #include "hyperdr/container/heif_writer.hpp"
-#include "hyperdr/container/heif_grid.hpp"
 #include "internal/icc_profiles.hpp"
 #include "hyperdr/container/exif.hpp"
 #include "hyperdr/container/inspect.hpp"
@@ -19,9 +18,6 @@
 #include "hyperdr/image/transfer.hpp"
 
 #include <avif/avif.h>
-#include <libheif/heif.h>
-#include <libheif/heif_items.h>
-#include <libheif/heif_properties.h>
 #include <png.h>
 #include <lcms2.h>
 
@@ -36,6 +32,7 @@
 #include <string_view>
 #include <vector>
 #include "heif_hlg_422.hpp"
+#include "heif_native_decode.hpp"
 
 namespace {
 
@@ -253,26 +250,10 @@ void require_linear_round_trip(const hyperdr::DecodedImage& decoded,
 //
 // Every encoding this project writes is 4:2:0 or interleaved RGB, so no HyperDR
 // output can stand in for the one HDR input shape cameras actually produce:
-// Sony's HEIF stills are Main 4:2:2 10 HLG. Decoding those needs libheif's
-// 4:2:2 chroma upsampling *and* an HEVC decoder that implements the range
-// extensions, neither of which any other test touches. The fixture is therefore
+// Sony's HEIF stills are Main 4:2:2 10 HLG. Decoding those needs 4:2:2 chroma
+// upsampling *and* an HEVC decoder that implements the range extensions,
+// neither of which any other test touches. The fixture is therefore
 // built here through VT's native Main42210 profile.
-
-struct TestContextDeleter {
-  void operator()(heif_context* p) const { if (p) heif_context_free(p); }
-};
-struct TestImageDeleter {
-  void operator()(heif_image* p) const { if (p) heif_image_release(p); }
-};
-struct TestHandleDeleter {
-  void operator()(heif_image_handle* p) const { if (p) heif_image_handle_release(p); }
-};
-
-void require_heif(const heif_error& error, const char* operation) {
-  if (error.code == heif_error_Ok) return;
-  throw std::runtime_error(std::string(operation) + ": " +
-                           (error.message ? error.message : "unknown libheif error"));
-}
 
 // Required native VT 4:2:2 fixture. Failure is a failure, never a skip.
 std::vector<std::uint8_t> encode_hlg_422(const hyperdr::FloatImage& linear) {
@@ -280,30 +261,23 @@ std::vector<std::uint8_t> encode_hlg_422(const hyperdr::FloatImage& linear) {
 }
 
 // Proves the fixture really is 4:2:2 before its decode is used as evidence:
-// asking libheif for the native colourspace is the only way to see the chroma
-// format the conversion to RGB would otherwise hide.
+// the hvcC and the decoded picture both say so, where the conversion to RGB
+// would otherwise hide the chroma format.
 void require_chroma_422(const std::vector<std::uint8_t>& bytes) {
-  std::unique_ptr<heif_context, TestContextDeleter> context(heif_context_alloc());
-  require(context != nullptr, "cannot allocate the 4:2:2 inspection context");
-  require_heif(heif_context_read_from_memory_without_copy(context.get(), bytes.data(),
-                                                          bytes.size(), nullptr),
-               "read the 4:2:2 fixture");
-  heif_image_handle* handle_raw = nullptr;
-  require_heif(heif_context_get_primary_image_handle(context.get(), &handle_raw),
-               "get the 4:2:2 fixture primary handle");
-  std::unique_ptr<heif_image_handle, TestHandleDeleter> handle(handle_raw);
-  heif_image* native_raw = nullptr;
-  require_heif(heif_decode_image(handle.get(), &native_raw, heif_colorspace_undefined,
-                                 heif_chroma_undefined, nullptr),
-               "decode the 4:2:2 fixture natively");
-  std::unique_ptr<heif_image, TestImageDeleter> native(native_raw);
-  const auto chroma = heif_image_get_chroma_format(native.get());
-  if (chroma != heif_chroma_422) {
-    throw std::runtime_error("the 4:2:2 fixture was not encoded as 4:2:2 (chroma=" +
-                             std::to_string(static_cast<int>(chroma)) + ")");
-  }
-  require(heif_image_handle_get_luma_bits_per_pixel(handle.get()) == 10,
-          "the 4:2:2 fixture is not 10-bit");
+  const auto file = hyperdr::read_heif(bytes);
+  const auto plan = file.resolve_image();
+  require(plan.config.chroma_format == 2 && plan.config.bit_depth == 10,
+          "the 4:2:2 fixture's hvcC is not 4:2:2 10-bit");
+  unsigned pictures = 0;
+  heif_native::for_each_picture(file, plan, [&](auto, auto, const heif_native::Picture& picture) {
+    ++pictures;
+    if (picture.chroma_format != 2) {
+      throw std::runtime_error("the 4:2:2 fixture was not decoded as 4:2:2 (chroma=" +
+                               std::to_string(picture.chroma_format) + ")");
+    }
+    require(picture.bit_depth == 10, "the 4:2:2 fixture is not 10-bit");
+  });
+  require(pictures > 0, "the 4:2:2 fixture decoded no pictures");
 }
 
 // An input's declared headroom, and the preview divisor that follows from it.
@@ -340,204 +314,129 @@ void check_input_headroom(const std::vector<std::uint8_t>& bytes, const char* la
   }
 }
 
-// Decodes the primary image and checks CICP plus non-inverted channel order at a
-// bright sample. This is the regression the 8-bit default path was missing: a file
-// can be structurally perfect and still carry an undecodable bitstream (for example
-// a single-slice NAL beyond libde265's 16 MiB security limit).
+// Decodes the primary image with VideoToolbox and checks CICP plus non-inverted
+// channel order at a bright sample. This is the regression the 8-bit default
+// path was missing: a file can be structurally perfect and still carry an
+// undecodable bitstream (for example a single-slice NAL the decoder refuses).
 void decode_and_check(const std::vector<std::uint8_t>& bytes, std::uint32_t width, std::uint32_t height) {
-  heif_context* context = heif_context_alloc();
-  require(context != nullptr, "cannot allocate decode context");
-  try {
-    auto err = heif_context_read_from_memory_without_copy(context, bytes.data(), bytes.size(), nullptr);
-    require(err.code == heif_error_Ok, "cannot read encoded HEIC");
-    heif_image_handle* primary = nullptr;
-    err = heif_context_get_primary_image_handle(context, &primary);
-    require(err.code == heif_error_Ok && primary, "cannot get primary image");
-
-    heif_color_profile_nclx* nclx = nullptr;
-    err = heif_image_handle_get_nclx_color_profile(primary, &nclx);
-    const bool nclx_ok = err.code == heif_error_Ok && nclx &&
-                         nclx->color_primaries == heif_color_primaries_SMPTE_EG_432_1 &&
-                         nclx->transfer_characteristics == heif_transfer_characteristic_IEC_61966_2_1 &&
-                         nclx->matrix_coefficients == heif_matrix_coefficients_ITU_R_BT_709_5 &&
-                         nclx->full_range_flag == 1 &&
-                         heif_image_handle_get_raw_color_profile_size(primary) > 0;
-    if (nclx) heif_nclx_color_profile_free(nclx);
-    if (!nclx_ok) { heif_image_handle_release(primary); throw std::runtime_error("primary image has incorrect Display P3 CICP"); }
-
-    const bool wide = heif_image_handle_get_luma_bits_per_pixel(primary) > 8;
-    heif_image* decoded = nullptr;
-    err = heif_decode_image(primary, &decoded, heif_colorspace_RGB,
-                            wide ? heif_chroma_interleaved_RRGGBB_LE : heif_chroma_interleaved_RGB, nullptr);
-    heif_image_handle_release(primary);
-    require(err.code == heif_error_Ok && decoded, "cannot decode primary image");
-    require(static_cast<std::uint32_t>(heif_image_get_width(decoded, heif_channel_interleaved)) == width &&
-                static_cast<std::uint32_t>(heif_image_get_height(decoded, heif_channel_interleaved)) == height,
-            "decoded primary image has wrong dimensions");
-    int stride = 0;
-    const auto* plane = heif_image_get_plane_readonly(decoded, heif_channel_interleaved, &stride);
-    require(plane != nullptr, "decoded primary image has no pixels");
-    const std::size_t row = static_cast<std::size_t>(height / 2) * stride;
-    const std::size_t x = static_cast<std::size_t>(width - 2) * 3;
-    bool ordered = false;
-    if (wide) {
-      const auto* sample = reinterpret_cast<const std::uint16_t*>(plane + row) + x;
-      // At the almost-white sample the original channel separation can be
-      // less than one code. Lossy VT quantisation may reverse it by two codes.
-      ordered = unsigned(sample[0])+2 >= sample[1] && unsigned(sample[1])+2 >= sample[2];
-    } else {
-      const auto* sample = plane + row + x;
-      ordered = sample[0] >= sample[1] && sample[1] >= sample[2];
-    }
-    const auto middle=static_cast<std::size_t>(width/3)*3;
-    bool distinct=false;
-    if(wide){const auto* p=reinterpret_cast<const std::uint16_t*>(plane+row)+middle;distinct=p[0]>p[1]&&p[1]>p[2];}
-    else {const auto* p=plane+row+middle;distinct=p[0]>p[1]&&p[1]>p[2];}
-    heif_image_release(decoded);
-    require(ordered&&distinct, "primary image color-channel round trip failed");
-  } catch (...) {
-    heif_context_free(context);
-    throw;
-  }
-  heif_context_free(context);
+  const auto file = hyperdr::read_heif(bytes);
+  const auto plan = file.resolve_image();
+  require(plan.color && plan.color->primaries == 12 && plan.color->transfer == 13 &&
+              plan.color->matrix == 1 && plan.color->full_range && !plan.icc.empty(),
+          "primary image has incorrect Display P3 CICP");
+  require(plan.width == width && plan.height == height,
+          "decoded primary image has wrong dimensions");
+  const bool wide = plan.config.bit_depth > 8;
+  // The normalized float is an integer code over the full-range maximum.
+  const float maximum = wide ? 1023.F : 255.F;
+  const auto code = [&](std::uint32_t x, std::uint32_t y) {
+    const auto rgb = heif_native::encoded_rgb(file, plan, x, y);
+    return std::array<int, 3>{int(std::lround(rgb[0] * maximum)), int(std::lround(rgb[1] * maximum)),
+                              int(std::lround(rgb[2] * maximum))};
+  };
+  const auto bright = code(width - 2, height / 2);
+  // At the almost-white sample the original channel separation can be less
+  // than one code. Lossy VT quantisation may reverse it by two codes.
+  const int slack = wide ? 2 : 0;
+  const bool ordered = bright[0] + slack >= bright[1] && bright[1] + slack >= bright[2];
+  const auto middle = code(width / 3, height / 2);
+  const bool distinct = middle[0] > middle[1] && middle[1] > middle[2];
+  require(ordered && distinct, "primary image color-channel round trip failed");
 }
 
 void check_gain_decode(const std::vector<std::uint8_t>& bytes,
                        const hyperdr::FloatImage* expected = nullptr) {
-  const auto references = hyperdr::find_tmap_references(bytes);
-  heif_context* context = heif_context_alloc();
-  require(context != nullptr, "cannot allocate gain decode context");
-  try {
-    auto error = heif_context_read_from_memory_without_copy(
-        context, bytes.data(), bytes.size(), nullptr);
-    require(error.code == heif_error_Ok, "cannot read gain-map HEIC");
-    heif_image_handle* handle = nullptr;
-    error = heif_context_get_image_handle(context, references.gain_id, &handle);
-    require(error.code == heif_error_Ok && handle, "cannot get Gain Map handle");
-
-    heif_color_profile_nclx* nclx = nullptr;
-    error = heif_image_handle_get_nclx_color_profile(handle, &nclx);
-    const bool profile_ok =
-        error.code == heif_error_Ok && nclx &&
-        nclx->color_primaries == heif_color_primaries_unspecified &&
-        nclx->transfer_characteristics == heif_transfer_characteristic_unspecified &&
-        nclx->matrix_coefficients == heif_matrix_coefficients_ITU_R_BT_709_5 &&
-        nclx->full_range_flag == 1;
-    if (nclx) heif_nclx_color_profile_free(nclx);
-    if (!profile_ok) {
-      heif_image_handle_release(handle);
-      throw std::runtime_error("Gain Map nclx is not 2/2/1/full");
-    }
-
-    heif_image* decoded = nullptr;
-    error = heif_decode_image(handle, &decoded, heif_colorspace_YCbCr,
-                              heif_chroma_420, nullptr);
-    heif_image_handle_release(handle);
-    require(error.code == heif_error_Ok && decoded, "cannot decode Gain Map");
-    int y_stride = 0;
-    const auto* y_plane =
-        heif_image_get_plane_readonly(decoded, heif_channel_Y, &y_stride);
-    const int width = heif_image_get_width(decoded, heif_channel_Y);
-    const int height = heif_image_get_height(decoded, heif_channel_Y);
-    require(y_plane && width > 0 && height > 0 && y_stride >= width,
-            "invalid Gain Map luma plane");
-    if (expected) {
-      require(expected->channels == 1 && expected->width == static_cast<std::uint32_t>(width) &&
-                  expected->height == static_cast<std::uint32_t>(height),
-              "Gain Map probe has unexpected dimensions");
-    }
-    int minimum = 255;
-    int maximum = 0;
-    std::uint64_t total_code_error = 0;
-    int maximum_code_error = 0;
-    for (int y = 0; y < height; ++y) {
-      for (int x = 0; x < width; ++x) {
-        const auto actual = y_plane[y * y_stride + x];
-        minimum = std::min(minimum, static_cast<int>(actual));
-        maximum = std::max(maximum, static_cast<int>(actual));
+  const auto file = hyperdr::read_heif(bytes);
+  const auto gain = file.resolve_gain_map();
+  require(gain.has_value(), "cannot resolve the Gain Map");
+  const auto& plan = gain->gain;
+  require(plan.color && plan.color->primaries == 2 && plan.color->transfer == 2 &&
+              plan.color->matrix == 1 && plan.color->full_range,
+          "Gain Map nclx is not 2/2/1/full");
+  require(plan.config.bit_depth == 8 && plan.config.chroma_format == 1,
+          "Gain Map is not 8-bit 4:2:0");
+  const int width = int(plan.width), height = int(plan.height);
+  require(width > 0 && height > 0, "invalid Gain Map dimensions");
+  if (expected) {
+    require(expected->channels == 1 && expected->width == static_cast<std::uint32_t>(width) &&
+                expected->height == static_cast<std::uint32_t>(height),
+            "Gain Map probe has unexpected dimensions");
+  }
+  int minimum = 255;
+  int maximum = 0;
+  std::uint64_t total_code_error = 0;
+  int maximum_code_error = 0;
+  heif_native::for_each_picture(file, plan, [&](std::uint32_t x0, std::uint32_t y0,
+                                                const heif_native::Picture& picture) {
+    require(picture.bit_depth == 8 && picture.chroma_format == 1, "Gain Map picture is not 8-bit 4:2:0");
+    for (std::uint32_t py = 0; py < picture.height && y0 + py < plan.height; ++py) {
+      for (std::uint32_t px = 0; px < picture.width && x0 + px < plan.width; ++px) {
+        const int actual = int(picture.luma_at(px, py));
+        minimum = std::min(minimum, actual);
+        maximum = std::max(maximum, actual);
         if (expected) {
-          const auto wanted = static_cast<std::uint8_t>(std::lround(
-              std::clamp(expected->at(static_cast<std::uint32_t>(x),
-                                      static_cast<std::uint32_t>(y), 0), 0.0F, 1.0F) * 255.0F));
-          const int code_error = std::abs(static_cast<int>(actual) - wanted);
+          const auto wanted = static_cast<int>(std::lround(
+              std::clamp(expected->at(x0 + px, y0 + py, 0), 0.0F, 1.0F) * 255.0F));
+          const int code_error = std::abs(actual - wanted);
           total_code_error += code_error;
           maximum_code_error = std::max(maximum_code_error, code_error);
         }
       }
     }
-    if (expected) {
-      const double mean_code_error = static_cast<double>(total_code_error) /
-                                     (static_cast<double>(width) * height);
-      std::cout << "Q95 Gain Map code error: mean " << mean_code_error
-                << ", maximum " << maximum_code_error << '\n';
-      require(mean_code_error <= 0.5 && maximum_code_error <= 3,
-              "Q95 Gain Map changed the gain codes too much");
-    }
-    require(minimum <= 16 && maximum >= 239,
-            "Gain Map does not retain full-range endpoints");
-    for (const auto channel : {heif_channel_Cb, heif_channel_Cr}) {
-      int stride = 0;
-      const auto* plane = heif_image_get_plane_readonly(decoded, channel, &stride);
-      const int cw = heif_image_get_width(decoded, channel);
-      const int ch = heif_image_get_height(decoded, channel);
-      require(plane && cw > 0 && ch > 0 && stride >= cw,
-              "invalid Gain Map chroma plane");
-      for (int y = 0; y < ch; y += std::max(1, ch / 32)) {
-        for (int x = 0; x < cw; x += std::max(1, cw / 32)) {
-          require(std::abs(static_cast<int>(plane[y * stride + x]) - 128) <= 3,
-                  "Gain Map chroma is not neutral");
-        }
+    for (std::uint32_t cy = 0; cy < picture.chroma_height(); cy += std::max(1U, picture.chroma_height() / 32)) {
+      for (std::uint32_t cx = 0; cx < picture.chroma_width(); cx += std::max(1U, picture.chroma_width() / 32)) {
+        require(std::abs(int(picture.cb_at(cx, cy)) - 128) <= 3 &&
+                    std::abs(int(picture.cr_at(cx, cy)) - 128) <= 3,
+                "Gain Map chroma is not neutral");
       }
     }
-    heif_image_release(decoded);
-  } catch (...) {
-    heif_context_free(context);
-    throw;
+  });
+  if (expected) {
+    const double mean_code_error = static_cast<double>(total_code_error) /
+                                   (static_cast<double>(width) * height);
+    std::cout << "Q95 Gain Map code error: mean " << mean_code_error
+              << ", maximum " << maximum_code_error << '\n';
+    require(mean_code_error <= 0.5 && maximum_code_error <= 3,
+            "Q95 Gain Map changed the gain codes too much");
   }
-  heif_context_free(context);
+  require(minimum <= 16 && maximum >= 239,
+          "Gain Map does not retain full-range endpoints");
 }
 void check_semantic_rejections(const std::vector<std::uint8_t>& bytes) {
   const auto references = hyperdr::find_tmap_references(bytes);
-  auto broken_dimg = bytes;
+  // The tmap item's dimg now claims three targets where two are listed.
   bool changed = false;
-  for (std::size_t i = 0; i + 16 <= broken_dimg.size(); ++i) {
-    if (broken_dimg[i] == 0 && broken_dimg[i + 1] == 0 &&
-        broken_dimg[i + 2] == 0 && broken_dimg[i + 3] == 16 &&
-        broken_dimg[i + 4] == 'd' && broken_dimg[i + 5] == 'i' &&
-        broken_dimg[i + 6] == 'm' && broken_dimg[i + 7] == 'g' &&
-        broken_dimg[i + 8] == static_cast<std::uint8_t>(references.tmap_id >> 8) &&
-        broken_dimg[i + 9] == static_cast<std::uint8_t>(references.tmap_id) &&
-        broken_dimg[i + 10] == 0 && broken_dimg[i + 11] == 2 &&
-        broken_dimg[i + 12] == static_cast<std::uint8_t>(references.base_id >> 8) &&
-        broken_dimg[i + 13] == static_cast<std::uint8_t>(references.base_id) &&
-        broken_dimg[i + 14] == static_cast<std::uint8_t>(references.gain_id >> 8) &&
-        broken_dimg[i + 15] == static_cast<std::uint8_t>(references.gain_id)) {
-      broken_dimg[i + 10] = 0;
-      broken_dimg[i + 11] = 3;
-      changed = true;
-      break;
+  const auto broken_dimg = heif_fixture::edit(bytes, [&](auto& meta) {
+    for (auto& box : meta) {
+      if (box.type != "iref") continue;
+      heif_fixture::children(box, 4, [&](auto& refs) {
+        for (auto& ref : refs) {
+          if (ref.type == "dimg" && heif_fixture::get(ref.data, 0, 2) == references.tmap_id) {
+            heif_fixture::put(ref.data, 2, 3, 2);
+            changed = true;
+          }
+        }
+      });
     }
-  }
+  });
   require(changed && !hyperdr::inspect_heif(broken_dimg).structurally_valid,
           "grid dimg masked a broken tmap dimg");
 
-  auto colliding_group = bytes;
+  // The altr group takes an item's ID.
   changed = false;
-  for (std::size_t i = 0; i + 28 <= colliding_group.size(); ++i) {
-    if (colliding_group[i + 4] == 'a' && colliding_group[i + 5] == 'l' &&
-        colliding_group[i + 6] == 't' && colliding_group[i + 7] == 'r') {
-      colliding_group[i + 12] =
-          static_cast<std::uint8_t>(references.gain_id >> 24);
-      colliding_group[i + 13] =
-          static_cast<std::uint8_t>(references.gain_id >> 16);
-      colliding_group[i + 14] =
-          static_cast<std::uint8_t>(references.gain_id >> 8);
-      colliding_group[i + 15] =
-          static_cast<std::uint8_t>(references.gain_id);
-      changed = true;
-      break;
+  const auto colliding_group = heif_fixture::edit(bytes, [&](auto& meta) {
+    for (auto& box : meta) {
+      if (box.type != "grpl") continue;
+      heif_fixture::children(box, 0, [&](auto& groups) {
+        for (auto& group : groups) {
+          if (group.type == "altr") {
+            heif_fixture::put(group.data, 4, references.gain_id, 4);
+            changed = true;
+          }
+        }
+      });
     }
-  }
+  });
   require(changed && !hyperdr::inspect_heif(colliding_group).structurally_valid,
           "altr group/item ID collision was accepted");
 }
@@ -835,23 +734,12 @@ std::vector<std::uint8_t> encode_icc_only_heic() {
 
 void check_icc_only_heic() {
   const auto bytes = encode_icc_only_heic();
-  std::unique_ptr<heif_context, TestContextDeleter> context(heif_context_alloc());
-  require(context != nullptr, "cannot allocate the ICC-only inspection context");
-  require_heif(heif_context_read_from_memory_without_copy(
-                   context.get(), bytes.data(), bytes.size(), nullptr),
-               "read the ICC-only fixture");
-  heif_image_handle* handle_raw = nullptr;
-  require_heif(heif_context_get_primary_image_handle(context.get(), &handle_raw),
-               "get the ICC-only fixture primary image");
-  std::unique_ptr<heif_image_handle, TestHandleDeleter> handle(handle_raw);
-  require(heif_image_handle_get_raw_color_profile_size(handle.get()) > 0,
-          "ICC-only fixture lost its ICC profile");
-  heif_color_profile_nclx* nclx = nullptr;
-  const auto nclx_error =
-      heif_image_handle_get_nclx_color_profile(handle.get(), &nclx);
-  require(nclx_error.code != heif_error_Ok || nclx == nullptr,
-          "ICC-only fixture unexpectedly contains nclx");
-  if (nclx) heif_nclx_color_profile_free(nclx);
+  {
+    const auto file = hyperdr::read_heif(bytes);
+    const auto plan = file.resolve_image();
+    require(!plan.icc.empty(), "ICC-only fixture lost its ICC profile");
+    require(!plan.color, "ICC-only fixture unexpectedly contains nclx");
+  }
 
   const auto path = hyperdr::test::temporary_directory() /
                     "hyperdr-codec-icc-only.heic";
@@ -1076,9 +964,9 @@ void check_gain_map_jpeg_pair(const hyperdr::PhotoMetadata& metadata) {
 
 // Apple's pre-ISO HDR photo: an SDR primary, an 8-bit monochrome auxiliary
 // image of type urn:com:apple:photo:2020:aux:hdrgainmap, and the headroom in
-// MakerNote tags 33 and 48. libheif cannot write auxiliary images directly, so
-// the gain item is encoded as an ordinary image and given the auxC property and
-// auxl reference Apple writes.
+// MakerNote tags 33 and 48. Our writer only writes ISO tone-mapped pairs, so
+// the gain item is written as the ISO auxiliary and then given the auxC URN and
+// auxl reference Apple writes, with the tmap item and its group removed.
 std::vector<std::uint8_t> encode_apple_legacy_heic(bool with_makernote, bool midtone = false) {
   namespace h=hyperdr::codec::hevc;
   constexpr int kSize=16;const auto grid=h::tile_grid(kSize,kSize);
@@ -1333,8 +1221,8 @@ int main() try {
                 oriented_jpeg.metadata.orientation == 1,
             "JPEG Exif orientation did not normalize pixels, geometry and metadata");
 
-    // libheif's writer normalises Exif orientation on output, so make an
-    // Exif-only input fixture by changing that one TIFF value after encoding.
+    // The writer normalises Exif orientation on output, so make an Exif-only
+    // input fixture by changing that one TIFF value after encoding.
     // This mirrors phones whose pixels are landscape-stored without adding an
     // irot/imir property that would make the container authoritative.
     auto oriented_heic_bytes =
@@ -1361,37 +1249,12 @@ int main() try {
     require(patched_orientation && *patched_orientation == 6,
             "raw HEIC Exif patch did not produce orientation 6");
     {
-      std::unique_ptr<heif_context, TestContextDeleter> context(
-          heif_context_alloc());
-      require_heif(heif_context_read_from_memory_without_copy(
-                       context.get(), oriented_heic_bytes.data(),
-                       oriented_heic_bytes.size(), nullptr),
-                   "open oriented HEIC fixture");
-      heif_image_handle* raw_handle = nullptr;
-      require_heif(heif_context_get_primary_image_handle(
-                       context.get(), &raw_handle),
-                   "get oriented HEIC primary");
-      std::unique_ptr<heif_image_handle, TestHandleDeleter> handle(raw_handle);
-      const auto id = heif_image_handle_get_item_id(handle.get());
-      require(heif_item_get_properties_of_type(
-                  context.get(), id,
-                  heif_item_property_type_transform_rotation, nullptr, 0) == 0 &&
-                  heif_item_get_properties_of_type(
-                  context.get(), id,
-                  heif_item_property_type_transform_mirror, nullptr, 0) == 0,
+      const auto file = hyperdr::read_heif(oriented_heic_bytes);
+      const auto plan = file.resolve_image();
+      require(plan.transforms.empty(),
               "Exif-only HEIC fixture unexpectedly has a container orientation");
-      const int count = heif_image_handle_get_number_of_metadata_blocks(
-          handle.get(), "Exif");
-      std::vector<heif_item_id> ids(static_cast<std::size_t>(count));
-      require(count > 0 && heif_image_handle_get_list_of_metadata_block_IDs(
-                               handle.get(), "Exif", ids.data(), count) > 0,
-              "oriented HEIC fixture has no Exif item");
-      const auto size =
-          heif_image_handle_get_metadata_size(handle.get(), ids.front());
-      std::vector<std::uint8_t> exif(size);
-      require_heif(heif_image_handle_get_metadata(
-                       handle.get(), ids.front(), exif.data()),
-                   "read oriented HEIC Exif");
+      const auto exif = file.exif();
+      require(!exif.empty(), "oriented HEIC fixture has no Exif item");
       const auto orientation =
           hyperdr::read_exif_orientation(exif.data(), exif.size());
       require(orientation && *orientation == 6,
@@ -1559,33 +1422,16 @@ int main() try {
             ".heic", reduced_jpeg_options);
         // The stored ispe can include codec padding beyond the clean aperture.
         // Check it against the container, not the intended display dimensions.
-        std::unique_ptr<heif_context, TestContextDeleter> geometry_context(heif_context_alloc());
-        require_heif(heif_context_read_from_memory_without_copy(geometry_context.get(),
-            hdr_bytes.data(), hdr_bytes.size(), nullptr), "read HEIC preview geometry");
-        heif_image_handle* geometry_raw = nullptr;
-        require_heif(heif_context_get_primary_image_handle(geometry_context.get(), &geometry_raw),
-            "get HEIC preview geometry");
-        std::unique_ptr<heif_image_handle, TestHandleDeleter> geometry_handle(geometry_raw);
-        heif_color_profile_nclx* hdr_nclx_raw = nullptr;
-        require_heif(heif_image_handle_get_nclx_color_profile(
-                         geometry_handle.get(), &hdr_nclx_raw),
-                     "get BT.2100 HEIC nclx");
-        std::unique_ptr<heif_color_profile_nclx,
-                        decltype(&heif_nclx_color_profile_free)>
-            hdr_nclx(hdr_nclx_raw, &heif_nclx_color_profile_free);
-        require(hdr_nclx != nullptr &&
-                    hdr_nclx->matrix_coefficients ==
-                        heif_matrix_coefficients_ITU_R_BT_2020_2_non_constant_luminance,
+        const auto geometry_file = hyperdr::read_heif(hdr_bytes);
+        const auto geometry = geometry_file.resolve_image();
+        require(geometry.color && geometry.color->matrix == 9,
                 "BT.2100 HEIC must use the same Rec.2020 YCbCr matrix as AVIF");
-        heif_content_light_level hdr_light{};
         const auto expected_light = expected_content_light(expected_hdr);
-        require(heif_image_handle_get_content_light_level(
-                    geometry_handle.get(), &hdr_light) &&
-                    hdr_light.max_content_light_level == expected_light[0] &&
-                    hdr_light.max_pic_average_light_level == expected_light[1],
+        require(geometry.light && geometry.light->maximum == expected_light[0] &&
+                    geometry.light->average == expected_light[1],
                 "HEIC CLLI does not use maxRGB for MaxCLL and MaxPALL");
-        require(reduced.decode.sensor_width == static_cast<unsigned>(heif_image_handle_get_ispe_width(geometry_handle.get())) &&
-                    reduced.decode.sensor_height == static_cast<unsigned>(heif_image_handle_get_ispe_height(geometry_handle.get())) &&
+        require(reduced.decode.sensor_width == geometry.width &&
+                    reduced.decode.sensor_height == geometry.height &&
                     reduced.decode.sensor_width == decoded.decode.sensor_width &&
                     reduced.decode.sensor_height == decoded.decode.sensor_height &&
                     reduced.decode.target_width == 64 && reduced.decode.target_height == 32 &&

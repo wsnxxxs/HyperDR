@@ -68,7 +68,7 @@ if(HYPERDR_WITH_CODECS)
 endif()
 
 if(HYPERDR_WITH_CODECS)
-  hyperdr_add_test(gain_map_jpeg_decode_test LINK HyperDR::codec uhdr)
+  hyperdr_add_test(gain_map_jpeg_decode_test LINK HyperDR::codec uhdr JPEG::JPEG)
   if(TARGET gain_map_jpeg_decode_test)
     target_link_libraries(gain_map_jpeg_decode_test PRIVATE "-framework ImageIO" "-framework CoreGraphics" "-framework CoreFoundation")
     target_compile_definitions(gain_map_jpeg_decode_test PRIVATE HYPERDR_TEST_FIXTURES="${PROJECT_SOURCE_DIR}/tests/fixtures/gain-map-jpeg")

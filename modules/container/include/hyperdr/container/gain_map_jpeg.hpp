@@ -24,6 +24,7 @@ struct GainMapJpeg {
   GainMapMetadata metadata;
   bool has_hdrgm{}, has_container_directory{};
   bool repaired_mpf{};
+  std::uint64_t recorded_gain_offset{}; // Absolute offset, before reader repair.
   std::size_t trailing_bytes{};
 };
 [[nodiscard]] std::vector<std::uint8_t> assemble_gain_map_jpeg(

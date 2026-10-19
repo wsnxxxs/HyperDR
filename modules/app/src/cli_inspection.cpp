@@ -67,6 +67,10 @@ int inspect_command(int argc, char** argv) {
         .member("primary_iso_segments", parsed.primary_iso_count)
         .member("gain_iso_segments", parsed.gain_iso_count)
         .member("mpf_segments", parsed.mpf_count)
+        .member("mpf_recorded_primary_size", parsed.entries[0].size)
+        .member("mpf_recorded_gain_offset", parsed.recorded_gain_offset)
+        .member("mpf_recorded_gain_relative_offset", parsed.entries[1].offset)
+        .member("mpf_recorded_gain_size", parsed.entries[1].size)
         .member("primary_size", parsed.primary_size)
         .member("gain_offset", parsed.gain_offset)
         .member("gain_size", parsed.gain_size);

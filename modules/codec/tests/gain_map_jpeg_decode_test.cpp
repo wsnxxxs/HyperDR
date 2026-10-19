@@ -10,6 +10,7 @@
 #include "hyperdr/gainmap/rendition.hpp"
 #include "hyperdr/foundation/cancel.hpp"
 #include <thread>
+#include <jpeglib.h>
 #include <chrono>
 #include <unistd.h>
 #include <ImageIO/ImageIO.h>
@@ -174,6 +175,7 @@ void regressions() {
   stale[offset_at+3]^=1;
   auto recovered=parse_gain_map_jpeg_input(stale);
   require(recovered.repaired_mpf,"stale MPF was not repaired");
+  require(recovered.recorded_gain_offset!=recovered.gain_offset && recovered.entries[1].size==parsed.gain_size,"MPF recorded values were lost");
   auto trailer=stale;
   trailer.insert(trailer.end(),5,0);
   trailer.insert(trailer.end(),original.begin(),original.end());
@@ -222,8 +224,84 @@ void roundtrip() {
     const auto base=errors(*own.authored_sdr,p.base_linear),candidate=errors(own.linear_p3,source),legacy=errors(old.linear_p3,source);
     std::cout<<"roundtrip_channels="<<ch<<" own_extra_mean="<<candidate.first-base.first<<" own_extra_p99="<<candidate.second-base.second
         <<" legacy_extra_mean="<<legacy.first-base.first<<" legacy_extra_p99="<<legacy.second-base.second<<"\n";
+    const auto peak=[](const FloatImage& image) {
+      std::vector<float> peaks;peaks.reserve(image.width*image.height);
+      for(std::size_t i=0;i<image.pixels.size();i+=3)
+        peaks.push_back(std::max({image.pixels[i],image.pixels[i+1],image.pixels[i+2]}));
+      const auto index=static_cast<std::size_t>(std::ceil(peaks.size()*.9999))-1;
+      std::nth_element(peaks.begin(),peaks.begin()+index,peaks.end());return peaks[index];
+    };
+    const auto source_peak=peak(source);
+    const double own_peak_error=std::abs(peak(own.linear_p3)/source_peak-1);
+    const double legacy_peak_error=std::abs(peak(old.linear_p3)/source_peak-1);
+    std::cout<<"roundtrip_channels="<<ch<<" own_peak_relative_error="<<own_peak_error
+        <<" legacy_peak_relative_error="<<legacy_peak_error<<"\n";
+    require(own_peak_error<=.02 && own_peak_error<=legacy_peak_error,"roundtrip p99.99 peak exceeded or is worse than libultrahdr");
     require(candidate.first-base.first<=.01 && candidate.second-base.second<=.04,"roundtrip E4 extra error exceeded");
     require(candidate.first<=legacy.first && candidate.second<=legacy.second,"roundtrip is worse than libultrahdr");
+  }
+}
+// Request cancellation from the progress callback itself: this pins the gap
+// inside jpeg_start_decompress rather than racing a small wall-clock delay.
+thread_local CancelToken* progress_token=nullptr;
+thread_local unsigned cancel_components=0;
+thread_local bool cancelled_in_start=false;
+void cancel_in_start(bool starting,unsigned components) noexcept {
+  if(starting && components==cancel_components) {
+    cancelled_in_start=true;progress_token->request();
+  }
+}
+std::vector<std::uint8_t> synthetic_jpeg(unsigned width,unsigned height,unsigned components,bool progressive) {
+  jpeg_compress_struct info{};jpeg_error_mgr error{};info.err=jpeg_std_error(&error);
+  jpeg_create_compress(&info);unsigned char* output=nullptr;unsigned long size=0;
+  jpeg_mem_dest(&info,&output,&size);info.image_width=width;info.image_height=height;
+  info.input_components=components;info.in_color_space=components==1 ? JCS_GRAYSCALE : JCS_RGB;
+  jpeg_set_defaults(&info);info.write_JFIF_header=FALSE;info.write_Adobe_marker=FALSE;jpeg_set_quality(&info,90,TRUE);
+  if(progressive)jpeg_simple_progression(&info);
+  jpeg_start_compress(&info,TRUE);std::vector<unsigned char> row(width*components);unsigned seed=321;
+  while(info.next_scanline<height) {
+    for(auto& v:row){seed=seed*1664525U+1013904223U;v=seed>>24;}
+    JSAMPROW p=row.data();jpeg_write_scanlines(&info,&p,1);
+  }
+  jpeg_finish_compress(&info);std::vector<std::uint8_t> result(output,output+size);
+  std::free(output);jpeg_destroy_compress(&info);return result;
+}
+void progressive_regressions() {
+  GainMapMetadata metadata;metadata.gain_max=metadata.alternate_headroom={2,1};
+  for(unsigned component:{3U,1U}) {
+    const auto primary=synthetic_jpeg(128,96,3,component==3);
+    const auto gain=synthetic_jpeg(64,48,1,component==1);
+    const auto bytes=assemble_gain_map_jpeg(primary,gain,metadata);
+    CancelToken token;progress_token=&token;cancel_components=component;cancelled_in_start=false;
+    codec::testing::set_jpeg_progress_hook(cancel_in_start);
+    bool cancelled=false;
+    try {CancelScope scope(&token);(void)codec::decode_iso_gain_map_jpeg_bytes(bytes,ColorGamut::kSrgb);}
+    catch(const Cancelled&){cancelled=true;}
+    codec::testing::set_jpeg_progress_hook(nullptr);progress_token=nullptr;
+    require(cancelled && cancelled_in_start,"progressive JPEG startup did not propagate cancellation");
+    const auto decoded=codec::decode_iso_gain_map_jpeg_bytes(bytes,ColorGamut::kSrgb);
+    require(decoded.linear_p3.width==128 && decoded.linear_p3.height==96,"decode after progressive cancellation failed");
+  }
+}
+void cancel_progressive_large() {
+  GainMapMetadata metadata;metadata.gain_max=metadata.alternate_headroom={2,1};
+  for(unsigned component:{3U,1U}) {
+    const auto large=synthetic_jpeg(10000,5000,component,true);
+    std::vector<std::uint8_t> bytes;
+    if(component==3)bytes=assemble_gain_map_jpeg(large,synthetic_jpeg(2,1,1,false),metadata);
+    for(unsigned delay:{10U,100U,250U,500U}) {
+      CancelToken token;bool cancelled=false;std::exception_ptr failure;
+      std::thread worker([&]{try{CancelScope scope(&token);
+        if(component==3)(void)codec::decode_iso_gain_map_jpeg_bytes(bytes,ColorGamut::kSrgb);
+        else (void)codec::decode_jpeg_gain_bytes(large,1);
+      }catch(const Cancelled&){cancelled=true;}catch(...){failure=std::current_exception();}});
+      std::this_thread::sleep_for(std::chrono::milliseconds(delay));const auto requested=std::chrono::steady_clock::now();
+      token.request();worker.join();if(failure)std::rethrow_exception(failure);
+      const double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-requested).count();
+      std::cout<<"progressive_components="<<component<<" request_ms="<<delay<<" cancel_tail_ms="<<ms<<"\n";
+      require(cancelled,"progressive large JPEG completed without observing cancellation");
+      require(ms<=200,"progressive JPEG cancellation exceeded 200 ms");
+    }
   }
 }
 void analytic() {
@@ -254,6 +332,7 @@ void cancel_large() {
 }
 int main(int argc,char**argv) {
   try {
+    if(argc==2 && std::string(argv[1])=="cancel-progressive"){cancel_progressive_large();return 0;}
     if(argc==2 && std::string(argv[1])=="cancel-large"){cancel_large();return 0;}
     if(argc==4 && std::string(argv[2])=="reexport") {
       auto input=codec::decode_legacy_ultrahdr_bytes(read_binary_file(argv[1]),ColorGamut::kSrgb);
@@ -278,7 +357,7 @@ int main(int argc,char**argv) {
     }
     if(argc>2)return compare_imageio(read_binary_file(argv[1]));
     if(argc>1){return compare(read_binary_file(argv[1]),argv[1])?0:1;}
-    regressions();analytic();roundtrip();
+    regressions();progressive_regressions();analytic();roundtrip();
     bool passed=true;
     for(unsigned c:{1U,3U}) for(unsigned pattern:{0U,1U,2U}) {
       GainMapResult pair;

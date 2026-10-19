@@ -126,6 +126,23 @@ void jpeg_fail(j_common_ptr info) {
   std::longjmp(error->jump, 1);
 }
 
+// libjpeg calls this while consuming progressive input in start_decompress,
+// before any output scanlines exist. Never throw across its C frames.
+thread_local void (*jpeg_progress_hook)(bool, unsigned) noexcept = nullptr;
+struct JpegProgress {
+  jpeg_progress_mgr base{};
+  bool starting{true};
+};
+void jpeg_decode_progress(j_common_ptr common) {
+  auto* info = reinterpret_cast<jpeg_decompress_struct*>(common);
+  const auto* progress = reinterpret_cast<JpegProgress*>(common->progress);
+  if (jpeg_progress_hook) jpeg_progress_hook(progress->starting, info->num_components);
+  if (current_cancel_token && current_cancel_token->requested()) {
+    auto* error = reinterpret_cast<JpegError*>(common->err);
+    std::longjmp(error->jump, 2);
+  }
+}
+
 struct JpegDecodeOutput {
   unsigned char* rgb{};
   std::size_t rgb_size{};
@@ -171,21 +188,31 @@ int jpeg_decode_rgb(const unsigned char* data, std::size_t size,
   JpegError error{};
   info.err = jpeg_std_error(&error.base);
   error.base.error_exit = jpeg_fail;
-  if (setjmp(error.jump)) {
-    set_message(out->message, sizeof(out->message), error.message);
-    jpeg_destroy_decompress(&info);
-    std::free(out->rgb);
-    std::free(out->icc);
-    std::free(out->exif);
-    out->rgb = nullptr;
-    out->rgb_size = 0;
-    out->icc = nullptr;
-    out->icc_size = 0;
-    out->exif = nullptr;
-    out->exif_size = 0;
-    return 1;
+  // Keep setjmp as a controlling expression. The callback's jump value is
+  // translated to the caller's cancellation code only after all C allocations
+  // have been released.
+  switch (setjmp(error.jump)) {
+    case 0: break;
+    case 2:
+      jpeg_destroy_decompress(&info);
+      std::free(out->rgb); std::free(out->icc); std::free(out->exif);
+      out->rgb=nullptr; out->rgb_size=0;
+      out->icc=nullptr; out->icc_size=0;
+      out->exif=nullptr; out->exif_size=0;
+      return 2;
+    default:
+      set_message(out->message, sizeof(out->message), error.message);
+      jpeg_destroy_decompress(&info);
+      std::free(out->rgb); std::free(out->icc); std::free(out->exif);
+      out->rgb=nullptr; out->rgb_size=0;
+      out->icc=nullptr; out->icc_size=0;
+      out->exif=nullptr; out->exif_size=0;
+      return 1;
   }
+  JpegProgress progress{};
+  progress.base.progress_monitor = jpeg_decode_progress;
   jpeg_create_decompress(&info);
+  info.progress = &progress.base;
   jpeg_mem_src(&info, data, static_cast<unsigned long>(size));
   jpeg_save_markers(&info, JPEG_APP0 + 1, 0xFFFF);  // Exif
   jpeg_save_markers(&info, JPEG_APP0 + 2, 0xFFFF);  // ICC
@@ -238,6 +265,7 @@ int jpeg_decode_rgb(const unsigned char* data, std::size_t size,
   out->scale_denom = 8;
   out->budget_limited = budget_num != 8;
   jpeg_start_decompress(&info);
+  progress.starting = false;
 
   const std::size_t stride = static_cast<std::size_t>(info.output_width) * 3;
   out->rgb_size = stride * info.output_height;
@@ -929,6 +957,9 @@ DecodedImage decode_heic(const std::vector<std::uint8_t>& bytes, bool base_only,
 }  // namespace
 
 namespace codec {
+namespace testing {
+void set_jpeg_progress_hook(void (*hook)(bool, unsigned) noexcept) { jpeg_progress_hook=hook; }
+}
 FloatImage decode_jpeg_gain_bytes(const std::vector<std::uint8_t>& bytes,
                                   unsigned channels) {
   if (channels != 1 && channels != 3) throw std::invalid_argument("invalid gain channels");

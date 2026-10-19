@@ -184,6 +184,7 @@ static GainMapJpeg read_gain_map_jpeg(const Bytes& bytes, bool metadata, bool re
       ((out.entries[0].attributes | out.entries[1].attributes) & 0x07000000U) != 0) invalid("invalid MPF primary/gain entries");
   const std::uint64_t recorded = static_cast<std::uint64_t>(index->offset) + 8 + out.entries[1].offset;
   auto soi = [&](std::uint64_t p) { return p < bytes.size() && bytes.size()-p >= 2 && bytes[p]==0xff && bytes[p+1]==0xd8; };
+  out.recorded_gain_offset = recorded;
   std::uint64_t offset = recorded;
   if (recover && !soi(offset)) offset = primary.end;
   if (!soi(offset) || offset < primary.end) invalid("MPF gain offset does not identify a JPEG");

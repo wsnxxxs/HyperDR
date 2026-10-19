@@ -244,34 +244,132 @@ import XCTest
 
     // MARK: Changing the frame from the export panel
 
-    func testChangeFrameHandsTheWindowOverAndBack() async throws {
+    /// The window as the export panel's "Change…" leaves it: the panel asked to go.
+    private func windowAskingForFrame() -> EditorWindowState {
         let window = EditorWindowState()
         window.showsExport = true
-        window.changeFrameFromExport(delay: .zero)
+        window.changeFrameFromExport()
+        return window
+    }
+
+    func testChangeFrameWaitsForTheExportPanelToLeaveThenHandsOverAndBack() {
+        let window = windowAskingForFrame()
         XCTAssertFalse(window.showsExport)
+        XCTAssertFalse(window.isFraming, "not before the panel has really gone")
         XCTAssertTrue(window.returnsToExport)
-        await eventually(timeout: .seconds(3)) { window.isFraming }
+        window.exportSheetDismissed(hasPhoto: true, isAskingToSwitch: false)
+        XCTAssertTrue(window.isFraming)
         window.isFraming = false
-        window.frameSheetClosed(canExport: true, delay: .zero)
-        await eventually(timeout: .seconds(3)) { window.showsExport }
+        XCTAssertFalse(window.showsExport, "not before the frame sheet has really gone")
+        window.frameSheetDismissed(hasPhoto: true, isAskingToSwitch: false)
+        XCTAssertTrue(window.showsExport)
         XCTAssertFalse(window.returnsToExport)
     }
 
-    func testClosingTheFrameSheetOpenedFromTheToolbarLeavesExportClosed() async throws {
+    func testAChangeFromAnyOtherPlaceNeverReturnsToExport() {
         let window = EditorWindowState()
+        window.changeFrameFromExport()   // no export panel up: nothing to leave
+        XCTAssertFalse(window.returnsToExport)
         window.isFraming = true; window.isFraming = false
-        window.frameSheetClosed(canExport: true, delay: .zero)
-        try await Task.sleep(for: .milliseconds(50))
+        window.frameSheetDismissed(hasPhoto: true, isAskingToSwitch: false)
         XCTAssertFalse(window.showsExport)
     }
 
-    func testNoReturnToExportWhenThePhotographIsGone() async throws {
-        let window = EditorWindowState()
-        window.changeFrameFromExport(delay: .zero)
-        await eventually(timeout: .seconds(3)) { window.isFraming }
-        window.isFraming = false
-        window.frameSheetClosed(canExport: false, delay: .zero)
-        try await Task.sleep(for: .milliseconds(50))
-        XCTAssertFalse(window.showsExport); XCTAssertFalse(window.returnsToExport)
+    func testOpeningTheExportPanelAgainBeforeTheHandOverCancelsIt() {
+        let window = windowAskingForFrame()
+        window.openExport()   // the toolbar, the menu or an inspector card, while the panel was leaving
+        window.exportSheetDismissed(hasPhoto: true, isAskingToSwitch: false)
+        XCTAssertFalse(window.isFraming, "never two sheets at once")
+        XCTAssertTrue(window.showsExport)
+        XCTAssertFalse(window.returnsToExport)
+        window.showsExport = false
+        window.frameSheetDismissed(hasPhoto: true, isAskingToSwitch: false)
+        XCTAssertFalse(window.showsExport)
+    }
+
+    func testAPhotoSwitchQuestionStopsTheHandOverInBothDirections() {
+        let outward = windowAskingForFrame()
+        outward.exportSheetDismissed(hasPhoto: true, isAskingToSwitch: true)
+        XCTAssertFalse(outward.isFraming); XCTAssertFalse(outward.returnsToExport)
+        let back = windowAskingForFrame()
+        back.exportSheetDismissed(hasPhoto: true, isAskingToSwitch: false)
+        XCTAssertTrue(back.isFraming)
+        back.isFraming = false
+        back.frameSheetDismissed(hasPhoto: true, isAskingToSwitch: true)
+        XCTAssertFalse(back.showsExport, "the question must not be covered by the export panel")
+        XCTAssertFalse(back.returnsToExport)
+    }
+
+    func testNoHandOverWithoutAPhotographOrWhileAnotherSheetIsUp() {
+        let closed = windowAskingForFrame()
+        closed.exportSheetDismissed(hasPhoto: false, isAskingToSwitch: false)
+        XCTAssertFalse(closed.isFraming)
+        let back = windowAskingForFrame()
+        back.exportSheetDismissed(hasPhoto: true, isAskingToSwitch: false)
+        back.isFraming = false
+        back.frameSheetDismissed(hasPhoto: false, isAskingToSwitch: false)
+        XCTAssertFalse(back.showsExport)
+        let busy = windowAskingForFrame()
+        busy.showsHistory = true
+        busy.exportSheetDismissed(hasPhoto: true, isAskingToSwitch: false)
+        XCTAssertFalse(busy.isFraming)
+    }
+
+    // MARK: A style that does not fit
+
+    /// A result for the photograph exported without a frame stops counting as the
+    /// current one once the frame is on and the engine refuses its style.
+    func testAMisfitStyleDoesNotLeaveAMatchingResultBehind() async throws {
+        let services = services(photoSize: PixelSize(width: 20_000, height: 100))
+        let (model, _) = try await ready(services)
+        let done = ExportResult(export: "plain", fileName: "result.heic", byteCount: 10, pixelSize: PixelSize(width: 20_000, height: 100))
+        let key = try await services.exportKey(try XCTUnwrap(model.photo), options: model.effectiveOptions(), frame: nil)
+        services.historyByURL[source] = [ExportHistoryItem(
+            version: ExportVersion(number: 1, createdAt: Date(), encodingID: "adaptive", result: done), key: key, options: model.edit)]
+        model.refreshExportMetadata()
+        await eventually(timeout: .seconds(10)) { model.exportVersions.first?.matchesCurrent == true && model.export.result != nil }
+        let matching = ExportPresentation.PanelMode(phase: model.export.phase,
+            hasMatchingResult: model.export.result != nil && !model.export.isResultStale, wantsSettings: false)
+        XCTAssertEqual(matching, .result)
+        var instant = model.frame; instant.isEnabled = true; instant.style = .instant; model.frame = instant
+        XCTAssertNil(model.frameLayout)
+        XCTAssertTrue(model.export.isResultStale)
+        XCTAssertTrue(model.exportVersions.allSatisfy { !$0.matchesCurrent })
+        let now = ExportPresentation.PanelMode(phase: model.export.phase,
+            hasMatchingResult: model.export.result != nil && !model.export.isResultStale, wantsSettings: false)
+        XCTAssertEqual(now, .settings, "the panel opens on the settings, with the warning")
+        XCTAssertEqual(model.exportFrameSummary, .misfit(.instant))
+        XCTAssertEqual(model.export.blockerKey, "export.blocker.frame")
+    }
+
+    // MARK: A picture that arrives after the export began
+
+    func testAFramedPictureThatArrivesAfterTheExportBeganIsFramed() async throws {
+        let bare = try solid(4, 2, red: 1, green: 0, blue: 0)
+        let services = services(); services.thumbnailHandler = { _, _ in bare }
+        let photo = try TinyPhoto(); defer { photo.remove() }
+        let engine = try await Engine(), session = try engine.openPreview(source: photo.url)
+        defer { session.close() }
+        let actual = try await session.renderFrame(EngineRequest(settings: ["preview_max_edge": .number(8)]))
+        let model = EditorModel(services: services, ticker: ManualFrameTicker())
+        await model.loadExportServices(); model.open([source])
+        await eventually(timeout: .seconds(10)) { model.document?.phase == .ready && !model.suggestedFileName.isEmpty }
+        var settings = model.frame; settings.isEnabled = true; settings.style = .gallery; model.frame = settings
+        let geometry = FrameThumbnailGeometry(layout: try XCTUnwrap(model.frameLayout), maxPixelSize: 256)
+        let tracking = Task { await model.trackExportSummaryThumbnail() }
+        defer { tracking.cancel() }
+        await eventually(timeout: .seconds(10)) { model.exportSummaryThumbnail == .loading }
+        model.startExport(destination: destination, token: try XCTUnwrap(model.prepareExport()))
+        await eventually(timeout: .seconds(10)) { services.hasExportSubscriber }
+        XCTAssertNil(services.exportCalls[0].thumbnail)
+        XCTAssertEqual(model.export.thumbnail, .loading)
+        model.apply(.edited(EditorPreview(pixelSize: PixelSize(width: 6000, height: 4000),
+            source: SourceSummary(domain: .sdr, colorName: "Display P3", degradationReasons: []), hasGain: true, frame: actual)))
+        await eventually(timeout: .seconds(10)) { if case .ready = model.export.thumbnail { true } else { false } }
+        guard case .ready(let late) = model.export.thumbnail else { return XCTFail("no picture") }
+        XCTAssertEqual(late.width, geometry.width); XCTAssertEqual(late.height, geometry.height)
+        XCTAssertNil(services.exportCalls[0].thumbnail, "a record admitted without a picture stays without one")
+        model.cancelExport()
+        await eventually(timeout: .seconds(10)) { !model.export.isInFlight }
     }
 }

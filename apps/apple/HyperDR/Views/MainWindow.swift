@@ -50,34 +50,38 @@ struct MainWindow: View {
     /// "Change…" on the export panel's Frame row: the frame sheet takes the
     /// export panel's place, and the export panel comes back when it closes,
     /// so the user ends up where they were. Two sheets of one window cannot
-    /// be up together, and one presented while the other is leaving can be
-    /// dropped, hence the short pauses.
+    /// be up together, so each is presented from the other's `onDismiss`, when
+    /// it has really gone, and only if the window is still in the state the
+    /// hand-over assumed: nothing else open, a photograph, no question about
+    /// switching it waiting (a sheet would hide that question, M3 §5.6).
     private(set) var returnsToExport = false
-    @ObservationIgnored private var handOverTask: Task<Void, Never>?
-    static let handOverDelay: Duration = .milliseconds(350)
+    @ObservationIgnored private var framesWhenExportLeaves = false
 
-    func changeFrameFromExport(delay: Duration = EditorWindowState.handOverDelay) {
-        guard !isFraming else { return }
+    func changeFrameFromExport() {
+        guard !isFraming, showsExport else { return }
         returnsToExport = true
+        framesWhenExportLeaves = true
         showsExport = false
-        handOver(delay: delay) { $0.isFraming = true }
     }
 
-    /// The frame sheet went away: back to the export panel if it came from there.
-    func frameSheetClosed(canExport: Bool, delay: Duration = EditorWindowState.handOverDelay) {
+    /// The export panel has gone (any way): on to the frame sheet if it was asked for.
+    func exportSheetDismissed(hasPhoto: Bool, isAskingToSwitch: Bool) {
+        guard framesWhenExportLeaves else { return }
+        framesWhenExportLeaves = false
+        guard canHandOver(hasPhoto: hasPhoto, isAskingToSwitch: isAskingToSwitch) else { returnsToExport = false; return }
+        isFraming = true
+    }
+
+    /// The frame sheet has gone: back to the export panel if it came from there.
+    func frameSheetDismissed(hasPhoto: Bool, isAskingToSwitch: Bool) {
         guard returnsToExport else { return }
         returnsToExport = false
-        guard canExport else { return }
-        handOver(delay: delay) { $0.showsExport = true }
+        guard canHandOver(hasPhoto: hasPhoto, isAskingToSwitch: isAskingToSwitch) else { return }
+        showsExport = true
     }
 
-    private func handOver(delay: Duration, _ action: @escaping @MainActor (EditorWindowState) -> Void) {
-        handOverTask?.cancel()
-        handOverTask = Task { [weak self] in
-            if delay > .zero { try? await Task.sleep(for: delay) }
-            guard !Task.isCancelled, let self else { return }
-            action(self)
-        }
+    private func canHandOver(hasPhoto: Bool, isAskingToSwitch: Bool) -> Bool {
+        !showsExport && !isFraming && !showsHistory && !showsLUTLibrary && hasPhoto && !isAskingToSwitch
     }
 }
 
@@ -121,13 +125,14 @@ private struct EditorWindow: View {
                     model.report(openFailure: error)
                 }
             }
-            .sheet(isPresented: Bindable(window).isFraming) {
+            .sheet(isPresented: Bindable(window).isFraming, onDismiss: {
+                window.frameSheetDismissed(hasPhoto: model.document != nil, isAskingToSwitch: model.pendingPhotoSwitch != nil)
+            }) {
                 FrameSheet(model: model)
             }
-            .onChange(of: window.isFraming) { _, framing in
-                if !framing { window.frameSheetClosed(canExport: model.document != nil) }
-            }
-            .sheet(isPresented: Bindable(window).showsExport) {
+            .sheet(isPresented: Bindable(window).showsExport, onDismiss: {
+                window.exportSheetDismissed(hasPhoto: model.document != nil, isAskingToSwitch: model.pendingPhotoSwitch != nil)
+            }) {
                 ExportSheet(model: model, window: window)
             }
             .sheet(isPresented: Bindable(window).showsHistory) {

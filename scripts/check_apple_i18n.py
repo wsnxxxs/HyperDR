@@ -87,11 +87,6 @@ LOCALES = ["en", "zh-Hans"]
 # Keys read through a name built at run time (see the module docstring); never
 # reported as unused. Their completeness is the Swift coverage test's.
 DYNAMIC_PREFIXES = ("ctrl.", "choice.", "field.", "enc.", "export.stage.", "export.unavailable.")
-# Keys whose view is not built yet: "camera." is the camera-and-lens group of
-# the RAW states (docs/design/raw-states.md R-V), which waits for the RAW
-# model; delete this tuple with it.
-PENDING_PREFIXES = ("camera.",)
-UNUSED_EXEMPT = DYNAMIC_PREFIXES + PENDING_PREFIXES
 
 KEY_RE = re.compile(r"^([a-z][A-Za-z0-9]*)(?:\.[A-Za-z0-9_-]+)+(?: %@)*$")
 CJK_RE = re.compile(r"[　-〿㐀-鿿＀-￯]")
@@ -263,7 +258,7 @@ def check(files: list[tuple[str, bool, str]], entries: dict, module_bundle: bool
         if key not in entries:
             problems.append(f"{where}: key not in catalogue: {key!r}")
     for key in sorted(set(entries) - set(used)):
-        if key.startswith(UNUSED_EXEMPT):
+        if key.startswith(DYNAMIC_PREFIXES):
             continue
         problems.append(f"unused catalogue key: {key!r}")
     return problems

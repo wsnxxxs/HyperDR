@@ -3,7 +3,11 @@
 // E6 implementation, based on 5ae7e4b5; before binary: 8033bf09.
 // Sources: public sony-ilce-7s.ARW and the read-only 61MP user RAW.
 // Failed codec cases are recorded in batch3-report.md, not used to claim a
-// completed encoding/verification peak. HEIC verification: remeasure at P3b-4.
+// completed encoding/verification peak. P3b-4: the HEIC rows were remeasured
+// with write-time verification on our own reader (all within 2% of the libheif
+// run: verification was never the peak) and the two large story Adaptive rows,
+// which libheif could not verify (1445 items), were added. The standalone
+// verification of the 61 MP file peaks at 40-78 MB (was 0.59-0.93 GB).
 struct ExportMeasurement {
   const char* name;
   unsigned pw,ph,cw,ch;
@@ -45,6 +49,8 @@ inline constexpr ExportMeasurement export_measurements[] = {
   {"large:story:iso-gainmap-jpeg:8",9504,6336,10200,18134,hyperdr::OutputEncoding::IsoGainMapJpeg,8,4761964720ULL},
   // E8: 10200x18134 is written as a 3x5 AVIF grid (libaom cannot hold it as one frame).
   {"large:story:avif-pq:10",9504,6336,10200,18134,hyperdr::OutputEncoding::AvifPq,10,4321104240ULL},
+  {"large:story:adaptive:8",9504,6336,10200,18134,hyperdr::OutputEncoding::Adaptive,8,4922184552ULL},
+  {"large:story:adaptive:10",9504,6336,10200,18134,hyperdr::OutputEncoding::Adaptive,10,4921611112ULL},
   {"large:story:pq:10",9504,6336,10200,18134,hyperdr::OutputEncoding::Pq,10,3915501288ULL},
   {"large:story:sdr-jpeg:8",9504,6336,10200,18134,hyperdr::OutputEncoding::SdrJpeg,8,3718090088ULL},
 };

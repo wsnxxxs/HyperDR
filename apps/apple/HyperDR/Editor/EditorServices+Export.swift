@@ -28,6 +28,7 @@ extension EditorServices {
     func encodingCapabilities() async throws -> EditorCapabilities {
         EditorCapabilities(encodings: Dictionary(uniqueKeysWithValues: Preferences.encodings.map { ($0, .init(available: true, reason: "")) }), main8: true, main10: true)
     }
+    func aboutInformation() async -> AboutInformation { AboutInformation() }
     func diagnostics() async -> String { "" }
     func exportFileURL(_ photo: EditorPhoto, export: String) async throws -> URL { throw UserFacingError(code: "session_expired") }
     func lutEntries() async -> [LUTItem] { [] }

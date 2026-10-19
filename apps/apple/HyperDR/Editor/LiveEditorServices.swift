@@ -525,7 +525,7 @@ extension LiveEditorServices {
         guard folder.ready else { return ExportFolder(label: folder.label, ready: false) }
         do {
             let snapshot = try await kit.exportTarget.captureFolder()
-            let target = ExportFolderTarget { [weak self, kit, snapshot] photo, export in
+            let target = ExportFolderTarget(reveal: { try await kit.exportTarget.reveal(folder: snapshot) }) { [weak self, kit, snapshot] photo, export in
                 guard let self else { throw UserFacingError(code: "engine_unavailable") }
                 let id = try exportSession(photo), version = ExportID(rawValue: export)
                 let saved = try await kit.exportTarget.save(session: id, export: version, folder: snapshot)
@@ -550,6 +550,9 @@ extension LiveEditorServices {
         let session = try exportSession(photo)
         return try await requireKit().sessions.resultURL(session, export: ExportID(rawValue: export))
     }
+    func aboutInformation() async -> AboutInformation {
+        AboutInformation(bundle: .main, engineABI: Engine.abiVersion)
+    }
     func diagnostics() async -> String {
         guard let kit = try? await requireKit() else { return "" }
         let version = ProcessInfo.processInfo.operatingSystemVersion
@@ -560,7 +563,7 @@ extension LiveEditorServices {
     private func item(_ entry: LUTEntry) -> LUTItem {
         LUTItem(id: entry.id.rawValue, name: entry.name,
             input: LUTColorSpace(rawValue: entry.input.rawValue) ?? .srgb,
-            output: LUTColorSpace(rawValue: entry.output.rawValue) ?? .srgb)
+            output: LUTColorSpace(rawValue: entry.output.rawValue) ?? .srgb, byteCount: entry.byteCount)
     }
     func lutEntries() async -> [LUTItem] {
         guard let kit = try? await requireKit() else { return [] }

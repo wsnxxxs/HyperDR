@@ -1,11 +1,13 @@
 // !$*UTF8*$!
 {archiveVersion = 1; classes = {}; objectVersion = 77; objects = {
+AB0100000000000000000001 /* notices */ = {isa = PBXFileReference; lastKnownFileType = text; path = ../../THIRD_PARTY_NOTICES.md; sourceTree = SOURCE_ROOT;};
+AB0100000000000000000002 /* noticesResource */ = {isa = PBXBuildFile; fileRef = AB0100000000000000000001;};
 430875E90777B4C6F1F8D253 /* appFiles */ = {isa = PBXFileSystemSynchronizedRootGroup; path = HyperDR; sourceTree = "<group>";};
 942FCAE2B95218778FA93023 /* testFiles */ = {isa = PBXFileSystemSynchronizedRootGroup; path = HyperDRPreviewTests; sourceTree = "<group>";};
 8BCD5BC4CDFDF0918087C782 /* appProduct */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = HyperDR.app; sourceTree = BUILT_PRODUCTS_DIR;};
 F219C0274590DA45E4BEF1EA /* testProduct */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = HyperDRPreviewTests.xctest; sourceTree = BUILT_PRODUCTS_DIR;};
 FBDC4F23F93125BBEEAE800C /* products */ = {isa = PBXGroup; children = (8BCD5BC4CDFDF0918087C782, F219C0274590DA45E4BEF1EA,); name = Products; sourceTree = "<group>";};
-DC76E9F0C0006E8F919E0C51 /* root */ = {isa = PBXGroup; children = (430875E90777B4C6F1F8D253, 942FCAE2B95218778FA93023, FBDC4F23F93125BBEEAE800C,); sourceTree = "<group>";};
+DC76E9F0C0006E8F919E0C51 /* root */ = {isa = PBXGroup; children = (AB0100000000000000000001, 430875E90777B4C6F1F8D253, 942FCAE2B95218778FA93023, FBDC4F23F93125BBEEAE800C,); sourceTree = "<group>";};
 C64033672F5CA984DFE96290 /* engine */ = {isa = XCLocalSwiftPackageReference; relativePath = Packages/HyperDREngine;};
 30F8C7D74650983A7B8E4793 /* engineProduct */ = {isa = XCSwiftPackageProductDependency; package = C64033672F5CA984DFE96290; productName = HyperDREngine;};
 53BDC47B10863A12D6981D10 /* engineBuild */ = {isa = PBXBuildFile; productRef = 30F8C7D74650983A7B8E4793;};
@@ -16,7 +18,7 @@ A20000000000000000000003 /* kitBuild */ = {isa = PBXBuildFile; productRef = A200
 729F262074F70F9D9EC00DD7 /* designProduct */ = {isa = XCSwiftPackageProductDependency; package = 056F118278992DA3361A3D5F; productName = HyperDRDesign;};
 77EAB2BDAC6C640A77408A49 /* designBuild */ = {isa = PBXBuildFile; productRef = 729F262074F70F9D9EC00DD7;};
 971ED9D05B25DB6C4D7680D4 /* appSources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;};
-364863F9F2E558B0F50473FC /* appResources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;};
+364863F9F2E558B0F50473FC /* appResources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (AB0100000000000000000002,); runOnlyForDeploymentPostprocessing = 0;};
 78AE8C6BEB2A40A6D824CCEE /* appFrameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (A20000000000000000000003, 53BDC47B10863A12D6981D10, 77EAB2BDAC6C640A77408A49,); runOnlyForDeploymentPostprocessing = 0;};
 6E431EB0650617AA1756B320 /* testSources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;};
 7DED7670B79BEA8B7480B1FC /* testResources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;};

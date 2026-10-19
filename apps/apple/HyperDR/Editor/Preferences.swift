@@ -51,8 +51,13 @@ nonisolated struct ExportFolder: Equatable, Sendable {
 }
 /// App-owned opaque authority. Views use only ExportFolder's label and ready.
 @MainActor final class ExportFolderTarget: Equatable {
+    private let revealAction: () async throws -> Void
     private let action: (EditorPhoto, String) async throws -> SavedLocation
-    init(save: @escaping (EditorPhoto, String) async throws -> SavedLocation) { action = save }
+    init(reveal: @escaping () async throws -> Void = { throw UserFacingError(code: "export_folder_unset") },
+         save: @escaping (EditorPhoto, String) async throws -> SavedLocation) {
+        revealAction = reveal; action = save
+    }
+    func reveal() async throws { try await revealAction() }
     func save(_ photo: EditorPhoto, export: String) async throws -> SavedLocation {
         try await action(photo, export)
     }
@@ -62,6 +67,7 @@ nonisolated struct ExportFolder: Equatable, Sendable {
     var value: Preferences
     var exportFolder = ExportFolder()
     var diagnostics = ""
+    var about = AboutInformation()
     var failure: UserFacingError?
     init(_ value: Preferences) { self.value = value }
 }

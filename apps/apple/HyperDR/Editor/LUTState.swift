@@ -8,6 +8,7 @@ nonisolated enum LUTColorSpace: String, CaseIterable, Sendable {
 }
 nonisolated struct LUTItem: Identifiable, Equatable, Sendable {
     var id: String; var name: String; var input: LUTColorSpace; var output: LUTColorSpace
+    var byteCount: UInt64 = 0
 }
 @MainActor @Observable final class LUTState {
     var library: [LUTItem] = []

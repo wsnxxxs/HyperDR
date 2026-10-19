@@ -302,6 +302,7 @@ extension EditorModel {
     /// the localized `undo.<action>`.
     func recordStep(from previous: EditSnapshot, action: String) {
         guard previous != edit else { return }
+        clearRestoreNotice()
         undoManager.beginUndoGrouping()
         undoManager.registerUndo(withTarget: self) { model in
             MainActor.assumeIsolated { model.restoreStep(previous, action: action) }

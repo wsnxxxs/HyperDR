@@ -81,8 +81,9 @@ enum RestoreResult {
     /// No remembered photo, or it expired: the empty state, silently.
     case none
     case restored(EditorPhoto)
-    /// A remembered photo that can no longer be opened (`source_missing`).
-    case unavailable(UserFacingError)
+    /// A remembered photo that can no longer be opened (`source_missing`),
+    /// with the name it had when the name could be read.
+    case unavailable(UserFacingError, name: String?)
 }
 
 /// One opened photo. `handle` makes every open distinct, so closing an

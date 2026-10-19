@@ -25,7 +25,8 @@ if(HYPERDR_WITH_CODECS)
     src/hevc/vt_common.cpp
     src/hevc/vt_decoder.cpp
     src/hevc/vt_encoder.cpp
-    src/hevc/yuv.cpp)
+    src/hevc/yuv.cpp
+    src/hevc/yuv_to_rgb.cpp)
 endif()
 
 hyperdr_add_module(codec

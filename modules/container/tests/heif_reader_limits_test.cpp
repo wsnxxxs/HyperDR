@@ -203,6 +203,7 @@ void run() {
   set32(sample, 0, sample.size() - 4);
   sample[4] = 0x26;
   sample[5] = 1;
+  sample[6] = 0x80;  // first_slice_segment_in_pic_flag: one complete picture
   validate_hevc_sample(sample, config);
   sample.push_back(0);
   rejects([&] { validate_hevc_sample(sample, config); });

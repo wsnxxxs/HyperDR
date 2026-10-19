@@ -489,7 +489,11 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
             options.encoding == OutputEncoding::IsoGainMapJpeg ? GainMapWriterProfile::iso_generic
                                                         : GainMapWriterProfile::apple_strict, result.frame.has_value());
       }
-      else gain.base_linear = std::move(photo.sdr);
+      else {
+        gain.base_linear = std::move(photo.sdr);
+        // An external grid finer than the photograph cannot be a gain map (E9).
+        fit_gain_map_to_base(gain);
+      }
     }
     const auto& rendered_stats = explicit_gain ? gain.stats : photo.stats;
     const auto& rendered_base = explicit_gain ? gain.base_linear : photo.sdr;

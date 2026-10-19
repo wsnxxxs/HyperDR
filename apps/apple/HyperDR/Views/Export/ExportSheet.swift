@@ -417,9 +417,11 @@ private struct ExportResultView: View {
                                      warnings: result.warnings.map { Text(verbatim: $0) }, isStale: stale,
                                      saveRow: saveRow(result),
                                      dragSource: ExportTransfer.dragSource(model: model, version: result.export,
-                                                                           thumbnail: model.export.thumbnail, name: result.fileName),
+                                                                           thumbnail: model.export.thumbnail,
+                                                                           name: result.saved?.fileName ?? result.fileName),
                                      shareAccessory: AnyView(ExportShareButton(model: model, version: result.export,
-                                                                               thumbnail: model.export.thumbnail)))
+                                                                               thumbnail: model.export.thumbnail,
+                                                                               name: result.saved?.fileName ?? result.fileName)))
                     ExportTransferNotice(model: model)
                 }
             }

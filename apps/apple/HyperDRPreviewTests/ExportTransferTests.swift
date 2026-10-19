@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 import HyperDRKit
 @testable import HyperDR
@@ -25,8 +26,8 @@ import HyperDRKit
     }
 
     private func list(_ model: EditorModel, _ services: FakeEditorServices, _ versions: [ExportVersion]) async throws {
-        let key = try await services.exportKey(model.photo!, options: model.effectiveOptions(), frame: nil)
-        services.historyByURL[source] = versions.map { ExportHistoryItem(version: $0, key: key, options: model.edit) }
+        // Made with other settings than the current ones, so Restore is on offer.
+        services.historyByURL[source] = versions.map { ExportHistoryItem(version: $0, key: "earlier-settings", options: model.edit) }
         model.refreshExportMetadata()
         await eventually(timeout: .seconds(10)) { model.exportVersions.count == versions.count }
     }
@@ -83,5 +84,93 @@ import HyperDRKit
         m.open([second])
         await eventually(timeout: .seconds(10)) { m.photo?.url == self.second && !m.suggestedFileName.isEmpty }
         XCTAssertNil(m.export.transferFailure)
+    }
+
+    // MARK: What the receiver is offered
+
+    func testEveryKindOfFileIsRegisteredUnderItsOwnTypeWithItsName() throws {
+        let cases: [(String, String)] = [("Holiday.heic", "public.heic"), ("a.jpg", "public.jpeg"), ("b.tif", "public.tiff"), ("c.avif", "public.avif")]
+        for (name, type) in cases {
+            let item = ExportTransferItem(version: "v", fileName: name) { URL(fileURLWithPath: "/tmp/x") }
+            let provider = NSItemProvider()
+            provider.register(item)
+            XCTAssertTrue(provider.registeredTypeIdentifiers.contains(type), "\(name): \(provider.registeredTypeIdentifiers)")
+            XCTAssertEqual(provider.suggestedName, name, name)
+            XCTAssertTrue(provider.hasItemConformingToTypeIdentifier("public.image"), "a receiver asking for any image still gets it")
+        }
+    }
+
+    func testAFileOfAnotherTypeStillGoesOutAsAnImage() {
+        let item = ExportTransferItem(version: "v", fileName: "weird.xyz") { URL(fileURLWithPath: "/tmp/x") }
+        let provider = NSItemProvider()
+        provider.register(item)
+        XCTAssertTrue(provider.hasItemConformingToTypeIdentifier("public.image"))
+    }
+
+    // MARK: What the receiver is told, and when
+
+    func testTheCopyIsOfTheVersionsOwnPhotoEvenIfAnotherIsOpenByThenAndAFailureIsNotShownOnThePanelOfTheOther() async throws {
+        let (m, s) = await ready()
+        try await list(m, s, [ExportVersion(number: 1, createdAt: Date(), encodingID: "adaptive", result: result("v1"))])
+        let first = try XCTUnwrap(m.photo)
+        let item = try XCTUnwrap(m.transferItem(for: "v1"))
+        s.transferHandler = { _, _ in throw UserFacingError(code: "source_missing") }
+        m.open([second])
+        await eventually(timeout: .seconds(10)) { m.photo?.url == self.second && !m.suggestedFileName.isEmpty }
+        do { _ = try await item.stage(); XCTFail("should throw") } catch {}
+        XCTAssertEqual(s.transferCalls.count, 1)
+        XCTAssertNil(m.export.transferFailure, "the other photo's panel says nothing about it")
+        XCTAssertNotEqual(m.photo, first)
+    }
+
+    func testAVersionJustExportedIsNamedByItsSavedNameBeforeTheHistoryHasIt() async {
+        let (m, _) = await ready()
+        m.export.result = result("fresh", saved: "Holiday.heic")
+        XCTAssertEqual(m.transferItem(for: "fresh")?.fileName, "Holiday.heic")
+        m.export.result = result("fresh")
+        XCTAssertEqual(m.transferItem(for: "fresh")?.fileName, "result.heic")
+    }
+
+    // MARK: The rows
+
+    func testARowOfAVersionSavedInAnEarlierSessionCanBeSharedAndSavedAgainButNotRevealed() async throws {
+        let (m, s) = await ready()
+        try await list(m, s, [ExportVersion(number: 1, createdAt: Date(), encodingID: "adaptive", result: result("v1", saved: "Holiday.heic"))])
+        let plan = HistoryRowPlan(model: m, version: m.exportVersions[0], saving: false)
+        XCTAssertFalse(plan.canShowInFinder, "no authority to reveal it any more")
+        XCTAssertTrue(plan.canTransfer); XCTAssertTrue(plan.canSaveAs); XCTAssertTrue(plan.canRestore)
+        XCTAssertFalse(plan.hasFileMissingNote)
+    }
+
+    func testARowWhoseFileIsGoneOnlyOffersRestoreAndSaysSo() async throws {
+        let (m, s) = await ready()
+        try await list(m, s, [ExportVersion(number: 1, createdAt: Date(), encodingID: "adaptive", fileAvailable: false, result: result("v1"))])
+        let plan = HistoryRowPlan(model: m, version: m.exportVersions[0], saving: false)
+        XCTAssertFalse(plan.canTransfer); XCTAssertFalse(plan.canSaveAs); XCTAssertFalse(plan.canShowInFinder)
+        XCTAssertTrue(plan.canRestore); XCTAssertTrue(plan.hasFileMissingNote)
+    }
+
+    func testASavingRowCanStillBeDraggedButNotSavedAgain() async throws {
+        let (m, s) = await ready()
+        try await list(m, s, [ExportVersion(number: 1, createdAt: Date(), encodingID: "adaptive", result: result("v1"))])
+        let plan = HistoryRowPlan(model: m, version: m.exportVersions[0], saving: true)
+        XCTAssertTrue(plan.canTransfer); XCTAssertFalse(plan.canSaveAs)
+    }
+
+    func testTheShareButtonNamesTheFileForVoiceOverAndTheSheetRendersEveryKindOfRow() async throws {
+        XCTAssertEqual(AppStrings.format("history.share.a11y %@", locale: Locale(identifier: "en"), "Holiday.heic"), "Share “Holiday.heic”")
+        let (m, s) = await ready()
+        try await list(m, s, [
+            ExportVersion(number: 3, createdAt: Date(), encodingID: "adaptive", fileAvailable: false, result: result("v3")),
+            ExportVersion(number: 2, createdAt: Date(), encodingID: "adaptive", result: result("v2", saved: "Holiday.heic")),
+            ExportVersion(number: 1, createdAt: Date(), encodingID: "adaptive", result: result("v1")),
+        ])
+        let host = NSHostingView(rootView: ExportHistorySheet(model: m).environment(\.locale, Locale(identifier: "en")).frame(width: 640, height: 480))
+        host.frame = CGRect(x: 0, y: 0, width: 640, height: 480)
+        host.layoutSubtreeIfNeeded()
+        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        let pixels = Array(UnsafeBufferPointer(start: bitmap.bitmapData, count: bitmap.bytesPerRow * bitmap.pixelsHigh))
+        XCTAssertGreaterThan(Set(pixels.prefix(200_000)).count, 8, "the sheet drew its rows")
     }
 }

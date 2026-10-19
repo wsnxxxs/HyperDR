@@ -62,16 +62,17 @@ struct ExportHistorySheet: View {
         var tags: [HDRTag] = []
         if version.matchesCurrent { tags.append(HDRTag(Text("history.matches"), tint: .accent)) }
         if version.saved != nil { tags.append(HDRTag(Text("history.saved"), systemImage: "checkmark", tint: .success)) }
+        let plan = HistoryRowPlan(model: model, version: version, saving: saving)
         let secondary: RowAction
         if version.saved != nil {
             secondary = RowAction(title: Text("export.save.showInFinder"), systemImage: "folder",
-                                  isEnabled: ExportFlow.canShowInFinder(model: model, version: version.id),
+                                  isEnabled: plan.canShowInFinder,
                                   disabledReason: ExportRevealHelp.unavailable) {
                 ExportFlow.showInFinder(model: model, version: version.id)
             }
         } else {
             secondary = RowAction(title: Text(saving ? "export.save.saving" : "export.save.saveAs"),
-                                  isEnabled: !saving && version.fileAvailable,
+                                  isEnabled: plan.canSaveAs,
                                   disabledReason: version.fileAvailable ? nil : Text("history.fileMissing.help")) {
                 ExportFlow.saveAs(model: model, version: version.id, choosePlace: ExportSavePanel.chooser(on: sheetWindow))
             }
@@ -82,12 +83,13 @@ struct ExportHistorySheet: View {
             note: version.fallbackReason.map { Text(verbatim: ExportPresentation.fallbackNote($0, model: model, locale: locale)) },
             extraNote: version.fileAvailable ? nil : Text("history.fileMissing"),
             primary: RowAction(title: Text("history.restore"),
-                               isEnabled: !version.matchesCurrent && !model.isEditingLocked) {
+                               isEnabled: plan.canRestore) {
                 model.restore(version.id)
             },
             secondary: secondary,
             dragSource: ExportTransfer.dragSource(model: model, version: version.id, thumbnail: thumbnail, name: version.fileName),
-            trailingAccessory: AnyView(ExportShareButton(model: model, version: version.id, thumbnail: thumbnail)))
+            trailingAccessory: AnyView(ExportShareButton(model: model, version: version.id, thumbnail: thumbnail,
+                                                     name: version.saved?.fileName ?? version.fileName)))
         .contextMenu { menu(version, saving: saving, thumbnail: thumbnail) }
         // Read lazily, once the row is on screen; it asks again if the model
         // let the picture go from its small cache.
@@ -98,14 +100,15 @@ struct ExportHistorySheet: View {
 
     /// What the file can be made to do, before the settings (M3 §9, parity batch 7 §1.4).
     @ViewBuilder private func menu(_ version: ExportVersion, saving: Bool, thumbnail: ThumbnailState) -> some View {
+        let plan = HistoryRowPlan(model: model, version: version, saving: saving)
         if version.saved != nil {
             Button("export.save.showInFinder") { ExportFlow.showInFinder(model: model, version: version.id) }
-                .disabled(!ExportFlow.canShowInFinder(model: model, version: version.id))
+                .disabled(!plan.canShowInFinder)
         }
         Button("export.save.saveAs") {
             ExportFlow.saveAs(model: model, version: version.id, choosePlace: ExportSavePanel.chooser(on: sheetWindow))
         }
-        .disabled(saving || !version.fileAvailable)
+        .disabled(!plan.canSaveAs)
         if let item = model.transferItem(for: version.id) {
             ShareLink(item: item, preview: SharePreview(Text(verbatim: item.fileName))) { Text("history.share") }
         } else {
@@ -113,7 +116,7 @@ struct ExportHistorySheet: View {
         }
         Divider()
         Button("history.restore") { model.restore(version.id) }
-            .disabled(version.matchesCurrent || model.isEditingLocked)
+            .disabled(!plan.canRestore)
     }
 
     private var empty: some View {
@@ -137,5 +140,26 @@ struct ExportHistorySheet: View {
                 .buttonStyle(.hdrPrimary).keyboardShortcut(.defaultAction)
         }
         .padding(.horizontal, Space.s5).padding(.vertical, Space.s3)
+    }
+}
+
+/// What can be done with one row of the history right now; the row and its
+/// context menu both read it, so they never disagree.
+struct HistoryRowPlan: Equatable {
+    /// Only a saved version has a place to show, and only while this session
+    /// still holds the authority to reveal it.
+    let canShowInFinder: Bool
+    let canSaveAs: Bool
+    /// Drag out and share: any version whose retained file is still there.
+    let canTransfer: Bool
+    let canRestore: Bool
+    let hasFileMissingNote: Bool
+
+    @MainActor init(model: EditorModel, version: ExportVersion, saving: Bool) {
+        canShowInFinder = version.saved != nil && ExportFlow.canShowInFinder(model: model, version: version.id)
+        canSaveAs = !saving && version.fileAvailable
+        canTransfer = model.transferItem(for: version.id) != nil
+        canRestore = !version.matchesCurrent && !model.isEditingLocked
+        hasFileMissingNote = !version.fileAvailable
     }
 }

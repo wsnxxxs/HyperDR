@@ -89,9 +89,9 @@ public struct ExportResultCard: View {
             }
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
-            HStack(alignment: .top, spacing: Space.s3) {
-                if let dragSource { dragSource(AnyView(Thumbnail(thumbnail, width: 96, height: 64))) }
-                else { Thumbnail(thumbnail, width: 96, height: 64) }
+            // The whole block is the drag source, and reads as one element.
+            let block = HStack(alignment: .top, spacing: Space.s3) {
+                Thumbnail(thumbnail, width: 96, height: 64)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(verbatim: fileName).font(.system(size: TypeScale.Size.control, weight: .semibold))
                         .foregroundStyle(Color.hdr.inkStrong).lineLimit(1).truncationMode(.middle)
@@ -100,6 +100,7 @@ public struct ExportResultCard: View {
                     }
                 }
             }
+            if let dragSource { dragSource(AnyView(block)) } else { block }
             if isStale {
                 Text("design.export.staleNote", bundle: .module)
                     .font(.hdr.caption).foregroundStyle(Color.hdr.ink).fixedSize(horizontal: false, vertical: true)

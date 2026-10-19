@@ -1,3 +1,4 @@
+#include "../../../tests/support/temp_directory.hpp"
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/container/gain_map_jpeg.hpp"
@@ -182,7 +183,7 @@ ImageIoReading read_with_imageio(const std::vector<std::uint8_t>& bytes) {
 // gain everywhere, a token AlternateHeadroom above BaseHeadroom so readers
 // accept the file, and both readers show the SDR base as the HDR rendition.
 void zero_headroom() {
-  const auto scratch = std::filesystem::temp_directory_path() /
+  const auto scratch = hyperdr::test::temporary_directory() /
       ("hyperdr-zero-headroom-" + std::to_string(getpid()));
   std::filesystem::create_directories(scratch);
   constexpr unsigned w = 96, h = 64;

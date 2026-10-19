@@ -1,3 +1,4 @@
+#include "../../../tests/support/temp_directory.hpp"
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/foundation/file_io.hpp"
@@ -198,7 +199,7 @@ void regressions() {
   trailer.insert(trailer.end(),original.begin(),original.end());
   recovered=parse_gain_map_jpeg_input(trailer);
   require(recovered.trailing_bytes==original.size()+5,"opaque JPEG trailer was consumed");
-  const auto path=std::filesystem::temp_directory_path()/("hyperdr-e4c-"+std::to_string(getpid())+".jpg");
+  const auto path=hyperdr::test::temporary_directory()/("hyperdr-e4c-"+std::to_string(getpid())+".jpg");
   struct Remove { std::filesystem::path path;~Remove(){std::error_code e;std::filesystem::remove(path,e);} } cleanup{path};
   write_binary_file_atomic(path,trailer,true);
   const auto decoded=decode_image(path);

@@ -1,3 +1,4 @@
+#include "../../../tests/support/temp_directory.hpp"
 #include "hyperdr/foundation/hash.hpp"
 #include "hyperdr/foundation/cancel.hpp"
 
@@ -54,7 +55,7 @@ const std::array<FileVector, 2> kFiles{{
 }};
 
 void check_sha256_vectors() {
-  const auto path = std::filesystem::temp_directory_path() / "hyperdr-sha256-test.bin";
+  const auto path = hyperdr::test::temporary_directory() / "hyperdr-sha256-test.bin";
   for (const auto& vector : kVectors) {
     const auto bytes = pattern(vector.size);
     write_file(path, bytes);

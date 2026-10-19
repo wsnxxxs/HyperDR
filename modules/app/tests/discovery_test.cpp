@@ -1,3 +1,4 @@
+#include "../../../tests/support/temp_directory.hpp"
 #include "hyperdr/app/batch.hpp"
 #include "hyperdr/app/discovery.hpp"
 #include "hyperdr/app/fingerprint.hpp"
@@ -38,7 +39,7 @@ bool contains(const std::vector<std::filesystem::path>& files,
 }  // namespace
 
 int main() {
-  const auto root = std::filesystem::temp_directory_path() /
+  const auto root = hyperdr::test::temporary_directory() /
       "hyperdr-pipeline-discovery-test";
   std::filesystem::remove_all(root);
   try {

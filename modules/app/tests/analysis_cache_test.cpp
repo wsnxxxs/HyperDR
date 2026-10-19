@@ -1,3 +1,4 @@
+#include "../../../tests/support/temp_directory.hpp"
 #include "hyperdr/app/analysis_cache.hpp"
 #include "hyperdr/app/decode_cache.hpp"
 
@@ -14,7 +15,7 @@ void require(bool condition, const char* message) {
 }
 
 int main() {
-  const auto directory = std::filesystem::temp_directory_path() /
+  const auto directory = hyperdr::test::temporary_directory() /
       ("hyperdr-analysis-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
   try {
     std::filesystem::create_directories(directory);

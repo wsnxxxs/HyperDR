@@ -1,3 +1,4 @@
+#include "../../../tests/support/temp_directory.hpp"
 // The variant changes only the mat: the TIFF's decoded photograph stays exact.
 #include "hyperdr/app/engine.hpp"
 #include "hyperdr/codec/encoders.hpp"
@@ -50,7 +51,7 @@ void check(unsigned width, const std::filesystem::path& root) {
 }
 }
 int main() {
-  const auto folder = std::filesystem::temp_directory_path() /
+  const auto folder = hyperdr::test::temporary_directory() /
       ("hyperdr-frame-variant-export-" + std::to_string(getpid()));
   try {
     std::filesystem::create_directories(folder);

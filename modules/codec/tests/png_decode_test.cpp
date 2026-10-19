@@ -1,3 +1,4 @@
+#include "../../../tests/support/temp_directory.hpp"
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/image/color.hpp"
@@ -94,7 +95,7 @@ std::vector<unsigned char> encode(const Fixture& f) {
 }
 hyperdr::DecodedImage decode(const Fixture& f, unsigned preview = 0,
                             hyperdr::ColorGamut fallback = hyperdr::ColorGamut::kSrgb) {
-  const auto path = std::filesystem::temp_directory_path() / "hyperdr-png-decode-test.png";
+  const auto path = hyperdr::test::temporary_directory() / "hyperdr-png-decode-test.png";
   hyperdr::write_binary_file_atomic(path, encode(f), true);
   hyperdr::RawDecodeOptions options;
   options.preview_max_edge = preview;
@@ -264,7 +265,7 @@ void check_preview() {
          "Adam7 changed the preview reduction kernel");
 }
 void check_decode_errors() {
-  const auto path = std::filesystem::temp_directory_path() / "hyperdr-png-truncated-test.png";
+  const auto path = hyperdr::test::temporary_directory() / "hyperdr-png-truncated-test.png";
   auto bytes = encode(Fixture{});
   bytes.resize(bytes.size() - 16);
   hyperdr::write_binary_file_atomic(path, bytes, true);
@@ -361,7 +362,7 @@ void check_content_peak() {
 }  // namespace
 
 hyperdr::FrameOverlay overlay_of(const Fixture& f) {
-  const auto path = std::filesystem::temp_directory_path() / "hyperdr-frame-overlay-test.png";
+  const auto path = hyperdr::test::temporary_directory() / "hyperdr-frame-overlay-test.png";
   hyperdr::write_binary_file_atomic(path, encode(f), true);
   try {
     auto result = hyperdr::decode_frame_overlay(path);

@@ -3876,6 +3876,23 @@
         }
       }
     },
+    "frame.style.instant.variant.wide" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On panoramas the margins and text follow the width, so they stay readable."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全景照片的留白与文字按宽度排，保持可读。"
+          }
+        }
+      }
+    },
     "frame.style.variant.tall" : {
       "extractionState" : "manual",
       "localizations" : {

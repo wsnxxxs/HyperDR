@@ -30,13 +30,21 @@ enum FrameStyle: String, CaseIterable, Identifiable, Codable {
                           aspect: FrameAspect(width: 9, height: 16, topShare: 0.42),
                           variants: [
                               // A panorama: a landscape card, margins and caption by the long edge.
-                              FrameVariant(name: "wide", minRatio: 2.5, margin: 0.02, caption: 0.06,
+                              FrameVariant(name: "wide", minRatio: 2.5, margins: FrameMargins(all: 0.02), caption: 0.06,
                                            referencesLongEdge: true),
                               // A very tall photo: the 9:16 canvas gives way to the plain mat.
                               FrameVariant(name: "tall", maxRatio: 0.125),
                           ])
         case .instant:
-            FrameGeometry(top: 0.045, right: 0.045, bottom: 0.03, left: 0.045, caption: 0.19)
+            FrameGeometry(top: 0.045, right: 0.045, bottom: 0.03, left: 0.045, caption: 0.19,
+                          variants: [
+                              // A panorama: the 2.5:1 card (these numbers are the plain ones
+                              // divided by 2.5) grown by the long edge, so margins and text
+                              // keep their share of the width instead of shrinking to a strip.
+                              FrameVariant(name: "wide", minRatio: 2.5,
+                                           margins: FrameMargins(top: 0.018, right: 0.018, bottom: 0.012, left: 0.018),
+                                           caption: 0.076, referencesLongEdge: true),
+                          ])
         case .hairline:
             FrameGeometry(top: 0.02, right: 0.02, bottom: 0.02, left: 0.02, caption: 0)
         }
@@ -59,7 +67,9 @@ struct FrameGeometry: Equatable {
     func applying(_ name: String?) -> FrameGeometry {
         guard let name, let variant = variants.first(where: { $0.name == name }) else { return self }
         var result = self
-        if let margin = variant.margin { result.top = margin; result.right = margin; result.bottom = margin; result.left = margin }
+        if let margins = variant.margins {
+            result.top = margins.top; result.right = margins.right; result.bottom = margins.bottom; result.left = margins.left
+        }
         if let caption = variant.caption { result.caption = caption }
         result.aspect = nil
         result.variants = []
@@ -74,10 +84,21 @@ struct FrameVariant: Equatable {
     var name: String
     var minRatio: Double? = nil
     var maxRatio: Double? = nil
-    /// The same mat on all four sides.
-    var margin: Double? = nil
+    var margins: FrameMargins? = nil
     var caption: Double? = nil
     var referencesLongEdge = false
+}
+
+/// The mat on each side, as a fraction of the reference edge.
+struct FrameMargins: Equatable {
+    var top, right, bottom, left: Double
+
+    init(top: Double, right: Double, bottom: Double, left: Double) {
+        self.top = top; self.right = right; self.bottom = bottom; self.left = left
+    }
+
+    /// The same mat on all four sides.
+    init(all margin: Double) { self.init(top: margin, right: margin, bottom: margin, left: margin) }
 }
 
 /// A fixed canvas proportion; `topShare` of the added height goes above the photo.
@@ -170,12 +191,13 @@ struct FrameSettings: Equatable, Codable {
         ]
         if !geometry.variants.isEmpty {
             frame["variants"] = .object(Dictionary(uniqueKeysWithValues: geometry.variants.map { variant in
-                var entry: [String: JSONValue] = ["aspect": .null]
+                // A variant drops the style's forced canvas proportion, if it has one.
+                var entry: [String: JSONValue] = geometry.aspect == nil ? [:] : ["aspect": .null]
                 if let minRatio = variant.minRatio { entry["minRatio"] = .number(minRatio) }
                 if let maxRatio = variant.maxRatio { entry["maxRatio"] = .number(maxRatio) }
-                if let margin = variant.margin {
-                    entry["margins"] = .object(["top": .number(margin), "right": .number(margin),
-                                                "bottom": .number(margin), "left": .number(margin)])
+                if let margins = variant.margins {
+                    entry["margins"] = .object(["top": .number(margins.top), "right": .number(margins.right),
+                                                "bottom": .number(margins.bottom), "left": .number(margins.left)])
                 }
                 // Without a caption the band goes in every layout, not just the default.
                 if let caption = variant.caption { entry["caption"] = .number(hasCaption ? caption : 0) }
@@ -324,6 +346,18 @@ extension FrameStyle {
                 line(date, .secondary, .text, 0.0155, gap: 0.008),
             ].compactMap { $0 }
             caption.placement = .top(0.035)
+        case .instant where variant == "wide":
+            // The 2.5:1 caption (every size divided by 2.5), by the long edge.
+            let name = signature.isEmpty && settings.showsCamera ? facts.cameraName : nil
+            caption.leading = [
+                line(signature, .primary, .signature, 0.018),
+                line(name, .primary, .semibold, 0.0088, tracking: 0.08),
+            ].compactMap { $0 }
+            caption.trailing = [
+                line(date, .secondary, .text, 0.0064),
+                line(exposure, .secondary, .text, 0.0064, gap: 0.0024),
+            ].compactMap { $0 }
+            caption.placement = .middle(abovePaperMargin: true)
         case .instant:
             let name = signature.isEmpty && settings.showsCamera ? facts.cameraName : nil
             caption.leading = [

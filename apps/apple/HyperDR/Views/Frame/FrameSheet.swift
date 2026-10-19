@@ -321,7 +321,7 @@ struct FrameSettingsPanel: View {
                     .font(Font.hdr.caption)
                     .foregroundStyle(Color.hdr.inkMuted)
                     .fixedSize(horizontal: false, vertical: true)
-                if let variant = layout.variant, let note = FrameStyle.variantNote(variant) {
+                if let variant = layout.variant, let note = settings.style.variantNote(variant) {
                     Text(note)
                         .font(Font.hdr.caption)
                         .foregroundStyle(Color.hdr.inkMuted)
@@ -452,10 +452,11 @@ extension EditorModel {
 
 extension FrameStyle {
     /// The line under the style when the engine laid it out as a variant.
-    static func variantNote(_ variant: String) -> LocalizedStringKey? {
-        switch variant {
-        case "wide": "frame.style.variant.wide"
-        case "tall": "frame.style.variant.tall"
+    func variantNote(_ variant: String) -> LocalizedStringKey? {
+        switch (self, variant) {
+        case (.instant, "wide"): "frame.style.instant.variant.wide"
+        case (_, "wide"): "frame.style.variant.wide"
+        case (_, "tall"): "frame.style.variant.tall"
         default: nil
         }
     }

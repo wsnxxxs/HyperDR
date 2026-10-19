@@ -258,8 +258,14 @@ extension EditorModel {
             } catch {
                 guard let self, !Task.isCancelled, self.photo == photo, exportMetadataTicket == ticket else { return }
                 let failure = UserFacingError.service(error)
-                // The history on screen stays as it was.
-                if failure.code == "source_missing" { enterSourceUnavailable(failure) }
+                if failure.code == "source_missing" {
+                    // The list stays, but nothing in it can be said to match
+                    // the settings any more (they may have moved on).
+                    export.isResultStale = export.result != nil
+                    for index in exportVersions.indices { exportVersions[index].matchesCurrent = false }
+                    currentExportKey = nil
+                    enterSourceUnavailable(failure)
+                }
                 else { handleExportError(failure) }
             }
         }

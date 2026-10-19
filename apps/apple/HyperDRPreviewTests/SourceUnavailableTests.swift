@@ -186,6 +186,48 @@ import XCTest
         window.locateSource()
         XCTAssertTrue(window.isImporting)
         XCTAssertTrue(window.isLocating)
+        // Cancelled: the panel never reports a choice, only that it closed.
+        window.isImporting = false
+        window.importPanelEnded()
+        XCTAssertFalse(window.isLocating, "the next Open… is an ordinary open")
+    }
+
+    func testTheLocateButtonWaitsWhileTheChosenFileIsBeingChecked() async {
+        let (model, services, ticker) = await opened()
+        await becomeUnavailable(model, services)
+        let handle = model.photo!.handle
+        var release: CheckedContinuation<Void, Never>?
+        services.relinkHandler = { url in
+            await withCheckedContinuation { release = $0 }
+            return EditorPhoto(url: url, name: url.lastPathComponent, formatLabel: "JPEG", byteCount: 1, handle: handle)
+        }
+        model.locateSource(b)
+        await eventually { model.isRelinking && release != nil }
+        model.locateSource(b)
+        release?.resume()
+        await eventually { !model.isRelinking }
+        await flush(ticker)
+        model.closeDocument()
+    }
+
+    func testARecordRefreshThatFindsTheFileMissingNoLongerCallsAnyVersionCurrent() async throws {
+        let services = FakeEditorServices(openDelay: .zero, previewDelay: .zero)
+        let model = EditorModel(services: services, ticker: ManualFrameTicker())
+        await model.loadExportServices()
+        model.open([a])
+        await eventually(timeout: .seconds(10)) { model.document?.phase == .ready && !model.suggestedFileName.isEmpty }
+        let key = try await services.exportKey(model.photo!, options: model.effectiveOptions(), frame: nil)
+        services.historyByURL[a] = [ExportHistoryItem(
+            version: ExportVersion(number: 1, createdAt: Date(), encodingID: "adaptive",
+                                   result: ExportResult(export: "v1", fileName: "a.heic", byteCount: 1, pixelSize: PixelSize(width: 1, height: 1))),
+            key: key, options: model.edit)]
+        model.refreshExportMetadata()
+        await eventually(timeout: .seconds(10)) { model.exportVersions.first?.matchesCurrent == true }
+        services.metadataHandler = { throw UserFacingError(code: "source_missing") }
+        model.refreshExportMetadata()
+        await eventually(timeout: .seconds(10)) { model.sourceUnavailable != nil }
+        XCTAssertEqual(model.exportVersions.first?.matchesCurrent, false, "so its settings can be restored")
+        XCTAssertTrue(model.export.isResultStale || model.export.result == nil)
     }
 
     // MARK: A file changed by another app

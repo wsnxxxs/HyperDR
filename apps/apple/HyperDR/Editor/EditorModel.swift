@@ -120,6 +120,9 @@ import UniformTypeIdentifiers
     @ObservationIgnored var appIsActive: () -> Bool = { NSApplication.shared.isActive }
     @ObservationIgnored var isRetryingSource = false
     @ObservationIgnored var locateTask: Task<Void, Never>?
+    /// A chosen file is being checked against the photo (its content is read
+    /// to be sure it is the same one).
+    var isRelinking = false
     @ObservationIgnored var replacedAwaitingExport: EditorPhoto?
     /// Bumped whenever the undo stack changes, so menu items re-evaluate.
     private(set) var undoRevision: UInt64 = 0
@@ -358,7 +361,11 @@ import UniformTypeIdentifiers
             case .unavailable(let error, let name):
                 // The photo is gone: say so where the picker is, not in a
                 // dialog nobody asked for. Other failures keep the alert.
-                if error.code == "source_missing" || error.code == "session_expired" { restoreNotice = .missing(name: name) }
+                if error.code == "source_missing" || error.code == "session_expired" {
+                    restoreNotice = .missing(name: name)
+                    // Once, here: a view that is rebuilt later must not read it again.
+                    NoticeAnnouncement.post(RestoreMissingNotice.announcement(name: name, locale: .current), highPriority: true)
+                }
                 else { alert = error }
             case .restored(let photo): beginOpen([photo.url], restored: photo, openedAt: openedAt)
             }

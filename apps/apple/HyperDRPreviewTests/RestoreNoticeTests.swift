@@ -107,7 +107,7 @@ import HyperDRKit
         window.isReleasedWhenClosed = false
         window.contentView = host
         defer { window.close() }
-        let giveUp = Date().addingTimeInterval(8)
+        let giveUp = Date().addingTimeInterval(condition() ? 0 : 0.3)
         repeat {
             host.layoutSubtreeIfNeeded()
             try await Task.sleep(for: .milliseconds(20))
@@ -128,15 +128,20 @@ import HyperDRKit
         XCTAssertTrue(spoken.first?.0.hasPrefix("Reopened your last photo.") == true)
     }
 
-    func testTheMissingNoteIsAnnouncedAtHighPriorityAndNamesThePhoto() async throws {
+    func testTheMissingPhotoIsAnnouncedOnceByTheModelAndNotAgainWhenTheViewIsRebuilt() async throws {
         let saved = NoticeAnnouncement.deliver
         defer { NoticeAnnouncement.deliver = saved }
         var spoken: [(String, Bool)] = []
         NoticeAnnouncement.deliver = { spoken.append(($0, $1)) }
-        try await mount(RestoreMissingNotice(name: "DSC04127.ARW") {}) { !spoken.isEmpty }
+        let s = services(.unavailable(UserFacingError(code: "source_missing"), name: "DSC04127.ARW"))
+        let m = EditorModel(services: s, ticker: ManualFrameTicker())
+        m.launch()
+        await eventually { m.restoreNotice != nil }
         XCTAssertEqual(spoken.count, 1)
         XCTAssertEqual(spoken.first?.1, true)
-        XCTAssertTrue(spoken.first?.0.hasPrefix("Can’t find your last photo, “DSC04127.ARW”.") == true)
+        XCTAssertEqual(spoken.first?.0, RestoreMissingNotice.announcement(name: "DSC04127.ARW", locale: .current))
+        for _ in 0..<2 { try await mount(RestoreMissingNotice(name: "DSC04127.ARW") {}) { false } }
+        XCTAssertEqual(spoken.count, 1, "showing the note again says nothing more")
     }
 
     func testTheMissingNoteWithoutANameIsTheUnnamedSentence() {

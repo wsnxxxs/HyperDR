@@ -58,27 +58,36 @@ enum FrameOverlayRenderer {
     struct Failure: Error {}
 
     static func png(_ caption: FrameCaption, settings: FrameSettings, layout: FramePixelLayout) throws -> Data {
-        let band = layout.caption
-        guard band.width > 0, band.height > 0,
-              let space = CGColorSpace(name: CGColorSpace.displayP3),
-              let context = CGContext(data: nil, width: band.width, height: band.height, bitsPerComponent: 8,
-                                      bytesPerRow: 0, space: space,
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        guard let image = image(caption, settings: settings, layout: layout,
+                                pixelWidth: layout.caption.width, pixelHeight: layout.caption.height, scale: 1)
         else { throw Failure() }
-        let content = FrameCaptionView(caption: caption, settings: settings, layout: layout, scale: 1)
-            .frame(width: CGFloat(band.width), height: CGFloat(band.height))
-            .environment(\.colorScheme, .light)
-        let renderer = ImageRenderer(content: content)
-        renderer.proposedSize = ProposedViewSize(width: CGFloat(band.width), height: CGFloat(band.height))
-        renderer.scale = 1
-        renderer.render { _, draw in draw(context) }
         let data = NSMutableData()
-        guard let image = context.makeImage(),
-              let destination = CGImageDestinationCreateWithData(data as CFMutableData, UTType.png.identifier as CFString,
+        guard let destination = CGImageDestinationCreateWithData(data as CFMutableData, UTType.png.identifier as CFString,
                                                                  1, nil)
         else { throw Failure() }
         CGImageDestinationAddImage(destination, image, nil)
         guard CGImageDestinationFinalize(destination) else { throw Failure() }
         return data as Data
+    }
+
+    /// The caption band as `pixelWidth` × `pixelHeight` pixels of Display P3,
+    /// premultiplied alpha; `scale` is pixels per engine pixel (1 for the
+    /// export's overlay, less for a thumbnail).
+    static func image(_ caption: FrameCaption, settings: FrameSettings, layout: FramePixelLayout,
+                      pixelWidth: Int, pixelHeight: Int, scale: CGFloat) -> CGImage? {
+        guard pixelWidth > 0, pixelHeight > 0,
+              let space = CGColorSpace(name: CGColorSpace.displayP3),
+              let context = CGContext(data: nil, width: pixelWidth, height: pixelHeight, bitsPerComponent: 8,
+                                      bytesPerRow: 0, space: space,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        let content = FrameCaptionView(caption: caption, settings: settings, layout: layout, scale: scale)
+            .frame(width: CGFloat(pixelWidth), height: CGFloat(pixelHeight))
+            .environment(\.colorScheme, .light)
+        let renderer = ImageRenderer(content: content)
+        renderer.proposedSize = ProposedViewSize(width: CGFloat(pixelWidth), height: CGFloat(pixelHeight))
+        renderer.scale = 1
+        renderer.render { _, draw in draw(context) }
+        return context.makeImage()
     }
 }

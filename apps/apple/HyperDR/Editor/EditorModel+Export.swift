@@ -45,7 +45,7 @@ extension EditorModel {
         else if photo == nil || document?.phase != .ready || !hasEditedFrame { blocker = "export.blocker.loading" }
         else if ai.isComputing { blocker = "export.blocker.ai" }
         else if let reason = export.encodingAvailability[edit.encoding] ?? nil { blocker = reason }
-        else if supportsFrameExport && frame.isEnabled && frameLayout == nil { blocker = "export.blocker.frame" }
+        else if frame.isEnabled && frameLayout == nil { blocker = "export.blocker.frame" }
         else if export.isInFlight { blocker = "export.blocker.inProgress" }
         else if case .failed = engine { blocker = "err.server.engine_unavailable" }
         else if case .starting = engine { blocker = "err.server.engine_unavailable" }
@@ -73,7 +73,7 @@ extension EditorModel {
         syncExportState()
     }
     func makeExportFrame() throws -> ExportFrame? {
-        guard supportsFrameExport, frame.isEnabled else { return nil }
+        guard frame.isEnabled else { return nil }
         guard let size = document?.pixelSize else { throw UserFacingError(code: "invalid_options") }
         let key = ExportFrameCacheKey(settings: frame, facts: captureFacts, size: size)
         if cachedFrameKey == key { return cachedExportFrame }
@@ -107,6 +107,8 @@ extension EditorModel {
         finishGestureBeforeEdit()
         pendingExportToken = nil
         let thumbnailFrame = frozenExportThumbnailFrame()
+        let thumbnailFraming = thumbnailFraming()
+        exportThumbnailFraming = thumbnailFraming
         deferredExportThumbnailTask?.cancel(); deferredExportThumbnailTask = nil
         export.reset(); exportThumbnailPersisted = false; exportThumbnailEditGeneration = editGeneration
         if thumbnailFrame == nil {
@@ -117,7 +119,7 @@ extension EditorModel {
         let options = effectiveOptions(), snapshot = edit
         let fixedFolder = destination == nil ? preferences.exportFolder.target : nil
         export.destination = destination.map(ExportDestination.file) ?? .folder(label: preferences.exportFolder.label)
-        let framed = supportsFrameExport && frame.isEnabled
+        let framed = frame.isEnabled
         syncControls()
         exportTask = Task { [weak self, services] in
             guard let self else { return }
@@ -133,7 +135,7 @@ extension EditorModel {
                 let pixels = exportSize.map { Double($0.width) * Double($0.height) } ?? 0
                 export.durations = ExportETA.durations(history: timingHistory, kind: .init(isRAW: photo.formatLabel == "RAW",
                     encoding: snapshot.encoding, isAI: snapshot.aiMode == .optimized, hasFrame: framed, verifies: snapshot.verifies), pixels: pixels)
-                let thumbnail = if let thumbnailFrame { await services.sdrThumbnail(of: thumbnailFrame, maxPixelSize: 256) } else { nil as CGImage? }
+                let thumbnail = if let thumbnailFrame { await makeThumbnail(of: thumbnailFrame, maxPixelSize: 256, framing: thumbnailFraming) } else { nil as CGImage? }
                 try Task.checkCancellation()
                 if let thumbnail { export.thumbnail = .ready(thumbnail); exportThumbnailPersisted = true }
                 else if thumbnailFrame != nil { export.thumbnail = .unavailable }

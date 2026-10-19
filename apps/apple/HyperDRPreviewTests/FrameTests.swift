@@ -781,10 +781,9 @@ private struct ReferenceFrameCaptionView: View {
     /// "Accessing FocusState's value outside of the body of a View") and which
     /// stalled it for over a minute on a busy machine. The window path is the
     /// one the other snapshot tests use and takes milliseconds.
-    private func render(settings: FrameSettings = FrameSettings(), lock: EditingLockReason? = nil,
-                        exportAvailable: Bool = true) throws -> NSBitmapImageRep {
+    private func render(settings: FrameSettings = FrameSettings(), lock: EditingLockReason? = nil) throws -> NSBitmapImageRep {
         let root = FrameSettingsPanel(settings: .constant(settings), photoSize: PixelSize(width: 6000, height: 4000),
-                                      lock: lock, exportAvailable: exportAvailable)
+                                      lock: lock)
             .padding(Layout.panelPadding).frame(width: 340, height: 700, alignment: .top)
             .background(Color.hdr.surfacePanel)
             .environment(\.locale, Locale(identifier: "en"))
@@ -829,39 +828,35 @@ private struct ReferenceFrameCaptionView: View {
         return Double(differing) / Double(a.pixelsWide * a.pixelsHigh)
     }
 
-    func testTheSwitchIsOffAndTheRestWorksWhileNoExportCanCarryTheFrame() throws {
+    func testTheSwitchIsLiveAndTheSettingsFollowIt() throws {
         var on = FrameSettings(); on.isEnabled = true
         var off = FrameSettings(); off.isEnabled = false
-        // Available: the stored choice decides what the panel shows.
+        // The stored choice decides what the panel shows: a live switch, and
+        // settings that are dimmed while it is off.
         XCTAssertGreaterThan(difference(try render(settings: on), try render(settings: off)), 0.01)
-        // Unavailable: a stored "on" is shown as off and the settings below stay usable,
-        // exactly as a stored "off" shows.
-        XCTAssertLessThan(difference(try render(settings: on, exportAvailable: false), try render(settings: off, exportAvailable: false)), 0.001)
-        // And that is not how an available "off" looks (dimmed settings, a live switch).
-        XCTAssertGreaterThan(difference(try render(settings: off, exportAvailable: false), try render(settings: off)), 0.01)
     }
 
     /// Pictures of the settings panel in the states the sheet puts it in (N11):
     /// free, locked by an export (with the note), and with the frame switch
-    /// unavailable. With $HDR_SNAPSHOT_DIR set they are written to the host's
+    /// off. With $HDR_SNAPSHOT_DIR set they are written to the host's
     /// temporary folder as `framev-<state>-<variant>.png`.
     func testPanelSnapshots() throws {
         let variants: [(String, ColorScheme, String)] = [("light-en", .light, "en"), ("dark-en", .dark, "en"),
                                                          ("light-zh-Hans", .light, "zh-Hans"), ("dark-zh-Hans", .dark, "zh-Hans")]
         var on = FrameSettings(); on.isEnabled = true
-        let states: [(String, FrameSettings, EditingLockReason?, Bool)] = [
-            ("free", on, nil, true), ("locked-export", on, .exporting, true), ("locked-loading", on, .loading, true),
-            ("switch-unavailable", on, nil, false),
+        let states: [(String, FrameSettings, EditingLockReason?)] = [
+            ("free", on, nil), ("locked-export", on, .exporting), ("locked-loading", on, .loading),
+            ("switch-off", FrameSettings(), nil),
         ]
         let directory = ProcessInfo.processInfo.environment["HDR_SNAPSHOT_DIR"].map {
             FileManager.default.temporaryDirectory.appendingPathComponent(URL(fileURLWithPath: $0).lastPathComponent, isDirectory: true)
         }
         if let directory { try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true) }
         var seen: [String: Data] = [:]
-        for (state, settings, lock, available) in states {
+        for (state, settings, lock) in states {
             for (name, scheme, locale) in variants {
                 let root = FrameSettingsPanel(settings: .constant(settings), photoSize: PixelSize(width: 6000, height: 4000),
-                                              lock: lock, exportAvailable: available)
+                                              lock: lock)
                     .padding(Layout.panelPadding).frame(width: 340, alignment: .topLeading)
                     .background(Color.hdr.surfacePanel)
                     .environment(\.colorScheme, scheme).environment(\.locale, Locale(identifier: locale))

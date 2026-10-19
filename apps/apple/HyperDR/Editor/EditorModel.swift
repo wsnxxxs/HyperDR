@@ -21,12 +21,10 @@ import UniformTypeIdentifiers
             pendingExportToken = nil
             newValue.save(to: services.preferences)
             syncExportState(); refreshExportMetadata()
+            if !thumbnailTrackers.isEmpty { updateSummaryThumbnail() }
         }
     }
     private(set) var frameSettingsRevision = 0
-    /// M3-F enables this only after E5/E6 and the frame acceptance gates land.
-    /// Until then the frame remains a preview preference, not an export input.
-    let supportsFrameExport: Bool
     let export = ExportState()
     let lut = LUTState()
     let preferences: PreferencesState
@@ -46,6 +44,8 @@ import UniformTypeIdentifiers
     @ObservationIgnored var deferredExportThumbnailTask: Task<Void, Never>?
     @ObservationIgnored var exportThumbnailEditGeneration: Int?
     @ObservationIgnored var exportThumbnailNeedsDeferred = false
+    /// The frame the running (or just finished) export carries, for a thumbnail that arrives late.
+    @ObservationIgnored var exportThumbnailFraming: ThumbnailFraming?
     @ObservationIgnored var exportThumbnailPersisted = false
     @ObservationIgnored var versionThumbnailTask: Task<Void, Never>?
     @ObservationIgnored var versionThumbnailQueue: [String] = []
@@ -194,10 +194,9 @@ import UniformTypeIdentifiers
 
     init(services: any EditorServices = FakeEditorServices(), document: DocumentState? = nil,
          alert: UserFacingError? = nil, photo: EditorPhoto? = nil,
-         hasReferenceFrame: Bool = false, hasEditedFrame: Bool = false, ticker: (any FrameTicker)? = nil, now: @escaping () -> Date = Date.init, supportsFrameExport: Bool = false) {
+         hasReferenceFrame: Bool = false, hasEditedFrame: Bool = false, ticker: (any FrameTicker)? = nil, now: @escaping () -> Date = Date.init) {
         self.services = services
         self.now = now
-        self.supportsFrameExport = supportsFrameExport
         preferences = PreferencesState(Preferences.load(from: services.preferences))
         undoManager.groupsByEvent = false
         undoManager.levelsOfUndo = 0
@@ -527,6 +526,7 @@ import UniformTypeIdentifiers
                   self.photo == photo else { return }
             captureFacts = facts
             refreshExportMetadata()
+            if !thumbnailTrackers.isEmpty { updateSummaryThumbnail() }
         }
     }
 

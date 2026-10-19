@@ -112,3 +112,35 @@ struct RestoreMissingNotice: View {
         .task { NoticeAnnouncement.post("\(title). \(AppStrings.string("restore.missing.body", locale: locale))", highPriority: true) }
     }
 }
+
+/// The photo's file cannot be found. Not a dismissable notice: it states
+/// something that stays true until the file is back, and goes by itself then.
+struct SourceMissingBanner: View {
+    let locate: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        HStack(alignment: .center, spacing: Space.s3) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.hdr.warn).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("source.missing.title").font(Font.hdr.control).fontWeight(.semibold)
+                Text("source.missing.body").font(Font.hdr.caption).foregroundStyle(Color.hdr.overlayMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+            Button(action: locate) {
+                Text("source.missing.locate")
+                    .font(.system(size: TypeScale.Size.caption, weight: .semibold))
+                    .foregroundStyle(Color.hdr.overlayInk)
+                    .padding(.horizontal, Space.s2)
+                    .frame(height: BusyChip.height)
+                    .background(hovered ? Color.hdr.overlayHover : .clear, in: .rect(cornerRadius: Radius.md))
+                    .contentShape(.rect(cornerRadius: Radius.md))
+            }
+            .buttonStyle(.plain)
+            .onHover { hovered = $0 }
+        }
+        .frame(maxWidth: 520, alignment: .leading)
+        .hdrOverlayChip()
+    }
+}

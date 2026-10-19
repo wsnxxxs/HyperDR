@@ -108,8 +108,13 @@ extension EditorModel {
                 }
             } catch EditorDetailError.sourceReplaced {
                 guard let self, !Task.isCancelled, detailTicket == ticket, self.photo == photo else { return }
-                open([photo.url])
-            } catch { /* Whole-frame preview stays visible; another pan/edit can retry. */ }
+                reopenReplacedSource(photo)
+            } catch {
+                // The whole-frame preview stays visible; another pan or edit
+                // can retry. A file that cannot be found is said once.
+                guard let self, !Task.isCancelled, detailTicket == ticket, self.photo == photo else { return }
+                enterSourceUnavailable(UserFacingError.service(error))
+            }
         }
     }
 }

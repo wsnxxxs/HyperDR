@@ -43,6 +43,7 @@ extension EditorModel {
         if document == nil && !isRestoring { blocker = "export.blocker.noPhoto" }
         else if isRestoring { blocker = "export.blocker.restoring" }
         else if photo == nil || document?.phase != .ready || !hasEditedFrame { blocker = "export.blocker.loading" }
+        else if sourceUnavailable != nil { blocker = "export.blocker.sourceMissing" }
         else if ai.isComputing { blocker = "export.blocker.ai" }
         else if let reason = export.encodingAvailability[edit.encoding] ?? nil { blocker = reason }
         else if frame.isEnabled && frameLayout == nil { blocker = "export.blocker.frame" }
@@ -196,10 +197,11 @@ extension EditorModel {
             export.failure = failure ?? UserFacingError(code: "export_failed")
             export.phase = .failed
         }
-        if let failure { handleExportError(failure) }
+        if let failure { handleExportError(failure); enterSourceUnavailable(failure) }
         syncControls()
         refreshExportMetadata()
         completePendingPhotoSwitch()
+        resumeReplacedReopen()
     }
     func cancelExport() {
         guard export.isInFlight, !export.isStopping else { return }
@@ -255,7 +257,10 @@ extension EditorModel {
                 showRestoreNoticeIfPending()
             } catch {
                 guard let self, !Task.isCancelled, self.photo == photo, exportMetadataTicket == ticket else { return }
-                handleExportError(UserFacingError.service(error))
+                let failure = UserFacingError.service(error)
+                // The history on screen stays as it was.
+                if failure.code == "source_missing" { enterSourceUnavailable(failure) }
+                else { handleExportError(failure) }
             }
         }
     }
@@ -299,6 +304,9 @@ extension EditorModel {
     }
     func prepareForPhotoSwitch() {
         clearRestoreNotice()
+        leaveSourceUnavailable(announce: false)
+        locateTask?.cancel(); locateTask = nil
+        replacedAwaitingExport = nil
         resetThumbnailsForPhotoSwitch()
         pendingExportToken = nil
         exportMetadataTask?.cancel(); exportMetadataTicket += 1
@@ -386,7 +394,7 @@ extension EditorModel {
                 scheduleDetails()
             } catch EditorDetailError.sourceReplaced {
                 guard let self, !Task.isCancelled, generation == ticket, self.photo == photo else { return }
-                open([photo.url])
+                reopenReplacedSource(photo)
             } catch {
                 // The earlier original stays on screen, so its details must
                 // match it; the next switch tries again.

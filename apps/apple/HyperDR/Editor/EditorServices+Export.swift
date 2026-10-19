@@ -27,6 +27,7 @@ extension EditorServices {
     }
     func saveExport(_ photo: EditorPhoto, export: String, destination: URL?) async throws -> SavedLocation { throw UserFacingError(code: "export_folder_unset") }
     func transferFile(_ photo: EditorPhoto, export: String, fileName: String?) async throws -> URL { throw UserFacingError(code: "source_missing") }
+    func relink(_ photo: EditorPhoto, to url: URL) async throws -> EditorPhoto { throw UserFacingError(code: "source_different") }
     func exportFolder() async -> ExportFolder { ExportFolder() }
     func setExportFolder(_ url: URL) async throws -> ExportFolder { throw UserFacingError(code: "export_folder_unwritable") }
     func encodingCapabilities() async throws -> EditorCapabilities {

@@ -43,6 +43,7 @@ extension EditorModel {
     /// Why AI cannot run now, as a string key; nil when it can.
     func aiBlockReason(workflow: Workflow? = nil) -> String? {
         guard photo != nil, hasEditedFrame else { return "ai.unavailable.noPhoto" }
+        if sourceUnavailable != nil { return "ai.blocker.sourceMissing" }
         let table = services.modelTable()
         guard table.runtimeReady, photoModels().contains(where: \.isEnabled) else {
             return "ai.unavailable.modelNotReady"

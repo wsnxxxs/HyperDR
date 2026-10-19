@@ -36,6 +36,26 @@ struct ExportFolderSnapshotTests {
         catch { #expect((error as? HyperDREngine.HyperDRError)?.code == "export_folder_unwritable") }
     }
 
+    @Test func capturedDirectoryMovedIntoWorkspaceIsStillExcludedByIdentity() async throws {
+        let env = try JobEnvironment(), access = FolderSnapshotAccess()
+        let target = ExportTarget(configuration: env.configuration, sessions: env.sessions, access: access)
+        let alpha = env.root.appendingPathComponent("alpha")
+        try FileManager.default.createDirectory(at: alpha, withIntermediateDirectories: true)
+        _ = try await target.setFolder(alpha)
+        let captured = try await target.captureFolder()
+        let photo = try await env.photo(), runner = env.runner()
+        let ticket = try await runner.start(session: photo.id, options: EditOptions())
+        try #require(await eventually(timeout: .seconds(10)) { await runner.read(ticket.job, offset: 0)?.summary.done == true })
+        let moved = env.configuration.supportDirectory.appendingPathComponent("moved")
+        try FileManager.default.moveItem(at: alpha, to: moved)
+        do {
+            _ = try await target.save(session: photo.id, export: ticket.export, folder: captured)
+            Issue.record("A snapshot must not authorize writing into the workspace after a move")
+        } catch { #expect((error as? HyperDRError)?.code == "export_folder_inside_workspace") }
+        #expect(access.active == 1, "A rejected save releases its renewed scope")
+        #expect(try FileManager.default.contentsOfDirectory(atPath: moved.path).isEmpty)
+    }
+
     @Test func capturedAuthoritySurvivesPreferenceChangesAndDirectoryRename() async throws {
         let env = try JobEnvironment(), access = FolderSnapshotAccess()
         let target = ExportTarget(configuration: env.configuration, sessions: env.sessions, access: access)

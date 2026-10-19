@@ -24,8 +24,32 @@ public final class ExportFolderSnapshot: Sendable {
     public let label: String
     fileprivate let descriptor: Int32
     private let lease: SecurityScopeLease
-    fileprivate init(label: String, descriptor: Int32, lease: SecurityScopeLease) {
+    private let bookmark: Data
+    private let access: any SecurityScopedAccess
+    fileprivate init(label: String, descriptor: Int32, lease: SecurityScopeLease,
+                     bookmark: Data, access: any SecurityScopedAccess) {
         self.label = label; self.descriptor = descriptor; self.lease = lease
+        self.bookmark = bookmark; self.access = access
+    }
+    /// A sandbox extension may stop covering a directory renamed externally.
+    /// Resolve this snapshot's own bookmark, renew its grant, and require that
+    /// it still names our pinned inode, never a replacement at the old path.
+    fileprivate func renewAccess() throws -> SecurityScopeLease {
+        do {
+            var stale = false
+            let url = try URL(resolvingBookmarkData: bookmark, options: [.withSecurityScope, .withoutUI],
+                relativeTo: nil, bookmarkDataIsStale: &stale)
+            let renewed = SecurityScopeLease(url: url, access: access)
+            var pinned = stat(), resolved = stat()
+            guard fstat(descriptor, &pinned) == 0, stat(url.path, &resolved) == 0,
+                  resolved.st_mode & S_IFMT == S_IFDIR,
+                  pinned.st_dev == resolved.st_dev, pinned.st_ino == resolved.st_ino else {
+                throw HyperDRError(code: "export_folder_unwritable", message: "Captured folder identity changed")
+            }
+            return renewed
+        } catch {
+            throw HyperDRError(code: "export_folder_unwritable", message: "Unable to renew captured folder authority")
+        }
     }
     deinit { Darwin.close(descriptor) }
 }
@@ -111,13 +135,18 @@ public actor ExportTarget {
     public func captureFolder() throws -> ExportFolderSnapshot {
         guard let selected else { throw Self.error("export_folder_unset") }
         let lease = SecurityScopeLease(url: selected, access: access)
+        let bookmark = try selected.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
         let descriptor = try Self.openFolder(selected, excluding: roots)
-        return ExportFolderSnapshot(label: Self.label(selected), descriptor: descriptor, lease: lease)
+        return ExportFolderSnapshot(label: Self.label(selected), descriptor: descriptor, lease: lease,
+            bookmark: bookmark, access: access)
     }
 
     /// Resolve the pinned, security-scoped directory at invocation time. No URL
     /// crosses the editor/view boundary and renaming cannot retarget the grant.
     public func reveal(folder: ExportFolderSnapshot) async throws {
+        let renewed = try folder.renewAccess()
+        defer { renewed.stop() }
+        try Self.validateFolderAncestors(folder.descriptor, excluding: roots)
         let url = try Self.directoryURL(folder.descriptor)
         guard await openFolder(url) else { throw Self.error("export_folder_unwritable") }
         withExtendedLifetime(folder) {}
@@ -125,6 +154,9 @@ public actor ExportTarget {
 
     public func save(session: SessionID, export: ExportID, folder: ExportFolderSnapshot) async throws -> SavedExport {
         let source = try await sessions.exportFile(session, export: export)
+        let renewed = try folder.renewAccess()
+        defer { renewed.stop() }
+        try Self.validateFolderAncestors(folder.descriptor, excluding: roots)
         let hooks = self.hooks
         let task = Task.detached {
             try withExtendedLifetime(folder) {
@@ -418,30 +450,43 @@ public actor ExportTarget {
         let descriptor = Darwin.open(real, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
         guard descriptor >= 0 else { throw error("export_folder_unwritable") }
         do {
-            let identities: [(dev_t, ino_t)] = roots.compactMap { root in
-                var info = stat()
-                guard stat(root.path, &info) == 0 else { return nil }
-                return (info.st_dev, info.st_ino)
-            }
-            var ancestor = dup(descriptor)
-            guard ancestor >= 0 else { throw error("export_folder_unwritable") }
-            defer { Darwin.close(ancestor) }
-            while true {
-                var current = stat()
-                guard fstat(ancestor, &current) == 0 else { throw error("export_folder_unwritable") }
-                if identities.contains(where: { $0.0 == current.st_dev && $0.1 == current.st_ino }) {
-                    throw error("export_folder_inside_workspace")
-                }
-                let parent = openat(ancestor, "..", O_RDONLY | O_DIRECTORY | O_CLOEXEC)
-                guard parent >= 0 else { throw error("export_folder_unwritable") }
-                var info = stat()
-                guard fstat(parent, &info) == 0 else { Darwin.close(parent); throw error("export_folder_unwritable") }
-                if info.st_dev == current.st_dev && info.st_ino == current.st_ino { Darwin.close(parent); break }
-                Darwin.close(ancestor); ancestor = parent
-            }
+            try validateFolderAncestors(descriptor, excluding: roots)
             return descriptor
         } catch { Darwin.close(descriptor); throw error }
     }
+    /// Metadata lookup through the authorized directory does not require opening
+    /// any unselected parent. EPERM/EACCES (or an incomplete walk) fail closed.
+    static func validateFolderAncestors(_ descriptor: Int32, excluding roots: [URL],
+        readAncestor: (Int32, String, inout stat) -> Int32 = { fd, path, info in
+            fstatat(fd, path, &info, 0)
+        }) throws {
+        let identities: [FileIdentity] = try roots.compactMap { root in
+            var info = stat()
+            guard stat(root.path, &info) == 0 else {
+                if errno == ENOENT { return nil }
+                throw error("export_folder_unwritable")
+            }
+            return FileIdentity(info)
+        }
+        var current = stat()
+        guard fstat(descriptor, &current) == 0, current.st_mode & S_IFMT == S_IFDIR else {
+            throw error("export_folder_unwritable")
+        }
+        var relative = ".."
+        while relative.utf8.count < Int(MAXPATHLEN) {
+            guard !identities.contains(FileIdentity(current)) else { throw error("export_folder_inside_workspace") }
+            var parent = stat()
+            guard readAncestor(descriptor, relative, &parent) == 0, parent.st_mode & S_IFMT == S_IFDIR else {
+                throw error("export_folder_unwritable")
+            }
+            if FileIdentity(parent) == FileIdentity(current) { return }
+            current = parent
+            relative += "/.."
+        }
+        // Never treat an unverified or excessively deep ancestry as outside.
+        throw error("export_folder_unwritable")
+    }
+
     private static func copy(_ source: SessionExportFile, to folder: URL, excluding roots: [URL],
                              hooks: CopyHooks) throws -> SavedExport {
         let directory = try openFolder(folder, excluding: roots)

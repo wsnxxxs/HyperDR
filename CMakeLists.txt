@@ -60,15 +60,12 @@ add_subdirectory(modules/capi)
 
 install(TARGETS HyperDR RUNTIME DESTINATION bin COMPONENT Runtime)
 
-install(DIRECTORY apps/panel/ DESTINATION apps/panel COMPONENT Runtime
-  PATTERN "__pycache__" EXCLUDE
-  PATTERN "*.pyc" EXCLUDE)
 hyperdr_install_model_assets()
 # PyTorch checkpoints, optimizer state, virtual environments and private
 # training data are intentionally not installed. The inference-only ONNX and
 # ncnn files remain offline build assets; the release executable contains the
 # fixed ncnn models as aligned byte arrays.
-# The panel derives its settings vocabulary from this file, so it ships too.
+# The settings vocabulary and report schema ship with the CLI.
 install(FILES schema/settings.json schema/report.json DESTINATION schema COMPONENT Runtime)
 install(FILES LICENSE THIRD_PARTY_NOTICES.md CHANGELOG.md DESTINATION . COMPONENT Runtime)
 install(FILES packaging/INSTALL.md DESTINATION . RENAME INSTALL.md COMPONENT Runtime)

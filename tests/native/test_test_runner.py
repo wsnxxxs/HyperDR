@@ -1,4 +1,4 @@
-"""The retired reference panel must never run as part of product validation."""
+"""The test runner offers only the product suites."""
 import contextlib
 import importlib.util
 import io
@@ -13,18 +13,15 @@ spec.loader.exec_module(runner)
 
 
 class TestRunnerTest(unittest.TestCase):
-    def test_all_runs_product_suites_without_the_retired_panel(self):
-        with patch("sys.argv", ["test.py", "all"]), patch.object(runner, "panel") as panel, \
-                patch.object(runner, "frontend") as frontend, patch.object(runner, "native") as native:
+    def test_all_runs_the_native_suite_only(self):
+        with patch("sys.argv", ["test.py", "all"]), patch.object(runner, "native") as native, \
+                patch.object(runner, "apple") as apple:
             self.assertEqual(runner.main(), 0)
-        panel.assert_not_called()
-        frontend.assert_called_once_with()
         native.assert_called_once()
+        apple.assert_not_called()
 
-    def test_panel_explicitly_reports_retirement_and_fails(self):
-        stderr = io.StringIO()
-        with patch("sys.argv", ["test.py", "panel"]), \
-                patch.object(runner, "run") as run, contextlib.redirect_stderr(stderr):
-            self.assertEqual(runner.main(), 1)
-        run.assert_not_called()
-        self.assertIn("已退役，P2c 删除", stderr.getvalue())
+    def test_the_retired_panel_and_frontend_suites_are_gone(self):
+        for suite in ("panel", "frontend"):
+            with self.subTest(suite=suite), patch("sys.argv", ["test.py", suite]), \
+                    contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                runner.main()

@@ -4,8 +4,10 @@ import Foundation
 public struct KitConfiguration: Sendable {
     public var supportDirectory: URL
     public var cacheDirectory: URL
-    /// Idle time before a session may be removed. The app schedules cleanup.
+    /// Idle expiry for sessions without retained exports; launch restore still
+    /// uses this interval even when export history retains a session.
     public var sessionTTL: Duration
+    public var exportHistoryLimit: Int
     public var previewCacheEntries: Int
     public var previewCacheBytes: Int
     public var previewMaxEdge: Int
@@ -18,6 +20,7 @@ public struct KitConfiguration: Sendable {
         supportDirectory: URL = Self.defaultSupportDirectory,
         cacheDirectory: URL = Self.defaultCacheDirectory,
         sessionTTL: Duration = .seconds(24 * 60 * 60),
+        exportHistoryLimit: Int = 20,
         previewCacheEntries: Int = 2,
         previewCacheBytes: Int = 256 << 20,
         previewMaxEdge: Int = 2048,
@@ -29,6 +32,7 @@ public struct KitConfiguration: Sendable {
         self.supportDirectory = supportDirectory
         self.cacheDirectory = cacheDirectory
         self.sessionTTL = sessionTTL
+        self.exportHistoryLimit = max(1, exportHistoryLimit)
         self.previewCacheEntries = previewCacheEntries
         self.previewCacheBytes = previewCacheBytes
         self.previewMaxEdge = previewMaxEdge

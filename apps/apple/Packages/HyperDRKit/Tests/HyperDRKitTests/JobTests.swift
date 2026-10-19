@@ -4,6 +4,7 @@ import CoreGraphics
 import ImageIO
 import HyperDREngine
 import Testing
+import Synchronization
 @testable import HyperDRKit
 
 private final class JobEnvironment: Sendable {
@@ -11,11 +12,11 @@ private final class JobEnvironment: Sendable {
     let configuration: KitConfiguration
     let sessions: SessionStore
     let resolver: OptionResolver
-    init(timeout: Duration = .seconds(30),
+    init(timeout: Duration = .seconds(30), historyLimit: Int = 20,
          openExportLeaf: @escaping SessionStore.OpenExportLeaf = { openat($0, $1, $2) }) throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("hyperdr-jobs-\(UUID())")
         configuration = KitConfiguration(supportDirectory: root.appendingPathComponent("support"),
-            cacheDirectory: root.appendingPathComponent("cache"), jobTimeout: timeout)
+            cacheDirectory: root.appendingPathComponent("cache"), exportHistoryLimit: historyLimit, jobTimeout: timeout)
         let schema = try Engine.schema()
         sessions = SessionStore(configuration: configuration, formats: try InputFormats(schema: schema),
             decodeCacheMaxAge: 7 * 24 * 60 * 60, decodeCacheMaxBytes: 4 << 30, openExportLeaf: openExportLeaf)
@@ -23,15 +24,16 @@ private final class JobEnvironment: Sendable {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     }
     deinit { try? FileManager.default.removeItem(at: root) }
-    func photo() async throws -> PhotoSession {
-        let source = root.appendingPathComponent("photo.png")
+    func photo(_ name: String = "photo.png") async throws -> PhotoSession {
+        let source = root.appendingPathComponent(name)
         try Data([137,80,78,71,13,10,26,10] + [UInt8](repeating: 0, count: 64)).write(to: source)
         return try await sessions.open(source)
     }
     func runner(probe: @escaping @Sendable (URL) async throws -> (Int, Int) = { _ in (800, 600) },
-                convert: @escaping JobRunner.Converter = fakeConversion) -> JobRunner {
+                convert: @escaping JobRunner.Converter = fakeConversion,
+                beforePublish: @escaping @Sendable () async -> Void = {}) -> JobRunner {
         JobRunner(configuration: configuration, sessions: sessions, resolver: resolver,
-            probe: probe, convert: convert)
+            probe: probe, convert: convert, beforePublish: beforePublish)
     }
 }
 
@@ -479,8 +481,8 @@ private func failureCode(_ operation: () async throws -> Void) async -> String? 
     @Test func disposingOnePendingVersionDoesNotUnpinAnother() async throws {
         let env = try JobEnvironment()
         let photo = try await env.photo()
-        let a = try await env.sessions.prepareExport(photo.id, options: [:])
-        let b = try await env.sessions.prepareExport(photo.id, options: [:])
+        let a = try await env.sessions.prepareExport(photo.id, options: [:], key: ExportKey(rawValue: "fixture"))
+        let b = try await env.sessions.prepareExport(photo.id, options: [:], key: ExportKey(rawValue: "fixture"))
         await env.sessions.close(photo.id)
         await env.sessions.discardExport(photo.id, export: a.id)
         #expect(await env.sessions.cleanupExpired(now: Date().addingTimeInterval(1_000_000)) == 0)
@@ -659,5 +661,195 @@ extension ExportTargetRaceTests {
         let name = try #require(swap.originalName)
         #expect(try Data(contentsOf: destination.appendingPathComponent(name)) == swap.replacement,
             "Cleanup must preserve somebody else's replacement at the old outer name")
+    }
+}
+
+private actor M3Gate {
+    var entered = false
+    private var continuation: CheckedContinuation<Void, Never>?
+    func wait() async {
+        entered = true
+        await withCheckedContinuation { continuation = $0 }
+    }
+    func release() { continuation?.resume(); continuation = nil }
+}
+
+@Suite(.timeLimit(.minutes(1))) struct M3JobContractTests {
+    @Test func cancelAllWaitsForPreparationCleanup() async throws {
+        let env = try JobEnvironment(), photo = try await env.photo(), gate = M3Gate()
+        let cancelled = Mutex(false)
+        let runner = env.runner(probe: { _ in
+            await withTaskCancellationHandler { await gate.wait() } onCancel: { cancelled.withLock { $0 = true } }
+            try Task.checkCancellation(); return (800,600)
+        })
+        let start = Task { try await runner.start(session: photo.id, options: EditOptions(),
+            frame: ExportFrame(spec: ["schema": .string("hyperdr.frame/v1")])) }
+        try #require(await eventually(timeout: .seconds(2)) { await gate.entered })
+        #expect(await runner.activity == .preparing)
+        let stop = Task { await runner.cancelAll() }
+        // Unblock the deliberately non-cancellation-aware probe; cancellation
+        // must still prevent allocation, publication and stale admission.
+        try #require(await eventually(timeout: .seconds(2)) { cancelled.withLock { $0 } })
+        await gate.release()
+        await stop.value
+        #expect(await failureCode { _ = try await start.value } == "cancelled")
+        #expect(await runner.activity == .idle)
+        #expect(await env.sessions.exports(for: photo.id).isEmpty)
+    }
+
+    @Test func cancelAllDrainsRunningAndWaitsForCommit() async throws {
+        let env = try JobEnvironment(), photo = try await env.photo()
+        let runner = env.runner(convert: { _, _ in try await Task.sleep(for: .seconds(30)); throw CancellationError() })
+        let ticket = try await runner.start(session: photo.id, options: EditOptions())
+        #expect(await runner.activity == .running(ticket.job))
+        await runner.cancelAll()
+        #expect(await runner.activity == .idle)
+        #expect(await runner.read(ticket.job, offset: 0)?.summary.cancelled == true)
+        #expect(await env.sessions.exports(for: photo.id).isEmpty)
+        let gate = M3Gate()
+        let committing = env.runner(beforePublish: { await gate.wait() })
+        let committed = try await committing.start(session: photo.id, options: EditOptions())
+        try #require(await eventually(timeout: .seconds(2)) { await gate.entered })
+        #expect(await committing.activity == .committing(committed.job))
+        let stop = Task { await committing.cancelAll() }
+        await Task.yield()
+        #expect(await committing.activity == .committing(committed.job))
+        await gate.release(); await stop.value
+        #expect(await committing.activity == .idle)
+        #expect(await committing.read(committed.job, offset: 0)?.summary.failure == nil)
+        #expect(await env.sessions.exports(for: photo.id).count == 1)
+    }
+
+    @Test func resolvedKeysIgnoreDisplayMetadataAndTemporaryPaths() async throws {
+        let env = try JobEnvironment(), photo = try await env.photo(), runner = env.runner()
+        let base = try await runner.exportKey(session: photo.id, options: EditOptions())
+        let defaults: [String: JSONValue] = ["brightness": .number(0.6)]
+        let explicit = try await runner.exportKey(session: photo.id, options: EditOptions(defaults))
+        #expect(explicit == base)
+        #expect(try await runner.exportKey(session: photo.id, options: EditOptions(["lutName": .string("Label")])) == base)
+        #expect(try await runner.exportKey(session: photo.id, options: EditOptions(["brightness": .number(0.5)])) != base)
+        var request = try Engine.normalize([:])
+        let originalKey = try ExportKey(request: request, frame: nil)
+        try request.setCommand("input", .string("other.png"))
+        try request.setCommand("output", .string("/temporary/export"))
+        try request.setCommand("report", .string("/temporary/report"))
+        #expect(try ExportKey(request: request, frame: nil) == originalKey)
+        request.setSetting("quality", .number(42))
+        #expect(try ExportKey(request: request, frame: nil) != originalKey)
+        let frame = ExportFrame(spec: ["schema": .string("hyperdr.frame/v1")])
+        #expect(try await runner.exportKey(session: photo.id, options: EditOptions(), frame: frame) != base)
+        let a = try ExportFrameRecord(ExportFrame(spec: frame.spec, overlayPNG: Data([1])))
+        let b = try ExportFrameRecord(ExportFrame(spec: frame.spec, overlayPNG: Data([2])))
+        #expect(a.overlaySHA256 != b.overlaySHA256)
+        #expect(a.spec["overlay"] == nil)
+        let placeholder = try await runner.commandLine(session: photo.id, options: EditOptions(), frame: frame)
+        #expect(placeholder.first == "HyperDR")
+        #expect(placeholder.contains("<导出文件夹>"))
+        #expect(placeholder.contains("<导出文件夹>/report.json"))
+        #expect(placeholder.contains("<导出文件夹>/frame.json"))
+        let ticket = try await runner.start(session: photo.id, options: EditOptions(), frame: frame)
+        try #require(await eventually(timeout: .seconds(2)) { await runner.read(ticket.job, offset: 0)?.summary.done == true })
+        let record = try #require(await env.sessions.exports(for: photo.id).first)
+        #expect(record.key == (try await runner.exportKey(session: photo.id, options: EditOptions(), frame: frame)))
+        #expect(record.frame == (try ExportFrameRecord(frame)))
+        #expect(!ticket.argv.contains("<导出文件夹>"))
+        let result = try await env.sessions.resultURL(photo.id, export: ticket.export)
+        let manifest = result.deletingLastPathComponent().appendingPathComponent("result.json")
+        let original = try Data(contentsOf: manifest)
+        let first = SavedMark(fileName: "first.tif", folderLabel: "…/Photos")
+        try await env.sessions.markSaved(photo.id, export: ticket.export, saved: first)
+        #expect(await env.sessions.exports(for: photo.id).first?.saved?.fileName == first.fileName)
+        let last = SavedMark(fileName: "last.tif", folderLabel: "…/Exports")
+        try await env.sessions.markSaved(photo.id, export: ticket.export, saved: last)
+        #expect(await env.sessions.exports(for: photo.id).first?.saved?.fileName == last.fileName)
+        #expect(await env.sessions.exports(for: photo.id).first?.saved?.folderLabel == last.folderLabel)
+        let savedAt = try #require(await env.sessions.exports(for: photo.id).first?.saved?.savedAt)
+        #expect(abs(savedAt.timeIntervalSince(last.savedAt)) < 0.001)
+        #expect(try Data(contentsOf: manifest) == original)
+        var old = try JSONSerialization.jsonObject(with: original) as! [String: Any]
+        old.removeValue(forKey: "key")
+        try JSONSerialization.data(withJSONObject: old).write(to: manifest)
+        #expect(await env.sessions.exports(for: photo.id).isEmpty)
+    }
+}
+
+@Suite(.timeLimit(.minutes(1))) struct M3HistoryTests {
+    private func publish(_ env: JobEnvironment, _ photo: PhotoSession) async throws -> ExportRecord {
+        let runner = env.runner()
+        let ticket = try await runner.start(session: photo.id, options: EditOptions())
+        try #require(await eventually(timeout: .seconds(2)) { await runner.read(ticket.job, offset: 0)?.summary.done == true })
+        return try #require(await runner.read(ticket.job, offset: 0)?.summary.result)
+    }
+    private func age(_ env: JobEnvironment, _ photo: PhotoSession) throws {
+        let path = env.configuration.supportDirectory.appendingPathComponent("sessions/\(photo.id)/session.json")
+        var json = try JSONSerialization.jsonObject(with: Data(contentsOf: path)) as! [String: Any]
+        json["lastUsedAt"] = Date().addingTimeInterval(-172_800).timeIntervalSince1970
+        try JSONSerialization.data(withJSONObject: json).write(to: path)
+    }
+
+    @Test func twentyFirstPublicationTrimsGloballyWithoutRenumberingOrTouchingPending() async throws {
+        let env = try JobEnvironment(), a = try await env.photo("a.png"), b = try await env.photo("b.png")
+        let first = try await publish(env, a)
+        let pending = try await env.sessions.prepareExport(a.id, options: [:], key: ExportKey(rawValue: "fixture"))
+        let orphan = pending.directory.deletingLastPathComponent().appendingPathComponent(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased())
+        try FileManager.default.createDirectory(at: orphan, withIntermediateDirectories: true)
+        try Data([1]).write(to: orphan.appendingPathComponent("unfinished.tif"))
+        for _ in 0..<19 { _ = try await publish(env, b) }
+        #expect(await env.sessions.exports(for: a.id).count == 1)
+        let last = try await publish(env, b)
+        #expect(await env.sessions.exports(for: a.id).isEmpty)
+        let records = await env.sessions.exports(for: b.id)
+        #expect(records.count == 20)
+        #expect(Set(records.map(\.sequence)) == Set(1...20))
+        #expect(last.sequence == 20)
+        #expect(FileManager.default.fileExists(atPath: pending.directory.path))
+        #expect(FileManager.default.fileExists(atPath: orphan.path))
+        _ = try await publish(env, b)
+        #expect(await env.sessions.exports(for: b.id).map(\.sequence).sorted() == Array(2...21))
+        try await env.sessions.markSaved(a.id, export: first.id, saved: SavedMark(fileName: "trimmed.tif", folderLabel: "…/out"))
+        #expect(!FileManager.default.fileExists(atPath: pending.directory.deletingLastPathComponent().appendingPathComponent(first.id.rawValue).path))
+        await env.sessions.discardExport(a.id, export: pending.id)
+    }
+
+    @Test func retainedSessionsSurviveTTLAndCanReopenButLaunchRestoreStillExpires() async throws {
+        let env = try JobEnvironment(historyLimit: 1), a = try await env.photo("a.png")
+        _ = try await publish(env, a)
+        await env.sessions.close(a.id); try age(env, a)
+        #expect(await env.sessions.cleanupExpired() == 0)
+        guard case .none = await env.sessions.restoreLastOutcome() else { Issue.record("Expired launch restore must stay disabled"); return }
+        let reopened = try await env.sessions.open(a.sourceURL)
+        #expect(reopened.id == a.id)
+        #expect(await env.sessions.exports(for: a.id).count == 1)
+        await env.sessions.close(a.id); try age(env, a)
+        let b = try await env.photo("b.png")
+        _ = try await publish(env, b)
+        #expect(await env.sessions.cleanupExpired() == 1)
+        let root = env.configuration.supportDirectory.appendingPathComponent("sessions/\(a.id)")
+        #expect(!FileManager.default.fileExists(atPath: root.path))
+    }
+
+    @Test func trimmingDuringAnOpenCopyDoesNotInterruptSaving() async throws {
+        let env = try JobEnvironment(historyLimit: 1), photo = try await env.photo()
+        let first = try await publish(env, photo)
+        let arrived = Mutex(false), release = DispatchSemaphore(value: 0)
+        let target = ExportTarget(configuration: env.configuration, sessions: env.sessions,
+            access: SystemSecurityScopedAccess(), copyRead: { fd, buffer, count in
+                let block = arrived.withLock { value in if value { return false }; value = true; return true }
+                if block { _ = release.wait(timeout: .now() + 5) }
+                return Darwin.read(fd,buffer,count)
+            })
+        let folder = env.root.appendingPathComponent("saved")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let save = Task { try await target.save(session: photo.id, export: first.id, oneOff: folder) }
+        defer { release.signal() }
+        try #require(await eventually(timeout: .seconds(2)) { arrived.withLock { $0 } })
+        _ = try await publish(env, photo)
+        #expect(await env.sessions.exports(for: photo.id).count == 1)
+        #expect(await env.sessions.exports(for: photo.id).first?.id != first.id)
+        release.signal()
+        let result = try await save.value
+        #expect(try Data(contentsOf: result.url) == Data([1,2,3]))
+        try await env.sessions.markSaved(photo.id, export: first.id, saved: SavedMark(fileName: result.name, folderLabel: result.folderLabel))
+        #expect(await env.sessions.exports(for: photo.id).count == 1)
     }
 }

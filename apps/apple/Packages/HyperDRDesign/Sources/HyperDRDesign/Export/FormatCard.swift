@@ -66,8 +66,11 @@ public struct FormatCard: View {
             .padding(10)
             .frame(width: width, height: Self.height, alignment: .topLeading)
             .frame(maxWidth: width == nil ? .infinity : nil, alignment: .topLeading)
-            .background(Color.hdr.surfaceCard, in: .rect(cornerRadius: Radius.md))
+            // The state's fill is drawn over the opaque card surface (a
+            // later `background` goes behind an earlier one), so the
+            // translucent selected wash shows instead of being covered.
             .background(fill, in: .rect(cornerRadius: Radius.md))
+            .background(Color.hdr.surfaceCard, in: .rect(cornerRadius: Radius.md))
             .overlay {
                 RoundedRectangle(cornerRadius: Radius.md)
                     .strokeBorder(stroke, lineWidth: isSelected ? 1.5 : 1)

@@ -131,3 +131,63 @@ private let variants: [(String, ColorScheme, ColorSchemeContrast, String)] = [
     #expect(Group.neighbor(of: 2, in: items, direction: .right) == 3, "moves on from an unavailable selection")
     #expect(Group.neighbor(of: 9, in: items, direction: .right) == nil)
 }
+
+/// The colour of the pixel at (`x`, `y`) points from the top left of a
+/// view of `width` points.
+private func colour(_ bitmap: NSBitmapImageRep, width: CGFloat, x: CGFloat, y: CGFloat) throws -> NSColor {
+    let scale = CGFloat(bitmap.pixelsWide) / width
+    return try #require(bitmap.colorAt(x: Int(x * scale), y: Int(y * scale))?.usingColorSpace(.sRGB))
+}
+
+private func distance(_ a: NSColor, _ b: NSColor) -> CGFloat {
+    abs(a.redComponent - b.redComponent) + abs(a.greenComponent - b.greenComponent) + abs(a.blueComponent - b.blueComponent)
+}
+
+/// The state's own fill must show: a point inside the card, away from its
+/// border, text and check, has a different colour selected and not (a
+/// picture that differs only in the border, text and check would pass
+/// `m3StatesLookDifferent` with the fill covered).
+@MainActor @Test func theSelectedFormatCardHasItsOwnFill() throws {
+    for scheme in [ColorScheme.light, .dark] {
+        func inside(selected: Bool, reason: Bool = false) throws -> NSColor {
+            let bitmap = try snapshot(FormatCard(name: Text(verbatim: "HDR JPEG"), detail: Text(verbatim: "JPEG"), isSelected: selected,
+                                                 unavailableReason: reason ? Text(verbatim: "No") : nil, width: 200) {},
+                                      scheme: scheme)
+            return try colour(bitmap, width: 200, x: 150, y: FormatCard.height - 12)
+        }
+        let normal = try inside(selected: false), selected = try inside(selected: true)
+        #expect(distance(normal, selected) > 0.03, "selected and normal cards have one fill: \(scheme)")
+        let unavailable = try inside(selected: false, reason: true)
+        #expect(distance(normal, unavailable) > 0.01, "the unavailable card is sunken: \(scheme)")
+    }
+}
+
+@MainActor @Test func theStatusCardsTintShows() throws {
+    for scheme in [ColorScheme.light, .dark] {
+        let panel = try colour(snapshot(Color.hdr.surfacePanel.frame(width: 20, height: 20), scheme: scheme),
+                               width: 20, x: 10, y: 10)
+        func inside(_ kind: ExportStatusKind) throws -> NSColor {
+            let bitmap = try snapshot(ExportStatusCard(kind: kind, fileName: "a.jpg", statusLine: Text(verbatim: "Encoding"), percent: 0.5,
+                                                       onStop: {}, onDetails: {}, onSave: {}, onShowInFinder: {}, onDismiss: {}),
+                                      width: Layout.inspectorWidth, scheme: scheme)
+            let scale = CGFloat(bitmap.pixelsWide) / Layout.inspectorWidth
+            return try colour(bitmap, width: Layout.inspectorWidth, x: Layout.inspectorWidth - 6, y: CGFloat(bitmap.pixelsHigh) / scale / 2)
+        }
+        let kinds: [ExportStatusKind] = [.running, .stopping, .exported(savedTo: "x"), .saveFailed, .failed(title: Text(verbatim: "Too large"))]
+        for kind in kinds {
+            #expect(distance(panel, try inside(kind)) > 0.01, "\(kind) shows no tint over the panel: \(scheme)")
+        }
+    }
+}
+
+/// Moving by arrow key chooses a format and the group exposes itself as a
+/// radio group, not a tab bar: a picture of the group still renders.
+@MainActor @Test func theFormatGroupRendersWithItsRadioRepresentation() throws {
+    var selection = 1
+    let items = [FormatCardItem(id: 1, name: Text(verbatim: "a"), detail: Text(verbatim: "x")),
+                 FormatCardItem(id: 2, name: Text(verbatim: "b"), detail: Text(verbatim: "y"), unavailableReason: Text(verbatim: "no"))]
+    let group = FormatCardGroup(title: Text(verbatim: "Format"), items: items,
+                                selection: Binding(get: { selection }, set: { selection = $0 }), columns: 2)
+    let bitmap = try snapshot(group, width: 320)
+    #expect(distinctColours(bitmap) > 10)
+}

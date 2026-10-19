@@ -67,8 +67,9 @@ public struct ExportStatusCard: View {
         }
         .padding(Space.s3)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.hdr.surfacePanel, in: .rect(cornerRadius: Radius.standard))
+        // The tint over the opaque panel surface, not under it.
         .background(tint.background, in: .rect(cornerRadius: Radius.standard))
+        .background(Color.hdr.surfacePanel, in: .rect(cornerRadius: Radius.standard))
         .overlay {
             RoundedRectangle(cornerRadius: Radius.standard)
                 .strokeBorder(flashing ? Color.hdr.accent : tint.line, lineWidth: flashing ? 2 : 1)

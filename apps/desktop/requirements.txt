@@ -1,2 +1,0 @@
-PyInstaller>=6.19,<7
--r ../panel/requirements.txt

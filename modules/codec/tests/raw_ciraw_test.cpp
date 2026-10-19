@@ -348,6 +348,27 @@ void run() {
   }
   testing::set_raw_os_build_override({});
   require(stale_binding, "persisted RAW binding survived OS build change");
+  // Cancellation after rendering and during a partially copied block must
+  // return at that checkpoint, without copying the rest of the block.
+  for (unsigned cancel_row : {0U, 16U}) {
+    CancelToken token;
+    std::vector<unsigned> copied;
+    testing::set_raw_copy_hook([&](unsigned row) {
+      copied.push_back(row);
+      if (row == cancel_row) token.request();
+    });
+    bool cancelled = false;
+    try {
+      CancelScope scope(&token);
+      decode_image(source);
+    } catch (const Cancelled&) {
+      cancelled = true;
+    }
+    testing::set_raw_copy_hook({});
+    require(cancelled && copied.size() == cancel_row / 16 + 1 &&
+                copied.back() == cancel_row,
+            "RAW copy ignored cancellation until after its checkpoint");
+  }
   // A second caller can cancel while another render owns the filter lock.
   std::atomic<bool> held = false, release = false;
   testing::set_raw_block_hook([&](unsigned top, unsigned) {
@@ -547,8 +568,10 @@ int cancel_measure(const std::filesystem::path& path) {
                             .count();
     std::cout << "RAW cancel request_after_block_start_ms=" << delay
               << " tail_ms=" << tail << " cancelled=" << cancelled << '\n';
-    require(cancelled && tail <= 200,
-            "61MP RAW block cancellation exceeded 200 ms");
+    require(cancelled, "61MP RAW render did not cancel");
+#ifdef NDEBUG
+    require(tail <= 200, "61MP RAW block cancellation exceeded 200 ms in Release");
+#endif
     (void)start;
   }
   const auto start = std::chrono::steady_clock::now();

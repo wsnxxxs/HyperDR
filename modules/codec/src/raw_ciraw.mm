@@ -62,6 +62,7 @@ std::string build_override;
 std::uint64_t open_count{}, render_count{};
 std::function<void()> open_hook;
 std::function<void(unsigned, unsigned)> block_hook;
+std::function<void(unsigned)> copy_hook;
 std::unique_lock<std::mutex> cancellable_cache_lock() {
   std::unique_lock lock(cache_mutex, std::defer_lock);
   while (!lock.try_lock()) {
@@ -314,7 +315,16 @@ DecodedImage decode_apple_raw(const std::filesystem::path& path, const RawDecode
                  bounds:rect
                  format:kCIFormatRGBAf
              colorSpace:space];
-      for (unsigned y = 0; y < rows; ++y)
+      if (copy_hook) copy_hook(top);
+      check_cancelled();
+      // Bound CPU-side cancellation latency without changing the render block.
+      // A 16-row interval is about 10 ms even in the 61MP Debug/ASan copy loop.
+      constexpr unsigned kCopyCancelRows = 16;
+      for (unsigned y = 0; y < rows; ++y) {
+        if (y && y % kCopyCancelRows == 0) {
+          if (copy_hook) copy_hook(top + y);
+          check_cancelled();
+        }
         for (unsigned x = 0; x < width; ++x)
           for (unsigned c = 0; c < 3; ++c) {
             const float value =
@@ -323,6 +333,7 @@ DecodedImage decode_apple_raw(const std::filesystem::path& path, const RawDecode
               throw std::runtime_error("Apple RAW produced nonfinite pixels");
             out.linear_p3.at(x, top + y, c) = value;
           }
+      }
       if (options.progress_sink) {
         const auto name = path_utf8(path);
         options.progress_sink->on_progress({"decode", name, double(top + rows) / height, {}});
@@ -345,6 +356,10 @@ std::uint64_t raw_filter_render_count() {
 void set_raw_block_hook(std::function<void(unsigned, unsigned)> value) {
   std::lock_guard lock(cache_mutex);
   block_hook = std::move(value);
+}
+void set_raw_copy_hook(std::function<void(unsigned)> value) {
+  std::lock_guard lock(cache_mutex);
+  copy_hook = std::move(value);
 }
 void set_raw_open_hook(std::function<void()> value) {
   std::lock_guard lock(cache_mutex);

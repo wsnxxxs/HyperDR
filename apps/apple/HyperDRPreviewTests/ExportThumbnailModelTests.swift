@@ -17,7 +17,8 @@ import XCTest
         return try XCTUnwrap(context.makeImage())
     }
     private func frame(_ exposure: Double = 0) async throws -> PreviewFrame {
-        let engine = try await Engine(), session = try engine.openPreview(source: TinyPhoto.url)
+        let photo = try TinyPhoto(); defer { photo.remove() }
+        let engine = try await Engine(), session = try engine.openPreview(source: photo.url)
         defer { session.close() }
         return try await session.renderFrame(EngineRequest(settings: ["preview_max_edge": .number(8), "exposure_bias": .number(exposure)]))
     }

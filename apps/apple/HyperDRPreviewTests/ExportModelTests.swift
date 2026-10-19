@@ -16,7 +16,7 @@ import HyperDRKit
         return (m,s)
     }
     func running(_ m: EditorModel, _ s: FakeEditorServices, destination: URL? = nil) async {
-        m.startExport(destination: destination ?? target)
+        startPreparedExport(m, destination: destination ?? target)
         await eventually(timeout: .seconds(10)) { s.hasExportSubscriber }
     }
     func result(_ id: String = "version") -> ExportResult {
@@ -24,7 +24,7 @@ import HyperDRKit
     }
     func testNilSavePanelCancellationDoesNotStartAnything() async {
         let (m,s) = await ready()
-        m.startExport(destination: nil)
+        startPreparedExport(m, destination: nil)
         XCTAssertTrue(s.exportCalls.isEmpty); XCTAssertEqual(m.export.phase, .idle)
     }
     func testDestinationIsForwardedAndSelectedDeliveryNeverSavesTwice() async {
@@ -98,7 +98,7 @@ import HyperDRKit
     func testPreparationCancellationDoesNotOpenUntilTheStartCallDrains() async {
         let (m,s) = await ready(); let gate = ExportModelGate()
         s.exportStartHandler = { await gate.wait() }
-        m.startExport(destination:target)
+        startPreparedExport(m, destination:target)
         await eventually(timeout:.seconds(10)) { gate.isWaiting }
         m.open([second]); m.resolvePhotoSwitch(stop:true)
         await eventually(timeout:.seconds(10)) { s.exportCancelCount == 1 }
@@ -123,7 +123,7 @@ import HyperDRKit
         var p=m.preferences.value; p.saveMode = .folder
         _ = try? await s.setExportFolder(URL(fileURLWithPath:"/tmp/fixed"))
         await m.setExportFolder(URL(fileURLWithPath:"/tmp/fixed")); m.updatePreferences(p)
-        m.startExport(destination:nil)
+        startPreparedExport(m, destination:nil)
         await eventually(timeout:.seconds(10)) { s.hasExportSubscriber }
         XCTAssertNil(s.exportCalls.last?.destination)
         s.sendExport(.finished(result:result(),failure:nil))
@@ -149,7 +149,7 @@ import HyperDRKit
     func testPreviewRefreshDoesNotBlockExportAndInvalidTargetDoesNotReachKit() async {
         let (m,s) = await ready(); m.requestBusy()
         XCTAssertNil(m.export.blockerKey)
-        m.startExport(destination:URL(fileURLWithPath:"/tmp/wrong.jpg"))
+        startPreparedExport(m, destination:URL(fileURLWithPath:"/tmp/wrong.jpg"))
         await eventually(timeout:.seconds(10)) { m.export.phase == .failed }
         XCTAssertEqual(m.export.failure?.code,"invalid_options");XCTAssertTrue(s.exportCalls.isEmpty)
     }
@@ -461,7 +461,7 @@ extension ExportModelTests {
         let (m,s)=await ready()
         await m.setExportFolder(URL(fileURLWithPath:"/tmp/alpha"))
         var p=m.preferences.value;p.saveMode = .folder;m.updatePreferences(p)
-        m.startExport(destination:nil)
+        startPreparedExport(m, destination:nil)
         await eventually(timeout:.seconds(10)) { s.hasExportSubscriber }
         XCTAssertEqual(m.export.destination,.folder(label:"alpha"))
         await m.setExportFolder(URL(fileURLWithPath:"/tmp/beta"))
@@ -473,14 +473,14 @@ extension ExportModelTests {
         let (m,s) = await ready()
         await m.setExportFolder(URL(fileURLWithPath: "/tmp/alpha"))
         var preferences = m.preferences.value; preferences.saveMode = .folder; m.updatePreferences(preferences)
-        m.startExport(destination: nil)
+        startPreparedExport(m, destination: nil)
         let next = try? await s.setExportFolder(URL(fileURLWithPath: "/tmp/beta"))
         if let next { m.preferences.exportFolder = next }
         await eventually(timeout: .seconds(3)) { s.hasExportSubscriber }
         s.sendExport(.finished(result: result(), failure: nil))
         await eventually(timeout: .seconds(3)) { !m.export.isInFlight }
         XCTAssertEqual(m.export.result?.saved?.folderLabel, "alpha")
-        m.startExport(destination: nil)
+        startPreparedExport(m, destination: nil)
         await eventually(timeout: .seconds(3)) { s.exportCalls.count == 2 && s.hasExportSubscriber }
         s.sendExport(.finished(result: result("next"), failure: nil))
         await eventually(timeout: .seconds(3)) { !m.export.isInFlight }
@@ -516,4 +516,14 @@ extension ExportModelTests {
         m.cancelExport()
         await eventually(timeout: .seconds(3)) { !m.export.isInFlight }
     }
+}
+
+/// Test callers follow the same mandatory preparation protocol as both save modes.
+@MainActor func startPreparedExport(_ model: EditorModel, destination: URL?,
+                                    file: StaticString = #filePath, line: UInt = #line) {
+    guard let token = model.prepareExport() else {
+        XCTFail("Expected an export preparation token", file: file, line: line)
+        return
+    }
+    model.startExport(destination: destination, token: token)
 }

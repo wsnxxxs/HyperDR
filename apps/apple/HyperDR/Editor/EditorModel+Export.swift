@@ -98,12 +98,8 @@ extension EditorModel {
         guard pendingExportToken == token.id, photoSerial == token.photoSerial,
               generation == token.openGeneration, editGeneration == token.editGeneration else { return }
         pendingExportToken = nil
-        startExport(destination: destination)
-    }
-
-    /// A nil destination is meaningful only in fixed-folder mode. Cancelling
-    /// the save panel does not call this method and cannot create a job/version.
-    func startExport(destination: URL?) {
+        // A nil destination is meaningful only in fixed-folder mode. A
+        // cancelled save panel must not call startExport at all.
         syncExportState()
         guard export.blockerKey == nil, let photo else { return }
         guard destination != nil || preferences.value.saveMode == .folder else { return }
@@ -158,8 +154,6 @@ extension EditorModel {
             }
         }
     }
-    /// Both spellings are available while frontend adopts the destination contract.
-    func startExport(to file: URL?) { startExport(destination: file) }
     func finishExport(result: ExportResult?, failure: UserFacingError?, snapshot: EditSnapshot, framed: Bool) {
         var failure = failure
         var result = result

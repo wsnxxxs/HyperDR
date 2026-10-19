@@ -188,7 +188,7 @@ extension LiveEditorServicesTests {
         await eventually(timeout:.seconds(20)) { model.document?.phase == .ready && !model.suggestedFileName.isEmpty }
         model.selectEncoding("sdr-tiff")
         let target=root.appendingPathComponent("my selected name.tif")
-        model.startExport(destination:target)
+        startPreparedExport(model, destination:target)
         XCTAssertTrue(model.export.isInFlight)
         await eventually(timeout:.seconds(30),"export delivered") { !model.export.isInFlight }
         XCTAssertEqual(model.export.phase,.succeeded)

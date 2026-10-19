@@ -17,7 +17,6 @@ nonisolated struct CanvasSnapshot: @unchecked Sendable {
     var content: Content
     var transform: CanvasTransform
     var drawableSize: CGSize
-    var contentsScale: CGFloat
     /// Increases with every snapshot a canvas hands over.
     var generation: UInt64 = 0
 }
@@ -48,6 +47,7 @@ nonisolated final class PreviewRenderLoop: @unchecked Sendable {
     // Guarded by `condition`.
     private var pending: CanvasSnapshot?
     private var stopping = false
+    private var stopped = false
     private var rendering = false
     private var lastPresented: UInt64 = 0
     private var presentedOutOfOrder = false
@@ -100,13 +100,14 @@ nonisolated final class PreviewRenderLoop: @unchecked Sendable {
         var presentations: Int
         var presentedOutOfOrder: Bool
         var idle: Bool
+        var hasStopped: Bool
     }
     var state: State {
         condition.lock()
         defer { condition.unlock() }
         return State(lastPresented: lastPresented, presentations: presentations,
                      presentedOutOfOrder: presentedOutOfOrder,
-                     idle: pending == nil && !rendering && renderer.inFlight == 0)
+                     idle: pending == nil && !rendering && renderer.inFlight == 0, hasStopped: stopped)
     }
 
     /// Tests: the renderer's frame cache, read only while the loop is idle.
@@ -163,6 +164,9 @@ nonisolated final class PreviewRenderLoop: @unchecked Sendable {
         }
         synthetic = nil
         renderer.releaseFrame()
+        condition.lock()
+        stopped = true
+        condition.unlock()
         exited.signal()
     }
 
@@ -173,6 +177,13 @@ nonisolated final class PreviewRenderLoop: @unchecked Sendable {
         do {
             switch snapshot.content {
             case .empty:
+                guard snapshot.drawableSize.width > 0, snapshot.drawableSize.height > 0 else {
+                    renderer.releaseFrame()
+                    // A zero-size close releases the photo but cannot clear
+                    // its last drawable. Clear again when geometry returns.
+                    showsEmpty = false
+                    return true
+                }
                 // Repeated empty snapshots (a transform change with no photo)
                 // present nothing new.
                 if showsEmpty { return true }
@@ -205,11 +216,9 @@ nonisolated final class PreviewRenderLoop: @unchecked Sendable {
     /// always matches the size the frame was laid out for. This thread has no
     /// run loop, so the change is committed explicitly.
     private func apply(_ snapshot: CanvasSnapshot) {
-        guard layer.drawableSize != snapshot.drawableSize
-                || layer.contentsScale != snapshot.contentsScale else { return }
+        guard layer.drawableSize != snapshot.drawableSize else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        layer.contentsScale = snapshot.contentsScale
         layer.drawableSize = snapshot.drawableSize
         CATransaction.commit()
     }

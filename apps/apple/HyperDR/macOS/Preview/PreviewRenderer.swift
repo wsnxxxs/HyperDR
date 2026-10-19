@@ -167,15 +167,34 @@ nonisolated final class PreviewRenderer: @unchecked Sendable {
     /// True while the GPU has not caught up: a draw now would wait in
     /// `nextDrawable`, so the caller should wait and retry.
     var isBusy: Bool { inFlight >= Self.maxInFlight }
-    /// Called on Metal's completion thread after the count dropped.
-    var onPresentationCompleted: (@Sendable () -> Void)?
+    /// Test/owner callbacks can change while the render thread runs. Copy
+    /// under the mutex and invoke after releasing it (callbacks may re-enter).
+    private struct Hooks: Sendable {
+        var completed: (@Sendable () -> Void)?
+        var drawable: @Sendable (CAMetalLayer) -> (any CAMetalDrawable)? = { $0.nextDrawable() }
+        var command: (@Sendable (any MTLCommandBuffer) -> Void)?
+        var prepare: (@Sendable () throws -> Void)?
+    }
+    private let hooks = Mutex(Hooks())
 
-    /// Where drawables come from. Tests count or replace the calls; the app
-    /// always asks the layer.
-    var drawableSource: @Sendable (CAMetalLayer) -> (any CAMetalDrawable)? = { $0.nextDrawable() }
-    /// Test hook: sees each presenting command buffer before anything is
-    /// encoded into it (to delay its GPU completion).
-    var presentingCommandHook: (@Sendable (any MTLCommandBuffer) -> Void)?
+    var onPresentationCompleted: (@Sendable () -> Void)? {
+        get { hooks.withLock { $0.completed } }
+        set { hooks.withLock { $0.completed = newValue } }
+    }
+    var drawableSource: @Sendable (CAMetalLayer) -> (any CAMetalDrawable)? {
+        get { hooks.withLock { $0.drawable } }
+        set { hooks.withLock { $0.drawable = newValue } }
+    }
+    var presentingCommandHook: (@Sendable (any MTLCommandBuffer) -> Void)? {
+        get { hooks.withLock { $0.command } }
+        set { hooks.withLock { $0.command = newValue } }
+    }
+    /// Injects a resource/preparation failure without submitting invalid GPU
+    /// commands; used to verify the executor's error and retry boundary.
+    var preparationHook: (@Sendable () throws -> Void)? {
+        get { hooks.withLock { $0.prepare } }
+        set { hooks.withLock { $0.prepare = newValue } }
+    }
 
     init(library suppliedLibrary: (any MTLLibrary)? = nil) throws {
         guard let device = suppliedLibrary?.device ?? MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue() else {
@@ -212,6 +231,7 @@ nonisolated final class PreviewRenderer: @unchecked Sendable {
     /// Rebuilds the intermediate only when the frame or the view mode changed.
     @discardableResult
     func prepare(frame: PreviewFrame, original: Bool) throws -> any MTLTexture {
+        try preparationHook?()
         if let prepared, prepared.source === frame, prepared.original == original {
             return prepared.texture
         }
@@ -222,6 +242,7 @@ nonisolated final class PreviewRenderer: @unchecked Sendable {
     /// Same pass for buffers the caller owns (the diagnostic ramp and tests).
     @discardableResult
     func prepare(planes: FramePlanes, original: Bool) throws -> any MTLTexture {
+        try preparationHook?()
         if let prepared, prepared.source === planes.base, prepared.original == original {
             return prepared.texture
         }
@@ -422,8 +443,8 @@ nonisolated final class PreviewRenderer: @unchecked Sendable {
     func clear(in layer: CAMetalLayer) -> Bool {
         prepared = nil
         guard layer.drawableSize.width > 0, layer.drawableSize.height > 0 else {
-            needsRetry = false   // nothing to present: not a miss
-            return true
+            needsRetry = true    // no drawable was cleared at this size
+            return false
         }
         guard let drawable = acquireDrawable(layer), let command = makePresentingCommand() else {
             needsRetry = true

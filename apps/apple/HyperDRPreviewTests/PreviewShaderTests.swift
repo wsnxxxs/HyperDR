@@ -213,8 +213,8 @@ private func fixturePhoto() throws -> URL {
         XCTAssertFalse(renderer.draw(in: broken, transform: transform))
         XCTAssertFalse(renderer.clear(in: broken))      // also drops the frame
         XCTAssertTrue(renderer.needsRetry)
-        XCTAssertTrue(renderer.clear(in: empty))
-        XCTAssertFalse(renderer.needsRetry, "zero-size clear")
+        XCTAssertFalse(renderer.clear(in: empty))
+        XCTAssertTrue(renderer.needsRetry, "zero-size clear must be retried at a drawable size")
 
         XCTAssertFalse(renderer.clear(in: broken))
         XCTAssertTrue(renderer.needsRetry)

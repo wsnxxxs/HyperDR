@@ -290,3 +290,124 @@ import XCTest
         XCTAssertFalse(loop.state.presentedOutOfOrder)
     }
 }
+
+extension PreviewRenderLoopTests {
+    func testReleasingTheViewStopsTheThreadAndFreesTheFrame() async throws {
+        var (view, _, _, _) = try canvas()
+        let executor = try loop(view)
+        view.tick()
+        await eventually(timeout: .seconds(2), "drawn") { executor.state.presentations >= 1 && executor.state.idle }
+        XCTAssertNotNil(executor.readyFrameIdentity)
+        weak let oldView = view
+        view = EDRCanvasView(renderer: try makePreviewRenderer())
+        await eventually(timeout: .seconds(2), "view released and executor stopped") {
+            oldView == nil && executor.state.hasStopped
+        }
+        XCTAssertNil(executor.readyFrameIdentity)
+    }
+
+    func testResizeReachesTheLayerBetweenDrawsAndPreservesAppKitScale() async throws {
+        let (view, _, _, _) = try canvas()
+        let executor = try loop(view)
+        view.layer?.contentsScale = 2 // stand-in for AppKit's backing update
+        view.tick()
+        await eventually(timeout: .seconds(2), "drawn") { executor.state.presentations >= 1 && executor.state.idle }
+        view.frame = CGRect(x: 0, y: 0, width: 32, height: 24)
+        view.layout()
+        view.tick()
+        await eventually(timeout: .seconds(2), "resized draw") {
+            executor.state.lastPresented == view.handedOverGeneration && executor.state.idle
+        }
+        XCTAssertEqual((view.layer as? CAMetalLayer)?.drawableSize, CGSize(width: 32, height: 24))
+        XCTAssertEqual(view.layer?.contentsScale, 2)
+    }
+
+    func testNilDrawableRetryIsPaced() async throws {
+        let (view, _, probe, _) = try canvas()
+        probe.handsOutNone = true
+        view.tick()
+        await eventually(timeout: .seconds(2), "retry started") { probe.requests >= 2 }
+        let start = ContinuousClock.now
+        let count = probe.requests
+        try await Task.sleep(for: .milliseconds(200))
+        let duration = (ContinuousClock.now - start).components
+        let elapsed = Double(duration.seconds) + Double(duration.attoseconds) / 1e18
+        // Account for scheduler delays instead of assuming the sleep lasted
+        // exactly 200 ms. At 8 ms intervals, the ceiling is 125 calls/s.
+        XCTAssertLessThanOrEqual(probe.requests - count, Int(ceil(elapsed / 0.008)) + 2)
+        view.renderLoop?.stop()
+    }
+
+    func testClosingAtZeroSizeClearsWhenTheCanvasGetsItsSizeBack() async throws {
+        let (view, _, probe, _) = try canvas()
+        let executor = try loop(view)
+        view.tick()
+        await eventually(timeout: .seconds(2), "drawn") { executor.state.presentations >= 1 && executor.state.idle }
+        let requests = probe.requests
+        view.frame = .zero
+        view.layout()
+        view.showsSyntheticRamp = false
+        view.tick()
+        await eventually(timeout: .seconds(2), "zero-size close") {
+            executor.state.lastPresented == view.handedOverGeneration && executor.state.idle
+        }
+        XCTAssertNil(executor.readyFrameIdentity)
+        XCTAssertEqual(probe.requests, requests)
+        view.frame = CGRect(x: 0, y: 0, width: 32, height: 24)
+        view.layout()
+        view.tick()
+        await eventually(timeout: .seconds(2), "nonzero-size clear") {
+            executor.state.lastPresented == view.handedOverGeneration && executor.state.idle
+        }
+        XCTAssertEqual(probe.requests, requests + 1, "the previous photo must be cleared after resize")
+    }
+
+    func testPreparationFailureIsReportedOnceWithoutRetryAndNewInputCanRecover() async throws {
+        let renderer = try makePreviewRenderer()
+        let layer = offscreenLayer(renderer)
+        let probe = DrawableProbe(standIn: layer)
+        probe.install(on: renderer)
+        var errors: [String] = []
+        let view = EDRCanvasView(renderer: renderer, onError: { errors.append($0) })
+        view.frame = CGRect(x: 0, y: 0, width: side, height: side)
+        view.layout()
+        view.showsSyntheticRamp = true
+        renderer.preparationHook = { throw PreviewError.unavailable("Injected preparation failure") }
+        let executor = try loop(view)
+        view.tick()
+        await eventually(timeout: .seconds(2), "reported error") { errors.count == 1 && executor.state.idle }
+        let requests = probe.requests
+        try await Task.sleep(for: .milliseconds(40))
+        XCTAssertEqual(probe.requests, requests)
+        XCTAssertEqual(errors.count, 1)
+        renderer.preparationHook = nil
+        view.setNeedsRedraw()
+        view.tick()
+        await eventually(timeout: .seconds(2), "recovered on new input") {
+            executor.state.lastPresented == view.handedOverGeneration && executor.state.idle
+        }
+        XCTAssertNotNil(executor.readyFrameIdentity)
+    }
+}
+
+extension PreviewRenderLoopTests {
+    func testRendererHooksCanChangeWhileTheExecutorIsDrawing() async throws {
+        let (view, renderer, probe, _) = try canvas()
+        let executor = try loop(view)
+        probe.block = 0.001
+        for _ in 0..<200 {
+            probe.install(on: renderer)
+            renderer.presentingCommandHook = { $0.label = "Concurrent hook probe" }
+            renderer.preparationHook = {}
+            view.setNeedsRedraw()
+            view.tick()
+            await Task.yield()
+            renderer.presentingCommandHook = nil
+            renderer.preparationHook = nil
+        }
+        await eventually(timeout: .seconds(3), "latest snapshot after hook changes") {
+            executor.state.lastPresented == view.handedOverGeneration && executor.state.idle
+        }
+        XCTAssertEqual(probe.mainThreadRequests, 0)
+    }
+}

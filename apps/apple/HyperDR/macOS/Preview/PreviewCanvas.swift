@@ -20,13 +20,28 @@ extension PreviewFrameSource {
 
 extension EditorModel: PreviewFrameSource {}
 
+/// What the view layer hears of the pointer on the canvas, in the canvas's own
+/// points: it times press-and-hold for the original and dismisses hints. The
+/// canvas still handles pan and zoom itself.
+struct CanvasPointerHandlers {
+    var down: (CGPoint) -> Void = { _ in }
+    var drag: (CGPoint) -> Void = { _ in }
+    var up: () -> Void = {}
+    /// The wheel or a pinch.
+    var zoomGesture: () -> Void = {}
+}
+
 /// Draws only the photo rect; background, corners, shadow and badges stay in the
 /// view layer and align to `canvas.imageFrame` (§3.5). Zoom and pan gestures run
 /// here and are mirrored into `CanvasModel`; keyboard handling does not.
 struct PreviewCanvas: NSViewRepresentable {
     let model: EditorModel
+    var pointer = CanvasPointerHandlers()
 
-    init(model: EditorModel) { self.model = model }
+    init(model: EditorModel, pointer: CanvasPointerHandlers = CanvasPointerHandlers()) {
+        self.model = model
+        self.pointer = pointer
+    }
 
     func makeNSView(context: Context) -> EDRCanvasView {
         let view = EDRCanvasView(onHeadroom: { [weak model] snapshot in
@@ -43,8 +58,16 @@ struct PreviewCanvas: NSViewRepresentable {
             model?.updateViewport(size, backingScale: scale)
         }
         view.onRefreshRateChange = { [weak model] rate in model?.updateRefreshRate(rate) }
+        install(pointer, on: view)
         view.setNeedsRedraw()
         return view
+    }
+
+    private func install(_ pointer: CanvasPointerHandlers, on view: EDRCanvasView) {
+        view.onPointerDown = pointer.down
+        view.onPointerDrag = pointer.drag
+        view.onPointerUp = pointer.up
+        view.onZoomGesture = pointer.zoomGesture
     }
 
     func updateNSView(_ view: EDRCanvasView, context: Context) {
@@ -62,6 +85,7 @@ struct PreviewCanvas: NSViewRepresentable {
         _ = model.canvas.zoom
         view.compositionProvider = { [weak model] in model?.canvasComposition }
         view.frameProvider = { [weak model] in model?.canvasFrame }
+        install(pointer, on: view)
         view.showsOriginal = model.viewMode == .original || !model.hasEditedFrame
         // Until the view has reported its size, the model still has a zero
         // viewport; pushing that back would collapse the canvas.

@@ -17,18 +17,30 @@ struct ControlSlider: View {
         if control.isVisible {
             ParameterSlider(
                 LocalizedStringKey(control.spec.labelKey),
-                value: Binding(get: { control.value }, set: { model.adjust(key, to: $0) }),
+                value: Self.binding(model: model, key: key),
                 spec: ParameterSpecFactory.spec(for: control, locale: locale),
                 help: control.spec.helpKey.map { LocalizedStringKey($0) },
                 mask: mask(for: control),
                 readoutHelp: ParameterSpecFactory.ceiling(of: control).map {
                     Text("adjust.rangeCeiling \($0.formatted(.number.precision(.fractionLength(1)).locale(locale)))")
                 },
-                onEditingChanged: { editing in
-                    if editing { model.beginAdjusting(key) } else { model.endAdjusting(key) }
-                },
+                onEditingChanged: Self.editing(model: model, key: key),
                 onReset: { model.resetControl(key) })
             .disabled(!control.isEnabled)
+        }
+    }
+
+    /// The control's value: reads it, and every write is an adjustment.
+    static func binding(model: EditorModel, key: String) -> Binding<Double> {
+        let control = model.control(key)
+        return Binding(get: { control.value }, set: { model.adjust(key, to: $0) })
+    }
+
+    /// What the slider reports at the start and end of a drag or of a held
+    /// arrow key: everything between is one undo step.
+    static func editing(model: EditorModel, key: String) -> (Bool) -> Void {
+        { editing in
+            if editing { model.beginAdjusting(key) } else { model.endAdjusting(key) }
         }
     }
 

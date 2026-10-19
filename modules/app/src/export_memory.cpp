@@ -41,7 +41,7 @@ ExportMemoryEstimate estimate_export_memory(std::uint32_t pw, std::uint32_t ph,
   ExportMemoryEstimate e;
   e.decode = raw ? sum({overhead,resident,plane(photo,12),plane(std::uint64_t(pw)*512,16)})
                  : sum({overhead,plane(photo,pair ? 40 : 15)});
-  // Imported dual renditions, LUT working renditions and model/external grids retain additional
+  // Imported dual renditions and model/external grids retain additional
   // bases, HDR samples and RGB gain planes while grading reconstructs a pair.
   // Measured with external grids: an SDR-only export of one holds about 48 B/px
   // above the grid, far below the 80 B/px that covers dual HDR renditions.
@@ -50,7 +50,7 @@ ExportMemoryEstimate estimate_export_memory(std::uint32_t pw, std::uint32_t ph,
   // 24 MP and 12 MP sources (R7-301): 47 B/px HDR and 26 B/px SDR beyond 32 MiB,
   // and the stages after it keep the graded photo (24 B/px) next to the canvas.
   const bool raster=!raw && !retained_renditions;
-  // An imported pair alone (no LUT, model or grid) measured 49-55 B/px for HDR
+  // An imported pair (a LUT adds nothing; no model or grid) measured 49-55 B/px for HDR
   // outputs and 38-43 for SDR outputs (HEIC and Ultra HDR JPEG inputs). A pair is
   // deliberately not `raster` for the stages after the render: the composite and
   // packaging coefficients below were measured on single-rendition sources, and
@@ -136,10 +136,10 @@ ExportMemoryEstimate estimate_export_memory(std::uint32_t pw, std::uint32_t ph,
     *stage=sum({*stage,retained_resource_bytes});
   return e;
 }
-RenditionRetention rendition_retention(bool authored_sdr, bool model_gain,
-                                       bool external_gain, bool lut_active) noexcept {
-  return {authored_sdr || model_gain || external_gain || lut_active,
-          authored_sdr && !model_gain && !external_gain && !lut_active};
+RenditionRetention rendition_retention(bool, bool authored_sdr, bool model_gain,
+                                       bool external_gain, bool) noexcept {
+  return {authored_sdr || model_gain || external_gain,
+          authored_sdr && !model_gain && !external_gain};
 }
 std::uint64_t export_resource_bytes(const ConvertOptions& options) {
   std::uint64_t retained=0;

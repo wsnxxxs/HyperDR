@@ -25,17 +25,22 @@ struct ExportMemoryEstimate {
     // Pixels of the external gain grid the parser will allocate (0 = none).
     std::uint64_t external_gain_pixels = 0,
     // The only reason for `retained_renditions` is an imported dual rendition
-    // (an authored SDR base with a gain map): no LUT, model or external grid.
+    // (an authored SDR base with a gain map): no model or external grid.
     // Such a pair costs less than the 80 B/px those add.
     bool authored_pair_only = false);
 // Which extra renditions a conversion keeps alive while it grades. Both flags
 // come from this one function so that "only an imported pair" can never be
-// claimed for a conversion that also runs a LUT, a model or an external grid.
+// claimed for a conversion that also runs a model or an external grid.
+// Neither the source kind (`raw`) nor a colour LUT changes the answer: a LUT
+// adds no renditions to a JPEG/TIFF, a RAW photo or an imported pair (the
+// footprints match the runs without it, R7-1301), so only the pair, a model
+// gain and an external grid retain anything. The parameters stay so that every
+// call site states the whole conversion and the tests pin this rule.
 struct RenditionRetention {
-  bool retained{};          // any imported pair, LUT, model gain or external grid
-  bool imported_pair_only{};  // an authored SDR + gain map pair and nothing else
+  bool retained{};          // an imported pair, a model gain or an external grid
+  bool imported_pair_only{};  // an authored SDR + gain map pair, with or without a LUT
 };
-[[nodiscard]] RenditionRetention rendition_retention(bool authored_sdr, bool model_gain,
+[[nodiscard]] RenditionRetention rendition_retention(bool raw, bool authored_sdr, bool model_gain,
                                                      bool external_gain, bool lut_active) noexcept;
 [[nodiscard]] std::uint64_t export_resource_bytes(const ConvertOptions& options);
 // Zero means that the host could not report its physical memory. A configured

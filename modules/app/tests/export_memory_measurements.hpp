@@ -138,6 +138,31 @@ inline constexpr ExportMeasurement raster_export_measurements[] = {
   {"raster-j12:none:sdr-jpeg:8",4000,3000,4000,3000,hyperdr::OutputEncoding::SdrJpeg,8,337969896ULL},
   {"raster-j12:gallery:sdr-jpeg:8",4000,3000,4360,3750,hyperdr::OutputEncoding::SdrJpeg,8,390611760ULL},
   {"raster-j12:story:sdr-jpeg:8",4000,3000,4328,7694,hyperdr::OutputEncoding::SdrJpeg,8,653394952ULL},
+  // R7-601: the same raster sources with a 17^3 colour LUT at strength 1. A LUT on
+  // a raster photo adds no renditions (footprints match the runs without it), so
+  // these use the plain raster coefficients, as rendition_retention() says.
+  {"raster-lut-j24:none:iso-gainmap-jpeg:8",6000,4000,6000,4000,hyperdr::OutputEncoding::IsoGainMapJpeg,8,1155188056ULL},
+  {"raster-lut-j24:story:iso-gainmap-jpeg:8",6000,4000,6440,11450,hyperdr::OutputEncoding::IsoGainMapJpeg,8,2259126408ULL},
+  {"raster-lut-j24:none:adaptive:8",6000,4000,6000,4000,hyperdr::OutputEncoding::Adaptive,8,1161250448ULL},
+  {"raster-lut-j24:story:adaptive:8",6000,4000,6440,11450,hyperdr::OutputEncoding::Adaptive,8,2109245840ULL},
+  {"raster-lut-j24:none:pq:10",6000,4000,6000,4000,hyperdr::OutputEncoding::Pq,10,1160496808ULL},
+  {"raster-lut-j24:story:pq:10",6000,4000,6440,11450,hyperdr::OutputEncoding::Pq,10,1469925296ULL},
+  {"raster-lut-j24:none:avif-pq:10",6000,4000,6000,4000,hyperdr::OutputEncoding::AvifPq,10,1876052008ULL},
+  {"raster-lut-j24:story:avif-pq:10",6000,4000,6440,11450,hyperdr::OutputEncoding::AvifPq,10,4415524872ULL},
+  {"raster-lut-j24:none:sdr-jpeg:8",6000,4000,6000,4000,hyperdr::OutputEncoding::SdrJpeg,8,662930416ULL},
+  {"raster-lut-j24:story:sdr-jpeg:8",6000,4000,6440,11450,hyperdr::OutputEncoding::SdrJpeg,8,1382041088ULL},
+  {"raster-lut-j24:gallery:iso-gainmap-jpeg:8",6000,4000,6480,5000,hyperdr::OutputEncoding::IsoGainMapJpeg,8,1264485768ULL},
+  {"raster-lut-j24:gallery:sdr-jpeg:8",6000,4000,6480,5000,hyperdr::OutputEncoding::SdrJpeg,8,764068944ULL},
+  {"raster-lut-j12:story:iso-gainmap-jpeg:8",4000,3000,4328,7694,hyperdr::OutputEncoding::IsoGainMapJpeg,8,1048839464ULL},
+  {"raster-lut-j12:story:adaptive:8",4000,3000,4328,7694,hyperdr::OutputEncoding::Adaptive,8,998475336ULL},
+  {"raster-lut-j12:story:sdr-jpeg:8",4000,3000,4328,7694,hyperdr::OutputEncoding::SdrJpeg,8,653820912ULL},
+  {"raster-lut-j12:none:avif-pq:10",4000,3000,4000,3000,hyperdr::OutputEncoding::AvifPq,10,960578880ULL},
+  {"raster-lut-j8000:none:iso-gainmap-jpeg:8",8000,6000,8000,6000,hyperdr::OutputEncoding::IsoGainMapJpeg,8,2141456424ULL},
+  {"raster-lut-j8000:story:iso-gainmap-jpeg:8",8000,6000,8660,15396,hyperdr::OutputEncoding::IsoGainMapJpeg,8,3967520080ULL},
+  {"raster-lut-j8000:none:sdr-jpeg:8",8000,6000,8000,6000,hyperdr::OutputEncoding::SdrJpeg,8,1311802808ULL},
+  {"raster-lut-j8000:story:sdr-jpeg:8",8000,6000,8660,15396,hyperdr::OutputEncoding::SdrJpeg,8,2568997192ULL},
+  {"raster-lut-j8000:none:avif-pq:10",8000,6000,8000,6000,hyperdr::OutputEncoding::AvifPq,10,3547024768ULL},
+  {"raster-lut-j8000:story:avif-pq:10",8000,6000,8660,15396,hyperdr::OutputEncoding::AvifPq,10,3203419040ULL},
   // R7-401: canvases past the single-frame AVIF limit are written as grids (E8).
   // 8000x6000 on story (8660x15396, 133 MP) and 9504x6336 on a story card with 0.15
   // margins (11404x20274, 231 MP); the HLG rows were measured the same way.
@@ -146,4 +171,34 @@ inline constexpr ExportMeasurement raster_export_measurements[] = {
   {"raster-grid-j8000:story:avif-pq:10",8000,6000,8660,15396,hyperdr::OutputEncoding::AvifPq,10,3205483472ULL},
   {"raster-grid-t9504:story15:avif-pq:10",9504,6336,11404,20274,hyperdr::OutputEncoding::AvifPq,10,5245522288ULL},
   {"raster-grid-t9504:story15:avif-hlg:10",9504,6336,11404,20274,hyperdr::OutputEncoding::AvifHlg,10,5584229056ULL},
+};
+// R7-1301: RAW photos with a 17^3 colour LUT at strength 1 (sony-ilce-7s.ARW and the
+// 61 MP user RAW; default look, quality 90, verification on, macOS 27 / M6, largest
+// of two runs). A LUT adds no retained renditions to a RAW export either: the
+// footprints match the runs without it, so these rows use the plain RAW coefficients.
+inline constexpr ExportMeasurement raw_lut_measurements[] = {
+  {"sony-lut:none:iso-gainmap-jpeg:8",2768,1848,2768,1848,hyperdr::OutputEncoding::IsoGainMapJpeg,8,425034904ULL},
+  {"sony-lut:gallery:iso-gainmap-jpeg:8",2768,1848,2988,2308,hyperdr::OutputEncoding::IsoGainMapJpeg,8,444466304ULL},
+  {"sony-lut:story:iso-gainmap-jpeg:8",2768,1848,2972,5284,hyperdr::OutputEncoding::IsoGainMapJpeg,8,656590168ULL},
+  {"sony-lut:none:adaptive:8",2768,1848,2768,1848,hyperdr::OutputEncoding::Adaptive,8,423494904ULL},
+  {"sony-lut:gallery:adaptive:8",2768,1848,2988,2308,hyperdr::OutputEncoding::Adaptive,8,445236520ULL},
+  {"sony-lut:story:adaptive:8",2768,1848,2972,5284,hyperdr::OutputEncoding::Adaptive,8,624035256ULL},
+  {"sony-lut:none:adaptive:10",2768,1848,2768,1848,hyperdr::OutputEncoding::Adaptive,10,423773384ULL},
+  {"sony-lut:gallery:adaptive:10",2768,1848,2988,2308,hyperdr::OutputEncoding::Adaptive,10,442631464ULL},
+  {"sony-lut:story:adaptive:10",2768,1848,2972,5284,hyperdr::OutputEncoding::Adaptive,10,624772512ULL},
+  {"sony-lut:none:pq:10",2768,1848,2768,1848,hyperdr::OutputEncoding::Pq,10,423019768ULL},
+  {"sony-lut:gallery:pq:10",2768,1848,2988,2308,hyperdr::OutputEncoding::Pq,10,422561016ULL},
+  {"sony-lut:story:pq:10",2768,1848,2972,5284,hyperdr::OutputEncoding::Pq,10,486917464ULL},
+  {"sony-lut:none:avif-pq:10",2768,1848,2768,1848,hyperdr::OutputEncoding::AvifPq,10,569689408ULL},
+  {"sony-lut:gallery:avif-pq:10",2768,1848,2988,2308,hyperdr::OutputEncoding::AvifPq,10,622052720ULL},
+  {"sony-lut:story:avif-pq:10",2768,1848,2972,5284,hyperdr::OutputEncoding::AvifPq,10,1062635200ULL},
+  {"sony-lut:none:sdr-jpeg:8",2768,1848,2768,1848,hyperdr::OutputEncoding::SdrJpeg,8,281183192ULL},
+  {"sony-lut:gallery:sdr-jpeg:8",2768,1848,2988,2308,hyperdr::OutputEncoding::SdrJpeg,8,303645776ULL},
+  {"sony-lut:story:sdr-jpeg:8",2768,1848,2972,5284,hyperdr::OutputEncoding::SdrJpeg,8,442647752ULL},
+  {"u61-lut:none:iso-gainmap-jpeg:8",9504,6336,9504,6336,hyperdr::OutputEncoding::IsoGainMapJpeg,8,3202944048ULL},
+  {"u61-lut:story:iso-gainmap-jpeg:8",9504,6336,10200,18134,hyperdr::OutputEncoding::IsoGainMapJpeg,8,4165144800ULL},
+  {"u61-lut:none:adaptive:8",9504,6336,9504,6336,hyperdr::OutputEncoding::Adaptive,8,3202993248ULL},
+  {"u61-lut:story:adaptive:8",9504,6336,10200,18134,hyperdr::OutputEncoding::Adaptive,8,4923986816ULL},
+  {"u61-lut:none:sdr-jpeg:8",9504,6336,9504,6336,hyperdr::OutputEncoding::SdrJpeg,8,2227833160ULL},
+  {"u61-lut:story:sdr-jpeg:8",9504,6336,10200,18134,hyperdr::OutputEncoding::SdrJpeg,8,3463384736ULL},
 };

@@ -196,9 +196,11 @@ enum SettingsDiagnostics {
     }
 
     /// The models this build can run, each with the version the engine reports;
-    /// why none can run when the runtime is missing; "None" when it is there
+    /// "Starting…" until the engine is up; why none can run when the runtime is missing; "None" when it is there
     /// but offers nothing.
     static func models(_ model: EditorModel, locale: Locale) -> String {
+        // The runtime is not reported before the engine is up: not "missing" yet.
+        if case .starting = model.engine { return AppStrings.string("settings.diag.engine.starting", locale: locale) }
         let table = model.services.modelTable()
         guard table.runtimeReady else { return AppStrings.string("settings.diag.model.noRuntime", locale: locale) }
         let names = table.models.filter(\.isEnabled).map { choice in

@@ -488,7 +488,15 @@ extension EditorModel {
         let english = Locale(identifier: "en")
         let budget = SettingsDiagnostics.memoryBudget(self, locale: english).map { "\nExport memory limit: " + $0 } ?? ""
         // The engine's own reasons for reading the photo with limits, which the screens only paraphrase.
-        let degradation = (document?.source?.degradationReasons).flatMap { $0.isEmpty ? nil : "\nDecode degradation: " + $0.joined(separator: ", ") } ?? ""
+        // The export report of the current edit is what the file was made from; before one, the preview's.
+        let degradation: String
+        if let result = export.result, !export.isResultStale {
+            degradation = "\nDecode degradation (export report): " + (result.warnings.isEmpty ? "none" : result.warnings.joined(separator: ", "))
+        } else {
+            degradation = (document?.source?.degradationReasons).flatMap {
+                $0.isEmpty ? nil : "\nDecode degradation (preview): " + $0.joined(separator: ", ")
+            } ?? ""
+        }
         return preferences.diagnostics + rawDiagnostics
             + "\nEngine: " + SettingsDiagnostics.engine(self, locale: english)
             + "\nModels: " + SettingsDiagnostics.models(self, locale: english)

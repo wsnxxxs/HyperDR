@@ -25,7 +25,7 @@ bool prefix(const Bytes& b, std::string_view s) {
 bool contains(const Bytes& b, std::string_view s) {
   return std::search(b.begin(), b.end(), s.begin(), s.end()) != b.end();
 }
-struct Scan { std::vector<JpegAppSegment> apps; std::size_t end{}, insert{}; };
+struct Scan { std::vector<JpegAppSegment> apps; std::size_t end{}, insert{}, first_dqt{}; };
 Scan scan(const Bytes& b, std::size_t start) {
   if (read(b, start, 2) != 0xffd8) invalid("missing JPEG SOI");
   Scan out; out.insert = start + 2;
@@ -62,6 +62,7 @@ Scan scan(const Bytes& b, std::size_t start) {
       if (!components || components > frame_components || length != 6 + 2 * components)
         invalid("invalid JPEG scan components");
     }
+    if (m == 0xdb && !out.first_dqt) out.first_dqt = p - 2;
     const bool app = m >= 0xe0 && m <= 0xef;
     if (app) out.apps.push_back({m, p - 2, Bytes(b.begin() + p + 2, b.begin() + p + length)});
     if (leading && app) out.insert = p + length; else leading = false;
@@ -149,6 +150,8 @@ static GainMapJpeg read_gain_map_jpeg(const Bytes& bytes, bool metadata, bool re
     }
   }
   if (out.mpf_count != 1 || !index) invalid("gain-map JPEG requires one MPF index");
+  out.first_dqt_offset = primary.first_dqt;
+  out.mpf_after_dqt = primary.first_dqt && index->offset > primary.first_dqt;
   const auto t = std::span<const std::uint8_t>(index->payload).subspan(4);
   const auto endian = read(t, 0, 2);
   if (endian != 0x4d4d && endian != 0x4949) invalid("invalid MPF byte order");
@@ -224,6 +227,41 @@ static GainMapJpeg read_gain_map_jpeg(const Bytes& bytes, bool metadata, bool re
   }
   return out;
 }
+Bytes normalize_gain_map_jpeg_mpf(const Bytes& bytes) {
+  check_cancelled();
+  const auto layout = inspect_gain_map_jpeg(bytes);
+  if (!layout.mpf_after_dqt) return {};
+  const auto& apps = layout.app_segments[0];
+  const auto index = std::find_if(apps.begin(), apps.end(), [](const auto& app) {
+    return app.marker == 0xe2 && prefix(app.payload, std::string_view("MPF\0", 4));
+  });
+  const auto begin = index->offset, length = index->payload.size() + 4;
+  const auto before = layout.first_dqt_offset;
+  Bytes out;
+  out.reserve(bytes.size());
+  out.insert(out.end(), bytes.begin(), bytes.begin() + before);
+  out.insert(out.end(), bytes.begin() + begin, bytes.begin() + begin + length);
+  out.insert(out.end(), bytes.begin() + before, bytes.begin() + begin);
+  out.insert(out.end(), bytes.begin() + begin + length, bytes.end());
+  const auto t = std::span<const std::uint8_t>(index->payload).subspan(4);
+  const bool le = read(t, 0, 2) == 0x4949;
+  const auto ifd = read(t, 4, 4, le), count = read(t, ifd, 2, le);
+  for (unsigned i = 0; i < count; ++i) {
+    const auto entry = ifd + 2 + i * 12;
+    if (read(t, entry, 2, le) != 0xb002) continue;
+    const auto table = read(t, entry + 8, 4, le);
+    // The primary offset is the special value zero. The other image has not
+    // moved, but its offset is relative to the MPF TIFF header that has moved.
+    const std::uint64_t offset = std::uint64_t(layout.entries[1].offset) + begin - before;
+    if (offset > std::numeric_limits<std::uint32_t>::max()) invalid("normalized MPF offset overflow");
+    const auto at = before + 8 + table + 24;
+    for (unsigned j = 0; j < 4; ++j)
+      out.at(at + j) = offset >> (8 * (le ? j : 3 - j));
+  }
+  check_cancelled();
+  return out;
+}
+
 bool has_gain_map_jpeg_signature(const Bytes& bytes) {
   const auto primary=scan(bytes,0);
   bool mpf=false, gain=false;

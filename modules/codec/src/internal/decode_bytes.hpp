@@ -36,8 +36,7 @@ void set_jpeg_progress_hook(void (*hook)(bool starting, unsigned components) noe
     const std::vector<std::uint8_t>& bytes, ColorGamut default_gamut);
 
 // JPEG gain-map recognition and shared dispatch. ISO uses the deterministic
-// reader; XMP-only uses the transitional libultrahdr reader until E4c ImageIO
-// corroboration passes.
+// reader; XMP-only uses ImageIO auxiliary metadata and gain pixels.
 [[nodiscard]] bool is_ultrahdr_bytes(const std::vector<std::uint8_t>& bytes);
 [[nodiscard]] DecodedImage decode_legacy_ultrahdr_bytes(
     const std::vector<std::uint8_t>& bytes, ColorGamut default_gamut);

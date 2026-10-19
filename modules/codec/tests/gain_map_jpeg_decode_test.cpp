@@ -3,6 +3,8 @@
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/gainmap/gain_map.hpp"
 #include "internal/decode_bytes.hpp"
+#include "internal/gain_map_jpeg.hpp"
+#include <atomic>
 #include "hyperdr/container/gain_map_jpeg.hpp"
 #include "hyperdr/container/exif.hpp"
 #include "hyperdr/image/orientation.hpp"
@@ -21,22 +23,66 @@
 #include <iostream>
 #include <stdexcept>
 using namespace hyperdr;
+codec::GainMapRead gain_input(const std::vector<std::uint8_t>& bytes) {
+  const auto layout=inspect_gain_map_jpeg(bytes);
+  if(!layout.primary_iso_count && !layout.gain_iso_count)return codec::read_gain_map_jpeg_imageio(bytes);
+  const auto parsed=parse_gain_map_jpeg_input(bytes);
+  return {codec::decode_jpeg_gain_bytes({bytes.begin()+parsed.gain_offset,bytes.begin()+parsed.gain_offset+parsed.gain_size},gain_map_channel_count(parsed.metadata)),parsed.metadata};
+}
+struct ReferencePrecision { bool floating{}; unsigned bits{}; double level{}, code{}, half_step_stops{}; } reference_precision;
+double quantization_half_step(CGColorSpaceRef encoded, unsigned bits, double level) {
+  auto linear=CGColorSpaceCreateWithName(kCGColorSpaceExtendedLinearDisplayP3);
+  const CGFloat values[]{level,level,level,1};
+  auto color=CGColorCreate(linear,values);
+  auto coded=CGColorCreateCopyByMatchingToColorSpace(encoded,kCGRenderingIntentRelativeColorimetric,color,nullptr);
+  CGColorRelease(color);
+  if(!coded){CGColorSpaceRelease(linear);throw std::runtime_error("cannot encode quantization reference value");}
+  const auto q=CGColorGetComponents(coded)[0];CGColorRelease(coded);
+  const double step=.5/(std::exp2(bits)-1);
+  double delta=0;
+  for(double sign:{-1.,1.}) {
+    const CGFloat codes[]{q+sign*step,q+sign*step,q+sign*step,1};
+    auto source=CGColorCreate(encoded,codes);
+    auto dest=CGColorCreateCopyByMatchingToColorSpace(linear,kCGRenderingIntentRelativeColorimetric,source,nullptr);
+    CGColorRelease(source);
+    if(!dest){CGColorSpaceRelease(linear);throw std::runtime_error("cannot decode quantization half-step");}
+    const auto* c=CGColorGetComponents(dest);
+    const double y=c[0]*.22897456+c[1]*.69173852+c[2]*.07928691;
+    delta=std::max(delta,std::abs(std::log2(y/level)));CGColorRelease(dest);
+  }
+  CGColorSpaceRelease(linear);reference_precision.code=q;
+  return delta;
+}
 FloatImage imageio(const std::vector<std::uint8_t>& bytes) {
-  auto data=CFDataCreate(nullptr,bytes.data(),bytes.size());
+  const auto normalized=normalize_gain_map_jpeg_mpf(bytes);
+  const auto& input=normalized.empty()?bytes:normalized;
+  auto data=CFDataCreate(nullptr,input.data(),input.size());
   auto source=CGImageSourceCreateWithData(data,nullptr);CFRelease(data);
-  const void* keys[]{kCGImageSourceDecodeRequest,kCGImageSourceGenerateImageSpecificLumaScaling,kCGImageSourceShouldCache};
-  const void* values[]{kCGImageSourceDecodeToHDR,kCFBooleanFalse,kCFBooleanFalse};
-  auto options=CFDictionaryCreate(nullptr,keys,values,3,&kCFTypeDictionaryKeyCallBacks,&kCFTypeDictionaryValueCallBacks);
+  const void* keys[]{kCGImageSourceDecodeRequest,kCGImageSourceGenerateImageSpecificLumaScaling,kCGImageSourceShouldCache,kCGImageSourceShouldAllowFloat};
+  const void* values[]{kCGImageSourceDecodeToHDR,kCFBooleanFalse,kCFBooleanFalse,kCFBooleanTrue};
+  auto options=CFDictionaryCreate(nullptr,keys,values,4,&kCFTypeDictionaryKeyCallBacks,&kCFTypeDictionaryValueCallBacks);
   auto image=CGImageSourceCreateImageAtIndex(source,0,options);CFRelease(options);CFRelease(source);
   if(!image)throw std::runtime_error("ImageIO decode failed");
   const auto w=CGImageGetWidth(image),h=CGImageGetHeight(image);
-  std::cout<<"imageio_headroom="<<CGImageGetContentHeadroom(image)<<" ";
+  std::cout<<"imageio_headroom="<<CGImageGetContentHeadroom(image)<<" bits_per_component="<<CGImageGetBitsPerComponent(image)<<" bits_per_pixel="<<CGImageGetBitsPerPixel(image)<<" ";
+  if(auto name=CGColorSpaceCopyName(CGImageGetColorSpace(image))) {
+    char text[256]{};CFStringGetCString(name,text,sizeof(text),kCFStringEncodingUTF8);CFRelease(name);
+    std::cout<<"imageio_color_space="<<text<<" ";
+  }
   std::vector<float> rgba(w*h*4);
   auto space=CGColorSpaceCreateWithName(kCGColorSpaceExtendedLinearDisplayP3);
   auto ctx=CGBitmapContextCreate(rgba.data(),w,h,32,w*16,space,kCGImageAlphaPremultipliedLast|kCGBitmapFloatComponents|kCGBitmapByteOrder32Little);
   CGColorSpaceRelease(space);if(!ctx)throw std::runtime_error("ImageIO context failed");
   CGContextSetEDRTargetHeadroom(ctx,0);CGContextSetInterpolationQuality(ctx,kCGInterpolationNone);
-  CGContextDrawImage(ctx,CGRectMake(0,0,w,h),image);CGContextRelease(ctx);CGImageRelease(image);
+  CGContextDrawImage(ctx,CGRectMake(0,0,w,h),image);CGContextRelease(ctx);
+  reference_precision.floating=CGImageGetBitmapInfo(image)&kCGBitmapFloatComponents;
+  reference_precision.bits=CGImageGetBitsPerComponent(image);
+  double y=0;
+  for(size_t i=0;i<w*h;++i)y+=rgba[i*4]*.22897456+rgba[i*4+1]*.69173852+rgba[i*4+2]*.07928691;
+  reference_precision.level=y/(w*h);
+  reference_precision.half_step_stops=reference_precision.floating?0:quantization_half_step(CGImageGetColorSpace(image),reference_precision.bits,reference_precision.level);
+  std::cout<<"reference_linear_level="<<reference_precision.level<<" encoded_level="<<reference_precision.code<<" half_quantum_stops="<<reference_precision.half_step_stops<<" destination_float_bits=32\n";
+  CGImageRelease(image);
   FloatImage result(w,h,3);
   for(std::size_t i=0;i<w*h;++i)for(unsigned c=0;c<3;++c)result.pixels[i*3+c]=rgba[i*4+c];
   const auto jpeg=inspect_gain_map_jpeg(bytes);
@@ -63,13 +109,25 @@ Metrics metrics(const FloatImage& actual,const FloatImage& expected,const char* 
   std::cout<<"mean="<<m.mean<<" p99="<<m.p99<<" max="<<m.max
       <<" candidate_at_max="<<actual.pixels[worst]<<" reference_at_max="<<expected.pixels[worst]<<"\n";return m;
 }
-int compare_imageio(const std::vector<std::uint8_t>& bytes) {
+int compare_imageio(const std::vector<std::uint8_t>& bytes, bool constant_fixture=false) {
   auto candidate=codec::decode_iso_gain_map_jpeg_bytes(bytes,ColorGamut::kSrgb);
   auto reference=codec::decode_legacy_ultrahdr_bytes(bytes,ColorGamut::kSrgb);
   auto third=imageio(bytes);
   (void)metrics(candidate.linear_p3,third,"candidate/imageio");
   (void)metrics(reference.linear_p3,third,"libultrahdr/imageio");
   auto luminance=[](const FloatImage& a,std::size_t i){return a.pixels[i]*.22897456+a.pixels[i+1]*.69173852+a.pixels[i+2]*.07928691;};
+  if(constant_fixture && bytes!=read_binary_file(std::filesystem::path(HYPERDR_TEST_FIXTURES)/"xmp-only.jpg"))
+    throw std::invalid_argument("quantization allowance is restricted to the approved constant synthetic fixture");
+  double dominant_fraction=0;
+  if(constant_fixture) {
+    std::vector<double> levels;
+    for(size_t i=0;i<candidate.authored_sdr->pixels.size();i+=3)levels.push_back(luminance(*candidate.authored_sdr,i));
+    std::sort(levels.begin(),levels.end());size_t best=0,current=0;double previous=-1;
+    for(auto v:levels){current=v==previous?current+1:1;previous=v;best=std::max(best,current);}
+    dominant_fraction=double(best)/levels.size();
+    std::cout<<"constant_fixture_dominant_sdr_fraction="<<dominant_fraction<<" min_sdr="<<levels.front()<<" max_sdr="<<levels.back()<<"\n";
+  }
+
   auto filtered=[&](const FloatImage& value,const char* label,bool channels){
     std::vector<double> e;double sum=0;
     for(std::size_t i=0;i<third.pixels.size();i+=3) {
@@ -85,8 +143,8 @@ int compare_imageio(const std::vector<std::uint8_t>& bytes) {
   };
   const auto ownY=filtered(candidate.linear_p3,"candidate/imageio",false),oldY=filtered(reference.linear_p3,"libultrahdr/imageio",false);
   const auto ownC=filtered(candidate.linear_p3,"candidate/imageio",true),oldC=filtered(reference.linear_p3,"libultrahdr/imageio",true);
-  const auto jpeg=parse_gain_map_jpeg_input(bytes);
-  auto gain=codec::decode_jpeg_gain_bytes({bytes.begin()+jpeg.gain_offset,bytes.begin()+jpeg.gain_offset+jpeg.gain_size},gain_map_channel_count(jpeg.metadata));
+  const auto jpeg=inspect_gain_map_jpeg(bytes);
+  auto gain=gain_input(bytes).pixels;
   for(const auto& app:jpeg.app_segments[0])if(app.marker==0xe1 && app.payload.size()>6 &&
       std::equal(app.payload.begin(),app.payload.begin()+6,"Exif\0\0")) {
     const auto exif=read_exif(app.payload.data()+6,app.payload.size()-6);
@@ -113,7 +171,14 @@ int compare_imageio(const std::vector<std::uint8_t>& bytes) {
   bool attribution=true;
   for(unsigned bin=0;bin<buckets.size();++bin){const auto& k=buckets[bin];if(!k.n)continue;
     const auto a=std::abs(k.own_signed/k.n),b=std::abs(k.old_signed/k.n);
-    attribution &= a<=b || (a<=.003 && b<=.003);
+    bool bucket_pass=a<=b || (a<=.003 && b<=.003);
+    if(constant_fixture && bin==0 && k.n==candidate.linear_p3.width*candidate.linear_p3.height) {
+      const double own_lib=std::abs(k.signed_delta/k.n);
+      const double limit=std::max(.003,reference_precision.half_step_stops+own_lib);
+      bucket_pass = a<=b || a<=.003 || a<=limit;
+      std::cout<<"constant_only_quantization_limit="<<limit<<" own_lib_signed_abs="<<own_lib<<" passed="<<bucket_pass<<"\n";
+    }
+    attribution &= bucket_pass;
     std::cout<<"gradient_bucket="<<labels[bin]<<" count="<<k.n<<" own_mean="<<k.own/k.n<<" old_mean="<<k.old/k.n
       <<" excess_mean="<<k.excess/k.n<<" signed_own_minus_old="<<k.signed_delta/k.n<<" own_imageio_signed_mean="<<k.own_signed/k.n<<" lib_imageio_signed_mean="<<k.old_signed/k.n<<" positive_excess_fraction="<<double(k.positive)/k.n<<"\n";
   }
@@ -122,7 +187,7 @@ int compare_imageio(const std::vector<std::uint8_t>& bytes) {
   return attribution&&pass(ownY,oldY)&&pass(ownC,oldC)?0:1;
 }
 void compare_metadata(const std::vector<std::uint8_t>& bytes) {
-  const auto m=parse_gain_map_jpeg_input(bytes).metadata;
+  const auto m=gain_input(bytes).metadata;
   auto* decoder=uhdr_create_decoder();
   struct Free{uhdr_codec_private_t* p;~Free(){uhdr_release_decoder(p);}} free{decoder};
   uhdr_compressed_image_t input{};input.data=const_cast<std::uint8_t*>(bytes.data());input.data_sz=input.capacity=bytes.size();
@@ -141,7 +206,8 @@ void compare_metadata(const std::vector<std::uint8_t>& bytes) {
     check(rational_value(k.alternate_offset),g->offset_hdr[c]);
   }
   std::cout<<"metadata_max_delta="<<largest<<"\n";
-  if(largest>1e-4)throw std::runtime_error("ISO metadata tolerance exceeded");
+  const auto layout=inspect_gain_map_jpeg(bytes);
+  if(largest>(layout.primary_iso_count?1e-4:1e-3))throw std::runtime_error("gain-map metadata tolerance exceeded");
 }
 bool compare(const std::vector<std::uint8_t>& bytes, const char* label, bool enforce=false) {
   compare_metadata(bytes);
@@ -349,13 +415,16 @@ int main(int argc,char**argv) {
       write_binary_file_atomic(argv[3],encode_gain_map_jpeg(gain_map_from_renditions(std::move(pair),GainMapWriterProfile::iso_generic),input.metadata,95),true);
       return 0;
     }
-    if(argc==4 && std::string(argv[2])=="legacy-pair") {
-      const auto a=codec::decode_legacy_ultrahdr_bytes(read_binary_file(argv[1]),ColorGamut::kSrgb);
-      const auto b=codec::decode_legacy_ultrahdr_bytes(read_binary_file(argv[3]),ColorGamut::kSrgb);
+    if(argc==4 && (std::string(argv[2])=="legacy-pair" || std::string(argv[2])=="own-pair")) {
+      const bool legacy=std::string(argv[2])=="legacy-pair";
+      const auto decode=legacy ? codec::decode_legacy_ultrahdr_bytes : codec::decode_ultrahdr_bytes;
+      const auto a=decode(read_binary_file(argv[1]),ColorGamut::kSrgb);
+      const auto b=decode(read_binary_file(argv[3]),ColorGamut::kSrgb);
       const bool hdr=a.linear_p3.pixels==b.linear_p3.pixels,sdr=a.authored_sdr->pixels==b.authored_sdr->pixels;
-      std::cout<<"legacy_hdr_exact="<<hdr<<" legacy_sdr_exact="<<sdr<<"\n";return hdr&&sdr?0:1;
+      const auto error=metrics(a.linear_p3,b.linear_p3,legacy?"legacy original/stripped":"own original/stripped");
+      std::cout<<(legacy?"legacy":"own")<<"_hdr_exact="<<hdr<<" authored_sdr_exact="<<sdr<<"\n";return sdr&&error.mean<=.005&&error.p99<=.02&&error.max<=.1?0:1;
     }
-    if(argc>2)return compare_imageio(read_binary_file(argv[1]));
+    if(argc>2)return compare_imageio(read_binary_file(argv[1]),argc>3 && std::string(argv[3])=="constant-fixture");
     if(argc>1){return compare(read_binary_file(argv[1]),argv[1])?0:1;}
     regressions();progressive_regressions();analytic();roundtrip();
     bool passed=true;

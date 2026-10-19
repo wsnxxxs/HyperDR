@@ -30,6 +30,8 @@ void usage() {
          "                         [--reference <source-image>]\n"
          "  HyperDR display-curve <reference.heic> <candidate.heic>\n"
          "                         --headroom <stops> [--headroom <stops> ...]\n"
+         "                         (bases are read unclipped, as on input; clamp counts include\n"
+         "                          slightly negative base pixels)\n"
          "  HyperDR thumbnail <image> --output <preview.jpg> [--max-edge <pixels>]\n"
          "                            [--quality <1..100>]\n"
          "                            [--base-only]\n"

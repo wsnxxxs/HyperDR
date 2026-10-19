@@ -16,4 +16,7 @@ with tempfile.TemporaryDirectory(prefix="hyperdr-smoke-") as directory:
         +chunk(b"IDAT",zlib.compress((b"\0"+b"\x60\x90\xb0"*64)*64))+chunk(b"IEND",b""))
     for encoding in ("sdr-jpeg", "sdr-tiff", "iso-gainmap-jpeg", "avif-pq", "avif-hlg"):
         subprocess.run([cli,"convert",str(source),"--output",str(root/encoding),"--encoding",encoding],check=True)
-    print("Five non-HEVC exports passed (including decoder verification)")
+    for encoding, depth in (("adaptive", 8), ("adaptive", 10), ("pq", 10), ("hlg", 10)):
+        subprocess.run([cli,"convert",str(source),"--output",str(root/(encoding+str(depth))),
+                        "--encoding",encoding,"--depth",str(depth)],check=True)
+    print("Eight encodings plus Adaptive10 passed (including decoder verification)")

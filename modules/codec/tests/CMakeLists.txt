@@ -9,7 +9,13 @@ if(HYPERDR_WITH_CODECS)
   # dependency private. Without this the only test that exercises the real
   # codec paths fails to compile, which is how it came to be skipped silently.
   hyperdr_add_test(codec_test LINK HyperDR::codec heif avif PNG::PNG lcms2::lcms2)
+  if(TARGET codec_test)
+    target_include_directories(codec_test PRIVATE ${PROJECT_SOURCE_DIR}/modules/codec/src ${PROJECT_SOURCE_DIR}/modules/container/src)
+  endif()
   hyperdr_add_test(heif_parallel_test LINK HyperDR::codec heif)
+  if(TARGET heif_parallel_test)
+    target_include_directories(heif_parallel_test PRIVATE ${PROJECT_SOURCE_DIR}/modules/codec/src)
+  endif()
   # VideoToolbox HEVC: 77 (skipped) only where no encoder exists at all.
   hyperdr_add_test(hevc_vt_test LINK HyperDR::codec)
   if(TARGET hevc_vt_test)
@@ -18,7 +24,8 @@ if(HYPERDR_WITH_CODECS)
   endif()
   hyperdr_add_test(alpha_decode_test LINK HyperDR::codec heif avif)
   if(TARGET heif_parallel_test)
-    set_tests_properties(heif_parallel_test PROPERTIES SKIP_RETURN_CODE 77)
+    set_tests_properties(heif_parallel_test PROPERTIES SKIP_RETURN_CODE 77
+      ENVIRONMENT "DYLD_INSERT_LIBRARIES=$<TARGET_FILE:capi_test_clock>")
   endif()
 
 
@@ -71,4 +78,18 @@ if(HYPERDR_WITH_CODECS AND HYPERDR_BUILD_TESTS)
     ${PROJECT_SOURCE_DIR}/tests/hevc/check_imageio.py
     --writer-fixtures $<TARGET_FILE:heif_imageio_fixtures> --build-dir ${CMAKE_BINARY_DIR}/heif-imageio)
   set_tests_properties(heif_writer_imageio_test PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
+endif()
+
+if(HYPERDR_WITH_CODECS AND HYPERDR_BUILD_TESTS)
+  add_executable(heif_imageio_renditions heif_imageio_renditions.cpp)
+  target_link_libraries(heif_imageio_renditions PRIVATE HyperDR::codec)
+  target_include_directories(heif_imageio_renditions PRIVATE ${PROJECT_SOURCE_DIR}/modules/codec/src)
+  hyperdr_configure_target(heif_imageio_renditions)
+endif()
+
+if(HYPERDR_WITH_CODECS AND HYPERDR_BUILD_TESTS)
+  add_test(NAME heif_export_imageio_test COMMAND ${Python3_EXECUTABLE}
+    ${PROJECT_SOURCE_DIR}/tests/hevc/check_imageio.py $<TARGET_FILE:HyperDR>
+    --rendition-fixtures $<TARGET_FILE:heif_imageio_renditions> --build-dir ${CMAKE_BINARY_DIR}/heif-imageio)
+  set_tests_properties(heif_export_imageio_test PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
 endif()

@@ -5,6 +5,7 @@
 #include "hyperdr/gainmap/rendition.hpp"
 
 #include <libheif/heif.h>
+#include "hevc/hevc.hpp"
 #include <libheif/heif_items.h>
 #include <libheif/heif_tiling.h>
 
@@ -165,8 +166,8 @@ ImageSnapshot snapshot_image(heif_context* context, heif_image_handle* handle,
   heif_image_tiling tiling{};
   check_heif(heif_image_handle_get_image_tiling(handle, 0, &tiling),
              "read HEIC grid tiling");
-  require(tiling.num_columns == (width + 2047) / 2048 &&
-              tiling.num_rows == (height + 2047) / 2048,
+  require(tiling.num_columns == (width + 511) / 512 &&
+              tiling.num_rows == (height + 511) / 512,
           "HEIC grid tile geometry changed");
   for (std::uint32_t y = 0; y < tiling.num_rows; ++y) {
     for (std::uint32_t x = 0; x < tiling.num_columns; ++x) {
@@ -275,6 +276,7 @@ void compare_files(const std::vector<std::uint8_t>& serial,
                    const std::vector<std::uint8_t>& parallel,
                    std::uint32_t width, std::uint32_t height,
                    bool adaptive, int depth, const std::string& label) {
+  require(serial == parallel, label + " serial/parallel HEIF bytes changed (run with the test clock)");
   const auto before = snapshot_file(serial, width, height, adaptive, depth);
   const auto after = snapshot_file(parallel, width, height, adaptive, depth);
   compare_images(before.primary, after.primary, label + " primary");
@@ -289,7 +291,7 @@ void compare_files(const std::vector<std::uint8_t>& serial,
 }  // namespace
 
 int main() {
-  if (!heif_have_encoder_for_format(heif_compression_HEVC)) {
+  if (!hyperdr::codec::hevc::encoder_caps().main10) {
     std::cout << "HEVC encoder unavailable; tile equivalence skipped\n";
     return 77;
   }

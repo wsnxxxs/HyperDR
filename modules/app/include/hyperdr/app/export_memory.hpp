@@ -20,7 +20,9 @@ struct ExportMemoryEstimate {
     OutputEncoding encoding, int depth, bool raw,
     std::uint32_t sensor_width = 0, std::uint32_t sensor_height = 0,
     unsigned tile_workers = 0, bool retained_renditions = false,
-    std::uint64_t retained_resource_bytes = 0);
+    std::uint64_t retained_resource_bytes = 0,
+    // Pixels of the external gain grid the parser will allocate (0 = none).
+    std::uint64_t external_gain_pixels = 0);
 [[nodiscard]] std::uint64_t export_resource_bytes(const ConvertOptions& options);
 // Zero means that the host could not report its physical memory. A configured
 // limit still applies in that case. The system reserve matches RAW's 512 MiB.

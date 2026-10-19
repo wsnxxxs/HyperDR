@@ -14,6 +14,7 @@
 #include <iterator>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -297,12 +298,82 @@ void test_v2_signed_canonical_sidecar() {
   std::filesystem::remove_all(root);
 }
 
+std::vector<std::uint8_t> bytes_of(const std::string& text) {
+  return {text.begin(), text.end()};
+}
+
+// Export admission sizes the grid from the sidecar before any pixel exists.
+void test_peek_external_gain_grid() {
+  const auto v1 = [](const std::string& size, unsigned long long byte_length,
+                     const std::string& extra = "") {
+    return bytes_of(R"({"gain_grid_size":)" + size + R"(,"metadata_gain_max_stops":3.0,"gain_file":{)"
+                    R"("format":"raw_float32_with_required_json_sidecar","endianness":"little",)"
+                    R"("scale":"normalized_log2_gain_0_to_1","width":)" +
+                    size.substr(1, size.find(',') - 1) + R"(,"height":)" +
+                    size.substr(size.find(',') + 1, size.size() - size.find(',') - 2) +
+                    R"(,"byte_length":)" + std::to_string(byte_length) + extra + "}}");
+  };
+  const std::vector<std::uint8_t> sixteen(16, 0);
+  const auto good = v1("[2,2]", 16);
+  {
+    const auto grid = hyperdr::peek_external_gain_grid(sixteen, good, true);
+    require(grid && grid->width == 2 && grid->height == 2 && !grid->canonical_log2,
+            "a valid v1 sidecar was not sized");
+    const auto parsed = hyperdr::parse_external_gain_map(sixteen, good, true);
+    require(parsed.gain_map.width == grid->width && parsed.gain_map.height == grid->height,
+            "peek and parser disagree on the grid");
+  }
+  require(!hyperdr::peek_external_gain_grid(sixteen, good, false),
+          "a disabled v1 sidecar was sized");
+  require(!hyperdr::peek_external_gain_grid(std::vector<std::uint8_t>(12, 0), good, true),
+          "a gain file of the wrong length was sized");
+  // The hash is not checked here (parse reports it); the grid still is what the parser allocates for.
+  require(hyperdr::peek_external_gain_grid(
+              sixteen, v1("[2,2]", 16, std::string(R"(,"sha256":")") + std::string(64, '0') + "\""), true).has_value(),
+          "a hash mismatch hid the grid");
+  require(!hyperdr::peek_external_gain_grid(sixteen, v1("[4097,4097]", 16), true),
+          "an oversized grid was sized");
+  require(!hyperdr::peek_external_gain_grid(sixteen, v1("[2,2]", 17), true),
+          "a wrong byte_length was sized");
+  for (const char* garbage : {"", "{", "[]", "null", "{\"gain_grid_size\":[2,2]}",
+                              "{\"gain_grid_size\":[0,2]}", "{\"gain_grid_size\":\"2x2\"}"}) {
+    require(!hyperdr::peek_external_gain_grid(sixteen, bytes_of(garbage), true),
+            "a malformed sidecar was sized");
+  }
+  require(!hyperdr::peek_external_gain_grid(sixteen, bytes_of(std::string(100000, '[')), true),
+          "a deeply nested sidecar was sized");
+  std::string binary(512, '\0');
+  for (std::size_t i = 0; i < binary.size(); ++i) binary[i] = static_cast<char>(i * 37U);
+  require(!hyperdr::peek_external_gain_grid(sixteen, bytes_of(binary), true),
+          "binary data was sized");
+  // The v2 contract is recognized and reported as canonical.
+  const auto v2 = bytes_of(R"({"label_contract_id":"hyperdr.apple-gain-label/v2","gain_grid_size":[2,1],)"
+      R"("gain_file":{"format":"raw_float32_with_required_json_sidecar","endianness":"little",)"
+      R"("scale":"signed_log2_gain","width":2,"height":1,"byte_length":8},)"
+      R"("gain_metadata":{"minimum_version":0,"writer_version":0,"flags":64,"use_base_color_space":true,)"
+      R"("backward_direction":false,"common_denominator":false,)"
+      R"("base_headroom":{"numerator":0,"denominator":1000000},)"
+      R"("alternate_headroom":{"numerator":2000000,"denominator":1000000},)"
+      R"("gain_min":{"numerator":-1000000,"denominator":1000000},)"
+      R"("gain_max":{"numerator":2000000,"denominator":1000000},)"
+      R"("gamma":{"numerator":1000000,"denominator":1000000},)"
+      R"("base_offset":{"numerator":0,"denominator":1000000},)"
+      R"("alternate_offset":{"numerator":0,"denominator":1000000}}})");
+  const std::vector<std::uint8_t> eight(8, 0);
+  const auto grid = hyperdr::peek_external_gain_grid(eight, v2, false);
+  require(grid && grid->width == 2 && grid->height == 1 && grid->canonical_log2,
+          "a valid v2 sidecar was not sized");
+  require(hyperdr::parse_external_gain_map(eight, v2, false).gain_map.width == 2,
+          "the v2 test sidecar must parse");
+}
+
 }  // namespace
 
 int main() try {
   try {
     test_external_gain_round_trip();
     test_v2_signed_canonical_sidecar();
+    test_peek_external_gain_grid();
     std::cout << "external gain tests passed\n";
     return 0;
   } catch (const std::exception& error) {

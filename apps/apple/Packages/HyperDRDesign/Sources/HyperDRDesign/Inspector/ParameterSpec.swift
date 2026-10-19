@@ -16,15 +16,21 @@ public struct ParameterSpec: Sendable {
     /// from its centre outwards and marks that point on the track.
     public var origin: Double
     public var format: ParameterFormat
+    /// Set for a parameter that can also be "Auto": a value below the range
+    /// that the control shows as a state of its own instead of a number.
+    public var automatic: ParameterAutomatic?
 
     public init(range: ClosedRange<Double>, step: Double, defaultValue: Double,
-                origin: Double? = nil, format: ParameterFormat = .number(fractionDigits: 2)) {
+                origin: Double? = nil, format: ParameterFormat = .number(fractionDigits: 2),
+                automatic: ParameterAutomatic? = nil) {
         precondition(step > 0 && range.upperBound > range.lowerBound, "empty range or step")
+        precondition(automatic.map { $0.value < range.lowerBound } ?? true, "the automatic value is inside the range")
         self.range = range
         self.step = step
         self.defaultValue = defaultValue
         self.origin = min(max(origin ?? range.lowerBound, range.lowerBound), range.upperBound)
         self.format = format
+        self.automatic = automatic
     }
 
     /// A signed parameter filled from zero, as exposure or tint.
@@ -35,6 +41,20 @@ public struct ParameterSpec: Sendable {
 
     /// Whether the fill starts inside the range rather than at its lower bound.
     public var isCentred: Bool { origin > range.lowerBound }
+
+    // MARK: Automatic
+
+    /// Whether `value` is the automatic state: a value below the range, for a
+    /// parameter that has one.
+    public func isAutomatic(_ value: Double) -> Bool {
+        automatic != nil && value < range.lowerBound
+    }
+
+    /// Where a control leaves Auto from a key press or a VoiceOver step: the
+    /// parameter's own `resume`, else the middle of the range, on the grid.
+    public var resumeValue: Double {
+        snapped(automatic?.resume ?? (range.lowerBound + range.upperBound) / 2)
+    }
 
     // MARK: Values
 
@@ -47,8 +67,9 @@ public struct ParameterSpec: Sendable {
     }
 
     /// `value` moved by `steps` steps (negative for down), snapped and clamped.
+    /// From Auto the first step lands on `resumeValue`, whichever way it goes.
     public func stepped(_ value: Double, by steps: Int) -> Double {
-        snapped(value + Double(steps) * step)
+        isAutomatic(value) ? resumeValue : snapped(value + Double(steps) * step)
     }
 
     /// Position of `value` along the track, 0…1.
@@ -70,12 +91,15 @@ public struct ParameterSpec: Sendable {
 
     // MARK: Text
 
-    /// The readout: "+0.30 EV", "25%".
-    public func formatted(_ value: Double) -> String { format.display(value) }
+    /// The readout: "+0.30 EV", "25%", or "Auto" in the language of `locale`.
+    public func formatted(_ value: Double, locale: Locale = .current) -> String {
+        isAutomatic(value) ? DesignStrings.string("design.slider.auto", bundle: .module, locale: locale) : format.display(value)
+    }
 
     /// The text a value is edited as: the displayed number without its unit
-    /// or grouping, to the step's precision ("0.30", "25").
+    /// or grouping, to the step's precision ("0.30", "25"); empty for Auto.
     public func editableText(_ value: Double) -> String {
+        if isAutomatic(value) { return "" }
         // The fewest decimals that write a step exactly: .25 needs two, .1 one.
         let scaled = step * format.scale
         let digits = (0...6).first { d in
@@ -90,14 +114,39 @@ public struct ParameterSpec: Sendable {
     /// percentage takes 25 for 0.25. Units are ignored ("+0.30 EV" works), a
     /// comma is a decimal point, and the typographic minus and en dash count
     /// as minus. Port of the web's `parseTypedValue`.
+    ///
+    /// A parameter with an Auto state also takes an empty field, "auto" in
+    /// any case and the localized word for it, and returns that state.
     public func parse(_ text: String) -> Double? {
-        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let automatic {
+            if trimmed.isEmpty || trimmed.lowercased() == "auto" || DesignStrings.isAutomaticWord(trimmed) {
+                return automatic.value
+            }
+        }
+        let cleaned = trimmed
             .replacingOccurrences(of: ",", with: ".")
             .replacingOccurrences(of: "\u{2212}", with: "-")
             .replacingOccurrences(of: "\u{2013}", with: "-")
         guard let match = cleaned.firstMatch(of: /[-+]?(?:\d+\.?\d*|\.\d+)/),
               let typed = Double(match.output), typed.isFinite else { return nil }
         return snapped(typed / format.scale)
+    }
+}
+
+/// The "Auto" state of a parameter such as the HDR range: a value below the
+/// range (the engine's -1) that the control shows as a word and a dashed
+/// track, not a number.
+public struct ParameterAutomatic: Sendable, Equatable {
+    /// The stored value that means Auto.
+    public var value: Double
+    /// Where the control goes when it leaves Auto by a key press or a
+    /// VoiceOver step; the middle of the range when nil.
+    public var resume: Double?
+
+    public init(value: Double = -1, resume: Double? = nil) {
+        self.value = value
+        self.resume = resume
     }
 }
 

@@ -21,22 +21,26 @@ final class LocalizationCoverageTests: XCTestCase {
     private static let exportStages = ["preparing", "decode", "process", "processColor", "encode", "verify"]
     private static let unavailableReasons = ["hevc", "main10", "probe", "generic"]
 
-    private typealias Entry = [String: Any]
+    /// A key's text by language, as the app bundle ships it.
+    private typealias Entry = [String: String]
 
+    /// The compiled catalogue in the app that hosts the tests. Reading the
+    /// source `.xcstrings` through `#filePath` instead opens a file under
+    /// ~/Desktop from the sandboxed host, whose first read waits for the
+    /// system's folder-access check (2.4 s alone, over a minute on a busy
+    /// machine) for no gain: the bundle holds exactly what the app ships.
     private func catalogue() throws -> [String: Entry] {
-        // HyperDRPreviewTests/ is next to HyperDR/ in the source tree.
-        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("HyperDR/Resources/Localizable.xcstrings")
-        let object = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]
-        return try XCTUnwrap(object?["strings"] as? [String: Entry])
+        var result: [String: Entry] = [:]
+        for locale in ["en", "zh-Hans"] {
+            let path = try XCTUnwrap(Bundle.main.path(forResource: "Localizable", ofType: "strings", inDirectory: nil,
+                                                      forLocalization: locale), "no \(locale) strings in the app")
+            let table = try XCTUnwrap(NSDictionary(contentsOfFile: path) as? [String: String])
+            for (key, text) in table { result[key, default: [:]][locale] = text }
+        }
+        return result
     }
 
-    private func value(_ entry: Entry, _ locale: String) -> String? {
-        let localizations = entry["localizations"] as? [String: Entry]
-        let unit = localizations?[locale]?["stringUnit"] as? [String: String]
-        guard unit?["state"] == "translated" else { return nil }
-        return unit?["value"]
-    }
+    private func value(_ entry: Entry, _ locale: String) -> String? { entry[locale] }
 
     private func assertTranslated(_ keys: [String], in catalogue: [String: Entry], file: StaticString = #filePath,
                                   line: UInt = #line) {

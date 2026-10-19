@@ -11,6 +11,8 @@ void set_raw_os_build_override(std::string value);
 void set_raw_open_hook(std::function<void()> hook);
 std::string raw_neutral_settings();
 void set_raw_block_hook(std::function<void(unsigned, unsigned)> hook);
+// Called after rendering and at copy checkpoints, before checking cancellation.
+void set_raw_copy_hook(std::function<void(unsigned)> hook);
 }  // namespace hyperdr::testing
 
 namespace hyperdr::codec {

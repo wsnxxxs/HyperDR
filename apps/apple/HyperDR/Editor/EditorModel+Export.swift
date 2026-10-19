@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 import HyperDRKit
 import UniformTypeIdentifiers
 
@@ -105,7 +106,14 @@ extension EditorModel {
         guard destination != nil || preferences.value.saveMode == .folder else { return }
         finishGestureBeforeEdit()
         pendingExportToken = nil
-        export.reset(); export.phase = .preparing; export.startedAt = now(); export.stageAt = export.startedAt
+        let thumbnailFrame = frozenExportThumbnailFrame()
+        deferredExportThumbnailTask?.cancel(); deferredExportThumbnailTask = nil
+        export.reset(); exportThumbnailPersisted = false; exportThumbnailEditGeneration = editGeneration
+        if thumbnailFrame == nil {
+            export.thumbnail = document?.previewError == nil && (currentEditedFrame == nil || exportSummaryThumbnail == .loading) ? .loading : .unavailable
+        }
+        exportThumbnailNeedsDeferred = thumbnailFrame == nil && export.thumbnail == .loading
+        export.phase = .preparing; export.startedAt = now(); export.stageAt = export.startedAt
         let options = effectiveOptions(), snapshot = edit
         let fixedFolder = destination == nil ? preferences.exportFolder.target : nil
         export.destination = destination.map(ExportDestination.file) ?? .folder(label: preferences.exportFolder.label)
@@ -125,7 +133,12 @@ extension EditorModel {
                 let pixels = exportSize.map { Double($0.width) * Double($0.height) } ?? 0
                 export.durations = ExportETA.durations(history: timingHistory, kind: .init(isRAW: photo.formatLabel == "RAW",
                     encoding: snapshot.encoding, isAI: snapshot.aiMode == .optimized, hasFrame: framed, verifies: snapshot.verifies), pixels: pixels)
-                let ticket = try await services.startExport(photo, options: options, frame: frame, destination: destination)
+                let thumbnail = if let thumbnailFrame { await services.sdrThumbnail(of: thumbnailFrame, maxPixelSize: 256) } else { nil as CGImage? }
+                try Task.checkCancellation()
+                if let thumbnail { export.thumbnail = .ready(thumbnail); exportThumbnailPersisted = true }
+                else if thumbnailFrame != nil { export.thumbnail = .unavailable }
+                let ticket = try await services.startExport(photo, options: options, frame: frame, destination: destination, thumbnail: thumbnail)
+                if thumbnailFrame == nil { fillDeferredExportThumbnail() }
                 if export.phase == .preparing { export.phase = .running }
                 var terminal = false
                 for await event in services.exportEvents(ticket.job) {
@@ -174,6 +187,7 @@ extension EditorModel {
         } else if let result {
             export.result = result; export.isResultStale = false; export.saveFailure = failure
             export.failure = nil; export.phase = .succeeded
+            cacheVersionThumbnail(exportThumbnailPersisted ? export.thumbnail : .unavailable, id: result.export)
         } else {
             export.failure = failure ?? UserFacingError(code: "export_failed")
             export.phase = .failed
@@ -223,6 +237,7 @@ extension EditorModel {
                        export.result?.saved?.canReveal == true {
                         result.saved = export.result?.saved
                     }
+                    if export.result?.export != result.export { export.thumbnail = versionThumbnail(result.export) }
                     export.result = result; export.isResultStale = false
                 } else { export.isResultStale = export.result != nil }
                 suggestedFileName = name; timingHistory = timings
@@ -271,6 +286,7 @@ extension EditorModel {
         } else if error.code == "engine_unavailable" || error.code == "internal_error" { publishAlert(error) }
     }
     func prepareForPhotoSwitch() {
+        resetThumbnailsForPhotoSwitch()
         pendingExportToken = nil
         exportMetadataTask?.cancel(); exportMetadataTicket += 1
         cachedFrameKey = nil; cachedExportFrame = nil

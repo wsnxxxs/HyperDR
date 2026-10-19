@@ -215,6 +215,7 @@ public actor SessionStore {
     private let sessionsDirectory: URL
     private let sessionsDevice: dev_t
     typealias OpenExportLeaf = @Sendable (Int32, String, Int32) -> Int32
+    private let beforeThumbnailWrite: @Sendable (Int32) -> Void
     private let openExportLeaf: OpenExportLeaf
     private let exportRoot: SessionExportFile?
     private let cacheDirectory: URL
@@ -246,7 +247,9 @@ public actor SessionStore {
     internal init(configuration: KitConfiguration, formats: InputFormats,
                   decodeCacheMaxAge: TimeInterval, decodeCacheMaxBytes: Int64,
                   access: any SecurityScopedAccess = SystemSecurityScopedAccess(),
-                  openExportLeaf: @escaping OpenExportLeaf = { openat($0, $1, $2) }) {
+                  openExportLeaf: @escaping OpenExportLeaf = { openat($0, $1, $2) },
+                  beforeThumbnailWrite: @escaping @Sendable (Int32) -> Void = { _ in }) {
+        self.beforeThumbnailWrite = beforeThumbnailWrite
         self.openExportLeaf = openExportLeaf
         supportDirectory = configuration.supportDirectory.resolvingSymlinksInPath().standardizedFileURL
         sessionsDirectory = supportDirectory.appendingPathComponent("sessions", isDirectory: true)
@@ -607,7 +610,7 @@ public actor SessionStore {
     }
 
     public func prepareExport(_ id: SessionID, options: [String: JSONValue],
-                              frame: ExportFrameRecord? = nil, key: ExportKey) async throws -> (id: ExportID, directory: URL) {
+                              frame: ExportFrameRecord? = nil, key: ExportKey, thumbnail: ExportThumbnail? = nil) async throws -> (id: ExportID, directory: URL) {
         let exportID = newExportID()
         // Reserve before session lookup suspends: cleanup must not remove the
         // workspace while a source refresh is hashing it.
@@ -619,6 +622,17 @@ public actor SessionStore {
             let pending = PendingExport(id: exportID, options: options, sourceDigest: session.sha256, frame: frame, key: key)
             do {
                 try write(pending, to: folder.appendingPathComponent("pending.json"))
+                if let thumbnail {
+                    do {
+                        let fd = try openExportDirectoryFD(id, export: exportID, rootDescriptor: exportRoot?.descriptor)
+                        defer { Darwin.close(fd) }
+                        beforeThumbnailWrite(fd)
+                        try writeAtomically(thumbnail.jpegData, named: "thumbnail.jpeg", in: fd)
+                    } catch {
+                        Logger(subsystem: "com.hyperdr.HyperDR", category: "Session")
+                            .error("Unable to save export thumbnail: \(error.localizedDescription, privacy: .private)")
+                    }
+                }
                 return (exportID, folder)
             } catch {
                 try? removeExportDirectory(id, export: exportID)
@@ -805,6 +819,29 @@ public actor SessionStore {
             throw HyperDRError(code: "source_missing", message: "The exported file is missing")
         }
         return target
+    }
+
+    /// Reads only the retained version snapshot, never the user's saved copy.
+    public func exportThumbnail(_ id: SessionID, export: ExportID) async -> Data? {
+        guard id.isValid, export.isValid else { return nil }
+        guard loadExportRecords(id).contains(where: { $0.id == export }), let exportRoot,
+              let directory = try? openExportDirectoryFD(id, export: export, rootDescriptor: exportRoot.descriptor) else { return nil }
+        defer { Darwin.close(directory) }
+        let fd = Darwin.openat(directory, "thumbnail.jpeg", O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
+        guard fd >= 0 else { return nil }
+        defer { Darwin.close(fd) }
+        var info = stat()
+        guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
+              info.st_size > 0, info.st_size <= ExportThumbnail.maxByteCount else { return nil }
+        var data = Data(), buffer = [UInt8](repeating: 0, count: 16 * 1024)
+        while data.count <= ExportThumbnail.maxByteCount {
+            let count = Darwin.read(fd, &buffer, min(buffer.count, ExportThumbnail.maxByteCount + 1 - data.count))
+            if count < 0 { if errno == EINTR { continue }; return nil }
+            if count == 0 { break }
+            data.append(contentsOf: buffer.prefix(count))
+        }
+        guard data.count == info.st_size, let thumbnail = try? ExportThumbnail(jpegData: data) else { return nil }
+        return thumbnail.jpegData
     }
 
     func exportFile(_ id: SessionID, export: ExportID) async throws -> SessionExportFile {

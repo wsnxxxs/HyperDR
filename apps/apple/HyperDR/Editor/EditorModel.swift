@@ -36,6 +36,21 @@ import UniformTypeIdentifiers
     var suggestedFileName = ""
     @ObservationIgnored var cachedFrameKey: ExportFrameCacheKey?
     @ObservationIgnored var cachedExportFrame: ExportFrame?
+    var exportSummaryThumbnail: ThumbnailState = .unavailable
+    var versionThumbnails: [String: ThumbnailState] = [:]
+    @ObservationIgnored var thumbnailTrackers: Set<UUID> = []
+    @ObservationIgnored var summaryThumbnailTask: Task<Void, Never>?
+    @ObservationIgnored var summaryThumbnailTicket = 0
+    @ObservationIgnored var summaryThumbnailLastStart: ContinuousClock.Instant?
+    @ObservationIgnored var summaryThumbnailFrame: PreviewFrame?
+    @ObservationIgnored var deferredExportThumbnailTask: Task<Void, Never>?
+    @ObservationIgnored var exportThumbnailEditGeneration: Int?
+    @ObservationIgnored var exportThumbnailNeedsDeferred = false
+    @ObservationIgnored var exportThumbnailPersisted = false
+    @ObservationIgnored var versionThumbnailTask: Task<Void, Never>?
+    @ObservationIgnored var versionThumbnailQueue: [String] = []
+    @ObservationIgnored var versionThumbnailOrder: [String] = []
+    @ObservationIgnored var thumbnailEpoch = 0
     @ObservationIgnored var exportTask: Task<Void, Never>?
     @ObservationIgnored var saveTaskNames: [UUID: String] = [:]
     @ObservationIgnored var saveTasks: [UUID: Task<Void, Never>] = [:]
@@ -227,6 +242,7 @@ import UniformTypeIdentifiers
     }
 
     deinit {
+        summaryThumbnailTask?.cancel(); deferredExportThumbnailTask?.cancel(); versionThumbnailTask?.cancel()
         exportTask?.cancel()
         exportMetadataTask?.cancel()
         lutTask?.cancel()
@@ -492,6 +508,7 @@ import UniformTypeIdentifiers
         editedFrame = nil
         frameRevision &+= 1
         canvas.setImageSize(nil)
+        thumbnailFrameDidChange()
         syncControls()
     }
 
@@ -698,6 +715,7 @@ import UniformTypeIdentifiers
             setRefreshing(false)
             document?.previewError = error
         }
+        thumbnailFrameDidChange()
         syncControls()
     }
 
@@ -766,6 +784,7 @@ import UniformTypeIdentifiers
         referencePresentationTrace = nil; editedPresentationTrace = nil
         referenceFrame = previous.referenceFrame
         editedFrame = previous.editedFrame
+        thumbnailFrameDidChange()
         captureFacts = previous.captureFacts
         frameRevision &+= 1
         canvas.setImageSize(previous.reference || previous.edited ? previous.document?.pixelSize : nil,

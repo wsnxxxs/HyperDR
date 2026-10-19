@@ -1,7 +1,9 @@
+import CoreGraphics
 import AppKit
 import Foundation
 import HyperDREngine
 import HyperDRKit
+import ImageIO
 import UniformTypeIdentifiers
 import os
 
@@ -449,10 +451,26 @@ extension LiveEditorServices {
         guard let record = records[photo.handle] else { throw UserFacingError(code: "session_expired") }
         return record.session.id
     }
-    func startExport(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?, destination: URL?) async throws -> EditorExportTicket {
+    func startExport(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?, destination: URL?, thumbnail: CGImage?) async throws -> EditorExportTicket {
         let id = try exportSession(photo), kit = try await requireKit()
-        let ticket = try await kit.jobs.start(session: id, options: options, frame: frame, destination: destination)
+        let payload = await Task.detached(priority: .utility) {
+            thumbnail.flatMap { try? ExportThumbnail(image: $0) }
+        }.value
+        try Task.checkCancellation()
+        let ticket = try await kit.jobs.start(session: id, options: options, frame: frame, destination: destination, thumbnail: payload)
         return EditorExportTicket(job: ticket.job.rawValue, argv: ticket.argv)
+    }
+    func sdrThumbnail(of frame: PreviewFrame, maxPixelSize: Int) async -> CGImage? {
+        let task = Task.detached(priority: .utility) { try? ExportThumbnail.sdrImage(from: frame, maxPixelSize: maxPixelSize) }
+        return await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+    }
+    func exportThumbnail(_ photo: EditorPhoto, version: String) async -> CGImage? {
+        guard let id = try? exportSession(photo), let kit = try? await requireKit(),
+              let data = await kit.sessions.exportThumbnail(id, export: ExportID(rawValue: version)) else { return nil }
+        return await Task.detached(priority: .utility) {
+            guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil as CGImage? }
+            return CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
+        }.value
     }
     func exportEvents(_ job: String) -> AsyncStream<EditorExportEvent> {
         guard let kit else { return AsyncStream { $0.finish() } }

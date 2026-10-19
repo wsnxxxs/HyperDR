@@ -130,19 +130,19 @@ public actor JobRunner {
     }
 
     public func start(session id: SessionID, options: EditOptions,
-                      frame: ExportFrame? = nil, destination: URL? = nil) async throws -> JobTicket {
+                      frame: ExportFrame? = nil, destination: URL? = nil, thumbnail: ExportThumbnail? = nil) async throws -> JobTicket {
         guard admission == nil else {
             throw HyperDRError(code: "convert_in_progress", message: "An export is already running")
         }
         let token = UUID()
         admission = token
-        let task = Task { try await self.prepare(session: id, options: options, frame: frame, destination: destination, token: token) }
+        let task = Task { try await self.prepare(session: id, options: options, frame: frame, destination: destination, thumbnail: thumbnail, token: token) }
         preparation = task
         defer { if admission == token || admission == nil { preparation = nil } }
         return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
     }
 
-    private func prepare(session id: SessionID, options: EditOptions, frame: ExportFrame?, destination: URL?, token: UUID) async throws -> JobTicket {
+    private func prepare(session id: SessionID, options: EditOptions, frame: ExportFrame?, destination: URL?, thumbnail: ExportThumbnail?, token: UUID) async throws -> JobTicket {
         var pending: ExportID?
         do {
             let (photo, lease) = try await sessions.exportSource(id)
@@ -167,7 +167,7 @@ public actor JobRunner {
             try Task.checkCancellation()
             let frameRecord = try frame.map { try ExportFrameRecord($0) }
             let key = try ExportKey(request: request, frame: frameRecord)
-            let version = try await sessions.prepareExport(id, options: options.values, frame: frameRecord, key: key)
+            let version = try await sessions.prepareExport(id, options: options.values, frame: frameRecord, key: key, thumbnail: thumbnail)
             pending = version.id
             try Task.checkCancellation()
             try request.setCommand("output", .string(version.directory.path))

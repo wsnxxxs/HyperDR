@@ -6,8 +6,6 @@ import HyperDREngine
 /// What the open photo told the model about itself.
 struct PhotoSource: Equatable {
     var domain: InputDomain?
-    /// An HDR source's own control values (its identity rendering).
-    var unadjusted: [String: Double]?
     var colorSource: String?
     var hasCaptureMetadata = false
 }
@@ -158,8 +156,7 @@ extension EditorModel {
     }
 
     func defaultsForCurrentEncoding() -> EditSnapshot {
-        EditSnapshot(EditBaseline.initial(encoding: edit.encoding, domain: source.domain,
-                                          unadjusted: source.unadjusted))
+        EditSnapshot(EditBaseline.initial(encoding: edit.encoding))
     }
 
     // MARK: - Processing mode, format, input colour
@@ -197,7 +194,8 @@ extension EditorModel {
         clampForEncoding(from: previous.encoding)
         // Only the range in use is worth a notice: aiHdrRange with the model on, hdrRange otherwise.
         let inUse = edit.aiMode == .optimized ? "aiHdrRange" : "hdrRange"
-        if (edit.controls[inUse] ?? 0) < (previous.controls[inUse] ?? 0) {
+        // Automatic (negative) never counts as narrowed: it follows the format by itself.
+        if let now = edit.controls[inUse], now >= 0, now < (previous.controls[inUse] ?? 0) {
             notice = .rangeClamped(maxStops: EditBaseline.maxRange(for: id))
         }
         recordStep(from: previous, action: action)
@@ -211,27 +209,11 @@ extension EditorModel {
         for key in ["hdrRange", "aiHdrRange"] where gesture?.key != key {
             guard let control = controlValues[key], var value = edit.controls[key] else { continue }
             let range = ControlRules.range(control.spec, encoding: new, domain: source.domain)
-            if key == "hdrRange", let identity = hdrIdentityRange(at: old), value == identity,
-               let restored = hdrIdentityRange(at: new) {
-                // An HDR source still at its own rendering follows the
-                // format's ceiling both ways (Web `controls.js`).
-                value = restored
-            }
             if !(control.spec.allowsAuto && value < 0) {
                 value = min(range.upperBound, max(range.lowerBound, value))
             }
             edit.controls[key] = value
         }
-    }
-
-    /// An HDR source's own range at this encoding, while brightness and
-    /// strength are still the source's own; nil otherwise.
-    private func hdrIdentityRange(at encoding: String) -> Double? {
-        guard source.domain == .hdr || source.domain == .dual,
-              let unadjusted = source.unadjusted, let range = unadjusted["hdrRange"],
-              edit.controls["brightness"] == unadjusted["brightness"],
-              edit.controls["hdrStrength"] == unadjusted["hdrStrength"] else { return nil }
-        return min(range, EditBaseline.maxRange(for: encoding))
     }
 
     /// Untagged RGB only (`colorSource == "assumed"`); RAW hides it.
@@ -353,12 +335,12 @@ extension EditorModel {
         hideMask()
         lastSubmitWasDraft = false
         referenceOptions = EditDefaults.reference(encoding: encoding,
-            workflow: EditDefaults.initial(encoding: encoding, sourceDomain: nil, unadjusted: nil))
+            workflow: EditDefaults.initial(encoding: encoding))
         shownReferenceOptions = referenceOptions
-        source = PhotoSource(domain: reference.source.domain, unadjusted: reference.unadjusted,
+        source = PhotoSource(domain: reference.source.domain,
                              colorSource: reference.source.colorSource,
                              hasCaptureMetadata: reference.hasCaptureMetadata)
-        edit = EditSnapshot(EditBaseline.initial(encoding: encoding, preview: reference))
+        edit = EditSnapshot(EditBaseline.initial(encoding: encoding))
         let models = photoModels()
         if !models.contains(where: { $0.id == edit.selectedModel && $0.isEnabled }) {
             let table = services.modelTable()
@@ -386,7 +368,7 @@ extension EditorModel {
         invalidateDetails()
         hideMask()
         source = PhotoSource()
-        edit = EditSnapshot(EditDefaults.initial(encoding: runEncoding, sourceDomain: nil, unadjusted: nil))
+        edit = EditSnapshot(EditDefaults.initial(encoding: runEncoding))
         lastJob = nil
         displayedAIGain = nil
         readyGain = nil

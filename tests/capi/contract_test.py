@@ -285,6 +285,49 @@ def synthetic_dng(path, focal_length=False):
     path.write_bytes(b"II" + struct.pack("<HIH", 42, 8, len(fields)) + entries + long(0) + overflow + pixels)
 
 
+SCHEMA_DEFAULTS = {item["key"]: item["default"] for item in json.loads(
+    Path(__file__).resolve().parents[2].joinpath("schema", "settings.json").read_text())["settings"]}
+# Panel key -> canonical setting for the values the panel can leave out.
+PANEL_KEYS = {"hdrStrength": ("gain_strength", "--gain-strength"), "brightness": ("exposure_bias", "--exposure-bias"),
+              "contrast": ("contrast", "--contrast"), "vibrance": ("vibrance", "--vibrance"),
+              "expansionStart": ("expansion_start", "--expansion-start"),
+              "areaCoverage": ("area_coverage", "--area-coverage")}
+
+def d1_defaults(options, settings, argv):
+    """The frozen Python output with D1's one set of defaults applied.
+
+    A value the panel leaves out is the engine schema's default (the frozen
+    output said 0.4 / 0.6 / 2.5 and so on); an absent `hdrRange` is automatic
+    headroom capped at the schema's `headroom_max`. The model's recipe is fixed
+    and is not a default. Returns the expected settings, the expected argv and
+    the gamut flags the command line now always prints.
+    """
+    settings, argv = dict(settings), list(argv)
+    def put(flag, value):
+        text = json.dumps(value) if not isinstance(value, float) else repr(value).rstrip("0").rstrip(".")
+        argv[argv.index(flag) + 1] = text
+    if not options.get("_model_mode"):
+        for edit_key, (key, flag) in PANEL_KEYS.items():
+            if edit_key not in options:
+                settings[key] = SCHEMA_DEFAULTS[key]
+                if flag in argv:
+                    put(flag, SCHEMA_DEFAULTS[key])
+        if "hdrRange" not in options:
+            settings["headroom"] = SCHEMA_DEFAULTS["headroom"]
+            settings["headroom_max"] = SCHEMA_DEFAULTS["headroom_max"]
+            if "--headroom" in argv:
+                put("--headroom-max", SCHEMA_DEFAULTS["headroom_max"])
+                argv[argv.index("--headroom") + 1] = SCHEMA_DEFAULTS["headroom"]
+    gamut = [("--color-gamut", "color_gamut")]
+    if settings["encoding"].startswith("sdr-"):
+        gamut.append(("--output-gamut", "output_gamut"))
+    for flag, _ in gamut:
+        while flag in argv:
+            position = argv.index(flag)
+            del argv[position:position + 2]
+    return settings, argv, gamut
+
+
 class EngineContract(unittest.TestCase):
     def setUp(self):
         self.engine = Handle()
@@ -825,8 +868,16 @@ class EngineContract(unittest.TestCase):
                             filtered.append(argv[index])
                             index += 1
                     argv = filtered
+                    expected, argv, gamut_flags = d1_defaults(case["options"], expected, argv)
                     self.assertEqual(settings, expected)
-                    self.assertEqual(json.loads(result(LIB.hyperdr_command_line, normalized)), argv)
+                    actual = json.loads(result(LIB.hyperdr_command_line, normalized))
+                    # The command line always carries the gamuts (the frozen one
+                    # printed them only when the panel sent them).
+                    for flag, key in gamut_flags:
+                        position = actual.index(flag)
+                        self.assertEqual(actual[position + 1], expected[key])
+                        del actual[position:position + 2]
+                    self.assertEqual(actual, argv)
 
     def test_removed_raw_options_and_ignored_highlight_control(self):
         # Deleted controls cannot reach an engine entry through canonical
@@ -1262,9 +1313,61 @@ class EngineContract(unittest.TestCase):
                                 destination / "sample-hyperdr.jpg", report_path)
                             self.assertEqual(report["settings"], cli_report["settings"])
                             self.assertAlmostEqual(report["settings"]["contrast"],
-                                contrast if contrast is not None else 1 if has_profile else 1.08)
+                                contrast if contrast is not None else SCHEMA_DEFAULTS["contrast"])
                             self.assertAlmostEqual(report["settings"]["vibrance"],
-                                vibrance if vibrance is not None else 0 if has_profile else .12)
+                                vibrance if vibrance is not None else SCHEMA_DEFAULTS["vibrance"])
+
+    def test_every_entry_point_shares_the_schema_defaults(self):
+        # D1: the engine schema is the only place a default is written down.
+        # An omitted panel key, a bare request and a bare CLI run all give it.
+        normalized = json.loads(result(LIB.hyperdr_normalize_options, b"{}"))
+        normalized.pop("command")
+        shared = set(normalized) & set(SCHEMA_DEFAULTS)
+        self.assertTrue({"contrast", "vibrance", "gain_strength", "headroom", "headroom_max",
+                         "exposure_bias", "expansion_start", "area_coverage"} <= shared)
+        for key in shared:
+            with self.subTest(key=key):
+                self.assertEqual(normalized[key], SCHEMA_DEFAULTS[key])
+        self.assertEqual(SCHEMA_DEFAULTS["headroom"], "auto")
+        # The native model keeps its fixed recipe, but its strength is the panel's hdrStrength.
+        model = json.loads(result(LIB.hyperdr_normalize_options, encoded({"_model_mode": True, "hdrStrength": .65})))
+        self.assertEqual(model["gain_strength"], .65)
+        self.assertEqual((model["contrast"], model["vibrance"], model["exposure_bias"]), (1, 0, 0))
+        # A number fixes the headroom; a negative one asks for automatic again.
+        fixed = json.loads(result(LIB.hyperdr_normalize_options, encoded({"hdrRange": 2.5})))
+        self.assertEqual((fixed["headroom"], fixed["headroom_max"]), (2.5, 2.5))
+        automatic = json.loads(result(LIB.hyperdr_normalize_options, encoded({"hdrRange": -1})))
+        self.assertEqual((automatic["headroom"], automatic["headroom_max"]),
+                         (SCHEMA_DEFAULTS["headroom"], SCHEMA_DEFAULTS["headroom_max"]))
+        arguments = json.loads(result(LIB.hyperdr_command_line, result(
+            LIB.hyperdr_normalize_options, encoded({"input": "/a.jpg", "output": "/o", "report": "/o/r.json"}))))
+        self.assertEqual(arguments[arguments.index("--headroom") + 1], "auto")
+        # HLG keeps its 2.3 stop ceiling: automatic headroom is capped there, a larger number is refused.
+        hlg = json.loads(result(LIB.hyperdr_normalize_options, encoded({"encoding": "hlg"})))
+        self.assertEqual(hlg["headroom"], "auto")
+        with self.assertRaises(AssertionError):
+            result(LIB.hyperdr_normalize_options, encoded({"encoding": "hlg", "hdrRange": 2.4}))
+        if not self.capabilities["codecs"]:
+            return
+        with tempfile.TemporaryDirectory(prefix="hyperdr-shared-defaults-") as temporary:
+            root = Path(temporary)
+            source = root / "sample.png"
+            png(source, 128, 96)
+            for encoding, extension in (("sdr-jpeg", "jpg"), ("adaptive", "heic"), ("hlg", "heic")):
+                with self.subTest(encoding=encoding):
+                    destination, report_path = root / encoding, root / (encoding + ".json")
+                    edit = {"encoding": encoding, "input": str(source),
+                            "output": str(destination), "report": str(report_path)}
+                    request = json.loads(result(LIB.hyperdr_normalize_options, encoded(edit)))
+                    request["command"]["overwrite"] = True
+                    # The bare CLI run takes every default from the same schema.
+                    report, cli_report = self.compare_export(request,
+                        ["convert", str(source), "--output", str(destination), "--encoding", encoding,
+                         "--report", str(report_path)],
+                        destination / ("sample-hyperdr." + extension), report_path)
+                    # The panel picks a bit depth by encoding; the CLI says it on its own flag.
+                    self.assertEqual({k: v for k, v in report["settings"].items() if k != "depth"},
+                                     {k: v for k, v in cli_report["settings"].items() if k != "depth"})
 
     def test_normalized_decimal_exports_match_cli(self):
         if not self.capabilities["codecs"]:

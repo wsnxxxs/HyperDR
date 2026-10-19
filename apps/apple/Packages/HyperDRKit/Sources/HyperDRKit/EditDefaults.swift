@@ -2,9 +2,9 @@ import Foundation
 import HyperDREngine
 
 /// Default and reference settings for a photo, and the preview tier rule.
-/// Values come from `EditControls` and `EditChoices`, which equal the
-/// panel-v1 adapter's defaults; keys the adapter fills itself
-/// (`contrast`, `vibrance`, `quality`) are omitted.
+/// Values come from `EditControls` and `EditChoices`, which read the engine
+/// schema's defaults; keys the adapter fills itself (`contrast`, `vibrance`,
+/// `quality`) are omitted.
 public enum EditDefaults {
     /// The highest `hdrRange` / `aiHdrRange` each output format accepts
     /// (batch4 §2.2). Unknown ids fall back to Adaptive, like `initial`.
@@ -38,14 +38,6 @@ public enum EditDefaults {
         return Encoding(id: "adaptive", maxRange: maxRanges["adaptive"]!)
     }
 
-    private static func isSdrEncoding(_ id: String) -> Bool {
-        id == "sdr-jpeg" || id == "sdr-tiff"
-    }
-
-    private static func isHDRSource(_ domain: String?) -> Bool {
-        domain == "display-referred-hdr" || domain == "dual-rendition"
-    }
-
     private static func defaults(encoding id: String) -> [String: JSONValue] {
         // Settings without a ControlSpec or ChoiceSpec yet: switches (M3
         // gives them their own value objects) and resource selections.
@@ -62,28 +54,10 @@ public enum EditDefaults {
         return values
     }
 
-    private static func applySourceIdentity(_ values: inout [String: JSONValue],
-                                            encoding: Encoding,
-                                            unadjusted: [String: Double]?) {
-        guard let unadjusted else { return }
-        for (key, value) in unadjusted { values[key] = .number(value) }
-        let range = unadjusted["hdrRange"] ?? values["hdrRange"]?.numberValue ?? encoding.maxRange
-        values["hdrRange"] = .number(min(range, encoding.maxRange))
-    }
-
-    /// Defaults for a newly opened photo. HDR/dual sources keep their own
-    /// rendering when the engine supplied `unadjusted` control values.
-    public static func initial(encoding id: String, sourceDomain: String?,
-                               unadjusted: [String: Double]?) -> EditOptions {
-        let active = encoding(id)
-        var values = defaults(encoding: active.id)
-        if isSdrEncoding(active.id) { values["brightness"] = .number(0) }
-        values["hdrRange"] = .number(min(2.5, active.maxRange))
-        values["aiHdrRange"] = .number(min(-1, active.maxRange))
-        if isHDRSource(sourceDomain) {
-            applySourceIdentity(&values, encoding: active, unadjusted: unadjusted)
-        }
-        return EditOptions(values)
+    /// Defaults for a newly opened photo. They are the schema's, the same for
+    /// every kind of source: an HDR photo already shows as it is with them.
+    public static func initial(encoding id: String) -> EditOptions {
+        EditOptions(defaults(encoding: encoding(id).id))
     }
 
     private static func neutralSettings(encoding id: String) -> [String: JSONValue] {

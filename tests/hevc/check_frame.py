@@ -74,7 +74,11 @@ def check_frames(cli, reader, probe, directory, export, source):
     cases += [("neutral", "no-shadow", hdr_jpeg, []), ("gallery", "v3", hdr_jpeg, []), ("saturated", "v3", hdr_jpeg, []),
               ("gallery", "v3-model", sdr_jpeg, ["--ai-model", "research-cnn-v1"])]
     # Lead-approved E5 gate quality; product default remains 90.
-    quality = ["--quality", "95"]
+    # The frozen photo baselines were measured with the recipe that was the default
+    # before D1 (contrast 1.08, vibrance .12, auto headroom up to 4, expansion start
+    # .48, area coverage .35); it is passed explicitly so a default can move.
+    quality = ["--quality", "95", "--contrast", "1.08", "--vibrance", "0.12", "--headroom-max", "4",
+               "--expansion-start", "0.48", "--area-coverage", "0.35"]
     baseline = json.loads(Path(__file__).with_name("frame_photo_baseline.json").read_text())
     baseline_seen = set()
     plain_cache = {}

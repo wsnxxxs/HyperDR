@@ -22,7 +22,7 @@ import HyperDRDesign
         services.missingCaptureFields = missingCaptureFields
         services.preview = EditorPreview(pixelSize: PixelSize(width: 6000, height: 4000),
             source: SourceSummary(domain: domain, colorName: "sRGB", degradationReasons: [], colorSource: "assumed"),
-            hasGain: true, unadjusted: nil, hasCaptureMetadata: hasCaptureMetadata)
+            hasGain: true, hasCaptureMetadata: hasCaptureMetadata)
         let model = EditorModel(services: services)
         model.open([URL(fileURLWithPath: "/fixtures/DSC00123.jpg")])
         await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }

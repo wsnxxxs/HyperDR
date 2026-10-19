@@ -17,7 +17,7 @@ private func makeSession() -> PhotoSession {
 
 private func makeRequest(_ mutate: (inout [String: JSONValue]) -> Void = { _ in },
                          maxEdge: Int = 960, region: PreviewRegion? = nil) -> PreviewRequest {
-    var values = EditDefaults.initial(encoding: "adaptive", sourceDomain: nil, unadjusted: nil).values
+    var values = EditDefaults.initial(encoding: "adaptive").values
     mutate(&values)
     return PreviewRequest(session: makeSession().id, options: EditOptions(values),
         maxEdge: maxEdge, region: region)
@@ -76,7 +76,7 @@ private func code(_ body: () throws -> Void) -> String? {
         let resolver = try makeResolver()
         let session = makeSession()
         func reference(_ lens: Bool) throws -> EngineRequest {
-            var workflow = EditDefaults.initial(encoding: "adaptive", sourceDomain: nil, unadjusted: nil)
+            var workflow = EditDefaults.initial(encoding: "adaptive")
             workflow["lensCorrection"] = .bool(lens)
             return try resolver.resolve(PreviewRequest(session: session.id,
                 options: EditDefaults.reference(encoding: "adaptive", workflow: workflow),

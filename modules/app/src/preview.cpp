@@ -1,5 +1,4 @@
 #include "hyperdr/app/preview.hpp"
-#include "hyperdr/app/source_defaults.hpp"
 #include "hyperdr/foundation/hash.hpp"
 #include "hyperdr/foundation/json.hpp"
 #include "hyperdr/foundation/rational.hpp"
@@ -21,7 +20,6 @@ std::string compact_preview_metadata(const GainMapResult& result,
   const float denominator = rational_value(result.metadata.alternate_headroom) - base_headroom;
   const float weight = std::abs(denominator) < 1e-8F ? 0.0F
       : std::clamp((result.headroom_stops - base_headroom) / denominator, 0.0F, 1.0F);
-  const auto defaults = source_defaults(input.domain);
   json::Writer writer;
   writer.begin_object()
       .member("schema", "hyperdr.native-preview/v2")
@@ -50,14 +48,7 @@ std::string compact_preview_metadata(const GainMapResult& result,
       .end_object()
       .member("hasCaptureMetadata", hasCaptureMetadata)
       .member("inputHeadroomStops", std::log2(input.headroom))
-      .member("status", decode.degraded ? "degraded" : "ok")
-      .begin_object("unadjusted")
-      .member("brightness", defaults.brightness_ev)
-      .member("hdrStrength", defaults.hdr_strength)
-      .member("hdrRange", defaults.hdr_range_stops)
-      .member("areaCoverage", defaults.area_coverage)
-      .member("lutStrength", defaults.lut_strength)
-      .end_object();
+      .member("status", decode.degraded ? "degraded" : "ok");
   if (input.content_peak_nits) writer.member("inputContentPeakNits", *input.content_peak_nits);
   if(decode.raw) writer.begin_object("raw").member("supported",true)
       .member("lensCorrectionSupported",decode.raw->lens_correction_supported)

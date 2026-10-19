@@ -85,6 +85,14 @@ struct Setting {
 [[nodiscard]] const Setting* find_setting_by_key(std::string_view key);
 [[nodiscard]] const Setting* find_setting_by_flag(std::string_view flag);
 
+// The value a setting has when nothing sets it: what a default-constructed
+// ConvertOptions reads back. Numbers that the options store as floats come back
+// as the shortest decimal that names the same float (0.6, not 0.6000000238), so
+// the schema, the panel adapter and the app all write the same digits.
+[[nodiscard]] json::Value setting_default(const Setting& setting);
+// The shortest decimal that parses back to the same float, as a number.
+[[nodiscard]] double shortest_float_value(float value);
+
 // Converts one command-line token into a canonical value, reporting the
 // setting's own name and range on failure.
 [[nodiscard]] json::Value parse_setting_text(const Setting& setting,

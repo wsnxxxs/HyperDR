@@ -1,8 +1,8 @@
 {
-  "reason": "E4c intentionally replaces ISO input with our JPEG/ISO reader and XMP-only input with ImageIO auxiliary translation; both share pixel-centred reconstruction and ICC-managed native-space gain application. The constant XMP fixture export SHA remains unchanged after the ImageIO switch.",
+  "reason": "D1: iso-rgb.jpg re-recorded for the one set of defaults (contrast 1, vibrance 0, auto headroom capped at 3, expansion start .25, area coverage .6). E4c intentionally replaces ISO input with our JPEG/ISO reader and XMP-only input with ImageIO auxiliary translation; both share pixel-centred reconstruction and ICC-managed native-space gain application. The constant XMP fixture export SHA remains unchanged after the ImageIO switch.",
   "cases": {
     "iso-mono.jpg": "02c655db8980150d8362afc253688a9ea5daba4725ea4b00c5ba247aaeba7e89",
-    "iso-rgb.jpg": "ea38d25ce21bfab18237db5eb756d7c6f1da9638de17c6997f16ab8352583413",
+    "iso-rgb.jpg": "6a7e46019dddc4f3111d244f6fa3e321fa31f07649da05504319048f44effbb3",
     "xmp-and-iso.jpg": "2f51ef40c06a275c0e1695b2beca6c6b0664edc4a406fd556ad3af800208b26e",
     "xmp-only.jpg": "2f51ef40c06a275c0e1695b2beca6c6b0664edc4a406fd556ad3af800208b26e"
   }

@@ -24,7 +24,7 @@ private let engineMapping: [(panel: String, engine: String, equal: Bool)] = [
     ("lutStrength", "lut_strength", true),
     ("brightness", "exposure_bias", true),
     ("hdrStrength", "gain_strength", false),
-    ("hdrRange", "headroom_max", true),
+    ("hdrRange", "headroom_max", false),   // below 0 is automatic headroom
     ("modelStrength", "gain_strength", false),   // sent as hdrStrength in model mode
     ("expansionStart", "expansion_start", true),
     ("areaCoverage", "area_coverage", true),
@@ -83,12 +83,12 @@ private func bytes(_ request: EngineRequest) throws -> Data {
     @Test func adapterSuppliedSettingsAreNotControls() {
         for key in ["highlightRecovery", "contrast", "vibrance"] {
             #expect(EditControls.byKey[key] == nil && EditChoices.byKey[key] == nil, "\(key)")
-            #expect(EditDefaults.initial(encoding: "pq", sourceDomain: nil, unadjusted: nil)[key] == nil)
+            #expect(EditDefaults.initial(encoding: "pq")[key] == nil)
         }
     }
 
     @Test func defaultsComeFromTheTables() {
-        let initial = EditDefaults.initial(encoding: "pq", sourceDomain: nil, unadjusted: nil)
+        let initial = EditDefaults.initial(encoding: "pq")
         for spec in EditControls.all {
             #expect(initial[spec.key] == .number(spec.defaultValue), "\(spec.key)")
         }
@@ -96,6 +96,26 @@ private func bytes(_ request: EngineRequest) throws -> Data {
             #expect(initial[spec.key] == .string(spec.defaultID), "\(spec.key)")
         }
         #expect(EditDefaults.controlKeys == EditControls.all.map(\.key))
+    }
+
+    /// D1: every mapped Kit default is the engine schema's own value.
+    @Test func defaultsEqualTheSchemaDefaults() throws {
+        let schema = try Engine.schema()
+        func schemaDefault(_ key: String) throws -> JSONValue {
+            let setting = try #require(schema.settings.first { $0.key == key })
+            return try #require(setting.default, "\(key)")
+        }
+        for (panel, key, _) in engineMapping where panel != "hdrRange" {
+            let spec = try #require(EditControls.byKey[panel])
+            let expected = try schemaDefault(key)
+            #expect(JSONValue.number(spec.defaultValue) == expected, "\(panel) vs \(key)")
+        }
+        for (panel, key) in choiceMapping {
+            let spec = try #require(EditChoices.byKey[panel])
+            let expected = try schemaDefault(key)
+            #expect(JSONValue.string(spec.defaultID) == expected, "\(panel) vs \(key)")
+        }
+        #expect(try schemaDefault("headroom") == .string("auto"))
     }
 
     @Test func rangesAndChoicesStayInsideTheEngineSchema() throws {
@@ -107,10 +127,17 @@ private func bytes(_ request: EngineRequest) throws -> Data {
             if equal {
                 #expect(spec.range == minimum...maximum, "\(panel) vs \(key)")
             } else {
-                #expect(minimum <= spec.range.lowerBound && spec.range.upperBound <= maximum,
+                // hdrRange's one state below the numeric range is automatic.
+                #expect((spec.allowsAuto || minimum <= spec.range.lowerBound) && spec.range.upperBound <= maximum,
                         "\(panel) outside \(key)")
             }
         }
+        // hdrRange: the schema's numeric range, with one state below it for automatic headroom.
+        let headroom = try #require(engine["headroom_max"])
+        let hdrRange = try #require(EditControls.byKey["hdrRange"])
+        let headroomMaximum = try #require(headroom.maximum)
+        #expect(hdrRange.allowsAuto && hdrRange.range == -1...headroomMaximum)
+        #expect(hdrRange.defaultValue < 0, "the schema's headroom default is automatic")
         #expect(Set(EditControls.all.map(\.key)) ==
                 Set(engineMapping.map(\.panel)).union(aiPostFlags.keys), "a control has no engine mapping")
         #expect(Set(EditChoices.all.map(\.key)) == Set(choiceMapping.keys), "a choice has no engine mapping")
@@ -137,7 +164,7 @@ private func bytes(_ request: EngineRequest) throws -> Data {
             _ = try Engine.normalize(["encoding": .string(encoding), "hdrRange": .number(ceiling)])
             _ = try Engine.normalize(["encoding": .string(encoding), "_model_mode": .bool(true),
                                       "aiHdrRange": .number(ceiling)])
-            let initial = EditDefaults.initial(encoding: encoding, sourceDomain: nil, unadjusted: nil)
+            let initial = EditDefaults.initial(encoding: encoding)
             let initialRange = try #require(initial["hdrRange"]?.numberValue)
             #expect(initialRange <= ceiling, "\(encoding)")
         }
@@ -152,33 +179,19 @@ private func bytes(_ request: EngineRequest) throws -> Data {
 
     /// Writing a Kit default and leaving the key out give byte-identical
     /// requests, for every key `EditDefaults.initial` writes, per output
-    /// format, manual and model mode. Binds the tables to the adapter.
+    /// format, manual and model mode, with no exceptions (D1: one set of
+    /// defaults, and no `command.*_explicit` flags). Binds the tables to the adapter.
     @Test func writingADefaultEqualsLeavingItOut() throws {
-        // Two deliberate exceptions, both unchanged values (D1 unifies them):
-        // - colorGamut / outputGamut: same settings, but an explicit choice is
-        //   recorded in `command.*_explicit` and becomes a CLI flag.
-        // - brightness under SDR output: Kit starts at 0, the adapter at 0.6.
         for encoding in encodings {
             for model in [false, true] {
                 var minimal: [String: JSONValue] = ["encoding": .string(encoding)]
                 if model { minimal["useModel"] = .bool(true) }
                 let omitted = try resolved(minimal)
-                let initial = EditDefaults.initial(encoding: encoding, sourceDomain: nil, unadjusted: nil)
+                let initial = EditDefaults.initial(encoding: encoding)
                 for (key, value) in initial.values where key != "encoding" {
                     let written = try resolved(minimal.merging([key: value]) { old, _ in old })
                     let label = "\(encoding) model=\(model) \(key)=\(value)"
-                    switch key {
-                    case "colorGamut", "outputGamut":
-                        #expect(written.settings == omitted.settings, "\(label)")
-                        var command = written.command
-                        command[key == "colorGamut" ? "color_explicit" : "output_explicit"] = .bool(false)
-                        #expect(command == omitted.command, "\(label)")
-                    case "brightness" where !model && (encoding == "sdr-jpeg" || encoding == "sdr-tiff"):
-                        #expect(written.settings["exposure_bias"] == .number(0))
-                        #expect(omitted.settings["exposure_bias"] == .number(0.6))
-                    default:
-                        #expect(try bytes(written) == bytes(omitted), "\(label)")
-                    }
+                    #expect(try bytes(written) == bytes(omitted), "\(label)")
                 }
                 // The settings left out on purpose are the adapter's values.
                 for (key, value) in ["highlightRecovery": JSONValue.string("blend"), "contrast": .number(1),
@@ -209,6 +222,10 @@ private func bytes(_ request: EngineRequest) throws -> Data {
                 try normalize(key, spec.range.lowerBound - spec.step, model: true)
             }
         }
+        // Numbers above the ceiling are refused; any negative number is automatic.
+        let ceiling = try #require(EditControls.byKey["hdrRange"]).range.upperBound
+        #expect(throws: (any Error).self) { try normalize("hdrRange", ceiling + 0.1, model: false) }
+        try normalize("hdrRange", -0.5, model: false)
         for (panel, _, equal) in engineMapping where equal {
             let spec = try #require(EditControls.byKey[panel])
             #expect(throws: (any Error).self, "\(panel) below its range") {

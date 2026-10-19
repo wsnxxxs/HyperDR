@@ -8,13 +8,11 @@ import XCTest
 @MainActor final class EditingModelTests: XCTestCase {
     private let url = URL(fileURLWithPath: "/fixtures/a.jpg")
 
-    private func opened(domain: InputDomain = .sdr, tagged: Bool = false,
-                        identity: [String: Double]? = nil) async -> (EditorModel, FakeEditorServices, UndoManager) {
+    private func opened(domain: InputDomain = .sdr, tagged: Bool = false) async -> (EditorModel, FakeEditorServices, UndoManager) {
         let services = FakeEditorServices(openDelay: .zero, previewDelay: .milliseconds(1))
         services.preview = EditorPreview(pixelSize: PixelSize(width: 6000, height: 4000),
             source: SourceSummary(domain: domain, colorName: "sRGB", degradationReasons: [],
-                                  colorSource: tagged ? "icc" : "assumed"), hasGain: true,
-            unadjusted: identity)
+                                  colorSource: tagged ? "icc" : "assumed"), hasGain: true)
         let model = EditorModel(services: services)
         let undo = UndoManager()
         model.attach(undoManager: undo)
@@ -199,17 +197,21 @@ import XCTest
         XCTAssertNil(model.notice, "with the model on, lowering the unused manual range is not news")
     }
 
-    func testSourceIdentityStaysUnquantizedAndTracksFormatCeilings() async {
-        let identity = ["brightness": 0.0, "hdrStrength": 1.0, "hdrRange": 3.80731]
-        let (model, _, _) = await opened(domain: .hdr, identity: identity)
-        XCTAssertEqual(model.control("hdrRange").value, 3)
-        model.selectEncoding("pq")
-        XCTAssertEqual(model.control("hdrRange").value, 3.80731)
-        XCTAssertEqual(model.control("hdrRange").defaultValue, 3.80731)
-        XCTAssertEqual(model.outputCeilingStops, 3.80731)
+    /// D1: an HDR source needs no values of its own; the one set of defaults
+    /// (automatic headroom) already shows it as it is, and follows the format.
+    func testHDRSourceStartsAutomaticAndFollowsFormatCeilings() async {
+        let (model, _, _) = await opened(domain: .hdr)
+        XCTAssertEqual(model.control("hdrRange").value, -1)
+        XCTAssertTrue(model.control("hdrRange").isAuto)
+        XCTAssertEqual(model.control("hdrRange").defaultValue, -1)
+        XCTAssertEqual(model.control("brightness").value, 0)
+        model.selectEncoding("hlg")
+        XCTAssertEqual(model.control("hdrRange").value, -1, "automatic is not clamped to a number")
+        XCTAssertEqual(model.control("hdrRange").range.upperBound, 2.3)
+        XCTAssertNil(model.notice, "automatic never counts as a narrowed range")
         model.adjust("hdrRange", to: 3.2)
         model.resetControl("hdrRange")
-        XCTAssertEqual(model.control("hdrRange").value, 3.80731)
+        XCTAssertEqual(model.control("hdrRange").value, -1)
     }
 
     func testAIReusesGainAndRecomputesForInputColorAndRestoresWithWorkflow() async {
@@ -405,7 +407,7 @@ extension EditingModelTests {
         model.undo()
         XCTAssertEqual(model.control("brightness").value, 0.9)
         model.undo()
-        XCTAssertEqual(model.control("brightness").value, 0.6)
+        XCTAssertEqual(model.control("brightness").value, 0)
         model.attach(undoManager: nil)
         XCTAssertFalse(undo.groupsByEvent)
         XCTAssertFalse(undo.canUndo)
@@ -466,12 +468,11 @@ extension EditingModelTests {
         model.setWorkflow(.colorOnly)
         XCTAssertEqual(model.outputCeilingStops,0)
         XCTAssertNil(model.maskKey)
-        let (hdr,_,_) = await opened(domain:.hdr,identity:["brightness":0,"hdrStrength":1,"hdrRange":3.80731])
+        let (hdr,_,_) = await opened(domain:.hdr)
         hdr.selectEncoding("pq")
-        XCTAssertEqual(hdr.control("hdrRange").defaultValue,3.80731)
+        XCTAssertEqual(hdr.control("hdrRange").defaultValue,-1)
         hdr.selectEncoding("hlg")
-        XCTAssertEqual(hdr.control("hdrRange").defaultValue,2.3)
-        XCTAssertEqual(hdr.outputCeilingStops,2.3)
+        XCTAssertEqual(hdr.control("hdrRange").range.upperBound,2.3)
     }
 }
 
@@ -496,7 +497,7 @@ extension EditingModelTests {
         model.redo(firstResponder:text)
         XCTAssertEqual(text.string,"hello")
         model.undo(firstResponder:NSResponder())
-        XCTAssertEqual(model.control("brightness").value,0.6)
+        XCTAssertEqual(model.control("brightness").value,0)
         text.isFieldEditor = true
         XCTAssertTrue(EditorModel.routesUndoToText(text))
         model.undo(firstResponder:text)

@@ -122,9 +122,12 @@ struct CaptureMetadata {
 
 struct LookOptions {
   LookMode mode{LookMode::kPhotographic};
-  float contrast{1.08F};
-  float vibrance{0.12F};
-  float headroom_max_stops{4.0F};
+  // The defaults are the one set of values every entry point shares (CLI, C ABI,
+  // the panel adapter, the app): neutral appearance, and the HDR parameters
+  // measured in docs/research/d1-defaults.md.
+  float contrast{1.0F};
+  float vibrance{0.0F};
+  float headroom_max_stops{3.0F};
   // Explicit photographic style: controls diffuse gain, headroom bias,
   // base clarity and highlight colour. The panel pins this to zero;
   // gain_strength alone controls the intensity of its HDR alternate.
@@ -137,10 +140,11 @@ struct LookOptions {
   float toe_end{0.08F};
   float toe_output_ratio{2.0F / 3.0F};
   // Begin the HDR-only transition in the upper-middle display range. The old
-  // 0.72 knee confined useful gain to a tiny fraction of real photographs.
-  float shoulder_start{0.48F};
+  // 0.72 knee confined useful gain to a tiny fraction of real photographs, and
+  // the D1 measurements found 0.25 clips the least highlight and uses the most gain.
+  float shoulder_start{0.25F};
   float positive_exposure_limit_ev{1.5F};
-  float diffuse_gain_floor{0.35F};
+  float diffuse_gain_floor{0.6F};
 };
 
 // Rejects out-of-range creative controls before anything is decoded or

@@ -14,7 +14,7 @@ import HyperDRDesign
         let services = FakeEditorServices(openDelay: .zero, previewDelay: .milliseconds(1))
         services.preview = EditorPreview(pixelSize: PixelSize(width: 6000, height: 4000),
             source: SourceSummary(domain: domain, colorName: "sRGB", degradationReasons: [],
-                                  colorSource: tagged ? "icc" : "assumed"), hasGain: true, unadjusted: nil)
+                                  colorSource: tagged ? "icc" : "assumed"), hasGain: true)
         let model = EditorModel(services: services)
         model.open([url])
         await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }

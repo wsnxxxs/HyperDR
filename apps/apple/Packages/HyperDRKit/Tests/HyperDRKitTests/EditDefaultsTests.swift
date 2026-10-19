@@ -45,6 +45,19 @@ private func loadReference() throws -> WebReference {
 /// request byte.
 private let adapterSupplied: Set<String> = ["contrast", "vibrance"]
 
+/// D1 deliberately differs from the frozen Web defaults (removed with the Web
+/// front end): neutral brightness for every format, the schema's HDR strength
+/// and area coverage, automatic headroom, and no values of an HDR source's own.
+private func d1Defaults(_ settings: [String: JSONValue]) -> [String: JSONValue] {
+    var settings = settings
+    settings["brightness"] = .number(SchemaDefaults.number("exposure_bias"))
+    settings["hdrStrength"] = .number(SchemaDefaults.number("gain_strength"))
+    settings["areaCoverage"] = .number(SchemaDefaults.number("area_coverage"))
+    settings["lutStrength"] = .number(SchemaDefaults.number("lut_strength"))
+    settings["hdrRange"] = .number(-1)
+    return settings
+}
+
 private func withoutAdapterSupplied(_ settings: [String: JSONValue]) -> [String: JSONValue] {
     // R2 intentionally removes the Web reference's external RAW vocabulary.
     let removed: Set<String> = ["highlightRecovery", "rawProfile", "rawProfileName", "rawLook", "rawLookName", "lensProfileName"]
@@ -75,10 +88,9 @@ private func renamed(_ settings: [String: JSONValue]) -> [String: JSONValue] {
         #expect(reference.domains.count == 5)
         #expect(reference.initial.count == 80)
         for entry in reference.initial {
-            let actual = EditDefaults.initial(encoding: renamed(entry.encoding),
-                sourceDomain: entry.sourceDomain, unadjusted: entry.unadjusted)
-            #expect(actual.values == withoutAdapterSupplied(renamed(entry.settings)),
-                "initial mismatch: \(entry.encoding) \(entry.sourceDomain ?? "nil") unadjusted=\(entry.unadjusted != nil)")
+            let actual = EditDefaults.initial(encoding: renamed(entry.encoding))
+            #expect(actual.values == d1Defaults(withoutAdapterSupplied(renamed(entry.settings))),
+                "initial mismatch: \(entry.encoding) \(entry.sourceDomain ?? "nil")")
         }
     }
 
@@ -105,13 +117,26 @@ private func renamed(_ settings: [String: JSONValue]) -> [String: JSONValue] {
                 reference.imageAdjustmentKeys.filter { !adapterSupplied.contains($0) && $0 != "highlightRecovery" }.sorted())
         #expect(adjustments["encoding"] == nil)
         #expect(adjustments["colorGamut"] == nil)
-        #expect(adjustments["hdrStrength"] == .number(0.4))
+        #expect(adjustments["hdrStrength"] == reference.reference.first?.workflow["hdrStrength"])
     }
 
-    @Test func nilDomainMatchesUnknownDomain() {
-        let unknown = EditDefaults.initial(encoding: "adaptive", sourceDomain: "unknown", unadjusted: nil)
-        let missing = EditDefaults.initial(encoding: "adaptive", sourceDomain: nil, unadjusted: nil)
-        #expect(unknown == missing)
+    /// One set of defaults: nothing about the source changes them, and they are the schema's.
+    @Test func defaultsAreTheSchemasForEverySource() throws {
+        let schema = try Engine.schema()
+        let initial = EditDefaults.initial(encoding: "adaptive")
+        for (panel, key) in [("brightness", "exposure_bias"), ("hdrStrength", "gain_strength"),
+                             ("expansionStart", "expansion_start"), ("areaCoverage", "area_coverage"),
+                             ("lutStrength", "lut_strength"), ("quality", "quality")] {
+            let setting = try #require(schema.settings.first { $0.key == key })
+            #expect(initial[panel] == setting.default, "\(panel) vs \(key)")
+        }
+        // Automatic headroom is the schema's default: `headroom` "auto", capped at `headroom_max`.
+        #expect(schema.settings.first { $0.key == "headroom" }?.default == .string("auto"))
+        #expect(initial["hdrRange"] == .number(-1))
+        for encoding in ["sdr-jpeg", "pq", "hlg"] {
+            #expect(EditDefaults.initial(encoding: encoding)["brightness"] == .number(0), "\(encoding)")
+            #expect(EditDefaults.initial(encoding: encoding)["hdrRange"] == .number(-1), "\(encoding)")
+        }
     }
 
     @Test func editOptionsEncodeAsAFlatObject() throws {

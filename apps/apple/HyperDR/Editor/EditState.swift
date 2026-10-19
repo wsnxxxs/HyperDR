@@ -89,13 +89,9 @@ nonisolated struct EditSnapshot: Equatable, Sendable {
 nonisolated enum EditBaseline {
     static func isSDR(_ encoding: String) -> Bool { encoding == "sdr-jpeg" || encoding == "sdr-tiff" }
 
-    static func initial(encoding: String, domain: InputDomain?,
-                        unadjusted: [String: Double]?) -> EditOptions {
-        EditDefaults.initial(encoding: encoding, sourceDomain: domain?.rawValue, unadjusted: unadjusted)
-    }
-
-    static func initial(encoding: String, preview: EditorPreview) -> EditOptions {
-        initial(encoding: encoding, domain: preview.source.domain, unadjusted: preview.unadjusted)
+    /// The schema's defaults, the same for every kind of source.
+    static func initial(encoding: String) -> EditOptions {
+        EditDefaults.initial(encoding: encoding)
     }
 
     /// The highest hdrRange / aiHdrRange the encoding accepts.

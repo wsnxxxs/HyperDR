@@ -83,6 +83,53 @@ private final class Events: @unchecked Sendable {
 }
 
 @Suite(.serialized) struct ABIContractTests {
+    /// The frozen Python output with D1's one set of defaults applied.
+    static func d1Defaults(_ options: [String: JSONValue], settings: [String: JSONValue], argv: [String]) throws
+        -> (settings: [String: JSONValue], argv: [String], gamuts: [(String, String)]) {
+        let schema = try Engine.schema()
+        func schemaDefault(_ key: String) throws -> JSONValue {
+            let setting = try #require(schema.settings.first { $0.key == key })
+            return try #require(setting.default)
+        }
+        func text(_ value: JSONValue) -> String {
+            if case .string(let text) = value { return text }
+            if case .number(let number) = value {
+                return number == number.rounded() ? String(Int(number)) : String(number)
+            }
+            return ""
+        }
+        var settings = settings, argv = argv
+        func put(_ flag: String, _ value: JSONValue) {
+            if let position = argv.firstIndex(of: flag) { argv[position + 1] = text(value) }
+        }
+        if options["_model_mode"] != .bool(true) {
+            let panel: [(String, String, String)] = [
+                ("hdrStrength", "gain_strength", "--gain-strength"), ("brightness", "exposure_bias", "--exposure-bias"),
+                ("contrast", "contrast", "--contrast"), ("vibrance", "vibrance", "--vibrance"),
+                ("expansionStart", "expansion_start", "--expansion-start"),
+                ("areaCoverage", "area_coverage", "--area-coverage")]
+            for (edit, key, flag) in panel where options[edit] == nil {
+                let value = try schemaDefault(key)
+                settings[key] = value
+                put(flag, value)
+            }
+            if options["hdrRange"] == nil {
+                settings["headroom"] = try schemaDefault("headroom")
+                settings["headroom_max"] = try schemaDefault("headroom_max")
+                put("--headroom-max", settings["headroom_max"]!)
+                put("--headroom", settings["headroom"]!)
+            }
+        }
+        var gamuts = [("--color-gamut", "color_gamut")]
+        if case .string(let encoding)? = settings["encoding"], encoding.hasPrefix("sdr-") {
+            gamuts.append(("--output-gamut", "output_gamut"))
+        }
+        for (flag, _) in gamuts {
+            while let position = argv.firstIndex(of: flag) { argv.removeSubrange(position...position + 1) }
+        }
+        return (settings, argv, gamuts)
+    }
+
     @Test func allPanelGoldensAndAdapterProvenance() throws {
         struct Golden: Decodable {
             let options: [String: JSONValue]
@@ -114,9 +161,21 @@ private final class Events: @unchecked Sendable {
                 if removed.contains(original[index]) { index += 2 }
                 else { argv.append(original[index]); index += 1 }
             }
+            // D1 deliberately differs from the frozen output (removed with P2c): a key
+            // the panel leaves out takes the schema's default, and the command line
+            // always carries the gamuts.
+            let defaults = try Self.d1Defaults(golden.options, settings: settings ?? [:], argv: argv)
+            settings = defaults.settings
+            argv = defaults.argv
             #expect(request.settings == settings)
             #expect(request.adapter == "panel-v1")
-            #expect(try Engine.commandLine(request) == argv)
+            var actual = try Engine.commandLine(request)
+            for (flag, key) in defaults.gamuts {
+                let position = try #require(actual.firstIndex(of: flag))
+                #expect(.string(actual[position + 1]) == settings?[key], "\(flag)")
+                actual.removeSubrange(position...position + 1)
+            }
+            #expect(actual == argv)
             for key in ["input", "output", "region"] {
                 try request.setCommand(key, .string("changed"))
                 #expect(request.adapter == "panel-v1")

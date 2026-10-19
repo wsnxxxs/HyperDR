@@ -104,7 +104,7 @@ private func fakeSession(_ format: InputFormat = .jpeg) -> PhotoSession {
 }
 
 private func request(_ session: PhotoSession, contrast: Double = 1.0) -> PreviewRequest {
-    var values = EditDefaults.initial(encoding: "adaptive", sourceDomain: nil, unadjusted: nil).values
+    var values = EditDefaults.initial(encoding: "adaptive").values
     values["contrast"] = .number(contrast)
     return PreviewRequest(session: session.id, options: EditOptions(values),
         maxEdge: 128, purpose: .edit)
@@ -505,7 +505,7 @@ private actor BlockingCloseRenderer: PreviewRenderSession {
             try await kit.previews.attach(session)
             let probe = try await kit.engine.probe(url)
             let value = PreviewRequest(session: session.id,
-                options: EditDefaults.initial(encoding: "adaptive", sourceDomain: nil, unadjusted: nil),
+                options: EditDefaults.initial(encoding: "adaptive"),
                 maxEdge: 64, purpose: .reference)
             let first = try await kit.previews.render(value)
             #expect(first.frame.metadata.sourceWidth == probe.width, "\(path) width")
@@ -541,7 +541,7 @@ private actor BlockingCloseRenderer: PreviewRenderSession {
         let session = try await kit.sessions.open(source)
         try await kit.previews.attach(session)
         func reference(lens: Bool) async throws -> PreviewResult {
-            var workflow = EditDefaults.initial(encoding: "adaptive", sourceDomain: nil, unadjusted: nil)
+            var workflow = EditDefaults.initial(encoding: "adaptive")
             workflow["lensCorrection"] = .bool(lens)
             return try await kit.previews.render(PreviewRequest(session: session.id,
                 options: EditDefaults.reference(encoding: "adaptive", workflow: workflow),
@@ -917,7 +917,7 @@ private actor BlockingCloseRenderer: PreviewRenderSession {
         let photo = try await kit.sessions.open(source)
         try await kit.previews.attach(photo)
         let value = PreviewRequest(session: photo.id,
-            options: EditDefaults.initial(encoding: "adaptive", sourceDomain: nil, unadjusted: nil),
+            options: EditDefaults.initial(encoding: "adaptive"),
             maxEdge: 64, purpose: .edit)
         let before = try await kit.previews.render(value)
         #expect(!before.fromCache)

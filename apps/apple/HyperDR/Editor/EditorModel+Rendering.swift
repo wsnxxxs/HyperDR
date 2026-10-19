@@ -38,7 +38,9 @@ extension EditorModel {
             let value = control("aiHdrRange").value
             return value < 0 ? currentEditedFrame?.metadata.headroomStops ?? 0 : value
         }
-        return control("hdrRange").value
+        // Automatic headroom is whatever the engine settled on for this photo.
+        let value = control("hdrRange").value
+        return value < 0 ? currentEditedFrame?.metadata.headroomStops ?? 0 : value
     }
 
     var canvasComposition: CanvasComposition? {

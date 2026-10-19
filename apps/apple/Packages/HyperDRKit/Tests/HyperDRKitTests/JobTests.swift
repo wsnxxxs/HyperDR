@@ -791,7 +791,7 @@ private final class BlockingJobGate: @unchecked Sendable {
     @Test func resolvedKeysIgnoreDisplayMetadataAndTemporaryPaths() async throws {
         let env = try JobEnvironment(), photo = try await env.photo(), runner = env.runner()
         let base = try await runner.exportKey(session: photo.id, options: EditOptions())
-        let defaults: [String: JSONValue] = ["brightness": .number(0.6)]
+        let defaults: [String: JSONValue] = ["brightness": .number(0)]
         let explicit = try await runner.exportKey(session: photo.id, options: EditOptions(defaults))
         #expect(explicit == base)
         #expect(try await runner.exportKey(session: photo.id, options: EditOptions(["lutName": .string("Label")])) == base)

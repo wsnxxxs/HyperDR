@@ -11,8 +11,11 @@ private actor CountingGainRenderer: PreviewRenderSession {
     private(set) var requests: [EngineRequest] = []
     private(set) var cancellations = 0
     private let delay: Duration
+    private let firstGate: TestStepGate?
 
-    init(delay: Duration = .zero) { self.delay = delay }
+    init(delay: Duration = .zero, firstGate: TestStepGate? = nil) {
+        self.delay = delay; self.firstGate = firstGate
+    }
 
     func renderFrame(_ request: EngineRequest) async throws -> PreviewFrame {
         throw HyperDRError(code: "internal_error", message: "not used")
@@ -21,7 +24,12 @@ private actor CountingGainRenderer: PreviewRenderSession {
     func modelGain(_ request: EngineRequest) async throws -> Data {
         requests.append(request)
         let index = requests.count
-        do { try await Task.sleep(for: delay) } catch { cancellations += 1; throw error }
+        do {
+            if index == 1, let firstGate {
+                await firstGate.wait(releaseOnCancel: true)
+                try Task.checkCancellation()
+            } else { try await Task.sleep(for: delay) }
+        } catch { cancellations += 1; throw error }
         return Data("gain-\(index)".utf8)
     }
 
@@ -58,12 +66,13 @@ private final class SourceDigest: Sendable {
     func replace(with value: String) { digest.withLock { $0 = value } }
 }
 
-private func waitUntil(_ condition: @Sendable () async -> Bool) async throws {
-    for _ in 0..<500 {
-        if await condition() { return }
-        try await Task.sleep(for: .milliseconds(5))
+private func gainEventually(timeout: Duration, _ condition: @Sendable () async -> Bool) async -> Bool {
+    let deadline = ContinuousClock.now + timeout
+    while ContinuousClock.now < deadline {
+        if await condition() { return true }
+        try? await Task.sleep(for: .milliseconds(2))
     }
-    Issue.record("timed out waiting")
+    return await condition()
 }
 
 private let base = EditDefaults.initial(encoding: "adaptive", sourceDomain: nil, unadjusted: nil)
@@ -223,14 +232,16 @@ private func untaggedPNG(at url: URL) throws {
 
     /// Detaching cancels an inference in flight instead of waiting for it.
     @Test func detachCancelsTheGainInFlight() async throws {
-        let renderer = CountingGainRenderer(delay: .seconds(10))
+        let gate = TestStepGate()
+        defer { gate.release() }
+        let renderer = CountingGainRenderer(firstGate: gate)
         let photo = photo()
         let service = try service(photo) { _ in renderer }
         try await service.attach(photo)
         let work = Task { try await service.modelGain(session: photo.id, options: base) }
-        try await waitUntil { await renderer.requests.count == 1 }
-        let elapsed = await ContinuousClock().measure { await service.detach(photo.id) }
-        #expect(elapsed < .seconds(2))
+        try #require(await gainEventually(timeout: .seconds(10)) { gate.entered })
+        await service.detach(photo.id)
+        #expect(gate.cancelled)
         #expect(await renderer.cancellations == 1)
         await #expect(throws: (any Error).self) { try await work.value }
     }
@@ -238,41 +249,52 @@ private func untaggedPNG(at url: URL) throws {
     /// Replacing the source cancels the old computation, and the new key
     /// carries the new digest.
     @Test func replacingTheSourceCancelsTheGainInFlight() async throws {
-        let renderer = CountingGainRenderer(delay: .seconds(10))
+        let gate = TestStepGate()
+        defer { gate.release() }
+        let renderer = CountingGainRenderer(firstGate: gate)
         let source = SourceDigest()
         let service = try service(provider: { source.current }) { _ in renderer }
         try await service.attach(source.current)
         let work = Task { try await service.modelGain(session: source.current.id, options: base) }
-        try await waitUntil { await renderer.requests.count == 1 }
+        try #require(await gainEventually(timeout: .seconds(10)) { gate.entered })
         source.replace(with: "digest-b")
-        var key: ModelGainKey?
-        let elapsed = try await ContinuousClock().measure {
-            key = try await service.modelGainKey(session: source.current.id, options: base)
-        }
-        #expect(elapsed < .seconds(2))
+        let key = try await service.modelGainKey(session: source.current.id, options: base)
+        #expect(gate.cancelled)
         #expect(await renderer.cancellations == 1)
         await #expect(throws: (any Error).self) { try await work.value }
-        #expect(key?.sourceDigest == "digest-b")
+        #expect(key.sourceDigest == "digest-b")
         await service.detach(source.current.id)
     }
 
     /// A caller sharing a computation retries when the caller that started
     /// it is cancelled.
-    @Test func aFollowerRetriesWhenTheLeaderIsCancelled() async throws {
-        let renderer = CountingGainRenderer(delay: .milliseconds(300))
+    @Test(.timeLimit(.minutes(1)), arguments: [false, true])
+    func aFollowerRetriesWhenTheLeaderIsCancelled(leaderFinishesFirst: Bool) async throws {
+        let gate = TestStepGate()
+        defer { gate.release() }
+        let renderer = CountingGainRenderer(firstGate: gate)
         let photo = photo()
         let service = try service(photo) { _ in renderer }
         try await service.attach(photo)
         let leader = Task { try await service.modelGain(session: photo.id, options: base) }
-        try await waitUntil { await renderer.requests.count == 1 }
+        defer { leader.cancel() }
+        try #require(await gainEventually(timeout: .seconds(10)) { gate.entered })
         let follower = Task { try await service.modelGain(session: photo.id, options: base) }
-        try await Task.sleep(for: .milliseconds(50))
-        leader.cancel()
+        defer { follower.cancel() }
+        try #require(await gainEventually(timeout: .seconds(10)) { await service.modelGainFollowerCount == 1 })
+        if leaderFinishesFirst {
+            gate.release()
+            #expect(try await leader.value.packet == Data("gain-1".utf8))
+            leader.cancel()
+        } else {
+            leader.cancel()
+            await #expect(throws: (any Error).self) { try await leader.value }
+        }
         let result = try await follower.value
         #expect(!result.fromCache)
-        #expect(result.packet == Data("gain-2".utf8))
-        #expect(await renderer.requests.count == 2)
-        await #expect(throws: (any Error).self) { try await leader.value }
+        #expect(result.packet == Data("gain-\(leaderFinishesFirst ? 1 : 2)".utf8))
+        #expect(await renderer.requests.count == (leaderFinishesFirst ? 1 : 2))
+        #expect(await renderer.cancellations == (leaderFinishesFirst ? 0 : 1))
         await service.detach(photo.id)
     }
 

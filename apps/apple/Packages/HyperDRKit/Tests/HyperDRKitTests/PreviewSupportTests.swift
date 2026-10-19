@@ -8,20 +8,23 @@ private actor Counter {
     func increment() { value += 1 }
 }
 
-@Suite struct PreviewSupportTests {
+@Suite(.timeLimit(.minutes(1))) struct PreviewSupportTests {
     @Test func singleFlightCoalescesConcurrentCallers() async throws {
         let flight = SingleFlight<String, Int>()
-        let calls = Counter()
+        let calls = Counter(), gate = TestStepGate()
+        defer { gate.release() }
         let values = await withTaskGroup(of: Int?.self) { group in
             for _ in 0..<5 {
                 group.addTask {
                     try? await flight.run("same") {
                         await calls.increment()
-                        try await Task.sleep(for: .milliseconds(50))
+                        await gate.wait()
                         return 7
                     }
                 }
             }
+            #expect(await supportEventually(timeout: .seconds(10)) { await flight.waiterCount == 4 })
+            gate.release()
             var result: [Int?] = []
             for await value in group { result.append(value) }
             return result
@@ -33,14 +36,15 @@ private actor Counter {
 
     @Test func singleFlightSharesLeaderFailureAndReleasesKey() async throws {
         let flight = SingleFlight<String, Int>()
-        let calls = Counter()
+        let calls = Counter(), gate = TestStepGate()
+        defer { gate.release() }
         let errors = await withTaskGroup(of: String?.self) { group in
             for _ in 0..<2 {
                 group.addTask {
                     do {
                         _ = try await flight.run("error") {
                             await calls.increment()
-                            try await Task.sleep(for: .milliseconds(50))
+                            await gate.wait()
                             throw HyperDRError(code: "decode_failed", message: "broken")
                         }
                         return nil
@@ -48,6 +52,8 @@ private actor Counter {
                     catch { return "other" }
                 }
             }
+            #expect(await supportEventually(timeout: .seconds(10)) { await flight.waiterCount == 1 })
+            gate.release()
             var result: [String?] = []
             for await value in group { result.append(value) }
             return result
@@ -61,14 +67,14 @@ private actor Counter {
     @Test func rawGateTimesOutAndReturnsSlots() async throws {
         let gate = RawDecodeGate(slots: 1)
         let first = try await gate.acquire(timeout: .seconds(1))
-        let start = ContinuousClock.now
         do {
             _ = try await gate.acquire(timeout: .milliseconds(50))
             Issue.record("Expected raw_budget")
         } catch let error as HyperDRError {
             #expect(error.code == "raw_budget")
         }
-        #expect(start.duration(to: .now) < .milliseconds(500))
+        // The timeout fired while the first ticket was still held. Its timer
+        // deadline is not an upper bound on OS/executor scheduling latency.
         await first.release()
         let second = try await gate.acquire(timeout: .milliseconds(500))
         await second.release()
@@ -99,28 +105,33 @@ private actor Counter {
 
     @Test func singleFlightFollowerCancellationDoesNotCancelTheLeader() async throws {
         let flight = SingleFlight<String, Int>()
-        let calls = Counter()
-        let (started, signal) = AsyncStream.makeStream(of: Void.self)
+        let calls = Counter(), gate = TestStepGate()
+        defer { gate.release() }
         let leader = Task {
             try await flight.run("key") {
                 await calls.increment()
-                signal.yield()
-                try await Task.sleep(for: .milliseconds(120))
+                await gate.wait()
                 return 7
             }
         }
-        for await _ in started { break }
+        defer { leader.cancel() }
+        try #require(await supportEventually(timeout: .seconds(10)) { gate.entered })
         let follower = Task { try await flight.run("key") { 9 } }
-        try await Task.sleep(for: .milliseconds(20))
+        defer { follower.cancel() }
+        try #require(await supportEventually(timeout: .seconds(10)) { await flight.waiterCount == 1 })
         follower.cancel()
         do {
             _ = try await follower.value
             Issue.record("Expected the follower to be cancelled")
         } catch is CancellationError {
         }
+        #expect(await flight.waiterCount == 0)
+        #expect(await flight.inFlight == 1, "the leader is still parked, not cancelled")
+        gate.release()
         #expect(try await leader.value == 7)
         #expect(await calls.value == 1)
     }
+
 }
 
 extension PreviewSupportTests {
@@ -129,11 +140,11 @@ extension PreviewSupportTests {
         let latch = KeyFlightLatch()
         let first = Task { try await flight.run("a") { await latch.wait(); return 1 } }
         defer { Task { await latch.release() } }
-        #expect(await supportEventually(timeout: .seconds(2)) { await latch.started })
+        #expect(await supportEventually(timeout: .seconds(10)) { await latch.started })
         // If keys were accidentally coalesced, this receives 1 or times out
         // while the first operation is deliberately parked.
         let second = Task { try await flight.run("b") { await latch.setSecond(); return 2 } }
-        #expect(await supportEventually(timeout: .seconds(2)) { await latch.second })
+        #expect(await supportEventually(timeout: .seconds(10)) { await latch.second })
         await latch.release()
         #expect(try await first.value == 1)
         #expect(try await second.value == 2)

@@ -36,6 +36,9 @@ public actor JobRunner {
     private var record: Record?
     private var preparation: Task<JobTicket, Error>?
     private let beforePublish: @Sendable () async -> Void
+    /// Internal observation for tests that must establish a drain is actually
+    /// waiting before releasing preparation/conversion/publication gates.
+    private(set) var cancelAllWaiterCount = 0
 
     public var activity: JobActivity {
         guard admission != nil else { return .idle }
@@ -47,6 +50,8 @@ public actor JobRunner {
     /// Cancellation waits for cleanup. Publication is an irreversible commit
     /// point: callers wait for it instead of cancelling an already-published result.
     public func cancelAll() async {
+        cancelAllWaiterCount += 1
+        defer { cancelAllWaiterCount -= 1 }
         if let preparation {
             preparation.cancel()
             _ = try? await preparation.value

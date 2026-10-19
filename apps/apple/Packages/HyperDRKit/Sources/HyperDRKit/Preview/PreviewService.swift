@@ -216,6 +216,10 @@ public actor PreviewService {
         get async { await singleFlight.waiterCount }
     }
 
+    var modelGainFollowerCount: Int {
+        get async { await gainFlight.waiterCount }
+    }
+
     // MARK: - Lifecycle and events
 
     public func attach(_ session: PhotoSession) async throws {

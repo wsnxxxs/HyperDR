@@ -26,6 +26,7 @@ extension EditorModel {
     func beginPeekOriginal() {
         guard hasReferenceFrame, hasEditedFrame, !isPeekingOriginal else { return }
         setPeeking(true)
+        scheduleDetails()
         bumpFrameRevision()
     }
 
@@ -33,6 +34,7 @@ extension EditorModel {
     func endPeekOriginal() {
         guard isPeekingOriginal else { return }
         setPeeking(false)
+        scheduleDetails()
         bumpFrameRevision()
     }
 

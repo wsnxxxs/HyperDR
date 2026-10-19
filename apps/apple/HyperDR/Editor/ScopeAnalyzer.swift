@@ -1,12 +1,14 @@
 import Foundation
 import HyperDREngine
+import HyperDRDesign
 import Observation
 
 /// Histogram counts in the fixed photographic coordinates of the Web
 /// `histogram.js`: the lower 70% of the bins are SDR 0…100% (sRGB-encoded),
 /// the upper 30% are +0…+4 EV above SDR white. Counts are unsmoothed.
 nonisolated struct HistogramData: Equatable, Sendable {
-    static let bins = 256, sdrShare = 0.7, hdrStops = 4.0
+    static let bins = 256
+    static let sdrShare = ScopeScale.sdrShare, hdrStops = ScopeScale.hdrStops
     let total: Int
     let luma, red, green, blue: [UInt32]
 }
@@ -81,13 +83,7 @@ nonisolated enum ScopeAnalyzer {
 
     /// Linear value → 0…1 position on the histogram axis (`toneToNorm`).
     static func position(_ value: Float) -> Float {
-        let v = max(0, value.isFinite ? value : 0)
-        if v <= 1 {
-            let encoded = v <= 0.0031308 ? 12.92 * v : 1.055 * powf(v, 1 / 2.4) - 0.055
-            return Float(HistogramData.sdrShare) * encoded
-        }
-        return min(1, Float(HistogramData.sdrShare)
-                   + Float(1 - HistogramData.sdrShare) * log2f(v) / Float(HistogramData.hdrStops))
+        Float(ScopeScale.position(Double(value)))
     }
 
     static func bin(_ value: Float, count: Int) -> Int {

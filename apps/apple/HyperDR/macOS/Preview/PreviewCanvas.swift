@@ -36,6 +36,7 @@ struct PreviewCanvas: NSViewRepresentable {
                 potentialHeadroom: Double(snapshot.potential),
                 gainWeight: model.display.gainWeight))
         }, onError: { [weak model] detail in model?.reportCanvasFailure(detail) })
+        view.compositionProvider = { [weak model] in model?.canvasComposition }
         view.frameProvider = { [weak model] in model?.canvasFrame }
         view.onTransformChange = { [weak model] transform in model?.canvas.apply(transform) }
         view.onViewportChange = { [weak model] size, scale in
@@ -51,8 +52,15 @@ struct PreviewCanvas: NSViewRepresentable {
         // mode switch or a menu zoom actually repaints.
         _ = model.frameRevision
         _ = model.viewMode
+        _ = model.splitRatio
+        _ = model.isPeekingOriginal
+        _ = model.previewsAsSDR
+        _ = model.showsHighlightZebra
+        _ = model.showsShadowZebra
+        _ = model.display.currentHeadroom
         _ = model.canvas.imageFrame
         _ = model.canvas.zoom
+        view.compositionProvider = { [weak model] in model?.canvasComposition }
         view.frameProvider = { [weak model] in model?.canvasFrame }
         view.showsOriginal = model.viewMode == .original || !model.hasEditedFrame
         // Until the view has reported its size, the model still has a zero

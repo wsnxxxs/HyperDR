@@ -13,6 +13,7 @@ extension EditorModel {
         guard !isEditingLocked, mode != edit.aiMode else { return }
         if mode == .optimized, aiBlockReason() != nil || aiFailureReason != nil { return }
         finishGestureBeforeEdit()
+        invalidateDetails(editedOnly: true)
         let previous = edit
         edit.aiMode = mode
         recordStep(from: previous, action: "aiMode")
@@ -25,6 +26,7 @@ extension EditorModel {
         guard !isEditingLocked, id != edit.selectedModel,
               ai.models.contains(where: { $0.id == id && $0.isEnabled }) else { return }
         finishGestureBeforeEdit()
+        invalidateDetails(editedOnly: true)
         let previous = edit
         edit.selectedModel = id
         aiFailureReason = nil
@@ -104,6 +106,7 @@ extension EditorModel {
         guard let photo else { return }
         aiTask?.cancel()
         tokenTask?.cancel()
+        invalidateDetails(editedOnly: true)
         renderScheduler?.discard()
         lastJob = nil
         setRefreshing(false)

@@ -77,7 +77,7 @@ private func fixturePhoto() throws -> URL {
     }
 
     /// The presentation texture keeps extended values: a 3-stop gain reaching a
-    /// white of 8.0, and the original mode showing the SDR base at 1.0.
+    /// white of 8.0; original mode preserves the source's HDR rendition.
     func testPresentationKeepsPeakWhiteAndOriginalMode() throws {
         let renderer = try makePreviewRenderer()
         let planes = try Self.uniformPlanes(device: renderer.device, base: 1, gainMin: 3, gainMax: 3)
@@ -87,8 +87,8 @@ private func fixturePhoto() throws -> URL {
         XCTAssertEqual(hdr[1], 8, accuracy: 0.01)
         let original = try renderer.readIntermediate(planes: planes, original: true)
         try tracePreviewPixels("white-original", original)
-        XCTAssertEqual(original[0], 1, accuracy: 0.001)
-        print("rgba16Float intermediate: HDR white=\(hdr[0]), SDR white=\(original[0])")
+        XCTAssertEqual(original[0], 8, accuracy: 0.001)
+        print("rgba16Float intermediate: HDR white=\(hdr[0]), original HDR white=\(original[0])")
 
         // The diagnostic window's synthetic ramp uses the same pass and must
         // still reach the same 8× peak (and 1.0 in original mode).
@@ -112,7 +112,7 @@ private func fixturePhoto() throws -> URL {
                 let tolerance = max(0.002, hdr * 0.002)
                 maximumError = max(maximumError, abs(rampPixels[index] - hdr))
                 XCTAssertEqual(rampPixels[index], hdr, accuracy: tolerance, "HDR column \(x), channel \(channel)")
-                XCTAssertEqual(rampOriginal[index], v, accuracy: 0.002, "original column \(x), channel \(channel)")
+                XCTAssertEqual(rampOriginal[index], hdr, accuracy: tolerance, "original column \(x), channel \(channel)")
             }
         }
         XCTAssertEqual(rampPixels[(row * ramp.width + ramp.width - 1) * 4], 8, accuracy: 0.01)
@@ -251,8 +251,8 @@ private func fixturePhoto() throws -> URL {
                        accuracy: max(1e-2, abs(expected.0) * 1e-3))
         let original = try renderer.readIntermediate(frame: frame, original: true)
         try tracePreviewPixels("native-original", original)
-        XCTAssertEqual(original[(y * frame.base.width + x) * 4 + 0], expected.3,
-                       accuracy: max(1e-2, abs(expected.3) * 1e-3))
+        XCTAssertEqual(original[(y * frame.base.width + x) * 4 + 0], expected.0,
+                       accuracy: max(1e-2, abs(expected.0) * 1e-3))
     }
 
     private static func uniformPlanes(device: any MTLDevice, base: Float,

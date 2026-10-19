@@ -74,6 +74,7 @@ extension EditorModel {
                 min(range.upperBound, max(range.lowerBound, value)))))
         }
         guard edit.controls[key] != next else { return }
+        invalidateDetails(editedOnly: true)
         let previous = edit
         edit.controls[key] = next
         control.update(value: next)
@@ -113,6 +114,7 @@ extension EditorModel {
         guard edit.controls[key] != value else { return }
         let previous = edit
         edit.controls[key] = value
+        invalidateDetails(editedOnly: true)
         syncControls()
         recordStep(from: previous, action: key)
         scheduleRender()
@@ -326,6 +328,11 @@ extension EditorModel {
     /// The opened photo's values: `EditDefaults.initial` for the run's
     /// encoding and this reference frame, AI manual, view state reset.
     func beginEditing(encoding: String, reference: EditorPreview) {
+        invalidateDetails()
+        hideMask()
+        lastSubmitWasDraft = false
+        referenceOptions = EditDefaults.reference(encoding: encoding,
+            workflow: EditDefaults.initial(encoding: encoding, sourceDomain: nil, unadjusted: nil))
         source = PhotoSource(domain: reference.source.domain, unadjusted: reference.unadjusted,
                              colorSource: reference.source.colorSource,
                              hasCaptureMetadata: reference.hasCaptureMetadata)
@@ -354,6 +361,8 @@ extension EditorModel {
 
     /// No photo: the controls show the defaults and are disabled.
     func endEditing() {
+        invalidateDetails()
+        hideMask()
         source = PhotoSource()
         edit = EditSnapshot(EditDefaults.initial(encoding: runEncoding, sourceDomain: nil, unadjusted: nil))
         lastJob = nil
@@ -374,6 +383,7 @@ extension EditorModel {
     /// After any change to `edit` other than a slider: publish, render,
     /// and check whether the AI gain still applies.
     func editChanged() {
+        invalidateDetails(editedOnly: true)
         runEncoding = edit.encoding
         syncControls()
         revalidateGain()
@@ -387,11 +397,12 @@ extension EditorModel {
     func syncControls() {
         let locked = isEditingLocked
         let snapshot = edit
+        let defaults = defaultsForCurrentEncoding()
         setWorkflowValue(snapshot.workflow)
         for spec in EditControls.all {
             guard let control = controlValues[spec.key] else { continue }
             let dragging = gesture?.key == spec.key
-            control.update(value: snapshot.controls[spec.key],
+            control.update(value: snapshot.controls[spec.key], defaultValue: defaults.controls[spec.key],
                            range: dragging ? nil : ControlRules.range(control.spec, encoding: snapshot.encoding,
                                                                    domain: source.domain),
                            isVisible: ControlRules.isVisible(spec.key, workflow: snapshot.workflow,
@@ -403,6 +414,9 @@ extension EditorModel {
                           isVisible: document != nil && source.domain != .sceneReferred,
                           isEnabled: !locked && !tagged && source.colorSource != nil,
                           disabledReasonKey: .some(tagged ? "inputColor.disabled.tagged" : nil))
+        if let maskKey, (controlValues[maskKey]?.isVisible != true || controlValues[maskKey]?.isEnabled != true) {
+            hideMask()
+        }
         updateAIState()
     }
 

@@ -336,6 +336,18 @@ import UniformTypeIdentifiers
         submitContinuation?.yield(PendingSubmission(handle: photo.handle, request: request))
     }
 
+    func renderDetail(_ photo: EditorPhoto, options: EditOptions, region: PreviewRegion,
+                      original: Bool) async throws -> EditorPreview? {
+        guard let kit, let record = records[photo.handle] else { throw UserFacingError(code: "source_missing") }
+        let result = try await kit.previews.render(PreviewRequest(session: record.session.id,
+            options: options, maxEdge: DetailPolicy.maxEdge, region: region,
+            purpose: original ? .reference : .edit))
+        try Task.checkCancellation()
+        guard records[photo.handle] != nil else { throw CancellationError() }
+        guard result.sourceDigest == record.session.sha256 else { throw EditorDetailError.sourceReplaced }
+        return Self.preview(result.frame)
+    }
+
     func refreshes(for photo: EditorPhoto) -> AsyncStream<EditorRefreshEvent> {
         guard let kit, let record = records[photo.handle] else { return AsyncStream { $0.finish() } }
         let events = kit.previews.events(for: record.session.id)
@@ -344,7 +356,7 @@ import UniformTypeIdentifiers
                 for await event in events {
                     guard !Task.isCancelled, let self, records[photo.handle] != nil else { break }
                     switch event {
-                    case .finished(let result) where result.request.purpose == .edit:
+                    case .finished(let result) where result.request.purpose == .edit && result.request.region == nil:
                         guard result.sourceDigest == record.session.sha256 else {
                             continuation.yield(.sourceReplaced); continuation.finish(); return
                         }
@@ -353,7 +365,7 @@ import UniformTypeIdentifiers
                             isLatest: latestRequests[photo.handle] == result.request))
                     case .failed(let request, let error) where latestRequests[photo.handle] == request:
                         continuation.yield(.failed(UserFacingError(error)))
-                    case .superseded(let request) where request.purpose == .edit:
+                    case .superseded(let request) where request.purpose == .edit && request.region == nil:
                         continuation.yield(.superseded(isLatest: latestRequests[photo.handle] == request))
                     default: break
                     }

@@ -76,8 +76,7 @@ import XCTest
         }
         let original = try centreRed(renderer, try XCTUnwrap(probe.last))
         XCTAssertGreaterThan(hdr, 1, "the ramp's middle reaches into HDR")
-        XCTAssertLessThan(original, 1, "the newest snapshot shows the SDR original")
-        XCTAssertGreaterThan(hdr, original * 2)
+        XCTAssertEqual(original, hdr, accuracy: 0.01, "the original retains the source's own HDR")
         XCTAssertEqual(probe.mainThreadRequests, 0)
         XCTAssertGreaterThan(probe.requests, 0)
         XCTAssertLessThanOrEqual(renderer.maxInFlightObserved, 1)

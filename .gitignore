@@ -76,3 +76,6 @@ __pycache__/
 
 # Finder metadata
 .DS_Store
+
+# SwiftPM build output of the Swift packages.
+apps/apple/Packages/*/.build/

@@ -232,8 +232,7 @@ private struct ParameterReadout: View {
                 focused = false
             }
             .onKeyPress(keys: [.upArrow, .downArrow], phases: [.down, .repeat, .up]) { press in
-                let steps = (press.key == .upArrow ? 1 : -1) * (press.modifiers.contains(.shift) ? 10 : 1)
-                if let steps = keys.handle(press.phase, steps: steps, notify: onEditingChanged) {
+                keys.perform(ArrowKeyInput(press), verticalOnly: true, notify: onEditingChanged) { steps in
                     set(spec.stepped(typed ? spec.parse(draft) ?? value : value, by: steps))
                     beginTyping()
                 }
@@ -366,9 +365,7 @@ private struct ParameterTrack: View {
         .focused($focused)
         .focusEffectDisabled()
         .onKeyPress(keys: [.leftArrow, .rightArrow, .upArrow, .downArrow], phases: [.down, .repeat, .up]) { press in
-            let up = press.key == .rightArrow || press.key == .upArrow
-            let steps = (up ? 1 : -1) * (press.modifiers.contains(.shift) ? 10 : 1)
-            if let steps = keys.handle(press.phase, steps: steps, notify: onEditingChanged) { step(steps) }
+            keys.perform(ArrowKeyInput(press), verticalOnly: false, notify: onEditingChanged, apply: step)
             return .handled
         }
         .onChange(of: live) { if !live { finishDrag() } }

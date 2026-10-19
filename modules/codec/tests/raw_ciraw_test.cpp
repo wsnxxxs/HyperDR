@@ -1,11 +1,17 @@
 #include "../src/internal/raw_ciraw.hpp"
 
 #include <mach/mach.h>
+#include <malloc/malloc.h>
+#if __has_feature(address_sanitizer)
+#include <sanitizer/allocator_interface.h>
+#endif
 #include <pthread.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <atomic>
+#include <array>
+#include <cstdlib>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -31,6 +37,39 @@ void require(bool v, const char* message) {
 const auto fixtures =
     std::filesystem::path(HYPERDR_SOURCE_DIR) / "build/fixtures";
 std::string model_baseline(const std::filesystem::path& path);
+std::size_t live_allocated_bytes() {
+#if __has_feature(address_sanitizer)
+  // Live allocations, not quarantine, resident pages or the high-water mark.
+  return __sanitizer_get_current_allocated_bytes();
+#else
+  malloc_statistics_t statistics{};
+  malloc_zone_statistics(nullptr,&statistics);
+  return statistics.size_in_use;
+#endif
+}
+void repeated_cancel_allocations(const std::filesystem::path& source) {
+  constexpr unsigned warmup=4,measured=20,window=5;
+  std::array<std::size_t,measured> live{};
+  for(unsigned i=0;i<warmup+measured;++i){
+    CancelToken token;unsigned checks=0;const unsigned checkpoint=(i%2)*16;
+    testing::set_raw_copy_hook([&](unsigned row){++checks;if(row==checkpoint)token.request();});
+    bool cancelled=false;
+    try{CancelScope scope(&token);(void)decode_image(source);}
+    catch(const Cancelled&){cancelled=true;}
+    catch(...){testing::set_raw_copy_hook({});release_apple_raw_cache(source);throw;}
+    testing::set_raw_copy_hook({});release_apple_raw_cache(source);
+    require(cancelled && checks==1+i%2,"repeated cancellation missed checkpoint");
+    if(i>=warmup)live[i-warmup]=live_allocated_bytes();
+  }
+  double first=0,last=0;
+  for(unsigned i=0;i<window;++i){first+=live[i]/double(window);last+=live[measured-window+i]/double(window);}
+  std::cout<<"RAW repeated_cancel warmup="<<warmup<<" samples="<<measured
+           <<" live_first_window="<<first<<" live_last_window="<<last<<" growth="<<last-first<<'\n';
+  // Original unpopped pools retain about 1.66MB per cancellation (>24MB
+  // between these windows). Allow 4MiB for system/decoder cache noise; the
+  // check does not depend on ASan quarantine size or heap page reclamation.
+  require(last<=first+4*1024*1024,"RAW cancellation retained live allocations across calls");
+}
 void run() {
   const auto source = fixtures / "sony-ilce-7s.ARW";
   const auto root = std::filesystem::path(HYPERDR_SOURCE_DIR) /
@@ -369,6 +408,7 @@ void run() {
                 copied.back() == cancel_row,
             "RAW copy ignored cancellation until after its checkpoint");
   }
+  repeated_cancel_allocations(source);
   // A second caller can cancel while another render owns the filter lock.
   std::atomic<bool> held = false, release = false;
   testing::set_raw_block_hook([&](unsigned top, unsigned) {
@@ -611,9 +651,13 @@ int main(int argc, char** argv) {
           &thread, &attr,
           [](void* p) -> void* {
             try {
-              run();
+              if (std::getenv("HYPERDR_TEST_RAW_CANCEL_ALLOCATIONS_ONLY"))
+                repeated_cancel_allocations(fixtures / "sony-ilce-7s.ARW");
+              else run();
               *static_cast<int*>(p) = 0;
-              std::cout << "CIRAW cold 512KB, probe, versions, scale reuse, "
+              if (std::getenv("HYPERDR_TEST_RAW_CANCEL_ALLOCATIONS_ONLY"))
+                std::cout << "RAW repeated cancellation on 512KB stack passed\n";
+              else std::cout << "CIRAW cold 512KB, probe, versions, scale reuse, "
                            "cache, identity, settings, gain, report and "
                            "cancellation passed\n";
             } catch (const std::exception& e) {

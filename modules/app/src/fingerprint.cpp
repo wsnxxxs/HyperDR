@@ -145,6 +145,8 @@ std::string model_preprocessing_fingerprint(const ConvertOptions& options) {
   std::string identity = std::string("model-base:") + kVersion +
       "|pipeline=" + std::to_string(kRenderPipelineRevision) +
       "|clamp_srgb=" + (options.clamp_srgb ? "1" : "0");
+  if (is_raw_extension(lower_extension(options.input)))
+    identity += "|raw_os_build=" + raw_os_build();
   const auto resources = raw_decode_resources(options.raw);
   for (const auto& setting : settings()) {
     if (!setting.affects_decoded_pixels || setting.key == "half_size" || setting.key == "highlight_recovery" ||

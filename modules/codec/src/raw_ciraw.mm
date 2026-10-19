@@ -312,7 +312,9 @@ DecodedImage decode_apple_raw(const std::filesystem::path& path, const RawDecode
       const auto rect = CGRectMake(image.extent.origin.x,
                                    image.extent.origin.y + height - top - rows, width, rows);
       if (block_hook) block_hook(top, rows);
-      [context() render:image
+      CIContext* renderer = context();
+      check_cancelled();  // Cold context setup must not commit a render after cancellation.
+      [renderer render:image
                toBitmap:rgba.data()
                rowBytes:static_cast<std::size_t>(width) * 16
                  bounds:rect

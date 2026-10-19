@@ -21,6 +21,7 @@
 #include "hyperdr/app/fingerprint.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/foundation/json.hpp"
+#include "hyperdr/foundation/hash.hpp"
 #include "hyperdr/gainmap/native_model.hpp"
 #include "hyperdr/model/ncnn_runtime.hpp"
 using namespace hyperdr;
@@ -149,8 +150,11 @@ void run() {
               file.find("raw_processing")->find("os_build")->string() == system_build &&
               key.find(system_build) != std::string::npos,
           "OS build differs between key, probe and report");
+  const auto fingerprint = model_preprocessing_fingerprint(options);
   const auto opens = testing::raw_filter_open_count();
   testing::set_raw_os_build_override("test-build");
+  require(model_preprocessing_fingerprint(options) != fingerprint,
+          "OS build absent from RAW model identity");
   require(decode_cache_variant(options, options.raw) != key,
           "OS build absent from key");
   testing::set_raw_os_build_override({});
@@ -279,6 +283,87 @@ void run() {
   probe_apple_raw(clone);
   require(testing::raw_filter_open_count() == count + 1,
           "closing photo retained filter");
+  // A supplied digest must not hide replacement at the same path, even when
+  // size and mtime are unchanged. Exercise both the exact source-cache hit
+  // and reuse of the scale-bucket master at another requested edge.
+  const auto replacement = fixtures / "leica-c-portrait.RWL";
+  const auto padded_size = std::max(std::filesystem::file_size(source),
+                                    std::filesystem::file_size(replacement));
+  const auto master_clone = root / "master-identity.ARW";
+  const auto replace = [&](const std::filesystem::path& from) {
+    std::filesystem::copy_file(from, master_clone,
+                              std::filesystem::copy_options::overwrite_existing);
+    std::filesystem::resize_file(master_clone, padded_size);
+  };
+  for (unsigned edge : {64U, 80U}) {
+    replace(source);
+    const auto timestamp = std::filesystem::last_write_time(master_clone);
+    auto cached_session = engine.preview_open(master_clone, sha256_file_hex(master_clone));
+    ConvertOptions preview;
+    preview.preview_max_edge = 64;
+    auto original = cached_session->render_pixels(preview);
+    const auto unchanged = testing::raw_filter_open_count();
+    require(cached_session->render_pixels(preview).base.pixels == original.base.pixels &&
+                testing::raw_filter_open_count() == unchanged,
+            "unchanged source did not reuse cache");
+    replace(replacement);
+    std::filesystem::last_write_time(master_clone, timestamp);
+    preview.preview_max_edge = edge;
+    auto changed = cached_session->render_pixels(preview);
+    require(testing::raw_filter_open_count() == unchanged + 1,
+            "source/master cache hid file replacement with supplied digest");
+    auto fresh = engine.preview_open(master_clone)->render_pixels(preview);
+    require(changed.base.pixels == fresh.base.pixels &&
+                changed.metadata == fresh.metadata &&
+                changed.base.pixels != original.base.pixels,
+            "replacement pixels or geometry differ from fresh session");
+  }
+  // A valid persisted model binding is accepted for its OS build, including a
+  // batch whose options.input is a directory, then rejected after an OS update
+  // even if CIRAWFilter keeps the same decoder version.
+  ConvertOptions bound_options;
+  bound_options.input = source;
+  ExternalGainMap external;
+  external.binding.emplace();
+  auto& binding = *external.binding;
+  const auto& decoded = full.decode;
+  binding.source_sha256 = sha256_file_hex(source);
+  binding.preprocessing_fingerprint = model_preprocessing_fingerprint(bound_options);
+  binding.orientation = full.metadata.orientation;
+  binding.sensor_width = decoded.sensor_width;
+  binding.sensor_height = decoded.sensor_height;
+  binding.requested_crop_width = decoded.target_width;
+  binding.requested_crop_height = decoded.target_height;
+  binding.requested_crop_left = decoded.requested_crop_left;
+  binding.requested_crop_top = decoded.requested_crop_top;
+  binding.delivered_crop_width = decoded.decoded_width;
+  binding.delivered_crop_height = decoded.decoded_height;
+  binding.delivered_crop_left = decoded.delivered_crop_left;
+  binding.delivered_crop_top = decoded.delivered_crop_top;
+  binding.raw_decoder_version = decoded.raw->decoder_version;
+  binding.raw_scale = decoded.raw->scale;
+  const auto& look = bound_options.gain.look;
+  binding.recipe.contrast = look.contrast;
+  binding.recipe.vibrance = look.vibrance;
+  binding.recipe.pop = look.pop;
+  binding.recipe.toe_end = look.toe_end;
+  binding.recipe.toe_output_ratio = look.toe_output_ratio;
+  binding.recipe.shoulder_start = look.shoulder_start;
+  binding.recipe.positive_exposure_limit_ev = look.positive_exposure_limit_ev;
+  binding.recipe.diffuse_gain_floor = look.diffuse_gain_floor;
+  binding.recipe.headroom_stops = bound_options.gain.headroom_stops;
+  static_cast<void>(replay_external_development(external, source, full, bound_options));
+  bound_options.input = fixtures;
+  static_cast<void>(replay_external_development(external, source, full, bound_options));
+  testing::set_raw_os_build_override("updated-system-build");
+  bool stale_binding = false;
+  try {
+    static_cast<void>(replay_external_development(external, source, full, bound_options));
+  } catch (const std::invalid_argument& e) {
+    stale_binding = std::string(e.what()).find("preprocessing changed") != std::string::npos;
+  }
+  testing::set_raw_os_build_override({});
+  require(stale_binding, "persisted RAW binding survived OS build change");
   // A second caller can cancel while another render owns the filter lock.
   std::atomic<bool> held = false, release = false;
   testing::set_raw_block_hook([&](unsigned top, unsigned) {

@@ -11,6 +11,7 @@
 #include "hyperdr/foundation/version.hpp"
 #include "hyperdr/image/resample.hpp"
 
+#include <sys/stat.h>
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -394,10 +395,17 @@ std::string decode_cache_key(const std::filesystem::path& input,
                              std::string_view variant,
                              std::string_view source_sha256) {
   const auto absolute = std::filesystem::absolute(input).lexically_normal();
-  std::error_code size_ec;
-  const auto size = std::filesystem::file_size(absolute, size_ec);
-  std::error_code time_ec;
-  const auto modified = std::filesystem::last_write_time(absolute, time_ec);
+  struct stat stamp{};
+  const bool stamped = ::stat(absolute.c_str(), &stamp) == 0;
+  // A session digest describes the source at open time. It cannot replace
+  // filesystem identity: same-path replacement may preserve size and mtime.
+  const std::string file_identity = stamped
+      ? std::to_string(static_cast<unsigned long long>(stamp.st_dev)) + '/' +
+        std::to_string(static_cast<unsigned long long>(stamp.st_ino)) + '/' +
+        std::to_string(stamp.st_size) + '/' +
+        std::to_string(stamp.st_mtimespec.tv_sec) + '/' + std::to_string(stamp.st_mtimespec.tv_nsec) + '/' +
+        std::to_string(stamp.st_ctimespec.tv_sec) + '/' + std::to_string(stamp.st_ctimespec.tv_nsec)
+      : "unavailable";
   std::string content(source_sha256);
   if (content.empty()) {
     try {
@@ -410,9 +418,7 @@ std::string decode_cache_key(const std::filesystem::path& input,
   }
   const std::string identity =
       path_utf8(absolute) + '|' +
-      std::to_string(size_ec ? 0ULL : static_cast<unsigned long long>(size)) + '|' +
-      std::to_string(time_ec ? 0LL
-                            : static_cast<long long>(modified.time_since_epoch().count())) +
+      file_identity +
       '|' + content + '|' + std::string(variant) + '|' + kVersion + '|' +
       std::to_string(kCacheSchema);
   return fnv1a_hex(identity);

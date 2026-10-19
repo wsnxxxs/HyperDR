@@ -345,3 +345,41 @@ import HyperDRKit
         XCTAssertTrue(m.saveTasks.isEmpty)
     }
 }
+
+extension ExportModelTests {
+    func testDiagnosticCommandIsGeneratedOnlyOnCopyFromCurrentEdits() async {
+        let (m,s) = await ready()
+        XCTAssertEqual(s.diagnosticCalls, 0)
+        m.adjust("brightness", to: 0.7)
+        await m.exportMetadataTask?.value
+        XCTAssertEqual(s.diagnosticCalls, 0)
+        s.diagnosticHandler = { _,options,_ in
+            XCTAssertEqual(options["brightness"], .number(0.7))
+            return ["HyperDR", "convert", "photo.jpg", "--output", "out", "--report", "out/report.json"]
+        }
+        let text = await m.diagnosticText
+        XCTAssertEqual(s.diagnosticCalls, 1)
+        XCTAssertTrue(text.contains("\nHyperDR convert photo.jpg --output out --report out/report.json\nPlaceholders:"))
+        XCTAssertFalse(text.contains(self.source.path))
+        XCTAssertFalse(text.contains("look.cube"))
+        await running(m,s)
+        _ = await m.diagnosticText
+        XCTAssertEqual(s.diagnosticCalls, 2)
+        m.cancelExport()
+        await eventually(timeout: .seconds(3)) { !m.export.isInFlight }
+    }
+
+    func testEmptyAndUnavailableDiagnosticCommandsNeverLeakErrorPaths() async {
+        let services = FakeEditorServices(openDelay: .zero, previewDelay: .zero)
+        let empty = EditorModel(services: services)
+        let text = await empty.diagnosticText
+        XCTAssertTrue(text.hasSuffix("Equivalent CLI command: no photo open"))
+        XCTAssertEqual(services.diagnosticCalls, 0)
+        let (m,s) = await ready()
+        s.diagnosticHandler = { _,_,_ in throw UserFacingError(code: "session_expired", detail: "/private/user/session") }
+        let failed = await m.diagnosticText
+        XCTAssertTrue(failed.hasSuffix("Equivalent CLI command: unavailable (session_expired)"))
+        XCTAssertFalse(failed.contains("/private/user"))
+        XCTAssertNil(m.alert)
+    }
+}

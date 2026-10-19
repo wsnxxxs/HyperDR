@@ -55,14 +55,21 @@ def main() -> None:
         source.write_bytes(png(128, 96))
         cases = [(encoding, None) for encoding in ("sdr-jpeg", "sdr-tiff", "avif-pq", "avif-hlg", "iso-gainmap-jpeg")]
         cases += [(encoding, style) for style in ("gallery", "story") for encoding in ("iso-gainmap-jpeg", "sdr-tiff")]
-        cases += [("iso-gainmap-jpeg", "raw")]
+        cases += [("iso-gainmap-jpeg", "raw"), ("sdr-tiff", "lut"), ("iso-gainmap-jpeg", "ai")]
+        lut = root / "private-look.cube"
+        lut.write_text('LUT_3D_SIZE 2\n' + '\n'.join(
+            f'{r} {g} {b}' for b in (0, 1) for g in (0, 1) for r in (0, 1)) + '\n')
         for index, (encoding, style) in enumerate(cases):
             case_source = ROOT / "build/fixtures/sony-ilce-7s.ARW" if style == "raw" else source
-            style = None if style == "raw" else style
+            mode = style
+            style = None if style in ("raw", "lut", "ai") else style
             case = root / str(index)
             case.mkdir()
             options = case / "options.json"
-            options.write_text(json.dumps({"encoding": encoding, "brightness": .612345, "contrast": 1.123456}))
+            values = {"encoding": encoding, "brightness": .612345, "contrast": 1.123456}
+            if mode == "ai":
+                values.update(useModel=True, modelId="research-cnn-v1")
+            options.write_text(json.dumps(values))
             destination = case / "saved"
             destination.mkdir()
             args = [str(binary_dir / "HyperDRKitParity"), str(case_source), str(options), str(case / "work"), str(destination)]
@@ -83,13 +90,22 @@ def main() -> None:
                 frame_path = case / "frame-input.json"
                 frame_path.write_text(json.dumps(frame))
                 args.append(str(frame_path))
-            output = run(*args, env=frozen)
+            output = run(*args, env=dict(frozen, HYPERDR_PARITY_LUT=str(lut)) if mode == "lut" else frozen)
             result = json.loads(next(line for line in reversed(output.splitlines()) if line.startswith('{"argv":')))
-            argv = result["argv"]
-            argv[0] = str(cli)
+            argv = result["diagnosticArgv"]
+            assert argv[0] == "HyperDR"
+            assert all(not arg.startswith("/") and str(Path.home()) not in arg for arg in argv), argv
+            assert all(arg.isascii() for arg in argv), argv
             output_dir = case / "cli"
-            argv[argv.index("--output") + 1] = str(output_dir)
-            argv[argv.index("--report") + 1] = str(case / "cli-report.json")
+            paths = {"photo" + case_source.suffix: str(case_source), "out": str(output_dir),
+                     "out/report.json": str(case / "cli-report.json"), "look.cube": str(lut)}
+            if style:
+                paths["frame.json"] = result["argv"][result["argv"].index("--frame") + 1]
+            if mode == "lut":
+                assert "look.cube" in argv
+            if mode == "ai":
+                assert "--ai-model" in argv, argv
+            argv = [str(cli)] + [paths.get(arg, arg) for arg in argv[1:]]
             if style:
                 assert "--frame" in argv
             run(*argv, env=frozen)
@@ -98,7 +114,7 @@ def main() -> None:
             actual = hashlib.sha256(kit_file.read_bytes()).hexdigest()
             expected = hashlib.sha256(cli_file.read_bytes()).hexdigest()
             assert actual == expected, (encoding, style, actual, expected)
-            print(f"PASS {encoding} {style or 'plain'} {actual}", flush=True)
+            print(f"PASS {encoding} {mode or 'plain'} {actual}", flush=True)
     print(f"export parity: {len(cases)}/{len(cases)} byte-identical", flush=True)
 
 

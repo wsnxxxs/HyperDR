@@ -229,12 +229,13 @@ import XCTest
         XCTAssertEqual(model.export.failure?.messageVariantKey, "err.server.raw_unsupported.model %@")
     }
 
-    func testDiagnosticsUsesEngineOSBuild() {
+    func testDiagnosticsUsesEngineOSBuild() async {
         let source = SourceSummary(domain: .sceneReferred, colorName: "P3", degradationReasons: [], raw:
             RawCapabilities(supported: true, lensCorrectionSupported: true, decoderVersion: "8.dng", osBuild: "engine-build-sentinel"))
         let document = DocumentState(name: "raw", formatLabel: "RAW", byteCount: 1, phase: .ready, isRefreshing: false, source: source)
         let model = EditorModel(document: document)
-        XCTAssertTrue(model.diagnosticText.contains("RAW: apple-ciraw · decoder 8.dng · macOS build engine-build-sentinel"))
-        XCTAssertTrue(model.diagnosticText.contains("Lens correction: supported, on"))
+        let text = await model.diagnosticText
+        XCTAssertTrue(text.contains("RAW: apple-ciraw · decoder 8.dng · macOS build engine-build-sentinel"))
+        XCTAssertTrue(text.contains("Lens correction: supported, on"))
     }
 }

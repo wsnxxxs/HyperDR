@@ -350,7 +350,7 @@ DecodedImage decode_heic_bytes(const std::vector<std::uint8_t>& bytes,
         parallel_for_rows(result.linear_p3.height, [&](unsigned y) {
           for (unsigned x = 0; x < result.linear_p3.width; ++x) {
             const float multiplier =
-                1.F + (*legacy_headroom - 1.F) * bt709_inverse_oetf(sampler.sample(grid, x, y));
+                1.F + (*legacy_headroom - 1.F) * std::pow(sampler.sample(grid, x, y), 2.2F);
             for (unsigned c = 0; c < 3; ++c) result.linear_p3.at(x, y, c) *= multiplier;
           }
         });

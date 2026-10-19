@@ -11,6 +11,7 @@
 #include "hyperdr/gainmap/gain_map.hpp"
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/image_source.hpp"
+#include "hyperdr/container/heif_reader.hpp"
 #include "hyperdr/gainmap/reconstruct.hpp"
 #include "hyperdr/gainmap/rendition.hpp"
 #include "hyperdr/image/color.hpp"
@@ -1078,7 +1079,7 @@ void check_gain_map_jpeg_pair(const hyperdr::PhotoMetadata& metadata) {
 // MakerNote tags 33 and 48. libheif cannot write auxiliary images directly, so
 // the gain item is encoded as an ordinary image and given the auxC property and
 // auxl reference Apple writes.
-std::vector<std::uint8_t> encode_apple_legacy_heic(bool with_makernote) {
+std::vector<std::uint8_t> encode_apple_legacy_heic(bool with_makernote, bool midtone = false) {
   namespace h=hyperdr::codec::hevc;
   constexpr int kSize=16;const auto grid=h::tile_grid(kSize,kSize);
   h::EncodeParams params;params.quality=100;params.color={12,13,1};
@@ -1086,7 +1087,7 @@ std::vector<std::uint8_t> encode_apple_legacy_heic(bool with_makernote) {
       [](auto,auto,auto n,float* v){std::fill_n(v,n*3,128.F/255);},1,false,tile);},params);
   params.color={2,2,1};
   auto gain=h::encode(1,[&](auto,h::YuvTile& tile){h::luma_tile(grid,0,
-      [](auto,auto x0,auto n,float* v){for(unsigned i=0;i<n;++i)v[i]=x0+i<kSize/2?1.F:0.F;},tile);},params);
+      [&](auto,auto x0,auto n,float* v){for(unsigned i=0;i<n;++i)v[i]=midtone?128.F/255:(x0+i<kSize/2?1.F:0.F);},tile);},params);
   auto icc=hyperdr::codec::display_p3_profile();
   hyperdr::HeifEncodedImage base_image{primary,kSize,kSize,{},std::nullopt,icc},gain_image{gain,kSize,kSize,{2,2,1,true},std::nullopt,{}};
   hyperdr::HeifWriteOptions options;options.gain_metadata=hyperdr::GainMapMetadata{};
@@ -1153,6 +1154,24 @@ void check_apple_legacy_heic() {
                 std::abs(decoded.hdr_headroom - measured) < 1e-5F &&
                 decoded.hdr_headroom < 4.0F,
             "legacy Apple usable headroom must be the measured peak, not the MakerNote capacity");
+
+    // A mid-code gain distinguishes Apple's power curve from BT.709 inverse OETF.
+    const auto mid_bytes = encode_apple_legacy_heic(true, true);
+    hyperdr::write_binary_file_atomic(path, mid_bytes, true);
+    const auto mid = hyperdr::decode_image(path);
+    const auto file = hyperdr::read_heif(mid_bytes);
+    float code = -1;
+    for (const auto& [id, item] : file.items) {
+      if (file.auxiliary_type(id) != "urn:com:apple:photo:2020:aux:hdrgainmap") continue;
+      const auto plan = file.resolve_image(id);
+      hyperdr::codec::hevc::decode_item(plan.config, plan.tiles.size(),
+          [&](std::size_t i) { const auto& e=plan.tiles[i].extents.front();return file.bytes.subspan(e.offset,e.length); },
+          [&](auto, hyperdr::codec::hevc::DecodedPicture&& picture) {code=picture.luma_at(8,8)/255.F;});
+    }
+    require(code > .45F && code < .55F, "legacy mid-code fixture was not preserved");
+    const float ratio = mid.linear_p3.at(8,8,0) / mid.authored_sdr->at(8,8,0);
+    require(std::abs(ratio - (1 + 7 * std::pow(code,2.2F))) < 1e-5F,
+            "legacy Apple gain must intentionally use code^2.2, not BT.709");
 
     hyperdr::write_binary_file_atomic(path, encode_apple_legacy_heic(false), true);
     const auto fallback = hyperdr::decode_image(path);

@@ -20,7 +20,7 @@ import XCTest
         model.open([url])
         await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
         XCTAssertFalse(model.isEditingLocked)
-        return (model, services, undo)
+        return (model, services, model.undoManager)
     }
 
     func testDragAndRepeatedArrowKeysEachUndoAsOneStepButSingleKeysStaySeparate() async {
@@ -322,7 +322,7 @@ extension EditingModelTests {
         model.closeDocument()
     }
 
-    func testDiscreteResetEndsTheDragAndDetachingRestoresWindowUndoPolicy() async {
+    func testDiscreteResetEndsTheDragAndDetachingClearsEditorHistory() async {
         let (model, _, undo) = await opened()
         model.beginAdjusting("brightness")
         model.adjust("brightness", to: 0.9)
@@ -332,8 +332,47 @@ extension EditingModelTests {
         model.undo()
         XCTAssertEqual(model.control("brightness").value, 0.6)
         model.attach(undoManager: nil)
-        XCTAssertTrue(undo.groupsByEvent)
+        XCTAssertFalse(undo.groupsByEvent)
         XCTAssertFalse(undo.canUndo)
         XCTAssertFalse(model.canRedo)
+    }
+}
+
+@MainActor private final class TextUndoDelegate: NSObject, NSTextViewDelegate {
+    let manager: UndoManager
+    init(_ manager: UndoManager) { self.manager = manager }
+    func undoManager(for view: NSTextView) -> UndoManager? { manager }
+}
+
+extension EditingModelTests {
+    func testSharedWindowTextHistoryAndEditorHistoryAreIndependent() async {
+        let (model, _, _) = await opened()
+        let shared = UndoManager()
+        model.attach(undoManager: shared)
+        XCTAssertTrue(shared.groupsByEvent)
+        let delegate = TextUndoDelegate(shared)
+        let text = NSTextView(frame: .zero)
+        text.delegate = delegate
+        text.allowsUndo = true
+        text.insertText("hello", replacementRange: NSRange(location:0,length:0))
+        await eventually(timeout:.seconds(2)) { shared.canUndo }
+        // No window/event dispatch in this test: explicitly finish the one
+        // automatic event group that AppKit normally closes at event end.
+        if shared.groupingLevel > 0 { shared.endUndoGrouping() }
+        model.adjust("brightness",to:0.7)
+        model.adjust("brightness",to:0.8)
+        model.undo(firstResponder:nil)
+        XCTAssertEqual(model.control("brightness").value,0.7)
+        XCTAssertEqual(text.string,"hello")
+        XCTAssertTrue(model.canUndo(firstResponder:text))
+        model.undo(firstResponder:text)
+        XCTAssertEqual(text.string,"")
+        XCTAssertEqual(model.control("brightness").value,0.7)
+        XCTAssertTrue(model.canRedo(firstResponder:text))
+        model.redo(firstResponder:text)
+        XCTAssertEqual(text.string,"hello")
+        model.redo(firstResponder:nil)
+        XCTAssertEqual(model.control("brightness").value,0.8)
+        XCTAssertTrue(shared.groupsByEvent)
     }
 }

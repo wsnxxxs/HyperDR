@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import HyperDRKit
 
 /// What the open photo told the model about itself.
@@ -43,7 +44,7 @@ extension EditorModel {
     /// a ready/failed photo. Finder/drop/programmatic open can supersede an
     /// in-progress open (Q14); AI computation blocks both entry points.
     var canOpenDocument: Bool {
-        guard !ai.isComputing else { return false }
+        guard !ai.isComputing, !isRestoring else { return false }
         return document?.phase != .opening && document?.phase != .rendering
     }
     var canResetAll: Bool { !isEditingLocked }
@@ -226,51 +227,64 @@ extension EditorModel {
 
     // MARK: - Undo (batch4 §2.4)
 
-    /// The window installs its UndoManager before editing (with no active
-    /// groups), and detaches it on disappearance. While attached, this model
-    /// owns edit grouping: each commit is explicit, independent of run-loop
-    /// events. UndoManager owns the inverse group during undo/redo. Detaching
-    /// restores the window's prior grouping policy and removes our actions.
-    func attach(undoManager: UndoManager?) {
-        guard undoManager !== self.undoManager else { return }
-        self.undoManager?.removeAllActions(withTarget: self)
-        if let previousUndoPolicy {
-            self.undoManager?.groupsByEvent = previousUndoPolicy.groupsByEvent
-            self.undoManager?.levelsOfUndo = previousUndoPolicy.levels
-        }
-        previousUndoPolicy = undoManager.map { ($0.groupsByEvent, $0.levelsOfUndo) }
-        self.undoManager = undoManager
-        undoManager?.groupsByEvent = false
-        undoManager?.levelsOfUndo = 0
-        bumpUndoRevision()
+    /// Compatibility boundary for the window's environment manager. The
+    /// editor owns a separate explicit-group history; NEVER change the shared
+    /// window manager (NSTextView relies on its automatic event grouping).
+    /// Detaching clears only editor history.
+    func attach(undoManager windowManager: UndoManager?) {
+        if windowManager == nil { clearUndo() }
+    }
+
+    /// Commands route field editors and text views to AppKit's own history.
+    /// Other responders use the editor history and its lock conditions.
+    static func routesUndoToText(_ responder: NSResponder?) -> Bool {
+        responder is NSTextView || responder is NSTextField
+    }
+
+    func canUndo(firstResponder: NSResponder?) -> Bool {
+        Self.routesUndoToText(firstResponder) ? firstResponder?.undoManager?.canUndo == true : canUndo
+    }
+
+    func canRedo(firstResponder: NSResponder?) -> Bool {
+        Self.routesUndoToText(firstResponder) ? firstResponder?.undoManager?.canRedo == true : canRedo
+    }
+
+    func undo(firstResponder: NSResponder?) {
+        if Self.routesUndoToText(firstResponder) { firstResponder?.undoManager?.undo() }
+        else { undo() }
+    }
+
+    func redo(firstResponder: NSResponder?) {
+        if Self.routesUndoToText(firstResponder) { firstResponder?.undoManager?.redo() }
+        else { redo() }
     }
 
     var canUndo: Bool {
         _ = undoRevision
-        return !isEditingLocked && gesture == nil && undoManager?.canUndo == true
+        return !isEditingLocked && gesture == nil && undoManager.canUndo == true
     }
 
     var canRedo: Bool {
         _ = undoRevision
-        return !isEditingLocked && gesture == nil && undoManager?.canRedo == true
+        return !isEditingLocked && gesture == nil && undoManager.canRedo == true
     }
 
     func undo() {
         guard canUndo else { return }
-        undoManager?.undo()
+        undoManager.undo()
         bumpUndoRevision()
     }
 
     func redo() {
         guard canRedo else { return }
-        undoManager?.redo()
+        undoManager.redo()
         bumpUndoRevision()
     }
 
     /// One step back to `previous`, unless nothing changed. The menu title is
     /// the localized `undo.<action>`.
     func recordStep(from previous: EditSnapshot, action: String) {
-        guard previous != edit, let undoManager else { return }
+        guard previous != edit else { return }
         undoManager.beginUndoGrouping()
         undoManager.registerUndo(withTarget: self) { model in
             MainActor.assumeIsolated { model.restoreStep(previous, action: action) }
@@ -283,10 +297,10 @@ extension EditorModel {
     /// Undo / redo: restores the values and registers the way back.
     private func restoreStep(_ snapshot: EditSnapshot, action: String) {
         let current = edit
-        undoManager?.registerUndo(withTarget: self) { model in
+        undoManager.registerUndo(withTarget: self) { model in
             MainActor.assumeIsolated { model.restoreStep(current, action: action) }
         }
-        undoManager?.setActionName(Self.undoActionName(action))
+        undoManager.setActionName(Self.undoActionName(action))
         gesture = nil
         edit = snapshot
         editChanged()
@@ -294,7 +308,7 @@ extension EditorModel {
     }
 
     func clearUndo() {
-        undoManager?.removeAllActions(withTarget: self)
+        undoManager.removeAllActions(withTarget: self)
         gesture = nil
         bumpUndoRevision()
     }

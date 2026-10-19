@@ -34,6 +34,15 @@ import XCTest
         XCTAssertNil(badge(.original, original: false, domain: .hdr, gain: nil))
     }
 
+    func testNoBadgeWhileTheOriginalIsHeld() {
+        for mode in [ViewMode.edited, .original, .compare] {
+            XCTAssertNil(PhotoBadgeKind(viewMode: mode, originalAvailable: true, domain: .hdr, gainWeight: 1,
+                                        isPeeking: true), "\(mode)")
+        }
+        XCTAssertEqual(PhotoBadgeKind(viewMode: .edited, originalAvailable: true, domain: .hdr, gainWeight: 1,
+                                      isPeeking: false), .hdr)
+    }
+
     func testCompareShowsNoBadge() {
         XCTAssertNil(badge(.compare, domain: .hdr, gain: 1))
     }

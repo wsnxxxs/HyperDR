@@ -321,4 +321,113 @@ import HyperDRDesign
         XCTAssertTrue(model.allowsOpenCommand)
         model.closeDocument()
     }
+
+    // MARK: Holds from more than one source (M2-V review P3)
+
+    func testReleasingSpaceWhileThePointerStillHoldsKeepsTheOriginal() {
+        var events: [String] = []
+        let peek = PeekHolds(begin: { events.append("begin") }, end: { events.append("end") })
+        peek.hold(.pointer)
+        peek.hold(.key)
+        peek.release(.key)
+        XCTAssertTrue(peek.isHeld)
+        XCTAssertEqual(events, ["begin"], "the pointer still holds the original")
+        peek.release(.pointer)
+        XCTAssertEqual(events, ["begin", "end"])
+    }
+
+    func testReleasingThePointerWhileSpaceIsStillHeldKeepsTheOriginal() {
+        var events: [String] = []
+        let peek = PeekHolds(begin: { events.append("begin") }, end: { events.append("end") })
+        peek.hold(.key)
+        peek.hold(.pointer)
+        peek.hold(.key)             // auto-repeat
+        peek.release(.pointer)
+        XCTAssertEqual(events, ["begin"])
+        peek.release(.key)
+        XCTAssertEqual(events, ["begin", "end"])
+    }
+
+    func testEscReleasesEverySourceAndALateMouseUpIsHarmless() {
+        var events: [String] = []
+        let peek = PeekHolds(begin: { events.append("begin") }, end: { events.append("end") })
+        peek.hold(.pointer)
+        peek.hold(.key)
+        peek.releaseAll()
+        peek.release(.pointer)      // the mouse goes up after Esc
+        peek.release(.key)
+        peek.releaseAll()
+        XCTAssertEqual(events, ["begin", "end"])
+        XCTAssertFalse(peek.isHeld)
+    }
+
+    func testAHoldAfterEscBeginsAgain() {
+        var events: [String] = []
+        let peek = PeekHolds(begin: { events.append("begin") }, end: { events.append("end") })
+        peek.hold(.pointer)
+        peek.releaseAll()
+        peek.hold(.pointer)
+        XCTAssertEqual(events, ["begin", "end", "begin"])
+    }
+
+    func testThePointerHoldReachesTheModelThroughPeekHoldsAndTheCanvasLeavingLetsGo() async {
+        let model = EditorModel.preview(.editingHDRDisplay)
+        let peek = PeekHolds(begin: { model.beginPeekOriginal() }, end: { model.endPeekOriginal() })
+        let hold = PressAndHold(delay: .milliseconds(10), begin: { peek.hold(.pointer) }, end: { peek.release(.pointer) })
+        hold.press(at: .zero)
+        await eventually(timeout: .seconds(2), "peeking") { model.isPeekingOriginal }
+        // The view goes away with the button down: no mouse-up will come.
+        hold.release()
+        peek.releaseAll()
+        model.endPeekOriginal()
+        XCTAssertFalse(model.isPeekingOriginal)
+        XCTAssertFalse(hold.isHolding)
+        XCTAssertFalse(peek.isHeld)
+    }
+
+    func testAPressStillWaitingForItsDelayIsCancelledByTheCanvasLeaving() async {
+        var began = false
+        let hold = PressAndHold(delay: .milliseconds(40), begin: { began = true }, end: {})
+        hold.press(at: .zero)
+        hold.release()              // onDisappear
+        try? await Task.sleep(for: .milliseconds(120))
+        XCTAssertFalse(began)
+    }
+
+    // MARK: Hint and legend (M2-V review P3)
+
+    func testAHintCoveredByTheLegendIsNeitherShownNorCounted() {
+        let session = ViewerSessionState()
+        let hint = CanvasHintState()
+        hint.update(key: "canvas.hint.peek", session: session, covered: true)
+        XCTAssertNil(hint.shown)
+        XCTAssertEqual(session.hintCount("canvas.hint.peek"), 0)
+        hint.update(key: "canvas.hint.peek", session: session)
+        XCTAssertNil(hint.shown, "the legend going does not bring back a hint that was never announced")
+    }
+
+    func testAShownHintTheLegendReplacesStaysGone() {
+        let session = ViewerSessionState()
+        let hint = CanvasHintState()
+        hint.update(key: "canvas.hint.peek", session: session)
+        XCTAssertEqual(hint.shown, "canvas.hint.peek")
+        hint.dismiss()              // the legend came: the stage dismisses
+        hint.update(key: "canvas.hint.peek", session: session)
+        XCTAssertNil(hint.shown, "the legend going within the 4 s does not bring the hint back")
+        XCTAssertEqual(session.hintCount("canvas.hint.peek"), 1, "one showing was counted, not two")
+    }
+
+    func testASamePhotoNameOpenedOverTheOldFrameAnnouncesTheHintAgain() async {
+        let session = ViewerSessionState()
+        let hint = CanvasHintState()
+        let model = EditorModel.preview(.editingHDRDisplay)
+        hint.update(key: model.viewerHintKey, session: session)
+        XCTAssertNotNil(hint.shown)
+        hint.dismiss()
+        // The same key, as when the old frame stays while the new photo opens.
+        hint.update(key: model.viewerHintKey, session: session)
+        XCTAssertNil(hint.shown)
+        hint.photoChanged(key: model.viewerHintKey, session: session)
+        XCTAssertEqual(hint.shown, model.viewerHintKey)
+    }
 }

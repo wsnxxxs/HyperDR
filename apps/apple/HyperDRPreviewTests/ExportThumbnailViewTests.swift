@@ -27,9 +27,7 @@ import XCTest
     }
 
     private func frame() async throws -> PreviewFrame {
-        var repository = URL(fileURLWithPath: #filePath)
-        for _ in 0..<4 { repository.deleteLastPathComponent() }
-        let engine = try await Engine(), session = try engine.openPreview(source: repository.appendingPathComponent("build/smoke/input.jpg"))
+        let engine = try await Engine(), session = try engine.openPreview(source: TinyPhoto.url)
         defer { session.close() }
         return try await session.renderFrame(EngineRequest(settings: ["preview_max_edge": .number(8)]))
     }
@@ -39,10 +37,14 @@ import XCTest
             source: SourceSummary(domain: .sdr, colorName: "Display P3", degradationReasons: []), hasGain: true, frame: frame)
     }
 
+    /// The editor's clock, fixed: a running export's elapsed time is then the same in every picture.
+    private let fixedNow = Date(timeIntervalSinceReferenceDate: 810_000_000)
+
     private func ready(frame: PreviewFrame?) async -> (EditorModel, FakeEditorServices) {
         let services = FakeEditorServices(openDelay: .zero, previewDelay: .zero)
         services.preview = preview(frame)
-        let model = EditorModel(services: services, ticker: ManualFrameTicker())
+        let now = fixedNow
+        let model = EditorModel(services: services, ticker: ManualFrameTicker(), now: { now })
         await model.loadExportServices(); model.open([source])
         await eventually(timeout: .seconds(10)) { model.document?.phase == .ready && !model.suggestedFileName.isEmpty }
         return (model, services)
@@ -72,6 +74,7 @@ import XCTest
             .background(Color.hdr.surfacePanel)
             .fixedSize()
             .environment(ViewerSessionState())
+            .environment(\.exportProgressClock, fixedNow)
             .environment(\.colorScheme, scheme)
             .environment(\.locale, Locale(identifier: "en"))
         let host = NSHostingView(rootView: root)
@@ -189,13 +192,23 @@ import XCTest
         model.closeDocument()
     }
 
-    func testAProgressViewThatIsStillWaitingShowsAnEmptyBoxWithoutASpinner() async throws {
+    func testAProgressViewThatIsStillWaitingShowsAnEmptyBoxWithoutASpinnerOrAnIcon() async throws {
         let (model, services) = await ready(frame: nil)
         model.startExport(destination: destination, token: model.prepareExport()!)
         await eventually(timeout: .seconds(10)) { services.hasExportSubscriber }
         XCTAssertEqual(model.export.thumbnail, .loading)
-        let progress = try await look(ExportSheet(model: model, window: EditorWindowState()), "progress-loading", seconds: 0.8)
-        XCTAssertEqual(magentaPixels(progress), 0)
+        // Before the spinner's half second and well after it: the same picture,
+        // so nothing turned up in the box.
+        let early = try await look(ExportSheet(model: model, window: EditorWindowState()), seconds: 0.1)
+        let late = try await look(ExportSheet(model: model, window: EditorWindowState()), "progress-loading", seconds: 0.8)
+        XCTAssertEqual(magentaPixels(late), 0)
+        XCTAssertEqual(early.representation(using: .png, properties: [:]), late.representation(using: .png, properties: [:]),
+                       "a progress box never grows a spinner")
+        // And it is not the placeholder, which has the photo icon in it.
+        model.export.thumbnail = .unavailable
+        let none = try await look(ExportSheet(model: model, window: EditorWindowState()), "progress-none", seconds: 0.1)
+        XCTAssertNotEqual(none.representation(using: .png, properties: [:]), late.representation(using: .png, properties: [:]),
+                          "loading is the empty box, none is the photo icon")
         model.closeDocument()
     }
 

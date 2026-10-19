@@ -17,9 +17,7 @@ import XCTest
         return try XCTUnwrap(context.makeImage())
     }
     private func frame(_ exposure: Double = 0) async throws -> PreviewFrame {
-        var repository = URL(fileURLWithPath: #filePath)
-        for _ in 0..<4 { repository.deleteLastPathComponent() }
-        let engine = try await Engine(), session = try engine.openPreview(source: repository.appendingPathComponent("build/smoke/input.jpg"))
+        let engine = try await Engine(), session = try engine.openPreview(source: TinyPhoto.url)
         defer { session.close() }
         return try await session.renderFrame(EngineRequest(settings: ["preview_max_edge": .number(8), "exposure_bias": .number(exposure)]))
     }

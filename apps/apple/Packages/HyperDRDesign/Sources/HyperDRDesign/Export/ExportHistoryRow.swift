@@ -29,7 +29,7 @@ public struct RowAction {
 /// made, a note when the engine fell back, and what can be done with it:
 /// restore its settings (`primary`) and show or save the file (`secondary`).
 public struct ExportHistoryRow: View {
-    private let thumbnail: Image?
+    private let thumbnail: ThumbnailContent
     private let number: Int?
     private let fileName: String
     private let tags: [HDRTag]
@@ -38,7 +38,7 @@ public struct ExportHistoryRow: View {
     private let primary: RowAction?
     private let secondary: RowAction
 
-    public init(thumbnail: Image?, number: Int?, fileName: String, tags: [HDRTag] = [], meta: Text, note: Text? = nil,
+    public init(thumbnail: ThumbnailContent, number: Int?, fileName: String, tags: [HDRTag] = [], meta: Text, note: Text? = nil,
                 primary: RowAction?, secondary: RowAction) {
         self.thumbnail = thumbnail
         self.number = number
@@ -52,7 +52,7 @@ public struct ExportHistoryRow: View {
 
     public var body: some View {
         HStack(alignment: .top, spacing: Space.s3) {
-            Thumbnail(image: thumbnail, width: 60, height: 40)
+            Thumbnail(thumbnail, width: 60, height: 40)
                 .overlay(alignment: .bottomLeading) {
                     if let number {
                         Text(verbatim: "#\(number)")

@@ -55,11 +55,22 @@ private struct Section<Content: View>: View {
     }
 }
 
-@MainActor private enum Thumbnails {
-    static func photo() -> Image {
-        let renderer = ImageRenderer(content: FixturePhoto().frame(width: 192, height: 128))
+@MainActor enum Thumbnails {
+    /// The fixture landscape as a thumbnail picture of the given proportion
+    /// (256 px on the long edge, like the ones the app keeps).
+    static func photo(aspectRatio: CGFloat = 1.5) -> ThumbnailContent { render(FixturePhoto(), aspectRatio: aspectRatio) }
+
+    /// A plain picture, for the edge line on a background of the same colour.
+    static func solid(_ color: Color, aspectRatio: CGFloat) -> ThumbnailContent { render(color, aspectRatio: aspectRatio) }
+    static func white(aspectRatio: CGFloat) -> ThumbnailContent { solid(.white, aspectRatio: aspectRatio) }
+
+    private static func render<V: View>(_ view: V, aspectRatio: CGFloat) -> ThumbnailContent {
+        let long: CGFloat = 128
+        let size = aspectRatio >= 1 ? CGSize(width: long, height: long / aspectRatio) : CGSize(width: long * aspectRatio, height: long)
+        let renderer = ImageRenderer(content: view.frame(width: size.width, height: size.height))
         renderer.scale = 2
-        return renderer.nsImage.map(Image.init(nsImage:)) ?? Image(systemName: "photo")
+        guard let image = renderer.cgImage else { return .unavailable }
+        return .image(Image(decorative: image, scale: 2), aspectRatio: aspectRatio)
     }
 }
 
@@ -289,6 +300,33 @@ struct M3RowsColumn: View {
                         secondary: RowAction(title: w.text("Save As…", "另存为…"), systemImage: "square.and.arrow.down") {})
                 }
                 .frame(width: 600)
+            }
+            Section(title: w("Thumbnails: ready, loading, loading with a spinner, none", "缩略图：就绪、加载中、加载中带转圈、没有")) {
+                HStack(alignment: .top, spacing: 14) {
+                    Thumbnail(Thumbnails.photo(), width: 172, height: 115)
+                    Thumbnail(.loading(showsSpinner: true), width: 172, height: 115).spinnerDelay(.zero)
+                    Thumbnail(.unavailable, width: 172, height: 115)
+                }
+                HStack(alignment: .top, spacing: 14) {
+                    Thumbnail(Thumbnails.photo(), width: 96, height: 64)
+                    Thumbnail(Thumbnails.photo(), width: 72, height: 48)
+                    Thumbnail(Thumbnails.photo(), width: 60, height: 40)
+                    Thumbnail(.loading(), width: 60, height: 40)
+                    Thumbnail(.unavailable, width: 60, height: 40)
+                }
+            }
+            Section(title: w("Proportions in a 96 × 64 box: always the whole picture, an edge line when it does not fill",
+                             "96 × 64 框里的比例：始终完整显示，不铺满时画面边缘有细线")) {
+                ForEach([[1.5, 4.0 / 3, 16.0 / 9, 1], [2.0 / 3, 4, 10, 9.0 / 16]], id: \.self) { row in
+                    HStack(alignment: .top, spacing: 8) {
+                        ForEach(row, id: \.self) { ratio in Thumbnail(Thumbnails.photo(aspectRatio: ratio), width: 96, height: 64) }
+                    }
+                }
+                HStack(alignment: .top, spacing: 8) {
+                    Thumbnail(Thumbnails.white(aspectRatio: 4), width: 96, height: 64)
+                    Thumbnail(Thumbnails.white(aspectRatio: 9.0 / 16), width: 96, height: 64)
+                    Thumbnail(Thumbnails.white(aspectRatio: 1.5), width: 96, height: 64)
+                }
             }
             Section(title: w("LUT library rows: in use, plain", "LUT 库行：在用、普通")) {
                 VStack(spacing: 0) {

@@ -28,14 +28,17 @@ struct CanvasStage: View {
     @FocusState private var focused: Bool
     @State private var hint = CanvasHintState()
     @State private var hold: PressAndHold
+    @State private var peek: PeekHolds
 
     init(model: EditorModel, window: EditorWindowState, showsInspector: Bool = true) {
         self.model = model
         self.window = window
         self.showsInspector = showsInspector
-        _hold = State(initialValue: PressAndHold(begin: { [weak model] in
+        let peek = PeekHolds(begin: { [weak model] in
             if let model, model.viewMode != .original { model.beginPeekOriginal() }
-        }, end: { [weak model] in model?.endPeekOriginal() }))
+        }, end: { [weak model] in model?.endPeekOriginal() })
+        _peek = State(initialValue: peek)
+        _hold = State(initialValue: PressAndHold(begin: { peek.hold(.pointer) }, end: { peek.release(.pointer) }))
     }
     /// The current focus was given by the canvas itself, not the keyboard.
     @State private var focusedByPointer = false
@@ -58,11 +61,22 @@ struct CanvasStage: View {
             .onKeyPress(keys: [.space], phases: [.down, .repeat, .up], action: handleSpace)
             .onKeyPress(.escape) {
                 guard model.isPeekingOriginal else { return .ignored }
-                model.endPeekOriginal()
+                releaseHolds()
                 return .handled
             }
-            .onChange(of: model.viewerHintKey, initial: true) { _, key in hint.update(key: key, session: session) }
+            .onChange(of: model.viewerHintKey, initial: true) { _, key in
+                hint.update(key: key, session: session, covered: legendIsShowing)
+            }
+            // The legend takes the hint's place, and the hint does not come
+            // back when the legend goes.
+            .onChange(of: legendIsShowing) { if legendIsShowing { hint.dismiss() } }
+            // A new photo announces itself again, even one with the same
+            // name that arrives while the old frame is still on the canvas.
             .onChange(of: model.document?.name) { hint.reset() }
+            .onChange(of: model.photoSerial) {
+                hint.photoChanged(key: model.viewerHintKey, session: session, covered: legendIsShowing)
+            }
+            .onDisappear { releaseHolds() }
             .task(id: hint.shown) {
                 guard hint.shown != nil else { return }
                 try? await Task.sleep(for: .seconds(4))
@@ -89,9 +103,15 @@ struct CanvasStage: View {
             zoomGesture: { [hint] in hint.dismiss() })
     }
 
+    /// Lets go of whatever holds the original, from every source.
     private func releaseHolds() {
         hold.release()
+        peek.releaseAll()
         model.endPeekOriginal()
+    }
+
+    private var legendIsShowing: Bool {
+        !CanvasAdornments.legendRows(model: model, showsInspector: showsInspector).isEmpty
     }
 
     private func takeFocus() {
@@ -107,12 +127,9 @@ struct CanvasStage: View {
         guard press.modifiers.isDisjoint(with: [.command, .option, .control]) else { return .ignored }
         hint.dismiss()
         switch press.phase {
-        case .down:
-            if model.viewMode != .original { model.beginPeekOriginal() }
-        case .up:
-            model.endPeekOriginal()
-        default:
-            break
+        case .down: peek.hold(.key)
+        case .up: peek.release(.key)
+        default: break
         }
         return .handled
     }
@@ -201,7 +218,8 @@ private struct PhotoBadge: View {
 
     private var badge: AnyView? {
         switch PhotoBadgeKind(viewMode: model.viewMode, originalAvailable: model.isAvailable(.original),
-                              domain: model.document?.source?.domain, gainWeight: model.display.gainWeight) {
+                              domain: model.document?.source?.domain, gainWeight: model.display.gainWeight,
+                              isPeeking: model.isPeekingOriginal) {
         case .original:
             AnyView(Text("stage.badgeOriginal")
                 .hdrOverlayChip()
@@ -227,8 +245,12 @@ enum PhotoBadgeKind: Equatable {
     /// "Original" while the original is shown. "HDR" over the edited photo
     /// when the source is HDR or has an HDR rendition, or when the edited
     /// frame has gain: `gainWeight` is non-nil exactly then, and may be 0 on
-    /// an SDR display or with no headroom left, which still counts.
-    init?(viewMode: ViewMode, originalAvailable: Bool, domain: InputDomain?, gainWeight: Double?) {
+    /// an SDR display or with no headroom left, which still counts. No badge
+    /// while the original is held: the label in the middle says it, and an
+    /// HDR badge would sit on an SDR picture.
+    init?(viewMode: ViewMode, originalAvailable: Bool, domain: InputDomain?, gainWeight: Double?,
+          isPeeking: Bool = false) {
+        guard !isPeeking else { return nil }
         switch viewMode {
         case .original where originalAvailable:
             self = .original

@@ -32,10 +32,7 @@ struct CanvasAdornments: View {
         let peeking = model.isPeekingOriginal
         let comparing = Self.showsSplit(viewMode: model.viewMode, isPeeking: peeking,
                                         hasReference: model.hasReferenceFrame, hasEdited: model.hasEditedFrame)
-        let legend = Self.legendRows(maskLabelKey: model.maskKey.map { model.control($0).spec.labelKey },
-                                     highlightZebra: model.showsHighlightZebra,
-                                     shadowZebra: model.showsShadowZebra, showsInspector: showsInspector,
-                                     viewMode: model.viewMode, isPeeking: peeking)
+        let legend = Self.legendRows(model: model, showsInspector: showsInspector)
         ZStack {
             if comparing {
                 SplitOverlay(ratio: model.splitRatio, imageFrame: image, visibleRect: visible,
@@ -77,6 +74,14 @@ struct CanvasAdornments: View {
     }
 
     // MARK: Rules
+
+    /// The legend now, for the model's state: what `adornments` draws, and
+    /// what the hint gives way to.
+    static func legendRows(model: EditorModel, showsInspector: Bool) -> [CanvasLegendRow] {
+        legendRows(maskLabelKey: model.maskKey.map { model.control($0).spec.labelKey },
+                   highlightZebra: model.showsHighlightZebra, shadowZebra: model.showsShadowZebra,
+                   showsInspector: showsInspector, viewMode: model.viewMode, isPeeking: model.isPeekingOriginal)
+    }
 
     /// The divider shows in compare mode when both renditions exist and the
     /// original is not being held (that shows the original whole).

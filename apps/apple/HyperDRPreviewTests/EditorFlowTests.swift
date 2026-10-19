@@ -432,3 +432,20 @@ extension EditorFlowTests {
         model.closeDocument()
     }
 }
+
+extension EditorFlowTests {
+    func testEachCommittedPhotoBumpsThePhotoSerialEvenWithTheSameName() async {
+        let services = ScriptedEditorServices()
+        let model = EditorModel(services: services)
+        let other = URL(fileURLWithPath: "/elsewhere/a.jpg")
+        XCTAssertEqual(model.photoSerial, 0)
+        await opened(model, services, url: a)
+        XCTAssertEqual(model.photoSerial, 1)
+        let hintBefore = model.viewerHintKey
+        await opened(model, services, url: other)
+        XCTAssertEqual(model.photoSerial, 2)
+        XCTAssertEqual(model.document?.name, "a.jpg")
+        XCTAssertEqual(model.viewerHintKey, hintBefore, "the key alone cannot tell the two photos apart")
+        model.closeDocument()
+    }
+}

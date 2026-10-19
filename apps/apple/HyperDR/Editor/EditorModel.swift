@@ -19,6 +19,9 @@ import UniformTypeIdentifiers
     private(set) var captureFacts = CaptureFacts()
 
     private var selectedMode: ViewMode = .edited
+    /// Counts the photos committed to the canvas, so the views can tell a new
+    /// photo from the old one even when the new one has the same name.
+    private(set) var photoSerial = 0
     private(set) var hasReferenceFrame: Bool
     private(set) var hasEditedFrame: Bool
     @ObservationIgnored let services: any EditorServices
@@ -293,6 +296,7 @@ import UniformTypeIdentifiers
                         // Commit the opened photo before publishing ready. A new
                         // refresh or open may start before the stream ends.
                         photo = opened
+                        photoSerial += 1
                         captureFacts = CaptureFacts()
                         openRollback = nil
                         operation = nil

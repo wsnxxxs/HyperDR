@@ -58,6 +58,10 @@ struct ErrorText {
     /// the generic text.
     static func isKnown(_ code: String) -> Bool { entries[code] != nil }
 
+    /// The features the HEIF reader reports with `unsupported_format`
+    /// (`modules/container`, `modules/codec/src/hevc`); each has a sentence.
+    nonisolated static let heifFeatures = ["protected_item", "construction_method", "external_reference", "image_sequence", "handler", "essential_property", "codec", "hevc_444", "hevc_422", "hevc_chroma", "hevc_12bit", "hevc_bit_depth", "hevc_separate_planes", "hevc_parameter_change", "color_matrix"]
+
     private struct Entry {
         let title: LocalizedStringResource
         let message: LocalizedStringResource
@@ -88,7 +92,30 @@ struct ErrorText {
         "out_of_memory": Entry(title: "mac.err.out_of_memory.title", message: "err.server.out_of_memory"),
         "internal_error": Entry(title: "mac.err.internal_error.title", message: "err.server.internal_error"),
         "source_unreadable": Entry(title: "mac.err.source_unreadable.title", message: "err.server.source_unreadable"),
-        "unsupported_format": Entry(title: "mac.err.unsupported_format.title", message: "err.server.unsupported_format"),
+        // A HEIF the reader refuses names the feature (`UserFacingError.init(_:)` marks it `heif_<feature>`):
+        // the sentence says what is missing, and the engine's own wording stays out of the alert.
+        // A feature this table does not know gets `heif_unknown`, whose engine detail still shows.
+        "unsupported_format": Entry(title: "mac.err.unsupported_format.title", message: "err.server.unsupported_format",
+            variants: [
+                "heif_protected_item": "err.server.unsupported_format.heif.protected_item",
+                "heif_construction_method": "err.server.unsupported_format.heif.construction_method",
+                "heif_external_reference": "err.server.unsupported_format.heif.external_reference",
+                "heif_image_sequence": "err.server.unsupported_format.heif.image_sequence",
+                "heif_handler": "err.server.unsupported_format.heif.handler",
+                "heif_essential_property": "err.server.unsupported_format.heif.essential_property",
+                "heif_codec": "err.server.unsupported_format.heif.codec",
+                "heif_hevc_444": "err.server.unsupported_format.heif.hevc_444",
+                "heif_hevc_422": "err.server.unsupported_format.heif.hevc_422",
+                "heif_hevc_chroma": "err.server.unsupported_format.heif.hevc_chroma",
+                "heif_hevc_12bit": "err.server.unsupported_format.heif.hevc_12bit",
+                "heif_hevc_bit_depth": "err.server.unsupported_format.heif.hevc_bit_depth",
+                "heif_hevc_separate_planes": "err.server.unsupported_format.heif.hevc_separate_planes",
+                "heif_hevc_parameter_change": "err.server.unsupported_format.heif.hevc_parameter_change",
+                "heif_color_matrix": "err.server.unsupported_format.heif.color_matrix",
+                "heif_unknown": "err.server.unsupported_format.heif.unknown",
+            ],
+            titleVariants: Dictionary(uniqueKeysWithValues: (Self.heifFeatures + ["unknown"]).map {
+                ("heif_" + $0, LocalizedStringResource("mac.err.unsupported_format.heif.title")) })),
         "decode_failed": Entry(title: "mac.err.decode_failed.title", message: "err.server.decode_failed"),
         "input_extension_mismatch": Entry(title: "mac.err.input_extension_mismatch.title",
             message: "err.server.input_extension_mismatch",

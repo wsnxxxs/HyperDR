@@ -10183,6 +10183,295 @@
         }
       }
     },
+    "mac.err.unsupported_format.heif.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can’t open this HEIF photo"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法打开这张 HEIF 照片"
+          }
+        }
+      }
+    },
+    "err.server.unsupported_format.heif.protected_item" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This photo is protected (encrypted or rights-managed), so HyperDR can’t read it. Open an unprotected copy."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这张照片受到保护（加密或带版权管理），HyperDR 无法读取。请换一份未受保护的副本。"
+          }
+        }
+      }
+    },
+    "err.server.unsupported_format.heif.construction_method" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This file stores its image data in a way HyperDR doesn’t support. Re-export the photo from the app that made it, or convert it to JPEG or standard HEIC."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个文件存放图像数据的方式 HyperDR 不支持。可以用生成它的软件重新导出，或先转成 JPEG 或标准 HEIC。"
+          }
+        }
+      }
+    },
+    "err.server.unsupported_format.heif.external_reference" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This file points to image data stored outside of it, which HyperDR can’t read. Re-export the photo as a self-contained file."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个文件引用了存放在文件之外的图像数据，HyperDR 无法读取。请重新导出为完整的单个文件。"
+          }
+        }
+      }
+    },
+    "err.server.unsupported_format.heif.image_sequence" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This is an image sequence (a burst or an animation). HyperDR opens single photos; export one frame as a photo first."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这是一个图像序列（连拍或动画）。HyperDR 只能打开单张照片，请先把其中一帧导出为照片。"
+          }
+        }
+      }
+    },
+    "err.server.unsupported_format.heif.handler" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This file isn’t a still photo, so HyperDR can’t open it as one."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个文件不是静态照片，HyperDR 无法当作照片打开。"
+          }
+        }
+      }
+    },
+    "err.server.unsupported_format.heif.essential_property" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This photo needs a HEIF feature that HyperDR doesn’t support yet. Re-export it from the app that made it, or convert it to JPEG or standard HEIC."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这张照片需要 HyperDR 暂不支持的 HEIF 功能。可以用生成它的软件重新导出，或先转成 JPEG 或标准 HEIC。"
+          }
+        }
+      }
+    },
+    "err.server.unsupported_format.heif.codec" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This photo isn’t compressed with HEVC, the codec HyperDR reads in HEIC files. Convert it to JPEG or standard HEIC."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这张照片不是用 HEVC 压缩的，而 HyperDR 只读取 HEIC 里的 HEVC。请先转成 JPEG 或标准 HEIC。"
+          }
+        }
+      }
+    },
+    "err.server.unsupported_format.heif.hevc_444" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This photo uses 4:4:4 HEVC, which this Mac’s video decoder can’t decode. Open it on a Mac whose chip supports it, or convert it to JPEG or standard HEIC."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这张照片使用 4:4:4 的 HEVC，这台 Mac 的视频解码器无法解码。可以换一台芯片支持的 Mac 打开，或先转成 JPEG 或标准 HEIC。"
+          }
+        }
+      }
+    },
+    "err.server.unsupported_format.heif.hevc_422" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This photo uses 4:2:2 HEVC, which this Mac’s video decoder can’t decode. Open it on a Mac whose chip supports it, or convert it to JPEG or standard HEIC."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这张照片使用 4:2:2 的 HEVC，这台 Mac 的视频解码器无法解码。可以换一台芯片支持的 Mac 打开，或先转成 JPEG 或标准 HEIC。"
+          }
+        }
+      }
+    },
+    "err.server.unsupported_format.heif.hevc_chroma" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This photo is 8-bit 4:2:2, which isn’t supported. HyperDR reads 4:2:2 photos only at 10 bits."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这张照片是 8 位的 4:2:2，不受支持。HyperDR 只能读取 10 位的 4:2:2 照片。"
+          }
+        }
+      }
+    },
+    "err.server.unsupported_format.heif.hevc_12bit" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This photo is 12-bit, which HyperDR doesn’t support. It reads 8-bit and 10-bit photos."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这张照片是 12 位的，HyperDR 不支持。它只能读取 8 位和 10 位的照片。"
+          }
+        }
+      }
+    },
+    "err.server.unsupported_format.heif.hevc_bit_depth" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This photo’s bit depth isn’t supported. HyperDR reads 8-bit and 10-bit photos."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这张照片的位深不受支持。HyperDR 只能读取 8 位和 10 位的照片。"
+          }
+        }
+      }
+    },
+    "err.server.unsupported_format.heif.hevc_separate_planes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This photo stores its colour channels as separate planes, which HyperDR doesn’t support. Convert it to JPEG or standard HEIC."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这张照片把各颜色通道分开存放，HyperDR 不支持。请先转成 JPEG 或标准 HEIC。"
+          }
+        }
+      }
+    },
+    "err.server.unsupported_format.heif.hevc_parameter_change" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This photo changes its encoding settings partway through, which HyperDR doesn’t support. Re-export it from the app that made it."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这张照片的编码设置在中途发生变化，HyperDR 不支持。请用生成它的软件重新导出。"
+          }
+        }
+      }
+    },
+    "err.server.unsupported_format.heif.color_matrix" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This photo uses a colour conversion matrix that HyperDR doesn’t support. Re-export it from the app that made it, or convert it to JPEG or standard HEIC."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这张照片使用的颜色转换矩阵 HyperDR 不支持。可以用生成它的软件重新导出，或先转成 JPEG 或标准 HEIC。"
+          }
+        }
+      }
+    },
+    "err.server.unsupported_format.heif.unknown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HyperDR can’t read this HEIF photo because it uses a feature that isn’t supported yet. Convert it to JPEG or standard HEIC."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HyperDR 无法读取这张 HEIF 照片，因为它用到了暂不支持的功能。请先转成 JPEG 或标准 HEIC。"
+          }
+        }
+      }
+    },
     "history.share" : {
       "extractionState" : "manual",
       "localizations" : {

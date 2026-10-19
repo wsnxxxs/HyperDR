@@ -90,6 +90,44 @@ private let schemes: [(ColorScheme, ColorSchemeContrast, String)] = [
     #expect(!cancelled.isShown, "the picture arrived first: no spinner")
 }
 
+/// The spinner in a real mounted view. A bitmap cannot draw the AppKit
+/// progress indicator, so count the indicators in the hosted hierarchy.
+@MainActor private func spinners(in host: NSView) -> Int {
+    host.layoutSubtreeIfNeeded()
+    func count(_ view: NSView) -> Int { (view is NSProgressIndicator ? 1 : 0) + view.subviews.map(count).reduce(0, +) }
+    return count(host)
+}
+
+@MainActor private func mount(_ content: ThumbnailContent, delay: Duration) -> (NSHostingView<Thumbnail>, NSWindow) {
+    let host = NSHostingView(rootView: Thumbnail(content, width: 172, height: 115).spinnerDelay(delay))
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 172, height: 115), styleMask: [.borderless], backing: .buffered, defer: false)
+    window.contentView = host
+    host.frame = NSRect(x: 0, y: 0, width: 172, height: 115)
+    return (host, window)
+}
+
+/// A mounted summary box shows no spinner before the delay and one after it;
+/// a box that is not the summary's, or one removed first, never gets one.
+@MainActor @Test func aMountedBoxShowsItsSpinnerOnlyAfterTheDelay() async throws {
+    let (host, window) = mount(.loading(showsSpinner: true), delay: .milliseconds(500))
+    try await Task.sleep(for: .milliseconds(150))
+    #expect(spinners(in: host) == 0, "not before the delay")
+    try await Task.sleep(for: .milliseconds(700))
+    #expect(spinners(in: host) == 1, "after it")
+    withExtendedLifetime(window) {}
+
+    let (plain, plainWindow) = mount(.loading(), delay: .zero)
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(spinners(in: plain) == 0, "only the summary spins")
+    withExtendedLifetime(plainWindow) {}
+
+    let (gone, goneWindow) = mount(.loading(showsSpinner: true), delay: .milliseconds(300))
+    goneWindow.contentView = nil
+    try await Task.sleep(for: .milliseconds(600))
+    #expect(spinners(in: gone) == 0, "removed before the delay: no spinner")
+    withExtendedLifetime(goneWindow) {}
+}
+
 /// The loading box has the sunken surface and an outline and no icon: the
 /// centre is the box colour.
 @MainActor @Test func aLoadingBoxIsEmptyAndAnUnavailableOneHasItsIcon() throws {

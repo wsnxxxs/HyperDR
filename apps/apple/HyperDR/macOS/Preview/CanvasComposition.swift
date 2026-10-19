@@ -32,11 +32,11 @@ nonisolated struct CompositionParams {
     var uvScale = SIMD2<Float>(repeating: 1)
     var slice: UInt32 = 0
     var flags: UInt32 = 0 // bit 0 SDR, 1 highlight, 2 shadow, 3 mask
-    var weight: Float = 1
+    var padding0: Float = 0
     var hdrRange: Float = 0
     var backingScale: Float = 1
-    var baseOffset: Float = 0
-    var alternateOffset: Float = 0
+    var padding1: Float = 0
+    var padding2: Float = 0
     var padding: Float = 0
     var maskColor = SIMD4(CanvasOverlayStyle.mask, CanvasOverlayStyle.maskOpacity)
     var highlightColor = SIMD4(CanvasOverlayStyle.highlight, CanvasOverlayStyle.zebraOpacity)
@@ -44,8 +44,9 @@ nonisolated struct CompositionParams {
     var stripe = SIMD4<Float>(CanvasOverlayStyle.stripePeriodPoints, CanvasOverlayStyle.stripeWidthPoints, CanvasOverlayStyle.stripeDirection.x, CanvasOverlayStyle.stripeDirection.y)
 }
 
-/// Each cache keeps ISO log gain in base alpha and a compact-plane marker in
-/// full-HDR alpha; display weighting never depends on a clipped rendition.
+/// Each cache has base, full HDR for statistics, and weighted linear HDR.
+/// Weight changes rebuild the latter before spatial/mip filtering, using the
+/// original gain plane; no information is recovered from clipped pixels.
 /// Two whole-image caches and ONE local texture array (edited + original in
 /// separate slices). The array avoids retaining two independent local GPU
 /// allocations while keeping both sides equally sharp in comparison mode.
@@ -57,13 +58,18 @@ nonisolated final class CanvasCompositor {
     private struct Entry {
         let source: PreviewFrame
         let texture: any MTLTexture
+        let planes: FramePlanes
+        var weight: Float
     }
     private var original: Entry?
     private var edited: Entry?
     private var detailOriginal: PreviewFrame?
     private var detailEdited: PreviewFrame?
     private var detailTexture: (any MTLTexture)?
+    private var detailOriginalWeight: Float?
+    private var detailEditedWeight: Float?
     private(set) var rebuilds = 0
+    private(set) var textureAllocations = 0
     private let signpostID = PreviewRenderer.signposter.makeSignpostID()
 
     init(device: any MTLDevice, queue: any MTLCommandQueue, library: any MTLLibrary) throws {
@@ -85,6 +91,7 @@ nonisolated final class CanvasCompositor {
     func releaseFrames() {
         original = nil; edited = nil
         detailOriginal = nil; detailEdited = nil; detailTexture = nil
+        detailOriginalWeight = nil; detailEditedWeight = nil
     }
 
     private func texture(width: Int, height: Int, slices: Int, mipmapped: Bool = false) throws -> any MTLTexture {
@@ -97,71 +104,114 @@ nonisolated final class CanvasCompositor {
         guard let texture = device.makeTexture(descriptor: descriptor) else {
             throw PreviewError.unavailable("Unable to allocate composition texture")
         }
+        textureAllocations += 1
         return texture
     }
 
     private func encode(_ frame: PreviewFrame, into texture: any MTLTexture, slice: UInt32,
-                        command: any MTLCommandBuffer) throws {
+                        weight: Float, weightedOnly: Bool = false, command: any MTLCommandBuffer) throws {
         let planes = try FramePlanes(frame, device: device)
-        try encode(planes, into: texture, slice: slice, command: command)
+        try encode(planes, into: texture, slice: slice, weight: weight, weightedOnly: weightedOnly, command: command)
     }
 
     /// Also used by synthetic, offscreen pixel tests: exactly the production
     /// compute and display passes, with no independent test implementation.
     func encode(_ planes: FramePlanes, into texture: any MTLTexture, slice: UInt32,
-                command: any MTLCommandBuffer) throws {
+                weight: Float? = nil, weightedOnly: Bool = false, command: any MTLCommandBuffer) throws {
         let interval = PreviewRenderer.signposter.beginInterval("Pass1",id:signpostID)
         defer { PreviewRenderer.signposter.endInterval("Pass1",interval) }
         guard let encoder = command.makeComputeCommandEncoder() else {
             throw PreviewError.unavailable("Unable to create composition compute encoder")
         }
         var params = ReconstructParams(planes: planes, original: false)
-        params.gainWeight = 1
+        params.gainWeight = min(1, max(0, weight ?? planes.gainWeight))
         var startSlice = slice
+        var firstPlane: UInt32 = weightedOnly ? 2 : 0
         encoder.setComputePipelineState(reconstruct)
         encoder.setBuffer(planes.base, offset: 0, index: 0)
         encoder.setBuffer(planes.gain, offset: 0, index: 1)
         encoder.setBytes(&params, length: MemoryLayout<ReconstructParams>.stride, index: 2)
         encoder.setBytes(&startSlice, length: 4, index: 3)
+        encoder.setBytes(&firstPlane, length: 4, index: 4)
         encoder.setTexture(texture, index: 0)
-        encoder.dispatchThreads(MTLSize(width: planes.width, height: planes.height, depth: 2),
+        encoder.dispatchThreads(MTLSize(width: planes.width, height: planes.height, depth: weightedOnly ? 1 : 3),
                                 threadsPerThreadgroup: MTLSize(width: 16, height: 16, depth: 1))
         encoder.endEncoding()
-        if texture.mipmapLevelCount > 1, let blit = command.makeBlitCommandEncoder() {
-            blit.generateMipmaps(for:texture)
+        if texture.mipmapLevelCount > 1 {
+            // A view shares storage. Updating headroom allocates no new GPU
+            // memory and does not regenerate base/full-HDR mip chains.
+            let mipTarget: any MTLTexture
+            if weightedOnly {
+                guard let view = texture.makeTextureView(pixelFormat: texture.pixelFormat, textureType: .type2D,
+                    levels: 0..<texture.mipmapLevelCount,
+                    slices: (Int(slice)+2)..<(Int(slice)+3)) else {
+                    throw PreviewError.unavailable("Unable to view weighted composition mipmaps")
+                }
+                mipTarget = view
+            } else { mipTarget = texture }
+            guard let blit = command.makeBlitCommandEncoder() else {
+                throw PreviewError.unavailable("Unable to create composition mipmap encoder")
+            }
+            blit.generateMipmaps(for: mipTarget)
             blit.endEncoding()
         }
         rebuilds += 1
     }
 
-    private func prepare(_ frame: PreviewFrame, previous: Entry?, command: any MTLCommandBuffer) throws -> Entry {
-        if let previous, previous.source === frame { return previous }
-        let result = try texture(width: frame.base.width, height: frame.base.height, slices: 2, mipmapped: true)
-        try encode(frame, into: result, slice: 0, command: command)
-        return Entry(source: frame, texture: result)
+    private func prepare(_ frame: PreviewFrame, weight: Float, previous: Entry?, command: any MTLCommandBuffer) throws -> Entry {
+        if var previous, previous.source === frame {
+            if previous.weight != weight {
+                try encode(previous.planes, into: previous.texture, slice: 0, weight: weight, weightedOnly: true, command: command)
+                previous.weight = weight
+            }
+            return previous
+        }
+        let result = try texture(width: frame.base.width, height: frame.base.height, slices: 3, mipmapped: true)
+        let planes = try FramePlanes(frame, device: device)
+        try encode(planes, into: result, slice: 0, weight: weight, command: command)
+        return Entry(source: frame, texture: result, planes: planes, weight: weight)
+    }
+
+    private static func weight(_ headroom: Double, frame: PreviewFrame) -> Float {
+        let m = frame.metadata, base = m.baseHeadroom ?? 0
+        let alternate = m.alternateHeadroom ?? m.headroomStops
+        return alternate > base ? Float(min(1, max(0, (log2(max(1, headroom))-base)/(alternate-base)))) : 1
     }
 
     /// All preparation and the complete display pass share the ONE presenting
     /// command buffer supplied by PreviewRenderer's in-flight gate.
     func encode(_ content: CanvasComposition, transform: CanvasTransform, target: any MTLTexture,
                 command: any MTLCommandBuffer) throws {
-        edited = try prepare(content.edited, previous: edited, command: command)
+        edited = try prepare(content.edited, weight: Self.weight(content.headroom, frame: content.edited), previous: edited, command: command)
         if let frame = content.original, content.mode != .edited {
-            original = try prepare(frame, previous: original, command: command)
+            original = try prepare(frame, weight: Self.weight(content.headroom, frame: frame), previous: original, command: command)
         }
         let wantOriginal = content.originalDetail
         let wantEdited = content.editedDetail
+        // A crop can report a different local peak. Its display weight must
+        // follow its WHOLE rendition, or the tile gains a brightness seam.
+        let originalWeight = wantOriginal.map { Self.weight(content.headroom, frame: content.original ?? $0) }
+        let editedWeight = wantEdited.map { _ in Self.weight(content.headroom, frame: content.edited) }
         if detailOriginal !== wantOriginal || detailEdited !== wantEdited {
-            detailOriginal = wantOriginal; detailEdited = wantEdited; detailTexture = nil
             let width = max(wantOriginal?.base.width ?? 0, wantEdited?.base.width ?? 0)
             let height = max(wantOriginal?.base.height ?? 0, wantEdited?.base.height ?? 0)
+            var atlas: (any MTLTexture)?
             if width > 0, height > 0 {
-                let atlas = try texture(width: width, height: height, slices: 4)
-                if let wantOriginal { try encode(wantOriginal, into: atlas, slice: 0, command: command) }
-                if let wantEdited { try encode(wantEdited, into: atlas, slice: 2, command: command) }
-                detailTexture = atlas
+                let texture = try texture(width: width, height: height, slices: 6)
+                if let frame = wantOriginal, let weight = originalWeight { try encode(frame, into: texture, slice: 0, weight: weight, command: command) }
+                if let frame = wantEdited, let weight = editedWeight { try encode(frame, into: texture, slice: 3, weight: weight, command: command) }
+                atlas = texture
+            }
+            detailOriginal = wantOriginal; detailEdited = wantEdited; detailTexture = atlas
+        } else if let atlas = detailTexture {
+            if let frame = wantOriginal, let weight = originalWeight, weight != detailOriginalWeight {
+                try encode(frame, into: atlas, slice: 0, weight: weight, weightedOnly: true, command: command)
+            }
+            if let frame = wantEdited, let weight = editedWeight, weight != detailEditedWeight {
+                try encode(frame, into: atlas, slice: 3, weight: weight, weightedOnly: true, command: command)
             }
         }
+        detailOriginalWeight = originalWeight; detailEditedWeight = editedWeight
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = target
         pass.colorAttachments[0].loadAction = .clear
@@ -179,7 +229,7 @@ nonisolated final class CanvasCompositor {
             let upper = content.mode == .compare && isOriginal ? max(0, min(target.width, split)) : target.width
             guard upper > lower else { return }
             encoder.setScissorRect(MTLScissorRect(x: lower, y: 0, width: upper - lower, height: target.height))
-            var params = parameters(content, frame: entry.source, original: isOriginal, transform: transform)
+            var params = parameters(content, original: isOriginal, transform: transform)
             params.rect = PreviewRenderer.normalisedRect(transform, drawableSize: size)
             draw(encoder, texture: entry.texture, params: params)
             if let atlas = detailTexture, let frame = isOriginal ? detailOriginal : detailEdited,
@@ -197,7 +247,7 @@ nonisolated final class CanvasCompositor {
                     Float(1 - tile.maxY / transform.viewport.height * 2),
                     Float(tile.maxX / transform.viewport.width * 2 - 1), Float(1 - tile.minY / transform.viewport.height * 2))
                 params.uvScale = SIMD2(Float(frame.base.width) / Float(atlas.width), Float(frame.base.height) / Float(atlas.height))
-                params.slice = isOriginal ? 0 : 2
+                params.slice = isOriginal ? 0 : 3
                 draw(encoder, texture: atlas, params: params)
             }
         }
@@ -212,17 +262,10 @@ nonisolated final class CanvasCompositor {
         return CGRect(x: x, y: y, width: m.width, height: m.height)
     }
 
-    private func parameters(_ content: CanvasComposition, frame: PreviewFrame, original: Bool,
+    private func parameters(_ content: CanvasComposition, original: Bool,
                             transform: CanvasTransform) -> CompositionParams {
-        let m = frame.metadata
-        let base = m.baseHeadroom ?? 0
-        let alternate = m.alternateHeadroom ?? m.headroomStops
-        let weight = alternate > base ? min(1, max(0, (log2(max(1, content.headroom)) - base) / (alternate - base))) : 1
         var params = CompositionParams(rect: .zero)
-        params.weight = Float(weight)
         params.backingScale = Float(max(1, transform.backingScale))
-        params.baseOffset = Float(m.baseOffset ?? 0)
-        params.alternateOffset = Float(m.alternateOffset ?? 0)
         params.hdrRange = content.overlays.hdrRange
         params.flags = content.previewsAsSDR ? 1 : 0
         if !original {
@@ -244,9 +287,10 @@ nonisolated final class CanvasCompositor {
         encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
     }
 
-    func makeTestTexture(_ planes: FramePlanes, command: any MTLCommandBuffer) throws -> any MTLTexture {
-        let result = try texture(width: planes.width, height: planes.height, slices: 2)
-        try encode(planes, into: result, slice: 0, command: command)
+    func makeTestTexture(_ planes: FramePlanes, weight: Float? = nil, mipmapped: Bool = false,
+                         command: any MTLCommandBuffer) throws -> any MTLTexture {
+        let result = try texture(width: planes.width, height: planes.height, slices: 3, mipmapped: mipmapped)
+        try encode(planes, into: result, slice: 0, weight: weight, command: command)
         return result
     }
 }

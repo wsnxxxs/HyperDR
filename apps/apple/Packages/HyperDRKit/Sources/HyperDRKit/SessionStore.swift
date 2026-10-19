@@ -755,6 +755,17 @@ public actor SessionStore {
         return removed
     }
 
+    /// Retained global records for timing statistics; UI history still uses
+    /// exports(for:), which filters by the current source digest.
+    public func recentExports() -> [ExportRecord] {
+        guard let root = try? sessionsRoot(), let directories = try? fileManager.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { return [] }
+        return directories.flatMap { directory -> [ExportRecord] in
+            let id = SessionID(rawValue: directory.lastPathComponent)
+            return id.isValid ? loadExportRecords(id) : []
+        }.sorted { $0.createdAt == $1.createdAt ? $0.id.rawValue > $1.id.rawValue : $0.createdAt > $1.createdAt }.prefix(exportHistoryLimit).map { $0 }
+    }
+
     public func markSaved(_ id: SessionID, export: ExportID, saved: SavedMark) throws {
         // A version can be trimmed while its already-open file is copied.
         // Do not recreate its directory or fail a completed save in that case.

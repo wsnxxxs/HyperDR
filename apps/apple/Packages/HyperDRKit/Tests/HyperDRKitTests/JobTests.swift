@@ -347,11 +347,14 @@ private func failureCode(_ operation: () async throws -> Void) async -> String? 
         let ticket = try await runner.start(session: photo.id, options: EditOptions(["encoding": .string("sdr-tiff")]))
         #expect(ticket.argv.first == "HyperDR")
         var progress: [Double] = []
+        var published = false
         let stream = runner.events(ticket.job) // Synchronous subscription before any callbacks.
         gate.release()
         for await event in stream {
             if case .progress(let value) = event { progress.append(value.fraction) }
+            if case .publishing = event { published = true }
             if case .finished(let result) = event {
+                #expect(published)
                 #expect(result.done); #expect(result.failure == nil)
                 #expect(try await env.sessions.resultURL(photo.id, export: ticket.export).lastPathComponent == "photo.tif")
             }
@@ -863,6 +866,7 @@ private final class BlockingJobGate: @unchecked Sendable {
         #expect(await env.sessions.exports(for: a.id).isEmpty)
         let records = await env.sessions.exports(for: b.id)
         #expect(records.count == 20)
+        #expect(await env.sessions.recentExports().map(\.id) == records.map(\.id))
         #expect(Set(records.map(\.sequence)) == Set(1...20))
         #expect(last.sequence == 20)
         #expect(FileManager.default.fileExists(atPath: pending.directory.path))

@@ -58,7 +58,18 @@ private func eventually(timeout: Duration, _ check: @Sendable () async -> Bool) 
         #expect(access.active.withLock { $0 } == 1)
         #expect(try Data(contentsOf: url) == Data([9]))
         #expect(await runner.read(ticket.job, offset: 0)?.summary.done == false)
+        let events = runner.events(ticket.job)
         await gate.release()
+        var stages: [String] = []
+        for await event in events {
+            switch event {
+            case .publishing: stages.append("publishing")
+            case .saving: stages.append("saving")
+            case .finished: stages.append("finished")
+            default: break
+            }
+        }
+        #expect(stages == ["publishing", "saving", "finished"])
         let summary = try await finish(runner, ticket)
         #expect(summary.failure == nil)
         #expect(summary.saved?.url.resolvingSymlinksInPath() == url.resolvingSymlinksInPath())

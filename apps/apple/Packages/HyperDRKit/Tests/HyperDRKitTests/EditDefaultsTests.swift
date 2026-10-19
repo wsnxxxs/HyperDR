@@ -43,7 +43,7 @@ private func loadReference() throws -> WebReference {
 /// Settings the Web wrote with fixed values and Kit leaves to the panel-v1
 /// adapter (batch4 §2.1); `EditControlsTests` shows omitting them changes no
 /// request byte.
-private let adapterSupplied: Set<String> = ["contrast", "vibrance", "quality"]
+private let adapterSupplied: Set<String> = ["contrast", "vibrance"]
 
 private func withoutAdapterSupplied(_ settings: [String: JSONValue]) -> [String: JSONValue] {
     // R2 intentionally removes the Web reference's external RAW vocabulary.

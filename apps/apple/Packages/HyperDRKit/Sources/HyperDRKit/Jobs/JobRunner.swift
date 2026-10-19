@@ -258,11 +258,13 @@ public actor JobRunner {
             // Publication is the commit point. After this actor turn cancel
             // returns false; a published version must never be called cancelled.
             record?.committing = true
+            hub.emit(.publishing, id: job)
             await beforePublish()
             do { record?.result = try await sessions.publishExport(session, export: export, report: report) }
             catch { failure = error as? HyperDRError ?? HyperDRError(code: "internal_error", message: String(describing: error)) }
         }
         if let destination, failure == nil, record?.result != nil {
+            hub.emit(.saving, id: job)
             do {
                 if record?.stopSaving == true { throw CancellationError() }
                 let delivery = Task { try await target.save(session: session, export: export, to: destination) }

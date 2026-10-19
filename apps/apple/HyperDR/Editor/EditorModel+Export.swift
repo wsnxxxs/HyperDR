@@ -135,7 +135,7 @@ extension EditorModel {
             let variant = error.code == "export_memory_budget" ? (framed ? "frame" : "noFrame")
                 : error.code == "export_dimension_limit" && snapshot.workflow == .colorOnly ? "color" : error.variant
             var detail = error.detail
-            if let line = export.lastLine, !line.isEmpty, detail?.contains(line) != true {
+            if error.code != "raw_unsupported", let line = export.lastLine, !line.isEmpty, detail?.contains(line) != true {
                 detail = detail.map { $0 + "\n" + line } ?? line
             }
             failure = UserFacingError(code: error.code, detail: detail, variant: variant)
@@ -308,8 +308,17 @@ extension EditorModel {
         edit.clampSrgb = on
         recordStep(from: previous, action: "clampSrgb"); editChanged()
     }
+    private var rawDiagnostics: String {
+        guard let raw = document?.source?.raw else { return "" }
+        // R1 uses the engine default raw_lens_correction=true. R2/M3-R
+        // will expose its switch; until then every supported RAW applies it.
+        let support = raw.lensCorrectionSupported ? "supported, on" : "unsupported"
+        return "\nRAW: apple-ciraw · decoder \(raw.decoderVersion) · macOS build \(raw.osBuild)"
+            + "\nCamera: \(captureFacts.model ?? "—") · Lens: \(captureFacts.lens ?? "—")"
+            + "\nLens correction: " + support
+    }
     var diagnosticText: String {
-        preferences.diagnostics + "\nDisplay: " + display.screenName
+        preferences.diagnostics + rawDiagnostics + "\nDisplay: " + display.screenName
             + "\nHeadroom: \(display.currentHeadroom) / \(display.potentialHeadroom)"
             + "\nInputs: " + openableContentTypes.map(\.identifier).joined(separator: ", ")
     }

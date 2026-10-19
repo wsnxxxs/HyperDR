@@ -452,13 +452,13 @@ private func failureCode(_ operation: () async throws -> Void) async -> String? 
     }
 
     @Test func perFileFailuresPreserveCodesDetailsAndDiscardWork() async throws {
-        for code in ["export_dimension_limit", "export_memory_budget", "export_failed"] {
+        for code in ["export_dimension_limit", "export_memory_budget", "export_failed", "raw_unsupported"] {
             let env = try JobEnvironment()
             let photo = try await env.photo()
             let data = Data("""
                 {"input":"photo.png","output":"","success":false,"skipped":false,
                  "message":"Failed export","error_code":\(code == "export_failed" ? "null" : "\"\(code)\""),
-                 "detail":"full error detail"}
+                 "detail":"full error detail","error_detail":{"container":"dng","model":"Camera"}}
                 """.utf8)
             let file = try JSONDecoder().decode(ReportFile.self, from: data)
             let runner = env.runner(convert: { _, _ in ConvertReport(json: data, files: [file]) })
@@ -467,7 +467,8 @@ private func failureCode(_ operation: () async throws -> Void) async -> String? 
             let result = try #require(await runner.read(ticket.job, offset: 0))
             #expect(result.summary.failure?.code == code)
             #expect(result.summary.failure?.message == "Failed export")
-            #expect(result.summary.failure?.detail == "full error detail")
+            #expect(result.summary.failure?.messageDetail == "full error detail")
+            #expect(result.summary.failure?.detail == .object(["container": .string("dng"), "model": .string("Camera")]))
             #expect(await env.sessions.exports(for: photo.id).isEmpty)
             let directory = env.configuration.supportDirectory.appendingPathComponent("sessions/\(photo.id)/exports")
             #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)

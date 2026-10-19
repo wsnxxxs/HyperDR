@@ -282,9 +282,9 @@ public actor ExportTarget {
             do { return try outcome.get() }
             catch let error as HyperDRError { throw error }
             catch is CancellationError { throw CancellationError() }
-            catch { throw HyperDRError(code: "export_folder_unwritable", message: "Unable to publish selected file", detail: String(describing: error)) }
+            catch { throw HyperDRError(code: "export_folder_unwritable", message: "Unable to publish selected file", messageDetail: String(describing: error)) }
         }
-        throw HyperDRError(code: "export_folder_unwritable", message: "Unable to coordinate selected file", detail: coordinationError?.localizedDescription)
+        throw HyperDRError(code: "export_folder_unwritable", message: "Unable to coordinate selected file", messageDetail: coordinationError?.localizedDescription)
     }
 
     /// External volumes may not supply an item-replacement directory. Direct

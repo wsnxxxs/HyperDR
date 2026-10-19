@@ -281,13 +281,14 @@ enum PhotoBadgeKind: Equatable {
 /// What the canvas is doing: reading or building the first frame, refreshing
 /// an existing one, a failed refresh over the kept frame, or a photo with no
 /// frame at all.
-private struct CanvasStatus: View {
+struct CanvasStatus: View {
     let model: EditorModel
     let window: EditorWindowState
 
     /// Work over an existing frame shows only once it has taken 300 ms, so
     /// quick refreshes do not flicker.
     @State private var showsBusy = false
+    @Environment(\.locale) private var locale
 
     var body: some View {
         ZStack {
@@ -298,7 +299,12 @@ private struct CanvasStatus: View {
                             .frame(maxHeight: .infinity, alignment: .top)
                             .padding(Space.s3)
                     }
-                    if showsBusy, let label = busyLabel(document) {
+                    if document.isPreparingCameraSupport {
+                        CameraSupportCard(fileName: document.name, canCancel: model.canCancelOpen, cancel: cancelOpen)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                            .padding(Space.s4)
+                            .transition(.opacity)
+                    } else if showsBusy, let label = busyLabel(document) {
                         Label { Text(label) } icon: { ProgressView().controlSize(.mini) }
                             .hdrOverlayChip()
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
@@ -307,7 +313,12 @@ private struct CanvasStatus: View {
                 } else {
                     switch document.phase {
                     case .opening, .rendering:
-                        FirstFrameProgress(label: busyLabel(document) ?? "stage.generating")
+                        if document.isPreparingCameraSupport {
+                            CameraSupportPanel(fileName: document.name, canCancel: model.canCancelOpen, cancel: cancelOpen)
+                                .transition(.opacity)
+                        } else {
+                            FirstFrameProgress(label: busyLabel(document) ?? "stage.generating")
+                        }
                     case .failed(let error):
                         FirstFrameFailure(text: ErrorText(error), engineFailed: model.engine.failure != nil) {
                             window.isImporting = true
@@ -319,11 +330,20 @@ private struct CanvasStatus: View {
             }
         }
         .animation(Motion.ease(), value: showsBusy)
+        .hdrAnimation(value: model.document?.isPreparingCameraSupport == true)
+        .onChange(of: model.document?.isPreparingCameraSupport == true) { _, preparing in
+            if preparing { CameraSupportAnnouncement.post("raw.preparing.announce", locale: locale) }
+        }
         .task(id: isBusy) {
             guard isBusy else { showsBusy = false; return }
             try? await Task.sleep(for: .milliseconds(300))
             if !Task.isCancelled { showsBusy = true }
         }
+    }
+
+    private func cancelOpen() {
+        model.cancelOpen()
+        CameraSupportAnnouncement.post("raw.preparing.cancelled", locale: locale)
     }
 
     /// Whether the canvas draws a photo. Until the first frame (and briefly

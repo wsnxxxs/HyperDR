@@ -16,16 +16,17 @@ struct ErrorText {
     init(_ error: UserFacingError) {
         let detail = error.detail.flatMap { $0.isEmpty ? nil : $0 }
         if let entry = Self.entries[error.code] {
-            title = entry.title
+            title = error.variant.flatMap { entry.titleVariants[$0] } ?? entry.title
+            let shown = entry.showsDetail ? detail : nil
             if let variant = error.variant, let text = entry.variants[variant] {
                 message = text
-                self.detail = detail
+                self.detail = shown
             } else if entry.messageTakesDetail, let detail {
                 message = entry.messageWithDetail(detail)
                 self.detail = nil
             } else {
                 message = entry.message
-                self.detail = detail
+                self.detail = shown
             }
         } else {
             title = "mac.err.generic.title"
@@ -59,6 +60,10 @@ struct ErrorText {
         /// Sentences for an error's `variant` (the model's context for it:
         /// whether the export had a frame, whether it was colour-only).
         var variants: [String: LocalizedStringResource] = [:]
+        /// Titles for the variants that name a different problem.
+        var titleVariants: [String: LocalizedStringResource] = [:]
+        /// Whether a detail the message does not carry is shown below it.
+        var showsDetail = true
         var messageTakesDetail: Bool { withDetail != nil }
 
         func messageWithDetail(_ detail: String) -> LocalizedStringResource {
@@ -114,6 +119,12 @@ struct ErrorText {
         "export_dimension_limit": Entry(title: "mac.err.export_dimension_limit.title",
             message: "err.server.export_dimension_limit",
             variants: ["color": "err.server.export_dimension_limit.color"]),
+        // The camera model rides in the sentence (`withDetail`); a DNG has its own title and sentence.
+        // Nothing is appended below either: the detail is only the model.
+        "raw_unsupported": Entry(title: "mac.err.raw_unsupported.title", message: "err.server.raw_unsupported",
+            withDetail: { "err.server.raw_unsupported.model \($0)" },
+            variants: ["dng": "err.server.raw_unsupported.dng"],
+            titleVariants: ["dng": "mac.err.raw_unsupported.dng.title"], showsDetail: false),
         "export_failed": Entry(title: "mac.err.export_failed.title", message: "err.server.export_failed"),
         "convert_timeout": Entry(title: "mac.err.convert_timeout.title", message: "err.server.convert_timeout"),
     ]

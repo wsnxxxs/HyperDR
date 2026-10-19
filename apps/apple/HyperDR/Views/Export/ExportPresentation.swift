@@ -262,13 +262,11 @@ extension ExportPresentation {
     }
 
     /// "…/Pictures", the system's own name for the folder a copy was saved in
-    /// ("…/图片" on a Chinese system) when the copy's URL is known; the label
-    /// stored with the version otherwise.
-    static func savedFolder(_ saved: SavedLocation?) -> String {
+    /// ("…/图片" on a Chinese system), as the service stored it with the copy
+    /// (no path leaves it); "Unknown location" when it has no name.
+    static func savedFolder(_ saved: SavedLocation?, locale: Locale = .current) -> String {
         guard let saved else { return "" }
-        guard let url = saved.url else { return saved.folderLabel }
-        let folder = url.deletingLastPathComponent()
-        return "…/" + FileManager.default.displayName(atPath: folder.path)
+        return saved.folderLabel.isEmpty ? AppStrings.string("export.location.unknown", locale: locale) : saved.folderLabel
     }
 
     /// "Pictures": where the export is going, for "DSC04127.jpg → Pictures".

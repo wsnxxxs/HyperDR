@@ -80,7 +80,7 @@ import Observation
             } else {
                 let encoding = model.exportVersions.first { $0.id == result.export }?.encodingID ?? export.encodingID
                 post(Announcement(text: AppStrings.format("export.announce.saved %@ %@", locale: locale, format(encoding),
-                                                          Self.folderName(result.saved)), isHigh: false))
+                                                          Self.folderName(result.saved, locale: locale)), isHigh: false))
             }
         case .failed:
             let failure = export.failure ?? UserFacingError(code: "export_failed")
@@ -94,9 +94,9 @@ import Observation
     }
 
     /// The system's name for the folder (not its path): "Pictures", "图片".
-    static func folderName(_ saved: SavedLocation?) -> String {
+    static func folderName(_ saved: SavedLocation?, locale: Locale = .current) -> String {
         guard let saved else { return "" }
-        guard let url = saved.url else { return saved.folderLabel }
-        return FileManager.default.displayName(atPath: url.deletingLastPathComponent().path)
+        let label = ExportPresentation.savedFolder(saved, locale: locale)
+        return label.hasPrefix("…/") ? String(label.dropFirst(2)) : label
     }
 }

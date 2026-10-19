@@ -24,6 +24,26 @@ import HyperDRDesign
         return (model, services)
     }
 
+    // MARK: Where a copy was saved (N3)
+
+    func testTheSavedFolderIsTheNameTheServiceStoredAndUnknownWithoutOne() {
+        let named = SavedLocation(fileName: "a.heic", folderLabel: "…/图片")
+        XCTAssertEqual(ExportPresentation.savedFolder(named, locale: zh), "…/图片")
+        XCTAssertEqual(ExportPresentation.savedFolder(SavedLocation(fileName: "a.heic", folderLabel: ""), locale: en), "Unknown location")
+        XCTAssertEqual(ExportPresentation.savedFolder(SavedLocation(fileName: "a.heic", folderLabel: ""), locale: zh), "未知位置")
+        XCTAssertEqual(ExportPresentation.savedFolder(nil, locale: en), "")
+        XCTAssertEqual(ExportAnnouncer.folderName(named, locale: zh), "图片", "spoken without the path marks")
+    }
+
+    func testShowInFinderUsesTheSavedCopysOwnRevealAction() async {
+        let (model, _) = await ready()
+        var revealed = 0
+        model.export.result = ExportResult(export: "v1", fileName: "a.heic", byteCount: 1, pixelSize: PixelSize(width: 1, height: 1),
+            saved: SavedLocation(fileName: "a.heic", folderLabel: "…/Pictures", reveal: { revealed += 1 }))
+        ExportFlow.showInFinder(model: model, version: "v1")
+        XCTAssertEqual(revealed, 1)
+    }
+
     // MARK: Presentation
 
     func testFormatGroupsFollowTheProcessingMode() {

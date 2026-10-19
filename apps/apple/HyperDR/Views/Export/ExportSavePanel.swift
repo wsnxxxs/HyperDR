@@ -55,9 +55,10 @@ import UniformTypeIdentifiers
     /// Shows the file in Finder: the saved copy when this run knows where it
     /// is, else the version's own file.
     static func showInFinder(model: EditorModel, version: String) {
-        if let url = model.exportVersions.first(where: { $0.id == version })?.saved?.url
-            ?? (model.export.result?.export == version ? model.export.result?.saved?.url : nil) {
-            NSWorkspace.shared.activateFileViewerSelecting([url])
+        if let saved = [model.exportVersions.first(where: { $0.id == version })?.saved,
+                        model.export.result?.export == version ? model.export.result?.saved : nil]
+            .compactMap({ $0 }).first(where: \.canReveal) {
+            saved.reveal()
             return
         }
         Task {

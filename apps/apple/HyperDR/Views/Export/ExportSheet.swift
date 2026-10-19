@@ -436,7 +436,7 @@ private struct ExportResultView: View {
             }, openSettings: wording.offersSettings ? { openSettings() } : nil)
         }
         if model.exportSaveStates[version] == .saving || model.export.phase == .saving { return .saving }
-        let place = ExportPresentation.savedFolder(result.saved)
+        let place = ExportPresentation.savedFolder(result.saved, locale: locale)
         return .saved(Text("export.save.savedTo \(place)")) {
             ExportFlow.showInFinder(model: model, version: version)
         }

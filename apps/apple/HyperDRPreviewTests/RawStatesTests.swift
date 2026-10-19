@@ -252,6 +252,76 @@ import HyperDRDesign
         try snapshots("alert-dng") { AlertSketch(error: UserFacingError(code: "raw_unsupported", variant: "dng")) }
     }
 
+    // MARK: The lens correction switch (M3 §12.4, B11)
+
+    func testTheLensCorrectionIsOnByDefaultAndTheSummaryFollowsTheSwitch() async throws {
+        let (model, services) = try await openRAW(supported: true)
+        XCTAssertTrue(model.edit.lensCorrection)
+        XCTAssertEqual(model.cameraSummaryKey, "camera.summary.on")
+        XCTAssertEqual(model.effectiveOptions()["lensCorrection"], .bool(true))
+        model.setLensCorrection(false)
+        XCTAssertFalse(model.edit.lensCorrection)
+        XCTAssertEqual(model.cameraSummaryKey, "camera.summary.off")
+        XCTAssertEqual(model.effectiveOptions()["lensCorrection"], .bool(false))
+        await eventually(timeout: .seconds(5)) { services.submitted.last?["lensCorrection"] == .bool(false) }
+        let en = Locale(identifier: "en"), zh = Locale(identifier: "zh-Hans")
+        XCTAssertEqual(AppStrings.string("camera.summary.off", locale: en), "Lens correction off")
+        XCTAssertEqual(AppStrings.string("camera.summary.off", locale: zh), "镜头校正关")
+    }
+
+    func testTheSwitchIsOneUndoStepAndRedoes() async throws {
+        let (model, _) = try await openRAW(supported: true)
+        let undo = model.undoManager
+        model.setLensCorrection(false)
+        XCTAssertTrue(undo.canUndo)
+        XCTAssertEqual(undo.undoActionName, EditorModel.undoActionName("lensCorrection"))
+        XCTAssertNotEqual(undo.undoActionName, EditorModel.undoActionName("somethingElse"))
+        model.setLensCorrection(false)   // no change, no step
+        model.undo()
+        XCTAssertTrue(model.edit.lensCorrection)
+        XCTAssertEqual(model.cameraSummaryKey, "camera.summary.on")
+        XCTAssertFalse(undo.canUndo)
+        model.redo()
+        XCTAssertFalse(model.edit.lensCorrection)
+        XCTAssertEqual(model.cameraSummaryKey, "camera.summary.off")
+    }
+
+    func testAnUnsupportedLensOrAnotherKindOfPhotoHasNoSwitchToTurn() async throws {
+        let (unsupported, _) = try await openRAW(supported: false)
+        XCTAssertEqual(unsupported.cameraSummaryKey, "camera.summary.unsupported")
+        let undo = unsupported.undoManager
+        unsupported.setLensCorrection(false)
+        XCTAssertTrue(unsupported.edit.lensCorrection)
+        XCTAssertFalse(undo.canUndo)
+        let (jpeg, _) = try await openJPEG()
+        XCTAssertNil(jpeg.cameraSummaryKey)
+        jpeg.setLensCorrection(false)
+        XCTAssertTrue(jpeg.edit.lensCorrection)
+    }
+
+    /// The group shows a real switch only where macOS can correct the lens.
+    func testTheGroupDrawsTheSwitchOnlyForASupportedLens() async throws {
+        func switches(in view: NSView) -> Int {
+            view.subviews.reduce(view is NSSwitch ? 1 : 0) { $0 + switches(in: $1) }
+        }
+        func count(_ model: EditorModel) -> Int {
+            let host = NSHostingView(rootView: CameraGroup(model: model, startsExpanded: true).frame(width: Layout.inspectorWidth))
+            let window = NSWindow(contentRect: CGRect(origin: .zero, size: host.fittingSize), styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = host
+            host.frame = CGRect(origin: .zero, size: host.fittingSize)
+            host.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+            let found = switches(in: host)
+            window.close()
+            return found
+        }
+        let (supported, _) = try await openRAW(supported: true)
+        let (unsupported, _) = try await openRAW(supported: false, decoder: "7", camera: "Leica C (Typ 112)", lens: nil)
+        XCTAssertEqual(count(supported), 1)
+        XCTAssertEqual(count(unsupported), 0)
+    }
+
     func testThePhotoOfAnotherKindHasNoCameraGroup() async throws {
         let (jpeg, _) = try await openJPEG()
         let marker = Text(verbatim: "marker").frame(width: Layout.inspectorWidth)

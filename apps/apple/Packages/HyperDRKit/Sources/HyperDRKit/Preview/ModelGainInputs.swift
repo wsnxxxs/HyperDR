@@ -34,6 +34,10 @@ enum ModelGainInputs {
         // Decode: raw.default_gamut, the colour assumed for untagged pixels
         // (decode_cache_variant reads every affects_decoded_pixels setting).
         Entry(location: .settings, key: "color_gamut", panel: ["colorGamut"]),
+        // Decode: the RAW lens correction changes the developed pixels the
+        // model sees (affects_decoded_pixels); the adapter writes it for
+        // every photo, and only a RAW whose lens macOS knows can turn it off.
+        Entry(location: .settings, key: "raw_lens_correction", panel: ["lensCorrection"]),
         // render_native_model_base. The adapter writes false for SDR
         // encodings, as apply_output_color_options does, so the encoding
         // matters only through this value.

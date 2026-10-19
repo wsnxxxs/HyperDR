@@ -3,8 +3,8 @@ import HyperDRDesign
 
 /// The camera and lens group (M3 §12.4, raw-states.md §4): which camera and
 /// lens made a RAW, whether macOS corrects the lens, and which RAW decoder
-/// version developed it. Read-only: the lens correction has no switch yet, so
-/// it shows what the engine does.
+/// version developed it. The lens correction is a switch where macOS knows the
+/// lens (on by default, one undo step); elsewhere a sentence says why not.
 struct CameraGroup: View {
     let model: EditorModel
 
@@ -19,7 +19,7 @@ struct CameraGroup: View {
     var body: some View {
         if let raw = model.document?.source?.raw {
             ParameterGroup("camera.title", systemImage: "camera.aperture",
-                           summary: Text(raw.lensCorrectionSupported ? "camera.summary.on" : "camera.summary.unsupported"),
+                           summary: Text(LocalizedStringKey(model.cameraSummaryKey ?? "camera.summary.unsupported")),
                            isExpanded: $isExpanded) {
                 VStack(alignment: .leading, spacing: Space.s3) {
                     FactRow(label: Text("camera.camera"), value: Text(verbatim: model.captureFacts.model ?? "—"),
@@ -27,13 +27,16 @@ struct CameraGroup: View {
                     FactRow(label: Text("camera.lens"), value: Text(verbatim: model.captureFacts.lens ?? "—"),
                             tone: model.captureFacts.lens == nil ? .muted : .normal)
                     if raw.lensCorrectionSupported {
-                        // Where the switch will sit; for now it reads what the engine does.
                         HStack {
                             Text("camera.lensCorrection").font(Font.hdr.control).foregroundStyle(Color.hdr.ink)
                             Spacer(minLength: Space.s3)
-                            Text("camera.lensCorrection.on").font(Font.hdr.caption).foregroundStyle(Color.hdr.inkMuted)
+                            Toggle("camera.lensCorrection",
+                                   isOn: Binding(get: { model.edit.lensCorrection }, set: { model.setLensCorrection($0) }))
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
                         }
-                        .accessibilityElement(children: .combine)
+                        .disabled(model.isEditingLocked)
                     } else {
                         Text("camera.summary.unsupportedNote")
                             .font(Font.hdr.caption).foregroundStyle(Color.hdr.inkMuted)

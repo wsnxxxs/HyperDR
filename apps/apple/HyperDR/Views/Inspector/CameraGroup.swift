@@ -22,8 +22,10 @@ struct CameraGroup: View {
                            summary: Text(raw.lensCorrectionSupported ? "camera.summary.on" : "camera.summary.unsupported"),
                            isExpanded: $isExpanded) {
                 VStack(alignment: .leading, spacing: Space.s3) {
-                    FactRow(label: Text("camera.camera"), value: Text(verbatim: model.captureFacts.model ?? "—"))
-                    FactRow(label: Text("camera.lens"), value: Text(verbatim: model.captureFacts.lens ?? "—"))
+                    FactRow(label: Text("camera.camera"), value: Text(verbatim: model.captureFacts.model ?? "—"),
+                            tone: model.captureFacts.model == nil ? .muted : .normal)
+                    FactRow(label: Text("camera.lens"), value: Text(verbatim: model.captureFacts.lens ?? "—"),
+                            tone: model.captureFacts.lens == nil ? .muted : .normal)
                     if raw.lensCorrectionSupported {
                         // Where the switch will sit; for now it reads what the engine does.
                         HStack {

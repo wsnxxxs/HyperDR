@@ -66,7 +66,8 @@ import HyperDRDesign
 
     func testTheAboutRowAndSystemVersionComeFromTheModelAndLeaveOutTheBuild() async throws {
         let (model, _) = try await openRAW(supported: true, decoder: "8.dng")
-        XCTAssertEqual(SettingsDiagnostics.raw(model, locale: en), "Decoder 8.dng · macOS build 25A123")
+        XCTAssertEqual(SettingsDiagnostics.raw(model, locale: en), "Decoder 8 · DNG · macOS build 25A123")
+        XCTAssertEqual(SettingsDiagnostics.raw(model, locale: zh), "解码器 8 · DNG · macOS 构建 25A123")
         XCTAssertFalse(SettingsDiagnostics.system().lowercased().contains("build"))
         XCTAssertTrue(SettingsDiagnostics.system().hasPrefix("macOS "))
         let text = await model.diagnosticText
@@ -74,6 +75,10 @@ import HyperDRDesign
         XCTAssertTrue(text.contains("macOS build 25A123"), text)
         let (plain, _) = try await openJPEG()
         XCTAssertNil(SettingsDiagnostics.raw(plain, locale: en))
+        let (raw, _) = try await openRAW(supported: true, decoder: "8")
+        XCTAssertEqual(SettingsDiagnostics.raw(raw, locale: en), "Decoder 8 · macOS build 25A123")
+        XCTAssertEqual(AppStrings.string("settings.diag.raw", locale: en), "RAW (this photo)")
+        XCTAssertEqual(AppStrings.string("settings.diag.raw", locale: zh), "RAW 显影（当前照片）")
     }
 
     // MARK: Fixtures
@@ -125,6 +130,7 @@ import HyperDRDesign
     private func render<V: View>(_ view: V, scheme: ColorScheme, locale: String, size: CGSize? = nil) throws -> NSBitmapImageRep {
         let root = view
             .environment(ViewerSessionState())
+            .environment(\.canvasSpinnerTurn, 0)
             .environment(\.colorScheme, scheme)
             .environment(\.locale, Locale(identifier: locale))
         let host = NSHostingView(rootView: root)
@@ -177,6 +183,38 @@ import HyperDRDesign
         try snapshots("camera-group-unsupported") { CameraGroup(model: unsupported, startsExpanded: true).frame(width: Layout.inspectorWidth).background(Color.hdr.surfacePanel) }
         let (dng, _) = try await openRAW(supported: true, decoder: "8.dng")
         try snapshots("camera-group-dng") { CameraGroup(model: dng, startsExpanded: true).frame(width: Layout.inspectorWidth).background(Color.hdr.surfacePanel) }
+    }
+
+    func testTheAboutPageShowsTheRAWRowForACameraRAWAndForADNG() async throws {
+        let (raw, _) = try await openRAW(supported: true)
+        try snapshots("about-raw", size: CGSize(width: 520, height: 560)) { AboutSettings(model: raw).frame(width: 520).background(Color.hdr.surfacePanel) }
+        let (dng, _) = try await openRAW(supported: true, decoder: "8.dng")
+        try snapshots("about-dng", size: CGSize(width: 520, height: 560)) { AboutSettings(model: dng).frame(width: 520).background(Color.hdr.surfacePanel) }
+        let (jpeg, _) = try await openJPEG()
+        try snapshots("about-jpeg", size: CGSize(width: 520, height: 560)) { AboutSettings(model: jpeg).frame(width: 520).background(Color.hdr.surfacePanel) }
+    }
+
+    /// The two alerts as the system draws them: an icon, the title, the sentence and OK.
+    private struct AlertSketch: View {
+        let error: UserFacingError
+        @Environment(\.locale) private var locale
+        var body: some View {
+            let text = ErrorText(error)
+            VStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 34)).foregroundStyle(Color.hdr.warn)
+                Text(verbatim: text.title(locale: locale)).font(.headline).multilineTextAlignment(.center)
+                Text(verbatim: text.body(locale: locale)).font(.callout).multilineTextAlignment(.center)
+                    .foregroundStyle(Color.hdr.inkMuted).fixedSize(horizontal: false, vertical: true)
+                Text(verbatim: "OK").frame(maxWidth: .infinity).padding(.vertical, 5)
+                    .background(Color.hdr.accent, in: .rect(cornerRadius: 6)).foregroundStyle(.white)
+            }
+            .padding(20).frame(width: 300).background(Color.hdr.surfacePanel)
+        }
+    }
+
+    func testTheUnsupportedCameraAndDNGAlerts() throws {
+        try snapshots("alert-camera") { AlertSketch(error: UserFacingError(code: "raw_unsupported", detail: "Leica M11-P", variant: "camera")) }
+        try snapshots("alert-dng") { AlertSketch(error: UserFacingError(code: "raw_unsupported", variant: "dng")) }
     }
 
     func testThePhotoOfAnotherKindHasNoCameraGroup() async throws {

@@ -13,7 +13,7 @@ struct CameraSupportPanel: View {
 
     var body: some View {
         VStack(spacing: Space.s3) {
-            ProgressView().controlSize(.regular)
+            CanvasSpinner(size: 22)
             Text("raw.preparing.title")
                 .font(.system(size: TypeScale.Size.body, weight: .semibold))
                 .foregroundStyle(Color.hdr.overlayInk)
@@ -47,7 +47,7 @@ struct CameraSupportCard: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: Space.s4) {
-            ProgressView().controlSize(.small)
+            CanvasSpinner(size: 16)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
                     Text("raw.preparing.title")

@@ -152,6 +152,12 @@ public actor JobRunner {
             failure = HyperDRError(code: record?.timedOut == true ? "convert_timeout" : "cancelled",
                 message: "Export cancelled")
         }
+        if let report, failure == nil, !report.files.contains(where: { $0.success }) {
+            let file = report.files.first(where: { !$0.skipped }) ?? report.files.first
+            failure = HyperDRError(code: file?.errorCode ?? "export_failed",
+                message: file?.message ?? "The conversion produced no successful output",
+                detail: file?.detail)
+        }
         if let report, failure == nil {
             // Publication is the commit point. After this actor turn cancel
             // returns false; a published version must never be called cancelled.

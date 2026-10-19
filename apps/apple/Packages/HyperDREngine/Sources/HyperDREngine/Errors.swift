@@ -4,7 +4,10 @@ import HyperDREngineCore
 public struct HyperDRError: Error, LocalizedError, Sendable {
     public let code: String
     public let message: String
-    public init(code: String, message: String) { self.code = code; self.message = message }
+    public let detail: String?
+    public init(code: String, message: String, detail: String? = nil) {
+        self.code = code; self.message = message; self.detail = detail
+    }
     public var errorDescription: String? { "\(message) (\(code))" }
 }
 

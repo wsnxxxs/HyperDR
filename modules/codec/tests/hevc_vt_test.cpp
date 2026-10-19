@@ -4,6 +4,9 @@
 // the machine has no HEVC encoder at all.
 
 #include "hevc/hevc.hpp"
+#include "hevc/testing.hpp"
+#include "hyperdr/gainmap/rendition.hpp"
+#include "hyperdr/image/transfer.hpp"
 
 #include "hyperdr/foundation/cancel.hpp"
 #include "hyperdr/foundation/file_io.hpp"
@@ -255,6 +258,7 @@ void test_sequence(int depth) {
     for (const auto& unit : units) {
       const int type = nal_type(unit);
       require(type != 35 && type != 39 && type != 40, name + ": no AUD or SEI");
+      require(type < 48, name + ": no UNSPEC NALs");
       require(type < 32 || type > 34, name + ": no in-band parameter sets");
       if (type < 32) {
         require(type == 19 || type == 20, name + ": every slice is IDR");
@@ -455,11 +459,101 @@ void test_failures_keep_cache(const std::filesystem::path& directory) {
   require(hevc::encoder_caps(directory).detail != "cached", "other OS build probes again");
 }
 
+void test_nal_policy() {
+  hevc::EncodedSequence sets;sets.vps={64,1,128};sets.sps={66,1,128};sets.pps={68,1,128};
+  for(const int length_size:{1,2,4}) {
+    const auto framed=[&](unsigned type){std::vector<std::uint8_t> out;
+      for(int i=length_size-1;i>=0;--i)out.push_back(3U>>(8*i));
+      out.insert(out.end(),{static_cast<std::uint8_t>(type<<1),1,128});return out;};
+    const auto idr=framed(20);
+    for(unsigned type=0;type<64;++type){
+      auto sample=idr;const auto extra=framed(type);sample.insert(sample.end(),extra.begin(),extra.end());
+      const bool accepted=type==19||type==20||(type>=32&&type<=35)||type==38||type==39||type==40||type>=48;
+      bool rejected=false;std::vector<std::uint8_t> clean;
+      try{clean=hevc::testing::repack_sample(sample,length_size,sets);}catch(const std::runtime_error&){rejected=true;}
+      require(rejected!=accepted,"NAL policy mismatch type="+std::to_string(type));
+      if(accepted){
+        const bool retained=type==19||type==20||type==38;
+        const std::vector<std::uint8_t> one{0,0,0,3,40,1,128};
+        auto expected=one;if(retained){const std::vector<std::uint8_t> other{0,0,0,3,static_cast<std::uint8_t>(type<<1),1,128};expected.insert(expected.end(),other.begin(),other.end());}
+        require(clean==expected,"unexpected NAL retained or discarded");
+      }
+    }
+  }
+}
+void check_audit(const hevc::testing::AuditedSequence& audit,int depth,const std::string& label){
+    std::size_t count62=0,bytes62=0,total_unspecified=0;
+    for(const auto& sample:audit.with_unspecified.samples)for(std::size_t at=0;at<sample.size();){
+      unsigned length=0;for(int i=0;i<4;++i)length=(length<<8)|sample[at++];
+      const auto type=(sample[at]>>1)&63;
+      if(type>=48)++total_unspecified;
+      if(type==62){++count62;bytes62+=length;}
+      at+=length;
+    }
+    const auto before=hevc::decode(audit.with_unspecified,depth),after=hevc::decode(audit.filtered,depth);
+    require(before.size()==after.size(),"UNSPEC filtering changed picture count");
+    for(std::size_t i=0;i<before.size();++i)
+      require(before[i].luma==after[i].luma&&before[i].chroma==after[i].chroma,"UNSPEC filtering changed decoded pixels");
+    std::cout<<"UNSPEC audit "<<label<<" depth="<<depth
+             <<" type62_count="<<count62<<" type62_bytes="<<bytes62<<" total_unspecified="<<total_unspecified<<" pixels=identical\n";
+    // Also exercise the discard comparison even on an OS/encoder which emits
+    // no private NALs for this picture. The added UNSPEC62 has no slice data.
+    auto injected=audit.filtered;
+    for(auto& sample:injected.samples)sample.insert(sample.end(),{0,0,0,4,124,1,128,1});
+    const auto artificial=hevc::decode(injected,depth);
+    for(std::size_t i=0;i<after.size();++i)
+      require(artificial[i].luma==after[i].luma&&artificial[i].chroma==after[i].chroma,"synthetic UNSPEC62 changed pixels");
+}
+void test_unspecified_pixels() {
+  hyperdr::PhotoRenditions photo;
+  photo.hdr=hyperdr::FloatImage(3073,65,3);
+  for(unsigned y=0;y<65;++y)for(unsigned x=0;x<3073;++x){
+    const float level=.05F+3.5F*float(x%257)/256.F;
+    photo.hdr.at(x,y,0)=level;photo.hdr.at(x,y,1)=level*(.5F+.4F*float(y%31)/30.F);photo.hdr.at(x,y,2)=level*.3F;
+  }
+  photo.sdr=photo.hdr;photo.hdr_is_source=true;photo.stats.headroom_stops=3;
+  const auto rendered=hyperdr::gain_map_from_renditions(std::move(photo),hyperdr::GainMapWriterProfile::apple_strict);
+  for(const int base_depth:{8,10})for(const bool fast:{false,true})for(const bool gain:{false,true}){
+    const int depth=gain?8:base_depth;
+    const auto& image=gain?rendered.gain_map:rendered.base_linear;
+    const auto grid=hevc::tile_grid(image.width,image.height);
+    hevc::EncodeParams params{gain?95:82,depth==10,fast,gain?hevc::ColorDescription{2,2,1}:hevc::ColorDescription{12,13,1}};
+    auto audit=hevc::testing::encode_audited(grid.count(),[&](std::size_t index,hevc::YuvTile& tile){
+      if(gain)hevc::luma_tile(grid,index,[&](unsigned y,unsigned x,unsigned count,float* row){
+        for(unsigned i=0;i<count;++i)row[i]=image.at(x+i,y,0);
+      },tile);
+      else hevc::rgb_tile(grid,index,[&](unsigned y,unsigned x,unsigned count,float* row){
+        for(unsigned i=0;i<count;++i)for(unsigned c=0;c<3;++c)row[i*3+c]=hyperdr::srgb_oetf(image.at(x+i,y,c));
+      },1,true,tile);
+    },params);
+    check_audit(audit,depth,"base_depth="+std::to_string(base_depth)+" role="+(gain?"gain":"base")+" preset="+(fast?"medium":"slow"));
+  }
+  for(const int transfer:{16,18})for(const bool fast:{false,true}){
+    constexpr unsigned width=2051,height=67;
+    const auto grid=hevc::tile_grid(width,height);
+    hevc::EncodeParams params{82,true,fast,{9,transfer,9}};
+    auto audit=hevc::testing::encode_audited(grid.count(),[&](std::size_t index,hevc::YuvTile& tile){
+      hevc::rgb_tile(grid,index,[&](unsigned y,unsigned x,unsigned count,float* row){
+        for(unsigned i=0;i<count;++i){
+          const float level=.05F+3.5F*float((x+i)%257)/256.F;
+          const auto wide=hyperdr::p3_to_rec2020(level,level*(.5F+.4F*float(y%31)/30.F),level*.3F);
+          const std::array<float,3> linear{std::max(0.F,wide[0]),std::max(0.F,wide[1]),std::max(0.F,wide[2])};
+          const auto encoded=transfer==16?std::array<float,3>{hyperdr::pq_oetf(linear[0]),hyperdr::pq_oetf(linear[1]),hyperdr::pq_oetf(linear[2])}:hyperdr::hlg_encode(linear);
+          std::copy(encoded.begin(),encoded.end(),row+i*3);
+        }
+      },9,true,tile);
+    },params);
+    check_audit(audit,10,std::string(transfer==16?"PQ":"HLG")+" preset="+(fast?"medium":"slow"));
+  }
+
+}
+
 void* small_stack_round_trip(void* result) {
   auto& ok = *static_cast<std::atomic<int>*>(result);
   try {
     const auto tiles = hevc::tiles_from_rgb(512, 512, card(), 1, 8, true);
     const auto decoded = hevc::decode(hevc::encode(tiles, {}), 8);
+    test_unspecified_pixels();
     ok = decoded.size() == 1 ? 1 : -1;
   } catch (const std::exception& error) {
     std::cerr << "small stack: " << error.what() << "\n";
@@ -487,6 +581,7 @@ int main() {
   try {
     test_conversion();
     test_quality_map();
+    test_nal_policy();
 
     const auto directory = std::filesystem::temp_directory_path() /
                            ("hyperdr-hevc-test-" + std::to_string(::getpid()));

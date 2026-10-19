@@ -1,4 +1,5 @@
 #include "hyperdr/container/heif_writer.hpp"
+#include "hyperdr/foundation/cancel.hpp"
 #include "internal/boxes.hpp"
 #include "internal/hevc_parameters.hpp"
 #include <array>
@@ -227,8 +228,9 @@ void validate_hevc_sample(std::span<const std::uint8_t> bytes,
                "invalid HEVC NAL length size");
   BmffCursor b(bytes);
   bool irap = false;
-  std::size_t vcl = 0;
+  std::size_t vcl = 0, pictures = 0, nal_count = 0;
   while (b.remaining()) {
+    if ((nal_count++ & 1023) == 0) check_cancelled();
     auto n = b.integer(config.length_size);
     require_heif(n >= 2 && n <= b.remaining(),
                  "HEVC NAL length overruns the sample");
@@ -238,6 +240,8 @@ void validate_hevc_sample(std::span<const std::uint8_t> bytes,
                  "invalid HEVC single-layer NAL header");
     auto type = (nal[0] >> 1) & 63;
     if (type < 32) {
+      require_heif(nal.size() >= 3, "truncated HEVC slice header");
+      pictures += (nal[2] & 0x80) != 0;
       ++vcl;
       irap |= type >= 16 && type <= 21;
     }
@@ -253,5 +257,6 @@ void validate_hevc_sample(std::span<const std::uint8_t> bytes,
     }
   }
   require_heif(vcl && irap, "HEVC sample lacks an IRAP picture");
+  require_heif(pictures == 1, "HEVC sample must contain exactly one picture");
 }
 } // namespace hyperdr

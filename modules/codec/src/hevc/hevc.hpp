@@ -103,7 +103,7 @@ using TileProducer = std::function<void(std::size_t index, YuvTile& tile)>;
 [[nodiscard]] EncodedSequence encode(std::span<const YuvTile> tiles, const EncodeParams& params);
 
 // Decodes a sequence produced by `encode` back into tiles of the given depth.
-// Used to verify the probe and by tests; the HEIF reader's decoder is P3b.
+// Thin convenience over decode_item, used by the probe and encoder tests.
 [[nodiscard]] std::vector<YuvTile> decode(const EncodedSequence& sequence, int bit_depth);
 
 // The colour description and range CoreMedia reads from the SPS VUI, mapped back
@@ -161,3 +161,66 @@ void luma_tile(const TileGrid& grid, std::size_t index, const LumaRowReader& rea
     std::uint32_t width, std::uint32_t height, const LumaRowReader& read, int bit_depth);
 
 }  // namespace hyperdr::codec::hevc
+
+namespace hyperdr {
+struct HvcConfig;
+struct HeifNclx;
+class CancelToken;
+} // namespace hyperdr
+namespace hyperdr::codec::hevc {
+// Native YUV codes copied out of one VT image buffer. Rows are tightly packed;
+// 10-bit values occupy the high bits of little-endian 16-bit words (P010/etc).
+// Chroma is interleaved CbCr, empty for monochrome. No RGB conversion occurs in
+// VT.
+struct DecodedPicture {
+  std::uint32_t width{}, height{};
+  unsigned bit_depth{}, chroma_format{};
+  std::vector<std::uint8_t> luma, chroma;
+  [[nodiscard]] unsigned sample_bytes() const noexcept {
+    return bit_depth > 8 ? 2 : 1;
+  }
+  [[nodiscard]] unsigned chroma_width() const noexcept;
+  [[nodiscard]] unsigned chroma_height() const noexcept;
+  [[nodiscard]] std::size_t luma_row_bytes() const noexcept {
+    return std::size_t(width) * sample_bytes();
+  }
+  [[nodiscard]] std::size_t chroma_row_bytes() const noexcept {
+    return std::size_t(chroma_width()) * 2 * sample_bytes();
+  }
+  [[nodiscard]] unsigned luma_at(unsigned x, unsigned y) const noexcept;
+  [[nodiscard]] unsigned cb_at(unsigned x, unsigned y) const noexcept;
+  [[nodiscard]] unsigned cr_at(unsigned x, unsigned y) const noexcept;
+};
+// Reader spans must remain valid until the next reader call. VT receives its
+// own CMBlockBuffer copy, so a reader can reuse storage for joined extents.
+using EncodedTileReader =
+    std::function<std::span<const std::uint8_t>(std::size_t)>;
+using DecodedTileSink = std::function<void(std::size_t, DecodedPicture &&)>;
+struct DecodeParams {
+  const CancelToken *cancel{}; // null inherits the operation's current token
+  std::function<void(std::size_t completed, std::size_t total)> progress;
+  unsigned max_in_flight{}; // 0: up to four, reduced for large tiles
+};
+// One item / hvcC / VT session. Output sinks run on the caller, in tile order;
+// VT may decode subsequent tiles while a sink converts the preceding one.
+void decode_item(const HvcConfig &, std::size_t count,
+                 const EncodedTileReader &, const DecodedTileSink &,
+                 const DecodeParams & = {});
+struct YuvRgbParams {
+  int matrix{6}; // unspecified (2) follows libheif 1.23's BT.601 default
+  bool full_range{false};
+  unsigned chroma_location{
+      1}; // absent VUI: centered; explicit H.265 types 0..5
+  bool parallel_rows{true};
+  const CancelToken *cancel{};
+};
+[[nodiscard]] YuvRgbParams conversion_params(const HvcConfig &,
+                                             const HeifNclx *nclx = nullptr);
+// A sink receives unshifted, rounded/clamped R'G'B' codes at the source bit
+// depth. Rows may run concurrently; each owns its temporary span only during
+// the callback. Gain-map users can instead consume luma_at without conversion.
+using RgbCodeRowSink =
+    std::function<void(unsigned row, std::span<const std::uint16_t>)>;
+void yuv_to_rgb(const DecodedPicture &, const YuvRgbParams &,
+                const RgbCodeRowSink &);
+} // namespace hyperdr::codec::hevc

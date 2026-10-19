@@ -5,6 +5,7 @@ import SwiftUI
     @NSApplicationDelegateAdaptor(HyperDRApplicationDelegate.self) private var applicationDelegate
     @State private var editor: EditorModel
     @State private var dock: DockProgress?
+    @State private var announcer: ExportAnnouncer?
 
     private static let isTesting = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
         || ProcessInfo.processInfo.environment["XCTestBundlePath"] != nil
@@ -27,6 +28,8 @@ import SwiftUI
                     if dock == nil, !Self.isTesting {
                         dock = DockProgress(model: editor)
                         dock?.start()
+                        announcer = ExportAnnouncer(model: editor)
+                        announcer?.start()
                     }
                     editor.launch()
                 }

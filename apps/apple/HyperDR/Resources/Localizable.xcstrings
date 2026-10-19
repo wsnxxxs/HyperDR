@@ -9570,6 +9570,91 @@
           }
         }
       }
+    },
+    "export.announce.started %@ %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exporting “%1$@” as %2$@."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开始导出“%1$@”，格式 %2$@。"
+          }
+        }
+      }
+    },
+    "export.announce.saved %@ %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Export finished. %1$@ saved to “%2$@”."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出完成，%1$@ 已保存到“%2$@”。"
+          }
+        }
+      }
+    },
+    "export.announce.notSaved %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Export finished, but %@ wasn’t saved: HyperDR can’t write to the chosen location."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出完成，但 %@ 没有保存：HyperDR 无法写入所选位置。"
+          }
+        }
+      }
+    },
+    "export.announce.failed %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Export failed. %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出失败。%@"
+          }
+        }
+      }
+    },
+    "export.announce.stopped" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Export stopped. Nothing was saved."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出已停止，没有保存任何文件。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

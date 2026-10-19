@@ -473,10 +473,12 @@ extension EditorModel {
         // The rows of the About page, in English so that a report reads the same everywhere.
         let english = Locale(identifier: "en")
         let budget = SettingsDiagnostics.memoryBudget(self, locale: english).map { "\nExport memory limit: " + $0 } ?? ""
+        // The engine's own reasons for reading the photo with limits, which the screens only paraphrase.
+        let degradation = (document?.source?.degradationReasons).flatMap { $0.isEmpty ? nil : "\nDecode degradation: " + $0.joined(separator: ", ") } ?? ""
         return preferences.diagnostics + rawDiagnostics
             + "\nEngine: " + SettingsDiagnostics.engine(self, locale: english)
             + "\nModels: " + SettingsDiagnostics.models(self, locale: english)
-            + budget
+            + budget + degradation
             + "\nMachine: " + SettingsDiagnostics.machine(locale: english)
             + "\nDisplay: " + display.screenName
             + "\nHDR preview: " + SettingsDiagnostics.previewState(display).rawValue

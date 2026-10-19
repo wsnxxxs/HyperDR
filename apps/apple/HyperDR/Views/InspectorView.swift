@@ -75,9 +75,9 @@ private struct PhotoInfoSection: View {
                 row("mac.info.type", document.source.map { Text($0.domain.label) })
                 row("mac.info.color", document.source.map { Text(verbatim: $0.colorName) })
             }
-            if let reasons = document.source?.degradationReasons, !reasons.isEmpty {
+            if let reasons = document.source?.degradationReasons, let sentence = DecodeDegradation.text(reasons) {
                 Label {
-                    Text("mac.info.degraded \(reasons.joined(separator: ", "))")
+                    Text(sentence)
                 } icon: {
                     Image(systemName: "exclamationmark.triangle.fill")
                 }

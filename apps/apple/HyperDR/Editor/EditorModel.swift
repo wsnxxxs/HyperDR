@@ -39,8 +39,9 @@ import UniformTypeIdentifiers
     var notice: EditorNotice?
     /// Bumped whenever the undo stack changes, so menu items re-evaluate.
     private(set) var undoRevision: UInt64 = 0
-    @ObservationIgnored weak var undoManager: UndoManager?
-    @ObservationIgnored var previousUndoPolicy: (groupsByEvent: Bool, levels: Int)?
+    /// Editor history never shares policy or registrations with AppKit text.
+    @ObservationIgnored let undoManager = UndoManager()
+    private(set) var isRestoring = false
     /// The control being dragged and the values when the drag began.
     @ObservationIgnored var gesture: (key: String, start: EditSnapshot)?
     /// The encoding the next photo opens with; kept for this run.
@@ -114,6 +115,8 @@ import UniformTypeIdentifiers
          alert: UserFacingError? = nil, photo: EditorPhoto? = nil,
          hasReferenceFrame: Bool = false, hasEditedFrame: Bool = false, ticker: (any FrameTicker)? = nil) {
         self.services = services
+        undoManager.groupsByEvent = false
+        undoManager.levelsOfUndo = 0
         self.ticker = ticker ?? ClockFrameTicker()
         let initial = EditDefaults.initial(encoding: "adaptive", sourceDomain: nil, unadjusted: nil)
         edit = EditSnapshot(initial)
@@ -192,14 +195,17 @@ import UniformTypeIdentifiers
     func open(_ urls: [URL]) {
         guard !ai.isComputing else { return }
         canRestoreAtLaunch = false
+        isRestoring = false
         beginOpen(urls)
     }
 
     func launch() {
         guard !didLaunch else { return }
         didLaunch = true
+        isRestoring = canRestoreAtLaunch && document == nil && photo == nil && openRollback == nil
         let ticket = generation
         launchTask = Task { [weak self, services] in
+            defer { if self?.generation == ticket { self?.isRestoring = false } }
             await services.start()
             guard let self, !Task.isCancelled, generation == ticket,
                   canRestoreAtLaunch, document == nil, openRollback == nil, photo == nil else { return }
@@ -220,6 +226,7 @@ import UniformTypeIdentifiers
     func report(openFailure error: any Error) { alert = UserFacingError.importFailure(error) }
 
     private func beginOpen(_ urls: [URL], restored: EditorPhoto? = nil) {
+        isRestoring = false
         if case .failed(let error) = engine {
             alert = UserFacingError(code: "engine_unavailable", detail: error.detail)
             return
@@ -300,6 +307,7 @@ import UniformTypeIdentifiers
 
     func closeDocument() {
         canRestoreAtLaunch = false
+        isRestoring = false
         generation += 1
         operation?.cancel()
         captureFactsTask?.cancel()

@@ -396,3 +396,24 @@ extension EditorFlowTests {
         XCTAssertEqual(model.captureFacts, CaptureFacts())
     }
 }
+
+extension EditorFlowTests {
+    func testOpenCommandIsLockedWhileRestoreWaitsButFinderCanReplaceIt() async {
+        let services = ScriptedEditorServices()
+        services.usesRestoreGate = true
+        let model = EditorModel(services:services)
+        model.launch()
+        XCTAssertFalse(model.canOpenDocument)
+        await eventually(timeout:.seconds(2)) { services.restoreWaiter != nil }
+        XCTAssertTrue(model.isRestoring)
+        XCTAssertFalse(model.canOpenDocument)
+        await opened(model,services,url:b)
+        XCTAssertFalse(model.isRestoring)
+        XCTAssertTrue(model.canOpenDocument)
+        services.restoreWaiter?.resume(returning:.restored(services.placeholder(for:a)))
+        services.restoreWaiter = nil
+        await eventually(timeout:.seconds(2)) { services.closed.contains { $0.url == self.a } }
+        XCTAssertEqual(model.document?.name,"b.jpg")
+        model.closeDocument()
+    }
+}

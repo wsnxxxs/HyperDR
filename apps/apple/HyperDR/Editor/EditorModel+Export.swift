@@ -377,12 +377,21 @@ extension EditorModel {
                 guard let result = try await services.renderReference(photo, options: options, maxEdge: previewEdge) else { return }
                 guard let self, !Task.isCancelled, generation == ticket, self.photo == photo,
                       referenceOptions == options else { return }
+                shownReferenceOptions = options
                 replaceReference(result)
                 scheduleDetails()
             } catch EditorDetailError.sourceReplaced {
                 guard let self, !Task.isCancelled, generation == ticket, self.photo == photo else { return }
                 open([photo.url])
-            } catch { /* The earlier original stays until another switch retries. */ }
+            } catch {
+                // The earlier original stays on screen, so its details must
+                // match it; the next switch tries again.
+                guard let self, !Task.isCancelled, generation == ticket, self.photo == photo,
+                      referenceOptions == options, let shown = shownReferenceOptions else { return }
+                referenceOptions = shown
+                invalidateDetails(editedOnly: false)
+                scheduleDetails()
+            }
         }
     }
     /// The camera group's summary key; nil when the photo is not a RAW.

@@ -97,6 +97,20 @@ import XCTest
         model.closeDocument()
     }
 
+    /// A new original frame (the lens correction switch) has a histogram of its own.
+    func testANewOriginalFrameRecomputesTheOriginalHistogram() async throws {
+        let (model,services,session) = try await opened(); defer { session.close() }
+        await eventually(timeout:.seconds(5)) { model.scopes.original != nil }
+        model.scopes.update(original:.some(nil),current:nil,waveform:nil)
+        XCTAssertNil(model.scopes.original)
+        model.edit.lensCorrection = false
+        model.editChanged()
+        await eventually(timeout:.seconds(5)) { services.referenceRenders.count == 1 }
+        await eventually(timeout:.seconds(5)) { model.scopes.original != nil }
+        XCTAssertEqual(services.referenceRenders.last?["lensCorrection"],.bool(false))
+        model.closeDocument()
+    }
+
     func testDisplayOnlyOptionsAndPeekingDoNotSubmitNewEdits() async throws {
         let (model,services,session) = try await opened(); defer { session.close() }
         let before = services.receivedOptions.count

@@ -165,6 +165,10 @@ import UniformTypeIdentifiers
     @ObservationIgnored private var busyTask: Task<Void, Never>?
     @ObservationIgnored var renderOutstanding = false
     @ObservationIgnored var referenceOptions: EditOptions?
+    /// The options the "original" frame on screen was rendered with; the
+    /// original details always use `referenceOptions`, which only differs
+    /// while a new original is rendering.
+    @ObservationIgnored var shownReferenceOptions: EditOptions?
     @ObservationIgnored var referenceRefreshTask: Task<Void, Never>?
     @ObservationIgnored var detailTask: Task<Void, Never>?
     @ObservationIgnored var detailTicket = 0
@@ -728,6 +732,7 @@ import UniformTypeIdentifiers
         referencePresentationTrace = preview.trace
         frameRevision &+= 1
         thumbnailFrameDidChange()
+        startScopes(original: true)
     }
 
     var hasPreviewFrame: Bool {

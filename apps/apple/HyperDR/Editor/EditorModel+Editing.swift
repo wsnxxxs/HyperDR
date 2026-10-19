@@ -349,6 +349,7 @@ extension EditorModel {
         lastSubmitWasDraft = false
         referenceOptions = EditDefaults.reference(encoding: encoding,
             workflow: EditDefaults.initial(encoding: encoding, sourceDomain: nil, unadjusted: nil))
+        shownReferenceOptions = referenceOptions
         source = PhotoSource(domain: reference.source.domain, unadjusted: reference.unadjusted,
                              colorSource: reference.source.colorSource,
                              hasCaptureMetadata: reference.hasCaptureMetadata)

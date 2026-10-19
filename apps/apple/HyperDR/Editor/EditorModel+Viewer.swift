@@ -52,8 +52,9 @@ extension EditorModel {
     // MARK: - Scopes
 
     /// Recomputes the scopes off the main thread, newest frame wins. The
-    /// original (reference) histogram changes only with the photo; draft
-    /// frames never reach here.
+    /// original (reference) histogram changes with the photo and with a new
+    /// original frame (the lens correction switch); draft frames never reach
+    /// here.
     func startScopes(original: Bool) {
         if original, let reference = currentReferenceFrame {
             originalScopeTask?.cancel()

@@ -326,6 +326,53 @@ import HyperDRDesign
         XCTAssertEqual(model.frameRevision, revision &+ 1)
     }
 
+    /// A failed original keeps the earlier frame on screen, so the original
+    /// details must keep using the options that frame was rendered with.
+    func testAFailedOriginalRendersTheOriginalDetailsWithTheShownOptions() async throws {
+        let (model, services) = try await openRAW(supported: true)
+        let initial = try XCTUnwrap(model.referenceOptions)
+        services.referenceHandler = { _ in throw UserFacingError(code: "decode_failed") }
+        model.setLensCorrection(false)
+        await eventually(timeout: .seconds(5)) { services.referenceRenders.count == 1 }
+        await eventually(timeout: .seconds(5)) { model.referenceOptions == initial }
+        XCTAssertEqual(model.referenceOptions, initial)
+        // The next edit finds the original out of step with the switch and tries again.
+        model.editChanged()
+        await eventually(timeout: .seconds(5)) { services.referenceRenders.count == 2 }
+    }
+
+    func testAnOriginalRenderingWhenThePhotoIsClosedIsDiscarded() async throws {
+        let (model, services) = try await openRAW(supported: true)
+        var gate: CheckedContinuation<EditorPreview?, Error>?
+        services.referenceHandler = { _ in try await withCheckedThrowingContinuation { gate = $0 } }
+        model.setLensCorrection(false)
+        await eventually(timeout: .seconds(5)) { gate != nil }
+        model.closeDocument()
+        let revision = model.frameRevision
+        gate?.resume(returning: EditorPreview(pixelSize: PixelSize(width: 9504, height: 6336),
+            source: SourceSummary(domain: .sceneReferred, colorName: "Display P3", degradationReasons: []), hasGain: false))
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(model.frameRevision, revision)
+        XCTAssertNil(model.document)
+    }
+
+    /// The result is only applied while its options are still the model's.
+    func testAnOriginalForOptionsThatAreNoLongerCurrentIsDiscarded() async throws {
+        let (model, services) = try await openRAW(supported: true)
+        let initial = try XCTUnwrap(model.referenceOptions)
+        let revision = model.frameRevision
+        services.referenceHandler = { _ in
+            model.referenceOptions = initial   // as if a newer state had been reached meanwhile
+            return EditorPreview(pixelSize: PixelSize(width: 9504, height: 6336),
+                source: SourceSummary(domain: .sceneReferred, colorName: "Display P3", degradationReasons: []), hasGain: false)
+        }
+        model.setLensCorrection(false)
+        await eventually(timeout: .seconds(5)) { services.referenceRenders.count == 1 }
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(model.frameRevision, revision)
+        XCTAssertEqual(model.shownReferenceOptions, initial)
+    }
+
     func testNoOriginalIsRenderedWhenThereIsNoSwitchToTurn() async throws {
         let (unsupported, services) = try await openRAW(supported: false)
         unsupported.setLensCorrection(false)

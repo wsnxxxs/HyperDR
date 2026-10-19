@@ -148,12 +148,16 @@ import HyperDRDesign
         var version = ExportVersion(number: 3, createdAt: Date(timeIntervalSince1970: 1_760_000_000), encodingID: "iso-gainmap-jpeg",
                                     result: ExportResult(export: "v3", fileName: "a.jpg", byteCount: 18_400_000,
                                                          pixelSize: PixelSize(width: 6000, height: 4000)))
-        let manual = ExportPresentation.historyMeta(version, locale: en)
+        let manual = ExportPresentation.historyMeta(version, locale: en).replacingOccurrences(of: "\u{00A0}", with: " ")
         XCTAssertTrue(manual.contains("HDR JPEG · 6000 × 4000 · 18.4 MB · manual"), manual)
         version.modelName = "CNN"; version.hasFrame = true
-        let ai = ExportPresentation.historyMeta(version, locale: en)
+        let ai = ExportPresentation.historyMeta(version, locale: en).replacingOccurrences(of: "\u{00A0}", with: " ")
         XCTAssertTrue(ai.hasSuffix("AI · CNN · this version has a frame"), ai)
-        XCTAssertTrue(ExportPresentation.historyMeta(version, locale: zh).contains("AI · CNN"))
+        XCTAssertTrue(ExportPresentation.historyMeta(version, locale: zh).replacingOccurrences(of: "\u{00A0}", with: " ").contains("AI · CNN"))
+        // A line may break before a dot, never after one: no plain space follows a dot, and "AI · CNN" is one piece.
+        let raw = ExportPresentation.historyMeta(version, locale: en)
+        XCTAssertFalse(raw.contains("· "), raw)
+        XCTAssertTrue(raw.contains("AI\u{00A0}·\u{00A0}CNN"), raw)
     }
 
     // MARK: Errors
@@ -203,17 +207,24 @@ import HyperDRDesign
         XCTAssertTrue(model.export.isInFlight)
     }
 
-    func testASaveFailureIsWordedByTheWayOfSavingTheModelReports() {
+    func testASaveFailureIsWordedAndOfferedSettingsByTheModelsMarkNotThePreference() {
         let chosen = UserFacingError(code: "export_folder_unwritable", detail: "x", variant: "destination")
+        let fixed = UserFacingError(code: "export_folder_unwritable")
+        // A chosen place that failed while the preference says "folder": Save As… only, and no Settings.
         for mode in [Preferences.SaveMode.ask, .folder] {
-            XCTAssertTrue(ExportPresentation.saveFailureSentence(chosen, mode: mode, locale: en).hasPrefix("Not saved: HyperDR can’t write to the chosen place"), "\(mode)")
+            let wording = ExportPresentation.saveFailure(chosen, mode: mode, locale: en)
+            XCTAssertTrue(wording.sentence.hasPrefix("Not saved: HyperDR can’t write to the chosen location"), "\(mode)")
+            XCTAssertFalse(wording.offersSettings, "\(mode)")
         }
-        // Unmarked is the fixed folder: that is something to fix in Settings.
-        let folder = UserFacingError(code: "export_folder_unwritable")
-        XCTAssertTrue(ExportPresentation.saveFailureSentence(folder, mode: .folder, locale: en).contains("chosen folder"))
-        XCTAssertTrue(ExportPresentation.saveFailureSentence(folder, mode: .ask, locale: en).contains("chosen folder"))
-        XCTAssertTrue(ExportPresentation.saveFailureSentence(UserFacingError(code: "session_expired"), mode: .ask, locale: en)
-            != AppStrings.string("export.save.failed", locale: en))
+        // The fixed folder that failed while the preference says "ask": its own sentence and Settings.
+        for mode in [Preferences.SaveMode.ask, .folder] {
+            let wording = ExportPresentation.saveFailure(fixed, mode: mode, locale: en)
+            XCTAssertTrue(wording.sentence.contains("chosen folder"), "\(mode)")
+            XCTAssertTrue(wording.offersSettings, "\(mode)")
+        }
+        let expired = ExportPresentation.saveFailure(UserFacingError(code: "session_expired"), mode: .ask, locale: en)
+        XCTAssertFalse(expired.offersSettings)
+        XCTAssertNotEqual(expired.sentence, AppStrings.string("export.save.failed", locale: en))
         XCTAssertEqual(ErrorText(chosen).body(locale: en).split(separator: "\n").first.map(String.init),
                        "HyperDR can’t write to the chosen location. Choose another location and try again.")
     }
@@ -223,8 +234,12 @@ import HyperDRDesign
         let known = ExportPresentation.fallbackNote(ExportFallbackReason(code: .missingCaptureFields,
             missingCaptureFields: ["iso", "f_number"]), model: model, locale: en)
         XCTAssertTrue(known.contains("ISO") && known.contains("aperture"), known)
-        XCTAssertEqual(AppStrings.string("history.fallback.unknown", locale: en), "The AI model fell back to the image alone.")
-        XCTAssertNotEqual(AppStrings.string("history.fallback.unknown", locale: zh), AppStrings.string("history.fallback.unknown", locale: en))
+        let unknown = ExportPresentation.fallbackNote(ExportFallbackReason(code: .unknown, missingCaptureFields: []), model: model, locale: en)
+        XCTAssertTrue(unknown.hasPrefix("Couldn’t use the selected model, so "), unknown)
+        XCTAssertFalse(unknown.contains("%"), "the model's name fills the sentence")
+        XCTAssertTrue(ExportPresentation.fallbackNote(ExportFallbackReason(code: .unknown, missingCaptureFields: []), model: model, locale: zh)
+            .hasPrefix("未能使用所选模型，已改用"))
+        XCTAssertTrue(known.hasPrefix("Some capture data is missing (ISO and aperture), so "), known)
     }
 
     func testASavePanelAnsweredAfterThePhotoChangedStartsNothing() async {

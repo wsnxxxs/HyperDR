@@ -5361,7 +5361,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Some capture data is missing (%1$@); used %2$@."
+            "value" : "Some capture data is missing (%1$@), so %2$@ was used."
           }
         },
         "zh-Hans" : {
@@ -7129,7 +7129,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Not saved: HyperDR can’t write to the chosen place. The exported file is kept in Export History."
+            "value" : "Not saved: HyperDR can’t write to the chosen location. The exported file is kept in Export History."
           }
         },
         "zh-Hans" : {
@@ -7486,7 +7486,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Quitting stops saving. No partial file is left in the chosen place."
+            "value" : "Quitting stops saving. No partial file is left in the chosen location."
           }
         },
         "zh-Hans" : {
@@ -7673,13 +7673,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "AI · %@"
+            "value" : "AI · %@"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "AI · %@"
+            "value" : "AI · %@"
           }
         }
       }
@@ -9520,23 +9520,6 @@
         }
       }
     },
-    "history.fallback.unknown" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The AI model fell back to the image alone."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "AI 模型退回到只看图像的方式。"
-          }
-        }
-      }
-    },
     "export.announce.started %@ %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9720,6 +9703,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已取消打开"
+          }
+        }
+      }
+    },
+    "history.fallback.unknown %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t use the selected model, so %@ was used."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未能使用所选模型，已改用%@。"
           }
         }
       }

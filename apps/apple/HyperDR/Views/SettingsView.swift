@@ -181,8 +181,10 @@ struct AboutSettings: View {
 /// The About page's diagnostic values as plain strings.
 enum SettingsDiagnostics {
     static func models(_ model: EditorModel, locale: Locale) -> String {
-        model.ai.models.filter(\.isEnabled).map { AppStrings.string($0.nameKey, locale: locale) }
-            .formatted(.list(type: .and, width: .narrow).locale(locale))
+        let names = model.ai.models.filter(\.isEnabled).map { AppStrings.string($0.nameKey, locale: locale) }
+        // No model enabled: say so, rather than leave an empty (and taller) row.
+        guard !names.isEmpty else { return AppStrings.string("export.summary.none", locale: locale) }
+        return names.formatted(.list(type: .and, width: .narrow).locale(locale))
     }
 
     /// "8-bit and 10-bit", "8-bit only" or "Not available".

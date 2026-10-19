@@ -428,14 +428,12 @@ private struct ExportResultView: View {
     private func saveRow(_ result: ExportResult) -> ExportSaveRow {
         let version = result.export
         if let failure = model.export.saveFailure {
-            // The sentence follows the way of saving, not the error code: a place
-            // picked in the save panel and the fixed folder both fail with the
-            // folder's code, but only the fixed folder is fixed in Settings.
-            let isFolder = model.preferences.value.saveMode == .folder
-            let sentence = ExportPresentation.saveFailureSentence(failure, mode: model.preferences.value.saveMode, locale: locale)
-            return .failed(Text(verbatim: sentence), saveAs: {
+            // The sentence and the button come from one decision: only the fixed
+            // folder is fixed in Settings (see `ExportPresentation.saveFailure`).
+            let wording = ExportPresentation.saveFailure(failure, mode: model.preferences.value.saveMode, locale: locale)
+            return .failed(Text(verbatim: wording.sentence), saveAs: {
                 ExportFlow.saveAs(model: model, version: version, choosePlace: ExportSavePanel.chooser(on: NSApp.keyWindow))
-            }, openSettings: isFolder && failure.code != "session_expired" ? { openSettings() } : nil)
+            }, openSettings: wording.offersSettings ? { openSettings() } : nil)
         }
         if model.exportSaveStates[version] == .saving || model.export.phase == .saving { return .saving }
         let place = ExportPresentation.savedFolder(result.saved)

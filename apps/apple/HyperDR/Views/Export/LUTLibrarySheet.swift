@@ -66,11 +66,10 @@ struct LUTLibrarySheet: View {
                     Image(systemName: "magnifyingglass").foregroundStyle(Color.hdr.inkMuted).accessibilityHidden(true)
                     TextField("lut.library.search", text: $query).textFieldStyle(.plain)
                 }
-                .padding(.horizontal, Space.s2).frame(height: 28)
+                .padding(.horizontal, Space.s2).frame(height: ControlMetrics.compact)
                 .background(Color.hdr.surfaceSunken, in: .rect(cornerRadius: Radius.sm))
                 Button { isPickingFiles = true } label: { Label("lut.library.import", systemImage: "plus") }
-                    .buttonStyle(.hdrSecondary)
-                    .frame(height: 28)
+                    .buttonStyle(HDRButtonStyle(.secondary, height: ControlMetrics.compact))
                     .disabled(model.lut.importBlockerKey != nil || model.lut.isBusy)
             }
             notices

@@ -7,7 +7,7 @@ import SwiftUI
     init() {
         let isTesting = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
             || ProcessInfo.processInfo.environment["XCTestBundlePath"] != nil
-        if isTesting { NSApplication.shared.setActivationPolicy(.prohibited) }
+        if isTesting { NSApplication.shared.setActivationPolicy(.prohibited) } else { UndoMenuState.shared.install() }
         _editor = State(initialValue: EditorModel(services: isTesting
             ? FakeEditorServices() : LiveEditorServices()))
     }

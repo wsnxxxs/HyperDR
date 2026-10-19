@@ -32,11 +32,13 @@ struct StatusBar: View {
         .overlay(alignment: .top) { Divider() }
     }
 
-    /// "HDR display · now 2.4×, up to 10.2×", or that an SDR display
-    /// previews in SDR. Follows the display as its headroom changes (the
+    /// "HDR display · now 2.4×, up to 10.2×", that an SDR display
+    /// previews in SDR, or that the preview is SDR on purpose (View ▸ Preview
+    /// as SDR; the export is not affected). Follows the display as its headroom changes (the
     /// model throttles this to about 4 Hz).
     private var displayText: some View {
         let display = model.display
+        if model.previewsAsSDR { return Text("status.sdrPreview").help(Text(verbatim: display.screenName)) }
         let text = display.supportsEDR
             ? Text("mac.display.edr \(Self.headroom(display.currentHeadroom)) \(Self.headroom(display.potentialHeadroom))")
             : Text("mac.display.sdr")
@@ -90,16 +92,31 @@ private struct ZoomControls: View {
             Button("editor.zoomOut", systemImage: "minus") { canvas.zoomOut() }
                 .labelStyle(.iconOnly)
                 .disabled(!canvas.canZoomOut)
-            Text(verbatim: hasPhoto ? "\(canvas.zoomPercent)%" : "—")
-                .font(Font.hdr.readout)
-                .foregroundStyle(hasPhoto ? Color.hdr.ink : Color.hdr.inkDisabled)
-                .frame(minWidth: 42)
-                .help("editor.zoomHint")
+            readout(hasPhoto: hasPhoto)
             Button("editor.zoomIn", systemImage: "plus") { canvas.zoomIn() }
                 .labelStyle(.iconOnly)
                 .disabled(!canvas.canZoomIn)
         }
         .buttonStyle(.borderless)
         .controlSize(.small)
+    }
+
+    /// "Fit" at the fitted size, else the share of the photo's own pixels
+    /// (one source pixel per backing pixel is 100%).
+    private func readout(hasPhoto: Bool) -> some View {
+        Group {
+            if !hasPhoto {
+                Text(verbatim: "—")
+            } else {
+                switch canvas.zoomReadout {
+                case .fit: Text("status.zoomFit")
+                case .percent(let value): Text(verbatim: "\(value)%")
+                }
+            }
+        }
+        .font(Font.hdr.readout)
+        .foregroundStyle(hasPhoto ? Color.hdr.ink : Color.hdr.inkDisabled)
+        .frame(minWidth: 42)
+        .help("editor.zoomHint")
     }
 }

@@ -37,10 +37,12 @@ struct Geometry {
         width = t.width;
         height = t.height;
       } else if (t.type == "imir") {
+        // ISO/IEC 23008-12 axis 0 exchanges top and bottom (a vertical flip),
+        // axis 1 left and right; ImageIO and the previous libheif path agree.
         if (t.value == 0)
-          compose(-1, 0, 0, 1, width - 1, 0);
-        else
           compose(1, 0, 0, -1, 0, height - 1);
+        else
+          compose(-1, 0, 0, 1, width - 1, 0);
       } else if (t.type == "irot") {
         if (t.value == 1) {
           compose(0, 1, -1, 0, 0, width - 1);
@@ -88,8 +90,9 @@ void tiles(const HeifFile& file, const HeifImagePlan& plan, const hevc::DecodedT
       sink, params);
   if (progress) progress->done += plan.tiles.size();
 }
-// Full-size writes are disjoint even after rotation. Reduced previews use a
-// fixed tile/row/pixel order so weighted sums cannot depend on worker count.
+// Full-size writes are disjoint even after rotation. A reduced output
+// accumulates weighted sums, so its callers must run serially in a fixed
+// tile/row/pixel order; `reduced` tells them when.
 class Output {
  public:
   Geometry geometry;
@@ -135,14 +138,20 @@ FloatImage code_plane(const HeifFile& file, const HeifImagePlan& plan, unsigned 
         auto x0 = unsigned(index % plan.columns) * plan.tile_width,
              y0 = unsigned(index / plan.columns) * plan.tile_height;
         if (channels == 1) {
-          parallel_for_rows(p.height, [&](unsigned y) {
+          const auto row = [&](unsigned y) {
             for (unsigned x = 0; x < p.width && x0 + x < plan.width && y0 + y < plan.height; ++x) {
               float v = p.luma_at(x, y) / maximum;
               out.put(x0 + x, y0 + y, &v);
             }
-          });
+          };
+          if (out.reduced) {
+            for (unsigned y = 0; y < p.height; ++y) row(y);
+          } else {
+            parallel_for_rows(p.height, row);
+          }
         } else {
           auto params = hevc::conversion_params(plan.config, plan.color ? &*plan.color : nullptr);
+          params.parallel_rows = !out.reduced;
           hevc::yuv_to_rgb(p, params, [&](unsigned y, std::span<const float> row) {
             for (unsigned x = 0; x < p.width && x0 + x < plan.width && y0 + y < plan.height; ++x) {
               float v[3]{row[x * 3], row[x * 3 + 1], row[x * 3 + 2]};
@@ -153,6 +162,74 @@ FloatImage code_plane(const HeifFile& file, const HeifImagePlan& plan, unsigned 
       },
       progress);
   return std::move(out.image);
+}
+// Alpha is sampled per source pixel, so it is kept at the oriented source size
+// whatever the output is reduced to. Codes are at most 10 bits: two bytes a
+// pixel, and the canvas is bounded by tiled_canvas_ok.
+class AlphaPlane {
+ public:
+  unsigned width = 0, height = 0;
+  [[nodiscard]] bool empty() const { return codes_.empty(); }
+  void allocate(unsigned w, unsigned h, float maximum) {
+    width = w;
+    height = h;
+    maximum_ = maximum;
+    codes_.assign(std::size_t(w) * h, 0);
+  }
+  void set(unsigned x, unsigned y, std::uint16_t code) { codes_[std::size_t(y) * width + x] = code; }
+  [[nodiscard]] float at(unsigned x, unsigned y) const {
+    return float(codes_[std::size_t(y) * width + x]) / maximum_;
+  }
+
+ private:
+  std::vector<std::uint16_t> codes_;
+  float maximum_ = 1;
+};
+AlphaPlane decode_alpha_plane(const HeifFile& file, const HeifImagePlan& plan, Progress* progress) {
+  const Geometry geometry(plan);
+  AlphaPlane alpha;
+  const float maximum = (1U << plan.config.bit_depth) - 1;
+  alpha.allocate(geometry.width, geometry.height, maximum);
+  tiles(
+      file, plan,
+      [&](std::size_t index, hevc::DecodedPicture&& p) {
+        auto x0 = unsigned(index % plan.columns) * plan.tile_width,
+             y0 = unsigned(index / plan.columns) * plan.tile_height;
+        // Rows write disjoint destination pixels after any rotation or flip.
+        parallel_for_rows(p.height, [&](unsigned y) {
+          for (unsigned x = 0; x < p.width && x0 + x < plan.width && y0 + y < plan.height; ++x) {
+            const auto [mx, my] = geometry.map(x0 + x, y0 + y);
+            if (mx >= 0 && my >= 0 && mx < geometry.width && my < geometry.height)
+              alpha.set(unsigned(mx), unsigned(my), std::uint16_t(p.luma_at(x, y)));
+          }
+        });
+      },
+      progress);
+  return alpha;
+}
+// Box-average the alpha plane onto the (budget-reduced) output grid.
+FloatImage reduce_alpha(const AlphaPlane& alpha, unsigned width, unsigned height) {
+  FloatImage out(width, height, 1);
+  parallel_for_rows(height, [&](unsigned y) {
+    const double top = double(y) * alpha.height / height,
+                 bottom = double(y + 1) * alpha.height / height;
+    for (unsigned x = 0; x < width; ++x) {
+      const double left = double(x) * alpha.width / width,
+                   right = double(x + 1) * alpha.width / width;
+      double sum = 0, total = 0;
+      for (unsigned sy = unsigned(top); sy < std::min(alpha.height, unsigned(std::ceil(bottom)));
+           ++sy)
+        for (unsigned sx = unsigned(left); sx < std::min(alpha.width, unsigned(std::ceil(right)));
+             ++sx) {
+          const double weight = (std::min(right, double(sx + 1)) - std::max(left, double(sx))) *
+                                (std::min(bottom, double(sy + 1)) - std::max(top, double(sy)));
+          sum += alpha.at(sx, sy) * weight;
+          total += weight;
+        }
+      out.at(x, y, 0) = total > 0 ? float(sum / total) : 0;
+    }
+  });
+  return out;
 }
 SourceColor color_for(const HeifImagePlan& plan, ColorGamut gamut) {
   SourceColor color(gamut);
@@ -172,12 +249,12 @@ SourceColor color_for(const HeifImagePlan& plan, ColorGamut gamut) {
   return color;
 }
 DecodedImage primary(const HeifFile& file, const HeifImagePlan& plan, ColorGamut gamut,
-                     unsigned edge, bool preserve_alpha, FloatImage* alpha_out,
+                     unsigned edge, bool preserve_alpha, AlphaPlane* alpha_out,
                      Progress* progress) {
   const auto color = color_for(plan, gamut);
-  auto alpha_plan = file.resolve_alpha(plan.item_id);
-  FloatImage alpha;
-  if (alpha_plan) alpha = code_plane(file, alpha_plan->image, 1, progress);
+  auto alpha_plan = file.resolve_alpha(plan.item_id, HeifCanvas::Tiled, &plan);
+  AlphaPlane alpha;
+  if (alpha_plan) alpha = decode_alpha_plane(file, alpha_plan->image, progress);
   Output out(plan, 3, edge);
   if (alpha_plan && (alpha.width != out.geometry.width || alpha.height != out.geometry.height))
     throw HeifReadError("HEIF alpha dimensions differ after transforms");
@@ -201,7 +278,7 @@ DecodedImage primary(const HeifFile& file, const HeifImagePlan& plan, ColorGamut
             for (unsigned x = 0; x < p.width; ++x) {
               const auto [ax, ay] = out.geometry.map(x0 + x, y0 + y);
               const float a = ax >= 0 && ay >= 0 && ax < alpha.width && ay < alpha.height
-                                  ? alpha.at(ax, ay, 0)
+                                  ? alpha.at(unsigned(ax), unsigned(ay))
                                   : 0;
               for (unsigned c = 0; c < 3; ++c)
                 unassociated[x * 3 + c] = a > 0 ? unassociated[x * 3 + c] / a : 0;
@@ -213,7 +290,7 @@ DecodedImage primary(const HeifFile& file, const HeifImagePlan& plan, ColorGamut
             for (unsigned x = 0; x < p.width; ++x) {
               const auto [ax, ay] = out.geometry.map(x0 + x, y0 + y);
               const float a = ax >= 0 && ay >= 0 && ax < alpha.width && ay < alpha.height
-                                  ? alpha.at(ax, ay, 0)
+                                  ? alpha.at(unsigned(ax), unsigned(ay))
                                   : 0;
               for (unsigned c = 0; c < 3; ++c) linear[x * 3 + c] *= a;
             }
@@ -240,14 +317,20 @@ DecodedImage primary(const HeifFile& file, const HeifImagePlan& plan, ColorGamut
   if (alpha_out) *alpha_out = std::move(alpha);
   return result;
 }
-void composite(DecodedImage& result, const FloatImage& alpha) {
-  if (alpha.pixels.empty()) return;
+void composite(DecodedImage& result, const AlphaPlane& source_alpha) {
+  if (source_alpha.empty()) return;
+  const bool same = source_alpha.width == result.linear_p3.width &&
+                    source_alpha.height == result.linear_p3.height;
+  FloatImage reduced;
+  if (!same) reduced = reduce_alpha(source_alpha, result.linear_p3.width, result.linear_p3.height);
   parallel_for_rows(result.linear_p3.height, [&](unsigned y) {
-    for (unsigned x = 0; x < result.linear_p3.width; ++x)
+    for (unsigned x = 0; x < result.linear_p3.width; ++x) {
+      const float a = same ? source_alpha.at(x, y) : reduced.at(x, y, 0);
       for (unsigned c = 0; c < 3; ++c) {
-        result.linear_p3.at(x, y, c) *= alpha.at(x, y, 0);
-        if (result.authored_sdr) result.authored_sdr->at(x, y, c) *= alpha.at(x, y, 0);
+        result.linear_p3.at(x, y, c) *= a;
+        if (result.authored_sdr) result.authored_sdr->at(x, y, c) *= a;
       }
+    }
   });
 }
 }  // namespace
@@ -257,10 +340,15 @@ FloatImage decode_heif_gain(const HeifFile& file, const HeifImagePlan& plan, uns
 DecodedImage decode_heic_bytes(const std::vector<std::uint8_t>& bytes,
                                const RawDecodeOptions& options, std::string_view path) {
   const auto file = read_heif(bytes);
-  const auto plan = file.resolve_image();
+  const auto plan = file.resolve_image(0, HeifCanvas::Tiled);
   auto exif_bytes = file.exif();
   auto exif = read_exif(exif_bytes.data(), exif_bytes.size());
-  auto orientation = plan.transforms.empty() ? exif.orientation.value_or(1) : 1;
+  // Only a rotation or mirror property replaces the Exif orientation; a crop
+  // does not (the previous libheif path and ImageIO behave the same).
+  const bool oriented_by_container =
+      std::any_of(plan.transforms.begin(), plan.transforms.end(),
+                  [](const HeifTransform& t) { return t.type == "irot" || t.type == "imir"; });
+  auto orientation = oriented_by_container ? 1 : exif.orientation.value_or(1);
   const bool iso = std::find(file.brands.begin(), file.brands.end(), "tmap") != file.brands.end() ||
                    file.tmap_references().has_value();
   std::optional<HeifGainMapPlan> gain;
@@ -271,7 +359,7 @@ DecodedImage decode_heic_bytes(const std::vector<std::uint8_t>& bytes,
     if (!inspection.structurally_valid || !inspection.has_tmap_brand || !inspection.has_tmap_item ||
         !inspection.has_dimg_reference)
       throw HeifReadError("Adaptive HDR HEIC has invalid tmap structure");
-    gain = file.resolve_gain_map();
+    gain = file.resolve_gain_map(HeifCanvas::Tiled);
     if (!gain || !gain->metadata) throw HeifReadError("Adaptive HDR HEIC lacks gain map");
   } else if (!options.ignore_embedded_gain_map) {
     for (const auto& [id, item] : file.items) {
@@ -285,7 +373,7 @@ DecodedImage decode_heic_bytes(const std::vector<std::uint8_t>& bytes,
         break;
       }
       try {
-        gain = HeifGainMapPlan{plan, file.resolve_image(id), {}, 0};
+        gain = HeifGainMapPlan{plan, file.resolve_image(id, HeifCanvas::Tiled), {}, 0};
         if (gain->gain.config.bit_depth != 8 || gain->gain.width > plan.width ||
             gain->gain.height > plan.height) {
           gain.reset();
@@ -302,11 +390,11 @@ DecodedImage decode_heic_bytes(const std::vector<std::uint8_t>& bytes,
     }
   }
   const bool reconstruct = gain && !options.ignore_embedded_gain_map;
-  auto alpha_plan = file.resolve_alpha();
+  auto alpha_plan = file.resolve_alpha(0, HeifCanvas::Tiled, &plan);
   Progress progress{options, path, 0,
                     plan.tiles.size() + (alpha_plan ? alpha_plan->image.tiles.size() : 0) +
                         (reconstruct ? gain->gain.tiles.size() : 0)};
-  FloatImage alpha;
+  AlphaPlane alpha;
   auto result = primary(file, plan, options.default_gamut,
                         reconstruct ? 0 : options.preview_max_edge, reconstruct, &alpha, &progress);
   apply_exif(result, exif);

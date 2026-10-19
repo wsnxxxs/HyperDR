@@ -9,6 +9,10 @@
 #include <unistd.h>
 #include <cmath>
 #include <memory>
+#include <exception>
+#include <optional>
+#include <type_traits>
+#include <utility>
 #include <mutex>
 #include "hyperdr/foundation/cancel.hpp"
 #include "hyperdr/foundation/file_io.hpp"
@@ -19,6 +23,25 @@
 
 namespace hyperdr {
 namespace {
+// Clang's Objective-C pool cleanup is not guaranteed during C++ exception
+// unwinding. Catch inside the pool, leave it normally, then rethrow after pop.
+// Return values own only C++ data, so moving them out preserves pixel bytes.
+template<class Function>
+auto with_raw_pool(Function&& function) {
+  using Value=std::invoke_result_t<Function>;
+  using Storage=std::conditional_t<std::is_void_v<Value>,bool,Value>;
+  std::optional<Storage> value;
+  std::exception_ptr failure;
+  @autoreleasepool {
+    try {
+      if constexpr(std::is_void_v<Value>) {function();value=true;}
+      else value.emplace(function());
+    } catch(...) {failure=std::current_exception();}
+  }
+  if(failure)std::rethrow_exception(failure);
+  if constexpr(!std::is_void_v<Value>)return std::move(*value);
+}
+
 struct Identity {
   std::string path;
   dev_t device{};
@@ -215,7 +238,7 @@ float raw_preview_scale(std::uint32_t edge, std::uint32_t source_edge) {
 }
 float raw_preview_scale(const std::filesystem::path& path, std::uint32_t edge) {
   if (!edge) return 1;
-  @autoreleasepool {
+  return with_raw_pool([&]() -> float {
     readable_identity(path);
     CGImageSourceRef source = CGImageSourceCreateWithURL(
         (__bridge CFURLRef)[NSURL fileURLWithPath:@(path.c_str())], nullptr);
@@ -226,25 +249,25 @@ float raw_preview_scale(const std::filesystem::path& path, std::uint32_t edge) {
     const auto w = [properties[(__bridge NSString*)kCGImagePropertyPixelWidth] unsignedIntValue];
     const auto h = [properties[(__bridge NSString*)kCGImagePropertyPixelHeight] unsignedIntValue];
     return raw_preview_scale(edge, std::max(w, h));
-  }
+  });
 }
 RawHeader probe_apple_raw(const std::filesystem::path& path) {
-  @autoreleasepool {
+  return with_raw_pool([&]() -> RawHeader {
     auto lock = cancellable_cache_lock();
     auto& item = opened(path);
     return {item.width, item.height, item.processing};
-  }
+  });
 }
 void release_apple_raw_cache(const std::filesystem::path& path) {
-  @autoreleasepool {
+  return with_raw_pool([&]() -> void {
     std::lock_guard lock(cache_mutex);
     std::error_code ec;
     const auto canonical = std::filesystem::weakly_canonical(path, ec);
     if (!ec && cached && cached->identity.path == canonical.string()) cached.reset();
-  }
+  });
 }
 RawLensMetadata probe_raw_lens_metadata(const std::filesystem::path& path) {
-  @autoreleasepool {
+  return with_raw_pool([&]() -> RawLensMetadata {
     auto lock = cancellable_cache_lock();
     auto& item = opened(path);
     NSDictionary* tiff = item.filter.properties[(__bridge NSString*)kCGImagePropertyTIFFDictionary];
@@ -254,13 +277,13 @@ RawLensMetadata probe_raw_lens_metadata(const std::filesystem::path& path) {
             text(exif[(__bridge NSString*)kCGImagePropertyExifLensModel]),
             [exif[(__bridge NSString*)kCGImagePropertyExifFocalLength] doubleValue],
             [exif[(__bridge NSString*)kCGImagePropertyExifFNumber] doubleValue]};
-  }
+  });
 }
 namespace codec {
 DecodedImage decode_apple_raw(const std::filesystem::path& path, const RawDecodeOptions& options) {
   if (!std::isfinite(options.digital_gain) || options.digital_gain <= 0)
     throw std::invalid_argument("invalid RAW digital gain");
-  @autoreleasepool {
+  return with_raw_pool([&]() -> DecodedImage {
     auto lock = cancellable_cache_lock();
     auto& item = opened(path, options.source_sha256);
     CIRAWFilter* filter = item.filter;
@@ -341,7 +364,7 @@ DecodedImage decode_apple_raw(const std::filesystem::path& path, const RawDecode
     }
     check_cancelled();
     return out;
-  }
+  });
 }
 }  // namespace codec
 namespace testing {
@@ -366,7 +389,7 @@ void set_raw_open_hook(std::function<void()> value) {
   open_hook = std::move(value);
 }
 std::string raw_neutral_settings() {
-  @autoreleasepool {
+  return with_raw_pool([&]() -> std::string {
     std::lock_guard lock(cache_mutex);
     if (!cached) throw std::runtime_error("no RAW filter");
     CIRAWFilter* f = cached->filter;
@@ -389,7 +412,7 @@ std::string raw_neutral_settings() {
     if (f.isMoireReductionSupported) w.member("moire", f.moireReductionAmount);
     if (f.isDespeckleSupported) w.member("despeckle", f.despeckleAmount);
     return w.end_object().take();
-  }
+  });
 }
 void set_raw_os_build_override(std::string value) {
   std::lock_guard lock(override_mutex);

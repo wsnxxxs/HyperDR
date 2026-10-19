@@ -26,6 +26,42 @@ import XCTest
         return (model, services, model.undoManager)
     }
 
+    /// G-08: from the moment a photo starts opening until its first edited frame
+    /// the inspector cannot change the photo, whatever else is true.
+    func testNothingCanBeEditedBeforeTheFirstEditedFrame() async {
+        let services = FakeEditorServices(openDelay: .zero, previewDelay: .milliseconds(400))
+        let model = EditorModel(services: services)
+        model.attach(undoManager: UndoManager())
+        model.open([url])
+        // Opening: the placeholder document, no frame yet.
+        XCTAssertEqual(model.document?.phase, .opening)
+        func assertLocked(_ moment: String, file: StaticString = #filePath, line: UInt = #line) {
+            XCTAssertEqual(model.editingLockReason, .loading, moment, file: file, line: line)
+            XCTAssertTrue(model.isEditingLocked, moment, file: file, line: line)
+            XCTAssertFalse(model.controls.isEmpty, file: file, line: line)
+            for control in model.controls {
+                XCTAssertFalse(control.isEnabled, "\(control.spec.key) at \(moment)", file: file, line: line)
+            }
+            XCTAssertFalse(model.canSetWorkflow, moment, file: file, line: line)
+            XCTAssertFalse(model.canResetAll, moment, file: file, line: line)
+            XCTAssertFalse(model.canOpenDocument, "a photo is still opening (\(moment))", file: file, line: line)
+        }
+        assertLocked("opening")
+        // The original is on screen and the edit is still rendering.
+        await eventually(timeout: .seconds(3)) { model.document?.phase == .rendering }
+        assertLocked("rendering")
+        let before = model.control("brightness").value
+        model.adjust("brightness", to: 0.9)
+        model.setAIMode(.optimized)
+        model.selectEncoding("pq")
+        XCTAssertEqual(model.control("brightness").value, before, "an edit before the first frame changes nothing")
+        XCTAssertEqual(model.ai.mode, .manual)
+        await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
+        XCTAssertNil(model.editingLockReason)
+        XCTAssertTrue(model.controls.contains { $0.isEnabled })
+        model.closeDocument()
+    }
+
     func testDragAndRepeatedArrowKeysEachUndoAsOneStepButSingleKeysStaySeparate() async {
         let (model, _, undo) = await opened()
         let initial = model.control("brightness").value

@@ -160,7 +160,7 @@ nonisolated final class CanvasCompositor {
 
     private func prepare(_ frame: PreviewFrame, weight: Float, previous: Entry?, command: any MTLCommandBuffer) throws -> Entry {
         if var previous, previous.source === frame {
-            if previous.weight != weight {
+            if GainWeight.needsRebuild(from: previous.weight, to: weight) {
                 try encode(previous.planes, into: previous.texture, slice: 0, weight: weight, weightedOnly: true, command: command)
                 previous.weight = weight
             }
@@ -173,9 +173,7 @@ nonisolated final class CanvasCompositor {
     }
 
     private static func weight(_ headroom: Double, frame: PreviewFrame) -> Float {
-        let m = frame.metadata, base = m.baseHeadroom ?? 0
-        let alternate = m.alternateHeadroom ?? m.headroomStops
-        return alternate > base ? Float(min(1, max(0, (log2(max(1, headroom))-base)/(alternate-base)))) : 1
+        GainWeight.value(headroom: headroom, metadata: frame.metadata)
     }
 
     /// All preparation and the complete display pass share the ONE presenting
@@ -203,15 +201,17 @@ nonisolated final class CanvasCompositor {
                 atlas = texture
             }
             detailOriginal = wantOriginal; detailEdited = wantEdited; detailTexture = atlas
+            detailOriginalWeight = originalWeight; detailEditedWeight = editedWeight
         } else if let atlas = detailTexture {
-            if let frame = wantOriginal, let weight = originalWeight, weight != detailOriginalWeight {
+            if let frame = wantOriginal, let weight = originalWeight, GainWeight.needsRebuild(from: detailOriginalWeight, to: weight) {
                 try encode(frame, into: atlas, slice: 0, weight: weight, weightedOnly: true, command: command)
+                detailOriginalWeight = weight
             }
-            if let frame = wantEdited, let weight = editedWeight, weight != detailEditedWeight {
+            if let frame = wantEdited, let weight = editedWeight, GainWeight.needsRebuild(from: detailEditedWeight, to: weight) {
                 try encode(frame, into: atlas, slice: 3, weight: weight, weightedOnly: true, command: command)
+                detailEditedWeight = weight
             }
         }
-        detailOriginalWeight = originalWeight; detailEditedWeight = editedWeight
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = target
         pass.colorAttachments[0].loadAction = .clear

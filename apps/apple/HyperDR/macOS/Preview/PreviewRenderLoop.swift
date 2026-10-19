@@ -14,6 +14,8 @@ nonisolated struct CanvasSnapshot: @unchecked Sendable {
         case synthetic(original: Bool)
         /// No photo: present a transparent drawable once and let go of the frame.
         case empty
+        /// Hidden or detached: release prepared textures without acquiring a drawable.
+        case suspended
     }
     var content: Content
     var transform: CanvasTransform
@@ -151,7 +153,9 @@ nonisolated final class PreviewRenderLoop: @unchecked Sendable {
 
             condition.lock()
             rendering = false
-            if presented {
+            if presented, case .suspended = snapshot.content {
+                // Resource release is not a presentation.
+            } else if presented {
                 if snapshot.generation < lastPresented { presentedOutOfOrder = true }
                 lastPresented = snapshot.generation
                 presentations += 1
@@ -177,6 +181,11 @@ nonisolated final class PreviewRenderLoop: @unchecked Sendable {
         apply(snapshot)
         do {
             switch snapshot.content {
+            case .suspended:
+                synthetic = nil
+                renderer.releaseFrame()
+                showsEmpty = false
+                return true
             case .empty:
                 guard snapshot.drawableSize.width > 0, snapshot.drawableSize.height > 0 else {
                     renderer.releaseFrame()

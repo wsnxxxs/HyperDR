@@ -90,6 +90,11 @@ import UniformTypeIdentifiers
     /// Editor history never shares policy or registrations with AppKit text.
     @ObservationIgnored let undoManager = UndoManager()
     private(set) var isRestoring = false
+    /// The deadline passed while the last photo was still being found (a
+    /// bookmark on a network volume, say): there is no document yet to carry
+    /// `isOpeningSlowly`, and the canvas offers to cancel all the same.
+    private var restoreIsSlow = false
+    var isRestoringSlowly: Bool { isRestoring && restoreIsSlow }
     /// The control being dragged and the values when the drag began.
     @ObservationIgnored var gesture: (key: String, start: EditSnapshot)?
     /// The encoding the next photo opens with; kept for this run.
@@ -427,7 +432,8 @@ import UniformTypeIdentifiers
 
     private func startCameraSupportDeadline(openedAt: Duration, ticket: Int) {
         // Arm at launch even before restoreLast identifies the source; a
-        // restored photograph adopts this deadline. Once it passes, a RAW is
+        // restored photograph adopts this deadline (and until it is identified a
+        // slow restore is `isRestoringSlowly`). Once it passes, a RAW is
         // "preparing camera support" and any other format is "opening slowly".
         let clock = services.openClock
         let deadline = openedAt + .milliseconds(1500)
@@ -438,9 +444,9 @@ import UniformTypeIdentifiers
         cameraSupportTask = Task { [weak self] in
             do { try await clock.sleep(until: deadline) }
             catch { return }
-            guard let self, !Task.isCancelled, generation == ticket,
-                  openRollback != nil, document?.phase == .opening else { return }
-            publishSlowOpen()
+            guard let self, !Task.isCancelled, generation == ticket else { return }
+            if openRollback != nil, document?.phase == .opening { publishSlowOpen() }
+            else if isRestoring, document == nil { restoreIsSlow = true }
         }
     }
 

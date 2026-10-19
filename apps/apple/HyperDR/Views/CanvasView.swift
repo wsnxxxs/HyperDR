@@ -11,6 +11,7 @@ struct CanvasView: View {
     var showsInspector = true
 
     @State private var dropCoordinator = PhotoDropCoordinator()
+    @Environment(\.locale) private var locale
 
     private var drop: PhotoDropState { dropCoordinator.state }
 
@@ -18,7 +19,8 @@ struct CanvasView: View {
         Group {
             switch model.workspace {
             case .editing: viewport
-            case .empty: DropTarget(model: model, window: window, drop: drop)
+            case .empty:
+                if model.isRestoringSlowly { restoringSlowly } else { DropTarget(model: model, window: window, drop: drop) }
             }
         }
         .padding(padding)
@@ -33,6 +35,20 @@ struct CanvasView: View {
         if drop == .rejects { return .rejects }
         if drop == .accepts, model.export.isInFlight, let name = dropCoordinator.firstName { return .replacesDuringExport(name: name) }
         return nil
+    }
+
+    /// The last photograph is still being found and it has taken over 1.5 s:
+    /// the same first-frame progress a slow open shows, with Cancel, and no
+    /// file name yet (raw-states §9, N10).
+    private var restoringSlowly: some View {
+        FirstFrameProgress(label: "stage.reading", offersCancel: true) {
+            OpenCancellation.cancel(model, locale: locale)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.hdr.previewBackdrop, in: .rect(cornerRadius: Radius.lg))
+        .clipShape(.rect(cornerRadius: Radius.lg))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("stage.label")
     }
 
     private var viewport: some View {

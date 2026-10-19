@@ -192,7 +192,9 @@ struct FrameSettingsPanel: View {
             }
             controls
                 .disabled(lock != nil)
-                .help(lock == .exporting ? Text("exportLock.help") : Text(verbatim: ""))
+                // The note's tooltip lives on a layer of its own while an export
+                // runs, so no control's tooltip (or lack of one) hides it.
+                .overlay { if lock == .exporting { Color.clear.contentShape(.rect).help(Text("exportLock.help")) } }
         }
     }
 
@@ -202,7 +204,7 @@ struct FrameSettingsPanel: View {
                 Toggle("frame.enabled", isOn: isOn)
                     .toggleStyle(HDRSwitchToggleStyle())
                     .disabled(!exportAvailable)
-                    .help(exportAvailable ? Text(verbatim: "") : Text("frame.enabled.unavailable"))
+                    .help(when: exportAvailable ? nil : "frame.enabled.unavailable")
                 Text("frame.enabled.note")
                     .font(Font.hdr.caption)
                     .foregroundStyle(Color.hdr.inkMuted)

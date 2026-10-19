@@ -2,6 +2,7 @@ import AppKit
 import Observation
 import SwiftUI
 import XCTest
+import HyperDRDesign
 @testable import HyperDR
 
 /// The open that is slow without being a RAW (raw-states §9): the model's
@@ -143,5 +144,75 @@ import XCTest
         XCTAssertTrue(OpenCancelKeyRule.handle(escape(), context: context(), model: model))
         XCTAssertFalse(model.isPeekingOriginal)
         XCTAssertEqual(model.document?.name, old.lastPathComponent)
+    }
+
+    // MARK: A restore that is slow before it knows the photo (N10)
+
+    func testARestoreStillLookingForItsPhotoIsSlowAfterOnePointFiveSecondsAndNeverARaw() async {
+        let clock = Clock(); defer { clock.finish() }
+        let services = ScriptedEditorServices(); services.openClock = clock; services.usesRestoreGate = true
+        let model = EditorModel(services: services)
+        model.launch()
+        await eventually(timeout: .seconds(3)) { services.restoreWaiter != nil }
+        clock.advance(to: .milliseconds(1499))
+        try? await Task.sleep(for: .milliseconds(50))
+        XCTAssertFalse(model.isRestoringSlowly)
+        clock.advance(to: .milliseconds(1500))
+        await eventually(timeout: .seconds(3)) { model.isRestoringSlowly }
+        XCTAssertNil(model.document, "nothing is known about the photo yet")
+        XCTAssertTrue(model.canCancelOpen)
+        model.cancelOpen()
+        XCTAssertFalse(model.isRestoringSlowly); XCTAssertFalse(model.canCancelOpen)
+        services.restoreWaiter?.resume(returning: .none); services.restoreWaiter = nil
+    }
+
+    func testTheSlowRestoreHandsOverToTheDocumentsOwnSlowFlag() async {
+        let clock = Clock(); defer { clock.finish() }
+        let services = ScriptedEditorServices(); services.openClock = clock; services.usesRestoreGate = true
+        let model = EditorModel(services: services)
+        model.launch()
+        await eventually(timeout: .seconds(3)) { services.restoreWaiter != nil }
+        clock.advance(to: .seconds(2))
+        await eventually(timeout: .seconds(3)) { model.isRestoringSlowly }
+        services.restoreWaiter?.resume(returning: .restored(services.placeholder(for: jpeg))); services.restoreWaiter = nil
+        await eventually(timeout: .seconds(3)) { model.document?.isOpeningSlowly == true }
+        XCTAssertFalse(model.isRestoringSlowly)
+        XCTAssertEqual(model.document?.isPreparingCameraSupport, false)
+    }
+
+    func testTheCanvasOffersCancelWhileARestoreIsSlow() async throws {
+        let clock = Clock(); defer { clock.finish() }
+        let services = ScriptedEditorServices(); services.openClock = clock; services.usesRestoreGate = true
+        let model = EditorModel(services: services)
+        model.launch()
+        await eventually(timeout: .seconds(3)) { services.restoreWaiter != nil }
+        func picture() throws -> [UInt8] {
+            let host = NSHostingView(rootView: CanvasView(model: model, window: EditorWindowState(), padding: 0)
+                .environment(\.locale, Locale(identifier: "en")).frame(width: 600, height: 400))
+            host.appearance = NSAppearance(named: .darkAqua)
+            host.frame = CGRect(x: 0, y: 0, width: 600, height: 400)
+            host.layoutSubtreeIfNeeded()
+            let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            return Array(UnsafeBufferPointer(start: bitmap.bitmapData, count: bitmap.bytesPerRow * bitmap.pixelsHigh))
+        }
+        let waiting = try picture()
+        clock.advance(to: .seconds(2))
+        await eventually(timeout: .seconds(3)) { model.isRestoringSlowly }
+        XCTAssertNotEqual(try picture(), waiting, "the slow restore shows its progress and Cancel")
+        services.restoreWaiter?.resume(returning: .none); services.restoreWaiter = nil
+    }
+
+    // MARK: The corner chip's height (N8)
+
+    func testTheCornerChipIs26PointsHighWithAndWithoutCancel() {
+        func height<V: View>(_ view: V) -> CGFloat {
+            NSHostingView(rootView: view.environment(\.locale, Locale(identifier: "en"))).fittingSize.height
+        }
+        let plain = height(Label { Text("stage.reading") } icon: { CanvasSpinner(size: 12) }
+            .frame(height: BusyChip.contentHeight).hdrOverlayChip())
+        let slow = height(SlowOpenChip(label: "stage.reading", fileName: "A.jpg", cancel: {}))
+        XCTAssertEqual(plain, 26, accuracy: 0.5)
+        XCTAssertEqual(slow, 26, accuracy: 0.5)
     }
 }

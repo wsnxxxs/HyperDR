@@ -426,6 +426,7 @@ struct CanvasStatus: View {
             SlowOpenChip(label: label, fileName: document.name, cancel: cancelOpen)
         } else {
             Label { Text(label) } icon: { CanvasSpinner(size: 12) }
+                .frame(height: BusyChip.contentHeight)
                 .hdrOverlayChip()
         }
     }
@@ -472,6 +473,9 @@ struct FirstFrameProgress: View {
     let label: LocalizedStringKey
     /// Set once the open is slow: the file's name and a way out go under the stage text.
     var slowFileName: String? = nil
+    /// Offer the way out even with no file name to show (a restore that is
+    /// still looking for its photograph).
+    var offersCancel = false
     var cancel: () -> Void = {}
 
     var body: some View {
@@ -483,7 +487,7 @@ struct FirstFrameProgress: View {
             }
             .foregroundStyle(Color.hdr.overlayInk)
             .accessibilityElement(children: .combine)
-            if let slowFileName { SlowOpenDetails(fileName: slowFileName, cancel: cancel) }
+            if slowFileName != nil || offersCancel { SlowOpenDetails(fileName: slowFileName, cancel: cancel) }
         }
         .environment(\.colorScheme, .dark)
     }

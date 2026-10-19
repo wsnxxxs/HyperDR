@@ -20,7 +20,7 @@ ENCODE_CANCEL_LIMIT = 1.0 if SANITIZED else .2
 
 
 class Error(ctypes.Structure):
-    _fields_ = [("code", ctypes.c_char_p), ("message", ctypes.c_char_p)]
+    _fields_ = [("code", ctypes.c_char_p), ("message", ctypes.c_char_p), ("detail_json",ctypes.c_char_p)]
 
 
 LIB.hyperdr_schema_json.argtypes = [ctypes.POINTER(ctypes.c_void_p),
@@ -385,7 +385,7 @@ class EngineContract(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="hyperdr-source-geometry-") as temporary:
             dng_path = Path(temporary) / "crop.dng"
             synthetic_dng(dng_path)
-            for raw in (dng_path, source):
+            for raw in (source, raw_fixture("canon-5d-iii-lossy-dng"), raw_fixture("leica-c-portrait-rwl")):
                 with self.subTest(source=raw.name):
                     self.assert_source_geometry(raw, (64, 80) if raw == dng_path else None)
                     self.assert_source_geometry(raw, half_size=True)
@@ -400,25 +400,118 @@ class EngineContract(unittest.TestCase):
                 with self.subTest(source=heic.name):
                     self.assert_source_geometry(heic)
 
+    def test_raw_lens_correction_adapter_and_cli_flag(self):
+        request=result(LIB.hyperdr_normalize_options,encoded({"input":"/fixture.raw","output":"/out","report":"/report.json","lensCorrection":False}))
+        self.assertFalse(json.loads(request)["raw_lens_correction"])
+        self.assertIn("--no-raw-lens-correction",json.loads(result(LIB.hyperdr_command_line,request)))
+        default=json.loads(result(LIB.hyperdr_normalize_options,b"{}"))
+        self.assertTrue(default["raw_lens_correction"])
+
+    def test_apple_raw_cli_abi_and_repeated_processes(self):
+        if not self.capabilities["codecs"]:
+            self.skipTest("requires codecs")
+        golden=json.loads((Path(__file__).parent/"golden/raw_ciraw.json").read_text())
+        for ident in ("sony-ilce-7s-arw","canon-5d-iii-lossy-dng","leica-c-portrait-rwl"):
+            source=raw_fixture(ident)
+            with self.subTest(fixture=ident),tempfile.TemporaryDirectory(prefix="hyperdr-apple-raw-") as temporary:
+                root=Path(temporary);destination=root/"out";report_path=root/"report.json"
+                probe=result(LIB.hyperdr_probe,self.engine,os.fsencode(source))
+                self.assertEqual(probe,subprocess.check_output([CLI,"probe",str(source)]))
+                session=Handle()
+                checked(LIB.hyperdr_preview_open,self.engine,os.fsencode(source),None,ctypes.byref(session))
+                try:
+                    request={"preview_max_edge":64,"command":{"compact":False}}
+                    packet=self.packet(LIB.hyperdr_preview_render,session,request)
+                    target=root/"preview.hpf"
+                    subprocess.run([CLI,"preview-frame",str(source),"--preview-max-edge","64","--output",str(target)],capture_output=True,check=True)
+                    self.assertEqual(packet,target.read_bytes())
+                    self.assertEqual(packet,self.packet(LIB.hyperdr_preview_render,session,request))
+                    length=struct.unpack_from("<I",packet,8)[0]
+                    metadata=json.loads(packet[12:12+length])
+                    self.assertEqual(metadata["raw"],json.loads(probe)["raw"])
+                    self.assertEqual(hashlib.sha256(packet).hexdigest(),golden["cases"][ident]["preview_sha256"])
+                finally:
+                    LIB.hyperdr_preview_close(session)
+                request={"encoding":"iso-gainmap-jpeg","command":{"input":str(source),"output":str(destination),"overwrite":True}}
+                report,_=self.compare_export(request,["convert",str(source),"--output",str(destination),"--encoding","iso-gainmap-jpeg","--report",str(report_path)],destination/(source.stem+"-hyperdr.jpg"),report_path)
+                self.assertEqual(report["files"][0]["raw_processing"]["engine"],"apple-ciraw")
+                self.assertEqual(report["files"][0]["raw_processing"]["decoder_version"],json.loads(probe)["raw"]["decoderVersion"])
+                self.assertEqual(report["files"][0]["raw_processing"]["os_build"],json.loads(probe)["raw"]["osBuild"])
+                self.assertEqual(hashlib.sha256((destination/(source.stem+"-hyperdr.jpg")).read_bytes()).hexdigest(),golden["cases"][ident]["export_sha256"])
+
+    def test_synthetic_dng_is_unsupported_by_system(self):
+        if not self.capabilities["codecs"]:
+            self.skipTest("requires codec-enabled build")
+        with tempfile.TemporaryDirectory(prefix="hyperdr-unsupported-raw-") as temporary:
+            source=Path(temporary)/"unsupported.dng"
+            synthetic_dng(source)
+            renamed=source.with_suffix(".ARW")
+            renamed.write_bytes(source.read_bytes())
+            expected={"container":"dng","model":""}
+            for path in (source,renamed):
+                for function in (LIB.hyperdr_probe,LIB.hyperdr_raw_metadata):
+                    output,error=ctypes.c_void_p(),ctypes.POINTER(Error)()
+                    try:
+                        self.assertNotEqual(function(self.engine,os.fsencode(path),ctypes.byref(output),ctypes.byref(error)),0)
+                        self.assertIsNone(output.value)
+                        self.assertEqual(error.contents.code,b"raw_unsupported")
+                        self.assertEqual(json.loads(error.contents.detail_json),expected)
+                        message=error.contents.message
+                    finally:
+                        LIB.hyperdr_error_free(error)
+                        LIB.hyperdr_string_free(output)
+                session=Handle()
+                checked(LIB.hyperdr_preview_open,self.engine,os.fsencode(path),None,ctypes.byref(session))
+                try:
+                    for function in (LIB.hyperdr_preview_render,LIB.hyperdr_model_gain):
+                        buffer,error=Buffer(),ctypes.POINTER(Error)()
+                        try:
+                            self.assertNotEqual(function(session,encoded({"command":{"model_id":"research-cnn-v1"}}),None,ctypes.byref(buffer),ctypes.byref(error)),0)
+                            self.assertEqual(error.contents.code,b"raw_unsupported")
+                            self.assertEqual(json.loads(error.contents.detail_json),expected)
+                            self.assertFalse(buffer.owner)
+                        finally:
+                            LIB.hyperdr_error_free(error)
+                            LIB.hyperdr_buffer_free(ctypes.byref(buffer))
+                finally:
+                    LIB.hyperdr_preview_close(session)
+                cli=subprocess.run([CLI,"probe",str(path)],capture_output=True)
+                self.assertNotEqual(cli.returncode,0)
+                self.assertIn(message,cli.stderr)
+                self.assertNotIn(b'"container"',cli.stderr)
+                request={"command":{"input":str(path),"output":str(Path(temporary)/"out"),"overwrite":True}}
+                output,error=ctypes.c_void_p(),ctypes.POINTER(Error)()
+                try:
+                    # Conversion returns a report even when the file fails.
+                    LIB.hyperdr_convert(self.engine,encoded(request),CALLBACK(),None,None,ctypes.byref(output),ctypes.byref(error))
+                    self.assertFalse(error)
+                    report=json.loads(ctypes.string_at(output))
+                    file=report["files"][0]
+                    self.assertEqual(file["error_code"],"raw_unsupported")
+                    self.assertEqual(file["error_detail"],expected)
+                    self.assertEqual(file["detail"].encode(),message)
+                finally:
+                    LIB.hyperdr_error_free(error)
+                    LIB.hyperdr_string_free(output)
+
     def test_invalid_resources_are_options_not_source_failures(self):
         if not self.capabilities["codecs"]:
             self.skipTest("requires codec-enabled build")
         with tempfile.TemporaryDirectory(prefix="hyperdr-resource-errors-") as temporary:
             root = Path(temporary)
             source, profile = root / "valid.dng", root / "valid.dcp"
-            synthetic_dng(source)
+            source=raw_fixture("sony-ilce-7s-arw")
             dcp(profile, camera_model="")
             session = Handle()
             checked(LIB.hyperdr_preview_open, self.engine, os.fsencode(source), None, ctypes.byref(session))
             try:
                 # Establish that the photograph and the profile used by XMP
                 # cases are valid; only the resource under test is broken.
-                self.packet(LIB.hyperdr_preview_render, session,
-                            {"command": {"_raw_profile_path": str(profile)}})
+                self.packet(LIB.hyperdr_preview_render, session, {})
                 for suffix, command_key, flag, diagnostic in [
-                    ("dcp", "_raw_profile_path", "--raw-profile", b"DCP profile:"),
-                    ("xmp", "_raw_look_path", "--raw-look", b"XMP look:"),
-                    ("lcp", "_lens_profile_path", "--raw-lens-profile", b"LCP"),
+                    ("dcp", "_raw_profile_path", "--raw-profile", "Apple RAW 引擎不支持该选项".encode()),
+                    ("xmp", "_raw_look_path", "--raw-look", "Apple RAW 引擎不支持该选项".encode()),
+                    ("lcp", "_lens_profile_path", "--raw-lens-profile", "Apple RAW 引擎不支持该选项".encode()),
                     ("cube", "_lut_path", "--lut", b"colour LUT")]:
                     for missing in (False, True):
                         with self.subTest(resource=suffix, missing=missing):
@@ -468,7 +561,7 @@ class EngineContract(unittest.TestCase):
                      (root / "unknown.xyz", "unsupported_format"),
                      (root / "corrupt.png", "decode_failed"),
                      (root / "corrupt.jpg", "decode_failed"),
-                     (root / "corrupt.ARW", "decode_failed"),
+                     (root / "corrupt.ARW", "raw_unsupported"),
                      (root / "missing.ARW", "source_unreadable")]
             for path, _ in cases:
                 if not path.stem.startswith("missing"):
@@ -513,7 +606,7 @@ class EngineContract(unittest.TestCase):
                     try:
                         self.assertNotEqual(status, 0)
                         self.assertIsNone(output.value)
-                        self.assertEqual(error.contents.code, b"source_unreadable" if path.stem == "missing" else b"decode_failed")
+                        self.assertEqual(error.contents.code, b"source_unreadable" if path.stem == "missing" else b"raw_unsupported")
                     finally:
                         LIB.hyperdr_error_free(error)
             finally:
@@ -533,6 +626,7 @@ class EngineContract(unittest.TestCase):
                     # The frozen Python output still says `ultrahdr`; the engine
                     # writes the canonical name (U12).
                     expected = dict(case["settings"])
+                    expected["raw_lens_correction"]=case["options"].get("lensCorrection", True)
                     if expected["encoding"] == "ultrahdr":
                         expected["encoding"] = "iso-gainmap-jpeg"
                     argv = ["iso-gainmap-jpeg" if previous == "--encoding" and item == "ultrahdr" else item
@@ -866,7 +960,7 @@ class EngineContract(unittest.TestCase):
             dcp(profile)
             # A raster isolates request/default handling from RAW development.
             # Test the two explicit flags independently, as the CLI does.
-            for has_profile in (False, True):
+            for has_profile in (False,):
                 for contrast in (None, 1.19):
                     for vibrance in (None, .23):
                         with self.subTest(profile=has_profile, contrast=contrast, vibrance=vibrance):
@@ -1020,7 +1114,7 @@ class EngineContract(unittest.TestCase):
     def test_raw_profiles_and_external_gain_use_captured_bytes(self):
         if not self.capabilities["codecs"]:
             self.skipTest("requires codec-enabled build")
-        for resource in ("dcp", "xmp", "lcp", "external-gain", "external-report"):
+        for resource in ("external-gain", "external-report"):
             with self.subTest(resource=resource), tempfile.TemporaryDirectory(prefix="hyperdr-calibration-snapshot-") as temporary:
                 root = Path(temporary)
                 source = root / "source.dng"
@@ -1190,7 +1284,7 @@ class EngineContract(unittest.TestCase):
             arguments = json.loads(result(LIB.hyperdr_command_line, encoded(request)))[1:]
             self.assertEqual(arguments[arguments.index("--frame") + 1], str(frame_file))
             report, cli_report = self.compare_export(request, arguments, output / "sample-hyperdr.jpg", report_path)
-            self.assertEqual(report["schema"], 12)
+            self.assertEqual(report["schema"], 13)
             self.assertEqual(report["files"][0]["frame"]["width"], layout["width"])
             self.assertEqual(report["files"][0]["frame"], cli_report["files"][0]["frame"])
             def resume():
@@ -1352,8 +1446,8 @@ class EngineContract(unittest.TestCase):
                     self.assertEqual("".join(e["text"] for e in events).encode(), cli.stderr)
                     self.assertEqual(events[0]["phase"], "decode")
                     self.assertEqual(events[-1]["phase"], "complete")
-                    # Presentation-frame geometry extends the report to schema 12.
-                    self.assertEqual(report["schema"], 12)
+                    # Presentation-frame geometry remains in report schema 13.
+                    self.assertEqual(report["schema"], 13)
                 models = json.loads(subprocess.check_output([CLI, "model-list", "--json"]))
                 # Core-only ncnn is intentionally absent. The model table owns
                 # availability; no second registry is maintained by this test.

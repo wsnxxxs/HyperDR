@@ -10,7 +10,9 @@
 #include <filesystem>
 
 namespace hyperdr::codec {
+[[nodiscard]] DecodedImage decode_apple_raw(const std::filesystem::path& path,
+                                          const RawDecodeOptions& options = {});
 
 [[nodiscard]] DecodedImage decode_raw(const std::filesystem::path& path,
-                                      const RawDecodeOptions& options);
+                                      const RawDecodeOptions& options = {});
 }  // namespace hyperdr::codec

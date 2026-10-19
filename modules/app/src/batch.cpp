@@ -51,11 +51,6 @@ struct Staged {
   std::filesystem::path analysis_cache;
 };
 
-bool half_size_matches_full(std::uint32_t half, std::uint32_t full) {
-  return half != 0 && full != 0 &&
-         (full == half * 2U || full + 1U == half * 2U);
-}
-
 bool raster_preview_matches_full(const DecodeInfo& decoded) {
   if (!decoded.target_dimensions_applied || !decoded.decoded_width || !decoded.decoded_height)
     return false;
@@ -88,7 +83,7 @@ const char* native_model_development_kind(InputDomain domain) noexcept {
     case InputDomain::kDisplayReferredSdr:
       return "display-p3-passthrough";
     case InputDomain::kSceneReferred:
-      return "raw-neutral-v1";
+      return "raw-neutral-v2";
     case InputDomain::kDisplayReferredHdr:
       return "display-hdr-split";
     case InputDomain::kDualRendition:
@@ -131,13 +126,15 @@ GainMapOptions replay_external_development(
     throw std::invalid_argument("external gain model binding mismatch: " +
                                 std::string(reason));
   };
+  if(binding.recipe.id=="raw-neutral-v1" || binding.recipe.id=="raw-dcp-v1" || binding.recipe.id=="photographic-v1")
+    reject("配方不匹配，请用新版本重新生成");
   if (sha256_file_hex(input) != binding.source_sha256) {
     reject("source sha256");
   }
   if (binding.preprocessing_fingerprint != model_preprocessing_fingerprint(options)) {
     reject("preprocessing changed; regenerate the model input and gain");
   }
-  if (binding.highlight_recovery !=
+  if (!decoded.raw && binding.highlight_recovery !=
       highlight_recovery_name(options.raw.highlight_recovery)) {
     reject("highlight recovery");
   }
@@ -167,16 +164,9 @@ GainMapOptions replay_external_development(
       binding.delivered_crop_width == decoded.target_width &&
       binding.delivered_crop_height == decoded.target_height &&
       raster_preview_matches_full(decoded);
-  const bool delivered_matches = raster_preview || (binding.raw_half_size
-      ? (options.decode_intent == DecodeIntent::Preview && same_delivered_size) ||
-            (half_size_matches_full(binding.delivered_crop_width,
-                                    decoded.decoded_width) &&
-             half_size_matches_full(binding.delivered_crop_height,
-                                    decoded.decoded_height))
-      : same_delivered_size ||
-            (options.decode_intent == DecodeIntent::Preview && options.raw.half_size &&
-             half_size_matches_full(decoded.decoded_width, binding.delivered_crop_width) &&
-             half_size_matches_full(decoded.decoded_height, binding.delivered_crop_height)));
+  const bool delivered_matches = decoded.raw
+      ? same_delivered_size && binding.raw_decoder_version==decoded.raw->decoder_version && binding.raw_scale==decoded.raw->scale
+      : raster_preview || same_delivered_size;
   if (!delivered_matches) reject("delivered crop");
 
   const auto profile_hash = image.raw_profile ? image.raw_profile->profile->sha256 : std::string{};
@@ -187,10 +177,7 @@ GainMapOptions replay_external_development(
   if (binding.raw_lens_profile_sha256 != lens_hash) reject("RAW LCP profile");
   const auto expected_recipe = image.raw_profile ? "raw-dcp-v1" :
       native_model_development_kind(image.describe_input().domain);
-  const bool legacy_scene_recipe = binding.recipe.id == "photographic-v1" &&
-      image.describe_input().domain == InputDomain::kSceneReferred && !image.raw_profile;
-  if (binding.recipe.id != expected_recipe && !legacy_scene_recipe)
-    reject("development recipe does not match the decoded input domain");
+  if(binding.recipe.id != expected_recipe) reject("配方不匹配，请用新版本重新生成");
   GainMapOptions replay = options.gain;
   replay.auto_exposure = false;
   replay.exposure_ev = binding.recipe.exposure_ev;
@@ -252,6 +239,8 @@ Staged decode_stage(const std::filesystem::path& path,
     // through the linear-light resampler alone, so its bytes do not change.
     if (options.decode_intent == DecodeIntent::Preview) {
       raw.preview_max_edge = options.preview_max_edge;
+    } else {
+      raw.preview_max_edge = 0;
     }
 
     staged.image = decode_cached_image(path, options, raw, &staged.analysis_cache);
@@ -259,6 +248,9 @@ Staged decode_stage(const std::filesystem::path& path,
     staged.decoded = true;
   } catch (const Cancelled&) {
     throw;
+  } catch (const RawUnsupported& e) {
+    staged.decoded=false;staged.result.message=e.what();staged.result.detail=e.what();
+    staged.result.error_code="raw_unsupported";staged.result.error_detail_json=e.detail_json();
   } catch (const std::bad_alloc&) {
     staged.decoded = false;
     staged.result.message = options.decode_intent == DecodeIntent::Export
@@ -461,6 +453,7 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     validate_encoding_headroom(options.encoding, rendered_stats.headroom_stops);
     result.sensor_width = staged.image.decode.sensor_width;
     result.source_color = staged.image.source_color;
+    result.raw_processing = staged.image.decode.raw;
     result.raw_white_balance = staged.image.raw_white_balance;
     result.raw_color_matrix = staged.image.raw_color_matrix;
     result.raw_lens_profile = path_utf8(staged.image.raw_lens_profile_path);
@@ -606,6 +599,7 @@ FileResult convert_file(const std::filesystem::path& input,
                         const ConvertOptions& requested_options,
                         const std::string& fingerprint, ProgressSink* sink) {
   auto options = requested_options;
+  options.raw.progress_sink = sink;
   const auto raw_resources = raw_decode_resources(options.raw);
   const bool resources_unprepared = (!options.raw.snapshots &&
       std::any_of(raw_resources.begin(), raw_resources.end(), [](const auto& resource) { return !resource.path.empty(); })) ||
@@ -651,6 +645,7 @@ void validate_frame_resources(const FrameSpec& frame) {
 int run_conversion(const ConvertOptions& requested_options, ProgressSink* sink, std::string* report) {
   check_cancelled();
   auto options = requested_options;
+  options.raw.progress_sink = sink;
   prepare_frame_snapshot(options);
   apply_output_color_options(options);
   // Validate the paths first so missing or invalid resources keep their

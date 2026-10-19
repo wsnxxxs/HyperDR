@@ -102,6 +102,7 @@ std::string normalize_options(const Value& edit) {
       {"color_gamut", get(edit, "colorGamut", text("srgb"))},
       {"clamp_srgb", sdr ? boolean(false) : get(edit, "clampSrgb", boolean(false))},
       {"highlight_recovery", get(edit, "highlightRecovery", text("blend"))},
+      {"raw_lens_correction",get(edit,"lensCorrection",boolean(true))},
       {"lut_input", get(edit, "lutInput", text("srgb"))},
       {"lut_output", get(edit, "lutOutput", text("srgb"))},
       {"lut_strength", get(edit, "lutStrength", number(1))},
@@ -185,6 +186,7 @@ std::vector<std::string> command_line(const Value& normalized) {
     flag("--exposure", "auto");
     flag("--headroom", fmt(value("headroom")));
   } else flag("--gain-strength", fmt(value("gain_strength")));
+  if (!value("raw_lens_correction").boolean()) args.emplace_back("--no-raw-lens-correction");
   flag("--highlight-recovery", value("highlight_recovery").string());
   flag("--quality", fmt(value("quality")));
   flag("--depth", fmt(cmd("depth")));

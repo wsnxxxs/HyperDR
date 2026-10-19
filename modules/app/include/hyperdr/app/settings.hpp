@@ -190,6 +190,7 @@ struct FileResult {
   bool target_dimensions_applied{true};
   bool default_crop_present{false};
   bool decode_degraded{false};
+  std::optional<RawProcessing> raw_processing;
   std::string raw_white_balance;
   std::string raw_color_matrix;
   std::string raw_profile_name, raw_profile_sha256, raw_profile_camera, raw_profile_tone;
@@ -229,6 +230,7 @@ struct FileResult {
   double gain_min{};
   double gain_max{};
   // Present only for a typed per-file export failure.
+  std::string error_detail_json; // Library-generated structured JSON object, empty if absent.
   std::string error_code;
   std::string detail;
   // Set when a frame was placed: `width`/`height` above are then the canvas,

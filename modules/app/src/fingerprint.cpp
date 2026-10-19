@@ -147,7 +147,7 @@ std::string model_preprocessing_fingerprint(const ConvertOptions& options) {
       "|clamp_srgb=" + (options.clamp_srgb ? "1" : "0");
   const auto resources = raw_decode_resources(options.raw);
   for (const auto& setting : settings()) {
-    if (!setting.affects_decoded_pixels || setting.key == "half_size" ||
+    if (!setting.affects_decoded_pixels || setting.key == "half_size" || setting.key == "highlight_recovery" ||
         setting.key == "preview_max_edge") continue;
     if (std::any_of(resources.begin(), resources.end(), [&](const auto& resource) {
           return resource.key == setting.key;

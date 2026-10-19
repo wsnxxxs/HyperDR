@@ -284,9 +284,10 @@ void check_model_binding_rejects_stale_gain() {
   binding.sensor_height = 80;
   binding.requested_crop_width = 64;
   binding.requested_crop_height = 80;
-  binding.delivered_crop_width = 32;
-  binding.delivered_crop_height = 40;
-  binding.raw_half_size = true;
+  binding.delivered_crop_width = 64;
+  binding.delivered_crop_height = 80;
+  binding.raw_half_size = false;
+  binding.raw_decoder_version="7";binding.raw_scale=1;
   binding.model_width = 1024;
   binding.model_height = 1280;
   binding.gain_width = 64;
@@ -308,6 +309,7 @@ void check_model_binding_rejects_stale_gain() {
 
   hyperdr::DecodedImage image;
   image.domain = hyperdr::InputDomain::kSceneReferred;
+  image.decode.raw=hyperdr::RawProcessing{};image.decode.raw->decoder_version="7";
   image.metadata.orientation = 1;
   image.decode.sensor_width = 96;
   image.decode.sensor_height = 80;
@@ -330,7 +332,7 @@ void check_model_binding_rejects_stale_gain() {
           "model recipe look was not replayed");
 
   auto neutral_external = external;
-  neutral_external.binding->recipe.id = "raw-neutral-v1";
+  neutral_external.binding->recipe.id = "raw-neutral-v2";
   neutral_external.binding->recipe.contrast = 1.0F;
   neutral_external.binding->recipe.vibrance = 0.0F;
   neutral_external.binding->recipe.pop = 0.0F;
@@ -341,33 +343,24 @@ void check_model_binding_rejects_stale_gain() {
               neutral.look.vibrance == 0.0F && neutral.look.pop == 0.0F,
           "neutral deployment recipe was not replayed exactly");
 
-  // The model input and the fast RAW preview are both decoded at half size.
-  // A final export below still has to match the binding at exactly 2x.
-  auto preview_image = image;
-  preview_image.decode.decoded_width = 32;
-  preview_image.decode.decoded_height = 40;
-  auto preview_options = options;
-  preview_options.decode_intent = hyperdr::DecodeIntent::Preview;
-  preview_options.raw.half_size = true;
-  static_cast<void>(hyperdr::replay_external_development(
-      external, source, preview_image, preview_options));
-  auto full_external = external;
-  full_external.binding->raw_half_size = false;
-  full_external.binding->delivered_crop_width = 64;
-  full_external.binding->delivered_crop_height = 80;
-  static_cast<void>(hyperdr::replay_external_development(
-      full_external, source, preview_image, preview_options));
-  bool reduced_export_rejected = false;
-  try {
-    static_cast<void>(hyperdr::replay_external_development(
-        full_external, source, preview_image, options));
-  } catch (const std::invalid_argument&) { reduced_export_rejected = true; }
-  require(reduced_export_rejected, "full model binding accepted a half-size final export");
-
+  auto preview_image=image;preview_image.decode.raw->scale=.5F;
+  auto preview_options=options;preview_options.decode_intent=hyperdr::DecodeIntent::Preview;
+  bool scale_rejected=false;
+  try { hyperdr::replay_external_development(external,source,preview_image,preview_options); }
+  catch(const std::invalid_argument&){scale_rejected=true;}
+  require(scale_rejected,"RAW scale mismatch accepted");
+  auto full_external=external;
+  for(auto old:{"raw-neutral-v1","raw-dcp-v1","photographic-v1"}) {
+    auto legacy=external;legacy.binding->recipe.id=old;
+    bool rejected=false;try{hyperdr::replay_external_development(legacy,source,image,options);}
+    catch(const std::invalid_argument&){rejected=true;}
+    require(rejected,"legacy model recipe accepted");
+  }
   // A full raster binding can drive JPEG/PNG/HEIF/AVIF previews at more than
   // LibRaw's one fixed 2x reduction. Source and crop identity still match.
   auto raster = image;
   raster.domain = hyperdr::InputDomain::kDisplayReferredSdr;
+  raster.decode.raw.reset();
   raster.decode.sensor_width = raster.decode.target_width = 6401;
   raster.decode.sensor_height = raster.decode.target_height = 4267;
   auto raster_external = full_external;
@@ -423,10 +416,14 @@ void check_model_binding_rejects_stale_gain() {
   require(rejected([](auto& gain, auto&, auto&) {
             gain.binding->recipe.id = "display-p3-passthrough";
           }), "display recipe was accepted for scene-referred input");
-  require(rejected([](auto&, auto&, auto& current) {
+  require(!rejected([](auto&, auto&, auto& current) {
             current.raw.highlight_recovery = hyperdr::HighlightRecovery::Reconstruct;
           }),
-          "gain from a different highlight recovery was accepted");
+          "ignored highlight recovery invalidated RAW binding");
+  require(rejected([](auto&, auto& current, auto&) { current.decode.raw->decoder_version="future"; }),
+          "gain from a different RAW decoder was accepted");
+  require(rejected([](auto&, auto&, auto& current) { current.raw.lens_correction=false; }),
+          "gain from a different RAW lens correction was accepted");
   require(rejected([](auto&, auto&, auto& current) { current.raw.digital_gain = 2.0F; }),
           "gain from a different RAW digital gain was accepted");
   require(rejected([](auto&, auto&, auto& current) { current.clamp_srgb = true; }),

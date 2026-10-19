@@ -5,6 +5,13 @@ semantic versioning; dates use ISO 8601.
 
 ## Unreleased
 
+- Develop RAW inputs with Apple's default CIRAWFilter decoder on Metal, with
+  neutral scene-linear settings, automatic lens correction and cancellable
+  render blocks. RAW dimensions, colours and exported bytes intentionally change;
+  decode caches and model bindings are invalidated. Unsupported RAW files report
+  `raw_unsupported` with structured container/model details (C ABI version 2).
+  Reports use schema 13 and RAW models use `raw-neutral-v2`.
+
 - Cancel progressive JPEG input during libjpeg input scans, including the
   pre-scanline startup phase; repaired MPF inspection includes recorded values.
 

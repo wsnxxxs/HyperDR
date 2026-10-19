@@ -62,7 +62,7 @@ int main() {
     require(base_variant != hyperdr::decode_cache_variant(after, after.raw),
             "preview geometry did not invalidate analysis identity");
     after = before;
-    after.raw.half_size = true;
+    after.raw.lens_correction = false;
     require(base_variant != hyperdr::decode_cache_variant(after, after.raw),
             "RAW decoding change did not invalidate analysis identity");
     const auto key = hyperdr::decode_cache_key(source_path, base_variant);

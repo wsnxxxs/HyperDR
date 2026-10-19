@@ -105,6 +105,15 @@
       "default": ""
     },
     {
+      "key": "raw_lens_correction",
+      "flag": "--no-raw-lens-correction",
+      "kind": "boolean",
+      "flag_sets_false": true,
+      "affects_output_bytes": true,
+      "help": "Disable automatic Apple RAW lens correction",
+      "default": true
+    },
+    {
       "key": "raw_gain",
       "flag": "--raw-gain",
       "kind": "number",

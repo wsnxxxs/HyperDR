@@ -69,6 +69,20 @@ std::string Engine::capabilities() const {
 }
 std::string Engine::probe(const std::filesystem::path& source) const {
   ExecutionScope execution({config_.heic_tile_workers, config_.memory_budget_bytes});
+  if (is_raw_extension(lower_extension(source))) {
+    const auto header=probe_apple_raw(source);
+    json::Writer writer;
+    writer.begin_object().member("schema", "hyperdr.probe/v1")
+        .member("path",path_utf8(source)).member("width",header.width).member("height",header.height)
+        .member("orientation",1).member("inputDomain","scene-referred").member("headroom",1)
+        .member("degraded",false).begin_object("sourceColor")
+        .member("name","Apple RAW").member("primaries","Display P3")
+        .member("transfer","Scene-linear").member("source","apple-ciraw").end_object()
+        .begin_object("raw").member("supported",true)
+        .member("lensCorrectionSupported",header.processing.lens_correction_supported)
+        .member("decoderVersion",header.processing.decoder_version).member("osBuild",raw_os_build()).end_object().end_object();
+    return writer.take()+'\n';
+  }
   // This uses the shared oriented decoder, including RAW default-crop rules.
   // Header-only probing can replace the decode without changing this document.
   const auto decoded = decode_image(source, RawDecodeOptions{});

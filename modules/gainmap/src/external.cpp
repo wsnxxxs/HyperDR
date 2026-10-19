@@ -160,12 +160,13 @@ ExternalGainBinding read_model_binding(const json::Value& value,
   }
 
   binding.recipe.id = required_string(recipe, "id");
-  if (binding.recipe.id != "photographic-v1" &&
-      binding.recipe.id != "display-p3-passthrough" &&
-      binding.recipe.id != "raw-neutral-v1" && binding.recipe.id != "raw-dcp-v1" &&
-      binding.recipe.id != "display-hdr-split") {
-    throw std::invalid_argument(
-        "external model binding has unsupported development recipe");
+  if(binding.recipe.id!="display-p3-passthrough" && binding.recipe.id!="raw-neutral-v2" && binding.recipe.id!="display-hdr-split")
+    throw std::invalid_argument("配方不匹配，请用新版本重新生成");
+  if(binding.recipe.id=="raw-neutral-v2") {
+    binding.raw_decoder_version=required_string(source,"raw_decoder_version");
+    binding.raw_scale=finite_number(required_member(source,"raw_scale"),"raw_scale");
+    if(binding.raw_scale!=.125F && binding.raw_scale!=.25F && binding.raw_scale!=.5F && binding.raw_scale!=1.F)
+      throw std::invalid_argument("invalid RAW scale bucket");
   }
   binding.recipe.exposure_ev =
       finite_number(required_member(recipe, "exposure_ev"), "recipe exposure_ev");

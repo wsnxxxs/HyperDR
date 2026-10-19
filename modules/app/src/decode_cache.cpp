@@ -57,7 +57,8 @@ constexpr std::array<char, 8> kMagic{'H', 'D', 'R', 'C', 'A', 'C', 'H', '3'};
 // 34 persists the input colour interpretation shown in previews and reports.
 // 35 retains upright full-resolution photo dimensions before preview reduction.
 // 36 decodes ISO gain-map JPEGs with our pixel-centred RGB reconstruction.
-constexpr std::uint32_t kCacheSchema = 36;
+// 37 uses Apple RAW pixels and records the system decoder, scale and build.
+constexpr std::uint32_t kCacheSchema = 37;
 
 // x86-64 and arm64, the only targets this project builds for, are both little
 // endian; the cache is a local scratch format and is never transported.
@@ -171,6 +172,12 @@ std::string metadata_json(const DecodedImage& value) {
       // one that would appear only on the second run of a batch.
       .member("input_domain", input_domain_name(value.domain))
       .member("has_gps", m.gps.has_value());
+  if(d.raw) writer.begin_object("apple_raw")
+      .member("engine",d.raw->engine).member("decoder_version",d.raw->decoder_version)
+      .member("os_build",d.raw->os_build).member("digital_gain",d.raw->digital_gain)
+      .member("baseline_exposure",d.raw->baseline_exposure)
+      .member("lens_supported",d.raw->lens_correction_supported).member("lens_applied",d.raw->lens_correction_applied)
+      .member("scale",d.raw->scale).member("block_rows",d.raw->block_rows).end_object();
   write_capture_value(writer, "metadata_capture_iso", m.capture.iso);
   write_capture_value(writer, "metadata_capture_exposure_seconds", m.capture.exposure_seconds);
   write_capture_value(writer, "metadata_capture_f_number", m.capture.f_number);
@@ -234,6 +241,24 @@ void apply_metadata_json(const std::string& text, DecodedImage& out, const RawDe
     const auto* value = document.find(key);
     return value != nullptr && value->is_bool() && value->boolean();
   };
+  if(const auto* value=document.find("apple_raw")) {
+    for(auto key:{"engine","decoder_version","os_build","digital_gain","baseline_exposure","lens_supported","lens_applied","scale","block_rows"})
+      if(!value->find(key))throw std::invalid_argument("incomplete Apple RAW cache metadata");
+    RawProcessing p;
+    p.engine=value->find("engine")->string();p.decoder_version=value->find("decoder_version")->string();
+    p.os_build=value->find("os_build")->string();p.digital_gain=value->find("digital_gain")->number();
+    p.baseline_exposure=value->find("baseline_exposure")->number();
+    p.lens_correction_supported=value->find("lens_supported")->boolean();
+    p.lens_correction_applied=value->find("lens_applied")->boolean();
+    p.scale=value->find("scale")->number();
+    const auto rows=value->find("block_rows")->number();
+    if(p.engine!="apple-ciraw" || p.decoder_version.empty() || p.os_build.empty() ||
+        !(p.digital_gain>0 && p.digital_gain<=64) ||
+        (p.scale!=.125F && p.scale!=.25F && p.scale!=.5F && p.scale!=1.F) ||
+        rows!=std::max(64.F,std::round(512*p.scale)))
+      throw std::invalid_argument("invalid Apple RAW cache metadata");
+    p.block_rows=static_cast<std::uint32_t>(rows);out.decode.raw=p;
+  }
   out.metadata.make = string_at("make");
   out.metadata.model = string_at("model");
   out.metadata.lens = string_at("lens");
@@ -403,7 +428,7 @@ std::string decode_cache_variant(const ConvertOptions& options,
   std::string variant = std::string(intent) + '/' +
       (raw.ignore_embedded_gain_map ? "base-only" : "embedded-gain");
   for (const auto& setting : settings()) {
-    if (!setting.affects_decoded_pixels) continue;
+    if (!setting.affects_decoded_pixels || setting.key=="highlight_recovery" || setting.key=="half_size") continue;
     const auto value = setting.read(reflected);
     variant += '/';
     variant += setting.key;
@@ -421,6 +446,11 @@ std::string decode_cache_variant(const ConvertOptions& options,
     variant += ':';
     variant += raw.resource(resource.path) ? raw.resource(resource.path)->sha256
         : configuration_resource([&] { return sha256_file_hex(resource.path); });
+  }
+  if(is_raw_extension(lower_extension(options.input))) {
+    const float scale=raw_preview_scale(options.input,raw.preview_max_edge);
+    variant+="/raw_engine=apple-ciraw/os_build="+raw_os_build()+"/scale="+json::number_text(scale)+
+        "/block_rows="+std::to_string(std::max(64U,static_cast<unsigned>(std::lround(512*scale))));
   }
   return variant;
 }
@@ -446,6 +476,7 @@ DecodedImage decode_cached_image(const std::filesystem::path& input,
 
   auto effective_raw = raw;
   effective_raw.default_gamut = options.default_gamut;
+  effective_raw.source_sha256 = options.decode_cache_source_sha256;
   auto decoded = decode_image(input, effective_raw);
   decoded.transform_planes([&](FloatImage plane) {
     return resample_to_max_edge(std::move(plane), options.preview_max_edge);

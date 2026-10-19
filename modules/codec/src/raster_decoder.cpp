@@ -62,7 +62,7 @@ std::optional<DecodedImage> decode_apple_legacy_heic(
 
 namespace {
 
-using codec::decode_raw;
+using codec::decode_apple_raw;
 using codec::apply_exif;
 using codec::interleaved_rgb_to_linear_p3;
 using codec::normalize_orientation;
@@ -1072,7 +1072,7 @@ static DecodedImage decode_image_impl(const std::filesystem::path& path, const R
   // signature cannot tell a .dng from any other TIFF, and LibRaw's memory
   // admission works from the path rather than from a buffer we would otherwise
   // have to hold alongside the sensor data.
-  if (is_raw_extension(ext)) return decode_raw(path, options);
+  if (is_raw_extension(ext)) return decode_apple_raw(path, options);
 
   // Everything else is decided by its leading bytes. A phone gallery exports
   // HEIC under a .jpg name routinely, and until now that file reached the plain

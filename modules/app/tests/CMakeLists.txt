@@ -22,3 +22,6 @@ if(HYPERDR_WITH_CODECS)
 endif()
 
 hyperdr_add_test(resource_snapshot_test LINK HyperDR::app)
+if(TARGET resource_snapshot_test)
+  target_compile_definitions(resource_snapshot_test PRIVATE HYPERDR_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+endif()

@@ -1,0 +1,18 @@
+{
+  "reason": "R1: RAW 改用 Apple 显影",
+  "os_build": "26A434",
+  "cases": {
+    "sony-ilce-7s-arw": {
+      "preview_sha256": "0bec86b750a3654d420a780596e4ff2d306f5286476da75f0272e6c0e795d996",
+      "export_sha256": "303d3dad7cd7a2df3c555de626182d77fbd9cf20e2401431050e5ae49a76ef00"
+    },
+    "canon-5d-iii-lossy-dng": {
+      "preview_sha256": "8c87989722c93ac39706b273f65325a965bc089b329dd9b97460bafcc9daa636",
+      "export_sha256": "3c2571ef64190e99ed90b9130caa658992606bca358aeeacc608c9acd6835c9c"
+    },
+    "leica-c-portrait-rwl": {
+      "preview_sha256": "4d9f8f5ef2f04b7242bec2c12277b9a5401b3d7bd7a53eeb14b16d43420f83bc",
+      "export_sha256": "0a787ccf2c19c9ea31f0b35e12802994368deef5c3f0ba6620699813373f5a26"
+    }
+  }
+}

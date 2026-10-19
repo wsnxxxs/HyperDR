@@ -93,6 +93,9 @@ PreviewPixels photo_preview_frame(PhotoRenditions result,
         .member("regionY", *region->top);
   }
   if (input.content_peak_nits) writer.member("inputContentPeakNits", *input.content_peak_nits);
+  if(decode.raw) writer.begin_object("raw").member("supported",true)
+      .member("lensCorrectionSupported",decode.raw->lens_correction_supported)
+      .member("decoderVersion",decode.raw->decoder_version).member("osBuild",raw_os_build()).end_object();
   writer.begin_array("degradationReasons");
   for (const auto& reason : decode.degradation_reasons) writer.element(reason);
   writer.end_array().end_object();
@@ -124,8 +127,7 @@ struct PreviewSource {
 
 struct PreviewSession::State {
   std::vector<std::unique_ptr<PreviewSource>> sources;
-  std::string raw_key;
-  DecodedImage raw_master;
+  std::vector<std::pair<std::string, DecodedImage>> raw_masters;
   PreviewSource& decode(const ConvertOptions& options) {
     const auto key = decode_cache_key(options.input,
         decode_cache_variant(options, options.raw), options.decode_cache_source_sha256);
@@ -139,7 +141,7 @@ struct PreviewSession::State {
     }
     auto source = std::make_unique<PreviewSource>();
     source->key = key;
-    if (options.raw.half_size && is_raw_extension(lower_extension(options.input))) {
+    if (is_raw_extension(lower_extension(options.input))) {
       const auto cache_file = options.decode_cache_directory.empty()
           ? std::filesystem::path{} : decode_cache_path(options.decode_cache_directory, key);
       if (!cache_file.empty()) {
@@ -148,24 +150,34 @@ struct PreviewSession::State {
       }
       const bool disk_hit = !cache_file.empty() && read_decode_cache(cache_file, source->image, &options.raw);
       if (!disk_hit) {
-        // LibRaw produces the same half-size pixels for every preview edge.
-        // Keep one such decode, then derive the two bounded render sizes below.
+        // One CIRAWFilter render per scale bucket serves all bounded edges.
         auto master_options = options;
         master_options.preview_max_edge = 0;
-        master_options.raw.preview_max_edge = 0;
+        // Preserve the RAW scale bucket while removing the final bounded resize.
         const auto master_key = decode_cache_key(options.input,
             decode_cache_variant(master_options, master_options.raw),
             options.decode_cache_source_sha256);
-        if (raw_key != master_key) {
-          raw_master = {};
-          raw_key.clear();
-          // This large intermediate belongs to this worker only. Persisting it
-          // adds substantial disk I/O to the first frame and worker retirement.
-          master_options.decode_cache_directory.clear();
-          raw_master = decode_cached_image(options.input, master_options, master_options.raw);
-          raw_key = master_key;
+        // A full-size detail source is itself the scale-1 master. Reuse it
+        // rather than retaining two complete copies of a 61MP decode.
+        const auto full_source=std::find_if(sources.begin(),sources.end(),
+            [&](const auto& item){return item->key==master_key;});
+        if(full_source!=sources.end()) {
+          source->image=(*full_source)->image;
+        } else {
+          auto master=std::find_if(raw_masters.begin(),raw_masters.end(),
+              [&](const auto& item){return item.first==master_key;});
+          if(master==raw_masters.end()) {
+            master_options.decode_cache_directory.clear();
+            raw_masters.emplace_back(master_key,
+                decode_cached_image(options.input,master_options,master_options.raw));
+          } else {
+            auto hit=std::move(*master);raw_masters.erase(master);raw_masters.push_back(std::move(hit));
+          }
+          if(options.preview_max_edge==0) {
+            source->image=std::move(raw_masters.back().second);
+            raw_masters.pop_back();
+          } else source->image=raw_masters.back().second;
         }
-        source->image = raw_master;
         source->image.transform_planes([&](FloatImage plane) {
           return resample_to_max_edge(std::move(plane), options.preview_max_edge);
         });
@@ -175,8 +187,7 @@ struct PreviewSession::State {
         }
       }
     } else {
-      raw_master = {};
-      raw_key.clear();
+      raw_masters.clear();
       source->image = decode_cached_image(options.input, options, options.raw, &source->analysis_file);
     }
     if (!source->image.raw_profile && source->image.domain == InputDomain::kSceneReferred) {
@@ -192,9 +203,14 @@ struct PreviewSession::State {
     };
     std::size_t retained = 0;
     for (const auto& item : sources) retained += decoded_bytes(*item);
+    for (const auto& item : raw_masters) retained += item.second.linear_p3.pixels.size()*sizeof(float);
     while (sources.size() > 1 && (sources.size() > 3 || retained > kDecodedBudget)) {
       retained -= decoded_bytes(*sources.front());
       sources.erase(sources.begin());
+    }
+    while(raw_masters.size()>1 && retained>kDecodedBudget) {
+      retained-=raw_masters.front().second.linear_p3.pixels.size()*sizeof(float);
+      raw_masters.erase(raw_masters.begin());
     }
     return *sources.back();
   }
@@ -203,7 +219,7 @@ struct PreviewSession::State {
 PreviewSession::PreviewSession(std::filesystem::path source, std::string sha256, EngineConfig config)
     : state_(std::make_unique<State>()), source_(std::move(source)),
       sha256_(std::move(sha256)), config_(std::move(config)) {}
-PreviewSession::~PreviewSession() = default;
+PreviewSession::~PreviewSession() { release_apple_raw_cache(source_); }
 
 PreviewPixels PreviewSession::render_pixels(ConvertOptions options, PreviewRegion region,
     const CancelToken* cancel, bool compact) {

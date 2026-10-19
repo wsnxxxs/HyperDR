@@ -1,4 +1,5 @@
 #pragma once
+#include "hyperdr/foundation/progress.hpp"
 
 // Decoding any supported input into the pipeline's one working space: linear
 // Display P3, 32-bit float, unbounded above 1.
@@ -31,8 +32,8 @@
 
 namespace hyperdr {
 
-// These are filename filters for discovery/UI only. LibRaw remains the
-// authority on the file contents, so accepting an extension here does not make
+// These are filename filters for discovery/UI only. CIRAWFilter decides
+// whether the actual file is supported, so accepting an extension here does not make
 // a malformed or unsupported file decode successfully.
 inline constexpr std::array<std::string_view, 30> kRawInputExtensions{
     ".3fr", ".arw", ".bay", ".cap", ".cr2", ".cr3", ".crw", ".dcr",
@@ -46,6 +47,13 @@ inline constexpr std::array<std::string_view, 30> kRawInputExtensions{
   }
   return false;
 }
+
+class RawUnsupported : public std::runtime_error {
+ public:
+  RawUnsupported(std::string container, std::string model);
+  [[nodiscard]] std::string detail_json() const;
+  std::string container, model;
+};
 
 class RawMemoryError : public std::runtime_error {
  public:
@@ -131,7 +139,10 @@ struct RawDecodeOptions {
   // LibRaw's fixed 1/2-per-axis demosaic, used only by fast preview callers.
   // Full export callers leave this false; the decoder never enables it
   // automatically in response to an internal memory estimate.
-  bool half_size{false};
+  bool half_size{false}; // Kept only for direct LibRaw comparison tests.
+  bool lens_correction{true};
+  std::string source_sha256; // Optional session identity, in addition to stat timestamps.
+  ProgressSink* progress_sink{nullptr};
   // When an external canonical gain grid is supplied, decode only the SDR
   // base of an embedded Apple/Ultra HDR container. Applying the embedded map
   // first would double-count the same gain before the external grid is used.
@@ -173,7 +184,25 @@ struct RawDecodeOptions {
   float digital_gain{1.0F};
 };
 
+struct RawProcessing {
+  std::string engine{"apple-ciraw"}, decoder_version, os_build;
+  float digital_gain{1}, baseline_exposure{};
+  bool lens_correction_supported{}, lens_correction_applied{};
+  float scale{1};
+  std::uint32_t block_rows{512};
+};
+struct RawHeader {
+  std::uint32_t width{}, height{};
+  RawProcessing processing;
+};
+[[nodiscard]] RawHeader probe_apple_raw(const std::filesystem::path& path);
+[[nodiscard]] std::string raw_os_build();
+float raw_preview_scale(const std::filesystem::path& path, std::uint32_t edge);
+[[nodiscard]] float raw_preview_scale(std::uint32_t max_edge,std::uint32_t source_long_edge);
+void release_apple_raw_cache(const std::filesystem::path& path);
+
 struct DecodeInfo {
+  std::optional<RawProcessing> raw;
   // Upright full-resolution output after the accepted default crop and RAW
   // geometry (including pixel aspect/Fuji). Recorded before preview reduction;
   // unlike target_* these describe the delivered photo even if a crop is rejected.

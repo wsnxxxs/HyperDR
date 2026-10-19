@@ -39,6 +39,8 @@ namespace hyperdr {
 namespace {
 
 constexpr int kDepth = 10;
+// avif_single_frame_bytes models exactly this configuration (10-bit 4:4:4, no alpha).
+static_assert(kDepth == kAvifFrameBitDepth, "revisit avif_single_frame_bytes before changing the AVIF bit depth");
 
 struct ImageDeleter {
   void operator()(avifImage* image) const { avifImageDestroy(image); }

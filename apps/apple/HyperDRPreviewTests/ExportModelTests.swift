@@ -146,6 +146,11 @@ import HyperDRKit
         s.sendExport(.finished(result:nil,failure:UserFacingError(code:"export_memory_budget")))
         await eventually(timeout:.seconds(10)) { m.export.phase == .failed }
         XCTAssertEqual(m.export.failure?.variant,"noFrame")
+        m.export.dismissOutcome(); m.selectEncoding("avif-pq")
+        await running(m,s,destination:URL(fileURLWithPath:"/tmp/out.avif"))
+        s.sendExport(.finished(result:nil,failure:UserFacingError(code:"export_dimension_limit")))
+        await eventually(timeout:.seconds(10)) { m.export.phase == .failed }
+        XCTAssertEqual(m.export.failure?.variant,"avif")
     }
     func testPreviewRefreshDoesNotBlockExportAndInvalidTargetDoesNotReachKit() async {
         let (m,s) = await ready(); m.requestBusy()

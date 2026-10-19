@@ -21,11 +21,16 @@ struct AvifGridLayout {
   [[nodiscard]] bool is_grid() const noexcept { return columns * rows > 1; }
 };
 
-// libaom's source frame for a 10-bit 4:4:4 image: 16-bit samples in three
-// planes, each with the encoder's 160-pixel border, plus the 8-bit pyramid the
-// non-realtime encoder allocates and counts toward the same cap. Measured to
-// agree with the libaom limit on both sides (11800x11800 encodes, 12000x12000
-// does not).
+// The size of libaom's source frame for the one configuration encode_avif
+// writes: 10-bit 4:4:4, no alpha, all-intra (what libavif selects for a single
+// image). Three 16-bit planes, plus the 8-bit pyramid the encoder allocates and
+// counts toward the same cap. The 160-pixel border is deliberately larger than
+// the all-intra border libaom really uses (64): the model is a little
+// conservative, and the measured limit sits between 11800x11800 (encodes) and
+// 12000x12000 (does not), where the 160 model reads 0.995 and 1.028 of the cap
+// (a 64-pixel border reads 0.970 and 1.002). It would have to be revisited for
+// any other depth, chroma format or alpha, so encode_avif static_asserts them.
+inline constexpr int kAvifFrameBitDepth = 10;
 [[nodiscard]] constexpr std::uint64_t avif_single_frame_bytes(std::uint32_t width,
                                                               std::uint32_t height) noexcept {
   constexpr std::uint64_t border = 160;
@@ -43,18 +48,37 @@ struct AvifGridLayout {
 inline constexpr std::uint64_t kAvifLibaomFrameLimit = 1ULL << 30;
 inline constexpr std::uint64_t kAvifSingleFrameBudget = kAvifLibaomFrameLimit / 10 * 9;
 // Longest cell side, so each cell is a modest independent encode (4096x4096 is
-// a 117 MB frame). libavif allows up to 256x256 cells.
+// a 117 MB frame). libavif allows up to 256x256 cells. Cells are a multiple of
+// 64 (MIAF recommends it for tile sizes); libavif pads the last column and row
+// up to the cell size and the grid's output size crops them again.
 inline constexpr std::uint32_t kAvifMaxCellSide = 4096;
+inline constexpr std::uint32_t kAvifCellAlignment = 64;
+
+// What libavif will decode, whatever the encoder wrote (AVIF_DEFAULT_IMAGE_SIZE_LIMIT
+// and the default dimension limit; neither can be raised). Past it a file is
+// written but cannot be opened by libavif, Chromium or our own check.
+inline constexpr std::uint64_t kAvifDecodeMaxPixels = 16384ULL * 16384ULL;
+inline constexpr std::uint32_t kAvifDecodeMaxSide = 32768;
+[[nodiscard]] constexpr bool avif_canvas_decodable(std::uint32_t width, std::uint32_t height) noexcept {
+  return std::uint64_t(width) * height <= kAvifDecodeMaxPixels && width <= kAvifDecodeMaxSide &&
+         height <= kAvifDecodeMaxSide;
+}
 
 [[nodiscard]] constexpr AvifGridLayout avif_grid_layout(std::uint32_t width,
                                                         std::uint32_t height) noexcept {
   AvifGridLayout layout{1, 1, width, height};
   if (avif_single_frame_bytes(width, height) <= kAvifSingleFrameBudget) return layout;
-  // Balanced cells: the remainder in the last column or row is never a sliver.
+  // Balanced cells (the remainder in the last column or row is never a sliver),
+  // rounded up to the alignment. Still at most the cap: it is a multiple of it.
   layout.columns = std::clamp<std::uint32_t>((width + kAvifMaxCellSide - 1) / kAvifMaxCellSide, 1, 256);
   layout.rows = std::clamp<std::uint32_t>((height + kAvifMaxCellSide - 1) / kAvifMaxCellSide, 1, 256);
-  layout.cell_width = (width + layout.columns - 1) / layout.columns;
-  layout.cell_height = (height + layout.rows - 1) / layout.rows;
+  const auto aligned = [](std::uint32_t size, std::uint32_t count) {
+    const auto balanced = (size + count - 1) / count;
+    return (balanced + kAvifCellAlignment - 1) / kAvifCellAlignment * kAvifCellAlignment;
+  };
+  // An axis with one cell has nothing to align.
+  layout.cell_width = layout.columns == 1 ? width : aligned(width, layout.columns);
+  layout.cell_height = layout.rows == 1 ? height : aligned(height, layout.rows);
   return layout;
 }
 

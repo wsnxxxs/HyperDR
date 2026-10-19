@@ -127,7 +127,8 @@ struct ErrorText {
                        "noFrame": "err.server.export_memory_budget.noFrame"]),
         "export_dimension_limit": Entry(title: "mac.err.export_dimension_limit.title",
             message: "err.server.export_dimension_limit",
-            variants: ["color": "err.server.export_dimension_limit.color"]),
+            variants: ["color": "err.server.export_dimension_limit.color",
+                       "avif": "err.server.export_dimension_limit.avif"]),
         // The camera model rides in the sentence (`withDetail`); a DNG has its own title and sentence.
         // Nothing is appended below either: the detail is only the model.
         "raw_unsupported": Entry(title: "mac.err.raw_unsupported.title", message: "err.server.raw_unsupported",

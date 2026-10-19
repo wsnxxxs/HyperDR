@@ -383,6 +383,15 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
       if (dimensions.target_width > 65500 || dimensions.target_height > 65500)
         throw ExportDimensionLimit(dimensions.target_width, dimensions.target_height);
     }
+    // libavif cannot open an AVIF past its size limits (photo plus frame), so one
+    // is refused here rather than encoded and then failing its own verification.
+    if (options.decode_intent == DecodeIntent::Export &&
+        (options.encoding == OutputEncoding::AvifPq || options.encoding == OutputEncoding::AvifHlg)) {
+      const auto& dimensions = staged.image.decode;
+      const auto canvas = options.frame ? layout_frame(*options.frame, dimensions.target_width, dimensions.target_height)
+                                        : FrameLayout{dimensions.target_width, dimensions.target_height, {}, {}, 0, {}};
+      if (!avif_canvas_decodable(canvas.width, canvas.height)) throw ExportDimensionLimit::avif(canvas.width, canvas.height);
+    }
     require_decode_resolution(options, staged.image.decode);
     const auto domain = staged.image.describe_input().domain;
     if ((domain == InputDomain::kDisplayReferredHdr ||

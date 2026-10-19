@@ -129,4 +129,12 @@ inline constexpr ExportMeasurement raster_export_measurements[] = {
   {"raster-j12:none:sdr-jpeg:8",4000,3000,4000,3000,hyperdr::OutputEncoding::SdrJpeg,8,337969896ULL},
   {"raster-j12:gallery:sdr-jpeg:8",4000,3000,4360,3750,hyperdr::OutputEncoding::SdrJpeg,8,390611760ULL},
   {"raster-j12:story:sdr-jpeg:8",4000,3000,4328,7694,hyperdr::OutputEncoding::SdrJpeg,8,653394952ULL},
+  // R7-401: canvases past the single-frame AVIF limit are written as grids (E8).
+  // 8000x6000 on story (8660x15396, 133 MP) and 9504x6336 on a story card with 0.15
+  // margins (11404x20274, 231 MP); the HLG rows were measured the same way.
+  {"raster-grid-t8000:story:avif-pq:10",8000,6000,8660,15396,hyperdr::OutputEncoding::AvifPq,10,3209104288ULL},
+  {"raster-grid-t8000:story:avif-hlg:10",8000,6000,8660,15396,hyperdr::OutputEncoding::AvifHlg,10,3519696016ULL},
+  {"raster-grid-j8000:story:avif-pq:10",8000,6000,8660,15396,hyperdr::OutputEncoding::AvifPq,10,3205483472ULL},
+  {"raster-grid-t9504:story15:avif-pq:10",9504,6336,11404,20274,hyperdr::OutputEncoding::AvifPq,10,5245522288ULL},
+  {"raster-grid-t9504:story15:avif-hlg:10",9504,6336,11404,20274,hyperdr::OutputEncoding::AvifHlg,10,5584229056ULL},
 };

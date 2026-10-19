@@ -175,7 +175,8 @@ extension EditorModel {
         if let started = export.startedAt { result?.elapsed = .seconds(max(0, now().timeIntervalSince(started))) }
         if let error = failure {
             let variant = error.code == "export_memory_budget" ? (framed ? "frame" : "noFrame")
-                : error.code == "export_dimension_limit" && snapshot.workflow == .colorOnly ? "color" : error.variant
+                : error.code == "export_dimension_limit" && snapshot.workflow == .colorOnly ? "color"
+                : error.code == "export_dimension_limit" && Self.fileExtension(snapshot.encoding) == "avif" ? "avif" : error.variant
             var detail = error.detail
             if error.code != "raw_unsupported", let line = export.lastLine, !line.isEmpty, detail?.contains(line) != true {
                 detail = detail.map { $0 + "\n" + line } ?? line

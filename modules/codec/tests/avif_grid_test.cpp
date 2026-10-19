@@ -67,8 +67,23 @@ void layout_rule() {
             "a cell is still too large for libaom");
   }
   const auto story = avif_grid_layout(10200, 18134);
-  require(story.columns == 3 && story.rows == 5 && story.cell_width == 3400 && story.cell_height == 3627,
+  require(story.columns == 3 && story.rows == 5 && story.cell_width == 3456 && story.cell_height == 3648,
           "61 MP story layout changed");
+  // Cells are a multiple of 64 wherever an axis has more than one (MIAF), never
+  // above the cap, and an axis with one cell is not padded.
+  for (auto [cw, ch] : {std::pair{10200U, 18134U}, {12000U, 12000U}, {11801U, 11801U}, {65535U, 2000U},
+                        {2000U, 65535U}, {30000U, 9000U}, {w, w}}) {
+    const auto layout = avif_grid_layout(cw, ch);
+    require(layout.columns == 1 ? layout.cell_width == cw : layout.cell_width % 64 == 0, "cell width not a multiple of 64");
+    require(layout.rows == 1 ? layout.cell_height == ch : layout.cell_height % 64 == 0, "cell height not a multiple of 64");
+    require(layout.cell_width <= kMax && layout.cell_height <= kMax, "aligned cell above the cap");
+  }
+  // What libavif decodes: 16384x16384 pixels and 32768 per side, whatever we encode.
+  require(avif_canvas_decodable(16384, 16384) && !avif_canvas_decodable(16385, 16384) &&
+              avif_canvas_decodable(32768, 8192) && !avif_canvas_decodable(32769, 2) &&
+              !avif_canvas_decodable(2, 32769) && avif_canvas_decodable(9504, 6336) &&
+              avif_canvas_decodable(10200, 18134) && !avif_canvas_decodable(12672, 22528),
+          "AVIF decodable limit moved");
 }
 
 FloatImage make_hdr(std::uint32_t width, std::uint32_t height) {

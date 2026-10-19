@@ -8,6 +8,7 @@ extension UserFacingError {
         case ("export_memory_budget", "frame"): "err.server.export_memory_budget.frame"
         case ("export_memory_budget", "noFrame"): "err.server.export_memory_budget.noFrame"
         case ("export_dimension_limit", "color"): "err.server.export_dimension_limit.color"
+        case ("export_dimension_limit", "avif"): "err.server.export_dimension_limit.avif"
         case ("export_dimension_limit", _): "err.server.export_dimension_limit"
         case ("raw_unsupported", "dng"): "err.server.raw_unsupported.dng"
         case ("raw_unsupported", _) where detail != nil: "err.server.raw_unsupported.model %@"

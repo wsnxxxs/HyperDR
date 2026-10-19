@@ -8,6 +8,8 @@
 #include <array>
 #include <cmath>
 #include <charconv>
+#include <cstdio>
+#include <cstdlib>
 #include <span>
 #include <stdexcept>
 
@@ -270,6 +272,22 @@ double parse_number(const Setting& setting, std::string_view text) {
 
 std::span<const Setting> settings() { return table(); }
 
+double shortest_float_value(float exact) {
+  for (int digits = 1; digits <= 9; ++digits) {
+    char text[32];
+    std::snprintf(text, sizeof(text), "%.*g", digits, static_cast<double>(exact));
+    if (std::strtof(text, nullptr) == exact) return std::strtod(text, nullptr);
+  }
+  return static_cast<double>(exact);
+}
+
+json::Value setting_default(const Setting& setting) {
+  const ConvertOptions defaults;
+  json::Value value = setting.read(defaults);
+  if (!value.is_number() || setting.kind == SettingKind::kInteger) return value;
+  return json::Value::from_number(shortest_float_value(static_cast<float>(value.number())));
+}
+
 const Setting* find_setting_by_key(std::string_view key) {
   for (const auto& setting : table()) {
     if (setting.key == key) return &setting;
@@ -465,7 +483,6 @@ void write_inputs(json::Writer& writer) {
 }  // namespace
 
 std::string schema_json() {
-  const ConvertOptions defaults;
   json::Writer writer(json::Writer::Style::kIndented);
   writer.begin_object().member("schema", 1).member("tool", kVersion).begin_array("settings");
   for (const auto& setting : table()) {
@@ -491,7 +508,7 @@ std::string schema_json() {
     }
     writer.member("affects_output_bytes", setting.affects_output_bytes)
         .member("help", setting.help);
-    const json::Value value = setting.read(defaults);
+    const json::Value value = setting_default(setting);
     if (value.is_string()) writer.member("default", value.string());
     else if (value.is_bool()) writer.member("default", value.boolean());
     else writer.member("default", value.number());

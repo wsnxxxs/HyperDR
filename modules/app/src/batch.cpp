@@ -111,6 +111,11 @@ GainMapResult render_native_model_base(const DecodedImage& image,
   development.look.contrast = 1.0F;
   development.look.vibrance = 0.0F;
   development.look.pop = 0.0F;
+  // The model's development recipe is part of its contract, not a default: it
+  // keeps the values it was trained and recorded with when the defaults move.
+  development.look.headroom_max_stops = 4.0F;
+  development.look.shoulder_start = 0.48F;
+  development.look.diffuse_gain_floor = 0.35F;
 
   // make_display_referred_sdr_result only invokes photographic expansion when
   // mathematical gain is requested. Zero gain therefore selects its exact

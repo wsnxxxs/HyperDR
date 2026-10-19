@@ -6,7 +6,6 @@
 #include "hyperdr/app/decode_cache.hpp"
 #include "hyperdr/app/preview.hpp"
 #include "hyperdr/app/schema.hpp"
-#include "hyperdr/app/source_defaults.hpp"
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/foundation/json.hpp"
@@ -54,7 +53,6 @@ PreviewPixels photo_preview_frame(PhotoRenditions result,
   // packed little-endian HWC RGB float32 planes (SDR base, reconstructed HDR).
   // JSON makes status/geometry extensible while the pixel payload stays
   // directly uploadable to GPU textures without an 8-bit colour conversion.
-  const auto defaults = source_defaults(input.domain);
   json::Writer writer;
   writer.begin_object()
       .member("schema", "hyperdr.native-preview/v1")
@@ -77,14 +75,7 @@ PreviewPixels photo_preview_frame(PhotoRenditions result,
       .end_object()
       .member("hasCaptureMetadata", hasCaptureMetadata)
       .member("inputHeadroomStops", std::log2(input.headroom))
-      .member("status", decode.degraded ? "degraded" : "ok")
-      .begin_object("unadjusted")
-      .member("brightness", defaults.brightness_ev)
-      .member("hdrStrength", defaults.hdr_strength)
-      .member("hdrRange", defaults.hdr_range_stops)
-      .member("areaCoverage", defaults.area_coverage)
-      .member("lutStrength", defaults.lut_strength)
-      .end_object();
+      .member("status", decode.degraded ? "degraded" : "ok");
   if (region) {
     writer.member("detail", true)
         .member("fullWidth", full_width)

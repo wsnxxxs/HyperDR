@@ -236,7 +236,7 @@ import UniformTypeIdentifiers
         undoManager.groupsByEvent = false
         undoManager.levelsOfUndo = 0
         self.ticker = ticker ?? ClockFrameTicker()
-        let initial = EditDefaults.initial(encoding: "adaptive", sourceDomain: nil, unadjusted: nil)
+        let initial = EditDefaults.initial(encoding: "adaptive")
         edit = EditSnapshot(initial)
         let colors = EditChoices.byKey["colorGamut"]?.options ?? []
         inputColor = ChoiceValue(key: "colorGamut", selection: edit.choices["colorGamut"] ?? "srgb",

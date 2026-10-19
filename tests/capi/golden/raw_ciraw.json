@@ -1,18 +1,18 @@
 {
-  "reason": "R1: RAW 改用 Apple 显影",
+  "reason": "R1: RAW 改用 Apple 显影; D1 统一默认值后重录(对比 1/饱和 0/HDR 强度 1/自动上限 3/起点 .25/面积 .6)",
   "os_build": "26A434",
   "cases": {
     "sony-ilce-7s-arw": {
-      "preview_sha256": "0bec86b750a3654d420a780596e4ff2d306f5286476da75f0272e6c0e795d996",
-      "export_sha256": "303d3dad7cd7a2df3c555de626182d77fbd9cf20e2401431050e5ae49a76ef00"
+      "preview_sha256": "5750b46f3fe03c1909d843756f24f1e67bb0dfb7500e6461f3baf10c6099598f",
+      "export_sha256": "22edadc880b2bfc4008c884606b3c41e3c326275601c25858be30cd17eacc55d"
     },
     "canon-5d-iii-lossy-dng": {
-      "preview_sha256": "8c87989722c93ac39706b273f65325a965bc089b329dd9b97460bafcc9daa636",
-      "export_sha256": "3c2571ef64190e99ed90b9130caa658992606bca358aeeacc608c9acd6835c9c"
+      "preview_sha256": "10cb49043117963d5fda2181dcc0d83a24f277ad4de25d6d62edf2ffe265b17c",
+      "export_sha256": "42bcb96ff591bdd2a2e1074a41dd77e764ab30092a2a72d659ec7cf526cbde5b"
     },
     "leica-c-portrait-rwl": {
-      "preview_sha256": "4d9f8f5ef2f04b7242bec2c12277b9a5401b3d7bd7a53eeb14b16d43420f83bc",
-      "export_sha256": "0a787ccf2c19c9ea31f0b35e12802994368deef5c3f0ba6620699813373f5a26"
+      "preview_sha256": "5866a8d71c782dffc58101e3acdd33625ab573be639c1349ec442fbdca8c3052",
+      "export_sha256": "1d4106e7b301204b5c902ed2fa96d05c634b9d406a53655b85992cd25e01dc13"
     }
   }
 }

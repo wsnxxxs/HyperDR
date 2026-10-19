@@ -75,7 +75,7 @@ private func gainEventually(timeout: Duration, _ condition: @Sendable () async -
     return await condition()
 }
 
-private let base = EditDefaults.initial(encoding: "adaptive", sourceDomain: nil, unadjusted: nil)
+private let base = EditDefaults.initial(encoding: "adaptive")
 
 private func changed(_ key: String, _ value: JSONValue, from options: EditOptions = base) -> EditOptions {
     var options = options

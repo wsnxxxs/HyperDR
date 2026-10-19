@@ -176,7 +176,7 @@ import XCTest
          "layout":"rgba","sampleType":"float32","colorSpace":"linear-display-p3",
          "relativeSdrWhite":1,"headroomStops":0,"inputDomain":"scene-referred","status":"ok",
          "sourceColor":{"name":"Display P3","primaries":"p3","transfer":"linear","source":"raw"},
-         "degradationReasons":[],"unadjusted":{"brightness":0,"hdrStrength":1,"hdrRange":1,"areaCoverage":1,"lutStrength":1},
+         "degradationReasons":[],
          "hasCaptureMetadata":true,"inputHeadroomStops":0,
          "raw":{"supported":true,"lensCorrectionSupported":false,"decoderVersion":"8.dng","osBuild":"engine-build"}}
         """#.utf8)

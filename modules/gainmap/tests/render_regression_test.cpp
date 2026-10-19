@@ -161,6 +161,13 @@ hyperdr::GainMapOptions photographic_defaults() {
   options.exposure_bias_ev = 1.0F;
   options.auto_headroom = false;
   options.headroom_stops = 3.0F;
+  // This pins the renderer's maths to the recipe its figures were recorded with.
+  // They are not the defaults (D1 changed those), so a default can move freely.
+  options.look.contrast = 1.08F;
+  options.look.vibrance = 0.12F;
+  options.look.headroom_max_stops = 4.0F;
+  options.look.shoulder_start = 0.48F;
+  options.look.diffuse_gain_floor = 0.35F;
   return options;
 }
 

@@ -23,7 +23,7 @@ import UniformTypeIdentifiers
     /// The photo remembered from the last launch, opened and attached.
     func restoreLast() async -> RestoreResult
     /// One open: the reference frame, then the first edit frame rendered
-    /// with `EditBaseline.initial(encoding:preview:)` of that reference. The
+    /// with `EditBaseline.initial(encoding:)` of that reference. The
     /// stream ends after the edit frame or a failure.
     func previews(for photo: EditorPhoto, encoding: String,
                   maxEdge: Int) -> AsyncStream<EditorPreviewEvent>
@@ -126,8 +126,6 @@ struct EditorPreview {
     var gainWeight: Double?
     /// The engine frame to draw; the fakes have none.
     var frame: PreviewFrame?
-    /// An HDR source's own control values (its identity rendering).
-    var unadjusted: [String: Double]? = nil
     /// The photo has the capture parameters the EXIF model needs.
     var hasCaptureMetadata = false
     var trace: PreviewTrace? = nil
@@ -303,7 +301,7 @@ extension UserDefaults {
                     if let error = previewFailure { continuation.yield(.failed(error)) }
                     else {
                         renderedPurposes.append(false)
-                        receivedOptions.append(EditBaseline.initial(encoding: encoding, preview: reference))
+                        receivedOptions.append(EditBaseline.initial(encoding: encoding))
                         continuation.yield(.edited(preview))
                     }
                 } catch { /* Stream termination owns cancellation. */ }

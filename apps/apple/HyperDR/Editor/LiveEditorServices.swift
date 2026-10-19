@@ -259,7 +259,7 @@ import os
         let events = kit.previews.events(for: id)
         do {
             // The neutral comparison frame: no model, the photo's own colour.
-            let workflow = EditDefaults.initial(encoding: encoding, sourceDomain: nil, unadjusted: nil)
+            let workflow = EditDefaults.initial(encoding: encoding)
             let result = try await kit.previews.render(PreviewRequest(session: id,
                 options: EditDefaults.reference(encoding: encoding, workflow: workflow),
                 maxEdge: maxEdge, purpose: .reference))
@@ -272,7 +272,7 @@ import os
             records[photo.handle]?.reference = result.frame
             let reference = Self.preview(result.frame, trace: result.trace)
             continuation.yield(.reference(reference))
-            let base = EditBaseline.initial(encoding: encoding, preview: reference)
+            let base = EditBaseline.initial(encoding: encoding)
             let request = PreviewRequest(session: id, options: base, maxEdge: maxEdge, purpose: .edit)
             await kit.previews.submit(request)
             for await event in events {
@@ -309,7 +309,6 @@ import os
             source: SourceSummary(metadata),
             hasGain: frame.isCompact || metadata.headroomStops > 0,
             gainWeight: metadata.gainWeight, frame: frame,
-            unadjusted: metadata.unadjusted.values,
             hasCaptureMetadata: metadata.hasCaptureMetadata, trace: trace)
     }
 
@@ -450,13 +449,6 @@ import os
     }
 }
 
-
-private extension PreviewMetadata.Unadjusted {
-    var values: [String: Double] {
-        ["brightness": brightness, "hdrStrength": hdrStrength, "hdrRange": hdrRange,
-         "areaCoverage": areaCoverage, "lutStrength": lutStrength]
-    }
-}
 
 extension LiveEditorServices {
     private func exportSession(_ photo: EditorPhoto) throws -> SessionID {

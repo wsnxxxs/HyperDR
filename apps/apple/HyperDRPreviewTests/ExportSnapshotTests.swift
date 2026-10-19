@@ -41,7 +41,7 @@ import HyperDRDesign
         let services = FakeEditorServices(openDelay: .zero, previewDelay: .zero)
         services.preview = EditorPreview(pixelSize: PixelSize(width: 6000, height: 4000),
             source: SourceSummary(domain: domain, colorName: "sRGB", degradationReasons: [], colorSource: "assumed"),
-            hasGain: true, unadjusted: nil, hasCaptureMetadata: false)
+            hasGain: true, hasCaptureMetadata: false)
         if timings {
             services.timings = [ExportTimingSample(kind: .init(isRAW: false, encoding: "adaptive", isAI: false, hasFrame: false, verifies: true),
                                                    pixels: 24_000_000, stages: [3, 9, 6, 2])]

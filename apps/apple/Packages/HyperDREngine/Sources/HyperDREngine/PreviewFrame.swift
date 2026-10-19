@@ -3,9 +3,6 @@ import HyperDREngineCore
 import Metal
 
 public struct PreviewMetadata: Codable, Sendable {
-    public struct Unadjusted: Codable, Sendable {
-        public let brightness, hdrStrength, hdrRange, areaCoverage, lutStrength: Double
-    }
     public let schema: String
     public let width, height, channels: Int
     public let layout, sampleType, colorSpace: String
@@ -14,7 +11,6 @@ public struct PreviewMetadata: Codable, Sendable {
     public let raw: RawCapabilities?
     public let sourceColor: SourceColor
     public let degradationReasons: [String]
-    public let unadjusted: Unadjusted
     public let hasCaptureMetadata: Bool
     public let inputHeadroomStops: Double
     public let inputContentPeakNits: Double?

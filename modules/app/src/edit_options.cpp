@@ -43,6 +43,8 @@ std::string serialize(const Value& value) {
   }
   throw std::invalid_argument("invalid JSON type");
 }
+// The engine schema is the only place a default is written down.
+Value schema_default(std::string_view key) { return setting_default(*find_setting_by_key(key)); }
 Value get(const Value& object, std::string_view key, Value fallback) {
   const auto* value = object.find(key);
   return value ? *value : std::move(fallback);
@@ -88,33 +90,46 @@ std::string normalize_options(const Value& edit) {
   const auto encoding = text(hdr_encoding_name(*parsed));
   const bool sdr = is_sdr_encoding(*parsed);
   const bool hlg = is_hlg_encoding(*parsed);
-  const auto output = get(edit, "outputGamut", text("auto"));
+  const auto output = get(edit, "outputGamut", schema_default("output_gamut"));
   if (output.string() != "auto" && output.string() != "srgb" && output.string() != "p3") {
     throw std::invalid_argument("outputGamut must be auto, srgb or p3");
   }
-  const auto headroom = model ? number(hlg ? 2.3 : 2.5)
-      : get(edit, "hdrRange", number(hlg ? 2.3 : 2.5));
-  if (hlg && headroom.is_number() && headroom.number() > 2.3) {
+  // `hdrRange` absent or negative means automatic headroom (the schema's default),
+  // as for aiHdrRange. A number fixes it. The model path has its own fixed recipe.
+  const auto* range = model ? nullptr : edit.find("hdrRange");
+  const bool automatic_headroom = !model && (!range || (range->is_number() && range->number() < 0));
+  const auto kHlgCeiling = number(shortest_float_value(kHlgHeadroomStops));
+  Value headroom, headroom_max;
+  if (model) headroom = headroom_max = hlg ? kHlgCeiling : number(2.5);
+  else if (automatic_headroom) {
+    headroom = schema_default("headroom");
+    headroom_max = schema_default("headroom_max");
+  } else headroom = headroom_max = *range;
+  if (hlg && headroom.is_number() && headroom.number() > kHlgCeiling.number()) {
     throw std::invalid_argument("HLG dynamic range cannot exceed 2.3 stops");
   }
+  // Recipe values the model path forces are not defaults; everything else comes from the schema.
+  const auto adjustable = [&](const char* edit_key, const char* setting_key, Value forced) {
+    return model ? std::move(forced) : get(edit, edit_key, schema_default(setting_key));
+  };
   Object settings{
-      {"encoding", encoding}, {"look", text("photographic")},
-      {"color_gamut", get(edit, "colorGamut", text("srgb"))},
-      {"clamp_srgb", sdr ? boolean(false) : get(edit, "clampSrgb", boolean(false))},
-      {"raw_lens_correction",get(edit,"lensCorrection",boolean(true))},
-      {"lut_input", get(edit, "lutInput", text("srgb"))},
-      {"lut_output", get(edit, "lutOutput", text("srgb"))},
-      {"lut_strength", get(edit, "lutStrength", number(1))},
-      {"contrast", model ? number(1) : get(edit, "contrast", number(1))},
-      {"vibrance", model ? number(0) : get(edit, "vibrance", number(0))},
-      {"gain_strength", get(edit, "hdrStrength", number(model ? 1 : .4))},
-      {"pop", number(0)}, {"headroom_max", headroom}, {"headroom", headroom},
-      {"exposure", text("auto")},
-      {"exposure_bias", model ? number(0) : get(edit, "brightness", number(.6))},
-      {"expansion_start", model ? number(.25) : get(edit, "expansionStart", number(.25))},
-      {"area_coverage", model ? number(1) : get(edit, "areaCoverage", number(1))},
-      {"quality", get(edit, "quality", number(90))},
-      {"hevc_preset", get(edit, "hevcPreset", text("slow"))}};
+      {"encoding", encoding}, {"look", schema_default("look")},
+      {"color_gamut", get(edit, "colorGamut", schema_default("color_gamut"))},
+      {"clamp_srgb", sdr ? boolean(false) : get(edit, "clampSrgb", schema_default("clamp_srgb"))},
+      {"raw_lens_correction", get(edit, "lensCorrection", schema_default("raw_lens_correction"))},
+      {"lut_input", get(edit, "lutInput", schema_default("lut_input"))},
+      {"lut_output", get(edit, "lutOutput", schema_default("lut_output"))},
+      {"lut_strength", get(edit, "lutStrength", schema_default("lut_strength"))},
+      {"contrast", adjustable("contrast", "contrast", number(1))},
+      {"vibrance", adjustable("vibrance", "vibrance", number(0))},
+      {"gain_strength", get(edit, "hdrStrength", schema_default("gain_strength"))},
+      {"pop", schema_default("pop")}, {"headroom_max", headroom_max}, {"headroom", headroom},
+      {"exposure", schema_default("exposure")},
+      {"exposure_bias", adjustable("brightness", "exposure_bias", number(0))},
+      {"expansion_start", adjustable("expansionStart", "expansion_start", number(.25))},
+      {"area_coverage", adjustable("areaCoverage", "area_coverage", number(1))},
+      {"quality", get(edit, "quality", schema_default("quality"))},
+      {"hevc_preset", get(edit, "hevcPreset", schema_default("hevc_preset"))}};
   if (sdr) settings.emplace("output_gamut", output);
   // Validate without converting doubles to the renderer's floats: the canonical
   // document must preserve the Python adapter's numbers exactly.
@@ -135,8 +150,6 @@ std::string normalize_options(const Value& edit) {
   if (external != external_report) throw std::invalid_argument("external gain requires both raw grid and JSON report");
   if (model && external) throw std::invalid_argument("native AI model cannot be combined with external gain");
   command["model_mode"] = boolean(model);
-  command["color_explicit"] = boolean(edit.find("colorGamut") != nullptr);
-  command["output_explicit"] = boolean(edit.find("outputGamut") != nullptr);
   const auto domain = get(edit, "sourceDomain", text("")).string();
   const bool adaptive = *parsed == OutputEncoding::Adaptive;
   command["depth"] = number(adaptive && (domain == "display-referred-hdr" || domain == "dual-rendition")
@@ -153,7 +166,7 @@ std::string normalize_options(const Value& edit) {
     for (const auto& post : posts) {
       auto value = get(edit, post.key, number(post.initial));
       if (!value.is_number() || !std::isfinite(value.number()) || value.number() < post.low || value.number() > post.high ||
-          (hlg && std::string_view(post.key) == "aiHdrRange" && value.number() > 2.3)) {
+          (hlg && std::string_view(post.key) == "aiHdrRange" && value.number() > kHlgCeiling.number())) {
         throw std::invalid_argument(std::string(post.key) + " is out of range");
       }
       command[post.flag] = value;
@@ -183,7 +196,7 @@ std::vector<std::string> command_line(const Value& normalized) {
     flag("--look", value("look").string());
     for (const auto& [name, key] : kCreativeFlags) flag(name, fmt(value(key)));
     flag("--exposure", "auto");
-    flag("--headroom", fmt(value("headroom")));
+    flag("--headroom", value("headroom").is_string() ? value("headroom").string() : fmt(value("headroom")));
   } else flag("--gain-strength", fmt(value("gain_strength")));
   if (!value("raw_lens_correction").boolean()) args.emplace_back("--no-raw-lens-correction");
   flag("--quality", fmt(value("quality")));
@@ -194,8 +207,9 @@ std::vector<std::string> command_line(const Value& normalized) {
     flag("--external-gain", cmd("external_gain").string());
     flag("--external-gain-report", cmd("external_gain_report").string());
   }
-  if (cmd("color_explicit").boolean()) flag("--color-gamut", value("color_gamut").string());
-  if (cmd("output_explicit").boolean() && is_sdr_encoding(validated.encoding)) flag("--output-gamut", value("output_gamut").string());
+  // The command line carries every value, so it does not depend on the CLI's own defaults.
+  flag("--color-gamut", value("color_gamut").string());
+  if (is_sdr_encoding(validated.encoding)) flag("--output-gamut", value("output_gamut").string());
   if (value("clamp_srgb").boolean()) args.emplace_back("--clamp-srgb");
   for (const auto& [key, name] : {std::pair{"_lut_path","--lut"}}) {
     if (const auto* path = command.find(key); path && !path->string().empty()) {
@@ -271,8 +285,7 @@ ConvertOptions request_options(const Value& request) {
       else if (key == "--ai-highlights") options.ai_post.highlights_stops = request_real(value);
       else if (key == "--ai-hdr-range") options.ai_post.hdr_range_stops = request_real(value);
       else if (key == "--ai-expansion-start") options.ai_post.expansion_start = request_real(value);
-      else if (key != "model_mode" && key != "color_explicit" && key != "output_explicit" &&
-               key != "compact" && key != "region" && key != "adapter") throw std::invalid_argument("unknown command key: " + key);
+      else if (key != "model_mode" && key != "compact" && key != "region" && key != "adapter") throw std::invalid_argument("unknown command key: " + key);
     }
   }
   apply_render_defaults(options);

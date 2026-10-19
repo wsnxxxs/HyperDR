@@ -135,7 +135,7 @@
       "maximum": 1.35,
       "affects_output_bytes": true,
       "help": "Photographic mid-tone slope",
-      "default": 1.080000043
+      "default": 1
     },
     {
       "key": "vibrance",
@@ -145,7 +145,7 @@
       "maximum": 0.5,
       "affects_output_bytes": true,
       "help": "Photographic saturation of unsaturated colours",
-      "default": 0.1199999973
+      "default": 0
     },
     {
       "key": "pop",
@@ -165,7 +165,7 @@
       "maximum": 4,
       "affects_output_bytes": true,
       "help": "Photographic auto-headroom ceiling, in stops",
-      "default": 4
+      "default": 3
     },
     {
       "key": "expansion_start",
@@ -175,7 +175,7 @@
       "maximum": 0.75,
       "affects_output_bytes": true,
       "help": "Linear SDR level where HDR expansion begins",
-      "default": 0.4799999893
+      "default": 0.25
     },
     {
       "key": "area_coverage",
@@ -185,7 +185,7 @@
       "maximum": 1,
       "affects_output_bytes": true,
       "help": "Bright-region coverage, local highlights to broad tones",
-      "default": 0.349999994
+      "default": 0.6
     },
     {
       "key": "gain_strength",

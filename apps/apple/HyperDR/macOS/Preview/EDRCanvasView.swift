@@ -113,10 +113,32 @@ final class EDRCanvasView: NSView {
             name: NSWindow.didChangeScreenNotification, object: window)
         NotificationCenter.default.addObserver(self, selector: #selector(displayChanged),
             name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(visibilityChanged),
+            name: NSWindow.didChangeOcclusionStateNotification, object: window)
         let link = displayLink(target: self, selector: #selector(step(_:)))
         link.add(to: .main, forMode: .common)
         self.link = link
         refreshDisplay()
+        visibilityChanged()
+    }
+
+    override func viewDidHide() {
+        super.viewDidHide()
+        suspend()
+    }
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        // Rebuild on the next visible tick, never from a visibility callback.
+        isSuspended = false
+        setNeedsRedraw()
+    }
+
+    @objc private func visibilityChanged() {
+        guard window?.isVisible == true, !isHiddenOrHasHiddenAncestor,
+              window?.occlusionState.contains(.visible) == true else { suspend(); return }
+        isSuspended = false
+        setNeedsRedraw()
     }
 
     override func layout() {

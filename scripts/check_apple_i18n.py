@@ -64,6 +64,12 @@ would be looked up in the app's catalogue and show as the key. Chinese
 literals are an error in its `Inspector/` components; the token gallery shows
 Chinese type specimens on purpose.
 
+The HEIF reader names the feature it cannot read (`HeifReadError(message,
+"feature")` in the engine sources). Each feature the sources can throw must be
+in `ErrorText.heifFeatures` and have an
+`err.server.unsupported_format.heif.<feature>` sentence in both languages, and
+nothing in the list may be a feature the sources no longer throw.
+
 `--self-test` (also run before every check) applies mutations to the real
 sources in memory -- a missing key in a new namespace, a key in `verbatim:`,
 an SF Symbol in an explicit position, an engine import in a view -- and fails unless each is reported
@@ -84,6 +90,11 @@ DESIGN = REPO_ROOT / "apps" / "apple" / "Packages" / "HyperDRDesign" / "Sources"
 DESIGN_CATALOG = DESIGN / "Resources" / "Localizable.xcstrings"
 DESIGN_COMPONENTS = DESIGN / "Inspector"
 LOCALES = ["en", "zh-Hans"]
+# Where the HEIF reader and the HEVC decoder throw HeifReadError with a feature.
+HEIF_SOURCES = ("modules/container/src/heif_reader.cpp", "modules/container/src/hvcc.cpp",
+                "modules/codec/src/hevc/vt_decoder.cpp", "modules/codec/src/hevc/yuv_to_rgb.cpp")
+HEIF_FEATURE_KEY = "err.server.unsupported_format.heif."
+ERROR_TEXT = APP / "Views" / "ErrorText.swift"
 # Keys read through a name built at run time (see the module docstring); never
 # reported as unused. Their completeness is the Swift coverage test's.
 DYNAMIC_PREFIXES = ("ctrl.", "choice.", "field.", "enc.", "export.stage.", "export.unavailable.")
@@ -519,6 +530,68 @@ def design_self_test(files: list[tuple[str, bool, str]], entries: dict) -> list[
     return failures
 
 
+HEIF_FEATURE_RE = re.compile(r'"([a-z0-9_]+)"')
+
+
+def heif_features_thrown(source: str) -> set[str]:
+    """Every lower-case identifier string inside a `HeifReadError(...)` call, up
+    to its statement's `;`, whichever branch of a (nested) conditional it is in.
+    A message has spaces, so it is not one."""
+    found: set[str] = set()
+    for call in re.finditer(r"HeifReadError\(", source):
+        end = source.find(";", call.end())
+        found.update(HEIF_FEATURE_RE.findall(source[call.end():end if end >= 0 else len(source)]))
+    return found
+
+
+def heif_feature_list(error_text: str) -> set[str] | None:
+    match = re.search(r"static let heifFeatures\s*=\s*\[([^\]]*)\]", error_text)
+    return None if match is None else set(HEIF_FEATURE_RE.findall(match.group(1)))
+
+
+def heif_features(sources: dict[str, str], error_text: str, entries: dict) -> list[str]:
+    """Problems between the features the engine throws, the app's list and the catalogue."""
+    listed = heif_feature_list(error_text)
+    if listed is None:
+        return ["cannot find ErrorText.heifFeatures"]
+    thrown: set[str] = set()
+    for text in sources.values():
+        thrown |= heif_features_thrown(text)
+    problems = []
+    for feature in sorted(thrown - listed):
+        problems.append(f"HEIF feature {feature!r} is thrown by the engine but not in ErrorText.heifFeatures")
+    for feature in sorted(listed - thrown):
+        problems.append(f"ErrorText.heifFeatures has {feature!r}, which no engine source throws")
+    for feature in sorted(thrown | listed):
+        entry = entries.get(HEIF_FEATURE_KEY + feature)
+        for locale in LOCALES:
+            value = ((entry or {}).get("localizations", {}).get(locale, {}).get("stringUnit", {}).get("value", ""))
+            if not value.strip():
+                problems.append(f"HEIF feature {feature!r} has no {locale} sentence ({HEIF_FEATURE_KEY}{feature})")
+    return problems
+
+
+def heif_self_test(sources: dict[str, str], error_text: str, entries: dict) -> list[str]:
+    failures = []
+    ternary = 'throw HeifReadError("a message", a ? "one_x" : b ? "two_y" : "three_z");\nHeifReadError("two words", "four_w")'
+    if heif_features_thrown(ternary) != {"one_x", "two_y", "three_z", "four_w"}:
+        failures.append(f"self-test: ternary branches: {sorted(heif_features_thrown(ternary))}")
+    if baseline := heif_features(sources, error_text, entries):
+        return failures + baseline
+    first = next(iter(sources))
+    mutant = dict(sources, **{first: sources[first] + '\nHeifReadError("a message", c ? "a_b" : "zzselftest_feature");'})
+    if not any("'zzselftest_feature'" in p for p in heif_features(mutant, error_text, entries)):
+        failures.append("self-test: a new feature in a later ternary branch not reported")
+    listed = sorted(heif_feature_list(error_text) or [])
+    dropped = error_text.replace(f'"{listed[0]}"', '"zzselftest_gone"', 1)
+    if not any(listed[0] in p for p in heif_features(sources, dropped, entries)):
+        failures.append("self-test: a feature missing from the list not reported")
+    thin = {k: v for k, v in entries.items() if k != HEIF_FEATURE_KEY + listed[0]}
+    if not any(listed[0] in p and "sentence" in p for p in heif_features(sources, error_text, thin)):
+        failures.append("self-test: a feature without a sentence not reported")
+    return failures
+
+
 def main() -> int:
     try:
         catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
@@ -542,7 +615,14 @@ def main() -> int:
         for path in sorted(DESIGN.rglob("*.swift"))
     ]
 
-    problems = (self_test(files, entries) + design_self_test(design_files, design_entries)
+    try:
+        heif_sources = {name: (REPO_ROOT / name).read_text(encoding="utf-8") for name in HEIF_SOURCES}
+        error_text = ERROR_TEXT.read_text(encoding="utf-8")
+    except OSError as error:
+        print(f"cannot read the HEIF feature sources: {error}")
+        return 1
+
+    problems = (self_test(files, entries) + heif_self_test(heif_sources, error_text, entries) + design_self_test(design_files, design_entries)
                 + boundary_self_test(files) + chinese_self_test(files))
     if "--self-test" not in sys.argv[1:]:
         for name, document in (("app", catalog), ("design package", design_catalog)):
@@ -550,6 +630,7 @@ def main() -> int:
                 problems.append(f"{name} catalogue sourceLanguage must be 'en'")
         problems += check(files, entries)
         problems += engine_imports(files)
+        problems += heif_features(heif_sources, error_text, entries)
         outside = chinese_outside_views(files)
         if CJK_OUTSIDE_VIEWS_STRICT:
             problems += outside

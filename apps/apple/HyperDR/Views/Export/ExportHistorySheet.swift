@@ -72,7 +72,7 @@ struct ExportHistorySheet: View {
         return ExportHistoryRow(
             thumbnail: nil, number: version.number, fileName: version.fileName, tags: tags,
             meta: Text(verbatim: ExportPresentation.historyMeta(version, locale: locale)),
-            note: version.fallbackNote.map { Text(verbatim: $0) },
+            note: version.fallbackReason.map { Text(verbatim: ExportPresentation.fallbackNote($0, model: model, locale: locale)) },
             primary: RowAction(title: Text("history.restore"),
                                isEnabled: !version.matchesCurrent && !model.isEditingLocked) {
                 model.restore(version.id)

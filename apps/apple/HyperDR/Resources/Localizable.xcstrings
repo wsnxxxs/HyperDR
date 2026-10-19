@@ -9553,6 +9553,23 @@
           }
         }
       }
+    },
+    "history.fallback.unknown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The AI model fell back to the image alone."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AI 模型退回到只看图像的方式。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

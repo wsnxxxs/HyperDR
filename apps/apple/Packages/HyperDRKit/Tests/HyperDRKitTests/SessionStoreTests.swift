@@ -628,3 +628,58 @@ extension SessionStoreTests {
         #expect(name == "Vacation.png")
     }
 }
+
+@Suite(.timeLimit(.minutes(1))) struct RelinkTests {
+    @Test func aMovedFileWithTheSameContentIsReconnectedKeepingTheSession() async throws {
+        let environment = try TestEnvironment()
+        let store = environment.store()
+        let original = try environment.source("photo.png")
+        let session = try await store.open(original)
+        let moved = environment.sources.appendingPathComponent("renamed.png")
+        try FileManager.default.moveItem(at: original, to: moved)
+        await #expect(throws: HyperDRError.self) { _ = try await store.session(session.id) }
+        let relinked = try await store.relink(session.id, to: moved)
+        #expect(relinked.id == session.id)
+        #expect(relinked.sha256 == session.sha256)
+        #expect(relinked.displayName == "renamed.png")
+        #expect(relinked.sourceURL.lastPathComponent == "renamed.png")
+        let refreshed = try await store.session(session.id)
+        #expect(refreshed.id == session.id && refreshed.sourceURL.lastPathComponent == "renamed.png",
+                "every later request reads the new place")
+    }
+
+    @Test func aDifferentFileIsRefusedAndLeavesTheSessionAlone() async throws {
+        let environment = try TestEnvironment()
+        let store = environment.store()
+        let original = try environment.source("photo.png")
+        let session = try await store.open(original)
+        let other = try environment.source("other.png", pngBytes + [0, 1, 2])
+        do { _ = try await store.relink(session.id, to: other); Issue.record("expected source_different") }
+        catch let error as HyperDRError { #expect(error.code == "source_different") }
+        let still = try await store.session(session.id)
+        #expect(still.sourceURL.lastPathComponent == "photo.png")
+    }
+
+    @Test func aFileThatIsGoneAndAnUnknownSessionAreRefused() async throws {
+        let environment = try TestEnvironment()
+        let store = environment.store()
+        let session = try await store.open(try environment.source("photo.png"))
+        let missing = environment.sources.appendingPathComponent("nothing.png")
+        await #expect(throws: HyperDRError.self) { _ = try await store.relink(session.id, to: missing) }
+        do { _ = try await store.relink(SessionID(rawValue: "0123456789abcdef0123456789abcdef"), to: missing); Issue.record("expected failure") }
+        catch let error as HyperDRError { #expect(error.code == "session_expired") }
+    }
+
+    @Test func theNewPlaceSurvivesARelaunch() async throws {
+        let environment = try TestEnvironment()
+        let first = environment.store()
+        let original = try environment.source("photo.png")
+        let session = try await first.open(original)
+        let moved = environment.sources.appendingPathComponent("renamed.png")
+        try FileManager.default.moveItem(at: original, to: moved)
+        _ = try await first.relink(session.id, to: moved)
+        let second = environment.store()
+        let restored = try await second.session(session.id)
+        #expect(restored.sourceURL.lastPathComponent == "renamed.png")
+    }
+}

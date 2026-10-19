@@ -44,6 +44,9 @@ struct PreviewCanvas: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> EDRCanvasView {
+        #if DEBUG
+        A3StressRunner.arm(model: model)
+        #endif
         let view = EDRCanvasView(onHeadroom: { [weak model] snapshot in
             guard let model else { return }
             model.receiveDisplay(DisplayState(screenName: snapshot.screen ?? "",

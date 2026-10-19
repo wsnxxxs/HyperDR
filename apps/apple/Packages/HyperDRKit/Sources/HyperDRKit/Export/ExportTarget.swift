@@ -100,6 +100,25 @@ public actor ExportTarget {
         return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
     }
 
+    /// The save panel has already confirmed replacement. Keep its exact URL
+    /// for security-scoped access; only the held parent descriptor publishes it.
+    public func save(session: SessionID, export: ExportID, to fileURL: URL) async throws -> SavedExport {
+        let source = try await sessions.exportFile(session, export: export)
+        let name = fileURL.lastPathComponent
+        guard fileURL.isFileURL, !name.isEmpty, name != ".", name != "..",
+              fileURL.pathExtension.lowercased() == URL(fileURLWithPath: source.name).pathExtension.lowercased() else {
+            throw HyperDRError(code: "invalid_options", message: "Save destination must use the export's file extension")
+        }
+        let roots = self.roots, hooks = self.hooks
+        let lease = SecurityScopeLease(url: fileURL, access: access)
+        defer { lease.stop() }
+        let task = Task.detached {
+            try Self.copy(source, to: fileURL.deletingLastPathComponent(), excluding: roots,
+                          hooks: hooks, replacing: name)
+        }
+        return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+    }
+
     private static func label(_ url: URL) -> String {
         let parts = url.pathComponents.filter { $0 != "/" }
         return parts.isEmpty ? "…" : "…/" + parts.suffix(2).joined(separator: "/")
@@ -147,7 +166,7 @@ public actor ExportTarget {
         } catch { Darwin.close(descriptor); throw error }
     }
     private static func copy(_ source: SessionExportFile, to folder: URL, excluding roots: [URL],
-                             hooks: CopyHooks) throws -> SavedExport {
+                             hooks: CopyHooks, replacing: String? = nil) throws -> SavedExport {
         let directory = try openFolder(folder, excluding: roots)
         defer { Darwin.close(directory) }
         let input = source.descriptor
@@ -220,7 +239,7 @@ public actor ExportTarget {
         var name = source.name
         while true {
             try Task.checkCancellation()
-            name = number == 1 ? source.name : "\(stem) (\(number))\(suffix)"
+            name = replacing ?? (number == 1 ? source.name : "\(stem) (\(number))\(suffix)")
             var opened = stat(), named = stat()
             guard fstat(output, &opened) == 0,
                   fstatat(staging, leaf, &named, AT_SYMLINK_NOFOLLOW) == 0,
@@ -228,8 +247,8 @@ public actor ExportTarget {
                   opened.st_dev == named.st_dev, opened.st_ino == named.st_ino else {
                 throw error("export_folder_unwritable")
             }
-            if renameatx_np(staging, leaf, directory, name, UInt32(RENAME_EXCL)) == 0 { break }
-            guard errno == EEXIST else { throw error("export_folder_unwritable") }
+            if renameatx_np(staging, leaf, directory, name, replacing == nil ? UInt32(RENAME_EXCL) : 0) == 0 { break }
+            guard replacing == nil, errno == EEXIST else { throw error("export_folder_unwritable") }
             number += 1
         }
         // The file is already published under `name`. Reporting a failure now

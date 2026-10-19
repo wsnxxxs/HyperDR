@@ -853,3 +853,60 @@ private actor M3Gate {
         #expect(await env.sessions.exports(for: photo.id).count == 1)
     }
 }
+
+@Suite(.timeLimit(.minutes(1))) struct M3SavePanelTests {
+    @Test func exactFilenameReplacesAtomicallyButFolderSavesStillAvoidCollisions() async throws {
+        let env = try JobEnvironment(), photo = try await env.photo(), runner = env.runner()
+        let ticket = try await runner.start(session: photo.id, options: EditOptions())
+        try #require(await eventually(timeout: .seconds(2)) { await runner.read(ticket.job, offset: 0)?.summary.done == true })
+        let folder = env.root.appendingPathComponent("destination")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let target = ExportTarget(configuration: env.configuration, sessions: env.sessions)
+        let exact = folder.appendingPathComponent("my export.tif")
+        try Data([9]).write(to: exact)
+        // A reader holding the original inode sees all old bytes after replace.
+        let old = try FileHandle(forReadingFrom: exact)
+        defer { try? old.close() }
+        let saved = try await target.save(session: photo.id, export: ticket.export, to: exact)
+        #expect(saved.name == exact.lastPathComponent)
+        #expect(try Data(contentsOf: exact) == Data([1,2,3]))
+        #expect(try old.readToEnd() == Data([9]))
+        #expect(await target.folder.ready == false)
+        #expect(await failureCode { _ = try await target.save(session: photo.id, export: ticket.export,
+            to: folder.appendingPathComponent("wrong.jpg")) } == "invalid_options")
+        #expect(await failureCode { _ = try await target.save(session: photo.id, export: ticket.export,
+            to: env.configuration.supportDirectory.appendingPathComponent("forbidden.tif")) } == "export_folder_inside_workspace")
+        let first = try await target.save(session: photo.id, export: ticket.export, oneOff: folder)
+        let second = try await target.save(session: photo.id, export: ticket.export, oneOff: folder)
+        #expect(first.name == "photo.tif")
+        #expect(second.name == "photo (2).tif")
+        #expect(!(try FileManager.default.contentsOfDirectory(atPath: folder.path)).contains { $0.hasPrefix(".hyperdr-export-") })
+    }
+
+    @Test func failedOrCancelledCopyKeepsExistingDestinationAndCleansStaging() async throws {
+        let env = try JobEnvironment(), photo = try await env.photo(), runner = env.runner()
+        let ticket = try await runner.start(session: photo.id, options: EditOptions())
+        try #require(await eventually(timeout: .seconds(2)) { await runner.read(ticket.job, offset: 0)?.summary.done == true })
+        let folder = env.root.appendingPathComponent("destination")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let exact = folder.appendingPathComponent("keep.tif")
+        try Data([9]).write(to: exact)
+        let fail = ExportTarget(configuration: env.configuration, sessions: env.sessions,
+            access: SystemSecurityScopedAccess(), copyRead: { _, _, _ in errno = EIO; return -1 })
+        #expect(await failureCode { _ = try await fail.save(session: photo.id, export: ticket.export, to: exact) } == "export_folder_unwritable")
+        let reached = Mutex(false), release = DispatchSemaphore(value: 0)
+        let cancelling = ExportTarget(configuration: env.configuration, sessions: env.sessions,
+            access: SystemSecurityScopedAccess(), copyRead: { fd, buffer, count in
+                reached.withLock { $0 = true }
+                _ = release.wait(timeout: .now() + 5)
+                return Darwin.read(fd, buffer, count)
+            })
+        let save = Task { try await cancelling.save(session: photo.id, export: ticket.export, to: exact) }
+        defer { release.signal() }
+        try #require(await eventually(timeout: .seconds(2)) { reached.withLock { $0 } })
+        save.cancel(); release.signal()
+        do { _ = try await save.value; Issue.record("Expected cancellation") } catch is CancellationError {}
+        #expect(try Data(contentsOf: exact) == Data([9]))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path) == ["keep.tif"])
+    }
+}

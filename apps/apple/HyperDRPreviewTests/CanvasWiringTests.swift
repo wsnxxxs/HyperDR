@@ -482,4 +482,3 @@ extension CanvasWiringTests {
         withExtendedLifetime(window) {}
     }
 }
-

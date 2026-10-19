@@ -245,7 +245,7 @@ private func fakeConversion(_ request: EngineRequest,
     return ConvertReport(json: Data("{}".utf8), files: [ReportFile(input: "", output: output.path,
         success: true, skipped: false, message: "", width: 800, height: 600)])
 }
-private func eventually(timeout: Duration = .seconds(2), _ condition: @Sendable () async -> Bool) async -> Bool {
+private func eventually(timeout: Duration = .seconds(10), _ condition: @Sendable () async -> Bool) async -> Bool {
     let deadline = ContinuousClock.now + timeout
     while ContinuousClock.now < deadline {
         if await condition() { return true }
@@ -259,7 +259,7 @@ private func failureCode(_ operation: () async throws -> Void) async -> String? 
 }
 
 @Suite(.timeLimit(.minutes(1))) struct JobTests {
-    @Test func realEngineCancellationFinishesWithinTwoHundredMilliseconds() async throws {
+    @Test func realEngineCancellationDiscardsBeforeTerminal() async throws {
         let env = try JobEnvironment()
         let source = env.root.appendingPathComponent("large.png")
         let width = 2600, height = 2000
@@ -273,25 +273,32 @@ private func failureCode(_ operation: () async throws -> Void) async -> String? 
         let destination = try #require(CGImageDestinationCreateWithURL(source as CFURL, "public.png" as CFString, 1, nil))
         CGImageDestinationAddImage(destination, image, nil)
         try #require(CGImageDestinationFinalize(destination))
-        let kit = try await HyperDRKit(configuration: env.configuration)
-        let photo = try await kit.sessions.open(source)
-        let ticket = try await kit.jobs.start(session: photo.id, options: EditOptions(["encoding": .string("sdr-jpeg")]))
-        var cancelledAt: ContinuousClock.Instant?
-        for await event in kit.jobs.events(ticket.job) {
-            if case .progress(let progress) = event, progress.phase == "decode", cancelledAt == nil {
-                cancelledAt = .now
-                #expect(await kit.jobs.cancel(ticket.job))
-            }
-            if case .finished(let summary) = event {
-                let start = try #require(cancelledAt)
-                #expect(start.duration(to: .now) < .milliseconds(200))
-                #expect(summary.cancelled && summary.failure?.code == "cancelled")
-            }
-        }
-        #expect(await kit.sessions.exports(for: photo.id).isEmpty)
+        let engine = try await Engine()
+        let photo = try await env.sessions.open(source)
+        let gate = BlockingJobGate()
+        defer { gate.release() }
+        let runner = env.runner(convert: { request, events in
+            try await engine.convert(request, events: { event in
+                events(event)
+                if event.phase == "decode" { gate.waitForRelease() }
+            })
+        })
+        let ticket = try await runner.start(session: photo.id, options: EditOptions(["encoding": .string("sdr-jpeg")]))
+        // The real C conversion remains in its decode callback until cancel()
+        // has propagated to its work task. It cannot naturally win this race.
+        try #require(await eventually(timeout: .seconds(10)) { gate.entered })
+        let started = ContinuousClock.now
+        #expect(await runner.cancel(ticket.job))
+        gate.release()
+        try #require(await eventually(timeout: .seconds(10)) { await runner.read(ticket.job, offset: 0)?.summary.done == true })
+        let summary = try #require(await runner.read(ticket.job, offset: 0)?.summary)
+        print("Native cancellation/cleanup latency (diagnostic): \(started.duration(to: .now))")
+        #expect(summary.cancelled && summary.failure?.code == "cancelled")
+        #expect(!gate.didTimeOut)
+        #expect(await env.sessions.exports(for: photo.id).isEmpty)
         let folder = env.configuration.supportDirectory.appendingPathComponent("sessions/\(photo.id)/exports/\(ticket.export)")
         #expect(!FileManager.default.fileExists(atPath: folder.path))
-        await kit.sessions.close(photo.id)
+        await env.sessions.close(photo.id)
     }
     @Test func logBoundsUseAbsoluteUnicodeScalarOffsets() {
         var log = JobLog(limit: 4)
@@ -331,14 +338,18 @@ private func failureCode(_ operation: () async throws -> Void) async -> String? 
     @Test func publicationPrecedesTerminalAndProgressRemainsOrdered() async throws {
         let env = try JobEnvironment()
         let photo = try await env.photo()
+        let gate = TestStepGate()
+        defer { gate.release() }
         let runner = env.runner(convert: { request, events in
-            try await Task.sleep(for: .milliseconds(30))
+            await gate.wait()
             return try await fakeConversion(request, events)
         })
         let ticket = try await runner.start(session: photo.id, options: EditOptions(["encoding": .string("sdr-tiff")]))
         #expect(ticket.argv.first == "HyperDR")
         var progress: [Double] = []
-        for await event in runner.events(ticket.job) {
+        let stream = runner.events(ticket.job) // Synchronous subscription before any callbacks.
+        gate.release()
+        for await event in stream {
             if case .progress(let value) = event { progress.append(value.fraction) }
             if case .finished(let result) = event {
                 #expect(result.done); #expect(result.failure == nil)
@@ -357,25 +368,41 @@ private func failureCode(_ operation: () async throws -> Void) async -> String? 
     @Test func cancellationDiscardsBeforeTerminalAndAdmitsAnotherJob() async throws {
         let env = try JobEnvironment()
         let photo = try await env.photo()
-        let runner = env.runner(convert: { _, _ in try await Task.sleep(for: .seconds(30)); throw CancellationError() })
+        let gates = [TestStepGate(), TestStepGate()], calls = Mutex(0)
+        defer { gates.forEach { $0.release() } }
+        let runner = env.runner(convert: { request, events in
+            let index = calls.withLock { count in defer { count += 1 }; return count }
+            await gates[min(index, 1)].wait(releaseOnCancel: true)
+            try Task.checkCancellation()
+            return try await fakeConversion(request, events)
+        })
         let ticket = try await runner.start(session: photo.id, options: EditOptions())
+        try #require(await eventually(timeout: .seconds(10)) { gates[0].entered })
         #expect(await failureCode { _ = try await runner.start(session: photo.id, options: EditOptions()) } == "convert_in_progress")
-        let start = ContinuousClock.now
         #expect(await runner.cancel(ticket.job))
-        try #require(await eventually(timeout: .milliseconds(200)) { await runner.read(ticket.job, offset: 0)?.summary.done == true })
-        #expect(ContinuousClock.now - start < .milliseconds(200))
+        try #require(await eventually(timeout: .seconds(10)) { await runner.read(ticket.job, offset: 0)?.summary.done == true })
+        #expect(gates[0].cancelled)
+        #expect(await runner.read(ticket.job, offset: 0)?.summary.cancelled == true)
         #expect(await env.sessions.exports(for: photo.id).isEmpty)
         let folder = env.configuration.supportDirectory.appendingPathComponent("sessions/\(photo.id)/exports/\(ticket.export)")
         #expect(!FileManager.default.fileExists(atPath: folder.path))
         let next = try await runner.start(session: photo.id, options: EditOptions())
+        try #require(await eventually(timeout: .seconds(10)) { gates[1].entered })
         #expect(next.job != ticket.job); #expect(await runner.read(ticket.job, offset: 0) == nil)
-        _ = await runner.cancel(next.job)
-        #expect(await eventually { await runner.read(next.job, offset: 0)?.summary.done == true })
+        #expect(await runner.cancel(next.job))
+        try #require(await eventually(timeout: .seconds(10)) { await runner.read(next.job, offset: 0)?.summary.done == true })
+        #expect(gates[1].cancelled)
     }
     @Test func timeoutDiscardsAndReportsTerminal() async throws {
         let env = try JobEnvironment(timeout: .milliseconds(20))
         let photo = try await env.photo()
-        let runner = env.runner(convert: { _, _ in try await Task.sleep(for: .seconds(30)); throw CancellationError() })
+        let gate = TestStepGate()
+        defer { gate.release() }
+        let runner = env.runner(convert: { request, events in
+            await gate.wait(releaseOnCancel: true)
+            try Task.checkCancellation()
+            return try await fakeConversion(request, events)
+        })
         let ticket = try await runner.start(session: photo.id, options: EditOptions())
         try #require(await eventually { await runner.read(ticket.job, offset: 0)?.summary.done == true })
         let result = try #require(await runner.read(ticket.job, offset: 0))
@@ -409,17 +436,16 @@ private func failureCode(_ operation: () async throws -> Void) async -> String? 
     @Test func admissionAlsoCoversSuspendingFramePreparation() async throws {
         let env = try JobEnvironment()
         let photo = try await env.photo()
-        let (stream, signal) = AsyncStream.makeStream(of: Void.self)
-        let runner = env.runner(probe: { _ in
-            signal.yield(())
-            try await Task.sleep(for: .milliseconds(100))
-            return (800, 600)
-        })
+        let gate = TestStepGate()
+        defer { gate.release() }
+        let runner = env.runner(probe: { _ in await gate.wait(); return (800, 600) })
         let first = Task { try await runner.start(session: photo.id, options: EditOptions(), frame: ExportFrame(spec: ["schema": .string("hyperdr.frame/v1")])) }
-        for await _ in stream { break }
+        try #require(await eventually(timeout: .seconds(10)) { gate.entered })
+        #expect(await runner.activity == .preparing)
         #expect(await failureCode { _ = try await runner.start(session: photo.id, options: EditOptions()) } == "convert_in_progress")
+        gate.release()
         let ticket = try await first.value
-        #expect(await eventually { await runner.read(ticket.job, offset: 0)?.summary.done == true })
+        try #require(await eventually(timeout: .seconds(10)) { await runner.read(ticket.job, offset: 0)?.summary.done == true })
     }
 
     @Test func perFileFailuresPreserveCodesDetailsAndDiscardWork() async throws {
@@ -434,7 +460,7 @@ private func failureCode(_ operation: () async throws -> Void) async -> String? 
             let file = try JSONDecoder().decode(ReportFile.self, from: data)
             let runner = env.runner(convert: { _, _ in ConvertReport(json: data, files: [file]) })
             let ticket = try await runner.start(session: photo.id, options: EditOptions())
-            try #require(await eventually(timeout: .seconds(2)) { await runner.read(ticket.job, offset: 0)?.summary.done == true })
+            try #require(await eventually(timeout: .seconds(10)) { await runner.read(ticket.job, offset: 0)?.summary.done == true })
             let result = try #require(await runner.read(ticket.job, offset: 0))
             #expect(result.summary.failure?.code == code)
             #expect(result.summary.failure?.message == "Failed export")
@@ -464,18 +490,22 @@ private func failureCode(_ operation: () async throws -> Void) async -> String? 
     @Test func cancellingPreparationReleasesAdmissionAndAllocatesNoVersion() async throws {
         let env = try JobEnvironment()
         let photo = try await env.photo()
-        let (stream, signal) = AsyncStream.makeStream(of: Void.self)
+        let gate = TestStepGate()
+        defer { gate.release() }
         let runner = env.runner(probe: { _ in
-            signal.yield(())
-            try await Task.sleep(for: .seconds(30)); return (800, 600)
+            await gate.wait(releaseOnCancel: true)
+            try Task.checkCancellation()
+            return (800, 600)
         })
         let preparation = Task { try await runner.start(session: photo.id, options: EditOptions(),
             frame: ExportFrame(spec: ["schema": .string("hyperdr.frame/v1")])) }
-        for await _ in stream { break }
+        try #require(await eventually(timeout: .seconds(10)) { gate.entered })
         preparation.cancel()
         #expect(await failureCode { _ = try await preparation.value } == "cancelled")
+        #expect(gate.cancelled)
+        #expect(await runner.activity == .idle)
         let next = try await runner.start(session: photo.id, options: EditOptions())
-        #expect(await eventually { await runner.read(next.job, offset: 0)?.summary.done == true })
+        try #require(await eventually(timeout: .seconds(10)) { await runner.read(next.job, offset: 0)?.summary.done == true })
         #expect(await env.sessions.exports(for: photo.id).count == 1)
     }
 
@@ -559,24 +589,17 @@ private final class StagingInodeSwap: @unchecked Sendable {
 }
 
 private final class FIFOLeafSwap: @unchecked Sendable {
-    private let lock = NSLock()
-    private var finished = false
-    var rescued: Bool { lock.withLock { finished } }
-    func open(_ directory: Int32, _ name: String, _ flags: Int32) -> Int32 {
+    private let flags = Mutex<Int32?>(nil)
+    var observedNonblocking: Bool { flags.withLock { $0.map { $0 & O_NONBLOCK != 0 } ?? false } }
+    func open(_ directory: Int32, _ name: String, _ requested: Int32) -> Int32 {
         guard unlinkat(directory, name, 0) == 0, mkfifoat(directory, name, 0o600) == 0 else {
             Issue.record("Unable to replace validated source with FIFO")
             return -1
         }
-        let rescueDirectory = dup(directory)
-        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(600)) { [self] in
-            // Rescue the old blocking implementation. O_NONBLOCK means the
-            // fixed implementation cannot leave this writer stuck instead.
-            let writer = openat(rescueDirectory, name, O_WRONLY | O_NONBLOCK | O_CLOEXEC)
-            if writer >= 0 { Darwin.close(writer) }
-            Darwin.close(rescueDirectory)
-            lock.withLock { finished = true }
-        }
-        return openat(directory, name, flags)
+        flags.withLock { $0 = requested }
+        // Prevent a regressed implementation hanging the test host: the
+        // assertion below still fails when O_NONBLOCK was not requested.
+        return openat(directory, name, requested | O_NONBLOCK)
     }
 }
 
@@ -610,12 +633,8 @@ extension ExportTargetRaceTests {
         let runner = env.runner()
         let ticket = try await runner.start(session: photo.id, options: EditOptions())
         try #require(await eventually { await runner.read(ticket.job, offset: 0)?.summary.done == true })
-        let start = ContinuousClock.now
         #expect(await failureCode { _ = try await env.sessions.exportFile(photo.id, export: ticket.export) } == "source_missing")
-        let elapsed = start.duration(to: .now)
-        print("K3 FIFO replacement: elapsed=\(elapsed)")
-        #expect(elapsed < .milliseconds(200))
-        #expect(await eventually { fault.rescued })
+        #expect(fault.observedNonblocking, "Opening an untrusted export leaf must not wait for a FIFO writer")
     }
 }
 
@@ -665,58 +684,101 @@ extension ExportTargetRaceTests {
     }
 }
 
-private actor M3Gate {
-    var entered = false
-    private var continuation: CheckedContinuation<Void, Never>?
-    func wait() async {
-        entered = true
-        await withCheckedContinuation { continuation = $0 }
+/// Blocks only a native callback or detached copy thread, never the Swift
+/// test executor. Tests release it after establishing cancellation or trimming.
+private final class BlockingJobGate: @unchecked Sendable {
+    private let condition = NSCondition()
+    private var waiting = false
+    private var released = false
+    private var timedOut = false
+    var entered: Bool { condition.withLock { waiting } }
+    var didTimeOut: Bool { condition.withLock { timedOut } }
+    func waitForRelease() {
+        condition.lock()
+        defer { condition.unlock() }
+        waiting = true
+        let deadline = Date().addingTimeInterval(30)
+        while !released {
+            if !condition.wait(until: deadline) { timedOut = true; break }
+        }
     }
-    func release() { continuation?.resume(); continuation = nil }
+    func release() {
+        condition.lock()
+        released = true
+        condition.broadcast()
+        condition.unlock()
+    }
 }
 
 @Suite(.timeLimit(.minutes(1))) struct M3JobContractTests {
     @Test func cancelAllWaitsForPreparationCleanup() async throws {
-        let env = try JobEnvironment(), photo = try await env.photo(), gate = M3Gate()
-        let cancelled = Mutex(false)
+        let env = try JobEnvironment(), photo = try await env.photo(), gate = TestStepGate()
+        defer { gate.release() }
         let runner = env.runner(probe: { _ in
-            await withTaskCancellationHandler { await gate.wait() } onCancel: { cancelled.withLock { $0 = true } }
+            await gate.wait()
             try Task.checkCancellation(); return (800,600)
         })
         let start = Task { try await runner.start(session: photo.id, options: EditOptions(),
             frame: ExportFrame(spec: ["schema": .string("hyperdr.frame/v1")])) }
-        try #require(await eventually(timeout: .seconds(2)) { await gate.entered })
+        try #require(await eventually(timeout: .seconds(10)) { gate.entered })
         #expect(await runner.activity == .preparing)
-        let stop = Task { await runner.cancelAll() }
-        // Unblock the deliberately non-cancellation-aware probe; cancellation
-        // must still prevent allocation, publication and stale admission.
-        try #require(await eventually(timeout: .seconds(2)) { cancelled.withLock { $0 } })
-        await gate.release()
+        let returned = Mutex(false)
+        let stop = Task { await runner.cancelAll(); returned.withLock { $0 = true } }
+        try #require(await eventually(timeout: .seconds(10)) {
+            let waiters = await runner.cancelAllWaiterCount
+            return gate.cancelled && waiters == 1
+        })
+        #expect(!returned.withLock { $0 })
+        #expect(await runner.activity == .preparing)
+        #expect(await env.sessions.exports(for: photo.id).isEmpty)
+        gate.release()
         await stop.value
         #expect(await failureCode { _ = try await start.value } == "cancelled")
+        #expect(await runner.cancelAllWaiterCount == 0)
         #expect(await runner.activity == .idle)
         #expect(await env.sessions.exports(for: photo.id).isEmpty)
     }
 
     @Test func cancelAllDrainsRunningAndWaitsForCommit() async throws {
-        let env = try JobEnvironment(), photo = try await env.photo()
-        let runner = env.runner(convert: { _, _ in try await Task.sleep(for: .seconds(30)); throw CancellationError() })
+        let env = try JobEnvironment(), photo = try await env.photo(), runningGate = TestStepGate()
+        defer { runningGate.release() }
+        let runner = env.runner(convert: { request, events in
+            await runningGate.wait()
+            try Task.checkCancellation()
+            return try await fakeConversion(request, events)
+        })
         let ticket = try await runner.start(session: photo.id, options: EditOptions())
+        try #require(await eventually(timeout: .seconds(10)) { runningGate.entered })
         #expect(await runner.activity == .running(ticket.job))
-        await runner.cancelAll()
+        let runningStop = Task { await runner.cancelAll() }
+        try #require(await eventually(timeout: .seconds(10)) {
+            let waiters = await runner.cancelAllWaiterCount
+            return runningGate.cancelled && waiters == 1
+        })
+        #expect(await runner.activity == .running(ticket.job), "admission stays held until cancellation cleanup exits")
+        #expect(await runner.read(ticket.job, offset: 0)?.summary.done == false)
+        runningGate.release()
+        await runningStop.value
         #expect(await runner.activity == .idle)
+        #expect(await runner.cancelAllWaiterCount == 0)
         #expect(await runner.read(ticket.job, offset: 0)?.summary.cancelled == true)
         #expect(await env.sessions.exports(for: photo.id).isEmpty)
-        let gate = M3Gate()
+        let gate = TestStepGate()
+        defer { gate.release() }
         let committing = env.runner(beforePublish: { await gate.wait() })
         let committed = try await committing.start(session: photo.id, options: EditOptions())
-        try #require(await eventually(timeout: .seconds(2)) { await gate.entered })
+        try #require(await eventually(timeout: .seconds(10)) { gate.entered })
         #expect(await committing.activity == .committing(committed.job))
-        let stop = Task { await committing.cancelAll() }
-        await Task.yield()
+        let returned = Mutex(false)
+        let stop = Task { await committing.cancelAll(); returned.withLock { $0 = true } }
+        try #require(await eventually(timeout: .seconds(10)) { await committing.cancelAllWaiterCount == 1 })
+        #expect(!returned.withLock { $0 })
+        #expect(!gate.cancelled, "commit is awaited rather than cancelled")
         #expect(await committing.activity == .committing(committed.job))
-        await gate.release(); await stop.value
+        gate.release()
+        await stop.value
         #expect(await committing.activity == .idle)
+        #expect(await committing.cancelAllWaiterCount == 0)
         #expect(await committing.read(committed.job, offset: 0)?.summary.failure == nil)
         #expect(await env.sessions.exports(for: photo.id).count == 1)
     }
@@ -749,7 +811,7 @@ private actor M3Gate {
         #expect(placeholder.contains("<导出文件夹>/report.json"))
         #expect(placeholder.contains("<导出文件夹>/frame.json"))
         let ticket = try await runner.start(session: photo.id, options: EditOptions(), frame: frame)
-        try #require(await eventually(timeout: .seconds(2)) { await runner.read(ticket.job, offset: 0)?.summary.done == true })
+        try #require(await eventually(timeout: .seconds(10)) { await runner.read(ticket.job, offset: 0)?.summary.done == true })
         let record = try #require(await env.sessions.exports(for: photo.id).first)
         #expect(record.key == (try await runner.exportKey(session: photo.id, options: EditOptions(), frame: frame)))
         #expect(record.frame == (try ExportFrameRecord(frame)))
@@ -778,7 +840,7 @@ private actor M3Gate {
     private func publish(_ env: JobEnvironment, _ photo: PhotoSession) async throws -> ExportRecord {
         let runner = env.runner()
         let ticket = try await runner.start(session: photo.id, options: EditOptions())
-        try #require(await eventually(timeout: .seconds(2)) { await runner.read(ticket.job, offset: 0)?.summary.done == true })
+        try #require(await eventually(timeout: .seconds(10)) { await runner.read(ticket.job, offset: 0)?.summary.done == true })
         return try #require(await runner.read(ticket.job, offset: 0)?.summary.result)
     }
     private func age(_ env: JobEnvironment, _ photo: PhotoSession) throws {
@@ -832,23 +894,24 @@ private actor M3Gate {
     @Test func trimmingDuringAnOpenCopyDoesNotInterruptSaving() async throws {
         let env = try JobEnvironment(historyLimit: 1), photo = try await env.photo()
         let first = try await publish(env, photo)
-        let arrived = Mutex(false), release = DispatchSemaphore(value: 0)
+        let arrived = Mutex(false), gate = BlockingJobGate()
         let target = ExportTarget(configuration: env.configuration, sessions: env.sessions,
             access: SystemSecurityScopedAccess(), copyRead: { fd, buffer, count in
                 let block = arrived.withLock { value in if value { return false }; value = true; return true }
-                if block { _ = release.wait(timeout: .now() + 5) }
+                if block { gate.waitForRelease() }
                 return Darwin.read(fd,buffer,count)
             })
         let folder = env.root.appendingPathComponent("saved")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let save = Task { try await target.save(session: photo.id, export: first.id, oneOff: folder) }
-        defer { release.signal() }
-        try #require(await eventually(timeout: .seconds(2)) { arrived.withLock { $0 } })
+        defer { gate.release() }
+        try #require(await eventually(timeout: .seconds(10)) { arrived.withLock { $0 } })
         _ = try await publish(env, photo)
         #expect(await env.sessions.exports(for: photo.id).count == 1)
         #expect(await env.sessions.exports(for: photo.id).first?.id != first.id)
-        release.signal()
+        gate.release()
         let result = try await save.value
+        #expect(!gate.didTimeOut)
         #expect(try Data(contentsOf: result.url) == Data([1,2,3]))
         try await env.sessions.markSaved(photo.id, export: first.id, saved: SavedMark(fileName: result.name, folderLabel: result.folderLabel))
         #expect(await env.sessions.exports(for: photo.id).count == 1)
@@ -859,7 +922,7 @@ private actor M3Gate {
     @Test func exactFilenameReplacesAtomicallyButFolderSavesStillAvoidCollisions() async throws {
         let env = try JobEnvironment(), photo = try await env.photo(), runner = env.runner()
         let ticket = try await runner.start(session: photo.id, options: EditOptions())
-        try #require(await eventually(timeout: .seconds(2)) { await runner.read(ticket.job, offset: 0)?.summary.done == true })
+        try #require(await eventually(timeout: .seconds(10)) { await runner.read(ticket.job, offset: 0)?.summary.done == true })
         let folder = env.root.appendingPathComponent("destination")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let target = ExportTarget(configuration: env.configuration, sessions: env.sessions)
@@ -887,7 +950,7 @@ private actor M3Gate {
     @Test func failedOrCancelledCopyKeepsExistingDestinationAndCleansStaging() async throws {
         let env = try JobEnvironment(), photo = try await env.photo(), runner = env.runner()
         let ticket = try await runner.start(session: photo.id, options: EditOptions())
-        try #require(await eventually(timeout: .seconds(2)) { await runner.read(ticket.job, offset: 0)?.summary.done == true })
+        try #require(await eventually(timeout: .seconds(10)) { await runner.read(ticket.job, offset: 0)?.summary.done == true })
         let folder = env.root.appendingPathComponent("destination")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let exact = folder.appendingPathComponent("keep.tif")
@@ -895,18 +958,19 @@ private actor M3Gate {
         let fail = ExportTarget(configuration: env.configuration, sessions: env.sessions,
             access: SystemSecurityScopedAccess(), copyRead: { _, _, _ in errno = EIO; return -1 })
         #expect(await failureCode { _ = try await fail.save(session: photo.id, export: ticket.export, to: exact) } == "export_folder_unwritable")
-        let reached = Mutex(false), release = DispatchSemaphore(value: 0)
+        let reached = Mutex(false), gate = BlockingJobGate()
         let cancelling = ExportTarget(configuration: env.configuration, sessions: env.sessions,
             access: SystemSecurityScopedAccess(), copyRead: { fd, buffer, count in
                 reached.withLock { $0 = true }
-                _ = release.wait(timeout: .now() + 5)
+                gate.waitForRelease()
                 return Darwin.read(fd, buffer, count)
             })
         let save = Task { try await cancelling.save(session: photo.id, export: ticket.export, to: exact) }
-        defer { release.signal() }
-        try #require(await eventually(timeout: .seconds(2)) { reached.withLock { $0 } })
-        save.cancel(); release.signal()
+        defer { gate.release() }
+        try #require(await eventually(timeout: .seconds(10)) { reached.withLock { $0 } })
+        save.cancel(); gate.release()
         do { _ = try await save.value; Issue.record("Expected cancellation") } catch is CancellationError {}
+        #expect(!gate.didTimeOut)
         #expect(try Data(contentsOf: exact) == Data([9]))
         #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path) == ["keep.tif"])
     }

@@ -21,6 +21,10 @@
 //   are also written to the named files as raw float32 linear Display P3
 //   (three uint32 width, height, 3, then RGB rows) for
 //   tests/hevc/gain_map_metrics.cpp.
+// - With HYPERDR_PROBE_DUMP_HDR_SIGNAL set, an HDR-only mode instead dumps
+//   the decoded BT.2100 RGB signal in its own tagged PQ/HLG space. The metrics
+//   helper inverts that transfer against the exact encoder input. No SDR
+//   decode or ColorSync display OOTF participates in this codec-quality gate.
 // - `regions`: for each `--region` (stored pixel coordinates, top-left
 //   origin, before any Exif orientation) minus every `--exclude`, per channel:
 //   log2(HDR / SDR) -- mean, maximum |·| and p99.9 |·| -- over the pixels whose
@@ -422,6 +426,26 @@ do {
         report["jpeg_segments"] = jpegSegments(bytes)
     }
     let hdrImage = try decode(file, hdr: true)
+    // Codec quality uses ImageIO's HDR-decoded signal in its own tagged colour
+    // space. Apply the specified PQ/HLG transfer explicitly in the metrics
+    // helper; a ColorSync HLG display conversion has its own viewing OOTF.
+    if let output = ProcessInfo.processInfo.environment["HYPERDR_PROBE_DUMP_HDR_SIGNAL"] {
+        guard let space = hdrImage.colorSpace,
+              space.name == CGColorSpace.itur_2100_PQ || space.name == CGColorSpace.itur_2100_HLG else {
+            throw Failure(description: "HDR signal is not tagged BT.2100 PQ or HLG")
+        }
+        let signal = try render(hdrImage, in: space)
+        let shape = [UInt32(signal.width), UInt32(signal.height), UInt32(3)]
+        var data = shape.withUnsafeBytes { Data($0) }
+        var rgb = [Float]()
+        for i in stride(from: 0, to: signal.values.count, by: 4) { rgb.append(contentsOf: signal.values[i..<i+3]) }
+        rgb.withUnsafeBytes { data.append(contentsOf: $0) }
+        try data.write(to: URL(fileURLWithPath: output))
+        report["hdr_signal_space"] = space.name! as String
+        let json = try JSONSerialization.data(withJSONObject: finite(report), options: [.prettyPrinted, .sortedKeys])
+        FileHandle.standardOutput.write(json)
+        exit(0) // HDR-only mode never requests a tone-mapped SDR rendition.
+    }
     let sdrImage = try decode(file, hdr: false)
     let hdr = try render(hdrImage, in: linearSpace)
     let sdr = try render(sdrImage, in: linearSpace)

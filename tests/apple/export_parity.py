@@ -56,17 +56,26 @@ def main() -> None:
         cases = [(encoding, None) for encoding in ("sdr-jpeg", "sdr-tiff", "avif-pq", "avif-hlg", "iso-gainmap-jpeg")]
         cases += [(encoding, style) for style in ("gallery", "story") for encoding in ("iso-gainmap-jpeg", "sdr-tiff")]
         cases += [("iso-gainmap-jpeg", "raw"), ("sdr-tiff", "lut"), ("iso-gainmap-jpeg", "ai")]
+        cases += [("adaptive", None), ("adaptive", "depth10"), ("pq", None), ("hlg", None)]
         lut = root / "private-look.cube"
         lut.write_text('LUT_3D_SIZE 2\n' + '\n'.join(
             f'{r} {g} {b}' for b in (0, 1) for g in (0, 1) for r in (0, 1)) + '\n')
         for index, (encoding, style) in enumerate(cases):
-            case_source = ROOT / "build/fixtures/sony-ilce-7s.ARW" if style == "raw" else source
+            adaptive10 = style == "depth10"
+            depth = 10 if adaptive10 or encoding in ("pq", "hlg") else 8
+            style = None if adaptive10 else style
+            case_source = (ROOT / "tests/fixtures/gain-map-jpeg/iso-mono.jpg" if adaptive10 else
+                           ROOT / "build/fixtures/sony-ilce-7s.ARW" if style == "raw" else source)
             mode = style
             style = None if style in ("raw", "lut", "ai") else style
             case = root / str(index)
             case.mkdir()
             options = case / "options.json"
             values = {"encoding": encoding, "brightness": .612345, "contrast": 1.123456}
+            if adaptive10:
+                # The editor normally supplies the actual source domain. This
+                # fixture is an authored ISO HDR JPEG, so select its HDR default.
+                values["sourceDomain"] = "dual-rendition"
             if mode == "ai":
                 values.update(useModel=True, modelId="research-cnn-v1")
             options.write_text(json.dumps(values))
@@ -105,6 +114,8 @@ def main() -> None:
                 assert "look.cube" in argv
             if mode == "ai":
                 assert "--ai-model" in argv, argv
+            if encoding in ("adaptive", "pq", "hlg"):
+                assert argv[argv.index("--depth") + 1] == str(depth), (encoding, depth, argv)
             argv = [str(cli)] + [paths.get(arg, arg) for arg in argv[1:]]
             if style:
                 assert "--frame" in argv
@@ -114,7 +125,7 @@ def main() -> None:
             actual = hashlib.sha256(kit_file.read_bytes()).hexdigest()
             expected = hashlib.sha256(cli_file.read_bytes()).hexdigest()
             assert actual == expected, (encoding, style, actual, expected)
-            print(f"PASS {encoding} {mode or 'plain'} {actual}", flush=True)
+            print(f"PASS {encoding} {mode or 'plain'} depth={depth} {actual}", flush=True)
     print(f"export parity: {len(cases)}/{len(cases)} byte-identical", flush=True)
 
 

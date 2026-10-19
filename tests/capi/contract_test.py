@@ -1403,6 +1403,23 @@ class EngineContract(unittest.TestCase):
             LIB.hyperdr_buffer_free(ctypes.byref(buffer))
             self.assertFalse(buffer.owner)
 
+    def test_hevc_exports_match_cli_bytes(self):
+        if not self.capabilities["codecs"]:
+            self.skipTest("requires codec-enabled build")
+        with tempfile.TemporaryDirectory(prefix="hyperdr-hevc-parity-") as temporary:
+            root = Path(temporary)
+            source = root / "sample.png"
+            png(source, 128, 96)
+            for encoding, depth in (("adaptive", 8), ("adaptive", 10), ("pq", 10), ("hlg", 10)):
+                with self.subTest(encoding=encoding, depth=depth):
+                    destination = root / (encoding + str(depth))
+                    report = root / "report.json"
+                    request = {"encoding": encoding, "command": {"input": str(source), "output": str(destination),
+                               "depth": depth, "overwrite": True}}
+                    self.compare_export(request, ["convert", str(source), "--output", str(destination),
+                        "--encoding", encoding, "--depth", str(depth), "--report", str(report)],
+                        destination / "sample-hyperdr.heic", report)
+
     def test_images_and_frames(self):
         if not self.capabilities["codecs"]:
             self.skipTest("requires codec-enabled build")

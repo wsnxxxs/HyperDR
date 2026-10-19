@@ -1,5 +1,6 @@
 #include "hyperdr/container/heif_tmap.hpp"
-#include "hyperdr/container/heif_grid.hpp"
+#include "hyperdr/container/heif_writer.hpp"
+#include "hevc/hevc.hpp"
 #include "hyperdr/image/color.hpp"
 #include "hyperdr/image/transfer.hpp"
 #include "hyperdr/foundation/parallel.hpp"
@@ -36,71 +37,10 @@ void check_heif(heif_error error, const char* operation) {
   if (error.code != heif_error_Ok) throw std::runtime_error(std::string(operation) + ": " + (error.message ? error.message : "unknown libheif error"));
 }
 
-void configure_main10_still(heif_encoder* encoder) {
-  // libheif's x265 plugin defaults to one total frame and Main10 Intra.
-  // Together those settings make x265 signal Range Extensions. The only
-  // encoded frame remains intra even when the sequence permits more frames.
-  // Repeat the parameter sets in that frame so libheif can build hvcC.
-  check_heif(heif_encoder_set_parameter_string(encoder, "x265:total-frames", "0"),
-             "set HEVC Main10 frame count");
-  check_heif(heif_encoder_set_parameter_string(encoder, "x265:keyint", "250"),
-             "set HEVC Main10 keyframe interval");
-  check_heif(heif_encoder_set_parameter_string(encoder, "x265:repeat-headers", "1"),
-             "set HEVC Main10 parameter sets");
-}
-
-void configure_hevc_preset(heif_encoder* encoder, HevcPreset preset) {
-  // Leaving the default untouched preserves existing exports. The opt-in
-  // medium preset trades a little compression efficiency for encoding speed.
-  if (preset == HevcPreset::Medium) {
-    check_heif(heif_encoder_set_parameter_string(encoder, "preset", "medium"),
-               "set HEVC encoding preset");
-  }
-}
-
-struct ImageDeleter { void operator()(heif_image* p) const { if (p) heif_image_release(p); } };
-struct HandleDeleter { void operator()(heif_image_handle* p) const { if (p) heif_image_handle_release(p); } };
-struct EncoderDeleter { void operator()(heif_encoder* p) const { if (p) heif_encoder_release(p); } };
-struct ContextDeleter { void operator()(heif_context* p) const { if (p) heif_context_free(p); } };
-struct EncodingOptionsDeleter { void operator()(heif_encoding_options* p) const { if (p) heif_encoding_options_free(p); } };
-struct DecodingOptionsDeleter { void operator()(heif_decoding_options* p) const { if (p) heif_decoding_options_free(p); } };
-
-heif_color_profile_nclx display_p3_nclx() {
-  heif_color_profile_nclx nclx{};
-  nclx.version = 1;
-  nclx.color_primaries = heif_color_primaries_SMPTE_EG_432_1;
-  nclx.transfer_characteristics = heif_transfer_characteristic_IEC_61966_2_1;
-  nclx.matrix_coefficients = heif_matrix_coefficients_ITU_R_BT_709_5;
-  nclx.full_range_flag = 1;
-  return nclx;
-}
-
-heif_color_profile_nclx gain_map_nclx() {
-  heif_color_profile_nclx nclx{};
-  nclx.version = 1;
-  nclx.color_primaries = heif_color_primaries_unspecified;
-  nclx.transfer_characteristics = heif_transfer_characteristic_unspecified;
-  nclx.matrix_coefficients = heif_matrix_coefficients_ITU_R_BT_709_5;
-  nclx.full_range_flag = 1;
-  return nclx;
-}
-
-heif_color_profile_nclx bt2100_nclx(HdrEncoding encoding) {
-  if (encoding != HdrEncoding::Pq && encoding != HdrEncoding::Hlg) {
-    throw std::invalid_argument("BT.2100 profile requires PQ or HLG encoding");
-  }
-  heif_color_profile_nclx nclx{};
-  nclx.version = 1;
-  nclx.color_primaries = heif_color_primaries_ITU_R_BT_2020_2_and_2100_0;
-  nclx.transfer_characteristics = encoding == HdrEncoding::Pq
-      ? heif_transfer_characteristic_ITU_R_BT_2100_0_PQ
-      : heif_transfer_characteristic_ITU_R_BT_2100_0_HLG;
-  nclx.matrix_coefficients =
-      heif_matrix_coefficients_ITU_R_BT_2020_2_non_constant_luminance;
-  nclx.full_range_flag = 1;
-  return nclx;
-}
-
+struct ImageDeleter { void operator()(heif_image* p) const { if(p)heif_image_release(p); } };
+struct HandleDeleter { void operator()(heif_image_handle* p) const { if(p)heif_image_handle_release(p); } };
+struct ContextDeleter { void operator()(heif_context* p) const { if(p)heif_context_free(p); } };
+struct DecodingOptionsDeleter { void operator()(heif_decoding_options* p) const { if(p)heif_decoding_options_free(p); } };
 void validate_base_profile(const heif_image_handle* handle) {
   heif_color_profile_nclx* nclx = nullptr;
   const auto error = heif_image_handle_get_nclx_color_profile(handle, &nclx);
@@ -150,537 +90,106 @@ void validate_gain_profile(const heif_image_handle* handle) {
   if (!valid) throw std::runtime_error("Gain Map lacks required nclx 2/2/1/full");
 }
 
-std::unique_ptr<heif_image, ImageDeleter> make_base(const FloatImage& image, int depth) {
-  if (depth != 8 && depth != 10) throw std::invalid_argument("base depth must be 8 or 10");
-  heif_image* raw = nullptr;
-  const auto chroma = depth > 8 ? heif_chroma_interleaved_RRGGBB_LE : heif_chroma_interleaved_RGB;
-  check_heif(heif_image_create(static_cast<int>(image.width), static_cast<int>(image.height), heif_colorspace_RGB,
-                               chroma, &raw), "create base image");
-  std::unique_ptr<heif_image, ImageDeleter> result(raw);
-  check_heif(heif_image_add_plane(raw, heif_channel_interleaved, image.width, image.height, depth), "allocate base plane");
-  int stride = 0;
-  auto* plane = heif_image_get_plane(raw, heif_channel_interleaved, &stride);
-  if (!plane || stride <= 0) throw std::runtime_error("allocated base plane is unavailable");
-  // TPDF-dithered quantization removes visible banding in smooth gradients
-  // (skies) that the multiplicative gain map would otherwise amplify.
-  const unsigned max_code = (1U << depth) - 1U;
-  parallel_for_rows(image.height, [&](const std::uint32_t y) {
-    if (depth > 8) {
-      auto* row = reinterpret_cast<std::uint16_t*>(plane + static_cast<std::size_t>(y) * stride);
-      for (std::uint32_t x = 0; x < image.width; ++x) {
-        for (unsigned c = 0; c < 3; ++c) {
-          row[x * 3 + c] = static_cast<std::uint16_t>(
-              quantize_dithered(srgb_oetf(image.at(x, y, c)), max_code, x, y, c));
-        }
-      }
-    } else {
-      auto* row = plane + static_cast<std::size_t>(y) * stride;
-      for (std::uint32_t x = 0; x < image.width; ++x) {
-        for (unsigned c = 0; c < 3; ++c) {
-          row[x * 3 + c] = static_cast<std::uint8_t>(
-              quantize_dithered(srgb_oetf(image.at(x, y, c)), max_code, x, y, c));
-        }
-      }
+// A bounded batch of YUV tiles is converted in parallel, then fed in row-major
+// order to one VT session. Conversion concurrency never changes the bitstream.
+template<class Convert>
+codec::hevc::EncodedSequence encode_picture(const codec::hevc::TileGrid& grid,
+    const codec::hevc::EncodeParams& params,const Convert& convert) {
+  using namespace codec::hevc;
+  const unsigned automatic=std::clamp(std::thread::hardware_concurrency()/4U,1U,4U);
+  const auto requested=current_execution_config.heic_tile_workers;
+  const std::size_t workers=std::min<std::size_t>(requested?requested:automatic,grid.count());
+  std::vector<YuvTile> batch(workers);
+  return encode(grid.count(),[&](std::size_t index,YuvTile& tile){
+    if(index%workers==0){
+      const auto count=std::min(workers,grid.count()-index);
+      std::exception_ptr failure;std::mutex mutex;
+      const auto run=[&,token=current_cancel_token,config=current_execution_config](std::size_t i){
+        CancelScope cancel(token);ExecutionScope execution(config);
+        try{check_cancelled();batch[i]=make_tile(params.main10?10:8);convert(index+i,batch[i]);}
+        catch(...){std::lock_guard lock(mutex);if(!failure)failure=std::current_exception();}
+      };
+      {std::vector<std::jthread> threads;for(std::size_t i=1;i<count;++i)threads.emplace_back(run,i);run(0);}
+      if(failure)std::rethrow_exception(failure);
     }
-  });
-  auto nclx = display_p3_nclx();
-  check_heif(heif_image_set_nclx_color_profile(raw, &nclx), "set P3 nclx");
-  const auto icc = codec::display_p3_profile();
-  check_heif(heif_image_set_raw_color_profile(raw, "prof", icc.data(), icc.size()), "set P3 ICC");
-  return result;
+    tile=std::move(batch[index%workers]);
+  },params);
 }
-
-// Encode the gain map as 8-bit 4:2:0 YCbCr with neutral chroma. x265 signals
-// this as Main Still Picture (profile_idc 3), while true 4:0:0 monochrome
-// signals Range Extensions (profile_idc 4). Apple camera HEICs also use
-// monochrome RExt gain maps, so the profile number alone does not establish
-// Apple compatibility.
-std::unique_ptr<heif_image, ImageDeleter> make_gain(const FloatImage& image) {
-  heif_image* raw = nullptr;
-  check_heif(heif_image_create(static_cast<int>(image.width), static_cast<int>(image.height),
-                               heif_colorspace_YCbCr, heif_chroma_420, &raw), "create gain map");
-  std::unique_ptr<heif_image, ImageDeleter> result(raw);
-  check_heif(heif_image_add_plane(raw, heif_channel_Y, static_cast<int>(image.width), static_cast<int>(image.height), 8), "allocate gain luma plane");
-  const auto chroma_width = (image.width + 1) / 2;
-  const auto chroma_height = (image.height + 1) / 2;
-  check_heif(heif_image_add_plane(raw, heif_channel_Cb, static_cast<int>(chroma_width), static_cast<int>(chroma_height), 8), "allocate gain Cb plane");
-  check_heif(heif_image_add_plane(raw, heif_channel_Cr, static_cast<int>(chroma_width), static_cast<int>(chroma_height), 8), "allocate gain Cr plane");
-  int stride = 0;
-  auto* plane = heif_image_get_plane(raw, heif_channel_Y, &stride);
-  if (!plane || stride <= 0) throw std::runtime_error("allocated gain luma plane is unavailable");
-  for (std::uint32_t y = 0; y < image.height; ++y) {
-    check_cancelled();
-    for (std::uint32_t x = 0; x < image.width; ++x)
-      plane[static_cast<std::size_t>(y) * stride + x] = static_cast<std::uint8_t>(std::lround(std::clamp(image.at(x, y, 0), 0.0F, 1.0F) * 255.0F));
-  }
-  for (const auto channel : {heif_channel_Cb, heif_channel_Cr}) {
-    int chroma_stride = 0;
-    auto* chroma_plane = heif_image_get_plane(raw, channel, &chroma_stride);
-    if (!chroma_plane || chroma_stride <= 0) {
-      throw std::runtime_error("allocated gain chroma plane is unavailable");
-    }
-    for (std::uint32_t y = 0; y < chroma_height; ++y)
-      std::memset(chroma_plane + static_cast<std::size_t>(y) * chroma_stride, 128, chroma_width);
-  }
-  // ISO 21496-1 gain-map inputs require explicit nclx signalling. Primaries and
-  // transfer are intentionally unspecified because samples represent gain, not
-  // colour; matrix/range describe the actual 4:2:0 encoding transform.
-  auto nclx = gain_map_nclx();
-  check_heif(heif_image_set_nclx_color_profile(raw, &nclx), "set gain map nclx");
-  return result;
-}
-
-std::unique_ptr<heif_image, ImageDeleter> make_hdr(
-    const PhotoRenditions& images, HdrEncoding encoding,
-    heif_content_light_level& light_level) {
-  constexpr int depth = 10;
-  const auto& hdr = images.hdr;
-  heif_image* raw = nullptr;
-  check_heif(heif_image_create(static_cast<int>(hdr.width), static_cast<int>(hdr.height),
-                               heif_colorspace_RGB, heif_chroma_interleaved_RRGGBB_LE,
-                               &raw),
-             "create BT.2100 HDR image");
-  std::unique_ptr<heif_image, ImageDeleter> result(raw);
-  check_heif(heif_image_add_plane(raw, heif_channel_interleaved, hdr.width, hdr.height,
-                                  depth),
-             "allocate BT.2100 HDR plane");
-  int stride = 0;
-  auto* plane = heif_image_get_plane(raw, heif_channel_interleaved, &stride);
-  if (!plane || stride <= 0) throw std::runtime_error("allocated HDR plane is unavailable");
-
-  constexpr unsigned max_code = (1U << depth) - 1U;
-  std::vector<float> row_peak(hdr.height, 0.0F);
-  std::vector<double> row_light_level(hdr.height, 0.0);
-  parallel_for_rows(hdr.height, [&](const std::uint32_t y) {
-    auto* row = reinterpret_cast<std::uint16_t*>(
-        plane + static_cast<std::size_t>(y) * stride);
-    float peak = 0.0F;
-    double light_level_sum = 0.0;
-    for (std::uint32_t x = 0; x < hdr.width; ++x) {
-      const auto rgb = p3_to_rec2020(hdr.at(x, y, 0), hdr.at(x, y, 1), hdr.at(x, y, 2));
-      const std::array<float, 3> linear{
-          std::max(0.0F, rgb[0]), std::max(0.0F, rgb[1]), std::max(0.0F, rgb[2])};
-      const float light_level = std::max({linear[0], linear[1], linear[2]});
-      peak = std::max(peak, light_level);
-      light_level_sum += light_level;
-      const auto encoded = encoding == HdrEncoding::Pq
-                               ? std::array<float, 3>{pq_oetf(linear[0]), pq_oetf(linear[1]),
-                                                      pq_oetf(linear[2])}
-                               : hlg_encode(linear);
-      for (unsigned channel = 0; channel < 3; ++channel) {
-        row[x * 3 + channel] = static_cast<std::uint16_t>(
-            quantize_dithered(encoded[channel], max_code, x, y, channel));
-      }
-    }
-    row_peak[y] = peak;
-    row_light_level[y] = light_level_sum;
-  });
-
-  const float peak = *std::max_element(row_peak.begin(), row_peak.end());
-  const double light_level_sum =
-      std::accumulate(row_light_level.begin(), row_light_level.end(), 0.0);
-  const double pixel_count = static_cast<double>(hdr.width) * hdr.height;
-  const auto clamp_light = [](double nits) {
-    return static_cast<std::uint16_t>(std::clamp(std::ceil(nits), 0.0, 10000.0));
-  };
-  light_level.max_content_light_level = clamp_light(peak * kReferenceWhiteNits);
-  light_level.max_pic_average_light_level =
-      clamp_light(pixel_count > 0.0
-                      ? light_level_sum * kReferenceWhiteNits / pixel_count
-                      : 0.0);
-  heif_image_set_content_light_level(raw, &light_level);
-  auto nclx = bt2100_nclx(encoding);
-  check_heif(heif_image_set_nclx_color_profile(raw, &nclx), "set BT.2100 nclx");
-  return result;
-}
-
-std::unique_ptr<heif_image_handle, HandleDeleter> encode_base(
-    heif_context* context, heif_image* image, heif_encoder* encoder,
-    std::uint32_t width, std::uint32_t height) {
-  // x265 emits each picture as a single slice NAL, and libde265 (used by libheif,
-  // heif-convert, and most desktop HEIF consumers) rejects NAL units larger than its
-  // 16 MiB security limit. A 24 MP quality-90 photo already produces a ~18 MB slice,
-  // so anything beyond one tile is encoded as a grid of 2048-px tiles: at typical
-  // photographic bitrates a tile stays in the low megabytes even at quality 100.
-  // Apple's own camera HEICs are grids as well, so this is the well-trodden path.
-  constexpr std::uint32_t tile_size = 2048;
-  std::unique_ptr<heif_encoding_options, EncodingOptionsDeleter> options(
-      heif_encoding_options_alloc());
-  if (!options) throw std::runtime_error("cannot allocate HEIF encoding options");
-  auto nclx = display_p3_nclx();
-  options->save_two_colr_boxes_when_ICC_and_nclx_available = 1;
-  options->output_nclx_profile = &nclx;
-  heif_image_handle* handle_raw = nullptr;
-  if (width <= tile_size && height <= tile_size) {
-    check_heif(heif_context_encode_image(context, image, encoder, options.get(), &handle_raw), "encode base");
-    return std::unique_ptr<heif_image_handle, HandleDeleter>(handle_raw);
-  }
-
-  const auto columns = (width + tile_size - 1) / tile_size;
-  const auto rows = (height + tile_size - 1) / tile_size;
-  check_heif(heif_context_add_grid_image(context, width, height, columns, rows,
-                                         options.get(), &handle_raw),
-             "create base grid");
-  std::unique_ptr<heif_image_handle, HandleDeleter> handle(handle_raw);
-  for (std::uint32_t y = 0; y < rows; ++y) {
-    check_cancelled();
-    for (std::uint32_t x = 0; x < columns; ++x) {
-      heif_image* tile_raw = nullptr;
-      check_heif(heif_image_extract_area(image,
-                                         static_cast<int>(x * tile_size),
-                                         static_cast<int>(y * tile_size),
-                                         static_cast<int>(tile_size),
-                                         static_cast<int>(tile_size),
-                                         nullptr, &tile_raw),
-                 "extract base tile");
-      std::unique_ptr<heif_image, ImageDeleter> tile(tile_raw);
-      check_heif(heif_context_add_image_tile(context, handle.get(), x, y,
-                                             tile.get(), encoder),
-                 "encode base tile");
-    }
-  }
-  return handle;
-}
-
-// Rendition-based exports use full-resolution gain maps. A 60 MP map exceeds
-// HEVC Level 6.2's largest picture, and a large single slice can exceed
-// libde265's 16 MiB NAL limit. Tile it like the base to avoid both limits.
-std::unique_ptr<heif_image_handle, HandleDeleter> encode_gain_map_item(
-    heif_context* context, heif_image* image, heif_encoder* encoder,
-    const heif_encoding_options* options, std::uint32_t width, std::uint32_t height) {
-  constexpr std::uint32_t single_picture_edge = 3072;
-  constexpr std::uint32_t tile_size = 2048;
-  heif_image_handle* handle_raw = nullptr;
-  if (width <= single_picture_edge && height <= single_picture_edge) {
-    check_heif(heif_context_encode_image(context, image, encoder, options, &handle_raw),
-               "encode gain map");
-    return std::unique_ptr<heif_image_handle, HandleDeleter>(handle_raw);
-  }
-  const auto columns = (width + tile_size - 1) / tile_size;
-  const auto rows = (height + tile_size - 1) / tile_size;
-  check_heif(heif_context_add_grid_image(context, width, height, columns, rows, options,
-                                         &handle_raw),
-             "create gain map grid");
-  std::unique_ptr<heif_image_handle, HandleDeleter> handle(handle_raw);
-  for (std::uint32_t y = 0; y < rows; ++y) {
-    check_cancelled();
-    for (std::uint32_t x = 0; x < columns; ++x) {
-      heif_image* tile_raw = nullptr;
-      check_heif(heif_image_extract_area(image, static_cast<int>(x * tile_size),
-                                         static_cast<int>(y * tile_size),
-                                         static_cast<int>(tile_size),
-                                         static_cast<int>(tile_size), nullptr, &tile_raw),
-                 "extract gain map tile");
-      std::unique_ptr<heif_image, ImageDeleter> tile(tile_raw);
-      check_heif(heif_context_add_image_tile(context, handle.get(), x, y, tile.get(), encoder),
-                 "encode gain map tile");
-    }
-  }
-  return handle;
-}
-
-std::unique_ptr<heif_image_handle, HandleDeleter> encode_hdr_image(
-    heif_context* context, heif_image* image, heif_encoder* encoder,
-    std::uint32_t width, std::uint32_t height, HdrEncoding encoding,
-    const heif_content_light_level& light_level) {
-  constexpr std::uint32_t tile_size = 2048;
-  std::unique_ptr<heif_encoding_options, EncodingOptionsDeleter> options(
-      heif_encoding_options_alloc());
-  if (!options) throw std::runtime_error("cannot allocate HDR encoding options");
-  auto nclx = bt2100_nclx(encoding);
-  options->output_nclx_profile = &nclx;
-  heif_image_handle* handle_raw = nullptr;
-  if (width <= tile_size && height <= tile_size) {
-    check_heif(heif_context_encode_image(context, image, encoder, options.get(), &handle_raw),
-               "encode BT.2100 HDR image");
-    std::unique_ptr<heif_image_handle, HandleDeleter> handle(handle_raw);
-    heif_image_handle_set_content_light_level(handle.get(), &light_level);
-    return handle;
-  }
-
-  const auto columns = (width + tile_size - 1) / tile_size;
-  const auto rows = (height + tile_size - 1) / tile_size;
-  check_heif(heif_context_add_grid_image(context, width, height, columns, rows,
-                                         options.get(), &handle_raw),
-             "create BT.2100 HDR grid");
-  std::unique_ptr<heif_image_handle, HandleDeleter> handle(handle_raw);
-  heif_image_handle_set_content_light_level(handle.get(), &light_level);
-  for (std::uint32_t y = 0; y < rows; ++y) {
-    check_cancelled();
-    for (std::uint32_t x = 0; x < columns; ++x) {
-      heif_image* tile_raw = nullptr;
-      check_heif(heif_image_extract_area(image, static_cast<int>(x * tile_size),
-                                         static_cast<int>(y * tile_size),
-                                         static_cast<int>(tile_size),
-                                         static_cast<int>(tile_size), nullptr, &tile_raw),
-                 "extract BT.2100 HDR tile");
-      std::unique_ptr<heif_image, ImageDeleter> tile(tile_raw);
-      check_heif(heif_context_add_image_tile(context, handle.get(), x, y, tile.get(), encoder),
-                 "encode BT.2100 HDR tile");
-    }
-  }
-  return handle;
-}
-heif_error write_callback(heif_context*, const void* data, size_t size, void* user) {
-  try {
-    auto& bytes = *static_cast<std::vector<std::uint8_t>*>(user);
-    const auto* begin = static_cast<const std::uint8_t*>(data);
-    bytes.insert(bytes.end(), begin, begin + size);
-    return {heif_error_Ok, heif_suberror_Unspecified, "Success"};
-  } catch (...) {
-    // Never allow a C++ exception to cross libheif's C callback boundary.
-    return {heif_error_Encoding_error, heif_suberror_Unspecified,
-            "cannot grow HEIF output buffer"};
-  }
-}
-
-unsigned heic_tile_workers() {
-  // Each x265 encoder already has its own WPP workers. Limit simultaneous
-  // pictures, rather than starting one encoder for every tile of a large RAW.
-  const unsigned automatic = std::clamp(std::thread::hardware_concurrency() / 4U, 1U, 4U);
-  const auto requested = current_execution_config.heic_tile_workers;
-  return requested ? requested : automatic;
-}
-
-struct HeicTileSource {
-  heif_image* image;
-  std::uint32_t width, height, single_picture_edge;
-  int quality;
-  bool main10, save_two_profiles;
-  heif_color_profile_nclx nclx;
-};
-
-// Encode one picture as a standalone single-image HEIF. Never share the
-// mutable libheif context or encoder between jobs.
-void encode_heic_picture(const HeicTileSource& source, heif_image* pixels,
-                         HevcPreset preset, std::vector<std::uint8_t>& out) {
-  std::unique_ptr<heif_context, ContextDeleter> context(heif_context_alloc());
-  if (!context) throw std::runtime_error("cannot allocate tile context");
-  heif_encoder* raw_encoder = nullptr;
-  check_heif(heif_context_get_encoder_for_format(context.get(), heif_compression_HEVC,
-      &raw_encoder), "get tile HEVC encoder");
-  std::unique_ptr<heif_encoder, EncoderDeleter> encoder(raw_encoder);
-  check_heif(heif_encoder_set_lossy_quality(encoder.get(), source.quality),
-             "set tile HEVC quality");
-  configure_hevc_preset(encoder.get(), preset);
-  if (source.main10) configure_main10_still(encoder.get());
-  std::unique_ptr<heif_encoding_options, EncodingOptionsDeleter> options(
-      heif_encoding_options_alloc());
-  if (!options) throw std::runtime_error("cannot allocate tile encoding options");
-  options->save_two_colr_boxes_when_ICC_and_nclx_available = source.save_two_profiles;
-  auto nclx = source.nclx;
-  options->output_nclx_profile = &nclx;
-  heif_image_handle* raw_handle = nullptr;
-  check_heif(heif_context_encode_image(context.get(), pixels, encoder.get(),
-      options.get(), &raw_handle), "encode parallel HEIC tile");
-  std::unique_ptr<heif_image_handle, HandleDeleter> handle(raw_handle);
-  heif_writer writer{1, &write_callback};
-  check_heif(heif_context_write(context.get(), &writer, &out),
-             "write parallel HEIC tile");
-}
-
-// x265 fills its process-wide primitive table on the first encoder open, and
-// only checks one entry to decide whether that has happened. Concurrent first
-// opens can therefore see a half-filled table. Each bit depth is a separate
-// x265 library with its own table, so open one small encoder per depth, once
-// per process, before any tile workers start.
-void warm_x265(const HeicTileSource& source, HevcPreset preset) {
-  static std::once_flag main8, main10;
-  std::call_once(source.main10 ? main10 : main8, [&] {
-    heif_image* extracted = nullptr;
-    check_heif(heif_image_extract_area(source.image, 0, 0,
-        std::min(64U, source.width), std::min(64U, source.height), nullptr, &extracted),
-        "extract x265 warm-up area");
-    std::unique_ptr<heif_image, ImageDeleter> area(extracted);
-    std::vector<std::uint8_t> discarded;
-    encode_heic_picture(source, area.get(), preset, discarded);
+codec::hevc::EncodedSequence encode_base(const FloatImage& image,int depth,int quality,HevcPreset preset){
+  using namespace codec::hevc;
+  if(depth!=8 && depth!=10)throw std::invalid_argument("base depth must be 8 or 10");
+  const auto grid=tile_grid(image.width,image.height);
+  const EncodeParams params{quality,depth==10,preset==HevcPreset::Medium,{12,13,1}};
+  return encode_picture(grid,params,[&](std::size_t index,YuvTile& tile){
+    rgb_tile(grid,index,[&](unsigned y,unsigned x,unsigned count,float* row){
+      for(unsigned i=0;i<count;++i)for(unsigned c=0;c<3;++c)row[i*3+c]=srgb_oetf(image.at(x+i,y,c));
+    },1,true,tile);
   });
 }
-
-std::vector<std::uint8_t> encode_parallel_heic(
-    const std::vector<HeicTileSource>& sources, std::size_t primary,
-    unsigned workers, HevcPreset preset, const PhotoMetadata& metadata,
-    float headroom, bool has_gain_map) {
-  constexpr std::uint32_t tile_size = 2048;
-  std::vector<EncodedHeifGrid> grids(sources.size());
-  struct Job { std::size_t source, tile; };
-  std::vector<Job> jobs;
-  for (std::size_t s = 0; s < sources.size(); ++s) {
-    const auto& source = sources[s];
-    auto& grid = grids[s];
-    grid.width = source.width;
-    grid.height = source.height;
-    const bool tiled = source.width > source.single_picture_edge ||
-                       source.height > source.single_picture_edge;
-    grid.columns = tiled ? (source.width + tile_size - 1) / tile_size : 1;
-    grid.rows = tiled ? (source.height + tile_size - 1) / tile_size : 1;
-    grid.tiles.resize(static_cast<std::size_t>(grid.columns) * grid.rows);
-    for (std::size_t t = 0; t < grid.tiles.size(); ++t) jobs.push_back({s, t});
-  }
-
-  for (const auto& source : sources) warm_x265(source, preset);
-
-  std::atomic<std::size_t> next{0};
-  std::exception_ptr failure;
-  std::mutex failure_mutex;
-  const auto run = [&, token = current_cancel_token, config = current_execution_config] {
-    CancelScope cancel(token);
-    ExecutionScope execution(config);
-    try {
-      for (;;) {
-        check_cancelled();
-        const auto index = next.fetch_add(1);
-        if (index >= jobs.size()) break;
-        const auto [s, t] = jobs[index];
-        const auto& source = sources[s];
-        auto& grid = grids[s];
-        std::unique_ptr<heif_image, ImageDeleter> tile;
-        heif_image* pixels = source.image;
-        if (grid.tiles.size() > 1) {
-          heif_image* extracted = nullptr;
-          check_heif(heif_image_extract_area(source.image,
-              static_cast<int>((t % grid.columns) * tile_size),
-              static_cast<int>((t / grid.columns) * tile_size), tile_size, tile_size,
-              nullptr, &extracted), "extract parallel HEIC tile");
-          tile.reset(extracted);
-          pixels = tile.get();
-        }
-        encode_heic_picture(source, pixels, preset, grid.tiles[t]);
-      }
-    } catch (...) {
-      next.store(jobs.size());
-      std::lock_guard lock(failure_mutex);
-      if (!failure) failure = std::current_exception();
-    }
-  };
-  {
-    std::vector<std::jthread> threads;
-    for (unsigned i = 1; i < std::min<std::size_t>(workers, jobs.size()); ++i)
-      threads.emplace_back(run);
-    run();
-  }  // Join before reading the indexed results or propagating an error.
-  if (failure) std::rethrow_exception(failure);
-  return assemble_heif_grids(grids, primary, make_minimal_exif(metadata),
-                             make_xmp(metadata, headroom, has_gain_map));
+codec::hevc::EncodedSequence encode_gain(const FloatImage& image,HevcPreset preset){
+  using namespace codec::hevc;
+  // apple_strict rejects multichannel metadata before any encoding. Never
+  // silently discard authored channels at this lower boundary either.
+  if(image.channels!=1)throw std::invalid_argument("Adaptive HEIC requires a single-channel gain map");
+  const auto grid=tile_grid(image.width,image.height);
+  const EncodeParams params{95,false,preset==HevcPreset::Medium,{2,2,1}};
+  return encode_picture(grid,params,[&](std::size_t index,YuvTile& tile){
+    luma_tile(grid,index,[&](unsigned y,unsigned x,unsigned count,float* row){
+      for(unsigned i=0;i<count;++i)row[i]=image.at(x+i,y,0);
+    },tile);
+  });
 }
-
-}  // namespace
+HeifContentLight content_light(const FloatImage& hdr){
+  std::vector<float> row_peak(hdr.height,0);std::vector<double> row_sum(hdr.height,0);
+  parallel_for_rows(hdr.height,[&](unsigned y){
+    float peak=0;double sum=0;
+    for(unsigned x=0;x<hdr.width;++x){
+      const auto rgb=p3_to_rec2020(hdr.at(x,y,0),hdr.at(x,y,1),hdr.at(x,y,2));
+      const float light=std::max({0.0F,rgb[0],rgb[1],rgb[2]});peak=std::max(peak,light);sum+=light;
+    }
+    row_peak[y]=peak;row_sum[y]=sum;
+  });
+  const auto clamp=[](double nits){return static_cast<std::uint16_t>(std::clamp(std::ceil(nits),0.0,10000.0));};
+  const double count=double(hdr.width)*hdr.height;
+  return {clamp(*std::max_element(row_peak.begin(),row_peak.end())*kReferenceWhiteNits),
+          clamp(std::accumulate(row_sum.begin(),row_sum.end(),0.0)*kReferenceWhiteNits/count)};
+}
+} // namespace
 
 std::vector<std::uint8_t> encode_adaptive_heic(const GainMapResult& images,
-                                               const PhotoMetadata& metadata, int quality,
-                                               int depth, HevcPreset preset) {
-  if (!heif_have_encoder_for_format(heif_compression_HEVC)) {
-    throw std::runtime_error("this build has no HEVC encoder");
-  }
-  // Adaptive HEIC is the Apple-interoperable writer. Keep this check at the
-  // codec boundary as well as in the renderer so a future alternate producer
-  // cannot silently emit generic ISO metadata through this path.
-  validate_gain_map_metadata(images.metadata,
-                             GainMapWriterProfile::apple_strict);
-  std::unique_ptr<heif_context, ContextDeleter> context(heif_context_alloc());
-  if (!context) throw std::runtime_error("cannot allocate libheif context");
-  heif_encoder* encoder_raw = nullptr;
-  check_heif(heif_context_get_encoder_for_format(context.get(), heif_compression_HEVC, &encoder_raw), "get HEVC encoder");
-  std::unique_ptr<heif_encoder, EncoderDeleter> encoder(encoder_raw);
-  check_heif(heif_encoder_set_lossy_quality(encoder.get(), std::clamp(quality, 0, 100)), "set HEVC quality");
-  configure_hevc_preset(encoder.get(), preset);
-  if (depth == 10) configure_main10_still(encoder.get());
-  heif_encoder* gain_encoder_raw = nullptr;
-  check_heif(heif_context_get_encoder_for_format(context.get(), heif_compression_HEVC,
-                                                  &gain_encoder_raw), "get Gain Map HEVC encoder");
-  std::unique_ptr<heif_encoder, EncoderDeleter> gain_encoder(gain_encoder_raw);
-  check_heif(heif_encoder_set_lossy_quality(gain_encoder.get(), 95),
-             "set Gain Map HEVC quality");
-  configure_hevc_preset(gain_encoder.get(), preset);
-
-  auto base = make_base(images.base_linear, depth);
-  auto gain = make_gain(images.gain_map);
-  const auto workers = heic_tile_workers();
-  if (workers > 1 && (images.base_linear.width > 2048 || images.base_linear.height > 2048 ||
-                      images.gain_map.width > 3072 || images.gain_map.height > 3072)) {
-    const auto intermediate = encode_parallel_heic({
-        {gain.get(), images.gain_map.width, images.gain_map.height, 3072, 95,
-         false, false, gain_map_nclx()},
-        {base.get(), images.base_linear.width, images.base_linear.height, 2048,
-         std::clamp(quality, 0, 100), depth == 10, true, display_p3_nclx()}},
-        1, workers, preset, metadata, images.headroom_stops, true);
-    return add_tmap_to_two_image_heif(intermediate, serialize_tmap_payload(images.metadata));
-  }
-  // Explicit encoding options are required for libheif to carry the gain-map
-  // nclx profile into the encoded item.
-  std::unique_ptr<heif_encoding_options, EncodingOptionsDeleter> gain_options(
-      heif_encoding_options_alloc());
-  if (!gain_options) throw std::runtime_error("cannot allocate gain-map encoding options");
-  auto gain_nclx = gain_map_nclx();
-  gain_options->output_nclx_profile = &gain_nclx;
-  // Encode the visible gain image first. Grid encoding creates hidden HEVC tile
-  // items; keeping the gain item first makes the narrow TMAP adapter unambiguous.
-  const auto gain_handle = encode_gain_map_item(
-      context.get(), gain.get(), gain_encoder.get(), gain_options.get(),
-      images.gain_map.width, images.gain_map.height);
-  auto base_handle = encode_base(context.get(), base.get(), encoder.get(),
-                                 images.base_linear.width, images.base_linear.height);
-  check_heif(heif_context_set_primary_image(context.get(), base_handle.get()), "set primary image");
-
-  const auto exif = make_minimal_exif(metadata);
-  check_heif(heif_context_add_exif_metadata(context.get(), base_handle.get(), exif.data(), static_cast<int>(exif.size())), "add Exif");
-  const auto xmp = make_xmp(metadata, images.headroom_stops,
-                            /*has_gain_map=*/true);
-  check_heif(heif_context_add_XMP_metadata(context.get(), base_handle.get(), xmp.data(), static_cast<int>(xmp.size())), "add XMP");
-
-  std::vector<std::uint8_t> intermediate;
-  heif_writer writer{1, &write_callback};
-  check_heif(heif_context_write(context.get(), &writer, &intermediate), "write HEIC");
-  return add_tmap_to_two_image_heif(intermediate, serialize_tmap_payload(images.metadata));
+    const PhotoMetadata& metadata,int quality,int depth,HevcPreset preset){
+  validate_gain_map_metadata(images.metadata,GainMapWriterProfile::apple_strict);
+  auto base=encode_base(images.base_linear,depth,quality,preset);
+  auto gain=encode_gain(images.gain_map,preset);
+  const auto icc=codec::display_p3_profile();
+  HeifEncodedImage b{base,images.base_linear.width,images.base_linear.height,{},std::nullopt,icc};
+  HeifEncodedImage g{gain,images.gain_map.width,images.gain_map.height,{2,2,1,true},std::nullopt,{}};
+  HeifWriteOptions options;options.gain_metadata=images.metadata;
+  options.exif=make_minimal_exif(metadata);options.xmp=make_xmp(metadata,images.headroom_stops,true);
+  return write_heif(b,&g,options);
 }
-
 std::vector<std::uint8_t> encode_hdr_heic(const PhotoRenditions& images,
-                                          const PhotoMetadata& metadata, int quality,
-                                          HdrEncoding encoding, HevcPreset preset) {
-  if (!heif_have_encoder_for_format(heif_compression_HEVC)) {
-    throw std::runtime_error("this build has no HEVC encoder");
-  }
-  if (encoding != HdrEncoding::Pq && encoding != HdrEncoding::Hlg) {
+    const PhotoMetadata& metadata,int quality,HdrEncoding encoding,HevcPreset preset){
+  using namespace codec::hevc;
+  if(encoding!=HdrEncoding::Pq && encoding!=HdrEncoding::Hlg)
     throw std::invalid_argument("encode_hdr_heic requires PQ or HLG");
-  }
-  std::unique_ptr<heif_context, ContextDeleter> context(heif_context_alloc());
-  if (!context) throw std::runtime_error("cannot allocate libheif context");
-  heif_encoder* encoder_raw = nullptr;
-  check_heif(heif_context_get_encoder_for_format(context.get(), heif_compression_HEVC,
-                                                  &encoder_raw),
-             "get HDR HEVC encoder");
-  std::unique_ptr<heif_encoder, EncoderDeleter> encoder(encoder_raw);
-  check_heif(heif_encoder_set_lossy_quality(encoder.get(), std::clamp(quality, 0, 100)),
-             "set HDR HEVC quality");
-  configure_hevc_preset(encoder.get(), preset);
-  configure_main10_still(encoder.get());
-
-  heif_content_light_level light_level{};
-  auto image = make_hdr(images, encoding, light_level);
-  const auto workers = heic_tile_workers();
-  if (workers > 1 && (images.hdr.width > 2048 || images.hdr.height > 2048)) {
-    return encode_parallel_heic({{image.get(), images.hdr.width, images.hdr.height, 2048,
-        std::clamp(quality, 0, 100), true, false, bt2100_nclx(encoding)}},
-        0, workers, preset, metadata, images.stats.headroom_stops, false);
-  }
-  auto handle = encode_hdr_image(context.get(), image.get(), encoder.get(),
-                                 images.sdr.width, images.sdr.height,
-                                 encoding, light_level);
-  check_heif(heif_context_set_primary_image(context.get(), handle.get()),
-             "set HDR primary image");
-  const auto exif = make_minimal_exif(metadata);
-  check_heif(heif_context_add_exif_metadata(context.get(), handle.get(), exif.data(),
-                                             static_cast<int>(exif.size())),
-             "add HDR Exif");
-  const auto xmp = make_xmp(metadata, images.stats.headroom_stops,
-                            /*has_gain_map=*/false);
-  check_heif(heif_context_add_XMP_metadata(context.get(), handle.get(), xmp.data(),
-                                            static_cast<int>(xmp.size())),
-             "add HDR XMP");
-  std::vector<std::uint8_t> bytes;
-  heif_writer writer{1, &write_callback};
-  check_heif(heif_context_write(context.get(), &writer, &bytes), "write BT.2100 HEIC");
-  return bytes;
+  const auto& hdr=images.hdr;const auto grid=tile_grid(hdr.width,hdr.height);
+  const int transfer=encoding==HdrEncoding::Pq?16:18;
+  const EncodeParams params{quality,true,preset==HevcPreset::Medium,{9,transfer,9}};
+  auto coded=encode_picture(grid,params,[&](std::size_t index,YuvTile& tile){
+    rgb_tile(grid,index,[&](unsigned y,unsigned x,unsigned count,float* row){
+      for(unsigned i=0;i<count;++i){
+        const auto rgb=p3_to_rec2020(hdr.at(x+i,y,0),hdr.at(x+i,y,1),hdr.at(x+i,y,2));
+        const std::array<float,3> linear{std::max(0.0F,rgb[0]),std::max(0.0F,rgb[1]),std::max(0.0F,rgb[2])};
+        const auto encoded=encoding==HdrEncoding::Pq?std::array<float,3>{pq_oetf(linear[0]),pq_oetf(linear[1]),pq_oetf(linear[2])}:hlg_encode(linear);
+        std::copy(encoded.begin(),encoded.end(),row+i*3);
+      }
+    },9,true,tile);
+  });
+  HeifEncodedImage image{coded,hdr.width,hdr.height,{9,static_cast<std::uint16_t>(transfer),9,true},content_light(hdr),{}};
+  HeifWriteOptions options;options.exif=make_minimal_exif(metadata);
+  options.xmp=make_xmp(metadata,images.stats.headroom_stops,false);
+  return write_heif(image,nullptr,options);
 }
 
 void verify_heic_decodable(const std::vector<std::uint8_t>& bytes) {

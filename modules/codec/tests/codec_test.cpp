@@ -1,4 +1,8 @@
 #include "hyperdr/container/heif_tmap.hpp"
+#include "hevc/hevc.hpp"
+#include "hyperdr/container/heif_writer.hpp"
+#include "hyperdr/container/heif_grid.hpp"
+#include "internal/icc_profiles.hpp"
 #include "hyperdr/container/exif.hpp"
 #include "hyperdr/container/inspect.hpp"
 #include "hyperdr/container/gain_map_jpeg.hpp"
@@ -29,6 +33,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "heif_hlg_422.hpp"
 
 namespace {
 
@@ -50,24 +55,24 @@ void require(bool condition, const char* message) {
 }
 
 void require_hevc_profiles(const std::vector<std::uint8_t>& bytes,
-                           bool expect_main10, bool expect_still_picture) {
+                           bool expect_main10, bool expect_main8) {
   const auto inspection = hyperdr::inspect_heif(bytes);
   bool has_main10 = false;
-  bool has_still_picture = false;
+  bool has_main8 = false;
   for (const auto& box : inspection.boxes) {
     if (box.type != "hvcC") continue;
     require(box.size >= 23 && box.offset + box.size <= bytes.size(),
             "HEIC has an invalid hvcC box");
     const auto profile = bytes[static_cast<std::size_t>(box.offset) + 9] & 31;
-    require(profile == 2 || profile == 3,
+    require(profile == 1 || profile == 2,
             "HEIC writer emitted an unexpected HEVC profile");
     require(bytes[static_cast<std::size_t>(box.offset) + 20] != 255,
             "HEIC writer emitted HEVC Level 8.5");
     has_main10 |= profile == 2;
-    has_still_picture |= profile == 3;
+    has_main8 |= profile == 1;
   }
   require(has_main10 == expect_main10 &&
-              has_still_picture == expect_still_picture,
+              has_main8 == expect_main8,
           "HEIC writer emitted the wrong HEVC profile");
 }
 
@@ -249,24 +254,16 @@ void require_linear_round_trip(const hyperdr::DecodedImage& decoded,
 // Sony's HEIF stills are Main 4:2:2 10 HLG. Decoding those needs libheif's
 // 4:2:2 chroma upsampling *and* an HEVC decoder that implements the range
 // extensions, neither of which any other test touches. The fixture is therefore
-// built here through libheif's own x265 `chroma` parameter.
+// built here through VT's native Main42210 profile.
 
 struct TestContextDeleter {
   void operator()(heif_context* p) const { if (p) heif_context_free(p); }
-};
-struct TestEncoderDeleter {
-  void operator()(heif_encoder* p) const { if (p) heif_encoder_release(p); }
 };
 struct TestImageDeleter {
   void operator()(heif_image* p) const { if (p) heif_image_release(p); }
 };
 struct TestHandleDeleter {
   void operator()(heif_image_handle* p) const { if (p) heif_image_handle_release(p); }
-};
-struct TestEncodingOptionsDeleter {
-  void operator()(heif_encoding_options* p) const {
-    if (p) heif_encoding_options_free(p);
-  }
 };
 
 void require_heif(const heif_error& error, const char* operation) {
@@ -275,103 +272,9 @@ void require_heif(const heif_error& error, const char* operation) {
                            (error.message ? error.message : "unknown libheif error"));
 }
 
-heif_error collect_heif_bytes(heif_context*, const void* data, size_t size, void* user) {
-  try {
-    auto& out = *static_cast<std::vector<std::uint8_t>*>(user);
-    const auto* bytes = static_cast<const std::uint8_t*>(data);
-    out.insert(out.end(), bytes, bytes + size);
-    return {heif_error_Ok, heif_suberror_Unspecified, "Success"};
-  } catch (...) {
-    // Never allow a C++ exception to cross libheif's C callback boundary.
-    return {heif_error_Encoding_error, heif_suberror_Unspecified, "fixture write failed"};
-  }
-}
-
-// Encodes `linear` (linear Display P3, 1.0 = diffuse white) as a 10-bit BT.2100
-// HLG HEIC with 4:2:2 chroma. Returns an empty vector when the x265 build in use
-// cannot do 4:2:2 or Main10, which is reported rather than treated as a failure,
-// exactly like the existing Main10 round trips below.
+// Required native VT 4:2:2 fixture. Failure is a failure, never a skip.
 std::vector<std::uint8_t> encode_hlg_422(const hyperdr::FloatImage& linear) {
-  std::unique_ptr<heif_context, TestContextDeleter> context(heif_context_alloc());
-  require(context != nullptr, "cannot allocate the 4:2:2 fixture context");
-  heif_encoder* encoder_raw = nullptr;
-  require_heif(heif_context_get_encoder_for_format(context.get(), heif_compression_HEVC,
-                                                   &encoder_raw),
-               "get the 4:2:2 fixture encoder");
-  std::unique_ptr<heif_encoder, TestEncoderDeleter> encoder(encoder_raw);
-  require_heif(heif_encoder_set_lossy_quality(encoder.get(), 95),
-               "set the 4:2:2 fixture quality");
-  // Not every x265 build exposes 4:2:2. A refusal here means the fixture cannot
-  // be produced, not that the decoder under test is broken.
-  if (heif_encoder_set_parameter_string(encoder.get(), "chroma", "422").code !=
-      heif_error_Ok) {
-    return {};
-  }
-
-  heif_image* image_raw = nullptr;
-  require_heif(heif_image_create(static_cast<int>(linear.width),
-                                 static_cast<int>(linear.height), heif_colorspace_RGB,
-                                 heif_chroma_interleaved_RRGGBB_LE, &image_raw),
-               "create the 4:2:2 fixture image");
-  std::unique_ptr<heif_image, TestImageDeleter> image(image_raw);
-  require_heif(heif_image_add_plane(image.get(), heif_channel_interleaved,
-                                    static_cast<int>(linear.width),
-                                    static_cast<int>(linear.height), 10),
-               "allocate the 4:2:2 fixture plane");
-  int stride = 0;
-  auto* plane = heif_image_get_plane(image.get(), heif_channel_interleaved, &stride);
-  require(plane != nullptr && stride > 0, "4:2:2 fixture plane is unavailable");
-  constexpr unsigned max_code = (1U << 10U) - 1U;
-  for (std::uint32_t y = 0; y < linear.height; ++y) {
-    auto* row = reinterpret_cast<std::uint16_t*>(plane + static_cast<std::size_t>(y) * stride);
-    for (std::uint32_t x = 0; x < linear.width; ++x) {
-      const auto wide = hyperdr::p3_to_rec2020(linear.at(x, y, 0), linear.at(x, y, 1),
-                                               linear.at(x, y, 2));
-      const auto encoded = hyperdr::hlg_encode(
-          {std::max(0.0F, wide[0]), std::max(0.0F, wide[1]), std::max(0.0F, wide[2])});
-      for (unsigned channel = 0; channel < 3; ++channel) {
-        row[x * 3 + channel] = static_cast<std::uint16_t>(
-            std::lround(std::clamp(encoded[channel], 0.0F, 1.0F) * max_code));
-      }
-    }
-  }
-
-  heif_color_profile_nclx nclx{};
-  nclx.version = 1;
-  nclx.color_primaries = heif_color_primaries_ITU_R_BT_2020_2_and_2100_0;
-  nclx.transfer_characteristics = heif_transfer_characteristic_ITU_R_BT_2100_0_HLG;
-  nclx.matrix_coefficients = heif_matrix_coefficients_ITU_R_BT_2020_2_non_constant_luminance;
-  nclx.full_range_flag = 1;
-  require_heif(heif_image_set_nclx_color_profile(image.get(), &nclx),
-               "set the 4:2:2 fixture nclx");
-
-  std::unique_ptr<heif_encoding_options, TestEncodingOptionsDeleter> options(
-      heif_encoding_options_alloc());
-  require(options != nullptr, "cannot allocate the 4:2:2 fixture options");
-  options->output_nclx_profile = &nclx;
-  heif_image_handle* handle_raw = nullptr;
-  const auto encoded = heif_context_encode_image(context.get(), image.get(),
-                                                 encoder.get(), options.get(),
-                                                 &handle_raw);
-  if (encoded.code != heif_error_Ok) {
-    // Same treatment as the Main10 round trips: a bit-depth or chroma refusal
-    // from x265 is an absent fixture, anything else is a real failure.
-    const std::string message = encoded.message ? encoded.message : "";
-    if (message.find("Bit depth not supported") != std::string::npos ||
-        message.find("chroma") != std::string::npos) {
-      return {};
-    }
-    require_heif(encoded, "encode the 4:2:2 fixture");
-  }
-  std::unique_ptr<heif_image_handle, TestHandleDeleter> handle(handle_raw);
-  require_heif(heif_context_set_primary_image(context.get(), handle.get()),
-               "set the 4:2:2 fixture primary image");
-
-  std::vector<std::uint8_t> bytes;
-  heif_writer writer{1, &collect_heif_bytes};
-  require_heif(heif_context_write(context.get(), &writer, &bytes),
-               "write the 4:2:2 fixture");
-  return bytes;
+  return heif_fixture::hlg422(linear);
 }
 
 // Proves the fixture really is 4:2:2 before its decode is used as evidence:
@@ -477,13 +380,21 @@ void decode_and_check(const std::vector<std::uint8_t>& bytes, std::uint32_t widt
     bool ordered = false;
     if (wide) {
       const auto* sample = reinterpret_cast<const std::uint16_t*>(plane + row) + x;
-      ordered = sample[0] >= sample[1] && sample[1] >= sample[2];
+      // At the almost-white sample the original channel separation can be
+      // less than one code. Lossy VT quantisation may reverse it by two codes.
+      ordered = unsigned(sample[0])+2 >= sample[1] && unsigned(sample[1])+2 >= sample[2];
     } else {
       const auto* sample = plane + row + x;
-      ordered = sample[0] >= sample[1] && sample[1] >= sample[2];
+      // At the almost-white sample the original channel separation can be
+      // less than one code. Lossy VT quantisation may reverse it by two codes.
+      ordered = unsigned(sample[0])+2 >= sample[1] && unsigned(sample[1])+2 >= sample[2];
     }
+    const auto middle=static_cast<std::size_t>(width/3)*3;
+    bool distinct=false;
+    if(wide){const auto* p=reinterpret_cast<const std::uint16_t*>(plane+row)+middle;distinct=p[0]>p[1]&&p[1]>p[2];}
+    else {const auto* p=plane+row+middle;distinct=p[0]>p[1]&&p[1]>p[2];}
     heif_image_release(decoded);
-    require(ordered, "primary image color-channel round trip failed");
+    require(ordered&&distinct, "primary image color-channel round trip failed");
   } catch (...) {
     heif_context_free(context);
     throw;
@@ -768,7 +679,7 @@ float region_mean_luminance(const hyperdr::FloatImage& image, std::uint32_t x0,
 
 void check_hdr_source_gain_maps(const hyperdr::PhotoMetadata& metadata) {
   const auto hlg = encode_hlg_422(make_camera_hdr(3200, 48));
-  require(!hlg.empty(), "x265 cannot produce the 4:2:2 HLG camera fixture");
+  require(!hlg.empty(), "VideoToolbox cannot produce the 4:2:2 HLG camera fixture");
   const auto source = decode_encoded_input(hlg, "camera-hlg");
   require(source.domain == hyperdr::InputDomain::kDisplayReferredHdr,
           "the HLG fixture must decode as an HDR source");
@@ -905,66 +816,21 @@ void check_gain_map_jpeg_icc(const hyperdr::PhotoMetadata& metadata) {
 }
 
 std::vector<std::uint8_t> encode_icc_only_heic() {
-  std::unique_ptr<heif_context, TestContextDeleter> context(heif_context_alloc());
-  require(context != nullptr, "cannot allocate the ICC-only fixture context");
-  heif_encoder* encoder_raw = nullptr;
-  require_heif(heif_context_get_encoder_for_format(context.get(), heif_compression_HEVC,
-                                                   &encoder_raw),
-               "get the ICC-only fixture encoder");
-  std::unique_ptr<heif_encoder, TestEncoderDeleter> encoder(encoder_raw);
-  require_heif(heif_encoder_set_lossy_quality(encoder.get(), 90),
-               "set the ICC-only fixture quality");
-
-  heif_image* image_raw = nullptr;
-  require_heif(heif_image_create(4, 4, heif_colorspace_RGB,
-                                 heif_chroma_interleaved_RGB, &image_raw),
-               "create the ICC-only fixture image");
-  std::unique_ptr<heif_image, TestImageDeleter> image(image_raw);
-  require_heif(heif_image_add_plane(image.get(), heif_channel_interleaved, 4, 4, 8),
-               "allocate the ICC-only fixture plane");
-  int stride = 0;
-  auto* plane = heif_image_get_plane(image.get(), heif_channel_interleaved, &stride);
-  require(plane != nullptr && stride >= 12, "ICC-only fixture plane is unavailable");
-  for (int y = 0; y < 4; ++y) {
-    for (int x = 0; x < 4; ++x) {
-      plane[y * stride + x * 3] = 48;
-      plane[y * stride + x * 3 + 1] = 96;
-      plane[y * stride + x * 3 + 2] = 144;
-    }
-  }
-
-  cmsHPROFILE profile = cmsCreate_sRGBProfile();
-  require(profile != nullptr, "cannot create the ICC-only fixture profile");
-  cmsUInt32Number profile_size = 0;
-  if (!cmsSaveProfileToMem(profile, nullptr, &profile_size) || profile_size == 0) {
-    cmsCloseProfile(profile);
-    throw std::runtime_error("cannot size the ICC-only fixture profile");
-  }
-  std::vector<std::uint8_t> icc(profile_size);
-  const bool saved = cmsSaveProfileToMem(profile, icc.data(), &profile_size) != 0;
-  cmsCloseProfile(profile);
-  require(saved, "cannot serialize the ICC-only fixture profile");
-  icc.resize(profile_size);
-  require_heif(heif_image_set_raw_color_profile(image.get(), "prof", icc.data(), icc.size()),
-               "set the ICC-only fixture profile");
-
-  std::unique_ptr<heif_encoding_options, TestEncodingOptionsDeleter> options(
-      heif_encoding_options_alloc());
-  require(options != nullptr, "cannot allocate the ICC-only fixture options");
-  options->macOS_compatibility_workaround_no_nclx_profile = 1;
-  heif_image_handle* handle_raw = nullptr;
-  require_heif(heif_context_encode_image(context.get(), image.get(), encoder.get(),
-                                         options.get(), &handle_raw),
-               "encode the ICC-only fixture");
-  std::unique_ptr<heif_image_handle, TestHandleDeleter> handle(handle_raw);
-  require_heif(heif_context_set_primary_image(context.get(), handle.get()),
-               "set the ICC-only fixture primary image");
-
-  std::vector<std::uint8_t> bytes;
-  heif_writer writer{1, &collect_heif_bytes};
-  require_heif(heif_context_write(context.get(), &writer, &bytes),
-               "write the ICC-only fixture");
-  return bytes;
+  namespace h=hyperdr::codec::hevc;
+  h::EncodeParams params;params.color={2,2,1};
+  auto sequence=h::encode(1,[](auto,h::YuvTile& tile){h::rgb_tile(h::tile_grid(4,4),0,
+      [](auto,auto,auto count,float* v){for(unsigned i=0;i<count;++i){v[3*i]=48.F/255;v[3*i+1]=96.F/255;v[3*i+2]=144.F/255;}},1,false,tile);},params);
+  hyperdr::HeifEncodedImage image{sequence,4,4,{},std::nullopt,{}};
+  auto bytes=hyperdr::write_heif(image);
+  cmsHPROFILE profile=cmsCreate_sRGBProfile();
+  require(profile!=nullptr,"create ICC-only fixture profile");cmsUInt32Number size=0;
+  const bool sized=cmsSaveProfileToMem(profile,nullptr,&size)!=0;
+  std::vector<std::uint8_t> icc(size);
+  const bool saved=sized&&cmsSaveProfileToMem(profile,icc.data(),&size);cmsCloseProfile(profile);
+  require(saved,"serialize ICC-only fixture profile");icc.resize(size);
+  return heif_fixture::edit(bytes,[&](auto& meta){heif_fixture::properties(meta,[&](auto& prop){
+    if(prop.type=="colr"){prop.data={'p','r','o','f'};prop.data.insert(prop.data.end(),icc.begin(),icc.end());}
+  });});
 }
 
 void check_icc_only_heic() {
@@ -1214,56 +1080,17 @@ void check_gain_map_jpeg_pair(const hyperdr::PhotoMetadata& metadata) {
 // the gain item is encoded as an ordinary image and given the auxC property and
 // auxl reference Apple writes.
 std::vector<std::uint8_t> encode_apple_legacy_heic(bool with_makernote) {
-  std::unique_ptr<heif_context, TestContextDeleter> context(heif_context_alloc());
-  require(context != nullptr, "cannot allocate the legacy Apple fixture context");
-  heif_encoder* encoder_raw = nullptr;
-  require_heif(heif_context_get_encoder_for_format(context.get(), heif_compression_HEVC,
-                                                   &encoder_raw),
-               "get the legacy Apple fixture encoder");
-  std::unique_ptr<heif_encoder, TestEncoderDeleter> encoder(encoder_raw);
-  require_heif(heif_encoder_set_lossy_quality(encoder.get(), 100),
-               "set the legacy Apple fixture quality");
-  constexpr int kSize = 16;
-  const auto encode = [&](heif_colorspace space, heif_chroma chroma, heif_channel channel,
-                          int components, auto value) {
-    heif_image* image_raw = nullptr;
-    require_heif(heif_image_create(kSize, kSize, space, chroma, &image_raw),
-                 "create a legacy Apple fixture image");
-    std::unique_ptr<heif_image, TestImageDeleter> image(image_raw);
-    require_heif(heif_image_add_plane(image.get(), channel, kSize, kSize, 8),
-                 "allocate a legacy Apple fixture plane");
-    int stride = 0;
-    auto* plane = heif_image_get_plane(image.get(), channel, &stride);
-    require(plane != nullptr, "legacy Apple fixture plane is unavailable");
-    for (int y = 0; y < kSize; ++y)
-      for (int x = 0; x < kSize; ++x)
-        for (int c = 0; c < components; ++c)
-          plane[y * stride + x * components + c] = value(x);
-    heif_image_handle* handle_raw = nullptr;
-    require_heif(heif_context_encode_image(context.get(), image.get(), encoder.get(),
-                                           nullptr, &handle_raw),
-                 "encode a legacy Apple fixture image");
-    return std::unique_ptr<heif_image_handle, TestHandleDeleter>(handle_raw);
-  };
-  // A mid-grey base; the gain map is full gain on the left half, none on the right.
-  const auto primary = encode(heif_colorspace_RGB, heif_chroma_interleaved_RGB,
-      heif_channel_interleaved, 3, [](int) { return std::uint8_t{128}; });
-  const auto gain = encode(heif_colorspace_monochrome, heif_chroma_monochrome,
-      heif_channel_Y, 1, [](int x) { return static_cast<std::uint8_t>(x < kSize / 2 ? 255 : 0); });
-  require_heif(heif_context_set_primary_image(context.get(), primary.get()),
-               "set the legacy Apple fixture primary image");
-  const auto primary_id = heif_image_handle_get_item_id(primary.get());
-  const auto gain_id = heif_image_handle_get_item_id(gain.get());
-  const std::string urn = "urn:com:apple:photo:2020:aux:hdrgainmap";
-  std::vector<std::uint8_t> aux_type(4, 0);  // FullBox version and flags.
-  aux_type.insert(aux_type.end(), urn.begin(), urn.end());
-  aux_type.push_back(0);
-  require_heif(heif_item_add_raw_property(context.get(), gain_id, heif_fourcc('a', 'u', 'x', 'C'),
-                                          nullptr, aux_type.data(), aux_type.size(), 1, nullptr),
-               "attach the legacy Apple auxiliary type");
-  require_heif(heif_context_add_item_reference(context.get(), heif_fourcc('a', 'u', 'x', 'l'),
-                                               gain_id, primary_id),
-               "reference the legacy Apple gain map");
+  namespace h=hyperdr::codec::hevc;
+  constexpr int kSize=16;const auto grid=h::tile_grid(kSize,kSize);
+  h::EncodeParams params;params.quality=100;params.color={12,13,1};
+  auto primary=h::encode(1,[&](auto,h::YuvTile& tile){h::rgb_tile(grid,0,
+      [](auto,auto,auto n,float* v){std::fill_n(v,n*3,128.F/255);},1,false,tile);},params);
+  params.color={2,2,1};
+  auto gain=h::encode(1,[&](auto,h::YuvTile& tile){h::luma_tile(grid,0,
+      [](auto,auto x0,auto n,float* v){for(unsigned i=0;i<n;++i)v[i]=x0+i<kSize/2?1.F:0.F;},tile);},params);
+  auto icc=hyperdr::codec::display_p3_profile();
+  hyperdr::HeifEncodedImage base_image{primary,kSize,kSize,{},std::nullopt,icc},gain_image{gain,kSize,kSize,{2,2,1,true},std::nullopt,{}};
+  hyperdr::HeifWriteOptions options;options.gain_metadata=hyperdr::GainMapMetadata{};
   if (with_makernote) {
     // The Exif fixture from exif_test: tags 33 = 3/2 and 48 = 0 declare 3 stops.
     std::vector<std::uint8_t> tiff(104, 0);
@@ -1287,15 +1114,29 @@ std::vector<std::uint8_t> encode_apple_legacy_heic(bool with_makernote) {
     be16(58, 0x21); be16(60, 10); be32(62, 1); be32(66, 38);
     be16(70, 0x30); be16(72, 10); be32(74, 1); be32(78, 46);
     be32(82, 3); be32(86, 2); be32(90, 0); be32(94, 1);
-    require_heif(heif_context_add_exif_metadata(context.get(), primary.get(),
-                                                tiff.data(), static_cast<int>(tiff.size())),
-                 "attach the legacy Apple MakerNote");
+    options.exif=std::move(tiff);
   }
-  std::vector<std::uint8_t> bytes;
-  heif_writer writer{1, &collect_heif_bytes};
-  require_heif(heif_context_write(context.get(), &writer, &bytes),
-               "write the legacy Apple fixture");
-  return bytes;
+  auto bytes=hyperdr::write_heif(base_image,&gain_image,options);
+  bytes=heif_fixture::edit(bytes,[](auto& meta){
+    heif_fixture::properties(meta,[](auto& prop){if(prop.type=="auxC"){
+      const std::string urn="urn:com:apple:photo:2020:aux:hdrgainmap";
+      prop.data.assign(4,0);prop.data.insert(prop.data.end(),urn.begin(),urn.end());prop.data.push_back(0);
+    }});
+    for(auto& box:meta){
+      if(box.type=="grpl")box.type="free";
+      if(box.type=="iinf")heif_fixture::children(box,8,[](auto& entries){for(auto& e:entries)
+        if(e.type=="infe"&&e.data.size()>=12&&std::string(e.data.begin()+8,e.data.begin()+12)=="tmap")
+          std::copy_n("free",4,e.data.begin()+8);
+      });
+      if(box.type=="iref")heif_fixture::children(box,4,[](auto& refs){for(auto& r:refs)
+        if(r.type=="dimg"&&heif_fixture::get(r.data,0,2)==5)r.type="free";
+      });
+    }
+  });
+  auto top=heif_fixture::parse(bytes);
+  for(auto& box:top)if(box.type=="ftyp")for(std::size_t i=8;i+4<=box.data.size();i+=4)
+    if(std::string(box.data.begin()+i,box.data.begin()+i+4)=="tmap")std::copy_n("mif1",4,box.data.begin()+i);
+  return heif_fixture::serialize(top);
 }
 
 void check_apple_legacy_heic() {
@@ -1346,7 +1187,8 @@ int main() {
     check_rgb_gain_map_jpeg(metadata);
     check_gain_map_jpeg_pair(metadata);
     check_gain_map_jpeg_icc(metadata);
-    const bool have_hevc = heif_have_encoder_for_format(heif_compression_HEVC);
+    const auto caps=hyperdr::codec::hevc::encoder_caps();
+    const bool have_hevc = caps.main8 && caps.main10;
     if (have_hevc) {
       check_icc_only_heic();
       check_apple_legacy_heic();
@@ -1367,7 +1209,7 @@ int main() {
                                 "gain-map JPEG round trip changed brightness");
       for (const auto encoding : {hyperdr::HdrEncoding::AvifPq,
                                   hyperdr::HdrEncoding::AvifHlg}) {
-        const auto bytes = hyperdr::encode_avif(gain, metadata, 80, encoding);
+        const auto bytes = hyperdr::encode_avif(hyperdr::renditions_from_gain_map(gain), metadata, 80, encoding);
         hyperdr::verify_avif_decodable(bytes);
         require_linear_round_trip(decode_encoded_input(bytes, "avif", ".avif"), expected,
                                   "AVIF round trip changed brightness");
@@ -1377,7 +1219,7 @@ int main() {
       return 0;
     }
 
-    // Default 8-bit output through the grid path (wider than one 2048 tile), with a
+    // Default 8-bit output through the grid path (wider than one 512 tile), with a
     // full decode and gain-map reconstruction regression, not just structure checks.
     const auto large = make_synthetic(2600, 1408);
     const auto large_gain = hyperdr::make_gain_map(large, options);
@@ -1423,7 +1265,7 @@ int main() {
       bool refused = false;
       try {
         static_cast<void>(decode_encoded_input(prose, "signature-prose", ".jpg"));
-      } catch (const std::invalid_argument& error) {
+      } catch (const hyperdr::DecodeFailed& error) {
         refused = std::string(error.what()).find("no supported signature") !=
                   std::string::npos;
       }
@@ -1579,7 +1421,7 @@ int main() {
     for (const auto encoding :
          {hyperdr::HdrEncoding::AvifPq, hyperdr::HdrEncoding::AvifHlg}) {
       const bool pq = encoding == hyperdr::HdrEncoding::AvifPq;
-      const auto avif = hyperdr::encode_avif(small_gain, metadata, 80, encoding);
+      const auto avif = hyperdr::encode_avif(hyperdr::renditions_from_gain_map(small_gain), metadata, 80, encoding);
       require(avif.size() > 32, "AVIF encoder produced an implausibly small file");
       require(!contains_text(avif, "AdaptiveHDR") &&
                   !contains_text(avif, "ISO-21496-1"),
@@ -1678,7 +1520,7 @@ int main() {
     // Single-image BT.2100 exports must be Main10, carry the requested transfer
     // function, remain distinct from gain-map topology, and decode end-to-end.
     for (const auto encoding : {hyperdr::HdrEncoding::Pq, hyperdr::HdrEncoding::Hlg}) {
-        const auto hdr_bytes = hyperdr::encode_hdr_heic(small_gain, metadata, 80, encoding);
+        const auto hdr_bytes = hyperdr::encode_hdr_heic(hyperdr::renditions_from_gain_map(small_gain), metadata, 80, encoding);
         require_hevc_profiles(hdr_bytes, true, false);
         const auto inspection = hyperdr::inspect_heif(hdr_bytes);
         require(inspection.structurally_valid && inspection.has_heic_brand &&
@@ -1780,8 +1622,8 @@ int main() {
                                hyperdr::HdrEncoding::AvifPq, hyperdr::HdrEncoding::AvifHlg}) {
       const bool avif = encoding == hyperdr::HdrEncoding::AvifPq || encoding == hyperdr::HdrEncoding::AvifHlg;
       const bool pq = encoding == hyperdr::HdrEncoding::Pq || encoding == hyperdr::HdrEncoding::AvifPq;
-      const auto bytes = avif ? hyperdr::encode_avif(checker_gain, metadata, 90, encoding)
-                              : hyperdr::encode_hdr_heic(checker_gain, metadata, 90, encoding);
+      const auto bytes = avif ? hyperdr::encode_avif(hyperdr::renditions_from_gain_map(checker_gain), metadata, 90, encoding)
+                              : hyperdr::encode_hdr_heic(hyperdr::renditions_from_gain_map(checker_gain), metadata, 90, encoding);
       const auto full = decode_encoded_input(bytes, "checker-full", avif ? ".avif" : ".heic");
       const auto reduced = decode_encoded_input(bytes, "checker-preview", avif ? ".avif" : ".heic",
                                                 reduced_jpeg_options);
@@ -1799,7 +1641,7 @@ int main() {
     // decode depends on the HEVC range extensions.
     const auto hlg422 = encode_hlg_422(small);
     if (hlg422.empty()) {
-      throw std::runtime_error("x265 cannot produce the required 4:2:2 Main10 fixture");
+      throw std::runtime_error("VideoToolbox cannot produce the required 4:2:2 Main10 fixture");
     }
     require_chroma_422(hlg422);
     const auto decoded_hlg422 = decode_encoded_input(hlg422, "hlg422");

@@ -38,16 +38,6 @@ class ExportDimensionLimit : public std::runtime_error {
 [[nodiscard]] std::vector<std::uint8_t> encode_gain_map_jpeg(
     const GainMapResult& images, const PhotoMetadata& metadata, int quality);
 
-// Compatibility overloads for callers that already own gain-map renditions.
-// The application uses the PhotoRenditions overloads below for direct HDR.
-[[nodiscard]] std::vector<std::uint8_t> encode_hdr_heic(
-    const GainMapResult& images, const PhotoMetadata& metadata, int quality,
-    HdrEncoding encoding, HevcPreset preset = HevcPreset::Slow);
-[[nodiscard]] std::vector<std::uint8_t> encode_avif(
-    const GainMapResult& images, const PhotoMetadata& metadata, int quality,
-    HdrEncoding encoding);
-
-
 [[nodiscard]] std::vector<std::uint8_t> encode_sdr_jpeg(
     const FloatImage& image, const PhotoMetadata& metadata, int quality,
     ColorGamut gamut = ColorGamut::kSrgb);

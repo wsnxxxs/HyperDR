@@ -30,6 +30,9 @@ enum PhotoDropState: Equatable {
     typealias Loader = @MainActor () async -> PhotoDropFiles
 
     private(set) var state = PhotoDropState.idle
+    /// The name of the first openable dragged file, once the drag has been
+    /// read; the canvas names it while an export is running.
+    private(set) var firstName: String?
 
     /// Bumped by every enter, exit and drop; a check publishes only if the
     /// session it started in is still current.
@@ -49,6 +52,7 @@ enum PhotoDropState: Equatable {
             let files = await load()
             guard current == session else { return }
             state = files.urls.contains(where: model.canOpen) || files.firstError != nil ? .accepts : .rejects
+            firstName = files.urls.first(where: model.canOpen)?.lastPathComponent
         }
     }
 
@@ -56,6 +60,7 @@ enum PhotoDropState: Equatable {
     func exited() {
         session += 1
         state = .idle
+        firstName = nil
     }
 
     /// The drag was released on the canvas. Returns whether the drop is
@@ -64,6 +69,7 @@ enum PhotoDropState: Equatable {
         let refused = state == .rejects
         session += 1
         state = .idle
+        firstName = nil
         guard !refused else { return false }
         drop += 1
         let current = drop
@@ -119,7 +125,7 @@ struct PhotoDropDelegate: DropDelegate {
         return { await urls(from: providers) }
     }
 
-    private static func urls(from providers: [NSItemProvider]) async -> PhotoDropFiles {
+    static func urls(from providers: [NSItemProvider]) async -> PhotoDropFiles {
         var results: [Result<URL, any Error>] = []
         for provider in providers {
             let result = await withCheckedContinuation {

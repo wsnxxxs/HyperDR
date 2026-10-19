@@ -25,6 +25,27 @@ struct MainWindow: View {
     var isImporting = false
     /// Whether the frame sheet is showing; the toolbar and File ▸ Frame… set it.
     var isFraming = false
+    /// The export panel, export history and LUT library sheets; the
+    /// toolbar, the menu and the inspector's cards open them.
+    var showsExport = false
+    var showsHistory = false
+    var showsLUTLibrary = false
+    /// Whether the lock is flashing: the user touched something an export
+    /// has locked (M3 §5.2). It falls back by itself after 0.6 s.
+    private(set) var isEmphasizingLock = false
+    @ObservationIgnored private var emphasisTask: Task<Void, Never>?
+
+    func emphasizeLock() {
+        emphasisTask?.cancel()
+        isEmphasizingLock = true
+        emphasisTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(600))
+            if !Task.isCancelled { self?.isEmphasizingLock = false }
+        }
+    }
+
+    /// Opens the export panel; with the export running it shows the progress.
+    func openExport() { showsExport = true }
 }
 
 private struct EditorWindow: View {
@@ -34,6 +55,7 @@ private struct EditorWindow: View {
     @State private var showsInspector = true
     @State private var windowWidth: CGFloat = 1440
     @State private var zoomKey = ZoomKeyMonitor()
+    @Environment(\.locale) private var locale
 
     var body: some View {
         CanvasView(model: model, window: window, padding: Layout.canvasPadding(forWindowWidth: windowWidth),
@@ -48,7 +70,7 @@ private struct EditorWindow: View {
             .navigationSubtitle(subtitle)
             .toolbar { MainToolbar(model: model, window: window, showsInspector: $showsInspector) }
             .inspector(isPresented: $showsInspector) {
-                InspectorView(model: model)
+                InspectorView(model: model, window: window)
                     .inspectorColumnWidth(Layout.inspectorWidth(forWindowWidth: windowWidth))
             }
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowWidth = $0 }
@@ -68,11 +90,26 @@ private struct EditorWindow: View {
             .sheet(isPresented: Bindable(window).isFraming) {
                 FrameSheet(model: model)
             }
+            .sheet(isPresented: Bindable(window).showsExport) {
+                ExportSheet(model: model, window: window)
+            }
+            .sheet(isPresented: Bindable(window).showsHistory) {
+                ExportHistorySheet(model: model)
+            }
+            .sheet(isPresented: Bindable(window).showsLUTLibrary) {
+                LUTLibrarySheet(model: model)
+            }
+            // A sheet would hide the question: close it first.
+            .onChange(of: model.pendingPhotoSwitch != nil) { _, asking in
+                if asking { window.showsExport = false; window.showsHistory = false; window.showsLUTLibrary = false }
+            }
+            .background { Color.clear.photoSwitchAlert(model: model) }
             .alert(alertTitle, isPresented: alertPresented, presenting: model.alert) { _ in
                 // No actions: the system supplies a localized OK.
             } message: { error in
                 Text(verbatim: ErrorText(error).body)
             }
+            .onPasteCommand(of: PasteImport.types) { PasteImport.handle($0, model: model) }
             .focusedSceneValue(model)
             .focusedSceneValue(window)
             .environment(ViewerSessionState.shared)
@@ -89,11 +126,16 @@ private struct EditorWindow: View {
             #endif
     }
 
-    /// "6000 × 4000 · RAW"; only the format until the first frame names the size.
+    /// "6000 × 4000 · RAW · Not exported"; only the format until the first
+    /// frame names the size, and the edit's state once there is a frame.
     private var subtitle: String {
         guard let document = model.document else { return "" }
-        guard let size = document.pixelSize else { return document.formatLabel }
-        return "\(size.width) × \(size.height) · \(document.formatLabel)"
+        var parts = [document.formatLabel]
+        if let size = document.pixelSize { parts.insert("\(size.width) × \(size.height)", at: 0) }
+        if let key = ExportPresentation.documentStatusKey(model.documentStatus, isExporting: model.export.isInFlight) {
+            parts.append(AppStrings.string(key, locale: locale))
+        }
+        return parts.joined(separator: " · ")
     }
 
     private var alertTitle: Text {

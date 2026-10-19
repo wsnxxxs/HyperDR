@@ -14,6 +14,7 @@ struct EditorCommands: Commands {
             OpenCommand()
         }
         CommandGroup(after: .importExport) {
+            ExportCommand()
             FrameCommand()
         }
         CommandGroup(replacing: .undoRedo) {
@@ -47,6 +48,21 @@ private struct OpenCommand: View {
         Button("mac.menu.open") { window?.isImporting = true }
             .keyboardShortcut("o")
             .disabled(window == nil || model?.allowsOpenCommand != true)
+    }
+}
+
+/// File ▸ Export… (⌘E): opens the export panel; while an export runs it
+/// reads "Show Export Progress" and opens the progress.
+private struct ExportCommand: View {
+    @FocusedValue(EditorModel.self) private var model
+    @FocusedValue(EditorWindowState.self) private var window
+
+    var body: some View {
+        Button(model?.export.isInFlight == true ? "export.menu.showProgress" : "export.menu.export") {
+            window?.openExport()
+        }
+        .keyboardShortcut("e")
+        .disabled(window == nil || model?.document == nil)
     }
 }
 

@@ -52,6 +52,9 @@ struct CanvasStage: View {
                 if editing { hint.dismiss() }
             } }
             .overlay { CanvasStatus(model: model, window: window) }
+            .overlay(alignment: .bottom) {
+                if !showsInspector { ExportCanvasCapsule(model: model, window: window) }
+            }
             .overlay { if focused && !focusedByPointer { FocusRing() } }
             .focusable()
             .focusEffectDisabled()
@@ -68,6 +71,12 @@ struct CanvasStage: View {
             // is for, so the first photo's hint is announced once.
             .onChange(of: HintTrigger(serial: model.photoSerial, key: model.viewerHintKey), initial: true) { _, trigger in
                 hint.observe(serial: trigger.serial, key: trigger.key, session: session, covered: legendIsShowing)
+            }
+            // Pasting an image that is not a file says so in the hint's place.
+            .onChange(of: model.notice, initial: true) {
+                guard model.notice == .clipboardImageUnsupported else { return }
+                hint.announce("paste.imageData")
+                model.notice = nil
             }
             // The legend takes the hint's place, and the hint does not come
             // back when the legend goes.

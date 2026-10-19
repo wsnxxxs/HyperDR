@@ -28,7 +28,9 @@ struct CameraGroup: View {
                             tone: model.captureFacts.lens == nil ? .muted : .normal)
                     if raw.lensCorrectionSupported {
                         HStack {
+                            // The switch carries the name for VoiceOver (and reads on/off itself).
                             Text("camera.lensCorrection").font(Font.hdr.control).foregroundStyle(Color.hdr.ink)
+                                .accessibilityHidden(true)
                             Spacer(minLength: Space.s3)
                             Toggle("camera.lensCorrection",
                                    isOn: Binding(get: { model.edit.lensCorrection }, set: { model.setLensCorrection($0) }))

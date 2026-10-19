@@ -218,3 +218,102 @@ extension SaveBeforeExportTests {
         #expect(try Data(contentsOf: swapped) == Data([7]))
     }
 }
+
+
+
+extension SaveBeforeExportTests {
+    @Test func reviewerParentRetargetCannotOverwriteWorkspace() async throws {
+        let env = try JobEnvironment(), photo = try await env.photo(), url = try destination(env)
+        let runner = env.runner()
+        let ticket = try await runner.start(session: photo.id, options: EditOptions())
+        _ = try await finish(runner, ticket)
+        let forbidden = env.configuration.supportDirectory.appendingPathComponent(url.lastPathComponent)
+        try Data([7]).write(to: forbidden)
+        let once = Mutex(false)
+        var hooks = ExportTarget.CopyHooks()
+        hooks.read = { fd, buffer, count in
+            if once.withLock({ value in if value { return false }; value = true; return true }) {
+                let folder = url.deletingLastPathComponent()
+                do {
+                    try FileManager.default.moveItem(at: folder, to: folder.appendingPathExtension("original"))
+                    try FileManager.default.createSymbolicLink(at: folder, withDestinationURL: env.configuration.supportDirectory)
+                } catch { Issue.record("Cannot arrange parent replacement: \(error)") }
+            }
+            return Darwin.read(fd, buffer, count)
+        }
+        let target = ExportTarget(configuration: env.configuration, sessions: env.sessions,
+            access: SystemSecurityScopedAccess(), hooks: hooks)
+        do { _ = try await target.save(session: photo.id, export: ticket.export, to: url) }
+        catch { print("REVIEW parent swap rejected: \(error)") }
+        let observed = try Data(contentsOf: forbidden)
+        print("REVIEW workspace bytes after parent retarget: \(Array(observed))")
+        #expect(observed == Data([7]), "Must not overwrite an excluded workspace through a replaced destination ancestor")
+    }
+}
+
+
+extension SaveBeforeExportTests {
+    @Test func parentRetargetAtPublicationIsRejectedWithoutChangingEitherOldFile() async throws {
+        let env = try JobEnvironment(), photo = try await env.photo(), url = try destination(env)
+        let runner = env.runner(), ticket = try await runner.start(session: photo.id, options: EditOptions())
+        _ = try await finish(runner, ticket)
+        let forbidden = env.configuration.cacheDirectory.appendingPathComponent(url.lastPathComponent)
+        try FileManager.default.createDirectory(at: env.configuration.cacheDirectory, withIntermediateDirectories: true)
+        try Data([7]).write(to: forbidden)
+        var hooks = ExportTarget.CopyHooks()
+        hooks.beforeSelectedPublish = {
+            let folder = url.deletingLastPathComponent()
+            try FileManager.default.moveItem(at: folder, to: folder.appendingPathExtension("original"))
+            try FileManager.default.createSymbolicLink(at: folder, withDestinationURL: env.configuration.cacheDirectory)
+        }
+        let target = ExportTarget(configuration: env.configuration, sessions: env.sessions,
+            access: SystemSecurityScopedAccess(), hooks: hooks)
+        do {
+            _ = try await target.save(session: photo.id, export: ticket.export, to: url)
+            Issue.record("Expected changed parent rejection")
+        } catch let error as HyperDRError { #expect(error.code == "export_folder_inside_workspace") }
+        #expect(try Data(contentsOf: forbidden) == Data([7]))
+        let original = url.deletingLastPathComponent().appendingPathExtension("original").appendingPathComponent(url.lastPathComponent)
+        #expect(try Data(contentsOf: original) == Data([9]))
+    }
+
+    @Test func publicationResultMustStillBelongToTheSelectedDirectory() async throws {
+        let env = try JobEnvironment(), photo = try await env.photo(), url = try destination(env)
+        let runner = env.runner(), ticket = try await runner.start(session: photo.id, options: EditOptions())
+        _ = try await finish(runner, ticket)
+        var hooks = ExportTarget.CopyHooks()
+        hooks.afterSelectedPublish = {
+            let folder = url.deletingLastPathComponent()
+            try FileManager.default.moveItem(at: folder, to: folder.appendingPathExtension("original"))
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Data([7]).write(to: url)
+        }
+        let target = ExportTarget(configuration: env.configuration, sessions: env.sessions,
+            access: SystemSecurityScopedAccess(), hooks: hooks)
+        do {
+            _ = try await target.save(session: photo.id, export: ticket.export, to: url)
+            Issue.record("Must not report a replacement directory as saved")
+        } catch let error as HyperDRError { #expect(error.code == "export_folder_unwritable") }
+        #expect(try Data(contentsOf: url) == Data([7]))
+        let actual = url.deletingLastPathComponent().appendingPathExtension("original").appendingPathComponent(url.lastPathComponent)
+        #expect(try Data(contentsOf: actual) == Data([1,2,3]))
+    }
+
+    @Test func newSelectedFileAndWorkspaceSymlinkValidation() async throws {
+        let env = try JobEnvironment(), photo = try await env.photo(), old = try destination(env)
+        let url = old.deletingLastPathComponent().appendingPathComponent("new.tif")
+        let runner = env.runner()
+        let ticket = try await runner.start(session: photo.id, options: EditOptions(["encoding": .string("sdr-tiff")]), destination: url)
+        let summary = try await finish(runner, ticket)
+        #expect(summary.failure == nil)
+        #expect(try Data(contentsOf: url) == Data([1,2,3]))
+        #expect(summary.saved?.syncConfirmed == false, "File-level grants cannot sync the parent directory")
+        let alias = env.root.appendingPathComponent("workspace-alias")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: env.configuration.supportDirectory)
+        let target = ExportTarget(configuration: env.configuration, sessions: env.sessions)
+        do {
+            try await target.validateDestination(alias.appendingPathComponent("invalid.tif"), expectedExtension: "tif")
+            Issue.record("Expected workspace identity rejection")
+        } catch let error as HyperDRError { #expect(error.code == "export_folder_inside_workspace") }
+    }
+}

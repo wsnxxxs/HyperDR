@@ -12,7 +12,7 @@ public struct SavedExport: Sendable {
     public let name: String
     public let folderLabel: String
     /// False when the file was published under its name but syncing the
-    /// folder failed: the export exists and must not be retried as a failure
+    /// folder failed or file-only authority prevented requesting a directory sync: the export exists and must not be retried as a failure
     /// (that would save a second copy), yet a crash could still lose the name.
     public let syncConfirmed: Bool
 }
@@ -26,6 +26,8 @@ public actor ExportTarget {
                 appropriateFor: $0, create: true)
         }
         var read: CopyRead = { Darwin.read($0, $1, $2) }
+        var beforeSelectedPublish: @Sendable () throws -> Void = {}
+        var afterSelectedPublish: @Sendable () throws -> Void = {}
         var openStaging: @Sendable (Int32, String) -> Int32 = {
             openat($0, $1, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
         }
@@ -117,17 +119,12 @@ public actor ExportTarget {
             throw HyperDRError(code: "invalid_options", message: "Invalid save destination or extension")
         }
         let lease = SecurityScopeLease(url: fileURL, access: access)
-        let folder = try Self.openFolder(fileURL.deletingLastPathComponent(), excluding: roots)
-        defer { Darwin.close(folder) }
-        var info = stat()
-        guard fstat(folder, &info) == 0, info.st_mode & 0o222 != 0 else { throw Self.error("export_folder_unwritable") }
+        let destination = try SelectedDestination(fileURL, excluding: roots)
         if let temporary = try? hooks.replacementDirectory(fileURL) {
             try? FileManager.default.removeItem(at: temporary)
         } else {
-            // Without an atomic replacement location, never truncate an old
-            // file. A new file can use exclusive direct creation at save time.
-            guard fstatat(folder, fileURL.lastPathComponent, &info, AT_SYMLINK_NOFOLLOW) != 0,
-                  errno == ENOENT else { throw Self.error("export_folder_unwritable") }
+            // Never truncate an existing file when atomic replacement is unavailable.
+            guard destination.fileIdentity == nil else { throw Self.error("export_folder_unwritable") }
         }
         return lease
     }
@@ -150,67 +147,169 @@ public actor ExportTarget {
         return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
     }
 
+    private struct FileIdentity: Equatable {
+        let device: dev_t
+        let inode: ino_t
+        init(_ info: stat) { device = info.st_dev; inode = info.st_ino }
+    }
+
+    /// Save-panel access grants metadata traversal, not directory enumeration.
+    /// This path must never open the selected file's parent or its ancestors.
+    private struct SelectedDestination {
+        let url: URL
+        let directoryIdentity: FileIdentity
+        let fileIdentity: FileIdentity?
+
+        init(_ requested: URL, excluding roots: [URL]) throws {
+            let parent = requested.deletingLastPathComponent()
+            guard let real = realpath(parent.path, nil) else { throw ExportTarget.error("export_folder_unwritable") }
+            defer { free(real) }
+            var ancestor = URL(fileURLWithPath: String(cString: real), isDirectory: true)
+            let canonical = ancestor
+            var info = stat()
+            guard stat(canonical.path, &info) == 0, info.st_mode & S_IFMT == S_IFDIR,
+                  info.st_mode & 0o222 != 0 else { throw ExportTarget.error("export_folder_unwritable") }
+            directoryIdentity = FileIdentity(info)
+            let excluded = roots.compactMap { root -> FileIdentity? in
+                var info = stat()
+                return stat(root.path, &info) == 0 ? FileIdentity(info) : nil
+            }
+            while true {
+                guard stat(ancestor.path, &info) == 0, info.st_mode & S_IFMT == S_IFDIR else {
+                    throw ExportTarget.error("export_folder_unwritable")
+                }
+                guard !excluded.contains(FileIdentity(info)) else { throw ExportTarget.error("export_folder_inside_workspace") }
+                if ancestor.path == "/" { break }
+                ancestor.deleteLastPathComponent()
+            }
+            url = canonical.appendingPathComponent(requested.lastPathComponent)
+            if lstat(url.path, &info) == 0 {
+                guard info.st_mode & S_IFMT == S_IFREG else { throw ExportTarget.error("invalid_options") }
+                fileIdentity = FileIdentity(info)
+            } else {
+                guard errno == ENOENT else { throw ExportTarget.error("export_folder_unwritable") }
+                fileIdentity = nil
+            }
+        }
+
+        func verify(_ requested: URL, excluding roots: [URL], file: FileIdentity?) throws -> URL {
+            let current = try SelectedDestination(requested, excluding: roots)
+            guard current.directoryIdentity == directoryIdentity, current.url == url,
+                  current.fileIdentity == file else { throw ExportTarget.error("export_folder_unwritable") }
+            return current.url
+        }
+    }
+
     private static func copySelected(_ source: SessionExportFile, to fileURL: URL,
                                      excluding roots: [URL], hooks: CopyHooks) throws -> SavedExport {
-        let directory = try openFolder(fileURL.deletingLastPathComponent(), excluding: roots)
-        defer { Darwin.close(directory) }
-        let canonical = try directoryURL(directory)
-        let destination = canonical.appendingPathComponent(fileURL.lastPathComponent)
+        let selected = try SelectedDestination(fileURL, excluding: roots)
         let temporary: URL
         do { temporary = try hooks.replacementDirectory(fileURL) }
-        catch { return try copyDirectNewFile(source, to: destination, directory: directory, hooks: hooks) }
-        defer { try? FileManager.default.removeItem(at: temporary) }
-        // The system grants this private replacement directory itself. Do
-        // not walk its ancestors (TemporaryItems may deny that traversal).
-        let temporaryFD = Darwin.open(temporary.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-        guard temporaryFD >= 0 else { throw error("export_folder_unwritable") }
-        defer { Darwin.close(temporaryFD) }
-        var originalInfo = stat(), temporaryInfo = stat()
-        guard fstat(directory, &originalInfo) == 0, fstat(temporaryFD, &temporaryInfo) == 0 else {
-            throw error("export_folder_unwritable")
+        catch {
+            return try copyDirectNewFile(source, to: selected.url, directory: nil, hooks: hooks,
+                verifyDirectory: {
+                    let current = try SelectedDestination(fileURL, excluding: roots)
+                    guard current.directoryIdentity == selected.directoryIdentity, current.url == selected.url else {
+                        throw ExportTarget.error("export_folder_unwritable")
+                    }
+                })
         }
-        guard originalInfo.st_dev == temporaryInfo.st_dev else {
-            return try copyDirectNewFile(source, to: destination, directory: directory, hooks: hooks)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        // Only the private system-granted replacement directory is opened.
+        let temporaryFD = Darwin.open(temporary.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard temporaryFD >= 0 else { throw ExportTarget.error("export_folder_unwritable") }
+        defer { Darwin.close(temporaryFD) }
+        var temporaryInfo = stat()
+        guard fstat(temporaryFD, &temporaryInfo) == 0 else { throw ExportTarget.error("export_folder_unwritable") }
+        guard selected.directoryIdentity.device == temporaryInfo.st_dev else {
+            return try copyDirectNewFile(source, to: selected.url, directory: nil, hooks: hooks,
+                verifyDirectory: {
+                    let current = try SelectedDestination(fileURL, excluding: roots)
+                    guard current.directoryIdentity == selected.directoryIdentity, current.url == selected.url else {
+                        throw ExportTarget.error("export_folder_unwritable")
+                    }
+                })
         }
         var stagingHooks = hooks
         stagingHooks.syncFolder = { fsync($0) }
         let staged = try copyDirectNewFile(source, to: temporary.appendingPathComponent("payload"),
             directory: temporaryFD, hooks: stagingHooks)
+        var stagedInfo = stat()
+        guard lstat(staged.url.path, &stagedInfo) == 0 else { throw ExportTarget.error("export_folder_unwritable") }
+        let publishedIdentity = FileIdentity(stagedInfo)
         try Task.checkCancellation()
-        var info = stat()
-        let exists = fstatat(directory, destination.lastPathComponent, &info, AT_SYMLINK_NOFOLLOW) == 0
-        if exists, info.st_mode & S_IFMT != S_IFREG { throw error("invalid_options") }
-        do {
-            if exists {
-                _ = try FileManager.default.replaceItemAt(destination, withItemAt: staged.url,
-                    backupItemName: nil, options: .usingNewMetadataOnly)
-            } else {
-                try FileManager.default.moveItem(at: staged.url, to: destination)
+        try hooks.beforeSelectedPublish()
+        var coordinationError: NSError?
+        var outcome: Result<SavedExport, Error>?
+        // Coordination serializes cooperating file presenters. Metadata checks
+        // before AND after publication reject persistent parent/target retargets.
+        // A hostile same-user process ignoring coordination can still rename an
+        // ancestor between the last check and the path-based system call (or
+        // perform an ABA swap between checks). File-only authority provides no
+        // directory handle for an atomic identity-bound rename; postchecks must
+        // not be advertised as preventing every such malicious filesystem race.
+        NSFileCoordinator().coordinate(writingItemAt: fileURL, options: .forReplacing, error: &coordinationError) { coordinated in
+            outcome = Result {
+                try Task.checkCancellation()
+                // Re-resolve both the original selection and the coordinator's
+                // URL: neither may acquire a different parent or target inode.
+                let destination = try selected.verify(fileURL, excluding: roots, file: selected.fileIdentity)
+                _ = try selected.verify(coordinated, excluding: roots, file: selected.fileIdentity)
+                let result: URL
+                if selected.fileIdentity != nil {
+                    result = try FileManager.default.replaceItemAt(destination, withItemAt: staged.url,
+                        backupItemName: nil, options: .usingNewMetadataOnly) ?? destination
+                } else {
+                    // Same-device exclusive rename, with no destination directory
+                    // FD. A file created since validation must never be replaced.
+                    guard renameatx_np(AT_FDCWD, staged.url.path, AT_FDCWD, destination.path, UInt32(RENAME_EXCL)) == 0 else {
+                        throw ExportTarget.error("export_folder_unwritable")
+                    }
+                    result = destination
+                }
+                try hooks.afterSelectedPublish()
+                // Do not report success for a different directory, a retargeted
+                // result URL, or a file other than our staged inode.
+                _ = try selected.verify(fileURL, excluding: roots, file: publishedIdentity)
+                let verified = try selected.verify(result, excluding: roots, file: publishedIdentity)
+                // File data was fsynced before publication; file-only authority
+                // cannot fsync the parent directory. Do not claim name durability.
+                return SavedExport(url: verified, name: verified.lastPathComponent,
+                    folderLabel: label(verified.deletingLastPathComponent()), syncConfirmed: false)
             }
-        } catch { throw HyperDRError(code: "export_folder_unwritable", message: "Unable to publish selected file", detail: String(describing: error)) }
-        let synced = hooks.syncFolder(directory) == 0
-        if !synced { log.warning("Saved selected file but could not sync its folder") }
-        return SavedExport(url: destination, name: destination.lastPathComponent,
-                           folderLabel: label(canonical), syncConfirmed: synced)
+        }
+        if let outcome {
+            do { return try outcome.get() }
+            catch let error as HyperDRError { throw error }
+            catch is CancellationError { throw CancellationError() }
+            catch { throw HyperDRError(code: "export_folder_unwritable", message: "Unable to publish selected file", detail: String(describing: error)) }
+        }
+        throw HyperDRError(code: "export_folder_unwritable", message: "Unable to coordinate selected file", detail: coordinationError?.localizedDescription)
     }
 
     /// External volumes may not supply an item-replacement directory. Direct
     /// writing is allowed only for a NEW file, so failure cannot destroy an
     /// existing file the user had agreed to replace.
     private static func copyDirectNewFile(_ source: SessionExportFile, to destination: URL,
-                                          directory: Int32, hooks: CopyHooks) throws -> SavedExport {
+                                          directory: Int32?, hooks: CopyHooks,
+                                          verifyDirectory: () throws -> Void = {}) throws -> SavedExport {
         let name = destination.lastPathComponent
-        let output = openat(directory, name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
-        guard output >= 0 else { throw error("export_folder_unwritable") }
+        try verifyDirectory()
+        let output = directory.map { openat($0, name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600) }
+            ?? Darwin.open(destination.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard output >= 0 else { throw ExportTarget.error("export_folder_unwritable") }
         var opened = stat()
-        guard fstat(output, &opened) == 0 else { Darwin.close(output); throw error("export_folder_unwritable") }
+        guard fstat(output, &opened) == 0 else { Darwin.close(output); throw ExportTarget.error("export_folder_unwritable") }
         var published = false
         defer {
             if !published {
                 var named = stat()
-                if fstatat(directory, name, &named, AT_SYMLINK_NOFOLLOW) == 0,
+                let found = directory.map { fstatat($0, name, &named, AT_SYMLINK_NOFOLLOW) }
+                    ?? lstat(destination.path, &named)
+                if found == 0,
                    named.st_dev == opened.st_dev, named.st_ino == opened.st_ino {
-                    unlinkat(directory, name, 0)
+                    if let directory { unlinkat(directory, name, 0) }
+                    else { unlink(destination.path) }
                 }
             }
             Darwin.close(output)
@@ -219,27 +318,37 @@ public actor ExportTarget {
         while true {
             try Task.checkCancellation()
             let count = hooks.read(source.descriptor, &buffer, buffer.count)
-            if count < 0 { if errno == EINTR { continue }; throw error("export_folder_unwritable") }
+            if count < 0 { if errno == EINTR { continue }; throw ExportTarget.error("export_folder_unwritable") }
             if count == 0 { break }
             try buffer.withUnsafeBytes { bytes in
                 var offset = 0
                 while offset < count {
                     let written = Darwin.write(output, bytes.baseAddress!.advanced(by: offset), count-offset)
                     if written < 0, errno == EINTR { continue }
-                    guard written > 0 else { throw error("export_folder_unwritable") }
+                    guard written > 0 else { throw ExportTarget.error("export_folder_unwritable") }
                     offset += written
                 }
             }
         }
         try Task.checkCancellation()
-        guard fsync(output) == 0 else { throw error("export_folder_unwritable") }
+        guard fsync(output) == 0 else { throw ExportTarget.error("export_folder_unwritable") }
         var named = stat()
-        guard fstatat(directory, name, &named, AT_SYMLINK_NOFOLLOW) == 0,
+        let found = directory.map { fstatat($0, name, &named, AT_SYMLINK_NOFOLLOW) }
+            ?? lstat(destination.path, &named)
+        guard found == 0,
               named.st_dev == opened.st_dev, named.st_ino == opened.st_ino else {
-            throw error("export_folder_unwritable")
+            throw ExportTarget.error("export_folder_unwritable")
+        }
+        try verifyDirectory()
+        // Verify after the data copy too. Without a parent FD, path identity
+        // checks cannot make hostile non-cooperating renames atomic with open.
+        // The held output FD nevertheless prevents redirecting ongoing writes.
+        if directory == nil {
+            let parent = try SelectedDestination(destination, excluding: [])
+            guard parent.fileIdentity == FileIdentity(opened) else { throw ExportTarget.error("export_folder_unwritable") }
         }
         published = true
-        let synced = hooks.syncFolder(directory) == 0
+        let synced = directory.map { hooks.syncFolder($0) == 0 } ?? false
         if !synced { log.warning("Saved selected file but could not sync its folder") }
         return SavedExport(url: destination, name: name, folderLabel: label(destination.deletingLastPathComponent()), syncConfirmed: synced)
     }

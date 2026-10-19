@@ -205,28 +205,3 @@ struct RegionGroup: View {
         }
     }
 }
-
-/// The colour LUT group: M3 fills it. It is here, closed and inert, so the
-/// inspector has the place it will have.
-struct LUTGroup: View {
-    let model: EditorModel
-    @State private var isExpanded = false
-    @State private var look = "none"
-    @State private var enabled = true
-
-    var body: some View {
-        ParameterGroup("lut.title", systemImage: "swatchpalette", summary: Text("lut.none"), isExpanded: $isExpanded) {
-            VStack(alignment: .leading, spacing: Space.s4) {
-                Picker("lut.select", selection: $look) {
-                    Text("lut.none").tag("none")
-                }
-                .labelsHidden()
-                Toggle("lut.enabled", isOn: $enabled)
-                    .font(Font.hdr.control)
-                ControlSlider(model: model, key: "lutStrength")
-            }
-            .padding(.top, Space.s3)
-            .disabled(true)
-        }
-    }
-}

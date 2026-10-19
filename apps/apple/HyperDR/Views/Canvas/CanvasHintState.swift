@@ -55,6 +55,11 @@ import Observation
         lastKey = nil
     }
 
+    /// Shows a one-off message in the hint's place (the clipboard held an
+    /// image, not a file): not counted against the key's two showings, and
+    /// gone after 4 s or at the user's first action like any hint.
+    func announce(_ key: String) { shown = key }
+
     /// The user pressed, scrolled, pinched or typed on the canvas, or the
     /// 4 s are up.
     func dismiss() {

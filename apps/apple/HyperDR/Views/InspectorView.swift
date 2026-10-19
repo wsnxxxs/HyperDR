@@ -9,12 +9,18 @@ import HyperDRDesign
 /// (`EditControls`), and each row reads only its own value.
 struct InspectorView: View {
     let model: EditorModel
+    var window = EditorWindowState()
 
     var body: some View {
         ScrollView {
-            InspectorContent(model: model)
+            InspectorContent(model: model, window: window)
         }
         .background(Color.hdr.surfacePanel)
+        // Pinned above the scrolling inspector: the export's status card.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            ExportStatusHost(model: model, window: window)
+                .background(Color.hdr.surfacePanel)
+        }
     }
 }
 
@@ -22,20 +28,25 @@ struct InspectorView: View {
 /// snapshot cannot size).
 struct InspectorContent: View {
     let model: EditorModel
+    var window = EditorWindowState()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if model.workspace == .editing, let document = model.document {
                 ScopeSection(model: model)
                 Divider()
-                PhotoInfoSection(document: document, model: model)
-                Divider()
-                WorkflowSection(model: model)
-                Divider()
-                AdjustmentSection(model: model)
-                FineTuneGroup(model: model)
-                RegionGroup(model: model)
-                LUTGroup(model: model)
+                ExportLockRegion(model: model, window: window) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        PhotoInfoSection(document: document, model: model)
+                        Divider()
+                        WorkflowSection(model: model)
+                        Divider()
+                        AdjustmentSection(model: model)
+                        FineTuneGroup(model: model)
+                        RegionGroup(model: model)
+                        LUTGroup(model: model, window: window)
+                    }
+                }
             } else {
                 Welcome()
             }

@@ -935,23 +935,6 @@
         }
       }
     },
-    "err.server.export_memory_budget" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Exporting this photo would need more memory than this Mac can spare, so the file was not exported. Other files in the batch are not affected."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "导出这张照片所需的内存超过本机可用的额度，此文件未导出；同批的其他文件不受影响。"
-          }
-        }
-      }
-    },
     "err.server.file_empty" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6358,23 +6341,6 @@
         }
       }
     },
-    "export.summary.frameInapplicable" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This style doesn’t fit this photo"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "此样式不适用于这张照片"
-          }
-        }
-      }
-    },
     "export.summary.lutInactive %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6456,40 +6422,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "限制为 sRGB"
-          }
-        }
-      }
-    },
-    "export.commandLine" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Command line"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "命令行"
-          }
-        }
-      }
-    },
-    "export.commandLine.copy" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Copy"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "复制"
           }
         }
       }
@@ -7021,57 +6953,6 @@
         }
       }
     },
-    "export.result.exported" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Exported"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已导出"
-          }
-        }
-      }
-    },
-    "export.result.earlier" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Earlier edit"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "上一版的结果"
-          }
-        }
-      }
-    },
-    "export.result.staleNote" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "You changed the photo after this export. Export again to include the changes."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "导出之后又调整过画面。再次导出才会包含这些改动。"
-          }
-        }
-      }
-    },
     "export.result.size" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7191,23 +7072,6 @@
         }
       }
     },
-    "export.save.autoSavedTo %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Saved automatically to %@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已自动保存到 %@"
-          }
-        }
-      }
-    },
     "export.save.saving" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7272,57 +7136,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有保存：HyperDR 无法写入所选位置。导出的文件仍在导出记录里。"
-          }
-        }
-      }
-    },
-    "export.save.failedShort" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Not saved: can’t write to the chosen place."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "没有保存：无法写入所选位置。"
-          }
-        }
-      }
-    },
-    "export.toolbar.exporting %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Exporting %@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "导出中 %@"
-          }
-        }
-      }
-    },
-    "export.toolbar.exportingIndeterminate" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Exporting…"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "导出中…"
           }
         }
       }
@@ -7429,40 +7242,6 @@
         }
       }
     },
-    "exportLock.title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Exporting"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在导出"
-          }
-        }
-      }
-    },
-    "exportLock.note" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Adjustments are locked. You can continue when the export finishes."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "调整已锁定，导出完成后可以继续。"
-          }
-        }
-      }
-    },
     "exportLock.help" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7476,23 +7255,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "导出进行中，完成后可以继续调整。"
-          }
-        }
-      }
-    },
-    "exportLock.details" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Details"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "查看详情"
           }
         }
       }
@@ -7527,40 +7289,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "停止"
-          }
-        }
-      }
-    },
-    "exportLock.done" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Exported"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已导出"
-          }
-        }
-      }
-    },
-    "exportLock.failed" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Export failed"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "导出失败"
           }
         }
       }
@@ -8092,40 +7820,6 @@
         }
       }
     },
-    "lut.library.inUse" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "In use"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "当前照片在用"
-          }
-        }
-      }
-    },
-    "lut.library.spaces" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Spaces…"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "空间…"
-          }
-        }
-      }
-    },
     "lut.library.remove" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8207,74 +7901,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已导入 %@ 个。"
-          }
-        }
-      }
-    },
-    "lut.library.importFailed %@ %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "“%1$@” was not imported: %2$@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "“%1$@”没有导入：%2$@"
-          }
-        }
-      }
-    },
-    "lut.library.lockedExport" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Importing is unavailable while exporting."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "导出进行中，暂时不能导入。"
-          }
-        }
-      }
-    },
-    "lut.library.lockedOpen" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Importing is unavailable while a photo is opening."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在打开照片，暂时不能导入。"
-          }
-        }
-      }
-    },
-    "lut.library.lockedAI" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Importing is unavailable while AI is computing."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "AI 计算中，暂时不能导入。"
           }
         }
       }
@@ -8428,40 +8054,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "更改…"
-          }
-        }
-      }
-    },
-    "lut.space.issue.sdrOutput" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "An SDR input needs an SDR output. The LUT is off until the spaces match."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "SDR 输入只能配 SDR 输出。空间不匹配时 LUT 不生效。"
-          }
-        }
-      }
-    },
-    "lut.space.issue.slog3RawOnly" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "S-Log3 input is for RAW photos only."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "S-Log3 输入只用于 RAW 照片。"
           }
         }
       }
@@ -9044,23 +8636,6 @@
         }
       }
     },
-    "settings.openInFinder" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Open in Finder"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在访达中打开"
-          }
-        }
-      }
-    },
     "settings.version %@ %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9401,40 +8976,6 @@
         }
       }
     },
-    "err.server.export_memory_budget.framed" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Exporting this photo needs more memory than this Mac can spare, so nothing was exported. Remove the frame or choose a smaller frame style and try again."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "导出这张照片所需的内存超过本机能腾出的额度，所以没有导出。可以去掉边框或换一种较小的边框样式后再试。"
-          }
-        }
-      }
-    },
-    "err.server.export_memory_budget.unframed" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Exporting this photo needs more memory than this Mac can spare, so nothing was exported. Close other apps and try again."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "导出这张照片所需的内存超过本机能腾出的额度，所以没有导出。可以关闭其他应用后再试。"
-          }
-        }
-      }
-    },
     "err.server.export_failed" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9516,6 +9057,176 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "HyperDR 无法写入所选位置。请选择其他位置后再试。"
+          }
+        }
+      }
+    },
+    "export.action.cancel" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancel"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消"
+          }
+        }
+      }
+    },
+    "export.menu.export" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Export…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出…"
+          }
+        }
+      }
+    },
+    "export.toolbar.saveJPEG" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save JPEG"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存 JPEG"
+          }
+        }
+      }
+    },
+    "export.toolbar.saveTIFF" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save TIFF"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存 TIFF"
+          }
+        }
+      }
+    },
+    "settings.histogram.luma" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Luminance"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "亮度"
+          }
+        }
+      }
+    },
+    "settings.histogram.rgb" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RGB"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RGB"
+          }
+        }
+      }
+    },
+    "settings.initialView.edited" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Edited"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "调整后"
+          }
+        }
+      }
+    },
+    "settings.initialView.original" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Original"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "原图"
+          }
+        }
+      }
+    },
+    "settings.diag.sdr" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SDR"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SDR"
+          }
+        }
+      }
+    },
+    "settings.diag.hdr %@ %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR · headroom %1$@ / %2$@ stops"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDR · 余量 %1$@ / %2$@ 档"
           }
         }
       }

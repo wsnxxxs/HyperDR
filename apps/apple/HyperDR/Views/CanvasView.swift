@@ -43,6 +43,17 @@ struct CanvasView: View {
                         .font(Font.hdr.control)
                         .hdrOverlayChip()
                         .padding(Space.s4)
+                } else if drop == .accepts, model.export.isInFlight, let name = dropCoordinator.firstName {
+                    // Accepted, not refused: releasing asks whether to stop the export.
+                    VStack(spacing: 2) {
+                        Label("switchPhoto.drop \(name)", systemImage: "arrow.down.doc")
+                            .font(Font.hdr.control)
+                        Text("switchPhoto.dropNote")
+                            .font(Font.hdr.caption)
+                            .foregroundStyle(Color.hdr.overlayMuted)
+                    }
+                    .hdrOverlayChip()
+                    .padding(Space.s4)
                 }
             }
             .accessibilityElement(children: .contain)
@@ -93,6 +104,17 @@ private struct DropTarget: View {
                 Text("mac.empty.dropHint")
                     .font(Font.hdr.caption)
                     .foregroundStyle(Color.hdr.inkMuted)
+            }
+            if model.notice == .clipboardImageUnsupported {
+                Text("paste.imageData")
+                    .font(Font.hdr.caption)
+                    .foregroundStyle(Color.hdr.ink)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 420)
+                    .task {
+                        try? await Task.sleep(for: .seconds(4))
+                        if !Task.isCancelled, model.notice == .clipboardImageUnsupported { model.notice = nil }
+                    }
             }
             Text("editor.local")
                 .font(Font.hdr.caption)

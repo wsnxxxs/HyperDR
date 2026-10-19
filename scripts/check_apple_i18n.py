@@ -8,7 +8,7 @@ script is the guard, the native counterpart of check_panel_i18n.py:
 
 * every key the app's Swift uses exists in the catalogue;
 * every catalogue key is used (no dead entries), except the keys under
-  `DYNAMIC_PREFIXES` below;
+  `DYNAMIC_PREFIXES` and, until M3-V wires them, `PENDING_M3_PREFIXES` below;
 * every entry has a translated, non-empty `en` and `zh-Hans` value, and both
   values take as many arguments as the key has `%@` placeholders;
 * a semantic key passed as `verbatim:` is an error: it would show the key
@@ -86,8 +86,18 @@ DESIGN_COMPONENTS = DESIGN / "Inspector"
 LOCALES = ["en", "zh-Hans"]
 # Keys read through a name built at run time (see the module docstring); never
 # reported as unused. Their completeness is the Swift coverage test's.
-DYNAMIC_PREFIXES = ("ctrl.", "choice.", "field.")
-UNUSED_EXEMPT = DYNAMIC_PREFIXES
+DYNAMIC_PREFIXES = ("ctrl.", "choice.", "field.", "enc.", "export.stage.", "export.unavailable.")
+# M3 (docs/design/m3-export.md §17) keys whose Views arrive with M3-V. Not
+# reported as unused until then; M3-V deletes this tuple once they are wired,
+# so they are checked like any other key.
+PENDING_M3_PREFIXES = (
+    "export.", "exportLock.", "switchPhoto.", "quit.", "paste.", "history.", "docStatus.", "camera.",
+    "settings.", "lut.library.", "lut.group.", "lut.space.",
+    "err.server.export_dimension_limit", "err.server.export_failed", "err.server.convert_timeout",
+    "err.server.export_memory_budget.", "mac.err.export_dimension_limit", "mac.err.export_failed",
+    "mac.err.convert_timeout",
+)
+UNUSED_EXEMPT = DYNAMIC_PREFIXES + PENDING_M3_PREFIXES
 
 KEY_RE = re.compile(r"^([a-z][A-Za-z0-9]*)(?:\.[A-Za-z0-9_-]+)+(?: %@)*$")
 CJK_RE = re.compile(r"[　-〿㐀-鿿＀-￯]")

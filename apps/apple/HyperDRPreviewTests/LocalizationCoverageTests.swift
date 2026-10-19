@@ -4,7 +4,8 @@ import XCTest
 
 /// The catalogue keys that are built from a prefix and a name at run time,
 /// which `scripts/check_apple_i18n.py` cannot see in the Swift and so
-/// exempts by prefix (`ctrl.`, `choice.`, `field.`). This is what keeps them
+/// exempts by prefix (`ctrl.`, `choice.`, `field.`, `enc.`, `export.stage.`,
+/// `export.unavailable.`). This is what keeps them
 /// honest: every key a control or an option will ask for is in the
 /// catalogue in both languages, and every key under those prefixes belongs
 /// to a control or an option that exists.
@@ -13,6 +14,12 @@ final class LocalizationCoverageTests: XCTestCase {
     /// the AI fallback names them (`field.<name>`).
     private static let captureFields = ["iso", "exposure_seconds", "f_number", "exposure_bias_ev",
                                         "focal_length_mm", "focal_length_35mm"]
+
+    /// The phases an export reports (`export.stage.<name>`; "processColor"
+    /// is the colour-only wording of "process") and the reasons a format is
+    /// unavailable (`export.unavailable.short|full.<name>`).
+    private static let exportStages = ["preparing", "decode", "process", "processColor", "encode", "verify"]
+    private static let unavailableReasons = ["hevc", "main10", "probe", "generic"]
 
     private typealias Entry = [String: Any]
 
@@ -55,6 +62,23 @@ final class LocalizationCoverageTests: XCTestCase {
         assertTranslated(Self.captureFields.map { "field.\($0)" }, in: catalogue)
     }
 
+    func testEveryExportFormatHasItsCardText() throws {
+        let catalogue = try catalogue()
+        let formats = try XCTUnwrap(EditChoices.byKey["encoding"]).options.map(\.id)
+        XCTAssertEqual(Set(formats), ["adaptive", "iso-gainmap-jpeg", "pq", "hlg", "avif-pq", "avif-hlg", "sdr-jpeg", "sdr-tiff"])
+        assertTranslated(formats.flatMap { ["enc.\($0).label", "enc.\($0).hint", "enc.\($0).detail"] }, in: catalogue)
+        assertTranslated(Self.exportStages.map { "export.stage.\($0)" }, in: catalogue)
+        assertTranslated(Self.unavailableReasons.flatMap { ["export.unavailable.short.\($0)", "export.unavailable.full.\($0) %@"] },
+                         in: catalogue)
+        // The option's own name and the card's are one word.
+        for id in formats {
+            for locale in ["en", "zh-Hans"] {
+                XCTAssertEqual(value(try XCTUnwrap(catalogue["choice.encoding.\(id)"]), locale),
+                               value(try XCTUnwrap(catalogue["enc.\(id).label"]), locale), "[\(locale)] \(id)")
+            }
+        }
+    }
+
     func testNoKeyUnderADynamicPrefixIsAnOrphan() throws {
         let catalogue = try catalogue()
         var orphans: [String] = []
@@ -76,6 +100,21 @@ final class LocalizationCoverageTests: XCTestCase {
                 }
             case "field":
                 if parts.count != 2 || !Self.captureFields.contains(parts[1]) { orphans.append(key) }
+            case "enc":
+                // enc.<id>.label | .hint | .detail (ids contain dashes, not dots)
+                guard parts.count == 3, EditChoices.byKey["encoding"]?.options.contains(where: { $0.id == parts[1] }) == true,
+                      ["label", "hint", "detail"].contains(parts[2]) else {
+                    orphans.append(key)
+                    continue
+                }
+            case "export" where parts.count > 1 && parts[1] == "stage":
+                if parts.count != 3 || !Self.exportStages.contains(parts[2]) { orphans.append(key) }
+            case "export" where parts.count > 1 && parts[1] == "unavailable":
+                // export.unavailable.short.<reason> | export.unavailable.full.<reason> %@
+                let reason = parts.last?.replacingOccurrences(of: " %@", with: "") ?? ""
+                if parts.count != 4 || !["short", "full"].contains(parts[2]) || !Self.unavailableReasons.contains(reason) {
+                    orphans.append(key)
+                }
             default:
                 break
             }

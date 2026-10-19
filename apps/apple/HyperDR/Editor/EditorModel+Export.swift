@@ -92,7 +92,11 @@ extension EditorModel {
                 if let destination { try await services.validateDestination(destination, expectedExtension: Self.fileExtension(snapshot.encoding)) }
                 try Task.checkCancellation()
                 let frame = try makeExportFrame()
-                let pixels = frameLayout.map { Double($0.width) * Double($0.height) } ?? 0
+                let exportSize: PixelSize?
+                if frame != nil {
+                    exportSize = frameLayout.map { PixelSize(width: $0.width, height: $0.height) }
+                } else { exportSize = document?.pixelSize }
+                let pixels = exportSize.map { Double($0.width) * Double($0.height) } ?? 0
                 export.durations = ExportETA.durations(history: timingHistory, kind: .init(isRAW: photo.formatLabel == "RAW",
                     encoding: snapshot.encoding, isAI: snapshot.aiMode == .optimized, hasFrame: framed, verifies: snapshot.verifies), pixels: pixels)
                 let ticket = try await services.startExport(photo, options: options, frame: frame, destination: destination)

@@ -487,3 +487,33 @@ extension ExportModelTests {
         XCTAssertEqual(m.export.result?.saved?.folderLabel, "beta")
     }
 }
+
+@MainActor extension ExportModelTests {
+    func testPreviewOnlyFrameMustNotInflateETA() async throws {
+        let (m,s)=await ready()
+        let size=try XCTUnwrap(m.document?.pixelSize)
+        let pixels=Double(size.width)*Double(size.height)
+        s.timings=[ExportTimingSample(kind:.init(isRAW:false,encoding:"adaptive",isAI:false,hasFrame:false,verifies:true),pixels:pixels,stages:[10,20,30,4])]
+        m.refreshExportMetadata();await eventually(timeout:.seconds(10)) { !m.timingHistory.isEmpty }
+        var f=m.frame;f.isEnabled=true;m.frame=f
+        await running(m,s)
+        XCTAssertNil(s.exportCalls.first?.frame)
+        XCTAssertEqual(try XCTUnwrap(m.export.durations)[0],10,accuracy:0.0001,"When frame export is disabled, ETA must use actual exported photo pixels")
+        m.cancelExport();await eventually(timeout:.seconds(10)) { !m.export.isInFlight }
+    }
+
+    func testEnabledFrameETAUsesTheActualExportCanvas() async throws {
+        let (m,s) = await ready(supportsFrameExport: true)
+        let size = try XCTUnwrap(m.document?.pixelSize)
+        let pixels = Double(size.width) * Double(size.height)
+        m.timingHistory = [.init(kind: .init(isRAW: false, encoding: "adaptive", isAI: false, hasFrame: true, verifies: true),
+            pixels: pixels, stages: [10,20,30,4])]
+        var frame = m.frame; frame.isEnabled = true; m.frame = frame
+        let layout = try XCTUnwrap(m.frameLayout)
+        await running(m,s)
+        XCTAssertNotNil(s.exportCalls.first?.frame)
+        XCTAssertEqual(try XCTUnwrap(m.export.durations)[0], 10 * Double(layout.width) * Double(layout.height) / pixels, accuracy: 0.0001)
+        m.cancelExport()
+        await eventually(timeout: .seconds(3)) { !m.export.isInFlight }
+    }
+}

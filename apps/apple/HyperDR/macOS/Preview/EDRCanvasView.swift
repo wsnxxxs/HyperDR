@@ -33,6 +33,13 @@ final class EDRCanvasView: NSView {
     var frameProvider: (() -> PreviewCanvasFrame?)?
     /// Called when a gesture changed the transform; the representable mirrors
     /// it into `CanvasModel` so overlays stay aligned.
+    /// Raw pointer events for the view layer's press-and-hold (§3.5): points in
+    /// this view, top-left origin. The canvas keeps its own pan and zoom.
+    var onPointerDown: ((CGPoint) -> Void)?
+    var onPointerDrag: ((CGPoint) -> Void)?
+    var onPointerUp: (() -> Void)?
+    /// The wheel or a pinch acted on the canvas.
+    var onZoomGesture: (() -> Void)?
     var onTransformChange: ((CanvasTransform) -> Void)?
     /// Called when the view itself knows the viewport size (layout, backing
     /// scale). Keeps `CanvasModel.imageFrame` alive without echoing the frame's
@@ -205,6 +212,7 @@ final class EDRCanvasView: NSView {
     /// Wheel zooms, anchored at the pointer, exactly like `view.js`.
     override func scrollWheel(with event: NSEvent) {
         guard allowsZoom else { return super.scrollWheel(with: event) }
+        onZoomGesture?()
         // Line-based wheels report small deltas; the Web editor scales those by
         // 16 (`deltaMode === 1`) so a notch feels the same as a trackpad slide.
         let delta = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.deltaY * 16
@@ -215,6 +223,7 @@ final class EDRCanvasView: NSView {
 
     override func magnify(with event: NSEvent) {
         guard allowsZoom else { return super.magnify(with: event) }
+        onZoomGesture?()
         applyZoom(transform.zoom * (1 + event.magnification),
                   anchor: convert(event.locationInWindow, from: nil))
     }
@@ -228,14 +237,16 @@ final class EDRCanvasView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        onPointerDown?(convert(event.locationInWindow, from: nil))
         guard allowsZoom, transform.zoom > CanvasTransform.minZoom else { return }
         dragOrigin = convert(event.locationInWindow, from: nil)
         NSCursor.closedHand.set()
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard let origin = dragOrigin else { return }
         let point = convert(event.locationInWindow, from: nil)
+        onPointerDrag?(point)
+        guard let origin = dragOrigin else { return }
         let next = transform.panned(by: CGSize(width: point.x - origin.x,
                                                height: point.y - origin.y))
         dragOrigin = point
@@ -245,6 +256,7 @@ final class EDRCanvasView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        onPointerUp?()
         guard dragOrigin != nil else { return }
         dragOrigin = nil
         NSCursor.openHand.set()

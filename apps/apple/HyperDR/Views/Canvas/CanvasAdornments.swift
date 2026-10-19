@@ -1,0 +1,101 @@
+import SwiftUI
+import HyperDRDesign
+
+/// What is drawn over the photograph besides the badge: the compare divider
+/// with its two labels, the "Original · release to return" label while the
+/// original is held, the legend that explains the overlay colours, and the
+/// hint at the foot. All of it is aligned to `canvas.imageFrame` and to the
+/// part of the photo that can be seen, so it stays on screen when zoomed in.
+///
+/// Only the divider takes the pointer; the rest lets it through to the canvas.
+struct CanvasAdornments: View {
+    let model: EditorModel
+    let hint: CanvasHintState
+    let showsInspector: Bool
+    /// The divider was grabbed or let go; the user is acting on the canvas.
+    var onSplitEditing: (Bool) -> Void = { _ in }
+
+    var body: some View {
+        GeometryReader { proxy in
+            if let image = model.canvas.imageFrame {
+                let visible = image.intersection(CGRect(origin: .zero, size: proxy.size))
+                if !visible.isNull, visible.width > 0, visible.height > 0 {
+                    adornments(image: image, visible: visible, canvasWidth: proxy.size.width)
+                }
+            }
+        }
+    }
+
+    // MARK: Layout
+
+    @ViewBuilder private func adornments(image: CGRect, visible: CGRect, canvasWidth: CGFloat) -> some View {
+        let peeking = model.isPeekingOriginal
+        let comparing = Self.showsSplit(viewMode: model.viewMode, isPeeking: peeking,
+                                        hasReference: model.hasReferenceFrame, hasEdited: model.hasEditedFrame)
+        let legend = Self.legendRows(maskLabelKey: model.maskKey.map { model.control($0).spec.labelKey },
+                                     highlightZebra: model.showsHighlightZebra,
+                                     shadowZebra: model.showsShadowZebra, showsInspector: showsInspector,
+                                     viewMode: model.viewMode, isPeeking: peeking)
+        ZStack {
+            if comparing {
+                SplitOverlay(ratio: model.splitRatio, imageFrame: image, visibleRect: visible,
+                             originalLabel: Text("editor.original"), editedLabel: Text("editor.effect"),
+                             showsHDRBadge: PhotoBadgeKind.hasHDR(domain: model.document?.source?.domain,
+                                                                  gainWeight: model.display.gainWeight),
+                             onDrag: { model.setSplitRatio($0) }, onEditingChanged: onSplitEditing,
+                             onNudge: { model.nudgeSplit(by: $0) })
+            }
+            if peeking {
+                Label("canvas.peeking", systemImage: "eye")
+                    .font(Font.hdr.caption)
+                    .hdrOverlayChip()
+                    .padding(.top, 12)
+                    .frame(width: visible.width, height: visible.height, alignment: .top)
+                    .position(x: visible.midX, y: visible.midY)
+                    .allowsHitTesting(false)
+            }
+            if !legend.isEmpty {
+                let dividerX = comparing ? SplitGeometry.dividerX(ratio: model.splitRatio, in: image) : visible.minX  // legend sits right of the divider
+                CanvasLegend(rows: legend)
+                    .padding(.leading, 12 + max(0, dividerX - visible.minX))
+                    .padding(.bottom, 12)
+                    .frame(width: visible.width, height: visible.height, alignment: .bottomLeading)
+                    .position(x: visible.midX, y: visible.midY)
+                    .allowsHitTesting(false)
+            }
+            if let key = hint.shown, legend.isEmpty {
+                CanvasHint(Text(LocalizedStringKey(key)))
+                    .frame(maxWidth: max(0, canvasWidth - 32))
+                    .padding(.bottom, 16)
+                    .frame(width: visible.width, height: visible.height, alignment: .bottom)
+                    .position(x: visible.midX, y: visible.midY)
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
+            }
+        }
+        .hdrAnimation(Motion.slow, value: hint.shown)
+    }
+
+    // MARK: Rules
+
+    /// The divider shows in compare mode when both renditions exist and the
+    /// original is not being held (that shows the original whole).
+    static func showsSplit(viewMode: ViewMode, isPeeking: Bool, hasReference: Bool, hasEdited: Bool) -> Bool {
+        viewMode == .compare && !isPeeking && hasReference && hasEdited
+    }
+
+    /// The legend's rows: the mask of the control being adjusted, and the
+    /// zebras only while the inspector, whose switches already say it, is
+    /// hidden. Nothing over the original, or while it is held.
+    static func legendRows(maskLabelKey: String?, highlightZebra: Bool, shadowZebra: Bool, showsInspector: Bool,
+                           viewMode: ViewMode, isPeeking: Bool) -> [CanvasLegendRow] {
+        guard viewMode != .original, !isPeeking else { return [] }
+        var rows: [CanvasLegendRow] = []
+        if !showsInspector {
+            if highlightZebra { rows.append(.highlightZebra) }
+            if shadowZebra { rows.append(.shadowZebra) }
+        }
+        if let maskLabelKey { rows.append(.mask(controlName: Text(LocalizedStringKey(maskLabelKey)))) }
+        return rows
+    }
+}

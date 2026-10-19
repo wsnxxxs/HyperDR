@@ -8,6 +8,7 @@ struct CanvasView: View {
     let model: EditorModel
     let window: EditorWindowState
     var padding: CGFloat
+    var showsInspector = true
 
     @State private var dropCoordinator = PhotoDropCoordinator()
 
@@ -27,7 +28,7 @@ struct CanvasView: View {
     }
 
     private var viewport: some View {
-        CanvasStage(model: model, window: window)
+        CanvasStage(model: model, window: window, showsInspector: showsInspector)
             .padding(Layout.canvasGutter)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.hdr.previewBackdrop, in: .rect(cornerRadius: Radius.lg))

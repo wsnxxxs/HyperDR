@@ -27,9 +27,11 @@ struct CameraSupportPanel: View {
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
             if canCancel {
-                Button("raw.preparing.cancel", action: cancel)
+                Button("open.cancel", action: cancel)
                     .buttonStyle(.hdrSecondary)
                     .keyboardShortcut(.cancelAction)
+                    .help(Text("open.cancel.help"))
+                    .accessibilityLabel(Text("open.cancel.a11y \(fileName)"))
                     .padding(.top, Space.s1)
             }
         }
@@ -65,9 +67,11 @@ struct CameraSupportCard: View {
             }
             Spacer(minLength: Space.s3)
             if canCancel {
-                Button("raw.preparing.cancel", action: cancel)
+                Button("open.cancel", action: cancel)
                     .buttonStyle(.hdrSecondary)
                     .keyboardShortcut(.cancelAction)
+                    .help(Text("open.cancel.help"))
+                    .accessibilityLabel(Text("open.cancel.a11y \(fileName)"))
             }
         }
         .padding(Space.s3)
@@ -82,7 +86,9 @@ struct CameraSupportCard: View {
 
 /// What VoiceOver says when the prompt appears and when it is cancelled.
 enum CameraSupportAnnouncement {
-    static func post(_ key: String, locale: Locale) {
-        AccessibilityNotification.Announcement(AppStrings.string(key, locale: locale)).post()
+    static func post(_ key: String, locale: Locale, _ arguments: CVarArg...) {
+        let text = arguments.isEmpty ? AppStrings.string(key, locale: locale)
+            : String(format: AppStrings.string(key, locale: locale), locale: locale, arguments: arguments)
+        AccessibilityNotification.Announcement(text).post()
     }
 }

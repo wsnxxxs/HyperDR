@@ -55,6 +55,7 @@ private struct EditorWindow: View {
     @State private var showsInspector = true
     @State private var windowWidth: CGFloat = 1440
     @State private var zoomKey = ZoomKeyMonitor()
+    @State private var openCancelKey = OpenCancelKeyMonitor()
     @Environment(\.locale) private var locale
 
     var body: some View {
@@ -115,9 +116,12 @@ private struct EditorWindow: View {
             .environment(ViewerSessionState.shared)
             // ⌘= zooms in while this window is key (M2-Q).
             .background(WindowReader { found in
-                if let found { zoomKey.install(window: found, canvas: model.canvas) } else { zoomKey.remove() }
+                if let found {
+                    zoomKey.install(window: found, canvas: model.canvas)
+                    openCancelKey.install(window: found, model: model)
+                } else { zoomKey.remove(); openCancelKey.remove() }
             })
-            .onDisappear { zoomKey.remove() }
+            .onDisappear { zoomKey.remove(); openCancelKey.remove() }
             #if DEBUG
             .task {
                 StressWindow.runIfRequested()

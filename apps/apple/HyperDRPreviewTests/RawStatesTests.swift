@@ -165,6 +165,23 @@ import HyperDRDesign
         ZStack { Color.hdr.previewBackdrop; content }.frame(width: 640, height: 400)
     }
 
+    func testTheSlowOpenSnapshots() throws {
+        // Without a photograph: the stage text, the name, Cancel (raw-states §9.2).
+        try snapshots("slow-open-panel", size: CGSize(width: 640, height: 400), distinct: 2) {
+            backdrop(FirstFrameProgress(label: "stage.reading", slowFileName: "A_very_long_file_name_from_a_slow_disk_0001.JPG", cancel: {}))
+        }
+        // Over an earlier photograph: the corner chip with Cancel after its text.
+        try snapshots("slow-open-chip", size: CGSize(width: 640, height: 400), distinct: 2) {
+            backdrop(SlowOpenChip(label: "stage.reading", fileName: "IMG_0001.JPG", cancel: {})
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing).padding(Space.s3))
+        }
+        // Before 1.5 s there is neither the name nor Cancel.
+        let quick = try render(backdrop(FirstFrameProgress(label: "stage.reading")), scheme: .dark, locale: "en", size: CGSize(width: 640, height: 400))
+        let slow = try render(backdrop(FirstFrameProgress(label: "stage.reading", slowFileName: "IMG_0001.JPG", cancel: {})), scheme: .dark, locale: "en",
+                              size: CGSize(width: 640, height: 400))
+        XCTAssertNotEqual(quick.representation(using: .png, properties: [:]), slow.representation(using: .png, properties: [:]))
+    }
+
     func testThePreparingPanelAndCardSnapshots() throws {
         // Over the photograph the prompt is dark in both appearances: only the language differs.
         try snapshots("preparing-panel", size: CGSize(width: 640, height: 400), distinct: 2) {

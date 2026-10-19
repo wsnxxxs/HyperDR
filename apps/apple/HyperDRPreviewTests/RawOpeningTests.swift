@@ -123,7 +123,7 @@ import XCTest
         clock.advance(to: .seconds(3))
         // A due second RAW deadline is an explicit drain barrier for the first.
         model.open([next])
-        await eventually(timeout: .seconds(3)) { clock.deadlines.count == 2 && clock.resumed == 1 }
+        await eventually(timeout: .seconds(3)) { clock.deadlines.count == 3 && clock.resumed == 2 }
         XCTAssertEqual(model.document?.isPreparingCameraSupport, false)
         await eventually(timeout: .seconds(3)) { services.streams[self.next] != nil }
         model.cancelOpen()
@@ -148,8 +148,9 @@ import XCTest
         model.open([jpeg])
         await eventually(timeout: .seconds(3)) { services.streams[self.jpeg] != nil }
         clock.advance(to: .seconds(10))
-        XCTAssertEqual(clock.deadlines.count, 1, "Non-RAW opens do not even schedule the notice")
-        XCTAssertEqual(model.document?.isPreparingCameraSupport, false)
+        XCTAssertEqual(clock.deadlines.count, 2, "A non-RAW open shares the 1.5 s deadline")
+        await eventually(timeout: .seconds(3)) { model.document?.isOpeningSlowly == true }
+        XCTAssertEqual(model.document?.isPreparingCameraSupport, false, "…but it is never 'camera support'")
         model.cancelOpen()
     }
 
@@ -219,7 +220,7 @@ import XCTest
         services.restoreWaiter = nil
         await eventually(timeout: .seconds(3)) { services.closed.contains { $0.url == self.raw } }
         clock.advance(to: .seconds(2))
-        await eventually(timeout: .seconds(3)) { clock.resumed == 1 }
+        await eventually(timeout: .seconds(3)) { clock.resumed == 2 }
         XCTAssertEqual(model.document, current)
         XCTAssertFalse(model.canCancelOpen)
         XCTAssertFalse(model.isRestoring)

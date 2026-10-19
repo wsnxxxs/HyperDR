@@ -145,7 +145,7 @@ import HyperDRKit
     }
 
     func testTheMissingNoteWithoutANameIsTheUnnamedSentence() {
-        let note = RestoreMissingNotice(name: nil) {}
-        XCTAssertEqual(note.title, "Can’t find your last photo")
+        XCTAssertEqual(RestoreMissingNotice.title(name: nil, locale: Locale(identifier: "en")), "Can’t find your last photo")
+        XCTAssertEqual(RestoreMissingNotice.title(name: "", locale: Locale(identifier: "en")), "Can’t find your last photo")
     }
 }

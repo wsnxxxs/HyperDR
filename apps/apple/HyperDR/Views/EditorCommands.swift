@@ -32,6 +32,7 @@ struct EditorCommands: Commands {
             Button { StressWindow.shared.show() } label: { Text(verbatim: "Inspector Stress (S12)") }
             Button { ControlsGalleryWindow.shared.show() } label: { Text(verbatim: "Inspector Controls") }
             Button { M2ComponentsGalleryWindow.shared.show() } label: { Text(verbatim: "Inspector, Scope and Canvas Components") }
+            Button { M3ComponentsGalleryWindow.shared.show() } label: { Text(verbatim: "Export, History and LUT Components") }
         }
         #endif
     }

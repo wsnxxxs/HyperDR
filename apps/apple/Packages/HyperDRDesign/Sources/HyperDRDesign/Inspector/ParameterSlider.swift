@@ -36,7 +36,8 @@ public struct ParameterMaskLink {
 ///   focusing the readout or dragging asks for the mask on the photograph.
 /// - VoiceOver sees a system slider with the formatted value, the
 ///   increment/decrement actions, Reset to Default and, when the control
-///   has one, Set to Auto.
+///   has one, Set to Auto. The control's `help` is the slider's hint: the
+///   tooltip is all the pointer gets, and VoiceOver users never see it.
 ///
 /// Bind one value per control (S12): the row reads nothing else, so a change
 /// redraws only this row. With the M2 contract (batch 3 §3.4), the value is
@@ -93,7 +94,7 @@ public struct ParameterSlider: View {
                 }
             }
             .frame(minHeight: 22)
-            ParameterTrack(title: title, value: $value, spec: spec, onReset: onReset) { editing in
+            ParameterTrack(title: title, value: $value, spec: spec, help: help, onReset: onReset) { editing in
                 hold(.drag, editing)
                 onEditingChanged(editing)
             }
@@ -272,6 +273,15 @@ private struct ParameterReadout: View {
     }
 }
 
+/// `.accessibilityHint` for a hint that may not be there.
+private struct OptionalHint: ViewModifier {
+    let text: Text?
+
+    func body(content: Content) -> some View {
+        if let text { content.accessibilityHint(text) } else { content }
+    }
+}
+
 /// `.help` for a tooltip that may not be there.
 private struct OptionalHelp: ViewModifier {
     let text: Text?
@@ -290,6 +300,9 @@ private struct ParameterTrack: View {
     let title: LocalizedStringKey
     @Binding var value: Double
     let spec: ParameterSpec
+    /// What the parameter does: the title's tooltip for the pointer, and the
+    /// slider's hint for VoiceOver (J-08).
+    let help: LocalizedStringKey?
     let onReset: (() -> Void)?
     let onEditingChanged: (Bool) -> Void
 
@@ -386,6 +399,7 @@ private struct ParameterTrack: View {
                                   set: { new in set(spec.isAutomatic(value) ? spec.resumeValue : spec.snapped(new)) }),
                    in: spec.range, step: spec.step) { Text(title) }
                 .accessibilityValue(Text(verbatim: spec.formatted(value, locale: locale)))
+                .modifier(OptionalHint(text: help.map { Text($0) }))
                 .accessibilityAction(named: Text("design.slider.reset", bundle: .module)) { reset() }
                 .accessibilityActions {
                     if let automatic = spec.automatic {

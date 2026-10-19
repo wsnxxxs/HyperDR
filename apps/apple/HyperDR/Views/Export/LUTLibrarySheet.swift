@@ -89,7 +89,11 @@ struct LUTLibrarySheet: View {
                 if let importedCount, importedCount > 0 {
                     Text("lut.library.importResult \(importedCount.formatted(.number.locale(locale)))")
                 }
-                ForEach(model.lut.failures) { Text(verbatim: ErrorText($0).body(locale: locale)) }
+                ForEach(model.lut.failures) { failure in
+                    let body = ErrorText(failure).body(locale: locale)
+                    // The model keeps the file name, and only the name, in `detail`.
+                    Text(verbatim: failure.detail.map { AppStrings.format("lut.library.failure %@ %@", locale: locale, $0, body) } ?? body)
+                }
             }
             .font(Font.hdr.caption).foregroundStyle(Color.hdr.ink)
             .padding(Space.s2)
@@ -117,6 +121,7 @@ struct LUTLibrarySheet: View {
                 LazyVStack(spacing: 0) {
                     ForEach(matches) { item in
                         LUTLibraryRow(name: item.name, spaces: Text(verbatim: LUTSpaces.string(item, locale: locale)),
+                                      size: item.byteCount.formatted(.byteCount(style: .file).locale(locale)),
                                       isInUse: model.lut.selection?.id == item.id,
                                       onSpaces: { spacesFor = item.id }, onRemove: { removing = item })
                             .popover(isPresented: Binding(get: { spacesFor == item.id },

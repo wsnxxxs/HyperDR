@@ -6194,13 +6194,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "HDR expansion range lowered to %2$@, the %1$@ limit."
+            "value" : "HDR expansion range lowered to %2$@ stops, the %1$@ limit."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "HDR 扩展范围已按 %1$@ 上限调整为 %2$@。"
+            "value" : "HDR 扩展范围已按 %1$@ 上限调整为 %2$@ 档。"
           }
         }
       }
@@ -9465,6 +9465,57 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "解码器 %@ · macOS 构建 %@"
+          }
+        }
+      }
+    },
+    "settings.openInFinder" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open in Finder"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在访达中打开"
+          }
+        }
+      }
+    },
+    "settings.diag.engine" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Engine interface"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "引擎接口"
+          }
+        }
+      }
+    },
+    "lut.library.failure %@ %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@: %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@：%2$@"
           }
         }
       }

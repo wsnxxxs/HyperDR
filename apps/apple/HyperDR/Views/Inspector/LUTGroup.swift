@@ -147,11 +147,14 @@ struct LUTSpacesPopover: View {
                 Text("lut.space.note")
                     .font(Font.hdr.caption).foregroundStyle(Color.hdr.inkMuted)
                     .fixedSize(horizontal: false, vertical: true)
+                // A setter reads the model's expected spaces when it runs, not the
+                // ones this body saw, so two quick changes keep both choices.
                 row("lut.space.input", selection: Binding(get: { item.input }, set: { newInput in
                     if model.lut.selection?.id == id { model.setLUTInput(newInput) }
                     else {
+                        let live = self.item ?? item
                         model.setLibraryLUTSpaces(id, input: newInput,
-                                                  output: newInput == .slog3SGamut3Cine ? .rec709 : item.output)
+                                                  output: newInput == .slog3SGamut3Cine ? .rec709 : live.output)
                     }
                 })) { space in
                     let name = AppStrings.string("choice.lutInput.\(space.rawValue)", locale: locale)
@@ -159,7 +162,7 @@ struct LUTSpacesPopover: View {
                                 ? name + " · " + AppStrings.string("lut.space.rawOnly", locale: locale) : name)
                 }
                 row("lut.space.output", selection: Binding(get: { item.output }, set: {
-                    model.setLibraryLUTSpaces(id, input: item.input, output: $0)
+                    model.setLibraryLUTSpaces(id, input: (self.item ?? item).input, output: $0)
                 })) { Text(verbatim: AppStrings.string("choice.lutOutput.\($0.rawValue)", locale: locale)) }
             }
             .padding(Space.s4)

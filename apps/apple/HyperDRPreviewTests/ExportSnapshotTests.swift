@@ -16,6 +16,10 @@ import HyperDRDesign
         ("light-en", .light, "en"), ("dark-en", .dark, "en"),
         ("light-zh-Hans", .light, "zh-Hans"), ("dark-zh-Hans", .dark, "zh-Hans"),
     ]
+    /// The editor's clock: fixed, and moved by the test, so every picture of a
+    /// running export shows the same elapsed time and the same percentage.
+    private final class Clock { var now = Date(timeIntervalSinceReferenceDate: 810_000_000) }
+    private let clock = Clock()
     private let source = URL(fileURLWithPath: "/fixtures/DSC04127.jpg")
     private let target = URL(fileURLWithPath: "/fixtures/out/DSC04127.heic")
 
@@ -43,7 +47,8 @@ import HyperDRDesign
                             LUTItem(id: "b", name: "Fuji Classic Neg", input: .rec709, output: .p3),
                             LUTItem(id: "c", name: "Cinema Teal", input: .slog3SGamut3Cine, output: .rec709)]
         services.folder = ExportFolder(label: "…/Pictures", ready: true)
-        let model = EditorModel(services: services, ticker: ManualFrameTicker())
+        let clock = clock
+        let model = EditorModel(services: services, ticker: ManualFrameTicker(), now: { clock.now })
         await model.loadExportServices()
         model.open([source])
         await eventually(timeout: .seconds(10)) { model.document?.phase == .ready && !model.suggestedFileName.isEmpty }
@@ -55,12 +60,20 @@ import HyperDRDesign
         await eventually(timeout: .seconds(10)) { services.hasExportSubscriber }
     }
 
+    /// Fourteen seconds into an export that is encoding, 72% through that stage.
+    private func runForFourteenSeconds(_ services: FakeEditorServices, _ model: EditorModel) async throws {
+        clock.now += 14
+        services.sendExport(.progress(stage: "encode", fraction: 0.72, at: clock.now.addingTimeInterval(-3)))
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(model.export.stage, "encode")
+    }
+
     /// What the engine does when an export finishes: the version enters the
     /// history under the key of the edit that was exported.
     private func finish(_ model: EditorModel, _ services: FakeEditorServices, result: ExportResult, failure: UserFacingError? = nil) async throws {
         let key = try await services.exportKey(model.photo!, options: model.effectiveOptions(), frame: nil)
         services.historyByURL[source] = [ExportHistoryItem(
-            version: ExportVersion(number: 1, createdAt: Date(), encodingID: "adaptive", result: result), key: key, options: model.edit)]
+            version: ExportVersion(number: 1, createdAt: clock.now, encodingID: "adaptive", result: result), key: key, options: model.edit)]
         services.sendExport(.finished(result: result, failure: failure))
         await eventually(timeout: .seconds(10)) { model.export.phase == .succeeded }
         model.refreshExportMetadata()
@@ -166,7 +179,7 @@ import HyperDRDesign
     func testProgressView() async throws {
         let (model, services) = await ready()
         await start(model, services)
-        services.sendExport(.progress(stage: "encode", fraction: 0.72, at: Date().addingTimeInterval(-3)))
+        try await runForFourteenSeconds(services, model)
         services.sendExport(.log("encode tile 4/12"))
         await eventually(timeout: .seconds(10)) { model.export.lastLine != nil }
         XCTAssertEqual(ExportPresentation.PanelMode(phase: model.export.phase), .progress)
@@ -176,9 +189,9 @@ import HyperDRDesign
     func testProgressViewWithoutAnEstimateOnAFirstExport() async throws {
         let (model, services) = await ready(timings: false)
         await start(model, services)
-        services.sendExport(.progress(stage: "decode", fraction: 0, at: Date()))
+        services.sendExport(.progress(stage: "decode", fraction: 0, at: clock.now))
         try await Task.sleep(for: .milliseconds(50))
-        XCTAssertNil(model.export.estimate(at: Date()))
+        XCTAssertNil(model.export.estimate(at: clock.now))
         try snapshots("export-progress-first", minimumHeight: 260) { ExportSheet(model: model, window: EditorWindowState()) }
     }
 
@@ -200,6 +213,37 @@ import HyperDRDesign
         try await finish(second, secondServices, result: finishedResult(saved: false), failure: UserFacingError(code: "export_folder_unwritable"))
         XCTAssertNotNil(second.export.saveFailure)
         try snapshots("result-save-failed", minimumHeight: 300) { ExportSheet(model: second, window: EditorWindowState()) }
+    }
+
+    func testTheEndedCardSaysWhenItIsAnEarlierEdit() async throws {
+        let (model, services) = await ready()
+        await start(model, services)
+        try await finish(model, services, result: finishedResult())
+        let window = EditorWindowState()
+        let current = try render(ExportStatusHost(model: model, window: window), scheme: .light, locale: "en")
+        model.adjust("brightness", to: 1.2)
+        await eventually(timeout: .seconds(10)) { model.export.isResultStale }
+        let earlier = try render(ExportStatusHost(model: model, window: window), scheme: .light, locale: "en")
+        XCTAssertNotEqual(current.representation(using: .png, properties: [:]), earlier.representation(using: .png, properties: [:]),
+                          "an edit made after the export shows on the card")
+        XCTAssertGreaterThan(earlier.pixelsHigh, current.pixelsHigh, "the tag takes a row")
+    }
+
+    func testReopeningAfterDismissingShowsTheResultThatStillMatches() async throws {
+        let (model, services) = await ready()
+        await start(model, services)
+        try await finish(model, services, result: finishedResult())
+        model.export.dismissOutcome()
+        func mode(_ wantsSettings: Bool = false) -> ExportPresentation.PanelMode {
+            .init(phase: model.export.phase, hasMatchingResult: model.export.result != nil && !model.export.isResultStale,
+                  wantsSettings: wantsSettings)
+        }
+        XCTAssertEqual(model.export.phase, .idle)
+        XCTAssertEqual(mode(), .result, "the result is still the current edit's")
+        XCTAssertEqual(mode(true), .settings, "Export Again still goes to the settings")
+        model.adjust("brightness", to: 1.2)
+        await eventually(timeout: .seconds(10)) { model.export.isResultStale }
+        XCTAssertEqual(mode(), .settings, "an earlier edit's result is not offered again")
     }
 
     func testFailurePanel() async throws {
@@ -224,8 +268,7 @@ import HyperDRDesign
     func testLockedInspectorWhileExporting() async throws {
         let (model, services) = await ready()
         await start(model, services)
-        services.sendExport(.progress(stage: "encode", fraction: 0.72, at: Date().addingTimeInterval(-3)))
-        try await Task.sleep(for: .milliseconds(50))
+        try await runForFourteenSeconds(services, model)
         XCTAssertEqual(model.editingLockReason, .exporting)
         let window = EditorWindowState()
         try snapshots("locked", minimumHeight: 700) { inspector(model, window) }
@@ -268,7 +311,7 @@ import HyperDRDesign
     func testHistorySheet() async throws {
         let (model, services) = await ready()
         let first = try await services.exportKey(model.photo!, options: model.effectiveOptions(), frame: nil)
-        let now = Date()
+        let now = clock.now
         func item(_ n: Int, key: String, saved: Bool, model name: String?) -> ExportHistoryItem {
             var result = finishedResult(saved: saved); result.export = "v\(n)"; result.fileName = "DSC04127-\(n).heic"
             return ExportHistoryItem(version: ExportVersion(number: n, createdAt: now.addingTimeInterval(Double(-n) * 3600),

@@ -29,15 +29,16 @@ import UniformTypeIdentifiers
 /// does not reach the model, so it can make no job and no version.
 @MainActor enum ExportFlow {
     static func begin(model: EditorModel, choosePlace: ExportSavePanel.Chooser) {
-        model.syncExportState()
-        guard model.export.blockerKey == nil else { return }
+        // The model hands out one token for the photo and edits as they are
+        // now; a panel answered after the photo changed gets nothing started.
+        guard let token = model.prepareExport() else { return }
         if model.preferences.value.saveMode == .folder {
-            model.startExport(destination: nil)
+            model.startExport(destination: nil, token: token)
             return
         }
         choosePlace(model.suggestedFileName, model.exportContentType) { url in
             guard let url else { return }
-            model.startExport(destination: url)
+            model.startExport(destination: url, token: token)
         }
     }
 

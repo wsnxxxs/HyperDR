@@ -94,6 +94,8 @@ private struct ExportSettings: View {
                     HStack {
                         folderLabel.foregroundStyle(Color.hdr.inkMuted)
                         Button("settings.change") { isPickingFolder = true }
+                        Button("settings.openInFinder") { Task { await model.revealExportFolder() } }
+                            .disabled(!model.preferences.exportFolder.ready)
                     }
                 }
                 Text("settings.folderNote").font(Font.hdr.caption).foregroundStyle(Color.hdr.inkMuted)
@@ -124,7 +126,7 @@ private struct AboutSettings: View {
                     Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 48, height: 48)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(verbatim: "HyperDR").font(Font.hdr.heading)
-                        Text("settings.version \(Self.version) \(Self.build)")
+                        Text("settings.version \(model.aboutInformation.version) \(model.aboutInformation.buildNumber)")
                             .font(Font.hdr.caption).foregroundStyle(Color.hdr.inkMuted)
                     }
                 }
@@ -161,9 +163,6 @@ private struct AboutSettings: View {
         }
     }
 
-    static var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "" }
-    static var build: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "" }
-
     /// The read-only rows: the AI models, HEVC encoding, this display, what
     /// the app opens and the system.
     private var rows: [(key: String, value: String)] {
@@ -174,6 +173,7 @@ private struct AboutSettings: View {
         // Only while a RAW is open: the decoder and system build that developed it.
         if let raw = SettingsDiagnostics.raw(model, locale: locale) { rows.append(("settings.diag.raw", raw)) }
         rows.append(("settings.diag.system", SettingsDiagnostics.system()))
+        if let abi = model.aboutInformation.engineABI { rows.append(("settings.diag.engine", String(abi))) }
         return rows
     }
 }
@@ -202,10 +202,12 @@ enum SettingsDiagnostics {
                                         log2(display.potentialHeadroom).formatted(number))
     }
 
-    /// "Decoder 8 · macOS build 25A123" from the open RAW's own report; nothing without one.
+    /// "Decoder 8 · macOS build 25A123" from the open RAW's own report. Nothing
+    /// without one: the model leaves both nil rather than guess.
     static func raw(_ model: EditorModel, locale: Locale) -> String? {
-        guard let raw = model.document?.source?.raw else { return nil }
-        return AppStrings.format("settings.diag.rawValue %@ %@", locale: locale, raw.decoderVersion, raw.osBuild)
+        let about = model.aboutInformation
+        guard let decoder = about.decoderVersion, let build = about.osBuild else { return nil }
+        return AppStrings.format("settings.diag.rawValue %@ %@", locale: locale, decoder, build)
     }
 
     /// "macOS 27.0.1": the version only, without the build number.

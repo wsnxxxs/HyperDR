@@ -11,17 +11,23 @@ struct ExportSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var sheetWindow: NSWindow?
+    /// "Export Again" on a result: the settings, even though the result still matches.
+    @State private var wantsSettings = false
 
     var body: some View {
-        let mode = ExportPresentation.PanelMode(phase: model.export.phase)
+        let mode = ExportPresentation.PanelMode(
+            phase: model.export.phase,
+            hasMatchingResult: model.export.result != nil && !model.export.isResultStale,
+            wantsSettings: wantsSettings)
         Group {
             switch mode {
             case .settings: ExportSettingsView(model: model, close: close, begin: begin)
             case .progress: ExportProgressView(model: model, close: close)
-            case .result: ExportResultView(model: model, close: closeAndClear, begin: begin, again: model.export.dismissOutcome)
-            case .failure: ExportFailureView(model: model, close: closeAndClear, again: model.export.dismissOutcome)
+            case .result: ExportResultView(model: model, close: closeAndClear, begin: begin, again: again)
+            case .failure: ExportFailureView(model: model, close: closeAndClear, again: again)
             }
         }
+        .onChange(of: model.export.isInFlight) { _, running in if running { wantsSettings = false } }
         .frame(width: mode.width)
         .background(Color.hdr.surfacePanel)
         .background(WindowReader { sheetWindow = $0 })
@@ -35,6 +41,11 @@ struct ExportSheet: View {
     private func closeAndClear() {
         model.export.dismissOutcome()
         dismiss()
+    }
+
+    private func again() {
+        wantsSettings = true
+        model.export.dismissOutcome()
     }
 
     private func begin() {
@@ -255,8 +266,8 @@ private struct ExportProgressView: View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: Space.s4) {
                 header
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    let estimate = model.export.estimate(at: context.date)
+                TimelineView(.periodic(from: .now, by: 1)) { _ in
+                    let estimate = model.export.estimate(at: model.now())
                     let parts = ExportPresentation.statusParts(phase: model.export.phase, stage: model.export.stage,
                                                               workflow: model.workflow, estimate: estimate)
                     VStack(alignment: .leading, spacing: Space.s3) {
@@ -264,7 +275,7 @@ private struct ExportProgressView: View {
                         ExportProgressBar(progress: ExportPresentation.progressStyle(isStopping: model.export.isStopping,
                                                                                     estimate: estimate), height: 8)
                         Text(verbatim: ExportPresentation.statusLine(
-                            parts, elapsed: model.export.startedAt.map { context.date.timeIntervalSince($0) } ?? 0,
+                            parts, elapsed: model.export.startedAt.map { model.now().timeIntervalSince($0) } ?? 0,
                             locale: locale))
                             .font(Font.hdr.caption).foregroundStyle(Color.hdr.inkMuted)
                     }

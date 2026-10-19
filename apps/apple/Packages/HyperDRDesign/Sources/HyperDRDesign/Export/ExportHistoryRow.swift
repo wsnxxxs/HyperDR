@@ -28,6 +28,8 @@ public struct RowAction {
 /// the file, tags ("Matches current", "Saved"), a line about how it was
 /// made, a note when the engine fell back, and what can be done with it:
 /// restore its settings (`primary`) and show or save the file (`secondary`).
+/// The left block (picture and text) can be a drag source and the secondary
+/// line can carry one more control (share), both supplied by the app.
 public struct ExportHistoryRow: View {
     private let thumbnail: ThumbnailContent
     private let number: Int?
@@ -37,9 +39,19 @@ public struct ExportHistoryRow: View {
     private let note: Text?
     private let primary: RowAction?
     private let secondary: RowAction
+    private let extraNote: Text?
+    private let dragSource: ((AnyView) -> AnyView)?
+    private let trailingAccessory: AnyView?
 
+    /// `extraNote` is a second warning under `note` (the fallback reason comes
+    /// first). `dragSource` wraps the left block to make it draggable;
+    /// `trailingAccessory` sits right of the secondary action.
     public init(thumbnail: ThumbnailContent, number: Int?, fileName: String, tags: [HDRTag] = [], meta: Text, note: Text? = nil,
-                primary: RowAction?, secondary: RowAction) {
+                extraNote: Text? = nil, primary: RowAction?, secondary: RowAction,
+                dragSource: ((AnyView) -> AnyView)? = nil, trailingAccessory: AnyView? = nil) {
+        self.extraNote = extraNote
+        self.dragSource = dragSource
+        self.trailingAccessory = trailingAccessory
         self.thumbnail = thumbnail
         self.number = number
         self.fileName = fileName
@@ -51,6 +63,31 @@ public struct ExportHistoryRow: View {
     }
 
     public var body: some View {
+        HStack(alignment: .top, spacing: Space.s3) {
+            if let dragSource { dragSource(AnyView(leftBlock)) } else { leftBlock }
+            Spacer(minLength: Space.s2)
+            VStack(alignment: .trailing, spacing: 6) {
+                if let primary {
+                    Button(action: primary.action) { label(primary) }
+                        .buttonStyle(CompactButtonStyle(kind: .secondary))
+                        .disabled(!primary.isEnabled)
+                        .modifier(DisabledReason(reason: primary.reasonWhileOff))
+                }
+                HStack(spacing: Space.s2) {
+                    Button(action: secondary.action) { label(secondary) }
+                        .buttonStyle(CompactButtonStyle(kind: .link))
+                        .disabled(!secondary.isEnabled)
+                        .modifier(DisabledReason(reason: secondary.reasonWhileOff))
+                    if let trailingAccessory { trailingAccessory }
+                }
+            }
+        }
+        .padding(.vertical, Space.s3)
+        .accessibilityElement(children: .contain)
+    }
+
+    /// The picture, the name with its tags, and the lines under it.
+    private var leftBlock: some View {
         HStack(alignment: .top, spacing: Space.s3) {
             Thumbnail(thumbnail, width: 60, height: 40)
                 .overlay(alignment: .bottomLeading) {
@@ -73,23 +110,12 @@ public struct ExportHistoryRow: View {
                 if let note {
                     note.font(.hdr.caption).foregroundStyle(Color.hdr.warn).fixedSize(horizontal: false, vertical: true)
                 }
-            }
-            Spacer(minLength: Space.s2)
-            VStack(alignment: .trailing, spacing: 6) {
-                if let primary {
-                    Button(action: primary.action) { label(primary) }
-                        .buttonStyle(CompactButtonStyle(kind: .secondary))
-                        .disabled(!primary.isEnabled)
-                        .modifier(DisabledReason(reason: primary.reasonWhileOff))
+                if let extraNote {
+                    extraNote.font(.hdr.caption).foregroundStyle(Color.hdr.warn).fixedSize(horizontal: false, vertical: true)
                 }
-                Button(action: secondary.action) { label(secondary) }
-                    .buttonStyle(CompactButtonStyle(kind: .link))
-                    .disabled(!secondary.isEnabled)
-                    .modifier(DisabledReason(reason: secondary.reasonWhileOff))
             }
         }
-        .padding(.vertical, Space.s3)
-        .accessibilityElement(children: .contain)
+        .contentShape(Rectangle())
     }
 
     @ViewBuilder private func label(_ action: RowAction) -> some View {

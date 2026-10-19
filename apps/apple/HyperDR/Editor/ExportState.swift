@@ -52,6 +52,9 @@ nonisolated struct ExportVersion: Identifiable, Equatable, Sendable {
     var fallbackReason: ExportFallbackReason? = nil
     var hasFrame = false
     var matchesCurrent = false
+    /// The retained file can be read; when it cannot, the version can still be
+    /// restored but not dragged, shared or saved again.
+    var fileAvailable = true
     var result: ExportResult
     var fileName: String { result.fileName }
     var byteCount: Int64 { result.byteCount }
@@ -150,6 +153,8 @@ nonisolated extension Duration {
     var lastLine: String?
     var failure: UserFacingError?
     var saveFailure: UserFacingError?
+    /// Why the last drag or share of a version could not hand its file over.
+    var transferFailure: TransferFailure?
     var result: ExportResult?
     var isResultStale = false
     var blockerKey: String?
@@ -194,9 +199,14 @@ nonisolated extension Duration {
     func reset() {
         thumbnail = .loading
         phase = .idle; startedAt = nil; stage = nil; fraction = nil; lastLine = nil
-        failure = nil; saveFailure = nil; result = nil; isResultStale = false
+        failure = nil; saveFailure = nil; transferFailure = nil; result = nil; isResultStale = false
         destination = nil; isStopping = false; isStoppingToQuit = false; durations = nil; fractionFloor = 0; fractionAt = nil; stageAt = nil
     }
+}
+nonisolated struct TransferFailure: Equatable {
+    var version: String
+    var fileName: String
+    var error: UserFacingError
 }
 nonisolated struct PhotoSwitchRequest: Equatable {
     enum Kind: Equatable { case open(URL), close }

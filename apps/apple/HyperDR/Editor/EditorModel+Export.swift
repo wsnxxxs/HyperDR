@@ -447,7 +447,16 @@ extension EditorModel {
         }
     }
     private var diagnosticHeader: String {
-        preferences.diagnostics + rawDiagnostics + "\nDisplay: " + display.screenName
+        // The rows of the About page, in English so that a report reads the same everywhere.
+        let english = Locale(identifier: "en")
+        let budget = SettingsDiagnostics.memoryBudget(self, locale: english).map { "\nExport memory limit: " + $0 } ?? ""
+        return preferences.diagnostics + rawDiagnostics
+            + "\nEngine: " + SettingsDiagnostics.engine(self, locale: english)
+            + "\nModels: " + SettingsDiagnostics.models(self, locale: english)
+            + budget
+            + "\nMachine: " + SettingsDiagnostics.machine(locale: english)
+            + "\nDisplay: " + display.screenName
+            + "\nHDR preview: " + SettingsDiagnostics.previewState(display).rawValue
             + "\nHeadroom: \(display.currentHeadroom) / \(display.potentialHeadroom)"
             + "\nInputs: " + openableContentTypes.map(\.identifier).joined(separator: ", ")
     }

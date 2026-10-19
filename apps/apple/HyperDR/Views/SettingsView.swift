@@ -163,28 +163,71 @@ struct AboutSettings: View {
         }
     }
 
-    /// The read-only rows: the AI models, HEVC encoding, this display, what
-    /// the app opens and the system.
+    /// The read-only rows: the engine, the AI models, HEVC encoding, the export
+    /// memory limit, this display and its HDR preview, what the app opens and
+    /// this Mac.
     private var rows: [(key: String, value: String)] {
-        var rows = [("settings.diag.model", SettingsDiagnostics.models(model, locale: locale)),
-                    ("settings.diag.hevc", SettingsDiagnostics.hevc(model, locale: locale)),
-                    ("settings.diag.display", SettingsDiagnostics.display(model.display, locale: locale)),
-                    ("settings.diag.opens", SettingsDiagnostics.opens(model))]
+        var rows = [("settings.diag.engine", SettingsDiagnostics.engine(model, locale: locale)),
+                    ("settings.diag.model", SettingsDiagnostics.models(model, locale: locale)),
+                    ("settings.diag.hevc", SettingsDiagnostics.hevc(model, locale: locale))]
+        if let budget = SettingsDiagnostics.memoryBudget(model, locale: locale) { rows.append(("settings.diag.memory", budget)) }
+        rows += [("settings.diag.display", SettingsDiagnostics.display(model.display, locale: locale)),
+                 ("settings.diag.preview", SettingsDiagnostics.preview(model.display, locale: locale))]
         // Only while a RAW is open: the decoder and system build that developed it.
         if let raw = SettingsDiagnostics.raw(model, locale: locale) { rows.append(("settings.diag.raw", raw)) }
-        rows.append(("settings.diag.system", SettingsDiagnostics.system()))
-        if let abi = model.aboutInformation.engineABI { rows.append(("settings.diag.engine", String(abi))) }
+        rows += [("settings.diag.opens", SettingsDiagnostics.opens(model)),
+                 ("settings.diag.machine", SettingsDiagnostics.machine(locale: locale))]
         return rows
     }
 }
 
 /// The About page's diagnostic values as plain strings.
 enum SettingsDiagnostics {
+    /// "Ready · version 1.0 · interface 3", or why the engine is not.
+    static func engine(_ model: EditorModel, locale: Locale) -> String {
+        switch model.engine {
+        case .starting: return AppStrings.string("settings.diag.engine.starting", locale: locale)
+        case .failed(let error):
+            return AppStrings.format("settings.diag.engine.failed %@", locale: locale, ErrorText(error).title(locale: locale))
+        case .ready(let version):
+            return AppStrings.format("settings.diag.engine.ready %@ %@", locale: locale, version,
+                                     model.aboutInformation.engineABI.map { String($0) } ?? "—")
+        }
+    }
+
+    /// The models this build can run, each with the version the engine reports;
+    /// why none can run when the runtime is missing; "None" when it is there
+    /// but offers nothing.
     static func models(_ model: EditorModel, locale: Locale) -> String {
-        let names = model.ai.models.filter(\.isEnabled).map { AppStrings.string($0.nameKey, locale: locale) }
+        let table = model.services.modelTable()
+        guard table.runtimeReady else { return AppStrings.string("settings.diag.model.noRuntime", locale: locale) }
+        let names = table.models.filter(\.isEnabled).map { choice in
+            let name = AppStrings.string(choice.nameKey, locale: locale)
+            guard let version = shortVersion(choice.version) else { return name }
+            return AppStrings.format("settings.diag.model.version %@ %@", locale: locale, name, version)
+        }
         // No model enabled: say so, rather than leave an empty (and taller) row.
         guard !names.isEmpty else { return AppStrings.string("export.summary.none", locale: locale) }
         return names.formatted(.list(type: .and, width: .narrow).locale(locale))
+    }
+
+    /// "v1" from the engine's "research-demo-fold0-seed908/v1": the part after
+    /// the last slash; the whole string when there is none. The full version is
+    /// in the copied diagnostics.
+    static func shortVersion(_ version: String?) -> String? {
+        guard let version, !version.isEmpty else { return nil }
+        let last = version.split(separator: "/").last.map(String.init) ?? version
+        return last.isEmpty ? version : last
+    }
+
+    /// "12 GB": the engine's export memory budget; nil when it reports none.
+    static func memoryBudget(_ model: EditorModel, locale: Locale) -> String? {
+        guard let bytes = model.aboutInformation.memoryBudgetBytes, bytes > 0 else { return nil }
+        return memory(bytes, locale: locale)
+    }
+
+    static func memory(_ bytes: UInt64, locale: Locale) -> String {
+        Int64(clamping: bytes).formatted(.byteCount(style: .memory).locale(locale))
     }
 
     /// "8-bit and 10-bit", "8-bit only" or "Not available".
@@ -215,10 +258,47 @@ enum SettingsDiagnostics {
                                  isDNG ? String(decoder.dropLast(4)) : decoder, build)
     }
 
+    enum PreviewState: String, Equatable {
+        case hdr, sdrDisplay = "sdr-display", noHeadroom = "no-headroom"
+    }
+
+    /// Whether the canvas can show HDR on this display right now.
+    static func previewState(_ display: DisplayState) -> PreviewState {
+        guard display.supportsEDR else { return .sdrDisplay }
+        return display.currentHeadroom <= 1 ? .noHeadroom : .hdr
+    }
+
+    static func preview(_ display: DisplayState, locale: Locale) -> String {
+        switch previewState(display) {
+        case .hdr: AppStrings.string("settings.diag.preview.hdr", locale: locale)
+        case .sdrDisplay: AppStrings.string("settings.diag.preview.sdrDisplay", locale: locale)
+        case .noHeadroom: AppStrings.string("settings.diag.preview.noHeadroom", locale: locale)
+        }
+    }
+
     /// "macOS 27.0.1": the version only, without the build number.
     static func system() -> String {
         let version = ProcessInfo.processInfo.operatingSystemVersion
         return "macOS \(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
+    }
+
+    /// "Apple M4 Pro" from the kernel; nil when it will not say.
+    static func chipName() -> String? {
+        var size = 0
+        guard sysctlbyname("machdep.cpu.brand_string", nil, &size, nil, 0) == 0, size > 1 else { return nil }
+        var buffer = [CChar](repeating: 0, count: size)
+        guard sysctlbyname("machdep.cpu.brand_string", &buffer, &size, nil, 0) == 0 else { return nil }
+        let name = String(cString: buffer)
+        return name.isEmpty ? nil : name
+    }
+
+    /// "macOS 27.0.1 · Apple M4 Pro · 48 GB memory". The pieces are injectable
+    /// for tests.
+    static func machine(system: String = system(), chip: String? = chipName(),
+                        memoryBytes: UInt64 = ProcessInfo.processInfo.physicalMemory, locale: Locale) -> String {
+        let chip = chip ?? AppStrings.string("settings.diag.machine.unknownChip", locale: locale)
+        return AppStrings.format("settings.diag.machine.value %@ %@ %@", locale: locale, system, chip,
+                                 memory(memoryBytes, locale: locale))
     }
 
     static func opens(_ model: EditorModel) -> String {

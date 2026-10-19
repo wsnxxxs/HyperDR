@@ -12,8 +12,8 @@
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/gainmap/reconstruct.hpp"
 
-#include <libheif/heif.h>
-#include <libheif/heif_tiling.h>
+#include "hyperdr/container/heif_reader.hpp"
+#include "internal/heif_decoder.hpp"
 #include "internal/icc_profiles.hpp"
 
 #include <algorithm>
@@ -33,61 +33,28 @@
 namespace hyperdr {
 namespace {
 
-void check_heif(heif_error error, const char* operation) {
-  if (error.code != heif_error_Ok) throw std::runtime_error(std::string(operation) + ": " + (error.message ? error.message : "unknown libheif error"));
+// The Adaptive base is an SDR picture: either an ICC (Display P3) profile or an
+// nclx-only BT.709/sRGB description, as Apple's files carry. When both exist
+// the nclx must still be consistent with an SDR full-range base.
+void validate_base_profile(const HeifImagePlan& base) {
+  const bool has_icc = !base.icc.empty();
+  if (!has_icc || !base.color) return;
+  const auto& c = *base.color;
+  const bool valid = (c.primaries == 12 || c.primaries == 1 || c.primaries == 2) &&
+                     (c.transfer == 13 || c.transfer == 1 || c.transfer == 2) &&
+                     (c.matrix == 1 || c.matrix == 2) && c.full_range;
+  if (!valid) throw std::runtime_error("SDR base lacks a usable ICC or nclx SDR profile");
 }
-
-struct ImageDeleter { void operator()(heif_image* p) const { if(p)heif_image_release(p); } };
-struct HandleDeleter { void operator()(heif_image_handle* p) const { if(p)heif_image_handle_release(p); } };
-struct ContextDeleter { void operator()(heif_context* p) const { if(p)heif_context_free(p); } };
-struct DecodingOptionsDeleter { void operator()(heif_decoding_options* p) const { if(p)heif_decoding_options_free(p); } };
-void validate_base_profile(const heif_image_handle* handle) {
-  heif_color_profile_nclx* nclx = nullptr;
-  const auto error = heif_image_handle_get_nclx_color_profile(handle, &nclx);
-  const bool has_icc = heif_image_handle_get_raw_color_profile_size(handle) > 0;
-  const bool has_nclx = nclx != nullptr;
-  const bool valid_nclx = error.code == heif_error_Ok && nclx &&
-                          (nclx->color_primaries == heif_color_primaries_SMPTE_EG_432_1 ||
-                           nclx->color_primaries == heif_color_primaries_ITU_R_BT_709_5 ||
-                           nclx->color_primaries == heif_color_primaries_unspecified) &&
-                          (nclx->transfer_characteristics ==
-                               heif_transfer_characteristic_IEC_61966_2_1 ||
-                           nclx->transfer_characteristics ==
-                               heif_transfer_characteristic_ITU_R_BT_709_5 ||
-                           nclx->transfer_characteristics ==
-                               heif_transfer_characteristic_unspecified) &&
-                          (nclx->matrix_coefficients == heif_matrix_coefficients_ITU_R_BT_709_5 ||
-                           nclx->matrix_coefficients == heif_matrix_coefficients_unspecified) &&
-                          nclx->full_range_flag == 1;
-  if (nclx) heif_nclx_color_profile_free(nclx);
-  // Apple files in the wild use either an ICC-only Display-P3 profile or an
-  // nclx-only BT.709/sRGB profile. Both are valid SDR bases for the verified
-  // single-channel forward subset; HyperDR-produced files still carry both.
-  // A nclx-only Apple base may be exposed by libheif as an unavailable
-  // profile (the property is attached through ipma). The HEIF structural
-  // inspection has already validated the item graph, so absence of an ICC is
-  // not grounds to reject that legal source. When an ICC is present, however,
-  // an explicitly present nclx must still be internally consistent.
-  if (has_icc && has_nclx && !valid_nclx) {
-    throw std::runtime_error("SDR base lacks a usable ICC or nclx SDR profile");
-  }
+// Apple's gain-map item is often deliberately unprofiled; the metadata carries
+// the ISO interpretation. HyperDR's own files carry unspecified/BT.709 full
+// range, so a profile that is present is checked rather than ignored.
+bool gain_profile_valid(const HeifImagePlan& gain) {
+  if (!gain.color) return true;
+  const auto& c = *gain.color;
+  return c.primaries == 2 && c.transfer == 2 && c.matrix == 1 && c.full_range;
 }
-
-void validate_gain_profile(const heif_image_handle* handle) {
-  heif_color_profile_nclx* nclx = nullptr;
-  const auto error = heif_image_handle_get_nclx_color_profile(handle, &nclx);
-  // Apple's gain-map item is often deliberately unprofiled; the metadata
-  // carries the ISO interpretation and the image is an 8-bit luma plane.
-  // HyperDR-produced files do carry the strict unspecified/BT.709 nclx below,
-  // so an explicitly present profile is still checked rather than ignored.
-  const bool valid = error.code != heif_error_Ok || nclx == nullptr ||
-                     (nclx->color_primaries == heif_color_primaries_unspecified &&
-                      nclx->transfer_characteristics ==
-                          heif_transfer_characteristic_unspecified &&
-                      nclx->matrix_coefficients == heif_matrix_coefficients_ITU_R_BT_709_5 &&
-                      nclx->full_range_flag == 1);
-  if (nclx) heif_nclx_color_profile_free(nclx);
-  if (!valid) throw std::runtime_error("Gain Map lacks required nclx 2/2/1/full");
+void validate_gain_profile(const HeifImagePlan& gain) {
+  if (!gain_profile_valid(gain)) throw std::runtime_error("Gain Map lacks required nclx 2/2/1/full");
 }
 
 // A bounded batch of YUV tiles is converted in parallel, then fed in row-major
@@ -233,72 +200,24 @@ void verify_heic_decodable(const std::vector<std::uint8_t>& bytes) {
   (void)parse_tmap_payload(extract_tmap_payload(bytes));
   const auto references = find_tmap_references(bytes);
 
-  std::unique_ptr<heif_context, ContextDeleter> context(heif_context_alloc());
-  if (!context) throw std::runtime_error("cannot allocate verification context");
-  check_heif(heif_context_read_from_memory_without_copy(
-                 context.get(), bytes.data(), bytes.size(), nullptr),
-             "read Adaptive HDR HEIC");
-
-  heif_image_handle* primary_raw = nullptr;
-  check_heif(heif_context_get_primary_image_handle(context.get(), &primary_raw),
-             "get primary image");
-  std::unique_ptr<heif_image_handle, HandleDeleter> primary(primary_raw);
-  validate_base_profile(primary.get());
-  if (heif_image_handle_get_item_id(primary.get()) != references.base_id) {
+  // Tiled: the written canvas may exceed what the raster budget can hold whole
+  // (a 185 MP story card); verification only ever holds one coded picture.
+  const auto file = read_heif(bytes);
+  const auto plan = file.resolve_gain_map(HeifCanvas::Tiled);
+  if (!plan) throw std::runtime_error("Adaptive HDR HEIC lacks a gain map");
+  if (plan->base.item_id != references.base_id) {
     throw std::runtime_error("tmap base reference is not the primary image");
   }
-
-  const bool wide = heif_image_handle_get_luma_bits_per_pixel(primary.get()) > 8;
-  heif_image* base_raw = nullptr;
-  check_heif(heif_decode_image(primary.get(), &base_raw, heif_colorspace_RGB,
-                               wide ? heif_chroma_interleaved_RRGGBB_LE
-                                    : heif_chroma_interleaved_RGB,
-                               nullptr),
-             "decode SDR base");
-  std::unique_ptr<heif_image, ImageDeleter> base(base_raw);
-  const int base_width = heif_image_get_width(base.get(), heif_channel_interleaved);
-  const int base_height = heif_image_get_height(base.get(), heif_channel_interleaved);
-  if (base_width <= 0 || base_height <= 0) {
-    throw std::runtime_error("decoded SDR base has invalid dimensions");
-  }
-
-  heif_image_handle* gain_handle_raw = nullptr;
-  check_heif(heif_context_get_image_handle(context.get(), references.gain_id,
-                                           &gain_handle_raw),
-             "get Gain Map image handle");
-  std::unique_ptr<heif_image_handle, HandleDeleter> gain_handle(gain_handle_raw);
-  heif_color_profile_nclx* gain_profile_raw = nullptr;
-  check_heif(heif_image_handle_get_nclx_color_profile(
-                 gain_handle.get(), &gain_profile_raw),
-             "get Gain Map nclx");
-  std::unique_ptr<heif_color_profile_nclx, decltype(&heif_nclx_color_profile_free)>
-      gain_profile(gain_profile_raw, &heif_nclx_color_profile_free);
-  if (gain_profile->color_primaries != heif_color_primaries_unspecified ||
-      gain_profile->transfer_characteristics !=
-          heif_transfer_characteristic_unspecified ||
-      gain_profile->matrix_coefficients !=
-          heif_matrix_coefficients_ITU_R_BT_709_5 ||
-      gain_profile->full_range_flag != 1) {
+  validate_base_profile(plan->base);
+  if (!plan->gain.color || !gain_profile_valid(plan->gain)) {
     throw std::runtime_error("Gain Map nclx must be 2/2/BT.709/full-range");
   }
-
-  heif_image* gain_raw = nullptr;
-  check_heif(heif_decode_image(gain_handle.get(), &gain_raw,
-                               heif_colorspace_YCbCr, heif_chroma_420, nullptr),
-             "decode Gain Map");
-  std::unique_ptr<heif_image, ImageDeleter> gain(gain_raw);
-  const int gain_width = heif_image_get_width(gain.get(), heif_channel_Y);
-  const int gain_height = heif_image_get_height(gain.get(), heif_channel_Y);
-  if (gain_width <= 0 || gain_height <= 0 || gain_width > base_width ||
-      gain_height > base_height ||
-      heif_image_get_bits_per_pixel_range(gain.get(), heif_channel_Y) != 8) {
+  if (plan->gain.width > plan->base.width || plan->gain.height > plan->base.height ||
+      plan->gain.config.bit_depth != 8) {
     throw std::runtime_error("decoded Gain Map has invalid dimensions or depth");
   }
-  int y_stride = 0;
-  if (!heif_image_get_plane_readonly(gain.get(), heif_channel_Y, &y_stride) ||
-      y_stride < gain_width) {
-    throw std::runtime_error("decoded Gain Map luma plane is unavailable");
-  }
+  codec::verify_heif_tiles(file, plan->base);
+  codec::verify_heif_tiles(file, plan->gain);
 }
 
 void verify_heic_decodable(const std::vector<std::uint8_t>& bytes,
@@ -312,51 +231,18 @@ void verify_heic_decodable(const std::vector<std::uint8_t>& bytes,
       inspection.has_tmap_item) {
     throw std::runtime_error("BT.2100 HEIC failed semantic structure verification");
   }
-  std::unique_ptr<heif_context, ContextDeleter> context(heif_context_alloc());
-  if (!context) throw std::runtime_error("cannot allocate HDR verification context");
-  check_heif(heif_context_read_from_memory_without_copy(
-                 context.get(), bytes.data(), bytes.size(), nullptr),
-             "read BT.2100 HEIC");
-  heif_image_handle* primary_raw = nullptr;
-  check_heif(heif_context_get_primary_image_handle(context.get(), &primary_raw),
-             "get BT.2100 primary image");
-  std::unique_ptr<heif_image_handle, HandleDeleter> primary(primary_raw);
-
-  heif_color_profile_nclx* profile_raw = nullptr;
-  check_heif(heif_image_handle_get_nclx_color_profile(primary.get(), &profile_raw),
-             "get BT.2100 nclx");
-  std::unique_ptr<heif_color_profile_nclx, decltype(&heif_nclx_color_profile_free)>
-      profile(profile_raw, &heif_nclx_color_profile_free);
-  const auto expected_transfer = encoding == HdrEncoding::Pq
-      ? heif_transfer_characteristic_ITU_R_BT_2100_0_PQ
-      : heif_transfer_characteristic_ITU_R_BT_2100_0_HLG;
-  if (profile->color_primaries !=
-          heif_color_primaries_ITU_R_BT_2020_2_and_2100_0 ||
-      profile->transfer_characteristics != expected_transfer ||
-      profile->matrix_coefficients !=
-          heif_matrix_coefficients_ITU_R_BT_2020_2_non_constant_luminance ||
-      profile->full_range_flag != 1) {
+  const auto file = read_heif(bytes);
+  const auto plan = file.resolve_image(0, HeifCanvas::Tiled);
+  const int expected_transfer = encoding == HdrEncoding::Pq ? 16 : 18;
+  if (!plan.color || plan.color->primaries != 9 || plan.color->transfer != expected_transfer ||
+      plan.color->matrix != 9 || !plan.color->full_range) {
     throw std::runtime_error("BT.2100 HEIC has incorrect nclx signalling");
   }
-  heif_content_light_level light{};
-  if (!heif_image_handle_get_content_light_level(primary.get(), &light)) {
-    throw std::runtime_error("BT.2100 HEIC lacks content-light metadata");
-  }
-
-  std::unique_ptr<heif_decoding_options, DecodingOptionsDeleter> options(
-      heif_decoding_options_alloc());
-  if (!options) throw std::runtime_error("cannot allocate HDR decoding options");
-  options->output_image_nclx_profile_passthrough = 1;
-  heif_image* decoded_raw = nullptr;
-  check_heif(heif_decode_image(primary.get(), &decoded_raw, heif_colorspace_RGB,
-                               heif_chroma_interleaved_RRGGBB_LE, options.get()),
-             "decode BT.2100 HDR image");
-  std::unique_ptr<heif_image, ImageDeleter> decoded(decoded_raw);
-  if (heif_image_get_width(decoded.get(), heif_channel_interleaved) <= 0 ||
-      heif_image_get_height(decoded.get(), heif_channel_interleaved) <= 0 ||
-      heif_image_get_bits_per_pixel_range(decoded.get(), heif_channel_interleaved) != 10) {
+  if (!plan.light) throw std::runtime_error("BT.2100 HEIC lacks content-light metadata");
+  if (plan.config.bit_depth != 10 || plan.config.chroma_format == 0) {
     throw std::runtime_error("decoded BT.2100 image is not valid 10-bit RGB");
   }
+  codec::verify_heif_tiles(file, plan);
 }
 
 void verify_heic_decodable(const std::filesystem::path& input) {
@@ -366,29 +252,14 @@ void verify_heic_decodable(const std::filesystem::path& input) {
     verify_heic_decodable(bytes);
     return;
   }
-  std::unique_ptr<heif_context, ContextDeleter> context(heif_context_alloc());
-  if (!context) throw std::runtime_error("cannot allocate HEIC detection context");
-  check_heif(heif_context_read_from_memory_without_copy(
-                 context.get(), bytes.data(), bytes.size(), nullptr),
-             "read HEIC for HDR mode detection");
-  heif_image_handle* primary_raw = nullptr;
-  check_heif(heif_context_get_primary_image_handle(context.get(), &primary_raw),
-             "get image for HDR mode detection");
-  std::unique_ptr<heif_image_handle, HandleDeleter> primary(primary_raw);
-  heif_color_profile_nclx* profile_raw = nullptr;
-  const auto profile_error =
-      heif_image_handle_get_nclx_color_profile(primary.get(), &profile_raw);
-  if (profile_error.code != heif_error_Ok || profile_raw == nullptr) {
-    if (profile_raw) heif_nclx_color_profile_free(profile_raw);
+  const auto plan = read_heif(bytes).resolve_image(0, HeifCanvas::Tiled);
+  if (!plan.color) {
     throw std::runtime_error(
         "HEIC is neither Adaptive HDR nor nclx-signalled PQ/HLG");
   }
-  std::unique_ptr<heif_color_profile_nclx, decltype(&heif_nclx_color_profile_free)>
-      profile(profile_raw, &heif_nclx_color_profile_free);
-  if (profile->transfer_characteristics == heif_transfer_characteristic_ITU_R_BT_2100_0_PQ) {
+  if (plan.color->transfer == 16) {
     verify_heic_decodable(bytes, HdrEncoding::Pq);
-  } else if (profile->transfer_characteristics ==
-             heif_transfer_characteristic_ITU_R_BT_2100_0_HLG) {
+  } else if (plan.color->transfer == 18) {
     verify_heic_decodable(bytes, HdrEncoding::Hlg);
   } else {
     throw std::runtime_error("HEIC is neither Adaptive HDR, PQ, nor HLG");
@@ -396,192 +267,27 @@ void verify_heic_decodable(const std::filesystem::path& input) {
 }
 
 namespace {
-
-struct DecodedGainMapHeic {
-  FloatImage base;
-  FloatImage gain;
-  GainMapMetadata metadata;
-};
-
-DecodedGainMapHeic decode_gain_map_heic_components(
-    const std::filesystem::path& input) {
+// Lenient about unprofiled gain maps (Apple's), strict about present profiles;
+// the same decoding as the input path, whole canvases (diagnostics only).
+codec::HeifAdaptiveParts adaptive_parts(const std::filesystem::path& input) {
   const auto bytes = read_binary_file(input);
-  const auto metadata = parse_tmap_payload(extract_tmap_payload(bytes));
-  std::unique_ptr<heif_context, ContextDeleter> context(heif_context_alloc());
-  if (!context) throw std::runtime_error("cannot allocate libheif context");
-  check_heif(heif_context_read_from_memory_without_copy(
-                 context.get(), bytes.data(), bytes.size(), nullptr),
-             "read Adaptive HDR HEIC");
-
-  heif_image_handle* primary_raw = nullptr;
-  check_heif(heif_context_get_primary_image_handle(context.get(), &primary_raw),
-             "get primary image");
-  std::unique_ptr<heif_image_handle, HandleDeleter> primary(primary_raw);
-  validate_base_profile(primary.get());
-  const bool wide_base = heif_image_handle_get_luma_bits_per_pixel(primary.get()) > 8;
-  heif_image* base_raw = nullptr;
-  check_heif(heif_decode_image(
-                 primary.get(), &base_raw, heif_colorspace_RGB,
-                 wide_base ? heif_chroma_interleaved_RRGGBB_LE
-                           : heif_chroma_interleaved_RGB,
-                 nullptr),
-             "decode SDR base");
-  std::unique_ptr<heif_image, ImageDeleter> base_image(base_raw);
-
-  // The Gain Map is the second dimg reference of the tmap item; scanning for
-  // any decodable non-primary item can select a hidden grid tile instead.
-  const auto references = find_tmap_references(bytes);
-  heif_image_handle* gain_handle_raw = nullptr;
-  check_heif(heif_context_get_image_handle(context.get(), references.gain_id,
-                                           &gain_handle_raw),
-             "get Gain Map image handle");
-  std::unique_ptr<heif_image_handle, HandleDeleter> gain_handle(gain_handle_raw);
-  validate_gain_profile(gain_handle.get());
-  heif_image* gain_raw = nullptr;
-  check_heif(heif_decode_image(gain_handle.get(), &gain_raw,
-                               heif_colorspace_undefined, heif_chroma_undefined,
-                               nullptr),
-             "decode Gain Map");
-  std::unique_ptr<heif_image, ImageDeleter> gain_image(gain_raw);
-
-  const auto width = static_cast<std::uint32_t>(
-      heif_image_get_width(base_image.get(), heif_channel_interleaved));
-  const auto height = static_cast<std::uint32_t>(
-      heif_image_get_height(base_image.get(), heif_channel_interleaved));
-  const auto gain_width = static_cast<std::uint32_t>(
-      heif_image_get_width(gain_image.get(), heif_channel_Y));
-  const auto gain_height = static_cast<std::uint32_t>(
-      heif_image_get_height(gain_image.get(), heif_channel_Y));
-  FloatImage base(width, height, 3), gain(gain_width, gain_height, 1);
-  int base_stride = 0;
-  int gain_stride = 0;
-  const auto* base_plane = heif_image_get_plane_readonly(
-      base_image.get(), heif_channel_interleaved, &base_stride);
-  const auto* gain_plane = heif_image_get_plane_readonly(
-      gain_image.get(), heif_channel_Y, &gain_stride);
-  if (!base_plane || !gain_plane) {
-    throw std::runtime_error("decoded HEIC plane is missing");
-  }
-  const int base_bits = heif_image_get_bits_per_pixel_range(
-      base_image.get(), heif_channel_interleaved);
-  const int gain_bits = heif_image_get_bits_per_pixel_range(
-      gain_image.get(), heif_channel_Y);
-  const float base_max =
-      static_cast<float>((1U << std::min(base_bits, 16)) - 1U);
-  const float gain_max =
-      static_cast<float>((1U << std::min(gain_bits, 16)) - 1U);
-  for (std::uint32_t y = 0; y < height; ++y) {
-    check_cancelled();
-    if (base_bits > 8) {
-      const auto* row = reinterpret_cast<const std::uint16_t*>(
-          base_plane + static_cast<std::size_t>(y) * base_stride);
-      for (std::uint32_t x = 0; x < width; ++x) {
-        for (unsigned c = 0; c < 3; ++c) {
-          base.at(x, y, c) =
-              srgb_eotf(row[x * 3 + c] / base_max);
-        }
-      }
-    } else {
-      const auto* row =
-          base_plane + static_cast<std::size_t>(y) * base_stride;
-      for (std::uint32_t x = 0; x < width; ++x) {
-        for (unsigned c = 0; c < 3; ++c) {
-          base.at(x, y, c) = srgb_eotf(row[x * 3 + c] / base_max);
-        }
-      }
-    }
-  }
-  for (std::uint32_t y = 0; y < gain_height; ++y) {
-    check_cancelled();
-    if (gain_bits <= 8) {
-      for (std::uint32_t x = 0; x < gain_width; ++x) {
-        gain.at(x, y, 0) =
-            gain_plane[static_cast<std::size_t>(y) * gain_stride + x] /
-            gain_max;
-      }
-    } else {
-      const auto* row = reinterpret_cast<const std::uint16_t*>(
-          gain_plane + static_cast<std::size_t>(y) * gain_stride);
-      for (std::uint32_t x = 0; x < gain_width; ++x) {
-        gain.at(x, y, 0) = row[x] / gain_max;
-      }
-    }
-  }
-  return {std::move(base), std::move(gain), metadata};
+  const auto file = read_heif(bytes);
+  const auto plan = file.resolve_gain_map(HeifCanvas::Tiled);
+  if (!plan || !plan->metadata) throw std::runtime_error("Adaptive HDR HEIC lacks a gain map");
+  validate_base_profile(plan->base);
+  validate_gain_profile(plan->gain);
+  return codec::decode_heif_adaptive_parts(bytes);
 }
-
 }  // namespace
 
 void reconstruct_heic_to_tiff(const std::filesystem::path& input,
                               const std::filesystem::path& output) {
-  const auto bytes = read_binary_file(input);
-  const auto metadata = parse_tmap_payload(extract_tmap_payload(bytes));
-  std::unique_ptr<heif_context, ContextDeleter> context(heif_context_alloc());
-  if (!context) throw std::runtime_error("cannot allocate libheif context");
-  check_heif(heif_context_read_from_memory_without_copy(context.get(), bytes.data(), bytes.size(), nullptr),
-             "read Adaptive HDR HEIC");
-
-  heif_image_handle* primary_raw = nullptr;
-  check_heif(heif_context_get_primary_image_handle(context.get(), &primary_raw), "get primary image");
-  std::unique_ptr<heif_image_handle, HandleDeleter> primary(primary_raw);
-  validate_base_profile(primary.get());
-  const bool wide_base = heif_image_handle_get_luma_bits_per_pixel(primary.get()) > 8;
-  heif_image* base_raw = nullptr;
-  check_heif(heif_decode_image(primary.get(), &base_raw, heif_colorspace_RGB,
-                               wide_base ? heif_chroma_interleaved_RRGGBB_LE : heif_chroma_interleaved_RGB,
-                               nullptr), "decode SDR base");
-  std::unique_ptr<heif_image, ImageDeleter> base_image(base_raw);
-
-  // The Gain Map is the second dimg reference of the tmap item; scanning for "any
-  // decodable non-primary item" would wrongly pick a hidden grid tile instead.
-  const auto references = find_tmap_references(bytes);
-  heif_image_handle* gain_handle_raw = nullptr;
-  check_heif(heif_context_get_image_handle(context.get(), references.gain_id, &gain_handle_raw),
-             "get Gain Map image handle");
-  std::unique_ptr<heif_image_handle, HandleDeleter> gain_handle(gain_handle_raw);
-  validate_gain_profile(gain_handle.get());
-  heif_image* gain_raw = nullptr;
-  check_heif(heif_decode_image(gain_handle.get(), &gain_raw, heif_colorspace_undefined,
-                               heif_chroma_undefined, nullptr), "decode Gain Map");
-  std::unique_ptr<heif_image, ImageDeleter> gain_image(gain_raw);
-
-  const auto width = static_cast<std::uint32_t>(heif_image_get_width(base_image.get(), heif_channel_interleaved));
-  const auto height = static_cast<std::uint32_t>(heif_image_get_height(base_image.get(), heif_channel_interleaved));
-  const auto gain_width = static_cast<std::uint32_t>(heif_image_get_width(gain_image.get(), heif_channel_Y));
-  const auto gain_height = static_cast<std::uint32_t>(heif_image_get_height(gain_image.get(), heif_channel_Y));
-  FloatImage base(width, height, 3), gain(gain_width, gain_height, 1);
-  int base_stride = 0, gain_stride = 0;
-  const auto* base_plane = heif_image_get_plane_readonly(base_image.get(), heif_channel_interleaved, &base_stride);
-  const auto* gain_plane = heif_image_get_plane_readonly(gain_image.get(), heif_channel_Y, &gain_stride);
-  if (!base_plane || !gain_plane) throw std::runtime_error("decoded HEIC plane is missing");
-  const int base_bits = heif_image_get_bits_per_pixel_range(base_image.get(), heif_channel_interleaved);
-  const int gain_bits = heif_image_get_bits_per_pixel_range(gain_image.get(), heif_channel_Y);
-  const float base_max = static_cast<float>((1U << std::min(base_bits, 16)) - 1U);
-  const float gain_max = static_cast<float>((1U << std::min(gain_bits, 16)) - 1U);
-  for (std::uint32_t y = 0; y < height; ++y) {
-    check_cancelled();
-    if (base_bits > 8) {
-      const auto* row = reinterpret_cast<const std::uint16_t*>(base_plane + static_cast<std::size_t>(y) * base_stride);
-      for (std::uint32_t x = 0; x < width; ++x)
-        for (unsigned c = 0; c < 3; ++c) base.at(x, y, c) = srgb_eotf(row[x * 3 + c] / base_max);
-    } else {
-      const auto* row = base_plane + static_cast<std::size_t>(y) * base_stride;
-      for (std::uint32_t x = 0; x < width; ++x)
-        for (unsigned c = 0; c < 3; ++c) base.at(x, y, c) = srgb_eotf(row[x * 3 + c] / base_max);
-    }
-  }
-  for (std::uint32_t y = 0; y < gain_height; ++y) {
-    check_cancelled();
-    if (gain_bits <= 8) {
-      for (std::uint32_t x = 0; x < gain_width; ++x) gain.at(x, y, 0) = gain_plane[static_cast<std::size_t>(y) * gain_stride + x] / gain_max;
-    } else {
-      const auto* row = reinterpret_cast<const std::uint16_t*>(gain_plane + static_cast<std::size_t>(y) * gain_stride);
-      for (std::uint32_t x = 0; x < gain_width; ++x) gain.at(x, y, 0) = row[x] / gain_max;
-    }
-  }
+  auto parts = adaptive_parts(input);
+  const auto& metadata = parts.metadata;
+  const std::uint32_t width = parts.base.width, height = parts.base.height;
   const float stops = static_cast<float>(metadata.alternate_headroom.numerator) /
                       static_cast<float>(metadata.alternate_headroom.denominator);
-  const auto hdr = reconstruct_gain_map(base, gain, metadata, stops);
+  const auto hdr = reconstruct_gain_map(parts.base, parts.gain, metadata, stops);
 
   auto le16 = [](std::vector<std::uint8_t>& out, std::uint16_t v) {
     out.push_back(static_cast<std::uint8_t>(v)); out.push_back(static_cast<std::uint8_t>(v >> 8));
@@ -644,8 +350,8 @@ DisplayCurveResult compare_gain_map_heic_curve(
   if (display_headroom_stops.empty()) {
     throw std::invalid_argument("display curve requires at least one headroom");
   }
-  auto reference_components = decode_gain_map_heic_components(reference);
-  auto candidate_components = decode_gain_map_heic_components(candidate);
+  auto reference_components = adaptive_parts(reference);
+  auto candidate_components = adaptive_parts(candidate);
   if (reference_components.base.width != candidate_components.base.width ||
       reference_components.base.height != candidate_components.base.height ||
       reference_components.base.channels != candidate_components.base.channels) {

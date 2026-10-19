@@ -6,9 +6,8 @@ resolves the dependencies below through vcpkg or CMake `FetchContent`.
 | Component | Purpose | Upstream license information |
 | --- | --- | --- |
 | Little CMS 2 | ICC profile construction | MIT |
-| libheif | Transitional HEIF container, decoding and Windows encoding | LGPL-3.0-or-later |
+| libheif | Transitional HEIF reading and decoding | LGPL-3.0-or-later |
 | libde265 | HEVC decoding selected by libheif | LGPL-3.0-or-later |
-| x265 | HEVC encoding selected by libheif's `hevc` feature | GPL-2.0-or-later |
 | libavif | AVIF container and image encoding | BSD-2-Clause |
 | Alliance for Open Media libaom | AV1 codec selected by libavif's `aom` feature | BSD-2-Clause-style license and patent grant; see upstream `LICENSE` and `PATENTS` |
 | libjpeg-turbo | JPEG input, preview output, and Ultra HDR support | IJG, modified BSD, and zlib licenses |
@@ -19,21 +18,13 @@ resolves the dependencies below through vcpkg or CMake `FetchContent`.
 
 ## Platform codec configurations
 
-- **Windows (transition):** libheif and libde265 are dynamic libraries. The
-  existing x265 encoding feature remains during P0–P3a; it is GPL-2.0-or-later
-  and must be removed in P3b before a GPL-free product release.
-- **macOS direct desktop build (transition):** libheif and libde265 are dynamic
-  decoder libraries under LGPL-3.0-or-later. No x265 is built.
-  Corresponding source and replacement/relinking instructions must accompany
-  distributed LGPL libraries. These libraries are removed from Apple builds
-  before App Store distribution when the native HEIF/VideoToolbox backend lands.
-- **iOS / Android:** native application builds are not implemented in this
-  batch. The planned iOS build has no libheif/libde265/x265; Android retains a
-  dynamic libde265 decoder. Their final dependency notices are supplied with
-  those platform builds.
-
-The remaining codec components in the table apply to both implemented desktop
-configurations.
+The native application targets macOS 26 and later on Apple Silicon. HEVC
+encoding uses Apple's VideoToolbox framework, and HEIF writing uses HyperDR's
+own writer. libheif and libde265 remain dynamic decoder libraries under
+LGPL-3.0-or-later; they are used only for HEIF reading and decoding.
+Corresponding source and replacement/relinking instructions must accompany
+these libraries when distributed. P3b will replace the remaining reader with
+HyperDR's HEIF parser and VideoToolbox decoding and remove these dependencies.
 
 Phone HTTPS certificate generation uses [cryptography](https://github.com/pyca/cryptography)
 under Apache-2.0 or BSD-3-Clause. The desktop sidecar bundles this dependency;

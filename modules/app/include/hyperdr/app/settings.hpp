@@ -55,8 +55,8 @@ struct ConvertOptions {
   int quality{90};
   HevcPreset hevc_preset{HevcPreset::Slow};
   // 8-bit matches what the iPhone camera itself writes for gain-map HEICs and
-  // has the broadest decoder support; 10 selects HEVC Main10 (which requires
-  // the multibit x265 runtime).
+  // has the broadest decoder support; 10 selects VideoToolbox HEVC Main10,
+  // subject to the runtime encoder capability probe.
   int depth{8};
   OutputEncoding encoding{OutputEncoding::Adaptive};
   ColorLutOptions color_lut;

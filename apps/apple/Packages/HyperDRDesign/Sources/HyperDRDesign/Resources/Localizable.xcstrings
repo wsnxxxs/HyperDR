@@ -101,8 +101,8 @@
     },
     "design.export.showInFinder.unavailable" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "This version was saved earlier. Use Save As… to save it again." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这一版是之前保存的，请用“另存为…”再存一次。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This version was saved in an earlier session, so HyperDR can’t show it. Drag it out, share it, or use Save As… to save it again." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这一版是之前保存的，HyperDR 不能再显示它。可以直接拖出、共享，或用“另存为…”再存一次。" } }
       }
     },
     "design.export.staleNote" : {

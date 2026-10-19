@@ -61,9 +61,15 @@ public struct ExportResultCard: View {
     private let warnings: [Text]
     private let isStale: Bool
     private let saveRow: ExportSaveRow
+    private let dragSource: ((AnyView) -> AnyView)?
+    private let shareAccessory: AnyView?
 
+    /// `dragSource` wraps the picture to make it draggable; `shareAccessory`
+    /// sits beside the save row's button (the share control).
     public init(thumbnail: ThumbnailContent, fileName: String, facts: [ExportFact], warnings: [Text] = [], isStale: Bool = false,
-                saveRow: ExportSaveRow) {
+                saveRow: ExportSaveRow, dragSource: ((AnyView) -> AnyView)? = nil, shareAccessory: AnyView? = nil) {
+        self.dragSource = dragSource
+        self.shareAccessory = shareAccessory
         self.thumbnail = thumbnail
         self.fileName = fileName
         self.facts = facts
@@ -84,7 +90,8 @@ public struct ExportResultCard: View {
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
             HStack(alignment: .top, spacing: Space.s3) {
-                Thumbnail(thumbnail, width: 96, height: 64)
+                if let dragSource { dragSource(AnyView(Thumbnail(thumbnail, width: 96, height: 64))) }
+                else { Thumbnail(thumbnail, width: 96, height: 64) }
                 VStack(alignment: .leading, spacing: 4) {
                     Text(verbatim: fileName).font(.system(size: TypeScale.Size.control, weight: .semibold))
                         .foregroundStyle(Color.hdr.inkStrong).lineLimit(1).truncationMode(.middle)
@@ -119,6 +126,7 @@ public struct ExportResultCard: View {
                 .buttonStyle(CompactButtonStyle(kind: .link))
                 .disabled(!canShowInFinder)
                 .revealUnavailableHelp(!canShowInFinder)
+                if let shareAccessory { shareAccessory }
             }
         case .saving:
             InspectorNotice(Text("design.export.saving", bundle: .module), style: .progress)
@@ -131,6 +139,7 @@ public struct ExportResultCard: View {
                             .buttonStyle(CompactButtonStyle(kind: .link))
                     }
                     Spacer(minLength: 0)
+                    if let shareAccessory { shareAccessory }
                     Button(action: saveAs) { Text("design.export.saveAs", bundle: .module) }
                         .buttonStyle(CompactButtonStyle(kind: .primary))
                 }

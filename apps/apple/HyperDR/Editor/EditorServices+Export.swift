@@ -26,6 +26,7 @@ extension EditorServices {
         guard url.isFileURL, url.pathExtension.lowercased() == expectedExtension else { throw UserFacingError(code: "invalid_options") }
     }
     func saveExport(_ photo: EditorPhoto, export: String, destination: URL?) async throws -> SavedLocation { throw UserFacingError(code: "export_folder_unset") }
+    func transferFile(_ photo: EditorPhoto, export: String, fileName: String?) async throws -> URL { throw UserFacingError(code: "source_missing") }
     func exportFolder() async -> ExportFolder { ExportFolder() }
     func setExportFolder(_ url: URL) async throws -> ExportFolder { throw UserFacingError(code: "export_folder_unwritable") }
     func encodingCapabilities() async throws -> EditorCapabilities {
@@ -59,7 +60,7 @@ extension ExportHistoryItem {
                 ExportFallbackReason(code: $0.code == .missingCaptureFields ? .missingCaptureFields : .unknown,
                     missingCaptureFields: $0.missingCaptureFields.map(\.rawValue))
             },
-            hasFrame: record.frame != nil, result: result)
+            hasFrame: record.frame != nil, fileAvailable: record.fileAvailable, result: result)
         key = record.key.rawValue; self.options = options
         // Report input_domain alone cannot distinguish RAW from other scene inputs;
         // input suffix uses the same source categories as the engine's discovery.

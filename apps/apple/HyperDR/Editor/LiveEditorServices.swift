@@ -553,6 +553,11 @@ extension LiveEditorServices {
         catch { Logger(subsystem: "com.hyperdr.HyperDR", category: "Export").warning("Export saved but its history mark could not be persisted") }
         return Self.savedLocation(saved)
     }
+    func transferFile(_ photo: EditorPhoto, export: String, fileName: String?) async throws -> URL {
+        let id = try exportSession(photo), kit = try await requireKit()
+        do { return try await kit.sessions.stageExportForTransfer(id, export: ExportID(rawValue: export), fileName: fileName) }
+        catch { throw UserFacingError.service(error) }
+    }
     func exportFolder() async -> ExportFolder {
         guard let kit = try? await requireKit() else { return ExportFolder() }
         let folder = await kit.exportTarget.folder

@@ -61,6 +61,9 @@ import UniformTypeIdentifiers
     func suggestedFileName(_ photo: EditorPhoto, options: EditOptions) async throws -> String
     func validateDestination(_ url: URL, expectedExtension: String) async throws
     func saveExport(_ photo: EditorPhoto, export: String, destination: URL?) async throws -> SavedLocation
+    /// A copy of one retained version's file, in a folder of its own, to hand to
+    /// another app (drag, share). `fileName` is the name the receiver sees.
+    func transferFile(_ photo: EditorPhoto, export: String, fileName: String?) async throws -> URL
     func exportFolder() async -> ExportFolder
     func setExportFolder(_ url: URL) async throws -> ExportFolder
     func encodingCapabilities() async throws -> EditorCapabilities
@@ -175,6 +178,8 @@ extension UserDefaults {
     var exportStartHandler: (() async throws -> Void)?
     var exportCancelHandler: (() async -> Void)?
     var exportSaveHandler: ((String, URL?) async throws -> SavedLocation)?
+    var transferHandler: ((String, String?) async throws -> URL)?
+    private(set) var transferCalls: [(export: String, fileName: String?)] = []
     var metadataHandler: (() async throws -> Void)?
     var historyByURL: [URL: [ExportHistoryItem]] = [:]
     var timings: [ExportTimingSample] = []
@@ -430,6 +435,11 @@ extension FakeEditorServices {
         saveCalls.append((export, destination))
         if let exportSaveHandler { return try await exportSaveHandler(export, destination) }
         return SavedLocation(fileName: destination?.lastPathComponent ?? "saved.heic", folderLabel: folder.label)
+    }
+    func transferFile(_ photo: EditorPhoto, export: String, fileName: String?) async throws -> URL {
+        transferCalls.append((export, fileName))
+        guard let transferHandler else { throw UserFacingError(code: "source_missing") }
+        return try await transferHandler(export, fileName)
     }
     func exportFolder() async -> ExportFolder {
         guard folder.ready else { return folder }

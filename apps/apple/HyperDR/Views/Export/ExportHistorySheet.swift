@@ -19,6 +19,8 @@ struct ExportHistorySheet: View {
                 InspectorNotice(Text("history.lockedNote"), style: .info)
                     .padding(.horizontal, Space.s5).padding(.top, Space.s3)
             }
+            ExportTransferNotice(model: model)
+                .padding(.horizontal, Space.s5).padding(.top, Space.s3)
             if model.exportVersions.isEmpty { empty } else { list }
             Divider()
             footer
@@ -56,6 +58,7 @@ struct ExportHistorySheet: View {
 
     private func row(_ version: ExportVersion) -> some View {
         let saving = model.exportSaveStates[version.id] == .saving
+        let thumbnail = model.versionThumbnails[version.id] ?? .loading
         var tags: [HDRTag] = []
         if version.matchesCurrent { tags.append(HDRTag(Text("history.matches"), tint: .accent)) }
         if version.saved != nil { tags.append(HDRTag(Text("history.saved"), systemImage: "checkmark", tint: .success)) }
@@ -67,29 +70,50 @@ struct ExportHistorySheet: View {
                 ExportFlow.showInFinder(model: model, version: version.id)
             }
         } else {
-            secondary = RowAction(title: Text(saving ? "export.save.saving" : "export.save.saveAs"), isEnabled: !saving) {
+            secondary = RowAction(title: Text(saving ? "export.save.saving" : "export.save.saveAs"),
+                                  isEnabled: !saving && version.fileAvailable,
+                                  disabledReason: version.fileAvailable ? nil : Text("history.fileMissing.help")) {
                 ExportFlow.saveAs(model: model, version: version.id, choosePlace: ExportSavePanel.chooser(on: sheetWindow))
             }
         }
         return ExportHistoryRow(
-            thumbnail: (model.versionThumbnails[version.id] ?? .loading).content(), number: version.number, fileName: version.fileName, tags: tags,
+            thumbnail: thumbnail.content(), number: version.number, fileName: version.fileName, tags: tags,
             meta: Text(verbatim: ExportPresentation.historyMeta(version, locale: locale)),
             note: version.fallbackReason.map { Text(verbatim: ExportPresentation.fallbackNote($0, model: model, locale: locale)) },
+            extraNote: version.fileAvailable ? nil : Text("history.fileMissing"),
             primary: RowAction(title: Text("history.restore"),
                                isEnabled: !version.matchesCurrent && !model.isEditingLocked) {
                 model.restore(version.id)
             },
-            secondary: secondary)
-        .contextMenu {
-            Button("export.save.saveAs") {
-                ExportFlow.saveAs(model: model, version: version.id, choosePlace: ExportSavePanel.chooser(on: sheetWindow))
-            }
-        }
+            secondary: secondary,
+            dragSource: ExportTransfer.dragSource(model: model, version: version.id, thumbnail: thumbnail, name: version.fileName),
+            trailingAccessory: AnyView(ExportShareButton(model: model, version: version.id, thumbnail: thumbnail)))
+        .contextMenu { menu(version, saving: saving, thumbnail: thumbnail) }
         // Read lazily, once the row is on screen; it asks again if the model
         // let the picture go from its small cache.
         .task(id: model.versionThumbnails[version.id] == nil) {
             if model.versionThumbnails[version.id] == nil { _ = model.versionThumbnail(version.id) }
         }
+    }
+
+    /// What the file can be made to do, before the settings (M3 §9, parity batch 7 §1.4).
+    @ViewBuilder private func menu(_ version: ExportVersion, saving: Bool, thumbnail: ThumbnailState) -> some View {
+        if version.saved != nil {
+            Button("export.save.showInFinder") { ExportFlow.showInFinder(model: model, version: version.id) }
+                .disabled(!ExportFlow.canShowInFinder(model: model, version: version.id))
+        }
+        Button("export.save.saveAs") {
+            ExportFlow.saveAs(model: model, version: version.id, choosePlace: ExportSavePanel.chooser(on: sheetWindow))
+        }
+        .disabled(saving || !version.fileAvailable)
+        if let item = model.transferItem(for: version.id) {
+            ShareLink(item: item, preview: SharePreview(Text(verbatim: item.fileName))) { Text("history.share") }
+        } else {
+            Button("history.share") {}.disabled(true)
+        }
+        Divider()
+        Button("history.restore") { model.restore(version.id) }
+            .disabled(version.matchesCurrent || model.isEditingLocked)
     }
 
     private var empty: some View {

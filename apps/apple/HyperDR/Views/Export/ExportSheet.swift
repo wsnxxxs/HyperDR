@@ -415,7 +415,12 @@ private struct ExportResultView: View {
                 if let result = model.export.result {
                     ExportResultCard(thumbnail: model.export.thumbnail.content(), fileName: result.fileName, facts: facts(result),
                                      warnings: result.warnings.map { Text(verbatim: $0) }, isStale: stale,
-                                     saveRow: saveRow(result))
+                                     saveRow: saveRow(result),
+                                     dragSource: ExportTransfer.dragSource(model: model, version: result.export,
+                                                                           thumbnail: model.export.thumbnail, name: result.fileName),
+                                     shareAccessory: AnyView(ExportShareButton(model: model, version: result.export,
+                                                                               thumbnail: model.export.thumbnail)))
+                    ExportTransferNotice(model: model)
                 }
             }
             .padding(Space.s5)

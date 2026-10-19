@@ -865,6 +865,10 @@ import UniformTypeIdentifiers
         if photo == nil { endEditing() }
         syncControls()
         if let photo {
+            // A render of the original asked for before the failed open belongs to
+            // the photo that came back, and may have been dropped on the way.
+            if isReferenceRenderPending { abandonReferenceRender() }
+            followPreviewEdgeWithReference()
             startCaptureFacts(photo)
             startRefreshing(photo)
             if previous.needsRefresh { scheduleRender(force: true) }

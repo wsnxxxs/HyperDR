@@ -425,9 +425,12 @@ extension EditorModel {
         let ticket = generation
         referenceRefreshTask = Task { [weak self, services] in
             do {
-                guard let result = try await services.renderReference(photo, options: options, maxEdge: edge) else { return }
-                guard let self, !Task.isCancelled, generation == ticket, self.photo == photo,
+                let result = try await services.renderReference(photo, options: options, maxEdge: edge)
+                guard let self, !Task.isCancelled, self.photo == photo,
                       referenceOptions == options, requestedReferenceEdge == edge else { return }
+                // Nothing to show (no result, or another photo is being opened): the
+                // earlier original stays, and the render is no longer on its way.
+                guard let result, generation == ticket else { return abandonReferenceRender() }
                 // Details of the original drawn with other options no longer match it.
                 if shownReferenceOptions != options { invalidateOriginalDetail() }
                 shownReferenceOptions = options
@@ -440,14 +443,19 @@ extension EditorModel {
             } catch {
                 // The earlier original stays on screen with its own details; the
                 // next switch or tier change tries again.
-                guard let self, !Task.isCancelled, generation == ticket, self.photo == photo,
-                      referenceOptions == options, requestedReferenceEdge == edge,
-                      let shown = shownReferenceOptions else { return }
-                referenceOptions = shown
-                requestedReferenceEdge = shownReferenceEdge
-                scheduleDetails()
+                guard let self, !Task.isCancelled, self.photo == photo,
+                      referenceOptions == options, requestedReferenceEdge == edge else { return }
+                abandonReferenceRender()
             }
         }
+    }
+    /// Puts the options and the edge asked for back to those of the original on
+    /// screen, so that nothing is waited for that will not arrive.
+    func abandonReferenceRender() {
+        referenceRefreshTask?.cancel()
+        if let shown = shownReferenceOptions { referenceOptions = shown }
+        requestedReferenceEdge = shownReferenceEdge
+        scheduleDetails()
     }
     /// The camera group's summary key; nil when the photo is not a RAW.
     var cameraSummaryKey: String? {

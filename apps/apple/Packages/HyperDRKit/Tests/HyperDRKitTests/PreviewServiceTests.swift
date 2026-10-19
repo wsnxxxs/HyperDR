@@ -518,6 +518,44 @@ private actor BlockingCloseRenderer: PreviewRenderSession {
         }
     }
 
+    /// The whole path with the real engine: a real RAW (copied to a private
+    /// directory, as the app's tests do) rendered as the "original" with the
+    /// lens correction on and off is two renders, each cached under its own
+    /// key. The fixture's lens is not one macOS can correct, so the two frames
+    /// have the same pixels; the pixel difference is for hand verification.
+    @Test func realRAWOriginalIsCachedPerLensCorrection() async throws {
+        let fixture = repository.appendingPathComponent("build/fixtures/sony-ilce-7s.ARW")
+        guard FileManager.default.fileExists(atPath: fixture.path) else {
+            print("skipping realRAWOriginalIsCachedPerLensCorrection: run fetch_test_fixtures.py first")
+            return
+        }
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hyperdr-lens-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("lens.ARW")
+        try FileManager.default.copyItem(at: fixture, to: source)
+        let kit = try await HyperDRKit(configuration: KitConfiguration(
+            supportDirectory: root.appendingPathComponent("support", isDirectory: true),
+            cacheDirectory: root.appendingPathComponent("cache", isDirectory: true)))
+        let session = try await kit.sessions.open(source)
+        try await kit.previews.attach(session)
+        func reference(lens: Bool) async throws -> PreviewResult {
+            var workflow = EditDefaults.initial(encoding: "adaptive", sourceDomain: nil, unadjusted: nil)
+            workflow["lensCorrection"] = .bool(lens)
+            return try await kit.previews.render(PreviewRequest(session: session.id,
+                options: EditDefaults.reference(encoding: "adaptive", workflow: workflow),
+                maxEdge: 256, purpose: .reference))
+        }
+        let on = try await reference(lens: true)
+        let off = try await reference(lens: false)
+        #expect(!off.fromCache)
+        #expect(on.frame !== off.frame)
+        #expect(try await reference(lens: false).fromCache)
+        await kit.previews.detach(session.id)
+        await kit.sessions.close(session.id)
+    }
+
     @Test func submitAndDirectRenderShareOneSerializedEngineSession() async throws {
         let frame = try await makeFrame()
         let renderer = FakeRenderer(frame: frame, delay: .milliseconds(80))

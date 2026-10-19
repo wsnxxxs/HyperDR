@@ -343,6 +343,7 @@ extension EditorModel {
     /// The opened photo's values: `EditDefaults.initial` for the run's
     /// encoding and this reference frame, AI manual, view state reset.
     func beginEditing(encoding: String, reference: EditorPreview) {
+        referenceRefreshTask?.cancel()
         invalidateDetails()
         hideMask()
         lastSubmitWasDraft = false
@@ -399,6 +400,7 @@ extension EditorModel {
     /// and check whether the AI gain still applies.
     func editChanged() {
         invalidateDetails(editedOnly: true)
+        followLensCorrectionWithReference()
         runEncoding = edit.encoding
         rememberOutputPreferences()
         syncControls()

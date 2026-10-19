@@ -339,6 +339,17 @@ import os
         submitContinuation?.yield(PendingSubmission(handle: photo.handle, request: request, trace: PreviewTrace.current))
     }
 
+    func renderReference(_ photo: EditorPhoto, options: EditOptions, maxEdge: Int) async throws -> EditorPreview? {
+        guard let kit, let record = records[photo.handle] else { return nil }
+        let result = try await kit.previews.render(PreviewRequest(session: record.session.id,
+            options: options, maxEdge: maxEdge, purpose: .reference))
+        try Task.checkCancellation()
+        guard records[photo.handle] != nil else { throw CancellationError() }
+        guard result.sourceDigest == record.session.sha256 else { throw EditorDetailError.sourceReplaced }
+        records[photo.handle]?.reference = result.frame
+        return Self.preview(result.frame, trace: result.trace)
+    }
+
     func renderDetail(_ photo: EditorPhoto, options: EditOptions, region: PreviewRegion,
                       original: Bool) async throws -> EditorPreview? {
         guard let kit, let record = records[photo.handle] else { throw UserFacingError(code: "source_missing") }

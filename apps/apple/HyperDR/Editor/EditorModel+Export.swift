@@ -360,6 +360,31 @@ extension EditorModel {
         edit.lensCorrection = on
         recordStep(from: previous, action: "lensCorrection"); editChanged()
     }
+    /// Lens correction is part of how the file is developed, not an
+    /// adjustment: the "original" shows the same geometry as the edit, so it
+    /// follows the switch while every adjustment in it stays neutral. Called from
+    /// `editChanged`, so undo, redo and resets reach it as well.
+    func followLensCorrectionWithReference() {
+        guard var options = referenceOptions, let photo,
+              options["lensCorrection"] != .bool(edit.lensCorrection) else { return }
+        options["lensCorrection"] = .bool(edit.lensCorrection)
+        referenceOptions = options
+        invalidateDetails(editedOnly: false)
+        referenceRefreshTask?.cancel()
+        let ticket = generation
+        referenceRefreshTask = Task { [weak self, services, previewEdge] in
+            do {
+                guard let result = try await services.renderReference(photo, options: options, maxEdge: previewEdge) else { return }
+                guard let self, !Task.isCancelled, generation == ticket, self.photo == photo,
+                      referenceOptions == options else { return }
+                replaceReference(result)
+                scheduleDetails()
+            } catch EditorDetailError.sourceReplaced {
+                guard let self, !Task.isCancelled, generation == ticket, self.photo == photo else { return }
+                open([photo.url])
+            } catch { /* The earlier original stays until another switch retries. */ }
+        }
+    }
     /// The camera group's summary key; nil when the photo is not a RAW.
     var cameraSummaryKey: String? {
         guard let raw = document?.source?.raw else { return nil }

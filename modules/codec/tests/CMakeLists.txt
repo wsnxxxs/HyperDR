@@ -60,3 +60,15 @@ if(HYPERDR_WITH_CODECS)
     target_compile_definitions(raw_ciraw_test PRIVATE HYPERDR_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
   endif()
 endif()
+
+if(HYPERDR_WITH_CODECS AND HYPERDR_BUILD_TESTS)
+  add_executable(heif_imageio_fixtures heif_imageio_fixtures.cpp)
+  target_link_libraries(heif_imageio_fixtures PRIVATE HyperDR::codec heif lcms2::lcms2)
+  target_include_directories(heif_imageio_fixtures PRIVATE ${PROJECT_SOURCE_DIR}/modules/codec/src)
+  hyperdr_configure_target(heif_imageio_fixtures)
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME heif_writer_imageio_test COMMAND ${Python3_EXECUTABLE}
+    ${PROJECT_SOURCE_DIR}/tests/hevc/check_imageio.py
+    --writer-fixtures $<TARGET_FILE:heif_imageio_fixtures> --build-dir ${CMAKE_BINARY_DIR}/heif-imageio)
+  set_tests_properties(heif_writer_imageio_test PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
+endif()

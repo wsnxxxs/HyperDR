@@ -47,6 +47,23 @@ import CoreGraphics
 import Foundation
 import ImageIO
 
+// Lightweight structural gate; no HDR reconstruction or large float buffers.
+if CommandLine.arguments.count > 1 && CommandLine.arguments[1] == "--require-iso-dimensions" {
+    let args = CommandLine.arguments
+    guard args.count == 5, let width = Int(args[2]), let height = Int(args[3]),
+          let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: args[4]) as CFURL, nil),
+          let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
+          image.width == width, image.height == height,
+          CGImageSourceCopyAuxiliaryDataInfoAtIndex(source, 0, kCGImageAuxiliaryDataTypeISOGainMap) != nil else {
+        FileHandle.standardError.write(Data("ImageIO dimensions/ISO auxiliary check failed\n".utf8))
+        exit(1)
+    }
+    let result: [String: Any] = ["width": image.width, "height": image.height, "iso_auxiliary": true]
+    let json = try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])
+    FileHandle.standardOutput.write(json)
+    exit(0)
+}
+
 struct Rect {
     let x, y, width, height: Int
 

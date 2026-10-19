@@ -276,13 +276,6 @@ std::vector<Association> describe(const HeifEncodedImage& image, const HevcConfi
     Bytes clli; put16(clli, image.light->maximum); put16(clli, image.light->average);
     out.push_back(pool.add({make_box("clli", clli), false}));
   }
-  if (!grid && (image.width != 512 || image.height != 512)) {
-    Bytes clap;
-    put32(clap, image.width); put32(clap, 1); put32(clap, image.height); put32(clap, 1);
-    put32(clap, static_cast<std::uint32_t>(std::int32_t(image.width) - 512)); put32(clap, 2);
-    put32(clap, static_cast<std::uint32_t>(std::int32_t(image.height) - 512)); put32(clap, 2);
-    out.push_back(pool.add({make_box("clap", clap), true}));
-  }
   return out;
 }
 } // namespace
@@ -306,7 +299,7 @@ std::vector<std::uint8_t> write_heif(const HeifEncodedImage& base, const HeifEnc
     configs.push_back(make_hevc_configuration(image.sequence.vps, image.sequence.sps, image.sequence.pps));
     grids.push_back(validate_image(image, configs.back()));
     tiles += image.sequence.samples.size();
-    item_count += image.sequence.samples.size() + (image.sequence.samples.size() > 1);
+    item_count += image.sequence.samples.size() + ((image.width != 512 || image.height != 512));
     for (const auto& sample : image.sequence.samples) {
       check_cancelled();
       media_size = container::bounded_heif_add(media_size,sample.size());
@@ -327,7 +320,7 @@ std::vector<std::uint8_t> write_heif(const HeifEncodedImage& base, const HeifEnc
     check_cancelled();
     const auto& image = *images[group];
     const auto& config = configs[group];
-    const bool grid = image.sequence.samples.size() > 1;
+    const bool grid = (image.width != 512 || image.height != 512);
     const auto logical_id = static_cast<std::uint16_t>(items.size() + 1);
     logical_ids[group] = logical_id;
     auto description = describe(image, config, grid, pool);

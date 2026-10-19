@@ -60,6 +60,8 @@ struct HeifWriteOptions {
 // Bounded to 4096 tiles across base and gain map, 256 per axis, and a <4 GiB
 // 32-bit iloc file; tmap extraction and inspect_heif read every such file.
 // Adaptive mode requires gain + gain_metadata + a matching base P3 ICC.
+// Only an exact 512x512 image is a bare hvc1; all cropping uses grid output
+// dimensions, including a 1x1 grid. No clean-aperture property is written.
 // nclx is essential, ICC is descriptive. No post-write metadata surgery.
 [[nodiscard]] std::vector<std::uint8_t> write_heif(
     const HeifEncodedImage& base, const HeifEncodedImage* gain = nullptr,

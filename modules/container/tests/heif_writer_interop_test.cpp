@@ -25,21 +25,25 @@ void check(const std::string& name) {
   require(bool(context),"allocate libheif context");
   checked(heif_context_read_from_memory_without_copy(context.get(),bytes.data(),bytes.size(),nullptr));
   const bool adaptive=name.starts_with("adaptive"), grid=name=="adaptive8-grid" || name=="grid10-hlg";
-  const int count=adaptive?(grid?13:5):(grid?5:1);
+  const bool derived=name!="single8";
+  const unsigned leaves=grid?4:1;
+  const int count=adaptive?int(2*(leaves+1)+3):derived?int(leaves+1):1;
   require(heif_context_get_number_of_items(context.get())==count,"libheif must enumerate every item");
   std::vector<heif_item_id> ids(count);
   require(heif_context_get_list_of_item_IDs(context.get(),ids.data(),count)==count,"libheif item IDs");
   std::map<Reference,std::vector<heif_item_id>> expected_refs,refs;
   std::map<heif_item_id,std::uint32_t> expected_types;
-  if(grid) {
+  if(derived) {
     expected_types[1]=type("grid");
-    expected_refs[{1,type("dimg")} ]={2,3,4,5};
-    for(unsigned i=2;i<=5;++i)expected_types[i]=type("hvc1");
+    for(unsigned i=2;i<=leaves+1;++i)expected_refs[{1,type("dimg")} ].push_back(i);
+    for(unsigned i=2;i<=leaves+1;++i)expected_types[i]=type("hvc1");
   } else expected_types[1]=type("hvc1");
   if(adaptive) {
-    const unsigned gain=grid?6:2,tmap=grid?11:3;
-    expected_types[gain]=type(grid?"grid":"hvc1");
-    if(grid){expected_refs[{gain,type("dimg")} ]={7,8,9,10};for(unsigned i=7;i<=10;++i)expected_types[i]=type("hvc1");}
+    const unsigned gain=leaves+2,tmap=2*(leaves+1)+1;
+    expected_types[gain]=type("grid");
+    for(unsigned i=gain+1;i<gain+1+leaves;++i){
+      expected_refs[{gain,type("dimg")} ].push_back(i);expected_types[i]=type("hvc1");
+    }
     expected_types[tmap]=type("tmap");expected_types[tmap+1]=type("Exif");expected_types[tmap+2]=type("mime");
     expected_refs[{tmap,type("dimg")} ]={1,gain};
     expected_refs[{gain,type("auxl")} ]={1};
@@ -64,13 +68,13 @@ void check(const std::string& name) {
   require(group_count==(adaptive?1:0),"libheif altr group count");
   if(adaptive) {
     require(groups && groups[0].entity_group_id==unsigned(count+1) && groups[0].num_entities==2 &&
-        groups[0].entities[0]==unsigned(grid?11:3) && groups[0].entities[1]==1,"libheif altr ID/ordered members");
+        groups[0].entities[0]==unsigned(2*(leaves+1)+1) && groups[0].entities[1]==1,"libheif altr ID/ordered members");
   }
   heif_entity_groups_release(groups,group_count);
   heif_image_handle* raw=nullptr;checked(heif_context_get_primary_image_handle(context.get(),&raw));
   std::unique_ptr<heif_image_handle,decltype(&heif_image_handle_release)> handle(raw,heif_image_handle_release);
   require(heif_image_handle_get_width(raw)==(grid?700:name=="single8"?512:127) &&
-          heif_image_handle_get_height(raw)==(grid?513:name=="single8"?512:95),"libheif grid/clap dimensions");
+          heif_image_handle_get_height(raw)==(grid?513:name=="single8"?512:95),"libheif grid dimensions");
   heif_color_profile_nclx* color=nullptr;checked(heif_image_handle_get_nclx_color_profile(raw,&color));
   require(color && color->color_primaries==(adaptive||name=="single8"?12:9) &&
       color->transfer_characteristics==(adaptive||name=="single8"?13:grid?18:16) &&

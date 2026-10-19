@@ -1,7 +1,5 @@
 import XCTest
-#if M3_FRONTEND_INTEGRATION
 import SwiftUI
-#endif
 @testable import HyperDR
 
 @MainActor private final class LUTWriteGate {
@@ -31,8 +29,7 @@ import SwiftUI
 
     func testRapidInputThenOutputKeepsBothDesiredChoicesAndRejectsOldReply() async {
         let (model, _, gate) = fixture()
-        #if M3_FRONTEND_INTEGRATION
-        // Run against the actual frontend popover when those commits are present.
+        // Drive the real popover's own bindings, the way the Pickers do.
         let inputs = spaceBindings(LUTSpacesPopover(model: model, id: "a").body)
         XCTAssertEqual(inputs.count, 2)
         guard inputs.count == 2 else { return }
@@ -41,13 +38,6 @@ import SwiftUI
         XCTAssertEqual(outputs.count, 2)
         guard outputs.count == 2 else { return }
         outputs[1].wrappedValue = .rec709
-        #else
-        model.setLibraryLUTSpaces("a", input: .p3, output: .srgb)
-        XCTAssertEqual(model.lut.library[0].input, .p3)
-        // The next popover render reads the real model's optimistic item.
-        let next = model.lut.library[0]
-        model.setLibraryLUTSpaces("a", input: next.input, output: .rec709)
-        #endif
         XCTAssertEqual(model.lut.library[0].output, .rec709)
         await eventually(timeout: .seconds(3)) { gate.requests.count == 1 }
         XCTAssertEqual(gate.requests[0].input, .p3)
@@ -203,7 +193,6 @@ import SwiftUI
     }
 }
 
-#if M3_FRONTEND_INTEGRATION
 @MainActor private func spaceBindings(_ value: Any) -> [Binding<LUTColorSpace>] {
     var result: [Binding<LUTColorSpace>] = []
     func walk(_ value: Any, _ depth: Int) {
@@ -216,4 +205,3 @@ import SwiftUI
     walk(value, 0)
     return result
 }
-#endif

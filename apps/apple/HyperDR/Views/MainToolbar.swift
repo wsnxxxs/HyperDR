@@ -134,9 +134,9 @@ struct ExportButton: View {
 
     var body: some View {
         if model.export.isInFlight {
-            TimelineView(.periodic(from: .now, by: 1)) { context in
+            TimelineView(.periodic(from: .now, by: 1)) { _ in
                 button(.exporting(fraction: ExportPresentation.percent(
-                    estimate: model.export.estimate(at: context.date), isDone: false)))
+                    estimate: model.export.estimate(at: model.now()), isDone: false)))
             }
         } else if model.document == nil {
             button(.disabled(title: Text("editor.export"), reason: Text("export.blocker.noPhoto")))

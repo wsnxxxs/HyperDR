@@ -25,7 +25,8 @@ public enum ExportStatusKind {
 ///
 /// Ended: success and failure each have their own tint, the one line that
 /// matters, and the one action that follows (Show in Finder, Save As…,
-/// Details).
+/// Details). A success that no longer matches the edits (`isStale`) carries
+/// the same "Earlier edit" tag as the result view.
 public struct ExportStatusCard: View {
     private let kind: ExportStatusKind
     private let fileName: String
@@ -33,6 +34,7 @@ public struct ExportStatusCard: View {
     private let percent: Double?
     private let progress: ExportProgressStyle?
     private let emphasis: Bool
+    private let isStale: Bool
     private let onStop: (() -> Void)?
     private let onDetails: () -> Void
     private let onSave: (() -> Void)?
@@ -42,7 +44,7 @@ public struct ExportStatusCard: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(kind: ExportStatusKind, fileName: String, statusLine: Text? = nil, percent: Double? = nil,
-                progress: ExportProgressStyle? = nil, emphasis: Bool = false, onStop: (() -> Void)? = nil,
+                progress: ExportProgressStyle? = nil, emphasis: Bool = false, isStale: Bool = false, onStop: (() -> Void)? = nil,
                 onDetails: @escaping () -> Void, onSave: (() -> Void)? = nil,
                 onShowInFinder: (() -> Void)? = nil, onDismiss: (() -> Void)? = nil) {
         self.kind = kind
@@ -51,6 +53,7 @@ public struct ExportStatusCard: View {
         self.percent = percent
         self.progress = progress
         self.emphasis = emphasis
+        self.isStale = isStale
         self.onStop = onStop
         self.onDetails = onDetails
         self.onSave = onSave
@@ -79,6 +82,7 @@ public struct ExportStatusCard: View {
         .accessibilityElement(children: .contain)
     }
 
+    private var isFailed: Bool { if case .failed = kind { true } else { false } }
     private var isStopping: Bool { if case .stopping = kind { true } else { false } }
     private var flashing: Bool { emphasis && !isEnded }
     private var isEnded: Bool {
@@ -156,6 +160,9 @@ public struct ExportStatusCard: View {
                     .foregroundStyle(Color.hdr.inkMuted)
                     .accessibilityLabel(Text("design.export.dismiss", bundle: .module))
             }
+        }
+        if isStale, !isFailed {
+            HDRTag(Text("design.export.earlier", bundle: .module), systemImage: "clock", tint: .warn)
         }
         endedLine
         endedActions

@@ -79,7 +79,7 @@ import Observation
     }
 
     private func refresh() {
-        let bar = Self.bar(phase: model.export.phase, estimate: model.export.estimate(at: Date()))
+        let bar = Self.bar(phase: model.export.phase, estimate: model.export.estimate(at: model.now()))
         if bar == .none {
             tile.contentView = nil
         } else {

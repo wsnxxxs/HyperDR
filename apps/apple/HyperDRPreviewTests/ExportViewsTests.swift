@@ -203,6 +203,19 @@ import HyperDRDesign
         XCTAssertTrue(model.export.isInFlight)
     }
 
+    func testASavePanelAnsweredAfterThePhotoChangedStartsNothing() async {
+        let (model, services) = await ready()
+        var finish: ((URL?) -> Void)?
+        ExportFlow.begin(model: model) { _, _, completion in finish = completion }
+        XCTAssertNotNil(finish)
+        model.open([URL(fileURLWithPath: "/tmp/second.jpg")])
+        await eventually(timeout: .seconds(10)) { model.document?.name == "second.jpg" && model.document?.phase == .ready }
+        finish?(target)
+        try? await Task.sleep(for: .milliseconds(100))
+        XCTAssertTrue(services.exportCalls.isEmpty, "the panel was for the first photo")
+        XCTAssertEqual(model.export.phase, .idle)
+    }
+
     func testAFixedFolderStartsWithoutAskingForAPlace() async {
         let (model, services) = await ready()
         var p = model.preferences.value; p.saveMode = .folder

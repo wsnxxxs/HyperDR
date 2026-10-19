@@ -23,15 +23,15 @@ struct ExportStatusHost: View {
 
     @ViewBuilder private var card: some View {
         if model.export.isInFlight {
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                let estimate = model.export.estimate(at: context.date)
+            TimelineView(.periodic(from: .now, by: 1)) { _ in
+                let estimate = model.export.estimate(at: model.now())
                 let parts = ExportPresentation.statusParts(phase: model.export.phase, stage: model.export.stage,
                                                           workflow: model.workflow, estimate: estimate)
                 ExportStatusCard(
                     kind: model.export.isStopping ? .stopping : .running,
                     fileName: ExportPresentation.fileName(for: model),
                     statusLine: Text(verbatim: ExportPresentation.statusLine(
-                        parts, elapsed: model.export.startedAt.map { context.date.timeIntervalSince($0) } ?? 0,
+                        parts, elapsed: model.export.startedAt.map { model.now().timeIntervalSince($0) } ?? 0,
                         locale: locale)),
                     percent: ExportPresentation.percent(estimate: estimate, isDone: false),
                     progress: ExportPresentation.progressStyle(isStopping: model.export.isStopping, estimate: estimate),
@@ -46,7 +46,7 @@ struct ExportStatusHost: View {
         } else if let result = model.export.result {
             ExportStatusCard(
                 kind: model.export.saveFailure != nil ? .saveFailed : .exported(savedTo: result.saved?.folderLabel ?? ""),
-                fileName: result.fileName, onDetails: window.openExport,
+                fileName: result.fileName, isStale: model.export.isResultStale, onDetails: window.openExport,
                 onSave: { ExportFlow.saveAs(model: model, version: result.export,
                                             choosePlace: ExportSavePanel.chooser(on: NSApp.keyWindow)) },
                 onShowInFinder: { ExportFlow.showInFinder(model: model, version: result.export) },
@@ -102,8 +102,8 @@ struct ExportCanvasCapsule: View {
 
     var body: some View {
         if model.export.isInFlight {
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                let estimate = model.export.estimate(at: context.date)
+            TimelineView(.periodic(from: .now, by: 1)) { _ in
+                let estimate = model.export.estimate(at: model.now())
                 let parts = ExportPresentation.statusParts(phase: model.export.phase, stage: model.export.stage,
                                                           workflow: model.workflow, estimate: estimate)
                 HStack(spacing: Space.s3) {

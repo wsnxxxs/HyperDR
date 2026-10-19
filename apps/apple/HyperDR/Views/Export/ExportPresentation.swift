@@ -249,6 +249,13 @@ extension ExportPresentation {
             }
         }
 
+        /// The mode when the panel is opened again after the outcome was
+        /// dismissed: a result that still matches the edits is shown (§5.16),
+        /// unless the user came to export again.
+        init(phase: ExportState.Phase, hasMatchingResult: Bool, wantsSettings: Bool) {
+            self = phase == .idle && hasMatchingResult && !wantsSettings ? .result : Self(phase: phase)
+        }
+
         /// The panel is 760 wide for the settings and 560 for the rest.
         var width: CGFloat { self == .settings ? 760 : 560 }
     }

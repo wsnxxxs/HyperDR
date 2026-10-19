@@ -34,7 +34,7 @@ struct AppContentView: View {
             }.font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
             Toggle(isOn: $original) { Text(verbatim: "SDR only (clamped to 1×)") }
             HStack(spacing: 24) {
-                Text(verbatim: headroom.screen)
+                Text(verbatim: headroom.screen ?? "")
                 Text(verbatim: "Current headroom: \(String(format: "%.2f", headroom.current))×")
                 Text(verbatim: "Potential headroom: \(String(format: "%.2f", headroom.potential))×")
             }.font(.system(.body, design: .monospaced))

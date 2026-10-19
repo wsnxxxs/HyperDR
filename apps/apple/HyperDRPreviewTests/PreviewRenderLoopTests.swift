@@ -120,6 +120,21 @@ import XCTest
         XCTAssertEqual(probe.requests, requests, "an empty canvas is cleared once, not every tick")
     }
 
+    func testSuspendingReleasesPreparedFrameWithoutAcquiringADrawable() async throws {
+        let (view, _, probe, _) = try canvas()
+        let executor = try loop(view)
+        view.tick()
+        await eventually(timeout: .seconds(3)) { executor.state.presentations == 1 && executor.state.idle }
+        XCTAssertNotNil(executor.readyFrameIdentity)
+        let requests = probe.requests
+        executor.submit(CanvasSnapshot(content: .suspended, transform: view.transform, drawableSize: .zero))
+        await eventually(timeout: .seconds(3)) { executor.state.idle && executor.readyFrameIdentity == nil }
+        XCTAssertEqual(probe.requests, requests)
+        view.setNeedsRedraw(); view.tick()
+        await eventually(timeout: .seconds(3)) { executor.state.presentations == 2 && executor.state.idle }
+        XCTAssertNotNil(executor.readyFrameIdentity)
+    }
+
     /// Judgement 5: stopping returns at once on the main thread, and the loop
     /// exits within 1.1 s even while it is waiting for a drawable.
     func testStopWhileWaitingForADrawable() async throws {

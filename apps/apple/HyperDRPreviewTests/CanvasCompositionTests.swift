@@ -356,8 +356,18 @@ extension CanvasCompositionTests {
         let high=try render(content,geometry:geometry,target:out)
         for (tile,left) in [(originalTile,true),(editedTile,false)] {
             let tileOut=try target(renderer.device,width:32,height:16)
-            let expected=try render(CanvasComposition(edited:tile,headroom:16),
-                geometry:CanvasTransform(imageSize:crop.size,viewport:crop.size),target:tileOut)
+            // Isolated crop metadata can be degenerate. The crop follows its
+            // whole rendition's weight, as the production atlas does.
+            let command = try XCTUnwrap(renderer.queue.makeCommandBuffer())
+            let image = try compositor.makeTestTexture(FramePlanes(tile, device: renderer.device),
+                weight: GainWeight.value(headroom: 16, metadata: (left ? original : edit).metadata), command: command)
+            let pass = MTLRenderPassDescriptor()
+            pass.colorAttachments[0].texture = tileOut
+            pass.colorAttachments[0].loadAction = .clear; pass.colorAttachments[0].storeAction = .store
+            let encoder = try XCTUnwrap(command.makeRenderCommandEncoder(descriptor: pass))
+            compositor.draw(encoder, texture: image, params: CompositionParams(rect: SIMD4(-1,-1,1,1)))
+            encoder.endEncoding()
+            let expected = try read(tileOut, after: command)
             var changed=false
             for y in 0..<16 { for x in 0..<32 where (x+16 < 32) == left {
                 let i=((y+16)*64+x+16)*4
@@ -587,5 +597,12 @@ extension CanvasCompositionTests {
         content.headroom=1;content.previewsAsSDR=false
         try draw();XCTAssertEqual(compositor.rebuilds,initial+8)
         XCTAssertEqual(compositor.textureAllocations,allocations)
+        let base = whole.metadata.baseHeadroom ?? 0
+        let span = alternate - base
+        for (weight, runs) in [(0.5,initial+12), (0.504,initial+12), (0.508,initial+16)] {
+            content.headroom = exp2(base + span * weight)
+            try draw()
+            XCTAssertEqual(compositor.rebuilds, runs, "all four layers compare to last rendered weight")
+        }
     }
 }

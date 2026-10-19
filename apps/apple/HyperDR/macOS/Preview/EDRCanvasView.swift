@@ -4,13 +4,6 @@ import HyperDREngine
 import Metal
 import QuartzCore
 
-struct HeadroomSnapshot: Equatable {
-    var screen = "waiting for display"
-    var current: CGFloat = 1
-    var potential: CGFloat = 1
-    var reference: CGFloat = 1
-}
-
 /// The photo surface. It draws only the photo rect (everything else stays
 /// transparent), owns zoom/pan gestures, and never becomes first responder:
 /// keyboard handling belongs to the view layer and the menu commands (§3.5).
@@ -20,8 +13,9 @@ final class EDRCanvasView: NSView {
     private(set) var renderLoop: PreviewRenderLoop?
     private let onHeadroom: (HeadroomSnapshot) -> Void
     private let onError: (String) -> Void
-    private var lastSnapshot: HeadroomSnapshot?
-    private var displayTimer: Timer?
+    private let headroom = HeadroomMonitor()
+    private var isSuspended = false
+    private let headroomPolicy = HeadroomPolicy.configured
     private var link: CADisplayLink?
     private var dirty = true
     private var generation: UInt64 = 0
@@ -111,16 +105,14 @@ final class EDRCanvasView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        displayTimer?.invalidate()
-        displayTimer = nil
         link?.invalidate()
         link = nil
-        guard window != nil else { return }
-        // A poll covers display reconfiguration and headroom changes that do
-        // not coincide with a redraw.
-        displayTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refreshDisplay() }
-        }
+        NotificationCenter.default.removeObserver(self)
+        guard let window else { suspend(); return }
+        NotificationCenter.default.addObserver(self, selector: #selector(displayChanged),
+            name: NSWindow.didChangeScreenNotification, object: window)
+        NotificationCenter.default.addObserver(self, selector: #selector(displayChanged),
+            name: NSApplication.didChangeScreenParametersNotification, object: nil)
         let link = displayLink(target: self, selector: #selector(step(_:)))
         link.add(to: .main, forMode: .common)
         self.link = link
@@ -149,7 +141,10 @@ final class EDRCanvasView: NSView {
     }
 
     @objc private func step(_ link: CADisplayLink) {
-        guard window?.isVisible == true else { return }
+        refreshDisplay()
+        guard window?.isVisible == true, !isHiddenOrHasHiddenAncestor,
+              window?.occlusionState.contains(.visible) == true else { suspend(); return }
+        if isSuspended { isSuspended = false; setNeedsRedraw() }
         tick()
     }
 
@@ -161,7 +156,12 @@ final class EDRCanvasView: NSView {
         guard dirty, let renderLoop else { return }
         dirty = false
         let content: CanvasSnapshot.Content
-        if let composition = compositionProvider?() {
+        if var composition = compositionProvider?() {
+            if window != nil { composition.headroom = headroomPolicy.target(headroom.snapshot) }
+            if headroomPolicy == .declaredCurrent {
+                metalLayer.preferredDynamicRange = .high
+                metalLayer.contentsHeadroom = max(1, exp2(max(composition.edited.metadata.headroomStops, composition.original?.metadata.headroomStops ?? 0)))
+            }
             content = .composition(composition)
         } else if let frame = frameProvider?() {
             content = .frame(frame.frame, original: frame.showsOriginal)
@@ -192,19 +192,24 @@ final class EDRCanvasView: NSView {
         transform.imageSize = size
     }
 
-    private func refreshDisplay() {
+    @objc private func displayChanged() { refreshDisplay(force: true) }
+
+    private func refreshDisplay(force: Bool = false) {
         updateDrawableSize()
-        if let screen = window?.screen {
-            onRefreshRateChange?(screen.maximumFramesPerSecond)
-            let snapshot = HeadroomSnapshot(screen: screen.localizedName,
-                current: screen.maximumExtendedDynamicRangeColorComponentValue,
-                potential: screen.maximumPotentialExtendedDynamicRangeColorComponentValue,
-                reference: screen.maximumReferenceExtendedDynamicRangeColorComponentValue)
-            if snapshot != lastSnapshot {
-                lastSnapshot = snapshot
-                DispatchQueue.main.async { [weak self] in self?.onHeadroom(snapshot) }
-            }
+        let changed = headroom.sample(window?.screen)
+        if let screen = window?.screen { onRefreshRateChange?(screen.maximumFramesPerSecond) }
+        if changed || force {
+            setNeedsRedraw()
+            onHeadroom(headroom.snapshot)
         }
+    }
+
+    private func suspend() {
+        guard !isSuspended else { return }
+        isSuspended = true
+        dirty = true
+        renderLoop?.submit(CanvasSnapshot(content: .suspended, transform: transform,
+            drawableSize: .zero, generation: generation))
     }
 
     // MARK: - Gestures

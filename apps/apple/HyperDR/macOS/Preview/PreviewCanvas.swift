@@ -46,10 +46,10 @@ struct PreviewCanvas: NSViewRepresentable {
     func makeNSView(context: Context) -> EDRCanvasView {
         let view = EDRCanvasView(onHeadroom: { [weak model] snapshot in
             guard let model else { return }
-            model.receiveDisplay(DisplayState(screenName: snapshot.screen,
+            model.receiveDisplay(DisplayState(screenName: snapshot.screen ?? "",
                 currentHeadroom: Double(snapshot.current),
                 potentialHeadroom: Double(snapshot.potential),
-                gainWeight: model.display.gainWeight))
+                gainWeight: model.currentEditedFrame.map { GainWeight.value(headroom: HeadroomPolicy.configured.target(snapshot), metadata: $0.metadata) }.map(Double.init)))
         }, onError: { [weak model] detail in model?.reportCanvasFailure(detail) })
         view.compositionProvider = { [weak model] in model?.canvasComposition }
         view.frameProvider = { [weak model] in model?.canvasFrame }

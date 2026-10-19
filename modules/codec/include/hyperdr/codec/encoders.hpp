@@ -108,7 +108,7 @@ struct DisplayCurveResult {
 //
 // The files are read the way the input path reads them: float RGB, not clipped
 // to [0,1] after the YCbCr conversion. A base pixel just below zero therefore
-// counts in the clamp totals, where the earlier libheif reader clipped it
+// counts in the clamp totals, where the earlier input path clipped it
 // before the reconstruction and reported no clamps; MAE and MSE are measured
 // against the unclipped base as well.
 [[nodiscard]] DisplayCurveResult compare_gain_map_heic_curve(

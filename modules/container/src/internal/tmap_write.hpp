@@ -1,5 +1,5 @@
 #pragma once
-// Shared ISO tmap declarations for the legacy rewrite and the direct writer.
+// ISO tmap declarations for the writer.
 #include "internal/boxes.hpp"
 #include <array>
 

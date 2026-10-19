@@ -715,8 +715,8 @@ static DecodedImage decode_image_impl(const std::filesystem::path& path, const R
                                         options.default_gamut);
       case InputFormat::Isobmff:
         // HEIF and AVIF are the same container family; the payload codec decides,
-        // because libheif would otherwise reject an AV1 payload with an error
-        // about the codec rather than simply reading it.
+        // because the HEIF reader would otherwise reject an AV1 payload with an
+        // error about the codec rather than simply reading it.
         if (codec::is_avif_bytes(bytes)) {
           return codec::decode_avif_bytes(bytes, options.preview_max_edge,
                                          options.default_gamut);

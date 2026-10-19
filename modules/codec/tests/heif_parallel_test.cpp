@@ -4,11 +4,9 @@
 #include "hyperdr/container/inspect.hpp"
 #include "hyperdr/gainmap/rendition.hpp"
 
-#include <libheif/heif.h>
 #include "hevc/hevc.hpp"
 #include "hevc_probe_policy.hpp"
-#include <libheif/heif_items.h>
-#include <libheif/heif_tiling.h>
+#include "heif_native_decode.hpp"
 
 #include <algorithm>
 #include <array>
@@ -27,23 +25,6 @@ namespace {
 void require(bool condition, const std::string& message) {
   if (!condition) throw std::runtime_error(message);
 }
-
-void check_heif(heif_error error, const char* action) {
-  if (error.code != heif_error_Ok) {
-    throw std::runtime_error(std::string(action) + ": " +
-                             (error.message ? error.message : "unknown libheif error"));
-  }
-}
-
-struct ContextDeleter {
-  void operator()(heif_context* p) const { heif_context_free(p); }
-};
-struct HandleDeleter {
-  void operator()(heif_image_handle* p) const { heif_image_handle_release(p); }
-};
-struct ImageDeleter {
-  void operator()(heif_image* p) const { heif_image_release(p); }
-};
 
 class WorkerOverride {
  public:
@@ -73,122 +54,48 @@ struct ImageSnapshot {
   std::array<int, 4> nclx{};
   std::array<int, 2> light{-1, -1};
   std::vector<std::uint8_t> icc;
-  std::vector<std::vector<std::uint8_t>> exif;
-  std::vector<std::vector<std::uint8_t>> xmp;
+  std::vector<std::uint8_t> exif;
+  std::string xmp;
   std::vector<std::uint8_t> pixels;
   std::vector<std::vector<std::uint8_t>> coded_tiles;
   bool operator==(const ImageSnapshot&) const = default;
 };
 
-std::vector<std::vector<std::uint8_t>> metadata_blocks(
-    const heif_image_handle* handle, const char* type) {
-  const int count = heif_image_handle_get_number_of_metadata_blocks(handle, type);
-  require(count >= 0, "cannot count HEIC metadata blocks");
-  std::vector<heif_item_id> ids(static_cast<std::size_t>(count));
-  require(heif_image_handle_get_list_of_metadata_block_IDs(
-              handle, type, ids.data(), count) == count,
-          "cannot list HEIC metadata blocks");
-  std::vector<std::vector<std::uint8_t>> blocks;
-  for (const auto id : ids) {
-    std::vector<std::uint8_t> bytes(heif_image_handle_get_metadata_size(handle, id));
-    check_heif(heif_image_handle_get_metadata(handle, id, bytes.data()),
-               "read HEIC metadata");
-    blocks.push_back(std::move(bytes));
-  }
-  std::sort(blocks.begin(), blocks.end());
-  return blocks;
-}
-
-void append_plane(std::vector<std::uint8_t>& pixels, const heif_image* image,
-                  heif_channel channel, int bytes_per_pixel) {
-  const int width = heif_image_get_width(image, channel);
-  const int height = heif_image_get_height(image, channel);
-  int stride = 0;
-  const auto* plane = heif_image_get_plane_readonly(image, channel, &stride);
-  require(width > 0 && height > 0 && plane && stride >= width * bytes_per_pixel,
-          "decoded HEIC plane is invalid");
-  const auto row_bytes = static_cast<std::size_t>(width) * bytes_per_pixel;
-  for (int y = 0; y < height; ++y) {
-    const auto* row = plane + static_cast<std::size_t>(y) * stride;
-    pixels.insert(pixels.end(), row, row + row_bytes);
-  }
-}
-
-ImageSnapshot snapshot_image(heif_context* context, heif_image_handle* handle,
-                             bool gain, std::uint32_t width, std::uint32_t height) {
+// One image of the file as our reader describes it, plus the pictures
+// VideoToolbox decodes from it (native YUV codes, tile by tile).
+ImageSnapshot snapshot_image(const hyperdr::HeifFile& file,
+                             const hyperdr::HeifImagePlan& plan, bool primary,
+                             std::uint32_t width, std::uint32_t height) {
   ImageSnapshot result;
-  result.width = heif_image_handle_get_width(handle);
-  result.height = heif_image_handle_get_height(handle);
-  result.depth = heif_image_handle_get_luma_bits_per_pixel(handle);
-  require(result.width == static_cast<int>(width) &&
-              result.height == static_cast<int>(height),
+  result.width = static_cast<int>(plan.width);
+  result.height = static_cast<int>(plan.height);
+  result.depth = static_cast<int>(plan.config.bit_depth);
+  require(plan.width == width && plan.height == height,
           "HEIC grid lost its odd logical image edge");
-
-  heif_color_profile_nclx* raw_nclx = nullptr;
-  check_heif(heif_image_handle_get_nclx_color_profile(handle, &raw_nclx),
-             "read HEIC nclx");
-  std::unique_ptr<heif_color_profile_nclx, decltype(&heif_nclx_color_profile_free)>
-      nclx(raw_nclx, &heif_nclx_color_profile_free);
-  require(nclx != nullptr, "HEIC image lost its nclx profile");
-  result.nclx = {nclx->color_primaries, nclx->transfer_characteristics,
-                 nclx->matrix_coefficients, nclx->full_range_flag};
-
-  result.icc.resize(heif_image_handle_get_raw_color_profile_size(handle));
-  if (!result.icc.empty()) {
-    check_heif(heif_image_handle_get_raw_color_profile(handle, result.icc.data()),
-               "read HEIC ICC profile");
+  require(plan.color.has_value(), "HEIC image lost its nclx profile");
+  result.nclx = {plan.color->primaries, plan.color->transfer, plan.color->matrix,
+                 plan.color->full_range ? 1 : 0};
+  result.icc.assign(plan.icc.begin(), plan.icc.end());
+  if (primary) {
+    result.exif = file.exif();
+    result.xmp = file.xmp();
   }
-  result.exif = metadata_blocks(handle, "Exif");
-  result.xmp = metadata_blocks(handle, "mime");
-  heif_content_light_level light{};
-  if (heif_image_handle_get_content_light_level(handle, &light)) {
-    result.light = {light.max_content_light_level,
-                    light.max_pic_average_light_level};
-  }
+  if (plan.light) result.light = {plan.light->maximum, plan.light->average};
 
-  heif_image* raw_image = nullptr;
-  check_heif(heif_decode_image(handle, &raw_image,
-                               gain ? heif_colorspace_YCbCr : heif_colorspace_RGB,
-                               gain ? heif_chroma_420
-                                    : result.depth > 8
-                                          ? heif_chroma_interleaved_RRGGBB_LE
-                                          : heif_chroma_interleaved_RGB,
-                               nullptr),
-             "decode HEIC grid");
-  std::unique_ptr<heif_image, ImageDeleter> image(raw_image);
-  if (gain) {
-    for (const auto channel : {heif_channel_Y, heif_channel_Cb, heif_channel_Cr}) {
-      append_plane(result.pixels, image.get(), channel, 1);
-    }
-  } else {
-    append_plane(result.pixels, image.get(), heif_channel_interleaved,
-                 result.depth > 8 ? 6 : 3);
-  }
-
-  heif_image_tiling tiling{};
-  check_heif(heif_image_handle_get_image_tiling(handle, 0, &tiling),
-             "read HEIC grid tiling");
-  require(tiling.num_columns == (width + 511) / 512 &&
-              tiling.num_rows == (height + 511) / 512,
+  require(plan.columns == (width + 511) / 512 && plan.rows == (height + 511) / 512 &&
+              plan.tiles.size() == std::size_t(plan.columns) * plan.rows,
           "HEIC grid tile geometry changed");
-  for (std::uint32_t y = 0; y < tiling.num_rows; ++y) {
-    for (std::uint32_t x = 0; x < tiling.num_columns; ++x) {
-      heif_item_id tile_id = 0;
-      check_heif(heif_image_handle_get_grid_image_tile_id(handle, 0, x, y, &tile_id),
-                 "find HEIC grid tile");
-      require(heif_item_get_item_type(context, tile_id) ==
-                  heif_fourcc('h', 'v', 'c', '1'),
-              "HEIC grid tile is not HEVC");
-      std::uint8_t* raw_data = nullptr;
-      std::size_t data_size = 0;
-      check_heif(heif_item_get_item_data(context, tile_id, nullptr, &raw_data,
-                                         &data_size),
-                 "read coded HEIC tile");
-      require(raw_data && data_size > 0, "coded HEIC tile is empty");
-      result.coded_tiles.emplace_back(raw_data, raw_data + data_size);
-      heif_release_item_data(context, &raw_data);
-    }
+  for (const auto& tile : plan.tiles) {
+    require(file.item(tile.id).type == "hvc1", "HEIC grid tile is not HEVC");
+    auto bytes = file.item_bytes(tile.id);
+    require(!bytes.empty(), "coded HEIC tile is empty");
+    result.coded_tiles.push_back(std::move(bytes));
   }
+  heif_native::for_each_picture(file, plan, [&](auto, auto, const heif_native::Picture& picture) {
+    result.pixels.insert(result.pixels.end(), picture.luma.begin(), picture.luma.end());
+    result.pixels.insert(result.pixels.end(), picture.chroma.begin(), picture.chroma.end());
+  });
+  require(!result.pixels.empty(), "HEIC image decoded no pictures");
   return result;
 }
 
@@ -213,17 +120,9 @@ FileSnapshot snapshot_file(const std::vector<std::uint8_t>& bytes,
                 inspection.has_tmap_metadata,
             "Adaptive HEIC lost its gain-map references");
   }
-  std::unique_ptr<heif_context, ContextDeleter> context(heif_context_alloc());
-  require(context != nullptr, "cannot allocate HEIC inspection context");
-  check_heif(heif_context_read_from_memory_without_copy(
-                 context.get(), bytes.data(), bytes.size(), nullptr),
-             "open encoded HEIC");
-  heif_image_handle* raw_primary = nullptr;
-  check_heif(heif_context_get_primary_image_handle(context.get(), &raw_primary),
-             "get HEIC primary image");
-  std::unique_ptr<heif_image_handle, HandleDeleter> primary(raw_primary);
-  FileSnapshot result{snapshot_image(context.get(), primary.get(), false,
-                                     width, height)};
+  const auto file = hyperdr::read_heif(bytes);
+  const auto primary = file.resolve_image();
+  FileSnapshot result{snapshot_image(file, primary, true, width, height)};
   require(!result.primary.exif.empty() && !result.primary.xmp.empty(),
           "HEIC primary lost Exif or XMP");
   require(result.primary.depth == depth, "HEIC primary has the wrong bit depth");
@@ -235,14 +134,10 @@ FileSnapshot snapshot_file(const std::vector<std::uint8_t>& bytes,
   }
   if (adaptive) {
     const auto references = hyperdr::find_tmap_references(bytes);
-    require(references.base_id == heif_image_handle_get_item_id(primary.get()),
+    require(references.base_id == primary.item_id,
             "TMAP does not reference the primary grid");
-    heif_image_handle* raw_gain = nullptr;
-    check_heif(heif_context_get_image_handle(context.get(), references.gain_id,
-                                             &raw_gain),
-               "get HEIC gain-map image");
-    std::unique_ptr<heif_image_handle, HandleDeleter> gain(raw_gain);
-    result.gain = snapshot_image(context.get(), gain.get(), true, width, height);
+    const auto gain_plan = file.resolve_image(references.gain_id);
+    result.gain = snapshot_image(file, gain_plan, false, width, height);
     require(result.gain->depth == 8, "HEIC gain map has the wrong bit depth");
     result.tmap = hyperdr::extract_tmap_payload(bytes);
     require(!result.tmap.empty(), "HEIC lost its ISO gain-map payload");

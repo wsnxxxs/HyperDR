@@ -145,8 +145,8 @@ void run() {
       std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
   require(cancelled && sink.last < 1 && cancel_ms <= 200, "HEIC input cancellation above 200ms");
   std::cout << "input tile cancellation including setup: " << cancel_ms << " ms\n";
-  // imir axis 0 exchanges top and bottom, axis 1 left and right (ImageIO and
-  // the previous libheif path agree). Check each ordering against ImageIO's own
+  // imir axis 0 exchanges top and bottom, axis 1 left and right (as ImageIO
+  // reads them). Check each ordering against ImageIO's own
   // reading of the same bytes, on a non-square image whose four tiles differ.
   struct Case {
     const char* name;

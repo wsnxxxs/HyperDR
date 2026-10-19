@@ -116,12 +116,11 @@ build/HyperDR model-list --json
 These presets target macOS 26 and write only to `build-core/` and `build/`.
 Both builds produce `HyperDR`, `libhyperdr.a`, and `libhyperdr.dylib` at the
 build root. The C11 header is `modules/capi/include/hyperdr/hyperdr.h`.
-The codec preset uses `cmake/triplets/arm64-osx.cmake` to keep the transitional
-libheif/libde265 decoder libraries dynamic. It disables libheif's GPL HEVC encoder feature; HEVC exports use VideoToolbox.
-Camera RAW inputs use the system CIRAWFilter decoder.
+The codec preset uses `cmake/triplets/arm64-osx.cmake`, which builds every
+dependency statically. HEVC encoding and decoding use VideoToolbox, and HEIF
+reading and writing are HyperDR's own code, so the build has no LGPL or GPL
+dependency. Camera RAW inputs use the system CIRAWFilter decoder.
 HEVC fixture-generation tests report their skip; AVIF and JPEG/R tests still run.
-This transitional libheif build is for direct desktop development/distribution;
-it is not the planned App Store build.
 
 ## Usage
 

@@ -1,4 +1,4 @@
-// Write-time HEIC verification on the native reader, with no libheif: files our
+// Write-time HEIC verification on the native reader, no third-party decoder: files our
 // own writer produced are accepted, and each rule the verifier enforces rejects
 // a file that breaks only that rule. Also: the diagnostics (--reconstruct,
 // display-curve) see the whole canvas or stop, never a reduced copy (R7-1101).

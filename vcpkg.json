@@ -14,10 +14,6 @@
     "libpng",
     "tiff",
     "lcms",
-    "ncnn",
-    {
-      "name": "libheif",
-      "default-features": false
-    }
+    "ncnn"
   ]
 }

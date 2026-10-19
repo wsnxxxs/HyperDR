@@ -53,9 +53,6 @@ def main() -> None:
     (bundle / "Contents/MacOS").mkdir(parents=True)
     executable = bundle / "Contents/MacOS/FolderSandbox"
     shutil.copy2(binary_dir / "FolderSandbox", executable)
-    runtime = repo / "build/xcframework/Runtime"
-    shutil.copytree(runtime, bundle / "Contents/Frameworks", symlinks=True)
-    subprocess.run(["install_name_tool", "-add_rpath", "@executable_path/../Frameworks", str(executable)], check=True, capture_output=True)
     (bundle / "Contents/Info.plist").write_bytes(plistlib.dumps({
         "CFBundleExecutable": "FolderSandbox", "CFBundleIdentifier": "com.hyperdr.tests.folder-sandbox",
         "CFBundlePackageType": "APPL", "CFBundleVersion": "1",

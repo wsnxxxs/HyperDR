@@ -36,7 +36,6 @@ hyperdr_add_module(codec
   PRIVATE_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 if(HYPERDR_WITH_CODECS)
-  find_package(libheif CONFIG REQUIRED)
   find_package(lcms2 CONFIG REQUIRED)
   find_package(JPEG REQUIRED)
   find_package(PNG REQUIRED)
@@ -46,7 +45,7 @@ if(HYPERDR_WITH_CODECS)
   # PRIVATE: nothing above this module includes a codec header, which is the
   # point of the module existing.
   target_link_libraries(hyperdr_codec PRIVATE
-    heif lcms2::lcms2 JPEG::JPEG PNG::PNG TIFF::TIFF ZLIB::ZLIB avif)
+    lcms2::lcms2 JPEG::JPEG PNG::PNG TIFF::TIFF ZLIB::ZLIB avif)
   # HEVC is VideoToolbox's (src/hevc); the frameworks are C APIs.
   target_link_libraries(hyperdr_codec PRIVATE
     "-framework VideoToolbox" "-framework CoreMedia" "-framework CoreVideo"

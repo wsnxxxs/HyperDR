@@ -50,7 +50,7 @@ void check_avif(avifResult result, const char* operation) {
 
 // The Exif orientation that `irot` and `imir` together describe.
 //
-// libavif reports the two boxes but never applies them, unlike libheif, so an
+// libavif reports the two boxes but never applies them, so an
 // AVIF whose camera shot it in portrait arrives here as a landscape raster plus
 // a pair of flags. Both are mapped onto this project's single orientation
 // vocabulary so the rotation is normalised into the pixels exactly once, by the

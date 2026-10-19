@@ -4,15 +4,11 @@ if(HYPERDR_WITH_CODECS)
   hyperdr_add_test(icc_color_test LINK HyperDR::image lcms2::lcms2)
   hyperdr_add_test(png_decode_test LINK HyperDR::codec PNG::PNG lcms2::lcms2)
   hyperdr_add_test(tiff_codec_test LINK HyperDR::codec TIFF::TIFF)
-  # `heif` as well as the module: the test builds its own HEIF fixtures, so it
-  # includes <libheif/heif.h> directly, and the module deliberately keeps that
-  # dependency private. Without this the only test that exercises the real
-  # codec paths fails to compile, which is how it came to be skipped silently.
-  hyperdr_add_test(codec_test LINK HyperDR::codec heif avif PNG::PNG lcms2::lcms2)
+  hyperdr_add_test(codec_test LINK HyperDR::codec avif PNG::PNG lcms2::lcms2)
   if(TARGET codec_test)
     target_include_directories(codec_test PRIVATE ${PROJECT_SOURCE_DIR}/modules/codec/src ${PROJECT_SOURCE_DIR}/modules/container/src)
   endif()
-  hyperdr_add_test(heif_parallel_test LINK HyperDR::codec heif)
+  hyperdr_add_test(heif_parallel_test LINK HyperDR::codec)
   if(TARGET heif_parallel_test)
     add_test(NAME hevc_probe_policy_test COMMAND heif_parallel_test --probe-policy-test)
     target_include_directories(heif_parallel_test PRIVATE ${PROJECT_SOURCE_DIR}/modules/codec/src)
@@ -87,7 +83,7 @@ endif()
 
 if(HYPERDR_WITH_CODECS AND HYPERDR_BUILD_TESTS)
   add_executable(heif_imageio_fixtures heif_imageio_fixtures.cpp)
-  target_link_libraries(heif_imageio_fixtures PRIVATE HyperDR::codec heif lcms2::lcms2)
+  target_link_libraries(heif_imageio_fixtures PRIVATE HyperDR::codec lcms2::lcms2)
   target_include_directories(heif_imageio_fixtures PRIVATE ${PROJECT_SOURCE_DIR}/modules/codec/src)
   hyperdr_configure_target(heif_imageio_fixtures)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
@@ -99,7 +95,7 @@ endif()
 
 if(HYPERDR_WITH_CODECS AND HYPERDR_BUILD_TESTS)
   add_executable(heif_imageio_renditions heif_imageio_renditions.cpp)
-  target_link_libraries(heif_imageio_renditions PRIVATE HyperDR::codec heif)
+  target_link_libraries(heif_imageio_renditions PRIVATE HyperDR::codec)
   target_include_directories(heif_imageio_renditions PRIVATE ${PROJECT_SOURCE_DIR}/modules/codec/src ${PROJECT_SOURCE_DIR}/modules/container/src)
   hyperdr_configure_target(heif_imageio_renditions)
 endif()
@@ -129,7 +125,9 @@ endif()
 
 if(HYPERDR_WITH_CODECS AND HYPERDR_BUILD_TESTS)
   # Deliberately replaces only the YUV conversion object in this executable.
-  # The codec library always contains its normal bilinear implementation.
+  # The codec library carries the product's copy of the same symbols; the link
+  # keeps the executable's definition because the library's member is never
+  # pulled in, and `heif_input_probe --self-test` fails if that stops being so.
   add_executable(heif_input_probe EXCLUDE_FROM_ALL
     heif_input_probe.cpp ../src/hevc/yuv_to_rgb.cpp)
   target_compile_definitions(heif_input_probe PRIVATE HYPERDR_HEIF_CHROMA_DIAGNOSTIC=1)
@@ -146,7 +144,7 @@ if(HYPERDR_WITH_CODECS AND HYPERDR_BUILD_TESTS)
 endif()
 
 if(HYPERDR_WITH_CODECS)
-  # Verification rejections and whole-canvas diagnostics, with no libheif.
+  # Verification rejections and whole-canvas diagnostics.
   hyperdr_add_test(heic_verify_test LINK HyperDR::codec lcms2::lcms2)
   if(TARGET heic_verify_test)
     target_include_directories(heic_verify_test PRIVATE ${PROJECT_SOURCE_DIR}/modules/codec/src)

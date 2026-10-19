@@ -5,6 +5,7 @@ public struct EngineConfiguration: Sendable {
     public var cacheDirectory: URL?
     public var memoryBudgetBytes: UInt64
     public var heicTileWorkers: Int
+    var hevcOverride: String?
     public init(cacheDirectory: URL? = nil, memoryBudgetBytes: UInt64 = 0, heicTileWorkers: Int = 0) {
         self.cacheDirectory = cacheDirectory
         self.memoryBudgetBytes = memoryBudgetBytes
@@ -26,6 +27,7 @@ public final class Engine: @unchecked Sendable {
             var config: [String: JSONValue] = [
                 "memory_budget_bytes": .number(Double(configuration.memoryBudgetBytes)),
                 "heic_tile_workers": .number(Double(configuration.heicTileWorkers))]
+            if let override = configuration.hevcOverride { config["hevc_override"] = .string(override) }
             if let directory = configuration.cacheDirectory { config["cache_directory"] = .string(directory.path) }
             var output: OpaquePointer?
             var error: UnsafeMutablePointer<hyperdr_error>?

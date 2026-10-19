@@ -30,6 +30,8 @@ std::string next_value(int& i, int argc, char** argv, std::string_view option);
 void parse_settings(int argc, char** argv, int first, ConvertOptions& options,
                     unsigned* curve_samples = nullptr, PreviewRegion* region = nullptr);
 
+EngineConfig cli_engine_config();
+int capabilities_command(int argc, char** argv);
 int convert_command(int argc, char** argv);
 int curve_command(int argc, char** argv);
 int schema_command(int argc, char** argv);

@@ -21,6 +21,14 @@
 
 namespace hyperdr::app::detail {
 
+int capabilities_command(int argc, char** argv) {
+  if (argc > 3 || (argc == 3 && std::string_view(argv[2]) != "--json"))
+    throw std::invalid_argument("capabilities accepts only --json");
+  set_stdout_binary();
+  std::cout << Engine(cli_engine_config()).capabilities();
+  return 0;
+}
+
 int probe_command(int argc, char** argv) {
   if (argc < 3 || argc > 4) throw std::invalid_argument("probe requires one input image");
   if (argc == 4 && std::string_view(argv[3]) != "--json") {

@@ -12,6 +12,12 @@
 
 namespace hyperdr::app::detail {
 
+EngineConfig cli_engine_config() {
+  EngineConfig config;
+  if (const char* value = std::getenv("HYPERDR_TEST_HEVC")) config.hevc_override = value;
+  return config;
+}
+
 int convert_command(int argc, char** argv) {
   if (argc < 3) throw std::invalid_argument("convert requires an input path");
   ConvertOptions options;
@@ -20,7 +26,7 @@ int convert_command(int argc, char** argv) {
   struct CliProgress : ProgressSink {
     void on_progress(const ProgressEvent& event) override { std::cerr << event.text; }
   } sink;
-  EngineConfig config;
+  auto config = cli_engine_config();
   if (const char* text = std::getenv("HYPERDR_HEIC_TILE_WORKERS")) {
     char* end = nullptr;
     const long workers = std::strtol(text, &end, 10);

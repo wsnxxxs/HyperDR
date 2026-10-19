@@ -1,4 +1,5 @@
 #include "hyperdr/app/engine.hpp"
+#include "encoder_capabilities.hpp"
 #include "hyperdr/app/batch.hpp"
 #include "hyperdr/app/schema.hpp"
 #include "hyperdr/codec/availability.hpp"
@@ -29,6 +30,7 @@ void PreviewRegion::resolve(std::uint32_t image_width, std::uint32_t image_heigh
 }
 
 Engine::Engine(EngineConfig config) : config_(std::move(config)) {
+  app::detail::validate_hevc_override(config_.hevc_override);
   if (config_.heic_tile_workers > 4) throw std::invalid_argument("heic_tile_workers must be in [0,4]");
 #if HYPERDR_WITH_NCNN
   static std::once_flag initialized;
@@ -45,24 +47,31 @@ std::string Engine::convert(ConvertOptions options, ProgressSink* sink,
   ExecutionScope execution({config_.heic_tile_workers, config_.memory_budget_bytes});
   if (options.decode_cache_directory.empty()) options.decode_cache_directory = config_.cache_directory;
   std::string report;
-  const int status = run_conversion(options, sink, &report);
+  const int status = run_conversion(options, sink, &report, config_.hevc_override);
   if (exit_code) *exit_code = status;
   return report;
 }
 std::string Engine::capabilities() const {
+  const auto caps = app::detail::effective_encoder_capabilities(config_.cache_directory, config_.hevc_override);
   json::Writer writer;
   writer.begin_object().member("schema", "hyperdr.capabilities/v1")
       .member("version", kVersion).member("buildFingerprint", codec_runtime_fingerprint())
       .member("codecs", kCodecsAvailable).member("memoryBudgetBytes", config_.memory_budget_bytes)
       .member("heicTileWorkers", config_.heic_tile_workers)
-      .raw_member("models", native_model_list_json()).begin_array("encodings");
+      .raw_member("models", native_model_list_json())
+      .begin_object("encoder").member("backend", "videotoolbox")
+      .member("main8", caps.main8).member("main10", caps.main10)
+      .member("state", caps.reason == "hevc_probe_failed" ? "failed" : caps.main8 ? "ready" : "unavailable")
+      .member("reason", caps.reason).end_object().begin_array("encodings");
   for (auto encoding : {OutputEncoding::Adaptive, OutputEncoding::IsoGainMapJpeg, OutputEncoding::Pq,
       OutputEncoding::Hlg, OutputEncoding::AvifPq, OutputEncoding::AvifHlg,
       OutputEncoding::SdrJpeg, OutputEncoding::SdrTiff}) {
     const bool hevc = encoding == OutputEncoding::Adaptive || encoding == OutputEncoding::Pq || encoding == OutputEncoding::Hlg;
+    const auto reason = !kCodecsAvailable ? std::string("codecs_unavailable")
+        : hevc ? app::detail::encoder_failure(caps, encoding != OutputEncoding::Adaptive) : std::string{};
     writer.begin_object().member("id", hdr_encoding_name(encoding))
-        .member("available", kCodecsAvailable && !hevc)
-        .member("reason", !kCodecsAvailable ? "codecs_unavailable" : hevc ? "hevc_encoder_unavailable" : "")
+        .member("available", reason.empty())
+        .member("reason", reason)
         .end_object();
   }
   return writer.end_array().end_object().take() + '\n';

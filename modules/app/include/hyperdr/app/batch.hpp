@@ -6,6 +6,7 @@
 #include "hyperdr/gainmap/external.hpp"
 
 #include <vector>
+#include <string_view>
 #include "hyperdr/foundation/progress.hpp"
 
 namespace hyperdr {
@@ -55,11 +56,12 @@ void require_decode_resolution(const ConvertOptions& options,
 // per-file failure: the reason lands in the result so a batch can continue.
 [[nodiscard]] FileResult convert_file(const std::filesystem::path& input,
                                       const ConvertOptions& options,
-                                      const std::string& fingerprint, ProgressSink* sink = nullptr);
+                                      const std::string& fingerprint, ProgressSink* sink = nullptr,
+                                      std::string_view hevc_override = {});
 
 // Converts everything `discover_input_files` finds. Returns a process exit code:
 // 0 when every file succeeded or was skipped.
 [[nodiscard]] int run_conversion(const ConvertOptions& options, ProgressSink* sink = nullptr,
-                                  std::string* report = nullptr);
+                                  std::string* report = nullptr, std::string_view hevc_override = {});
 
 }  // namespace hyperdr

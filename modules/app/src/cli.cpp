@@ -22,6 +22,7 @@ void usage() {
          " PQ, HLG, AVIF\n\n"
          "Usage:\n"
          "  HyperDR convert <file-or-directory> --output <directory> [options]\n"
+         "  HyperDR capabilities [--json]\n"
          "  HyperDR probe <image> [--json]\n"
          "  HyperDR inspect <file.heic|file.jpg> [--json]\n"
          "  HyperDR raw-metadata <raw-file>\n"
@@ -87,6 +88,7 @@ int run_cli(int argc, char** argv) {
     return argc < 2 ? 2 : 0;
   }
   const std::string_view command = argv[1];
+  if (command == "capabilities") return capabilities_command(argc, argv);
   if (command == "convert") return convert_command(argc, argv);
   if (command == "curve") return curve_command(argc, argv);
   if (command == "schema") return schema_command(argc, argv);

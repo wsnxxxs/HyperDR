@@ -10,7 +10,7 @@ public struct Capabilities: Codable, Sendable {
         public let backend: String
         public let main8, main10: Bool
         public let state: String
-        public let reason: String?
+        public let reason: String
     }
     public let schema, version, buildFingerprint: String
     public let codecs: Bool

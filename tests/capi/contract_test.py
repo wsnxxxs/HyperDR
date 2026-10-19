@@ -294,6 +294,96 @@ class EngineContract(unittest.TestCase):
     def tearDown(self):
         LIB.hyperdr_engine_destroy(self.engine)
 
+    def test_capabilities_cli_and_overrides(self):
+        for override in (None, "unavailable", "no-main10"):
+            handle = Handle()
+            config = {} if override is None else {"hevc_override": override}
+            checked(LIB.hyperdr_engine_create, encoded(config), ctypes.byref(handle))
+            try:
+                env = dict(os.environ)
+                env.pop("HYPERDR_TEST_HEVC", None)
+                if override:
+                    env["HYPERDR_TEST_HEVC"] = override
+                document = result(LIB.hyperdr_capabilities, handle)
+                self.assertEqual(document, subprocess.check_output([CLI, "capabilities", "--json"], env=env))
+                self.assertEqual(document, subprocess.check_output([CLI, "capabilities"], env=env))
+                caps = json.loads(document)
+                encoder = caps["encoder"]
+                self.assertEqual(encoder["backend"], "videotoolbox")
+                if caps["codecs"]:
+                    self.assertEqual(encoder["main8"], override != "unavailable")
+                    self.assertEqual(encoder["main10"], override is None)
+                    self.assertEqual(encoder["state"], "unavailable" if override == "unavailable" else "ready")
+                    self.assertEqual(encoder["reason"], {None: "", "unavailable": "hevc_unavailable",
+                                     "no-main10": "hevc_main10_unavailable"}[override])
+                    for encoding in caps["encodings"]:
+                        hevc = encoding["id"] in ("adaptive", "pq", "hlg")
+                        blocked = hevc and (override == "unavailable" or
+                                  (override == "no-main10" and encoding["id"] != "adaptive"))
+                        self.assertEqual(encoding["available"], not blocked)
+                        self.assertEqual(encoding["reason"], encoder["reason"] if blocked else "")
+            finally:
+                LIB.hyperdr_engine_destroy(handle)
+        # A CLI-only environment override must not leak into the ABI engine.
+        previous = os.environ.get("HYPERDR_TEST_HEVC")
+        try:
+            os.environ["HYPERDR_TEST_HEVC"] = "unavailable"
+            self.assertEqual(json.loads(result(LIB.hyperdr_capabilities, self.engine)), self.capabilities)
+        finally:
+            if previous is None:
+                os.environ.pop("HYPERDR_TEST_HEVC", None)
+            else:
+                os.environ["HYPERDR_TEST_HEVC"] = previous
+
+    def test_hevc_export_override_failures_and_non_hevc(self):
+        if not self.capabilities["codecs"]:
+            self.skipTest("requires codec-enabled build")
+        with tempfile.TemporaryDirectory(prefix="hyperdr-v4-") as temporary:
+            root = Path(temporary)
+            source = root / "source.png"
+            png(source, 64, 48)
+            for override in ("unavailable", "no-main10"):
+                handle = Handle()
+                checked(LIB.hyperdr_engine_create, encoded({"hevc_override": override}), ctypes.byref(handle))
+                try:
+                    for encoding, depth in (("adaptive", 8), ("adaptive", 10), ("pq", 10), ("hlg", 10),
+                                            ("sdr-jpeg", 8), ("sdr-tiff", 8), ("iso-gainmap-jpeg", 8),
+                                            ("avif-pq", 10), ("avif-hlg", 10)):
+                        with self.subTest(override=override, encoding=encoding, depth=depth):
+                            destination = root / (override + encoding + str(depth))
+                            report_path = root / "report.json"
+                            request = {"encoding": encoding, "command": {"input": str(source),
+                                       "output": str(destination), "depth": depth, "overwrite": True}}
+                            document = json.loads(result(LIB.hyperdr_convert, handle, encoded(request), CALLBACK(), None, None))
+                            file = document["files"][0]
+                            hevc = encoding in ("adaptive", "pq", "hlg")
+                            blocked = hevc and (override == "unavailable" or depth == 10)
+                            self.assertEqual(document["schema"], 13)
+                            self.assertEqual(file["success"], not blocked, file)
+                            target = Path(file["output"])
+                            self.assertEqual(target.exists(), not blocked)
+                            expected = None
+                            if not blocked:
+                                expected = target.read_bytes()
+                                target.unlink()
+                            else:
+                                self.assertEqual(file["error_code"], "hevc_unavailable" if override == "unavailable"
+                                                 else "hevc_main10_unavailable")
+                            cli = subprocess.run([CLI, "convert", str(source), "--output", str(destination),
+                                "--encoding", encoding, "--depth", str(depth), "--report", str(report_path)],
+                                env=dict(os.environ, HYPERDR_TEST_HEVC=override), capture_output=True)
+                            self.assertEqual(cli.returncode, 1 if blocked else 0, cli.stderr)
+                            cli_file = json.loads(report_path.read_bytes())["files"][0]
+                            self.assertEqual(cli_file["success"], file["success"])
+                            if blocked:
+                                self.assertEqual(cli_file["error_code"], file["error_code"])
+                                self.assertFalse(target.exists())
+                                self.assertEqual(list(destination.iterdir()), [])
+                            else:
+                                self.assertEqual(target.read_bytes(), expected)
+                finally:
+                    LIB.hyperdr_engine_destroy(handle)
+
     def assert_source_geometry(self, source, expected=None, fast_preview=False):
         probe = json.loads(result(LIB.hyperdr_probe, self.engine, os.fsencode(source)))
         dimensions = (probe["width"], probe["height"])

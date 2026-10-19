@@ -1,3 +1,4 @@
+#include "../../../tests/support/temp_directory.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/app/settings.hpp"
 #include "hyperdr/app/fingerprint.hpp"
@@ -63,7 +64,7 @@ void snapshot_identity(const std::filesystem::path& root) {
 }
 }
 int run() {
-  const auto root=std::filesystem::temp_directory_path()/("hyperdr-resource-snapshot-"+std::to_string(getpid()));
+  const auto root=hyperdr::test::temporary_directory()/("hyperdr-resource-snapshot-"+std::to_string(getpid()));
   try {
     std::filesystem::create_directories(root);
     snapshot_identity(root);

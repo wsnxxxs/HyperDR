@@ -1,3 +1,4 @@
+#include "../../../tests/support/temp_directory.hpp"
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/container/heif_tmap.hpp"
 #include "hyperdr/container/iso_gain_map.hpp"
@@ -134,7 +135,7 @@ double mean(const hyperdr::FloatImage& image) {
 }
 
 int main() {
-  const auto root=std::filesystem::temp_directory_path()/
+  const auto root=hyperdr::test::temporary_directory()/
       ("hyperdr-alpha-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
   try {
     std::filesystem::create_directory(root);

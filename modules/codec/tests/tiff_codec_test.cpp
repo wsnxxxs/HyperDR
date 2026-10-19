@@ -1,3 +1,4 @@
+#include "../../../tests/support/temp_directory.hpp"
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/foundation/file_io.hpp"
@@ -28,7 +29,7 @@ struct TemporaryFile {
 
 int main() {
   using namespace hyperdr;
-  const auto directory = std::filesystem::temp_directory_path();
+  const auto directory = hyperdr::test::temporary_directory();
   FloatImage original(2, 1, 3);
   original.pixels = {0.8F, 0.25F, 0.05F, 0.1F, 0.5F, 0.9F};
   PhotoMetadata metadata;

@@ -1,3 +1,4 @@
+#include "../../../tests/support/temp_directory.hpp"
 #include "hyperdr/app/decode_cache.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 
@@ -68,7 +69,7 @@ void round_trip(const std::filesystem::path& path,
 }  // namespace
 
 int main() {
-  const auto directory = std::filesystem::temp_directory_path() /
+  const auto directory = hyperdr::test::temporary_directory() /
       ("hyperdr-decode-" + std::to_string(
           std::chrono::steady_clock::now().time_since_epoch().count()));
   try {

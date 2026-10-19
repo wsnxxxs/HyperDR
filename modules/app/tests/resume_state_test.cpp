@@ -1,3 +1,4 @@
+#include "../../../tests/support/temp_directory.hpp"
 // --skip-existing used to compare modification times only, so changing the
 // look and re-running silently skipped every file and shipped the previous
 // render. These cases pin the fingerprint: it must change when anything that
@@ -76,7 +77,7 @@ void check_scheduling_options_do_not_change_it() {
 }
 
 void check_resume_rejects_damaged_output() {
-  const auto root = std::filesystem::temp_directory_path() / "hyperdr-resume-integrity-test";
+  const auto root = hyperdr::test::temporary_directory() / "hyperdr-resume-integrity-test";
   std::filesystem::remove_all(root);
   std::filesystem::create_directories(root / "output");
   const auto input = root / "input.jpg";
@@ -109,7 +110,7 @@ void check_resume_rejects_damaged_output() {
 }
 
 void check_decode_cache_roundtrip() {
-  const auto directory = std::filesystem::temp_directory_path() / "hyperdr-cache-test";
+  const auto directory = hyperdr::test::temporary_directory() / "hyperdr-cache-test";
   std::filesystem::remove_all(directory);
   std::filesystem::create_directories(directory);
 
@@ -217,7 +218,7 @@ void check_decode_cache_roundtrip() {
 }
 
 void check_decode_cache_key_varies() {
-  const auto self = std::filesystem::temp_directory_path() / "hyperdr-key-test.bin";
+  const auto self = hyperdr::test::temporary_directory() / "hyperdr-key-test.bin";
   {
     std::ofstream output(self, std::ios::binary);
     output << "fixture";
@@ -262,7 +263,7 @@ void check_export_rejects_reduced_resolution() {
 }
 
 void check_model_binding_rejects_stale_gain() {
-  const auto source = std::filesystem::temp_directory_path() /
+  const auto source = hyperdr::test::temporary_directory() /
                       "hyperdr-model-binding-source.arw";
   { std::ofstream output(source, std::ios::binary); output << "raw-a"; }
 
@@ -448,7 +449,7 @@ void check_model_preprocessing_identity() {
 }
 
 void check_prune_respects_the_budget() {
-  const auto directory = std::filesystem::temp_directory_path() / "hyperdr-prune-test";
+  const auto directory = hyperdr::test::temporary_directory() / "hyperdr-prune-test";
   std::filesystem::remove_all(directory);
   std::filesystem::create_directories(directory);
   for (int i = 0; i < 8; ++i) {

@@ -1,3 +1,4 @@
+#include "../../../tests/support/temp_directory.hpp"
 // Path comparison is shared by output-collision detection, self-overwrite
 // refusal, and the discovery walk that must not descend into its own output.
 // It used to exist in two copies with different platform behaviour.
@@ -46,7 +47,7 @@ void test_extension_is_case_insensitive() {
 }
 
 void test_atomic_write_round_trips() {
-  const auto directory = std::filesystem::temp_directory_path() / "hyperdr-file-io-test";
+  const auto directory = hyperdr::test::temporary_directory() / "hyperdr-file-io-test";
   std::filesystem::remove_all(directory);
   const auto target = directory / "nested" / "value.bin";
   const std::vector<std::uint8_t> bytes{1, 2, 3, 4};

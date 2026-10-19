@@ -1,3 +1,4 @@
+#include "../../../tests/support/temp_directory.hpp"
 // The frame reaches an export through three doors -- the C ABI request, the
 // CLI and the resume fingerprint -- and each has to agree on it. These cases
 // pin that agreement without decoding a photograph.
@@ -102,7 +103,7 @@ void test_fingerprint_covers_the_frame() {
           "a different mat or colour must change the fingerprint");
 
   // The overlay is an external file: its contents, not only its name, count.
-  const auto folder = std::filesystem::temp_directory_path() / "hyperdr-frame-request-test";
+  const auto folder = hyperdr::test::temporary_directory() / "hyperdr-frame-request-test";
   std::filesystem::create_directories(folder);
   const auto overlay = folder / "caption.png";
   const auto with_overlay = [&] {
@@ -128,7 +129,7 @@ void test_fingerprint_covers_the_frame() {
 }
 
 void test_cli_reads_the_frame_file_first() {
-  const auto folder = std::filesystem::temp_directory_path() / "hyperdr-frame-cli-test";
+  const auto folder = hyperdr::test::temporary_directory() / "hyperdr-frame-cli-test";
   std::filesystem::create_directories(folder);
   const auto spec = folder / "frame.json";
   std::ofstream(spec) << R"({"margins": 0.05, "colour": "#FFFFFF"})";
@@ -145,7 +146,7 @@ void test_cli_reads_the_frame_file_first() {
 }
 
 void test_missing_overlay_fails_before_input_or_output() {
-  const auto folder = std::filesystem::temp_directory_path() / "hyperdr-frame-missing-overlay-test";
+  const auto folder = hyperdr::test::temporary_directory() / "hyperdr-frame-missing-overlay-test";
   std::filesystem::remove_all(folder);
   std::filesystem::create_directories(folder);
   const auto spec = folder / "frame.json";

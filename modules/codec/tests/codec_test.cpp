@@ -1,3 +1,4 @@
+#include "../../../tests/support/temp_directory.hpp"
 #include "hyperdr/container/heif_tmap.hpp"
 #include "hevc/hevc.hpp"
 #include "hyperdr/container/heif_writer.hpp"
@@ -186,7 +187,7 @@ std::vector<std::uint8_t> make_pq_png() {
 }
 
 void check_png_cicp_headroom() {
-  const auto path = std::filesystem::temp_directory_path() /
+  const auto path = hyperdr::test::temporary_directory() /
                     "hyperdr-codec-cicp-pq.png";
   try {
     hyperdr::write_binary_file_atomic(path, make_pq_png(), true);
@@ -205,7 +206,7 @@ hyperdr::DecodedImage decode_encoded_input(const std::vector<std::uint8_t>& byte
                                            const char* label,
                                            const char* extension = ".heic",
                                            const hyperdr::RawDecodeOptions& options = {}) {
-  const auto path = std::filesystem::temp_directory_path() /
+  const auto path = hyperdr::test::temporary_directory() /
       (std::string("hyperdr-codec-input-") + label + extension);
   hyperdr::write_binary_file_atomic(path, bytes, true);
   try {
@@ -220,7 +221,7 @@ hyperdr::DecodedImage decode_encoded_input(const std::vector<std::uint8_t>& byte
 
 hyperdr::DecodedImage decode_gain_map_jpeg_input(const std::vector<std::uint8_t>& bytes) {
   const auto path =
-      std::filesystem::temp_directory_path() / "hyperdr-codec-input-ultrahdr.jpg";
+      hyperdr::test::temporary_directory() / "hyperdr-codec-input-ultrahdr.jpg";
   hyperdr::write_binary_file_atomic(path, bytes, true);
   try {
     auto decoded = hyperdr::decode_ultrahdr(path);
@@ -312,7 +313,7 @@ void require_chroma_422(const std::vector<std::uint8_t>& bytes) {
 // only the HDR one may be scaled.
 void check_input_headroom(const std::vector<std::uint8_t>& bytes, const char* label,
                           const char* extension) {
-  const auto path = std::filesystem::temp_directory_path() /
+  const auto path = hyperdr::test::temporary_directory() /
       (std::string("hyperdr-codec-headroom-") + label + extension);
   hyperdr::write_binary_file_atomic(path, bytes, true);
   try {
@@ -554,8 +555,8 @@ void check_structure(const std::vector<std::uint8_t>& bytes, const char* label) 
 }
 
 void reconstruct_and_check(const std::vector<std::uint8_t>& bytes, const char* label) {
-  const auto temp_heic = std::filesystem::temp_directory_path() / "hyperdr-codec-test.heic";
-  const auto temp_tiff = std::filesystem::temp_directory_path() / "hyperdr-codec-test.tiff";
+  const auto temp_heic = hyperdr::test::temporary_directory() / "hyperdr-codec-test.heic";
+  const auto temp_tiff = hyperdr::test::temporary_directory() / "hyperdr-codec-test.tiff";
   hyperdr::write_binary_file_atomic(temp_heic, bytes, true);
   hyperdr::reconstruct_heic_to_tiff(temp_heic, temp_tiff);
   const auto tiff = hyperdr::read_binary_file(temp_tiff);
@@ -572,7 +573,7 @@ void reconstruct_and_check(const std::vector<std::uint8_t>& bytes, const char* l
 // fails if the two arms are decoded or rendered differently, if the statistics
 // are read from the wrong arm, or if they are never populated at all.
 void display_curve_identity_check(const std::vector<std::uint8_t>& bytes, const char* label) {
-  const auto temp_heic = std::filesystem::temp_directory_path() / "hyperdr-display-curve-test.heic";
+  const auto temp_heic = hyperdr::test::temporary_directory() / "hyperdr-display-curve-test.heic";
   hyperdr::write_binary_file_atomic(temp_heic, bytes, true);
   const std::vector<float> headrooms{0.0F, 1.0F, 2.5F};
   const auto result = hyperdr::compare_gain_map_heic_curve(temp_heic, temp_heic, headrooms);
@@ -606,7 +607,7 @@ void display_curve_identity_check(const std::vector<std::uint8_t>& bytes, const 
 void display_curve_difference_check(const std::vector<std::uint8_t>& reference_bytes,
                                     const std::vector<std::uint8_t>& candidate_bytes,
                                     const char* label) {
-  const auto directory = std::filesystem::temp_directory_path();
+  const auto directory = hyperdr::test::temporary_directory();
   const auto reference = directory / "hyperdr-display-curve-reference.heic";
   const auto candidate = directory / "hyperdr-display-curve-candidate.heic";
   hyperdr::write_binary_file_atomic(reference, reference_bytes, true);
@@ -851,7 +852,7 @@ void check_icc_only_heic() {
           "ICC-only fixture unexpectedly contains nclx");
   if (nclx) heif_nclx_color_profile_free(nclx);
 
-  const auto path = std::filesystem::temp_directory_path() /
+  const auto path = hyperdr::test::temporary_directory() /
                     "hyperdr-codec-icc-only.heic";
   hyperdr::write_binary_file_atomic(path, bytes, true);
   try {
@@ -956,7 +957,7 @@ void check_avif_gain_map(bool hdr_primary) {
                 inspect->image->transferCharacteristics == AVIF_TRANSFER_CHARACTERISTICS_PQ,
             "AVIF fixture must store ICC and PQ CICP together");
   }
-  const auto path = std::filesystem::temp_directory_path() /
+  const auto path = hyperdr::test::temporary_directory() /
       (hdr_primary ? "hyperdr-gain-hdr-primary.avif" : "hyperdr-gain-sdr-primary.avif");
   hyperdr::write_binary_file_atomic(path, bytes, true);
   try {
@@ -1138,7 +1139,7 @@ std::vector<std::uint8_t> encode_apple_legacy_heic(bool with_makernote) {
 }
 
 void check_apple_legacy_heic() {
-  const auto path = std::filesystem::temp_directory_path() / "hyperdr-apple-legacy.heic";
+  const auto path = hyperdr::test::temporary_directory() / "hyperdr-apple-legacy.heic";
   try {
     hyperdr::write_binary_file_atomic(path, encode_apple_legacy_heic(true), true);
     const auto decoded = hyperdr::decode_image(path);
@@ -1282,7 +1283,7 @@ int main() {
     base_only.ignore_embedded_gain_map = true;
     const auto oriented_jpeg_bytes =
         hyperdr::encode_gain_map_jpeg(small_gain, portrait_metadata, 90);
-    const auto oriented_jpeg_path = std::filesystem::temp_directory_path() /
+    const auto oriented_jpeg_path = hyperdr::test::temporary_directory() /
                                     "hyperdr-codec-oriented-jpeg.jpg";
     hyperdr::write_binary_file_atomic(oriented_jpeg_path, oriented_jpeg_bytes,
                                       true);

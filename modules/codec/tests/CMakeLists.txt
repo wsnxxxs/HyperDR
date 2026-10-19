@@ -94,3 +94,13 @@ if(HYPERDR_WITH_CODECS AND HYPERDR_BUILD_TESTS)
     --rendition-fixtures $<TARGET_FILE:heif_imageio_renditions> --build-dir ${CMAKE_BINARY_DIR}/heif-imageio)
   set_tests_properties(heif_export_imageio_test PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
 endif()
+
+if(HYPERDR_WITH_CODECS AND HYPERDR_BUILD_TESTS)
+  add_test(NAME native_temp_isolation_test COMMAND ${Python3_EXECUTABLE}
+    ${PROJECT_SOURCE_DIR}/tests/support/check_concurrent_temp.py
+    $<TARGET_FILE:png_decode_test> $<TARGET_FILE:tiff_codec_test>
+    $<TARGET_FILE:hash_test> $<TARGET_FILE:file_io_test>
+    $<TARGET_FILE:frame_request_test> $<TARGET_FILE:resume_state_test>
+    $<TARGET_FILE:color_lut_test> $<TARGET_FILE:discovery_test>)
+  set_tests_properties(native_temp_isolation_test PROPERTIES TIMEOUT 180)
+endif()

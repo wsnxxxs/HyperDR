@@ -1,3 +1,4 @@
+#include "../../../tests/support/temp_directory.hpp"
 #include "hyperdr/gainmap/external.hpp"
 
 #include "hyperdr/foundation/rational.hpp"
@@ -32,7 +33,7 @@ void write_float_le(std::ofstream& output, float value) {
 }
 
 void test_external_gain_round_trip() {
-  const auto root = std::filesystem::temp_directory_path() /
+  const auto root = hyperdr::test::temporary_directory() /
                     "hyperdr-external-gain-test";
   std::filesystem::remove_all(root);
   std::filesystem::create_directories(root);
@@ -157,7 +158,7 @@ void test_external_gain_round_trip() {
 }
 
 void test_v2_signed_canonical_sidecar() {
-  const auto root = std::filesystem::temp_directory_path() /
+  const auto root = hyperdr::test::temporary_directory() /
                     "hyperdr-external-gain-v2-test";
   std::filesystem::remove_all(root);
   std::filesystem::create_directories(root);

@@ -1,3 +1,4 @@
+#include "../../../tests/support/temp_directory.hpp"
 #include "hyperdr/look/color_lut.hpp"
 #include "hyperdr/image/color.hpp"
 #include "hyperdr/image/transfer.hpp"
@@ -278,7 +279,7 @@ void test_content_light_lut(const std::filesystem::path& file) {
 }
 
 int main() {
-  const auto file=std::filesystem::temp_directory_path()/"hyperdr-color-lut-test.cube";
+  const auto file=hyperdr::test::temporary_directory()/"hyperdr-color-lut-test.cube";
   try {
     {
       std::ofstream out(file);

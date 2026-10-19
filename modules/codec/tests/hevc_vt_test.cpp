@@ -1,3 +1,4 @@
+#include "../../../tests/support/temp_directory.hpp"
 // VideoToolbox HEVC: colour conversion and tiling, the encoder's sequence
 // contract (one IDR per tile, shared parameter sets, clean samples), round-trip
 // quality, the capabilities probe and its cache. Exits 77 (skipped) only when
@@ -584,7 +585,7 @@ int main() {
     test_quality_map();
     test_nal_policy();
 
-    const auto directory = std::filesystem::temp_directory_path() /
+    const auto directory = hyperdr::test::temporary_directory() /
                            ("hyperdr-hevc-test-" + std::to_string(::getpid()));
     std::filesystem::remove_all(directory);
     test_cancelled_first_probe(directory);

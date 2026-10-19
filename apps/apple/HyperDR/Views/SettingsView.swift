@@ -135,8 +135,12 @@ private struct AboutSettings: View {
                 }
                 HStack {
                     Button("settings.copyDiagnostics") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(model.diagnosticText, forType: .string)
+                        // The equivalent command is built on demand from one snapshot of the edit.
+                        Task {
+                            let text = await model.diagnosticText
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(text, forType: .string)
+                        }
                     }
                     if let notices = Bundle.main.url(forResource: "THIRD_PARTY_NOTICES", withExtension: "md") {
                         Button("settings.acknowledgements") { NSWorkspace.shared.open(notices) }

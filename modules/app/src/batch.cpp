@@ -413,7 +413,8 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
         external_pixels = std::uint64_t(grid->width) * grid->height;
       }
     const auto retention = rendition_retention(
-        staged.image.authored_sdr.has_value(), !options.ai_model_path.empty(),
+        staged.image.decode.raw.has_value(), staged.image.authored_sdr.has_value(),
+        !options.ai_model_path.empty(),
         !options.external_gain_path.empty(),
         options.color_lut.snapshot && options.color_lut.strength > 0);
     const auto estimate = estimate_export_memory(pw, ph, options.frame ? layout.width : pw,

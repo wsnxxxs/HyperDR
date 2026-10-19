@@ -42,6 +42,16 @@ void external_measured_peaks() {
       throw std::runtime_error(std::string("external gain estimate outside [1,1.5]: ")+r.name);
   }
 }
+// R7-1301: RAW exports with a colour LUT, classified by rendition_retention().
+void raw_lut_peaks() {
+  const auto retention=rendition_retention(true,false,false,false,true);
+  for(const auto& r : raw_lut_measurements) {
+    const auto peak=estimate_export_memory(r.pw,r.ph,r.cw,r.ch,r.encoding,r.depth,true,0,0,0,
+        retention.retained,0,0,retention.imported_pair_only).peak();
+    if(peak<r.footprint || peak>r.footprint+r.footprint/2)
+      throw std::runtime_error(std::string("RAW + LUT estimate outside [1,1.5]: ")+r.name);
+  }
+}
 // P3b-4: exports of HEIC photos read by our own reader. Never below the real
 // footprint, never beyond 1.5 times it.
 void heic_input_peaks() {
@@ -103,16 +113,22 @@ void avif_grid_estimates() {
   require(above.peak()<8ULL<<30,"a 144 MP AVIF export should fit eight gigabytes as a grid");
 }
 void rendition_retention_flags() {
-  require(!rendition_retention(false,false,false,false).retained,"a plain photo retains nothing");
-  const auto pair=rendition_retention(true,false,false,false);
-  require(pair.retained && pair.imported_pair_only,"an imported pair alone");
-  for(int extra=0;extra<3;++extra) {
-    const auto mixed=rendition_retention(true,extra==0,extra==1,extra==2);
-    require(mixed.retained && !mixed.imported_pair_only,"a pair with a model, grid or LUT is not a pair alone");
+  for(bool raw : {false,true}) {
+    require(!rendition_retention(raw,false,false,false,false).retained,"a plain photo retains nothing");
+    require(rendition_retention(raw,false,true,false,false).retained,"a model gain retains renditions");
+    require(rendition_retention(raw,false,false,true,false).retained,"an external grid retains renditions");
+    const auto mixed_model=rendition_retention(raw,true,true,false,false);
+    const auto mixed_grid=rendition_retention(raw,true,false,true,false);
+    require(mixed_model.retained && !mixed_model.imported_pair_only &&
+            mixed_grid.retained && !mixed_grid.imported_pair_only,
+            "a pair with a model or a grid is not a pair alone");
   }
-  for(int source=0;source<3;++source) {
-    const auto working=rendition_retention(false,source==0,source==1,source==2);
-    require(working.retained && !working.imported_pair_only,"model, grid and LUT conversions are not a pair");
+  // A LUT retains nothing by itself, on any source, and leaves a pair a pair.
+  for(bool raw : {false,true}) {
+    const auto lut=rendition_retention(raw,false,false,false,true);
+    require(!lut.retained && !lut.imported_pair_only,"a LUT alone retains nothing");
+    const auto pair=rendition_retention(raw,true,false,false,true);
+    require(pair.retained && pair.imported_pair_only,"an imported pair with a LUT is still a pair");
   }
 }
 void estimates() {
@@ -406,6 +422,7 @@ int main() try {
   avif_grid_estimates();
   measured_peaks();
   heic_input_peaks();
+  raw_lut_peaks();
   external_grid_estimates();
   external_measured_peaks();
 #if HYPERDR_WITH_CODECS

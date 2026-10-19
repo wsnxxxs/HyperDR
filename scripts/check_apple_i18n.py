@@ -90,9 +90,9 @@ DESIGN = REPO_ROOT / "apps" / "apple" / "Packages" / "HyperDRDesign" / "Sources"
 DESIGN_CATALOG = DESIGN / "Resources" / "Localizable.xcstrings"
 DESIGN_COMPONENTS = DESIGN / "Inspector"
 LOCALES = ["en", "zh-Hans"]
-# Where the HEIF reader and the HEVC decoder throw HeifReadError with a feature.
-HEIF_SOURCES = ("modules/container/src/heif_reader.cpp", "modules/container/src/hvcc.cpp",
-                "modules/codec/src/hevc/vt_decoder.cpp", "modules/codec/src/hevc/yuv_to_rgb.cpp")
+# Every engine source (not the tests) that can throw HeifReadError with a feature.
+HEIF_SOURCE_GLOBS = ("modules/*/src/**/*", "modules/*/include/**/*")
+HEIF_SOURCE_SUFFIXES = {".cpp", ".cc", ".hpp", ".h", ".mm"}
 HEIF_FEATURE_KEY = "err.server.unsupported_format.heif."
 ERROR_TEXT = APP / "Views" / "ErrorText.swift"
 # Keys read through a name built at run time (see the module docstring); never
@@ -533,6 +533,18 @@ def design_self_test(files: list[tuple[str, bool, str]], entries: dict) -> list[
 HEIF_FEATURE_RE = re.compile(r'"([a-z0-9_]+)"')
 
 
+def heif_engine_sources() -> dict[str, str]:
+    """The text of every engine source file that mentions HeifReadError."""
+    sources: dict[str, str] = {}
+    for pattern in HEIF_SOURCE_GLOBS:
+        for path in sorted(REPO_ROOT.glob(pattern)):
+            if path.suffix in HEIF_SOURCE_SUFFIXES and path.is_file():
+                text = path.read_text(encoding="utf-8", errors="replace")
+                if "HeifReadError(" in text:
+                    sources[str(path.relative_to(REPO_ROOT))] = text
+    return sources
+
+
 def heif_features_thrown(source: str) -> set[str]:
     """Every lower-case identifier string inside a `HeifReadError(...)` call, up
     to its statement's `;`, whichever branch of a (nested) conditional it is in.
@@ -551,6 +563,8 @@ def heif_feature_list(error_text: str) -> set[str] | None:
 
 def heif_features(sources: dict[str, str], error_text: str, entries: dict) -> list[str]:
     """Problems between the features the engine throws, the app's list and the catalogue."""
+    if not sources:
+        return ["no engine source throws HeifReadError: the source globs found nothing"]
     listed = heif_feature_list(error_text)
     if listed is None:
         return ["cannot find ErrorText.heifFeatures"]
@@ -616,7 +630,7 @@ def main() -> int:
     ]
 
     try:
-        heif_sources = {name: (REPO_ROOT / name).read_text(encoding="utf-8") for name in HEIF_SOURCES}
+        heif_sources = heif_engine_sources()
         error_text = ERROR_TEXT.read_text(encoding="utf-8")
     except OSError as error:
         print(f"cannot read the HEIF feature sources: {error}")

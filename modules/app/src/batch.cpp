@@ -398,8 +398,11 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     std::uint64_t external_pixels = 0;
     if (const auto& snapshot = options.external_gain_snapshot; snapshot && !options.external_gain_path.empty())
       if (const auto grid = peek_external_gain_grid(snapshot->gain_bytes, snapshot->report_bytes,
-                                                    options.allow_legacy_external_gain))
+                                                    options.allow_legacy_external_gain)) {
+        // A damaged file is the user's first problem, not the memory budget.
+        check_external_gain_hash(snapshot->report_bytes, snapshot->gain_sha256);
         external_pixels = std::uint64_t(grid->width) * grid->height;
+      }
     const auto estimate = estimate_export_memory(pw, ph, options.frame ? layout.width : pw,
         options.frame ? layout.height : ph, options.encoding, options.depth,
         staged.image.decode.raw.has_value(), staged.image.decode.sensor_width,
@@ -415,12 +418,12 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
     std::optional<ExternalGainMap> external;
     if (!options.external_gain_path.empty()) {
       // Parse per file so an invalid grid stays a per-file failure, as before.
-      external = options.external_gain_snapshot
-          ? parse_external_gain_map(options.external_gain_snapshot->gain_bytes,
-                                    options.external_gain_snapshot->report_bytes,
-                                    options.allow_legacy_external_gain)
-          : read_external_gain_map(options.external_gain_path,
-                                         options.external_gain_report,
+      // prepare_conversion_resources froze the two files before this stage, and the
+      // admission above sized the grid from the same bytes.
+      if (!options.external_gain_snapshot)
+        throw std::logic_error("the external gain files were not captured before conversion");
+      external = parse_external_gain_map(options.external_gain_snapshot->gain_bytes,
+                                         options.external_gain_snapshot->report_bytes,
                                          options.allow_legacy_external_gain);
     }
     GainMapResult gain;

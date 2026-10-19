@@ -78,6 +78,10 @@ nonisolated struct DocumentState: Equatable {
     var source: SourceSummary?
     var previewError: UserFacingError?
     var isPreparingCameraSupport = false
+    /// An open that is not a RAW has had no first frame for 1.5 s (raw-states §9):
+    /// the canvas offers to cancel it. Like `isPreparingCameraSupport`, it is
+    /// cleared when the first frame arrives and is never both at once.
+    var isOpeningSlowly = false
 }
 
 nonisolated struct DisplayState: Equatable {

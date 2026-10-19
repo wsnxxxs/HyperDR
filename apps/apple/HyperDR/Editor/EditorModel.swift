@@ -363,8 +363,10 @@ import UniformTypeIdentifiers
                 try Task.checkCancellation()
                 guard generation == ticket else { await services.close(opened); return }
                 let preparing = document?.isPreparingCameraSupport == true
+                let slow = document?.isOpeningSlowly == true
                 document = opened.openingDocument
                 document?.isPreparingCameraSupport = preparing
+                document?.isOpeningSlowly = slow
                 var reference: EditorPreview?
                 for await event in services.previews(for: opened, encoding: encoding, maxEdge: previewEdge) {
                     try Task.checkCancellation()
@@ -424,23 +426,30 @@ import UniformTypeIdentifiers
     }
 
     private func startCameraSupportDeadline(openedAt: Duration, ticket: Int) {
-        // Arm at launch even before restoreLast identifies the source. Unknown
-        // formats never publish a RAW state; a restored RAW adopts this deadline.
-        guard isRestoring || document?.formatLabel == "RAW" else { return }
+        // Arm at launch even before restoreLast identifies the source; a
+        // restored photograph adopts this deadline. Once it passes, a RAW is
+        // "preparing camera support" and any other format is "opening slowly".
         let clock = services.openClock
         let deadline = openedAt + .milliseconds(1500)
-        if clock.now >= deadline, document?.formatLabel == "RAW" {
-            document?.isPreparingCameraSupport = true
+        if clock.now >= deadline, document?.phase == .opening, openRollback != nil {
+            publishSlowOpen()
             return
         }
         cameraSupportTask = Task { [weak self] in
             do { try await clock.sleep(until: deadline) }
             catch { return }
             guard let self, !Task.isCancelled, generation == ticket,
-                  openRollback != nil, document?.phase == .opening,
-                  document?.formatLabel == "RAW" else { return }
-            document?.isPreparingCameraSupport = true
+                  openRollback != nil, document?.phase == .opening else { return }
+            publishSlowOpen()
         }
+    }
+
+    /// 1.5 s without a first frame: a RAW is probably waiting for macOS to
+    /// provide the camera's support, anything else is just slow. Either way
+    /// the user may cancel (the formats that are not yet known stay silent).
+    private func publishSlowOpen() {
+        if document?.formatLabel == "RAW" { document?.isPreparingCameraSupport = true }
+        else if document != nil { document?.isOpeningSlowly = true }
     }
 
     func closeDocument() {
@@ -646,6 +655,7 @@ import UniformTypeIdentifiers
             cameraSupportTask?.cancel()
             cameraSupportTask = nil
             document?.isPreparingCameraSupport = false
+            document?.isOpeningSlowly = false
             document?.phase = .rendering
             referenceFrame = frame.frame
             referencePresentationTrace = frame.trace
@@ -665,6 +675,7 @@ import UniformTypeIdentifiers
             cameraSupportTask?.cancel()
             cameraSupportTask = nil
             document?.isPreparingCameraSupport = false
+            document?.isOpeningSlowly = false
             editedFrame = frame.frame
             editedPresentationTrace = frame.trace
             canvas.previewPixelSize = frame.frame.map { CGSize(width: $0.base.width, height: $0.base.height) }

@@ -334,8 +334,7 @@ struct CanvasStatus: View {
                             .padding(Space.s4)
                             .transition(.opacity)
                     } else if showsBusy, let label = busyLabel(document) {
-                        Label { Text(label) } icon: { CanvasSpinner(size: 12) }
-                            .hdrOverlayChip()
+                        busyChip(label, document: document)
                             .reportsCanvasFoot(\.status, gap: Space.s3, name: "status")
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                             .padding(Space.s3)
@@ -347,7 +346,9 @@ struct CanvasStatus: View {
                             CameraSupportPanel(fileName: document.name, canCancel: model.canCancelOpen, cancel: cancelOpen)
                                 .transition(.opacity)
                         } else {
-                            FirstFrameProgress(label: busyLabel(document) ?? "stage.generating")
+                            FirstFrameProgress(label: busyLabel(document) ?? "stage.generating",
+                                               slowFileName: document.isOpeningSlowly && model.canCancelOpen ? document.name : nil,
+                                               cancel: cancelOpen)
                         }
                     case .failed(let error):
                         FirstFrameFailure(text: ErrorText(error), engineFailed: model.engine.failure != nil) {
@@ -364,6 +365,11 @@ struct CanvasStatus: View {
         .onChange(of: model.document?.isPreparingCameraSupport == true) { _, preparing in
             if preparing { CameraSupportAnnouncement.post("raw.preparing.announce", locale: locale) }
         }
+        .onChange(of: model.document?.isOpeningSlowly == true) { _, slow in
+            if slow, let name = model.document?.name {
+                CameraSupportAnnouncement.post("open.slow.announce %@", locale: locale, name)
+            }
+        }
         .task(id: isBusy) {
             guard isBusy else { showsBusy = false; return }
             try? await Task.sleep(for: .milliseconds(300))
@@ -371,9 +377,16 @@ struct CanvasStatus: View {
         }
     }
 
-    private func cancelOpen() {
-        model.cancelOpen()
-        CameraSupportAnnouncement.post("raw.preparing.cancelled", locale: locale)
+    private func cancelOpen() { OpenCancellation.cancel(model, locale: locale) }
+
+    /// "Reading the photo…" in the corner; once it is slow, with Cancel.
+    @ViewBuilder private func busyChip(_ label: LocalizedStringKey, document: DocumentState) -> some View {
+        if document.isOpeningSlowly, model.canCancelOpen {
+            SlowOpenChip(label: label, fileName: document.name, cancel: cancelOpen)
+        } else {
+            Label { Text(label) } icon: { CanvasSpinner(size: 12) }
+                .hdrOverlayChip()
+        }
     }
 
     /// Whether the canvas draws a photo. Until the first frame (and briefly
@@ -414,18 +427,24 @@ private struct PreviewErrorBanner: View {
     }
 }
 
-private struct FirstFrameProgress: View {
+struct FirstFrameProgress: View {
     let label: LocalizedStringKey
+    /// Set once the open is slow: the file's name and a way out go under the stage text.
+    var slowFileName: String? = nil
+    var cancel: () -> Void = {}
 
     var body: some View {
         VStack(spacing: Space.s3) {
-            CanvasSpinner(size: 22)
-            Text(label)
-                .font(Font.hdr.control)
+            VStack(spacing: Space.s3) {
+                CanvasSpinner(size: 22)
+                Text(label)
+                    .font(Font.hdr.control)
+            }
+            .foregroundStyle(Color.hdr.overlayInk)
+            .accessibilityElement(children: .combine)
+            if let slowFileName { SlowOpenDetails(fileName: slowFileName, cancel: cancel) }
         }
-        .foregroundStyle(Color.hdr.overlayInk)
         .environment(\.colorScheme, .dark)
-        .accessibilityElement(children: .combine)
     }
 }
 

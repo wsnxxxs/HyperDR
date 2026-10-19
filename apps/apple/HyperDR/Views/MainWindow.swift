@@ -46,6 +46,39 @@ struct MainWindow: View {
 
     /// Opens the export panel; with the export running it shows the progress.
     func openExport() { showsExport = true }
+
+    /// "Change…" on the export panel's Frame row: the frame sheet takes the
+    /// export panel's place, and the export panel comes back when it closes,
+    /// so the user ends up where they were. Two sheets of one window cannot
+    /// be up together, and one presented while the other is leaving can be
+    /// dropped, hence the short pauses.
+    private(set) var returnsToExport = false
+    @ObservationIgnored private var handOverTask: Task<Void, Never>?
+    static let handOverDelay: Duration = .milliseconds(350)
+
+    func changeFrameFromExport(delay: Duration = EditorWindowState.handOverDelay) {
+        guard !isFraming else { return }
+        returnsToExport = true
+        showsExport = false
+        handOver(delay: delay) { $0.isFraming = true }
+    }
+
+    /// The frame sheet went away: back to the export panel if it came from there.
+    func frameSheetClosed(canExport: Bool, delay: Duration = EditorWindowState.handOverDelay) {
+        guard returnsToExport else { return }
+        returnsToExport = false
+        guard canExport else { return }
+        handOver(delay: delay) { $0.showsExport = true }
+    }
+
+    private func handOver(delay: Duration, _ action: @escaping @MainActor (EditorWindowState) -> Void) {
+        handOverTask?.cancel()
+        handOverTask = Task { [weak self] in
+            if delay > .zero { try? await Task.sleep(for: delay) }
+            guard !Task.isCancelled, let self else { return }
+            action(self)
+        }
+    }
 }
 
 private struct EditorWindow: View {
@@ -90,6 +123,9 @@ private struct EditorWindow: View {
             }
             .sheet(isPresented: Bindable(window).isFraming) {
                 FrameSheet(model: model)
+            }
+            .onChange(of: window.isFraming) { _, framing in
+                if !framing { window.frameSheetClosed(canExport: model.document != nil) }
             }
             .sheet(isPresented: Bindable(window).showsExport) {
                 ExportSheet(model: model, window: window)

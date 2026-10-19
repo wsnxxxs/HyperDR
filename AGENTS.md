@@ -91,8 +91,13 @@ draw anything into the frame that depends on the photo's HDR pixels.
   hands HyperDRKit an `ExportFrame` (K3), which writes `command.frame`. E5
   (framed gain maps put zero gain on a whole code; framed gain JPEGs use a
   quality-100 table) and E6 (staged export memory admission, no duplicate framed
-  renditions) are in, but the frame toggle in the export panel stays disabled
-  until it is reopened together with the framed thumbnail (F-T1).
+  renditions) are in, and the frame toggle in the export panel is live. The
+  panel's summary has a Frame row (none, the style, or a warning when the engine
+  refuses the style for this photo) with "Change…", which swaps the export panel
+  for the frame sheet and back. The summary, progress, result and history
+  thumbnails of a framed export show the whole card (`Frame/FrameThumbnail.swift`:
+  paper tone, the photo's SDR base at `layout.photo`, the caption band at
+  `layout.caption`, no shadow).
 - The frame sheet has Hold for SDR (`docs/design/frame-sheet.md`); the Instant
   style switches to a wide variant above 2.5:1 and is unavailable beyond about
   45:1.
@@ -118,8 +123,7 @@ Open, roughly in order: R6-E6-1 (the export memory estimate undercounts large
 external gain maps); P3b-3 (HEIC input through our reader, unclipped float RGB,
 the old Apple gain-map curve fixed to code^2.2), which is committed on
 `wip/p3b` but not yet reviewed; P3b-4 to P3b-6 (post-export verification and
-diagnostics on our reader, deleting libheif and libde265, acceptance); reopening
-the frame export toggle with the framed thumbnail (F-T1); E8 (61 MP story
+diagnostics on our reader, deleting libheif and libde265, acceptance); E8 (61 MP story
 canvases fail in libaom for AVIF); D1 (one set of default values; D1-a
 measurement not started, CC0 RAW candidates listed); P3a-2 (encoder quality,
 including the photo-area errors E5 froze as non-regression cases); the

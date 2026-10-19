@@ -28,23 +28,43 @@ extension EditorModel {
         fillDeferredExportThumbnail()
     }
 
-    private func updateSummaryThumbnail() {
+    func updateSummaryThumbnail() {
         summaryThumbnailTask?.cancel(); summaryThumbnailTicket &+= 1
         guard photo != nil else { exportSummaryThumbnail = .unavailable; return }
         guard document?.previewError == nil else { exportSummaryThumbnail = .unavailable; return }
         guard let frame = currentEditedFrame else { exportSummaryThumbnail = .loading; return }
         let ticket = summaryThumbnailTicket, epoch = thumbnailEpoch
+        let framing = thumbnailFraming()
         let deadline = summaryThumbnailLastStart.map { $0 + .milliseconds(200) }
         summaryThumbnailTask = Task { [weak self, services] in
             if let deadline { do { try await ContinuousClock().sleep(until: deadline) } catch { return } }
             guard let self, !Task.isCancelled, thumbnailEpoch == epoch else { return }
             summaryThumbnailLastStart = .now
-            let image = await services.sdrThumbnail(of: frame, maxPixelSize: 344)
+            let image = await makeThumbnail(of: frame, maxPixelSize: 344, framing: framing)
             guard !Task.isCancelled, thumbnailEpoch == epoch, summaryThumbnailTicket == ticket,
                   !thumbnailTrackers.isEmpty else { return }
             exportSummaryThumbnail = image.map(ThumbnailState.ready) ?? .unavailable
             summaryThumbnailFrame = image == nil ? nil : frame
         }
+    }
+
+    /// What a framed export looks like, as of now; nil without a frame, or when
+    /// the engine refuses the style for this photograph (the export is blocked
+    /// then, and the bare photograph is the best picture of it).
+    func thumbnailFraming() -> ThumbnailFraming? {
+        FrameThumbnail.framing(settings: frame, layout: frameLayout, facts: captureFacts)
+    }
+
+    /// The picture of an edited frame for `maxPixelSize`: the SDR base, or with
+    /// `framing` the whole framed card at that size (M3 §20.3 rule 2). The
+    /// photograph is shrunk by the service, off the main actor; only the small
+    /// composition happens here.
+    func makeThumbnail(of frame: PreviewFrame, maxPixelSize: Int, framing: ThumbnailFraming?) async -> CGImage? {
+        guard let framing else { return await services.sdrThumbnail(of: frame, maxPixelSize: maxPixelSize) }
+        let geometry = FrameThumbnailGeometry(layout: framing.layout, maxPixelSize: maxPixelSize)
+        guard let photo = await services.sdrThumbnail(of: frame, maxPixelSize: geometry.photoPixelSize),
+              !Task.isCancelled else { return nil }
+        return FrameThumbnail.compose(photo: photo, framing: framing, maxPixelSize: maxPixelSize)
     }
 
     func frozenExportThumbnailFrame() -> PreviewFrame? {
@@ -63,10 +83,11 @@ extension EditorModel {
             export.thumbnail = .unavailable; return
         }
         guard let frame = currentEditedFrame else { return }
-        let epoch = thumbnailEpoch, revision = exportThumbnailEditGeneration
-        deferredExportThumbnailTask = Task { [weak self, services] in
-            let image = await services.sdrThumbnail(of: frame, maxPixelSize: 256)
-            guard let self, !Task.isCancelled, thumbnailEpoch == epoch else { return }
+        let epoch = thumbnailEpoch, revision = exportThumbnailEditGeneration, framing = exportThumbnailFraming
+        deferredExportThumbnailTask = Task { [weak self] in
+            guard let self else { return }
+            let image = await makeThumbnail(of: frame, maxPixelSize: 256, framing: framing)
+            guard !Task.isCancelled, thumbnailEpoch == epoch else { return }
             deferredExportThumbnailTask = nil
             guard export.thumbnail == .loading, exportThumbnailEditGeneration == revision,
                   editGeneration == revision else { return }
@@ -118,6 +139,7 @@ extension EditorModel {
         summaryThumbnailTask = nil; deferredExportThumbnailTask = nil; versionThumbnailTask = nil
         summaryThumbnailFrame = nil; summaryThumbnailLastStart = nil
         exportThumbnailEditGeneration = nil; exportThumbnailPersisted = false; exportThumbnailNeedsDeferred = false
+        exportThumbnailFraming = nil
         versionThumbnailQueue = []; versionThumbnailOrder = []; versionThumbnails = [:]
         exportSummaryThumbnail = .loading
     }

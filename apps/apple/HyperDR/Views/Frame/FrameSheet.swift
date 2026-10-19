@@ -28,7 +28,7 @@ struct FrameSheet: View {
                 Divider()
                 ScrollView {
                     FrameSettingsPanel(settings: $model.frame, photoSize: model.document?.pixelSize,
-                                       lock: model.editingLockReason, exportAvailable: model.supportsFrameExport)
+                                       lock: model.editingLockReason)
                         .padding(Layout.panelPadding)
                 }
                 .frame(width: 340)
@@ -69,14 +69,8 @@ struct FrameSheet: View {
         .padding(.vertical, Space.s4)
     }
 
-    /// The settings the preview draws. While no export can carry the frame the
-    /// switch is off, but the settings are for looking at: the preview shows
-    /// the frame.
-    private var previewSettings: FrameSettings {
-        var settings = model.frame
-        if !model.supportsFrameExport { settings.isEnabled = true }
-        return settings
-    }
+    /// The settings the preview draws: with the switch off, the bare photograph.
+    private var previewSettings: FrameSettings { model.frame }
 
     /// The caption in the layout the engine picked for this photograph.
     private func caption(for layout: FramePixelLayout) -> FrameCaption {
@@ -249,15 +243,6 @@ struct FrameSettingsPanel: View {
     /// system-disabled and still readable, and while an export runs they say
     /// why (M3 §5.2).
     var lock: EditingLockReason? = nil
-    /// Whether an export can carry the frame yet. Until it can, the switch is
-    /// off and unavailable (the saved choice is left alone) and the rest of
-    /// the settings work for the preview (M3 §3.1).
-    var exportAvailable = true
-
-    private var isOn: Binding<Bool> {
-        exportAvailable ? $settings.isEnabled : .constant(false)
-    }
-    private var settingsApply: Bool { settings.isEnabled || !exportAvailable }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s4) {
@@ -278,10 +263,8 @@ struct FrameSettingsPanel: View {
     private var controls: some View {
         VStack(alignment: .leading, spacing: Space.s4) {
             VStack(alignment: .leading, spacing: Space.s1) {
-                Toggle("frame.enabled", isOn: isOn)
+                Toggle("frame.enabled", isOn: $settings.isEnabled)
                     .toggleStyle(HDRSwitchToggleStyle())
-                    .disabled(!exportAvailable)
-                    .help(when: exportAvailable ? nil : "frame.enabled.unavailable")
                 Text("frame.enabled.note")
                     .font(Font.hdr.caption)
                     .foregroundStyle(Color.hdr.inkMuted)
@@ -296,8 +279,8 @@ struct FrameSettingsPanel: View {
                     .toggleStyle(HDRSwitchToggleStyle())
                     .disabled(settings.style.geometry.shadow == nil)
             }
-            .disabled(!settingsApply)
-            .opacity(settingsApply ? 1 : 0.45)
+            .disabled(!settings.isEnabled)
+            .opacity(settings.isEnabled ? 1 : 0.45)
         }
     }
 

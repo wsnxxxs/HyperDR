@@ -7,9 +7,9 @@ import HyperDRKit
     let source = URL(fileURLWithPath: "/tmp/first.jpg")
     let second = URL(fileURLWithPath: "/tmp/second.jpg")
     let target = URL(fileURLWithPath: "/tmp/result.heic")
-    func ready(_ services: FakeEditorServices? = nil, supportsFrameExport: Bool = false) async -> (EditorModel, FakeEditorServices) {
+    func ready(_ services: FakeEditorServices? = nil) async -> (EditorModel, FakeEditorServices) {
         let s = services ?? FakeEditorServices(openDelay: .zero, previewDelay: .zero)
-        let m = EditorModel(services: s, ticker: ManualFrameTicker(), supportsFrameExport: supportsFrameExport)
+        let m = EditorModel(services: s, ticker: ManualFrameTicker())
         await m.loadExportServices()
         m.open([source])
         await eventually(timeout: .seconds(10)) { m.document?.phase == .ready && !m.suggestedFileName.isEmpty }
@@ -235,7 +235,7 @@ import HyperDRKit
 
 @MainActor extension ExportModelTests {
     func testFrameExportCarriesSnapshotAndSelectsFrameMemoryVariant() async {
-        let (m,s)=await ready(supportsFrameExport: true)
+        let (m,s)=await ready()
         var frame=m.frame;frame.isEnabled=true;frame.showsCamera=false;frame.showsExposure=false;frame.showsDate=false
         m.frame=frame
         await running(m,s)
@@ -275,10 +275,9 @@ import HyperDRKit
 }
 
 @MainActor extension ExportModelTests {
-    func testFramePreviewDoesNotEnterProductionExportBeforeM3F() async {
+    func testExportCarriesNoFrameWhileTheSwitchIsOff() async {
         let (m,s)=await ready()
-        m.frame.isEnabled=true
-        XCTAssertFalse(m.supportsFrameExport)
+        XCTAssertFalse(m.frame.isEnabled)
         await running(m,s)
         XCTAssertNil(s.exportCalls.first?.frame)
         s.sendExport(.finished(result:result(),failure:nil))
@@ -456,21 +455,20 @@ extension ExportModelTests {
 }
 
 @MainActor extension ExportModelTests {
-    func testPreviewOnlyFrameMustNotInflateETA() async throws {
+    func testETAWithoutAFrameUsesThePhotoPixels() async throws {
         let (m,s)=await ready()
         let size=try XCTUnwrap(m.document?.pixelSize)
         let pixels=Double(size.width)*Double(size.height)
         s.timings=[ExportTimingSample(kind:.init(isRAW:false,encoding:"adaptive",isAI:false,hasFrame:false,verifies:true),pixels:pixels,stages:[10,20,30,4])]
         m.refreshExportMetadata();await eventually(timeout:.seconds(10)) { !m.timingHistory.isEmpty }
-        var f=m.frame;f.isEnabled=true;m.frame=f
         await running(m,s)
         XCTAssertNil(s.exportCalls.first?.frame)
-        XCTAssertEqual(try XCTUnwrap(m.export.durations)[0],10,accuracy:0.0001,"When frame export is disabled, ETA must use actual exported photo pixels")
+        XCTAssertEqual(try XCTUnwrap(m.export.durations)[0],10,accuracy:0.0001,"Without a frame, ETA must use the exported photo's pixels")
         m.cancelExport();await eventually(timeout:.seconds(10)) { !m.export.isInFlight }
     }
 
     func testEnabledFrameETAUsesTheActualExportCanvas() async throws {
-        let (m,s) = await ready(supportsFrameExport: true)
+        let (m,s) = await ready()
         let size = try XCTUnwrap(m.document?.pixelSize)
         let pixels = Double(size.width) * Double(size.height)
         m.timingHistory = [.init(kind: .init(isRAW: false, encoding: "adaptive", isAI: false, hasFrame: true, verifies: true),

@@ -21,7 +21,7 @@ struct ExportSheet: View {
             wantsSettings: wantsSettings)
         Group {
             switch mode {
-            case .settings: ExportSettingsView(model: model, close: close, begin: begin)
+            case .settings: ExportSettingsView(model: model, close: close, begin: begin, changeFrame: changeFrame)
             case .progress: ExportProgressView(model: model, close: close)
             case .result: ExportResultView(model: model, close: closeAndClear, begin: begin, again: again)
             case .failure: ExportFailureView(model: model, close: closeAndClear, again: again)
@@ -35,6 +35,9 @@ struct ExportSheet: View {
     }
 
     private func close() { dismiss() }
+
+    /// The frame panel takes this panel's place and gives it back when it closes.
+    private func changeFrame() { window.changeFrameFromExport() }
 
     /// Done / Close after an outcome: the outcome has been seen, so the
     /// inspector's card goes too.
@@ -59,6 +62,7 @@ private struct ExportSettingsView: View {
     let model: EditorModel
     let close: () -> Void
     let begin: () -> Void
+    let changeFrame: () -> Void
 
     @Environment(\.locale) private var locale
     @Environment(\.openSettings) private var openSettings
@@ -73,7 +77,7 @@ private struct ExportSettingsView: View {
                 .padding(.vertical, Space.s4)
             Divider()
             HStack(alignment: .top, spacing: 0) {
-                ExportSummaryColumn(model: model)
+                ExportSummaryColumn(model: model, changeFrame: changeFrame)
                     .frame(width: 212)
                 Divider()
                 settings
@@ -209,6 +213,7 @@ private struct ExportSettingsView: View {
 /// The left column: the photo and what the export will make of it.
 private struct ExportSummaryColumn: View {
     let model: EditorModel
+    let changeFrame: () -> Void
 
     @Environment(\.locale) private var locale
 
@@ -228,7 +233,7 @@ private struct ExportSummaryColumn: View {
             VStack(alignment: .leading, spacing: Space.s2) {
                 FactRow(label: Text("export.summary.processing"), value: processing)
                 FactRow(label: Text("export.summary.lut"), value: lut, tone: model.lut.spaceIssueKey != nil && model.lut.selection != nil ? .warn : .normal)
-                FactRow(label: Text("export.summary.frame"), value: Text("export.summary.frameUnavailable"), tone: .normal)
+                frameRow
             }
             Spacer(minLength: 0)
         }
@@ -237,6 +242,24 @@ private struct ExportSummaryColumn: View {
         .background(Color.hdr.surfaceSunken.opacity(0.5))
         // The picture is kept up to date only while this column is on screen.
         .task { await model.trackExportSummaryThumbnail() }
+    }
+
+    /// The frame the export carries, and the way to the frame panel. The
+    /// button sits under the value so a long style name or the warning has the
+    /// whole column.
+    private var frameRow: some View {
+        let summary = model.exportFrameSummary
+        return VStack(alignment: .leading, spacing: 2) {
+            switch summary {
+            case .none: FactRow(label: Text("export.summary.frame"), value: Text("export.summary.none"))
+            case .style(let style): FactRow(label: Text("export.summary.frame"), value: Text(style.title))
+            case .misfit: FactRow(label: Text("export.summary.frame"), value: Text("export.summary.frameMisfit"), tone: .warn)
+            }
+            Button("export.summary.frameChange", action: changeFrame)
+                .buttonStyle(.hdrCompact(.link))
+                .accessibilityLabel(Text("export.summary.frameChange.a11y"))
+                .padding(.leading, FactRow.labelWidth + Space.s2)
+        }
     }
 
     private var processing: Text {

@@ -49,6 +49,21 @@ extension EditorModel {
             .map(FramePixelLayout.init)
     }
 
+    /// What the export panel's Frame row says (M3 §3.1).
+    enum FrameSummary: Equatable {
+        /// The switch is off: the export has no frame.
+        case none
+        /// The export carries this style.
+        case style(FrameStyle)
+        /// The switch is on but the engine refuses the style for this photograph's proportions.
+        case misfit(FrameStyle)
+    }
+
+    var exportFrameSummary: FrameSummary {
+        guard frame.isEnabled else { return .none }
+        return document?.pixelSize != nil && frameLayout == nil ? .misfit(frame.style) : .style(frame.style)
+    }
+
     /// A style's proportions around a nominal photo, with default settings,
     /// for the style picker's miniatures. Nil if the engine rejects the document.
     static func frameLayout(for style: FrameStyle, photoWidth: Int = 1000,

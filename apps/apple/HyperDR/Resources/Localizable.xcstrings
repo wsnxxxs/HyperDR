@@ -6511,23 +6511,6 @@
         }
       }
     },
-    "export.summary.frameUnavailable" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "None · framed export coming soon"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无 · 带边框导出暂未开放"
-          }
-        }
-      }
-    },
     "export.summary.lutInactive %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9792,23 +9775,6 @@
         }
       }
     },
-    "frame.enabled.unavailable" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Exporting with a frame isn’t available yet"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "带边框导出暂未开放"
-          }
-        }
-      }
-    },
     "open.cancel" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9907,6 +9873,57 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未能使用所选模型，已改用%@。"
+          }
+        }
+      }
+    },
+    "export.summary.frameChange" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Change…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更改…"
+          }
+        }
+      }
+    },
+    "export.summary.frameMisfit" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This style doesn’t fit this photo"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此样式不适用于这张照片"
+          }
+        }
+      }
+    },
+    "export.summary.frameChange.a11y" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Change frame"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更改边框"
           }
         }
       }

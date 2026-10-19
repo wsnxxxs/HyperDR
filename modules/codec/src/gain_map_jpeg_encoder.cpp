@@ -21,6 +21,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <functional>
+#include <span>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -78,8 +80,9 @@ std::vector<std::uint8_t> compress_jpeg(const std::uint8_t* pixels, std::uint32_
                                         J_COLOR_SPACE color_space, int quality,
                                         const std::vector<std::uint8_t>* exif_tiff = nullptr,
                                         const std::vector<std::uint8_t>* icc = nullptr,
-                                        bool full_chroma = false) {
-  if (!pixels || width == 0 || height == 0) {
+                                        bool full_chroma = false,
+                                        const std::function<void(unsigned,std::span<std::uint8_t>)>& read_row = {}) {
+  if ((!pixels && !read_row) || width == 0 || height == 0) {
     throw std::invalid_argument("cannot encode an empty JPEG image");
   }
 
@@ -98,6 +101,7 @@ std::vector<std::uint8_t> compress_jpeg(const std::uint8_t* pixels, std::uint32_
     jpeg_compress_struct info{};
     JpegError error{};
     VectorDestination destination;
+    std::vector<std::uint8_t> row;
   };
   auto state = std::make_unique<State>();
   auto& info = state->info;
@@ -145,10 +149,12 @@ std::vector<std::uint8_t> compress_jpeg(const std::uint8_t* pixels, std::uint32_
   if (!exif_marker.empty()) jpeg_write_marker(&info, JPEG_APP0 + 1, exif_marker.data(), exif_marker.size());
 
   const std::size_t stride = static_cast<std::size_t>(width) * components;
+  if (read_row) state->row.resize(stride);
   while (info.next_scanline < info.image_height) {
     check_cancelled();
-    auto* row = const_cast<JSAMPLE*>(
-        pixels + static_cast<std::size_t>(info.next_scanline) * stride);
+    auto* row = state->row.data();
+    if (read_row) read_row(info.next_scanline,state->row);
+    else row = const_cast<JSAMPLE*>(pixels + static_cast<std::size_t>(info.next_scanline) * stride);
     jpeg_write_scanlines(&info, &row, 1);
   }
   // With optimize_coding the entropy coding and most of the output happen
@@ -168,9 +174,7 @@ std::vector<std::uint8_t> make_base_jpeg(const FloatImage& image,
   image.require_consistent("gain-map JPEG base");
   check_jpeg_dimensions(image.width, image.height);
   if (image.channels != 3) throw std::invalid_argument("gain-map JPEG base must be RGB");
-  std::vector<std::uint8_t> rgb(static_cast<std::size_t>(image.width) * image.height * 3);
-  for (std::uint32_t y = 0; y < image.height; ++y) {
-    check_cancelled();
+  const auto row = [&](std::uint32_t y, std::span<std::uint8_t> rgb) {
     for (std::uint32_t x = 0; x < image.width; ++x) {
       const auto base = (static_cast<std::size_t>(y) * image.width + x) * 3;
       const auto fitted = clamp_srgb
@@ -181,17 +185,17 @@ std::vector<std::uint8_t> make_base_jpeg(const FloatImage& image,
                                                      image.pixels[base + 1],
                                                      image.pixels[base + 2]};
       for (unsigned c = 0; c < 3; ++c) {
-        rgb[base + c] = static_cast<std::uint8_t>(quantize_dithered(
+        rgb[x * 3 + c] = static_cast<std::uint8_t>(quantize_dithered(
             srgb_oetf(fitted[c]), 255, x, y, c));
       }
     }
-  }
+  };
   const auto exif = make_minimal_exif(metadata);
   // Gamut compression retains P3 coordinates even when clamp_srgb is enabled.
   // Both modes therefore store Display P3 primaries with the sRGB transfer.
   const auto icc = codec::display_p3_profile();
-  return compress_jpeg(rgb.data(), image.width, image.height, 3, JCS_RGB, quality, &exif,
-                       &icc);
+  return compress_jpeg(nullptr, image.width, image.height, 3, JCS_RGB, quality, &exif,
+                       &icc, false, row);
 }
 
 std::vector<std::uint8_t> make_gain_jpeg(const FloatImage& image, int quality) {
@@ -277,8 +281,8 @@ void verify_sdr_jpeg(const std::vector<std::uint8_t>& bytes) {
   (void)decode_jpeg_for_verification(bytes.data(), bytes.size());
 }
 
-std::vector<std::uint8_t> encode_gain_map_jpeg(const GainMapResult& images,
-                                               const PhotoMetadata& metadata, int quality) {
+static std::vector<std::uint8_t> encode_gain_map_jpeg_impl(const GainMapResult& images,
+    const PhotoMetadata& metadata, int quality, GainMapResult* owned) {
   if (quality < 0 || quality > 100) throw std::invalid_argument("quality must be in [0,100]");
   images.gain_map.require_consistent("gain-map JPEG recovery map");
   validate_gain_map_metadata(images.metadata);
@@ -297,16 +301,41 @@ std::vector<std::uint8_t> encode_gain_map_jpeg(const GainMapResult& images,
   // The gain map relates the two uncompressed renditions; it does not correct
   // the base's compression error. The base is therefore an ordinary 4:2:0 JPEG
   // like an SDR export, and the HDR rendition is as faithful as that base.
+  const auto gain_width=images.gain_map.width, gain_height=images.gain_map.height,
+             gain_channels=images.gain_map.channels;
+  std::vector<std::uint8_t,PlaneAllocator<std::uint8_t>> packed;
+  if (owned) {
+    packed.resize(images.gain_map.pixels.size());
+    const auto stride=static_cast<std::size_t>(gain_width)*gain_channels;
+    for(unsigned y=0;y<gain_height;++y) {
+      check_cancelled();
+      for(std::size_t i=y*stride;i<(y+1)*stride;++i)
+        packed[i]=static_cast<std::uint8_t>(std::lround(std::clamp(images.gain_map.pixels[i],0.0F,1.0F)*255));
+    }
+    owned->gain_map={};
+  }
   auto base_bytes = make_base_jpeg(images.base_linear, metadata, quality, images.clamp_srgb);
   // A lower base quality should not also coarsen the gain, so the gain map
   // never drops below 90.
   // With a frame the photo/mat step can ring several codes into the mat at
   // quality 95. Unit DCT quantizers bound this independently of base quality;
   // unframed exports retain their exact previous byte stream.
-  auto gain_bytes = make_gain_jpeg(images.gain_map,
-      images.presentation_frame ? 100 : std::max(90, quality));
+  const auto gain_quality=images.presentation_frame ? 100 : std::max(90, quality);
+  auto gain_bytes = owned
+      ? compress_jpeg(packed.data(),gain_width,gain_height,gain_channels,
+          gain_channels==1 ? JCS_GRAYSCALE : JCS_RGB,gain_quality,nullptr,nullptr,true)
+      : make_gain_jpeg(images.gain_map,gain_quality);
 
   return assemble_gain_map_jpeg(base_bytes, gain_bytes, images.metadata);
+}
+
+std::vector<std::uint8_t> encode_gain_map_jpeg(const GainMapResult& images,
+    const PhotoMetadata& metadata,int quality) {
+  return encode_gain_map_jpeg_impl(images,metadata,quality,nullptr);
+}
+std::vector<std::uint8_t> encode_gain_map_jpeg(GainMapResult&& images,
+    const PhotoMetadata& metadata,int quality) {
+  return encode_gain_map_jpeg_impl(images,metadata,quality,&images);
 }
 
 void verify_gain_map_jpeg(const std::vector<std::uint8_t>& bytes) {
@@ -335,6 +364,7 @@ void verify_gain_map_jpeg(const std::vector<std::uint8_t>& bytes) {
       base[0] / gain[0] != base[1] / gain[1])
     throw std::runtime_error("gain-map JPEG raster dimensions/channels do not match metadata");
 }
+
 
 void verify_gain_map_jpeg(const std::filesystem::path& input) {
   verify_gain_map_jpeg(read_binary_file(input));

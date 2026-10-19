@@ -2,6 +2,7 @@
 #include "hyperdr/look/options.hpp"
 #include "hyperdr/look/analysis.hpp"
 #include "hyperdr/image/image.hpp"
+#include "hyperdr/image/frame.hpp"
 #include "hyperdr/image/color.hpp"
 #include <array>
 #include <optional>
@@ -94,6 +95,18 @@ RenderOptions render_options_for_target(RenderOptions options, RenderTarget targ
 struct PhotoRenditions {
   FloatImage sdr;
   FloatImage hdr;
+  // A framed gain-map export owns only the SDR canvas and the HDR photograph.
+  // Outside this rectangle the alternate is exactly the SDR canvas pixel.
+  std::optional<FrameRect> hdr_photo;
+  [[nodiscard]] const float* hdr_pixel(std::uint32_t x, std::uint32_t y) const noexcept {
+    if (hdr_photo) {
+      const auto& r = *hdr_photo;
+      if (x < r.x || y < r.y || x - r.x >= r.width || y - r.y >= r.height)
+        return sdr.pixels.data() + (static_cast<std::size_t>(y) * sdr.width + x) * 3;
+      return hdr.pixels.data() + (static_cast<std::size_t>(y - r.y) * hdr.width + x - r.x) * 3;
+    }
+    return hdr.pixels.data() + (static_cast<std::size_t>(y) * hdr.width + x) * 3;
+  }
   // The HDR rendition is the photograph itself rather than an expansion the
   // renderer invented, so a gain map must decode back to it pixel for pixel.
   // Set for a display-referred HDR input; the packager derives the base from
@@ -111,7 +124,7 @@ struct PhotoRenditions {
   bool clamp_srgb{false};
   ColorGamut hdr_gamut{ColorGamut::kDisplayP3};
   // Selection made before creative grading; reused after gain quantization.
-  std::vector<std::uint8_t> below_knee;
+  BytePlane below_knee;
 };
 void measure_rendition_stats(RenderStats& stats, const FloatImage& sdr,
     const FloatImage& hdr, std::span<const std::uint8_t> below_knee = {});

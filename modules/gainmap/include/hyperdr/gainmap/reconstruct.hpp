@@ -9,6 +9,7 @@
 
 #include "hyperdr/container/iso_gain_map.hpp"
 #include "hyperdr/image/image.hpp"
+#include "hyperdr/look/rendition.hpp"
 
 #include <cstdint>
 
@@ -32,5 +33,11 @@ struct ReconstructionStats {
     const FloatImage& base, const FloatImage& gain,
     const GainMapMetadata& metadata, float display_headroom_stops,
     ReconstructionStats* stats = nullptr, bool clamp_srgb = false);
+
+// The same reconstruction arithmetic, reduced per row without an HDR image.
+void measure_reconstructed_rendition_stats(RenderStats& stats,
+    const FloatImage& base, const FloatImage& gain,
+    const GainMapMetadata& metadata, float display_headroom_stops,
+    std::span<const std::uint8_t> below_knee = {}, bool clamp_srgb = false);
 
 }  // namespace hyperdr

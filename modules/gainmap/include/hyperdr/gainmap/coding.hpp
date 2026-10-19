@@ -10,6 +10,8 @@
 
 #include <cstdint>
 #include <vector>
+#include <span>
+#include "hyperdr/foundation/plane_allocator.hpp"
 
 namespace hyperdr {
 
@@ -23,7 +25,7 @@ struct RenderStats;
 struct FloatImage;
 
 struct QuantizedGainGrid {
-  std::vector<float> codes;
+  FloatPlane codes;
   float stored_gain_max{0.0F};
   float stored_gamma{1.0F};
   Rational gain_max_metadata{0, 1};
@@ -51,11 +53,11 @@ void measure_quantized_gain(RenderStats& stats, const FloatImage& codes,
 // Picks the gamma that minimises weighted 8-bit round-trip error over the
 // grid's own distribution, preferring 1 when the difference is immaterial so
 // the metadata stays simple.
-[[nodiscard]] float choose_gain_gamma(const std::vector<float>& normalized_gains);
+[[nodiscard]] float choose_gain_gamma(std::span<const float> normalized_gains);
 
 // Encodes a non-negative log2-gain grid with the same 8-bit representation and
 // serializable rational metadata used by every scalar gain-map writer.
 [[nodiscard]] QuantizedGainGrid quantize_gain_grid(
-    const std::vector<float>& gain_stops, std::uint32_t width);
+    std::span<const float> gain_stops, std::uint32_t width);
 
 }  // namespace hyperdr

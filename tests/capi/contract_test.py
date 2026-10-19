@@ -1067,6 +1067,38 @@ class EngineContract(unittest.TestCase):
                 LIB.hyperdr_string_free(output)
                 LIB.hyperdr_cancel_destroy(cancel)
 
+    def test_export_memory_budget_is_a_per_file_failure(self):
+        if not self.capabilities["codecs"]:
+            self.skipTest("requires codecs")
+        with tempfile.TemporaryDirectory(prefix="hyperdr-export-budget-") as temporary:
+            root = Path(temporary)
+            inputs = root / "inputs"
+            inputs.mkdir()
+            png(inputs / "large.png", 600, 400)
+            png(inputs / "small.png", 64, 64)
+            engine = Handle()
+            budget = 50 * 1024 * 1024
+            checked(LIB.hyperdr_engine_create, encoded({"memory_budget_bytes": budget}), ctypes.byref(engine))
+            try:
+                request = {"encoding": "iso-gainmap-jpeg", "command": {
+                    "input": str(inputs), "output": str(root / "framed"),
+                    "frame": {"margins": .055, "caption": .16, "aspect": {"width": 9, "height": 16}}}}
+                report = json.loads(result(LIB.hyperdr_convert, engine, encoded(request), CALLBACK(), None, None))
+                failures = [f for f in report["files"] if not f["success"]]
+                self.assertEqual(len(failures), 1)
+                self.assertEqual(sum(f["success"] for f in report["files"]), 1)
+                failed = failures[0]
+                self.assertEqual(failed["error_code"], "export_memory_budget")
+                self.assertIn(str(budget), failed["detail"])
+                self.assertIn("estimated", failed["detail"])
+                self.assertFalse(Path(failed["output"]).exists())
+                request["command"].pop("frame")
+                request["command"]["output"] = str(root / "plain")
+                plain = json.loads(result(LIB.hyperdr_convert, engine, encoded(request), CALLBACK(), None, None))
+                self.assertTrue(all(f["success"] for f in plain["files"]))
+            finally:
+                LIB.hyperdr_engine_destroy(engine)
+
     def test_jpeg_dimension_limit_is_a_per_file_failure(self):
         if not self.capabilities["codecs"]:
             self.skipTest("requires codecs")

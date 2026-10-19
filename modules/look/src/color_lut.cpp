@@ -248,7 +248,7 @@ PhotoRenditions render_graded_photo(const FloatImage& source,
   }
   FloatImage working;
   FloatImage developed_sdr;
-  std::vector<std::uint8_t> developed_below_knee;
+  BytePlane developed_below_knee;
   float exposure_ev=0;
   float working_headroom=1;
   std::optional<float> developed_stops;

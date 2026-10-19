@@ -457,12 +457,12 @@ FloatImage frame_image(const FloatImage& photo, const FrameSpec& spec,
   return canvas;
 }
 
-std::vector<std::uint8_t> frame_mask(const std::vector<std::uint8_t>& mask,
+BytePlane frame_mask(std::span<const std::uint8_t> mask,
                                      const FrameLayout& layout, std::uint8_t frame_value) {
   if (mask.empty()) return {};
   if (mask.size() != static_cast<std::size_t>(layout.photo.width) * layout.photo.height)
     reject("mask does not match the photo size");
-  std::vector<std::uint8_t> framed(static_cast<std::size_t>(layout.width) * layout.height, frame_value);
+  BytePlane framed(static_cast<std::size_t>(layout.width) * layout.height, frame_value);
   for (std::uint32_t y = 0; y < layout.photo.height; ++y) {
     std::memcpy(framed.data() + static_cast<std::size_t>(layout.photo.y + y) * layout.width + layout.photo.x,
                 mask.data() + static_cast<std::size_t>(y) * layout.photo.width, layout.photo.width);

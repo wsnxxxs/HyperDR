@@ -123,7 +123,7 @@ float quantize_gain_code_dithered(float encoded_gain, std::uint32_t x,
          255.0F;
 }
 
-float choose_gain_gamma(const std::vector<float>& normalized_gains) {
+float choose_gain_gamma(std::span<const float> normalized_gains) {
   if (normalized_gains.empty()) return 1.0F;
   // Gamma selection is a distribution estimate, not a per-pixel transform.
   // A deterministic stratified sample bounds the expensive pow() work while
@@ -174,7 +174,7 @@ float choose_gain_gamma(const std::vector<float>& normalized_gains) {
   return best_gamma;
 }
 
-QuantizedGainGrid quantize_gain_grid(const std::vector<float>& gain_stops,
+QuantizedGainGrid quantize_gain_grid(std::span<const float> gain_stops,
                                      std::uint32_t width) {
   if (width == 0 || gain_stops.size() % width != 0) {
     throw std::invalid_argument("gain grid dimensions do not match its samples");

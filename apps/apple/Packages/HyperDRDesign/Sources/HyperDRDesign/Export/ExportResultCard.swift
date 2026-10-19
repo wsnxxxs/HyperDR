@@ -108,12 +108,18 @@ public struct ExportResultCard: View {
 }
 
 /// A photo's thumbnail, or a quiet placeholder while there is none.
-struct Thumbnail: View {
+public struct Thumbnail: View {
     let image: Image?
     let width: CGFloat
     let height: CGFloat
 
-    var body: some View {
+    public init(image: Image?, width: CGFloat, height: CGFloat) {
+        self.image = image
+        self.width = width
+        self.height = height
+    }
+
+    public var body: some View {
         ZStack {
             Color.hdr.surfaceSunken
             if let image {

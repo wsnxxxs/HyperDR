@@ -12,9 +12,44 @@ import UniformTypeIdentifiers
     private(set) var alert: UserFacingError?
     let canvas = CanvasModel()
     /// The presentation frame, remembered across launches.
+    @ObservationIgnored private var storedFrame: FrameSettings
     var frame: FrameSettings {
-        didSet { if frame != oldValue { frame.save(to: services.preferences) } }
+        get { _ = frameSettingsRevision; return storedFrame }
+        set {
+            guard !export.isInFlight, newValue != storedFrame else { return }
+            storedFrame = newValue; frameSettingsRevision &+= 1
+            newValue.save(to: services.preferences)
+            syncExportState(); refreshExportMetadata()
+        }
     }
+    private(set) var frameSettingsRevision = 0
+    /// M3-F enables this only after E5/E6 and the frame acceptance gates land.
+    /// Until then the frame remains a preview preference, not an export input.
+    let supportsFrameExport: Bool
+    let export = ExportState()
+    let lut = LUTState()
+    let preferences: PreferencesState
+    var exportVersions: [ExportVersion] = []
+    var exportSaveStates: [String: ExportSaveState] = [:]
+    var pendingPhotoSwitch: PhotoSwitchRequest?
+    var suggestedFileName = ""
+    @ObservationIgnored var cachedFrameKey: ExportFrameCacheKey?
+    @ObservationIgnored var cachedExportFrame: ExportFrame?
+    @ObservationIgnored var exportTask: Task<Void, Never>?
+    @ObservationIgnored var saveTaskNames: [UUID: String] = [:]
+    @ObservationIgnored var saveTasks: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored var exportMetadataTask: Task<Void, Never>?
+    @ObservationIgnored var exportMetadataTicket = 0
+    @ObservationIgnored var exportHistory: [ExportHistoryItem] = []
+    @ObservationIgnored var timingHistory: [ExportTimingSample] = []
+    @ObservationIgnored var currentExportKey: String?
+    @ObservationIgnored var exportCapabilities: EditorCapabilities?
+    @ObservationIgnored var pendingSwitchStops = false
+    @ObservationIgnored var lutMetadataTask: Task<Void, Never>?
+    @ObservationIgnored var lutTask: Task<Void, Never>?
+    @ObservationIgnored var lutTicket = 0
+    @ObservationIgnored let now: () -> Date
+
     /// The committed photograph's Exif, loaded automatically in the background.
     private(set) var captureFacts = CaptureFacts()
 
@@ -126,8 +161,11 @@ import UniformTypeIdentifiers
 
     init(services: any EditorServices = FakeEditorServices(), document: DocumentState? = nil,
          alert: UserFacingError? = nil, photo: EditorPhoto? = nil,
-         hasReferenceFrame: Bool = false, hasEditedFrame: Bool = false, ticker: (any FrameTicker)? = nil) {
+         hasReferenceFrame: Bool = false, hasEditedFrame: Bool = false, ticker: (any FrameTicker)? = nil, now: @escaping () -> Date = Date.init, supportsFrameExport: Bool = false) {
         self.services = services
+        self.now = now
+        self.supportsFrameExport = supportsFrameExport
+        preferences = PreferencesState(Preferences.load(from: services.preferences))
         undoManager.groupsByEvent = false
         undoManager.levelsOfUndo = 0
         self.ticker = ticker ?? ClockFrameTicker()
@@ -137,9 +175,10 @@ import UniformTypeIdentifiers
         inputColor = ChoiceValue(key: "colorGamut", selection: edit.choices["colorGamut"] ?? "srgb",
             choices: colors.map { Choice(id: $0.id, labelKey: $0.labelKey, isEnabled: true) })
         for spec in EditControls.all { controlValues[spec.key] = ControlValue(spec: ControlSpecView(spec)) }
-        frame = FrameSettings.load(from: services.preferences)
+        storedFrame = FrameSettings.load(from: services.preferences)
         engine = services.engineStatus
         display = services.displayState
+        if preferences.value.rememberOutput { runEncoding = preferences.value.output["encoding"] ?? "adaptive" }
         self.document = document
         workspace = document == nil ? .empty : .editing
         self.alert = alert
@@ -157,6 +196,7 @@ import UniformTypeIdentifiers
             for await status in statuses {
                 guard !Task.isCancelled else { return }
                 self?.engine = status
+                self?.syncExportState()
             }
         }
         let updates = services.displayUpdates()
@@ -169,6 +209,11 @@ import UniformTypeIdentifiers
     }
 
     deinit {
+        exportTask?.cancel()
+        exportMetadataTask?.cancel()
+        lutTask?.cancel()
+        lutMetadataTask?.cancel()
+        for task in saveTasks.values { task.cancel() }
         operation?.cancel()
         detailTask?.cancel()
         busyTask?.cancel()
@@ -209,19 +254,27 @@ import UniformTypeIdentifiers
     /// frames, mode and canvas geometry stay visible until its reference arrives.
     /// Any open failure restores the complete previous state, or the empty state.
     func open(_ urls: [URL]) {
+        if export.isInFlight {
+            guard let url = urls.first(where: canOpen) else { return }
+            pendingPhotoSwitch = PhotoSwitchRequest(kind: .open(url), displayName: url.lastPathComponent)
+            return
+        }
         guard !ai.isComputing else { return }
         canRestoreAtLaunch = false
         isRestoring = false
+        prepareForPhotoSwitch()
         beginOpen(urls)
     }
 
     func launch() {
         guard !didLaunch else { return }
         didLaunch = true
+        Task { [weak self] in await self?.loadExportServices() }
         isRestoring = canRestoreAtLaunch && document == nil && photo == nil && openRollback == nil
+        syncControls()
         let ticket = generation
         launchTask = Task { [weak self, services] in
-            defer { if self?.generation == ticket { self?.isRestoring = false } }
+            defer { if self?.generation == ticket { self?.isRestoring = false; self?.syncControls() } }
             await services.start()
             guard let self, !Task.isCancelled, generation == ticket,
                   canRestoreAtLaunch, document == nil, openRollback == nil, photo == nil else { return }
@@ -259,7 +312,7 @@ import UniformTypeIdentifiers
         endGesture()
         generation += 1
         let ticket = generation
-        let encoding = runEncoding
+        let encoding = preferences.value.rememberOutput ? runEncoding : "adaptive"
         var previous = openRollback ?? OpenSnapshot(document: document, photo: photo,
             reference: hasReferenceFrame, edited: hasEditedFrame, viewMode: selectedMode,
             transform: canvas.transform,
@@ -305,6 +358,8 @@ import UniformTypeIdentifiers
                         startScopes(original: true)
                         startCaptureFacts(opened)
                         startRefreshing(opened)
+                        applyInitialPreferences()
+                        refreshExportMetadata()
                         if let old = previous.photo, old != opened { await services.close(old) }
                         return
                     }
@@ -324,6 +379,11 @@ import UniformTypeIdentifiers
     }
 
     func closeDocument() {
+        if export.isInFlight {
+            pendingPhotoSwitch = PhotoSwitchRequest(kind: .close, displayName: document?.name ?? "")
+            return
+        }
+        prepareForPhotoSwitch()
         canRestoreAtLaunch = false
         isRestoring = false
         generation += 1
@@ -354,6 +414,8 @@ import UniformTypeIdentifiers
         syncControls()
     }
 
+    func publishAlert(_ error: UserFacingError?) { alert = error }
+
     func dismissAlert() { alert = nil }
 
     // MARK: Frame
@@ -366,6 +428,7 @@ import UniformTypeIdentifiers
             guard let self, !Task.isCancelled, generation == ticket,
                   self.photo == photo else { return }
             captureFacts = facts
+            refreshExportMetadata()
         }
     }
 
@@ -469,7 +532,7 @@ import UniformTypeIdentifiers
                         if renderScheduler?.hasPending != true {
                             apply(.failed(error))
                             if edit.aiMode == .optimized, !ai.isComputing,
-                               submittedJob?.options == edit.options() { failAI(error) }
+                               submittedJob?.options == effectiveOptions() { failAI(error) }
                         }
                     case .superseded(let isLatest):
                         guard isLatest else { continue }
@@ -617,6 +680,7 @@ import UniformTypeIdentifiers
             startRefreshing(photo)
             if previous.needsRefresh { scheduleRender(force: true) }
             revalidateGain()
+            refreshExportMetadata()
         }
     }
 }

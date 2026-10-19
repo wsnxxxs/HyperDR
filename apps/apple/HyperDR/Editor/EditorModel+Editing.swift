@@ -34,20 +34,31 @@ extension EditorModel {
     /// first frame, while opening or restoring, while AI computes (batch4
     /// §2.12). Control enablement, undo, the processing mode and open derive
     /// from it; views never combine their own conditions.
-    var isEditingLocked: Bool {
-        guard hasEditedFrame, document?.phase == .ready, photo != nil else { return true }
-        return ai.isComputing
+    var editingLockReason: EditingLockReason? {
+        if export.isInFlight { return .exporting }
+        if isRestoring { return .restoring }
+        guard document != nil else { return nil }
+        if !hasEditedFrame || document?.phase != .ready || photo == nil { return .loading }
+        return ai.isComputing ? .computingAI : nil
     }
+    var isEditingLocked: Bool { editingLockReason != nil }
 
-    var canSetWorkflow: Bool { !isEditingLocked }
+    var canSetWorkflow: Bool { photo != nil && !isEditingLocked }
     /// User commands stay enabled in an empty workspace and for replacing
     /// a ready/failed photo. Finder/drop/programmatic open can supersede an
     /// in-progress open (Q14); AI computation blocks both entry points.
-    var canOpenDocument: Bool {
-        guard !ai.isComputing, !isRestoring else { return false }
-        return document?.phase != .opening && document?.phase != .rendering
+    var photoSwitch: PhotoSwitchPolicy {
+        if export.isInFlight { return .confirmStoppingExport }
+        if isRestoring { return .unavailable(reasonKey: "export.blocker.restoring") }
+        if ai.isComputing { return .unavailable(reasonKey: "export.blocker.ai") }
+        if document?.phase == .opening || document?.phase == .rendering { return .unavailable(reasonKey: "export.blocker.loading") }
+        return .allowed
     }
-    var canResetAll: Bool { !isEditingLocked }
+    var canOpenDocument: Bool {
+        if case .unavailable = photoSwitch { return false }; return true
+    }
+
+    var canResetAll: Bool { photo != nil && !isEditingLocked }
 
     // MARK: - Controls
 
@@ -63,7 +74,7 @@ extension EditorModel {
     /// readout shows (batch4 §2.2). Outside a drag every call is one undo
     /// step; inside one, `endAdjusting` records the whole drag.
     func adjust(_ key: String, to value: Double) {
-        guard value.isFinite, !isEditingLocked, let control = controlValues[key] else { return }
+        guard photo != nil, value.isFinite, !isEditingLocked, let control = controlValues[key] else { return }
         if let gesture, gesture.key != key { endAdjusting(gesture.key) }
         let next: Double
         if control.spec.allowsAuto && value < 0 {
@@ -87,7 +98,7 @@ extension EditorModel {
     }
 
     func beginAdjusting(_ key: String) {
-        guard !isEditingLocked, controlValues[key] != nil else { return }
+        guard photo != nil, !isEditingLocked, controlValues[key] != nil else { return }
         if let gesture, gesture.key != key { endAdjusting(gesture.key) }
         if gesture == nil { gesture = (key, edit) }
     }
@@ -109,7 +120,7 @@ extension EditorModel {
     /// Double-click: back to this photo's default for the current format.
     func resetControl(_ key: String) {
         guard let value = defaultsForCurrentEncoding().controls[key] else { return }
-        guard !isEditingLocked else { return }
+        guard photo != nil, !isEditingLocked else { return }
         finishGestureBeforeEdit()
         guard edit.controls[key] != value else { return }
         let previous = edit
@@ -122,7 +133,7 @@ extension EditorModel {
 
     /// Auto-capable controls only; writes −1.
     func setAuto(_ key: String) {
-        guard !isEditingLocked, controlValues[key]?.spec.allowsAuto == true else { return }
+        guard photo != nil, !isEditingLocked, controlValues[key]?.spec.allowsAuto == true else { return }
         finishGestureBeforeEdit()
         adjust(key, to: -1)
     }
@@ -130,7 +141,7 @@ extension EditorModel {
     /// Back to how this photo opened, for the current output format: AI back
     /// to manual (its gain stays cached), the encoding and mode unchanged.
     func resetAll() {
-        guard !isEditingLocked else { return }
+        guard photo != nil, !isEditingLocked else { return }
         finishGestureBeforeEdit()
         var target = defaultsForCurrentEncoding()
         target.selectedModel = edit.selectedModel
@@ -153,7 +164,7 @@ extension EditorModel {
     /// One undo step. Colour-only remembers the HDR encoding and AI mode and
     /// restores both on the way back (AI only while it can run).
     func setWorkflow(_ workflow: Workflow) {
-        guard !isEditingLocked, workflow != edit.workflow else { return }
+        guard photo != nil, !isEditingLocked, workflow != edit.workflow else { return }
         switch workflow {
         case .colorOnly: changeEncoding(to: "sdr-jpeg", action: "workflow")
         case .hdr: changeEncoding(to: remembered.encoding ?? "adaptive", action: "workflow")
@@ -163,7 +174,7 @@ extension EditorModel {
     /// The output format. M2's interface only switches it through the
     /// processing mode; the export interface (M3) uses this directly.
     func selectEncoding(_ id: String) {
-        guard !isEditingLocked, id != edit.encoding,
+        guard photo != nil, !isEditingLocked, (export.encodingAvailability[id] ?? nil) == nil, id != edit.encoding,
               EditChoices.byKey["encoding"]?.options.contains(where: { $0.id == id }) == true else { return }
         changeEncoding(to: id, action: "encoding")
     }
@@ -181,6 +192,7 @@ extension EditorModel {
             edit.aiMode = canRun ? remembered.aiMode : .manual
         }
         clampForEncoding(from: previous.encoding)
+        if (edit.controls["hdrRange"] ?? 0) < (previous.controls["hdrRange"] ?? 0) { notice = .rangeClamped(maxStops: EditBaseline.maxRange(for: id)) }
         recordStep(from: previous, action: action)
         editChanged()
     }
@@ -217,7 +229,7 @@ extension EditorModel {
 
     /// Untagged RGB only (`colorSource == "assumed"`); RAW hides it.
     func selectInputColor(_ id: String) {
-        guard !isEditingLocked, inputColor.isEnabled, id != edit.choices["colorGamut"],
+        guard photo != nil, !isEditingLocked, inputColor.isEnabled, id != edit.choices["colorGamut"],
               inputColor.choices.contains(where: { $0.id == id }) else { return }
         finishGestureBeforeEdit()
         let previous = edit
@@ -344,7 +356,7 @@ extension EditorModel {
                 ?? models.first(where: \.isEnabled)?.id ?? edit.selectedModel
         }
         runEncoding = edit.encoding
-        lastJob = RenderJob(options: edit.options(), draft: false)
+        lastJob = RenderJob(options: effectiveOptions(), draft: false)
         displayedAIGain = nil
         readyGain = nil
         gainToken = nil
@@ -385,6 +397,7 @@ extension EditorModel {
     func editChanged() {
         invalidateDetails(editedOnly: true)
         runEncoding = edit.encoding
+        rememberOutputPreferences()
         syncControls()
         revalidateGain()
         scheduleRender()
@@ -395,7 +408,8 @@ extension EditorModel {
     /// Writes the value objects from `edit` and the lock. Each object only
     /// changes the properties whose value differs.
     func syncControls() {
-        let locked = isEditingLocked
+        let locked = isEditingLocked || photo == nil
+        syncExportState()
         let snapshot = edit
         let defaults = defaultsForCurrentEncoding()
         setWorkflowValue(snapshot.workflow)
@@ -405,7 +419,7 @@ extension EditorModel {
             control.update(value: snapshot.controls[spec.key], defaultValue: defaults.controls[spec.key],
                            range: dragging ? nil : ControlRules.range(control.spec, encoding: snapshot.encoding,
                                                                    domain: source.domain),
-                           isVisible: ControlRules.isVisible(spec.key, workflow: snapshot.workflow,
+                           isVisible: spec.key == "quality" ? snapshot.encoding != "sdr-tiff" : ControlRules.isVisible(spec.key, workflow: snapshot.workflow,
                                                              domain: source.domain, aiMode: snapshot.aiMode),
                            isEnabled: !locked)
         }
@@ -417,14 +431,16 @@ extension EditorModel {
         if let maskKey, (controlValues[maskKey]?.isVisible != true || controlValues[maskKey]?.isEnabled != true) {
             hideMask()
         }
+        syncLUTState()
         updateAIState()
     }
 
     /// Queues a render of the current values unless the scheduler already has
     /// exactly this one. `force` re-renders the same values (a new edge).
     func scheduleRender(draft: Bool = false, force: Bool = false) {
+        refreshExportMetadata()
         guard photo != nil, document?.phase == .ready, !ai.isComputing else { return }
-        let job = RenderJob(options: edit.options(), draft: draft)
+        let job = RenderJob(options: effectiveOptions(), draft: draft)
         guard force || job != lastJob else { return }
         lastJob = job
         clearPreviewError()

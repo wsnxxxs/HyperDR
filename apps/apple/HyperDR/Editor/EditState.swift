@@ -4,20 +4,20 @@ import HyperDRKit
 import Observation
 
 /// Colour-only (SDR output) or HDR, derived from the output encoding.
-enum Workflow: Equatable, Sendable {
+nonisolated enum Workflow: Equatable, Sendable {
     case colorOnly, hdr
 
     init(encoding: String) { self = EditBaseline.isSDR(encoding) ? .colorOnly : .hdr }
 }
 
-enum AIMode: Equatable, Sendable {
+nonisolated enum AIMode: Equatable, Sendable {
     case manual, optimized
 }
 
 /// Everything one undo step restores (batch4 §2.4): the request values, the
 /// processing mode (through `encoding`), AI mode, model and input colour.
 /// View state (mode, zoom, split, overlays) and the frame are not in it.
-struct EditSnapshot: Equatable, Sendable {
+nonisolated struct EditSnapshot: Equatable, Sendable {
     /// One value per `EditControls` key.
     var controls: [String: Double]
     /// One id per `EditChoices` key; `colorGamut` is the input colour.
@@ -26,6 +26,10 @@ struct EditSnapshot: Equatable, Sendable {
     var lensCorrection: Bool
     var aiMode: AIMode
     var selectedModel: String
+    var lutID: String
+    var lutName: String
+    var lutEnabled = true
+    var verifies = true
 
     var encoding: String { choices["encoding"] ?? "adaptive" }
     var workflow: Workflow { Workflow(encoding: encoding) }
@@ -47,6 +51,9 @@ struct EditSnapshot: Equatable, Sendable {
         if case .bool(let value)? = options["lensCorrection"] { lensCorrection = value } else { lensCorrection = true }
         if case .string(let id)? = options["modelId"] { selectedModel = id } else { selectedModel = "" }
         self.aiMode = aiMode
+        lutID = options["lutId"]?.editorString ?? ""
+        lutName = options["lutName"]?.editorString ?? ""
+        verifies = true // The current native export always verifies its output.
     }
 
     /// AI post-adjustments and the model strength act only in AI mode.
@@ -63,6 +70,9 @@ struct EditSnapshot: Equatable, Sendable {
             values[key] = .number(value)
         }
         for (key, id) in choices { values[key] = .string(id) }
+        values["lutId"] = .string(lutID)
+        values["lutName"] = .string(lutName)
+        if !lutEnabled { values["lutStrength"] = .number(0) }
         values["clampSrgb"] = .bool(clampSrgb)
         values["lensCorrection"] = .bool(lensCorrection)
         if mode == .optimized {
@@ -76,7 +86,7 @@ struct EditSnapshot: Equatable, Sendable {
 /// The starting values of an open, shared by the live services (which render
 /// the first edit frame with them) and the model (which shows them), so both
 /// derive the same values from the same reference frame.
-enum EditBaseline {
+nonisolated enum EditBaseline {
     static func isSDR(_ encoding: String) -> Bool { encoding == "sdr-jpeg" || encoding == "sdr-tiff" }
 
     static func initial(encoding: String, domain: InputDomain?,
@@ -96,7 +106,7 @@ enum EditBaseline {
 
 /// How a control's readout is written; mirrors `ControlSpec.Format` so views
 /// never import the Kit.
-enum ControlFormat: String, Sendable {
+nonisolated enum ControlFormat: String, Sendable {
     case ev, signed, percent, fixed2, stops1, stopsOrAuto1, percentOrAuto, integer
 
     /// The smallest step of the readout, in value units (§2.2).
@@ -115,10 +125,10 @@ enum ControlFormat: String, Sendable {
     }
 }
 
-enum ControlGroup: String, Sendable { case lut, tone, model, region }
+nonisolated enum ControlGroup: String, Sendable { case lut, tone, model, region }
 
 /// The read-only description a view needs to draw one slider.
-struct ControlSpecView: Equatable, Sendable {
+nonisolated struct ControlSpecView: Equatable, Sendable {
     let key: String
     let group: ControlGroup
     let labelKey: String
@@ -135,8 +145,8 @@ struct ControlSpecView: Equatable, Sendable {
     init(_ spec: ControlSpec) {
         key = spec.key
         group = ControlGroup(rawValue: spec.group.rawValue) ?? .tone
-        labelKey = spec.labelKey
-        helpKey = spec.helpKey
+        labelKey = spec.key == "quality" ? "ctrl.quality.label" : spec.labelKey
+        helpKey = spec.key == "quality" ? "ctrl.quality.help" : spec.helpKey
         format = ControlFormat(rawValue: spec.format.rawValue) ?? .fixed2
         step = spec.step
         defaultValue = spec.defaultValue
@@ -181,7 +191,7 @@ struct ControlSpecView: Equatable, Sendable {
 }
 
 /// One option of a discrete setting, with why it is unavailable.
-struct Choice<ID: Hashable & Sendable>: Equatable, Sendable {
+nonisolated struct Choice<ID: Hashable & Sendable>: Equatable, Sendable {
     let id: ID
     let labelKey: String
     var isEnabled: Bool
@@ -217,16 +227,18 @@ struct Choice<ID: Hashable & Sendable>: Equatable, Sendable {
 }
 
 /// A one-shot message the view shows in place (not an alert).
-enum EditorNotice: Equatable {
+nonisolated enum EditorNotice: Equatable {
     case resetDone
     /// AI could not run; it went back to manual. The key explains why.
     case aiFailed(reasonKey: String)
+    case rangeClamped(maxStops: Double)
+    case clipboardImageUnsupported
 }
 
 /// Which controls show, as one pure function (batch4 §2.2). Colour-only
 /// hides the HDR controls, region and AI; an HDR source hides region and AI;
 /// AI mode swaps the manual HDR controls for the model's.
-enum ControlRules {
+nonisolated enum ControlRules {
     static let hdrKeys: Set<String> = ["hdrStrength", "hdrRange"]
     static let regionKeys: Set<String> = ["expansionStart", "areaCoverage"]
 
@@ -260,4 +272,8 @@ enum ControlRules {
         }
         return range
     }
+}
+
+nonisolated extension JSONValue {
+    var editorString: String? { if case .string(let s) = self { return s }; return nil }
 }

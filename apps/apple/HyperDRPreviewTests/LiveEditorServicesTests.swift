@@ -174,3 +174,40 @@ extension LiveEditorServicesTests {
         XCTAssertEqual(counter.snapshot.count, 1)
     }
 }
+
+@MainActor extension LiveEditorServicesTests {
+    func testRealExportBeforeSaveHistoryTimingAndVersionRestore() async throws {
+        let (root, source, config) = try environment()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (defaults,suite)=UserDefaults.ephemeral();defer { defaults.removePersistentDomain(forName:suite) }
+        let services=LiveEditorServices(configuration:config,preferences:defaults)
+        defer { services.stop() }
+        let model=EditorModel(services:services)
+        await services.start();await model.loadExportServices()
+        model.open([source])
+        await eventually(timeout:.seconds(20)) { model.document?.phase == .ready && !model.suggestedFileName.isEmpty }
+        model.selectEncoding("sdr-tiff")
+        let target=root.appendingPathComponent("my selected name.tif")
+        model.startExport(destination:target)
+        XCTAssertTrue(model.export.isInFlight)
+        await eventually(timeout:.seconds(30),"export delivered") { !model.export.isInFlight }
+        XCTAssertEqual(model.export.phase,.succeeded)
+        XCTAssertNil(model.export.failure);XCTAssertNil(model.export.saveFailure)
+        XCTAssertEqual(model.export.result?.saved?.url?.resolvingSymlinksInPath(),target.resolvingSymlinksInPath())
+        XCTAssertGreaterThan(try Data(contentsOf:target).count,0)
+        await eventually(timeout:.seconds(10)) { model.exportVersions.count == 1 && model.exportVersions[0].matchesCurrent }
+        XCTAssertEqual(model.exportVersions[0].number,1);XCTAssertEqual(model.documentStatus,.saved)
+        XCTAssertEqual(model.exportVersions[0].pixelSize,model.document?.pixelSize)
+        XCTAssertTrue(model.exportVersions[0].result.selfVerified)
+        let timings = await services.exportTimingHistory()
+        XCTAssertFalse(timings.isEmpty)
+        let id=model.exportVersions[0].id
+        model.adjust("brightness",to:1.2)
+        await eventually(timeout:.seconds(10)) { model.exportVersions.first?.matchesCurrent == false }
+        model.restore(id)
+        await eventually(timeout:.seconds(10)) { model.exportVersions.first?.matchesCurrent == true }
+        let fileURL = await model.exportFileURL(id)
+        XCTAssertNotNil(fileURL)
+        model.closeDocument()
+    }
+}

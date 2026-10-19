@@ -42,6 +42,27 @@ import UniformTypeIdentifiers
     /// The photograph's Exif for a frame caption; empty when it has none.
     func captureFacts(for photo: EditorPhoto) async -> CaptureFacts
     func close(_ photo: EditorPhoto) async
+    func startExport(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?, destination: URL?) async throws -> EditorExportTicket
+    func exportEvents(_ job: String) -> AsyncStream<EditorExportEvent>
+    func cancelAllExports() async
+    func hasExportActivity() async -> Bool
+    func commandLine(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?) async throws -> [String]
+    func exportKey(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?) async throws -> String
+    func exports(for photo: EditorPhoto) async throws -> [ExportHistoryItem]
+    func exportTimingHistory() async -> [ExportTimingSample]
+    func suggestedFileName(_ photo: EditorPhoto, options: EditOptions) async throws -> String
+    func validateDestination(_ url: URL, expectedExtension: String) async throws
+    func saveExport(_ photo: EditorPhoto, export: String, destination: URL?) async throws -> SavedLocation
+    func exportFolder() async -> ExportFolder
+    func setExportFolder(_ url: URL) async throws -> ExportFolder
+    func encodingCapabilities() async throws -> EditorCapabilities
+    func diagnostics() async -> String
+    func exportFileURL(_ photo: EditorPhoto, export: String) async throws -> URL
+    func lutEntries() async -> [LUTItem]
+    func importLUT(_ url: URL) async throws -> LUTItem
+    func applyLUT(_ id: String, to photo: EditorPhoto) async throws -> LUTItem
+    func updateLUT(_ id: String, input: LUTColorSpace, output: LUTColorSpace) async throws -> LUTItem
+    func removeLUT(_ id: String) async throws
 }
 
 /// Outcome of restoring the last photo on launch (A2).
@@ -133,6 +154,21 @@ extension UserDefaults {
         ModelChoice(id: "research-exif-v1", name: "EXIF", nameKey: "model.research-exif-v1",
                     summaryKey: "model.research-exif-v1.summary", isEnabled: true, requiresCapture: true),
     ])
+    var exportStartHandler: (() async throws -> Void)?
+    var exportCancelHandler: (() async -> Void)?
+    var exportSaveHandler: ((String, URL?) async throws -> SavedLocation)?
+    var metadataHandler: (() async throws -> Void)?
+    var historyByURL: [URL: [ExportHistoryItem]] = [:]
+    var timings: [ExportTimingSample] = []
+    var folder = ExportFolder()
+    var capabilityFixture: EditorCapabilities?
+    var library: [LUTItem] = []
+    var importedLUT: LUTItem?
+    private(set) var exportCalls: [(photo: EditorPhoto, options: EditOptions, frame: ExportFrame?, destination: URL?)] = []
+    private(set) var saveCalls: [(String, URL?)] = []
+    private(set) var exportCancelCount = 0
+    private(set) var activeExport = false
+    private var exportSinks: [String: AsyncStream<EditorExportEvent>.Continuation] = [:]
     var detailHandler: ((PreviewRegion, Bool) async throws -> EditorPreview?)?
     private(set) var detailRequests: [(region: PreviewRegion, original: Bool)] = []
     var autoCompletesRefreshes = true
@@ -178,7 +214,7 @@ extension UserDefaults {
                     formatLabel: Self.formatLabel(for: url) ?? "", byteCount: 0)
     }
 
-    static func formatLabel(for url: URL) -> String? {
+    nonisolated static func formatLabel(for url: URL) -> String? {
         switch url.pathExtension.lowercased() {
         case "jpg", "jpeg": "JPEG"
         case "png": "PNG"
@@ -323,3 +359,56 @@ extension EditorServices {
 }
 
 enum EditorDetailError: Error { case sourceReplaced }
+
+
+extension FakeEditorServices {
+    func startExport(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?, destination: URL?) async throws -> EditorExportTicket {
+        exportCalls.append((photo, options, frame, destination)); activeExport = true
+        do { try await exportStartHandler?(); try Task.checkCancellation() }
+        catch { activeExport = false; throw error }
+        return EditorExportTicket(job: "fake-job", argv: ["HyperDR", "--output", destination?.path ?? "folder"])
+    }
+    func exportEvents(_ job: String) -> AsyncStream<EditorExportEvent> {
+        AsyncStream { exportSinks[job] = $0 }
+    }
+    func sendExport(_ event: EditorExportEvent) {
+        for sink in exportSinks.values { sink.yield(event) }
+        if case .finished = event { activeExport = false; for sink in exportSinks.values { sink.finish() }; exportSinks = [:] }
+    }
+    var hasExportSubscriber: Bool { !exportSinks.isEmpty }
+    func cancelAllExports() async { exportCancelCount += 1; await exportCancelHandler?(); activeExport = false }
+    func hasExportActivity() async -> Bool { activeExport }
+    func exports(for photo: EditorPhoto) async throws -> [ExportHistoryItem] {
+        try await metadataHandler?(); return historyByURL[photo.url] ?? []
+    }
+    func exportTimingHistory() async -> [ExportTimingSample] { timings }
+    func commandLine(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?) async throws -> [String] { ["HyperDR", "--output", "<export>"] }
+    func exportKey(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?) async throws -> String {
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        return String(decoding: try encoder.encode(options.values), as: UTF8.self) + String(describing: frame)
+    }
+    func saveExport(_ photo: EditorPhoto, export: String, destination: URL?) async throws -> SavedLocation {
+        saveCalls.append((export, destination))
+        if let exportSaveHandler { return try await exportSaveHandler(export, destination) }
+        return SavedLocation(fileName: destination?.lastPathComponent ?? "saved.heic", folderLabel: folder.label, url: destination)
+    }
+    func exportFolder() async -> ExportFolder { folder }
+    func setExportFolder(_ url: URL) async throws -> ExportFolder { folder = ExportFolder(label: url.lastPathComponent, ready: true); return folder }
+    func encodingCapabilities() async throws -> EditorCapabilities {
+        capabilityFixture ?? EditorCapabilities(encodings: Dictionary(uniqueKeysWithValues: Preferences.encodings.map { ($0, .init(available: true, reason: "")) }), main8: true, main10: true)
+    }
+    func lutEntries() async -> [LUTItem] { library }
+    func importLUT(_ url: URL) async throws -> LUTItem {
+        guard let importedLUT else { throw UserFacingError(code: "lut_invalid") }
+        if !library.contains(where: { $0.id == importedLUT.id }) { library.append(importedLUT) }
+        return importedLUT
+    }
+    func applyLUT(_ id: String, to photo: EditorPhoto) async throws -> LUTItem {
+        guard let item = library.first(where: { $0.id == id }) else { throw UserFacingError(code: "lut_invalid") }; return item
+    }
+    func updateLUT(_ id: String, input: LUTColorSpace, output: LUTColorSpace) async throws -> LUTItem {
+        guard let i = library.firstIndex(where: { $0.id == id }) else { throw UserFacingError(code: "lut_invalid") }
+        library[i].input = input; library[i].output = output; return library[i]
+    }
+    func removeLUT(_ id: String) async throws { library.removeAll { $0.id == id } }
+}

@@ -417,3 +417,18 @@ extension EditorFlowTests {
         model.closeDocument()
     }
 }
+
+extension EditorFlowTests {
+    func testReviewerOpeningCommandIsLockedWhileRestorationIsSuspended() async {
+        let services = ScriptedEditorServices()
+        services.usesRestoreGate = true
+        let model = EditorModel(services: services)
+        model.launch()
+        await eventually(timeout: .seconds(3)) { services.restoreWaiter != nil }
+        XCTAssertTrue(model.isEditingLocked)
+        XCTAssertFalse(model.canOpenDocument, "§2.12 restore must disable the Open command before the photo exists")
+        services.restoreWaiter?.resume(returning: .none)
+        services.restoreWaiter = nil
+        model.closeDocument()
+    }
+}

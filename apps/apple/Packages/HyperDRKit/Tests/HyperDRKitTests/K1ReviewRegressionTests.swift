@@ -192,7 +192,7 @@ private func requireHyperDRError(_ body: () async throws -> Void) async -> Strin
         let store = environment.store()
         let source = try environment.source("photo.png")
         let session = try await store.open(source)
-        let (export, folder) = try await store.prepareExport(session.id, options: [:])
+        let (export, folder) = try await store.prepareExport(session.id, options: [:], key: ExportKey(rawValue: "fixture"))
         let output = folder.appendingPathComponent("result.jpg")
         try Data([1, 2, 3]).write(to: output)
         let report = ConvertReport(json: Data("{}".utf8), files: [ReportFile(
@@ -358,7 +358,7 @@ private func requireHyperDRError(_ body: () async throws -> Void) async -> Strin
         let environment = try ReviewEnvironment()
         let store = environment.store()
         let session = try await store.open(try environment.source("photo.png"))
-        let (_, folder) = try await store.prepareExport(session.id, options: [:])
+        let (_, folder) = try await store.prepareExport(session.id, options: [:], key: ExportKey(rawValue: "fixture"))
         await store.close(session.id)
 
         let fresh = environment.store()
@@ -373,12 +373,12 @@ private func requireHyperDRError(_ body: () async throws -> Void) async -> Strin
         let environment = try ReviewEnvironment()
         let store = environment.store()
         let session = try await store.open(try environment.source("photo.png"))
-        let (export, folder) = try await store.prepareExport(session.id, options: [:])
+        let (export, folder) = try await store.prepareExport(session.id, options: [:], key: ExportKey(rawValue: "fixture"))
         let output = folder.appendingPathComponent("final.jpg")
         try Data([4, 5, 6]).write(to: output)
         let record = ExportRecord(id: export, name: "final.jpg", byteCount: 3,
             createdAt: Date(), sourceDigest: session.sha256, options: [:],
-            reportJSON: Data("{}".utf8))
+            reportJSON: Data("{}".utf8), sequence: 1, key: ExportKey(rawValue: "fixture"), frame: nil)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .secondsSince1970
         try encoder.encode(record).write(to: folder.appendingPathComponent("pending.json"))
@@ -400,12 +400,12 @@ private func requireHyperDRError(_ body: () async throws -> Void) async -> Strin
         let environment = try ReviewEnvironment()
         let store = environment.store()
         let session = try await store.open(try environment.source("photo.png"))
-        let (export, folder) = try await store.prepareExport(session.id, options: [:])
+        let (export, folder) = try await store.prepareExport(session.id, options: [:], key: ExportKey(rawValue: "fixture"))
         let output = folder.appendingPathComponent("final.jpg")
         try Data([7]).write(to: output)
         let record = ExportRecord(id: export, name: "final.jpg", byteCount: 1,
             createdAt: Date(), sourceDigest: session.sha256, options: [:],
-            reportJSON: Data("{}".utf8))
+            reportJSON: Data("{}".utf8), sequence: 1, key: ExportKey(rawValue: "fixture"), frame: nil)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .secondsSince1970
         try encoder.encode(record).write(to: folder.appendingPathComponent("result.json"))
@@ -547,7 +547,7 @@ private func requireHyperDRError(_ body: () async throws -> Void) async -> Strin
         let environment = try ReviewEnvironment()
         let store = environment.store()
         let session = try await store.open(try environment.source("photo.png"))
-        let (export, folder) = try await store.prepareExport(session.id, options: [:])
+        let (export, folder) = try await store.prepareExport(session.id, options: [:], key: ExportKey(rawValue: "fixture"))
         await store.close(session.id)
 
         let image = environment.root.appendingPathComponent("mount-test.dmg")

@@ -1,5 +1,50 @@
+import CryptoKit
 import Foundation
 import HyperDREngine
+
+public enum JobActivity: Sendable, Equatable {
+    case idle, preparing, running(JobID), committing(JobID)
+}
+
+/// Resolved request identity, independent of temporary input/output paths.
+public struct ExportKey: Sendable, Codable, Equatable, Hashable {
+    public let rawValue: String
+    public init(rawValue: String) { self.rawValue = rawValue }
+
+    init(request: EngineRequest, frame: ExportFrameRecord?) throws {
+        var command = request.command
+        for key in ["input", "output", "report"] { command.removeValue(forKey: key) }
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let frameValue: JSONValue = try frame.map {
+            try JSONDecoder().decode(JSONValue.self, from: encoder.encode($0))
+        } ?? .null
+        rawValue = String(decoding: try encoder.encode([
+            "settings": JSONValue.object(request.settings), "command": .object(command), "frame": frameValue
+        ]), as: UTF8.self)
+    }
+}
+
+/// Durable frame identity: no temporary paths or PNG payload in history.
+public struct ExportFrameRecord: Sendable, Codable, Equatable {
+    public let spec: [String: JSONValue]
+    public let overlaySHA256: String?
+    public init(_ frame: ExportFrame) throws {
+        guard frame.spec["overlay"] == nil else {
+            throw HyperDRError(code: "invalid_options", message: "Overlay must be supplied as PNG data")
+        }
+        spec = frame.spec
+        overlaySHA256 = frame.overlayPNG.map { SHA256.hash(data: $0).map { String(format: "%02x", $0) }.joined() }
+    }
+}
+
+public struct SavedMark: Sendable, Codable, Equatable {
+    public let fileName: String
+    public let folderLabel: String
+    public let savedAt: Date
+    public init(fileName: String, folderLabel: String, savedAt: Date = Date()) {
+        self.fileName = fileName; self.folderLabel = folderLabel; self.savedAt = savedAt
+    }
+}
 
 public struct JobID: Sendable, Hashable, Codable {
     public let rawValue: String

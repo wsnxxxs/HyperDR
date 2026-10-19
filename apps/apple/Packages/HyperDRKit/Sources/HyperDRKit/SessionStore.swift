@@ -2,6 +2,7 @@ import CryptoKit
 import Darwin
 import Foundation
 import HyperDREngine
+import os
 
 public struct SessionID: Sendable, Hashable, Codable, CustomStringConvertible {
     public let rawValue: String
@@ -66,6 +67,11 @@ public struct ExportRecord: Sendable, Codable, Equatable {
     public let sourceDigest: String
     public let options: [String: JSONValue]
     public let reportJSON: Data
+    public let sequence: Int
+    public let key: ExportKey
+    public let frame: ExportFrameRecord?
+    /// Loaded from saved.json; publication never rewrites result.json.
+    public internal(set) var saved: SavedMark? = nil
 }
 
 public enum SessionResource: String, Sendable, Codable {
@@ -170,6 +176,8 @@ public actor SessionStore {
         let id: ExportID
         let options: [String: JSONValue]
         let sourceDigest: String
+        let frame: ExportFrameRecord?
+        let key: ExportKey
     }
     private struct OpenSession {
         let url: URL
@@ -213,6 +221,7 @@ public actor SessionStore {
     private let openExportLeaf: OpenExportLeaf
     private let exportRoot: SessionExportFile?
     private let cacheDirectory: URL
+    private let exportHistoryLimit: Int
     private let sessionTTL: TimeInterval
     private let decodeCacheMaxAge: TimeInterval
     private let decodeCacheMaxBytes: Int64
@@ -246,6 +255,7 @@ public actor SessionStore {
         sessionsDirectory = supportDirectory.appendingPathComponent("sessions", isDirectory: true)
         cacheDirectory = configuration.cacheDirectory.resolvingSymlinksInPath().standardizedFileURL
             .appendingPathComponent("decode-cache", isDirectory: true)
+        exportHistoryLimit = max(1, configuration.exportHistoryLimit)
         sessionTTL = configuration.sessionTTL.timeInterval
         self.decodeCacheMaxAge = decodeCacheMaxAge
         self.decodeCacheMaxBytes = decodeCacheMaxBytes
@@ -523,6 +533,13 @@ public actor SessionStore {
         guard let directories = try? fileManager.contentsOfDirectory(
             at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
         else { return 0 }
+        for directory in directories {
+            let id = SessionID(rawValue: directory.lastPathComponent)
+            if id.isValid, exporting[id] == nil, !openingSessions.contains(id), activating[id] == nil {
+                cleanupAbandonedExports(id)
+            }
+        }
+        _ = trimExportHistory()
         var removed = 0
         for directory in directories {
             let id = SessionID(rawValue: directory.lastPathComponent)
@@ -532,7 +549,7 @@ public actor SessionStore {
             guard !openingPaths.contains(stored.sourcePath) else { continue }
             cleanupAbandonedExports(id)
             guard !hasPendingExport(id) else { continue }
-            guard stored.lastUsedAt < cutoff else { continue }
+            guard loadExportRecords(id).isEmpty, stored.lastUsedAt < cutoff else { continue }
             do {
                 try removeSessionDirectory(id)
                 digestCache.removeValue(forKey: stored.sourcePath)
@@ -592,7 +609,8 @@ public actor SessionStore {
         if exporting[id]?.isEmpty == true { exporting.removeValue(forKey: id) }
     }
 
-    public func prepareExport(_ id: SessionID, options: [String: JSONValue]) async throws -> (id: ExportID, directory: URL) {
+    public func prepareExport(_ id: SessionID, options: [String: JSONValue],
+                              frame: ExportFrameRecord? = nil, key: ExportKey) async throws -> (id: ExportID, directory: URL) {
         let exportID = newExportID()
         // Reserve before session lookup suspends: cleanup must not remove the
         // workspace while a source refresh is hashing it.
@@ -601,7 +619,7 @@ public actor SessionStore {
             let session = try await self.session(id)
             let folder = try exportDirectory(id, export: exportID)
             try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
-            let pending = PendingExport(id: exportID, options: options, sourceDigest: session.sha256)
+            let pending = PendingExport(id: exportID, options: options, sourceDigest: session.sha256, frame: frame, key: key)
             do {
                 try write(pending, to: folder.appendingPathComponent("pending.json"))
                 return (exportID, folder)
@@ -655,7 +673,9 @@ public actor SessionStore {
             }
             let record = ExportRecord(id: export, name: name,
                 byteCount: fileSize, createdAt: Date(), sourceDigest: pending.sourceDigest,
-                options: pending.options, reportJSON: report.json)
+                options: pending.options, reportJSON: report.json,
+                sequence: (loadExportRecords(id).map(\.sequence).max() ?? 0) + 1,
+                key: pending.key, frame: pending.frame)
             let encoded: Data
             do { encoded = try encoder.encode(record) }
             catch {
@@ -673,6 +693,8 @@ public actor SessionStore {
             guard Darwin.renameat(folderFD, "pending.json", folderFD, "result.json") == 0 else {
                 throw posixError("renameat", "result.json")
             }
+            releaseExport(id, export: export)
+            _ = trimExportHistory()
             return record
         } catch {
             throw publicError(error)
@@ -709,6 +731,40 @@ public actor SessionStore {
         }
         Darwin.close(folder)
         try? removeEntry(named: export.rawValue, in: exports)
+    }
+
+    /// Global published history, regardless of photo/source digest. Unpublished
+    /// directories and active reservations never contribute to this budget.
+    @discardableResult public func trimExportHistory() -> Int {
+        guard let root = try? sessionsRoot(), let directories = try? fileManager.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { return 0 }
+        var versions: [(SessionID, ExportRecord)] = []
+        for directory in directories {
+            let id = SessionID(rawValue: directory.lastPathComponent)
+            guard id.isValid else { continue }
+            for record in loadExportRecords(id) where exporting[id]?.contains(record.id) != true {
+                versions.append((id, record))
+            }
+        }
+        versions.sort {
+            if $0.1.createdAt != $1.1.createdAt { return $0.1.createdAt > $1.1.createdAt }
+            return $0.1.id.rawValue > $1.1.id.rawValue
+        }
+        var removed = 0
+        for (session, record) in versions.dropFirst(exportHistoryLimit) {
+            do { try removeExportDirectory(session, export: record.id); removed += 1 }
+            catch { continue }
+        }
+        return removed
+    }
+
+    public func markSaved(_ id: SessionID, export: ExportID, saved: SavedMark) throws {
+        // A version can be trimmed while its already-open file is copied.
+        // Do not recreate its directory or fail a completed save in that case.
+        guard loadExportRecords(id).contains(where: { $0.id == export }) else { return }
+        let directory = try openExportDirectoryFD(id, export: export)
+        defer { Darwin.close(directory) }
+        try writeAtomically(try encoder.encode(saved), named: "saved.json", in: directory)
     }
 
     public func exports(for id: SessionID) async -> [ExportRecord] {
@@ -1408,7 +1464,7 @@ public actor SessionStore {
             let id = SessionID(rawValue: directory.lastPathComponent)
             guard id.isValid, let stored = try? loadStored(id),
                   stored.sourcePath == path, stored.sha256 == digest,
-                  stored.lastUsedAt >= cutoff else { continue }
+                  (stored.lastUsedAt >= cutoff || !loadExportRecords(id).isEmpty) else { continue }
             if best == nil || stored.lastUsedAt > best!.lastUsedAt { best = stored }
         }
         return best
@@ -1476,9 +1532,15 @@ public actor SessionStore {
         for folder in folders {
             let attrs = try? fileManager.attributesOfItem(atPath: folder.path)
             guard attrs?[.type] as? FileAttributeType == .typeDirectory else { continue }
-            guard let record = try? read(ExportRecord.self, from: folder.appendingPathComponent("result.json")),
-                  record.id.rawValue == folder.lastPathComponent,
+            guard var record = try? read(ExportRecord.self, from: folder.appendingPathComponent("result.json")) else {
+                if fileManager.fileExists(atPath: folder.appendingPathComponent("result.json").path) {
+                    Logger(subsystem: "com.hyperdr.HyperDR", category: "Session").debug("Discarding incompatible export record")
+                }
+                continue
+            }
+            guard record.id.rawValue == folder.lastPathComponent,
                   resultFileURL(id, record: record) != nil else { continue }
+            record.saved = try? read(SavedMark.self, from: folder.appendingPathComponent("saved.json"))
             records.append(record)
         }
         return records

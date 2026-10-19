@@ -296,7 +296,7 @@ private func sha256(_ bytes: [UInt8]) -> String {
         let open = try await store.open(try environment.source("open.png"))
         let exporting = try await store.open(try environment.source("exporting.png"))
         let (exportID, exportDirectory) = try await store.prepareExport(exporting.id,
-            options: ["encoding": .string("sdr-jpeg")])
+            options: ["encoding": .string("sdr-jpeg")], key: ExportKey(rawValue: "fixture"))
         await store.close(exporting.id)
 
         let future = Date().addingTimeInterval(120)
@@ -325,7 +325,7 @@ private func sha256(_ bytes: [UInt8]) -> String {
 
         func publish(_ name: String, bytes: [UInt8]) async throws -> (ExportRecord, URL) {
             let (id, directory) = try await store.prepareExport(session.id,
-                options: ["encoding": .string("sdr-jpeg")])
+                options: ["encoding": .string("sdr-jpeg")], key: ExportKey(rawValue: "fixture"))
             let output = directory.appendingPathComponent(name)
             try Data(bytes).write(to: output)
             let report = ConvertReport(json: Data("{}".utf8), files: [ReportFile(
@@ -351,7 +351,7 @@ private func sha256(_ bytes: [UInt8]) -> String {
         #expect(records.first?.id == secondRecord.id)
         #expect(try await store.resultURL(session.id, export: nil) == secondURL)
 
-        let (discardID, discardDirectory) = try await store.prepareExport(session.id, options: [:])
+        let (discardID, discardDirectory) = try await store.prepareExport(session.id, options: [:], key: ExportKey(rawValue: "fixture"))
         await store.discardExport(session.id, export: discardID)
         #expect(!FileManager.default.fileExists(atPath: discardDirectory.path))
 
@@ -471,7 +471,7 @@ extension SessionStoreTests {
         let photo = try await store.open(source)
         var published: [(ExportID, URL)] = []
         for name in ["photo.jpg", "photo.heic", "photo.avif", "photo.tif"] {
-            let (id, directory) = try await store.prepareExport(photo.id, options: [:])
+            let (id, directory) = try await store.prepareExport(photo.id, options: [:], key: ExportKey(rawValue: "fixture"))
             let output = directory.appendingPathComponent(name)
             try Data(name.utf8).write(to: output)
             let report = ConvertReport(json: Data("{}".utf8), files: [ReportFile(input: source.path,
@@ -488,7 +488,7 @@ extension SessionStoreTests {
             #expect(try Data(contentsOf: url) == Data(url.lastPathComponent.utf8))
         }
         for mode in ["empty-report", "missing", "failed", "outside"] {
-            let (id, directory) = try await recreated.prepareExport(photo.id, options: [:])
+            let (id, directory) = try await recreated.prepareExport(photo.id, options: [:], key: ExportKey(rawValue: "fixture"))
             let output = mode == "outside" ? env.root.appendingPathComponent("outside.jpg") : directory.appendingPathComponent("result.jpg")
             if mode != "missing" { try Data([9]).write(to: output) }
             let report = ConvertReport(json: Data("{}".utf8), files: [ReportFile(input: source.path,

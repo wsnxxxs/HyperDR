@@ -6,7 +6,7 @@ import HyperDREngine
 public final class HyperDRKit: Sendable {
     public let engine: Engine
     public let schema: SettingsSchema
-    let capabilities: Capabilities
+    public let capabilities: Capabilities
     public let formats: InputFormats
     public let sessions: SessionStore
     public let previews: PreviewService

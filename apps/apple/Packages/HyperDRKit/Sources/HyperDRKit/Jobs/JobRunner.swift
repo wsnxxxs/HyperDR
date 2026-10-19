@@ -28,6 +28,48 @@ public actor JobRunner {
     /// Covers preparation, conversion, publication and failed-output removal.
     private var admission: UUID?
     private var record: Record?
+    private var preparation: Task<JobTicket, Error>?
+    private let beforePublish: @Sendable () async -> Void
+
+    public var activity: JobActivity {
+        guard admission != nil else { return .idle }
+        if preparation != nil { return .preparing }
+        guard let record, !record.done else { return .preparing }
+        return record.committing ? .committing(record.id) : .running(record.id)
+    }
+
+    /// Cancellation waits for cleanup. Publication is an irreversible commit
+    /// point: callers wait for it instead of cancelling an already-published result.
+    public func cancelAll() async {
+        if let preparation {
+            preparation.cancel()
+            _ = try? await preparation.value
+        } else if let task = record?.task {
+            if record?.committing != true {
+                record?.cancelled = true
+                task.cancel()
+            }
+            await task.value
+        }
+    }
+
+    public func exportKey(session id: SessionID, options: EditOptions,
+                          frame: ExportFrame? = nil) async throws -> ExportKey {
+        let request = try resolver.resolveExport(options, session: await sessions.session(id))
+        return try ExportKey(request: request, frame: frame.map { try ExportFrameRecord($0) })
+    }
+
+    public func commandLine(session id: SessionID, options: EditOptions,
+                            frame: ExportFrame? = nil) async throws -> [String] {
+        var request = try resolver.resolveExport(options, session: await sessions.session(id))
+        if let frame { _ = try ExportFrameRecord(frame) }
+        try request.setCommand("output", .string("<导出文件夹>"))
+        try request.setCommand("report", .string("<导出文件夹>/report.json"))
+        if frame != nil { try request.setCommand("frame", .string("<导出文件夹>/frame.json")) }
+        var argv = try Engine.commandLine(request)
+        argv[0] = "HyperDR"
+        return argv
+    }
 
     public init(configuration: KitConfiguration, schema: SettingsSchema,
                 capabilities: Capabilities, sessions: SessionStore, engine: Engine) {
@@ -41,7 +83,8 @@ public actor JobRunner {
 
     init(configuration: KitConfiguration, sessions: SessionStore, resolver: OptionResolver,
          probe: @escaping @Sendable (URL) async throws -> (Int, Int),
-         convert: @escaping Converter) {
+         convert: @escaping Converter, beforePublish: @escaping @Sendable () async -> Void = {}) {
+        self.beforePublish = beforePublish
         self.configuration = configuration; self.sessions = sessions
         self.resolver = resolver; self.probe = probe; self.convert = convert
     }
@@ -53,6 +96,13 @@ public actor JobRunner {
         }
         let token = UUID()
         admission = token
+        let task = Task { try await self.prepare(session: id, options: options, frame: frame, token: token) }
+        preparation = task
+        defer { if admission == token || admission == nil { preparation = nil } }
+        return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+    }
+
+    private func prepare(session id: SessionID, options: EditOptions, frame: ExportFrame?, token: UUID) async throws -> JobTicket {
         var pending: ExportID?
         do {
             let (photo, lease) = try await sessions.exportSource(id)
@@ -71,7 +121,9 @@ public actor JobRunner {
                 }
             }
             try Task.checkCancellation()
-            let version = try await sessions.prepareExport(id, options: options.values)
+            let frameRecord = try frame.map { try ExportFrameRecord($0) }
+            let key = try ExportKey(request: request, frame: frameRecord)
+            let version = try await sessions.prepareExport(id, options: options.values, frame: frameRecord, key: key)
             pending = version.id
             try Task.checkCancellation()
             try request.setCommand("output", .string(version.directory.path))
@@ -98,6 +150,7 @@ public actor JobRunner {
             let task = Task { await self.run(job: job, session: id, export: version.id,
                 request: request, lease: lease) }
             record?.task = task
+            preparation = nil
             return JobTicket(job: job, export: version.id, argv: argv)
         } catch {
             if let pending { await sessions.discardExport(id, export: pending) }
@@ -162,6 +215,7 @@ public actor JobRunner {
             // Publication is the commit point. After this actor turn cancel
             // returns false; a published version must never be called cancelled.
             record?.committing = true
+            await beforePublish()
             do { record?.result = try await sessions.publishExport(session, export: export, report: report) }
             catch { failure = error as? HyperDRError ?? HyperDRError(code: "internal_error", message: String(describing: error)) }
         }

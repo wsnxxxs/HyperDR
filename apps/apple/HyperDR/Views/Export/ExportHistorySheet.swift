@@ -61,7 +61,8 @@ struct ExportHistorySheet: View {
         if version.saved != nil { tags.append(HDRTag(Text("history.saved"), systemImage: "checkmark", tint: .success)) }
         let secondary: RowAction
         if version.saved != nil {
-            secondary = RowAction(title: Text("export.save.showInFinder"), systemImage: "folder") {
+            secondary = RowAction(title: Text("export.save.showInFinder"), systemImage: "folder",
+                                  isEnabled: ExportFlow.canShowInFinder(model: model, version: version.id)) {
                 ExportFlow.showInFinder(model: model, version: version.id)
             }
         } else {

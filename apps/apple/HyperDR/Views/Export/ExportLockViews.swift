@@ -62,6 +62,7 @@ struct ExportStatusHost: View {
                 onSave: { ExportFlow.saveAs(model: model, version: result.export,
                                             choosePlace: ExportSavePanel.chooser(on: NSApp.keyWindow)) },
                 onShowInFinder: { ExportFlow.showInFinder(model: model, version: result.export) },
+                canShowInFinder: ExportFlow.canShowInFinder(model: model, version: result.export),
                 onDismiss: model.export.dismissOutcome)
         }
     }

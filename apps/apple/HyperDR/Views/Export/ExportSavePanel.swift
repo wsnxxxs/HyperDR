@@ -52,17 +52,23 @@ import UniformTypeIdentifiers
         }
     }
 
-    /// Shows the file in Finder: the saved copy when this run knows where it
-    /// is, else the version's own file.
+    /// The saved copy this run can still show in Finder: only a copy that
+    /// carries its own reveal action (the opaque authority the service kept).
+    /// Views never hold a file URL, so there is no other way to find a file.
+    static func revealable(model: EditorModel, version: String) -> SavedLocation? {
+        [model.exportVersions.first(where: { $0.id == version })?.saved,
+         model.export.result?.export == version ? model.export.result?.saved : nil]
+            .compactMap { $0 }.first(where: \.canReveal)
+    }
+
+    /// Whether "Show in Finder" works for this version; the button is disabled
+    /// when it does not, and nothing else stands in for it.
+    static func canShowInFinder(model: EditorModel, version: String) -> Bool {
+        revealable(model: model, version: version) != nil
+    }
+
+    /// Shows the saved copy in Finder through its own reveal action.
     static func showInFinder(model: EditorModel, version: String) {
-        if let saved = [model.exportVersions.first(where: { $0.id == version })?.saved,
-                        model.export.result?.export == version ? model.export.result?.saved : nil]
-            .compactMap({ $0 }).first(where: \.canReveal) {
-            saved.reveal()
-            return
-        }
-        Task {
-            if let url = await model.exportFileURL(version) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-        }
+        revealable(model: model, version: version)?.reveal()
     }
 }

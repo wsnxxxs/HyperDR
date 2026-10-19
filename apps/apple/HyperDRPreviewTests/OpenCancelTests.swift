@@ -32,6 +32,20 @@ import HyperDRDesign
         func finish() { advance(to: .seconds(1000)) }
     }
 
+    /// What would have been spoken; nothing reaches the system.
+    private var spoken: [String] = []
+    private var originalDeliver: ((String) -> Void)?
+
+    override func setUp() async throws {
+        spoken = []
+        originalDeliver = CameraSupportAnnouncement.deliver
+        CameraSupportAnnouncement.deliver = { [weak self] in self?.spoken.append($0) }
+    }
+
+    override func tearDown() async throws {
+        if let originalDeliver { CameraSupportAnnouncement.deliver = originalDeliver }
+    }
+
     // MARK: The model
 
     func testASlowNonRawOpenIsFlaggedAtOnePointFiveSecondsAndClearedByTheFirstFrame() async {
@@ -75,7 +89,8 @@ import HyperDRDesign
         await eventually(timeout: .seconds(3)) { services.streams[self.jpeg] != nil }
         clock.advance(to: .seconds(2))
         await eventually(timeout: .seconds(3)) { model.document?.isOpeningSlowly == true }
-        OpenCancellation.cancel(model)
+        OpenCancellation.cancel(model, locale: Locale(identifier: "en"))
+        XCTAssertEqual(spoken, ["Opening cancelled"], "said once, to the recorder")
         XCTAssertEqual(model.document?.name, old.lastPathComponent)
         XCTAssertEqual(model.document?.isOpeningSlowly, false)
         XCTAssertNil(model.alert); XCTAssertFalse(model.canCancelOpen)
@@ -102,8 +117,9 @@ import HyperDRDesign
 
     func testEscapeCancelsAnUncommittedOpenAtAnyTimeWithNoFocusNeeded() async {
         let (model, _) = await opening()
-        XCTAssertTrue(OpenCancelKeyRule.handle(escape(), context: context(), model: model))
+        XCTAssertTrue(OpenCancelKeyRule.handle(escape(), context: context(), model: model, locale: Locale(identifier: "en")))
         XCTAssertNil(model.document); XCTAssertFalse(model.canCancelOpen); XCTAssertNil(model.alert)
+        XCTAssertEqual(spoken, ["Opening cancelled"])
     }
 
     func testEscapeBelongsToASheetAnAlertOrAMenuFirst() async {
@@ -112,6 +128,7 @@ import HyperDRDesign
         XCTAssertFalse(OpenCancelKeyRule.handle(escape(), context: context(modal: true), model: model))
         XCTAssertFalse(OpenCancelKeyRule.handle(escape(), context: context(key: false), model: model))
         XCTAssertTrue(model.canCancelOpen, "nothing was cancelled")
+        XCTAssertEqual(spoken, [], "and nothing was said")
     }
 
     func testOnlyAPlainEscapeCancels() async {

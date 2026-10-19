@@ -55,7 +55,7 @@ std::array<float, 3> fit_unit_cube(std::array<float, 3> rgb) {
 // rendition's desaturated chroma. Here every pixel gets its own gain and the
 // base is derived from the HDR pixel, so `base x 2^gain` is the HDR pixel
 // again. Full resolution is also what keeps that true in every decoder: at 1:1
-// there is no resampling, whereas libultrahdr, Core Image and this project each
+// there is no resampling, whereas Core Image and this project each
 // interpolate a smaller map by a different rule.
 //
 // Per pixel the gain is the larger of the tone map's luminance ratio (so the
@@ -165,11 +165,11 @@ GainMapResult exact_gain_map_from_renditions(PhotoRenditions images) {
 
 // ISO 21496-1 weights the gain by (H - BaseHeadroom) / (AlternateHeadroom -
 // BaseHeadroom), so a file must declare AlternateHeadroom above BaseHeadroom
-// even when it carries no HDR; libultrahdr rejects a file where they are equal.
+// even when it carries no HDR; a distinct alternate headroom avoids ambiguous gain weighting.
 // A rendering with no headroom declares this smallest step over a base
 // headroom of 0 together with zero gain, so every reader shows its SDR base.
 // The step is the smallest that still survives a reader's single-precision
-// exp2(): libultrahdr turns it into a linear capacity that must exceed 1.
+// exp2(): the linear alternate capacity must exceed 1.
 constexpr Rational kMinimumAlternateHeadroom{1, 1U << 23};
 
 // The stored form of quantized RGB gain codes, decided by their content so the
@@ -230,7 +230,7 @@ void shrink_gain_codes(FloatImage& codes, const std::array<float, 3>& base_offse
 // Preserve both endpoints when grading gives them independent RGB ratios.
 // Offsets use the same SDR-white-relative units on encode and reconstruction;
 // they keep a LUT's zero-valued channel representable without infinite gain.
-// A shared coding range/gamma also permits libultrahdr's XMP + ISO writer.
+// A shared coding range/gamma also fits common XMP + ISO writers.
 GainMapResult rgb_gain_map_from_renditions(PhotoRenditions images) {
   constexpr float offset = 1.0F / 64.0F;
   const auto width = images.sdr.width, height = images.sdr.height;

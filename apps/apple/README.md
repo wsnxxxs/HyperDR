@@ -20,7 +20,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -downloadCom
 The build script uses `build-apple/` for CMake and writes the merged static xcframework
 plus replaceable libheif/libde265 dylibs to `build/xcframework/`. It also creates the
 local artifact symlink consumed by Swift Package Manager. These products are ignored.
-The App target embeds and signs the decoder dylibs; libultrahdr is merged statically.
+The App target embeds and signs the remaining decoder dylibs. Gain-map JPEGs use the native parser, libjpeg-turbo and ImageIO.
 
 `HyperDREngine` wraps the original six C ABI functions. It imports a Clang module,
 with no Swift C++ interoperability. Its schema test compares the raw engine output

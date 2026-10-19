@@ -212,7 +212,7 @@ inline constexpr float kGamutCompressionPower = 1.2F;
 // Rec.709/sRGB primaries to Display P3, both linear and D65. This is the
 // inverse of the P3->709 matrix used by is_outside_rec709 below, and is needed
 // when an input already carries Rec.709 primaries (an Ultra HDR JPEG decoded
-// through libultrahdr, for example) and has to enter the P3 working space.
+// from a gain-map JPEG, for example) and has to enter the P3 working space.
 [[nodiscard]] inline std::array<float, 3> rec709_to_linear_p3(float r, float g,
                                                               float b) {
   return {std::max(0.0F, 0.82246197F * r + 0.17753803F * g),

@@ -2,7 +2,8 @@
 # Include sources/assets and the pinned dependency manifest, not filesystem
 # paths or configure time, so CLI and static/shared C ABI agree in one build.
 file(GLOB_RECURSE hyperdr_identity_inputs CONFIGURE_DEPENDS
-  "${PROJECT_SOURCE_DIR}/modules/*.cpp" "${PROJECT_SOURCE_DIR}/modules/*.hpp"
+  "${PROJECT_SOURCE_DIR}/modules/*.cpp" "${PROJECT_SOURCE_DIR}/modules/*.mm"
+  "${PROJECT_SOURCE_DIR}/modules/*.hpp"
   "${PROJECT_SOURCE_DIR}/modules/*.h" "${PROJECT_SOURCE_DIR}/modules/*.inc"
   "${PROJECT_SOURCE_DIR}/modules/CMakeLists.txt" "${PROJECT_SOURCE_DIR}/cmake/*.cmake"
   "${HYPERDR_MODEL_ASSET_DIR}/*.ncnn.*" "${HYPERDR_MODEL_ASSET_DIR}/*.manifest.json")

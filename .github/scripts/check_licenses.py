@@ -3,6 +3,8 @@
 LGPL libraries remain allowed during the documented desktop transition. Their
 copyright files include GPL text by reference, so classify those notices by the
 installed SPDX package license, rather than matching that incorporated text.
+The checks follow installed metadata and the generated product graph; image
+codec dependencies have no separately fetched reference-codec exception list.
 """
 import argparse
 import json

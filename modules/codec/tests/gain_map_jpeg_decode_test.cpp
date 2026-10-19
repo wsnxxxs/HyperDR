@@ -17,7 +17,6 @@
 #include <unistd.h>
 #include <ImageIO/ImageIO.h>
 #include <CoreGraphics/CoreGraphics.h>
-#include <ultrahdr_api.h>
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -111,10 +110,8 @@ Metrics metrics(const FloatImage& actual,const FloatImage& expected,const char* 
 }
 int compare_imageio(const std::vector<std::uint8_t>& bytes, bool constant_fixture=false) {
   auto candidate=codec::decode_iso_gain_map_jpeg_bytes(bytes,ColorGamut::kSrgb);
-  auto reference=codec::decode_legacy_ultrahdr_bytes(bytes,ColorGamut::kSrgb);
   auto third=imageio(bytes);
   (void)metrics(candidate.linear_p3,third,"candidate/imageio");
-  (void)metrics(reference.linear_p3,third,"libultrahdr/imageio");
   auto luminance=[](const FloatImage& a,std::size_t i){return a.pixels[i]*.22897456+a.pixels[i+1]*.69173852+a.pixels[i+2]*.07928691;};
   if(constant_fixture && bytes!=read_binary_file(std::filesystem::path(HYPERDR_TEST_FIXTURES)/"xmp-only.jpg"))
     throw std::invalid_argument("quantization allowance is restricted to the approved constant synthetic fixture");
@@ -141,8 +138,8 @@ int compare_imageio(const std::vector<std::uint8_t>& bytes, bool constant_fixtur
     std::sort(e.begin(),e.end());Metrics m{sum/e.size(),e[e.size()*99/100],e.back()};
     std::cout<<label<<(channels?" filtered_RGB":" bright_Y")<<" count="<<e.size()<<" mean="<<m.mean<<" p99="<<m.p99<<"\n";return m;
   };
-  const auto ownY=filtered(candidate.linear_p3,"candidate/imageio",false),oldY=filtered(reference.linear_p3,"libultrahdr/imageio",false);
-  const auto ownC=filtered(candidate.linear_p3,"candidate/imageio",true),oldC=filtered(reference.linear_p3,"libultrahdr/imageio",true);
+  const auto ownY=filtered(candidate.linear_p3,"candidate/imageio",false);
+  const auto ownC=filtered(candidate.linear_p3,"candidate/imageio",true);
   const auto jpeg=inspect_gain_map_jpeg(bytes);
   auto gain=gain_input(bytes).pixels;
   for(const auto& app:jpeg.app_segments[0])if(app.marker==0xe1 && app.payload.size()>6 &&
@@ -150,7 +147,7 @@ int compare_imageio(const std::vector<std::uint8_t>& bytes, bool constant_fixtur
     const auto exif=read_exif(app.payload.data()+6,app.payload.size()-6);
     gain=apply_exif_orientation(std::move(gain),exif.orientation.value_or(1));break;
   }
-  struct Bucket {std::size_t n=0,positive=0;double excess=0,signed_delta=0,own=0,old=0,own_signed=0,old_signed=0;};
+  struct Bucket {std::size_t n=0;double own=0,own_signed=0;};
   std::array<Bucket,5> buckets{};
   for(unsigned y=0;y<third.height;++y)for(unsigned x=0;x<third.width;++x){
     const auto i=(static_cast<std::size_t>(y)*third.width+x)*3;
@@ -164,70 +161,24 @@ int compare_imageio(const std::vector<std::uint8_t>& bytes, bool constant_fixtur
     }
     const auto bin=gradient<.5?0:gradient<=1.01?1:gradient<=4.01?2:gradient<=16.01?3:4;
     const auto a=std::log2(std::max(luminance(candidate.linear_p3,i),1e-6)/std::max(luminance(third,i),1e-6));
-    const auto b=std::log2(std::max(luminance(reference.linear_p3,i),1e-6)/std::max(luminance(third,i),1e-6));
-    auto& k=buckets[bin];++k.n;k.positive+=std::abs(a)>std::abs(b);k.excess+=std::abs(a)-std::abs(b);k.signed_delta+=a-b;k.own+=std::abs(a);k.old+=std::abs(b);k.own_signed+=a;k.old_signed+=b;
+    auto& k=buckets[bin];++k.n;k.own+=std::abs(a);k.own_signed+=a;
   }
   const char* labels[]{"flat_0","1_code","2_to_4_codes","5_to_16_codes","over_16_codes"};
   bool attribution=true;
   for(unsigned bin=0;bin<buckets.size();++bin){const auto& k=buckets[bin];if(!k.n)continue;
-    const auto a=std::abs(k.own_signed/k.n),b=std::abs(k.old_signed/k.n);
-    bool bucket_pass=a<=b || (a<=.003 && b<=.003);
+    const auto a=std::abs(k.own_signed/k.n);
     if(constant_fixture && bin==0 && k.n==candidate.linear_p3.width*candidate.linear_p3.height) {
-      const double own_lib=std::abs(k.signed_delta/k.n);
-      const double limit=std::max(.003,reference_precision.half_step_stops+own_lib);
-      bucket_pass = a<=b || a<=.003 || a<=limit;
-      std::cout<<"constant_only_quantization_limit="<<limit<<" own_lib_signed_abs="<<own_lib<<" passed="<<bucket_pass<<"\n";
+      // This stricter check needs no external comparison decoder: the source
+      // reference itself has a measured quantization half-step.
+      const double limit=std::max(.003,reference_precision.half_step_stops);
+      attribution &= a<=limit;
+      std::cout<<"constant_only_quantization_limit="<<limit<<" passed="<<(a<=limit)<<"\n";
     }
-    attribution &= bucket_pass;
-    std::cout<<"gradient_bucket="<<labels[bin]<<" count="<<k.n<<" own_mean="<<k.own/k.n<<" old_mean="<<k.old/k.n
-      <<" excess_mean="<<k.excess/k.n<<" signed_own_minus_old="<<k.signed_delta/k.n<<" own_imageio_signed_mean="<<k.own_signed/k.n<<" lib_imageio_signed_mean="<<k.old_signed/k.n<<" positive_excess_fraction="<<double(k.positive)/k.n<<"\n";
+    std::cout<<"gradient_bucket="<<labels[bin]<<" count="<<k.n<<" own_mean="<<k.own/k.n
+      <<" own_imageio_signed_mean="<<k.own_signed/k.n<<"\n";
   }
-  auto pass=[](Metrics own,Metrics old){return own.mean<=.02 && own.p99<=.1 && own.mean<=old.mean+.005 && own.p99<=old.p99+.02;};
-  std::cout<<"gradient_attribution_pass="<<attribution<<"\n";
-  return attribution&&pass(ownY,oldY)&&pass(ownC,oldC)?0:1;
-}
-void compare_metadata(const std::vector<std::uint8_t>& bytes) {
-  const auto m=gain_input(bytes).metadata;
-  auto* decoder=uhdr_create_decoder();
-  struct Free{uhdr_codec_private_t* p;~Free(){uhdr_release_decoder(p);}} free{decoder};
-  uhdr_compressed_image_t input{};input.data=const_cast<std::uint8_t*>(bytes.data());input.data_sz=input.capacity=bytes.size();
-  if(uhdr_dec_set_image(decoder,&input).error_code || uhdr_dec_probe(decoder).error_code)throw std::runtime_error("reference metadata probe failed");
-  const auto* g=uhdr_dec_get_gainmap_metadata(decoder);
-  if(!g)throw std::runtime_error("reference gain metadata missing");
-  double largest=0;
-  auto check=[&](double a,double b){largest=std::max(largest,std::abs(a-b));};
-  check(rational_value(m.base_headroom),std::log2(g->hdr_capacity_min));
-  check(rational_value(m.alternate_headroom),std::log2(g->hdr_capacity_max));
-  if(m.use_base_color_space!=bool(g->use_base_cg))throw std::runtime_error("gain working space differs");
-  for(unsigned c=0;c<3;++c){auto k=gain_map_channel(m,gain_map_channel_count(m)==1?0:c);
-    check(rational_value(k.gain_min),std::log2(g->min_content_boost[c]));
-    check(rational_value(k.gain_max),std::log2(g->max_content_boost[c]));
-    check(rational_value(k.gamma),g->gamma[c]);check(rational_value(k.base_offset),g->offset_sdr[c]);
-    check(rational_value(k.alternate_offset),g->offset_hdr[c]);
-  }
-  std::cout<<"metadata_max_delta="<<largest<<"\n";
-  const auto layout=inspect_gain_map_jpeg(bytes);
-  if(largest>(layout.primary_iso_count?1e-4:1e-3))throw std::runtime_error("gain-map metadata tolerance exceeded");
-}
-bool compare(const std::vector<std::uint8_t>& bytes, const char* label, bool enforce=false) {
-  compare_metadata(bytes);
-  const auto expected = codec::decode_legacy_ultrahdr_bytes(bytes,ColorGamut::kSrgb);
-  const auto actual = codec::decode_iso_gain_map_jpeg_bytes(bytes,ColorGamut::kSrgb);
-  if(expected.linear_p3.width!=actual.linear_p3.width || expected.linear_p3.height!=actual.linear_p3.height || expected.metadata.orientation!=actual.metadata.orientation)throw std::runtime_error("geometry differs");
-  if(expected.authored_sdr->pixels != actual.authored_sdr->pixels) throw std::runtime_error("SDR differs");
-  std::vector<double> errors;
-  for (std::size_t i=0;i<expected.linear_p3.pixels.size();++i) {
-    const double a=std::max(1e-6F,actual.linear_p3.pixels[i]);
-    const double b=std::max(1e-6F,expected.linear_p3.pixels[i]);
-    errors.push_back(std::abs(std::log2(a/b)));
-  }
-  const auto worst=static_cast<std::size_t>(std::max_element(errors.begin(),errors.end())-errors.begin());
-  std::cout<<"worst=("<<(worst/3)%actual.linear_p3.width<<","<<(worst/3)/actual.linear_p3.width<<","<<worst%3<<") ";
-  double sum=0;for(auto v:errors)sum+=v;
-  std::sort(errors.begin(),errors.end());
-  const auto mean=sum/errors.size(),p99=errors[errors.size()*99/100],max=errors.back();
-  std::cout<<label<<" mean="<<mean<<" p99="<<p99<<" max="<<max<<'\n';
-  return !enforce || (mean<=.005 && p99<=.02 && max<=.1);
+  auto pass=[](Metrics own){return own.mean<=.02 && own.p99<=.1;};
+  return attribution&&pass(ownY)&&pass(ownC)?0:1;
 }
 void require(bool condition,const char* message){if(!condition)throw std::runtime_error(message);}
 void regressions() {
@@ -280,16 +231,20 @@ void roundtrip() {
     const auto source=reconstruct_gain_map(p.base_linear,p.gain_map,p.metadata,2);
     const auto bytes=encode_gain_map_jpeg(p,{},95);
     const auto own=codec::decode_iso_gain_map_jpeg_bytes(bytes,ColorGamut::kSrgb);
-    const auto old=codec::decode_legacy_ultrahdr_bytes(bytes,ColorGamut::kSrgb);
     auto errors=[&](const FloatImage& candidate,const FloatImage& reference) {
       std::vector<double> values;double sum=0;
       auto y=[](const FloatImage& a,std::size_t i){return a.pixels[i]*.22897456+a.pixels[i+1]*.69173852+a.pixels[i+2]*.07928691;};
       for(std::size_t i=0;i<reference.pixels.size();i+=3)if(y(p.base_linear,i)>=.02){auto e=std::abs(std::log2(std::max(y(candidate,i),1e-6)/std::max(y(reference,i),1e-6)));values.push_back(e);sum+=e;}
       std::sort(values.begin(),values.end());return std::pair(sum/values.size(),values[values.size()*99/100]);
     };
-    const auto base=errors(*own.authored_sdr,p.base_linear),candidate=errors(own.linear_p3,source),legacy=errors(old.linear_p3,source);
+    const auto base=errors(*own.authored_sdr,p.base_linear),candidate=errors(own.linear_p3,source);
+    // Frozen E4c reference measurements for these exact generated inputs.
+    // Provenance and the full parallel comparison are in batch3-report E4c/E4d.
+    constexpr std::array<std::array<double,3>,2> reference{{
+      {.0053744,.00930336,.01721}, {.0108338,.0287085,.00770867}}};
+    const auto& ceiling=reference[ch==1?0:1];
     std::cout<<"roundtrip_channels="<<ch<<" own_extra_mean="<<candidate.first-base.first<<" own_extra_p99="<<candidate.second-base.second
-        <<" legacy_extra_mean="<<legacy.first-base.first<<" legacy_extra_p99="<<legacy.second-base.second<<"\n";
+        <<" reference_extra_mean="<<ceiling[0]<<" reference_extra_p99="<<ceiling[1]<<"\n";
     const auto peak=[](const FloatImage& image) {
       std::vector<float> peaks;peaks.reserve(image.width*image.height);
       for(std::size_t i=0;i<image.pixels.size();i+=3)
@@ -299,12 +254,11 @@ void roundtrip() {
     };
     const auto source_peak=peak(source);
     const double own_peak_error=std::abs(peak(own.linear_p3)/source_peak-1);
-    const double legacy_peak_error=std::abs(peak(old.linear_p3)/source_peak-1);
     std::cout<<"roundtrip_channels="<<ch<<" own_peak_relative_error="<<own_peak_error
-        <<" legacy_peak_relative_error="<<legacy_peak_error<<"\n";
-    require(own_peak_error<=.02 && own_peak_error<=legacy_peak_error,"roundtrip p99.99 peak exceeded or is worse than libultrahdr");
+        <<" reference_peak_relative_error="<<ceiling[2]<<"\n";
+    require(own_peak_error<=.02 && own_peak_error<=ceiling[2],"roundtrip p99.99 peak exceeded the comparison reference");
     require(candidate.first-base.first<=.01 && candidate.second-base.second<=.04,"roundtrip E4 extra error exceeded");
-    require(candidate.first<=legacy.first && candidate.second<=legacy.second,"roundtrip is worse than libultrahdr");
+    require(candidate.first-base.first<=ceiling[0] && candidate.second-base.second<=ceiling[1],"roundtrip is worse than the frozen reference");
   }
 }
 // Request cancellation from the progress callback itself: this pins the gap
@@ -401,7 +355,7 @@ int main(int argc,char**argv) {
     if(argc==2 && std::string(argv[1])=="cancel-progressive"){cancel_progressive_large();return 0;}
     if(argc==2 && std::string(argv[1])=="cancel-large"){cancel_large();return 0;}
     if(argc==4 && std::string(argv[2])=="reexport") {
-      auto input=codec::decode_legacy_ultrahdr_bytes(read_binary_file(argv[1]),ColorGamut::kSrgb);
+      auto input=codec::decode_ultrahdr_bytes(read_binary_file(argv[1]),ColorGamut::kSrgb);
       PhotoRenditions pair;pair.sdr=std::move(*input.authored_sdr);pair.hdr=std::move(input.linear_p3);
       pair.dual_rendition=true;pair.hdr_is_source=true;pair.authored_gain_channels=input.gain_map.channels;
       pair.authored_gain_map=input.gain_map;pair.fixed_gain_channels=true;
@@ -415,17 +369,16 @@ int main(int argc,char**argv) {
       write_binary_file_atomic(argv[3],encode_gain_map_jpeg(gain_map_from_renditions(std::move(pair),GainMapWriterProfile::iso_generic),input.metadata,95),true);
       return 0;
     }
-    if(argc==4 && (std::string(argv[2])=="legacy-pair" || std::string(argv[2])=="own-pair")) {
-      const bool legacy=std::string(argv[2])=="legacy-pair";
-      const auto decode=legacy ? codec::decode_legacy_ultrahdr_bytes : codec::decode_ultrahdr_bytes;
+    if(argc==4 && std::string(argv[2])=="own-pair") {
+      const auto decode=codec::decode_ultrahdr_bytes;
       const auto a=decode(read_binary_file(argv[1]),ColorGamut::kSrgb);
       const auto b=decode(read_binary_file(argv[3]),ColorGamut::kSrgb);
       const bool hdr=a.linear_p3.pixels==b.linear_p3.pixels,sdr=a.authored_sdr->pixels==b.authored_sdr->pixels;
-      const auto error=metrics(a.linear_p3,b.linear_p3,legacy?"legacy original/stripped":"own original/stripped");
-      std::cout<<(legacy?"legacy":"own")<<"_hdr_exact="<<hdr<<" authored_sdr_exact="<<sdr<<"\n";return sdr&&error.mean<=.005&&error.p99<=.02&&error.max<=.1?0:1;
+      const auto error=metrics(a.linear_p3,b.linear_p3,"own original/stripped");
+      std::cout<<"own"<<"_hdr_exact="<<hdr<<" authored_sdr_exact="<<sdr<<"\n";return sdr&&error.mean<=.005&&error.p99<=.02&&error.max<=.1?0:1;
     }
     if(argc>2)return compare_imageio(read_binary_file(argv[1]),argc>3 && std::string(argv[3])=="constant-fixture");
-    if(argc>1){return compare(read_binary_file(argv[1]),argv[1])?0:1;}
+    if(argc>1)return compare_imageio(read_binary_file(argv[1]));
     regressions();progressive_regressions();analytic();roundtrip();
     bool passed=true;
     for(unsigned c:{1U,3U}) for(unsigned pattern:{0U,1U,2U}) {
@@ -440,7 +393,19 @@ int main(int argc,char**argv) {
       if(c==3){pair.metadata.flags|=0x80;pair.metadata.channels.resize(3);
         for(auto& m:pair.metadata.channels)m.gain_max={2,1};}
       std::cout<<"channels="<<c<<" pattern="<<pattern<<" ";
-      passed=compare(encode_gain_map_jpeg(pair,{},95),"synthetic",pattern==0)&&passed;
+      const auto bytes=encode_gain_map_jpeg(pair,{},95);
+      require(serialize_tmap_payload(parse_gain_map_jpeg(bytes).metadata)==serialize_tmap_payload(pair.metadata),"authored metadata changed");
+      const auto own=codec::decode_ultrahdr_bytes(bytes,ColorGamut::kSrgb);
+      auto expected=reconstruct_gain_map(pair.base_linear,pair.gain_map,pair.metadata,2);
+      if(pattern==0) {
+        // Isolate a known constant gain from the primary JPEG's lossy coding.
+        // This is an analytic HDR expectation over the retained authored SDR.
+        expected=*own.authored_sdr;
+        for(auto& value:expected.pixels)value*=std::exp2(1.2F);
+      }
+      const auto error=metrics(own.linear_p3,expected,pattern==0?"constant/analytic":"synthetic/source");
+      // Nonconstant maps record JPEG quantization plus upsampling error.
+      if(pattern==0)passed=(error.mean<=.005 && error.p99<=.02 && error.max<=.1)&&passed;
     }
     return passed?0:1;
   }catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}

@@ -22,6 +22,8 @@ struct ModelChoice: Equatable, Sendable, Identifiable {
     var isEnabled: Bool
     /// Needs the photo's capture parameters (shown only when it has them).
     let requiresCapture: Bool
+    /// The engine's version of the model (`entry.document["version"]`).
+    var version: String? = nil
 }
 
 /// The model table the services offer for this engine build.

@@ -241,7 +241,9 @@ import HyperDRDesign
     }
 
     func testTheAboutPageSaysNoneForAnEmptyModelList() {
-        let model = EditorModel(services: ScriptedEditorServices())
+        let services = FakeEditorServices()
+        services.models = ModelTable(runtimeReady: true, defaultID: "", models: [])
+        let model = EditorModel(services: services)
         XCTAssertTrue(model.ai.models.filter(\.isEnabled).isEmpty, "a model with nothing loaded has no enabled model")
         XCTAssertEqual(SettingsDiagnostics.models(model, locale: en), "None")
         XCTAssertEqual(SettingsDiagnostics.models(model, locale: zh), "无")

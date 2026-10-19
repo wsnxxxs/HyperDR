@@ -400,7 +400,8 @@ import os
                 if case .string(let declared)? = entry.document["displayKey"] { key = declared }
                 return ModelChoice(id: entry.id, name: entry.displayName, nameKey: key,
                     summaryKey: key + ".summary", isEnabled: entry.available,
-                    requiresCapture: entry.document["requiresExif"] == .bool(true))
+                    requiresCapture: entry.document["requiresExif"] == .bool(true),
+                    version: { if case .string(let value)? = entry.document["version"] { return value } else { return nil } }())
             })
     }
 
@@ -597,7 +598,9 @@ extension LiveEditorServices {
             main8: c.encoder?.main8 ?? false, main10: c.encoder?.main10 ?? false, encoderReason: c.encoder?.reason)
     }
     func aboutInformation() async -> AboutInformation {
-        AboutInformation(bundle: .main, engineABI: Engine.abiVersion)
+        let capabilities = try? await requireKit().capabilities
+        return AboutInformation(bundle: .main, engineABI: Engine.abiVersion,
+                                memoryBudgetBytes: capabilities?.memoryBudgetBytes)
     }
     func diagnostics() async -> String {
         guard let kit = try? await requireKit() else { return "" }

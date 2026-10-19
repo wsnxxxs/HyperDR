@@ -13,13 +13,14 @@ final class JobEnvironment: Sendable {
     let sessions: SessionStore
     let resolver: OptionResolver
     init(timeout: Duration = .seconds(30), historyLimit: Int = 20,
-         openExportLeaf: @escaping SessionStore.OpenExportLeaf = { openat($0, $1, $2) }) throws {
+         openExportLeaf: @escaping SessionStore.OpenExportLeaf = { openat($0, $1, $2) },
+         beforeThumbnailWrite: @escaping @Sendable (Int32) -> Void = { _ in }) throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("hyperdr-jobs-\(UUID())")
         configuration = KitConfiguration(supportDirectory: root.appendingPathComponent("support"),
             cacheDirectory: root.appendingPathComponent("cache"), exportHistoryLimit: historyLimit, jobTimeout: timeout)
         let schema = try Engine.schema()
         sessions = SessionStore(configuration: configuration, formats: try InputFormats(schema: schema),
-            decodeCacheMaxAge: 7 * 24 * 60 * 60, decodeCacheMaxBytes: 4 << 30, openExportLeaf: openExportLeaf)
+            decodeCacheMaxAge: 7 * 24 * 60 * 60, decodeCacheMaxBytes: 4 << 30, openExportLeaf: openExportLeaf, beforeThumbnailWrite: beforeThumbnailWrite)
         resolver = OptionResolver(schema: schema, knownModels: [:], maxEdgeCeiling: 2048)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     }

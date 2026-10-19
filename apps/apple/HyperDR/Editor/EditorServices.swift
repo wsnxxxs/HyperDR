@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import HyperDREngine
 import HyperDRKit
@@ -43,7 +44,9 @@ import UniformTypeIdentifiers
     /// The photograph's Exif for a frame caption; empty when it has none.
     func captureFacts(for photo: EditorPhoto) async -> CaptureFacts
     func close(_ photo: EditorPhoto) async
-    func startExport(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?, destination: URL?) async throws -> EditorExportTicket
+    func startExport(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?, destination: URL?, thumbnail: CGImage?) async throws -> EditorExportTicket
+    func sdrThumbnail(of frame: PreviewFrame, maxPixelSize: Int) async -> CGImage?
+    func exportThumbnail(_ photo: EditorPhoto, version: String) async -> CGImage?
     func exportEvents(_ job: String) -> AsyncStream<EditorExportEvent>
     func cancelAllExports() async
     func hasExportActivity() async -> Bool
@@ -158,6 +161,10 @@ extension UserDefaults {
     ])
     var diagnosticHandler: ((EditorPhoto, EditOptions, ExportFrame?) async throws -> [String])?
     fileprivate(set) var diagnosticCalls = 0
+    var thumbnailHandler: ((PreviewFrame, Int) async -> CGImage?)?
+    var versionThumbnailHandler: ((EditorPhoto, String) async -> CGImage?)?
+    private(set) var thumbnailCalls: [Int] = []
+    private(set) var versionThumbnailCalls: [String] = []
     var exportStartHandler: (() async throws -> Void)?
     var exportCancelHandler: (() async -> Void)?
     var exportSaveHandler: ((String, URL?) async throws -> SavedLocation)?
@@ -171,7 +178,7 @@ extension UserDefaults {
     var removeLUTHandler: ((String) async throws -> Void)?
     var importedLUT: LUTItem?
     var updateLUTHandler: ((String, LUTColorSpace, LUTColorSpace) async throws -> LUTItem)?
-    private(set) var exportCalls: [(photo: EditorPhoto, options: EditOptions, frame: ExportFrame?, destination: URL?)] = []
+    private(set) var exportCalls: [(photo: EditorPhoto, options: EditOptions, frame: ExportFrame?, destination: URL?, thumbnail: CGImage?)] = []
     private(set) var saveCalls: [(String, URL?)] = []
     private(set) var exportCancelCount = 0
     private(set) var activeExport = false
@@ -369,14 +376,22 @@ enum EditorDetailError: Error { case sourceReplaced }
 
 
 extension FakeEditorServices {
-    func startExport(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?, destination: URL?) async throws -> EditorExportTicket {
-        exportCalls.append((photo, options, frame, destination)); activeExport = true
+    func startExport(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?, destination: URL?, thumbnail: CGImage?) async throws -> EditorExportTicket {
+        exportCalls.append((photo, options, frame, destination, thumbnail)); activeExport = true
         do { try await exportStartHandler?(); try Task.checkCancellation() }
         catch { activeExport = false; throw error }
         return EditorExportTicket(job: "fake-job", argv: ["HyperDR", "--output", destination?.path ?? "folder"])
     }
     func exportEvents(_ job: String) -> AsyncStream<EditorExportEvent> {
         AsyncStream { exportSinks[job] = $0 }
+    }
+    func sdrThumbnail(of frame: PreviewFrame, maxPixelSize: Int) async -> CGImage? {
+        thumbnailCalls.append(maxPixelSize)
+        return await thumbnailHandler?(frame, maxPixelSize)
+    }
+    func exportThumbnail(_ photo: EditorPhoto, version: String) async -> CGImage? {
+        versionThumbnailCalls.append(version)
+        return await versionThumbnailHandler?(photo, version)
     }
     func sendExport(_ event: EditorExportEvent) {
         for sink in exportSinks.values { sink.yield(event) }

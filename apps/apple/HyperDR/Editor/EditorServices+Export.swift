@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import HyperDREngine
 import HyperDRKit
@@ -5,7 +6,9 @@ import HyperDRKit
 /// Existing preview-only test doubles can use the unsupported service defaults.
 /// Live and Fake implement the complete M3 surface below/alongside their records.
 extension EditorServices {
-    func startExport(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?, destination: URL?) async throws -> EditorExportTicket { throw UserFacingError(code: "engine_unavailable") }
+    func startExport(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?, destination: URL?, thumbnail: CGImage?) async throws -> EditorExportTicket { throw UserFacingError(code: "engine_unavailable") }
+    func sdrThumbnail(of frame: PreviewFrame, maxPixelSize: Int) async -> CGImage? { nil }
+    func exportThumbnail(_ photo: EditorPhoto, version: String) async -> CGImage? { nil }
     func exportEvents(_ job: String) -> AsyncStream<EditorExportEvent> { AsyncStream { $0.finish() } }
     func cancelAllExports() async {}
     func hasExportActivity() async -> Bool { false }

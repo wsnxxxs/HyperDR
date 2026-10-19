@@ -1,9 +1,13 @@
 import Foundation
+import CoreGraphics
 import Observation
 
 /// Editor-facing values. Views do not depend on Kit's jobs or durable manifests.
 nonisolated enum EditingLockReason: String { case loading, restoring, computingAI, exporting }
 nonisolated enum DocumentStatus { case waiting, notExported, modifiedSinceExport, exportedNotSaved, saved }
+nonisolated enum ThumbnailState: Equatable {
+    case loading, ready(CGImage), unavailable
+}
 nonisolated enum ExportDestination: Equatable { case file(URL), folder(label: String) }
 nonisolated struct SavedLocation: Equatable, Sendable {
     let fileName: String
@@ -135,6 +139,7 @@ nonisolated extension Duration {
 
 @MainActor @Observable final class ExportState {
     enum Phase: Equatable { case idle, preparing, running, finishing, saving, succeeded, failed, cancelled }
+    var thumbnail: ThumbnailState = .loading
     var encodingID = "adaptive"
     var outputGamut = "srgb"
     var clampSrgb = false
@@ -187,6 +192,7 @@ nonisolated extension Duration {
         phase = .idle; failure = nil; saveFailure = nil
     }
     func reset() {
+        thumbnail = .loading
         phase = .idle; startedAt = nil; stage = nil; fraction = nil; lastLine = nil
         failure = nil; saveFailure = nil; result = nil; isResultStale = false
         destination = nil; isStopping = false; isStoppingToQuit = false; durations = nil; fractionFloor = 0; fractionAt = nil; stageAt = nil

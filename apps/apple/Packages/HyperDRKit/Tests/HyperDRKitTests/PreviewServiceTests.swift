@@ -90,7 +90,7 @@ private func eventually(timeout: Duration,
 
 private func makeFrame() async throws -> PreviewFrame {
     let engine = try await Engine()
-    let session = try engine.openPreview(source: repository.appendingPathComponent("build/smoke/input.jpg"))
+    let session = try engine.openPreview(source: TinyPhoto.url)
     return try await session.renderFrame(EngineRequest(settings: ["preview_max_edge": .number(8)]))
 }
 
@@ -1014,8 +1014,7 @@ private actor BlockingCloseRenderer: PreviewRenderSession {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let source = root.appendingPathComponent("source.jpg")
-        try FileManager.default.copyItem(
-            at: repository.appendingPathComponent("build/smoke/input.jpg"), to: source)
+        try FileManager.default.copyItem(at: TinyPhoto.url, to: source)
         let kit = try await HyperDRKit(configuration: KitConfiguration(
             supportDirectory: root.appendingPathComponent("support", isDirectory: true),
             cacheDirectory: root.appendingPathComponent("cache", isDirectory: true)))

@@ -148,7 +148,6 @@ ExternalGainBinding read_model_binding(const json::Value& value,
   binding.delivered_crop_height = delivered[1];
   binding.delivered_crop_left = delivered_origin[0];
   binding.delivered_crop_top = delivered_origin[1];
-  binding.raw_half_size = required_bool(source, "raw_half_size");
   binding.recipe.id = required_string(recipe, "id");
   if(binding.recipe.id!="display-p3-passthrough" && binding.recipe.id!="raw-neutral-v2" && binding.recipe.id!="display-hdr-split")
     throw std::invalid_argument("配方不匹配，请用新版本重新生成");

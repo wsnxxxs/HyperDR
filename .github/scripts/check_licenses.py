@@ -28,6 +28,8 @@ def main():
         raise RuntimeError("No installed copyright files were found")
     for notice in notices:
         package = notice.parent.name
+        if package.lower() == "libraw":
+            failures.append("LibRaw/CDDL dependency was retired in R3")
         content = notice.read_text(errors="replace")
         spdx = notice.with_name("vcpkg.spdx.json")
         licenses = []
@@ -49,6 +51,8 @@ def main():
     subprocess.run(["cmake", f"--graphviz={graph.resolve()}", str(args.build.resolve())], check=True,
                    stdout=subprocess.DEVNULL)
     linked = graph.read_text()
+    if re.search(r"\blibraw(?:::raw_r)?\b", linked, re.I):
+        failures.append("retired LibRaw dependency in CMake link graph")
     # These optional codec families are GPL; reject them even if a package
     # incorrectly labels its notice or attempts to use a system-installed copy.
     for pattern in (r"\bx265\b", r"\bx264\b", r"\b(?:postproc|avfilter)\b"):
@@ -57,6 +61,8 @@ def main():
     binaries = [args.build / "HyperDR", args.build / "libhyperdr.dylib"]
     for binary in binaries:
         deps = subprocess.check_output(["otool", "-L", str(binary)], text=True)
+        if re.search(r"libraw", deps, re.I):
+            failures.append(f"retired LibRaw runtime dependency: {binary}")
         if re.search(r"(?:libx26[45]|libpostproc|libavfilter)", deps, re.I):
             failures.append(f"forbidden GPL runtime dependency: {binary}")
     if failures:

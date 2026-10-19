@@ -71,14 +71,14 @@ int main() {
     touch(tiff);
     require(hyperdr::is_supported_input(tiff), "TIFF is not a supported input");
 
-    // LibRaw handles more than the original ARW/DNG pair. These are discovery
+    // RAW discovery covers more than the original ARW/DNG pair. These are discovery
     // filters only; the codec still validates their actual contents.
     for (const auto extension : {".cr2", ".cr3", ".nef", ".raf", ".orf",
                                  ".rw2", ".pef"}) {
       const auto candidate = input / ("nested/raw" + std::string(extension));
       touch(candidate);
       require(hyperdr::is_supported_input(candidate),
-              "a common LibRaw extension was not accepted");
+              "a common RAW extension was not accepted");
     }
 
     // The flat raster list every caller uses is built from the per-family ones

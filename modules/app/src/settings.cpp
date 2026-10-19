@@ -14,15 +14,7 @@
 
 namespace hyperdr {
 
-void prepare_raw_resources(RawDecodeOptions& raw) {
-  if (!raw.profile.empty() || !raw.look_profile.empty() || !raw.lens_profile.empty() ||
-      !raw.bad_pixel_map.empty() || !raw.dark_frame.empty() || !raw.linearization_lut.empty() ||
-      !raw.lens_shading_map.empty() || raw.auto_bad_pixel_correction)
-    throw std::invalid_argument("Apple RAW 引擎不支持该选项");
-}
-
 void prepare_conversion_resources(ConvertOptions& options) {
-  prepare_raw_resources(options.raw);
   if (!options.color_lut.path.empty() && !options.color_lut.snapshot) {
     auto snapshot = std::make_shared<ColorLutSnapshot>();
     configuration_resource([&] {
@@ -110,11 +102,6 @@ void validate_convert_options(const ConvertOptions& options) {
     throw std::invalid_argument(
         "fast preview requires --preview-max-edge");
   }
-  if ((options.decode_intent == DecodeIntent::Preview) !=
-      options.raw.half_size) {
-    throw std::invalid_argument(
-        "RAW half-size decoding is permitted only for explicit previews");
-  }
   if (options.encoding == HdrEncoding::IsoGainMapJpeg && options.depth != 8) {
     throw std::invalid_argument(
         "ISO gain-map JPEG uses an 8-bit SDR base and requires --depth 8");
@@ -167,10 +154,6 @@ void validate_convert_options(const ConvertOptions& options) {
         options.raw.digital_gain > 0.0F && options.raw.digital_gain <= 64.0F)) {
     throw std::invalid_argument("RAW digital gain must be finite and in (0,64]");
   }
-  if (!options.raw.profile.empty() || !options.raw.look_profile.empty() || !options.raw.lens_profile.empty() ||
-      !options.raw.bad_pixel_map.empty() || !options.raw.dark_frame.empty() || !options.raw.linearization_lut.empty() ||
-      !options.raw.lens_shading_map.empty() || options.raw.auto_bad_pixel_correction)
-    throw std::invalid_argument("Apple RAW 引擎不支持该选项");
   // Ranges for the individual settings are enforced by the schema on the way in;
   // this catches the internal look parameters and the renderer's own invariants.
   validate_gain_map_options(options.gain);

@@ -131,8 +131,7 @@ std::string model_preprocessing_fingerprint(const ConvertOptions& options) {
   if (is_raw_extension(lower_extension(options.input)))
     identity += "|raw_os_build=" + raw_os_build();
   for (const auto& setting : settings()) {
-    if (!setting.affects_decoded_pixels || setting.key == "half_size" ||
-        setting.key == "preview_max_edge") continue;
+    if (!setting.affects_decoded_pixels || setting.key == "preview_max_edge") continue;
     const auto value = setting.read(options);
     identity += '|' + std::string(setting.key) + '=';
     if (value.is_string()) identity += value.string();

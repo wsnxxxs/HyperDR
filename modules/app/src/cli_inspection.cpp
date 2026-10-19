@@ -279,10 +279,6 @@ int thumbnail_command(int argc, char** argv) {
       if (quality < 1 || quality > 100) {
         throw std::invalid_argument("preview quality must be in [1,100]");
       }
-    } else if (arg == "--half-size") {
-      // The preview is bounded by --max-edge anyway, so half-size demosaic
-      // costs nothing visible and roughly quarters the decode.
-      raw.half_size = true;
     } else if (arg == "--base-only") {
       raw.ignore_embedded_gain_map = true;
     } else if (arg == "--model-input") {

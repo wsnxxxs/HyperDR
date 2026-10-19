@@ -55,7 +55,6 @@ void parse_settings(int argc, char** argv, int first, ConvertOptions& options,
       // remains a pure output bound, so it can also describe a full-quality
       // size-limited export and argument order cannot change this decision.
       options.decode_intent = DecodeIntent::Preview;
-      options.raw.half_size = true;
     } else if (arg == "--samples" && curve_samples != nullptr) {
       *curve_samples = integer<unsigned>(next_value(i, argc, argv, arg), "sample count");
     } else if (arg == "--json" && curve_samples != nullptr) {

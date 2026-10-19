@@ -1,3 +1,4 @@
+#include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/app/settings.hpp"
 #include "hyperdr/app/fingerprint.hpp"
 #include "hyperdr/app/decode_cache.hpp"

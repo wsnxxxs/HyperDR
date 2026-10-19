@@ -107,7 +107,6 @@ std::string model_input_report(const std::filesystem::path& input,
           .element(d.requested_crop_left).element(d.requested_crop_top).end_array()
       .begin_array("delivered_crop_origin_sensor")
           .element(d.delivered_crop_left).element(d.delivered_crop_top).end_array()
-      .member("raw_half_size", false)
       .member("raw_decoder_version",d.raw ? d.raw->decoder_version : "")
       .member("raw_scale",d.raw ? d.raw->scale : 1.F)
       .member("input_domain", input_domain_name(decoded.describe_input().domain))
@@ -178,8 +177,6 @@ int model_input_command(int argc, char** argv) {
     } else if (arg == "--long-side") {
       long_side = integer<std::uint32_t>(next_value(i, argc, argv, arg),
                                          "model long side");
-    } else if (arg == "--half-size") {
-      options.raw.half_size = true;
     } else {
       throw std::invalid_argument("unknown model-input option: " + std::string(arg));
     }
@@ -187,7 +184,6 @@ int model_input_command(int argc, char** argv) {
   if (output.empty() || report.empty()) {
     throw std::invalid_argument("model-input requires --output and --report");
   }
-  prepare_raw_resources(options.raw);
   apply_output_color_options(options);
   const std::filesystem::path input = path_from_utf8(argv[2]);
   if (same_path(input, output) || same_path(input, report) || same_path(output, report)) {

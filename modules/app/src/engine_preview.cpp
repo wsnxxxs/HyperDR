@@ -236,11 +236,10 @@ PreviewPixels PreviewSession::render_pixels(ConvertOptions options, PreviewRegio
   apply_output_color_options(options);
   const bool detail = region.requested();
   if (detail) {
-    // A detail crop must start from the full decode. Neither a decoder resize
-    // nor LibRaw half-size output can recover sensor detail afterward.
+    // A detail crop must start from the full decode. A decoder resize
+    // cannot recover sensor detail afterward.
     options.preview_max_edge = 0;
     options.raw.preview_max_edge = 0;
-    options.raw.half_size = false;
   } else if (options.preview_max_edge == 0) {
     options.preview_max_edge = 2048;
   }

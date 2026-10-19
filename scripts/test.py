@@ -34,11 +34,7 @@ def run(*command: str, label: str | None = None, **kwargs) -> None:
 
 
 def panel() -> None:
-    run(sys.executable, "-m", "pytest", "tests/python", "-q")
-    if shutil.which("pwsh"):
-        run("pwsh", "-NoProfile", "-File", "tests/powershell/test_hyperdr_tls.ps1")
-    else:
-        print("Skipping TLS PowerShell tests: pwsh is unavailable", flush=True)
+    raise RuntimeError("旧 Python 面板测试已退役，P2c 删除")
 
 
 def frontend() -> None:
@@ -121,7 +117,7 @@ def main() -> int:
     parser.add_argument("--config", default="Release")
     args = parser.parse_args()
     try:
-        if args.suite in ("all", "panel"):
+        if args.suite == "panel":
             panel()
         if args.suite in ("all", "frontend"):
             frontend()

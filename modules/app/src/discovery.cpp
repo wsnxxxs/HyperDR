@@ -78,7 +78,7 @@ std::vector<std::filesystem::path> discover_input_files(const ConvertOptions& op
   std::sort(files.begin(), files.end());
   if (files.empty()) {
     throw std::runtime_error(
-        "no supported images found (LibRaw RAW, JPG, JPEG, PNG, HEIC, HEIF, AVIF)");
+        "no supported images found (camera RAW, JPG, JPEG, PNG, HEIC, HEIF, AVIF)");
   }
   return files;
 }

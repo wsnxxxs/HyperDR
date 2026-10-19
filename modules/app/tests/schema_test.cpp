@@ -141,14 +141,12 @@ void test_parsing_enforces_ranges_and_types() {
   const auto* preview = hyperdr::find_setting_by_key("preview_max_edge");
   hyperdr::ConvertOptions preview_options;
   preview->apply(preview_options, hyperdr::json::Value::from_number(2048));
-  require(preview_options.decode_intent == hyperdr::DecodeIntent::Export &&
-              !preview_options.raw.half_size,
+  require(preview_options.decode_intent == hyperdr::DecodeIntent::Export,
           "a pure size bound changed decode intent");
   preview_options.output_directory = "output";
   hyperdr::validate_convert_options(preview_options);
 
   preview_options.decode_intent = hyperdr::DecodeIntent::Preview;
-  preview_options.raw.half_size = true;
   hyperdr::validate_convert_options(preview_options);
 }
 
@@ -174,9 +172,9 @@ void test_presets_reject_anything_unexpected() {
   const auto identity = hyperdr::settings_fingerprint(options);
   apply(R"({"highlight_recovery":{"obsolete":true},"highlightRecovery":42})");
   require(hyperdr::settings_fingerprint(options) == identity, "obsolete highlight request changed settings");
-  for (const char* key : {"highlight_recovery", "raw_profile", "raw_look", "raw_lens_profile", "raw_auto_bad_pixels"})
+  for (const char* key : {"highlight_recovery", "raw_profile", "raw_look", "raw_lens_profile", "raw_auto_bad_pixels", "half_size"})
     require(hyperdr::find_setting_by_key(key) == nullptr, "removed RAW setting remains in schema");
-  for (const char* key : {"raw_profile", "raw_look", "raw_lens_profile", "raw_auto_bad_pixels"})
+  for (const char* key : {"raw_profile", "raw_look", "raw_lens_profile", "raw_auto_bad_pixels", "half_size"})
     require(throws([&] { apply(std::string("{\"") + key + "\":true}"); }), "removed RAW setting was accepted");
   // A report file is not a preset, but its "schema" member should not be the
   // error the user hears about first.
@@ -229,7 +227,7 @@ void test_fingerprint_covers_exactly_the_byte_affecting_settings() {
 
 void test_decode_cache_controls_are_declared_in_the_settings_table() {
   const std::set<std::string> expected{
-      "color_gamut", "half_size", "preview_max_edge", "raw_gain", "raw_lens_correction"};
+      "color_gamut", "preview_max_edge", "raw_gain", "raw_lens_correction"};
   std::set<std::string> actual;
   for (const auto& setting : hyperdr::settings()) {
     if (setting.affects_decoded_pixels) actual.insert(std::string(setting.key));

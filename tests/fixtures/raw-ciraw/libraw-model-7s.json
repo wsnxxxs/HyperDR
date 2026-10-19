@@ -1,0 +1,1 @@
+{"decode_ms":209.016334,"decoder":"7","models":[{"id":"research-cnn-v1","mean":0.0134390031,"p99":0.08091042259,"max":0.1538030451,"legacy_effective":"research-cnn-v1","own_effective":"research-cnn-v1"},{"id":"research-exif-v1","mean":0.0134390031,"p99":0.08091042259,"max":0.1538030451,"legacy_effective":"research-cnn-v1","own_effective":"research-cnn-v1"}]}

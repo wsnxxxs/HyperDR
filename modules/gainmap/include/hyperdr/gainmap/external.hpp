@@ -44,14 +44,13 @@ struct ExternalGainBinding {
   std::uint32_t requested_crop_height{};
   std::uint32_t requested_crop_left{};
   std::uint32_t requested_crop_top{};
-  // The actual LibRaw/raster dimensions used to develop the model input,
+  // The actual RAW/raster dimensions used to develop the model input,
   // before the final tensor resample.  For a RAW half-size decode these are
   // deliberately not confused with requested_crop_*.
   std::uint32_t delivered_crop_width{};
   std::uint32_t delivered_crop_height{};
   std::uint32_t delivered_crop_left{};
   std::uint32_t delivered_crop_top{};
-  bool raw_half_size{false};
   std::string raw_decoder_version;
   float raw_scale{1};
   std::uint32_t model_width{};

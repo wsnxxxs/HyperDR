@@ -59,10 +59,7 @@ FrameOverlay decode_frame_overlay(const std::vector<std::uint8_t>&) {
   fail_without_codecs("frame overlay decoding");
 }
 
-RawMosaic decode_raw_mosaic(const std::filesystem::path&,
-                            const RawDecodeOptions&) {
-  fail_without_codecs("RAW mosaic decoding");
-}
+
 
 bool is_ultrahdr_jpeg_file(const std::filesystem::path&) { return false; }
 

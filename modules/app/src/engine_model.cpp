@@ -12,7 +12,6 @@
 #include "hyperdr/foundation/json.hpp"
 #include "hyperdr/foundation/version.hpp"
 #include "hyperdr/gainmap/native_model.hpp"
-#include "hyperdr/image/dcp_profile.hpp"
 #include "hyperdr/image/resample.hpp"
 
 #include <bit>
@@ -176,11 +175,9 @@ std::vector<std::uint8_t> render_model_gain(ConvertOptions options,
     return native_model_gain_packet(prediction, "undeclared");
   }
 
-  prepare_raw_resources(options.raw);
   if (options.preview_max_edge == 0) options.preview_max_edge = 2048;
   options.decode_intent = DecodeIntent::Preview;
   options.raw.preview_max_edge = options.preview_max_edge;
-  options.raw.half_size = is_raw_extension(lower_extension(options.input));
   options.raw.ignore_embedded_gain_map = false;
   options.raw.default_gamut = options.default_gamut;
   validate_gain_map_options(options.gain);

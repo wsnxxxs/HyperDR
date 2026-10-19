@@ -647,7 +647,7 @@ int run_conversion(const ConvertOptions& requested_options, ProgressSink* sink, 
     text << '\n';
     // A degraded decode still succeeds for non-resolution conditions such as
     // rejected crop metadata. Resolution is not a degradable export property:
-    // RAW half-size is selected explicitly by preview callers only.
+    // RAW preview scaling is selected by preview callers only.
     if (result.success && result.decode_degraded) {
       text << "warning: " << path_utf8(file) << ": ";
       // Only phrase this as a shortfall against the target when the target was

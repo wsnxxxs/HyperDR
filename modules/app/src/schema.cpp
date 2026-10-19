@@ -86,8 +86,8 @@ json::Value read_headroom(const ConvertOptions& o) {
                               : json::Value::from_number(o.gain.headroom_stops);
 }
 
-const std::array<Setting, 32>& table() {
-  static const std::array<Setting, 32> kSettings{{
+const std::array<Setting, 31>& table() {
+  static const std::array<Setting, 31> kSettings{{
       {"encoding", "--encoding", SettingKind::kEnum, 0, 0, kEncodingChoices,
        "adaptive|iso-gainmap-jpeg|pq|hlg|avif-pq|avif-hlg|sdr-jpeg|sdr-tiff", "Output representation", false,
        true,
@@ -223,11 +223,6 @@ const std::array<Setting, 32>& table() {
        [](const ConvertOptions& o) { return json::Value::from_bool(o.skip_existing); }},
       // Internal: not settable, but part of the rendered bytes, so a resumable
       // batch has to notice if a future version changes one.
-      {"half_size", {}, SettingKind::kBoolean, 0, 0, {}, {},
-       "RAW half-size demosaic (set by the preview path)", false, true, nullptr,
-       nullptr,
-       [](const ConvertOptions& o) { return json::Value::from_bool(o.raw.half_size); },
-       true},
       {"toe_end", {}, SettingKind::kNumber, 0.0, 1.0, {}, {},
        "Scene luminance where the toe ends", false, true, nullptr, nullptr,
        [](const ConvertOptions& o) { return json::Value::from_number(o.gain.look.toe_end); }},

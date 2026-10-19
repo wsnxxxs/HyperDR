@@ -23,8 +23,8 @@
 namespace hyperdr {
 
 // Identifies one decode result. `variant` must encode every option that can
-// change the decoded pixels: highlight recovery, half-size demosaic, and the
-// preview bound.
+// change the decoded pixels: RAW gain, lens correction, decoder scale, and
+// the preview bound.
 //
 // The source identity includes its content digest. A caller such as the panel
 // that already hashed an upload may pass it to avoid a second 300 MB read;

@@ -29,6 +29,114 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已展开" } }
       }
     },
+    "design.scope.ceiling %@" : {
+      "comment" : "Export limit label on the scope; the argument is a formatted number of stops, e.g. 2.5.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Limit +%@ EV" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "上限 +%@ EV" } }
+      }
+    },
+    "design.scope.ceilingSDR" : {
+      "comment" : "Export limit label when processing is colour-only.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Limit" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "上限" } }
+      }
+    },
+    "design.scope.channels" : {
+      "comment" : "VoiceOver name of the luma / RGB switch.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Histogram channels" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "直方图通道" } }
+      }
+    },
+    "design.scope.collapse" : {
+      "comment" : "Collapse button of the scopes panel (tooltip, VoiceOver).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Hide Scopes" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "收起示波器" } }
+      }
+    },
+    "design.scope.edited" : {
+      "comment" : "Histogram legend: the photo after adjustments.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Edited" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整后" } }
+      }
+    },
+    "design.scope.expand" : {
+      "comment" : "Collapsed scopes row (tooltip, VoiceOver hint).",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show Scopes" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "展开示波器" } }
+      }
+    },
+    "design.scope.histogram" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Histogram" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "直方图" } }
+      }
+    },
+    "design.scope.kind" : {
+      "comment" : "VoiceOver name of the histogram / waveform switch.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Scope" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "示波器类型" } }
+      }
+    },
+    "design.scope.luma" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Luma" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "亮度" } }
+      }
+    },
+    "design.scope.measuring" : {
+      "comment" : "Shown in the scope while the first measurement is pending.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Measuring…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在统计…" } }
+      }
+    },
+    "design.scope.original" : {
+      "comment" : "Histogram legend: the photo before adjustments.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Original" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "原图" } }
+      }
+    },
+    "design.scope.rgb" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "RGB" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "RGB" } }
+      }
+    },
+    "design.scope.title" : {
+      "comment" : "Title of the collapsed scopes row; VoiceOver name of the panel.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Scopes" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "示波器" } }
+      }
+    },
+    "design.scope.unavailable" : {
+      "comment" : "Shown in the scope when the preview failed.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No preview to measure" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有可统计的预览" } }
+      }
+    },
+    "design.scope.waveform" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Waveform" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "亮度波形" } }
+      }
+    },
+    "design.scope.waveformLegend" : {
+      "comment" : "Waveform legend.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Edited · across the photo" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整后 · 横向位置" } }
+      }
+    },
     "design.slider.auto" : {
       "comment" : "The Auto state of a slider: its readout, field placeholder and the small button.",
       "localizations" : {
@@ -62,6 +170,32 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Type an exact value. Up and Down Arrow change it by one step." } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "输入精确数值；上下方向键按步长调整。" } }
+      }
+    },
+    "design.zebra.highlights" : {
+      "comment" : "Switch under the scope: stripe the highlights that export will clip.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clipped highlights" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "高光截断" } }
+      }
+    },
+    "design.zebra.highlights.help" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stripes highlights that will be clipped on export. Also in the View menu." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "给导出时会被截断的高光加斜纹。也可在“显示”菜单里开关。" } }
+      }
+    },
+    "design.zebra.shadows" : {
+      "comment" : "Switch under the scope: stripe the shadows that are pure black in the SDR version.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Crushed shadows" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暗部死黑" } }
+      }
+    },
+    "design.zebra.shadows.help" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stripes areas that are pure black in the SDR version. Also in the View menu." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "给 SDR 版本里是纯黑的区域加斜纹。也可在“显示”菜单里开关。" } }
       }
     }
   },

@@ -3,12 +3,18 @@ import SwiftUI
 /// One choice of a `ParameterSegmented`.
 public struct SegmentedChoice<Value: Hashable>: Identifiable {
     public let value: Value
-    public let title: LocalizedStringKey
+    let title: Text
     public let systemImage: String?
     public let isEnabled: Bool
     public var id: Value { value }
 
     public init(_ title: LocalizedStringKey, value: Value, systemImage: String? = nil, isEnabled: Bool = true) {
+        self.init(Text(title), value: value, systemImage: systemImage, isEnabled: isEnabled)
+    }
+
+    /// A choice whose title is already a `Text`: one from the package's own
+    /// catalogue (`Text("design.…", bundle: .module)`) or a verbatim name.
+    public init(_ title: Text, value: Value, systemImage: String? = nil, isEnabled: Bool = true) {
         self.title = title
         self.value = value
         self.systemImage = systemImage
@@ -33,7 +39,7 @@ public enum SegmentedSize: Sendable {
 /// `title`. With Increase Contrast on, the selected segment is filled with
 /// the accent and every segment is outlined (CSS `forced-colors`).
 public struct ParameterSegmented<Value: Hashable>: View {
-    private let title: LocalizedStringKey
+    private let title: Text
     @Binding private var selection: Value
     private let choices: [SegmentedChoice<Value>]
     private let size: SegmentedSize
@@ -41,6 +47,13 @@ public struct ParameterSegmented<Value: Hashable>: View {
 
     /// `fillsWidth`: segments share the full width (CSS `.field > .segmented`).
     public init(_ title: LocalizedStringKey, selection: Binding<Value>, choices: [SegmentedChoice<Value>],
+                size: SegmentedSize = .regular, fillsWidth: Bool = true) {
+        self.init(Text(title), selection: selection, choices: choices, size: size, fillsWidth: fillsWidth)
+    }
+
+    /// The group's VoiceOver name as a `Text`, for names from the package's
+    /// own catalogue.
+    public init(_ title: Text, selection: Binding<Value>, choices: [SegmentedChoice<Value>],
                 size: SegmentedSize = .regular, fillsWidth: Bool = true) {
         self.title = title
         _selection = selection
@@ -58,9 +71,9 @@ public struct ParameterSegmented<Value: Hashable>: View {
                     selection = choice.value
                 } label: {
                     if let systemImage = choice.systemImage {
-                        Label(choice.title, systemImage: systemImage)
+                        Label { choice.title } icon: { Image(systemName: systemImage) }
                     } else {
-                        Text(choice.title)
+                        choice.title
                     }
                 }
                 .buttonStyle(SegmentButtonStyle(selected: selected, size: size, fillsWidth: fillsWidth))
@@ -77,7 +90,7 @@ public struct ParameterSegmented<Value: Hashable>: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(Text(title))
+        .accessibilityLabel(title)
     }
 }
 
@@ -107,7 +120,7 @@ private struct SegmentBody: View {
             .font(.system(size: TypeScale.Size.caption, weight: increased && selected ? .semibold : .medium))
             .lineLimit(1)
             .foregroundStyle(foreground(increased))
-            .padding(.horizontal, fillsWidth ? 3 : size == .regular ? 12 : 9)
+            .padding(.horizontal, fillsWidth ? 3 : size == .regular ? 12 : 8)
             .frame(maxWidth: fillsWidth ? .infinity : nil, minHeight: size == .regular ? 28 : 23)
             .background(fill(increased), in: .rect(cornerRadius: Radius.xs))
             .overlay {

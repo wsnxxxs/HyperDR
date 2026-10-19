@@ -351,6 +351,51 @@ public actor SessionStore {
         }
     }
 
+    /// Points an open session at a file the user has chosen to replace its
+    /// moved or renamed source. Only a file with the same content qualifies:
+    /// the session keeps its id, its edits' export history and its engine
+    /// state. Any other content is `source_different`, and the caller opens
+    /// the file as a new photo instead.
+    public func relink(_ id: SessionID, to url: URL) async throws -> PhotoSession {
+        guard url.isFileURL else {
+            throw HyperDRError(code: "unsupported_format", message: "The source is not a file URL")
+        }
+        guard let current = openSessions[id] else {
+            throw HyperDRError(code: "session_expired", message: "The session is no longer open")
+        }
+        // As for open: lease the URL the user chose before touching the path.
+        let lease = SecurityScopeLease(url: url, access: access)
+        var leaseKept = false
+        defer { if !leaseKept { lease.stop() } }
+        do {
+            let source = try canonicalURL(url)
+            let facts = try fileFacts(source)
+            let digest = try await digest(for: source, facts: facts)
+            guard digest == current.session.sha256 else {
+                throw HyperDRError(code: "source_different",
+                    message: "The chosen file is not the photo this session was opened from")
+            }
+            var stored = try loadStored(id)
+            guard let live = openSessions[id], live.generation == current.generation,
+                  !Task.isCancelled else { throw CancellationError() }
+            stored.sourceBookmark = try makeBookmark(url)
+            stored.sourcePath = source.path
+            stored.displayName = source.lastPathComponent
+            stored.sha256 = digest
+            stored.record(facts)
+            stored.lastUsedAt = Date()
+            try save(stored)
+            let session = photoSession(stored, url: source)
+            live.lease.stop()
+            openSessions[id] = OpenSession(url: source, lease: lease, session: session,
+                modifiedAt: facts.modifiedAt, generation: live.generation, lastPersistedAt: stored.lastUsedAt)
+            leaseKept = true
+            return session
+        } catch {
+            throw publicError(error)
+        }
+    }
+
     private func performOpen(source: URL, originalURL: URL, lease: SecurityScopeLease,
                              token: UUID) async throws -> PhotoSession {
         do {

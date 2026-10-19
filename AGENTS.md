@@ -73,26 +73,26 @@ draw anything into the frame that depends on the photo's HDR pixels.
   overlay renderer, `FrameExportPlan`) and `HyperDR/Views/Frame/` (the sheet).
   The caption overlay is a straight-alpha Display P3 PNG exactly the size of
   the layout's caption band; `FrameCaptionView` draws both preview and overlay.
-- Still to do: A2 implements `EditorServices.captureFacts` (read inside the
-  photo's security scope) and must set `document.pixelSize` to the full-size
-  oriented dimensions the layout uses; M3 calls `FrameExportPlan.make` with the
-  export's own pixel size and sets `command.frame`. The SDR comparison
-  (press-and-hold) in the design is not built.
+- `EditorServices.captureFacts` reads the photo inside its security scope and
+  `document.pixelSize` is the full-size oriented size the layout uses. Export
+  hands HyperDRKit an `ExportFrame` (K3), which writes `command.frame`; the
+  frame export entry in the app waits for the frame gain and export memory
+  work (E5, E6). The SDR comparison (press-and-hold) in the design is not built.
 
-## Status (2026-10-18)
+## Status (2026-10-19)
 
-Done: the C ABI and its Swift wrapper, the editor view-model contract with fake
-services, localization, the main window, canvas overlays, inspector control
-styles, `HyperDRKit` sessions and previews, and the two-pass Metal canvas.
+Done: the C ABI and its Swift wrapper; `EditorModel` on real `HyperDRKit`
+services with the App Sandbox, Finder opening and restoring the last photo;
+render pacing and a serial render thread per canvas; export jobs, versions,
+the model catalog and the LUT library in `HyperDRKit`; VideoToolbox HEVC tiles
+and our own HEIF writer; our own ISO 21496-1 gain-map JPEG writer
+(`iso-gainmap-jpeg`); presentation frames.
 
-Next, in order:
+In progress on `wip/*` branches, not yet on this branch: reading gain-map JPEGs
+with our own code (E4c); the M2 editor model, canvas comparison and overlays
+(M2-M, M2-R, M2-Z); the M3 export services in `HyperDRKit` (M3-K); the M2
+inspector views (M2-V).
 
-1. Connect `EditorModel` to `HyperDRKit`.
-2. Turn on the App Sandbox; opening from Finder; restoring the last photo on launch.
-3. Coalesce slider changes to at most one render per display frame.
-4. Compare EDR output with the Photos app.
-5. Export, models, LUTs, camera and lens profiles.
-6. VideoToolbox HEVC encoding and the new HEIF writer.
-
-The Metal canvas (`1488899`) and the inspector control styles (`5b0edd6`,
-`defc236`) have not had an independent review yet.
+Next: RAW through `CIRAWFilter` and removing LibRaw (R1–R3); the M3 export
+interface; HEIC through VideoToolbox (V3–V5); headroom tracking and the
+comparison with the Photos app on a real display (A3).

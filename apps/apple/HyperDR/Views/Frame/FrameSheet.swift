@@ -8,6 +8,13 @@ import HyperDRDesign
 struct FrameSheet: View {
     let model: EditorModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.controlActiveState) private var activeState
+    /// "Hold for SDR": view state, not the model's -- it only changes what
+    /// the preview shows.
+    @State private var compare = FrameSDRCompare()
+    @FocusState private var previewFocused: Bool
+    /// The preview took focus from a click, not the keyboard: no ring.
+    @State private var focusedByPointer = false
 
     var body: some View {
         @Bindable var model = model
@@ -32,6 +39,18 @@ struct FrameSheet: View {
         }
         .frame(minWidth: 960, idealWidth: 1120, minHeight: 640, idealHeight: 740)
         .background(Color.hdr.surfacePanel)
+        .onChange(of: CompareInputs(supportsEDR: model.display.supportsEDR, hasHDR: model.frameCompareHasHDR), initial: true) { _, inputs in
+            compare.configure(supportsEDR: inputs.supportsEDR, hasHDR: inputs.hasHDR)
+        }
+        // A key-up never arrives once the window is not key.
+        .onChange(of: activeState) { if activeState == .inactive { compare.releaseAll() } }
+        .onChange(of: model.photoSerial) { compare.releaseAll() }
+        .onDisappear { compare.releaseAll() }
+    }
+
+    private struct CompareInputs: Equatable {
+        var supportsEDR: Bool
+        var hasHDR: Bool
     }
 
     private var header: some View {
@@ -80,6 +99,30 @@ struct FrameSheet: View {
         return max(fit, minimumBodyPoints / (CGFloat(body) * CGFloat(layout.referenceEdge)))
     }
 
+    /// What the canvas reports of the pointer: a press on the photograph is
+    /// a possible hold, and the click gives the preview the keyboard.
+    private var pointer: CanvasPointerHandlers {
+        CanvasPointerHandlers(
+            down: { point in takePreviewFocus(); compare.pointerMoved(start: point, to: point) },
+            drag: { point in compare.pointerMoved(start: point, to: point) },
+            up: { compare.pointerEnded() })
+    }
+
+    private func takePreviewFocus() {
+        focusedByPointer = true
+        previewFocused = true
+    }
+
+    /// The same press over the mat and the caption, which are SwiftUI.
+    private var matPress: some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .local)
+            .onChanged { value in
+                if !previewFocused { takePreviewFocus() }
+                compare.pointerMoved(start: value.startLocation, to: value.location)
+            }
+            .onEnded { _ in compare.pointerEnded() }
+    }
+
     @ViewBuilder private var preview: some View {
         if let layout = model.frameLayout {
             GeometryReader { proxy in
@@ -89,26 +132,56 @@ struct FrameSheet: View {
                 let text = caption(for: layout)
                 let scale = Self.previewScale(fit: fit, layout: layout, settings: previewSettings, caption: text)
                 let framed = FramedPhoto(layout: layout, settings: previewSettings, caption: text) {
-                    FramePreviewCanvas(model: model)
+                    FramePreviewCanvas(model: model, showsSDR: compare.showsSDR, pointer: pointer)
                 }
-                if scale > fit {
-                    ScrollView(.horizontal) {
-                        framed
-                            .frame(width: CGFloat(layout.width) * scale, height: CGFloat(layout.height) * scale)
-                            .padding(.horizontal, Space.s6)
-                    }
-                    .scrollIndicators(.visible)
-                    .frame(maxHeight: .infinity)
-                    .padding(.top, Space.s6)
-                    .padding(.bottom, 56)
-                } else {
-                    framed
-                        .padding(.horizontal, Space.s6)
+                // The card's top edge: it is centred in the space offered, or,
+                // for a card that scrolls, at the top of it.
+                let cardTop = scale > fit ? Space.s6 : Space.s6 + max(0, (available.height - CGFloat(layout.height) * fit) / 2)
+                ZStack(alignment: .top) {
+                    if scale > fit {
+                        ScrollView(.horizontal) {
+                            framed
+                                .frame(width: CGFloat(layout.width) * scale, height: CGFloat(layout.height) * scale)
+                                .padding(.horizontal, Space.s6)
+                                .contentShape(.rect)
+                                .simultaneousGesture(matPress)
+                        }
+                        .scrollIndicators(.visible)
+                        .frame(maxHeight: .infinity)
                         .padding(.top, Space.s6)
                         .padding(.bottom, 56)
+                    } else {
+                        framed
+                            .padding(.horizontal, Space.s6)
+                            .padding(.top, Space.s6)
+                            .padding(.bottom, 56)
+                            .contentShape(.rect)
+                            .simultaneousGesture(matPress)
+                    }
+                    if compare.showsSDR {
+                        FrameSDRLabel(compare: compare).padding(.top, cardTop + 12)
+                    }
                 }
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             }
-            .overlay(alignment: .bottomLeading) { DisplayNote(display: model.display).padding(Space.s4) }
+            .overlay(alignment: .bottom) { FrameCompareBar(display: model.display, compare: compare) }
+            .overlay { if previewFocused && !focusedByPointer { FocusRing() } }
+            .focusable()
+            .focusEffectDisabled()
+            .focused($previewFocused)
+            .onChange(of: previewFocused) { _, now in
+                if !now { focusedByPointer = false; compare.keyboardLeft() }
+            }
+            .onKeyPress(keys: [.space], phases: [.down, .repeat, .up]) { press in
+                guard press.modifiers.isDisjoint(with: [.command, .option, .control]) else { return .ignored }
+                switch press.phase {
+                case .down: compare.spaceDown()
+                case .up: compare.spaceUp()
+                default: break
+                }
+                return .handled
+            }
+            .onKeyPress(.escape) { compare.escape() ? .handled : .ignored }
         } else if model.document?.pixelSize != nil {
             Text("frame.style.unavailable")
                 .font(Font.hdr.control)
@@ -145,15 +218,20 @@ struct FrameSheet: View {
 }
 
 /// Under the preview: what the frame does on this display.
-private struct DisplayNote: View {
+struct DisplayNote: View {
     let display: DisplayState
+    /// The photograph shows its SDR version: the HDR badge goes and the note
+    /// says what the picture is now.
+    var showsSDR = false
 
     var body: some View {
         HStack(spacing: Space.s2) {
-            if display.supportsEDR { HDRBadge() }
-            Text(display.supportsEDR ? "frame.preview.hdr" : "frame.preview.sdr")
+            if display.supportsEDR && !showsSDR { HDRBadge() }
+            Text(showsSDR ? "frame.compare.sdr.note" : display.supportsEDR ? "frame.preview.hdr" : "frame.preview.sdr")
                 .font(Font.hdr.caption)
                 .foregroundStyle(Color.hdr.overlayInk)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .hdrOverlayChip()
     }

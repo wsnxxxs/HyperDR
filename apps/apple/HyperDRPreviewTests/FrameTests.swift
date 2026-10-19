@@ -689,4 +689,45 @@ private struct ReferenceFrameCaptionView: View {
         // And that is not how an available "off" looks (dimmed settings, a live switch).
         XCTAssertGreaterThan(difference(try render(settings: off, exportAvailable: false), try render(settings: off, exportAvailable: true)), 0.01)
     }
+
+    /// Pictures of the settings panel in the states the sheet puts it in (N11):
+    /// free, locked by an export (with the note), and with the frame switch
+    /// unavailable. With $HDR_SNAPSHOT_DIR set they are written to the host's
+    /// temporary folder as `framev-<state>-<variant>.png`.
+    func testPanelSnapshots() throws {
+        let variants: [(String, ColorScheme, String)] = [("light-en", .light, "en"), ("dark-en", .dark, "en"),
+                                                         ("light-zh-Hans", .light, "zh-Hans"), ("dark-zh-Hans", .dark, "zh-Hans")]
+        var on = FrameSettings(); on.isEnabled = true
+        let states: [(String, FrameSettings, EditingLockReason?, Bool)] = [
+            ("free", on, nil, true), ("locked-export", on, .exporting, true), ("locked-loading", on, .loading, true),
+            ("switch-unavailable", on, nil, false),
+        ]
+        let directory = ProcessInfo.processInfo.environment["HDR_SNAPSHOT_DIR"].map {
+            FileManager.default.temporaryDirectory.appendingPathComponent(URL(fileURLWithPath: $0).lastPathComponent, isDirectory: true)
+        }
+        if let directory { try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true) }
+        var seen: [String: Data] = [:]
+        for (state, settings, lock, available) in states {
+            for (name, scheme, locale) in variants {
+                let root = FrameSettingsPanel(settings: .constant(settings), photoSize: PixelSize(width: 6000, height: 4000),
+                                              lock: lock, exportAvailable: available)
+                    .padding(Layout.panelPadding).frame(width: 340, alignment: .topLeading)
+                    .background(Color.hdr.surfacePanel)
+                    .environment(\.colorScheme, scheme).environment(\.locale, Locale(identifier: locale))
+                let host = NSHostingView(rootView: root)
+                host.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+                let size = host.fittingSize
+                let window = NSWindow(contentRect: CGRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+                window.contentView = host
+                host.frame = CGRect(origin: .zero, size: size)
+                host.layoutSubtreeIfNeeded()
+                let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+                host.cacheDisplay(in: host.bounds, to: bitmap)
+                let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                if name == "light-en" { seen[state] = png }
+                if let directory { try png.write(to: directory.appendingPathComponent("framev-\(state)-\(name).png")) }
+            }
+        }
+        XCTAssertEqual(Set(seen.values).count, states.count, "each state looks different")
+    }
 }

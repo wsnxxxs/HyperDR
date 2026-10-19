@@ -19,23 +19,35 @@ import HyperDRDesign
 /// and a Cancel under the progress, as short as the stage text allows
 /// (raw-states §9.2).
 struct SlowOpenDetails: View {
-    let fileName: String
+    /// Nil while the photograph is still being found (a slow restore).
+    let fileName: String?
     let cancel: () -> Void
 
     var body: some View {
         VStack(spacing: Space.s3) {
-            Text(verbatim: fileName)
-                .font(Font.hdr.readout)
-                .foregroundStyle(Color.hdr.overlayMuted)
-                .lineLimit(1).truncationMode(.middle)
-                .frame(maxWidth: 320)
+            if let fileName {
+                Text(verbatim: fileName)
+                    .font(Font.hdr.readout)
+                    .foregroundStyle(Color.hdr.overlayMuted)
+                    .lineLimit(1).truncationMode(.middle)
+                    .frame(maxWidth: 320)
+            }
             Button("open.cancel", action: cancel)
                 .buttonStyle(.hdrSecondary)
                 .keyboardShortcut(.cancelAction)
                 .help(Text("open.cancel.help"))
-                .accessibilityLabel(Text("open.cancel.a11y \(fileName)"))
+                .accessibilityLabel(fileName.map { Text("open.cancel.a11y \($0)") } ?? Text("open.cancel"))
         }
     }
+}
+
+/// The corner chip's height, with and without Cancel (R-V7, N8): the chip's
+/// own padding goes round whatever it holds, so the content is made this
+/// much less, and the Cancel button's hover plate (26 pt) overhangs the
+/// padding it cancels with a negative inset.
+enum BusyChip {
+    static let height: CGFloat = 26
+    static var contentHeight: CGFloat { height - 2 * Space.s1 }
 }
 
 /// The busy chip over an earlier photograph with Cancel after its text: a
@@ -55,9 +67,10 @@ struct SlowOpenChip: View {
                     .font(.system(size: TypeScale.Size.caption, weight: .semibold))
                     .foregroundStyle(Color.hdr.overlayInk)
                     .padding(.horizontal, Space.s2)
-                    .frame(height: 26)
+                    .frame(height: BusyChip.height)
                     .background(hovered ? Color.hdr.overlayHover : .clear, in: .rect(cornerRadius: Radius.md))
                     .contentShape(.rect(cornerRadius: Radius.md))
+                    .padding(.vertical, -Space.s1)
             }
             .buttonStyle(.plain)
             .onHover { hovered = $0 }
@@ -65,6 +78,7 @@ struct SlowOpenChip: View {
             .help(Text("open.cancel.help"))
             .accessibilityLabel(Text("open.cancel.a11y \(fileName)"))
         }
+        .frame(height: BusyChip.contentHeight)
         .hdrOverlayChip()
     }
 }

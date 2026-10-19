@@ -70,8 +70,9 @@ struct ExportStatusHost: View {
 /// The inspector's locked part (M3 §5.2): while an export runs, a clear
 /// layer over the controls takes the press or drag a disabled control would
 /// swallow and answers with the status card's flash. One tooltip covers the
-/// whole region. The layer sits inside the scroll view's content, so the
-/// wheel still scrolls the inspector.
+/// whole region; it is the layer's own, so no empty tooltip of a control
+/// underneath can hide it and the content keeps its identity. The layer sits
+/// inside the scroll view's content, so the wheel still scrolls the inspector.
 struct ExportLockRegion<Content: View>: View {
     let model: EditorModel
     let window: EditorWindowState
@@ -81,7 +82,6 @@ struct ExportLockRegion<Content: View>: View {
         let locked = model.editingLockReason == .exporting
         content
             .overlay { if locked { LockCatcher(window: window) } }
-            .help(locked ? Text("exportLock.help") : Text(verbatim: ""))
     }
 }
 
@@ -99,6 +99,7 @@ private struct LockCatcher: View {
                     window.emphasizeLock()
                 }
                 .onEnded { _ in pressed = false })
+            .help(Text("exportLock.help"))
             .accessibilityHidden(true)
     }
 }

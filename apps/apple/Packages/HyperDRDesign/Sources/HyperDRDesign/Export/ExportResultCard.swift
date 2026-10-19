@@ -100,7 +100,7 @@ public struct ExportResultCard: View {
                 HStack {
                     if let openSettings {
                         Button(action: openSettings) { Text("design.export.openSettings", bundle: .module) }
-                            .buttonStyle(CompactButtonStyle(kind: .plain))
+                            .buttonStyle(CompactButtonStyle(kind: .link))
                     }
                     Spacer(minLength: 0)
                     Button(action: saveAs) { Text("design.export.saveAs", bundle: .module) }

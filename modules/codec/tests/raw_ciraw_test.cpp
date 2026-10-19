@@ -29,6 +29,7 @@
 #include "hyperdr/foundation/hash.hpp"
 #include "hyperdr/gainmap/native_model.hpp"
 #include "hyperdr/model/ncnn_runtime.hpp"
+#include <exception>
 using namespace hyperdr;
 namespace {
 void require(bool v, const char* message) {

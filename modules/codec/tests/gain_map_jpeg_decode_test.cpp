@@ -22,6 +22,7 @@
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
+#include <exception>
 using namespace hyperdr;
 codec::GainMapRead gain_input(const std::vector<std::uint8_t>& bytes) {
   const auto layout=inspect_gain_map_jpeg(bytes);

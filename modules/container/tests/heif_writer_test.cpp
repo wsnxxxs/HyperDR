@@ -12,6 +12,7 @@
 #include <sstream>
 #include <map>
 #include <pthread.h>
+#include <exception>
 
 namespace {
 using namespace hyperdr;

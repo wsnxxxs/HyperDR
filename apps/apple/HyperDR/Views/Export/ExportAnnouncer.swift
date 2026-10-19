@@ -87,6 +87,8 @@ import Observation
             post(Announcement(text: AppStrings.format("export.announce.failed %@", locale: locale,
                                                       ErrorText(failure).title(locale: locale)), isHigh: true))
         default:
+            // Choosing "Stop and Quit" has already said the export is going away.
+            guard !export.isStoppingToQuit else { return }
             post(Announcement(text: AppStrings.string("export.announce.stopped", locale: locale), isHigh: false))
         }
     }

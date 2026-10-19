@@ -316,6 +316,7 @@ extension EditorModel {
     }
     func stopForTermination() async {
         pendingPhotoSwitch = nil
+        export.isStoppingToQuit = export.isInFlight
         export.isStopping = export.isInFlight
         exportTask?.cancel()
         let saves = Array(saveTasks.values)

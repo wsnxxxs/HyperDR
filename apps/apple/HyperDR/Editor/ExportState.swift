@@ -152,6 +152,11 @@ nonisolated extension Duration {
     /// Every encoding id is present; a present optional nil means available.
     var encodingAvailability: [String: String?] = [:]
     var isStopping = false
+    /// The user chose "Stop and Quit": the stop that follows is part of leaving,
+    /// not a stop to announce (M3 §19.1). Set once the choice is made, before the
+    /// cancellation starts; an export that finishes while the question was still
+    /// open never sets it.
+    @ObservationIgnored var isStoppingToQuit = false
     @ObservationIgnored var stageAt: Date?
     @ObservationIgnored var durations: [Double]?
     @ObservationIgnored var fractionFloor = 0.0
@@ -184,7 +189,7 @@ nonisolated extension Duration {
     func reset() {
         phase = .idle; startedAt = nil; stage = nil; fraction = nil; lastLine = nil
         failure = nil; saveFailure = nil; result = nil; isResultStale = false
-        destination = nil; isStopping = false; durations = nil; fractionFloor = 0; fractionAt = nil; stageAt = nil
+        destination = nil; isStopping = false; isStoppingToQuit = false; durations = nil; fractionFloor = 0; fractionAt = nil; stageAt = nil
     }
 }
 nonisolated struct PhotoSwitchRequest: Equatable {

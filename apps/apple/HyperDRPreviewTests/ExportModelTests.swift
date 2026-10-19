@@ -35,10 +35,10 @@ import HyperDRKit
         await eventually(timeout: .seconds(10)) { m.export.phase == .finishing }
         s.sendExport(.saving)
         await eventually(timeout: .seconds(10)) { m.export.phase == .saving }
-        var r = result(); r.saved = SavedLocation(fileName: "result.heic", folderLabel: "Chosen", url: target)
+        var r = result(); r.saved = SavedLocation(fileName: "result.heic", folderLabel: "Chosen")
         s.sendExport(.finished(result: r, failure: nil))
         await eventually(timeout: .seconds(10)) { !m.export.isInFlight }
-        XCTAssertEqual(m.export.result?.saved?.url, target); XCTAssertTrue(s.saveCalls.isEmpty)
+        XCTAssertEqual(m.export.result?.saved?.folderLabel, "Chosen"); XCTAssertTrue(s.saveCalls.isEmpty)
         XCTAssertEqual(m.export.phase, .succeeded)
     }
     func testExportLocksEditsUndoFrameAndLUTButKeepsViewerAndOpenEnabled() async {

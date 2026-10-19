@@ -402,7 +402,7 @@ extension FakeEditorServices {
     func saveExport(_ photo: EditorPhoto, export: String, destination: URL?) async throws -> SavedLocation {
         saveCalls.append((export, destination))
         if let exportSaveHandler { return try await exportSaveHandler(export, destination) }
-        return SavedLocation(fileName: destination?.lastPathComponent ?? "saved.heic", folderLabel: folder.label, url: destination)
+        return SavedLocation(fileName: destination?.lastPathComponent ?? "saved.heic", folderLabel: folder.label)
     }
     func exportFolder() async -> ExportFolder {
         guard folder.ready else { return folder }

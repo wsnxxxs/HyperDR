@@ -39,10 +39,12 @@ public struct ExportFrameRecord: Sendable, Codable, Equatable {
 
 public struct SavedMark: Sendable, Codable, Equatable {
     public let fileName: String
-    public let folderLabel: String
+    /// Last directory display name at save time, never a path.
+    /// Missing in older records: consumers show their localized unknown label.
+    public let folderDisplayName: String?
     public let savedAt: Date
-    public init(fileName: String, folderLabel: String, savedAt: Date = Date()) {
-        self.fileName = fileName; self.folderLabel = folderLabel; self.savedAt = savedAt
+    public init(fileName: String, folderDisplayName: String?, savedAt: Date = Date()) {
+        self.fileName = fileName; self.folderDisplayName = folderDisplayName; self.savedAt = savedAt
     }
 }
 

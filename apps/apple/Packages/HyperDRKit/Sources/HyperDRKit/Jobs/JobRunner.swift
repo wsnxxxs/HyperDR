@@ -277,7 +277,7 @@ public actor JobRunner {
                 let delivery = Task { try await target.save(session: session, export: export, to: destination) }
                 record?.delivery = delivery
                 let saved = try await delivery.value
-                let mark = SavedMark(fileName: saved.name, folderLabel: saved.folderLabel)
+                let mark = SavedMark(fileName: saved.name, folderDisplayName: saved.folderDisplayName)
                 record?.saved = saved
                 record?.result?.saved = mark
                 do { try await sessions.markSaved(session, export: export, saved: mark) }

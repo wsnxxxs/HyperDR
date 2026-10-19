@@ -6,9 +6,21 @@ nonisolated enum EditingLockReason: String { case loading, restoring, computingA
 nonisolated enum DocumentStatus { case waiting, notExported, modifiedSinceExport, exportedNotSaved, saved }
 nonisolated enum ExportDestination: Equatable { case file(URL), folder(label: String) }
 nonisolated struct SavedLocation: Equatable, Sendable {
-    var fileName: String
-    var folderLabel: String
-    var url: URL? = nil
+    let fileName: String
+    let folderLabel: String
+    private let revealAction: (@MainActor @Sendable () -> Void)?
+    init(fileName: String, folderLabel: String, reveal: (@MainActor @Sendable () -> Void)? = nil) {
+        self.fileName = fileName; self.folderLabel = folderLabel; revealAction = reveal
+    }
+    var canReveal: Bool { revealAction != nil }
+    @MainActor func reveal() { revealAction?() }
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.fileName == rhs.fileName && lhs.folderLabel == rhs.folderLabel && lhs.canReveal == rhs.canReveal
+    }
+    static func label(displayName: String?) -> String {
+        guard let displayName, !displayName.isEmpty else { return String(localized: "export.location.unknown") }
+        return "…/" + displayName
+    }
 }
 nonisolated struct ExportResult: Equatable, Sendable {
     var export: String

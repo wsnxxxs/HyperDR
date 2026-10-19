@@ -443,7 +443,7 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
       if (!predicted_gain || result.frame || options.encoding == OutputEncoding::IsoGainMapJpeg) {
         gain = gain_map_from_renditions(std::move(photo),
             options.encoding == OutputEncoding::IsoGainMapJpeg ? GainMapWriterProfile::iso_generic
-                                                        : GainMapWriterProfile::apple_strict);
+                                                        : GainMapWriterProfile::apple_strict, result.frame.has_value());
       }
       else gain.base_linear = std::move(photo.sdr);
     }

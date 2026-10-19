@@ -10,9 +10,45 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <numeric>
 #include <stdexcept>
 
 namespace hyperdr {
+
+void align_zero_gain(Rational& minimum, Rational& maximum, unsigned bit_depth) {
+  if (bit_depth != 8 && bit_depth != 10)
+    throw std::invalid_argument("gain bit depth must be 8 or 10");
+  const auto value = [](Rational r) { return double(r.numerator) / r.denominator; };
+  const double low = value(minimum), high = value(maximum);
+  if (!(low < 0 && high > 0)) return; // Zero is already an endpoint.
+  const std::int64_t levels = (1U << bit_depth) - 1;
+  const auto requested = static_cast<std::int64_t>(std::ceil(-low * levels / (high - low)));
+  const auto zero = std::clamp<std::int64_t>(requested, 1, levels - 1);
+  const auto fraction = [](std::int64_t n, std::int64_t d, Rational& out) {
+    const auto divisor = std::gcd(n, d); n /= divisor; d /= divisor;
+    if (n < std::numeric_limits<std::int32_t>::min() || n > std::numeric_limits<std::int32_t>::max() ||
+        d > std::numeric_limits<std::uint32_t>::max()) return false;
+    out = {static_cast<std::int32_t>(n), static_cast<std::uint32_t>(d)}; return true;
+  };
+  // A common rational step makes the integer zero code mathematically exact.
+  // Usually retain max and expand min. If zero would be the last code while
+  // max is positive, retain min and leave one positive code instead.
+  if (requested < levels) {
+    if (fraction(-std::int64_t(maximum.numerator) * zero,
+                 std::int64_t(maximum.denominator) * (levels-zero), minimum)) return;
+  } else {
+    if (fraction(-std::int64_t(minimum.numerator) * (levels-zero),
+                 std::int64_t(minimum.denominator) * zero, maximum)) return;
+  }
+  // Large coprime rationals may exceed ISO's integer fields after expansion.
+  // A binary rational step rounded up covers both endpoints without overflow.
+  constexpr std::int64_t denominator = 65536;
+  const auto step = static_cast<std::int64_t>(std::ceil(
+      std::max(-low/zero, high/(levels-zero)) * denominator));
+  if (!fraction(-step*zero, denominator, minimum) ||
+      !fraction(step*(levels-zero), denominator, maximum))
+    throw std::invalid_argument("zero-aligned gain range is not representable");
+}
 
 void measure_quantized_gain(RenderStats& stats, const FloatImage& codes,
                             float gain_max, float gamma, float ceiling, float gain_min) {

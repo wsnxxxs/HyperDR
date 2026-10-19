@@ -13,6 +13,12 @@
 
 namespace hyperdr {
 
+// Expand the negative endpoint so zero is an integer code with gamma 1.
+// Keep the positive endpoint when representable; otherwise expand the range
+// to retain both endpoint bounds and an exact zero code. Used only for frames;
+// bit_depth describes the gain plane, independently of the base image.
+void align_zero_gain(Rational& minimum, Rational& maximum, unsigned bit_depth = 8);
+
 struct RenderStats;
 struct FloatImage;
 

@@ -32,6 +32,8 @@ struct GainMapResult {
   float exposure_ev{};
   float headroom_stops{};
   RenderStats stats;
+  // Framed exports protect the zero-gain mat from JPEG ringing at photo edges.
+  bool presentation_frame{false};
 };
 
 }  // namespace hyperdr

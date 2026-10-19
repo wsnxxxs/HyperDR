@@ -18,10 +18,6 @@ import tempfile
 import zlib
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-# Support bound: 420 box footprint (1 luma px) + bilinear chroma (2) +
-# full-resolution bilinear gain texture (1). Derived from kernels, not fit to
-# measured outliers. See batch3-report's zero-gain/chroma-phase attribution.
-FRAME_BOUNDARY_SUPPORT = 4
 
 
 def invoke(*args, env=None):
@@ -130,33 +126,8 @@ def check_cli(cli, renditions, probe, directory):
         if metrics["psnr_pq_db"] < 42 or metrics["delta_e_itp_p99"] > 3 or (encoding == "hlg" and mean_error > .02):
             raise RuntimeError(f"{encoding} same-rendition HDR gate: {metrics}, mean error={mean_error}")
         print(f"{encoding} exact HDR: {json.dumps(metrics)}, mean relative error={mean_error:.8f}", flush=True)
-    # Actual encoded frames, including a model-authored pair. No skip path.
-    frame_source = ROOT / "tests/fixtures/gain-map-jpeg/iso-mono.jpg"
-    cases = [(style, depth, False) for style in ("gallery", "saturated") for depth in (8, 10)]
-    cases.append(("gallery", 8, True))
-    for style, depth, model in cases:
-        name = f"{style}{depth}" + ("-model" if model else "")
-        spec = directory / (name + ".json")
-        spec.write_text(json.dumps({"schema": "hyperdr.frame/v1", "background": "#F5F3EE" if style == "gallery" else "#ED30D0",
-            "margins": .06, "caption": .13, "shadow": {"opacity": .10, "blur": .012, "offset": .004}}))
-        extra = ["--frame", str(spec)] + (["--ai-model", "research-cnn-v1"] if model else [])
-        path, report = export(cli, source if model else frame_source, directory / name, "adaptive", depth, extra)
-        frame = report["files"][0]["frame"]
-        photo = frame["photo"]
-        def rectangle(border):
-            return ",".join(map(str, (photo["x"]-border, photo["y"]-border,
-                                      photo["width"]+2*border, photo["height"]+2*border)))
-        full = f"0,0,{frame['width']},{frame['height']}"
-        whole = json.loads(invoke(probe, path, "--region", full, "--exclude", rectangle(0)))
-        inside = json.loads(invoke(probe, path, "--region", full, "--exclude", rectangle(FRAME_BOUNDARY_SUPPORT)))
-        require_facts(inside, frame["width"], frame["height"], depth, True)
-        region = inside["regions"][0]
-        if not region["valid"] or any(c["bright_pixels"] == 0 or c["max_abs_log2"] is None or
-                                     not math.isfinite(c["max_abs_log2"]) or c["max_abs_log2"] > .05 for c in region["channels"]):
-            raise RuntimeError(f"{name} mat interior >4px: {region}")
-        print(f"{name} encoded mat: entire max={max(c['max_abs_log2'] for c in whole['regions'][0]['channels']):.9f}, "
-              f"interior >4px max={max(c['max_abs_log2'] for c in region['channels']):.9f} stops, "
-              f"pixels={region['sampled_pixels']}", flush=True)
+    from check_frame import check_frames
+    check_frames(cli, renditions, probe, directory, export, source)
 
 
 def main():
@@ -165,6 +136,7 @@ def main():
     parser.add_argument("--writer-fixtures", type=pathlib.Path)
     parser.add_argument("--rendition-fixtures", type=pathlib.Path)
     parser.add_argument("--build-dir", type=pathlib.Path)
+    parser.add_argument("--frame-baseline-cli", type=pathlib.Path, help="retained pre-E5 CLI for same-build q90 audit")
     args = parser.parse_args()
     if not args.cli and not args.writer_fixtures:
         parser.error("supply CLI or --writer-fixtures")
@@ -180,6 +152,9 @@ def main():
         if cli:
             renditions = (args.rendition_fixtures or cli.with_name("heif_imageio_renditions")).resolve()
             check_cli(cli, renditions, probe, root)
+            if args.frame_baseline_cli:
+                from check_frame import check_q90_nonregression
+                check_q90_nonregression(cli,args.frame_baseline_cli.resolve(),renditions,probe,root,export)
 
 
 if __name__ == "__main__":

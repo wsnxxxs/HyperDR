@@ -7,7 +7,8 @@ The app uses semantic keys (`editor.open`, `err.server.raw_budget`,
 script is the guard, the native counterpart of check_panel_i18n.py:
 
 * every key the app's Swift uses exists in the catalogue;
-* every catalogue key is used (no dead entries);
+* every catalogue key is used (no dead entries), except the keys under
+  `DYNAMIC_PREFIXES` and `PENDING_PREFIXES` below;
 * every entry has a translated, non-empty `en` and `zh-Hans` value, and both
   values take as many arguments as the key has `%@` placeholders;
 * a semantic key passed as `verbatim:` is an error: it would show the key
@@ -19,6 +20,16 @@ script is the guard, the native counterpart of check_panel_i18n.py:
   diagnostics -- error details, the engine diagnostics window
   (`Shared/AppContentView.swift`) -- are in English and not translated.
   `CJK_OUTSIDE_VIEWS_STRICT = False` would turn this back into a warning.
+
+Keys built at run time cannot be seen in the Swift: `ctrl.<key>.label` and
+`.help` come from the controls table in HyperDRKit (`EditControls`),
+`choice.<key>.<id>` from its options (`EditChoices`), and `field.<name>` from
+the capture fields the engine reports as missing. Such a key is not reported
+as unused; the other direction is the job of
+`HyperDRPreviewTests/LocalizationCoverageTests.swift`, which lists the keys
+from the tables and asserts each is in the catalogue in both languages, and
+that no key under these prefixes lacks a control, option or field behind it.
+A literal that uses one of them in a view still has to exist in the catalogue.
 
 One rule here is not about strings but sits with them because it reads the
 same sources: nothing under `Views/` imports `HyperDREngine`. Views talk only
@@ -73,6 +84,15 @@ DESIGN = REPO_ROOT / "apps" / "apple" / "Packages" / "HyperDRDesign" / "Sources"
 DESIGN_CATALOG = DESIGN / "Resources" / "Localizable.xcstrings"
 DESIGN_COMPONENTS = DESIGN / "Inspector"
 LOCALES = ["en", "zh-Hans"]
+# Keys read through a name built at run time (see the module docstring); never
+# reported as unused. Their completeness is the Swift coverage test's.
+DYNAMIC_PREFIXES = ("ctrl.", "choice.", "field.")
+# Keys whose literal users arrive with a branch that is not merged yet (the
+# editor model's undo names and AI reasons, the canvas hints). Not reported
+# as unused until then; delete this tuple once that branch has landed, so
+# these are checked like any other key.
+PENDING_PREFIXES = ("undo.", "ai.unavailable.", "canvas.hint.", "canvas.peeking")
+UNUSED_EXEMPT = DYNAMIC_PREFIXES + PENDING_PREFIXES
 
 KEY_RE = re.compile(r"^([a-z][A-Za-z0-9]*)(?:\.[A-Za-z0-9_-]+)+(?: %@)*$")
 CJK_RE = re.compile(r"[　-〿㐀-鿿＀-￯]")
@@ -244,6 +264,8 @@ def check(files: list[tuple[str, bool, str]], entries: dict, module_bundle: bool
         if key not in entries:
             problems.append(f"{where}: key not in catalogue: {key!r}")
     for key in sorted(set(entries) - set(used)):
+        if key.startswith(UNUSED_EXEMPT):
+            continue
         problems.append(f"unused catalogue key: {key!r}")
     return problems
 
@@ -457,6 +479,11 @@ def self_test(files: list[tuple[str, bool, str]], entries: dict) -> list[str]:
          f'Text(verbatim: "{used_key}")', [], ["shown verbatim", repr(used_key)]),
         ("a verbatim key does not count as used",
          'Text(verbatim: "zzselftest.only")', ["zzselftest.only"], ["unused catalogue key: 'zzselftest.only'"]),
+        # A key built at run time is not unused; a stray key is.
+        ("a catalogue key under a dynamic prefix is not unused",
+         "", [f"{DYNAMIC_PREFIXES[0]}zzselftest.label"], None),
+        ("a catalogue key outside the prefixes is unused",
+         "", ["zzselftest.orphan"], ["unused catalogue key: 'zzselftest.orphan'"]),
         # Symbols in a catalogue namespace, as "app.badge" is in "app".
         ("SF Symbols are not keys",
          f'Label("{used_key}", systemImage: "{namespace}.zzselftest.fill"); '

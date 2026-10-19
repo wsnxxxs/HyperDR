@@ -5,6 +5,7 @@
 #include "hyperdr/gainmap/gain_map.hpp"
 #include "hyperdr/image/resample.hpp"
 
+#include <algorithm>
 #include <bit>
 #include <cmath>
 #include <cstdint>
@@ -94,6 +95,41 @@ void test_external_gain_round_trip() {
   require(fine_result.gain_map.width == 8 && fine_result.gain_map.height == 6 &&
               fine_result.gain_map.pixels.front() == 0.125F,
           "finer external gain was unexpectedly downsampled");
+
+  // E9: a gain map larger than its base is not a legal container, so packaging
+  // averages a finer grid down to fit, keeping its aspect; a grid that fits is
+  // never touched. (Applying it still keeps the grid as supplied, above.)
+  const auto fitted = [](std::uint32_t gw, std::uint32_t gh, std::uint32_t bw, std::uint32_t bh, float constant) {
+    hyperdr::GainMapResult out;
+    out.base_linear = hyperdr::FloatImage(bw, bh, 3);
+    out.gain_map = hyperdr::FloatImage(gw, gh, 1);
+    std::fill(out.gain_map.pixels.begin(), out.gain_map.pixels.end(), constant);
+    hyperdr::fit_gain_map_to_base(out);
+    return out;
+  };
+  {
+    const auto fine = fitted(8, 6, 4, 4, 0.125F);
+    require(fine.gain_map.width == 4 && fine.gain_map.height == 3, "finer external gain was not fitted to its base");
+    require(std::all_of(fine.gain_map.pixels.begin(), fine.gain_map.pixels.end(),
+                        [](float v) { return std::abs(v - 0.125F) < 1e-6F; }),
+            "fitting an external gain changed its code values");
+    const auto tall = fitted(40, 400, 128, 128, 0.5F);
+    require(tall.gain_map.width == 13 && tall.gain_map.height == 128, "tall grid did not keep its aspect");
+    const auto square = fitted(4096, 4096, 128, 128, 0.5F);
+    require(square.gain_map.width == 128 && square.gain_map.height == 128, "4096 square grid was not fitted");
+    const auto sliver = fitted(1000, 3, 10, 10, 0.5F);
+    require(sliver.gain_map.width == 10 && sliver.gain_map.height == 1, "a thin grid lost a dimension");
+    hyperdr::GainMapResult same;
+    same.base_linear = hyperdr::FloatImage(6, 6, 3);
+    same.gain_map = hyperdr::FloatImage(6, 6, 1);
+    for (std::size_t i = 0; i < same.gain_map.pixels.size(); ++i) same.gain_map.pixels[i] = float(i % 7) / 6.F;
+    const auto expected = same.gain_map.pixels;
+    hyperdr::fit_gain_map_to_base(same);
+    require(same.gain_map.width == 6 && same.gain_map.height == 6 && same.gain_map.pixels == expected,
+            "a grid equal to the base was altered");
+    hyperdr::GainMapResult smaller = fitted(3, 2, 6, 6, 0.25F);
+    require(smaller.gain_map.width == 3 && smaller.gain_map.height == 2, "a smaller grid was resized");
+  }
 
   // A model recipe may carry more headroom than the selected output format.
   // The external grid is attenuated to that format ceiling instead of making

@@ -642,4 +642,22 @@ GainMapResult make_external_gain_map(const FloatImage& source,
   return result;
 }
 
+
+void fit_gain_map_to_base(GainMapResult& result) {
+  const auto& base = result.base_linear;
+  auto& gain = result.gain_map;
+  if (base.width == 0 || base.height == 0 || gain.width == 0 || gain.height == 0 ||
+      (gain.width <= base.width && gain.height <= base.height)) {
+    return;
+  }
+  const double scale = std::min(static_cast<double>(base.width) / gain.width,
+                                static_cast<double>(base.height) / gain.height);
+  const auto fit = [scale](std::uint32_t size, std::uint32_t limit) {
+    return std::clamp<std::uint32_t>(static_cast<std::uint32_t>(std::lround(size * scale)), 1, limit);
+  };
+  // The map is already in the stored code domain; resampling it there keeps the
+  // decoder's own half-pixel/bilinear semantics, as lift_external_gain_map does.
+  gain = resample_to(std::move(gain), fit(gain.width, base.width), fit(gain.height, base.height));
+}
+
 }  // namespace hyperdr

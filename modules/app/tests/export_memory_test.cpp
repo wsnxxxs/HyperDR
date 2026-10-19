@@ -243,6 +243,43 @@ void external_admission() {
   }
   std::filesystem::remove_all(root);
 }
+// E9: an external grid finer than the photograph is averaged down to the photo
+// when the gain map is packaged. Unframed Adaptive HEIC used to fail its own
+// write-back check ("decoded Gain Map has invalid dimensions or depth").
+void external_grid_larger_than_photo() {
+  const auto root=hyperdr::test::temporary_directory()/"external-grid-larger";
+  std::filesystem::remove_all(root);
+  const auto input=root/"photo.tif";
+  std::filesystem::create_directories(root);
+  {
+    FloatImage photo(128,128,3);
+    std::fill(photo.pixels.begin(),photo.pixels.end(),.3F);
+    write_binary_file_atomic(input,encode_sdr_tiff(photo,{}),true);
+  }
+  const auto story=json::parse(R"({"margins":0.055,"caption":0.16,"aspect":{"width":9,"height":16}})");
+  struct Grid {const char* name;unsigned width,height;bool v2;};
+  for(const Grid g : {Grid{"v2-512",512,512,true},Grid{"v1-512",512,512,false},Grid{"v2-wide",300,64,true},
+                      Grid{"v2-tall",64,300,true},Grid{"v2-edge",129,128,true},Grid{"v2-same",128,128,true}}) {
+    const auto grid=root/g.name;
+    write_gain_grid(grid,g.width,g.height,g.v2);
+    for(bool framed : {false,true}) for(int depth : {8,10}) {
+      Engine engine({});
+      ConvertOptions options;
+      options.input=input;options.output_directory=root/(std::string("out-")+g.name+(framed?"-f":"-u")+std::to_string(depth));
+      options.encoding=OutputEncoding::Adaptive;options.depth=depth;
+      options.external_gain_path=grid/"gain.f32";options.external_gain_report=grid/"gain.json";
+      options.allow_legacy_external_gain=!g.v2;
+      if(framed) options.frame=parse_frame_spec(story);
+      const auto report=json::parse(engine.convert(options));
+      const auto& file=only_file(report);
+      const auto detail=std::string(g.name)+(framed?" framed ":" unframed ")+std::to_string(depth)+": "+
+          (file.find("detail")?file.find("detail")->string():file.find("message")?file.find("message")->string():"");
+      require(file.find("success")->boolean(),detail.c_str());
+      require(std::filesystem::exists(path_from_utf8(file.find("output")->string())),"output missing");
+    }
+  }
+  std::filesystem::remove_all(root);
+}
 void admission() {
   constexpr auto limit=50ULL*1024*1024;
   const auto root=hyperdr::test::temporary_directory()/"export-memory";
@@ -285,6 +322,7 @@ int main() try {
 #if HYPERDR_WITH_CODECS
   admission();
   external_admission();
+  external_grid_larger_than_photo();
 #endif
   std::cout<<"export_memory_test passed\n";
 } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}

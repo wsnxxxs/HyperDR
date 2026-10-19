@@ -23,6 +23,7 @@ if(APPLE)
     set_target_properties(capi_small_stack_test PROPERTIES
       C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
       RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+    target_compile_definitions(capi_small_stack_test PRIVATE HYPERDR_GAIN_FIXTURES="${PROJECT_SOURCE_DIR}/tests/fixtures/gain-map-jpeg")
     target_link_libraries(capi_small_stack_test PRIVATE HyperDR::capi HyperDR::app Threads::Threads)
     add_test(NAME capi_small_stack_test COMMAND capi_small_stack_test
       ${PROJECT_SOURCE_DIR}/build/fixtures/sony-ilce-7s.ARW

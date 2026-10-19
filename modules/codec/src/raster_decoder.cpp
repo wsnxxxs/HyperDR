@@ -250,6 +250,10 @@ int jpeg_decode_rgb(const unsigned char* data, std::size_t size,
   }
   while (info.output_scanline < info.output_height) {
     JSAMPROW row = out->rgb + static_cast<std::size_t>(info.output_scanline) * stride;
+    if (current_cancel_token && current_cancel_token->requested()) {
+      jpeg_destroy_decompress(&info);
+      return 2;
+    }
     jpeg_read_scanlines(&info, &row, 1);
   }
   out->width = info.output_width;
@@ -294,6 +298,7 @@ DecodedImage decode_jpeg(const std::vector<std::uint8_t>& bytes,
   const MallocBytes rgb(output.rgb);
   const MallocBytes icc(output.icc);
   const MallocBytes exif(output.exif);
+  if (failed == 2) throw Cancelled();
   if (failed != 0) {
     throw std::runtime_error(std::string("JPEG decode: ") + output.message);
   }
@@ -924,6 +929,24 @@ DecodedImage decode_heic(const std::vector<std::uint8_t>& bytes, bool base_only,
 }  // namespace
 
 namespace codec {
+FloatImage decode_jpeg_gain_bytes(const std::vector<std::uint8_t>& bytes,
+                                  unsigned channels) {
+  if (channels != 1 && channels != 3) throw std::invalid_argument("invalid gain channels");
+  JpegDecodeOutput output{};
+  const auto failed = jpeg_decode_rgb(bytes.data(), bytes.size(), 0, &output);
+  const MallocBytes rgb(output.rgb), icc(output.icc), exif(output.exif);
+  if (failed == 2) throw Cancelled();
+  if (failed) throw std::runtime_error(std::string("gain JPEG decode: ") + output.message);
+  if (output.budget_limited) throw std::runtime_error("gain JPEG exceeds decode budget");
+  FloatImage gain(output.width, output.height, channels);
+  parallel_for_rows(output.height, [&](std::uint32_t y) {
+    for (unsigned x = 0; x < output.width; ++x)
+      for (unsigned c = 0; c < channels; ++c)
+        gain.at(x,y,c) = rgb.get()[(static_cast<std::size_t>(y)*output.width+x)*3+c]/255.0F;
+  });
+  return gain;
+}
+
 DecodedImage decode_jpeg_primary_bytes(const std::vector<std::uint8_t>& bytes,
                                        ColorGamut default_gamut) {
   return decode_jpeg(bytes, 0, default_gamut);
@@ -1059,7 +1082,9 @@ static DecodedImage decode_image_impl(const std::filesystem::path& path, const R
         if (!options.ignore_embedded_gain_map && codec::is_ultrahdr_bytes(bytes)) {
           try {
             return codec::decode_ultrahdr_bytes(bytes, options.default_gamut);
-          } catch (const std::exception&) {
+          } catch (const Cancelled&) {
+            throw;
+          } catch (const std::exception& error) {
             // Keep the backward-compatible primary usable, but never pretend that
             // losing the advertised HDR rendition was an ordinary successful
             // decode.  Export/report callers already surface DecodeInfo degraded
@@ -1074,7 +1099,8 @@ static DecodedImage decode_image_impl(const std::filesystem::path& path, const R
                                         options.default_gamut);
             fallback.decode.degraded = true;
             fallback.decode.degradation_reasons.push_back(
-                "ultrahdr_decode_failed_sdr_fallback");
+                std::string(error.what()).find("duplicate ISO") != std::string::npos
+                    ? "gain_map_metadata_duplicate" : "ultrahdr_decode_failed_sdr_fallback");
             return fallback;
           }
         }

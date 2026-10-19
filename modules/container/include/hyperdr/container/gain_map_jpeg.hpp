@@ -23,6 +23,8 @@ struct GainMapJpeg {
   std::uint16_t minimum_version{}, writer_version{};
   GainMapMetadata metadata;
   bool has_hdrgm{}, has_container_directory{};
+  bool repaired_mpf{};
+  std::size_t trailing_bytes{};
 };
 [[nodiscard]] std::vector<std::uint8_t> assemble_gain_map_jpeg(
     const std::vector<std::uint8_t>& primary,
@@ -30,4 +32,9 @@ struct GainMapJpeg {
 // Validates JPEG marker boundaries, MP Index ranges and ISO metadata before
 // exposing any offsets. Entropy-coded image data is checked by the codec layer.
 [[nodiscard]] GainMapJpeg parse_gain_map_jpeg(const std::vector<std::uint8_t>& bytes);
+// Validates the MPF/JPEG layout, retaining segment counts without interpreting
+// ISO metadata. Used to route XMP-only inputs and diagnose duplicate metadata.
+[[nodiscard]] GainMapJpeg parse_gain_map_jpeg_input(const std::vector<std::uint8_t>& bytes);
+[[nodiscard]] bool has_gain_map_jpeg_signature(const std::vector<std::uint8_t>& bytes);
+[[nodiscard]] GainMapJpeg inspect_gain_map_jpeg(const std::vector<std::uint8_t>& bytes);
 }  // namespace hyperdr

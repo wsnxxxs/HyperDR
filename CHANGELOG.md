@@ -5,6 +5,12 @@ semantic versioning; dates use ISO 8601.
 
 ## Unreleased
 
+- Decode ISO gain-map JPEG inputs with our MPF/ISO parser, libjpeg-turbo and
+  pixel-centred reconstruction. Re-exported bytes and previews may change;
+  decoder caches are invalidated. Duplicate ISO metadata opens as SDR with a
+  diagnostic. Stale third-party MPF records may use validated JPEG boundaries.
+  XMP-only JPEG input continues to use libultrahdr pending ImageIO corroboration.
+
 - The gain-map JPEG encoding is now called `iso-gainmap-jpeg` and writes only
   ISO 21496-1 metadata, without the Ultra HDR `hdrgm` XMP. Reports, schema
   output and generated command lines use the new name. `ultrahdr` is still

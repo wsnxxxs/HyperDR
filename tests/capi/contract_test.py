@@ -655,6 +655,34 @@ class EngineContract(unittest.TestCase):
             finally:
                 LIB.hyperdr_preview_close(session)
 
+    def test_gain_jpeg_input_cli_abi_and_repetition(self):
+        if not self.capabilities["codecs"]:
+            self.skipTest("requires codecs")
+        fixtures = Path(__file__).resolve().parents[1] / "fixtures/gain-map-jpeg"
+        golden = json.loads((Path(__file__).parent / "golden/gain_jpeg_input.json").read_text())
+        for name in ("iso-mono.jpg", "iso-rgb.jpg", "xmp-only.jpg", "xmp-and-iso.jpg"):
+            source = fixtures / name
+            with self.subTest(input=name), tempfile.TemporaryDirectory(prefix="hyperdr-gain-input-") as temporary:
+                root = Path(temporary)
+                destination, report_path = root / "out", root / "report.json"
+                request = {"encoding": "iso-gainmap-jpeg", "command": {
+                    "input": str(source), "output": str(destination), "overwrite": True}}
+                report, _ = self.compare_export(request,
+                    ["convert", str(source), "--output", str(destination),
+                     "--encoding", "iso-gainmap-jpeg", "--report", str(report_path)],
+                    destination / (source.stem + "-hyperdr.jpg"), report_path)
+                self.assertEqual(hashlib.sha256((destination / (source.stem + "-hyperdr.jpg")).read_bytes()).hexdigest(), golden["cases"][name])
+                session = Handle()
+                checked(LIB.hyperdr_preview_open, self.engine, os.fsencode(source), None, ctypes.byref(session))
+                try:
+                    target = root / "preview.hpf"
+                    subprocess.run([CLI, "preview-frame", str(source), "--output", str(target)], capture_output=True, check=True)
+                    first = self.packet(LIB.hyperdr_preview_render, session, {"command": {"compact": False}})
+                    self.assertEqual(first, target.read_bytes())
+                    self.assertEqual(first, self.packet(LIB.hyperdr_preview_render, session, {"command": {"compact": False}}))
+                finally:
+                    LIB.hyperdr_preview_close(session)
+
     def test_iso_jpeg_structure_and_rendered_headroom(self):
         if not self.capabilities["codecs"]:
             self.skipTest("requires codecs")

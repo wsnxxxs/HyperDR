@@ -35,10 +35,15 @@ struct ErrorText {
     }
 
     /// Message and detail as one block, for an alert body or a tooltip.
-    var body: String {
-        let message = String(localized: message)
-        guard let detail else { return message }
-        return message + "\n\n" + String(localized: "mac.err.detail \(detail)")
+    var body: String { body(locale: .current) }
+
+    /// The same block in the language of `locale`.
+    func body(locale: Locale) -> String {
+        var message = self.message, detailLabel = LocalizedStringResource("mac.err.detail \(detail ?? "")")
+        message.locale = locale; detailLabel.locale = locale
+        let text = String(localized: message)
+        guard detail != nil else { return text }
+        return text + "\n\n" + String(localized: detailLabel)
     }
 
     /// Whether the code is one this table describes; the rest fall back to

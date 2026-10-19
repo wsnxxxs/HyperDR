@@ -16,10 +16,10 @@ this checkout. This file summarizes what they decide.
   used.
 - HEVC encoding and decoding use VideoToolbox only, and HEIF reading and
   writing are our own code. x265 is gone and HEIC exports are written by our
-  own container code from VideoToolbox tiles. Our HEIF reader
-  (`container/heif_reader`) and VideoToolbox tile decoder are in; HEIC input
-  still decodes through libheif and libde265 until P3b-3 is merged, and both
-  libraries are then deleted outright (P3b-5), tests included.
+  own container code from VideoToolbox tiles. HEIC input, the write-time check
+  of HEIC exports and diagnostics use our HEIF reader (`container/heif_reader`)
+  and the VideoToolbox tile decoder. libheif and libde265 were deleted on
+  2026-10-20 (P3b-5); the app bundle embeds no dylibs and carries no LGPL code.
 - RAW is developed through `CIRAWFilter`; LibRaw is gone.
 - The Python panel, LAN server, web front end and Tauri shell were deleted on
   2026-10-20 (last visible at `50f734c6`). The engine keeps the
@@ -102,7 +102,7 @@ draw anything into the frame that depends on the photo's HDR pixels.
   style switches to a wide variant above 2.5:1 and is unavailable beyond about
   45:1.
 
-## Status (2026-10-19, end of the sixth shift)
+## Status (2026-10-20, end of the seventh shift)
 
 On this branch: the C ABI and its Swift wrapper; `EditorModel` on real
 `HyperDRKit` services with the App Sandbox, Finder opening and restoring the
@@ -116,15 +116,26 @@ SDR thumbnails, LUT library, stage and time estimates; the equivalent CLI
 command appears only in diagnostics, with placeholders); HEIC exports through
 VideoToolbox and our own HEIF writer, with runtime encoder capabilities
 (`encoder.main8/main10`); display headroom tracking and preview tracing (A3);
-presentation frames with framed gain repair (E5) and export memory admission
-(E6); our HEIF reader (P3b-1) and VideoToolbox HEVC decoding (P3b-2).
+presentation frames with framed gain repair (E5), the export frame toggle and
+framed thumbnails (F-T1); export memory admission (E6) whose estimate covers
+raster, RAW and HEIC sources, external gain grids and LUTs (a LUT never counts
+as retaining both renditions: `rendition_retention`); HEIC input, write-time
+verification and diagnostics on our HEIF reader with VideoToolbox decoding
+(P3b-1 to P3b-5, libheif and libde265 deleted); AVIF grids for canvases above
+libaom's per-frame limit, with canvases beyond libavif's decode limits refused
+at admission as `export_dimension_limit` (E8); external gain grids clipped per
+axis to the base when packaging (E9); the parity batch (drag out and share,
+missing-source notice and relinking, diagnostics, HEIF feature messages).
 
-Open, roughly in order: R6-E6-1 (the export memory estimate undercounts large
-external gain maps); P3b-3 (HEIC input through our reader, unclipped float RGB,
-the old Apple gain-map curve fixed to code^2.2), which is committed on
-`wip/p3b` but not yet reviewed; P3b-4 to P3b-6 (post-export verification and
-diagnostics on our reader, deleting libheif and libde265, acceptance); E8 (61 MP story
-canvases fail in libaom for AVIF); D1 (one set of default values; D1-a
-measurement not started, CC0 RAW candidates listed); P3a-2 (encoder quality,
-including the photo-area errors E5 froze as non-regression cases); the
-hands-on checks in `docs/design/user-acceptance.md`.
+Open, roughly in order: D1-b (one set of default values, approved as C1:
+contrast 1, vibrance 0, pop 0, exposure bias 0, gain strength 1, headroom auto
+up to 3, expansion start 0.25, area coverage 0.6; `source_defaults`,
+`unadjusted` and Kit `applySourceIdentity` are removed; the engine part is
+unmerged work on `wip/e5`, the Kit and App parts are not started); AE-1 (the
+RAW default exposure follows the camera's shooting exposure, Apple's baseline;
+after D1-b); P3b-6 (five minutes of fuzzing per target, in the background, and
+acceptance); P3a-2 (encoder quality, including the photo-area errors E5 froze
+as non-regression cases, and E-07; run locally, no self-hosted runner); P-04
+(preview ceiling, needs the user's A3 frame times); the hands-on checks in
+`docs/design/user-acceptance.md` (including the C20 headroom approach and a
+backlit or sunset RAW sample for D1).

@@ -307,6 +307,19 @@ std::vector<std::uint8_t> build_ifd(const std::vector<Entry>& entries, std::uint
 
 }  // namespace
 
+bool has_dng_version_ifd0(const std::uint8_t* bytes, std::size_t size) {
+  size=std::min<std::size_t>(size,64*1024);
+  const auto start=tiff_start(bytes,size);
+  if(!start || *start!=0 || size<8)return false;
+  const TiffView tiff{bytes,size,bytes[0]=='M'};
+  const auto ifd=tiff.u32(4);if(!ifd || *ifd<8)return false;
+  const auto count=tiff.u16(*ifd);
+  if(!count || *count>512 || !tiff.contains(*ifd,2ULL+12ULL * *count+4))return false;
+  for(unsigned i=0;i<*count;++i)
+    if(tiff.u16(std::uint64_t(*ifd)+2+12ULL*i).value_or(0)==50706)return true;
+  return false;
+}
+
 std::vector<std::uint8_t> make_minimal_exif(const PhotoMetadata& m) {
   // libheif expects a TIFF payload; it prepends the HEIF Exif item offset field itself.
   std::vector<Entry> exif_entries;

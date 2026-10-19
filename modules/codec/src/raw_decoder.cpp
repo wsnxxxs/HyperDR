@@ -973,7 +973,7 @@ BayerPattern detect_bayer_pattern(LibRaw& raw, std::uint32_t width,
 
 }  // namespace
 
-RawLensMetadata probe_raw_lens_metadata(const std::filesystem::path& path) {
+RawLensMetadata probe_libraw_lens_metadata(const std::filesystem::path& path) {
   // LibRaw is ~768 KiB. GCD worker threads have roughly 512 KiB of stack, so a
   // stack instance here crashes when this entry point is called off the main
   // thread. Keep the object on the heap and use a reference below.

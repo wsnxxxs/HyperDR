@@ -39,6 +39,16 @@ inline constexpr std::uint64_t kMaxRawPixels =
   return pixel_count_ok(width, height, kMaxRawPixels);
 }
 
+// CIRAWFilter's GPU working set plus output and one RGBA render block.
+[[nodiscard]] inline std::uint64_t ciraw_pipeline_bytes(std::uint64_t source_width,
+    std::uint64_t source_height,std::uint64_t output_width,std::uint64_t output_height,
+    std::uint64_t block_rows) {
+  if(!raw_input_budget_ok(source_width,source_height) || !raw_input_budget_ok(output_width,output_height) || !block_rows || block_rows>512)
+    return std::numeric_limits<std::uint64_t>::max();
+  return 150ULL*1024*1024+16*source_width*source_height+12*output_width*output_height+
+      16*output_width*block_rows;
+}
+
 // LibRaw always unpacks the complete sensor mosaic, including margins.  Its
 // half-size option reduces demosaic/output allocations only; treating the
 // entire working set as quarter-sized admits exactly the large-margin files

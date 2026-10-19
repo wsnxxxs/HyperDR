@@ -55,14 +55,17 @@ def main() -> None:
         source.write_bytes(png(128, 96))
         cases = [(encoding, None) for encoding in ("sdr-jpeg", "sdr-tiff", "avif-pq", "avif-hlg", "iso-gainmap-jpeg")]
         cases += [(encoding, style) for style in ("gallery", "story") for encoding in ("iso-gainmap-jpeg", "sdr-tiff")]
+        cases += [("iso-gainmap-jpeg", "raw")]
         for index, (encoding, style) in enumerate(cases):
+            case_source = ROOT / "build/fixtures/sony-ilce-7s.ARW" if style == "raw" else source
+            style = None if style == "raw" else style
             case = root / str(index)
             case.mkdir()
             options = case / "options.json"
             options.write_text(json.dumps({"encoding": encoding, "brightness": .612345, "contrast": 1.123456}))
             destination = case / "saved"
             destination.mkdir()
-            args = [str(binary_dir / "HyperDRKitParity"), str(source), str(options), str(case / "work"), str(destination)]
+            args = [str(binary_dir / "HyperDRKitParity"), str(case_source), str(options), str(case / "work"), str(destination)]
             if style:
                 spec = {"schema": "hyperdr.frame/v1", "background": "#F5F3EE"}
                 if style == "gallery":

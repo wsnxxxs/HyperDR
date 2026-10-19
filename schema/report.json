@@ -1,27 +1,23 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "HyperDR conversion report schema 12",
+  "title": "HyperDR conversion report schema 13",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schema",
     "tool",
     "settings",
-    "raw_processing",
     "files"
   ],
   "properties": {
     "schema": {
-      "const": 12
+      "const": 13
     },
     "tool": {
       "type": "string"
     },
     "settings": {
       "$ref": "#/$defs/settings"
-    },
-    "raw_processing": {
-      "$ref": "#/$defs/raw_processing"
     },
     "files": {
       "type": "array",
@@ -117,7 +113,11 @@
           ]
         },
         "output_gamut": {
-          "enum": ["auto", "srgb", "p3"]
+          "enum": [
+            "auto",
+            "srgb",
+            "p3"
+          ]
         },
         "clamp_srgb": {
           "type": "boolean"
@@ -311,6 +311,9 @@
         },
         "raw_lens_profile": {
           "type": "string"
+        },
+        "raw_lens_correction": {
+          "type": "boolean"
         }
       }
     },
@@ -318,50 +321,27 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "black_level_correction",
-        "white_balance",
+        "engine",
+        "decoder_version",
+        "os_build",
         "digital_gain",
-        "auto_bad_pixel_correction",
-        "bad_pixel_map",
-        "dark_frame",
-        "linearization_lut",
-        "lens_shading_map"
+        "baseline_exposure"
       ],
       "properties": {
-        "black_level_correction": {
-          "enum": [
-            "LibRaw metadata",
-            "metadata or measured dark; LUT-aware"
-          ]
+        "engine": {
+          "const": "apple-ciraw"
         },
-        "white_balance": {
-          "enum": [
-            "camera WB",
-            "camera WB with LibRaw fallback"
-          ]
+        "decoder_version": {
+          "type": "string"
+        },
+        "os_build": {
+          "type": "string"
         },
         "digital_gain": {
-          "type": "number",
-          "exclusiveMinimum": 0,
-          "maximum": 64
+          "type": "number"
         },
-        "auto_bad_pixel_correction": {
-          "type": "boolean"
-        },
-        "bad_pixel_map": {
-          "type": "string"
-        },
-        "dark_frame": {
-          "type": "string"
-        },
-        "linearization_lut": {
-          "type": "string"
-        },
-        "lens_shading_map": {
-          "type": "string"
-        },
-        "lens_profile": {
-          "type": "string"
+        "baseline_exposure": {
+          "type": "number"
         }
       }
     },
@@ -377,10 +357,6 @@
         "message",
         "sensor_width",
         "sensor_height",
-        "target_width",
-        "target_height",
-        "decoded_width",
-        "decoded_height",
         "requested_crop_width",
         "requested_crop_height",
         "delivered_crop_width",
@@ -444,18 +420,6 @@
         "sensor_height": {
           "$ref": "#/$defs/dimension"
         },
-        "target_width": {
-          "$ref": "#/$defs/dimension"
-        },
-        "target_height": {
-          "$ref": "#/$defs/dimension"
-        },
-        "decoded_width": {
-          "$ref": "#/$defs/dimension"
-        },
-        "decoded_height": {
-          "$ref": "#/$defs/dimension"
-        },
         "requested_crop_width": {
           "$ref": "#/$defs/dimension"
         },
@@ -477,24 +441,6 @@
         "decode_degraded": {
           "type": "boolean"
         },
-        "raw_white_balance": {
-          "enum": [
-            "",
-            "camera",
-            "camera-applied",
-            "auto",
-            "daylight"
-          ]
-        },
-        "raw_color_matrix": {
-          "enum": [
-            "",
-            "embedded",
-            "libraw",
-            "none",
-            "dcp"
-          ]
-        },
         "input_domain": {
           "type": "string",
           "enum": [
@@ -508,12 +454,25 @@
         "source_color": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["name", "primaries", "transfer", "source"],
+          "required": [
+            "name",
+            "primaries",
+            "transfer",
+            "source"
+          ],
           "properties": {
-            "name": {"type": "string"},
-            "primaries": {"type": "string"},
-            "transfer": {"type": "string"},
-            "source": {"type": "string"}
+            "name": {
+              "type": "string"
+            },
+            "primaries": {
+              "type": "string"
+            },
+            "transfer": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            }
           }
         },
         "input_headroom": {
@@ -565,7 +524,11 @@
           "description": "Present when a presentation frame was placed: width and height are then the canvas, and photo is where the photograph sits on it.",
           "type": "object",
           "additionalProperties": false,
-          "required": ["width", "height", "photo"],
+          "required": [
+            "width",
+            "height",
+            "photo"
+          ],
           "properties": {
             "width": {
               "$ref": "#/$defs/dimension"
@@ -580,7 +543,12 @@
             "photo": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["x", "y", "width", "height"],
+              "required": [
+                "x",
+                "y",
+                "width",
+                "height"
+              ],
               "properties": {
                 "x": {
                   "type": "integer",
@@ -645,26 +613,27 @@
         "gain_map": {
           "$ref": "#/$defs/gain_map"
         },
-        "raw_profile_name": {
-          "type": "string"
-        },
-        "raw_profile_sha256": {
-          "type": "string"
-        },
-        "raw_profile_camera": {
-          "type": "string"
-        },
-        "raw_profile_tone": {
-          "type": "string"
-        },
-        "raw_profile_baseline_ev": {
-          "type": "number"
-        },
-        "raw_lens_profile": {
-          "type": "string"
+        "raw_processing": {
+          "$ref": "#/$defs/raw_processing"
         },
         "raw_lens_correction": {
-          "type": "string"
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "supported",
+            "applied"
+          ],
+          "properties": {
+            "supported": {
+              "type": "boolean"
+            },
+            "applied": {
+              "type": "boolean"
+            }
+          }
+        },
+        "error_detail": {
+          "type": "object"
         }
       }
     },

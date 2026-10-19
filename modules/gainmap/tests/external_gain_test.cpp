@@ -208,10 +208,10 @@ void test_v2_signed_canonical_sidecar() {
       "delivered_crop": [2, 1],
       "requested_crop_origin_sensor": [0, 0],
       "delivered_crop_origin_sensor": [0, 0],
-      "raw_half_size": false
+      "raw_half_size": false, "raw_decoder_version": "7", "raw_scale": 1
     },
     "development_recipe": {
-      "id": "raw-neutral-v1",
+      "id": "raw-neutral-v2",
       "exposure_ev": 0.25,
       "headroom_stops": 3.0,
       "contrast": 1.0,
@@ -239,7 +239,7 @@ void test_v2_signed_canonical_sidecar() {
   const auto external = hyperdr::read_external_gain_map(raw, report, false);
   require(external.canonical_log2, "v2 sidecar was not recognized");
   require(external.binding &&
-              external.binding->recipe.id == "raw-neutral-v1",
+              external.binding->recipe.id == "raw-neutral-v2",
           "deployment development recipe id was not parsed");
   require(external.binding->preprocessing_fingerprint == "1234567890abcdef",
           "preprocessing identity was not parsed");
@@ -247,7 +247,7 @@ void test_v2_signed_canonical_sidecar() {
     std::ifstream input(report);
     std::string text{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
     input.close();
-    text.replace(text.find("raw-neutral-v1"), std::string("raw-neutral-v1").size(), "display-hdr-split");
+    text.replace(text.find("raw-neutral-v2"), std::string("raw-neutral-v2").size(), "display-hdr-split");
     { std::ofstream output(report); output << text; }
     require(hyperdr::read_external_gain_map(raw, report).binding->recipe.id == "display-hdr-split",
             "the native HDR model development recipe was rejected");

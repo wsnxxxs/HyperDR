@@ -30,6 +30,14 @@ void fail_without_codecs(const char* capability) {
 
 #if !HYPERDR_WITH_CODECS
 
+RawHeader probe_apple_raw(const std::filesystem::path&) { fail_without_codecs("RAW probing"); }
+float raw_preview_scale(const std::filesystem::path&, std::uint32_t) { return 1; }
+std::string raw_os_build(){ return {}; }
+float raw_preview_scale(std::uint32_t edge,std::uint32_t source){
+  if(!edge||!source)return 1;for(float s:{.125F,.25F,.5F,1.F})if(source*s>=edge)return s;return 1;
+}
+void release_apple_raw_cache(const std::filesystem::path&) {}
+
 RawLensMetadata probe_raw_lens_metadata(const std::filesystem::path&) {
   fail_without_codecs("RAW metadata probing");
 }

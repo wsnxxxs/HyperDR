@@ -25,7 +25,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -97,7 +98,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -169,7 +171,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -240,7 +243,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -310,7 +314,8 @@
       "exposure": "auto",
       "headroom": 4,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -379,7 +384,8 @@
       "exposure": "auto",
       "headroom": 2.3,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -450,7 +456,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 90,
-      "hevc_preset": "medium"
+      "hevc_preset": "medium",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -521,7 +528,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -593,7 +601,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -657,7 +666,8 @@
       "exposure": "auto",
       "headroom": 2.3,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -721,7 +731,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -822,7 +833,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 0,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -920,7 +932,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "error": "aiHdrRange must be a finite number in [-1.0, 4.0]"
   },
@@ -952,7 +965,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "error": "aiContrast must be a finite number in [0.8, 1.35]"
   },
@@ -983,7 +997,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "error": "external gain requires both raw grid and JSON report"
   },
@@ -1016,7 +1031,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "error": "native AI model cannot be combined with external gain"
   },
@@ -1063,7 +1079,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -1148,7 +1165,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -1217,7 +1235,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -1286,7 +1305,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -1355,7 +1375,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -1424,7 +1445,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -1493,7 +1515,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -1562,7 +1585,8 @@
       "exposure": "auto",
       "headroom": 0,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -1631,7 +1655,8 @@
       "exposure": "auto",
       "headroom": 4,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -1700,7 +1725,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -1769,7 +1795,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -1838,7 +1865,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -1907,7 +1935,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -1976,7 +2005,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -2045,7 +2075,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -2114,7 +2145,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 100,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -2183,7 +2215,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",
@@ -2252,7 +2285,8 @@
       "exposure": "auto",
       "headroom": 2.5,
       "quality": 90,
-      "hevc_preset": "slow"
+      "hevc_preset": "slow",
+      "raw_lens_correction": true
     },
     "argv": [
       "HyperDR",

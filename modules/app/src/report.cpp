@@ -46,18 +46,7 @@ void write_settings(json::Writer& writer, const ConvertOptions& options) {
       .member("input", lut_space_name(options.color_lut.input))
       .member("output", lut_space_name(options.color_lut.output))
       .member("strength", options.color_lut.strength).end_object();
-  writer.begin_object("raw_processing")
-      .member("black_level_correction", "metadata or measured dark; LUT-aware")
-      .member("white_balance", "camera WB with LibRaw fallback")
-      .member("digital_gain", options.raw.digital_gain)
-      .member("auto_bad_pixel_correction",
-              options.raw.auto_bad_pixel_correction)
-      .member("bad_pixel_map", path_utf8(options.raw.bad_pixel_map))
-      .member("dark_frame", path_utf8(options.raw.dark_frame))
-      .member("linearization_lut", path_utf8(options.raw.linearization_lut))
-      .member("lens_shading_map", path_utf8(options.raw.lens_shading_map))
-      .member("lens_profile", path_utf8(options.raw.lens_profile))
-      .end_object();
+
 }
 
 void write_stats(json::Writer& writer, const RenderStats& s) {
@@ -108,7 +97,7 @@ std::string run_report_json(const std::vector<FileResult>& results,
   json::Writer writer(json::Writer::Style::kIndented);
   // 10: API3 reports encoded gain ranges; unmeasured distribution fields are
   // omitted instead of publishing the renderer's different pre-JPEG grid.
-  writer.begin_object().member("schema", 12).member("tool", kVersion);
+  writer.begin_object().member("schema", 13).member("tool", kVersion);
   write_settings(writer, options);
   writer.begin_array("files");
   for (const auto& result : results) {
@@ -121,10 +110,6 @@ std::string run_report_json(const std::vector<FileResult>& results,
         .member("message", result.message)
         .member("sensor_width", result.sensor_width)
         .member("sensor_height", result.sensor_height)
-        .member("target_width", result.target_width)
-        .member("target_height", result.target_height)
-        .member("decoded_width", result.decoded_width)
-        .member("decoded_height", result.decoded_height)
         .member("requested_crop_width", result.requested_crop_width)
         .member("requested_crop_height", result.requested_crop_height)
         .member("delivered_crop_width", result.delivered_crop_width)
@@ -132,15 +117,6 @@ std::string run_report_json(const std::vector<FileResult>& results,
         .member("target_dimensions_applied", result.target_dimensions_applied)
         .member("default_crop_present", result.default_crop_present)
         .member("decode_degraded", result.decode_degraded)
-        .member("raw_white_balance", result.raw_white_balance)
-        .member("raw_color_matrix", result.raw_color_matrix)
-        .member("raw_profile_name", result.raw_profile_name)
-        .member("raw_lens_profile", result.raw_lens_profile)
-        .member("raw_lens_correction", result.raw_lens_correction)
-        .member("raw_profile_sha256", result.raw_profile_sha256)
-        .member("raw_profile_camera", result.raw_profile_camera)
-        .member("raw_profile_tone", result.raw_profile_tone)
-        .member("raw_profile_baseline_ev", result.raw_profile_baseline_ev)
         // Which input rendition path this file took, and the headroom it was
         // told the input carried. Recorded because nothing else in the record
         // distinguishes them, and the same settings mean different things in
@@ -164,6 +140,14 @@ std::string run_report_json(const std::vector<FileResult>& results,
         .member("model_version", result.model_version)
         .member("model_inference_mode", result.model_inference_mode)
         .member("model_fallback_reason", result.model_fallback_reason);
+    if(result.raw_processing) {
+      const auto& raw=*result.raw_processing;
+      writer.begin_object("raw_processing").member("engine",raw.engine).member("decoder_version",raw.decoder_version)
+          .member("os_build",raw.os_build).member("digital_gain",raw.digital_gain)
+          .member("baseline_exposure",raw.baseline_exposure).end_object()
+          .begin_object("raw_lens_correction").member("supported",raw.lens_correction_supported)
+          .member("applied",raw.lens_correction_applied).end_object();
+    }
     if (result.input_content_peak_nits)
       writer.member("input_content_peak_nits", *result.input_content_peak_nits);
     writer.begin_array("decode_degradation_reasons");
@@ -194,6 +178,7 @@ std::string run_report_json(const std::vector<FileResult>& results,
         .member("codec_ms", result.codec_ms)
         .member("verify_ms", result.verify_ms)
         .member("write_ms", result.write_ms);
+    if(!result.error_detail_json.empty())writer.raw_member("error_detail",result.error_detail_json);
     if (!result.error_code.empty()) {
       writer.member("error_code", result.error_code).member("detail", result.detail);
     }

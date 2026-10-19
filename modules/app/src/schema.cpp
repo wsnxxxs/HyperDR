@@ -97,8 +97,8 @@ json::Value read_headroom(const ConvertOptions& o) {
                               : json::Value::from_number(o.gain.headroom_stops);
 }
 
-const std::array<Setting, 36>& table() {
-  static const std::array<Setting, 36> kSettings{{
+const std::array<Setting, 37>& table() {
+  static const std::array<Setting, 37> kSettings{{
       {"encoding", "--encoding", SettingKind::kEnum, 0, 0, kEncodingChoices,
        "adaptive|iso-gainmap-jpeg|pq|hlg|avif-pq|avif-hlg|sdr-jpeg|sdr-tiff", "Output representation", false,
        true,
@@ -140,6 +140,10 @@ const std::array<Setting, 36>& table() {
        "<file.xmp>", "Static Adobe XMP look (requires matching --raw-profile)", false, true, nullptr,
        [](ConvertOptions& o, const json::Value& v) { o.raw.look_profile = path_from_utf8(v.string()); },
        [](const ConvertOptions& o) { return json::Value::from_string(path_utf8(o.raw.look_profile)); }, true},
+      {"raw_lens_correction", "--no-raw-lens-correction", SettingKind::kBoolean, 0, 0, {}, {},
+       "Disable automatic Apple RAW lens correction", true, true, nullptr,
+       [](ConvertOptions& o, const json::Value& v) { o.raw.lens_correction=v.boolean(); },
+       [](const ConvertOptions& o) { return json::Value::from_bool(o.raw.lens_correction); }, true},
       {"raw_gain", "--raw-gain", SettingKind::kNumber, 0.125, 64.0, {},
        "<0.125..64>", "Post-decode scene-linear RAW gain", false, true, nullptr,
        [](ConvertOptions& o, const json::Value& v) {

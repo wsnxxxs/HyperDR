@@ -24,6 +24,7 @@
 #include "hyperdr/image/color.hpp"
 #include "hyperdr/image/dng_color.hpp"
 #include "../src/internal/raw_highlights.hpp"
+#include "../src/internal/raw.hpp"
 
 #include <algorithm>
 #include <array>
@@ -399,7 +400,7 @@ int main(int argc, char** argv) {
         hyperdr::RawDecodeOptions options;
         options.highlight_recovery = kModes[i].second;
         const auto decoded =
-            hyperdr::decode_image(std::filesystem::path(argv[1]), options)
+            hyperdr::codec::decode_raw(std::filesystem::path(argv[1]), options)
                 .linear_p3;
         medians[i] = median_luminance(decoded);
         std::cout << kModes[i].first << ": " << decoded.width << 'x'
@@ -519,7 +520,7 @@ int main(int argc, char** argv) {
     for (const auto& [name, mode] : kModes) {
       hyperdr::RawDecodeOptions options;
       options.highlight_recovery = mode;
-      auto result = hyperdr::decode_image(path, options);
+      auto result = hyperdr::codec::decode_raw(path, options);
       require(result.linear_p3.width == kCropHeight &&
                   result.linear_p3.height == kCropWidth,
                std::string("unexpected decoded size for ") + name);
@@ -593,7 +594,7 @@ int main(int argc, char** argv) {
     //    CFA-aligned delivery. Keep both dimensions and bind consumers to the
     //    actual returned raster.
     write_synthetic_dng(path, 79, 63);
-    const auto odd = hyperdr::decode_image(path);
+    const auto odd = hyperdr::codec::decode_raw(path, {});
     require(odd.decode.target_width == 63 && odd.decode.target_height == 79,
             "odd requested DefaultCrop was not reported after orientation");
     require(odd.decode.source_width == odd.linear_p3.width &&
@@ -614,7 +615,7 @@ int main(int argc, char** argv) {
     //    swap is exercised on this path too: a square fixture cannot tell a
     //    correct swap from a missing one.
     write_synthetic_dng(path, 32, 48);
-    const auto rejected = hyperdr::decode_image(path);
+    const auto rejected = hyperdr::codec::decode_raw(path, {});
     require(rejected.decode.degraded,
             "rejected DefaultCrop was not marked as degraded");
     require(rejected.decode.degradation_reasons.size() == 1 &&
@@ -637,7 +638,7 @@ int main(int argc, char** argv) {
     // Bounds validation must reject a crop that is positive and within the
     // maxcrop ratio but still extends beyond the sensor raster.
     write_synthetic_dng(path, kCropWidth, kCropHeight, kWidth - 8, kCropTop);
-    const auto out_of_bounds = hyperdr::decode_image(path);
+    const auto out_of_bounds = hyperdr::codec::decode_raw(path, {});
     // LibRaw may discard an obviously invalid crop before exposing it through
     // raw_inset_crops. If it does expose it, HyperDR must reject it explicitly;
     // either way the visible raster, never the malformed crop, is delivered.
@@ -735,8 +736,8 @@ int main(int argc, char** argv) {
     const auto dark_mosaic = hyperdr::decode_raw_mosaic(path, dark_options);
     require(std::abs(dark_mosaic.samples.at(0, 0, 0) - 856.0F / 65023.0F) < 2.0F / 65535.0F,
             "dark calibration did not use the original visible sensor samples");
-    const auto before_dark = hyperdr::decode_image(path);
-    const auto after_dark = hyperdr::decode_image(path, dark_options);
+    const auto before_dark = hyperdr::codec::decode_raw(path, {});
+    const auto after_dark = hyperdr::codec::decode_raw(path, dark_options);
     require(max_abs_difference(before_dark.linear_p3, after_dark.linear_p3) > 0.001F,
             "DefaultCrop silently disabled the full-visible-area dark frame");
     dark_options.linearization_lut = lut_path;
@@ -745,13 +746,13 @@ int main(int argc, char** argv) {
             "dark frame and source did not undergo the same affine LUT");
     hyperdr::write_text_file_atomic(dark_path, "P5\n1 1\n65535\n", true);
     bool bad_dark_rejected = false;
-    try { static_cast<void>(hyperdr::decode_image(path, dark_options)); }
+    try { static_cast<void>(hyperdr::codec::decode_raw(path, dark_options)); }
     catch (const std::invalid_argument&) { bad_dark_rejected = true; }
     require(bad_dark_rejected, "incompatible dark frame was silently ignored");
 
     // Bad-pixel coordinates also refer to the uncropped visible raster.
     write_synthetic_dng(path);
-    const auto before_defect = hyperdr::decode_image(path);
+    const auto before_defect = hyperdr::codec::decode_raw(path, {});
     auto defect_bytes = hyperdr::read_binary_file(path);
     const auto defect_at = defect_bytes.size() - kWidth * kHeight * 2 + (20 * kWidth + 20) * 2;
     defect_bytes[defect_at] = 255; defect_bytes[defect_at + 1] = 255;
@@ -759,19 +760,19 @@ int main(int argc, char** argv) {
     hyperdr::write_text_file_atomic(lsc_path, "20 20 0\n", true);
     hyperdr::RawDecodeOptions defect_options;
     defect_options.bad_pixel_map = lsc_path;
-    const auto corrected_defect = hyperdr::decode_image(path, defect_options);
+    const auto corrected_defect = hyperdr::codec::decode_raw(path, defect_options);
     require(max_abs_difference(before_defect.linear_p3, corrected_defect.linear_p3) < 1.0e-4F,
             "DefaultCrop shifted the bad-pixel coordinates");
 
     write_synthetic_dng(path);
     hyperdr::write_text_file_atomic(lsc_path, "2 2 1\n2 2 2 2\n", true);
-    const auto rgb_lsc = hyperdr::decode_image(path, lsc_options);
-    const auto rgb_gain = hyperdr::decode_image(path, gain_options);
+    const auto rgb_lsc = hyperdr::codec::decode_raw(path, lsc_options);
+    const auto rgb_gain = hyperdr::codec::decode_raw(path, gain_options);
     require(max_abs_difference(rgb_lsc.linear_p3, rgb_gain.linear_p3) < 1.0e-4F,
             "uniform LSC lost highlights before the float HDR domain");
     lsc_options.half_size = gain_options.half_size = true;
-    require(max_abs_difference(hyperdr::decode_image(path, lsc_options).linear_p3,
-                               hyperdr::decode_image(path, gain_options).linear_p3) < 1.0e-4F,
+    require(max_abs_difference(hyperdr::codec::decode_raw(path, lsc_options).linear_p3,
+                               hyperdr::codec::decode_raw(path, gain_options).linear_p3) < 1.0e-4F,
             "half-size LSC lost highlight headroom");
     lsc_options.half_size = gain_options.half_size = false;
 
@@ -791,8 +792,8 @@ int main(int argc, char** argv) {
         reference_options.highlight_recovery = mode;
         auto calibrated_options = reference_options;
         calibrated_options.lens_shading_map = lsc_path;
-        const auto expected = hyperdr::decode_image(path, reference_options);
-        const auto actual = hyperdr::decode_image(path, calibrated_options);
+        const auto expected = hyperdr::codec::decode_raw(path, reference_options);
+        const auto actual = hyperdr::codec::decode_raw(path, calibrated_options);
         const unsigned divisor = half ? 2 : 1;
         float error = 0;
         // Sensor (60,32), away from both the calibration and demosaic edges;
@@ -824,8 +825,8 @@ int main(int argc, char** argv) {
         calibrated_options.digital_gain = 1.0F;
         calibrated_options.lens_shading_map = lsc_path;
         hyperdr::write_text_file_atomic(lsc_path, "1 1 1\n0.5\n", true);
-        const auto expected = hyperdr::decode_image(path, reference_options);
-        const auto actual = hyperdr::decode_image(path, calibrated_options);
+        const auto expected = hyperdr::codec::decode_raw(path, reference_options);
+        const auto actual = hyperdr::codec::decode_raw(path, calibrated_options);
         const float attenuation_error = max_abs_difference(expected.linear_p3, actual.linear_p3);
         std::cout << "constant shading highlight error: " << attenuation_error << '\n';
         require(attenuation_error < 1.0e-5F,
@@ -838,8 +839,8 @@ int main(int argc, char** argv) {
           outside_map += i == 0 ? "4 4 4 4\n" : "1 1 1 1\n";
         hyperdr::write_text_file_atomic(lsc_path, outside_map, true);
         reference_options.digital_gain = 1.0F;
-        require(max_abs_difference(hyperdr::decode_image(path, reference_options).linear_p3,
-                                   hyperdr::decode_image(path, calibrated_options).linear_p3) < 1.0e-5F,
+        require(max_abs_difference(hyperdr::codec::decode_raw(path, reference_options).linear_p3,
+                                   hyperdr::codec::decode_raw(path, calibrated_options).linear_p3) < 1.0e-5F,
                 "shading outside DefaultCrop changed visible highlights");
       }
     }
@@ -861,9 +862,9 @@ int main(int argc, char** argv) {
         return text;
       };
       hyperdr::write_text_file_atomic(lsc_path, range_map(false), true);
-      const auto expected = hyperdr::decode_image(path, range_options);
+      const auto expected = hyperdr::codec::decode_raw(path, range_options);
       hyperdr::write_text_file_atomic(lsc_path, range_map(true), true);
-      const auto actual = hyperdr::decode_image(path, range_options);
+      const auto actual = hyperdr::codec::decode_raw(path, range_options);
       const float error = max_abs_difference(expected.linear_p3, actual.linear_p3);
       std::cout << "nonconstant crop shading range error (half=" << half << "): " << error << '\n';
       crop_range_preserved = crop_range_preserved && error < 1.0e-6F;
@@ -894,9 +895,9 @@ int main(int argc, char** argv) {
       lsc_options.half_size = half;
       const unsigned divisor = half ? 2 : 1;
       write_synthetic_dng(path);
-      const auto crop_lsc = hyperdr::decode_image(path, lsc_options);
+      const auto crop_lsc = hyperdr::codec::decode_raw(path, lsc_options);
       write_synthetic_dng(path, kWidth, kHeight, 0, 0);
-      const auto full_lsc = hyperdr::decode_image(path, lsc_options);
+      const auto full_lsc = hyperdr::codec::decode_raw(path, lsc_options);
       float crop_error = 0.0F;
       for (unsigned y = 8; y + 8 < crop_lsc.linear_p3.height; ++y)
         for (unsigned x = 8; x + 8 < crop_lsc.linear_p3.width; ++x)
@@ -910,8 +911,8 @@ int main(int argc, char** argv) {
     write_synthetic_dng(path, kCropWidth, kCropHeight, kCropLeft, kCropTop, 0, false);
     hyperdr::RawDecodeOptions clip_options;
     clip_options.highlight_recovery = hyperdr::HighlightRecovery::Clip;
-    const auto fallback_clip = hyperdr::decode_image(path, clip_options);
-    const auto fallback_blend = hyperdr::decode_image(path);
+    const auto fallback_clip = hyperdr::codec::decode_raw(path, clip_options);
+    const auto fallback_blend = hyperdr::codec::decode_raw(path, {});
     require(fallback_clip.raw_white_balance == "auto" &&
                 fallback_blend.raw_white_balance == "auto",
             "missing camera WB was not reported as an automatic fallback");
@@ -927,7 +928,7 @@ int main(int argc, char** argv) {
     // its P3 red; gamut compression brings it inside AP1 with 0.19.
     write_synthetic_dng(path, kCropWidth, kCropHeight, kCropLeft, kCropTop, 0, true, false,
                         true, {20000, 0, 0});
-    const auto red = hyperdr::decode_image(path);
+    const auto red = hyperdr::codec::decode_raw(path, {});
     require(red.raw_color_matrix == "embedded",
             "a DNG ColorMatrix was not reported as the file's own matrix");
     const auto centre = [](const hyperdr::FloatImage& image) {
@@ -950,14 +951,14 @@ int main(int argc, char** argv) {
     // red at 1.0 (1.63 in P3).
     write_synthetic_dng(path, kCropWidth, kCropHeight, kCropLeft, kCropTop, 0, true, false,
                         true, {60000, 0, 0});
-    const auto bright = hyperdr::decode_image(path, clip_options);
+    const auto bright = hyperdr::codec::decode_raw(path, clip_options);
     const float bright_red = centre(bright.linear_p3)[0];
     require(bright_red > 2.0F && bright_red < 2.3F,
             "RAW highlight headroom was clipped at LibRaw's 16-bit ceiling (P3 red " +
                 std::to_string(bright_red) + ")");
     write_synthetic_dng(path, kCropWidth, kCropHeight, kCropLeft, kCropTop, 0, true, false,
                         false, {20000, 0, 0});
-    const auto uncalibrated = hyperdr::decode_image(path);
+    const auto uncalibrated = hyperdr::codec::decode_raw(path, {});
     const auto& uncalibrated_reasons = uncalibrated.decode.degradation_reasons;
     require(uncalibrated.raw_color_matrix == "none" && uncalibrated.decode.degraded &&
                 std::find(uncalibrated_reasons.begin(), uncalibrated_reasons.end(),
@@ -1043,7 +1044,7 @@ int main(int argc, char** argv) {
               std::array<std::uint16_t, 3>{6000, 24000, 28000}}) {
           write_synthetic_dng(path, kCropWidth, kCropHeight, kCropLeft, kCropTop, 0, true, false, true,
                               level, tags(*variant));
-          const auto dng = hyperdr::decode_image(path, clip_options);
+          const auto dng = hyperdr::codec::decode_raw(path, clip_options);
           require(dng.raw_color_matrix == "embedded",
                   "a DNG with two calibrations was not reported as using its own matrix");
           const auto pixel = centre(dng.linear_p3);
@@ -1083,7 +1084,7 @@ int main(int argc, char** argv) {
                                        const std::vector<Field>& signatures) {
         write_synthetic_dng(path, kCropWidth, kCropHeight, kCropLeft, kCropTop, 0,
                             true, false, true, signature_level, tags(source), signatures);
-        return hyperdr::decode_image(path, clip_options).linear_p3;
+        return hyperdr::codec::decode_raw(path, clip_options).linear_p3;
       };
       const auto calibrated = decode_profile(full, {});
       const auto uncalibrated = decode_profile(without_calibration, {});
@@ -1129,10 +1130,10 @@ int main(int argc, char** argv) {
       }
       const std::array<std::uint16_t, 3> flat{6000, 6000, 6000};
       write_synthetic_dng(path, kCropWidth, kCropHeight, kCropLeft, kCropTop, 0, true, false, true, flat);
-      const auto plain = hyperdr::decode_image(path, clip_options);
+      const auto plain = hyperdr::codec::decode_raw(path, clip_options);
       write_synthetic_dng(path, kCropWidth, kCropHeight, kCropLeft, kCropTop, 0, true, false, true, flat, {},
                           {opcode_tag(51009, opcode_list({opcode(9, 0, ramp)}))});
-      const auto ramped = hyperdr::decode_image(path, clip_options);
+      const auto ramped = hyperdr::codec::decode_raw(path, clip_options);
       require(!ramped.decode.degraded, "a GainMap the decoder applies must not degrade the decode");
       const auto y = ramped.linear_p3.height / 2;
       for (std::uint32_t x = 2; x + 2 < ramped.linear_p3.width; x += 6) {
@@ -1162,7 +1163,7 @@ int main(int argc, char** argv) {
           bytes[at + 1] = 0;
         }
         hyperdr::write_binary_file_atomic(path, bytes, true);
-        return hyperdr::decode_image(path, clip_options);
+        return hyperdr::codec::decode_raw(path, clip_options);
       };
       require(max_abs_difference(dead(true).linear_p3, plain.linear_p3) < 1.0e-4F,
               "OpcodeList1 FixBadPixelsConstant left dead pixels in the decode");
@@ -1174,7 +1175,7 @@ int main(int argc, char** argv) {
       const auto reasons = [&](const std::vector<Field>& extra) {
         write_synthetic_dng(path, kCropWidth, kCropHeight, kCropLeft, kCropTop, 0, true, false, true, flat, {},
                             extra);
-        return hyperdr::decode_image(path, clip_options).decode.degradation_reasons;
+        return hyperdr::codec::decode_raw(path, clip_options).decode.degradation_reasons;
       };
       const auto has = [](const std::vector<std::string>& list, const char* reason) {
         return std::find(list.begin(), list.end(), reason) != list.end();

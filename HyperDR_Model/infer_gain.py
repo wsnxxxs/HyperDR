@@ -316,6 +316,8 @@ def main() -> None:
                     "delivered_crop_origin_sensor"
                 ],
                 "raw_half_size": model_input_descriptor["raw_half_size"],
+                "raw_decoder_version": model_input_descriptor.get("raw_decoder_version", ""),
+                "raw_scale": model_input_descriptor.get("raw_scale", 1),
             },
             "development_recipe": model_input_descriptor["development_recipe"],
             "geometry": {

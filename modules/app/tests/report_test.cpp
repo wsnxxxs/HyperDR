@@ -199,10 +199,6 @@ void test_run_report_is_parseable_and_complete() {
   require(files[0].find("success")->boolean(), "successful file not recorded");
   require(files[0].find("sensor_width")->number() == 9600,
           "RAW sensor dimensions missing");
-  require(files[0].find("target_width")->number() == 9504,
-          "DefaultCrop target dimensions missing");
-  require(files[0].find("decoded_width")->number() == 4752,
-          "actual decode dimensions missing");
   require(files[0].find("requested_crop_width")->number() == 9504 &&
               files[0].find("delivered_crop_width")->number() == 4752,
           "requested and delivered crop dimensions were not distinguished");
@@ -220,7 +216,7 @@ void test_run_report_is_parseable_and_complete() {
   // Schema 9: a model run reports the model that answered, named separately from
   // the one that was asked for. A single field could not tell a fallback from a
   // result, which is the case this pair exists for.
-  require(document.find("schema")->number() == 12, "report schema version was not moved");
+  require(document.find("schema")->number() == 13, "report schema version was not moved");
   require(files[0].find("model_id")->string() == "research-cnn-v1" &&
               files[0].find("model_requested_id")->string() == "research-exif-v1",
           "the requested and effective model identities were not both reported");
@@ -233,9 +229,8 @@ void test_run_report_is_parseable_and_complete() {
           "a file that never decoded should report an unknown domain");
   require(files[0].find("decode_degraded")->boolean(),
           "decode degradation was not reported");
-  require(files[0].find("raw_color_matrix")->string() == "embedded" &&
-              files[1].find("raw_color_matrix")->string().empty(),
-          "the RAW camera matrix source was not reported");
+  require(!files[0].find("raw_color_matrix") && !files[0].find("target_width"),
+          "removed LibRaw/report aliases remain");
   // Types are pinned, not just values: the panel branches on
   // target_dimensions_applied and joins the reasons, so a reason emitted as a
   // bare string again -- or the predicate emitted as a number -- would break it

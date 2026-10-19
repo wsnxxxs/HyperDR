@@ -20,11 +20,15 @@
 extern "C" {
 #endif
 
-#define HYPERDR_ABI_VERSION 1
+#define HYPERDR_ABI_VERSION 2
 
 typedef struct hyperdr_error {
   const char* code;
   const char* message;
+  /* Optional JSON object, owned by this error. Shape is fixed by error code:
+   * raw_unsupported: {"container":"dng"|"camera","model":"<UTF-8 text or empty>"}.
+   * NULL for errors without a defined structured detail. */
+  const char* detail_json;
 } hyperdr_error;
 
 /* Version strings have static lifetime and must not be freed. */
@@ -110,7 +114,7 @@ HYPERDR_API void hyperdr_engine_destroy(hyperdr_engine*);
 HYPERDR_API int hyperdr_capabilities(hyperdr_engine*, char** out_json, hyperdr_error** err);
 HYPERDR_API int hyperdr_probe(hyperdr_engine*, const char* path_utf8, char** out_json, hyperdr_error** err);
 /* RAW capture/lens metadata, byte-identical to CLI raw-metadata (trailing newline).
- * Decoding calls distinguish source_unreadable, unsupported_format and decode_failed. */
+ * Decoding calls distinguish source_unreadable, unsupported_format, raw_unsupported and decode_failed. */
 HYPERDR_API int hyperdr_raw_metadata(hyperdr_engine*, const char* path_utf8, char** out_json, hyperdr_error** err);
 HYPERDR_API int hyperdr_normalize_options(const char* edit_options_json, char** settings_json, hyperdr_error** err);
 HYPERDR_API int hyperdr_command_line(const char* settings_json, char** out, hyperdr_error** err);

@@ -22,15 +22,20 @@ struct hyperdr_cancel { hyperdr::CancelToken value; };
 
 namespace {
 
-void set_error(hyperdr_error** out, const char* code, const char* message) noexcept {
+void set_error(hyperdr_error** out, const char* code, const char* message, const char* detail_json=nullptr) noexcept {
   if (out == nullptr) return;
   const auto size = std::strlen(message) + 1;
-  auto* error = static_cast<hyperdr_error*>(std::malloc(sizeof(hyperdr_error) + size));
+  auto* error = static_cast<hyperdr_error*>(std::malloc(sizeof(hyperdr_error) + size + (detail_json ? std::strlen(detail_json)+1 : 0)));
   if (error == nullptr) return;
   auto* text = reinterpret_cast<char*>(error + 1);
   std::memcpy(text, message, size);
   error->code = code;
   error->message = text;
+  error->detail_json = nullptr;
+  if(detail_json) {
+    std::memcpy(text+size,detail_json,std::strlen(detail_json)+1);
+    error->detail_json=text+size;
+  }
   *out = error;
 }
 
@@ -44,6 +49,13 @@ int boundary(hyperdr_error** error, Function function) noexcept {
     set_error(error, "cancelled", exception.what());
   } catch (const hyperdr::Busy& exception) {
     set_error(error, "busy", exception.what());
+  } catch (const hyperdr::RawUnsupported& exception) {
+    try {
+      const auto detail = exception.detail_json();
+      set_error(error, "raw_unsupported", exception.what(), detail.c_str());
+    } catch (...) {
+      set_error(error, "out_of_memory", "cannot allocate native error detail");
+    }
   } catch (const hyperdr::RawMemoryError& exception) {
     set_error(error, "raw_budget", exception.what());
   } catch (const hyperdr::SourceUnreadable& exception) {

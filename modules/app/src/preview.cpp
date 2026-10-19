@@ -59,6 +59,9 @@ std::string compact_preview_metadata(const GainMapResult& result,
       .member("lutStrength", defaults.lut_strength)
       .end_object();
   if (input.content_peak_nits) writer.member("inputContentPeakNits", *input.content_peak_nits);
+  if(decode.raw) writer.begin_object("raw").member("supported",true)
+      .member("lensCorrectionSupported",decode.raw->lens_correction_supported)
+      .member("decoderVersion",decode.raw->decoder_version).member("osBuild",raw_os_build()).end_object();
   writer.begin_array("degradationReasons");
   for (const auto& reason : decode.degradation_reasons) writer.element(reason);
   auto metadata = writer.end_array().end_object().take();

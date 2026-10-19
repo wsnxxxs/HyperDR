@@ -293,7 +293,7 @@ private final class Events: @unchecked Sendable {
         _ = try await session.renderFrame(EngineRequest(settings: ["preview_max_edge": .number(32)]))
     }
 
-    @Test func frameFileExportDecodesSchema12Geometry() async throws {
+    @Test func frameFileExportDecodesSchema13Geometry() async throws {
         let fixture = try Fixture()
         let spec: [String: JSONValue] = ["margins": .number(0.05), "caption": .number(0.1)]
         let layout = try Engine.frameLayout(frame: spec, photoWidth: 128, photoHeight: 96)
@@ -316,10 +316,10 @@ private final class Events: @unchecked Sendable {
         #expect(frame.width == layout.width && frame.height == layout.height)
         #expect(frame.photo == layout.photo)
         let document = try #require(JSONSerialization.jsonObject(with: report.json) as? [String: Any])
-        #expect(document["schema"] as? Int == 12)
+        #expect(document["schema"] as? Int == 13)
     }
 
-    @Test func frameVariantSurvivesLayoutAndSchema12Export() async throws {
+    @Test func frameVariantSurvivesLayoutAndSchema13Export() async throws {
         let fixture = try Fixture(width: 400, height: 100)
         let spec: [String: JSONValue] = ["margins": .number(0.05),
             "variants": .object(["wide": .object(["minRatio": .number(2.5),
@@ -376,7 +376,7 @@ private final class Events: @unchecked Sendable {
 
     @Test @MainActor func synchronousAPIsRunOnMainThread() async throws {
         MainActor.preconditionIsolated()
-        #expect(Engine.abiVersion == 1)
+        #expect(Engine.abiVersion == 2)
         #expect(!Engine.version.isEmpty)
         #expect(!(try Engine.schema()).settings.isEmpty)
         let curve = try Engine.curve(settings: ["contrast": .number(1.123456)], samples: 33)

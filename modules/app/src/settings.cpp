@@ -16,6 +16,10 @@
 namespace hyperdr {
 
 void prepare_raw_resources(RawDecodeOptions& raw) {
+  if (!raw.profile.empty() || !raw.look_profile.empty() || !raw.lens_profile.empty() ||
+      !raw.bad_pixel_map.empty() || !raw.dark_frame.empty() || !raw.linearization_lut.empty() ||
+      !raw.lens_shading_map.empty() || raw.auto_bad_pixel_correction)
+    throw std::invalid_argument("Apple RAW 引擎不支持该选项");
   if (!raw.snapshots) {
     auto snapshots = std::make_shared<ResourceSnapshots>();
     configuration_resource([&] {
@@ -196,6 +200,10 @@ void validate_convert_options(const ConvertOptions& options) {
         options.raw.digital_gain > 0.0F && options.raw.digital_gain <= 64.0F)) {
     throw std::invalid_argument("RAW digital gain must be finite and in (0,64]");
   }
+  if (!options.raw.profile.empty() || !options.raw.look_profile.empty() || !options.raw.lens_profile.empty() ||
+      !options.raw.bad_pixel_map.empty() || !options.raw.dark_frame.empty() || !options.raw.linearization_lut.empty() ||
+      !options.raw.lens_shading_map.empty() || options.raw.auto_bad_pixel_correction)
+    throw std::invalid_argument("Apple RAW 引擎不支持该选项");
   const auto validate_raw_file = [&](const std::filesystem::path& path,
                                     const char* label) {
     if (path.empty() || options.raw.resource(path)) return;

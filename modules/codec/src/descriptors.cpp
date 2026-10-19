@@ -2,8 +2,19 @@
 #include "hyperdr/codec/image_source.hpp"
 
 #include <stdexcept>
+#include "hyperdr/foundation/json.hpp"
 
 namespace hyperdr {
+RawUnsupported::RawUnsupported(std::string kind, std::string camera)
+    : std::runtime_error(kind=="dng" ? "This DNG cannot be decoded by this version of macOS"
+        : camera.empty() ? "This camera RAW cannot be decoded by this version of macOS"
+        : "RAW from "+camera+" is not supported by this version of macOS"),
+      container(std::move(kind)), model(std::move(camera)) {}
+std::string RawUnsupported::detail_json() const {
+  json::Writer writer;return writer.begin_object().member("container",container)
+      .member("model",model).end_object().take();
+}
+
 
 const char* hdr_encoding_name(HdrEncoding encoding) {
   switch (encoding) {

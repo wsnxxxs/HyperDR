@@ -7,6 +7,9 @@
 #include <vector>
 
 namespace hyperdr {
+// Bounded raw-container classification: TIFF IFD0 only, at most 64KiB/512 entries.
+[[nodiscard]] bool has_dng_version_ifd0(const std::uint8_t* bytes, std::size_t size);
+
 
 // Decimal degrees as recorded by the camera. Exif stores these as
 // degrees/minutes/seconds rationals plus a hemisphere reference, which is what

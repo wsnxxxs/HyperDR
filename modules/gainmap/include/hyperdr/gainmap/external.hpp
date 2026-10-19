@@ -21,7 +21,7 @@ namespace hyperdr {
 struct ExternalDevelopmentRecipe {
   // Identifies how the model's retained SDR base was prepared. Older bindings
   // omitted this member in memory and therefore retain the historical default.
-  std::string id{"photographic-v1"};
+  std::string id{"raw-neutral-v2"};
   float exposure_ev{};
   float headroom_stops{};
   float contrast{};
@@ -53,6 +53,8 @@ struct ExternalGainBinding {
   std::uint32_t delivered_crop_left{};
   std::uint32_t delivered_crop_top{};
   bool raw_half_size{false};
+  std::string raw_decoder_version;
+  float raw_scale{1};
   std::string raw_profile_sha256;
   std::string raw_lens_profile_sha256;
   std::uint32_t model_width{};

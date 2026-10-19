@@ -11,6 +11,28 @@
       "license": "CC0-1.0",
       "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
       "source_page": "https://raw.pixls.us/"
+    },
+    {
+      "id": "canon-5d-iii-lossy-dng",
+      "filename": "canon-eos-5d-iii-lossy.dng",
+      "camera": "Adobe DNG Converter Canon EOS 5D Mark III",
+      "description": "RAW system-decoder and orientation regression; raw.pixls.us sample 1023",
+      "url": "https://raw.pixls.us/getfile.php/1023/nice/Adobe%20DNG%20Converter%20-%20Canon%20EOS%205D%20Mark%20III%20-%20Lossy%20JPEG%20compression%20(3:2).DNG",
+      "sha256": "159326856c29073e845c3c5a9ecf98c6474f43ca15798a88ad5e2baecd0664b7",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_page": "https://raw.pixls.us/"
+    },
+    {
+      "id": "leica-c-portrait-rwl",
+      "filename": "leica-c-portrait.RWL",
+      "camera": "Leica C (Typ 112)",
+      "description": "RAW system-decoder and orientation regression; raw.pixls.us sample 4963",
+      "url": "https://raw.pixls.us/getfile.php/4963/nice/Leica%20-%20C%20(Typ%20112)%20-%203:2.RWL",
+      "sha256": "95ff5be4dab1d8415ddcaae674a40d024d625d0684893fcaaa0139983611a455",
+      "license": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "source_page": "https://raw.pixls.us/"
     }
   ],
   "generated_fixtures": [

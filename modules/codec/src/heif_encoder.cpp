@@ -240,7 +240,7 @@ void verify_heic_decodable(const std::vector<std::uint8_t>& bytes,
   }
   if (!plan.light) throw std::runtime_error("BT.2100 HEIC lacks content-light metadata");
   if (plan.config.bit_depth != 10 || plan.config.chroma_format == 0) {
-    throw std::runtime_error("decoded BT.2100 image is not valid 10-bit RGB");
+    throw std::runtime_error("BT.2100 HEIC is not 10-bit colour HEVC");
   }
   codec::verify_heif_tiles(file, plan);
 }
@@ -268,21 +268,34 @@ void verify_heic_decodable(const std::filesystem::path& input) {
 
 namespace {
 // Lenient about unprofiled gain maps (Apple's), strict about present profiles;
-// the same decoding as the input path, whole canvases (diagnostics only).
-codec::HeifAdaptiveParts adaptive_parts(const std::filesystem::path& input) {
+// the same decoding as the input path. Diagnostics see the whole canvas, never a
+// reduced copy: when the planes it needs (`bytes_per_pixel` of canvas, the base,
+// the reconstruction and what the caller adds) do not fit the memory budget, the
+// command stops with that figure instead of quietly working on fewer pixels.
+codec::HeifAdaptiveParts adaptive_parts(const std::filesystem::path& input,
+                                        std::uint64_t bytes_per_pixel) {
   const auto bytes = read_binary_file(input);
   const auto file = read_heif(bytes);
   const auto plan = file.resolve_gain_map(HeifCanvas::Tiled);
   if (!plan || !plan->metadata) throw std::runtime_error("Adaptive HDR HEIC lacks a gain map");
   validate_base_profile(plan->base);
   validate_gain_profile(plan->gain);
-  return codec::decode_heif_adaptive_parts(bytes);
+  const auto budget = current_execution_config.memory_budget_bytes;
+  const auto pixels = std::uint64_t(plan->base.width) * plan->base.height;
+  if (budget && pixels > budget / bytes_per_pixel) {
+    throw std::runtime_error("the whole " + std::to_string(plan->base.width) + "x" +
+                             std::to_string(plan->base.height) + " canvas needs about " +
+                             std::to_string(pixels * bytes_per_pixel >> 20) +
+                             " MiB, over the memory budget of " + std::to_string(budget >> 20) +
+                             " MiB; diagnostics do not work on a reduced copy");
+  }
+  return codec::decode_heif_adaptive_parts(file, *plan);
 }
 }  // namespace
 
 void reconstruct_heic_to_tiff(const std::filesystem::path& input,
                               const std::filesystem::path& output) {
-  auto parts = adaptive_parts(input);
+  auto parts = adaptive_parts(input, 40);
   const auto& metadata = parts.metadata;
   const std::uint32_t width = parts.base.width, height = parts.base.height;
   const float stops = static_cast<float>(metadata.alternate_headroom.numerator) /
@@ -350,8 +363,8 @@ DisplayCurveResult compare_gain_map_heic_curve(
   if (display_headroom_stops.empty()) {
     throw std::invalid_argument("display curve requires at least one headroom");
   }
-  auto reference_components = adaptive_parts(reference);
-  auto candidate_components = adaptive_parts(candidate);
+  auto reference_components = adaptive_parts(reference, 32);
+  auto candidate_components = adaptive_parts(candidate, 32);
   if (reference_components.base.width != candidate_components.base.width ||
       reference_components.base.height != candidate_components.base.height ||
       reference_components.base.channels != candidate_components.base.channels) {

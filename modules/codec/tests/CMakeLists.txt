@@ -146,6 +146,12 @@ if(HYPERDR_WITH_CODECS AND HYPERDR_BUILD_TESTS)
 endif()
 
 if(HYPERDR_WITH_CODECS)
+  # Verification rejections and whole-canvas diagnostics, with no libheif.
+  hyperdr_add_test(heic_verify_test LINK HyperDR::codec lcms2::lcms2)
+  if(TARGET heic_verify_test)
+    target_include_directories(heic_verify_test PRIVATE ${PROJECT_SOURCE_DIR}/modules/codec/src)
+    set_tests_properties(heic_verify_test PROPERTIES TIMEOUT 300)
+  endif()
   hyperdr_add_test(heif_input_test LINK HyperDR::codec lcms2::lcms2)
   if(TARGET heif_input_test)
     target_include_directories(heif_input_test PRIVATE ${PROJECT_SOURCE_DIR}/modules/codec/src)

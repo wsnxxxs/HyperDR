@@ -12,10 +12,11 @@ FloatImage decode_heif_gain(const HeifFile&, const HeifImagePlan&, unsigned chan
 // RGB conversion and no whole-image buffer; memory stays at one tile.
 void verify_heif_tiles(const HeifFile&, const HeifImagePlan&);
 // Diagnostics (--reconstruct, display-curve): the SDR base as linear P3 and the
-// encoded gain-map code plane, decoded by the same path as the input.
+// encoded gain-map code plane, decoded by the same path as the input but never
+// reduced: the planes have the file's full canvas size.
 struct HeifAdaptiveParts {
   FloatImage base, gain;
   GainMapMetadata metadata;
 };
-HeifAdaptiveParts decode_heif_adaptive_parts(const std::vector<std::uint8_t>& bytes);
+HeifAdaptiveParts decode_heif_adaptive_parts(const HeifFile& file, const HeifGainMapPlan& plan);
 }  // namespace hyperdr::codec

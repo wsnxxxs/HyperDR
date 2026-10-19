@@ -98,8 +98,13 @@ class Output {
   Geometry geometry;
   FloatImage image;
   bool reduced, budget_limited;
-  Output(const HeifImagePlan& plan, unsigned channels, unsigned edge = 0) : geometry(plan) {
-    auto size = raster_decode_plan(geometry.width, geometry.height, edge);
+  // `whole`: a diagnostic that must see every pixel (--reconstruct, display-curve)
+  // keeps the canvas size whatever the raster limits are; the caller checks the
+  // memory that costs beforehand.
+  Output(const HeifImagePlan& plan, unsigned channels, unsigned edge = 0, bool whole = false)
+      : geometry(plan) {
+    const auto size = whole ? RasterDecodePlan{geometry.width, geometry.height, false}
+                            : raster_decode_plan(geometry.width, geometry.height, edge);
     image = FloatImage(size.width, size.height, channels);
     budget_limited = size.budget_limited;
     reduced = size.width != geometry.width || size.height != geometry.height;
@@ -128,9 +133,9 @@ class Output {
   }
 };
 FloatImage code_plane(const HeifFile& file, const HeifImagePlan& plan, unsigned channels,
-                      Progress* progress) {
+                      Progress* progress, bool whole = false) {
   if (channels != 1 && channels != 3) throw HeifReadError("invalid HEIF gain channels");
-  Output out(plan, channels);
+  Output out(plan, channels, 0, whole);
   const float maximum = (1U << plan.config.bit_depth) - 1;
   tiles(
       file, plan,
@@ -261,12 +266,12 @@ SourceColor color_for(const HeifImagePlan& plan, ColorGamut gamut) {
 }
 DecodedImage primary(const HeifFile& file, const HeifImagePlan& plan, ColorGamut gamut,
                      unsigned edge, bool preserve_alpha, AlphaPlane* alpha_out,
-                     Progress* progress) {
+                     Progress* progress, bool whole = false) {
   const auto color = color_for(plan, gamut);
   auto alpha_plan = file.resolve_alpha(plan.item_id, HeifCanvas::Tiled, &plan);
   AlphaPlane alpha;
   if (alpha_plan) alpha = decode_alpha_plane(file, alpha_plan->image, progress);
-  Output out(plan, 3, edge);
+  Output out(plan, 3, edge, whole);
   if (alpha_plan && (alpha.width != out.geometry.width || alpha.height != out.geometry.height))
     throw HeifReadError("HEIF alpha dimensions differ after transforms");
   const auto alpha_type = !alpha_plan                 ? RgbAlpha::None
@@ -369,13 +374,14 @@ void verify_heif_tiles(const HeifFile& file, const HeifImagePlan& plan) {
   });
   if (seen != plan.tiles.size()) throw HeifReadError("HEVC decoder returned the wrong tile count");
 }
-HeifAdaptiveParts decode_heif_adaptive_parts(const std::vector<std::uint8_t>& bytes) {
-  const auto file = read_heif(bytes);
-  const auto plan = file.resolve_gain_map(HeifCanvas::Tiled);
-  if (!plan || !plan->metadata) throw HeifReadError("Adaptive HDR HEIC lacks gain map");
-  auto base = primary(file, plan->base, RawDecodeOptions{}.default_gamut, 0, true, nullptr, nullptr);
-  auto gain = code_plane(file, plan->gain, gain_map_channel_count(*plan->metadata), nullptr);
-  return {std::move(base.linear_p3), std::move(gain), *plan->metadata};
+HeifAdaptiveParts decode_heif_adaptive_parts(const HeifFile& file, const HeifGainMapPlan& plan) {
+  if (!plan.metadata) throw HeifReadError("Adaptive HDR HEIC lacks gain map");
+  // Whole canvases: a diagnostic's output must line up pixel for pixel with
+  // the file, so nothing is reduced to fit the raster or memory limits.
+  auto base = primary(file, plan.base, RawDecodeOptions{}.default_gamut, 0, true, nullptr, nullptr,
+                      true);
+  auto gain = code_plane(file, plan.gain, gain_map_channel_count(*plan.metadata), nullptr, true);
+  return {std::move(base.linear_p3), std::move(gain), *plan.metadata};
 }
 DecodedImage decode_heic_bytes(const std::vector<std::uint8_t>& bytes,
                                const RawDecodeOptions& options, std::string_view path) {

@@ -105,6 +105,12 @@ struct DisplayCurveResult {
 // reconstructions at each caller-supplied physical display headroom. This is
 // intentionally a metric-only path: it does not write a second container or
 // alter either input file.
+//
+// The files are read the way the input path reads them: float RGB, not clipped
+// to [0,1] after the YCbCr conversion. A base pixel just below zero therefore
+// counts in the clamp totals, where the earlier libheif reader clipped it
+// before the reconstruction and reported no clamps; MAE and MSE are measured
+// against the unclipped base as well.
 [[nodiscard]] DisplayCurveResult compare_gain_map_heic_curve(
     const std::filesystem::path& reference,
     const std::filesystem::path& candidate,

@@ -51,9 +51,7 @@ private func publishThumbnail(_ env: JobEnvironment, _ photo: PhotoSession, thum
     }
 
     @Test func baseOnlyLinearAreaAveragePreservesSizeAndIgnoresGain() async throws {
-        var repository = URL(fileURLWithPath: #filePath)
-        for _ in 0..<7 { repository.deleteLastPathComponent() }
-        let engine = try await Engine(), session = try engine.openPreview(source: repository.appendingPathComponent("build/smoke/input.jpg"))
+        let engine = try await Engine(), session = try engine.openPreview(source: TinyPhoto.url)
         defer { session.close() }
         let a = try await session.renderFrame(EngineRequest(settings: ["preview_max_edge": .number(8), "gain_strength": .number(0)]))
         let b = try await session.renderFrame(EngineRequest(settings: ["preview_max_edge": .number(8), "gain_strength": .number(2)]))

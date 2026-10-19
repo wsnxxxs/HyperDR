@@ -45,12 +45,16 @@ enum Operation {
   OP_MODEL_GAIN,
   OP_CONVERT,
   OP_CONVERT_JPEG,
+  OP_PROBE_ISO, OP_PREVIEW_ISO, OP_CONVERT_ISO,
+  OP_PROBE_XMP, OP_PREVIEW_XMP, OP_CONVERT_XMP,
   OP_COUNT
 };
 
 static const char* const kOperationNames[OP_COUNT] = {
     "frame_layout", "probe(ARW)", "probe(HEIC)", "raw_metadata(ARW)", "preview(ARW)",
-    "preview(HEIC)", "model_gain(ARW)", "convert(HEIC, AVIF PQ)", "convert+inspect(ISO JPEG)"};
+    "preview(HEIC)", "model_gain(ARW)", "convert(HEIC, AVIF PQ)", "convert+inspect(ISO JPEG)",
+    "probe(ISO JPEG)","preview(ISO JPEG)","convert(ISO JPEG)",
+    "probe(XMP JPEG)","preview(XMP JPEG)","convert(XMP JPEG)"};
 
 typedef struct {
   int status;
@@ -302,6 +306,17 @@ static int run_operation(hyperdr_engine* engine, enum Operation operation,
       const int length = snprintf(output, sizeof(output), "%s/out", root);
       if (length <= 0 || (size_t)length >= sizeof(output)) return 1;
       return run_convert(engine, heic, output, operation == OP_CONVERT_JPEG, result);
+    }
+    case OP_PROBE_ISO: case OP_PREVIEW_ISO: case OP_CONVERT_ISO:
+    case OP_PROBE_XMP: case OP_PREVIEW_XMP: case OP_CONVERT_XMP: {
+      const int xmp=operation>=OP_PROBE_XMP;
+      const char* source=xmp ? HYPERDR_GAIN_FIXTURES "/xmp-only.jpg" : HYPERDR_GAIN_FIXTURES "/iso-rgb.jpg";
+      if(operation==OP_PROBE_ISO || operation==OP_PROBE_XMP)return run_probe(engine,source,result);
+      if(operation==OP_PREVIEW_ISO || operation==OP_PREVIEW_XMP)return run_preview(engine,source,0,result);
+      char output[PATH_MAX];
+      const int length=snprintf(output,sizeof(output),"%s/out",root);
+      if(length<=0 || (size_t)length>=sizeof(output))return 1;
+      return run_convert(engine,source,output,1,result);
     }
     case OP_COUNT:
       break;

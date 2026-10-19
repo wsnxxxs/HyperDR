@@ -1,15 +1,8 @@
-// Reading Ultra HDR JPEG/R as HDR input.
-//
-// Until now a JPEG/R was read through its backward-compatible SDR primary
-// image, which throws away the entire point of the format: the gain map that
-// carries the highlight information. Re-exporting such a file therefore lost
-// real captured range at the input stage, before any look decision was made.
-// libultrahdr can apply the gain map itself and hand back a linear HDR
-// rendition, which is exactly the working space this pipeline wants.
+// Transitional XMP-only reader and independent E4c comparison reference.
+// ISO JPEG input is dispatched to gain_map_jpeg_decoder.cpp.
 
 #include "hyperdr/container/exif.hpp"
 #include "hyperdr/container/heif_tmap.hpp"
-#include "hyperdr/container/exif.hpp"
 #include "hyperdr/image/color.hpp"
 #include "hyperdr/image/orientation.hpp"
 #include "hyperdr/foundation/parallel.hpp"
@@ -20,6 +13,7 @@
 #include "internal/metadata.hpp"
 
 #include <ultrahdr_api.h>
+#include "hyperdr/container/gain_map_jpeg.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -104,37 +98,8 @@ std::array<float, 3> to_linear_p3(uhdr_color_gamut_t gamut,
 }  // namespace
 
 namespace codec {
-
-bool is_ultrahdr_bytes(const std::vector<std::uint8_t>& bytes) {
-  if (bytes.size() < 4) return false;
-  return is_uhdr_image(const_cast<std::uint8_t*>(bytes.data()),
-                       static_cast<int>(bytes.size())) != 0;
-}
-
-}  // namespace codec
-
-// Kept for the CLI and the codec tests, which hold a path rather than a buffer.
-// `decode_image` no longer takes this route: it reads the file once and asks
-// `codec::is_ultrahdr_bytes` about the bytes it already has.
-bool is_ultrahdr_jpeg_file(const std::filesystem::path& path) {
-  try {
-    return codec::is_ultrahdr_bytes(read_binary_file(path));
-  } catch (const std::exception&) {
-    return false;
-  }
-}
-
-// Decodes the gain-map-applied HDR rendition into linear Display P3 with SDR
-// diffuse white at 1.0, which is the same normalisation the RAW path produces.
-DecodedImage decode_ultrahdr(const std::filesystem::path& path) {
-  return codec::decode_ultrahdr_bytes(read_binary_file(path),
-                                      ColorGamut::kSrgb);
-}
-
-namespace codec {
-
-DecodedImage decode_ultrahdr_bytes(const std::vector<std::uint8_t>& bytes,
-                                   ColorGamut default_gamut) {
+DecodedImage decode_legacy_ultrahdr_bytes(const std::vector<std::uint8_t>& bytes,
+                                         ColorGamut default_gamut) {
   if (bytes.empty()) throw std::runtime_error("Ultra HDR input is empty");
   auto authored_sdr = decode_jpeg_primary_bytes(bytes, default_gamut);
 

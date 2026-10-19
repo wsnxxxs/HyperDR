@@ -25,8 +25,17 @@ namespace hyperdr::codec {
 [[nodiscard]] DecodedImage decode_jpeg_primary_bytes(
     const std::vector<std::uint8_t>& bytes, ColorGamut default_gamut);
 
-// Ultra HDR JPEG/R: true when the file carries a gain map libultrahdr can read.
+[[nodiscard]] FloatImage decode_jpeg_gain_bytes(
+    const std::vector<std::uint8_t>& bytes, unsigned channels);
+[[nodiscard]] DecodedImage decode_iso_gain_map_jpeg_bytes(
+    const std::vector<std::uint8_t>& bytes, ColorGamut default_gamut);
+
+// JPEG gain-map recognition and shared dispatch. ISO uses the deterministic
+// reader; XMP-only uses the transitional libultrahdr reader until E4c ImageIO
+// corroboration passes.
 [[nodiscard]] bool is_ultrahdr_bytes(const std::vector<std::uint8_t>& bytes);
+[[nodiscard]] DecodedImage decode_legacy_ultrahdr_bytes(
+    const std::vector<std::uint8_t>& bytes, ColorGamut default_gamut);
 [[nodiscard]] DecodedImage decode_ultrahdr_bytes(
     const std::vector<std::uint8_t>& bytes,
     ColorGamut default_gamut = ColorGamut::kSrgb);

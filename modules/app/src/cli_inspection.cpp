@@ -5,6 +5,7 @@
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/container/inspect.hpp"
 #include "hyperdr/container/gain_map_jpeg.hpp"
+#include "hyperdr/foundation/cancel.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/foundation/json.hpp"
 #include "hyperdr/gainmap/reconstruct.hpp"
@@ -50,17 +51,30 @@ int inspect_command(int argc, char** argv) {
     throw std::invalid_argument("unknown inspect option: " + std::string(argv[3]));
   const auto bytes = read_binary_file(path_from_utf8(argv[2]));
   if (bytes.size() >= 2 && bytes[0] == 0xff && bytes[1] == 0xd8) {
-    const auto parsed = parse_gain_map_jpeg(bytes);
-    verify_gain_map_jpeg(bytes);
+    try {
+    const auto segments = inspect_gain_map_jpeg(bytes);
+    const bool duplicate = segments.primary_iso_count>1 || segments.gain_iso_count>1;
+    const bool iso = segments.primary_iso_count && segments.gain_iso_count && !duplicate;
+    const auto parsed = iso ? parse_gain_map_jpeg_input(bytes) : segments;
     json::Writer writer;
-    writer.begin_object().member("structurally_valid", true)
+    writer.begin_object().member("structurally_valid", !duplicate)
+        .member("reader_path", duplicate ? "sdr-fallback" : iso ? "iso-own" : "xmp-libultrahdr")
+        .member("degradation_reason", duplicate ? "gain_map_metadata_duplicate" : "")
+        .member("mpf_repaired", parsed.repaired_mpf)
+        .member("mpf_diagnostic", parsed.repaired_mpf ? "MPF offset or length disagrees with JPEG boundaries; using actual JPEG boundaries" : "")
+        .member("trailing_bytes", parsed.trailing_bytes)
+        .member("trailing_diagnostic", parsed.trailing_bytes ? "File ends with unrecognized additional data (length recorded in trailing_bytes)" : "")
         .member("primary_iso_segments", parsed.primary_iso_count)
         .member("gain_iso_segments", parsed.gain_iso_count)
         .member("mpf_segments", parsed.mpf_count)
         .member("primary_size", parsed.primary_size)
         .member("gain_offset", parsed.gain_offset)
-        .member("gain_size", parsed.gain_size)
-        .member("base_headroom", static_cast<double>(rational_value(parsed.metadata.base_headroom)))
+        .member("gain_size", parsed.gain_size);
+    if(!iso) {
+      writer.member("has_hdrgm",parsed.has_hdrgm).member("has_container_directory",parsed.has_container_directory).end_object();
+      std::cout<<writer.take()<<'\n';return 0;
+    }
+    writer.member("base_headroom", static_cast<double>(rational_value(parsed.metadata.base_headroom)))
         .member("alternate_headroom", static_cast<double>(rational_value(parsed.metadata.alternate_headroom)))
         .member("channels", gain_map_channel_count(parsed.metadata))
         .member("has_hdrgm", parsed.has_hdrgm)
@@ -77,6 +91,13 @@ int inspect_command(int argc, char** argv) {
     writer.end_array().end_object();
     std::cout << writer.take() << '\n';
     return 0;
+    } catch(const Cancelled&) { throw; }
+      catch(const std::exception& error) {
+        json::Writer writer;
+        writer.begin_object().member("structurally_valid",false).member("reader_path","sdr-fallback")
+            .member("degradation_reason",error.what()).end_object();
+        std::cout<<writer.take()<<'\n';return 0;
+      }
   }
   const auto inspection = inspect_heif(bytes);
   if (argc == 4) {

@@ -94,7 +94,7 @@ void reject_existing(const Scan& s) {
     if (prefix(app.payload, std::string_view(iso, sizeof(iso))) ||
         prefix(app.payload, std::string_view("MPF\0", 4)) ||
         contains(app.payload, "http://ns.adobe.com/hdr-gain-map/1.0/") ||
-        contains(app.payload, "hdrgm") || contains(app.payload, "Container:Directory"))
+        contains(app.payload, "Container:Directory"))
       invalid("input JPEG already contains gain-map metadata");
   }
 }
@@ -129,7 +129,7 @@ Bytes assemble_gain_map_jpeg(const Bytes& primary, const Bytes& gain, const Gain
   check_cancelled(); return out;
 }
 
-GainMapJpeg parse_gain_map_jpeg(const Bytes& bytes) {
+static GainMapJpeg read_gain_map_jpeg(const Bytes& bytes, bool metadata, bool recover) {
   if (bytes.size() >= (std::uint64_t{1} << 32)) invalid("gain-map JPEG must be smaller than 4 GiB");
   GainMapJpeg out;
   auto primary = scan(bytes, 0);
@@ -141,6 +141,7 @@ GainMapJpeg parse_gain_map_jpeg(const Bytes& bytes) {
     }
     if (app.marker == 0xe2 && prefix(app.payload, std::string_view(iso, sizeof(iso)))) {
       ++out.primary_iso_count;
+      if (!metadata) continue;
       if (app.payload.size() != sizeof(iso) + 4) invalid("invalid primary ISO version segment");
       out.minimum_version = read(app.payload, sizeof(iso), 2);
       out.writer_version = read(app.payload, sizeof(iso) + 2, 2);
@@ -178,31 +179,61 @@ GainMapJpeg parse_gain_map_jpeg(const Bytes& bytes) {
     }
   }
   if (!version || !number || !entries || out.entries[0].offset != 0 ||
-      out.entries[0].size != primary.end || (out.entries[0].attributes & 0xffffff) != 0x30000 ||
+      (!recover && out.entries[0].size != primary.end) || (out.entries[0].attributes & 0xffffff) != 0x30000 ||
       (out.entries[1].attributes & 0xffffff) != 0 ||
       ((out.entries[0].attributes | out.entries[1].attributes) & 0x07000000U) != 0) invalid("invalid MPF primary/gain entries");
-  const std::uint64_t offset = static_cast<std::uint64_t>(index->offset) + 8 + out.entries[1].offset;
-  if (offset != primary.end || offset > bytes.size() || out.entries[1].size != bytes.size() - offset)
-    invalid("MPF gain range does not match JPEG bytes");
+  const std::uint64_t recorded = static_cast<std::uint64_t>(index->offset) + 8 + out.entries[1].offset;
+  auto soi = [&](std::uint64_t p) { return p < bytes.size() && bytes.size()-p >= 2 && bytes[p]==0xff && bytes[p+1]==0xd8; };
+  std::uint64_t offset = recorded;
+  if (recover && !soi(offset)) offset = primary.end;
+  if (!soi(offset) || offset < primary.end) invalid("MPF gain offset does not identify a JPEG");
   auto gain = scan(bytes, offset);
-  if (gain.end != bytes.size()) invalid("trailing gain-map JPEG data");
-  out.gain_offset = offset; out.gain_size = out.entries[1].size;
+  auto advertised = [](const Scan& image) {
+    for (const auto& app : image.apps)
+      if ((app.marker==0xe2 && prefix(app.payload,std::string_view(iso,sizeof(iso)))) ||
+          (app.marker==0xe1 && contains(app.payload,"http://ns.adobe.com/hdr-gain-map/1.0/"))) return true;
+    return false;
+  };
+  if (recover && !advertised(gain)) invalid("MPF alternate is not a gain-map JPEG");
+  out.repaired_mpf = offset != recorded || out.entries[0].size != primary.end ||
+      out.entries[1].size != gain.end-offset;
+  if (!recover && (offset != primary.end || out.entries[1].size != bytes.size()-offset || gain.end != bytes.size()))
+    invalid("MPF gain range does not match JPEG bytes");
+  // Only the JPEG immediately following the primary belongs to a repaired
+  // MPF. Embedded JPEGs in an opaque trailer are not alternate candidates.
+  out.trailing_bytes = bytes.size()-gain.end;
+  out.gain_offset = offset; out.gain_size = gain.end-offset;
   for (const auto& app : gain.apps) {
-    if (app.marker == 0xe2 && prefix(app.payload, std::string_view("MPF\0", 4)))
+    if (!recover && app.marker == 0xe2 && prefix(app.payload, std::string_view("MPF\0", 4)))
       invalid("unexpected MPF index in gain image");
     if (app.marker == 0xe2 && prefix(app.payload, std::string_view(iso, sizeof(iso)))) {
       ++out.gain_iso_count;
+      if (!metadata) continue;
       Bytes payload{0}; payload.insert(payload.end(), app.payload.begin() + sizeof(iso), app.payload.end());
       out.metadata = parse_tmap_payload(payload);
     }
   }
-  if (out.primary_iso_count != 1 || out.gain_iso_count != 1) invalid("gain-map JPEG requires exactly one ISO segment per image");
+  if (metadata && (out.primary_iso_count > 1 || out.gain_iso_count > 1)) invalid("duplicate ISO gain-map metadata");
+  if (metadata && (out.primary_iso_count != 1 || out.gain_iso_count != 1)) invalid("gain-map JPEG requires exactly one ISO segment per image");
   out.app_segments = {std::move(primary.apps), std::move(gain.apps)};
   for (const auto& apps : out.app_segments) for (const auto& app : apps) {
-    out.has_hdrgm |= contains(app.payload, "hdrgm") || contains(app.payload, "http://ns.adobe.com/hdr-gain-map/1.0/");
+    out.has_hdrgm |= contains(app.payload, "http://ns.adobe.com/hdr-gain-map/1.0/");
     out.has_container_directory |= contains(app.payload, "Container:Directory") ||
         contains(app.payload, "http://ns.google.com/photos/1.0/container/");
   }
   return out;
 }
+bool has_gain_map_jpeg_signature(const Bytes& bytes) {
+  const auto primary=scan(bytes,0);
+  bool mpf=false, gain=false;
+  for(const auto& app:primary.apps) {
+    mpf |= app.marker==0xe2 && prefix(app.payload,std::string_view("MPF\0",4));
+    gain |= (app.marker==0xe2 && prefix(app.payload,std::string_view(iso,sizeof(iso)))) ||
+        (app.marker==0xe1 && contains(app.payload,"http://ns.adobe.com/hdr-gain-map/1.0/"));
+  }
+  return mpf && gain;
+}
+GainMapJpeg parse_gain_map_jpeg(const Bytes& bytes) { return read_gain_map_jpeg(bytes, true, false); }
+GainMapJpeg parse_gain_map_jpeg_input(const Bytes& bytes) { return read_gain_map_jpeg(bytes, true, true); }
+GainMapJpeg inspect_gain_map_jpeg(const Bytes& bytes) { return read_gain_map_jpeg(bytes, false, true); }
 }  // namespace hyperdr

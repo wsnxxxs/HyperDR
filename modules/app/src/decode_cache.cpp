@@ -56,7 +56,8 @@ constexpr std::array<char, 8> kMagic{'H', 'D', 'R', 'C', 'A', 'C', 'H', '3'};
 // 33 persists the optional static XMP look layered over the camera DCP.
 // 34 persists the input colour interpretation shown in previews and reports.
 // 35 retains upright full-resolution photo dimensions before preview reduction.
-constexpr std::uint32_t kCacheSchema = 35;
+// 36 decodes ISO gain-map JPEGs with our pixel-centred RGB reconstruction.
+constexpr std::uint32_t kCacheSchema = 36;
 
 // x86-64 and arm64, the only targets this project builds for, are both little
 // endian; the cache is a local scratch format and is never transported.

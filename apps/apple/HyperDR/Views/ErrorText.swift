@@ -60,7 +60,7 @@ struct ErrorText {
 
     /// The features the HEIF reader reports with `unsupported_format`
     /// (`modules/container`, `modules/codec/src/hevc`); each has a sentence.
-    nonisolated static let heifFeatures = ["protected_item", "construction_method", "external_reference", "image_sequence", "handler", "essential_property", "codec", "hevc_444", "hevc_422", "hevc_chroma", "hevc_12bit", "hevc_bit_depth", "hevc_separate_planes", "hevc_parameter_change", "color_matrix"]
+    nonisolated static let heifFeatures = ["protected_item", "construction_method", "external_reference", "image_sequence", "handler", "essential_property", "codec", "hevc_444", "hevc_422", "hevc_chroma", "hevc_12bit", "hevc_bit_depth", "hevc_decoder", "hevc_separate_planes", "hevc_parameter_change", "color_matrix"]
 
     private struct Entry {
         let title: LocalizedStringResource
@@ -109,6 +109,7 @@ struct ErrorText {
                 "heif_hevc_chroma": "err.server.unsupported_format.heif.hevc_chroma",
                 "heif_hevc_12bit": "err.server.unsupported_format.heif.hevc_12bit",
                 "heif_hevc_bit_depth": "err.server.unsupported_format.heif.hevc_bit_depth",
+                "heif_hevc_decoder": "err.server.unsupported_format.heif.hevc_decoder",
                 "heif_hevc_separate_planes": "err.server.unsupported_format.heif.hevc_separate_planes",
                 "heif_hevc_parameter_change": "err.server.unsupported_format.heif.hevc_parameter_change",
                 "heif_color_matrix": "err.server.unsupported_format.heif.color_matrix",

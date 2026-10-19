@@ -10404,6 +10404,23 @@
         }
       }
     },
+    "err.server.unsupported_format.heif.hevc_decoder" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This Mac’s video decoder can’t decode this HEVC photo. Open it on another Mac, or convert it to JPEG or standard HEIC."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 Mac 的视频解码器无法解码这张 HEVC 照片。可以换一台 Mac 打开，或先转成 JPEG 或标准 HEIC。"
+          }
+        }
+      }
+    },
     "err.server.unsupported_format.heif.hevc_separate_planes" : {
       "extractionState" : "manual",
       "localizations" : {

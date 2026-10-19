@@ -2,6 +2,8 @@
 
 Run from the repository root: python3 tests/capi/golden/generate.py.
 Normal tests consume edit_options.json and do not import the Python panel.
+R2 intentionally removes the old RAW/highlight vocabulary; contract_test filters
+only those frozen settings and argv pairs instead of rewriting this history.
 """
 import json
 from pathlib import Path

@@ -3,6 +3,11 @@
 Two things used to drift silently and are pinned here: the command line the
 panel displayed versus the one it ran, and the settings vocabulary the browser
 sends versus the one the converter accepts.
+
+R2 intentionally diverges for RAW/highlight vocabulary: the historical Python
+adapter still writes highlight_recovery and external profile paths. It is no
+longer a native CLI parity oracle for those inputs; tests/capi keeps the frozen
+cases and explicitly filters the approved deletions.
 """
 from __future__ import annotations
 

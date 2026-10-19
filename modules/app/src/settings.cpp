@@ -10,7 +10,6 @@
 #include <cmath>
 #include <fstream>
 #include <iterator>
-#include <map>
 #include <stdexcept>
 
 namespace hyperdr {
@@ -20,31 +19,6 @@ void prepare_raw_resources(RawDecodeOptions& raw) {
       !raw.bad_pixel_map.empty() || !raw.dark_frame.empty() || !raw.linearization_lut.empty() ||
       !raw.lens_shading_map.empty() || raw.auto_bad_pixel_correction)
     throw std::invalid_argument("Apple RAW 引擎不支持该选项");
-  if (!raw.snapshots) {
-    auto snapshots = std::make_shared<ResourceSnapshots>();
-    configuration_resource([&] {
-      for (const auto& resource : raw_decode_resources(raw)) {
-        if (resource.path.empty() || snapshots->contains(resource.path)) continue;
-        // Same wording as the decoder's own check, which used to report these.
-        static const std::map<std::string_view, const char*> labels{
-            {"raw_profile", "RAW DCP profile"}, {"raw_look", "RAW XMP look"},
-            {"raw_lens_profile", "RAW lens profile"}, {"raw_bad_pixel_map", "RAW bad-pixel map"},
-            {"raw_dark_frame", "RAW dark frame"}, {"raw_linearization_lut", "RAW linearization LUT"},
-            {"raw_lens_shading_map", "RAW lens-shading map"}};
-        std::error_code ec;
-        if (!std::filesystem::is_regular_file(resource.path, ec) || ec)
-          throw std::invalid_argument(std::string(labels.at(resource.key)) + " does not exist: " +
-                                      path_utf8(resource.path));
-        if (resource.key == "raw_look" && std::filesystem::file_size(resource.path) > 32*1024*1024)
-          throw std::invalid_argument("XMP look: file exceeds 32 MB");
-        ResourceSnapshot captured;
-        captured.bytes = read_binary_file(resource.path);
-        captured.sha256 = sha256_hex(captured.bytes);
-        snapshots->emplace(resource.path, std::move(captured));
-      }
-    });
-    raw.snapshots = std::move(snapshots);
-  }
 }
 
 void prepare_conversion_resources(ConvertOptions& options) {
@@ -73,14 +47,7 @@ void prepare_conversion_resources(ConvertOptions& options) {
   }
 }
 
-void apply_render_defaults(ConvertOptions& options, bool contrast_set,
-                            bool vibrance_set) {
-  if (!options.raw.profile.empty()) {
-    // The profile already supplies its base look. Only explicit creative
-    // controls should change it; argument order must not affect this choice.
-    if (!contrast_set) options.gain.look.contrast = 1.0F;
-    if (!vibrance_set) options.gain.look.vibrance = 0.0F;
-  }
+void apply_render_defaults(ConvertOptions& options) {
   if (is_hlg_encoding(options.encoding)) {
     // HLG's range above diffuse white is fixed by the standard, so a higher
     // ceiling cannot be honoured. Lowering it silently is right for the
@@ -204,23 +171,6 @@ void validate_convert_options(const ConvertOptions& options) {
       !options.raw.bad_pixel_map.empty() || !options.raw.dark_frame.empty() || !options.raw.linearization_lut.empty() ||
       !options.raw.lens_shading_map.empty() || options.raw.auto_bad_pixel_correction)
     throw std::invalid_argument("Apple RAW 引擎不支持该选项");
-  const auto validate_raw_file = [&](const std::filesystem::path& path,
-                                    const char* label) {
-    if (path.empty() || options.raw.resource(path)) return;
-    std::error_code ec;
-    if (!std::filesystem::is_regular_file(path, ec) || ec) {
-      throw std::invalid_argument(std::string(label) + " does not exist");
-    }
-  };
-  validate_raw_file(options.raw.profile, "RAW DCP profile");
-  validate_raw_file(options.raw.look_profile, "RAW XMP look");
-  if (!options.raw.look_profile.empty() && options.raw.profile.empty())
-    throw std::invalid_argument("--raw-look requires --raw-profile");
-  validate_raw_file(options.raw.lens_profile, "RAW LCP profile");
-  validate_raw_file(options.raw.bad_pixel_map, "RAW bad-pixel map");
-  validate_raw_file(options.raw.dark_frame, "RAW dark frame");
-  validate_raw_file(options.raw.linearization_lut, "RAW linearization LUT");
-  validate_raw_file(options.raw.lens_shading_map, "RAW lens-shading map");
   // Ranges for the individual settings are enforced by the schema on the way in;
   // this catches the internal look parameters and the renderer's own invariants.
   validate_gain_map_options(options.gain);

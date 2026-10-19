@@ -59,10 +59,10 @@ void check_render_options_change_the_fingerprint() {
   require(changed([](auto& o) { o.depth = 10; }), "depth");
   require(changed([](auto& o) { o.encoding = hyperdr::HdrEncoding::IsoGainMapJpeg; }), "encoding");
   require(changed([](auto& o) { o.preview_max_edge = 1600; }), "preview bound");
-  require(changed([](auto& o) {
+  require(!changed([](auto& o) {
             o.raw.highlight_recovery = hyperdr::HighlightRecovery::Reconstruct;
           }),
-          "highlight recovery");
+          "ignored highlight recovery affected resume identity");
 }
 
 void check_scheduling_options_do_not_change_it() {
@@ -280,7 +280,6 @@ void check_model_binding_rejects_stale_gain() {
   preprocessing_options.input = source;
   binding.preprocessing_fingerprint = hyperdr::model_preprocessing_fingerprint(preprocessing_options);
   binding.source_sha256 = hyperdr::sha256_file_hex(source);
-  binding.highlight_recovery = "blend";
   binding.orientation = 1;
   binding.sensor_width = 96;
   binding.sensor_height = 80;
@@ -430,9 +429,6 @@ void check_model_binding_rejects_stale_gain() {
           "gain from a different RAW digital gain was accepted");
   require(rejected([](auto&, auto&, auto& current) { current.clamp_srgb = true; }),
           "gain from a different base gamut mapping was accepted");
-  require(rejected([](auto&, auto&, auto& current) {
-            current.raw.auto_bad_pixel_correction = true;
-          }), "gain from a different RAW bad-pixel correction was accepted");
   require(rejected([](auto&, auto& current, auto&) {
              current.decode.decoded_width = 62;
            }),
@@ -452,26 +448,8 @@ void check_model_binding_rejects_stale_gain() {
   std::filesystem::remove(source);
 }
 
-void check_model_calibration_identity() {
-  const auto file = std::filesystem::temp_directory_path() / "hyperdr-binding-calibration.txt";
-  const auto moved = std::filesystem::temp_directory_path() / "hyperdr-binding-calibration-moved.txt";
+void check_model_preprocessing_identity() {
   const auto reference = hyperdr::model_preprocessing_fingerprint(base_options());
-  for (auto member : {&hyperdr::RawDecodeOptions::profile, &hyperdr::RawDecodeOptions::lens_profile,
-                      &hyperdr::RawDecodeOptions::bad_pixel_map, &hyperdr::RawDecodeOptions::dark_frame,
-                      &hyperdr::RawDecodeOptions::linearization_lut, &hyperdr::RawDecodeOptions::lens_shading_map}) {
-    { std::ofstream out(file); out << "calibration-a"; }
-    { std::ofstream out(moved); out << "calibration-a"; }
-    auto options = base_options();
-    options.raw.*member = file;
-    const auto calibrated = hyperdr::model_preprocessing_fingerprint(options);
-    require(calibrated != reference, "calibration resource was omitted from model binding");
-    options.raw.*member = moved;
-    require(hyperdr::model_preprocessing_fingerprint(options) == calibrated,
-            "moving unchanged calibration invalidated model binding");
-    { std::ofstream out(moved); out << "calibration-b"; }
-    require(hyperdr::model_preprocessing_fingerprint(options) != calibrated,
-            "in-place calibration change was omitted from model binding");
-  }
   auto preview = base_options();
   preview.raw.half_size = true;
   preview.preview_max_edge = preview.raw.preview_max_edge = 640;
@@ -482,8 +460,6 @@ void check_model_calibration_identity() {
   preview.default_gamut = hyperdr::ColorGamut::kDisplayP3;
   require(hyperdr::model_preprocessing_fingerprint(preview) != reference,
           "default input colour gamut was omitted from model binding");
-  std::filesystem::remove(file);
-  std::filesystem::remove(moved);
 }
 
 void check_prune_respects_the_budget() {
@@ -589,7 +565,7 @@ int main() {
     check_decode_cache_key_varies();
     check_export_rejects_reduced_resolution();
     check_model_binding_rejects_stale_gain();
-    check_model_calibration_identity();
+    check_model_preprocessing_identity();
     check_prune_respects_the_budget();
     check_input_domain_routing();
     check_native_model_base_routing();

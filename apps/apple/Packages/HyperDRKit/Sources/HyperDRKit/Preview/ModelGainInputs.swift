@@ -15,7 +15,7 @@ import HyperDREngine
 ///
 /// Decode settings that reach the model but are left out: the panel-v1
 /// adapter (`normalize_options`) always writes `look` as `photographic`, and
-/// never writes `raw_gain` or `raw_auto_bad_pixels`, so they stay at the
+/// never writes `raw_gain`, so it stays at the
 /// engine's defaults. Key them once a caller can change them.
 enum ModelGainInputs {
     enum Location: String, Sendable { case settings, command }
@@ -34,8 +34,6 @@ enum ModelGainInputs {
         // Decode: raw.default_gamut, the colour assumed for untagged pixels
         // (decode_cache_variant reads every affects_decoded_pixels setting).
         Entry(location: .settings, key: "color_gamut", panel: ["colorGamut"]),
-        // Decode: RAW clipped-highlight handling.
-        Entry(location: .settings, key: "highlight_recovery", panel: ["highlightRecovery"]),
         // render_native_model_base. The adapter writes false for SDR
         // encodings, as apply_output_color_options does, so the encoding
         // matters only through this value.
@@ -43,11 +41,6 @@ enum ModelGainInputs {
         // Decode size. Kit leaves it out (the engine then uses 2048), so it
         // is constant today; keyed in case a caller ever sets it.
         Entry(location: .settings, key: "preview_max_edge", panel: []),
-        // RAW decode resources (raw_decode_resources); Kit rejects these
-        // until R1 resolves them from session copies.
-        Entry(location: .command, key: "_raw_profile_path", panel: ["rawProfile"]),
-        Entry(location: .command, key: "_raw_look_path", panel: ["rawLook"]),
-        Entry(location: .command, key: "_lens_profile_path", panel: ["lensProfileName"]),
     ]
 
     /// The table's values in `request`, as canonical JSON. A missing key is

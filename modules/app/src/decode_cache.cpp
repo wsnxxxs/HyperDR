@@ -1,6 +1,4 @@
-#include "hyperdr/foundation/configuration_error.hpp"
 #include "hyperdr/app/decode_cache.hpp"
-#include "hyperdr/codec/dcp_profile.hpp"
 
 #include "hyperdr/app/fingerprint.hpp"
 #include "hyperdr/app/schema.hpp"
@@ -60,7 +58,7 @@ constexpr std::array<char, 8> kMagic{'H', 'D', 'R', 'C', 'A', 'C', 'H', '3'};
 // 36 decodes ISO gain-map JPEGs with our pixel-centred RGB reconstruction.
 // 37 uses Apple RAW pixels and records the system decoder, scale and build.
 // 38 translates XMP JPEG gain maps through ImageIO.
-constexpr std::uint32_t kCacheSchema = 38;
+constexpr std::uint32_t kCacheSchema = 39;
 
 // x86-64 and arm64, the only targets this project builds for, are both little
 // endian; the cache is a local scratch format and is never transported.
@@ -204,16 +202,6 @@ std::string metadata_json(const DecodedImage& value) {
   write_capture_value(writer, "capture_exposure_bias_ev", c.exposure_bias_ev);
   write_capture_value(writer, "capture_focal_length_mm", c.focal_length_mm);
   write_capture_value(writer, "capture_focal_length_35mm", c.focal_length_35mm);
-  writer.member("raw_lens_profile_path", path_utf8(value.raw_lens_profile_path))
-      .member("raw_lens_correction", value.raw_lens_correction);
-  if (value.raw_profile) {
-    writer.member("raw_profile_path", path_utf8(value.raw_profile_path))
-        .member("raw_look_path", path_utf8(value.raw_look_path))
-        .member("raw_look_sha256", value.raw_profile->profile->xmp_look_sha256)
-        .member("raw_profile_sha256", value.raw_profile->profile->sha256)
-        .member("raw_profile_weight", value.raw_profile->illuminant_weight)
-        .member("raw_profile_baseline", value.raw_profile->baseline_exposure);
-  }
   writer.begin_array("decode_degradation_reasons");
   for (const auto& reason : d.degradation_reasons) {
     writer.element(reason);
@@ -229,7 +217,7 @@ std::string metadata_json(const DecodedImage& value) {
   return writer.end_object().take();
 }
 
-void apply_metadata_json(const std::string& text, DecodedImage& out, const RawDecodeOptions* raw) {
+void apply_metadata_json(const std::string& text, DecodedImage& out) {
   const auto document = json::parse(text);
   const auto string_at = [&](std::string_view key) -> std::string {
     const auto* value = document.find(key);
@@ -323,25 +311,6 @@ void apply_metadata_json(const std::string& text, DecodedImage& out, const RawDe
   out.source_color.primaries = string_at("source_color_primaries");
   out.source_color.transfer = string_at("source_color_transfer");
   out.source_color.source = string_at("source_color_source");
-  out.raw_profile_path = path_from_utf8(string_at("raw_profile_path"));
-  out.raw_look_path = path_from_utf8(string_at("raw_look_path"));
-  out.raw_lens_profile_path = path_from_utf8(string_at("raw_lens_profile_path"));
-  out.raw_lens_correction = string_at("raw_lens_correction");
-  if (!out.raw_profile_path.empty()) {
-    auto profile = read_dcp_profile(out.raw_profile_path, raw ? raw->resource(raw->profile) : nullptr);
-    if (!out.raw_look_path.empty()) {
-      apply_xmp_look(profile, out.raw_look_path, raw ? raw->resource(raw->look_profile) : nullptr);
-      if (profile.xmp_look_sha256 != string_at("raw_look_sha256"))
-        throw std::runtime_error("cached XMP look changed");
-    }
-    if (profile.sha256 != string_at("raw_profile_sha256"))
-      throw std::runtime_error("cached DCP profile changed");
-    auto context = std::make_shared<DcpRenderContext>();
-    context->profile = std::make_shared<const DcpProfile>(std::move(profile));
-    context->illuminant_weight = number_at("raw_profile_weight");
-    context->baseline_exposure = static_cast<float>(number_at("raw_profile_baseline"));
-    out.raw_profile = std::move(context);
-  }
 
   out.capture.exposure_time_seconds =
       read_optional(document, "capture_exposure_time_seconds");
@@ -435,7 +404,7 @@ std::string decode_cache_variant(const ConvertOptions& options,
   std::string variant = std::string(intent) + '/' +
       (raw.ignore_embedded_gain_map ? "base-only" : "embedded-gain");
   for (const auto& setting : settings()) {
-    if (!setting.affects_decoded_pixels || setting.key=="highlight_recovery" || setting.key=="half_size") continue;
+    if (!setting.affects_decoded_pixels || setting.key=="half_size") continue;
     const auto value = setting.read(reflected);
     variant += '/';
     variant += setting.key;
@@ -443,16 +412,6 @@ std::string decode_cache_variant(const ConvertOptions& options,
     if (value.is_string()) variant += value.string();
     else if (value.is_bool()) variant += value.boolean() ? "1" : "0";
     else variant += json::number_text(value.number());
-  }
-  for (const auto& resource : raw_decode_resources(raw)) {
-    if (resource.path.empty()) continue;
-    variant += '/';
-    variant += resource.key;
-    variant += '=';
-    variant += path_utf8(resource.path);
-    variant += ':';
-    variant += raw.resource(resource.path) ? raw.resource(resource.path)->sha256
-        : configuration_resource([&] { return sha256_file_hex(resource.path); });
   }
   if(is_raw_extension(lower_extension(options.input))) {
     const float scale=raw_preview_scale(options.input,raw.preview_max_edge);
@@ -478,7 +437,7 @@ DecodedImage decode_cached_image(const std::filesystem::path& input,
       *analysis_cache_file = cache_file.parent_path() /
           (cache_file.stem().string() + ".analysis.hdrcache");
     }
-    if (read_decode_cache(cache_file, cached, &raw)) return cached;
+    if (read_decode_cache(cache_file, cached)) return cached;
   }
 
   auto effective_raw = raw;
@@ -500,7 +459,7 @@ std::filesystem::path decode_cache_path(const std::filesystem::path& directory,
   return directory / (key + ".hdrcache");
 }
 
-bool read_decode_cache(const std::filesystem::path& file, DecodedImage& out, const RawDecodeOptions* raw) {
+bool read_decode_cache(const std::filesystem::path& file, DecodedImage& out) {
   std::error_code ec;
   if (!std::filesystem::is_regular_file(file, ec) || ec) return false;
   BinaryInput input(file);
@@ -538,7 +497,7 @@ bool read_decode_cache(const std::filesystem::path& file, DecodedImage& out, con
   try {
     loaded.linear_p3 = FloatImage(width, height, channels);
     if (planes == 2) loaded.authored_sdr.emplace(width, height, channels);
-    if (json_length != 0) apply_metadata_json(metadata_text, loaded, raw);
+    if (json_length != 0) apply_metadata_json(metadata_text, loaded);
   } catch (const std::exception&) {
     return false;
   }

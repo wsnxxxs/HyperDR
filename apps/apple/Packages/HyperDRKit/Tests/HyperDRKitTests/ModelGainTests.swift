@@ -94,12 +94,13 @@ private let outsideTheTable: [(String, JSONValue)] = [
     ("aiShadows", .number(-0.5)), ("aiHighlights", .number(0.5)), ("aiHdrRange", .number(2)),
     ("aiExpansionStart", .number(0.4)), ("contrast", .number(1.2)), ("vibrance", .number(0.3)),
     ("quality", .number(70)), ("useModel", .bool(false)),
+    ("highlightRecovery", .string("ignored")),
 ]
 
 /// Panel options the table keys, with a value that must invalidate the gain.
 private let insideTheTable: [(String, JSONValue)] = [
     ("modelId", .string("research-exif-v1")), ("colorGamut", .string("p3")),
-    ("highlightRecovery", .string("clip")), ("clampSrgb", .bool(true)),
+    ("clampSrgb", .bool(true)),
 ]
 
 /// An 8-bit PNG with no colour chunk, so the engine assumes `colorGamut`.
@@ -146,7 +147,7 @@ private func untaggedPNG(at url: URL) throws {
         #expect(Set(insideTheTable.map(\.0)).isSubset(of: tablePanel))
         // Resource selections the resolver resolves or strips; none reaches
         // the model (a LUT acts after the prediction).
-        let resources: Set = ["lutId", "lutName", "rawProfileName", "rawLookName", "lensCorrection"]
+        let resources: Set = ["lutId", "lutName", "lensCorrection"]
         let written = Set(base.values.keys)
             .union(["highlightRecovery", "contrast", "vibrance", "quality", "useModel", "sourceDomain"])
         let classified = tablePanel.union(outside).union(resources)

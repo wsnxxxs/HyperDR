@@ -356,9 +356,7 @@ private func sha256(_ bytes: [UInt8]) -> String {
         #expect(!FileManager.default.fileExists(atPath: discardDirectory.path))
 
         let luts = try await store.resourceDirectory(session.id, .luts)
-        let rawProfiles = try await store.resourceDirectory(session.id, .rawProfiles)
         #expect(luts.lastPathComponent == "luts")
-        #expect(rawProfiles.lastPathComponent == "raw-profiles")
         #expect(FileManager.default.fileExists(atPath: luts.path))
 
         let changed = pngBytes + [0x09]

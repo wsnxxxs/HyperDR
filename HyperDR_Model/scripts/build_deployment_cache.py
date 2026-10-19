@@ -150,7 +150,6 @@ def main() -> None:
     )
     parser.add_argument("--label-subset", choices=("iso_native", "legacy_apple", "all"), default="iso_native")
     parser.add_argument("--long-side", type=int, default=1024)
-    parser.add_argument("--highlight-recovery", choices=("clip", "unclip", "blend", "reconstruct"), default="blend")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument(
         "--target-output-dir",
@@ -196,7 +195,7 @@ def main() -> None:
         raise SystemExit(f"{manifest_path} already exists; use a new directory or --resume")
 
     generation = {"executable_sha256": sha256_file(args.hyperdr_exe),
-                  "long_side": args.long_side, "highlight_recovery": args.highlight_recovery}
+                  "long_side": args.long_side}
     existing = cache_manifest(output) if args.resume else {}
     reuse_rows = cache_manifest(reuse_input) if reuse_input is not None else {}
 
@@ -226,7 +225,6 @@ def main() -> None:
                 "--output", subprocess_path(raw, windows_executable=windows_executable),
                 "--report", subprocess_path(report_path, windows_executable=windows_executable),
                 "--long-side", str(args.long_side),
-                "--highlight-recovery", args.highlight_recovery,
             ]
             completed = subprocess.run(command, check=False, capture_output=True, text=True)
             original_error = None

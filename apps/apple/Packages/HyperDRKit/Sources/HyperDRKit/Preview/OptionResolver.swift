@@ -4,7 +4,6 @@ import HyperDREngine
 /// Shared panel vocabulary for preview and export. K4 resources are resolved
 /// only from immutable session copies; private client paths are discarded.
 struct OptionResolver: Sendable {
-    private static let fallbackHighlightChoices = ["blend", "reconstruct", "clip", "unclip"]
 
     let schema: SettingsSchema
     let models: ModelCatalog
@@ -52,7 +51,6 @@ struct OptionResolver: Sendable {
         // Private routing keys are server-derived, never client-controlled.
         options = options.filter { !$0.key.hasPrefix("_") }
 
-        let recovery = try highlightRecovery(options.removeValue(forKey: "highlightRecovery"))
         let useModel = try boolean(options.removeValue(forKey: "useModel"), name: "useModel", default: false)
         let modelStrength = try modelStrength(options.removeValue(forKey: "modelStrength"))
         let requestedModel = options.removeValue(forKey: "modelId")
@@ -78,27 +76,9 @@ struct OptionResolver: Sendable {
                 }
             }
         }
-        if let value = options["rawProfile"], value != .string("") {
-            throw HyperDRError(code: "invalid_options",
-                message: "RAW profile resolution is not available in this build")
-        }
-        if let value = options["rawLook"], value != .string("") {
-            throw HyperDRError(code: "invalid_options",
-                message: "RAW look resolution is not available in this build")
-        }
-        if let value = options["lensProfileName"], value != .string("") {
-            throw HyperDRError(code: "invalid_options",
-                message: "Lens profile resolution is not available in this build")
-        }
         options.removeValue(forKey: "lutId")
         options.removeValue(forKey: "lutName")
-        options.removeValue(forKey: "rawProfile")
-        options.removeValue(forKey: "rawProfileName")
-        options.removeValue(forKey: "rawLook")
-        options.removeValue(forKey: "rawLookName")
-        options.removeValue(forKey: "lensProfileName")
         options.removeValue(forKey: "lensCorrection")
-        options["highlightRecovery"] = .string(recovery)
 
         // Detail requests always render at the ceiling; Python's _preview
         // forces MAX_EDGE for regions regardless of the normal preview tier.
@@ -125,23 +105,6 @@ struct OptionResolver: Sendable {
             try resolved.setCommand("region", .object(object))
         }
         return resolved
-    }
-
-    private func highlightRecovery(_ value: JSONValue?) throws -> String {
-        let choices = schema.settings.first { $0.key == "highlight_recovery" }?.choices
-            ?? Self.fallbackHighlightChoices
-        guard let value else { return "blend" }
-        guard case .string(let recovery) = value else {
-            throw HyperDRError(code: "invalid_options",
-                message: "Unknown highlight recovery mode")
-        }
-        // api.py uses `or`, so a restored empty value falls back to blend.
-        if recovery.isEmpty { return "blend" }
-        guard choices.contains(recovery) else {
-            throw HyperDRError(code: "invalid_options",
-                message: "Unknown highlight recovery mode")
-        }
-        return recovery
     }
 
     private func boolean(_ value: JSONValue?, name: String, default fallback: Bool) throws -> Bool {

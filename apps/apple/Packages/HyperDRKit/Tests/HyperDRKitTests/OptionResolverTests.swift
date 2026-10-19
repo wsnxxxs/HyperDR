@@ -36,7 +36,7 @@ private func code(_ body: () throws -> Void) -> String? {
         let request = makeRequest(maxEdge: 9999, region: region)
         let resolved = try resolver.resolve(request, session: makeSession())
         #expect(resolved.adapter == "panel-v1")
-        #expect(resolved.settings["highlight_recovery"] == .string("blend"))
+        #expect(resolved.settings["highlight_recovery"] == nil)
         #expect(resolved.settings["preview_max_edge"] == .number(2048))
         #expect(resolved.command["input"] == .string("/tmp/fake-source.jpg"))
         #expect(resolved.command["output"] == .string(""))
@@ -60,7 +60,7 @@ private func code(_ body: () throws -> Void) -> String? {
         #expect(code { _ = try resolver.resolve(makeRequest { $0["external_gain_report"] = .string("/tmp/report") },
             session: makeSession()) } == "invalid_options")
         #expect(code { _ = try resolver.resolve(makeRequest { $0["highlightRecovery"] = .string("unknown") },
-            session: makeSession()) } == "invalid_options")
+            session: makeSession()) } == nil)
         #expect(code { _ = try resolver.resolve(makeRequest { $0["useModel"] = .string("yes") },
             session: makeSession()) } == "invalid_options")
         #expect(code { _ = try resolver.resolve(makeRequest { $0["modelStrength"] = .number(2) },
@@ -140,7 +140,7 @@ private func code(_ body: () throws -> Void) -> String? {
         let resolved = try resolver.resolve(makeRequest {
             $0["highlightRecovery"] = .string("")
         }, session: makeSession())
-        #expect(resolved.settings["highlight_recovery"] == .string("blend"))
+        #expect(resolved.settings["highlight_recovery"] == nil)
     }
 }
 
@@ -198,7 +198,7 @@ extension OptionResolverTests {
             ["colorGamut": .string("unknown")], ["colorGamut": .number(1)],
             ["clampSrgb": .string("false")], ["clampSrgb": .number(1)],
             ["outputGamut": .string("unknown")], ["quality": .number(90.9)],
-            ["contrast": .string("1.2")], ["highlightRecovery": .string("nope")],
+            ["contrast": .string("1.2")],
             ["aiHdrRange": .number(2.5), "encoding": .string("hlg")]
         ]
         for values in invalid {

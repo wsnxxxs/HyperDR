@@ -67,44 +67,6 @@
       "default": "photographic"
     },
     {
-      "key": "highlight_recovery",
-      "flag": "--highlight-recovery",
-      "kind": "enum",
-      "choices": [
-        "blend",
-        "reconstruct",
-        "clip",
-        "unclip"
-      ],
-      "affects_output_bytes": true,
-      "help": "RAW clipped-highlight handling",
-      "default": "blend"
-    },
-    {
-      "key": "raw_profile",
-      "flag": "--raw-profile",
-      "kind": "string",
-      "affects_output_bytes": true,
-      "help": "RAW DCP profile (auto exposure uses the profile baseline)",
-      "default": ""
-    },
-    {
-      "key": "raw_lens_profile",
-      "flag": "--raw-lens-profile",
-      "kind": "string",
-      "affects_output_bytes": true,
-      "help": "RAW Lightroom lens correction profile",
-      "default": ""
-    },
-    {
-      "key": "raw_look",
-      "flag": "--raw-look",
-      "kind": "string",
-      "affects_output_bytes": true,
-      "help": "Static Adobe XMP look (requires matching --raw-profile)",
-      "default": ""
-    },
-    {
       "key": "raw_lens_correction",
       "flag": "--no-raw-lens-correction",
       "kind": "boolean",
@@ -122,15 +84,6 @@
       "affects_output_bytes": true,
       "help": "Post-decode scene-linear RAW gain",
       "default": 1
-    },
-    {
-      "key": "raw_auto_bad_pixels",
-      "flag": "--raw-auto-bad-pixels",
-      "kind": "boolean",
-      "flag_sets_false": false,
-      "affects_output_bytes": true,
-      "help": "Conservative RAW hot/dead pixel correction",
-      "default": false
     },
     {
       "key": "lut_input",

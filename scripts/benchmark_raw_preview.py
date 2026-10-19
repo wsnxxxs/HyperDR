@@ -58,8 +58,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path)
     parser.add_argument("--exe", required=True, type=Path)
-    parser.add_argument("--raw-profile", type=Path)
-    parser.add_argument("--raw-lens-profile", type=Path)
     parser.add_argument("--edges", type=int, nargs="+", default=[640, 1440, 2048, 1440])
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--report", type=Path, required=True)
@@ -71,10 +69,6 @@ def main() -> None:
     with source.open("rb") as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
     flags = []
-    for flag, value in [("--raw-profile", args.raw_profile),
-                        ("--raw-lens-profile", args.raw_lens_profile)]:
-        if value:
-            flags.extend([flag, str(value.resolve(strict=True))])
     if args.packets:
         args.packets.mkdir(parents=True, exist_ok=True)
     rows = []

@@ -31,7 +31,6 @@ void usage() {
          "                         --headroom <stops> [--headroom <stops> ...]\n"
          "  HyperDR thumbnail <image> --output <preview.jpg> [--max-edge <pixels>]\n"
          "                            [--quality <1..100>] [--half-size]\n"
-         "                            [--highlight-recovery blend|reconstruct|clip|unclip]\n"
          "                            [--base-only]\n"
          "  HyperDR preview-frame <image> --output <preview.hpf> [look options]\n"
          "                            [--preview-max-edge <pixels>] [--fast-preview]\n"
@@ -71,11 +70,7 @@ void usage() {
           "  --allow-legacy-external-gain      Allow frozen v1 normalized sidecars\n"
           "  --decode-cache <directory>         Reuse decoded buffers across look-only reruns\n"
           "  --fast-preview                     Explicitly allow RAW half-size decoding\n"
-          "  --raw-bad-pixels <file>             Visible-area bad-pixel coordinates\n"
-          "  --raw-dark-frame <file>              Visible-area 16-bit dark-frame PGM\n"
-          "  --lut <file.cube>                  Creative 1D/3D colour LUT\n"
-          "  --raw-linearization-lut <file>      N code-to-code LUT for RAW linearization\n"
-          "  --raw-lens-shading <file>           Text gain map: width height channels + gains\n";
+          "  --lut <file.cube>                  Creative 1D/3D colour LUT\n";
   if (!kCodecsAvailable) {
     std::cout << "\nThis build was configured with HYPERDR_WITH_CODECS=OFF: the renderer\n"
                  "and its self-tests are present, but no format can be read or written.\n";

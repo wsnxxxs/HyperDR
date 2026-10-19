@@ -37,7 +37,6 @@ struct ExternalDevelopmentRecipe {
 struct ExternalGainBinding {
   std::string preprocessing_fingerprint;
   std::string source_sha256;
-  std::string highlight_recovery;
   std::uint32_t orientation{1};
   std::uint32_t sensor_width{};
   std::uint32_t sensor_height{};
@@ -55,8 +54,6 @@ struct ExternalGainBinding {
   bool raw_half_size{false};
   std::string raw_decoder_version;
   float raw_scale{1};
-  std::string raw_profile_sha256;
-  std::string raw_lens_profile_sha256;
   std::uint32_t model_width{};
   std::uint32_t model_height{};
   std::uint32_t gain_width{};

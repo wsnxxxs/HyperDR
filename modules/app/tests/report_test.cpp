@@ -164,7 +164,6 @@ void test_run_report_is_parseable_and_complete() {
   ok.default_crop_present = true;
   ok.decode_degraded = true;
   ok.decode_degradation_reasons = {"default_crop_rejected"};
-  ok.raw_color_matrix = "embedded";
   ok.input_domain = hyperdr::InputDomain::kDualRendition;
   ok.input_headroom = 4.93F;
   ok.model_development = "display-p3-passthrough";

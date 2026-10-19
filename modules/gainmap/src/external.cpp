@@ -129,7 +129,6 @@ ExternalGainBinding read_model_binding(const json::Value& value,
   if (binding.source_sha256.size() != 64) {
     throw std::invalid_argument("external model binding has invalid source sha256");
   }
-  binding.highlight_recovery = required_string(source, "highlight_recovery");
   binding.orientation = positive_dimension(required_member(source, "orientation"),
                                            "source orientation");
   const auto sensor = dimensions_member(source, "sensor_size");
@@ -150,15 +149,6 @@ ExternalGainBinding read_model_binding(const json::Value& value,
   binding.delivered_crop_left = delivered_origin[0];
   binding.delivered_crop_top = delivered_origin[1];
   binding.raw_half_size = required_bool(source, "raw_half_size");
-  if (const auto* profile = source.find("raw_profile_sha256")) {
-    if (!profile->is_string()) throw std::invalid_argument("invalid RAW profile hash");
-    binding.raw_profile_sha256 = profile->string();
-  }
-  if (const auto* profile = source.find("raw_lens_profile_sha256")) {
-    if (!profile->is_string()) throw std::invalid_argument("invalid RAW lens profile hash");
-    binding.raw_lens_profile_sha256 = profile->string();
-  }
-
   binding.recipe.id = required_string(recipe, "id");
   if(binding.recipe.id!="display-p3-passthrough" && binding.recipe.id!="raw-neutral-v2" && binding.recipe.id!="display-hdr-split")
     throw std::invalid_argument("配方不匹配，请用新版本重新生成");

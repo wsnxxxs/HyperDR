@@ -43,10 +43,12 @@ private func loadReference() throws -> WebReference {
 /// Settings the Web wrote with fixed values and Kit leaves to the panel-v1
 /// adapter (batch4 §2.1); `EditControlsTests` shows omitting them changes no
 /// request byte.
-private let adapterSupplied: Set<String> = ["highlightRecovery", "contrast", "vibrance", "quality"]
+private let adapterSupplied: Set<String> = ["contrast", "vibrance", "quality"]
 
 private func withoutAdapterSupplied(_ settings: [String: JSONValue]) -> [String: JSONValue] {
-    settings.filter { !adapterSupplied.contains($0.key) }
+    // R2 intentionally removes the Web reference's external RAW vocabulary.
+    let removed: Set<String> = ["highlightRecovery", "rawProfile", "rawProfileName", "rawLook", "rawLookName", "lensProfileName"]
+    return settings.filter { !adapterSupplied.contains($0.key) && !removed.contains($0.key) }
 }
 
 /// The fixture stays frozen with the Web's encoding names; E4r renamed
@@ -100,7 +102,7 @@ private func renamed(_ settings: [String: JSONValue]) -> [String: JSONValue] {
         let workflow = EditOptions(try #require(reference.reference.first).workflow)
         let adjustments = EditDefaults.imageAdjustments(workflow)
         #expect(adjustments.values.keys.sorted() ==
-                reference.imageAdjustmentKeys.filter { !adapterSupplied.contains($0) }.sorted())
+                reference.imageAdjustmentKeys.filter { !adapterSupplied.contains($0) && $0 != "highlightRecovery" }.sorted())
         #expect(adjustments["encoding"] == nil)
         #expect(adjustments["colorGamut"] == nil)
         #expect(adjustments["hdrStrength"] == .number(0.4))

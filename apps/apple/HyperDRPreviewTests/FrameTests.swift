@@ -774,41 +774,56 @@ private struct ReferenceFrameCaptionView: View {
 }
 
 @MainActor final class FrameLockTests: XCTestCase {
-    /// The panel as the sheet draws it, at two lock states, rendered in a window.
-    private func render(_ lock: EditingLockReason?) throws -> Data {
-        let view = FrameSettingsPanel(settings: .constant(FrameSettings()), photoSize: PixelSize(width: 6000, height: 4000), lock: lock)
+    /// The settings panel as the sheet draws it, at 340 × 700 points, in an
+    /// off-screen window. Not `ImageRenderer`: the panel holds AppKit-backed
+    /// controls (the caption's text field) and focus-aware ones, which
+    /// `ImageRenderer` cannot draw ("Unable to render flattened version",
+    /// "Accessing FocusState's value outside of the body of a View") and which
+    /// stalled it for over a minute on a busy machine. The window path is the
+    /// one the other snapshot tests use and takes milliseconds.
+    private func render(settings: FrameSettings = FrameSettings(), lock: EditingLockReason? = nil,
+                        exportAvailable: Bool = true) throws -> NSBitmapImageRep {
+        let root = FrameSettingsPanel(settings: .constant(settings), photoSize: PixelSize(width: 6000, height: 4000),
+                                      lock: lock, exportAvailable: exportAvailable)
             .padding(Layout.panelPadding).frame(width: 340, height: 700, alignment: .top)
+            .background(Color.hdr.surfacePanel)
             .environment(\.locale, Locale(identifier: "en"))
-        let renderer = ImageRenderer(content: view); renderer.scale = 1
-        let tiff = try XCTUnwrap(renderer.nsImage?.tiffRepresentation)
-        return try XCTUnwrap(NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]))
+        let host = NSHostingView(rootView: root)
+        host.appearance = NSAppearance(named: .aqua)
+        let size = CGSize(width: 340, height: 700)
+        let window = NSWindow(contentRect: CGRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        host.frame = CGRect(origin: .zero, size: size)
+        host.layoutSubtreeIfNeeded()
+        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        window.close()
+        return bitmap
     }
 
     func testTheSettingsLookDifferentWhileLockedAndSayWhyOnlyForAnExport() throws {
-        let free = try render(nil), exporting = try render(.exporting), loading = try render(.loading)
-        XCTAssertNotEqual(free, exporting)
-        XCTAssertNotEqual(free, loading)
-        XCTAssertNotEqual(exporting, loading, "only an export adds the lock note")
+        let free = try render(), exporting = try render(lock: .exporting), loading = try render(lock: .loading)
+        XCTAssertGreaterThan(difference(free, exporting), 0.001)
+        XCTAssertGreaterThan(difference(free, loading), 0.001)
+        XCTAssertGreaterThan(difference(exporting, loading), 0.001, "only an export adds the lock note")
     }
 
-    private func render(settings: FrameSettings, exportAvailable: Bool) throws -> NSBitmapImageRep {
-        let view = FrameSettingsPanel(settings: .constant(settings), photoSize: PixelSize(width: 6000, height: 4000),
-                                      exportAvailable: exportAvailable)
-            .padding(Layout.panelPadding).frame(width: 340, height: 700, alignment: .top)
-            .environment(\.locale, Locale(identifier: "en"))
-        let renderer = ImageRenderer(content: view); renderer.scale = 1
-        let tiff = try XCTUnwrap(renderer.nsImage?.tiffRepresentation)
-        return try XCTUnwrap(NSBitmapImageRep(data: tiff))
-    }
-
-    /// Share of pixels that differ visibly (the canvas tiles are not bit-repeatable).
+    /// Share of pixels that differ visibly, read straight from the pixel
+    /// buffers: a colour-space conversion per pixel made this the slowest part
+    /// of the test (the canvas tiles are not bit-repeatable, hence the margin).
     private func difference(_ a: NSBitmapImageRep, _ b: NSBitmapImageRep) -> Double {
-        guard a.pixelsWide == b.pixelsWide, a.pixelsHigh == b.pixelsHigh else { return 1 }
+        guard a.pixelsWide == b.pixelsWide, a.pixelsHigh == b.pixelsHigh, a.samplesPerPixel == b.samplesPerPixel,
+              a.bitsPerSample == 8, b.bitsPerSample == 8, a.samplesPerPixel >= 3,
+              let p = a.bitmapData, let q = b.bitmapData else { return 1 }
+        let step = a.samplesPerPixel
         var differing = 0
         for y in 0..<a.pixelsHigh {
+            let rowA = p + y * a.bytesPerRow, rowB = q + y * b.bytesPerRow
             for x in 0..<a.pixelsWide {
-                guard let p = a.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB), let q = b.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
-                if abs(p.redComponent - q.redComponent) + abs(p.greenComponent - q.greenComponent) + abs(p.blueComponent - q.blueComponent) > 0.1 { differing += 1 }
+                let i = x * step
+                let total = abs(Int(rowA[i]) - Int(rowB[i])) + abs(Int(rowA[i + 1]) - Int(rowB[i + 1])) + abs(Int(rowA[i + 2]) - Int(rowB[i + 2]))
+                if total > 26 { differing += 1 }   // 0.1 of the three channels' full range
             }
         }
         return Double(differing) / Double(a.pixelsWide * a.pixelsHigh)
@@ -818,12 +833,12 @@ private struct ReferenceFrameCaptionView: View {
         var on = FrameSettings(); on.isEnabled = true
         var off = FrameSettings(); off.isEnabled = false
         // Available: the stored choice decides what the panel shows.
-        XCTAssertGreaterThan(difference(try render(settings: on, exportAvailable: true), try render(settings: off, exportAvailable: true)), 0.01)
+        XCTAssertGreaterThan(difference(try render(settings: on), try render(settings: off)), 0.01)
         // Unavailable: a stored "on" is shown as off and the settings below stay usable,
         // exactly as a stored "off" shows.
         XCTAssertLessThan(difference(try render(settings: on, exportAvailable: false), try render(settings: off, exportAvailable: false)), 0.001)
         // And that is not how an available "off" looks (dimmed settings, a live switch).
-        XCTAssertGreaterThan(difference(try render(settings: off, exportAvailable: false), try render(settings: off, exportAvailable: true)), 0.01)
+        XCTAssertGreaterThan(difference(try render(settings: off, exportAvailable: false), try render(settings: off)), 0.01)
     }
 
     /// Pictures of the settings panel in the states the sheet puts it in (N11):

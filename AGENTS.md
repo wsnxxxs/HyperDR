@@ -16,8 +16,10 @@ this checkout. This file summarizes what they decide.
   used.
 - HEVC encoding and decoding use VideoToolbox only, and HEIF reading and
   writing are our own code. x265 is gone and HEIC exports are written by our
-  own container code from VideoToolbox tiles; libheif and libde265 remain only
-  for reading HEIF until our own reader (P3b) replaces them.
+  own container code from VideoToolbox tiles. Our HEIF reader
+  (`container/heif_reader`) and VideoToolbox tile decoder are in; HEIC input
+  still decodes through libheif and libde265 until P3b-3 is merged, and both
+  libraries are then deleted outright (P3b-5), tests included.
 - RAW is developed through `CIRAWFilter`; LibRaw is gone.
 - The Python panel, LAN server, web front end and Tauri shell are kept only as
   behaviour references until the SwiftUI app reaches parity, then deleted.
@@ -56,6 +58,9 @@ python3 scripts/test.py apple                    # xcframework, Swift packages, 
   tests fail without them.
 - Give concurrent native test runs separate `TMPDIR`s: `png_decode_test` still
   uses fixed temporary file names.
+- App and Kit tests that need a small photo generate one with `TinyPhoto` in a
+  private temporary directory. Opening files in the checkout from the test
+  hosts has stalled for over a minute when the machine is busy.
 - Every engine entry point must run on a thread with a 512 KB stack
   (`tests/capi/small_stack.c`).
 - User-visible strings go in `apps/apple/HyperDR/Resources/Localizable.xcstrings`
@@ -83,11 +88,16 @@ draw anything into the frame that depends on the photo's HDR pixels.
   the layout's caption band; `FrameCaptionView` draws both preview and overlay.
 - `EditorServices.captureFacts` reads the photo inside its security scope and
   `document.pixelSize` is the full-size oriented size the layout uses. Export
-  hands HyperDRKit an `ExportFrame` (K3), which writes `command.frame`; the
-  frame toggle in the export panel stays disabled until the frame gain and
-  export memory work (E5, E6) is done. The SDR comparison (press-and-hold) in the design is not built.
+  hands HyperDRKit an `ExportFrame` (K3), which writes `command.frame`. E5
+  (framed gain maps put zero gain on a whole code; framed gain JPEGs use a
+  quality-100 table) and E6 (staged export memory admission, no duplicate framed
+  renditions) are in, but the frame toggle in the export panel stays disabled
+  until it is reopened together with the framed thumbnail (F-T1).
+- The frame sheet has Hold for SDR (`docs/design/frame-sheet.md`); the Instant
+  style switches to a wide variant above 2.5:1 and is unavailable beyond about
+  45:1.
 
-## Status (2026-10-19)
+## Status (2026-10-19, end of the sixth shift)
 
 On this branch: the C ABI and its Swift wrapper; `EditorModel` on real
 `HyperDRKit` services with the App Sandbox, Finder opening and restoring the
@@ -96,16 +106,22 @@ regions and overlays) and its inspector views; RAW through `CIRAWFilter` with
 cancellable opening (LibRaw removed); our own ISO 21496-1 gain-map JPEG reader
 and writer (`iso-gainmap-jpeg`), with older gain-map JPEGs read through
 ImageIO; the M3 export services and interface (save panel before rendering,
-fixed folder kept inside the sandbox, history of the last twenty exports, LUT
-library, stage and time estimates; the equivalent CLI command appears only in
-diagnostics, with placeholders); HEIC exports through VideoToolbox and our own
-HEIF writer, with runtime encoder capabilities (`encoder.main8/main10`);
-display headroom tracking and preview tracing (A3); presentation frames.
+fixed folder kept inside the sandbox, history of the last twenty exports with
+SDR thumbnails, LUT library, stage and time estimates; the equivalent CLI
+command appears only in diagnostics, with placeholders); HEIC exports through
+VideoToolbox and our own HEIF writer, with runtime encoder capabilities
+(`encoder.main8/main10`); display headroom tracking and preview tracing (A3);
+presentation frames with framed gain repair (E5) and export memory admission
+(E6); our HEIF reader (P3b-1) and VideoToolbox HEVC decoding (P3b-2).
 
-Open: the frame export toggle (E5 frame gain, E6 export memory); our own HEIF
-reader replacing libheif and libde265 (P3b); HEIC decoding through
-VideoToolbox (V5); `png_decode_test` temporary file isolation; removing
-`EditorModel.exportFileURL`, which no view uses any more; the comparison with
-the Photos app on a real display and the other hands-on checks in
-`docs/design/user-acceptance.md`; deleting the Python panel, LAN server, web
-front end and Tauri shell once the app reaches parity.
+Open, roughly in order: R6-E6-1 (the export memory estimate undercounts large
+external gain maps); P3b-3 (HEIC input through our reader, unclipped float RGB,
+the old Apple gain-map curve fixed to code^2.2), which is committed on
+`wip/p3b` but not yet reviewed; P3b-4 to P3b-6 (post-export verification and
+diagnostics on our reader, deleting libheif and libde265, acceptance); reopening
+the frame export toggle with the framed thumbnail (F-T1); E8 (61 MP story
+canvases fail in libaom for AVIF); D1 (one set of default values; D1-a
+measurement not started, CC0 RAW candidates listed); P3a-2 (encoder quality,
+including the photo-area errors E5 froze as non-regression cases); the
+hands-on checks in `docs/design/user-acceptance.md`; deleting the Python panel,
+LAN server, web front end and Tauri shell once the app reaches parity.

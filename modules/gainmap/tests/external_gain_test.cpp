@@ -1,6 +1,7 @@
 #include "../../../tests/support/temp_directory.hpp"
 #include "hyperdr/gainmap/external.hpp"
 
+#include "hyperdr/foundation/hash.hpp"
 #include "hyperdr/foundation/rational.hpp"
 #include "hyperdr/gainmap/gain_map.hpp"
 #include "hyperdr/image/resample.hpp"
@@ -353,8 +354,30 @@ void test_peek_external_gain_grid() {
   const auto good = v1("[2,2]", 16);
   {
     const auto grid = hyperdr::peek_external_gain_grid(sixteen, good, true);
-    require(grid && grid->width == 2 && grid->height == 2 && !grid->canonical_log2,
+    require(grid && grid->width == 2 && grid->height == 2,
             "a valid v1 sidecar was not sized");
+    // Admission checks the hash from the frozen snapshot before it counts memory,
+    // with the parser's own message; a report without a hash passes.
+    const auto digest = hyperdr::sha256_hex(sixteen);
+    const auto hashed = v1("[2,2]", 16, R"(,"sha256":")" + digest + "\"");
+    hyperdr::check_external_gain_hash(good, digest);
+    hyperdr::check_external_gain_hash(hashed, digest);
+    bool refused = false;
+    try {
+      hyperdr::check_external_gain_hash(hashed, std::string(64, '0'));
+    } catch (const std::invalid_argument& error) {
+      refused = std::string(error.what()) == "external gain hash does not match its report";
+    }
+    require(refused, "a wrong gain hash was not reported by the admission check");
+    try {
+      (void)hyperdr::parse_external_gain_map(sixteen, v1("[2,2]", 16, R"(,"sha256":")" + std::string(64, '0') + "\""), true);
+      refused = false;
+    } catch (const std::invalid_argument& error) {
+      refused = std::string(error.what()) == "external gain hash does not match its report";
+    }
+    require(refused, "the parser and the admission check disagree on the hash message");
+    // A report the parser would reject earlier is not this check's business.
+    hyperdr::check_external_gain_hash(std::vector<std::uint8_t>{'{'}, digest);
     const auto parsed = hyperdr::parse_external_gain_map(sixteen, good, true);
     require(parsed.gain_map.width == grid->width && parsed.gain_map.height == grid->height,
             "peek and parser disagree on the grid");
@@ -397,7 +420,7 @@ void test_peek_external_gain_grid() {
       R"("alternate_offset":{"numerator":0,"denominator":1000000}}})");
   const std::vector<std::uint8_t> eight(8, 0);
   const auto grid = hyperdr::peek_external_gain_grid(eight, v2, false);
-  require(grid && grid->width == 2 && grid->height == 1 && grid->canonical_log2,
+  require(grid && grid->width == 2 && grid->height == 1,
           "a valid v2 sidecar was not sized");
   require(hyperdr::parse_external_gain_map(eight, v2, false).gain_map.width == 2,
           "the v2 test sidecar must parse");

@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -56,15 +57,6 @@ float finite_number(const json::Value& value, std::string_view name) {
 
 void require_string(const json::Value& object, std::string_view key,
                     std::string_view expected);
-
-bool required_bool(const json::Value& object, std::string_view key) {
-  const auto& value = required_member(object, key);
-  if (!value.is_bool()) {
-    throw std::invalid_argument("external gain report has invalid " +
-                                std::string(key));
-  }
-  return value.boolean();
-}
 
 std::string required_string(const json::Value& object, std::string_view key) {
   const auto& value = required_member(object, key);
@@ -440,6 +432,12 @@ SidecarHeader read_sidecar_header(const json::Value& document,
   return header;
 }
 
+void require_declared_hash(const json::Value& file, std::string_view actual) {
+  if (const auto* hash = file.find("sha256"); hash && hash->is_string() && actual != hash->string()) {
+    throw std::invalid_argument("external gain hash does not match its report");
+  }
+}
+
 }  // namespace
 
 ExternalGainMap read_external_gain_map(const std::filesystem::path& gain_path,
@@ -465,10 +463,7 @@ ExternalGainMap parse_external_gain_map(std::span<const std::uint8_t> bytes,
   const auto& metadata = header.metadata;
   const bool canonical_log2 = header.canonical_log2, v2 = header.v2;
   const auto& file = required_member(document, "gain_file");
-  if (const auto* hash = file.find("sha256"); hash && hash->is_string() &&
-      sha256_hex(bytes) != hash->string()) {
-    throw std::invalid_argument("external gain hash does not match its report");
-  }
+  require_declared_hash(file, sha256_hex(bytes));
 
   ExternalGainMap result;
   result.gain_map = FloatImage(width, height, 1);
@@ -500,14 +495,29 @@ ExternalGainMap parse_external_gain_map(std::span<const std::uint8_t> bytes,
 
 std::optional<ExternalGainGrid> peek_external_gain_grid(
     std::span<const std::uint8_t> gain_bytes, std::span<const std::uint8_t> report_bytes,
-    bool allow_legacy_external_gain) noexcept {
+    bool allow_legacy_external_gain) {
   try {
     const auto header = read_sidecar_header(parse_sidecar_document(report_bytes),
                                             gain_bytes.size(), allow_legacy_external_gain);
-    return ExternalGainGrid{header.width, header.height, header.canonical_log2};
+    return ExternalGainGrid{header.width, header.height};
+  } catch (const std::bad_alloc&) {
+    throw;
   } catch (...) {
     return std::nullopt;
   }
+}
+
+void check_external_gain_hash(std::span<const std::uint8_t> report_bytes, std::string_view gain_sha256) {
+  const json::Value document = [&] {
+    try {
+      return parse_sidecar_document(report_bytes);
+    } catch (const std::bad_alloc&) {
+      throw;
+    } catch (...) {
+      return json::Value{};
+    }
+  }();
+  if (const auto* file = document.find("gain_file")) require_declared_hash(*file, gain_sha256);
 }
 
 void apply_external_gain_map(GainMapResult& result, ExternalGainMap external,

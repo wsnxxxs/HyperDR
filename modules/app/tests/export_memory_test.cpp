@@ -23,12 +23,19 @@ void measured_peaks() {
     if(peak<r.footprint || peak>r.footprint+r.footprint/2)
       throw std::runtime_error(std::string("measured footprint estimate outside [1,1.5]: ")+r.name);
   }
+  // R7-301: raster sources, measured the same way. They have no RAW overhead to
+  // hide an under-estimate in, so the band is held row by row.
+  for(const auto& r : raster_export_measurements) {
+    const auto peak=estimate_export_memory(r.pw,r.ph,r.cw,r.ch,r.encoding,r.depth,false).peak();
+    if(peak<r.footprint || peak>r.footprint+r.footprint/2)
+      throw std::runtime_error(std::string("raster footprint estimate outside [1,1.5]: ")+r.name);
+  }
 }
 // Measured exports with an external gain grid: never below the real footprint,
 // never beyond 1.5 times it (the same band as the RAW matrix above).
 void external_measured_peaks() {
   for(const auto& r : external_gain_measurements) {
-    const auto peak=estimate_export_memory(r.pw,r.ph,r.cw,r.ch,r.encoding,r.depth,false,0,0,0,true,
+    const auto peak=estimate_export_memory(r.pw,r.ph,r.cw,r.ch,r.encoding,r.depth,r.raw,0,0,0,true,
         r.grid_pixels*4+r.report_bytes,r.grid_pixels).peak();
     if(peak<r.footprint || peak>r.footprint+r.footprint/2)
       throw std::runtime_error(std::string("external gain estimate outside [1,1.5]: ")+r.name);
@@ -222,6 +229,30 @@ void external_admission() {
     const auto& refused=only_file(tight_report);
     require(!refused.find("success")->boolean() && refused.find("error_code")->string()=="export_memory_budget",
             "2048 x 2048 grid fits 64 MiB");
+  }
+  // R7-303: a damaged gain file is reported as such even when the grid would also
+  // blow the budget; the hash comes from the frozen snapshot, so it costs nothing.
+  {
+    const auto grid=root/"fine-hash";
+    write_gain_grid(grid,4096,4096,true);
+    {
+      std::ifstream in(grid/"gain.json");
+      std::string text((std::istreambuf_iterator<char>(in)),std::istreambuf_iterator<char>());
+      const auto at=text.find("\"byte_length\":");
+      require(at!=std::string::npos,"test sidecar has no byte_length");
+      text.insert(at,"\"sha256\":\""+std::string(64,'0')+"\",");
+      std::ofstream out(grid/"gain.json",std::ios::trunc);
+      out<<text;
+    }
+    Engine engine({.memory_budget_bytes=100*MiB});
+    ConvertOptions options;
+    options.input=input;options.output_directory=root/"out-hash";
+    options.encoding=OutputEncoding::IsoGainMapJpeg;
+    options.external_gain_path=grid/"gain.f32";options.external_gain_report=grid/"gain.json";
+    const auto report=json::parse(engine.convert(options));
+    const auto& file=only_file(report);
+    require(!file.find("success")->boolean() && !file.find("error_code"),"a wrong hash was reported as a budget error");
+    require(file.find("message")->string().find("hash does not match")!=std::string::npos,"wrong hash not named");
   }
   // A pair the parser rejects counts as no grid: the file keeps the parser's own error.
   {

@@ -41,7 +41,13 @@ ExportMemoryEstimate estimate_export_memory(std::uint32_t pw, std::uint32_t ph,
   // bases, HDR samples and RGB gain planes while grading reconstructs a pair.
   // Measured with external grids: an SDR-only export of one holds about 48 B/px
   // above the grid, far below the 80 B/px that covers dual HDR renditions.
-  const auto render_planes=retained_renditions ? (external_gain_pixels && sdr ? 56 : 80) : (sdr ? 24 : 44);
+  // A raster source (JPEG/TIFF) has no RAW renderer fixed cost to absorb a short
+  // estimate, and its decoded 8-bit samples stay alive through grading. Measured
+  // 24 MP and 12 MP sources (R7-301): 47 B/px HDR and 26 B/px SDR beyond 32 MiB,
+  // and the stages after it keep the graded photo (24 B/px) next to the canvas.
+  const bool raster=!raw && !retained_renditions;
+  const auto render_planes=retained_renditions ? (external_gain_pixels && sdr ? 56 : 80)
+      : raster ? (sdr ? 27 : 48) : (sdr ? 24 : 44);
   e.render = sum({overhead,resident,plane(photo,render_planes)});
   // The sidecar grid has its own size, independent of the photo and the canvas.
   // Parsing and applying it hold, besides the snapshot counted in the retained
@@ -53,12 +59,12 @@ ExportMemoryEstimate estimate_export_memory(std::uint32_t pw, std::uint32_t ph,
   if (external_gain_pixels)
     e.render = std::max(sum({e.render,plane(grid,3)}),
                         sum({overhead,resident,plane(photo,36),plane(grid,4)}));
-  e.composite = sum({overhead,resident,plane(photo,sdr ? 12 : 24),plane(canvas,13)});
+  e.composite=sum({overhead,resident,plane(photo,sdr ? 12 : 24),plane(canvas,raster ? 16 : 13)});
   // ISO expansion overlaps SDR + RGB gain canvases, byte ROI codes, and a
   // byte mask. Apple packaging overlaps SDR + mono stops/quantization + mask.
   e.packaging = gain ? (encoding == OutputEncoding::IsoGainMapJpeg
-      ? sum({overhead,resident,plane(photo,3),plane(canvas,25)})
-      : sum({overhead,resident,plane(photo,12),plane(canvas,21)})) : 0;
+      ? sum({overhead,resident,plane(photo,raster ? 24 : 3),plane(canvas,raster ? 24 : 25)})
+      : sum({overhead,resident,plane(photo,raster ? 24 : 12),plane(canvas,21)})) : 0;
   const auto auto_workers=std::clamp(std::thread::hardware_concurrency()/4U,1U,4U);
   const auto tile_count=((std::uint64_t(cw)+511)/512)*((std::uint64_t(ch)+511)/512);
   const auto count=std::min<std::uint64_t>(workers ? workers : auto_workers,tile_count);
@@ -89,7 +95,9 @@ ExportMemoryEstimate estimate_export_memory(std::uint32_t pw, std::uint32_t ph,
         e.verify=sum({overhead,resident,plane(canvas,18),plane(cell,20)});
       } else {
         // HDR float + RGB16 + YUV444 + libaom reference/work planes.
-        e.encode=sum({overhead,resident,plane(canvas,66)});
+        // Unframed, the graded photo is still resident next to the canvas (R7-301:
+        // 77 B/px measured at 24 MP; framed exports free it after compositing).
+        e.encode=sum({overhead,resident,plane(canvas,raster && !framed ? 78 : 66)});
         e.verify=sum({overhead,resident,plane(canvas,20)});
       }
       break;

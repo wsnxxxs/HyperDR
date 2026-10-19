@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <string>
 
 namespace hyperdr {
@@ -91,18 +92,26 @@ struct ExternalGainMap {
 // The grid parse_external_gain_map would allocate for exactly these two inputs.
 struct ExternalGainGrid {
   std::uint32_t width{}, height{};
-  bool canonical_log2{false};
 };
 
 // Export admission needs the grid size before the first float is allocated.
 // This runs the parser's own pre-allocation checks (sidecar fields, grid limit,
 // byte length; no hash, no pixel decode) and returns nullopt when the parser
-// would reject the pair there, so the real error stays the parser's. Never
-// throws; the JSON reader is depth-limited and the sidecar is already in memory.
+// would reject the pair there, so the real error stays the parser's. The JSON
+// reader is depth-limited and the sidecar is already in memory; the only thing
+// it throws is std::bad_alloc, which must not be read as "no grid".
 [[nodiscard]] std::optional<ExternalGainGrid> peek_external_gain_grid(
     std::span<const std::uint8_t> gain_bytes,
     std::span<const std::uint8_t> report_bytes,
-    bool allow_legacy_external_gain = false) noexcept;
+    bool allow_legacy_external_gain = false);
+
+// Throws std::invalid_argument, with the parser's own message, when the report
+// declares a gain_file.sha256 that differs from `gain_sha256` (the hash of the
+// gain bytes). Export admission calls it after a successful peek so that a
+// damaged file is reported as such before, and not hidden by, a memory refusal.
+// A report without a hash, or one the parser would reject earlier, passes.
+void check_external_gain_hash(std::span<const std::uint8_t> report_bytes,
+                              std::string_view gain_sha256);
 
 // Builds the normal rendition first and then replaces only its gain grid.  The
 // mathematical path therefore remains the single owner of the SDR base,

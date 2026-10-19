@@ -11,6 +11,7 @@ struct ExternalGainMeasurement {
   hyperdr::OutputEncoding encoding;
   int depth;
   std::uint64_t grid_pixels, report_bytes, footprint;
+  bool raw{false};
 };
 inline constexpr ExternalGainMeasurement external_gain_measurements[] = {
   {"smoke128:story:iso",128,128,144,256,hyperdr::OutputEncoding::IsoGainMapJpeg,8,16777216ULL,861,350012160ULL},
@@ -22,4 +23,11 @@ inline constexpr ExternalGainMeasurement external_gain_measurements[] = {
   {"tif2400:none:pq",2400,1600,2400,1600,hyperdr::OutputEncoding::Pq,10,960000ULL,858,261325808ULL},
   {"tif4000:story:adaptive8",4000,3000,4328,7694,hyperdr::OutputEncoding::Adaptive,8,3000000ULL,861,999622192ULL},
   {"tif4000:none:iso",4000,3000,4000,3000,hyperdr::OutputEncoding::IsoGainMapJpeg,8,47000ULL,855,738837512ULL},
+  // R7-302: the 56 B/px SDR render with an external grid (a large photo and a
+  // small grid) and a RAW source with a grid.
+  {"tif6000:none:sdr-jpeg:grid64",6000,4000,6000,4000,hyperdr::OutputEncoding::SdrJpeg,8,4096ULL,858,1156187504ULL},
+  {"tif6000:story:sdr-jpeg:grid64",6000,4000,6440,11450,hyperdr::OutputEncoding::SdrJpeg,8,4096ULL,858,1729775392ULL},
+  {"arw:none:iso:grid4096",2768,1848,2768,1848,hyperdr::OutputEncoding::IsoGainMapJpeg,8,16777216ULL,861,811320712ULL,true},
+  {"arw:story:iso:grid4096",2768,1848,2972,5284,hyperdr::OutputEncoding::IsoGainMapJpeg,8,16777216ULL,861,871761432ULL,true},
+  {"arw:none:sdr-jpeg:grid4096",2768,1848,2768,1848,hyperdr::OutputEncoding::SdrJpeg,8,16777216ULL,861,751125872ULL,true},
 };

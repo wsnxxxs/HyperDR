@@ -199,15 +199,26 @@ import HyperDRDesign
         let (unsupported, _) = try await openRAW(supported: false, decoder: "7", camera: "Leica C (Typ 112)", lens: nil)
         try snapshots("camera-group-unsupported") { CameraGroup(model: unsupported, startsExpanded: true).frame(width: Layout.inspectorWidth).background(Color.hdr.surfacePanel) }
         let (dng, _) = try await openRAW(supported: true, decoder: "8.dng")
+        _ = released(dng)
         try snapshots("camera-group-dng") { CameraGroup(model: dng, startsExpanded: true).frame(width: Layout.inspectorWidth).background(Color.hdr.surfacePanel) }
+    }
+
+    /// The page as a release shows it: with a version and build.
+    private func released(_ model: EditorModel) -> EditorModel {
+        var about = AboutInformation()
+        about.version = "1.0"; about.buildNumber = "42"; about.engineABI = 3
+        model.preferences.about = about
+        return model
     }
 
     func testTheAboutPageShowsTheRAWRowForACameraRAWAndForADNG() async throws {
         let (raw, _) = try await openRAW(supported: true)
+        _ = released(raw)
         try snapshots("about-raw", size: CGSize(width: 520, height: 560)) { AboutSettings(model: raw).frame(width: 520).background(Color.hdr.surfacePanel) }
         let (dng, _) = try await openRAW(supported: true, decoder: "8.dng")
         try snapshots("about-dng", size: CGSize(width: 520, height: 560)) { AboutSettings(model: dng).frame(width: 520).background(Color.hdr.surfacePanel) }
         let (jpeg, _) = try await openJPEG()
+        _ = released(jpeg)
         try snapshots("about-jpeg", size: CGSize(width: 520, height: 560)) { AboutSettings(model: jpeg).frame(width: 520).background(Color.hdr.surfacePanel) }
     }
 
@@ -222,11 +233,18 @@ import HyperDRDesign
                 Text(verbatim: text.title(locale: locale)).font(.headline).multilineTextAlignment(.center)
                 Text(verbatim: text.body(locale: locale)).font(.callout).multilineTextAlignment(.center)
                     .foregroundStyle(Color.hdr.inkMuted).fixedSize(horizontal: false, vertical: true)
-                Text(verbatim: "OK").frame(maxWidth: .infinity).padding(.vertical, 5)
-                    .background(Color.hdr.accent, in: .rect(cornerRadius: 6)).foregroundStyle(.white)
+                // The system's default button is a filled accent; this is the app's own filled button, which keeps its contrast.
+                Button { } label: { Text(verbatim: "OK").frame(maxWidth: .infinity) }.buttonStyle(.hdrPrimary)
             }
             .padding(20).frame(width: 300).background(Color.hdr.surfacePanel)
         }
+    }
+
+    func testTheAboutPageSaysNoneForAnEmptyModelList() {
+        let model = EditorModel(services: ScriptedEditorServices())
+        XCTAssertTrue(model.ai.models.filter(\.isEnabled).isEmpty, "a model with nothing loaded has no enabled model")
+        XCTAssertEqual(SettingsDiagnostics.models(model, locale: en), "None")
+        XCTAssertEqual(SettingsDiagnostics.models(model, locale: zh), "无")
     }
 
     func testTheUnsupportedCameraAndDNGAlerts() throws {

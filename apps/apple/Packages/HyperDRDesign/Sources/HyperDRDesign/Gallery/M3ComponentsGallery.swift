@@ -215,7 +215,7 @@ struct M3CardsColumn: View {
                     result(w, stale: false, save: .saving)
                     result(w, stale: false, warnings: [w.text("Decoded with reduced precision: the source’s gain map was resampled.",
                                                               "以降低的精度解码：源图的增益图被重新采样。")],
-                           save: .failed(w.text("Not saved: HyperDR can’t write to the chosen place. The exported file is kept in Export History.",
+                           save: .failed(w.text("Not saved: HyperDR can’t write to the chosen location. The exported file is kept in Export History.",
                                                 "没有保存：HyperDR 无法写入所选位置。导出的文件仍在导出记录里。"), saveAs: {}))
                 }
             }

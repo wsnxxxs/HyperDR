@@ -21,7 +21,7 @@ import HyperDRDesign
     private final class Clock { var now = Date(timeIntervalSinceReferenceDate: 810_000_000) }
     private let clock = Clock()
     private let source = URL(fileURLWithPath: "/fixtures/DSC04127.jpg")
-    private let target = URL(fileURLWithPath: "/fixtures/out/DSC04127.heic")
+    private let target = URL(fileURLWithPath: "/fixtures/Pictures/DSC04127.heic")
 
     private static let snapshotDirectory: URL? = {
         guard let name = ProcessInfo.processInfo.environment["HDR_SNAPSHOT_DIR"] else { return nil }
@@ -208,12 +208,21 @@ import HyperDRDesign
         await eventually(timeout: .seconds(10)) { model.export.isResultStale }
         try snapshots("result-stale", minimumHeight: 300) { ExportSheet(model: model, window: EditorWindowState()) }
 
-        // The chosen place could not be written.
+        // The place chosen in the save panel could not be written: the model marks it, and only Save As… is offered.
         let (second, secondServices) = await ready()
         await start(second, secondServices)
-        try await finish(second, secondServices, result: finishedResult(saved: false), failure: UserFacingError(code: "export_folder_unwritable"))
+        try await finish(second, secondServices, result: finishedResult(saved: false),
+                         failure: UserFacingError(code: "export_folder_unwritable", variant: "destination"))
         XCTAssertNotNil(second.export.saveFailure)
         try snapshots("result-save-failed", minimumHeight: 300) { ExportSheet(model: second, window: EditorWindowState()) }
+
+        // The fixed folder could not be written: the same code, unmarked, and Settings is the way out.
+        let (third, thirdServices) = await ready()
+        var preferences = third.preferences.value; preferences.saveMode = .folder; third.updatePreferences(preferences)
+        await start(third, thirdServices)
+        try await finish(third, thirdServices, result: finishedResult(saved: false), failure: UserFacingError(code: "export_folder_unwritable"))
+        XCTAssertNotNil(third.export.saveFailure)
+        try snapshots("result-save-failed-folder", minimumHeight: 300) { ExportSheet(model: third, window: EditorWindowState()) }
     }
 
     func testTheEndedCardSaysWhenItIsAnEarlierEdit() async throws {

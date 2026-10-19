@@ -77,7 +77,7 @@
     },
     "design.export.saveFailedShort" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not saved: can’t write to the chosen place." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not saved: can’t write to the chosen location." } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有保存：无法写入所选位置。" } }
       }
     },

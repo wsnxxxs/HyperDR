@@ -27,8 +27,16 @@ struct CanvasView: View {
         .onDrop(of: [.fileURL], delegate: PhotoDropDelegate(model: model, coordinator: dropCoordinator))
     }
 
+    /// What the drag over the canvas says: refused, or (while an export runs)
+    /// that releasing will ask about stopping it.
+    private var dropNotice: DropNotice? {
+        if drop == .rejects { return .rejects }
+        if drop == .accepts, model.export.isInFlight, let name = dropCoordinator.firstName { return .replacesDuringExport(name: name) }
+        return nil
+    }
+
     private var viewport: some View {
-        CanvasStage(model: model, window: window, showsInspector: showsInspector)
+        CanvasStage(model: model, window: window, showsInspector: showsInspector, dropNotice: dropNotice)
             .padding(Layout.canvasGutter)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.hdr.previewBackdrop, in: .rect(cornerRadius: Radius.lg))
@@ -36,25 +44,6 @@ struct CanvasView: View {
             .overlay {
                 RoundedRectangle(cornerRadius: Radius.lg)
                     .strokeBorder(drop.borderColor(idle: Color.hdr.line), lineWidth: drop == .idle ? 1 : 2)
-            }
-            .overlay(alignment: .bottom) {
-                if drop == .rejects {
-                    Label("mac.drop.unsupported", systemImage: "nosign")
-                        .font(Font.hdr.control)
-                        .hdrOverlayChip()
-                        .padding(Space.s4)
-                } else if drop == .accepts, model.export.isInFlight, let name = dropCoordinator.firstName {
-                    // Accepted, not refused: releasing asks whether to stop the export.
-                    VStack(spacing: 2) {
-                        Label("switchPhoto.drop \(name)", systemImage: "arrow.down.doc")
-                            .font(Font.hdr.control)
-                        Text("switchPhoto.dropNote")
-                            .font(Font.hdr.caption)
-                            .foregroundStyle(Color.hdr.overlayMuted)
-                    }
-                    .hdrOverlayChip()
-                    .padding(Space.s4)
-                }
             }
             .accessibilityElement(children: .contain)
             .accessibilityLabel("stage.label")
@@ -152,5 +141,34 @@ private struct DropTarget: View {
             .flatMap { $0.tags[.filenameExtension] ?? [] }
             .map { "." + $0 }
             .joined(separator: " ")
+    }
+}
+
+/// What a drag over the canvas says in its chip at the canvas's foot.
+enum DropNotice: Equatable {
+    case rejects
+    case replacesDuringExport(name: String)
+}
+
+struct DropNoticeChip: View {
+    let notice: DropNotice
+
+    var body: some View {
+        switch notice {
+        case .rejects:
+            Label("mac.drop.unsupported", systemImage: "nosign")
+                .font(Font.hdr.control)
+                .hdrOverlayChip()
+        case .replacesDuringExport(let name):
+            // Accepted, not refused: releasing asks whether to stop the export.
+            VStack(spacing: 2) {
+                Label("switchPhoto.drop \(name)", systemImage: "arrow.down.doc")
+                    .font(Font.hdr.control)
+                Text("switchPhoto.dropNote")
+                    .font(Font.hdr.caption)
+                    .foregroundStyle(Color.hdr.overlayMuted)
+            }
+            .hdrOverlayChip()
+        }
     }
 }

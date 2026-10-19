@@ -12,9 +12,31 @@ struct CanvasBottomReserve: Equatable {
     var status: CGFloat = 0
     /// The export capsule, which the card lifts.
     var capsule: CGFloat = 0
+    /// The small "updating" chip in the bottom-right corner. It is out of the
+    /// way of everything but what reaches its columns, so it counts only
+    /// there (`lift(over:)`): a refresh that comes and goes must not move the
+    /// legend while a slider is dragged.
+    var chip: CGFloat = 0
 
-    /// Everything that sits at the foot of the canvas, stacked.
+    /// The card and the capsule, stacked: what always keeps the legend, the
+    /// hint and the drop notice above it.
     var total: CGFloat { status + capsule }
+
+    /// The foot's height for something at the canvas's foot that spans
+    /// `columns`: the card and capsule, and the chip when it shares a column
+    /// with it. `chip` is the chip's horizontal extent (nil: not showing).
+    static func lift(_ reserve: CanvasBottomReserve, columns: ClosedRange<CGFloat>?, chip: ClosedRange<CGFloat>?) -> CGFloat {
+        var height = reserve.total
+        if reserve.chip > 0, let columns, let chip, columns.overlaps(chip) { height += reserve.chip }
+        return height
+    }
+
+    /// The capsule's own lift: the card, and the chip when it shares a column.
+    static func capsuleLift(_ reserve: CanvasBottomReserve, capsule: ClosedRange<CGFloat>?, chip: ClosedRange<CGFloat>?) -> CGFloat {
+        var height = reserve.status
+        if reserve.chip > 0, let capsule, let chip, capsule.overlaps(chip) { height += reserve.chip }
+        return height
+    }
 
     /// The extra padding the legend or hint needs at the foot of the visible
     /// photograph so it clears the reserve: the part of the reserved band that
@@ -33,6 +55,7 @@ struct CanvasBottomReserveKey: PreferenceKey {
         let next = nextValue()
         value.status = max(value.status, next.status)
         value.capsule = max(value.capsule, next.capsule)
+        value.chip = max(value.chip, next.chip)
     }
 }
 

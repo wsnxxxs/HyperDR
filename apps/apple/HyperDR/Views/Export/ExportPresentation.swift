@@ -223,21 +223,38 @@ extension ExportPresentation {
         return model.suggestedFileName
     }
 
-    /// Why a copy did not reach its place. A place picked in the save panel and
-    /// the fixed folder fail with the same code, but only the fixed folder is
-    /// something to fix in Settings, so the wording follows the way of saving.
+    /// What the result card says when a copy did not reach its place, and
+    /// whether the way out is Settings. The model says which way of saving
+    /// failed (`variant == "destination"`: a place picked in the save panel,
+    /// fixed by choosing another); the sentence and the button are decided
+    /// together here so they cannot disagree. Without that mark the same code
+    /// is the fixed folder, which is fixed in Settings.
+    struct SaveFailureWording: Equatable {
+        var sentence: String
+        var offersSettings: Bool
+    }
+
+    static func saveFailure(_ failure: UserFacingError, mode: Preferences.SaveMode, locale: Locale) -> SaveFailureWording {
+        let generic = AppStrings.string("export.save.failed", locale: locale)
+        if failure.variant == "destination" { return SaveFailureWording(sentence: generic, offersSettings: false) }
+        if failure.code == "export_folder_unwritable" {
+            return SaveFailureWording(sentence: ErrorText(failure).body(locale: locale), offersSettings: true)
+        }
+        // Any other failure keeps the setting's way of putting it.
+        let sentence = mode == .folder || failure.code == "session_expired" ? ErrorText(failure).body(locale: locale) : generic
+        return SaveFailureWording(sentence: sentence, offersSettings: false)
+    }
+
+    /// The sentence alone.
     static func saveFailureSentence(_ failure: UserFacingError, mode: Preferences.SaveMode, locale: Locale) -> String {
-        // The model says which way of saving failed; the setting only decides for a failure it did not mark.
-        if failure.variant == "destination" { return AppStrings.string("export.save.failed", locale: locale) }
-        return mode == .folder || failure.code == "export_folder_unwritable" || failure.code == "session_expired"
-            ? ErrorText(failure).body(locale: locale) : AppStrings.string("export.save.failed", locale: locale)
+        saveFailure(failure, mode: mode, locale: locale).sentence
     }
 
     /// Why this version's model fell back to the image alone, from the model's
     /// reason code and field names (never the engine's own wording).
     @MainActor static func fallbackNote(_ reason: ExportFallbackReason, model: EditorModel, locale: Locale) -> String {
         guard reason.code == .missingCaptureFields, !reason.missingCaptureFields.isEmpty else {
-            return AppStrings.string("history.fallback.unknown", locale: locale)
+            return AppStrings.format("history.fallback.unknown %@", locale: locale, AppStrings.string(model.fallbackModelNameKey, locale: locale))
         }
         return AppStrings.format("ai.fallback %@ %@", locale: locale,
             AdjustmentSection.fieldList(reason.missingCaptureFields, locale: locale),
@@ -344,6 +361,7 @@ extension ExportPresentation {
         if let model = version.modelName { parts.append(AppStrings.format("history.ai %@", locale: locale, model)) }
         else { parts.append(AppStrings.string("history.manual", locale: locale)) }
         if version.hasFrame { parts.append(AppStrings.string("history.framed", locale: locale)) }
-        return parts.joined(separator: " · ")
+        // Break before a dot, never after it: "AI · CNN" stays whole and no line ends with a dot.
+        return parts.joined(separator: " \u{00B7}\u{00A0}")
     }
 }

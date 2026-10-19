@@ -22,6 +22,8 @@ struct CanvasStage: View {
     /// Whether the inspector is showing: the zebra legend is on the canvas
     /// only while it is not.
     var showsInspector = true
+    /// What a drag over the canvas says, if anything.
+    var dropNotice: DropNotice? = nil
 
     @Environment(ViewerSessionState.self) private var session
     @Environment(\.controlActiveState) private var activeState
@@ -30,10 +32,11 @@ struct CanvasStage: View {
     @State private var hold: PressAndHold
     @State private var peek: PeekHolds
 
-    init(model: EditorModel, window: EditorWindowState, showsInspector: Bool = true) {
+    init(model: EditorModel, window: EditorWindowState, showsInspector: Bool = true, dropNotice: DropNotice? = nil) {
         self.model = model
         self.window = window
         self.showsInspector = showsInspector
+        self.dropNotice = dropNotice
         let peek = PeekHolds(begin: { [weak model] in
             if let model, model.viewMode != .original { model.beginPeekOriginal() }
         }, end: { [weak model] in model?.endPeekOriginal() })
@@ -49,7 +52,8 @@ struct CanvasStage: View {
             .overlay { PhotoCorners(frame: model.canvas.imageFrame) }
             .overlay { PhotoBadge(model: model) }
             .overlay {
-                CanvasFloating(model: model, window: window, hint: hint, showsInspector: showsInspector) { editing in
+                CanvasFloating(model: model, window: window, hint: hint, showsInspector: showsInspector,
+                               dropNotice: dropNotice) { editing in
                     if editing { hint.dismiss() }
                 }
             }
@@ -285,22 +289,51 @@ struct CanvasFloating: View {
     let window: EditorWindowState
     let hint: CanvasHintState
     let showsInspector: Bool
+    /// What a drag over the canvas says, if anything. It reads the foot's
+    /// reserve and adds none: it comes and goes with the pointer, and nothing
+    /// else may move for it.
+    var dropNotice: DropNotice? = nil
+    var busyAlreadyShown = false
     var onSplitEditing: (Bool) -> Void = { _ in }
 
     /// What the card, chip and capsule take at the canvas's foot.
     @State private var foot = CanvasBottomReserve()
+    /// Where, left to right, the things that the chip may share a column with are.
+    @State private var columns: [String: ClosedRange<CGFloat>] = [:]
+
+    private func extent(_ name: String) -> ClosedRange<CGFloat>? { columns[name] }
 
     var body: some View {
+        let legendColumns = extent("legend") ?? extent("hint")
+        let legendLift = CanvasBottomReserve.lift(foot, columns: legendColumns, chip: extent("chip"))
         ZStack {
             CanvasAdornments(model: model, hint: hint, showsInspector: showsInspector,
-                             bottomReserve: foot.total, onSplitEditing: onSplitEditing)
-            CanvasStatus(model: model, window: window)
+                             bottomReserve: legendLift, onSplitEditing: onSplitEditing)
+                .hdrAnimation(Motion.standard, value: legendLift)
+            CanvasStatus(model: model, window: window, busyAlreadyShown: busyAlreadyShown)
             if !showsInspector {
-                ExportCanvasCapsule(model: model, window: window, lift: foot.status)
+                ExportCanvasCapsule(model: model, window: window,
+                                    lift: CanvasBottomReserve.capsuleLift(foot, capsule: extent("capsule"), chip: extent("chip")))
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            }
+            if let dropNotice {
+                let lift = CanvasBottomReserve.lift(foot, columns: extent("drop"), chip: extent("chip"))
+                DropNoticeChip(notice: dropNotice)
+                    .reportsCanvasFrame(name: "drop")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    // Above the card and the capsule; with nothing there, where
+                    // the chip sat before it moved inside the canvas's gutter.
+                    .padding(.bottom, lift > 0 ? lift + Space.s2 : Space.s4 - Layout.canvasGutter)
+                    .transition(.opacity)
             }
         }
         .onPreferenceChange(CanvasBottomReserveKey.self) { foot = $0 }
+        .onPreferenceChange(CanvasFloatingFramesKey.self) { frames in
+            let next = frames.mapValues { $0.minX...$0.maxX }
+            if next != columns { columns = next }
+        }
+        // A drag over the canvas is the user acting on it: the hint steps aside.
+        .onChange(of: dropNotice != nil) { _, dragging in if dragging { hint.dismiss() } }
     }
 }
 
@@ -315,8 +348,16 @@ struct CanvasStatus: View {
 
     /// Work over an existing frame shows only once it has taken 300 ms, so
     /// quick refreshes do not flicker.
-    @State private var showsBusy = false
+    @State private var showsBusy: Bool
     @Environment(\.locale) private var locale
+
+    /// `busyAlreadyShown` skips the 300 ms wait, for views that are laid out
+    /// without being on screen (tests).
+    init(model: EditorModel, window: EditorWindowState, busyAlreadyShown: Bool = false) {
+        self.model = model
+        self.window = window
+        _showsBusy = State(initialValue: busyAlreadyShown)
+    }
 
     var body: some View {
         ZStack {
@@ -335,7 +376,7 @@ struct CanvasStatus: View {
                             .transition(.opacity)
                     } else if showsBusy, let label = busyLabel(document) {
                         busyChip(label, document: document)
-                            .reportsCanvasFoot(\.status, gap: Space.s3, name: "status")
+                            .reportsCanvasFoot(\.chip, gap: Space.s3, name: "chip")
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                             .padding(Space.s3)
                     }

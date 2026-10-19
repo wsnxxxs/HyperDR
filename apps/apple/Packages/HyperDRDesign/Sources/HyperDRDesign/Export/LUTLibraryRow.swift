@@ -21,6 +21,12 @@ public struct LUTLibraryRow: View {
         self.onRemove = onRemove
     }
 
+    /// "38 kB" as one piece: the size never wraps alone to the next line, nor
+    /// loses its unit.
+    static func unbreakable(_ size: String) -> String {
+        size.replacingOccurrences(of: " ", with: "\u{00A0}")
+    }
+
     public var body: some View {
         HStack(spacing: Space.s3) {
             // Only a mark for the row; it does not preview the look.
@@ -36,7 +42,7 @@ public struct LUTLibraryRow: View {
                         .foregroundStyle(Color.hdr.inkStrong).lineLimit(1).truncationMode(.tail)
                     if isInUse { HDRTag(Text("design.lut.inUse", bundle: .module), tint: .accent) }
                 }
-                (size.map { Text("\(spaces)  ·  \($0)") } ?? spaces).font(.hdr.caption).foregroundStyle(Color.hdr.inkMuted).lineLimit(2)
+                (size.map { Text("\(spaces)\u{00A0}·\u{00A0}\(Self.unbreakable($0))") } ?? spaces).font(.hdr.caption).foregroundStyle(Color.hdr.inkMuted).lineLimit(2)
             }
             Spacer(minLength: Space.s2)
             Button(action: onSpaces) { Text("design.lut.spaces", bundle: .module) }

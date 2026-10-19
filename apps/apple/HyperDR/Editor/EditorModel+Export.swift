@@ -67,7 +67,7 @@ extension EditorModel {
         preferences.exportFolder = await services.exportFolder()
         preferences.diagnostics = await services.diagnostics()
         preferences.about = await services.aboutInformation()
-        mergeLUTLibrary(await services.lutEntries())
+        await refreshLUTLibrary()
         timingHistory = await services.exportTimingHistory()
         syncExportState()
     }

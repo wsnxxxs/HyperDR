@@ -77,12 +77,12 @@ extension EditorModel {
                     detail: url.lastPathComponent, variant: failure.variant))
             }
         }
-        mergeLUTLibrary(await services.lutEntries())
+        await refreshLUTLibrary()
     }
     func removeLUT(_ id: String) {
         guard !isEditingLocked else { return }
         Task { [weak self, services] in
-            do { try await services.removeLUT(id); self?.mergeLUTLibrary(await services.lutEntries()) }
+            do { try await services.removeLUT(id); await self?.refreshLUTLibrary() }
             catch { self?.lut.failures = [UserFacingError.service(error)] }
         }
     }

@@ -6,6 +6,13 @@ nonisolated struct LUTMetadataWrite: Sendable {
     var task: Task<Void, Never>?
 }
 
+/// A read begun during a pending write cannot be authoritative even if the
+/// write finishes without another enqueue (and thus without a new revision).
+nonisolated struct LUTLibraryReadVersion: Sendable {
+    var revision = 0
+    var wasWriting = false
+}
+
 extension EditorModel {
     /// The library publishes desired spaces immediately. The selected look
     /// continues to use the photo editing path, including its undo boundary.
@@ -62,13 +69,29 @@ extension EditorModel {
         lutMetadataTask = Task { for task in pending { await task.value } }
     }
 
-    /// Refreshing the library must not replace choices whose writes are pending.
-    func mergeLUTLibrary(_ entries: [LUTItem]) {
+    func lutLibraryReadVersions() -> [String: LUTLibraryReadVersion] {
+        lutMetadataWrites.mapValues { LUTLibraryReadVersion(revision: $0.revision, wasWriting: $0.task != nil) }
+    }
+
+    /// Capture the read's ordering before suspending, not when its result arrives.
+    func refreshLUTLibrary() async {
+        let versions = lutLibraryReadVersions()
+        let entries = await services.lutEntries()
+        guard !Task.isCancelled else { return }
+        mergeLUTLibrary(entries, reading: versions)
+    }
+
+    /// Pending-at-read, pending-now, and mutations since the read all supersede
+    /// its metadata. Later reads begun after completion may replace confirmed
+    /// values, so legitimate imports and refreshes remain authoritative.
+    func mergeLUTLibrary(_ entries: [LUTItem], reading versions: [String: LUTLibraryReadVersion]) {
         lut.library = entries.map { item in
-            guard lutMetadataWrites[item.id]?.task != nil,
-                  let desired = lut.library.first(where: { $0.id == item.id }) else { return item }
+            let before = versions[item.id] ?? LUTLibraryReadVersion()
+            let write = lutMetadataWrites[item.id]
+            guard before.wasWriting || write?.task != nil || before.revision != (write?.revision ?? 0),
+                  let current = lut.library.first(where: { $0.id == item.id }) else { return item }
             var result = item
-            result.input = desired.input; result.output = desired.output
+            result.input = current.input; result.output = current.output
             return result
         }
     }

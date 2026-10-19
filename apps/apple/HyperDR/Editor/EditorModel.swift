@@ -276,8 +276,15 @@ import UniformTypeIdentifiers
         syncControls()
         let ticket = generation
         let openedAt = services.openClock.now
+        if isRestoring { startCameraSupportDeadline(openedAt: openedAt, ticket: ticket) }
         launchTask = Task { [weak self, services] in
-            defer { if self?.generation == ticket { self?.isRestoring = false; self?.syncControls() } }
+            defer {
+                if self?.generation == ticket {
+                    self?.cameraSupportTask?.cancel()
+                    self?.isRestoring = false
+                    self?.syncControls()
+                }
+            }
             await services.start()
             guard let self, !Task.isCancelled, generation == ticket,
                   canRestoreAtLaunch, document == nil, openRollback == nil, photo == nil else { return }
@@ -384,27 +391,41 @@ import UniformTypeIdentifiers
         }
     }
 
-    var canCancelOpen: Bool { openRollback != nil }
+    var canCancelOpen: Bool { isRestoring || openRollback != nil }
 
     /// Silent Q14 rollback. A cancelled native open may finish later; its task
     /// still owns and closes the candidate, never the restored photograph.
     func cancelOpen() {
-        guard let previous = openRollback else { return }
+        guard canCancelOpen else { return }
+        let previous = openRollback
+        canRestoreAtLaunch = false
+        isRestoring = false
+        launchTask?.cancel()
+        launchTask = nil
         cameraSupportTask?.cancel()
         operation?.cancel()
         operation = nil
         generation += 1
-        restore(previous, error: nil)
+        if let previous { restore(previous, error: nil) }
+        else { syncControls() }
     }
 
     private func startCameraSupportDeadline(openedAt: Duration, ticket: Int) {
-        guard document?.formatLabel == "RAW" else { return }
+        // Arm at launch even before restoreLast identifies the source. Unknown
+        // formats never publish a RAW state; a restored RAW adopts this deadline.
+        guard isRestoring || document?.formatLabel == "RAW" else { return }
         let clock = services.openClock
+        let deadline = openedAt + .milliseconds(1500)
+        if clock.now >= deadline, document?.formatLabel == "RAW" {
+            document?.isPreparingCameraSupport = true
+            return
+        }
         cameraSupportTask = Task { [weak self] in
-            do { try await clock.sleep(until: openedAt + .milliseconds(1500)) }
+            do { try await clock.sleep(until: deadline) }
             catch { return }
             guard let self, !Task.isCancelled, generation == ticket,
-                  openRollback != nil, document?.phase == .opening else { return }
+                  openRollback != nil, document?.phase == .opening,
+                  document?.formatLabel == "RAW" else { return }
             document?.isPreparingCameraSupport = true
         }
     }

@@ -17,6 +17,8 @@ import XCTest
     var closed: [EditorPhoto] = []
     var submitted: [EditOptions] = []
     var restoreWaiter: CheckedContinuation<RestoreResult, Never>?
+    var startHandler: (() async -> Void)?
+    var startsCompleted = 0
     var starts = 0
     var subscriptions = 0
     var usesRestoreGate = false
@@ -28,7 +30,11 @@ import XCTest
     deinit { UserDefaults.standard.removePersistentDomain(forName: preferencesName) }
     func engineUpdates() -> AsyncStream<EngineStatus> { AsyncStream { $0.yield(engineStatus) } }
     func displayUpdates() -> AsyncStream<DisplayState> { AsyncStream { $0.yield(displayState) } }
-    func start() async { starts += 1 }
+    func start() async {
+        starts += 1
+        await startHandler?()
+        startsCompleted += 1
+    }
     func canOpen(_ url: URL) -> Bool { ["jpg", "ARW"].contains(url.pathExtension) }
     func placeholder(for url: URL) -> EditorPhoto {
         EditorPhoto(url: url, name: url.lastPathComponent, formatLabel: url.pathExtension == "ARW" ? "RAW" : "JPEG", byteCount: 1)

@@ -920,10 +920,21 @@ public actor SessionStore {
     public func exports(for id: SessionID) async -> [ExportRecord] {
         guard let stored = try? loadStored(id) else { return [] }
         let digest: String
+        // A source that has gone missing leaves the retained versions usable:
+        // they belong to the content last recorded for the session. Any other
+        // failure (a cancelled read, say) lists nothing.
+        func fallback(_ error: Error, _ recorded: String) -> String? {
+            guard let error = error as? HyperDRError,
+                  error.code == "source_missing" || error.code == "source_unreadable",
+                  !recorded.isEmpty else { return nil }
+            return recorded
+        }
         if let open = openSessions[id] {
-            do { digest = try await refreshOpen(open, id: id).sha256 } catch { return [] }
+            do { digest = try await refreshOpen(open, id: id).sha256 }
+            catch { guard let recorded = fallback(error, open.session.sha256) else { return [] }; digest = recorded }
         } else {
-            do { digest = try await currentDigest(stored) } catch { return [] }
+            do { digest = try await currentDigest(stored) }
+            catch { guard let recorded = fallback(error, stored.sha256) else { return [] }; digest = recorded }
         }
         return loadExportRecords(id).filter { $0.sourceDigest == digest }
             .sorted { $0.createdAt > $1.createdAt }

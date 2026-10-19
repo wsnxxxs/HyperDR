@@ -433,3 +433,99 @@ nonisolated private final class DrawablePressureGate: @unchecked Sendable {
         condition.unlock()
     }
 }
+
+@MainActor extension PreviewRenderLoopTests {
+    /// Absolute timing belongs to an explicitly quiet, unsanitized run. Keep
+    /// the original budgets rather than weakening them for concurrent CI load.
+    func testQuietPressureRetainsOriginalMainQueueBudgets() async throws {
+        guard ProcessInfo.processInfo.environment["HYPERDR_QUIET_PRESSURE"] == "1" else {
+            throw XCTSkip("Set HYPERDR_QUIET_PRESSURE=1 on a quiet machine for the original 36 ms budget")
+        }
+        for scenario in 0..<3 {
+            let (view,renderer,probe,layer)=try canvas()
+            let executor=try loop(view)
+            var held:[any CAMetalDrawable]=[]
+            let event=try XCTUnwrap(renderer.device.makeSharedEvent())
+            if scenario==0 { probe.block=1;probe.handsOutNone=true }
+            if scenario==1 {
+                let next=Mutex<UInt64>(0)
+                renderer.presentingCommandHook={ command in
+                    let value=next.withLock { $0 += 1;return $0 }
+                    command.encodeWaitForEvent(event,value:value)
+                    DispatchQueue.global().asyncAfter(deadline:.now()+0.25) { event.signaledValue=value }
+                }
+            }
+            if scenario==2 {
+                for _ in 0..<layer.maximumDrawableCount {
+                    if let drawable=layer.nextDrawable() { held.append(drawable) }
+                }
+                XCTAssertEqual(held.count,layer.maximumDrawableCount)
+            }
+            checkQuiet(await quietDrive(view,seconds:5),["quiet source","quiet GPU","quiet held pool"][scenario])
+            held.removeAll();probe.block=0;probe.handsOutNone=false
+            renderer.presentingCommandHook=nil
+            executor.stop()
+            await eventually(timeout:.seconds(10),"quiet executor cleanup") { executor.state.hasStopped }
+            XCTAssertEqual(probe.mainThreadRequests,0)
+            XCTAssertLessThanOrEqual(renderer.maxInFlightObserved,1)
+        }
+    }
+    private struct QuietPressure {
+        var tickDurations: [Duration] = []
+        var probeGaps: [Duration] = []
+        var maxProbeGap: Duration { probeGaps.max() ?? .zero }
+        var p99ProbeGap: Duration { Self.p99(probeGaps) }
+        var p99: Duration { Self.p99(tickDurations) }
+        static func p99(_ values: [Duration]) -> Duration {
+            let sorted = values.sorted()
+            guard !sorted.isEmpty else { return .zero }
+            return sorted[Swift.max(0, Int((Double(sorted.count) * 0.99).rounded(.up)) - 1)]
+        }
+        var max: Duration { tickDurations.max() ?? .zero }
+    }
+
+    /// 120 Hz of transform changes and ticks for `seconds`, with a main-queue
+    /// probe firing every 4 ms; records each tick's time in canvas code and
+    /// the longest gap between probe firings.
+    private func quietDrive(_ view: EDRCanvasView, seconds: Double) async -> QuietPressure {
+        var result = QuietPressure()
+        var firings: [ContinuousClock.Instant] = []
+        let timer = DispatchSource.makeTimerSource(flags: .strict, queue: .main)
+        timer.schedule(deadline: .now(), repeating: .milliseconds(4), leeway: .nanoseconds(0))
+        timer.setEventHandler { MainActor.assumeIsolated { firings.append(.now) } }
+        timer.resume()
+        let clock = ContinuousClock()
+        let end = clock.now + .milliseconds(Int(seconds * 1000))
+        var step = 0
+        while clock.now < end {
+            step += 1
+            let start = clock.now
+            view.transform.zoom = step.isMultiple(of: 2) ? 1 : 1.5
+            view.setNeedsRedraw()
+            view.tick()
+            result.tickDurations.append(clock.now - start)
+            try? await Task.sleep(for: .microseconds(8333))
+        }
+        timer.cancel()
+        result.probeGaps = zip(firings, firings.dropFirst()).map { $1 - $0 }
+        return result
+    }
+
+    private func checkQuiet(_ pressure: QuietPressure, _ scenario: String,
+                       file: StaticString = #filePath, line: UInt = #line) {
+        print("A2b-2 \(scenario): ticks=\(pressure.tickDurations.count) p99=\(pressure.p99) "
+            + "max=\(pressure.max) probeP99Gap=\(pressure.p99ProbeGap) probeMaxGap=\(pressure.maxProbeGap)")
+        XCTAssertGreaterThan(pressure.tickDurations.count, 100, scenario, file: file, line: line)
+        XCTAssertLessThanOrEqual(pressure.p99, .milliseconds(1), "\(scenario) p99", file: file, line: line)
+        XCTAssertLessThanOrEqual(pressure.max, .milliseconds(4), "\(scenario) max", file: file, line: line)
+        // A 4 ms timer, so a 16 ms delay is a 20 ms gap. The canvas code
+        // itself is bounded above; the main queue also serves XCTest and
+        // shares a busy machine, so one outlier is allowed up to two 120 Hz
+        // frames (seen once in 12 runs: 20.5 ms while ticks peaked at 0.5 ms).
+        XCTAssertLessThanOrEqual(pressure.p99ProbeGap, .milliseconds(20), "\(scenario) probe p99",
+                                 file: file, line: line)
+        XCTAssertLessThanOrEqual(pressure.maxProbeGap, .milliseconds(36), "\(scenario) probe max",
+                                 file: file, line: line)
+    }
+
+}

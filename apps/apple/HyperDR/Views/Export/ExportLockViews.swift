@@ -57,7 +57,7 @@ struct ExportStatusHost: View {
                              onDetails: window.openExport, onDismiss: model.export.dismissOutcome)
         } else if let result = model.export.result {
             ExportStatusCard(
-                kind: model.export.saveFailure != nil ? .saveFailed : .exported(savedTo: ExportPresentation.savedFolder(result.saved)),
+                kind: model.export.saveFailure != nil ? .saveFailed : .exported(savedTo: ExportPresentation.savedFolder(result.saved, locale: locale)),
                 fileName: result.fileName, isStale: model.export.isResultStale, onDetails: window.openExport,
                 onSave: { ExportFlow.saveAs(model: model, version: result.export,
                                             choosePlace: ExportSavePanel.chooser(on: NSApp.keyWindow)) },

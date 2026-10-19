@@ -87,7 +87,7 @@ import HyperDRDesign
         ExportResult(export: "v1", fileName: "DSC04127.heic", byteCount: 18_400_000,
                      pixelSize: PixelSize(width: 6000, height: 4000), headroomStops: 2.5, selfVerified: true, elapsed: .seconds(21),
                      saved: saved ? SavedLocation(fileName: "DSC04127.heic", folderLabel: "…/Pictures",
-                                              url: URL(fileURLWithPath: "/fixtures/Pictures/DSC04127.heic")) : nil)
+                                              reveal: {}) : nil)
     }
 
     func testIndeterminateProgressIsTheSameEveryTime() throws {

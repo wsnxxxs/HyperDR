@@ -30,7 +30,7 @@ import XCTest
     private func result(saved: Bool) -> ExportResult {
         ExportResult(export: "v1", fileName: "first.heic", byteCount: 1_000, pixelSize: PixelSize(width: 6000, height: 4000),
                      saved: saved ? SavedLocation(fileName: "first.heic", folderLabel: "…/Pictures",
-                                                  url: URL(fileURLWithPath: "/fixtures/Pictures/first.heic")) : nil)
+                                                  reveal: {}) : nil)
     }
 
     func testStartedThenSavedAreEachSpokenOnceAndProgressIsSilent() async throws {

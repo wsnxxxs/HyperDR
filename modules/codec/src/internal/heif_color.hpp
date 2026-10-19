@@ -42,9 +42,12 @@ class FloatRgbRowTransform {
 
  private:
   float exact(float v) const {
-    return transfer_ == kCicpTransferHlg
-               ? hlg_inverse_oetf_scene(v)
-               : std::copysign(decode_transfer(std::abs(v), transfer_), v);
+    if (transfer_ == kCicpTransferHlg) return hlg_inverse_oetf_scene(v);
+    // PQ has no meaning above code 1 (10000 nit) and its EOTF has a pole near
+    // 1.995, which a full-range 10-bit code can reach. Excursions below zero
+    // are kept; the positive side stops at the top of the curve.
+    if (transfer_ == kCicpTransferPq && v > 1) v = 1;
+    return std::copysign(decode_transfer(std::abs(v), transfer_), v);
   }
   float decode(float v) const {
     if (!(v >= 0 && v < 1)) return exact(v);

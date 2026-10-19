@@ -104,13 +104,34 @@ void check_float_heif_colour() {
     transform.convert(encoded,output,1);
     std::array<float,3> linear;
     for(unsigned c=0;c<3;++c) linear[c]=transfer==18 ? hlg_inverse_oetf_scene(encoded[c])
-        : std::copysign(decode_transfer(std::abs(encoded[c]),transfer),encoded[c]);
+        : std::copysign(decode_transfer(transfer==16 && encoded[c]>1 ? 1.F : std::abs(encoded[c]),transfer),encoded[c]);
     if(transfer==18)linear=hlg_ootf(linear,cicp_luminance_weights(primaries));
     const auto expected=encoded_to_linear_p3(linear[0],linear[1],linear[2],primaries,8);
     for(unsigned c=0;c<3;++c)
       if(std::abs(output[c]-expected[c])>1e-3F+std::abs(expected[c])*3e-5F)
         throw std::runtime_error("HEIF float CICP lost extended encoded RGB");
   }
+  // PQ has no meaning above code 1 and a pole near 1.995, which full-range
+  // 10-bit YCbCr reaches (Y=1023, Cb=1023 gives B' ~ 1.94). Positive codes stop
+  // at the top of the curve; the negative side keeps its excursion.
+  color.primaries=9;color.transfer=16;
+  FloatRgbRowTransform pq(color);
+  for(float code:{1.F,1.0947F,1.2F,1.737F,1.94F,2.168F,5.F}) {
+    const float in[]{code,code,code};
+    float out[3];
+    pq.convert(in,out,1);
+    for(float value:out)
+      if(!std::isfinite(value)||value<0||value>50.F)
+        throw std::runtime_error("PQ code above 1 left the 10000 nit range");
+    if(std::abs(out[0]-out[1])>1e-4F*out[0]||std::abs(out[1]-out[2])>1e-4F*out[1])
+      throw std::runtime_error("PQ codes above 1 clamp differently per channel");
+  }
+  const float small[]{-.0625F,-.0625F,-.0625F},large[]{-.5F,-.5F,-.5F};
+  float small_out[3],large_out[3];
+  pq.convert(small,small_out,1);
+  pq.convert(large,large_out,1);
+  if(!(small_out[0]<0&&large_out[0]<small_out[0]))
+    throw std::runtime_error("PQ negative excursion was clipped");
 }
 
 int main() {

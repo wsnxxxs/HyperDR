@@ -522,7 +522,19 @@ extension LiveEditorServices {
     func exportFolder() async -> ExportFolder {
         guard let kit = try? await requireKit() else { return ExportFolder() }
         let folder = await kit.exportTarget.folder
-        return ExportFolder(label: folder.label, ready: folder.ready)
+        guard folder.ready else { return ExportFolder(label: folder.label, ready: false) }
+        do {
+            let snapshot = try await kit.exportTarget.captureFolder()
+            let target = ExportFolderTarget { [weak self, kit, snapshot] photo, export in
+                guard let self else { throw UserFacingError(code: "engine_unavailable") }
+                let id = try exportSession(photo), version = ExportID(rawValue: export)
+                let saved = try await kit.exportTarget.save(session: id, export: version, folder: snapshot)
+                do { try await kit.sessions.markSaved(id, export: version, saved: SavedMark(fileName: saved.name, folderLabel: saved.folderLabel)) }
+                catch { Logger(subsystem: "com.hyperdr.HyperDR", category: "Export").warning("Export saved but its history mark could not be persisted") }
+                return SavedLocation(fileName: saved.name, folderLabel: saved.folderLabel, url: saved.url)
+            }
+            return ExportFolder(label: snapshot.label, ready: true, target: target)
+        } catch { return ExportFolder(label: folder.label, ready: false) }
     }
     func setExportFolder(_ url: URL) async throws -> ExportFolder {
         let kit = try await requireKit()

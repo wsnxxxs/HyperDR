@@ -17,6 +17,18 @@ public struct SavedExport: Sendable {
     public let syncConfirmed: Bool
 }
 
+/// Immutable directory authority retained independently of later preferences.
+/// A descriptor pins the selected directory even if its name is replaced.
+public final class ExportFolderSnapshot: Sendable {
+    public let label: String
+    fileprivate let descriptor: Int32
+    private let lease: SecurityScopeLease
+    fileprivate init(label: String, descriptor: Int32, lease: SecurityScopeLease) {
+        self.label = label; self.descriptor = descriptor; self.lease = lease
+    }
+    deinit { Darwin.close(descriptor) }
+}
+
 public actor ExportTarget {
     typealias CopyRead = @Sendable (Int32, UnsafeMutableRawPointer?, Int) -> Int
     /// Test seams for the private staging directory and the final folder sync.
@@ -89,6 +101,24 @@ public actor ExportTarget {
         } catch { throw HyperDRError(code: "export_folder_unwritable", message: "Unable to persist export folder bookmark: \(error)") }
         selected = scoped
         return Self.label(canonical)
+    }
+
+    public func captureFolder() throws -> ExportFolderSnapshot {
+        guard let selected else { throw Self.error("export_folder_unset") }
+        let lease = SecurityScopeLease(url: selected, access: access)
+        let descriptor = try Self.openFolder(selected, excluding: roots)
+        return ExportFolderSnapshot(label: Self.label(selected), descriptor: descriptor, lease: lease)
+    }
+
+    public func save(session: SessionID, export: ExportID, folder: ExportFolderSnapshot) async throws -> SavedExport {
+        let source = try await sessions.exportFile(session, export: export)
+        let hooks = self.hooks
+        let task = Task.detached {
+            try withExtendedLifetime(folder) {
+                try Self.copy(source, directory: folder.descriptor, hooks: hooks)
+            }
+        }
+        return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
     }
 
     public func save(session: SessionID, export: ExportID, oneOff: URL? = nil) async throws -> SavedExport {
@@ -403,6 +433,10 @@ public actor ExportTarget {
                              hooks: CopyHooks) throws -> SavedExport {
         let directory = try openFolder(folder, excluding: roots)
         defer { Darwin.close(directory) }
+        return try copy(source, directory: directory, hooks: hooks)
+    }
+
+    private static func copy(_ source: SessionExportFile, directory: Int32, hooks: CopyHooks) throws -> SavedExport {
         let input = source.descriptor
         var info = stat()
         guard fstat(input, &info) == 0, info.st_mode & S_IFMT == S_IFREG else { throw error("source_missing") }

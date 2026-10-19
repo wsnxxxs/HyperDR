@@ -400,8 +400,19 @@ extension FakeEditorServices {
         if let exportSaveHandler { return try await exportSaveHandler(export, destination) }
         return SavedLocation(fileName: destination?.lastPathComponent ?? "saved.heic", folderLabel: folder.label, url: destination)
     }
-    func exportFolder() async -> ExportFolder { folder }
-    func setExportFolder(_ url: URL) async throws -> ExportFolder { folder = ExportFolder(label: url.lastPathComponent, ready: true); return folder }
+    func exportFolder() async -> ExportFolder {
+        guard folder.ready else { return folder }
+        return capturedFolder(label: folder.label)
+    }
+    private func capturedFolder(label: String) -> ExportFolder {
+        ExportFolder(label: label, ready: true, target: ExportFolderTarget { [weak self] _, export in
+            guard let self else { throw UserFacingError(code: "engine_unavailable") }
+            saveCalls.append((export, nil))
+            if let exportSaveHandler { return try await exportSaveHandler(export, nil) }
+            return SavedLocation(fileName: "saved.heic", folderLabel: label)
+        })
+    }
+    func setExportFolder(_ url: URL) async throws -> ExportFolder { folder = capturedFolder(label: url.lastPathComponent); return folder }
     func encodingCapabilities() async throws -> EditorCapabilities {
         capabilityFixture ?? EditorCapabilities(encodings: Dictionary(uniqueKeysWithValues: Preferences.encodings.map { ($0, .init(available: true, reason: "")) }), main8: true, main10: true)
     }

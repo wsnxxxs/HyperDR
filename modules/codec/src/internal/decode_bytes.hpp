@@ -19,6 +19,11 @@
 #include <vector>
 
 namespace hyperdr::codec {
+namespace testing {
+// Per-thread seam for deterministic cancellation inside libjpeg's input passes.
+void set_jpeg_progress_hook(void (*hook)(bool starting, unsigned components) noexcept);
+}
+
 
 // The authored JPEG primary of an Ultra HDR file, decoded without applying
 // its embedded gain map.

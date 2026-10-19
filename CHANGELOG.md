@@ -5,6 +5,9 @@ semantic versioning; dates use ISO 8601.
 
 ## Unreleased
 
+- Cancel progressive JPEG input during libjpeg input scans, including the
+  pre-scanline startup phase; repaired MPF inspection includes recorded values.
+
 - Decode ISO gain-map JPEG inputs with our MPF/ISO parser, libjpeg-turbo and
   pixel-centred reconstruction. Re-exported bytes and previews may change;
   decoder caches are invalidated. Duplicate ISO metadata opens as SDR with a

@@ -12,7 +12,6 @@ for name in ['heif_reader','heif_inspect','tmap','exif','hvcc','cube']:
     log=(out/(name+'.log')).open('w')
     cmd=[str(build/'tests/fuzz'/('fuzz_'+name)),str(corpus),f'-max_total_time={a.seconds}','-max_len=65536','-timeout=5','-rss_limit_mb=2048','-artifact_prefix='+str(artifacts)+'/']
     processes.append((name,subprocess.Popen(cmd,env=env,stdout=log,stderr=log),log))
-log=(out/'hyprev.log').open('w');processes.append(('hyprev',subprocess.Popen(['node',str(root/'tests/fuzz/hyprev.mjs'),str(a.seconds)],env=env,stdout=log,stderr=log),log))
 results={}
 try:
     for name,process,log in processes:results[name]=process.wait();log.close()

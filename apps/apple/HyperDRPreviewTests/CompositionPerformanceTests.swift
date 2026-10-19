@@ -34,7 +34,9 @@ import XCTest
         services.autoCompletesRefreshes = false
         let model = EditorModel(services:services)
         model.open([url])
-        await eventually(timeout:.seconds(3)) { model.document?.phase == .ready && model.scopes.current != nil }
+        // Readiness is outside S12's timing sample. TSan instruments millions
+        // of scope pixel reads (over 3 seconds); retain the 4 ms input budget.
+        await eventually(timeout:.seconds(10)) { model.document?.phase == .ready && model.scopes.current != nil }
         model.beginAdjusting("brightness")
         let renderer = try makePreviewRenderer()
         let layer = CAMetalLayer(); layer.device = renderer.device; layer.pixelFormat = .rgba16Float

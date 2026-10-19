@@ -10,14 +10,22 @@ import os
     enum Mode: String { case steps, drag }
     private static var armed = false
     private static let logger = Logger(subsystem: "com.hyperdr.HyperDR", category: "PreviewStress")
-    static var edge: Int? {
-        guard UserDefaults.standard.string(forKey: "HDRA3Stress") != nil else { return nil }
-        let edge = UserDefaults.standard.integer(forKey: "HDRA3Edge")
-        return [640, 2048].contains(edge) ? edge : nil
+    /// NSArgumentDomain contains launch options only; never consult persistent
+    /// preferences or registered defaults for a runner that changes edits.
+    struct Configuration {
+        let mode: Mode
+        let edge: Int?
     }
+    static func configuration(defaults: UserDefaults = .standard) -> Configuration? {
+        let arguments = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
+        guard let value = arguments["HDRA3Stress"] as? String, let mode = Mode(rawValue: value) else { return nil }
+        let edge = arguments["HDRA3Edge"].flatMap { Int(String(describing: $0)) }
+        return Configuration(mode: mode, edge: edge.flatMap { [640, 2048].contains($0) ? $0 : nil })
+    }
+    static var edge: Int? { configuration()?.edge }
 
     static func arm(model: EditorModel) {
-        guard !armed, let mode = UserDefaults.standard.string(forKey: "HDRA3Stress").flatMap(Mode.init(rawValue:)) else { return }
+        guard !armed, let mode = configuration()?.mode else { return }
         armed = true
         Task { [weak model] in
             // Opening is done by the user through the normal scoped workflow.

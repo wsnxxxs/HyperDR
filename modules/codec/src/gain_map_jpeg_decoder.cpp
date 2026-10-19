@@ -1,5 +1,6 @@
-// ISO JPEG input. The legacy XMP decoder remains only until S13(b) passes.
+// ISO and XMP JPEG inputs share reconstruction and colour conversion.
 #include "internal/decode_bytes.hpp"
+#include "internal/gain_map_jpeg.hpp"
 #include "internal/cicp.hpp"
 #include "internal/metadata.hpp"
 #include "hyperdr/container/gain_map_jpeg.hpp"
@@ -25,7 +26,7 @@ DecodedImage decode_ultrahdr_bytes(const std::vector<std::uint8_t>& bytes,ColorG
   if(jpeg.primary_iso_count>1 || jpeg.gain_iso_count>1)
     throw std::runtime_error("duplicate ISO gain-map metadata");
   if(jpeg.primary_iso_count || jpeg.gain_iso_count) return decode_iso_gain_map_jpeg_bytes(bytes,gamut);
-  return decode_legacy_ultrahdr_bytes(bytes,gamut);
+  return decode_iso_gain_map_jpeg_bytes(bytes,gamut);
 }
 namespace {
 std::vector<std::uint8_t> icc_profile(const std::vector<JpegAppSegment>& apps) {
@@ -57,12 +58,21 @@ void transform(FloatImage& image, cmsHTRANSFORM conversion) {
 DecodedImage decode_iso_gain_map_jpeg_bytes(const std::vector<std::uint8_t>& bytes,
                                            ColorGamut default_gamut) {
   check_cancelled();
-  const auto jpeg = parse_gain_map_jpeg_input(bytes);
+  auto jpeg = inspect_gain_map_jpeg(bytes);
+  GainMapRead input;
+  if (jpeg.primary_iso_count || jpeg.gain_iso_count) {
+    jpeg = parse_gain_map_jpeg_input(bytes);
+    input.metadata = jpeg.metadata;
+    input.pixels = decode_jpeg_gain_bytes({bytes.begin()+jpeg.gain_offset,
+        bytes.begin()+jpeg.gain_offset+jpeg.gain_size},gain_map_channel_count(jpeg.metadata));
+  } else {
+    input = read_gain_map_jpeg_imageio(bytes);
+    jpeg.metadata = input.metadata;
+  }
   auto primary = decode_jpeg_primary_bytes(bytes, default_gamut);
   if (primary.decode.resolution_reduced) throw std::runtime_error("gain-map primary exceeds decode budget");
   const auto channels = gain_map_channel_count(jpeg.metadata);
-  auto gain=decode_jpeg_gain_bytes({bytes.begin()+jpeg.gain_offset,
-      bytes.begin()+jpeg.gain_offset+jpeg.gain_size},channels);
+  auto gain=std::move(input.pixels);
   unsigned orientation = 1;
   for (const auto& app : jpeg.app_segments[0]) {
     if (app.marker == 0xe1 && app.payload.size() > 6 &&

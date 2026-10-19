@@ -5,6 +5,11 @@ semantic versioning; dates use ISO 8601.
 
 ## Unreleased
 
+- Read XMP-only gain-map JPEG inputs through ImageIO and the shared HDR
+  reconstruction pipeline. MPF segments after quantization tables are moved
+  only in a private memory copy. Some older Android JPEGs may fall back to SDR
+  when ImageIO cannot expose their gain map or translate its metadata.
+
 - Develop RAW inputs with Apple's default CIRAWFilter decoder on Metal, with
   neutral scene-linear settings, automatic lens correction and cancellable
   render blocks. RAW dimensions, colours and exported bytes intentionally change;

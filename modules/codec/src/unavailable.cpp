@@ -7,6 +7,7 @@
 // sites, and the error messages are shared, and only these definitions differ.
 
 #include "hyperdr/codec/availability.hpp"
+#include "hyperdr/codec/gain_map_jpeg.hpp"
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/foundation/file_io.hpp"
@@ -29,6 +30,10 @@ void fail_without_codecs(const char* capability) {
 }
 
 #if !HYPERDR_WITH_CODECS
+namespace codec {
+GainMapRead read_gain_map_jpeg_imageio(const std::vector<std::uint8_t>&) { fail_without_codecs("gain-map JPEG input"); }
+namespace testing { void set_imageio_gain_map_hook(void (*)(bool) noexcept) {} }
+}
 
 RawHeader probe_apple_raw(const std::filesystem::path&) { fail_without_codecs("RAW probing"); }
 float raw_preview_scale(const std::filesystem::path&, std::uint32_t) { return 1; }

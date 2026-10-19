@@ -1,5 +1,5 @@
 {
-  "reason": "E4c intentionally replaces ISO JPEG input decoding with libjpeg-turbo, pixel-centred bilinear reconstruction and ICC-managed native-space gain application. XMP-only remains on libultrahdr pending corroboration.",
+  "reason": "E4c intentionally replaces ISO input with our JPEG/ISO reader and XMP-only input with ImageIO auxiliary translation; both share pixel-centred reconstruction and ICC-managed native-space gain application. The constant XMP fixture export SHA remains unchanged after the ImageIO switch.",
   "cases": {
     "iso-mono.jpg": "02c655db8980150d8362afc253688a9ea5daba4725ea4b00c5ba247aaeba7e89",
     "iso-rgb.jpg": "ea38d25ce21bfab18237db5eb756d7c6f1da9638de17c6997f16ab8352583413",

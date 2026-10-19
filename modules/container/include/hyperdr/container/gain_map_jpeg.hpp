@@ -24,6 +24,8 @@ struct GainMapJpeg {
   GainMapMetadata metadata;
   bool has_hdrgm{}, has_container_directory{};
   bool repaired_mpf{};
+  std::size_t first_dqt_offset{};
+  bool mpf_after_dqt{};
   std::uint64_t recorded_gain_offset{}; // Absolute offset, before reader repair.
   std::size_t trailing_bytes{};
 };
@@ -38,4 +40,8 @@ struct GainMapJpeg {
 [[nodiscard]] GainMapJpeg parse_gain_map_jpeg_input(const std::vector<std::uint8_t>& bytes);
 [[nodiscard]] bool has_gain_map_jpeg_signature(const std::vector<std::uint8_t>& bytes);
 [[nodiscard]] GainMapJpeg inspect_gain_map_jpeg(const std::vector<std::uint8_t>& bytes);
+// Empty means the input already has the required layout; otherwise returns
+// a private copy with only MPF placement/relative offsets changed.
+[[nodiscard]] std::vector<std::uint8_t> normalize_gain_map_jpeg_mpf(
+    const std::vector<std::uint8_t>& bytes);
 }  // namespace hyperdr

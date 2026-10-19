@@ -58,7 +58,8 @@ constexpr std::array<char, 8> kMagic{'H', 'D', 'R', 'C', 'A', 'C', 'H', '3'};
 // 35 retains upright full-resolution photo dimensions before preview reduction.
 // 36 decodes ISO gain-map JPEGs with our pixel-centred RGB reconstruction.
 // 37 uses Apple RAW pixels and records the system decoder, scale and build.
-constexpr std::uint32_t kCacheSchema = 37;
+// 38 translates XMP JPEG gain maps through ImageIO.
+constexpr std::uint32_t kCacheSchema = 38;
 
 // x86-64 and arm64, the only targets this project builds for, are both little
 // endian; the cache is a local scratch format and is never transported.

@@ -56,7 +56,10 @@ public struct PhotoSession: Sendable, Identifiable, Hashable {
 public enum RestoreOutcome: Sendable {
     case none
     case restored(PhotoSession)
-    case unavailable(HyperDRError)
+    /// `displayName` is the source file's name as last opened (nil when the
+    /// session record itself cannot be read), so the app can say which photo
+    /// could not be reopened.
+    case unavailable(HyperDRError, displayName: String?)
 }
 
 public struct ExportRecord: Sendable, Codable, Equatable {
@@ -72,6 +75,14 @@ public struct ExportRecord: Sendable, Codable, Equatable {
     public let frame: ExportFrameRecord?
     /// Loaded from saved.json; publication never rewrites result.json.
     public internal(set) var saved: SavedMark? = nil
+    /// Whether the retained file in the version folder can be read. Filled in
+    /// when the records are listed (not stored), so the app does not offer to
+    /// drag or share a version whose file is gone.
+    public internal(set) var fileAvailable: Bool = true
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, byteCount, createdAt, sourceDigest, options, reportJSON, sequence, key, frame
+    }
 }
 
 public enum SessionResource: String, Sendable, Codable {
@@ -219,6 +230,9 @@ public actor SessionStore {
     private let openExportLeaf: OpenExportLeaf
     private let exportRoot: SessionExportFile?
     private let cacheDirectory: URL
+    /// Copies handed to other apps (drag, share); outside the decode cache so
+    /// its trimming never counts them.
+    private let transfersDirectory: URL
     private let exportHistoryLimit: Int
     private let sessionTTL: TimeInterval
     private let decodeCacheMaxAge: TimeInterval
@@ -255,6 +269,10 @@ public actor SessionStore {
         sessionsDirectory = supportDirectory.appendingPathComponent("sessions", isDirectory: true)
         cacheDirectory = configuration.cacheDirectory.resolvingSymlinksInPath().standardizedFileURL
             .appendingPathComponent("decode-cache", isDirectory: true)
+        transfersDirectory = configuration.cacheDirectory.resolvingSymlinksInPath().standardizedFileURL
+            .appendingPathComponent("Transfers", isDirectory: true)
+        // Whatever an earlier run handed out is no longer wanted.
+        try? FileManager.default.removeItem(at: transfersDirectory)
         exportHistoryLimit = max(1, configuration.exportHistoryLimit)
         sessionTTL = configuration.sessionTTL.timeInterval
         self.decodeCacheMaxAge = decodeCacheMaxAge
@@ -442,8 +460,10 @@ public actor SessionStore {
             // Another open may have replaced the history while activation awaited.
             // Cancellation must preserve the history for the next launch.
             let failure = publicError(error)
+            // Read before the history is cleared; a record that cannot be read has no name.
+            let name = (try? loadStored(id)).map { URL(fileURLWithPath: $0.sourcePath).lastPathComponent }
             if failure.code != "cancelled", readLastSession() == id { clearLastSession() }
-            return .unavailable(failure)
+            return .unavailable(failure, displayName: name)
         }
     }
 
@@ -549,7 +569,7 @@ public actor SessionStore {
             guard !openingPaths.contains(stored.sourcePath) else { continue }
             cleanupAbandonedExports(id)
             guard !hasPendingExport(id) else { continue }
-            guard loadExportRecords(id).isEmpty, stored.lastUsedAt < cutoff else { continue }
+            guard !loadExportRecords(id).contains(where: \.fileAvailable), stored.lastUsedAt < cutoff else { continue }
             do {
                 try removeSessionDirectory(id)
                 digestCache.removeValue(forKey: stored.sourcePath)
@@ -558,7 +578,70 @@ public actor SessionStore {
             } catch { continue }
         }
         _ = trimDecodeCache(now: now)
+        removeOldTransfers(now: now)
         return removed
+    }
+
+    /// Transfer copies live an hour: a mail draft or message may read its
+    /// attachment well after the drop, so nothing is deleted right away.
+    static let transferLifetime: TimeInterval = 60 * 60
+
+    private func removeOldTransfers(now: Date) {
+        guard let items = try? fileManager.contentsOfDirectory(
+            at: transfersDirectory, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
+        for item in items {
+            let modified = (try? item.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            if let modified, now.timeIntervalSince(modified) > Self.transferLifetime {
+                try? fileManager.removeItem(at: item)
+            }
+        }
+    }
+
+    /// A copy of one retained export, in a folder of its own, for handing to
+    /// another app. It is a copy, never the version's own file: a Finder move
+    /// would otherwise take the file out of the export history. On APFS the
+    /// copy is a clone (instant, no extra space). `fileName` is the name the
+    /// receiver sees (nil = the record's name) and must be one plain path component.
+    public func stageExportForTransfer(_ id: SessionID, export: ExportID, fileName: String? = nil) async throws -> URL {
+        let source = try await exportFile(id, export: export)
+        let name = fileName ?? source.name
+        guard isSafeComponent(name), !name.contains("\\"), !name.contains("\0"), name.utf8.count <= 255 else {
+            throw HyperDRError(code: "invalid_options", message: "The file name is not a single path component")
+        }
+        let folder = transfersDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        do {
+            try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
+            let directory = try openDirectory(folder)
+            defer { Darwin.close(directory) }
+            if fclonefileat(source.descriptor, directory, name, 0) != 0 {
+                try copyContents(of: source.descriptor, named: name, into: directory)
+            }
+        } catch {
+            try? fileManager.removeItem(at: folder)
+            throw publicError(error)
+        }
+        return folder.appendingPathComponent(name)
+    }
+
+    /// The fallback when the volume cannot clone: a plain chunked copy.
+    private func copyContents(of descriptor: Int32, named name: String, into directory: Int32) throws {
+        let target = Darwin.openat(directory, name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard target >= 0 else { throw posixError("create", name) }
+        defer { Darwin.close(target) }
+        var buffer = [UInt8](repeating: 0, count: 1 << 20)
+        var offset: off_t = 0
+        while true {
+            let count = Darwin.pread(descriptor, &buffer, buffer.count, offset)
+            if count < 0 { if errno == EINTR { continue }; throw posixError("read", name) }
+            if count == 0 { break }
+            var written = 0
+            while written < count {
+                let result = buffer.withUnsafeBytes { Darwin.write(target, $0.baseAddress! + written, count - written) }
+                if result < 0 { if errno == EINTR { continue }; throw posixError("write", name) }
+                written += result
+            }
+            offset += off_t(count)
+        }
     }
 
     internal func trimDecodeCache(now: Date = Date()) -> Int {
@@ -1509,7 +1592,7 @@ public actor SessionStore {
             let id = SessionID(rawValue: directory.lastPathComponent)
             guard id.isValid, let stored = try? loadStored(id),
                   stored.sourcePath == path, stored.sha256 == digest,
-                  (stored.lastUsedAt >= cutoff || !loadExportRecords(id).isEmpty) else { continue }
+                  (stored.lastUsedAt >= cutoff || loadExportRecords(id).contains(where: \.fileAvailable)) else { continue }
             if best == nil || stored.lastUsedAt > best!.lastUsedAt { best = stored }
         }
         return best
@@ -1582,18 +1665,24 @@ public actor SessionStore {
                 }
                 continue
             }
-            guard record.id.rawValue == folder.lastPathComponent,
-                  resultFileURL(id, record: record) != nil else { continue }
+            guard record.id.rawValue == folder.lastPathComponent, hasSafeName(record) else { continue }
+            // A version whose file has gone is still listed (its settings can be
+            // restored); it just cannot be dragged, shared or saved.
+            record.fileAvailable = resultFileURL(id, record: record) != nil
             record.saved = try? read(SavedMark.self, from: folder.appendingPathComponent("saved.json"))
             records.append(record)
         }
         return records
     }
 
+    private func hasSafeName(_ record: ExportRecord) -> Bool {
+        record.name == (record.name as NSString).lastPathComponent
+            && !record.name.isEmpty && record.name != "." && record.name != ".."
+            && !record.name.contains("/") && !record.name.contains("\\")
+    }
+
     private func resultFileURL(_ id: SessionID, record: ExportRecord) -> URL? {
-        guard record.name == (record.name as NSString).lastPathComponent,
-              !record.name.isEmpty, record.name != ".", record.name != "..",
-              !record.name.contains("/"), !record.name.contains("\\") else { return nil }
+        guard hasSafeName(record) else { return nil }
         guard let folder = try? exportDirectory(id, export: record.id) else { return nil }
         let target = folder.appendingPathComponent(record.name)
         guard let validated = try? containedURL(target, in: folder),

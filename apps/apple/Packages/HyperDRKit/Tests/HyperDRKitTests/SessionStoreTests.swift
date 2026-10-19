@@ -89,7 +89,7 @@ private func sha256(_ bytes: [UInt8]) -> String {
         #expect(restored.id == photo.id)
         await restoredStore.close(photo.id)
         try FileManager.default.removeItem(at: source)
-        guard case .unavailable(let failure) = await store.restoreLastOutcome() else {
+        guard case .unavailable(let failure, _) = await store.restoreLastOutcome() else {
             Issue.record("Expected unavailable source"); return
         }
         #expect(failure.code == "source_missing")
@@ -108,7 +108,7 @@ private func sha256(_ bytes: [UInt8]) -> String {
             withUnsafeCurrentTask { $0?.cancel() }
             return await store.restoreLastOutcome()
         }.value
-        guard case .unavailable(let failure) = outcome else {
+        guard case .unavailable(let failure, _) = outcome else {
             Issue.record("Expected cancelled restore"); return
         }
         #expect(failure.code == "cancelled")
@@ -452,7 +452,7 @@ extension SessionStoreTests {
         access.arm { restoration.cancel() }
         signal.yield(); signal.finish()
         let outcome = await restoration.value
-        guard case .unavailable(let error) = outcome else { Issue.record("Expected cancellation"); return }
+        guard case .unavailable(let error, _) = outcome else { Issue.record("Expected cancellation"); return }
         #expect(error.code == "cancelled")
         print("review restore cancelled at lease acquisition: starts/stops=\(access.counts)")
         #expect(access.counts.0 == access.counts.1, "The only restore caller left without a PhotoSession but still owns a lease")
@@ -525,5 +525,106 @@ extension SessionStoreTests {
         }
         do { _ = try await store.session(SessionID(rawValue: String(repeating: "0", count: 32))); Issue.record("Missing session accepted") }
         catch let error as HyperDRError { #expect(error.code == "session_expired") }
+    }
+}
+
+/// Handing a version's file to another app (drag, share): a copy in a folder
+/// of its own, never the retained file.
+@Suite(.timeLimit(.minutes(1))) struct ExportTransferTests {
+    private func publishOne(_ store: SessionStore, _ session: PhotoSession, name: String, bytes: [UInt8]) async throws -> (ExportRecord, URL) {
+        let (id, directory) = try await store.prepareExport(session.id,
+            options: [:], key: ExportKey(rawValue: "fixture"))
+        let output = directory.appendingPathComponent(name)
+        try Data(bytes).write(to: output)
+        let report = ConvertReport(json: Data("{}".utf8), files: [ReportFile(
+            input: "", output: output.path, success: true, skipped: false, message: "", width: 1, height: 1)])
+        return (try await store.publishExport(session.id, export: id, report: report), output)
+    }
+
+    @Test func theStagedCopyHasTheSameBytesAndIsNotTheVersionsOwnFile() async throws {
+        let environment = try TestEnvironment()
+        let store = environment.store()
+        let session = try await store.open(try environment.source("photo.png"))
+        let (record, original) = try await publishOne(store, session, name: "one.heic", bytes: [1, 2, 3, 4])
+        let copy = try await store.stageExportForTransfer(session.id, export: record.id)
+        #expect(copy.lastPathComponent == "one.heic")
+        #expect(try Data(contentsOf: copy) == Data([1, 2, 3, 4]))
+        var a = stat(), b = stat()
+        #expect(stat(copy.path, &a) == 0 && stat(original.path, &b) == 0)
+        #expect(a.st_ino != b.st_ino)
+        try Data([9]).write(to: copy)
+        #expect(try Data(contentsOf: original) == Data([1, 2, 3, 4]), "changing the copy leaves the version alone")
+        // A move out of the folder (what Finder does inside a volume) takes the copy only.
+        try FileManager.default.moveItem(at: copy, to: environment.sources.appendingPathComponent("moved.heic"))
+        #expect(FileManager.default.fileExists(atPath: original.path))
+        #expect((await store.exports(for: session.id)).count == 1)
+        // Each stage has a folder of its own.
+        let again = try await store.stageExportForTransfer(session.id, export: record.id)
+        #expect(again.deletingLastPathComponent() != copy.deletingLastPathComponent())
+    }
+
+    @Test func theNameTheReceiverSeesIsOneSafeComponent() async throws {
+        let environment = try TestEnvironment()
+        let store = environment.store()
+        let session = try await store.open(try environment.source("photo.png"))
+        let (record, _) = try await publishOne(store, session, name: "one.heic", bytes: [1])
+        let renamed = try await store.stageExportForTransfer(session.id, export: record.id, fileName: "My shot.heic")
+        #expect(renamed.lastPathComponent == "My shot.heic")
+        for bad in ["", ".", "..", "a/b", "../x", "a\\b", "a\0b", String(repeating: "x", count: 300)] {
+            await #expect(throws: HyperDRError.self) {
+                _ = try await store.stageExportForTransfer(session.id, export: record.id, fileName: bad)
+            }
+        }
+    }
+
+    @Test func aMissingVersionFileThrowsSourceMissingAndIsMarkedUnavailable() async throws {
+        let environment = try TestEnvironment()
+        let store = environment.store()
+        let session = try await store.open(try environment.source("photo.png"))
+        let (record, original) = try await publishOne(store, session, name: "one.heic", bytes: [1, 2])
+        #expect((await store.exports(for: session.id)).first?.fileAvailable == true)
+        try FileManager.default.removeItem(at: original)
+        let listed = await store.exports(for: session.id)
+        #expect(listed.count == 1 && listed.first?.fileAvailable == false, "the settings can still be restored")
+        do { _ = try await store.stageExportForTransfer(session.id, export: record.id); Issue.record("expected failure") }
+        catch let error as HyperDRError { #expect(error.code == "source_missing") }
+    }
+
+    @Test func aSessionWhoseOnlyVersionLostItsFileCanBeCleanedUp() async throws {
+        let environment = try TestEnvironment()
+        let store = environment.store(ttl: .seconds(1))
+        let session = try await store.open(try environment.source("photo.png"))
+        let (_, original) = try await publishOne(store, session, name: "one.heic", bytes: [1, 2])
+        await store.close(session.id)
+        try FileManager.default.removeItem(at: original)
+        #expect(await store.cleanupExpired(now: Date().addingTimeInterval(3600)) == 1)
+    }
+
+    @Test func transfersAreClearedAtStartAndAfterAnHour() async throws {
+        let environment = try TestEnvironment()
+        let store = environment.store()
+        let session = try await store.open(try environment.source("photo.png"))
+        let (record, _) = try await publishOne(store, session, name: "one.heic", bytes: [1])
+        let copy = try await store.stageExportForTransfer(session.id, export: record.id)
+        _ = await store.cleanupExpired(now: Date())
+        #expect(FileManager.default.fileExists(atPath: copy.path), "a recent copy stays: the receiver may read it later")
+        _ = await store.cleanupExpired(now: Date().addingTimeInterval(2 * 60 * 60))
+        #expect(!FileManager.default.fileExists(atPath: copy.deletingLastPathComponent().path))
+        let second = try await store.stageExportForTransfer(session.id, export: record.id)
+        _ = environment.store()   // a new run
+        #expect(!FileManager.default.fileExists(atPath: second.path))
+    }
+
+    @Test func aRestoreThatCannotReopenNamesThePhoto() async throws {
+        let environment = try TestEnvironment()
+        let store = environment.store()
+        let source = try environment.source("Vacation.png")
+        _ = try await store.open(source)
+        try FileManager.default.removeItem(at: source)
+        guard case .unavailable(let failure, let name) = await environment.store().restoreLastOutcome() else {
+            Issue.record("Expected unavailable source"); return
+        }
+        #expect(failure.code == "source_missing")
+        #expect(name == "Vacation.png")
     }
 }

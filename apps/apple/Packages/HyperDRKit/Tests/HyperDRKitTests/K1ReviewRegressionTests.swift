@@ -209,7 +209,8 @@ private func requireHyperDRError(_ body: () async throws -> Void) async -> Strin
         #expect(await requireHyperDRError {
             _ = try await store.resultURL(session.id, export: record.id)
         } == "source_missing")
-        #expect(await store.exports(for: session.id).isEmpty)
+        // Still listed (its settings can be restored), but its file is not offered.
+        #expect(await store.exports(for: session.id).allSatisfy { !$0.fileAvailable })
         await store.close(session.id)
     }
 
@@ -601,7 +602,7 @@ extension K1ReviewRegressionTests {
         // give the second waiter an actor turn before cancelling the creator.
         try await Task.sleep(for: .milliseconds(20))
         creator.cancel()
-        guard case .unavailable(let failure) = await creator.value else {
+        guard case .unavailable(let failure, _) = await creator.value else {
             Issue.record("Expected cancelled creator"); return
         }
         #expect(failure.code == "cancelled")
@@ -620,7 +621,7 @@ extension K1ReviewRegressionTests {
             withUnsafeCurrentTask { $0?.cancel() }
             return await store.restoreLastOutcome()
         }
-        guard case .unavailable(let failure) = await caller.value else {
+        guard case .unavailable(let failure, _) = await caller.value else {
             Issue.record("Expected cancellation"); return
         }
         #expect(failure.code == "cancelled")

@@ -36,6 +36,7 @@
 } while (0)
 
 enum Operation {
+  OP_CAPABILITIES,
   OP_FRAME_LAYOUT,
   OP_PROBE_ARW,
   OP_PROBE_HEIC,
@@ -51,7 +52,7 @@ enum Operation {
 };
 
 static const char* const kOperationNames[OP_COUNT] = {
-    "frame_layout", "probe(ARW)", "probe(HEIC)", "raw_metadata(ARW)", "preview(ARW)",
+    "capabilities", "frame_layout", "probe(ARW)", "probe(HEIC)", "raw_metadata(ARW)", "preview(ARW)",
     "preview(HEIC)", "model_gain(ARW)", "convert(HEIC, AVIF PQ)", "convert+inspect(ISO JPEG)",
     "probe(ISO JPEG)","preview(ISO JPEG)","convert(ISO JPEG)",
     "probe(XMP JPEG)","preview(XMP JPEG)","convert(XMP JPEG)"};
@@ -277,6 +278,12 @@ static int run_operation(hyperdr_engine* engine, enum Operation operation,
                          const char* arw, const char* heic, const char* root,
                          Result* result) {
   switch (operation) {
+    case OP_CAPABILITIES: {
+      char* output = NULL;
+      hyperdr_error* error = NULL;
+      const int status = hyperdr_capabilities(engine, &output, &error);
+      return take_string(result, "capabilities", status, output, error);
+    }
     case OP_FRAME_LAYOUT: {
       char* output = NULL;
       hyperdr_error* error = NULL;

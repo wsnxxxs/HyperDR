@@ -88,7 +88,12 @@ typedef struct hyperdr_frame {
   void* owner;
 } hyperdr_frame;
 
-/* config: cache_directory (UTF-8), memory_budget_bytes, heic_tile_workers (0..4).
+/* config: cache_directory (UTF-8), memory_budget_bytes, heic_tile_workers (0..4),
+ * hevc_override (test-only: "unavailable" or "no-main10"; absent = real probe).
+ * capabilities.encoder reports backend, main8/main10, state and reason.
+ * HEVC failures use existing per-file error_code: hevc_unavailable,
+ * hevc_main10_unavailable or hevc_probe_failed. A requested 10-bit export
+ * never falls back to 8-bit; completed reports retain schema 13.
  * Request JSON: canonical settings at the top level; optional `command` holds
  * input/output/report, overwrite/recursive/skip_existing, depth, model_id,
  * external_gain/external_gain_report and region {left,top,width,height,center}.

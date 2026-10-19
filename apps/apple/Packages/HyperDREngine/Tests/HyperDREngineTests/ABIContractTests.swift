@@ -37,11 +37,12 @@ private final class Fixture {
     deinit { try? FileManager.default.removeItem(at: directory) }
 }
 
-private func cli(_ arguments: [String]) async throws -> Data {
+private func cli(_ arguments: [String], environment: [String: String] = [:]) async throws -> Data {
     try await EngineExecutor.run { _ in
         let process = Process()
         process.executableURL = repository.appendingPathComponent("build-apple/HyperDR")
         process.arguments = arguments
+        process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, value in value }
         let output = Pipe()
         let errors = Pipe()
         process.standardOutput = output
@@ -165,7 +166,20 @@ private final class Events: @unchecked Sendable {
         let metadata = try await engine.rawMetadata(raw)
         #expect(metadata.rawJSON == (try await cli(["raw-metadata", raw.path])))
         #expect(!metadata.make.isEmpty && !metadata.model.isEmpty)
-        // V4 adds the capabilities CLI. Until then, verify future encoder fields decode.
+        #expect(capabilities.rawJSON == (try await cli(["capabilities", "--json"])))
+        #expect(capabilities.encoder?.backend == "videotoolbox")
+        #expect(capabilities.encoder?.main8 == true && capabilities.encoder?.main10 == true)
+        for override in ["unavailable", "no-main10"] {
+            var configuration = EngineConfiguration()
+            configuration.hevcOverride = override
+            let restricted = try await Engine(configuration: configuration)
+            let caps = try await restricted.capabilities()
+            #expect(caps.rawJSON == (try await cli(["capabilities", "--json"],
+                environment: ["HYPERDR_TEST_HEVC": override])))
+            #expect(caps.encoder?.main10 == false)
+            #expect(caps.encoder?.reason == (override == "unavailable" ? "hevc_unavailable" : "hevc_main10_unavailable"))
+        }
+        // The typed contract also decodes a Main8-only encoder.
         var object = try #require(JSONSerialization.jsonObject(with: capabilities.rawJSON) as? [String: Any])
         object["encoder"] = ["backend": "videotoolbox", "main8": true, "main10": false,
                              "state": "ready", "reason": ""]

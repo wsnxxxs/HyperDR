@@ -1,4 +1,5 @@
 #include "hevc/vt_common.hpp"
+#include "hyperdr/codec/encoder_capabilities.hpp"
 
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/foundation/cancel.hpp"
@@ -231,3 +232,10 @@ void invalidate_encoder_caps() {
 }
 
 }  // namespace hyperdr::codec::hevc
+
+namespace hyperdr {
+EncoderCapabilities encoder_capabilities(const std::filesystem::path& cache_directory) {
+  const auto caps = codec::hevc::encoder_caps(cache_directory);
+  return {caps.main8, caps.main10, caps.reason_code};
+}
+}  // namespace hyperdr

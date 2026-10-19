@@ -171,6 +171,7 @@ int hyperdr_engine_create(const char* config_json, hyperdr_engine** out, hyperdr
       const auto doc = document(config_json);
       for (const auto& [key, value] : doc.members()) {
         if (key == "cache_directory") config.cache_directory = hyperdr::path_from_utf8(value.string());
+        else if (key == "hevc_override") config.hevc_override = value.string();
         else if (key == "heic_tile_workers" || key == "memory_budget_bytes") {
           const double n = value.number();
           if (n < 0 || n > 9007199254740991.0 || std::floor(n) != n) throw std::invalid_argument("invalid engine configuration number");

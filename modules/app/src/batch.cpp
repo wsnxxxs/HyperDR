@@ -1,4 +1,5 @@
 #include "hyperdr/app/batch.hpp"
+#include "encoder_capabilities.hpp"
 #include "hyperdr/app/analysis_cache.hpp"
 
 #include "hyperdr/app/decode_cache.hpp"
@@ -343,11 +344,22 @@ void verify_encoded(const std::vector<std::uint8_t>& bytes,
 }
 
 void finish_stage(Staged& staged, const ConvertOptions& options,
-                  const std::string& fingerprint, ProgressSink* sink) {
+                  const std::string& fingerprint, ProgressSink* sink, std::string_view hevc_override) {
   if (!staged.decoded) return;
   auto& result = staged.result;
   try {
     const auto decoded = Clock::now();
+    if (options.encoding == OutputEncoding::Adaptive || options.encoding == OutputEncoding::Pq ||
+        options.encoding == OutputEncoding::Hlg) {
+      const auto caps = app::detail::effective_encoder_capabilities(options.decode_cache_directory, hevc_override);
+      result.error_code = app::detail::encoder_failure(caps,
+          options.encoding != OutputEncoding::Adaptive || options.depth == 10);
+      if (!result.error_code.empty()) {
+        result.message = result.detail = result.error_code;
+        result.success = false;
+        return;
+      }
+    }
     if (options.decode_intent == DecodeIntent::Export &&
         (options.encoding == OutputEncoding::IsoGainMapJpeg || options.encoding == OutputEncoding::SdrJpeg)) {
       const auto& dimensions = staged.image.decode;
@@ -573,7 +585,7 @@ void require_decode_resolution(const ConvertOptions& options,
 
 FileResult convert_file(const std::filesystem::path& input,
                         const ConvertOptions& requested_options,
-                        const std::string& fingerprint, ProgressSink* sink) {
+                        const std::string& fingerprint, ProgressSink* sink, std::string_view hevc_override) {
   auto options = requested_options;
   options.raw.progress_sink = sink;
   const bool resources_unprepared =
@@ -593,7 +605,7 @@ FileResult convert_file(const std::filesystem::path& input,
     const auto path = path_utf8(input);
     sink->on_progress({"process", path, .3, {}});
   }
-  finish_stage(staged, options, captured_fingerprint, sink);
+  finish_stage(staged, options, captured_fingerprint, sink, hevc_override);
   return staged.result;
 }
 
@@ -616,7 +628,8 @@ void validate_frame_resources(const FrameSpec& frame) {
   }
 }
 
-int run_conversion(const ConvertOptions& requested_options, ProgressSink* sink, std::string* report) {
+int run_conversion(const ConvertOptions& requested_options, ProgressSink* sink, std::string* report,
+                   std::string_view hevc_override) {
   check_cancelled();
   auto options = requested_options;
   options.raw.progress_sink = sink;
@@ -682,7 +695,7 @@ int run_conversion(const ConvertOptions& requested_options, ProgressSink* sink, 
     check_cancelled();
     const auto path = path_utf8(files[index]);
     if (sink) sink->on_progress({"decode", path, 0.0, {}});
-    results[index] = convert_file(files[index], options, fingerprint, sink);
+    results[index] = convert_file(files[index], options, fingerprint, sink, hevc_override);
     announce(results[index], files[index]);
   }
   check_cancelled();

@@ -20,6 +20,8 @@ struct EngineConfig {
   std::filesystem::path cache_directory;
   std::uint64_t memory_budget_bytes{};
   unsigned heic_tile_workers{};
+  // Test-only capability override; never read from the environment by the engine.
+  std::string hevc_override;
 };
 class Busy : public std::runtime_error {
  public:

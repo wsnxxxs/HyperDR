@@ -16,6 +16,15 @@ extension UserFacingError {
             if case .string(let value) = fields["model"], !value.isEmpty { model = value }
             else { model = nil }
             self.init(code: error.code, detail: model, variant: container)
+        } else if error.code == "unsupported_format", case .object(let fields) = error.detail,
+                  fields["container"] == .string("heif"), case .string(let feature) = fields["feature"] {
+            // The reader says which HEIF feature it cannot read. A known one gets its own sentence and
+            // no engine wording; an unknown one keeps the detail for a bug report.
+            if ErrorText.heifFeatures.contains(feature) {
+                self.init(code: error.code, variant: "heif_" + feature)
+            } else {
+                self.init(code: error.code, detail: error.messageDetail ?? error.message, variant: "heif_unknown")
+            }
         } else if error.code == "export_folder_unwritable",
                   case .object(let fields) = error.detail, fields["save_mode"] == .string("destination") {
             self.init(code: error.code, detail: error.messageDetail ?? error.message, variant: "destination")

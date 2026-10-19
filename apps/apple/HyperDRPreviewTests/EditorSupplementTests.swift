@@ -8,7 +8,7 @@ import XCTest
         let url = try XCTUnwrap(Bundle.main.url(forResource: "THIRD_PARTY_NOTICES", withExtension: "md"))
         XCTAssertTrue(url.path.contains("HyperDR.app/Contents/Resources/"))
         let text = try String(contentsOf: url, encoding: .utf8)
-        XCTAssertTrue(text.contains("License"))
+        XCTAssertTrue(text.hasPrefix("# Third-party notices"))
         XCTAssertGreaterThan(text.utf8.count, 1000)
     }
 

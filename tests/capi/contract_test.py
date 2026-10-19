@@ -308,6 +308,11 @@ class EngineContract(unittest.TestCase):
                 self.assertEqual(document, subprocess.check_output([CLI, "capabilities", "--json"], env=env))
                 self.assertEqual(document, subprocess.check_output([CLI, "capabilities"], env=env))
                 caps = json.loads(document)
+                # Configured 0 derives the limit from physical memory less the
+                # 512 MiB reserve, as an export is checked against it.
+                self.assertEqual(caps["memoryBudgetBytes"], 0)
+                self.assertGreater(caps["effectiveMemoryBudgetBytes"], 0)
+                self.assertLessEqual(caps["effectiveMemoryBudgetBytes"], os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES"))
                 encoder = caps["encoder"]
                 self.assertEqual(encoder["backend"], "videotoolbox")
                 if caps["codecs"]:
@@ -324,6 +329,15 @@ class EngineContract(unittest.TestCase):
                         self.assertEqual(encoding["reason"], encoder["reason"] if blocked else "")
             finally:
                 LIB.hyperdr_engine_destroy(handle)
+        handle = Handle()
+        checked(LIB.hyperdr_engine_create, encoded({"memory_budget_bytes": 1 << 30}), ctypes.byref(handle))
+        try:
+            capped = json.loads(result(LIB.hyperdr_capabilities, handle))
+            self.assertEqual(capped["memoryBudgetBytes"], 1 << 30)
+            self.assertEqual(capped["effectiveMemoryBudgetBytes"],
+                             min(1 << 30, json.loads(result(LIB.hyperdr_capabilities, self.engine))["effectiveMemoryBudgetBytes"]))
+        finally:
+            LIB.hyperdr_engine_destroy(handle)
         # A CLI-only environment override must not leak into the ABI engine.
         previous = os.environ.get("HYPERDR_TEST_HEVC")
         try:

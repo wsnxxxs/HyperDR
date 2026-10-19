@@ -600,7 +600,7 @@ extension LiveEditorServices {
     func aboutInformation() async -> AboutInformation {
         let capabilities = try? await requireKit().capabilities
         return AboutInformation(bundle: .main, engineABI: Engine.abiVersion,
-                                memoryBudgetBytes: capabilities?.memoryBudgetBytes)
+                                memoryBudgetBytes: capabilities?.effectiveMemoryBudgetBytes)
     }
     func diagnostics() async -> String {
         guard let kit = try? await requireKit() else { return "" }

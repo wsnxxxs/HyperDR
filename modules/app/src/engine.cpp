@@ -1,6 +1,7 @@
 #include "hyperdr/app/engine.hpp"
 #include "encoder_capabilities.hpp"
 #include "hyperdr/app/batch.hpp"
+#include "hyperdr/app/export_memory.hpp"
 #include "hyperdr/app/schema.hpp"
 #include "hyperdr/codec/availability.hpp"
 #include "hyperdr/codec/encoding.hpp"
@@ -57,6 +58,8 @@ std::string Engine::capabilities() const {
   writer.begin_object().member("schema", "hyperdr.capabilities/v1")
       .member("version", kVersion).member("buildFingerprint", codec_runtime_fingerprint())
       .member("codecs", kCodecsAvailable).member("memoryBudgetBytes", config_.memory_budget_bytes)
+      .member("effectiveMemoryBudgetBytes",
+              export_memory_budget(config_.memory_budget_bytes, physical_memory_bytes()))
       .member("heicTileWorkers", config_.heic_tile_workers)
       .raw_member("models", native_model_list_json())
       .begin_object("encoder").member("backend", "videotoolbox")

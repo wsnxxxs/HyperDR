@@ -19,11 +19,14 @@ public struct Capabilities: Codable, Sendable {
     public let encodings: [Encoding]
     public let encoder: Encoder?
     public let memoryBudgetBytes: UInt64
+    /// The limit exports are checked against: the configured budget, or the host's memory less a reserve
+    /// when none is configured. Zero means the host could not report it.
+    public let effectiveMemoryBudgetBytes: UInt64
     public let heicTileWorkers: Int
     /// Exact UTF-8 returned by the engine, including the trailing newline.
     public internal(set) var rawJSON = Data()
     private enum CodingKeys: String, CodingKey {
-        case schema, version, buildFingerprint, codecs, models, encodings, encoder, memoryBudgetBytes, heicTileWorkers
+        case schema, version, buildFingerprint, codecs, models, encodings, encoder, memoryBudgetBytes, effectiveMemoryBudgetBytes, heicTileWorkers
     }
 }
 

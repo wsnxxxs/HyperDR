@@ -16,11 +16,13 @@ import HyperDRDesign
         ("light-zh-Hans", .light, "zh-Hans"), ("dark-zh-Hans", .dark, "zh-Hans"),
     ]
 
-    private func open(domain: InputDomain = .sdr) async -> EditorModel {
+    private func open(domain: InputDomain = .sdr, hasCaptureMetadata: Bool = false,
+                      missingCaptureFields: [String] = []) async -> EditorModel {
         let services = FakeEditorServices(openDelay: .zero, previewDelay: .milliseconds(1))
+        services.missingCaptureFields = missingCaptureFields
         services.preview = EditorPreview(pixelSize: PixelSize(width: 6000, height: 4000),
             source: SourceSummary(domain: domain, colorName: "sRGB", degradationReasons: [], colorSource: "assumed"),
-            hasGain: true, unadjusted: nil)
+            hasGain: true, unadjusted: nil, hasCaptureMetadata: hasCaptureMetadata)
         let model = EditorModel(services: services)
         model.open([URL(fileURLWithPath: "/fixtures/DSC00123.jpg")])
         await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
@@ -143,6 +145,35 @@ import HyperDRDesign
         XCTAssertEqual(model.ai.mode, .optimized)
         let pictures = try snapshots("ai", model: model) { $0.isScopeExpanded = false }
         XCTAssertFalse(pictures.isEmpty)
+    }
+
+    /// The design's third AI state: applied, with the model having done
+    /// without capture fields, and the picker offering two models. Waits for
+    /// the applied state itself -- `!isComputing` alone is true before the
+    /// computation starts.
+    func testAIAppliedWithFallbackAndTwoModels() async throws {
+        // The EXIF model is offered only for a photo with capture metadata; it
+        // can still lack some fields, and then falls back to the pixels.
+        let model = await open(hasCaptureMetadata: true, missingCaptureFields: ["focal_length_mm", "iso"])
+        let manual = try render(model, scheme: .light, locale: "en", session: ViewerSessionState())
+        model.setAIMode(.optimized)
+        await eventually(timeout: .seconds(5)) {
+            if case .applied = model.ai.availability {
+                return !model.ai.isComputing && !model.ai.fallbackMissingFields.isEmpty
+            }
+            return false
+        }
+        XCTAssertEqual(model.ai.mode, .optimized)
+        XCTAssertEqual(model.ai.fallbackMissingFields, ["focal_length_mm", "iso"])
+        XCTAssertEqual(model.ai.models.filter(\.isEnabled).count, 2, "the picker has two models to offer")
+        let panel = AIPanelState.make(domain: model.document?.source?.domain, mode: model.ai.mode,
+                                      availability: model.ai.availability, isComputing: model.ai.isComputing,
+                                      fallbackMissingFields: model.ai.fallbackMissingFields, notice: model.notice)
+        XCTAssertEqual(panel.lines.map(\.style), [.success, .warning])
+        let pictures = try snapshots("ai-applied-fallback", model: model) { $0.isScopeExpanded = false }
+        XCTAssertEqual(pictures.count, 4)
+        let applied = try render(model, scheme: .light, locale: "en", session: ViewerSessionState())
+        XCTAssertGreaterThan(applied.pixelsHigh, manual.pixelsHigh, "the notices and the picker add rows")
     }
 
     func testColorOnlyWithWaveformAndResetNotice() async throws {

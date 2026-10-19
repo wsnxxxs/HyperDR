@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import XCTest
 import HyperDRDesign
@@ -179,20 +180,32 @@ import HyperDRDesign
 
     // MARK: Held arrow keys (batch 4 §2.4)
 
-    /// What the slider does with a held arrow, replayed through the row's
-    /// own binding and bracket: down + repeats are one undo step.
+    private func arrow(_ type: NSEvent.EventType, repeating: Bool = false) -> ArrowKeyInput {
+        let event = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+                                     context: nil, characters: "", charactersIgnoringModifiers: "",
+                                     isARepeat: repeating, keyCode: 126)!
+        return ArrowKeyInput(event)!
+    }
+
+    /// A held arrow through the slider's own entry (`ArrowKeyEditing.perform`,
+    /// which the track and the readout call with the row's binding and
+    /// bracket), driven by constructed key events: the first key-down begins
+    /// the session, the repeats step, the key-up ends it, and one undo takes
+    /// back the whole hold.
     func testAHeldArrowIsOneUndoStep() async {
         let model = await opened()
         let initial = model.control("brightness").value
         let binding = ControlSlider.binding(model: model, key: "brightness")
         let editing = ControlSlider.editing(model: model, key: "brightness")
         let spec = ParameterSpecFactory.spec(for: model.control("brightness"), locale: Locale(identifier: "en"))
-        // The slider's own decision, as the track and the readout make it
-        // (ArrowKeyEditing, tested in the design package): a session opens
-        // at the first key-down and closes at the key-up.
-        editing(true)
-        for _ in 0..<3 { binding.wrappedValue = spec.stepped(binding.wrappedValue, by: 1) }
-        editing(false)
+        var keys = ArrowKeyEditing()
+        var phases: [Bool] = []
+        for input in [arrow(.keyDown), arrow(.keyDown, repeating: true), arrow(.keyDown, repeating: true), arrow(.keyUp)] {
+            keys.perform(input, verticalOnly: false, notify: { phases.append($0); editing($0) }) { steps in
+                binding.wrappedValue = spec.stepped(binding.wrappedValue, by: steps)
+            }
+        }
+        XCTAssertEqual(phases, [true, false], "one session for the whole hold")
         XCTAssertEqual(model.control("brightness").value, initial + 3 * spec.step, accuracy: 1e-6)
         model.undo()
         XCTAssertEqual(model.control("brightness").value, initial, accuracy: 1e-6, "one undo takes back the whole hold")
@@ -206,14 +219,41 @@ import HyperDRDesign
         let binding = ControlSlider.binding(model: model, key: "brightness")
         let editing = ControlSlider.editing(model: model, key: "brightness")
         let spec = ParameterSpecFactory.spec(for: model.control("brightness"), locale: Locale(identifier: "en"))
+        var keys = ArrowKeyEditing()
         for _ in 0..<2 {
-            editing(true)
-            binding.wrappedValue = spec.stepped(binding.wrappedValue, by: 1)
-            editing(false)
+            for input in [arrow(.keyDown), arrow(.keyUp)] {
+                keys.perform(input, verticalOnly: false, notify: editing) { steps in
+                    binding.wrappedValue = spec.stepped(binding.wrappedValue, by: steps)
+                }
+            }
         }
         model.undo()
         XCTAssertEqual(model.control("brightness").value, initial + spec.step, accuracy: 1e-6)
         XCTAssertTrue(model.canUndo)
+        model.undo()
+        XCTAssertEqual(model.control("brightness").value, initial, accuracy: 1e-6)
+        XCTAssertFalse(model.canUndo)
+        model.closeDocument()
+    }
+
+    /// The window going away mid-hold: the key-up never comes, and `finish`
+    /// (focus loss, disabling, removal) still closes the session, so the
+    /// edit is one undo step and nothing stays open.
+    func testALostKeyUpStillEndsTheHoldWhenTheControlLetsGo() async {
+        let model = await opened()
+        let initial = model.control("brightness").value
+        let binding = ControlSlider.binding(model: model, key: "brightness")
+        let editing = ControlSlider.editing(model: model, key: "brightness")
+        let spec = ParameterSpecFactory.spec(for: model.control("brightness"), locale: Locale(identifier: "en"))
+        var keys = ArrowKeyEditing()
+        for input in [arrow(.keyDown), arrow(.keyDown, repeating: true)] {
+            keys.perform(input, verticalOnly: false, notify: editing) { steps in
+                binding.wrappedValue = spec.stepped(binding.wrappedValue, by: steps)
+            }
+        }
+        XCTAssertTrue(keys.isOpen)
+        keys.finish(editing)
+        XCTAssertFalse(keys.isOpen)
         model.undo()
         XCTAssertEqual(model.control("brightness").value, initial, accuracy: 1e-6)
         XCTAssertFalse(model.canUndo)

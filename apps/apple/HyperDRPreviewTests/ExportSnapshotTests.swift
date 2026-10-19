@@ -56,7 +56,7 @@ import HyperDRDesign
     }
 
     private func start(_ model: EditorModel, _ services: FakeEditorServices) async {
-        model.startExport(destination: target)
+        model.startExport(destination: target, token: model.prepareExport()!)
         await eventually(timeout: .seconds(10)) { services.hasExportSubscriber }
     }
 
@@ -170,7 +170,7 @@ import HyperDRDesign
         let (model, services) = await ready()
         model.selectEncoding("sdr-jpeg")
         try await Task.sleep(for: .milliseconds(50))
-        model.startExport(destination: URL(fileURLWithPath: "/fixtures/out/a.jpg"))
+        model.startExport(destination: URL(fileURLWithPath: "/fixtures/out/a.jpg"), token: model.prepareExport()!)
         await eventually(timeout: .seconds(10)) { services.hasExportSubscriber }
         model.cancelExport()
         await eventually(timeout: .seconds(10)) { model.export.phase == .cancelled }
@@ -326,7 +326,7 @@ import HyperDRDesign
             var result = finishedResult(saved: saved); result.export = "v\(n)"; result.fileName = "DSC04127-\(n).heic"
             return ExportHistoryItem(version: ExportVersion(number: n, createdAt: now.addingTimeInterval(Double(n - 4) * 3600),
                 encodingID: n == 2 ? "iso-gainmap-jpeg" : "adaptive", modelName: name,
-                fallbackNote: n == 2 ? "Missing aperture; used the CNN alone" : nil, hasFrame: n == 3, result: result),
+                fallbackReason: n == 2 ? ExportFallbackReason(code: .missingCaptureFields, missingCaptureFields: ["f_number"]) : nil, hasFrame: n == 3, result: result),
                 key: key, options: model.edit)
         }
         services.historyByURL[source] = [item(1, key: first, saved: true, model: nil), item(2, key: "other", saved: false, model: "CNN"),

@@ -203,12 +203,28 @@ import HyperDRDesign
         XCTAssertTrue(model.export.isInFlight)
     }
 
-    func testASaveFailureIsWordedByTheWayOfSavingNotByTheErrorCode() {
-        let failure = UserFacingError(code: "export_folder_unwritable")
-        XCTAssertTrue(ExportPresentation.saveFailureSentence(failure, mode: .ask, locale: en).hasPrefix("Not saved: HyperDR can’t write to the chosen place"))
-        XCTAssertTrue(ExportPresentation.saveFailureSentence(failure, mode: .folder, locale: en).contains("chosen folder"))
+    func testASaveFailureIsWordedByTheWayOfSavingTheModelReports() {
+        let chosen = UserFacingError(code: "export_folder_unwritable", detail: "x", variant: "destination")
+        for mode in [Preferences.SaveMode.ask, .folder] {
+            XCTAssertTrue(ExportPresentation.saveFailureSentence(chosen, mode: mode, locale: en).hasPrefix("Not saved: HyperDR can’t write to the chosen place"), "\(mode)")
+        }
+        // Unmarked is the fixed folder: that is something to fix in Settings.
+        let folder = UserFacingError(code: "export_folder_unwritable")
+        XCTAssertTrue(ExportPresentation.saveFailureSentence(folder, mode: .folder, locale: en).contains("chosen folder"))
+        XCTAssertTrue(ExportPresentation.saveFailureSentence(folder, mode: .ask, locale: en).contains("chosen folder"))
         XCTAssertTrue(ExportPresentation.saveFailureSentence(UserFacingError(code: "session_expired"), mode: .ask, locale: en)
             != AppStrings.string("export.save.failed", locale: en))
+        XCTAssertEqual(ErrorText(chosen).body(locale: en).split(separator: "\n").first.map(String.init),
+                       "HyperDR can’t write to the chosen location. Choose another location and try again.")
+    }
+
+    func testAHistoryNoteNamesTheMissingFieldsOrSaysTheModelFellBack() {
+        let model = EditorModel(services: ScriptedEditorServices())
+        let known = ExportPresentation.fallbackNote(ExportFallbackReason(code: .missingCaptureFields,
+            missingCaptureFields: ["iso", "f_number"]), model: model, locale: en)
+        XCTAssertTrue(known.contains("ISO") && known.contains("aperture"), known)
+        XCTAssertEqual(AppStrings.string("history.fallback.unknown", locale: en), "The AI model fell back to the image alone.")
+        XCTAssertNotEqual(AppStrings.string("history.fallback.unknown", locale: zh), AppStrings.string("history.fallback.unknown", locale: en))
     }
 
     func testASavePanelAnsweredAfterThePhotoChangedStartsNothing() async {
@@ -312,7 +328,7 @@ import HyperDRDesign
 
     func testThePhotoSwitchQuestionNamesTheFileAndTheExport() async throws {
         let (model, services) = await ready()
-        model.startExport(destination: target)
+        model.startExport(destination: target, token: model.prepareExport()!)
         await eventually(timeout: .seconds(10)) { services.hasExportSubscriber }
         let other = URL(fileURLWithPath: "/tmp/IMG_2041.HEIC")
         model.open([other])

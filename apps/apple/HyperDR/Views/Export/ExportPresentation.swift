@@ -227,8 +227,21 @@ extension ExportPresentation {
     /// the fixed folder fail with the same code, but only the fixed folder is
     /// something to fix in Settings, so the wording follows the way of saving.
     static func saveFailureSentence(_ failure: UserFacingError, mode: Preferences.SaveMode, locale: Locale) -> String {
-        mode == .folder || failure.code == "session_expired"
+        // The model says which way of saving failed; the setting only decides for a failure it did not mark.
+        if failure.variant == "destination" { return AppStrings.string("export.save.failed", locale: locale) }
+        return mode == .folder || failure.code == "export_folder_unwritable" || failure.code == "session_expired"
             ? ErrorText(failure).body(locale: locale) : AppStrings.string("export.save.failed", locale: locale)
+    }
+
+    /// Why this version's model fell back to the image alone, from the model's
+    /// reason code and field names (never the engine's own wording).
+    @MainActor static func fallbackNote(_ reason: ExportFallbackReason, model: EditorModel, locale: Locale) -> String {
+        guard reason.code == .missingCaptureFields, !reason.missingCaptureFields.isEmpty else {
+            return AppStrings.string("history.fallback.unknown", locale: locale)
+        }
+        return AppStrings.format("ai.fallback %@ %@", locale: locale,
+            AdjustmentSection.fieldList(reason.missingCaptureFields, locale: locale),
+            AppStrings.string(model.fallbackModelNameKey, locale: locale))
     }
 
     /// "…/Pictures", the system's own name for the folder a copy was saved in

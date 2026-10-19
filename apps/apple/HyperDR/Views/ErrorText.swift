@@ -103,7 +103,9 @@ struct ErrorText {
         "model_not_ready": Entry(title: "mac.err.model.title", message: "err.server.model_not_ready"),
         "model_unknown": Entry(title: "mac.err.model.title", message: "err.server.model_unknown"),
         "export_folder_unset": Entry(title: "mac.err.export_folder_unset.title", message: "err.server.export_folder_unset"),
-        "export_folder_unwritable": Entry(title: "mac.err.export_folder_unwritable.title", message: "err.server.export_folder_unwritable"),
+        // The model marks a place chosen in the save panel (`destination`); the unmarked one is the fixed folder.
+        "export_folder_unwritable": Entry(title: "mac.err.export_folder_unwritable.title", message: "err.server.export_folder_unwritable",
+            variants: ["destination": "err.server.export_folder_unwritable.destination"]),
         "export_folder_inside_workspace": Entry(title: "mac.err.export_folder_inside_workspace.title",
             message: "err.server.export_folder_inside_workspace"),
         "lut_invalid": Entry(title: "mac.err.lut_invalid.title", message: "err.server.lut_invalid"),

@@ -223,6 +223,142 @@ import UniformTypeIdentifiers
                caption: [0, 1080, 4160, 80], reference: 4000, variant: "wide")
     }
 
+    private func instantLayout(_ width: Int, _ height: Int, hasCaption: Bool = true) throws -> FramePixelLayout {
+        var settings = FrameSettings()
+        settings.isEnabled = true
+        settings.style = .instant
+        return FramePixelLayout(try Engine.frameLayout(frame: settings.engineFrame(hasCaption: hasCaption),
+                                                       photoWidth: width, photoHeight: height))
+    }
+
+    /// instant's layouts by photograph proportion (frame-instant-panorama §2).
+    /// The numbers are `HyperDR frame-layout` run on the proposal spec,
+    /// build-design6/specs/instant-proposal.json.
+    func testInstantVariantsFollowThePhotoProportion() throws {
+        expect(try instantLayout(3000, 1000), 3108, 1318, photo: [54, 54, 3000, 1000],
+               caption: [0, 1054, 3108, 264], reference: 3000, variant: "wide")
+        expect(try instantLayout(4000, 1000), 4144, 1424, photo: [72, 72, 4000, 1000],
+               caption: [0, 1072, 4144, 352], reference: 4000, variant: "wide")
+        expect(try instantLayout(10000, 1000), 10360, 2060, photo: [180, 180, 10000, 1000],
+               caption: [0, 1180, 10360, 880], reference: 10000, variant: "wide")
+        expect(try instantLayout(45000, 1000), 46620, 5770, photo: [810, 810, 45000, 1000],
+               caption: [0, 1810, 46620, 3960], reference: 45000, variant: "wide")
+        // The band keeps the bottom mat when there is no text.
+        let plain = try instantLayout(4000, 1000, hasCaption: false)
+        XCTAssertEqual(plain.variant, "wide")
+        XCTAssertEqual(plain.caption.height, plain.height - plain.photo.y - plain.photo.height)
+    }
+
+    /// At 2.5:1 and below (and in portrait) the layout is what it was before the
+    /// variant: the same numbers as the spec without it, build-design6/specs/instant-now.json.
+    func testInstantStaysAsItWasUpToTwoAndAHalfToOne() throws {
+        expect(try instantLayout(2500, 1000), 2592, 1266, photo: [46, 46, 2500, 1000],
+               caption: [0, 1046, 2592, 220], reference: 1000, variant: nil)
+        expect(try instantLayout(6000, 4000), 6360, 5060, photo: [180, 180, 6000, 4000],
+               caption: [0, 4180, 6360, 880], reference: 4000, variant: nil)
+        expect(try instantLayout(4000, 6000), 4360, 7060, photo: [180, 180, 4000, 6000],
+               caption: [0, 6180, 4360, 880], reference: 4000, variant: nil)
+        expect(try instantLayout(1000, 4000), 1092, 4266, photo: [46, 46, 1000, 4000],
+               caption: [0, 4046, 1092, 220], reference: 1000, variant: nil)
+        expect(try instantLayout(1000, 9000), 1092, 9266, photo: [46, 46, 1000, 9000],
+               caption: [0, 9046, 1092, 220], reference: 1000, variant: nil)
+        // Just past 2.5:1 the card, the print and the band are the same pixels as the plain layout
+        // gave there (2594 × 1266, print at 46, band 220 high); only the reference edge differs.
+        expect(try instantLayout(2501, 1000), 2594, 1266, photo: [46, 46, 2501, 1000],
+               caption: [0, 1046, 2594, 220], reference: 2501, variant: "wide")
+    }
+
+    /// Past about 45:1 the canvas would be over six times the photograph's
+    /// area: the engine refuses and the sheet says the style does not apply.
+    func testInstantDoesNotApplyBeyondFortyFiveToOne() throws {
+        XCTAssertThrowsError(try instantLayout(46000, 1000))
+        XCTAssertNil(EditorModel.frameLayout(for: .instant, photoSize: PixelSize(width: 46000, height: 1000)))
+        XCTAssertNotNil(EditorModel.frameLayout(for: .instant, photoSize: PixelSize(width: 45000, height: 1000)))
+    }
+
+    func testInstantWritesItsWideVariantAsTheProposalSpec() {
+        var settings = FrameSettings()
+        settings.style = .instant
+        settings.tone = .paper
+        let expected: [String: JSONValue] = [
+            "schema": .string("hyperdr.frame/v1"), "background": .string(FrameTone.paper.background.hex),
+            "margins": .object(["top": .number(0.045), "right": .number(0.045), "bottom": .number(0.03), "left": .number(0.045)]),
+            "caption": .number(0.19), "reference": .string("short"),
+            "variants": .object(["wide": .object([
+                "minRatio": .number(2.5), "reference": .string("long"), "caption": .number(0.076),
+                "margins": .object(["top": .number(0.018), "right": .number(0.018), "bottom": .number(0.012), "left": .number(0.018)]),
+            ])]),
+        ]
+        XCTAssertEqual(settings.engineFrame(hasCaption: true), expected)
+        // No text: the band goes in the variant too.
+        guard case .object(let variants)? = settings.engineFrame(hasCaption: false)["variants"],
+              case .object(let wide)? = variants["wide"] else { return XCTFail("no wide variant") }
+        XCTAssertEqual(wide["caption"], .number(0))
+        // Story's variants are written as before, with the forced proportion dropped.
+        settings.style = .story
+        guard case .object(let story)? = settings.engineFrame(hasCaption: true)["variants"],
+              case .object(let storyWide)? = story["wide"] else { return XCTFail("no story variant") }
+        XCTAssertEqual(storyWide["aspect"], .null)
+        XCTAssertEqual(storyWide["margins"], .object(["top": .number(0.02), "right": .number(0.02),
+                                                      "bottom": .number(0.02), "left": .number(0.02)]))
+    }
+
+    /// The wide card's caption is the 2.5:1 one by the long edge: every size is
+    /// the plain one divided by 2.5.
+    func testInstantWideCaptionIsThePlainOneDividedByTwoAndAHalf() {
+        var settings = FrameSettings()
+        settings.isEnabled = true
+        settings.style = .instant
+        settings.showsDate = true
+        settings.signature = "Lin Wei"
+        let plain = FrameStyle.instant.caption(settings, facts: sony)
+        let wide = FrameStyle.instant.caption(settings, facts: sony, variant: "wide")
+        func sizes(_ caption: FrameCaption) -> [Double] { (caption.leading + caption.trailing).map(\.size) }
+        XCTAssertEqual(wide.leading.map(\.text), plain.leading.map(\.text))
+        XCTAssertEqual(wide.trailing.map(\.text), plain.trailing.map(\.text))
+        XCTAssertEqual(sizes(wide), [0.018, 0.0064, 0.0064])
+        for (w, p) in zip(sizes(wide), sizes(plain)) { XCTAssertEqual(w * 2.5, p, accuracy: 0.0005) }
+        XCTAssertEqual(wide.trailing.last?.gap, 0.0024)
+        XCTAssertEqual(wide.placement, plain.placement)
+        // The camera name stands in for an empty signature.
+        settings.signature = ""
+        XCTAssertEqual(FrameStyle.instant.caption(settings, facts: sony, variant: "wide").leading.map(\.size), [0.0088])
+        // Ordinary photographs keep their own sizes whatever else changes.
+        XCTAssertEqual(FrameStyle.instant.caption(settings, facts: sony, variant: nil).leading.map(\.size), [0.022])
+        // The preview does not force a minimum size on it.
+        XCTAssertNil(FrameStyle.instant.bodySize(variant: "wide"))
+    }
+
+    func testInstantHasItsOwnNoteForPanoramas() {
+        XCTAssertNotNil(FrameStyle.instant.variantNote("wide"))
+    }
+
+    /// No line of the instant card's text leaves the band in a wide card,
+    /// whichever text is on, and the two columns do not meet.
+    func testInstantWideCaptionLinesStayInsideTheBand() throws {
+        for (width, height) in [(4000, 1000), (10000, 1000), (2600, 1000)] {
+            for mask in 1..<8 {
+                var settings = FrameSettings()
+                settings.isEnabled = true
+                settings.style = .instant
+                settings.showsExposure = mask & 1 != 0
+                settings.showsCamera = mask & 2 != 0
+                settings.showsDate = mask & 4 != 0
+                settings.signature = mask == 7 ? "Lin Wei" : ""
+                let layout = try instantLayout(width, height)
+                XCTAssertEqual(layout.variant, "wide")
+                let (caption, frames) = lineFrames(settings, facts: sony, layout: layout)
+                let count = caption.leading.count + caption.center.count + caption.trailing.count
+                XCTAssertEqual(frames.count, count, "\(width)x\(height) \(mask): lines measured")
+                let band = textBand(layout)
+                assertInside(frames, band, "\(width)x\(height) \(mask)")
+                let left = frames.values.filter { $0.minX < band.midX }.map(\.maxX).max() ?? 0
+                let right = frames.values.filter { $0.minX >= band.midX }.map(\.minX).min() ?? .infinity
+                XCTAssertLessThan(left, right, "\(width)x\(height) \(mask): columns overlap")
+            }
+        }
+    }
+
     func testEngineDocumentWritesTheVariants() {
         var settings = FrameSettings()
         settings.style = .story
@@ -453,7 +589,7 @@ import UniformTypeIdentifiers
         let panorama = PixelSize(width: 3500, height: 1000)
         for style in FrameStyle.allCases {
             let layout = try XCTUnwrap(EditorModel.frameLayout(for: style, photoSize: panorama), "\(style)")
-            XCTAssertEqual(layout.variant, style == .story ? "wide" : nil, "\(style)")
+            XCTAssertEqual(layout.variant, style == .story || style == .instant ? "wide" : nil, "\(style)")
         }
         var story = FrameSettings()
         story.isEnabled = true
@@ -462,7 +598,7 @@ import UniformTypeIdentifiers
         XCTAssertEqual(plan.layout.variant, "wide")
         XCTAssertGreaterThan(plan.layout.width, plan.layout.height)
         XCTAssertNotNil(plan.overlayPNG)
-        XCTAssertEqual(FrameStyle.variantNote("wide") != nil, true)
+        XCTAssertNotNil(FrameStyle.story.variantNote("wide"))
         // A canvas past the engine's size limit is still refused.
         XCTAssertThrowsError(try FrameExportPlan.make(settings: story, facts: sony,
                                                       photoSize: PixelSize(width: 60000, height: 1000)))

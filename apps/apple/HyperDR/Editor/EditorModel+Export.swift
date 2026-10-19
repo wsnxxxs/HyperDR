@@ -395,7 +395,19 @@ extension EditorModel {
     func followPreviewEdgeWithReference() {
         let edge = previewEdge
         guard hasReferenceFrame, let options = referenceOptions, edge > requestedReferenceEdge else { return }
+        // An original that already has the photo's full size has nothing more to
+        // give; a larger tier would render the same pixels.
+        if !isReferenceRenderPending, let size = canvas.referencePixelSize, let full = document?.pixelSize,
+           max(size.width, size.height) >= CGFloat(max(full.width, full.height)) {
+            requestedReferenceEdge = edge; shownReferenceEdge = edge
+            return
+        }
         renderReferenceFrame(options: options, edge: edge)
+    }
+    /// A render of the "original" that has been asked for and has not arrived (or
+    /// failed): the original on screen and its details are still the old ones.
+    var isReferenceRenderPending: Bool {
+        referenceOptions != shownReferenceOptions || requestedReferenceEdge != shownReferenceEdge
     }
     /// Renders the "original" with `options` at `edge` and swaps it in; on a
     /// failure the earlier original stays, with the options and edge it had.
@@ -405,8 +417,10 @@ extension EditorModel {
         referenceOptions = options
         requestedReferenceEdge = edge
         // The details of the original on screen stay valid across a larger render
-        // of the same options; only different options make them stale.
-        if optionsChanged { invalidateDetails(editedOnly: false) }
+        // of the same options; only different options make them stale. The edit's
+        // own details are never the reference's business: a change of the edit
+        // clears them where it is made.
+        if optionsChanged { invalidateOriginalDetail() }
         referenceRefreshTask?.cancel()
         let ticket = generation
         referenceRefreshTask = Task { [weak self, services] in
@@ -414,23 +428,23 @@ extension EditorModel {
                 guard let result = try await services.renderReference(photo, options: options, maxEdge: edge) else { return }
                 guard let self, !Task.isCancelled, generation == ticket, self.photo == photo,
                       referenceOptions == options, requestedReferenceEdge == edge else { return }
+                // Details of the original drawn with other options no longer match it.
+                if shownReferenceOptions != options { invalidateOriginalDetail() }
                 shownReferenceOptions = options
                 shownReferenceEdge = edge
                 replaceReference(result)
-                invalidateDetails(editedOnly: false)
                 scheduleDetails()
             } catch EditorDetailError.sourceReplaced {
                 guard let self, !Task.isCancelled, generation == ticket, self.photo == photo else { return }
                 reopenReplacedSource(photo)
             } catch {
-                // The earlier original stays on screen, so its details must
-                // match it; the next switch or tier change tries again.
+                // The earlier original stays on screen with its own details; the
+                // next switch or tier change tries again.
                 guard let self, !Task.isCancelled, generation == ticket, self.photo == photo,
                       referenceOptions == options, requestedReferenceEdge == edge,
                       let shown = shownReferenceOptions else { return }
                 referenceOptions = shown
                 requestedReferenceEdge = shownReferenceEdge
-                invalidateDetails(editedOnly: false)
                 scheduleDetails()
             }
         }

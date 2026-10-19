@@ -160,6 +160,108 @@ import XCTest
         model.closeDocument()
     }
 
+    /// A photo opened at the 960 tier whose frames come from a real session, so
+    /// that the canvas knows how small they are. `previewEdge` is the edge of the
+    /// frames the fake hands out; the viewport is set before opening.
+    private func openedForTierChanges(previewEdge: Int = 32) async throws
+        -> (EditorModel,FakeEditorServices,PreviewSession) {
+        let bundle = previewFixtureBundle()
+        let url = try XCTUnwrap(bundle.url(forResource:"photo",withExtension:"jpg",subdirectory:"Fixtures")
+            ?? bundle.url(forResource:"photo",withExtension:"jpg"))
+        let engine = try await Engine(), session = try engine.openPreview(source:url)
+        let frame = try await session.renderFrame(EngineRequest(settings:["preview_max_edge":.number(Double(previewEdge))]))
+        let services = FakeEditorServices(openDelay:.zero,previewDelay:.milliseconds(1))
+        services.preview = LiveEditorServices.preview(frame)
+        services.detailHandler = { region,_ in
+            var request = EngineRequest(settings:["preview_max_edge":.number(2048)])
+            try request.setCommand("region",.object(["left":.number(Double(region.left)),"top":.number(Double(region.top)),
+                "width":.number(Double(region.width)),"height":.number(Double(region.height))]))
+            return LiveEditorServices.preview(try await session.renderFrame(request))
+        }
+        let model = EditorModel(services:services)
+        model.updateViewport(CGSize(width:800,height:600),backingScale:1) // the 960 tier
+        model.open([url])
+        await eventually(timeout:.seconds(3)) { model.document?.phase == .ready }
+        XCTAssertEqual(model.shownReferenceEdge,960)
+        return (model,services,session)
+    }
+
+    /// R7-802: a larger original of the same options leaves the details on screen
+    /// alone, on both sides, and asks for nothing more while it is on its way.
+    func testALargerTierKeepsTheDetailsOfBothSides() async throws {
+        let (model,services,session) = try await openedForTierChanges(); defer { session.close() }
+        model.toggleCompare()
+        model.canvas.zoomToActualPixels()
+        await eventually(timeout:.seconds(3)) { model.editedDetailFrame != nil && model.originalDetailFrame != nil }
+        services.autoCompletesRefreshes = false
+        let requests = services.detailRequests.count
+        var gate: CheckedContinuation<EditorPreview?,Error>?
+        services.referenceHandler = { _ in try await withCheckedThrowingContinuation { gate = $0 } }
+        model.updateViewport(CGSize(width:1000,height:700),backingScale:1) // 1280
+        await eventually(timeout:.seconds(3)) { gate != nil }
+        XCTAssertNotNil(model.editedDetailFrame,"the edit keeps its detail while the original is replaced")
+        XCTAssertNotNil(model.originalDetailFrame,"the same options: the original's detail is still its own")
+        gate?.resume(returning:services.preview)
+        await eventually(timeout:.seconds(3)) { model.shownReferenceEdge == 1280 }
+        try await Task.sleep(for:.milliseconds(400))
+        XCTAssertNotNil(model.editedDetailFrame)
+        XCTAssertNotNil(model.originalDetailFrame)
+        XCTAssertEqual(services.detailRequests.count,requests,"nothing was asked for again")
+        model.closeDocument()
+    }
+
+    /// R7-802: a new whole original is in flight, so its own detail is not asked
+    /// for twice; the edit's detail is, and the original's follows the new frame.
+    func testNoOriginalDetailIsAskedForWhileANewOriginalIsOnItsWay() async throws {
+        let (model,services,session) = try await openedForTierChanges(); defer { session.close() }
+        var gate: CheckedContinuation<EditorPreview?,Error>?
+        services.referenceHandler = { _ in try await withCheckedThrowingContinuation { gate = $0 } }
+        model.updateViewport(CGSize(width:1000,height:700),backingScale:1)
+        await eventually(timeout:.seconds(3)) { gate != nil }
+        services.autoCompletesRefreshes = false
+        model.toggleCompare()
+        model.canvas.zoomToActualPixels()
+        await eventually(timeout:.seconds(3)) { model.editedDetailFrame != nil }
+        try await Task.sleep(for:.milliseconds(400))
+        XCTAssertFalse(services.detailRequests.contains { $0.original },"the original is being replaced")
+        XCTAssertNil(model.originalDetailFrame)
+        gate?.resume(returning:services.preview)
+        await eventually(timeout:.seconds(3)) { model.originalDetailFrame != nil }
+        XCTAssertEqual(services.detailRequests.filter { $0.original }.count,1)
+        model.closeDocument()
+    }
+
+    /// R7-802: a different set of options makes the original's detail stale, but
+    /// not the edit's.
+    func testANewOriginalOfOtherOptionsDropsOnlyTheOriginalDetail() async throws {
+        let (model,services,session) = try await openedForTierChanges(); defer { session.close() }
+        model.toggleCompare()
+        model.canvas.zoomToActualPixels()
+        await eventually(timeout:.seconds(3)) { model.editedDetailFrame != nil && model.originalDetailFrame != nil }
+        services.autoCompletesRefreshes = false
+        var gate: CheckedContinuation<EditorPreview?,Error>?
+        services.referenceHandler = { _ in try await withCheckedThrowingContinuation { gate = $0 } }
+        model.referenceOptions?["lensCorrection"] = .bool(false)   // as if the lens switch had turned
+        model.followLensCorrectionWithReference()
+        await eventually(timeout:.seconds(3)) { gate != nil }
+        XCTAssertNil(model.originalDetailFrame,"drawn with other options than the new original")
+        XCTAssertNotNil(model.editedDetailFrame)
+        model.closeDocument()
+        gate?.resume(returning:services.preview)
+    }
+
+    /// R7-802: an original that already has every pixel is not rendered again.
+    func testAFullResolutionOriginalIsNotRenderedAgainForALargerTier() async throws {
+        let (model,services,session) = try await openedForTierChanges(previewEdge: 2400); defer { session.close() }
+        model.updateViewport(CGSize(width:1000,height:700),backingScale:1)
+        model.updateViewport(CGSize(width:1600,height:1000),backingScale:2)
+        try await Task.sleep(for:.milliseconds(200))
+        XCTAssertTrue(services.referenceEdges.isEmpty)
+        XCTAssertEqual(model.shownReferenceEdge,2048)
+        XCTAssertFalse(model.isReferenceRenderPending)
+        model.closeDocument()
+    }
+
     /// V-13: an original smaller than the canvas shows asks for its own detail
     /// even when the edited frame is large enough.
     func testTheOriginalNeedsDetailWhenItIsSmallerThanTheEditedFrame() {

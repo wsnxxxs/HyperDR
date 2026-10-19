@@ -83,10 +83,12 @@ import HyperDRDesign
 
     // MARK: Fixtures
 
-    private func openRAW(supported: Bool, decoder: String = "8", camera: String = "Sony ILCE-7RM5", lens: String? = "FE 70-200mm F2.8 GM OSS II")
+    private func openRAW(supported: Bool, decoder: String = "8", camera: String = "Sony ILCE-7RM5", lens: String? = "FE 70-200mm F2.8 GM OSS II",
+                         viewport: CGSize? = nil)
         async throws -> (EditorModel, ScriptedEditorServices) {
         let services = ScriptedEditorServices()
         let model = EditorModel(services: services)
+        if let viewport { model.updateViewport(viewport, backingScale: 1) }
         let url = URL(fileURLWithPath: "/fixtures/DSC01468.ARW")
         let preview = EditorPreview(pixelSize: PixelSize(width: 9504, height: 6336), source: SourceSummary(
             domain: .sceneReferred, colorName: "Display P3", degradationReasons: [],
@@ -341,6 +343,77 @@ import HyperDRDesign
         // The next edit finds the original out of step with the switch and tries again.
         model.editChanged()
         await eventually(timeout: .seconds(5)) { services.referenceRenders.count == 2 }
+    }
+
+    private var rawReference: EditorPreview {
+        EditorPreview(pixelSize: PixelSize(width: 9504, height: 6336),
+            source: SourceSummary(domain: .sceneReferred, colorName: "Display P3", degradationReasons: []), hasGain: false)
+    }
+
+    /// V-13 × lens correction: a larger tier asked for while the lens switch's
+    /// render is in flight (or the reverse) is one render of both changes. The
+    /// result of the older one is thrown away.
+    func testATierChangeAndTheLensSwitchCrossingBecomeOneOriginal() async throws {
+        for switchFirst in [false, true] {
+            let (model, services) = try await openRAW(supported: true, viewport: CGSize(width: 800, height: 600))
+            let initial = try XCTUnwrap(model.referenceOptions)
+            XCTAssertEqual(model.shownReferenceEdge, 960)
+            var gates: [CheckedContinuation<EditorPreview?, Error>] = []
+            services.referenceHandler = { _ in try await withCheckedThrowingContinuation { gates.append($0) } }
+            if switchFirst {
+                model.setLensCorrection(false)
+                await eventually(timeout: .seconds(5)) { gates.count == 1 }
+                model.updateViewport(CGSize(width: 1600, height: 1000), backingScale: 2)
+            } else {
+                model.updateViewport(CGSize(width: 1600, height: 1000), backingScale: 2)
+                await eventually(timeout: .seconds(5)) { gates.count == 1 }
+                model.setLensCorrection(false)
+            }
+            await eventually(timeout: .seconds(5)) { gates.count == 2 }
+            XCTAssertEqual(services.referenceEdges, switchFirst ? [960, 2048] : [2048, 2048])
+            XCTAssertEqual(services.referenceRenders.last?["lensCorrection"], .bool(false))
+            XCTAssertEqual(services.referenceRenders.last?["lensCorrection"], model.referenceOptions?["lensCorrection"])
+            XCTAssertTrue(model.isReferenceRenderPending)
+            let revision = model.frameRevision
+            gates[1].resume(returning: rawReference)
+            await eventually(timeout: .seconds(5)) { model.shownReferenceEdge == 2048 }
+            XCTAssertEqual(model.shownReferenceOptions?["lensCorrection"], .bool(false))
+            XCTAssertEqual(model.referenceOptions, model.shownReferenceOptions)
+            XCTAssertNotEqual(model.shownReferenceOptions, initial)
+            XCTAssertFalse(model.isReferenceRenderPending)
+            let swapped = model.frameRevision
+            XCTAssertGreaterThan(swapped, revision)
+            gates[0].resume(returning: rawReference)   // the older render, finished late
+            try await Task.sleep(for: .milliseconds(200))
+            XCTAssertEqual(model.frameRevision, swapped, "the older result is discarded")
+            XCTAssertEqual(model.shownReferenceEdge, 2048)
+            model.closeDocument()
+        }
+    }
+
+    /// A failure of that merged render puts the options and the edge back
+    /// together, to the original that is still shown.
+    func testAFailedCrossingRollsTheOptionsAndTheEdgeBackTogether() async throws {
+        let (model, services) = try await openRAW(supported: true, viewport: CGSize(width: 800, height: 600))
+        let initial = try XCTUnwrap(model.referenceOptions)
+        var gates: [CheckedContinuation<EditorPreview?, Error>] = []
+        services.referenceHandler = { _ in try await withCheckedThrowingContinuation { gates.append($0) } }
+        model.updateViewport(CGSize(width: 1600, height: 1000), backingScale: 2)
+        await eventually(timeout: .seconds(5)) { gates.count == 1 }
+        model.setLensCorrection(false)
+        await eventually(timeout: .seconds(5)) { gates.count == 2 }
+        let revision = model.frameRevision
+        gates[1].resume(throwing: UserFacingError(code: "decode_failed"))
+        await eventually(timeout: .seconds(5)) { !model.isReferenceRenderPending }
+        XCTAssertEqual(model.referenceOptions, initial)
+        XCTAssertEqual(model.shownReferenceOptions, initial)
+        XCTAssertEqual(model.requestedReferenceEdge, 960)
+        XCTAssertEqual(model.shownReferenceEdge, 960)
+        gates[0].resume(returning: rawReference)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(model.frameRevision, revision, "the discarded render does not reach the screen")
+        XCTAssertEqual(model.shownReferenceEdge, 960)
+        model.closeDocument()
     }
 
     func testAnOriginalRenderingWhenThePhotoIsClosedIsDiscarded() async throws {

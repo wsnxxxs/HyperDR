@@ -200,6 +200,7 @@ void structure(const std::string& name,const Bytes& bytes) {
       if(child.type=="ipco")props=children(meta,child.offset+8,child.offset+child.size);
     }
   }
+  for(const auto& property:props)require(property.type!="clap","writer must crop with grid, never clap");
   for(const auto& item:parse_iinf(iinf)) {
     types[item.id]=item.type;
     const bool hidden=item.type=="Exif" || item.type=="mime" ||

@@ -17,10 +17,24 @@
       "peak_relative_error": 0.0121500724927
     },
     "frame-gallery-hdr-heic-adaptive8": {
-      "mean_abs_log2": 0.0151279700173,
+      "candidate_peak": 2.557980299,
+      "mean_abs_log2": 0.0151118318096,
+      "peak_relative_error": 0.0158179905266,
       "reference_peak": 2.59909272194,
-      "candidate_peak": 2.56319999695,
-      "peak_relative_error": 0.013809713535
+      "source_commit": "bdc5f31704b514c6a72d055d858abfb75ac8253f",
+      "reason": "Lead approved 2026-10-19: HEIC input decoding improvement; deferred to P3a-2.",
+      "evidence": [
+        "build-p3b/e5-attribution/results.json",
+        "build-p3b/e5-attribution/diagnostic.json",
+        "build-p3b/e5-signed-attribution/results.json",
+        "build-p3b/e5-full-diagnostic128/results.json"
+      ],
+      "previous_pre": {
+        "mean_abs_log2": 0.0151279700173,
+        "reference_peak": 2.59909272194,
+        "candidate_peak": 2.56319999695,
+        "peak_relative_error": 0.013809713535
+      }
     },
     "frame-gallery-hdr-heic-avif-hlg10": {
       "mean_abs_log2": 0.00793893087007,
@@ -45,6 +59,20 @@
       "reference_peak": 1.59667575359,
       "candidate_peak": 1.56744027138,
       "peak_relative_error": 0.0183102190495
+    },
+    "frame-white-signed-pq10": {
+      "candidate_peak": 1.85562360287,
+      "mean_abs_log2": 0.0109004995891,
+      "peak_relative_error": 0.0180730558932,
+      "reference_peak": 1.88977766037,
+      "source_commit": "bdc5f31704b514c6a72d055d858abfb75ac8253f",
+      "reason": "Lead approved 2026-10-19: HEIC input decoding improvement; deferred to P3a-2.",
+      "evidence": [
+        "build-p3b/e5-attribution/results.json",
+        "build-p3b/e5-attribution/diagnostic.json",
+        "build-p3b/e5-signed-attribution/results.json",
+        "build-p3b/e5-full-diagnostic128/results.json"
+      ]
     }
   }
 }

@@ -99,4 +99,50 @@ import XCTest
         XCTAssertTrue(spoken.items[0].text.hasPrefix("开始导出“"))
         XCTAssertTrue(spoken.items[1].text.hasPrefix("导出完成，") && spoken.items[1].text.hasSuffix("已保存到“Pictures”。"))
     }
+
+    // MARK: Stop and Quit (§19.1)
+
+    func testStopAndQuitDoesNotSpeakAnOrdinaryStop() async throws {
+        let (model, services, announcer, spoken) = await setUp(); _ = announcer
+        await begin(model, services)
+        await eventually(timeout: .seconds(5)) { spoken.items.count == 1 }
+        let coordinator = TerminationCoordinator()
+        var replied: Bool?
+        coordinator.request(editor: model, confirmStop: { true }, reply: { replied = $0 })
+        await eventually(timeout: .seconds(5)) { replied != nil }
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(model.export.phase, .cancelled)
+        XCTAssertEqual(spoken.items.count, 1, "only the start was spoken: \(spoken.items)")
+    }
+
+    func testAnExportThatEndsWhileTheQuitQuestionIsOpenIsStillAnnounced() async throws {
+        let (model, services, announcer, spoken) = await setUp(); _ = announcer
+        await begin(model, services)
+        await eventually(timeout: .seconds(5)) { spoken.items.count == 1 }
+        let coordinator = TerminationCoordinator()
+        var answer: CheckedContinuation<Bool, Never>?
+        var replied: Bool?
+        coordinator.request(editor: model, confirmStop: { await withCheckedContinuation { answer = $0 } }, reply: { replied = $0 })
+        await eventually(timeout: .seconds(5)) { answer != nil }
+        XCTAssertTrue(coordinator.isPending)
+        services.sendExport(.finished(result: result(saved: true), failure: nil))
+        await eventually(timeout: .seconds(5)) { spoken.items.count == 2 }
+        XCTAssertEqual(spoken.items.last?.text, "Export finished. Adaptive HDR saved to “Pictures”.")
+        answer?.resume(returning: false)
+        await eventually(timeout: .seconds(5)) { replied == false }
+    }
+
+    func testAnOrdinaryStopIsStillSpokenAfterAQuitWasDeclined() async throws {
+        let (model, services, announcer, spoken) = await setUp(); _ = announcer
+        await begin(model, services)
+        await eventually(timeout: .seconds(5)) { spoken.items.count == 1 }
+        let coordinator = TerminationCoordinator()
+        var replied: Bool?
+        coordinator.request(editor: model, confirmStop: { false }, reply: { replied = $0 })
+        await eventually(timeout: .seconds(5)) { replied == false }
+        XCTAssertFalse(model.export.isStoppingToQuit)
+        model.cancelExport()
+        await eventually(timeout: .seconds(5)) { spoken.items.count == 2 }
+        XCTAssertEqual(spoken.items.last?.text, "Export stopped. Nothing was saved.")
+    }
 }

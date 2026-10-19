@@ -102,53 +102,134 @@ extension EditorModel {
     }
 }
 
+/// A press as the gesture reports it: where it began and where it is.
+struct FramePress: Equatable {
+    var start: CGPoint
+    var location: CGPoint
+}
+
+/// Reports a zero-distance press to `report`: the press while it lasts and
+/// `nil` when it is over, however it ends. The press is a `@GestureState`, so
+/// the system cancelling the gesture (which never calls `onEnded`) puts it back
+/// to nil just as a release does; `PressRelay` turns that, and the view going
+/// away while it is held, into the same nil. Whoever listens can therefore not
+/// be left holding.
+struct PressReporter: ViewModifier {
+    var simultaneous = false
+    let report: (FramePress?) -> Void
+    @GestureState private var press: FramePress?
+
+    private var gesture: some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .local)
+            .updating($press) { value, state, _ in state = FramePress(start: value.startLocation, location: value.location) }
+    }
+
+    func body(content: Content) -> some View {
+        Group {
+            if simultaneous { content.simultaneousGesture(gesture) } else { content.gesture(gesture) }
+        }
+        .modifier(PressRelay(press: press, report: report))
+    }
+}
+
+/// What follows a press that is a plain value: every change is reported, and
+/// the view leaving reports nil, which is idempotent for the listener (see
+/// `FrameSDRCompare.buttonUp`, `pointerEnded`). Kept apart from the gesture so
+/// a test can hand it a press that goes away without ever being "ended".
+struct PressRelay: ViewModifier {
+    let press: FramePress?
+    let report: (FramePress?) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: press) { _, now in report(now) }
+            .onDisappear { report(nil) }
+    }
+}
+
+extension View {
+    func reportsPress(simultaneous: Bool = false, _ report: @escaping (FramePress?) -> Void) -> some View {
+        modifier(PressReporter(simultaneous: simultaneous, report: report))
+    }
+}
+
+extension FrameSDRCompare {
+    /// The button's press, as `PressReporter` reports it.
+    func buttonPress(_ press: FramePress?) {
+        if press != nil { buttonDown() } else { buttonUp() }
+    }
+
+    /// A press on the card's mat or caption, as `PressReporter` reports it.
+    func matPress(_ press: FramePress?) {
+        if let press { pointerMoved(start: press.start, to: press.location) } else { pointerEnded() }
+    }
+}
+
 /// "Hold for SDR" at the preview's bottom right. A plain `Button` would turn
 /// a hold into a click that stays on; this is a view with a zero-distance
 /// drag instead, so down shows and up returns. It is focusable for the
-/// keyboard (hold Space) and a switch for VoiceOver.
+/// keyboard (hold Space) and a switch for VoiceOver. With nothing to compare
+/// it is disabled -- for the accessibility tree as well as to the eye --
+/// and its tooltip says why.
 struct FrameSDRButton: View {
     let compare: FrameSDRCompare
-    @FocusState private var focused: Bool
-    @State private var focusedByPointer = false
+    /// Told whether the button is enabled as SwiftUI resolves it, which is
+    /// what the accessibility tree and the focus system follow. For tests: an
+    /// offscreen view does not expose its accessibility elements.
+    var resolvedEnabled: ((Bool) -> Void)?
 
     var body: some View {
-        let enabled = compare.isEnabled
-        Label("frame.compare.sdr", systemImage: "circle.lefthalf.filled")
-            .labelStyle(.titleAndIcon)
-            .font(Font.hdr.caption)
-            .foregroundStyle(enabled ? Color.hdr.overlayInk : Color.hdr.overlayMuted)
-            .padding(.horizontal, Space.s2)
-            .padding(.vertical, Space.s1)
-            .background(compare.showsSDR ? Color.hdr.overlayHover : Color.hdr.overlay, in: .rect(cornerRadius: Radius.sm))
-            .overlay {
-                RoundedRectangle(cornerRadius: Radius.sm)
-                    .strokeBorder(compare.showsSDR ? Color.hdr.overlayLineStrong : Color.hdr.overlayLine)
-            }
-            .overlay { if focused && !focusedByPointer { RoundedRectangle(cornerRadius: Radius.sm).strokeBorder(Color.hdr.overlayInk, lineWidth: 2) } }
-            .environment(\.colorScheme, .dark)
-            .opacity(enabled ? 1 : 0.6)
-            .fixedSize()
-            .contentShape(.rect(cornerRadius: Radius.sm))
-            .gesture(DragGesture(minimumDistance: 0)
-                .onChanged { _ in focusedByPointer = true; compare.buttonDown() }
-                .onEnded { _ in compare.buttonUp() })
-            .focusable(enabled)
-            .focusEffectDisabled()
-            .focused($focused)
-            .onChange(of: focused) { _, now in if !now { focusedByPointer = false; compare.keyboardLeft() } }
-            .onKeyPress(keys: [.space], phases: [.down, .up]) { press in
-                guard press.modifiers.isDisjoint(with: [.command, .option, .control]) else { return .ignored }
-                if press.phase == .down { compare.spaceDown() } else { compare.spaceUp() }
-                return .handled
-            }
-            .onKeyPress(.escape) { compare.escape() ? .handled : .ignored }
-            .help(Text(enabled ? "frame.compare.sdr.help" : "frame.compare.sdr.noHDR"))
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(Text("frame.compare.sdr.a11y"))
-            .accessibilityValue(Text(compare.showsSDR ? "frame.compare.sdr.a11y.on" : "frame.compare.sdr.a11y.off"))
-            .accessibilityHint(Text(enabled ? "frame.compare.sdr.a11y.hint" : "frame.compare.sdr.noHDR"))
-            .accessibilityAddTraits([.isButton, .isToggle])
-            .accessibilityAction { compare.toggleLatched() }
+        Control(compare: compare, resolvedEnabled: resolvedEnabled).disabled(!compare.isEnabled)
+    }
+
+    private struct Control: View {
+        let compare: FrameSDRCompare
+        let resolvedEnabled: ((Bool) -> Void)?
+        /// What `.disabled` above made of it: the look and the traits follow it.
+        @Environment(\.isEnabled) private var enabled
+        @FocusState private var focused: Bool
+        @State private var focusedByPointer = false
+
+        var body: some View {
+            Label("frame.compare.sdr", systemImage: "circle.lefthalf.filled")
+                .labelStyle(.titleAndIcon)
+                .font(Font.hdr.caption)
+                .foregroundStyle(enabled ? Color.hdr.overlayInk : Color.hdr.overlayMuted)
+                .padding(.horizontal, Space.s2)
+                .padding(.vertical, Space.s1)
+                .background(compare.showsSDR ? Color.hdr.overlayHover : Color.hdr.overlay, in: .rect(cornerRadius: Radius.sm))
+                .overlay {
+                    RoundedRectangle(cornerRadius: Radius.sm)
+                        .strokeBorder(compare.showsSDR ? Color.hdr.overlayLineStrong : Color.hdr.overlayLine)
+                }
+                .overlay { if focused && !focusedByPointer { RoundedRectangle(cornerRadius: Radius.sm).strokeBorder(Color.hdr.overlayInk, lineWidth: 2) } }
+                .environment(\.colorScheme, .dark)
+                .opacity(enabled ? 1 : 0.6)
+                .fixedSize()
+                .contentShape(.rect(cornerRadius: Radius.sm))
+                .reportsPress { press in
+                    if press != nil { focusedByPointer = true }
+                    compare.buttonPress(press)
+                }
+                .focusable(enabled)
+                .focusEffectDisabled()
+                .focused($focused)
+                .onChange(of: focused) { _, now in if !now { focusedByPointer = false; compare.keyboardLeft() } }
+                .onKeyPress(keys: [.space], phases: [.down, .up]) { press in
+                    guard press.modifiers.isDisjoint(with: [.command, .option, .control]) else { return .ignored }
+                    if press.phase == .down { compare.spaceDown() } else { compare.spaceUp() }
+                    return .handled
+                }
+                .onKeyPress(.escape) { compare.escape() ? .handled : .ignored }
+                .help(Text(enabled ? "frame.compare.sdr.help" : "frame.compare.sdr.noHDR"))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text("frame.compare.sdr.a11y"))
+                .accessibilityValue(Text(compare.showsSDR ? "frame.compare.sdr.a11y.on" : "frame.compare.sdr.a11y.off"))
+                .accessibilityHint(Text(enabled ? "frame.compare.sdr.a11y.hint" : "frame.compare.sdr.noHDR"))
+                .accessibilityAddTraits([.isButton, .isToggle])
+                .accessibilityAction { compare.toggleLatched() }
+                .onChange(of: enabled, initial: true) { _, now in resolvedEnabled?(now) }
+        }
     }
 }
 

@@ -114,13 +114,9 @@ struct FrameSheet: View {
     }
 
     /// The same press over the mat and the caption, which are SwiftUI.
-    private var matPress: some Gesture {
-        DragGesture(minimumDistance: 0, coordinateSpace: .local)
-            .onChanged { value in
-                if !previewFocused { takePreviewFocus() }
-                compare.pointerMoved(start: value.startLocation, to: value.location)
-            }
-            .onEnded { _ in compare.pointerEnded() }
+    private func matPressed(_ press: FramePress?) {
+        if press != nil, !previewFocused { takePreviewFocus() }
+        compare.matPress(press)
     }
 
     @ViewBuilder private var preview: some View {
@@ -144,7 +140,7 @@ struct FrameSheet: View {
                                 .frame(width: CGFloat(layout.width) * scale, height: CGFloat(layout.height) * scale)
                                 .padding(.horizontal, Space.s6)
                                 .contentShape(.rect)
-                                .simultaneousGesture(matPress)
+                                .reportsPress(simultaneous: true, matPressed)
                         }
                         .scrollIndicators(.visible)
                         .frame(maxHeight: .infinity)
@@ -156,7 +152,7 @@ struct FrameSheet: View {
                             .padding(.top, Space.s6)
                             .padding(.bottom, 56)
                             .contentShape(.rect)
-                            .simultaneousGesture(matPress)
+                            .reportsPress(simultaneous: true, matPressed)
                     }
                     if compare.showsSDR {
                         FrameSDRLabel(compare: compare).padding(.top, cardTop + 12)
@@ -182,6 +178,9 @@ struct FrameSheet: View {
                 return .handled
             }
             .onKeyPress(.escape) { compare.escape() ? .handled : .ignored }
+            // The preview going away (no layout any more) takes its presses,
+            // keys and focus with it; nothing may stay held.
+            .onDisappear { compare.releaseAll() }
         } else if model.document?.pixelSize != nil {
             Text("frame.style.unavailable")
                 .font(Font.hdr.control)

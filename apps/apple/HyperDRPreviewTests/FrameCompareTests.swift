@@ -316,3 +316,128 @@ import HyperDRDesign
         }
     }
 }
+
+// MARK: - The views' side of a hold (R6-FRAME-SDR-1, -2)
+
+/// Mounted views in an offscreen window. Nothing is sent to the system.
+@MainActor final class FrameCompareMountedTests: XCTestCase {
+    private func mount<V: View>(_ view: V) -> (NSWindow, NSHostingView<V>) {
+        let host = NSHostingView(rootView: view)
+        let window = NSWindow(contentRect: NSRect(x: -4000, y: -4000, width: 240, height: 120), styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        host.frame = NSRect(x: 0, y: 0, width: 240, height: 120)
+        host.layoutSubtreeIfNeeded()
+        return (window, host)
+    }
+
+    private func settle() async { try? await Task.sleep(for: .milliseconds(80)) }
+
+    /// A press that goes away without `onEnded` ever running -- what a
+    /// cancelled gesture does to its `@GestureState` -- lets go.
+    private struct Relayed: View {
+        let compare: FrameSDRCompare
+        let box: PressBox
+        var body: some View {
+            Color.clear.frame(width: 40, height: 40)
+                .modifier(PressRelay(press: box.press, report: compare.buttonPress))
+        }
+    }
+    @MainActor @Observable final class PressBox { var press: FramePress? }
+
+    func testAGestureThatIsCancelledLetsGo() async {
+        let compare = FrameSDRCompare()
+        let box = PressBox()
+        let (window, _) = mount(Relayed(compare: compare, box: box))
+        defer { window.close() }
+        box.press = FramePress(start: .zero, location: .zero)
+        await settle()
+        XCTAssertTrue(compare.showsSDR)
+        box.press = nil // the state reset; no ended callback
+        await settle()
+        XCTAssertFalse(compare.showsSDR, "a cancelled press must not leave the preview on SDR")
+    }
+
+    private struct MatRelayed: View {
+        let compare: FrameSDRCompare
+        let box: PressBox
+        var body: some View {
+            Color.clear.frame(width: 40, height: 40)
+                .modifier(PressRelay(press: box.press, report: compare.matPress))
+        }
+    }
+
+    func testAMatPressThatIsCancelledEndsItsPendingHold() async {
+        let compare = FrameSDRCompare(holdDelay: .milliseconds(300))
+        let box = PressBox()
+        let (window, _) = mount(MatRelayed(compare: compare, box: box))
+        defer { window.close() }
+        box.press = FramePress(start: .zero, location: .zero)
+        await settle()
+        XCTAssertFalse(compare.showsSDR, "still waiting out the hold delay")
+        box.press = nil
+        try? await Task.sleep(for: .milliseconds(450))
+        XCTAssertFalse(compare.showsSDR, "the cancelled press did not start a hold afterwards")
+    }
+
+    private struct Switch: View {
+        let compare: FrameSDRCompare
+        let box: PressBox
+        let on: SwitchState
+        var body: some View {
+            if on.shown {
+                Color.clear.frame(width: 40, height: 40)
+                    .modifier(PressRelay(press: box.press, report: compare.buttonPress))
+            }
+        }
+    }
+    @MainActor @Observable final class SwitchState { var shown = true }
+
+    func testTheViewGoingAwayWhileHeldLetsGo() async {
+        let compare = FrameSDRCompare()
+        let box = PressBox(), state = SwitchState()
+        let (window, _) = mount(Switch(compare: compare, box: box, on: state))
+        defer { window.close() }
+        box.press = FramePress(start: .zero, location: .zero)
+        await settle()
+        XCTAssertTrue(compare.showsSDR)
+        state.shown = false
+        await settle()
+        XCTAssertFalse(compare.showsSDR, "the view left with the pointer down")
+    }
+
+    func testTheViewGoingAwayKeepsAKeyThatStillHolds() async {
+        let compare = FrameSDRCompare()
+        let box = PressBox(), state = SwitchState()
+        let (window, _) = mount(Switch(compare: compare, box: box, on: state))
+        defer { window.close() }
+        compare.spaceDown()
+        box.press = FramePress(start: .zero, location: .zero)
+        await settle()
+        state.shown = false
+        await settle()
+        XCTAssertTrue(compare.showsSDR, "Space is still down")
+        compare.buttonUp() // a second release is harmless
+        XCTAssertTrue(compare.showsSDR)
+        compare.spaceUp()
+        XCTAssertFalse(compare.showsSDR)
+    }
+
+    // MARK: Disabled for real
+
+    func testWithoutAnHDRPartTheButtonIsDisabledAndWithItEnabled() async {
+        let compare = FrameSDRCompare()
+        var seen: [Bool] = []
+        let (window, _) = mount(FrameSDRButton(compare: compare, resolvedEnabled: { seen.append($0) }))
+        defer { window.close() }
+        compare.configure(supportsEDR: true, hasHDR: true)
+        await settle()
+        XCTAssertEqual(seen.last, true)
+        compare.configure(supportsEDR: true, hasHDR: false)
+        await settle()
+        XCTAssertEqual(seen.last, false, "not just dimmed: SwiftUI resolves it disabled, so the accessibility tree and focus follow")
+        compare.configure(supportsEDR: true, hasHDR: true)
+        await settle()
+        XCTAssertEqual(seen.last, true)
+    }
+}

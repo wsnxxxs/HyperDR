@@ -523,6 +523,9 @@ import UniformTypeIdentifiers
     var currentReferenceFrame: PreviewFrame? { referenceFrame }
 
     var previewEdge: Int {
+        #if DEBUG
+        if let edge = A3StressRunner.edge { return edge }
+        #endif
         let transform = canvas.transform
         guard transform.viewport.width > 0, transform.viewport.height > 0 else { return 2048 }
         return EditDefaults.previewEdge(ceiling: 2048, boxWidth: transform.viewport.width,

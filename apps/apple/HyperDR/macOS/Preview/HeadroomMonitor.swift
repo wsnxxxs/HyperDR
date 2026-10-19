@@ -1,5 +1,6 @@
 import AppKit
 import HyperDREngine
+import os
 
 nonisolated struct HeadroomSnapshot: Equatable, Sendable {
     var screen: String? = nil
@@ -42,6 +43,7 @@ nonisolated enum GainWeight {
 /// NSScreen is read only on the main actor, once per display tick and on screen
 /// notifications. This state is independent of EditorModel's 4Hz readout.
 @MainActor final class HeadroomMonitor {
+    private static let logger = Logger(subsystem: "com.hyperdr.HyperDR", category: "PreviewTiming")
     private(set) var snapshot = HeadroomSnapshot()
     @discardableResult func sample(_ screen: NSScreen?) -> Bool {
         update(screen.map { HeadroomSnapshot(screen: $0.localizedName,
@@ -52,6 +54,9 @@ nonisolated enum GainWeight {
     @discardableResult func update(_ value: HeadroomSnapshot) -> Bool {
         guard snapshot != value else { return false }
         snapshot = value
+        if PreviewTrace.recordsEnabled {
+            Self.logger.info("A3 headroom current=\(Double(value.current), privacy: .public) potential=\(Double(value.potential), privacy: .public) policy=\(HeadroomPolicy.configured.rawValue, privacy: .public)")
+        }
         return true
     }
 }

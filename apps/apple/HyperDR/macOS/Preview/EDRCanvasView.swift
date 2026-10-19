@@ -141,6 +141,8 @@ final class EDRCanvasView: NSView {
     }
 
     @objc private func step(_ link: CADisplayLink) {
+        let interval = PreviewRenderer.signposter.beginInterval("CanvasTick")
+        defer { PreviewRenderer.signposter.endInterval("CanvasTick", interval) }
         refreshDisplay()
         guard window?.isVisible == true, !isHiddenOrHasHiddenAncestor,
               window?.occlusionState.contains(.visible) == true else { suspend(); return }

@@ -64,6 +64,15 @@ extension EditorModel {
         if !editedOnly, originalDetailFrame != nil { originalDetailFrame = nil; originalDetailTrace = nil; bumpFrameRevision() }
     }
 
+    /// The details of the "original" only; the edit's details stay up.
+    func invalidateOriginalDetail() {
+        guard originalDetailFrame != nil || originalDetailTrace != nil else { return }
+        detailTask?.cancel(); detailTask = nil
+        detailTicket &+= 1
+        originalDetailTrace = nil
+        if originalDetailFrame != nil { originalDetailFrame = nil; bumpFrameRevision() }
+    }
+
     /// Called by CanvasModel for buttons, gestures, viewport and scale changes.
     func canvasGeometryChanged() {
         guard canvas.needsEditedDetail || canvas.needsOriginalDetail, let visible = canvas.visibleSourceRect else {
@@ -93,8 +102,10 @@ extension EditorModel {
         let wantsEdited = !isPeekingOriginal && viewMode != .original
         let reference = referenceOptions ?? EditDefaults.reference(encoding: edit.encoding, workflow: options)
         // Each side asks for a detail only when its own frame is too small: the
-        // original may be a tier behind the edit (V-13).
+        // original may be a tier behind the edit (V-13), and none is asked of an
+        // original that is being replaced.
         let needsOriginal = wantsOriginal && originalDetailFrame == nil && canvas.needsOriginalDetail
+            && !isReferenceRenderPending
         let needsEdited = wantsEdited && editedDetailFrame == nil && canvas.needsEditedDetail
         guard needsOriginal || needsEdited else { return }
         detailTask = Task { [weak self, services] in

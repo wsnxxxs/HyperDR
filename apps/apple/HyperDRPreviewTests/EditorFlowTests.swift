@@ -17,6 +17,7 @@ import XCTest
     var closed: [EditorPhoto] = []
     var submitted: [EditOptions] = []
     var referenceRenders: [EditOptions] = []
+    var referenceEdges: [Int] = []
     var referenceHandler: ((EditOptions) async throws -> EditorPreview?)?
     var restoreWaiter: CheckedContinuation<RestoreResult, Never>?
     var startHandler: (() async -> Void)?
@@ -61,6 +62,7 @@ import XCTest
     }
     func renderReference(_ photo: EditorPhoto, options: EditOptions, maxEdge: Int) async throws -> EditorPreview? {
         referenceRenders.append(options)
+        referenceEdges.append(maxEdge)
         return try await referenceHandler?(options)
     }
     func modelTable() -> ModelTable { .unavailable }

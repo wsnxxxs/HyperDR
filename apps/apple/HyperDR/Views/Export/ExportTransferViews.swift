@@ -9,9 +9,12 @@ import SwiftUI
     /// picture) as a drag source. The block reads as one element to VoiceOver.
     static func dragSource(model: EditorModel, version: String, thumbnail: ThumbnailState,
                            name: String) -> (AnyView) -> AnyView {
-        guard let item = model.transferItem(for: version) else { return { $0 } }
+        let item = model.transferItem(for: version)
         return { content in
-            AnyView(content
+            // Read as one element whether or not it can be dragged, so a row
+            // whose file is gone is read the same way as the others.
+            guard let item else { return AnyView(content.accessibilityElement(children: .combine)) }
+            return AnyView(content
                 .draggable(item) { DragPreview(thumbnail: thumbnail, name: item.fileName) }
                 .accessibilityElement(children: .combine)
                 .accessibilityHint(Text("history.drag.hint")))
@@ -42,6 +45,8 @@ struct ExportShareButton: View {
     let model: EditorModel
     let version: String
     let thumbnail: ThumbnailState
+    /// The name the file has for the person (saved name, else its own).
+    let name: String
 
     var body: some View {
         if let item = model.transferItem(for: version) {
@@ -56,7 +61,7 @@ struct ExportShareButton: View {
                 .buttonStyle(.hdrIcon)
                 .disabled(true)
                 .help(Text("history.fileMissing.help"))
-                .accessibilityLabel(Text("history.share"))
+                .accessibilityLabel(Text("history.share.a11y \(name)"))
                 .accessibilityHint(Text("history.fileMissing.help"))
         }
     }

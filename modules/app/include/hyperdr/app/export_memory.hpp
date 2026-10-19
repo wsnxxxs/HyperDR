@@ -23,7 +23,11 @@ struct ExportMemoryEstimate {
     unsigned tile_workers = 0, bool retained_renditions = false,
     std::uint64_t retained_resource_bytes = 0,
     // Pixels of the external gain grid the parser will allocate (0 = none).
-    std::uint64_t external_gain_pixels = 0);
+    std::uint64_t external_gain_pixels = 0,
+    // The only reason for `retained_renditions` is an imported dual rendition
+    // (an authored SDR base with a gain map): no LUT, model or external grid.
+    // Such a pair costs less than the 80 B/px those add.
+    bool authored_pair_only = false);
 [[nodiscard]] std::uint64_t export_resource_bytes(const ConvertOptions& options);
 // Zero means that the host could not report its physical memory. A configured
 // limit still applies in that case. The system reserve matches RAW's 512 MiB.

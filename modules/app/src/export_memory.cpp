@@ -23,7 +23,7 @@ std::uint64_t plane(std::uint64_t pixels, std::uint64_t bytes) {
 ExportMemoryEstimate estimate_export_memory(std::uint32_t pw, std::uint32_t ph,
     std::uint32_t cw, std::uint32_t ch, OutputEncoding encoding, int depth,
     bool raw, std::uint32_t sw, std::uint32_t sh, unsigned workers, bool retained_renditions, std::uint64_t retained_resource_bytes,
-    std::uint64_t external_gain_pixels) {
+    std::uint64_t external_gain_pixels, bool authored_pair_only) {
   const auto photo = std::uint64_t(pw) * ph, canvas = std::uint64_t(cw) * ch;
   const auto sensor = sw && sh ? std::uint64_t(sw) * sh : photo;
   const bool sdr = is_sdr_encoding(encoding), gain = is_gain_map_encoding(encoding);
@@ -32,11 +32,14 @@ ExportMemoryEstimate estimate_export_memory(std::uint32_t pw, std::uint32_t ph,
   // observed across repeated exports (malloc's cache varies with host pressure).
   const auto overhead = raw ? 192 * MiB : 32 * MiB;
   // CIRAW keeps a GPU working set as well as the decoded float plane; its
-  // block renderer adds one 512-row RGBA block. Raster decode uses 15 B/px.
+  // block renderer adds one 512-row RGBA block. Raster decode uses 15 B/px;
+  // an imported dual rendition holds its HDR and SDR float planes beside the
+  // gain map: 37.6 B/px measured for an ISO HEIC, 26.1 for an older Apple one.
+  const bool pair = authored_pair_only && retained_renditions && !raw;
   const auto resident = raw ? plane(sensor,16) : 0;
   ExportMemoryEstimate e;
   e.decode = raw ? sum({overhead,resident,plane(photo,12),plane(std::uint64_t(pw)*512,16)})
-                 : sum({overhead,plane(photo,15)});
+                 : sum({overhead,plane(photo,pair ? 40 : 15)});
   // Imported dual renditions, LUT working renditions and model/external grids retain additional
   // bases, HDR samples and RGB gain planes while grading reconstructs a pair.
   // Measured with external grids: an SDR-only export of one holds about 48 B/px
@@ -46,7 +49,10 @@ ExportMemoryEstimate estimate_export_memory(std::uint32_t pw, std::uint32_t ph,
   // 24 MP and 12 MP sources (R7-301): 47 B/px HDR and 26 B/px SDR beyond 32 MiB,
   // and the stages after it keep the graded photo (24 B/px) next to the canvas.
   const bool raster=!raw && !retained_renditions;
-  const auto render_planes=retained_renditions ? (external_gain_pixels && sdr ? 56 : 80)
+  // An imported pair alone (no LUT, model or grid) measured 49-55 B/px for HDR
+  // outputs and 38-43 for SDR outputs (HEIC and Ultra HDR JPEG inputs).
+  const auto render_planes=pair ? (sdr ? 48 : 64)
+      : retained_renditions ? (external_gain_pixels && sdr ? 56 : 80)
       : raster ? (sdr ? 27 : 48) : (sdr ? 24 : 44);
   e.render = sum({overhead,resident,plane(photo,render_planes)});
   // The sidecar grid has its own size, independent of the photo and the canvas.

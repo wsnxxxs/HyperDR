@@ -419,7 +419,10 @@ void finish_stage(Staged& staged, const ConvertOptions& options,
         staged.image.authored_sdr.has_value() || !options.ai_model_path.empty() ||
         !options.external_gain_path.empty() ||
         (options.color_lut.snapshot && options.color_lut.strength > 0),
-        export_resource_bytes(options), external_pixels);
+        export_resource_bytes(options), external_pixels,
+        staged.image.authored_sdr.has_value() && options.ai_model_path.empty() &&
+        options.external_gain_path.empty() &&
+        !(options.color_lut.snapshot && options.color_lut.strength > 0));
     const auto physical = physical_memory_bytes();
     const auto budget = export_memory_budget(current_execution_config.memory_budget_bytes, physical);
     if ((physical || current_execution_config.memory_budget_bytes) && estimate.peak() > budget)

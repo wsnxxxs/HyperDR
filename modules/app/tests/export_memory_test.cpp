@@ -2,6 +2,7 @@
 #include "hyperdr/app/export_memory.hpp"
 #include "export_memory_measurements.hpp"
 #include "export_memory_external_measurements.hpp"
+#include "export_memory_heic_measurements.hpp"
 #include "hyperdr/app/engine.hpp"
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/foundation/file_io.hpp"
@@ -39,6 +40,16 @@ void external_measured_peaks() {
         r.grid_pixels*4+r.report_bytes,r.grid_pixels).peak();
     if(peak<r.footprint || peak>r.footprint+r.footprint/2)
       throw std::runtime_error(std::string("external gain estimate outside [1,1.5]: ")+r.name);
+  }
+}
+// P3b-4: exports of HEIC photos read by our own reader. Never below the real
+// footprint, never beyond 1.5 times it.
+void heic_input_peaks() {
+  for(const auto& r : heic_input_measurements) {
+    const auto peak=estimate_export_memory(r.pw,r.ph,r.cw,r.ch,r.encoding,r.depth,false,0,0,0,r.dual,0,0,r.dual).peak();
+    if(peak<r.footprint || peak>r.footprint+r.footprint/2)
+      throw std::runtime_error(std::string("HEIC input estimate outside [1,1.5] (")+
+          std::to_string(double(peak)/double(r.footprint))+"): "+r.name);
   }
 }
 void external_grid_estimates() {
@@ -380,6 +391,7 @@ int main() try {
   estimates();
   avif_grid_estimates();
   measured_peaks();
+  heic_input_peaks();
   external_grid_estimates();
   external_measured_peaks();
 #if HYPERDR_WITH_CODECS

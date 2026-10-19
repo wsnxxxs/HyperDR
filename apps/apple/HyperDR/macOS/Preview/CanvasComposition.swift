@@ -17,6 +17,23 @@ nonisolated struct CanvasComposition: @unchecked Sendable {
     var overlays = CanvasOverlays()
     var previewsAsSDR = false
     var presentationTrace: PreviewTrace? = nil
+    var originalDetailTrace: PreviewTrace? = nil
+    var editedDetailTrace: PreviewTrace? = nil
+
+    /// Whole-image work belongs to this publication, not cached provenance.
+    var primaryTrace: PreviewTrace? {
+        presentationTrace ?? (mode == .original ? original?.trace : edited.trace)
+    }
+    /// Only layers actually drawn may complete an independent detail request.
+    var presentedTraces: [PreviewTrace] {
+        var traces = [primaryTrace]
+        if mode != .edited, original != nil, let frame = originalDetail,
+           CanvasCompositor.region(frame) != nil { traces.append(originalDetailTrace ?? primaryTrace) }
+        if mode != .original, let frame = editedDetail,
+           CanvasCompositor.region(frame) != nil { traces.append(editedDetailTrace ?? primaryTrace) }
+        var seen = Set<ObjectIdentifier>()
+        return traces.compactMap { $0 }.filter { seen.insert(ObjectIdentifier($0)).inserted }
+    }
 }
 
 nonisolated struct CanvasOverlays: Equatable, Sendable {
@@ -110,9 +127,9 @@ nonisolated final class CanvasCompositor {
     }
 
     private func encode(_ frame: PreviewFrame, into texture: any MTLTexture, slice: UInt32,
-                        weight: Float, weightedOnly: Bool = false, command: any MTLCommandBuffer) throws {
-        let planes = try FramePlanes(frame, device: device)
-        try encode(planes, into: texture, slice: slice, weight: weight, weightedOnly: weightedOnly, command: command, trace: frame.trace)
+                        weight: Float, weightedOnly: Bool = false, command: any MTLCommandBuffer, trace: PreviewTrace?) throws {
+        let planes = try FramePlanes(frame, device: device, trace: trace)
+        try encode(planes, into: texture, slice: slice, weight: weight, weightedOnly: weightedOnly, command: command, trace: trace ?? frame.trace)
     }
 
     /// Also used by synthetic, offscreen pixel tests: exactly the production
@@ -183,9 +200,9 @@ nonisolated final class CanvasCompositor {
     /// command buffer supplied by PreviewRenderer's in-flight gate.
     func encode(_ content: CanvasComposition, transform: CanvasTransform, target: any MTLTexture,
                 command: any MTLCommandBuffer) throws {
-        edited = try prepare(content.edited, weight: Self.weight(content.headroom, frame: content.edited), previous: edited, command: command, trace: content.presentationTrace)
+        edited = try prepare(content.edited, weight: Self.weight(content.headroom, frame: content.edited), previous: edited, command: command, trace: content.primaryTrace)
         if let frame = content.original, content.mode != .edited {
-            original = try prepare(frame, weight: Self.weight(content.headroom, frame: frame), previous: original, command: command)
+            original = try prepare(frame, weight: Self.weight(content.headroom, frame: frame), previous: original, command: command, trace: content.primaryTrace)
         }
         let wantOriginal = content.originalDetail
         let wantEdited = content.editedDetail
@@ -199,19 +216,19 @@ nonisolated final class CanvasCompositor {
             var atlas: (any MTLTexture)?
             if width > 0, height > 0 {
                 let texture = try texture(width: width, height: height, slices: 6)
-                if let frame = wantOriginal, let weight = originalWeight { try encode(frame, into: texture, slice: 0, weight: weight, command: command) }
-                if let frame = wantEdited, let weight = editedWeight { try encode(frame, into: texture, slice: 3, weight: weight, command: command) }
+                if let frame = wantOriginal, let weight = originalWeight { try encode(frame, into: texture, slice: 0, weight: weight, command: command, trace: content.originalDetailTrace ?? content.primaryTrace) }
+                if let frame = wantEdited, let weight = editedWeight { try encode(frame, into: texture, slice: 3, weight: weight, command: command, trace: content.editedDetailTrace ?? content.primaryTrace) }
                 atlas = texture
             }
             detailOriginal = wantOriginal; detailEdited = wantEdited; detailTexture = atlas
             detailOriginalWeight = originalWeight; detailEditedWeight = editedWeight
         } else if let atlas = detailTexture {
             if let frame = wantOriginal, let weight = originalWeight, GainWeight.needsRebuild(from: detailOriginalWeight, to: weight) {
-                try encode(frame, into: atlas, slice: 0, weight: weight, weightedOnly: true, command: command)
+                try encode(frame, into: atlas, slice: 0, weight: weight, weightedOnly: true, command: command, trace: content.originalDetailTrace ?? content.primaryTrace)
                 detailOriginalWeight = weight
             }
             if let frame = wantEdited, let weight = editedWeight, GainWeight.needsRebuild(from: detailEditedWeight, to: weight) {
-                try encode(frame, into: atlas, slice: 3, weight: weight, weightedOnly: true, command: command)
+                try encode(frame, into: atlas, slice: 3, weight: weight, weightedOnly: true, command: command, trace: content.editedDetailTrace ?? content.primaryTrace)
                 detailEditedWeight = weight
             }
         }

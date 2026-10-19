@@ -1,5 +1,5 @@
 import XCTest
-import HyperDREngine
+@_spi(Testing) import HyperDREngine
 import HyperDRKit
 import Metal
 import Synchronization
@@ -56,7 +56,80 @@ import Synchronization
         XCTAssertTrue(model.canvasComposition?.presentationTrace === cached, "A cache hit must time this request, not the first render")
         XCTAssertTrue(first.trace === trace, "Publication must not mutate immutable pixel provenance")
         XCTAssertFalse(cached.hasPresented, "Offscreen service completion is not a presentation")
+        model.viewMode = .compare
+        model.canvas.setViewport(CGSize(width: 16, height: 16), backingScale: 1)
+        model.canvas.previewPixelSize = CGSize(width: 1, height: 1)
+        model.scheduleDetails()
+        await model.detailTask?.value
+        XCTAssertNotNil(model.originalDetailTrace)
+        XCTAssertNotNil(model.editedDetailTrace)
+        XCTAssertTrue(model.canvasComposition?.originalDetailTrace === model.originalDetailTrace)
+        XCTAssertTrue(model.canvasComposition?.editedDetailTrace === model.editedDetailTrace)
+        model.invalidateDetails()
+        XCTAssertNil(model.originalDetailTrace)
+        XCTAssertNil(model.editedDetailTrace)
         model.closeDocument()
+    }
+
+    func testCachedOriginalAndBothDetailLayersEncodeWithPublicationTraces() async throws {
+        let engine = try await Engine()
+        let bundle = previewFixtureBundle()
+        let url = try XCTUnwrap(bundle.url(forResource: "photo", withExtension: "jpg", subdirectory: "Fixtures")
+            ?? bundle.url(forResource: "photo", withExtension: "jpg"))
+        let session = try engine.openPreview(source: url)
+        defer { session.close() }
+        let staleEvents = Mutex<[String]>([])
+        let stale = PreviewTrace(onRecord: { stage, event in staleEvents.withLock { $0.append(stage + ":" + event) } })
+        let frame = try await PreviewTrace.$current.withValue(stale) {
+            try await session.renderFrame(EngineRequest(settings: ["preview_max_edge": .number(32), "headroom": .number(2)]))
+        }
+        var request = EngineRequest(settings: ["preview_max_edge": .number(32), "headroom": .number(2)])
+        try request.setCommand("region", .object(["left": .number(4), "top": .number(4),
+            "width": .number(16), "height": .number(12)]))
+        let detail = try await PreviewTrace.$current.withValue(stale) { try await session.renderFrame(request) }
+        let renderer = try makePreviewRenderer()
+        let compositor = try CanvasCompositor(device: renderer.device, queue: renderer.queue, library: renderer.library)
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba16Float, width: 16, height: 16, mipmapped: false)
+        descriptor.usage = [.renderTarget, .shaderRead]
+        let target = try XCTUnwrap(renderer.device.makeTexture(descriptor: descriptor))
+        let transform = CanvasTransform(imageSize: CGSize(width: frame.base.width, height: frame.base.height), viewport: CGSize(width: 16, height: 16))
+        func encode(_ composition: CanvasComposition) async throws {
+            let command = try XCTUnwrap(renderer.queue.makeCommandBuffer())
+            try compositor.encode(composition, transform: transform, target: target, command: command)
+            command.commit()
+            await eventually(timeout: .seconds(10)) { command.status == .completed }
+        }
+        try await encode(CanvasComposition(original: frame, edited: frame, presentationTrace: stale))
+        staleEvents.withLock { $0.removeAll() }
+        let events = Mutex<[String]>([])
+        let publication = PreviewTrace(onRecord: { stage, event in events.withLock { $0.append(stage + ":" + event) } })
+        try await encode(CanvasComposition(original: frame, edited: frame, mode: .original, presentationTrace: publication))
+        XCTAssertTrue(events.withLock { $0.contains("metalBuffers:begin") && $0.contains("pass1_encode:begin") })
+        XCTAssertTrue(staleEvents.withLock { $0.isEmpty })
+
+        let originalEvents = Mutex<[String]>([]), editedEvents = Mutex<[String]>([])
+        let original = PreviewTrace(onRecord: { stage, event in originalEvents.withLock { $0.append(stage + ":" + event) } })
+        let edited = PreviewTrace(onRecord: { stage, event in editedEvents.withLock { $0.append(stage + ":" + event) } })
+        var content = CanvasComposition(original: frame, edited: frame, originalDetail: detail, editedDetail: detail,
+            mode: .compare, presentationTrace: publication, originalDetailTrace: original, editedDetailTrace: edited)
+        try await encode(content)
+        for log in [originalEvents.withLock({ $0 }), editedEvents.withLock({ $0 })] {
+            XCTAssertTrue(log.contains("metalBuffers:begin") && log.contains("pass1_encode:begin"))
+        }
+        XCTAssertTrue(staleEvents.withLock { $0.isEmpty })
+        XCTAssertEqual(content.presentedTraces.map(\.token), [publication, original, edited].map(\.token))
+        // Headroom-only rebuilds must use the same publication ownership too.
+        originalEvents.withLock { $0.removeAll() }; editedEvents.withLock { $0.removeAll() }
+        content.headroom = 2
+        try await encode(content)
+        XCTAssertTrue(originalEvents.withLock { $0.contains("pass1_encode:begin") })
+        XCTAssertTrue(editedEvents.withLock { $0.contains("pass1_encode:begin") })
+        content.mode = .original
+        XCTAssertEqual(content.presentedTraces.map(\.token), [publication, original].map(\.token))
+        XCTAssertFalse(publication.hasPresented)
+        XCTAssertFalse(original.hasPresented)
+        XCTAssertFalse(edited.hasPresented)
+        XCTAssertTrue(frame.trace === stale)
     }
 
     func testGPUCounterCalibrationCompletesInTheSameCommandBuffer() async throws {

@@ -11,6 +11,7 @@ public final class PreviewTrace: @unchecked Sendable {
     public static let recordsEnabled = ProcessInfo.processInfo.environment["HDR_PREVIEW_TIMINGS"] == "1"
         || UserDefaults.standard.bool(forKey: "HDRPreviewTimings")
     private let recording: Bool
+    private var onRecord: (@Sendable (String, String) -> Void)? = nil
     public let token = UUID().uuidString
     private let id = signposter.makeSignpostID()
     private let lock = NSLock()
@@ -21,6 +22,11 @@ public final class PreviewTrace: @unchecked Sendable {
         self.recording = recording
         requestInterval = Self.signposter.beginInterval("RequestToPresent", id: id)
         record("request", "begin")
+    }
+    /// Deterministic event assertions without reading asynchronous system logs.
+    @_spi(Testing) public convenience init(onRecord: @escaping @Sendable (String, String) -> Void) {
+        self.init(recording: false)
+        self.onRecord = onRecord
     }
     deinit {
         if !presented {
@@ -37,6 +43,7 @@ public final class PreviewTrace: @unchecked Sendable {
         record(String(describing: stage), "end")
     }
     public func record(_ stage: String, _ event: String, nanoseconds: UInt64 = DispatchTime.now().uptimeNanoseconds) {
+        onRecord?(stage, event)
         guard recording else { return }
         Self.logger.info("A3 trace=\(self.token, privacy: .public) stage=\(stage, privacy: .public) event=\(event, privacy: .public) ns=\(nanoseconds, privacy: .public)")
     }

@@ -579,7 +579,7 @@ void test_small_stack() {
 
 }  // namespace
 
-int main() {
+int main() try {
   try {
     test_conversion();
     test_quality_map();
@@ -615,4 +615,10 @@ int main() {
     std::cerr << "hevc_vt_test failed: " << error.what() << "\n";
     return 1;
   }
+} catch (const std::exception& error) {
+  std::cerr << "test failure: " << error.what() << '\n';
+  return 1;
+} catch (...) {
+  std::cerr << "unknown test failure\n";
+  return 1;
 }

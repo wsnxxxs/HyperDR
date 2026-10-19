@@ -96,11 +96,17 @@ if(HYPERDR_WITH_CODECS AND HYPERDR_BUILD_TESTS)
 endif()
 
 if(HYPERDR_WITH_CODECS AND HYPERDR_BUILD_TESTS)
+  # Same real TIFF test, deliberately throwing after its first fixture write.
+  add_executable(tiff_codec_failure_test tiff_codec_test.cpp)
+  target_link_libraries(tiff_codec_failure_test PRIVATE HyperDR::codec TIFF::TIFF)
+  target_compile_definitions(tiff_codec_failure_test PRIVATE HYPERDR_TEST_INJECT_FAILURE=1)
+  hyperdr_configure_target(tiff_codec_failure_test)
   add_test(NAME native_temp_isolation_test COMMAND ${Python3_EXECUTABLE}
     ${PROJECT_SOURCE_DIR}/tests/support/check_concurrent_temp.py
     $<TARGET_FILE:png_decode_test> $<TARGET_FILE:tiff_codec_test>
     $<TARGET_FILE:hash_test> $<TARGET_FILE:file_io_test>
     $<TARGET_FILE:frame_request_test> $<TARGET_FILE:resume_state_test>
-    $<TARGET_FILE:color_lut_test> $<TARGET_FILE:discovery_test>)
+    $<TARGET_FILE:color_lut_test> $<TARGET_FILE:discovery_test>
+    --failure $<TARGET_FILE:tiff_codec_failure_test>)
   set_tests_properties(native_temp_isolation_test PROPERTIES TIMEOUT 180)
 endif()

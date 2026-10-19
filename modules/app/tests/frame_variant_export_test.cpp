@@ -50,7 +50,7 @@ void check(unsigned width, const std::filesystem::path& root) {
                 "wide TIFF changed a photograph pixel");
 }
 }
-int main() {
+int main() try {
   const auto folder = hyperdr::test::temporary_directory() /
       ("hyperdr-frame-variant-export-" + std::to_string(getpid()));
   try {
@@ -63,4 +63,10 @@ int main() {
     std::cerr << "frame_variant_export_test: " << error.what() << '\n';
     return 1;
   }
+} catch (const std::exception& error) {
+  std::cerr << "test failure: " << error.what() << '\n';
+  return 1;
+} catch (...) {
+  std::cerr << "unknown test failure\n";
+  return 1;
 }

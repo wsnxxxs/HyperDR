@@ -278,7 +278,7 @@ void test_content_light_lut(const std::filesystem::path& file) {
   }
 }
 
-int main() {
+int main() try {
   const auto file=hyperdr::test::temporary_directory()/"hyperdr-color-lut-test.cube";
   try {
     {
@@ -338,4 +338,10 @@ int main() {
     std::filesystem::remove(file);
     std::cout<<"colour LUT and rendition tests passed\n";
   } catch(const std::exception& e) {std::filesystem::remove(file);std::cerr<<e.what()<<'\n';return 1;}
+} catch (const std::exception& error) {
+  std::cerr << "test failure: " << error.what() << '\n';
+  return 1;
+} catch (...) {
+  std::cerr << "unknown test failure\n";
+  return 1;
 }

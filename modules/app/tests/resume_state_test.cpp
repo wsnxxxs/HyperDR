@@ -542,7 +542,7 @@ void check_native_model_base_routing() {
 
 }  // namespace
 
-int main() {
+int main() try {
   try {
     check_render_options_change_the_fingerprint();
     check_scheduling_options_do_not_change_it();
@@ -561,4 +561,10 @@ int main() {
   }
   std::cout << "resume_state_test passed\n";
   return 0;
+} catch (const std::exception& error) {
+  std::cerr << "test failure: " << error.what() << '\n';
+  return 1;
+} catch (...) {
+  std::cerr << "unknown test failure\n";
+  return 1;
 }

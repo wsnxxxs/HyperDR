@@ -198,7 +198,7 @@ void test_report_places_the_photo() {
 
 }  // namespace
 
-int main() {
+int main() try {
   try {
     test_request_carries_the_frame();
     test_framed_request_has_no_argv();
@@ -213,4 +213,10 @@ int main() {
   }
   std::cout << "frame_request_test passed\n";
   return 0;
+} catch (const std::exception& error) {
+  std::cerr << "test failure: " << error.what() << '\n';
+  return 1;
+} catch (...) {
+  std::cerr << "unknown test failure\n";
+  return 1;
 }

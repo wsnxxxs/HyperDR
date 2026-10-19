@@ -38,7 +38,7 @@ bool contains(const std::vector<std::filesystem::path>& files,
 
 }  // namespace
 
-int main() {
+int main() try {
   const auto root = hyperdr::test::temporary_directory() /
       "hyperdr-pipeline-discovery-test";
   std::filesystem::remove_all(root);
@@ -243,4 +243,10 @@ int main() {
     std::cerr << "pipeline discovery test failure: " << error.what() << '\n';
     return 1;
   }
+} catch (const std::exception& error) {
+  std::cerr << "test failure: " << error.what() << '\n';
+  return 1;
+} catch (...) {
+  std::cerr << "unknown test failure\n";
+  return 1;
 }

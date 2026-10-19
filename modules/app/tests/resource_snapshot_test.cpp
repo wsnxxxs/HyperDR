@@ -79,7 +79,7 @@ int run() {
   }
 }
 
-int main() {
+int main() try {
   pthread_attr_t attributes;
   if (pthread_attr_init(&attributes) != 0) return 2;
   if (pthread_attr_setstacksize(&attributes, 512U*1024U) != 0) {
@@ -93,4 +93,10 @@ int main() {
   pthread_attr_destroy(&attributes);
   if (status != 0 || pthread_join(thread,nullptr) != 0) return 2;
   return result;
+} catch (const std::exception& error) {
+  std::cerr << "test failure: " << error.what() << '\n';
+  return 1;
+} catch (...) {
+  std::cerr << "unknown test failure\n";
+  return 1;
 }

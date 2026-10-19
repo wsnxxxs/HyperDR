@@ -1170,7 +1170,7 @@ void check_apple_legacy_heic() {
   }
 }
 
-int main() {
+int main() try {
   try {
     hyperdr::GainMapOptions options;
     options.auto_exposure = false;
@@ -1669,4 +1669,10 @@ int main() {
     std::cerr << "codec test failure: " << e.what() << '\n';
     return 1;
   }
+} catch (const std::exception& error) {
+  std::cerr << "test failure: " << error.what() << '\n';
+  return 1;
+} catch (...) {
+  std::cerr << "unknown test failure\n";
+  return 1;
 }

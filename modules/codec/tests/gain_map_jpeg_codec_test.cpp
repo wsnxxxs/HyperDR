@@ -335,7 +335,7 @@ void reference(const std::filesystem::path& input, const std::filesystem::path& 
   std::cout << "reference headroom=" << p.headroom_stops << " render=" << p.stats.headroom_stops << '\n';
 }
 }
-int main(int argc,char**argv) {
+int main(int argc,char**argv) try {
   try {
     const std::string mode=argc>1?argv[1]:"test";
     if(mode=="fixtures" && argc==3) fixtures(argv[2]);
@@ -345,4 +345,10 @@ int main(int argc,char**argv) {
     else { packaging(); zero_headroom(); cancel_while_finishing(); }
     return 0;
   } catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}
+} catch (const std::exception& error) {
+  std::cerr << "test failure: " << error.what() << '\n';
+  return 1;
+} catch (...) {
+  std::cerr << "unknown test failure\n";
+  return 1;
 }

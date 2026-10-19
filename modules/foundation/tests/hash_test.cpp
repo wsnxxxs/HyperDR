@@ -113,7 +113,7 @@ void check_on_small_stack() {
 
 }  // namespace
 
-int main() {
+int main() try {
   try {
     check_sha256_vectors();
     check_on_small_stack();
@@ -123,4 +123,10 @@ int main() {
     std::cerr << error.what() << '\n';
     return 1;
   }
+} catch (const std::exception& error) {
+  std::cerr << "test failure: " << error.what() << '\n';
+  return 1;
+} catch (...) {
+  std::cerr << "unknown test failure\n";
+  return 1;
 }

@@ -43,11 +43,15 @@ public struct ParameterMaskLink {
 /// the key's `ControlValue`, writes go to `adjust(key, to:)`, and
 /// `onEditingChanged` maps to `beginAdjusting` / `endAdjusting`.
 ///
-/// `onEditingChanged` brackets pointer drags only: the drag is one undo step
-/// and previews at the draft size until it ends. A keyboard step, a typed
-/// value and a reset are single writes outside it, one undo step each, and
-/// render at full size at once. A drag that ends where it began still
-/// brackets; the model records no step for an unchanged value.
+/// `onEditingChanged` brackets a pointer drag and a held arrow key: each is
+/// one undo step and previews at the draft size until it ends. A key's
+/// bracket opens at its first key-down, stays open through the auto-repeat
+/// and closes at key-up (or when focus leaves, the control is disabled or
+/// removed), so holding Right Arrow from 0.60 to 0.75 is one step; a single
+/// press is a bracket of its own. A typed value and a reset are single
+/// writes outside any bracket, one undo step each, and render at full size
+/// at once. A drag that ends where it began still brackets; the model
+/// records no step for an unchanged value.
 public struct ParameterSlider: View {
     private let title: LocalizedStringKey
     @Binding private var value: Double
@@ -83,7 +87,8 @@ public struct ParameterSlider: View {
                 if let automatic = spec.automatic, !spec.isAutomatic(value) {
                     AutoButton { if value != automatic.value { value = automatic.value } }
                 }
-                ParameterReadout(title: title, value: $value, spec: spec, help: readoutHelp) { focused in
+                ParameterReadout(title: title, value: $value, spec: spec, help: readoutHelp,
+                                 onEditingChanged: onEditingChanged) { focused in
                     hold(.focus, focused)
                 }
             }
@@ -170,8 +175,10 @@ private struct ParameterReadout: View {
     @Binding var value: Double
     let spec: ParameterSpec
     let help: Text?
+    let onEditingChanged: (Bool) -> Void
     let onFocusChange: (Bool) -> Void
 
+    @State private var keys = ArrowKeyEditing()
     @FocusState private var focused: Bool
     @State private var draft = ""
     /// Whether `draft` holds something typed. Only typed text is committed.
@@ -207,8 +214,11 @@ private struct ParameterReadout: View {
             .modifier(OptionalHelp(text: help))
             .onChange(of: focused) { _, now in
                 now ? beginTyping() : commit()
+                if !now { keys.finish(onEditingChanged) }
                 onFocusChange(now)
             }
+            .onChange(of: isEnabled) { if !isEnabled { keys.finish(onEditingChanged) } }
+            .onDisappear { keys.finish(onEditingChanged) }
             .onChange(of: value) { if focused { beginTyping() } }
             .onSubmit {
                 // Commit and stay, with the value as stored, so another number
@@ -221,10 +231,12 @@ private struct ParameterReadout: View {
                 typed = false
                 focused = false
             }
-            .onKeyPress(keys: [.upArrow, .downArrow], phases: [.down, .repeat]) { press in
+            .onKeyPress(keys: [.upArrow, .downArrow], phases: [.down, .repeat, .up]) { press in
                 let steps = (press.key == .upArrow ? 1 : -1) * (press.modifiers.contains(.shift) ? 10 : 1)
-                set(spec.stepped(typed ? spec.parse(draft) ?? value : value, by: steps))
-                beginTyping()
+                if let steps = keys.handle(press.phase, steps: steps, notify: onEditingChanged) {
+                    set(spec.stepped(typed ? spec.parse(draft) ?? value : value, by: steps))
+                    beginTyping()
+                }
                 return .handled
             }
             // labelsHidden() drops the label from accessibility too.
@@ -285,6 +297,8 @@ private struct ParameterTrack: View {
     @State private var hovered = false
     @State private var grab: CGFloat?
     @State private var bracket = EditingBracket()
+    /// Open from the first key-down of an arrow to its key-up.
+    @State private var keys = ArrowKeyEditing()
     /// True while the pointer gesture is live; the system resets it to false
     /// when the gesture is cancelled as well as when it ends.
     @GestureState private var live = false
@@ -351,14 +365,16 @@ private struct ParameterTrack: View {
         .focusable(interactions: .activate)
         .focused($focused)
         .focusEffectDisabled()
-        .onKeyPress(keys: [.leftArrow, .rightArrow, .upArrow, .downArrow], phases: [.down, .repeat]) { press in
+        .onKeyPress(keys: [.leftArrow, .rightArrow, .upArrow, .downArrow], phases: [.down, .repeat, .up]) { press in
             let up = press.key == .rightArrow || press.key == .upArrow
-            step((up ? 1 : -1) * (press.modifiers.contains(.shift) ? 10 : 1))
+            let steps = (up ? 1 : -1) * (press.modifiers.contains(.shift) ? 10 : 1)
+            if let steps = keys.handle(press.phase, steps: steps, notify: onEditingChanged) { step(steps) }
             return .handled
         }
         .onChange(of: live) { if !live { finishDrag() } }
-        .onChange(of: isEnabled) { if !isEnabled { finishDrag() } }
-        .onDisappear { finishDrag() }
+        .onChange(of: focused) { if !focused { keys.finish(onEditingChanged) } }
+        .onChange(of: isEnabled) { if !isEnabled { finishDrag(); keys.finish(onEditingChanged) } }
+        .onDisappear { finishDrag(); keys.finish(onEditingChanged) }
         .contextMenu {
             Button { reset() } label: { Text("design.slider.reset", bundle: .module) }
                 .disabled(value == spec.defaultValue)

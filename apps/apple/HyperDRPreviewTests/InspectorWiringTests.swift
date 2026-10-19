@@ -176,4 +176,47 @@ import HyperDRDesign
         XCTAssertEqual(data.waveform?.rows, WaveformData.rows)
         XCTAssertEqual(data.waveform?.counts.count, 2 * WaveformData.rows)
     }
+
+    // MARK: Held arrow keys (batch 4 §2.4)
+
+    /// What the slider does with a held arrow, replayed through the row's
+    /// own binding and bracket: down + repeats are one undo step.
+    func testAHeldArrowIsOneUndoStep() async {
+        let model = await opened()
+        let initial = model.control("brightness").value
+        let binding = ControlSlider.binding(model: model, key: "brightness")
+        let editing = ControlSlider.editing(model: model, key: "brightness")
+        let spec = ParameterSpecFactory.spec(for: model.control("brightness"), locale: Locale(identifier: "en"))
+        // The slider's own decision, as the track and the readout make it
+        // (ArrowKeyEditing, tested in the design package): a session opens
+        // at the first key-down and closes at the key-up.
+        editing(true)
+        for _ in 0..<3 { binding.wrappedValue = spec.stepped(binding.wrappedValue, by: 1) }
+        editing(false)
+        XCTAssertEqual(model.control("brightness").value, initial + 3 * spec.step, accuracy: 1e-6)
+        model.undo()
+        XCTAssertEqual(model.control("brightness").value, initial, accuracy: 1e-6, "one undo takes back the whole hold")
+        XCTAssertFalse(model.canUndo)
+        model.closeDocument()
+    }
+
+    func testTwoSeparatePressesAreTwoUndoSteps() async {
+        let model = await opened()
+        let initial = model.control("brightness").value
+        let binding = ControlSlider.binding(model: model, key: "brightness")
+        let editing = ControlSlider.editing(model: model, key: "brightness")
+        let spec = ParameterSpecFactory.spec(for: model.control("brightness"), locale: Locale(identifier: "en"))
+        for _ in 0..<2 {
+            editing(true)
+            binding.wrappedValue = spec.stepped(binding.wrappedValue, by: 1)
+            editing(false)
+        }
+        model.undo()
+        XCTAssertEqual(model.control("brightness").value, initial + spec.step, accuracy: 1e-6)
+        XCTAssertTrue(model.canUndo)
+        model.undo()
+        XCTAssertEqual(model.control("brightness").value, initial, accuracy: 1e-6)
+        XCTAssertFalse(model.canUndo)
+        model.closeDocument()
+    }
 }

@@ -29,6 +29,10 @@ final class LocalizationCoverageTests: XCTestCase {
     /// ~/Desktop from the sandboxed host, whose first read waits for the
     /// system's folder-access check (2.4 s alone, over a minute on a busy
     /// machine) for no gain: the bundle holds exactly what the app ships.
+    ///
+    /// The compiled strings keep no translation state, so this test cannot see
+    /// a string left at `needs_review`; `scripts/check_apple_i18n.py` rejects
+    /// every unit that is not `translated`.
     private func catalogue() throws -> [String: Entry] {
         var result: [String: Entry] = [:]
         for locale in ["en", "zh-Hans"] {

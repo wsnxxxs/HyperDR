@@ -7,9 +7,9 @@ import HyperDRDesign
 /// Items that would overflow a narrow window fold into the toolbar's own
 /// overflow menu.
 ///
-/// M1 opens photos and switches the original and edited views. The LUT
-/// library, undo, export history, export and the comparison view arrive with
-/// M2 / M3; until then they are present but disabled rather than wired to
+/// Open, the original / edited / compare views, undo and redo, the frame and
+/// the inspector are live. The LUT library, export history and export arrive
+/// with M3; until then they are present but disabled rather than wired to
 /// actions that do nothing.
 struct MainToolbar: ToolbarContent {
     let model: EditorModel
@@ -36,12 +36,12 @@ struct MainToolbar: ToolbarContent {
             }
 
             ToolbarItemGroup(placement: .primaryAction) {
-                Button("edit.undo", systemImage: "arrow.uturn.backward") {}
+                Button("edit.undo", systemImage: "arrow.uturn.backward") { model.undo() }
                     .help("edit.undo")
-                    .disabled(true)
-                Button("edit.redo", systemImage: "arrow.uturn.forward") {}
+                    .disabled(!model.canUndo)
+                Button("edit.redo", systemImage: "arrow.uturn.forward") { model.redo() }
                     .help("edit.redo")
-                    .disabled(true)
+                    .disabled(!model.canRedo)
                 Button("workspace.versions", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90") {}
                     .help("workspace.versions")
                     .disabled(true)

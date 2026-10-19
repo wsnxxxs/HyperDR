@@ -9486,6 +9486,23 @@
           }
         }
       }
+    },
+    "err.server.export_folder_unwritable.destination" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HyperDR can’t write to the chosen location. Choose another location and try again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HyperDR 无法写入所选位置。请选择其他位置后再试。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

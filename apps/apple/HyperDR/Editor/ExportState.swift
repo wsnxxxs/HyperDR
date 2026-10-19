@@ -21,13 +21,19 @@ nonisolated struct ExportResult: Equatable, Sendable {
     var warnings: [String] = []
     var saved: SavedLocation? = nil
 }
+nonisolated struct ExportFallbackReason: Equatable, Sendable {
+    enum Code: String { case missingCaptureFields, unknown }
+    var code: Code
+    /// Engine field identifiers, never human-readable engine explanations.
+    var missingCaptureFields: [String]
+}
 nonisolated struct ExportVersion: Identifiable, Equatable, Sendable {
     var id: String { result.export }
     var number: Int
     var createdAt: Date
     var encodingID: String
     var modelName: String? = nil
-    var fallbackNote: String? = nil
+    var fallbackReason: ExportFallbackReason? = nil
     var hasFrame = false
     var matchesCurrent = false
     var result: ExportResult

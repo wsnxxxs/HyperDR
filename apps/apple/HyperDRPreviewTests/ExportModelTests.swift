@@ -108,9 +108,10 @@ import HyperDRKit
     }
     func testSaveFailureRetainsResultAndCancellationHasNoOutcomeCard() async {
         let (m,s) = await ready(); await running(m,s)
-        s.sendExport(.finished(result:result(),failure:UserFacingError(code:"export_folder_unwritable")))
+        s.sendExport(.finished(result:result(),failure:UserFacingError(code:"export_folder_unwritable",variant:"destination")))
         await eventually(timeout:.seconds(10)) { m.export.phase == .succeeded }
         XCTAssertNotNil(m.export.result); XCTAssertEqual(m.export.saveFailure?.code,"export_folder_unwritable")
+        XCTAssertEqual(m.export.saveFailure?.variant, "destination")
         m.export.dismissOutcome(); XCTAssertEqual(m.export.phase,.idle); XCTAssertNotNil(m.export.result)
         await running(m,s)
         s.sendExport(.finished(result:result(),failure:UserFacingError(code:"cancelled")))

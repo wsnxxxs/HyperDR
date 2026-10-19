@@ -210,8 +210,6 @@ extension LiveEditorServicesTests {
         await eventually(timeout:.seconds(10)) { model.exportVersions.first?.matchesCurrent == false }
         model.restore(id)
         await eventually(timeout:.seconds(10)) { model.exportVersions.first?.matchesCurrent == true }
-        let fileURL = await model.exportFileURL(id)
-        XCTAssertNotNil(fileURL)
         model.closeDocument()
     }
 }

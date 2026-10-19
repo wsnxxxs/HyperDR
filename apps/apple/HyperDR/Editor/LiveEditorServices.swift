@@ -551,10 +551,6 @@ extension LiveEditorServices {
         return EditorCapabilities(encodings: Dictionary(uniqueKeysWithValues: c.encodings.map { ($0.id, .init(available: $0.available, reason: $0.reason)) }),
             main8: c.encoder?.main8 ?? false, main10: c.encoder?.main10 ?? false, encoderReason: c.encoder?.reason)
     }
-    func exportFileURL(_ photo: EditorPhoto, export: String) async throws -> URL {
-        let session = try exportSession(photo)
-        return try await requireKit().sessions.resultURL(session, export: ExportID(rawValue: export))
-    }
     func aboutInformation() async -> AboutInformation {
         AboutInformation(bundle: .main, engineABI: Engine.abiVersion)
     }

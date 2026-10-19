@@ -212,6 +212,7 @@ Staged decode_stage(const std::filesystem::path& path,
     staged.result.output = output_path_for(path, options);
     if (options.skip_existing &&
         output_is_current(staged.result.output, path, options, fingerprint)) {
+      // A resume hit performs no encoding, so it is exempt from the encoder capability gate.
       staged.result.success = true;
       staged.result.skipped = true;
       staged.result.message = "skipped: output matches the current settings";

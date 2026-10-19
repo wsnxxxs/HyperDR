@@ -384,6 +384,67 @@ class EngineContract(unittest.TestCase):
                 finally:
                     LIB.hyperdr_engine_destroy(handle)
 
+    def test_hevc_resume_hit_exempts_gate_but_new_file_fails(self):
+        if not self.capabilities["codecs"]:
+            self.skipTest("requires codec-enabled build")
+        with tempfile.TemporaryDirectory(prefix="hyperdr-v4-resume-") as temporary:
+            for encoding in ("adaptive", "pq", "hlg"):
+                for interface in ("cli", "abi"):
+                    with self.subTest(encoding=encoding, interface=interface):
+                        root = Path(temporary) / encoding / interface
+                        sources, destination = root / "inputs", root / "out"
+                        sources.mkdir(parents=True)
+                        first, second = sources / "first.png", sources / "second.png"
+                        png(first, 64, 48)
+                        report_path = root / "report.json"
+                        request = {"encoding": encoding, "command": {"input": str(sources),
+                            "output": str(destination), "depth": 10, "overwrite": True, "skip_existing": True}}
+                        arguments = [CLI, "convert", str(sources), "--output", str(destination),
+                            "--encoding", encoding, "--depth", "10", "--overwrite", "--skip-existing",
+                            "--report", str(report_path)]
+                        env = dict(os.environ)
+                        env.pop("HYPERDR_TEST_HEVC", None)
+                        if interface == "cli":
+                            subprocess.run(arguments, env=env, capture_output=True, check=True)
+                            seeded = json.loads(report_path.read_bytes())
+                        else:
+                            seeded = json.loads(result(LIB.hyperdr_convert, self.engine,
+                                encoded(request), CALLBACK(), None, None))
+                        self.assertEqual(len(seeded["files"]), 1)
+                        existing = seeded["files"][0]
+                        self.assertTrue(existing["success"], existing)
+                        self.assertFalse(existing["skipped"])
+                        target = Path(existing["output"])
+                        digest = hashlib.sha256(target.read_bytes()).hexdigest()
+                        # The second source has no output when this same batch resumes.
+                        png(second, 63, 47)
+                        if interface == "cli":
+                            replay = subprocess.run(arguments,
+                                env=dict(env, HYPERDR_TEST_HEVC="no-main10"), capture_output=True)
+                            self.assertEqual(replay.returncode, 1, replay.stderr)
+                            document = json.loads(report_path.read_bytes())
+                        else:
+                            handle = Handle()
+                            checked(LIB.hyperdr_engine_create, encoded({"hevc_override": "no-main10"}),
+                                    ctypes.byref(handle))
+                            try:
+                                document = json.loads(result(LIB.hyperdr_convert, handle,
+                                    encoded(request), CALLBACK(), None, None))
+                            finally:
+                                LIB.hyperdr_engine_destroy(handle)
+                        self.assertEqual(document["schema"], 13)
+                        self.assertEqual(len(document["files"]), 2)
+                        files = {Path(file["input"]).name: file for file in document["files"]}
+                        skipped, failed = files[first.name], files[second.name]
+                        self.assertTrue(skipped["success"], skipped)
+                        self.assertTrue(skipped["skipped"], skipped)
+                        self.assertNotIn("error_code", skipped)
+                        self.assertEqual(hashlib.sha256(target.read_bytes()).hexdigest(), digest)
+                        self.assertFalse(failed["success"], failed)
+                        self.assertFalse(failed["skipped"], failed)
+                        self.assertEqual(failed["error_code"], "hevc_main10_unavailable")
+                        self.assertFalse(Path(failed["output"]).exists())
+
     def assert_source_geometry(self, source, expected=None, fast_preview=False):
         probe = json.loads(result(LIB.hyperdr_probe, self.engine, os.fsencode(source)))
         dimensions = (probe["width"], probe["height"])

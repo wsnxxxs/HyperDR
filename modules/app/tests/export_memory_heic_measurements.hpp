@@ -51,4 +51,13 @@ inline constexpr HeicInputMeasurement heic_input_measurements[] = {
   {"sony-hlg:story:pq:10",6336,9504,7032,12502,hyperdr::OutputEncoding::Pq,10,false,2288044480ULL},
   {"sony-hlg:story:iso-gainmap-jpeg:8",6336,9504,7032,12502,hyperdr::OutputEncoding::IsoGainMapJpeg,8,false,2646641184ULL},
   {"sony-hlg:story:sdr-jpeg:8",6336,9504,7032,12502,hyperdr::OutputEncoding::SdrJpeg,8,false,1834829744ULL},
+  {"ios-iso:none:avif-pq:10",5712,4284,5712,4284,hyperdr::OutputEncoding::AvifPq,10,true,1729038400ULL},
+  {"ios-iso:gallery:avif-pq:10",5712,4284,6228,5356,hyperdr::OutputEncoding::AvifPq,10,true,1830078696ULL},
+  {"ios-iso:story:avif-pq:10",5712,4284,6184,10994,hyperdr::OutputEncoding::AvifPq,10,true,3861499648ULL},
+  {"ios-old:none:avif-pq:10",4032,3024,4032,3024,hyperdr::OutputEncoding::AvifPq,10,true,879052192ULL},
+  {"ios-old:gallery:avif-pq:10",4032,3024,4396,3782,hyperdr::OutputEncoding::AvifPq,10,true,936773096ULL},
+  {"ios-old:story:avif-pq:10",4032,3024,4364,7758,hyperdr::OutputEncoding::AvifPq,10,true,1948813640ULL},
+  {"sony-hlg:none:avif-pq:10",6336,9504,6336,9504,hyperdr::OutputEncoding::AvifPq,10,false,4228255752ULL},
+  {"sony-hlg:gallery:avif-pq:10",6336,9504,7096,11088,hyperdr::OutputEncoding::AvifPq,10,false,4368749032ULL},
+  {"sony-hlg:story:avif-pq:10",6336,9504,7032,12502,hyperdr::OutputEncoding::AvifPq,10,false,5076800336ULL},
 };

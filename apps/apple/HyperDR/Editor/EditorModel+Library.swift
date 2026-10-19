@@ -66,6 +66,7 @@ extension EditorModel {
 
     func importLUTs(_ urls: [URL]) async {
         guard editingLockReason == nil, !lut.isBusy else { return }
+        invalidateLUTLibraryReads()
         lut.isBusy = true; lut.failures = []
         defer { lut.isBusy = false }
         for url in urls {
@@ -76,14 +77,20 @@ extension EditorModel {
                 lut.failures.append(UserFacingError(code: failure.code,
                     detail: url.lastPathComponent, variant: failure.variant))
             }
+            invalidateLUTLibraryReads()
         }
         await refreshLUTLibrary()
     }
     func removeLUT(_ id: String) {
         guard !isEditingLocked else { return }
+        invalidateLUTLibraryReads()
         Task { [weak self, services] in
-            do { try await services.removeLUT(id); await self?.refreshLUTLibrary() }
+            do { try await services.removeLUT(id) }
             catch { self?.lut.failures = [UserFacingError.service(error)] }
+            guard let self else { return }
+            // Fence reads begun during a mutation too, including partial failure.
+            invalidateLUTLibraryReads()
+            await refreshLUTLibrary()
         }
     }
     /// Invalid spaces keep the selected LUT and strength in undo, but the

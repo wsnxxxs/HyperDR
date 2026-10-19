@@ -6,12 +6,20 @@ public struct RowAction {
     public var title: Text
     public var systemImage: String?
     public var isEnabled: Bool
+    /// Why the action is off, as a tooltip and an accessibility hint; shown
+    /// only while it is off.
+    public var disabledReason: Text?
     public var action: () -> Void
 
-    public init(title: Text, systemImage: String? = nil, isEnabled: Bool = true, action: @escaping () -> Void) {
+    /// The reason to show: only while the action is off.
+    var reasonWhileOff: Text? { isEnabled ? nil : disabledReason }
+
+    public init(title: Text, systemImage: String? = nil, isEnabled: Bool = true, disabledReason: Text? = nil,
+                action: @escaping () -> Void) {
         self.title = title
         self.systemImage = systemImage
         self.isEnabled = isEnabled
+        self.disabledReason = disabledReason
         self.action = action
     }
 }
@@ -72,10 +80,12 @@ public struct ExportHistoryRow: View {
                     Button(action: primary.action) { label(primary) }
                         .buttonStyle(CompactButtonStyle(kind: .secondary))
                         .disabled(!primary.isEnabled)
+                        .modifier(DisabledReason(reason: primary.reasonWhileOff))
                 }
                 Button(action: secondary.action) { label(secondary) }
                     .buttonStyle(CompactButtonStyle(kind: .link))
                     .disabled(!secondary.isEnabled)
+                    .modifier(DisabledReason(reason: secondary.reasonWhileOff))
             }
         }
         .padding(.vertical, Space.s3)

@@ -226,6 +226,7 @@ public struct ExportStatusCard: View {
                     }
                     .buttonStyle(CompactButtonStyle(kind: .link))
                     .disabled(!canShowInFinder)
+                    .revealUnavailableHelp(!canShowInFinder)
                 }
             }
         }

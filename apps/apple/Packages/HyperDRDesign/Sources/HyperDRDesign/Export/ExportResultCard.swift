@@ -15,6 +15,32 @@ public struct ExportFact {
     }
 }
 
+/// Why a disabled "Show in Finder" is disabled. The tooltip and the VoiceOver
+/// hint say it, so a pointer or a screen reader learns what to do instead.
+public enum ExportRevealHelp {
+    public static var unavailable: Text { Text("design.export.showInFinder.unavailable", bundle: .module) }
+
+    /// The explanation to attach to a "Show in Finder" button: only while it is off.
+    static func reason(canShow: Bool) -> Text? { canShow ? nil : unavailable }
+}
+
+/// Gives a control that is off its reason: a tooltip and an accessibility
+/// hint, both only while there is one.
+struct DisabledReason: ViewModifier {
+    let reason: Text?
+
+    func body(content: Content) -> some View {
+        if let reason { content.help(reason).accessibilityHint(reason) } else { content }
+    }
+}
+
+extension View {
+    /// Explains a "Show in Finder" button that is off.
+    func revealUnavailableHelp(_ explain: Bool) -> some View {
+        modifier(DisabledReason(reason: ExportRevealHelp.reason(canShow: !explain)))
+    }
+}
+
 /// What the result card's last row says about saving.
 public enum ExportSaveRow {
     /// Saved: the place ("Saved to …/Pictures") and a way to show it.
@@ -92,6 +118,7 @@ public struct ExportResultCard: View {
                 }
                 .buttonStyle(CompactButtonStyle(kind: .link))
                 .disabled(!canShowInFinder)
+                .revealUnavailableHelp(!canShowInFinder)
             }
         case .saving:
             InspectorNotice(Text("design.export.saving", bundle: .module), style: .progress)

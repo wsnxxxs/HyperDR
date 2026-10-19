@@ -99,6 +99,12 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在访达中显示" } }
       }
     },
+    "design.export.showInFinder.unavailable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This version was saved earlier. Use Save As… to save it again." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这一版是之前保存的，请用“另存为…”再存一次。" } }
+      }
+    },
     "design.export.staleNote" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "You changed the photo after this export. Export again to include the changes." } },

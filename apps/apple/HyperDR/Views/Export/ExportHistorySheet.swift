@@ -62,7 +62,8 @@ struct ExportHistorySheet: View {
         let secondary: RowAction
         if version.saved != nil {
             secondary = RowAction(title: Text("export.save.showInFinder"), systemImage: "folder",
-                                  isEnabled: ExportFlow.canShowInFinder(model: model, version: version.id)) {
+                                  isEnabled: ExportFlow.canShowInFinder(model: model, version: version.id),
+                                  disabledReason: ExportRevealHelp.unavailable) {
                 ExportFlow.showInFinder(model: model, version: version.id)
             }
         } else {

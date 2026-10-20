@@ -99,6 +99,7 @@ public final class ModelGainResampler: @unchecked Sendable {
         for band in bands {
             try Task.checkCancellation()
             let height = band.sourceRows.upperBound - band.sourceRows.lowerBound
+            try device.validateTexture(width:sourceSize.width,height:height)
             let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba32Float,
                 width: sourceSize.width, height: height, mipmapped: false)
             descriptor.storageMode = .shared
@@ -141,6 +142,7 @@ public final class ModelGainResampler: @unchecked Sendable {
     }
 
     private func makeDestination(_ size: PixelSize) throws -> any MTLTexture {
+        try device.validateTexture(width:size.width,height:size.height)
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba32Float,
             width: size.width, height: size.height, mipmapped: false)
         descriptor.storageMode = .shared

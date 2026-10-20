@@ -281,7 +281,7 @@ nonisolated struct ExportStack: Sendable {
                 // session, where the service reads it.
                 if let look = capture.recipe.activeLook {
                     do { _ = try await stack.luts.apply(try IOSLUTLibrary.libraryID(look.contentHash), to: opened.session) }
-                    catch { throw RecipeExportError.missingLUT }
+                    catch where !Self.isCancellation(error) { throw RecipeExportError.missingLUT }
                 }
                 let result = try await stack.service.export(
                     session: opened.session, snapshot: capture.snapshot(revision: opened.revision), request: request,
@@ -349,11 +349,16 @@ nonisolated struct ExportStack: Sendable {
         task = nil
         waitingForSource = false
         endBackgroundTask()
-        if error is CancellationError || (error as? HyperDRError)?.code == "cancelled" {
+        if Self.isCancellation(error) {
             phase = leftRun == run ? .failed(Self.stopped) : .choosing
             return
         }
         phase = .failed(Self.failure(error))
+    }
+
+    /// A cancelled run (by the user or by leaving the app), not a failure.
+    nonisolated static func isCancellation(_ error: any Error) -> Bool {
+        error is CancellationError || (error as? HyperDRError)?.code == "cancelled"
     }
 
     // MARK: - Leaving the app

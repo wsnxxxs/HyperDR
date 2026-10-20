@@ -156,7 +156,7 @@ void write_gain_map_jpeg_rows(const EncodingRows& base, const EncodingRows& code
     const std::filesystem::path&);
 [[nodiscard]] std::vector<std::uint8_t> encode_heic_rows(const EncodingRows& base,
     const EncodingRows& codes, const GainMapMetadata&, float headroom,
-    const PhotoMetadata&, OutputEncoding, int quality, int depth, HevcPreset);
+    const PhotoMetadata&, OutputEncoding, int quality, int depth, HevcPreset, bool frame = false);
 
 namespace testing {
 // Test seam for JPEG encoding: when set, every libjpeg progress callback calls

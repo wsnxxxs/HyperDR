@@ -90,16 +90,17 @@ codec::hevc::EncodedSequence encode_base(const FloatImage& image,int depth,int q
   return encode_picture(grid,params,[&](std::size_t index,YuvTile& tile){
     rgb_tile(grid,index,[&](unsigned y,unsigned x,unsigned count,float* row){
       for(unsigned i=0;i<count;++i)for(unsigned c=0;c<3;++c)row[i*3+c]=srgb_oetf(image.at(x+i,y,c));
-    },1,true,tile);
+    },1,false,tile);
   });
 }
-codec::hevc::EncodedSequence encode_gain(const FloatImage& image,HevcPreset preset){
+codec::hevc::EncodedSequence encode_gain(const FloatImage& image,int quality,HevcPreset preset,bool frame){
   using namespace codec::hevc;
   // apple_strict rejects multichannel metadata before any encoding. Never
   // silently discard authored channels at this lower boundary either.
   if(image.channels!=1)throw std::invalid_argument("Adaptive HEIC requires a single-channel gain map");
   const auto grid=tile_grid(image.width,image.height);
-  const EncodeParams params{95,false,preset==HevcPreset::Medium,{2,2,1}};
+  const EncodeParams params{quality,false,preset==HevcPreset::Medium,{2,2,1},
+      frame?QualityRole::FramedGain:QualityRole::Gain};
   return encode_picture(grid,params,[&](std::size_t index,YuvTile& tile){
     luma_tile(grid,index,[&](unsigned y,unsigned x,unsigned count,float* row){
       for(unsigned i=0;i<count;++i)row[i]=image.at(x+i,y,0);
@@ -127,7 +128,7 @@ std::vector<std::uint8_t> encode_adaptive_heic(const GainMapResult& images,
     const PhotoMetadata& metadata,int quality,int depth,HevcPreset preset){
   validate_gain_map_metadata(images.metadata,GainMapWriterProfile::apple_strict);
   auto base=encode_base(images.base_linear,depth,quality,preset);
-  auto gain=encode_gain(images.gain_map,preset);
+  auto gain=encode_gain(images.gain_map,quality,preset,images.presentation_frame);
   const auto icc=codec::display_p3_profile();
   HeifEncodedImage b{base,images.base_linear.width,images.base_linear.height,{},std::nullopt,icc};
   HeifEncodedImage g{gain,images.gain_map.width,images.gain_map.height,{2,2,1,true},std::nullopt,{}};
@@ -151,7 +152,7 @@ std::vector<std::uint8_t> encode_hdr_heic(const PhotoRenditions& images,
         const auto encoded=encoding==HdrEncoding::Pq?std::array<float,3>{pq_oetf(linear[0]),pq_oetf(linear[1]),pq_oetf(linear[2])}:hlg_encode(linear);
         std::copy(encoded.begin(),encoded.end(),row+i*3);
       }
-    },9,true,tile);
+    },9,false,tile);
   });
   HeifEncodedImage image{coded,hdr.width,hdr.height,{9,static_cast<std::uint16_t>(transfer),9,true},content_light(hdr),{}};
   HeifWriteOptions options;options.exif=make_minimal_exif(metadata);
@@ -161,7 +162,7 @@ std::vector<std::uint8_t> encode_hdr_heic(const PhotoRenditions& images,
 
 std::vector<std::uint8_t> encode_heic_rows(const EncodingRows& base,const EncodingRows& codes,
     const GainMapMetadata& metadata,float headroom,const PhotoMetadata& photo,
-    OutputEncoding encoding,int quality,int depth,HevcPreset preset) {
+    OutputEncoding encoding,int quality,int depth,HevcPreset preset,bool frame) {
   using namespace codec::hevc;
   const auto grid=tile_grid(base.width,base.height);
   auto picture=[&](const EncodingRows& rows,const EncodeParams& parameters,bool luma,bool hdr) {
@@ -191,7 +192,7 @@ std::vector<std::uint8_t> encode_heic_rows(const EncodingRows& base,const Encodi
             } else for(auto& v:rgb)v=srgb_oetf(v);
             std::copy(rgb.begin(),rgb.end(),row+i*3);
           }
-        },hdr?9:1,true,tile);
+        },hdr?9:1,false,tile);
       }
     },parameters);
   };
@@ -200,7 +201,7 @@ std::vector<std::uint8_t> encode_heic_rows(const EncodingRows& base,const Encodi
   if(encoding==OutputEncoding::Adaptive) {
     validate_gain_map_metadata(metadata,GainMapWriterProfile::apple_strict);
     auto b=picture(base,{quality,depth==10,speed,{12,13,1}},false,false);
-    auto g=picture(codes,{95,false,speed,{2,2,1}},true,false);
+    auto g=picture(codes,{quality,false,speed,{2,2,1},frame?QualityRole::FramedGain:QualityRole::Gain},true,false);
     const auto icc=codec::display_p3_profile();
     HeifEncodedImage primary{b,base.width,base.height,{},std::nullopt,icc};
     HeifEncodedImage gain{g,base.width,base.height,{2,2,1,true},std::nullopt,{}};

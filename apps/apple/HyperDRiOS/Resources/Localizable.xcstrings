@@ -91,6 +91,60 @@
         }
       }
     },
+    "ios.ai.computing" : {
+      "comment" : "The AI highlights are being computed; editing goes on.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Computing AI highlights…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在计算 AI 高光…"
+          }
+        }
+      }
+    },
+    "ios.ai.failed" : {
+      "comment" : "The AI highlights could not be computed; the photo shows without them.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AI highlights could not be computed"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法计算 AI 高光"
+          }
+        }
+      }
+    },
+    "ios.canvas.original" : {
+      "comment" : "Shown while the canvas is held to see the original.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Original · Release to Return"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "原图 · 松开返回"
+          }
+        }
+      }
+    },
     "ios.display.edr %@ %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -223,6 +277,42 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "照片"
+          }
+        }
+      }
+    },
+    "ios.toolbar.redo" : {
+      "comment" : "Redo the adjustment just undone.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Redo"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重做"
+          }
+        }
+      }
+    },
+    "ios.toolbar.undo" : {
+      "comment" : "Undo the last adjustment.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Undo"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "撤销"
           }
         }
       }

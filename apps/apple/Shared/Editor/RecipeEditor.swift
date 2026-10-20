@@ -45,6 +45,9 @@ import Observation
     /// The newest edited render. The previous photo's frame stays until the
     /// new photo's first frame arrives.
     private(set) var frame: EditorFrame?
+    /// The photo `frame` shows: `source`, or the previous one until the new
+    /// photo's first frame arrives.
+    private(set) var frameSource: EditorSource?
     /// The defaults under the same development (p7-2b §5).
     private(set) var originalFrame: EditorFrame?
     private(set) var isOpening = false
@@ -186,6 +189,7 @@ import Observation
         undo.clear()
         source = nil
         frame = nil
+        frameSource = nil
         originalFrame = nil
         recipe = Recipe()
         bypassedGroups = []
@@ -357,6 +361,7 @@ import Observation
         switch result {
         case .success(let rendered):
             frame = rendered
+            if source?.id == rendered.request.sourceID { frameSource = source }
             renderFailure = nil
         case .failure(let error):
             if !(error is CancellationError) { renderFailure = String(describing: error) }

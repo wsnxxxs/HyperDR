@@ -59,8 +59,8 @@ actor RenderSession: EditorRendering {
         var pending = false
         if recipe.hdrSource.usesModel {
             // R1: the graph cannot take a prediction yet.
+            pending = recipe.conditionValue("hdr.enabled")?.boolValue != false
             recipe.setHDRSource(recipe.hdrSource == .ai ? .expand : .captured)
-            pending = true
         }
         let lut = try recipe.look.map { look -> ColorLUT in
             guard let lut = luts[look.contentHash] else { throw EditorRenderingError.missingLUT(look.contentHash) }
@@ -68,8 +68,11 @@ actor RenderSession: EditorRendering {
         }
         let full = request.region != nil || request.size == opened.editor.pixelSize
         let options = try SourceOptions(recipe: recipe, resolution: full ? .full : .preview(maximumSize: request.size))
-        if !Self.covers(opened.options, opened.source, options) {
-            opened.source = try await engine.load(opened.editor.url, options: options)
+        if !Self.covers(opened.options, options) {
+            let source = try await engine.load(opened.editor.url, options: options)
+            // Another photo may have opened (or none) while this one loaded.
+            guard self.opened?.editor.id == opened.editor.id else { throw EditorRenderingError.staleSource }
+            opened.source = source
             opened.options = options
             self.opened = opened
         }
@@ -88,16 +91,21 @@ actor RenderSession: EditorRendering {
     func predictModelGain(modelID: String) async throws {
         guard let opened else { throw EditorRenderingError.noSource }
         if predictions[modelID] != nil { return }
-        if provider == nil {
-            do { provider = try CoreMLModelGainProvider() } catch {
-                throw EditorRenderingError.modelUnavailable(String(describing: error))
-            }
-        }
         guard opened.editor.domain == .sdr else {
             // A RAW prediction needs the SDR base the graph splits off (R1).
             throw EditorRenderingError.unsupported("AI on RAW waits for Render R1")
         }
-        let prediction = try await provider!.predict(source: opened.source)
+        let provider: CoreMLModelGainProvider
+        if let loaded = self.provider { provider = loaded } else {
+            // Loading the model off the actor keeps renders going meanwhile.
+            do {
+                provider = try await Task.detached(priority: .userInitiated) { try CoreMLModelGainProvider() }.value
+            } catch {
+                throw EditorRenderingError.modelUnavailable(String(describing: error))
+            }
+            if self.provider == nil { self.provider = provider }
+        }
+        let prediction = try await provider.predict(source: opened.source)
         guard self.opened?.editor.id == opened.editor.id else { throw CancellationError() }
         predictions[modelID] = prediction
     }
@@ -115,16 +123,19 @@ actor RenderSession: EditorRendering {
     // MARK: - Helpers
 
     /// Whether the open source can serve `wanted`: the same development, and
-    /// full size or at least as many pixels as asked for.
-    private static func covers(_ current: SourceOptions, _ source: RenderSource, _ wanted: SourceOptions) -> Bool {
+    /// a preview opened for at least as many pixels (compared as asked for: the
+    /// loader rounds down), or full size for full size. A full-size source does
+    /// not serve previews, so drags do not run on a full development after a
+    /// detail region.
+    private static func covers(_ current: SourceOptions, _ wanted: SourceOptions) -> Bool {
         var same = wanted
         same.resolution = current.resolution
         guard same == current else { return false }
         switch (current.resolution, wanted.resolution) {
-        case (.full, _): return true
-        case (.preview, .full): return false
-        case (.preview, .preview(let size)):
-            return max(source.size.width, source.size.height) >= max(size.width, size.height)
+        case (.full, .full): return true
+        case (.full, .preview), (.preview, .full): return false
+        case (.preview(let have), .preview(let want)):
+            return max(have.width, have.height) >= max(want.width, want.height)
         }
     }
 

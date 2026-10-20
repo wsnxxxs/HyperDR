@@ -23,6 +23,9 @@ struct AdjustmentBar: View {
     /// The narrow iPad's version: group tabs with names, a taller control area.
     var large = false
     var onEditingChanged: (ParameterDeclaration, Bool) -> Void = { _, _ in }
+    /// Performs a group reset itself, so the host's undo names it; without
+    /// it the reset writes the binding.
+    var onReset: ((AdjustmentReset) -> Void)?
 
     @State private var group: AdjustmentGroupID = .light
     @State private var selected: String?
@@ -196,7 +199,9 @@ struct AdjustmentBar: View {
                     Button { panel.setAutomatic(control.id, in: &recipe) } label: { AdjustmentText.command(.setAuto) }
                         .disabled(control.isAutomatic)
                 }
-                Button { panel.reset(group: state.group, in: &recipe) } label: { AdjustmentText.command(.resetGroup) }
+                Button {
+                    if let onReset { onReset(.group(state.group)) } else { panel.reset(group: state.group, in: &recipe) }
+                } label: { AdjustmentText.command(.resetGroup) }
                     .disabled(!state.isModified)
             }
     }

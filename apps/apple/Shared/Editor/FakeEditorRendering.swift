@@ -114,7 +114,8 @@ actor FakeEditorRendering: EditorRendering {
                                       region: planes.region, outputSize: request.size)
         // "AI pending": without a prediction the frame has no AI gain.
         return EditorFrame(request: request, planes: planes, display: display,
-                           modelGainPending: request.recipe.hdrSource.usesModel && !request.usesModelGain)
+                           modelGainPending: request.recipe.hdrSource.usesModel && !request.usesModelGain
+                               && request.recipe.conditionValue("hdr.enabled")?.boolValue != false)
     }
 
     func sdrThumbnail(_ frame: EditorFrame, maximumSize: HyperDRRender.PixelSize) async throws -> CGImage {

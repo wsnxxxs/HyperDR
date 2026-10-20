@@ -29,6 +29,8 @@ actor FakeEditorRendering: EditorRendering {
     var modelBehavior = ModelBehavior.succeed
     /// Thrown by every render while set.
     var renderError: EditorRenderingError?
+    /// Thrown by every open while set.
+    var openError: EditorRenderingError?
 
     private(set) var opened: [URL] = []
     /// Every render request in arrival order, finished or not.
@@ -88,6 +90,7 @@ actor FakeEditorRendering: EditorRendering {
 
     func open(_ url: URL, previewSize: HyperDRRender.PixelSize?) async throws -> EditorSource {
         opened.append(url)
+        if let openError { throw openError }
         let photo = photos[url] ?? defaultPhoto
         let source = EditorSource(id: UUID(), url: url, domain: photo.domain, pixelSize: photo.size,
                                   sourceValues: photo.sourceValues, capabilities: photo.capabilities)

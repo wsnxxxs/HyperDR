@@ -54,37 +54,51 @@ extension EditorModel {
 
     // MARK: - Scopes
 
-    /// Recomputes the scopes from a small render of the current recipe, off
-    /// the main thread, once the edit has settled (never during a drag). The
-    /// original's histogram changes only when the original does (a new photo,
-    /// a new development).
+    /// Recomputes the scopes from a small render of what the canvas shows,
+    /// off the main thread, once the edit has settled (never during a drag).
+    /// A render is measured again only when it would draw another picture:
+    /// another source, recipe, bypass, or the prediction coming in. The
+    /// original's histogram changes only when the original does.
     func startScopes() {
         guard let source = editor.source else { return }
-        let recipe = editor.recipe
         let size = Self.scopeSize(source.pixelSize)
         let editor = self.editor
-        if scopedOriginal != recipe.original {
-            scopedOriginal = recipe.original
+        if let request = editor.renderRequest(size: size, original: true),
+           !Self.covers(request, scopedOriginal, scopingOriginal) {
+            scopingOriginal = request
             originalScopeTask?.cancel()
             originalScopeTask = Task { [weak self] in
-                guard let result = await Self.analyze(editor: editor, size: size, original: true, waveform: false),
-                      let self, !Task.isCancelled else { return }
+                let result = await Self.analyze(editor: editor, request: request, waveform: false)
+                guard let self, !Task.isCancelled else { return }
+                scopingOriginal = nil
+                guard let result else { return }
+                scopedOriginal = request
                 scopes.update(original: .some(result.histogram), current: nil, waveform: nil)
             }
         }
-        guard scopedRecipe != recipe else { return }
-        scopedRecipe = recipe
+        guard let request = editor.renderRequest(size: size),
+              !Self.covers(request, scopedRequest, scopingRequest) else { return }
+        scopingRequest = request
         scopeTask?.cancel()
         scopeTask = Task { [weak self] in
-            guard let result = await Self.analyze(editor: editor, size: size, original: false, waveform: true),
-                  let self, !Task.isCancelled else { return }
+            let result = await Self.analyze(editor: editor, request: request, waveform: true)
+            guard let self, !Task.isCancelled else { return }
+            scopingRequest = nil
+            guard let result else { return }
+            scopedRequest = request
             scopes.update(original: nil, current: .some(result.histogram), waveform: .some(result.waveform))
         }
     }
 
-    private static func analyze(editor: RecipeEditor, size: HyperDRRender.PixelSize, original: Bool,
+    /// Whether `request` draws what was measured, or is being measured.
+    private static func covers(_ request: EditorRenderRequest, _ measured: EditorRenderRequest?,
+                               _ measuring: EditorRenderRequest?) -> Bool {
+        [measured, measuring].contains { $0.map(request.rendersSame) == true }
+    }
+
+    private static func analyze(editor: RecipeEditor, request: EditorRenderRequest,
                                 waveform: Bool) async -> ScopeAnalyzer.Result? {
-        guard let frame = try? await editor.render(size: size, original: original), !Task.isCancelled else { return nil }
+        guard let frame = try? await editor.renderer.render(request), !Task.isCancelled else { return nil }
         let display = frame.display
         let work = Task.detached(priority: .utility) { () -> ScopeAnalyzer.Result? in
             guard let input = try? await ScopeInput.read(display) else { return nil }

@@ -20,6 +20,34 @@ import HyperDRRecipe
 
     // MARK: Scopes
 
+    /// The scopes measure what the canvas draws: a prediction coming in or a
+    /// bypass changes the picture without changing the recipe (R27-002).
+    func testScopesMeasureAgainWhenThePredictionArrivesOrAGroupIsBypassed() async throws {
+        let services = FakeEditorServices(openDelay: .zero)
+        let fake = try XCTUnwrap(services.fakeRendering)
+        await fake.holdPredictions()
+        let model = EditorModel(services: services)
+        model.open([url])
+        await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
+        let size = EditorModel.scopeSize(try XCTUnwrap(model.editor.source).pixelSize)
+        func measured(_ what: String, _ match: (EditorRenderRequest) -> Bool) async {
+            for _ in 0..<5000 {
+                if await fake.requests.contains(where: { $0.size == size && $0.region == nil && match($0) }) { return }
+                try? await Task.sleep(for: .milliseconds(1))
+            }
+            XCTFail("the scopes never measured \(what)")
+        }
+        var recipe = model.editor.recipe
+        recipe.setValue(.string("ai"), for: "hdr.source")
+        model.editor.setRecipe(recipe)
+        await eventually(timeout: .seconds(3)) { model.editor.isModelGainPending }
+        await fake.releasePredictions()
+        await measured("the predicted picture") { $0.recipe == recipe && $0.usesModelGain }
+        model.editor.bypassedGroups = [.light]
+        await measured("the bypassed picture") { $0.recipe == recipe && $0.bypassedGroups == [.light] }
+        model.closeDocument()
+    }
+
     func testScopeContentFollowsTheMeasurementAndThePhase() async {
         let model = await opened()
         // The fake's frames are measured once; start again from nothing.

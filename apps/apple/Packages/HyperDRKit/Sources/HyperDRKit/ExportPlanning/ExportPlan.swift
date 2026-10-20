@@ -171,11 +171,13 @@ public struct ExportPlanRequest: Sendable, Hashable {
     /// Only the "Photos" destination reads this; a web or social export ignores it.
     public var library: ExportLibraryFacts
     public var resources: ExportRetainedResources
+    /// Renderer/host capability; false also provides a whole-plane parity baseline.
+    public var allowsRowInput: Bool
 
     public init(choice: ExportChoice, source: ExportSource, pair: ExportGainPair? = nil,
                 frame: ExportFrameFacts = ExportFrameFacts(),
                 edit: ExportEditFacts, library: ExportLibraryFacts = ExportLibraryFacts(),
-                resources: ExportRetainedResources = ExportRetainedResources()) {
+                resources: ExportRetainedResources = ExportRetainedResources(), allowsRowInput: Bool = true) {
         self.choice = choice
         self.source = source
         self.pair = pair
@@ -183,6 +185,7 @@ public struct ExportPlanRequest: Sendable, Hashable {
         self.edit = edit
         self.library = library
         self.resources = resources
+        self.allowsRowInput = allowsRowInput
     }
 }
 
@@ -361,7 +364,8 @@ public enum ExportPlanner {
             keepLocation: keepLocation,
             memory: ExportMemoryPlan(estimate: admission.estimate,
                                      availableBytes: admission.availableBytes,
-                                     degradation: admission.degradation, renderRows: admission.renderRows),
+                                     degradation: admission.degradation, renderRows: admission.renderRows,
+                usesRowInput: request.allowsRowInput && admission.writer.supportsRowInput(encoding: encoding)),
             library: library,
             notices: notices,
             blockers: blockers,
@@ -460,7 +464,8 @@ public enum ExportPlanner {
                 source: request.source, photoSize: photoSize, canvas: size,
                 encoding: encoding, writer: writer,
                 writesGainMap: writesGainMap, isFramed: request.frame.isFramed,
-                baseBitDepth: baseBitDepth, writeRows: rows, retainedBytes: request.resources.bytes))
+                baseBitDepth: baseBitDepth, writeRows: rows, retainedBytes: request.resources.bytes,
+                allowsRowInput: request.allowsRowInput))
         }
         let available = budget.availableBytes() ?? 256 * 1024 * 1024
         let canFallback = preferred.writer == .imageIO && encoding == .adaptive && writesGainMap && baseBitDepth == 8

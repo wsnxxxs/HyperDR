@@ -4,7 +4,7 @@ import HyperDRRender
 
 public enum RecipeExportError: Error, Sendable, Equatable {
     case busy, invalidSnapshot, sourceChanged, missingLUT, missingModel, invalidStripes
-    case memoryExceeded(required: Int, available: Int?)
+    case memoryExceeded(ExportBlockReason)
     case planBlocked([String])
     case verificationFailed(String)
 }

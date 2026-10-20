@@ -474,3 +474,12 @@ to reported stage durations. Missing verification evidence never means verified.
 The LUT library already lives in Application Support on iOS and owns picker URL
 security scopes. `LUTEntry.contentHash` exposes the Render-compatible `sha256:`
 identity directly, so listing LUTs does not require parsing their cubes.
+
+Runtime memory refusals use `RecipeExportError.memoryExceeded(.memory(...))`,
+including requested canvas size and the maximum smaller long edge admitted by
+that same estimator under a frozen runtime budget. Remaining process memory is
+credited only for allocations already charged in the estimate. A replan after
+source/model loading uses the same typed error; initial plan refusal still uses
+`planBlocked`. A nil size suggestion means no smaller candidate was admitted. The independent
+GPU working-set refusal also carries typed memory facts, but no suggestion: a
+process-budget estimate cannot establish that a smaller GPU working set fits.

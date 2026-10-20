@@ -448,7 +448,7 @@ public enum ExportPlanner {
 
     /// Search only memory admission, freezing the measured budget. Frame canvas is
     /// kept as an upper bound: hosts must regenerate the actual smaller frame.
-    private static func maximumLongEdge(_ request: ExportPlanRequest, budget: Int, upper: Int) -> Int? {
+    static func maximumLongEdge(_ request: ExportPlanRequest, budget: Int, upper: Int) -> Int? {
         guard upper > 1 else { return nil }
         func fits(_ edge: Int) -> Bool {
             var candidate = request

@@ -58,8 +58,10 @@ extension UserFacingError {
         case .sourceChanged: self.init(code: "source_changed")
         case .missingLUT: self.init(code: "lut_invalid")
         case .missingModel: self.init(code: "model_not_ready")
-        case .memoryExceeded(let required, let available):
-            self.init(code: "export_memory_budget", detail: "required \(required) bytes, available \(available.map(String.init) ?? "unknown")")
+        case .memoryExceeded(let reason):
+            if case .memory(let required, let available, _, _) = reason {
+                self.init(code: "export_memory_budget", detail: "required \(required) bytes, available \(available)")
+            } else { self.init(code: "export_memory_budget") }
         // The plan's blocker codes, under the messages that already say them;
         // the plan's own message keys are not in the catalogue.
         case .planBlocked(let reasons):

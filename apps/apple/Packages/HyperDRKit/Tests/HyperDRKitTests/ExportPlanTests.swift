@@ -33,8 +33,8 @@ struct ExportDestinationPlanTests {
         let plan = plan(request(.destination(.photos)))
         #expect(plan.encoding == .adaptive)
         #expect(plan.baseBitDepth == 8) // an SDR source keeps Main 8
-        #expect(plan.writer == .inHouse) // b writes gain-map HEIC through package
-        #expect(plan.writerReason == .peakMemory)
+        #expect(plan.writer == .imageIO)
+        #expect(plan.writerReason == .qualityAtEqualSize)
         #expect(plan.gamut == .p3)
         #expect(plan.size == photo)
         #expect(plan.longEdgeLimit == nil)
@@ -164,7 +164,7 @@ struct ExportCustomPlanTests {
 
     @Test func everyEncodingPicksTheWriterOfThePipelineTable() {
         let expected: [ExportEncoding: (ExportWriter, ExportWriterReason)] = [
-            .adaptive: (.inHouse, .peakMemory),
+            .adaptive: (.imageIO, .qualityAtEqualSize),
             .isoGainMapJPEG: (.inHouse, .qualityAtEqualSize),
             .pq: (.inHouse, .peakMemory),
             .hlg: (.inHouse, .peakMemory),
@@ -250,13 +250,12 @@ struct ExportGainMapPlanTests {
     }
 
     @Test func anAuthoredPairFallsBackToResplitWhenTheWriterCarriesOneChannel() {
-        // A dual source never reaches the ImageIO path today (its pair takes a
-        // 10-bit base, which our writer owns), so this is the writer capability
-        // rule itself: a writer that carries one channel cannot take three.
+        // A dual source takes a 10-bit base, which our writer owns. Its
+        // single-channel contract still requires a three-channel pair to split.
         let three = ExportPlanner.gainMapPlan(
             request: request(.destination(.photos), source: source(.dual),
                              pair: pair(.editedAuthored, channels: 3)),
-            writer: .imageIO, writesGainMap: true)
+            writer: .inHouse, writesGainMap: true)
         #expect(three.origin == .resplit)
         #expect(three.channels == 1)
         #expect(three.offsetsAreZero)
@@ -328,7 +327,25 @@ struct ExportMemoryPlanTests {
         #expect(plan.memory.degradation == nil)
         #expect(plan.memory.availableBytes == 8_000_000_000)
         #expect(plan.memory.fits)
-        #expect(plan.writer == .inHouse)
+        #expect(plan.writer == .imageIO)
+    }
+
+    @Test func nonSDRBaseHeadroomSelectsNativeWriter() {
+        let result = plan(request(.destination(.photos),
+            pair: ExportGainPair(provenance: .authored, baseHeadroom: 0.5)))
+        #expect(result.isExecutable)
+        #expect(result.writer == .inHouse)
+        #expect(result.writerReason == .unsupportedCapability)
+        #expect(result.gainMap.resplitReason == .writerHeadroomContract)
+        #expect(!ExportWriter.imageIO.capabilities(encoding: .adaptive, bitDepth: 8,
+            gainChannels: 1, baseHeadroom: 0.5).supported)
+    }
+
+    @Test func framedHEICUsesTheWriterWithCompressionProtection() {
+        let result = plan(request(.destination(.photos), frame: ExportFrameFacts(canvas: photo)))
+        #expect(result.writer == .inHouse)
+        #expect(result.writerReason == .frameGainProtection)
+        #expect(result.gainMap.zeroGainInFrame)
     }
 
     @Test func anUnknownBudgetUsesAConservativeLimit() {
@@ -338,15 +355,25 @@ struct ExportMemoryPlanTests {
         #expect(!plan.isExecutable)
     }
 
-    @Test func aCanvasThatDoesNotFitCannotPretendToStreamTheWriter() {
+    @Test func anAVIFCanvasThatDoesNotFitIsRefused() {
         let canvas = ExportPixelSize(width: 12000, height: 8000)
-        let framed = request(.custom(CustomExportFormat(encoding: .isoGainMapJPEG, gamut: .p3, quality: 90)),
+        let framed = request(.custom(CustomExportFormat(encoding: .avifPq, gamut: .p3, quality: 90)),
                              frame: ExportFrameFacts(canvas: canvas))
         let whole = plan(framed).memory.estimate.peak
         let result = plan(framed, available: whole - 1)
         #expect(result.memory.degradation == .refused)
         #expect(!result.memory.fits)
         #expect(!result.isExecutable)
+    }
+
+    @Test func incrementalRowsCanShrinkTheActiveGraphAndInputBand() {
+        let framed = request(.custom(.init(encoding: .isoGainMapJPEG, gamut: .p3, quality: 90)),
+            frame: ExportFrameFacts(canvas: .init(width: 12000, height: 8000)))
+        let preferred = plan(framed)
+        let reduced = plan(framed, available: preferred.memory.estimate.peak - 1)
+        #expect(reduced.memory.usesRowInput && reduced.isExecutable)
+        #expect(reduced.memory.renderRows < preferred.memory.renderRows)
+        #expect(reduced.memory.estimate.peak < preferred.memory.estimate.peak)
     }
 
     @Test func whatNoWriterFitsIsRefusedWithAReason() {
@@ -404,17 +431,57 @@ struct ExportMemoryPlanTests {
         let whole = ExportMemoryEstimate.estimate(ExportMemoryEstimate.Input(
             source: source(), photoSize: photo, canvas: photo, encoding: .isoGainMapJPEG,
             writer: .inHouse, writesGainMap: true, isFramed: false, baseBitDepth: 8,
-            writeRows: photo.height, retainedBytes: 0))
+            writeRows: photo.height, retainedBytes: 0, allowsRowInput: false))
         let strips = ExportMemoryEstimate.estimate(ExportMemoryEstimate.Input(
             source: source(), photoSize: photo, canvas: photo, encoding: .isoGainMapJPEG,
             writer: .inHouse, writesGainMap: true, isFramed: false, baseBitDepth: 8,
-            writeRows: 64, retainedBytes: 0))
+            writeRows: 64, retainedBytes: 0, allowsRowInput: false))
         // Readback has both RGBA and packed RGB for base and gain (56 B/px),
         // beside GPU RGBA outputs (32 B/px). Shrinking stripes only frees those.
         let freedStripePixels = photo.width * (photo.height - 64)
         #expect(whole.render - strips.render >= freedStripePixels * (56 + 32))
         #expect(strips.encode == whole.encode)
         #expect(strips.packaging == whole.packaging)
+    }
+
+    @Test func rowsBoundNativeVerificationButReserveTheSystemReader() {
+        let req = request(.custom(.init(encoding: .sdrTIFF, gamut: .p3, quality: 90)))
+        let streamed = plan(req)
+        var old = req; old.allowsRowInput = false
+        let whole = plan(old)
+        #expect(streamed.memory.usesRowInput && !whole.memory.usesRowInput)
+        #expect(streamed.memory.estimate.encode < whole.memory.estimate.encode)
+        #expect(streamed.memory.estimate.systemVerify > photo.pixels * 16)
+        #expect(streamed.memory.estimate.nativeVerify < streamed.memory.estimate.systemVerify)
+        #expect(streamed.memory.estimate.verify == streamed.memory.estimate.systemVerify)
+        #expect(whole.memory.estimate.nativeVerify == whole.memory.estimate.systemVerify)
+        #expect(!ExportWriter.imageIO.supportsRowInput(encoding: .adaptive))
+        #expect(!ExportWriter.libavif.supportsRowInput(encoding: .avifPq))
+    }
+
+    @Test func nativeRowVerificationWorkspaceDoesNotGrowWithHeight() {
+        for encoding in [ExportEncoding.sdrJPEG, .sdrTIFF, .isoGainMapJPEG, .adaptive, .pq, .hlg] {
+            func estimate(_ height: Int) -> ExportMemoryEstimate {
+                let size = ExportPixelSize(width: 2048, height: height)
+                return ExportMemoryEstimate.estimate(.init(source: source(size: size), photoSize: size,
+                    canvas: size, encoding: encoding, writer: .inHouse, writesGainMap: encoding.writesGainMap,
+                    isFramed: false, baseBitDepth: encoding.isBT2100 ? 10 : 8, writeRows: 64, retainedBytes: 0))
+            }
+            let short = estimate(1024), tall = estimate(4096)
+            // Source/analysis cache belongs to decode; the verification workspace
+            // remains one row set or tile pair at the same width.
+            #expect(tall.nativeVerify - tall.decode == short.nativeVerify - short.decode)
+            #expect(tall.systemVerify - tall.decode > short.systemVerify - short.decode)
+            #expect(tall.verify == max(tall.nativeVerify, tall.systemVerify))
+        }
+        for encoding in [ExportEncoding.avifPq, .adaptive] {
+            let writer: ExportWriter = encoding.isAVIF ? .libavif : .imageIO
+            let result = ExportMemoryEstimate.estimate(.init(source: source(), photoSize: photo, canvas: photo,
+                encoding: encoding, writer: writer, writesGainMap: encoding.writesGainMap,
+                isFramed: false, baseBitDepth: encoding.isAVIF ? 10 : 8, writeRows: 64, retainedBytes: 0))
+            #expect(result.nativeVerify == result.systemVerify)
+            #expect(result.verify > photo.pixels * 16)
+        }
     }
 
     @Test func theSystemBudgetAnswersOrDeclines() {

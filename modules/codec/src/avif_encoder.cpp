@@ -217,7 +217,7 @@ std::vector<std::uint8_t> encode_avif(const PhotoRenditions& images,
   return {output.data, output.data + output.size};
 }
 
-void verify_avif_decodable(const std::vector<std::uint8_t>& bytes) {
+void verify_avif_decodable(std::span<const std::uint8_t> bytes) {
   std::unique_ptr<avifDecoder, DecoderDeleter> decoder(avifDecoderCreate());
   if (!decoder) throw std::runtime_error("cannot allocate the AVIF decoder");
   decoder->maxThreads = 1;

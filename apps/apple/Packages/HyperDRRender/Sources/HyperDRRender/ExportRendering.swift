@@ -38,11 +38,51 @@ private struct FrameUniform {
     var region: SIMD4<UInt32>
 }
 
+// Caption texture is immutable and used only on its owning renderer executor.
+private struct ExportPreparation: @unchecked Sendable {
+    let source: RenderSource
+    let lazy: ExportSource?
+    let request: ExportRenderRequest
+    let edit: RenderAdjustments
+    let caption: (any MTLTexture)?
+    let report: ExportRenderReport
+    let transparent, resplit, shoulder: Bool
+    let ceiling: Float
+}
+
 extension RenderEngine: ExportStripeRendering {
     public func renderExportStripes(_ source: RenderSource, recipe: Recipe, lut: ColorLUT? = nil,
                                     modelGain: ModelGainPrediction? = nil, request: ExportRenderRequest, rows: Int = 256,
                                     prepare: @Sendable (ExportRenderReport) throws -> Void,
                                     consume: @Sendable (ExportStripe) throws -> Void) throws -> ExportRenderReport {
+        try renderExport(source,lazy:nil,recipe:recipe,lut:lut,modelGain:modelGain,request:request,rows:rows,prepare:prepare,consume:consume)
+    }
+
+    /// Lazy source overload: no full-size RenderSource or RGBAf input texture.
+    public func renderExportStripes(_ source: ExportSource, recipe: Recipe, lut: ColorLUT? = nil,
+                                    modelGain: ModelGainPrediction? = nil, request: ExportRenderRequest, rows: Int = 256,
+                                    prepare: @Sendable (ExportRenderReport) throws -> Void,
+                                    consume: @Sendable (ExportStripe) throws -> Void) throws -> ExportRenderReport {
+        try renderExport(source.analysisSource,lazy:source,recipe:recipe,lut:lut,modelGain:modelGain,
+                         request:request,rows:rows,prepare:prepare,consume:consume)
+    }
+
+    private func renderExport(_ source: RenderSource, lazy: ExportSource?, recipe: Recipe, lut: ColorLUT?,
+                              modelGain: ModelGainPrediction?, request: ExportRenderRequest, rows: Int,
+                              prepare: @Sendable (ExportRenderReport) throws -> Void,
+                              consume: @Sendable (ExportStripe) throws -> Void) throws -> ExportRenderReport {
+        let prepared = try prepareExport(source,lazy:lazy,recipe:recipe,lut:lut,modelGain:modelGain,request:request,rows:rows)
+        try Task.checkCancellation()
+        try prepare(prepared.report)
+        for y in stride(from:0,to:request.canvasSize.height,by:rows) {
+            try consume(readExport(prepared,y:y,count:min(rows,request.canvasSize.height-y)))
+            try Task.checkCancellation()
+        }
+        return prepared.report
+    }
+
+    private func prepareExport(_ source: RenderSource, lazy: ExportSource?, recipe: Recipe, lut: ColorLUT?,
+                               modelGain: ModelGainPrediction?, request: ExportRenderRequest, rows: Int) throws -> ExportPreparation {
         try Task.checkCancellation()
         guard source.domain == recipe.inputDomain, rows > 0 else { throw RenderError.invalidAdjustment }
         try validate(request.photoSize); try validate(request.canvasSize)
@@ -68,10 +108,12 @@ extension RenderEngine: ExportStripeRendering {
         for y in stride(from:0,to:request.photoSize.height,by:rows) {
             try Task.checkCancellation()
             try autoreleasepool {
-                let planes = try render(source,adjustments:edit,size:request.photoSize,
+                let tile = try lazy.map { try materializeExportRegion($0,outputSize:request.photoSize,
+                    region:CGRect(x:0,y:y,width:request.photoSize.width,height:min(rows,request.photoSize.height-y))) } ?? source
+                let planes = try render(tile,adjustments:edit,size:request.photoSize,
                     region:CGRect(x:0,y:y,width:request.photoSize.width,height:min(rows,request.photoSize.height-y)))
                 guard !planes.aiPending else { throw RenderError.aiNotAvailable }
-                let pair = try displayPair(planes,source:source)
+                let pair = try displayPair(planes,source:tile)
                 if firstPair == nil { firstPair = ExportPairInfo(pair); provenance = planes.provenance }
                 guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
                 let node = nodeContext(domain:source.domain,buffer:command)
@@ -132,44 +174,73 @@ extension RenderEngine: ExportStripeRendering {
             resplitReasons:reasons,rangeBeforeCeiling:naturalRange,
             rangeAfterCeiling:edit.hdr.range ?? naturalRange,resolvedAutomatic:automatic,presentationFrame:request.frame != nil,
             framePhoto:request.frame?.photo)
-        try Task.checkCancellation(); try prepare(report)
-        for y in stride(from:0,to:request.canvasSize.height,by:rows) {
-            try Task.checkCancellation()
-            try autoreleasepool {
-                let height = min(rows,request.canvasSize.height-y)
-                let photo = request.frame?.photo ?? ExportRect(x:0,y:0,width:request.photoSize.width,height:request.photoSize.height)
-                let start = max(y,photo.y), end = min(y+height,photo.y+photo.height)
-                var photoPlanes: RenderPlanes?
-                if start < end {
-                    let rendered = try render(source,adjustments:edit,size:request.photoSize,
-                        region:CGRect(x:0,y:start-photo.y,width:photo.width,height:end-start))
-                    let pair = try displayPair(rendered,source:source)
-                    photoPlanes = try exportNormalize(pair,source:source,channels:metadata?.channelCount ?? 1,
-                        resplit:resplit,flatten:transparent,sdrOnly:!request.includesGain,ceiling:ceiling,shoulder:shoulder)
+        return ExportPreparation(source:source,lazy:lazy,request:request,edit:edit,caption:caption,report:report,
+                                 transparent:transparent,resplit:resplit,shoulder:shoulder,ceiling:ceiling)
+    }
+
+    private func readExport(_ state: ExportPreparation, y: Int, count: Int) throws -> ExportStripe {
+        let source = state.source, lazy = state.lazy, request = state.request, edit = state.edit
+        let metadata = state.report.gain, caption = state.caption
+        let resplit = state.resplit, transparent = state.transparent, ceiling = state.ceiling, shoulder = state.shoulder
+        guard y >= 0, count > 0, y < request.canvasSize.height, count <= request.canvasSize.height-y else {
+            throw RenderError.invalidRegion
+        }
+        try Task.checkCancellation()
+        if let lazy { try lazy.revision.validate(lazy.url) }
+        return try autoreleasepool {
+            let height = count
+            let photo = request.frame?.photo ?? ExportRect(x:0,y:0,width:request.photoSize.width,height:request.photoSize.height)
+            let start = max(y,photo.y), end = min(y+height,photo.y+photo.height)
+            var photoPlanes: RenderPlanes?
+            if start < end {
+                let region = CGRect(x:0,y:start-photo.y,width:photo.width,height:end-start)
+                let tile = try lazy.map { try materializeExportRegion($0,outputSize:request.photoSize,region:region) } ?? source
+                let rendered = try render(tile,adjustments:edit,size:request.photoSize,region:region)
+                let pair = try displayPair(rendered,source:tile)
+                photoPlanes = try exportNormalize(pair,source:source,channels:metadata?.channelCount ?? 1,
+                    resplit:resplit,flatten:transparent,sdrOnly:!request.includesGain,ceiling:ceiling,shoulder:shoulder)
+            }
+            let output: RenderPlanes
+            if let frame = request.frame {
+                output = try exportFrame(photoPlanes,source:source,frame:frame,caption:caption,
+                                         y:y,height:height,photoStart:start,channels:metadata?.channelCount ?? 1)
+            } else { output = photoPlanes! }
+            let rgba = Self.readTexture(output.base)
+            var rgb = [Float](); rgb.reserveCapacity(output.base.width*output.base.height*3)
+            for i in stride(from:0,to:rgba.count,by:4) { rgb.append(contentsOf:rgba[i..<i+3]) }
+            let gain: [Float]
+            if let metadata {
+                let values = Self.readTexture(output.gain)
+                if metadata.channelCount == 1 { gain = values }
+                else {
+                    var packed = [Float](); packed.reserveCapacity(output.gain.width*output.gain.height*3)
+                    for i in stride(from:0,to:values.count,by:4) { packed.append(contentsOf:values[i..<i+3]) }
+                    gain = packed
                 }
-                let output: RenderPlanes
-                if let frame = request.frame {
-                    output = try exportFrame(photoPlanes,source:source,frame:frame,caption:caption,
-                                             y:y,height:height,photoStart:start,channels:metadata?.channelCount ?? 1)
-                } else { output = photoPlanes! }
-                let rgba = Self.readTexture(output.base)
-                var rgb = [Float](); rgb.reserveCapacity(output.base.width*output.base.height*3)
-                for i in stride(from:0,to:rgba.count,by:4) { rgb.append(contentsOf:rgba[i..<i+3]) }
-                let gain: [Float]
-                if let metadata {
-                    let values = Self.readTexture(output.gain)
-                    if metadata.channelCount == 1 { gain = values }
-                    else {
-                        var packed = [Float](); packed.reserveCapacity(output.gain.width*output.gain.height*3)
-                        for i in stride(from:0,to:values.count,by:4) { packed.append(contentsOf:values[i..<i+3]) }
-                        gain = packed
-                    }
-                } else { gain = [] }
-                try consume(ExportStripe(rect:ExportRect(x:0,y:y,width:request.canvasSize.width,height:height),baseRGB:rgb,gain:gain))
-                try Task.checkCancellation()
+            } else { gain = [] }
+            try Task.checkCancellation()
+            return ExportStripe(rect:ExportRect(x:0,y:y,width:request.canvasSize.width,height:height),baseRGB:rgb,gain:gain)
+        }
+    }
+
+    /// Freezes one global scan in a dedicated renderer. The originating engine
+    /// remains available for preview and other exports while the reader is alive.
+    public func prepareExportRows(_ source: ExportSource, recipe: Recipe, lut: ColorLUT? = nil,
+                                  modelGain: ModelGainPrediction? = nil, request: ExportRenderRequest) async throws -> PreparedExportRows {
+        let renderer = try RenderEngine(device:device)
+        return try await renderer.makeExportRows(source,recipe:recipe,lut:lut,modelGain:modelGain,request:request)
+    }
+
+    private func makeExportRows(_ source: ExportSource, recipe: Recipe, lut: ColorLUT?,
+                                modelGain: ModelGainPrediction?, request: ExportRenderRequest) throws -> PreparedExportRows {
+        analysisSource = source.analysisSource
+        let state = try prepareExport(source.analysisSource,lazy:source,recipe:recipe,lut:lut,
+                                      modelGain:modelGain,request:request,rows:256)
+        return PreparedExportRows(report:state.report) { [self] y,count in
+            try serialExecutor.sync {
+                try self.assumeIsolated { renderer in try renderer.readExport(state,y:y,count:count) }
             }
         }
-        return report
     }
 
     private func exportNormalize(_ pair: DisplayGainPair, source: RenderSource, channels: Int,

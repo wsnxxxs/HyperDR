@@ -34,6 +34,22 @@ private func collect(_ engine: RenderEngine, _ source: RenderSource, recipe: Rec
 }
 
 @Suite(.serialized) struct ExportRenderingTests {
+    @Test func cancellationInLastConsumerIsPropagated() async throws {
+        let engine = try RenderEngine()
+        let source = try await engine.source(image:exportImage([SIMD4(2,1,0.5,1)],width:1),domain:.hdr)
+        let task = Task {
+            try await engine.renderExportStripes(source,recipe:Recipe(inputDomain:.hdr),
+                request:ExportRenderRequest(photoSize:source.size,capabilities:isoCapabilities),rows:256,
+                prepare:{ _ in },consume:{ _ in
+                    withUnsafeCurrentTask { $0?.cancel() }
+                })
+        }
+        do {
+            _ = try await task.value
+            Issue.record("Push export returned success after cancellation in its final consumer")
+        } catch is CancellationError {}
+    }
+
     @Test func identityCeilingSDRAndAIContract() async throws {
         let engine = try RenderEngine()
         let size = PixelSize(width:2,height:2)

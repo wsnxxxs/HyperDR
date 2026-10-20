@@ -62,7 +62,7 @@ void walk_boxes(std::span<const std::uint8_t> bytes, std::size_t begin, std::siz
 
 }  // namespace
 
-HeifInspection inspect_heif(const Bytes& bytes) {
+HeifInspection inspect_heif(std::span<const std::uint8_t> bytes) {
   HeifInspection result;
   try {
     std::size_t box_count=0;

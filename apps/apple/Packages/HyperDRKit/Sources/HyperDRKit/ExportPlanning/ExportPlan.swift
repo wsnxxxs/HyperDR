@@ -55,16 +55,20 @@ public struct ExportGainPair: Sendable, Hashable, Codable {
     public let offsetsAreEqual: Bool
     public let gainWorkingGamut: String
     public let hasSignedGain: Bool
+    /// ISO base headroom in log2 stops; the manual ImageIO writer requires SDR (zero).
+    public let baseHeadroom: Double
     public let headroomMatchesGainMaximum: Bool
 
     public init(provenance: Provenance, channels: Int = 1, offsetsAreZero: Bool = true,
                 offsetsAreEqual: Bool? = nil, gainWorkingGamut: String = "display-p3",
-                hasSignedGain: Bool = false, headroomMatchesGainMaximum: Bool = true) {
+                hasSignedGain: Bool = false, headroomMatchesGainMaximum: Bool = true,
+                baseHeadroom: Double = 0) {
         self.provenance = provenance
         self.channels = channels
         self.offsetsAreZero = offsetsAreZero
         self.offsetsAreEqual = offsetsAreEqual ?? offsetsAreZero
         self.gainWorkingGamut = gainWorkingGamut; self.hasSignedGain = hasSignedGain
+        self.baseHeadroom = baseHeadroom
         self.headroomMatchesGainMaximum = headroomMatchesGainMaximum
     }
 
@@ -171,11 +175,13 @@ public struct ExportPlanRequest: Sendable, Hashable {
     /// Only the "Photos" destination reads this; a web or social export ignores it.
     public var library: ExportLibraryFacts
     public var resources: ExportRetainedResources
+    /// Renderer/host capability; false also provides a whole-plane parity baseline.
+    public var allowsRowInput: Bool
 
     public init(choice: ExportChoice, source: ExportSource, pair: ExportGainPair? = nil,
                 frame: ExportFrameFacts = ExportFrameFacts(),
                 edit: ExportEditFacts, library: ExportLibraryFacts = ExportLibraryFacts(),
-                resources: ExportRetainedResources = ExportRetainedResources()) {
+                resources: ExportRetainedResources = ExportRetainedResources(), allowsRowInput: Bool = true) {
         self.choice = choice
         self.source = source
         self.pair = pair
@@ -183,6 +189,7 @@ public struct ExportPlanRequest: Sendable, Hashable {
         self.edit = edit
         self.library = library
         self.resources = resources
+        self.allowsRowInput = allowsRowInput
     }
 }
 
@@ -313,8 +320,14 @@ public enum ExportPlanner {
             }
         }
 
-        let preferred = preferredWriter(encoding: encoding, writesGainMap: writesGainMap,
+        var preferred = preferredWriter(encoding: encoding, writesGainMap: writesGainMap,
                                         baseBitDepth: baseBitDepth)
+        if preferred.writer == .imageIO && writesGainMap && (request.pair?.baseHeadroom ?? 0) != 0 {
+            preferred = (.inHouse, .unsupportedCapability)
+        }
+        if request.frame.isFramed && encoding == .adaptive && writesGainMap && baseBitDepth == 8 {
+            preferred = (.inHouse, .frameGainProtection)
+        }
         // Admission prices what is written, so the canvas is the size after the
         // destination's long-edge limit.
         let admission = admitMemory(request: request, preferred: preferred,
@@ -358,7 +371,8 @@ public enum ExportPlanner {
             keepLocation: keepLocation,
             memory: ExportMemoryPlan(estimate: admission.estimate,
                                      availableBytes: admission.availableBytes,
-                                     degradation: admission.degradation, renderRows: admission.renderRows),
+                                     degradation: admission.degradation, renderRows: admission.renderRows,
+                usesRowInput: request.allowsRowInput && admission.writer.supportsRowInput(encoding: encoding)),
             library: library,
             notices: notices,
             blockers: blockers,
@@ -398,7 +412,7 @@ public enum ExportPlanner {
         case .sdrJPEG, .sdrTIFF:
             (.inHouse, .noComparison)
         case .adaptive:
-            writesGainMap ? (.inHouse, .peakMemory) : (.imageIO, .noComparison)
+            writesGainMap ? (baseBitDepth == 8 ? (.imageIO, .qualityAtEqualSize) : (.inHouse, .peakMemory)) : (.imageIO, .noComparison)
         }
     }
 
@@ -420,7 +434,7 @@ public enum ExportPlanner {
         else if request.frame.isFramed && !pair.offsetsAreEqual { reason = .frameRequiresNeutralPair }
         else if pair.channels == 3 && !caps.supportsThreeChannelGain { reason = .writerCarriesOneChannel }
         else if pair.hasSignedGain && !caps.supportsSignedGain { reason = .writerCannotRepresentSignedGain }
-        else if caps.requiresGainMaximumHeadroom && !pair.headroomMatchesGainMaximum { reason = .writerHeadroomContract }
+        else if caps.requiresGainMaximumHeadroom && (!pair.headroomMatchesGainMaximum || pair.baseHeadroom != 0) { reason = .writerHeadroomContract }
         else { reason = nil }
         if let reason {
             return GainMapPlan(origin: .resplit, channels: 1, offsetsAreZero: true,
@@ -452,25 +466,32 @@ public enum ExportPlanner {
                                     encoding: ExportEncoding, writesGainMap: Bool,
                                     baseBitDepth: Int,
                                     budget: any ExportMemoryBudget) -> Admission {
-        func estimate(rows: Int) -> ExportMemoryEstimate {
+        func estimate(writer: ExportWriter, rows: Int) -> ExportMemoryEstimate {
             ExportMemoryEstimate.estimate(ExportMemoryEstimate.Input(
                 source: request.source, photoSize: photoSize, canvas: size,
-                encoding: encoding, writer: preferred.writer,
+                encoding: encoding, writer: writer,
                 writesGainMap: writesGainMap, isFramed: request.frame.isFramed,
-                baseBitDepth: baseBitDepth, writeRows: rows, retainedBytes: request.resources.bytes))
+                baseBitDepth: baseBitDepth, writeRows: rows, retainedBytes: request.resources.bytes,
+                allowsRowInput: request.allowsRowInput))
         }
         let available = budget.availableBytes() ?? 256 * 1024 * 1024
-        let gainMap = gainMapPlan(request: request, writer: preferred.writer, writesGainMap: writesGainMap)
+        let canFallback = preferred.writer == .imageIO && encoding == .adaptive && writesGainMap && baseBitDepth == 8
+        let writers: [ExportWriter] = canFallback ? [preferred.writer, .inHouse] : [preferred.writer]
         for rows in [256, 128, 64] {
-            let peak = estimate(rows: rows)
-            if peak.fits(in: available) {
-                return Admission(writer: preferred.writer, reason: preferred.reason, gainMap: gainMap,
-                                 estimate: peak, availableBytes: available,
-                                 degradation: rows == 256 ? nil : .renderRows(rowHeight: rows),
-                                 renderRows: rows, blockers: [])
+            for writer in writers {
+                let peak = estimate(writer: writer, rows: rows)
+                if peak.fits(in: available) {
+                    let fallback = writer != preferred.writer
+                    return Admission(writer: writer, reason: fallback ? .memoryFallback : preferred.reason,
+                        gainMap: gainMapPlan(request: request, writer: writer, writesGainMap: writesGainMap),
+                        estimate: peak, availableBytes: available,
+                        degradation: fallback ? .switchedWriter(writer) : rows == 256 ? nil : .renderRows(rowHeight: rows),
+                        renderRows: rows, blockers: [])
+                }
             }
         }
-        let shortfall = estimate(rows: 64)
+        let gainMap = gainMapPlan(request: request, writer: preferred.writer, writesGainMap: writesGainMap)
+        let shortfall = writers.map { estimate(writer: $0, rows: 64) }.min { $0.peak < $1.peak }!
         return Admission(writer: preferred.writer, reason: preferred.reason, gainMap: gainMap,
                          estimate: shortfall, availableBytes: available, degradation: .refused, renderRows: 64,
                          blockers: [ExportBlocker(code: "export_memory_exceeded",

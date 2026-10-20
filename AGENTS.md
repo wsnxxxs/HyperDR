@@ -150,7 +150,6 @@ screens only (the P7-3c panel design is paused). Then: an iOS long-edge
 choice (Kit K2/K3 are in), P7-3e (saving to the photo library, after the
 user's Photos Lab run on `wip/photos-lab`), the iOS background host, P3b-6
 fuzzing, and the hands-on checks in `docs/design/user-acceptance.md`.
-`.github/workflows/ci.yml` still calls the deleted `tests/capi/smoke.py` and
-`contract_test.py`; it runs only for `main`, so replace those steps with
-`capi_package_test` / `capi_package_rows_test` before merging to `main`, after
-asking the user. Run the test scripts with `python3.12`.
+`.github/workflows/ci.yml` runs only for `main`; its sanitizer job runs the
+C ABI lifecycle and package tests through `ctest`. Run the test scripts with
+`python3.12`.

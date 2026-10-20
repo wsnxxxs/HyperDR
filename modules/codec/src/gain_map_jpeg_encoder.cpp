@@ -473,7 +473,14 @@ class VerificationJpeg {
     if(setjmp(s.error.jump)) { if(s.created)jpeg_destroy_decompress(&s.info);s.created=false;
       throw std::runtime_error(std::string("JPEG verification: ")+s.error.message); }
     jpeg_create_decompress(&s.info);s.created=true;
-    jpeg_mem_src(&s.info,bytes.data(),bytes.size());jpeg_read_header(&s.info,TRUE);
+    jpeg_mem_src(&s.info,bytes.data(),bytes.size());
+    jpeg_save_markers(&s.info,JPEG_APP0+1,0xffff);
+    jpeg_read_header(&s.info,TRUE);
+    for(auto* marker=s.info.marker_list;marker;marker=marker->next) {
+      if(marker->data_length>=6 && std::memcmp(marker->data,"Exif\0\0",6)==0 &&
+         read_exif_orientation(marker->data+6,marker->data_length-6).value_or(1)!=1)
+        throw std::runtime_error("bounded export verification requires EXIF Orientation=1");
+    }
     // HyperDR writes baseline JPEG. Progressive decoding needs a whole-image
     // coefficient array in libjpeg, so it cannot enter the bounded verifier.
     if(s.info.progressive_mode || s.info.arith_code) {

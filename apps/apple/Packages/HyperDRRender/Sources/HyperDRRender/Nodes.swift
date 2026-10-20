@@ -26,7 +26,7 @@ public struct IdentityNode: RenderNode {
 public struct SourceHDRSplitNode: RenderNode {
     public static let parameters = [ParameterDeclaration(
         id: "hdr.range", group: .hdr, kind: .floatOrAuto, range: 0.5...4, step: 0.1,
-        default: .auto, format: .stops, visibleWhen: "hdr.enabled", scope: .hdrOnly, mask: "gain")]
+        default: .auto, format: .stops, visibleWhen: .isOn("hdr.enabled"), scope: .hdrOnly, mask: "gain")]
     /// Resolved output capacity in stops; automatic resolution currently defaults to 3.
     /// P7-1 separates the HDR-only range operation from this source decomposition.
     public let headroom: Float

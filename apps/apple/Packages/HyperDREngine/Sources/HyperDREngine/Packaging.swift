@@ -173,6 +173,7 @@ extension Engine {
         var base = hyperdr_package_plane()
         base.data = UnsafeRawPointer(sdr.samples.baseAddress)
         base.row_bytes = 0
+        base.size = sdr.samples.count * MemoryLayout<Float>.size
         base.width = UInt32(sdr.width)
         base.height = UInt32(sdr.height)
         base.channels = UInt32(sdr.channels)
@@ -181,6 +182,7 @@ extension Engine {
         var gainPlane = hyperdr_package_plane()
         gainPlane.data = gain.flatMap { UnsafeRawPointer($0.samples.baseAddress) }
         gainPlane.row_bytes = 0
+        gainPlane.size = (gain?.samples.count ?? 0) * MemoryLayout<Float>.size
         gainPlane.width = UInt32(gain?.width ?? 0)
         gainPlane.height = UInt32(gain?.height ?? 0)
         gainPlane.channels = UInt32(gain?.channels ?? 0)

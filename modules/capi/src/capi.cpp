@@ -1,6 +1,7 @@
 #include "hyperdr/hyperdr.h"
 
 #include "hyperdr/app/report.hpp"
+#include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/app/engine.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include <unistd.h>
@@ -65,6 +66,8 @@ int boundary(hyperdr_error** error, Function function) noexcept {
       const auto detail=exception.detail_json();
       set_error(error,"unsupported_format",exception.what(),detail.empty()?nullptr:detail.c_str());
     } catch (...) { set_error(error,"out_of_memory","cannot allocate native error detail"); }
+  } catch (const hyperdr::ExportDimensionLimit& exception) {
+    set_error(error, "export_dimension_limit", exception.what());
   } catch (const hyperdr::DecodeFailed& exception) {
     set_error(error, "decode_failed", exception.what());
   } catch (const std::invalid_argument& exception) {
@@ -292,8 +295,8 @@ hyperdr::PackagePlane package_plane(const hyperdr_package_plane& plane, const ch
   if (plane.data == nullptr) throw std::invalid_argument(std::string(what) + " plane data is null");
   if (plane.format != HYPERDR_PLANE_F32)
     throw std::invalid_argument(std::string(what) + " plane must use HYPERDR_PLANE_F32");
-  return {static_cast<const float*>(plane.data), plane.row_bytes, plane.width, plane.height,
-          plane.channels};
+  return {static_cast<const float*>(plane.data), plane.row_bytes, plane.size, plane.width,
+          plane.height, plane.channels};
 }
 
 }  // namespace

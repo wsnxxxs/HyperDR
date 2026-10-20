@@ -7,6 +7,10 @@
 
 #include "hyperdr/codec/encoders.hpp"
 
+// The codec-less build defines this entry point in unavailable.cpp instead,
+// where every other encoder is a "needs codecs" failure.
+#if HYPERDR_WITH_CODECS
+
 namespace hyperdr {
 
 void verify_encoded_output(const std::vector<std::uint8_t>& bytes,
@@ -19,3 +23,5 @@ void verify_encoded_output(const std::vector<std::uint8_t>& bytes,
 }
 
 }  // namespace hyperdr
+
+#endif  // HYPERDR_WITH_CODECS

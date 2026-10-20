@@ -30,6 +30,11 @@ namespace hyperdr {
 struct PackagePlane {
   const float* data{};
   std::size_t row_bytes{};
+  // Bytes the caller's buffer actually holds. Zero means "the caller
+  // guarantees the rows are complete"; a non-zero value is checked against
+  // `row_bytes * height`, so an undersized buffer is refused instead of read
+  // past its end.
+  std::size_t size{};
   std::uint32_t width{};
   std::uint32_t height{};
   std::uint32_t channels{};

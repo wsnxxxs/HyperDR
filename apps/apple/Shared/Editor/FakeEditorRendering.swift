@@ -34,6 +34,8 @@ actor FakeEditorRendering: EditorRendering {
     private(set) var completed: [EditorRenderRequest] = []
     private(set) var cancelled: [EditorRenderRequest] = []
     private(set) var predictions: [String] = []
+    /// The parameter of every mask asked for.
+    private(set) var masks: [String] = []
     private(set) var installedLUTs: Set<String> = []
 
     private var current: EditorSource?
@@ -108,7 +110,7 @@ actor FakeEditorRendering: EditorRendering {
         if let look = request.recipe.activeLook, !installedLUTs.contains(look.contentHash) {
             throw EditorRenderingError.missingLUT(look.contentHash)
         }
-        let planes = try makePlanes(size: request.size)
+        let planes = try makePlanes(size: request.size, region: request.region)
         completed.append(request)
         let display = DisplayGainPair(base: planes.base, gain: planes.gain, alternateHeadroom: 0,
                                       region: planes.region, outputSize: request.size)
@@ -119,7 +121,10 @@ actor FakeEditorRendering: EditorRendering {
     }
 
     func effectMask(_ request: EditorRenderRequest, parameterID: String) async throws -> RenderMask {
-        throw EditorRenderingError.unsupported("The fake draws no effect masks")
+        masks.append(parameterID)
+        guard let current, current.id == request.sourceID else { throw EditorRenderingError.staleSource }
+        let planes = try makePlanes(size: request.size, region: request.region)
+        return RenderMask(texture: planes.gain, region: planes.region, outputSize: request.size)
     }
 
     func sdrThumbnail(_ frame: EditorFrame, maximumSize: HyperDRRender.PixelSize) async throws -> CGImage {
@@ -160,7 +165,7 @@ actor FakeEditorRendering: EditorRendering {
     }
 
     /// An 8 × 8 mid grey with zero gain: enough for the canvas and the scopes to draw.
-    private func makePlanes(size: HyperDRRender.PixelSize) throws -> RenderPlanes {
+    private func makePlanes(size: HyperDRRender.PixelSize, region: CGRect?) throws -> RenderPlanes {
         if textures == nil {
             guard let device = MTLCreateSystemDefaultDevice() else { throw RenderError.metalUnavailable }
             func texture(_ format: MTLPixelFormat, fill: [Float]) throws -> any MTLTexture {
@@ -180,7 +185,7 @@ actor FakeEditorRendering: EditorRendering {
         }
         let (base, gain) = textures!
         return RenderPlanes(base: base, gain: gain, baseColorSpace: RenderEngine.workingColorSpace,
-                            provenance: .identity, region: CGRect(x: 0, y: 0, width: size.width, height: size.height),
+                            provenance: .identity, region: region ?? CGRect(x: 0, y: 0, width: size.width, height: size.height),
                             outputSize: size)
     }
 }

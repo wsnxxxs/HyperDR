@@ -65,7 +65,17 @@ actor RenderSession: EditorRendering {
         return editor
     }
 
-    func render(_ request: EditorRenderRequest) async throws -> EditorFrame {
+    /// What a request renders from: the source variant it needs (loaded on
+    /// demand), its LUT, its model gain and its options.
+    private struct Prepared {
+        let source: RenderSource
+        let lut: ColorLUT?
+        let modelGain: ModelGainPrediction?
+        let options: RenderOptions
+        let generation: Int
+    }
+
+    private func prepare(_ request: EditorRenderRequest) async throws -> Prepared {
         guard var opened else { throw EditorRenderingError.noSource }
         let generation = self.generation
         guard opened.editor.id == request.sourceID, request.recipe.inputDomain == opened.editor.domain else {
@@ -93,29 +103,32 @@ actor RenderSession: EditorRendering {
             self.opened = opened
         }
         try Task.checkCancellation()
-        let source = opened.source
-        let planes = try await engine.render(source, recipe: recipe, lut: lut, modelGain: modelGain, options: options,
-                                             size: request.size, region: request.region)
+        return Prepared(source: opened.source, lut: lut, modelGain: modelGain, options: options, generation: generation)
+    }
+
+    func render(_ request: EditorRenderRequest) async throws -> EditorFrame {
+        let prepared = try await prepare(request)
+        let source = prepared.source
+        let planes = try await engine.render(source, recipe: request.recipe, lut: prepared.lut, modelGain: prepared.modelGain,
+                                             options: prepared.options, size: request.size, region: request.region)
         let display = try await engine.displayPair(planes, source: source)
         let automatic = request.region == nil
-            ? try await engine.resolvedAutomatic(source, recipe: recipe, lut: lut, modelGain: modelGain, options: options)
+            ? try await engine.resolvedAutomatic(source, recipe: request.recipe, lut: prepared.lut,
+                                                 modelGain: prepared.modelGain, options: prepared.options)
             : [:]
         try Task.checkCancellation()
-        try checkCurrent(generation)
+        try checkCurrent(prepared.generation)
         return EditorFrame(request: request, planes: planes, display: display, modelGainPending: planes.aiPending,
                            automaticValues: automatic)
     }
 
     func effectMask(_ request: EditorRenderRequest, parameterID: String) async throws -> RenderMask {
-        guard let opened else { throw EditorRenderingError.noSource }
-        let generation = self.generation
-        guard opened.editor.id == request.sourceID else { throw EditorRenderingError.staleSource }
-        let lut = request.recipe.activeLook.flatMap { luts[$0.contentHash] }
-        let mask = try await engine.effectMask(opened.source, recipe: request.recipe, parameterID: parameterID, lut: lut,
-            modelGain: request.usesModelGain ? prediction(for: request.recipe, source: opened.source) : nil,
-            options: RenderOptions(bypassedGroups: request.bypassedGroups), size: request.size, region: request.region)
+        let prepared = try await prepare(request)
+        let mask = try await engine.effectMask(prepared.source, recipe: request.recipe, parameterID: parameterID,
+                                               lut: prepared.lut, modelGain: prepared.modelGain, options: prepared.options,
+                                               size: request.size, region: request.region)
         try Task.checkCancellation()
-        try checkCurrent(generation)
+        try checkCurrent(prepared.generation)
         return mask
     }
 

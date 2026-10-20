@@ -145,6 +145,42 @@
         }
       }
     },
+    "ios.compare.button" : {
+      "comment" : "The canvas comparison control in the top bar.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Compare"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "对比"
+          }
+        }
+      }
+    },
+    "ios.compare.split" : {
+      "comment" : "More menu: show the original and the adjusted photo side by side.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Split Comparison"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分屏对比"
+          }
+        }
+      }
+    },
     "ios.display.edr %@ %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -313,6 +349,60 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "撤销"
+          }
+        }
+      }
+    },
+    "ios.view.edited" : {
+      "comment" : "Comparison view, and the label of the adjusted side of the divider.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Adjusted"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "调整后"
+          }
+        }
+      }
+    },
+    "ios.view.original" : {
+      "comment" : "Comparison view, and the label of the original's side of the divider.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Original"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "原图"
+          }
+        }
+      }
+    },
+    "ios.view.split" : {
+      "comment" : "Comparison view: original and adjusted side by side.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Split"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分屏"
           }
         }
       }

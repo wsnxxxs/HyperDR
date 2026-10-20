@@ -17,3 +17,12 @@ extension DisplayPair {
                   region: pair.region == whole ? nil : pair.region)
     }
 }
+
+extension DisplayMask {
+    /// Render's effect mask (R6), placed by its region in `outputSize`.
+    init(_ mask: RenderMask) {
+        let width = Double(max(1, mask.outputSize.width)), height = Double(max(1, mask.outputSize.height))
+        self.init(texture: mask.texture, rect: CGRect(x: mask.region.minX / width, y: mask.region.minY / height,
+                                                      width: mask.region.width / width, height: mask.region.height / height))
+    }
+}

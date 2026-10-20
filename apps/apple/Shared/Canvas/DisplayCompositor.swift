@@ -19,12 +19,23 @@ nonisolated struct DisplayComposition: @unchecked Sendable {
     /// The screen's linear headroom.
     var headroom = 1.0
     var overlays = CanvasOverlays()
+    /// Where the dragged parameter acts, tinted over the edited side.
+    var effectMask: DisplayMask?
     var previewsAsSDR = false
     /// The publication each layer's rebuild is timed for.
     var originalTrace: (any CanvasTrace)? = nil
     var editedTrace: (any CanvasTrace)? = nil
     var originalDetailTrace: (any CanvasTrace)? = nil
     var editedDetailTrace: (any CanvasTrace)? = nil
+}
+
+/// A parameter's effect mask (R32Float, 0…1, top-down) and the part of the
+/// photo it covers, as fractions of the whole image.
+nonisolated struct DisplayMask: @unchecked Sendable {
+    let texture: any MTLTexture
+    let rect: CGRect
+
+    func hasSameContent(as other: DisplayMask) -> Bool { texture === other.texture && rect == other.rect }
 }
 
 nonisolated struct CanvasOverlays: Equatable, Sendable {
@@ -93,6 +104,7 @@ nonisolated final class DisplayCompositor {
     private let device: any MTLDevice
     private let compose: any MTLComputePipelineState
     private let display: any MTLRenderPipelineState
+    private let maskOverlay: any MTLRenderPipelineState
     private struct Entry {
         let pair: DisplayPair
         let texture: any MTLTexture
@@ -120,6 +132,14 @@ nonisolated final class DisplayCompositor {
         descriptor.fragmentFunction = library.makeFunction(name: "compositionFragment")
         descriptor.colorAttachments[0].pixelFormat = .rgba16Float
         display = try device.makeRenderPipelineState(descriptor: descriptor)
+        descriptor.fragmentFunction = library.makeFunction(name: "effectMaskFragment")
+        let blend = descriptor.colorAttachments[0]!
+        blend.isBlendingEnabled = true
+        blend.sourceRGBBlendFactor = .sourceAlpha
+        blend.destinationRGBBlendFactor = .oneMinusSourceAlpha
+        blend.sourceAlphaBlendFactor = .zero
+        blend.destinationAlphaBlendFactor = .one
+        maskOverlay = try device.makeRenderPipelineState(descriptor: descriptor)
         guard MemoryLayout<CompositionParams>.stride == 128, MemoryLayout<DisplayLayerParams>.stride == 160 else {
             throw PreviewError.unavailable("Composition parameter layout changed")
         }
@@ -278,23 +298,36 @@ nonisolated final class DisplayCompositor {
                 let normalized = CGRect(x: region.minX / transform.imageSize.width,
                     y: region.minY / transform.imageSize.height,
                     width: region.width / transform.imageSize.width, height: region.height / transform.imageSize.height)
-                let image = transform.imageFrame
-                let tile = CGRect(x: image.minX + normalized.minX * image.width,
-                    y: image.minY + normalized.minY * image.height,
-                    width: normalized.width * image.width, height: normalized.height * image.height)
-                // normalisedRect uses imageFrame; direct conversion keeps the
-                // local tile in the whole photo's transform and clip.
-                params.rect = SIMD4(Float(tile.minX / transform.viewport.width * 2 - 1),
-                    Float(1 - tile.maxY / transform.viewport.height * 2),
-                    Float(tile.maxX / transform.viewport.width * 2 - 1), Float(1 - tile.minY / transform.viewport.height * 2))
+                params.rect = Self.tileRect(normalized, transform: transform)
                 params.uvScale = SIMD2(Float(pair.width) / Float(atlas.width), Float(pair.height) / Float(atlas.height))
                 params.slice = isOriginal ? 0 : 3
                 draw(encoder, texture: atlas, params: params)
+            }
+            if !isOriginal, let mask = content.effectMask {
+                var maskParams = CompositionParams(rect: Self.tileRect(mask.rect, transform: transform))
+                encoder.setRenderPipelineState(maskOverlay)
+                encoder.setVertexBytes(&maskParams, length: MemoryLayout<CompositionParams>.stride, index: 0)
+                encoder.setFragmentBytes(&maskParams, length: MemoryLayout<CompositionParams>.stride, index: 0)
+                encoder.setFragmentTexture(mask.texture, index: 0)
+                encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
             }
         }
         if content.mode != .edited, let original { side(original, original: true) }
         if content.mode != .original, let edited { side(edited, original: false) }
         encoder.endEncoding()
+    }
+
+    /// A part of the photo (fractions of the whole) in clip space. Converted
+    /// directly rather than through `normalisedRect`, so a tile stays in the
+    /// whole photo's transform and clip.
+    private static func tileRect(_ normalized: CGRect, transform: CanvasTransform) -> SIMD4<Float> {
+        let image = transform.imageFrame
+        let tile = CGRect(x: image.minX + normalized.minX * image.width,
+            y: image.minY + normalized.minY * image.height,
+            width: normalized.width * image.width, height: normalized.height * image.height)
+        return SIMD4(Float(tile.minX / transform.viewport.width * 2 - 1),
+            Float(1 - tile.maxY / transform.viewport.height * 2),
+            Float(tile.maxX / transform.viewport.width * 2 - 1), Float(1 - tile.minY / transform.viewport.height * 2))
     }
 
     private func parameters(_ content: DisplayComposition, original: Bool,

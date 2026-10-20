@@ -7,7 +7,10 @@ import UIKit
 /// The iOS host of the shared canvas: a `CAMetalLayer` in extended linear
 /// Display P3 drawn by the shared `DisplayCompositor`, pinch to zoom, drag to
 /// pan, double tap to switch between fit and actual pixels, and a press of
-/// 240 ms to see the original (p7-adjustments §5.4). Headroom is read from
+/// 240 ms to see the original (p7-adjustments §5.4). The photo can be shown
+/// edited, original or split, with detail tiles and an effect mask over it
+/// (step 6); every change of geometry is reported through `onTransform`, for
+/// the overlays and the editor's viewport. Headroom is read from
 /// the window's `UIScreen` on every display tick; when it moves only the
 /// display weight changes, the photo is not rendered again (p7-2b §5).
 final class EDRCanvasUIView: UIView {
@@ -18,13 +21,20 @@ final class EDRCanvasUIView: UIView {
     var onDrawableSize: (HyperDRRender.PixelSize) -> Void = { _ in }
     var onHoldOriginal: (Bool) -> Void = { _ in }
     var onError: (String) -> Void = { _ in }
+    var onTransform: (CanvasTransform) -> Void = { _ in }
 
     /// What to show; the pairs come from Render through `RecipeEditor`.
     struct Content {
         var edited: DisplayPair
         var original: DisplayPair?
-        var showsOriginal = false
-        /// The photo's full oriented size, for actual pixels.
+        var editedDetail: DisplayPair?
+        var originalDetail: DisplayPair?
+        /// `.original` and `.compare` need `original`; without it the edit shows.
+        var mode: DisplayComposition.Mode = .edited
+        var splitRatio = 0.5
+        var mask: DisplayMask?
+        var previewsAsSDR = false
+        /// The photo's full oriented size, for actual pixels and detail regions.
         var imageSize: CGSize
     }
 
@@ -42,6 +52,7 @@ final class EDRCanvasUIView: UIView {
     private let compositor: DisplayCompositor?
     private var headroom = HeadroomSnapshot()
     private var geometry = CanvasTransform(imageSize: .zero, viewport: .zero)
+    private var reported: CanvasTransform?
     private var link: CADisplayLink?
     private var dirty = true
     private var inFlight = false
@@ -97,7 +108,12 @@ final class EDRCanvasUIView: UIView {
 
     // MARK: - Display tick
 
+    /// Geometry is reported on the display tick, outside SwiftUI's updates.
     @objc private func step() {
+        if geometry != reported {
+            reported = geometry
+            onTransform(geometry)
+        }
         sampleHeadroom()
         guard dirty, !inFlight else { return }
         draw()
@@ -123,9 +139,14 @@ final class EDRCanvasUIView: UIView {
         var drawn = false
         if let content, let compositor {
             var composition = DisplayComposition(edited: content.edited, headroom: Double(max(1, headroom.current)))
-            if content.showsOriginal, let original = content.original {
+            composition.editedDetail = content.editedDetail
+            composition.effectMask = content.mask
+            composition.previewsAsSDR = content.previewsAsSDR
+            composition.splitRatio = content.splitRatio
+            if let original = content.original {
                 composition.original = original
-                composition.mode = .original
+                composition.originalDetail = content.originalDetail
+                composition.mode = content.mode
             }
             do {
                 try compositor.encode(composition, transform: geometry, target: drawable.texture, command: command)
@@ -209,6 +230,7 @@ struct EDRCanvas: UIViewRepresentable {
     var onDrawableSize: (HyperDRRender.PixelSize) -> Void
     var onHoldOriginal: (Bool) -> Void
     var onError: (String) -> Void
+    var onTransform: (CanvasTransform) -> Void
 
     func makeUIView(context: Context) -> EDRCanvasUIView {
         let view = EDRCanvasUIView(frame: .zero)
@@ -221,14 +243,19 @@ struct EDRCanvas: UIViewRepresentable {
         view.onDrawableSize = onDrawableSize
         view.onHoldOriginal = onHoldOriginal
         view.onError = onError
+        view.onTransform = onTransform
         if !Self.same(view.content, content) { view.content = content }
     }
 
     private static func same(_ a: EDRCanvasUIView.Content?, _ b: EDRCanvasUIView.Content?) -> Bool {
         guard let a, let b else { return a == nil && b == nil }
-        let originals = a.original.flatMap { left in b.original.map { left.hasSameContent(as: $0) } }
-            ?? (a.original == nil && b.original == nil)
-        return a.edited.hasSameContent(as: b.edited) && originals
-            && a.showsOriginal == b.showsOriginal && a.imageSize == b.imageSize
+        func same(_ x: DisplayPair?, _ y: DisplayPair?) -> Bool {
+            x.flatMap { left in y.map { left.hasSameContent(as: $0) } } ?? (x == nil && y == nil)
+        }
+        let masks = a.mask.flatMap { left in b.mask.map { left.hasSameContent(as: $0) } } ?? (a.mask == nil && b.mask == nil)
+        return a.edited.hasSameContent(as: b.edited) && same(a.original, b.original)
+            && same(a.editedDetail, b.editedDetail) && same(a.originalDetail, b.originalDetail) && masks
+            && a.mode == b.mode && a.splitRatio == b.splitRatio && a.previewsAsSDR == b.previewsAsSDR
+            && a.imageSize == b.imageSize
     }
 }

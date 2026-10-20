@@ -20,8 +20,10 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <cmath>
 #include <cstring>
+#include <fcntl.h>
 #include <limits>
 #include <optional>
 #include <stdexcept>
@@ -333,24 +335,44 @@ void verify_framed_mat(const PackageRequest& request, const std::filesystem::pat
 // readback decodes that file, and only then does the caller's path change. A
 // cancelled or failing check must not be able to destroy the file the caller
 // already had there, which a check after the rename cannot promise.
+//
+// The staging file is created exclusively: its name is a guess, and a file that
+// already answers to it belongs to somebody else, so neither writing over it nor
+// deleting it afterwards is ours to do. The destructor therefore only ever
+// removes a file this call created.
 struct StagingFile {
-  std::filesystem::path path;
+  StagingFile() = default;
+  explicit StagingFile(std::filesystem::path created) : path(std::move(created)) {}
+  StagingFile(const StagingFile&) = delete;
+  StagingFile& operator=(const StagingFile&) = delete;
+  StagingFile(StagingFile&&) = delete;
+  StagingFile& operator=(StagingFile&&) = delete;
   ~StagingFile() {
     if (!path.empty()) {
       std::error_code ignored;
       std::filesystem::remove(path, ignored);
     }
   }
+  std::filesystem::path path;
 };
 
-StagingFile staged_beside(const std::filesystem::path& output) {
+std::filesystem::path reserve_staging_beside(const std::filesystem::path& output) {
   static std::atomic<std::uint64_t> sequence{0};
-  std::string name = output.filename().native();
-  name += ".reading." + std::to_string(::getpid()) + "." +
-          std::to_string(sequence.fetch_add(1, std::memory_order_relaxed));
-  StagingFile staging;
-  staging.path = output.has_parent_path() ? output.parent_path() / name : std::filesystem::path(name);
-  return staging;
+  const std::string base =
+      output.filename().native() + ".reading." + std::to_string(::getpid()) + ".";
+  for (unsigned attempt = 0; attempt < 256; ++attempt) {
+    const std::string name =
+        base + std::to_string(sequence.fetch_add(1, std::memory_order_relaxed));
+    auto candidate = output.has_parent_path() ? output.parent_path() / name : std::filesystem::path(name);
+    const int file = ::open(candidate.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+    if (file >= 0) {
+      ::close(file);
+      return candidate;
+    }
+    if (errno != EEXIST)
+      throw std::runtime_error("cannot create a staging file beside the output");
+  }
+  throw std::runtime_error("cannot find a free staging name beside the output");
 }
 
 std::string verification_name(OutputEncoding encoding) {
@@ -504,14 +526,14 @@ std::string package_image(const PackageRequest& request) {
   check_cancelled();
   // A framed export is verified on a staging copy, so the readback cannot run
   // after the caller's file has already been replaced.
-  StagingFile staging = request.frame_photo ? staged_beside(request.output) : StagingFile{};
-  const bool staged = !staging.path.empty();
-  write_binary_file_atomic(staged ? staging.path : request.output, bytes,
-                           staged ? true : request.overwrite);
-  if (staged) {
+  std::optional<StagingFile> staging;
+  if (request.frame_photo) staging.emplace(reserve_staging_beside(request.output));
+  write_binary_file_atomic(staging ? staging->path : request.output, bytes,
+                           staging ? true : request.overwrite);
+  if (staging) {
     // A file that fails the mat check is never published: the staging copy is
     // removed by its owner and the destination keeps whatever it had.
-    verify_framed_mat(request, staging.path);
+    verify_framed_mat(request, staging->path);
     write_binary_file_atomic(request.output, bytes, request.overwrite);
   }
 

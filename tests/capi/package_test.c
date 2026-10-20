@@ -153,6 +153,23 @@ static int count_prefix(const char* directory, const char* prefix) {
   return count;
 }
 
+static int write_text(const char* path, const char* text) {
+  FILE* file = fopen(path, "wb");
+  if (file == NULL) return 1;
+  const size_t length = strlen(text);
+  const int failed = fwrite(text, 1, length, file) != length;
+  return fclose(file) != 0 || failed;
+}
+
+static int holds_text(const char* path, const char* text) {
+  size_t size = 0;
+  unsigned char* bytes = read_all(path, &size);
+  const size_t length = strlen(text);
+  const int same = bytes != NULL && size == length && memcmp(bytes, text, length) == 0;
+  free(bytes);
+  return same;
+}
+
 /* Reads the file back through the engine's own decoder, which is what proves a
  * written container is a photograph and not just bytes on disk. */
 static int probed_as(hyperdr_engine* engine, const char* path, const char* domain) {
@@ -454,6 +471,34 @@ int main(void) {
   REQUIRE(probed_as(engine, framed_negative_path, "dual-rendition") == 0);
   REQUIRE(count_prefix(directory, "framed-negative.jpg.reading") == 0);
 
+  /* The staging name is a guess, so a file already holding it is somebody
+   * else's: the export takes another name instead of overwriting and then
+   * deleting it. */
+  char framed_decoy_path[512];
+  snprintf(framed_decoy_path, sizeof(framed_decoy_path), "%s/framed-decoy.jpg", directory);
+  enum { DECOYS = 64 };
+  char decoy_paths[DECOYS][640];
+  char decoy_texts[DECOYS][32];
+  for (int i = 0; i < DECOYS; ++i) {
+    snprintf(decoy_paths[i], sizeof(decoy_paths[i]), "%s.reading.%ld.%d", framed_decoy_path,
+             (long)getpid(), i);
+    snprintf(decoy_texts[i], sizeof(decoy_texts[i]), "decoy %d\n", i);
+    REQUIRE(write_text(decoy_paths[i], decoy_texts[i]) == 0);
+  }
+  hyperdr_package_request decoy_write = framed_ok;
+  decoy_write.output_path = framed_decoy_path;
+  REQUIRE(hyperdr_package(engine, &decoy_write, &report, &error) == 0 && report != NULL);
+  hyperdr_string_free(report);
+  report = NULL;
+  REQUIRE(probed_as(engine, framed_decoy_path, "dual-rendition") == 0);
+  for (int i = 0; i < DECOYS; ++i) {
+    if (!holds_text(decoy_paths[i], decoy_texts[i])) {
+      fprintf(stderr, "staging decoy %d was disturbed: %s\n", i, decoy_paths[i]);
+      return 1;
+    }
+  }
+  for (int i = 0; i < DECOYS; ++i) remove(decoy_paths[i]);
+
   /* Malformed requests are option errors, not format refusals. */
   hyperdr_package_request broken = write;
   broken.format = "no-such-format";
@@ -481,6 +526,7 @@ int main(void) {
   remove(refused_path);
   remove(framed_path);
   remove(framed_negative_path);
+  remove(framed_decoy_path);
   rmdir(directory);
   printf("package_test: gain-map, three-channel, framed, SDR and refusal paths all held\n");
   return 0;

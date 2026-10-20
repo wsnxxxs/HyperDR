@@ -142,6 +142,22 @@ public struct PackageReport: Codable, Sendable {
     }
 }
 
+/// Repeatable synchronous row producer, running on the native package thread.
+/// Fill the borrowed tightly packed RGB base and optional log2 gain buffers.
+/// Requests may revisit rows; preserve the frozen source/recipe for this call.
+public typealias PackageRowReader = @Sendable (_ y: Int, _ rows: Int,
+    _ base: UnsafeMutableBufferPointer<Float>, _ gain: UnsafeMutableBufferPointer<Float>?) throws -> Void
+
+private final class PackageRowContext {
+    let width: Int
+    let channels: Int
+    let read: PackageRowReader
+    var failure: (any Error)?
+    init(width: Int, channels: Int, read: @escaping PackageRowReader) {
+        self.width = width; self.channels = channels; self.read = read
+    }
+}
+
 extension Engine {
     /// Writes an already-rendered SDR base plus gain plane (P7).
     ///
@@ -176,6 +192,35 @@ extension Engine {
         }
     }
 
+    /// Runtime HEVC encoder availability is still checked by encoder capabilities.
+    public static func supportsPackageRows(format: String) -> Bool {
+        format.withCString { hyperdr_package_rows_supported($0) != 0 }
+    }
+
+    /// Packages repeatable bands without caller-owned whole float planes. AVIF
+    /// currently requires the ordinary whole-plane API. Verification may still
+    /// use whole-image decoder workspace after encoding finishes.
+    public func packageRows(width: Int, height: Int, gainChannels: Int = 0,
+                            gainMetadata: PackageGainMetadata? = nil, rows: Int = 256,
+                            to output: URL, options: PackageOptions,
+                            read: @escaping PackageRowReader) async throws -> PackageReport {
+        guard width > 0, height > 0, width <= Int(UInt32.max), height <= Int(UInt32.max),
+              rows > 0, rows <= 4096, [0, 1, 3].contains(gainChannels),
+              (gainChannels == 0) == (gainMetadata == nil) else {
+            throw HyperDRError(code: "invalid_options", message: "Invalid package band dimensions or gain metadata")
+        }
+        let base = PackagePlane(samples: UnsafeBufferPointer(start: nil, count: 0), width: width, height: height, channels: 3)
+        let gain = gainChannels == 0 ? nil : PackagePlane(samples: UnsafeBufferPointer(start: nil, count: 0),
+            width: width, height: height, channels: gainChannels)
+        let parameters = try encodeJSON(options.parameters)
+        return try await EngineExecutor.run { cancellation in
+            try Self.packageNow(engine: self.pointer, sdr: base, gain: gain, gainMetadata: gainMetadata,
+                output: output, format: options.format, parameters: parameters,
+                presentationFrame: options.presentationFrame, framePhoto: options.framePhoto,
+                exif: options.exif ?? Data(), cancellation: cancellation, reader: read, rows: rows)
+        }
+    }
+
     /// The C struct has room for three channels; a caller with one value means
     /// that value for all of them (only the first is stored for a mono map).
     private static func channels3(_ values: [Float]) -> (Float, Float, Float) {
@@ -190,7 +235,7 @@ extension Engine {
                                    format: String, parameters: String,
                                    presentationFrame: Bool, framePhoto: FrameLayout.Rect?,
                                    exif: Data,
-                                   cancellation: Cancellation) throws -> PackageReport {
+                                   cancellation: Cancellation, reader: PackageRowReader? = nil, rows: Int = 256) throws -> PackageReport {
         var base = hyperdr_package_plane()
         base.data = UnsafeRawPointer(sdr.samples.baseAddress)
         base.row_bytes = 0
@@ -217,6 +262,7 @@ extension Engine {
         gainSettings.alternate_headroom = gainMetadata?.alternateHeadroom ?? 0
         let gamut = gainMetadata?.workingGamut ?? "display-p3"
 
+        let rowContext = reader.map { PackageRowContext(width: sdr.width, channels: gain?.channels ?? 0, read: $0) }
         var reportPointer: UnsafeMutablePointer<CChar>?
         var error: UnsafeMutablePointer<hyperdr_error>?
         let status: Int32 = output.path.withCString { path in
@@ -248,6 +294,21 @@ extension Engine {
                                         request.frame_photo.height = UInt32(framePhoto.height)
                                     }
                                     request.cancel = cancellation.pointer
+                                    if let rowContext {
+                                        return hyperdr_package_rows(engine, &request, UInt32(rows), { user, y, count, base, gain in
+                                            let context = Unmanaged<PackageRowContext>.fromOpaque(user!).takeUnretainedValue()
+                                            do {
+                                                let pixels = context.width * Int(count)
+                                                try context.read(Int(y), Int(count),
+                                                    UnsafeMutableBufferPointer(start: base, count: pixels * 3),
+                                                    gain.map { UnsafeMutableBufferPointer(start: $0, count: pixels * context.channels) })
+                                                return 0
+                                            } catch {
+                                                context.failure = error
+                                                return 1
+                                            }
+                                        }, Unmanaged.passUnretained(rowContext).toOpaque(), &reportPointer, &error)
+                                    }
                                     return hyperdr_package(engine, &request, &reportPointer, &error)
                                 }
                             }
@@ -260,6 +321,10 @@ extension Engine {
         // the status first and keep the string alive until the caller has it.
         if status != 0 {
             defer { if let reportPointer { hyperdr_string_free(reportPointer) } }
+            if let failure = rowContext?.failure {
+                hyperdr_error_free(error)
+                throw failure
+            }
             try checkStatus(status, error)
             throw HyperDRError(code: "internal_error", message: "Packaging failed without an error")
         }

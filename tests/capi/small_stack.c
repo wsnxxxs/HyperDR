@@ -249,6 +249,12 @@ extern int e4_inspect_jpeg(const char* path, char** output);
 static float package_base[PACKAGE_WIDTH * PACKAGE_HEIGHT * 3];
 static float package_gain[PACKAGE_WIDTH * PACKAGE_HEIGHT];
 
+static int package_rows(void* user,uint32_t y,uint32_t count,float* base,float* gain) {
+  (void)user;
+  memcpy(base,package_base+(size_t)y*PACKAGE_WIDTH*3,(size_t)count*PACKAGE_WIDTH*3*sizeof(float));
+  memcpy(gain,package_gain+(size_t)y*PACKAGE_WIDTH,(size_t)count*PACKAGE_WIDTH*sizeof(float));
+  return 0;
+}
 static int run_package(hyperdr_engine* engine, const char* root, Result* result) {
   /* A framed canvas, so the entry point's own E5 readback (which decodes the
    * file it just wrote) also runs on this thread's small stack. */
@@ -315,6 +321,11 @@ static int run_package(hyperdr_engine* engine, const char* root, Result* result)
   }
   hyperdr_string_free(report);
   hyperdr_error_free(error);
+  report = NULL; error = NULL;
+  if(hyperdr_package_rows(engine,&request,13,package_rows,NULL,&report,&error)!=0) {
+    report_error("package_rows",error);hyperdr_string_free(report);hyperdr_error_free(error);return 1;
+  }
+  hyperdr_string_free(report);hyperdr_error_free(error);
   result->status = status;
   const int failure = read_file(path, result);
   remove(path);

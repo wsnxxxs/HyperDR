@@ -3,6 +3,7 @@
 #include "hyperdr/container/iso_gain_map.hpp"
 #include <array>
 #include <cstddef>
+#include <cstdio>
 #include <cstdint>
 #include <vector>
 
@@ -32,6 +33,8 @@ struct GainMapJpeg {
 [[nodiscard]] std::vector<std::uint8_t> assemble_gain_map_jpeg(
     const std::vector<std::uint8_t>& primary,
     const std::vector<std::uint8_t>& gain, const GainMapMetadata& metadata);
+// Combines two internally encoded JPEG streams without retaining their bytes.
+void write_gain_map_jpeg(FILE* primary, FILE* gain, FILE* output, const GainMapMetadata&);
 // Validates JPEG marker boundaries, MP Index ranges and ISO metadata before
 // exposing any offsets. Entropy-coded image data is checked by the codec layer.
 [[nodiscard]] GainMapJpeg parse_gain_map_jpeg(const std::vector<std::uint8_t>& bytes);

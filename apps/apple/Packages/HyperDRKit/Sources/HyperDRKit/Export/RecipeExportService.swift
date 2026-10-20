@@ -128,6 +128,16 @@ public actor RecipeExportService: RecipeExportServicing {
                 guard model?.sourceID == source.id, model?.modelID == modelID else { throw RecipeExportError.missingModel }
             }
             try Task.checkCancellation()
+            // UI readouts can precede prediction and are only estimates. Resolve
+            // the frozen Recipe with the actual model before imposing a ceiling.
+            let automatic = try await renderEngine.resolvedAutomatic(source, recipe: snapshot.recipe,
+                                                                      lut: frozenLUT, modelGain: model)
+            guard let naturalRange = adjustments.hdr.range.map(Double.init) ?? automatic["hdr.range"],
+                  naturalRange.isFinite, naturalRange >= 0 else { throw RecipeExportError.invalidSnapshot }
+            actualRequest.edit.peakStops = naturalRange
+            plan = ExportPlanner.plan(actualRequest, budget: budget)
+            let resolvedBlockers = plan.blockers.filter { $0.code != "photos_permission_denied" }
+            guard resolvedBlockers.isEmpty else { throw RecipeExportError.planBlocked(resolvedBlockers.map(\.code)) }
             let resident = retainedCPUBytes + (model.map { $0.gain.width * $0.gain.height * 4 } ?? 0)
                 + request.source.pixelSize.pixels * (source.domain == .dual ? 48 : 16)
                 + (source.domain == .rawEDR ? (request.source.sensorSize ?? request.source.pixelSize).pixels * 16 : 0)

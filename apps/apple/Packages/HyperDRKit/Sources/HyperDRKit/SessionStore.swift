@@ -911,7 +911,7 @@ public actor SessionStore {
     }
 
     public func publishExport(_ id: SessionID, export: ExportID,
-                              report: ConvertReport) async throws -> ExportRecord {
+                              report: ExportPublication) async throws -> ExportRecord {
         defer { releaseExport(id, export: export) }
         do {
             let folder = try exportDirectory(id, export: export)

@@ -13,7 +13,7 @@ nonisolated struct ExportStack: Sendable {
 
     static func live() async throws -> ExportStack {
         let configuration = KitConfiguration()
-        let sessions = SessionStore(configuration: configuration, formats: try InputFormats(schema: Engine.schema()))
+        let sessions = SessionStore(configuration: configuration, formats: InputFormats())
         let engine = try await Engine(configuration: .init(cacheDirectory: configuration.cacheDirectory))
         let render = try RenderEngine()
         let service = RecipeExportService(engine: engine, renderEngine: render, renderer: render, sessions: sessions,

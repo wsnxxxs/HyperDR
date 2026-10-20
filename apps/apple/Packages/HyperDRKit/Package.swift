@@ -12,7 +12,6 @@ let package = Package(
             .product(name: "HyperDRRecipe", package: "HyperDRRecipe"),
             .product(name: "HyperDRRender", package: "HyperDRRender")
         ]),
-        .testTarget(name: "HyperDRKitTests", dependencies: ["HyperDRKit"],
-                    resources: [.process("Fixtures")]),
+        .testTarget(name: "HyperDRKitTests", dependencies: ["HyperDRKit"]),
     ]
 )

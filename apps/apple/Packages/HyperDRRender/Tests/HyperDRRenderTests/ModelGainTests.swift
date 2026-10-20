@@ -7,11 +7,10 @@ import Testing
 import HyperDRRecipe
 @testable import HyperDRRender
 
-/// The gate the AI gain model has to pass before it can replace ncnn.
+/// Frozen tolerance gate against the former ncnn backend.
 ///
 /// The reference grids in `Fixtures/ModelGain` were produced by the shipped ncnn
-/// path (`HyperDR model-gain --input-tensor`, see
-/// `HyperDR_Model/scripts/make_coreml_tolerance_fixtures.py`) on the very same
+/// path before P7-4 retired its CLI fixture producer, on the very same
 /// stored inputs, so a difference here is a difference between the two backends,
 /// not between two sets of test data.
 private enum Gate {

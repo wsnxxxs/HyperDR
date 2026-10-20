@@ -17,8 +17,7 @@ final class JobEnvironment: Sendable {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("hyperdr-jobs-\(UUID())")
         configuration = KitConfiguration(supportDirectory: root.appendingPathComponent("support"),
             cacheDirectory: root.appendingPathComponent("cache"), exportHistoryLimit: historyLimit, jobTimeout: timeout)
-        let schema = try Engine.schema()
-        sessions = SessionStore(configuration: configuration, formats: try InputFormats(schema: schema),
+        sessions = SessionStore(configuration: configuration, formats: InputFormats(),
             decodeCacheMaxAge: 7 * 24 * 60 * 60, decodeCacheMaxBytes: 4 << 30, openExportLeaf: openExportLeaf, beforeThumbnailWrite: beforeThumbnailWrite)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     }
@@ -135,7 +134,7 @@ private final class BlockingJobGate: @unchecked Sendable {
         let version = try await env.sessions.prepareExport(photo.id, options: [:], key: ExportKey(rawValue: "fixture"))
         let file = version.directory.appendingPathComponent("photo.tif")
         try Data([1, 2, 3]).write(to: file)
-        let report = ConvertReport(json: Data("{}".utf8), files: [ReportFile(input: "", output: file.path,
+        let report = ExportPublication(json: Data("{}".utf8), files: [ExportOutput(input: "", output: file.path,
             success: true, skipped: false, message: "", width: 16, height: 8)])
         return try await env.sessions.publishExport(photo.id, export: version.id, report: report)
     }

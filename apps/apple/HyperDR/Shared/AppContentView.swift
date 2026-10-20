@@ -3,8 +3,6 @@ import HyperDREngine
 import HyperDRDesign
 
 struct AppContentView: View {
-    @State private var schemaCount: Int?
-    @State private var engineError: String?
     @State private var previewError: String?
     @State private var headroom = HeadroomSnapshot()
     @State private var original = false
@@ -16,10 +14,8 @@ struct AppContentView: View {
                 Spacer()
                 VStack(alignment: .trailing) {
                     Text(verbatim: "Engine \(Engine.version) · ABI \(Engine.abiVersion)")
-                    if let schemaCount { Text(verbatim: "Settings: \(schemaCount)") }
                 }.font(.system(.body, design: .monospaced))
             }
-            if let engineError { Text(verbatim: engineError).foregroundStyle(.red) }
             Text(verbatim: "Metal EDR preview prototype").font(.title2)
             Text(verbatim: "Linear Display P3 · synthetic 0–8× HDR ramp").foregroundStyle(.secondary)
             EDRPreview(original: original, onHeadroom: { headroom = $0 }, onError: { previewError = $0 })
@@ -44,12 +40,6 @@ struct AppContentView: View {
         .background(Color.hdr.surfacePage)
         .foregroundStyle(Color.hdr.ink)
         .frame(minWidth: 800, minHeight: 520)
-        .task {
-            do {
-                let schema = try Engine.schema()
-                schemaCount = schema.settings.count
-                print("HyperDR engine=\(Engine.version) abi=\(Engine.abiVersion) settings=\(schema.settings.count)")
-            } catch { engineError = "Cannot read the engine settings: \(error.localizedDescription)" }
-        }
+
     }
 }

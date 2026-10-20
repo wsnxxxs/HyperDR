@@ -52,15 +52,6 @@ nonisolated struct SourceSummary: Equatable {
     var raw: RawCapabilities? = nil
 }
 
-extension SourceSummary {
-    init(_ metadata: PreviewMetadata) {
-        self.init(domain: InputDomain(rawValue: metadata.inputDomain) ?? .unknown,
-                  colorName: metadata.sourceColor.name,
-                  degradationReasons: metadata.degradationReasons,
-                  colorSource: metadata.sourceColor.source, raw: metadata.raw)
-    }
-}
-
 nonisolated enum DocumentPhase: Equatable {
     case opening, rendering, ready
     // An already opened photo with no drawable frame. Q14 open failures roll

@@ -1,6 +1,6 @@
 {
   "schema": "hyperdr.model-gain-references/v1",
-  "description": "ncnn references for the Core ML tolerance gate; see HyperDR_Model/scripts/make_coreml_tolerance_fixtures.py",
+  "description": "Frozen pre-P7-4 ncnn references for the Core ML tolerance gate",
   "encoding": {
     "transfer": "sRGB",
     "bits": 8,

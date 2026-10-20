@@ -170,18 +170,10 @@ import XCTest
         XCTAssertNil(model.alert); XCTAssertEqual(model.document?.isPreparingCameraSupport, false)
     }
 
-    func testPreviewMetadataPreservesRawCapabilitiesForTheEditor() throws {
-        let json = Data(#"""
-        {"schema":"hyperdr.native-preview/v1","width":4,"height":2,"channels":4,
-         "layout":"rgba","sampleType":"float32","colorSpace":"linear-display-p3",
-         "relativeSdrWhite":1,"headroomStops":0,"inputDomain":"scene-referred","status":"ok",
-         "sourceColor":{"name":"Display P3","primaries":"p3","transfer":"linear","source":"raw"},
-         "degradationReasons":[],
-         "hasCaptureMetadata":true,"inputHeadroomStops":0,
-         "raw":{"supported":true,"lensCorrectionSupported":false,"decoderVersion":"8.dng","osBuild":"engine-build"}}
-        """#.utf8)
-        let metadata = try JSONDecoder().decode(PreviewMetadata.self, from: json)
-        let summary = SourceSummary(metadata)
+    func testRawCapabilitiesPreserveDecoderFactsForTheEditor() throws {
+        let json = Data(#"{"supported":true,"lensCorrectionSupported":false,"decoderVersion":"8.dng","osBuild":"engine-build"}"#.utf8)
+        let metadata = try JSONDecoder().decode(RawCapabilities.self, from: json)
+        let summary = SourceSummary(domain: .sceneReferred, colorName: "Display P3", degradationReasons: [], colorSource: "raw", raw: metadata)
         XCTAssertEqual(summary.raw, RawCapabilities(supported: true, lensCorrectionSupported: false,
             decoderVersion: "8.dng", osBuild: "engine-build"))
         XCTAssertEqual(summary.domain, .sceneReferred)

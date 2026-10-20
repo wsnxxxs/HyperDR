@@ -38,7 +38,7 @@ import os
     }
 
     private let readCaptureFacts: @Sendable (URL) -> CaptureFacts
-    private let formats: InputFormats?
+    private let formats: InputFormats
     private let openableTypes: [UTType]
     private let lifecycle: Lifecycle
     private let kitTask: Task<HyperDRKit, Error>
@@ -67,12 +67,11 @@ import os
                                         sessions: kit.sessions, target: kit.exportTarget)
          }) {
         self.makeRecipeExport = makeRecipeExport
-        // The schema is a pure, synchronous engine call: the open panel and
-        // drag checks work before the engine itself has started.
-        let formats = try? InputFormats(schema: Engine.schema())
+        // Kit's input table is available before the engine starts.
+        let formats = InputFormats()
         self.readCaptureFacts = readCaptureFacts
         self.formats = formats
-        openableTypes = formats?.contentTypes ?? []
+        openableTypes = formats.contentTypes
         self.lifecycle = lifecycle
         self.preferences = preferences
         kitTask = Task.detached { try await makeKit(configuration) }

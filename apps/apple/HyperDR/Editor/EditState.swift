@@ -16,7 +16,7 @@ nonisolated struct ExportChoices: Equatable, Sendable {
     var encoding = "adaptive"
     /// For an SDR format: `auto`, `srgb` or `p3`.
     var outputGamut = "auto"
-    var quality = EditControls.all.first { $0.key == "quality" }?.defaultValue ?? 90
+    var quality = Double(CustomExportFormat().quality)
 
     var workflow: Workflow { Workflow(encoding: encoding) }
 

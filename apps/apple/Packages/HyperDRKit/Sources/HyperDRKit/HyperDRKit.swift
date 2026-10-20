@@ -5,12 +5,10 @@ import HyperDREngine
 /// Export runs through `RecipeExportService`, which hosts construct.
 public final class HyperDRKit: Sendable {
     public let engine: Engine
-    public let schema: SettingsSchema
     public let capabilities: Capabilities
     public let formats: InputFormats
     public let sessions: SessionStore
     public let exportTarget: ExportTarget
-    public let models: ModelCatalog
     public let luts: LUTLibrary
 
     private final class CleanupState: @unchecked Sendable {
@@ -34,16 +32,13 @@ public final class HyperDRKit: Sendable {
         let engine = try await Engine(configuration: EngineConfiguration(
             cacheDirectory: configuration.cacheDirectory.appendingPathComponent("decode-cache", isDirectory: true),
             memoryBudgetBytes: 0, heicTileWorkers: 0))
-        let schema = try Engine.schema()
         let capabilities = try await engine.capabilities()
-        let formats = try InputFormats(schema: schema)
+        let formats = InputFormats()
         self.engine = engine
-        self.schema = schema
         self.capabilities = capabilities
         self.formats = formats
         let sessions = SessionStore(configuration: configuration, formats: formats)
         self.sessions = sessions
-        self.models = ModelCatalog(capabilities: capabilities)
         self.luts = LUTLibrary(configuration: configuration, sessions: sessions)
         self.cleanup = cleanup ?? { await sessions.cleanupExpired() }
         self.exportTarget = ExportTarget(configuration: configuration, sessions: sessions)

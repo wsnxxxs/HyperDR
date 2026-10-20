@@ -26,9 +26,8 @@ final class TinyPhotoTests: XCTestCase {
     func testTheEnginePathLeavesNothingBehind() async throws {
         let before = TinyPhoto.leftovers()
         let photo = try TinyPhoto()
-        let session = try await Engine().openPreview(source: photo.url)
-        _ = try await session.renderFrame(EngineRequest(settings: ["preview_max_edge": .number(8)]))
-        session.close(); photo.remove()
+        _ = try await Engine().probe(photo.url)
+        photo.remove()
         XCTAssertEqual(TinyPhoto.leftovers(), before)
     }
 }

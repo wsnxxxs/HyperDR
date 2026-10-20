@@ -16,7 +16,7 @@ private final class LUTEnvironment: Sendable {
     init() throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("hyperdr-k4-lut-\(UUID())")
         configuration = KitConfiguration(supportDirectory: root.appendingPathComponent("support"), cacheDirectory: root.appendingPathComponent("cache"))
-        sessions = SessionStore(configuration: configuration, formats: try InputFormats(schema: Engine.schema()))
+        sessions = SessionStore(configuration: configuration, formats: InputFormats())
         luts = LUTLibrary(configuration: configuration, sessions: sessions)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     }

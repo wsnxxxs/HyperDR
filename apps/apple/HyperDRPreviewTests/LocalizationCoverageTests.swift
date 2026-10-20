@@ -61,9 +61,8 @@ final class LocalizationCoverageTests: XCTestCase {
 
     func testEveryControlAndChoiceKeyIsTranslated() throws {
         let catalogue = try catalogue()
-        let controlKeys = EditControls.all.flatMap { [$0.labelKey] + [$0.helpKey].compactMap { $0 } }
-        let choiceKeys = EditChoices.all.flatMap { $0.options.map(\.labelKey) }
-        XCTAssertEqual(controlKeys.count, EditControls.all.count * 2, "every control has a label and a help")
+        let controlKeys = catalogue.keys.filter { $0.hasPrefix("ctrl.") }
+        let choiceKeys = catalogue.keys.filter { $0.hasPrefix("choice.") }
         XCTAssertFalse(choiceKeys.isEmpty)
         assertTranslated(controlKeys, in: catalogue)
         assertTranslated(choiceKeys, in: catalogue)
@@ -72,7 +71,7 @@ final class LocalizationCoverageTests: XCTestCase {
 
     func testEveryExportFormatHasItsCardText() throws {
         let catalogue = try catalogue()
-        let formats = try XCTUnwrap(EditChoices.byKey["encoding"]).options.map(\.id)
+        let formats = ExportEncoding.allCases.map(\.rawValue)
         XCTAssertEqual(Set(formats), ["adaptive", "iso-gainmap-jpeg", "pq", "hlg", "avif-pq", "avif-hlg", "sdr-jpeg", "sdr-tiff"])
         assertTranslated(formats.flatMap { ["enc.\($0).label", "enc.\($0).hint", "enc.\($0).detail"] }, in: catalogue)
         assertTranslated(Self.exportStages.map { "export.stage.\($0)" }, in: catalogue)
@@ -93,24 +92,11 @@ final class LocalizationCoverageTests: XCTestCase {
         for key in catalogue.keys.sorted() {
             let parts = key.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
             switch parts.first {
-            case "ctrl":
-                // ctrl.<key>.label | ctrl.<key>.help
-                guard parts.count == 3, let spec = EditControls.byKey[parts[1]],
-                      parts[2] == "label" || (parts[2] == "help" && spec.helpKey != nil) else {
-                    orphans.append(key)
-                    continue
-                }
-            case "choice":
-                // choice.<key>.<id>
-                guard parts.count == 3, EditChoices.byKey[parts[1]]?.options.contains(where: { $0.id == parts[2] }) == true else {
-                    orphans.append(key)
-                    continue
-                }
             case "field":
                 if parts.count != 2 || !Self.captureFields.contains(parts[1]) { orphans.append(key) }
             case "enc":
                 // enc.<id>.label | .hint | .detail (ids contain dashes, not dots)
-                guard parts.count == 3, EditChoices.byKey["encoding"]?.options.contains(where: { $0.id == parts[1] }) == true,
+                guard parts.count == 3, ExportEncoding(rawValue: parts[1]) != nil,
                       ["label", "hint", "detail"].contains(parts[2]) else {
                     orphans.append(key)
                     continue

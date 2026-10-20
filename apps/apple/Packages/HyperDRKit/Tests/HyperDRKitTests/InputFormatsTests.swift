@@ -4,7 +4,7 @@ import Testing
 @testable import HyperDRKit
 
 private func makeFormats() throws -> InputFormats {
-    try InputFormats(schema: Engine.schema())
+    InputFormats()
 }
 
 private func withTemporaryDirectory<T>(_ body: (URL) throws -> T) throws -> T {
@@ -85,18 +85,12 @@ private let avif = [UInt8](arrayLiteral: 0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x7
 }
 
 extension InputFormatsTests {
-    @Test func inputVocabularyUsesEverySchemaRawSuffixAndCanonicalRasterExtension() throws {
-        let schema = try Engine.schema()
-        let formats = try InputFormats(schema: schema)
-        let document = try #require(JSONSerialization.jsonObject(with: schema.rawJSON) as? [String: Any])
-        let inputs = try #require(document["inputs"] as? [String: Any])
-        let extensions = try #require(inputs["extensions"] as? [String: Any])
-        let raw = try #require(extensions["raw"] as? [String])
-        let raster = try #require(extensions["raster"] as? [String: [String]])
-        let canonical = try #require(inputs["canonicalExtensions"] as? [String: String])
-        #expect(!raw.isEmpty)
-        #expect(formats.prefixBytes == inputs["prefixBytes"] as? Int)
-        #expect(formats.prefixBytes >= 16)
+    @Test func inputVocabularyPreservesRawAndCanonicalRasterExtensions() throws {
+        let formats = InputFormats()
+        let raw = [".arw", ".dng", ".cr3", ".nef"]
+        let raster = ["jpeg": [".jpg", ".jpeg"], "png": [".png"], "tiff": [".tif", ".tiff"], "isobmff": [".heic", ".heif", ".hif", ".avif"]]
+        let canonical = ["jpeg": ".jpg", "png": ".png", "tiff": ".tif", "isobmff": ".heic"]
+        #expect(formats.prefixBytes == 16)
         try withTemporaryDirectory { directory in
             for suffix in raw {
                 // RAW suffix takes precedence over TIFF/HEIF container magic.

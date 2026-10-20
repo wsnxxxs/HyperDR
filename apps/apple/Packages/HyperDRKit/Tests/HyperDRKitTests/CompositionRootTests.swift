@@ -11,7 +11,6 @@ import Testing
             supportDirectory: root.appendingPathComponent("support", isDirectory: true),
             cacheDirectory: root.appendingPathComponent("cache", isDirectory: true))
         let kit = try await HyperDRKit(configuration: configuration)
-        #expect(!kit.schema.settings.isEmpty)
         #expect(kit.capabilities.codecs)
         #expect(!kit.formats.contentTypes.isEmpty)
         #expect(kit.formats.prefixBytes == 16)

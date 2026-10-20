@@ -510,17 +510,15 @@ private struct ExportFailureView: View {
 /// edit, so no undo step.
 private struct ExportQualitySlider: View {
     let model: EditorModel
-    private static let spec = EditControls.all.first { $0.key == "quality" }
+    private static let defaultQuality = Double(CustomExportFormat().quality)
 
     var body: some View {
-        if let spec = Self.spec {
-            ParameterSlider("ctrl.quality.label",
-                            value: Binding(get: { model.exportQuality ?? spec.defaultValue },
-                                           set: { model.setExportQuality($0) }),
-                            spec: ParameterSpec(range: spec.range, step: spec.step, defaultValue: spec.defaultValue,
-                                                format: .number(fractionDigits: 0)),
-                            help: "ctrl.quality.help",
-                            onReset: { model.setExportQuality(spec.defaultValue) })
-        }
+        ParameterSlider("ctrl.quality.label",
+                        value: Binding(get: { model.exportQuality ?? Self.defaultQuality },
+                                       set: { model.setExportQuality($0) }),
+                        spec: ParameterSpec(range: 0...100, step: 1, defaultValue: Self.defaultQuality,
+                                            format: .number(fractionDigits: 0)),
+                        help: "ctrl.quality.help",
+                        onReset: { model.setExportQuality(Self.defaultQuality) })
     }
 }

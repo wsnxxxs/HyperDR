@@ -49,6 +49,43 @@ import Testing
         #expect(report.channels == 3 && report.gainMin == -0.25 && report.gainMax == 2.5)
     }
 
+    /// Opt-in bitrate sample for admission, using authored synthetic planes.
+    @Test func nativeHEICBitrateMeasurement() async throws {
+        guard ProcessInfo.processInfo.environment["HYPERDR_HEIC_RATE"] == "1" else { return }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("heic-rate-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let engine = try await Engine(configuration: .init(cacheDirectory: root.appendingPathComponent("cache")))
+        let width = 1024, height = 1024, pixels = width*height
+        for noisy in [false, true] {
+            var state: UInt32 = 908
+            func random() -> Float {
+                state = state &* 1664525 &+ 1013904223
+                return Float(state >> 8) / Float(0xFFFFFF)
+            }
+            var base = [Float](repeating: 0, count: pixels*3), gain = [Float](repeating: 0, count: pixels)
+            for i in 0..<pixels {
+                let x = Float(i % width)/Float(width), y = Float(i / width)/Float(height)
+                for c in 0..<3 { base[i*3+c] = noisy ? random() : 0.1+0.6*(c == 0 ? x : y) }
+                gain[i] = noisy ? 2*random() : 2*x
+            }
+            // RAW normally separates a smooth gain map; random gain also probes
+            // a high-entropy authored input rather than assuming smoothness.
+            for depth in [8, 10] { for quality in [90, 95, 100] {
+                let output = root.appendingPathComponent("output.heic")
+                try? FileManager.default.removeItem(at: output)
+                let bridge = RatePlanes(base: base, gain: gain, width: width)
+                let result = try await engine.packageRows(width: width, height: height, gainChannels: 1,
+                    gainMetadata: .init(alternateHeadroom: 2), rows: 256, to: output,
+                    options: .init(format: "adaptive", quality: quality, depth: depth, verify: true),
+                    read: { y, count, b, g in bridge.read(y: y, count: count, base: b, gain: g!) })
+                #expect(result.verified)
+                let bytes = try output.resourceValues(forKeys: [.fileSizeKey]).fileSize!
+                print("HEIC_RATE", noisy ? "noise" : "gradient", depth, quality, bytes, Double(bytes)/Double(pixels))
+            } }
+        }
+    }
+
     /// Opt-in one-process-per-writer comparison; excluded from routine work.
     @Test func writerComparisonMeasurement() async throws {
         guard let writer = ProcessInfo.processInfo.environment["HYPERDR_HEIC8_BENCH_WRITER"] else { return }
@@ -160,5 +197,15 @@ import Testing
             }
         } }
         print("HEIC_FRAME_EXPERIMENT gain=\(gw)x\(gh) mat_nonzero=\(count) max_code=\(maximum*255)")
+    }
+}
+
+private struct RatePlanes: Sendable {
+    let base, gain: [Float]
+    let width: Int
+    func read(y: Int, count: Int, base output: UnsafeMutableBufferPointer<Float>,
+              gain gainOutput: UnsafeMutableBufferPointer<Float>) {
+        base.withUnsafeBufferPointer { output.baseAddress!.update(from: $0.baseAddress!.advanced(by: y*width*3), count: count*width*3) }
+        gain.withUnsafeBufferPointer { gainOutput.baseAddress!.update(from: $0.baseAddress!.advanced(by: y*width), count: count*width) }
     }
 }

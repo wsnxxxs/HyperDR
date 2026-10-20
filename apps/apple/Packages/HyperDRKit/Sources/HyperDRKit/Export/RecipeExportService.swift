@@ -408,7 +408,8 @@ public actor RecipeExportService: RecipeExportServicing {
         let available = budget.availableBytes() ?? 256 * 1024 * 1024
         let needed = max(0, plan.memory.estimate.peak - residentBytes)
         guard needed <= available else {
-            recordMemoryFailure(.init(check: .process, phase: .running, requiredBytes: needed, availableBytes: available))
+            recordMemoryFailure(.init(check: .process, phase: .running, requiredBytes: needed, availableBytes: available,
+                reason: plan.memory.usesRowInput ? .workingSet : .nonIncrementalWriter))
             throw RecipeExportError.memoryExceeded(required: needed, available: available)
         }
         // Metal's recommendation is an independent GPU constraint, never the
@@ -439,7 +440,8 @@ public actor RecipeExportService: RecipeExportServicing {
         guard plan.blockers.contains(where: { $0.code == "export_memory_exceeded" }) else { return }
         recordMemoryFailure(.init(check: .process, phase: .planning,
             requiredBytes: max(0, plan.memory.estimate.peak - residentBytes),
-            availableBytes: max(0, (plan.memory.availableBytes ?? 256 * 1024 * 1024) - residentBytes)))
+            availableBytes: max(0, (plan.memory.availableBytes ?? 256 * 1024 * 1024) - residentBytes),
+            reason: plan.memory.usesRowInput ? .workingSet : .nonIncrementalWriter))
     }
     private func recordMemoryFailure(_ failure: ExportMemoryDiagnostic) {
         lastMemoryDiagnostic = failure

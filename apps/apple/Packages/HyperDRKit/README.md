@@ -209,7 +209,7 @@ failure paths.
 
 `RecipeExportServicing.lastMemoryDiagnostic` is available after a failed export,
 including process rejection by the planner before rendering. It records process
-versus GPU, planning versus running, required/available bytes, and computed
+versus GPU, planning versus running, a non-incremental-writer rejection reason, required/available bytes, and computed
 required/available/shortfall MiB. It resets on the next accepted operation. The
 same numeric summary is logged publicly in `com.hyperdr.HyperDR` / `Export`, with
 no photo paths. Existing `RecipeExportError` cases remain unchanged. iOS currently
@@ -221,13 +221,12 @@ recommendations remain enforced.
 
 Native row output now obtains auxiliary **metadata** from ImageIO's file-contents
 properties, without copying the full decoded auxiliary-data dictionary. It asks
-`CGImageSourceCreateImageAtIndex` for 1/8 decoder subsampling, SDR or HDR as
-appropriate, and float output; JPEG MCU rounding is allowed. Unexpected full-size
-fallback is refused. The decoded image is at most the even-rounded 1/8 dimensions
-and is sampled into a <=64px Float buffer. These are public ImageIO APIs available
+`CGImageSourceCreateThumbnailAtIndex` for 1/8 decoder subsampling, SDR or HDR as
+appropriate, float output and a maximum edge of 256. Unexpected oversized output
+is refused. The decoded thumbnail is sampled into a <=64px Float buffer. These are public ImageIO APIs available
 before iOS 26; the CI-specific subsample API requires iOS 27 and is not used.
-Our retained readback buffers scale with 1/64 of output area, not full area; this
-is not a promise that Apple's private decoder caches are allocator-bounded.
+Our retained readback buffers have fixed size, independent of output area;
+this is not a promise that Apple's private decoder caches are allocator-bounded.
 
 The independent system reader still checks original dimensions, upright primary
 orientation, bit depth, gain auxiliary presence/absence, reduced HDR/SDR decode,
@@ -239,39 +238,81 @@ intermediate headrooms. Native row/tile validation still checks every full-size
 pixel, gain metadata, reconstruction, orientation and E5 before this readback.
 AVIF and ImageIO manual writing keep their existing full-plane checks/estimates.
 
-Offline RAW example: 9504×6336, no size limit, no frame/LUT/prediction overhead,
-rawEDR, native row input, Adaptive HEIC10 / ISO JPEG8. Values are MiB, successive
-stage peaks (not summed), with the same estimates on iOS. Use
-`HYPERDR_MEMORY_ESTIMATES=1` and test `fullSizeRAWMemoryEstimates` to reproduce.
-This does not substitute host RAM for a device's measured remaining budget.
+RAW estimates, original size: both 9504×6336 and 12800×8600 (110.08MP),
+no frame/LUT/prediction overhead, native row input, HEIC10 / ISO JPEG8 at q95.
+Stage values are MiB and are not summed. Set `HYPERDR_MEMORY_ESTIMATES=1` and run
+`fullSizeRAWMemoryEstimates` to reproduce; the default row estimates are asserted
+against actual `ExportPlanner.plan` results. "Before" is c2945d2e.
 
-| Stage, 256 rows | HEIC before | HEIC after | ISO JPEG before | ISO JPEG after |
+**Integration dependency:** the current Render contract still explicitly permits
+full-frame Apple RAW/decoder caches. Their existing reservation remains priced
+until Render provides a measured bounded source working set and maximum GPU ROI
+(including halos and the preparation scan). Removing that reservation without the
+contract would falsely admit the requested 110MP on the current renderer. The
+analysis image is already fixed to a 1024px long edge. GPU admission is already
+ROI based but must be tightened to Render's new maximum ROI width/height when
+that interface arrives. These are intermediate tables, not completed iPhone
+110MP acceptance.
+
+| 61MP, 256 rows | HEIC before | HEIC now | ISO JPEG before | ISO JPEG now |
 |---|---:|---:|---:|---:|
 | Decode/resident | 961.5 | 961.5 | 961.5 | 961.5 |
 | Render / composite | 1147.7 | 1147.7 | 1147.7 | 1147.7 |
-| Packaging / encode | 2175.5 | 2077.6 | 1407.9 | 1407.9 |
+| Packaging / encode | 2175.5 | 1912.2 | 1407.9 | 1407.9 |
 | Native verification | 1165.7 | 1165.7 | 1156.9 | 1156.9 |
-| System verification | 3444.8 | 1201.6 | 3444.8 | 1192.8 |
-| Peak | 3444.8 | 2077.6 | 3444.8 | 1407.9 |
+| System verification | 3444.8 | 1168.2 | 3444.8 | 1159.4 |
+| Peak | 3444.8 | 1912.2 | 3444.8 | 1407.9 |
 
-| Rows | Old peak, both | New HEIC peak | New ISO JPEG peak |
+| 110MP, 256 rows | HEIC before | HEIC now | ISO JPEG before | ISO JPEG now |
+|---|---:|---:|---:|---:|
+| Decode/resident | 1722.4 | 1722.4 | 1722.4 | 1722.4 |
+| Render / composite | 1973.2 | 1973.2 | 1973.2 | 1973.2 |
+| Packaging / encode | 3631.0 | 3189.0 | 2323.6 | 2323.6 |
+| Native verification | 1991.2 | 1991.2 | 1982.8 | 1982.8 |
+| System verification | 6172.4 | 1993.7 | 6172.4 | 1985.3 |
+| Peak | 6172.4 | 3189.0 | 6172.4 | 2323.6 |
+
+| Size | Rows | Old peak, both | HEIC now | ISO JPEG now |
+|---|---:|---:|---:|---:|
+| 61MP | 256 | 3444.8 | 1912.2 | 1407.9 |
+| 61MP | 128 | 3352.0 | 1689.4 | 1185.1 |
+| 61MP | 64 | 3305.6 | 1578.1 | 1147.7 |
+| 110MP | 256 | 6172.4 | 3189.0 | 2323.6 |
+| 110MP | 128 | 6047.4 | 2889.0 | 2023.6 |
+| 110MP | 64 | 5984.9 | 2739.0 | 1973.2 |
+
+The old RAW decoder reserve is 16 B/native pixel (918.8 / 1679.7 MiB). It is
+currently the main Render-dependent area term. HEIC slab accounting is corrected
+to one 12 B/px RGB Float slab plus a 32 MiB four-picture VT/framework reserve.
+
+HEIC compressed retention now uses a quality/depth-specific measured bit-rate
+envelope, not 3/5 B per pixel. One opt-in `nativeHEICBitrateMeasurement` run used
+1MP gradient and independent random RGB base/random mono gain planes through
+real native row writing and verification. File bytes per pixel were:
+
+| Input/depth | q90 | q95 | q100 |
 |---|---:|---:|---:|
-| 256 | 3444.8 | 2077.6 | 1407.9 |
-| 128 | 3352.0 | 1854.8 | 1185.1 |
-| 64 | 3305.6 | 1743.4 | 1147.7 |
+| Gradient/8 | .01791 | .02834 | .06686 |
+| Gradient/10 | .01821 | .06266 | .16920 |
+| Random/8 | 2.17554 | 2.37934 | 2.45496 |
+| Random/10 | 2.56658 | 2.99564 | 3.20879 |
 
-RAW retains a 918.8 MiB decoder/development reserve. For HEIC the writer actually
-owns one RGB Float slab (12 B/px), not a full-width 40 B/px YUV/Float canvas; the
-model now prices that slab plus 32 MiB for the bounded four-picture VT queue and
-framework workspace. Compressed tiles plus the assembled container still reserve
-two copies at 5 B/px for HEIC10 (~574.3 MiB). Those writer allocations, and the
-fixed 256-row Render scan for JPEG, dominate after removing the full system map.
-The QA report proves Simulator's GPU zero-limit rejection; it contains no numeric
+The rate envelope interpolates q90/95/100 random-plane bits/pixel, reserves 20%
+variation and 2 MiB container slack, and counts retained tiles plus assembled
+container (two copies). Lower qualities use the q90 envelope. This intentionally
+does not extrapolate a smooth gradient's rate to noisy sources, and remains an
+estimate rather than a hard bitstream cap. Writing stays O(compressed file size).
+Native JPEG/TIFF/ISO JPEG are incremental; HEIC retains only compressed output.
+AVIF has no incremental input and ImageIO manual HEIC retains whole planes;
+these keep the full estimate and reject large requests with
+`reason=nonIncrementalWriter`, required and available MiB rather than silently
+reducing original dimensions.
+
+The QA report proves Simulator's GPU zero-limit rejection. It captured no numeric
 process/GPU budget at the old phone failure, so its exact failed check cannot be
-retrospectively identified. The GPU estimate is 383.9 MiB at 256 rows and
-309.6 MiB at 128/64 rows (the fixed preparation scan remains); the phone's actual
-Metal recommendation was not captured. The new public diagnostic resolves this
-on retest.
+retrospectively identified. The new diagnostic resolves it on retest. Current
+61MP GPU estimates are 383.9 MiB at 256 rows and 309.6 MiB at 128/64; they still
+need Render's forthcoming bounded ROI constants for the 110MP target.
 
 HLG pull observation: 512-row HEIC slabs reuse data across horizontal tiles.
 256/128/64-row package bands all divide 512, so smaller bands add callbacks but

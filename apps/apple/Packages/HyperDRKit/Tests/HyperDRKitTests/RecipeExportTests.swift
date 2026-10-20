@@ -416,7 +416,7 @@ struct RecipeExportEnvironment {
         let initial = ExportPlanner.plan(request, budget: FixedExportMemoryBudget(bytes: 1_000_000_000))
         let native = ExportMemoryEstimate.estimate(.init(source: request.source, photoSize: initial.photoSize,
             canvas: initial.size, encoding: .adaptive, writer: .inHouse, writesGainMap: true,
-            isFramed: false, baseBitDepth: 8, writeRows: 256, retainedBytes: 0))
+            isFramed: false, baseBitDepth: 8, writeRows: 256, retainedBytes: 0, quality: initial.quality))
         #expect(native.peak < initial.memory.estimate.peak)
         let result = try await env.service(budget: native.peak + 1).export(session: env.session.id,
             snapshot: env.snapshot(), request: request)
@@ -531,14 +531,15 @@ struct RecipeExportEnvironment {
         #expect(try Data(contentsOf: env.session.sourceURL) == originalBytes)
     }
 
-    @Test func memoryFailureIncludesTheCheckAndMiBNumbers() async throws {
+    @Test(arguments: [ExportEncoding.sdrJPEG, .avifPq]) func memoryFailureIncludesTheCheckAndMiBNumbers(encoding: ExportEncoding) async throws {
         let env = try await RecipeExportEnvironment(); defer { env.remove() }
         let service = env.service(budget: 1)
         await #expect(throws: RecipeExportError.planBlocked(["export_memory_exceeded"])) {
-            _ = try await service.export(session: env.session.id, snapshot: env.snapshot(), request: env.request(.sdrJPEG))
+            _ = try await service.export(session: env.session.id, snapshot: env.snapshot(), request: env.request(encoding))
         }
         let api: any RecipeExportServicing = service
         let diagnostic = try #require(await api.lastMemoryDiagnostic)
+        #expect(diagnostic.reason == (encoding == .avifPq ? .nonIncrementalWriter : .workingSet))
         #expect(diagnostic.check == .process && diagnostic.phase == .planning)
         #expect(diagnostic.availableBytes == 1 && diagnostic.requiredBytes > 1)
         #expect(diagnostic.requiredMiB > diagnostic.availableMiB)

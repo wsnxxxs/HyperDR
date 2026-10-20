@@ -9,6 +9,11 @@ import HyperDRRecipe
 /// Task cancellation is checked before/after decode and each GPU stripe; already
 /// submitted GPU work is allowed to finish, and its cancelled result is discarded.
 public actor RenderEngine {
+    // Explicit executor also permits a prepared export's synchronous entry to
+    // enter the same isolation domain without waiting for an async actor hop.
+    nonisolated let serialExecutor = ExportRowsExecutor()
+    public nonisolated var unownedExecutor: UnownedSerialExecutor { serialExecutor.asUnownedSerialExecutor() }
+
     public static let workingColorSpace = CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3)!
     public let device: any MTLDevice
     let queue: any MTLCommandQueue

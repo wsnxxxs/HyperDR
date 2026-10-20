@@ -56,6 +56,19 @@ private func licensedRAW() -> URL {
         _ = try await engine.renderExportStripes(full,recipe:recipe,request:request,rows:11,prepare:{ _ in },consume:{ a.consume($0) })
         _ = try await engine.renderExportStripes(lazy,recipe:recipe,request:request,rows:11,prepare:{ _ in },consume:{ b.consume($0) })
         compareBands(a.rgb,b.rgb,label:"raster_base"); compareBands(a.gain,b.gain,scale:0.25,label:"raster_gain")
+        let reader = try await engine.prepareExportRows(lazy,recipe:recipe,request:request)
+        // An unrelated actor call cannot mutate the reader's frozen analysis.
+        await engine.clearCaches()
+        let replay = try await Task.detached {
+            let tail = try reader.read(y:22,count:11)
+            let head = try reader.read(y:0,count:11)
+            let tailAgain = try reader.read(y:22,count:11)
+            #expect(tail.baseRGB == tailAgain.baseRGB && tail.gain == tailAgain.gain)
+            #expect(tail.baseRGB == Array(b.rgb[(22*37*3)..<(33*37*3)]))
+            #expect(head.baseRGB == Array(b.rgb[0..<(11*37*3)]))
+            return tail
+        }.value
+        #expect(replay.rect.y == 22)
         // A real system-written gain-map fixture exercises cropped native gain decoding.
         let heic = folder.appendingPathComponent("pair.heic")
         let base = CIImage(cgImage:image)

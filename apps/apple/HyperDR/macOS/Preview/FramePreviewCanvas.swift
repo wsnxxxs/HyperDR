@@ -1,4 +1,3 @@
-import HyperDREngine
 import SwiftUI
 
 /// The editor's current frame on a second EDR canvas, fitted and fixed, for
@@ -16,11 +15,7 @@ struct FramePreviewCanvas: NSViewRepresentable {
 
     /// What the canvas draws: the edited frame, in SDR only while comparing.
     static func composition(of model: EditorModel, showsSDR: Bool) -> CanvasComposition? {
-        model.editedCanvasFrame.map { composition(frame: $0.frame, trace: model.editedPresentationTrace, showsSDR: showsSDR) }
-    }
-
-    static func composition(frame: PreviewFrame, trace: PreviewTrace?, showsSDR: Bool) -> CanvasComposition {
-        CanvasComposition(edited: frame, previewsAsSDR: showsSDR, presentationTrace: trace)
+        model.editedPair.map { CanvasComposition(edited: $0, headroom: model.display.currentHeadroom, previewsAsSDR: showsSDR) }
     }
 
     func makeNSView(context: Context) -> EDRCanvasView {

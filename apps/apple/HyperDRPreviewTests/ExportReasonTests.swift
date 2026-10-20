@@ -33,13 +33,4 @@ import XCTest
         let unknown = try history("Missing aperture; used the CNN alone").version.fallbackReason
         XCTAssertEqual(unknown?.code, .unknown); XCTAssertEqual(unknown?.missingCaptureFields, [])
     }
-
-    func testGainPacketUsesSameColonSeparatedMachineReason() throws {
-        let header = try JSONSerialization.data(withJSONObject: ["fallbackReason": "missing_capture_fields:iso:f_number"])
-        var packet = Data("HYPGAIN1\n".utf8)
-        var count = UInt32(header.count).littleEndian
-        withUnsafeBytes(of: &count) { packet.append(contentsOf: $0) }
-        packet.append(header)
-        XCTAssertEqual(LiveEditorServices.missingCaptureFields(packet), ["iso", "f_number"])
-    }
 }

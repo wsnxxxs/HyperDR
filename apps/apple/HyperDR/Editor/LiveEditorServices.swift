@@ -19,22 +19,16 @@ import os
     private(set) var engineStatus: EngineStatus = .starting
     private(set) var displayState = DisplayState(screenName: "", currentHeadroom: 1,
                                                  potentialHeadroom: 1, gainWeight: nil)
-    /// Long edge the next preview requests use; the model sets it from the
-    /// canvas tier (`EditDefaults.previewEdge`).
     let preferences: UserDefaults
-    private struct PendingSubmission {
-        let handle: UUID
-        let request: PreviewRequest
-        let trace: PreviewTrace?
-    }
-    private var submitContinuation: AsyncStream<PendingSubmission>.Continuation?
-    private var submitPump: Task<Void, Never>?
-    private var latestRequests: [UUID: PreviewRequest] = [:]
+    /// HyperDRRender, created on first use; a Mac without Metal gets a
+    /// renderer that refuses every photo.
+    private(set) lazy var rendering: any EditorRendering = {
+        do { return try RenderSession() }
+        catch { return UnavailableEditorRendering(reason: String(describing: error)) }
+    }()
 
     private struct Record {
         var session: PhotoSession
-        var reference: PreviewFrame?
-        var edited: PreviewFrame?
         // The task is also the cached result, including an empty result. Store
         // it before the first suspension so concurrent callers share one read.
         var captureFacts: Task<CaptureFacts, Never>?
@@ -75,8 +69,6 @@ import os
     }
 
     isolated deinit {
-        submitPump?.cancel()
-        submitContinuation?.finish()
         if let terminationObserver { NotificationCenter.default.removeObserver(terminationObserver) }
     }
 
@@ -87,7 +79,6 @@ import os
             let kit = try await kitTask.value
             guard !stopped else { kit.stop(); return }
             self.kit = kit
-            installSubmitPump(kit)
             setEngine(.ready(version: Engine.version))
         } catch {
             setEngine(.failed(UserFacingError(code: "engine_unavailable",
@@ -133,8 +124,6 @@ import os
     func stop() {
         guard !stopped else { return }
         stopped = true
-        submitContinuation?.finish()
-        submitPump?.cancel()
         if let kit { lifecycle.stop(kit) }
     }
 
@@ -193,7 +182,6 @@ import os
                                 formatLabel: session.format.displayLabel, byteCount: session.byteCount)
         records[photo.handle] = Record(session: session)
         do {
-            try await kit.previews.attach(session)
             try Task.checkCancellation()
             return photo
         } catch {
@@ -205,12 +193,8 @@ import os
     func close(_ photo: EditorPhoto) async {
         guard let record = records.removeValue(forKey: photo.handle) else { return }
         record.captureFacts?.cancel()
-        latestRequests.removeValue(forKey: photo.handle)
         let kit = try? await requireKit()
         guard let kit, !records.values.contains(where: { $0.session.id == record.session.id }) else { return }
-        await kit.previews.detach(record.session.id)
-        // A new adoption may have arrived during detach; preserve its scope.
-        guard !records.values.contains(where: { $0.session.id == record.session.id }) else { return }
         await kit.sessions.close(record.session.id)
     }
 
@@ -226,212 +210,6 @@ import os
         }
         records[photo.handle]?.captureFacts = task
         return await task.value
-    }
-
-    // MARK: - Previews
-
-    /// The frames the canvas should draw for a photo (reference SDR base and
-    /// the latest edit).
-    func frames(for photo: EditorPhoto) -> (reference: PreviewFrame?, edited: PreviewFrame?) {
-        let record = records[photo.handle]
-        return (record?.reference, record?.edited)
-    }
-
-    func previews(for photo: EditorPhoto, encoding: String,
-                  maxEdge: Int) -> AsyncStream<EditorPreviewEvent> {
-        AsyncStream { continuation in
-            let task = Task { @MainActor [weak self] in
-                await self?.render(photo, encoding: encoding, maxEdge: maxEdge, into: continuation)
-                continuation.finish()
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
-    }
-
-    private func render(_ photo: EditorPhoto, encoding: String, maxEdge: Int,
-                        into continuation: AsyncStream<EditorPreviewEvent>.Continuation) async {
-        guard let kit, let record = records[photo.handle] else {
-            continuation.yield(.failed(UserFacingError(code: "source_missing")))
-            return
-        }
-        let id = record.session.id
-        // Subscribe before submitting so the result cannot be missed.
-        let events = kit.previews.events(for: id)
-        do {
-            // The neutral comparison frame: no model, the photo's own colour.
-            let workflow = EditDefaults.initial(encoding: encoding)
-            let result = try await kit.previews.render(PreviewRequest(session: id,
-                options: EditDefaults.reference(encoding: encoding, workflow: workflow),
-                maxEdge: maxEdge, purpose: .reference))
-            try Task.checkCancellation()
-            guard records[photo.handle] != nil else { throw CancellationError() }
-            guard result.sourceDigest == record.session.sha256 else {
-                throw HyperDRError(code: "source_missing", message: "Source changed while opening")
-
-            }
-            records[photo.handle]?.reference = result.frame
-            let reference = Self.preview(result.frame, trace: result.trace)
-            continuation.yield(.reference(reference))
-            let base = EditBaseline.initial(encoding: encoding)
-            let request = PreviewRequest(session: id, options: base, maxEdge: maxEdge, purpose: .edit)
-            await kit.previews.submit(request)
-            for await event in events {
-                try Task.checkCancellation()
-                switch event {
-                case .finished(let result) where result.request == request:
-                    guard records[photo.handle] != nil else { throw CancellationError() }
-                    guard result.sourceDigest == record.session.sha256 else {
-                        throw HyperDRError(code: "source_missing", message: "Source changed while opening")
-                    }
-                    records[photo.handle]?.edited = result.frame
-                    continuation.yield(.edited(Self.preview(result.frame, trace: result.trace)))
-                    return
-                case .failed(let failed, let error) where failed == request:
-                    continuation.yield(.failed(UserFacingError(error)))
-                    return
-                case .superseded(let superseded) where superseded == request:
-                    return
-                default:
-                    continue
-                }
-            }
-        } catch {
-            guard !Task.isCancelled else { return }
-            continuation.yield(.failed(UserFacingError.service(error)))
-        }
-    }
-
-    static func preview(_ frame: PreviewFrame, trace: PreviewTrace? = nil) -> EditorPreview {
-        let metadata = frame.metadata
-        return EditorPreview(
-            pixelSize: PixelSize(width: metadata.sourceWidth ?? metadata.width,
-                                 height: metadata.sourceHeight ?? metadata.height),
-            source: SourceSummary(metadata),
-            hasGain: frame.isCompact || metadata.headroomStops > 0,
-            gainWeight: metadata.gainWeight, frame: frame,
-            hasCaptureMetadata: metadata.hasCaptureMetadata, trace: trace)
-    }
-
-    private func installSubmitPump(_ kit: HyperDRKit) {
-        guard submitPump == nil else { return }
-        let (stream, continuation) = AsyncStream.makeStream(of: PendingSubmission.self,
-            bufferingPolicy: .bufferingNewest(1))
-        submitContinuation = continuation
-        submitPump = Task { [weak self] in
-            for await pending in stream {
-                guard !Task.isCancelled else { return }
-                guard let self, records[pending.handle] != nil,
-                      latestRequests[pending.handle] == pending.request else { continue }
-                await PreviewTrace.$current.withValue(pending.trace) {
-                    await kit.previews.submit(pending.request)
-                }
-            }
-        }
-    }
-
-    func submit(_ photo: EditorPhoto, options: EditOptions, maxEdge: Int) {
-        guard let record = records[photo.handle], let kit, !stopped else { return }
-        installSubmitPump(kit)
-        let request = PreviewRequest(session: record.session.id, options: options, maxEdge: maxEdge,
-                                     submissionID: UUID())
-        latestRequests[photo.handle] = request
-        submitContinuation?.yield(PendingSubmission(handle: photo.handle, request: request, trace: PreviewTrace.current))
-    }
-
-    func renderReference(_ photo: EditorPhoto, options: EditOptions, maxEdge: Int) async throws -> EditorPreview? {
-        guard let kit, let record = records[photo.handle] else { return nil }
-        let result = try await kit.previews.render(PreviewRequest(session: record.session.id,
-            options: options, maxEdge: maxEdge, purpose: .reference))
-        try Task.checkCancellation()
-        guard records[photo.handle] != nil else { throw CancellationError() }
-        guard result.sourceDigest == record.session.sha256 else { throw EditorDetailError.sourceReplaced }
-        records[photo.handle]?.reference = result.frame
-        return Self.preview(result.frame, trace: result.trace)
-    }
-
-    func renderDetail(_ photo: EditorPhoto, options: EditOptions, region: PreviewRegion,
-                      original: Bool) async throws -> EditorPreview? {
-        guard let kit, let record = records[photo.handle] else { throw UserFacingError(code: "source_missing") }
-        let result = try await kit.previews.render(PreviewRequest(session: record.session.id,
-            options: options, maxEdge: DetailPolicy.maxEdge, region: region,
-            purpose: original ? .reference : .edit))
-        try Task.checkCancellation()
-        guard records[photo.handle] != nil else { throw CancellationError() }
-        guard result.sourceDigest == record.session.sha256 else { throw EditorDetailError.sourceReplaced }
-        return Self.preview(result.frame, trace: result.trace)
-    }
-
-    func refreshes(for photo: EditorPhoto) -> AsyncStream<EditorRefreshEvent> {
-        guard let kit, let record = records[photo.handle] else { return AsyncStream { $0.finish() } }
-        let events = kit.previews.events(for: record.session.id)
-        return AsyncStream { continuation in
-            let observer = Task { [weak self] in
-                for await event in events {
-                    guard !Task.isCancelled, let self, records[photo.handle] != nil else { break }
-                    switch event {
-                    case .finished(let result) where result.request.purpose == .edit && result.request.region == nil:
-                        guard result.sourceDigest == record.session.sha256 else {
-                            continuation.yield(.sourceReplaced); continuation.finish(); return
-                        }
-                        records[photo.handle]?.edited = result.frame
-                        continuation.yield(.edited(Self.preview(result.frame, trace: result.trace),
-                            isLatest: latestRequests[photo.handle] == result.request))
-                    case .failed(let request, let error) where latestRequests[photo.handle] == request:
-                        continuation.yield(.failed(UserFacingError(error)))
-                    case .superseded(let request) where request.purpose == .edit && request.region == nil:
-                        continuation.yield(.superseded(isLatest: latestRequests[photo.handle] == request))
-                    default: break
-                    }
-                }
-                continuation.finish()
-            }
-            continuation.onTermination = { _ in observer.cancel() }
-        }
-    }
-
-    // MARK: - AI
-
-    func modelTable() -> ModelTable {
-        guard let catalog = kit?.models else { return .unavailable }
-        return ModelTable(runtimeReady: catalog.status.runtimeAvailable, defaultID: catalog.defaultID,
-            models: catalog.models.map { entry in
-                var key = "model.\(entry.id)"
-                if case .string(let declared)? = entry.document["displayKey"] { key = declared }
-                return ModelChoice(id: entry.id, name: entry.displayName, nameKey: key,
-                    summaryKey: key + ".summary", isEnabled: entry.available,
-                    requiresCapture: entry.document["requiresExif"] == .bool(true),
-                    version: { if case .string(let value)? = entry.document["version"] { return value } else { return nil } }())
-            })
-    }
-
-    func modelGainToken(for photo: EditorPhoto, options: EditOptions) async throws -> ModelGainToken {
-        guard let kit, let record = records[photo.handle] else { throw UserFacingError(code: "source_missing") }
-        do {
-            return ModelGainToken(value: try await kit.previews.modelGainKey(session: record.session.id,
-                                                                            options: options))
-        } catch { throw UserFacingError.service(error) }
-    }
-
-    func computeModelGain(for photo: EditorPhoto, options: EditOptions) async throws -> ModelGainOutcome {
-        guard let kit, let record = records[photo.handle] else { throw UserFacingError(code: "source_missing") }
-        do {
-            let result = try await kit.previews.modelGain(session: record.session.id, options: options)
-            return ModelGainOutcome(token: ModelGainToken(value: result.key),
-                                    missingCaptureFields: Self.missingCaptureFields(result.packet))
-        } catch { throw UserFacingError.service(error) }
-    }
-
-    /// The capture fields a model fell back without, from the `HYPGAIN1`
-    /// packet's `fallbackReason` (`missing_capture_fields:iso:f_number`).
-    static func missingCaptureFields(_ packet: Data) -> [String] {
-        let magic = Array("HYPGAIN1\n".utf8)
-        guard packet.count >= 13, Array(packet.prefix(9)) == magic else { return [] }
-        let size = packet.withUnsafeBytes { Int(UInt32(littleEndian: $0.loadUnaligned(fromByteOffset: 9, as: UInt32.self))) }
-        guard size > 0, 13 + size <= packet.count,
-              let header = try? JSONDecoder().decode([String: JSONValue].self,
-                                                     from: packet.subdata(in: 13..<13 + size)),
-              case .string(let reason)? = header["fallbackReason"] else { return [] }
-        return ModelFallbackReason(engineReason: reason)?.missingCaptureFields.map(\.rawValue) ?? []
     }
 
     // MARK: - Display
@@ -463,10 +241,6 @@ extension LiveEditorServices {
         try Task.checkCancellation()
         let ticket = try await kit.jobs.start(session: id, options: options, frame: frame, destination: destination, thumbnail: payload)
         return EditorExportTicket(job: ticket.job.rawValue, argv: ticket.argv)
-    }
-    func sdrThumbnail(of frame: PreviewFrame, maxPixelSize: Int) async -> CGImage? {
-        let task = Task.detached(priority: .utility) { try? ExportThumbnail.sdrImage(from: frame, maxPixelSize: maxPixelSize) }
-        return await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
     }
     func exportThumbnail(_ photo: EditorPhoto, version: String) async -> CGImage? {
         guard let id = try? exportSession(photo), let kit = try? await requireKit(),
@@ -609,6 +383,10 @@ extension LiveEditorServices {
     func lutEntries() async -> [LUTItem] {
         guard let kit = try? await requireKit() else { return [] }
         return await kit.luts.entries().map(item)
+    }
+    func lutCube(_ id: String) async throws -> String {
+        do { return try await requireKit().luts.cube(LUTID(rawValue: id)) }
+        catch { throw UserFacingError.service(error) }
     }
     func importLUT(_ url: URL) async throws -> LUTItem { item(try await requireKit().luts.importLUT(url)) }
     func applyLUT(_ id: String, to photo: EditorPhoto) async throws -> LUTItem {

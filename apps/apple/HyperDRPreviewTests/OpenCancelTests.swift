@@ -11,10 +11,6 @@ import HyperDRDesign
     private let jpeg = URL(fileURLWithPath: "/fixtures/big.jpg")
     private let old = URL(fileURLWithPath: "/fixtures/old.jpg")
     private let raw = URL(fileURLWithPath: "/fixtures/one.ARW")
-    private var preview: EditorPreview {
-        EditorPreview(pixelSize: PixelSize(width: 100, height: 80), source:
-            SourceSummary(domain: .sdr, colorName: "sRGB", degradationReasons: []), hasGain: false)
-    }
 
     @MainActor private final class Clock: EditorOpenClock {
         var now: Duration = .zero
@@ -51,9 +47,10 @@ import HyperDRDesign
     func testASlowNonRawOpenIsFlaggedAtOnePointFiveSecondsAndClearedByTheFirstFrame() async {
         let clock = Clock(); defer { clock.finish() }
         let services = ScriptedEditorServices(); services.openClock = clock
+        services.scripted.holdsOpens = true
         let model = EditorModel(services: services)
         model.open([jpeg])
-        await eventually(timeout: .seconds(3)) { services.streams[self.jpeg] != nil }
+        await eventually(timeout: .seconds(3)) { services.scripted.isHoldingOpen(self.jpeg) }
         clock.advance(to: .milliseconds(1499))
         try? await Task.sleep(for: .milliseconds(50))
         XCTAssertEqual(model.document?.isOpeningSlowly, false)
@@ -61,17 +58,18 @@ import HyperDRDesign
         await eventually(timeout: .seconds(3)) { model.document?.isOpeningSlowly == true }
         XCTAssertEqual(model.document?.isPreparingCameraSupport, false, "never both")
         XCTAssertTrue(model.canCancelOpen)
-        services.streams[jpeg]?.yield(.reference(preview))
-        await eventually(timeout: .seconds(3)) { model.document?.phase == .rendering }
+        services.scripted.releaseOpens()
+        await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
         XCTAssertEqual(model.document?.isOpeningSlowly, false)
     }
 
     func testARawIsPreparingNotSlow() async {
         let clock = Clock(); defer { clock.finish() }
         let services = ScriptedEditorServices(); services.openClock = clock
+        services.scripted.holdsOpens = true
         let model = EditorModel(services: services)
         model.open([raw])
-        await eventually(timeout: .seconds(3)) { services.streams[self.raw] != nil }
+        await eventually(timeout: .seconds(3)) { services.scripted.isHoldingOpen(self.raw) }
         clock.advance(to: .milliseconds(1500))
         await eventually(timeout: .seconds(3)) { model.document?.isPreparingCameraSupport == true }
         XCTAssertEqual(model.document?.isOpeningSlowly, false)
@@ -81,12 +79,10 @@ import HyperDRDesign
         let clock = Clock(); defer { clock.finish() }
         let services = ScriptedEditorServices(); services.openClock = clock
         let model = EditorModel(services: services)
-        model.open([old])
-        await eventually(timeout: .seconds(3)) { services.streams[self.old] != nil }
-        services.streams[old]?.yield(.reference(preview)); services.streams[old]?.yield(.edited(preview))
-        await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
+        await openReady(model, old)
+        services.scripted.holdsOpens = true
         model.open([jpeg])
-        await eventually(timeout: .seconds(3)) { services.streams[self.jpeg] != nil }
+        await eventually(timeout: .seconds(3)) { services.scripted.isHoldingOpen(self.jpeg) }
         clock.advance(to: .seconds(2))
         await eventually(timeout: .seconds(3)) { model.document?.isOpeningSlowly == true }
         OpenCancellation.cancel(model, locale: Locale(identifier: "en"))
@@ -109,9 +105,10 @@ import HyperDRDesign
 
     private func opening() async -> (EditorModel, ScriptedEditorServices) {
         let services = ScriptedEditorServices()
+        services.scripted.holdsOpens = true
         let model = EditorModel(services: services)
         model.open([jpeg])
-        await eventually(timeout: .seconds(3)) { services.streams[self.jpeg] != nil }
+        await eventually(timeout: .seconds(3)) { services.scripted.isHoldingOpen(self.jpeg) }
         return (model, services)
     }
 
@@ -150,14 +147,12 @@ import HyperDRDesign
     func testEscapeAlsoLetsGoOfTheOriginalHeldOverTheOldPhoto() async {
         let services = ScriptedEditorServices()
         let model = EditorModel(services: services)
-        model.open([old])
-        await eventually(timeout: .seconds(3)) { services.streams[self.old] != nil }
-        services.streams[old]?.yield(.reference(preview)); services.streams[old]?.yield(.edited(preview))
-        await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
+        await openReady(model, old)
+        services.scripted.holdsOpens = true
         model.beginPeekOriginal()
         XCTAssertTrue(model.isPeekingOriginal)
         model.open([jpeg])
-        await eventually(timeout: .seconds(3)) { services.streams[self.jpeg] != nil }
+        await eventually(timeout: .seconds(3)) { services.scripted.isHoldingOpen(self.jpeg) }
         XCTAssertTrue(OpenCancelKeyRule.handle(escape(), context: context(), model: model))
         XCTAssertFalse(model.isPeekingOriginal)
         XCTAssertEqual(model.document?.name, old.lastPathComponent)
@@ -186,6 +181,7 @@ import HyperDRDesign
     func testTheSlowRestoreHandsOverToTheDocumentsOwnSlowFlag() async {
         let clock = Clock(); defer { clock.finish() }
         let services = ScriptedEditorServices(); services.openClock = clock; services.usesRestoreGate = true
+        services.scripted.holdsOpens = true
         let model = EditorModel(services: services)
         model.launch()
         await eventually(timeout: .seconds(3)) { services.restoreWaiter != nil }

@@ -144,6 +144,13 @@ import Observation
     @ObservationIgnored private var abandoned: (id: String, since: ContinuousClock.Instant)?
     @ObservationIgnored private var largestCanvasSide: Int?
     @ObservationIgnored private var openGeneration = 0
+    /// The photo the undo history belongs to. A newly opened photo takes the
+    /// history over (clearing it) with its first frame, so a photo whose
+    /// opening fails before then leaves the previous photo's steps in place.
+    @ObservationIgnored private var historyURL: URL?
+    /// Set from a successful `open` until the source's first frame: the
+    /// history still holds the previous photo's steps.
+    @ObservationIgnored private var historyIsStale = false
     @ObservationIgnored private var opening: Task<EditorSource, any Error>?
 
     private struct Flight {
@@ -198,10 +205,16 @@ import Observation
     // MARK: - Photos
 
     /// Opens a photo the caller can read. The new photo starts from the
-    /// defaults of its own input domain; undo steps, bypassed groups and the
-    /// prediction state of the previous photo are dropped. A newer `open`
-    /// supersedes this one, which then throws `CancellationError`.
-    func open(_ url: URL) async throws {
+    /// defaults of its own input domain; bypassed groups and the prediction
+    /// state of the previous photo are dropped, and its undo steps once the
+    /// new photo's first frame is in (until then they can come back with
+    /// `restoring`). A newer `open` supersedes this one, which then throws
+    /// `CancellationError`.
+    ///
+    /// `restoring` puts back a photo whose opening of a successor failed:
+    /// it starts from that recipe, with no undo step, and keeps the undo
+    /// history when the history belongs to `url`.
+    func open(_ url: URL, restoring: Recipe? = nil) async throws {
         // A caller cancelled before it got here must not supersede a newer open.
         try Task.checkCancellation()
         openGeneration += 1
@@ -229,12 +242,17 @@ import Observation
         editingParameter = nil
         cancelRenders()
         clearLayers()
-        undo.clear()
         previewSize = nil
         largestCanvasSide = nil
         source = opened
         sourceChanged = false
-        recipe = Recipe(inputDomain: opened.domain)
+        if var restoring {
+            restoring.setInputDomain(opened.domain)
+            recipe = restoring
+        } else {
+            recipe = Recipe(inputDomain: opened.domain)
+        }
+        historyIsStale = restoring == nil || historyURL != url
         bypassedGroups = []
         modelTask?.cancel()
         modelTask = nil
@@ -267,6 +285,8 @@ import Observation
         cancelRenders()
         clearLayers()
         undo.clear()
+        historyURL = nil
+        historyIsStale = false
         source = nil
         sourceChanged = false
         frame = nil
@@ -302,7 +322,7 @@ import Observation
         let old = recipe
         recipe = newValue
         if drag == nil, let edit = RecipeEdit.classify(from: old, to: newValue) {
-            undo.register(RecipeStep(before: old, after: newValue, edit: edit))
+            register(RecipeStep(before: old, after: newValue, edit: edit))
         }
         recipeDidChange(from: old)
     }
@@ -317,7 +337,7 @@ import Observation
         recipe = newValue
         // The drag and this edit are two steps even in one event's undo group.
         if committed { undo.separateNextStep() }
-        undo.register(RecipeStep(before: old, after: newValue, edit: edit))
+        register(RecipeStep(before: old, after: newValue, edit: edit))
         recipeDidChange(from: old)
     }
 
@@ -382,7 +402,7 @@ import Observation
         updateMask()
         var registered = false
         if recipe != drag.start {
-            undo.register(RecipeStep(before: drag.start, after: recipe, edit: .parameter(drag.id)))
+            register(RecipeStep(before: drag.start, after: recipe, edit: .parameter(drag.id)))
             registered = true
         }
         // The final, non-interactive frame, and the original if development
@@ -396,12 +416,28 @@ import Observation
     /// being undone comes before it (hosts end drags before undoing, and a
     /// pointer or finger drag cannot overlap an undo in practice).
     private func restore(_ value: Recipe) {
+        // The previous photo's steps do not apply to the one being opened.
+        guard !historyIsStale else { return }
         drag = nil
         editingParameter = nil
         updateMask()
         let old = recipe
         recipe = value
         recipeDidChange(from: old)
+    }
+
+    private func register(_ step: RecipeStep) {
+        adoptHistory()
+        undo.register(step)
+    }
+
+    /// The open photo takes the undo history over: its first frame is in, or
+    /// it is being edited.
+    private func adoptHistory() {
+        guard historyIsStale, let source else { return }
+        undo.clear()
+        historyURL = source.url
+        historyIsStale = false
     }
 
     private func recipeDidChange(from old: Recipe) {
@@ -493,7 +529,10 @@ import Observation
         switch result {
         case .success(let rendered):
             frame = rendered
-            if source?.id == rendered.request.sourceID { frameSource = source }
+            if source?.id == rendered.request.sourceID {
+                frameSource = source
+                adoptHistory()
+            }
             renderFailure = nil
             if let detail = detailFrame, !detail.request.rendersSame(as: rendered.request) { detailFrame = nil }
             updateMask()
@@ -545,9 +584,16 @@ import Observation
 
     /// A render of the current recipe outside the preview loop: a detail
     /// region at full size, a small frame for the scopes, a thumbnail.
-    func render(size: HyperDRRender.PixelSize, region: CGRect? = nil) async throws -> EditorFrame {
-        guard let request = request(for: recipe, size: size, region: region, interactive: false) else {
+    /// `original` renders the defaults under the same development, as
+    /// `originalFrame` does (the Mac's comparison detail).
+    func render(size: HyperDRRender.PixelSize, region: CGRect? = nil, original: Bool = false) async throws -> EditorFrame {
+        guard var request = request(for: original ? recipe.original : recipe, size: size, region: region,
+                                    interactive: false) else {
             throw EditorRenderingError.noSource
+        }
+        if original {
+            request.bypassedGroups = []
+            request.usesModelGain = false
         }
         return try await renderer.render(request)
     }

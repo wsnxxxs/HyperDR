@@ -12,18 +12,13 @@ import XCTest
     let openableContentTypes: [UTType] = [.jpeg]
     let preferences: UserDefaults
     private let preferencesName: String
-    var streams: [URL: AsyncStream<EditorPreviewEvent>.Continuation] = [:]
-    var refresh: AsyncStream<EditorRefreshEvent>.Continuation?
+    let scripted = ScriptedRendering()
+    var rendering: any EditorRendering { scripted }
     var closed: [EditorPhoto] = []
-    var submitted: [EditOptions] = []
-    var referenceRenders: [EditOptions] = []
-    var referenceEdges: [Int] = []
-    var referenceHandler: ((EditOptions) async throws -> EditorPreview?)?
     var restoreWaiter: CheckedContinuation<RestoreResult, Never>?
     var startHandler: (() async -> Void)?
     var startsCompleted = 0
     var starts = 0
-    var subscriptions = 0
     var usesRestoreGate = false
     var factsCalls = 0
     var usesFactsGate = false
@@ -50,34 +45,13 @@ import XCTest
         guard usesRestoreGate else { return .none }
         return await withCheckedContinuation { restoreWaiter = $0 }
     }
-    func previews(for photo: EditorPhoto, encoding: String, maxEdge: Int) -> AsyncStream<EditorPreviewEvent> {
-        AsyncStream { streams[photo.url] = $0 }
-    }
-    func refreshes(for photo: EditorPhoto) -> AsyncStream<EditorRefreshEvent> {
-        subscriptions += 1
-        return AsyncStream { refresh = $0 }
-    }
-    func submit(_ photo: EditorPhoto, options: EditOptions, maxEdge: Int) {
-        submitted.append(options)
-    }
-    func renderReference(_ photo: EditorPhoto, options: EditOptions, maxEdge: Int) async throws -> EditorPreview? {
-        referenceRenders.append(options)
-        referenceEdges.append(maxEdge)
-        return try await referenceHandler?(options)
-    }
-    func modelTable() -> ModelTable { .unavailable }
-    func modelGainToken(for photo: EditorPhoto, options: EditOptions) async throws -> ModelGainToken {
-        throw UserFacingError(code: "model_not_ready")
-    }
-    func computeModelGain(for photo: EditorPhoto, options: EditOptions) async throws -> ModelGainOutcome {
-        throw UserFacingError(code: "model_not_ready")
-    }
     func captureFacts(for photo: EditorPhoto) async -> CaptureFacts {
         factsCalls += 1
         guard usesFactsGate else { return CaptureFacts(model: "review-body") }
         return await withCheckedContinuation { factsWaiters[photo.url] = $0 }
     }
     func close(_ photo: EditorPhoto) async { closed.append(photo) }
+    func lutCube(_ id: String) async throws -> String { throw CocoaError(.fileNoSuchFile) }
     var relinkHandler: ((URL) async throws -> EditorPhoto)?
     func relink(_ photo: EditorPhoto, to url: URL) async throws -> EditorPhoto {
         guard let relinkHandler else { throw UserFacingError(code: "source_different") }
@@ -85,53 +59,58 @@ import XCTest
     }
 }
 
+/// Opens `url` and waits until its first frame is on the canvas.
+@MainActor func openReady(_ model: EditorModel, _ url: URL, file: StaticString = #filePath, line: UInt = #line) async {
+    let serial = model.photoSerial
+    model.open([url])
+    await eventually(timeout: .seconds(5), "\(url.lastPathComponent) to be ready", file: file, line: line) {
+        model.photoSerial > serial && model.document?.phase == .ready && model.hasReferenceFrame
+    }
+}
+
 @MainActor final class EditorFlowTests: XCTestCase {
     private let a = URL(fileURLWithPath: "/fixtures/a.jpg")
     private let b = URL(fileURLWithPath: "/fixtures/b.jpg")
     private let c = URL(fileURLWithPath: "/fixtures/c.jpg")
-    private var preview: EditorPreview {
-        EditorPreview(pixelSize: PixelSize(width: 6000, height: 4000),
-            source: SourceSummary(domain: .hdr, colorName: "Display P3", degradationReasons: []), hasGain: true)
-    }
 
     private func opened(_ model: EditorModel, _ service: ScriptedEditorServices, url: URL) async {
-        model.open([url])
-        await eventually { service.streams[url] != nil }
-        service.streams[url]?.yield(.reference(preview))
-        service.streams[url]?.yield(.edited(preview))
-        await eventually { model.document?.phase == .ready }
+        await openReady(model, url)
     }
 
-    func testReferenceThenFailureRollsBackCompletePreviousState() async {
+    private func exposure(_ value: Double, _ model: EditorModel) {
+        var recipe = model.editor.recipe
+        recipe.setValue(.number(value), for: "tone.exposure")
+        model.editor.setRecipe(recipe)
+    }
+
+    func testFirstRenderFailureRollsBackCompletePreviousState() async {
         let services = ScriptedEditorServices()
         let model = EditorModel(services: services)
         await opened(model, services, url: a)
         let previous = model.document
         model.viewMode = .original
+        services.scripted.failRenders(of: b, with: UserFacingError(code: "decode_failed"))
         model.open([b])
         XCTAssertEqual(model.document?.phase, .opening)
-        XCTAssertTrue(model.hasEditedFrame)
-        await eventually { services.streams[self.b] != nil }
-        services.streams[b]?.yield(.reference(preview))
-        await eventually { !model.hasEditedFrame }
-        services.streams[b]?.yield(.failed(UserFacingError(code: "decode_failed")))
-        await eventually { model.alert?.code == "decode_failed" }
+        XCTAssertTrue(model.hasEditedFrame, "the previous frames stay up while the new photo opens")
+        await eventually { model.alert != nil }
+        XCTAssertEqual(model.alert?.code, "decode_failed")
         XCTAssertEqual(model.document, previous)
         XCTAssertEqual(model.viewMode, .original)
         XCTAssertTrue(model.hasEditedFrame)
         XCTAssertEqual(services.closed.map(\.url), [b])
+        // The editor holds the previous photo again, and its frames show.
+        await eventually { model.editor.source?.url == self.a && model.committedSource == model.editor.source?.id }
         model.closeDocument()
     }
 
-    func testReferenceThenFailureWithoutPreviousPhotoReturnsToEmpty() async {
+    func testOpenFailureWithoutPreviousPhotoReturnsToEmpty() async {
         let services = ScriptedEditorServices()
         let model = EditorModel(services: services)
+        services.scripted.failOpen(a, with: UserFacingError(code: "source_unreadable"))
         model.open([a])
-        await eventually { services.streams[self.a] != nil }
-        services.streams[a]?.yield(.reference(preview))
-        await eventually { model.hasReferenceFrame }
-        services.streams[a]?.yield(.failed(UserFacingError(code: "decode_failed")))
         await eventually { model.alert != nil }
+        XCTAssertEqual(model.alert?.code, "source_unreadable")
         XCTAssertNil(model.document)
         XCTAssertFalse(model.hasPreviewFrame)
     }
@@ -140,17 +119,13 @@ import XCTest
         let services = ScriptedEditorServices()
         let model = EditorModel(services: services)
         await opened(model, services, url: a)
+        services.scripted.failRenders(of: b, with: UserFacingError(code: "decode_failed"))
         model.open([b])
-        await eventually { services.streams[self.b] != nil }
-        model.open([c])
-        await eventually { services.streams[self.c] != nil }
-        services.streams[b]?.yield(.failed(UserFacingError(code: "decode_failed")))
-        services.streams[c]?.yield(.reference(preview))
-        services.streams[c]?.yield(.edited(preview))
-        await eventually { model.document?.phase == .ready }
+        await openReady(model, c)
+        await settle(100)
         XCTAssertEqual(model.document?.name, "c.jpg")
         XCTAssertNil(model.alert)
-        await eventually { services.closed.contains { $0.url == self.b } }
+        XCTAssertEqual(model.editor.source?.url, c)
         model.closeDocument()
     }
 
@@ -170,24 +145,35 @@ import XCTest
         model.closeDocument()
     }
 
-    func testThousandAdjustmentsUseFrameClockAndLastValueWins() async {
+    /// The editor submits at most one render per frame, the newest recipe.
+    func testThousandEditsUseTheFrameClockAndTheLastValueWins() async {
         let services = ScriptedEditorServices()
         let ticker = ManualFrameTicker()
-        let model = EditorModel(services: services, ticker: ticker)
-        await opened(model, services, url: a)
+        let model = EditorModel(services: services, frameClock: ticker)
+        model.open([a])
+        await eventually { ticker.isWaiting }
+        ticker.tick()
+        await eventually { model.document?.phase == .ready }
+        let before = await services.scripted.fake.requests.count
+        let ticksBefore = ticker.ticks
         for value in 1...1000 {
-            model.adjust("brightness", to: Double(value) / 1000)
+            exposure(Double(value) / 1000, model)
             if value % 20 == 0 {
                 await eventually { ticker.isWaiting }
                 ticker.tick()
                 await settle()
             }
         }
-        await eventually { services.submitted.last?["brightness"] == .number(1) }
-        XCTAssertLessThanOrEqual(services.submitted.count, ticker.ticks + 1)
-        services.refresh?.yield(.edited(preview, isLatest: true))
+        for _ in 0..<20 where model.editor.frame?.request.recipe != model.editor.recipe {
+            if ticker.isWaiting { ticker.tick() }
+            await settle(5)
+        }
+        let scope = EditorModel.scopeSize(model.editor.source!.pixelSize)
+        let edits = await services.scripted.fake.requests.dropFirst(before)
+            .filter { $0.region == nil && $0.size != scope && $0.recipe.value(for: "tone.exposure") != nil }
+        XCTAssertLessThanOrEqual(edits.count, ticker.ticks - ticksBefore + 1)
+        XCTAssertEqual(edits.last?.recipe.value(for: "tone.exposure"), .number(1))
         await eventually { model.document?.isRefreshing == false }
-        XCTAssertEqual(model.document?.pixelSize, PixelSize(width: 6000, height: 4000))
         model.closeDocument()
     }
 
@@ -221,37 +207,30 @@ extension EditorFlowTests {
         services.usesRestoreGate = true
         let model = EditorModel(services: services)
         model.open([b])
-        await eventually { services.streams[self.b] != nil }
         model.launch()
         await eventually { services.starts == 1 }
         XCTAssertNil(services.restoreWaiter, "Explicit open must disable launch restoration")
         await settle(100)
-        print("review prelaunch open: displayed=\(model.document?.name ?? "nil")")
         XCTAssertEqual(model.document?.name, "b.jpg", "Launch restore replaced an explicit Finder open")
         model.closeDocument()
     }
 
-    func testReviewRollbackMustResubmitPendingAdjustment() async {
+    /// A rollback puts the previous photo back in the editor with its recipe.
+    func testRollbackKeepsThePreviousRecipeAndRendersIt() async {
         let services = ScriptedEditorServices()
-        let ticker = ManualFrameTicker()
-        let model = EditorModel(services: services, ticker: ticker)
+        let model = EditorModel(services: services)
         await opened(model, services, url: a)
-        model.adjust("brightness", to: 0.7)
-        await eventually { ticker.isWaiting }
+        exposure(0.7, model)
+        await model.editor.settle()
+        services.scripted.failRenders(of: b, with: UserFacingError(code: "decode_failed"))
         model.open([b])
-        await eventually { services.streams[self.b] != nil }
-        services.streams[b]?.yield(.reference(preview))
-        services.streams[b]?.yield(.failed(UserFacingError(code: "decode_failed")))
         await eventually { model.alert != nil }
-        ticker.tick()
-        await settle(100)
-        // Repeating the same value is normally a no-op, so it cannot repair
-        // the mismatch if rollback discarded the only dirty slot.
-        model.adjust("brightness", to: 0.7)
-        ticker.tick()
-        await settle(100)
-        print("review rollback pending: submitted=\(services.submitted), refreshing=\(String(describing: model.document?.isRefreshing))")
-        XCTAssertEqual(services.submitted.last?["brightness"], .number(0.7))
+        await eventually { model.editor.source?.url == self.a && model.editor.recipe.value(for: "tone.exposure") == .number(0.7) }
+        await model.editor.settle()
+        XCTAssertEqual(model.editor.frame?.request.recipe.value(for: "tone.exposure"), .number(0.7))
+        XCTAssertTrue(model.canUndo, "the previous photo's steps are kept")
+        model.undo()
+        XCTAssertTrue(model.editor.recipe.isDefault("tone.exposure"))
         model.closeDocument()
     }
 
@@ -265,30 +244,11 @@ extension EditorFlowTests {
         transform.pan = CGPoint(x: 120, y: 90)
         model.canvas.apply(transform)
         let previousFrame = model.canvas.imageFrame
+        services.scripted.failRenders(of: b, with: UserFacingError(code: "decode_failed"))
         model.open([b])
-        await eventually { services.streams[self.b] != nil }
-        services.streams[b]?.yield(.reference(preview))
-        services.streams[b]?.yield(.failed(UserFacingError(code: "decode_failed")))
         await eventually { model.alert != nil }
-        print("review rollback pan: old=\(transform.pan), new=\(model.canvas.transform.pan)")
         XCTAssertEqual(model.canvas.transform.pan, transform.pan)
         XCTAssertEqual(model.canvas.imageFrame, previousFrame)
-        model.closeDocument()
-    }
-
-    func testReviewRefreshStreamTerminationMustClearBusyState() async {
-        let services = ScriptedEditorServices()
-        let ticker = ManualFrameTicker()
-        let model = EditorModel(services: services, ticker: ticker)
-        await opened(model, services, url: a)
-        model.adjust("brightness", to: 0.7)
-        await eventually { ticker.isWaiting }
-        ticker.tick()
-        await eventually { !services.submitted.isEmpty }
-        services.refresh?.finish()
-        await settle(100)
-        print("review refresh stream closed: refreshing=\(String(describing: model.document?.isRefreshing))")
-        XCTAssertFalse(model.document?.isRefreshing ?? true)
         model.closeDocument()
     }
 }
@@ -305,86 +265,18 @@ extension EditorFlowTests {
     func testReviewSliderUpdatesDoNotInvalidateTheDocumentAtInputRate() async {
         let services = ScriptedEditorServices()
         let ticker = ManualFrameTicker()
-        let model = EditorModel(services: services, ticker: ticker)
-        await opened(model, services, url: a)
+        let model = EditorModel(services: services, frameClock: ticker)
+        model.open([a])
+        await eventually { ticker.isWaiting }
+        ticker.tick()
+        await eventually { model.document?.phase == .ready }
         let changes = ReviewObservationCounter()
         for i in 1...100 {
             withObservationTracking { _ = model.document } onChange: { changes.increment() }
-            model.adjust("brightness", to: Double(i) / 100)
+            exposure(Double(i) / 100, model)
+            await settle(2)
         }
-        print("review slider observation: 100 changes, document notifications=\(changes.value), submitted=\(services.submitted.count)")
         XCTAssertLessThanOrEqual(changes.value, 1, "Only the first isRefreshing transition should invalidate document observers")
-        model.closeDocument()
-    }
-}
-
-
-extension EditorFlowTests {
-    func testRollbackResubmitsAnAdjustmentAlreadyInFlight() async {
-        let services = ScriptedEditorServices()
-        let ticker = ManualFrameTicker()
-        let model = EditorModel(services: services, ticker: ticker)
-        await opened(model, services, url: a)
-        model.adjust("brightness", to: 0.7)
-        await eventually { ticker.isWaiting }
-        ticker.tick()
-        await eventually { services.submitted.count == 1 }
-        model.open([b])
-        await eventually { services.streams[self.b] != nil }
-        services.streams[b]?.yield(.reference(preview))
-        services.streams[b]?.yield(.failed(UserFacingError(code: "decode_failed")))
-        await eventually { model.alert != nil }
-        await eventually { ticker.isWaiting }
-        ticker.tick()
-        await eventually { services.submitted.count == 2 }
-        XCTAssertEqual(services.submitted.last?["brightness"], .number(0.7))
-        await eventually(timeout: .seconds(2)) { model.document?.isRefreshing == true }
-        services.refresh?.yield(.edited(preview, isLatest: true))
-        await eventually { model.document?.isRefreshing == false }
-        model.closeDocument()
-    }
-
-    func testSupersededOnlyFinishesLatestAndResubscribes() async {
-        let services = ScriptedEditorServices()
-        let ticker = ManualFrameTicker()
-        let model = EditorModel(services: services, ticker: ticker)
-        await opened(model, services, url: a)
-        model.adjust("brightness", to: 0.7)
-        await eventually { ticker.isWaiting }
-        ticker.tick()
-        await eventually { services.submitted.count == 1 }
-        services.refresh?.yield(.superseded(isLatest: false))
-        await settle(100)
-        await eventually(timeout: .seconds(2)) { model.document?.isRefreshing == true }
-        XCTAssertEqual(services.subscriptions, 1)
-        services.refresh?.yield(.superseded(isLatest: true))
-        await eventually { model.document?.isRefreshing == false && services.subscriptions == 2 }
-        model.adjust("brightness", to: 0.8)
-        await eventually { ticker.isWaiting }
-        ticker.tick()
-        await eventually { services.submitted.count == 2 }
-        services.refresh?.yield(.edited(preview, isLatest: true))
-        await eventually { model.document?.isRefreshing == false }
-        model.closeDocument()
-    }
-
-    func testStreamReattachesAndCanFinishTheNextEdit() async {
-        let services = ScriptedEditorServices()
-        let ticker = ManualFrameTicker()
-        let model = EditorModel(services: services, ticker: ticker)
-        await opened(model, services, url: a)
-        model.adjust("brightness", to: 0.7)
-        await eventually { ticker.isWaiting }
-        ticker.tick()
-        await eventually { services.submitted.count == 1 }
-        services.refresh?.finish()
-        await eventually { model.document?.isRefreshing == false && services.subscriptions == 2 }
-        model.adjust("brightness", to: 0.8)
-        await eventually { ticker.isWaiting }
-        ticker.tick()
-        await eventually { services.submitted.count == 2 }
-        services.refresh?.yield(.edited(preview, isLatest: true))
-        await eventually { model.document?.isRefreshing == false }
         model.closeDocument()
     }
 }
@@ -420,7 +312,6 @@ extension EditorFlowTests {
         XCTAssertEqual(model.captureFacts, CaptureFacts())
     }
 }
-
 extension EditorFlowTests {
     func testOpenCommandIsLockedWhileRestoreWaitsButFinderCanReplaceIt() async {
         let services = ScriptedEditorServices()

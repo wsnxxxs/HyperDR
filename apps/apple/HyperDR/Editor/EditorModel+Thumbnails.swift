@@ -1,6 +1,6 @@
 import CoreGraphics
 import Foundation
-import HyperDREngine
+import HyperDRRender
 
 extension EditorModel {
     /// The export sheet owns this task. Cancellation stops summary work without
@@ -32,7 +32,8 @@ extension EditorModel {
         summaryThumbnailTask?.cancel(); summaryThumbnailTicket &+= 1
         guard photo != nil else { exportSummaryThumbnail = .unavailable; return }
         guard document?.previewError == nil else { exportSummaryThumbnail = .unavailable; return }
-        guard let frame = currentEditedFrame else { exportSummaryThumbnail = .loading; return }
+        // While another photo opens the last one's frame is still up: no picture of it.
+        guard document?.phase == .ready, let frame = currentEditedFrame else { exportSummaryThumbnail = .loading; return }
         let ticket = summaryThumbnailTicket, epoch = thumbnailEpoch
         let framing = thumbnailFraming()
         let deadline = summaryThumbnailLastStart.map { $0 + .milliseconds(200) }
@@ -59,15 +60,21 @@ extension EditorModel {
     /// `framing` the whole framed card at that size (M3 §20.3 rule 2). The
     /// photograph is shrunk by the service, off the main actor; only the small
     /// composition happens here.
-    func makeThumbnail(of frame: PreviewFrame, maxPixelSize: Int, framing: ThumbnailFraming?) async -> CGImage? {
-        guard let framing else { return await services.sdrThumbnail(of: frame, maxPixelSize: maxPixelSize) }
+    func makeThumbnail(of frame: EditorFrame, maxPixelSize: Int, framing: ThumbnailFraming?) async -> CGImage? {
+        guard let framing else { return await sdrThumbnail(of: frame, maxPixelSize: maxPixelSize) }
         let geometry = FrameThumbnailGeometry(layout: framing.layout, maxPixelSize: maxPixelSize)
-        guard let photo = await services.sdrThumbnail(of: frame, maxPixelSize: geometry.photoPixelSize),
+        guard let photo = await sdrThumbnail(of: frame, maxPixelSize: geometry.photoPixelSize),
               !Task.isCancelled else { return nil }
         return FrameThumbnail.compose(photo: photo, framing: framing, maxPixelSize: maxPixelSize)
     }
 
-    func frozenExportThumbnailFrame() -> PreviewFrame? {
+    /// The SDR base of `frame` within a `maxPixelSize` square (R9).
+    func sdrThumbnail(of frame: EditorFrame, maxPixelSize: Int) async -> CGImage? {
+        let side = max(1, maxPixelSize)
+        return try? await editor.sdrThumbnail(of: frame, maximumSize: HyperDRRender.PixelSize(width: side, height: side))
+    }
+
+    func frozenExportThumbnailFrame() -> EditorFrame? {
         guard document?.previewError == nil else { return nil }
         if case .ready = exportSummaryThumbnail { return summaryThumbnailFrame ?? currentEditedFrame }
         // Fixed-folder exports need no sheet, so there may be no summary owner.

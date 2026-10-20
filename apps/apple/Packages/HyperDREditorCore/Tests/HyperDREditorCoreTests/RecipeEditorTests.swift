@@ -198,6 +198,24 @@ private func setting(_ recipe: Recipe, _ id: String, _ value: Double) -> Recipe 
         #expect(h.editor.source?.domain == .rawEDR)
     }
 
+    @Test func aPhotoThatNeverShowsKeepsThePreviousPhotosUndo() async throws {
+        let h = Harness(undo: true)
+        try await h.open(.sdr)
+        h.step { h.editor.setRecipe(setting(h.editor.recipe, "tone.exposure", 1)) }
+        let edited = h.editor.recipe
+        // b opens but its first frame fails: the host puts a back.
+        await h.fake.configure { $0.renderError = .noSource }
+        try await h.open(.sdr, name: "b.jpg")
+        #expect(h.editor.renderFailure != nil)
+        await h.fake.configure { $0.renderError = nil }
+        try await h.editor.open(URL(fileURLWithPath: "/tmp/a.jpg"), restoring: edited)
+        await h.editor.settle()
+        #expect(h.editor.recipe == edited)
+        #expect(h.undoManager.undoActionName == "undo.tone.exposure")
+        h.undoManager.undo()
+        #expect(h.editor.recipe.isDefault("tone.exposure"))
+    }
+
     @Test func actionNamesComeFromTheHost() async throws {
         let h = Harness(undo: true)
         h.editor.undo.actionName = { edit in edit == .resetAll ? "Reset All" : "other" }

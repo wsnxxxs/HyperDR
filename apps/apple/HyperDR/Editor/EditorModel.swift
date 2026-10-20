@@ -1,7 +1,9 @@
 import AppKit
 import Foundation
-import HyperDREngine
+import HyperDRDesign
 import HyperDRKit
+import HyperDRRecipe
+import HyperDRRender
 import Observation
 import UniformTypeIdentifiers
 
@@ -12,6 +14,9 @@ import UniformTypeIdentifiers
     private(set) var display: DisplayState
     private(set) var alert: UserFacingError?
     let canvas = CanvasModel()
+    /// The editing session: the recipe, its undo steps, preview rendering and
+    /// AI (p7-2b §2). The inspector binds to it.
+    let editor: RecipeEditor
     /// The presentation frame, remembered across launches.
     @ObservationIgnored private var storedFrame: FrameSettings
     var frame: FrameSettings {
@@ -41,7 +46,7 @@ import UniformTypeIdentifiers
     @ObservationIgnored var summaryThumbnailTask: Task<Void, Never>?
     @ObservationIgnored var summaryThumbnailTicket = 0
     @ObservationIgnored var summaryThumbnailLastStart: ContinuousClock.Instant?
-    @ObservationIgnored var summaryThumbnailFrame: PreviewFrame?
+    @ObservationIgnored var summaryThumbnailFrame: EditorFrame?
     @ObservationIgnored var deferredExportThumbnailTask: Task<Void, Never>?
     @ObservationIgnored var exportThumbnailEditGeneration: Int?
     @ObservationIgnored var exportThumbnailNeedsDeferred = false
@@ -66,8 +71,11 @@ import UniformTypeIdentifiers
     @ObservationIgnored var lutLibraryAcceptedSequence = 0
     @ObservationIgnored var lutMetadataTask: Task<Void, Never>?
     @ObservationIgnored var lutMetadataWrites: [String: LUTMetadataWrite] = [:]
-    @ObservationIgnored var lutTask: Task<Void, Never>?
-    @ObservationIgnored var lutTicket = 0
+    /// Library LUTs handed to the renderer, by library id: the reference a
+    /// recipe stores for each (its content hash and name).
+    private(set) var lutReferences: [String: LUTReference] = [:]
+    func setLUTReference(_ reference: LUTReference?, for id: String) { lutReferences[id] = reference }
+    @ObservationIgnored var lutInstallTask: Task<Void, Never>?
     @ObservationIgnored let now: () -> Date
 
     /// The committed photograph's Exif, loaded automatically in the background.
@@ -83,22 +91,22 @@ import UniformTypeIdentifiers
     @ObservationIgnored var photo: EditorPhoto?
     @ObservationIgnored var generation = 0
 
-    // MARK: Editing state (EditorModel+Editing.swift)
-    /// The values every request is built from.
-    @ObservationIgnored var edit: EditSnapshot {
+    // MARK: Export request (until P7-3b)
+    /// The export's own choices. Not the recipe, and never undone.
+    @ObservationIgnored var exportChoices = ExportChoices() {
         didSet {
-            if oldValue != edit { editGeneration &+= 1; pendingExportToken = nil }
+            if oldValue != exportChoices { editGeneration &+= 1; pendingExportToken = nil }
         }
     }
+    /// Changes with the export request and with every recipe change, so a
+    /// save panel opened before an edit is not honoured after it.
     @ObservationIgnored var editGeneration = 0
     @ObservationIgnored var pendingExportToken: UUID?
-    /// What the photo was opened with, for the current encoding's defaults.
+    /// The recipe the model last mirrored.
+    @ObservationIgnored private var mirroredRecipe: Recipe?
+    /// What the open photo told the model about itself.
     @ObservationIgnored var source = PhotoSource()
-    @ObservationIgnored var controlValues: [String: ControlValue] = [:]
-    let inputColor: ChoiceValue<String>
-    let ai = AIState()
     let scopes = ScopeState()
-    private(set) var workflow: Workflow = .hdr
     /// A one-shot message shown in place; the view clears it.
     var notice: EditorNotice?
     /// What the canvas says about the photo that was reopened at launch, or
@@ -134,80 +142,66 @@ import UniformTypeIdentifiers
     /// `isOpeningSlowly`, and the canvas offers to cancel all the same.
     private var restoreIsSlow = false
     var isRestoringSlowly: Bool { isRestoring && restoreIsSlow }
-    /// The control being dragged and the values when the drag began.
-    @ObservationIgnored var gesture: (key: String, start: EditSnapshot)?
-    /// The encoding the next photo opens with; kept for this run.
+    /// The output encoding the next photo opens with; kept for this run.
     @ObservationIgnored var runEncoding = "adaptive"
-    @ObservationIgnored var remembered = RememberedHDR()
-    @ObservationIgnored var lastJob: RenderJob?
-
-    // MARK: AI state (EditorModel+AI.swift)
-    @ObservationIgnored var gainToken: ModelGainToken?
-    @ObservationIgnored var readyGain: ModelGainToken?
-    @ObservationIgnored var aiTask: Task<Void, Never>?
-    @ObservationIgnored var tokenTask: Task<Void, Never>?
-    @ObservationIgnored var aiTicket = 0
-    /// Why the last AI computation failed; AI stays unavailable until the
-    /// inputs or the photo change.
-    @ObservationIgnored var aiFailureReason: String?
 
     // MARK: Viewer state (EditorModel+Viewer.swift)
     private(set) var splitRatio = 0.5
     private(set) var isPeekingOriginal = false
     @ObservationIgnored var scopeTask: Task<Void, Never>?
     @ObservationIgnored var originalScopeTask: Task<Void, Never>?
+    /// The recipes the scopes on screen were computed for.
+    @ObservationIgnored var scopedRecipe: Recipe?
+    @ObservationIgnored var scopedOriginal: Recipe?
 
     func setSplitRatioValue(_ value: Double) { if value != splitRatio { splitRatio = value } }
     func setPeeking(_ value: Bool) { if value != isPeekingOriginal { isPeekingOriginal = value } }
-    func setWorkflowValue(_ value: Workflow) { if value != workflow { workflow = value } }
     func bumpFrameRevision() { frameRevision &+= 1 }
     func clearPreviewError() { if document?.previewError != nil { document?.previewError = nil } }
     func bumpUndoRevision() { undoRevision &+= 1 }
+    @ObservationIgnored private let frameClock: any EditorFrameClock
     @ObservationIgnored private var cameraSupportTask: Task<Void, Never>?
     @ObservationIgnored private var operation: Task<Void, Never>?
     @ObservationIgnored private var captureFactsTask: Task<Void, Never>?
     @ObservationIgnored private var displayObserver: Task<Void, Never>?
     @ObservationIgnored private var displayPublication: Task<Void, Never>?
+    @ObservationIgnored private var editorObserver: Task<Void, Never>?
+    @ObservationIgnored private var editorReopen: Task<Void, Never>?
     @ObservationIgnored private var pendingDisplay: DisplayState?
     private var openRollback: OpenSnapshot?
     @ObservationIgnored private var editedGainWeight: Double?
 
     private(set) var frameRevision: UInt64 = 0
-    @ObservationIgnored private var referenceFrame: PreviewFrame? {
-        didSet { canvas.referencePixelSize = referenceFrame.map { CGSize(width: $0.base.width, height: $0.base.height) } }
+    /// The editor's source whose frames the canvas shows; frames of a photo
+    /// still opening (or of one being put back) are not shown.
+    @ObservationIgnored private(set) var committedSource: UUID?
+    /// "Original": the defaults under the same development (p7-2b §5).
+    @ObservationIgnored private(set) var referenceFrame: EditorFrame? {
+        didSet {
+            referencePair = referenceFrame.map { DisplayPair($0.display) }
+        }
     }
-    @ObservationIgnored private var editedFrame: PreviewFrame?
+    @ObservationIgnored private(set) var editedFrame: EditorFrame? {
+        didSet {
+            editedPair = editedFrame.map { DisplayPair($0.display) }
+        }
+    }
+    @ObservationIgnored private(set) var referencePair: DisplayPair?
+    /// What the canvas draws for the edit.
+    @ObservationIgnored private(set) var editedPair: DisplayPair?
     @ObservationIgnored private var engineObserver: Task<Void, Never>?
     @ObservationIgnored private var launchTask: Task<Void, Never>?
     @ObservationIgnored private var didLaunch = false
     @ObservationIgnored private var canRestoreAtLaunch = true
-    @ObservationIgnored private var refreshObserver: Task<Void, Never>?
-    @ObservationIgnored var renderScheduler: RenderScheduler<RenderJob>?
-    @ObservationIgnored private let ticker: any FrameTicker
-    @ObservationIgnored private var submittedEdge = 2048
-    @ObservationIgnored var lastSubmitWasDraft = false
-    @ObservationIgnored var submittedJob: RenderJob?
-    @ObservationIgnored var displayedAIGain: ModelGainToken?
     @ObservationIgnored private var busyTask: Task<Void, Never>?
     @ObservationIgnored var renderOutstanding = false
-    @ObservationIgnored var referenceOptions: EditOptions?
-    /// The options the "original" frame on screen was rendered with; the
-    /// original details always use `referenceOptions`, which only differs
-    /// while a new original is rendering.
-    @ObservationIgnored var shownReferenceOptions: EditOptions?
-    @ObservationIgnored var referenceRefreshTask: Task<Void, Never>?
-    /// The edge the "original" on screen was rendered at, and the edge of the
-    /// newest request for one (they differ while a larger original renders).
-    @ObservationIgnored var shownReferenceEdge = 0
-    @ObservationIgnored var requestedReferenceEdge = 0
-    @ObservationIgnored var detailTask: Task<Void, Never>?
-    @ObservationIgnored var detailTicket = 0
-    @ObservationIgnored var originalDetailTrace: PreviewTrace?
-    @ObservationIgnored var editedDetailTrace: PreviewTrace?
-    @ObservationIgnored var editedDetailFrame: PreviewFrame?
-    @ObservationIgnored var originalDetailFrame: PreviewFrame?
+    /// The last render failure already reported.
+    @ObservationIgnored private var reportedFailure: String?
+    /// The editor's detail layers and effect mask the canvas last drew.
+    @ObservationIgnored private var shownLayers: [ObjectIdentifier?] = []
+    /// The control whose effect mask the canvas tints, while it is dragged.
     private(set) var maskKey: String?
-    func setMaskKey(_ value: String?) { maskKey = value }
+    func setMaskKey(_ value: String?) { if value != maskKey { maskKey = value; bumpFrameRevision() } }
     var showsHighlightZebra = false { didSet { if showsHighlightZebra != oldValue { bumpFrameRevision() } } }
     var showsShadowZebra = false { didSet { if showsShadowZebra != oldValue { bumpFrameRevision() } } }
     var previewsAsSDR = false { didSet { if previewsAsSDR != oldValue { bumpFrameRevision() } } }
@@ -219,29 +213,29 @@ import UniformTypeIdentifiers
         let edited: Bool
         let viewMode: ViewMode
         let transform: CanvasTransform
-        let needsRefresh: Bool
         let display: DisplayState
         let editedGainWeight: Double?
-        let referenceFrame: PreviewFrame?
-        let editedFrame: PreviewFrame?
+        let referenceFrame: EditorFrame?
+        let editedFrame: EditorFrame?
         let captureFacts: CaptureFacts
+        /// The editor's photo and recipe, to put back if the new photo
+        /// opened in the editor but never rendered.
+        let source: UUID?
+        let recipe: Recipe
     }
 
     init(services: any EditorServices = FakeEditorServices(), document: DocumentState? = nil,
          alert: UserFacingError? = nil, photo: EditorPhoto? = nil,
-         hasReferenceFrame: Bool = false, hasEditedFrame: Bool = false, ticker: (any FrameTicker)? = nil, now: @escaping () -> Date = Date.init) {
+         hasReferenceFrame: Bool = false, hasEditedFrame: Bool = false,
+         frameClock: (any EditorFrameClock)? = nil, now: @escaping () -> Date = Date.init) {
         self.services = services
         self.now = now
+        let frameClock = frameClock ?? ContinuousFrameClock()
+        self.frameClock = frameClock
+        editor = RecipeEditor(renderer: services.rendering, frameClock: frameClock)
         preferences = PreferencesState(Preferences.load(from: services.preferences))
         undoManager.groupsByEvent = false
         undoManager.levelsOfUndo = 0
-        self.ticker = ticker ?? ClockFrameTicker()
-        let initial = EditDefaults.initial(encoding: "adaptive")
-        edit = EditSnapshot(initial)
-        let colors = EditChoices.byKey["colorGamut"]?.options ?? []
-        inputColor = ChoiceValue(key: "colorGamut", selection: edit.choices["colorGamut"] ?? "srgb",
-            choices: colors.map { Choice(id: $0.id, labelKey: $0.labelKey, isEnabled: true) })
-        for spec in EditControls.all { controlValues[spec.key] = ControlValue(spec: ControlSpecView(spec)) }
         storedFrame = FrameSettings.load(from: services.preferences)
         engine = services.engineStatus
         display = services.displayState
@@ -256,6 +250,16 @@ import UniformTypeIdentifiers
         if !hasEditedFrame { display.gainWeight = nil }
         canvas.setImageSize(hasEditedFrame ? document?.pixelSize : nil)
         source.domain = document?.source?.domain
+        editor.attach(undoManager: undoManager)
+        editor.undo.actionName = { Self.undoActionName($0) }
+        // Every step, undo and redo included, is an edit: an export panel
+        // prepared before it is stale at once, not when the mirror catches up.
+        editor.undo.didRegister = { [weak self] in
+            self?.clearRestoreNotice()
+            self?.bumpUndoRevision()
+            self?.editGeneration &+= 1
+            self?.pendingExportToken = nil
+        }
         syncControls()
         canvas.onGeometryChange = { [weak self] in self?.canvasGeometryChanged() }
         let statuses = services.engineUpdates()
@@ -273,30 +277,29 @@ import UniformTypeIdentifiers
                 self?.receiveDisplay(state)
             }
         }
+        observeEditor()
     }
 
     deinit {
         summaryThumbnailTask?.cancel(); deferredExportThumbnailTask?.cancel(); versionThumbnailTask?.cancel()
         exportTask?.cancel()
         exportMetadataTask?.cancel()
-        lutTask?.cancel()
+        lutInstallTask?.cancel()
         lutMetadataTask?.cancel()
         for write in lutMetadataWrites.values { write.task?.cancel() }
         for task in saveTasks.values { task.cancel() }
         cameraSupportTask?.cancel()
         operation?.cancel()
-        detailTask?.cancel()
         busyTask?.cancel()
-        aiTask?.cancel()
-        tokenTask?.cancel()
         scopeTask?.cancel()
         originalScopeTask?.cancel()
         captureFactsTask?.cancel()
         launchTask?.cancel()
         engineObserver?.cancel()
-        refreshObserver?.cancel()
         displayObserver?.cancel()
         displayPublication?.cancel()
+        editorObserver?.cancel()
+        editorReopen?.cancel()
     }
 
     var viewMode: ViewMode {
@@ -304,7 +307,7 @@ import UniformTypeIdentifiers
         set {
             guard isAvailable(newValue) else { return }
             selectedMode = newValue
-            scheduleDetails()
+            canvasGeometryChanged()
             display.gainWeight = newValue != .original ? editedGainWeight : nil
         }
     }
@@ -321,15 +324,15 @@ import UniformTypeIdentifiers
     }
 
     /// Q14: document describes the new source immediately, but the previous
-    /// frames, mode and canvas geometry stay visible until its reference arrives.
-    /// Any open failure restores the complete previous state, or the empty state.
+    /// frames, mode and canvas geometry stay visible until its first frame
+    /// arrives. Any open failure restores the complete previous state, or the
+    /// empty state.
     func open(_ urls: [URL], afterReplacement replacedName: String? = nil) {
         if export.isInFlight {
             guard let url = urls.first(where: canOpen) else { return }
             pendingPhotoSwitch = PhotoSwitchRequest(kind: .open(url), displayName: url.lastPathComponent)
             return
         }
-        guard !ai.isComputing else { return }
         canRestoreAtLaunch = false
         isRestoring = false
         prepareForPhotoSwitch()
@@ -395,19 +398,18 @@ import UniformTypeIdentifiers
         cameraSupportTask?.cancel()
         operation?.cancel()
         captureFactsTask?.cancel()
+        editorReopen?.cancel()
         invalidateDetails()
-        cancelAI()
-        endGesture()
+        editor.commitDrag()
         generation += 1
         let ticket = generation
         let encoding = preferences.value.rememberOutput ? runEncoding : "adaptive"
         var previous = openRollback ?? OpenSnapshot(document: document, photo: photo,
             reference: hasReferenceFrame, edited: hasEditedFrame, viewMode: selectedMode,
-            transform: canvas.transform,
-            needsRefresh: renderOutstanding || document?.isRefreshing == true || renderScheduler?.hasPending == true,
-            display: display, editedGainWeight: editedGainWeight,
-            referenceFrame: referenceFrame, editedFrame: editedFrame, captureFacts: captureFacts)
-        stopRefreshing()
+            transform: canvas.transform, display: display, editedGainWeight: editedGainWeight,
+            referenceFrame: referenceFrame, editedFrame: editedFrame, captureFacts: captureFacts,
+            source: committedSource, recipe: editor.recipe)
+        setRefreshing(false)
         previous.document?.isRefreshing = false
         openRollback = previous
         document = services.placeholder(for: url).openingDocument
@@ -431,47 +433,54 @@ import UniformTypeIdentifiers
                 document = opened.openingDocument
                 document?.isPreparingCameraSupport = preparing
                 document?.isOpeningSlowly = slow
-                var reference: EditorPreview?
-                let openingEdge = previewEdge
-                for await event in services.previews(for: opened, encoding: encoding, maxEdge: openingEdge) {
-                    try Task.checkCancellation()
-                    guard generation == ticket else { throw CancellationError() }
-                    if case .failed(let error) = event { throw error }
-                    if case .reference(let preview) = event { reference = preview }
-                    if case .edited(let preview) = event {
-                        // Commit the opened photo before publishing ready. A new
-                        // refresh or open may start before the stream ends.
-                        photo = opened
-                        photoSerial += 1
-                        captureFacts = CaptureFacts()
-                        openRollback = nil
-                        operation = nil
-                        beginEditing(encoding: encoding, reference: reference ?? preview)
-                        shownReferenceEdge = openingEdge; requestedReferenceEdge = openingEdge
-                        apply(event)
-                        startScopes(original: true)
-                        startCaptureFacts(opened)
-                        startRefreshing(opened)
-                        applyInitialPreferences()
-                        if restored != nil { armRestoreNotice() }
-                        if let replacedName { sourceReplacedNotice = replacedName }
-                        refreshExportMetadata()
-                        if let old = previous.photo, old != opened { await services.close(old) }
-                        return
-                    }
-                    apply(event)
+                do { try await editor.open(opened.url) } catch let error as UserFacingError { throw error } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    // Render's own errors: the file could not be read as a photo.
+                    throw UserFacingError(code: "decode_failed", detail: String(describing: error))
                 }
                 try Task.checkCancellation()
+                guard generation == ticket, let source = editor.source else { throw CancellationError() }
+                document?.pixelSize = PixelSize(source.pixelSize)
+                document?.source = SourceSummary(source)
+                try await firstFrame(of: source.id)
+                try Task.checkCancellation()
                 guard generation == ticket else { throw CancellationError() }
-                throw UserFacingError(code: "internal_error")
+                // Commit the opened photo before publishing ready.
+                photo = opened
+                photoSerial += 1
+                captureFacts = CaptureFacts()
+                openRollback = nil
+                operation = nil
+                beginEditing(encoding: encoding, source: source)
+                editorChanged()
+                startCaptureFacts(opened)
+                applyInitialPreferences()
+                if restored != nil { armRestoreNotice() }
+                if let replacedName { sourceReplacedNotice = replacedName }
+                refreshExportMetadata()
+                if let old = previous.photo, old != opened { await services.close(old) }
             } catch {
                 if let candidate, candidate != previous.photo { await services.close(candidate) }
                 guard generation == ticket, !Task.isCancelled else { return }
-                let error = UserFacingError.service(error)
-                restore(previous, error: error)
+                restore(previous, error: UserFacingError.service(error))
                 operation = nil
             }
         }
+    }
+
+    /// Waits until the editor has rendered `source`, or throws its render failure.
+    private func firstFrame(of source: UUID) async throws {
+        let editor = self.editor
+        for await state in Observations({
+            (edited: editor.frame?.request.sourceID, failure: editor.renderFailure, current: editor.source?.id)
+        }) {
+            try Task.checkCancellation()
+            guard state.current == source else { throw CancellationError() }
+            if state.edited == source { return }
+            if let failure = state.failure { throw UserFacingError(code: "decode_failed", detail: failure) }
+        }
+        throw CancellationError()
     }
 
     var canCancelOpen: Bool { isRestoring || openRollback != nil }
@@ -533,8 +542,9 @@ import UniformTypeIdentifiers
         cameraSupportTask?.cancel()
         operation?.cancel()
         captureFactsTask?.cancel()
+        editorReopen?.cancel()
         operation = nil
-        stopRefreshing()
+        setRefreshing(false)
         if let photo { Task { [services] in await services.close(photo) } }
         photo = nil
         invalidateDetails()
@@ -546,17 +556,18 @@ import UniformTypeIdentifiers
         hasEditedFrame = false
         selectedMode = .edited
         captureFacts = CaptureFacts()
-        cancelAI()
-        endGesture()
         endEditing()
         display.gainWeight = nil
         editedGainWeight = nil
         referenceFrame = nil
         editedFrame = nil
+        committedSource = nil
         frameRevision &+= 1
         canvas.setImageSize(nil)
         thumbnailFrameDidChange()
         syncControls()
+        let editor = self.editor
+        editorReopen = Task { await editor.close() }
     }
 
     func publishAlert(_ error: UserFacingError?) { alert = error }
@@ -582,54 +593,32 @@ import UniformTypeIdentifiers
     /// The caption the frame sets for this photograph.
     var frameCaption: FrameCaption { frame.style.caption(frame, facts: captureFacts) }
 
-    var canvasFrame: PreviewCanvasFrame? {
-        if selectedMode == .original || isPeekingOriginal, let referenceFrame {
-            return PreviewCanvasFrame(frame: referenceFrame, showsOriginal: true)
-        }
-        if let editedFrame { return PreviewCanvasFrame(frame: editedFrame, showsOriginal: false) }
-        return referenceFrame.map { PreviewCanvasFrame(frame: $0, showsOriginal: true) }
-    }
-
-    var editedCanvasFrame: PreviewCanvasFrame? {
-        (editedFrame ?? referenceFrame).map { PreviewCanvasFrame(frame: $0, showsOriginal: false) }
-    }
-
-    /// The original side of the split view (renderer, M2-R).
-    var originalCanvasFrame: PreviewCanvasFrame? {
-        referenceFrame.map { PreviewCanvasFrame(frame: $0, showsOriginal: true) }
-    }
-
-    /// Frames for the scope analyser.
-    @ObservationIgnored var editedPresentationTrace: PreviewTrace?
-    @ObservationIgnored var referencePresentationTrace: PreviewTrace?
-    var currentEditedFrame: PreviewFrame? { editedFrame }
-    var currentReferenceFrame: PreviewFrame? { referenceFrame }
-
-    var previewEdge: Int {
-        #if DEBUG
-        if let edge = A3StressRunner.edge { return edge }
-        #endif
-        let transform = canvas.transform
-        guard transform.viewport.width > 0, transform.viewport.height > 0 else { return 2048 }
-        return EditDefaults.previewEdge(ceiling: 2048, boxWidth: transform.viewport.width,
-            boxHeight: transform.viewport.height, scale: transform.backingScale)
-    }
+    /// The newest frames of the committed photo.
+    var currentEditedFrame: EditorFrame? { editedFrame }
+    var currentReferenceFrame: EditorFrame? { referenceFrame }
 
     func updateViewport(_ size: CGSize, backingScale: Double) {
         canvas.setViewport(size, backingScale: backingScale)
-        guard document?.phase == .ready else { return }
-        followPreviewEdgeWithReference()
-        guard submittedEdge != previewEdge else { return }
-        scheduleRender(force: true)
+        #if DEBUG
+        if let edge = A3StressRunner.edge {
+            editor.canvasPixelSize = HyperDRRender.PixelSize(width: edge, height: edge)
+            return
+        }
+        #endif
+        let scale = max(1, backingScale)
+        let pixels = HyperDRRender.PixelSize(width: Int((size.width * scale).rounded()),
+                                             height: Int((size.height * scale).rounded()))
+        if pixels.width > 0, pixels.height > 0 { editor.canvasPixelSize = pixels }
     }
 
     func updateRefreshRate(_ framesPerSecond: Int) {
-        (ticker as? ClockFrameTicker)?.framesPerSecond = framesPerSecond
+        (frameClock as? ContinuousFrameClock)?.framesPerSecond = framesPerSecond
     }
 
-    /// The latest adjustment starts a fresh 300 ms grace period. Fast frames
-    /// never publish busy; an already-visible busy indicator stays until a frame.
+    /// A render not caught up starts a 300 ms grace period. Fast frames never
+    /// publish busy; an already-visible busy indicator stays until a frame.
     func requestBusy() {
+        guard !renderOutstanding else { return }
         renderOutstanding = true
         busyTask?.cancel()
         guard document?.isRefreshing != true else { busyTask = nil; return }
@@ -650,145 +639,93 @@ import UniformTypeIdentifiers
         if document?.isRefreshing != refreshing { document?.isRefreshing = refreshing }
     }
 
-    private func stopRefreshing() {
-        setRefreshing(false)
-        refreshObserver?.cancel()
-        refreshObserver = nil
-        renderScheduler?.cancel()
-        renderScheduler = nil
-    }
+    // MARK: Editor
 
-    private func startRefreshing(_ photo: EditorPhoto) {
-        stopRefreshing()
-        let ticket = generation
-        submittedEdge = previewEdge
-        let initialUpdates = services.refreshes(for: photo)
-        refreshObserver = Task { [weak self, services] in
-            var updates = initialUpdates
-            while !Task.isCancelled {
-                var restart = false
-                for await event in updates {
-                    guard !Task.isCancelled, let self, generation == ticket, self.photo == photo,
-                          document?.phase == .ready else { return }
-                    switch event {
-                    case .edited(let preview, let isLatest):
-                        let final = isLatest && renderScheduler?.hasPending != true
-                        apply(.edited(preview), finishesRefresh: final)
-                        if final {
-                            displayedAIGain = submittedJob?.options["useModel"] == .bool(true) ? readyGain : nil
-                            updateAIState()
-                            if !lastSubmitWasDraft {
-                                startScopes(original: false)
-                                scheduleDetails()
-                            }
-                        }
-                    case .failed(let error):
-                        if renderScheduler?.hasPending != true {
-                            apply(.failed(error))
-                            if edit.aiMode == .optimized, !ai.isComputing,
-                               submittedJob?.options == effectiveOptions() { failAI(error) }
-                        }
-                    case .superseded(let isLatest):
-                        guard isLatest else { continue }
-                        if renderScheduler?.hasPending != true { setRefreshing(false) }
-                        restart = true
-                    case .sourceReplaced:
-                        cancelAI()
-                        readyGain = nil
-                        gainToken = nil
-                        reopenReplacedSource(photo)
-                        return
-                    }
-                    if restart { break }
-                }
-                guard !Task.isCancelled, self?.generation == ticket, self?.photo == photo,
-                      self?.document?.phase == .ready else { return }
-                if self?.renderScheduler?.hasPending != true { self?.setRefreshing(false) }
-                // Subscribe before awaiting so edits during the retry delay are
-                // buffered. One resident loop backs off from repeatedly empty streams.
-                updates = services.refreshes(for: photo)
-                do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
-                guard self?.generation == ticket, self?.photo == photo else { return }
-            }
-        }
-        renderScheduler = RenderScheduler(ticker: ticker) { [weak self] job in
-            guard let self, generation == ticket, self.photo == photo, document?.phase == .ready else { return }
-            guard !ai.isComputing else { return }
-            submittedJob = job
-            submittedEdge = job.draft ? Self.draftEdge : previewEdge
-            lastSubmitWasDraft = job.draft
-            PreviewTrace.$current.withValue(job.trace) {
-                services.submit(photo, options: job.options, maxEdge: submittedEdge)
+    private func observeEditor() {
+        let editor = self.editor
+        editorObserver = Task { [weak self] in
+            for await _ in Observations({
+                // Everything the model mirrors; `editorChanged` reads the values again.
+                (editor.frame?.request, editor.originalFrame?.request, editor.renderFailure,
+                 editor.recipe, editor.editingParameter, editor.aiStatus, editor.source?.id,
+                 editor.sourceChanged, editor.detailFrame?.request, editor.originalDetailFrame?.request,
+                 editor.effectMask?.request)
+            }) {
+                guard let self, !Task.isCancelled else { return }
+                editorChanged()
             }
         }
     }
 
-    func apply(_ event: EditorPreviewEvent, finishesRefresh: Bool = true) {
-        switch event {
-        case .reference(let frame):
-            cameraSupportTask?.cancel()
-            cameraSupportTask = nil
-            document?.isPreparingCameraSupport = false
-            document?.isOpeningSlowly = false
-            document?.phase = .rendering
-            referenceFrame = frame.frame
-            referencePresentationTrace = frame.trace
-            editedPresentationTrace = nil
-            editedFrame = nil
+    /// Mirrors the editor into the document, the canvas and everything that
+    /// follows a frame. Frames of a photo still opening are left alone.
+    func editorChanged() {
+        guard let source = editor.source, source.id == committedSource, photo != nil else { return }
+        setMaskKey(editor.shownMask?.parameterID)
+        let recipe = editor.recipe
+        if recipe != mirroredRecipe {
+            mirroredRecipe = recipe
+            editGeneration &+= 1
+            pendingExportToken = nil
+            refreshExportMetadata()
+        }
+        let layers = [editor.shownDetail?.display.base, editor.shownOriginalDetail?.display.base,
+                      editor.shownMask?.mask.texture].map { $0.map { ObjectIdentifier($0) } }
+        if layers != shownLayers {
+            shownLayers = layers
             frameRevision &+= 1
+        }
+        var changed = false
+        if let frame = editor.originalFrame, frame.request.sourceID == source.id,
+           referenceFrame?.request != frame.request {
+            referenceFrame = frame
             hasReferenceFrame = true
-            hasEditedFrame = false
-            selectedMode = .edited
-            editedGainWeight = nil
-            display.gainWeight = nil
-            document?.pixelSize = frame.pixelSize
-            document?.source = frame.source
-            canvas.setImageSize(frame.pixelSize)
-            setPeeking(false)
-        case .edited(let frame):
+            changed = true
+        }
+        if let frame = editor.frame, frame.request.sourceID == source.id,
+           editedFrame?.request != frame.request {
+            editedFrame = frame
+            hasEditedFrame = true
+            changed = true
             cameraSupportTask?.cancel()
             cameraSupportTask = nil
             document?.isPreparingCameraSupport = false
             document?.isOpeningSlowly = false
-            editedFrame = frame.frame
-            editedPresentationTrace = frame.trace
-            canvas.previewPixelSize = frame.frame.map { CGSize(width: $0.base.width, height: $0.base.height) }
-            frameRevision &+= 1
-            hasEditedFrame = true
-            document?.pixelSize = frame.pixelSize
             document?.phase = .ready
-            if finishesRefresh { setRefreshing(false) }
             document?.previewError = nil
+            reportedFailure = nil
             leaveSourceUnavailable(announce: true)
-            canvas.setImageSize(frame.pixelSize, zoom: canvas.zoom)
-            editedGainWeight = frame.hasGain ? frame.frame.map { Double(DisplayWeight.value(headroom: display.currentHeadroom, metadata: $0.metadata)) } ?? frame.gainWeight ?? services.displayState.gainWeight ?? 1 : nil
+            editedGainWeight = editedPair.map { Double($0.weight(headroom: display.currentHeadroom)) }
             display.gainWeight = selectedMode != .original ? editedGainWeight : nil
-        case .failed(let error):
-            setRefreshing(false)
-            document?.previewError = error
-            // The work data is gone: nothing can be kept, as when an export finds out.
-            if error.code == "session_expired" { handleExportError(error) }
-            else { enterSourceUnavailable(error) }
         }
-        thumbnailFrameDidChange()
+        if changed {
+            frameRevision &+= 1
+            thumbnailFrameDidChange()
+        }
+        let caughtUp = editor.frame?.request.recipe == recipe && editor.frame?.request.sourceID == source.id
+        if caughtUp { setRefreshing(false) } else if editor.renderFailure == nil { requestBusy() }
+        if let failure = editor.renderFailure, failure != reportedFailure {
+            reportedFailure = failure
+            setRefreshing(false)
+            renderFailed(failure)
+        }
+        if caughtUp, !editor.isDragging { startScopes() }
         syncControls()
     }
 
-    /// A newer "original" frame for the same photo (the lens correction
-    /// switch changed); everything else on the canvas stays as it is.
-    func replaceReference(_ preview: EditorPreview) {
-        guard hasReferenceFrame else { return }
-        referenceFrame = preview.frame
-        referencePresentationTrace = preview.trace
-        frameRevision &+= 1
-        thumbnailFrameDidChange()
-        startScopes(original: true)
+    /// A render failed and the shown frame stays. A file that is gone is said
+    /// as such (and retried); anything else is a preview error.
+    private func renderFailed(_ detail: String) {
+        guard let photo else { return }
+        if !FileManager.default.fileExists(atPath: photo.url.path) {
+            enterSourceUnavailable(UserFacingError(code: "source_missing", detail: detail))
+        } else {
+            document?.previewError = UserFacingError(code: "decode_failed", detail: detail)
+            thumbnailFrameDidChange()
+        }
     }
 
-    var hasPreviewFrame: Bool {
-        // Until the new edit arrives, its reference SDR base is the fallback.
-        hasReferenceFrame || hasEditedFrame
-    }
+    var hasPreviewFrame: Bool { hasReferenceFrame || hasEditedFrame }
 
     func receiveDisplay(_ state: DisplayState) {
         pendingDisplay = state
@@ -812,10 +749,9 @@ import UniformTypeIdentifiers
         cameraSupportTask?.cancel()
         operation?.cancel()
         captureFactsTask?.cancel()
-        cancelAI()
-        endGesture()
+        editor.commitDrag()
         operation = nil
-        stopRefreshing()
+        setRefreshing(false)
         invalidateDetails()
         let error = UserFacingError(code: "metal_unavailable", detail: detail)
         if let previous = openRollback {
@@ -824,7 +760,7 @@ import UniformTypeIdentifiers
             // An opened document with no drawable frame uses .failed. Opening
             // a replacement instead follows Q14's rollback path above.
             document?.phase = .failed(error)
-            setRefreshing(false)
+            committedSource = nil
             referenceFrame = nil
             editedFrame = nil
             frameRevision &+= 1
@@ -847,7 +783,6 @@ import UniformTypeIdentifiers
         selectedMode = previous.viewMode
         display = previous.display
         editedGainWeight = previous.editedGainWeight
-        referencePresentationTrace = nil; editedPresentationTrace = nil
         referenceFrame = previous.referenceFrame
         editedFrame = previous.editedFrame
         thumbnailFrameDidChange()
@@ -861,19 +796,72 @@ import UniformTypeIdentifiers
         workspace = document == nil ? .empty : .editing
         alert = error
         openRollback = nil
-        clearUndo()
-        if photo == nil { endEditing() }
         syncControls()
+        reopenInEditor(previous)
         if let photo {
-            // A render of the original asked for before the failed open belongs to
-            // the photo that came back, and may have been dropped on the way.
-            if isReferenceRenderPending { abandonReferenceRender() }
-            followPreviewEdgeWithReference()
             startCaptureFacts(photo)
-            startRefreshing(photo)
-            if previous.needsRefresh { scheduleRender(force: true) }
-            revalidateGain()
             refreshExportMetadata()
         }
+    }
+
+    /// The editor may already hold the photo that failed: put the previous
+    /// one back with its recipe and its undo steps, or close it.
+    private func reopenInEditor(_ previous: OpenSnapshot) {
+        guard editor.source?.id != previous.source || previous.source == nil else {
+            committedSource = previous.source
+            return
+        }
+        committedSource = nil
+        let editor = self.editor
+        let ticket = generation
+        editorReopen?.cancel()
+        editorReopen = Task { [weak self] in
+            guard let photo = previous.photo, previous.source != nil else {
+                if editor.source != nil { await editor.close() }
+                return
+            }
+            do {
+                try await editor.open(photo.url, restoring: previous.recipe)
+                guard let self, generation == ticket, self.photo == photo else { return }
+                bumpUndoRevision()
+                committedSource = editor.source?.id
+                editorChanged()
+            } catch {
+                guard let self, generation == ticket, self.photo == photo else { return }
+                enterSourceUnavailable(UserFacingError.service(error))
+            }
+        }
+    }
+
+    /// Commits the photo whose first frame is in (called once per open).
+    func commit(source: EditorSource) {
+        committedSource = source.id
+        mirroredRecipe = nil
+    }
+
+    static func undoActionName(_ edit: RecipeEdit) -> String {
+        switch edit {
+        case .parameter(let id): Adjustments.declaration(id).map { AdjustmentText.undoName($0) } ?? AdjustmentText.undoName(.all)
+        case .resetGroup(let group): AdjustmentText.undoName(.group(group))
+        case .resetAll: AdjustmentText.undoName(.all)
+        }
+    }
+}
+
+extension PixelSize {
+    init(_ size: HyperDRRender.PixelSize) { self.init(width: size.width, height: size.height) }
+}
+
+extension SourceSummary {
+    /// What the inspector says about the editor's source. Render does not
+    /// name the colour space or report the decoder's facts yet.
+    init(_ source: EditorSource) {
+        let domain: InputDomain = switch source.domain {
+        case .sdr: .sdr
+        case .hdr: .hdr
+        case .dual: .dual
+        case .rawEDR: .sceneReferred
+        }
+        self.init(domain: domain, colorName: "", degradationReasons: [])
     }
 }

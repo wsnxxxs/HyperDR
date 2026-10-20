@@ -25,8 +25,6 @@ extension EditorNotice {
         switch self {
         case .clipboardImageUnsupported: "paste.imageData"
         case .rangeClamped: "export.rangeClamped %@ %@"
-        case .aiFailed(let key): key
-        case .resetDone: nil
         }
     }
 }

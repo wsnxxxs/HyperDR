@@ -11,8 +11,8 @@ import HyperDRKit
     private let second = URL(fileURLWithPath: "/tmp/second.jpg")
 
     private func ready() async -> (EditorModel, FakeEditorServices) {
-        let services = FakeEditorServices(openDelay: .zero, previewDelay: .zero)
-        let model = EditorModel(services: services, ticker: ManualFrameTicker())
+        let services = FakeEditorServices(openDelay: .zero)
+        let model = EditorModel(services: services)
         await model.loadExportServices()
         model.open([source])
         await eventually(timeout: .seconds(10)) { model.document?.phase == .ready && !model.suggestedFileName.isEmpty }
@@ -27,7 +27,7 @@ import HyperDRKit
 
     private func list(_ model: EditorModel, _ services: FakeEditorServices, _ versions: [ExportVersion]) async throws {
         // Made with other settings than the current ones, so Restore is on offer.
-        services.historyByURL[source] = versions.map { ExportHistoryItem(version: $0, key: "earlier-settings", options: model.edit) }
+        services.historyByURL[source] = versions.map { ExportHistoryItem(version: $0, key: "earlier-settings", options: model.exportChoices) }
         model.refreshExportMetadata()
         await eventually(timeout: .seconds(10)) { model.exportVersions.count == versions.count }
     }

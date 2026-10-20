@@ -190,7 +190,7 @@ import HyperDRDesign
     // MARK: The model's side
 
     private func readyModel() async -> (EditorModel, FakeEditorServices) {
-        let services = FakeEditorServices(openDelay: .zero, previewDelay: .milliseconds(1))
+        let services = FakeEditorServices(openDelay: .zero)
         let model = EditorModel(services: services)
         model.open([URL(fileURLWithPath: "/fixtures/a.jpg")])
         await eventually(timeout: .seconds(3)) { model.document?.phase == .ready && model.hasEditedFrame }
@@ -200,32 +200,28 @@ import HyperDRDesign
     /// The canvas gets SDR only while comparing, and never from the main
     /// canvas's "Preview as SDR".
     func testTheCompositionIsSDROnlyWhileComparing() async throws {
-        let engine = try await Engine()
-        let bundle = previewFixtureBundle()
-        let url = try XCTUnwrap(bundle.url(forResource: "photo", withExtension: "jpg", subdirectory: "Fixtures")
-            ?? bundle.url(forResource: "photo", withExtension: "jpg"))
-        let session = try engine.openPreview(source: url)
-        defer { session.close() }
-        let frame = try await session.renderFrame(EngineRequest(settings: ["preview_max_edge": .number(64)]))
-        XCTAssertFalse(FramePreviewCanvas.composition(frame: frame, trace: nil, showsSDR: false).previewsAsSDR)
-        let sdr = FramePreviewCanvas.composition(frame: frame, trace: nil, showsSDR: true)
-        XCTAssertTrue(sdr.previewsAsSDR)
-        XCTAssertEqual(sdr.mode, .edited)
+        let empty = EditorModel(services: FakeEditorServices(openDelay: .zero))
+        XCTAssertNil(FramePreviewCanvas.composition(of: empty, showsSDR: false), "no frame, nothing to draw")
+        let (model, _) = await readyModel()
         // The main canvas's own switch is not read: the model's composition
         // for the main canvas follows it, the sheet's does not.
-        let model = EditorModel(services: FakeEditorServices(openDelay: .zero, previewDelay: .milliseconds(1)))
         model.previewsAsSDR = true
-        XCTAssertNil(FramePreviewCanvas.composition(of: model, showsSDR: false), "no frame, nothing to draw")
+        XCTAssertEqual(FramePreviewCanvas.composition(of: model, showsSDR: false)?.previewsAsSDR, false)
+        let sdr = try XCTUnwrap(FramePreviewCanvas.composition(of: model, showsSDR: true))
+        XCTAssertTrue(sdr.previewsAsSDR)
+        XCTAssertEqual(sdr.mode, .edited)
+        model.closeDocument()
     }
 
     func testTheExportHasAnHDRPartUnlessColourOnly() async {
         let (model, _) = await readyModel()
         let hdr = model.frameCompareHasHDR
-        model.setWorkflow(.colorOnly)
+        let encoding = model.exportChoices.encoding
+        model.selectEncoding("sdr-tiff")
         XCTAssertFalse(model.frameCompareHasHDR, "colour only has nothing above SDR white")
-        model.setWorkflow(.hdr)
+        model.selectEncoding(encoding)
         XCTAssertEqual(model.frameCompareHasHDR, hdr)
-        XCTAssertFalse(EditorModel(services: FakeEditorServices(openDelay: .zero, previewDelay: .milliseconds(1))).frameCompareHasHDR,
+        XCTAssertFalse(EditorModel(services: FakeEditorServices(openDelay: .zero)).frameCompareHasHDR,
                        "nothing open, nothing to compare")
     }
 

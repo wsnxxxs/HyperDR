@@ -162,3 +162,68 @@ struct LUTLibrarySheet: View {
         .padding(.horizontal, Space.s5).padding(.vertical, Space.s3)
     }
 }
+
+enum LUTSpaces {
+    /// "sRGB → Display P3".
+    static func string(_ item: LUTItem, locale: Locale) -> String {
+        AppStrings.string("choice.lutInput.\(item.input.rawValue)", locale: locale) + " → "
+            + AppStrings.string("choice.lutOutput.\(item.output.rawValue)", locale: locale)
+    }
+}
+
+/// The popover that sets a library look's input and output spaces (M3
+/// §12.3). S-Log3 input is for RAW photos only; other photos see it dimmed.
+/// The recipe's own spaces are the inspector's (`look.input`, `look.output`).
+struct LUTSpacesPopover: View {
+    let model: EditorModel
+    let id: String
+
+    private var item: LUTItem? { model.lut.library.first { $0.id == id } }
+
+    private var isRAW: Bool { model.document?.formatLabel == "RAW" }
+    @Environment(\.locale) private var locale
+
+    var body: some View {
+        if let item {
+            VStack(alignment: .leading, spacing: Space.s3) {
+                Text("lut.space.note")
+                    .font(Font.hdr.caption).foregroundStyle(Color.hdr.inkMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                // A setter reads the model's expected spaces when it runs, not the
+                // ones this body saw, so two quick changes keep both choices.
+                row("lut.space.input", selection: Binding(get: { item.input }, set: { newInput in
+                    let live = self.item ?? item
+                    model.setLibraryLUTSpaces(id, input: newInput,
+                                              output: newInput == .slog3SGamut3Cine ? .rec709 : live.output)
+                })) { space in
+                    let name = AppStrings.string("choice.lutInput.\(space.rawValue)", locale: locale)
+                    return Text(verbatim: space == .slog3SGamut3Cine && !isRAW
+                                ? name + " · " + AppStrings.string("lut.space.rawOnly", locale: locale) : name)
+                }
+                row("lut.space.output", selection: Binding(get: { item.output }, set: {
+                    model.setLibraryLUTSpaces(id, input: (self.item ?? item).input, output: $0)
+                })) { Text(verbatim: AppStrings.string("choice.lutOutput.\($0.rawValue)", locale: locale)) }
+            }
+            .padding(Space.s4)
+            .frame(width: 290)
+            .disabled(model.isEditingLocked)
+        }
+    }
+
+    private func row(_ title: LocalizedStringKey, selection: Binding<LUTColorSpace>,
+                     label: @escaping (LUTColorSpace) -> Text) -> some View {
+        HStack {
+            Text(title).font(Font.hdr.control).foregroundStyle(Color.hdr.ink)
+            Spacer()
+            Picker(title, selection: selection) {
+                ForEach(LUTColorSpace.allCases, id: \.self) { space in
+                    label(space).tag(space)
+                        .disabled(space == .slog3SGamut3Cine && !isRAW && selection.wrappedValue != space)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .fixedSize()
+        }
+    }
+}

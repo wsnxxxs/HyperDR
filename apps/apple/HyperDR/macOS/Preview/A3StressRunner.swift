@@ -1,6 +1,6 @@
 #if DEBUG
 import Foundation
-import HyperDREngine
+import HyperDRRecipe
 import os
 
 /// S12's input-rate measurement, connected to the real editor/canvas instead
@@ -35,32 +35,30 @@ import os
                 if model.document?.phase == .ready, !model.isEditingLocked { break }
                 do { try await Task.sleep(for: .milliseconds(50)) } catch { return }
             }
-            guard let model, let photo = model.photo else { return }
-            let control = model.control("brightness")
-            guard control.isVisible, control.isEnabled else {
-                logger.error("A3Stress event=control_unavailable"); return
-            }
-            let lower = max(control.range.lowerBound, control.value - 0.5)
-            let upper = min(control.range.upperBound, control.value + 0.5)
+            guard let model, let photo = model.photo,
+                  let exposure = Adjustments.declaration("tone.exposure") else { return }
+            let editor = model.editor
+            let current = editor.recipe.conditionValue(exposure.id)?.numberValue ?? 0
+            let lower = current - 0.5, upper = current + 0.5
             model.viewMode = .edited
             logger.notice("A3Stress mode=\(mode.rawValue, privacy: .public) event=begin ns=\(DispatchTime.now().uptimeNanoseconds, privacy: .public)")
-            if mode == .drag { model.beginAdjusting("brightness") }
+            if mode == .drag { editor.editingChanged(exposure, true) }
             defer {
-                if mode == .drag, model.photo == photo { model.endAdjusting("brightness") }
+                if mode == .drag, model.photo == photo { editor.editingChanged(exposure, false) }
                 logger.notice("A3Stress mode=\(mode.rawValue, privacy: .public) event=end ns=\(DispatchTime.now().uptimeNanoseconds, privacy: .public)")
             }
             let count = mode == .drag ? 3000 : 30
             for index in 0..<count {
                 guard !Task.isCancelled, model.photo == photo, !model.isEditingLocked else { return }
-                // Match S12's 100Hz sustained input; all mutations still go
-                // through model quantization, scheduler and real services.
-                let value = lower + Double(index % 30 + 1) / 31 * (upper - lower)
-                model.adjust("brightness", to: value)
-                if mode == .steps, let trace = model.lastJob?.trace {
+                // S12's 100Hz sustained input, through the editor's own pacing.
+                var recipe = editor.recipe
+                recipe.setValue(.number(lower + Double(index % 30 + 1) / 31 * (upper - lower)), for: exposure.id)
+                editor.setRecipe(recipe)
+                if mode == .steps {
                     let deadline = ContinuousClock.now + .seconds(60)
-                    while !trace.hasPresented {
+                    while editor.frame?.request.recipe != editor.recipe {
                         guard ContinuousClock.now < deadline, model.photo == photo, !Task.isCancelled else {
-                            logger.error("A3Stress event=presentation_timeout"); return
+                            logger.error("A3Stress event=render_timeout"); return
                         }
                         do { try await Task.sleep(for: .milliseconds(10)) } catch { return }
                     }

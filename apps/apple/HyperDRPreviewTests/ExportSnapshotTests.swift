@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import XCTest
 import HyperDRDesign
+import HyperDRRecipe
 @testable import HyperDR
 
 /// The M3 views in the app, with the real model and catalogue, in light and
@@ -37,11 +38,8 @@ import HyperDRDesign
 
     // MARK: Fixtures
 
-    private func ready(domain: InputDomain = .sdr, timings: Bool = true) async -> (EditorModel, FakeEditorServices) {
-        let services = FakeEditorServices(openDelay: .zero, previewDelay: .zero)
-        services.preview = EditorPreview(pixelSize: PixelSize(width: 6000, height: 4000),
-            source: SourceSummary(domain: domain, colorName: "sRGB", degradationReasons: [], colorSource: "assumed"),
-            hasGain: true, hasCaptureMetadata: false)
+    private func ready(timings: Bool = true) async -> (EditorModel, FakeEditorServices) {
+        let services = FakeEditorServices(openDelay: .zero)
         if timings {
             services.timings = [ExportTimingSample(kind: .init(isRAW: false, encoding: "adaptive", isAI: false, hasFrame: false, verifies: true),
                                                    pixels: 24_000_000, stages: [3, 9, 6, 2])]
@@ -51,7 +49,7 @@ import HyperDRDesign
                             LUTItem(id: "c", name: "Cinema Teal", input: .slog3SGamut3Cine, output: .rec709, byteCount: 38_000)]
         services.folder = ExportFolder(label: "…/Pictures", ready: true)
         let clock = clock
-        let model = EditorModel(services: services, ticker: ManualFrameTicker(), now: { clock.now })
+        let model = EditorModel(services: services, now: { clock.now })
         await model.loadExportServices()
         model.open([source])
         await eventually(timeout: .seconds(10)) { model.document?.phase == .ready && !model.suggestedFileName.isEmpty }
@@ -76,7 +74,7 @@ import HyperDRDesign
     private func finish(_ model: EditorModel, _ services: FakeEditorServices, result: ExportResult, failure: UserFacingError? = nil) async throws {
         let key = try await services.exportKey(model.photo!, options: model.effectiveOptions(), frame: nil)
         services.historyByURL[source] = [ExportHistoryItem(
-            version: ExportVersion(number: 1, createdAt: clock.now, encodingID: "adaptive", result: result), key: key, options: model.edit)]
+            version: ExportVersion(number: 1, createdAt: clock.now, encodingID: "adaptive", result: result), key: key, options: model.exportChoices)]
         services.sendExport(.finished(result: result, failure: failure))
         await eventually(timeout: .seconds(10)) { model.export.phase == .succeeded }
         model.refreshExportMetadata()
@@ -225,7 +223,8 @@ import HyperDRDesign
         try snapshots("result-saved", minimumHeight: 300) { ExportSheet(model: model, window: EditorWindowState()) }
 
         // Adjusting past the export marks it as an earlier version.
-        model.adjust("brightness", to: 1.2)
+        // Until P7-3b the export follows its own choices, not the recipe.
+        model.setExportQuality(55)
         await eventually(timeout: .seconds(10)) { model.export.isResultStale }
         try snapshots("result-stale", minimumHeight: 300) { ExportSheet(model: model, window: EditorWindowState()) }
 
@@ -252,7 +251,8 @@ import HyperDRDesign
         try await finish(model, services, result: finishedResult())
         let window = EditorWindowState()
         let current = try render(ExportStatusHost(model: model, window: window), scheme: .light, locale: "en")
-        model.adjust("brightness", to: 1.2)
+        // Until P7-3b the export follows its own choices, not the recipe.
+        model.setExportQuality(55)
         await eventually(timeout: .seconds(10)) { model.export.isResultStale }
         let earlier = try render(ExportStatusHost(model: model, window: window), scheme: .light, locale: "en")
         XCTAssertNotEqual(current.representation(using: .png, properties: [:]), earlier.representation(using: .png, properties: [:]),
@@ -272,7 +272,8 @@ import HyperDRDesign
         XCTAssertEqual(model.export.phase, .idle)
         XCTAssertEqual(mode(), .result, "the result is still the current edit's")
         XCTAssertEqual(mode(true), .settings, "Export Again still goes to the settings")
-        model.adjust("brightness", to: 1.2)
+        // Until P7-3b the export follows its own choices, not the recipe.
+        model.setExportQuality(55)
         await eventually(timeout: .seconds(10)) { model.export.isResultStale }
         XCTAssertEqual(mode(), .settings, "an earlier edit's result is not offered again")
     }
@@ -334,17 +335,6 @@ import HyperDRDesign
                        "Not enough memory to export")
     }
 
-    func testLUTGroupStates() async throws {
-        let (model, _) = await ready()
-        model.selectLUT("a")
-        await eventually(timeout: .seconds(10)) { model.lut.selection?.id == "a" }
-        try snapshots("lut-group", minimumHeight: 120) { LUTGroup(model: model, window: EditorWindowState(), startsExpanded: true).padding(Space.s4).frame(width: Layout.inspectorWidth) }
-        // Spaces that cannot work together keep the look, say why, and stop the strength.
-        model.setLUTSpaces(input: .slog3SGamut3Cine, output: .rec709)
-        XCTAssertNotNil(model.lut.spaceIssueKey)
-        try snapshots("lut-group-issue", minimumHeight: 160) { LUTGroup(model: model, window: EditorWindowState(), startsExpanded: true).padding(Space.s4).frame(width: Layout.inspectorWidth) }
-    }
-
     // MARK: History and library
 
     func testHistorySheet() async throws {
@@ -357,7 +347,7 @@ import HyperDRDesign
             return ExportHistoryItem(version: ExportVersion(number: n, createdAt: now.addingTimeInterval(Double(n - 4) * 3600),
                 encodingID: n == 2 ? "iso-gainmap-jpeg" : "adaptive", modelName: name,
                 fallbackReason: n == 2 ? ExportFallbackReason(code: .missingCaptureFields, missingCaptureFields: ["f_number"]) : nil, hasFrame: n == 3, result: result),
-                key: key, options: model.edit)
+                key: key, options: model.exportChoices)
         }
         services.historyByURL[source] = [item(1, key: first, saved: true, model: nil), item(2, key: "other", saved: false, model: "CNN"),
                                         item(3, key: "older", saved: true, model: nil)]
@@ -376,7 +366,10 @@ import HyperDRDesign
 
     func testLUTLibrarySheet() async throws {
         let (model, _) = await ready()
-        model.selectLUT("a")
+        await eventually(timeout: .seconds(10)) { model.lutChoices.count == 3 }
+        var recipe = model.editor.recipe
+        recipe.look = model.lutChoices.first
+        model.editor.setRecipe(recipe)
         await eventually(timeout: .seconds(10)) { model.lut.selection?.id == "a" }
         try snapshots("library", minimumHeight: 340) { LUTLibrarySheet(model: model) }
     }

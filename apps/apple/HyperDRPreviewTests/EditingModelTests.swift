@@ -1,417 +1,171 @@
 import AppKit
 import Observation
 import Synchronization
-import HyperDRKit
+import HyperDRDesign
+import HyperDRRecipe
 import XCTest
 @testable import HyperDR
 
+/// The Mac model around the recipe editor: the lock, undo and its names, the
+/// split between AppKit text history and editor history, and what follows a
+/// drag (p7-2b §4). The editor's own rules are tested in HyperDREditorCore.
 @MainActor final class EditingModelTests: XCTestCase {
     private let url = URL(fileURLWithPath: "/fixtures/a.jpg")
+    private let exposure = Adjustments.declaration("tone.exposure")!
 
-    private func opened(domain: InputDomain = .sdr, tagged: Bool = false) async -> (EditorModel, FakeEditorServices, UndoManager) {
-        let services = FakeEditorServices(openDelay: .zero, previewDelay: .milliseconds(1))
-        services.preview = EditorPreview(pixelSize: PixelSize(width: 6000, height: 4000),
-            source: SourceSummary(domain: domain, colorName: "sRGB", degradationReasons: [],
-                                  colorSource: tagged ? "icc" : "assumed"), hasGain: true)
-        let model = EditorModel(services: services)
-        let undo = UndoManager()
-        model.attach(undoManager: undo)
+    private func opened() async -> EditorModel {
+        let model = EditorModel(services: FakeEditorServices(openDelay: .zero))
         XCTAssertNil(model.editingLockReason)
-        XCTAssertFalse(model.isEditingLocked)
         model.open([url])
         await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
         XCTAssertFalse(model.isEditingLocked)
-        return (model, services, model.undoManager)
+        return model
     }
 
-    /// G-08: from the moment a photo starts opening until its first edited frame
-    /// the inspector cannot change the photo, whatever else is true.
+    private func value(_ model: EditorModel) -> Double { model.recipeNumber(exposure.id) ?? 0 }
+
+    /// G-08: from the moment a photo starts opening until its first edited
+    /// frame the editor cannot change the photo.
     func testNothingCanBeEditedBeforeTheFirstEditedFrame() async {
-        let services = FakeEditorServices(openDelay: .zero, previewDelay: .milliseconds(400))
+        let services = FakeEditorServices(openDelay: .zero)
+        await services.fakeRendering?.holdRenders()
         let model = EditorModel(services: services)
-        model.attach(undoManager: UndoManager())
         model.open([url])
-        // Opening: the placeholder document, no frame yet.
         XCTAssertEqual(model.document?.phase, .opening)
-        func assertLocked(_ moment: String, file: StaticString = #filePath, line: UInt = #line) {
-            XCTAssertEqual(model.editingLockReason, .loading, moment, file: file, line: line)
-            XCTAssertTrue(model.isEditingLocked, moment, file: file, line: line)
-            XCTAssertFalse(model.controls.isEmpty, file: file, line: line)
-            for control in model.controls {
-                XCTAssertFalse(control.isEnabled, "\(control.spec.key) at \(moment)", file: file, line: line)
-            }
-            XCTAssertFalse(model.canSetWorkflow, moment, file: file, line: line)
-            XCTAssertFalse(model.canResetAll, moment, file: file, line: line)
-            XCTAssertFalse(model.canOpenDocument, "a photo is still opening (\(moment))", file: file, line: line)
-        }
-        assertLocked("opening")
-        // The original is on screen and the edit is still rendering.
-        await eventually(timeout: .seconds(3)) { model.document?.phase == .rendering }
-        assertLocked("rendering")
-        let before = model.control("brightness").value
-        model.adjust("brightness", to: 0.9)
-        model.setAIMode(.optimized)
+        XCTAssertEqual(model.editingLockReason, .loading)
+        XCTAssertFalse(model.canResetAll)
+        XCTAssertFalse(model.canOpenDocument, "a photo is still opening")
         model.selectEncoding("pq")
-        XCTAssertEqual(model.control("brightness").value, before, "an edit before the first frame changes nothing")
-        XCTAssertEqual(model.ai.mode, .manual)
+        XCTAssertNotEqual(model.exportChoices.encoding, "pq")
+        await services.fakeRendering?.releaseRenders()
         await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
         XCTAssertNil(model.editingLockReason)
-        XCTAssertTrue(model.controls.contains { $0.isEnabled })
+        XCTAssertTrue(model.canResetAll)
         model.closeDocument()
     }
 
-    func testDragAndRepeatedArrowKeysEachUndoAsOneStepButSingleKeysStaySeparate() async {
-        let (model, _, undo) = await opened()
-        let initial = model.control("brightness").value
-        // A drag and a held arrow have the same explicit begin/end boundary.
-        for target in [0.4, 0.8] {
-            model.beginAdjusting("brightness")
-            for value in stride(from: target - 0.2, through: target, by: 0.01) {
-                model.adjust("brightness", to: value)
-            }
-            model.endAdjusting("brightness")
-        }
+    func testADragIsOneUndoStepNamedAfterItsControl() async {
+        let model = await opened()
+        let initial = value(model)
+        model.editor.editingChanged(exposure, true)
+        for step in 1...10 { model.adjustRecipe(exposure.id, to: Double(step) / 10) }
+        XCTAssertTrue(model.canUndo, "Undo would end the open drag first")
+        model.editor.editingChanged(exposure, false)
+        XCTAssertEqual(model.undoActionName, AdjustmentText.undoName(exposure))
         model.undo()
-        XCTAssertEqual(model.control("brightness").value, 0.4)
-        model.undo()
-        XCTAssertEqual(model.control("brightness").value, initial)
+        XCTAssertEqual(value(model), initial)
         XCTAssertFalse(model.canUndo)
         model.redo()
-        XCTAssertEqual(model.control("brightness").value, 0.4)
-        undo.removeAllActions()
-        model.adjust("brightness", to: 0.5)
-        model.adjust("brightness", to: 0.6)
+        XCTAssertEqual(value(model), 1)
+        model.closeDocument()
+    }
+
+    func testUndoDuringADragCommitsItFirst() async {
+        let model = await opened()
+        model.adjustRecipe(exposure.id, to: 0.3)
+        model.editor.editingChanged(exposure, true)
+        model.adjustRecipe(exposure.id, to: 0.9)
+        // ⌘Z ends the open drag as its own step first (R22-004).
+        XCTAssertTrue(model.canUndo)
         model.undo()
-        XCTAssertEqual(model.control("brightness").value, 0.5)
+        XCTAssertFalse(model.editor.isDragging)
+        XCTAssertEqual(value(model), 0.3)
         model.undo()
-        XCTAssertEqual(model.control("brightness").value, 0.4)
-        model.beginAdjusting("brightness")
-        model.adjust("brightness", to: 0.8)
-        model.adjust("brightness", to: 0.4)
-        model.endAdjusting("brightness")
-        XCTAssertFalse(model.canUndo)
+        XCTAssertEqual(value(model), 0)
+        model.closeDocument()
     }
 
-    func testQuantizationAndStableControlObjects() async {
-        let (model, _, _) = await opened()
-        let value = model.control("brightness")
-        model.adjust("brightness", to: 0.6372)
-        XCTAssertTrue(value === model.control("brightness"))
-        XCTAssertEqual(value.value, 0.64)
-        model.adjust("hdrStrength", to: 0.4567)
-        XCTAssertEqual(model.control("hdrStrength").value, 0.46)
-        model.adjust("hdrRange", to: 2.567)
-        XCTAssertEqual(model.control("hdrRange").value, 2.6)
-        model.adjust("brightness", to: -.infinity)
-        XCTAssertEqual(value.value, 0.64)
-        model.setAuto("aiHdrRange")
-        XCTAssertTrue(model.control("aiHdrRange").isAuto)
-        XCTAssertEqual(ControlFormat.integer.quantize(2.6), 3)
-        XCTAssertEqual(ControlFormat.fixed2.quantize(0.637), 0.64)
-        XCTAssertEqual(ControlFormat.percentOrAuto.quantize(0.637), 0.64)
-    }
-
-    func testVisibilityAndSourceDependentBrightness() async {
-        let (model, _, _) = await opened()
-        XCTAssertEqual(model.control("brightness").range.lowerBound, 0)
-        XCTAssertTrue(model.control("areaCoverage").isVisible)
-        XCTAssertFalse(model.control("modelStrength").isVisible)
-        model.setWorkflow(.colorOnly)
-        for key in ["hdrStrength", "hdrRange", "areaCoverage", "expansionStart", "modelStrength"] {
-            XCTAssertFalse(model.control(key).isVisible, key)
-        }
-        XCTAssertTrue(model.control("brightness").isVisible)
-        model.setWorkflow(.hdr)
-        model.setAIMode(.optimized)
-        await eventually(timeout: .seconds(3)) { !model.ai.isComputing }
-        XCTAssertTrue(model.control("modelStrength").isVisible)
-        XCTAssertFalse(model.control("hdrStrength").isVisible)
-        XCTAssertFalse(model.control("areaCoverage").isVisible)
-        let (hdr, _, _) = await opened(domain: .hdr)
-        XCTAssertLessThan(hdr.control("brightness").range.lowerBound, 0)
-        XCTAssertFalse(hdr.control("areaCoverage").isVisible)
-        hdr.setAIMode(.optimized)
-        XCTAssertEqual(hdr.ai.mode, .manual)
-        let (raw, _, _) = await opened(domain: .sceneReferred)
-        XCTAssertFalse(raw.inputColor.isVisible)
-        let (tagged, _, _) = await opened(tagged: true)
-        XCTAssertFalse(tagged.inputColor.isEnabled)
-        XCTAssertNotNil(tagged.inputColor.disabledReasonKey)
-        let color = tagged.inputColor.selection
-        tagged.selectInputColor("p3")
-        XCTAssertEqual(tagged.inputColor.selection, color)
-    }
-
-    func testFormatClampIsPartOfTheSameUndoAndDraggingDefersCorrection() async {
-        let (model, _, undo) = await opened()
-        model.selectEncoding("pq")
-        model.adjust("hdrRange", to: 3.8)
-        undo.removeAllActions()
-        model.selectEncoding("hlg")
-        XCTAssertEqual(model.control("hdrRange").range.upperBound, 2.3)
-        XCTAssertEqual(model.control("hdrRange").value, 2.3)
+    func testGroupResetAndResetAllAreNamedSteps() async {
+        let model = await opened()
+        model.adjustRecipe(exposure.id, to: 0.5)
+        model.adjustRecipe("tone.contrast", to: 1.3)
+        model.editor.resetGroup(exposure.group)
+        XCTAssertEqual(model.undoActionName, AdjustmentText.undoName(.group(exposure.group)))
         model.undo()
-        XCTAssertEqual(model.control("hdrRange").value, 3.8)
-        XCTAssertFalse(model.canUndo)
-        model.beginAdjusting("hdrRange")
-        model.adjust("hdrRange", to: 3.7)
-        model.selectEncoding("adaptive")
-        XCTAssertEqual(model.control("hdrRange").value, 3)
-        XCTAssertEqual(model.control("hdrRange").range.upperBound, 3)
-        model.endAdjusting("hdrRange")
-        XCTAssertEqual(model.control("hdrRange").value, 3)
-        XCTAssertEqual(model.control("hdrRange").range.upperBound, 3)
-    }
-
-    func testTheRangeNoticeFollowsTheRangeInUse() async {
-        // The model is off: only hdrRange is in use, and it was not lowered.
-        var (model, _, _) = await opened()
-        model.selectEncoding("pq")
-        model.adjust("hdrRange", to: 1)
-        model.edit.controls["aiHdrRange"] = 3.8
-        model.notice = nil
-        model.selectEncoding("hlg")
-        XCTAssertEqual(model.edit.controls["aiHdrRange"], 2.3)
-        XCTAssertNil(model.notice, "the model is off, and the range in use (1 stop) was not lowered")
-        model.notice = nil
-        model.selectEncoding("pq")
-        XCTAssertNil(model.notice, "a higher ceiling lowers nothing")
-        // The model is on: aiHdrRange is the one in use.
-        (model, _, _) = await opened()
-        model.selectEncoding("pq")
-        model.edit.aiMode = .optimized
-        model.edit.controls["aiHdrRange"] = 3.8
-        model.edit.controls["hdrRange"] = 1
-        model.notice = nil
-        model.selectEncoding("hlg")
-        XCTAssertEqual(model.notice, .rangeClamped(maxStops: 2.3))
-        // The model is on and its range was not lowered; the unused manual range was.
-        (model, _, _) = await opened()
-        model.selectEncoding("pq")
-        model.edit.aiMode = .optimized
-        model.edit.controls["aiHdrRange"] = 1
-        model.edit.controls["hdrRange"] = 3.8
-        model.notice = nil
-        model.selectEncoding("hlg")
-        XCTAssertEqual(model.edit.controls["hdrRange"], 2.3)
-        XCTAssertNil(model.notice, "with the model on, lowering the unused manual range is not news")
-    }
-
-    /// D1: an HDR source needs no values of its own; the one set of defaults
-    /// (automatic headroom) already shows it as it is, and follows the format.
-    func testHDRSourceStartsAutomaticAndFollowsFormatCeilings() async {
-        let (model, _, _) = await opened(domain: .hdr)
-        XCTAssertEqual(model.control("hdrRange").value, -1)
-        XCTAssertTrue(model.control("hdrRange").isAuto)
-        XCTAssertEqual(model.control("hdrRange").defaultValue, -1)
-        XCTAssertEqual(model.control("brightness").value, 0)
-        model.selectEncoding("hlg")
-        XCTAssertEqual(model.control("hdrRange").value, -1, "automatic is not clamped to a number")
-        XCTAssertEqual(model.control("hdrRange").range.upperBound, 2.3)
-        XCTAssertNil(model.notice, "automatic never counts as a narrowed range")
-        model.adjust("hdrRange", to: 3.2)
-        model.resetControl("hdrRange")
-        XCTAssertEqual(model.control("hdrRange").value, -1)
-    }
-
-    func testAIReusesGainAndRecomputesForInputColorAndRestoresWithWorkflow() async {
-        let (model, services, _) = await opened()
-        model.setAIMode(.optimized)
-        XCTAssertTrue(model.isEditingLocked)
-        XCTAssertFalse(model.canUndo)
-        await eventually(timeout: .seconds(3)) { !model.ai.isComputing }
-        XCTAssertEqual(services.gainComputations.count, 1)
-        model.adjust("aiBrightness", to: 0.3)
-        model.setAIMode(.manual)
-        model.setAIMode(.optimized)
-        await eventually(timeout: .seconds(3)) { !model.ai.isComputing }
-        XCTAssertEqual(services.gainComputations.count, 1)
-        model.selectInputColor("p3")
-        await eventually(timeout: .seconds(3)) { !model.ai.isComputing }
-        XCTAssertEqual(services.gainComputations.count, 2)
-        model.setWorkflow(.colorOnly)
-        XCTAssertEqual(model.ai.mode, .manual)
-        model.setWorkflow(.hdr)
-        await eventually(timeout: .seconds(3)) { !model.ai.isComputing }
-        XCTAssertEqual(model.ai.mode, .optimized)
-        XCTAssertEqual(services.gainComputations.count, 2)
+        XCTAssertEqual(value(model), 0.5)
         model.resetAll()
-        XCTAssertEqual(model.ai.mode, .manual)
-        XCTAssertEqual(model.notice, .resetDone)
-        XCTAssertEqual(model.workflow, .hdr)
-    }
-
-    func testAIFailureFallbackAndEligibility() async {
-        let (model, services, _) = await opened()
-        services.gainFailure = UserFacingError(code: "model_unknown")
-        model.setAIMode(.optimized)
-        await eventually(timeout: .seconds(3)) { !model.ai.isComputing }
-        XCTAssertEqual(model.ai.mode, .manual)
-        XCTAssertEqual(model.ai.availability, .unavailable(reasonKey: "ai.unavailable.unknownModel"))
-        XCTAssertEqual(model.notice, .aiFailed(reasonKey: "ai.unavailable.unknownModel"))
-        XCTAssertTrue(model.control("brightness").isEnabled)
-        XCTAssertEqual(model.ai.models.count, 1, "EXIF model hidden without capture data")
-        model.edit.choices["lutInput"] = "hlg"
-        XCTAssertEqual(model.aiBlockReason(), "ai.unavailable.lutInput")
-        model.edit.choices["lutInput"] = "srgb"
-        XCTAssertNil(model.aiBlockReason())
+        XCTAssertEqual(model.undoActionName, AdjustmentText.undoName(.all))
+        XCTAssertNil(model.recipeNumber(exposure.id))
+        model.closeDocument()
     }
 
     func testCompareAndPeekDoNotAffectUndoAndNewPhotosResetViewState() async {
-        let (model, _, _) = await opened()
+        let model = await opened()
         model.toggleCompare()
         XCTAssertEqual(model.viewMode, .compare)
         model.setSplitRatio(2)
         XCTAssertEqual(model.splitRatio, 0.95)
-        model.nudgeSplit(by: -0.05)
-        XCTAssertEqual(model.splitRatio, 0.9, accuracy: 1e-12)
         model.beginPeekOriginal()
         XCTAssertTrue(model.isPeekingOriginal)
-        XCTAssertEqual(model.viewMode, .compare)
         model.endPeekOriginal()
         XCTAssertEqual(model.viewMode, .compare)
         XCTAssertFalse(model.canUndo)
-        model.adjust("brightness", to: 0.7)
+        model.adjustRecipe(exposure.id, to: 0.7)
         model.open([URL(fileURLWithPath: "/fixtures/b.jpg")])
-        await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
+        await eventually(timeout: .seconds(3)) { model.document?.phase == .ready && model.document?.name == "b.jpg" }
         XCTAssertEqual(model.splitRatio, 0.5)
         XCTAssertEqual(model.viewMode, .edited)
         XCTAssertFalse(model.canUndo)
-        XCTAssertNotEqual(model.control("brightness").value, 0.7)
+        XCTAssertNil(model.recipeNumber(exposure.id))
+        model.closeDocument()
     }
 
-    func testCloseCancelsAIAndClearsUndo() async {
-        let (model, services, _) = await opened()
-        services.gainDelay = .seconds(1)
-        model.setAIMode(.optimized)
+    func testCloseClearsUndo() async {
+        let model = await opened()
+        model.adjustRecipe(exposure.id, to: 0.7)
+        XCTAssertTrue(model.canUndo)
         model.closeDocument()
-        XCTAssertFalse(model.ai.isComputing)
-        XCTAssertFalse(model.isEditingLocked)
         XCTAssertFalse(model.canUndo)
-        XCTAssertEqual(model.ai.availability, .unavailable(reasonKey: "ai.unavailable.noPhoto"))
-    }
-}
-
-extension EditingModelTests {
-    func testGainMustFinishBeforeSubmittingAndAppliedWaitsForSuccessfulFrame() async throws {
-        let (model, services, _) = await opened()
-        // Deterministic gates for gain and rendering; advancing the frame
-        // ticker while inference is suspended must submit no AI request.
-        model.closeDocument()
-        let ticker = ManualFrameTicker()
-        let gated = EditorModel(services: services, ticker: ticker)
-        gated.open([url])
-        await eventually(timeout: .seconds(3)) { gated.document?.phase == .ready }
-        services.autoCompletesRefreshes = false
-        var gain: CheckedContinuation<Void, Error>?
-        services.gainGate = { try await withCheckedThrowingContinuation { gain = $0 } }
-        let before = services.receivedOptions.count
-        gated.adjust("brightness", to: 0.8) // pending manual frame
-        gated.setAIMode(.optimized)
-        await eventually(timeout: .seconds(3)) { gain != nil }
-        ticker.tick()
-        await settle(100)
-        XCTAssertEqual(services.receivedOptions.count, before)
-        XCTAssertTrue(gated.ai.isComputing)
-        gain?.resume(); gain = nil
-        await eventually(timeout: .seconds(3)) { !gated.ai.isComputing }
-        XCTAssertEqual(gated.ai.availability, .cached)
-        ticker.tick()
-        await eventually(timeout: .seconds(3)) { services.receivedOptions.count == before + 1 }
-        XCTAssertEqual(services.receivedOptions.last?["useModel"], .bool(true))
-        XCTAssertEqual(gated.ai.availability, .cached, "manual pixels are still visible")
-        let photo = try XCTUnwrap(gated.photo)
-        services.sendRefresh(.edited(services.preview, isLatest: true), for: photo)
-        await eventually(timeout: .seconds(3)) {
-            if case .applied = gated.ai.availability { return true }; return false
-        }
-        gated.selectInputColor("p3") // changed gain input, same race through editChanged
-        await eventually(timeout: .seconds(3)) { gain != nil }
-        ticker.tick()
-        await settle(100)
-        XCTAssertEqual(services.receivedOptions.count, before + 1)
-        gain?.resume(); gain = nil
-        await eventually(timeout: .seconds(3)) { !gated.ai.isComputing }
-        ticker.tick()
-        await eventually(timeout: .seconds(3)) { services.receivedOptions.count == before + 2 }
-        services.sendRefresh(.failed(UserFacingError(code: "render_failed")), for: photo)
-        await eventually(timeout: .seconds(3)) { gated.ai.mode == .manual }
-        XCTAssertEqual(gated.notice, .aiFailed(reasonKey: "ai.unavailable.failed"))
-        gated.closeDocument()
+        XCTAssertFalse(model.isEditingLocked)
     }
 
-    func testIncompatibleLUTCallsDoNotComputeOrRegisterUndo() async {
-        let (model, services, undo) = await opened()
-        for input in ["hlg", "pq", "slog3-sgamut3cine"] {
-            model.edit.choices["lutInput"] = input
-            model.setAIMode(.optimized)
-            XCTAssertEqual(model.ai.mode, .manual)
-            XCTAssertFalse(undo.canUndo)
-            XCTAssertTrue(services.gainComputations.isEmpty)
-        }
-        for input in ["srgb", "p3", "rec709"] {
-            model.edit.choices["lutInput"] = input
-            XCTAssertNil(model.aiBlockReason())
-        }
-    }
-
-    func testBusyGracePeriodAndOpenCommandBoundaries() async throws {
-        let services = FakeEditorServices(openDelay: .milliseconds(10), previewDelay: .milliseconds(1))
+    /// A file changed on disk (R23-001): the canvas asks to open it again and
+    /// nothing is exported from it meanwhile.
+    func testAChangedFileAsksToBeOpenedAgain() async {
+        // A file that exists: a missing one would be "can't find it" instead.
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("changed-\(UUID()).jpg")
+        FileManager.default.createFile(atPath: file.path, contents: Data([0]))
+        defer { try? FileManager.default.removeItem(at: file) }
+        let services = FakeEditorServices(openDelay: .zero)
         let model = EditorModel(services: services)
-        XCTAssertTrue(model.canOpenDocument)
-        model.open([url])
-        XCTAssertFalse(model.canOpenDocument)
+        model.open([file])
         await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
-        XCTAssertTrue(model.canOpenDocument)
-        services.previewDelay = .seconds(2)
-        model.adjust("brightness", to: 0.8)
-        XCTAssertFalse(model.document?.isRefreshing ?? true)
-        try await Task.sleep(for: .milliseconds(150))
-        model.adjust("brightness", to: 0.9) // resets the grace period
-        try await Task.sleep(for: .milliseconds(180))
-        XCTAssertFalse(model.document?.isRefreshing ?? true)
-        await eventually(timeout: .seconds(2)) { model.document?.isRefreshing == true }
-        model.closeDocument()
-        XCTAssertTrue(model.canOpenDocument)
-        XCTAssertNil(model.document)
-        let (ai, _, _) = await opened()
-        ai.setAIMode(.optimized)
-        XCTAssertFalse(ai.canOpenDocument)
-        ai.closeDocument()
-    }
-}
-
-extension EditingModelTests {
-    func testSourceReplacementCancelsInferenceAndReopensEvenWhileEditingIsLocked() async throws {
-        let (model, services, _) = await opened()
-        let old = try XCTUnwrap(model.photo)
-        services.gainDelay = .seconds(1)
-        model.setAIMode(.optimized)
-        model.open([URL(fileURLWithPath: "/fixtures/blocked.jpg")])
-        XCTAssertEqual(model.photo, old, "user opens are disabled during inference")
-        services.sendRefresh(.sourceReplaced, for: old)
-        await eventually(timeout: .seconds(3)) {
-            model.photo != old && model.document?.phase == .ready
-        }
-        XCTAssertFalse(model.ai.isComputing)
-        XCTAssertEqual(model.ai.mode, .manual)
-        XCTAssertEqual(model.photo?.url, old.url)
+        await services.fakeRendering!.configure { $0.renderError = .sourceChanged }
+        model.adjustRecipe(exposure.id, to: 0.5)
+        await eventually { model.sourceChanged }
+        XCTAssertEqual(model.export.blockerKey, "export.blocker.sourceChanged")
+        await services.fakeRendering!.configure { $0.renderError = nil }
+        model.reopenChangedSource()
+        await eventually { model.document?.phase == .ready && !model.sourceChanged }
+        XCTAssertNil(model.recipeNumber(exposure.id), "the photo is read again from the defaults")
         model.closeDocument()
     }
 
-    func testDiscreteResetEndsTheDragAndDetachingClearsEditorHistory() async {
-        let (model, _, undo) = await opened()
-        model.beginAdjusting("brightness")
-        model.adjust("brightness", to: 0.9)
-        model.resetControl("brightness")
-        model.undo()
-        XCTAssertEqual(model.control("brightness").value, 0.9)
-        model.undo()
-        XCTAssertEqual(model.control("brightness").value, 0)
+    func testDetachingClearsEditorHistory() async {
+        let model = await opened()
+        model.adjustRecipe(exposure.id, to: 0.7)
         model.attach(undoManager: nil)
-        XCTAssertFalse(undo.groupsByEvent)
-        XCTAssertFalse(undo.canUndo)
-        XCTAssertFalse(model.canRedo)
+        XCTAssertFalse(model.undoManager.groupsByEvent)
+        XCTAssertFalse(model.canUndo)
+        model.closeDocument()
+    }
+
+    /// The mask follows the control being dragged and goes with the drag.
+    func testTheMaskFollowsTheDrag() async {
+        let model = await opened()
+        let strength = Adjustments.declaration("hdr.strength")!
+        let changes = Mutex(0)
+        withObservationTracking { _ = model.maskKey } onChange: { changes.withLock { $0 += 1 } }
+        model.editor.editingChanged(strength, true)
+        await eventually { model.maskKey == "hdr.strength" }
+        XCTAssertEqual(changes.withLock { $0 }, 1)
+        model.editor.editingChanged(strength, false)
+        await eventually { model.maskKey == nil }
+        model.editor.editingChanged(exposure, true)
+        await settle()
+        XCTAssertNil(model.maskKey, "a control without a mask shows none")
+        model.editor.editingChanged(exposure, false)
+        model.closeDocument()
     }
 }
 
@@ -423,7 +177,7 @@ extension EditingModelTests {
 
 extension EditingModelTests {
     func testSharedWindowTextHistoryAndEditorHistoryAreIndependent() async {
-        let (model, _, _) = await opened()
+        let model = await opened()
         let shared = UndoManager()
         model.attach(undoManager: shared)
         XCTAssertTrue(shared.groupsByEvent)
@@ -431,77 +185,26 @@ extension EditingModelTests {
         let text = NSTextView(frame: .zero)
         text.delegate = delegate
         text.allowsUndo = true
-        text.insertText("hello", replacementRange: NSRange(location:0,length:0))
-        await eventually(timeout:.seconds(2)) { shared.canUndo }
+        text.insertText("hello", replacementRange: NSRange(location: 0, length: 0))
+        await eventually(timeout: .seconds(2)) { shared.canUndo }
         // No window/event dispatch in this test: explicitly finish the one
         // automatic event group that AppKit normally closes at event end.
         if shared.groupingLevel > 0 { shared.endUndoGrouping() }
-        model.adjust("brightness",to:0.7)
-        model.adjust("brightness",to:0.8)
-        model.undo(firstResponder:nil)
-        XCTAssertEqual(model.control("brightness").value,0.7)
-        XCTAssertEqual(text.string,"hello")
-        XCTAssertTrue(model.canUndo(firstResponder:text))
-        model.undo(firstResponder:text)
-        XCTAssertEqual(text.string,"")
-        XCTAssertEqual(model.control("brightness").value,0.7)
-        XCTAssertTrue(model.canRedo(firstResponder:text))
-        model.redo(firstResponder:text)
-        XCTAssertEqual(text.string,"hello")
-        model.redo(firstResponder:nil)
-        XCTAssertEqual(model.control("brightness").value,0.8)
-        XCTAssertTrue(shared.groupsByEvent)
-    }
-}
-
-extension EditingModelTests {
-    func testMaskAndOutputCeilingAreObservableAndUseCurrentDefaults() async {
-        let (model,_,_) = await opened()
-        let maskChanges = Mutex(0), ceilingChanges = Mutex(0)
-        withObservationTracking { _ = model.maskKey } onChange: { maskChanges.withLock { $0 += 1 } }
-        model.showMask(for:"hdrStrength")
-        XCTAssertEqual(maskChanges.withLock { $0 },1)
-        withObservationTracking { _ = model.outputCeilingStops } onChange: { ceilingChanges.withLock { $0 += 1 } }
-        model.adjust("hdrRange",to:2.8)
-        XCTAssertEqual(ceilingChanges.withLock { $0 },1)
-        XCTAssertEqual(model.outputCeilingStops,2.8)
-        model.setWorkflow(.colorOnly)
-        XCTAssertEqual(model.outputCeilingStops,0)
-        XCTAssertNil(model.maskKey)
-        let (hdr,_,_) = await opened(domain:.hdr)
-        hdr.selectEncoding("pq")
-        XCTAssertEqual(hdr.control("hdrRange").defaultValue,-1)
-        hdr.selectEncoding("hlg")
-        XCTAssertEqual(hdr.control("hdrRange").range.upperBound,2.3)
-    }
-}
-
-extension EditingModelTests {
-    func testReviewerNSTextViewProbeThroughActualAttachAndRouting() async {
-        let (model, _, _) = await opened()
-        let shared = UndoManager()
-        model.attach(undoManager: shared)
-        let storage = NSTextStorage(), layout = NSLayoutManager()
-        let container = NSTextContainer(containerSize: NSSize(width:200,height:100))
-        storage.addLayoutManager(layout); layout.addTextContainer(container)
-        let text = NSTextView(frame:NSRect(x:0,y:0,width:200,height:100),textContainer:container)
-        let delegate = TextUndoDelegate(shared)
-        text.delegate = delegate; text.allowsUndo = true
-        text.insertText("hello",replacementRange:NSRange(location:0,length:0))
-        XCTAssertEqual(text.string,"hello")
-        if shared.groupingLevel > 0 { shared.endUndoGrouping() }
-        model.adjust("brightness",to:0.7)
-        model.undo(firstResponder:text)
-        XCTAssertEqual(text.string,"")
-        XCTAssertEqual(model.control("brightness").value,0.7)
-        model.redo(firstResponder:text)
-        XCTAssertEqual(text.string,"hello")
-        model.undo(firstResponder:NSResponder())
-        XCTAssertEqual(model.control("brightness").value,0)
+        model.adjustRecipe(exposure.id, to: 0.7)
+        model.adjustRecipe(exposure.id, to: 0.8)
+        model.undo(firstResponder: nil)
+        XCTAssertEqual(value(model), 0.7)
+        XCTAssertEqual(text.string, "hello")
+        XCTAssertTrue(model.canUndo(firstResponder: text))
+        model.undo(firstResponder: text)
+        XCTAssertEqual(text.string, "")
+        XCTAssertEqual(value(model), 0.7)
+        model.redo(firstResponder: text)
+        XCTAssertEqual(text.string, "hello")
+        model.redo(firstResponder: nil)
+        XCTAssertEqual(value(model), 0.8)
         text.isFieldEditor = true
         XCTAssertTrue(EditorModel.routesUndoToText(text))
-        model.undo(firstResponder:text)
-        XCTAssertEqual(text.string,"")
         XCTAssertTrue(shared.groupsByEvent)
         model.closeDocument()
     }

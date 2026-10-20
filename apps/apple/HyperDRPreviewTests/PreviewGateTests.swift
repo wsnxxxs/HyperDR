@@ -23,20 +23,12 @@ import XCTest
                         viewport: CGSize(width: side, height: side))
     }
 
-    /// Planes whose every pixel reconstructs to `base · 2^stops`.
-    private func uniform(_ renderer: PreviewRenderer, base: Float, stops: Float) throws -> FramePlanes {
-        let width = 4, height = 4
-        let baseValues = [Float](repeating: base, count: width * height * 3)
-        let gainValues = [Float](repeating: 0, count: width * height)
-        let device = renderer.device
-        let baseBuffer = try XCTUnwrap(device.makeBuffer(bytes: baseValues,
-            length: baseValues.count * MemoryLayout<Float>.size, options: .storageModeShared))
-        let gainBuffer = try XCTUnwrap(device.makeBuffer(bytes: gainValues,
-            length: gainValues.count * MemoryLayout<Float>.size, options: .storageModeShared))
-        return FramePlanes(base: baseBuffer, baseRowBytes: width * 12,
-                           gain: gainBuffer, gainRowBytes: width * 4, gainChannels: 1,
-                           width: width, height: height, gainWidth: width, gainHeight: height,
-                           gainMin: stops, gainMax: stops)
+    /// A pair whose every pixel shows `base · 2^stops` on an 8× screen.
+    private func uniform(_ renderer: PreviewRenderer, base: Float, stops: Float) throws -> CanvasComposition {
+        let count = 4 * 4
+        let pair = try makeDisplayPair(renderer.device, base: [Float](repeating: base, count: count * 3), width: 4, height: 4,
+                                       gain: [Float](repeating: stops, count: count), alternateHeadroom: Double(max(stops, 1)))
+        return CanvasComposition(edited: pair, headroom: 8)
     }
 
     /// The red channel at the drawable's centre, after the GPU finished.
@@ -65,22 +57,22 @@ import XCTest
         probe.install(on: renderer)
         let layer = makeLayer(renderer)
 
-        try renderer.prepare(planes: uniform(renderer, base: 0.5, stops: 0), original: false)
-        XCTAssertTrue(renderer.draw(in: layer, transform: transform))
+        var content = try uniform(renderer, base: 0.5, stops: 0)
+        XCTAssertTrue(try renderer.draw(in: layer, composition: content, transform: transform))
         XCTAssertEqual(probe.requests, 1)
         XCTAssertEqual(renderer.inFlight, 1)
         XCTAssertTrue(renderer.isBusy)
 
         // A newer frame arrives while the GPU is behind.
-        try renderer.prepare(planes: uniform(renderer, base: 1, stops: 3), original: false)
-        XCTAssertFalse(renderer.draw(in: layer, transform: transform))
+        content = try uniform(renderer, base: 1, stops: 3)
+        XCTAssertFalse(try renderer.draw(in: layer, composition: content, transform: transform))
         XCTAssertTrue(renderer.needsRetry)
-        XCTAssertFalse(renderer.draw(in: layer, transform: transform))
+        XCTAssertFalse(try renderer.draw(in: layer, composition: content, transform: transform))
         XCTAssertEqual(probe.requests, 1, "a closed gate never asks for a drawable")
         XCTAssertEqual(renderer.inFlight, 1)
 
         await eventually("the presentation to complete") { !renderer.isBusy }
-        XCTAssertTrue(renderer.draw(in: layer, transform: transform))
+        XCTAssertTrue(try renderer.draw(in: layer, composition: content, transform: transform))
         XCTAssertFalse(renderer.needsRetry)
         XCTAssertEqual(probe.requests, 2)
         let drawable = try XCTUnwrap(probe.last)
@@ -95,8 +87,8 @@ import XCTest
         let probe = DrawableProbe()
         probe.install(on: renderer)
         let layer = makeLayer(renderer)
-        try renderer.prepare(planes: uniform(renderer, base: 0.5, stops: 0), original: false)
-        XCTAssertTrue(renderer.draw(in: layer, transform: transform))
+        let content = try uniform(renderer, base: 0.5, stops: 0)
+        XCTAssertTrue(try renderer.draw(in: layer, composition: content, transform: transform))
 
         XCTAssertFalse(renderer.clear(in: layer))
         XCTAssertNil(renderer.readyFrameIdentity, "the frame is released even when gated")
@@ -116,16 +108,16 @@ import XCTest
         let probe = DrawableProbe()
         probe.install(on: renderer)
         let layer = makeLayer(renderer)
-        try renderer.prepare(planes: uniform(renderer, base: 0.5, stops: 0), original: false)
+        let content = try uniform(renderer, base: 0.5, stops: 0)
 
         probe.handsOutNone = true
-        XCTAssertFalse(renderer.draw(in: layer, transform: transform))
+        XCTAssertFalse(try renderer.draw(in: layer, composition: content, transform: transform))
         XCTAssertTrue(renderer.needsRetry)
         XCTAssertEqual(renderer.inFlight, 0)
         XCTAssertFalse(renderer.isBusy)
 
         probe.handsOutNone = false
-        XCTAssertTrue(renderer.draw(in: layer, transform: transform))
+        XCTAssertTrue(try renderer.draw(in: layer, composition: content, transform: transform))
         XCTAssertFalse(renderer.needsRetry)
         XCTAssertEqual(probe.requests, 2)
         XCTAssertEqual(renderer.inFlight, 1)

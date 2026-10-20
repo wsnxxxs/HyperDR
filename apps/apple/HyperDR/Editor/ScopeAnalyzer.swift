@@ -1,7 +1,10 @@
 import Foundation
-import HyperDREngine
+import HyperDRRender
+import Metal
+import simd
 import HyperDRDesign
 import Observation
+import Synchronization
 
 /// Histogram counts in the fixed photographic coordinates of the Web
 /// `histogram.js`: the lower 70% of the bins are SDR 0…100% (sRGB-encoded),
@@ -36,26 +39,14 @@ nonisolated struct WaveformData: Equatable, Sendable {
     }
 }
 
-/// The planes of one preview frame, read in place. `PreviewFrame` keeps the
-/// native storage alive; tests pass Swift arrays of the same layout.
+/// The planes the scopes read: base RGB, and either a gain code plane or the
+/// HDR rendition itself. Built from a small render (`init(pair:)`); tests
+/// pass Swift arrays of the same layout.
 nonisolated struct ScopeInput: @unchecked Sendable {
     let width, height, baseRowBytes: Int
     let gainWidth, gainHeight, gainRowBytes, gainChannels: Int
     let gainMin, gainMax, gainGamma, baseOffset, alternateOffset: Float
     private let access: ((UnsafeRawBufferPointer, UnsafeRawBufferPointer) -> Void) -> Void
-
-    init(_ frame: PreviewFrame) {
-        let metadata = frame.metadata
-        width = frame.base.width; height = frame.base.height; baseRowBytes = frame.base.rowBytes
-        gainWidth = frame.gain.width; gainHeight = frame.gain.height
-        gainRowBytes = frame.gain.rowBytes; gainChannels = frame.gain.channels
-        gainMin = Float(metadata.gainMin ?? 0); gainMax = Float(metadata.gainMax ?? 0)
-        gainGamma = Float(metadata.gainGamma ?? 1)
-        baseOffset = Float(metadata.baseOffset ?? 0); alternateOffset = Float(metadata.alternateOffset ?? 0)
-        access = { body in
-            frame.base.withUnsafeBytes { base in frame.gain.withUnsafeBytes { gain in body(base, gain) } }
-        }
-    }
 
     /// Tightly packed planes: base RGB, gain either one code channel
     /// (`gainChannels == 1`) or an RGB HDR image.
@@ -73,6 +64,88 @@ nonisolated struct ScopeInput: @unchecked Sendable {
     }
 
     func withPlanes(_ body: (UnsafeRawBufferPointer, UnsafeRawBufferPointer) -> Void) { access(body) }
+
+    /// A display pair at full gain, i.e. the file's own HDR rendition: the
+    /// base, and the HDR it reconstructs per base pixel (ISO 21496-1 with the
+    /// pair's matrices and offsets, gain sampled bilinearly). Reads both
+    /// textures back through a blit, whatever their storage.
+    static func read(_ pair: DisplayGainPair) async throws -> ScopeInput {
+        let base = try await TextureReadback.floats(pair.base)
+        let gain = try await TextureReadback.floats(pair.gain)
+        let width = pair.base.width, height = pair.base.height
+        let gw = pair.gain.width, gh = pair.gain.height
+        let gainStride = gain.count / max(1, gw * gh)
+        var rgb = [Float](repeating: 0, count: width * height * 3)
+        var hdr = rgb
+        let identity = pair.p3ToGain == matrix_identity_float3x3 && pair.gainToP3 == matrix_identity_float3x3
+        for y in 0..<height {
+            if y & 31 == 0 { try Task.checkCancellation() }
+            let fy = min(max((Float(y) + 0.5) * Float(gh) / Float(height) - 0.5, 0), Float(gh - 1))
+            let y0 = Int(fy), y1 = min(y0 + 1, gh - 1), wy = fy - Float(y0)
+            for x in 0..<width {
+                let fx = min(max((Float(x) + 0.5) * Float(gw) / Float(width) - 0.5, 0), Float(gw - 1))
+                let x0 = Int(fx), x1 = min(x0 + 1, gw - 1), wx = fx - Float(x0)
+                func g(_ px: Int, _ py: Int) -> SIMD3<Float> {
+                    let i = (py * gw + px) * gainStride
+                    return pair.gainChannelCount == 1 ? SIMD3(repeating: gain[i]) : SIMD3(gain[i], gain[i + 1], gain[i + 2])
+                }
+                let stops = (g(x0, y0) * (1 - wx) + g(x1, y0) * wx) * (1 - wy) + (g(x0, y1) * (1 - wx) + g(x1, y1) * wx) * wy
+                let b = (y * width + x) * 4
+                let sdr = SIMD3(base[b], base[b + 1], base[b + 2])
+                let scale = SIMD3(exp2f(stops.x), exp2f(stops.y), exp2f(stops.z))
+                var value = identity ? (sdr + pair.baseOffset) * scale - pair.alternateOffset
+                    : pair.gainToP3 * ((pair.p3ToGain * sdr + pair.baseOffset) * scale - pair.alternateOffset)
+                value = simd_max(value, .zero)
+                let o = (y * width + x) * 3
+                rgb[o] = sdr.x; rgb[o + 1] = sdr.y; rgb[o + 2] = sdr.z
+                hdr[o] = value.x; hdr[o + 1] = value.y; hdr[o + 2] = value.z
+            }
+        }
+        return ScopeInput(width: width, height: height, base: rgb, gainWidth: width, gainHeight: height,
+                          gainChannels: 3, gain: hdr)
+    }
+}
+
+/// Copies a texture into shared memory as floats (half, float, R or RGBA).
+nonisolated enum TextureReadback {
+    private static let queues = Mutex<[ObjectIdentifier: any MTLCommandQueue]>([:])
+
+    static func floats(_ texture: any MTLTexture) async throws -> [Float] {
+        let device = texture.device
+        let queue = try queues.withLock { queues -> any MTLCommandQueue in
+            if let queue = queues[ObjectIdentifier(device)] { return queue }
+            guard let queue = device.makeCommandQueue() else { throw CancellationError() }
+            queues[ObjectIdentifier(device)] = queue
+            return queue
+        }
+        let (channels, half): (Int, Bool) = switch texture.pixelFormat {
+        case .r16Float: (1, true)
+        case .r32Float: (1, false)
+        case .rgba16Float: (4, true)
+        default: (4, false)
+        }
+        let rowBytes = texture.width * channels * (half ? 2 : 4)
+        guard let buffer = device.makeBuffer(length: max(1, rowBytes * texture.height), options: .storageModeShared),
+              let command = queue.makeCommandBuffer(), let blit = command.makeBlitCommandEncoder() else {
+            throw CancellationError()
+        }
+        blit.copy(from: texture, sourceSlice: 0, sourceLevel: 0, sourceOrigin: MTLOrigin(),
+                  sourceSize: MTLSize(width: texture.width, height: texture.height, depth: 1),
+                  to: buffer, destinationOffset: 0, destinationBytesPerRow: rowBytes,
+                  destinationBytesPerImage: rowBytes * texture.height)
+        blit.endEncoding()
+        await withCheckedContinuation { continuation in
+            command.addCompletedHandler { _ in continuation.resume() }
+            command.commit()
+        }
+        if let error = command.error { throw error }
+        let count = texture.width * texture.height * channels
+        if half {
+            let values = buffer.contents().bindMemory(to: Float16.self, capacity: count)
+            return (0..<count).map { Float(values[$0]) }
+        }
+        return Array(UnsafeBufferPointer(start: buffer.contents().bindMemory(to: Float.self, capacity: count), count: count))
+    }
 }
 
 /// CPU statistics of a frame at full gain, i.e. the file's own HDR rendition,

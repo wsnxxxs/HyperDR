@@ -56,13 +56,10 @@ import XCTest
         let services = ScriptedEditorServices(); services.openClock = ImmediateClock()
         let model = EditorModel(services: services)
         let old = URL(fileURLWithPath: "/fixtures/old.jpg")
-        let preview = EditorPreview(pixelSize: PixelSize(width: 640, height: 400),
-                                    source: SourceSummary(domain: .sdr, colorName: "sRGB", degradationReasons: []), hasGain: false)
-        model.open([old])
-        await eventually(timeout: .seconds(5)) { services.streams[old] != nil }
-        services.streams[old]?.yield(.reference(preview)); services.streams[old]?.yield(.edited(preview))
-        await eventually(timeout: .seconds(5)) { model.document?.phase == .ready }
+        await services.scripted.fake.configure { $0.photos[old] = .init(size: .init(width: 640, height: 400)) }
+        await openReady(model, old)
         model.showsHighlightZebra = true; model.showsShadowZebra = true
+        services.scripted.holdsOpens = true
         model.open([URL(fileURLWithPath: "/fixtures/new-and-a-very-long-file-name-from-a-camera-DSC01468.ARW")])
         await eventually(timeout: .seconds(5)) { model.document?.isPreparingCameraSupport == true }
 
@@ -86,12 +83,8 @@ import XCTest
         let services = ScriptedEditorServices()
         let model = EditorModel(services: services)
         let old = URL(fileURLWithPath: "/fixtures/old.jpg")
-        let preview = EditorPreview(pixelSize: PixelSize(width: 640, height: 400),
-                                    source: SourceSummary(domain: .sdr, colorName: "sRGB", degradationReasons: []), hasGain: false)
-        model.open([old])
-        await eventually(timeout: .seconds(5)) { services.streams[old] != nil }
-        services.streams[old]?.yield(.reference(preview)); services.streams[old]?.yield(.edited(preview))
-        await eventually(timeout: .seconds(5)) { model.document?.phase == .ready }
+        await services.scripted.fake.configure { $0.photos[old] = .init(size: .init(width: 640, height: 400)) }
+        await openReady(model, old)
         model.showsHighlightZebra = true
         model.updateViewport(CGSize(width: 640, height: 400), backingScale: 1)
         let frames = Frames()
@@ -106,17 +99,12 @@ import XCTest
 // MARK: - The drop notice and the updating chip
 
 extension CanvasFootTests {
-    private static let preview = EditorPreview(pixelSize: PixelSize(width: 640, height: 400),
-        source: SourceSummary(domain: .sdr, colorName: "sRGB", degradationReasons: []), hasGain: false)
-
     /// A ready JPEG on a 640×400 canvas, zebras on.
     fileprivate func readyModel(_ services: ScriptedEditorServices) async -> EditorModel {
         let model = EditorModel(services: services)
         let old = URL(fileURLWithPath: "/fixtures/old.jpg")
-        model.open([old])
-        await eventually(timeout: .seconds(5)) { services.streams[old] != nil }
-        services.streams[old]?.yield(.reference(Self.preview)); services.streams[old]?.yield(.edited(Self.preview))
-        await eventually(timeout: .seconds(5)) { model.document?.phase == .ready }
+        await services.scripted.fake.configure { $0.photos[old] = .init(size: .init(width: 640, height: 400)) }
+        await openReady(model, old)
         model.showsHighlightZebra = true; model.showsShadowZebra = true
         return model
     }
@@ -124,6 +112,7 @@ extension CanvasFootTests {
     func testTheDropNoticeSitsAboveTheCardOnARefusedDrag() async throws {
         let services = ScriptedEditorServices(); services.openClock = ImmediateClock()
         let model = await readyModel(services)
+        services.scripted.holdsOpens = true
         model.open([URL(fileURLWithPath: "/fixtures/new.ARW")])
         await eventually(timeout: .seconds(5)) { model.document?.isPreparingCameraSupport == true }
         for locale in ["en", "zh-Hans"] {
@@ -142,8 +131,8 @@ extension CanvasFootTests {
     }
 
     func testTheDropNoticeDuringAnExportSitsAboveTheCapsuleAndTheLegendIsUntouched() async throws {
-        let services = FakeEditorServices(openDelay: .zero, previewDelay: .zero)
-        let model = EditorModel(services: services, ticker: ManualFrameTicker())
+        let services = FakeEditorServices(openDelay: .zero)
+        let model = EditorModel(services: services)
         await model.loadExportServices()
         model.open([URL(fileURLWithPath: "/tmp/first.jpg")])
         await eventually(timeout: .seconds(10)) { model.document?.phase == .ready && !model.suggestedFileName.isEmpty }
@@ -167,6 +156,7 @@ extension CanvasFootTests {
     func testTheUpdatingChipLiftsTheLegendOnlyWhereTheyShareAColumn() async throws {
         let services = ScriptedEditorServices()
         let model = await readyModel(services)
+        services.scripted.holdsOpens = true
         model.open([URL(fileURLWithPath: "/fixtures/next.jpg")])   // the old frame stays; the chip appears after 300 ms
         var overlapped = 0
         for width in [CGFloat(900), 640, 330, 260] {

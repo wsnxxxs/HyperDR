@@ -87,20 +87,47 @@ private func setting(_ recipe: Recipe, _ id: String, _ value: Double) -> Recipe 
     @Test func aDiscreteEditEndsAnOpenDragFirst() async throws {
         let h = Harness(undo: true)
         try await h.open()
-        h.step {
-            h.editor.editingChanged(declaration("tone.exposure"), true)
-            h.editor.setRecipe(setting(h.editor.recipe, "tone.exposure", 0.5))
-        }
-        // The drag is committed before Reset All registers; both land in the
-        // event's undo group, as a click during a drag would.
+        let exposure = declaration("tone.exposure")
+        // A drag registers nothing until it ends (an empty explicit group
+        // would itself count as an undo step here).
+        h.editor.editingChanged(exposure, true)
+        h.editor.setRecipe(setting(h.editor.recipe, "tone.exposure", 0.5))
+        // Reset All while the drag is open: the drag is committed first, and
+        // the two are separate steps although one event registers both (R22-002).
         h.step { h.editor.resetAll() }
         #expect(!h.editor.isDragging)
         #expect(h.undoManager.undoActionName == "undo.resetAll")
         h.undoManager.undo()
+        #expect(h.editor.recipe.value(for: "tone.exposure") == .number(0.5))
+        #expect(h.undoManager.undoActionName == "undo.tone.exposure")
+        h.undoManager.undo()
         #expect(h.editor.recipe == Recipe(inputDomain: .sdr))
+        // The ruler, still coasting, reports its end later: nothing more happens.
+        h.editor.editingChanged(exposure, false)
+        #expect(!h.undoManager.canUndo)
+    }
+
+    @Test func undoWhileARulerCoasts() async throws {
+        let h = Harness(undo: true)
+        try await h.open()
+        let exposure = declaration("tone.exposure")
+        // A drag registers nothing until it ends (an empty explicit group
+        // would itself count as an undo step here).
+        h.editor.editingChanged(exposure, true)
+        h.editor.setRecipe(setting(h.editor.recipe, "tone.exposure", 0.5))
+        // The iOS undo button: commit the drag, then undo (an event's group
+        // is closed by undo itself; this manager has no event groups).
+        h.step { h.editor.commitDrag() }
+        h.undoManager.undo()
+        #expect(h.editor.recipe == Recipe(inputDomain: .sdr))
+        // The coasting ruler's last writes neither overwrite the undo nor add steps.
+        h.editor.setRecipe(setting(h.editor.recipe, "tone.exposure", 0.7))
+        h.editor.editingChanged(exposure, false)
+        #expect(h.editor.recipe == Recipe(inputDomain: .sdr))
+        #expect(!h.undoManager.canUndo)
+        #expect(h.undoManager.canRedo)
         h.undoManager.redo()
-        #expect(h.editor.recipe == Recipe(inputDomain: .sdr))
-        #expect(h.undoManager.canUndo)
+        #expect(h.editor.recipe.value(for: "tone.exposure") == .number(0.5))
     }
 
     @Test func resetNames() async throws {
@@ -204,6 +231,27 @@ private func setting(_ recipe: Recipe, _ id: String, _ value: Double) -> Recipe 
         h.editor.editingChanged(exposure, false)
         await h.editor.settle()
         #expect(h.editor.frame?.request.isInteractive == false)
+    }
+
+    @Test func anInactiveLUTNeedsNoInstall() async throws {
+        let h = Harness()
+        try await h.open()
+        var recipe = h.editor.recipe
+        recipe.look = LUTReference(contentHash: "sha256:missing", name: "Missing")
+        recipe.setValue(.bool(false), for: "look.enabled")
+        h.editor.setRecipe(recipe)
+        await h.editor.settle()
+        #expect(h.editor.renderFailure == nil)
+        #expect(h.editor.frame?.request.recipe.look != nil)
+        recipe.setValue(nil, for: "look.enabled")
+        recipe.setValue(.number(0), for: "look.strength")
+        h.editor.setRecipe(recipe)
+        await h.editor.settle()
+        #expect(h.editor.renderFailure == nil)
+        recipe.setValue(nil, for: "look.strength")
+        h.editor.setRecipe(recipe)
+        await h.editor.settle()
+        #expect(h.editor.renderFailure != nil)
     }
 
     @Test func bypassedGroupsAreARenderOption() async throws {

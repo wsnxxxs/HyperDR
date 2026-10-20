@@ -93,6 +93,8 @@ import Observation
     // MARK: - Bookkeeping
 
     @ObservationIgnored private var drag: (id: String, start: Recipe)?
+    /// A drag `commitDrag` ended before its control did.
+    @ObservationIgnored private var abandoned: (id: String, since: ContinuousClock.Instant)?
     @ObservationIgnored private var largestCanvasSide: Int?
     @ObservationIgnored private var openGeneration = 0
     @ObservationIgnored private var opening: Task<EditorSource, any Error>?
@@ -153,6 +155,7 @@ import Observation
         // the caller was cancelled meanwhile; only a newer request wins.
         guard generation == openGeneration else { throw CancellationError() }
         drag = nil
+        abandoned = nil
         editingParameter = nil
         cancelRenders()
         undo.clear()
@@ -173,6 +176,7 @@ import Observation
     func close() async {
         openGeneration += 1
         isOpening = false
+        abandoned = nil
         // Behind any open still on its way to the renderer, ahead of any later one.
         let previous = opening
         previous?.cancel()
@@ -209,7 +213,7 @@ import Observation
     /// the drag; otherwise it is one undo step, named after what changed
     /// (`RecipeEdit.classify`).
     func setRecipe(_ newValue: Recipe) {
-        guard newValue != recipe else { return }
+        guard newValue != recipe, !isAbandonedWrite else { return }
         let old = recipe
         recipe = newValue
         if drag == nil, let edit = RecipeEdit.classify(from: old, to: newValue) {
@@ -220,12 +224,14 @@ import Observation
 
     /// One named step. An open drag ends first, as its own step.
     func apply(_ edit: RecipeEdit, _ change: (inout Recipe) -> Void) {
-        commitDrag()
+        let committed = commitDrag()
         var newValue = recipe
         change(&newValue)
         guard newValue != recipe else { return }
         let old = recipe
         recipe = newValue
+        // The drag and this edit are two steps even in one event's undo group.
+        if committed { undo.separateNextStep() }
         undo.register(RecipeStep(before: old, after: newValue, edit: edit))
         recipeDidChange(from: old)
     }
@@ -242,24 +248,56 @@ import Observation
     /// ruler's: when the finger lands), false when it ends (after its inertia
     /// stops). The whole drag is one step.
     func editingChanged(_ declaration: ParameterDeclaration, _ isEditing: Bool) {
-        commitDrag()
+        if !isEditing, abandoned?.id == declaration.id {
+            abandoned = nil
+            return
+        }
+        finishDrag()
+        abandoned = nil
         if isEditing {
             drag = (declaration.id, recipe)
             editingParameter = declaration.id
         }
     }
 
-    /// Ends an open drag (before a discrete edit, a photo change, an undo the
-    /// host is about to perform).
-    func commitDrag() {
-        guard let drag else { return }
+    /// Ends an open drag as its own step, before something else happens to the
+    /// recipe: a discrete edit, or an undo the host is about to perform (the
+    /// iOS undo button tapped while the ruler still coasts). The control keeps
+    /// writing until its own end; those writes are dropped, for at most
+    /// `abandonedWriteLimit`, so they neither overwrite the undo nor become
+    /// steps of their own. Returns whether a step was registered.
+    @discardableResult
+    func commitDrag() -> Bool {
+        guard let id = drag?.id else { return false }
+        let registered = finishDrag()
+        abandoned = (id, ContinuousClock.now)
+        return registered
+    }
+
+    /// How long the writes of a drag ended by `commitDrag` are dropped when
+    /// the control never reports its end.
+    nonisolated static let abandonedWriteLimit: Duration = .seconds(2)
+
+    private var isAbandonedWrite: Bool {
+        guard let abandoned else { return false }
+        if ContinuousClock.now - abandoned.since < Self.abandonedWriteLimit { return true }
+        self.abandoned = nil
+        return false
+    }
+
+    @discardableResult
+    private func finishDrag() -> Bool {
+        guard let drag else { return false }
         self.drag = nil
         editingParameter = nil
+        var registered = false
         if recipe != drag.start {
             undo.register(RecipeStep(before: drag.start, after: recipe, edit: .parameter(drag.id)))
+            registered = true
         }
         // The final, non-interactive frame, and the original if development moved.
         scheduleRender()
+        return registered
     }
 
     /// Undo and redo. A drag still open is dropped with its changes: the step

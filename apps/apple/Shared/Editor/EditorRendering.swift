@@ -121,6 +121,15 @@ extension Recipe {
         return original
     }
 
+    /// The LUT reference when it takes effect: enabled with a strength above
+    /// zero. Otherwise the reference stays in the recipe but the renderer gets
+    /// no LUT and needs none installed.
+    nonisolated var activeLook: LUTReference? {
+        guard let look, conditionValue("look.enabled")?.boolValue != false,
+              conditionValue("look.strength")?.numberValue != 0 else { return nil }
+        return look
+    }
+
     /// The values that need a new development of the source.
     nonisolated var development: [String: ParameterValue] {
         var values: [String: ParameterValue] = [:]

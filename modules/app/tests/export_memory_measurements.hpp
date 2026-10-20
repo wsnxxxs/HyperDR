@@ -1,10 +1,10 @@
 #pragma once
 // Method (all three tables): entry point is the CLI (`HyperDR convert <input>
-// --out <file> ...`, which runs the same engine export as the C ABI), measured
-// as the peak memory footprint reported by `/usr/bin/time -l`, one export per
-// process. Threads: the machine's default (12 logical CPUs on the M6), so the
+// --output <directory> ...`, which runs the same engine export as the C ABI),
+// measured as the peak memory footprint reported by `/usr/bin/time -l`, one
+// export per process. Threads: the machine's default (12 logical CPUs on the M6), so the
 // HEIC tile encoder runs the automatic worker count, clamp(CPUs/4, 1, 4) = 3
-// (`heic_tile_workers` 0); image processing uses the engine's default pool.
+// (`heic_tile_workers` 0); other stages use the engine defaults.
 // The value kept is the larger of two runs where a table says so below;
 // otherwise the number of runs was not recorded. Repeated runs of the same
 // export differ by a few percent, and measurements by different people on

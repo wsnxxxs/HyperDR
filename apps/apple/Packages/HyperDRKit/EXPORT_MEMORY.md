@@ -84,5 +84,6 @@ establish the typical-device result. No constants are lowered to force admission
 Report `stageSeconds.rendering` measures preparation. `stageSeconds.read` sums
 only synchronous Render read calls with a monotonic clock; `encoding` excludes
 that read time and retains writer/bridge/native verification time. The Mac timing
-sample folds `read` into its rendering slot so total duration and prediction
-samples remain complete. Old reports without `read` continue to decode.
+sample folds `read` into its encoding slot, matching the live encoding stage
+that performs pull rendering; its rendering slot remains preparation only.
+Total duration and prediction samples remain complete. Old reports without `read` continue to decode.

@@ -1,5 +1,7 @@
 import Foundation
 import XCTest
+import HyperDRKit
+import HyperDRRecipe
 @testable import HyperDR
 
 @MainActor final class ExportETATests: XCTestCase {
@@ -35,6 +37,42 @@ import XCTest
         XCTAssertNil(state.estimate(at:start+141)?.remaining);XCTAssertEqual(state.estimate(at:start+141)?.fraction,0.99)
         state.phase = .succeeded;XCTAssertEqual(state.estimate(at:start+142)?.fraction,1)
     }
+    func testRowReportHistoryKeepsPullReadTimeInEncodingETA() throws {
+        let plan = ExportPlanner.plan(.init(choice: .custom(.init(encoding: .isoGainMapJPEG)),
+            source: .init(domain: .sdr, pixelSize: .init(width: 96, height: 64)),
+            edit: .init(peakStops: 2)))
+        let snapshot = RecipeExportSnapshot(recipe: Recipe(),
+            source: .init(sha256: "digest", byteCount: 1, modificationDate: .distantPast))
+        let resolved = ResolvedExportSnapshot(snapshot: snapshot, plan: plan)
+        let resolvedJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(resolved))
+        // New reports separate nine seconds of pull reads; old reports include
+        // those reads in encoding and omit the read key. Both describe 11 s.
+        for separateRead in [true, false] {
+            var seconds = ["rendering": 1.0, "encoding": separateRead ? 1.0 : 10.0]
+            if separateRead { seconds["read"] = 9 }
+            let report: [String: Any] = ["schema": "hyperdr.recipe-export/v1",
+                "system": ["width": 96, "height": 64, "bitDepth": 8, "orientation": 1,
+                    "auxiliaryGain": true, "hdrReadable": true, "verifiedHeadroomStops": []],
+                "stageSeconds": seconds, "resplitReasons": [], "transparentBackground": "black-sdr",
+                "usesRowInput": true]
+            let object: [String: Any] = ["id": String(repeating: "a", count: 32),
+                "name": "photo.jpg", "byteCount": 3, "createdAt": 0, "sourceDigest": "digest",
+                "options": [:], "sequence": 1, "key": ["rawValue": "key"],
+                "reportJSON": try JSONSerialization.data(withJSONObject: report).base64EncodedString(),
+                "resolvedSnapshot": resolvedJSON]
+            let record = try JSONDecoder().decode(ExportRecord.self,
+                from: JSONSerialization.data(withJSONObject: object))
+            let timing = try XCTUnwrap(ExportHistoryItem(record).timing)
+            XCTAssertEqual(timing.stages[1], 1, "rendering only prepares rows")
+            let durations = try XCTUnwrap(ExportETA.durations(history: [timing], kind: timing.kind, pixels: timing.pixels))
+            let encodingStart = Date(timeIntervalSince1970: 100)
+            let estimate = try XCTUnwrap(ExportETA.estimate(at: encodingStart+2, startedAt: encodingStart-1,
+                stageAt: encodingStart, stage: "encoding", durations: durations, fractionFloor: 0))
+            XCTAssertEqual(try XCTUnwrap(estimate.remaining).seconds, 8, accuracy: 1e-10)
+            XCTAssertFalse(estimate.isOverdue)
+        }
+    }
+
     func testRemainingBucketsAreStableAndRoundUp() {
         func bucket(_ seconds:Double)->ExportEstimate.RemainingBucket? { ExportEstimate(fraction:0,remaining:.seconds(seconds),isOverdue:false).remainingBucket }
         XCTAssertEqual(bucket(4.99),.soon);XCTAssertEqual(bucket(5),.seconds(5));XCTAssertEqual(bucket(6),.seconds(10))

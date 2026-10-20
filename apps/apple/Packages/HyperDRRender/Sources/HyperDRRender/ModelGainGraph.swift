@@ -15,7 +15,10 @@ extension RenderEngine {
     public func predictModelGain(_ source: RenderSource, provider: CoreMLModelGainProvider) async throws -> ModelGainPrediction {
         guard source.domain == .sdr || source.domain == .rawEDR else { throw RenderError.invalidAdjustment }
         let key = ModelPredictionKey(source:source.id,model:provider.modelID)
-        if let cached = modelPredictionCache[key] { return cached }
+        if let cached = modelPredictionCache[key] {
+            modelPredictionOrder.removeAll { $0 == key }; modelPredictionOrder.append(key)
+            return cached
+        }
         let source = try fixedAnalysisSource(source)
         let prediction: ModelGainPrediction
         if source.domain == .sdr { prediction = try await provider.predict(source:source) }
@@ -25,6 +28,10 @@ extension RenderEngine {
         try Task.checkCancellation()
         guard prediction.sourceID == key.source, prediction.modelID == key.model else { throw RenderError.invalidAdjustment }
         modelPredictionCache[key] = prediction
+        modelPredictionOrder.removeAll { $0 == key }; modelPredictionOrder.append(key)
+        if modelPredictionOrder.count > 4 {
+            modelPredictionCache.removeValue(forKey:modelPredictionOrder.removeFirst())
+        }
         return prediction
     }
 

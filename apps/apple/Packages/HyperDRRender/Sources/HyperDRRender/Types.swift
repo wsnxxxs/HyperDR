@@ -147,6 +147,8 @@ struct SourceRevision: Hashable {
 /// Immutable source assets. Full, latest-preview and fixed-analysis variants are
 /// retained for one asset/development family. Clients account for other retained sources.
 public struct RenderSource: @unchecked Sendable {
+    /// Stable across engines and preview/full: path + file revision + normalized
+    /// development parameters. Decoded-only sources receive a fresh identity.
     public let id: UUID
     /// A decoded variant has its own GPU cache identity; source/model identity is shared.
     let renderID: UUID

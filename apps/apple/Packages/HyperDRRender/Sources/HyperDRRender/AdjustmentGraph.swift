@@ -49,6 +49,7 @@ extension RenderEngine {
         if let cache = lutCache, cache.id == id { return (cache.texture, cache.buffer) }
         lutCache = nil
         let edge = lut?.is3D == true ? lut!.size : 2
+        guard edge > 0, edge <= 2048 else { throw RenderError.invalidSize }
         let descriptor = MTLTextureDescriptor()
         descriptor.textureType = .type3D; descriptor.pixelFormat = .rgba32Float
         descriptor.width = edge; descriptor.height = edge; descriptor.depth = edge

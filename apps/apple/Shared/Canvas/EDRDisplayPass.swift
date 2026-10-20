@@ -1,3 +1,4 @@
+import HyperDRRender
 import CoreGraphics
 import Foundation
 import Metal
@@ -107,6 +108,10 @@ nonisolated struct EDRDisplayPass: @unchecked Sendable {
     }
 
     static func makeTexture(device: any MTLDevice, descriptor: MTLTextureDescriptor) throws -> any MTLTexture {
+        let limit = RenderEngine.maximumTextureDimension(device:device)
+        guard descriptor.width > 0, descriptor.height > 0, descriptor.width <= limit, descriptor.height <= limit else {
+            throw PreviewError.unavailable("Composition dimensions exceed this device's texture limit")
+        }
         guard let texture = device.makeTexture(descriptor: descriptor) else {
             throw PreviewError.unavailable("Unable to allocate a Metal texture")
         }

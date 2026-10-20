@@ -48,6 +48,7 @@ struct FrameUniform {
     uint4 photo,caption; // canvas rectangles
     float4 paper,shadow; // opacity,sigma,offsetX,offsetY
     uint4 region; // output band y, photo input's canvas y, has photo, has caption
+    uint4 horizontal; // output x, photo input's canvas x, caption texture origin x/y
 };
 float exportErf(float x) {
     float t=1.f/(1.f+.3275911f*abs(x));
@@ -65,17 +66,17 @@ kernel void exportFrame(texture2d<float,access::read> photoBase [[texture(0)]],
                         texture2d<float,access::write> gain [[texture(4)]],
                         constant FrameUniform& p [[buffer(0)]],uint2 pos [[thread_position_in_grid]]) {
     if(pos.x>=base.get_width() || pos.y>=base.get_height())return;
-    uint2 global=pos+uint2(0,p.region.x);
+    uint2 global=pos+uint2(p.horizontal.x,p.region.x);
     bool inPhoto=all(global>=p.photo.xy) && all(global-p.photo.xy<p.photo.zw);
     if(inPhoto && p.region.z) {
-        uint2 local=uint2(global.x-p.photo.x,global.y-p.region.y);
+        uint2 local=uint2(global.x-p.horizontal.y,global.y-p.region.y);
         base.write(photoBase.read(local),pos);gain.write(photoGain.read(local),pos);return;
     }
     float2 xy=float2(global)+.5f, lo=float2(p.photo.xy)+p.shadow.zw,hi=lo+float2(p.photo.zw);
     float coverage=frameCoverage(xy.x,lo.x,hi.x,p.shadow.y)*frameCoverage(xy.y,lo.y,hi.y,p.shadow.y);
     float3 color=p.paper.rgb*(1.f-p.shadow.x*coverage);
     if(p.region.w && all(global>=p.caption.xy) && all(global-p.caption.xy<p.caption.zw)) {
-        float4 ink=caption.read(global-p.caption.xy);
+        float4 ink=caption.read(global-p.horizontal.zw);
         color=mix(color,clamp(ink.rgb,0.f,1.f),clamp(ink.a,0.f,1.f));
     }
     base.write(float4(color,1),pos);gain.write(float4(0),pos);

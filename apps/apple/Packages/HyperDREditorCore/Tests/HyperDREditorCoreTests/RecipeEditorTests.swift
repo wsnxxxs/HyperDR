@@ -130,6 +130,32 @@ private func setting(_ recipe: Recipe, _ id: String, _ value: Double) -> Recipe 
         #expect(h.editor.recipe.value(for: "tone.exposure") == .number(0.5))
     }
 
+    /// R22-004: only the abandoned control's writes are dropped; a switch
+    /// thrown while the ruler still coasts is an edit of its own.
+    @Test func otherControlsWriteWhileARulerCoasts() async throws {
+        let h = Harness(undo: true)
+        try await h.open()
+        let exposure = declaration("tone.exposure")
+        h.editor.editingChanged(exposure, true)
+        h.editor.setRecipe(setting(h.editor.recipe, "tone.exposure", 0.5))
+        h.step { h.editor.resetAll() }
+        h.step {
+            var recipe = h.editor.recipe
+            recipe.setValue(.bool(false), for: "hdr.enabled")
+            h.editor.setRecipe(recipe)
+        }
+        #expect(h.editor.recipe.value(for: "hdr.enabled") == .bool(false))
+        #expect(h.undoManager.undoActionName == "undo.hdr.enabled")
+        // A coasting write carrying both keeps the switch, not the exposure.
+        var coasting = h.editor.recipe
+        coasting.setValue(.number(0.8), for: "tone.exposure")
+        h.editor.setRecipe(coasting)
+        #expect(h.editor.recipe.isDefault("tone.exposure"))
+        h.editor.editingChanged(exposure, false)
+        h.undoManager.undo()
+        #expect(h.editor.recipe.value(for: "hdr.enabled") != .bool(false))
+    }
+
     @Test func resetNames() async throws {
         let h = Harness(undo: true)
         try await h.open()
@@ -302,6 +328,23 @@ private func setting(_ recipe: Recipe, _ id: String, _ value: Double) -> Recipe 
         #expect(h.editor.source?.url == (results[1] ? b : a))
         // The renderer holds the photo the editor shows.
         #expect(await h.fake.opened.last == h.editor.source?.url)
+    }
+
+    /// R22-005: an open whose caller was cancelled before it began does not
+    /// supersede the open in progress.
+    @Test func aCancelledOpenDoesNotSupersede() async throws {
+        let h = Harness()
+        let a = URL(fileURLWithPath: "/tmp/old.jpg"), b = URL(fileURLWithPath: "/tmp/new.jpg")
+        let current = Task { @MainActor in try await h.editor.open(b) }
+        while !h.editor.isOpening { await Task.yield() }
+        let stale = Task { @MainActor in
+            withUnsafeCurrentTask { $0?.cancel() }
+            try await h.editor.open(a)
+        }
+        await #expect(throws: CancellationError.self) { try await stale.value }
+        try await current.value
+        #expect(h.editor.source?.url == b)
+        #expect(await h.fake.opened == [b])
     }
 }
 

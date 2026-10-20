@@ -182,6 +182,8 @@ import Observation
     /// prediction state of the previous photo are dropped. A newer `open`
     /// supersedes this one, which then throws `CancellationError`.
     func open(_ url: URL) async throws {
+        // A caller cancelled before it got here must not supersede a newer open.
+        try Task.checkCancellation()
         openGeneration += 1
         let generation = openGeneration
         isOpening = true
@@ -261,9 +263,14 @@ import Observation
 
     /// The controls' binding write. While a drag is open the write belongs to
     /// the drag; otherwise it is one undo step, named after what changed
-    /// (`RecipeEdit.classify`).
+    /// (`RecipeEdit.classify`). A write from a drag `commitDrag` abandoned
+    /// keeps everything but that control's value.
     func setRecipe(_ newValue: Recipe) {
-        guard newValue != recipe, !isAbandonedWrite else { return }
+        var newValue = newValue
+        if let id = abandonedID {
+            newValue.setValue(recipe.value(for: id), for: id)
+        }
+        guard newValue != recipe else { return }
         let old = recipe
         recipe = newValue
         if drag == nil, let edit = RecipeEdit.classify(from: old, to: newValue) {
@@ -315,9 +322,10 @@ import Observation
     /// Ends an open drag as its own step, before something else happens to the
     /// recipe: a discrete edit, or an undo the host is about to perform (the
     /// iOS undo button tapped while the ruler still coasts). The control keeps
-    /// writing until its own end; those writes are dropped, for at most
-    /// `abandonedWriteLimit`, so they neither overwrite the undo nor become
-    /// steps of their own. Returns whether a step was registered.
+    /// writing until its own end; its changes to its own parameter are
+    /// dropped, for at most `abandonedWriteLimit`, so they neither overwrite
+    /// the undo nor become steps of their own. Every other control writes as
+    /// usual meanwhile. Returns whether a step was registered.
     @discardableResult
     func commitDrag() -> Bool {
         guard let id = drag?.id else { return false }
@@ -330,11 +338,12 @@ import Observation
     /// the control never reports its end.
     nonisolated static let abandonedWriteLimit: Duration = .seconds(2)
 
-    private var isAbandonedWrite: Bool {
-        guard let abandoned else { return false }
-        if ContinuousClock.now - abandoned.since < Self.abandonedWriteLimit { return true }
+    /// The parameter whose writes are dropped now, if any.
+    private var abandonedID: String? {
+        guard let abandoned else { return nil }
+        if ContinuousClock.now - abandoned.since < Self.abandonedWriteLimit { return abandoned.id }
         self.abandoned = nil
-        return false
+        return nil
     }
 
     @discardableResult

@@ -177,6 +177,9 @@ void test_conversion() {
 void test_quality_map() {
   require(hevc::vt_quality(-5) == 0.0F && hevc::vt_quality(0) == 0.0F, "quality floor");
   require(hevc::vt_quality(100) == 1.0F && hevc::vt_quality(250) == 1.0F, "quality ceiling");
+  require(hevc::vt_quality(90) == .89F && std::abs(hevc::vt_quality(90, true) - .89F) < 1e-6F, "calibrated color quality");
+  require(hevc::vt_quality(90, false, hevc::QualityRole::Gain) == .85F &&
+          hevc::vt_quality(90, false, hevc::QualityRole::FramedGain) == .95F, "independent gain quality");
   float previous = -1.0F;
   for (int q = 0; q <= 100; ++q) {
     require(hevc::vt_quality(q) > previous, "quality map is increasing");

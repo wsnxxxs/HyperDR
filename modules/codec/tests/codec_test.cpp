@@ -1346,6 +1346,10 @@ int main() try {
     hyperdr::verify_gain_map_jpeg(
         hyperdr::encode_gain_map_jpeg(no_headroom_gain, metadata, 20));
     auto gain_probe = small_gain;
+    // This is the fixed-q95 code-preservation probe. P3a-2 gives ordinary
+    // gain streams an independent lossy quality cap; framed streams retain
+    // q95 for E5. Keep this path's original 0.5-mean / 3-max code limits.
+    gain_probe.presentation_frame = true;
     for (std::size_t i = 0; i < gain_probe.gain_map.pixels.size(); ++i) {
       const auto code = i % 7 == 0 ? 0U : (i % 11 == 0 ? 255U : static_cast<unsigned>((i * 37U) % 255U));
       gain_probe.gain_map.pixels[i] = static_cast<float>(code) / 255.0F;

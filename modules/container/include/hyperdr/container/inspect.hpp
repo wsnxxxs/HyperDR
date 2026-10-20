@@ -7,6 +7,7 @@
 // Parsing the box tree directly is what makes that answer independent of
 // any decoder library.
 
+#include <span>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -45,7 +46,7 @@ struct HeifInspection {
   std::vector<std::string> errors;
 };
 
-[[nodiscard]] HeifInspection inspect_heif(const std::vector<std::uint8_t>& bytes);
+[[nodiscard]] HeifInspection inspect_heif(std::span<const std::uint8_t> bytes);
 [[nodiscard]] std::string inspection_json(const HeifInspection& inspection);
 
 }  // namespace hyperdr

@@ -13,6 +13,10 @@ endforeach()
 if(HYPERDR_WITH_CODECS)
   # The packaging entry point writes real files, so it needs the encoder paths.
   # Synthetic planes keep it independent of the RAW and HEIC fixtures.
+  add_executable(capi_package_rows_test package_rows_test.cpp)
+  target_link_libraries(capi_package_rows_test PRIVATE HyperDR::capi_static HyperDR::app)
+  set_target_properties(capi_package_rows_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+  add_test(NAME capi_package_rows_test COMMAND capi_package_rows_test)
   add_executable(capi_package_test package_test.c)
   set_target_properties(capi_package_test PROPERTIES
     C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
@@ -24,6 +28,8 @@ if(APPLE)
   add_library(capi_test_clock SHARED frozen_time.c)
   set_target_properties(capi_test_clock PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
   if(HYPERDR_WITH_CODECS)
+    set_tests_properties(capi_package_rows_test PROPERTIES
+      ENVIRONMENT "DYLD_INSERT_LIBRARIES=$<TARGET_FILE:capi_test_clock>")
     # G19: exercise every decoding entry on a GCD-sized worker stack.
     # Run every entry point on a 512 KiB pthread before the main thread initializes
     # lazy static tables, then require byte-identical results.
@@ -56,4 +62,10 @@ if(Python3_FOUND)
     set_tests_properties(capi_contract_test PROPERTIES ENVIRONMENT
       "DYLD_INSERT_LIBRARIES=$<TARGET_FILE:capi_test_clock>")
   endif()
+endif()
+
+if(Python3_FOUND AND HYPERDR_WITH_CODECS AND APPLE)
+  add_test(NAME capi_verify_memory_test COMMAND ${HYPERDR_CONTRACT_PYTHON}
+    ${CMAKE_CURRENT_SOURCE_DIR}/verify_memory_test.py $<TARGET_FILE:capi_package_rows_test>)
+  set_tests_properties(capi_verify_memory_test PROPERTIES TIMEOUT 240 RUN_SERIAL TRUE)
 endif()

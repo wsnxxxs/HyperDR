@@ -1,6 +1,7 @@
 #include "hyperdr/hyperdr.h"
 
 #include "hyperdr/app/report.hpp"
+#include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/app/engine.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include <unistd.h>
@@ -65,6 +66,8 @@ int boundary(hyperdr_error** error, Function function) noexcept {
       const auto detail=exception.detail_json();
       set_error(error,"unsupported_format",exception.what(),detail.empty()?nullptr:detail.c_str());
     } catch (...) { set_error(error,"out_of_memory","cannot allocate native error detail"); }
+  } catch (const hyperdr::ExportDimensionLimit& exception) {
+    set_error(error, "export_dimension_limit", exception.what());
   } catch (const hyperdr::DecodeFailed& exception) {
     set_error(error, "decode_failed", exception.what());
   } catch (const std::invalid_argument& exception) {
@@ -286,6 +289,86 @@ int hyperdr_convert(hyperdr_engine* engine, const char* request, hyperdr_event_f
     return required(engine).value.convert(hyperdr::request_options(document(request)), &sink, token(cancel));
   });
 }
+namespace {
+
+hyperdr::PackagePlane package_plane(const hyperdr_package_plane& plane, const char* what) {
+  if (plane.data == nullptr) throw std::invalid_argument(std::string(what) + " plane data is null");
+  if (plane.format != HYPERDR_PLANE_F32)
+    throw std::invalid_argument(std::string(what) + " plane must use HYPERDR_PLANE_F32");
+  return {static_cast<const float*>(plane.data), plane.row_bytes, plane.size, plane.width,
+          plane.height, plane.channels};
+}
+
+}  // namespace
+
+int hyperdr_package(hyperdr_engine* engine, const hyperdr_package_request* configuration,
+    char** out, hyperdr_error** error) {
+  return json_result(out, error, [&] {
+    if (configuration == nullptr) throw std::invalid_argument("package request is required");
+    hyperdr::PackageRequest request;
+    if (configuration->output_path == nullptr) throw std::invalid_argument("package output path is required");
+    request.output = hyperdr::path_from_utf8(configuration->output_path);
+    const std::string_view format = configuration->format ? configuration->format : "";
+    const auto encoding = hyperdr::hdr_encoding_from_name(format);
+    if (!encoding) throw std::invalid_argument("unknown output format: \"" + std::string(format) + "\"");
+    request.encoding = *encoding;
+    if (configuration->parameters_json) {
+      const auto parameters = hyperdr::json::parse(configuration->parameters_json);
+      if (!parameters.is_object()) throw std::invalid_argument("package parameters must be an object");
+      for (const auto& [key, value] : parameters.members()) {
+        if (key == "quality") {
+          const double n = value.number();
+          if (n < 0 || n > 100 || std::floor(n) != n) throw std::invalid_argument("quality must be in [0,100]");
+          request.quality = static_cast<int>(n);
+        } else if (key == "depth") {
+          const double n = value.number();
+          if (n != 8 && n != 10) throw std::invalid_argument("depth must be 8 or 10");
+          request.depth = static_cast<int>(n);
+        } else if (key == "hevc_preset") {
+          const auto& name = value.string();
+          if (name == "slow") request.hevc_preset = hyperdr::HevcPreset::Slow;
+          else if (name == "medium") request.hevc_preset = hyperdr::HevcPreset::Medium;
+          else throw std::invalid_argument("hevc_preset must be \"slow\" or \"medium\"");
+        } else if (key == "gamut") {
+          const auto gamut = hyperdr::color_gamut_from_name(value.string());
+          if (!gamut || *gamut == hyperdr::ColorGamut::kRec2020)
+            throw std::invalid_argument("gamut must be \"srgb\" or \"p3\"");
+          request.gamut = *gamut;
+        } else if (key == "verify") request.verify = value.boolean();
+        else if (key == "overwrite") request.overwrite = value.boolean();
+        else throw std::invalid_argument("unknown package parameter: " + key);
+      }
+    }
+    hyperdr::PackagePlane sdr;
+    hyperdr::PackageGain gain;
+    if (configuration->sdr) {
+      sdr = package_plane(*configuration->sdr, "SDR base");
+      request.sdr = &sdr;
+    }
+    if (configuration->gain) {
+      gain.plane = package_plane(configuration->gain->plane, "gain");
+      for (unsigned c = 0; c < 3; ++c) {
+        gain.base_offset[c] = configuration->gain->base_offset[c];
+        gain.alternate_offset[c] = configuration->gain->alternate_offset[c];
+      }
+      gain.base_headroom = configuration->gain->base_headroom;
+      gain.alternate_headroom = configuration->gain->alternate_headroom;
+      if (configuration->gain->working_gamut) gain.working_gamut = configuration->gain->working_gamut;
+      request.gain = &gain;
+    }
+    if (configuration->exif && configuration->exif_size) {
+      request.exif = static_cast<const std::uint8_t*>(configuration->exif);
+      request.exif_size = configuration->exif_size;
+    }
+    request.presentation_frame = configuration->presentation_frame != 0;
+    if (configuration->has_frame_photo) {
+      const auto& rect = configuration->frame_photo;
+      request.frame_photo = hyperdr::FrameRect{rect.x, rect.y, rect.width, rect.height};
+    }
+    return required(engine).value.package(request, token(configuration->cancel));
+  });
+}
+
 hyperdr_cancel* hyperdr_cancel_create(void) { return new (std::nothrow) hyperdr_cancel; }
 void hyperdr_cancel_request(hyperdr_cancel* cancel) { if (cancel) cancel->value.request(); }
 void hyperdr_cancel_destroy(hyperdr_cancel* cancel) { delete cancel; }

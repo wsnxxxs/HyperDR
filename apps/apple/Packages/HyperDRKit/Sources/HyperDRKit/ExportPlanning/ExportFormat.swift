@@ -65,17 +65,23 @@ public enum ExportWriter: String, Sendable, Hashable, Codable {
     /// libavif, used only for AVIF.
     case libavif
 
-    /// Whether a photo's own three-channel gain map can be written as it is.
-    /// Our writers carry one or three channels (ISO 21496-1); writer-lab only
-    /// measured the one-channel ImageIO auxiliary-data path, so a three-channel
-    /// authored pair is re-separated there until P7-3b measures otherwise.
-    public var carriesThreeChannelGain: Bool { self == .inHouse }
+    /// ABI 4 capabilities for this exact output combination. b accumulates full
+    /// planes; none of these writers is a streaming plane consumer.
+    public func capabilities(encoding: ExportEncoding, bitDepth: Int,
+                             gainChannels: Int, workingGamut: String = "display-p3") -> ExportWriterCapabilities {
+        let depth = encoding == .adaptive ? [8, 10].contains(bitDepth)
+            : encoding == .sdrTIFF ? bitDepth == 16
+            : encoding.isBT2100 ? bitDepth == 10 : bitDepth == 8
+        let writerMatches = self == .inHouse || (self == .libavif && encoding.isAVIF)
+            || (self == .imageIO && encoding == .adaptive && bitDepth == 8 && gainChannels == 0)
+        let rgb = encoding != .adaptive && self != .imageIO
+        let supported = depth && writerMatches && workingGamut == "display-p3"
+            && [0, 1, 3].contains(gainChannels) && (gainChannels != 3 || rgb)
+        return .init(supported: supported, supportsThreeChannelGain: rgb,
+                     supportsSignedGain: encoding != .adaptive,
+                     requiresGainMaximumHeadroom: encoding == .adaptive)
+    }
 
-    /// Whether this writer can encode a canvas piece by piece. gpu-pipeline §2
-    /// gives `hyperdr_package` streamed, tiled writes; ImageIO cannot, and AVIF
-    /// only ever splits into a grid of independent cells. The pre-P7 engine does
-    /// not stream, so P7-3b may offer the strip degradation only for that entry.
-    public var streamsInStrips: Bool { self == .inHouse }
 }
 
 /// Why the plan chose that writer, in the words of gpu-pipeline §11.x.
@@ -124,4 +130,11 @@ public enum ExportChoice: Sendable, Hashable, Codable {
         if case .custom(let format) = self { return format }
         return nil
     }
+}
+
+public struct ExportWriterCapabilities: Sendable, Hashable {
+    public let supported: Bool
+    public let supportsThreeChannelGain: Bool
+    public let supportsSignedGain: Bool
+    public let requiresGainMaximumHeadroom: Bool
 }

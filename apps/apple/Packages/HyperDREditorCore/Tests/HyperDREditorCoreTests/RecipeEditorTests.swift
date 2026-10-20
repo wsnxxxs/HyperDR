@@ -583,3 +583,30 @@ private func setting(_ recipe: Recipe, _ id: String, _ value: Double) -> Recipe 
         #expect(h.editor.previewsAsSDR)
     }
 }
+
+@MainActor @Suite struct RecipeEditorExportTests {
+    /// P7-3b-U: the capture is the recipe as edited, not the preview's bypass,
+    /// with the model it uses and the LUT its look takes effect with.
+    @Test func theCaptureFreezesRecipeModelAndLUT() async throws {
+        let h = Harness()
+        try await h.open()
+        let lut = try ColorLUT(cube: "LUT_3D_SIZE 2\n" + String(repeating: "0 0 0\n", count: 8))
+        var recipe = h.editor.recipe
+        recipe.setHDRSource(.ai)
+        recipe.look = LUTReference(contentHash: lut.contentHash, name: "Film")
+        h.editor.setRecipe(recipe)
+        h.editor.bypassedGroups = [.light]
+        #expect(throws: EditorRenderingError.missingLUT(lut.contentHash)) { try h.editor.exportCapture() }
+        await h.editor.installLUT(lut)
+        await h.editor.settle()
+        let capture = try h.editor.exportCapture()
+        #expect(capture.recipe == h.editor.recipe)
+        // The model is the recipe's own selection, frozen with it; Kit
+        // resolves the full identity from it.
+        #expect(capture.recipe.hdrSource == .ai)
+        #expect(capture.recipe.conditionValue("hdr.model") == h.editor.recipe.conditionValue("hdr.model"))
+        #expect(capture.recipe.conditionValue("hdr.model")?.stringValue == "research-cnn-v1")
+        #expect(capture.lut == lut)
+        #expect(capture.peakStops == capture.automaticValues["hdr.range"] ?? 3)
+    }
+}

@@ -126,16 +126,19 @@ public struct ExportStripe: Sendable {
 public struct ExportRenderReport: Sendable {
     public let canvasSize: PixelSize
     public let gain: ExportGainMetadata?
+    /// Rendered pair before writer, frame or output-boundary adaptation.
+    public let sourceProvenance: PairProvenance
+    /// Final exported pair, including any adaptation resplit.
     public let provenance: PairProvenance
     public let resplitReasons: Set<ExportResplitReason>
     public let resolvedAutomatic: [String:Double]
     /// C ABI presentation_frame; only gain-map formats use framePhoto for E5 readback.
     public let presentationFrame: Bool
     public let framePhoto: ExportRect?
-    public init(canvasSize: PixelSize, gain: ExportGainMetadata?, provenance: PairProvenance,
+    public init(canvasSize: PixelSize, gain: ExportGainMetadata?, sourceProvenance: PairProvenance, provenance: PairProvenance,
                 resplitReasons: Set<ExportResplitReason>, resolvedAutomatic: [String:Double],
                 presentationFrame: Bool, framePhoto: ExportRect?) {
-        self.canvasSize = canvasSize; self.gain = gain; self.provenance = provenance
+        self.canvasSize = canvasSize; self.gain = gain; self.sourceProvenance = sourceProvenance; self.provenance = provenance
         self.resplitReasons = resplitReasons; self.resolvedAutomatic = resolvedAutomatic
         self.presentationFrame = presentationFrame; self.framePhoto = framePhoto
     }

@@ -118,6 +118,10 @@ actor FakeEditorRendering: EditorRendering {
                                && request.recipe.conditionValue("hdr.enabled")?.boolValue != false)
     }
 
+    func effectMask(_ request: EditorRenderRequest, parameterID: String) async throws -> RenderMask {
+        throw EditorRenderingError.unsupported("The fake draws no effect masks")
+    }
+
     func sdrThumbnail(_ frame: EditorFrame, maximumSize: HyperDRRender.PixelSize) async throws -> CGImage {
         let space = CGColorSpace(name: CGColorSpace.displayP3)!
         guard let context = CGContext(data: nil, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 0, space: space,

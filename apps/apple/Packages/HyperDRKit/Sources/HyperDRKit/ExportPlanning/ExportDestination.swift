@@ -32,6 +32,8 @@ public enum DestinationHandling: String, Sendable, Hashable, Codable {
 /// One column of p7-adjustments §4.2. The panel's read-only "Will write" row
 /// and the destination cards read this table, so neither can drift from it.
 public struct DestinationProfile: Sendable, Hashable {
+    public static let currentVersion = 1
+    public var version: Int { Self.currentVersion }
     public let destination: ExportDestination
     /// Written when the photo has HDR (the HDR group is on).
     public let encoding: ExportEncoding

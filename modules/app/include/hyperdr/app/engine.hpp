@@ -1,5 +1,6 @@
 #pragma once
 
+#include "hyperdr/app/package.hpp"
 #include "hyperdr/app/settings.hpp"
 #include "hyperdr/foundation/cancel.hpp"
 #include "hyperdr/foundation/progress.hpp"
@@ -67,6 +68,11 @@ class Engine {
   // optionally provides the CLI aggregate status. Cancellation throws Cancelled.
   [[nodiscard]] std::string convert(ConvertOptions options, ProgressSink* sink = nullptr,
       const CancelToken* cancel = nullptr, int* exit_code = nullptr) const;
+  // Writes an already-rendered SDR base and gain plane (P7). Shares this
+  // engine's execution configuration with `convert`, so tile workers and the
+  // memory budget apply to the same encoders.
+  [[nodiscard]] std::string package(const PackageRequest& request,
+      const CancelToken* cancel = nullptr) const;
  private:
   EngineConfig config_;
 };

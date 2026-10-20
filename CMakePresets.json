@@ -56,6 +56,39 @@
         "CMAKE_TOOLCHAIN_FILE": "$env{HOME}/vcpkg/scripts/buildsystems/vcpkg.cmake",
         "VCPKG_TARGET_TRIPLET": "arm64-osx"
       }
+    },
+    {
+      "name": "ios-arm64-codecs",
+      "inherits": "codecs",
+      "displayName": "iOS arm64 (device slice)",
+      "description": "Engine slice for iOS devices. No ncnn: inference moves to Core ML (P7).",
+      "binaryDir": "${sourceDir}/build-ios",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      },
+      "cacheVariables": {
+        "CMAKE_SYSTEM_NAME": "iOS",
+        "CMAKE_OSX_SYSROOT": "iphoneos",
+        "CMAKE_OSX_ARCHITECTURES": "arm64",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "26.0",
+        "CMAKE_TOOLCHAIN_FILE": "$env{HOME}/vcpkg/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "arm64-ios",
+        "VCPKG_MANIFEST_NO_DEFAULT_FEATURES": "ON",
+        "HYPERDR_WITH_NCNN": "OFF",
+        "HYPERDR_BUILD_TESTS": "OFF"
+      }
+    },
+    {
+      "name": "ios-simulator-arm64-codecs",
+      "inherits": "ios-arm64-codecs",
+      "displayName": "iOS arm64 (simulator slice)",
+      "binaryDir": "${sourceDir}/build-ios-simulator",
+      "cacheVariables": {
+        "CMAKE_OSX_SYSROOT": "iphonesimulator",
+        "VCPKG_TARGET_TRIPLET": "arm64-ios-simulator"
+      }
     }
   ],
   "buildPresets": [
@@ -66,6 +99,14 @@
     {
       "name": "macos-arm64-codecs",
       "configurePreset": "macos-arm64-codecs"
+    },
+    {
+      "name": "ios-arm64-codecs",
+      "configurePreset": "ios-arm64-codecs"
+    },
+    {
+      "name": "ios-simulator-arm64-codecs",
+      "configurePreset": "ios-simulator-arm64-codecs"
     }
   ],
   "testPresets": [

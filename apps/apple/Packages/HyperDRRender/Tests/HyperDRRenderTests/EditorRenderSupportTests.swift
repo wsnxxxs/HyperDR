@@ -31,6 +31,10 @@ import HyperDRRecipe
         #expect((0.5...3).contains(try #require(auto["hdr.range"])))
         let hdr = try await engine.source(image:CIImage(color:CIColor(red:CGFloat(pow(2,3.72)),green:1,blue:1,
             colorSpace:RenderEngine.workingColorSpace)!).cropped(to:CGRect(x:0,y:0,width:1,height:1)),domain:.hdr)
+        let report = try await engine.sourceReport(hdr)
+        #expect(try #require(report.sourceValues["hdr.range"]) >= 3.72-0.00001)
+        #expect(report.capabilities.contains("tone.exposure") && report.capabilities.contains("hdr.range"))
+        #expect(!report.capabilities.contains("develop.tint") && !report.capabilities.contains("develop.sharpness"))
         let imported = try await engine.resolvedAutomatic(hdr,recipe:Recipe(inputDomain:.hdr))
         #expect(try #require(imported["hdr.range"]) >= 3.72-0.00001)
         let inactive = try await engine.effectMask(hdr,recipe:Recipe(inputDomain:.hdr),parameterID:"hdr.expansionStart")

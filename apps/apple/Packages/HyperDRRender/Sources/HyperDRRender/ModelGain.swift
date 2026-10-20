@@ -15,6 +15,8 @@ import Foundation
 /// Keeping it identical is what makes a Core ML prediction comparable with the
 /// ncnn one; the tolerance gate in the tests compares the two directly.
 public enum ModelGainError: Error, Sendable, Equatable {
+    /// No compatible runtime device; distinct from a missing/corrupt model or prediction failure.
+    case deviceUnavailable(String)
     case modelUnavailable(String)
     case invalidTensorSize(PixelSize)
     case invalidInputCount(expected: Int, actual: Int)

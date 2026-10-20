@@ -14,7 +14,7 @@ public actor RenderEngine {
     let context: CIContext
     let library: any MTLLibrary
     let pipelines: [String: any MTLComputePipelineState]
-    var modelPredictionCache: (key: ModelPredictionKey, value: ModelGainPrediction)?
+    var modelPredictionCache: [ModelPredictionKey:ModelGainPrediction] = [:]
     var modelFilterCache: (key: ModelFilterKey, gain: any MTLTexture, peak: Float)?
     var displayMatrices: [(space: CGColorSpace, matrix: simd_float3x3)] = []
     var analysisCache: (key: AnalysisKey, result: SpatialAnalysis)?
@@ -70,7 +70,7 @@ public actor RenderEngine {
     public func clearCaches() {
         sourceCache.removeAll()
         analysisSource = nil
-        modelPredictionCache = nil
+        modelPredictionCache.removeAll()
         modelFilterCache = nil
         hdrCache = nil
         outputCache = nil

@@ -344,3 +344,25 @@ Recipe units: temperature Kelvin, neutralTint −150…150 directly, NR and shar
 0…1). `capabilities: Set<String>` uses the exact declaration capability strings.
 Use these dictionaries directly for AdjustmentContext; neither NR double conversion
 nor tint division by 100 belongs in the editor.
+
+
+`sourceReport(_:) -> SourceReport` supplies editor-facing source facts:
+`sourceValues: [String:Double]` and `capabilities: Set<String>` both use Recipe
+parameter IDs. `hdr.range` is the original source capacity in stops from the
+unedited fixed-scale analysis; RAW `tone.exposure` is the file's baseline exposure,
+not a user adjustment. RAW camera/Apple defaults are included in Recipe units.
+Capabilities filter the declaration's input domain and actual RAW support;
+current visibility/selection is separate. The lower-level
+`RAWDevelopment.capabilities` retains its CIRAWFilter predicate names for callers
+that evaluate declaration conditions. `resolvedAutomatic` separately reports the
+actual edited auto output range as `hdr.range`.
+
+AI predictions are retained by `(sourceID, modelID)` until source family replacement
+or `clearCaches()`, so switching models does not replace another model's prediction.
+`ModelGainError.deviceUnavailable(String)` identifies absent Metal/Core ML compute
+devices. Missing/broken model resources remain `modelUnavailable`; inference failures
+remain `predictionFailed`. These are not labelled as hardware incompatibility.
+
+RAW preview `SourceOptions(recipe:resolution:)` sets CIRAWFilter.scaleFactor
+before requesting output; it never develops a full-size image first. `.full`
+remains the export policy.

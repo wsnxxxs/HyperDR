@@ -6,7 +6,7 @@ extension ModelGainPrediction: Hashable {
     public static func == (lhs: Self, rhs: Self) -> Bool { lhs.sourceID == rhs.sourceID && lhs.modelID == rhs.modelID }
     public func hash(into hasher: inout Hasher) { hasher.combine(sourceID); hasher.combine(modelID) }
 }
-struct ModelPredictionKey: Equatable { let source: UUID; let model: String }
+struct ModelPredictionKey: Hashable { let source: UUID; let model: String }
 struct ModelFilterKey: Equatable { let prediction: ModelPredictionKey; let start: Float? }
 
 extension RenderEngine {
@@ -15,7 +15,7 @@ extension RenderEngine {
     public func predictModelGain(_ source: RenderSource, provider: CoreMLModelGainProvider) async throws -> ModelGainPrediction {
         guard source.domain == .sdr || source.domain == .rawEDR else { throw RenderError.invalidAdjustment }
         let key = ModelPredictionKey(source:source.id,model:provider.modelID)
-        if let cache = modelPredictionCache, cache.key == key { return cache.value }
+        if let cached = modelPredictionCache[key] { return cached }
         let source = try fixedAnalysisSource(source)
         let prediction: ModelGainPrediction
         if source.domain == .sdr { prediction = try await provider.predict(source:source) }
@@ -24,7 +24,7 @@ extension RenderEngine {
         }
         try Task.checkCancellation()
         guard prediction.sourceID == key.source, prediction.modelID == key.model else { throw RenderError.invalidAdjustment }
-        modelPredictionCache = (key,prediction)
+        modelPredictionCache[key] = prediction
         return prediction
     }
 

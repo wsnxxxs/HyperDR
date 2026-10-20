@@ -85,3 +85,29 @@ extension RenderEngine {
         return RenderMask(texture:output,region:region,outputSize:size)
     }
 }
+
+/// Original photograph facts in Recipe units. Capability keys are parameter IDs,
+/// distinct from RAWDevelopment's low-level CIRAWFilter capability predicates.
+public struct SourceReport: Sendable {
+    public let sourceValues: [String:Double]
+    public let capabilities: Set<String>
+    public init(sourceValues: [String:Double], capabilities: Set<String>) {
+        self.sourceValues = sourceValues; self.capabilities = capabilities
+    }
+}
+
+extension RenderEngine {
+    /// Uses the same cached, unedited fixed-scale analysis as preview and export.
+    /// hdr.range reports the source capacity in stops, not an edited output range.
+    /// tone.exposure is the RAW file's baseline exposure, not an exposure adjustment.
+    public func sourceReport(_ source: RenderSource) throws -> SourceReport {
+        var values = source.rawSettings?.sourceValues ?? [:]
+        values["hdr.range"] = Double(try analysis(source).sourceHeadroom)
+        if let raw = source.rawSettings { values["tone.exposure"] = Double(raw.baselineExposure) }
+        let flags = source.rawSettings?.capabilities ?? []
+        let supported = Adjustments.all.filter { declaration in
+            declaration.allows(source.domain) && (declaration.capability.map { flags.contains($0) } ?? true)
+        }
+        return SourceReport(sourceValues:values,capabilities:Set(supported.map(\.id)))
+    }
+}

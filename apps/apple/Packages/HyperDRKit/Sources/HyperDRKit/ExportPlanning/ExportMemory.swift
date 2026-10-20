@@ -98,8 +98,12 @@ public struct ExportMemoryPlan: Sendable, Hashable {
     /// The measured budget, or the explicit conservative limit.
     public let availableBytes: Int?
     public let degradation: ExportDegradation?
+    /// Largest admitted photo long edge under this budget; nil if none was found.
+    /// Only computed after refusal. Rebuild the frame layout before applying it.
+    public let maxAdmissibleLongEdge: Int?
 
-    public init(estimate: ExportMemoryEstimate, availableBytes: Int?, degradation: ExportDegradation?, renderRows: Int = 256, usesRowInput: Bool = false) {
+    public init(estimate: ExportMemoryEstimate, availableBytes: Int?, degradation: ExportDegradation?, renderRows: Int = 256, usesRowInput: Bool = false, maxAdmissibleLongEdge: Int? = nil) {
+        self.maxAdmissibleLongEdge = maxAdmissibleLongEdge
         self.renderRows = renderRows
         self.usesRowInput = usesRowInput
         self.estimate = estimate

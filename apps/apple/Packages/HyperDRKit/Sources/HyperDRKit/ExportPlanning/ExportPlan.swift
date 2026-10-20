@@ -108,6 +108,23 @@ public struct ExportMessage: Sendable, Hashable {
     public let key: String
     public let arguments: [ExportMessageArgument]
 
+    /// Resolve from Kit's catalogue, independent of the host app's bundle.
+    public func localized(locale: Locale = .current) -> String {
+        let language = locale.identifier.hasPrefix("zh") ? "zh-Hans" : "en"
+        let bundle = Bundle.module.path(forResource: language, ofType: "lproj")
+            .flatMap(Bundle.init(path:)) ?? Bundle.module
+        func text(_ key: String) -> String { bundle.localizedString(forKey: key, value: nil, table: nil) }
+        let values: [String] = arguments.map {
+            switch $0 {
+            case .text(let value): value
+            case .key(let key): text(key)
+            case .stops(let value): ExportPlanText.stops(value)
+            case .pixels(let value): ExportPlanText.pixels(value)
+            }
+        }
+        return String(format: text(key), locale: locale, arguments: values)
+    }
+
     public init(key: String, arguments: [ExportMessageArgument] = []) {
         self.key = key
         self.arguments = arguments
@@ -119,8 +136,11 @@ public struct ExportMessage: Sendable, Hashable {
 public struct ExportBlocker: Sendable, Hashable {
     public let code: String
     public let message: ExportMessage
+    /// Requested output canvas, including the frozen frame.
+    public let pixelSize: ExportPixelSize?
 
-    public init(code: String, message: ExportMessage) {
+    public init(code: String, message: ExportMessage, pixelSize: ExportPixelSize? = nil) {
+        self.pixelSize = pixelSize
         self.code = code
         self.message = message
     }
@@ -240,10 +260,9 @@ public struct ExportPlan: Sendable, Hashable {
     public var isExecutable: Bool { blockers.isEmpty }
 
     /// What "Custom format…" starts from when the user leaves a destination
-    /// (p7-adjustments §4.1). The destination's long edge is not carried: the
-    /// custom page writes the original size.
+    /// (p7-adjustments §4.1), including its photograph long-edge limit.
     public var customCarryingSettings: CustomExportFormat {
-        CustomExportFormat(encoding: encoding, gamut: gamut, quality: quality)
+        CustomExportFormat(encoding: encoding, gamut: gamut, quality: quality, longEdge: longEdgeLimit)
     }
 }
 
@@ -253,6 +272,11 @@ public enum ExportPlanner {
     public static func plan(_ request: ExportPlanRequest,
                             budget: any ExportMemoryBudget = SystemExportMemoryBudget(),
                             preferences: (any ExportPreferenceStore)? = nil) -> ExportPlan {
+        makePlan(request, budget: budget, preferences: preferences, suggestSize: true)
+    }
+
+    private static func makePlan(_ request: ExportPlanRequest, budget: any ExportMemoryBudget,
+                                 preferences: (any ExportPreferenceStore)?, suggestSize: Bool) -> ExportPlan {
         let destination = request.choice.destination
         let profile = destination?.profile
 
@@ -276,8 +300,7 @@ public enum ExportPlanner {
                 : format.encoding.writesGainMap ? .p3
                 : format.gamut == .rec2020 ? .p3 : format.gamut
             quality = min(max(format.quality, 0), 100)
-            // The custom page has no size control: it writes the original size.
-            longEdge = nil
+            longEdge = format.longEdge
             keepLocation = true
         }
 
@@ -304,6 +327,10 @@ public enum ExportPlanner {
         // requested ceiling and never raises the rendered source's gain.
         let peakStops = outputIsHDR ? max(0.5, min(request.edit.peakStops, ceiling)) : nil
         var notices: [ExportMessage] = []
+        let selectedEncoding = request.choice.customFormat?.encoding ?? profile!.encoding
+        if !request.edit.hdrEnabled && selectedEncoding.writesGainMap {
+            notices.append(.init(key: "plan.sdrVersion"))
+        }
         if peakStops != nil, request.edit.peakStops > ceiling {
             let stops = ExportMessageArgument.stops(ceiling)
             notices.append(destination == nil
@@ -335,6 +362,11 @@ public enum ExportPlanner {
                                     encoding: encoding, writesGainMap: writesGainMap,
                                     baseBitDepth: baseBitDepth, budget: budget)
         var blockers = admission.blockers
+        if !request.edit.hdrEnabled && selectedEncoding.isBT2100 {
+            blockers.append(.init(code: "hdrOff", message: .init(key: "plan.hdrOff")))
+        }
+        let maxLongEdge = suggestSize && !admission.estimate.fits(in: admission.availableBytes ?? 0)
+            ? maximumLongEdge(request, budget: admission.availableBytes ?? 0, upper: photoSize.longEdge) : nil
         if let pair = request.pair, ![1, 3].contains(pair.channels) {
             blockers.append(.init(code: "unsupported_format", message: .init(key: "err.server.unsupported_format")))
         }
@@ -372,7 +404,8 @@ public enum ExportPlanner {
             memory: ExportMemoryPlan(estimate: admission.estimate,
                                      availableBytes: admission.availableBytes,
                                      degradation: admission.degradation, renderRows: admission.renderRows,
-                usesRowInput: request.allowsRowInput && admission.writer.supportsRowInput(encoding: encoding)),
+                usesRowInput: request.allowsRowInput && admission.writer.supportsRowInput(encoding: encoding),
+                maxAdmissibleLongEdge: maxLongEdge),
             library: library,
             notices: notices,
             blockers: blockers,
@@ -383,7 +416,7 @@ public enum ExportPlanner {
     /// The photograph's written size for a choice: a destination's long edge,
     /// never upscaling. A frame is laid out around this size.
     public static func photoSize(for choice: ExportChoice, photo: ExportPixelSize) -> ExportPixelSize {
-        photo.fitted(longEdge: choice.destination?.profile.longEdge)
+        photo.fitted(longEdge: choice.customFormat?.longEdge ?? choice.destination?.profile.longEdge)
     }
 
     /// Lay out the card around the destination-limited photo before the UI
@@ -498,7 +531,31 @@ public enum ExportPlanner {
                          blockers: [ExportBlocker(code: "export_memory_exceeded",
                              message: ExportMessage(key: "dest.memoryExceeded %@ %@",
                                  arguments: [.text(ExportPlanText.bytes(shortfall.peak)),
-                                             .text(ExportPlanText.bytes(available))]))])
+                                             .text(ExportPlanText.bytes(available))]), pixelSize: size)])
+    }
+
+    /// Search only memory admission, freezing the measured budget. Frame canvas is
+    /// kept as an upper bound: hosts must regenerate the actual smaller frame.
+    private static func maximumLongEdge(_ request: ExportPlanRequest, budget: Int, upper: Int) -> Int? {
+        guard upper > 1 else { return nil }
+        func fits(_ edge: Int) -> Bool {
+            var candidate = request
+            var format = request.choice.customFormat ?? CustomExportFormat(
+                encoding: request.choice.destination!.profile.encoding,
+                gamut: request.choice.destination!.profile.gamut,
+                quality: request.choice.destination!.profile.quality)
+            format.longEdge = edge
+            candidate.choice = .custom(format)
+            return makePlan(candidate, budget: FixedExportMemoryBudget(bytes: budget),
+                            preferences: nil, suggestSize: false).memory.fits
+        }
+        // ROI cost can increase when heavily downsampling. Search from the
+        // requested edge down so a narrow admitted interval is never skipped.
+        // These are scalar estimates; no image or encoder work is performed.
+        for edge in stride(from: upper - 1, through: 1, by: -1) {
+            if fits(edge) { return edge }
+        }
+        return nil
     }
 
     // MARK: Summary

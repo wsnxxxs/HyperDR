@@ -125,7 +125,8 @@ public actor RecipeExportService: RecipeExportServicing {
                     throw RecipeExportError.invalidSnapshot
                 }
             }
-            emit(.developing)
+            if request.source.domain == .rawEDR { emit(.developing) }
+            else { emit(.preparing) }
             let lazySource: HyperDRRender.ExportSource?
             var source: RenderSource
             if actualRequest.allowsRowInput {
@@ -235,7 +236,7 @@ public actor RecipeExportService: RecipeExportServicing {
                         baseHeadroom: Double(report.gain?.baseHeadroom ?? 0)).supported else { throw RecipeExportError.invalidStripes }
                 try validateRevision(try await sessions.session(session), snapshot: snapshot)
                 try await checkMemory(plan, residentBytes: resident, sourceSize: request.source.pixelSize)
-                let bridge = PackageRowBridge(source: rows, frame: frozenFrame)
+                let bridge = PackageRowBridge(source: rows, frame: frozenFrame, progress: progress)
                 emit(.encoding)
                 let metadata = report.gain.map {
                     PackageGainMetadata(baseOffsets: [$0.baseOffset.x, $0.baseOffset.y, $0.baseOffset.z],

@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "HyperDRKit",
+    defaultLocalization: "en",
     platforms: [.macOS(.v26), .iOS(.v26)],
     products: [.library(name: "HyperDRKit", targets: ["HyperDRKit"])],
     dependencies: [.package(path: "../HyperDREngine"), .package(path: "../HyperDRRecipe"), .package(path: "../HyperDRRender")],
@@ -11,7 +12,7 @@ let package = Package(
             .product(name: "HyperDREngine", package: "HyperDREngine"),
             .product(name: "HyperDRRecipe", package: "HyperDRRecipe"),
             .product(name: "HyperDRRender", package: "HyperDRRender")
-        ]),
+        ], resources: [.process("Resources")]),
         .testTarget(name: "HyperDRKitTests", dependencies: ["HyperDRKit"]),
     ]
 )

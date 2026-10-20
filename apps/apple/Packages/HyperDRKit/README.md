@@ -330,3 +330,56 @@ so paid membership is not a necessary assumption for this entitlement. It has no
 been signing-tested in this task. If tried later, verify the generated profile,
 signed entitlement and device budget; do not assume it bypasses process/GPU
 admission. No entitlement was added here.
+
+
+## Export planning and host progress contract
+
+`CustomExportFormat.longEdge: Int?` limits the **photo** before a frame is laid
+out; nil keeps original size and a limit never upscales. Destination-to-custom
+conversion now retains the destination limit. Call `ExportPlanner.frameLayout`
+with the updated choice, regenerate the caption and freeze the resulting frame.
+The service rejects an old frozen frame whose photo size no longer matches.
+Selection (including longEdge), final canvas size and quality are serialized in
+`ResolvedExportSnapshot` and participate in `ExportKey`.
+
+A refused process-memory plan exposes `memory.maxAdmissibleLongEdge`, plus
+`blockers[].pixelSize` on `export_memory_exceeded`. The suggestion uses the same
+quality, encoding, resources and measured budget, considering writer fallback
+and 256/128/64 rows. Scalar candidates are checked from the requested edge down:
+source ROI cost can grow during downsampling, so a plain monotonic binary search
+can miss an admitted interval. nil means no smaller candidate fits this estimate;
+it never automatically changes the requested dimensions. For a frozen frame the
+existing canvas/overlay remain reserved as an upper bound; rebuild the frame and
+replan after accepting a suggestion. This may conservatively return nil for a
+large fixed canvas. This is process admission, not a promise about later GPU or
+changed device budgets. Original-size 110MP remains the goal independently.
+
+With HDR off, gain-map choices carry the `plan.sdrVersion` notice: ISO gain JPEG
+becomes SDR JPEG, Adaptive stays HEIC with an 8-bit SDR base and no gain map.
+PQ, HLG and both AVIF variants carry blocker code `hdrOff`. The service enforces
+these blockers before writing. The planner does not change the frozen Recipe.
+
+Hosts can call `ExportMessage.localized(locale:)` for notices, blockers and
+summary parts; Kit owns the English and Simplified Chinese catalogue, including
+nested encoding/gamut labels and library-save reasons. Use this rather than
+looking up `message.key` in an app bundle that may not contain it. For labelKey
+or unavailableReasonKey values construct `ExportMessage(key:)` and call the same
+method. Planning itself remains locale-independent and returns semantic keys.
+No App catalogues or UI files are changed by this integration.
+
+`developing` is emitted only for RAW; non-RAW source opening belongs to
+`preparing`. Whole-plane exports retain rendering row progress then encoding.
+For row-input exports, global prepare/scanning is `rendering` without row counts,
+then package pulls Render during `encoding`. Callbacks with
+`includesRendering == true` mean **Rendering and encoding**. They include
+`rowPass` (one-based) and completedRows/totalRows **for that pass**, not an overall
+fraction or ETA. A full replay starts a new pass; duplicate reads within a pass
+do not advance its count. Hosts can show “pass N · X / H rows”, and keep the
+whole operation indeterminate because scan, base, gain and container finalization
+do not have a fixed universal pass count. 100% of a pass is not file completion.
+The timer's `encoding` bucket includes pull rendering, codec/container work and
+native verification; `verifying` follows for system readback. Existing
+`SessionStore` timing history is available on both platforms, but its aggregate
+stage times cannot predict remaining row passes. No new enum cases are required
+in Mac/iOS stage switches; `progress.stageMessage.localized()` supplies the
+combined or ordinary stage label from Kit’s catalogue.

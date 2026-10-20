@@ -102,6 +102,94 @@ arrays, retained resources and the existing editor. This is an empirical safety
 allowance, not a replacement for checking available process memory. Do not credit
 native caches across independent engines without measuring their overlap.
 
+### Native-tiled RAW preview follow-up
+
+The reduced `CIRAWFilter.scaleFactor` path was the controllable source of an
+extra high-water mark. Preview and fixed analysis now keep the filter at native
+scale, develop independent <=4096 x 516 ROIs and area-filter each into the bounded
+float32 preview/analysis texture. RAW settings and
+draft mode are unchanged. `RAWDevelopment.scaleFactor` reports the final source
+output scale, including this post-development resampling. Analysis remains
+1024-long-edge and the processing graph remains <=768-long-edge.
+
+Fresh-process before/after, same 60,217,344-pixel RAW, 2048 preview, fixed analysis,
+four 2048-square details/pans, 256-row export reads, Mac Debug. The editor's preview,
+latest display output and lazy detail source remain alive during the combined
+export; independent export starts without them. Peaks are process MiB:
+
+| Stage | Reduced filter preview | Initial native ROI point preview |
+|---|---:|---:|
+| Open + fixed analysis | 1530.7 | 1236.7 |
+| Open + first 1:1 detail + four pans | 1723.3 | 1254.2 |
+| Independent export open/scan/read | 1571.9 | 1337.8 |
+| Export open/scan/read with resident editor | 1958.9 | 1492.8 |
+
+This reduces the measured peaks by 19.2%, 27.2%, 14.9% and 23.8%, respectively.
+Opening/analysis took 1.035 -> 1.722 s; through the pans 2.010 -> 2.879 s;
+the combined run 5.033 -> 5.734 s. Independent export took 3.671 -> 3.244 s.
+A repeat without changes peaked at 1801.6 MiB while panning; native ROI preview
+repeats peaked at 1245.9/1254.2 MiB. Apple resource release timing still varies.
+The earlier RAW tables/projections above describe the previous preview policy.
+
+An isolated system graph was 25.7/26.0 MiB before any development. Rendering a
+1024 preview previously peaked at 1158.8 MiB, versus 1016.8 MiB now (917.3 MiB
+resident after the last tile). Subtracting graph residency and the 11,599,872-byte
+owned destination gives about **19.5 -> 17.1 peak B/native pixel**, or **15.3
+resident B/native pixel** after the new preview. This includes system development
+and its ROI work, not just a separately measurable decoder cache. A native
+2048-square ROI alone peaked at 338.8 MiB, including its 70,270,976-byte output:
+a detail ROI does not require an application-owned full-frame development.
+
+`clearCaches` after development, extra autorelease pools and recreating the
+CIContext did not reliably reduce the complete-run peak. Preview draft mode did
+not reduce the opening peak. Reducing the CI memory target to 64 MB increased the
+peak to 2979.3 MiB; it is not a monotonic process-memory limit. A half-float working
+context lowered memory but changed sampled linear/normalized outputs by up to
+0.01448 (15 ticks on a 1023 scale), so it was rejected. Production keeps float32,
+`cacheIntermediates = false` and the 256 MB task target.
+
+The original point-sampling preview test could not detect downsampling aliasing.
+It is replaced by an independent CPU area reference over one-pixel alternating
+stripes, in both axes: 9504 x 16 -> 1024 x 1 (and its transpose), plus 1 x 1
+outputs whose footprints cross native tile boundaries. Maximum absolute float32
+error is 8.94e-8. Each ROI covers the full destination footprints plus a one-texel
+rounding guard. Footprints exceeding the native envelope are integrated in
+bounded pieces; their partial area sums accumulate without truncation. Full/ROI
+rendering and replay checks remain in place. No native-size Render texture was added.
+The editor/exporter can hold separate lazy RAW graphs and Apple cache storage;
+neither retains an application-owned full-size float development. Their measured
+overlap is still charged as resident editor state, not credited as shared memory.
+Keep **24 B/native pixel once + 512 MiB**, plus rows/resources/resident editor,
+as the empirical admission allowance: this sample does not justify a lower
+universal bound or certify a 110MP RAW on an iPhone.
+
+### Area-filter follow-up (R50)
+
+Same fresh-process probe, 60,217,344 native pixels, 2048 preview + automatic
+analysis + display, four 2048-square pans and a complete 256-row export read
+with the editor retained. Process peak MiB:
+
+| Stage | Reduced filter | Native point sampling | Native area filtering |
+|---|---:|---:|---:|
+| Open + fixed analysis + display | 1530.5 | 1237.0 | 1216.0 |
+| Through four 1:1 pans | 1799.7 | 1239.6 | 1408.4 |
+| Through export scan/read with resident editor | 1963.6 | 1492.5 | 1676.4 |
+
+Area-filter repeat: 1196.3 / 1413.2 / 1684.7 MiB. Thus the opening reduction
+remains, and pan/export peaks remain below the reduced-filter path, but their
+previous point-sampling savings are partly lost. These are whole-process peaks,
+including system caches; the <=4096 x 516 source envelope and empirical 24 B/px
+allowance are unchanged. Complete area-filter probe: 6.20 s (repeat 6.19 s).
+
+For the licensed Sony fixture, resolved automatic `hdr.range` is 0.8117584
+with the reduced-filter path, 0.8825801 with native point sampling and 0.8563057
+with native area filtering. Area filtering differs from the original by +0.0445473
+and from point sampling by -0.0262744. Native versus reduced RAW development is
+still different; this change removes point-sampling aliasing, not that system
+pipeline difference. The 61MP probe resolves to 0 in all three paths.
+
+### Synthetic TIFF measurements
+
 | 110.08MP synthetic TIFF, final editor implementation | Measured MiB |
 |---|---:|
 | Preview + fixed analysis peak | 195.0 |

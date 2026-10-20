@@ -83,6 +83,25 @@ python3 scripts/test.py ios                      # iOS/iPadOS target: device and
 - Requests produced by `normalize_options` carry `command.adapter = "panel-v1"`,
   which selects the panel's three-decimal rounding. Keep it when editing such a
   request; plain requests keep full precision.
+- `scripts/build_xcframework.sh` builds the macOS arm64 slice by default;
+  `--platforms all` adds the iOS device and iOS simulator slices (deployment
+  target 26.0, no ncnn). The iOS app target starts linking this package later, so
+  the three-slice artifact is the one to generate whenever iOS work needs it, and
+  each slice's archive is checked for retired (L)GPL symbols by
+  `check_licenses.py --archive-only`.
+- Building the iOS slices needs `DEVELOPER_DIR` pointing at Xcode: vcpkg's
+  `arm64-ios` and `arm64-ios-simulator` triplets read the iOS SDK through it, and
+  with `xcode-select` on the Command Line Tools they fail with "iphoneos is not
+  an iOS SDK".
+- libtiff is a static *framework* on iOS (`tiff.framework/tiff`, linked as
+  `-framework tiff`), not a `.a`; the xcframework script folds that binary into
+  the combined archive, which is why the iOS archive still holds the TIFF
+  symbols.
+- Give each build directory its own vcpkg install root. A vcpkg manifest install
+  removes the packages of other triplets from the install root it is given, so two
+  presets sharing one root keep uninstalling each other's slices; changing the
+  root also leaves stale imported-target paths in `CMakeCache.txt`, which fails at
+  generate time until the build directory is cleared.
 
 ## Presentation frames
 

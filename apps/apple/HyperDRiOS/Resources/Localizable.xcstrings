@@ -1096,6 +1096,91 @@
         }
       }
     },
+    "ios.export.memory.estimate %@ %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estimated peak %1$@ MiB, %2$@ MiB available"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "估计峰值 %1$@ MiB，可用 %2$@ MiB"
+          }
+        }
+      }
+    },
+    "ios.export.memory.estimateUnknown %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estimated peak %@ MiB, available memory unknown"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "估计峰值 %@ MiB，可用内存未知"
+          }
+        }
+      }
+    },
+    "ios.export.memory.gpu %@ %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GPU memory: needs %1$@ MiB, %2$@ MiB available"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GPU 内存：需要 %1$@ MiB，可用 %2$@ MiB"
+          }
+        }
+      }
+    },
+    "ios.export.memory.process %@ %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Process memory: needs %1$@ MiB, %2$@ MiB available"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "进程内存：需要 %1$@ MiB，可用 %2$@ MiB"
+          }
+        }
+      }
+    },
+    "ios.export.memory.writer %@ %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This format cannot be written in parts: needs %1$@ MiB, %2$@ MiB available"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个格式不支持分段写入：需要 %1$@ MiB，可用 %2$@ MiB"
+          }
+        }
+      }
+    },
     "ios.export.notYetAvailable" : {
       "comment" : "A destination or action that is not offered yet.",
       "extractionState" : "manual",

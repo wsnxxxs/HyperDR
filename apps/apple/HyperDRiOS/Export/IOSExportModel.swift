@@ -55,6 +55,8 @@ nonisolated struct ExportStack: Sendable {
         let key: String
         /// Developer-facing detail, shown small.
         let detail: String?
+        /// Which memory check failed and its numbers, for reporting.
+        var memory: String?
     }
 
     enum Phase {
@@ -260,7 +262,12 @@ nonisolated struct ExportStack: Sendable {
                 let file = try await stack.sessions.stageExportForTransfer(opened.session, export: result.record.id)
                 self?.finished(Finished(result: result, file: file), run: run)
             } catch {
-                self?.failed(error, run: run)
+                // A memory refusal: which check, with the service's numbers.
+                var memory: ExportMemoryDiagnostic?
+                if case RecipeExportError.memoryExceeded = error, let stack = try? await stack.value {
+                    memory = await stack.service.lastMemoryDiagnostic
+                }
+                self?.failed(error, run: run, memory: memory)
             }
         }
     }
@@ -313,7 +320,7 @@ nonisolated struct ExportStack: Sendable {
         if finished.result.resolved.selection == .destination(.web) { presentingFileExporter = true }
     }
 
-    private func failed(_ error: any Error, run: Int) {
+    private func failed(_ error: any Error, run: Int, memory: ExportMemoryDiagnostic? = nil) {
         guard run == self.run else { return }
         task = nil
         waitingForSource = false
@@ -321,7 +328,36 @@ nonisolated struct ExportStack: Sendable {
             phase = .choosing
             return
         }
-        phase = .failed(Self.failure(error))
+        var failure = Self.failure(error)
+        if let memory { failure = Failure(key: failure.key, detail: memory.summary, memory: Self.memoryLine(memory)) }
+        phase = .failed(failure)
+    }
+
+    // MARK: - Memory, in MiB for reporting
+
+    static func mebibytes(_ bytes: Int) -> String { String(Int((Double(bytes) / 1_048_576).rounded())) }
+
+    /// "Process memory: needs 3189 MiB, 2400 MiB available", or the GPU's,
+    /// or that the format cannot be written in parts.
+    static func memoryLine(_ diagnostic: ExportMemoryDiagnostic) -> String {
+        let needed = mebibytes(diagnostic.requiredBytes), available = mebibytes(diagnostic.availableBytes)
+        if diagnostic.reason == .nonIncrementalWriter {
+            return String(localized: "ios.export.memory.writer \(needed) \(available)")
+        }
+        switch diagnostic.check {
+        case .process: return String(localized: "ios.export.memory.process \(needed) \(available)")
+        case .gpu: return String(localized: "ios.export.memory.gpu \(needed) \(available)")
+        }
+    }
+
+    /// The plan's own estimate, when its memory blocks the export.
+    static func memoryEstimate(_ plan: ExportPlan) -> String? {
+        guard plan.blockers.contains(where: { $0.code == "export_memory_exceeded" }) else { return nil }
+        let peak = mebibytes(plan.memory.estimate.peak)
+        guard let available = plan.memory.availableBytes else {
+            return String(localized: "ios.export.memory.estimateUnknown \(peak)")
+        }
+        return String(localized: "ios.export.memory.estimate \(peak) \(mebibytes(available))")
     }
 
     static func failure(_ error: any Error) -> Failure {

@@ -52,4 +52,6 @@ public enum ResplitReason: String, Sendable, Hashable, Codable {
     /// The chosen writer only carries a one-channel gain map, so a three-channel
     /// authored pair has to be separated again.
     case writerCarriesOneChannel
+    case unsupportedGainWorkingGamut, writerCannotRepresentOffsets
+    case writerCannotRepresentSignedGain, writerHeadroomContract, frameRequiresNeutralPair
 }

@@ -108,6 +108,8 @@ public struct ResolvedExportSnapshot: Sendable, Codable, Equatable {
     public let sourceProvenance: String?
     /// Pair origin after export adaptation.
     public let provenance: String?
+    /// Resolved Recipe range before/after Render's output ceiling, in stops.
+    public let rangeBeforeCeiling, rangeAfterCeiling: Float?
     public init(snapshot: RecipeExportSnapshot, plan: ExportPlan,
                 resolvedAutomatic: [String: Double] = [:], resplitReasons: [String] = [],
                 report: ExportRenderReport? = nil) {
@@ -118,6 +120,8 @@ public struct ResolvedExportSnapshot: Sendable, Codable, Equatable {
         gain = report?.gain.map(ResolvedExportGain.init)
         sourceProvenance = report?.sourceProvenance.rawValue
         provenance = report?.provenance.rawValue
+        rangeBeforeCeiling = report?.rangeBeforeCeiling
+        rangeAfterCeiling = report?.rangeAfterCeiling
     }
     public func exportKey() throws -> ExportKey {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]

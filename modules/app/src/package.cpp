@@ -25,10 +25,16 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace hyperdr {
 namespace {
+
+// A framed map's mat is written as exactly zero gain; this is the residue a
+// caller's own float arithmetic may leave on it, in log2 stops (about 1/14000
+// of a stop). Anything larger is a real gain and gets its own code.
+constexpr float kFrameZeroTolerance = 1.0e-4F;
 
 // The gain codebook is the one every writer already uses: normalized code,
 // gathered gamma, then a per-pixel 8-bit code. Keeping the parameters here
@@ -40,6 +46,9 @@ struct QuantizedGain {
   float gain_max{};
   float gamma{1.0F};
   float alternate_headroom{};
+  // The code that carries zero stops; set only for a framed pair, where it is
+  // an integer code that decodes to exactly no gain.
+  float zero_code{};
   std::uint64_t clipped_samples{};
 };
 
@@ -100,12 +109,19 @@ Rational offset_rational(float value) {
   return rational_from_float(value, 1U << 24);
 }
 
-void validate_offsets(const PackageGain& gain, std::uint32_t channels) {
+void validate_offsets(const PackageGain& gain, std::uint32_t channels, bool presentation_frame) {
   for (std::uint32_t c = 0; c < channels; ++c) {
     if (!std::isfinite(gain.base_offset[c]) || !std::isfinite(gain.alternate_offset[c]))
       throw std::invalid_argument("gain offsets must be finite");
     if (std::abs(gain.base_offset[c]) > 64.0F || std::abs(gain.alternate_offset[c]) > 64.0F)
       throw std::invalid_argument("gain offsets must be within [-64, 64]");
+    // E5: the mat is reproduced by the zero-gain code alone, so both renditions
+    // must agree there. An affine pair whose offsets differ would paint the
+    // mat by (base_offset - alternate_offset) at every zero code.
+    if (presentation_frame && gain.base_offset[c] != gain.alternate_offset[c])
+      throw UnsupportedFormat(
+          "a framed pair must use the same base and alternate offsets; "
+          "differing offsets give the mat its own gain");
   }
   if (!std::isfinite(gain.base_headroom) || !std::isfinite(gain.alternate_headroom))
     throw std::invalid_argument("gain headroom must be finite");
@@ -115,15 +131,17 @@ void validate_offsets(const PackageGain& gain, std::uint32_t channels) {
 
 // Quantizes the caller's log2-stop plane into the 8-bit codes and metadata the
 // writers store. `apple_strict` is ISO 21496-1's Apple form: one channel, and
-// alternate headroom equal to the map's largest gain.
-QuantizedGain quantize_gain(const PackageGain& gain, bool apple_strict) {
+// alternate headroom equal to the map's largest gain. `presentation_frame`
+// applies E5 to the codebook: the mat outside the photograph must decode to no
+// gain at all, which needs an exact integer zero-gain code at gamma 1.
+QuantizedGain quantize_gain(const PackageGain& gain, bool apple_strict, bool presentation_frame) {
   QuantizedGain out;
   float low = 0.0F, high = 0.0F;
   FloatImage grid = copy_plane(gain.plane, "gain", &low, &high);
   if (grid.channels != 1 && grid.channels != 3)
     throw std::invalid_argument("gain plane must have one or three channels");
   const auto channels = grid.channels;
-  validate_offsets(gain, channels);
+  validate_offsets(gain, channels, presentation_frame);
   if (apple_strict && channels != 1)
     throw UnsupportedFormat(
         "the adaptive format writes ISO 21496-1's single-channel gain map; "
@@ -157,19 +175,30 @@ QuantizedGain quantize_gain(const PackageGain& gain, bool apple_strict) {
   auto& metadata = out.metadata;
   metadata.gain_min = rational_from_float(low);
   metadata.gain_max = rational_from_float(high);
+  // A framed canvas keeps zero on an integer code, so the mat's own code reads
+  // back as exactly no gain instead of the two codes that bracket it.
+  if (presentation_frame) align_zero_gain(metadata.gain_min, metadata.gain_max);
   out.gain_min = rational_value(metadata.gain_min);
   out.gain_max = rational_value(metadata.gain_max);
   const float range = out.gain_max - out.gain_min;
 
   // Gamma is chosen from the distribution, exactly as every writer does, then
   // read back from its stored rational so the codes match the file's metadata.
+  // A framed map stays at gamma 1: aligning zero is only worth it if nothing
+  // else moves the code that represents it.
   std::vector<float> normalized(grid.pixels.size());
   for (std::size_t i = 0; i < grid.pixels.size(); ++i)
     normalized[i] = range > kEpsilon
                         ? clamp_finite((grid.pixels[i] - out.gain_min) / range, 0.0F, 1.0F) : 0.0F;
-  metadata.gamma = rational_from_float(range > kEpsilon ? choose_gain_gamma(normalized) : 1.0F);
+  metadata.gamma = rational_from_float(
+      presentation_frame ? 1.0F : (range > kEpsilon ? choose_gain_gamma(normalized) : 1.0F));
   out.gamma = rational_value(metadata.gamma);
 
+  // The reference point the frame needs: the code that carries zero stops, and
+  // the mat's samples snapped onto it. Dithering is what keeps a photograph's
+  // shadows from banding, and it is exactly what would move the mat's code.
+  const float zero_code = std::round(clamp_finite(
+      range > kEpsilon ? (0.0F - out.gain_min) / range : 0.0F, 0.0F, 1.0F) * 255.0F) / 255.0F;
   out.codes = FloatImage(grid.width, grid.height, channels);
   parallel_for_rows(grid.height, [&](std::uint32_t y) {
     for (std::uint32_t x = 0; x < grid.width; ++x) {
@@ -177,10 +206,16 @@ QuantizedGain quantize_gain(const PackageGain& gain, bool apple_strict) {
       for (std::uint32_t c = 0; c < channels; ++c) {
         const auto index = pixel * channels + c;
         const float encoded = encode_gain_code(normalized[index], out.gamma);
-        out.codes.pixels[index] = quantize_gain_code_dithered(encoded, x, y);
+        out.codes.pixels[index] = !presentation_frame
+            ? quantize_gain_code_dithered(encoded, x, y)
+            : std::abs(grid.pixels[index]) <= kFrameZeroTolerance
+                  ? zero_code : std::round(encoded * 255.0F) / 255.0F;
       }
     }
   });
+  if (presentation_frame && std::abs(out.gain_min + range * zero_code) > 1.0e-6F)
+    throw std::logic_error("the framed gain codebook did not keep an exact zero code");
+  out.zero_code = zero_code;
 
   metadata.base_offset = offset_rational(gain.base_offset[0]);
   metadata.alternate_offset = offset_rational(gain.alternate_offset[0]);
@@ -188,7 +223,7 @@ QuantizedGain quantize_gain(const PackageGain& gain, bool apple_strict) {
   // An ISO-generic pair with no declared capacity advertises the gain's own
   // maximum, which is what the file can actually show.
   if (!apple_strict && out.alternate_headroom <= 0.0F) out.alternate_headroom = high;
-  metadata.alternate_headroom = rational_from_float(apple_strict ? high : out.alternate_headroom);
+  metadata.alternate_headroom = rational_from_float(apple_strict ? out.gain_max : out.alternate_headroom);
   if (channels == 3) {
     const auto channel = gain_map_channel(metadata, 0);
     metadata.flags |= 0x80;
@@ -207,6 +242,91 @@ QuantizedGain quantize_gain(const PackageGain& gain, bool apple_strict) {
 ColorGamut resolved_gamut(const PackageRequest& request) {
   return request.gamut.value_or(request.encoding == OutputEncoding::SdrJpeg
                                     ? ColorGamut::kSrgb : ColorGamut::kDisplayP3);
+}
+
+// E5 read back rather than assumed: the mat outside the photograph must carry no
+// gain, and the only way to know is to decode the file that was just written.
+// Both renditions of a gain-map file come from one decoded base and one stored
+// code, so their difference is stored gain rather than a codec error.
+//
+// One coding block next to the photograph is left out: an 8x8 JPEG or HEVC gain
+// block that straddles the photo's edge rings into the mat, which is a property
+// of the codec rather than of the codes, and E5's promise is about the gain the
+// writer stores (checked at the codebook before encoding). A mat narrower than
+// that margin has nothing left to read back.
+constexpr std::uint32_t kMatReadbackMargin = 8;
+
+// The same E5 rule at the codebook, before anything is encoded: every sample the
+// caller did not place inside the photograph is the zero code.
+std::uint64_t mat_samples_carrying_gain(const QuantizedGain& gain, const FrameRect& photo) {
+  std::uint64_t count = 0;
+  for (std::uint32_t y = 0; y < gain.codes.height; ++y) {
+    const bool in_photo_rows = y >= photo.y && y < photo.y + photo.height;
+    for (std::uint32_t x = 0; x < gain.codes.width; ++x) {
+      if (in_photo_rows && x >= photo.x && x < photo.x + photo.width) continue;
+      const auto pixel = (static_cast<std::size_t>(y) * gain.codes.width + x) * gain.codes.channels;
+      for (std::uint32_t c = 0; c < gain.codes.channels; ++c)
+        if (gain.codes.pixels[pixel + c] != gain.zero_code) ++count;
+    }
+  }
+  return count;
+}
+
+void verify_framed_mat(const PackageRequest& request) {
+  const auto& photo = *request.frame_photo;
+  const auto width = request.sdr->width, height = request.sdr->height;
+  const auto decoded = decode_image(request.output);
+  if (!decoded.authored_sdr)
+    throw std::runtime_error("the framed package did not read back as a base plus gain map");
+  const auto& base = *decoded.authored_sdr;
+  const auto& alternate = decoded.linear_p3;
+  if (base.width != width || base.height != height || alternate.width != width ||
+      alternate.height != height)
+    throw std::runtime_error("the framed package read back at a different size than it was given");
+  const auto offset = [&](std::uint32_t c) {
+    const auto index = std::min<std::size_t>(c, 2);
+    return std::pair<float, float>{decoded.gain_map.base_offset[index],
+                                   decoded.gain_map.alternate_offset[index]};
+  };
+  std::uint64_t failures = 0, checked = 0;
+  float worst = 0.0F;
+  std::uint32_t worst_x = 0, worst_y = 0;
+  const auto check = [&](std::uint32_t x, std::uint32_t y) {
+    const auto pixel = (static_cast<std::size_t>(y) * width + x) * 3;
+    for (std::uint32_t c = 0; c < 3; ++c) {
+      const auto [base_offset, alternate_offset] = offset(c);
+      const float low = std::max(base.pixels[pixel + c] + base_offset, 0.0F);
+      const float high = alternate.pixels[pixel + c] + alternate_offset;
+      ++checked;
+      // Stops of stored gain: zero is the mat's own value, and offset equality
+      // (enforced for a framed pair) makes the reconstruction a pure ratio.
+      const float stops = low > 1.0e-6F ? std::log2(std::max(high, 1.0e-6F) / low)
+                                        : (std::abs(high) <= 1.0e-6F ? 0.0F : 64.0F);
+      if (std::abs(stops) <= kFrameZeroTolerance) continue;
+      ++failures;
+      if (std::abs(stops) > std::abs(worst)) { worst = stops; worst_x = x; worst_y = y; }
+    }
+  };
+  // One coding block of slack on every side of the photograph, clipped to the
+  // canvas so a photograph at the edge is handled the same way.
+  const auto near_left = photo.x > kMatReadbackMargin ? photo.x - kMatReadbackMargin : 0;
+  const auto near_top = photo.y > kMatReadbackMargin ? photo.y - kMatReadbackMargin : 0;
+  const auto near_right = std::min(width, photo.x + photo.width + kMatReadbackMargin);
+  const auto near_bottom = std::min(height, photo.y + photo.height + kMatReadbackMargin);
+  for (std::uint32_t y = 0; y < height; ++y) {
+    check_cancelled();
+    const bool in_photo_rows = y >= photo.y && y < photo.y + photo.height;
+    for (std::uint32_t x = 0; x < width; ++x) {
+      if (in_photo_rows && x >= photo.x && x < photo.x + photo.width) continue;
+      if (x < near_left || x >= near_right || y < near_top || y >= near_bottom) check(x, y);
+    }
+  }
+  if (checked == 0) return;
+  if (failures != 0)
+    throw std::runtime_error(
+        "the framed mat carries gain: " + std::to_string(failures) + " samples, worst at " +
+        std::to_string(worst_x) + "," + std::to_string(worst_y) + " (" +
+        json::number_text(worst) + " stops)");
 }
 
 std::string verification_name(OutputEncoding encoding) {
@@ -244,6 +364,21 @@ std::string package_image(const PackageRequest& request) {
   FloatImage base = copy_plane(*request.sdr, "SDR base");
   if (base.channels != 3)
     throw std::invalid_argument("the SDR base plane must have three channels");
+  // A frame intention is about a canvas the caller already composited, and the
+  // mat readback needs to know where the photograph sits in it.
+  if (request.frame_photo && !request.presentation_frame)
+    throw std::invalid_argument("a frame photograph rectangle needs presentation_frame");
+  if (request.frame_photo && request.gain == nullptr)
+    throw std::invalid_argument("a frame photograph rectangle needs the gain plane it applies to");
+  if (request.frame_photo && !gain_map_output)
+    throw std::invalid_argument(
+        "the frame mat readback needs a format that stores the gain map it checks");
+  if (request.frame_photo) {
+    const auto& photo = *request.frame_photo;
+    if (photo.width == 0 || photo.height == 0 || photo.x > base.width || photo.y > base.height ||
+        photo.width > base.width - photo.x || photo.height > base.height - photo.y)
+      throw std::invalid_argument("the frame photograph rectangle must lie inside the canvas");
+  }
   // A gain plane describes the same pixels: this version writes the codes 1:1
   // and does not resample a grid onto the base.
   if (request.gain != nullptr) {
@@ -268,7 +403,15 @@ std::string package_image(const PackageRequest& request) {
   check_cancelled();
   std::optional<QuantizedGain> gain;
   if (request.gain != nullptr && (gain_map_output || bt2100_output)) {
-    gain = quantize_gain(*request.gain, encoding == OutputEncoding::Adaptive);
+    gain = quantize_gain(*request.gain, encoding == OutputEncoding::Adaptive,
+                         request.presentation_frame);
+    // E5 at the codebook, before anything is encoded: whatever the caller left
+    // outside the photograph must be the zero code.
+    if (request.frame_photo) {
+      if (const auto samples = mat_samples_carrying_gain(*gain, *request.frame_photo))
+        throw std::runtime_error("the framed mat carries gain at " + std::to_string(samples) +
+                                 " coded samples; the photograph rectangle does not cover it");
+    }
     // HLG's signal only carries about 2.3 stops above diffuse white; a pair
     // that reaches higher would be compressed into that range while the file's
     // metadata still claimed the higher headroom. Convert refuses it too.
@@ -302,6 +445,9 @@ std::string package_image(const PackageRequest& request) {
       images.gain_map = std::move(gain->codes);
       images.metadata = gain->metadata;
       images.headroom_stops = gain->alternate_headroom;
+      // Tells a gain-map JPEG to store its gain plane losslessly (quality 100),
+      // so a framed mat's zero code cannot be moved by quantizing it.
+      images.presentation_frame = request.presentation_frame;
       bytes = encoding == OutputEncoding::Adaptive
                   ? encode_adaptive_heic(images, photo, request.quality, request.depth, request.hevc_preset)
                   : encode_gain_map_jpeg(std::move(images), photo, request.quality);
@@ -332,6 +478,18 @@ std::string package_image(const PackageRequest& request) {
     check_cancelled();
   }
   write_binary_file_atomic(request.output, bytes, request.overwrite);
+  // The second E5 check: the file that was just written decodes back with no
+  // gain on the mat. The caller asked for it by supplying the rectangle, and a
+  // file that fails it must not be left behind for the caller to publish.
+  if (request.frame_photo) {
+    try {
+      verify_framed_mat(request);
+    } catch (...) {
+      std::error_code ignored;
+      std::filesystem::remove(request.output, ignored);
+      throw;
+    }
+  }
 
   json::Writer writer;
   writer.begin_object().member("schema", "hyperdr.package/v1")

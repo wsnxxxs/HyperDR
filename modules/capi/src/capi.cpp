@@ -360,6 +360,11 @@ int hyperdr_package(hyperdr_engine* engine, const hyperdr_package_request* confi
       request.exif = static_cast<const std::uint8_t*>(configuration->exif);
       request.exif_size = configuration->exif_size;
     }
+    request.presentation_frame = configuration->presentation_frame != 0;
+    if (configuration->has_frame_photo) {
+      const auto& rect = configuration->frame_photo;
+      request.frame_photo = hyperdr::FrameRect{rect.x, rect.y, rect.width, rect.height};
+    }
     return required(engine).value.package(request, token(configuration->cancel));
   });
 }

@@ -461,7 +461,7 @@ private final class Events: @unchecked Sendable {
 
     @Test @MainActor func synchronousAPIsRunOnMainThread() async throws {
         MainActor.preconditionIsolated()
-        #expect(Engine.abiVersion == 3)
+        #expect(Engine.abiVersion == 4)
         #expect(!Engine.version.isEmpty)
         #expect(!(try Engine.schema()).settings.isEmpty)
         let curve = try Engine.curve(settings: ["contrast": .number(1.123456)], samples: 33)

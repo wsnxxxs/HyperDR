@@ -53,7 +53,7 @@ import UniformTypeIdentifiers
                                                                   size: PixelSize(width: 48, height: 32)))
         #expect(pending.modelGainPending)
         // R1: with the prediction the same recipe renders with AI gain.
-        try await session.predictModelGain(modelID: "research-cnn-v1")
+        try await session.predictModelGain(pending.request)
         var withModel = EditorRenderRequest(sourceID: source.id, recipe: ai, size: PixelSize(width: 48, height: 32))
         withModel.usesModelGain = true
         #expect(try await session.render(withModel).modelGainPending == false)
@@ -74,6 +74,43 @@ import UniformTypeIdentifiers
         await #expect(throws: EditorRenderingError.staleSource) {
             try await session.render(EditorRenderRequest(sourceID: UUID(), recipe: recipe, size: PixelSize(width: 48, height: 32)))
         }
+    }
+
+    /// R22-006: a prediction belongs to the source id it was made on; a new
+    /// development renders pending (not an error) until predicted.
+    @Test func aNewDevelopmentNeedsItsOwnPrediction() async throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        // Tests/HyperDREditorCoreTests → the checkout; `fetch_test_fixtures.py` puts it there.
+        let url = (0..<6).reduce(root) { url, _ in url.deletingLastPathComponent() }
+            .appendingPathComponent("build/fixtures/canon-eos-5d-iii-lossy.dng")
+        try #require(FileManager.default.fileExists(atPath: url.path), "Run scripts/fetch_test_fixtures.py")
+        let session = try RenderSession()
+        let size = PixelSize(width: 64, height: 64)
+        let source = try await session.open(url, previewSize: size)
+        var recipe = Recipe(inputDomain: source.domain)
+        recipe.setHDRSource(.capturedAI)
+        func render(_ recipe: Recipe, _ size: PixelSize = size) async throws -> EditorFrame {
+            var request = EditorRenderRequest(sourceID: source.id, recipe: recipe, size: size)
+            request.usesModelGain = true
+            return try await session.render(request)
+        }
+        try await session.predictModelGain(try await render(recipe).request)
+        #expect(try await render(recipe).modelGainPending == false)
+
+        var warmer = recipe
+        warmer.setValue(.number(5500), for: "develop.temperature")
+        let pending = try await render(warmer)
+        #expect(pending.modelGainPending)
+        try await session.predictModelGain(pending.request)
+        #expect(try await render(warmer).modelGainPending == false)
+        // Another preview size shares the development.
+        #expect(try await render(warmer, PixelSize(width: 128, height: 128)).modelGainPending == false)
+        // Render gives a development loaded again a new source id, so the
+        // first one's prediction no longer applies: pending, then predicted again.
+        let back = try await render(recipe)
+        #expect(back.modelGainPending)
+        try await session.predictModelGain(back.request)
+        #expect(try await render(recipe).modelGainPending == false)
     }
 
     /// R22-001: a region render waiting to reload must not write the closed

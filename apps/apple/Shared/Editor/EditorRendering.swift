@@ -34,13 +34,14 @@ nonisolated protocol EditorRendering: AnyObject, Sendable {
     /// An SDR thumbnail (Display P3) of a frame's base: export summaries, frames.
     func sdrThumbnail(_ frame: EditorFrame, maximumSize: HyperDRRender.PixelSize) async throws -> CGImage
 
-    /// Computes the AI gain for the open photo with the model `modelID`, loading
-    /// the model on first use (§9). Predictions are kept by model id: a render
-    /// with `usesModelGain` uses the one for its recipe's `hdr.model`, however
-    /// the calls for different models finished. Throws
-    /// `EditorRenderingError.modelUnavailable` when the model cannot run on
-    /// this device at all; any other error is a failed prediction.
-    func predictModelGain(modelID: String) async throws
+    /// Computes the AI gain with the recipe's `hdr.model` for the source the
+    /// request renders from (its RAW development and bypass), loading the
+    /// model on first use (§9). Predictions are kept by that source and model:
+    /// a render with `usesModelGain` gets the one for the source it renders
+    /// from, or none (`modelGainPending`) when that development has none.
+    /// Throws `EditorRenderingError.modelUnavailable` when the model cannot
+    /// run on this device at all; any other error is a failed prediction.
+    func predictModelGain(_ request: EditorRenderRequest) async throws
 
     /// Installs a LUT the recipe can then reference by its `contentHash`.
     func installLUT(_ lut: ColorLUT) async
@@ -93,8 +94,9 @@ nonisolated struct EditorRenderRequest: Equatable, Sendable {
     /// Groups temporarily switched off to see their effect (a render option,
     /// never in the recipe, never undone).
     var bypassedGroups: Set<ParameterGroup> = []
-    /// Use the prediction `predictModelGain` produced. False while it is
-    /// being computed: the photo shows without AI until then (Lead, §14.3).
+    /// Use the prediction `predictModelGain` produced for this development.
+    /// False while it is being computed: the photo shows without AI until then
+    /// (Lead, §14.3).
     var usesModelGain = false
     /// Part of an interactive drag.
     var isInteractive = false

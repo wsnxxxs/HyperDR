@@ -13,8 +13,11 @@ import HyperDRRender
 ///   source options and the render alike, so a RAW bypass develops again.
 /// - AI (R1): the first prediction loads a `CoreMLModelGainProvider` off the
 ///   actor; `RenderEngine.predictModelGain` predicts for SDR and RAW, and
-///   renders that use it get it as `modelGain`. Predictions are kept by
-///   source and model. A provider or prediction that reports
+///   renders that use it get it as `modelGain`. A prediction belongs to the
+///   `RenderSource.id` it was made on, which a new RAW development changes
+///   (preview and full size share it): renders look it up after loading
+///   their source, and without one they come back `aiPending`. The latest
+///   `predictionLimit` are kept, by source id and model. A provider or prediction that reports
 ///   `ModelGainError.deviceUnavailable` makes AI unavailable; any other
 ///   failure is a failed prediction the user can retry.
 actor RenderSession: EditorRendering {
@@ -39,6 +42,9 @@ actor RenderSession: EditorRendering {
     private struct PredictionKey: Hashable { let source: UUID; let model: String }
     /// By the source's id and the recipe's `hdr.model`; each holds the provider's own model id.
     private var predictions: [PredictionKey: ModelGainPrediction] = [:]
+    /// Oldest first.
+    private var predictionOrder: [PredictionKey] = []
+    static let predictionLimit = RecipeEditor.predictionLimit
 
     init(engine: RenderEngine) {
         self.engine = engine
@@ -62,6 +68,7 @@ actor RenderSession: EditorRendering {
                                   capabilities: Self.capabilities(report.capabilities))
         opened = Opened(editor: editor, source: source, options: options)
         predictions = [:]
+        predictionOrder = []
         return editor
     }
 
@@ -75,7 +82,7 @@ actor RenderSession: EditorRendering {
         let generation: Int
     }
 
-    private func prepare(_ request: EditorRenderRequest) async throws -> Prepared {
+    private func prepare(_ request: EditorRenderRequest, needsLUT: Bool = true) async throws -> Prepared {
         guard var opened else { throw EditorRenderingError.noSource }
         let generation = self.generation
         guard opened.editor.id == request.sourceID, request.recipe.inputDomain == opened.editor.domain else {
@@ -83,11 +90,11 @@ actor RenderSession: EditorRendering {
         }
         let recipe = request.recipe
         let options = RenderOptions(bypassedGroups: request.bypassedGroups)
-        let lut = try recipe.activeLook.map { look -> ColorLUT in
+        let lut = try recipe.activeLook.flatMap { look -> ColorLUT? in
+            guard needsLUT else { return nil }
             guard let lut = luts[look.contentHash] else { throw EditorRenderingError.missingLUT(look.contentHash) }
             return lut
         }
-        let modelGain = request.usesModelGain ? prediction(for: recipe, source: opened.source) : nil
         let full = request.region != nil || request.size == opened.editor.pixelSize
         let sourceOptions = try SourceOptions(recipe: recipe, resolution: full ? .full : .preview(maximumSize: request.size),
                                               options: options)
@@ -103,6 +110,9 @@ actor RenderSession: EditorRendering {
             self.opened = opened
         }
         try Task.checkCancellation()
+        // Looked up on the source the request renders from: another
+        // development has no prediction yet, and the frame says it is pending.
+        let modelGain = request.usesModelGain ? prediction(for: recipe, source: opened.source) : nil
         return Prepared(source: opened.source, lut: lut, modelGain: modelGain, options: options, generation: generation)
     }
 
@@ -136,10 +146,10 @@ actor RenderSession: EditorRendering {
         try await engine.sdrThumbnail(frame.planes, maximumSize: maximumSize)
     }
 
-    func predictModelGain(modelID: String) async throws {
-        guard let opened else { throw EditorRenderingError.noSource }
-        let generation = self.generation
-        let key = PredictionKey(source: opened.source.id, model: modelID)
+    func predictModelGain(_ request: EditorRenderRequest) async throws {
+        let prepared = try await prepare(request, needsLUT: false)
+        let generation = prepared.generation
+        let key = PredictionKey(source: prepared.source.id, model: Self.modelID(request.recipe))
         if predictions[key] != nil { return }
         let provider: CoreMLModelGainProvider
         if let loaded = self.provider { provider = loaded } else {
@@ -152,18 +162,22 @@ actor RenderSession: EditorRendering {
             if self.provider == nil { self.provider = provider }
         }
         let prediction: ModelGainPrediction
-        do { prediction = try await engine.predictModelGain(opened.source, provider: provider) } catch {
+        do { prediction = try await engine.predictModelGain(prepared.source, provider: provider) } catch {
             throw Self.modelError(error)
         }
         try Task.checkCancellation()
         try checkCurrent(generation)
         predictions[key] = prediction
+        predictionOrder.removeAll { $0 == key }
+        predictionOrder.append(key)
+        if predictionOrder.count > Self.predictionLimit { predictions[predictionOrder.removeFirst()] = nil }
     }
+
+    private static func modelID(_ recipe: Recipe) -> String { recipe.conditionValue("hdr.model")?.stringValue ?? "" }
 
     /// The prediction for the recipe's model, if it was made for this source.
     private func prediction(for recipe: Recipe, source: RenderSource) -> ModelGainPrediction? {
-        let model = recipe.conditionValue("hdr.model")?.stringValue ?? ""
-        guard let prediction = predictions[PredictionKey(source: source.id, model: model)],
+        guard let prediction = predictions[PredictionKey(source: source.id, model: Self.modelID(recipe))],
               prediction.sourceID == source.id, prediction.modelID == provider?.modelID else { return nil }
         return prediction
     }
@@ -186,6 +200,7 @@ actor RenderSession: EditorRendering {
         generation += 1
         opened = nil
         predictions = [:]
+        predictionOrder = []
         await engine.clearCaches()
     }
 

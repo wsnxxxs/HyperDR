@@ -406,6 +406,58 @@ private func setting(_ recipe: Recipe, _ id: String, _ value: Double) -> Recipe 
         #expect(h.editor.unavailableOptions["hdr.source"] != nil)
     }
 
+    /// R22-006: a prediction belongs to one RAW development. A new one
+    /// predicts again after its drag, not during it; another preview size
+    /// does not.
+    @Test func aNewDevelopmentPredictsAgain() async throws {
+        let h = Harness()
+        try await h.open(.rawEDR, name: "r.dng")
+        var recipe = h.editor.recipe
+        recipe.setHDRSource(.capturedAI)
+        h.editor.setRecipe(recipe)
+        await h.editor.settle()
+        #expect(h.editor.aiStatus == .ready && !h.editor.isModelGainPending)
+        let shot = h.editor.recipe
+
+        let temperature = declaration("develop.temperature")
+        h.editor.editingChanged(temperature, true)
+        h.editor.setRecipe(setting(h.editor.recipe, "develop.temperature", 5500))
+        await h.editor.settle()
+        #expect(h.editor.aiStatus == .computing)
+        #expect(h.editor.isModelGainPending)
+        #expect(await h.fake.predictions.count == 1)
+        h.editor.editingChanged(temperature, false)
+        await h.editor.settle()
+        #expect(await h.fake.predictions.count == 2)
+        #expect(h.editor.aiStatus == .ready && !h.editor.isModelGainPending)
+
+        // Another preview size keeps the prediction.
+        h.editor.canvasPixelSize = PixelSize(width: 3840, height: 2160)
+        await h.editor.settle()
+        #expect(await h.fake.predictions.count == 2)
+        #expect(!h.editor.isModelGainPending)
+        // Back to the first development: Render loads it as a new source, so
+        // the frame comes back pending and it is predicted again, once.
+        h.editor.setRecipe(shot)
+        await h.editor.settle()
+        #expect(await h.fake.predictions.count == 3)
+        #expect(h.editor.aiStatus == .ready && !h.editor.isModelGainPending)
+    }
+
+    /// A whole frame without the gain it asked for (the renderer dropped the
+    /// prediction) predicts again, once.
+    @Test func aLostPredictionIsMadeAgain() async throws {
+        let h = Harness()
+        try await h.open()
+        chooseAI(h)
+        await h.editor.settle()
+        await h.fake.forgetPredictions()
+        h.editor.setRecipe(setting(h.editor.recipe, "tone.exposure", 0.5))
+        await h.editor.settle()
+        #expect(await h.fake.predictions.count == 2)
+        #expect(!h.editor.isModelGainPending)
+    }
+
     @Test func aNewPhotoForgetsThePrediction() async throws {
         let h = Harness()
         try await h.open()

@@ -23,7 +23,9 @@ import Observation
 ///   the newest pending value follows right after it.
 /// - AI: choosing an AI source starts the prediction; until it is ready the
 ///   photo renders without AI and `aiStatus` is `.computing`. Editing is not
-///   locked meanwhile.
+///   locked meanwhile. A prediction belongs to one RAW development: a new
+///   development (after its drag) predicts again, and a whole frame that
+///   comes back without the gain it asks for starts the missing prediction.
 /// - Canvas layers (step 6): when the host's `CanvasViewport` shows the photo
 ///   with more pixels than a frame has, a full-size render of the visible part
 ///   follows once the canvas has been still for `detailIdle`; while a
@@ -72,7 +74,11 @@ import Observation
     /// Groups switched off to see their effect: a render option, never in the
     /// recipe and never undone. A new photo clears it.
     var bypassedGroups: Set<ParameterGroup> = [] {
-        didSet { if bypassedGroups != oldValue { scheduleRender() } }
+        didSet {
+            guard bypassedGroups != oldValue else { return }
+            scheduleRender()
+            updateModelGain()
+        }
     }
 
     /// The canvas's drawable size in pixels, reported by the host.
@@ -150,8 +156,20 @@ import Observation
     @ObservationIgnored private var renderGeneration = 0
 
     /// The prediction the renderer holds or is computing, by source and model.
-    private struct ModelKey: Equatable { let source: UUID; let model: String }
+    private struct ModelKey: Equatable {
+        let source: UUID
+        let model: String
+        let development: [String: ParameterValue]
+        let bypassed: Set<ParameterGroup>
+    }
+    /// The prediction in flight.
     @ObservationIgnored private var modelKey: ModelKey?
+    /// Predictions made, oldest first, at most `predictionLimit`.
+    @ObservationIgnored private var predicted: [ModelKey] = []
+    @ObservationIgnored private var failure: (key: ModelKey, reason: String)?
+    /// A prediction asked for again because a frame lacked it; not again
+    /// until a frame has shown it.
+    @ObservationIgnored private var repredicted: ModelKey?
     @ObservationIgnored private var modelTask: Task<Void, Never>?
 
     @ObservationIgnored private var viewport: CanvasViewport?
@@ -218,6 +236,9 @@ import Observation
         modelTask?.cancel()
         modelTask = nil
         modelKey = nil
+        predicted = []
+        failure = nil
+        repredicted = nil
         if case .unavailable = aiStatus {} else { aiStatus = .idle }
         renderFailure = nil
         updatePreviewSize(force: true)
@@ -252,6 +273,9 @@ import Observation
         modelTask?.cancel()
         modelTask = nil
         modelKey = nil
+        predicted = []
+        failure = nil
+        repredicted = nil
         previewSize = nil
         largestCanvasSide = nil
         if case .unavailable = aiStatus {} else { aiStatus = .idle }
@@ -357,8 +381,10 @@ import Observation
             undo.register(RecipeStep(before: drag.start, after: recipe, edit: .parameter(drag.id)))
             registered = true
         }
-        // The final, non-interactive frame, and the original if development moved.
+        // The final, non-interactive frame, and the original if development
+        // moved; a new development's prediction starts now.
         scheduleRender()
+        updateModelGain()
         return registered
     }
 
@@ -467,6 +493,7 @@ import Observation
             renderFailure = nil
             if let detail = detailFrame, !detail.request.rendersSame(as: rendered.request) { detailFrame = nil }
             updateMask()
+            frameLacksModelGain(rendered)
         case .failure(let error):
             if !(error is CancellationError) { renderFailure = String(describing: error) }
         }
@@ -677,49 +704,104 @@ import Observation
         recipe.conditionValue("hdr.model")?.stringValue ?? ""
     }
 
-    private func usesModelGain(_ recipe: Recipe) -> Bool {
-        guard wantsModel(recipe), aiStatus == .ready, let source else { return false }
-        return modelKey == ModelKey(source: source.id, model: modelID(recipe))
+    /// The prediction a recipe needs: by photo, model and the development the
+    /// renderer predicts on (a new RAW development is a new source for
+    /// Render, so its prediction is a new one; preview and full size share it).
+    private func modelKey(_ recipe: Recipe, bypassed: Set<ParameterGroup>) -> ModelKey? {
+        guard wantsModel(recipe), let source else { return nil }
+        return ModelKey(source: source.id, model: modelID(recipe), development: recipe.development, bypassed: bypassed)
     }
 
-    /// Starts the prediction the recipe needs, once per photo and model. A
-    /// failed prediction is not retried by itself (`retryModelGain`).
+    private var currentModelKey: ModelKey? { modelKey(recipe, bypassed: bypassedGroups) }
+
+    private func usesModelGain(_ recipe: Recipe) -> Bool {
+        guard let key = modelKey(recipe, bypassed: bypassedGroups) else { return false }
+        return predicted.contains(key)
+    }
+
+    /// Follows the prediction the current recipe needs: ready if it was made,
+    /// computing while it is, started when it is not (after a drag, not
+    /// during one). A failed prediction is not retried by itself (`retryModelGain`).
     private func updateModelGain() {
-        guard wantsModel(recipe), let source else { return }
+        guard let key = currentModelKey else { return }
         if case .unavailable = aiStatus { return }
-        let key = ModelKey(source: source.id, model: modelID(recipe))
-        guard key != modelKey else { return }
-        startPrediction(key)
+        if predicted.contains(key) {
+            aiStatus = .ready
+        } else if let failure, failure.key == key {
+            aiStatus = .failed(failure.reason)
+        } else {
+            aiStatus = .computing
+            if modelKey != key, !isDragging { startPrediction(key) }
+        }
+    }
+
+    /// A whole frame came back without the AI gain it asks for: the renderer
+    /// has no prediction for the source it rendered from. Predict for it,
+    /// also when the renderer lost one it had (Render gives a development a
+    /// new source id each time it is loaded again), but not again before a
+    /// frame has shown it.
+    private func frameLacksModelGain(_ frame: EditorFrame) {
+        guard frame.modelGainPending else {
+            if frame.request.usesModelGain { repredicted = nil }
+            return
+        }
+        guard frame.request.region == nil, !isDragging, modelKey == nil,
+              let key = currentModelKey,
+              key == modelKey(frame.request.recipe, bypassed: frame.request.bypassedGroups) else { return }
+        if frame.request.usesModelGain {
+            guard repredicted != key else { return }
+            repredicted = key
+            predicted.removeAll { $0 == key }
+        }
+        updateModelGain()
     }
 
     func retryModelGain() {
-        guard wantsModel(recipe), let source, case .failed = aiStatus else { return }
-        startPrediction(ModelKey(source: source.id, model: modelID(recipe)))
+        guard let key = currentModelKey, case .failed = aiStatus else { return }
+        if failure?.key == key { failure = nil }
+        updateModelGain()
     }
 
     private func startPrediction(_ key: ModelKey) {
+        guard let size = previewSize ?? source?.pixelSize,
+              let request = request(for: recipe, size: size, interactive: false) else { return }
         modelTask?.cancel()
         modelKey = key
         aiStatus = .computing
         let renderer = self.renderer
         modelTask = Task { [weak self] in
-            let outcome: AIStatus
+            var reason: String?
             do {
-                try await renderer.predictModelGain(modelID: key.model)
-                outcome = .ready
-            } catch EditorRenderingError.modelUnavailable(let reason) {
-                outcome = .unavailable(reason)
+                try await renderer.predictModelGain(request)
+            } catch EditorRenderingError.modelUnavailable(let detail) {
+                guard let self, self.modelKey == key, !Task.isCancelled else { return }
+                self.modelTask = nil
+                self.modelKey = nil
+                self.aiStatus = .unavailable(detail)
+                return
             } catch is CancellationError {
                 return
             } catch {
-                outcome = .failed(String(describing: error))
+                reason = String(describing: error)
             }
             guard let self, self.modelKey == key, !Task.isCancelled else { return }
             self.modelTask = nil
-            self.aiStatus = outcome
-            if outcome == .ready { self.scheduleRender() }
+            self.modelKey = nil
+            if let reason {
+                self.failure = (key, reason)
+            } else {
+                self.predicted.removeAll { $0 == key }
+                self.predicted.append(key)
+                if self.predicted.count > Self.predictionLimit { self.predicted.removeFirst() }
+            }
+            // The recipe may have moved on to another development meanwhile.
+            self.updateModelGain()
+            if reason == nil { self.scheduleRender() }
         }
     }
+
+    /// Predictions the editor counts on; `RenderSession` keeps as many.
+    nonisolated static let predictionLimit = 4
 
     // MARK: - Tests
 

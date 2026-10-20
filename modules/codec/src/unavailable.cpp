@@ -34,7 +34,9 @@ void fail_without_codecs(const char* capability) {
 void write_sdr_jpeg_rows(const EncodingRows&,const PhotoMetadata&,int,ColorGamut,const std::filesystem::path&){fail_without_codecs("streaming JPEG");}
 void write_sdr_tiff_rows(const EncodingRows&,const PhotoMetadata&,ColorGamut,const std::filesystem::path&){fail_without_codecs("streaming TIFF");}
 void write_gain_map_jpeg_rows(const EncodingRows&,const EncodingRows&,const GainMapMetadata&,const PhotoMetadata&,int,bool,const std::filesystem::path&){fail_without_codecs("streaming ISO JPEG");}
-std::vector<std::uint8_t> encode_heic_rows(const EncodingRows&,const EncodingRows&,const GainMapMetadata&,float,const PhotoMetadata&,OutputEncoding,int,int,bool){fail_without_codecs("streaming HEIC");return {};}
+void write_adaptive_heic(const GainMapResult&,const PhotoMetadata&,int,int,const std::filesystem::path&){fail_without_codecs("HEIC");}
+void write_hdr_heic(const PhotoRenditions&,const PhotoMetadata&,int,HdrEncoding,const std::filesystem::path&){fail_without_codecs("HEIC");}
+void write_heic_rows(const EncodingRows&,const EncodingRows&,const GainMapMetadata&,float,const PhotoMetadata&,OutputEncoding,int,int,bool,const std::filesystem::path&){fail_without_codecs("streaming HEIC");}
 
 EncoderCapabilities encoder_capabilities(const std::filesystem::path&) {
   return {false, false, "hevc_unavailable"};

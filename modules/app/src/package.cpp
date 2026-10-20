@@ -23,6 +23,7 @@
 #include <cerrno>
 #include <cmath>
 #include <cstring>
+#include <cstdio>
 #include <fcntl.h>
 #include <limits>
 #include <optional>
@@ -409,6 +410,7 @@ struct StagingFile {
 };
 
 std::filesystem::path reserve_staging_beside(const std::filesystem::path& output) {
+  if (output.has_parent_path()) std::filesystem::create_directories(output.parent_path());
   static std::atomic<std::uint64_t> sequence{0};
   const std::string base =
       output.filename().native() + ".reading." + std::to_string(::getpid()) + ".";
@@ -425,6 +427,30 @@ std::filesystem::path reserve_staging_beside(const std::filesystem::path& output
       throw std::runtime_error("cannot create a staging file beside the output");
   }
   throw std::runtime_error("cannot find a free staging name beside the output");
+}
+
+// The fully closed staging file has passed verification before publication.
+void publish_package(const PackageRequest& request,const std::filesystem::path& path) {
+  const int fd=::open(path.c_str(),O_RDONLY|O_CLOEXEC);
+  if(fd<0)throw std::runtime_error("cannot open staged package");
+  const int synced=::fsync(fd);
+  const int closed=::close(fd);
+  if(synced || closed)throw std::runtime_error("cannot flush or close staged package");
+  if(request.overwrite) {
+    if(::rename(path.c_str(),request.output.c_str()))throw std::system_error(errno,std::generic_category(),"cannot publish package");
+  } else {
+    if(::renameatx_np(AT_FDCWD,path.c_str(),AT_FDCWD,request.output.c_str(),RENAME_EXCL)) {
+      if(errno==EEXIST)throw std::runtime_error("output exists: "+path_utf8(request.output));
+      throw std::system_error(errno,std::generic_category(),"cannot publish package");
+    }
+  }
+  const auto directory=request.output.has_parent_path()?request.output.parent_path():std::filesystem::path(".");
+  const int parent=::open(directory.c_str(),O_RDONLY|O_DIRECTORY|O_CLOEXEC);
+  if(parent<0)throw std::system_error(errno,std::generic_category(),"cannot open output directory");
+  const int flushed=::fsync(parent);
+  const int error=errno;
+  ::close(parent);
+  if(flushed)throw std::system_error(error,std::generic_category(),"cannot flush output directory");
 }
 
 std::string verification_name(OutputEncoding encoding) {
@@ -565,6 +591,9 @@ std::string package_image(const PackageRequest& request) {
   photo.orientation = 1;
 
   check_cancelled();
+  const bool heic = encoding == OutputEncoding::Adaptive || encoding == OutputEncoding::Pq || encoding == OutputEncoding::Hlg;
+  std::optional<StagingFile> heic_staging;
+  if (heic) heic_staging.emplace(reserve_staging_beside(request.output));
   std::vector<std::uint8_t> bytes;
   switch (encoding) {
     case OutputEncoding::SdrJpeg: {
@@ -589,9 +618,8 @@ std::string package_image(const PackageRequest& request) {
       // Tells a gain-map JPEG to store its gain plane losslessly (quality 100),
       // so a framed mat's zero code cannot be moved by quantizing it.
       images.presentation_frame = request.presentation_frame;
-      bytes = encoding == OutputEncoding::Adaptive
-                  ? encode_adaptive_heic(images, photo, request.quality, request.depth)
-                  : encode_gain_map_jpeg(std::move(images), photo, request.quality);
+      if (heic) write_adaptive_heic(images,photo,request.quality,request.depth,heic_staging->path);
+      else bytes = encode_gain_map_jpeg(std::move(images), photo, request.quality);
       break;
     }
     case OutputEncoding::Pq:
@@ -605,14 +633,22 @@ std::string package_image(const PackageRequest& request) {
       renditions.hdr = reconstruct_gain_map(renditions.sdr, gain->codes, gain->metadata,
                                            gain->alternate_headroom);
       renditions.stats.headroom_stops = gain->alternate_headroom;
-      bytes = is_avif_encoding(encoding)
-                  ? encode_avif(renditions, photo, request.quality, encoding)
-                  : encode_hdr_heic(renditions, photo, request.quality, encoding);
+      if (heic) write_hdr_heic(renditions,photo,request.quality,encoding,heic_staging->path);
+      else bytes = encode_avif(renditions, photo, request.quality, encoding);
       break;
     }
   }
 
   check_cancelled();
+  if (heic_staging) {
+    if (request.verify && !request.frame_photo) (void)verify_encoded_file(heic_staging->path,encoding);
+    if (request.frame_photo) verify_framed_mat(request,heic_staging->path);
+    const auto size=std::filesystem::file_size(heic_staging->path);
+    const auto report=package_report(request,gain,size);
+    check_cancelled();
+    publish_package(request,heic_staging->path);
+    return report;
+  }
   if (request.verify) {
     verify_encoded_output(bytes, encoding);
     check_cancelled();
@@ -727,8 +763,7 @@ std::string package_image_rows(const PackageRequest& request,std::uint32_t rows,
     case OutputEncoding::SdrTiff:write_sdr_tiff_rows(base_rows,photo,resolved_gamut(request),staged.path);break;
     case OutputEncoding::IsoGainMapJpeg:write_gain_map_jpeg_rows(base_rows,codes,gain->metadata,photo,request.quality,request.presentation_frame,staged.path);break;
     default: {
-      const auto bytes=encode_heic_rows(base_rows,codes,gain->metadata,gain->alternate_headroom,photo,request.encoding,request.quality,request.depth,request.presentation_frame);
-      write_binary_file_atomic(staged.path,bytes,true);break;
+      write_heic_rows(base_rows,codes,gain->metadata,gain->alternate_headroom,photo,request.encoding,request.quality,request.depth,request.presentation_frame,staged.path);break;
     }
   }
   // Release input row planes before native row/tile verification.
@@ -739,16 +774,7 @@ std::string package_image_rows(const PackageRequest& request,std::uint32_t rows,
   const auto size=std::filesystem::file_size(staged.path);
   const auto report=package_report(request,gain,size);
   check_cancelled();
-  const int fd=::open(staged.path.c_str(),O_RDONLY|O_CLOEXEC);
-  if(fd<0)throw std::runtime_error("cannot open staged package");
-  const int synced=::fsync(fd);
-  const int closed=::close(fd);
-  if(synced || closed)throw std::runtime_error("cannot flush or close staged package");
-  if(request.overwrite) {
-    if(::rename(staged.path.c_str(),request.output.c_str()))throw std::system_error(errno,std::generic_category(),"cannot publish package");
-  } else {
-    if(::link(staged.path.c_str(),request.output.c_str()))throw std::system_error(errno,std::generic_category(),"cannot publish package");
-  }
+  publish_package(request,staged.path);
   return report;
 }
 

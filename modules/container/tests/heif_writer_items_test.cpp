@@ -4,6 +4,7 @@
 #include <array>
 #include <iostream>
 #include <map>
+#include "hyperdr/foundation/cancel.hpp"
 
 // The five writer goldens read back through our own reader: every item and
 // its type, every ordered reference, the alternative group, and the primary
@@ -15,6 +16,9 @@ void require(bool okay,const char* message){if(!okay)throw std::runtime_error(me
 using Reference=std::pair<std::uint32_t,std::string>;
 void check(const std::string& name) {
   const auto bytes=writer_fixture::file(name);
+  writer_fixture::Bytes streamed;
+  (void)writer_fixture::file(name,[&](auto part) { streamed.insert(streamed.end(),part.begin(),part.end()); });
+  require(streamed==bytes,"sink output differs from in-memory writer");
   if(name=="single8") {
     auto data=writer_fixture::sequence(8,1);
     hyperdr::codec::hevc::EncodedSequence actual{data.vps,data.sps,data.pps,data.samples};
@@ -74,6 +78,32 @@ void check(const std::string& name) {
   require(plan.config.bit_depth==unsigned(name=="single8"||name=="adaptive8-grid"?8:10),"hvcC bit depth");
   std::cout<<name<<": reader found "<<count<<" items, "<<refs.size()<<" reference sets\n";
 }
+void sink_failures() {
+  auto data=writer_fixture::sequence(8,1);
+  // A large IDR tests bounded writes, including a final partial chunk.
+  data.samples[0].resize(600003,0x80);
+  const auto nal=static_cast<std::uint32_t>(data.samples[0].size()-4);
+  for(unsigned i=0;i<4;++i)data.samples[0][i]=nal>>(24-i*8);
+  hyperdr::HeifEncodedImage image{data,512,512,{},std::nullopt,{}};
+  unsigned calls=0;
+  hyperdr::write_heif_to([&](auto part) {
+    require(part.size()<=256U*1024,"unbounded sink write");++calls;
+  },image);
+  require(calls==6,"expected headers plus three sample chunks");
+  calls=0;
+  try {
+    hyperdr::write_heif_to([&](auto) { if(++calls==4)throw std::runtime_error("sink failure"); },image);
+    throw std::logic_error("sink failure swallowed");
+  } catch(const std::runtime_error& e) { require(std::string(e.what())=="sink failure","wrong sink error"); }
+  require(calls==4,"continued after sink failure");
+  hyperdr::CancelToken token;hyperdr::CancelScope scope(&token);calls=0;
+  try {
+    hyperdr::write_heif_to([&](auto) { if(++calls==4)token.request(); },image);
+    throw std::runtime_error("sink ignored cancellation");
+  } catch(const hyperdr::Cancelled&) {}
+  require(calls==4,"continued after sink cancellation");
 }
-int main(){try{for(const auto& name:writer_fixture::names())check(name);}
+
+}
+int main(){try{sink_failures();for(const auto& name:writer_fixture::names())check(name);}
 catch(const std::exception& error){std::cerr<<"heif_writer_items_test: "<<error.what()<<'\n';return 1;}}

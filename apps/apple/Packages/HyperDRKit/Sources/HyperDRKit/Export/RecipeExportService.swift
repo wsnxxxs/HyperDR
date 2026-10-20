@@ -219,8 +219,16 @@ public actor RecipeExportService: RecipeExportServicing {
             let system = try ExportVerification.system(file, plan: plan, gainMetadata: report.gain)
             try Task.checkCancellation()
             try validateRevision(try await sessions.session(session), snapshot: snapshot)
+            // Render can apply the destination shoulder while building its
+            // edited authored pair, before its final capability scan. Record
+            // the planner's output constraint even when that scan needs no
+            // further resplit; do not change the actual Render provenance.
+            var conversionReasons = report.resplitReasons
+            if let ceiling = plan.peakStops, actualRequest.edit.peakStops > ceiling {
+                conversionReasons.insert(.outputCeiling)
+            }
             let resolved = ResolvedExportSnapshot(snapshot: snapshot, plan: plan,
-                resolvedAutomatic: report.resolvedAutomatic, resplitReasons: report.resplitReasons.map(\.rawValue),
+                resolvedAutomatic: report.resolvedAutomatic, resplitReasons: conversionReasons.map(\.rawValue),
                 report: report)
             timings[stage.rawValue, default: 0] += Date().timeIntervalSince(stageStart)
             let evidence = RecipeExportReport(schema: "hyperdr.recipe-export/v1", packageJSON: packageJSON,

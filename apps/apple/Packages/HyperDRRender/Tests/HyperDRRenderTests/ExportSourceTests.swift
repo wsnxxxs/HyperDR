@@ -30,7 +30,8 @@ private func licensedRAW() -> URL {
 }
 
 @Suite(.serialized) struct ExportSourceTests {
-    @Test func downscaledSourceTilesIncludeIntegralRounding() async throws {
+    @Test(arguments:[false,true])
+    func downscaledSourceTilesIncludeIntegralRounding(hasGain: Bool) async throws {
         let engine = try RenderEngine()
         let native = PixelSize(width:9504,height:6336)
         let output = PixelSize(width:9479,height:6306)
@@ -41,9 +42,13 @@ private func licensedRAW() -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("tile-bounds-\(UUID())")
         try Data([0]).write(to:url)
         defer { try? FileManager.default.removeItem(at:url) }
-        let opened = OpenedSource(domain:.sdr,image:image,hdr:image,baseSpace:RenderEngine.workingColorSpace,
-                                  gain:nil,raw:nil,nativeSize:native)
-        let lazy = ExportSource(id:analysis.id,domain:.sdr,nativeSize:native,rawSettings:nil,
+        let gain = hasGain ? AuthoredGainMap(standard:.iso,auxiliaryInfo:NSDictionary(),image:image,
+            channelCount:1,baseColorSpace:RenderEngine.workingColorSpace,alternateColorSpace:nil,
+            auxiliaryColorSpace:nil,tags:[:]) : nil
+        let domain: InputDomain = hasGain ? .dual : .sdr
+        let opened = OpenedSource(domain:domain,image:image,hdr:image,baseSpace:RenderEngine.workingColorSpace,
+                                  gain:gain,raw:nil,nativeSize:native)
+        let lazy = ExportSource(id:analysis.id,domain:domain,nativeSize:native,rawSettings:nil,
             analysisSource:analysis,opened:opened,url:url,revision:try SourceRevision(url:url))
         let tile = await engine.exportTileSize(lazy,request:ExportRenderRequest(photoSize:output,capabilities:streamCaps))
         let limit = PreparedExportRows.maximumSourceTileSize
@@ -52,6 +57,10 @@ private func licensedRAW() -> URL {
                 let region = CGRect(x:x,y:y,width:min(tile.width,output.width-x),height:min(tile.height,output.height-y))
                 let source = try await engine.materializeExportRegion(lazy,outputSize:output,region:region)
                 #expect(source.texture.width <= limit.width && source.texture.height <= limit.height)
+                if hasGain {
+                    let gain = try #require(source.gainTexture)
+                    #expect(gain.width <= limit.width && gain.height <= limit.height)
+                }
             }
         }
     }

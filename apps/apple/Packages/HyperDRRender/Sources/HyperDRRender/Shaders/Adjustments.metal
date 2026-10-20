@@ -13,11 +13,17 @@ float3 pointOp(float3 rgb, uint op, float amount, bool sdr) {
     if (op == 1 ? amount == 1 : amount == 0) return rgb;
     float y = lum(rgb), target = y, a = amount;
     if (op == 0) {
-        rgb *= exp2(amount);
-        y = lum(rgb);
-        if (sdr && amount > 0 && y > .48f) {
-            target = .48f + .52f * (1 - exp(-(y-.48f)/.52f));
-            rgb *= target / y;
+        float factor=exp2(amount), originalY=y;
+        rgb *= factor;
+        if (sdr && amount > 0) {
+            // This original-domain knee tends to white as EV tends to zero.
+            // The upper power joins with slope factor and reaches white at slope zero.
+            float knee=exp2(-2*amount);
+            if(originalY>knee) {
+                float distance=clamp((1-originalY)/(1-knee),0.f,1.f);
+                target=1-(1-1/factor)*pow(distance,factor+1);
+                rgb*=target/(originalY*factor);
+            }
         }
         return rgb;
     }
@@ -118,7 +124,7 @@ float3 lutSample(float3 rgb,constant GraphUniform& p, texture3d<float,access::re
 float3 applyLUT(float3 rgb,constant GraphUniform& p,texture3d<float,access::read> cube,device const float4* table) {
     if(p.color.y==0) return rgb;
     float3 changed=lutDecode(lutSample(lutEncode(rgb,p.lutInfo.z),p,cube,table),p.lutInfo.w);
-    changed=fit(changed,p.flags.y ? 1.f : max(1.f,maximum(changed)));
+    changed=fit(changed,max(1.f,maximum(changed)));
     return mix(rgb,changed,p.color.y);
 }
 struct WorkingPair { float3 base; float gain; float alpha; };
@@ -132,7 +138,6 @@ WorkingPair preparePair(float4 pixel,constant GraphUniform& p,texture3d<float,ac
     if(p.flags.z) rgb=applyLUT(rgb,p,cube,table);
     float g=(p.flags.x!=0 || p.flags.z) ? log2(max(1.f,maximum(rgb))) : 0;
     float3 base=fit(rgb*exp2(-g),1.f);
-    if(p.flags.y) base=applyLUT(base,p,cube,table);
     return {base,g,pixel.a};
 }
 float softPeak(float peak,float limit,bool gate) {

@@ -11,9 +11,14 @@ extension DoubleReference {
         func scale(_ target: Double) -> RGB { y > 1e-8 ? rgb*(target/y) : rgb }
         switch operation {
         case .exposure:
-            let x = rgb * exp2(value), brightness = luma(x)
-            if sdr && value > 0 && brightness > 0.48 {
-                return x * ((0.48+0.52 * -expm1(-(brightness-0.48)/0.52))/brightness)
+            let factor = exp2(value), x = rgb * factor
+            if sdr && value > 0 {
+                let knee = exp2(-2*value)
+                if y > knee {
+                    let position = min(1,max(0,(1-y)/(1-knee)))
+                    let shoulder = 1-(1-1/factor)*pow(position,factor+1)
+                    return rgb * (shoulder/y)
+                }
             }
             return x
         case .contrast:
@@ -147,7 +152,7 @@ extension DoubleReference {
     public static func look(_ rgb: RGB, settings: LookAdjustments) -> RGB {
         guard !settings.isIdentity, let lut = settings.lut else { return rgb }
         let mapped = decodeLUT(sampleLUT(encodeLUT(rgb,space:settings.input),lut:lut),space:settings.output)
-        let fitted = fitP3(mapped,upper:settings.input.isSDR ? 1 : max(1,mapped.x,mapped.y,mapped.z))
+        let fitted = fitP3(mapped,upper:max(1,mapped.x,mapped.y,mapped.z))
         return rgb+(fitted-rgb)*Double(settings.strength)
     }
 
@@ -160,10 +165,9 @@ extension DoubleReference {
             (.shadows,settings.tone.shadows),(.blacks,settings.tone.blacks),(.vibrance,settings.color.vibrance),(.saturation,settings.color.saturation)]
         for (op,value) in operations { x = point(x,operation:op,value:Double(value),sdr:sdr && op == .exposure) }
         x = fitP3(x,upper:max(1,x.x,x.y,x.z))
-        if !settings.look.isIdentity && !settings.look.input.isSDR { x = look(x,settings:settings.look) }
-        let g = !sdr || (!settings.look.isIdentity && !settings.look.input.isSDR) ? log2(max(1,x.x,x.y,x.z)) : 0
-        var base = fitP3(x*exp2(-g))
-        if !settings.look.isIdentity && settings.look.input.isSDR { base = look(base,settings:settings.look) }
+        if !settings.look.isIdentity { x = look(x,settings:settings.look) }
+        let g = !sdr || !settings.look.isIdentity ? log2(max(1,x.x,x.y,x.z)) : 0
+        let base = fitP3(x*exp2(-g))
         return Split(base:base,gain:g)
     }
 

@@ -296,8 +296,7 @@ private struct ExportProgressView: View {
                 header
                 TimelineView(.periodic(from: .now, by: 1)) { _ in
                     let estimate = model.export.estimate(at: model.now())
-                    let parts = ExportPresentation.statusParts(phase: model.export.phase, stage: model.export.stage,
-                                                              workflow: model.workflow, estimate: estimate)
+                    let parts = ExportPresentation.statusParts(phase: model.export.phase, stage: model.export.stage, estimate: estimate)
                     VStack(alignment: .leading, spacing: Space.s3) {
                         summary(estimate)
                         ExportProgressBar(progress: ExportPresentation.progressStyle(isStopping: model.export.isStopping,

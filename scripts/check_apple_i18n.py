@@ -36,6 +36,15 @@ and is checked against it the same way, every file held to the no-Chinese
 rule as a view is. `apps/apple/Shared`, which both apps compile, has no
 catalogue: it may use no key and no Chinese literal.
 
+Kit speaks in keys of its own (`ExportMessage`: the plan's notices,
+blockers, "will write" summary and Photos save options, a progress's stage),
+translated in Kit's own catalogue, not the app's. The Mac app and `Shared/`
+show them with `localized(locale:)`. While any of those keys is not
+translated there, they must not read Kit's messages at all; and a file that
+reads them must never read a message's raw `.key`, which shown or looked up
+in the app's bundle would be the key itself. Files that only read blocker
+codes are listed in `PLAN_TEXT_ALLOWED` with the reason.
+
 One rule here is not about strings but sits with them because it reads the
 same sources: nothing under `Views/` imports `HyperDREngine`. Views talk only
 to the editor models (batch 3 §3.4); engine types and calls stay in
@@ -109,6 +118,8 @@ ADJUSTMENTS = REPO_ROOT / "apps" / "apple" / "Packages" / "HyperDRRecipe" / "Sou
 IOS_APP = REPO_ROOT / "apps" / "apple" / "HyperDRiOS"
 IOS_CATALOG = IOS_APP / "Resources" / "Localizable.xcstrings"
 SHARED = REPO_ROOT / "apps" / "apple" / "Shared"
+KIT_SOURCES = REPO_ROOT / "apps" / "apple" / "Packages" / "HyperDRKit" / "Sources" / "HyperDRKit"
+KIT_CATALOG = KIT_SOURCES / "Resources" / "Localizable.xcstrings"
 LOCALES = ["en", "zh-Hans"]
 # Every engine source (not the tests) that can throw HeifReadError with a feature.
 HEIF_SOURCE_GLOBS = ("modules/*/src/**/*", "modules/*/include/**/*")
@@ -308,13 +319,16 @@ ENGINE_IMPORT_RE = re.compile(
     r"HyperDREngine\b", re.MULTILINE)
 
 
-def code_only(source: str) -> str:
+def code_only(source: str, keep_interpolations: bool = False) -> str:
     """`source` with comments and string literals blanked to spaces, newlines
     kept, so a match's line number is still right. Handles nested block
     comments, multi-line and raw strings, and interpolations (code again,
-    with strings of their own)."""
+    with strings of their own). With `keep_interpolations`, an
+    interpolation's code stays (its own comments and strings blanked)."""
     out = list(source)
     n = len(source)
+    kept: list[tuple[int, int]] = []   # interpolation code
+    inner: list[tuple[int, int]] = []  # comments and strings inside it
 
     def blank(start: int, end: int) -> None:
         for k in range(start, end):
@@ -331,7 +345,9 @@ def code_only(source: str) -> str:
             if quote == '"' and source[j] == "\n":
                 return j  # unterminated: stop at the line's end
             if source.startswith(escape + "(", j):
-                j = code_end(j + len(escape) + 1)
+                start = j + len(escape) + 1
+                j = code_end(start)
+                kept.append((start, j - 1))
                 continue
             if source.startswith(escape, j):
                 j += len(escape) + 1
@@ -348,6 +364,7 @@ def code_only(source: str) -> str:
         while j < n and depth:
             end = token_end(j)
             if end is not None:
+                inner.append((j, end))
                 j = end
                 continue
             depth += {"(": 1, ")": -1}.get(source[j], 0)
@@ -372,6 +389,11 @@ def code_only(source: str) -> str:
             continue
         blank(i, end)
         i = end
+    if keep_interpolations:
+        for start, end in kept:
+            out[start:end] = source[start:end]
+        for start, end in inner:
+            blank(start, end)
     return "".join(out)
 
 
@@ -387,6 +409,114 @@ def engine_imports(files: list[tuple[str, bool, str]]) -> list[str]:
             line = code.count("\n", 0, match.start("keyword")) + 1
             problems.append(f"{relative}:{line}: views must not import HyperDREngine; go through the editor model")
     return problems
+
+
+# A key Kit writes into an `ExportMessage`: `ExportMessage(key: "...")`,
+# `.init(key: "...")`, a save option's `unavailableReasonKey: "..."`, a
+# `replaceReason = "..."`. A prefix completed at run time (`"export.stage." +
+# ...`) is not a key.
+KIT_MESSAGE_KEY_RE = re.compile(
+    r'(?:ExportMessage\(key:|\.init\(key:|unavailableReasonKey:|replaceReason =)\s*"([^"\\]+)"(?!\s*\+)')
+# Reading Kit's messages, token by token, whatever the line breaks or local
+# names: their types, the members that hold them (`notices`, the summary's
+# `parts`, a progress's `stageMessage`) and any mention of `blockers`, which
+# carry messages as well as codes.
+PLAN_TEXT_RE = re.compile(
+    r"\b(?:ExportMessage|ExportMessageArgument|WillWriteSummary|unavailableReasonKey|blockers|stageMessage)\b"
+    r"|\.\s*(?:notices|parts)\b")
+# A message's raw key (`.key`, `\.key`, the `.key(...)` argument): in a file
+# that reads Kit's messages, the key would be shown or looked up in the app's
+# catalogue, where it is not. `localized(locale:)` resolves it from Kit's.
+RAW_KEY_RE = re.compile(r"\.\s*key\b")
+# Files that may mention these tokens: path relative to the repository -> why.
+PLAN_TEXT_ALLOWED: dict[str, str] = {}
+
+
+def kit_message_keys(sources: list[str]) -> set[str]:
+    return {key for source in sources if "ExportMessage" in source or "unavailableReasonKey" in source
+            for key in KIT_MESSAGE_KEY_RE.findall(source)}
+
+
+def translated_keys(entries: dict) -> set[str]:
+    """Catalogue keys with a non-empty value in every locale."""
+    return {key for key, entry in entries.items()
+            if all(((entry or {}).get("localizations", {}).get(locale, {}).get("stringUnit", {}).get("value"))
+                   for locale in LOCALES)}
+
+
+def plan_text(files: list[tuple[str, bool, str]], kit_keys: set[str], kit_entries: dict,
+              allowed: dict[str, str] = PLAN_TEXT_ALLOWED) -> list[str]:
+    """Mac app or Shared code that reads Kit's messages while some of their
+    keys are not translated in Kit's own catalogue, or that reads a
+    message's raw key. Code inside string interpolations counts; comments
+    and plain strings do not."""
+    missing = sorted(kit_keys - translated_keys(kit_entries))
+    problems = []
+    for relative, _, source in files:
+        if relative in allowed:
+            continue
+        code = code_only(source, keep_interpolations=True)
+        reads = list(PLAN_TEXT_RE.finditer(code))
+        if not reads:
+            continue
+        def line(match: re.Match) -> int:
+            return code.count("\n", 0, match.start()) + 1
+        if missing:
+            for match in reads:
+                problems.append(f"{relative}:{line(match)}: reads Kit's messages ({match.group(0).strip()}), "
+                                f"but Kit's catalogue does not translate {', '.join(missing)}; map the plan's "
+                                f"facts or blocker codes to app keys instead")
+        for match in RAW_KEY_RE.finditer(code):
+            problems.append(f"{relative}:{line(match)}: reads a raw key in a file that reads Kit's messages; "
+                            f"show them with `localized(locale:)`, which resolves them from Kit's catalogue")
+    return problems
+
+
+def plan_text_self_test(files: list[tuple[str, bool, str]]) -> list[str]:
+    """While a key is untranslated in Kit's catalogue, reading Kit's messages
+    is reported, however written; once it is translated, only reading a
+    message's raw key is. Comments, plain strings and allowed files never."""
+    keys = kit_message_keys(['let a = ExportMessage(key: "dest.x")\n',
+                             'let s = ExportMessage(key: "export.stage." + stage.rawValue)\n'])
+    failures = [] if keys == {"dest.x"} else [f"self-test: Kit message keys read as {keys}"]
+    kit = {"dest.x": {"localizations": {locale: {"stringUnit": {"value": "x"}} for locale in LOCALES}}}
+    half = {"dest.x": {"localizations": {"en": {"stringUnit": {"value": "x"}}}}}
+
+    def reported(source: str, catalogue: dict, line: int | None = None, **kwargs) -> bool:
+        found = plan_text([("apps/apple/HyperDR/Editor/SelfTest.swift", False, source)], keys, catalogue, **kwargs)
+        return bool(found) if line is None else any(f"SelfTest.swift:{line}:" in p for p in found)
+
+    if not reported("let n = plan.notices\n", {}):
+        failures.append("self-test: reading plan.notices not reported while Kit's catalogue lacks a key")
+    if not reported("let n = plan.notices\n", half):
+        failures.append("self-test: a key with only English counted as translated")
+    if reported("let n = plan.notices.map { $0.localized(locale: locale) }\n", kit):
+        failures.append("self-test: localized(locale:) reported though Kit's catalogue translates every key")
+    if reported('// plan.notices\nlet s = "WillWriteSummary \\(name) plan.notices"\n', {}):
+        failures.append("self-test: plan text in a comment or a string reported")
+    if reported("let codes = plan.blockers.map(\\.code)\n", {}, allowed={"apps/apple/HyperDR/Editor/SelfTest.swift": "codes only"}):
+        failures.append("self-test: an allowed file reported")
+    # A chain over two lines, a local alias, an interpolation (R39-001).
+    untranslated = [("let messages = plan.blockers\n    .map(\\.message)\n", 1),
+                    ("let all = plan\n    .notices\n", 2),
+                    ("let b = plan.blockers\nlet m = b.map(\\.message)\n", 1),
+                    ('let t = Text(verbatim: "\\(plan.summary.parts[0].key)")\n', 1),
+                    ('let t = "\\(f("x") + plan.summary.parts[0].key)"\n', 1),
+                    ("let summary = plan.summary\nlet first = summary\n    .parts[0]\n", 3)]
+    for source, line in untranslated:
+        if not reported(source, {}, line):
+            failures.append(f"self-test: plan text not reported on line {line}: {source!r}")
+    # The raw key, even with every key translated: shown, looked up in the
+    # app's catalogue, through an alias, a key path or an interpolation.
+    raw = [("let t = Text(LocalizedStringKey(plan.notices[0].key))\n", 1),
+           ("let n = plan.notices\nlet k = n.map(\\.key)\n", 2),
+           ("let m = progress.stageMessage\nText(verbatim: m\n    .key)\n", 3),
+           ('let t = Text(verbatim: "\\(plan.summary.parts[0].key)")\n', 1),
+           ("for b in plan.blockers { if case .key(let k) = b.message.arguments[0] { print(k) } }\n", 1)]
+    for source, line in raw:
+        if not reported(source, kit, line):
+            failures.append(f"self-test: raw key not reported on line {line}: {source!r}")
+    return failures
 
 
 def chinese_outside_views(files: list[tuple[str, bool, str]]) -> list[str]:
@@ -771,13 +901,26 @@ def main() -> int:
 
     problems = (self_test(files, entries) + heif_self_test(heif_sources, error_text, entries) + design_self_test(design_files, design_entries)
                 + boundary_self_test(files) + chinese_self_test(files)
-                + declared_self_test(design_files, design_entries, adjustments))
+                + declared_self_test(design_files, design_entries, adjustments)
+                + plan_text_self_test(files))
     if "--self-test" not in sys.argv[1:]:
         for name, document in (("app", catalog), ("design package", design_catalog), ("iOS app", ios_catalog)):
             if document.get("sourceLanguage") != "en":
                 problems.append(f"{name} catalogue sourceLanguage must be 'en'")
         problems += check(files, entries)
         problems += engine_imports(files)
+        kit_keys = kit_message_keys([path.read_text(encoding="utf-8") for path in sorted(KIT_SOURCES.rglob("*.swift"))])
+        if not kit_keys:
+            problems.append(f"no ExportMessage keys found under {KIT_SOURCES.relative_to(REPO_ROOT)}")
+        # Until Kit has a catalogue, none of its keys is translated.
+        try:
+            kit_entries = json.loads(KIT_CATALOG.read_text(encoding="utf-8")).get("strings", {})
+        except FileNotFoundError:
+            kit_entries = {}
+        except (OSError, ValueError) as error:
+            problems.append(f"cannot read {KIT_CATALOG.relative_to(REPO_ROOT)}: {error}")
+            kit_entries = {}
+        problems += plan_text(files + shared_files, kit_keys, kit_entries)
         problems += heif_features(heif_sources, error_text, entries)
         outside = chinese_outside_views(files)
         if CJK_OUTSIDE_VIEWS_STRICT:

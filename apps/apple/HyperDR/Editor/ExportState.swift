@@ -121,12 +121,23 @@ nonisolated struct ExportTimingClass: Equatable, Sendable {
 nonisolated struct ExportTimingSample: Sendable {
     var kind: ExportTimingClass
     var pixels: Double
-    /// Seconds in decode, process, encode, verify order.
+    /// Seconds reading the photo (preparing, AI model, developing), rendering,
+    /// encoding and verifying, in that order.
     var stages: [Double]
 }
 /// No clock, observation or mutation: callers supply all inputs.
 nonisolated enum ExportETA {
-    static let stages = ["decode", "process", "encode", "verify"]
+    /// Kit's stages (`RecipeExportStage`) in the four spans the timing
+    /// history keeps: preparing and the AI model count as reading the photo.
+    static func span(_ stage: String?) -> Int? {
+        switch stage {
+        case "preparing", "model", "developing": 0
+        case "rendering": 1
+        case "encoding": 2
+        case "verifying": 3
+        default: nil
+        }
+    }
     static func durations(history: [ExportTimingSample], kind: ExportTimingClass, pixels: Double) -> [Double]? {
         let valid = history.filter { $0.pixels > 0 && $0.pixels.isFinite && $0.stages.count == 4
             && $0.stages.allSatisfy { $0.isFinite && $0 >= 0 } }
@@ -145,11 +156,11 @@ nonisolated enum ExportETA {
         if completed { return ExportEstimate(fraction: 1, remaining: .zero, isOverdue: false) }
         if saving { return ExportEstimate(fraction: 0.99, remaining: nil, isOverdue: false) }
         guard let durations else { return nil }
-        let index = stages.firstIndex(of: stage ?? "decode") ?? 0
+        let index = span(stage) ?? 0
         let stageRemaining: Double
-        // ABI2 emits real RAW block completion only in decode. process=.3,
-        // encode=.7 and verify=.9 are whole-job milestones, not stage ratios.
-        if stage == "decode", let fraction, fraction.isFinite, fraction > 0, fraction <= 1 {
+        // Only rendering reports real progress: the rows Render has handed to
+        // the writer. The other stages run on their history alone.
+        if stage == "rendering", let fraction, fraction.isFinite, fraction > 0, fraction <= 1 {
             stageRemaining = max(0, durations[index] * (1 - fraction)
                 - max(0, at.timeIntervalSince(fractionAt ?? stageAt)))
         } else {
@@ -206,15 +217,16 @@ nonisolated extension Duration {
             saving: phase == .saving || phase == .finishing, completed: phase == .succeeded)
     }
     func progress(stage newStage: String, fraction: Double, at date: Date) {
-        if let current = ExportETA.stages.firstIndex(of: stage ?? ""),
-           let next = ExportETA.stages.firstIndex(of: newStage), next < current { return }
+        let span = ExportETA.span(newStage)
+        if let current = ExportETA.span(stage), let span, span < current { return }
         fractionFloor = max(fractionFloor, estimate(at: date)?.fraction ?? 0)
         if newStage != stage {
-            stageAt = date; stage = newStage
+            // The AI model runs inside the photo's reading span: its clock goes on.
+            if span != ExportETA.span(stage) { stageAt = date }
+            stage = newStage
             self.fraction = nil; fractionAt = nil
         }
-        if fraction.isFinite, fraction > 0, fraction <= 1,
-           newStage != "decode" || fraction > (self.fraction ?? 0) {
+        if newStage == "rendering", fraction.isFinite, fraction > 0, fraction <= 1, fraction > (self.fraction ?? 0) {
             self.fraction = fraction; fractionAt = date
         }
         phase = .running

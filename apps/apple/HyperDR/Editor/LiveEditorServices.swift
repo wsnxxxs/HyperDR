@@ -284,17 +284,16 @@ extension LiveEditorServices {
         return revision
     }
 
-    /// Kit's stages as the progress view counts them: developing the photo
-    /// (and its AI prediction) is its decode, rendering its processing.
+    /// Kit's stages as the progress view shows them, by their own names;
+    /// rendering carries the rows done. Preparing is the panel's own phase.
     nonisolated private static func event(_ progress: RecipeExportProgress) -> EditorExportEvent? {
         switch progress.stage {
         case .preparing: nil
-        case .model, .developing: .progress(stage: "decode", fraction: 0, at: Date())
+        case .model, .developing, .encoding, .verifying:
+            .progress(stage: progress.stage.rawValue, fraction: 0, at: Date())
         case .rendering:
-            .progress(stage: "process", fraction: progress.totalRows.map { total in
+            .progress(stage: progress.stage.rawValue, fraction: progress.totalRows.map { total in
                 total > 0 ? Double(progress.completedRows ?? 0) / Double(total) : 0 } ?? 0, at: Date())
-        case .encoding: .progress(stage: "encode", fraction: 0, at: Date())
-        case .verifying: .progress(stage: "verify", fraction: 0, at: Date())
         case .publishing: .finishing
         case .delivering: .saving
         }

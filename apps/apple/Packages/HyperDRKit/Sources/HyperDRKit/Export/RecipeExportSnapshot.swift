@@ -172,3 +172,25 @@ public struct ResolvedExportGain: Sendable, Codable, Equatable {
         baseHeadroom = gain.baseHeadroom; alternateHeadroom = gain.alternateHeadroom
     }
 }
+
+extension ExportRecord {
+    /// Editing identity is independent of the chosen destination or format.
+    public func matchesEdit(_ snapshot: RecipeExportSnapshot) -> Bool {
+        guard let made = recipeSnapshot else { return false }
+        return made.matchesEdit(snapshot)
+    }
+
+    public func matches(_ snapshot: RecipeExportSnapshot, selection: ExportChoice, profileVersion: Int) -> Bool {
+        matchesEdit(snapshot) && resolvedSnapshot?.selection == selection && resolvedSnapshot?.profileVersion == profileVersion
+    }
+}
+
+extension RecipeExportSnapshot {
+    public func matchesEdit(_ snapshot: RecipeExportSnapshot) -> Bool {
+        var lhs = recipe
+        var rhs = snapshot.recipe
+        if let look = lhs.look { lhs.look = .init(contentHash: look.contentHash, name: "") }
+        if let look = rhs.look { rhs.look = .init(contentHash: look.contentHash, name: "") }
+        return lhs == rhs && source == snapshot.source && frame == snapshot.frame
+    }
+}

@@ -181,7 +181,7 @@ nonisolated struct ExportStack: Sendable {
     /// for a custom format): the one notice with a stop count.
     static func ceiling(in plan: ExportPlan) -> Double? {
         for notice in plan.notices {
-            for argument in notice.arguments { if case .stops(let stops) = argument { return stops } }
+            if case .ceiling(let stops, _) = notice { return stops }
         }
         return nil
     }
@@ -189,9 +189,7 @@ nonisolated struct ExportStack: Sendable {
     /// The ceiling the export actually applied, from Render's report: the
     /// edit's resolved range before and after it.
     static func appliedCeiling(_ result: RecipeExportResult) -> Double? {
-        guard let before = result.resolved.rangeBeforeCeiling, let after = result.resolved.rangeAfterCeiling,
-              before > after + 1e-4 else { return nil }
-        return Double(after)
+        result.ceilingApplied?.written
     }
 
     /// Whether an export can be opened or started: a photo, and no other

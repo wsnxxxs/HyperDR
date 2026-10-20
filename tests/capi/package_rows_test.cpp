@@ -1,5 +1,10 @@
 #include "hyperdr/hyperdr.h"
 #include "hyperdr/codec/image_source.hpp"
+#include "hyperdr/codec/encoders.hpp"
+#include "hyperdr/codec/encoding.hpp"
+#include "hyperdr/container/gain_map_jpeg.hpp"
+#include "hyperdr/container/heif_reader.hpp"
+#include "hyperdr/container/exif.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include <algorithm>
 #include <cmath>
@@ -10,6 +15,8 @@
 #include <vector>
 #include <unistd.h>
 #include <mach/mach.h>
+#include <sys/resource.h>
+#include <signal.h>
 
 #define REQUIRE(x) do { if(!(x))throw std::runtime_error(#x); } while(0)
 struct Source {
@@ -46,6 +53,12 @@ void footprint(const char* stage) {
     std::cout<<"PACKAGE_MEMORY "<<stage<<" footprint="<<vm.phys_footprint<<" peak="<<vm.ledger_phys_footprint_peak<<'\n';
 }
 int main(int argc,char** argv) try {
+  if(argc>3&&std::string(argv[1])=="check") {
+    footprint("before");
+    const auto verified=hyperdr::verify_encoded_file(argv[2],*hyperdr::hdr_encoding_from_name(argv[3]));
+    REQUIRE(verified.boundedMemory&&verified.pixels==std::uint64_t(verified.width)*verified.height);
+    footprint("after");return 0;
+  }
   auto directory=(std::filesystem::temp_directory_path()/"hyperdr-package-rows-XXXXXX").native();
   REQUIRE(mkdtemp(directory.data()));
   const std::filesystem::path root(directory);
@@ -57,12 +70,18 @@ int main(int argc,char** argv) try {
   hyperdr_package_plane base{};base.width=source.width;base.height=source.height;base.channels=3;base.format=HYPERDR_PLANE_F32;
   hyperdr_package_gain gain{};gain.plane=base;gain.plane.channels=1;gain.alternate_headroom=2;gain.working_gamut="display-p3";
   hyperdr_package_request request{};request.sdr=&base;request.gain=&gain;
-  request.parameters_json=probe?"{\"verify\":false}":"{\"quality\":93}";
+  request.parameters_json=probe?(std::string(argv[1])=="verify"?"{\"verify\":true}":"{\"verify\":false}"):"{\"quality\":93}";
   const auto whole=root/"whole",stream=root/"stream";
-  const auto whole_path=whole.string(),stream_path=stream.string();
+  const auto whole_path=whole.string(),stream_path=probe&&argc>5?std::string(argv[5]):stream.string();
   if(probe) {
     const unsigned rows=argc>3?unsigned(std::stoul(argv[3])):64;
-    request.format="sdr-tiff";request.gain=nullptr;request.output_path=stream_path.c_str();
+    request.format=argc>4?argv[4]:"sdr-tiff";
+    request.gain=std::string(request.format).starts_with("sdr-")?nullptr:&gain;
+    // Include native E5 readback in gain-map probes.
+    source.frame=request.gain!=nullptr;
+    request.presentation_frame=source.frame;request.has_frame_photo=source.frame;
+    request.frame_photo={16,16,source.width-32,source.height-32};
+    request.output_path=stream_path.c_str();
     footprint("before");char* report=nullptr;
     std::vector<float> plane;
     if(std::string(argv[1])=="full") {
@@ -76,6 +95,27 @@ int main(int argc,char** argv) try {
     footprint("after");if(std::string(argv[1])!="full")REQUIRE(source.largest<=rows);
     std::filesystem::remove_all(root);hyperdr_engine_destroy(engine);return 0;
   }
+  // The last strip/IFD can fail after all scanlines succeeded. No verification
+  // may be needed to detect this, and KEEP must survive every writer failure.
+  source.width=source.height=16;base.width=base.height=16;gain.plane.width=gain.plane.height=16;
+  for(const char* format:{"sdr-tiff","sdr-jpeg","iso-gainmap-jpeg","adaptive"}) {
+    hyperdr::write_text_file_atomic(stream,"KEEP",false);
+    request.format=format;request.output_path=stream_path.c_str();
+    request.parameters_json="{\"verify\":false,\"overwrite\":true}";
+    request.gain=std::string(format).starts_with("sdr-")?nullptr:&gain;
+    struct rlimit original{};REQUIRE(getrlimit(RLIMIT_FSIZE,&original)==0);
+    auto limited=original;limited.rlim_cur=128;
+    auto previous=signal(SIGXFSZ,SIG_IGN);
+    REQUIRE(setrlimit(RLIMIT_FSIZE,&limited)==0);
+    char* report=nullptr;error=nullptr;
+    const auto code=hyperdr_package_rows(engine,&request,13,Source::read,&source,&report,&error);
+    REQUIRE(setrlimit(RLIMIT_FSIZE,&original)==0);signal(SIGXFSZ,previous);
+    REQUIRE(code!=0);hyperdr_error_free(error);hyperdr_string_free(report);
+    REQUIRE(hyperdr::read_binary_file(stream)==std::vector<std::uint8_t>({'K','E','E','P'}));
+    std::filesystem::remove(stream);
+  }
+  source.width=base.width=gain.plane.width=65;source.height=base.height=gain.plane.height=533;
+  request.parameters_json="{\"quality\":93}";
   REQUIRE(!hyperdr_package_rows_supported("avif-pq"));
   for(const char* format:{"sdr-tiff","sdr-jpeg","iso-gainmap-jpeg","adaptive","pq","hlg"}) {
     REQUIRE(hyperdr_package_rows_supported(format));
@@ -94,6 +134,58 @@ int main(int argc,char** argv) try {
     code=hyperdr_package_rows(engine,&request,13,Source::read,&source,&report,&error);status(code,report,error);
     REQUIRE(source.largest<=13);
     const auto a=hyperdr::read_binary_file(whole),bbytes=hyperdr::read_binary_file(stream);
+    const auto encoding=*hyperdr::hdr_encoding_from_name(format);
+    const auto verified=hyperdr::verify_encoded_file(stream,encoding);
+    REQUIRE(verified.boundedMemory&&verified.pixels==std::uint64_t(source.width)*source.height);
+    // Original byte verifier and the new native-row/tile verifier agree on
+    // valid files; a truncated codestream must fail both.
+    hyperdr::verify_encoded_output(bbytes,encoding);
+    if(std::string(format)=="iso-gainmap-jpeg" || std::string(format)=="adaptive") {
+      // Change only the exported IFD0 orientation, keeping all pixel/container
+      // bytes intact. E5 must reject a nonidentity display direction.
+      std::vector<std::uint8_t> exif;
+      if(encoding==hyperdr::OutputEncoding::Adaptive)exif=hyperdr::read_heif(bbytes).exif();
+      else {
+        const auto jpeg=hyperdr::parse_gain_map_jpeg(bbytes);
+        for(const auto& app:jpeg.app_segments[0])
+          if(app.marker==0xe1&&app.payload.size()>6&&!std::memcmp(app.payload.data(),"Exif\0\0",6))
+            exif.assign(app.payload.begin()+6,app.payload.end());
+      }
+      REQUIRE(!exif.empty()&&hyperdr::read_exif_orientation(exif.data(),exif.size()).value_or(0)==1);
+      const std::vector<std::uint8_t> tag{0x12,0x01,3,0,1,0,0,0,1,0,0,0};
+      const auto entry=std::search(exif.begin(),exif.end(),tag.begin(),tag.end());
+      REQUIRE(entry!=exif.end());
+      const auto payload=std::search(bbytes.begin(),bbytes.end(),exif.begin(),exif.end());
+      REQUIRE(payload!=bbytes.end());
+      auto rotated=bbytes;
+      rotated[std::size_t(payload-bbytes.begin())+std::size_t(entry-exif.begin())+8]=6;
+      const auto broken=root/"rotated";hyperdr::write_binary_file_atomic(broken,rotated,false);
+      bool rejected=false;
+      try {(void)hyperdr::verify_encoded_file(broken,encoding,hyperdr::VerificationFrame{source.width,source.height,16,16,source.width-32,source.height-32});}
+      catch(const std::exception&){rejected=true;}
+      REQUIRE(rejected);std::filesystem::remove(broken);
+    }
+
+    if(std::string(format)=="iso-gainmap-jpeg") {
+      auto corrupt=bbytes;corrupt.resize(corrupt.size()-2);
+      const auto broken=root/"truncated.jpg";hyperdr::write_binary_file_atomic(broken,corrupt,false);
+      bool oldRejected=false,newRejected=false;
+      try {hyperdr::verify_encoded_output(corrupt,encoding);}catch(const std::exception&){oldRejected=true;}
+      try {(void)hyperdr::verify_encoded_file(broken,encoding);}catch(const std::exception&){newRejected=true;}
+      REQUIRE(oldRejected&&newRejected);std::filesystem::remove(broken);
+      // A wrong photo rectangle exposes known nonzero gain as mat: both the
+      // previous whole-rendition criterion and the streamed E5 gate reject it.
+      const auto decoded=hyperdr::decode_image(stream);
+      REQUIRE(decoded.authored_sdr.has_value());
+      const auto sample=(std::size_t(100)*source.width+20)*3;
+      REQUIRE(std::abs(decoded.linear_p3.pixels[sample]-decoded.authored_sdr->pixels[sample])>1e-5f);
+      bool matRejected=false;
+      try {(void)hyperdr::verify_encoded_file(stream,encoding,hyperdr::VerificationFrame{source.width,source.height,32,32,1,1});}
+      catch(const std::exception&){matRejected=true;}
+      REQUIRE(matRejected);
+
+    }
+
     float worst=0;
     if(a!=bbytes) {
       const auto x=hyperdr::decode_image(whole),y=hyperdr::decode_image(stream);

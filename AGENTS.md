@@ -49,7 +49,7 @@ this checkout. This file summarizes what they decide.
 | `apps/apple/HyperDR/Views` | SwiftUI views; they only talk to the editor models |
 | `apps/apple/HyperDR/macOS/Preview` | Metal EDR canvas: a compute pass rebuilds the frame, a second pass draws it at the canvas zoom and pan |
 | `apps/apple/Shared/Canvas` | Shared by the Mac and iOS targets: `CanvasTransform`, the EDR layer setup and the display pass (`EDRDisplayPass`, `EDRDisplay.metal`) |
-| `apps/apple/HyperDRiOS` | iOS/iPadOS target (P7-0 shell): PhotosPicker, a `UIView` + `CAMetalLayer` canvas with `UIScreen` headroom, a temporary Core Image loader (`TemporaryHDRSource`) until HyperDRRender lands; its own string catalogue. Links HyperDRDesign only. Install steps: `apps/apple/README-iOS.md` |
+| `apps/apple/HyperDRiOS` | iOS/iPadOS target (P7-0 shell): PhotosPicker and Files (`fileImporter`) placed as in `p7-adjustments.md` §5.5, a `UIView` + `CAMetalLayer` canvas with `UIScreen` headroom, a temporary Core Image loader (`TemporaryHDRSource`) until HyperDRRender lands; its own string catalogue. Links HyperDRDesign only. Install steps: `apps/apple/README-iOS.md` |
 
 ## Building and testing
 

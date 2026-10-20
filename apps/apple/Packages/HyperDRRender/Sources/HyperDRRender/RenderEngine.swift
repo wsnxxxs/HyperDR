@@ -85,7 +85,7 @@ public actor RenderEngine {
         let library = try device.makeLibrary(source: shader, options: options)
         self.library = library
         var pipelines: [String: any MTLComputePipelineState] = [:]
-        for name in ["sourceHDRSplit", "sampleSource", "zeroGain", "adjustPoint", "graphCells", "graphBox",
+        for name in ["sourceHDRSplit", "sampleSource", "sampleSourceArea", "zeroGain", "adjustPoint", "graphCells", "graphBox",
                      "graphWeights", "graphCoefficients", "graphFinalGain", "graphOutput", "graphPeak", "authoredOutput",
                      "displayBase", "displayISOGain", "displayGainPeak", "displayLegacyGain", "modelGainWeights", "effectMask", "exportSummary", "exportPair", "exportFrame"] {
             guard let function = library.makeFunction(name: name) else { throw RenderError.gpu(name) }

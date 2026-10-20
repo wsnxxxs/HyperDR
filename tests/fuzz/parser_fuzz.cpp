@@ -2,7 +2,6 @@
 #include "hyperdr/container/exif.hpp"
 #include "hyperdr/container/iso_gain_map.hpp"
 #include "hyperdr/container/inspect.hpp"
-#include "hyperdr/look/color_lut.hpp"
 #include <cstdint>
 #include <span>
 #include <stdexcept>
@@ -25,8 +24,6 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data,std::size_t size)
   (void)hyperdr::read_exif(data,size);(void)hyperdr::read_apple_legacy_gain_headroom(data,size);
 #elif HYPERDR_FUZZ_TARGET == 5
   (void)hyperdr::parse_hevc_configuration({data,size});
-#elif HYPERDR_FUZZ_TARGET == 6
-  (void)hyperdr::parse_color_lut({reinterpret_cast<const char*>(data),size});
 #endif
  }catch(const std::exception&){}
  return 0;

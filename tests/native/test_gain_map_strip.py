@@ -1,4 +1,5 @@
 """Exercise the standalone ISO-strip tool through the shipping XMP reader."""
+import ctypes
 import json
 import os
 from pathlib import Path
@@ -12,9 +13,15 @@ ROOT = Path(__file__).resolve().parents[2]
 
 class GainMapStripTest(unittest.TestCase):
     def test_stripped_fixture_keeps_pixels_and_has_valid_directory_and_mpf(self):
-        executable = os.environ.get("HYPERDR_EXECUTABLE")
-        if not executable:
-            self.skipTest("requires the native test entry point")
+        library_path = os.environ.get("HYPERDR_LIBRARY")
+        if not library_path:
+            self.skipTest("requires the native C ABI library")
+        library = ctypes.CDLL(library_path)
+        pointer = ctypes.c_void_p
+        library.hyperdr_engine_create.argtypes = [ctypes.c_char_p, ctypes.POINTER(pointer), ctypes.POINTER(pointer)]
+        library.hyperdr_probe.argtypes = [pointer, ctypes.c_char_p, ctypes.POINTER(pointer), ctypes.POINTER(pointer)]
+        library.hyperdr_engine_destroy.argtypes = [pointer]
+        library.hyperdr_string_free.argtypes = [pointer]
         fixture = ROOT / "tests/fixtures/gain-map-jpeg/xmp-and-iso.jpg"
         with tempfile.TemporaryDirectory(prefix="build-strip-test-", dir=ROOT) as temporary:
             derived = Path(temporary) / "xmp-only.jpg"
@@ -27,10 +34,13 @@ class GainMapStripTest(unittest.TestCase):
                 self.assertTrue(checks[field], field)
             self.assertEqual(checks["item_length_recomputed"], 1)
             self.assertEqual(checks["iso_segments_remaining"], 0)
-            inspection = json.loads(subprocess.check_output([executable, "inspect", str(derived), "--json"]))
-            self.assertEqual(inspection["reader_path"], "xmp-imageio")
-            self.assertFalse(inspection["mpf_repaired"])
-            self.assertEqual(inspection["alternate_headroom"], 2)
-            probe = json.loads(subprocess.check_output([executable, "probe", str(derived)]))
+            engine, output, error = pointer(), pointer(), pointer()
+            self.assertEqual(library.hyperdr_engine_create(b'{"hevc_override":"unavailable"}', ctypes.byref(engine), ctypes.byref(error)), 0)
+            try:
+                self.assertEqual(library.hyperdr_probe(engine, os.fsencode(derived), ctypes.byref(output), ctypes.byref(error)), 0)
+                probe = json.loads(ctypes.string_at(output))
+            finally:
+                library.hyperdr_string_free(output)
+                library.hyperdr_engine_destroy(engine)
             self.assertEqual(probe["inputDomain"], "dual-rendition")
             self.assertFalse(probe["degraded"])

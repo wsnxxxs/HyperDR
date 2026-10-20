@@ -2,7 +2,7 @@
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/foundation/file_io.hpp"
-#include "hyperdr/gainmap/gain_map.hpp"
+#include "../../../tests/support/writer_planes.hpp"
 #include "internal/decode_bytes.hpp"
 #include "internal/gain_map_jpeg.hpp"
 #include <atomic>
@@ -10,7 +10,7 @@
 #include "hyperdr/container/exif.hpp"
 #include "hyperdr/image/orientation.hpp"
 #include "hyperdr/gainmap/reconstruct.hpp"
-#include "hyperdr/gainmap/rendition.hpp"
+#include "../../../tests/support/writer_planes.hpp"
 #include "hyperdr/foundation/cancel.hpp"
 #include <thread>
 #include <jpeglib.h>
@@ -368,7 +368,7 @@ int main(int argc,char**argv) try {
         for(unsigned c=0;c<3;++c)pair.hdr.pixels[i+c]*=4.F/peak;
       }
       pair.stats.headroom_stops=2;pair.authored_gain_map.alternate_headroom=4;
-      write_binary_file_atomic(argv[3],encode_gain_map_jpeg(gain_map_from_renditions(std::move(pair),GainMapWriterProfile::iso_generic),input.metadata,95),true);
+      write_binary_file_atomic(argv[3],encode_gain_map_jpeg(test::encoded_pair(std::move(pair),false),input.metadata,95),true);
       return 0;
     }
     if(argc==4 && std::string(argv[2])=="own-pair") {

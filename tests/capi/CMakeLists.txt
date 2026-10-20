@@ -35,7 +35,7 @@ if(APPLE)
     # lazy static tables, then require byte-identical results.
     # AVIF PQ carries no LittleCMS creation timestamp, so worker/main export
     # bytes are deterministic without a clock interposer or test environment.
-    add_executable(capi_small_stack_test small_stack.c jpeg_inspect.cpp)
+    add_executable(capi_small_stack_test small_stack.c)
     set_target_properties(capi_small_stack_test PROPERTIES
       C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
       RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
@@ -55,13 +55,7 @@ if(Python3_FOUND)
   execute_process(COMMAND ${Python3_EXECUTABLE} -c
     "import pathlib,sys; p=pathlib.Path(sys.base_prefix)/'Resources/Python.app/Contents/MacOS/Python'; print(p if p.is_file() else sys.executable)"
     OUTPUT_VARIABLE HYPERDR_CONTRACT_PYTHON OUTPUT_STRIP_TRAILING_WHITESPACE)
-  add_test(NAME capi_contract_test COMMAND ${HYPERDR_CONTRACT_PYTHON}
-    ${CMAKE_CURRENT_SOURCE_DIR}/contract_test.py
-    $<TARGET_FILE:HyperDR> $<TARGET_FILE:hyperdr_capi>)
-  if(APPLE)
-    set_tests_properties(capi_contract_test PROPERTIES ENVIRONMENT
-      "DYLD_INSERT_LIBRARIES=$<TARGET_FILE:capi_test_clock>")
-  endif()
+
 endif()
 
 if(Python3_FOUND AND HYPERDR_WITH_CODECS AND APPLE)

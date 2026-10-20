@@ -90,14 +90,8 @@ slice_link_platform() {
   esac
 }
 
-# The link line the archive closure is read from: the CLI on macOS, the C ABI
-# shared library on iOS, where no executable is built.
-slice_closure_target() {
-  case "$1" in
-    macos) echo HyperDR ;;
-    *)     echo hyperdr_capi ;;
-  esac
-}
+# Read the static archive closure from the C ABI link command on every platform.
+slice_closure_target() { echo hyperdr_capi; }
 
 git -C "$repo" check-ignore -q "$repo/build-apple/probe" || { echo 'build-apple must be gitignored' >&2; exit 1; }
 git -C "$repo" check-ignore -q "$repo/build-ios/probe" || { echo 'build-ios must be gitignored' >&2; exit 1; }
@@ -151,7 +145,7 @@ work, out, platform, target, deployment = (pathlib.Path(sys.argv[1]), pathlib.Pa
 out.mkdir(parents=True, exist_ok=True)
 commands = subprocess.check_output(['ninja', '-C', str(work), '-t', 'commands', target], text=True)
 line = next((line for line in commands.splitlines()
-             if ' -o HyperDR ' in line or ' -o libhyperdr.dylib ' in line), None)
+             if ' -o libhyperdr.dylib ' in line), None)
 if line is None:
     raise SystemExit(f'cannot find the {target} link line in {work}; '
                      'the archive closure is read from it')
@@ -224,12 +218,7 @@ for slice in "${slices[@]}"; do
   echo "== $slice: configuring $(slice_preset "$slice") in $work"
   cmake --preset "$(slice_preset "$slice")" -S "$repo" -B "$work" -DHYPERDR_BUILD_TESTS=OFF \
     -DCMAKE_TOOLCHAIN_FILE="$toolchain"
-  if [[ "$slice" == macos ]]; then
-    cmake --build "$work" --target hyperdr_capi_static HyperDR
-  else
-    # The iOS slices are a library for the app: no CLI, and no ncnn.
-    cmake --build "$work" --target hyperdr_capi_static
-  fi
+  cmake --build "$work" --target hyperdr_capi_static
   echo "== $slice: combining the static closure"
   combine_slice "$slice" "$work"
   # R7-1602: no slice may carry libheif or libde265, and the check belongs to
@@ -252,7 +241,6 @@ for slice in "${slices[@]}"; do
     # The macOS archive also stays at the top level: existing callers reach the
     # archive the macOS app links at this path.
     cp "$out/macos/libHyperDREngineCore.a" "$out/libHyperDREngineCore.a"
-    "$repo/build-apple/HyperDR" schema > "$out/schema-cli.json"
   fi
 done
 [[ "$source_fingerprint" == "$(python3 "$repo/scripts/engine_fingerprint.py")" ]] || {

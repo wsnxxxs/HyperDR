@@ -7,12 +7,10 @@
 #include "hyperdr/foundation/parallel.hpp"
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/image_source.hpp"
-#include "hyperdr/gainmap/gain_map.hpp"
 #include "hyperdr/container/inspect.hpp"
 #include "hyperdr/container/iso_gain_map.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/gainmap/reconstruct.hpp"
-#include "hyperdr/look/analysis.hpp"
 #include "hyperdr/look/grid.hpp"
 #include "hyperdr/codec/input_format.hpp"
 #include "internal/budget.hpp"
@@ -773,14 +771,6 @@ constexpr float kMaxPreviewScale = 8.0F;
 // The magnitude still comes from the content, because a PQ file that happens to
 // hold an SDR-range picture should not be darkened for headroom it does not
 // use.
-float preview_scale_for(const FloatImage& source, float hdr_headroom) {
-  if (!(hdr_headroom > 1.0F)) return 1.0F;
-  const SceneStatistics stats = compute_luminance_statistics(source);
-  const float ceiling = std::min(kMaxPreviewScale, hdr_headroom);
-  float scale = 1.0F;
-  while (scale * 2.0F <= ceiling && stats.p9999 > scale) scale *= 2.0F;
-  return scale;
-}
 
 // RAW is scene-referred, while the browser controls (and the exported SDR
 // base) are display-referred. The old preview only performed the first half of
@@ -790,141 +780,4 @@ float preview_scale_for(const FloatImage& source, float hdr_headroom) {
 // already been lifted to the photographic middle grey. Return only the
 // automatic part here; the browser's brightness slider remains the user's
 // exposure bias and therefore continues to match the export.
-float raw_preview_exposure_ev(const std::filesystem::path& path,
-                              const FloatImage& source,
-                              const CaptureMetadata& capture) {
-  const auto ext = lower_extension(path);
-  if (!is_raw_extension(ext)) return 0.0F;
-  GainMapOptions options;
-  // The panel applies the user's brightness separately. The model input and
-  // the renderer therefore need the automatic anchor without that bias.
-  options.exposure_bias_ev = 0.0F;
-  return photographic_exposure_ev(source, options, capture);
-}
-
-PreviewJpeg encode_preview_jpeg(const std::filesystem::path& path,
-                                std::uint32_t max_edge, int quality,
-                                const RawDecodeOptions& options,
-                                bool apply_scene_exposure) {
-  if (max_edge == 0 || max_edge > 8192) {
-    throw std::invalid_argument("preview max edge must be in [1,8192]");
-  }
-  auto decoded = decode_image(path, options);
-
-  // Measure before resampling so the exposure anchor is not a function of the
-  // requested preview size. Bounded RAW callers use a system preview scale,
-  // but the exposure algorithm is shared with the
-  // formal photographic renderer.
-  const float exposure_ev =
-      raw_preview_exposure_ev(path, decoded.linear_p3, decoded.capture);
-  // Identical policy to the --preview-max-edge conversion path: repeated 2x2
-  // area reduction in linear light, then one bilinear step to the exact size.
-  auto source = resample_to_max_edge(std::move(decoded.linear_p3), max_edge);
-  const auto width = source.width;
-  const auto height = source.height;
-  const float scale = preview_scale_for(source, decoded.hdr_headroom);
-  const float inverse_scale = 1.0F / scale;
-  const float scene_exposure = apply_scene_exposure
-                                   ? std::exp2(exposure_ev)
-                                   : 1.0F;
-
-  std::vector<std::uint8_t> rgb(static_cast<std::size_t>(width) * height * 3);
-  parallel_for_rows(height, [&](const std::uint32_t y) {
-    for (std::uint32_t x = 0; x < width; ++x) {
-      const std::array<float, 3> p3{source.at(x, y, 0), source.at(x, y, 1),
-                                    source.at(x, y, 2)};
-      const std::array<float, 3> srgb{
-          1.22494018F * p3[0] - 0.22494018F * p3[1],
-          -0.04205695F * p3[0] + 1.04205695F * p3[1],
-          -0.01963755F * p3[0] - 0.07863605F * p3[1] + 1.09827360F * p3[2]};
-      const auto pixel = (static_cast<std::size_t>(y) * width + x) * 3;
-      for (unsigned c = 0; c < 3; ++c) {
-        rgb[pixel + c] = static_cast<std::uint8_t>(std::lround(
-            std::clamp(srgb_oetf(srgb[c] * scene_exposure * inverse_scale),
-                       0.0F, 1.0F) * 255.0F));
-      }
-    }
-  });
-
-  jpeg_compress_struct info{};
-  JpegError error{};
-  unsigned char* output = nullptr;
-  unsigned long output_size = 0;
-  info.err = jpeg_std_error(&error.base);
-  error.base.error_exit = jpeg_fail;
-  if (setjmp(error.jump)) {
-    jpeg_destroy_compress(&info);
-    std::free(output);
-    throw std::runtime_error(std::string("JPEG preview encode: ") + error.message);
-  }
-  jpeg_create_compress(&info);
-  jpeg_mem_dest(&info, &output, &output_size);
-  info.image_width = width;
-  info.image_height = height;
-  info.input_components = 3;
-  info.in_color_space = JCS_RGB;
-  jpeg_set_defaults(&info);
-  jpeg_set_quality(&info, std::clamp(quality, 1, 100), TRUE);
-  info.optimize_coding = TRUE;
-  jpeg_start_compress(&info, TRUE);
-  const std::size_t stride = static_cast<std::size_t>(width) * 3;
-  while (info.next_scanline < info.image_height) {
-    auto* row = rgb.data() + static_cast<std::size_t>(info.next_scanline) * stride;
-    jpeg_write_scanlines(&info, &row, 1);
-  }
-  jpeg_finish_compress(&info);
-  std::vector<std::uint8_t> result(output, output + output_size);
-  jpeg_destroy_compress(&info);
-  std::free(output);
-  return {std::move(result), scale, exposure_ev};
-}
-
-FrameOverlay decode_frame_overlay(const std::filesystem::path& path) {
-  return decode_frame_overlay(read_binary_file(path));
-}
-
-FrameOverlay decode_frame_overlay(const std::vector<std::uint8_t>& bytes) {
-  PngReader reader(bytes);
-  auto* png = reader.png;
-  auto* info = reader.info;
-  png_uint_32 width = 0, height = 0;
-  int bit_depth = 0, color_type = 0, interlace = 0;
-  checked_png_read(png, [&] {
-    png_read_info(png, info);
-    png_get_IHDR(png, info, &width, &height, &bit_depth, &color_type, &interlace, nullptr, nullptr);
-    const bool transparency = png_get_valid(png, info, PNG_INFO_tRNS) != 0;
-    if (color_type == PNG_COLOR_TYPE_PALETTE) png_set_palette_to_rgb(png);
-    if (color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8) png_set_expand_gray_1_2_4_to_8(png);
-    if (transparency) png_set_tRNS_to_alpha(png);
-    if (!(color_type & PNG_COLOR_MASK_COLOR)) png_set_gray_to_rgb(png);
-    // An opaque overlay is allowed; it simply covers the band.
-    if (!(color_type & PNG_COLOR_MASK_ALPHA) && !transparency)
-      png_set_add_alpha(png, bit_depth == 16 ? 0xFFFF : 0xFF, PNG_FILLER_AFTER);
-    if (bit_depth == 16) png_set_swap(png);
-    png_set_interlace_handling(png);
-    png_read_update_info(png, info);
-  });
-  const int bytes_per_sample = bit_depth == 16 ? 2 : 1;
-  const std::size_t row_bytes = png_get_rowbytes(png, info);
-  if (png_get_channels(png, info) != 4 ||
-      row_bytes != static_cast<std::size_t>(width) * 4 * bytes_per_sample)
-    throw std::runtime_error("unsupported frame overlay PNG layout");
-  check_raster_budget(width, height);
-  std::vector<unsigned char> raster(row_bytes * height);
-  std::vector<png_bytep> rows(height);
-  for (png_uint_32 y = 0; y < height; ++y) rows[y] = raster.data() + y * row_bytes;
-  checked_png_read(png, [&] { png_read_image(png, rows.data()); });
-
-  FrameOverlay overlay{width, height, {}};
-  overlay.rgba.resize(static_cast<std::size_t>(width) * height * 4);
-  const float scale = bytes_per_sample == 2 ? 1.0F / 65535.0F : 1.0F / 255.0F;
-  for (std::size_t i = 0; i < overlay.rgba.size(); ++i) {
-    const unsigned sample = bytes_per_sample == 2
-        ? static_cast<unsigned>(raster[i * 2]) | (static_cast<unsigned>(raster[i * 2 + 1]) << 8)
-        : raster[i];
-    overlay.rgba[i] = static_cast<float>(sample) * scale;
-  }
-  return overlay;
-}
-
-}  // namespace hyperdr
+} // namespace hyperdr

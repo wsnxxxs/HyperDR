@@ -4,12 +4,8 @@
 #include "hyperdr/container/gain_map_jpeg.hpp"
 #include "hyperdr/foundation/cancel.hpp"
 #include "hyperdr/foundation/file_io.hpp"
-#include "hyperdr/gainmap/rendition.hpp"
-#include "hyperdr/gainmap/gain_map.hpp"
-#include "hyperdr/gainmap/native_model.hpp"
-#include "hyperdr/model/ncnn_runtime.hpp"
+#include "../../../tests/support/writer_planes.hpp"
 #include "hyperdr/image/frame.hpp"
-#include "hyperdr/look/color_lut.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -117,7 +113,9 @@ void large(const std::string& mode, const std::filesystem::path& output) {
   GainMapResult p;
   {
     FloatImage photo(w,h,3); std::fill(photo.pixels.begin(),photo.pixels.end(),.25F);
-    p.base_linear=frame_image(photo,spec,layout);
+    p.base_linear=FloatImage(layout.width,layout.height,3);
+    std::fill(p.base_linear.pixels.begin(),p.base_linear.pixels.end(),1.F);
+    for(unsigned y=0;y<h;++y)for(unsigned x=0;x<w;++x)for(unsigned c=0;c<3;++c)p.base_linear.at(layout.photo.x+x,layout.photo.y+y,c)=photo.at(x,y,c);
   }
   p.gain_map=FloatImage(layout.width,layout.height,1);
   for(unsigned y=0;y<layout.photo.height;++y)
@@ -191,6 +189,8 @@ void zero_headroom() {
     // Smooth colour ramps: decoders differ in chroma upsampling, which pixel
     // noise would turn into differences that have nothing to do with gain.
     const auto renditions = [&](float hdr_scale, float headroom) {
+      // The source is a finished pair; zero range supplies an SDR alternate.
+      if (headroom == 0) hdr_scale = 1;
       PhotoRenditions images;
       images.sdr = FloatImage(w, h, 3);
       images.hdr = FloatImage(w, h, 3);
@@ -205,13 +205,12 @@ void zero_headroom() {
         }
       images.stats.headroom_stops = headroom;
       if (channels == 1) { images.dual_rendition = true; images.authored_gain_channels = 1; }
-      return gain_map_from_renditions(std::move(images), GainMapWriterProfile::iso_generic);
+      return test::encoded_pair(std::move(images), true);
     };
     // The HDR rendition would carry gain at any real headroom.
     const auto map = renditions(1.5F, 0);
-    // A constant map is stored as one channel shrunk by 16.
-    require(map.gain_map.channels == 1 && map.gain_map.width == w / 16 && map.gain_map.height == h / 16,
-        "zero-headroom gain map was not shrunk");
+    require(map.gain_map.width == w && map.gain_map.height == h,
+        "finished gain-plane dimensions changed");
     require(std::all_of(map.gain_map.pixels.begin(), map.gain_map.pixels.end(), [](float v) { return v == 0; }),
         "zero headroom left gain in the map");
     require(map.headroom_stops == 0 && map.stats.headroom_stops == 0, "zero headroom reported headroom");
@@ -305,35 +304,7 @@ void cancel() {
   request.join();require(cancelled,"encoding ignored cancellation");require(ms<280,"encoding cancellation exceeded 200 ms");
   std::cout << "cancel elapsed=" << ms << " ms (request at 80 ms)\n";
 }
-void reference(const std::filesystem::path& input, const std::filesystem::path& root, bool model) {
-  std::filesystem::create_directories(root);
-  auto decoded=decode_image(input,{});
-  PhotoRenditions photo;
-  if (!model) photo=render_graded_photo(decoded.linear_p3,{},decoded.capture,decoded.describe_input(),RenderTarget::Hdr,{});
-  else {
-    require(install_embedded_ncnn_runtime(), "native model unavailable");
-    GainMapOptions options; options.gain_strength=0; options.look.contrast=1; options.look.vibrance=0; options.look.pop=0;
-    auto gain=make_gain_map(decoded.linear_p3,options,decoded.capture,decoded.describe_input());
-    auto tensor=make_native_model_input(gain.base_linear);
-    NativeModelRequest request; request.model_id="research-cnn-v1"; request.capture=decoded.metadata.capture;
-    apply_native_model_gain_map(gain,tensor,infer_native_model(request,tensor));
-    photo=render_graded_gain_map(gain,{},true);
-    photo.dual_rendition=true;
-    photo.authored_gain_channels=gain.gain_map.channels;
-    for(unsigned c=0;c<3;++c){auto channel=gain_map_channel(gain.metadata,gain.gain_map.channels==1?0:c);
-      photo.authored_gain_map.base_offset[c]=rational_value(channel.base_offset);
-      photo.authored_gain_map.alternate_offset[c]=rational_value(channel.alternate_offset);}
-  }
-  save_floats(root/"render.f32",photo.hdr);
-  const auto p=gain_map_from_renditions(std::move(photo),GainMapWriterProfile::iso_generic);
-  save_floats(root/"sdr.f32",p.base_linear);
-  auto bytes=encode_gain_map_jpeg(p,decoded.metadata,90);
-  verify_gain_map_jpeg(bytes);
-  write_binary_file_atomic(root/"new.jpg",bytes,true);
-  auto ours=decode_image(root/"new.jpg",{});
-  save_floats(root/"native.f32",ours.linear_p3);
-  std::cout << "reference headroom=" << p.headroom_stops << " render=" << p.stats.headroom_stops << '\n';
-}
+
 }
 int main(int argc,char**argv) try {
   try {
@@ -341,7 +312,6 @@ int main(int argc,char**argv) try {
     if(mode=="fixtures" && argc==3) fixtures(argv[2]);
     else if((mode=="panorama"||mode=="portrait")&&argc==3) large(mode,argv[2]);
     else if(mode=="cancel")cancel();
-    else if((mode=="reference"||mode=="reference-model")&&argc==4)reference(argv[2],argv[3],mode=="reference-model");
     else { packaging(); zero_headroom(); cancel_while_finishing(); }
     return 0;
   } catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}

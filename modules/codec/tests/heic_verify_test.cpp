@@ -18,7 +18,7 @@
 #include "hyperdr/container/heif_reader.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include "hyperdr/foundation/progress.hpp"
-#include "hyperdr/gainmap/rendition.hpp"
+#include "../../../tests/support/writer_planes.hpp"
 using namespace hyperdr;
 namespace {
 using Bytes = std::vector<std::uint8_t>;
@@ -307,7 +307,7 @@ void adaptive_cases(int depth) {
 
 void bt2100_cases(HdrEncoding encoding) {
   const auto pq = encoding == HdrEncoding::Pq;
-  const auto bytes = encode_hdr_heic(renditions_from_gain_map(make_gain(96, 64)), {}, 90, encoding);
+  const auto bytes = encode_hdr_heic(test::decoded_pair(make_gain(96, 64)), {}, 90, encoding);
   verify_heic_decodable(bytes, encoding);
   const auto path = test::temporary_directory() / (pq ? "heic-verify-pq.heic" : "heic-verify-hlg.heic");
   write_binary_file_atomic(path, bytes, true);

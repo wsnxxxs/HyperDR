@@ -3,12 +3,8 @@
 // A presentation frame around an exported photograph: a mat of one colour, an
 // optional soft shadow of the print on it, and an optional caption overlay.
 //
-// The frame is SDR by construction. `frame_image` writes every frame pixel
-// from the spec alone, so the SDR and HDR renditions of one export receive
-// bit-identical frames and the gain map packaged from the pair is zero stops
-// there. On an HDR screen the frame therefore sits at reference white while
-// the photograph keeps all of its headroom, and that is the point: paper white
-// beside the print is what makes its highlights read as light.
+// HyperDRRender composites the SDR mat and caption. This module retains the
+// spec and even-pixel layout used by Kit's export planner.
 
 #include "hyperdr/foundation/json.hpp"
 #include "hyperdr/image/image.hpp"
@@ -88,13 +84,6 @@ struct FrameLayout {
   friend bool operator==(const FrameLayout&, const FrameLayout&) = default;
 };
 
-// The decoded caption overlay: interleaved RGBA in [0, 1], colour encoded as
-// Display P3 with the sRGB transfer, alpha straight (unassociated).
-struct FrameOverlay {
-  std::uint32_t width{}, height{};
-  std::vector<float> rgba;
-};
-
 // Reads a hyperdr.frame/v1 document. Unknown members are errors. A relative
 // overlay path resolves against `base_directory` when one is given.
 [[nodiscard]] FrameSpec parse_frame_spec(const json::Value& document,
@@ -111,15 +100,4 @@ struct FrameOverlay {
                                        std::uint32_t photo_height);
 [[nodiscard]] std::string frame_layout_json(const FrameLayout& layout);
 
-// The photo (linear Display P3, three channels) on its framed canvas. Frame
-// pixels never read the photo, so framing both renditions with one spec gives
-// them the same frame bit for bit. The photo's pixels are copied unchanged.
-[[nodiscard]] FloatImage frame_image(const FloatImage& photo, const FrameSpec& spec,
-    const FrameLayout& layout, const FrameOverlay* overlay = nullptr);
-
-// A per-pixel byte mask of the photo, placed the same way, with `frame_value`
-// in every frame pixel. An empty mask stays empty.
-[[nodiscard]] BytePlane frame_mask(std::span<const std::uint8_t> mask,
-    const FrameLayout& layout, std::uint8_t frame_value);
-
-}  // namespace hyperdr
+} // namespace hyperdr

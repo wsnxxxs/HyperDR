@@ -13,10 +13,7 @@ foreach(target hyperdr_capi hyperdr_capi_static)
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 endforeach()
 target_compile_definitions(hyperdr_capi PUBLIC HYPERDR_SHARED PRIVATE HYPERDR_CAPI_BUILD)
-if(WIN32)
-  # The DLL's import library is already named hyperdr.lib.
-  set_target_properties(hyperdr_capi_static PROPERTIES OUTPUT_NAME hyperdr_static)
-elseif(APPLE)
+if(APPLE)
   target_link_options(hyperdr_capi PRIVATE
     "LINKER:-exported_symbols_list,${CMAKE_CURRENT_SOURCE_DIR}/exports.macos")
   set_property(TARGET hyperdr_capi APPEND PROPERTY LINK_DEPENDS

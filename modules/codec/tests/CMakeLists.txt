@@ -94,20 +94,6 @@ if(HYPERDR_WITH_CODECS AND HYPERDR_BUILD_TESTS)
 endif()
 
 if(HYPERDR_WITH_CODECS AND HYPERDR_BUILD_TESTS)
-  add_executable(heif_imageio_renditions heif_imageio_renditions.cpp)
-  target_link_libraries(heif_imageio_renditions PRIVATE HyperDR::codec)
-  target_include_directories(heif_imageio_renditions PRIVATE ${PROJECT_SOURCE_DIR}/modules/codec/src ${PROJECT_SOURCE_DIR}/modules/container/src)
-  hyperdr_configure_target(heif_imageio_renditions)
-endif()
-
-if(HYPERDR_WITH_CODECS AND HYPERDR_BUILD_TESTS)
-  add_test(NAME heif_export_imageio_test COMMAND ${Python3_EXECUTABLE}
-    ${PROJECT_SOURCE_DIR}/tests/hevc/check_imageio.py $<TARGET_FILE:HyperDR>
-    --rendition-fixtures $<TARGET_FILE:heif_imageio_renditions> --build-dir ${CMAKE_BINARY_DIR}/heif-imageio)
-  set_tests_properties(heif_export_imageio_test PROPERTIES TIMEOUT 600 RUN_SERIAL TRUE)
-endif()
-
-if(HYPERDR_WITH_CODECS AND HYPERDR_BUILD_TESTS)
   # Same real TIFF test, deliberately throwing after its first fixture write.
   add_executable(tiff_codec_failure_test tiff_codec_test.cpp)
   target_link_libraries(tiff_codec_failure_test PRIVATE HyperDR::codec TIFF::TIFF)
@@ -117,8 +103,6 @@ if(HYPERDR_WITH_CODECS AND HYPERDR_BUILD_TESTS)
     ${PROJECT_SOURCE_DIR}/tests/support/check_concurrent_temp.py
     $<TARGET_FILE:png_decode_test> $<TARGET_FILE:tiff_codec_test>
     $<TARGET_FILE:hash_test> $<TARGET_FILE:file_io_test>
-    $<TARGET_FILE:frame_request_test> $<TARGET_FILE:resume_state_test>
-    $<TARGET_FILE:color_lut_test> $<TARGET_FILE:discovery_test>
     --failure $<TARGET_FILE:tiff_codec_failure_test>)
   set_tests_properties(native_temp_isolation_test PROPERTIES TIMEOUT 180)
 endif()
@@ -168,4 +152,10 @@ if(HYPERDR_WITH_CODECS AND HYPERDR_BUILD_TESTS)
   hyperdr_configure_target(quality_lab)
   add_library(quality_vt_trace SHARED EXCLUDE_FROM_ALL ${PROJECT_SOURCE_DIR}/tests/quality/vt_trace.mm)
   target_link_libraries(quality_vt_trace PRIVATE "-framework VideoToolbox" "-framework CoreFoundation")
+endif()
+
+if(HYPERDR_WITH_CODECS AND HYPERDR_BUILD_TESTS)
+  add_executable(e5_package_quality EXCLUDE_FROM_ALL ${PROJECT_SOURCE_DIR}/tests/quality/e5_package.cpp)
+  target_link_libraries(e5_package_quality PRIVATE HyperDR::app)
+  hyperdr_configure_target(e5_package_quality)
 endif()

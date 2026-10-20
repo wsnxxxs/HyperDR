@@ -7,12 +7,12 @@
 #include "hyperdr/container/inspect.hpp"
 #include "hyperdr/container/gain_map_jpeg.hpp"
 #include "hyperdr/foundation/file_io.hpp"
-#include "hyperdr/gainmap/gain_map.hpp"
+#include "../../../tests/support/writer_planes.hpp"
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/container/heif_reader.hpp"
 #include "hyperdr/gainmap/reconstruct.hpp"
-#include "hyperdr/gainmap/rendition.hpp"
+#include "../../../tests/support/writer_planes.hpp"
 #include "hyperdr/image/color.hpp"
 #include "hyperdr/image/fidelity.hpp"
 #include "hyperdr/image/transfer.hpp"
@@ -301,12 +301,6 @@ void check_input_headroom(const std::vector<std::uint8_t>& bytes, const char* la
     require(sdr.hdr_headroom == 1.0F,
             "the SDR base of a gain-map input must declare no headroom");
 
-    const auto hdr_preview = hyperdr::encode_preview_jpeg(path, 256, 85);
-    require(hdr_preview.scale > 1.0F,
-            "an HDR input's preview must be divided so its highlights survive");
-    const auto sdr_preview = hyperdr::encode_preview_jpeg(path, 256, 85, base_only);
-    require(sdr_preview.scale == 1.0F,
-            "an SDR input's preview must not be divided");
     std::filesystem::remove(path);
   } catch (...) {
     std::filesystem::remove(path);
@@ -583,18 +577,15 @@ void check_hdr_source_gain_maps(const hyperdr::PhotoMetadata& metadata) {
   require(source.domain == hyperdr::InputDomain::kDisplayReferredHdr,
           "the HLG fixture must decode as an HDR source");
 
-  hyperdr::RenderOptions identity;
-  identity.auto_headroom = false;
-  identity.headroom_stops = 3.0F;
-  identity.look.headroom_max_stops = 3.0F;
-  identity.look.shoulder_start = 0.25F;
-  identity.look.contrast = 1.0F;
-  identity.look.vibrance = 0.0F;
-  auto photo = hyperdr::render_renditions(source.linear_p3, identity, source.capture,
-                                          source.describe_input(),
-                                          hyperdr::RenderTarget::Hdr);
-  require(photo.hdr_is_source, "an HLG photograph must be packaged as its own HDR");
-  const auto gain = hyperdr::gain_map_from_renditions(std::move(photo));
+  hyperdr::PhotoRenditions photo;
+  photo.hdr=source.linear_p3; photo.sdr=source.linear_p3;
+  photo.stats.headroom_stops=3; photo.stats.headroom_linear=8;
+  for(unsigned y=0;y<photo.sdr.height;++y)for(unsigned x=0;x<photo.sdr.width;++x){
+    const auto* pixel=photo.hdr_pixel(x,y);
+    const float divisor=std::max({1.F,pixel[0],pixel[1],pixel[2]});
+    for(unsigned c=0;c<3;++c)photo.sdr.at(x,y,c)/=divisor;
+  }
+  const auto gain = hyperdr::test::encoded_pair(std::move(photo));
   require(gain.gain_map.width == 3200 && gain.gain_map.height == 48,
           "an HDR source's gain map must be full resolution");
 
@@ -653,8 +644,8 @@ void check_rgb_gain_map_jpeg(const hyperdr::PhotoMetadata& metadata) {
       photo.hdr.at(x, y, c) = target[c];
     }
   }
-  const auto packed = hyperdr::gain_map_from_renditions(photo,
-      hyperdr::GainMapWriterProfile::iso_generic);
+  const auto packed = hyperdr::test::encoded_pair(photo,
+      false);
   const auto bytes = hyperdr::encode_gain_map_jpeg(packed, metadata, 95);
   hyperdr::verify_gain_map_jpeg(bytes);
   const auto decoded = decode_gain_map_jpeg_input(bytes);
@@ -685,8 +676,8 @@ void check_gain_map_jpeg_icc(const hyperdr::PhotoMetadata& metadata) {
   photo.stats.headroom_linear = 2;
   for (bool clamp : {false, true}) for (bool pair : {false, true}) {
     photo.clamp_srgb = clamp;
-    auto bytes = hyperdr::encode_gain_map_jpeg(hyperdr::gain_map_from_renditions(photo,
-        hyperdr::GainMapWriterProfile::iso_generic), metadata, 95);
+    auto bytes = hyperdr::encode_gain_map_jpeg(hyperdr::test::encoded_pair(photo,
+        false), metadata, 95);
     (void)pair;
     hyperdr::verify_gain_map_jpeg(bytes);
     constexpr std::string_view signature = "ICC_PROFILE";
@@ -951,13 +942,13 @@ void check_gain_map_jpeg_pair(const hyperdr::PhotoMetadata& metadata) {
     }
     std::cout << "ISO JPEG RGB gain-map MSE: " << error / photo.hdr.pixels.size() << '\n';
   };
-  const auto packed = hyperdr::gain_map_from_renditions(photo, hyperdr::GainMapWriterProfile::iso_generic);
+  const auto packed = hyperdr::test::encoded_pair(photo, false);
   check_hdr(hyperdr::encode_gain_map_jpeg(packed, metadata, 90));
   // Zero headroom is a valid SDR-compatible ISO gain-map JPEG.
   photo.hdr = photo.sdr;
   photo.stats.headroom_stops = 0;
   hyperdr::verify_gain_map_jpeg(hyperdr::encode_gain_map_jpeg(
-      hyperdr::gain_map_from_renditions(photo, hyperdr::GainMapWriterProfile::iso_generic), metadata, 90));
+      hyperdr::test::encoded_pair(photo, false), metadata, 90));
 }
 
 }  // namespace
@@ -1079,10 +1070,7 @@ void check_apple_legacy_heic() {
 
 int main() try {
   try {
-    hyperdr::GainMapOptions options;
-    options.auto_exposure = false;
-    options.auto_headroom = false;
-    options.headroom_stops = 3.0F;
+    const float options = 3.0F;
     hyperdr::PhotoMetadata metadata;
     metadata.model = "ILCE-7RM5";
     metadata.lens = "Synthetic test lens";
@@ -1106,7 +1094,7 @@ int main() try {
       // The transitional macOS build intentionally has a decoder only. Keep
       // its JPEG/R and AVIF round trips active without generating HEVC fixtures.
       const auto small = make_synthetic(64, 32);
-      const auto gain = hyperdr::make_gain_map(small, options);
+      const auto gain = hyperdr::test::gradient_pair(small, options);
       const auto expected = hyperdr::reconstruct_gain_map(
           gain.base_linear, gain.gain_map, gain.metadata, gain.headroom_stops);
       const auto jpeg = hyperdr::encode_gain_map_jpeg(gain, metadata, 90);
@@ -1115,7 +1103,7 @@ int main() try {
                                 "gain-map JPEG round trip changed brightness");
       for (const auto encoding : {hyperdr::HdrEncoding::AvifPq,
                                   hyperdr::HdrEncoding::AvifHlg}) {
-        const auto bytes = hyperdr::encode_avif(hyperdr::renditions_from_gain_map(gain), metadata, 80, encoding);
+        const auto bytes = hyperdr::encode_avif(hyperdr::test::decoded_pair(gain), metadata, 80, encoding);
         hyperdr::verify_avif_decodable(bytes);
         require_linear_round_trip(decode_encoded_input(bytes, "avif", ".avif"), expected,
                                   "AVIF round trip changed brightness");
@@ -1128,7 +1116,7 @@ int main() try {
     // Default 8-bit output through the grid path (wider than one 512 tile), with a
     // full decode and gain-map reconstruction regression, not just structure checks.
     const auto large = make_synthetic(2600, 1408);
-    const auto large_gain = hyperdr::make_gain_map(large, options);
+    const auto large_gain = hyperdr::test::gradient_pair(large, options);
     const auto bytes8 = hyperdr::encode_adaptive_heic(large_gain, metadata, 90, 8);
     check_structure(bytes8, "8-bit grid");
     require_hevc_profiles(bytes8, false, true);
@@ -1141,7 +1129,7 @@ int main() try {
 
     // Single-tile 8-bit output.
     const auto small = make_synthetic(64, 32);
-    const auto small_gain = hyperdr::make_gain_map(small, options);
+    const auto small_gain = hyperdr::test::gradient_pair(small, options);
 
     // The name no longer decides which decoder reads a raster. A phone gallery
     // exports HEIC under a .jpg suffix routinely, and that file used to reach
@@ -1302,7 +1290,7 @@ int main() try {
     for (const auto encoding :
          {hyperdr::HdrEncoding::AvifPq, hyperdr::HdrEncoding::AvifHlg}) {
       const bool pq = encoding == hyperdr::HdrEncoding::AvifPq;
-      const auto avif = hyperdr::encode_avif(hyperdr::renditions_from_gain_map(small_gain), metadata, 80, encoding);
+      const auto avif = hyperdr::encode_avif(hyperdr::test::decoded_pair(small_gain), metadata, 80, encoding);
       require(avif.size() > 32, "AVIF encoder produced an implausibly small file");
       require(!contains_text(avif, "AdaptiveHDR") &&
                   !contains_text(avif, "ISO-21496-1"),
@@ -1340,9 +1328,8 @@ int main() try {
     }
     std::cout << "PQ/HLG AVIF input round trips passed\n";
     check_png_cicp_headroom();
-    auto no_headroom_options = options;
-    no_headroom_options.headroom_stops = 0.0F;
-    const auto no_headroom_gain = hyperdr::make_gain_map(small, no_headroom_options);
+    const float no_headroom_options = 0;
+    const auto no_headroom_gain = hyperdr::test::gradient_pair(small, no_headroom_options);
     hyperdr::verify_gain_map_jpeg(
         hyperdr::encode_gain_map_jpeg(no_headroom_gain, metadata, 20));
     auto gain_probe = small_gain;
@@ -1405,7 +1392,7 @@ int main() try {
     // Single-image BT.2100 exports must be Main10, carry the requested transfer
     // function, remain distinct from gain-map topology, and decode end-to-end.
     for (const auto encoding : {hyperdr::HdrEncoding::Pq, hyperdr::HdrEncoding::Hlg}) {
-        const auto hdr_bytes = hyperdr::encode_hdr_heic(hyperdr::renditions_from_gain_map(small_gain), metadata, 80, encoding);
+        const auto hdr_bytes = hyperdr::encode_hdr_heic(hyperdr::test::decoded_pair(small_gain), metadata, 80, encoding);
         require_hevc_profiles(hdr_bytes, true, false);
         const auto inspection = hyperdr::inspect_heif(hdr_bytes);
         require(inspection.structurally_valid && inspection.has_heic_brand &&
@@ -1490,8 +1477,8 @@ int main() try {
                                hyperdr::HdrEncoding::AvifPq, hyperdr::HdrEncoding::AvifHlg}) {
       const bool avif = encoding == hyperdr::HdrEncoding::AvifPq || encoding == hyperdr::HdrEncoding::AvifHlg;
       const bool pq = encoding == hyperdr::HdrEncoding::Pq || encoding == hyperdr::HdrEncoding::AvifPq;
-      const auto bytes = avif ? hyperdr::encode_avif(hyperdr::renditions_from_gain_map(checker_gain), metadata, 90, encoding)
-                              : hyperdr::encode_hdr_heic(hyperdr::renditions_from_gain_map(checker_gain), metadata, 90, encoding);
+      const auto bytes = avif ? hyperdr::encode_avif(hyperdr::test::decoded_pair(checker_gain), metadata, 90, encoding)
+                              : hyperdr::encode_hdr_heic(hyperdr::test::decoded_pair(checker_gain), metadata, 90, encoding);
       const auto full = decode_encoded_input(bytes, "checker-full", avif ? ".avif" : ".heic");
       const auto reduced = decode_encoded_input(bytes, "checker-preview", avif ? ".avif" : ".heic",
                                                 reduced_jpeg_options);

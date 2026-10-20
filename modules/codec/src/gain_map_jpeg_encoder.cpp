@@ -11,7 +11,6 @@
 
 #include <jpeglib.h>
 #include "hyperdr/container/gain_map_jpeg.hpp"
-#include "hyperdr/gainmap/rendition.hpp"
 #include <lcms2.h>
 
 #include <algorithm>

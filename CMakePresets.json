@@ -13,8 +13,7 @@
       "binaryDir": "${sourceDir}/build-core",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "HYPERDR_WITH_CODECS": "OFF",
-        "HYPERDR_WITH_NCNN": "OFF"
+        "HYPERDR_WITH_CODECS": "OFF"
       }
     },
     {
@@ -25,7 +24,6 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "HYPERDR_WITH_CODECS": "ON",
-        "HYPERDR_WITH_NCNN": "ON",
         "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cmake/triplets"
       }
     },
@@ -61,7 +59,7 @@
       "name": "ios-arm64-codecs",
       "inherits": "codecs",
       "displayName": "iOS arm64 (device slice)",
-      "description": "Engine slice for iOS devices. No ncnn: inference moves to Core ML (P7).",
+      "description": "Engine writer slice for iOS devices.",
       "binaryDir": "${sourceDir}/build-ios",
       "condition": {
         "type": "equals",
@@ -75,8 +73,6 @@
         "CMAKE_OSX_DEPLOYMENT_TARGET": "26.0",
         "CMAKE_TOOLCHAIN_FILE": "$env{HOME}/vcpkg/scripts/buildsystems/vcpkg.cmake",
         "VCPKG_TARGET_TRIPLET": "arm64-ios",
-        "VCPKG_MANIFEST_NO_DEFAULT_FEATURES": "ON",
-        "HYPERDR_WITH_NCNN": "OFF",
         "HYPERDR_BUILD_TESTS": "OFF"
       }
     },

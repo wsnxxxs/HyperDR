@@ -64,7 +64,6 @@ struct PackageRequest {
   int quality{90};
   // Base bit depth for Adaptive HEIC; 8 or 10.
   int depth{8};
-  HevcPreset hevc_preset{HevcPreset::Slow};
   // SDR JPEG/TIFF only; the format default applies when unset.
   std::optional<ColorGamut> gamut;
   bool verify{true};

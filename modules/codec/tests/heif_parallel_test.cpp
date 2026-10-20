@@ -2,7 +2,7 @@
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/container/heif_tmap.hpp"
 #include "hyperdr/container/inspect.hpp"
-#include "hyperdr/gainmap/rendition.hpp"
+#include "../../../tests/support/writer_planes.hpp"
 
 #include "hevc/hevc.hpp"
 #include "hevc_probe_policy.hpp"
@@ -222,22 +222,20 @@ int main(int argc, char** argv) {
     adaptive_photo.sdr = adaptive_photo.hdr;
     adaptive_photo.hdr_is_source = true;
     adaptive_photo.stats.headroom_stops = 3.0F;
-    const auto gain = hyperdr::gain_map_from_renditions(
-        std::move(adaptive_photo), hyperdr::GainMapWriterProfile::apple_strict);
+    const auto gain = hyperdr::test::encoded_pair(
+        std::move(adaptive_photo), true);
     require(gain.gain_map.width == 3073 && gain.gain_map.height == 65,
             "fixture must tile the full-resolution gain map");
     for (const int depth : {8, 10}) {
-      const auto preset = depth == 8 ? hyperdr::HevcPreset::Slow
-                                     : hyperdr::HevcPreset::Medium;
       std::vector<std::uint8_t> serial;
       std::vector<std::uint8_t> parallel;
       {
         WorkerOverride workers("4");
-        parallel = hyperdr::encode_adaptive_heic(gain, metadata, 82, depth, preset);
+        parallel = hyperdr::encode_adaptive_heic(gain, metadata, 82, depth);
       }
       {
         WorkerOverride workers("1");
-        serial = hyperdr::encode_adaptive_heic(gain, metadata, 82, depth, preset);
+        serial = hyperdr::encode_adaptive_heic(gain, metadata, 82, depth);
       }
       compare_files(serial, parallel, 3073, 65, true, depth,
                     "Adaptive HEIC " + std::to_string(depth) + "-bit");
@@ -254,12 +252,12 @@ int main(int argc, char** argv) {
       {
         WorkerOverride workers("4");
         parallel = hyperdr::encode_hdr_heic(
-            photo, metadata, 82, encoding, hyperdr::HevcPreset::Medium);
+            photo, metadata, 82, encoding);
       }
       {
         WorkerOverride workers("1");
         serial = hyperdr::encode_hdr_heic(
-            photo, metadata, 82, encoding, hyperdr::HevcPreset::Medium);
+            photo, metadata, 82, encoding);
       }
       compare_files(serial, parallel, 2051, 67, false, 10,
                     encoding == hyperdr::HdrEncoding::Pq ? "PQ HEIC" : "HLG HEIC");

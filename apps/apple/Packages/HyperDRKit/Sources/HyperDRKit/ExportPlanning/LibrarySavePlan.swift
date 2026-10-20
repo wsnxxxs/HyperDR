@@ -9,7 +9,7 @@ public enum LibrarySaveMode: String, Sendable, Hashable, Codable, CaseIterable {
     /// `PHAssetCreationRequest`: a second photo beside the original.
     case newPhoto
 
-    /// `dest.photos.replace` / `.new` in `Localizable.xcstrings`.
+    /// `dest.photos.replace` / `.new` in the apps' catalogues.
     public var labelKey: String {
         switch self {
         case .replace: "dest.photos.replace"

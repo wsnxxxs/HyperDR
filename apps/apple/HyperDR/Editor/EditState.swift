@@ -52,7 +52,6 @@ nonisolated struct ExportChoices: Equatable, Sendable {
 
 /// A one-shot message the view shows in place (not an alert).
 nonisolated enum EditorNotice: Equatable {
-    case rangeClamped(maxStops: Double)
     case clipboardImageUnsupported
 }
 

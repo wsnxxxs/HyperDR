@@ -92,7 +92,8 @@ extension EditorModel {
     func captureExport() throws -> ExportIntent {
         let capture = try editor.exportCapture()
         let model = restoredModel.flatMap { $0.recipe == capture.recipe ? $0.identity : nil }
-        return ExportIntent(capture: capture, frame: try makeExportFrame(), choices: exportChoices, expectedModelIdentity: model)
+        return ExportIntent(capture: capture, frame: try makeExportFrame(), choices: exportChoices,
+                            capabilities: exportCapabilities?.exportFacts ?? .init(), expectedModelIdentity: model)
     }
     /// Capture immediately before presenting the save panel (or starting a
     /// fixed-folder export). Only the most recently issued token remains valid.
@@ -201,7 +202,7 @@ extension EditorModel {
             if error.code != "raw_unsupported", let line = export.lastLine, !line.isEmpty, detail?.contains(line) != true {
                 detail = detail.map { $0 + "\n" + line } ?? line
             }
-            failure = UserFacingError(code: error.code, detail: detail, variant: variant)
+            failure = UserFacingError(code: error.code, detail: detail, variant: variant, suggestedLongEdge: error.suggestedLongEdge)
         }
         export.isStopping = false; exportTask = nil
         if failure?.code == "session_expired" { handleExportError(failure!); return }
@@ -487,6 +488,8 @@ struct ExportIntent {
     let capture: EditorExportCapture
     let frame: FrameExportPlan?
     let choices: ExportChoices
+    /// The encoder facts the plan checks the format against.
+    var capabilities = ExportEncodingCapabilities()
     /// Set when re-rendering a restored version that used AI.
     var expectedModelIdentity: String? = nil
 
@@ -494,7 +497,7 @@ struct ExportIntent {
     var request: ExportPlanRequest {
         capture.planRequest(.custom(choices.customFormat), frame: ExportFrameFacts(canvas: frame.map {
             ExportPixelSize(width: $0.layout.width, height: $0.layout.height)
-        }))
+        }), capabilities: capabilities)
     }
 
     func snapshot(revision: RecipeSourceRevision) -> RecipeExportSnapshot {

@@ -18,12 +18,15 @@ nonisolated struct UserFacingError: Error, Equatable, Identifiable, Sendable {
     let code: String
     let detail: String?
     let variant: String?
+    /// An export that ran out of memory: the largest long edge that fits.
+    let suggestedLongEdge: Int?
 
-    init(id: UUID = UUID(), code: String, detail: String? = nil, variant: String? = nil) {
+    init(id: UUID = UUID(), code: String, detail: String? = nil, variant: String? = nil, suggestedLongEdge: Int? = nil) {
         self.id = id
         self.code = code
         self.detail = detail
         self.variant = variant
+        self.suggestedLongEdge = suggestedLongEdge
     }
 }
 

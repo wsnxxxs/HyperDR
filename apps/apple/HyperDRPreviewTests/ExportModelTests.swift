@@ -1,5 +1,6 @@
 import AppKit
 import XCTest
+import HyperDRDesign
 import HyperDRKit
 import HyperDRRecipe
 import HyperDRRender
@@ -247,6 +248,28 @@ import HyperDRRender
         request.choice = .custom(.init(encoding: .avifPq, longEdge: edge))
         XCTAssertNil(ExportLongEdge.memoryBlocker(ExportPlanner.plan(request, budget: budget)))
         XCTAssertNil(ExportLongEdge.admissible(ExportPlanner.plan(request, budget: FixedExportMemoryBudget(bytes: 8_000_000_000))))
+    }
+    /// A run that ran out of memory offers the largest long edge that fits
+    /// (Kit's typed refusal); Kit's reasons read in the shared words; the
+    /// plan request carries the encoder facts (K6).
+    func testOutOfMemoryCarriesTheLongEdgeAndTheReasonsTheirWords() async throws {
+        let error = UserFacingError(RecipeExportError.memoryExceeded(.memory(needed: 5_000_000_000, available: 1_000_000_000,
+            size: .init(width: 6000, height: 4000), maxLongEdge: 2400)))
+        XCTAssertEqual(error.code, "export_memory_budget")
+        XCTAssertEqual(error.suggestedLongEdge, 2400)
+        let (m,s) = await ready()
+        XCTAssertEqual(try m.captureExport().request.capabilities, m.exportCapabilities?.exportFacts)
+        await running(m,s)
+        s.sendExport(.finished(result: nil, failure: error))
+        await eventually(timeout: .seconds(10)) { m.export.phase == .failed }
+        XCTAssertEqual(m.export.failure?.suggestedLongEdge, 2400)
+
+        XCTAssertEqual(ExportBlockReason.photosNotAvailable(.notVerified).destinationShortPhrase, .notYetAvailable)
+        XCTAssertNil(ExportBlockReason.hdrOff(.pq).destinationShortPhrase)
+        XCTAssertEqual(ExportBlockReason.encoderUnavailable(.pq, .main10Unavailable).phrase, .hevcMain10Unavailable)
+        XCTAssertEqual(ExportNotice.ceiling(stops: 3, scope: .format(.pq)).phrase, .ceiling(stops: "+3", byFormat: true))
+        XCTAssertEqual(ExportBlockReason.memory(needed: 3_100_000_000, available: 900_000_000, size: .init(width: 1, height: 1),
+            maxLongEdge: 10).phrase, .memory(needed: "3.1 GB", available: "900 MB"))
     }
     /// R36-003: Render's errors read as the messages Kit's already had.
     func testRenderErrorsMapToExistingMessages() {

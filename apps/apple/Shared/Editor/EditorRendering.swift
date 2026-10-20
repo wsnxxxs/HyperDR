@@ -82,6 +82,9 @@ nonisolated struct EditorSource: Equatable, Sendable {
     var sourceValues: [String: Double] = [:]
     /// Capability strings that hold (`ParameterDeclaration.capability`).
     var capabilities: Set<String> = []
+    /// The file carries transparency, which an export fills (Kit's
+    /// `ExportSource.hasAlpha`).
+    var hasAlpha = false
 }
 
 /// One render of the open photo.

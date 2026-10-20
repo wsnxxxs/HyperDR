@@ -5202,23 +5202,6 @@
         }
       }
     },
-    "export.rangeClamped %@ %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "HDR expansion range lowered to %2$@ stops, the %1$@ limit."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "HDR 扩展范围已按 %1$@ 上限调整为 %2$@ 档。"
-          }
-        }
-      }
-    },
     "export.title" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9520,24 +9503,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "长边（px）"
-          }
-        }
-      }
-    },
-    "export.useLongEdge %@" : {
-      "comment" : "Export footer: memory blocks the export; sets the largest long edge that fits, in pixels.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Change to long edge %@ px"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "改为长边 %@ px"
           }
         }
       }

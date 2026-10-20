@@ -208,6 +208,13 @@ final class EDRCanvasUIView: UIView {
         }
     }
 
+    /// Back to the whole photo, fitted.
+    func fit() {
+        var next = CanvasTransform(imageSize: geometry.imageSize, viewport: bounds.size)
+        next.backingScale = contentScaleFactor
+        apply(next)
+    }
+
     private func apply(_ next: CanvasTransform) {
         guard next != geometry else { return }
         geometry = next
@@ -226,11 +233,19 @@ extension EDRCanvasUIView: UIGestureRecognizerDelegate {
 /// SwiftUI wrapper of `EDRCanvasUIView`.
 struct EDRCanvas: UIViewRepresentable {
     var content: EDRCanvasUIView.Content?
+    /// A change fits the whole photo again (entering or leaving the frame view).
+    var fitRequest = false
     var onHeadroom: (HeadroomSnapshot) -> Void
     var onDrawableSize: (HyperDRRender.PixelSize) -> Void
     var onHoldOriginal: (Bool) -> Void
     var onError: (String) -> Void
     var onTransform: (CanvasTransform) -> Void
+
+    final class Coordinator {
+        var fitRequest: Bool?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> EDRCanvasUIView {
         let view = EDRCanvasUIView(frame: .zero)
@@ -245,6 +260,8 @@ struct EDRCanvas: UIViewRepresentable {
         view.onError = onError
         view.onTransform = onTransform
         if !Self.same(view.content, content) { view.content = content }
+        if let last = context.coordinator.fitRequest, last != fitRequest { view.fit() }
+        context.coordinator.fitRequest = fitRequest
     }
 
     private static func same(_ a: EDRCanvasUIView.Content?, _ b: EDRCanvasUIView.Content?) -> Bool {

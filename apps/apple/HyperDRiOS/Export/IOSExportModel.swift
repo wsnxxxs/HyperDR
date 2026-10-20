@@ -47,10 +47,25 @@ nonisolated struct ExportStack: Sendable {
 /// - Cancelling the run cancels the service's task. Cancelling the system
 ///   save sheet only cancels that delivery: the verified version stays, and
 ///   can be saved or shared again.
-/// - Frames are not exported on iOS yet; the Photos destination is shown but
-///   not available.
+/// - The presentation frame the user chose goes with every export: Kit lays
+///   it out around the photo at the size the choice writes, and Render
+///   composites it (`FrameExportPlan`). The Photos destination is shown but
+///   not available yet.
 @MainActor @Observable final class IOSExportModel {
     enum Page: Hashable { case destination, custom }
+
+    /// What the frame is laid out from: the user's settings and the photo's Exif.
+    struct Framing: Equatable {
+        var settings: FrameSettings
+        var facts: CaptureFacts
+    }
+
+    /// One frame plan, for one choice of one photo.
+    private struct FrameKey: Equatable {
+        let framing: Framing
+        let size: PixelSize
+        let choice: ExportChoice
+    }
 
     struct Finished {
         let result: RecipeExportResult
@@ -103,6 +118,11 @@ nonisolated struct ExportStack: Sendable {
     /// The device's encoder facts, once the stack is up.
     private(set) var capabilities = ExportEncodingCapabilities()
 
+    /// The frame exports carry, set by the session.
+    var framing = Framing(settings: FrameSettings(), facts: CaptureFacts())
+    /// The last frame plan: its caption is drawn into a PNG, once per choice.
+    @ObservationIgnored private var frameCache: (key: FrameKey, plan: Result<FrameExportPlan?, any Error>)?
+
     /// Whether the editor's photo has a session (open or still opening).
     private(set) var hasPhoto = false
     /// The host's photo request being loaded (copied or decoded), from the
@@ -144,10 +164,50 @@ nonisolated struct ExportStack: Sendable {
         return false
     }
 
-    /// The plan for the current choice, from the editor as it is.
+    var isChoosing: Bool {
+        if case .choosing = phase { return true }
+        return false
+    }
+
+    /// The plan for the current choice, from the editor as it is, with the
+    /// frame's canvas when the frame is on.
     func plan(_ editor: RecipeEditor) -> ExportPlan? {
         guard let capture = try? editor.exportCapture() else { return nil }
-        return ExportPlanner.plan(capture.planRequest(choice, capabilities: capabilities))
+        let frame = (try? framePlan(capture, choice: choice).get()) ?? nil
+        return ExportPlanner.plan(capture.planRequest(choice, frame: Self.facts(frame), capabilities: capabilities))
+    }
+
+    /// The frame for this choice of this photo: nil while the frame is off;
+    /// a failure when the engine refuses the style for the photo.
+    private func framePlan(_ capture: EditorExportCapture, choice: ExportChoice) -> Result<FrameExportPlan?, any Error> {
+        guard framing.settings.isEnabled else { return .success(nil) }
+        let size = capture.source.pixelSize
+        let key = FrameKey(framing: framing, size: size, choice: choice)
+        if let frameCache, frameCache.key == key { return frameCache.plan }
+        let plan = Result { try FrameExportPlan.make(settings: framing.settings, facts: framing.facts, photoSize: size,
+                                                     choice: choice) }
+        frameCache = (key, plan)
+        return plan
+    }
+
+    private static func facts(_ frame: FrameExportPlan?) -> ExportFrameFacts {
+        ExportFrameFacts(canvas: frame.map { ExportPixelSize(width: $0.layout.width, height: $0.layout.height) })
+    }
+
+    /// The frame is on and the engine refuses its style for this photo.
+    func frameMisfits(_ editor: RecipeEditor) -> Bool {
+        guard framing.settings.isEnabled, let capture = try? editor.exportCapture() else { return false }
+        if case .failure = framePlan(capture, choice: choice) { return true }
+        return false
+    }
+
+    /// The written size: the frame's canvas, else the photo after the
+    /// choice's size limit.
+    func outputSize(_ plan: ExportPlan, _ editor: RecipeEditor) -> (width: Int, height: Int) {
+        if let capture = try? editor.exportCapture(), case .success(let frame?) = framePlan(capture, choice: choice) {
+            return (frame.layout.width, frame.layout.height)
+        }
+        return (plan.size.width, plan.size.height)
     }
 
     /// Why a destination cannot be chosen: only the Photos destination
@@ -215,7 +275,7 @@ nonisolated struct ExportStack: Sendable {
     /// without blockers (which include a destination not open yet). The session may
     /// still be hashing; the run waits for it.
     func canStart(_ plan: ExportPlan?, _ editor: RecipeEditor) -> Bool {
-        isSettled(editor) && luts.missingLook(editor) == nil && plan?.isExecutable == true
+        isSettled(editor) && luts.missingLook(editor) == nil && !frameMisfits(editor) && plan?.isExecutable == true
     }
 
     /// "Custom format…": the destination's encoding, gamut and quality carried over.
@@ -264,6 +324,18 @@ nonisolated struct ExportStack: Sendable {
         }
     }
 
+    /// The photo was closed: its session goes, and so does any still opening.
+    func photoClosed() {
+        if let pending { discard(pending) }
+        if let current { discard(current) }
+        pending = nil
+        current = nil
+        hasPhoto = false
+        sessionFailure = nil
+        frameCache = nil
+        phase = .choosing
+    }
+
     /// The editor could not open `url`; the previous photo stays.
     func photoFailed(_ url: URL) {
         guard let opening = pending, opening.url == url else { return }
@@ -300,7 +372,12 @@ nonisolated struct ExportStack: Sendable {
             phase = .failed(Failure(key: "ios.error.sourceChanged", detail: nil))
             return
         }
-        let request = capture.planRequest(choice)
+        let frame: FrameExportPlan?
+        do { frame = try framePlan(capture, choice: choice).get() } catch {
+            phase = .failed(Failure(key: "ios.frame.misfit", detail: nil))
+            return
+        }
+        let request = capture.planRequest(choice, frame: Self.facts(frame))
         let stack = exportStack()
         run += 1
         let run = self.run
@@ -319,7 +396,9 @@ nonisolated struct ExportStack: Sendable {
                     catch where !Self.isCancellation(error) { throw RecipeExportError.missingLUT }
                 }
                 let result = try await stack.service.export(
-                    session: opened.session, snapshot: capture.snapshot(revision: opened.revision), request: request,
+                    session: opened.session,
+                    snapshot: RecipeExportSnapshot(recipe: capture.recipe, source: opened.revision, frame: frame?.snapshot),
+                    request: request,
                     lut: capture.lut, destination: nil,
                     progress: { progress in Task { @MainActor in self?.progressed(progress, run: run) } })
                 let file = try await stack.sessions.stageExportForTransfer(opened.session, export: result.record.id)

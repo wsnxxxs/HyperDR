@@ -142,10 +142,16 @@ extension EditorModel {
                 try Task.checkCancellation()
                 let job = try intent.get().job(revision: try await services.sourceRevision(photo))
                 try Task.checkCancellation()
+                // The size written: the frame's canvas, else the photo after
+                // the format's long edge (the history keeps written pixels).
                 let exportSize: PixelSize?
                 if let frame = try intent.get().frame {
                     exportSize = PixelSize(width: frame.layout.width, height: frame.layout.height)
-                } else { exportSize = document?.pixelSize }
+                } else {
+                    let request = job.request
+                    let fitted = ExportPlanner.photoSize(for: request.choice, photo: request.source.pixelSize)
+                    exportSize = PixelSize(width: fitted.width, height: fitted.height)
+                }
                 let pixels = exportSize.map { Double($0.width) * Double($0.height) } ?? 0
                 export.durations = ExportETA.durations(history: timingHistory, kind: .init(isRAW: photo.formatLabel == "RAW",
                     encoding: snapshot.encoding, isAI: false, hasFrame: framed, verifies: true), pixels: pixels)

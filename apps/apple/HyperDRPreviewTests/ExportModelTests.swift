@@ -519,6 +519,14 @@ extension ExportModelTests {
         XCTAssertNil(s.exportCalls.first?.job.snapshot.frame)
         XCTAssertEqual(try XCTUnwrap(m.export.durations)[0],10,accuracy:0.0001,"Without a frame, ETA must use the exported photo's pixels")
         m.cancelExport();await eventually(timeout:.seconds(10)) { !m.export.isInFlight }
+        // R46-001: a long edge shrinks what is written, and the estimate with it.
+        let edge = min(1080, max(size.width, size.height) - 1)
+        m.setExportLongEdge(edge)
+        let fitted = ExportPixelSize(width: size.width, height: size.height).fitted(longEdge: edge)
+        await running(m,s)
+        await eventually(timeout:.seconds(10)) { m.export.durations != nil }
+        XCTAssertEqual(try XCTUnwrap(m.export.durations)[0], 10 * Double(fitted.width) * Double(fitted.height) / pixels, accuracy: 0.0001)
+        m.cancelExport();await eventually(timeout:.seconds(10)) { !m.export.isInFlight }
     }
 
     func testEnabledFrameETAUsesTheActualExportCanvas() async throws {

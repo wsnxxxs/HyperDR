@@ -1,11 +1,10 @@
 #!/bin/bash
-# Builds the engine xcframework and its static archive.
+# Builds the engine xcframework and its static archives.
 #
 # Default: the macOS arm64 slice only, which is what the Swift package tests and
-# the macOS app need (and what CI builds on every run).
-#   bash scripts/build_xcframework.sh [VCPKG_ROOT] [--platforms all]
-# `--platforms all` adds the iOS device and iOS simulator slices, so the
-# xcframework carries the same three slices the multi-platform app links.
+# the macOS app link. `--platforms all` adds the iOS device and iOS simulator
+# slices; the iOS app target starts linking this package in P7-2b/P7-3b.
+#   bash scripts/build_xcframework.sh [VCPKG_ROOT] [--platforms macos|all]
 #
 # Build products stay local; the engine is one static archive per slice with no
 # dylib to embed.
@@ -122,7 +121,11 @@ if [[ ! -f "$toolchain" ]]; then
 fi
 echo "Using vcpkg toolchain: $toolchain"
 
+# The output directory is rebuilt from scratch so it always holds exactly the
+# slices this run built: a stale ios/ from an earlier `--platforms all` would
+# otherwise be gated (and shipped) as if the macOS-only build had produced it.
 out="$repo/build/xcframework"
+rm -rf "$out"
 mkdir -p "$out/headers"
 cp "$repo/modules/capi/include/hyperdr/hyperdr.h" "$out/headers/"
 cp "$repo/apps/apple/Packages/HyperDREngine/Modules/module.modulemap" "$out/headers/"
@@ -150,14 +153,23 @@ if line is None:
     raise SystemExit(f'cannot find the {target} link line in {work}; '
                      'the archive closure is read from it')
 tokens = shlex.split(line)
-archives = [work / 'libhyperdr.a']
 # Only archives are collected, so a dependency that became a dylib would be
-# dropped from the xcframework silently and fail later, in the app's link.
-dylibs = [token for token in tokens
-          if '.dylib' in token and not token.startswith(('/usr/lib/', '/System/'))]
+# dropped from the xcframework silently and fail later, in the app's link
+# (R7-1602). Every slice is checked: on iOS the closure is read from the C ABI
+# shared library, whose own output and install name are dylibs, so the values of
+# those options are not inputs and are skipped.
+option_values = set()
+for index, token in enumerate(tokens[:-1]):
+    if token in ('-o', '-install_name', '-current_version', '-compatibility_version',
+                 '-exported_symbols_list', '-framework', '-F', '-L', '-u'):
+        option_values.add(index + 1)
+dylibs = [token for index, token in enumerate(tokens)
+          if '.dylib' in token and index not in option_values
+          and not token.startswith(('/usr/lib/', '/System/'))]
 if dylibs:
-    sys.exit('The CLI link line names non-system dynamic libraries, which the xcframework '
-             'cannot carry: ' + ', '.join(dylibs))
+    raise SystemExit(f'The {platform} link line names non-system dynamic libraries, '
+                     'which the xcframework cannot carry: ' + ', '.join(dylibs))
+archives = [work / 'libhyperdr.a']
 for token in tokens:
     if token.endswith('.a'):
         path = pathlib.Path(token)
@@ -226,7 +238,13 @@ rm -rf "$out/HyperDREngineCore.xcframework"
 xcodebuild -create-xcframework "${libraries[@]}" -output "$out/HyperDREngineCore.xcframework"
 mkdir -p "$repo/apps/apple/Packages/HyperDREngine/Artifacts"
 ln -sfn ../../../../../build/xcframework/HyperDREngineCore.xcframework "$repo/apps/apple/Packages/HyperDREngine/Artifacts/HyperDREngineCore.xcframework"
-if [[ "$platforms" == macos ]]; then
-  "$repo/build-apple/HyperDR" schema > "$out/schema-cli.json"
-fi
+for slice in "${slices[@]}"; do
+  if [[ "$slice" == macos ]]; then
+    # The macOS archive also stays at the top level: the license gate
+    # (R7-1602, check_licenses.py --engine-archive) reads that path, and it is
+    # the slice the macOS app links.
+    cp "$out/macos/libHyperDREngineCore.a" "$out/libHyperDREngineCore.a"
+    "$repo/build-apple/HyperDR" schema > "$out/schema-cli.json"
+  fi
+done
 echo "Built ${slices[*]}: $out/HyperDREngineCore.xcframework"

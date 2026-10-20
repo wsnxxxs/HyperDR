@@ -52,6 +52,7 @@ import CoreGraphics
 import Foundation
 import ImageIO
 import CoreVideo
+import CoreImage
 
 // Lightweight structural gate; no HDR reconstruction or large float buffers.
 if CommandLine.arguments.count > 1 && CommandLine.arguments[1] == "--require-iso-dimensions" {
@@ -67,6 +68,58 @@ if CommandLine.arguments.count > 1 && CommandLine.arguments[1] == "--require-iso
     let result: [String: Any] = ["width": image.width, "height": image.height, "iso_auxiliary": true]
     let json = try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])
     FileHandle.standardOutput.write(json)
+    exit(0)
+}
+
+// Independent tile-order gate for the writer fixtures: the grid's dimg order and
+// the auxiliary's auxl link are read by ImageIO, not by our own HEIF reader. The
+// fixtures give each 512-pixel tile its own level (base rising, gain falling in
+// raster order); this mode samples every tile centre of the decoded primary and
+// of the gain map (found through CGImageSourceCopyAuxiliaryDataInfo, rendered by
+// Core Image) and reports both sequences.
+if CommandLine.arguments.count > 1 && CommandLine.arguments[1] == "--tile-order" {
+    func fail(_ message: String) -> Never {
+        FileHandle.standardError.write(Data("ImageIO tile-order check failed: \(message)\n".utf8))
+        exit(1)
+    }
+    let args = CommandLine.arguments
+    guard args.count == 5, let width = Int(args[2]), let height = Int(args[3]),
+          let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: args[4]) as CFURL, nil),
+          let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
+          image.width == width, image.height == height else { fail("primary image") }
+    let tile = 512, columns = (width + tile - 1) / tile, rows = (height + tile - 1) / tile
+    func centre(_ column: Int, _ row: Int) -> (Int, Int) {
+        (column * tile + min(tile, width - column * tile) / 2, row * tile + min(tile, height - row * tile) / 2)
+    }
+    var pixels = [UInt8](repeating: 0, count: width * height * 4)
+    let rendered = pixels.withUnsafeMutableBytes { buffer -> Bool in
+        guard let space = CGColorSpace(name: CGColorSpace.displayP3),
+              let context = CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                                      bytesPerRow: width * 4, space: space,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return true
+    }
+    guard rendered else { fail("cannot draw the primary image") }
+    var base = [Double](), gain = [Double]()
+    // ImageIO keeps the HEIC gain map's samples private (no Data in the info
+    // dictionary); Core Image renders the same auxl-linked image to 8-bit codes.
+    guard let info = CGImageSourceCopyAuxiliaryDataInfoAtIndex(source, 0, kCGImageAuxiliaryDataTypeISOGainMap) as? [CFString: Any],
+          let desc = info[kCGImageAuxiliaryDataInfoDataDescription] as? [String: Any],
+          let gainWidth = (desc["Width"] as? NSNumber)?.intValue, let gainHeight = (desc["Height"] as? NSNumber)?.intValue,
+          gainWidth == width, gainHeight == height else { fail("no ISO auxiliary of the primary's size is linked to it") }
+    guard let gainImage = CIImage(contentsOf: URL(fileURLWithPath: args[4]), options: [.auxiliaryHDRGainMap: true]),
+          Int(gainImage.extent.width) == width, Int(gainImage.extent.height) == height else { fail("Core Image found no gain map") }
+    var gainPixels = [UInt8](repeating: 0, count: width * height)
+    CIContext().render(gainImage, toBitmap: &gainPixels, rowBytes: width, bounds: gainImage.extent,
+                       format: .R8, colorSpace: nil)
+    for row in 0..<rows { for column in 0..<columns {
+        let (x, y) = centre(column, row)
+        base.append(Double(pixels[(y * width + x) * 4]) / 255)
+        gain.append(Double(gainPixels[y * width + x]) / 255)
+    } }
+    let result: [String: Any] = ["columns": columns, "rows": rows, "base": base, "gain": gain]
+    FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]))
     exit(0)
 }
 

@@ -82,11 +82,11 @@ struct PhotoCanvasScreen: View {
             // Cleared once used, so picking the same photo again (after a
             // file, or after a failed load) is a new request too.
             guard let item else { return }
-            request = Request(source: .library(item))
             selection = nil
+            open(.library(item))
         }
         .fileImporter(isPresented: $importingFile, allowedContentTypes: [.image]) { result in
-            if case .success(let url) = result { request = Request(source: .file(url)) }
+            if case .success(let url) = result { open(.file(url)) }
         }
         .task { makeEditor() }
         .task(id: request?.id) { await load(request?.source) }
@@ -287,6 +287,7 @@ struct PhotoCanvasScreen: View {
             PhotosPicker(selection: $selection, matching: .images, preferredItemEncoding: .current) {
                 Text("ios.toolbar.photos")
             }
+            .disabled(!exports.canOpenPhoto)
         }
         ToolbarItem(placement: .principal) { comparisonControl(editor) }
         ToolbarItemGroup(placement: .topBarTrailing) {
@@ -308,6 +309,7 @@ struct PhotoCanvasScreen: View {
             .disabled(undoManager?.canRedo != true)
             Menu {
                 Button("ios.file.openMenu", systemImage: "folder") { importingFile = true }
+                    .disabled(!exports.canOpenPhoto)
                 if form == .bottomBar || form == .sideBar {
                     Toggle(isOn: Binding(get: { comparison == .split },
                                          set: { comparison = $0 ? .split : .edited })) {
@@ -326,11 +328,13 @@ struct PhotoCanvasScreen: View {
             } label: {
                 Label("ios.toolbar.more", systemImage: "ellipsis")
             }
+            // Closed while another photo is on its way in (R26-002).
             Button("ios.toolbar.export") {
                 editor.commitDrag()
                 exports.reset()
                 showingExport = true
             }
+            .disabled(!exports.isSettled(editor))
         }
     }
 
@@ -400,11 +404,24 @@ struct PhotoCanvasScreen: View {
     /// keeps HEIC, DNG and gain maps; Files: inside its security scope) and
     /// opens it. The previous photo stays on screen until the new one is
     /// ready, and its copy is removed once the new one is open.
+    /// Every way of opening a photo comes here. Not while an export runs:
+    /// opening the next photo removes this one's copy and session.
+    private func open(_ source: Request.Source) {
+        guard exports.canOpenPhoto else { return }
+        request = Request(source: source)
+    }
+
     private func load(_ source: Request.Source?) async {
         guard let source, let editor else { return }
         loading = true
+        exports.loadingPhoto = true
         // A newer request has started its own load; leave its spinner alone.
-        defer { if !Task.isCancelled { loading = false } }
+        defer {
+            if !Task.isCancelled {
+                loading = false
+                exports.loadingPhoto = false
+            }
+        }
         var imported: ImportedPhoto?
         do {
             switch source {

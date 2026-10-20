@@ -80,4 +80,4 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -scheme Hype
   -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
 ```
 
-`python3 scripts/test.py apple` 也会跑这两项。
+`python3 scripts/test.py ios` 会跑这两项（需要 Xcode 装有 iOS 平台；`apple` 套件只测 Mac）。

@@ -60,13 +60,17 @@ def ensure_metal_toolchain(env: dict[str, str]) -> None:
             "xcodebuild -downloadComponent MetalToolchain")
 
 
-def apple() -> None:
+def xcode_env() -> dict[str, str]:
     developer_dir = Path(os.environ.get("DEVELOPER_DIR", APPLE_DEVELOPER_DIR))
     if not (developer_dir / "usr/bin/xcodebuild").is_file():
         raise RuntimeError(
             f"Xcode was not found at {developer_dir}. Set DEVELOPER_DIR to an Xcode "
             "developer directory or run: sudo xcode-select -s /Applications/Xcode.app")
-    env = dict(os.environ, DEVELOPER_DIR=str(developer_dir))
+    return dict(os.environ, DEVELOPER_DIR=str(developer_dir))
+
+
+def apple() -> None:
+    env = xcode_env()
     ensure_metal_toolchain(env)
     run("bash", "scripts/build_xcframework.sh", env=env)
     # The archive the app links must carry no libheif / libde265 (R7-1602).
@@ -84,19 +88,25 @@ def apple() -> None:
     run(*xcode, "build", env=env)
     run(*xcode, "test", "-test-timeouts-enabled", "YES",
         "-default-test-execution-time-allowance", "60", env=env)
-    # The iOS and iPadOS shell: device and simulator, unsigned (no team needed).
-    for destination in ("generic/platform=iOS", "generic/platform=iOS Simulator"):
-        run("xcodebuild", "-project", "apps/apple/HyperDR.xcodeproj", "-scheme", "HyperDRiOS",
-            "-destination", destination, "-derivedDataPath", "build-apple/DerivedData",
-            "CODE_SIGNING_ALLOWED=NO", "build", env=env)
     run(sys.executable, "scripts/check_apple_i18n.py")
     run(sys.executable, "scripts/summarize_preview_timings.py", "--self-test")
     run(sys.executable, "tests/apple/export_parity.py", env=env)
 
 
+def ios() -> None:
+    """The iOS and iPadOS target: device and simulator builds, unsigned (no
+    team needed). Needs Xcode's iOS platform; the Mac suite does not."""
+    env = xcode_env()
+    ensure_metal_toolchain(env)
+    for destination in ("generic/platform=iOS", "generic/platform=iOS Simulator"):
+        run("xcodebuild", "-project", "apps/apple/HyperDR.xcodeproj", "-scheme", "HyperDRiOS",
+            "-destination", destination, "-derivedDataPath", "build-apple/DerivedData-iOS",
+            "CODE_SIGNING_ALLOWED=NO", "build", env=env)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("suite", choices=("all", "native", "apple"),
+    parser.add_argument("suite", choices=("all", "native", "apple", "ios"),
                         nargs="?", default="all")
     parser.add_argument("--build-dir", default="build-core",
                         help="Configured CMake build directory (default: build-core)")
@@ -107,6 +117,8 @@ def main() -> int:
             native((ROOT / args.build_dir).resolve(), args.config)
         if args.suite == "apple":
             apple()
+        if args.suite == "ios":
+            ios()
     except (subprocess.CalledProcessError, OSError, RuntimeError, ValueError) as error:
         print(f"Tests failed: {error}", file=sys.stderr)
         return 1

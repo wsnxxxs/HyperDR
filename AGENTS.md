@@ -62,6 +62,7 @@ required.
 python3 scripts/fetch_test_fixtures.py          # RAW samples used by the tests
 python3 scripts/test.py native --build-dir build # engine: CMake preset macos-arm64-codecs
 python3 scripts/test.py apple                    # xcframework, Swift packages, app build and tests, localization check
+python3 scripts/test.py ios                      # iOS/iPadOS target: device and simulator builds, unsigned (needs Xcode's iOS platform)
 ```
 
 - Engine changes must keep CLI output byte-identical unless the change is

@@ -104,6 +104,9 @@ public struct ResolvedExportSnapshot: Sendable, Codable, Equatable {
     public let resolvedAutomatic: [String: Double]
     public let resplitReasons: [String]
     public let gain: ResolvedExportGain?
+    /// Pair origin before export adaptation resplits.
+    public let sourceProvenance: String?
+    /// Pair origin after export adaptation.
     public let provenance: String?
     public init(snapshot: RecipeExportSnapshot, plan: ExportPlan,
                 resolvedAutomatic: [String: Double] = [:], resplitReasons: [String] = [],
@@ -113,6 +116,7 @@ public struct ResolvedExportSnapshot: Sendable, Codable, Equatable {
         quality = plan.quality; width = plan.size.width; height = plan.size.height; ceilingStops = plan.peakStops
         self.resolvedAutomatic = resolvedAutomatic; self.resplitReasons = resplitReasons.sorted()
         gain = report?.gain.map(ResolvedExportGain.init)
+        sourceProvenance = report?.sourceProvenance.rawValue
         provenance = report?.provenance.rawValue
     }
     public func exportKey() throws -> ExportKey {

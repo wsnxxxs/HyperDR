@@ -164,6 +164,7 @@ public actor RecipeExportService: RecipeExportServicing {
                 throw HyperDRError(code: "unsupported_format", message: "The rendered pair cannot be represented by this writer")
             }
             guard finalReport.canvasSize == report.canvasSize, finalReport.gain == report.gain,
+                  finalReport.sourceProvenance == report.sourceProvenance,
                   finalReport.provenance == report.provenance, finalReport.resplitReasons == report.resplitReasons,
                   finalReport.resolvedAutomatic == report.resolvedAutomatic,
                   finalReport.presentationFrame == report.presentationFrame, finalReport.framePhoto == report.framePhoto else {

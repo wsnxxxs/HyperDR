@@ -232,7 +232,7 @@ std::vector<std::uint8_t> encode_heic_rows(const EncodingRows& base,const Encodi
   return write_heif(primary,nullptr,options);
 }
 
-void verify_heic_decodable(const std::vector<std::uint8_t>& bytes) {
+void verify_heic_decodable(std::span<const std::uint8_t> bytes) {
   // Every check below already passed on a file that macOS ImageIO refused to
   // recognise as carrying a gain map at all (gate T2, 2026-08-09,
   // HyperDR_Model/reports/macos-t2-container-finding.md). Structural
@@ -293,7 +293,7 @@ void verify_heic_decodable(const std::vector<std::uint8_t>& bytes) {
   codec::verify_heif_tiles(file, plan->gain);
 }
 
-void verify_heic_decodable(const std::vector<std::uint8_t>& bytes,
+void verify_heic_decodable(std::span<const std::uint8_t> bytes,
                            HdrEncoding encoding) {
   if (encoding == HdrEncoding::Adaptive) {
     verify_heic_decodable(bytes);

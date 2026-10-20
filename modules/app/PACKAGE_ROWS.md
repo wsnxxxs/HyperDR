@@ -42,12 +42,35 @@ is separate and belongs in admission too.
 
 Memory scope: TIFF/JPEG write directly to staged files, without output-byte
 vectors or full float planes. HEIC removes full float input/reconstruction/YUV
-planes but still has O(compressed file size) container memory. **Verification is
-still whole-image**, after the input band is released; both normal verify and E5
-readback must be budgeted separately. This entry does not claim bounded end-to-end
-memory or change Photos/Kit behavior. Frame input/codebook checks and decoded mat
-checks run on the staged result before atomic publication, independently of the
-normal verify toggle. Destination overwrite/no-overwrite behavior is preserved.
+planes but still has O(compressed file size) container memory. Native verification
+now borrows compressed files through a read-only mapping: baseline JPEG uses
+scanlines (two gain rows for ISO interpolation), TIFF uses libtiff scanlines and
+its strip buffer, and HEIC uses one matching base/gain tile pair plus VT's bounded
+in-flight pictures. No native verifier creates full RGB, gain or HDR canvases.
+Frame/codebook checks and decoded mat checks run on the staged result before
+atomic publication, independently of the normal verify toggle. Destination
+publication and CLI encoded bytes are unchanged. File-backed mappings reserve
+compressed-file address space and retain reclaimable pages; this is not a full
+private encoded-byte allocation. Container item/strip tables still scale with
+item/strip count. Render/RAW caches and HEIC's writing-time compressed container
+remain separate admission costs.
+
+`verify_encoded_file` retains the original format-specific structural, metadata,
+profile, bit-depth/chroma and corruption checks. It additionally visits native
+pixels for finite SDR/HDR reconstruction and gain extrema; E5 uses the same
+1e-5 relative linear tolerance and 8-pixel coding-block exclusion as the previous
+whole-image check. JPEG base and gain decode synchronously with bilinear gain
+sampling. HEIC export pairs have matching tile grids, so a pair is reconstructed
+one tile at a time, without chroma interpolation across tile boundaries (same as
+the normal reader). Progressive/arithmetic JPEG is refused by this bounded export
+verifier; HyperDR writes baseline Huffman JPEG. The legacy byte verifier retains
+its general JPEG acceptance. TIFF export validation requires the RGB16 layout the
+writer emits. Export grids must be upright: EXIF orientation other than 1 and
+nonidentity HEIF irot/imir are rejected, including on the gain item. The current
+writers emit Orientation=1 and no irot/imir; clean-aperture crops remain supported.
+AVIF **remains whole-YUV**: libavif's grid decoder assembles all cells
+into one image. Its file verification reports `boundedMemory=false`, and the row
+writer capability remains false. System ImageIO verification belongs to Kit.
 
 ## Measured writer memory
 
@@ -73,3 +96,26 @@ file. `capi_package_rows_test` without arguments checks all supported formats,
 frame/cancel/failure behavior and whole/rows agreement. Tests freeze ICC creation
 time using the repository's test clock: TIFF and Adaptive/PQ/HLG HEIC match
 byte-for-byte; SDR/ISO JPEG entropy differs with zero decoded pixel difference.
+
+## Verification memory regression
+
+`capi_verify_memory_test` first creates 2048×1024 and 2048×4096 exports in separate
+producer processes, then measures fresh verifier processes. TIFF, ISO JPEG and
+Adaptive HEIC cover scanlines, paired scanlines and tiles. The producers also
+exercise E5 on framed gain-map outputs. No generated file survives a probe. Run
+`ctest --test-dir build -R capi_verify_memory_test -V` for actual kernel peak
+physical footprints. The threshold allows 16 MiB of allocator/VT variation as
+height grows fourfold, rather than the previous full-raster growth.
+
+Measured on macOS in these fresh verifier processes (`TASK_VM_INFO` kernel peak,
+bytes; includes framework baseline):
+
+| Format | 2048×1024 | 2048×4096 | Height ×4 growth |
+| --- | ---: | ---: | ---: |
+| TIFF | 2,327,032 | 2,327,008 | −24 |
+| ISO JPEG | 2,523,616 | 2,654,712 | 131,096 |
+| Adaptive HEIC | 12,436,128 | 12,534,456 | 98,328 |
+
+The small differences are codec/container tables and allocator variation, rather
+than complete float/YUV renditions. This table measures native verification only;
+Apple ImageIO verification and Render/RAW memory belong to their respective owners.

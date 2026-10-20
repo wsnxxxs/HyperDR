@@ -13,7 +13,7 @@
 
 namespace hyperdr {
 
-void verify_encoded_output(const std::vector<std::uint8_t>& bytes,
+void verify_encoded_output(std::span<const std::uint8_t> bytes,
                            HdrEncoding encoding) {
   if (encoding == HdrEncoding::SdrTiff) verify_sdr_tiff(bytes);
   else if (encoding == HdrEncoding::SdrJpeg) verify_sdr_jpeg(bytes);
@@ -25,3 +25,50 @@ void verify_encoded_output(const std::vector<std::uint8_t>& bytes,
 }  // namespace hyperdr
 
 #endif  // HYPERDR_WITH_CODECS
+
+#if HYPERDR_WITH_CODECS
+#include "internal/verify_pixels.hpp"
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <system_error>
+namespace hyperdr {
+namespace {
+class VerificationFile {
+  void* mapping=MAP_FAILED;
+  std::size_t size=0;
+ public:
+  explicit VerificationFile(const std::filesystem::path& path) {
+    const int fd=::open(path.c_str(),O_RDONLY);
+    if(fd<0)throw std::system_error(errno,std::generic_category(),"open verification file");
+    struct stat info{};
+    if(fstat(fd,&info)!=0||info.st_size<=0) { const int error=errno;::close(fd);throw std::system_error(error?error:EINVAL,std::generic_category(),"stat verification file"); }
+    size=std::size_t(info.st_size);mapping=mmap(nullptr,size,PROT_READ,MAP_PRIVATE,fd,0);
+    const int error=errno;::close(fd);
+    if(mapping==MAP_FAILED)throw std::system_error(error,std::generic_category(),"map verification file");
+    // File-backed pages are reclaimable, not a private encoded-file vector.
+    madvise(mapping,size,MADV_SEQUENTIAL);
+  }
+  ~VerificationFile() { if(mapping!=MAP_FAILED)munmap(mapping,size); }
+  std::span<const std::uint8_t> bytes()const{return {static_cast<const std::uint8_t*>(mapping),size};}
+};
+}
+VerificationResult verify_encoded_file(const std::filesystem::path& path,HdrEncoding encoding,
+                                       std::optional<VerificationFrame> frame) {
+  VerificationFile file(path);
+  const auto bytes=file.bytes();
+  if(encoding==HdrEncoding::SdrTiff) {
+    if(frame)throw std::invalid_argument("SDR TIFF has no gain-map frame");
+    return codec::verify_tiff_pixels(bytes);
+  }
+  if(encoding==HdrEncoding::SdrJpeg||encoding==HdrEncoding::IsoGainMapJpeg)
+    return codec::verify_jpeg_pixels(bytes,encoding==HdrEncoding::IsoGainMapJpeg,frame);
+  if(is_avif_encoding(encoding)) {
+    verify_avif_decodable(bytes);
+    VerificationResult result;result.boundedMemory=false;return result;
+  }
+  return codec::verify_heif_pixels(bytes,encoding,frame);
+}
+} // namespace hyperdr
+#endif

@@ -24,8 +24,13 @@ For native area N, canvas width W and callback height R:
   GPU admission uses Render's maximum source tile/read rows and the actual
   device's `maximumTextureDimension`, rather than logical canvas dimensions.
 - HEIC encoding adds a 12W × min(512,H) float slab, 32 MiB codec allowance and
-  one compressed sequence C. Assembly adds 32 MiB and 2C (sequence + output);
-  it does not hold three copies. C is the existing quality/depth rate envelope.
+  one compressed sequence C. Since `bc394adc`, assembly retains only C and
+  streams the container into the staged file; both full-plane and row package
+  paths use the file sink. Items and <=256 KiB writes borrow spans, so there is
+  no extra chunk allocation or complete output vector. The existing 32 MiB
+  assembly allowance covers bounded metadata/box construction (Exif/XMP are
+  individually limited to 4 MiB) and the small standard-library file buffer.
+  C is the existing quality/depth rate envelope, now charged once.
   JPEG adds 32W codec workspace. Stage peaks are compared, not summed.
 - Native/system verification keeps the same decoder/work allowance plus bounded
   row/tile and thumbnail workspace. `maxAdmissibleLongEdge` uses this same
@@ -39,18 +44,20 @@ MiB, q95, Adaptive Main10, no frame/LUT/caption, RGB gain reservation (even thou
 separated RAW normally uses mono). Values can be reproduced with
 `HYPERDR_MEMORY_ESTIMATES=1 swift test --filter fullSizeRAWMemoryEstimates`.
 61MP means 9504×6336 (60.22MP); 110MP means 12800×8600 (110.08MP).
+The final column separates assembly / peak where they differ; Adaptive now
+peaks during encoding, while its float slab and VT workspace are still alive.
 
 | Native | Format | Rows | D | Returned B | Encode | Assembly / peak |
 |---|---|---:|---:|---:|---:|---:|
-| 61MP | Adaptive | 256 | 1890.3 | 55.7 | 2321.8 | 2474.5 |
-| 61MP | Adaptive | 128 | 1890.3 | 27.8 | 2266.1 | 2418.8 |
-| 61MP | Adaptive | 64 | 1890.3 | 13.9 | 2238.2 | 2391.0 |
+| 61MP | Adaptive | 256 | 1890.3 | 55.7 | 2321.8 | 2266.1 / 2321.8 |
+| 61MP | Adaptive | 128 | 1890.3 | 27.8 | 2266.1 | 2210.4 / 2266.1 |
+| 61MP | Adaptive | 64 | 1890.3 | 13.9 | 2238.2 | 2182.6 / 2238.2 |
 | 61MP | ISO JPEG | 256 | 1890.3 | 55.7 | 2025.9 | 2025.9 |
 | 61MP | ISO JPEG | 128 | 1890.3 | 27.8 | 1970.2 | 1970.2 |
 | 61MP | ISO JPEG | 64 | 1890.3 | 13.9 | 1942.4 | 1942.4 |
-| 110MP | Adaptive | 256 | 3031.5 | 75.0 | 3691.9 | 3996.3 |
-| 110MP | Adaptive | 128 | 3031.5 | 37.5 | 3616.9 | 3921.3 |
-| 110MP | Adaptive | 64 | 3031.5 | 18.8 | 3579.4 | 3883.8 |
+| 110MP | Adaptive | 256 | 3031.5 | 75.0 | 3691.9 | 3616.9 / 3691.9 |
+| 110MP | Adaptive | 128 | 3031.5 | 37.5 | 3616.9 | 3541.9 / 3616.9 |
+| 110MP | Adaptive | 64 | 3031.5 | 18.8 | 3579.4 | 3504.4 / 3579.4 |
 | 110MP | ISO JPEG | 256 | 3031.5 | 75.0 | 3205.9 | 3205.9 |
 | 110MP | ISO JPEG | 128 | 3031.5 | 37.5 | 3130.9 | 3130.9 |
 | 110MP | ISO JPEG | 64 | 3031.5 | 18.8 | 3093.4 | 3093.4 |
@@ -62,8 +69,11 @@ On iOS the 20% reserve means a 4 GiB export budget requires 5 GiB reported
 available *after* the editor is resident. Device RAM alone cannot establish this.
 
 At 3 GiB usable remaining budget, 61MP admits both formats; 110MP RAW with RGB
-reservation cannot admit either even at 64 rows: Adaptive is short 811.8 MiB
-(mainly the two compressed HEIF copies, 758.8 MiB); ISO JPEG is short 21.4 MiB.
+reservation cannot admit either even at 64 rows: Adaptive is short 507.4 MiB
+(its remaining single compressed sequence is 379.4 MiB, with a 75 MiB slab and
+32 MiB codec workspace); ISO JPEG is still short 21.4 MiB. At 4 GiB both formats
+continue to admit full size at 256 rows; Adaptive peak is now 3691.9 MiB, leaving
+404.1 MiB rather than 99.7 MiB of that usable budget.
 The native decoder/work floor alone is 3031.5 MiB. Smaller output cannot remove
 that floor; below it, the planner correctly offers no long-edge fallback.
 Actual iPhone 17 Pro available memory and a real 110MP RAW remain required to

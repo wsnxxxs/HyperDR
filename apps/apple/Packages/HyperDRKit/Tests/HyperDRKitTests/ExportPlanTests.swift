@@ -487,17 +487,18 @@ struct ExportMemoryPlanTests {
         #expect(failure?.summary.contains("shortfall=256.0 MiB") == true)
     }
 
-    @Test func heifAssemblyPricesBorrowedSamplesAndOutputSeparatelyFromEncoding() {
+    @Test func heifSinkBorrowsSamplesWithoutACompleteOutputCopy() {
         let size = ExportPixelSize(width: 12800, height: 8600)
         let memory = ExportMemoryEstimate.estimate(.init(source: source(.rawEDR, size: size),
             photoSize: size, canvas: size, encoding: .adaptive, writer: .inHouse,
             writesGainMap: true, isFramed: false, baseBitDepth: 10, writeRows: 256,
             retainedBytes: 0, quality: 95))
-        let oneCopy = ExportMemoryEstimate.compressedHEICCache(pixels: size.pixels, bitDepth: 10, quality: 95) / 2
+        let oneCopy = ExportMemoryEstimate.compressedHEICCache(pixels: size.pixels, bitDepth: 10, quality: 95)
         let slab = size.width * 512 * 12
-        #expect(memory.packaging - memory.encode == oneCopy - slab)
-        #expect(memory.packaging > memory.encode)
-        #expect(memory.peak == memory.packaging)
+        let rowOwners = 2 * 4 * (3 + 3) * size.width * 256
+        #expect(memory.packaging == memory.render + rowOwners + (32 << 20) + oneCopy)
+        #expect(memory.encode - memory.packaging == slab)
+        #expect(memory.peak == memory.encode)
     }
 
     @Test func fullSizeRAWMemoryEstimates() {
@@ -552,6 +553,7 @@ struct ExportMemoryPlanTests {
             let admitted = plan(input, available: (5 << 30) - (1 << 30))
             #expect(admitted.isExecutable && admitted.photoSize == size)
             #expect(admitted.memory.renderRows == 256)
+            #expect(!plan(input, available: 3 << 30).isExecutable)
             let refused = plan(input, available: 2800 << 20)
             #expect(!refused.isExecutable)
             // Downscaling cannot remove native Apple decoder residency.

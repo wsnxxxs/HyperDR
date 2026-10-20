@@ -6,7 +6,7 @@ public enum ExportNoticeScope: Sendable, Hashable {
 }
 public enum ExportNotice: Sendable, Hashable {
     case ceiling(stops: Double, scope: ExportNoticeScope)
-    case socialAspect, sdrVersion, alphaOnWhite
+    case socialAspect, sdrVersion, alphaOnBlack
 }
 public enum PhotosUnavailableReason: Sendable, Hashable {
     case notVerified, permissionDenied, fileSource, framed, addOnly, selectedAssetUnavailable

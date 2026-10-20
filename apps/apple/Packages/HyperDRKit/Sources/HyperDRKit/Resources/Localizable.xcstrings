@@ -609,18 +609,18 @@
         }
       }
     },
-    "plan.alphaOnWhite": {
+    "plan.alphaOnBlack": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Transparent areas will be filled with SDR white."
+            "value": "Transparent areas will be filled with SDR black."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "透明区域将铺上 SDR 白色背景。"
+            "value": "透明区域会铺黑色。"
           }
         }
       }

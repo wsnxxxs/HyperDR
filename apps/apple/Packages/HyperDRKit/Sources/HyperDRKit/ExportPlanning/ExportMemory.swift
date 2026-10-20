@@ -178,7 +178,13 @@ extension ExportMemoryEstimate {
         let codec = input.encoding.isAVIF ? p * 96
             : input.encoding == .adaptive || input.encoding.isBT2100 ? p * 32 + 48 * 1024 * 1024
             : p * 20
-        let encode = resident + owner * 2 + codec
+        // ImageIO receives explicit 8-bit RGBA (4 B/px) and up to RGB gain
+        // (3 B/px), retaining their CGImage/auxiliary handoff copies. Reserve
+        // HEVC/framework workspace separately; it never borrows Float owners.
+        let imageIO = input.writer == .imageIO && input.writesGainMap && input.encoding == .adaptive
+        let encode = imageIO
+            ? resident + owner + p * (4 * 2 + 3 * 2 + 32) + 64 * 1024 * 1024
+            : resident + owner * 2 + codec
         let verify = resident + owner + p * (needsGain ? 40 : 16)
         return .init(decode: resident, render: render, composite: render,
                      packaging: encode, encode: encode, verify: verify)

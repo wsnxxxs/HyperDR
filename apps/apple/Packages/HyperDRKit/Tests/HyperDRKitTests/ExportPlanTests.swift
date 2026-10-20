@@ -33,8 +33,8 @@ struct ExportDestinationPlanTests {
         let plan = plan(request(.destination(.photos)))
         #expect(plan.encoding == .adaptive)
         #expect(plan.baseBitDepth == 8) // an SDR source keeps Main 8
-        #expect(plan.writer == .inHouse) // b writes gain-map HEIC through package
-        #expect(plan.writerReason == .peakMemory)
+        #expect(plan.writer == .imageIO)
+        #expect(plan.writerReason == .qualityAtEqualSize)
         #expect(plan.gamut == .p3)
         #expect(plan.size == photo)
         #expect(plan.longEdgeLimit == nil)
@@ -164,7 +164,7 @@ struct ExportCustomPlanTests {
 
     @Test func everyEncodingPicksTheWriterOfThePipelineTable() {
         let expected: [ExportEncoding: (ExportWriter, ExportWriterReason)] = [
-            .adaptive: (.inHouse, .peakMemory),
+            .adaptive: (.imageIO, .qualityAtEqualSize),
             .isoGainMapJPEG: (.inHouse, .qualityAtEqualSize),
             .pq: (.inHouse, .peakMemory),
             .hlg: (.inHouse, .peakMemory),
@@ -250,13 +250,12 @@ struct ExportGainMapPlanTests {
     }
 
     @Test func anAuthoredPairFallsBackToResplitWhenTheWriterCarriesOneChannel() {
-        // A dual source never reaches the ImageIO path today (its pair takes a
-        // 10-bit base, which our writer owns), so this is the writer capability
-        // rule itself: a writer that carries one channel cannot take three.
+        // A dual source takes a 10-bit base, which our writer owns. Its
+        // single-channel contract still requires a three-channel pair to split.
         let three = ExportPlanner.gainMapPlan(
             request: request(.destination(.photos), source: source(.dual),
                              pair: pair(.editedAuthored, channels: 3)),
-            writer: .imageIO, writesGainMap: true)
+            writer: .inHouse, writesGainMap: true)
         #expect(three.origin == .resplit)
         #expect(three.channels == 1)
         #expect(three.offsetsAreZero)
@@ -328,7 +327,14 @@ struct ExportMemoryPlanTests {
         #expect(plan.memory.degradation == nil)
         #expect(plan.memory.availableBytes == 8_000_000_000)
         #expect(plan.memory.fits)
-        #expect(plan.writer == .inHouse)
+        #expect(plan.writer == .imageIO)
+    }
+
+    @Test func framedHEICUsesTheWriterWithCompressionProtection() {
+        let result = plan(request(.destination(.photos), frame: ExportFrameFacts(canvas: photo)))
+        #expect(result.writer == .inHouse)
+        #expect(result.writerReason == .frameGainProtection)
+        #expect(result.gainMap.zeroGainInFrame)
     }
 
     @Test func anUnknownBudgetUsesAConservativeLimit() {

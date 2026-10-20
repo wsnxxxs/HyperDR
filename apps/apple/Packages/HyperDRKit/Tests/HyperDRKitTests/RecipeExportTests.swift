@@ -103,8 +103,12 @@ private struct RecipeExportEnvironment {
             let result = try await service.export(session: env.session.id, snapshot: env.snapshot(recipe: recipe),
                                                   request: env.request(encoding))
             let evidence = try JSONDecoder().decode(RecipeExportReport.self, from: result.record.reportJSON)
-            let package = try JSONDecoder().decode(PackageReport.self, from: #require(evidence.packageJSON))
-            #expect(package.verified)
+            if result.resolved.writer == .imageIO {
+                #expect(evidence.packageJSON == nil && evidence.imageIO != nil && evidence.firstReaderJSON != nil)
+            } else {
+                let package = try JSONDecoder().decode(PackageReport.self, from: #require(evidence.packageJSON))
+                #expect(package.verified)
+            }
             #expect(result.resolved.snapshot.recipe == recipe)
             #expect(evidence.system.auxiliaryGain == encoding.writesGainMap)
             #expect(evidence.system.width == 96 && evidence.system.height == 64)
@@ -132,12 +136,16 @@ private struct RecipeExportEnvironment {
             photo: .init(x: 8, y: 8, width: 96, height: 64), paper: .init(repeating: 0.8),
             shadow: .init(opacity: 0.2, sigma: 2, offset: .init(0, 2)),
             caption: .init(png: caption as Data, rect: .init(x: 0, y: 72, width: 112, height: 16)))
-        for encoding in [ExportEncoding.isoGainMapJPEG, .sdrTIFF, .pq] {
+        for encoding in [ExportEncoding.isoGainMapJPEG, .adaptive, .sdrTIFF, .pq] {
             let result = try await service.export(session: env.session.id, snapshot: env.snapshot(frame: frame),
                                                   request: env.request(encoding))
             let evidence = try JSONDecoder().decode(RecipeExportReport.self, from: result.record.reportJSON)
             let package = try JSONDecoder().decode(PackageReport.self, from: #require(evidence.packageJSON))
             #expect(package.verified && package.width == 112 && package.height == 88)
+            if encoding == .adaptive {
+                #expect(result.resolved.writer == .inHouse && result.resolved.writerReason == .frameGainProtection)
+                #expect(evidence.writerReason == .frameGainProtection)
+            }
             #expect(evidence.system.auxiliaryGain == encoding.writesGainMap)
             #expect(await env.sessions.exportThumbnail(env.session.id, export: result.record.id) != nil)
         }
@@ -235,14 +243,36 @@ private struct RecipeExportEnvironment {
             #expect(result.record.recipeSnapshot?.recipe == Recipe())
             #expect(result.record.resolvedSnapshot == result.resolved)
             let evidence = try JSONDecoder().decode(RecipeExportReport.self, from: result.record.reportJSON)
-            let package = try JSONDecoder().decode(PackageReport.self, from: #require(evidence.packageJSON))
-            #expect(package.schema == "hyperdr.package/v1")
-            #expect(package.verified)
+            if result.resolved.writer == .imageIO {
+                #expect(evidence.packageJSON == nil && evidence.imageIO != nil && evidence.firstReaderJSON != nil)
+            } else {
+                let package = try JSONDecoder().decode(PackageReport.self, from: #require(evidence.packageJSON))
+                #expect(package.schema == "hyperdr.package/v1")
+                #expect(package.verified)
+            }
             #expect(evidence.system.width == 96 && evidence.system.height == 64)
             #expect(evidence.system.auxiliaryGain == encoding.writesGainMap)
             #expect(await env.sessions.exportThumbnail(env.session.id, export: result.record.id) != nil)
         }
         #expect(await env.sessions.exports(for: env.session.id).count == 8)
+    }
+
+    @Test func heicMemoryFallbackKeepsEncodingQualityAndSize() async throws {
+        let env = try await RecipeExportEnvironment(); defer { env.remove() }
+        let request = env.request(.adaptive)
+        let initial = ExportPlanner.plan(request, budget: FixedExportMemoryBudget(bytes: 1_000_000_000))
+        let native = ExportMemoryEstimate.estimate(.init(source: request.source, photoSize: initial.photoSize,
+            canvas: initial.size, encoding: .adaptive, writer: .inHouse, writesGainMap: true,
+            isFramed: false, baseBitDepth: 8, writeRows: 256, retainedBytes: 0))
+        #expect(native.peak < initial.memory.estimate.peak)
+        let result = try await env.service(budget: native.peak + 1).export(session: env.session.id,
+            snapshot: env.snapshot(), request: request)
+        #expect(result.resolved.writer == .inHouse && result.resolved.writerReason == .memoryFallback)
+        #expect(result.resolved.encoding == .adaptive && result.resolved.bitDepth == 8)
+        #expect(result.resolved.quality == initial.quality && result.resolved.width == initial.size.width
+                && result.resolved.height == initial.size.height)
+        let evidence = try JSONDecoder().decode(RecipeExportReport.self, from: result.record.reportJSON)
+        #expect(evidence.writerReason == .memoryFallback && evidence.packageJSON != nil)
     }
 
     @Test func sdrHEICContainsNoAuxiliaryAndRoundTripsTheSnapshot() async throws {

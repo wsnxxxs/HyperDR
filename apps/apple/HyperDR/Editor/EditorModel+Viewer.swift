@@ -63,26 +63,25 @@ extension EditorModel {
         guard let source = editor.source else { return }
         let size = Self.scopeSize(source.pixelSize)
         let editor = self.editor
-        if let request = editor.renderRequest(size: size, original: true),
-           !Self.covers(request, scopedOriginal, scopingOriginal) {
+        if let request = editor.renderRequest(size: size, original: true), wantsMeasuring(request, original: true) {
             scopingOriginal = request
             originalScopeTask?.cancel()
             originalScopeTask = Task { [weak self] in
                 let result = await Self.analyze(editor: editor, request: request, waveform: false)
-                guard let self, !Task.isCancelled else { return }
+                // Only the measurement still asked for is published (R34-001).
+                guard let self, !Task.isCancelled, scopingOriginal == request else { return }
                 scopingOriginal = nil
                 guard let result else { return }
                 scopedOriginal = request
                 scopes.update(original: .some(result.histogram), current: nil, waveform: nil)
             }
         }
-        guard let request = editor.renderRequest(size: size),
-              !Self.covers(request, scopedRequest, scopingRequest) else { return }
+        guard let request = editor.renderRequest(size: size), wantsMeasuring(request, original: false) else { return }
         scopingRequest = request
         scopeTask?.cancel()
         scopeTask = Task { [weak self] in
             let result = await Self.analyze(editor: editor, request: request, waveform: true)
-            guard let self, !Task.isCancelled else { return }
+            guard let self, !Task.isCancelled, scopingRequest == request else { return }
             scopingRequest = nil
             guard let result else { return }
             scopedRequest = request
@@ -90,10 +89,20 @@ extension EditorModel {
         }
     }
 
-    /// Whether `request` draws what was measured, or is being measured.
-    private static func covers(_ request: EditorRenderRequest, _ measured: EditorRenderRequest?,
-                               _ measuring: EditorRenderRequest?) -> Bool {
-        [measured, measuring].contains { $0.map(request.rendersSame) == true }
+    /// Whether `request` needs a new measurement. What was measured already
+    /// stands, and a measurement of another picture still running is dropped
+    /// (A → B → A: B's result must not replace A's); one of this picture
+    /// still running is waited for.
+    private func wantsMeasuring(_ request: EditorRenderRequest, original: Bool) -> Bool {
+        let measured = original ? scopedOriginal : scopedRequest
+        let measuring = original ? scopingOriginal : scopingRequest
+        if let measuring, measuring.rendersSame(as: request) { return false }
+        guard measured?.rendersSame(as: request) == true else { return true }
+        if measuring != nil {
+            if original { originalScopeTask?.cancel(); scopingOriginal = nil }
+            else { scopeTask?.cancel(); scopingRequest = nil }
+        }
+        return false
     }
 
     private static func analyze(editor: RecipeEditor, request: EditorRenderRequest,

@@ -364,11 +364,9 @@ std::vector<std::uint8_t> encode_for(const PhotoRenditions& photo, GainMapResult
 
 void verify_encoded(const std::vector<std::uint8_t>& bytes,
                     const ConvertOptions& options) {
-  if (options.encoding == HdrEncoding::SdrTiff) verify_sdr_tiff(bytes);
-  else if (options.encoding == HdrEncoding::SdrJpeg) verify_sdr_jpeg(bytes);
-  else if (options.encoding == HdrEncoding::IsoGainMapJpeg) verify_gain_map_jpeg(bytes);
-  else if (is_avif_encoding(options.encoding)) verify_avif_decodable(bytes);
-  else verify_heic_decodable(bytes, options.encoding);
+  // Shared with the packaging entry point: one dispatch, so neither path can
+  // publish a file its own format's check never saw.
+  verify_encoded_output(bytes, options.encoding);
 }
 
 void finish_stage(Staged& staged, const ConvertOptions& options,

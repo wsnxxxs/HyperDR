@@ -23,7 +23,7 @@ private func request(_ choice: ExportChoice,
         library: library, resources: resources)
 }
 
-private func plan(_ request: ExportPlanRequest, available: Int? = nil) -> ExportPlan {
+private func plan(_ request: ExportPlanRequest, available: Int? = 8_000_000_000) -> ExportPlan {
     ExportPlanner.plan(request, budget: FixedExportMemoryBudget(bytes: available))
 }
 
@@ -33,8 +33,8 @@ struct ExportDestinationPlanTests {
         let plan = plan(request(.destination(.photos)))
         #expect(plan.encoding == .adaptive)
         #expect(plan.baseBitDepth == 8) // an SDR source keeps Main 8
-        #expect(plan.writer == .imageIO) // 8-bit base: writer-lab prefers ImageIO
-        #expect(plan.writerReason == .qualityAtEqualSize)
+        #expect(plan.writer == .inHouse) // b writes gain-map HEIC through package
+        #expect(plan.writerReason == .peakMemory)
         #expect(plan.gamut == .p3)
         #expect(plan.size == photo)
         #expect(plan.longEdgeLimit == nil)
@@ -154,7 +154,7 @@ struct ExportCustomPlanTests {
         let ceiling = min(9, encoding.ceilingStops)
         #expect(plan.peakStops == (encoding.isSDR ? nil : ceiling))
         // A single-rendition source keeps Main 8; BT.2100 formats are 10-bit.
-        #expect(plan.baseBitDepth == (encoding.isBT2100 ? 10 : 8))
+        #expect(plan.baseBitDepth == (encoding.isBT2100 ? 10 : encoding == .sdrTIFF ? 16 : 8))
     }
 
     @Test(arguments: ExportEncoding.allCases)
@@ -164,7 +164,7 @@ struct ExportCustomPlanTests {
 
     @Test func everyEncodingPicksTheWriterOfThePipelineTable() {
         let expected: [ExportEncoding: (ExportWriter, ExportWriterReason)] = [
-            .adaptive: (.imageIO, .qualityAtEqualSize),
+            .adaptive: (.inHouse, .peakMemory),
             .isoGainMapJPEG: (.inHouse, .qualityAtEqualSize),
             .pq: (.inHouse, .peakMemory),
             .hlg: (.inHouse, .peakMemory),
@@ -244,9 +244,9 @@ struct ExportGainMapPlanTests {
         let plan = plan(request(.destination(.photos), source: source(.dual),
                                 pair: pair(.editedAuthored, channels: 3, offsetsAreZero: false)))
         #expect(plan.writer == .inHouse)
-        #expect(plan.gainMap.origin == .authored)
-        #expect(plan.gainMap.channels == 3)
-        #expect(!plan.gainMap.offsetsAreZero) // the file's own offsets
+        #expect(plan.gainMap.origin == .resplit)
+        #expect(plan.gainMap.channels == 1)
+        #expect(plan.gainMap.offsetsAreZero) // the file's own offsets
     }
 
     @Test func anAuthoredPairFallsBackToResplitWhenTheWriterCarriesOneChannel() {
@@ -283,8 +283,9 @@ struct ExportGainMapPlanTests {
         let plan = plan(request(.destination(.photos), source: source(.dual),
                                 pair: pair(.authored, channels: 3, offsetsAreZero: false),
                                 frame: ExportFrameFacts(canvas: ExportPixelSize(width: 6200, height: 4200))))
-        #expect(plan.gainMap.origin == .authored)
-        #expect(plan.gainMap.channels == 3)
+        #expect(plan.gainMap.origin == .resplit)
+        #expect(plan.gainMap.resplitReason == .frameRequiresNeutralPair)
+        #expect(plan.gainMap.channels == 1)
         #expect(plan.gainMap.zeroGainInFrame)
     }
 
@@ -327,40 +328,25 @@ struct ExportMemoryPlanTests {
         #expect(plan.memory.degradation == nil)
         #expect(plan.memory.availableBytes == 8_000_000_000)
         #expect(plan.memory.fits)
-        #expect(plan.writer == .imageIO)
-    }
-
-    @Test func anUnknownBudgetSkipsAdmission() {
-        let plan = plan(request(.destination(.photos)), available: nil)
-        #expect(plan.memory.availableBytes == nil)
-        #expect(plan.memory.degradation == nil)
-        #expect(plan.writer == .imageIO)
-        #expect(plan.blockers.isEmpty)
-    }
-
-    @Test func theEightBitPairFallsBackToOurWriterWhenImageIODoesNotFit() {
-        let preferred = plan(request(.destination(.photos)), available: nil).memory.estimate.peak
-        let plan = plan(request(.destination(.photos)), available: preferred - 1)
         #expect(plan.writer == .inHouse)
-        #expect(plan.writerReason == .memoryFallback)
-        #expect(plan.memory.degradation == .switchedWriter(.inHouse))
-        #expect(plan.memory.fits)
-        #expect(plan.blockers.isEmpty)
     }
 
-    @Test func aCanvasThatDoesNotFitIsWrittenInStrips() {
-        // The composite of a large frame and the pair packaging, not the photo,
-        // are what a strip bounds here.
+    @Test func anUnknownBudgetUsesAConservativeLimit() {
+        let plan = plan(request(.destination(.photos)), available: nil)
+        #expect(plan.memory.availableBytes == 256 * 1024 * 1024)
+        #expect(plan.memory.degradation == .refused)
+        #expect(!plan.isExecutable)
+    }
+
+    @Test func aCanvasThatDoesNotFitCannotPretendToStreamTheWriter() {
         let canvas = ExportPixelSize(width: 12000, height: 8000)
         let framed = request(.custom(CustomExportFormat(encoding: .isoGainMapJPEG, gamut: .p3, quality: 90)),
                              frame: ExportFrameFacts(canvas: canvas))
-        let whole = plan(framed, available: nil).memory.estimate.peak
-        let plan = plan(framed, available: whole - 1)
-        #expect(plan.memory.degradation == .strips(rowHeight: ExportMemoryEstimate.stripHeight))
-        #expect(plan.memory.fits)
-        #expect(plan.writer == .inHouse)
-        #expect(plan.blockers.isEmpty)
-        #expect(plan.memory.estimate.composite == plan.memory.estimate.peak)
+        let whole = plan(framed).memory.estimate.peak
+        let result = plan(framed, available: whole - 1)
+        #expect(result.memory.degradation == .refused)
+        #expect(!result.memory.fits)
+        #expect(!result.isExecutable)
     }
 
     @Test func whatNoWriterFitsIsRefusedWithAReason() {
@@ -387,7 +373,7 @@ struct ExportMemoryPlanTests {
         let sameShape = ExportMemoryEstimate.estimate(ExportMemoryEstimate.Input(
             source: source(), photoSize: written, canvas: written,
             encoding: .isoGainMapJPEG, writer: .inHouse, writesGainMap: true,
-            isFramed: false, baseBitDepth: 8, writeRows: 1707, retainedBytes: 0))
+            isFramed: false, baseBitDepth: 8, writeRows: 256, retainedBytes: 0))
         #expect(web.encode == sameShape.encode)
         #expect(web.packaging == sameShape.packaging)
         #expect(web.render == sameShape.render)
@@ -414,14 +400,21 @@ struct ExportMemoryPlanTests {
         #expect(loaded.decode == bare.decode + resources.bytes)
     }
 
-    @Test func aStripCostsLessThanTheWholeCanvas() {
-        let whole = plan(request(.destination(.web))).memory.estimate
+    @Test func smallerRenderStripesDoNotEliminateThePlaneOwners() {
+        let whole = ExportMemoryEstimate.estimate(ExportMemoryEstimate.Input(
+            source: source(), photoSize: photo, canvas: photo, encoding: .isoGainMapJPEG,
+            writer: .inHouse, writesGainMap: true, isFramed: false, baseBitDepth: 8,
+            writeRows: photo.height, retainedBytes: 0))
         let strips = ExportMemoryEstimate.estimate(ExportMemoryEstimate.Input(
             source: source(), photoSize: photo, canvas: photo, encoding: .isoGainMapJPEG,
             writer: .inHouse, writesGainMap: true, isFramed: false, baseBitDepth: 8,
-            writeRows: ExportMemoryEstimate.stripHeight, retainedBytes: 0))
-        #expect(strips.encode < whole.encode)
-        #expect(strips.decode == whole.decode) // decoding is per photo either way
+            writeRows: 64, retainedBytes: 0))
+        // Readback has both RGBA and packed RGB for base and gain (56 B/px),
+        // beside GPU RGBA outputs (32 B/px). Shrinking stripes only frees those.
+        let freedStripePixels = photo.width * (photo.height - 64)
+        #expect(whole.render - strips.render >= freedStripePixels * (56 + 32))
+        #expect(strips.encode == whole.encode)
+        #expect(strips.packaging == whole.packaging)
     }
 
     @Test func theSystemBudgetAnswersOrDeclines() {

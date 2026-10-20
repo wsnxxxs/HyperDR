@@ -49,8 +49,9 @@ this checkout. This file summarizes what they decide.
 | `apps/apple/HyperDR/Views` | SwiftUI views; they only talk to the editor models |
 | `apps/apple/HyperDR/macOS/Preview` | Metal EDR canvas: a compute pass rebuilds the frame, a second pass draws it at the canvas zoom and pan |
 | `apps/apple/Shared/Canvas` | Shared by the Mac and iOS targets: `CanvasTransform`, the EDR layer setup and the display pass (`EDRDisplayPass`, `EDRDisplay.metal`) |
-| `apps/apple/HyperDRiOS` | iOS/iPadOS target: PhotosPicker and Files (`fileImporter`) placed as in `p7-adjustments.md` §5.5, each photo copied into `tmp/Imported/` (`ImportedPhoto`) and edited through the shared `RecipeEditor` on HyperDRRender; a `UIView` + `CAMetalLayer` canvas drawn by the shared `DisplayCompositor` with `UIScreen` headroom, detail tiles when zoomed in, the effect mask while a masked control is dragged, and the comparison views of §5.4 (hold, Original / Adjusted / Split, the split divider); undo on the scene's undo manager; its own string catalogue; `Adjustments/` holds the iPhone adjustment bar, its ruler and the layout switch (P7-2a). Links HyperDRDesign, HyperDRRecipe and HyperDRRender. Install steps: `apps/apple/README-iOS.md` |
-| `apps/apple/Shared/Editor` | Shared by the Mac and iOS targets: `RecipeEditor` (recipe, undo steps, drag brackets, render pacing, AI state, detail regions for the host's `CanvasViewport`, effect masks while dragging), `RenderSession` on HyperDRRender, `EditorRendering` and its fake. Foundation, Observation, HyperDRRecipe and HyperDRRender only; tested by `Packages/HyperDREditorCore`, whose sources link to this directory |
+| `apps/apple/HyperDRiOS` | iOS/iPadOS target: PhotosPicker and Files (`fileImporter`) placed as in `p7-adjustments.md` §5.5, each photo copied into `tmp/Imported/` (`ImportedPhoto`) and edited through the shared `RecipeEditor` on HyperDRRender; a `UIView` + `CAMetalLayer` canvas drawn by the shared `DisplayCompositor` with `UIScreen` headroom, detail tiles when zoomed in, the effect mask while a masked control is dragged, and the comparison views of §5.4 (hold, Original / Adjusted / Split, the split divider); undo on the scene's undo manager; its own string catalogue; `Adjustments/` holds the iPhone adjustment bar, its ruler and the layout switch (P7-2a). `Export/` holds the minimal export sheet (P7-3b-U: destination or custom format, progress and cancel, Save to Files and Share) on Kit's `RecipeExportService` with its own `RenderEngine`; the photo's Kit session opens and hashes alongside the editor's decoding, and a run waits for it while preparing. Links HyperDRDesign, HyperDRRecipe, HyperDRRender and HyperDRKit, so the engine xcframework needs its iOS slices (`test.py ios` builds them when missing; for Xcode alone, `bash scripts/build_xcframework.sh --platforms all`). Install steps: `apps/apple/README-iOS.md` |
+| `apps/apple/Shared/Editor` | Shared by the Mac and iOS targets: `RecipeEditor` (recipe, undo steps, drag brackets, render pacing, AI state, detail regions for the host's `CanvasViewport`, effect masks while dragging, the export capture), `RenderSession` on HyperDRRender, `EditorRendering` and its fake. Foundation, Observation, HyperDRRecipe and HyperDRRender only; tested by `Packages/HyperDREditorCore`, whose sources link to this directory |
+| `apps/apple/Shared/Export` | Shared by the Mac and iOS targets: the editor's export capture in Kit's terms (`RecipeExportSnapshot`, `ExportPlanRequest`) |
 
 ## Building and testing
 
@@ -63,7 +64,7 @@ required.
 python3 scripts/fetch_test_fixtures.py          # RAW samples used by the tests
 python3 scripts/test.py native --build-dir build # engine: CMake preset macos-arm64-codecs
 python3 scripts/test.py apple                    # xcframework, Swift packages, app build and tests, localization check
-python3 scripts/test.py ios                      # iOS/iPadOS target: device and simulator builds, unsigned (needs Xcode's iOS platform)
+python3 scripts/test.py ios                      # iOS/iPadOS target: engine slices when missing, device and simulator builds, unsigned (needs Xcode's iOS platform)
 ```
 
 - Engine changes must keep CLI output byte-identical unless the change is
@@ -84,6 +85,28 @@ python3 scripts/test.py ios                      # iOS/iPadOS target: device and
 - Requests produced by `normalize_options` carry `command.adapter = "panel-v1"`,
   which selects the panel's three-decimal rounding. Keep it when editing such a
   request; plain requests keep full precision.
+- `scripts/build_xcframework.sh` builds the macOS arm64 slice by default;
+  `--platforms all` adds the iOS device and iOS simulator slices (deployment
+  target 26.0, no ncnn). The iOS app target starts linking this package later, so
+  the three-slice artifact is the one to generate whenever iOS work needs it.
+  Each slice's archive is checked for retired (L)GPL symbols by
+  `check_licenses.py --archive-only` inside the build script, right after the
+  archive is combined, so no slice can be built without the check and no caller
+  has to remember it. The script rebuilds its output directory from scratch, so
+  `build/xcframework` never holds a slice this run did not produce.
+- Building the iOS slices needs `DEVELOPER_DIR` pointing at Xcode: vcpkg's
+  `arm64-ios` and `arm64-ios-simulator` triplets read the iOS SDK through it, and
+  with `xcode-select` on the Command Line Tools they fail with "iphoneos is not
+  an iOS SDK".
+- libtiff is a static *framework* on iOS (`tiff.framework/tiff`, linked as
+  `-framework tiff`), not a `.a`; the xcframework script folds that binary into
+  the combined archive, which is why the iOS archive still holds the TIFF
+  symbols.
+- Give each build directory its own vcpkg install root. A vcpkg manifest install
+  removes the packages of other triplets from the install root it is given, so two
+  presets sharing one root keep uninstalling each other's slices; changing the
+  root also leaves stale imported-target paths in `CMakeCache.txt`, which fails at
+  generate time until the build directory is cleared.
 
 ## Presentation frames
 

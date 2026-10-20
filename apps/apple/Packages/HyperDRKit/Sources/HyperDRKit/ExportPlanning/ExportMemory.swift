@@ -33,7 +33,7 @@ public struct ExportMemoryEstimate: Sendable, Hashable {
 /// budget instead of borrowing the machine's.
 public protocol ExportMemoryBudget: Sendable {
     /// Bytes available to the export now, or nil when the host cannot say
-    /// (admission is then skipped rather than guessed).
+    /// (admission then uses the explicit conservative 256 MiB limit).
     func availableBytes() -> Int?
 }
 
@@ -42,8 +42,8 @@ public protocol ExportMemoryBudget: Sendable {
 public struct SystemExportMemoryBudget: ExportMemoryBudget {
     /// macOS keeps no per-process limit we can read, and the app shares the
     /// machine with everything else, so admission uses a share of RAM. iOS is
-    /// asked directly; only when it declines does the share stand in. P7-3
-    /// re-measures admission against the new pipeline, so the share is a value.
+    /// asked directly, reserving 20% of its reported available memory. A missing
+    /// iOS measurement never falls back to a fraction of physical RAM.
     public let physicalShare: Double
 
     public init(physicalShare: Double = 0.5) { self.physicalShare = physicalShare }
@@ -51,11 +51,13 @@ public struct SystemExportMemoryBudget: ExportMemoryBudget {
     public func availableBytes() -> Int? {
         #if os(iOS)
         let reported = Int(os_proc_available_memory())
-        if reported > 0 { return reported }
-        #endif
+        if reported > 0 { return Int(Double(reported) * 0.8) }
+        return nil
+        #else
         let physical = Int(ProcessInfo.processInfo.physicalMemory)
         guard physical > 0, physicalShare > 0 else { return nil }
         return Int(Double(physical) * physicalShare)
+        #endif
     }
 }
 
@@ -70,8 +72,8 @@ public struct FixedExportMemoryBudget: ExportMemoryBudget {
 public enum ExportDegradation: Sendable, Hashable {
     /// The preferred writer did not fit; this writer's lower peak does.
     case switchedWriter(ExportWriter)
-    /// The canvas is written in strips of `rowHeight` rows.
-    case strips(rowHeight: Int)
+    /// Only GPU/readback rows shrink. Full CPU planes and codec copies remain.
+    case renderRows(rowHeight: Int)
     /// Nothing fit: the plan is refused and a blocker says why.
     case refused
 }
@@ -80,11 +82,13 @@ public enum ExportDegradation: Sendable, Hashable {
 public struct ExportMemoryPlan: Sendable, Hashable {
     /// The estimate for what the plan will actually do (after any degradation).
     public let estimate: ExportMemoryEstimate
-    /// nil when the host could not report what is free.
+    public let renderRows: Int
+    /// The measured budget, or the explicit conservative limit.
     public let availableBytes: Int?
     public let degradation: ExportDegradation?
 
-    public init(estimate: ExportMemoryEstimate, availableBytes: Int?, degradation: ExportDegradation?) {
+    public init(estimate: ExportMemoryEstimate, availableBytes: Int?, degradation: ExportDegradation?, renderRows: Int = 256) {
+        self.renderRows = renderRows
         self.estimate = estimate
         self.availableBytes = availableBytes
         self.degradation = degradation
@@ -129,10 +133,6 @@ public struct ExportRetainedResources: Sendable, Hashable {
 }
 
 extension ExportMemoryEstimate {
-    /// Rows written at once when a writer streams a canvas. E6's HEVC tile
-    /// height, so a strip costs the buffers the encoder already holds.
-    public static let stripHeight = 512
-
     struct Input {
         let source: ExportSource
         /// The photo as it is graded and written: the source limited to the
@@ -145,106 +145,43 @@ extension ExportMemoryEstimate {
         let writesGainMap: Bool
         let isFramed: Bool
         let baseBitDepth: Int
-        /// Rows of the canvas encoded at once: the canvas height, or a strip's.
+        /// GPU stripe rows. Does not change CPU owners or writer allocations.
         let writeRows: Int
         let retainedBytes: Int
     }
 
-    /// E6's model, kept in the same shape: the stages of one export, each with
-    /// the footprints E6 measured, the ImageIO 8-bit HEIC pair added from
-    /// writer-lab (3.11 GiB at 61 MP against 1.21 GiB for ours), and the
-    /// canvas-sized terms of packaging, encoding and verification bounded by
-    /// `writeRows` so a streaming writer can be asked what a strip would cost.
+    /// b-stage allocation model. Source, whole-plane owners, ABI copies and
+    /// codec buffers overlap; rendering stripes never imply streaming encoding.
     static func estimate(_ input: Input) -> ExportMemoryEstimate {
-        let mib = 1024 * 1024
-        // Decoding works on the source's own raster; grading and writing work on
-        // the size the destination asks for.
-        let source = input.source.pixelSize
-        let photo = input.photoSize
-        let photoPixels = photo.pixels
-        let canvasPixels = input.canvas.pixels
-        let writeRows = min(max(input.writeRows, 1), input.canvas.height)
-        let writePixels = input.canvas.width * writeRows
-        let sensorPixels = (input.source.sensorSize ?? source).pixels
-
-        let sdr = input.encoding.isSDR
-        let raw = input.source.domain == .rawEDR
-        // An imported pair holds its HDR and SDR float planes beside the gain
-        // map; a single rendition (SDR or HDR) does not.
-        let pair = input.source.domain == .dual
-        let raster = !raw && !pair
-        // RAW keeps the renderer's floor plus a GPU working set; everything
-        // else pays the process and framework caches.
-        let overhead = raw ? 192 * mib : 32 * mib
-        let resident = raw ? sensorPixels * 16 : 0
-        let main10 = input.baseBitDepth == 10
-        // Four 512-row tiles in flight, whatever the thread count, and the
-        // VideoToolbox floor.
-        let tileWorkingSet = 4 * 512 * 512 * (main10 ? 3 : 2) + 32 * mib
-
-        let decode = raw
-            ? overhead + resident + source.pixels * 12 + source.width * 512 * 16
-            : overhead + source.pixels * (pair ? 40 : 15)
-        let renderPlanes = pair ? (sdr ? 48 : 64)
-            : raster ? (sdr ? 27 : 48)
-            : (sdr ? 24 : 44)
-        let render = overhead + resident + photoPixels * renderPlanes
-        let composite = input.isFramed
-            ? overhead + resident + photoPixels * (sdr ? 12 : 24) + canvasPixels * (raster ? 16 : 13)
-            : 0
-        // Only a pair is repackaged; a base written straight out does not.
-        let packaging: Int
-        if input.writesGainMap {
-            packaging = input.encoding == .isoGainMapJPEG
-                ? overhead + resident + photoPixels * (raster ? 24 : 3) + writePixels * (raster ? 24 : 25)
-                : overhead + resident + photoPixels * (raster ? 24 : 12) + writePixels * 21
-        } else {
-            packaging = 0
-        }
-
-        let avifCell = input.encoding.isAVIF ? Self.avifCell(canvas: input.canvas) : nil
-        let encode: Int
-        let verify: Int
-        switch input.encoding {
-        case .isoGainMapJPEG:
-            encode = overhead + resident + writePixels * 27
-            verify = overhead + resident + writePixels * 16
-        case .adaptive:
-            if input.writer == .imageIO {
-                // writer-lab's B path holds the whole canvas as ImageIO buffers on
-                // top of ours and cannot stream; a plain 8-bit SDR HEIC (no pair
-                // to carry) costs the single-rendition path instead.
-                encode = overhead + resident + canvasPixels * (input.writesGainMap ? 53 : 20)
-            } else {
-                encode = overhead + resident + writePixels * 20 + tileWorkingSet
-            }
-            verify = overhead + resident + writePixels * 4
-        case .pq, .hlg:
-            encode = overhead + resident + writePixels * 16 + tileWorkingSet
-            verify = overhead + resident + writePixels * 4
-        case .avifPq, .avifHlg:
-            if let avifCell {
-                // A grid converts and codes one cell at a time; the finished
-                // YUV cells stay beside the canvas.
-                encode = overhead + resident + canvasPixels * 18 + avifCell.pixels * 42
-                    + photoPixels * (raster ? 24 : 0)
-                verify = overhead + resident + canvasPixels * 18 + avifCell.pixels * 20
-            } else {
-                encode = overhead + resident + canvasPixels * ((!raw && !input.isFramed) ? 78 : 66)
-                verify = overhead + resident + canvasPixels * 20
-            }
-        case .sdrJPEG, .sdrTIFF:
-            encode = overhead + resident + writePixels * 20
-            verify = overhead + resident + writePixels * 16
-        }
-
-        return ExportMemoryEstimate(
-            decode: decode + input.retainedBytes,
-            render: render + input.retainedBytes,
-            composite: composite + input.retainedBytes,
-            packaging: packaging + input.retainedBytes,
-            encode: encode + input.retainedBytes,
-            verify: verify + input.retainedBytes)
+        let sourcePixels = input.source.pixelSize.pixels
+        let p = input.canvas.pixels
+        // Reserve RGB gain even if analysis later produces mono. Full source,
+        // CPU owner and package's copy_plane are real overlapping allocations.
+        let needsGain = input.writesGainMap || input.encoding.isBT2100
+        let pairBytes = needsGain ? 24 : 12
+        let source = sourcePixels * (input.source.domain == .dual ? 48 : 16)
+        let rawCache = input.source.domain == .rawEDR
+            ? (input.source.sensorSize ?? input.source.pixelSize).pixels * 16 : 0
+        let resident = source + rawCache + input.retainedBytes + 32 * 1024 * 1024
+        let owner = p * pairBytes
+        // GPU output remains alive while readback packs RGBA into RGB. RGB
+        // gain peaks at (4+3 + 4+3) Floats = 56 CPU bytes per stripe pixel,
+        // alongside two RGBA textures (32 GPU bytes) and the whole CPU owner.
+        // Without gain, Render still allocates its single-channel gain texture.
+        let stripeGPUBytes = needsGain ? 32 : 20
+        let stripeCPUBytes = needsGain ? 56 : 28
+        let stripe = input.canvas.width * min(input.writeRows, input.canvas.height)
+            * (stripeGPUBytes + stripeCPUBytes)
+        let render = resident + owner + stripe + input.photoSize.pixels * 64
+        // Quantized planes, full-plane copies, HDR reconstruction and encoder
+        // workspace. AVIF retains YUV cells and the canvas beside the codec.
+        let codec = input.encoding.isAVIF ? p * 96
+            : input.encoding == .adaptive || input.encoding.isBT2100 ? p * 32 + 48 * 1024 * 1024
+            : p * 20
+        let encode = resident + owner * 2 + codec
+        let verify = resident + owner + p * (needsGain ? 40 : 16)
+        return .init(decode: resident, render: render, composite: render,
+                     packaging: encode, encode: encode, verify: verify)
     }
 
     /// libaom refuses a source frame above its cap, so a large canvas is coded

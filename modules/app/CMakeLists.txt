@@ -9,6 +9,7 @@ hyperdr_add_module(app
     src/edit_options.cpp
     src/batch.cpp
     src/export_memory.cpp
+    src/package.cpp
     src/cli.cpp
     src/cli_preview.cpp
     src/cli_model.cpp
@@ -26,8 +27,12 @@ hyperdr_add_module(app
     src/settings.cpp
   DEPENDS HyperDR::codec)
 
-add_executable(HyperDR src/main.cpp)
-target_link_libraries(HyperDR PRIVATE HyperDR::app)
-hyperdr_configure_target(HyperDR)
+# The iOS slices are a library for the app: a command-line executable cannot be
+# built for iOS, and the engine reaches iOS only through the C ABI.
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+  add_executable(HyperDR src/main.cpp)
+  target_link_libraries(HyperDR PRIVATE HyperDR::app)
+  hyperdr_configure_target(HyperDR)
+endif()
 
 add_subdirectory(tests)

@@ -41,7 +41,11 @@ struct PhotoCanvasScreen: View {
             .toolbarBackground(.hidden, for: .navigationBar)
         }
         .onChange(of: selection) { _, item in
-            if let item { request = Request(source: .library(item)) }
+            // Cleared once used, so picking the same photo again (after a
+            // file, or after a failed load) is a new request too.
+            guard let item else { return }
+            request = Request(source: .library(item))
+            selection = nil
         }
         .fileImporter(isPresented: $importingFile, allowedContentTypes: [.image]) { result in
             if case .success(let url) = result { request = Request(source: .file(url)) }

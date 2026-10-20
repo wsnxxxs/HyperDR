@@ -51,7 +51,7 @@ public struct SystemExportMemoryBudget: ExportMemoryBudget {
     /// iOS devices are asked directly, reserving 20% of reported available memory.
     /// A missing physical-device measurement never uses a fraction of RAM.
     /// Simulator memory belongs to the host Mac and does not predict device
-    /// capacity: 61MP export admission must be validated on a real device.
+    /// capacity: 110MP original-size export must be validated on a real device.
     public let physicalShare: Double
 
     public init(physicalShare: Double = 0.5) { self.physicalShare = physicalShare }
@@ -98,8 +98,12 @@ public struct ExportMemoryPlan: Sendable, Hashable {
     /// The measured budget, or the explicit conservative limit.
     public let availableBytes: Int?
     public let degradation: ExportDegradation?
+    /// Largest admitted photo long edge under this budget; nil if none was found.
+    /// Only computed after refusal. Rebuild the frame layout before applying it.
+    public let maxAdmissibleLongEdge: Int?
 
-    public init(estimate: ExportMemoryEstimate, availableBytes: Int?, degradation: ExportDegradation?, renderRows: Int = 256, usesRowInput: Bool = false) {
+    public init(estimate: ExportMemoryEstimate, availableBytes: Int?, degradation: ExportDegradation?, renderRows: Int = 256, usesRowInput: Bool = false, maxAdmissibleLongEdge: Int? = nil) {
+        self.maxAdmissibleLongEdge = maxAdmissibleLongEdge
         self.renderRows = renderRows
         self.usesRowInput = usesRowInput
         self.estimate = estimate
@@ -162,6 +166,7 @@ extension ExportMemoryEstimate {
         let writeRows: Int
         let retainedBytes: Int
         var allowsRowInput: Bool = true
+        var quality: Int = 90
     }
 
     /// b-stage allocation model. Source, whole-plane owners, ABI copies and
@@ -232,12 +237,20 @@ extension ExportMemoryEstimate {
         let readback = input.canvas.width * rows * (gain ? 88 : 48)
         let packageBand = input.canvas.width * rows * (gain ? 24 : 12)
         let heic = input.encoding == .adaptive || input.encoding.isBT2100
-        // VT consumes its own 512-row float/YUV slab, and our HEIF container
-        // retains compressed tiles plus its final assembled byte vector.
-        let codec = heic ? input.canvas.width * min(512, input.canvas.height) * 40 : input.canvas.width * 32
-        let compressedBytesPerPixel = input.encoding == .adaptive && input.baseBitDepth == 10 ? 5 : 3
-        let compressedCache = heic ? input.canvas.pixels * compressedBytesPerPixel * 2 + 8 * 1024 * 1024 : 0
-        let encode = resident + sourceBand(rows) + graph + readback + packageBand + codec + compressedCache
+        // encode_heic_rows materializes one RGB Float slab (12 B/px), not
+        // full-width YUV/float canvases. VT has at most four 512px pictures in
+        // flight; reserve their buffers/framework workspace separately (32 MiB).
+        // Compressed tiles and the assembled container are accounted below.
+        let codec = heic ? input.canvas.width * min(512, input.canvas.height) * 12 + 32 * 1024 * 1024
+            : input.canvas.width * 32
+        let compressedCache = heic ? compressedHEICCache(pixels: input.canvas.pixels,
+            bitDepth: input.baseBitDepth, quality: input.quality) : 0
+        // Encoding retains one copy of the compressed sequences. During HEIF
+        // assembly their payloads are borrowed by Items; only the final output
+        // is additional. Slab/codec pictures have finished before assembly.
+        let rowResident = resident + sourceBand(rows) + graph + readback + packageBand
+        let encode = rowResident + codec + (heic ? compressedCache / 2 : 0)
+        let assembly = heic ? rowResident + 32 * 1024 * 1024 + compressedCache : encode
         let render = resident + sourceBand(scanRows) + scanGraph
         // Native verification releases input bands first and scans rows, or
         // decodes one 512×512 HEIC tile pair with bounded VT pictures. Keep the
@@ -245,12 +258,28 @@ extension ExportMemoryEstimate {
         let verifierResident = resident + sourceBand(rows) + graph
         let nativeWorkspace = (heic ? 512 * 512 * 40 : input.canvas.width * 128) + 8 * 1024 * 1024
         let nativeVerify = verifierResident + nativeWorkspace
-        // ImageIO thumbnail/CI output is small, but its decoder and auxiliary
-        // dictionary may cache full rasters. Retain the full-image reservation.
-        let systemVerify = verifierResident + input.canvas.pixels * (gain ? 40 : 16)
+        // No full auxiliary dictionary on native row output. JPEG/HEIC CI
+        // readback requests decoder subsampling by 8 and a <=256px thumbnail.
+        // Keep decoder row/tile workspace beside fixed base/gain/float buffers.
+        let systemVerify = verifierResident + nativeWorkspace + 256 * 256 * (gain ? 40 : 16)
         return .init(decode: resident, render: render, composite: render,
-                     packaging: encode, encode: encode, verify: max(nativeVerify, systemVerify),
+                     packaging: assembly, encode: encode, verify: max(nativeVerify, systemVerify),
                      nativeVerify: nativeVerify, systemVerify: systemVerify)
+    }
+
+    /// Upper envelope from 1MP random base + random gain native writer samples,
+    /// not a fixed RGB byte count. Includes 20% rate variation, container slack,
+    /// and both retained encoded tiles and the assembled container (Item payloads
+    /// borrow the sequence samples). Smooth RAW
+    /// gain maps normally encode far below this envelope; do not assume that.
+    static func compressedHEICCache(pixels: Int, bitDepth: Int, quality: Int) -> Int {
+        let rates = bitDepth == 10 ? [20.533, 23.966, 25.671] : [17.405, 19.035, 19.640] // bits/pixel
+        let q = min(100, max(90, quality))
+        let index = q <= 95 ? 0 : 1
+        let t = Double(q - (index == 0 ? 90 : 95)) / 5
+        let bits = rates[index] + (rates[index+1] - rates[index]) * t
+        let encoded = Int(ceil(Double(pixels) * bits * 1.2 / 8)) + 2 * 1024 * 1024
+        return encoded * 2
     }
 
     /// libaom refuses a source frame above its cap, so a large canvas is coded

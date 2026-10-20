@@ -15,7 +15,16 @@ public struct RecipeExportProgress: Sendable {
     public let stage: RecipeExportStage
     public let completedRows: Int?
     public let totalRows: Int?
-    public init(stage: RecipeExportStage, completedRows: Int? = nil, totalRows: Int? = nil) {
+    /// Encoding pulls Render synchronously on the row path. Label this stage
+    /// “Rendering and encoding”; rows describe this pass, not overall completion.
+    public let includesRendering: Bool
+    /// One-based sequential replay pass; nil outside the row writer.
+    public let rowPass: Int?
+    public var stageMessage: ExportMessage {
+        .init(key: "export.stage." + (includesRendering ? "renderingEncoding" : stage.rawValue))
+    }
+    public init(stage: RecipeExportStage, completedRows: Int? = nil, totalRows: Int? = nil, includesRendering: Bool = false, rowPass: Int? = nil) {
+        self.includesRendering = includesRendering; self.rowPass = rowPass
         self.stage = stage; self.completedRows = completedRows; self.totalRows = totalRows
     }
 }
@@ -50,7 +59,13 @@ extension ExportRecord {
 /// Select a Mac file destination before calling; nil retains a verified version for
 /// iOS fileExporter / ShareLink. Photos saving remains disabled until Photos Lab.
 public protocol RecipeExportServicing: Sendable {
+    /// Read after a failed export; nil if it did not fail memory admission.
+    var lastMemoryDiagnostic: ExportMemoryDiagnostic? { get async }
     func export(session: SessionID, snapshot: RecipeExportSnapshot,
                 request: ExportPlanRequest, lut: ColorLUT?, destination: URL?,
                 progress: @escaping @Sendable (RecipeExportProgress) -> Void) async throws -> RecipeExportResult
+}
+
+extension RecipeExportServicing {
+    public var lastMemoryDiagnostic: ExportMemoryDiagnostic? { get async { nil } }
 }

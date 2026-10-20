@@ -120,10 +120,14 @@ public struct CustomExportFormat: Sendable, Hashable, Codable {
     /// 0...100; TIFF ignores it.
     public var quality: Int
 
-    public init(encoding: ExportEncoding = .adaptive, gamut: ExportColorGamut = .p3, quality: Int = 90) {
+    /// nil keeps the original dimensions; a positive limit never upscales.
+    public var longEdge: Int?
+
+    public init(encoding: ExportEncoding = .adaptive, gamut: ExportColorGamut = .p3, quality: Int = 90, longEdge: Int? = nil) {
         self.encoding = encoding
         self.gamut = gamut
         self.quality = quality
+        self.longEdge = longEdge
     }
 }
 

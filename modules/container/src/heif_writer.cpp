@@ -22,7 +22,7 @@ constexpr std::size_t kMetadataLimit = 4U * 1024 * 1024;
 constexpr std::uint64_t kFileLimit = std::numeric_limits<std::uint32_t>::max();
 struct Grid { std::uint32_t width, height, columns, rows; };
 struct Property { Bytes box; bool essential{}; };
-void append(Bytes& dst, const Bytes& source) {
+void append(Bytes& dst, std::span<const std::uint8_t> source) {
   (void)container::bounded_heif_add(dst.size(),source.size());
   dst.insert(dst.end(), source.begin(), source.end());
 }
@@ -73,11 +73,17 @@ struct Item {
   std::string_view type;
   std::string_view name;
   bool hidden{};
-  Bytes data;
+  Bytes data; // Owned small grid/tmap/Exif/XMP payload only.
   std::vector<Association> properties;
   std::vector<std::uint16_t> derived_from;
   std::string_view content_type;
   std::uint16_t auxiliary_to{};
+  // Encoded sequences outlive this call. Never duplicate their compressed samples.
+  // The view points into the caller, not data, so Item moves cannot invalidate it.
+  std::span<const std::uint8_t> sample{};
+  [[nodiscard]] std::span<const std::uint8_t> payload() const {
+    return sample.empty() ? std::span<const std::uint8_t>(data) : sample;
+  }
 };
 
 class PropertyPool {
@@ -183,7 +189,7 @@ Bytes make_iloc(const std::vector<Item>& items, std::uint64_t media_start) {
   put16(payload, static_cast<std::uint16_t>(items.size()));
   for (const auto& item : items) {
     if (media_start > std::numeric_limits<std::uint32_t>::max() ||
-        item.data.size() > std::numeric_limits<std::uint32_t>::max() - media_start) {
+        item.payload().size() > std::numeric_limits<std::uint32_t>::max() - media_start) {
       throw std::runtime_error("assembled HEIF exceeds 32-bit item offsets");
     }
     put16(payload, item.id);
@@ -191,8 +197,8 @@ Bytes make_iloc(const std::vector<Item>& items, std::uint64_t media_start) {
     put16(payload, 0);  // data_reference_index 0
     put16(payload, 1);  // extent_count
     put32(payload, static_cast<std::uint32_t>(media_start));
-    put32(payload, static_cast<std::uint32_t>(item.data.size()));
-    media_start += item.data.size();
+    put32(payload, static_cast<std::uint32_t>(item.payload().size()));
+    media_start += item.payload().size();
   }
   return make_box("iloc", payload);
 }
@@ -326,7 +332,8 @@ std::vector<std::uint8_t> write_heif(const HeifEncodedImage& base, const HeifEnc
     auto description = describe(image, config, grid, pool);
     if (!group) base_description = description;
     Item logical{logical_id, grid ? "grid" : "hvc1", group ? "Gain map" : "Image",
-                 group != 0, grid ? grid_payload(grids[group]) : image.sequence.samples[0], description, {}, {}, 0};
+                 group != 0, grid ? grid_payload(grids[group]) : Bytes{}, description, {}, {}, 0,
+                 grid ? std::span<const std::uint8_t>{} : std::span<const std::uint8_t>(image.sequence.samples[0])};
     const auto hvcc = pool.add({make_box("hvcC", config.record), true});
     if (!grid) logical.properties.push_back(hvcc);
     items.push_back(std::move(logical));
@@ -338,7 +345,7 @@ std::vector<std::uint8_t> write_heif(const HeifEncodedImage& base, const HeifEnc
         check_cancelled();
         const auto id = static_cast<std::uint16_t>(items.size() + 1);
         items[logical_id - 1].derived_from.push_back(id);
-        items.push_back({id, "hvc1", "Tile", true, sample, tile_description, {}, {}, 0});
+        items.push_back({id, "hvc1", "Tile", true, {}, tile_description, {}, {}, 0, sample});
       }
     }
   }
@@ -370,7 +377,7 @@ std::vector<std::uint8_t> write_heif(const HeifEncodedImage& base, const HeifEnc
   auto meta = make_meta(items, pool, hdlr, primary, 0);
   const std::uint64_t media_start = ftyp.size() + std::uint64_t(meta.size()) + 8;
   media_size = 0;
-  for (const auto& item : items) media_size=container::bounded_heif_add(media_size,item.data.size());
+  for (const auto& item : items) media_size=container::bounded_heif_add(media_size,item.payload().size());
   if (media_start > kFileLimit || media_size > kFileLimit - media_start)
     throw std::invalid_argument("HEIF file exceeds 32-bit offsets");
   meta = make_meta(items, pool, hdlr, primary, media_start);
@@ -379,7 +386,7 @@ std::vector<std::uint8_t> write_heif(const HeifEncodedImage& base, const HeifEnc
   append(out, ftyp); append(out, meta);
   put32(out, static_cast<std::uint32_t>(media_size + 8));
   out.insert(out.end(), {'m','d','a','t'});
-  for (const auto& item : items) { check_cancelled(); append(out, item.data); }
+  for (const auto& item : items) { check_cancelled(); append(out, item.payload()); }
   return out;
 }
 } // namespace hyperdr

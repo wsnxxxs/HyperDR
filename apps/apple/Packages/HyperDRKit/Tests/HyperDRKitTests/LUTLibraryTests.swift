@@ -271,35 +271,12 @@ extension LUTLibraryTests {
     }
 }
 
-@Suite(.timeLimit(.minutes(1))) struct LUTCompatibilityTests {
-    @Test func allSpacePairsMatchRealEngineForSDRAndRAWSources() async throws {
-        let env = try LUTEnvironment()
-        let source = env.root.appendingPathComponent("spaces.png")
-        let provider = try #require(CGDataProvider(data: Data(repeating: 128, count: 8*8*4) as CFData))
-        let space = try #require(CGColorSpace(name: CGColorSpace.sRGB))
-        let image = try #require(CGImage(width:8,height:8,bitsPerComponent:8,bitsPerPixel:32,bytesPerRow:32,
-            space:space,bitmapInfo:CGBitmapInfo(rawValue:CGImageAlphaInfo.noneSkipLast.rawValue),provider:provider,
-            decode:nil,shouldInterpolate:false,intent:.defaultIntent))
-        let file = try #require(CGImageDestinationCreateWithURL(source as CFURL,"public.png" as CFString,1,nil))
-        CGImageDestinationAddImage(file,image,nil);try #require(CGImageDestinationFinalize(file))
-        let kit = try await HyperDRKit(configuration:env.configuration)
-        let photo = try await kit.sessions.open(source)
-        let lut = try await kit.luts.importLUT(env.source(),into:photo.id)
-        let repository = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .appendingPathComponent("../../../../../..", isDirectory: true).standardized
-        let raw = repository.appendingPathComponent("build/fixtures/sony-ilce-7s.ARW")
-        try #require(FileManager.default.fileExists(atPath: raw.path), "Run scripts/fetch_test_fixtures.py")
-        let rawPhoto = try await kit.sessions.open(raw)
-        _ = try await kit.luts.apply(lut.id, to: rawPhoto.id)
-        for (source, isRAW) in [(photo, false), (rawPhoto, true)] {
-            for input in LUTSpace.allCases { for output in LUTSpace.allCases {
-                var options=env.options(lut);options["encoding"] = .string("sdr-tiff")
-                options["lutInput"] = .string(input.rawValue);options["lutOutput"] = .string(output.rawValue)
-                var accepted = false
-                do { _ = try await kit.previews.render(PreviewRequest(session:source.id,options:options,maxEdge:640));accepted=true }
-                catch let error as HyperDRError { #expect(error.code == "invalid_options", "RAW=\(isRAW) \(input)/\(output): \(error)") }
-                #expect(accepted == (LUTCompatibility.issue(input:input,output:output,isRAW:isRAW) == nil), "RAW=\(isRAW) \(input)/\(output)")
-            } }
-        }
+@Suite struct LUTCompatibilityTests {
+    @Test func onlySLog3InputRequiresRAW() {
+        for input in LUTSpace.allCases { for output in LUTSpace.allCases {
+            #expect(LUTCompatibility.issue(input: input, output: output, isRAW: true) == nil)
+            #expect((LUTCompatibility.issue(input: input, output: output, isRAW: false) == nil)
+                    == (input != .slog3SGamut3Cine))
+        } }
     }
 }

@@ -43,7 +43,7 @@ public final class ExportFolderSnapshot: Sendable {
     fileprivate func renewAccess() throws -> SecurityScopeLease {
         do {
             var stale = false
-            let url = try URL(resolvingBookmarkData: bookmark, options: [.withSecurityScope, .withoutUI],
+            let url = try URL(resolvingBookmarkData: bookmark, options: SecurityScopedBookmarks.resolutionOptions,
                 relativeTo: nil, bookmarkDataIsStale: &stale)
             let renewed = SecurityScopeLease(url: url, access: access)
             var pinned = stat(), resolved = stat()
@@ -105,7 +105,7 @@ public actor ExportTarget {
         bookmarkFile = configuration.supportDirectory.appendingPathComponent("export-folder.bookmark")
         if let data = try? Data(contentsOf: bookmarkFile) {
             var stale = false
-            selected = try? URL(resolvingBookmarkData: data, options: [.withSecurityScope, .withoutUI],
+            selected = try? URL(resolvingBookmarkData: data, options: SecurityScopedBookmarks.resolutionOptions,
                 relativeTo: nil, bookmarkDataIsStale: &stale)
         }
     }
@@ -130,10 +130,10 @@ public actor ExportTarget {
         let canonical = try Self.directoryURL(descriptor)
         let scoped: URL
         do {
-            let bookmark = try canonical.bookmarkData(options: [.withSecurityScope],
+            let bookmark = try canonical.bookmarkData(options: SecurityScopedBookmarks.creationOptions,
                 includingResourceValuesForKeys: nil, relativeTo: nil)
             var stale = false
-            scoped = try URL(resolvingBookmarkData: bookmark, options: [.withSecurityScope, .withoutUI],
+            scoped = try URL(resolvingBookmarkData: bookmark, options: SecurityScopedBookmarks.resolutionOptions,
                 relativeTo: nil, bookmarkDataIsStale: &stale)
             try FileManager.default.createDirectory(at: bookmarkFile.deletingLastPathComponent(), withIntermediateDirectories: true)
             try bookmark.write(to: bookmarkFile, options: .atomic)
@@ -145,7 +145,7 @@ public actor ExportTarget {
     public func captureFolder() throws -> ExportFolderSnapshot {
         guard let selected else { throw Self.error("export_folder_unset") }
         let lease = SecurityScopeLease(url: selected, access: access)
-        let bookmark = try selected.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
+        let bookmark = try selected.bookmarkData(options: SecurityScopedBookmarks.creationOptions, includingResourceValuesForKeys: nil, relativeTo: nil)
         let descriptor = try Self.openFolder(selected, excluding: roots)
         return ExportFolderSnapshot(label: Self.label(selected), descriptor: descriptor, lease: lease,
             bookmark: bookmark, access: access)

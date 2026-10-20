@@ -25,7 +25,7 @@ private struct StripeFake: ExportStripeRendering {
         let size = request.canvasSize
         let report = ExportRenderReport(canvasSize: size,
             gain: channels == 0 ? nil : metadata ?? .init(channelCount: channels, alternateHeadroom: 2),
-            provenance: .split, resplitReasons: [], resolvedAutomatic: ["hdr.range": 2],
+            sourceProvenance: .split, provenance: .split, resplitReasons: [], resolvedAutomatic: ["hdr.range": 2],
             presentationFrame: request.frame != nil, framePhoto: request.frame?.photo)
         try prepare(report)
         for y in stride(from: 0, to: size.height, by: rows) {
@@ -190,9 +190,17 @@ private struct RecipeExportEnvironment {
                                              request: request(.isoGainMapJPEG))
         #expect(kept.resolved.gain?.channels == 3)
         #expect(kept.resolved.resplitReasons.isEmpty)
+        #expect(kept.resolved.sourceProvenance == "authored")
         #expect(kept.resolved.provenance == "authored")
         let mono = try await service.export(session: photo.id, snapshot: .init(recipe: recipe, source: revision),
                                              request: request(.adaptive))
+        // Adaptive also narrows the range upstream before the mono resplit.
+        #expect(mono.resolved.sourceProvenance == "editedAuthored")
+        #expect(mono.resolved.provenance == "resplit")
+        let reopened = await env.sessions.exports(for: photo.id)
+        let persisted = try #require(reopened.first { $0.id == mono.record.id }?.resolvedSnapshot)
+        let decoded = try JSONDecoder().decode(ResolvedExportSnapshot.self, from: JSONEncoder().encode(persisted))
+        #expect(decoded.sourceProvenance == "editedAuthored" && decoded.provenance == "resplit")
         #expect(mono.resolved.gain?.channels == 1)
         #expect(mono.resolved.resplitReasons.contains("writerCarriesOneChannel"))
         let social = ExportPlanRequest(choice: .destination(.social),
@@ -208,6 +216,8 @@ private struct RecipeExportEnvironment {
                                                request: request(.isoGainMapJPEG))
         #expect(framed.resolved.gain?.baseOffset == .zero && framed.resolved.gain?.alternateOffset == .zero)
         #expect(framed.resolved.resplitReasons.contains("frameRequiresNeutralPair"))
+        #expect(framed.resolved.sourceProvenance == "authored")
+        #expect(framed.resolved.provenance == "resplit")
     }
 
     @Test func eightEncodingsArePackagedAndReadByBothReaders() async throws {

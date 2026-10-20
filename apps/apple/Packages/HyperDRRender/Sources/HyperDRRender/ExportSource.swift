@@ -14,8 +14,9 @@ func sourceSampling(_ texture: any MTLTexture, _ region: CGRect) -> SIMD4<Float>
     return SIMD4(Float((region.minX*width).rounded()),Float((region.minY*height).rounded()),Float(width),Float(height))
 }
 
-/// Lazy system decode/development graph. No full-size RGBAf texture is allocated
-/// by Render. Apple codecs/CIRAWFilter may still cache full-frame data internally.
+/// System decode/development source. No full-size RGBAf texture is allocated
+/// by Render. Large TIFFs retain one detached native bitmap for ROI reuse;
+/// other Apple codecs/CIRAWFilter may still cache full-frame data internally.
 /// The caller must keep file access valid until export finishes. Immutable and may
 /// be shared with another RenderEngine on the same Metal device.
 public struct ExportSource: @unchecked Sendable {
@@ -32,8 +33,8 @@ public struct ExportSource: @unchecked Sendable {
 }
 
 extension RenderEngine {
-    /// Keeps full-quality system graphs lazy, and materializes only the fixed
-    /// analysis source. Drops engine-owned pixel caches, retaining four AI grids.
+    /// Opens full-quality system graphs/native decoder storage and materializes
+    /// only the fixed analysis texture. Drops pixel caches, retaining four AI grids.
     /// Use an export engine if the editor must keep its preview caches warm.
     public func openExportSource(_ url: URL, options: SourceOptions = SourceOptions()) throws -> ExportSource {
         try Task.checkCancellation()

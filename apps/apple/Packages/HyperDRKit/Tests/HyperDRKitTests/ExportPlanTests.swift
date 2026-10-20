@@ -444,16 +444,44 @@ struct ExportMemoryPlanTests {
         #expect(strips.packaging == whole.packaging)
     }
 
-    @Test func rowsRemoveOwnersButStillReserveWholeImageVerification() {
+    @Test func rowsBoundNativeVerificationButReserveTheSystemReader() {
         let req = request(.custom(.init(encoding: .sdrTIFF, gamut: .p3, quality: 90)))
         let streamed = plan(req)
         var old = req; old.allowsRowInput = false
         let whole = plan(old)
         #expect(streamed.memory.usesRowInput && !whole.memory.usesRowInput)
         #expect(streamed.memory.estimate.encode < whole.memory.estimate.encode)
-        #expect(streamed.memory.estimate.verify > photo.pixels * 16)
+        #expect(streamed.memory.estimate.systemVerify > photo.pixels * 16)
+        #expect(streamed.memory.estimate.nativeVerify < streamed.memory.estimate.systemVerify)
+        #expect(streamed.memory.estimate.verify == streamed.memory.estimate.systemVerify)
+        #expect(whole.memory.estimate.nativeVerify == whole.memory.estimate.systemVerify)
         #expect(!ExportWriter.imageIO.supportsRowInput(encoding: .adaptive))
         #expect(!ExportWriter.libavif.supportsRowInput(encoding: .avifPq))
+    }
+
+    @Test func nativeRowVerificationWorkspaceDoesNotGrowWithHeight() {
+        for encoding in [ExportEncoding.sdrJPEG, .sdrTIFF, .isoGainMapJPEG, .adaptive, .pq, .hlg] {
+            func estimate(_ height: Int) -> ExportMemoryEstimate {
+                let size = ExportPixelSize(width: 2048, height: height)
+                return ExportMemoryEstimate.estimate(.init(source: source(size: size), photoSize: size,
+                    canvas: size, encoding: encoding, writer: .inHouse, writesGainMap: encoding.writesGainMap,
+                    isFramed: false, baseBitDepth: encoding.isBT2100 ? 10 : 8, writeRows: 64, retainedBytes: 0))
+            }
+            let short = estimate(1024), tall = estimate(4096)
+            // Source/analysis cache belongs to decode; the verification workspace
+            // remains one row set or tile pair at the same width.
+            #expect(tall.nativeVerify - tall.decode == short.nativeVerify - short.decode)
+            #expect(tall.systemVerify - tall.decode > short.systemVerify - short.decode)
+            #expect(tall.verify == max(tall.nativeVerify, tall.systemVerify))
+        }
+        for encoding in [ExportEncoding.avifPq, .adaptive] {
+            let writer: ExportWriter = encoding.isAVIF ? .libavif : .imageIO
+            let result = ExportMemoryEstimate.estimate(.init(source: source(), photoSize: photo, canvas: photo,
+                encoding: encoding, writer: writer, writesGainMap: encoding.writesGainMap,
+                isFramed: false, baseBitDepth: encoding.isAVIF ? 10 : 8, writeRows: 64, retainedBytes: 0))
+            #expect(result.nativeVerify == result.systemVerify)
+            #expect(result.verify > photo.pixels * 16)
+        }
     }
 
     @Test func theSystemBudgetAnswersOrDeclines() {

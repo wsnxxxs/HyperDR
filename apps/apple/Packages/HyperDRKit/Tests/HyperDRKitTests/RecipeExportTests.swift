@@ -357,16 +357,20 @@ private struct RecipeExportEnvironment {
         let band = try prepared.read(y: height/2, count: min(rows, height-height/2))
         #expect(try prepared.read(y: height/2, count: min(rows, height-height/2)).baseRGB == band.baseRGB)
         let bridge = PackageRowBridge(source: prepared, frame: nil)
-        _ = try await engine.packageRows(width: width, height: height, rows: rows, to: output,
-            options: .init(format: "sdr-tiff", gamut: "p3", verify: false),
+        let packaged = try await engine.packageRows(width: width, height: height, rows: rows, to: output,
+            options: .init(format: "sdr-tiff", gamut: "p3", verify: true),
             read: { y, count, base, gain in try bridge.read(y: y, count: count, base: base, gain: gain) })
         _ = try bridge.thumbnail()
-        let writePeak = peak()
-        let probe = try await engine.probe(output)
-        #expect(probe.width == width && probe.height == height)
+        #expect(packaged.verified)
+        let nativeVerifiedPeak = peak()
+        let plan = ExportPlanner.plan(ExportPlanRequest(choice: .custom(.init(encoding: .sdrTIFF, gamut: .p3, quality: 90)),
+            source: .init(domain: .sdr, pixelSize: .init(width: width, height: height)),
+            edit: .init(hdrEnabled: false, peakStops: 0)), budget: FixedExportMemoryBudget(bytes: 8_000_000_000))
+        let system = try ExportVerification.system(output, plan: plan)
+        #expect(system.width == width && system.height == height)
         let values: [String: Any] = ["width": width, "height": height, "rows": rows,
             "initialPeak": initialPeak, "sourcePeak": sourcePeak, "preparedPeak": preparedPeak,
-            "writePeak": writePeak, "verifiedPeak": peak()]
+            "nativeVerifiedPeak": nativeVerifiedPeak, "systemVerifiedPeak": peak()]
         let data = try JSONSerialization.data(withJSONObject: values, options: [.sortedKeys])
         try data.write(to: root.appendingPathComponent("\(height).json"))
         print("KIT_REAL_ROWS_MEMORY " + String(data: data, encoding: .utf8)!)

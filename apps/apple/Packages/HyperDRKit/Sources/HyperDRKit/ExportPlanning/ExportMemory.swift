@@ -11,15 +11,21 @@ public struct ExportMemoryEstimate: Sendable, Hashable {
     public let composite: Int
     public let packaging: Int
     public let encode: Int
+    /// The independent native and system reader peaks; verify is their maximum.
+    public let nativeVerify: Int
+    public let systemVerify: Int
     public let verify: Int
 
-    public init(decode: Int, render: Int, composite: Int, packaging: Int, encode: Int, verify: Int) {
+    public init(decode: Int, render: Int, composite: Int, packaging: Int, encode: Int, verify: Int,
+                nativeVerify: Int? = nil, systemVerify: Int? = nil) {
         self.decode = decode
         self.render = render
         self.composite = composite
         self.packaging = packaging
         self.encode = encode
-        self.verify = verify
+        self.nativeVerify = nativeVerify ?? verify
+        self.systemVerify = systemVerify ?? verify
+        self.verify = max(self.nativeVerify, self.systemVerify)
     }
 
     public var peak: Int {
@@ -73,7 +79,7 @@ public enum ExportDegradation: Sendable, Hashable {
     /// The preferred writer did not fit; this writer's lower peak does.
     case switchedWriter(ExportWriter)
     /// Input/readback rows shrink. Whole-plane owners (when used), the fixed
-    /// analysis scan, HEIC slab and full-image verification do not.
+    /// analysis scan, HEIC slab and system reader reservation do not.
     case renderRows(rowHeight: Int)
     /// Nothing fit: the plan is refused and a blocker says why.
     case refused
@@ -229,10 +235,18 @@ extension ExportMemoryEstimate {
         let compressedCache = heic ? input.canvas.pixels * compressedBytesPerPixel * 2 + 8 * 1024 * 1024 : 0
         let encode = resident + sourceBand(rows) + graph + readback + packageBand + codec + compressedCache
         let render = resident + sourceBand(scanRows) + scanGraph
-        // Current native and system verification still decode the whole image.
-        let verify = resident + sourceBand(rows) + graph + input.canvas.pixels * (gain ? 40 : 16)
+        // Native verification releases input bands first and scans rows, or
+        // decodes one 512×512 HEIC tile pair with bounded VT pictures. Keep the
+        // reader's last ROI/graph priced while it remains alive in the caller.
+        let verifierResident = resident + sourceBand(rows) + graph
+        let nativeWorkspace = (heic ? 512 * 512 * 40 : input.canvas.width * 128) + 8 * 1024 * 1024
+        let nativeVerify = verifierResident + nativeWorkspace
+        // ImageIO thumbnail/CI output is small, but its decoder and auxiliary
+        // dictionary may cache full rasters. Retain the full-image reservation.
+        let systemVerify = verifierResident + input.canvas.pixels * (gain ? 40 : 16)
         return .init(decode: resident, render: render, composite: render,
-                     packaging: encode, encode: encode, verify: verify)
+                     packaging: encode, encode: encode, verify: max(nativeVerify, systemVerify),
+                     nativeVerify: nativeVerify, systemVerify: systemVerify)
     }
 
     /// libaom refuses a source frame above its cap, so a large canvas is coded

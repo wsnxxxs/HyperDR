@@ -155,18 +155,28 @@ extension RenderEngine {
     /// All light/color operations, LUT, captured/analytic HDR and SDR rolloff.
     /// The empty/default dual graph returns the original author pair unchanged.
     public func render(_ source: RenderSource, adjustments edit: RenderAdjustments,
-                       size: PixelSize? = nil) throws -> RenderPlanes {
+                       size: PixelSize? = nil, region: CGRect? = nil) throws -> RenderPlanes {
         try Task.checkCancellation()
         try edit.validate(domain:source.domain)
         let size = size ?? source.size
         try validate(size)
-        let region = CGRect(x: 0, y: 0, width: size.width, height: size.height)
+        let region = try validatedRegion(region, size: size)
         if source.domain == .dual && edit.wholeImageIsIdentity {
-            if edit.hdr.isIdentity { return try render(source, size: size) }
+            if edit.hdr.isIdentity { return try renderRegion(source, size: size, region: region, nodes: []) }
             return try renderAuthorRegion(source, edit: edit, size: size, region: region)
         }
         let analysis = try analysis(source, adjustments: edit)
         return try graphRegion(source, edit: edit, size: size, region: region, analysis: analysis)
+    }
+
+    /// Regions use integral output pixels, top-left origin, within the full `size`.
+    /// Analysis remains global; rendering a crop cannot change local processing.
+    func validatedRegion(_ requested: CGRect?, size: PixelSize) throws -> CGRect {
+        let bounds = CGRect(x: 0, y: 0, width: size.width, height: size.height)
+        guard let requested else { return bounds }
+        guard !requested.isNull, !requested.isInfinite, requested.width > 0, requested.height > 0,
+              requested == requested.integral, bounds.contains(requested) else { throw RenderError.invalidRegion }
+        return requested
     }
 
     public func renderStripes(_ source: RenderSource, adjustments edit: RenderAdjustments,
@@ -208,7 +218,7 @@ extension RenderEngine {
             textures: [input, base, gain, resources.texture, analysis.expansion], buffers: [resources.buffer], value: &p)
         try finish(command)
         return RenderPlanes(base: base, gain: gain, baseColorSpace: Self.workingColorSpace,
-            provenance: source.domain == .dual ? .resplit : source.domain == .sdr ? .identity : .split, region: region)
+            provenance: source.domain == .dual ? .resplit : source.domain == .sdr ? .identity : .split, region: region, outputSize:size)
     }
 
     func authorWorking(_ source: RenderSource) throws -> (base: any MTLTexture, hdr: any MTLTexture, metadata: ISOLogGainMetadata) {
@@ -239,7 +249,7 @@ extension RenderEngine {
             var unused: UInt32 = 0
             try context.dispatch("zeroGain", width: gain.width, height: gain.height, textures: [gain], value: &unused)
             try finish(command)
-            return RenderPlanes(base: original.base, gain: gain, baseColorSpace: original.baseColorSpace, provenance: .editedAuthored, region: region)
+            return RenderPlanes(base: original.base, gain: gain, baseColorSpace: original.baseColorSpace, provenance: .editedAuthored, region: region, outputSize:size)
         }
         let working = try authorWorking(source)
         // Analysis only resolves content headroom; it never replaces the author's base.
@@ -262,6 +272,6 @@ extension RenderEngine {
             textures: [working.base, source.gainTexture!, working.hdr, gain], value: &p)
         try finish(command)
         return RenderPlanes(base: original.base, gain: gain, gainChannelCount: 3, encoding: .isoLog2(working.metadata),
-                            baseColorSpace: original.baseColorSpace, provenance: .editedAuthored, region: region)
+                            baseColorSpace: original.baseColorSpace, provenance: .editedAuthored, region: region, outputSize:size)
     }
 }

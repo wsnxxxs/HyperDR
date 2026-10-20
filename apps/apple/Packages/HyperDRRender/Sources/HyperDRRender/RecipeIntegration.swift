@@ -95,8 +95,8 @@ extension RenderAdjustments {
 }
 
 extension SourceOptions {
-    public init(recipe: Recipe, rawResolution: RAWResolution = .full) throws {
-        self.init(rawResolution:rawResolution)
+    public init(recipe: Recipe, rawResolution: RAWResolution? = nil, resolution: SourceResolution = .full) throws {
+        self.init(rawResolution:rawResolution, resolution:resolution)
         let values = RecipeValues(recipe:recipe)
         lensCorrection = try values.bool("develop.lensCorrection")
         raw.temperature = try values.optionalNumber("develop.temperature")
@@ -109,9 +109,9 @@ extension SourceOptions {
 
 extension RenderEngine {
     public func render(_ source: RenderSource, recipe: Recipe, lut: ColorLUT? = nil,
-                       size: PixelSize? = nil) throws -> RenderPlanes {
+                       size: PixelSize? = nil, region: CGRect? = nil) throws -> RenderPlanes {
         guard recipe.inputDomain == source.domain else { throw RenderError.invalidAdjustment }
-        return try render(source,adjustments:RenderAdjustments(recipe:recipe,lut:lut),size:size)
+        return try render(source,adjustments:RenderAdjustments(recipe:recipe,lut:lut),size:size,region:region)
     }
     public func renderStripes(_ source: RenderSource, recipe: Recipe, lut: ColorLUT? = nil,
                               size: PixelSize? = nil, rows: Int = 256,

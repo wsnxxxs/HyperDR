@@ -1,6 +1,7 @@
 import Foundation
 import CoreImage
 import Metal
+import simd
 import HyperDRRecipe
 
 /// One serialized GPU service per editor/export context, independent of UI frameworks.
@@ -13,6 +14,7 @@ public actor RenderEngine {
     let context: CIContext
     let library: any MTLLibrary
     let pipelines: [String: any MTLComputePipelineState]
+    var displayMatrices: [(space: CGColorSpace, matrix: simd_float3x3)] = []
     var analysisCache: (key: AnalysisKey, result: SpatialAnalysis)?
     var lutCache: (id: String, texture: any MTLTexture, buffer: any MTLBuffer)?
     var authorCache: (id: UUID, base: any MTLTexture, hdr: any MTLTexture, metadata: ISOLogGainMetadata)?
@@ -44,14 +46,17 @@ public actor RenderEngine {
         ])
         let url = Bundle.module.url(forResource: "Pipeline", withExtension: "metal", subdirectory: "Shaders")!
         let adjustmentURL = Bundle.module.url(forResource: "Adjustments", withExtension: "metal", subdirectory: "Shaders")!
+        let displayURL = Bundle.module.url(forResource: "Display", withExtension: "metal", subdirectory: "Shaders")!
         let shader = try String(contentsOf: url, encoding: .utf8) + "\n" + String(contentsOf: adjustmentURL, encoding: .utf8)
+            + "\n" + String(contentsOf:displayURL,encoding:.utf8)
         let options = MTLCompileOptions()
         options.mathMode = .safe
         let library = try device.makeLibrary(source: shader, options: options)
         self.library = library
         var pipelines: [String: any MTLComputePipelineState] = [:]
         for name in ["sourceHDRSplit", "sampleSource", "zeroGain", "adjustPoint", "graphCells", "graphBox",
-                     "graphWeights", "graphCoefficients", "graphFinalGain", "graphOutput", "graphPeak", "authoredOutput"] {
+                     "graphWeights", "graphCoefficients", "graphFinalGain", "graphOutput", "graphPeak", "authoredOutput",
+                     "displayBase", "displayISOGain", "displayGainPeak", "displayLegacyGain"] {
             guard let function = library.makeFunction(name: name) else { throw RenderError.gpu(name) }
             pipelines[name] = try device.makeComputePipelineState(function: function)
         }
@@ -65,6 +70,7 @@ public actor RenderEngine {
         analysisCache = nil
         lutCache = nil
         authorCache = nil
+        displayMatrices.removeAll()
         context.clearCaches()
     }
 
@@ -93,10 +99,12 @@ public actor RenderEngine {
 
     private func materialize(_ opened: OpenedSource) throws -> RenderSource {
         let texture = try rasterize(opened.image, space: opened.baseSpace)
+        // Retain the native encoded gain. Display decodes gamma before resampling.
         let gainTexture = try opened.gain.map { try rasterize($0.image, space: nil,
                                                     format: $0.channelCount == 1 ? .r32Float : .rgba32Float) }
         return RenderSource(id: UUID(), domain: opened.domain,
-            size: PixelSize(width: texture.width, height: texture.height), authoredGainMap: opened.gain,
+            size: PixelSize(width: texture.width, height: texture.height),
+            nativeSize: opened.nativeSize ?? opened.raw?.nativeSize ?? PixelSize(width:texture.width,height:texture.height), authoredGainMap: opened.gain,
             hdrImage: opened.hdr, authoredBaseImage: opened.gain == nil ? nil : opened.image,
             rawSettings: opened.raw, texture: texture, baseSpace: opened.baseSpace, gainTexture: gainTexture)
     }
@@ -230,7 +238,7 @@ public actor RenderEngine {
             gainChannelCount: authored ? source.authoredGainMap!.channelCount : 1,
             encoding: authored ? .authored(source.authoredGainMap!) : .log2,
             baseColorSpace: authored ? source.baseSpace : Self.workingColorSpace,
-            provenance: authored ? .authored : .identity, region: inputRegion)
+            provenance: authored ? .authored : .identity, region: inputRegion, outputSize:size)
         for node in nodes {
             try Task.checkCancellation()
             planes = try node.encode(planes, context: context)
@@ -242,7 +250,7 @@ public actor RenderEngine {
             let croppedBase = try crop(planes.base, from: inputRegion, to: region, context: context)
             let croppedGain = try crop(planes.gain, from: inputRegion, to: region, context: context)
             planes = RenderPlanes(base: croppedBase, gain: croppedGain, gainChannelCount: planes.gainChannelCount,
-                encoding: planes.encoding, baseColorSpace: planes.baseColorSpace, provenance: planes.provenance, region: region)
+                encoding: planes.encoding, baseColorSpace: planes.baseColorSpace, provenance: planes.provenance, region: region, outputSize:size)
         }
         try finish(buffer)
         return planes

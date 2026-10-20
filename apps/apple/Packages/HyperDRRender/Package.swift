@@ -8,7 +8,15 @@ let package = Package(
     dependencies: [.package(path: "../HyperDRRecipe")],
     targets: [
         .target(name: "HyperDRRender", dependencies: ["HyperDRRecipe"],
-                resources: [.copy("Shaders")]),
-        .testTarget(name: "HyperDRRenderTests", dependencies: ["HyperDRRender"])
+                resources: [.copy("Shaders"),
+                            // The mlpackage is copied verbatim. SwiftPM's Core ML
+                            // build rule declares only model.mlmodel as an input,
+                            // so a multi-file package (with weights/ beside it)
+                            // fails inside the build sandbox; the model is
+                            // compiled once per process instead, and an Xcode app
+                            // target will compile it at build time.
+                            .copy("Resources/research-cnn-v1.mlpackage")]),
+        .testTarget(name: "HyperDRRenderTests", dependencies: ["HyperDRRender"],
+                    resources: [.copy("Fixtures")])
     ]
 )

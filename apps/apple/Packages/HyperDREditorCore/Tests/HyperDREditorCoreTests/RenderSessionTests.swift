@@ -113,6 +113,23 @@ import UniformTypeIdentifiers
         #expect(try await render(recipe).modelGainPending == false)
     }
 
+    /// R23-001: a file replaced after opening is refused as `sourceChanged`.
+    @Test func aReplacedFileIsReportedAsChanged() async throws {
+        let session = try RenderSession()
+        let url = try Self.tinyPNG()
+        let source = try await session.open(url, previewSize: PixelSize(width: 48, height: 48))
+        try FileManager.default.removeItem(at: url)
+        try FileManager.default.moveItem(at: try Self.tinyPNG(width: 80, height: 64), to: url)
+        let region = EditorRenderRequest(sourceID: source.id, recipe: Recipe(inputDomain: .sdr), size: source.pixelSize,
+                                         region: CGRect(x: 0, y: 0, width: 16, height: 16))
+        // A region loads the file again; a preview renders the source it holds.
+        await #expect(throws: EditorRenderingError.sourceChanged) { try await session.render(region) }
+        await #expect(throws: EditorRenderingError.sourceChanged) {
+            try await session.render(EditorRenderRequest(sourceID: source.id, recipe: Recipe(inputDomain: .sdr),
+                                                         size: PixelSize(width: 48, height: 32)))
+        }
+    }
+
     /// R22-001: a region render waiting to reload must not write the closed
     /// photo back; it and later renders of that photo find no source.
     @Test func aReloadAcrossCloseWritesNothingBack() async throws {

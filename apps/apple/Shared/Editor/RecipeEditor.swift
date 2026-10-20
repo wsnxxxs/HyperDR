@@ -60,6 +60,8 @@ import Observation
     private(set) var aiStatus: AIStatus = .idle
     /// The last render failure (not a cancellation), developer-facing; nil once a render succeeds.
     private(set) var renderFailure: String?
+    /// The file changed on disk since it was opened: tell the user to open it again.
+    private(set) var sourceChanged = false
     /// The parameter being dragged, if any.
     private(set) var editingParameter: String?
     /// The size previews are rendered at.
@@ -231,6 +233,7 @@ import Observation
         previewSize = nil
         largestCanvasSide = nil
         source = opened
+        sourceChanged = false
         recipe = Recipe(inputDomain: opened.domain)
         bypassedGroups = []
         modelTask?.cancel()
@@ -265,6 +268,7 @@ import Observation
         clearLayers()
         undo.clear()
         source = nil
+        sourceChanged = false
         frame = nil
         frameSource = nil
         originalFrame = nil
@@ -496,6 +500,7 @@ import Observation
             frameLacksModelGain(rendered)
         case .failure(let error):
             if !(error is CancellationError) { renderFailure = String(describing: error) }
+            noteFailure(error)
         }
         if pending != nil, pacing == nil { submitPending() }
         scheduleDetails()
@@ -626,7 +631,11 @@ import Observation
             for (isOriginal, request) in [(true, original), (false, edited)] {
                 guard !Task.isCancelled else { return }
                 guard let request else { continue }
-                guard let rendered = try? await renderer.render(request) else { return }
+                let rendered: EditorFrame
+                do { rendered = try await renderer.render(request) } catch {
+                    if !Task.isCancelled { self?.noteFailure(error) }
+                    return
+                }
                 guard let self, self.detailGeneration == generation, !Task.isCancelled else { return }
                 if isOriginal { self.originalDetailFrame = rendered } else { self.detailFrame = rendered }
             }
@@ -673,7 +682,10 @@ import Observation
         maskAttempt = (id, request)
         let renderer = self.renderer
         maskTask = Task { [weak self] in
-            let mask = try? await renderer.effectMask(request, parameterID: id)
+            var mask: RenderMask?
+            do { mask = try await renderer.effectMask(request, parameterID: id) } catch {
+                if !Task.isCancelled { self?.noteFailure(error) }
+            }
             guard let self, !Task.isCancelled else { return }
             self.maskTask = nil
             if let mask, self.editingParameter == id {
@@ -681,6 +693,10 @@ import Observation
             }
             self.updateMask()
         }
+    }
+
+    private func noteFailure(_ error: any Error) {
+        if case EditorRenderingError.sourceChanged = error { sourceChanged = true }
     }
 
     private func clearLayers() {
@@ -783,6 +799,7 @@ import Observation
                 return
             } catch {
                 reason = String(describing: error)
+                if !Task.isCancelled { self?.noteFailure(error) }
             }
             guard let self, self.modelKey == key, !Task.isCancelled else { return }
             self.modelTask = nil

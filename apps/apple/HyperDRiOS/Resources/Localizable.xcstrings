@@ -232,6 +232,24 @@
         }
       }
     },
+    "ios.error.sourceChanged" : {
+      "comment" : "Shown over the canvas when the open photo's file changed on disk after it was opened.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This photo was changed elsewhere. Open it again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "照片已在别处修改，请重新打开"
+          }
+        }
+      }
+    },
     "ios.file.open" : {
       "extractionState" : "manual",
       "localizations" : {

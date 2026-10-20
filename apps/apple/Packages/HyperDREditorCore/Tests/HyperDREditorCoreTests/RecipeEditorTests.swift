@@ -317,6 +317,18 @@ private func setting(_ recipe: Recipe, _ id: String, _ value: Double) -> Recipe 
         #expect(h.editor.previewSize == PixelSize(width: 2560, height: 1707))
     }
 
+    @Test func aChangedFileAsksToOpenAgain() async throws {
+        let h = Harness()
+        try await h.open()
+        await h.fake.configure { $0.renderError = .sourceChanged }
+        h.editor.setRecipe(setting(h.editor.recipe, "tone.exposure", 0.5))
+        await h.editor.settle()
+        #expect(h.editor.sourceChanged)
+        await h.fake.configure { $0.renderError = nil }
+        try await h.open(name: "b.jpg")
+        #expect(!h.editor.sourceChanged)
+    }
+
     @Test func aNewerOpenSupersedesAnOlderOne() async throws {
         let h = Harness()
         let a = URL(fileURLWithPath: "/tmp/one.jpg"), b = URL(fileURLWithPath: "/tmp/two.dng")

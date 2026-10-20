@@ -19,7 +19,7 @@ import SwiftUI
 
 @MainActor final class LUTMetadataWriteTests: XCTestCase {
     private func fixture() -> (EditorModel, FakeEditorServices, LUTWriteGate) {
-        let services = FakeEditorServices(openDelay: .zero, previewDelay: .zero), gate = LUTWriteGate()
+        let services = FakeEditorServices(openDelay: .zero), gate = LUTWriteGate()
         services.updateLUTHandler = { try await gate.update($0, input: $1, output: $2) }
         let model = EditorModel(services: services)
         let entries = ["a", "b"].map { LUTItem(id: $0, name: $0, input: .srgb, output: .srgb, byteCount: 42) }
@@ -152,44 +152,20 @@ import SwiftUI
         XCTAssertEqual(model.lut.failures.first?.code, "lut_invalid")
     }
 
-    func testSelectedSpacesAreUndoableAndLibraryOnlyChangesAreNot() async {
+    /// A library entry's spaces are the library's, not the photo's: changing
+    /// them is no edit (the look in the recipe names the entry, p7-2b).
+    func testLibrarySpaceChangesAreNotEdits() async {
         let (model, services, gate) = fixture()
         await model.loadExportServices()
         model.open([URL(fileURLWithPath: "/tmp/first.jpg")])
         await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
-        model.selectLUT("a")
-        await eventually(timeout: .seconds(3)) { model.lut.selection?.id == "a" }
-        model.clearUndo()
-        model.setLibraryLUTSpaces("a", input: .p3, output: .rec709)
-        XCTAssertEqual(model.lut.selection?.input, .p3); XCTAssertTrue(model.canUndo)
-        await eventually(timeout: .seconds(3)) { gate.requests.count == 1 }
-        model.undo()
-        gate.requests[0].fail()
-        await model.lutMetadataTask?.value
-        XCTAssertEqual(model.lut.selection?.input, .srgb)
-        XCTAssertEqual(model.lut.library[0].input, .srgb)
-        XCTAssertEqual(model.lut.failures.first?.code, "lut_invalid")
-        model.selectLUT(nil); model.clearUndo()
         model.setLibraryLUTSpaces("b", input: .p3, output: .rec709)
-        await eventually(timeout: .seconds(3)) { gate.requests.count == 2 }
-        gate.requests[1].succeed()
+        await eventually(timeout: .seconds(3)) { gate.requests.count == 1 }
+        gate.requests[0].succeed()
         await model.lutMetadataTask?.value
         XCTAssertFalse(model.canUndo)
         XCTAssertEqual(services.library[0].input, .srgb)
-    }
-
-    func testSelectedFailureRollsBackMatchingPhotoSpaces() async {
-        let (model, _, gate) = fixture()
-        model.open([URL(fileURLWithPath: "/tmp/first.jpg")])
-        await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
-        model.selectLUT("a")
-        await eventually(timeout: .seconds(3)) { model.lut.selection?.id == "a" }
-        model.setLibraryLUTSpaces("a", input: .p3, output: .rec709)
-        await eventually(timeout: .seconds(3)) { gate.requests.count == 1 }
-        gate.requests[0].fail()
-        await model.lutMetadataTask?.value
-        XCTAssertEqual(model.lut.selection?.input, .srgb); XCTAssertEqual(model.lut.selection?.output, .srgb)
-        XCTAssertEqual(model.lut.library[0].input, .srgb)
+        model.closeDocument()
     }
 }
 

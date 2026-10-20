@@ -5,14 +5,14 @@ import Foundation
 /// is open (parity batch 7 §3).
 extension EditorModel {
     /// The file cannot be found: the canvas keeps its last frame, adjustments
-    /// are recorded but not rendered, and the banner offers to locate it.
+    /// still render from the photo the renderer holds, export stops, and the
+    /// banner offers to locate it.
     /// Nothing else about the photo is locked.
     func enterSourceUnavailable(_ error: UserFacingError) {
         guard error.code == "source_missing", photo != nil, sourceUnavailable == nil else { return }
         sourceUnavailable = error
         setRefreshing(false)
         syncExportState()
-        updateAIState()
         NoticeAnnouncement.post(AppStrings.format("source.missing.announce %@", photo?.name ?? ""), highPriority: true)
         startSourceRetry()
     }
@@ -23,16 +23,37 @@ extension EditorModel {
         sourceUnavailable = nil
         stopSourceRetry()
         syncExportState()
-        updateAIState()
         if announce { NoticeAnnouncement.post(AppStrings.format("source.found.announce %@", photo?.name ?? "")) }
     }
 
-    /// Renders the current values once, to see whether the file is back.
+    /// Checks whether the file is back. The renderer keeps the photo it
+    /// opened, so the state simply ends; a render that fails again on a
+    /// missing file starts it again.
     func retrySource() {
-        guard sourceUnavailable != nil, photo != nil, document?.phase == .ready else { return }
+        guard sourceUnavailable != nil, let photo, document?.phase == .ready,
+              FileManager.default.fileExists(atPath: photo.url.path) else { return }
+        leaveSourceUnavailable(announce: true)
+        refreshExportMetadata()
+    }
+
+    /// A relinked file: the editor reads it with the current recipe (the
+    /// undo history survives only when the file is at the same place); the
+    /// first frame from it ends the unavailable state.
+    private func reopenRelinked(_ photo: EditorPhoto) {
         isRetryingSource = true
-        defer { isRetryingSource = false }
-        scheduleRender(force: true)
+        let recipe = editor.recipe
+        let editor = self.editor
+        let ticket = generation
+        Task { [weak self] in
+            defer { self?.isRetryingSource = false }
+            do {
+                try await editor.open(photo.url, restoring: recipe)
+                guard let self, generation == ticket, self.photo == photo else { return }
+                bumpUndoRevision()
+                commit(source: editor.source!)
+                editorChanged()
+            } catch {}
+        }
     }
 
     private func startSourceRetry() {
@@ -59,7 +80,7 @@ extension EditorModel {
     }
 
     /// The user chose a file for the photo whose own cannot be found. The same
-    /// content is reconnected, so adjustments, undo and history stay; anything
+    /// content is reconnected, so adjustments and history stay; anything
     /// else is simply a different photo and opens as one.
     func locateSource(_ url: URL) {
         guard let photo, sourceUnavailable != nil, locateTask == nil else { return }
@@ -73,7 +94,7 @@ extension EditorModel {
                 locateTask = nil
                 self.photo = relinked
                 renameDocument(relinked.name)
-                retrySource()
+                reopenRelinked(relinked)
             } catch {
                 guard let self, !Task.isCancelled, generation == ticket, self.photo == photo else { return }
                 locateTask = nil
@@ -92,6 +113,18 @@ extension EditorModel {
         if export.isInFlight { replacedAwaitingExport = photo; return }
         replacedAwaitingExport = nil
         open([photo.url], afterReplacement: photo.name)
+    }
+
+    /// The file under the open photo changed since the editor read it
+    /// (R23-001): it is not rendered or exported until it is opened again.
+    var sourceChanged: Bool {
+        photo != nil && editor.sourceChanged && editor.source?.id == committedSource
+    }
+
+    /// The banner's button.
+    func reopenChangedSource() {
+        guard sourceChanged, let photo else { return }
+        reopenReplacedSource(photo)
     }
 
     func resumeReplacedReopen() {

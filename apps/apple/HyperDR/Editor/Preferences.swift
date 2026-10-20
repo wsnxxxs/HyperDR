@@ -32,7 +32,6 @@ nonisolated struct Preferences: Equatable {
         case "encoding": encodings.contains(value)
         case "colorGamut": ["srgb", "p3", "rec2020"].contains(value)
         case "outputGamut": ["auto", "srgb", "p3"].contains(value)
-        case "clampSrgb": ["true", "false"].contains(value)
         case "modelId": !value.isEmpty && value.count < 200
         default: false
         }

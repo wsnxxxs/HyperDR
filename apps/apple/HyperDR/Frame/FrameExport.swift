@@ -1,30 +1,19 @@
 import CoreGraphics
 import Foundation
 import HyperDREngine
+import HyperDRKit
+import HyperDRRender
 import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// What an export needs to carry a frame: the `command.frame` document, the
-/// caption overlay to go with it, and the layout the engine will produce.
+/// What an export needs to carry a frame: the frame document, the caption
+/// band drawn at the layout Kit computes for the export
+/// (`ExportPlanner.frameLayout`), and Render's `FrameSnapshot`, which goes
+/// into the export's `RecipeExportSnapshot` with the caption's PNG.
 ///
-/// Nothing is written here. The export (Kit, K3) saves `overlayPNG` in its
-/// own export directory and points the document's `overlay` at that file:
-///
-///     if let plan = try FrameExportPlan.make(settings: model.frame, facts: facts,
-///                                            photoSize: exportSize) {
-///         var frame = plan.frame
-///         if let png = plan.overlayPNG {
-///             let overlay = exportDirectory.appendingPathComponent("frame-caption.png")
-///             try png.write(to: overlay)
-///             frame["overlay"] = .string(overlay.path)
-///         }
-///         try request.setCommand("frame", .object(frame))
-///     }
-///
-/// `photoSize` must be the size the engine renders the photograph at (its
-/// oriented, cropped size after any export size limit): the engine recomputes
-/// the layout from the rendered photo and rejects a caption of another size.
+/// `photoSize` is the photograph's full oriented size; the layout applies the
+/// export choice's size limit to it.
 struct FrameExportPlan {
     /// `command.frame` without `overlay`.
     let frame: [String: JSONValue]
@@ -32,22 +21,44 @@ struct FrameExportPlan {
     /// the frame has no caption.
     let overlayPNG: Data?
     let layout: FramePixelLayout
+    /// The same frame as Render composites it on export (P7-3b-U).
+    let snapshot: FrameSnapshot
 
     /// Nil when the frame is off. Throws the engine's error when the style
     /// rejects the frame (a hand-written spec, or a canvas over its size limits).
-    static func make(settings: FrameSettings, facts: CaptureFacts,
-                     photoSize: PixelSize) throws -> FrameExportPlan? {
+    /// `choice` is the export's destination or format: Kit lays the card out
+    /// around the photo at the size that choice writes it.
+    static func make(settings: FrameSettings, facts: CaptureFacts, photoSize: PixelSize,
+                     choice: ExportChoice = .custom(ExportChoices().customFormat)) throws -> FrameExportPlan? {
         guard settings.isEnabled else { return nil }
         // Whether there is text does not depend on the layout the engine picks.
         let hasCaption = !settings.style.caption(settings, facts: facts).isEmpty
         let frame = settings.engineFrame(hasCaption: hasCaption)
-        let layout = FramePixelLayout(try Engine.frameLayout(frame: frame, photoWidth: photoSize.width,
-                                                             photoHeight: photoSize.height))
+        let layout = FramePixelLayout(try ExportPlanner.frameLayout(
+            frame: frame, choice: choice, photo: ExportPixelSize(width: photoSize.width, height: photoSize.height)))
         let caption = settings.style.caption(settings, facts: facts, variant: layout.variant,
                                              bandHeight: Double(layout.caption.height) / Double(layout.referenceEdge))
         let overlay = !caption.isEmpty && layout.caption.height > 0
             ? try FrameOverlayRenderer.png(caption, settings: settings, layout: layout) : nil
-        return FrameExportPlan(frame: frame, overlayPNG: overlay, layout: layout)
+        return FrameExportPlan(frame: frame, overlayPNG: overlay, layout: layout,
+                               snapshot: snapshot(settings, layout: layout, caption: overlay))
+    }
+
+    /// Render's frame: the mat in linear Display P3 (the tone is P3 with the
+    /// sRGB transfer), the shadow's sigma and downward offset in pixels.
+    private static func snapshot(_ settings: FrameSettings, layout: FramePixelLayout, caption: Data?) -> FrameSnapshot {
+        func linear(_ v: Double) -> Float { Float(v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)) }
+        func rect(_ r: FramePixelLayout.Rect) -> ExportRect { ExportRect(x: r.x, y: r.y, width: r.width, height: r.height) }
+        let tone = settings.tone.background, edge = Double(layout.referenceEdge)
+        let shadow = settings.showsShadow ? settings.style.geometry.shadow.map {
+            HyperDRRender.FrameShadow(opacity: Float($0.opacity), sigma: Float($0.blur * edge),
+                                      offset: SIMD2(0, Float($0.offset * edge)))
+        } : nil
+        return FrameSnapshot(canvasSize: HyperDRRender.PixelSize(width: layout.width, height: layout.height),
+                             photo: rect(layout.photo),
+                             paper: SIMD3(linear(tone.red), linear(tone.green), linear(tone.blue)),
+                             shadow: shadow ?? HyperDRRender.FrameShadow(),
+                             caption: caption.map { HyperDRRender.FrameCaption(png: $0, rect: rect(layout.caption)) })
     }
 }
 

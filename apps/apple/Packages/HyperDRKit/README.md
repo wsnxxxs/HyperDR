@@ -1,0 +1,207 @@
+# Recipe exports (P7-3b)
+
+`RecipeExportService` is the shared Mac/iPhone/iPad export operation. It accepts
+`RecipeExportSnapshot`, the existing `ExportPlanRequest`, an optional frozen
+Render `ColorLUT`, an optional preselected file URL, and a progress callback.
+Keep the calling `Task` to cancel. A second operation on the same service fails
+with `RecipeExportError.busy`.
+
+Construct the service with `Engine`, a dedicated `RenderEngine`, an
+`ExportStripeRendering` (the real Render implementation or a Fake), `SessionStore`
+and `ExportTarget`. An optional prediction closure receives the Recipe model
+selection and returns a prediction carrying its full provider identity. The
+default resolves `research-cnn-v1` through its CoreML provider and uses Render's
+RAW/SDR prediction entry. The service never converts a Recipe to EditOptions or
+calls convert.
+
+`RecipeExportSnapshot.modelSelection` reads the frozen Recipe's `hdr.model`;
+callers need no loaded provider. The initializer's former `modelID` argument is
+replaced by optional `expectedModelIdentity`, for an exact version requirement
+when re-rendering history. Read that identity from
+`ResolvedExportSnapshot.modelIdentity`, which also feeds ExportKey. The service
+checks source and full identity on the prediction; an expected identity mismatch
+fails with `missingModel`. Snapshot version 2 rejects re-rendering older snapshots
+whose model name/identity semantics were ambiguous.
+
+Capture `RecipeSourceRevision(session:)` when the source is opened. Reuse it at
+export, rather than capturing a new revision after editing. Input source and
+sensor sizes, domain, pair facts and resolved range belong in `ExportPlanRequest`.
+`ExportPlanner.frameLayout(frame:choice:photo:)` computes the card around the
+photo after the destination size limit; the UI draws the caption PNG at that
+layout's caption rectangle and supplies Render's `FrameSnapshot`.
+
+Use `SessionStore.saveRecipe(_:for:)` at completed edits and `recipe(for:)` on
+reopen. Snapshots encode the caption's hash and geometry, not image bytes.
+`SessionStore.resolveFrame(_:for:)` retains or loads its immutable PNG resource.
+LUTs must be applied into the session with `LUTLibrary`; exports resolve the
+retained content hash, so removing the library entry cannot invalidate history.
+Missing local LUT/caption/model resources are explicit errors. The snapshot
+schema can be reused for adjustment data without embedding external resources.
+
+The service awaits AI, checks the source revision, consumes one GPU stripe at a
+time into full owned float32 planes, packages them, waits for the package's own
+reader, then verifies ImageIO/CI independently. Gain-map files are applied through
+Core Image at the declared alternate headroom and an intermediate weight; no
+assumption about ImageIO's default viewing headroom is used. Original package
+JSON stays untouched inside `RecipeExportReport`; system evidence is separate.
+The ordinary SDR HEIC path uses ImageIO without auxiliary data and is checked by
+our HEIF decoder before system readback. Gain-map HEIC8 uses an explicit nonlinear
+Display P3 RGBA8 CGImage and our gamma-1 quantized auxiliary gain plus complete ISO
+metadata; it never asks ImageIO to generate gain or an SDR base. Native probe
+finishes before ImageIO metadata/pixel checks. `RecipeExportReport.imageIO`
+records the written gain parameters, with no fabricated package report.
+HEIC10 and other encodings continue through `Engine.package`.
+
+HEIC8 normally selects ImageIO. Its integer SDR base requires zero base headroom;
+other pairs select our writer (`unsupportedCapability`) and are resplit as needed. If its separate CGImage/auxiliary handoff and
+encoder estimate does not fit, admission tries our writer without changing
+encoding, quality or dimensions (`memoryFallback`). Framed HEIC8 always uses our
+writer (`frameGainProtection`): the manual ImageIO compression experiment leaked
+up to five gain codes onto a non-block-aligned mat. Both reasons and the selected
+writer are frozen in the resolved snapshot and report. The memory policy reserves
+14 B/px for RGBA8/RGB-gain handoff copies plus 32 B/px codec workspace and 64 MiB
+framework allowance beside the owner and source; it is a conservative policy,
+not a measured iOS encoder limit.
+
+The opt-in `writerComparisonMeasurement` test takes
+`HYPERDR_HEIC8_BENCH_WRITER=imageIO|inHouse` and optional
+`HYPERDR_HEIC8_BENCH_QUALITY` (default 90). Run each writer in a separate process
+with `swift test --filter writerComparisonMeasurement`. It generates the same
+2048×1536 synthetic planes and writes per-writer JSON and HEIC to
+`/tmp/p7-heic8-lab`; metrics are SDR/sRGB 255 codes and HDR/PQ 1023 codes at 203-nit
+SDR white. `writePeakBytes` is process `ru_maxrss` sampled before verification and
+metrics, and includes the input owners and test runtime, not GPU total residency.
+
+A verified file, frozen snapshot, evidence and SDR thumbnail are atomically
+published as history before delivery. Nil destination returns that file for
+fileExporter/share; stage shares with `SessionStore.stageExportForTransfer`.
+Preselected Mac file authority is held throughout the operation. Delivery failure
+or cancellation returns `deliveryError` with the verified version retained; a
+render/encode/verification failure removes the unfinished version. Successful
+file delivery writes `SavedMark` before the result is returned.
+
+Render preparation scans the photo and then renders the output a second time;
+this is not a streaming writer. Admission includes full source textures, CPU
+planes, package copies, codec workspace and serial verification. Render stripes
+may shrink from 256 to 128/64 rows; CPU/codec full-plane costs do not shrink.
+Unmeasurable budgets use an explicit conservative 256 MiB limit. iOS uses 80% of
+`os_proc_available_memory`, and Metal's recommended working set is checked
+separately. The allocation estimates are conservative policies awaiting P7-3d
+footprint calibration; this does not promise 61 MP iPhone export. Transparent
+raster RGB retains the old decoder's black SDR background convention
+(`modules/codec/src/internal/cicp.hpp`).
+
+`PhotoLibrarySaver` is an explicit disabled entry (`photos_not_verified`) and a
+Fake seam. It performs no Photos transaction or permission request until Photos
+Lab establishes the modes that may be enabled. Background GPU hosting and
+incremental writers are later batches.
+
+The Mac and iOS apps both export through this service; the old JobRunner,
+preview service, EditOptions and their CLI parity check are gone. Recipe history
+uses `recipeSnapshot` and `resolvedSnapshot`; the legacy options field is empty
+for new exports and is never used to restore a Recipe.
+
+The real RenderEngine conformance is integrated from `510e39cc`. Service tests
+exercise all eight encodings through the real Recipe graph and both readers,
+including a caption/shadow card through gain-map, SDR and PQ paths; a transparent
+PNG against linear-black compositing; and an authored RGB/nonzero-offset pair
+through preservation, writer resplit, a narrower destination and frame neutrality.
+Kit records Render's explicit output-ceiling report even when Render folds it
+into the edited authored pair before its capability scan needs a further resplit.
+
+`python3.12 scripts/test.py ios` checks the package artifact for macOS arm64,
+iOS arm64 and iOS simulator arm64 archives/headers, plus the adjacent
+`engine-source.sha256` content fingerprint. Missing, incomplete or stale slices
+trigger `build_xcframework.sh --platforms all` before either app build. The Mac
+suite uses the same freshness check for its macOS slice.
+Source SHA-256 already runs off the caller in a detached task, with chunk-level
+cancellation; `SessionStore.open` waits for it to establish content identity and
+history/session reuse. A host may start that task alongside photo decoding and
+await the same task when preparing export, rather than serializing both opens.
+
+
+## Incremental export integration (P7-3d-K)
+
+`ExportRowRendering.prepareRows` accepts a lazy `HyperDRRender.ExportSource` and
+frozen Recipe/LUT/prediction/request. It returns `ExportRowSource`, whose report is
+fixed and whose synchronous `read(y:count:)` may be replayed. A renderer may opt
+into this separately from `ExportStripeRendering`; the service also accepts an
+explicit `rowRenderer` injection. `RenderEngine` implements the protocol through
+`prepareExportRows`; `PreparedExportRows` supplies the frozen report and synchronous
+ROI reader on its private renderer executor. A renderer without this protocol
+keeps the whole-plane path. Setting
+`ExportPlanRequest.allowsRowInput=false` provides that same parity baseline.
+
+Native JPEG/TIFF/ISO JPEG/HEIC writers pull rows through `PackageRowBridge`, not a
+canvas owner or spool. Each callback validates and copies one stripe into the
+engine's borrowed buffers and returns before the next one. The source scope and
+revision stay frozen until verification/publication. A bounded <=256px linear
+thumbnail accumulator accepts each source row once, so replays cannot bias it.
+Rendering and encoding overlap; encoding progress stays an active stage instead
+of claiming completion on an intermediate scan pass. `usesRowInput` is recorded
+in both resolved snapshot and report.
+
+ImageIO manual HEIC8/SDR HEIC and AVIF keep whole-plane writing. HEIC8 selected as
+a memory fallback to our writer uses the row path. Admission compares writer plus
+format capabilities; analysis/prediction use the lazy source's fixed analysis
+image, and a full source is loaded only when the final plan needs whole planes.
+
+The row model prices fixed analysis, decoder/RAW caches, source ROI and active
+Render graph, 56 CPU+32 GPU bytes per RGB-gain readback pixel, package input band,
+and HEIC's independent 512-row float/YUV slab. HEIC also reserves compressed tiles
+plus assembly bytes (two copies, estimated at 3 B/pixel or 5 for adaptive10, plus
+8 MiB). These are reserve policies, not measured encoder limits. Preparation's
+256-row scan and the encoding reader are successive phases; 256/128/64 input
+choices reduce the latter, not the fixed scan or HEIC slab. Native verification
+of these row formats now uses scanlines or a matching HEIC 512×512 tile pair, with an 8 MiB codec reserve plus row/tile workspace. The
+estimate exposes `nativeVerify` and `systemVerify`; `verify` is their maximum,
+not their sum. The independent ImageIO reader keeps a full-image cache reservation
+because auxiliary dictionaries and Apple decoders are not guaranteed bounded.
+AVIF and ImageIO writing retain their whole-plane verification estimates. This
+does not claim constant memory for all formats or 61MP iPhone admission.
+
+Opt-in bridge/writer measurement: run `streamingHeightMemoryMeasurement` in fresh
+processes with `HYPERDR_STREAM_HEIGHT=1024`, then `4096`. At 2048 pixels wide and
+64 rows, process `ru_maxrss` was 72,744,960 B (69.38 MiB) versus 72,581,120 B
+(69.22 MiB). It includes the real Kit row bridge, bounded thumbnail and native
+incremental TIFF, with a procedural Fake row source and verify=false. It excludes
+real system source/Render/verification residency; JSON is in
+`/tmp/p7-stream-memory/`. The separate six-format test compares whole versus rows
+with identical decoded pixels, including JPEG's intentionally different entropy
+coding, and confirms multi-band gain analysis/encoding replay.
+
+Real source/Render measurement (P7-3d-K): `realStreamingHeightMemoryMeasurement`
+uses a generated system JPEG source, the lazy analysis source, the real 256-row
+Render preparation scan, replayable 64-row ROI reads, the Kit bridge/thumbnail,
+and native incremental SDR TIFF with `verify=true`, followed by the same
+`ExportVerification.system` check used by the service. Generate each input in a
+separate process by setting `HYPERDR_STREAM_REAL_HEIGHT=1024` (then `4096`) and
+`HYPERDR_STREAM_REAL_GENERATE_ONLY=1`; run the same filtered test in a new process
+without the generate-only variable. This excludes the generator's full-size
+CGContext from the export process high-water mark. Files are synthetic and removed
+after measurement; JSON remains in `/tmp/p7-stream-real-memory/`.
+
+| Process high-water mark (`ru_maxrss`, bytes) | 2048×1024 | 2048×4096 |
+|---|---:|---:|
+| Before engine/source | 43,745,280 | 43,761,664 |
+| After system source/analysis | 90,980,352 | 90,931,200 |
+| After Render preparation | 92,848,128 | 92,749,824 |
+| After row writing, native bounded verification and thumbnail | 102,563,840 | 103,038,976 |
+| After independent ImageIO check | 103,022,592 | 103,399,424 |
+
+These numbers were remeasured after integrating `cfb84a56` and rebuilding all
+three engine slices. At fixed width, the complete source/Render/package/native
+verification/system readback path stayed at 98.25/98.61 MiB across four times the
+height. Native-verification completion was 97.81/98.27 MiB. Unlike the earlier
+measurement, this invokes package's bounded write-time verifier, not the general
+full-image `Engine.probe` API after an unverified write. ImageIO here checks a
+256-pixel SDR thumbnail and metadata; this sample shows no full-image growth.
+Its decoder and auxiliary data caches remain an explicit full-image admission
+reservation for other formats, particularly gain-map/BT.2100 readback.
+
+The measurement checks an arbitrary band twice for exact replay before packaging.
+It is a macOS synthetic SDR JPEG/TIFF sample, not an admission guarantee for RAW,
+dual inputs or iOS; the decoder/HEIC reserves remain. The real service's six-format
+test also compares decoded pixels against whole-plane output, including a
+multi-band framed HEIC pair. Service tests retain Fake injection for deterministic
+failure paths.

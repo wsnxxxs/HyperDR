@@ -30,56 +30,55 @@ import XCTest
     private let raw = URL(fileURLWithPath: "/fixtures/one.ARW")
     private let next = URL(fileURLWithPath: "/fixtures/two.ARW")
     private let jpeg = URL(fileURLWithPath: "/fixtures/old.jpg")
-    private var preview: EditorPreview {
-        EditorPreview(pixelSize: PixelSize(width: 100, height: 80), source:
-            SourceSummary(domain: .sceneReferred, colorName: "P3", degradationReasons: []), hasGain: false)
-    }
+    /// Opens `url` with the renderer letting it through, then holds later opens again.
     private func ready(_ model: EditorModel, _ services: ScriptedEditorServices, _ url: URL) async {
-        model.open([url])
-        await eventually(timeout: .seconds(3)) { services.streams[url] != nil }
-        services.streams[url]?.yield(.reference(preview))
-        services.streams[url]?.yield(.edited(preview))
-        await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
+        let holds = services.scripted.holdsOpens
+        services.scripted.releaseOpens()
+        await openReady(model, url)
+        services.scripted.holdsOpens = holds
+    }
+    /// Script services whose renderer holds every open until released.
+    private func holding(_ clock: ManualOpenClock? = nil) -> ScriptedEditorServices {
+        let services = ScriptedEditorServices()
+        if let clock { services.openClock = clock }
+        services.scripted.holdsOpens = true
+        return services
     }
 
     func testDeadlineAndReferenceHandoff() async {
         let clock = ManualOpenClock(); defer { clock.finish() }
-        let services = ScriptedEditorServices(); services.openClock = clock
+        let services = holding(clock)
         let model = EditorModel(services: services)
         let availabilityChanges = Mutex(0)
         withObservationTracking { _ = model.canCancelOpen } onChange: { availabilityChanges.withLock { $0 += 1 } }
         model.open([raw])
         XCTAssertEqual(availabilityChanges.withLock { $0 }, 1)
-        await eventually(timeout: .seconds(3)) { clock.deadlines.count == 1 && services.streams[self.raw] != nil }
+        await eventually(timeout: .seconds(3)) { clock.deadlines.count == 1 && services.scripted.isHoldingOpen(self.raw) }
         XCTAssertEqual(clock.deadlines, [.milliseconds(1500)])
         clock.advance(to: .milliseconds(1499))
         XCTAssertEqual(model.document?.isPreparingCameraSupport, false)
         XCTAssertEqual(model.document?.phase, .opening)
         clock.advance(to: .milliseconds(1500))
         await eventually(timeout: .seconds(3)) { model.document?.isPreparingCameraSupport == true }
-        services.streams[raw]?.yield(.reference(preview))
-        await eventually(timeout: .seconds(3)) { model.document?.phase == .rendering }
-        XCTAssertEqual(model.document?.isPreparingCameraSupport, false)
         XCTAssertTrue(model.canCancelOpen)
         withObservationTracking { _ = model.canCancelOpen } onChange: { availabilityChanges.withLock { $0 += 1 } }
-        services.streams[raw]?.yield(.edited(preview))
+        services.scripted.releaseOpens()
         await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
+        XCTAssertEqual(model.document?.isPreparingCameraSupport, false)
         XCTAssertFalse(model.canCancelOpen)
         XCTAssertEqual(availabilityChanges.withLock { $0 }, 2)
     }
 
     func testCancelRestoresPhotoTransformAndClosesCandidateWithoutAlert() async {
         let clock = ManualOpenClock(); defer { clock.finish() }
-        let services = ScriptedEditorServices(); services.openClock = clock
+        let services = holding(clock)
         let model = EditorModel(services: services)
         await ready(model, services, jpeg)
         model.updateViewport(CGSize(width: 100, height: 100), backingScale: 2)
         model.canvas.zoomIn(); model.viewMode = .compare
         let oldDocument = model.document, transform = model.canvas.transform
         model.open([raw])
-        await eventually(timeout: .seconds(3)) { services.streams[self.raw] != nil }
-        services.streams[raw]?.yield(.reference(preview))
-        await eventually(timeout: .seconds(3)) { model.document?.phase == .rendering }
+        await eventually(timeout: .seconds(3)) { services.scripted.isHoldingOpen(self.raw) }
         model.cancelOpen()
         XCTAssertEqual(model.document, oldDocument)
         XCTAssertEqual(model.canvas.transform, transform)
@@ -93,7 +92,7 @@ import XCTest
 
     func testCancelDoesNotWaitForNativeOpenAndLateCandidateCloses() async {
         let clock = ManualOpenClock(); defer { clock.finish() }
-        let services = ScriptedEditorServices(); services.openClock = clock
+        let services = holding(clock)
         var gate: CheckedContinuation<EditorPhoto, Never>?
         services.openHandler = { _ in await withCheckedContinuation { gate = $0 } }
         let model = EditorModel(services: services)
@@ -115,7 +114,7 @@ import XCTest
 
     func testNonRawAndObsoleteDeadlineNeverPublish() async {
         let clock = ManualOpenClock(); defer { clock.finish() }
-        let services = ScriptedEditorServices(); services.openClock = clock
+        let services = holding(clock)
         let model = EditorModel(services: services)
         model.open([raw])
         await eventually(timeout: .seconds(3)) { clock.deadlines.count == 1 }
@@ -125,7 +124,7 @@ import XCTest
         model.open([next])
         await eventually(timeout: .seconds(3)) { clock.deadlines.count == 3 && clock.resumed == 2 }
         XCTAssertEqual(model.document?.isPreparingCameraSupport, false)
-        await eventually(timeout: .seconds(3)) { services.streams[self.next] != nil }
+        await eventually(timeout: .seconds(3)) { services.scripted.isHoldingOpen(self.next) }
         model.cancelOpen()
         clock.advance(to: .seconds(5))
         await eventually(timeout: .seconds(3)) { services.closed.contains { $0.url == self.next } }
@@ -133,20 +132,20 @@ import XCTest
         XCTAssertEqual(model.document?.isPreparingCameraSupport, false)
     }
 
-    func testReferenceBeforeDeadlineAndNonRawNeverShowPreparation() async {
+    func testFrameBeforeDeadlineAndNonRawNeverShowPreparation() async {
         let clock = ManualOpenClock(); defer { clock.finish() }
-        let services = ScriptedEditorServices(); services.openClock = clock
+        let services = holding(clock)
         let model = EditorModel(services: services)
         model.open([raw])
-        await eventually(timeout: .seconds(3)) { clock.deadlines.count == 1 && services.streams[self.raw] != nil }
-        services.streams[raw]?.yield(.reference(preview))
-        await eventually(timeout: .seconds(3)) { model.document?.phase == .rendering }
+        await eventually(timeout: .seconds(3)) { clock.deadlines.count == 1 && services.scripted.isHoldingOpen(self.raw) }
+        services.scripted.releaseOpens()
+        await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
         clock.advance(to: .seconds(2))
         await eventually(timeout: .seconds(3)) { clock.resumed == 1 }
         XCTAssertEqual(model.document?.isPreparingCameraSupport, false)
-        model.cancelOpen()
+        services.scripted.holdsOpens = true
         model.open([jpeg])
-        await eventually(timeout: .seconds(3)) { services.streams[self.jpeg] != nil }
+        await eventually(timeout: .seconds(3)) { services.scripted.isHoldingOpen(self.jpeg) }
         clock.advance(to: .seconds(10))
         XCTAssertEqual(clock.deadlines.count, 2, "A non-RAW open shares the 1.5 s deadline")
         await eventually(timeout: .seconds(3)) { model.document?.isOpeningSlowly == true }
@@ -156,13 +155,14 @@ import XCTest
 
     func testFailureAfterDeadlineClearsPreparationAndRollsBack() async {
         let clock = ManualOpenClock(); defer { clock.finish() }
-        let services = ScriptedEditorServices(); services.openClock = clock
+        let services = holding(clock)
         let model = EditorModel(services: services)
         model.open([raw])
-        await eventually(timeout: .seconds(3)) { clock.deadlines.count == 1 && services.streams[self.raw] != nil }
+        await eventually(timeout: .seconds(3)) { clock.deadlines.count == 1 && services.scripted.isHoldingOpen(self.raw) }
         clock.advance(to: .seconds(2))
         await eventually(timeout: .seconds(3)) { model.document?.isPreparingCameraSupport == true }
-        services.streams[raw]?.yield(.failed(UserFacingError(code: "raw_unsupported", variant: "camera")))
+        services.scripted.failOpen(raw, with: UserFacingError(code: "raw_unsupported", variant: "camera"))
+        services.scripted.releaseOpens()
         await eventually(timeout: .seconds(3)) { model.alert != nil }
         XCTAssertNil(model.document); XCTAssertFalse(model.canCancelOpen)
         XCTAssertEqual(model.alert?.code, "raw_unsupported")
@@ -189,7 +189,7 @@ import XCTest
     }
 
     func testCancelWhileLaunchRestoreIsStillSuspended() async {
-        let services = ScriptedEditorServices(); services.usesRestoreGate = true
+        let services = holding(); services.usesRestoreGate = true
         let model = EditorModel(services: services)
         model.launch()
         await eventually(timeout: .seconds(3)) { services.restoreWaiter != nil }
@@ -203,13 +203,14 @@ import XCTest
         services.restoreWaiter?.resume(returning: .restored(services.placeholder(for: raw)))
         services.restoreWaiter = nil
         await eventually(timeout: .seconds(3)) { services.closed.contains { $0.url == self.raw } }
-        XCTAssertNil(services.streams[raw])
+        let opened = await services.scripted.fake.opened
+        XCTAssertFalse(opened.contains(raw), "the renderer never opened it")
         XCTAssertNil(model.document); XCTAssertNil(model.alert)
     }
 
     func testCancelRestoreAllowsImmediateOpenAndClosesLateCandidate() async {
         let clock = ManualOpenClock(); defer { clock.finish() }
-        let services = ScriptedEditorServices(); services.openClock = clock; services.usesRestoreGate = true
+        let services = holding(clock); services.usesRestoreGate = true
         let model = EditorModel(services: services)
         model.launch()
         await eventually(timeout: .seconds(3)) { services.restoreWaiter != nil && clock.deadlines.count == 1 }
@@ -224,12 +225,13 @@ import XCTest
         XCTAssertEqual(model.document, current)
         XCTAssertFalse(model.canCancelOpen)
         XCTAssertFalse(model.isRestoring)
-        XCTAssertNil(services.streams[raw]); XCTAssertNil(model.alert)
+        let opened = await services.scripted.fake.opened
+        XCTAssertFalse(opened.contains(raw)); XCTAssertNil(model.alert)
         XCTAssertFalse(services.closed.contains { $0.url == self.jpeg })
     }
 
     func testCancelWhileStartupIsSuspendedSkipsRestoreAndAllowsOpen() async {
-        let services = ScriptedEditorServices(); services.usesRestoreGate = true
+        let services = holding(); services.usesRestoreGate = true
         var startWaiter: CheckedContinuation<Void, Never>?
         services.startHandler = { await withCheckedContinuation { startWaiter = $0 } }
         let model = EditorModel(services: services)
@@ -253,7 +255,7 @@ import XCTest
 
     func testLaunchRestoreUsesOpeningDeadline() async {
         let clock = ManualOpenClock(); defer { clock.finish() }
-        let services = ScriptedEditorServices(); services.openClock = clock; services.usesRestoreGate = true
+        let services = holding(clock); services.usesRestoreGate = true
         let model = EditorModel(services: services)
         model.launch()
         await eventually(timeout: .seconds(3)) { services.restoreWaiter != nil && clock.deadlines.count == 1 }
@@ -288,7 +290,7 @@ import XCTest
         model.export.lastLine = "Failed to export unsupported RAW"
         model.finishExport(result: nil,
             failure: UserFacingError(code: "raw_unsupported", detail: "SONY", variant: "camera"),
-            snapshot: model.edit, framed: false)
+            snapshot: model.exportChoices, framed: false)
         XCTAssertEqual(model.export.failure?.detail, "SONY")
         XCTAssertEqual(model.export.failure?.variant, "camera")
         XCTAssertEqual(model.export.failure?.messageVariantKey, "err.server.raw_unsupported.model %@")
@@ -301,6 +303,6 @@ import XCTest
         let model = EditorModel(document: document)
         let text = await model.diagnosticText
         XCTAssertTrue(text.contains("RAW: apple-ciraw · decoder 8.dng · macOS build engine-build-sentinel"))
-        XCTAssertTrue(text.contains("Lens correction: supported, on"))
+        XCTAssertTrue(text.contains("Lens correction: supported"))
     }
 }

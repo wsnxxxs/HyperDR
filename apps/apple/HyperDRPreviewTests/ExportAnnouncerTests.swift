@@ -11,8 +11,8 @@ import XCTest
     private final class Spoken { var items: [ExportAnnouncer.Announcement] = [] }
 
     private func setUp(locale: Locale? = nil) async -> (EditorModel, FakeEditorServices, ExportAnnouncer, Spoken) {
-        let services = FakeEditorServices(openDelay: .zero, previewDelay: .zero)
-        let model = EditorModel(services: services, ticker: ManualFrameTicker())
+        let services = FakeEditorServices(openDelay: .zero)
+        let model = EditorModel(services: services)
         await model.loadExportServices()
         model.open([source])
         await eventually(timeout: .seconds(10)) { model.document?.phase == .ready && !model.suggestedFileName.isEmpty }

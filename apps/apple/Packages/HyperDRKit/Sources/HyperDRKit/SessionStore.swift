@@ -2,6 +2,8 @@ import CryptoKit
 import Darwin
 import Foundation
 import HyperDREngine
+import HyperDRRender
+import HyperDRRecipe
 import os
 
 public struct SessionID: Sendable, Hashable, Codable, CustomStringConvertible {
@@ -73,6 +75,8 @@ public struct ExportRecord: Sendable, Codable, Equatable {
     public let sequence: Int
     public let key: ExportKey
     public let frame: ExportFrameRecord?
+    public var recipeSnapshot: RecipeExportSnapshot? = nil
+    public var resolvedSnapshot: ResolvedExportSnapshot? = nil
     /// Loaded from saved.json; publication never rewrites result.json.
     public internal(set) var saved: SavedMark? = nil
     /// Whether the retained file in the version folder can be read. Filled in
@@ -81,7 +85,7 @@ public struct ExportRecord: Sendable, Codable, Equatable {
     public internal(set) var fileAvailable: Bool = true
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, byteCount, createdAt, sourceDigest, options, reportJSON, sequence, key, frame, saved
+        case id, name, byteCount, createdAt, sourceDigest, options, reportJSON, sequence, key, frame, saved, recipeSnapshot, resolvedSnapshot
     }
 }
 
@@ -745,6 +749,130 @@ public actor SessionStore {
     private func releaseExport(_ id: SessionID, export: ExportID) {
         exporting[id]?.remove(export)
         if exporting[id]?.isEmpty == true { exporting.removeValue(forKey: id) }
+    }
+
+    /// Last completed edit, independent of export choices and temporary bypasses.
+    public func saveRecipe(_ snapshot: RecipeExportSnapshot, for id: SessionID) async throws {
+        let photo = try await session(id)
+        guard snapshot.version == RecipeExportSnapshot.currentVersion,
+              snapshot.recipe.version == HyperDRRecipe.Recipe.currentVersion,
+              photo.sha256 == snapshot.source.sha256 else { throw RecipeExportError.sourceChanged }
+        _ = try resolveFrame(snapshot.frame, for: id)
+        try write(snapshot, to: try sessionDirectory(id).appendingPathComponent("recipe.json"))
+    }
+
+    public func recipe(for id: SessionID) async throws -> RecipeExportSnapshot? {
+        let photo = try await session(id)
+        let url = try sessionDirectory(id).appendingPathComponent("recipe.json")
+        guard let snapshot = try? read(RecipeExportSnapshot.self, from: url),
+              snapshot.version == RecipeExportSnapshot.currentVersion,
+              snapshot.recipe.version == HyperDRRecipe.Recipe.currentVersion,
+              snapshot.source.sha256 == photo.sha256 else { return nil }
+        return snapshot
+    }
+
+    /// Retain/read caption resources separately from the snapshot payload. The
+    /// same schema can therefore be used in PHAdjustmentData without an image.
+    public func resolveFrame(_ frame: RecipeFrameSnapshot?, for id: SessionID) throws -> FrameSnapshot? {
+        guard var frame else { return nil }
+        if let hash = frame.captionSHA256 {
+            guard id.isValid, hash.count == 64, hash.allSatisfy(\.isHexDigit), let root = exportRoot else {
+                throw RecipeExportError.invalidSnapshot
+            }
+            let session = try openDirectory(named: id.rawValue, in: root.descriptor)
+            defer { Darwin.close(session) }
+            if mkdirat(session, "frame-resources", 0o700) != 0 && errno != EEXIST {
+                throw posixError("mkdirat", "frame-resources")
+            }
+            let resources = try openDirectory(named: "frame-resources", in: session)
+            defer { Darwin.close(resources) }
+            try verifyTrustedTree(resources)
+            let name = hash + ".png"
+            if let png = frame.captionPNG {
+                guard png.count <= 64 * 1024 * 1024, SHA256.hash(data: png).map({ String(format: "%02x", $0) }).joined() == hash else {
+                    throw RecipeExportError.invalidSnapshot
+                }
+                if readFile(named: name, in: resources) != png { try writeAtomically(png, named: name, in: resources) }
+            } else {
+                guard let size = regularFileSize(named: name, in: resources), size <= 64 * 1024 * 1024,
+                      let png = readFile(named: name, in: resources),
+                      SHA256.hash(data: png).map({ String(format: "%02x", $0) }).joined() == hash else {
+                    throw HyperDRError(code: "frame_resource_missing", message: "The frozen caption resource is unavailable")
+                }
+                frame.captionPNG = png
+            }
+        }
+        return try frame.renderFrame()
+    }
+
+    private struct PendingRecipeExport: Codable {
+        let id: ExportID
+        let snapshot: RecipeExportSnapshot
+    }
+
+    func prepareRecipeExport(_ id: SessionID, snapshot: RecipeExportSnapshot) async throws -> (id: ExportID, directory: URL) {
+        let export = newExportID()
+        exporting[id, default: []].insert(export)
+        do {
+            let photo = try await session(id)
+            guard photo.sha256 == snapshot.source.sha256 else { throw RecipeExportError.sourceChanged }
+            _ = try resolveFrame(snapshot.frame, for: id)
+            let directory = try exportDirectory(id, export: export)
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            try write(PendingRecipeExport(id: export, snapshot: snapshot), to: directory.appendingPathComponent("pending.json"))
+            return (export, directory)
+        } catch {
+            try? removeExportDirectory(id, export: export)
+            releaseExport(id, export: export)
+            throw error
+        }
+    }
+
+    /// No legacy options/convert report is constructed for a Recipe export.
+    func publishRecipeExport(_ id: SessionID, export: ExportID, name: String,
+                             resolved: ResolvedExportSnapshot, reportJSON: Data,
+                             thumbnail: ExportThumbnail) throws -> ExportRecord {
+        defer { releaseExport(id, export: export) }
+        let fd = try openExportDirectoryFD(id, export: export)
+        defer { Darwin.close(fd) }
+        guard isSafeComponent(name), !name.contains("\\"),
+              let data = readFile(named: "pending.json", in: fd),
+              let pending = try? decoder.decode(PendingRecipeExport.self, from: data),
+              pending.id == export, pending.snapshot == resolved.snapshot,
+              let size = regularFileSize(named: name, in: fd), size > 0,
+              regularFileSize(named: "result.json", in: fd) == nil else {
+            throw RecipeExportError.invalidSnapshot
+        }
+        var record = ExportRecord(id: export, name: name, byteCount: size, createdAt: Date(),
+                                  sourceDigest: resolved.snapshot.source.sha256, options: [:], reportJSON: reportJSON,
+                                  sequence: (loadExportRecords(id).map(\.sequence).max() ?? 0) + 1,
+                                  key: try resolved.exportKey(), frame: nil)
+        record.recipeSnapshot = resolved.snapshot; record.resolvedSnapshot = resolved
+        // All resources precede the final manifest rename. Recovery promotes only
+        // complete manifests, so a partially written recipe never becomes history.
+        try writeAtomically(thumbnail.jpegData, named: "thumbnail.jpeg", in: fd)
+        try writeAtomically(try encoder.encode(record), named: "pending.json", in: fd)
+        guard Darwin.renameat(fd, "pending.json", fd, "result.json") == 0 else {
+            throw posixError("renameat", "result.json")
+        }
+        releaseExport(id, export: export)
+        _ = trimExportHistory()
+        return record
+    }
+
+    /// The library copies immutable .cube content into a session on apply. Read
+    /// through that retained descriptor; removing the library entry is harmless.
+    public func recipeLUT(_ hash: String, for id: SessionID) throws -> HyperDRRender.ColorLUT {
+        let raw = hash.hasPrefix("sha256:") ? String(hash.dropFirst(7)) : hash
+        let lutID = try LUTID(rawValue: raw)
+        let directory = try lutDirectory(id)
+        let file = try LUTFiles.file(lutID.rawValue + ".cube", in: directory.descriptor)
+        defer { Darwin.close(file) }
+        try LUTFiles.identities.verify(file, in: directory.descriptor, id: lutID)
+        guard lseek(file, 0, SEEK_SET) == 0 else { throw RecipeExportError.missingLUT }
+        let bytes = try FileHandle(fileDescriptor: file, closeOnDealloc: false).readToEnd() ?? Data()
+        guard let text = String(data: bytes, encoding: .utf8) else { throw RecipeExportError.missingLUT }
+        return try HyperDRRender.ColorLUT(cube: text)
     }
 
     public func prepareExport(_ id: SessionID, options: [String: JSONValue],
@@ -1784,7 +1912,7 @@ public actor SessionStore {
         var stale = false
         do {
             let url = try URL(resolvingBookmarkData: data,
-                options: [.withSecurityScope, .withoutUI], relativeTo: nil, bookmarkDataIsStale: &stale)
+                options: bookmarkResolution, relativeTo: nil, bookmarkDataIsStale: &stale)
             // Keep the exact URL the scope was resolved for; callers lease it
             // before standardizing or otherwise touching the file system.
             return (url, stale)
@@ -1795,7 +1923,7 @@ public actor SessionStore {
 
     private func makeBookmark(_ url: URL) throws -> Data {
         do {
-            return try url.bookmarkData(options: [.withSecurityScope],
+            return try url.bookmarkData(options: bookmarkCreation,
                 includingResourceValuesForKeys: nil, relativeTo: nil)
         } catch {
             throw HyperDRError(code: "source_unreadable",

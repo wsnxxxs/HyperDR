@@ -1,5 +1,7 @@
 import Foundation
 import HyperDREngine
+import HyperDRKit
+import HyperDRRender
 
 extension UserFacingError {
     /// A service-layer error keeps its §3.6 code; the message is the
@@ -39,8 +41,55 @@ extension UserFacingError {
         switch error {
         case let error as UserFacingError: error
         case let error as HyperDRError: UserFacingError(error)
+        case let error as RecipeExportError: UserFacingError(error)
+        case let error as EditorRenderingError: UserFacingError(error)
+        case let error as RenderError: UserFacingError(error)
         case is CancellationError: UserFacingError(code: "cancelled")
         default: UserFacingError(code: "internal_error", detail: String(describing: error))
+        }
+    }
+
+    /// Kit's recipe export failures (P7-3b-K) under the codes the export
+    /// messages already have.
+    init(_ error: RecipeExportError) {
+        switch error {
+        case .busy: self.init(code: "convert_in_progress")
+        case .invalidSnapshot: self.init(code: "invalid_options")
+        case .sourceChanged: self.init(code: "source_changed")
+        case .missingLUT: self.init(code: "lut_invalid")
+        case .missingModel: self.init(code: "model_not_ready")
+        case .memoryExceeded(let required, let available):
+            self.init(code: "export_memory_budget", detail: "required \(required) bytes, available \(available.map(String.init) ?? "unknown")")
+        case .planBlocked(let reasons): self.init(code: "export_failed", detail: "plan blocked: " + reasons.joined(separator: ", "))
+        case .verificationFailed(let detail): self.init(code: "export_failed", detail: "verification failed: " + detail)
+        case .invalidStripes: self.init(code: "export_failed", detail: "invalid stripes")
+        }
+    }
+
+    /// Render's failures, which the export service and its readers pass on
+    /// as they are (R36-003).
+    init(_ error: RenderError) {
+        switch error {
+        case .sourceChanged: self.init(code: "source_changed")
+        case .cannotOpenSource: self.init(code: "source_unreadable")
+        case .cannotDecodeSource, .missingGainMap, .unsupportedGainColorSpace:
+            self.init(code: "decode_failed", detail: String(describing: error))
+        case .allocationFailed: self.init(code: "out_of_memory")
+        case .metalUnavailable: self.init(code: "metal_unavailable")
+        case .gpu(let detail): self.init(code: "metal_unavailable", detail: detail)
+        case .aiNotAvailable: self.init(code: "model_not_ready")
+        case .invalidLUT(let detail): self.init(code: "lut_invalid", detail: detail)
+        case .invalidSize, .invalidRegion, .invalidAdjustment, .duplicateHDRSplit:
+            self.init(code: "internal_error", detail: String(describing: error))
+        }
+    }
+
+    /// What the editor could not capture for an export.
+    init(_ error: EditorRenderingError) {
+        switch error {
+        case .missingLUT(let hash): self.init(code: "lut_invalid", detail: hash)
+        case .sourceChanged: self.init(code: "source_changed")
+        default: self.init(code: "internal_error", detail: String(describing: error))
         }
     }
 

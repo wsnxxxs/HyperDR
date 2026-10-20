@@ -2,7 +2,6 @@ import Foundation
 import CoreGraphics
 import ImageIO
 import QuartzCore
-import HyperDREngine
 import HyperDRDesign
 import HyperDRKit
 import Metal
@@ -104,30 +103,34 @@ import XCTest
         }
     }
 
-    private func session() async throws -> PreviewSession {
-        let engine = try await Engine()
-        let bundle = previewFixtureBundle()
-        let url = try XCTUnwrap(bundle.url(forResource: "photo", withExtension: "jpg", subdirectory: "Fixtures")
-            ?? bundle.url(forResource: "photo", withExtension: "jpg"))
-        return try engine.openPreview(source: url)
-    }
-
-    private func frame(_ session: PreviewSession, exposure: Double, region: CGRect? = nil) async throws -> PreviewFrame {
-        var request = EngineRequest(settings: ["preview_max_edge":.number(64), "exposure":.number(exposure),
-            "headroom":.number(2)])
-        if let region {
-            try request.setCommand("region", .object(["left":.number(region.minX),"top":.number(region.minY),
-                "width":.number(region.width),"height":.number(region.height),"center":.bool(false)]))
+    /// A synthetic photo for the compositor, standing in for Render's pairs:
+    /// `pattern` gives each pixel's SDR value at 1:1, times 2^exposure; the
+    /// gain grows with it, up to the 2-stop alternate headroom. A region
+    /// crops the same pixels at full size, as a detail render does.
+    private func photo(_ device: any MTLDevice, exposure: Double = 0, region: CGRect? = nil,
+                       width: Int = 64, height: Int = 48,
+                       pattern: (Int, Int) -> Float = { x, y in Float((x * 7 + y * 13) % 64) / 80 + 0.1 }) throws -> DisplayPair {
+        let crop = region ?? CGRect(x: 0, y: 0, width: width, height: height)
+        let scale = Float(exp2(exposure))
+        var base: [Float] = [], gain: [Float] = []
+        for y in Int(crop.minY)..<Int(crop.maxY) {
+            for x in Int(crop.minX)..<Int(crop.maxX) {
+                let value = min(1, pattern(x, y) * scale)
+                base += [value, value * 0.9, value * 0.8]
+                gain.append(2 * value)
+            }
         }
-        return try await session.renderFrame(request)
+        var pair = try makeDisplayPair(device, base: base, width: Int(crop.width), height: Int(crop.height),
+                                       gain: gain, alternateHeadroom: 2)
+        pair.region = region
+        return pair
     }
 
     func testProductionSplitScissorsAndOriginalHidesOverlaysForEveryPixel() async throws {
-        let session = try await session(); defer { session.close() }
-        let original = try await frame(session, exposure: -1)
-        let edited = try await frame(session, exposure: 1)
         let renderer = try makePreviewRenderer()
-        let compositor = try CanvasCompositor(device: renderer.device, library: renderer.library)
+        let original = try photo(renderer.device, exposure: -1)
+        let edited = try photo(renderer.device, exposure: 1)
+        let compositor = try DisplayCompositor(device: renderer.device, library: renderer.library)
         let w = edited.base.width, h = edited.base.height
         var geometry = CanvasTransform(imageSize: CGSize(width:w,height:h), viewport: CGSize(width:w,height:h))
         let out = try target(renderer.device,width:w,height:h)
@@ -164,20 +167,18 @@ import XCTest
     }
 
     func testDetailPlacementAndNoBrightnessSeamOnBothSides() async throws {
-        let session = try await session(); defer { session.close() }
-        let original = try await frame(session,exposure:0)
-        let edited = try await frame(session,exposure:0.5)
-        let crop = CGRect(x:4,y:4,width:16,height:12)
-        let originalTile = try await frame(session,exposure:0,region:crop)
-        let editedTile = try await frame(session,exposure:0.5,region:crop)
-        XCTAssertEqual(CanvasCompositor.region(editedTile),crop)
-        // Native full dimensions can exceed the whole preview. Position the
-        // output in full-source coordinates, then compare the tile's pixels
-        // to the same standalone frame at exactly 1:1.
-        let size = CGSize(width:editedTile.metadata.fullWidth!,height:editedTile.metadata.fullHeight!)
-        let w = Int(size.width), h = Int(size.height)
         let renderer = try makePreviewRenderer()
-        let compositor = try CanvasCompositor(device: renderer.device, library:renderer.library)
+        // The whole photo at half size, as a preview is smaller than the source.
+        let original = try photo(renderer.device, width: 32, height: 24) { x, y in Float((x + y) % 8) / 10 + 0.1 }
+        let edited = try photo(renderer.device, exposure: 0.5, width: 32, height: 24) { x, y in Float((x + y) % 8) / 10 + 0.1 }
+        let crop = CGRect(x:4,y:4,width:16,height:12)
+        let originalTile = try photo(renderer.device, region: crop)
+        let editedTile = try photo(renderer.device, exposure: 0.5, region: crop)
+        // Position the output in full-source coordinates, then compare the
+        // tile's pixels to the same standalone pair at exactly 1:1.
+        let size = CGSize(width: 64, height: 48)
+        let w = Int(size.width), h = Int(size.height)
+        let compositor = try DisplayCompositor(device: renderer.device, library:renderer.library)
         let geometry = CanvasTransform(imageSize:size,viewport:size)
         let out = try target(renderer.device,width:w,height:h)
         let command = try XCTUnwrap(renderer.queue.makeCommandBuffer())
@@ -186,10 +187,12 @@ import XCTest
         try compositor.encode(content,transform:geometry,target:out,command:command)
         let image = try read(out,after:command)
         for (tile,isOriginal) in [(originalTile,true),(editedTile,false)] {
-            let local = try CanvasCompositor(device: renderer.device, library:renderer.library)
+            let local = try DisplayCompositor(device: renderer.device, library:renderer.library)
             let tileOut = try target(renderer.device,width:tile.base.width,height:tile.base.height)
             let command = try XCTUnwrap(renderer.queue.makeCommandBuffer())
-            try local.encode(CanvasComposition(original:tile,edited:tile,mode:.edited,headroom:16),
+            var standalone = tile
+            standalone.region = nil
+            try local.encode(CanvasComposition(original:standalone,edited:standalone,mode:.edited,headroom:16),
                 transform:CanvasTransform(imageSize:crop.size,viewport:crop.size),target:tileOut,command:command)
             let expected = try read(tileOut,after:command)
             for y in 0..<12 { for x in 0..<16 {
@@ -205,20 +208,10 @@ import XCTest
 
 extension CanvasCompositionTests {
     func testUniformPhotoHasNoLocalLayerSeamWithOverlaysAndSDR() async throws {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("seam-\(UUID()).png")
-        defer { try? FileManager.default.removeItem(at:url) }
-        let context = try XCTUnwrap(CGContext(data:nil,width:64,height:48,bitsPerComponent:8,bytesPerRow:0,
-            space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue))
-        context.setFillColor(CGColor(gray:0.5,alpha:1)); context.fill(CGRect(x:0,y:0,width:64,height:48))
-        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL,"public.png" as CFString,1,nil))
-        CGImageDestinationAddImage(destination,try XCTUnwrap(context.makeImage()),nil)
-        XCTAssertTrue(CGImageDestinationFinalize(destination))
-        let engine = try await Engine(), session = try engine.openPreview(source:url)
-        defer { session.close() }
-        let whole = try await frame(session,exposure:0)
-        let tile = try await frame(session,exposure:0,region:CGRect(x:16,y:12,width:32,height:24))
         let renderer = try makePreviewRenderer()
-        let compositor = try CanvasCompositor(device: renderer.device, library:renderer.library)
+        let whole = try photo(renderer.device) { _, _ in 0.5 }
+        let tile = try photo(renderer.device, region: CGRect(x:16,y:12,width:32,height:24)) { _, _ in 0.5 }
+        let compositor = try DisplayCompositor(device: renderer.device, library:renderer.library)
         let out = try target(renderer.device,width:64,height:48)
         let transform = CanvasTransform(imageSize:CGSize(width:64,height:48),viewport:CGSize(width:64,height:48))
         for headroom in [1.0,1.3,2.0,4.0] { for sdr in [false,true] { for overlay in [false,true] {
@@ -236,10 +229,9 @@ extension CanvasCompositionTests {
     }
 
     func testAllLayersShareOneInFlightPresentationAndNewestSnapshotWins() async throws {
-        let session = try await session(); defer { session.close() }
-        let whole = try await frame(session,exposure:0)
-        let tile = try await frame(session,exposure:0,region:CGRect(x:4,y:4,width:16,height:12))
         let renderer = try makePreviewRenderer()
+        let whole = try photo(renderer.device)
+        let tile = try photo(renderer.device, region: CGRect(x:4,y:4,width:16,height:12))
         let layer = CAMetalLayer(); layer.device = renderer.device; layer.pixelFormat = .rgba16Float
         layer.drawableSize = CGSize(width:64,height:48)
         let probe = DrawableProbe(standIn:layer); probe.install(on:renderer)
@@ -247,7 +239,7 @@ extension CanvasCompositionTests {
         renderer.presentingCommandHook = { $0.encodeWaitForEvent(event,value:1) }
         let view = EDRCanvasView(renderer:renderer)
         view.frame = CGRect(x:0,y:0,width:64,height:48); view.layout()
-        view.transform = CanvasTransform(imageSize:CGSize(width:tile.metadata.fullWidth!,height:tile.metadata.fullHeight!),viewport:view.bounds.size)
+        view.transform = CanvasTransform(imageSize:CGSize(width:64,height:48),viewport:view.bounds.size)
         var content = CanvasComposition(original:whole,edited:whole,originalDetail:tile,editedDetail:tile,
             mode:.compare,headroom:4,overlays:CanvasOverlays(highlights:true,shadows:true,mask:true,hdrRange:1))
         view.compositionProvider = { content }
@@ -289,14 +281,13 @@ extension CanvasCompositionTests {
     }
 
     func testReviewerOriginalCacheTracksReferenceIdentity() async throws {
-        let session=try await session(); defer { session.close() }
-        let a=try await frame(session,exposure:-1), b=try await frame(session,exposure:1)
-        let edit=try await frame(session,exposure:0)
         let renderer=try makePreviewRenderer()
-        let compositor=try CanvasCompositor(device: renderer.device, library:renderer.library)
+        let a=try photo(renderer.device,exposure:-1), b=try photo(renderer.device,exposure:1)
+        let edit=try photo(renderer.device)
+        let compositor=try DisplayCompositor(device: renderer.device, library:renderer.library)
         let out=try target(renderer.device,width:edit.base.width,height:edit.base.height)
         let geometry=CanvasTransform(imageSize:CGSize(width:edit.base.width,height:edit.base.height),viewport:CGSize(width:out.width,height:out.height))
-        func render(_ original:PreviewFrame) throws -> [Float] {
+        func render(_ original:DisplayPair) throws -> [Float] {
             let command=try XCTUnwrap(renderer.queue.makeCommandBuffer())
             try compositor.encode(CanvasComposition(original:original,edited:edit,mode:.original,headroom:16),transform:geometry,target:out,command:command)
             return try read(out,after:command)
@@ -306,7 +297,7 @@ extension CanvasCompositionTests {
         XCTAssertEqual(compositor.rebuilds,3)
         _ = try render(b)
         XCTAssertEqual(compositor.rebuilds,3)
-        compositor.releaseFrames()
+        compositor.releasePairs()
         _ = try render(b)
         XCTAssertEqual(compositor.rebuilds,5)
     }
@@ -314,29 +305,16 @@ extension CanvasCompositionTests {
 
 extension CanvasCompositionTests {
     func testReviewerBothDetailLayersCrossTheDividerOnHighFrequencyPixels() async throws {
-        let url=FileManager.default.temporaryDirectory.appendingPathComponent("checker-\(UUID()).png")
-        defer { try? FileManager.default.removeItem(at:url) }
-        let context=try XCTUnwrap(CGContext(data:nil,width:64,height:48,bitsPerComponent:8,bytesPerRow:0,
-            space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue))
-        for y in 0..<48 { for x in 0..<64 {
-            context.setFillColor(CGColor(gray:(x+y)%2 == 0 ? 0.15 : 0.75,alpha:1))
-            context.fill(CGRect(x:x,y:y,width:1,height:1))
-        } }
-        let destination=try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL,"public.png" as CFString,1,nil))
-        CGImageDestinationAddImage(destination,try XCTUnwrap(context.makeImage()),nil)
-        XCTAssertTrue(CGImageDestinationFinalize(destination))
-        let engine=try await Engine(), session=try engine.openPreview(source:url)
-        defer { session.close() }
-        let crop=CGRect(x:16,y:16,width:32,height:16)
-        func make(_ exposure:Double,detail:Bool) async throws -> PreviewFrame {
-            var r=EngineRequest(settings:["preview_max_edge":.number(detail ? 64 : 16),"exposure":.number(exposure),"headroom":.number(2)])
-            if detail { try r.setCommand("region",.object(["left":.number(16),"top":.number(16),"width":.number(32),"height":.number(16)])) }
-            return try await session.renderFrame(r)
-        }
-        let original=try await make(0,detail:false), edit=try await make(0.5,detail:false)
-        let originalTile=try await make(0,detail:true), editedTile=try await make(0.5,detail:true)
         let renderer=try makePreviewRenderer()
-        let compositor=try CanvasCompositor(device: renderer.device, library:renderer.library)
+        let checker: (Int, Int) -> Float = { x, y in (x + y) % 2 == 0 ? 0.15 : 0.75 }
+        // The whole photo at a quarter size averages the checker out; the
+        // detail tiles have it at full size.
+        let original=try photo(renderer.device,width:16,height:12) { _, _ in 0.45 }
+        let edit=try photo(renderer.device,exposure:0.5,width:16,height:12) { _, _ in 0.45 }
+        let crop=CGRect(x:16,y:16,width:32,height:16)
+        let originalTile=try photo(renderer.device,region:crop,pattern:checker)
+        let editedTile=try photo(renderer.device,exposure:0.5,region:crop,pattern:checker)
+        let compositor=try DisplayCompositor(device: renderer.device, library:renderer.library)
         let out=try target(renderer.device,width:64,height:48)
         func render(_ content:CanvasComposition,geometry:CanvasTransform,target:any MTLTexture) throws -> [Float] {
             let command=try XCTUnwrap(renderer.queue.makeCommandBuffer())
@@ -353,13 +331,15 @@ extension CanvasCompositionTests {
             // Isolated crop metadata can be degenerate. The crop follows its
             // whole rendition's weight, as the production atlas does.
             let command = try XCTUnwrap(renderer.queue.makeCommandBuffer())
-            let image = try compositor.display.makeTestTexture(compositor.upload(tile, command: command),
-                weight: DisplayWeight.value(headroom: 16, metadata: (left ? original : edit).metadata), command: command)
+            var standalone = tile
+            standalone.region = nil
+            let image = try compositor.makeTestTexture(standalone,
+                weight: (left ? original : edit).weight(headroom: 16), command: command)
             let pass = MTLRenderPassDescriptor()
             pass.colorAttachments[0].texture = tileOut
             pass.colorAttachments[0].loadAction = .clear; pass.colorAttachments[0].storeAction = .store
             let encoder = try XCTUnwrap(command.makeRenderCommandEncoder(descriptor: pass))
-            compositor.display.draw(encoder, texture: image, params: CompositionParams(rect: SIMD4(-1,-1,1,1)))
+            compositor.draw(encoder, texture: image, params: CompositionParams(rect: SIMD4(-1,-1,1,1)))
             encoder.endEncoding()
             let expected = try read(tileOut, after: command)
             var changed=false
@@ -375,10 +355,9 @@ extension CanvasCompositionTests {
 
 extension CanvasCompositionTests {
     func testReviewerOriginalActuallyHidesAnActiveOverlay() async throws {
-        let session=try await session(); defer { session.close() }
-        let frame=try await frame(session,exposure:3)
         let renderer=try makePreviewRenderer()
-        let compositor=try CanvasCompositor(device: renderer.device, library:renderer.library)
+        let frame=try photo(renderer.device,exposure:3)
+        let compositor=try DisplayCompositor(device: renderer.device, library:renderer.library)
         let out=try target(renderer.device,width:frame.base.width,height:frame.base.height)
         let geometry=CanvasTransform(imageSize:CGSize(width:out.width,height:out.height),viewport:CGSize(width:out.width,height:out.height))
         func render(_ mode:CanvasComposition.Mode,_ overlay:CanvasOverlays) throws -> [Float] {
@@ -397,17 +376,14 @@ extension CanvasCompositionTests {
 
 extension CanvasCompositionTests {
     /// Negative gain and offsets can clip the full rendition while intermediate
-    /// weights remain distinct. Check both a scalar ISO reference and the
-    /// independent legacy float output, with RGB bases and compact bilinear gain.
-    /// Render hands the gain over decoded, so it is resampled in stops; the
-    /// legacy path resamples codes, which agrees only at gamma 1.
+    /// weights remain distinct. Check a scalar ISO reference with RGB bases
+    /// and compact bilinear gain. Render hands the gain over decoded, so it is
+    /// resampled in stops.
     func testISOLogGainCacheMatchesReconstructionAcrossWeightsAndOffsets() throws {
         let renderer = try makePreviewRenderer()
         let compositor = try DisplayCompositor(device: renderer.device, library: renderer.library)
         let base: [Float] = [0,0.1,0.55, 0.02,0.1,0.9, 0.05,0.1,0.3, 0.1,0.2,1]
-        let baseBuffer = try XCTUnwrap(renderer.device.makeBuffer(bytes: base, length: base.count*4))
         let gains: [Float] = [0,0.8]
-        let gainBuffer = try XCTUnwrap(renderer.device.makeBuffer(bytes: gains, length: gains.count*4))
         let cases: [(Float,Float,Float,Float,Float)] = [
             (-1,2,1,0,0.08), // reviewer: full rendition clips, intermediate must stay black
             (-2,-2,1,0.08,0.08), // equal offsets: 0.1 * 0.5 gain => 0.01 at half weight
@@ -415,12 +391,6 @@ extension CanvasCompositionTests {
             (-0.5,3,0.7,0.015,0.025),
         ]
         for (minimum,maximum,gamma,baseOffset,alternateOffset) in cases {
-            func source(_ weight: Float) -> FramePlanes {
-                FramePlanes(base: baseBuffer, baseRowBytes: 4*12, gain: gainBuffer, gainRowBytes: 2*4,
-                    gainChannels: 1, width: 4, height: 1, gainWidth: 2, gainHeight: 1,
-                    gainMin: minimum, gainMax: maximum, gainGamma: gamma, gainWeight: weight,
-                    baseOffset: baseOffset, alternateOffset: alternateOffset)
-            }
             let stops = gains.map { minimum+(maximum-minimum)*pow($0,1/gamma) }
             let pair = try makeDisplayPair(renderer.device, base: base, width: 4, height: 1, gain: stops,
                 gainWidth: 2, gainHeight: 1, baseOffset: baseOffset, alternateOffset: alternateOffset)
@@ -434,7 +404,6 @@ extension CanvasCompositionTests {
                 let params = CompositionParams(rect: SIMD4(-1,-1,1,1))
                 compositor.draw(encoder,texture:texture,params:params); encoder.endEncoding()
                 let actual = try read(out,after:command)
-                let legacy = try renderer.reconstructFloat(planes: source(weight))
                 for x in 0..<4 {
                     let location = min(1,max(0,(Float(x)+0.5)*0.5-0.5))
                     let logGain = stops[0]*(1-location)+stops[1]*location
@@ -443,7 +412,6 @@ extension CanvasCompositionTests {
                         let tolerance = 0.002*max(1,abs(expected))
                         XCTAssertEqual(actual[x*4+c],expected,accuracy:tolerance,
                             "weight=\(weight), offsets=\(baseOffset)/\(alternateOffset), x=\(x), c=\(c)")
-                        if gamma == 1 { XCTAssertEqual(actual[x*4+c],legacy[x*4+c],accuracy:tolerance) }
                     }
                 }
             }
@@ -564,14 +532,12 @@ extension CanvasCompositionTests {
     }
 
     func testHeadroomUpdatesAllLayersWithoutAllocatingOrRebuildingForDisplayChanges() async throws {
-        let session = try await session();defer { session.close() }
-        let whole = try await frame(session,exposure:0)
-        let tile = try await frame(session,exposure:0,region:CGRect(x:4,y:4,width:16,height:12))
         let renderer = try makePreviewRenderer()
-        let compositor = try CanvasCompositor(device: renderer.device, library:renderer.library)
+        let whole = try photo(renderer.device)
+        let tile = try photo(renderer.device,region:CGRect(x:4,y:4,width:16,height:12))
+        let compositor = try DisplayCompositor(device: renderer.device, library:renderer.library)
         let out = try target(renderer.device,width:64,height:48)
-        let fullWidth = try XCTUnwrap(tile.metadata.fullWidth), fullHeight = try XCTUnwrap(tile.metadata.fullHeight)
-        let transform = CanvasTransform(imageSize:CGSize(width:fullWidth,height:fullHeight),viewport:CGSize(width:64,height:48))
+        let transform = CanvasTransform(imageSize:CGSize(width:64,height:48),viewport:CGSize(width:64,height:48))
         var content = CanvasComposition(original:whole,edited:whole,originalDetail:tile,editedDetail:tile,mode:.compare,headroom:1)
         func draw() throws {
             let command = try XCTUnwrap(renderer.queue.makeCommandBuffer())
@@ -583,7 +549,7 @@ extension CanvasCompositionTests {
         XCTAssertEqual(initial,4);XCTAssertEqual(allocations,3)
         content.splitRatio=0.4;content.overlays.highlights=true;content.previewsAsSDR=true
         try draw();XCTAssertEqual(compositor.rebuilds,initial)
-        let alternate = whole.metadata.alternateHeadroom ?? whole.metadata.headroomStops
+        let alternate = whole.alternateHeadroom
         content.headroom=exp2(alternate+1)
         try draw();XCTAssertEqual(compositor.rebuilds,initial+4,"both whole and both detail weights must update")
         XCTAssertEqual(compositor.textureAllocations,allocations,"headroom reuses all three texture allocations")
@@ -592,7 +558,7 @@ extension CanvasCompositionTests {
         content.headroom=1;content.previewsAsSDR=false
         try draw();XCTAssertEqual(compositor.rebuilds,initial+8)
         XCTAssertEqual(compositor.textureAllocations,allocations)
-        let base = whole.metadata.baseHeadroom ?? 0
+        let base = whole.baseHeadroom
         let span = alternate - base
         for (weight, runs) in [(0.5,initial+12), (0.504,initial+12), (0.508,initial+16)] {
             content.headroom = exp2(base + span * weight)

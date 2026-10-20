@@ -12,28 +12,17 @@ import XCTest
         XCTAssertGreaterThan(text.utf8.count, 1000)
     }
 
-    func testAboutValuesAreStructuredAndRAWIdentityComesFromEngine() async {
+    func testAboutValuesAreStructured() async {
         let services = LiveEditorServices()
         let about = await services.aboutInformation()
         XCTAssertEqual(about.version, Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
         XCTAssertEqual(about.buildNumber, Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String)
         XCTAssertEqual(about.engineABI, Engine.abiVersion)
         XCTAssertNil(about.osBuild); XCTAssertNil(about.decoderVersion)
-        let scripted = ScriptedEditorServices()
-        let model = EditorModel(services: scripted)
+        // The photo no longer reports a RAW decoder of its own: RAW is
+        // developed by the system's CIRAWFilter (P7-2b).
+        let model = EditorModel(services: ScriptedEditorServices())
         model.preferences.about = about
-        var source = SourceSummary(domain: .sceneReferred, colorName: "P3", degradationReasons: [])
-        source.raw = RawCapabilities(supported: true, lensCorrectionSupported: true, decoderVersion: "engine-decoder", osBuild: "engine-build")
-        let url = URL(fileURLWithPath: "/fixtures/about.ARW")
-        model.open([url])
-        await eventually(timeout: .seconds(3)) { scripted.streams[url] != nil }
-        let frame = EditorPreview(pixelSize: PixelSize(width: 10, height: 10), source: source, hasGain: false)
-        scripted.streams[url]?.yield(.reference(frame))
-        scripted.streams[url]?.yield(.edited(frame))
-        await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
-        XCTAssertEqual(model.aboutInformation.osBuild, "engine-build")
-        XCTAssertEqual(model.aboutInformation.decoderVersion, "engine-decoder")
-        model.closeDocument()
         XCTAssertNil(model.aboutInformation.osBuild)
         XCTAssertNil(model.aboutInformation.decoderVersion)
     }

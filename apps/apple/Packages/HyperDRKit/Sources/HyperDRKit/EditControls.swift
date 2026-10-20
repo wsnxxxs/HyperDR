@@ -15,7 +15,7 @@ public struct ControlSpec: Sendable, Hashable {
     public let key: String
     public let group: Group
     /// The static range. `hdrRange` and `aiHdrRange` are narrowed further by
-    /// the output format (`EditDefaults.maxRange(for:)`).
+    /// the output format (`ExportEncoding.ceilingStops`).
     public let range: ClosedRange<Double>
     public let step: Double
     /// The engine schema's default for this key (D1: the schema is the only

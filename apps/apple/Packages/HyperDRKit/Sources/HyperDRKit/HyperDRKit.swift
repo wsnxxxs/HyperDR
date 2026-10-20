@@ -2,15 +2,13 @@ import Foundation
 import HyperDREngine
 
 /// Composition root for the non-UI service layer. One instance per process.
-/// Preview, job and resource services are added by K2-K5.
+/// Export runs through `RecipeExportService`, which hosts construct.
 public final class HyperDRKit: Sendable {
     public let engine: Engine
     public let schema: SettingsSchema
     public let capabilities: Capabilities
     public let formats: InputFormats
     public let sessions: SessionStore
-    public let previews: PreviewService
-    public let jobs: JobRunner
     public let exportTarget: ExportTarget
     public let models: ModelCatalog
     public let luts: LUTLibrary
@@ -48,10 +46,6 @@ public final class HyperDRKit: Sendable {
         self.models = ModelCatalog(capabilities: capabilities)
         self.luts = LUTLibrary(configuration: configuration, sessions: sessions)
         self.cleanup = cleanup ?? { await sessions.cleanupExpired() }
-        self.previews = PreviewService(configuration: configuration, schema: schema,
-            capabilities: capabilities, sessions: sessions, engine: engine)
-        self.jobs = JobRunner(configuration: configuration, schema: schema,
-            capabilities: capabilities, sessions: sessions, engine: engine)
         self.exportTarget = ExportTarget(configuration: configuration, sessions: sessions)
         self.cleanupInterval = cleanupInterval
     }

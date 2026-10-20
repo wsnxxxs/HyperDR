@@ -1,6 +1,5 @@
 import AppKit
 import CoreGraphics
-import HyperDREngine
 import Metal
 import QuartzCore
 
@@ -24,7 +23,6 @@ final class EDRCanvasView: NSView {
     /// Supplies the frame to draw. A2 wires this to the live preview service;
     /// the diagnostic window supplies a synthetic ramp instead.
     var compositionProvider: (() -> CanvasComposition?)?
-    var frameProvider: (() -> PreviewCanvasFrame?)?
     /// Called when a gesture changed the transform; the representable mirrors
     /// it into `CanvasModel` so overlays stay aligned.
     /// Raw pointer events for the view layer's press-and-hold (§3.5): points in
@@ -177,11 +175,9 @@ final class EDRCanvasView: NSView {
             if window != nil { composition.headroom = headroomPolicy.target(headroom.snapshot) }
             if headroomPolicy == .declaredCurrent {
                 metalLayer.preferredDynamicRange = .high
-                metalLayer.contentsHeadroom = max(1, exp2(max(composition.edited.metadata.headroomStops, composition.original?.metadata.headroomStops ?? 0)))
+                metalLayer.contentsHeadroom = max(1, exp2(max(composition.edited.alternateHeadroom, composition.original?.alternateHeadroom ?? 0)))
             }
             content = .composition(composition)
-        } else if let frame = frameProvider?() {
-            content = .frame(frame.frame, original: frame.showsOriginal)
         } else if showsSyntheticRamp {
             if transform.imageSize == .zero { showImageSize(PreviewRenderer.syntheticRampSize) }
             content = .synthetic(original: showsOriginal)

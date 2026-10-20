@@ -1,12 +1,14 @@
 import SwiftUI
 import HyperDRDesign
+import HyperDRRecipe
 
-/// The trailing inspector: the scopes on top, then the photograph's facts and
-/// input colour, the processing mode and the adjustment groups. Without a
-/// photograph it shows the three steps instead.
+/// The trailing inspector: the scopes on top, then the photograph's facts,
+/// the AI status and the adjustment groups. Without a photograph it shows the
+/// three steps instead.
 ///
-/// Every control is generated from the model's own description of it
-/// (`EditControls`), and each row reads only its own value.
+/// The controls are generated from the recipe's declarations
+/// (`AdjustmentInspector`) and write the editor's recipe; the editor makes
+/// the undo steps.
 struct InspectorView: View {
     let model: EditorModel
     var window = EditorWindowState()
@@ -37,15 +39,11 @@ struct InspectorContent: View {
                 Divider()
                 ExportLockRegion(model: model, window: window) {
                     VStack(alignment: .leading, spacing: 0) {
-                        PhotoInfoSection(document: document, model: model)
+                        PhotoInfoSection(document: document)
                         Divider()
-                        WorkflowSection(model: model)
-                        Divider()
-                        AdjustmentSection(model: model)
-                        FineTuneGroup(model: model)
-                        RegionGroup(model: model)
-                        LUTGroup(model: model, window: window)
-                        CameraGroup(model: model)
+                        AIStatusLine(editor: model.editor)
+                        Adjustments(model: model)
+                            .disabled(model.isEditingLocked)
                     }
                 }
             } else {
@@ -63,7 +61,6 @@ struct InspectorContent: View {
 /// as a dash.
 private struct PhotoInfoSection: View {
     let document: DocumentState
-    let model: EditorModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s3) {
@@ -73,7 +70,7 @@ private struct PhotoInfoSection: View {
                 row("mac.info.format", Text(verbatim: document.formatLabel))
                 row("mac.info.size", fileSize.map { Text(verbatim: $0) })
                 row("mac.info.type", document.source.map { Text($0.domain.label) })
-                row("mac.info.color", document.source.map { Text(verbatim: $0.colorName) })
+                row("mac.info.color", document.source.flatMap { $0.colorName.isEmpty ? nil : Text(verbatim: $0.colorName) })
             }
             if let reasons = document.source?.degradationReasons, let sentence = DecodeDegradation.text(reasons) {
                 Label {
@@ -84,7 +81,6 @@ private struct PhotoInfoSection: View {
                 .font(Font.hdr.caption)
                 .foregroundStyle(Color.hdr.warn)
             }
-            InputColorSelector(model: model)
         }
         .padding(20)
     }
@@ -172,37 +168,82 @@ private struct Welcome: View {
     }
 }
 
-// MARK: - Input colour
+// MARK: - Adjustments
 
-/// Which colour space a file without a colour tag was made in. Selectable
-/// only for such files; a tagged file shows the choice resting, and the
-/// tooltip says why. Not for RAW.
-private struct InputColorSelector: View {
+/// The generated controls on the editor's recipe. Group resets and Reset All
+/// go through the editor so their undo steps are named for what they did.
+private struct Adjustments: View {
     let model: EditorModel
 
     var body: some View {
-        let input = model.inputColor
-        if input.isVisible {
-            VStack(alignment: .leading, spacing: Space.s2) {
-                Text("input.color")
+        let editor = model.editor
+        AdjustmentInspector(
+            recipe: Binding(get: { editor.recipe }, set: { editor.setRecipe($0) }),
+            panel: AdjustmentPanel(context: AdjustmentContext(
+                sourceValues: editor.source?.sourceValues ?? [:],
+                automaticValues: editor.automaticValues,
+                capabilities: editor.source?.capabilities ?? [],
+                unavailableOptions: editor.unavailableOptions,
+                luts: model.lutChoices)),
+            style: .pointer,
+            onEditingChanged: { editor.editingChanged($0, $1) },
+            onReset: { reset in
+                switch reset {
+                case .group(let group): editor.resetGroup(group)
+                case .all: editor.resetAll()
+                }
+            })
+    }
+}
+
+/// Under the HDR source: what AI is doing, when it is doing anything
+/// (p7-2b §9). Editing is never paused for it.
+private struct AIStatusLine: View {
+    let editor: RecipeEditor
+
+    var body: some View {
+        if let key {
+            HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
+                if editor.aiStatus == .computing { ProgressView().controlSize(.mini) }
+                Text(key)
                     .font(Font.hdr.caption)
-                    .foregroundStyle(input.isEnabled ? Color.hdr.inkMuted : Color.hdr.inkDisabled)
-                ParameterSegmented("input.color", selection: Binding(get: { input.selection },
-                                                                    set: { model.selectInputColor($0) }),
-                                   choices: input.choices.map {
-                                       SegmentedChoice(LocalizedStringKey($0.labelKey), value: $0.id,
-                                                       isEnabled: $0.isEnabled)
-                                   }, size: .small)
-                    .disabled(!input.isEnabled)
-                if input.isEnabled {
-                    Text("input.color.note")
-                        .font(Font.hdr.caption)
-                        .foregroundStyle(Color.hdr.inkMuted)
-                        .fixedSize(horizontal: false, vertical: true)
+                    .foregroundStyle(isProblem ? Color.hdr.warn : Color.hdr.inkMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                if case .failed = editor.aiStatus {
+                    Button("ai.status.retry") { editor.retryModelGain() }
+                        .buttonStyle(.hdrCompact(.link))
                 }
             }
-            .padding(.top, Space.s2)
-            .help(input.disabledReasonKey.map { Text(LocalizedStringKey($0)) } ?? Text(verbatim: ""))
+            .help(detail.map { Text(verbatim: $0) } ?? Text(verbatim: ""))
+            .padding(.horizontal, Layout.panelPadding)
+            .padding(.vertical, Space.s3)
+        }
+    }
+
+    private var usesAI: Bool { editor.recipe.hdrSource.usesModel }
+
+    private var key: LocalizedStringKey? {
+        switch editor.aiStatus {
+        case .computing: return usesAI ? "ai.status.predicting" : nil
+        case .failed: return usesAI ? "ai.status.predictFailed" : nil
+        case .unavailable: return "ai.status.modelUnavailable"
+        case .ready: return usesAI && editor.isModelGainPending ? "ai.status.notApplied" : nil
+        case .idle: return nil
+        }
+    }
+
+    private var isProblem: Bool {
+        switch editor.aiStatus {
+        case .failed, .unavailable: true
+        default: false
+        }
+    }
+
+    /// The developer-facing reason, as a tooltip.
+    private var detail: String? {
+        switch editor.aiStatus {
+        case .failed(let reason), .unavailable(let reason): reason
+        default: nil
         }
     }
 }

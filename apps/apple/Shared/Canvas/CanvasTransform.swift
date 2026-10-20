@@ -75,6 +75,17 @@ nonisolated struct CanvasTransform: Equatable, Sendable {
                       width: size.width, height: size.height)
     }
 
+    /// The part of the photo on screen, in `imageSize` pixels; nil when none is.
+    var visibleSourceRect: CGRect? {
+        let image = imageFrame
+        guard image.width > 0, image.height > 0 else { return nil }
+        let visible = image.intersection(CGRect(origin: .zero, size: viewport))
+        guard !visible.isNull, !visible.isEmpty else { return nil }
+        let sx = imageSize.width / image.width, sy = imageSize.height / image.height
+        return CGRect(x: (visible.minX - image.minX) * sx, y: (visible.minY - image.minY) * sy,
+                      width: visible.width * sx, height: visible.height * sy)
+    }
+
     func clampedPan(_ candidate: CGPoint) -> CGPoint {
         let limit = panLimit
         return CGPoint(x: min(limit.width, max(-limit.width, candidate.x)),

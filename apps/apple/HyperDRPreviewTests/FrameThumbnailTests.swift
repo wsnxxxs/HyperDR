@@ -1,5 +1,5 @@
 import AppKit
-import HyperDREngine
+import HyperDRRender
 import XCTest
 @testable import HyperDR
 
@@ -39,23 +39,25 @@ import XCTest
         try XCTUnwrap(EditorModel.frameLayout(for: style, photoWidth: width, photoHeight: height))
     }
 
-    private func services(photoSize: PixelSize = PixelSize(width: 6000, height: 4000)) -> FakeEditorServices {
-        let services = FakeEditorServices(openDelay: .zero, previewDelay: .zero)
-        services.preview = EditorPreview(pixelSize: photoSize,
-            source: SourceSummary(domain: .sdr, colorName: "Display P3", degradationReasons: []), hasGain: true, frame: nil)
-        return services
+    private func services(photoSize: HyperDR.PixelSize = HyperDR.PixelSize(width: 6000, height: 4000)) async -> FakeEditorServices {
+        let rendering = ScriptedRendering()
+        let url = source
+        await rendering.fake.configure {
+            $0.photos[url] = .init(size: HyperDRRender.PixelSize(width: photoSize.width, height: photoSize.height))
+        }
+        return FakeEditorServices(openDelay: .zero, rendering: rendering)
     }
 
-    private func ready(_ services: FakeEditorServices) async throws -> (EditorModel, PreviewFrame) {
-        let photo = try TinyPhoto(); defer { photo.remove() }
-        let engine = try await Engine(), session = try engine.openPreview(source: photo.url)
-        defer { session.close() }
-        let frame = try await session.renderFrame(EngineRequest(settings: ["preview_max_edge": .number(8)]))
-        services.preview.frame = frame
-        let model = EditorModel(services: services, ticker: ManualFrameTicker())
+    /// The scripted renderer behind `services`.
+    private func rendering(_ services: FakeEditorServices) -> ScriptedRendering {
+        services.rendering as! ScriptedRendering
+    }
+
+    private func ready(_ services: FakeEditorServices) async throws -> EditorModel {
+        let model = EditorModel(services: services)
         await model.loadExportServices(); model.open([source])
         await eventually(timeout: .seconds(10)) { model.document?.phase == .ready && !model.suggestedFileName.isEmpty }
-        return (model, frame)
+        return model
     }
 
     // MARK: Geometry
@@ -162,8 +164,8 @@ import XCTest
 
     func testTheSummaryPictureIsTheFramedCardWhileTheFrameIsOn() async throws {
         let photo = try solid(4, 2, red: 1, green: 0, blue: 0)
-        let services = services(); services.thumbnailHandler = { _, _ in photo }
-        let (model, _) = try await ready(services)
+        let services = await services(); rendering(services).thumbnailHandler = { _, _ in photo }
+        let model = try await ready(services)
         var settings = model.frame; settings.isEnabled = true; settings.style = .label; model.frame = settings
         let layout = try XCTUnwrap(model.frameLayout)
         let geometry = FrameThumbnailGeometry(layout: layout, maxPixelSize: 344)
@@ -172,17 +174,17 @@ import XCTest
         await eventually(timeout: .seconds(10)) { if case .ready = model.exportSummaryThumbnail { true } else { false } }
         guard case .ready(let framed) = model.exportSummaryThumbnail else { return XCTFail("no picture") }
         XCTAssertEqual(framed.width, geometry.width); XCTAssertEqual(framed.height, geometry.height)
-        XCTAssertEqual(services.thumbnailCalls.last, geometry.photoPixelSize, "the service shrinks only the photograph")
+        XCTAssertEqual(rendering(services).thumbnailCalls.last, geometry.photoPixelSize, "the service shrinks only the photograph")
         // Turning the frame off puts the bare photograph back.
         settings.isEnabled = false; model.frame = settings
         await eventually(timeout: .seconds(10)) { model.exportSummaryThumbnail == .ready(photo) }
-        XCTAssertEqual(services.thumbnailCalls.last, 344)
+        XCTAssertEqual(rendering(services).thumbnailCalls.last, 344)
     }
 
     func testAnExportWithAFrameFreezesAndPassesTheFramedPicture() async throws {
         let photo = try solid(4, 2, red: 1, green: 0, blue: 0)
-        let services = services(); services.thumbnailHandler = { _, _ in photo }
-        let (model, _) = try await ready(services)
+        let services = await services(); rendering(services).thumbnailHandler = { _, _ in photo }
+        let model = try await ready(services)
         var settings = model.frame; settings.isEnabled = true; settings.style = .gallery; model.frame = settings
         let geometry = FrameThumbnailGeometry(layout: try XCTUnwrap(model.frameLayout), maxPixelSize: 256)
         let tracking = Task { await model.trackExportSummaryThumbnail() }
@@ -190,10 +192,9 @@ import XCTest
         await eventually(timeout: .seconds(10)) { if case .ready = model.exportSummaryThumbnail { true } else { false } }
         model.startExport(destination: destination, token: try XCTUnwrap(model.prepareExport()))
         await eventually(timeout: .seconds(10)) { services.hasExportSubscriber }
-        let passed = try XCTUnwrap(services.exportCalls[0].thumbnail)
+        guard case .ready(let passed) = model.export.thumbnail else { return XCTFail("no picture") }
         XCTAssertEqual(passed.width, geometry.width); XCTAssertEqual(passed.height, geometry.height)
-        XCTAssertNotNil(services.exportCalls[0].frame)
-        XCTAssertEqual(model.export.thumbnail, .ready(passed))
+        XCTAssertNotNil(services.exportCalls[0].job.snapshot.frame)
         XCTAssertLessThanOrEqual(max(passed.width, passed.height), 256)
         model.cancelExport()
         await eventually(timeout: .seconds(10)) { !model.export.isInFlight }
@@ -201,16 +202,16 @@ import XCTest
 
     func testAnExportWithoutAFrameStillPassesTheBarePhotograph() async throws {
         let photo = try solid(4, 2, red: 1, green: 0, blue: 0)
-        let services = services(); services.thumbnailHandler = { _, _ in photo }
-        let (model, _) = try await ready(services)
+        let services = await services(); rendering(services).thumbnailHandler = { _, _ in photo }
+        let model = try await ready(services)
         XCTAssertFalse(model.frame.isEnabled)
         let tracking = Task { await model.trackExportSummaryThumbnail() }
         defer { tracking.cancel() }
         await eventually(timeout: .seconds(10)) { model.exportSummaryThumbnail == .ready(photo) }
         model.startExport(destination: destination, token: try XCTUnwrap(model.prepareExport()))
         await eventually(timeout: .seconds(10)) { services.hasExportSubscriber }
-        XCTAssertTrue(services.exportCalls[0].thumbnail === photo)
-        XCTAssertNil(services.exportCalls[0].frame)
+        XCTAssertEqual(model.export.thumbnail, .ready(photo))
+        XCTAssertNil(services.exportCalls[0].job.snapshot.frame)
         model.cancelExport()
         await eventually(timeout: .seconds(10)) { !model.export.isInFlight }
     }
@@ -218,14 +219,14 @@ import XCTest
     // MARK: The Frame row
 
     func testTheFrameRowSaysNoneTheStyleOrThatItDoesNotFit() async throws {
-        let (model, _) = try await ready(services())
+        let model = try await ready(await services())
         XCTAssertEqual(model.exportFrameSummary, .none)
         var settings = model.frame; settings.isEnabled = true; settings.style = .story; model.frame = settings
         XCTAssertEqual(model.exportFrameSummary, .style(.story))
         XCTAssertNil(model.export.blockerKey)
         // A photograph far wider than the Instant card can be: the engine refuses it.
-        let wide = services(photoSize: PixelSize(width: 20_000, height: 100))
-        let (stretched, _) = try await ready(wide)
+        let wide = await services(photoSize: PixelSize(width: 20_000, height: 100))
+        let stretched = try await ready(wide)
         var instant = stretched.frame; instant.isEnabled = true; instant.style = .instant; stretched.frame = instant
         XCTAssertNil(stretched.frameLayout)
         XCTAssertEqual(stretched.exportFrameSummary, .misfit(.instant))
@@ -234,7 +235,7 @@ import XCTest
     }
 
     func testTheSwitchStaysLiveWhileEditingIsFree() async throws {
-        let (model, _) = try await ready(services())
+        let model = try await ready(await services())
         XCTAssertNil(model.editingLockReason)
         model.frame.isEnabled = true
         XCTAssertTrue(model.frame.isEnabled)
@@ -320,12 +321,12 @@ import XCTest
     /// A result for the photograph exported without a frame stops counting as the
     /// current one once the frame is on and the engine refuses its style.
     func testAMisfitStyleDoesNotLeaveAMatchingResultBehind() async throws {
-        let services = services(photoSize: PixelSize(width: 20_000, height: 100))
-        let (model, _) = try await ready(services)
+        let services = await services(photoSize: PixelSize(width: 20_000, height: 100))
+        let model = try await ready(services)
         let done = ExportResult(export: "plain", fileName: "result.heic", byteCount: 10, pixelSize: PixelSize(width: 20_000, height: 100))
-        let key = try await services.exportKey(try XCTUnwrap(model.photo), options: model.effectiveOptions(), frame: nil)
+        let key = try await services.exportKey(model)
         services.historyByURL[source] = [ExportHistoryItem(
-            version: ExportVersion(number: 1, createdAt: Date(), encodingID: "adaptive", result: done), key: key, options: model.edit)]
+            version: ExportVersion(number: 1, createdAt: Date(), encodingID: "adaptive", result: done), recipeSnapshot: key, options: model.exportChoices)]
         model.refreshExportMetadata()
         await eventually(timeout: .seconds(10)) { model.exportVersions.first?.matchesCurrent == true && model.export.result != nil }
         let matching = ExportPresentation.PanelMode(phase: model.export.phase,
@@ -346,29 +347,27 @@ import XCTest
 
     func testAFramedPictureThatArrivesAfterTheExportBeganIsFramed() async throws {
         let bare = try solid(4, 2, red: 1, green: 0, blue: 0)
-        let services = services(); services.thumbnailHandler = { _, _ in bare }
-        let photo = try TinyPhoto(); defer { photo.remove() }
-        let engine = try await Engine(), session = try engine.openPreview(source: photo.url)
-        defer { session.close() }
-        let actual = try await session.renderFrame(EngineRequest(settings: ["preview_max_edge": .number(8)]))
-        let model = EditorModel(services: services, ticker: ManualFrameTicker())
+        let services = await services(); rendering(services).thumbnailHandler = { _, _ in bare }
+        let model = EditorModel(services: services)
         await model.loadExportServices(); model.open([source])
         await eventually(timeout: .seconds(10)) { model.document?.phase == .ready && !model.suggestedFileName.isEmpty }
         var settings = model.frame; settings.isEnabled = true; settings.style = .gallery; model.frame = settings
         let geometry = FrameThumbnailGeometry(layout: try XCTUnwrap(model.frameLayout), maxPixelSize: 256)
+        // The summary's photograph never comes; the export's does.
+        let summarySide = FrameThumbnailGeometry(layout: try XCTUnwrap(model.frameLayout), maxPixelSize: 344).photoPixelSize
+        rendering(services).thumbnailHandler = { _, size in
+            if max(size.width, size.height) == summarySide { try? await Task.sleep(for: .seconds(60)); return nil }
+            return bare
+        }
         let tracking = Task { await model.trackExportSummaryThumbnail() }
         defer { tracking.cancel() }
-        await eventually(timeout: .seconds(10)) { model.exportSummaryThumbnail == .loading }
+        await eventually(timeout: .seconds(10)) { self.rendering(services).thumbnailCalls.contains(summarySide) }
+        XCTAssertEqual(model.exportSummaryThumbnail, .loading)
         model.startExport(destination: destination, token: try XCTUnwrap(model.prepareExport()))
         await eventually(timeout: .seconds(10)) { services.hasExportSubscriber }
-        XCTAssertNil(services.exportCalls[0].thumbnail)
-        XCTAssertEqual(model.export.thumbnail, .loading)
-        model.apply(.edited(EditorPreview(pixelSize: PixelSize(width: 6000, height: 4000),
-            source: SourceSummary(domain: .sdr, colorName: "Display P3", degradationReasons: []), hasGain: true, frame: actual)))
         await eventually(timeout: .seconds(10)) { if case .ready = model.export.thumbnail { true } else { false } }
         guard case .ready(let late) = model.export.thumbnail else { return XCTFail("no picture") }
         XCTAssertEqual(late.width, geometry.width); XCTAssertEqual(late.height, geometry.height)
-        XCTAssertNil(services.exportCalls[0].thumbnail, "a record admitted without a picture stays without one")
         model.cancelExport()
         await eventually(timeout: .seconds(10)) { !model.export.isInFlight }
     }

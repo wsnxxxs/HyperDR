@@ -15,6 +15,10 @@ import SwiftUI
 struct AdjustmentWorkspace<Canvas: View>: View {
     @Binding var recipe: Recipe
     let panel: AdjustmentPanel
+    /// Drag brackets, for the host's undo (one drag, one step).
+    var onEditingChanged: (ParameterDeclaration, Bool) -> Void = { _, _ in }
+    /// Group and full resets the host performs and names itself.
+    var onReset: ((AdjustmentReset) -> Void)?
     @ViewBuilder let canvas: Canvas
 
     static var sidebarMinimumWidth: CGFloat { 1000 }
@@ -34,7 +38,8 @@ struct AdjustmentWorkspace<Canvas: View>: View {
                 HStack(spacing: 0) {
                     canvas
                     ScrollView {
-                        AdjustmentInspector(recipe: $recipe, panel: panel, style: .touch)
+                        AdjustmentInspector(recipe: $recipe, panel: panel, style: .touch,
+                                            onEditingChanged: onEditingChanged, onReset: onReset)
                             .padding(.vertical, Space.s2)
                     }
                     .frame(width: Self.sidebarWidth)
@@ -43,17 +48,19 @@ struct AdjustmentWorkspace<Canvas: View>: View {
             case .bottomPanel:
                 VStack(spacing: 0) {
                     canvas.frame(minHeight: geometry.size.height * 0.55)
-                    AdjustmentBar(recipe: $recipe, panel: panel, large: true)
+                    AdjustmentBar(recipe: $recipe, panel: panel, large: true,
+                                  onEditingChanged: onEditingChanged, onReset: onReset)
                 }
             case .bottomBar:
                 VStack(spacing: 0) {
                     canvas
-                    AdjustmentBar(recipe: $recipe, panel: panel)
+                    AdjustmentBar(recipe: $recipe, panel: panel, onEditingChanged: onEditingChanged, onReset: onReset)
                 }
             case .sideBar:
                 HStack(spacing: 0) {
                     canvas
-                    AdjustmentBar(recipe: $recipe, panel: panel, axis: .vertical)
+                    AdjustmentBar(recipe: $recipe, panel: panel, axis: .vertical,
+                                  onEditingChanged: onEditingChanged, onReset: onReset)
                 }
             }
         }

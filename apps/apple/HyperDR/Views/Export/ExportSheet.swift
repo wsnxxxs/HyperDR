@@ -1,5 +1,7 @@
 import SwiftUI
 import HyperDRDesign
+import HyperDRKit
+import HyperDRRecipe
 
 /// The export panel, a sheet over the editor window (M3 §3, §6, §7): the
 /// settings before an export, the progress while it runs, the result or the
@@ -108,7 +110,7 @@ private struct ExportSettingsView: View {
                                 style: .info)
             }
             colorSetting
-            ControlSlider(model: model, key: "quality")
+            if model.exportQuality != nil { ExportQualitySlider(model: model) }
         }
         .padding(Space.s5)
         .disabled(model.isEditingLocked)
@@ -152,11 +154,10 @@ private struct ExportSettingsView: View {
                                              SegmentedChoice("choice.outputGamut.p3", value: "p3")],
                                    size: .small)
             } else {
-                ParameterSegmented("export.color", selection: Binding(get: { model.export.clampSrgb },
-                                                                     set: { model.setClampSrgb($0) }),
-                                   choices: [SegmentedChoice("export.color.keep", value: false),
-                                             SegmentedChoice("export.color.limitSRGB", value: true)],
-                                   size: .small)
+                // An HDR format fixes its gamut: P3 for a gain map, Rec. 2020 for BT.2100.
+                Text(LocalizedStringKey(model.export.gamut.labelKey))
+                    .font(Font.hdr.body)
+                    .foregroundStyle(Color.hdr.inkMuted)
             }
         }
     }
@@ -232,6 +233,7 @@ private struct ExportSummaryColumn: View {
             }
             VStack(alignment: .leading, spacing: Space.s2) {
                 FactRow(label: Text("export.summary.processing"), value: processing)
+                FactRow(label: Text("export.color"), value: Text(LocalizedStringKey(model.export.gamut.labelKey)))
                 FactRow(label: Text("export.summary.lut"), value: lut, tone: model.lut.spaceIssueKey != nil && model.lut.selection != nil ? .warn : .normal)
                 frameRow
             }
@@ -264,9 +266,9 @@ private struct ExportSummaryColumn: View {
 
     private var processing: Text {
         if model.workflow == .colorOnly { return Text("export.summary.colorOnly") }
-        if model.ai.mode == .optimized {
-            let name = AppStrings.string(model.ai.models.first { $0.id == model.ai.selectedModel }?.nameKey ?? "", locale: locale)
-            return Text("export.summary.hdrAI \(name)")
+        let source = model.editor.recipe.hdrSource
+        if source.usesModel, let option = Adjustments.declaration(Recipe.hdrSourceID)?.options.first(where: { $0.id == source.rawValue }) {
+            return Text("export.summary.hdrAI \(AdjustmentText.option(option))")
         }
         return Text("export.summary.hdrManual")
     }
@@ -368,9 +370,8 @@ private struct ExportProgressView: View {
     private var meta: String {
         var pieces = [AppStrings.string("enc.\(model.export.encodingID).label", locale: locale)]
         if let size = model.document?.pixelSize { pieces.append("\(size.width) × \(size.height)") }
-        let quality = model.control("quality")
-        if quality.isVisible {
-            pieces.append(AppStrings.string("export.quality", locale: locale) + " " + Int(quality.value.rounded()).formatted(.number.locale(locale)))
+        if let quality = model.exportQuality {
+            pieces.append(AppStrings.string("export.quality", locale: locale) + " " + Int(quality.rounded()).formatted(.number.locale(locale)))
         }
         return pieces.joined(separator: " · ")
     }
@@ -501,6 +502,25 @@ private struct ExportFailureView: View {
             }
             .padding(.horizontal, Space.s5)
             .padding(.vertical, Space.s3)
+        }
+    }
+}
+
+/// The export's quality (the old export's request, until P7-3b): not an
+/// edit, so no undo step.
+private struct ExportQualitySlider: View {
+    let model: EditorModel
+    private static let spec = EditControls.all.first { $0.key == "quality" }
+
+    var body: some View {
+        if let spec = Self.spec {
+            ParameterSlider("ctrl.quality.label",
+                            value: Binding(get: { model.exportQuality ?? spec.defaultValue },
+                                           set: { model.setExportQuality($0) }),
+                            spec: ParameterSpec(range: spec.range, step: spec.step, defaultValue: spec.defaultValue,
+                                                format: .number(fractionDigits: 0)),
+                            help: "ctrl.quality.help",
+                            onReset: { model.setExportQuality(spec.defaultValue) })
         }
     }
 }

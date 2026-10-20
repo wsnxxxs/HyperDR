@@ -1,6 +1,6 @@
 import CoreGraphics
 import Foundation
-import HyperDREngine
+import HyperDRRecipe
 import ImageIO
 import Metal
 import QuartzCore
@@ -13,31 +13,21 @@ import XCTest
 /// CADisplayLink hitches (those require the later visible-window A3 run).
 @MainActor final class CompositionPerformanceTests: XCTestCase {
     func test120HzHandoffWithZebrasAndBackgroundScopes() async throws {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("scope-perf-\(UUID()).png")
-        defer { try? FileManager.default.removeItem(at:url) }
-        let context = try XCTUnwrap(CGContext(data:nil,width:2048,height:1365,bitsPerComponent:8,
-            bytesPerRow:0,space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue))
-        let gradient = try XCTUnwrap(CGGradient(colorsSpace:CGColorSpaceCreateDeviceRGB(),
-            colors:[CGColor(gray:0,alpha:1),CGColor(gray:1,alpha:1)] as CFArray,locations:[0,1]))
-        context.drawLinearGradient(gradient,start:.zero,end:CGPoint(x:2048,y:0),options:[])
-        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL,"public.png" as CFString,1,nil))
-        CGImageDestinationAddImage(destination,try XCTUnwrap(context.makeImage()),nil)
-        XCTAssertTrue(CGImageDestinationFinalize(destination))
-        let engine = try await Engine(), session = try engine.openPreview(source:url)
-        defer { session.close() }
-        var request = try Engine.normalize(["encoding":.string("iso-gainmap-jpeg"),"hdrRange":.number(3),"brightness":.number(0.6)])
-        request.setSetting("preview_max_edge",.number(2048))
-        let frame = try await session.renderFrame(request)
-        XCTAssertEqual(frame.base.width,2048)
-        let services = FakeEditorServices(openDelay:.zero,previewDelay:.milliseconds(1))
-        services.preview = LiveEditorServices.preview(frame)
-        services.autoCompletesRefreshes = false
+        let width = 2048, height = 1365
+        var base = [Float](repeating: 0, count: width * height * 3), gain = [Float](repeating: 0, count: width * height)
+        for y in 0..<height { for x in 0..<width {
+            let value = Float(x) / Float(width - 1)
+            for c in 0..<3 { base[(y * width + x) * 3 + c] = value }
+            gain[y * width + x] = 3 * value
+        } }
+        let services = FakeEditorServices(openDelay:.zero)
         let model = EditorModel(services:services)
-        model.open([url])
+        model.open([URL(fileURLWithPath: "/fixtures/scope-perf.jpg")])
         // Readiness is outside S12's timing sample. TSan instruments millions
         // of scope pixel reads (over 3 seconds); retain the 4 ms input budget.
         await eventually(timeout:.seconds(10)) { model.document?.phase == .ready && model.scopes.current != nil }
-        model.beginAdjusting("brightness")
+        let exposure = try XCTUnwrap(Adjustments.declaration("tone.exposure"))
+        model.editor.editingChanged(exposure, true)
         let renderer = try makePreviewRenderer()
         let layer = CAMetalLayer(); layer.device = renderer.device; layer.pixelFormat = .rgba16Float
         layer.drawableSize = CGSize(width:1000,height:667)
@@ -51,13 +41,15 @@ import XCTest
         let view = EDRCanvasView(renderer:renderer)
         view.frame = CGRect(x:0,y:0,width:1000,height:667); view.layout()
         view.transform = CanvasTransform(imageSize:CGSize(width:2048,height:1365),viewport:view.bounds.size)
+        let frame = try makeDisplayPair(renderer.device, base: base, width: width, height: height, gain: gain, alternateHeadroom: 3)
         var content = CanvasComposition(original:frame,edited:frame,mode:.compare,headroom:8)
         view.compositionProvider = { content }
         let loop = try XCTUnwrap(view.renderLoop)
         // Warm pipelines and texture allocations before measuring changes.
         view.tick()
         await eventually(timeout:.seconds(3)) { loop.state.idle && loop.state.presentations > 0 }
-        let input = ScopeInput(frame)
+        let input = ScopeInput(width: width, height: height, base: base, gainWidth: width, gainHeight: height,
+                               gainChannels: 1, gain: gain.map { $0 / 3 }, gainMin: 0, gainMax: 3)
         for phase in 0..<3 {
             content.overlays.highlights = phase > 0; content.overlays.shadows = phase > 0
             let scope = phase == 2 ? Task.detached(priority:.utility) { () -> Duration in
@@ -70,7 +62,7 @@ import XCTest
             let start = ContinuousClock.now
             for i in 0..<120 {
                 let before = ContinuousClock.now
-                model.adjust("brightness",to:0.6+Double(i%40)/100)
+                model.adjustRecipe("tone.exposure", to: 0.6+Double(i%40)/100)
                 content.overlays.hdrRange = Float(i%40)/10
                 view.setNeedsRedraw(); view.tick()
                 samples.append(milliseconds(ContinuousClock.now-before))
@@ -85,7 +77,7 @@ import XCTest
             print("M2-R S12 phase=\(phase) input=120Hz n=\(samples.count) main mean=\(samples.reduce(0,+)/Double(samples.count))ms p99=\(p99)ms max=\(sorted.last!)ms GPU n=\(gpuSorted.count) p99=\(gpuP99)ms scope=\(String(describing:scopeDuration))")
             XCTAssertLessThan(p99,4,"S12 per-change main-thread budget")
         }
-        model.endAdjusting("brightness")
+        model.editor.editingChanged(exposure, false)
         model.closeDocument()
         XCTAssertLessThanOrEqual(renderer.maxInFlightObserved,1)
         XCTAssertEqual(probe.mainThreadRequests,0)

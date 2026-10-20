@@ -1,11 +1,14 @@
 import Foundation
-import HyperDREngine
+import HyperDRRecipe
+import HyperDRRender
 
 /// Split comparison, press-and-hold original and the scopes (batch4 §2.7,
 /// §2.9). None of this is undoable; the split position lasts for this run
 /// and goes back to the middle with every photo.
 extension EditorModel {
     static let splitRange = 0.05...0.95
+    /// The long side of the render the scopes read (p7-2b §3.1).
+    static let scopeEdge = 512
 
     func setSplitRatio(_ value: Double) {
         guard value.isFinite else { return }
@@ -26,7 +29,7 @@ extension EditorModel {
     func beginPeekOriginal() {
         guard hasReferenceFrame, hasEditedFrame, !isPeekingOriginal else { return }
         setPeeking(true)
-        scheduleDetails()
+        canvasGeometryChanged()
         bumpFrameRevision()
     }
 
@@ -34,7 +37,7 @@ extension EditorModel {
     func endPeekOriginal() {
         guard isPeekingOriginal else { return }
         setPeeking(false)
-        scheduleDetails()
+        canvasGeometryChanged()
         bumpFrameRevision()
     }
 
@@ -51,31 +54,74 @@ extension EditorModel {
 
     // MARK: - Scopes
 
-    /// Recomputes the scopes off the main thread, newest frame wins. The
-    /// original (reference) histogram changes with the photo and with a new
-    /// original frame (the lens correction switch); draft frames never reach
-    /// here.
-    func startScopes(original: Bool) {
-        if original, let reference = currentReferenceFrame {
+    /// Recomputes the scopes from a small render of what the canvas shows,
+    /// off the main thread, once the edit has settled (never during a drag).
+    /// A render is measured again only when it would draw another picture:
+    /// another source, recipe, bypass, or the prediction coming in. The
+    /// original's histogram changes only when the original does.
+    func startScopes() {
+        guard let source = editor.source else { return }
+        let size = Self.scopeSize(source.pixelSize)
+        let editor = self.editor
+        if let request = editor.renderRequest(size: size, original: true), wantsMeasuring(request, original: true) {
+            scopingOriginal = request
             originalScopeTask?.cancel()
-            let input = ScopeInput(reference)
             originalScopeTask = Task { [weak self] in
-                let work = Task.detached(priority: .utility) {
-                    ScopeAnalyzer.analyze(input, waveform: false)
-                }
-                let result = await withTaskCancellationHandler { await work.value } onCancel: { work.cancel() }
-                guard let self, !Task.isCancelled, let result else { return }
+                let result = await Self.analyze(editor: editor, request: request, waveform: false)
+                // Only the measurement still asked for is published (R34-001).
+                guard let self, !Task.isCancelled, scopingOriginal == request else { return }
+                scopingOriginal = nil
+                guard let result else { return }
+                scopedOriginal = request
                 scopes.update(original: .some(result.histogram), current: nil, waveform: nil)
             }
         }
-        guard let frame = currentEditedFrame else { return }
+        guard let request = editor.renderRequest(size: size), wantsMeasuring(request, original: false) else { return }
+        scopingRequest = request
         scopeTask?.cancel()
-        let input = ScopeInput(frame)
         scopeTask = Task { [weak self] in
-            let work = Task.detached(priority: .utility) { ScopeAnalyzer.analyze(input, waveform: true) }
-            let result = await withTaskCancellationHandler { await work.value } onCancel: { work.cancel() }
-            guard let self, !Task.isCancelled, let result else { return }
+            let result = await Self.analyze(editor: editor, request: request, waveform: true)
+            guard let self, !Task.isCancelled, scopingRequest == request else { return }
+            scopingRequest = nil
+            guard let result else { return }
+            scopedRequest = request
             scopes.update(original: nil, current: .some(result.histogram), waveform: .some(result.waveform))
         }
+    }
+
+    /// Whether `request` needs a new measurement. What was measured already
+    /// stands, and a measurement of another picture still running is dropped
+    /// (A → B → A: B's result must not replace A's); one of this picture
+    /// still running is waited for.
+    private func wantsMeasuring(_ request: EditorRenderRequest, original: Bool) -> Bool {
+        let measured = original ? scopedOriginal : scopedRequest
+        let measuring = original ? scopingOriginal : scopingRequest
+        if let measuring, measuring.rendersSame(as: request) { return false }
+        guard measured?.rendersSame(as: request) == true else { return true }
+        if measuring != nil {
+            if original { originalScopeTask?.cancel(); scopingOriginal = nil }
+            else { scopeTask?.cancel(); scopingRequest = nil }
+        }
+        return false
+    }
+
+    private static func analyze(editor: RecipeEditor, request: EditorRenderRequest,
+                                waveform: Bool) async -> ScopeAnalyzer.Result? {
+        guard let frame = try? await editor.renderer.render(request), !Task.isCancelled else { return nil }
+        let display = frame.display
+        let work = Task.detached(priority: .utility) { () -> ScopeAnalyzer.Result? in
+            guard let input = try? await ScopeInput.read(display) else { return nil }
+            return ScopeAnalyzer.analyze(input, waveform: waveform)
+        }
+        return await withTaskCancellationHandler { await work.value } onCancel: { work.cancel() }
+    }
+
+    /// `source` fitted into `scopeEdge`, never enlarged.
+    static func scopeSize(_ source: HyperDRRender.PixelSize) -> HyperDRRender.PixelSize {
+        let long = max(source.width, source.height)
+        guard long > scopeEdge else { return source }
+        let scale = Double(scopeEdge) / Double(long)
+        return HyperDRRender.PixelSize(width: max(1, Int((Double(source.width) * scale).rounded())),
+                                       height: max(1, Int((Double(source.height) * scale).rounded())))
     }
 }

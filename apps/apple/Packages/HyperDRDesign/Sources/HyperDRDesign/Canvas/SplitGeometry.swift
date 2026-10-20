@@ -11,6 +11,8 @@ public enum SplitGeometry {
     public static let nudgeStep = 0.05
     /// Width of the divider's pointer target around its line.
     public static let hitWidth: CGFloat = 24
+    /// The same on touch layouts (p7-adjustments §5.4: a 44 pt target).
+    public static let touchHitWidth: CGFloat = 44
 
     /// The divider ratio for a pointer at `x`, across the photograph's frame.
     public static func ratio(forX x: CGFloat, in imageFrame: CGRect) -> Double {

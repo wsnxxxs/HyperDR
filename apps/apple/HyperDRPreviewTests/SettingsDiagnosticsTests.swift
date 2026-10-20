@@ -26,29 +26,17 @@ import XCTest
         XCTAssertTrue(SettingsDiagnostics.engine(model, locale: zh).hasPrefix("不可用 · "))
     }
 
-    func testTheModelRowNamesEachModelWithItsVersion() {
-        let services = FakeEditorServices()
-        services.models.models = services.models.models.map { choice in
-            var choice = choice; choice.version = "research-demo-fold0-seed908/v1"; return choice
-        }
-        let model = EditorModel(services: services)
-        XCTAssertEqual(SettingsDiagnostics.models(model, locale: en), "Image-only CNN v1, EXIF-assisted prediction v1")
-        XCTAssertEqual(SettingsDiagnostics.models(model, locale: zh), "纯 CNN v1和EXIF 参数辅助预测 v1")
-    }
-
-    func testTheModelRowSaysTheRuntimeIsMissing() {
-        let services = FakeEditorServices()
-        services.models = .unavailable
-        let model = EditorModel(services: services)
-        XCTAssertEqual(SettingsDiagnostics.models(model, locale: en), "Not available · this build has no model runtime")
-        XCTAssertEqual(SettingsDiagnostics.models(model, locale: zh), "不可用 · 此版本没有包含模型运行时")
+    /// The model runs on Core ML, which ships with the app.
+    func testTheModelRowSaysCoreMLIsBuiltIn() {
+        let model = EditorModel(services: FakeEditorServices())
+        XCTAssertEqual(SettingsDiagnostics.models(model, locale: en), "Core ML · built in")
+        XCTAssertEqual(SettingsDiagnostics.models(model, locale: zh), "Core ML · 随 App 提供")
     }
 
     /// R7-805: while the engine starts, nothing is known about the runtime yet.
     func testTheModelRowSaysStartingWhileTheEngineStarts() {
         let services = FakeEditorServices()
         services.engineStatus = .starting
-        services.models = .unavailable
         let model = EditorModel(services: services)
         XCTAssertEqual(SettingsDiagnostics.models(model, locale: en), "Starting…")
         XCTAssertEqual(SettingsDiagnostics.models(model, locale: zh), "正在启动…")

@@ -9,7 +9,8 @@ import SwiftUI
 /// line, the handle and the labels stay on what can be seen when the photo
 /// is zoomed past the window.
 ///
-/// - Drag the handle or anywhere within 12 pt of the line.
+/// - Drag the handle or anywhere within half of `hitWidth` of the line (12 pt
+///   with a pointer; touch layouts pass `SplitGeometry.touchHitWidth`).
 /// - With keyboard navigation on, the handle takes focus; ← → nudge by 5%.
 /// - VoiceOver sees one adjustable "Comparison divider" with its percentage.
 /// - Labels sit at the top corners of the visible photograph; one fades when
@@ -22,6 +23,7 @@ public struct SplitOverlay: View {
     private let originalLabel: Text
     private let editedLabel: Text
     private let showsHDRBadge: Bool
+    private let hitWidth: CGFloat
     private let onDrag: (Double) -> Void
     private let onEditingChanged: (Bool) -> Void
     private let onNudge: (Double) -> Void
@@ -34,24 +36,25 @@ public struct SplitOverlay: View {
     @Environment(\.isEnabled) private var isEnabled
 
     public init(ratio: Double, imageFrame: CGRect, visibleRect: CGRect, originalLabel: Text, editedLabel: Text,
-                showsHDRBadge: Bool, onDrag: @escaping (Double) -> Void,
+                showsHDRBadge: Bool, hitWidth: CGFloat = SplitGeometry.hitWidth, onDrag: @escaping (Double) -> Void,
                 onEditingChanged: @escaping (Bool) -> Void = { _ in }, onNudge: @escaping (Double) -> Void) {
         self.init(ratio: ratio, imageFrame: imageFrame, visibleRect: visibleRect, originalLabel: originalLabel,
-                  editedLabel: editedLabel, showsHDRBadge: showsHDRBadge, onDrag: onDrag,
+                  editedLabel: editedLabel, showsHDRBadge: showsHDRBadge, hitWidth: hitWidth, onDrag: onDrag,
                   onEditingChanged: onEditingChanged, onNudge: onNudge, forcedState: nil)
     }
 
     /// `forcedState` shows a handle state without the pointer or the
     /// keyboard, for the gallery and its snapshots.
     init(ratio: Double, imageFrame: CGRect, visibleRect: CGRect, originalLabel: Text, editedLabel: Text,
-         showsHDRBadge: Bool, onDrag: @escaping (Double) -> Void, onEditingChanged: @escaping (Bool) -> Void,
-         onNudge: @escaping (Double) -> Void, forcedState: HandleState?) {
+         showsHDRBadge: Bool, hitWidth: CGFloat = SplitGeometry.hitWidth, onDrag: @escaping (Double) -> Void,
+         onEditingChanged: @escaping (Bool) -> Void, onNudge: @escaping (Double) -> Void, forcedState: HandleState?) {
         self.ratio = ratio
         self.imageFrame = imageFrame
         self.visibleRect = visibleRect
         self.originalLabel = originalLabel
         self.editedLabel = editedLabel
         self.showsHDRBadge = showsHDRBadge
+        self.hitWidth = hitWidth
         self.onDrag = onDrag
         self.onEditingChanged = onEditingChanged
         self.onNudge = onNudge
@@ -93,7 +96,7 @@ public struct SplitOverlay: View {
                 line.frame(width: 3, height: visible.height).position(x: local, y: visible.height / 2)
                 handle.position(x: local, y: visible.height / 2)
                 hitArea
-                    .frame(width: SplitGeometry.hitWidth, height: visible.height)
+                    .frame(width: hitWidth, height: visible.height)
                     .position(x: local, y: visible.height / 2)
             }
         }

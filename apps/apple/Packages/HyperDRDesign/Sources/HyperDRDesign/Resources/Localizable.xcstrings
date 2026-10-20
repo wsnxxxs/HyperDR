@@ -1181,6 +1181,20 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整 LUT 强度" } }
       }
     },
+    "undo.resetAll" : {
+      "comment" : "Undo action name of Reset All.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reset All" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "全部重置" } }
+      }
+    },
+    "undo.resetGroup %@" : {
+      "comment" : "Undo action name of ↺ on a group; the argument is the group's name.",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reset %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重置%@" } }
+      }
+    },
     "undo.tone.blacks" : {
       "comment" : "Undo action name (tone.blacks).",
       "localizations" : {

@@ -94,6 +94,32 @@ kernel void sampleSource(texture2d<float, access::sample> src [[texture(0)]],
     if (pos.x >= dst.get_width() || pos.y >= dst.get_height()) return;
     dst.write(sourceSample(src,float2(pos+uint2(p.x,p.y))+.5f,float2(p.outputWidth,p.outputHeight),p.sourceRegion), pos);
 }
+// Pixel squares cover [i,i+1). Integrate their overlap with the complete
+// destination footprint; partial native tiles accumulate into the same result.
+struct AreaSampling { uint4 output, source, options; };
+kernel void sampleSourceArea(texture2d<float, access::read> src [[texture(0)]],
+                             texture2d<float, access::read> previous [[texture(1)]],
+                             texture2d<float, access::write> dst [[texture(2)]],
+                             constant AreaSampling &p [[buffer(0)]],
+                             uint2 pos [[thread_position_in_grid]]) {
+    if (pos.x >= dst.get_width() || pos.y >= dst.get_height()) return;
+    float2 scale=float2(p.source.xy)/float2(p.output.xy);
+    float2 low=float2(pos+p.output.zw)*scale, high=float2(pos+p.output.zw+1u)*scale;
+    uint2 begin=max(uint2(floor(low)),p.source.zw);
+    uint2 end=min(uint2(ceil(high)),p.source.zw+uint2(src.get_width(),src.get_height()));
+    float4 sum=0;
+    for(uint y=begin.y;y<end.y;++y) {
+        float wy=max(0.f,min(high.y,float(y+1))-max(low.y,float(y)));
+        float4 row=0;
+        for(uint x=begin.x;x<end.x;++x) {
+            float wx=max(0.f,min(high.x,float(x+1))-max(low.x,float(x)));
+            row+=src.read(uint2(x,y)-p.source.zw)*wx;
+        }
+        sum+=row*wy;
+    }
+    float4 prior=p.options.x ? float4(0) : previous.read(pos);
+    dst.write(prior+sum/(scale.x*scale.y),pos);
+}
 kernel void zeroGain(texture2d<float, access::write> dst [[texture(0)]],
                      constant uint &unused [[buffer(0)]], uint2 pos [[thread_position_in_grid]]) {
     if (pos.x < dst.get_width() && pos.y < dst.get_height()) dst.write(float4(0), pos);

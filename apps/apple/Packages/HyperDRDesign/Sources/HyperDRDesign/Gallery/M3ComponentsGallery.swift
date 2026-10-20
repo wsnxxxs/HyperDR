@@ -1,4 +1,3 @@
-import AppKit
 import SwiftUI
 
 /// The M3 export, history and LUT-library components with fixture values:

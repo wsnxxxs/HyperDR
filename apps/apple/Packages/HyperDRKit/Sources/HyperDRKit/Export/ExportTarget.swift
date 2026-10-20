@@ -1,4 +1,6 @@
+#if canImport(AppKit)
 import AppKit
+#endif
 import Darwin
 import Foundation
 import HyperDREngine
@@ -13,7 +15,9 @@ public struct SavedExport: Sendable {
     public let name: String
     public let folderDisplayName: String
     public var folderLabel: String { "…/" + folderDisplayName }
+    #if canImport(AppKit)
     @MainActor public func reveal() { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+    #endif
     /// False when the file was published under its name but syncing the
     /// folder failed or file-only authority prevented requesting a directory sync: the export exists and must not be retried as a failure
     /// (that would save a second copy), yet a crash could still lose the name.
@@ -87,7 +91,11 @@ public actor ExportTarget {
     init(configuration: KitConfiguration, sessions: SessionStore, access: any SecurityScopedAccess,
          copyRead: CopyRead? = nil, hooks: CopyHooks = CopyHooks(),
          openFolder: @escaping @Sendable (URL) async -> Bool = { url in
+             #if canImport(AppKit)
              await MainActor.run { NSWorkspace.shared.open(url) }
+             #else
+             false  // No Finder outside the Mac; the iOS shell does not export yet.
+             #endif
          }) {
         self.sessions = sessions; self.access = access; self.openFolder = openFolder
         var hooks = hooks

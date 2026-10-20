@@ -2,12 +2,7 @@ import AppKit
 import HyperDREngine
 import os
 
-nonisolated struct HeadroomSnapshot: Equatable, Sendable {
-    var screen: String? = nil
-    var current: CGFloat = 1
-    var potential: CGFloat = 1
-    var reference: CGFloat = 1
-}
+// `HeadroomSnapshot` is shared with iOS (Shared/Canvas/EDRDisplayPass.swift).
 
 /// Diagnostic A/B/C comparison. Production defaults to the currently usable
 /// headroom; neither the potential value nor a model's throttled readout can

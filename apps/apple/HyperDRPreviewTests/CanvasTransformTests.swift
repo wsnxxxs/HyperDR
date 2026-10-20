@@ -84,7 +84,7 @@ import XCTest
         var fit = transform()
         fit = fit.zoomed(to: 2, anchorInView: CGPoint(x: 450, y: 300))
         let frame = fit.imageFrame
-        let rect = PreviewRenderer.normalisedRect(fit, drawableSize: CGSize(width: 1800, height: 1200))
+        let rect = EDRDisplayPass.normalisedRect(fit, drawableSize: CGSize(width: 1800, height: 1200))
         let scale: CGFloat = 1800 / 900
         func pixelX(_ value: Float) -> CGFloat { (CGFloat(value) + 1) / 2 * 1800 }
         // NDC y grows upwards while the view's origin is top-left.
@@ -100,7 +100,7 @@ import XCTest
         var fit = transform()
         let zoom = 6000 / (fit.fittedSize.width * fit.backingScale)
         fit = fit.zoomed(to: zoom, anchorInView: CGPoint(x: 450, y: 300))
-        let rect = PreviewRenderer.normalisedRect(fit, drawableSize: CGSize(width: 1800, height: 1200))
+        let rect = EDRDisplayPass.normalisedRect(fit, drawableSize: CGSize(width: 1800, height: 1200))
         let deviceWidth = (Double(rect.z) - Double(rect.x)) / 2 * 1800
         XCTAssertEqual(deviceWidth, 6000, accuracy: 1)
     }

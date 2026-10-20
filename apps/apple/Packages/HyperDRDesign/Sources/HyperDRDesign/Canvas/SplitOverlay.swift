@@ -140,7 +140,9 @@ public struct SplitOverlay: View {
             .fill(Color.clear)
             .contentShape(.rect)
             .onHover { hovered = $0 }
+            #if os(macOS)
             .pointerStyle(.columnResize)
+            #endif
             .gesture(
                 DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.space))
                     .onChanged { drag in

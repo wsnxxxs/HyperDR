@@ -75,14 +75,7 @@ final class EDRCanvasView: NSView {
         wantsLayer = true
         do {
             let renderer = try suppliedRenderer ?? PreviewRenderer()
-            metalLayer.device = renderer.device
-            metalLayer.pixelFormat = .rgba16Float
-            metalLayer.colorspace = CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3)
-            metalLayer.wantsExtendedDynamicRangeContent = true
-            // Only the photo rect is opaque; the rest of the canvas is clear so
-            // the SwiftUI backdrop shows through.
-            metalLayer.isOpaque = false
-            metalLayer.framebufferOnly = true
+            EDRDisplayPass.configure(metalLayer, device: renderer.device)
             // AppKit owns contentsScale; the loop updates only drawableSize
             // between draws from immutable geometry snapshots.
             renderLoop = PreviewRenderLoop(renderer: renderer, layer: metalLayer) { [weak self] message in

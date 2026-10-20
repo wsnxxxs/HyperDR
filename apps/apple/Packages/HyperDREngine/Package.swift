@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "HyperDREngine",
-    platforms: [.macOS(.v26)],
+    platforms: [.macOS(.v26), .iOS(.v26)],
     products: [.library(name: "HyperDREngine", targets: ["HyperDREngine"])],
     targets: [
         .binaryTarget(name: "HyperDREngineCore", path: "Artifacts/HyperDREngineCore.xcframework"),

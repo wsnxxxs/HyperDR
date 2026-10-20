@@ -227,11 +227,13 @@ private struct ParameterReadout: View {
                 commit()
                 beginTyping()
             }
+            #if os(macOS)
             .onExitCommand {
                 // Escape abandons what was typed and leaves the field.
                 typed = false
                 focused = false
             }
+            #endif
             .onKeyPress(keys: [.upArrow, .downArrow], phases: [.down, .repeat, .up]) { press in
                 keys.perform(ArrowKeyInput(press), verticalOnly: true, notify: onEditingChanged) { steps in
                     set(spec.stepped(typed ? spec.parse(draft) ?? value : value, by: steps))

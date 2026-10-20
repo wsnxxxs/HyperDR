@@ -1,4 +1,8 @@
+#if canImport(AppKit)
 import AppKit
+#else
+import UIKit
+#endif
 import SwiftUI
 
 /// Motion (CSS `--ease`, `--duration-*`). One curve, three durations: `fast`
@@ -35,6 +39,11 @@ public extension View {
 /// `withAnimation` counterpart for state changes made in actions.
 @MainActor
 public func withHDRAnimation<Result>(_ duration: TimeInterval = Motion.standard, _ body: () throws -> Result) rethrows -> Result {
-    if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { return try body() }
+    #if canImport(AppKit)
+    let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    #else
+    let reduceMotion = UIAccessibility.isReduceMotionEnabled
+    #endif
+    if reduceMotion { return try body() }
     return try withAnimation(Motion.ease(duration), body)
 }

@@ -250,7 +250,7 @@ nonisolated final class CanvasCompositor {
             guard upper > lower else { return }
             encoder.setScissorRect(MTLScissorRect(x: lower, y: 0, width: upper - lower, height: target.height))
             var params = parameters(content, original: isOriginal, transform: transform)
-            params.rect = PreviewRenderer.normalisedRect(transform, drawableSize: size)
+            params.rect = EDRDisplayPass.normalisedRect(transform, drawableSize: size)
             draw(encoder, texture: entry.texture, params: params)
             if let atlas = detailTexture, let frame = isOriginal ? detailOriginal : detailEdited,
                let region = Self.region(frame) {

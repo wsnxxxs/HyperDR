@@ -42,11 +42,16 @@ void generate(const std::filesystem::path& directory){
     const auto [width,height]=size;const auto grid=tile_grid(width,height);
     EncodeParams p;p.main10=depth==10;p.color={12,13,1};
     auto base=encode(grid.count(),[&](std::size_t index,YuvTile& tile){
-      rgb_tile(grid,index,[](auto,auto,auto count,float* values){std::fill_n(values,count*3,.5F);},1,true,tile);
+      // Every tile gets its own level, rising in raster order, so an independent
+      // reader (check_imageio.py --tile-order) can tell a swapped dimg order apart.
+      const float level=.15F+.2F*static_cast<float>(index);
+      rgb_tile(grid,index,[level](auto,auto,auto count,float* values){std::fill_n(values,count*3,level);},1,true,tile);
     },p);
     p.main10=false;p.color={2,2,1};
     auto gain=encode(grid.count(),[&](std::size_t index,YuvTile& tile){
-      luma_tile(grid,index,[](auto,auto,auto count,float* values){std::fill_n(values,count,.5F);},tile);
+      // The gain grid falls in raster order, the opposite of the base.
+      const float level=.8F-.2F*static_cast<float>(index);
+      luma_tile(grid,index,[level](auto,auto,auto count,float* values){std::fill_n(values,count,level);},tile);
     },p);
     HeifEncodedImage b{base,width,height,{},std::nullopt,icc},g{gain,width,height,{2,2,1,true},std::nullopt,{}};
     HeifWriteOptions options;options.gain_metadata=GainMapMetadata{};

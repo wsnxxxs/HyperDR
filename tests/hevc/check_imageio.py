@@ -33,6 +33,26 @@ def check_writer(fixtures, probe, directory):
             if result != {"width": width, "height": height, "iso_auxiliary": True}:
                 raise RuntimeError(f"ImageIO grid/auxiliary mismatch: {path.name}: {result}")
             print(f"ImageIO {path.name}: dimensions correct, ISO auxiliary true", flush=True)
+            check_tile_order(probe, width, height, path)
+
+
+def check_tile_order(probe, width, height, path):
+    """Structure check that does not rely on our own HEIF reader (R7-1603).
+
+    ImageIO resolves the grid's ordered dimg list and the gain map's auxl link
+    to the primary image. The fixtures give each tile its own level: the base
+    rises and the gain falls in raster order, so a swapped dimg order, a gain
+    grid linked to the wrong image or a mis-cropped tile changes the sequence.
+    """
+    result = json.loads(invoke(probe, "--tile-order", width, height, path))
+    count = result["columns"] * result["rows"]
+    if len(result["base"]) != count or len(result["gain"]) != count:
+        raise RuntimeError(f"ImageIO tile samples: {path.name}: {result}")
+    for name, direction in (("base", 1), ("gain", -1)):
+        steps = [direction * (b - a) for a, b in zip(result[name], result[name][1:])]
+        if any(step < 0.08 for step in steps):
+            raise RuntimeError(f"ImageIO {name} tile order: {path.name}: {result[name]}")
+    print(f"ImageIO {path.name}: {count} tile(s) in raster order, gain linked to the primary", flush=True)
 
 
 def png(width, height):

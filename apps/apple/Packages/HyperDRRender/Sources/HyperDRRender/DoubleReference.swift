@@ -69,12 +69,16 @@ public enum DoubleReference {
         return clamp(weight * straight + (1 - weight) * best, upper: upper)
     }
 
+    // P7-0 AE-3 reference: capacity overflow still hard-limits here. P7-1 H3 adds
+    // an HDR-only soft shoulder without modifying the already selected SDR base.
     public static func sourceHDRSplit(_ hdr: RGB, headroom: Double = 3) -> Split {
         let gain = min(headroom, max(0, log2(max(1, hdr.x, hdr.y, hdr.z))))
         return Split(base: fitP3(hdr * exp2(-gain)), gain: gain)
     }
 
-    /// AE-3's common display controls; carried here for P7-1 node comparisons.
+    /// AE-3's common display controls, not the final P7-1 tone.contrast semantics.
+    /// The non-default contrast curve has a derivative discontinuity at white (T2).
+    /// Keep it matched to the prototype until CPU and GPU curves change together.
     public static func grade(_ source: RGB, exposure: Double = 0, contrast: Double = 1,
                              vibrance: Double = 0) -> RGB {
         var rgb = source * exp2(exposure)

@@ -11,6 +11,7 @@ struct OpenedSource {
     let baseSpace: CGColorSpace
     let gain: AuthoredGainMap?
     let raw: RAWDevelopment?
+    var nativeSize: PixelSize? = nil
 }
 
 extension RenderEngine {
@@ -23,15 +24,37 @@ extension RenderEngine {
         }
         let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any] ?? [:]
         let orientation = (properties[kCGImagePropertyOrientation as String] as? NSNumber)?.int32Value ?? 1
-        guard let baseCG = CGImageSourceCreateImageAtIndex(source, 0, nil) else { throw RenderError.cannotDecodeSource }
+        let auxiliary = [(kCGImageAuxiliaryDataTypeISOGainMap, AuthoredGainMap.Standard.iso),
+                         (kCGImageAuxiliaryDataTypeHDRGainMap, .apple)].map { key, standard in
+            (standard, CGImageSourceCopyAuxiliaryDataInfoAtIndex(source,0,key))
+        }
+        let width = (properties[kCGImagePropertyPixelWidth as String] as? NSNumber)?.intValue ?? 0
+        let height = (properties[kCGImagePropertyPixelHeight as String] as? NSNumber)?.intValue ?? 0
+        let nativeSize = PixelSize(width: orientation >= 5 ? height : width, height: orientation >= 5 ? width : height)
+        let baseCG: CGImage
+        switch options.resolution {
+        case .full:
+            guard let decoded = CGImageSourceCreateImageAtIndex(source, 0, nil) else { throw RenderError.cannotDecodeSource }
+            baseCG = decoded
+        case .preview(let maximumSize):
+            guard maximumSize.width > 0, maximumSize.height > 0, width > 0, height > 0 else { throw RenderError.invalidSize }
+            let scale = min(1,Double(maximumSize.width)/Double(nativeSize.width),Double(maximumSize.height)/Double(nativeSize.height))
+            let decodeOptions: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: false,
+                kCGImageSourceDecodeRequest: auxiliary.contains { $0.1 != nil } ? kCGImageSourceDecodeToSDR : kCGImageSourceDecodeToHDR,
+                kCGImageSourceThumbnailMaxPixelSize: max(1,Int((Double(max(width,height))*scale).rounded(.down)))]
+            guard let decoded = CGImageSourceCreateThumbnailAtIndex(source, 0, decodeOptions as CFDictionary) else {
+                throw RenderError.cannotDecodeSource
+            }
+            baseCG = decoded
+        }
         let baseSpace = baseCG.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!
         let nativeLinear = CGColorSpaceCreateExtendedLinearized(baseSpace)
         let base = CIImage(cgImage: baseCG, options: [.toneMapHDRtoSDR: false])
             .oriented(forExifOrientation: orientation)
         var gain: AuthoredGainMap?
-        for (key, standard) in [(kCGImageAuxiliaryDataTypeISOGainMap, AuthoredGainMap.Standard.iso),
-                                 (kCGImageAuxiliaryDataTypeHDRGainMap, .apple)] {
-            guard let info = CGImageSourceCopyAuxiliaryDataInfoAtIndex(source, 0, key) else { continue }
+        for (standard, info) in auxiliary {
+            guard let info else { continue }
             guard let gainImage = CIImage(contentsOf: url, options: [.auxiliaryHDRGainMap: true,
                                                                      .applyOrientationProperty: false,
                                                                      .colorSpace: NSNull()]) else {
@@ -72,11 +95,13 @@ extension RenderEngine {
                                                                .applyOrientationProperty: true]) else {
                 throw RenderError.cannotDecodeSource
             }
-            return OpenedSource(domain: .dual, image: base, hdr: hdr,
-                                baseSpace: nativeLinear, gain: gain, raw: nil)
+            let scaleX = base.extent.width/hdr.extent.width, scaleY = base.extent.height/hdr.extent.height
+            let previewHDR = hdr.transformed(by:CGAffineTransform(scaleX:scaleX,y:scaleY))
+            return OpenedSource(domain: .dual, image: base, hdr: previewHDR,
+                                baseSpace: nativeLinear, gain: gain, raw: nil, nativeSize:nativeSize)
         }
         return OpenedSource(domain: isHDR ? .hdr : .sdr, image: base, hdr: base,
-                            baseSpace: workingColorSpace, gain: nil, raw: nil)
+                            baseSpace: workingColorSpace, gain: nil, raw: nil, nativeSize:nativeSize)
     }
 
     static func openRAW(_ url: URL, options: SourceOptions) throws -> OpenedSource {
@@ -91,7 +116,7 @@ extension RenderEngine {
         let native = filter.nativeSize
         let nativeSize = PixelSize(width:Int(rotated ? native.height : native.width),
                                    height:Int(rotated ? native.width : native.height))
-        switch options.rawResolution {
+        switch options.resolution {
         case .full: filter.scaleFactor = 1
         case .preview(let maximumSize):
             guard maximumSize.width > 0, maximumSize.height > 0 else { throw RenderError.invalidSize }

@@ -169,7 +169,7 @@ Set `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` and a private TMP
 licensed RAW fixtures with `python3 scripts/fetch_test_fixtures.py`, then run `swift test
 --package-path apps/apple/Packages/HyperDRRender`. Host Metal/codec access is required.
 
-Seventeen focused tests cover the source contracts and each point operation, CPU-double LUT/
+Nineteen focused tests cover the source contracts and each point operation, CPU-double LUT/
 spatial analysis/offset references, tone anchors/white derivative, HDR-base invariance, rolloff
 compensation, soft shoulders, fixed analysis reuse, resized stripes, repeated/new-context
 renders, Apple-default RAW development/overrides and the Recipe/default/unit/LUT boundary.
@@ -178,7 +178,10 @@ and its derivative independently of the GPU/double equality. One pixel/LUT/stren
 all declared LUT space pairs, using SDR except where S-Log3 input requires RAW (no additional
 domain or image matrix). Comparisons use SDR/PQ 10-bit code
 space (≤1 code) or tighter float checks for gain/metadata. Synthetic images and the licensed
-RAW fixture are used; no tests reference user photos.
+RAW fixture are used; no tests reference user photos. Preview checks cover ROI/full-frame
+agreement, SDR thumbnail orientation, tiered ImageIO/RAW resolution, and PQ/dual preservation.
+Display checks cover native-gamut three-channel ISO gamma/offsets at endpoint and intermediate
+weights, decode-before-resample, legacy system reconstruction, and unchanged export planes.
 
 iOS device and simulator package targets build with signing disabled. Metal resources compile
 at renderer creation; macOS tests exercise every new entry point. No App/Kit/engine is changed.
@@ -202,3 +205,63 @@ The JPEG decoder investigation remains in [Research/README.md](Research/README.m
 approximately 14-code difference occurs before GPU processing; ICC contributes <.036 of a
 10-bit code, and original Y/Cb/Cr IDCT planes differ by at most one 8-bit code, with additional
 chroma interpolation/matrix/integer-rounding effects. System decoding remains authoritative.
+
+
+P7-2b preview interfaces (R2/R9)
+
+```swift
+// Region is optional: integral output pixels, top-left origin, contained in size.
+try await engine.render(source, recipe: recipe, lut: lut, size: outputSize, region: region)
+let resolution = try SourceResolution.preview(canvasSize: canvasSize, nativeSize: nativeSize)
+let source = try await engine.load(url, options: SourceOptions(recipe: recipe, resolution: resolution))
+let thumbnail = try await engine.sdrThumbnail(planes, maximumSize: PixelSize(width: 512, height: 512))
+```
+
+`SourceResolution` covers both RAW and ImageIO; `RAWResolution` remains a type alias.
+The canvas tier helper selects 1280 / 2048 / 2560 / 3840 without upscaling the source.
+`RenderSource.size` is the decoded size; `nativeSize` is the oriented file size.
+ImageIO previews use decoder thumbnails before RGBAf texture allocation, retaining
+HDR decoding for single HDR assets and the original SDR rendition for dual assets.
+Full resolution remains the default for export. Thumbnails read only the SDR base,
+convert its native gamut to Display P3, and never bake gain into the thumbnail.
+ROI rendering uses the same global analysis as a full frame.
+
+
+P7-2b display pair (R3)
+
+```swift
+let display = try await engine.displayPair(planes, source: source) // DisplayGainPair
+```
+
+`DisplayGainPair` exposes `base` (RGBA32Float, linear P3), `gain` (R32Float or
+RGBA32Float decoded log2), `gainChannelCount`, `baseOffset`, `alternateOffset`,
+`baseHeadroom`, `alternateHeadroom`, `p3ToGain`, `gainToP3`, `region`, `outputSize`,
+and computed `size` / `isSimpleGain`. The public initializer accepts these fields
+so editor fakes can build frames without decoding an asset. Headrooms are **log2
+stops**, not luminance multipliers. Matrices are `simd_float3x3`, column vectors,
+matching Metal's matrix layout. A one-channel gain uses its red value for all RGB.
+Sample native-resolution gain using normalized coordinates within the displayed
+region. `size` is the actual ROI texture size; `outputSize` is the full requested
+canvas, and `region` locates that ROI in the canvas.
+
+For any ISO weight `w`, the compositor computes:
+
+```
+gainToP3 * ((p3ToGain * base + baseOffset) * exp2(w * gain) - alternateOffset)
+```
+
+Render decodes ISO min/max/gamma **before** gain interpolation, retains ISO offsets
+and both headrooms, and obtains ICC matrices through Core Image/ColorSync in linear
+light. Legacy Apple files use the system's full HDR reconstruction and exact
+per-channel inversion into a display-only ISO pair, with equal 1/64 offsets to
+represent black safely; their native encoded gain remains untouched for export.
+Generated zero-offset P3 pairs reuse both textures and identity matrices
+(`isSimpleGain`); no ICC/gamma work belongs in the compositor. A deterministic GPU
+reduction supplies missing alternate headroom. The original `RenderPlanes`, its
+native base gamut, encoded gain bytes, and auxiliary metadata remain the export
+input and are never replaced by `DisplayGainPair`.
+
+R3 timing on the same shared M6 host: normalizing a generated 2560×1707 pair took
+0.60 ms in one pass (includes the GPU peak reduction and command completion;
+identity matrices and both textures were reused). This excludes any ICC setup
+or native ISO/Apple decoding and is not an iPhone performance measurement.

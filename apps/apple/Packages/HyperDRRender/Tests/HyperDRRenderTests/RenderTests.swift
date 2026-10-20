@@ -110,6 +110,16 @@ private func close(_ a: [Float], _ b: [Float], tolerance: Float = 0.00001) {
         let pixels = RenderEngine.readPixels(try await engine.render(source))
         #expect(pixels.baseRGBA[0] > pixels.baseRGBA[1])
         #expect(pixels.baseRGBA[5] > pixels.baseRGBA[4])
+        let thumbnail = try await engine.sdrThumbnail(try await engine.render(source))
+        let roundTrip = try await engine.source(image:CIImage(cgImage:thumbnail),domain:.sdr)
+        let thumbnailPixels = RenderEngine.readPixels(try await engine.render(roundTrip))
+        #expect(thumbnailPixels.baseRGBA[0] > thumbnailPixels.baseRGBA[1])
+        #expect(thumbnailPixels.baseRGBA[5] > thumbnailPixels.baseRGBA[4])
+        let preview = try await engine.load(url,options:SourceOptions(resolution:.preview(maximumSize:PixelSize(width:1,height:1))))
+        #expect(preview.domain == .sdr && preview.size == PixelSize(width:1,height:1))
+        #expect(preview.nativeSize == PixelSize(width:1,height:2))
+        #expect(try SourceResolution.preview(canvasSize:PixelSize(width:1400,height:900),nativeSize:PixelSize(width:6000,height:4000))
+                == .preview(maximumSize:PixelSize(width:2048,height:1365)))
     }
 
     @Test func authoredISOPairPassesThroughAndReconstructs() async throws {
@@ -141,6 +151,22 @@ private func close(_ a: [Float], _ b: [Float], tolerance: Float = 0.00001) {
         #expect(edited.provenance == .resplit)
         #expect(edited.gainChannelCount == 1)
         if case .log2 = edited.encoding {} else { Issue.record("Edited pair was not resplit") }
+        let preview = try await engine.load(url,options:SourceOptions(resolution:.preview(maximumSize:PixelSize(width:8,height:4))))
+        #expect(preview.domain == .dual && preview.size == PixelSize(width:8,height:4))
+        #expect(preview.nativeSize == PixelSize(width:16,height:8))
+        let previewGain = try #require(preview.authoredGainMap)
+        #expect(previewGain.isoChannels == authored.isoChannels)
+        #expect(previewGain.baseHeadroom == authored.baseHeadroom && previewGain.alternateHeadroom == authored.alternateHeadroom)
+        #expect(previewGain.usesBaseColorSpace == authored.usesBaseColorSpace)
+        #expect((previewGain.auxiliaryInfo[kCGImageAuxiliaryDataInfoData] as? Data) ==
+                (authored.auxiliaryInfo[kCGImageAuxiliaryDataInfoData] as? Data))
+        #expect(RenderEngine.readTexture(try await engine.reconstructedHDR(preview).texture).max()! > 1)
+        let pqURL = url.deletingPathExtension().appendingPathExtension("pq.heic")
+        defer { try? FileManager.default.removeItem(at:pqURL) }
+        try writer.writeHEIF10Representation(of:hdr,to:pqURL,colorSpace:CGColorSpace(name:CGColorSpace.itur_2100_PQ)!,options:[:])
+        let pqPreview = try await engine.load(pqURL,options:SourceOptions(resolution:.preview(maximumSize:PixelSize(width:8,height:4))))
+        #expect(pqPreview.domain == .hdr && pqPreview.size == PixelSize(width:8,height:4))
+        #expect(RenderEngine.readTexture(try await engine.reconstructedHDR(pqPreview).texture).max()! > 1)
     }
 
     @Test func rawG2KeepsFileBaselineAndCachesDevelopment() async throws {
@@ -248,7 +274,7 @@ private func close(_ a: [Float], _ b: [Float], tolerance: Float = 0.00001) {
         let gain = AuthoredGainMap(standard: .iso, auxiliaryInfo: tags as NSDictionary,
             image: gainSource.hdrImage, channelCount: 3, baseColorSpace: p3,
             alternateColorSpace: nil, auxiliaryColorSpace: nil, tags: tags)
-        let pairSource = RenderSource(id: UUID(), domain: .dual, size: baseSource.size,
+        let pairSource = RenderSource(id: UUID(), domain: .dual, size: baseSource.size, nativeSize: baseSource.nativeSize,
             authoredGainMap: gain, hdrImage: baseSource.hdrImage, authoredBaseImage: baseSource.hdrImage,
             rawSettings: nil, texture: baseSource.texture, baseSpace: p3, gainTexture: gainSource.texture)
         let carriedPair = try await engine.render(pairSource)

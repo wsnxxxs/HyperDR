@@ -45,7 +45,7 @@ public struct SourceHDRSplitNode: RenderNode {
                              textures: [input.base, base, gain], value: &value)
         return RenderPlanes(base: base, gain: gain, baseColorSpace: context.workingSpace,
                             provenance: context.domain == .dual ? .resplit : .split,
-                            region: input.region)
+                            region: input.region, outputSize:input.outputSize)
     }
 }
 
@@ -128,7 +128,7 @@ public struct AdjustmentNode: RenderNode {
         try context.dispatch("adjustPoint", width: output.width, height: output.height,
                              textures: [input.base, output], value: &parameters)
         return RenderPlanes(base: output, gain: input.gain, gainChannelCount: input.gainChannelCount,
-            encoding: input.encoding, baseColorSpace: input.baseColorSpace, provenance: input.provenance, region: input.region)
+            encoding: input.encoding, baseColorSpace: input.baseColorSpace, provenance: input.provenance, region: input.region, outputSize:input.outputSize)
     }
 }
 

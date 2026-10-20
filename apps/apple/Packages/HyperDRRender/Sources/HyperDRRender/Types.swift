@@ -108,10 +108,12 @@ public struct RenderPlanes: @unchecked Sendable {
     public let baseColorSpace: CGColorSpace
     public let provenance: PairProvenance
     public let region: CGRect
+    /// Full output canvas for normalized gain sampling when `region` is an ROI.
+    public let outputSize: PixelSize
 
     public init(base: any MTLTexture, gain: any MTLTexture, gainChannelCount: Int = 1,
                 encoding: GainEncoding = .log2, baseColorSpace: CGColorSpace,
-                provenance: PairProvenance, region: CGRect) {
+                provenance: PairProvenance, region: CGRect, outputSize: PixelSize? = nil) {
         self.base = base
         self.gain = gain
         self.gainChannelCount = gainChannelCount
@@ -119,6 +121,7 @@ public struct RenderPlanes: @unchecked Sendable {
         self.baseColorSpace = baseColorSpace
         self.provenance = provenance
         self.region = region
+        self.outputSize = outputSize ?? PixelSize(width:base.width,height:base.height)
     }
 }
 
@@ -128,6 +131,7 @@ public struct RenderSource: @unchecked Sendable {
     public let id: UUID
     public let domain: InputDomain
     public let size: PixelSize
+    public let nativeSize: PixelSize
     public let authoredGainMap: AuthoredGainMap?
     /// System HDR reconstruction, oriented, in CI coordinates (bottom-left).
     public let hdrImage: CIImage
@@ -164,10 +168,24 @@ public struct RAWDevelopment: Sendable {
 
 /// Preview develops only the pixels needed by the canvas, retaining Apple detail
 /// quality. Full development is the default for export; both modes keep G2 semantics.
-public enum RAWResolution: Hashable, Sendable {
+public enum SourceResolution: Hashable, Sendable {
     case full
     case preview(maximumSize: PixelSize)
+
+    /// A shared canvas tier for RAW and ImageIO sources. Never upscales the source.
+    public static func preview(canvasSize: PixelSize, nativeSize: PixelSize) throws -> SourceResolution {
+        guard canvasSize.width > 0, canvasSize.height > 0, nativeSize.width > 0, nativeSize.height > 0 else {
+            throw RenderError.invalidSize
+        }
+        let edge = [1280, 2048, 2560, 3840].first { $0 >= max(canvasSize.width, canvasSize.height) } ?? 3840
+        let scale = min(1, Double(edge)/Double(max(nativeSize.width,nativeSize.height)))
+        return .preview(maximumSize: PixelSize(width: max(1,Int((Double(nativeSize.width)*scale).rounded())),
+                                               height: max(1,Int((Double(nativeSize.height)*scale).rounded()))))
+    }
 }
+
+/// Retained for callers of the original RAW preview API; the policy now covers all sources.
+public typealias RAWResolution = SourceResolution
 
 public struct SourceOptions: Hashable, Sendable {
     public static let parameters = Adjustments.all.filter { $0.cost == .redevelop }
@@ -175,12 +193,16 @@ public struct SourceOptions: Hashable, Sendable {
     public var kind: Kind
     public var lensCorrection: Bool
     public var raw = RAWAdjustments()
-    public var rawResolution: RAWResolution
-    public init(kind: Kind = .automatic, lensCorrection: Bool? = nil, raw: RAWAdjustments = RAWAdjustments(), rawResolution: RAWResolution = .full) {
+    public var resolution: SourceResolution
+    public var rawResolution: RAWResolution {
+        get { resolution }
+        set { resolution = newValue }
+    }
+    public init(kind: Kind = .automatic, lensCorrection: Bool? = nil, raw: RAWAdjustments = RAWAdjustments(), rawResolution: RAWResolution? = nil, resolution: SourceResolution = .full) {
         self.kind = kind
         self.lensCorrection = lensCorrection ?? RenderParameter.defaultBool("develop.lensCorrection")
         self.raw = raw
-        self.rawResolution = rawResolution
+        self.resolution = rawResolution ?? resolution
     }
 }
 

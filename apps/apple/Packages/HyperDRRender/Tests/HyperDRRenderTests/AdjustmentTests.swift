@@ -212,6 +212,19 @@ private func cube(swap: Bool = false) -> String {
         #expect(reused.expansion === actual.expansion)
         let sized = PixelSize(width:23,height:17)
         let full = RenderEngine.readPixels(try await engine.render(source,adjustments:edit,size:sized))
+        let region = CGRect(x:3,y:2,width:7,height:6)
+        let roiPlanes = try await engine.render(source,adjustments:edit,size:sized,region:region)
+        let roi = RenderEngine.readPixels(roiPlanes)
+        #expect(roiPlanes.region == region && roi.size == PixelSize(width:7,height:6))
+        for y in 0..<6 { for x in 0..<7 {
+            let cropped = y*7+x, fullIndex = (y+2)*23+x+3
+            #expect(abs(roi.gain[cropped]-full.gain[fullIndex]) < 0.00001)
+            for c in 0..<4 { #expect(abs(roi.baseRGBA[cropped*4+c]-full.baseRGBA[fullIndex*4+c]) < 0.00001) }
+        } }
+        do {
+            _ = try await engine.render(source,recipe:Recipe(inputDomain:.sdr),size:sized,region:CGRect(x:-1,y:0,width:1,height:1))
+            Issue.record("Accepted an out-of-bounds ROI")
+        } catch RenderError.invalidRegion {}
         let stripes = StripeCollector()
         try await engine.renderStripes(source,adjustments:edit,size:sized,rows:5) { stripes.append($0) }
         #expect(zip(full.baseRGBA,stripes.base).allSatisfy { abs($0-$1)<0.00001 })
@@ -324,7 +337,7 @@ private func cube(swap: Bool = false) -> String {
         }
         let original = AuthoredGainMap(standard:.iso,auxiliaryInfo:tags as NSDictionary,image:gainSource.hdrImage,
             channelCount:3,baseColorSpace:RenderEngine.workingColorSpace,alternateColorSpace:nil,auxiliaryColorSpace:nil,tags:tags)
-        let source = RenderSource(id:UUID(),domain:.dual,size:baseSource.size,authoredGainMap:original,
+        let source = RenderSource(id:UUID(),domain:.dual,size:baseSource.size,nativeSize:baseSource.nativeSize,authoredGainMap:original,
             hdrImage:bitmap([hdr],width:1,height:1),authoredBaseImage:baseSource.hdrImage,rawSettings:nil,
             texture:baseSource.texture,baseSpace:RenderEngine.workingColorSpace,gainTexture:gainSource.texture)
         var edit = RenderAdjustments()
@@ -345,6 +358,9 @@ private func cube(swap: Bool = false) -> String {
         for c in 0..<3 { #expect(abs(Double(actual.gain[c])-expected[c]) < 0.00001) }
         if case .isoLog2(let metadata) = changed.encoding { #expect(metadata.baseOffset == SIMD3(repeating:Float(1.0/64))) }
         else { Issue.record("Missing ISO edited-pair metadata") }
+        let displayChanged = try await engine.displayPair(changed,source:source)
+        #expect(displayChanged.gain === changed.gain && displayChanged.gainChannelCount == 3)
+        #expect(displayChanged.baseOffset == SIMD3(repeating:Float(1.0/64)))
         var lookOnly = RenderAdjustments()
         lookOnly.look.lut = try ColorLUT(cube:cube(swap:true))
         lookOnly.look.input = .displayP3; lookOnly.look.output = .displayP3
@@ -370,11 +386,16 @@ private func cube(swap: Bool = false) -> String {
         _ = try await engine.analysis(source,adjustments:edit)
         let analysisMilliseconds = Double(DispatchTime.now().uptimeNanoseconds-analysisStart)/1e6
         var timings: [Double] = []
+        var lastFrame: RenderPlanes?
         for _ in 0..<3 {
             let start = DispatchTime.now().uptimeNanoseconds
-            _ = try await engine.render(source,adjustments:edit)
+            lastFrame = try await engine.render(source,adjustments:edit)
             timings.append(Double(DispatchTime.now().uptimeNanoseconds-start)/1e6)
         }
+        let displayStart = DispatchTime.now().uptimeNanoseconds
+        _ = try await engine.displayPair(try #require(lastFrame),source:source)
+        let displayMilliseconds = Double(DispatchTime.now().uptimeNanoseconds-displayStart)/1e6
+        print("P7-2b normalize 2560x1707 ms=\(displayMilliseconds)")
         print("P7-1a cached 2560x1707 median_ms=\(timings.sorted()[1]) min_ms=\(timings.min()!) max_ms=\(timings.max()!) analysis_ms=\(analysisMilliseconds)")
     }
 }

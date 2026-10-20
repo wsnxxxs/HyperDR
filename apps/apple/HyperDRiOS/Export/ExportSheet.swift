@@ -13,6 +13,7 @@ struct ExportSheet: View {
     @Bindable var model: IOSExportModel
     let editor: RecipeEditor
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.locale) private var locale
 
     var body: some View {
         NavigationStack {
@@ -174,6 +175,7 @@ struct ExportSheet: View {
                     Text("ios.export.gamut")
                 }
             }
+            longEdge
             if model.custom.encoding != .sdrTIFF {
                 LabeledContent {
                     Slider(value: Binding(get: { Double(model.custom.quality) },
@@ -183,6 +185,35 @@ struct ExportSheet: View {
                     Text("ios.export.quality \(String(model.custom.quality))")
                 }
             }
+        }
+    }
+
+    /// Original size or a long edge: the presets smaller than the photo, or
+    /// a typed number (p7-3c-export §1.3 B).
+    @ViewBuilder private var longEdge: some View {
+        let photo = model.photoLongEdge(editor)
+        Picker(selection: Binding(get: { model.custom.longEdge }, set: { model.setLongEdge($0, photo: photo) })) {
+            ForEach(IOSExportModel.longEdgeChoices(photo: photo, current: model.custom.longEdge), id: \.self) { edge in
+                if let edge {
+                    Text("ios.export.longEdge.pixels \(String(edge))").tag(Int?.some(edge))
+                } else {
+                    Text("ios.export.originalSize").tag(Int?.none)
+                }
+            }
+        } label: {
+            Text("ios.export.longEdge")
+        }
+        LabeledContent {
+            TextField(value: Binding(get: { model.custom.longEdge }, set: { model.setLongEdge($0, photo: photo) }),
+                      format: .number.grouping(.never), prompt: Text("ios.export.originalSize")) {
+                Text("ios.export.longEdge.custom")
+            }
+            // Has a Return key, which commits the number.
+            .keyboardType(.numbersAndPunctuation)
+            .multilineTextAlignment(.trailing)
+            .frame(maxWidth: 120)
+        } label: {
+            Text("ios.export.longEdge.custom")
         }
     }
 
@@ -208,6 +239,9 @@ struct ExportSheet: View {
                     .font(.footnote).foregroundStyle(.orange)
                 if let estimate = IOSExportModel.memoryEstimate(plan) {
                     Text(verbatim: estimate).font(.caption).foregroundStyle(.secondary)
+                }
+                if let edge = IOSExportModel.admissibleLongEdge(plan) {
+                    Button("ios.export.useLongEdge \(String(edge))") { model.useLongEdge(edge, from: plan) }
                 }
             }
         } header: {
@@ -239,7 +273,7 @@ struct ExportSheet: View {
 
     private func running(_ progress: RecipeExportProgress?) -> some View {
         VStack(spacing: Space.s4) {
-            Text(LocalizedStringKey("export.stage.\((progress?.stage ?? .preparing).rawValue)")).font(.headline)
+            Text(verbatim: (progress ?? RecipeExportProgress(stage: .preparing)).stageMessage.localized(locale: locale)).font(.headline)
             if let done = progress?.completedRows, let total = progress?.totalRows, total > 0 {
                 ProgressView(value: Double(done), total: Double(total))
             } else {

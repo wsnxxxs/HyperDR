@@ -4,7 +4,7 @@ import XCTest
 
 /// The catalogue keys that are built from a prefix and a name at run time,
 /// which `scripts/check_apple_i18n.py` cannot see in the Swift and so
-/// exempts by prefix (`ctrl.`, `choice.`, `field.`, `enc.`, `export.stage.`,
+/// exempts by prefix (`ctrl.`, `choice.`, `field.`, `enc.`,
 /// `export.unavailable.`). This is what keeps them
 /// honest: every key a control or an option will ask for is in the
 /// catalogue in both languages, and every key under those prefixes belongs
@@ -15,10 +15,8 @@ final class LocalizationCoverageTests: XCTestCase {
     private static let captureFields = ["iso", "exposure_seconds", "f_number", "exposure_bias_ev",
                                         "focal_length_mm", "focal_length_35mm"]
 
-    /// The stages an export reports (`export.stage.<name>`: Kit's
-    /// `RecipeExportStage`, delivering being the saving phase) and the reasons a format is
-    /// unavailable (`export.unavailable.short|full.<name>`).
-    private static let exportStages = ["preparing", "developing", "model", "rendering", "encoding", "verifying", "publishing"]
+    /// The reasons a format is unavailable (`export.unavailable.short|full.<name>`).
+    /// An export's stages are Kit's words (`RecipeExportProgress.stageMessage`).
     private static let unavailableReasons = ["hevc", "main10", "probe", "generic"]
 
     /// A key's text by language, as the app bundle ships it.
@@ -74,7 +72,6 @@ final class LocalizationCoverageTests: XCTestCase {
         let formats = ExportEncoding.allCases.map(\.rawValue)
         XCTAssertEqual(Set(formats), ["adaptive", "iso-gainmap-jpeg", "pq", "hlg", "avif-pq", "avif-hlg", "sdr-jpeg", "sdr-tiff"])
         assertTranslated(formats.flatMap { ["enc.\($0).label", "enc.\($0).hint", "enc.\($0).detail"] }, in: catalogue)
-        assertTranslated(Self.exportStages.map { "export.stage.\($0)" }, in: catalogue)
         assertTranslated(Self.unavailableReasons.flatMap { ["export.unavailable.short.\($0)", "export.unavailable.full.\($0) %@"] },
                          in: catalogue)
         // The option's own name and the card's are one word.
@@ -102,7 +99,8 @@ final class LocalizationCoverageTests: XCTestCase {
                     continue
                 }
             case "export" where parts.count > 1 && parts[1] == "stage":
-                if parts.count != 3 || !Self.exportStages.contains(parts[2]) { orphans.append(key) }
+                // Kit's catalogue has the stages; the app has none of its own.
+                orphans.append(key)
             case "export" where parts.count > 1 && parts[1] == "unavailable":
                 // export.unavailable.short.<reason> | export.unavailable.full.<reason> %@
                 let reason = parts.last?.replacingOccurrences(of: " %@", with: "") ?? ""

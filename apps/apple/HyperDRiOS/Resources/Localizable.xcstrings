@@ -779,13 +779,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "This export goes up to +%@ EV; brighter highlights are brought down. Your edit is unchanged."
+            "value" : "This export goes up to %@ EV; brighter highlights are brought down. Your edit is unchanged."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "这次导出最高 +%@ EV，更亮的高光会被压下来。编辑里的设置不变。"
+            "value" : "这次导出最高 %@ EV，更亮的高光会被压下来。编辑里的设置不变。"
           }
         }
       }
@@ -1175,13 +1175,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Peak +%@ EV"
+            "value" : "Peak %@ EV"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "峰值 +%@ EV"
+            "value" : "峰值 %@ EV"
           }
         }
       }

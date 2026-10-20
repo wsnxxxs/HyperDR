@@ -118,10 +118,22 @@ nonisolated struct ExportStack: Sendable {
         return ExportPlanner.plan(capture.planRequest(choice))
     }
 
-    /// Whether the plan's ceiling brings the edit's highlights down.
-    func clampsPeak(_ plan: ExportPlan, _ editor: RecipeEditor) -> Bool {
-        guard let peak = plan.peakStops, let capture = try? editor.exportCapture() else { return false }
-        return capture.peakStops > peak + 1e-9
+    /// The ceiling the planner's own notice names when it brings the edit's
+    /// highlights down (`dest.ceiling` for a destination, `export.rangeClamped`
+    /// for a custom format): the one notice with a stop count.
+    static func ceiling(in plan: ExportPlan) -> Double? {
+        for notice in plan.notices {
+            for argument in notice.arguments { if case .stops(let stops) = argument { return stops } }
+        }
+        return nil
+    }
+
+    /// The ceiling the export actually applied, from Render's report: the
+    /// edit's resolved range before and after it.
+    static func appliedCeiling(_ result: RecipeExportResult) -> Double? {
+        guard let before = result.resolved.rangeBeforeCeiling, let after = result.resolved.rangeAfterCeiling,
+              before > after + 1e-4 else { return nil }
+        return Double(after)
     }
 
     /// Whether an export can be opened or started: a photo, and no other

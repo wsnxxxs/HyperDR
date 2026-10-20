@@ -127,6 +127,9 @@ echo "Using vcpkg toolchain: $toolchain"
 out="$repo/build/xcframework"
 rm -rf "$out"
 mkdir -p "$out/headers"
+# Capture before building. A failed build or changed source must never acquire
+# a stamp claiming that its completed archives match the current inputs.
+source_fingerprint="$(python3 "$repo/scripts/engine_fingerprint.py")"
 cp "$repo/modules/capi/include/hyperdr/hyperdr.h" "$out/headers/"
 cp "$repo/apps/apple/Packages/HyperDREngine/Modules/module.modulemap" "$out/headers/"
 
@@ -252,4 +255,9 @@ for slice in "${slices[@]}"; do
     "$repo/build-apple/HyperDR" schema > "$out/schema-cli.json"
   fi
 done
+[[ "$source_fingerprint" == "$(python3 "$repo/scripts/engine_fingerprint.py")" ]] || {
+  echo 'Engine inputs changed during the build; rerun build_xcframework.sh.' >&2
+  exit 1
+}
+printf '%s\n' "$source_fingerprint" > "$out/engine-source.sha256"
 echo "Built ${slices[*]}: $out/HyperDREngineCore.xcframework"

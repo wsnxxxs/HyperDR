@@ -2,6 +2,7 @@
 import contextlib
 import importlib.util
 import io
+import sys
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -9,7 +10,8 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("hyperdr_test_runner", ROOT / "scripts/test.py")
 runner = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(runner)
+with patch.object(sys, "path", [str(ROOT / "scripts"), *sys.path]):
+    spec.loader.exec_module(runner)
 
 
 class TestRunnerTest(unittest.TestCase):
@@ -57,6 +59,7 @@ class IOSEnginePreparationTest(unittest.TestCase):
             libraries.append(library)
         with (self.artifact / "Info.plist").open("wb") as file:
             plistlib.dump(dict(AvailableLibraries=libraries), file)
+        (self.artifact.parent / "engine-source.sha256").write_text(runner.engine_fingerprint(self.root))
 
     def test_complete_artifact_skips_native_rebuild_and_builds_both_apps(self):
         self.write_artifact()
@@ -96,6 +99,62 @@ class IOSEnginePreparationTest(unittest.TestCase):
                 self.assertEqual(run.call_args_list[0].args,
                                  ("bash", "scripts/build_xcframework.sh", "--platforms", "all"))
                 self.assertEqual(run.call_args_list[1].args[0], "xcodebuild")
+
+    def test_stale_inputs_and_missing_stamp_rebuild_existing_slices(self):
+        for changed in ("missing-stamp", "modules/image/new.cpp", "cmake/new.cmake",
+                        "vcpkg.json", "scripts/build_xcframework.sh"):
+            with self.subTest(changed=changed):
+                self.write_artifact()
+                if changed == "missing-stamp":
+                    (self.artifact.parent / "engine-source.sha256").unlink()
+                else:
+                    source = self.root / changed
+                    source.parent.mkdir(parents=True, exist_ok=True)
+                    source.write_text("new engine content")
+                with patch.object(runner, "run", side_effect=lambda *args, **kwargs: self.write_artifact()) as run:
+                    runner.ensure_ios_engine({})
+                run.assert_called_once_with("bash", "scripts/build_xcframework.sh", "--platforms", "all", env={})
+
+    def test_mac_uses_current_slice_but_rebuilds_changed_engine(self):
+        self.write_artifact(("macos",))
+        with patch.object(runner, "run") as run:
+            runner.ensure_apple_engine({}, ios=False)
+        run.assert_not_called()
+        source = self.root / "modules/core.cpp"
+        source.parent.mkdir(parents=True)
+        source.write_text("changed")
+        with patch.object(runner, "run", side_effect=lambda *args, **kwargs: self.write_artifact(("macos",))) as run:
+            runner.ensure_apple_engine({}, ios=False)
+        run.assert_called_once_with("bash", "scripts/build_xcframework.sh", env={})
+
+    def test_unrelated_UI_edits_do_not_invalidate_engine_but_deletions_do(self):
+        source = self.root / "modules/core.cpp"
+        source.parent.mkdir(parents=True)
+        source.write_text("engine")
+        before = runner.engine_fingerprint(self.root)
+        (self.root / "View.swift").write_text("UI only")
+        self.assertEqual(before, runner.engine_fingerprint(self.root))
+        source.unlink()
+        self.assertNotEqual(before, runner.engine_fingerprint(self.root))
+
+    def test_first_build_checks_stamp_beside_new_artifact_symlink(self):
+        def build(*args, **kwargs):
+            output = self.root / "build/xcframework/HyperDREngineCore.xcframework"
+            output.mkdir(parents=True)
+            self.artifact.parent.mkdir(parents=True)
+            self.artifact.symlink_to(output, target_is_directory=True)
+            self.write_artifact()
+            (output.parent / "engine-source.sha256").write_text(runner.engine_fingerprint(self.root))
+            (self.artifact.parent / "engine-source.sha256").unlink()
+        with patch.object(runner, "run", side_effect=build) as run:
+            runner.ensure_ios_engine({})
+        self.assertEqual(run.call_count, 1)
+
+    def test_rebuild_without_fresh_stamp_is_rejected(self):
+        self.write_artifact()
+        (self.artifact.parent / "engine-source.sha256").write_text("outdated")
+        with patch.object(runner, "run"), self.assertRaisesRegex(RuntimeError, "stamp.*stale"):
+            runner.ensure_ios_engine({})
 
     def test_incomplete_rebuild_cannot_reach_xcode(self):
         with patch.object(runner, "xcode_env", return_value={}), \

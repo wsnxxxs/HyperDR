@@ -52,7 +52,8 @@ finishes before ImageIO metadata/pixel checks. `RecipeExportReport.imageIO`
 records the written gain parameters, with no fabricated package report.
 HEIC10 and other encodings continue through `Engine.package`.
 
-HEIC8 normally selects ImageIO. If its separate CGImage/auxiliary handoff and
+HEIC8 normally selects ImageIO. Its integer SDR base requires zero base headroom;
+other pairs select our writer (`unsupportedCapability`) and are resplit as needed. If its separate CGImage/auxiliary handoff and
 encoder estimate does not fit, admission tries our writer without changing
 encoding, quality or dimensions (`memoryFallback`). Framed HEIC8 always uses our
 writer (`frameGainProtection`): the manual ImageIO compression experiment leaked

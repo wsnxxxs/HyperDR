@@ -19,6 +19,10 @@ enum ImageIOHEICWriter {
     static func write(base: PackagePlane, gain: PackagePlane, metadata: ExportGainMetadata,
                       to url: URL, quality: Int) throws -> ImageIOGainWriteReport {
         try Task.checkCancellation()
+        guard metadata.baseHeadroom == 0 else {
+            throw HyperDRError(code: "unsupported_format",
+                message: "ImageIO HEIC8 requires an SDR base with zero base headroom")
+        }
         return try autoreleasepool {
             guard base.width > 0, base.height > 0, base.channels == 3,
                   gain.width == base.width, gain.height == base.height,

@@ -8,11 +8,15 @@ let package = Package(
     products: [
         .library(name: "HyperDRDesign", targets: ["HyperDRDesign"]),
     ],
+    dependencies: [.package(path: "../HyperDRRecipe")],
     targets: [
         .target(
             name: "HyperDRDesign",
+            dependencies: [.product(name: "HyperDRRecipe", package: "HyperDRRecipe")],
             resources: [.process("Resources")]
         ),
-        .testTarget(name: "HyperDRDesignTests", dependencies: ["HyperDRDesign"]),
+        .testTarget(name: "HyperDRDesignTests", dependencies: [
+            "HyperDRDesign", .product(name: "HyperDRRecipe", package: "HyperDRRecipe"),
+        ]),
     ]
 )

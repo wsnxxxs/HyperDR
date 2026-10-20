@@ -66,8 +66,19 @@ the few strings its components say themselves (`design.*`: Reset to Default,
 Expanded / Collapsed). Its sources are checked against it the same way, with
 one more rule: a key there must be looked up with `bundle: .module`, or it
 would be looked up in the app's catalogue and show as the key. Chinese
-literals are an error in its `Inspector/` components; the token gallery shows
-Chinese type specimens on purpose.
+literals are an error in its `Inspector/` and `Adjustments/` components; the
+token gallery shows Chinese type specimens on purpose.
+
+The adjustment controls (P7-2a) are generated from the recipe's parameter
+declarations (`HyperDRRecipe/Adjustments.swift`), and their words are keys
+built from the declarations: `ctrl.<id>.label`, `ctrl.<id>.help`,
+`undo.<id>`, `<id>.<option>` for each option of a choice and `group.<group>`
+for every group with a parameter. They live in the design package's
+catalogue (M2 §12, approach a): this script reads the declarations, derives
+the same keys and counts them as used there, so a declaration without its
+words is reported as missing keys, and words left behind by a removed
+declaration as unused. `HyperDRDesignTests` asserts the same set from the
+Swift side (`AdjustmentText.declaredKeys`).
 
 The HEIF reader names the feature it cannot read (`HeifReadError(message,
 "feature")` in the engine sources). Each feature the sources can throw must be
@@ -93,7 +104,8 @@ VIEWS = APP / "Views"
 CATALOG = APP / "Resources" / "Localizable.xcstrings"
 DESIGN = REPO_ROOT / "apps" / "apple" / "Packages" / "HyperDRDesign" / "Sources" / "HyperDRDesign"
 DESIGN_CATALOG = DESIGN / "Resources" / "Localizable.xcstrings"
-DESIGN_COMPONENTS = DESIGN / "Inspector"
+DESIGN_COMPONENTS = (DESIGN / "Inspector", DESIGN / "Adjustments")
+ADJUSTMENTS = REPO_ROOT / "apps" / "apple" / "Packages" / "HyperDRRecipe" / "Sources" / "HyperDRRecipe" / "Adjustments.swift"
 IOS_APP = REPO_ROOT / "apps" / "apple" / "HyperDRiOS"
 IOS_CATALOG = IOS_APP / "Resources" / "Localizable.xcstrings"
 SHARED = REPO_ROOT / "apps" / "apple" / "Shared"
@@ -232,10 +244,13 @@ MODULE_BUNDLE = re.compile(r"\bbundle\s*:\s*\.module\b")
 BUNDLE_CHARS = 240
 
 
-def check(files: list[tuple[str, bool, str]], entries: dict, module_bundle: bool = False) -> list[str]:
+def check(files: list[tuple[str, bool, str]], entries: dict, module_bundle: bool = False,
+          declared: dict[str, str] | None = None) -> list[str]:
     """Problems for `files` -- (path for messages, held to the no-Chinese
     rule, source) -- against the catalogue's `entries`. `module_bundle`: the
-    files are a package's, whose keys must be read with `bundle: .module`."""
+    files are a package's, whose keys must be read with `bundle: .module`.
+    `declared`: keys derived from the parameter declarations, each with where
+    it comes from; they are used, and must exist."""
     problems: list[str] = []
     namespaces = {m.group(1) for key in entries if (m := KEY_RE.match(key))}
 
@@ -252,7 +267,7 @@ def check(files: list[tuple[str, bool, str]], entries: dict, module_bundle: bool
             if len(SPECIFIER_RE.findall(value)) != expected:
                 problems.append(f"[{locale}] {key!r} takes {expected} argument(s): {value!r}")
 
-    used: dict[str, str] = {}
+    used: dict[str, str] = dict(declared or {})
     for relative, in_views, source in files:
         for line, offset, text in literals(source):
             where = f"{relative}:{line}"
@@ -538,6 +553,94 @@ def design_self_test(files: list[tuple[str, bool, str]], entries: dict) -> list[
     return failures
 
 
+DECLARATION_RE = re.compile(r'ParameterDeclaration\(\s*id:\s*"([^"]+)"\s*,\s*group:\s*\.(\w+)')
+OPTIONS_RE = re.compile(r'\boptions:\s*(?:([A-Za-z_]\w*(?:\.allCases)?)\.map\b|(\[))')
+
+
+def option_ids(source: str, collection: str) -> list[str] | None:
+    """The option ids a declaration maps from: the cases of a String enum
+    (`HDRSource.allCases`, explicit raw values honoured) or the strings of a
+    `static let` array in the same file. None when neither is found."""
+    if collection.endswith(".allCases"):
+        name = collection[: -len(".allCases")]
+        match = re.search(r"\benum\s+" + re.escape(name) + r"\b[^{]*\{(.*?)\n\}", source, re.S)
+        if not match:
+            return None
+        cases = re.findall(r'^\s*case\s+([a-z]\w*)\s*(?:=\s*"([^"]*)")?\s*(?://.*)?$', match.group(1), re.M)
+        return [raw or case for case, raw in cases] or None
+    match = re.search(r"\blet\s+" + re.escape(collection) + r"\s*=\s*\[([^\]]*)\]", source)
+    return re.findall(r'"([^"]*)"', match.group(1)) if match else None
+
+
+def declared_keys(source: str, where: str) -> tuple[dict[str, str], list[str]]:
+    """The keys the parameter declarations in `source` produce, each with the
+    declaration it comes from, and problems reading them. Every
+    `ParameterDeclaration(` must be one the pattern understands."""
+    keys: dict[str, str] = {}
+    problems: list[str] = []
+    matches = list(DECLARATION_RE.finditer(source))
+    if not matches or len(matches) != source.count("ParameterDeclaration("):
+        problems.append(f"{where}: cannot read the parameter declarations "
+                        f"({len(matches)} of {source.count('ParameterDeclaration(')} understood)")
+    for index, match in enumerate(matches):
+        parameter, group = match.groups()
+        line = source.count("\n", 0, match.start()) + 1
+        origin = f"{where}:{line} (declared)"
+        for key in (f"ctrl.{parameter}.label", f"ctrl.{parameter}.help", f"undo.{parameter}", f"group.{group}"):
+            keys.setdefault(key, origin)
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(source)
+        if "options:" in source[match.end():end]:
+            options = OPTIONS_RE.search(source, match.end(), end)
+            if options and options.group(2):  # an inline array of ParameterOption("id", ...)
+                ids = re.findall(r'ParameterOption\(\s*"([^"]+)"', source[options.end():end]) or None
+            else:
+                ids = option_ids(source, options.group(1)) if options else None
+            if ids is None:
+                problems.append(f"{origin}: cannot read the options of {parameter!r}")
+            for option in ids or []:
+                keys.setdefault(f"{parameter}.{option}", origin)
+    return keys, problems
+
+
+def declared_self_test(files: list[tuple[str, bool, str]], entries: dict, source: str) -> list[str]:
+    """Derived keys: one missing from the catalogue, a new declaration and a
+    new option must each be reported; the real declarations read cleanly."""
+    where = str(ADJUSTMENTS.relative_to(REPO_ROOT))
+    declared, problems = declared_keys(source, where)
+    if problems:
+        return [f"self-test: {p}" for p in problems]
+    failures: list[str] = []
+    for key in ("ctrl.tone.exposure.label", "undo.hdr.strength", "hdr.source.expand", "look.output.pq", "group.light"):
+        if key not in declared:
+            failures.append(f"self-test: declared key not derived: {key!r}")
+    baseline = set(check(files, entries, module_bundle=True, declared=declared))
+    some = sorted(declared)[0]
+    thin = {k: v for k, v in entries.items() if k != some}
+    if not any(repr(some) in p and "not in catalogue" in p
+               for p in set(check(files, thin, module_bundle=True, declared=declared)) - baseline):
+        failures.append(f"self-test: a declared key missing from the catalogue not reported: {some!r}")
+    mutants = [
+        ("a new declaration",
+         source.replace("ParameterDeclaration(id: ", 'ParameterDeclaration(id: "zz.selftest", group: .light, kind: .bool,\n'
+                        '            default: .constant(.bool(true))),\n        ParameterDeclaration(id: ', 1),
+         "'ctrl.zz.selftest.label'"),
+        ("a new option", source.replace("case builtIn", "case builtIn\n    case zzSelftest // comment", 1),
+         "'hdr.source.zzSelftest'"),
+        ("an inline option list",
+         source.replace("ParameterDeclaration(id: ", 'ParameterDeclaration(id: "zz.choice", group: .light, kind: .choice,\n'
+                        '            default: .constant(.string("a")), options: [ParameterOption("zzinline", of: "zz.choice")]),\n'
+                        '        ParameterDeclaration(id: ', 1),
+         "'zz.choice.zzinline'"),
+        ("a new LUT space", source.replace('"srgb", ', '"srgb", "zzspace", ', 1), "'look.input.zzspace'"),
+    ]
+    for name, mutant, fragment in mutants:
+        keys, read = declared_keys(mutant, where)
+        found = set(check(files, entries, module_bundle=True, declared=keys)) - baseline
+        if read or not any(fragment in p and "not in catalogue" in p for p in found):
+            failures.append(f"self-test: {name}: not reported (got {sorted(found)}, {read})")
+    return failures
+
+
 HEIF_FEATURE_RE = re.compile(r'"([a-z0-9_]+)"')
 
 
@@ -633,9 +736,16 @@ def main() -> int:
         return 1
     design_entries: dict = design_catalog.get("strings", {})
     design_files = [
-        (str(path.relative_to(REPO_ROOT)), DESIGN_COMPONENTS in path.parents, path.read_text(encoding="utf-8"))
+        (str(path.relative_to(REPO_ROOT)), any(c in path.parents for c in DESIGN_COMPONENTS),
+         path.read_text(encoding="utf-8"))
         for path in sorted(DESIGN.rglob("*.swift"))
     ]
+    try:
+        adjustments = ADJUSTMENTS.read_text(encoding="utf-8")
+    except OSError as error:
+        print(f"cannot read {ADJUSTMENTS.relative_to(REPO_ROOT)}: {error}")
+        return 1
+    declared, declared_problems = declared_keys(adjustments, str(ADJUSTMENTS.relative_to(REPO_ROOT)))
 
     try:
         ios_catalog = json.loads(IOS_CATALOG.read_text(encoding="utf-8"))
@@ -660,7 +770,8 @@ def main() -> int:
         return 1
 
     problems = (self_test(files, entries) + heif_self_test(heif_sources, error_text, entries) + design_self_test(design_files, design_entries)
-                + boundary_self_test(files) + chinese_self_test(files))
+                + boundary_self_test(files) + chinese_self_test(files)
+                + declared_self_test(design_files, design_entries, adjustments))
     if "--self-test" not in sys.argv[1:]:
         for name, document in (("app", catalog), ("design package", design_catalog), ("iOS app", ios_catalog)):
             if document.get("sourceLanguage") != "en":
@@ -674,7 +785,8 @@ def main() -> int:
         else:
             for warning in outside:
                 print(f"warning: {warning}")
-        problems += check(design_files, design_entries, module_bundle=True)
+        problems += declared_problems
+        problems += check(design_files, design_entries, module_bundle=True, declared=declared)
         problems += check(ios_files, ios_entries)
         problems += check(shared_files, {})
 
@@ -686,7 +798,8 @@ def main() -> int:
     if "--self-test" in sys.argv[1:]:
         print("ok: self-test")
     else:
-        print(f"ok: {len(entries)} app keys, {len(design_entries)} design package keys, "
+        print(f"ok: {len(entries)} app keys, {len(design_entries)} design package keys "
+              f"({len(declared)} from the parameter declarations), "
               f"{len(ios_entries)} iOS app keys, "
               f"{len(LOCALES)} locales, no engine imports in views (self-test passed)")
     return 0

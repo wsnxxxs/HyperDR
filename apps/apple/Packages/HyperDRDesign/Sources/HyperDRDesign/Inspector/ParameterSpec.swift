@@ -59,7 +59,9 @@ public struct ParameterSpec: Sendable {
     // MARK: Values
 
     /// `value` on the step grid (counted from the lower bound) and in range.
-    public func snapped(_ value: Double) -> Double {
+    public func snapped(_ value: Double) -> Double { Self.snapped(value, range: range, step: step) }
+
+    static func snapped(_ value: Double, range: ClosedRange<Double>, step: Double) -> Double {
         let lower = range.lowerBound
         let snapped = lower + ((value - lower) / step).rounded() * step
         // Rounded to 1e-6, so steps of 0.05 do not drift into 0.30000000000000004.
@@ -91,22 +93,30 @@ public struct ParameterSpec: Sendable {
 
     // MARK: Text
 
-    /// The readout: "+0.30 EV", "25%", or "Auto" in the language of `locale`.
+    /// The readout: "+0.30 EV", "25%", or "Auto" in the language of `locale`;
+    /// "Auto · 2.4" when the automatic value is known.
     public func formatted(_ value: Double, locale: Locale = .current) -> String {
-        isAutomatic(value) ? DesignStrings.string("design.slider.auto", bundle: .module, locale: locale) : format.display(value)
+        guard isAutomatic(value) else { return format.display(value) }
+        guard let resolved = automatic?.resolved else {
+            return DesignStrings.string("design.slider.auto", bundle: .module, locale: locale)
+        }
+        return String(format: DesignStrings.string("design.slider.autoValue %@", bundle: .module, locale: locale),
+                      format.display(resolved))
     }
 
     /// The text a value is edited as: the displayed number without its unit
     /// or grouping, to the step's precision ("0.30", "25"); empty for Auto.
     public func editableText(_ value: Double) -> String {
         if isAutomatic(value) { return "" }
-        // The fewest decimals that write a step exactly: .25 needs two, .1 one.
-        let scaled = step * format.scale
-        let digits = (0...6).first { d in
-            let shifted = scaled * pow(10, Double(d))
+        return String(format: "%.\(Self.fractionDigits(step * format.scale))f", value * format.scale)
+    }
+
+    /// The fewest decimals that write a step exactly: 1 needs none, .25 two, .1 one.
+    static func fractionDigits(_ step: Double) -> Int {
+        (0...6).first { digits in
+            let shifted = step * pow(10, Double(digits))
             return abs(shifted - shifted.rounded()) < 1e-9 * max(1, shifted)
         } ?? 6
-        return String(format: "%.\(digits)f", value * format.scale)
     }
 
     /// A typed value as a stored one, snapped and clamped; nil when nothing
@@ -143,10 +153,14 @@ public struct ParameterAutomatic: Sendable, Equatable {
     /// Where the control goes when it leaves Auto by a key press or a
     /// VoiceOver step; the middle of the range when nil.
     public var resume: Double?
+    /// What Auto currently resolves to, when the renderer has said; the
+    /// readout then shows it after the word.
+    public var resolved: Double?
 
-    public init(value: Double = -1, resume: Double? = nil) {
+    public init(value: Double = -1, resume: Double? = nil, resolved: Double? = nil) {
         self.value = value
         self.resume = resume
+        self.resolved = resolved
     }
 }
 

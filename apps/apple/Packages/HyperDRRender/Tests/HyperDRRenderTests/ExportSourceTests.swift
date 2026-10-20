@@ -30,6 +30,44 @@ private func licensedRAW() -> URL {
 }
 
 @Suite(.serialized) struct ExportSourceTests {
+    @Test func oversizedPanoramaRowsAndTextureLimit() async throws {
+        let engine = try RenderEngine()
+        let width = 20017, height = 19
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("panorama-\(UUID()).tiff")
+        defer { try? FileManager.default.removeItem(at:url) }
+        let image = CIImage(color:CIColor(red:0.2,green:0.4,blue:0.6)).cropped(to:CGRect(x:0,y:0,width:width,height:height))
+        try CIContext().writeTIFFRepresentation(of:image,to:url,format:.RGBAh,colorSpace:RenderEngine.workingColorSpace)
+        let lazy = try await engine.openExportSource(url)
+        let recipe = Recipe(inputDomain:lazy.domain)
+        let reader = try await engine.prepareExportRows(lazy,recipe:recipe,
+            request:ExportRenderRequest(photoSize:lazy.nativeSize,capabilities:streamCaps))
+        let rows = try reader.read(y:3,count:7)
+        #expect(rows.rect.width == width && rows.baseRGB.count == width*7*3)
+        let replay = try reader.read(y:3,count:7)
+        #expect(rows.baseRGB == replay.baseRGB && rows.gain == replay.gain)
+        let region = CGRect(x:123,y:3,width:17,height:7)
+        let tile = try await engine.materializeExportRegion(lazy,outputSize:lazy.nativeSize,region:region)
+        let expected = RenderEngine.readPixels(try await engine.render(tile,recipe:recipe,size:lazy.nativeSize,region:region))
+        #expect(Array(rows.baseRGB[(123*3)..<(124*3)]) == Array(expected.baseRGBA.prefix(3)))
+        let caption = CIImage(color:CIColor(red:1,green:1,blue:1,alpha:0.5))
+            .cropped(to:CGRect(x:0,y:0,width:width+16,height:2))
+        let png = try #require(CIContext().pngRepresentation(of:caption,format:.RGBA8,
+            colorSpace:CGColorSpace(name:CGColorSpace.displayP3)!))
+        let frame = FrameSnapshot(canvasSize:PixelSize(width:width+16,height:height+6),
+            photo:ExportRect(x:8,y:2,width:width,height:height),paper:SIMD3(repeating:0.8),
+            caption:FrameCaption(png:png,rect:ExportRect(x:0,y:height+4,width:width+16,height:2)))
+        let framed = try await engine.prepareExportRows(lazy,recipe:recipe,
+            request:ExportRenderRequest(photoSize:lazy.nativeSize,capabilities:streamCaps,frame:frame))
+        let band = try framed.read(y:height,count:6)
+        #expect(band.gain[0] == 0 && band.gain[band.rect.width-1] == 0)
+        // A caption wider than the Metal limit is cropped before rasterization.
+        #expect(abs(band.baseRGB[5*band.rect.width*3]-0.9) < 0.003)
+        #expect(band.baseRGB[(4095)*3] == band.baseRGB[(4096)*3])
+        // Reject before calling Metal validation, which aborts rather than throws.
+        do { _ = try await engine.load(url); Issue.record("Oversized full texture was accepted") }
+        catch RenderError.invalidSize {}
+    }
+
     @Test func orientedRasterAndAuthoredPairMatchWhole() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)

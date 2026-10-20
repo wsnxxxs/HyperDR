@@ -126,9 +126,11 @@ extension RenderEngine: ExportStripeRendering {
                 alternateOffset:pair.alternateOffset,baseHeadroom:pair.baseHeadroom,
                 alternateHeadroom:declaredHeadroom)
         }
+        let sourceProvenance = provenance
         if resplit { provenance = .resplit }
-        let report = ExportRenderReport(canvasSize:request.canvasSize,gain:metadata,provenance:provenance,
-            resplitReasons:reasons,resolvedAutomatic:automatic,presentationFrame:request.frame != nil,
+        let report = ExportRenderReport(canvasSize:request.canvasSize,gain:metadata,sourceProvenance:sourceProvenance,provenance:provenance,
+            resplitReasons:reasons,rangeBeforeCeiling:naturalRange,
+            rangeAfterCeiling:edit.hdr.range ?? naturalRange,resolvedAutomatic:automatic,presentationFrame:request.frame != nil,
             framePhoto:request.frame?.photo)
         try Task.checkCancellation(); try prepare(report)
         for y in stride(from:0,to:request.canvasSize.height,by:rows) {

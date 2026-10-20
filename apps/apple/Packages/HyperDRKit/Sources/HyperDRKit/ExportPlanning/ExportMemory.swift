@@ -164,7 +164,14 @@ extension ExportMemoryEstimate {
             ? (input.source.sensorSize ?? input.source.pixelSize).pixels * 16 : 0
         let resident = source + rawCache + input.retainedBytes + 32 * 1024 * 1024
         let owner = p * pairBytes
-        let stripe = input.canvas.width * min(input.writeRows, input.canvas.height) * (needsGain ? 64 : 32)
+        // GPU output remains alive while readback packs RGBA into RGB. RGB
+        // gain peaks at (4+3 + 4+3) Floats = 56 CPU bytes per stripe pixel,
+        // alongside two RGBA textures (32 GPU bytes) and the whole CPU owner.
+        // Without gain, Render still allocates its single-channel gain texture.
+        let stripeGPUBytes = needsGain ? 32 : 20
+        let stripeCPUBytes = needsGain ? 56 : 28
+        let stripe = input.canvas.width * min(input.writeRows, input.canvas.height)
+            * (stripeGPUBytes + stripeCPUBytes)
         let render = resident + owner + stripe + input.photoSize.pixels * 64
         // Quantized planes, full-plane copies, HDR reconstruction and encoder
         // workspace. AVIF retains YUV cells and the canvas beside the codec.

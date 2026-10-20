@@ -125,28 +125,32 @@ enum ExportPresentation {
     /// The parts of "<stage> · <elapsed> · <estimate>".
     struct StatusParts: Equatable {
         enum Remaining: Equatable { case first, overdue, soon, seconds(Int), minutes(Int), none }
-        var stageKey: String
+        /// Kit's words for its stage, or the app's own for saving.
+        enum Stage: Equatable {
+            case kit(ExportMessage)
+            case app(String)
+            func text(locale: Locale) -> String {
+                switch self {
+                case .kit(let message): message.localized(locale: locale)
+                case .app(let key): AppStrings.string(key, locale: locale)
+                }
+            }
+        }
+        var stage: Stage
         var remaining: Remaining
     }
 
-    /// The stage is Kit's (`RecipeExportStage`); publishing is the finishing
-    /// phase and delivering the saving one.
-    static func statusParts(phase: ExportState.Phase, stage: String?,
+    /// The stage is Kit's (`RecipeExportProgress.stageMessage`); publishing is
+    /// the finishing phase and delivering the saving one.
+    static func statusParts(phase: ExportState.Phase, stage: ExportMessage?,
                             estimate: ExportEstimate?) -> StatusParts {
-        let stageKey: String
+        let preparing = RecipeExportProgress(stage: .preparing).stageMessage
+        let label: StatusParts.Stage
         switch phase {
-        case .saving: stageKey = "export.save.saving"
-        case .finishing: stageKey = "export.stage.publishing"
-        case .idle, .preparing: stageKey = "export.stage.preparing"
-        default:
-            switch stage {
-            case "developing": stageKey = "export.stage.developing"
-            case "model": stageKey = "export.stage.model"
-            case "rendering": stageKey = "export.stage.rendering"
-            case "encoding": stageKey = "export.stage.encoding"
-            case "verifying": stageKey = "export.stage.verifying"
-            default: stageKey = "export.stage.preparing"
-            }
+        case .saving: label = .app("export.save.saving")
+        case .finishing: label = .kit(RecipeExportProgress(stage: .publishing).stageMessage)
+        case .idle, .preparing: label = .kit(preparing)
+        default: label = .kit(stage ?? preparing)
         }
         let remaining: StatusParts.Remaining
         if phase == .saving { remaining = .none }
@@ -161,7 +165,7 @@ enum ExportPresentation {
                 }
             }
         } else { remaining = .first }
-        return StatusParts(stageKey: stageKey, remaining: remaining)
+        return StatusParts(stage: label, remaining: remaining)
     }
 
     /// "0:21", "12:05".
@@ -188,7 +192,7 @@ extension ExportPresentation {
     /// "Encoding · 0:21 elapsed · about 10 s left": the stage, the time since
     /// the export began and the estimate, in `locale`.
     static func statusLine(_ parts: StatusParts, elapsed: Double, locale: Locale) -> String {
-        var pieces = [AppStrings.string(parts.stageKey, locale: locale)]
+        var pieces = [parts.stage.text(locale: locale)]
         pieces.append(AppStrings.format("export.elapsed %@", locale: locale, elapsedText(elapsed)))
         if let remaining = remainingText(parts.remaining, locale: locale) { pieces.append(remaining) }
         return pieces.joined(separator: " · ")
@@ -216,7 +220,7 @@ extension ExportPresentation {
     /// for a percentage not known yet.
     static func capsuleText(estimate: ExportEstimate?, parts: StatusParts, locale: Locale) -> String {
         let percent = percent(estimate: estimate, isDone: false).map { percentText($0, locale: locale) } ?? "…"
-        let eta = remainingText(parts.remaining, locale: locale) ?? AppStrings.string(parts.stageKey, locale: locale)
+        let eta = remainingText(parts.remaining, locale: locale) ?? parts.stage.text(locale: locale)
         return AppStrings.format("exportLock.canvas %@ %@", locale: locale, percent, eta)
     }
 

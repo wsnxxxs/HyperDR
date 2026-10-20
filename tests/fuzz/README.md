@@ -20,11 +20,15 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer cmake --preset macos-ar
   '-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined'
 cmake --build build-fuzz --target fuzz_heif_reader fuzz_heif_inspect fuzz_tmap fuzz_exif fuzz_hvcc fuzz_cube
 TMPDIR="$PWD/build-fuzz-tmp" ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
-  /opt/homebrew/bin/python3.12 tests/fuzz/run.py --build-dir build-fuzz --seconds 600
+  taskpolicy -b /opt/homebrew/bin/python3.12 tests/fuzz/run.py --build-dir build-fuzz --seconds 300
 ```
 
-`600` seconds per target is P3b-1's short run. Use `300` for P3b-6's five
-minutes per target (cut from 30 on 2026-10-20). The runner copies seeds into
+`300` seconds per target is the P3b-6 acceptance run (the default; cut from 30
+minutes on 2026-10-20); `taskpolicy -b` keeps it from slowing other work. The
+six targets run in parallel, so on a loaded machine a starved process can trip
+libFuzzer's watchdog with an input that runs in under a millisecond (a
+"timeout" artifact that replays in 0 ms): pass `--timeout 30` (default 5) and
+replay any artifact directly before treating it as a bug. The runner copies seeds into
 the ignored build directory; libFuzzer never writes new corpus entries into
 source control. Artifacts, individual logs, and exit codes are retained there.
 A nonzero exit is failure.

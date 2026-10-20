@@ -125,33 +125,38 @@ import HyperDRDesign
     }
 
     func testTheStatusLineNamesTheStageTheTimeAndTheEstimate() {
-        func line(_ phase: ExportState.Phase, _ stage: String?, _ workflow: Workflow = .hdr, estimate: ExportEstimate?,
+        func line(_ phase: ExportState.Phase, _ stage: String?, estimate: ExportEstimate?,
                   elapsed: Double = 21, locale: Locale) -> String {
-            ExportPresentation.statusLine(ExportPresentation.statusParts(phase: phase, stage: stage, workflow: workflow,
+            ExportPresentation.statusLine(ExportPresentation.statusParts(phase: phase, stage: stage,
                 estimate: estimate), elapsed: elapsed, locale: locale)
         }
         let seconds = ExportEstimate(fraction: 0.5, remaining: .seconds(8), isOverdue: false)
-        XCTAssertEqual(line(.running, "process", estimate: seconds, locale: en), "Computing HDR · 0:21 elapsed · about 10 s left")
-        XCTAssertEqual(line(.running, "process", .colorOnly, estimate: seconds, locale: en), "Grading · 0:21 elapsed · about 10 s left")
-        XCTAssertEqual(line(.running, "process", estimate: seconds, locale: zh), "计算 HDR · 已用 0:21 · 约 10 秒后完成")
+        XCTAssertEqual(line(.running, "rendering", estimate: seconds, locale: en), "Rendering edits · 0:21 elapsed · about 10 s left")
+        XCTAssertEqual(line(.running, "rendering", estimate: seconds, locale: zh), "渲染调整 · 已用 0:21 · 约 10 秒后完成")
+        // Each of Kit's stages has its own words (RecipeExportStage).
+        for (stage, text) in [("developing", "Reading photo"), ("model", "Running AI model"),
+                              ("encoding", "Encoding"), ("verifying", "Verifying")] {
+            XCTAssertTrue(line(.running, stage, estimate: seconds, locale: en).hasPrefix(text + " · "), stage)
+        }
+        XCTAssertTrue(line(.finishing, "verifying", estimate: seconds, locale: en).hasPrefix("Adding to Export History · "))
         XCTAssertEqual(line(.preparing, nil, estimate: nil, elapsed: 0, locale: en), "Preparing · 0:00 elapsed · first export, estimating the time")
-        XCTAssertTrue(line(.running, "decode", estimate: ExportEstimate(fraction: 0.99, remaining: .zero, isOverdue: true), locale: en)
+        XCTAssertTrue(line(.running, "developing", estimate: ExportEstimate(fraction: 0.99, remaining: .zero, isOverdue: true), locale: en)
             .hasSuffix("almost done, a little longer than expected"))
-        XCTAssertTrue(line(.running, "encode", estimate: ExportEstimate(fraction: 0.9, remaining: .seconds(2), isOverdue: false), locale: en)
+        XCTAssertTrue(line(.running, "encoding", estimate: ExportEstimate(fraction: 0.9, remaining: .seconds(2), isOverdue: false), locale: en)
             .hasSuffix("almost done"))
-        XCTAssertTrue(line(.running, "verify", estimate: ExportEstimate(fraction: 0.5, remaining: .seconds(150), isOverdue: false), locale: en)
+        XCTAssertTrue(line(.running, "verifying", estimate: ExportEstimate(fraction: 0.5, remaining: .seconds(150), isOverdue: false), locale: en)
             .hasSuffix("about 3 min left"))
         // Writing to the chosen place has no estimate to give.
-        XCTAssertEqual(line(.saving, "verify", estimate: ExportEstimate(fraction: 0.99, remaining: nil, isOverdue: false), elapsed: 75, locale: en),
+        XCTAssertEqual(line(.saving, "verifying", estimate: ExportEstimate(fraction: 0.99, remaining: nil, isOverdue: false), elapsed: 75, locale: en),
                        "Saving… · 1:15 elapsed")
     }
 
     func testTheCanvasCapsuleReadsLikeTheStatusLine() {
         let estimate = ExportEstimate(fraction: 0.72, remaining: .seconds(8), isOverdue: false)
-        let parts = ExportPresentation.statusParts(phase: .running, stage: "encode", workflow: .hdr, estimate: estimate)
+        let parts = ExportPresentation.statusParts(phase: .running, stage: "encoding", estimate: estimate)
         XCTAssertEqual(ExportPresentation.capsuleText(estimate: estimate, parts: parts, locale: en), "Exporting 72% · about 10 s left")
         XCTAssertEqual(ExportPresentation.capsuleText(estimate: estimate, parts: parts, locale: zh), "正在导出 72% · 约 10 秒后完成")
-        let none = ExportPresentation.statusParts(phase: .running, stage: "encode", workflow: .hdr, estimate: nil)
+        let none = ExportPresentation.statusParts(phase: .running, stage: "encoding", estimate: nil)
         XCTAssertEqual(ExportPresentation.capsuleText(estimate: nil, parts: none, locale: en), "Exporting … · first export, estimating the time")
     }
 

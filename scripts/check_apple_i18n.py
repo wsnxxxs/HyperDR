@@ -36,6 +36,12 @@ and is checked against it the same way, every file held to the no-Chinese
 rule as a view is. `apps/apple/Shared`, which both apps compile, has no
 catalogue: it may use no key and no Chinese literal.
 
+Kit's export planner speaks in keys of its own (`ExportMessage`: notices,
+blockers, the "will write" summary, the Photos save options), and those keys
+are not in the app's catalogue. While any of them is missing, the Mac app and
+`Shared/` must not read the plan's messages at all -- shown, they would be the
+key itself. Blockers reach the user through their codes (`ErrorMapping`).
+
 One rule here is not about strings but sits with them because it reads the
 same sources: nothing under `Views/` imports `HyperDREngine`. Views talk only
 to the editor models (batch 3 §3.4); engine types and calls stay in
@@ -109,6 +115,7 @@ ADJUSTMENTS = REPO_ROOT / "apps" / "apple" / "Packages" / "HyperDRRecipe" / "Sou
 IOS_APP = REPO_ROOT / "apps" / "apple" / "HyperDRiOS"
 IOS_CATALOG = IOS_APP / "Resources" / "Localizable.xcstrings"
 SHARED = REPO_ROOT / "apps" / "apple" / "Shared"
+KIT_PLANNING = REPO_ROOT / "apps" / "apple" / "Packages" / "HyperDRKit" / "Sources" / "HyperDRKit" / "ExportPlanning"
 LOCALES = ["en", "zh-Hans"]
 # Every engine source (not the tests) that can throw HeifReadError with a feature.
 HEIF_SOURCE_GLOBS = ("modules/*/src/**/*", "modules/*/include/**/*")
@@ -387,6 +394,52 @@ def engine_imports(files: list[tuple[str, bool, str]]) -> list[str]:
             line = code.count("\n", 0, match.start("keyword")) + 1
             problems.append(f"{relative}:{line}: views must not import HyperDREngine; go through the editor model")
     return problems
+
+
+# A key the planner writes: `ExportMessage(key: "...")`, `.init(key: "...")`,
+# a save option's `unavailableReasonKey: "..."`, a `replaceReason = "..."`.
+KIT_MESSAGE_KEY_RE = re.compile(
+    r'(?:ExportMessage\(key:|\.init\(key:|unavailableReasonKey:|replaceReason =)\s*"([^"\\]+)"')
+# Reading the plan's messages: their types, or the plan fields holding them.
+PLAN_TEXT_RE = re.compile(
+    r"\b(?:ExportMessage|ExportMessageArgument|WillWriteSummary|unavailableReasonKey)\b"
+    r"|\.(?:notices|summary\.parts)\b|\.blockers\b[^\n]*\.message\b")
+
+
+def kit_message_keys(sources: list[str]) -> set[str]:
+    return {key for source in sources for key in KIT_MESSAGE_KEY_RE.findall(source)}
+
+
+def plan_text(files: list[tuple[str, bool, str]], kit_keys: set[str], entries: dict) -> list[str]:
+    """Mac app or Shared code reading the planner's messages while some of
+    their keys are missing from the app's catalogue."""
+    missing = sorted(key for key in kit_keys if key not in entries)
+    if not missing:
+        return []
+    problems = []
+    for relative, _, source in files:
+        code = code_only(source)
+        for match in PLAN_TEXT_RE.finditer(code):
+            line = code.count("\n", 0, match.start()) + 1
+            problems.append(f"{relative}:{line}: reads Kit's plan messages ({match.group(0).strip()}), whose keys "
+                            f"are not in the catalogue ({', '.join(missing)}); map the plan's facts or "
+                            f"blocker codes to app keys instead")
+    return problems
+
+
+def plan_text_self_test(files: list[tuple[str, bool, str]]) -> list[str]:
+    """Reading a notice is reported while a key is missing, not once the
+    catalogue has it, and not in a comment or a string."""
+    keys = kit_message_keys(['let a = ExportMessage(key: "dest.x")\n'])
+    failures = [] if keys == {"dest.x"} else [f"self-test: Kit message keys read as {keys}"]
+    mutant = [("apps/apple/HyperDR/Editor/SelfTest.swift", False, "let n = plan.notices\n")]
+    if not plan_text(mutant, keys, {}):
+        failures.append("self-test: reading plan.notices not reported")
+    if plan_text(mutant, keys, {"dest.x": {}}):
+        failures.append("self-test: plan.notices reported though every key is in the catalogue")
+    if plan_text([("x.swift", False, '// plan.notices\nlet s = "WillWriteSummary"\n')], keys, {}):
+        failures.append("self-test: plan text in a comment or a string reported")
+    return failures
 
 
 def chinese_outside_views(files: list[tuple[str, bool, str]]) -> list[str]:
@@ -771,13 +824,18 @@ def main() -> int:
 
     problems = (self_test(files, entries) + heif_self_test(heif_sources, error_text, entries) + design_self_test(design_files, design_entries)
                 + boundary_self_test(files) + chinese_self_test(files)
-                + declared_self_test(design_files, design_entries, adjustments))
+                + declared_self_test(design_files, design_entries, adjustments)
+                + plan_text_self_test(files))
     if "--self-test" not in sys.argv[1:]:
         for name, document in (("app", catalog), ("design package", design_catalog), ("iOS app", ios_catalog)):
             if document.get("sourceLanguage") != "en":
                 problems.append(f"{name} catalogue sourceLanguage must be 'en'")
         problems += check(files, entries)
         problems += engine_imports(files)
+        kit_keys = kit_message_keys([path.read_text(encoding="utf-8") for path in sorted(KIT_PLANNING.rglob("*.swift"))])
+        if not kit_keys:
+            problems.append(f"no ExportMessage keys found under {KIT_PLANNING.relative_to(REPO_ROOT)}")
+        problems += plan_text(files + shared_files, kit_keys, entries)
         problems += heif_features(heif_sources, error_text, entries)
         outside = chinese_outside_views(files)
         if CJK_OUTSIDE_VIEWS_STRICT:

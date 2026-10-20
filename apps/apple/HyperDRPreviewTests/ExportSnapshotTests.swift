@@ -65,9 +65,9 @@ import HyperDRRecipe
     /// Fourteen seconds into an export that is encoding, 72% through that stage.
     private func runForFourteenSeconds(_ services: FakeEditorServices, _ model: EditorModel) async throws {
         clock.now += 14
-        services.sendExport(.progress(stage: "encode", fraction: 0.72, at: clock.now.addingTimeInterval(-3)))
+        services.sendExport(.progress(stage: "encoding", fraction: 0.72, at: clock.now.addingTimeInterval(-3)))
         try await Task.sleep(for: .milliseconds(50))
-        XCTAssertEqual(model.export.stage, "encode")
+        XCTAssertEqual(model.export.stage, "encoding")
     }
 
     /// What the engine does when an export finishes: the version enters the
@@ -210,7 +210,7 @@ import HyperDRRecipe
     func testProgressViewWithoutAnEstimateOnAFirstExport() async throws {
         let (model, services) = await ready(timings: false)
         await start(model, services)
-        services.sendExport(.progress(stage: "decode", fraction: 0, at: clock.now))
+        services.sendExport(.progress(stage: "developing", fraction: 0, at: clock.now))
         try await Task.sleep(for: .milliseconds(50))
         XCTAssertNil(model.export.estimate(at: clock.now))
         try snapshots("export-progress-first", minimumHeight: 260) { ExportSheet(model: model, window: EditorWindowState()) }

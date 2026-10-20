@@ -57,10 +57,10 @@ nonisolated struct CompositionParams {
 nonisolated struct DisplayLayerParams {
     var baseOffset: SIMD4<Float>
     var alternateOffset: SIMD4<Float>
-    var toGain: simd_float3x3
-    var toP3: simd_float3x3
+    var p3ToGain: simd_float3x3
+    var gainToP3: simd_float3x3
     var weight: Float = 1
-    var gainChannels: UInt32 = 1
+    var gainChannelCount: UInt32 = 1
     var coding: UInt32 = 0 // 0 log2, 1 alternate rendition
     var firstSlice: UInt32 = 0
     var firstPlane: UInt32 = 0
@@ -69,11 +69,11 @@ nonisolated struct DisplayLayerParams {
     init(_ pair: DisplayPair, weight: Float, slice: UInt32, weightedOnly: Bool) {
         baseOffset = SIMD4(pair.baseOffset, 0)
         alternateOffset = SIMD4(pair.alternateOffset, 0)
-        toGain = pair.toGain; toP3 = pair.toP3
-        identity = pair.toGain == matrix_identity_float3x3 && pair.toP3 == matrix_identity_float3x3 ? 1 : 0
+        p3ToGain = pair.p3ToGain; gainToP3 = pair.gainToP3
+        identity = pair.p3ToGain == matrix_identity_float3x3 && pair.gainToP3 == matrix_identity_float3x3 ? 1 : 0
         coding = pair.coding == .alternate ? 1 : 0
         self.weight = min(1, max(0, weight))
-        gainChannels = UInt32(pair.gainChannels)
+        gainChannelCount = UInt32(pair.gainChannelCount)
         firstSlice = slice
         firstPlane = weightedOnly ? 2 : 0
     }

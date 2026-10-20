@@ -9,9 +9,13 @@ import simd
 /// and resolves min/max/gamma and ICC; the display layer alone decides how
 /// much of the gain the screen gets. Export never passes through here.
 ///
+/// Field names and matrix layout follow `HyperDRRender.DisplayGainPair` (the
+/// Render side of R3), which maps onto this one field for field; `coding`
+/// exists only for the Mac's legacy v1 frames.
+///
 /// Both textures are top-down and must not be written once the pair exists:
-/// the compositor caches by texture identity. The gain may be smaller than
-/// the base; it is resampled bilinearly in its stored coding, then decoded.
+/// the compositor caches by texture identity. The gain may have another
+/// resolution; it is sampled bilinearly at normalised coordinates.
 nonisolated struct DisplayPair: @unchecked Sendable {
     enum GainCoding: Equatable, Sendable {
         /// The texel is log2 of the gain, in stops.
@@ -30,9 +34,10 @@ nonisolated struct DisplayPair: @unchecked Sendable {
     var coding: GainCoding = .log2
     var baseOffset = SIMD3<Float>(repeating: 0)
     var alternateOffset = SIMD3<Float>(repeating: 0)
-    /// Display P3 → the gain's working space, and back.
-    var toGain = matrix_identity_float3x3
-    var toP3 = matrix_identity_float3x3
+    /// Display P3 → the gain's working space, and back; column-major, as
+    /// Metal's float3x3.
+    var p3ToGain = matrix_identity_float3x3
+    var gainToP3 = matrix_identity_float3x3
     /// log2 headroom of the base and of the alternate rendition.
     var baseHeadroom: Double = 0
     var alternateHeadroom: Double
@@ -41,7 +46,7 @@ nonisolated struct DisplayPair: @unchecked Sendable {
 
     var width: Int { base.width }
     var height: Int { base.height }
-    var gainChannels: Int {
+    var gainChannelCount: Int {
         switch gain.pixelFormat {
         case .r8Unorm, .r16Unorm, .r16Float, .r32Float: 1
         default: 3
@@ -52,7 +57,7 @@ nonisolated struct DisplayPair: @unchecked Sendable {
     func hasSameContent(as other: DisplayPair) -> Bool {
         base === other.base && gain === other.gain && coding == other.coding
             && baseOffset == other.baseOffset && alternateOffset == other.alternateOffset
-            && toGain == other.toGain && toP3 == other.toP3 && region == other.region
+            && p3ToGain == other.p3ToGain && gainToP3 == other.gainToP3 && region == other.region
     }
 
     /// The share of the gain a screen with `headroom` (linear) shows.

@@ -614,7 +614,7 @@ extension CanvasCompositionTests {
         var pair = try makeDisplayPair(renderer.device,base:[0.2,0.4,0.6],width:1,height:1,gain:[0.5,1,1.5],
             gainChannels:3,baseOffset:0.01,alternateOffset:0.02)
         let identity = pair
-        pair.toGain = toGain; pair.toP3 = toGain.inverse
+        pair.p3ToGain = toGain; pair.gainToP3 = toGain.inverse
         XCTAssertFalse(pair.hasSameContent(as: identity), "new matrices on the same textures must rebuild the cache")
         for weight: Float in [0,0.25,0.5,0.8,1] {
             let command = try XCTUnwrap(renderer.queue.makeCommandBuffer())

@@ -11,6 +11,16 @@
 - 一根数据线（第一次安装必须用线连接；之后可以改用无线，见文末）。
 - 一个 Apple ID。
 
+## 第零步：先构建引擎（含 iOS 部分）
+
+iOS 版要链接 HyperDR 的引擎（导出要用）。在仓库根目录先运行一次：
+
+```sh
+bash scripts/build_xcframework.sh --platforms all
+```
+
+它会把 Mac、iPhone 真机和模拟器三份引擎都构建好（第一次要等一会儿）。以后引擎代码有更新时再运行一次。运行过 `python3 scripts/test.py ios` 的话，它已经替你构建好了。
+
 ## 第一步：在 Xcode 里登录 Apple ID
 
 1. 打开 Xcode，菜单 **Xcode → Settings…（设置）→ Accounts（账户）**。

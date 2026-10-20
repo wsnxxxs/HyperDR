@@ -49,6 +49,8 @@ struct PhotoCanvasScreen: View {
     @State private var transform: CanvasTransform?
     @State private var screenSize = CGSize.zero
     @State private var confirmingReset = false
+    @State private var exports = IOSExportModel()
+    @State private var showingExport = false
     @State private var showingAdjustments = false
     @Environment(\.undoManager) private var undoManager
     @Environment(\.displayScale) private var displayScale
@@ -92,6 +94,9 @@ struct PhotoCanvasScreen: View {
         .onChange(of: undoManager.map(ObjectIdentifier.init)) { editor?.attach(undoManager: undoManager) }
         .confirmationDialog(Text("ios.adjust.resetAll.confirm"), isPresented: $confirmingReset, titleVisibility: .visible) {
             Button(role: .destructive) { editor?.resetAll() } label: { AdjustmentText.command(.resetAll) }
+        }
+        .sheet(isPresented: $showingExport) {
+            if let editor { ExportSheet(model: exports, editor: editor) }
         }
         #if DEBUG
         .fullScreenCover(isPresented: $showingAdjustments) { AdjustmentsDebugScreen() }
@@ -321,6 +326,11 @@ struct PhotoCanvasScreen: View {
             } label: {
                 Label("ios.toolbar.more", systemImage: "ellipsis")
             }
+            Button("ios.toolbar.export") {
+                editor.commitDrag()
+                exports.reset()
+                showingExport = true
+            }
         }
     }
 
@@ -407,11 +417,15 @@ struct PhotoCanvasScreen: View {
             // The Files copy runs detached and ignores this task's cancellation:
             // a request superseded meanwhile stops here, and its copy is removed.
             try Task.checkCancellation()
+            // The export session hashes the copy while the editor decodes it.
+            exports.photoOpening(imported.url)
             try await editor.open(imported.url)
             photo?.discard()
             photo = imported
             failed = false
+            exports.photoOpened(imported.url)
         } catch {
+            if let imported { exports.photoFailed(imported.url) }
             imported?.discard()
             guard !Task.isCancelled, !(error is CancellationError) else { return }
             if editor.source == nil { failed = true } else { notice = "ios.error.load" }

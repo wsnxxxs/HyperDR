@@ -105,12 +105,10 @@ import UniformTypeIdentifiers
         #expect(try await render(warmer).modelGainPending == false)
         // Another preview size shares the development.
         #expect(try await render(warmer, PixelSize(width: 128, height: 128)).modelGainPending == false)
-        // Render gives a development loaded again a new source id, so the
-        // first one's prediction no longer applies: pending, then predicted again.
+        // Render gives a development loaded again its stable id (510e39cc),
+        // so the first one's prediction still applies.
         let back = try await render(recipe)
-        #expect(back.modelGainPending)
-        try await session.predictModelGain(back.request)
-        #expect(try await render(recipe).modelGainPending == false)
+        #expect(back.modelGainPending == false)
     }
 
     /// R23-001: a file replaced after opening is refused as `sourceChanged`.

@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import CoreImage
 import ImageIO
 import UniformTypeIdentifiers
@@ -16,39 +17,64 @@ private final class ChangingExportMemoryBudget: ExportMemoryBudget {
     func availableBytes() -> Int? { bytes.withLock { $0 } }
 }
 
-private struct StripeFake: ExportStripeRendering {
+private struct StripeFake: ExportStripeRendering, ExportRowRendering {
     var metadata: ExportGainMetadata? = nil
     var gainScale: Float = 2
     var before: @Sendable () async throws -> Void = {}
     var afterStripe: @Sendable () throws -> Void = {}
+    var onRead: @Sendable (Int, Int) -> Void = { _, _ in }
+    func report(_ request: ExportRenderRequest) -> ExportRenderReport {
+        let channels = request.includesGain ? metadata?.channelCount ?? 1 : 0
+        return .init(canvasSize: request.canvasSize,
+            gain: channels == 0 ? nil : metadata ?? .init(channelCount: channels, alternateHeadroom: 2),
+            sourceProvenance: .split, provenance: .split, resplitReasons: [],
+            rangeBeforeCeiling: gainScale, rangeAfterCeiling: gainScale, resolvedAutomatic: ["hdr.range": 2],
+            presentationFrame: request.frame != nil, framePhoto: request.frame?.photo)
+    }
+    func stripe(_ request: ExportRenderRequest, y: Int, count: Int) -> ExportStripe {
+        let channels = request.includesGain ? metadata?.channelCount ?? 1 : 0
+        let size = request.canvasSize
+        var base = [Float](), gain = [Float]()
+        for sy in y..<(y+count) { for x in 0..<size.width {
+            let inside = request.frame.map { x >= $0.photo.x && x < $0.photo.x+$0.photo.width
+                && sy >= $0.photo.y && sy < $0.photo.y+$0.photo.height } ?? true
+            let paper = request.frame?.paper ?? SIMD3<Float>(repeating: 0.8)
+            base += inside ? [0.25 + Float(x)/Float(size.width)*0.5, 0.5, 0.25] : [paper.x, paper.y, paper.z]
+            if channels > 0 { gain += [Float](repeating: inside ? gainScale * Float(x)/Float(max(size.width-1,1)) : 0, count: channels) }
+        } }
+        return .init(rect: .init(x: 0, y: y, width: size.width, height: count), baseRGB: base, gain: gain)
+    }
+    func prepareRows(_ source: HyperDRRender.ExportSource, recipe: Recipe, lut: ColorLUT?,
+                     modelGain: ModelGainPrediction?, request: ExportRenderRequest,
+                     rows: Int) async throws -> any ExportRowSource {
+        try await before()
+        return FakeRows(fake: self, request: request, report: report(request))
+    }
     func renderExportStripes(_ source: RenderSource, recipe: Recipe, lut: ColorLUT?,
                              modelGain: ModelGainPrediction?, request: ExportRenderRequest, rows: Int,
                              prepare: @Sendable (ExportRenderReport) throws -> Void,
                              consume: @Sendable (ExportStripe) throws -> Void) async throws -> ExportRenderReport {
         try await before()
         try Task.checkCancellation()
-        let channels = request.includesGain ? metadata?.channelCount ?? 1 : 0
-        let size = request.canvasSize
-        let report = ExportRenderReport(canvasSize: size,
-            gain: channels == 0 ? nil : metadata ?? .init(channelCount: channels, alternateHeadroom: 2),
-            sourceProvenance: .split, provenance: .split, resplitReasons: [],
-            rangeBeforeCeiling: gainScale, rangeAfterCeiling: gainScale, resolvedAutomatic: ["hdr.range": 2],
-            presentationFrame: request.frame != nil, framePhoto: request.frame?.photo)
+        let report = report(request)
         try prepare(report)
-        for y in stride(from: 0, to: size.height, by: rows) {
-            let count = min(rows, size.height-y)
-            var base = [Float](), gain = [Float]()
-            for sy in y..<(y+count) { for x in 0..<size.width {
-                let inside = request.frame.map { x >= $0.photo.x && x < $0.photo.x+$0.photo.width
-                    && sy >= $0.photo.y && sy < $0.photo.y+$0.photo.height } ?? true
-                let paper = request.frame?.paper ?? SIMD3<Float>(repeating: 0.8)
-                base += inside ? [0.25 + Float(x)/Float(size.width)*0.5, 0.5, 0.25] : [paper.x, paper.y, paper.z]
-                if channels > 0 { gain += [Float](repeating: inside ? gainScale * Float(x)/Float(max(size.width-1,1)) : 0, count: channels) }
-            } }
-            try consume(.init(rect: .init(x: 0, y: y, width: size.width, height: count), baseRGB: base, gain: gain))
+        for y in stride(from: 0, to: request.canvasSize.height, by: rows) {
+            try consume(stripe(request, y: y, count: min(rows, request.canvasSize.height-y)))
             try afterStripe()
         }
         return report
+    }
+}
+
+private struct FakeRows: ExportRowSource {
+    let fake: StripeFake
+    let request: ExportRenderRequest
+    let report: ExportRenderReport
+    func read(y: Int, count: Int) throws -> ExportStripe {
+        fake.onRead(y, count)
+        let stripe = fake.stripe(request, y: y, count: count)
+        try fake.afterStripe()
+        return stripe
     }
 }
 
@@ -257,6 +283,67 @@ private struct RecipeExportEnvironment {
         #expect(await env.sessions.exports(for: env.session.id).count == 8)
     }
 
+    /// Run each height in a fresh process. This isolates the Kit bridge/writer;
+    /// verification is deliberately excluded until its bounded API lands.
+    @Test func streamingHeightMemoryMeasurement() async throws {
+        guard let value = ProcessInfo.processInfo.environment["HYPERDR_STREAM_HEIGHT"], let height = Int(value) else { return }
+        let width = 2048, rows = 64
+        let root = URL(fileURLWithPath: "/tmp/p7-stream-memory")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let engine = try await Engine(configuration: .init(cacheDirectory: root.appendingPathComponent("cache")))
+        let request = ExportRenderRequest(photoSize: .init(width: width, height: height), includesGain: false,
+            capabilities: .init(supportsThreeChannelGain: false, supportsSignedGain: true,
+                                requiresGainMaximumHeadroom: false))
+        let fake = StripeFake()
+        let bridge = PackageRowBridge(source: FakeRows(fake: fake, request: request, report: fake.report(request)), frame: nil)
+        let file = root.appendingPathComponent("\(height).tif")
+        try? FileManager.default.removeItem(at: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        var before = rusage(); getrusage(RUSAGE_SELF, &before)
+        _ = try await engine.packageRows(width: width, height: height, rows: rows, to: file,
+            options: .init(format: "sdr-tiff", gamut: "p3", verify: false),
+            read: { y, count, base, gain in try bridge.read(y: y, count: count, base: base, gain: gain) })
+        _ = try bridge.thumbnail()
+        var after = rusage(); getrusage(RUSAGE_SELF, &after)
+        let data = try JSONSerialization.data(withJSONObject: ["height": height, "width": width, "rows": rows,
+            "before": before.ru_maxrss, "peak": after.ru_maxrss], options: [.sortedKeys])
+        try data.write(to: root.appendingPathComponent("\(height).json"))
+        print("KIT_ROWS_MEMORY " + String(data: data, encoding: .utf8)!)
+    }
+
+    @Test func pullWritersReplayRowsAndMatchWholePlanePixels() async throws {
+        let env = try await RecipeExportEnvironment(); defer { env.remove() }
+        let calls = Mutex<[(Int, Int)]>([])
+        let fake = StripeFake(onRead: { y, rows in calls.withLock { $0.append((y, rows)) } })
+        let service = env.service(fake)
+        let frame = FrameSnapshot(canvasSize: .init(width: 112, height: 600),
+            photo: .init(x: 8, y: 8, width: 96, height: 64), paper: .init(repeating: 0.8))
+        func pixels(_ url: URL) throws -> [Float] {
+            let image = try #require(CIImage(contentsOf: url, options: [.expandToHDR: true]))
+            let w = Int(image.extent.width), h = Int(image.extent.height)
+            var values = [Float](repeating: 0, count: w*h*4)
+            values.withUnsafeMutableBytes { CIContext(options: [.cacheIntermediates: false]).render(image,
+                toBitmap: $0.baseAddress!, rowBytes: w*16, bounds: image.extent, format: .RGBAf,
+                colorSpace: CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3)) }
+            return values
+        }
+        for encoding in [ExportEncoding.sdrJPEG, .sdrTIFF, .isoGainMapJPEG, .adaptive, .pq, .hlg] {
+            let snapshot = try env.snapshot(frame: encoding == .adaptive ? frame : nil)
+            var request = env.request(encoding)
+            let streamed = try await service.export(session: env.session.id, snapshot: snapshot, request: request)
+            #expect(streamed.resolved.usesRowInput == true)
+            request.allowsRowInput = false
+            let whole = try await service.export(session: env.session.id, snapshot: snapshot, request: request)
+            #expect(whole.resolved.usesRowInput == false)
+            #expect(try pixels(streamed.file) == pixels(whole.file), "\(encoding)")
+            #expect(await env.sessions.exportThumbnail(env.session.id, export: streamed.record.id) != nil)
+        }
+        let reads = calls.withLock { $0 }
+        #expect(reads.count > 6) // Gain analysis and encoding replay the same rows.
+        #expect(reads.allSatisfy { $0.1 <= 256 })
+        #expect(reads.filter { $0.0 == 0 }.count > 6)
+    }
+
     @Test func heicMemoryFallbackKeepsEncodingQualityAndSize() async throws {
         let env = try await RecipeExportEnvironment(); defer { env.remove() }
         let request = env.request(.adaptive)
@@ -374,14 +461,16 @@ private struct RecipeExportEnvironment {
         #expect(await env.sessions.exports(for: env.session.id).isEmpty)
     }
 
-    @Test func replanningCreditsTheSourceWhenRemainingMemoryDrops() async throws {
+    @Test(arguments: [false, true]) func replanningCreditsTheSourceWhenRemainingMemoryDrops(rows: Bool) async throws {
         let env = try await RecipeExportEnvironment(); defer { env.remove() }
-        let request = env.request(.isoGainMapJPEG)
+        var request = env.request(.isoGainMapJPEG)
+        request.allowsRowInput = rows
         let initialPlan = ExportPlanner.plan(request, budget: FixedExportMemoryBudget(bytes: 1_000_000_000))
         let peak = initialPlan.memory.estimate.peak
         let sourceBytes = request.source.pixelSize.pixels * 16
         let budget = ChangingExportMemoryBudget(peak + 1)
-        let service = RecipeExportService(engine: env.engine, renderEngine: env.render, renderer: env.render,
+        let renderer: any ExportStripeRendering = rows ? StripeFake() : env.render
+        let service = RecipeExportService(engine: env.engine, renderEngine: env.render, renderer: renderer,
             sessions: env.sessions, target: env.target, budget: budget)
         let result = try await service.export(session: env.session.id, snapshot: env.snapshot(), request: request,
             progress: { event in

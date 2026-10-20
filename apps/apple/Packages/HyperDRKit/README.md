@@ -116,3 +116,48 @@ Source SHA-256 already runs off the caller in a detached task, with chunk-level
 cancellation; `SessionStore.open` waits for it to establish content identity and
 history/session reuse. A host may start that task alongside photo decoding and
 await the same task when preparing export, rather than serializing both opens.
+
+
+## Incremental export integration (P7-3d-K)
+
+`ExportRowRendering.prepareRows` accepts a lazy `HyperDRRender.ExportSource` and
+frozen Recipe/LUT/prediction/request. It returns `ExportRowSource`, whose report is
+fixed and whose synchronous `read(y:count:)` may be replayed. A renderer may opt
+into this separately from `ExportStripeRendering`; the service also accepts an
+explicit `rowRenderer` injection. The real Render adapter follows its prepared-row
+handoff; a renderer without this protocol keeps the whole-plane path. Setting
+`ExportPlanRequest.allowsRowInput=false` provides that same parity baseline.
+
+Native JPEG/TIFF/ISO JPEG/HEIC writers pull rows through `PackageRowBridge`, not a
+canvas owner or spool. Each callback validates and copies one stripe into the
+engine's borrowed buffers and returns before the next one. The source scope and
+revision stay frozen until verification/publication. A bounded <=256px linear
+thumbnail accumulator accepts each source row once, so replays cannot bias it.
+Rendering and encoding overlap; encoding progress stays an active stage instead
+of claiming completion on an intermediate scan pass. `usesRowInput` is recorded
+in both resolved snapshot and report.
+
+ImageIO manual HEIC8/SDR HEIC and AVIF keep whole-plane writing. HEIC8 selected as
+a memory fallback to our writer uses the row path. Admission compares writer plus
+format capabilities; analysis/prediction use the lazy source's fixed analysis
+image, and a full source is loaded only when the final plan needs whole planes.
+
+The row model prices fixed analysis, decoder/RAW caches, source ROI and active
+Render graph, 56 CPU+32 GPU bytes per RGB-gain readback pixel, package input band,
+and HEIC's independent 512-row float/YUV slab. HEIC also reserves compressed tiles
+plus assembly bytes (two copies, estimated at 3 B/pixel or 5 for adaptive10, plus
+8 MiB). These are reserve policies, not measured encoder limits. Preparation's
+256-row scan and the encoding reader are successive phases; 256/128/64 input
+choices reduce the latter, not the fixed scan or HEIC slab. Native/system
+verification still gets a separate full-image decode budget pending verify-stream;
+this does not claim constant memory for complete export or 61MP iPhone admission.
+
+Opt-in bridge/writer measurement: run `streamingHeightMemoryMeasurement` in fresh
+processes with `HYPERDR_STREAM_HEIGHT=1024`, then `4096`. At 2048 pixels wide and
+64 rows, process `ru_maxrss` was 72,744,960 B (69.38 MiB) versus 72,581,120 B
+(69.22 MiB). It includes the real Kit row bridge, bounded thumbnail and native
+incremental TIFF, with a procedural Fake row source and verify=false. It excludes
+real system source/Render/verification residency; JSON is in
+`/tmp/p7-stream-memory/`. The separate six-format test compares whole versus rows
+with identical decoded pixels, including JPEG's intentionally different entropy
+coding, and confirms multi-band gain analysis/encoding replay.

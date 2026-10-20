@@ -16,6 +16,7 @@ public struct RecipeExportReport: Sendable, Codable {
     public let writer: ExportWriter?
     public let writerReason: ExportWriterReason?
     public let imageIO: ImageIOGainWriteReport?
+    public let usesRowInput: Bool?
 }
 
 /// One operation at a time. Dedicated RenderEngine caches can be discarded
@@ -26,6 +27,7 @@ public actor RecipeExportService: RecipeExportServicing {
     private let engine: Engine
     private let renderEngine: RenderEngine
     private let renderer: any ExportStripeRendering
+    private let rowRenderer: (any ExportRowRendering)?
     private let sessions: SessionStore
     private let target: ExportTarget
     private let budget: any ExportMemoryBudget
@@ -35,10 +37,12 @@ public actor RecipeExportService: RecipeExportServicing {
 
     public init(engine: Engine, renderEngine: RenderEngine, renderer: any ExportStripeRendering,
                 sessions: SessionStore, target: ExportTarget,
-                budget: any ExportMemoryBudget = SystemExportMemoryBudget(), prediction: Prediction? = nil) {
+                budget: any ExportMemoryBudget = SystemExportMemoryBudget(), prediction: Prediction? = nil,
+                rowRenderer: (any ExportRowRendering)? = nil) {
         self.engine = engine; self.renderEngine = renderEngine; self.renderer = renderer
         self.sessions = sessions; self.target = target; self.budget = budget
         self.prediction = prediction
+        self.rowRenderer = rowRenderer ?? (renderer as? any ExportRowRendering)
     }
 
     public func export(session: SessionID, snapshot: RecipeExportSnapshot,
@@ -72,6 +76,7 @@ public actor RecipeExportService: RecipeExportServicing {
             defer { lease.stop() }
             try validateRevision(photo, snapshot: snapshot)
             var actualRequest = request
+            actualRequest.allowsRowInput = request.allowsRowInput && rowRenderer != nil
             // Recipe is authoritative for the SDR switch. The selection cannot
             // turn processing back on or turn the recipe into legacy options.
             actualRequest.edit.hdrEnabled = snapshot.recipe.conditionValue("hdr.enabled")?.boolValue ?? true
@@ -89,7 +94,7 @@ public actor RecipeExportService: RecipeExportServicing {
             if let destination { destinationLease = try await target.leaseDestination(destination, expectedExtension: ext) }
             else { destinationLease = nil }
             defer { destinationLease?.stop() }
-            try await checkMemory(plan, residentBytes: 0, sourcePixels: request.source.pixelSize.pixels)
+            try await checkMemory(plan, residentBytes: 0, sourceSize: request.source.pixelSize)
             await renderEngine.clearCaches()
             var frozenLUT = lut
             if let hash = snapshot.lutContentHash {
@@ -109,15 +114,24 @@ public actor RecipeExportService: RecipeExportServicing {
             }
             plan = ExportPlanner.plan(actualRequest, budget: budget)
             let retainedCPUBytes = (frozenLUT?.values.count ?? 0) * 16 + (frozenFrame?.caption?.png.count ?? 0)
-            try await checkMemory(plan, residentBytes: retainedCPUBytes, sourcePixels: request.source.pixelSize.pixels)
+            try await checkMemory(plan, residentBytes: retainedCPUBytes, sourceSize: request.source.pixelSize)
             if let frame = frozenFrame {
                 guard frame.photo.width == plan.photoSize.width, frame.photo.height == plan.photoSize.height else {
                     throw RecipeExportError.invalidSnapshot
                 }
             }
             emit(.developing)
-            let source = try await renderEngine.load(photo.sourceURL,
-                options: SourceOptions(recipe: snapshot.recipe, resolution: .full))
+            let lazySource: HyperDRRender.ExportSource?
+            var source: RenderSource
+            if actualRequest.allowsRowInput {
+                let lazy = try await renderEngine.openExportSource(photo.sourceURL,
+                    options: SourceOptions(recipe: snapshot.recipe, resolution: .full))
+                lazySource = lazy; source = lazy.analysisSource
+            } else {
+                lazySource = nil
+                source = try await renderEngine.load(photo.sourceURL,
+                    options: SourceOptions(recipe: snapshot.recipe, resolution: .full))
+            }
             guard source.domain == snapshot.recipe.inputDomain,
                   source.nativeSize.width == request.source.pixelSize.width,
                   source.nativeSize.height == request.source.pixelSize.height else { throw RecipeExportError.sourceChanged }
@@ -160,16 +174,23 @@ public actor RecipeExportService: RecipeExportServicing {
             // The host reports remaining memory after source/model/analysis
             // allocation. Credit only resident allocations already charged in
             // the estimate; prediction is not part of that estimate.
-            let resident = retainedCPUBytes
-                + request.source.pixelSize.pixels * (source.domain == .dual ? 48 : 16)
-                + (source.domain == .rawEDR ? (request.source.sensorSize ?? request.source.pixelSize).pixels * 16 : 0)
+            var resident = retainedCPUBytes
+                + source.size.width * source.size.height * (source.domain == .dual ? 48 : 16)
+                + (lazySource == nil && source.domain == .rawEDR
+                    ? (request.source.sensorSize ?? request.source.pixelSize).pixels * 16 : 0)
             let remaining = budget.availableBytes() ?? 256 * 1024 * 1024
             let totalBudget = remaining.addingReportingOverflow(resident)
             plan = ExportPlanner.plan(actualRequest, budget: FixedExportMemoryBudget(
                 bytes: totalBudget.overflow ? Int.max : totalBudget.partialValue))
             let resolvedBlockers = plan.blockers.filter { $0.code != "photos_permission_denied" }
             guard resolvedBlockers.isEmpty else { throw RecipeExportError.planBlocked(resolvedBlockers.map(\.code)) }
-            try await checkMemory(plan, residentBytes: resident, sourcePixels: request.source.pixelSize.pixels)
+            if !plan.memory.usesRowInput && lazySource != nil {
+                source = try await renderEngine.load(photo.sourceURL,
+                    options: SourceOptions(recipe: snapshot.recipe, resolution: .full))
+                resident = retainedCPUBytes + request.source.pixelSize.pixels * (source.domain == .dual ? 48 : 16)
+                    + (source.domain == .rawEDR ? (request.source.sensorSize ?? request.source.pixelSize).pixels * 16 : 0)
+            }
+            try await checkMemory(plan, residentBytes: resident, sourceSize: request.source.pixelSize)
             let prepared = try await sessions.prepareRecipeExport(session, snapshot: snapshot)
             pending = prepared.id
             let file = prepared.directory.appendingPathComponent("result." + ext)
@@ -183,94 +204,140 @@ public actor RecipeExportService: RecipeExportServicing {
                                     supportsSignedGain: caps.supportsSignedGain,
                                     requiresGainMaximumHeadroom: caps.requiresGainMaximumHeadroom),
                 frame: frozenFrame)
-            let owner = PackagePlaneCollector(width: plan.size.width, height: plan.size.height)
-            emit(.rendering)
-            let finalReport = try await renderer.renderExportStripes(source, recipe: snapshot.recipe, lut: frozenLUT,
-                modelGain: model, request: renderRequest, rows: plan.memory.renderRows,
-                prepare: { report in try Task.checkCancellation(); try owner.prepare(report) },
-                consume: { stripe in
-                    try owner.consume(stripe)
-                    progress(.init(stage: .rendering, completedRows: stripe.rect.y + stripe.rect.height,
-                                   totalRows: renderRequest.canvasSize.height))
-                })
-            let report = try owner.completed()
-            let needsGain = renderRequest.includesGain
-            guard (report.gain != nil) == needsGain,
-                  report.presentationFrame == (snapshot.frame != nil),
-                  plan.writer.capabilities(encoding: plan.encoding, bitDepth: plan.baseBitDepth,
-                                           gainChannels: report.gain?.channelCount ?? 0).supported else {
-                throw HyperDRError(code: "unsupported_format", message: "The rendered pair cannot be represented by this writer")
-            }
-            guard finalReport.canvasSize == report.canvasSize, finalReport.gain == report.gain,
-                  finalReport.sourceProvenance == report.sourceProvenance,
-                  finalReport.provenance == report.provenance, finalReport.resplitReasons == report.resplitReasons,
-                  finalReport.rangeBeforeCeiling == report.rangeBeforeCeiling,
-                  finalReport.rangeAfterCeiling == report.rangeAfterCeiling,
-                  finalReport.resolvedAutomatic == report.resolvedAutomatic,
-                  finalReport.presentationFrame == report.presentationFrame, finalReport.framePhoto == report.framePhoto else {
-                throw RecipeExportError.invalidStripes
-            }
-            // A source edit during inference/render must not be published as the
-            // old source. SessionStore rehashes on inode/ctime/mtime changes.
-            let refreshed = try await sessions.session(session)
-            try validateRevision(refreshed, snapshot: snapshot)
-            // The collected planes are now independent. Drop graph/analysis/LUT
-            // GPU caches before package allocates its whole-plane copies. The
-            // source stays charged in resident bytes; prediction consumes the
-            // host's measured remaining budget.
-            await renderEngine.clearCaches()
-            try Task.checkCancellation()
-            try await checkMemory(plan, residentBytes: resident + plan.size.pixels * (12 + 4 * (report.gain?.channelCount ?? 0)),
-                                  sourcePixels: request.source.pixelSize.pixels)
-            let thumbnail = try owner.thumbnail(frame: frozenFrame)
-            emit(.encoding)
+            let report: ExportRenderReport
+            let thumbnail: ExportThumbnail
             var packageJSON: Data?
             var firstReaderJSON: Data?
             var imageIOReport: ImageIOGainWriteReport?
-            if plan.writer == .imageIO && plan.gainMap.writesGainMap {
-                guard let gain = owner.gainPlane, let metadata = report.gain else { throw RecipeExportError.invalidStripes }
-                imageIOReport = try ImageIOHEICWriter.write(base: owner.basePlane, gain: gain, metadata: metadata,
-                    to: file, quality: plan.quality)
-                emit(.verifying)
-                let probe = try await engine.probe(file)
-                guard probe.width == plan.size.width, probe.height == plan.size.height,
-                      probe.orientation == 1, probe.inputDomain == "dual-rendition",
-                      probe.headroom.isFinite, probe.headroom >= 1 else {
-                    throw RecipeExportError.verificationFailed("heif_gain_readback")
+            if plan.memory.usesRowInput {
+                guard let rowRenderer, let lazySource,
+                      Engine.supportsPackageRows(format: plan.encoding.rawValue) else {
+                    throw HyperDRError(code: "unsupported_format", message: "Incremental export is unavailable")
                 }
-                firstReaderJSON = probe.rawJSON
-            } else if plan.encoding == .adaptive && !plan.gainMap.writesGainMap {
-                try SDRHEICWriter.write(owner.basePlane, to: file, quality: plan.quality)
-                emit(.verifying)
-                let probe = try await engine.probe(file)
-                guard probe.width == plan.size.width, probe.height == plan.size.height,
-                      probe.orientation == 1, probe.inputDomain == "display-referred-sdr" else {
-                    throw RecipeExportError.verificationFailed("heif_sdr_readback")
-                }
-                firstReaderJSON = probe.rawJSON
-            } else {
+                emit(.rendering)
+                let rows = try await rowRenderer.prepareRows(lazySource, recipe: snapshot.recipe, lut: frozenLUT,
+                    modelGain: model, request: renderRequest, rows: plan.memory.renderRows)
+                report = rows.report
+                guard report.canvasSize == renderRequest.canvasSize,
+                      (report.gain != nil) == renderRequest.includesGain,
+                      report.presentationFrame == (snapshot.frame != nil),
+                      report.framePhoto == frozenFrame?.photo,
+                      plan.writer.capabilities(encoding: plan.encoding, bitDepth: plan.baseBitDepth,
+                        gainChannels: report.gain?.channelCount ?? 0).supported else { throw RecipeExportError.invalidStripes }
+                try validateRevision(try await sessions.session(session), snapshot: snapshot)
+                try await checkMemory(plan, residentBytes: resident, sourceSize: request.source.pixelSize)
+                let bridge = PackageRowBridge(source: rows, frame: frozenFrame)
+                emit(.encoding)
                 let metadata = report.gain.map {
                     PackageGainMetadata(baseOffsets: [$0.baseOffset.x, $0.baseOffset.y, $0.baseOffset.z],
-                                        alternateOffsets: [$0.alternateOffset.x, $0.alternateOffset.y, $0.alternateOffset.z],
-                                        baseHeadroom: $0.baseHeadroom, alternateHeadroom: $0.alternateHeadroom)
+                        alternateOffsets: [$0.alternateOffset.x, $0.alternateOffset.y, $0.alternateOffset.z],
+                        baseHeadroom: $0.baseHeadroom, alternateHeadroom: $0.alternateHeadroom)
                 }
                 let framePhoto = plan.gainMap.writesGainMap ? report.framePhoto.map {
                     FrameLayout.Rect(x: $0.x, y: $0.y, width: $0.width, height: $0.height)
                 } : nil
-                let packaged = try await engine.package(sdr: owner.basePlane, gain: owner.gainPlane,
-                    gainMetadata: metadata, to: file,
-                    options: .init(format: plan.encoding.rawValue, quality: plan.quality,
-                                   depth: plan.encoding == .adaptive ? plan.baseBitDepth : 8,
-                                   gamut: plan.encoding.isSDR ? plan.gamut.rawValue : nil, verify: true,
-                                   presentationFrame: report.presentationFrame, framePhoto: framePhoto))
-                guard packaged.verified else { throw RecipeExportError.verificationFailed("package_unverified") }
-                guard (packaged.gain?.clippedSamples ?? 0) == 0 else {
-                    throw HyperDRError(code: "unsupported_format", message: "The writer clipped gain samples that Render must normalize")
+                let packaged = try await engine.packageRows(width: plan.size.width, height: plan.size.height,
+                    gainChannels: report.gain?.channelCount ?? 0, gainMetadata: metadata, rows: plan.memory.renderRows,
+                    to: file, options: .init(format: plan.encoding.rawValue, quality: plan.quality,
+                        depth: plan.encoding == .adaptive ? plan.baseBitDepth : 8,
+                        gamut: plan.encoding.isSDR ? plan.gamut.rawValue : nil, verify: true,
+                        presentationFrame: report.presentationFrame, framePhoto: framePhoto),
+                    read: { y, count, base, gain in try bridge.read(y: y, count: count, base: base, gain: gain) })
+                guard packaged.verified, (packaged.gain?.clippedSamples ?? 0) == 0 else {
+                    throw RecipeExportError.verificationFailed("package_rows_unverified")
                 }
                 packageJSON = packaged.rawJSON
+                thumbnail = try bridge.thumbnail()
                 emit(.verifying)
+            } else {
+                let owner = PackagePlaneCollector(width: plan.size.width, height: plan.size.height)
+                emit(.rendering)
+                let finalReport = try await renderer.renderExportStripes(source, recipe: snapshot.recipe, lut: frozenLUT,
+                    modelGain: model, request: renderRequest, rows: plan.memory.renderRows,
+                    prepare: { report in try Task.checkCancellation(); try owner.prepare(report) },
+                    consume: { stripe in
+                        try owner.consume(stripe)
+                        progress(.init(stage: .rendering, completedRows: stripe.rect.y + stripe.rect.height,
+                                       totalRows: renderRequest.canvasSize.height))
+                    })
+                report = try owner.completed()
+                let needsGain = renderRequest.includesGain
+                guard (report.gain != nil) == needsGain,
+                      report.presentationFrame == (snapshot.frame != nil),
+                      plan.writer.capabilities(encoding: plan.encoding, bitDepth: plan.baseBitDepth,
+                                               gainChannels: report.gain?.channelCount ?? 0).supported else {
+                    throw HyperDRError(code: "unsupported_format", message: "The rendered pair cannot be represented by this writer")
+                }
+                guard finalReport.canvasSize == report.canvasSize, finalReport.gain == report.gain,
+                      finalReport.sourceProvenance == report.sourceProvenance,
+                      finalReport.provenance == report.provenance, finalReport.resplitReasons == report.resplitReasons,
+                      finalReport.rangeBeforeCeiling == report.rangeBeforeCeiling,
+                      finalReport.rangeAfterCeiling == report.rangeAfterCeiling,
+                      finalReport.resolvedAutomatic == report.resolvedAutomatic,
+                      finalReport.presentationFrame == report.presentationFrame, finalReport.framePhoto == report.framePhoto else {
+                    throw RecipeExportError.invalidStripes
+                }
+                // A source edit during inference/render must not be published as the
+                // old source. SessionStore rehashes on inode/ctime/mtime changes.
+                let refreshed = try await sessions.session(session)
+                try validateRevision(refreshed, snapshot: snapshot)
+                // The collected planes are now independent. Drop graph/analysis/LUT
+                // GPU caches before package allocates its whole-plane copies. The
+                // source stays charged in resident bytes; prediction consumes the
+                // host's measured remaining budget.
+                await renderEngine.clearCaches()
+                try Task.checkCancellation()
+                try await checkMemory(plan, residentBytes: resident + plan.size.pixels * (12 + 4 * (report.gain?.channelCount ?? 0)),
+                                      sourceSize: request.source.pixelSize)
+                thumbnail = try owner.thumbnail(frame: frozenFrame)
+                emit(.encoding)
+                if plan.writer == .imageIO && plan.gainMap.writesGainMap {
+                    guard let gain = owner.gainPlane, let metadata = report.gain else { throw RecipeExportError.invalidStripes }
+                    imageIOReport = try ImageIOHEICWriter.write(base: owner.basePlane, gain: gain, metadata: metadata,
+                        to: file, quality: plan.quality)
+                    emit(.verifying)
+                    let probe = try await engine.probe(file)
+                    guard probe.width == plan.size.width, probe.height == plan.size.height,
+                          probe.orientation == 1, probe.inputDomain == "dual-rendition",
+                          probe.headroom.isFinite, probe.headroom >= 1 else {
+                        throw RecipeExportError.verificationFailed("heif_gain_readback")
+                    }
+                    firstReaderJSON = probe.rawJSON
+                } else if plan.encoding == .adaptive && !plan.gainMap.writesGainMap {
+                    try SDRHEICWriter.write(owner.basePlane, to: file, quality: plan.quality)
+                    emit(.verifying)
+                    let probe = try await engine.probe(file)
+                    guard probe.width == plan.size.width, probe.height == plan.size.height,
+                          probe.orientation == 1, probe.inputDomain == "display-referred-sdr" else {
+                        throw RecipeExportError.verificationFailed("heif_sdr_readback")
+                    }
+                    firstReaderJSON = probe.rawJSON
+                } else {
+                    let metadata = report.gain.map {
+                        PackageGainMetadata(baseOffsets: [$0.baseOffset.x, $0.baseOffset.y, $0.baseOffset.z],
+                                            alternateOffsets: [$0.alternateOffset.x, $0.alternateOffset.y, $0.alternateOffset.z],
+                                            baseHeadroom: $0.baseHeadroom, alternateHeadroom: $0.alternateHeadroom)
+                    }
+                    let framePhoto = plan.gainMap.writesGainMap ? report.framePhoto.map {
+                        FrameLayout.Rect(x: $0.x, y: $0.y, width: $0.width, height: $0.height)
+                    } : nil
+                    let packaged = try await engine.package(sdr: owner.basePlane, gain: owner.gainPlane,
+                        gainMetadata: metadata, to: file,
+                        options: .init(format: plan.encoding.rawValue, quality: plan.quality,
+                                       depth: plan.encoding == .adaptive ? plan.baseBitDepth : 8,
+                                       gamut: plan.encoding.isSDR ? plan.gamut.rawValue : nil, verify: true,
+                                       presentationFrame: report.presentationFrame, framePhoto: framePhoto))
+                    guard packaged.verified else { throw RecipeExportError.verificationFailed("package_unverified") }
+                    guard (packaged.gain?.clippedSamples ?? 0) == 0 else {
+                        throw HyperDRError(code: "unsupported_format", message: "The writer clipped gain samples that Render must normalize")
+                    }
+                    packageJSON = packaged.rawJSON
+                    emit(.verifying)
+                }
             }
-            // package's own verification has returned and released its decode.
+            // The native verifier has released its decode. Release graph caches
+            // before the independent system reader starts.
+            await renderEngine.clearCaches()
             if let imageIOReport { try ImageIOHEICWriter.verify(file, expected: imageIOReport) }
             let system = try ExportVerification.system(file, plan: plan, gainMetadata: report.gain)
             try Task.checkCancellation()
@@ -286,7 +353,8 @@ public actor RecipeExportService: RecipeExportServicing {
             let evidence = RecipeExportReport(schema: "hyperdr.recipe-export/v1", packageJSON: packageJSON,
                 firstReaderJSON: firstReaderJSON, system: system, stageSeconds: timings,
                 resplitReasons: resolved.resplitReasons, transparentBackground: "black-sdr",
-                writer: plan.writer, writerReason: plan.writerReason, imageIO: imageIOReport)
+                writer: plan.writer, writerReason: plan.writerReason, imageIO: imageIOReport,
+                usesRowInput: plan.memory.usesRowInput)
             emit(.publishing)
             var record = try await sessions.publishRecipeExport(session, export: prepared.id, name: file.lastPathComponent,
                 resolved: resolved, reportJSON: JSONEncoder().encode(evidence), thumbnail: thumbnail)
@@ -326,13 +394,28 @@ public actor RecipeExportService: RecipeExportServicing {
         let revision = try RecipeSourceRevision(session: photo)
         guard revision == snapshot.source else { throw RecipeExportError.sourceChanged }
     }
-    private func checkMemory(_ plan: ExportPlan, residentBytes: Int, sourcePixels: Int) async throws {
+    private func checkMemory(_ plan: ExportPlan, residentBytes: Int, sourceSize: ExportPixelSize) async throws {
         let available = budget.availableBytes() ?? 256 * 1024 * 1024
         let needed = max(0, plan.memory.estimate.peak - residentBytes)
         guard needed <= available else { throw RecipeExportError.memoryExceeded(required: needed, available: available) }
         // Metal's recommendation is an independent GPU constraint, never the
         // process limit. Source and active graph textures still occupy memory.
-        let gpu = sourcePixels * 48 + plan.photoSize.pixels * 64 + plan.size.width * min(plan.memory.renderRows, plan.size.height) * 64
+        let sourcePixels = sourceSize.pixels
+        let gpu: Int
+        if plan.memory.usesRowInput {
+            func graph(_ rows: Int) -> Int {
+                let rows = min(rows, plan.photoSize.height)
+                let nativeRows = min(sourceSize.height, Int(ceil(Double(rows + 4)
+                    * Double(sourceSize.height) / Double(plan.photoSize.height))))
+                return sourceSize.width * nativeRows * 48 + plan.photoSize.width * rows * 64
+            }
+            gpu = min(sourcePixels, 1024 * 1024) * 48
+                + max(graph(256), graph(plan.memory.renderRows)
+                    + plan.size.width * min(plan.memory.renderRows, plan.size.height) * 32)
+        } else {
+            gpu = sourcePixels * 48 + plan.photoSize.pixels * 64
+                + plan.size.width * min(plan.memory.renderRows, plan.size.height) * 64
+        }
         let gpuBudget = await renderEngine.device.recommendedMaxWorkingSetSize
         guard gpu <= gpuBudget else {
             throw RecipeExportError.memoryExceeded(required: gpu, available: Int(gpuBudget))

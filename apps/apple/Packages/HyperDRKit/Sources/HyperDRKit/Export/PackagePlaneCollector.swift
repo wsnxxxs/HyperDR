@@ -64,7 +64,7 @@ final class PackagePlaneCollector: @unchecked Sendable {
         guard let gain, let channels = report?.gain?.channelCount else { return nil }
         return .init(samples: .init(start: gain, count: width * height * channels), width: width, height: height, channels: channels)
     }
-    func thumbnail(frame: FrameSnapshot? = nil) throws -> ExportThumbnail {
+    func thumbnail(frame: FrameSnapshot? = nil, captionFrame: FrameSnapshot? = nil) throws -> ExportThumbnail {
         _ = try completed()
         let scale = min(1, 256.0 / Double(max(width, height)))
         let w = max(1, Int(Double(width) * scale)), h = max(1, Int(Double(height) * scale))
@@ -98,7 +98,8 @@ final class PackagePlaneCollector: @unchecked Sendable {
                                   provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent) else {
             throw RecipeExportError.invalidStripes
         }
-        if let caption = frame?.caption,
+        let overlayFrame = captionFrame ?? frame
+        if let caption = overlayFrame?.caption,
            let source = CGImageSourceCreateWithData(caption.png as CFData, nil),
            let overlay = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
@@ -106,7 +107,8 @@ final class PackagePlaneCollector: @unchecked Sendable {
            let context = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w*4,
                                    space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
             context.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
-            let sx = Double(w)/Double(width), sy = Double(h)/Double(height)
+            let sx = Double(w)/Double(overlayFrame?.canvasSize.width ?? width)
+            let sy = Double(h)/Double(overlayFrame?.canvasSize.height ?? height)
             context.draw(overlay, in: CGRect(x: Double(caption.rect.x)*sx,
                 y: Double(h)-Double(caption.rect.y+caption.rect.height)*sy,
                 width: Double(caption.rect.width)*sx, height: Double(caption.rect.height)*sy))

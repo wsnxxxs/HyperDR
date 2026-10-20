@@ -65,6 +65,12 @@ public enum ExportWriter: String, Sendable, Hashable, Codable {
     /// libavif, used only for AVIF.
     case libavif
 
+    /// Native row-input writers. ImageIO's manual auxiliary-data API and AVIF
+    /// still require whole planes; capability is per writer as well as format.
+    public func supportsRowInput(encoding: ExportEncoding) -> Bool {
+        self == .inHouse && !encoding.isAVIF
+    }
+
     /// Package/ImageIO capabilities for this exact output combination. We accumulate full
     /// planes; none of these writers is a streaming plane consumer.
     public func capabilities(encoding: ExportEncoding, bitDepth: Int,

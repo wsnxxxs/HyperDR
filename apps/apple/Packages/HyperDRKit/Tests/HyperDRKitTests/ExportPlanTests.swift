@@ -344,15 +344,25 @@ struct ExportMemoryPlanTests {
         #expect(!plan.isExecutable)
     }
 
-    @Test func aCanvasThatDoesNotFitCannotPretendToStreamTheWriter() {
+    @Test func anAVIFCanvasThatDoesNotFitIsRefused() {
         let canvas = ExportPixelSize(width: 12000, height: 8000)
-        let framed = request(.custom(CustomExportFormat(encoding: .isoGainMapJPEG, gamut: .p3, quality: 90)),
+        let framed = request(.custom(CustomExportFormat(encoding: .avifPq, gamut: .p3, quality: 90)),
                              frame: ExportFrameFacts(canvas: canvas))
         let whole = plan(framed).memory.estimate.peak
         let result = plan(framed, available: whole - 1)
         #expect(result.memory.degradation == .refused)
         #expect(!result.memory.fits)
         #expect(!result.isExecutable)
+    }
+
+    @Test func incrementalRowsCanShrinkTheActiveGraphAndInputBand() {
+        let framed = request(.custom(.init(encoding: .isoGainMapJPEG, gamut: .p3, quality: 90)),
+            frame: ExportFrameFacts(canvas: .init(width: 12000, height: 8000)))
+        let preferred = plan(framed)
+        let reduced = plan(framed, available: preferred.memory.estimate.peak - 1)
+        #expect(reduced.memory.usesRowInput && reduced.isExecutable)
+        #expect(reduced.memory.renderRows < preferred.memory.renderRows)
+        #expect(reduced.memory.estimate.peak < preferred.memory.estimate.peak)
     }
 
     @Test func whatNoWriterFitsIsRefusedWithAReason() {
@@ -410,17 +420,29 @@ struct ExportMemoryPlanTests {
         let whole = ExportMemoryEstimate.estimate(ExportMemoryEstimate.Input(
             source: source(), photoSize: photo, canvas: photo, encoding: .isoGainMapJPEG,
             writer: .inHouse, writesGainMap: true, isFramed: false, baseBitDepth: 8,
-            writeRows: photo.height, retainedBytes: 0))
+            writeRows: photo.height, retainedBytes: 0, allowsRowInput: false))
         let strips = ExportMemoryEstimate.estimate(ExportMemoryEstimate.Input(
             source: source(), photoSize: photo, canvas: photo, encoding: .isoGainMapJPEG,
             writer: .inHouse, writesGainMap: true, isFramed: false, baseBitDepth: 8,
-            writeRows: 64, retainedBytes: 0))
+            writeRows: 64, retainedBytes: 0, allowsRowInput: false))
         // Readback has both RGBA and packed RGB for base and gain (56 B/px),
         // beside GPU RGBA outputs (32 B/px). Shrinking stripes only frees those.
         let freedStripePixels = photo.width * (photo.height - 64)
         #expect(whole.render - strips.render >= freedStripePixels * (56 + 32))
         #expect(strips.encode == whole.encode)
         #expect(strips.packaging == whole.packaging)
+    }
+
+    @Test func rowsRemoveOwnersButStillReserveWholeImageVerification() {
+        let req = request(.custom(.init(encoding: .sdrTIFF, gamut: .p3, quality: 90)))
+        let streamed = plan(req)
+        var old = req; old.allowsRowInput = false
+        let whole = plan(old)
+        #expect(streamed.memory.usesRowInput && !whole.memory.usesRowInput)
+        #expect(streamed.memory.estimate.encode < whole.memory.estimate.encode)
+        #expect(streamed.memory.estimate.verify > photo.pixels * 16)
+        #expect(!ExportWriter.imageIO.supportsRowInput(encoding: .adaptive))
+        #expect(!ExportWriter.libavif.supportsRowInput(encoding: .avifPq))
     }
 
     @Test func theSystemBudgetAnswersOrDeclines() {

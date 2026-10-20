@@ -57,6 +57,7 @@ public actor RecipeExportService: RecipeExportServicing {
         var published = false
         var timings: [String: Double] = [:]
         var stage = RecipeExportStage.preparing
+        let operationStart = ContinuousClock.now
         var stageStart = Date()
         func emit(_ next: RecipeExportStage) {
             timings[stage.rawValue, default: 0] += Date().timeIntervalSince(stageStart)
@@ -78,6 +79,7 @@ public actor RecipeExportService: RecipeExportServicing {
             defer { lease.stop() }
             try validateRevision(photo, snapshot: snapshot)
             var actualRequest = request
+            actualRequest.capabilities = ExportEncodingCapabilities(try await engine.capabilities())
             actualRequest.allowsRowInput = request.allowsRowInput && rowRenderer != nil
             // Recipe is authoritative for the SDR switch. The selection cannot
             // turn processing back on or turn the recipe into legacy options.
@@ -88,8 +90,8 @@ public actor RecipeExportService: RecipeExportServicing {
                 actualRequest.frame = ExportFrameFacts(canvas: .init(width: frame.width, height: frame.height))
             } else { actualRequest.frame = ExportFrameFacts() }
             var plan = ExportPlanner.plan(actualRequest, budget: budget)
-            // Photos authorization gates library delivery, never file generation.
-            let blockers = plan.blockers.filter { $0.code != "photos_permission_denied" }
+            // Destination availability and encoding share the same planning admission.
+            let blockers = plan.blockers
             guard blockers.isEmpty else {
                 recordPlanMemoryFailure(plan, residentBytes: 0)
                 throw RecipeExportError.planBlocked(blockers.map(\.code))
@@ -99,7 +101,7 @@ public actor RecipeExportService: RecipeExportServicing {
             if let destination { destinationLease = try await target.leaseDestination(destination, expectedExtension: ext) }
             else { destinationLease = nil }
             defer { destinationLease?.stop() }
-            try await checkMemory(plan, residentBytes: 0, sourceSize: request.source.pixelSize)
+            try await checkMemory(plan, residentBytes: 0, request: actualRequest)
             await renderEngine.clearCaches()
             var frozenLUT = lut
             if let hash = snapshot.lutContentHash {
@@ -119,7 +121,7 @@ public actor RecipeExportService: RecipeExportServicing {
             }
             plan = ExportPlanner.plan(actualRequest, budget: budget)
             let retainedCPUBytes = (frozenLUT?.values.count ?? 0) * 16 + (frozenFrame?.caption?.png.count ?? 0)
-            try await checkMemory(plan, residentBytes: retainedCPUBytes, sourceSize: request.source.pixelSize)
+            try await checkMemory(plan, residentBytes: retainedCPUBytes, request: actualRequest)
             if let frame = frozenFrame {
                 guard frame.photo.width == plan.photoSize.width, frame.photo.height == plan.photoSize.height else {
                     throw RecipeExportError.invalidSnapshot
@@ -188,9 +190,14 @@ public actor RecipeExportService: RecipeExportServicing {
             let totalBudget = remaining.addingReportingOverflow(resident)
             plan = ExportPlanner.plan(actualRequest, budget: FixedExportMemoryBudget(
                 bytes: totalBudget.overflow ? Int.max : totalBudget.partialValue))
-            let resolvedBlockers = plan.blockers.filter { $0.code != "photos_permission_denied" }
+            let resolvedBlockers = plan.blockers
             guard resolvedBlockers.isEmpty else {
                 recordPlanMemoryFailure(plan, residentBytes: resident)
+                if let memory = resolvedBlockers.first(where: { if case .memory = $0 { true } else { false } }),
+                   case .memory(let needed, let available, let size, let edge) = memory {
+                    throw RecipeExportError.memoryExceeded(.memory(needed: max(0, needed - resident),
+                        available: max(0, available - resident), size: size, maxLongEdge: edge))
+                }
                 throw RecipeExportError.planBlocked(resolvedBlockers.map(\.code))
             }
             if !plan.memory.usesRowInput && lazySource != nil {
@@ -199,7 +206,7 @@ public actor RecipeExportService: RecipeExportServicing {
                 resident = retainedCPUBytes + request.source.pixelSize.pixels * (source.domain == .dual ? 48 : 16)
                     + (source.domain == .rawEDR ? (request.source.sensorSize ?? request.source.pixelSize).pixels * 16 : 0)
             }
-            try await checkMemory(plan, residentBytes: resident, sourceSize: request.source.pixelSize)
+            try await checkMemory(plan, residentBytes: resident, request: actualRequest)
             let prepared = try await sessions.prepareRecipeExport(session, snapshot: snapshot)
             pending = prepared.id
             let file = prepared.directory.appendingPathComponent("result." + ext)
@@ -235,7 +242,7 @@ public actor RecipeExportService: RecipeExportServicing {
                         gainChannels: report.gain?.channelCount ?? 0,
                         baseHeadroom: Double(report.gain?.baseHeadroom ?? 0)).supported else { throw RecipeExportError.invalidStripes }
                 try validateRevision(try await sessions.session(session), snapshot: snapshot)
-                try await checkMemory(plan, residentBytes: resident, sourceSize: request.source.pixelSize)
+                try await checkMemory(plan, residentBytes: resident, request: actualRequest)
                 let bridge = PackageRowBridge(source: rows, frame: frozenFrame, progress: progress)
                 emit(.encoding)
                 let metadata = report.gain.map {
@@ -299,7 +306,7 @@ public actor RecipeExportService: RecipeExportServicing {
                 await renderEngine.clearCaches()
                 try Task.checkCancellation()
                 try await checkMemory(plan, residentBytes: resident + plan.size.pixels * (12 + 4 * (report.gain?.channelCount ?? 0)),
-                                      sourceSize: request.source.pixelSize)
+                                      request: actualRequest)
                 thumbnail = try owner.thumbnail(frame: frozenFrame)
                 emit(.encoding)
                 if plan.writer == .imageIO && plan.gainMap.writesGainMap {
@@ -393,7 +400,8 @@ public actor RecipeExportService: RecipeExportServicing {
                 }
             }
             await renderEngine.clearCaches()
-            return RecipeExportResult(record: record, resolved: resolved, file: file, saved: saved, deliveryError: deliveryError)
+            return RecipeExportResult(record: record, resolved: resolved, file: file, saved: saved, deliveryError: deliveryError,
+                                      elapsed: operationStart.duration(to: .now))
         } catch {
             if let pending, !published { await sessions.discardExport(session, export: pending) }
             await renderEngine.clearCaches()
@@ -405,16 +413,18 @@ public actor RecipeExportService: RecipeExportServicing {
         let revision = try RecipeSourceRevision(session: photo)
         guard revision == snapshot.source else { throw RecipeExportError.sourceChanged }
     }
-    private func checkMemory(_ plan: ExportPlan, residentBytes: Int, sourceSize: ExportPixelSize) async throws {
+    private func checkMemory(_ plan: ExportPlan, residentBytes: Int, request: ExportPlanRequest) async throws {
         let available = budget.availableBytes() ?? 256 * 1024 * 1024
         let needed = max(0, plan.memory.estimate.peak - residentBytes)
         guard needed <= available else {
             recordMemoryFailure(.init(check: .process, phase: .running, requiredBytes: needed, availableBytes: available,
                 reason: plan.memory.usesRowInput ? .workingSet : .nonIncrementalWriter))
-            throw RecipeExportError.memoryExceeded(required: needed, available: available)
+            throw runtimeMemoryError(plan, request: request, needed: needed,
+                                     available: available, residentBytes: residentBytes)
         }
         // Metal's recommendation is an independent GPU constraint, never the
         // process limit. Source and active graph textures still occupy memory.
+        let sourceSize = request.source.pixelSize
         let sourcePixels = sourceSize.pixels
         let gpu: Int
         if plan.memory.usesRowInput {
@@ -434,8 +444,20 @@ public actor RecipeExportService: RecipeExportServicing {
         let gpuBudget = await renderEngine.device.recommendedMaxWorkingSetSize
         if let failure = ExportMemoryDiagnostic.gpuFailure(required: gpu, recommended: Int(gpuBudget)) {
             recordMemoryFailure(failure)
-            throw RecipeExportError.memoryExceeded(required: gpu, available: Int(gpuBudget))
+            // The process estimator cannot prove a smaller GPU working set.
+            // Keep the typed facts, without offering an unverified size fix.
+            throw RecipeExportError.memoryExceeded(.memory(needed: gpu, available: Int(gpuBudget),
+                size: plan.size, maxLongEdge: nil))
         }
+    }
+    /// Credit only allocations already included in the estimate. Freeze the
+    /// measured runtime budget so the size search cannot sample a different one.
+    private func runtimeMemoryError(_ plan: ExportPlan, request: ExportPlanRequest,
+                                    needed: Int, available: Int, residentBytes: Int) -> RecipeExportError {
+        let total = available.addingReportingOverflow(residentBytes)
+        let edge = ExportPlanner.maximumLongEdge(request,
+            budget: total.overflow ? Int.max : total.partialValue, upper: plan.photoSize.longEdge)
+        return .memoryExceeded(.memory(needed: needed, available: available, size: plan.size, maxLongEdge: edge))
     }
     private func recordPlanMemoryFailure(_ plan: ExportPlan, residentBytes: Int) {
         guard plan.blockers.contains(where: { $0.code == "export_memory_exceeded" }) else { return }

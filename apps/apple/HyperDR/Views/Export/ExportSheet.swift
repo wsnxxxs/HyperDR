@@ -33,7 +33,6 @@ struct ExportSheet: View {
         .frame(width: mode.width)
         .background(Color.hdr.surfacePanel)
         .background(WindowReader { sheetWindow = $0 })
-        .onDisappear { if case .rangeClamped? = model.notice { model.notice = nil } }
     }
 
     private func close() { dismiss() }
@@ -70,6 +69,8 @@ private struct ExportSettingsView: View {
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
+        // Kit's plan, for its memory check, while nothing else blocks.
+        let plan = model.export.blockerKey == nil ? model.exportPlan() : nil
         VStack(spacing: 0) {
             Text("export.title")
                 .font(Font.hdr.title)
@@ -82,16 +83,16 @@ private struct ExportSettingsView: View {
                 ExportSummaryColumn(model: model, changeFrame: changeFrame)
                     .frame(width: 212)
                 Divider()
-                settings
+                settings(plan)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
             .fixedSize(horizontal: false, vertical: true)
             Divider()
-            footer
+            footer(plan)
         }
     }
 
-    private var settings: some View {
+    private func settings(_ plan: ExportPlan?) -> some View {
         VStack(alignment: .leading, spacing: Space.s4) {
             if model.export.phase == .cancelled {
                 InspectorNotice(Text("export.stoppedNotice"), style: .info)
@@ -105,11 +106,13 @@ private struct ExportSettingsView: View {
                 .foregroundStyle(Color.hdr.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)
             Divider()
-            if case .rangeClamped(let maxStops)? = model.notice {
-                InspectorNotice(Text("export.rangeClamped \(AppStrings.string("enc.\(model.export.encodingID).label", locale: locale)) \(maxStops.formatted(.number.precision(.fractionLength(1)).locale(locale)))"),
-                                style: .info)
+            // Kit's notes on what this format writes (the peak's ceiling,
+            // an SDR version, a transparency fill).
+            ForEach(plan?.notices ?? [], id: \.self) { notice in
+                InspectorNotice(Text(verbatim: notice.phrase.text(locale: locale)), style: .info)
             }
             colorSetting
+            sizeSetting
             if model.exportQuality != nil { ExportQualitySlider(model: model) }
         }
         .padding(Space.s5)
@@ -120,7 +123,6 @@ private struct ExportSettingsView: View {
 
     private var selection: Binding<String> {
         Binding(get: { model.export.encodingID }, set: { id in
-            if case .rangeClamped? = model.notice { model.notice = nil }
             model.selectEncoding(id)
         })
     }
@@ -162,11 +164,46 @@ private struct ExportSettingsView: View {
         }
     }
 
+    // MARK: Size
+
+    /// Original size, a common long edge smaller than the photo, or a typed
+    /// one (p7-3c-export §1.3 B).
+    @ViewBuilder private var sizeSetting: some View {
+        let binding = Binding(get: { model.export.longEdge }, set: { model.setExportLongEdge($0) })
+        VStack(alignment: .leading, spacing: Space.s2) {
+            Text("export.size")
+                .font(Font.hdr.control)
+                .foregroundStyle(Color.hdr.ink)
+            HStack(spacing: Space.s3) {
+                Picker(selection: binding) {
+                    ForEach(ExportLongEdge.choices(photo: model.exportPhotoLongEdge, current: model.export.longEdge),
+                            id: \.self) { edge in
+                        if let edge {
+                            Text("export.size.pixels \(String(edge))").tag(Int?.some(edge))
+                        } else {
+                            Text("export.size.original").tag(Int?.none)
+                        }
+                    }
+                } label: {
+                    Text("export.size")
+                }
+                .labelsHidden()
+                .fixedSize()
+                TextField(value: binding, format: .number.grouping(.never), prompt: Text("export.size.custom")) {
+                    Text("export.size.custom")
+                }
+                .labelsHidden()
+                .frame(width: 120)
+            }
+        }
+    }
+
     // MARK: Footer
 
-    private var footer: some View {
-        HStack(spacing: Space.s3) {
-            footerNote
+    private func footer(_ plan: ExportPlan?) -> some View {
+        let blocker = plan?.blockers.first
+        return HStack(spacing: Space.s3) {
+            if let blocker { planNote(blocker) } else { footerNote }
             Spacer(minLength: Space.s3)
             Button("export.action.cancel", action: close)
                 .buttonStyle(.hdrSecondary)
@@ -175,10 +212,29 @@ private struct ExportSettingsView: View {
                                                                           asksForPlace: asksForPlace)), action: begin)
                 .buttonStyle(.hdrPrimary)
                 .keyboardShortcut(.defaultAction)
-                .disabled(model.export.blockerKey != nil)
+                .disabled(model.export.blockerKey != nil || blocker != nil)
         }
         .padding(.horizontal, Space.s5)
         .padding(.vertical, Space.s3)
+    }
+
+    /// Why Kit's plan cannot run, and, when memory is why, the largest long
+    /// edge that fits.
+    private func planNote(_ blocker: ExportBlockReason) -> some View {
+        HStack(spacing: Space.s2) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.hdr.warn)
+                .accessibilityHidden(true)
+            Text(verbatim: blocker.phrase.text(locale: locale))
+                .foregroundStyle(Color.hdr.ink)
+                .fixedSize(horizontal: false, vertical: true)
+            if let edge = blocker.suggestedLongEdge {
+                Button { model.setExportLongEdge(edge) } label: {
+                    Text(verbatim: ExportReasonPhrase.useLongEdge(edge).text(locale: locale))
+                }
+                .buttonStyle(.hdrCompact(.link))
+            }
+        }
+        .font(Font.hdr.caption)
     }
 
     private var asksForPlace: Bool { model.preferences.value.saveMode == .ask }
@@ -368,7 +424,10 @@ private struct ExportProgressView: View {
     /// "HDR JPEG · 6000 × 4000 · Quality 90".
     private var meta: String {
         var pieces = [AppStrings.string("enc.\(model.export.encodingID).label", locale: locale)]
-        if let size = model.document?.pixelSize { pieces.append("\(size.width) × \(size.height)") }
+        if let size = model.document?.pixelSize {
+            let written = ExportPixelSize(width: size.width, height: size.height).fitted(longEdge: model.export.longEdge)
+            pieces.append("\(written.width) × \(written.height)")
+        }
         if let quality = model.exportQuality {
             pieces.append(AppStrings.string("export.quality", locale: locale) + " " + Int(quality.rounded()).formatted(.number.locale(locale)))
         }
@@ -482,6 +541,8 @@ private struct ExportFailureView: View {
     let close: () -> Void
     let again: () -> Void
 
+    @Environment(\.locale) private var locale
+
     var body: some View {
         VStack(spacing: 0) {
             ExportTitleBar(model: model)
@@ -489,6 +550,16 @@ private struct ExportFailureView: View {
                 if let failure = model.export.failure {
                     let text = ErrorText(failure)
                     ExportFailureCard(title: Text(text.title), message: Text(text.message), detail: text.detail)
+                }
+                // Out of memory: the largest long edge that fits, then the settings.
+                if let edge = model.export.failure?.suggestedLongEdge {
+                    Button {
+                        model.setExportLongEdge(edge)
+                        again()
+                    } label: {
+                        Text(verbatim: ExportReasonPhrase.useLongEdge(edge).text(locale: locale))
+                    }
+                    .buttonStyle(.hdrCompact(.link))
                 }
             }
             .padding(Space.s5)

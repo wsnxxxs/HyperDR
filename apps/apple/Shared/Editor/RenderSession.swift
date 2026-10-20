@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import ImageIO
 import HyperDRRecipe
 import HyperDRRender
 
@@ -74,11 +75,20 @@ actor RenderSession: EditorRendering {
         guard generation == self.generation else { throw CancellationError() }
         let editor = EditorSource(id: UUID(), url: url, domain: source.domain, pixelSize: source.nativeSize,
                                   sourceValues: report.sourceValues,
-                                  capabilities: Self.capabilities(report.capabilities))
+                                  capabilities: Self.capabilities(report.capabilities),
+                                  hasAlpha: source.domain != .rawEDR && Self.hasAlpha(url))
         opened = Opened(editor: editor, revision: revision, source: source, options: options)
         predictions = [:]
         predictionOrder = []
         return editor
+    }
+
+    /// Whether the file's first image has an alpha channel, from its
+    /// properties alone (no decoding).
+    nonisolated static func hasAlpha(_ url: URL) -> Bool {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else { return false }
+        return properties[kCGImagePropertyHasAlpha] as? Bool ?? false
     }
 
     /// What a request renders from: the source variant it needs (loaded on

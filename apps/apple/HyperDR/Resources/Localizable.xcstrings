@@ -5202,23 +5202,6 @@
         }
       }
     },
-    "export.rangeClamped %@ %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "HDR expansion range lowered to %2$@ stops, the %1$@ limit."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "HDR 扩展范围已按 %1$@ 上限调整为 %2$@ 档。"
-          }
-        }
-      }
-    },
     "export.title" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9448,6 +9431,78 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "照片已在别处修改，重新打开后才能导出。"
+          }
+        }
+      }
+    },
+    "export.size" : {
+      "comment" : "Export settings: the size of the photo in the export.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Size"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尺寸"
+          }
+        }
+      }
+    },
+    "export.size.original" : {
+      "comment" : "Export settings: the size picker keeps the photo's own size.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Original size"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "原尺寸"
+          }
+        }
+      }
+    },
+    "export.size.pixels %@" : {
+      "comment" : "Export settings: a long edge in the size picker, in pixels.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Long edge %@ px"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "长边 %@ px"
+          }
+        }
+      }
+    },
+    "export.size.custom" : {
+      "comment" : "Export settings: a long edge typed in pixels; empty keeps the original size.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Long edge (px)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "长边（px）"
           }
         }
       }

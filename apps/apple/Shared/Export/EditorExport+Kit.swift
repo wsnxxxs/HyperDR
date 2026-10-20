@@ -11,13 +11,17 @@ extension EditorExportCapture {
         RecipeExportSnapshot(recipe: recipe, source: revision)
     }
 
-    /// What Kit plans the export from. No frame yet on iOS (P7-3b-U).
-    func planRequest(_ choice: ExportChoice, frame: ExportFrameFacts = ExportFrameFacts()) -> ExportPlanRequest {
+    /// What Kit plans the export from, with the host's encoder facts
+    /// (`ExportEncodingCapabilities`). No frame yet on iOS (P7-3b-U).
+    func planRequest(_ choice: ExportChoice, frame: ExportFrameFacts = ExportFrameFacts(),
+                     capabilities: ExportEncodingCapabilities = .init()) -> ExportPlanRequest {
         ExportPlanRequest(choice: choice,
                           source: ExportSource(domain: source.domain,
                                                pixelSize: ExportPixelSize(width: source.pixelSize.width,
-                                                                          height: source.pixelSize.height)),
+                                                                          height: source.pixelSize.height),
+                                               hasAlpha: source.hasAlpha),
                           frame: frame,
-                          edit: ExportEditFacts(hdrEnabled: hdrEnabled, peakStops: peakStops))
+                          edit: ExportEditFacts(hdrEnabled: hdrEnabled, peakStops: peakStops),
+                          capabilities: capabilities)
     }
 }

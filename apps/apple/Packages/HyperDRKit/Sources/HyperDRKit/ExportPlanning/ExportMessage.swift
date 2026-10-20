@@ -1,7 +1,7 @@
 import Foundation
 
-/// A sentence part a view composes. The planning layer never localizes; it
-/// names what is said and what fills the placeholders.
+/// A sentence part a view composes. Kit's only sentences are an export's
+/// stages (`RecipeExportProgress.stageMessage`); the plan itself is typed.
 public enum ExportMessageArgument: Sendable, Hashable {
     /// Already-formatted text (a number, a byte count).
     case text(String)
@@ -40,18 +40,6 @@ public struct ExportMessage: Sendable, Hashable {
     }
 }
 
-/// The read-only "Will write" row (p7-adjustments §4.1): encoding, gamut, size
-/// and peak, as keys with their arguments.
-public struct WillWriteSummary: Sendable, Hashable {
-    public let labelKey: String
-    public let parts: [ExportMessage]
-
-    public init(parts: [ExportMessage]) {
-        self.labelKey = "dest.willWrite"
-        self.parts = parts
-    }
-}
-
 /// How the plan's numbers are written. Locale-independent on purpose: the app
 /// formats the same values with the user's locale elsewhere, and this is the one
 /// place a plan's own sentences (a stop count, a byte count) are spelled out.
@@ -75,38 +63,8 @@ public enum ExportPlanText {
 }
 
 
-// Compatibility presentation for existing hosts. Planning stores typed facts;
-// only this layer translates them into the existing catalogue messages.
-extension ExportNotice {
-    public var message: ExportMessage {
-        switch self {
-        case .ceiling(let stops, .destination): .init(key: "dest.ceiling %@", arguments: [.stops(stops)])
-        case .ceiling(let stops, .format(let encoding)):
-            .init(key: "export.rangeClamped %@ %@", arguments: [.key(encoding.labelKey), .stops(stops)])
-        case .socialAspect: .init(key: "dest.social.aspect")
-        case .sdrVersion: .init(key: "plan.sdrVersion")
-        case .alphaOnBlack: .init(key: "plan.alphaOnBlack")
-        }
-    }
-    public var key: String { message.key }
-    public var arguments: [ExportMessageArgument] { message.arguments }
-    public func localized(locale: Locale = .current) -> String { message.localized(locale: locale) }
-}
-extension PhotosUnavailableReason {
-    public var messageKey: String {
-        switch self {
-        case .notVerified: "plan.photosNotVerified"
-        case .permissionDenied: "dest.photos.permission"
-        case .fileSource: "dest.photos.replace.files"
-        case .framed: "dest.photos.replace.framed"
-        case .addOnly: "dest.photos.replace.addOnly"
-        case .selectedAssetUnavailable: "dest.photos.replace.libraryAccess"
-        }
-    }
-}
-extension LibrarySaveOption {
-    public var unavailableReasonKey: String? { unavailableReason?.messageKey }
-}
+// Plan facts for logs and tests. The words for notices and reasons are the
+// hosts' (`Shared/Export/ExportReasonText`, HyperDRDesign's catalogue).
 extension ExportBlockReason {
     public var code: String {
         switch self {
@@ -120,27 +78,7 @@ extension ExportBlockReason {
         case .unsupportedPair: "unsupported_format"
         }
     }
-    public var message: ExportMessage {
-        switch self {
-        case .memory(let needed, let available, _, _):
-            .init(key: "dest.memoryExceeded %@ %@", arguments: [.text(ExportPlanText.bytes(needed)), .text(ExportPlanText.bytes(available))])
-        case .photosNotAvailable(let reason): .init(key: reason.messageKey)
-        case .hdrOff: .init(key: "plan.hdrOff")
-        case .encoderUnavailable: .init(key: "err.server." + code)
-        case .unsupportedPair: .init(key: "err.server.unsupported_format")
-        }
-    }
     public var pixelSize: ExportPixelSize? {
         if case .memory(_, _, let size, _) = self { size } else { nil }
-    }
-}
-extension ExportPlan {
-    public var summary: WillWriteSummary {
-        var parts = [ExportMessage(key: encoding.labelKey), .init(key: gamut.labelKey),
-                     size == sourceSize && photoSize == sourceSize
-                        ? .init(key: "plan.size.original")
-                        : .init(key: "plan.size.pixels", arguments: [.pixels(size.width), .pixels(size.height)])]
-        if let peakStops { parts.append(.init(key: "plan.peak %@", arguments: [.stops(peakStops)])) }
-        return WillWriteSummary(parts: parts)
     }
 }

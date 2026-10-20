@@ -31,6 +31,11 @@ void fail_without_codecs(const char* capability) {
 }
 
 #if !HYPERDR_WITH_CODECS
+void write_sdr_jpeg_rows(const EncodingRows&,const PhotoMetadata&,int,ColorGamut,const std::filesystem::path&){fail_without_codecs("streaming JPEG");}
+void write_sdr_tiff_rows(const EncodingRows&,const PhotoMetadata&,ColorGamut,const std::filesystem::path&){fail_without_codecs("streaming TIFF");}
+void write_gain_map_jpeg_rows(const EncodingRows&,const EncodingRows&,const GainMapMetadata&,const PhotoMetadata&,int,bool,const std::filesystem::path&){fail_without_codecs("streaming ISO JPEG");}
+std::vector<std::uint8_t> encode_heic_rows(const EncodingRows&,const EncodingRows&,const GainMapMetadata&,float,const PhotoMetadata&,OutputEncoding,int,int,HevcPreset){fail_without_codecs("streaming HEIC");return {};}
+
 EncoderCapabilities encoder_capabilities(const std::filesystem::path&) {
   return {false, false, "hevc_unavailable"};
 }

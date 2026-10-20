@@ -27,8 +27,8 @@ nonisolated protocol EditorRendering: AnyObject, Sendable {
     func render(_ request: EditorRenderRequest) async throws -> EditorFrame
 
     /// Where the parameter `parameterID` acts (R6, `declaration.mask`), for the
-    /// request's recipe, size and region: R32Float in 0…1, top-down. Step 6
-    /// draws it; the fake throws `unsupported`.
+    /// request's recipe, size and region: R32Float in 0…1, top-down, drawn
+    /// over the canvas while the parameter is dragged.
     func effectMask(_ request: EditorRenderRequest, parameterID: String) async throws -> RenderMask
 
     /// An SDR thumbnail (Display P3) of a frame's base: export summaries, frames.
@@ -98,6 +98,14 @@ nonisolated struct EditorRenderRequest: Equatable, Sendable {
     var usesModelGain = false
     /// Part of an interactive drag.
     var isInteractive = false
+
+    /// Whether the two render the same picture of the same photo, whatever
+    /// their size, region or pacing: a detail or a mask belongs to a frame
+    /// only while this holds.
+    func rendersSame(as other: EditorRenderRequest) -> Bool {
+        sourceID == other.sourceID && recipe == other.recipe && bypassedGroups == other.bypassedGroups
+            && usesModelGain == other.usesModelGain
+    }
 }
 
 /// A finished render.
@@ -116,6 +124,13 @@ nonisolated struct EditorFrame: @unchecked Sendable {
     var automaticValues: [String: Double] = [:]
 
     var size: HyperDRRender.PixelSize { request.size }
+}
+
+/// Where a parameter acts, for the frame rendered from `request`.
+nonisolated struct EditorMask: @unchecked Sendable {
+    let parameterID: String
+    let request: EditorRenderRequest
+    let mask: RenderMask
 }
 
 extension Recipe {

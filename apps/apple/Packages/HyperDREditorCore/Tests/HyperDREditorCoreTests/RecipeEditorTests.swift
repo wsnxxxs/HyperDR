@@ -18,7 +18,7 @@ import Testing
     /// Undo steps go to `undoManager` only with `undo`; without it, writes
     /// need no undo grouping.
     init(undo: Bool = false) {
-        editor = RecipeEditor(renderer: fake, frameClock: ImmediateFrameClock())
+        editor = RecipeEditor(renderer: fake, frameClock: ImmediateFrameClock(), detailIdle: .zero)
         undoManager.groupsByEvent = false
         if undo { editor.attach(undoManager: undoManager) }
     }
@@ -373,5 +373,79 @@ private func setting(_ recipe: Recipe, _ id: String, _ value: Double) -> Recipe 
         chooseAI(h)
         await h.editor.settle()
         #expect(await h.fake.predictions.count == 2)
+    }
+}
+
+@MainActor @Suite struct RecipeEditorCanvasLayerTests {
+    /// The default fake photo is 6000 × 4000; a viewport at 1:1 on part of it.
+    private let zoomed = CanvasViewport(visible: CGRect(x: 1000, y: 1000, width: 1200, height: 800), displayedWidth: 6000)
+
+    @Test func aDetailFollowsTheViewportAndTheRecipe() async throws {
+        let h = Harness()
+        try await h.open()
+        h.editor.setViewport(zoomed)
+        await h.editor.settle()
+        let detail = try #require(h.editor.shownDetail)
+        #expect(detail.request.size == PixelSize(width: 6000, height: 4000))
+        #expect(detail.request.region == RecipeEditor.detailRegion(visible: zoomed.visible, source: detail.request.size))
+        #expect(detail.request.region!.contains(zoomed.visible))
+        #expect(h.editor.shownOriginalDetail == nil)
+
+        // An edit drops the detail with the frame it belonged to; the new one follows the new frame.
+        h.editor.setRecipe(setting(h.editor.recipe, "tone.exposure", 0.5))
+        await h.editor.settle()
+        #expect(h.editor.shownDetail?.request.recipe == h.editor.recipe)
+
+        // Fitted again, the preview has enough pixels.
+        let regions = await h.fake.completed.filter { $0.region != nil }.count
+        h.editor.setViewport(CanvasViewport(visible: CGRect(x: 0, y: 0, width: 6000, height: 4000), displayedWidth: 1200))
+        await h.editor.settle()
+        #expect(h.editor.detailFrame == nil)
+        #expect(await h.fake.completed.filter { $0.region != nil }.count == regions)
+    }
+
+    @Test func noDetailWhileDraggingAndTheOriginalOnlyWhenShown() async throws {
+        let h = Harness()
+        try await h.open()
+        let exposure = declaration("tone.exposure")
+        h.editor.editingChanged(exposure, true)
+        h.editor.setRecipe(setting(h.editor.recipe, "tone.exposure", 0.3))
+        h.editor.setViewport(zoomed)
+        await h.editor.settle()
+        #expect(await h.fake.requests.allSatisfy { $0.region == nil })
+        h.editor.editingChanged(exposure, false)
+        await h.editor.settle()
+        #expect(h.editor.shownDetail != nil)
+        #expect(h.editor.shownOriginalDetail == nil)
+
+        var both = zoomed
+        both.showsOriginal = true
+        h.editor.setViewport(both)
+        await h.editor.settle()
+        let original = try #require(h.editor.shownOriginalDetail)
+        #expect(original.request.recipe == h.editor.recipe.original)
+    }
+
+    @Test func aMaskFollowsADragOfAMaskedParameter() async throws {
+        let h = Harness()
+        try await h.open()
+        let highlights = declaration("tone.highlights")
+        h.editor.editingChanged(highlights, true)
+        h.editor.setRecipe(setting(h.editor.recipe, "tone.highlights", -0.4))
+        await h.editor.settle()
+        let mask = try #require(h.editor.shownMask)
+        #expect(mask.parameterID == "tone.highlights")
+        #expect(mask.request.rendersSame(as: h.editor.frame!.request))
+        h.editor.editingChanged(highlights, false)
+        #expect(h.editor.shownMask == nil)
+
+        // Exposure acts everywhere: no mask; the SDR-only rolloff previews SDR instead.
+        let asked = await h.fake.masks.count
+        h.editor.editingChanged(declaration("tone.exposure"), true)
+        await h.editor.settle()
+        #expect(await h.fake.masks.count == asked)
+        #expect(!h.editor.previewsAsSDR)
+        h.editor.editingChanged(declaration("hdr.sdrRolloff"), true)
+        #expect(h.editor.previewsAsSDR)
     }
 }

@@ -24,6 +24,10 @@ import Observation
 /// - AI: choosing an AI source starts the prediction; until it is ready the
 ///   photo renders without AI and `aiStatus` is `.computing`. Editing is not
 ///   locked meanwhile.
+/// - Canvas layers (step 6): when the host's `CanvasViewport` shows the photo
+///   with more pixels than a frame has, a full-size render of the visible part
+///   follows once the canvas has been still for `detailIdle`; while a
+///   parameter with a mask is dragged, its `effectMask` follows the frames.
 @MainActor @Observable final class RecipeEditor {
     enum AIStatus: Equatable, Sendable {
         case idle
@@ -58,6 +62,12 @@ import Observation
     private(set) var editingParameter: String?
     /// The size previews are rendered at.
     private(set) var previewSize: HyperDRRender.PixelSize?
+    /// Full-size renders of the visible part of `frame` and `originalFrame`;
+    /// read them through `shownDetail` and `shownOriginalDetail`.
+    private(set) var detailFrame: EditorFrame?
+    private(set) var originalDetailFrame: EditorFrame?
+    /// Where the dragged parameter acts; read it through `shownMask`.
+    private(set) var effectMask: EditorMask?
 
     /// Groups switched off to see their effect: a render option, never in the
     /// recipe and never undone. A new photo clears it.
@@ -84,11 +94,40 @@ import Observation
     /// What `auto` resolves to in the shown frame.
     var automaticValues: [String: Double] { frame?.automaticValues ?? [:] }
 
+    /// The edited detail layer, while it is of the shown frame.
+    var shownDetail: EditorFrame? {
+        guard let detailFrame, let frame, detailFrame.request.rendersSame(as: frame.request) else { return nil }
+        return detailFrame
+    }
+
+    /// The original's detail layer, while it is of the shown original.
+    var shownOriginalDetail: EditorFrame? {
+        guard let originalDetailFrame, let originalFrame,
+              originalDetailFrame.request.rendersSame(as: originalFrame.request) else { return nil }
+        return originalDetailFrame
+    }
+
+    /// The mask of the parameter being dragged, for the photo shown. It may be
+    /// a frame or two behind the drag.
+    var shownMask: EditorMask? {
+        guard let effectMask, effectMask.parameterID == editingParameter,
+              effectMask.request.sourceID == frame?.request.sourceID else { return nil }
+        return effectMask
+    }
+
+    /// While a parameter that changes only the SDR base is dragged the canvas
+    /// shows the SDR version (p7-adjustments §1, §2.3).
+    var previewsAsSDR: Bool {
+        editingParameter.flatMap { Adjustments.declaration($0) }?.scope == .sdrOnly
+    }
+
     // MARK: - Collaborators
 
     @ObservationIgnored let renderer: any EditorRendering
     @ObservationIgnored let undo: RecipeUndo
     @ObservationIgnored private let frameClock: any EditorFrameClock
+    /// How long the canvas must be still before a detail region is rendered.
+    @ObservationIgnored let detailIdle: Duration
 
     // MARK: - Bookkeeping
 
@@ -115,9 +154,18 @@ import Observation
     @ObservationIgnored private var modelKey: ModelKey?
     @ObservationIgnored private var modelTask: Task<Void, Never>?
 
-    init(renderer: any EditorRendering, frameClock: any EditorFrameClock = ContinuousFrameClock()) {
+    @ObservationIgnored private var viewport: CanvasViewport?
+    @ObservationIgnored private var detailTask: Task<Void, Never>?
+    @ObservationIgnored private var detailGeneration = 0
+    @ObservationIgnored private var maskTask: Task<Void, Never>?
+    /// The last mask asked for, so a failed one is not asked again for the same frame.
+    @ObservationIgnored private var maskAttempt: (parameterID: String, request: EditorRenderRequest)?
+
+    init(renderer: any EditorRendering, frameClock: any EditorFrameClock = ContinuousFrameClock(),
+         detailIdle: Duration = .milliseconds(250)) {
         self.renderer = renderer
         self.frameClock = frameClock
+        self.detailIdle = detailIdle
         self.recipe = Recipe()
         var restore: (@MainActor (Recipe) -> Void)?
         self.undo = RecipeUndo(restore: { restore?($0) })
@@ -158,6 +206,7 @@ import Observation
         abandoned = nil
         editingParameter = nil
         cancelRenders()
+        clearLayers()
         undo.clear()
         previewSize = nil
         largestCanvasSide = nil
@@ -190,6 +239,7 @@ import Observation
         drag = nil
         editingParameter = nil
         cancelRenders()
+        clearLayers()
         undo.clear()
         source = nil
         frame = nil
@@ -257,6 +307,8 @@ import Observation
         if isEditing {
             drag = (declaration.id, recipe)
             editingParameter = declaration.id
+            detailTask?.cancel()
+            updateMask()
         }
     }
 
@@ -290,6 +342,7 @@ import Observation
         guard let drag else { return false }
         self.drag = nil
         editingParameter = nil
+        updateMask()
         var registered = false
         if recipe != drag.start {
             undo.register(RecipeStep(before: drag.start, after: recipe, edit: .parameter(drag.id)))
@@ -306,6 +359,7 @@ import Observation
     private func restore(_ value: Recipe) {
         drag = nil
         editingParameter = nil
+        updateMask()
         let old = recipe
         recipe = value
         recipeDidChange(from: old)
@@ -360,6 +414,7 @@ import Observation
         guard let size = previewSize,
               let request = request(for: recipe, size: size, interactive: drag != nil) else { return }
         pending = request
+        detailTask?.cancel()
         if !isDragging { scheduleOriginalIfNeeded(size: size) }
         guard pacing == nil else { return }
         pacing = Task { [weak self, frameClock] in
@@ -401,10 +456,13 @@ import Observation
             frame = rendered
             if source?.id == rendered.request.sourceID { frameSource = source }
             renderFailure = nil
+            if let detail = detailFrame, !detail.request.rendersSame(as: rendered.request) { detailFrame = nil }
+            updateMask()
         case .failure(let error):
             if !(error is CancellationError) { renderFailure = String(describing: error) }
         }
         if pending != nil, pacing == nil { submitPending() }
+        scheduleDetails()
     }
 
     private func scheduleOriginalIfNeeded(size: HyperDRRender.PixelSize) {
@@ -423,7 +481,13 @@ import Observation
             do { result = .success(try await renderer.render(wanted)) } catch { result = .failure(error) }
             guard let self, self.originalFlight?.generation == generation else { return }
             self.originalFlight = nil
-            if case .success(let rendered) = result { self.originalFrame = rendered }
+            if case .success(let rendered) = result {
+                self.originalFrame = rendered
+                if let detail = self.originalDetailFrame, !detail.request.rendersSame(as: rendered.request) {
+                    self.originalDetailFrame = nil
+                }
+                self.scheduleDetails()
+            }
         }
         originalFlight = Flight(generation: generation, request: wanted, task: task)
     }
@@ -460,6 +524,138 @@ import Observation
                       maximumSize: HyperDRRender.PixelSize = HyperDRRender.PixelSize(width: 512, height: 512)) async throws -> CGImage {
         guard let frame = frame ?? self.frame else { throw EditorRenderingError.noSource }
         return try await renderer.sdrThumbnail(frame, maximumSize: maximumSize)
+    }
+
+    // MARK: - Canvas layers
+
+    /// What the canvas shows, from the host on every pan, zoom, resize and
+    /// view change; nil when no photo is drawn. A detail no longer needed, or
+    /// one that no longer covers the visible part, is dropped at once; a new
+    /// one is asked for once the canvas is still.
+    func setViewport(_ viewport: CanvasViewport?) {
+        guard viewport != self.viewport else { return }
+        self.viewport = viewport
+        if let detail = detailFrame, !keeps(detail, of: frame, showing: viewport?.showsEdited) { detailFrame = nil }
+        if let detail = originalDetailFrame, !keeps(detail, of: originalFrame, showing: viewport?.showsOriginal) {
+            originalDetailFrame = nil
+        }
+        scheduleDetails()
+    }
+
+    private func keeps(_ detail: EditorFrame, of frame: EditorFrame?, showing: Bool?) -> Bool {
+        guard let viewport, showing == true, let frame, lacksPixels(frame, viewport),
+              let region = detail.request.region else { return false }
+        return Self.covers(region, viewport.visible)
+    }
+
+    /// Within half a pixel: the visible rect is fractional, regions are whole.
+    private static func covers(_ region: CGRect, _ visible: CGRect) -> Bool {
+        region.insetBy(dx: -0.5, dy: -0.5).contains(visible)
+    }
+
+    /// Whether the canvas draws `frame` with more pixels than it has, and the
+    /// source has more to give.
+    private func lacksPixels(_ frame: EditorFrame, _ viewport: CanvasViewport) -> Bool {
+        guard let source, frame.request.sourceID == source.id else { return false }
+        let width = Double(frame.display.outputSize.width) + 0.5
+        return width < Double(source.pixelSize.width) && width < viewport.displayedWidth
+    }
+
+    /// Asks for the details the viewport needs, after `detailIdle`, once the
+    /// shown frames are final (no drag, nothing pending or rendering).
+    private func scheduleDetails() {
+        detailTask?.cancel()
+        detailTask = nil
+        guard let source, let viewport, !isDragging, pending == nil, pacing == nil, inFlight == nil,
+              !viewport.visible.isEmpty else { return }
+        let region = Self.detailRegion(visible: viewport.visible, source: source.pixelSize)
+        func wanted(_ frame: EditorFrame?, _ detail: EditorFrame?, shown: Bool) -> EditorRenderRequest? {
+            guard shown, let frame, lacksPixels(frame, viewport) else { return nil }
+            if let detail, detail.request.rendersSame(as: frame.request),
+               let covered = detail.request.region, Self.covers(covered, viewport.visible) { return nil }
+            var request = frame.request
+            request.size = source.pixelSize
+            request.region = region
+            request.isInteractive = false
+            return request
+        }
+        let original = originalFlight == nil ? wanted(originalFrame, originalDetailFrame, shown: viewport.showsOriginal) : nil
+        let edited = wanted(frame, detailFrame, shown: viewport.showsEdited)
+        guard original != nil || edited != nil else { return }
+        detailGeneration += 1
+        let generation = detailGeneration
+        let renderer = self.renderer, idle = detailIdle
+        detailTask = Task { [weak self] in
+            try? await Task.sleep(for: idle)
+            for (isOriginal, request) in [(true, original), (false, edited)] {
+                guard !Task.isCancelled else { return }
+                guard let request else { continue }
+                guard let rendered = try? await renderer.render(request) else { return }
+                guard let self, self.detailGeneration == generation, !Task.isCancelled else { return }
+                if isOriginal { self.originalDetailFrame = rendered } else { self.detailFrame = rendered }
+            }
+            guard let self, self.detailGeneration == generation else { return }
+            self.detailTask = nil
+        }
+    }
+
+    nonisolated static let detailExpansion = 0.25
+    nonisolated static let detailMinimumEdge = 2048.0
+
+    /// The visible part, grown by `detailExpansion` on each side for small
+    /// pans (each edge at most `detailMinimumEdge` or the visible edge,
+    /// whichever is larger), in whole pixels inside the source.
+    nonisolated static func detailRegion(visible: CGRect, source: HyperDRRender.PixelSize) -> CGRect {
+        let sourceWidth = Double(source.width), sourceHeight = Double(source.height)
+        func edge(_ visible: Double, _ limit: Double) -> Double {
+            min(limit, max(min(detailMinimumEdge, visible * (1 + 2 * detailExpansion)), ceil(visible)))
+                .rounded(.up)
+        }
+        let width = min(sourceWidth, edge(visible.width, sourceWidth))
+        let height = min(sourceHeight, edge(visible.height, sourceHeight))
+        let x = min(max(0, (visible.midX - width / 2).rounded(.down)), sourceWidth - width)
+        let y = min(max(0, (visible.midY - height / 2).rounded(.down)), sourceHeight - height)
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    /// Follows the dragged parameter's mask: one at a time, then again for the
+    /// newest frame if it moved on meanwhile.
+    private func updateMask() {
+        guard let id = editingParameter, Adjustments.declaration(id)?.mask != nil,
+              let frame, frame.request.sourceID == source?.id else {
+            maskTask?.cancel()
+            maskTask = nil
+            maskAttempt = nil
+            effectMask = nil
+            return
+        }
+        guard maskTask == nil else { return }
+        var request = frame.request
+        request.region = nil
+        request.isInteractive = false
+        if let attempt = maskAttempt, attempt.parameterID == id, attempt.request.rendersSame(as: request) { return }
+        maskAttempt = (id, request)
+        let renderer = self.renderer
+        maskTask = Task { [weak self] in
+            let mask = try? await renderer.effectMask(request, parameterID: id)
+            guard let self, !Task.isCancelled else { return }
+            self.maskTask = nil
+            if let mask, self.editingParameter == id {
+                self.effectMask = EditorMask(parameterID: id, request: request, mask: mask)
+            }
+            self.updateMask()
+        }
+    }
+
+    private func clearLayers() {
+        detailTask?.cancel()
+        detailTask = nil
+        detailFrame = nil
+        originalDetailFrame = nil
+        maskTask?.cancel()
+        maskTask = nil
+        maskAttempt = nil
+        effectMask = nil
     }
 
     // MARK: - AI
@@ -525,8 +721,22 @@ import Observation
             if let flight = inFlight { await flight.task.value; await Task.yield(); continue }
             if let flight = originalFlight { await flight.task.value; await Task.yield(); continue }
             if let modelTask { await modelTask.value; await Task.yield(); continue }
+            if let maskTask { await maskTask.value; await Task.yield(); continue }
+            if let detailTask { await detailTask.value; await Task.yield(); continue }
             if pending != nil { submitPending(); await Task.yield(); continue }
             return
         }
     }
+}
+
+/// What the canvas shows, as the editor needs it for detail regions.
+nonisolated struct CanvasViewport: Equatable, Sendable {
+    /// The part of the photo on screen, in full-size source pixels, top left origin.
+    var visible: CGRect
+    /// How many device pixels wide the whole photo is drawn.
+    var displayedWidth: Double
+    /// Which renditions are on screen (the original while held, in split, or
+    /// chosen; the edit otherwise).
+    var showsEdited = true
+    var showsOriginal = false
 }

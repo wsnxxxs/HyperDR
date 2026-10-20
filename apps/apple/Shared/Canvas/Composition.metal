@@ -108,3 +108,20 @@ fragment float4 compositionFragment(CompositionVertex in [[stage_in]],
         value = mix(value,p.shadowColor.rgb,p.shadowColor.a);
     return float4(value,1);
 }
+
+// A parameter's effect mask over the edited side, in the mask colour at the
+// mask opacity times its weight (the look of the Mac's gain mask, M2 §6).
+// Bilinear by hand: R32Float is not filterable on every GPU.
+fragment float4 effectMaskFragment(CompositionVertex in [[stage_in]],
+                                   constant CompositionParams& p [[buffer(0)]],
+                                   texture2d<float, access::read> mask [[texture(0)]]) {
+    const float2 size = float2(mask.get_width(), mask.get_height());
+    const float2 g = clamp(in.uv * size - 0.5, float2(0), size - 1);
+    const uint2 lo = uint2(floor(g));
+    const uint2 hi = min(lo + 1, uint2(size) - 1);
+    const float2 f = fract(g);
+    const float w = clamp(mix(mix(mask.read(lo).r, mask.read(uint2(hi.x, lo.y)).r, f.x),
+                              mix(mask.read(uint2(lo.x, hi.y)).r, mask.read(hi).r, f.x), f.y), 0.0, 1.0);
+    if (w <= 0.01) discard_fragment();
+    return float4(p.maskColor.rgb, w * p.maskColor.a);
+}

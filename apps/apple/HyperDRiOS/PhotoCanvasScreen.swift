@@ -13,7 +13,16 @@ import UniformTypeIdentifiers
 /// leads the top bar, undo and redo follow, and Open from Files and Reset All
 /// sit in the More menu. Undo steps go to the scene's undo manager, so the
 /// three-finger swipe and ⌘Z work too.
+///
+/// Comparison follows §5.4: holding the canvas shows the original; the iPad
+/// sidebar layout has Original | Adjusted | Split in the toolbar, the iPad
+/// bottom panel a Compare button that cycles through the three, and the
+/// iPhone a Compare button (original or adjusted) with Split Comparison in
+/// the More menu. Zoomed in, the editor adds full-size detail tiles; while a
+/// parameter with a mask is dragged, its mask is tinted over the edit.
 struct PhotoCanvasScreen: View {
+    enum Comparison: Hashable, CaseIterable { case original, edited, split }
+
     /// One open request; a newer one cancels the load of the previous.
     private struct Request: Equatable {
         enum Source: Equatable { case library(PhotosPickerItem), file(URL) }
@@ -34,6 +43,11 @@ struct PhotoCanvasScreen: View {
     @State private var notice: LocalizedStringKey?
     @State private var headroom = HeadroomSnapshot()
     @State private var holdingOriginal = false
+    @State private var comparison = Comparison.edited
+    @State private var splitRatio = 0.5
+    /// The canvas geometry, as the canvas last reported it.
+    @State private var transform: CanvasTransform?
+    @State private var screenSize = CGSize.zero
     @State private var confirmingReset = false
     @State private var showingAdjustments = false
     @Environment(\.undoManager) private var undoManager
@@ -56,6 +70,7 @@ struct PhotoCanvasScreen: View {
             .navigationBarTitleDisplayMode(.inline)
             // Before the canvas exists, the screen bounds the first decode.
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+                screenSize = size
                 guard let editor, editor.canvasPixelSize == nil else { return }
                 editor.canvasPixelSize = PixelSize(width: Int(size.width * displayScale),
                                                    height: Int(size.height * displayScale))
@@ -73,6 +88,7 @@ struct PhotoCanvasScreen: View {
         }
         .task { makeEditor() }
         .task(id: request?.id) { await load(request?.source) }
+        .onChange(of: editor.flatMap(viewport), initial: true) { _, viewport in editor?.setViewport(viewport) }
         .onChange(of: undoManager.map(ObjectIdentifier.init)) { editor?.attach(undoManager: undoManager) }
         .confirmationDialog(Text("ios.adjust.resetAll.confirm"), isPresented: $confirmingReset, titleVisibility: .visible) {
             Button(role: .destructive) { editor?.resetAll() } label: { AdjustmentText.command(.resetAll) }
@@ -130,7 +146,9 @@ struct PhotoCanvasScreen: View {
                       onHeadroom: { headroom = $0 },
                       onDrawableSize: { editor.canvasPixelSize = $0 },
                       onHoldOriginal: { holdingOriginal = $0 },
-                      onError: { _ in notice = "ios.error.load" })
+                      onError: { _ in notice = "ios.error.load" },
+                      onTransform: { transform = $0 })
+                .overlay { adornments(editor) }
                 .ignoresSafeArea(edges: .top)
             VStack(spacing: Space.s2) {
                 if holdingOriginal, editor.originalFrame != nil { capsule(Text("ios.canvas.original")) }
@@ -149,15 +167,75 @@ struct PhotoCanvasScreen: View {
         }
     }
 
+    /// The original of the shown photo, when there is one to compare with.
+    private func original(_ editor: RecipeEditor) -> EditorFrame? {
+        editor.originalFrame.flatMap { $0.request.sourceID == editor.frame?.request.sourceID ? $0 : nil }
+    }
+
+    private func mode(_ editor: RecipeEditor) -> DisplayComposition.Mode {
+        guard original(editor) != nil else { return .edited }
+        if holdingOriginal { return .original }
+        switch comparison {
+        case .original: return .original
+        case .edited: return .edited
+        case .split: return .compare
+        }
+    }
+
     private func canvasContent(_ editor: RecipeEditor) -> EDRCanvasUIView.Content? {
         guard let frame = editor.frame, let source = editor.frameSource else { return nil }
         // Until the new photo's first frame arrives the previous one stays, at its own size.
         let size = source.pixelSize
-        let original = editor.originalFrame.flatMap { $0.request.sourceID == frame.request.sourceID ? $0 : nil }
+        let original = original(editor)
+        let originalDetail = original == nil ? nil : editor.shownOriginalDetail
         return EDRCanvasUIView.Content(edited: DisplayPair(frame.display),
                                        original: original.map { DisplayPair($0.display) },
-                                       showsOriginal: holdingOriginal,
+                                       editedDetail: editor.shownDetail.map { DisplayPair($0.display) },
+                                       originalDetail: originalDetail.map { DisplayPair($0.display) },
+                                       mode: mode(editor), splitRatio: splitRatio,
+                                       mask: editor.shownMask.map { DisplayMask($0.mask) },
+                                       previewsAsSDR: editor.previewsAsSDR,
                                        imageSize: CGSize(width: size.width, height: size.height))
+    }
+
+    /// What the editor needs for detail tiles: the visible part of the photo
+    /// in source pixels and which renditions are on screen.
+    private func viewport(_ editor: RecipeEditor) -> CanvasViewport? {
+        guard let transform, let source = editor.source,
+              transform.imageSize == CGSize(width: source.pixelSize.width, height: source.pixelSize.height),
+              let visible = transform.visibleSourceRect else { return nil }
+        let mode = mode(editor)
+        return CanvasViewport(visible: visible,
+                              displayedWidth: Double(transform.displayedSize.width * transform.backingScale),
+                              showsEdited: mode != .original, showsOriginal: mode != .edited)
+    }
+
+    /// The split divider and the mask legend, in the canvas's coordinates.
+    @ViewBuilder private func adornments(_ editor: RecipeEditor) -> some View {
+        if let transform, transform.imageFrame.width > 0 {
+            let image = transform.imageFrame
+            let visible = image.intersection(CGRect(origin: .zero, size: transform.viewport))
+            ZStack {
+                if mode(editor) == .compare {
+                    SplitOverlay(ratio: splitRatio, imageFrame: image,
+                                 visibleRect: CGRect(origin: .zero, size: transform.viewport),
+                                 originalLabel: Text("ios.view.original"), editedLabel: Text("ios.view.edited"),
+                                 showsHDRBadge: false, hitWidth: SplitGeometry.touchHitWidth,
+                                 onDrag: { splitRatio = $0 },
+                                 onNudge: { splitRatio = min(max(splitRatio + $0, SplitGeometry.ratioRange.lowerBound),
+                                                             SplitGeometry.ratioRange.upperBound) })
+                }
+                if let mask = editor.shownMask, mode(editor) != .original, !visible.isNull,
+                   let declaration = Adjustments.declaration(mask.parameterID) {
+                    CanvasLegend(rows: [.mask(controlName: AdjustmentText.label(declaration))])
+                        .padding(Space.s3)
+                        .frame(width: visible.width, height: visible.height,
+                               alignment: mode(editor) == .compare ? .bottomTrailing : .bottomLeading)
+                        .position(x: visible.midX, y: visible.midY)
+                        .allowsHitTesting(false)
+                }
+            }
+        }
     }
 
     private func capsule(_ text: Text) -> some View {
@@ -204,6 +282,7 @@ struct PhotoCanvasScreen: View {
                 Text("ios.toolbar.photos")
             }
         }
+        ToolbarItem(placement: .principal) { comparisonControl(editor) }
         ToolbarItemGroup(placement: .topBarTrailing) {
             // Read with the recipe, so the buttons follow every step.
             let _ = editor.recipe
@@ -223,6 +302,13 @@ struct PhotoCanvasScreen: View {
             .disabled(undoManager?.canRedo != true)
             Menu {
                 Button("ios.file.openMenu", systemImage: "folder") { importingFile = true }
+                if form == .bottomBar || form == .sideBar {
+                    Toggle(isOn: Binding(get: { comparison == .split },
+                                         set: { comparison = $0 ? .split : .edited })) {
+                        Label("ios.compare.split", systemImage: "rectangle.split.2x1")
+                    }
+                    .disabled(original(editor) == nil)
+                }
                 Button(role: .destructive) { confirmingReset = true } label: {
                     Label { AdjustmentText.command(.resetAll) } icon: { Image(systemName: "arrow.counterclockwise") }
                 }
@@ -234,6 +320,54 @@ struct PhotoCanvasScreen: View {
             } label: {
                 Label("ios.toolbar.more", systemImage: "ellipsis")
             }
+        }
+    }
+
+    private var form: AdjustmentWorkspace<EmptyView>.Form {
+        AdjustmentWorkspace<EmptyView>.form(for: screenSize, isPad: UIDevice.current.userInterfaceIdiom == .pad)
+    }
+
+    /// §5.4: the three views in the iPad sidebar layout, a button cycling
+    /// through them in the iPad bottom panel, original or adjusted on the iPhone.
+    @ViewBuilder private func comparisonControl(_ editor: RecipeEditor) -> some View {
+        let available = original(editor) != nil
+        switch form {
+        case .sidebar:
+            Picker(selection: $comparison) {
+                Text("ios.view.original").tag(Comparison.original)
+                Text("ios.view.edited").tag(Comparison.edited)
+                Text("ios.view.split").tag(Comparison.split)
+            } label: {
+                Text("ios.compare.button")
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
+            .disabled(!available)
+        case .bottomPanel:
+            Button {
+                let all = Comparison.allCases
+                comparison = all[(all.firstIndex(of: comparison)! + 1) % all.count]
+            } label: {
+                Text("ios.compare.button")
+            }
+            .accessibilityValue(comparisonName)
+            .disabled(!available)
+        case .bottomBar, .sideBar:
+            Button {
+                comparison = comparison == .original ? .edited : .original
+            } label: {
+                Text("ios.compare.button")
+            }
+            .accessibilityValue(comparisonName)
+            .disabled(!available)
+        }
+    }
+
+    private var comparisonName: Text {
+        switch comparison {
+        case .original: Text("ios.view.original")
+        case .edited: Text("ios.view.edited")
+        case .split: Text("ios.view.split")
         }
     }
 

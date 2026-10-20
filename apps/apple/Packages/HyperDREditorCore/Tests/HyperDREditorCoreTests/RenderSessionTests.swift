@@ -64,6 +64,10 @@ import UniformTypeIdentifiers
         bypassed.bypassedGroups = [.light]
         #expect(try await session.render(bypassed).request.recipe == recipe)
 
+        // R6: the mask of a parameter, for the same request.
+        let mask = try await session.effectMask(preview.request, parameterID: "tone.highlights")
+        #expect(mask.texture.width == 48 && mask.outputSize == PixelSize(width: 48, height: 32))
+
         let thumbnail = try await session.sdrThumbnail(preview, maximumSize: PixelSize(width: 24, height: 24))
         #expect(thumbnail.width == 24)
 

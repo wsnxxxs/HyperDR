@@ -148,17 +148,16 @@ image, and a full source is loaded only when the final plan needs whole planes.
 
 The row model prices fixed analysis, decoder/RAW caches, source ROI and active
 Render graph, 56 CPU+32 GPU bytes per RGB-gain readback pixel, package input band,
-and HEIC's independent 512-row float/YUV slab. HEIC also reserves compressed tiles
+and HEIC's independent 512-row RGB Float slab plus a fixed VT queue reserve. HEIC also reserves compressed tiles
 plus assembly bytes (two copies, estimated at 3 B/pixel or 5 for adaptive10, plus
 8 MiB). These are reserve policies, not measured encoder limits. Preparation's
 256-row scan and the encoding reader are successive phases; 256/128/64 input
 choices reduce the latter, not the fixed scan or HEIC slab. Native verification
 of these row formats now uses scanlines or a matching HEIC 512×512 tile pair, with an 8 MiB codec reserve plus row/tile workspace. The
 estimate exposes `nativeVerify` and `systemVerify`; `verify` is their maximum,
-not their sum. The independent ImageIO reader keeps a full-image cache reservation
-because auxiliary dictionaries and Apple decoders are not guaranteed bounded.
+not their sum. Native row output uses the reduced ImageIO reader described below;
 AVIF and ImageIO writing retain their whole-plane verification estimates. This
-does not claim constant memory for all formats or 61MP iPhone admission.
+does not claim constant memory for all formats or guaranteed 61MP iPhone admission.
 
 Opt-in bridge/writer measurement: run `streamingHeightMemoryMeasurement` in fresh
 processes with `HYPERDR_STREAM_HEIGHT=1024`, then `4096`. At 2048 pixels wide and
@@ -205,3 +204,88 @@ dual inputs or iOS; the decoder/HEIC reserves remain. The real service's six-for
 test also compares decoded pixels against whole-plane output, including a
 multi-band framed HEIC pair. Service tests retain Fake injection for deterministic
 failure paths.
+
+## iOS export admission diagnostics and reduced system readback
+
+`RecipeExportServicing.lastMemoryDiagnostic` is available after a failed export,
+including process rejection by the planner before rendering. It records process
+versus GPU, planning versus running, required/available bytes, and computed
+required/available/shortfall MiB. It resets on the next accepted operation. The
+same numeric summary is logged publicly in `com.hyperdr.HyperDR` / `Export`, with
+no photo paths. Existing `RecipeExportError` cases remain unchanged. iOS currently
+drops `.memoryExceeded` details; its host can await the diagnostic in the failure
+handler and localize the check/phase labels when showing these MiB fields.
+Metal's zero recommendation is unknown (observed on Simulator), so GPU admission
+is skipped in that case; process admission is always retained. Nonzero device
+recommendations remain enforced.
+
+Native row output now obtains auxiliary **metadata** from ImageIO's file-contents
+properties, without copying the full decoded auxiliary-data dictionary. It asks
+`CGImageSourceCreateImageAtIndex` for 1/8 decoder subsampling, SDR or HDR as
+appropriate, and float output; JPEG MCU rounding is allowed. Unexpected full-size
+fallback is refused. The decoded image is at most the even-rounded 1/8 dimensions
+and is sampled into a <=64px Float buffer. These are public ImageIO APIs available
+before iOS 26; the CI-specific subsample API requires iOS 27 and is not used.
+Our retained readback buffers scale with 1/64 of output area, not full area; this
+is not a promise that Apple's private decoder caches are allocator-bounded.
+
+The independent system reader still checks original dimensions, upright primary
+orientation, bit depth, gain auxiliary presence/absence, reduced HDR/SDR decode,
+finite pixels and finite content headroom, and reports the profile name. For row
+output, `verifiedHeadroomStops` now contains the decoded content headroom rather
+than claiming two separately applied gain-map headrooms. It does not compare
+full-resolution system pixels or manually reconstruct the pair at maximum and
+intermediate headrooms. Native row/tile validation still checks every full-size
+pixel, gain metadata, reconstruction, orientation and E5 before this readback.
+AVIF and ImageIO manual writing keep their existing full-plane checks/estimates.
+
+Offline RAW example: 9504×6336, no size limit, no frame/LUT/prediction overhead,
+rawEDR, native row input, Adaptive HEIC10 / ISO JPEG8. Values are MiB, successive
+stage peaks (not summed), with the same estimates on iOS. Use
+`HYPERDR_MEMORY_ESTIMATES=1` and test `fullSizeRAWMemoryEstimates` to reproduce.
+This does not substitute host RAM for a device's measured remaining budget.
+
+| Stage, 256 rows | HEIC before | HEIC after | ISO JPEG before | ISO JPEG after |
+|---|---:|---:|---:|---:|
+| Decode/resident | 961.5 | 961.5 | 961.5 | 961.5 |
+| Render / composite | 1147.7 | 1147.7 | 1147.7 | 1147.7 |
+| Packaging / encode | 2175.5 | 2077.6 | 1407.9 | 1407.9 |
+| Native verification | 1165.7 | 1165.7 | 1156.9 | 1156.9 |
+| System verification | 3444.8 | 1201.6 | 3444.8 | 1192.8 |
+| Peak | 3444.8 | 2077.6 | 3444.8 | 1407.9 |
+
+| Rows | Old peak, both | New HEIC peak | New ISO JPEG peak |
+|---|---:|---:|---:|
+| 256 | 3444.8 | 2077.6 | 1407.9 |
+| 128 | 3352.0 | 1854.8 | 1185.1 |
+| 64 | 3305.6 | 1743.4 | 1147.7 |
+
+RAW retains a 918.8 MiB decoder/development reserve. For HEIC the writer actually
+owns one RGB Float slab (12 B/px), not a full-width 40 B/px YUV/Float canvas; the
+model now prices that slab plus 32 MiB for the bounded four-picture VT queue and
+framework workspace. Compressed tiles plus the assembled container still reserve
+two copies at 5 B/px for HEIC10 (~574.3 MiB). Those writer allocations, and the
+fixed 256-row Render scan for JPEG, dominate after removing the full system map.
+The QA report proves Simulator's GPU zero-limit rejection; it contains no numeric
+process/GPU budget at the old phone failure, so its exact failed check cannot be
+retrospectively identified. The GPU estimate is 383.9 MiB at 256 rows and
+309.6 MiB at 128/64 rows (the fixed preparation scan remains); the phone's actual
+Metal recommendation was not captured. The new public diagnostic resolves this
+on retest.
+
+HLG pull observation: 512-row HEIC slabs reuse data across horizontal tiles.
+256/128/64-row package bands all divide 512, so smaller bands add callbacks but
+not an extra per-tile Render pass. Gain extrema/codebook scan and encode each
+traverse the image. For 4032×3024 HLG at 256 rows this is 12 reads per traversal,
+24 package callbacks plus Render's separate 256-row preparation scan. The encoding
+stage includes all pull rendering, VT encoding and native verification; 13.9 s
+cannot be attributed to read latency from that aggregate timer alone.
+
+`increased-memory-limit`: Apple's [entitlement documentation](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.kernel.increased-memory-limit)
+only promises additional memory on supported models and requires checking
+`os_proc_available_memory`. There is a [first-person Personal Team/Xcode report](https://github.com/SideStore/SideStore/issues/1616)
+that the entitlement is retained and increases available memory with a free team;
+so paid membership is not a necessary assumption for this entitlement. It has not
+been signing-tested in this task. If tried later, verify the generated profile,
+signed entitlement and device budget; do not assume it bypasses process/GPU
+admission. No entitlement was added here.

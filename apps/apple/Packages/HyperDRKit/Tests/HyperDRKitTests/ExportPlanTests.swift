@@ -439,14 +439,14 @@ struct ExportMemoryPlanTests {
         #expect(strips.packaging == whole.packaging)
     }
 
-    @Test func rowsBoundNativeVerificationButReserveTheSystemReader() {
+    @Test func rowsBoundNativeAndSubsampleSystemVerification() {
         let req = request(.custom(.init(encoding: .sdrTIFF, gamut: .p3, quality: 90)))
         let streamed = plan(req)
         var old = req; old.allowsRowInput = false
         let whole = plan(old)
         #expect(streamed.memory.usesRowInput && !whole.memory.usesRowInput)
         #expect(streamed.memory.estimate.encode < whole.memory.estimate.encode)
-        #expect(streamed.memory.estimate.systemVerify > photo.pixels * 16)
+        #expect(streamed.memory.estimate.systemVerify < photo.pixels * 16)
         #expect(streamed.memory.estimate.nativeVerify < streamed.memory.estimate.systemVerify)
         #expect(streamed.memory.estimate.verify == streamed.memory.estimate.systemVerify)
         #expect(whole.memory.estimate.nativeVerify == whole.memory.estimate.systemVerify)
@@ -476,6 +476,42 @@ struct ExportMemoryPlanTests {
                 isFramed: false, baseBitDepth: encoding.isAVIF ? 10 : 8, writeRows: 64, retainedBytes: 0))
             #expect(result.nativeVerify == result.systemVerify)
             #expect(result.verify > photo.pixels * 16)
+        }
+    }
+
+    @Test func unknownMetalLimitIsNotAZeroByteBudget() {
+        #expect(ExportMemoryDiagnostic.gpuFailure(required: 256 << 20, recommended: 0) == nil)
+        #expect(ExportMemoryDiagnostic.gpuFailure(required: 256 << 20, recommended: 512 << 20) == nil)
+        let failure = ExportMemoryDiagnostic.gpuFailure(required: 512 << 20, recommended: 256 << 20)
+        #expect(failure?.check == .gpu && failure?.requiredMiB == 512 && failure?.availableMiB == 256)
+        #expect(failure?.summary.contains("shortfall=256.0 MiB") == true)
+    }
+
+    @Test func fullSizeRAWMemoryEstimates() {
+        let size = ExportPixelSize(width: 9504, height: 6336)
+        for encoding in [ExportEncoding.adaptive, .isoGainMapJPEG] {
+            let planned = plan(request(.custom(.init(encoding: encoding, gamut: .p3, quality: 95)),
+                source: source(.rawEDR, size: size)))
+            #expect(planned.memory.usesRowInput && planned.writer == .inHouse)
+            for rows in [256, 128, 64] {
+                let estimate = ExportMemoryEstimate.estimate(.init(source: source(.rawEDR, size: size),
+                    photoSize: size, canvas: size, encoding: encoding, writer: .inHouse, writesGainMap: true,
+                    isFramed: false, baseBitDepth: encoding == .adaptive ? 10 : 8, writeRows: rows, retainedBytes: 0))
+                let workspace = (encoding == .adaptive ? 512*512*40 : size.width*128) + 8*1024*1024
+                let before = estimate.nativeVerify - workspace + size.pixels*40
+                #expect(estimate.systemVerify < before)
+                if rows == 256 { #expect(estimate == planned.memory.estimate) }
+                if ProcessInfo.processInfo.environment["HYPERDR_MEMORY_ESTIMATES"] == "1" {
+                    let oldSlab = size.width * min(512, size.height) * 40
+                    let newSlab = size.width * min(512, size.height) * 12 + 32*1024*1024
+                    let oldEncode = estimate.encode + (encoding == .adaptive ? oldSlab - newSlab : 0)
+                    print("RAW_MEMORY", encoding.rawValue, "rows", rows, "beforeEncode", oldEncode,
+                        "decode", estimate.decode, "render", estimate.render, "composite", estimate.composite,
+                        "packaging", estimate.packaging, "encode", estimate.encode,
+                        "nativeVerify", estimate.nativeVerify, "beforeSystemVerify", before,
+                        "systemVerify", estimate.systemVerify, "peak", estimate.peak)
+                }
+            }
         }
     }
 

@@ -10,6 +10,8 @@ public struct SystemExportVerification: Sendable, Codable, Equatable {
     public let orientation: Int
     public let auxiliaryGain: Bool
     public let hdrReadable: Bool
+    /// Row output: ImageIO-decoded content headroom. Whole output: explicit
+    /// maximum/intermediate headrooms applied by the legacy system readback.
     public let verifiedHeadroomStops: [Double]
     public let profileName: String?
 }
@@ -36,6 +38,9 @@ enum ExportVerification {
             let depth = props[kCGImagePropertyDepth] as? Int ?? 0
             guard depth == plan.baseBitDepth else {
                 throw RecipeExportError.verificationFailed("imageio_bit_depth")
+            }
+            if plan.memory.usesRowInput {
+                return try boundedSystem(source, properties: props, plan: plan)
             }
             let auxiliary = CGImageSourceCopyAuxiliaryDataInfoAtIndex(source, 0, kCGImageAuxiliaryDataTypeISOGainMap)
                 ?? CGImageSourceCopyAuxiliaryDataInfoAtIndex(source, 0, kCGImageAuxiliaryDataTypeHDRGainMap)
@@ -93,6 +98,61 @@ enum ExportVerification {
                          auxiliaryGain: auxiliary != nil || (plan.gainMap.writesGainMap && gain != nil), hdrReadable: hdr,
                          verifiedHeadroomStops: headrooms, profileName: props[kCGImagePropertyProfileName] as? String)
         }
+    }
+    /// Native verification owns full-resolution pixel correctness. This second
+    /// reader checks container properties, gain presence and reduced HDR pixels.
+    /// Never copy the auxiliary dictionary, which materializes the entire map.
+    private static func boundedSystem(_ source: CGImageSource, properties: [CFString: Any],
+                                      plan: ExportPlan) throws -> SystemExportVerification {
+        let file = CGImageSourceCopyProperties(source, nil) as? [CFString: Any]
+        let contents = file?[kCGImagePropertyFileContentsDictionary] as? [CFString: Any]
+        let images = contents?[kCGImagePropertyImages] as? [[CFString: Any]] ?? []
+        let primary = images.first { ($0[kCGImagePropertyImageIndex] as? Int) == 0 } ?? images.first
+        let auxiliaries = primary?[kCGImagePropertyAuxiliaryData] as? [[CFString: Any]] ?? []
+        let hasGain = auxiliaries.contains {
+            let type = $0[kCGImagePropertyAuxiliaryDataType] as? String
+            return type == kCGImageAuxiliaryDataTypeISOGainMap as String
+                || type == kCGImageAuxiliaryDataTypeHDRGainMap as String
+        }
+        guard hasGain == plan.gainMap.writesGainMap else {
+            throw RecipeExportError.verificationFailed("imageio_gain_properties")
+        }
+        let hdr = plan.peakStops != nil
+        let options: [CFString: Any] = [kCGImageSourceShouldCache: false,
+            kCGImageSourceSubsampleFactor: 8, kCGImageSourceShouldAllowFloat: true,
+            kCGImageSourceDecodeRequest: hdr ? kCGImageSourceDecodeToHDR : kCGImageSourceDecodeToSDR]
+        guard let decoded = CGImageSourceCreateImageAtIndex(source, 0, options as CFDictionary) else {
+            throw RecipeExportError.verificationFailed("imageio_readback")
+        }
+        guard decoded.width <= (((plan.size.width + 7) / 8 + 1) & ~1),
+              decoded.height <= (((plan.size.height + 7) / 8 + 1) & ~1) else {
+            // JPEG subsampling rounds its output to even MCU dimensions.
+            // ImageIO can ignore unsupported subsampling. Never silently accept
+            // a full-size decoded image under the reduced readback budget.
+            throw RecipeExportError.verificationFailed("system_subsample_unsupported")
+        }
+        let headroom = decoded.contentHeadroom
+        guard headroom.isFinite, headroom >= 1 else {
+            throw RecipeExportError.verificationFailed("system_hdr_headroom")
+        }
+        let image = CIImage(cgImage: decoded)
+        let scale = min(1, 64 / max(image.extent.width, image.extent.height))
+        let small = image.transformed(by: .init(scaleX: scale, y: scale))
+        let w = max(1, Int(small.extent.width)), h = max(1, Int(small.extent.height))
+        var samples = [Float](repeating: 0, count: w*h*4)
+        samples.withUnsafeMutableBytes {
+            CIContext(options: [.cacheIntermediates: false]).render(small,
+                toBitmap: $0.baseAddress!, rowBytes: w*16, bounds: CGRect(x: 0, y: 0, width: w, height: h),
+                format: .RGBAf, colorSpace: CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3))
+        }
+        guard samples.allSatisfy(\.isFinite) else {
+            throw RecipeExportError.verificationFailed("system_hdr_decode")
+        }
+        try Task.checkCancellation()
+        return .init(width: plan.size.width, height: plan.size.height, bitDepth: plan.baseBitDepth,
+            orientation: 1, auxiliaryGain: hasGain, hdrReadable: hdr,
+            verifiedHeadroomStops: hdr ? [log2(Double(headroom))] : [],
+            profileName: properties[kCGImagePropertyProfileName] as? String)
     }
 }
 

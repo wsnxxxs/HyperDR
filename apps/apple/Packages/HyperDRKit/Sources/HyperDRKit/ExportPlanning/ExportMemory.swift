@@ -232,9 +232,12 @@ extension ExportMemoryEstimate {
         let readback = input.canvas.width * rows * (gain ? 88 : 48)
         let packageBand = input.canvas.width * rows * (gain ? 24 : 12)
         let heic = input.encoding == .adaptive || input.encoding.isBT2100
-        // VT consumes its own 512-row float/YUV slab, and our HEIF container
-        // retains compressed tiles plus its final assembled byte vector.
-        let codec = heic ? input.canvas.width * min(512, input.canvas.height) * 40 : input.canvas.width * 32
+        // encode_heic_rows materializes one RGB Float slab (12 B/px), not
+        // full-width YUV/float canvases. VT has at most four 512px pictures in
+        // flight; reserve their buffers/framework workspace separately (32 MiB).
+        // Compressed tiles and the assembled container are accounted below.
+        let codec = heic ? input.canvas.width * min(512, input.canvas.height) * 12 + 32 * 1024 * 1024
+            : input.canvas.width * 32
         let compressedBytesPerPixel = input.encoding == .adaptive && input.baseBitDepth == 10 ? 5 : 3
         let compressedCache = heic ? input.canvas.pixels * compressedBytesPerPixel * 2 + 8 * 1024 * 1024 : 0
         let encode = resident + sourceBand(rows) + graph + readback + packageBand + codec + compressedCache
@@ -245,9 +248,12 @@ extension ExportMemoryEstimate {
         let verifierResident = resident + sourceBand(rows) + graph
         let nativeWorkspace = (heic ? 512 * 512 * 40 : input.canvas.width * 128) + 8 * 1024 * 1024
         let nativeVerify = verifierResident + nativeWorkspace
-        // ImageIO thumbnail/CI output is small, but its decoder and auxiliary
-        // dictionary may cache full rasters. Retain the full-image reservation.
-        let systemVerify = verifierResident + input.canvas.pixels * (gain ? 40 : 16)
+        // No full auxiliary dictionary on native row output. JPEG/HEIC CI
+        // readback requests decoder subsampling by 8 and checks its dimensions,
+        // with MCU rounding. Keep decoder
+        // row/tile workspace as well as the reduced base/gain/float buffers.
+        let reducedPixels = (((input.canvas.width + 7) / 8 + 1) & ~1) * (((input.canvas.height + 7) / 8 + 1) & ~1)
+        let systemVerify = verifierResident + nativeWorkspace + reducedPixels * (gain ? 40 : 16)
         return .init(decode: resident, render: render, composite: render,
                      packaging: encode, encode: encode, verify: max(nativeVerify, systemVerify),
                      nativeVerify: nativeVerify, systemVerify: systemVerify)

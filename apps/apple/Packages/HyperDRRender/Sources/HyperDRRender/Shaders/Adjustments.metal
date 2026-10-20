@@ -217,7 +217,8 @@ kernel void graphPeak(texture2d<float,access::read> peaks [[texture(0)]],texture
 }
 kernel void graphOutput(texture2d<float,access::sample> src [[texture(0)]],texture2d<float,access::write> base [[texture(1)]],
                         texture2d<float,access::write> gain [[texture(2)]],texture3d<float,access::read> cube [[texture(3)]],
-                        texture2d<float,access::sample> expansion [[texture(4)]],constant GraphUniform& p [[buffer(0)]],
+                        texture2d<float,access::sample> expansion [[texture(4)]],texture2d<float,access::sample> model [[texture(5)]],
+                        constant GraphUniform& p [[buffer(0)]],
                         device const float4* table [[buffer(1)]],uint2 pos [[thread_position_in_grid]]) {
     if(pos.x>=base.get_width() || pos.y>=base.get_height())return;
     constexpr sampler s(coord::normalized,address::clamp_to_edge,filter::linear);
@@ -225,6 +226,7 @@ kernel void graphOutput(texture2d<float,access::sample> src [[texture(0)]],textu
     auto pair=preparePair(src.sample(s,uv),p,cube,table);
     float g=pair.gain;
     if(p.mode.x)g=max(g,expansion.sample(s,uv).x*p.color.z/3);
+    if(p.mode.y)g=max(g,model.sample(s,uv).x);
     g*=p.color.w;
     float peak=maximum(pair.base)*exp2(g), mapped=softPeak(peak,exp2(p.color.z),p.hdr.w!=0);
     if(peak>0)g+=log2(max(mapped/peak,1e-30f));
@@ -266,4 +268,18 @@ kernel void authoredOutput(texture2d<float,access::sample> baseWorking [[texture
         h*=mapped/peak;g=isoLogRatio(h+oA,b+oB);
     }
     output.write(float4(g,0),pos);
+}
+
+// Model grid is raw log2, unsmoothed. Auto start retains the prediction; an
+// explicit expansion start gates it using the untouched SDR guide luminance.
+kernel void modelGainWeights(texture2d<float,access::read> cells [[texture(0)]],
+                             texture2d<float,access::sample> model [[texture(1)]],
+                             texture2d<float,access::write> output [[texture(2)]],
+                             constant float& start [[buffer(0)]],uint2 pos [[thread_position_in_grid]]) {
+    if(pos.x>=output.get_width() || pos.y>=output.get_height())return;
+    constexpr sampler s(coord::normalized,address::clamp_to_edge,filter::linear);
+    float y=cells.read(pos).x;
+    float g=max(0.f,model.sample(s,(float2(pos)+.5f)/float2(output.get_width(),output.get_height())).x);
+    if(start>=0)g*=sm(.75f*start,max(.001f,min(1.f,1.1f*start)),y);
+    output.write(float4(y,g,y*y,y*g),pos);
 }

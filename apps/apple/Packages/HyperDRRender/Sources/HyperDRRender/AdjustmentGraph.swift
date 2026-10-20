@@ -136,18 +136,19 @@ extension RenderEngine {
         return result
     }
 
-    func graphConfiguration(_ source: RenderSource, _ edit: RenderAdjustments, analysis: SpatialAnalysis) throws -> (range: Float, expand: Bool, shoulder: Bool) {
+    func graphConfiguration(_ source: RenderSource, _ edit: RenderAdjustments, analysis: SpatialAnalysis, modelPeak: Float = 0) throws -> (range: Float, expand: Bool, shoulder: Bool) {
         let expand = (edit.hdr.source ?? .defaultSource(for:source.domain)).expands
         let imported = source.domain == .hdr || source.domain == .dual
         let captured = min(imported ? Float(Adjustments.declaration("hdr.range")!.range!.upperBound) : Float(Adjustments.generatedRangeCeiling),
             max(imported ? analysis.sourceHeadroom : 0, log2(max(1, analysis.peaks.x))))
         let contentExpansion = 0.5 + (Adjustments.generatedRangeCeiling-0.5) * DoubleReference.smoothStep(0.5, 1, Double(analysis.peaks.y))
-        let automatic = expand ? max(captured, Float(contentExpansion)) : captured
+        let automatic = max(expand ? max(captured, Float(contentExpansion)) : captured,
+                            min(Float(Adjustments.generatedRangeCeiling),modelPeak))
         let range = edit.hdr.range ?? automatic
-        let requested = max(analysis.peaks.z, expand ? analysis.peaks.w * range / 3 : 0) * edit.hdr.strength
+        let requested = max(analysis.peaks.z, modelPeak, expand ? analysis.peaks.w * range / 3 : 0) * edit.hdr.strength
         // Use the actual post-adjustment HDR peak when captured strength is
         // unchanged, rather than an independent gain bound for a dimmer base.
-        let overflow = !expand && edit.hdr.strength == 1
+        let overflow = !expand && modelPeak == 0 && edit.hdr.strength == 1
             ? analysis.peaks.x > exp2(range) * 1.00001 : requested > range + 0.00001
         return (range, expand, overflow)
     }
@@ -205,7 +206,8 @@ extension RenderEngine {
 
     func graphRegion(_ source: RenderSource, edit: RenderAdjustments, size: PixelSize,
                      region: CGRect, analysis: SpatialAnalysis) throws -> RenderPlanes {
-        let configuration = try graphConfiguration(source, edit, analysis: analysis)
+        let model = try filteredModelGain(source,edit:edit)
+        let configuration = try graphConfiguration(source, edit, analysis: analysis, modelPeak:model?.peak ?? 0)
         let input = try workingInput(source)
         let resources = try lookupResources(edit.look.isIdentity ? nil : edit.look.lut)
         guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
@@ -214,11 +216,13 @@ extension RenderEngine {
         let gain = try context.texture(width: base.width, height: base.height, format: .r32Float)
         var p = graphUniform(source, edit, size: size, region: region, range: configuration.range, shoulder: configuration.shoulder)
         p.mode.x = configuration.expand ? 1 : 0
+        p.mode.y = model == nil ? 0 : 1
         try context.dispatch("graphOutput", width: base.width, height: base.height,
-            textures: [input, base, gain, resources.texture, analysis.expansion], buffers: [resources.buffer], value: &p)
+            textures: [input, base, gain, resources.texture, analysis.expansion, model?.gain ?? analysis.expansion], buffers: [resources.buffer], value: &p)
         try finish(command)
         return RenderPlanes(base: base, gain: gain, baseColorSpace: Self.workingColorSpace,
-            provenance: source.domain == .dual ? .resplit : source.domain == .sdr ? .identity : .split, region: region, outputSize:size)
+            provenance: source.domain == .dual ? .resplit : source.domain == .sdr ? .identity : .split, region: region, outputSize:size,
+            aiPending: edit.hdr.enabled && (edit.hdr.source ?? .defaultSource(for:source.domain)).usesModel && model == nil)
     }
 
     func authorWorking(_ source: RenderSource) throws -> (base: any MTLTexture, hdr: any MTLTexture, metadata: ISOLogGainMetadata) {

@@ -109,14 +109,20 @@ extension SourceOptions {
 
 extension RenderEngine {
     public func render(_ source: RenderSource, recipe: Recipe, lut: ColorLUT? = nil,
+                       modelGain: ModelGainPrediction? = nil,
                        size: PixelSize? = nil, region: CGRect? = nil) throws -> RenderPlanes {
         guard recipe.inputDomain == source.domain else { throw RenderError.invalidAdjustment }
-        return try render(source,adjustments:RenderAdjustments(recipe:recipe,lut:lut),size:size,region:region)
+        var edit = try RenderAdjustments(recipe:recipe,lut:lut)
+        edit.hdr.modelGain = modelGain
+        return try render(source,adjustments:edit,size:size,region:region)
     }
     public func renderStripes(_ source: RenderSource, recipe: Recipe, lut: ColorLUT? = nil,
+                              modelGain: ModelGainPrediction? = nil,
                               size: PixelSize? = nil, rows: Int = 256,
                               consume: @Sendable (RenderPlanes) throws -> Void) throws {
         guard recipe.inputDomain == source.domain else { throw RenderError.invalidAdjustment }
-        try renderStripes(source,adjustments:RenderAdjustments(recipe:recipe,lut:lut),size:size,rows:rows,consume:consume)
+        var edit = try RenderAdjustments(recipe:recipe,lut:lut)
+        edit.hdr.modelGain = modelGain
+        try renderStripes(source,adjustments:edit,size:size,rows:rows,consume:consume)
     }
 }

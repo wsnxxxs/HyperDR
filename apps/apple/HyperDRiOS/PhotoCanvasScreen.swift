@@ -89,7 +89,7 @@ struct PhotoCanvasScreen: View {
             if case .success(let url) = result { open(.file(url)) }
         }
         .task { makeEditor() }
-        .task(id: request?.id) { await load(request?.source) }
+        .task(id: request?.id) { await load(request) }
         .onChange(of: editor.flatMap(viewport), initial: true) { _, viewport in editor?.setViewport(viewport) }
         .onChange(of: undoManager.map(ObjectIdentifier.init)) { editor?.attach(undoManager: undoManager) }
         .confirmationDialog(Text("ios.adjust.resetAll.confirm"), isPresented: $confirmingReset, titleVisibility: .visible) {
@@ -400,28 +400,35 @@ struct PhotoCanvasScreen: View {
 
     // MARK: - Opening
 
+    /// Every way of opening a photo comes here. Not while an export runs:
+    /// opening the next photo removes this one's copy and session. Export
+    /// closes in the same step as the request is accepted, before its load
+    /// starts (R26-004).
+    private func open(_ source: Request.Source) {
+        guard exports.canOpenPhoto else { return }
+        let next = Request(source: source)
+        exports.photoRequested(next.id)
+        request = next
+    }
+
     /// Copies the original into our own file (library: as a file, `.current`
     /// keeps HEIC, DNG and gain maps; Files: inside its security scope) and
     /// opens it. The previous photo stays on screen until the new one is
     /// ready, and its copy is removed once the new one is open.
-    /// Every way of opening a photo comes here. Not while an export runs:
-    /// opening the next photo removes this one's copy and session.
-    private func open(_ source: Request.Source) {
-        guard exports.canOpenPhoto else { return }
-        request = Request(source: source)
-    }
-
-    private func load(_ source: Request.Source?) async {
-        guard let source, let editor else { return }
-        loading = true
-        exports.loadingPhoto = true
-        // A newer request has started its own load; leave its spinner alone.
-        defer {
-            if !Task.isCancelled {
-                loading = false
-                exports.loadingPhoto = false
-            }
+    private func load(_ request: Request?) async {
+        guard let request else { return }
+        // Whatever happens below, this request no longer holds export closed.
+        defer { exports.photoRequestEnded(request.id) }
+        // An export that started meanwhile keeps its photo: drop the request.
+        guard exports.canOpenPhoto else {
+            if self.request?.id == request.id { self.request = nil }
+            return
         }
+        guard let editor else { return }
+        let source = request.source
+        loading = true
+        // A newer request has started its own load; leave its spinner alone.
+        defer { if !Task.isCancelled { loading = false } }
         var imported: ImportedPhoto?
         do {
             switch source {

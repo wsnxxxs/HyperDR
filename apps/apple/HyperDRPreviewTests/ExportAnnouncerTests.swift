@@ -39,7 +39,7 @@ import XCTest
         await eventually(timeout: .seconds(5)) { spoken.items.count == 1 }
         XCTAssertEqual(spoken.items.first?.text, "Exporting “\(model.document?.name ?? "")” as Adaptive HDR.")
         for fraction in stride(from: 0.1, through: 0.9, by: 0.2) {
-            services.sendExport(.progress(stage: "encode", fraction: fraction, at: Date()))
+            services.sendExport(.progress(stage: "encoding", fraction: fraction, at: Date()))
         }
         services.sendExport(.finishing); services.sendExport(.saving)
         try await Task.sleep(for: .milliseconds(100))

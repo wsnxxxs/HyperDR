@@ -1,14 +1,12 @@
 import CoreGraphics
 import Foundation
-import HyperDREngine
 import Metal
 import QuartzCore
 
 /// What one canvas should show, captured on the main thread. Immutable; the
-/// frame is held strongly so its no-copy planes outlive the draw.
+/// display pairs hold their textures until the draw is done.
 nonisolated struct CanvasSnapshot: @unchecked Sendable {
     enum Content {
-        case frame(PreviewFrame, original: Bool)
         case composition(CanvasComposition)
         /// The diagnostic window's 0–8× ramp.
         case synthetic(original: Bool)
@@ -26,13 +24,13 @@ nonisolated struct CanvasSnapshot: @unchecked Sendable {
 
 /// One serial render executor per canvas (A2b-2, batch3 §14.6). The main
 /// thread only hands over snapshots; this loop's own thread waits for
-/// drawables, runs both passes and presents, so a compositor that holds on to
+/// drawables, rebuilds the layers and presents, so a compositor that holds on to
 /// drawables blocks this thread and never the main one.
 ///
 /// - Newest wins: one pending snapshot slot, overwritten by a newer one.
 /// - One draw in flight per canvas: the loop waits for the GPU to finish the
 ///   previous presentation, then draws whatever is pending at that moment.
-/// - `nextDrawable` comes before pass 1, so a missing drawable costs no GPU
+/// - `nextDrawable` comes before any layer rebuild, so a missing drawable costs no GPU
 ///   work; the snapshot is retried a display frame later.
 ///
 /// `CAMetalDisplayLink` was the first choice; offscreen it hands out only the
@@ -56,7 +54,7 @@ nonisolated final class PreviewRenderLoop: @unchecked Sendable {
     private var presentedOutOfOrder = false
     private var presentations = 0
     // Render thread only.
-    private var synthetic: FramePlanes?
+    private var synthetic: DisplayPair?
     private var showsEmpty = false
 
     init(renderer: PreviewRenderer, layer: CAMetalLayer, retryDelay: TimeInterval = 0.008,
@@ -204,17 +202,14 @@ nonisolated final class PreviewRenderLoop: @unchecked Sendable {
                 let drawn = try renderer.draw(in: layer, composition: content, transform: snapshot.transform)
                 if drawn { showsEmpty = false }
                 return drawn
-            case .frame(let frame, let original):
-                let drawn = try renderer.draw(in: layer, transform: snapshot.transform) {
-                    try renderer.prepare(frame: frame, original: original)
-                }
-                if drawn { showsEmpty = false }
-                return drawn
             case .synthetic(let original):
-                let drawn = try renderer.draw(in: layer, transform: snapshot.transform) {
-                    if synthetic == nil { synthetic = try PreviewRenderer.syntheticRamp(device: renderer.device) }
-                    if let synthetic { try renderer.prepare(planes: synthetic, original: original) }
-                }
+                if synthetic == nil { synthetic = try PreviewRenderer.syntheticRamp(device: renderer.device) }
+                guard let synthetic else { return true }
+                // The ramp at full gain, drawn as the edit or as the original
+                // (which keeps the source's own HDR).
+                let content = CanvasComposition(original: original ? synthetic : nil, edited: synthetic,
+                                                mode: original ? .original : .edited, headroom: 8)
+                let drawn = try renderer.draw(in: layer, composition: content, transform: snapshot.transform)
                 if drawn { showsEmpty = false }
                 return drawn
             }

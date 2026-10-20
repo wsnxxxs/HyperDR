@@ -1,5 +1,4 @@
 import AppKit
-import HyperDREngine
 import os
 
 // `HeadroomSnapshot` is shared with iOS (Shared/Canvas/EDRDisplayPass.swift).
@@ -12,13 +11,6 @@ nonisolated enum HeadroomPolicy: String {
     static let configured = Self(rawValue: UserDefaults.standard.string(forKey: "HDRHeadroomPolicy") ?? "A") ?? .current
     func target(_ snapshot: HeadroomSnapshot) -> Double {
         Double(self == .potential ? snapshot.potential : snapshot.current)
-    }
-}
-
-extension DisplayWeight {
-    static func value(headroom: Double, metadata: PreviewMetadata) -> Float {
-        value(headroom: headroom, base: metadata.baseHeadroom ?? 0,
-              alternate: metadata.alternateHeadroom ?? metadata.headroomStops)
     }
 }
 
@@ -36,7 +28,7 @@ extension DisplayWeight {
     @discardableResult func update(_ value: HeadroomSnapshot) -> Bool {
         guard snapshot != value else { return false }
         snapshot = value
-        if PreviewTrace.recordsEnabled {
+        if HeadroomPolicy.configured != .current {
             Self.logger.info("A3 headroom current=\(Double(value.current), privacy: .public) potential=\(Double(value.potential), privacy: .public) policy=\(HeadroomPolicy.configured.rawValue, privacy: .public)")
         }
         return true

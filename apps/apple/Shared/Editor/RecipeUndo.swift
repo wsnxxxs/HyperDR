@@ -98,6 +98,11 @@ extension Recipe {
     }
 
     private func register(restoring recipe: Recipe, then other: Recipe, edit: RecipeEdit, on manager: UndoManager) {
+        // A manager that does not group by event (the Mac editor's own, which
+        // keeps steps apart from AppKit text) needs each step in a group of
+        // its own; inside an undo or redo the manager has one open already.
+        let grouped = !manager.groupsByEvent && manager.groupingLevel == 0
+        if grouped { manager.beginUndoGrouping() }
         manager.registerUndo(withTarget: self) { undo in
             MainActor.assumeIsolated {
                 undo.restore(recipe)
@@ -105,6 +110,8 @@ extension Recipe {
             }
         }
         manager.setActionName(actionName(edit))
+        if grouped { manager.endUndoGrouping() }
+        didRegister?()
     }
 
     /// Makes the next registration a step of its own even inside the current
@@ -117,6 +124,9 @@ extension Recipe {
         undoManager.endUndoGrouping()
         undoManager.beginUndoGrouping()
     }
+
+    /// Called after every registration (the Mac refreshes its Undo menu items).
+    var didRegister: (@MainActor () -> Void)?
 
     /// A different photo: its edits are not this photo's.
     func clear() {

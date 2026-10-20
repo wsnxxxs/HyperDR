@@ -9,7 +9,7 @@ import HyperDRKit
     private let remembered = URL(fileURLWithPath: "/tmp/DSC04127.jpg")
 
     private func services(_ result: RestoreResult) -> FakeEditorServices {
-        let s = FakeEditorServices(openDelay: .zero, previewDelay: .zero)
+        let s = FakeEditorServices(openDelay: .zero)
         s.restoreResult = result
         return s
     }
@@ -17,7 +17,7 @@ import HyperDRKit
     func testAReopenedPhotoSaysSoOnceItsFirstFrameAndHistoryAreIn() async throws {
         let s = services(.none)
         s.restoreResult = .restored(s.placeholder(for: remembered))
-        let m = EditorModel(services: s, ticker: ManualFrameTicker())
+        let m = EditorModel(services: s)
         m.launch()
         await eventually(timeout: .seconds(10)) { m.restoreNotice != nil }
         XCTAssertEqual(m.restoreNotice, .reopened(hasHistory: false))
@@ -28,12 +28,12 @@ import HyperDRKit
     func testTheSentenceMentionsExportHistoryOnlyWhenThereIsSome() async throws {
         let s = services(.none)
         s.restoreResult = .restored(s.placeholder(for: remembered))
-        let m = EditorModel(services: s, ticker: ManualFrameTicker())
+        let m = EditorModel(services: s)
         let key = try await s.exportKey(s.placeholder(for: remembered), options: EditOptions(), frame: nil)
         s.historyByURL[remembered] = [ExportHistoryItem(
             version: ExportVersion(number: 1, createdAt: Date(), encodingID: "adaptive",
                                    result: ExportResult(export: "v1", fileName: "a.heic", byteCount: 1, pixelSize: PixelSize(width: 1, height: 1))),
-            key: key, options: m.edit)]
+            key: key, options: m.exportChoices)]
         m.launch()
         await eventually(timeout: .seconds(10)) { m.restoreNotice != nil }
         XCTAssertEqual(m.restoreNotice, .reopened(hasHistory: true))
@@ -42,12 +42,12 @@ import HyperDRKit
     func testTheFirstEditAndDismissalClearTheNotice() async {
         let s = services(.none)
         s.restoreResult = .restored(s.placeholder(for: remembered))
-        let m = EditorModel(services: s, ticker: ManualFrameTicker())
+        let m = EditorModel(services: s)
         m.launch()
         await eventually(timeout: .seconds(10)) { m.restoreNotice != nil }
-        m.adjust("brightness", to: 1.2)
+        m.adjustRecipe("tone.exposure", to: 1.2)
         XCTAssertNil(m.restoreNotice)
-        let other = EditorModel(services: s, ticker: ManualFrameTicker())
+        let other = EditorModel(services: s)
         other.launch()
         await eventually(timeout: .seconds(10)) { other.restoreNotice != nil }
         other.dismissRestoreNotice()
@@ -56,7 +56,7 @@ import HyperDRKit
 
     func testAnOrdinaryOpenSaysNothing() async {
         let s = services(.none)
-        let m = EditorModel(services: s, ticker: ManualFrameTicker())
+        let m = EditorModel(services: s)
         m.open([remembered])
         await eventually(timeout: .seconds(10)) { m.document?.phase == .ready }
         try? await Task.sleep(for: .milliseconds(150))
@@ -65,7 +65,7 @@ import HyperDRKit
 
     func testAMissingPhotoIsExplainedInPlaceNotInADialog() async {
         let s = services(.unavailable(UserFacingError(code: "source_missing"), name: "DSC04127.ARW"))
-        let m = EditorModel(services: s, ticker: ManualFrameTicker())
+        let m = EditorModel(services: s)
         m.launch()
         await eventually(timeout: .seconds(10)) { m.restoreNotice != nil }
         XCTAssertEqual(m.restoreNotice, .missing(name: "DSC04127.ARW"))
@@ -76,14 +76,14 @@ import HyperDRKit
 
     func testOtherRestoreFailuresKeepTheirAlert() async {
         let s = services(.unavailable(UserFacingError(code: "decode_failed"), name: "a.jpg"))
-        let m = EditorModel(services: s, ticker: ManualFrameTicker())
+        let m = EditorModel(services: s)
         m.launch()
         await eventually(timeout: .seconds(10)) { m.alert != nil }
         XCTAssertEqual(m.alert?.code, "decode_failed"); XCTAssertNil(m.restoreNotice)
     }
 
     func testNoPhotoAndNoNoticeWhenNothingWasRemembered() async {
-        let m = EditorModel(services: services(.none), ticker: ManualFrameTicker())
+        let m = EditorModel(services: services(.none))
         m.launch()
         try? await Task.sleep(for: .milliseconds(150))
         XCTAssertNil(m.restoreNotice); XCTAssertNil(m.alert); XCTAssertNil(m.document)
@@ -134,7 +134,7 @@ import HyperDRKit
         var spoken: [(String, Bool)] = []
         NoticeAnnouncement.deliver = { spoken.append(($0, $1)) }
         let s = services(.unavailable(UserFacingError(code: "source_missing"), name: "DSC04127.ARW"))
-        let m = EditorModel(services: s, ticker: ManualFrameTicker())
+        let m = EditorModel(services: s)
         m.launch()
         await eventually { m.restoreNotice != nil }
         XCTAssertEqual(spoken.count, 1)

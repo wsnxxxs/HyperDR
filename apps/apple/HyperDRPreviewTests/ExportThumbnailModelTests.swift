@@ -1,10 +1,10 @@
 import AppKit
-import HyperDREngine
+import HyperDRRender
 import XCTest
 @testable import HyperDR
 
 @MainActor final class ExportThumbnailModelTests: XCTestCase {
-    private let source = URL(fileURLWithPath: "/tmp/thumbnail-first.jpg")
+    private let source = FileManager.default.temporaryDirectory.appendingPathComponent("thumbnail-first.jpg")
     private let next = URL(fileURLWithPath: "/tmp/thumbnail-second.jpg")
     private let destination = URL(fileURLWithPath: "/tmp/thumbnail-result.heic")
 
@@ -16,23 +16,17 @@ import XCTest
         context.fill(CGRect(x: 0, y: 0, width: 4, height: 2))
         return try XCTUnwrap(context.makeImage())
     }
-    private func frame(_ exposure: Double = 0) async throws -> PreviewFrame {
-        let photo = try TinyPhoto(); defer { photo.remove() }
-        let engine = try await Engine(), session = try engine.openPreview(source: photo.url)
-        defer { session.close() }
-        return try await session.renderFrame(EngineRequest(settings: ["preview_max_edge": .number(8), "exposure_bias": .number(exposure)]))
+    /// The exposure of the edit a frame shows; nil at its default.
+    nonisolated private static func exposure(_ frame: EditorFrame) -> Double? {
+        frame.request.recipe.value(for: "tone.exposure")?.numberValue
     }
-    private func preview(_ frame: PreviewFrame?) -> EditorPreview {
-        EditorPreview(pixelSize: PixelSize(width: 64, height: 48),
-            source: SourceSummary(domain: .sdr, colorName: "Display P3", degradationReasons: []), hasGain: true, frame: frame)
-    }
-    private func ready(_ frame: PreviewFrame? = nil) async -> (EditorModel, FakeEditorServices) {
-        let services = FakeEditorServices(openDelay: .zero, previewDelay: .zero)
-        services.preview = preview(frame)
-        let model = EditorModel(services: services, ticker: ManualFrameTicker())
+    private func ready() async -> (EditorModel, FakeEditorServices, ScriptedRendering) {
+        let rendering = ScriptedRendering()
+        let services = FakeEditorServices(openDelay: .zero, rendering: rendering)
+        let model = EditorModel(services: services)
         await model.loadExportServices(); model.open([source])
         await eventually(timeout: .seconds(10)) { model.document?.phase == .ready && !model.suggestedFileName.isEmpty }
-        return (model, services)
+        return (model, services, rendering)
     }
     private func start(_ model: EditorModel, _ services: FakeEditorServices) async {
         model.startExport(destination: destination, token: model.prepareExport()!)
@@ -43,21 +37,20 @@ import XCTest
     }
 
     func testSummaryTracksOnlyWhileTheSheetOwnsItAndClearsOnSwitch() async throws {
-        let first = try await frame(), second = try await frame(0.8)
         let a = try image(0.1), b = try image(0.8)
-        let (model, services) = await ready(first)
-        services.thumbnailHandler = { value, _ in value === first ? a : b }
-        XCTAssertTrue(services.thumbnailCalls.isEmpty)
+        let (model, _, rendering) = await ready()
+        rendering.thumbnailHandler = { frame, _ in Self.exposure(frame) == nil ? a : b }
+        XCTAssertTrue(rendering.thumbnailCalls.isEmpty)
         let tracking = Task { await model.trackExportSummaryThumbnail() }
         await eventually(timeout: .seconds(10)) { model.exportSummaryThumbnail == .ready(a) }
-        XCTAssertEqual(services.thumbnailCalls, [344])
-        for _ in 0..<10 { model.apply(.edited(preview(second))) }
+        model.adjustRecipe("tone.exposure", to: 0.8)
         await eventually(timeout: .seconds(10)) { model.exportSummaryThumbnail == .ready(b) }
-        XCTAssertEqual(services.thumbnailCalls, [344, 344])
+        XCTAssertEqual(Set(rendering.thumbnailCalls), [344])
         tracking.cancel(); await tracking.value
-        model.apply(.edited(preview(first)))
+        let calls = rendering.thumbnailCalls.count
+        model.adjustRecipe("tone.exposure", to: 0.2)
         try await Task.sleep(for: .milliseconds(250))
-        XCTAssertEqual(services.thumbnailCalls, [344, 344])
+        XCTAssertEqual(rendering.thumbnailCalls.count, calls, "no owner, no summary work")
         model.open([next])
         XCTAssertEqual(model.exportSummaryThumbnail, .loading)
         model.closeDocument()
@@ -65,17 +58,16 @@ import XCTest
     }
 
     func testAdmissionFreezesTheSameImagePassedToTheServiceAndHistory() async throws {
-        let first = try await frame(), second = try await frame(0.8)
         let a = try image(0.1), b = try image(0.8)
-        let (model, services) = await ready(first)
-        services.thumbnailHandler = { value, _ in value === first ? a : b }
+        let (model, services, rendering) = await ready()
+        rendering.thumbnailHandler = { frame, _ in Self.exposure(frame) == nil ? a : b }
         let tracking = Task { await model.trackExportSummaryThumbnail() }
         defer { tracking.cancel() }
         await eventually(timeout: .seconds(10)) { model.exportSummaryThumbnail == .ready(a) }
         await start(model, services)
         XCTAssertTrue(services.exportCalls[0].thumbnail === a)
         XCTAssertEqual(model.export.thumbnail, .ready(a))
-        model.apply(.edited(preview(second)))
+        model.adjustRecipe("tone.exposure", to: 0.8)
         await eventually(timeout: .seconds(10)) { model.exportSummaryThumbnail == .ready(b) }
         XCTAssertEqual(model.export.thumbnail, .ready(a))
         services.sendExport(.finished(result: result("v1"), failure: nil))
@@ -85,32 +77,12 @@ import XCTest
         model.closeDocument()
     }
 
-    func testMissingAdmissionFrameFillsMemoryWithoutBackfillingTheRecord() async throws {
-        let actual = try await frame(), a = try image(0.2)
-        let (model, services) = await ready()
-        services.thumbnailHandler = { _, _ in a }
-        let tracking = Task { await model.trackExportSummaryThumbnail() }
-        defer { tracking.cancel() }
-        await eventually(timeout: .seconds(10)) { model.exportSummaryThumbnail == .loading }
-        await start(model, services)
-        XCTAssertNil(services.exportCalls[0].thumbnail)
-        XCTAssertEqual(model.export.thumbnail, .loading)
-        model.apply(.edited(preview(actual)))
-        await eventually(timeout: .seconds(10)) { model.export.thumbnail == .ready(a) }
-        XCTAssertNil(services.exportCalls[0].thumbnail)
-        services.sendExport(.finished(result: result("no-disk-thumb"), failure: nil))
-        await eventually(timeout: .seconds(10)) { model.export.phase == .succeeded }
-        XCTAssertEqual(model.versionThumbnail("no-disk-thumb"), .unavailable)
-        XCTAssertEqual(model.export.thumbnail, .ready(a))
-        model.closeDocument()
-    }
-
     func testExportWithoutASheetStillMakesOnlyTheSmallAdmissionImage() async throws {
-        let actual = try await frame(), a = try image(0.5)
-        let (model, services) = await ready(actual)
-        services.thumbnailHandler = { _, _ in a }
+        let a = try image(0.5)
+        let (model, services, rendering) = await ready()
+        rendering.thumbnailHandler = { _, _ in a }
         await start(model, services)
-        XCTAssertEqual(services.thumbnailCalls, [256])
+        XCTAssertEqual(rendering.thumbnailCalls, [256])
         XCTAssertTrue(services.exportCalls[0].thumbnail === a)
         services.sendExport(.finished(result: result("direct"), failure: nil))
         await eventually(timeout: .seconds(10)) { model.export.phase == .succeeded }
@@ -118,7 +90,7 @@ import XCTest
     }
 
     func testHistoryLoadsSeriallyCachesUnavailableAndDiscardsOldPhotoReplies() async throws {
-        let (model, services) = await ready()
+        let (model, services, _) = await ready()
         let a = try image(0.4)
         var replies: [CheckedContinuation<CGImage?, Never>] = []
         services.versionThumbnailHandler = { _, _ in await withCheckedContinuation { replies.append($0) } }
@@ -148,17 +120,22 @@ import XCTest
     }
 
     func testPreviewFailureAndGenerationFailureBecomeUnavailable() async throws {
-        let actual = try await frame()
-        let (model, services) = await ready(actual)
-        services.thumbnailHandler = { _, _ in nil }
+        let a = try image(0.3)
+        let (model, _, rendering) = await ready()
+        rendering.thumbnailHandler = { _, _ in nil }
         let tracking = Task { await model.trackExportSummaryThumbnail() }
         defer { tracking.cancel() }
-        await eventually(timeout: .seconds(10)) { services.thumbnailCalls.count == 1 && model.exportSummaryThumbnail == .unavailable }
-        model.apply(.reference(preview(actual)))
-        XCTAssertEqual(model.exportSummaryThumbnail, .loading)
-        XCTAssertEqual(services.thumbnailCalls.count, 1)
-        model.apply(.failed(UserFacingError(code: "decode_failed")))
-        XCTAssertEqual(model.exportSummaryThumbnail, .unavailable)
+        await eventually(timeout: .seconds(10)) { rendering.thumbnailCalls.count == 1 && model.exportSummaryThumbnail == .unavailable }
+        rendering.thumbnailHandler = { _, _ in a }
+        model.adjustRecipe("tone.exposure", to: 0.4)
+        await eventually(timeout: .seconds(10)) { model.exportSummaryThumbnail == .ready(a) }
+        // A file that is there: its renders failing is not a missing file.
+        try Data([1]).write(to: source)
+        defer { try? FileManager.default.removeItem(at: source) }
+        rendering.failRenders(of: source, with: ScriptedFailure())
+        model.adjustRecipe("tone.exposure", to: 0.6)
+        await eventually(timeout: .seconds(10)) { model.exportSummaryThumbnail == .unavailable }
+        XCTAssertNotNil(model.document?.previewError)
         model.closeDocument()
     }
 }

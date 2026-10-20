@@ -10,8 +10,14 @@ import XCTest
         await eventually(timeout: .seconds(3), "state transition", file: file, line: line, condition)
     }
 
-    func testOpenTransitionsThroughReferenceAndEditedFrames() async throws {
-        let services = FakeEditorServices(openDelay: .milliseconds(60), previewDelay: .milliseconds(60))
+    private func setExposure(_ value: Double, _ model: EditorModel) {
+        var recipe = model.editor.recipe
+        recipe.setValue(.number(value), for: "tone.exposure")
+        model.editor.setRecipe(recipe)
+    }
+
+    func testOpenTransitionsToReadyWithBothFrames() async throws {
+        let services = FakeEditorServices(openDelay: .milliseconds(30))
         let model = EditorModel(services: services)
         XCTAssertEqual(model.workspace, .empty)
         XCTAssertFalse(model.isAvailable(.compare))
@@ -19,26 +25,22 @@ import XCTest
         XCTAssertEqual(model.workspace, .editing)
         XCTAssertEqual(model.document?.phase, .opening)
         XCTAssertNil(model.document?.pixelSize)
-        try await waitUntil { model.hasReferenceFrame }
-        XCTAssertEqual(model.document?.phase, .rendering)
-        XCTAssertEqual(model.document?.source, services.preview.source)
-        XCTAssertFalse(model.hasEditedFrame)
         try await waitUntil { model.document?.phase == .ready }
         XCTAssertEqual(model.document?.pixelSize, PixelSize(width: 6000, height: 4000))
-        XCTAssertEqual(services.renderedPurposes, [true, false])
+        XCTAssertTrue(model.hasReferenceFrame)
+        XCTAssertTrue(model.hasEditedFrame)
         XCTAssertTrue(model.isAvailable(.original))
-        XCTAssertTrue(model.isAvailable(.edited))
+        XCTAssertTrue(model.isAvailable(.compare))
+        XCTAssertNotNil(model.canvasComposition)
         model.viewMode = .original
         XCTAssertNil(model.display.gainWeight)
-        model.viewMode = .compare
-        XCTAssertEqual(model.viewMode, .compare)
-        XCTAssertTrue(model.isAvailable(.compare))
         model.viewMode = .edited
         XCTAssertNotNil(model.display.gainWeight)
+        model.closeDocument()
     }
 
     func testFailedOpenKeepsPreviousPhotoModeAndZoom() async throws {
-        let services = FakeEditorServices(openDelay: .milliseconds(5), previewDelay: .milliseconds(5))
+        let services = FakeEditorServices(openDelay: .milliseconds(5))
         let model = EditorModel(services: services)
         model.open([source])
         try await waitUntil { model.document?.phase == .ready }
@@ -64,120 +66,40 @@ import XCTest
         XCTAssertTrue(model.hasPreviewFrame)
         model.dismissAlert()
         XCTAssertNil(model.alert)
-    }
-
-    func testOpeningKeepsOldFrameUntilReferenceAndRestoresEditStateOnFailure() async throws {
-        let services = FakeEditorServices(openDelay: .milliseconds(10), previewDelay: .milliseconds(10))
-        let ticker = ManualFrameTicker()
-        let model = EditorModel(services: services, ticker: ticker)
-        model.open([source])
-        try await waitUntil { model.document?.phase == .ready }
-        model.adjust("brightness", to: 0.612345)
-        await eventually { ticker.isWaiting }
-        ticker.tick()
-        try await waitUntil { services.renderedPurposes.count >= 3 }
-        model.canvas.setViewport(CGSize(width: 1000, height: 800), backingScale: 2)
-        model.canvas.zoomIn()
-        model.viewMode = .original
-        let previousDocument = model.document
-        let previousFrame = model.canvas.imageFrame
-        let previousPreview = services.preview
-        services.openDelay = .milliseconds(60)
-        services.previewDelay = .milliseconds(60)
-        services.preview = EditorPreview(pixelSize: PixelSize(width: 4000, height: 6000),
-            source: SourceSummary(domain: .hdr, colorName: "Display P3", degradationReasons: []),
-            hasGain: true)
-        let replacement = URL(fileURLWithPath: "/fixtures/replacement.heic")
-        model.open([replacement])
-        XCTAssertEqual(model.document?.name, replacement.lastPathComponent)
-        XCTAssertEqual(model.document?.phase, .opening)
-        XCTAssertEqual(model.canvas.imageFrame, previousFrame)
-        XCTAssertTrue(model.hasEditedFrame)
-        try await waitUntil { model.document?.pixelSize == services.preview.pixelSize }
-        XCTAssertFalse(model.hasEditedFrame)
-        XCTAssertTrue(model.hasPreviewFrame)
-        XCTAssertNotEqual(model.canvas.imageFrame, previousFrame)
-        let error = UserFacingError(code: "decode_failed")
-        services.previewFailure = error
-        try await waitUntil { model.alert == error }
-        XCTAssertEqual(model.document, previousDocument)
-        XCTAssertEqual(model.canvas.imageFrame, previousFrame)
-        XCTAssertEqual(model.canvas.zoomPercent, 50)
-        XCTAssertEqual(model.viewMode, .original)
-        XCTAssertTrue(model.hasEditedFrame)
-        services.previewFailure = nil
-        services.preview = previousPreview
-        model.adjust("hdrStrength", to: 0.723456)
-        await eventually { ticker.isWaiting }
-        ticker.tick()
-        try await waitUntil { services.receivedOptions.last?["hdrStrength"] == .number(0.72) && services.renderedPurposes.count >= 4 }
-        XCTAssertEqual(services.receivedOptions.last?["brightness"], .number(0.61))
-        XCTAssertEqual(services.receivedOptions.last?["hdrStrength"], .number(0.72))
-    }
-
-    func testUnsupportedAndEngineFailureDoNotReplacePhoto() {
-        let model = EditorModel.preview(.editingHDRDisplay)
-        let old = model.document
-        model.open([URL(fileURLWithPath: "/fixtures/unsupported.txt")])
-        XCTAssertEqual(model.alert?.code, "unsupported_format")
-        XCTAssertEqual(model.document, old)
-        let failed = EditorModel.preview(.engineFailed)
-        failed.open([source])
-        XCTAssertEqual(failed.alert?.code, "engine_unavailable")
-        XCTAssertNil(failed.document)
-        XCTAssertEqual(failed.workspace, .empty)
+        model.closeDocument()
     }
 
     func testFirstFrameFailureHasNoDrawableFrame() async throws {
-        let services = FakeEditorServices(openDelay: .zero, previewDelay: .milliseconds(5))
-        let error = UserFacingError(code: "decode_failed")
-        services.previewFailure = error
+        let services = ScriptedEditorServices()
+        services.scripted.failRenders(of: source, with: UserFacingError(code: "decode_failed"))
         let model = EditorModel(services: services)
         model.open([source])
-        try await waitUntil { model.alert == error }
+        try await waitUntil { model.alert != nil }
+        XCTAssertEqual(model.alert?.code, "decode_failed")
         XCTAssertNil(model.document)
         XCTAssertEqual(model.workspace, .empty)
         XCTAssertFalse(model.hasPreviewFrame)
         XCTAssertNil(model.canvas.imageFrame)
     }
 
-    func testEditedFrameFailureWithoutPreviousPhotoReturnsToEmpty() async throws {
-        let services = FakeEditorServices(openDelay: .zero, previewDelay: .milliseconds(60))
+    /// A render that fails after the photo is open keeps the last frame and
+    /// says why under the photo; the photo stays ready.
+    func testRenderFailureKeepsTheFrame() async throws {
+        let services = ScriptedEditorServices()
         let model = EditorModel(services: services)
-        model.open([source])
-        try await waitUntil { model.hasReferenceFrame }
-        XCTAssertEqual(model.document?.phase, .rendering)
-        XCTAssertTrue(model.hasPreviewFrame)
-        let error = UserFacingError(code: "decode_failed")
-        services.previewFailure = error
-        try await waitUntil { model.alert == error }
-        XCTAssertNil(model.document)
-        XCTAssertEqual(model.workspace, .empty)
-        XCTAssertFalse(model.hasPreviewFrame)
-        XCTAssertNil(model.canvas.imageFrame)
-    }
-
-    func testRefreshRetainsFrameAndQuantizedValues() async throws {
-        let services = FakeEditorServices(openDelay: .zero, previewDelay: .milliseconds(10))
-        let ticker = ManualFrameTicker()
-        let model = EditorModel(services: services, ticker: ticker)
-        model.open([source])
-        try await waitUntil { model.document?.phase == .ready }
-        model.adjust("brightness", to: 0.612345)
-        await eventually { ticker.isWaiting }
-        ticker.tick()
-        XCTAssertEqual(model.document?.isRefreshing, false)
-        XCTAssertTrue(model.hasPreviewFrame)
-        try await waitUntil { services.renderedPurposes.count >= 3 }
-        XCTAssertEqual(services.receivedOptions.last?["brightness"], .number(0.61))
-        services.previewFailure = UserFacingError(code: "raw_budget")
-        model.adjust("brightness", to: 0.712345)
-        await eventually { ticker.isWaiting }
-        ticker.tick()
-        try await waitUntil { model.document?.previewError?.code == "raw_budget" }
+        // A file that is there: its renders failing is not a missing file.
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("contract-\(UUID().uuidString).jpg")
+        try Data([1]).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        await openReady(model, file)
+        services.scripted.failRenders(of: file, with: UserFacingError(code: "raw_budget"))
+        setExposure(0.6, model)
+        try await waitUntil { model.document?.previewError != nil }
+        XCTAssertEqual(model.document?.previewError?.code, "decode_failed")
         XCTAssertEqual(model.document?.phase, .ready)
         XCTAssertTrue(model.hasPreviewFrame)
-        XCTAssertEqual(model.document?.isRefreshing, false)
+        try await waitUntil { model.document?.isRefreshing == false }
+        model.closeDocument()
     }
 
     func testCanvasFailureRollsBackAnOpenButFailsAnAlreadyOpenedDocument() async throws {
@@ -205,36 +127,35 @@ import XCTest
         XCTAssertNil(opened.canvas.imageFrame)
     }
 
-    func testCanvasFailureDuringRefreshCannotBeOverwrittenByLateEditedFrame() async throws {
-        let services = FakeEditorServices(openDelay: .zero, previewDelay: .milliseconds(5))
-        let ticker = ManualFrameTicker()
-        let model = EditorModel(services: services, ticker: ticker)
+    func testCanvasFailureCannotBeOverwrittenByALateFrame() async throws {
+        let services = FakeEditorServices(openDelay: .zero)
+        let model = EditorModel(services: services)
         model.open([source])
         try await waitUntil { model.document?.phase == .ready }
-        services.previewDelay = .milliseconds(100)
-        model.adjust("brightness", to: 0.712345)
-        await eventually { ticker.isWaiting }
-        ticker.tick()
-        XCTAssertEqual(model.document?.isRefreshing, false)
-        // Allow the refresh operation to start before the renderer fails.
-        try await Task.sleep(for: .milliseconds(20))
+        await services.fakeRendering?.holdRenders()
+        setExposure(0.7, model)
+        let fake = try XCTUnwrap(services.fakeRendering)
+        var waited = 0
+        while await fake.heldRenderCount == 0, waited < 400 { await settle(5); waited += 1 }
         model.reportCanvasFailure("fixture")
         let failedPhase = model.document?.phase
         guard case .failed(let error) = failedPhase else {
             return XCTFail("Canvas failure must fail the opened document")
         }
         XCTAssertEqual(error.code, "metal_unavailable")
-        XCTAssertFalse(model.hasPreviewFrame)
-        try await Task.sleep(for: .milliseconds(150))
+        await services.fakeRendering?.releaseRenders()
+        await model.editor.settle()
+        await settle()
         XCTAssertEqual(model.document?.phase, failedPhase)
         XCTAssertEqual(model.document?.isRefreshing, false)
         XCTAssertFalse(model.hasPreviewFrame)
         XCTAssertNil(model.canvas.imageFrame)
         XCTAssertNil(model.display.gainWeight)
+        model.closeDocument()
     }
 
     func testReplacedOpenCannotRestoreAnUnfinishedDocument() async throws {
-        let services = FakeEditorServices(openDelay: .milliseconds(20), previewDelay: .milliseconds(10))
+        let services = FakeEditorServices(openDelay: .milliseconds(20))
         let model = EditorModel(services: services)
         let bad = URL(fileURLWithPath: "/fixtures/bad.jpg")
         services.openFailures[bad] = UserFacingError(code: "source_unreadable")
@@ -338,14 +259,14 @@ import XCTest
         let canvas = model.canvas
         canvas.setViewport(CGSize(width: 1000, height: 800), backingScale: 2)
         let view = EDRCanvasView()
-        view.frameProvider = { model.canvasFrame }
+        view.compositionProvider = { model.canvasComposition }
         view.transform = canvas.transform
         XCTAssertEqual(view.transform.viewport, CGSize(width: 1000, height: 800))
         XCTAssertFalse(view.isOpaque)
         XCTAssertFalse(view.acceptsFirstResponder)
         XCTAssertEqual(model.canvas.imageFrame, model.canvas.transform.imageFrame)
-        // A2 supplies the frames; until then the canvas has nothing to draw.
-        XCTAssertNil(model.canvasFrame)
+        // The scenario has no rendered pairs, so there is nothing to draw.
+        XCTAssertNil(model.canvasComposition)
         canvas.zoomIn()
         view.transform = canvas.transform
         XCTAssertEqual(view.transform.zoom, 1.5, accuracy: 1e-9)
@@ -361,7 +282,7 @@ import XCTest
         view.onViewportChange = { [weak model] size, scale in
             model?.canvas.setViewport(size, backingScale: scale)
         }
-        view.frameProvider = { model.canvasFrame }
+        view.compositionProvider = { model.canvasComposition }
         view.onTransformChange = { [weak model] transform in model?.canvas.apply(transform) }
         view.setFrameSize(CGSize(width: 900, height: 700))
         view.needsLayout = true

@@ -37,16 +37,12 @@ import XCTest
         XCTAssertEqual(starts, 1)
         model.open([source])
         await eventually(timeout: .seconds(15), "JPEG frames") { model.document?.phase == .ready }
-        XCTAssertNotNil(model.canvasFrame)
-        XCTAssertNotNil(model.editedCanvasFrame)
-        let frame = try XCTUnwrap(model.editedCanvasFrame?.frame)
-        XCTAssertEqual(model.document?.pixelSize?.width, frame.metadata.sourceWidth)
-        XCTAssertEqual(model.document?.pixelSize?.height, frame.metadata.sourceHeight)
+        XCTAssertNotNil(model.canvasComposition)
+        let pair = try XCTUnwrap(model.editedPair)
         XCTAssertEqual(model.document?.pixelSize, PixelSize(width: 1600, height: 2400))
-        XCTAssertLessThan(frame.base.height, 2400, "document dimensions must survive preview downsampling")
+        XCTAssertLessThan(pair.base.height, 2400, "document dimensions must survive preview downsampling")
         model.viewMode = .original
-        XCTAssertEqual(model.canvasFrame?.showsOriginal, true)
-        XCTAssertEqual(model.editedCanvasFrame?.showsOriginal, false)
+        XCTAssertEqual(model.canvasComposition?.mode, .original)
         let old = model.document
         let corrupt = root.appendingPathComponent("corrupt.jpg")
         try Data([0xff, 0xd8, 0xff, 0xe0] + [UInt8](repeating: 0, count: 64)).write(to: corrupt)
@@ -54,7 +50,7 @@ import XCTest
         await eventually(timeout: .seconds(15), "corrupt JPEG failure") { model.alert != nil }
         XCTAssertEqual(model.alert?.code, "decode_failed")
         XCTAssertEqual(model.document, old)
-        XCTAssertNotNil(model.canvasFrame)
+        XCTAssertNotNil(model.canvasComposition)
         // Opening a bad file updates durable history; reopen the good photo
         // before simulating a fresh launch of the model and services.
         model.open([source])
@@ -70,7 +66,7 @@ import XCTest
         restoredModel.launch()
         await eventually(timeout: .seconds(15), "remembered JPEG") { restoredModel.document?.phase == .ready }
         XCTAssertEqual(restoredModel.document?.name, source.lastPathComponent)
-        XCTAssertNotNil(restoredModel.canvasFrame)
+        XCTAssertNotNil(restoredModel.canvasComposition)
         restoredModel.closeDocument()
         await settle()
     }
@@ -206,7 +202,7 @@ extension LiveEditorServicesTests {
         let timings = await services.exportTimingHistory()
         XCTAssertFalse(timings.isEmpty)
         let id=model.exportVersions[0].id
-        model.adjust("brightness",to:1.2)
+        model.setExportQuality(55)   // the export follows its own choices until P7-3b
         await eventually(timeout:.seconds(10)) { model.exportVersions.first?.matchesCurrent == false }
         model.restore(id)
         await eventually(timeout:.seconds(10)) { model.exportVersions.first?.matchesCurrent == true }

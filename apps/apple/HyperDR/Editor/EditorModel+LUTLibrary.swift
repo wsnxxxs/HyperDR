@@ -14,19 +14,18 @@ nonisolated struct LUTLibraryReadVersion: Sendable {
 }
 
 extension EditorModel {
-    /// The library publishes desired spaces immediately. The selected look
-    /// continues to use the photo editing path, including its undo boundary.
+    /// The library publishes desired spaces immediately. The recipe's own
+    /// look spaces (`look.input`, `look.output`) are the inspector's.
     func setLibraryLUTSpaces(_ id: String, input: LUTColorSpace, output: LUTColorSpace) {
         guard !isEditingLocked else { return }
-        if id == edit.lutID { setLUTSpaces(input: input, output: output); return }
-        enqueueLUTSpaces(id, input: input, output: output, selectedPhoto: nil)
+        enqueueLUTSpaces(id, input: input, output: output)
     }
 
-    func enqueueLUTSpaces(_ id: String, input: LUTColorSpace, output: LUTColorSpace, selectedPhoto: EditorPhoto?) {
+    func enqueueLUTSpaces(_ id: String, input: LUTColorSpace, output: LUTColorSpace) {
         var write = lutMetadataWrites[id] ?? LUTMetadataWrite()
         if write.task == nil { write.confirmed = lut.library.first { $0.id == id } }
         write.revision &+= 1
-        let revision = write.revision, previous = write.task, openGeneration = generation
+        let revision = write.revision, previous = write.task
         if let index = lut.library.firstIndex(where: { $0.id == id }) {
             lut.library[index].input = input
             lut.library[index].output = output
@@ -58,15 +57,6 @@ extension EditorModel {
                     lut.library[index] = confirmed
                 }
                 lutMetadataWrites[id]?.task = nil
-                // A failed library write may roll back this photo's matching
-                // optimistic spaces, but never a new photo, selection or undo.
-                if let selectedPhoto, generation == openGeneration, photo == selectedPhoto, edit.lutID == id,
-                   edit.choices["lutInput"] == input.rawValue,
-                   edit.choices["lutOutput"] == output.rawValue, let confirmed {
-                    edit.choices["lutInput"] = confirmed.input.rawValue
-                    edit.choices["lutOutput"] = confirmed.output.rawValue
-                    editChanged()
-                }
             }
         }
         lutMetadataWrites[id] = write
@@ -97,6 +87,8 @@ extension EditorModel {
         guard !Task.isCancelled, sequence > lutLibraryAcceptedSequence else { return }
         lutLibraryAcceptedSequence = sequence
         mergeLUTLibrary(entries, reading: versions)
+        installLibraryLUTs()
+        syncLUTState()
     }
 
     /// Pending-at-read, pending-now, and mutations since the read all supersede

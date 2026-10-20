@@ -378,6 +378,10 @@ struct CanvasStatus: View {
                         SourceMissingBanner(isChecking: model.isRelinking) { window.locateSource() }
                             .frame(maxHeight: .infinity, alignment: .top)
                             .padding(Space.s3)
+                    } else if model.sourceChanged {
+                        SourceMissingBanner(kind: .changed) { model.reopenChangedSource() }
+                            .frame(maxHeight: .infinity, alignment: .top)
+                            .padding(Space.s3)
                     } else if let error = document.previewError {
                         PreviewErrorBanner(text: ErrorText(error))
                             .frame(maxHeight: .infinity, alignment: .top)

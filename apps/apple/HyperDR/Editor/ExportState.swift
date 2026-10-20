@@ -3,7 +3,7 @@ import CoreGraphics
 import Observation
 
 /// Editor-facing values. Views do not depend on Kit's jobs or durable manifests.
-nonisolated enum EditingLockReason: String { case loading, restoring, computingAI, exporting }
+nonisolated enum EditingLockReason: String { case loading, restoring, exporting }
 nonisolated enum DocumentStatus { case waiting, notExported, modifiedSinceExport, exportedNotSaved, saved }
 nonisolated enum ThumbnailState: Equatable {
     case loading, ready(CGImage), unavailable
@@ -66,7 +66,7 @@ nonisolated enum ExportSaveState: Equatable { case saving, saved(SavedLocation),
 nonisolated struct ExportHistoryItem: Sendable {
     var version: ExportVersion
     var key: String
-    var options: EditSnapshot
+    var options: ExportChoices
     var timing: ExportTimingSample?
 }
 nonisolated struct EditorExportTicket: Sendable { var job: String; var argv: [String] }

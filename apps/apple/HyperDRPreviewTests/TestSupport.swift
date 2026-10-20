@@ -1,7 +1,10 @@
 import Foundation
 import Metal
 import QuartzCore
+import Synchronization
 import XCTest
+import HyperDRRecipe
+import HyperDRRender
 @testable import HyperDR
 
 /// Waits for a main-actor condition with a hard deadline. Every asynchronous
@@ -26,11 +29,11 @@ import XCTest
     for _ in 0..<turns { await Task.yield() }
 }
 
-/// A frame clock the test advances. `nextFrame()` returns at the first
+/// A frame clock the test advances (the editor's render pacing). `nextFrame()` returns at the first
 /// `tick()` after it was called; a tick with nobody waiting is banked once,
 /// like a display frame boundary that already passed. Cancellation resumes the
 /// waiter, so a cancelled scheduler never leaves a test hanging.
-@MainActor final class ManualFrameTicker: FrameTicker {
+@MainActor final class ManualFrameTicker: EditorFrameClock {
     private(set) var ticks = 0
     private(set) var waits = 0
     private var banked = false
@@ -87,7 +90,7 @@ func previewFixtureBundle() -> Bundle {
 #if SWIFT_PACKAGE
     Bundle.module
 #else
-    Bundle(for: PreviewShaderTests.self)
+    Bundle(for: PreviewRendererTests.self)
 #endif
 }
 /// Optional raw bytes for same-machine before/after checks; no tolerance or
@@ -152,7 +155,8 @@ nonisolated final class DrawableProbe: @unchecked Sendable {   // all state behi
 nonisolated func makeDisplayPair(_ device: any MTLDevice, base: [Float], width: Int, height: Int,
                                  gain: [Float], gainWidth: Int? = nil, gainHeight: Int? = nil,
                                  gainChannels: Int = 1, coding: DisplayPair.GainCoding = .log2,
-                                 baseOffset: Float = 0, alternateOffset: Float = 0) throws -> DisplayPair {
+                                 baseOffset: Float = 0, alternateOffset: Float = 0,
+                                 alternateHeadroom: Double = 1) throws -> DisplayPair {
     func rgba(_ rgb: [Float]) -> [Float] {
         stride(from: 0, to: rgb.count, by: 3).flatMap { [rgb[$0], rgb[$0 + 1], rgb[$0 + 2], 1] }
     }
@@ -162,5 +166,112 @@ nonisolated func makeDisplayPair(_ device: any MTLDevice, base: [Float], width: 
         gain: try PreviewRenderer.texture(device: device, width: gainWidth, height: gainHeight,
             values: gainChannels == 1 ? gain : rgba(gain), monochrome: gainChannels == 1),
         coding: coding, baseOffset: SIMD3(repeating: baseOffset),
-        alternateOffset: SIMD3(repeating: alternateOffset), alternateHeadroom: 1)
+        alternateOffset: SIMD3(repeating: alternateOffset), alternateHeadroom: alternateHeadroom)
+}
+
+/// `FakeEditorRendering` with failures a test can inject: an open that throws
+/// for a URL, and renders of a URL's photo that throw (after any hold). With
+/// `holdsOpens` set, an open waits until `releaseOpens` (or cancellation).
+nonisolated final class ScriptedRendering: EditorRendering, @unchecked Sendable {   // state behind `state`
+    let fake = FakeEditorRendering()
+    private struct State {
+        var openFailures: [URL: any Error] = [:]
+        var renderFailures: [URL: any Error] = [:]
+        var sources: [UUID: URL] = [:]
+        var holdsOpens = false
+        var thumbnailHandler: (@Sendable (EditorFrame, HyperDRRender.PixelSize) async -> CGImage?)?
+        var thumbnailCalls: [Int] = []
+        var heldOpens: [UUID: (url: URL, resume: CheckedContinuation<Void, Error>)] = [:]
+    }
+    private let state = Mutex(State())
+
+    var holdsOpens: Bool {
+        get { state.withLock { $0.holdsOpens } }
+        set { state.withLock { $0.holdsOpens = newValue } }
+    }
+
+    /// Replaces the fake's thumbnails; nil from it is a failed thumbnail.
+    var thumbnailHandler: (@Sendable (EditorFrame, HyperDRRender.PixelSize) async -> CGImage?)? {
+        get { state.withLock { $0.thumbnailHandler } }
+        set { state.withLock { $0.thumbnailHandler = newValue } }
+    }
+    /// The longest side asked for, per thumbnail.
+    var thumbnailCalls: [Int] { state.withLock { $0.thumbnailCalls } }
+
+    /// True while an open of `url` is held.
+    func isHoldingOpen(_ url: URL) -> Bool { state.withLock { $0.heldOpens.values.contains { $0.url == url } } }
+
+    func releaseOpens() {
+        let held = state.withLock { state in
+            state.holdsOpens = false
+            defer { state.heldOpens = [:] }
+            return state.heldOpens.values.map(\.resume)
+        }
+        held.forEach { $0.resume() }
+    }
+
+    private func waitIfHeld(_ url: URL) async throws {
+        guard holdsOpens else { return }
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let cancelled = state.withLock { state -> Bool in
+                    if Task.isCancelled { return true }
+                    state.heldOpens[id] = (url, continuation)
+                    return false
+                }
+                if cancelled { continuation.resume(throwing: CancellationError()) }
+            }
+        } onCancel: {
+            state.withLock { $0.heldOpens.removeValue(forKey: id) }?.resume.resume(throwing: CancellationError())
+        }
+    }
+
+    func failOpen(_ url: URL, with error: (any Error)?) { state.withLock { $0.openFailures[url] = error } }
+    func failRenders(of url: URL, with error: (any Error)?) { state.withLock { $0.renderFailures[url] = error } }
+
+    func open(_ url: URL, previewSize: HyperDRRender.PixelSize?) async throws -> EditorSource {
+        try await waitIfHeld(url)
+        if let error = state.withLock({ $0.openFailures[url] }) { throw error }
+        let source = try await fake.open(url, previewSize: previewSize)
+        state.withLock { $0.sources[source.id] = url }
+        return source
+    }
+    func render(_ request: EditorRenderRequest) async throws -> EditorFrame {
+        let frame = try await fake.render(request)
+        if let error = state.withLock({ state in state.sources[request.sourceID].flatMap { state.renderFailures[$0] } }) {
+            throw error
+        }
+        return frame
+    }
+    func sdrThumbnail(_ frame: EditorFrame, maximumSize: HyperDRRender.PixelSize) async throws -> CGImage {
+        let handler = state.withLock { state in
+            state.thumbnailCalls.append(max(maximumSize.width, maximumSize.height))
+            return state.thumbnailHandler
+        }
+        guard let handler else { return try await fake.sdrThumbnail(frame, maximumSize: maximumSize) }
+        guard let image = await handler(frame, maximumSize) else { throw ScriptedFailure() }
+        return image
+    }
+    func effectMask(_ request: EditorRenderRequest, parameterID: String) async throws -> RenderMask {
+        try await fake.effectMask(request, parameterID: parameterID)
+    }
+    func predictModelGain(_ request: EditorRenderRequest) async throws { try await fake.predictModelGain(request) }
+    func installLUT(_ lut: ColorLUT) async { await fake.installLUT(lut) }
+    func close() async { await fake.close() }
+}
+
+struct ScriptedFailure: Error, CustomStringConvertible {
+    var description: String { "scripted failure" }
+}
+
+extension EditorModel {
+    /// Writes one recipe value as a control would (one undo step).
+    func adjustRecipe(_ id: String, to value: Double) {
+        var recipe = editor.recipe
+        recipe.setValue(.number(value), for: id)
+        editor.setRecipe(recipe)
+    }
+
+    func recipeNumber(_ id: String) -> Double? { editor.recipe.value(for: id)?.numberValue }
 }

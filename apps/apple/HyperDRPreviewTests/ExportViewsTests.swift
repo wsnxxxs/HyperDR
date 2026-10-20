@@ -16,8 +16,8 @@ import HyperDRDesign
     private let target = URL(fileURLWithPath: "/tmp/chosen.heic")
 
     private func ready() async -> (EditorModel, FakeEditorServices) {
-        let services = FakeEditorServices(openDelay: .zero, previewDelay: .zero)
-        let model = EditorModel(services: services, ticker: ManualFrameTicker())
+        let services = FakeEditorServices(openDelay: .zero)
+        let model = EditorModel(services: services)
         await model.loadExportServices()
         model.open([source])
         await eventually(timeout: .seconds(10)) { model.document?.phase == .ready && !model.suggestedFileName.isEmpty }
@@ -82,10 +82,10 @@ import HyperDRDesign
         XCTAssertTrue(full.contains("HEIC PQ") && full.contains("10-bit HEVC"), full)
         XCTAssertTrue(ExportPresentation.isFormatReason(keys[0]))
         // A model sentence is shown as it is.
-        XCTAssertEqual(ExportPresentation.blockerText("export.blocker.ai", formatName: "x", locale: en),
-                       "Wait for AI processing to finish.")
+        XCTAssertEqual(ExportPresentation.blockerText("export.blocker.loading", formatName: "x", locale: en),
+                       "Wait for the photo to finish opening.")
         XCTAssertTrue(ExportPresentation.isFolderBlocker("err.server.export_folder_unset"))
-        XCTAssertFalse(ExportPresentation.isFolderBlocker("export.blocker.ai"))
+        XCTAssertFalse(ExportPresentation.isFolderBlocker("export.blocker.loading"))
     }
 
     func testButtonTitlesFollowTheFormatAndWhetherASavePanelFollows() {

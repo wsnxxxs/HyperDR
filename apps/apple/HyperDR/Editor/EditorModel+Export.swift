@@ -24,7 +24,7 @@ extension EditorModel {
         default: "heic"
         }
     }
-    var exportContentType: UTType { UTType(filenameExtension: Self.fileExtension(edit.encoding)) ?? .data }
+    var exportContentType: UTType { UTType(filenameExtension: Self.fileExtension(exportChoices.encoding)) ?? .data }
     var documentStatus: DocumentStatus {
         guard document?.phase == .ready, hasEditedFrame else { return .waiting }
         guard !exportVersions.isEmpty else { return .notExported }
@@ -33,9 +33,10 @@ extension EditorModel {
     }
     /// Ordered reasons from §5.3; preview refresh deliberately does not block.
     func syncExportState() {
-        export.encodingID = edit.encoding
-        export.outputGamut = edit.choices["outputGamut"] == "auto" ? (edit.encoding == "sdr-tiff" ? "p3" : "srgb") : edit.choices["outputGamut"] ?? "srgb"
-        export.clampSrgb = edit.clampSrgb
+        let choices = exportChoices
+        export.encodingID = choices.encoding
+        export.outputGamut = choices.outputGamut == "auto" ? (choices.encoding == "sdr-tiff" ? "p3" : "srgb") : choices.outputGamut
+        export.clampSrgb = choices.clampSrgb
         if let capabilities = exportCapabilities {
             export.encodingAvailability = capabilities.availability(isHDR: source.domain == .hdr || source.domain == .dual)
         }
@@ -44,8 +45,8 @@ extension EditorModel {
         else if isRestoring { blocker = "export.blocker.restoring" }
         else if photo == nil || document?.phase != .ready || !hasEditedFrame { blocker = "export.blocker.loading" }
         else if sourceUnavailable != nil { blocker = "export.blocker.sourceMissing" }
-        else if ai.isComputing { blocker = "export.blocker.ai" }
-        else if let reason = export.encodingAvailability[edit.encoding] ?? nil { blocker = reason }
+        else if sourceChanged { blocker = "export.blocker.sourceChanged" }
+        else if let reason = export.encodingAvailability[choices.encoding] ?? nil { blocker = reason }
         else if frame.isEnabled && frameLayout == nil { blocker = "export.blocker.frame" }
         else if export.isInFlight { blocker = "export.blocker.inProgress" }
         else if case .failed = engine { blocker = "err.server.engine_unavailable" }
@@ -57,7 +58,6 @@ extension EditorModel {
         switch editingLockReason {
         case .loading: lutBlock = "lut.importBlocker.loading"
         case .restoring: lutBlock = "lut.importBlocker.restoring"
-        case .computingAI: lutBlock = "lut.importBlocker.computingAI"
         case .exporting: lutBlock = "lut.importBlocker.exporting"
         case nil: lutBlock = nil
         }
@@ -118,7 +118,7 @@ extension EditorModel {
         }
         exportThumbnailNeedsDeferred = thumbnailFrame == nil && export.thumbnail == .loading
         export.phase = .preparing; export.startedAt = now(); export.stageAt = export.startedAt
-        let options = effectiveOptions(), snapshot = edit
+        let options = effectiveOptions(), snapshot = exportChoices
         let fixedFolder = destination == nil ? preferences.exportFolder.target : nil
         export.destination = destination.map(ExportDestination.file) ?? .folder(label: preferences.exportFolder.label)
         let framed = frame.isEnabled
@@ -136,7 +136,7 @@ extension EditorModel {
                 } else { exportSize = document?.pixelSize }
                 let pixels = exportSize.map { Double($0.width) * Double($0.height) } ?? 0
                 export.durations = ExportETA.durations(history: timingHistory, kind: .init(isRAW: photo.formatLabel == "RAW",
-                    encoding: snapshot.encoding, isAI: snapshot.aiMode == .optimized, hasFrame: framed, verifies: snapshot.verifies), pixels: pixels)
+                    encoding: snapshot.encoding, isAI: false, hasFrame: framed, verifies: true), pixels: pixels)
                 let thumbnail = if let thumbnailFrame { await makeThumbnail(of: thumbnailFrame, maxPixelSize: 256, framing: thumbnailFraming) } else { nil as CGImage? }
                 try Task.checkCancellation()
                 if let thumbnail { export.thumbnail = .ready(thumbnail); exportThumbnailPersisted = true }
@@ -171,7 +171,7 @@ extension EditorModel {
             }
         }
     }
-    func finishExport(result: ExportResult?, failure: UserFacingError?, snapshot: EditSnapshot, framed: Bool) {
+    func finishExport(result: ExportResult?, failure: UserFacingError?, snapshot: ExportChoices, framed: Bool) {
         var failure = failure
         var result = result
         if let started = export.startedAt { result?.elapsed = .seconds(max(0, now().timeIntervalSince(started))) }
@@ -212,7 +212,7 @@ extension EditorModel {
             await services.cancelAllExports()
             await task?.value
             guard let self, self.photo == expectedPhoto, export.isInFlight else { return }
-            finishExport(result: nil, failure: UserFacingError(code: "cancelled"), snapshot: edit, framed: frame.isEnabled)
+            finishExport(result: nil, failure: UserFacingError(code: "cancelled"), snapshot: exportChoices, framed: frame.isEnabled)
         }
     }
     func refreshExportMetadata() {
@@ -274,9 +274,10 @@ extension EditorModel {
         guard !isEditingLocked, let item = exportHistory.first(where: { $0.version.id == version }),
               exportVersions.first(where: { $0.id == version })?.matchesCurrent == false else { return }
         finishGestureBeforeEdit()
-        let previous = edit; edit = item.options
-        recordStep(from: previous, action: "restoreExport")
-        editChanged()
+        // Until exports keep their recipe (P7-3), only the export's own
+        // choices of that version come back.
+        exportChoices = item.options
+        exportChoicesChanged()
     }
     func saveExport(_ version: String, destination: URL?) {
         guard let photo, exportVersions.contains(where: { $0.id == version }) else { return }
@@ -319,7 +320,7 @@ extension EditorModel {
         cachedFrameKey = nil; cachedExportFrame = nil
         export.reset(); exportVersions = []; exportSaveStates = [:]; exportHistory = []; currentExportKey = nil; suggestedFileName = ""
         pendingPhotoSwitch = nil; pendingSwitchStops = false
-        lutTicket += 1; lutTask?.cancel(); lut.selection = nil; lut.isBusy = false
+        lut.isBusy = false
     }
     func resolvePhotoSwitch(stop: Bool) {
         guard pendingPhotoSwitch != nil else { return }
@@ -362,116 +363,20 @@ extension EditorModel {
 
 
 extension EditorModel {
+    /// The export's own choices: not edits, so no undo step (p7-2b §3.1).
     func setOutputGamut(_ id: String) {
-        guard photo != nil, !isEditingLocked, ["srgb", "p3"].contains(id), edit.choices["outputGamut"] != id else { return }
-        finishGestureBeforeEdit(); let previous = edit
-        edit.choices["outputGamut"] = id
-        recordStep(from: previous, action: "outputGamut"); editChanged()
-    }
-    /// The RAW lens correction switch (M3 §12.4): one undo step, and a new
-    /// preview, model gain and export key through the request's
-    /// `raw_lens_correction`. Only a RAW whose lens macOS can correct has the switch.
-    func setLensCorrection(_ on: Bool) {
-        guard photo != nil, !isEditingLocked, document?.source?.raw?.lensCorrectionSupported == true,
-              edit.lensCorrection != on else { return }
-        finishGestureBeforeEdit(); let previous = edit
-        edit.lensCorrection = on
-        recordStep(from: previous, action: "lensCorrection"); editChanged()
-    }
-    /// Lens correction is part of how the file is developed, not an
-    /// adjustment: the "original" shows the same geometry as the edit, so it
-    /// follows the switch while every adjustment in it stays neutral. Called from
-    /// `editChanged`, so undo, redo and resets reach it as well.
-    func followLensCorrectionWithReference() {
-        guard var options = referenceOptions, options["lensCorrection"] != .bool(edit.lensCorrection) else { return }
-        options["lensCorrection"] = .bool(edit.lensCorrection)
-        renderReferenceFrame(options: options, edge: previewEdge)
-    }
-    /// A larger preview tier (the window grew, or moved to a denser display)
-    /// asks for a larger "original" as well: the edit sharpens at once, and a
-    /// comparison against a stale small original would show a soft half beside
-    /// a sharp one (V-13). The smaller original stays up until the new one is
-    /// ready, and a smaller tier never re-renders.
-    func followPreviewEdgeWithReference() {
-        let edge = previewEdge
-        guard hasReferenceFrame, let options = referenceOptions, edge > requestedReferenceEdge else { return }
-        // An original that already has the photo's full size has nothing more to
-        // give; a larger tier would render the same pixels.
-        if !isReferenceRenderPending, let size = canvas.referencePixelSize, let full = document?.pixelSize,
-           max(size.width, size.height) >= CGFloat(max(full.width, full.height)) {
-            requestedReferenceEdge = edge; shownReferenceEdge = edge
-            return
-        }
-        renderReferenceFrame(options: options, edge: edge)
-    }
-    /// A render of the "original" that has been asked for and has not arrived (or
-    /// failed): the original on screen and its details are still the old ones.
-    var isReferenceRenderPending: Bool {
-        referenceOptions != shownReferenceOptions || requestedReferenceEdge != shownReferenceEdge
-    }
-    /// Renders the "original" with `options` at `edge` and swaps it in; on a
-    /// failure the earlier original stays, with the options and edge it had.
-    private func renderReferenceFrame(options: EditOptions, edge: Int) {
-        guard let photo else { return }
-        let optionsChanged = referenceOptions != options
-        referenceOptions = options
-        requestedReferenceEdge = edge
-        // The details of the original on screen stay valid across a larger render
-        // of the same options; only different options make them stale. The edit's
-        // own details are never the reference's business: a change of the edit
-        // clears them where it is made.
-        if optionsChanged { invalidateOriginalDetail() }
-        referenceRefreshTask?.cancel()
-        let ticket = generation
-        referenceRefreshTask = Task { [weak self, services] in
-            do {
-                let result = try await services.renderReference(photo, options: options, maxEdge: edge)
-                guard let self, !Task.isCancelled, self.photo == photo,
-                      referenceOptions == options, requestedReferenceEdge == edge else { return }
-                // Nothing to show (no result, or another photo is being opened): the
-                // earlier original stays, and the render is no longer on its way.
-                guard let result, generation == ticket else { return abandonReferenceRender() }
-                // Details of the original drawn with other options no longer match it.
-                if shownReferenceOptions != options { invalidateOriginalDetail() }
-                shownReferenceOptions = options
-                shownReferenceEdge = edge
-                replaceReference(result)
-                scheduleDetails()
-            } catch EditorDetailError.sourceReplaced {
-                guard let self, !Task.isCancelled, generation == ticket, self.photo == photo else { return }
-                reopenReplacedSource(photo)
-            } catch {
-                // The earlier original stays on screen with its own details; the
-                // next switch or tier change tries again.
-                guard let self, !Task.isCancelled, self.photo == photo,
-                      referenceOptions == options, requestedReferenceEdge == edge else { return }
-                abandonReferenceRender()
-            }
-        }
-    }
-    /// Puts the options and the edge asked for back to those of the original on
-    /// screen, so that nothing is waited for that will not arrive.
-    func abandonReferenceRender() {
-        referenceRefreshTask?.cancel()
-        if let shown = shownReferenceOptions { referenceOptions = shown }
-        requestedReferenceEdge = shownReferenceEdge
-        scheduleDetails()
-    }
-    /// The camera group's summary key; nil when the photo is not a RAW.
-    var cameraSummaryKey: String? {
-        guard let raw = document?.source?.raw else { return nil }
-        guard raw.lensCorrectionSupported else { return "camera.summary.unsupported" }
-        return edit.lensCorrection ? "camera.summary.on" : "camera.summary.off"
+        guard photo != nil, !isEditingLocked, ["srgb", "p3"].contains(id), exportChoices.outputGamut != id else { return }
+        exportChoices.outputGamut = id
+        exportChoicesChanged()
     }
     func setClampSrgb(_ on: Bool) {
-        guard photo != nil, !isEditingLocked, edit.clampSrgb != on else { return }
-        finishGestureBeforeEdit(); let previous = edit
-        edit.clampSrgb = on
-        recordStep(from: previous, action: "clampSrgb"); editChanged()
+        guard photo != nil, !isEditingLocked, exportChoices.clampSrgb != on else { return }
+        exportChoices.clampSrgb = on
+        exportChoicesChanged()
     }
     private var rawDiagnostics: String {
         guard let raw = document?.source?.raw else { return "" }
-        let support = raw.lensCorrectionSupported ? (edit.lensCorrection ? "supported, on" : "supported, off") : "unsupported"
+        let support = raw.lensCorrectionSupported ? "supported" : "unsupported"
         return "\nRAW: apple-ciraw · decoder \(raw.decoderVersion) · macOS build \(raw.osBuild)"
             + "\nCamera: \(captureFacts.model ?? "—") · Lens: \(captureFacts.lens ?? "—")"
             + "\nLens correction: " + support

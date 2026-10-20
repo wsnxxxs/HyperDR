@@ -2,6 +2,8 @@ import AppKit
 import SwiftUI
 import XCTest
 import HyperDRDesign
+import HyperDRRecipe
+import HyperDRRender
 @testable import HyperDR
 
 /// The whole inspector column, in the app (real model, real catalogue), in
@@ -16,15 +18,13 @@ import HyperDRDesign
         ("light-zh-Hans", .light, "zh-Hans"), ("dark-zh-Hans", .dark, "zh-Hans"),
     ]
 
-    private func open(domain: InputDomain = .sdr, hasCaptureMetadata: Bool = false,
-                      missingCaptureFields: [String] = []) async -> EditorModel {
-        let services = FakeEditorServices(openDelay: .zero, previewDelay: .milliseconds(1))
-        services.missingCaptureFields = missingCaptureFields
-        services.preview = EditorPreview(pixelSize: PixelSize(width: 6000, height: 4000),
-            source: SourceSummary(domain: domain, colorName: "sRGB", degradationReasons: [], colorSource: "assumed"),
-            hasGain: true, hasCaptureMetadata: hasCaptureMetadata)
+    private func open(domain: HyperDRRecipe.InputDomain = .sdr, holdingPredictions: Bool = false) async -> EditorModel {
+        let services = FakeEditorServices(openDelay: .zero)
+        let url = URL(fileURLWithPath: "/fixtures/DSC00123.jpg")
+        await services.fakeRendering?.configure { $0.photos[url] = .init(domain: domain) }
+        if holdingPredictions { await services.fakeRendering?.holdPredictions() }
         let model = EditorModel(services: services)
-        model.open([URL(fileURLWithPath: "/fixtures/DSC00123.jpg")])
+        model.open([url])
         await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
         model.scopes.update(original: .some(Self.histogram(peak: 0.3)), current: .some(Self.histogram(peak: 0.45)),
                             waveform: .some(Self.waveform()))
@@ -128,59 +128,34 @@ import HyperDRDesign
         return pictures
     }
 
-    func testHDREnhancementManual() async throws {
+    func testHDRManualWithMask() async throws {
         let model = await open()
-        model.setWorkflow(.hdr)
-        // The mask mark shows on the control being adjusted.
-        model.showMask(for: "hdrStrength")
-        XCTAssertEqual(model.maskKey, "hdrStrength")
+        // The mask mark shows on the control being dragged.
+        let strength = try XCTUnwrap(Adjustments.declaration("hdr.strength"))
+        model.editor.editingChanged(strength, true)
+        await eventually { model.maskKey == "hdr.strength" }
         _ = try snapshots("hdr-manual", model: model) { _ in }
-        model.hideMask()
+        model.editor.editingChanged(strength, false)
+        model.closeDocument()
     }
 
-    func testAIEnhancement() async throws {
-        let model = await open()
-        model.setAIMode(.optimized)
-        await eventually(timeout: .seconds(3)) { !model.ai.isComputing }
-        XCTAssertEqual(model.ai.mode, .optimized)
-        let pictures = try snapshots("ai", model: model) { $0.isScopeExpanded = false }
+    /// The AI source while its prediction is computed: the photo shows
+    /// without AI and the status line says so (p7-2b §14.3).
+    func testAIPredicting() async throws {
+        let model = await open(holdingPredictions: true)
+        var recipe = model.editor.recipe
+        recipe.setValue(.string("ai"), for: "hdr.source")
+        model.editor.setRecipe(recipe)
+        await eventually { model.editor.isModelGainPending }
+        let pictures = try snapshots("ai-predicting", model: model) { $0.isScopeExpanded = false }
         XCTAssertFalse(pictures.isEmpty)
+        await (model.services as? FakeEditorServices)?.fakeRendering?.releasePredictions()
+        model.closeDocument()
     }
 
-    /// The design's third AI state: applied, with the model having done
-    /// without capture fields, and the picker offering two models. Waits for
-    /// the applied state itself -- `!isComputing` alone is true before the
-    /// computation starts.
-    func testAIAppliedWithFallbackAndTwoModels() async throws {
-        // The EXIF model is offered only for a photo with capture metadata; it
-        // can still lack some fields, and then falls back to the pixels.
-        let model = await open(hasCaptureMetadata: true, missingCaptureFields: ["focal_length_mm", "iso"])
-        let manual = try render(model, scheme: .light, locale: "en", session: ViewerSessionState())
-        model.setAIMode(.optimized)
-        await eventually(timeout: .seconds(5)) {
-            if case .applied = model.ai.availability {
-                return !model.ai.isComputing && !model.ai.fallbackMissingFields.isEmpty
-            }
-            return false
-        }
-        XCTAssertEqual(model.ai.mode, .optimized)
-        XCTAssertEqual(model.ai.fallbackMissingFields, ["focal_length_mm", "iso"])
-        XCTAssertEqual(model.ai.models.filter(\.isEnabled).count, 2, "the picker has two models to offer")
-        let panel = AIPanelState.make(domain: model.document?.source?.domain, mode: model.ai.mode,
-                                      availability: model.ai.availability, isComputing: model.ai.isComputing,
-                                      fallbackMissingFields: model.ai.fallbackMissingFields, notice: model.notice)
-        XCTAssertEqual(panel.lines.map(\.style), [.success, .warning])
-        let pictures = try snapshots("ai-applied-fallback", model: model) { $0.isScopeExpanded = false }
-        XCTAssertEqual(pictures.count, 4)
-        let applied = try render(model, scheme: .light, locale: "en", session: ViewerSessionState())
-        XCTAssertGreaterThan(applied.pixelsHigh, manual.pixelsHigh, "the notices and the picker add rows")
-    }
-
-    func testColorOnlyWithWaveformAndResetNotice() async throws {
+    func testWaveform() async throws {
         let model = await open()
-        model.setWorkflow(.colorOnly)
-        model.resetAll()
-        XCTAssertEqual(model.notice, .resetDone)
-        _ = try snapshots("color-only", model: model) { $0.scopeKind = .waveform }
+        _ = try snapshots("waveform", model: model) { $0.scopeKind = .waveform }
+        model.closeDocument()
     }
 }

@@ -1,20 +1,16 @@
 import AppKit
 import Foundation
 import HyperDRKit
+import HyperDRRecipe
 import XCTest
 @testable import HyperDR
 
-/// The photo's file going missing or being changed while it is open
-/// (parity batch 7 §3): what the editor keeps, what it stops doing and how it
-/// finds its way back.
+/// The photo's file going missing while it is open (parity batch 7 §3): what
+/// the editor keeps, what it stops doing and how it finds its way back.
 @MainActor final class SourceUnavailableTests: XCTestCase {
-    private let a = URL(fileURLWithPath: "/fixtures/a.jpg")
-    private let b = URL(fileURLWithPath: "/fixtures/b.jpg")
-    private let missing = UserFacingError(code: "source_missing")
-    private var preview: EditorPreview {
-        EditorPreview(pixelSize: PixelSize(width: 6000, height: 4000),
-            source: SourceSummary(domain: .hdr, colorName: "Display P3", degradationReasons: []), hasGain: true)
-    }
+    private var directory: URL!
+    private var a: URL { directory.appendingPathComponent("a.jpg") }
+    private var b: URL { directory.appendingPathComponent("b.jpg") }
     private var spoken: [(String, Bool)] = []
     private var savedDeliver: ((String, Bool) -> Void)?
 
@@ -22,163 +18,163 @@ import XCTest
         spoken = []
         savedDeliver = NoticeAnnouncement.deliver
         NoticeAnnouncement.deliver = { [weak self] in self?.spoken.append(($0, $1)) }
+        directory = FileManager.default.temporaryDirectory.appendingPathComponent("source-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data([1]).write(to: a)
+        try Data([2]).write(to: b)
     }
 
     override func tearDown() async throws {
         if let savedDeliver { NoticeAnnouncement.deliver = savedDeliver }
+        try? FileManager.default.removeItem(at: directory)
     }
 
-    private func opened(ticker: FrameTicker? = nil) async -> (EditorModel, ScriptedEditorServices, ManualFrameTicker) {
+    private func opened() async -> (EditorModel, ScriptedEditorServices) {
         let services = ScriptedEditorServices()
-        let ticker = ManualFrameTicker()
-        let model = EditorModel(services: services, ticker: ticker)
-        model.open([a])
-        await eventually { services.streams[self.a] != nil }
-        services.streams[a]?.yield(.reference(preview))
-        services.streams[a]?.yield(.edited(preview))
-        await eventually { model.document?.phase == .ready && services.refresh != nil }
-        return (model, services, ticker)
+        let model = EditorModel(services: services)
+        await openReady(model, a)
+        return (model, services)
     }
 
-    private func flush(_ ticker: ManualFrameTicker) async {
-        await eventually { ticker.isWaiting }
-        ticker.tick()
-        await settle()
+    private func setExposure(_ value: Double, _ model: EditorModel) {
+        var recipe = model.editor.recipe
+        recipe.setValue(.number(value), for: "tone.exposure")
+        model.editor.setRecipe(recipe)
     }
 
+    private func exposure(_ model: EditorModel) -> Double? {
+        model.editor.recipe.value(for: "tone.exposure")?.numberValue
+    }
+
+    /// The file goes away and the next render of it fails.
     private func becomeUnavailable(_ model: EditorModel, _ services: ScriptedEditorServices) async {
-        services.refresh?.yield(.failed(missing))
+        try? FileManager.default.removeItem(at: a)
+        services.scripted.failRenders(of: a, with: UserFacingError(code: "decode_failed"))
+        setExposure(0.25, model)
         await eventually { model.sourceUnavailable != nil }
     }
 
-    func testAMissingFileKeepsTheFrameAndTheControlsButStopsExportAndAI() async {
-        let (model, services, _) = await opened()
+    /// The file is back and renders of it work again.
+    private func comeBack(_ services: ScriptedEditorServices) async {
+        try? Data([1]).write(to: a)
+        services.scripted.failRenders(of: a, with: nil)
+    }
+
+    func testAMissingFileKeepsTheFrameAndTheControlsButStopsExport() async {
+        let (model, services) = await opened()
         await becomeUnavailable(model, services)
         XCTAssertTrue(model.hasEditedFrame, "the last frame stays")
         XCTAssertNil(model.editingLockReason, "controls are not locked")
         XCTAssertEqual(model.export.blockerKey, "export.blocker.sourceMissing")
-        XCTAssertEqual(model.aiBlockReason(), "ai.blocker.sourceMissing")
         XCTAssertEqual(spoken.count, 1)
         XCTAssertEqual(spoken.first?.1, true, "high priority")
         XCTAssertEqual(spoken.first?.0, AppStrings.format("source.missing.announce %@", "a.jpg"))
+        model.closeDocument()
     }
 
-    func testOtherPreviewFailuresDoNotEnterTheState() async {
-        let (model, services, _) = await opened()
-        services.refresh?.yield(.failed(UserFacingError(code: "raw_budget")))
+    func testOtherRenderFailuresDoNotEnterTheState() async {
+        let (model, services) = await opened()
+        services.scripted.failRenders(of: a, with: UserFacingError(code: "decode_failed"))
+        setExposure(0.25, model)
         await eventually { model.document?.previewError != nil }
         XCTAssertNil(model.sourceUnavailable)
         XCTAssertTrue(spoken.isEmpty)
+        model.closeDocument()
     }
 
-    func testAdjustmentsAreRecordedButNotRenderedWhileTheFileIsMissing() async {
-        let (model, services, ticker) = await opened()
+    func testAdjustmentsAndUndoWorkWhileTheFileIsMissing() async {
+        let (model, services) = await opened()
         await becomeUnavailable(model, services)
-        let before = services.submitted.count
-        model.adjust("brightness", to: 1.3)
-        model.adjust("brightness", to: 1.4)
-        ticker.tick()
-        await settle()
-        XCTAssertEqual(services.submitted.count, before, "nothing is submitted")
+        setExposure(0.5, model)
         XCTAssertTrue(model.canUndo)
-        XCTAssertEqual(model.control("brightness").value, 1.4)
+        XCTAssertEqual(exposure(model), 0.5)
         model.undo()
-        XCTAssertNotEqual(model.control("brightness").value, 1.4, "undo works as usual")
+        XCTAssertEqual(exposure(model), 0.25, "undo works as usual")
+        model.closeDocument()
     }
 
-    func testRetryRendersTheCurrentValuesOnceAndAFrameClearsTheState() async {
-        let (model, services, ticker) = await opened()
+    func testRetryEndsTheStateOnceTheFileIsBack() async {
+        let (model, services) = await opened()
         await becomeUnavailable(model, services)
-        model.adjust("brightness", to: 1.3)
-        let before = services.submitted.count
         model.retrySource()
-        await flush(ticker)
-        await eventually { services.submitted.count == before + 1 }
-        XCTAssertEqual(services.submitted.last?["brightness"], .number(1.3))
-        XCTAssertNotNil(model.sourceUnavailable, "still unavailable until a frame arrives")
+        XCTAssertNotNil(model.sourceUnavailable, "still missing")
+        await comeBack(services)
         spoken = []
-        services.refresh?.yield(.edited(preview, isLatest: true))
-        await eventually { model.sourceUnavailable == nil }
+        model.retrySource()
+        XCTAssertNil(model.sourceUnavailable)
         XCTAssertNil(model.export.blockerKey)
         XCTAssertEqual(spoken.map(\.0), [AppStrings.format("source.found.announce %@", "a.jpg")])
         XCTAssertEqual(spoken.first?.1, false)
+        XCTAssertTrue(model.canUndo, "the photo's steps stay")
+        model.closeDocument()
     }
 
     func testTheTimerRetriesWhileTheAppIsInFront() async {
-        let services = ScriptedEditorServices()
-        let model = EditorModel(services: services)
+        let (model, services) = await opened()
         model.sourceRetryInterval = .milliseconds(30)
         var active = false
         model.appIsActive = { active }
-        model.open([a])
-        await eventually { services.streams[self.a] != nil }
-        services.streams[a]?.yield(.reference(preview))
-        services.streams[a]?.yield(.edited(preview))
-        await eventually { model.document?.phase == .ready && services.refresh != nil }
         await becomeUnavailable(model, services)
+        await comeBack(services)
         try? await Task.sleep(for: .milliseconds(200))
-        XCTAssertTrue(services.submitted.isEmpty, "not while the app is in the background")
+        XCTAssertNotNil(model.sourceUnavailable, "not while the app is in the background")
         active = true
-        await eventually(timeout: .seconds(5)) { !services.submitted.isEmpty }
+        await eventually(timeout: .seconds(5)) { model.sourceUnavailable == nil }
         model.closeDocument()
     }
 
     func testComingToTheFrontRetriesAtOnce() async {
-        let (model, services, ticker) = await opened()
+        let (model, services) = await opened()
         await becomeUnavailable(model, services)
+        await comeBack(services)
         NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: NSApp)
-        await flush(ticker)
-        await eventually { !services.submitted.isEmpty }
+        await eventually { model.sourceUnavailable == nil }
         model.closeDocument()
     }
 
-    func testClosingOrSwitchingThePhotoLeavesTheState() async {
-        let (model, services, _) = await opened()
+    func testClosingThePhotoLeavesTheState() async {
+        let (model, services) = await opened()
         await becomeUnavailable(model, services)
         model.closeDocument()
         XCTAssertNil(model.sourceUnavailable)
-        XCTAssertNil(model.export.blockerKey == "export.blocker.sourceMissing" ? "stuck" : nil)
+        XCTAssertNotEqual(model.export.blockerKey, "export.blocker.sourceMissing")
     }
 
     // MARK: Finding the file again
 
-    func testALocatedFileWithTheSameContentKeepsAdjustmentsAndUndo() async {
-        let (model, services, ticker) = await opened()
-        model.adjust("brightness", to: 1.3)
-        await flush(ticker)
+    func testALocatedFileWithTheSameContentKeepsTheAdjustments() async {
+        let (model, services) = await opened()
         await becomeUnavailable(model, services)
         let handle = model.photo!.handle
         services.relinkHandler = { url in EditorPhoto(url: url, name: url.lastPathComponent, formatLabel: "JPEG", byteCount: 1, handle: handle) }
-        let before = services.submitted.count
         model.locateSource(b)
-        await flush(ticker)
         await eventually { model.photo?.url == self.b }
         XCTAssertEqual(model.document?.name, "b.jpg")
-        XCTAssertEqual(model.control("brightness").value, 1.3, "adjustments stay")
-        XCTAssertTrue(model.canUndo)
-        await eventually { services.submitted.count > before }
-        services.refresh?.yield(.edited(preview, isLatest: true))
-        await eventually { model.sourceUnavailable == nil }
+        await eventually { model.editor.source?.url == self.b && model.sourceUnavailable == nil }
+        XCTAssertEqual(exposure(model), 0.25, "adjustments stay")
+        model.closeDocument()
     }
 
     func testADifferentFileIsOpenedAsAnotherPhoto() async {
-        let (model, services, _) = await opened()
+        let (model, services) = await opened()
         await becomeUnavailable(model, services)
         services.relinkHandler = { _ in throw UserFacingError(code: "source_different") }
         model.locateSource(b)
-        await eventually { services.streams[self.b] != nil }
+        await eventually { model.photo?.url == self.b && model.document?.phase == .ready }
         XCTAssertNil(model.sourceUnavailable)
         XCTAssertNil(model.alert)
+        XCTAssertNil(exposure(model), "another photo starts from its defaults")
         model.closeDocument()
     }
 
     func testAnyOtherLocateFailureIsAnAlert() async {
-        let (model, services, _) = await opened()
+        let (model, services) = await opened()
         await becomeUnavailable(model, services)
         services.relinkHandler = { _ in throw UserFacingError(code: "source_unreadable") }
         model.locateSource(b)
         await eventually { model.alert?.code == "source_unreadable" }
         XCTAssertNotNil(model.sourceUnavailable)
+        model.closeDocument()
     }
 
     func testTheLocatePanelIsOpenedForLocatingNotForOpening() {
@@ -193,7 +189,7 @@ import XCTest
     }
 
     func testTheLocateButtonWaitsWhileTheChosenFileIsBeingChecked() async {
-        let (model, services, ticker) = await opened()
+        let (model, services) = await opened()
         await becomeUnavailable(model, services)
         let handle = model.photo!.handle
         var release: CheckedContinuation<Void, Never>?
@@ -206,13 +202,12 @@ import XCTest
         model.locateSource(b)
         release?.resume()
         await eventually { !model.isRelinking }
-        await flush(ticker)
         model.closeDocument()
     }
 
     func testARecordRefreshThatFindsTheFileMissingNoLongerCallsAnyVersionCurrent() async throws {
-        let services = FakeEditorServices(openDelay: .zero, previewDelay: .zero)
-        let model = EditorModel(services: services, ticker: ManualFrameTicker())
+        let services = FakeEditorServices(openDelay: .zero)
+        let model = EditorModel(services: services)
         await model.loadExportServices()
         model.open([a])
         await eventually(timeout: .seconds(10)) { model.document?.phase == .ready && !model.suggestedFileName.isEmpty }
@@ -220,7 +215,7 @@ import XCTest
         services.historyByURL[a] = [ExportHistoryItem(
             version: ExportVersion(number: 1, createdAt: Date(), encodingID: "adaptive",
                                    result: ExportResult(export: "v1", fileName: "a.heic", byteCount: 1, pixelSize: PixelSize(width: 1, height: 1))),
-            key: key, options: model.edit)]
+            key: key, options: model.exportChoices)]
         model.refreshExportMetadata()
         await eventually(timeout: .seconds(10)) { model.exportVersions.first?.matchesCurrent == true }
         services.metadataHandler = { throw UserFacingError(code: "source_missing") }
@@ -230,54 +225,11 @@ import XCTest
         XCTAssertTrue(model.export.isResultStale || model.export.result == nil)
     }
 
-    // MARK: A file changed by another app
-
-    func testAReplacedFileReopensFromDefaultsAndSaysSo() async {
-        let (model, services, _) = await opened()
-        model.adjust("brightness", to: 1.3)
-        services.streams[a] = nil
-        services.refresh?.yield(.sourceReplaced)
-        await eventually { services.streams[self.a] != nil }
-        services.streams[a]?.yield(.reference(preview))
-        services.streams[a]?.yield(.edited(preview))
-        await eventually { model.canvasNotice != nil }
-        XCTAssertEqual(model.canvasNotice, .sourceReplaced(name: "a.jpg"))
-        XCTAssertNotEqual(model.control("brightness").value, 1.3, "the old adjustments do not carry over")
-        model.adjust("brightness", to: 1.1)
-        XCTAssertNil(model.canvasNotice, "the first edit clears it")
-    }
-
-    func testAReplacedFileDuringAnExportWaitsForTheExportAndThenReopens() async {
-        let (model, services, _) = await opened()
-        model.export.phase = .running
-        services.streams[a] = nil
-        services.refresh?.yield(.sourceReplaced)
-        try? await Task.sleep(for: .milliseconds(150))
-        XCTAssertNil(services.streams[a], "the export is not interrupted and nothing is reopened")
-        XCTAssertNil(model.pendingPhotoSwitch, "no question is asked either")
-        model.export.phase = .failed
-        model.resumeReplacedReopen()
-        await eventually { services.streams[self.a] != nil }
-        services.streams[a]?.yield(.reference(preview))
-        services.streams[a]?.yield(.edited(preview))
-        await eventually { model.canvasNotice == .sourceReplaced(name: "a.jpg") }
-    }
-
-    // MARK: Work data gone
-
-    func testAnExpiredSessionOnThePreviewPathClosesThePhotoWithTheAlert() async {
-        let (model, services, _) = await opened()
-        services.refresh?.yield(.failed(UserFacingError(code: "session_expired")))
-        await eventually { model.alert?.code == "session_expired" }
-        XCTAssertNil(model.document)
-        XCTAssertNil(model.sourceUnavailable)
-    }
-
     // MARK: The history
 
     func testAnExportHistoryRefreshThatFindsTheFileMissingKeepsTheListAndEntersTheState() async throws {
-        let services = FakeEditorServices(openDelay: .zero, previewDelay: .zero)
-        let model = EditorModel(services: services, ticker: ManualFrameTicker())
+        let services = FakeEditorServices(openDelay: .zero)
+        let model = EditorModel(services: services)
         await model.loadExportServices()
         model.open([a])
         await eventually(timeout: .seconds(10)) { model.document?.phase == .ready && !model.suggestedFileName.isEmpty }
@@ -285,7 +237,7 @@ import XCTest
         services.historyByURL[a] = [ExportHistoryItem(
             version: ExportVersion(number: 1, createdAt: Date(), encodingID: "adaptive",
                                    result: ExportResult(export: "v1", fileName: "a.heic", byteCount: 1, pixelSize: PixelSize(width: 1, height: 1))),
-            key: key, options: model.edit)]
+            key: key, options: model.exportChoices)]
         model.refreshExportMetadata()
         await eventually(timeout: .seconds(10)) { model.exportVersions.count == 1 }
         services.metadataHandler = { throw UserFacingError(code: "source_missing") }

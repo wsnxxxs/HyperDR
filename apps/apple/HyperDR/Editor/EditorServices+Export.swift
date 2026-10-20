@@ -46,7 +46,7 @@ extension ExportHistoryItem {
     nonisolated init(_ record: ExportRecord) {
         let report = (try? JSONSerialization.jsonObject(with: record.reportJSON)) as? [String: Any]
         let file = (report?["files"] as? [[String: Any]])?.first(where: { $0["success"] as? Bool == true }) ?? [:]
-        let options = EditSnapshot(EditOptions(record.options), aiMode: record.options["useModel"] == .bool(true) ? .optimized : .manual)
+        let options = ExportChoices(exportedOptions: EditOptions(record.options))
         let width = file["width"] as? Int ?? 0, height = file["height"] as? Int ?? 0
         let size = width > 0 && height > 0 ? PixelSize(width: width, height: height) : nil
         let warnings = file["decode_degradation_reasons"] as? [String] ?? []
@@ -68,7 +68,7 @@ extension ExportHistoryItem {
         let ext = URL(fileURLWithPath: file["input"] as? String ?? "").pathExtension
         let raw = FakeEditorServices.formatLabel(for: URL(fileURLWithPath: "x." + ext)) == "RAW"
         timing = size.map { ExportTimingSample(kind: .init(isRAW: raw, encoding: options.encoding,
-            isAI: options.aiMode == .optimized, hasFrame: record.frame != nil, verifies: result.selfVerified),
+            isAI: record.options["useModel"] == .bool(true), hasFrame: record.frame != nil, verifies: result.selfVerified),
             pixels: Double($0.width) * Double($0.height), stages: stages) }
     }
 }

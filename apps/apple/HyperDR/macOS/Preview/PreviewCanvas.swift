@@ -1,24 +1,4 @@
-import HyperDREngine
 import SwiftUI
-
-/// One frame the canvas can draw plus the mode it is drawn in.
-struct PreviewCanvasFrame {
-    let frame: PreviewFrame
-    let showsOriginal: Bool
-}
-
-/// The app hands frames to the canvas through this. A0's placeholder model has
-/// no pixels yet, so the default is "nothing to draw"; A2 conforms `EditorModel`
-/// by storing the latest engine frame.
-@MainActor protocol PreviewFrameSource: AnyObject {
-    var canvasFrame: PreviewCanvasFrame? { get }
-}
-
-extension PreviewFrameSource {
-    var canvasFrame: PreviewCanvasFrame? { nil }
-}
-
-extension EditorModel: PreviewFrameSource {}
 
 /// What the view layer hears of the pointer on the canvas, in the canvas's own
 /// points: it times press-and-hold for the original and dismisses hints. The
@@ -52,10 +32,9 @@ struct PreviewCanvas: NSViewRepresentable {
             model.receiveDisplay(DisplayState(screenName: snapshot.screen ?? "",
                 currentHeadroom: Double(snapshot.current),
                 potentialHeadroom: Double(snapshot.potential),
-                gainWeight: model.currentEditedFrame.map { DisplayWeight.value(headroom: HeadroomPolicy.configured.target(snapshot), metadata: $0.metadata) }.map(Double.init)))
+                gainWeight: model.editedPair.map { Double($0.weight(headroom: HeadroomPolicy.configured.target(snapshot))) }))
         }, onError: { [weak model] detail in model?.reportCanvasFailure(detail) })
         view.compositionProvider = { [weak model] in model?.canvasComposition }
-        view.frameProvider = { [weak model] in model?.canvasFrame }
         view.onTransformChange = { [weak model] transform in model?.canvas.apply(transform) }
         view.onViewportChange = { [weak model] size, scale in
             model?.updateViewport(size, backingScale: scale)
@@ -87,7 +66,6 @@ struct PreviewCanvas: NSViewRepresentable {
         _ = model.canvas.imageFrame
         _ = model.canvas.zoom
         view.compositionProvider = { [weak model] in model?.canvasComposition }
-        view.frameProvider = { [weak model] in model?.canvasFrame }
         install(pointer, on: view)
         view.showsOriginal = model.viewMode == .original || !model.hasEditedFrame
         // Until the view has reported its size, the model still has a zero

@@ -145,6 +145,9 @@ nonisolated final class DisplayCompositor {
         }
     }
 
+    /// The edited base the compositor holds, if any (tests).
+    var heldIdentity: ObjectIdentifier? { edited.map { ObjectIdentifier($0.pair.base) } }
+
     func releasePairs() {
         original = nil; edited = nil
         detailOriginal = nil; detailEdited = nil; detailTexture = nil

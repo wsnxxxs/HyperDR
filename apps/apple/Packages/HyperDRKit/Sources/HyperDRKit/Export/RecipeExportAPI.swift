@@ -47,7 +47,17 @@ public struct RecipeExportResult: Sendable {
         guard resolved.ceilingStops != nil else { return nil }
         return package?.gain?.alternateHeadroom ?? evidence?.system.verifiedHeadroomStops.max()
     }
-    public var verified: Bool { evidence != nil && (package?.verified ?? (evidence?.imageIO != nil)) }
+    public var verified: Bool {
+        guard let evidence else { return false }
+        if let package { return package.verified }
+        if evidence.imageIO != nil { return true }
+        // SDR Adaptive has no gain-write report. Its native probe and the
+        // independent system readback are the two successful readers.
+        return resolved.encoding == .adaptive && resolved.ceilingStops == nil
+            && evidence.firstReaderJSON != nil
+            && evidence.system.width == resolved.width && evidence.system.height == resolved.height
+            && !evidence.system.auxiliaryGain && !evidence.system.hdrReadable
+    }
     private let operationElapsed: Duration?
     /// Includes publication and delivery when returned by the live service.
     public var elapsed: Duration { operationElapsed ?? .seconds(evidence?.stageSeconds.values.reduce(0, +) ?? 0) }

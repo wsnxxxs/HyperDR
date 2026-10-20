@@ -137,7 +137,7 @@ extension ExportBlockReason {
 extension ExportPlan {
     public var summary: WillWriteSummary {
         var parts = [ExportMessage(key: encoding.labelKey), .init(key: gamut.labelKey),
-                     size == photoSize && longEdgeLimit == nil
+                     size == sourceSize && photoSize == sourceSize
                         ? .init(key: "plan.size.original")
                         : .init(key: "plan.size.pixels", arguments: [.pixels(size.width), .pixels(size.height)])]
         if let peakStops { parts.append(.init(key: "plan.peak %@", arguments: [.stops(peakStops)])) }

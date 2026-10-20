@@ -14,6 +14,8 @@ public actor RenderEngine {
     let context: CIContext
     let library: any MTLLibrary
     let pipelines: [String: any MTLComputePipelineState]
+    var modelPredictionCache: (key: ModelPredictionKey, value: ModelGainPrediction)?
+    var modelFilterCache: (key: ModelFilterKey, gain: any MTLTexture, peak: Float)?
     var displayMatrices: [(space: CGColorSpace, matrix: simd_float3x3)] = []
     var analysisCache: (key: AnalysisKey, result: SpatialAnalysis)?
     var lutCache: (id: String, texture: any MTLTexture, buffer: any MTLBuffer)?
@@ -56,7 +58,7 @@ public actor RenderEngine {
         var pipelines: [String: any MTLComputePipelineState] = [:]
         for name in ["sourceHDRSplit", "sampleSource", "zeroGain", "adjustPoint", "graphCells", "graphBox",
                      "graphWeights", "graphCoefficients", "graphFinalGain", "graphOutput", "graphPeak", "authoredOutput",
-                     "displayBase", "displayISOGain", "displayGainPeak", "displayLegacyGain"] {
+                     "displayBase", "displayISOGain", "displayGainPeak", "displayLegacyGain", "modelGainWeights"] {
             guard let function = library.makeFunction(name: name) else { throw RenderError.gpu(name) }
             pipelines[name] = try device.makeComputePipelineState(function: function)
         }
@@ -65,6 +67,8 @@ public actor RenderEngine {
 
     public func clearCaches() {
         sourceCache = nil
+        modelPredictionCache = nil
+        modelFilterCache = nil
         hdrCache = nil
         outputCache = nil
         analysisCache = nil
@@ -250,7 +254,7 @@ public actor RenderEngine {
             let croppedBase = try crop(planes.base, from: inputRegion, to: region, context: context)
             let croppedGain = try crop(planes.gain, from: inputRegion, to: region, context: context)
             planes = RenderPlanes(base: croppedBase, gain: croppedGain, gainChannelCount: planes.gainChannelCount,
-                encoding: planes.encoding, baseColorSpace: planes.baseColorSpace, provenance: planes.provenance, region: region, outputSize:size)
+                encoding: planes.encoding, baseColorSpace: planes.baseColorSpace, provenance: planes.provenance, region: region, outputSize:size, aiPending:planes.aiPending)
         }
         try finish(buffer)
         return planes

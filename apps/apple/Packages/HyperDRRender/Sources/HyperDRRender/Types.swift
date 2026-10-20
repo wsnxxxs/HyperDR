@@ -110,10 +110,11 @@ public struct RenderPlanes: @unchecked Sendable {
     public let region: CGRect
     /// Full output canvas for normalized gain sampling when `region` is an ROI.
     public let outputSize: PixelSize
+    public let aiPending: Bool
 
     public init(base: any MTLTexture, gain: any MTLTexture, gainChannelCount: Int = 1,
                 encoding: GainEncoding = .log2, baseColorSpace: CGColorSpace,
-                provenance: PairProvenance, region: CGRect, outputSize: PixelSize? = nil) {
+                provenance: PairProvenance, region: CGRect, outputSize: PixelSize? = nil, aiPending: Bool = false) {
         self.base = base
         self.gain = gain
         self.gainChannelCount = gainChannelCount
@@ -122,6 +123,7 @@ public struct RenderPlanes: @unchecked Sendable {
         self.provenance = provenance
         self.region = region
         self.outputSize = outputSize ?? PixelSize(width:base.width,height:base.height)
+        self.aiPending = aiPending
     }
 }
 

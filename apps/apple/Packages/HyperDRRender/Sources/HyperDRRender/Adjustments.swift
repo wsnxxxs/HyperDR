@@ -34,6 +34,7 @@ public struct RAWAdjustments: Hashable, Sendable {
 }
 
 public struct HDRAdjustments: Hashable, Sendable {
+    public var modelGain: ModelGainPrediction?
     public var enabled = RenderParameter.defaultBool("hdr.enabled")
     /// Nil resolves to HyperDRRecipe.HDRSource.defaultSource(for:) at rendering.
     public var source: HyperDRRecipe.HDRSource? = nil
@@ -43,7 +44,7 @@ public struct HDRAdjustments: Hashable, Sendable {
     public var coverage: Float = RenderParameter.defaultNumber("hdr.coverage")
     public var sdrRolloff: Float = RenderParameter.defaultNumber("hdr.sdrRolloff")
     public init() {}
-    public var isIdentity: Bool { var value = self; value.source = nil; return value == Self() }
+    public var isIdentity: Bool { var value = self; value.source = nil; value.modelGain = nil; return value == Self() }
 }
 
 public struct LookAdjustments: Hashable, Sendable {
@@ -79,7 +80,6 @@ public struct RenderAdjustments: Hashable, Sendable {
         }
         let source = hdr.source ?? .defaultSource(for:domain)
         guard source.domains.contains(domain) else { throw RenderError.invalidAdjustment }
-        if source.usesModel { throw RenderError.aiNotAvailable }
         if domain == .rawEDR && (color.warmth != 0 || color.tint != 0) { throw RenderError.invalidAdjustment }
     }
 }

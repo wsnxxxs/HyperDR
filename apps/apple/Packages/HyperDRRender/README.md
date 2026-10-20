@@ -158,10 +158,10 @@ limits; tiled decoding and export memory admission belong to P7-3.
 
 `ModelGainProvider` / `ModelGainPrediction` reserve P7-1b's boundary: infer original oriented
 linear-P3 source once, cache by source/model identity, return a single-channel float log2 grid.
-AI selections currently throw `aiNotAvailable`. P7-1b should inject that grid next to analytic
-expansion, combine RAW captured/model by max, then reuse strength/range/rolloff and stripes.
-Keep prediction independent of tone/color/LUT; explicit expansion-start masking belongs after
-prediction, auto should preserve the model's result. No Core ML or model loading exists here.
+AI predictions enter alongside analytic expansion, combine RAW captured/model by max,
+then reuse strength/range/rolloff and stripes. Prediction and guided reconstruction remain
+independent of tone/color/LUT; explicit expansion-start masking follows prediction, while
+auto preserves participation. Core ML supplies the original unsmoothed grid.
 
 ## Verification
 
@@ -265,3 +265,33 @@ R3 timing on the same shared M6 host: normalizing a generated 2560×1707 pair to
 0.60 ms in one pass (includes the GPU peak reduction and command completion;
 identity matrices and both textures were reused). This excludes any ICC setup
 or native ISO/Apple decoding and is not an iPhone performance measurement.
+
+
+R1 model gain integration
+
+```swift
+// First render is useful immediately; its aiPending flag is true.
+let pending = try await engine.render(source, recipe: aiRecipe)
+let prediction = try await engine.predictModelGain(source, provider: provider)
+let ready = try await engine.render(source, recipe: aiRecipe, modelGain: prediction)
+```
+
+`RenderAdjustments.hdr.modelGain` accepts the same prediction for direct-adjustment
+calls. Recipe render and stripe entry points accept `modelGain: ModelGainPrediction?`.
+The caller schedules inference and triggers the next render; rendering never starts
+an implicit task or waits for Core ML. `RenderPlanes.aiPending` marks active AI
+selection without a prediction. Disabled HDR does not wait for AI.
+
+`predictModelGain(_:provider:)` uses `predict(source:)` for SDR and
+`prediction(forSDRBase:sourceID:size:)` for RAW, with `sdrBase(_:)` returning the
+untouched source separation (zero SDR highlight rolloff). HDR/dual inputs reject AI.
+Prediction identity/cache is `(sourceID, modelID)`; modelID includes preprocessing
+and analysis scale. Treat the gain texture as immutable for this identity.
+
+The HDR node upsamples onto the fixed guide, suppresses negative highlight gain,
+applies optional explicit-start participation, then uses a guided filter (epsilon
+.005, radius 4–8 analysis pixels) bounded by each pixel's prediction. Default auto
+start does not gate the model. Filter cache excludes light/color/LUT and retains
+source/model/start identity. Captured/model gain combines by maximum; strength,
+range soft shoulder, SDR rolloff compensation and HDR enable apply afterward.
+`DoubleReference.modelGain` provides the guided-postprocess double reference.

@@ -83,9 +83,10 @@ nonisolated struct ExportStack: Sendable {
 
     /// Whether the editor's photo has a session (open or still opening).
     private(set) var hasPhoto = false
-    /// The host is loading another photo (copying or decoding it). Set by the
-    /// host alongside its own spinner.
-    var loadingPhoto = false
+    /// The host's photo request being loaded (copied or decoded), from the
+    /// moment the host accepts it.
+    private(set) var loadingRequest: UUID?
+    var loadingPhoto: Bool { loadingRequest != nil }
     /// Why the photo's session could not be opened.
     private(set) var sessionFailure: String?
     @ObservationIgnored private var current: Opening?
@@ -131,6 +132,17 @@ nonisolated struct ExportStack: Sendable {
 
     /// Whether a new photo may start loading: not while an export runs.
     var canOpenPhoto: Bool { !isRunning }
+
+    /// The host accepted a request to open another photo; export is closed
+    /// until that request ends (a newer request takes over).
+    func photoRequested(_ id: UUID) {
+        loadingRequest = id
+    }
+
+    /// The host's request ended: opened, failed, cancelled or refused.
+    func photoRequestEnded(_ id: UUID) {
+        if loadingRequest == id { loadingRequest = nil }
+    }
 
     /// Whether the current choice can start: a settled photo, a destination
     /// that exists on iOS now, and a plan without blockers. The session may

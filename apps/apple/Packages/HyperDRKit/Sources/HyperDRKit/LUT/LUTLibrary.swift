@@ -2,6 +2,12 @@ import Darwin
 import Foundation
 import HyperDREngine
 
+/// The imported `.cube` LUTs, in `<supportDirectory>/lut-library`. With the
+/// default configuration that is Application Support on both platforms, which
+/// persists across launches and updates (never `tmp/` or Caches).
+///
+/// `importLUT` takes picker URLs as they are (`fileImporter`, open panels): it
+/// starts and stops their security scope itself, so callers do not.
 public actor LUTLibrary {
     private let root: URL
     private let sessions: SessionStore

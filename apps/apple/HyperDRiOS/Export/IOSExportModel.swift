@@ -3,6 +3,7 @@ import HyperDREngine
 import HyperDRKit
 import HyperDRRender
 import Observation
+import UIKit
 
 /// Kit's export service and the session store it exports from. Export has
 /// its own `RenderEngine`, apart from the editor's, so its caches go with it;
@@ -10,6 +11,9 @@ import Observation
 nonisolated struct ExportStack: Sendable {
     let sessions: SessionStore
     let service: any RecipeExportServicing
+    /// The LUT library, on the same session store: an export applies the
+    /// look's LUT from it into the photo's session.
+    let luts: LUTLibrary
 
     static func live() async throws -> ExportStack {
         let configuration = KitConfiguration()
@@ -18,7 +22,8 @@ nonisolated struct ExportStack: Sendable {
         let render = try RenderEngine()
         let service = RecipeExportService(engine: engine, renderEngine: render, renderer: render, sessions: sessions,
                                           target: ExportTarget(configuration: configuration, sessions: sessions))
-        return ExportStack(sessions: sessions, service: service)
+        return ExportStack(sessions: sessions, service: service,
+                           luts: LUTLibrary(configuration: configuration, sessions: sessions))
     }
 }
 
@@ -33,6 +38,9 @@ nonisolated struct ExportStack: Sendable {
 /// - Export is closed while a photo is loading, and a photo cannot start
 ///   loading while an export runs: the host drops the previous photo's copy
 ///   and session as soon as the next one opens (R26-002).
+/// - The app stays in front while exporting (no background GPU on a free
+///   team): the screen does not lock; leaving HyperDR cancels the run, except
+///   for publishing and delivering, which finish in a background task.
 /// - Cancelling the run cancels the service's task. Cancelling the system
 ///   save sheet only cancels that delivery: the verified version stays, and
 ///   can be saved or shared again.
@@ -55,6 +63,8 @@ nonisolated struct ExportStack: Sendable {
         let key: String
         /// Developer-facing detail, shown small.
         let detail: String?
+        /// Stopped by leaving the app: "Export again" restarts with the edit.
+        var restartable = false
     }
 
     enum Phase {
@@ -77,7 +87,9 @@ nonisolated struct ExportStack: Sendable {
     var page = Page.destination
     var destination = ExportDestination.web
     var custom = CustomExportFormat(encoding: .isoGainMapJPEG, gamut: .p3, quality: 90)
-    private(set) var phase = Phase.choosing
+    private(set) var phase = Phase.choosing {
+        didSet { UIApplication.shared.isIdleTimerDisabled = isRunning }
+    }
     /// `fileExporter`'s binding.
     var presentingFileExporter = false
 
@@ -92,15 +104,22 @@ nonisolated struct ExportStack: Sendable {
     @ObservationIgnored private var current: Opening?
     /// The photo the editor is still opening.
     @ObservationIgnored private var pending: Opening?
-    @ObservationIgnored private var stack: Task<ExportStack, any Error>?
+    @ObservationIgnored private let stack: Task<ExportStack, any Error>
+    /// The library's LUTs, installed into the editor.
+    let luts: IOSLUTLibrary
+    /// The run the app's leaving cancelled.
+    @ObservationIgnored private var leftRun: Int?
+    @ObservationIgnored private var backgroundTask = UIBackgroundTaskIdentifier.invalid
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var run = 0
     /// The run is waiting for the session, before the service has it.
     @ObservationIgnored private var waitingForSource = false
-    @ObservationIgnored private let makeStack: @Sendable () async throws -> ExportStack
 
+    /// The stack is made at once: the LUT library is read at launch.
     init(makeStack: @escaping @Sendable () async throws -> ExportStack = { try await ExportStack.live() }) {
-        self.makeStack = makeStack
+        let stack = Task { try await makeStack() }
+        self.stack = stack
+        luts = IOSLUTLibrary { Task { try await stack.value.luts } }
     }
 
     var choice: ExportChoice {
@@ -160,14 +179,25 @@ nonisolated struct ExportStack: Sendable {
     /// that exists on iOS now, and a plan without blockers. The session may
     /// still be hashing; the run waits for it.
     func canStart(_ plan: ExportPlan?, _ editor: RecipeEditor) -> Bool {
-        guard isSettled(editor), let plan, plan.isExecutable else { return false }
+        guard isSettled(editor), luts.missingLook(editor) == nil, let plan, plan.isExecutable else { return false }
         return !(page == .destination && destination == .photos)
     }
 
     /// "Custom format…": the destination's encoding, gamut and quality carried over.
     func useCustomFormat(from plan: ExportPlan?) {
         if let plan { custom = plan.customCarryingSettings }
+        normalizeGamut()
         page = .custom
+    }
+
+    /// A custom encoding; an SDR one offers sRGB and Display P3 only (F2).
+    func select(_ encoding: ExportEncoding) {
+        custom.encoding = encoding
+        normalizeGamut()
+    }
+
+    private func normalizeGamut() {
+        if custom.encoding.isSDR, custom.gamut == .rec2020 { custom.gamut = .p3 }
     }
 
     // MARK: - The photo's session
@@ -216,20 +246,14 @@ nonisolated struct ExportStack: Sendable {
         }
     }
 
-    private func exportStack() -> Task<ExportStack, any Error> {
-        if let stack { return stack }
-        let make = makeStack
-        let stack = Task { try await make() }
-        self.stack = stack
-        return stack
-    }
+    private func exportStack() -> Task<ExportStack, any Error> { stack }
 
     // MARK: - Running
 
     /// Freezes the edit now; the run then waits for the photo's session
     /// (the one opened with the photo, never a second hash) while preparing.
     func start(_ editor: RecipeEditor) {
-        guard !isRunning, isSettled(editor), let opening = current else { return }
+        guard !isRunning, isSettled(editor), luts.missingLook(editor) == nil, let opening = current else { return }
         editor.commitDrag()
         let capture: EditorExportCapture
         do { capture = try editor.exportCapture() } catch {
@@ -253,6 +277,12 @@ nonisolated struct ExportStack: Sendable {
                 let stack = try await stack.value
                 try Task.checkCancellation()
                 self?.sourceReady(run: run)
+                // The look's LUT goes from the library into the photo's
+                // session, where the service reads it.
+                if let look = capture.recipe.activeLook {
+                    do { _ = try await stack.luts.apply(try IOSLUTLibrary.libraryID(look.contentHash), to: opened.session) }
+                    catch { throw RecipeExportError.missingLUT }
+                }
                 let result = try await stack.service.export(
                     session: opened.session, snapshot: capture.snapshot(revision: opened.revision), request: request,
                     lut: capture.lut, destination: nil,
@@ -308,6 +338,7 @@ nonisolated struct ExportStack: Sendable {
     private func finished(_ finished: Finished, run: Int) {
         guard run == self.run else { return }
         task = nil
+        endBackgroundTask()
         phase = .finished(finished)
         // The web destination is "Save to Files…": the save sheet follows.
         if finished.result.resolved.selection == .destination(.web) { presentingFileExporter = true }
@@ -317,11 +348,46 @@ nonisolated struct ExportStack: Sendable {
         guard run == self.run else { return }
         task = nil
         waitingForSource = false
+        endBackgroundTask()
         if error is CancellationError || (error as? HyperDRError)?.code == "cancelled" {
-            phase = .choosing
+            phase = leftRun == run ? .failed(Self.stopped) : .choosing
             return
         }
         phase = .failed(Self.failure(error))
+    }
+
+    // MARK: - Leaving the app
+
+    static let stopped = Failure(key: "ios.export.stopped", detail: nil, restartable: true)
+
+    /// The app went to the background: publishing and delivering (the file
+    /// written and verified) finish in a background task; any other stage is
+    /// cancelled, and the sheet says so when the app is back.
+    func enteredBackground() {
+        guard case .running(let progress) = phase else { return }
+        if let stage = progress?.stage, stage == .publishing || stage == .delivering {
+            guard backgroundTask == .invalid else { return }
+            backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "HyperDR export") { [weak self] in
+                self?.endBackgroundTask()
+            }
+            return
+        }
+        leftRun = run
+        if waitingForSource {
+            task?.cancel()
+            run += 1
+            task = nil
+            waitingForSource = false
+            phase = .failed(Self.stopped)
+        } else {
+            task?.cancel()
+        }
+    }
+
+    private func endBackgroundTask() {
+        guard backgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundTask)
+        backgroundTask = .invalid
     }
 
     static func failure(_ error: any Error) -> Failure {

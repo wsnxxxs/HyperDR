@@ -29,7 +29,7 @@ struct FrameExportPlan {
     /// `choice` is the export's destination or format: Kit lays the card out
     /// around the photo at the size that choice writes it.
     static func make(settings: FrameSettings, facts: CaptureFacts, photoSize: PixelSize,
-                     choice: ExportChoice = .custom(ExportChoices().customFormat)) throws -> FrameExportPlan? {
+                     choice: ExportChoice = .custom(CustomExportFormat())) throws -> FrameExportPlan? {
         guard settings.isEnabled else { return nil }
         // Whether there is text does not depend on the layout the engine picks.
         let hasCaption = !settings.style.caption(settings, facts: facts).isEmpty

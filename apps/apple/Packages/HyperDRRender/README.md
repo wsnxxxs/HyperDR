@@ -357,8 +357,8 @@ current visibility/selection is separate. The lower-level
 that evaluate declaration conditions. `resolvedAutomatic` separately reports the
 actual edited auto output range as `hdr.range`.
 
-AI predictions are retained by `(sourceID, modelID)` until source family replacement
-or `clearCaches()`, so switching models does not replace another model's prediction.
+AI predictions use a four-entry LRU keyed by `(sourceID, modelID)`. Switching
+development families preserves these small grids; `clearCaches()` removes them.
 `ModelGainError.deviceUnavailable(String)` identifies absent Metal/Core ML compute
 devices. Missing/broken model resources remain `modelUnavailable`; inference failures
 remain `predictionFailed`. These are not labelled as hardware incompatibility.
@@ -374,3 +374,122 @@ resource-value caches cleared). Replacing the file cannot attach new analysis or
 AI input to an old source ID: a required reopen throws `RenderError.sourceChanged`.
 Already cached analysis and materialized pixels remain usable; after cache clear
 or transfer to another engine, the editor must reload a changed source.
+
+### Export handoff (P7-3b-R)
+
+`ExportTypes.swift` fixes the Kit/Fake boundary for the RenderEngine
+implementation and backend Fake. `ExportStripeRendering.renderExportStripes` receives a
+source, the frozen Recipe/LUT/model prediction, and `ExportRenderRequest`.
+It calls `prepare(ExportRenderReport)` once with the final metadata, then
+`consume(ExportStripe)` for each top-down band, and returns that same report.
+Both callbacks are synchronous and throwing; retain CPU arrays as needed, do not
+queue unbounded bands. A failed operation leaves partial bands to discard.
+RenderEngine conforms directly. It never writes files or calls an encoder.
+
+`photoSize` is the destination-limited photograph, before adding a frame.
+`FrameSnapshot` carries the final canvas and integral photo rectangle, linear-P3
+paper colour, shadow sigma/offset in final pixels, and optional straight-alpha
+Display-P3 caption PNG with its final rectangle. Compute layout and text in the
+caller, convert the paper's UI colour to linear P3, and freeze PNG bytes before
+starting. No UI objects cross this boundary.
+
+`ExportPairCapabilities` describes the selected format/depth: RGB gain, nonzero
+offsets, signed gain and Apple-style maximum-gain headroom constraints. It is
+not an encoder selection enum. C ABI 4 only supports P3 gain working space;
+unsupported workspaces require exact reconstruction/resplit, reported in
+`resplitReasons`. Destination gamut is an output conversion declaration:
+CPU base planes always remain **linear P3 RGB float32**, gain planes decoded
+**log2 float32** on the same canvas grid, for the C ABI to consume.
+`includesGain=false` is for SDR-only output; PQ/HLG still need gain to reconstruct
+HDR even though their file does not store an auxiliary map. `rows` is explicit
+(256 recommended); it bounds Render bands, not b-stage whole-plane accumulation.
+
+Kit owns durable Recipe/source/LUT/frame fingerprints, model waiting, memory
+admission, file output and reporting. These Render inputs contain no paths,
+PhotoKit assets, platform views, export history or screen headroom adaptation.
+
+
+The export implementation scans photo bands first to determine one global header
+(channel count, signed gain, transparency, HDR peak), then emits bands. This is
+bounded GPU readback with two render passes, not a file writer or full-source
+streaming. `prepare` follows the scan, before any pixel callback. Intermediate
+textures are recycled per band; b-stage Kit still owns whole-plane accumulation.
+Generated metadata uses the global maximum, never the first band's maximum.
+
+`ceilingStops` only narrows the resolved recipe range via the existing soft
+shoulder. A remaining overflow after ICC reconstruction uses the same shoulder;
+max-channel base is chosen **before** reducing gain. Unsupported RGB gains,
+offsets, signed gain, non-P3 working gamut, Adaptive headroom, and unequal framed
+offsets are reconstructed with ISO vector math and re-separated. Report reasons
+include `flattenTransparency` and `outputCeiling` as well as the six original
+capability reasons. The legacy black-alpha rule is retained (see codec's
+`internal/cicp.hpp`): composite after ISO reconstruction. Zero-offset simple
+pairs can retain their gain while their base is multiplied by alpha.
+
+Frame pixels use only linear-P3 paper, Gaussian print shadow and a decoded caption
+PNG. Text alpha blends in linear light (the planned GPU convention, unlike the
+old encoded-space text blend). Gain outside the photo rectangle is exactly zero;
+Kit must still pass presentation_frame for E5 quantization and, on gain-map output,
+frame_photo for E5 readback. Render does not quantize gain or alter its codebook.
+
+File-backed `RenderSource.id` is a SHA256-derived UUID over canonical path, file
+size/modification-date revision, decoder choice, lens correction and normalized
+engine-unit RAW values (including signed-zero normalization). Preview dimensions
+are omitted. Returning to the same settings, clearing pixel caches, or loading in
+another engine yields the same ID; a different revision yields a different ID.
+Only one development family's full/preview/analysis pixels are resident internally;
+small AI predictions survive a family switch for the last four source/model keys.
+
+
+### Lazy export sources (P7-3d-R)
+
+`await engine.openExportSource(url, options:) -> ExportSource` opens full-quality
+ImageIO/Core Image or CIRAWFilter graphs without creating a full-size Render
+RGBAf texture. It materializes a fixed 1024-long-side `analysisSource`, which is
+also the source to pass to `predictModelGain`. The source exposes stable `id`,
+`domain`, `nativeSize` and `rawSettings`. Keep security-scoped file access alive
+through export. File revision is checked when opening and before/after each ROI;
+a replaced source throws `sourceChanged`.
+
+`renderExportStripes(ExportSource, recipe:lut:modelGain:request:rows:prepare:consume:)`
+has the same report and callbacks as the materialized overload. Each scan/output
+band materializes its native-pixel source ROI with two sampling-support texels;
+Core Image requests upstream filter halos. Auxiliary gain is cropped on its own
+native grid, decoded before display resampling. Global pixel-space bilinear
+weights avoid the dimension-dependent rounding of hardware normalized samplers.
+Analysis remains fixed-scale, shared across bands. Export still scans once before
+emission to determine global metadata. No writer or package behavior changes.
+
+Opening clears engine-owned pixel caches, keeping the last four AI predictions.
+Use a separate export engine to keep editor preview caches warm. Render owns
+only analysis, band textures and bounded readback. This does **not** promise
+region-only codec I/O or bounded Apple internal caches: ImageIO may decode a full
+compressed image; CIRAWFilter/Core Image/Metal can retain full-frame workspaces.
+Kit's whole-plane accumulation also remains until incremental writing lands.
+
+Measured on the licensed 2768×1848 Sony RAW, separate fresh macOS test processes,
+full-size export, 256-row bands, discard-on-consume (no writer accumulation):
+
+| Measurement | Materialized source | Lazy source |
+| --- | ---: | ---: |
+| Physical footprint after open | 431,981,552 B | 250,823,640 B |
+| Kernel lifetime peak physical footprint | 636,322,992 B | 389,497,960 B |
+| Physical footprint after clearCaches | 165,708,952 B | 149,242,960 B |
+| Open + two-pass render time | 3.60 s | 3.19 s |
+
+`TASK_VM_INFO` measures physical footprint, including unified GPU allocations;
+its lifetime peak includes transient peaks between callbacks. Lazy peak is 38.8%
+lower, but remains much larger than its ~11.5 MB full-width source band and
+~11.2 MB analysis image. These observations establish internal framework/cache
+cost; they do not isolate CIRAWFilter bytes or establish safety for 61MP/iPhone.
+Repeat explicitly with `HYPERDR_EXPORT_MEMORY_PROBE=full` or `stream` and
+`swift test --filter ExportSourceTests.rawMemoryProbe`, one fresh process each.
+The ordinary suite skips this measurement. Functional tests compare oriented
+raster, authored gain pairs and RAW ROI/resized exports against whole-source
+rendering within one normalized 10-bit code; gain uses the 0–4-stop code range.
+Export reports distinguish the rendered `sourceProvenance` from final
+`provenance`. `rangeBeforeCeiling` / `rangeAfterCeiling` are resolved stops;
+`ceilingApplied` says the output ceiling narrowed that range. This upstream H3
+adjustment does not require a resplit and is reported even when `resplitReasons`
+is empty. A later output-boundary conversion still records `.outputCeiling`
+among its actual resplit reasons.

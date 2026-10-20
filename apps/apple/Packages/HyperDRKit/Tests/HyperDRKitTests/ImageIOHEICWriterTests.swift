@@ -8,6 +8,24 @@ import Testing
 @testable import HyperDRKit
 
 @Suite(.serialized) struct ImageIOHEICWriterTests {
+    @Test func nonSDRBaseHeadroomIsRejectedBeforeWriting() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("unsupported-\(UUID()).heic")
+        let base: [Float] = [0.3, 0.3, 0.3], gain: [Float] = [2]
+        do {
+            _ = try base.withUnsafeBufferPointer { b in try gain.withUnsafeBufferPointer { g in
+                try ImageIOHEICWriter.write(base: .init(samples: b, width: 1, height: 1, channels: 3),
+                    gain: .init(samples: g, width: 1, height: 1, channels: 1),
+                    metadata: .init(channelCount: 1, baseHeadroom: 0.5, alternateHeadroom: 3),
+                    to: file, quality: 90)
+            } }
+            Issue.record("Expected unsupported_format")
+        } catch let error as HyperDRError {
+            #expect(error.code == "unsupported_format")
+            #expect(error.message.contains("zero base headroom"))
+        }
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+    }
+
     @Test func manualRGBMetadataSurvivesBothReaders() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("heic-manual-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

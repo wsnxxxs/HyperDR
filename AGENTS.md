@@ -137,3 +137,12 @@ is removed; HEVC uses the calibrated quality route (tests/quality).
 
 Photos saving still waits for the user's Photos Lab result. Local quality and
 fuzz gates remain outside CI; do not add a hosted runner.
+
+Open, roughly in order (2026-10-21): P7-3c (destination and custom-format
+pages, iOS sheet, iOS LUT library); the rest of P7-3d (61MP iPhone
+measurement on a device, background host); P7-3e (saving back to the photo
+library, after Photos Lab); P3b-6 (five minutes of fuzzing per target, in the
+background); `.github/workflows/ci.yml` still calls the deleted
+`tests/capi/smoke.py` and `contract_test.py` (it runs only for `main`; replace
+those steps with `capi_package_test` / `capi_package_rows_test` before merging
+to `main`); the hands-on checks in `docs/design/user-acceptance.md`.

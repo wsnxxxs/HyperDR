@@ -366,3 +366,11 @@ remain `predictionFailed`. These are not labelled as hardware incompatibility.
 RAW preview `SourceOptions(recipe:resolution:)` sets CIRAWFilter.scaleFactor
 before requesting output; it never develops a full-size image first. `.full`
 remains the export policy.
+
+
+File-backed sources bind their size/modification-date revision at load. Lazy
+fixed-scale analysis validates that revision before and after decode (with URL
+resource-value caches cleared). Replacing the file cannot attach new analysis or
+AI input to an old source ID: a required reopen throws `RenderError.sourceChanged`.
+Already cached analysis and materialized pixels remain usable; after cache clear
+or transfer to another engine, the editor must reload a changed source.

@@ -17,6 +17,45 @@ private func close(_ a: [Float], _ b: [Float], tolerance: Float = 0.00001) {
 }
 
 @Suite(.serialized) struct RenderTests {
+    @Test func oldSourceCannotAnalyzeReplacementFile() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".tiff")
+        defer { try? FileManager.default.removeItem(at:url) }
+        func write(_ gray: UInt8, modified: Date) throws {
+            let bytes = Data([gray,gray,gray,255])
+            let provider = CGDataProvider(data:bytes as CFData)!
+            let cg = CGImage(width:1,height:1,bitsPerComponent:8,bitsPerPixel:32,bytesPerRow:4,
+                space:CGColorSpace(name:CGColorSpace.sRGB)!,
+                bitmapInfo:CGBitmapInfo(rawValue:CGImageAlphaInfo.last.rawValue),provider:provider,
+                decode:nil,shouldInterpolate:false,intent:.defaultIntent)!
+            let destination = CGImageDestinationCreateWithURL(url as CFURL,"public.tiff" as CFString,1,nil)!
+            CGImageDestinationAddImage(destination,cg,nil)
+            #expect(CGImageDestinationFinalize(destination))
+            try FileManager.default.setAttributes([.modificationDate:modified],ofItemAtPath:url.path)
+        }
+        try write(32,modified:Date(timeIntervalSince1970:1000))
+        let engine = try RenderEngine()
+        let old = try await engine.load(url)
+        let before = RenderEngine.readPixels(try await engine.render(old,recipe:Recipe(inputDomain:.sdr)))
+        #expect(before.gain == [0])
+        try write(240,modified:Date(timeIntervalSince1970:2000))
+        let new = try await engine.load(url)
+        #expect(new.id != old.id)
+        let current = try await engine.analysis(new)
+        #expect(current.peaks.x > 0.8)
+        // New-source analysis must not be silently reused under the old identity.
+        do { _ = try await engine.render(old,recipe:Recipe(inputDomain:.sdr)); Issue.record("Replaced source rendered") }
+        catch RenderError.sourceChanged {}
+        await engine.clearCaches()
+        do { _ = try await engine.sourceReport(old); Issue.record("Replaced source analyzed after cache clear") }
+        catch RenderError.sourceChanged {}
+        let other = try RenderEngine()
+        do { _ = try await other.analysis(old); Issue.record("Replaced source analyzed by another engine") }
+        catch RenderError.sourceChanged {}
+        // Already materialized pixels remain the original photo, independent of the URL.
+        let retained = RenderEngine.readPixels(try await engine.render(old,nodes:[IdentityNode()]))
+        #expect(retained.baseRGBA == before.baseRGBA)
+    }
+
     @Test func identityPreservesEDRNegativesAndAlpha() async throws {
         let engine = try RenderEngine()
         let values: [SIMD4<Float>] = [SIMD4(-0.1, 0.2, 2, 1), SIMD4(0.18, 0.18, 0.18, 1)]

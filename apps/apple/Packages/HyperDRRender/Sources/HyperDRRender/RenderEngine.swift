@@ -30,8 +30,7 @@ public actor RenderEngine {
 
     private struct SourceKey: Hashable {
         let url: URL
-        let size: Int?
-        let modified: Date?
+        let revision: SourceRevision
         var options: SourceOptions
     }
     private struct OutputKey: Equatable {
@@ -84,9 +83,8 @@ public actor RenderEngine {
     /// The caller owns any security scope needed to read this URL. No UI-thread I/O.
     public func load(_ url: URL, options: SourceOptions = SourceOptions()) throws -> RenderSource {
         try Task.checkCancellation()
-        let values = try url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
-        let key = SourceKey(url: url.standardizedFileURL, size: values.fileSize,
-                            modified: values.contentModificationDate, options: options)
+        let revision = try SourceRevision(url:url)
+        let key = SourceKey(url:url.standardizedFileURL,revision:revision,options:options)
         if let cached = sourceCache[key] { return cached }
         var familyKey = key
         familyKey.options.resolution = .full
@@ -95,7 +93,8 @@ public actor RenderEngine {
             sourceFamily = (familyKey,UUID())
         }
         let opened = try Self.open(url, options: options)
-        let source = try materialize(opened,id:sourceFamily!.id,origin:(familyKey.url,familyKey.options))
+        let source = try materialize(opened,id:sourceFamily!.id,origin:(familyKey.url,familyKey.options,revision))
+        try revision.validate(url)
         // Retain full and the latest preview together, while bounding variant residency.
         sourceCache = sourceCache.filter { ($0.key.options.resolution == .full) != (options.resolution == .full) }
         sourceCache[key] = source
@@ -107,11 +106,13 @@ public actor RenderEngine {
     func fixedAnalysisSource(_ source: RenderSource) throws -> RenderSource {
         guard let origin = source.origin else { return source }
         if let cached = analysisSource, cached.id == source.id { return cached }
+        try origin.revision.validate(origin.url)
         var options = origin.options
         let scale = min(1,1024/Double(max(source.nativeSize.width,source.nativeSize.height)))
         options.resolution = .preview(maximumSize:PixelSize(width:max(1,Int((Double(source.nativeSize.width)*scale).rounded(.up))),
                                                           height:max(1,Int((Double(source.nativeSize.height)*scale).rounded(.up)))))
         let result = try materialize(Self.open(origin.url,options:options),id:source.id,origin:origin)
+        try origin.revision.validate(origin.url)
         analysisSource = result
         return result
     }
@@ -125,7 +126,7 @@ public actor RenderEngine {
     }
 
     private func materialize(_ opened: OpenedSource, id: UUID = UUID(),
-                             origin: (url: URL, options: SourceOptions)? = nil) throws -> RenderSource {
+                             origin: (url: URL, options: SourceOptions, revision: SourceRevision)? = nil) throws -> RenderSource {
         let texture = try rasterize(opened.image, space: opened.baseSpace)
         // Retain the native encoded gain. Display decodes gamma before resampling.
         let gainTexture = try opened.gain.map { try rasterize($0.image, space: nil,

@@ -7,6 +7,7 @@ import HyperDRRecipe
 public enum RenderError: Error, Sendable {
     case metalUnavailable, allocationFailed, invalidSize, invalidRegion
     case cannotOpenSource, cannotDecodeSource, missingGainMap, unsupportedGainColorSpace
+    case sourceChanged
     case gpu(String)
     case invalidAdjustment, invalidLUT(String), aiNotAvailable, duplicateHDRSplit
 }
@@ -127,6 +128,22 @@ public struct RenderPlanes: @unchecked Sendable {
     }
 }
 
+/// File revision bound to the materialized pixels and any later analysis decode.
+struct SourceRevision: Hashable {
+    let size: Int?
+    let modified: Date?
+    init(url: URL) throws {
+        var url = url
+        url.removeAllCachedResourceValues()
+        let values = try url.resourceValues(forKeys:[.fileSizeKey,.contentModificationDateKey])
+        size = values.fileSize
+        modified = values.contentModificationDate
+    }
+    func validate(_ url: URL) throws {
+        guard try Self(url:url) == self else { throw RenderError.sourceChanged }
+    }
+}
+
 /// Immutable source assets. Full, latest-preview and fixed-analysis variants are
 /// retained for one asset/development family. Clients account for other retained sources.
 public struct RenderSource: @unchecked Sendable {
@@ -134,7 +151,7 @@ public struct RenderSource: @unchecked Sendable {
     /// A decoded variant has its own GPU cache identity; source/model identity is shared.
     let renderID: UUID
     /// Reopen at the fixed analysis scale, including when shared with another engine.
-    let origin: (url: URL, options: SourceOptions)?
+    let origin: (url: URL, options: SourceOptions, revision: SourceRevision)?
     public let domain: InputDomain
     public let size: PixelSize
     public let nativeSize: PixelSize

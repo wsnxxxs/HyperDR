@@ -25,7 +25,8 @@ private struct StripeFake: ExportStripeRendering {
         let size = request.canvasSize
         let report = ExportRenderReport(canvasSize: size,
             gain: channels == 0 ? nil : metadata ?? .init(channelCount: channels, alternateHeadroom: 2),
-            sourceProvenance: .split, provenance: .split, resplitReasons: [], resolvedAutomatic: ["hdr.range": 2],
+            sourceProvenance: .split, provenance: .split, resplitReasons: [],
+            rangeBeforeCeiling: gainScale, rangeAfterCeiling: gainScale, resolvedAutomatic: ["hdr.range": 2],
             presentationFrame: request.frame != nil, framePhoto: request.frame?.photo)
         try prepare(report)
         for y in stride(from: 0, to: size.height, by: rows) {
@@ -362,6 +363,8 @@ private struct RecipeExportEnvironment {
                 snapshot: env.snapshot(recipe: recipe, modelID: "test-v1"), request: request)
             #expect(ready.withLock { $0 })
             #expect(abs((result.resolved.ceilingStops ?? 0) - 2) < 0.01)
+            #expect(abs((result.resolved.rangeBeforeCeiling ?? 0) - 2) < 0.01)
+            #expect(result.resolved.rangeBeforeCeiling == result.resolved.rangeAfterCeiling)
             #expect(abs((result.resolved.resolvedAutomatic["hdr.range"] ?? 0) - 2) < 0.01)
             #expect((result.resolved.gain?.alternateHeadroom ?? 0) > 1.9)
             #expect(!result.resolved.resplitReasons.contains("outputCeiling"))
@@ -372,6 +375,8 @@ private struct RecipeExportEnvironment {
         let limited = try await service.export(session: env.session.id,
             snapshot: env.snapshot(recipe: recipe, modelID: "test-v1"), request: social)
         #expect(limited.resolved.ceilingStops == 2)
+        #expect(abs((limited.resolved.rangeBeforeCeiling ?? 0) - 3) < 0.01)
+        #expect(limited.resolved.rangeAfterCeiling == 2)
         #expect(limited.resolved.resplitReasons.contains("outputCeiling"))
         recipe.setValue(.number(1), for: "hdr.range")
         let manual = try await service.export(session: env.session.id,

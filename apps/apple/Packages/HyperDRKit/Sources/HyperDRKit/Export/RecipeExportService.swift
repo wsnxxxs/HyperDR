@@ -176,6 +176,8 @@ public actor RecipeExportService: RecipeExportServicing {
             guard finalReport.canvasSize == report.canvasSize, finalReport.gain == report.gain,
                   finalReport.sourceProvenance == report.sourceProvenance,
                   finalReport.provenance == report.provenance, finalReport.resplitReasons == report.resplitReasons,
+                  finalReport.rangeBeforeCeiling == report.rangeBeforeCeiling,
+                  finalReport.rangeAfterCeiling == report.rangeAfterCeiling,
                   finalReport.resolvedAutomatic == report.resolvedAutomatic,
                   finalReport.presentationFrame == report.presentationFrame, finalReport.framePhoto == report.framePhoto else {
                 throw RecipeExportError.invalidStripes
@@ -230,14 +232,10 @@ public actor RecipeExportService: RecipeExportServicing {
             let system = try ExportVerification.system(file, plan: plan, gainMetadata: report.gain)
             try Task.checkCancellation()
             try validateRevision(try await sessions.session(session), snapshot: snapshot)
-            // Render can apply the destination shoulder while building its
-            // edited authored pair, before its final capability scan. Record
-            // the planner's output constraint even when that scan needs no
-            // further resplit; do not change the actual Render provenance.
+            // Range controls can narrow the pair before its adaptation scan.
+            // Render reports that change separately from a boundary resplit.
             var conversionReasons = report.resplitReasons
-            if let ceiling = plan.peakStops, actualRequest.edit.peakStops > ceiling {
-                conversionReasons.insert(.outputCeiling)
-            }
+            if report.ceilingApplied { conversionReasons.insert(.outputCeiling) }
             let resolved = ResolvedExportSnapshot(snapshot: snapshot, plan: plan,
                 resolvedAutomatic: report.resolvedAutomatic, resplitReasons: conversionReasons.map(\.rawValue),
                 report: report)

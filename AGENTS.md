@@ -49,7 +49,8 @@ this checkout. This file summarizes what they decide.
 | `apps/apple/HyperDR/Views` | SwiftUI views; they only talk to the editor models |
 | `apps/apple/HyperDR/macOS/Preview` | Metal EDR canvas: a compute pass rebuilds the frame, a second pass draws it at the canvas zoom and pan |
 | `apps/apple/Shared/Canvas` | Shared by the Mac and iOS targets: `CanvasTransform`, the EDR layer setup and the display pass (`EDRDisplayPass`, `EDRDisplay.metal`) |
-| `apps/apple/HyperDRiOS` | iOS/iPadOS target (P7-0 shell): PhotosPicker and Files (`fileImporter`) placed as in `p7-adjustments.md` §5.5, a `UIView` + `CAMetalLayer` canvas with `UIScreen` headroom, a temporary Core Image loader (`TemporaryHDRSource`) until HyperDRRender lands; its own string catalogue; `Adjustments/` holds the iPhone adjustment bar, its ruler and the layout switch (P7-2a). Links HyperDRDesign and HyperDRRecipe. Install steps: `apps/apple/README-iOS.md` |
+| `apps/apple/HyperDRiOS` | iOS/iPadOS target: PhotosPicker and Files (`fileImporter`) placed as in `p7-adjustments.md` §5.5, each photo copied into `tmp/Imported/` (`ImportedPhoto`) and edited through the shared `RecipeEditor` on HyperDRRender; a `UIView` + `CAMetalLayer` canvas drawn by the shared `DisplayCompositor` with `UIScreen` headroom; undo on the scene's undo manager; its own string catalogue; `Adjustments/` holds the iPhone adjustment bar, its ruler and the layout switch (P7-2a). Links HyperDRDesign, HyperDRRecipe and HyperDRRender. Install steps: `apps/apple/README-iOS.md` |
+| `apps/apple/Shared/Editor` | Shared by the Mac and iOS targets: `RecipeEditor` (recipe, undo steps, drag brackets, render pacing, AI state), `RenderSession` on HyperDRRender, `EditorRendering` and its fake. Foundation, Observation, HyperDRRecipe and HyperDRRender only; tested by `Packages/HyperDREditorCore`, whose sources link to this directory |
 
 ## Building and testing
 

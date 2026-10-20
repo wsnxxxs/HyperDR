@@ -180,7 +180,14 @@ HYPERDR_API void hyperdr_buffer_free(hyperdr_buffer*);
  *   "adaptive" writes ISO 21496-1's Apple form, which declares alternate
  *   headroom equal to the map's largest gain: a positive alternate_headroom is
  *   used as that declared capacity, and a gain above it is refused. Zero or
- *   negative means "declare the plane's own maximum".
+ *   negative means "declare the plane's own maximum". That form stores no
+ *   signed gain, so a negative gain (an HDR pixel below its SDR base) is
+ *   clipped to zero there, exactly as the converter's Adaptive exports do; the
+ *   number of clipped samples is reported.
+ *   The BT.2100 formats reconstruct the rendition at the declared headroom, so
+ *   HLG's ~2.3-stop ceiling is enforced exactly as it is for a convert, and a
+ *   canvas past JPEG's 65500 per side or libavif's decode limits fails with the
+ *   same export_dimension_limit code.
  * - Exif travels as a serialized block from the source file; the writer
  *   re-emits the safe portable subset (as an export always has). Orientation is
  *   written as 1, because the planes are expected upright. There is no ICC
@@ -203,6 +210,10 @@ typedef struct hyperdr_package_plane {
    * `row_bytes` when that is non-zero. */
   const void* data;
   size_t row_bytes;
+  /* Bytes `data` really holds. Zero means "the rows are complete"; a non-zero
+   * value must cover `row_bytes * height`, so an undersized buffer is refused
+   * instead of read past its end. */
+  size_t size;
   uint32_t width, height, channels;
   uint32_t format; /* HYPERDR_PLANE_F32 */
 } hyperdr_package_plane;

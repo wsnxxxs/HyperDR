@@ -1,5 +1,7 @@
 #include "hyperdr/app/package.hpp"
 
+#include "hyperdr/app/settings.hpp"
+#include "hyperdr/codec/avif_grid.hpp"
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/container/exif.hpp"
@@ -75,6 +77,8 @@ FloatImage copy_plane(const PackagePlane& plane, const char* what,
   const auto stride = plane.row_bytes ? plane.row_bytes : tight;
   if (stride < tight)
     throw std::invalid_argument(std::string(what) + " row_bytes is shorter than one row");
+  if (plane.size != 0 && plane.size < stride * plane.height)
+    throw std::invalid_argument(std::string(what) + " buffer is shorter than its rows");
   const auto* bytes = reinterpret_cast<const std::uint8_t*>(plane.data);
   parallel_for_rows(plane.height, [&](std::uint32_t y) {
     std::memcpy(image.pixels.data() + static_cast<std::size_t>(y) * plane.width * plane.channels,
@@ -88,9 +92,12 @@ FloatImage copy_plane(const PackagePlane& plane, const char* what,
   return image;
 }
 
+// Offsets are small (order 1e-5) and near-black reconstruction depends on them,
+// so keep the extra (2^24) precision the converter's own packager uses rather
+// than the default 1e-5 grid, which would round an authored offset to zero.
 Rational offset_rational(float value) {
   if (value == 1.0F / 64.0F) return {1, 64};
-  return rational_from_float(value);
+  return rational_from_float(value, 1U << 24);
 }
 
 void validate_offsets(const PackageGain& gain, std::uint32_t channels) {
@@ -217,7 +224,11 @@ std::string package_image(const PackageRequest& request) {
   if (request.output.empty()) throw std::invalid_argument("the output path is required");
   if (request.quality < 0 || request.quality > 100)
     throw std::invalid_argument("quality must be in [0,100]");
-  if (request.encoding == OutputEncoding::Adaptive && request.depth != 8 && request.depth != 10)
+  // Only the Adaptive base selects a bit depth; convert rejects the others too
+  // rather than silently ignoring the setting.
+  if (request.encoding == OutputEncoding::Adaptive
+          ? (request.depth != 8 && request.depth != 10)
+          : request.depth != 8)
     throw std::invalid_argument("depth must be 8 or 10");
 
   const auto encoding = request.encoding;
@@ -244,10 +255,25 @@ std::string package_image(const PackageRequest& request) {
                               "\" is not supported; the base is Display P3 and no writer converts a grid");
   }
 
+  // Refuse a canvas the encoder (or the verifier) cannot open, before any
+  // pixels are encoded: a JPEG past 65500 per side has no representation, and
+  // libavif cannot decode a canvas past its own limits, so a file written there
+  // could never pass its own check.
+  if ((encoding == OutputEncoding::SdrJpeg || encoding == OutputEncoding::IsoGainMapJpeg) &&
+      (base.width > 65500 || base.height > 65500))
+    throw ExportDimensionLimit(base.width, base.height);
+  if (is_avif_encoding(encoding) && !avif_canvas_decodable(base.width, base.height))
+    throw ExportDimensionLimit::avif(base.width, base.height);
+
   check_cancelled();
   std::optional<QuantizedGain> gain;
-  if (request.gain != nullptr && (gain_map_output || bt2100_output))
+  if (request.gain != nullptr && (gain_map_output || bt2100_output)) {
     gain = quantize_gain(*request.gain, encoding == OutputEncoding::Adaptive);
+    // HLG's signal only carries about 2.3 stops above diffuse white; a pair
+    // that reaches higher would be compressed into that range while the file's
+    // metadata still claimed the higher headroom. Convert refuses it too.
+    validate_encoding_headroom(encoding, gain->alternate_headroom);
+  }
 
   PhotoMetadata photo;
   if (request.exif != nullptr && request.exif_size != 0) photo = read_exif(request.exif, request.exif_size).metadata;
@@ -318,8 +344,11 @@ std::string package_image(const PackageRequest& request) {
       .member("verification", request.verify ? verification_name(encoding) : "skipped")
       .begin_object("metadata")
       .member("exif", request.exif != nullptr && request.exif_size != 0)
-      .member("icc", is_sdr_encoding(encoding) && resolved_gamut(request) == ColorGamut::kSrgb
-                         ? "srgb" : "display-p3")
+      // The colour space the written samples are in: a BT.2100 rendition is
+      // Rec.2020 and carries no ICC profile of its own.
+      .member("icc", bt2100_output ? "rec2020"
+                         : is_sdr_encoding(encoding) && resolved_gamut(request) == ColorGamut::kSrgb
+                               ? "srgb" : "display-p3")
       .end_object();
   if (gain.has_value() && (gain_map_output || bt2100_output)) {
     writer.begin_object("gain").member("stored", gain_map_output)

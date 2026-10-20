@@ -132,13 +132,23 @@ cp "$repo/apps/apple/Packages/HyperDREngine/Modules/module.modulemap" "$out/head
 # second C++ graph here.
 combine_slice() {
   local slice="$1" work="$2"
-  python3 - "$work" "$out/$slice" "$(slice_link_platform "$slice")" "$(slice_closure_target "$slice")" <<'PY'
+  # The deployment target the slice was compiled for, so the combined object is
+  # stamped with the same minimum as its members instead of a copy of it.
+  local deployment
+  deployment="$(sed -n 's/^CMAKE_OSX_DEPLOYMENT_TARGET:[A-Z]*=\(.*\)$/\1/p' "$work/CMakeCache.txt" | head -1)"
+  deployment="${deployment:-26.0}"
+  python3 - "$work" "$out/$slice" "$(slice_link_platform "$slice")" \
+    "$(slice_closure_target "$slice")" "$deployment" <<'PY'
 import pathlib, shlex, subprocess, sys
-work, out, platform, target = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), sys.argv[3], sys.argv[4]
+work, out, platform, target, deployment = (pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]),
+                                           sys.argv[3], sys.argv[4], sys.argv[5])
 out.mkdir(parents=True, exist_ok=True)
 commands = subprocess.check_output(['ninja', '-C', str(work), '-t', 'commands', target], text=True)
-line = next(line for line in commands.splitlines()
-            if ' -o HyperDR ' in line or ' -o libhyperdr.dylib ' in line)
+line = next((line for line in commands.splitlines()
+             if ' -o HyperDR ' in line or ' -o libhyperdr.dylib ' in line), None)
+if line is None:
+    raise SystemExit(f'cannot find the {target} link line in {work}; '
+                     'the archive closure is read from it')
 tokens = shlex.split(line)
 archives = [work / 'libhyperdr.a']
 # Only archives are collected, so a dependency that became a dylib would be
@@ -164,7 +174,10 @@ def is_static_archive(path):
 # vcpkg builds libtiff as a static framework on iOS, so it appears as
 # `-framework tiff` beside `-F<lib>`, not as a .a. Pull the framework's binary
 # in when it really is an archive; SDK frameworks only ship an .tbd stub and are
-# left for the app's own link (the Swift package declares them).
+# left for the app's own link (the Swift package declares them). A framework
+# whose binary is missing or dynamic is left out here and shows up as an
+# undefined symbol when the app links, which is the honest failure: this script
+# carries static libraries only.
 search = []
 for index, token in enumerate(tokens):
     if token == '-F' and index + 1 < len(tokens):
@@ -182,8 +195,9 @@ for index, token in enumerate(tokens):
             break
 # CMake enables Release LTO. Materialize bitcode before packaging: Xcode's
 # xcframework scanner cannot infer an architecture from LLVM-only members.
-subprocess.run(['xcrun', 'ld', '-r', '-arch', 'arm64', '-platform_version', platform, '26.0', '26.0',
-                '-all_load', *map(str, archives), '-o', str(out / 'HyperDREngineCore.o')], check=True)
+subprocess.run(['xcrun', 'ld', '-r', '-arch', 'arm64', '-platform_version', platform,
+                deployment, deployment, '-all_load', *map(str, archives),
+                '-o', str(out / 'HyperDREngineCore.o')], check=True)
 subprocess.run(['xcrun', 'libtool', '-static', '-o', str(out / 'libHyperDREngineCore.a'),
                 str(out / 'HyperDREngineCore.o')], check=True)
 PY

@@ -51,6 +51,7 @@ static hyperdr_package_plane plane(const void* data, uint32_t channels) {
   memset(&value, 0, sizeof(value));
   value.data = data;
   value.row_bytes = (size_t)WIDTH * channels * sizeof(float);
+  value.size = value.row_bytes * HEIGHT;
   value.width = WIDTH;
   value.height = HEIGHT;
   value.channels = channels;
@@ -209,6 +210,42 @@ int main(void) {
   REQUIRE(hyperdr_package(engine, &write, &report, &error) != 0);
   REQUIRE(report == NULL && error != NULL);
   REQUIRE(contains(error->message, "output exists"));
+  hyperdr_error_free(error);
+  error = NULL;
+
+  /* HLG carries only about 2.3 stops above diffuse white, so a declared
+   * headroom past that is refused instead of being compressed behind metadata
+   * that still claims it. */
+  char hlg_path[512];
+  snprintf(hlg_path, sizeof(hlg_path), "%s/hlg.heic", directory);
+  hyperdr_package_gain tall = mono_gain();
+  tall.alternate_headroom = 3.5f;
+  hyperdr_package_request hlg = {0};
+  hlg.output_path = hlg_path;
+  hlg.format = "hlg";
+  hlg.sdr = &base;
+  hlg.gain = &tall;
+  REQUIRE(hyperdr_package(engine, &hlg, &report, &error) != 0);
+  REQUIRE(report == NULL && error != NULL);
+  REQUIRE(strcmp(error->code, "invalid_options") == 0);
+  REQUIRE(contains(error->message, "2.3"));
+  hyperdr_error_free(error);
+  error = NULL;
+  REQUIRE(access(hlg_path, F_OK) != 0);
+
+  /* A plane whose stated buffer is too short is refused rather than read past
+   * its end. */
+  hyperdr_package_plane truncated = plane(base_samples, 3);
+  truncated.size = 64;
+  hyperdr_package_request short_base = write;
+  short_base.output_path = hlg_path;
+  short_base.format = "sdr-jpeg";
+  short_base.gain = NULL;
+  short_base.sdr = &truncated;
+  REQUIRE(hyperdr_package(engine, &short_base, &report, &error) != 0);
+  REQUIRE(report == NULL && error != NULL);
+  REQUIRE(strcmp(error->code, "invalid_options") == 0);
+  REQUIRE(contains(error->message, "shorter than its rows"));
   hyperdr_error_free(error);
   error = NULL;
 

@@ -264,12 +264,14 @@ static int run_package(hyperdr_engine* engine, const char* root, Result* result)
   hyperdr_package_plane base = {0}, gain = {0};
   base.data = package_base;
   base.row_bytes = (size_t)PACKAGE_WIDTH * 3 * sizeof(float);
+  base.size = base.row_bytes * PACKAGE_HEIGHT;
   base.width = PACKAGE_WIDTH;
   base.height = PACKAGE_HEIGHT;
   base.channels = 3;
   base.format = HYPERDR_PLANE_F32;
   gain.data = package_gain;
   gain.row_bytes = (size_t)PACKAGE_WIDTH * sizeof(float);
+  gain.size = gain.row_bytes * PACKAGE_HEIGHT;
   gain.width = PACKAGE_WIDTH;
   gain.height = PACKAGE_HEIGHT;
   gain.channels = 1;

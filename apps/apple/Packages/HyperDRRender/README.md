@@ -1,22 +1,37 @@
 # HyperDRRender
 
 Shared macOS 26 / iOS 26 GPU processing, without AppKit, UIKit, C ABI or C++ interop.
-HyperDRRecipe owns parameter declarations. Render currently exposes temporary typed values
-in `RenderAdjustments` / `RAWAdjustments`, with the design's parameter IDs; Recipe integration
-can map to these without changing the shaders.
+HyperDRRecipe's `Adjustments` owns parameter declarations, defaults, ranges, units and typed
+visibility conditions. Render reads this catalogue; it declares no copies of HDR range or RAW
+lens correction. `RenderAdjustments(recipe:lut:)` and `SourceOptions(recipe:)` resolve Recipe v1
+into GPU/RAW values. Full-frame and stripe APIs also accept `recipe:` directly.
 
 ```swift
 let renderer = try RenderEngine()
+// For a restored recipe, pass SourceOptions(recipe:) when loading RAW.
 let source = try await renderer.load(url) // caller holds the security scope
-var edit = RenderAdjustments()
-edit.tone.exposure = 0.25
-// RAW can also select .capturedExpand; SDR defaults to expansion.
-let preview = try await renderer.render(source, adjustments: edit,
+var recipe = Recipe(inputDomain: source.domain)
+recipe.setValue(.number(0.25), for: "tone.exposure")
+let preview = try await renderer.render(source, recipe: recipe,
     size: PixelSize(width: 2560, height: 1707))
-try await renderer.renderStripes(source, adjustments: edit, rows: 256) { stripe in
+try await renderer.renderStripes(source, recipe: recipe, rows: 256) { stripe in
     // Consume textures or RenderEngine.readPixels(stripe), then release them.
 }
 ```
+
+Numeric conversion happens only in `ParameterDeclaration.engineValue`: percent and signed
+levels become 0…1 / −1…1; contrast becomes `1.6^(value/100)` (−100 → .625, 0 → 1, +100 → 1.6).
+EV/stops/kelvin and RAW tint stay unchanged. GPU kernels and DoubleReference consume resolved
+engine units; they do not repeat UI conversion. The direct `RenderAdjustments`/`AdjustmentNode`
+APIs use these engine units too. Nil range/start resolve auto using Recipe's
+`generatedRangeCeiling` and `automaticExpansionStart`; nil RAW amounts preserve Apple defaults.
+HDR source defaults come from Recipe's domain rules, including `builtIn` for HDR/dual.
+
+Resolve `recipe.look` by its content hash and pass the resulting `ColorLUT` as `lut:`. The hash
+is SHA-256 of the original .cube bytes; Render validates the match. A disabled/zero-strength LUT
+can remain unresolved. An active missing/mismatched LUT reports `invalidLUT`, avoiding silent
+look loss. Equal LUT contents share identity/cache keys even after reparsing. Security-scoped
+bookmark resolution stays with the caller.
 
 `RenderEngine` is an actor. Cancellation is checked around decode, GPU submission and stripes.
 System decode and submitted GPU work finish before cancellation is reported; cancelled results
@@ -72,7 +87,7 @@ Low-level node graphs allow at most one `SourceHDRSplitNode`; both full-frame an
 entry points reject duplicates with `RenderError.duplicateHDRSplit` before rendering.
 
 * Exposure is linear `2^EV`; positive SDR exposure uses an exponential shoulder above Y=.48.
-* Contrast maps signed control logarithmically to c=.6…1.6. Below .18 it uses AE-3's power.
+* Contrast receives Recipe's multiplier c=.625…1.6. Below .18 it uses AE-3's power.
   Above .18, t=(Y-.18)/.82 and `Y'=.18+.82*(t+(c-1)*t*(1-t)^2)`; black, gray and white are
   fixed, the derivative is c at gray and **1 at white**. Y≥1 is unchanged.
 * SDR highlights use a smooth .4…1 mask with fixed white. HDR highlights use
@@ -130,10 +145,10 @@ Set `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` and a private TMP
 licensed RAW fixtures with `python3 scripts/fetch_test_fixtures.py`, then run `swift test
 --package-path apps/apple/Packages/HyperDRRender`. Host Metal/codec access is required.
 
-Fourteen focused tests cover the source contracts and each point operation, CPU-double LUT/
+Fifteen focused tests cover the source contracts and each point operation, CPU-double LUT/
 spatial analysis/offset references, tone anchors/white derivative, HDR-base invariance, rolloff
 compensation, soft shoulders, fixed analysis reuse, resized stripes, repeated/new-context
-renders and Apple-default RAW development/overrides. Comparisons use SDR/PQ 10-bit code
+renders, Apple-default RAW development/overrides and the Recipe/default/unit/LUT boundary. Comparisons use SDR/PQ 10-bit code
 space (≤1 code) or tighter float checks for gain/metadata. Synthetic images and the licensed
 RAW fixture are used; no tests reference user photos.
 

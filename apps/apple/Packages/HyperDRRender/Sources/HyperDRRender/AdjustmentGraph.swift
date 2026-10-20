@@ -43,7 +43,7 @@ extension RenderEngine {
     }
 
     func lookupResources(_ lut: ColorLUT?) throws -> (texture: any MTLTexture, buffer: any MTLBuffer) {
-        let id = lut?.id ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        let id = lut?.id ?? ""
         if let cache = lutCache, cache.id == id { return (cache.texture, cache.buffer) }
         lutCache = nil
         let edge = lut?.is3D == true ? lut!.size : 2
@@ -76,7 +76,7 @@ extension RenderEngine {
         let domain: UInt32 = source.domain == .sdr ? 0 : source.domain == .hdr ? 1 : source.domain == .rawEDR ? 2 : 3
         return GraphUniform(tone0: SIMD4(t.exposure, t.contrast, t.highlights, t.shadows),
             tone1: SIMD4(t.blacks, c.warmth, c.tint, c.vibrance), color: SIMD4(c.saturation, lut == nil ? 0 : l.strength, range, h.strength),
-            hdr: SIMD4(h.expansionStart ?? 0.25, h.coverage, h.sdrRolloff, shoulder ? 1 : 0),
+            hdr: SIMD4(h.expansionStart ?? RenderParameter.expansionStart, h.coverage, h.sdrRolloff, shoulder ? 1 : 0),
             flags: SIMD4(domain, lut != nil && l.input.isSDR ? 1 : 0, lut != nil && !l.input.isSDR ? 1 : 0, h.enabled ? 1 : 0),
             lutInfo: SIMD4(UInt32(lut?.size ?? 2), lut?.is3D == false ? 0 : 1, l.input.rawValue, l.output.rawValue),
             lutMin: SIMD4(lut?.domainMinimum ?? .zero, 0), lutMax: SIMD4(lut?.domainMaximum ?? SIMD3(repeating: 1), 0),
@@ -87,11 +87,9 @@ extension RenderEngine {
     /// strength, range, enabled or rolloff does not invalidate upstream analysis.
     public func analysis(_ source: RenderSource, adjustments edit: RenderAdjustments = RenderAdjustments()) throws -> SpatialAnalysis {
         try Task.checkCancellation()
-        try edit.validate()
-        if source.domain != .rawEDR && edit.look.input == .sLog3 && !edit.look.isIdentity { throw RenderError.invalidAdjustment }
-        if source.domain == .rawEDR && (edit.color.warmth != 0 || edit.color.tint != 0) { throw RenderError.invalidAdjustment }
+        try edit.validate(domain:source.domain)
         let key = AnalysisKey(source: source.id, tone: edit.tone, color: edit.color, look: edit.look,
-                              start: edit.hdr.expansionStart ?? 0.25, coverage: edit.hdr.coverage)
+                              start: edit.hdr.expansionStart ?? RenderParameter.expansionStart, coverage: edit.hdr.coverage)
         if let cached = analysisCache, cached.key == key { return cached.result }
         analysisCache = nil
         let input = try workingInput(source)
@@ -138,14 +136,11 @@ extension RenderEngine {
     }
 
     func graphConfiguration(_ source: RenderSource, _ edit: RenderAdjustments, analysis: SpatialAnalysis) throws -> (range: Float, expand: Bool, shoulder: Bool) {
-        if source.domain == .rawEDR && (edit.color.warmth != 0 || edit.color.tint != 0) { throw RenderError.invalidAdjustment }
-        if source.domain == .sdr && [.captured, .capturedExpand].contains(edit.hdr.source) { throw RenderError.invalidAdjustment }
-        if source.domain != .sdr && edit.hdr.source == .expand { throw RenderError.invalidAdjustment }
-        let expand = source.domain == .sdr || (source.domain == .rawEDR && edit.hdr.source == .capturedExpand)
+        let expand = (edit.hdr.source ?? .defaultSource(for:source.domain)).expands
         let imported = source.domain == .hdr || source.domain == .dual
-        let captured = min(imported ? 4 : 3,
+        let captured = min(imported ? Float(Adjustments.declaration("hdr.range")!.range!.upperBound) : Float(Adjustments.generatedRangeCeiling),
             max(imported ? analysis.sourceHeadroom : 0, log2(max(1, analysis.peaks.x))))
-        let contentExpansion = 0.5 + 2.5 * DoubleReference.smoothStep(0.5, 1, Double(analysis.peaks.y))
+        let contentExpansion = 0.5 + (Adjustments.generatedRangeCeiling-0.5) * DoubleReference.smoothStep(0.5, 1, Double(analysis.peaks.y))
         let automatic = expand ? max(captured, Float(contentExpansion)) : captured
         let range = edit.hdr.range ?? automatic
         let requested = max(analysis.peaks.z, expand ? analysis.peaks.w * range / 3 : 0) * edit.hdr.strength
@@ -162,7 +157,7 @@ extension RenderEngine {
     public func render(_ source: RenderSource, adjustments edit: RenderAdjustments,
                        size: PixelSize? = nil) throws -> RenderPlanes {
         try Task.checkCancellation()
-        try edit.validate()
+        try edit.validate(domain:source.domain)
         let size = size ?? source.size
         try validate(size)
         let region = CGRect(x: 0, y: 0, width: size.width, height: size.height)
@@ -177,7 +172,7 @@ extension RenderEngine {
     public func renderStripes(_ source: RenderSource, adjustments edit: RenderAdjustments,
                               size: PixelSize? = nil, rows: Int = 256,
                               consume: @Sendable (RenderPlanes) throws -> Void) throws {
-        try edit.validate()
+        try edit.validate(domain:source.domain)
         let size = size ?? source.size
         try validate(size)
         guard rows > 0 else { throw RenderError.invalidSize }
@@ -249,7 +244,7 @@ extension RenderEngine {
         let working = try authorWorking(source)
         // Analysis only resolves content headroom; it never replaces the author's base.
         let analysis = try self.analysis(source)
-        let natural = min(4, max(analysis.sourceHeadroom, log2(max(1, analysis.peaks.x))))
+        let natural = min(Float(Adjustments.declaration("hdr.range")!.range!.upperBound), max(analysis.sourceHeadroom, log2(max(1, analysis.peaks.x))))
         let range = edit.hdr.range ?? natural
         let channels = working.metadata.source.isoChannels
         func vector(_ key: KeyPath<ISOGainChannel, Double>, fallback: Float) -> SIMD4<Float> {

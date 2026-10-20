@@ -159,16 +159,14 @@ public struct RAWDevelopment: Sendable {
 }
 
 public struct SourceOptions: Hashable, Sendable {
-    public static let parameters = [ParameterDeclaration(id: "develop.lensCorrection", group: .detail,
-        kind: .bool, default: .constant(.bool(true)), domains: [.rawEDR],
-        capability: "CIRAWFilter.isLensCorrectionSupported", cost: .redevelop)]
+    public static let parameters = AdjustmentIDs.raw.map { Adjustments.declaration($0)! }
     public enum Kind: String, Sendable { case automatic, imageIO, raw }
     public var kind: Kind
     public var lensCorrection: Bool
     public var raw = RAWAdjustments()
-    public init(kind: Kind = .automatic, lensCorrection: Bool = true, raw: RAWAdjustments = RAWAdjustments()) {
+    public init(kind: Kind = .automatic, lensCorrection: Bool? = nil, raw: RAWAdjustments = RAWAdjustments()) {
         self.kind = kind
-        self.lensCorrection = lensCorrection
+        self.lensCorrection = lensCorrection ?? RenderParameter.defaultBool("develop.lensCorrection")
         self.raw = raw
     }
 }

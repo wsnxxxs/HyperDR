@@ -76,7 +76,7 @@ public enum DoubleReference {
     }
 
     /// AE-3 native-c controls with the same C1 upper contrast segment as P7-1.
-    /// The editor's signed -100...100 contrast maps to c=0.6...1.6.
+    /// The editor's signed -100...100 contrast maps to c=0.625...1.6.
     public static func grade(_ source: RGB, exposure: Double = 0, contrast: Double = 1,
                              vibrance: Double = 0) -> RGB {
         var rgb = source * exp2(exposure)

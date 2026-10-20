@@ -14,7 +14,7 @@ public actor RenderEngine {
     let library: any MTLLibrary
     let pipelines: [String: any MTLComputePipelineState]
     var analysisCache: (key: AnalysisKey, result: SpatialAnalysis)?
-    var lutCache: (id: UUID, texture: any MTLTexture, buffer: any MTLBuffer)?
+    var lutCache: (id: String, texture: any MTLTexture, buffer: any MTLBuffer)?
     var authorCache: (id: UUID, base: any MTLTexture, hdr: any MTLTexture, metadata: ISOLogGainMetadata)?
     private var sourceCache: (key: SourceKey, source: RenderSource)?
     private var hdrCache: (id: UUID, texture: any MTLTexture)?

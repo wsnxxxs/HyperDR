@@ -6,8 +6,8 @@ extension DoubleReference {
         return t*t*(3-2*t)
     }
     public static func point(_ rgb: RGB, operation: AdjustmentOperation, value: Double, sdr: Bool = false) -> RGB {
-        if value == 0 { return rgb }
-        let y = luma(rgb), a = value/100
+        if operation == .contrast ? value == 1 : value == 0 { return rgb }
+        let y = luma(rgb), a = value
         func scale(_ target: Double) -> RGB { y > 1e-8 ? rgb*(target/y) : rgb }
         switch operation {
         case .exposure:
@@ -18,7 +18,7 @@ extension DoubleReference {
             return x
         case .contrast:
             if y >= 1 || y <= 0 { return rgb }
-            let c = exp((value >= 0 ? log(1.6) : -log(0.6))*a)
+            let c = value
             let target: Double
             if y <= 0.18 { target = 0.18*pow(y/0.18,c) }
             else {

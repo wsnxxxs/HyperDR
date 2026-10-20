@@ -1,9 +1,8 @@
 // Shared point operators, used by individual nodes and the fused full graph.
 float maximum(float3 x) { return max(x.r, max(x.g, x.b)); }
 float rawY(float3 x) { return dot(x, float3(.2289746f,.6917385f,.0792869f)); }
-float contrastY(float y, float signedValue) {
-    if (signedValue == 0 || y >= 1 || y <= 0) return y;
-    float c = exp((signedValue >= 0 ? log(1.6f) : -log(.6f)) * signedValue / 100.f);
+float contrastY(float y, float c) {
+    if (c == 1 || y >= 1 || y <= 0) return y;
     if (y <= .18f) return .18f * pow(y / .18f, c);
     // AE-3 anchors and gray-point slope, with a cubic upper segment whose
     // derivative is exactly one at white, matching the EDR identity segment.
@@ -11,8 +10,8 @@ float contrastY(float y, float signedValue) {
     return .18f + .82f * (t + (c-1) * t * (1-t) * (1-t));
 }
 float3 pointOp(float3 rgb, uint op, float amount, bool sdr) {
-    if (amount == 0) return rgb;
-    float y = lum(rgb), target = y, a = amount / 100.f;
+    if (op == 1 ? amount == 1 : amount == 0) return rgb;
+    float y = lum(rgb), target = y, a = amount;
     if (op == 0) {
         rgb *= exp2(amount);
         y = lum(rgb);

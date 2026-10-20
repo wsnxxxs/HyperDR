@@ -245,7 +245,12 @@ extension ExportMemoryEstimate {
             : input.canvas.width * 32
         let compressedCache = heic ? compressedHEICCache(pixels: input.canvas.pixels,
             bitDepth: input.baseBitDepth, quality: input.quality) : 0
-        let encode = resident + sourceBand(rows) + graph + readback + packageBand + codec + compressedCache
+        // Encoding retains one copy of the compressed sequences. During HEIF
+        // assembly their payloads are borrowed by Items; only the final output
+        // is additional. Slab/codec pictures have finished before assembly.
+        let rowResident = resident + sourceBand(rows) + graph + readback + packageBand
+        let encode = rowResident + codec + (heic ? compressedCache / 2 : 0)
+        let assembly = heic ? rowResident + 32 * 1024 * 1024 + compressedCache : encode
         let render = resident + sourceBand(scanRows) + scanGraph
         // Native verification releases input bands first and scans rows, or
         // decodes one 512×512 HEIC tile pair with bounded VT pictures. Keep the
@@ -258,13 +263,14 @@ extension ExportMemoryEstimate {
         // Keep decoder row/tile workspace beside fixed base/gain/float buffers.
         let systemVerify = verifierResident + nativeWorkspace + 256 * 256 * (gain ? 40 : 16)
         return .init(decode: resident, render: render, composite: render,
-                     packaging: encode, encode: encode, verify: max(nativeVerify, systemVerify),
+                     packaging: assembly, encode: encode, verify: max(nativeVerify, systemVerify),
                      nativeVerify: nativeVerify, systemVerify: systemVerify)
     }
 
     /// Upper envelope from 1MP random base + random gain native writer samples,
     /// not a fixed RGB byte count. Includes 20% rate variation, container slack,
-    /// and both retained encoded tiles and the assembled container. Smooth RAW
+    /// and both retained encoded tiles and the assembled container (Item payloads
+    /// borrow the sequence samples). Smooth RAW
     /// gain maps normally encode far below this envelope; do not assume that.
     static func compressedHEICCache(pixels: Int, bitDepth: Int, quality: Int) -> Int {
         let rates = bitDepth == 10 ? [20.533, 23.966, 25.671] : [17.405, 19.035, 19.640] // bits/pixel

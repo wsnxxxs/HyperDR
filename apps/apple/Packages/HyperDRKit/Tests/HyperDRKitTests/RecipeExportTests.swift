@@ -518,6 +518,19 @@ private struct RecipeExportEnvironment {
         #expect(await env.sessions.exports(for: env.session.id).isEmpty)
     }
 
+    @Test func sourceRevisionRefreshesCachedModificationTime() async throws {
+        let env = try await RecipeExportEnvironment(); defer { env.remove() }
+        // Prime the same URL resource cache before an mtime-only edit.
+        let cached = try #require(env.session.sourceURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+        let originalBytes = try Data(contentsOf: env.session.sourceURL)
+        let changed = cached.addingTimeInterval(60)
+        try FileManager.default.setAttributes([.modificationDate: changed], ofItemAtPath: env.session.sourceURL.path)
+        let revision = try RecipeSourceRevision(session: env.session)
+        #expect(revision.modificationTimeMilliseconds == Int64((changed.timeIntervalSince1970 * 1000).rounded()))
+        #expect(revision.sha256 == env.session.sha256)
+        #expect(try Data(contentsOf: env.session.sourceURL) == originalBytes)
+    }
+
     @Test func cancellationDiscardsPartialStripes() async throws {
         let env = try await RecipeExportEnvironment(); defer { env.remove() }
         let service = env.service(StripeFake(afterStripe: { throw CancellationError() }))

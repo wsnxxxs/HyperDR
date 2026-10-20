@@ -21,22 +21,36 @@ public enum AdjustmentControlStyle: Sendable {
 ///   the top.
 ///
 /// The recipe is the only state; `onEditingChanged` brackets drags for the
-/// host's undo and preview size, with the declaration being edited.
+/// host's undo and preview size, with the declaration being edited. A host
+/// that names its undo steps passes `onReset` and performs the resets itself
+/// ("Reset Light" rather than the name of the one control a reset changed);
+/// without it the resets write the binding.
 public struct AdjustmentInspector: View {
     @Binding private var recipe: Recipe
     private let panel: AdjustmentPanel
     private let style: AdjustmentControlStyle
     private let onEditingChanged: (ParameterDeclaration, Bool) -> Void
+    private let onReset: ((AdjustmentReset) -> Void)?
 
     @State private var expanded: Set<AdjustmentGroupID> = [.hdr, .light]
     @Environment(\.locale) private var locale
 
     public init(recipe: Binding<Recipe>, panel: AdjustmentPanel, style: AdjustmentControlStyle = .pointer,
-                onEditingChanged: @escaping (ParameterDeclaration, Bool) -> Void = { _, _ in }) {
+                onEditingChanged: @escaping (ParameterDeclaration, Bool) -> Void = { _, _ in },
+                onReset: ((AdjustmentReset) -> Void)? = nil) {
         _recipe = recipe
         self.panel = panel
         self.style = style
         self.onEditingChanged = onEditingChanged
+        self.onReset = onReset
+    }
+
+    private func reset(_ reset: AdjustmentReset) {
+        if let onReset { return onReset(reset) }
+        switch reset {
+        case .group(let group): panel.reset(group: group, in: &recipe)
+        case .all: panel.resetAll(in: &recipe)
+        }
     }
 
     public var body: some View {
@@ -44,7 +58,7 @@ public struct AdjustmentInspector: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Spacer()
-                Button { panel.resetAll(in: &recipe) } label: {
+                Button { reset(.all) } label: {
                     Text("design.adjust.resetAll", bundle: .module)
                 }
                 .buttonStyle(.plain)
@@ -80,7 +94,7 @@ public struct AdjustmentInspector: View {
         } accessory: {
             HStack(spacing: Space.s2) {
                 if state.isModified {
-                    Button { panel.reset(group: state.group, in: &recipe) } label: {
+                    Button { reset(.group(state.group)) } label: {
                         Image(systemName: "arrow.counterclockwise")
                             .frame(minWidth: style == .touch ? 44 : 20, minHeight: style == .touch ? 44 : 20)
                             .contentShape(.rect)

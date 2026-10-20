@@ -309,7 +309,10 @@ extension RenderEngine: ExportStripeRendering {
         guard let caption = frame.caption else { return nil }
         guard contains(caption.rect), let source = CGImageSourceCreateWithData(caption.png as CFData,nil),
               (CGImageSourceGetType(source) as String?) == "public.png",
-              let image = CIImage(data:caption.png), image.extent.width == Double(caption.rect.width),
+              // Decoded here, not by Core Image: rendering the lazily decoded
+              // `CIImage(data:)` faults inside Core Image's tiler on iOS.
+              let decoded = CGImageSourceCreateImageAtIndex(source,0,[kCGImageSourceShouldCacheImmediately:true] as CFDictionary),
+              case let image = CIImage(cgImage:decoded), image.extent.width == Double(caption.rect.width),
               image.extent.height == Double(caption.rect.height) else { throw RenderError.invalidAdjustment }
         let photo = CGRect(x:frame.photo.x,y:frame.photo.y,width:frame.photo.width,height:frame.photo.height)
         let band = CGRect(x:caption.rect.x,y:caption.rect.y,width:caption.rect.width,height:caption.rect.height)

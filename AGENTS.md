@@ -6,9 +6,20 @@ this checkout. This file summarizes what they decide.
 
 ## Decisions that are settled
 
-- Target macOS 26 on Apple Silicon (arm64) only. iPhone and iPad are postponed;
-  do not design for them. Windows stopped at commit `a43d46a` on `main`;
-  Android is out of scope.
+- HyperDR targets iPhone, iPad and Mac (user decision, 2026-10-21; this
+  replaces the earlier Mac-only scope). The Mac app stays native SwiftUI, not
+  Mac Catalyst, on Apple Silicon. Core packages (edit recipe, GPU render
+  graph, export planning) must not depend on AppKit or UIKit. Windows stopped
+  at commit `a43d46a` on `main`; Android is out of scope.
+- Direction approved on 2026-10-20 and 2026-10-21: image processing moves to a
+  GPU render graph (Core Image plus our own Metal kernels) shared by preview
+  and export; decoding moves to the system (ImageIO, `CIRAWFilter`); each
+  writer is chosen per format between ImageIO and our own code; re-rendering
+  the same settings must stay within one code value per pixel, and tests
+  compare with tolerances, not bytes. The app has no photo library of its own
+  and no Photos extension: it picks from the system photo library. The plan is
+  in `docs/architecture/gpu-pipeline.md` and `product-vision.md` (ignored by
+  Git); until it lands, the rules below describe the current code.
 - The app is SwiftUI (AppKit only where SwiftUI cannot do the job) with a
   `CAMetalLayer` EDR preview, a Swift service layer (`HyperDRKit`) and the C++
   engine. Swift reaches the engine only through the C ABI in

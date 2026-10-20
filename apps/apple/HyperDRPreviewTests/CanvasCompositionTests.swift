@@ -92,7 +92,7 @@ import XCTest
     }
 
     func testMaskWeightIsMagentaAtFileGainRegardlessOfScreenWeight() throws {
-        for weight: Float in [0,0.5,1] {
+        for weight: Float in [0,0.25,0.5,0.8,1] {
             let image = try pixels(base: 0.25, stops: 1, flags: 8, weight: weight, range: 2)
             let alpha: Float = 0.5 * CanvasOverlayStyle.maskOpacity
             let value: Float = 0.25 * exp2(weight)
@@ -603,16 +603,20 @@ extension CanvasCompositionTests {
 }
 
 extension CanvasCompositionTests {
-    /// A gain in another working space: base into it, gain and offsets there,
-    /// then back to P3, at every weight.
-    func testGainWorkingSpaceMatricesFollowTheISOFormula() throws {
+    /// A gain in Rec.2020: base into it, gain and offsets there, then back to
+    /// P3, matching the same formula on the CPU at endpoint and middle weights.
+    func testRec2020GainWorkingSpaceFollowsTheISOFormula() throws {
         let renderer = try makePreviewRenderer()
         let compositor = try DisplayCompositor(device:renderer.device,library:renderer.library)
-        let toGain = simd_float3x3(rows: [SIMD3(0.75,0.25,0), SIMD3(0.05,0.9,0.05), SIMD3(0,0.1,0.9)])
+        // Linear Display P3 → linear Rec.2020 (D65).
+        let toGain = simd_float3x3(rows: [SIMD3(0.753833,0.198597,0.047570), SIMD3(0.045744,0.941777,0.012479),
+                                          SIMD3(-0.001210,0.017602,0.983609)])
         var pair = try makeDisplayPair(renderer.device,base:[0.2,0.4,0.6],width:1,height:1,gain:[0.5,1,1.5],
             gainChannels:3,baseOffset:0.01,alternateOffset:0.02)
+        let identity = pair
         pair.toGain = toGain; pair.toP3 = toGain.inverse
-        for weight: Float in [0,0.5,1] {
+        XCTAssertFalse(pair.hasSameContent(as: identity), "new matrices on the same textures must rebuild the cache")
+        for weight: Float in [0,0.25,0.5,0.8,1] {
             let command = try XCTUnwrap(renderer.queue.makeCommandBuffer())
             let texture = try compositor.makeTestTexture(pair, weight: weight, command: command)
             let out = try target(renderer.device,width:1,height:1)

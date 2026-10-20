@@ -55,16 +55,20 @@ public struct ExportGainPair: Sendable, Hashable, Codable {
     public let offsetsAreEqual: Bool
     public let gainWorkingGamut: String
     public let hasSignedGain: Bool
+    /// ISO base headroom in log2 stops; the manual ImageIO writer requires SDR (zero).
+    public let baseHeadroom: Double
     public let headroomMatchesGainMaximum: Bool
 
     public init(provenance: Provenance, channels: Int = 1, offsetsAreZero: Bool = true,
                 offsetsAreEqual: Bool? = nil, gainWorkingGamut: String = "display-p3",
-                hasSignedGain: Bool = false, headroomMatchesGainMaximum: Bool = true) {
+                hasSignedGain: Bool = false, headroomMatchesGainMaximum: Bool = true,
+                baseHeadroom: Double = 0) {
         self.provenance = provenance
         self.channels = channels
         self.offsetsAreZero = offsetsAreZero
         self.offsetsAreEqual = offsetsAreEqual ?? offsetsAreZero
         self.gainWorkingGamut = gainWorkingGamut; self.hasSignedGain = hasSignedGain
+        self.baseHeadroom = baseHeadroom
         self.headroomMatchesGainMaximum = headroomMatchesGainMaximum
     }
 
@@ -315,6 +319,9 @@ public enum ExportPlanner {
 
         var preferred = preferredWriter(encoding: encoding, writesGainMap: writesGainMap,
                                         baseBitDepth: baseBitDepth)
+        if preferred.writer == .imageIO && writesGainMap && (request.pair?.baseHeadroom ?? 0) != 0 {
+            preferred = (.inHouse, .unsupportedCapability)
+        }
         if request.frame.isFramed && encoding == .adaptive && writesGainMap && baseBitDepth == 8 {
             preferred = (.inHouse, .frameGainProtection)
         }
@@ -423,7 +430,7 @@ public enum ExportPlanner {
         else if request.frame.isFramed && !pair.offsetsAreEqual { reason = .frameRequiresNeutralPair }
         else if pair.channels == 3 && !caps.supportsThreeChannelGain { reason = .writerCarriesOneChannel }
         else if pair.hasSignedGain && !caps.supportsSignedGain { reason = .writerCannotRepresentSignedGain }
-        else if caps.requiresGainMaximumHeadroom && !pair.headroomMatchesGainMaximum { reason = .writerHeadroomContract }
+        else if caps.requiresGainMaximumHeadroom && (!pair.headroomMatchesGainMaximum || pair.baseHeadroom != 0) { reason = .writerHeadroomContract }
         else { reason = nil }
         if let reason {
             return GainMapPlan(origin: .resplit, channels: 1, offsetsAreZero: true,

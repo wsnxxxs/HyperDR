@@ -89,7 +89,7 @@ import Synchronization
             "width": .number(16), "height": .number(12)]))
         let detail = try await PreviewTrace.$current.withValue(stale) { try await session.renderFrame(request) }
         let renderer = try makePreviewRenderer()
-        let compositor = try CanvasCompositor(device: renderer.device, queue: renderer.queue, library: renderer.library)
+        let compositor = try CanvasCompositor(device: renderer.device, library: renderer.library)
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba16Float, width: 16, height: 16, mipmapped: false)
         descriptor.usage = [.renderTarget, .shaderRead]
         let target = try XCTUnwrap(renderer.device.makeTexture(descriptor: descriptor))

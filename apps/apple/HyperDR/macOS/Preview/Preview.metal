@@ -15,7 +15,6 @@ struct ReconstructParams {
 };
 
 // Decode ISO gain directly: a clipped full rendition cannot recover it.
-// Shared by legacy reconstruction and the composition compute pass.
 float sampleLogGain(uint2 xy, device const float* gain, constant ReconstructParams& p) {
     // v2: one monochrome gain plane, bilinearly resampled and decoded.
     const float2 size = float2(p.gainWidth, p.gainHeight);
@@ -68,87 +67,29 @@ kernel void reconstructFrame32(device const float* base [[buffer(0)]],
 
 // Pass 2, drawing the intermediate into the drawable, is shared with the iOS
 // canvas: `previewDisplayVertex` / `previewDisplayFragment` in
-// Shared/Canvas/EDRDisplay.metal.
+// Shared/Canvas/EDRDisplay.metal. The composition canvas is shared too
+// (Shared/Canvas/Composition.metal); until the Mac editor renders through
+// HyperDRRender (P7-2b step 4), this kernel hands it the engine's planes.
 
-struct CompositionVertex {
-    float4 position [[position]];
-    float2 uv;
-};
-
-// Reconstruct all display weights at SOURCE resolution, before filtering.
-// The three slices are base, full HDR (overlay statistics), and weighted HDR.
-// A headroom-only update writes plane 2 without touching base or full HDR.
-kernel void reconstructComposition(device const float* base [[buffer(0)]],
-                                   device const float* gain [[buffer(1)]],
-                                   constant ReconstructParams& input [[buffer(2)]],
-                                   constant uint& firstSlice [[buffer(3)]],
-                                   constant uint& firstPlane [[buffer(4)]],
-                                   texture2d_array<float, access::write> out [[texture(0)]],
-                                   uint3 xy [[thread_position_in_grid]]) {
-    uint plane = firstPlane + xy.z;
-    if (xy.x >= input.width || xy.y >= input.height || plane >= 3) return;
-    uint i = xy.y * (input.baseRowBytes / 4) + xy.x * 3;
-    float3 sdr = float3(base[i], base[i+1], base[i+2]);
-    float3 value = sdr;
-    if (plane == 1) value = reconstructPixel(xy.xy, base, gain, input, 1.0);
-    else if (plane == 2) {
-        float weight = clamp(input.gainWeight, 0.0, 1.0);
-        if (input.gainChannels == 1) {
-            // Raw log gain, not an inverse of a clipped full rendition. Weight
-            // zero also applies both ISO offsets; clipping is the final step.
-            value = reconstructPixel(xy.xy, base, gain, input, weight);
-        } else {
-            float3 hdr = reconstructPixel(xy.xy, base, gain, input, 1.0);
-            // Preserve RGB/v1 reconstruction and explicit endpoint semantics.
-            if (weight >= 1) value = hdr;
-            else if (weight > 0) {
-                float3 ratio = max(float3(1e-6), (hdr + input.alternateOffset) / max(float3(1e-6), sdr + input.baseOffset));
-                value = max(float3(0), (sdr + input.baseOffset) * pow(ratio, weight) - input.alternateOffset);
-            }
+// Copies a frame's native planes into a display pair: the base as rgba, a v2
+// gain as its ISO codes (the compositor decodes them after resampling), and
+// v1's full-size HDR image as the alternate rendition.
+kernel void uploadPreviewFrame(device const float* base [[buffer(0)]],
+                               device const float* gain [[buffer(1)]],
+                               constant ReconstructParams& p [[buffer(2)]],
+                               texture2d<float, access::write> baseOut [[texture(0)]],
+                               texture2d<float, access::write> gainOut [[texture(1)]],
+                               uint2 xy [[thread_position_in_grid]]) {
+    if (xy.x < p.width && xy.y < p.height) {
+        const uint i = xy.y * (p.baseRowBytes / 4) + xy.x * 3;
+        const float3 sdr = float3(base[i], base[i + 1], base[i + 2]);
+        baseOut.write(float4(sdr, 1), xy);
+        if (p.gainChannels != 1) {
+            const uint j = xy.y * (p.gainRowBytes / 4) + xy.x * 3;
+            gainOut.write(float4(gain[j], gain[j + 1], gain[j + 2], 1), xy);
         }
     }
-    out.write(float4(value, 1), xy.xy, firstSlice + plane);
-}
-
-struct CompositionParams {
-    float4 rect;
-    float2 uvScale;
-    uint slice, flags;
-    float padding0, hdrRange, backingScale, padding1, padding2, padding;
-    float4 maskColor, highlightColor, shadowColor, stripe;
-};
-
-vertex CompositionVertex compositionVertex(uint index [[vertex_id]],
-                                        constant CompositionParams& p [[buffer(0)]]) {
-    const float2 corners[4] = {float2(0,0),float2(1,0),float2(0,1),float2(1,1)};
-    float2 c = corners[index];
-    CompositionVertex out;
-    out.position = float4(mix(p.rect.x,p.rect.z,c.x),mix(p.rect.y,p.rect.w,c.y),0,1);
-    out.uv = float2(c.x,1-c.y) * p.uvScale;
-    return out;
-}
-
-fragment float4 compositionFragment(CompositionVertex in [[stage_in]],
-                                      constant CompositionParams& p [[buffer(0)]],
-                                      texture2d_array<float> image [[texture(0)]]) {
-    constexpr sampler s(filter::linear, mip_filter::linear, address::clamp_to_edge);
-    float2 texel = 0.5 / float2(image.get_width(), image.get_height());
-    float2 uv = clamp(in.uv, texel, p.uvScale - texel);
-    float3 base = image.sample(s,uv,p.slice).rgb;
-    float3 hdr = image.sample(s,uv,p.slice+1).rgb;
-    // All spatial/mip filtering operates on already reconstructed linear light.
-    float3 value = (p.flags & 1) ? base : image.sample(s,uv,p.slice+2).rgb;
-    if (p.flags & 8) {
-        float3 Y = float3(0.2289746,0.6917385,0.0792869);
-        float stops = max(0.0,log2(max(dot(hdr,Y),1e-6) / max(dot(base,Y),1e-6)));
-        float w = p.hdrRange > 0 ? clamp(stops/p.hdrRange,0.0,1.0) : 0;
-        if (w > 0.01) value = mix(value,p.maskColor.rgb,w*p.maskColor.a);
+    if (p.gainChannels == 1 && xy.x < p.gainWidth && xy.y < p.gainHeight) {
+        gainOut.write(float4(gain[xy.y * (p.gainRowBytes / 4) + xy.x]), xy);
     }
-    // Screen-point coordinates: the period never grows with photo zoom.
-    bool stripe = fmod(dot(in.position.xy,p.stripe.zw),p.stripe.x) < p.stripe.y;
-    if (stripe && (p.flags & 2) && max(hdr.r,max(hdr.g,hdr.b)) >= max(1.0,exp2(p.hdrRange))*exp2(-0.01))
-        value = mix(value,p.highlightColor.rgb,p.highlightColor.a);
-    if (stripe && (p.flags & 4) && max(base.r,max(base.g,base.b)) < 0.5/255.0/12.92)
-        value = mix(value,p.shadowColor.rgb,p.shadowColor.a);
-    return float4(value,1);
 }

@@ -129,7 +129,7 @@ nonisolated final class PreviewRenderer: @unchecked Sendable {
     /// Intervals for A3's frame-time table: pass 1, waiting for a drawable,
     /// pass 2 encoding, present + commit, and each presenting command buffer
     /// from commit to GPU completion. Busy ticks are events.
-    static let signposter = OSSignposter(subsystem: "com.hyperdr.HyperDR", category: "Canvas")
+    static let signposter = DisplayCompositor.signposter
     /// One id per renderer: the main canvas and the frame sheet's canvas run
     /// at once, and their intervals must not pair with each other's.
     let signpostID = PreviewRenderer.signposter.makeSignpostID()
@@ -412,7 +412,7 @@ nonisolated final class PreviewRenderer: @unchecked Sendable {
     func draw(in layer: CAMetalLayer, composition: CanvasComposition, transform: CanvasTransform) throws -> Bool {
         guard layer.drawableSize.width > 0, layer.drawableSize.height > 0 else { return true }
         guard let drawable = acquireDrawable(layer), let command = makePresentingCommand() else { return false }
-        if compositor == nil { compositor = try CanvasCompositor(device: device, queue: queue, library: library) }
+        if compositor == nil { compositor = try CanvasCompositor(device: device, library: library) }
         let interval = Self.signposter.beginInterval("Encode",id:signpostID)
         defer { Self.signposter.endInterval("Encode",interval) }
         try compositor?.encode(composition, transform: transform, target: drawable.texture, command: command)

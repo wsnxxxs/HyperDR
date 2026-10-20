@@ -105,28 +105,26 @@ extension CompositionPerformanceTests {
     func testHeadroomReconstructionCost() async throws {
         let renderer = try makePreviewRenderer()
         try await Task.detached {
-            let compositor = try CanvasCompositor(device:renderer.device,queue:renderer.queue,library:renderer.library)
+            let compositor = try DisplayCompositor(device:renderer.device,library:renderer.library)
             let width=2048,height=2048,wholeHeight=1365
-            let base=try XCTUnwrap(renderer.device.makeBuffer(length:width*height*12))
-            let gain=try XCTUnwrap(renderer.device.makeBuffer(length:width*height*4))
-            let b=base.contents().bindMemory(to:Float.self,capacity:width*height*3)
-            let g=gain.contents().bindMemory(to:Float.self,capacity:width*height)
-            for i in 0..<width*height {
-                b[i*3]=0.1;b[i*3+1]=0.3;b[i*3+2]=0.5;g[i]=Float(i%127)/126
-            }
-            func planes(_ height:Int) -> FramePlanes {
-                FramePlanes(base:base,baseRowBytes:width*12,gain:gain,gainRowBytes:width*4,
-                    gainChannels:1,width:width,height:height,gainWidth:width,gainHeight:height,gainMin:-1,gainMax:4)
+            func planes(_ height:Int) throws -> DisplayPair {
+                var base=[Float](repeating:1,count:width*height*4), gain=[Float](repeating:0,count:width*height)
+                for i in 0..<width*height {
+                    base[i*4]=0.1;base[i*4+1]=0.3;base[i*4+2]=0.5;gain[i]=Float(i%127)/126
+                }
+                return DisplayPair(base:try PreviewRenderer.texture(device:renderer.device,width:width,height:height,values:base),
+                    gain:try PreviewRenderer.texture(device:renderer.device,width:width,height:height,values:gain,monochrome:true),
+                    coding:.isoCode(minimum:-1,maximum:4,gamma:1),alternateHeadroom:4)
             }
             let setup=try XCTUnwrap(renderer.queue.makeCommandBuffer())
-            let whole=planes(wholeHeight),detail=planes(height)
+            let whole=try planes(wholeHeight),detail=try planes(height)
             let first=try compositor.makeTestTexture(whole,mipmapped:true,command:setup)
             let second=try compositor.makeTestTexture(whole,mipmapped:true,command:setup)
             let descriptor=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.rgba16Float,width:width,height:height,mipmapped:false)
             descriptor.textureType = .type2DArray;descriptor.arrayLength=6;descriptor.storageMode = .private;descriptor.usage=[.shaderRead,.shaderWrite]
             let atlas=try XCTUnwrap(renderer.device.makeTexture(descriptor:descriptor))
-            try compositor.encode(detail,into:atlas,slice:0,command:setup)
-            try compositor.encode(detail,into:atlas,slice:3,command:setup)
+            try compositor.encode(detail,into:atlas,slice:0,weight:1,command:setup)
+            try compositor.encode(detail,into:atlas,slice:3,weight:1,command:setup)
             setup.commit();await setup.completed();XCTAssertNil(setup.error)
             let outputDescriptor=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.rgba16Float,width:1000,height:667,mipmapped:false)
             outputDescriptor.storageMode = .private;outputDescriptor.usage=[.renderTarget]

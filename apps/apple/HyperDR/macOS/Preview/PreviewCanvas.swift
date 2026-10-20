@@ -52,7 +52,7 @@ struct PreviewCanvas: NSViewRepresentable {
             model.receiveDisplay(DisplayState(screenName: snapshot.screen ?? "",
                 currentHeadroom: Double(snapshot.current),
                 potentialHeadroom: Double(snapshot.potential),
-                gainWeight: model.currentEditedFrame.map { GainWeight.value(headroom: HeadroomPolicy.configured.target(snapshot), metadata: $0.metadata) }.map(Double.init)))
+                gainWeight: model.currentEditedFrame.map { DisplayWeight.value(headroom: HeadroomPolicy.configured.target(snapshot), metadata: $0.metadata) }.map(Double.init)))
         }, onError: { [weak model] detail in model?.reportCanvasFailure(detail) })
         view.compositionProvider = { [weak model] in model?.canvasComposition }
         view.frameProvider = { [weak model] in model?.canvasFrame }

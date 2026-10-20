@@ -16,6 +16,8 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -120,6 +122,23 @@ struct DisplayCurveResult {
     const std::filesystem::path& reference,
     const std::filesystem::path& candidate,
     const std::vector<float>& display_headroom_stops);
+
+// Synchronous, repeatable native float rows. Calls are serialized on the
+// encoding thread; the reader must fill the complete span before returning.
+struct EncodingRows {
+  std::uint32_t width{}, height{}, channels{};
+  std::function<void(std::uint32_t y, std::span<float>)> read;
+};
+void write_sdr_jpeg_rows(const EncodingRows&, const PhotoMetadata&, int quality,
+                         ColorGamut, const std::filesystem::path&);
+void write_sdr_tiff_rows(const EncodingRows&, const PhotoMetadata&, ColorGamut,
+                         const std::filesystem::path&);
+void write_gain_map_jpeg_rows(const EncodingRows& base, const EncodingRows& codes,
+    const GainMapMetadata&, const PhotoMetadata&, int quality, bool frame,
+    const std::filesystem::path&);
+[[nodiscard]] std::vector<std::uint8_t> encode_heic_rows(const EncodingRows& base,
+    const EncodingRows& codes, const GainMapMetadata&, float headroom,
+    const PhotoMetadata&, OutputEncoding, int quality, int depth, HevcPreset);
 
 namespace testing {
 // Test seam for JPEG encoding: when set, every libjpeg progress callback calls

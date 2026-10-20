@@ -48,6 +48,8 @@ int boundary(hyperdr_error** error, Function function) noexcept {
     return 0;
   } catch (const hyperdr::Cancelled& exception) {
     set_error(error, "cancelled", exception.what());
+  } catch (const hyperdr::PackageCallbackFailed& exception) {
+    set_error(error, "callback_failed", exception.what());
   } catch (const hyperdr::Busy& exception) {
     set_error(error, "busy", exception.what());
   } catch (const hyperdr::RawUnsupported& exception) {
@@ -291,8 +293,8 @@ int hyperdr_convert(hyperdr_engine* engine, const char* request, hyperdr_event_f
 }
 namespace {
 
-hyperdr::PackagePlane package_plane(const hyperdr_package_plane& plane, const char* what) {
-  if (plane.data == nullptr) throw std::invalid_argument(std::string(what) + " plane data is null");
+hyperdr::PackagePlane package_plane(const hyperdr_package_plane& plane, const char* what, bool streaming = false) {
+  if (!streaming && plane.data == nullptr) throw std::invalid_argument(std::string(what) + " plane data is null");
   if (plane.format != HYPERDR_PLANE_F32)
     throw std::invalid_argument(std::string(what) + " plane must use HYPERDR_PLANE_F32");
   return {static_cast<const float*>(plane.data), plane.row_bytes, plane.size, plane.width,
@@ -301,9 +303,9 @@ hyperdr::PackagePlane package_plane(const hyperdr_package_plane& plane, const ch
 
 }  // namespace
 
-int hyperdr_package(hyperdr_engine* engine, const hyperdr_package_request* configuration,
-    char** out, hyperdr_error** error) {
-  return json_result(out, error, [&] {
+namespace {
+hyperdr::PackageRequest package_request(const hyperdr_package_request* configuration,
+    hyperdr::PackagePlane& sdr,hyperdr::PackageGain& gain,bool streaming) {
     if (configuration == nullptr) throw std::invalid_argument("package request is required");
     hyperdr::PackageRequest request;
     if (configuration->output_path == nullptr) throw std::invalid_argument("package output path is required");
@@ -339,14 +341,12 @@ int hyperdr_package(hyperdr_engine* engine, const hyperdr_package_request* confi
         else throw std::invalid_argument("unknown package parameter: " + key);
       }
     }
-    hyperdr::PackagePlane sdr;
-    hyperdr::PackageGain gain;
     if (configuration->sdr) {
-      sdr = package_plane(*configuration->sdr, "SDR base");
+      sdr = package_plane(*configuration->sdr, "SDR base",streaming);
       request.sdr = &sdr;
     }
     if (configuration->gain) {
-      gain.plane = package_plane(configuration->gain->plane, "gain");
+      gain.plane = package_plane(configuration->gain->plane, "gain",streaming);
       for (unsigned c = 0; c < 3; ++c) {
         gain.base_offset[c] = configuration->gain->base_offset[c];
         gain.alternate_offset[c] = configuration->gain->alternate_offset[c];
@@ -365,7 +365,33 @@ int hyperdr_package(hyperdr_engine* engine, const hyperdr_package_request* confi
       const auto& rect = configuration->frame_photo;
       request.frame_photo = hyperdr::FrameRect{rect.x, rect.y, rect.width, rect.height};
     }
-    return required(engine).value.package(request, token(configuration->cancel));
+    return request;
+}
+}
+int hyperdr_package(hyperdr_engine* engine, const hyperdr_package_request* configuration,
+    char** out, hyperdr_error** error) {
+  return json_result(out,error,[&] {
+    hyperdr::PackagePlane sdr;hyperdr::PackageGain gain;
+    const auto request=package_request(configuration,sdr,gain,false);
+    return required(engine).value.package(request,token(configuration->cancel));
+  });
+}
+int hyperdr_package_rows_supported(const char* format) {
+  const auto encoding=hyperdr::hdr_encoding_from_name(format?format:"");
+  return encoding&&hyperdr::package_rows_supported(*encoding)?1:0;
+}
+int hyperdr_package_rows(hyperdr_engine* engine,const hyperdr_package_request* configuration,
+    uint32_t rows,hyperdr_package_row_callback callback,void* user,char** out,hyperdr_error** error) {
+  return json_result(out,error,[&] {
+    if(!callback)throw std::invalid_argument("package row callback is required");
+    hyperdr::PackagePlane sdr;hyperdr::PackageGain gain;
+    const auto request=package_request(configuration,sdr,gain,true);
+    return required(engine).value.package_rows(request,rows,[&](auto y,auto count,auto base,auto auxiliary) {
+      if(callback(user,y,count,base.data(),auxiliary.empty()?nullptr:auxiliary.data())) {
+        if(const auto cancel=token(configuration->cancel))cancel->check();
+        throw hyperdr::PackageCallbackFailed();
+      }
+    },token(configuration->cancel));
   });
 }
 

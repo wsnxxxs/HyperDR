@@ -71,6 +71,8 @@ class Engine {
   // Writes an already-rendered SDR base and gain plane (P7). Shares this
   // engine's execution configuration with `convert`, so tile workers and the
   // memory budget apply to the same encoders.
+  [[nodiscard]] std::string package_rows(const PackageRequest&, std::uint32_t rows,
+      const PackageRows&, const CancelToken* cancel = nullptr) const;
   [[nodiscard]] std::string package(const PackageRequest& request,
       const CancelToken* cancel = nullptr) const;
  private:

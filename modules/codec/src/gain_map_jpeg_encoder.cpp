@@ -19,6 +19,8 @@
 #include <cmath>
 #include <csetjmp>
 #include <cstdlib>
+#include <cstdio>
+#include <unistd.h>
 #include <cstring>
 #include <filesystem>
 #include <functional>
@@ -81,7 +83,8 @@ std::vector<std::uint8_t> compress_jpeg(const std::uint8_t* pixels, std::uint32_
                                         const std::vector<std::uint8_t>* exif_tiff = nullptr,
                                         const std::vector<std::uint8_t>* icc = nullptr,
                                         bool full_chroma = false,
-                                        const std::function<void(unsigned,std::span<std::uint8_t>)>& read_row = {}) {
+                                        const std::function<void(unsigned,std::span<std::uint8_t>)>& read_row = {},
+                                        FILE* output = nullptr) {
   if ((!pixels && !read_row) || width == 0 || height == 0) {
     throw std::invalid_argument("cannot encode an empty JPEG image");
   }
@@ -117,7 +120,8 @@ std::vector<std::uint8_t> compress_jpeg(const std::uint8_t* pixels, std::uint32_
   state->destination.pub.init_destination = vector_init;
   state->destination.pub.empty_output_buffer = vector_grow;
   state->destination.pub.term_destination = vector_term;
-  info.dest = &state->destination.pub;
+  if (output) jpeg_stdio_dest(&info, output);
+  else info.dest = &state->destination.pub;
   info.image_width = width;
   info.image_height = height;
   info.input_components = components;
@@ -131,7 +135,9 @@ std::vector<std::uint8_t> compress_jpeg(const std::uint8_t* pixels, std::uint32_
       info.comp_info[component].v_samp_factor = 1;
     }
   }
-  info.optimize_coding = TRUE;
+  // Streaming avoids libjpeg's whole-frame coefficient store. Huffman tables
+  // change, but DCT/quantization and decoded samples remain identical.
+  info.optimize_coding = output ? FALSE : TRUE;
   struct Progress {
     jpeg_progress_mgr pub{};
     bool finishing = false;
@@ -238,6 +244,69 @@ std::vector<std::uint8_t> encode_sdr_jpeg(const FloatImage& image,
   const auto icc = gamut == ColorGamut::kSrgb ? codec::srgb_profile() : codec::display_p3_profile();
   const auto exif=make_minimal_exif(metadata);
   return compress_jpeg(rgb.data(),image.width,image.height,3,JCS_RGB,quality,&exif,&icc);
+}
+
+namespace {
+struct FileCloser { void operator()(FILE* f) const { if(f) std::fclose(f); } };
+using FileHandle = std::unique_ptr<FILE,FileCloser>;
+FileHandle output_file(const std::filesystem::path& path) {
+  FileHandle f(std::fopen(path.c_str(),"wb"));
+  if(!f) throw std::runtime_error("cannot open streaming JPEG output");
+  return f;
+}
+FileHandle temporary_jpeg(const std::filesystem::path& output) {
+  // Use the writable export directory, including in an iOS sandbox; tmpfile()
+  // may choose a system directory outside the application's container.
+  auto name=(output.parent_path()/".hyperdr-jpeg-XXXXXX").native();
+  const int fd=::mkstemp(name.data());
+  if(fd<0)throw std::runtime_error("cannot stage streaming JPEG component");
+  ::unlink(name.c_str());
+  FileHandle file(::fdopen(fd,"w+b"));
+  if(!file) { ::close(fd);throw std::runtime_error("cannot open streaming JPEG component"); }
+  return file;
+}
+void base_rows_jpeg(const EncodingRows& source, const PhotoMetadata& photo, int quality,
+                    ColorGamut gamut, bool ordinary, FILE* out) {
+  check_jpeg_dimensions(source.width,source.height);
+  std::vector<float> linear(std::size_t(source.width)*3);
+  const auto row = [&](unsigned y,std::span<std::uint8_t> encoded) {
+    source.read(y,linear);
+    for(unsigned x=0;x<source.width;++x) {
+      const auto i=std::size_t(x)*3;
+      auto rgb=std::array<float,3>{linear[i],linear[i+1],linear[i+2]};
+      if(ordinary) {
+        // Match package_image's fit_sdr_to_srgb, then the SDR writer's fit.
+        if(gamut==ColorGamut::kSrgb) rgb=compress_linear_p3_to_srgb(rgb[0],rgb[1],rgb[2]);
+        rgb=fit_linear_p3_gamut(rgb[0],rgb[1],rgb[2],1,gamut==ColorGamut::kSrgb);
+        if(gamut==ColorGamut::kSrgb) rgb=linear_p3_to_rec709(rgb[0],rgb[1],rgb[2]);
+      }
+      for(unsigned c=0;c<3;++c) encoded[i+c]=std::uint8_t(quantize_dithered(srgb_oetf(rgb[c]),255,x,y,c));
+    }
+  };
+  const auto icc=gamut==ColorGamut::kSrgb?codec::srgb_profile():codec::display_p3_profile();
+  const auto exif=make_minimal_exif(photo);
+  (void)compress_jpeg(nullptr,source.width,source.height,3,JCS_RGB,quality,&exif,&icc,false,row,out);
+}
+}
+void write_sdr_jpeg_rows(const EncodingRows& source,const PhotoMetadata& photo,int quality,
+                         ColorGamut gamut,const std::filesystem::path& path) {
+  auto output=output_file(path);base_rows_jpeg(source,photo,quality,gamut,true,output.get());
+}
+void write_gain_map_jpeg_rows(const EncodingRows& base,const EncodingRows& gain,
+    const GainMapMetadata& metadata,const PhotoMetadata& photo,int quality,bool frame,
+    const std::filesystem::path& path) {
+  auto primary=temporary_jpeg(path), auxiliary=temporary_jpeg(path);
+  if(!primary||!auxiliary) throw std::runtime_error("cannot stage streaming JPEG components");
+  base_rows_jpeg(base,photo,quality,ColorGamut::kDisplayP3,false,primary.get());
+  std::vector<float> linear(std::size_t(gain.width)*gain.channels);
+  const auto row=[&](unsigned y,std::span<std::uint8_t> encoded) {
+    gain.read(y,linear);
+    for(std::size_t i=0;i<linear.size();++i) encoded[i]=std::uint8_t(std::lround(std::clamp(linear[i],0.f,1.f)*255));
+  };
+  (void)compress_jpeg(nullptr,gain.width,gain.height,gain.channels,
+      gain.channels==1?JCS_GRAYSCALE:JCS_RGB,frame?100:std::max(90,quality),nullptr,nullptr,true,row,auxiliary.get());
+  auto output=output_file(path);
+  write_gain_map_jpeg(primary.get(),auxiliary.get(),output.get(),metadata);
 }
 
 namespace {

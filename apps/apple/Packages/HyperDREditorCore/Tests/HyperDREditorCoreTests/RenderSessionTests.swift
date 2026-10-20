@@ -52,6 +52,17 @@ import UniformTypeIdentifiers
         let pending = try await session.render(EditorRenderRequest(sourceID: source.id, recipe: ai,
                                                                   size: PixelSize(width: 48, height: 32)))
         #expect(pending.modelGainPending)
+        // R1: with the prediction the same recipe renders with AI gain.
+        try await session.predictModelGain(modelID: "research-cnn-v1")
+        var withModel = EditorRenderRequest(sourceID: source.id, recipe: ai, size: PixelSize(width: 48, height: 32))
+        withModel.usesModelGain = true
+        #expect(try await session.render(withModel).modelGainPending == false)
+
+        // Automatic values come with whole renders; bypass is a render option.
+        #expect(preview.automaticValues["hdr.range"] != nil)
+        var bypassed = EditorRenderRequest(sourceID: source.id, recipe: recipe, size: PixelSize(width: 48, height: 32))
+        bypassed.bypassedGroups = [.light]
+        #expect(try await session.render(bypassed).request.recipe == recipe)
 
         let thumbnail = try await session.sdrThumbnail(preview, maximumSize: PixelSize(width: 24, height: 24))
         #expect(thumbnail.width == 24)

@@ -447,6 +447,14 @@ import Observation
         return try await renderer.render(request)
     }
 
+    /// Where `parameterID` acts in the current recipe (R6), at `size`.
+    func effectMask(parameterID: String, size: HyperDRRender.PixelSize, region: CGRect? = nil) async throws -> RenderMask {
+        guard let request = request(for: recipe, size: size, region: region, interactive: false) else {
+            throw EditorRenderingError.noSource
+        }
+        return try await renderer.effectMask(request, parameterID: parameterID)
+    }
+
     /// An SDR thumbnail of the shown frame, or of `frame`.
     func sdrThumbnail(of frame: EditorFrame? = nil,
                       maximumSize: HyperDRRender.PixelSize = HyperDRRender.PixelSize(width: 512, height: 512)) async throws -> CGImage {

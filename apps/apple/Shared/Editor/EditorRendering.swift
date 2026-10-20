@@ -26,6 +26,11 @@ nonisolated protocol EditorRendering: AnyObject, Sendable {
     /// full-size source.
     func render(_ request: EditorRenderRequest) async throws -> EditorFrame
 
+    /// Where the parameter `parameterID` acts (R6, `declaration.mask`), for the
+    /// request's recipe, size and region: R32Float in 0…1, top-down. Step 6
+    /// draws it; the fake throws `unsupported`.
+    func effectMask(_ request: EditorRenderRequest, parameterID: String) async throws -> RenderMask
+
     /// An SDR thumbnail (Display P3) of a frame's base: export summaries, frames.
     func sdrThumbnail(_ frame: EditorFrame, maximumSize: HyperDRRender.PixelSize) async throws -> CGImage
 
@@ -65,8 +70,11 @@ nonisolated struct EditorSource: Equatable, Sendable {
     let domain: HyperDRRecipe.InputDomain
     /// Full-size oriented pixels (RAW: the native size, whatever the preview develops).
     let pixelSize: HyperDRRender.PixelSize
-    /// `fromSource` defaults in the declared units: the RAW white balance,
-    /// Apple's noise reduction and sharpness (`AdjustmentContext.sourceValues`).
+    /// The photo's own values in the declared units (`SourceReport`): the RAW
+    /// white balance, Apple's noise reduction and sharpness, which the
+    /// `fromSource` defaults show (`AdjustmentContext.sourceValues`), and
+    /// facts such as the source's own headroom in `hdr.range` (not the
+    /// output range: that is `EditorFrame.automaticValues`).
     var sourceValues: [String: Double] = [:]
     /// Capability strings that hold (`ParameterDeclaration.capability`).
     var capabilities: Set<String> = []
@@ -99,11 +107,12 @@ nonisolated struct EditorFrame: @unchecked Sendable {
     let planes: RenderPlanes
     /// The same render normalized for the canvas (R3): linear P3 base, log2 gain.
     let display: DisplayGainPair
-    /// The recipe asks for AI gain but this frame has none yet: the
-    /// prediction is not ready, or (until R1) Render cannot apply it.
+    /// The recipe asks for AI gain but this frame has none yet, because the
+    /// prediction is not ready (`RenderPlanes.aiPending`).
     var modelGainPending = false
     /// What `auto` parameters resolved to, by id, in the declared units
-    /// (`AdjustmentContext.automaticValues`). Empty until Render reports them (R7).
+    /// (`AdjustmentContext.automaticValues`; `hdr.range` in stops). Whole-image
+    /// renders only; a region's is empty.
     var automaticValues: [String: Double] = [:]
 
     var size: HyperDRRender.PixelSize { request.size }

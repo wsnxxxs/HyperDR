@@ -1,5 +1,6 @@
 import Foundation
 import CoreImage
+import CoreML
 import ImageIO
 import Metal
 import Testing
@@ -37,6 +38,17 @@ private func close(_ a: [Float], _ b: [Float], tolerance: Float = 0.00001) {
         let old = try await engine.load(url)
         let before = RenderEngine.readPixels(try await engine.render(old,recipe:Recipe(inputDomain:.sdr)))
         #expect(before.gain == [0])
+        let provider = try CoreMLModelGainProvider(computeUnits:.cpuOnly,analysisLongSide:32)
+        let prediction = try await engine.predictModelGain(old,provider:provider)
+        let different = try await engine.load(url,options:SourceOptions(lensCorrection:false))
+        let restored = try await engine.load(url)
+        #expect(different.id != old.id && restored.id == old.id)
+        let reused = try await engine.predictModelGain(restored,provider:provider)
+        #expect(prediction.gain === reused.gain)
+        let transferred = try await RenderEngine().load(url)
+        #expect(transferred.id == old.id)
+        await engine.clearCaches()
+        #expect(try await engine.load(url).id == old.id)
         try write(240,modified:Date(timeIntervalSince1970:2000))
         let new = try await engine.load(url)
         #expect(new.id != old.id)

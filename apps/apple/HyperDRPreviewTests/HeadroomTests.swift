@@ -11,7 +11,7 @@ import HyperDREngine
         let session = try engine.openPreview(source: url)
         defer { session.close() }
         for stops in [0.0, 0.5, 1.0, 2.0, 4.0] {
-            let frame = try await session.renderFrame(EngineRequest(settings: ["preview_max_edge":.number(64), "headroom":.number(stops), "headroom_max":.number(4)]))
+            let frame = try await session.renderFrame(EngineRequest(settings: ["preview_max_edge":.number(64), "headroom":.number(stops)]))
             let m = frame.metadata
             XCTAssertEqual(Double(GainWeight.value(headroom: exp2(m.headroomStops), metadata: m)),
                            try XCTUnwrap(m.gainWeight), accuracy: 1e-6)

@@ -521,12 +521,8 @@ void check_native_model_base_routing() {
 
   const auto raw = flat_image(
       hyperdr::InputDomain::kSceneReferred, 0.25F, 1.0F);
-  hyperdr::GainMapOptions neutral;
-  neutral.exposure_bias_ev = 0.0F;
-  neutral.gain_strength = 1.0F;
-  neutral.look.contrast = 1.0F;
-  neutral.look.vibrance = 0.0F;
-  neutral.look.pop = 0.0F;
+  const auto neutral = hyperdr::native_model_development_options(
+      hyperdr::InputDomain::kSceneReferred);
   const auto expected = hyperdr::render_decoded_image(raw, neutral);
   const auto actual = hyperdr::render_native_model_base(raw);
   require(actual.base_linear.pixels == expected.base_linear.pixels &&

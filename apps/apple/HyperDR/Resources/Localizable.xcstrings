@@ -4613,13 +4613,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Highlight headroom and peak ceiling"
+            "value" : "Highlight headroom and peak ceiling; Auto lets the photo decide, up to 3 stops and the format’s limit"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "高光动态余量与峰值上限"
+            "value" : "高光动态余量与峰值上限；自动按照片决定，最多 3 档，并受格式限制"
           }
         }
       }

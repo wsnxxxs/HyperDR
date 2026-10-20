@@ -41,6 +41,11 @@ void require_decode_resolution(const ConvertOptions& options,
     const DecodedImage& image, bool clamp_srgb = false,
     const PhotographicAnalysis* analysis = nullptr);
 
+// The development options render_native_model_base uses; model-input reports
+// record exactly these, so a replay cannot differ from what the model saw.
+[[nodiscard]] GainMapOptions native_model_development_options(
+    InputDomain domain, bool clamp_srgb = false);
+
 // Stable provenance name used by model-input reports and conversion reports.
 [[nodiscard]] const char* native_model_development_kind(
     InputDomain domain) noexcept;

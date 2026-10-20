@@ -101,9 +101,8 @@ const char* native_model_development_kind(InputDomain domain) noexcept {
   return "none";
 }
 
-GainMapResult render_native_model_base(const DecodedImage& image,
-                                       bool clamp_srgb,
-                                       const PhotographicAnalysis* analysis) {
+GainMapOptions native_model_development_options(InputDomain domain,
+                                                bool clamp_srgb) {
   GainMapOptions development{};
   development.clamp_srgb = clamp_srgb;
   development.exposure_bias_ev = 0.0F;
@@ -116,14 +115,21 @@ GainMapResult render_native_model_base(const DecodedImage& image,
   development.look.headroom_max_stops = 4.0F;
   development.look.shoulder_start = 0.48F;
   development.look.diffuse_gain_floor = 0.35F;
-
   // make_display_referred_sdr_result only invokes photographic expansion when
   // mathematical gain is requested. Zero gain therefore selects its exact
   // linear Display-P3 passthrough result; the inferred gain replaces the zero
   // grid immediately afterwards.
-  if (image.describe_input().domain == InputDomain::kDisplayReferredSdr) {
+  if (domain == InputDomain::kDisplayReferredSdr) {
     development.gain_strength = 0.0F;
   }
+  return development;
+}
+
+GainMapResult render_native_model_base(const DecodedImage& image,
+                                       bool clamp_srgb,
+                                       const PhotographicAnalysis* analysis) {
+  const auto development = native_model_development_options(
+      image.describe_input().domain, clamp_srgb);
   return make_gain_map(image.linear_p3, development, image.capture,
       image.describe_input(), analysis);
 }

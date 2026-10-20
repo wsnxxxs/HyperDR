@@ -40,6 +40,13 @@ void prepare_conversion_resources(ConvertOptions& options) {
 }
 
 void apply_render_defaults(ConvertOptions& options) {
+  // A fixed headroom is a request for that many stops; only an explicit
+  // headroom-max below it is a contradiction.
+  if (!options.headroom_max_given && !options.gain.auto_headroom &&
+      std::isfinite(options.gain.headroom_stops)) {
+    options.gain.look.headroom_max_stops =
+        std::max(options.gain.look.headroom_max_stops, options.gain.headroom_stops);
+  }
   if (is_hlg_encoding(options.encoding)) {
     // HLG's range above diffuse white is fixed by the standard, so a higher
     // ceiling cannot be honoured. Lowering it silently is right for the

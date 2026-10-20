@@ -153,7 +153,10 @@ const std::array<Setting, 31>& table() {
        [](const ConvertOptions& o) { return json::Value::from_number(o.gain.look.pop); }},
       {"headroom_max", "--headroom-max", SettingKind::kNumber, 0.0, 4.0, {},
        "<0..4>", "Photographic auto-headroom ceiling, in stops", false, true, nullptr,
-       [](ConvertOptions& o, const json::Value& v) { o.gain.look.headroom_max_stops = as_float(v); },
+       [](ConvertOptions& o, const json::Value& v) {
+         o.gain.look.headroom_max_stops = as_float(v);
+         o.headroom_max_given = true;
+       },
        [](const ConvertOptions& o) { return json::Value::from_number(o.gain.look.headroom_max_stops); }},
       {"expansion_start", "--expansion-start", SettingKind::kNumber, 0.18, 0.75, {},
        "<0.18..0.75>", "Linear SDR level where HDR expansion begins", false, true, nullptr,

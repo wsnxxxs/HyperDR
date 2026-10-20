@@ -1,5 +1,5 @@
 {
-  "reason": "D1: re-recorded for the one set of defaults. E4: self-authored ISO-only JPEG, removal of API-3, rendered headroom, E4q: plain gain from the uncompressed renditions, content-chosen channels, 4:2:0 base, gain quality max(90, quality)",
+  "reason": "D1: re-recorded because the sample is an SDR PNG whose look and expansion follow the one set of defaults (contrast 1, vibrance 0, auto headroom up to 3, expansion start .25, area coverage .6). E4: self-authored ISO-only JPEG, removal of API-3, rendered headroom, E4q: plain gain from the uncompressed renditions, content-chosen channels, 4:2:0 base, gain quality max(90, quality)",
   "backend": "libjpeg-turbo + HyperDR ISO/MPF writer",
   "source": "png(sample.png, 128, 96) from contract_test.py",
   "encoding": "iso-gainmap-jpeg",

@@ -1369,6 +1369,42 @@ class EngineContract(unittest.TestCase):
                     self.assertEqual({k: v for k, v in report["settings"].items() if k != "depth"},
                                      {k: v for k, v in cli_report["settings"].items() if k != "depth"})
 
+    def test_a_fixed_headroom_raises_the_default_ceiling_unless_the_ceiling_is_given(self):
+        if not self.capabilities["codecs"]:
+            self.skipTest("requires codec-enabled build")
+        with tempfile.TemporaryDirectory(prefix="hyperdr-fixed-headroom-") as temporary:
+            root = Path(temporary)
+            source = root / "sample.png"
+            png(source, 64, 48)
+            def convert(name, *extra):
+                return subprocess.run([CLI, "convert", str(source), "--output", str(root / name),
+                    "--encoding", "pq", "--report", str(root / (name + ".json")), *extra], capture_output=True)
+            self.assertEqual(convert("fixed", "--headroom", "3.5").returncode, 0)
+            self.assertEqual(convert("given", "--headroom", "3.5", "--headroom-max", "4").returncode, 0)
+            refused = convert("contradiction", "--headroom", "3.5", "--headroom-max", "3")
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertIn(b"headroom", refused.stderr)
+
+    def test_the_model_input_report_records_the_development_the_model_saw(self):
+        # The recipe in the report is replayed for an external gain grid, so it must be
+        # the one render_native_model_base develops with, not the current defaults.
+        with tempfile.TemporaryDirectory(prefix="hyperdr-model-recipe-") as temporary:
+            root = Path(temporary)
+            source = root / "sample.png"
+            png(source, 64, 48)
+            subprocess.run([CLI, "model-input", str(source), "--output", str(root / "tensor.f32"),
+                            "--report", str(root / "report.json")], check=True, capture_output=True)
+            recipe = json.loads((root / "report.json").read_text())["development_recipe"]
+            self.assertEqual({k: recipe[k] for k in ("contrast", "vibrance", "pop", "exposure_bias_ev",
+                                                      "shoulder_start", "diffuse_gain_floor")},
+                             {"contrast": 1, "vibrance": 0, "pop": 0, "exposure_bias_ev": 0,
+                              "shoulder_start": .48, "diffuse_gain_floor": .35})
+            # Moving a default (the recipe is not a default) must not move the recipe.
+            subprocess.run([CLI, "model-input", str(source), "--output", str(root / "t2.f32"),
+                            "--report", str(root / "r2.json"), "--expansion-start", "0.5",
+                            "--area-coverage", "0.9"], check=True, capture_output=True)
+            self.assertEqual(json.loads((root / "r2.json").read_text())["development_recipe"], recipe)
+
     def test_normalized_decimal_exports_match_cli(self):
         if not self.capabilities["codecs"]:
             self.skipTest("requires codec-enabled build")

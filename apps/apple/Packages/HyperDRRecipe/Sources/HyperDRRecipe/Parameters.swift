@@ -35,12 +35,16 @@ public enum ParameterKind: String, Codable, CaseIterable, Sendable {
     case reference
 }
 
-/// One recipe value. Numbers, booleans and strings keep their JSON shape, so a recipe
-/// written by a newer build stays readable; `.none` is a deliberate "no reference".
+/// One recipe value: a small JSON tree, so a value this build does not understand
+/// (an object from a newer build) still survives a round trip. Numbers are held as
+/// `Double`, so integers above 2^53 lose precision; `.none` is a JSON null and also a
+/// deliberate "no reference".
 public enum ParameterValue: Equatable, Sendable {
     case number(Double)
     case bool(Bool)
     case string(String)
+    case array([ParameterValue])
+    case object([String: ParameterValue])
     case none
 
     public var numberValue: Double? {
@@ -57,9 +61,26 @@ public enum ParameterValue: Equatable, Sendable {
         if case .string(let value) = self { return value }
         return nil
     }
+
+    public var arrayValue: [ParameterValue]? {
+        if case .array(let value) = self { return value }
+        return nil
+    }
+
+    public var objectValue: [String: ParameterValue]? {
+        if case .object(let value) = self { return value }
+        return nil
+    }
 }
 
 extension ParameterValue: Codable {
+    private struct Key: CodingKey {
+        let stringValue: String
+        var intValue: Int? { nil }
+        init(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { nil }
+    }
+
     public init(from decoder: any Decoder) throws {
         let container = try decoder.singleValueContainer()
         if container.decodeNil() {
@@ -73,9 +94,13 @@ extension ParameterValue: Codable {
             self = .number(value)
         } else if let value = try? container.decode(String.self) {
             self = .string(value)
+        } else if let value = try? container.decode([ParameterValue].self) {
+            self = .array(value)
+        } else if let value = try? container.decode([String: ParameterValue].self) {
+            self = .object(value)
         } else {
             throw DecodingError.dataCorruptedError(
-                in: container, debugDescription: "Unsupported recipe value; expected number, bool, string or null")
+                in: container, debugDescription: "Unsupported recipe value")
         }
     }
 
@@ -85,6 +110,12 @@ extension ParameterValue: Codable {
         case .number(let value): try container.encode(value)
         case .bool(let value): try container.encode(value)
         case .string(let value): try container.encode(value)
+        case .array(let value): try container.encode(value)
+        case .object(let value):
+            var keyed = encoder.container(keyedBy: Key.self)
+            for (name, element) in value {
+                try keyed.encode(element, forKey: Key(stringValue: name))
+            }
         case .none: try container.encodeNil()
         }
     }
@@ -143,7 +174,8 @@ extension ParameterDefault: Codable {
     }
 }
 
-/// How the readout is written. Non-numeric kinds carry no format.
+/// How the readout is written. Non-numeric kinds carry no format. This is display
+/// only; the value a node receives is decided by `ParameterScale`.
 public enum ParameterFormat: String, Codable, CaseIterable, Sendable {
     /// Exposure in EV, `+0.30`.
     case ev
@@ -161,6 +193,19 @@ public enum ParameterFormat: String, Codable, CaseIterable, Sendable {
 /// Which end of the slider the fill grows from.
 public enum ParameterOrigin: String, Codable, CaseIterable, Sendable {
     case zero, lower
+}
+
+/// How a declared value reaches the node. Kept apart from `ParameterFormat` so that a
+/// readout unit never decides an engine unit: RAW `develop.tint` reads as a signed
+/// number and is passed through, while `tone.shadows` reads the same way and is a
+/// normalized level.
+public enum ParameterScale: String, Codable, CaseIterable, Sendable {
+    /// The node takes the declared unit: EV, stops, kelvin, a CIRAWFilter amount.
+    case direct
+    /// The node takes a normalized level: declared `60` becomes `0.6`.
+    case hundredth
+    /// The node takes a contrast multiplier: declared `v` becomes `1.6^(v/100)`.
+    case contrast
 }
 
 /// Which rendition a parameter changes (p7-adjustments §1).
@@ -276,6 +321,8 @@ public struct ParameterDeclaration: Codable, Equatable, Sendable {
     public let step: Double?
     public let `default`: ParameterDefault
     public let format: ParameterFormat?
+    /// How the node receives the value; `.direct` for non-numeric kinds.
+    public let scale: ParameterScale
     public let origin: ParameterOrigin
     public let domains: Set<InputDomain>
     /// Selectable values, in display order; empty unless `kind == .choice`.
@@ -298,7 +345,7 @@ public struct ParameterDeclaration: Codable, Equatable, Sendable {
     public init(id: String, group: ParameterGroup, kind: ParameterKind = .float,
                 range: ClosedRange<Double>? = nil, step: Double? = nil,
                 default: ParameterDefault, format: ParameterFormat? = nil,
-                origin: ParameterOrigin = .lower,
+                scale: ParameterScale = .direct, origin: ParameterOrigin = .lower,
                 domains: Set<InputDomain> = Set(InputDomain.allCases),
                 options: [ParameterOption] = [],
                 visibleWhen: ParameterCondition? = nil, capability: String? = nil,
@@ -311,6 +358,7 @@ public struct ParameterDeclaration: Codable, Equatable, Sendable {
         self.step = step
         self.default = `default`
         self.format = format
+        self.scale = scale
         self.origin = origin
         self.domains = domains
         self.options = options
@@ -345,29 +393,29 @@ public struct ParameterDeclaration: Codable, Equatable, Sendable {
 /// The value a render node consumes, derived from the value the recipe stores.
 ///
 /// The recipe and the inspector always use the units declared in p7-adjustments
-/// §2.3–§2.7 (`−100…+100`, `0…100%`, EV, stops, kelvin). Nodes want either the same
-/// unit or a normalized one, so the mapping is fixed here once instead of in each node:
+/// §2.3–§2.7 (`−100…+100`, `0…100%`, EV, stops, kelvin, CIRAWFilter amounts). Each
+/// declaration states its own `scale`, so the readout format never decides an engine
+/// unit:
 ///
-/// - `ev`, `stops`, `kelvin`, `integer`: unchanged.
-/// - `percent`: divided by 100 (a declared 60% is `0.6`; `hdr.strength` 100% is `1`).
-/// - `signed`: divided by 100 (`−100…+100` becomes `−1…+1`), except
-///   `tone.contrast`, which is a contrast multiplier.
-/// - `tone.contrast` (C1: the engine default is 1): `2^(value/100 · log2 1.6)`, i.e.
-///   `1.6^(value/100)`. 0 → 1, +100 → 1.6, −100 → 0.625; the curve itself stays with
-///   the renderer (T2). `C1` calls the default 1, the inspector calls it 0.
+/// - `.direct`: unchanged. EV, stops, kelvin, `develop.temperature`,
+///   `develop.tint` (−150…150 is CIRAWFilter's `neutralTint`).
+/// - `.hundredth`: divided by 100. Percent controls, and signed level controls such as
+///   `tone.shadows` or `color.saturation` (`−100…+100` → `−1…+1`).
+/// - `.contrast`: `2^(value/100 · log2 1.6)`, i.e. `1.6^(value/100)`; 0 → 1 (C1 calls
+///   the default 1, the inspector shows 0), +100 → 1.6, −100 → 0.625. The curve itself
+///   stays with the renderer (T2).
 extension ParameterDeclaration {
     /// `tone.contrast`'s multiplier at +100 (p7-adjustments §2.4 suggests `c ≈ 0.6…1.6`).
     public static let contrastMultiplierCeiling = 1.6
 
     public func engineValue(_ value: Double) -> Double {
-        switch format {
-        case .percent:
-            return value / 100
-        case .signed:
-            guard id == "tone.contrast" else { return value / 100 }
-            return pow(Self.contrastMultiplierCeiling, value / 100)
-        case .ev, .stops, .kelvin, .integer, .none:
+        switch scale {
+        case .direct:
             return value
+        case .hundredth:
+            return value / 100
+        case .contrast:
+            return Self.contrastMultiplier(for: value)
         }
     }
 

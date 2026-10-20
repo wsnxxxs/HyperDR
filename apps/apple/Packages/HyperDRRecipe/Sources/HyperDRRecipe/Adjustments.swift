@@ -47,8 +47,11 @@ public enum HDRSource: String, Codable, CaseIterable, Sendable {
 /// undo names, localization keys and the GPU nodes (product-vision principle 4,
 /// p7-adjustments §2.2–§2.7). 28 parameters: 6 of them RAW-only.
 public enum Adjustments {
-    /// C1: the automatic range never exceeds three stops, whatever the source headroom.
-    public static let automaticRangeCeiling = 3.0
+    /// Ceiling for HDR HyperDR generates itself: the analytic expansion on an `sdr`
+    /// base and `rawEDR` (C1). Sources that already have HDR (`hdr`, `dual`) keep
+    /// their own headroom when the range is automatic, up to the declared four stops;
+    /// resolving that belongs to Render.
+    public static let generatedRangeCeiling = 3.0
     /// C1: automatic expansion start for the analytic expansion, in the declared
     /// percent unit. AI keeps the model's own start.
     public static let automaticExpansionStart = 25.0
@@ -94,24 +97,24 @@ public enum Adjustments {
             visibleWhen: .all([.isOn("hdr.enabled"), .isOneOf("hdr.source", ["ai", "capturedAI"])]),
             capability: "HyperDR.aiModels >= 2", scope: .hdrOnly, cost: .inference),
         ParameterDeclaration(id: "hdr.strength", group: .hdr, kind: .float, range: 0...200, step: 1,
-            default: .constant(.number(100)), format: .percent, origin: .zero,
+            default: .constant(.number(100)), format: .percent, scale: .hundredth, origin: .zero,
             visibleWhen: .isOn("hdr.enabled"), scope: .hdrOnly, mask: "gain"),
         ParameterDeclaration(id: "hdr.range", group: .hdr, kind: .floatOrAuto, range: 0.5...4, step: 0.1,
-            default: .auto, format: .stops,
+            default: .auto, format: .stops, scale: .direct,
             visibleWhen: .isOn("hdr.enabled"), scope: .hdrOnly, mask: "gainFull"),
         ParameterDeclaration(id: "hdr.expansionStart", group: .hdr, kind: .floatOrAuto, range: 18...75, step: 1,
-            default: .auto, format: .percent,
+            default: .auto, format: .percent, scale: .hundredth,
             visibleWhen: .all([.isOn("hdr.enabled"),
                                .isOneOf("hdr.source", ["expand", "ai", "capturedExpand", "capturedAI"])]),
             scope: .hdrOnly, mask: "participation"),
         ParameterDeclaration(id: "hdr.coverage", group: .hdr, kind: .float, range: 0...100, step: 1,
-            default: .constant(.number(60)), format: .percent, origin: .zero,
+            default: .constant(.number(60)), format: .percent, scale: .hundredth, origin: .zero,
             visibleWhen: .all([.isOn("hdr.enabled"),
                                .isOneOf("hdr.source", ["expand", "capturedExpand"])]),
             scope: .hdrOnly, mask: "coverage"),
         // The one SDR-only control: it changes the base and compensates the gain (H2).
         ParameterDeclaration(id: "hdr.sdrRolloff", group: .hdr, kind: .float, range: 0...100, step: 1,
-            default: .constant(.number(0)), format: .percent, origin: .zero,
+            default: .constant(.number(0)), format: .percent, scale: .hundredth, origin: .zero,
             domains: [.rawEDR, .hdr], visibleWhen: .isOn("hdr.enabled"), scope: .sdrOnly),
     ]
 
@@ -119,15 +122,15 @@ public enum Adjustments {
 
     private static let light: [ParameterDeclaration] = [
         ParameterDeclaration(id: "tone.exposure", group: .light, kind: .float, range: -4...4, step: 0.01,
-            default: .constant(.number(0)), format: .ev, origin: .zero),
+            default: .constant(.number(0)), format: .ev, scale: .direct, origin: .zero),
         ParameterDeclaration(id: "tone.contrast", group: .light, kind: .float, range: -100...100, step: 1,
-            default: .constant(.number(0)), format: .signed, origin: .zero),
+            default: .constant(.number(0)), format: .signed, scale: .contrast, origin: .zero),
         ParameterDeclaration(id: "tone.highlights", group: .light, kind: .float, range: -100...100, step: 1,
-            default: .constant(.number(0)), format: .signed, origin: .zero, mask: "highlights"),
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero, mask: "highlights"),
         ParameterDeclaration(id: "tone.shadows", group: .light, kind: .float, range: -100...100, step: 1,
-            default: .constant(.number(0)), format: .signed, origin: .zero, mask: "shadows"),
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero, mask: "shadows"),
         ParameterDeclaration(id: "tone.blacks", group: .light, kind: .float, range: -100...100, step: 1,
-            default: .constant(.number(0)), format: .signed, origin: .zero, mask: "blacks"),
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero, mask: "blacks"),
     ]
 
     // MARK: - Color
@@ -137,17 +140,17 @@ public enum Adjustments {
     private static let color: [ParameterDeclaration] = [
         // RAW white balance is a development parameter, not a matrix (p7-adjustments §2.5).
         ParameterDeclaration(id: "develop.temperature", group: .color, kind: .float, range: 2000...50000, step: 50,
-            default: .fromSource, format: .kelvin, domains: [.rawEDR], cost: .redevelop),
+            default: .fromSource, format: .kelvin, scale: .direct, domains: [.rawEDR], cost: .redevelop),
         ParameterDeclaration(id: "develop.tint", group: .color, kind: .float, range: -150...150, step: 1,
-            default: .fromSource, format: .signed, origin: .zero, domains: [.rawEDR], cost: .redevelop),
+            default: .fromSource, format: .signed, scale: .direct, origin: .zero, domains: [.rawEDR], cost: .redevelop),
         ParameterDeclaration(id: "color.warmth", group: .color, kind: .float, range: -100...100, step: 1,
-            default: .constant(.number(0)), format: .signed, origin: .zero, domains: [.sdr, .hdr, .dual]),
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero, domains: [.sdr, .hdr, .dual]),
         ParameterDeclaration(id: "color.tint", group: .color, kind: .float, range: -100...100, step: 1,
-            default: .constant(.number(0)), format: .signed, origin: .zero, domains: [.sdr, .hdr, .dual]),
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero, domains: [.sdr, .hdr, .dual]),
         ParameterDeclaration(id: "color.vibrance", group: .color, kind: .float, range: -100...100, step: 1,
-            default: .constant(.number(0)), format: .signed, origin: .zero),
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
         ParameterDeclaration(id: "color.saturation", group: .color, kind: .float, range: -100...100, step: 1,
-            default: .constant(.number(0)), format: .signed, origin: .zero),
+            default: .constant(.number(0)), format: .signed, scale: .hundredth, origin: .zero),
     ]
 
     // MARK: - Look
@@ -158,7 +161,7 @@ public enum Adjustments {
         ParameterDeclaration(id: "look.enabled", group: .look, kind: .bool,
             default: .constant(.bool(true)), visibleWhen: .isSet("look.lut")),
         ParameterDeclaration(id: "look.strength", group: .look, kind: .float, range: 0...100, step: 1,
-            default: .constant(.number(100)), format: .percent, origin: .zero,
+            default: .constant(.number(100)), format: .percent, scale: .hundredth, origin: .zero,
             visibleWhen: .isSet("look.lut")),
         ParameterDeclaration(id: "look.input", group: .look, kind: .choice,
             default: .constant(.string("srgb")),
@@ -177,13 +180,13 @@ public enum Adjustments {
 
     private static let detail: [ParameterDeclaration] = [
         ParameterDeclaration(id: "develop.luminanceNR", group: .detail, kind: .float, range: 0...100, step: 1,
-            default: .fromSource, format: .percent, domains: [.rawEDR],
+            default: .fromSource, format: .percent, scale: .hundredth, domains: [.rawEDR],
             capability: "CIRAWFilter.isLuminanceNoiseReductionSupported", cost: .redevelop),
         ParameterDeclaration(id: "develop.colorNR", group: .detail, kind: .float, range: 0...100, step: 1,
-            default: .fromSource, format: .percent, domains: [.rawEDR],
+            default: .fromSource, format: .percent, scale: .hundredth, domains: [.rawEDR],
             capability: "CIRAWFilter.isColorNoiseReductionSupported", cost: .redevelop),
         ParameterDeclaration(id: "develop.sharpness", group: .detail, kind: .float, range: 0...100, step: 1,
-            default: .fromSource, format: .percent, domains: [.rawEDR],
+            default: .fromSource, format: .percent, scale: .hundredth, domains: [.rawEDR],
             capability: "CIRAWFilter.isSharpnessSupported", cost: .redevelop),
         ParameterDeclaration(id: "develop.lensCorrection", group: .detail, kind: .bool,
             default: .constant(.bool(true)), domains: [.rawEDR],

@@ -175,3 +175,44 @@ private extension ParameterDefault {
         return nil
     }
 }
+
+@Test func unknownStructuredValuesSurviveARoundTrip() throws {
+    // A newer build may store an object or an array; that must not fail the whole
+    // recipe, or reading the adjustment data back from Photos would lose everything.
+    let json = """
+    {"version":3,"inputDomain":"sdr","hdrSource":"expand",
+     "values":{"future.local":{"mask":"sky","feather":0.4,"stops":[1,0.5]},"tone.exposure":0.25}}
+    """
+    let recipe = try Recipe.decode(Data(json.utf8))
+    #expect(recipe.value(for: "future.local")?.objectValue?["mask"] == .string("sky"))
+    #expect(recipe.value(for: "future.local")?.objectValue?["stops"]?.arrayValue == [.number(1), .number(0.5)])
+    let restored = try Recipe.decode(try recipe.encoded())
+    #expect(restored == recipe)
+    #expect(try restored.encoded() == recipe.encoded(), "structured values are not stable")
+}
+
+@Test func engineScaleIsDeclaredPerParameter() throws {
+    // R11-002: RAW tint reads signed and is passed through; the scale, not the
+    // readout format, decides the engine unit.
+    let rawTint = try #require(Adjustments.declaration("develop.tint"))
+    #expect(rawTint.format == .signed && rawTint.scale == .direct)
+    #expect(rawTint.engineValue(50) == 50)
+    #expect(try #require(Adjustments.declaration("develop.temperature")).engineValue(5500) == 5500)
+    #expect(try #require(Adjustments.declaration("tone.exposure")).engineValue(0.3) == 0.3)
+    #expect(try #require(Adjustments.declaration("tone.shadows")).engineValue(50) == 0.5)
+    #expect(try #require(Adjustments.declaration("hdr.strength")).engineValue(200) == 2)
+    #expect(try #require(Adjustments.declaration("hdr.range")).engineValue(3) == 3)
+    let contrast = try #require(Adjustments.declaration("tone.contrast"))
+    #expect(contrast.scale == .contrast)
+    #expect(contrast.engineValue(0) == 1)
+    #expect(abs(contrast.engineValue(100) - 1.6) < 1e-12)
+}
+
+@Test func rangeCeilingAppliesToGeneratedHDROnly() throws {
+    // R11-001: three stops cap the HDR we generate (sdr expansion, rawEDR); hdr and
+    // dual keep their own headroom up to the declared four stops.
+    #expect(Adjustments.generatedRangeCeiling == 3)
+    let range = try #require(Adjustments.declaration("hdr.range"))
+    #expect(range.defaultValue(in: .hdr) == .auto)
+    #expect(range.range == 0.5...4)
+}

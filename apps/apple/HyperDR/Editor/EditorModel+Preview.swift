@@ -25,8 +25,8 @@ extension EditorModel {
         case .editingHDRDisplay, .editingSDRDisplay, .refreshing, .previewFailedKeepsFrame, .openFailed:
             hasFrame = true
             document.phase = .ready
-            document.pixelSize = services.preview.pixelSize
-            document.source = services.preview.source
+            document.pixelSize = PixelSize(width: 6000, height: 4000)
+            document.source = SourceSummary(domain: .sceneReferred, colorName: "Display P3", degradationReasons: [])
             services.displayState.gainWeight = 0.6
             if scenario == .editingSDRDisplay {
                 services.displayState = DisplayState(screenName: "", currentHeadroom: 1,

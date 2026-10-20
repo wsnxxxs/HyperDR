@@ -3,7 +3,7 @@ import XCTest
 
 @MainActor final class ExportPreparationTokenTests: XCTestCase {
     private func ready() async -> (EditorModel, FakeEditorServices) {
-        let services = FakeEditorServices(openDelay: .zero, previewDelay: .zero)
+        let services = FakeEditorServices(openDelay: .zero)
         let model = EditorModel(services: services)
         await model.loadExportServices()
         model.open([URL(fileURLWithPath: "/tmp/first.jpg")])
@@ -38,7 +38,7 @@ import XCTest
     func testEditThenUndoStillInvalidatesPanelAndFrameChangesAlsoInvalidate() async throws {
         let (model, services) = await ready()
         let token = try XCTUnwrap(model.prepareExport())
-        model.adjust("brightness", to: 1)
+        model.adjustRecipe("tone.exposure", to: 1)
         model.undo()
         model.startExport(destination: destination, token: token)
         XCTAssertNil(model.exportTask)

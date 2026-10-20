@@ -71,6 +71,17 @@ public actor LUTLibrary {
         _ = try LUTFiles.install(source, in: destination.descriptor, expected: entry.id)
         return result
     }
+    /// The `.cube` text of a library LUT, for a renderer that parses it itself.
+    public func cube(_ id: LUTID) throws -> String {
+        let directory = try LUTFiles.directory(root)
+        defer { Darwin.close(directory) }
+        let file = try LUTFiles.file(id.rawValue + ".cube", in: directory)
+        let handle = FileHandle(fileDescriptor: file, closeOnDealloc: true)
+        guard let data = try handle.readToEnd(), let text = String(data: data, encoding: .utf8) else {
+            throw LUTFiles.invalid("Expected UTF-8 .cube")
+        }
+        return text
+    }
     public func update(_ id: LUTID, input: LUTSpace, output: LUTSpace) throws -> LUTEntry {
         let directory = try LUTFiles.directory(root)
         defer { Darwin.close(directory) }

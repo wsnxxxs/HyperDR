@@ -2,164 +2,84 @@ import AppKit
 import SwiftUI
 import XCTest
 import HyperDRDesign
+import HyperDRRecipe
 @testable import HyperDR
 
-/// The glue between the editor model and the design components: how a
-/// control becomes a `ParameterSpec`, what the AI part of the inspector says
-/// in each state, how the scope data is handed over.
+/// The glue between the editor model and the design components: how the
+/// scope data is handed over, and how a held arrow key on a control becomes
+/// one undo step of the recipe editor.
 @MainActor final class InspectorWiringTests: XCTestCase {
     private let url = URL(fileURLWithPath: "/fixtures/a.jpg")
 
-    private func opened(domain: InputDomain = .sdr, tagged: Bool = false) async -> EditorModel {
-        let services = FakeEditorServices(openDelay: .zero, previewDelay: .milliseconds(1))
-        services.preview = EditorPreview(pixelSize: PixelSize(width: 6000, height: 4000),
-            source: SourceSummary(domain: domain, colorName: "sRGB", degradationReasons: [],
-                                  colorSource: tagged ? "icc" : "assumed"), hasGain: true)
-        let model = EditorModel(services: services)
+    private func opened() async -> EditorModel {
+        let model = EditorModel(services: FakeEditorServices(openDelay: .zero))
         model.open([url])
         await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
         return model
     }
 
-    // MARK: Control to spec
-
-    func testEveryControlBecomesAValidSpecInBothLanguages() async {
-        let model = await opened()
-        for locale in [Locale(identifier: "en"), Locale(identifier: "zh-Hans")] {
-            for control in model.controls {
-                let spec = ParameterSpecFactory.spec(for: control, locale: locale)
-                XCTAssertEqual(spec.step, control.spec.step, control.key)
-                XCTAssertEqual(spec.automatic != nil, control.spec.allowsAuto, control.key)
-                // The default, whatever it is (Auto is -1), reads without crashing.
-                XCTAssertFalse(spec.formatted(control.defaultValue, locale: locale).isEmpty, control.key)
-            }
-        }
-    }
-
-    func testSignedControlsFillFromZeroAndOthersFromTheLowerBound() async {
-        let model = await opened(domain: .hdr)
-        let brightness = ParameterSpecFactory.spec(for: model.control("brightness"), locale: Locale(identifier: "en"))
-        XCTAssertEqual(brightness.origin, 0)
-        XCTAssertTrue(brightness.isCentred, "an HDR source can go below 0, so the fill starts mid-track")
-        let strength = ParameterSpecFactory.spec(for: model.control("hdrStrength"), locale: Locale(identifier: "en"))
-        XCTAssertEqual(strength.origin, strength.range.lowerBound)
-    }
-
-    func testAutoControlsKeepAutoBelowTheRange() async {
-        let model = await opened()
-        model.setAIMode(.optimized)
-        await eventually(timeout: .seconds(3)) { model.ai.availability != .available && !model.ai.isComputing }
-        let control = model.control("aiHdrRange")
-        let spec = ParameterSpecFactory.spec(for: control, locale: Locale(identifier: "en"))
-        XCTAssertGreaterThanOrEqual(spec.range.lowerBound, 0)
-        XCTAssertTrue(spec.isAutomatic(-1))
-        XCTAssertEqual(spec.formatted(-1, locale: Locale(identifier: "zh-Hans")), "自动")
-        XCTAssertEqual(spec.formatted(-1, locale: Locale(identifier: "en")), "Auto")
-    }
-
-    func testStopsReadoutIsWrittenInTheRequestedLanguage() async {
-        let model = await opened()
-        let en = ParameterSpecFactory.spec(for: model.control("hdrRange"), locale: Locale(identifier: "en"))
-        let zh = ParameterSpecFactory.spec(for: model.control("hdrRange"), locale: Locale(identifier: "zh-Hans"))
-        XCTAssertEqual(en.formatted(2.5, locale: Locale(identifier: "en")), "2.5 stops")
-        XCTAssertEqual(zh.formatted(2.5, locale: Locale(identifier: "zh-Hans")), "2.5 档")
-    }
-
-    func testTheFormatCeilingIsReportedOnlyWhenItLowersTheRange() async {
-        let model = await opened()
-        model.setWorkflow(.hdr)
-        let control = model.control("hdrRange")
-        // The control's own range goes to 4; each format may hold it lower.
-        XCTAssertEqual(control.spec.range.upperBound, 4)
-        model.selectEncoding("adaptive")
-        let adaptive = EditBaseline.maxRange(for: "adaptive")
-        XCTAssertLessThan(adaptive, 4)
-        XCTAssertEqual(ParameterSpecFactory.ceiling(of: control), adaptive)
-        model.selectEncoding("pq")
-        XCTAssertEqual(EditBaseline.maxRange(for: "pq"), 4)
-        XCTAssertNil(ParameterSpecFactory.ceiling(of: control))
-    }
-
-    // MARK: AI panel
-
-    private func panel(domain: InputDomain? = .sdr, mode: AIMode = .manual,
-                       availability: AIAvailability = .available, computing: Bool = false,
-                       missing: [String] = [], notice: EditorNotice? = nil) -> AIPanelState {
-        AIPanelState.make(domain: domain, mode: mode, availability: availability, isComputing: computing,
-                          fallbackMissingFields: missing, notice: notice)
-    }
-
-    func testManualWithAIAvailableShowsTheHintAndAllowsAI() {
-        let state = panel()
-        XCTAssertTrue(state.showsModeSwitch)
-        XCTAssertTrue(state.isAIEnabled)
-        XCTAssertEqual(state.lines, [.manualNote])
-        XCTAssertEqual(panel(availability: .cached).lines, [.cached])
-    }
-
-    func testComputingSelectsAIDisablesTheSwitchAndSaysSo() {
-        let state = panel(mode: .optimized, availability: .available, computing: true)
-        XCTAssertTrue(state.isAISelected)
-        XCTAssertFalse(state.isAIEnabled)
-        XCTAssertEqual(state.lines, [.computing])
-        XCTAssertEqual(AIPanelState.Line.computing.style, .progress)
-    }
-
-    func testAppliedShowsTheModelAndTheFallbackWarning() {
-        let applied = panel(mode: .optimized, availability: .applied(modelName: "model.research-exif-v1"))
-        XCTAssertEqual(applied.lines, [.applied(modelNameKey: "model.research-exif-v1")])
-        let fallback = panel(mode: .optimized, availability: .applied(modelName: "model.research-exif-v1"),
-                             missing: ["f_number", "focal_length_mm"])
-        XCTAssertEqual(fallback.lines.last, .fallback(fields: ["f_number", "focal_length_mm"]))
-        XCTAssertEqual(fallback.lines.last?.style, .warning)
-        XCTAssertTrue(fallback.isAIEnabled, "AI can be switched off while it is applied")
-    }
-
-    func testFailureOutranksUnavailableAndRestsTheAISegment() {
-        let state = panel(availability: .unavailable(reasonKey: "ai.unavailable.failed"),
-                          notice: .aiFailed(reasonKey: "ai.unavailable.failed"))
-        XCTAssertEqual(state.lines, [.failed(reasonKey: "ai.unavailable.failed")])
-        XCTAssertFalse(state.isAIEnabled)
-        // After the notice is cleared the plain reason remains.
-        XCTAssertEqual(panel(availability: .unavailable(reasonKey: "ai.unavailable.failed")).lines,
-                       [.unavailable(reasonKey: "ai.unavailable.failed")])
-    }
-
-    func testHDRSourcesHaveNoSwitchOnlyTheirExplanation() {
-        for domain in [InputDomain.hdr, .dual] {
-            let state = panel(domain: domain, availability: .unavailable(reasonKey: "ai.unavailable.hdrSource"))
-            XCTAssertFalse(state.showsModeSwitch)
-            XCTAssertEqual(state.lines, [.hdrSource])
-        }
-    }
-
-    func testColorOnlyRestsAIWithItsReason() {
-        let state = panel(availability: .unavailable(reasonKey: "ai.unavailable.colorOnly"))
-        XCTAssertFalse(state.isAIEnabled)
-        XCTAssertEqual(state.lines, [.unavailable(reasonKey: "ai.unavailable.colorOnly")])
-    }
-
-    func testTheMissingFieldsReadAsAListInEachLanguage() {
-        XCTAssertEqual(AdjustmentSection.fieldList(["f_number", "focal_length_mm"], locale: Locale(identifier: "en")),
-                       "aperture and focal length")
-        XCTAssertEqual(AdjustmentSection.fieldList(["f_number", "focal_length_mm"], locale: Locale(identifier: "zh-Hans")),
-                       "光圈和焦距")
-    }
-
-    func testFailureNoticeClearsButResetDoneDoesNot() async {
-        let model = await opened()
-        model.notice = .resetDone
-        model.clearAIFailureNotice()
-        XCTAssertEqual(model.notice, .resetDone)
-        model.notice = .aiFailed(reasonKey: "ai.unavailable.failed")
-        model.clearAIFailureNotice()
-        XCTAssertNil(model.notice)
-    }
-
     // MARK: Scopes
+
+    /// The scopes measure what the canvas draws: a prediction coming in or a
+    /// bypass changes the picture without changing the recipe (R27-002).
+    func testScopesMeasureAgainWhenThePredictionArrivesOrAGroupIsBypassed() async throws {
+        let services = FakeEditorServices(openDelay: .zero)
+        let fake = try XCTUnwrap(services.fakeRendering)
+        await fake.holdPredictions()
+        let model = EditorModel(services: services)
+        model.open([url])
+        await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
+        let size = EditorModel.scopeSize(try XCTUnwrap(model.editor.source).pixelSize)
+        func measured(_ what: String, _ match: (EditorRenderRequest) -> Bool) async {
+            for _ in 0..<5000 {
+                if await fake.requests.contains(where: { $0.size == size && $0.region == nil && match($0) }) { return }
+                try? await Task.sleep(for: .milliseconds(1))
+            }
+            XCTFail("the scopes never measured \(what)")
+        }
+        var recipe = model.editor.recipe
+        recipe.setValue(.string("ai"), for: "hdr.source")
+        model.editor.setRecipe(recipe)
+        await eventually(timeout: .seconds(3)) { model.editor.isModelGainPending }
+        await fake.releasePredictions()
+        await measured("the predicted picture") { $0.recipe == recipe && $0.usesModelGain }
+        model.editor.bypassedGroups = [.light]
+        await measured("the bypassed picture") { $0.recipe == recipe && $0.bypassedGroups == [.light] }
+        model.closeDocument()
+    }
+
+    /// A → B → A while B is still being measured: the scopes end on A, not on
+    /// B's late result (R34-001).
+    func testReturningToAMeasuredPictureDropsTheMeasurementInBetween() async throws {
+        let services = FakeEditorServices(openDelay: .zero)
+        let fake = try XCTUnwrap(services.fakeRendering)
+        let model = EditorModel(services: services)
+        model.open([url])
+        await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
+        let a = model.editor.recipe
+        await eventually(timeout: .seconds(3)) { model.scopedRequest?.recipe == a && model.scopingRequest == nil }
+        var b = a
+        b.setValue(.number(1), for: "tone.exposure")
+        await fake.holdRenders()
+        model.editor.setRecipe(b)
+        model.startScopes()
+        XCTAssertEqual(model.scopingRequest?.recipe, b)
+        model.editor.setRecipe(a)
+        model.startScopes()
+        XCTAssertNil(model.scopingRequest, "B's measurement is dropped")
+        await fake.releaseRenders()
+        await model.scopeTask?.value
+        await settle(50)
+        XCTAssertEqual(model.scopedRequest?.recipe, a)
+        model.closeDocument()
+    }
 
     func testScopeContentFollowsTheMeasurementAndThePhase() async {
         let model = await opened()
+        // The fake's frames are measured once; start again from nothing.
+        await eventually(timeout: .seconds(3)) { model.scopes.current != nil }
+        await settle(50)
+        model.scopes.update(original: .some(nil), current: .some(nil), waveform: .some(nil))
         XCTAssertEqual(ScopeSection.content(scopes: model.scopes, phase: .ready), .measuring)
         XCTAssertEqual(ScopeSection.content(scopes: model.scopes,
                                             phase: .failed(UserFacingError(code: "x"))), .unavailable)
@@ -187,51 +107,64 @@ import HyperDRDesign
         return ArrowKeyInput(event)!
     }
 
-    /// A held arrow through the slider's own entry (`ArrowKeyEditing.perform`,
-    /// which the track and the readout call with the row's binding and
-    /// bracket), driven by constructed key events: the first key-down begins
-    /// the session, the repeats step, the key-up ends it, and one undo takes
-    /// back the whole hold.
+    private let exposure = Adjustments.declaration("tone.exposure")!
+    private var step: Double { exposure.step ?? 0.01 }
+
+    private func value(_ model: EditorModel) -> Double {
+        model.editor.recipe.value(for: exposure.id)?.numberValue ?? 0
+    }
+
+    /// The row's binding and bracket, as the adjustment inspector wires them.
+    private func row(_ model: EditorModel) -> (binding: Binding<Double>, editing: (Bool) -> Void) {
+        let binding = Binding<Double>(get: { self.value(model) }, set: { value in
+            var recipe = model.editor.recipe
+            recipe.setValue(.number(value), for: self.exposure.id)
+            model.editor.setRecipe(recipe)
+        })
+        return (binding, { model.editor.editingChanged(self.exposure, $0) })
+    }
+
+    /// A held arrow through the slider's own entry (`ArrowKeyEditing.perform`),
+    /// driven by constructed key events: the first key-down begins the
+    /// session, the repeats step, the key-up ends it, and one undo takes back
+    /// the whole hold.
     func testAHeldArrowIsOneUndoStep() async {
         let model = await opened()
-        let initial = model.control("brightness").value
-        let binding = ControlSlider.binding(model: model, key: "brightness")
-        let editing = ControlSlider.editing(model: model, key: "brightness")
-        let spec = ParameterSpecFactory.spec(for: model.control("brightness"), locale: Locale(identifier: "en"))
+        let initial = value(model)
+        let (binding, editing) = row(model)
         var keys = ArrowKeyEditing()
         var phases: [Bool] = []
         for input in [arrow(.keyDown), arrow(.keyDown, repeating: true), arrow(.keyDown, repeating: true), arrow(.keyUp)] {
             keys.perform(input, verticalOnly: false, notify: { phases.append($0); editing($0) }) { steps in
-                binding.wrappedValue = spec.stepped(binding.wrappedValue, by: steps)
+                binding.wrappedValue += Double(steps) * step
             }
         }
         XCTAssertEqual(phases, [true, false], "one session for the whole hold")
-        XCTAssertEqual(model.control("brightness").value, initial + 3 * spec.step, accuracy: 1e-6)
+        XCTAssertEqual(value(model), initial + 3 * step, accuracy: 1e-6)
+        XCTAssertEqual(model.undoActionName, AdjustmentText.undoName(exposure))
         model.undo()
-        XCTAssertEqual(model.control("brightness").value, initial, accuracy: 1e-6, "one undo takes back the whole hold")
+        XCTAssertEqual(value(model), initial, accuracy: 1e-6, "one undo takes back the whole hold")
         XCTAssertFalse(model.canUndo)
         model.closeDocument()
     }
 
     func testTwoSeparatePressesAreTwoUndoSteps() async {
         let model = await opened()
-        let initial = model.control("brightness").value
-        let binding = ControlSlider.binding(model: model, key: "brightness")
-        let editing = ControlSlider.editing(model: model, key: "brightness")
-        let spec = ParameterSpecFactory.spec(for: model.control("brightness"), locale: Locale(identifier: "en"))
+        let initial = value(model)
+        let (binding, editing) = row(model)
         var keys = ArrowKeyEditing()
         for _ in 0..<2 {
             for input in [arrow(.keyDown), arrow(.keyUp)] {
                 keys.perform(input, verticalOnly: false, notify: editing) { steps in
-                    binding.wrappedValue = spec.stepped(binding.wrappedValue, by: steps)
+                    binding.wrappedValue += Double(steps) * step
                 }
             }
         }
         model.undo()
-        XCTAssertEqual(model.control("brightness").value, initial + spec.step, accuracy: 1e-6)
+        XCTAssertEqual(value(model), initial + step, accuracy: 1e-6)
         XCTAssertTrue(model.canUndo)
         model.undo()
-        XCTAssertEqual(model.control("brightness").value, initial, accuracy: 1e-6)
+        XCTAssertEqual(value(model), initial, accuracy: 1e-6)
         XCTAssertFalse(model.canUndo)
         model.closeDocument()
     }
@@ -241,21 +174,20 @@ import HyperDRDesign
     /// edit is one undo step and nothing stays open.
     func testALostKeyUpStillEndsTheHoldWhenTheControlLetsGo() async {
         let model = await opened()
-        let initial = model.control("brightness").value
-        let binding = ControlSlider.binding(model: model, key: "brightness")
-        let editing = ControlSlider.editing(model: model, key: "brightness")
-        let spec = ParameterSpecFactory.spec(for: model.control("brightness"), locale: Locale(identifier: "en"))
+        let initial = value(model)
+        let (binding, editing) = row(model)
         var keys = ArrowKeyEditing()
         for input in [arrow(.keyDown), arrow(.keyDown, repeating: true)] {
             keys.perform(input, verticalOnly: false, notify: editing) { steps in
-                binding.wrappedValue = spec.stepped(binding.wrappedValue, by: steps)
+                binding.wrappedValue += Double(steps) * step
             }
         }
         XCTAssertTrue(keys.isOpen)
         keys.finish(editing)
         XCTAssertFalse(keys.isOpen)
+        XCTAssertFalse(model.editor.isDragging)
         model.undo()
-        XCTAssertEqual(model.control("brightness").value, initial, accuracy: 1e-6)
+        XCTAssertEqual(value(model), initial, accuracy: 1e-6)
         XCTAssertFalse(model.canUndo)
         model.closeDocument()
     }

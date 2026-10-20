@@ -2,6 +2,7 @@
 import AppKit
 import SwiftUI
 import HyperDRDesign
+import HyperDRRecipe
 
 // S12 inspector performance spike (batch 3 F4). Debug builds only: Developer ▸
 // Inspector Stress, or `-HDRInspectorStress run` to run every binding, print
@@ -13,7 +14,7 @@ import HyperDRDesign
 //   C  the control's own @State, sent to the model from .onChange (the model
 //      value is not observed by the view);
 //   D  an AppKit row (NSSlider + labels) inside NSViewRepresentable.
-// Every value change calls `EditorModel.adjust`, as M2's inspector will.
+// Every value change writes the editor's recipe, as the inspector does.
 //
 // Drags are synthesized mouse events posted to this app's own event queue for
 // the stress window (never system-wide), from a background thread at 120 Hz,
@@ -85,7 +86,13 @@ enum StressCatalog {
     func send(_ key: String, _ value: Double) {
         adjustCalls += 1
         lastSend = (key, value, ProcessInfo.processInfo.systemUptime)
-        if Self.sendsToModel { model.adjust(key, to: value) }
+        // Every parameter stands in for one recipe value, so the editor and
+        // its render pacing see the drag as the inspector's would.
+        if Self.sendsToModel {
+            var recipe = model.editor.recipe
+            recipe.setValue(.number(value), for: "tone.exposure")
+            model.editor.setRecipe(recipe)
+        }
     }
 
     func reset() {

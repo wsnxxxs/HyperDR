@@ -53,6 +53,14 @@ public struct AdjustmentModelChoice: Equatable, Sendable, Identifiable {
     }
 }
 
+/// A reset of more than one control, which a host may perform and name itself.
+public enum AdjustmentReset: Equatable, Sendable {
+    /// ↺ on a group.
+    case group(AdjustmentGroupID)
+    /// Reset All.
+    case all
+}
+
 /// One generated control and what it holds in a recipe.
 public struct AdjustmentControl: Identifiable, Equatable, Sendable {
     public enum Value: Equatable, Sendable {

@@ -43,13 +43,15 @@ this checkout. This file summarizes what they decide.
 |---|---|
 | `modules/` | C++ engine; `modules/app` holds the engine facade, `modules/capi` the C ABI |
 | `apps/apple/Packages/HyperDREngine` | Swift wrapper over the C ABI. Pure computations are synchronous; I/O, decoding, rendering and export are `async` on a dedicated queue and forward `Task` cancellation |
-| `apps/apple/Packages/HyperDRKit` | Services: edit defaults, input formats, `SessionStore` (security-scoped bookmarks, cleanup, export versions), `PreviewService` |
+| `apps/apple/Packages/HyperDRKit` | Services: input formats, `SessionStore` (security-scoped bookmarks, cleanup, export versions), export planning and `RecipeExportService` |
 | `apps/apple/Packages/HyperDRDesign` | Design tokens and controls, including the inspector controls; `Adjustments/` generates the adjustment controls from HyperDRRecipe's declarations (`AdjustmentPanel`, `AdjustmentInspector` for the Mac and the iPad sidebar, the touch slider), with their words in this package's catalogue |
 | `apps/apple/HyperDR/Editor` | `EditorModel` / `CanvasModel`, the contract the views bind to, running on the real `HyperDRKit` services |
 | `apps/apple/HyperDR/Views` | SwiftUI views; they only talk to the editor models |
 | `apps/apple/HyperDR/macOS/Preview` | Metal EDR canvas: a compute pass rebuilds the frame, a second pass draws it at the canvas zoom and pan |
 | `apps/apple/Shared/Canvas` | Shared by the Mac and iOS targets: `CanvasTransform`, the EDR layer setup and the display pass (`EDRDisplayPass`, `EDRDisplay.metal`) |
-| `apps/apple/HyperDRiOS` | iOS/iPadOS target (P7-0 shell): PhotosPicker and Files (`fileImporter`) placed as in `p7-adjustments.md` §5.5, a `UIView` + `CAMetalLayer` canvas with `UIScreen` headroom, a temporary Core Image loader (`TemporaryHDRSource`) until HyperDRRender lands; its own string catalogue; `Adjustments/` holds the iPhone adjustment bar, its ruler and the layout switch (P7-2a). Links HyperDRDesign and HyperDRRecipe. Install steps: `apps/apple/README-iOS.md` |
+| `apps/apple/HyperDRiOS` | iOS/iPadOS target: PhotosPicker and Files (`fileImporter`) placed as in `p7-adjustments.md` §5.5, each photo copied into `tmp/Imported/` (`ImportedPhoto`) and edited through the shared `RecipeEditor` on HyperDRRender; a `UIView` + `CAMetalLayer` canvas drawn by the shared `DisplayCompositor` with `UIScreen` headroom, detail tiles when zoomed in, the effect mask while a masked control is dragged, and the comparison views of §5.4 (hold, Original / Adjusted / Split, the split divider); undo on the scene's undo manager; its own string catalogue; `Adjustments/` holds the iPhone adjustment bar, its ruler and the layout switch (P7-2a). `Export/` holds the minimal export sheet (P7-3b-U: destination or custom format, progress and cancel, Save to Files and Share) on Kit's `RecipeExportService` with its own `RenderEngine`; the photo's Kit session opens and hashes alongside the editor's decoding, and a run waits for it while preparing. Links HyperDRDesign, HyperDRRecipe, HyperDRRender and HyperDRKit, so the engine xcframework needs its iOS slices (`test.py ios` builds them when missing; for Xcode alone, `bash scripts/build_xcframework.sh --platforms all`). Install steps: `apps/apple/README-iOS.md` |
+| `apps/apple/Shared/Editor` | Shared by the Mac and iOS targets: `RecipeEditor` (recipe, undo steps, drag brackets, render pacing, AI state, detail regions for the host's `CanvasViewport`, effect masks while dragging, the export capture), `RenderSession` on HyperDRRender, `EditorRendering` and its fake. Foundation, Observation, HyperDRRecipe and HyperDRRender only; tested by `Packages/HyperDREditorCore`, whose sources link to this directory |
+| `apps/apple/Shared/Export` | Shared by the Mac and iOS targets: the editor's export capture in Kit's terms (`RecipeExportSnapshot`, `ExportPlanRequest`) |
 
 ## Building and testing
 
@@ -62,7 +64,7 @@ required.
 python3 scripts/fetch_test_fixtures.py          # RAW samples used by the tests
 python3 scripts/test.py native --build-dir build # engine: CMake preset macos-arm64-codecs
 python3 scripts/test.py apple                    # xcframework, Swift packages, app build and tests, localization check
-python3 scripts/test.py ios                      # iOS/iPadOS target: device and simulator builds, unsigned (needs Xcode's iOS platform)
+python3 scripts/test.py ios                      # iOS/iPadOS target: engine slices when missing, device and simulator builds, unsigned (needs Xcode's iOS platform)
 ```
 
 - Engine changes must keep CLI output byte-identical unless the change is

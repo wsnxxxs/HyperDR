@@ -46,6 +46,17 @@ public enum AdjustmentText {
         DesignStrings.string(declaration.undoKey, locale: locale)
     }
 
+    /// The undo action name of a reset ("Reset Light", "Reset All").
+    public static func undoName(_ reset: AdjustmentReset, locale: Locale = .current) -> String {
+        switch reset {
+        case .group(let group):
+            return String(format: DesignStrings.string("undo.resetGroup %@", bundle: .module, locale: locale),
+                          DesignStrings.string(group.labelKey, locale: locale))
+        case .all:
+            return DesignStrings.string("undo.resetAll", bundle: .module, locale: locale)
+        }
+    }
+
     public static func labelString(_ declaration: ParameterDeclaration, locale: Locale = .current) -> String {
         DesignStrings.string(declaration.labelKey, locale: locale)
     }

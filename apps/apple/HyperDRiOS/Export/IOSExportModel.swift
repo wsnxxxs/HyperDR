@@ -1,0 +1,338 @@
+import Foundation
+import HyperDREngine
+import HyperDRKit
+import HyperDRRender
+import Observation
+
+/// Kit's export service and the session store it exports from. Export has
+/// its own `RenderEngine`, apart from the editor's, so its caches go with it;
+/// the AI prediction is the service's default.
+nonisolated struct ExportStack: Sendable {
+    let sessions: SessionStore
+    let service: any RecipeExportServicing
+
+    static func live() async throws -> ExportStack {
+        let configuration = KitConfiguration()
+        let sessions = SessionStore(configuration: configuration, formats: try InputFormats(schema: Engine.schema()))
+        let engine = try await Engine(configuration: .init(cacheDirectory: configuration.cacheDirectory))
+        let render = try RenderEngine()
+        let service = RecipeExportService(engine: engine, renderEngine: render, renderer: render, sessions: sessions,
+                                          target: ExportTarget(configuration: configuration, sessions: sessions))
+        return ExportStack(sessions: sessions, service: service)
+    }
+}
+
+/// The iOS export flow (P7-3b-U, p7-adjustments §4.4): the choice of a
+/// destination or a custom format, the run with its stages, and the verified
+/// version handed to Files or the share sheet.
+///
+/// - The photo's Kit session opens (and hashes the file) alongside the
+///   editor's decoding, as soon as the copy exists; its source revision is
+///   captured then. Export does not wait for it to be enabled: a run waits for
+///   that same task while it is preparing.
+/// - Export is closed while a photo is loading, and a photo cannot start
+///   loading while an export runs: the host drops the previous photo's copy
+///   and session as soon as the next one opens (R26-002).
+/// - Cancelling the run cancels the service's task. Cancelling the system
+///   save sheet only cancels that delivery: the verified version stays, and
+///   can be saved or shared again.
+/// - Frames are not exported on iOS yet; the Photos destination is shown but
+///   not available.
+@MainActor @Observable final class IOSExportModel {
+    enum Page: Hashable { case destination, custom }
+
+    struct Finished {
+        let result: RecipeExportResult
+        /// The staged copy `fileExporter` and `ShareLink` deliver.
+        let file: URL
+        var savedToFiles = false
+        /// A save to Files that failed (not a cancelled one).
+        var deliveryFailed = false
+    }
+
+    struct Failure {
+        /// An `ios.*` catalogue key.
+        let key: String
+        /// Developer-facing detail, shown small.
+        let detail: String?
+    }
+
+    enum Phase {
+        case choosing
+        case running(RecipeExportProgress?)
+        case finished(Finished)
+        case failed(Failure)
+    }
+
+    /// A photo's Kit session, opening or open.
+    private struct Opening {
+        struct Opened: Sendable {
+            let session: SessionID
+            let revision: RecipeSourceRevision
+        }
+        let url: URL
+        let task: Task<Opened, any Error>
+    }
+
+    var page = Page.destination
+    var destination = ExportDestination.web
+    var custom = CustomExportFormat(encoding: .isoGainMapJPEG, gamut: .p3, quality: 90)
+    private(set) var phase = Phase.choosing
+    /// `fileExporter`'s binding.
+    var presentingFileExporter = false
+
+    /// Whether the editor's photo has a session (open or still opening).
+    private(set) var hasPhoto = false
+    /// The host's photo request being loaded (copied or decoded), from the
+    /// moment the host accepts it.
+    private(set) var loadingRequest: UUID?
+    var loadingPhoto: Bool { loadingRequest != nil }
+    /// Why the photo's session could not be opened.
+    private(set) var sessionFailure: String?
+    @ObservationIgnored private var current: Opening?
+    /// The photo the editor is still opening.
+    @ObservationIgnored private var pending: Opening?
+    @ObservationIgnored private var stack: Task<ExportStack, any Error>?
+    @ObservationIgnored private var task: Task<Void, Never>?
+    @ObservationIgnored private var run = 0
+    /// The run is waiting for the session, before the service has it.
+    @ObservationIgnored private var waitingForSource = false
+    @ObservationIgnored private let makeStack: @Sendable () async throws -> ExportStack
+
+    init(makeStack: @escaping @Sendable () async throws -> ExportStack = { try await ExportStack.live() }) {
+        self.makeStack = makeStack
+    }
+
+    var choice: ExportChoice {
+        page == .destination ? .destination(destination) : .custom(custom)
+    }
+
+    var isRunning: Bool {
+        if case .running = phase { return true }
+        return false
+    }
+
+    /// The plan for the current choice, from the editor as it is.
+    func plan(_ editor: RecipeEditor) -> ExportPlan? {
+        guard let capture = try? editor.exportCapture() else { return nil }
+        return ExportPlanner.plan(capture.planRequest(choice))
+    }
+
+    /// Whether the plan's ceiling brings the edit's highlights down.
+    func clampsPeak(_ plan: ExportPlan, _ editor: RecipeEditor) -> Bool {
+        guard let peak = plan.peakStops, let capture = try? editor.exportCapture() else { return false }
+        return capture.peakStops > peak + 1e-9
+    }
+
+    /// Whether an export can be opened or started: a photo, and no other
+    /// photo on its way in to replace it.
+    func isSettled(_ editor: RecipeEditor) -> Bool {
+        hasPhoto && !loadingPhoto && pending == nil && !editor.isOpening
+    }
+
+    /// Whether a new photo may start loading: not while an export runs.
+    var canOpenPhoto: Bool { !isRunning }
+
+    /// The host accepted a request to open another photo; export is closed
+    /// until that request ends (a newer request takes over).
+    func photoRequested(_ id: UUID) {
+        loadingRequest = id
+    }
+
+    /// The host's request ended: opened, failed, cancelled or refused.
+    func photoRequestEnded(_ id: UUID) {
+        if loadingRequest == id { loadingRequest = nil }
+    }
+
+    /// Whether the current choice can start: a settled photo, a destination
+    /// that exists on iOS now, and a plan without blockers. The session may
+    /// still be hashing; the run waits for it.
+    func canStart(_ plan: ExportPlan?, _ editor: RecipeEditor) -> Bool {
+        guard isSettled(editor), let plan, plan.isExecutable else { return false }
+        return !(page == .destination && destination == .photos)
+    }
+
+    /// "Custom format…": the destination's encoding, gamut and quality carried over.
+    func useCustomFormat(from plan: ExportPlan?) {
+        if let plan { custom = plan.customCarryingSettings }
+        page = .custom
+    }
+
+    // MARK: - The photo's session
+
+    /// The editor starts opening `url`: its session opens now, in parallel.
+    /// A photo still pending from before is dropped.
+    func photoOpening(_ url: URL) {
+        if let pending { discard(pending) }
+        let stack = exportStack()
+        pending = Opening(url: url, task: Task {
+            let photo = try await stack.value.sessions.open(url)
+            return Opening.Opened(session: photo.id, revision: try RecipeSourceRevision(session: photo))
+        })
+    }
+
+    /// The editor opened `url`: its session replaces the previous photo's.
+    func photoOpened(_ url: URL) {
+        guard let opening = pending, opening.url == url else { return }
+        pending = nil
+        if let current { discard(current) }
+        current = opening
+        hasPhoto = true
+        sessionFailure = nil
+        Task { [weak self] in
+            do { _ = try await opening.task.value } catch {
+                guard let self, self.current?.task == opening.task else { return }
+                self.sessionFailure = String(describing: error)
+            }
+        }
+    }
+
+    /// The editor could not open `url`; the previous photo stays.
+    func photoFailed(_ url: URL) {
+        guard let opening = pending, opening.url == url else { return }
+        pending = nil
+        discard(opening)
+    }
+
+    /// Stops a session's hashing, or closes it once open.
+    private func discard(_ opening: Opening) {
+        opening.task.cancel()
+        let stack = exportStack()
+        Task {
+            guard let opened = try? await opening.task.value, let stack = try? await stack.value else { return }
+            await stack.sessions.close(opened.session)
+        }
+    }
+
+    private func exportStack() -> Task<ExportStack, any Error> {
+        if let stack { return stack }
+        let make = makeStack
+        let stack = Task { try await make() }
+        self.stack = stack
+        return stack
+    }
+
+    // MARK: - Running
+
+    /// Freezes the edit now; the run then waits for the photo's session
+    /// (the one opened with the photo, never a second hash) while preparing.
+    func start(_ editor: RecipeEditor) {
+        guard !isRunning, isSettled(editor), let opening = current else { return }
+        editor.commitDrag()
+        let capture: EditorExportCapture
+        do { capture = try editor.exportCapture() } catch {
+            phase = .failed(Self.failure(error))
+            return
+        }
+        // The edit and the session must be the same photo's.
+        guard capture.source.url.standardizedFileURL == opening.url.standardizedFileURL else {
+            phase = .failed(Failure(key: "ios.error.sourceChanged", detail: nil))
+            return
+        }
+        let request = capture.planRequest(choice)
+        let stack = exportStack()
+        run += 1
+        let run = self.run
+        phase = .running(RecipeExportProgress(stage: .preparing))
+        waitingForSource = true
+        task = Task { [weak self] in
+            do {
+                let opened = try await opening.task.value
+                let stack = try await stack.value
+                try Task.checkCancellation()
+                self?.sourceReady(run: run)
+                let result = try await stack.service.export(
+                    session: opened.session, snapshot: capture.snapshot(revision: opened.revision), request: request,
+                    lut: capture.lut, destination: nil,
+                    progress: { progress in Task { @MainActor in self?.progressed(progress, run: run) } })
+                let file = try await stack.sessions.stageExportForTransfer(opened.session, export: result.record.id)
+                self?.finished(Finished(result: result, file: file), run: run)
+            } catch {
+                self?.failed(error, run: run)
+            }
+        }
+    }
+
+    /// Cancels the run. While it still waits for the session, the sheet goes
+    /// back at once; the hashing goes on for the next run.
+    func cancel() {
+        task?.cancel()
+        guard waitingForSource, isRunning else { return }
+        run += 1
+        task = nil
+        waitingForSource = false
+        phase = .choosing
+    }
+
+    /// Back to the choice, after a result or a failure.
+    func reset() {
+        guard !isRunning else { return }
+        phase = .choosing
+    }
+
+    /// The system save sheet closed. A cancel only cancels the delivery.
+    func savedToFiles(_ outcome: Result<URL, any Error>) {
+        guard case .finished(var finished) = phase else { return }
+        switch outcome {
+        case .success:
+            finished.savedToFiles = true
+            finished.deliveryFailed = false
+        case .failure(let error):
+            if (error as? CocoaError)?.code == .userCancelled { return }
+            finished.deliveryFailed = true
+        }
+        phase = .finished(finished)
+    }
+
+    private func sourceReady(run: Int) {
+        if run == self.run { waitingForSource = false }
+    }
+
+    private func progressed(_ progress: RecipeExportProgress, run: Int) {
+        guard run == self.run, case .running = phase else { return }
+        phase = .running(progress)
+    }
+
+    private func finished(_ finished: Finished, run: Int) {
+        guard run == self.run else { return }
+        task = nil
+        phase = .finished(finished)
+        // The web destination is "Save to Files…": the save sheet follows.
+        if finished.result.resolved.selection == .destination(.web) { presentingFileExporter = true }
+    }
+
+    private func failed(_ error: any Error, run: Int) {
+        guard run == self.run else { return }
+        task = nil
+        waitingForSource = false
+        if error is CancellationError || (error as? HyperDRError)?.code == "cancelled" {
+            phase = .choosing
+            return
+        }
+        phase = .failed(Self.failure(error))
+    }
+
+    static func failure(_ error: any Error) -> Failure {
+        switch error {
+        case let error as RecipeExportError:
+            switch error {
+            case .busy: return Failure(key: "ios.export.error.busy", detail: nil)
+            case .sourceChanged: return Failure(key: "ios.error.sourceChanged", detail: nil)
+            case .missingLUT: return Failure(key: "ios.export.error.missingLUT", detail: nil)
+            case .missingModel: return Failure(key: "ios.export.error.missingModel", detail: nil)
+            case .memoryExceeded: return Failure(key: "ios.export.error.memory", detail: nil)
+            case .planBlocked(let codes): return Failure(key: "ios.export.blocked", detail: codes.joined(separator: ", "))
+            case .verificationFailed(let reason): return Failure(key: "ios.export.error.verification", detail: reason)
+            case .invalidSnapshot, .invalidStripes: return Failure(key: "ios.export.error.other", detail: String(describing: error))
+            }
+        case EditorRenderingError.missingLUT:
+            return Failure(key: "ios.export.error.missingLUT", detail: nil)
+        case EditorRenderingError.sourceChanged:
+            return Failure(key: "ios.error.sourceChanged", detail: nil)
+        case let error as HyperDRError:
+            return Failure(key: "ios.export.error.other", detail: "\(error.message) (\(error.code))")
+        default:
+            return Failure(key: "ios.export.error.other", detail: String(describing: error))
+        }
+    }
+}

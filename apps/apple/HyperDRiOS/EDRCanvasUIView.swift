@@ -1,41 +1,58 @@
-import CoreImage
+import HyperDRRender
 import Metal
 import QuartzCore
 import SwiftUI
 import UIKit
 
-/// The iOS host of the shared EDR display pass: a `CAMetalLayer` in extended
-/// linear Display P3, pinch to zoom, drag to pan, double tap to switch between
-/// fit and actual pixels. Headroom is read from the window's `UIScreen` on
-/// every display tick; when it moves, the photo is rendered again for it.
+/// The iOS host of the shared canvas: a `CAMetalLayer` in extended linear
+/// Display P3 drawn by the shared `DisplayCompositor`, pinch to zoom, drag to
+/// pan, double tap to switch between fit and actual pixels, and a press of
+/// 240 ms to see the original (p7-adjustments §5.4). The photo can be shown
+/// edited, original or split, with detail tiles and an effect mask over it
+/// (step 6); every change of geometry is reported through `onTransform`, for
+/// the overlays and the editor's viewport. Headroom is read from
+/// the window's `UIScreen` on every display tick; when it moves only the
+/// display weight changes, the photo is not rendered again (p7-2b §5).
 final class EDRCanvasUIView: UIView {
     override class var layerClass: AnyClass { CAMetalLayer.self }
     private var metalLayer: CAMetalLayer { layer as! CAMetalLayer }
 
     var onHeadroom: (HeadroomSnapshot) -> Void = { _ in }
+    var onDrawableSize: (HyperDRRender.PixelSize) -> Void = { _ in }
+    var onHoldOriginal: (Bool) -> Void = { _ in }
     var onError: (String) -> Void = { _ in }
+    var onTransform: (CanvasTransform) -> Void = { _ in }
 
-    var photo: HDRPhoto? {
+    /// What to show; the pairs come from Render through `RecipeEditor`.
+    struct Content {
+        var edited: DisplayPair
+        var original: DisplayPair?
+        var editedDetail: DisplayPair?
+        var originalDetail: DisplayPair?
+        /// `.original` and `.compare` need `original`; without it the edit shows.
+        var mode: DisplayComposition.Mode = .edited
+        var splitRatio = 0.5
+        var mask: DisplayMask?
+        var previewsAsSDR = false
+        /// The photo's full oriented size, for actual pixels and detail regions.
+        var imageSize: CGSize
+    }
+
+    var content: Content? {
         didSet {
-            texture = nil
-            renderedHeadroom = nil
-            geometry = CanvasTransform(imageSize: photo?.size ?? .zero, viewport: bounds.size)
-            geometry.backingScale = contentScaleFactor
-            renderGeneration += 1
+            if oldValue?.imageSize != content?.imageSize {
+                geometry = CanvasTransform(imageSize: content?.imageSize ?? .zero, viewport: bounds.size)
+                geometry.backingScale = contentScaleFactor
+            }
             dirty = true
         }
     }
 
     private let queue: (any MTLCommandQueue)?
-    private let display: EDRDisplayPass?
-    private let context: CIContext?
-    private var texture: (any MTLTexture)?
-    /// The display headroom `texture` was rendered for; nil while none is.
-    private var renderedHeadroom: CGFloat?
-    private var renderGeneration = 0
-    private var rendering = false
+    private let compositor: DisplayCompositor?
     private var headroom = HeadroomSnapshot()
     private var geometry = CanvasTransform(imageSize: .zero, viewport: .zero)
+    private var reported: CanvasTransform?
     private var link: CADisplayLink?
     private var dirty = true
     private var inFlight = false
@@ -43,16 +60,15 @@ final class EDRCanvasUIView: UIView {
     override init(frame: CGRect) {
         let device = MTLCreateSystemDefaultDevice()
         let queue = device?.makeCommandQueue()
-        var display: EDRDisplayPass?
+        var compositor: DisplayCompositor?
         var failure: String?
         if let device, queue != nil, let library = device.makeDefaultLibrary() {
-            do { display = try EDRDisplayPass(device: device, library: library) } catch { failure = error.localizedDescription }
+            do { compositor = try DisplayCompositor(device: device, library: library) } catch { failure = error.localizedDescription }
         } else {
             failure = "No Metal device"
         }
         self.queue = queue
-        self.display = display
-        context = queue.map(TemporaryHDRSource.makeContext)
+        self.compositor = compositor
         super.init(frame: frame)
         if let device { EDRDisplayPass.configure(metalLayer, device: device) }
         backgroundColor = .clear
@@ -82,16 +98,23 @@ final class EDRCanvasUIView: UIView {
         geometry.viewport = bounds.size
         geometry.backingScale = contentScaleFactor
         geometry.pan = geometry.clampedPan(geometry.pan)
-        metalLayer.drawableSize = CGSize(width: bounds.width * contentScaleFactor,
-                                         height: bounds.height * contentScaleFactor)
+        let size = CGSize(width: bounds.width * contentScaleFactor, height: bounds.height * contentScaleFactor)
+        metalLayer.drawableSize = size
+        if size.width >= 1, size.height >= 1 {
+            onDrawableSize(HyperDRRender.PixelSize(width: Int(size.width), height: Int(size.height)))
+        }
         dirty = true
     }
 
     // MARK: - Display tick
 
+    /// Geometry is reported on the display tick, outside SwiftUI's updates.
     @objc private func step() {
+        if geometry != reported {
+            reported = geometry
+            onTransform(geometry)
+        }
         sampleHeadroom()
-        renderIfNeeded()
         guard dirty, !inFlight else { return }
         draw()
     }
@@ -103,49 +126,36 @@ final class EDRCanvasUIView: UIView {
         guard next != headroom else { return }
         headroom = next
         onHeadroom(next)
+        dirty = true
     }
 
-    /// Renders the photo again when the headroom it is shown at moved by more
-    /// than 0.02 stops, one render at a time, newest photo wins. Past the
-    /// photo's own headroom nothing changes, so that is where it stops.
-    private func renderIfNeeded() {
-        guard let photo, let context, let queue, !rendering else { return }
-        let target = min(max(1, headroom.current), photo.headroom)
-        if let renderedHeadroom, abs(log2(target / renderedHeadroom)) < 0.02 { return }
-        rendering = true
-        let generation = renderGeneration
-        Task.detached(priority: .userInitiated) { [weak self] in
-            let result = Result { try TemporaryHDRSource.render(photo, displayHeadroom: target, context: context, queue: queue) }
-            await self?.finishRender(result, headroom: target, generation: generation)
-        }
-    }
-
-    private func finishRender(_ result: Result<any MTLTexture, any Error>, headroom target: CGFloat, generation: Int) {
-        rendering = false
-        guard generation == renderGeneration else { return }
-        switch result {
-        case .success(let rendered):
-            texture = rendered
-            renderedHeadroom = target
-            dirty = true
-        case .failure(let error):
-            renderedHeadroom = target   // the same input would fail again
-            // A failed re-render keeps the photo at its last headroom.
-            if texture == nil { onError(error.localizedDescription) }
-        }
-    }
-
-    /// Draws the newest state, one presentation in flight at a time. Without a
-    /// texture (no photo, or not rendered yet) the canvas is cleared.
+    /// Draws the newest state, one presentation in flight at a time. Without
+    /// content the canvas is cleared.
     private func draw() {
-        guard let queue, let display, metalLayer.drawableSize.width > 0, metalLayer.drawableSize.height > 0,
+        guard let queue, metalLayer.drawableSize.width > 0, metalLayer.drawableSize.height > 0,
               let drawable = metalLayer.nextDrawable(), let command = queue.makeCommandBuffer() else { return }
         dirty = false
         inFlight = true
-        if let texture {
-            display.encode(texture, transform: geometry, into: drawable,
-                           drawableSize: metalLayer.drawableSize, command: command)
-        } else if let encoder = command.makeRenderCommandEncoder(descriptor: EDRDisplayPass.clearPass(drawable)) {
+        var drawn = false
+        if let content, let compositor {
+            var composition = DisplayComposition(edited: content.edited, headroom: Double(max(1, headroom.current)))
+            composition.editedDetail = content.editedDetail
+            composition.effectMask = content.mask
+            composition.previewsAsSDR = content.previewsAsSDR
+            composition.splitRatio = content.splitRatio
+            if let original = content.original {
+                composition.original = original
+                composition.originalDetail = content.originalDetail
+                composition.mode = content.mode
+            }
+            do {
+                try compositor.encode(composition, transform: geometry, target: drawable.texture, command: command)
+                drawn = true
+            } catch {
+                onError(error.localizedDescription)
+            }
+        }
+        if !drawn, let encoder = command.makeRenderCommandEncoder(descriptor: EDRDisplayPass.clearPass(drawable)) {
             encoder.endEncoding()
         }
         // Metal calls this on its own thread: not main-actor isolated.
@@ -164,7 +174,9 @@ final class EDRCanvasUIView: UIView {
         pan.maximumNumberOfTouches = 2
         let doubleTap = UITapGestureRecognizer(target: self, action: #selector(doubleTapped(_:)))
         doubleTap.numberOfTapsRequired = 2
-        for recognizer in [pinch, pan, doubleTap] as [UIGestureRecognizer] {
+        let hold = UILongPressGestureRecognizer(target: self, action: #selector(held(_:)))
+        hold.minimumPressDuration = 0.24
+        for recognizer in [pinch, pan, doubleTap, hold] as [UIGestureRecognizer] {
             recognizer.delegate = self
             addGestureRecognizer(recognizer)
         }
@@ -188,6 +200,14 @@ final class EDRCanvasUIView: UIView {
         apply(geometry.zoomed(to: target, anchorInView: recognizer.location(in: self)))
     }
 
+    @objc private func held(_ recognizer: UILongPressGestureRecognizer) {
+        switch recognizer.state {
+        case .began: onHoldOriginal(true)
+        case .ended, .cancelled, .failed: onHoldOriginal(false)
+        default: break
+        }
+    }
+
     private func apply(_ next: CanvasTransform) {
         guard next != geometry else { return }
         geometry = next
@@ -205,21 +225,37 @@ extension EDRCanvasUIView: UIGestureRecognizerDelegate {
 
 /// SwiftUI wrapper of `EDRCanvasUIView`.
 struct EDRCanvas: UIViewRepresentable {
-    var photo: HDRPhoto?
+    var content: EDRCanvasUIView.Content?
     var onHeadroom: (HeadroomSnapshot) -> Void
+    var onDrawableSize: (HyperDRRender.PixelSize) -> Void
+    var onHoldOriginal: (Bool) -> Void
     var onError: (String) -> Void
+    var onTransform: (CanvasTransform) -> Void
 
     func makeUIView(context: Context) -> EDRCanvasUIView {
         let view = EDRCanvasUIView(frame: .zero)
-        view.onHeadroom = onHeadroom
-        view.onError = onError
-        view.photo = photo
+        updateUIView(view, context: context)
         return view
     }
 
     func updateUIView(_ view: EDRCanvasUIView, context: Context) {
         view.onHeadroom = onHeadroom
+        view.onDrawableSize = onDrawableSize
+        view.onHoldOriginal = onHoldOriginal
         view.onError = onError
-        if view.photo?.image !== photo?.image { view.photo = photo }
+        view.onTransform = onTransform
+        if !Self.same(view.content, content) { view.content = content }
+    }
+
+    private static func same(_ a: EDRCanvasUIView.Content?, _ b: EDRCanvasUIView.Content?) -> Bool {
+        guard let a, let b else { return a == nil && b == nil }
+        func same(_ x: DisplayPair?, _ y: DisplayPair?) -> Bool {
+            x.flatMap { left in y.map { left.hasSameContent(as: $0) } } ?? (x == nil && y == nil)
+        }
+        let masks = a.mask.flatMap { left in b.mask.map { left.hasSameContent(as: $0) } } ?? (a.mask == nil && b.mask == nil)
+        return a.edited.hasSameContent(as: b.edited) && same(a.original, b.original)
+            && same(a.editedDetail, b.editedDetail) && same(a.originalDetail, b.originalDetail) && masks
+            && a.mode == b.mode && a.splitRatio == b.splitRatio && a.previewsAsSDR == b.previewsAsSDR
+            && a.imageSize == b.imageSize
     }
 }

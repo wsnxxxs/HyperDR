@@ -93,12 +93,10 @@ import XCTest
         view.tick()
         await eventually("several misses") { probe.requests >= 3 }
         XCTAssertEqual(loop.state.presentations, 0)
-        XCTAssertEqual(renderer.pass1Runs, 0, "no pass 1 without a drawable")
         probe.handsOutNone = false
         await eventually("drawn after the misses") {
             loop.state.lastPresented == view.handedOverGeneration && loop.state.idle
         }
-        XCTAssertEqual(renderer.pass1Runs, 1)
         XCTAssertLessThanOrEqual(renderer.maxInFlightObserved, 1)
     }
 
@@ -212,7 +210,6 @@ import XCTest
         await driveWhileBlocked(view, scenario: "drawable source blocked / nil", isBlocked: { gate.isWaiting })
         XCTAssertEqual(requests.withLock { $0 }, 1, "coalesced updates must not request more drawables")
         XCTAssertEqual(loop.state.presentations, 0)
-        XCTAssertEqual(renderer.pass1Runs, 0, "no pass 1 while waiting for a drawable")
         gate.release()
         await eventually(timeout: .seconds(10), "newest snapshot after relief without another tick") {
             loop.state.lastPresented == view.handedOverGeneration && loop.state.idle
@@ -270,7 +267,6 @@ import XCTest
         await eventually(timeout: .seconds(10), "renderer waiting for held pool") { gate.isWaiting }
         await driveWhileBlocked(view, scenario: "all drawables held", isBlocked: { gate.isWaiting })
         XCTAssertEqual(loop.state.presentations, 0)
-        XCTAssertEqual(renderer.pass1Runs, 0)
         gate.release()
         await eventually(timeout: .seconds(10), "newest snapshot after returning held drawables") {
             loop.state.lastPresented == view.handedOverGeneration && loop.state.idle

@@ -1,5 +1,6 @@
 import Foundation
 import HyperDRDesign
+import HyperDRKit
 
 /// What the export views say for one state of the model, as plain values:
 /// which cards make up the format groups, which of the four HEVC reasons a
@@ -254,11 +255,21 @@ extension ExportPresentation {
     /// reason code and field names (never the engine's own wording).
     @MainActor static func fallbackNote(_ reason: ExportFallbackReason, model: EditorModel, locale: Locale) -> String {
         guard reason.code == .missingCaptureFields, !reason.missingCaptureFields.isEmpty else {
-            return AppStrings.format("history.fallback.unknown %@", locale: locale, AppStrings.string(model.fallbackModelNameKey, locale: locale))
+            return AppStrings.format("history.fallback.unknown %@", locale: locale, AppStrings.string(fallbackModelNameKey, locale: locale))
         }
         return AppStrings.format("ai.fallback %@ %@", locale: locale,
-            AdjustmentSection.fieldList(reason.missingCaptureFields, locale: locale),
-            AppStrings.string(model.fallbackModelNameKey, locale: locale))
+            fieldList(reason.missingCaptureFields, locale: locale),
+            AppStrings.string(fallbackModelNameKey, locale: locale))
+    }
+
+    /// The engine model an export without capture data fell back to (old
+    /// exports in the history; the editor's AI is Core ML now).
+    static let fallbackModelNameKey = "model.research-cnn-v1"
+
+    /// "aperture and focal length" / 「光圈和焦距」.
+    static func fieldList(_ fields: [String], locale: Locale) -> String {
+        fields.map { AppStrings.string("field.\($0)", locale: locale) }
+            .formatted(.list(type: .and, width: .standard).locale(locale))
     }
 
     /// "…/Pictures", the system's own name for the folder a copy was saved in
@@ -354,6 +365,7 @@ extension ExportPresentation {
         formatter.doesRelativeDateFormatting = true
         parts.append(formatter.string(from: version.createdAt))
         parts.append(AppStrings.string("enc.\(version.encodingID).label", locale: locale))
+        if let gamut = version.gamut { parts.append(AppStrings.string(gamut.labelKey, locale: locale)) }
         if let size = version.pixelSize { parts.append("\(size.width) × \(size.height)") }
         parts.append(version.byteCount.formatted(.byteCount(style: .file).locale(locale)))
         if let model = version.modelName { parts.append(AppStrings.format("history.ai %@", locale: locale, model)) }

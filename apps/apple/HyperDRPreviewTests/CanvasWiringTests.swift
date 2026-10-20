@@ -24,16 +24,16 @@ import HyperDRDesign
     func testLegendNamesTheMaskAndShowsZebrasOnlyWithoutTheInspector() {
         func rows(mask: String? = nil, hot: Bool = false, cold: Bool = false, inspector: Bool = true,
                   mode: ViewMode = .edited, peeking: Bool = false) -> Int {
-            CanvasAdornments.legendRows(maskLabelKey: mask, highlightZebra: hot, shadowZebra: cold,
+            CanvasAdornments.legendRows(maskName: mask.map { Text($0) }, highlightZebra: hot, shadowZebra: cold,
                                         showsInspector: inspector, viewMode: mode, isPeeking: peeking).count
         }
-        XCTAssertEqual(rows(mask: "ctrl.hdrStrength.label"), 1)
+        XCTAssertEqual(rows(mask: "Strength"), 1)
         XCTAssertEqual(rows(hot: true, cold: true), 0, "the inspector's own switches are the legend")
         XCTAssertEqual(rows(hot: true, cold: true, inspector: false), 2)
-        XCTAssertEqual(rows(mask: "ctrl.hdrStrength.label", hot: true, inspector: false), 2)
-        XCTAssertEqual(rows(mask: "ctrl.hdrStrength.label", mode: .original), 0)
-        XCTAssertEqual(rows(mask: "ctrl.hdrStrength.label", peeking: true), 0)
-        XCTAssertEqual(rows(mask: "ctrl.hdrStrength.label", mode: .compare), 1)
+        XCTAssertEqual(rows(mask: "Strength", hot: true, inspector: false), 2)
+        XCTAssertEqual(rows(mask: "Strength", mode: .original), 0)
+        XCTAssertEqual(rows(mask: "Strength", peeking: true), 0)
+        XCTAssertEqual(rows(mask: "Strength", mode: .compare), 1)
     }
 
     // MARK: Hints
@@ -211,7 +211,7 @@ import HyperDRDesign
     // MARK: Undo routing
 
     func testUndoGoesToTheTextHistoryForTextAndToTheEditorOtherwise() {
-        let services = FakeEditorServices(openDelay: .zero, previewDelay: .milliseconds(1))
+        let services = FakeEditorServices(openDelay: .zero)
         let model = EditorModel(services: services)
         let editorOnly = NSView()
         XCTAssertFalse(UndoRouting.canUndo(model: model, responder: editorOnly))
@@ -224,29 +224,29 @@ import HyperDRDesign
     }
 
     func testTheMenuTitleNamesTheEditorStep() async {
-        let services = FakeEditorServices(openDelay: .zero, previewDelay: .milliseconds(1))
+        let services = FakeEditorServices(openDelay: .zero)
         let model = EditorModel(services: services)
         model.open([URL(fileURLWithPath: "/fixtures/a.jpg")])
         await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
-        model.adjust("brightness", to: 0.9)
+        model.adjustRecipe("tone.exposure", to: 0.9)
         let title = UndoRouting.undoTitle(model: model, responder: NSView())
-        XCTAssertTrue(title.contains(EditorModel.undoActionName("brightness")), title)
+        XCTAssertTrue(title.contains(EditorModel.undoActionName(.parameter("tone.exposure"))), title)
         XCTAssertTrue(UndoRouting.canUndo(model: model, responder: NSView()))
         UndoRouting.undo(model: model, responder: NSView())
         XCTAssertTrue(UndoRouting.canRedo(model: model, responder: NSView()))
         // Text keeps its own history: the editor's is not touched.
-        let before = model.control("brightness").value
+        let before = model.recipeNumber("tone.exposure")
         UndoRouting.redo(model: model, responder: NSTextView())
-        XCTAssertEqual(model.control("brightness").value, before)
+        XCTAssertEqual(model.recipeNumber("tone.exposure"), before)
     }
 
     func testEmptyTextHistoryDisablesUndoInsteadOfFallingBackToThePhoto() async {
-        let services = FakeEditorServices(openDelay: .zero, previewDelay: .milliseconds(1))
+        let services = FakeEditorServices(openDelay: .zero)
         let model = EditorModel(services: services)
         model.open([URL(fileURLWithPath: "/fixtures/a.jpg")])
         await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
-        model.adjust("brightness", to: 0.9)
-        let edited = model.control("brightness").value
+        model.adjustRecipe("tone.exposure", to: 0.9)
+        let edited = model.recipeNumber("tone.exposure")
         XCTAssertTrue(model.canUndo)
 
         // A text view with nothing to undo: the commands are off, they do not
@@ -255,9 +255,9 @@ import HyperDRDesign
         XCTAssertFalse(UndoRouting.canUndo(model: model, responder: text))
         XCTAssertFalse(UndoRouting.canRedo(model: model, responder: text))
         UndoRouting.undo(model: model, responder: text)
-        XCTAssertEqual(model.control("brightness").value, edited)
+        XCTAssertEqual(model.recipeNumber("tone.exposure"), edited)
         XCTAssertTrue(model.canUndo)
-        XCTAssertFalse(UndoRouting.undoTitle(model: model, responder: text).contains(EditorModel.undoActionName("brightness")))
+        XCTAssertFalse(UndoRouting.undoTitle(model: model, responder: text).contains(EditorModel.undoActionName(.parameter("tone.exposure"))))
 
         // A text field's own history, once it has a step, is what is enabled.
         let history = UndoManager()
@@ -274,7 +274,7 @@ import HyperDRDesign
         XCTAssertEqual(UndoRouting.undoTitle(model: model, responder: field), history.undoMenuItemTitle)
         UndoRouting.undo(model: model, responder: field)
         XCTAssertEqual(typed, "")
-        XCTAssertEqual(model.control("brightness").value, edited)
+        XCTAssertEqual(model.recipeNumber("tone.exposure"), edited)
     }
 
     func testMenuStateBumpsWhenAnUndoGroupCloses() {
@@ -314,7 +314,7 @@ import HyperDRDesign
     }
 
     func testOpenCommandsAreOnOnceThePhotoIsReady() async {
-        let services = FakeEditorServices(openDelay: .zero, previewDelay: .milliseconds(1))
+        let services = FakeEditorServices(openDelay: .zero)
         let model = EditorModel(services: services)
         model.open([URL(fileURLWithPath: "/fixtures/a.jpg")])
         await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
@@ -461,7 +461,7 @@ extension CanvasWiringTests {
     /// The real view, in a window that is never shown: opening one photo
     /// consumes one showing of its hint, not one per observation.
     func testFirstPhotoConsumesOneHintAppearanceInTheRealStage() async {
-        let service = FakeEditorServices(openDelay: .milliseconds(20), previewDelay: .milliseconds(20))
+        let service = FakeEditorServices(openDelay: .milliseconds(20))
         let model = EditorModel(services: service)
         let session = ViewerSessionState()
         let root = CanvasStage(model: model, window: EditorWindowState())

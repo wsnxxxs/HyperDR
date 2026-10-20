@@ -1,6 +1,7 @@
 import AppKit
 import HyperDRDesign
-@_spi(Testing) import HyperDREngine
+import HyperDRRender
+import Synchronization
 import SwiftUI
 import XCTest
 @testable import HyperDR
@@ -26,26 +27,19 @@ import XCTest
         return try XCTUnwrap(context.makeImage())
     }
 
-    private func frame() async throws -> PreviewFrame {
-        let photo = try TinyPhoto(); defer { photo.remove() }
-        let engine = try await Engine(), session = try engine.openPreview(source: photo.url)
-        defer { session.close() }
-        return try await session.renderFrame(EngineRequest(settings: ["preview_max_edge": .number(8)]))
-    }
-
-    private func preview(_ frame: PreviewFrame?) -> EditorPreview {
-        EditorPreview(pixelSize: PixelSize(width: 64, height: 48),
-            source: SourceSummary(domain: .sdr, colorName: "Display P3", degradationReasons: []), hasGain: true, frame: frame)
-    }
-
     /// The editor's clock, fixed: a running export's elapsed time is then the same in every picture.
     private let fixedNow = Date(timeIntervalSinceReferenceDate: 810_000_000)
 
-    private func ready(frame: PreviewFrame?) async -> (EditorModel, FakeEditorServices) {
-        let services = FakeEditorServices(openDelay: .zero, previewDelay: .zero)
-        services.preview = preview(frame)
+    /// A ready photo whose thumbnails come from `thumbnail`; the default
+    /// never finishes, so the picture stays loading.
+    private func ready(thumbnail: @escaping @Sendable (EditorFrame, HyperDRRender.PixelSize) async -> CGImage? = { _, _ in
+        try? await Task.sleep(for: .seconds(60)); return nil
+    }) async -> (EditorModel, FakeEditorServices) {
+        let rendering = ScriptedRendering()
+        rendering.thumbnailHandler = thumbnail
+        let services = FakeEditorServices(openDelay: .zero, rendering: rendering)
         let now = fixedNow
-        let model = EditorModel(services: services, ticker: ManualFrameTicker(), now: { now })
+        let model = EditorModel(services: services, now: { now })
         await model.loadExportServices(); model.open([source])
         await eventually(timeout: .seconds(10)) { model.document?.phase == .ready && !model.suggestedFileName.isEmpty }
         return (model, services)
@@ -125,24 +119,21 @@ import XCTest
 
     func testTheSummaryShowsLoadingThenThePictureThenNone() async throws {
         let picture = try magenta()
-        // Loading: no edited frame yet.
-        let (loadingModel, _) = await ready(frame: nil)
+        // Loading: the picture is not made yet.
+        let (loadingModel, _) = await ready()
         let loading = try await look(ExportSettingsHost(model: loadingModel), "summary-loading")
         XCTAssertEqual(loadingModel.exportSummaryThumbnail, .loading)
         XCTAssertEqual(magentaPixels(loading), 0)
         loadingModel.closeDocument()
 
         // Ready.
-        let shown = try await frame()
-        let (model, services) = await ready(frame: shown)
-        services.thumbnailHandler = { _, _ in picture }
+        let (model, _) = await ready { _, _ in picture }
         let readyPicture = try await look(ExportSettingsHost(model: model), "summary-ready", until: { model.exportSummaryThumbnail == .ready(picture) })
         XCTAssertGreaterThan(magentaPixels(readyPicture), 1000, "the picture fills the 172 × 115 box (fit, 3:2)")
         model.closeDocument()
 
         // None: the picture could not be made.
-        let (failing, failingServices) = await ready(frame: shown)
-        failingServices.thumbnailHandler = { _, _ in nil }
+        let (failing, _) = await ready { _, _ in nil }
         let none = try await look(ExportSettingsHost(model: failing), "summary-none", until: { failing.exportSummaryThumbnail == .unavailable })
         XCTAssertEqual(magentaPixels(none), 0)
         XCTAssertNotEqual(none.representation(using: .png, properties: [:]), loading.representation(using: .png, properties: [:]),
@@ -151,15 +142,14 @@ import XCTest
     }
 
     func testSwitchingPhotoEmptiesTheSummary() async throws {
-        let picture = try magenta(), shown = try await frame()
-        let (model, services) = await ready(frame: shown)
-        services.thumbnailHandler = { _, _ in picture }
+        let picture = try magenta()
+        let (model, services) = await ready { _, _ in picture }
         let tracking = Task { await model.trackExportSummaryThumbnail() }
         defer { tracking.cancel() }
         await eventually(timeout: .seconds(10)) { model.exportSummaryThumbnail == .ready(picture) }
         let before = try await look(ExportSettingsHost(model: model), seconds: 0.2)
         XCTAssertGreaterThan(magentaPixels(before), 1000, "the first photo's picture is on show")
-        services.preview = preview(nil)
+        (services.rendering as! ScriptedRendering).holdsOpens = true   // the next photo is still opening
         model.open([next])
         XCTAssertEqual(model.exportSummaryThumbnail, .loading, "no picture of the last photo while the next one opens")
         let after = try await look(ExportSettingsHost(model: model), seconds: 0.3)
@@ -170,9 +160,9 @@ import XCTest
     // MARK: Progress and result
 
     func testProgressAndResultShowTheFrozenPictureEvenWhenTheResultIsStale() async throws {
-        let picture = try magenta(), shown = try await frame()
-        let (model, services) = await ready(frame: shown)
-        services.thumbnailHandler = { _, _ in picture }
+        let picture = try magenta()
+        let shown = Mutex(true)
+        let (model, services) = await ready { _, _ in shown.withLock { $0 } ? picture : nil }
         model.startExport(destination: destination, token: model.prepareExport()!)
         await eventually(timeout: .seconds(10)) { services.hasExportSubscriber && model.export.thumbnail == .ready(picture) }
         let progress = try await look(ExportSheet(model: model, window: EditorWindowState()), "progress-ready", seconds: 0.2)
@@ -185,8 +175,9 @@ import XCTest
         XCTAssertGreaterThan(magentaPixels(done), magentaPixels(progress), "96 × 64 is larger")
 
         // The picture was exported with the old parameters; the current ones do not replace it.
-        services.thumbnailHandler = { _, _ in nil }
-        model.adjust("brightness", to: 1.2)
+        shown.withLock { $0 = false }
+        // Until P7-3b the export follows its own choices, not the recipe.
+        model.setExportQuality(55)
         await eventually(timeout: .seconds(10)) { model.export.isResultStale }
         let stale = try await look(ExportSheet(model: model, window: EditorWindowState()), "result-stale", seconds: 0.2)
         XCTAssertGreaterThan(magentaPixels(stale), 1000, "still the exported version, not dimmed away")
@@ -194,7 +185,13 @@ import XCTest
     }
 
     func testAProgressViewThatIsStillWaitingShowsAnEmptyBoxWithoutASpinnerOrAnIcon() async throws {
-        let (model, services) = await ready(frame: nil)
+        let (model, services) = await ready()
+        // The summary's picture is still on its way, so the export starts without one.
+        let tracking = Task { await model.trackExportSummaryThumbnail() }
+        defer { tracking.cancel() }
+        let rendering = services.rendering as! ScriptedRendering
+        await eventually(timeout: .seconds(10)) { rendering.thumbnailCalls.contains(344) }
+        XCTAssertEqual(model.exportSummaryThumbnail, .loading)
         model.startExport(destination: destination, token: model.prepareExport()!)
         await eventually(timeout: .seconds(10)) { services.hasExportSubscriber }
         XCTAssertEqual(model.export.thumbnail, .loading)
@@ -217,12 +214,12 @@ import XCTest
 
     func testHistoryRowsReadTheirPictureWhenTheyAppear() async throws {
         let picture = try magenta()
-        let (model, services) = await ready(frame: nil)
+        let (model, services) = await ready()
         var asked: [String] = []
         services.versionThumbnailHandler = { _, id in asked.append(id); return id == "a" ? picture : nil }
         services.historyByURL[source] = ["a", "b"].enumerated().map { index, id in
             ExportHistoryItem(version: ExportVersion(number: 2 - index, createdAt: .now, encodingID: "adaptive", result: result(id)),
-                              key: "key-\(id)", options: model.edit)
+                              options: model.exportChoices)
         }
         model.refreshExportMetadata()
         await eventually(timeout: .seconds(10)) { model.exportVersions.count == 2 }

@@ -195,22 +195,16 @@ enum SettingsDiagnostics {
         }
     }
 
-    /// The models this build can run, each with the version the engine reports;
-    /// "Starting…" until the engine is up; why none can run when the runtime is missing; "None" when it is there
-    /// but offers nothing.
+    /// The AI model: Core ML, built in; "Starting…" until the engine is up;
+    /// why not when it cannot run on this Mac.
     static func models(_ model: EditorModel, locale: Locale) -> String {
         // The runtime is not reported before the engine is up: not "missing" yet.
         if case .starting = model.engine { return AppStrings.string("settings.diag.engine.starting", locale: locale) }
-        let table = model.services.modelTable()
-        guard table.runtimeReady else { return AppStrings.string("settings.diag.model.noRuntime", locale: locale) }
-        let names = table.models.filter(\.isEnabled).map { choice in
-            let name = AppStrings.string(choice.nameKey, locale: locale)
-            guard let version = shortVersion(choice.version) else { return name }
-            return AppStrings.format("settings.diag.model.version %@ %@", locale: locale, name, version)
+        // Core ML: built in; it says it cannot run here only once it was tried.
+        if case .unavailable = model.editor.aiStatus {
+            return AppStrings.string("settings.diag.model.noRuntime", locale: locale)
         }
-        // No model enabled: say so, rather than leave an empty (and taller) row.
-        guard !names.isEmpty else { return AppStrings.string("export.summary.none", locale: locale) }
-        return names.formatted(.list(type: .and, width: .narrow).locale(locale))
+        return AppStrings.string("settings.diag.model.coreml", locale: locale)
     }
 
     /// "v1" from the engine's "research-demo-fold0-seed908/v1": the part after

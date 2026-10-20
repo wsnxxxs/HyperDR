@@ -117,11 +117,15 @@ struct RestoreMissingNotice: View {
     }
 }
 
-/// The photo's file cannot be found. Not a dismissable notice: it states
-/// something that stays true until the file is back, and goes by itself then.
+/// The photo's file cannot be found, or was changed by another app. Not a
+/// dismissable notice: it states something that stays true until the file is
+/// back (it goes by itself then) or the photo is opened again.
 struct SourceMissingBanner: View {
+    enum Kind { case missing, changed }
+    var kind = Kind.missing
     /// A chosen file is being checked: the button waits for that to finish.
     var isChecking = false
+    /// Locates the missing file, or opens the changed one again.
     let locate: () -> Void
     @State private var hovered = false
 
@@ -129,13 +133,15 @@ struct SourceMissingBanner: View {
         HStack(alignment: .center, spacing: Space.s3) {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.hdr.warn).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text("source.missing.title").font(Font.hdr.control).fontWeight(.semibold)
-                Text("source.missing.body").font(Font.hdr.caption).foregroundStyle(Color.hdr.overlayMuted)
+                Text(kind == .missing ? "source.missing.title" : "source.changed.title")
+                    .font(Font.hdr.control).fontWeight(.semibold)
+                Text(kind == .missing ? "source.missing.body" : "source.changed.body")
+                    .font(Font.hdr.caption).foregroundStyle(Color.hdr.overlayMuted)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .accessibilityElement(children: .combine)
             Button(action: locate) {
-                Text(isChecking ? "source.missing.checking" : "source.missing.locate")
+                Text(kind == .changed ? "source.changed.reopen" : isChecking ? "source.missing.checking" : "source.missing.locate")
                     .font(.system(size: TypeScale.Size.caption, weight: .semibold))
                     .foregroundStyle(Color.hdr.overlayInk)
                     .padding(.horizontal, Space.s2)

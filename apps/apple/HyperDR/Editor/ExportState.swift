@@ -50,6 +50,9 @@ nonisolated struct ExportVersion: Identifiable, Equatable, Sendable {
     var number: Int
     var createdAt: Date
     var encodingID: String
+    /// The gamut written, as the planner resolved it; nil for versions from
+    /// before recipe exports.
+    var gamut: ExportColorGamut? = nil
     var modelName: String? = nil
     var fallbackReason: ExportFallbackReason? = nil
     var hasFrame = false
@@ -168,7 +171,8 @@ nonisolated extension Duration {
     var thumbnail: ThumbnailState = .loading
     var encodingID = "adaptive"
     var outputGamut = "srgb"
-    var clampSrgb = false
+    /// The gamut the export writes, as the planner resolves it.
+    var gamut: ExportColorGamut = .p3
     var phase: Phase = .idle
     var startedAt: Date?
     var stage: String?

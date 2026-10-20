@@ -81,6 +81,8 @@ import UniformTypeIdentifiers
     private(set) var lutReferences: [String: LUTReference] = [:]
     func setLUTReference(_ reference: LUTReference?, for id: String) { lutReferences[id] = reference }
     @ObservationIgnored var lutInstallTask: Task<Void, Never>?
+    /// A restore waiting for its look's LUT from the photo's own copy.
+    @ObservationIgnored var restoreTask: Task<Void, Never>?
     @ObservationIgnored let now: () -> Date
 
     /// The committed photograph's Exif, loaded automatically in the background.
@@ -294,6 +296,7 @@ import UniformTypeIdentifiers
         exportTask?.cancel()
         exportMetadataTask?.cancel()
         lutInstallTask?.cancel()
+        restoreTask?.cancel()
         lutMetadataTask?.cancel()
         for write in lutMetadataWrites.values { write.task?.cancel() }
         for task in saveTasks.values { task.cancel() }

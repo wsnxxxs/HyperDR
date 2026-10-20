@@ -62,6 +62,9 @@ import UniformTypeIdentifiers
     func applyLUT(_ id: String, to photo: EditorPhoto) async throws -> LUTItem
     func updateLUT(_ id: String, input: LUTColorSpace, output: LUTColorSpace) async throws -> LUTItem
     func removeLUT(_ id: String) async throws
+    /// The photo's own copy of a look's LUT (kept for its export history,
+    /// which outlives the library), by content hash.
+    func recipeLUT(_ photo: EditorPhoto, contentHash: String) async throws -> ColorLUT
 }
 
 /// Outcome of restoring the last photo on launch (A2).
@@ -137,6 +140,8 @@ extension UserDefaults {
     var folder = ExportFolder()
     var capabilityFixture: EditorCapabilities?
     var library: [LUTItem] = []
+    /// The open photo's own LUTs (`recipeLUT`), by content hash.
+    var sessionLUTs: [String: ColorLUT] = [:]
     var lutEntriesHandler: (() async -> [LUTItem])?
     var removeLUTHandler: ((String) async throws -> Void)?
     var importedLUT: LUTItem?
@@ -317,5 +322,9 @@ extension FakeEditorServices {
     func removeLUT(_ id: String) async throws {
         if let removeLUTHandler { try await removeLUTHandler(id); return }
         library.removeAll { $0.id == id }
+    }
+    func recipeLUT(_ photo: EditorPhoto, contentHash: String) async throws -> ColorLUT {
+        guard let lut = sessionLUTs[contentHash] else { throw UserFacingError(code: "lut_invalid") }
+        return lut
     }
 }

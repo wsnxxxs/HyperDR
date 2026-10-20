@@ -106,8 +106,7 @@ extension EditorModel {
     }
     func rememberOutputPreferences() {
         guard preferences.value.rememberOutput else { return }
-        let output = ["encoding": exportChoices.encoding, "outputGamut": exportChoices.outputGamut,
-            "clampSrgb": exportChoices.clampSrgb ? "true" : "false"]
+        let output = ["encoding": exportChoices.encoding, "outputGamut": exportChoices.outputGamut]
         preferences.value.output = output
         preferences.value.save(to: services.preferences)
     }
@@ -116,7 +115,6 @@ extension EditorModel {
         let p = preferences.value
         if p.rememberOutput {
             if let v = p.output["outputGamut"] { exportChoices.outputGamut = v }
-            if let v = p.output["clampSrgb"] { exportChoices.clampSrgb = v == "true" }
         }
         showsHighlightZebra = p.highlightZebra; showsShadowZebra = p.shadowZebra
         viewMode = p.initialView == .original ? .original : .edited

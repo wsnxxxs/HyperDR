@@ -37,7 +37,7 @@ extension EditorModel {
         let choices = exportChoices
         export.encodingID = choices.encoding
         export.outputGamut = choices.outputGamut == "auto" ? (choices.encoding == "sdr-tiff" ? "p3" : "srgb") : choices.outputGamut
-        export.clampSrgb = choices.clampSrgb
+        export.gamut = choices.gamut
         if let capabilities = exportCapabilities {
             export.encodingAvailability = capabilities.availability(isHDR: source.domain == .hdr || source.domain == .dual)
         }
@@ -289,8 +289,24 @@ extension EditorModel {
         guard !isEditingLocked, let item = exportHistory.first(where: { $0.version.id == version }),
               exportVersions.first(where: { $0.id == version })?.matchesCurrent == false else { return }
         finishGestureBeforeEdit()
-        // The version's recipe comes back as one undo step, its format as the
-        // panel's settings; exporting that recipe again asks for its model.
+        restoreTask?.cancel()
+        guard let look = item.recipeSnapshot?.recipe.look, let photo else { apply(item); return }
+        // The look's LUT may have left the library: the photo keeps its own
+        // copy, which goes to the editor before the recipe that names it.
+        let editor = editor
+        restoreTask = Task { [weak self, services] in
+            let lut = try? await services.recipeLUT(photo, contentHash: look.contentHash)
+            if let lut { await editor.installLUT(lut) }
+            guard let self, !Task.isCancelled, self.photo == photo, !isEditingLocked else { return }
+            if lut == nil, !lutReferences.values.contains(where: { $0.contentHash == look.contentHash }) {
+                self.lut.failures = [UserFacingError(code: "lut_invalid", detail: look.name)]
+            }
+            apply(item)
+        }
+    }
+    /// The version's recipe comes back as one undo step, its format as the
+    /// panel's settings; exporting that recipe again asks for its model.
+    private func apply(_ item: ExportHistoryItem) {
         if let snapshot = item.recipeSnapshot {
             editor.setRecipe(snapshot.recipe)
             restoredModel = item.resolved?.modelIdentity.map { (editor.recipe, $0) }
@@ -386,11 +402,6 @@ extension EditorModel {
     func setOutputGamut(_ id: String) {
         guard photo != nil, !isEditingLocked, ["srgb", "p3"].contains(id), exportChoices.outputGamut != id else { return }
         exportChoices.outputGamut = id
-        exportChoicesChanged()
-    }
-    func setClampSrgb(_ on: Bool) {
-        guard photo != nil, !isEditingLocked, exportChoices.clampSrgb != on else { return }
-        exportChoices.clampSrgb = on
         exportChoicesChanged()
     }
     private var rawDiagnostics: String {

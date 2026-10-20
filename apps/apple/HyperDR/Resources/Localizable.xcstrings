@@ -5389,40 +5389,6 @@
         }
       }
     },
-    "export.color.keep" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Keep format gamut"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "保持格式色域"
-          }
-        }
-      }
-    },
-    "export.color.limitSRGB" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Limit to sRGB"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "限制为 sRGB"
-          }
-        }
-      }
-    },
     "export.footer.panelFirst" : {
       "extractionState" : "manual",
       "localizations" : {

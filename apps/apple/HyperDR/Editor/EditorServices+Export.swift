@@ -3,6 +3,7 @@ import Foundation
 import HyperDREngine
 import HyperDRKit
 import HyperDRRecipe
+import HyperDRRender
 
 /// Existing preview-only test doubles can use the unsupported service defaults.
 /// Live and Fake implement the complete M3 surface below/alongside their records.
@@ -40,6 +41,16 @@ extension EditorServices {
     func applyLUT(_ id: String, to photo: EditorPhoto) async throws -> LUTItem { throw UserFacingError(code: "lut_invalid") }
     func updateLUT(_ id: String, input: LUTColorSpace, output: LUTColorSpace) async throws -> LUTItem { throw UserFacingError(code: "lut_invalid") }
     func removeLUT(_ id: String) async throws { throw UserFacingError(code: "lut_invalid") }
+    func recipeLUT(_ photo: EditorPhoto, contentHash: String) async throws -> ColorLUT { throw UserFacingError(code: "lut_invalid") }
+}
+
+extension ExportChoices {
+    /// The panel's settings a recipe export asked for: an ISO gain-map JPEG
+    /// written as SDR (HDR off) still restores, and matches, as one.
+    nonisolated init(_ resolved: ResolvedExportSnapshot) {
+        if case .custom(let format) = resolved.selection { self.init(format) }
+        else { self.init(CustomExportFormat(encoding: resolved.encoding, gamut: resolved.gamut, quality: resolved.quality)) }
+    }
 }
 
 extension ExportHistoryItem {
@@ -55,7 +66,6 @@ extension ExportHistoryItem {
         var options = ExportChoices()
         if case .string(let id)? = record.options["encoding"] { options.encoding = id }
         if case .string(let id)? = record.options["outputGamut"] { options.outputGamut = id }
-        if case .bool(let on)? = record.options["clampSrgb"] { options.clampSrgb = on }
         if case .number(let value)? = record.options["quality"] { options.quality = value }
         let width = file["width"] as? Int ?? 0, height = file["height"] as? Int ?? 0
         let size = width > 0 && height > 0 ? PixelSize(width: width, height: height) : nil
@@ -82,14 +92,13 @@ extension ExportHistoryItem {
         func time(_ stages: RecipeExportStage...) -> Double { stages.reduce(0) { $0 + (seconds[$1.rawValue] ?? 0) } }
         let stages = [time(.preparing, .model, .developing), time(.rendering), time(.encoding), time(.verifying)]
         let size = PixelSize(width: resolved.width, height: resolved.height)
-        let options = ExportChoices(CustomExportFormat(encoding: resolved.encoding, gamut: resolved.gamut,
-                                                       quality: resolved.quality))
+        let options = ExportChoices(resolved)
         let result = ExportResult(export: record.id.rawValue, fileName: record.name, byteCount: record.byteCount,
             pixelSize: size, headroomStops: resolved.ceilingStops, selfVerified: true,
             elapsed: .seconds(stages.reduce(0, +)), saved: Self.saved(record))
         let snapshot = record.recipeSnapshot ?? resolved.snapshot
         let version = ExportVersion(number: record.sequence, createdAt: record.createdAt, encodingID: options.encoding,
-            modelName: resolved.modelIdentity, hasFrame: snapshot.frame != nil,
+            gamut: resolved.gamut, modelName: resolved.modelIdentity, hasFrame: snapshot.frame != nil,
             fileAvailable: record.fileAvailable, result: result)
         let raw = snapshot.recipe.inputDomain == .rawEDR
         let timing = ExportTimingSample(kind: .init(isRAW: raw, encoding: options.encoding, isAI: resolved.modelIdentity != nil,

@@ -154,11 +154,10 @@ private struct ExportSettingsView: View {
                                              SegmentedChoice("choice.outputGamut.p3", value: "p3")],
                                    size: .small)
             } else {
-                ParameterSegmented("export.color", selection: Binding(get: { model.export.clampSrgb },
-                                                                     set: { model.setClampSrgb($0) }),
-                                   choices: [SegmentedChoice("export.color.keep", value: false),
-                                             SegmentedChoice("export.color.limitSRGB", value: true)],
-                                   size: .small)
+                // An HDR format fixes its gamut: P3 for a gain map, Rec. 2020 for BT.2100.
+                Text(LocalizedStringKey(model.export.gamut.labelKey))
+                    .font(Font.hdr.body)
+                    .foregroundStyle(Color.hdr.inkMuted)
             }
         }
     }
@@ -234,6 +233,7 @@ private struct ExportSummaryColumn: View {
             }
             VStack(alignment: .leading, spacing: Space.s2) {
                 FactRow(label: Text("export.summary.processing"), value: processing)
+                FactRow(label: Text("export.color"), value: Text(LocalizedStringKey(model.export.gamut.labelKey)))
                 FactRow(label: Text("export.summary.lut"), value: lut, tone: model.lut.spaceIssueKey != nil && model.lut.selection != nil ? .warn : .normal)
                 frameRow
             }

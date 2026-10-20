@@ -190,6 +190,7 @@ public struct RAWDevelopment: Sendable {
     public let supportsSharpness: Bool
     /// Oriented native dimensions, independent of preview development scale.
     public let nativeSize: PixelSize
+    /// Output scale relative to native pixels, after bounded RAW development.
     public let scaleFactor: Float
     public let isDraft: Bool
     /// Camera white balance / Apple detail defaults, in Recipe units (K, tint,

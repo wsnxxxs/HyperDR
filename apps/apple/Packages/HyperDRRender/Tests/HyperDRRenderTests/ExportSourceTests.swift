@@ -169,6 +169,41 @@ private func licensedRAW() -> URL {
         } catch RenderError.sourceChanged {}
     }
 
+    @Test(arguments:[false,true])
+    func rawPreviewAreaFiltersHighFrequency(transpose: Bool) async throws {
+        let engine = try RenderEngine()
+        let width = transpose ? 16 : 9504, height = transpose ? 9504 : 16
+        let values = (0..<width*height).map { Float((transpose ? $0/width : $0%width)%2) }
+        let rgba: [Float] = values.flatMap { [$0,$0,$0,1] }
+        let image = CIImage(bitmapData:rgba.withUnsafeBytes { Data($0) },bytesPerRow:width*16,
+            size:CGSize(width:width,height:height),format:.RGBAf,colorSpace:RenderEngine.workingColorSpace)
+        for output in [PixelSize(width:transpose ? 1 : 1024,height:transpose ? 1024 : 1),PixelSize(width:1,height:1)] {
+            let actual = try await engine.rawPreviewPixels(image,size:output)
+            let sx = Double(width)/Double(output.width), sy = Double(height)/Double(output.height)
+            var maximumError = 0.0
+            for y in 0..<output.height {
+                for x in 0..<output.width {
+                    let left = Double(x)*sx, right = Double(x+1)*sx
+                    let top = Double(y)*sy, bottom = Double(y+1)*sy
+                    var sum = 0.0
+                    for iy in Int(floor(top))..<min(height,Int(ceil(bottom))) {
+                        let wy = min(bottom,Double(iy+1))-max(top,Double(iy))
+                        for ix in Int(floor(left))..<min(width,Int(ceil(right))) {
+                            let wx = min(right,Double(ix+1))-max(left,Double(ix))
+                            sum += Double(values[iy*width+ix])*wx*wy
+                        }
+                    }
+                    let expected = sum/(sx*sy)
+                    for channel in 0..<3 {
+                        maximumError = max(maximumError,abs(Double(actual[(y*output.width+x)*4+channel])-expected))
+                    }
+                }
+            }
+            print("RAW_AREA transpose=\(transpose) size=\(output.width)x\(output.height) max_error=\(maximumError)")
+            #expect(maximumError < 0.00001)
+        }
+    }
+
     @Test func rawRegionsMatchWholeDevelopment() async throws {
         let engine = try RenderEngine()
         let url = licensedRAW()
@@ -265,5 +300,17 @@ private final class FootprintRecorder: @unchecked Sendable {
             compareBands(a.baseRGBA,b.baseRGBA,label:"TIFF_bitmap")
             compareBands(a.gain,b.gain,scale:0.25,label:"TIFF_bitmap_gain")
         }
+    }
+}
+
+private extension RenderEngine {
+    func rawPreviewPixels(_ image: CIImage, size: PixelSize) throws -> [Float] {
+        let texture = try rasterizeRAWPreview(image,size:size,space:Self.workingColorSpace)
+        var pixels = [Float](repeating:0,count:size.width*size.height*4)
+        pixels.withUnsafeMutableBytes {
+            texture.getBytes($0.baseAddress!,bytesPerRow:size.width*16,
+                from:MTLRegionMake2D(0,0,size.width,size.height),mipmapLevel:0)
+        }
+        return pixels
     }
 }

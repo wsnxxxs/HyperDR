@@ -85,7 +85,7 @@ public actor RenderEngine {
         let library = try device.makeLibrary(source: shader, options: options)
         self.library = library
         var pipelines: [String: any MTLComputePipelineState] = [:]
-        for name in ["sourceHDRSplit", "sampleSource", "zeroGain", "adjustPoint", "graphCells", "graphBox",
+        for name in ["sourceHDRSplit", "sampleSource", "sampleSourceArea", "zeroGain", "adjustPoint", "graphCells", "graphBox",
                      "graphWeights", "graphCoefficients", "graphFinalGain", "graphOutput", "graphPeak", "authoredOutput",
                      "displayBase", "displayISOGain", "displayGainPeak", "displayLegacyGain", "modelGainWeights", "effectMask", "exportSummary", "exportPair", "exportFrame"] {
             guard let function = library.makeFunction(name: name) else { throw RenderError.gpu(name) }
@@ -162,7 +162,8 @@ public actor RenderEngine {
 
     private func materialize(_ opened: OpenedSource, id: UUID = UUID(),
                              origin: (url: URL, options: SourceOptions, revision: SourceRevision)? = nil) throws -> RenderSource {
-        let texture = try rasterize(opened.image, space: opened.baseSpace)
+        let texture = try opened.rawPreviewSize.map { try rasterizeRAWPreview(opened.image,size:$0,space:opened.baseSpace) }
+            ?? rasterize(opened.image,space:opened.baseSpace)
         // Retain the native encoded gain. Display decodes gamma before resampling.
         let gainTexture = try opened.gain.map { try rasterize($0.image, space: nil,
                                                     format: $0.channelCount == 1 ? .r32Float : .rgba32Float) }

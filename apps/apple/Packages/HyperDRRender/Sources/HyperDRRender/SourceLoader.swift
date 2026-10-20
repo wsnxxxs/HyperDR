@@ -12,6 +12,7 @@ struct OpenedSource {
     let gain: AuthoredGainMap?
     let raw: RAWDevelopment?
     var nativeSize: PixelSize? = nil
+    var rawPreviewSize: PixelSize? = nil
 }
 
 extension RenderEngine {
@@ -137,13 +138,17 @@ extension RenderEngine {
         let native = filter.nativeSize
         let nativeSize = PixelSize(width:Int(rotated ? native.height : native.width),
                                    height:Int(rotated ? native.width : native.height))
+        let previewScale: Double
         switch options.resolution {
-        case .full: filter.scaleFactor = 1
+        case .full: previewScale = 1
         case .preview(let maximumSize):
             guard maximumSize.width > 0, maximumSize.height > 0 else { throw RenderError.invalidSize }
-            filter.scaleFactor = Float(min(1,Double(maximumSize.width)/Double(nativeSize.width),
-                                          Double(maximumSize.height)/Double(nativeSize.height)))
+            previewScale = min(1,Double(maximumSize.width)/Double(nativeSize.width),
+                               Double(maximumSize.height)/Double(nativeSize.height))
         }
+        // Keep RAW development native. Reduced filter graphs can still allocate
+        // native-area float buffers; materialize downsamples bounded native ROIs.
+        filter.scaleFactor = 1
         if filter.isContrastSupported { filter.contrastAmount = 0 }
         if filter.isLocalToneMapSupported { filter.localToneMapAmount = 0 }
         // Capture camera/Apple defaults before applying recipe overrides. UI values
@@ -170,7 +175,9 @@ extension RenderEngine {
         if filter.isSharpnessSupported, let value = raw.sharpness { filter.sharpnessAmount = value }
         if filter.isLensCorrectionSupported { filter.isLensCorrectionEnabled = options.lensCorrection }
         try Task.checkCancellation()
-        guard let image = filter.outputImage else { throw RenderError.cannotDecodeSource }
+        guard let output = filter.outputImage else { throw RenderError.cannotDecodeSource }
+        let previewSize = previewScale < 1 ? PixelSize(width:max(1,Int((output.extent.width*previewScale).rounded())),
+            height:max(1,Int((output.extent.height*previewScale).rounded()))) : nil
         let development = RAWDevelopment(boost: filter.boostAmount, boostShadow: filter.boostShadowAmount,
             baselineExposure: filter.baselineExposure, localToneMap: filter.localToneMapAmount,
             extendedDynamicRange: filter.extendedDynamicRangeAmount,
@@ -181,9 +188,9 @@ extension RenderEngine {
             luminanceNR: filter.luminanceNoiseReductionAmount, colorNR: filter.colorNoiseReductionAmount,
             sharpness: filter.sharpnessAmount, supportsLuminanceNR: filter.isLuminanceNoiseReductionSupported,
             supportsColorNR: filter.isColorNoiseReductionSupported, supportsSharpness: filter.isSharpnessSupported,
-            nativeSize: nativeSize, scaleFactor: filter.scaleFactor, isDraft: filter.isDraftModeEnabled, sourceValues:sourceValues)
+            nativeSize: nativeSize, scaleFactor: Float(previewScale), isDraft: filter.isDraftModeEnabled, sourceValues:sourceValues)
         // CIRAWFilter already applies the file's orientation.
-        return OpenedSource(domain: .rawEDR, image: image, hdr: image,
-                            baseSpace: workingColorSpace, gain: nil, raw: development)
+        return OpenedSource(domain: .rawEDR, image: output, hdr: output,
+                            baseSpace: workingColorSpace, gain: nil, raw: development,rawPreviewSize:previewSize)
     }
 }

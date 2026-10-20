@@ -197,7 +197,7 @@ struct ExportCustomPlanTests {
         #expect(custom.encoding == destination.encoding)
         #expect(custom.gamut == destination.gamut)
         #expect(custom.quality == destination.quality)
-        #expect(custom.size == photo) // the long edge is not carried
+        #expect(custom.size == destination.size) // the destination limit is carried
         #expect(custom.peakStops == destination.peakStops)
     }
 
@@ -439,14 +439,14 @@ struct ExportMemoryPlanTests {
         #expect(strips.packaging == whole.packaging)
     }
 
-    @Test func rowsBoundNativeVerificationButReserveTheSystemReader() {
+    @Test func rowsBoundNativeAndSubsampleSystemVerification() {
         let req = request(.custom(.init(encoding: .sdrTIFF, gamut: .p3, quality: 90)))
         let streamed = plan(req)
         var old = req; old.allowsRowInput = false
         let whole = plan(old)
         #expect(streamed.memory.usesRowInput && !whole.memory.usesRowInput)
         #expect(streamed.memory.estimate.encode < whole.memory.estimate.encode)
-        #expect(streamed.memory.estimate.systemVerify > photo.pixels * 16)
+        #expect(streamed.memory.estimate.systemVerify < photo.pixels * 16)
         #expect(streamed.memory.estimate.nativeVerify < streamed.memory.estimate.systemVerify)
         #expect(streamed.memory.estimate.verify == streamed.memory.estimate.systemVerify)
         #expect(whole.memory.estimate.nativeVerify == whole.memory.estimate.systemVerify)
@@ -466,7 +466,7 @@ struct ExportMemoryPlanTests {
             // Source/analysis cache belongs to decode; the verification workspace
             // remains one row set or tile pair at the same width.
             #expect(tall.nativeVerify - tall.decode == short.nativeVerify - short.decode)
-            #expect(tall.systemVerify - tall.decode > short.systemVerify - short.decode)
+            #expect(tall.systemVerify - tall.decode == short.systemVerify - short.decode)
             #expect(tall.verify == max(tall.nativeVerify, tall.systemVerify))
         }
         for encoding in [ExportEncoding.avifPq, .adaptive] {
@@ -476,6 +476,58 @@ struct ExportMemoryPlanTests {
                 isFramed: false, baseBitDepth: encoding.isAVIF ? 10 : 8, writeRows: 64, retainedBytes: 0))
             #expect(result.nativeVerify == result.systemVerify)
             #expect(result.verify > photo.pixels * 16)
+        }
+    }
+
+    @Test func unknownMetalLimitIsNotAZeroByteBudget() {
+        #expect(ExportMemoryDiagnostic.gpuFailure(required: 256 << 20, recommended: 0) == nil)
+        #expect(ExportMemoryDiagnostic.gpuFailure(required: 256 << 20, recommended: 512 << 20) == nil)
+        let failure = ExportMemoryDiagnostic.gpuFailure(required: 512 << 20, recommended: 256 << 20)
+        #expect(failure?.check == .gpu && failure?.requiredMiB == 512 && failure?.availableMiB == 256)
+        #expect(failure?.summary.contains("shortfall=256.0 MiB") == true)
+    }
+
+    @Test func heifAssemblyPricesBorrowedSamplesAndOutputSeparatelyFromEncoding() {
+        let size = ExportPixelSize(width: 12800, height: 8600)
+        let memory = ExportMemoryEstimate.estimate(.init(source: source(.rawEDR, size: size),
+            photoSize: size, canvas: size, encoding: .adaptive, writer: .inHouse,
+            writesGainMap: true, isFramed: false, baseBitDepth: 10, writeRows: 256,
+            retainedBytes: 0, quality: 95))
+        let oneCopy = ExportMemoryEstimate.compressedHEICCache(pixels: size.pixels, bitDepth: 10, quality: 95) / 2
+        let slab = size.width * 512 * 12
+        #expect(memory.packaging - memory.encode == oneCopy - slab)
+        #expect(memory.packaging > memory.encode)
+        #expect(memory.peak == memory.packaging)
+    }
+
+    @Test func fullSizeRAWMemoryEstimates() {
+        for size in [ExportPixelSize(width: 9504, height: 6336), ExportPixelSize(width: 12800, height: 8600)] {
+            for encoding in [ExportEncoding.adaptive, .isoGainMapJPEG] {
+                let planned = plan(request(.custom(.init(encoding: encoding, gamut: .p3, quality: 95)),
+                    source: source(.rawEDR, size: size)))
+                #expect(planned.memory.usesRowInput && planned.writer == .inHouse)
+                for rows in [256, 128, 64] {
+                    let estimate = ExportMemoryEstimate.estimate(.init(source: source(.rawEDR, size: size),
+                        photoSize: size, canvas: size, encoding: encoding, writer: .inHouse, writesGainMap: true,
+                        isFramed: false, baseBitDepth: encoding == .adaptive ? 10 : 8, writeRows: rows, retainedBytes: 0, quality: 95))
+                    let workspace = (encoding == .adaptive ? 512*512*40 : size.width*128) + 8*1024*1024
+                    let before = estimate.nativeVerify - workspace + size.pixels*40
+                    #expect(estimate.systemVerify < before)
+                    if rows == 256 { #expect(estimate == planned.memory.estimate) }
+                    if ProcessInfo.processInfo.environment["HYPERDR_MEMORY_ESTIMATES"] == "1" {
+                        let oldSlab = size.width * min(512, size.height) * 40
+                        let newSlab = size.width * min(512, size.height) * 12 + 32*1024*1024
+                        let cacheDelta = encoding == .adaptive
+                            ? size.pixels * 10 + 8*1024*1024 - ExportMemoryEstimate.compressedHEICCache(pixels: size.pixels, bitDepth: 10, quality: 95) : 0
+                        let oldEncode = estimate.encode + (encoding == .adaptive ? oldSlab - newSlab + ExportMemoryEstimate.compressedHEICCache(pixels: size.pixels, bitDepth: 10, quality: 95) / 2 : 0) + cacheDelta
+                        print("RAW_MEMORY", encoding.rawValue, "width", size.width, "height", size.height, "rows", rows, "beforeEncode", oldEncode,
+                            "decode", estimate.decode, "render", estimate.render, "composite", estimate.composite,
+                            "packaging", estimate.packaging, "encode", estimate.encode,
+                            "nativeVerify", estimate.nativeVerify, "beforeSystemVerify", before,
+                            "systemVerify", estimate.systemVerify, "peak", estimate.peak)
+                    }
+                }
+            }
         }
     }
 
@@ -658,5 +710,72 @@ struct ExportGeometryTests {
         #expect(plan.size == canvas)
         #expect(plan.summary.parts[2].key == "plan.size.pixels")
         #expect(plan.summary.parts[2].arguments == [.pixels(6200), .pixels(4200)])
+    }
+}
+
+@Suite("Export planning: functional gaps")
+struct ExportPlanGapTests {
+    @Test func customLongEdgeFlowsIntoSizeSnapshotAndKey() throws {
+        let limited = plan(request(.custom(.init(encoding: .sdrJPEG, longEdge: 1800))))
+        #expect(limited.photoSize == .init(width: 1800, height: 1200))
+        #expect(limited.longEdgeLimit == 1800)
+        let layout = try ExportPlanner.frameLayout(frame: ["margins": .number(0.05), "caption": .number(0.1)],
+            choice: limited.choice, photo: photo)
+        #expect(layout.photo.width == 1800 && layout.photo.height == 1200)
+        let framed = plan(request(limited.choice, frame: .init(canvas: .init(width: layout.width, height: layout.height))))
+        #expect(framed.photoSize == limited.photoSize)
+        #expect(framed.size == .init(width: layout.width, height: layout.height))
+        #expect(framed.memory.estimate.peak >= limited.memory.estimate.peak)
+        #expect(plan(request(.custom(.init(longEdge: 9000)))).photoSize == photo)
+        let recipe = Recipe(inputDomain: .sdr)
+        let snapshot = RecipeExportSnapshot(recipe: recipe, source: .init(sha256: "test", byteCount: 1, modificationDate: .distantPast))
+        let resolved = ResolvedExportSnapshot(snapshot: snapshot, plan: limited)
+        let restored = try JSONDecoder().decode(ResolvedExportSnapshot.self, from: JSONEncoder().encode(resolved))
+        #expect(restored.selection.customFormat?.longEdge == 1800)
+        #expect(restored.width == 1800 && restored.height == 1200)
+        let original = ResolvedExportSnapshot(snapshot: snapshot, plan: plan(request(.custom(.init(encoding: .sdrJPEG)))))
+        #expect(try resolved.exportKey() != original.exportKey())
+        // Existing serialized choices without longEdge remain readable.
+        let format = try JSONDecoder().decode(CustomExportFormat.self, from: Data(#"{"encoding":"adaptive","gamut":"p3","quality":90}"#.utf8))
+        #expect(format.longEdge == nil)
+    }
+
+    @Test func hdrOffNoticesAndBT2100Blockers() {
+        for encoding in ExportEncoding.allCases {
+            let value = plan(request(.custom(.init(encoding: encoding)), hdrEnabled: false))
+            #expect(value.blockers.contains { $0.code == "hdrOff" } == encoding.isBT2100)
+            #expect(value.notices.contains { $0.key == "plan.sdrVersion" } == encoding.writesGainMap)
+            if encoding == .isoGainMapJPEG { #expect(value.encoding == .sdrJPEG) }
+            if encoding == .adaptive { #expect(value.baseBitDepth == 8 && !value.gainMap.writesGainMap) }
+        }
+    }
+
+    @Test func memoryFailureSuggestsAnAdmittedBoundary() throws {
+        let input = request(.custom(.init(encoding: .avifPq)))
+        let budget = 900_000_000
+        let refused = plan(input, available: budget)
+        #expect(!refused.memory.fits)
+        #expect(refused.blockers.first { $0.code == "export_memory_exceeded" }?.pixelSize == photo)
+        let edge = try #require(refused.memory.maxAdmissibleLongEdge)
+        var smaller = input
+        smaller.choice = .custom(.init(encoding: .avifPq, longEdge: edge))
+        #expect(plan(smaller, available: budget).memory.fits)
+        smaller.choice = .custom(.init(encoding: .avifPq, longEdge: edge + 1))
+        #expect(!plan(smaller, available: budget).memory.fits)
+        #expect(plan(input, available: 1).memory.maxAdmissibleLongEdge == nil)
+    }
+
+    @Test func planMessagesResolveInBothLanguages() {
+        for locale in [Locale(identifier: "en"), Locale(identifier: "zh-Hans")] {
+            for encoding in ExportEncoding.allCases {
+                for hdr in [true, false] {
+                    let value = plan(request(.custom(.init(encoding: encoding)), hdrEnabled: hdr, peakStops: 8), available: 1)
+                    for message in value.notices + value.blockers.map(\.message) + value.summary.parts {
+                        #expect(message.localized(locale: locale) != message.key)
+                        #expect(!message.localized(locale: locale).contains("%@"))
+                    }
+                }
+            }
+        }
     }
 }

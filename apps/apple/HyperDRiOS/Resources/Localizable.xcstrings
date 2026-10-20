@@ -343,150 +343,6 @@
         }
       }
     },
-    "export.stage.delivering" : {
-      "comment" : "Export stage.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Delivering"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "交付"
-          }
-        }
-      }
-    },
-    "export.stage.developing" : {
-      "comment" : "Export stage.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Developing RAW"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "冲洗 RAW"
-          }
-        }
-      }
-    },
-    "export.stage.encoding" : {
-      "comment" : "Export stage.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Encoding"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "编码"
-          }
-        }
-      }
-    },
-    "export.stage.model" : {
-      "comment" : "Export stage.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Computing AI"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "计算 AI"
-          }
-        }
-      }
-    },
-    "export.stage.preparing" : {
-      "comment" : "Export stage.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Preparing"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "准备中"
-          }
-        }
-      }
-    },
-    "export.stage.publishing" : {
-      "comment" : "Export stage.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Saving the version"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "保存版本"
-          }
-        }
-      }
-    },
-    "export.stage.rendering" : {
-      "comment" : "Export stage.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Rendering"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "渲染"
-          }
-        }
-      }
-    },
-    "export.stage.verifying" : {
-      "comment" : "Export stage.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Verifying"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "校验"
-          }
-        }
-      }
-    },
     "ios.adjust.apply" : {
       "comment" : "Typing a value: apply it.",
       "extractionState" : "manual",
@@ -1096,6 +952,60 @@
         }
       }
     },
+    "ios.export.longEdge" : {
+      "comment" : "Custom format: the size picker's label.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Size"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尺寸"
+          }
+        }
+      }
+    },
+    "ios.export.longEdge.custom" : {
+      "comment" : "Custom format: a long edge typed in pixels; empty keeps the original size.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Long edge (px)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "长边（px）"
+          }
+        }
+      }
+    },
+    "ios.export.longEdge.pixels %@" : {
+      "comment" : "Custom format: a long edge in the size picker, in pixels.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Long edge %@ px"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "长边 %@ px"
+          }
+        }
+      }
+    },
     "ios.export.lutMissing %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1551,6 +1461,24 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "改用自定义格式…"
+          }
+        }
+      }
+    },
+    "ios.export.useLongEdge %@" : {
+      "comment" : "Will write: memory blocks the export; switches to the custom format at the largest long edge that fits, in pixels.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Change to long edge %@ px"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "改为长边 %@ px"
           }
         }
       }

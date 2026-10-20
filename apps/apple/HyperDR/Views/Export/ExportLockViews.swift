@@ -37,7 +37,7 @@ struct ExportStatusHost: View {
         if model.export.isInFlight {
             TimelineView(.periodic(from: .now, by: 1)) { _ in
                 let estimate = model.export.estimate(at: model.now())
-                let parts = ExportPresentation.statusParts(phase: model.export.phase, stage: model.export.stage, estimate: estimate)
+                let parts = ExportPresentation.statusParts(phase: model.export.phase, stage: model.export.stageMessage, estimate: estimate)
                 ExportStatusCard(
                     kind: model.export.isStopping ? .stopping : .running,
                     fileName: ExportPresentation.fileName(for: model),
@@ -119,7 +119,7 @@ struct ExportCanvasCapsule: View {
         if model.export.isInFlight {
             TimelineView(.periodic(from: .now, by: 1)) { _ in
                 let estimate = model.export.estimate(at: model.now())
-                let parts = ExportPresentation.statusParts(phase: model.export.phase, stage: model.export.stage, estimate: estimate)
+                let parts = ExportPresentation.statusParts(phase: model.export.phase, stage: model.export.stageMessage, estimate: estimate)
                 HStack(spacing: Space.s3) {
                     Label {
                         Text(verbatim: ExportPresentation.capsuleText(estimate: estimate, parts: parts, locale: locale))

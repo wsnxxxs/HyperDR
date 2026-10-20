@@ -97,7 +97,9 @@ nonisolated struct RecipeExportJob: Sendable {
     let lut: ColorLUT?
 }
 nonisolated enum EditorExportEvent: Sendable {
-    case progress(stage: String, fraction: Double, at: Date)
+    /// `message` is Kit's words for the stage (`RecipeExportProgress.stageMessage`),
+    /// which can say more than `stage` (rendering and encoding on the row path).
+    case progress(stage: String, fraction: Double, at: Date, message: ExportMessage? = nil)
     case log(String)
     case finishing, saving
     case finished(result: ExportResult?, failure: UserFacingError?)
@@ -187,6 +189,8 @@ nonisolated extension Duration {
     var phase: Phase = .idle
     var startedAt: Date?
     var stage: String?
+    /// Kit's words for the stage, shown in the status line.
+    var stageMessage: ExportMessage?
     var fraction: Double?
     var lastLine: String?
     var failure: UserFacingError?
@@ -216,9 +220,10 @@ nonisolated extension Duration {
             stage: stage, durations: durations, fractionFloor: fractionFloor, fraction: fraction, fractionAt: fractionAt,
             saving: phase == .saving || phase == .finishing, completed: phase == .succeeded)
     }
-    func progress(stage newStage: String, fraction: Double, at date: Date) {
+    func progress(stage newStage: String, fraction: Double, at date: Date, message: ExportMessage? = nil) {
         let span = ExportETA.span(newStage)
         if let current = ExportETA.span(stage), let span, span < current { return }
+        stageMessage = message ?? ExportMessage(key: "export.stage." + newStage)
         fractionFloor = max(fractionFloor, estimate(at: date)?.fraction ?? 0)
         if newStage != stage {
             // The AI model runs inside the photo's reading span: its clock goes on.
@@ -237,7 +242,7 @@ nonisolated extension Duration {
     }
     func reset() {
         thumbnail = .loading
-        phase = .idle; startedAt = nil; stage = nil; fraction = nil; lastLine = nil
+        phase = .idle; startedAt = nil; stage = nil; stageMessage = nil; fraction = nil; lastLine = nil
         failure = nil; saveFailure = nil; transferFailure = nil; result = nil; isResultStale = false
         destination = nil; isStopping = false; isStoppingToQuit = false; durations = nil; fractionFloor = 0; fractionAt = nil; stageAt = nil
     }

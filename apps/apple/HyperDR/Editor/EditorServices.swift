@@ -2,6 +2,7 @@ import CoreGraphics
 import Foundation
 import HyperDREngine
 import HyperDRKit
+import HyperDRRender
 import UniformTypeIdentifiers
 
 // App-internal boundary. A2 supplies live services without changing Views.
@@ -29,16 +30,17 @@ import UniformTypeIdentifiers
     /// The photograph's Exif for a frame caption; empty when it has none.
     func captureFacts(for photo: EditorPhoto) async -> CaptureFacts
     func close(_ photo: EditorPhoto) async
-    func startExport(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?, destination: URL?, thumbnail: CGImage?) async throws -> EditorExportTicket
+    /// Starts a recipe export (P7-3b); its events follow on `exportEvents`.
+    func startExport(_ photo: EditorPhoto, job: RecipeExportJob, destination: URL?) async throws -> EditorExportTicket
+    /// The open photo's file as its session recorded it, which an export renders from.
+    func sourceRevision(_ photo: EditorPhoto) async throws -> RecipeSourceRevision
     func exportThumbnail(_ photo: EditorPhoto, version: String) async -> CGImage?
     func exportEvents(_ job: String) -> AsyncStream<EditorExportEvent>
     func cancelAllExports() async
     func hasExportActivity() async -> Bool
-    func commandLine(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?) async throws -> [String]
-    func exportKey(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?) async throws -> String
     func exports(for photo: EditorPhoto) async throws -> [ExportHistoryItem]
     func exportTimingHistory() async -> [ExportTimingSample]
-    func suggestedFileName(_ photo: EditorPhoto, options: EditOptions) async throws -> String
+    func suggestedFileName(_ photo: EditorPhoto, encoding: String) async throws -> String
     func validateDestination(_ url: URL, expectedExtension: String) async throws
     func saveExport(_ photo: EditorPhoto, export: String, destination: URL?) async throws -> SavedLocation
     /// A copy of one retained version's file, in a folder of its own, to hand to
@@ -120,8 +122,6 @@ extension UserDefaults {
     /// Debug builds render through `FakeEditorRendering` (configure it per
     /// test); release builds have no fake renderer and open nothing.
     let rendering: any EditorRendering
-    var diagnosticHandler: ((EditorPhoto, EditOptions, ExportFrame?) async throws -> [String])?
-    fileprivate(set) var diagnosticCalls = 0
     var versionThumbnailHandler: ((EditorPhoto, String) async -> CGImage?)?
     private(set) var versionThumbnailCalls: [String] = []
     var exportStartHandler: (() async throws -> Void)?
@@ -141,7 +141,7 @@ extension UserDefaults {
     var removeLUTHandler: ((String) async throws -> Void)?
     var importedLUT: LUTItem?
     var updateLUTHandler: ((String, LUTColorSpace, LUTColorSpace) async throws -> LUTItem)?
-    private(set) var exportCalls: [(photo: EditorPhoto, options: EditOptions, frame: ExportFrame?, destination: URL?, thumbnail: CGImage?)] = []
+    private(set) var exportCalls: [(photo: EditorPhoto, job: RecipeExportJob, destination: URL?)] = []
     private(set) var saveCalls: [(String, URL?)] = []
     private(set) var exportCancelCount = 0
     private(set) var activeExport = false
@@ -239,11 +239,11 @@ extension UserDefaults {
 }
 
 extension FakeEditorServices {
-    func startExport(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?, destination: URL?, thumbnail: CGImage?) async throws -> EditorExportTicket {
-        exportCalls.append((photo, options, frame, destination, thumbnail)); activeExport = true
+    func startExport(_ photo: EditorPhoto, job: RecipeExportJob, destination: URL?) async throws -> EditorExportTicket {
+        exportCalls.append((photo, job, destination)); activeExport = true
         do { try await exportStartHandler?(); try Task.checkCancellation() }
         catch { activeExport = false; throw error }
-        return EditorExportTicket(job: "fake-job", argv: ["HyperDR", "--output", destination?.path ?? "folder"])
+        return EditorExportTicket(job: "fake-job")
     }
     func exportEvents(_ job: String) -> AsyncStream<EditorExportEvent> {
         AsyncStream { exportSinks[job] = $0 }
@@ -263,15 +263,6 @@ extension FakeEditorServices {
         try await metadataHandler?(); return historyByURL[photo.url] ?? []
     }
     func exportTimingHistory() async -> [ExportTimingSample] { timings }
-    func commandLine(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?) async throws -> [String] {
-        diagnosticCalls += 1
-        if let diagnosticHandler { return try await diagnosticHandler(photo, options, frame) }
-        return ["HyperDR", "convert", "photo." + photo.url.pathExtension, "--output", "out", "--report", "out/report.json"]
-    }
-    func exportKey(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?) async throws -> String {
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-        return String(decoding: try encoder.encode(options.values), as: UTF8.self) + String(describing: frame)
-    }
     func saveExport(_ photo: EditorPhoto, export: String, destination: URL?) async throws -> SavedLocation {
         saveCalls.append((export, destination))
         if let exportSaveHandler { return try await exportSaveHandler(export, destination) }

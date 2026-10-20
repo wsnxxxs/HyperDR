@@ -123,6 +123,7 @@ struct ErrorText {
             withDetail: { "err.server.input_extension_mismatch.actual \($0)" }),
         "file_empty": Entry(title: "mac.err.file_empty.title", message: "err.server.file_empty"),
         "source_missing": Entry(title: "mac.err.source_missing.title", message: "err.server.source_missing"),
+        "source_changed": Entry(title: "source.changed.title", message: "export.blocker.sourceChanged"),
         "preview_timeout": Entry(title: "mac.err.preview_timeout.title", message: "err.server.preview_timeout"),
         "engine_unavailable": Entry(title: "mac.err.engine_unavailable.title", message: "err.server.engine_unavailable"),
         "metal_unavailable": Entry(title: "mac.err.metal_unavailable.title", message: "err.server.metal_unavailable"),

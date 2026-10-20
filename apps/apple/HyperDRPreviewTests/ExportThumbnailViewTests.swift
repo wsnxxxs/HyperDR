@@ -219,7 +219,7 @@ import XCTest
         services.versionThumbnailHandler = { _, id in asked.append(id); return id == "a" ? picture : nil }
         services.historyByURL[source] = ["a", "b"].enumerated().map { index, id in
             ExportHistoryItem(version: ExportVersion(number: 2 - index, createdAt: .now, encodingID: "adaptive", result: result(id)),
-                              key: "key-\(id)", options: model.exportChoices)
+                              options: model.exportChoices)
         }
         model.refreshExportMetadata()
         await eventually(timeout: .seconds(10)) { model.exportVersions.count == 2 }

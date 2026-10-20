@@ -29,11 +29,11 @@ import HyperDRKit
         let s = services(.none)
         s.restoreResult = .restored(s.placeholder(for: remembered))
         let m = EditorModel(services: s)
-        let key = try await s.exportKey(s.placeholder(for: remembered), options: EditOptions(), frame: nil)
+        let key: RecipeExportSnapshot? = nil
         s.historyByURL[remembered] = [ExportHistoryItem(
             version: ExportVersion(number: 1, createdAt: Date(), encodingID: "adaptive",
                                    result: ExportResult(export: "v1", fileName: "a.heic", byteCount: 1, pixelSize: PixelSize(width: 1, height: 1))),
-            key: key, options: m.exportChoices)]
+            recipeSnapshot: key, options: m.exportChoices)]
         m.launch()
         await eventually(timeout: .seconds(10)) { m.restoreNotice != nil }
         XCTAssertEqual(m.restoreNotice, .reopened(hasHistory: true))

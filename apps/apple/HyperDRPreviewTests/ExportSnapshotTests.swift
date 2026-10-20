@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import XCTest
 import HyperDRDesign
+import HyperDRKit
 import HyperDRRecipe
 @testable import HyperDR
 
@@ -72,9 +73,9 @@ import HyperDRRecipe
     /// What the engine does when an export finishes: the version enters the
     /// history under the key of the edit that was exported.
     private func finish(_ model: EditorModel, _ services: FakeEditorServices, result: ExportResult, failure: UserFacingError? = nil) async throws {
-        let key = try await services.exportKey(model.photo!, options: model.effectiveOptions(), frame: nil)
+        let key = try await services.exportKey(model)
         services.historyByURL[source] = [ExportHistoryItem(
-            version: ExportVersion(number: 1, createdAt: clock.now, encodingID: "adaptive", result: result), key: key, options: model.exportChoices)]
+            version: ExportVersion(number: 1, createdAt: clock.now, encodingID: "adaptive", result: result), recipeSnapshot: key, options: model.exportChoices)]
         services.sendExport(.finished(result: result, failure: failure))
         await eventually(timeout: .seconds(10)) { model.export.phase == .succeeded }
         model.refreshExportMetadata()
@@ -339,18 +340,18 @@ import HyperDRRecipe
 
     func testHistorySheet() async throws {
         let (model, services) = await ready()
-        let first = try await services.exportKey(model.photo!, options: model.effectiveOptions(), frame: nil)
+        let first = try await services.exportKey(model)
         let now = clock.now
         // Version 3 is the newest, so it is the latest time and the top row.
-        func item(_ n: Int, key: String, saved: Bool, model name: String?) -> ExportHistoryItem {
+        func item(_ n: Int, key: RecipeExportSnapshot?, saved: Bool, model name: String?) -> ExportHistoryItem {
             var result = finishedResult(saved: saved); result.export = "v\(n)"; result.fileName = "DSC04127-\(n).heic"
             return ExportHistoryItem(version: ExportVersion(number: n, createdAt: now.addingTimeInterval(Double(n - 4) * 3600),
                 encodingID: n == 2 ? "iso-gainmap-jpeg" : "adaptive", modelName: name,
                 fallbackReason: n == 2 ? ExportFallbackReason(code: .missingCaptureFields, missingCaptureFields: ["f_number"]) : nil, hasFrame: n == 3, result: result),
-                key: key, options: model.exportChoices)
+                recipeSnapshot: key, options: model.exportChoices)
         }
-        services.historyByURL[source] = [item(1, key: first, saved: true, model: nil), item(2, key: "other", saved: false, model: "CNN"),
-                                        item(3, key: "older", saved: true, model: nil)]
+        services.historyByURL[source] = [item(1, key: first, saved: true, model: nil), item(2, key: nil, saved: false, model: "CNN"),
+                                        item(3, key: nil, saved: true, model: nil)]
         model.refreshExportMetadata()
         await eventually(timeout: .seconds(10)) { model.exportVersions.count == 3 }
         try snapshots("history", minimumHeight: 360) { ExportHistorySheet(model: model) }

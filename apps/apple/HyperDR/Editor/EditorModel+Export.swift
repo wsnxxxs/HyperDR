@@ -1,10 +1,11 @@
 import Foundation
 import CoreGraphics
 import HyperDRKit
+import HyperDRRender
 import UniformTypeIdentifiers
 
 struct ExportFrameCacheKey: Equatable {
-    var settings: FrameSettings; var facts: CaptureFacts; var size: PixelSize
+    var settings: FrameSettings; var facts: CaptureFacts; var size: PixelSize; var choice: ExportChoice
 }
 
 /// An opaque, single-use save-panel capability. Its issuer owns validity.
@@ -73,15 +74,24 @@ extension EditorModel {
         timingHistory = await services.exportTimingHistory()
         syncExportState()
     }
-    func makeExportFrame() throws -> ExportFrame? {
+    func makeExportFrame() throws -> FrameExportPlan? {
         guard frame.isEnabled else { return nil }
         guard let size = document?.pixelSize else { throw UserFacingError(code: "invalid_options") }
-        let key = ExportFrameCacheKey(settings: frame, facts: captureFacts, size: size)
+        let choice = ExportChoice.custom(exportChoices.customFormat)
+        let key = ExportFrameCacheKey(settings: frame, facts: captureFacts, size: size, choice: choice)
         if cachedFrameKey == key { return cachedExportFrame }
-        guard let plan = try FrameExportPlan.make(settings: frame, facts: captureFacts, photoSize: size) else { return nil }
-        let result = ExportFrame(spec: plan.frame, overlayPNG: plan.overlayPNG)
-        cachedExportFrame = result; cachedFrameKey = key
-        return result
+        guard let plan = try FrameExportPlan.make(settings: frame, facts: captureFacts, photoSize: size, choice: choice)
+        else { return nil }
+        cachedExportFrame = plan; cachedFrameKey = key
+        return plan
+    }
+    /// What an export of the current edit freezes, before the source
+    /// revision: the editor's capture, the frame and the panel's format.
+    /// Taken synchronously, so one edit revision covers all three.
+    func captureExport() throws -> ExportIntent {
+        let capture = try editor.exportCapture()
+        let model = restoredModel.flatMap { $0.recipe == capture.recipe ? $0.identity : nil }
+        return ExportIntent(capture: capture, frame: try makeExportFrame(), choices: exportChoices, expectedModelIdentity: model)
     }
     /// Capture immediately before presenting the save panel (or starting a
     /// fixed-folder export). Only the most recently issued token remains valid.
@@ -118,7 +128,7 @@ extension EditorModel {
         }
         exportThumbnailNeedsDeferred = thumbnailFrame == nil && export.thumbnail == .loading
         export.phase = .preparing; export.startedAt = now(); export.stageAt = export.startedAt
-        let options = effectiveOptions(), snapshot = exportChoices
+        let intent = Result { try captureExport() }, snapshot = exportChoices
         let fixedFolder = destination == nil ? preferences.exportFolder.target : nil
         export.destination = destination.map(ExportDestination.file) ?? .folder(label: preferences.exportFolder.label)
         let framed = frame.isEnabled
@@ -129,10 +139,11 @@ extension EditorModel {
                 // Cancellation covers validation and Kit preparation as well as conversion.
                 if let destination { try await services.validateDestination(destination, expectedExtension: Self.fileExtension(snapshot.encoding)) }
                 try Task.checkCancellation()
-                let frame = try makeExportFrame()
+                let job = try intent.get().job(revision: try await services.sourceRevision(photo))
+                try Task.checkCancellation()
                 let exportSize: PixelSize?
-                if frame != nil {
-                    exportSize = frameLayout.map { PixelSize(width: $0.width, height: $0.height) }
+                if let frame = try intent.get().frame {
+                    exportSize = PixelSize(width: frame.layout.width, height: frame.layout.height)
                 } else { exportSize = document?.pixelSize }
                 let pixels = exportSize.map { Double($0.width) * Double($0.height) } ?? 0
                 export.durations = ExportETA.durations(history: timingHistory, kind: .init(isRAW: photo.formatLabel == "RAW",
@@ -141,7 +152,7 @@ extension EditorModel {
                 try Task.checkCancellation()
                 if let thumbnail { export.thumbnail = .ready(thumbnail); exportThumbnailPersisted = true }
                 else if thumbnailFrame != nil { export.thumbnail = .unavailable }
-                let ticket = try await services.startExport(photo, options: options, frame: frame, destination: destination, thumbnail: thumbnail)
+                let ticket = try await services.startExport(photo, job: job, destination: destination)
                 if thumbnailFrame == nil { fillDeferredExportThumbnail() }
                 if export.phase == .preparing { export.phase = .running }
                 var terminal = false
@@ -218,31 +229,35 @@ extension EditorModel {
     func refreshExportMetadata() {
         exportMetadataTask?.cancel(); exportMetadataTicket += 1
         guard let photo, document?.phase == .ready, !export.isInFlight else { return }
-        let ticket = exportMetadataTicket, options = effectiveOptions()
-        // Capture frame values at the same revision as options, before suspending.
-        let frame: ExportFrame?
-        do { frame = try makeExportFrame() } catch {
+        let ticket = exportMetadataTicket, encoding = exportChoices.encoding
+        // Capture the edit, frame and format at one revision, before suspending.
+        // Without a capture (a look's LUT still installing) nothing matches yet.
+        let intent: ExportIntent?
+        do { _ = try makeExportFrame(); intent = try? captureExport() } catch {
             // The style does not fit this photograph: no export can match the
             // current settings, so nothing from the history may say it does.
             export.isResultStale = export.result != nil
             for index in exportVersions.indices { exportVersions[index].matchesCurrent = false }
-            currentExportKey = nil
+            currentExportSnapshot = nil
             return
         }
         exportMetadataTask = Task { [weak self, services] in
             do {
                 try Task.checkCancellation()
-                let key = try await services.exportKey(photo, options: options, frame: frame)
+                var current: RecipeExportSnapshot?
+                if let intent { current = intent.snapshot(revision: try await services.sourceRevision(photo)) }
                 try Task.checkCancellation()
                 let history = try await services.exports(for: photo)
                 try Task.checkCancellation()
-                let name = try await services.suggestedFileName(photo, options: options)
+                let name = try await services.suggestedFileName(photo, encoding: encoding)
                 try Task.checkCancellation()
                 let timings = await services.exportTimingHistory()
                 guard let self, !Task.isCancelled, self.photo == photo, exportMetadataTicket == ticket, !export.isInFlight else { return }
-                currentExportKey = key; exportHistory = history
+                currentExportSnapshot = current; exportHistory = history
                 exportVersions = history.sorted { $0.version.createdAt == $1.version.createdAt ? $0.version.number > $1.version.number : $0.version.createdAt > $1.version.createdAt }.map { item in
-                    var version = item.version; version.matchesCurrent = item.key == key; return version
+                    var version = item.version
+                    version.matchesCurrent = current.map { item.matches($0, options: intent?.choices ?? exportChoices) } ?? false
+                    return version
                 }
                 if let match = exportVersions.first(where: \.matchesCurrent), export.phase != .cancelled {
                     var result = match.result
@@ -263,7 +278,7 @@ extension EditorModel {
                     // the settings any more (they may have moved on).
                     export.isResultStale = export.result != nil
                     for index in exportVersions.indices { exportVersions[index].matchesCurrent = false }
-                    currentExportKey = nil
+                    currentExportSnapshot = nil
                     enterSourceUnavailable(failure)
                 }
                 else { handleExportError(failure) }
@@ -274,8 +289,12 @@ extension EditorModel {
         guard !isEditingLocked, let item = exportHistory.first(where: { $0.version.id == version }),
               exportVersions.first(where: { $0.id == version })?.matchesCurrent == false else { return }
         finishGestureBeforeEdit()
-        // Until exports keep their recipe (P7-3), only the export's own
-        // choices of that version come back.
+        // The version's recipe comes back as one undo step, its format as the
+        // panel's settings; exporting that recipe again asks for its model.
+        if let snapshot = item.recipeSnapshot {
+            editor.setRecipe(snapshot.recipe)
+            restoredModel = item.resolved?.modelIdentity.map { (editor.recipe, $0) }
+        }
         exportChoices = item.options
         exportChoicesChanged()
     }
@@ -318,7 +337,7 @@ extension EditorModel {
         pendingExportToken = nil
         exportMetadataTask?.cancel(); exportMetadataTicket += 1
         cachedFrameKey = nil; cachedExportFrame = nil
-        export.reset(); exportVersions = []; exportSaveStates = [:]; exportHistory = []; currentExportKey = nil; suggestedFileName = ""
+        export.reset(); exportVersions = []; exportSaveStates = [:]; exportHistory = []; currentExportSnapshot = nil; restoredModel = nil; suggestedFileName = ""
         pendingPhotoSwitch = nil; pendingSwitchStops = false
         lut.isBusy = false
     }
@@ -382,19 +401,25 @@ extension EditorModel {
             + "\nLens correction: " + support
     }
     /// Generate only on explicit copy, capturing one coherent edit snapshot.
+    /// The export of the current edit is described by its plan; there is no
+    /// equivalent CLI command any more (P7-3b-U).
     var diagnosticText: String {
         get async {
             let header = diagnosticHeader
-            guard let photo else { return header + "\nEquivalent CLI command: no photo open" }
-            let options = effectiveOptions()
+            guard photo != nil else { return header + "\nExport plan: no photo open" }
             do {
-                let frame = try makeExportFrame()
-                let argv = try await services.commandLine(photo, options: options, frame: frame)
-                return header + "\n" + DiagnosticCommand.text(argv)
+                return header + "\nExport plan: " + Self.planSummary(ExportPlanner.plan(try captureExport().request))
             } catch {
-                return header + "\nEquivalent CLI command: unavailable (" + UserFacingError.service(error).code + ")"
+                return header + "\nExport plan: unavailable (" + UserFacingError.service(error).code + ")"
             }
         }
+    }
+    nonisolated static func planSummary(_ plan: ExportPlan) -> String {
+        var parts = ["\(plan.encoding.rawValue)", "writer \(plan.writer)", "\(plan.gamut.rawValue)",
+                     "\(plan.size.width)×\(plan.size.height)", "\(plan.baseBitDepth)-bit", "quality \(plan.quality)"]
+        if let stops = plan.peakStops { parts.append("ceiling \(stops) stops") }
+        parts.append("gain map \(plan.gainMap)")
+        return parts.joined(separator: " · ")
     }
     private var diagnosticHeader: String {
         // The rows of the About page, in English so that a report reads the same everywhere.
@@ -419,5 +444,30 @@ extension EditorModel {
             + "\nHDR preview: " + SettingsDiagnostics.previewState(display).rawValue
             + "\nHeadroom: \(display.currentHeadroom) / \(display.potentialHeadroom)"
             + "\nInputs: " + openableContentTypes.map(\.identifier).joined(separator: ", ")
+    }
+}
+
+/// One export of the current edit, frozen on the main actor (P7-3 §8).
+struct ExportIntent {
+    let capture: EditorExportCapture
+    let frame: FrameExportPlan?
+    let choices: ExportChoices
+    /// Set when re-rendering a restored version that used AI.
+    var expectedModelIdentity: String? = nil
+
+    /// What Kit plans from: the panel's format, the frame's canvas.
+    var request: ExportPlanRequest {
+        capture.planRequest(.custom(choices.customFormat), frame: ExportFrameFacts(canvas: frame.map {
+            ExportPixelSize(width: $0.layout.width, height: $0.layout.height)
+        }))
+    }
+
+    func snapshot(revision: RecipeSourceRevision) -> RecipeExportSnapshot {
+        RecipeExportSnapshot(recipe: capture.recipe, source: revision, expectedModelIdentity: expectedModelIdentity,
+                             frame: frame?.snapshot)
+    }
+
+    func job(revision: RecipeSourceRevision) -> RecipeExportJob {
+        RecipeExportJob(snapshot: snapshot(revision: revision), request: request, lut: capture.lut)
     }
 }

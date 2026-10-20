@@ -192,10 +192,9 @@ import XCTest
         await eventually(timeout: .seconds(10)) { if case .ready = model.exportSummaryThumbnail { true } else { false } }
         model.startExport(destination: destination, token: try XCTUnwrap(model.prepareExport()))
         await eventually(timeout: .seconds(10)) { services.hasExportSubscriber }
-        let passed = try XCTUnwrap(services.exportCalls[0].thumbnail)
+        guard case .ready(let passed) = model.export.thumbnail else { return XCTFail("no picture") }
         XCTAssertEqual(passed.width, geometry.width); XCTAssertEqual(passed.height, geometry.height)
-        XCTAssertNotNil(services.exportCalls[0].frame)
-        XCTAssertEqual(model.export.thumbnail, .ready(passed))
+        XCTAssertNotNil(services.exportCalls[0].job.snapshot.frame)
         XCTAssertLessThanOrEqual(max(passed.width, passed.height), 256)
         model.cancelExport()
         await eventually(timeout: .seconds(10)) { !model.export.isInFlight }
@@ -211,8 +210,8 @@ import XCTest
         await eventually(timeout: .seconds(10)) { model.exportSummaryThumbnail == .ready(photo) }
         model.startExport(destination: destination, token: try XCTUnwrap(model.prepareExport()))
         await eventually(timeout: .seconds(10)) { services.hasExportSubscriber }
-        XCTAssertTrue(services.exportCalls[0].thumbnail === photo)
-        XCTAssertNil(services.exportCalls[0].frame)
+        XCTAssertEqual(model.export.thumbnail, .ready(photo))
+        XCTAssertNil(services.exportCalls[0].job.snapshot.frame)
         model.cancelExport()
         await eventually(timeout: .seconds(10)) { !model.export.isInFlight }
     }
@@ -325,9 +324,9 @@ import XCTest
         let services = await services(photoSize: PixelSize(width: 20_000, height: 100))
         let model = try await ready(services)
         let done = ExportResult(export: "plain", fileName: "result.heic", byteCount: 10, pixelSize: PixelSize(width: 20_000, height: 100))
-        let key = try await services.exportKey(try XCTUnwrap(model.photo), options: model.effectiveOptions(), frame: nil)
+        let key = try await services.exportKey(model)
         services.historyByURL[source] = [ExportHistoryItem(
-            version: ExportVersion(number: 1, createdAt: Date(), encodingID: "adaptive", result: done), key: key, options: model.exportChoices)]
+            version: ExportVersion(number: 1, createdAt: Date(), encodingID: "adaptive", result: done), recipeSnapshot: key, options: model.exportChoices)]
         model.refreshExportMetadata()
         await eventually(timeout: .seconds(10)) { model.exportVersions.first?.matchesCurrent == true && model.export.result != nil }
         let matching = ExportPresentation.PanelMode(phase: model.export.phase,
@@ -366,11 +365,9 @@ import XCTest
         XCTAssertEqual(model.exportSummaryThumbnail, .loading)
         model.startExport(destination: destination, token: try XCTUnwrap(model.prepareExport()))
         await eventually(timeout: .seconds(10)) { services.hasExportSubscriber }
-        XCTAssertNil(services.exportCalls[0].thumbnail)
         await eventually(timeout: .seconds(10)) { if case .ready = model.export.thumbnail { true } else { false } }
         guard case .ready(let late) = model.export.thumbnail else { return XCTFail("no picture") }
         XCTAssertEqual(late.width, geometry.width); XCTAssertEqual(late.height, geometry.height)
-        XCTAssertNil(services.exportCalls[0].thumbnail, "a record admitted without a picture stays without one")
         model.cancelExport()
         await eventually(timeout: .seconds(10)) { !model.export.isInFlight }
     }

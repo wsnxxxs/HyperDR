@@ -125,8 +125,10 @@ await the same task when preparing export, rather than serializing both opens.
 frozen Recipe/LUT/prediction/request. It returns `ExportRowSource`, whose report is
 fixed and whose synchronous `read(y:count:)` may be replayed. A renderer may opt
 into this separately from `ExportStripeRendering`; the service also accepts an
-explicit `rowRenderer` injection. The real Render adapter follows its prepared-row
-handoff; a renderer without this protocol keeps the whole-plane path. Setting
+explicit `rowRenderer` injection. `RenderEngine` implements the protocol through
+`prepareExportRows`; `PreparedExportRows` supplies the frozen report and synchronous
+ROI reader on its private renderer executor. A renderer without this protocol
+keeps the whole-plane path. Setting
 `ExportPlanRequest.allowsRowInput=false` provides that same parity baseline.
 
 Native JPEG/TIFF/ISO JPEG/HEIC writers pull rows through `PackageRowBridge`, not a
@@ -162,3 +164,29 @@ real system source/Render/verification residency; JSON is in
 `/tmp/p7-stream-memory/`. The separate six-format test compares whole versus rows
 with identical decoded pixels, including JPEG's intentionally different entropy
 coding, and confirms multi-band gain analysis/encoding replay.
+
+Real source/Render measurement (P7-3d-K): `realStreamingHeightMemoryMeasurement`
+uses a generated system JPEG source, the lazy analysis source, the real 256-row
+Render preparation scan, replayable 64-row ROI reads, the Kit bridge/thumbnail,
+and native incremental SDR TIFF. Generate each input in a separate process by
+setting `HYPERDR_STREAM_REAL_HEIGHT=1024` (then `4096`) and
+`HYPERDR_STREAM_REAL_GENERATE_ONLY=1`; run the same filtered test in a new process
+without the generate-only variable. This excludes the generator's full-size
+CGContext from the export process high-water mark. Files are synthetic and removed
+after measurement; JSON remains in `/tmp/p7-stream-real-memory/`.
+
+| Process high-water mark (`ru_maxrss`, bytes) | 2048×1024 | 2048×4096 |
+|---|---:|---:|
+| Before engine/source | 43,728,896 | 43,745,280 |
+| After system source/analysis | 91,078,656 | 90,963,968 |
+| After Render preparation | 92,962,816 | 92,815,360 |
+| After row writing and thumbnail | 103,923,712 | 103,874,560 |
+| After native full-image probe | 129,138,688 | 204,570,624 |
+
+At fixed width, rendering plus writing stayed at 99.11/99.06 MiB across four times
+the height; full-image validation grew to 123.16/195.09 MiB. The measurement checks
+an arbitrary band twice for exact replay before packaging. It is a macOS synthetic
+SDR JPEG/TIFF sample, not an admission guarantee for RAW, dual inputs or iOS; the
+conservative decoder/HEIC reserves remain. The real service's six-format test also
+compares decoded pixels against whole-plane output, including a multi-band framed
+HEIC pair. Service tests retain Fake injection for deterministic failure paths.

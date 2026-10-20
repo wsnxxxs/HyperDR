@@ -10,6 +10,8 @@ import subprocess
 import sys
 from xml.parsers.expat import ExpatError
 
+from engine_fingerprint import engine_fingerprint
+
 ROOT = Path(__file__).resolve().parents[1]
 MINIMUM_PYTHON = (3, 10)
 
@@ -79,7 +81,7 @@ def apple() -> None:
     # The build script gates every archive it produces with check_licenses.py
     # --archive-only (R7-1602), so a slice can never be built, or skipped, without
     # the libheif/libde265 check.
-    run("bash", "scripts/build_xcframework.sh", env=env)
+    ensure_apple_engine(env, ios=False)
     for package, scratch in APPLE_PACKAGES.items():
         path = ROOT / "apps/apple/Packages" / package
         if not path.is_dir():
@@ -97,8 +99,8 @@ def apple() -> None:
     run(sys.executable, "tests/apple/export_parity.py", env=env)
 
 
-def has_apple_engine_slices() -> bool:
-    """Check the package's actual artifact, including both arm64 iOS variants.
+def has_apple_engine_slices(*, ios: bool = True) -> bool:
+    """Check usable macOS and, when requested, both arm64 iOS variants.
     A plist entry alone is insufficient after an interrupted or Mac-only build.
     """
     artifact = ROOT / "apps/apple/Packages/HyperDREngine/Artifacts/HyperDREngineCore.xcframework"
@@ -126,17 +128,37 @@ def has_apple_engine_slices() -> bool:
             if not all((directory / headers / name).is_file() for name in ("hyperdr.h", "module.modulemap")):
                 continue
             found.add((library.get("SupportedPlatform"), library.get("SupportedPlatformVariant", "")))
-        return {("macos", ""), ("ios", ""), ("ios", "simulator")} <= found
+        required = {("macos", ""), ("ios", ""), ("ios", "simulator")} if ios else {("macos", "")}
+        return required <= found
     except (OSError, ValueError, TypeError, plistlib.InvalidFileException, ExpatError):
         return False
 
 
-def ensure_ios_engine(env: dict[str, str]) -> None:
-    if has_apple_engine_slices():
+def ensure_apple_engine(env: dict[str, str], *, ios: bool) -> None:
+    artifact = ROOT / "apps/apple/Packages/HyperDREngine/Artifacts/HyperDREngineCore.xcframework"
+    fingerprint = engine_fingerprint(ROOT)
+
+    def current() -> bool:
+        try:
+            return has_apple_engine_slices(ios=ios) and (
+                artifact.resolve().parent / "engine-source.sha256").read_text().strip() == fingerprint
+        except OSError:
+            return False
+
+    if current():
         return
-    run("bash", "scripts/build_xcframework.sh", "--platforms", "all", env=env)
-    if not has_apple_engine_slices():
-        raise RuntimeError("Engine xcframework is missing usable macOS/iOS device/iOS simulator slices after rebuilding")
+    command = ("bash", "scripts/build_xcframework.sh")
+    if ios:
+        command += ("--platforms", "all")
+    run(*command, env=env)
+    if not has_apple_engine_slices(ios=ios):
+        raise RuntimeError("Engine xcframework is missing usable requested slices after rebuilding")
+    if not current():
+        raise RuntimeError("Engine xcframework source stamp is missing or stale after rebuilding")
+
+
+def ensure_ios_engine(env: dict[str, str]) -> None:
+    ensure_apple_engine(env, ios=True)
 
 
 def ios() -> None:

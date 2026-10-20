@@ -8,12 +8,12 @@ using namespace metal;
 
 struct DisplayLayerParams {
     float4 baseOffset, alternateOffset;
-    float gainMin, gainMax, inverseGamma, weight;
-    uint gainChannels, coding, firstSlice, firstPlane;
+    float3x3 toGain, toP3;
+    float weight;
+    uint gainChannels, coding, firstSlice, firstPlane, identity;
 };
 
-// Bilinear in the stored coding, then decoded: an ISO code is interpolated
-// before its gamma, as a gain-map reader does.
+// Bilinear in log2 stops (Render has already decoded min/max/gamma).
 float3 sampleDisplayGain(uint2 xy, uint2 size, texture2d<float, access::read> gain,
                          constant DisplayLayerParams& p) {
     const float2 gainSize = float2(gain.get_width(), gain.get_height());
@@ -24,16 +24,15 @@ float3 sampleDisplayGain(uint2 xy, uint2 size, texture2d<float, access::read> ga
     const float2 w = fract(g);
     const float4 v = mix(mix(gain.read(lo), gain.read(uint2(hi.x, lo.y)), w.x),
                          mix(gain.read(uint2(lo.x, hi.y)), gain.read(hi), w.x), w.y);
-    float3 value = p.gainChannels == 1 ? float3(v.r) : v.rgb;
-    if (p.coding == 1) {
-        value = p.gainMin + (p.gainMax - p.gainMin) * pow(clamp(value, 0.0, 1.0), p.inverseGamma);
-    }
-    return value;
+    return p.gainChannels == 1 ? float3(v.r) : v.rgb;
 }
 
 // Three slices: base, full HDR (overlay statistics), and weighted HDR. A
 // headroom-only update writes plane 2 without touching base or full HDR.
-// Weight zero still applies both ISO offsets; clipping is the final step.
+// ISO 21496-1 at any weight w, in the gain's working space:
+//   HDR_P3 = M_toP3 · ((M_toGain · base + o_base) · 2^(w·g) − o_alt)
+// Identity matrices (our own separated pairs) skip both products. Weight zero
+// still applies both offsets; clipping is the final step.
 kernel void composeDisplayLayers(texture2d<float, access::read> base [[texture(0)]],
                                  texture2d<float, access::read> gain [[texture(1)]],
                                  texture2d_array<float, access::write> out [[texture(2)]],
@@ -45,7 +44,7 @@ kernel void composeDisplayLayers(texture2d<float, access::read> base [[texture(0
     const float3 sdr = base.read(xy.xy).rgb;
     float3 value = sdr;
     const float weight = plane == 1 ? 1.0 : clamp(p.weight, 0.0, 1.0);
-    if (plane != 0 && p.coding == 2) {
+    if (plane != 0 && p.coding == 1) {
         // The alternate rendition: keep both endpoints exact.
         const float3 hdr = gain.read(xy.xy).rgb;
         if (weight >= 1) value = hdr;
@@ -54,8 +53,10 @@ kernel void composeDisplayLayers(texture2d<float, access::read> base [[texture(0
             value = max(float3(0), (sdr + p.baseOffset.rgb) * pow(ratio, weight) - p.alternateOffset.rgb);
         }
     } else if (plane != 0) {
-        value = max(float3(0), (sdr + p.baseOffset.rgb) * exp2(sampleDisplayGain(xy.xy, size, gain, p) * weight)
-                               - p.alternateOffset.rgb);
+        const float3 scale = exp2(sampleDisplayGain(xy.xy, size, gain, p) * weight);
+        value = p.identity != 0 ? (sdr + p.baseOffset.rgb) * scale - p.alternateOffset.rgb
+              : p.toP3 * ((p.toGain * sdr + p.baseOffset.rgb) * scale - p.alternateOffset.rgb);
+        value = max(float3(0), value);
     }
     out.write(float4(value, 1), xy.xy, p.firstSlice + plane);
 }

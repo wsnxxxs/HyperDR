@@ -110,11 +110,11 @@ extension CompositionPerformanceTests {
             func planes(_ height:Int) throws -> DisplayPair {
                 var base=[Float](repeating:1,count:width*height*4), gain=[Float](repeating:0,count:width*height)
                 for i in 0..<width*height {
-                    base[i*4]=0.1;base[i*4+1]=0.3;base[i*4+2]=0.5;gain[i]=Float(i%127)/126
+                    base[i*4]=0.1;base[i*4+1]=0.3;base[i*4+2]=0.5;gain[i]=Float(-1)+5*Float(i%127)/126
                 }
                 return DisplayPair(base:try PreviewRenderer.texture(device:renderer.device,width:width,height:height,values:base),
                     gain:try PreviewRenderer.texture(device:renderer.device,width:width,height:height,values:gain,monochrome:true),
-                    coding:.isoCode(minimum:-1,maximum:4,gamma:1),alternateHeadroom:4)
+                    alternateHeadroom:4)
             }
             let setup=try XCTUnwrap(renderer.queue.makeCommandBuffer())
             let whole=try planes(wholeHeight),detail=try planes(height)

@@ -97,7 +97,7 @@ nonisolated final class CanvasCompositor {
         encoder.endEncoding()
         let m = frame.metadata
         return DisplayPair(base: base, gain: gain,
-            coding: mono ? .isoCode(minimum: planes.gainMin, maximum: planes.gainMax, gamma: planes.gainGamma) : .alternate,
+            coding: mono ? .log2 : .alternate,
             baseOffset: SIMD3(repeating: planes.baseOffset), alternateOffset: SIMD3(repeating: planes.alternateOffset),
             baseHeadroom: m.baseHeadroom ?? 0, alternateHeadroom: m.alternateHeadroom ?? m.headroomStops,
             region: Self.region(frame))

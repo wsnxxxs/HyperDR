@@ -1,11 +1,13 @@
 import CoreGraphics
 import Metal
 import os
+import simd
 
 /// What the canvas shows for one rendition: a linear Display P3 base and the
-/// gain that takes it to the alternate rendition (ISO 21496-1, gpu-pipeline
-/// §11). Render produces it; the display layer alone decides how much of the
-/// gain the screen gets. Export never passes through here.
+/// decoded log2 gain that takes it to the alternate rendition (ISO 21496-1,
+/// gpu-pipeline §11), applied in the gain's working space. Render produces it
+/// and resolves min/max/gamma and ICC; the display layer alone decides how
+/// much of the gain the screen gets. Export never passes through here.
 ///
 /// Both textures are top-down and must not be written once the pair exists:
 /// the compositor caches by texture identity. The gain may be smaller than
@@ -14,8 +16,6 @@ nonisolated struct DisplayPair: @unchecked Sendable {
     enum GainCoding: Equatable, Sendable {
         /// The texel is log2 of the gain, in stops.
         case log2
-        /// The texel is an ISO 21496-1 code in 0…1.
-        case isoCode(minimum: Float, maximum: Float, gamma: Float)
         /// The "gain" is the alternate rendition itself, at the base's size:
         /// the engine's v1 frames (details, LUT and SDR-clamped previews)
         /// until the Mac editor renders through HyperDRRender. Weight 0 is
@@ -27,9 +27,12 @@ nonisolated struct DisplayPair: @unchecked Sendable {
     let base: any MTLTexture
     /// One channel (an R format) or three (the RGB of an RGBA format).
     let gain: any MTLTexture
-    let coding: GainCoding
+    var coding: GainCoding = .log2
     var baseOffset = SIMD3<Float>(repeating: 0)
     var alternateOffset = SIMD3<Float>(repeating: 0)
+    /// Display P3 → the gain's working space, and back.
+    var toGain = matrix_identity_float3x3
+    var toP3 = matrix_identity_float3x3
     /// log2 headroom of the base and of the alternate rendition.
     var baseHeadroom: Double = 0
     var alternateHeadroom: Double
@@ -48,7 +51,8 @@ nonisolated struct DisplayPair: @unchecked Sendable {
     /// Same textures and the same decoding.
     func hasSameContent(as other: DisplayPair) -> Bool {
         base === other.base && gain === other.gain && coding == other.coding
-            && baseOffset == other.baseOffset && alternateOffset == other.alternateOffset && region == other.region
+            && baseOffset == other.baseOffset && alternateOffset == other.alternateOffset
+            && toGain == other.toGain && toP3 == other.toP3 && region == other.region
     }
 
     /// The share of the gain a screen with `headroom` (linear) shows.

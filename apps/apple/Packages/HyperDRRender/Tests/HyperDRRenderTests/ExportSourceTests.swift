@@ -169,6 +169,21 @@ private func licensedRAW() -> URL {
         } catch RenderError.sourceChanged {}
     }
 
+    @Test func rawPreviewMatchesNativeSampling() async throws {
+        let engine = try RenderEngine()
+        let url = licensedRAW()
+        let full = try await engine.load(url)
+        let preview = try await engine.load(url,options:SourceOptions(resolution:.preview(maximumSize:PixelSize(width:641,height:428))))
+        let opened = try RenderEngine.openRAW(url,options:SourceOptions(resolution:.preview(maximumSize:PixelSize(width:641,height:428))))
+        #expect(opened.image.extent.size == CGSize(width:full.size.width,height:full.size.height))
+        #expect(opened.rawPreviewSize == preview.size)
+        #expect(preview.size.width <= 641 && preview.size.height <= 428)
+        let a = RenderEngine.readPixels(try await engine.render(full,size:preview.size))
+        let b = RenderEngine.readPixels(try await engine.render(preview,size:preview.size))
+        compareBands(a.baseRGBA,b.baseRGBA,label:"RAW_preview_base")
+        compareBands(a.gain,b.gain,scale:0.25,label:"RAW_preview_gain")
+    }
+
     @Test func rawRegionsMatchWholeDevelopment() async throws {
         let engine = try RenderEngine()
         let url = licensedRAW()

@@ -566,19 +566,25 @@ struct RecipeExportEnvironment {
         let renderer: any ExportStripeRendering = rows ? StripeFake() : env.render
         let service = RecipeExportService(engine: env.engine, renderEngine: env.render, renderer: renderer,
             sessions: env.sessions, target: env.target, budget: budget)
+        let preparations = Mutex(0)
         let result = try await service.export(session: env.session.id, snapshot: env.snapshot(), request: request,
             progress: { event in
-                if event.stage == .developing { budget.bytes.withLock { $0 -= sourceBytes } }
+                if event.stage == .preparing && preparations.withLock({ $0 += 1; return $0 == 2 }) {
+                    budget.bytes.withLock { $0 -= sourceBytes }
+                }
             })
         #expect(budget.availableBytes() == peak + 1 - sourceBytes)
         #expect(result.record.resolvedSnapshot == result.resolved)
         #expect(result.resolved.width == 96 && result.resolved.height == 64)
         // A remaining budget below the genuinely incremental peak still refuses.
         budget.bytes.withLock { $0 = peak + 1 }
+        preparations.withLock { $0 = 0 }
         await #expect(throws: RecipeExportError.planBlocked(["export_memory_exceeded"])) {
             _ = try await service.export(session: env.session.id, snapshot: env.snapshot(), request: request,
                 progress: { event in
-                    if event.stage == .developing { budget.bytes.withLock { $0 = peak - sourceBytes - 1 } }
+                    if event.stage == .preparing && preparations.withLock({ $0 += 1; return $0 == 2 }) {
+                        budget.bytes.withLock { $0 = peak - sourceBytes - 1 }
+                    }
                 })
         }
         #expect(await env.sessions.exports(for: env.session.id).count == 1)
@@ -757,5 +763,42 @@ struct RecipeExportEnvironment {
         let first = ResolvedExportSnapshot(snapshot: try env.snapshot(recipe: a), plan: plan)
         let second = ResolvedExportSnapshot(snapshot: try env.snapshot(recipe: b), plan: plan)
         #expect(try first.exportKey() == second.exportKey())
+    }
+}
+
+@Suite("Row writer progress")
+struct RowWriterProgressTests {
+    @Test func serviceExportsTheSelectedLongEdgeAndCombinedProgress() async throws {
+        let env = try await RecipeExportEnvironment(); defer { env.remove() }
+        var request = env.request(.isoGainMapJPEG)
+        request.choice = .custom(.init(encoding: .isoGainMapJPEG, quality: 95, longEdge: 48))
+        let events = Mutex<[RecipeExportProgress]>([])
+        let result = try await env.service().export(session: env.session.id, snapshot: env.snapshot(), request: request,
+            progress: { event in events.withLock { $0.append(event) } })
+        #expect(result.resolved.width == 48 && result.resolved.height == 32)
+        #expect(result.resolved.selection.customFormat?.longEdge == 48)
+        #expect(events.withLock { $0.contains { $0.includesRendering && $0.totalRows == 32 } })
+        #expect(!events.withLock { $0.contains { $0.stage == .developing } })
+    }
+
+    @Test func replayReportsDistinctPassesWithoutDuplicateRows() throws {
+        let request = ExportRenderRequest(photoSize: .init(width: 8, height: 8), includesGain: false,
+            capabilities: .init(supportsThreeChannelGain: false, supportsSignedGain: true,
+                                requiresGainMaximumHeadroom: false))
+        let fake = StripeFake()
+        let events = Mutex<[RecipeExportProgress]>([])
+        let bridge = PackageRowBridge(source: FakeRows(fake: fake, request: request, report: fake.report(request)),
+            frame: nil, progress: { event in events.withLock { $0.append(event) } })
+        var base = [Float](repeating: 0, count: 8 * 4 * 3)
+        for y in [0, 0, 4, 0, 4] {
+            try base.withUnsafeMutableBufferPointer { try bridge.read(y: y, count: 4, base: $0, gain: nil) }
+        }
+        let actual = events.withLock { $0 }
+        #expect(actual.map(\.completedRows) == [4, 8, 4, 8])
+        #expect(actual.map(\.rowPass) == [1, 1, 2, 2])
+        #expect(actual[0].stageMessage.localized(locale: Locale(identifier: "en")) == "Rendering and encoding")
+        #expect(actual[0].stageMessage.localized(locale: Locale(identifier: "zh-Hans")) == "渲染与编码")
+        #expect(actual.allSatisfy { $0.stage == .encoding && $0.includesRendering && $0.totalRows == 8 })
+        _ = try bridge.thumbnail()
     }
 }

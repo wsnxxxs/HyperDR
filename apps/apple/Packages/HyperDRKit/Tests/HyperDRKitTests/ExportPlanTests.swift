@@ -197,7 +197,7 @@ struct ExportCustomPlanTests {
         #expect(custom.encoding == destination.encoding)
         #expect(custom.gamut == destination.gamut)
         #expect(custom.quality == destination.quality)
-        #expect(custom.size == photo) // the long edge is not carried
+        #expect(custom.size == destination.size) // the destination limit is carried
         #expect(custom.peakStops == destination.peakStops)
     }
 
@@ -697,5 +697,72 @@ struct ExportGeometryTests {
         #expect(plan.size == canvas)
         #expect(plan.summary.parts[2].key == "plan.size.pixels")
         #expect(plan.summary.parts[2].arguments == [.pixels(6200), .pixels(4200)])
+    }
+}
+
+@Suite("Export planning: functional gaps")
+struct ExportPlanGapTests {
+    @Test func customLongEdgeFlowsIntoSizeSnapshotAndKey() throws {
+        let limited = plan(request(.custom(.init(encoding: .sdrJPEG, longEdge: 1800))))
+        #expect(limited.photoSize == .init(width: 1800, height: 1200))
+        #expect(limited.longEdgeLimit == 1800)
+        let layout = try ExportPlanner.frameLayout(frame: ["margins": .number(0.05), "caption": .number(0.1)],
+            choice: limited.choice, photo: photo)
+        #expect(layout.photo.width == 1800 && layout.photo.height == 1200)
+        let framed = plan(request(limited.choice, frame: .init(canvas: .init(width: layout.width, height: layout.height))))
+        #expect(framed.photoSize == limited.photoSize)
+        #expect(framed.size == .init(width: layout.width, height: layout.height))
+        #expect(framed.memory.estimate.peak >= limited.memory.estimate.peak)
+        #expect(plan(request(.custom(.init(longEdge: 9000)))).photoSize == photo)
+        let recipe = Recipe(inputDomain: .sdr)
+        let snapshot = RecipeExportSnapshot(recipe: recipe, source: .init(sha256: "test", byteCount: 1, modificationDate: .distantPast))
+        let resolved = ResolvedExportSnapshot(snapshot: snapshot, plan: limited)
+        let restored = try JSONDecoder().decode(ResolvedExportSnapshot.self, from: JSONEncoder().encode(resolved))
+        #expect(restored.selection.customFormat?.longEdge == 1800)
+        #expect(restored.width == 1800 && restored.height == 1200)
+        let original = ResolvedExportSnapshot(snapshot: snapshot, plan: plan(request(.custom(.init(encoding: .sdrJPEG)))))
+        #expect(try resolved.exportKey() != original.exportKey())
+        // Existing serialized choices without longEdge remain readable.
+        let format = try JSONDecoder().decode(CustomExportFormat.self, from: Data(#"{"encoding":"adaptive","gamut":"p3","quality":90}"#.utf8))
+        #expect(format.longEdge == nil)
+    }
+
+    @Test func hdrOffNoticesAndBT2100Blockers() {
+        for encoding in ExportEncoding.allCases {
+            let value = plan(request(.custom(.init(encoding: encoding)), hdrEnabled: false))
+            #expect(value.blockers.contains { $0.code == "hdrOff" } == encoding.isBT2100)
+            #expect(value.notices.contains { $0.key == "plan.sdrVersion" } == encoding.writesGainMap)
+            if encoding == .isoGainMapJPEG { #expect(value.encoding == .sdrJPEG) }
+            if encoding == .adaptive { #expect(value.baseBitDepth == 8 && !value.gainMap.writesGainMap) }
+        }
+    }
+
+    @Test func memoryFailureSuggestsAnAdmittedBoundary() throws {
+        let input = request(.custom(.init(encoding: .avifPq)))
+        let budget = 900_000_000
+        let refused = plan(input, available: budget)
+        #expect(!refused.memory.fits)
+        #expect(refused.blockers.first { $0.code == "export_memory_exceeded" }?.pixelSize == photo)
+        let edge = try #require(refused.memory.maxAdmissibleLongEdge)
+        var smaller = input
+        smaller.choice = .custom(.init(encoding: .avifPq, longEdge: edge))
+        #expect(plan(smaller, available: budget).memory.fits)
+        smaller.choice = .custom(.init(encoding: .avifPq, longEdge: edge + 1))
+        #expect(!plan(smaller, available: budget).memory.fits)
+        #expect(plan(input, available: 1).memory.maxAdmissibleLongEdge == nil)
+    }
+
+    @Test func planMessagesResolveInBothLanguages() {
+        for locale in [Locale(identifier: "en"), Locale(identifier: "zh-Hans")] {
+            for encoding in ExportEncoding.allCases {
+                for hdr in [true, false] {
+                    let value = plan(request(.custom(.init(encoding: encoding)), hdrEnabled: hdr, peakStops: 8), available: 1)
+                    for message in value.notices + value.blockers.map(\.message) + value.summary.parts {
+                        #expect(message.localized(locale: locale) != message.key)
+                        #expect(!message.localized(locale: locale).contains("%@"))
+                    }
+                }
+            }
+        }
     }
 }

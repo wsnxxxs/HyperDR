@@ -8,11 +8,16 @@ final class PackageRowBridge: @unchecked Sendable {
     let source: any ExportRowSource
     private let frame: FrameSnapshot?
     private let width, height, thumbnailWidth, thumbnailHeight: Int
+    private let progress: @Sendable (RecipeExportProgress) -> Void
+    private var progressEnd = 0
+    private var progressPass = 1
     private var nextThumbnailRow = 0
     private var sums: [SIMD3<Double>]
     private var counts: [Int]
 
-    init(source: any ExportRowSource, frame: FrameSnapshot?) {
+    init(source: any ExportRowSource, frame: FrameSnapshot?,
+         progress: @escaping @Sendable (RecipeExportProgress) -> Void = { _ in }) {
+        self.progress = progress
         self.source = source; self.frame = frame
         width = source.report.canvasSize.width; height = source.report.canvasSize.height
         let scale = min(1, 256 / Double(max(width, height)))
@@ -54,6 +59,14 @@ final class PackageRowBridge: @unchecked Sendable {
             nextThumbnailRow = y + count
         }
         try Task.checkCancellation()
+        // Package may replay rows for extrema, base and auxiliary encoding.
+        // Report each sequential pass, never count repeated callback samples twice.
+        if y == 0 && progressEnd == height { progressPass += 1; progressEnd = 0 }
+        if y <= progressEnd && y + count > progressEnd {
+            progressEnd = y + count
+            progress(.init(stage: .encoding, completedRows: progressEnd, totalRows: height,
+                           includesRendering: true, rowPass: progressPass))
+        }
     }
 
     func thumbnail() throws -> ExportThumbnail {

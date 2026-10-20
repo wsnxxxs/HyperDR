@@ -15,7 +15,16 @@ public struct RecipeExportProgress: Sendable {
     public let stage: RecipeExportStage
     public let completedRows: Int?
     public let totalRows: Int?
-    public init(stage: RecipeExportStage, completedRows: Int? = nil, totalRows: Int? = nil) {
+    /// Encoding pulls Render synchronously on the row path. Label this stage
+    /// “Rendering and encoding”; rows describe this pass, not overall completion.
+    public let includesRendering: Bool
+    /// One-based sequential replay pass; nil outside the row writer.
+    public let rowPass: Int?
+    public var stageMessage: ExportMessage {
+        .init(key: "export.stage." + (includesRendering ? "renderingEncoding" : stage.rawValue))
+    }
+    public init(stage: RecipeExportStage, completedRows: Int? = nil, totalRows: Int? = nil, includesRendering: Bool = false, rowPass: Int? = nil) {
+        self.includesRendering = includesRendering; self.rowPass = rowPass
         self.stage = stage; self.completedRows = completedRows; self.totalRows = totalRows
     }
 }

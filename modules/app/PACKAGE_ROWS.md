@@ -1,7 +1,7 @@
 # Incremental packaging
 
-ABI 4 is retained: this change adds symbols, changes no existing structure layout
-and leaves `hyperdr_package` and CLI output behavior intact.
+ABI 5 provides both whole-plane `hyperdr_package` and incremental row-input
+packaging, with the same plane and metadata structure layouts.
 
 `hyperdr_package_rows_supported(format)` reports compiled row-input capability.
 `hyperdr_package_rows(engine, request, rows, callback, user, report, error)` runs

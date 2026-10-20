@@ -1,6 +1,6 @@
 {
   "schema": "hyperdr.quality/v1",
-  "note": "Local calibrated representative cards, not universal tolerances. E5 limits stay in tests/hevc/frame_photo_baseline.json. Sharp 4:2:0 color edges have a separate measured floor.",
+  "note": "Local calibrated representative cards, not universal tolerances. E5 limits stay in tests/quality/e5_package.cpp. Sharp 4:2:0 color edges have a separate measured floor.",
   "cases": [
     {
       "name": "p3-main8-gradient",

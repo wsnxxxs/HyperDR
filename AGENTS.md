@@ -43,7 +43,7 @@ this checkout. This file summarizes what they decide.
 |---|---|
 | `modules/` | C++ engine; `modules/app` holds the engine facade, `modules/capi` the C ABI |
 | `apps/apple/Packages/HyperDREngine` | Swift wrapper over the C ABI. Pure computations are synchronous; I/O, decoding, rendering and export are `async` on a dedicated queue and forward `Task` cancellation |
-| `apps/apple/Packages/HyperDRKit` | Services: edit defaults, input formats, `SessionStore` (security-scoped bookmarks, cleanup, export versions), `PreviewService` |
+| `apps/apple/Packages/HyperDRKit` | Services: input formats, `SessionStore` (security-scoped bookmarks, cleanup, export versions), export planning and `RecipeExportService` |
 | `apps/apple/Packages/HyperDRDesign` | Design tokens and controls, including the inspector controls; `Adjustments/` generates the adjustment controls from HyperDRRecipe's declarations (`AdjustmentPanel`, `AdjustmentInspector` for the Mac and the iPad sidebar, the touch slider), with their words in this package's catalogue |
 | `apps/apple/HyperDR/Editor` | `EditorModel` / `CanvasModel`, the contract the views bind to, running on the real `HyperDRKit` services |
 | `apps/apple/HyperDR/Views` | SwiftUI views; they only talk to the editor models |

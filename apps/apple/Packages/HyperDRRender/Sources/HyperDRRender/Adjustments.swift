@@ -85,13 +85,3 @@ public struct RenderAdjustments: Hashable, Sendable {
         if domain == .rawEDR && (color.warmth != 0 || color.tint != 0) { throw RenderError.invalidAdjustment }
     }
 }
-
-/// Metadata IDs join to HyperDRRecipe's declaration catalogue. No duplicate
-/// ranges/default declarations are owned by Render's adjustment nodes.
-public enum AdjustmentIDs {
-    public static let tone = ["tone.exposure", "tone.contrast", "tone.highlights", "tone.shadows", "tone.blacks"]
-    public static let color = ["color.warmth", "color.tint", "color.vibrance", "color.saturation"]
-    public static let raw = ["develop.temperature", "develop.tint", "develop.luminanceNR", "develop.colorNR", "develop.sharpness", "develop.lensCorrection"]
-    public static let hdr = ["hdr.enabled", "hdr.source", "hdr.strength", "hdr.range", "hdr.expansionStart", "hdr.coverage", "hdr.sdrRolloff"]
-    public static let look = ["look.lut", "look.enabled", "look.strength", "look.input", "look.output"]
-}

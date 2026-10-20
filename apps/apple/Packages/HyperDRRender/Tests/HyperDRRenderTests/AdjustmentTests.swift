@@ -52,7 +52,7 @@ private func cube(swap: Bool = false) -> String {
         #expect(raw.raw.tint == 35 && raw.raw.luminanceNR == 0.4 && raw.raw.sharpness == 0.25)
         #expect(raw.raw.temperature == nil && raw.raw.colorNR == nil)
         #expect(try RenderAdjustments(recipe:rawRecipe).color.warmth == 0)
-        #expect(SourceOptions.parameters == AdjustmentIDs.raw.map { Adjustments.declaration($0)! })
+        #expect(SourceOptions.parameters == Adjustments.all.filter { $0.cost == .redevelop })
         #expect(AdjustmentNode.parameters == AdjustmentNode.parameterIDs.map { Adjustments.declaration($0)! })
         let lut = try ColorLUT(cube:cube(swap:true))
         #expect(lut == (try ColorLUT(cube:cube(swap:true))))

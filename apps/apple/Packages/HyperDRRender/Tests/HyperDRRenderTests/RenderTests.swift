@@ -155,7 +155,12 @@ private func close(_ a: [Float], _ b: [Float], tolerance: Float = 0.00001) {
         defer { try? FileManager.default.removeItem(at: temporary) }
         let defaults = try #require(CIRAWFilter(imageURL: temporary))
         let engine = try RenderEngine()
+        let target = PixelSize(width:2560,height:1707)
+        let fullStart = DispatchTime.now().uptimeNanoseconds
         let source = try await engine.load(temporary, options: SourceOptions(lensCorrection: false))
+        let fullLoaded = DispatchTime.now().uptimeNanoseconds
+        _ = try await engine.render(source,recipe:Recipe(inputDomain:.rawEDR),size:target)
+        let fullRendered = DispatchTime.now().uptimeNanoseconds
         let cached = try await engine.load(temporary, options: SourceOptions(lensCorrection: false))
         #expect(source.id == cached.id)
         #expect(source.domain == .rawEDR)
@@ -170,6 +175,21 @@ private func close(_ a: [Float], _ b: [Float], tolerance: Float = 0.00001) {
         #expect(settings.colorNR == defaults.colorNoiseReductionAmount)
         #expect(settings.temperature == defaults.neutralTemperature)
         #expect(settings.tint == defaults.neutralTint)
+        #expect(settings.scaleFactor == 1 && !settings.isDraft)
+        let previewOptions = SourceOptions(lensCorrection:false,rawResolution:.preview(maximumSize:target))
+        let previewStart = DispatchTime.now().uptimeNanoseconds
+        let preview = try await engine.load(temporary,options:previewOptions)
+        let previewLoaded = DispatchTime.now().uptimeNanoseconds
+        _ = try await engine.render(preview,recipe:Recipe(inputDomain:.rawEDR),size:target)
+        let previewRendered = DispatchTime.now().uptimeNanoseconds
+        let previewCached = try await engine.load(temporary,options:previewOptions)
+        let previewSettings = try #require(preview.rawSettings)
+        #expect(preview.id != source.id && preview.id == previewCached.id)
+        #expect(preview.size.width <= target.width+1 && preview.size.height <= target.height+1)
+        #expect(previewSettings.nativeSize == settings.nativeSize && previewSettings.scaleFactor < 1)
+        #expect(!previewSettings.isDraft && previewSettings.sharpness == settings.sharpness)
+        func milliseconds(_ duration: UInt64) -> Double { Double(duration)/1e6 }
+        print("P7-1c RAW output=2560x1707 full_source=\(source.size.width)x\(source.size.height) full_decode_ms=\(milliseconds(fullLoaded-fullStart)) full_graph_ms=\(milliseconds(fullRendered-fullLoaded)) preview_source=\(preview.size.width)x\(preview.size.height) preview_decode_ms=\(milliseconds(previewLoaded-previewStart)) preview_graph_ms=\(milliseconds(previewRendered-previewLoaded))")
         // Independent AE-2 G2 development, with the file defaults left intact.
         defaults.boostAmount = 1
         defaults.exposure = 0

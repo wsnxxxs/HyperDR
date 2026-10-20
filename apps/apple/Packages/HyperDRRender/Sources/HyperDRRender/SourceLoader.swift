@@ -87,6 +87,17 @@ extension RenderEngine {
         filter.extendedDynamicRangeAmount = 1
         filter.isGamutMappingEnabled = true
         filter.isDraftModeEnabled = false
+        let rotated = filter.orientation.rawValue >= 5
+        let native = filter.nativeSize
+        let nativeSize = PixelSize(width:Int(rotated ? native.height : native.width),
+                                   height:Int(rotated ? native.width : native.height))
+        switch options.rawResolution {
+        case .full: filter.scaleFactor = 1
+        case .preview(let maximumSize):
+            guard maximumSize.width > 0, maximumSize.height > 0 else { throw RenderError.invalidSize }
+            filter.scaleFactor = Float(min(1,Double(maximumSize.width)/Double(nativeSize.width),
+                                          Double(maximumSize.height)/Double(nativeSize.height)))
+        }
         if filter.isContrastSupported { filter.contrastAmount = 0 }
         if filter.isLocalToneMapSupported { filter.localToneMapAmount = 0 }
         let raw = options.raw
@@ -116,7 +127,8 @@ extension RenderEngine {
             temperature: filter.neutralTemperature, tint: filter.neutralTint,
             luminanceNR: filter.luminanceNoiseReductionAmount, colorNR: filter.colorNoiseReductionAmount,
             sharpness: filter.sharpnessAmount, supportsLuminanceNR: filter.isLuminanceNoiseReductionSupported,
-            supportsColorNR: filter.isColorNoiseReductionSupported, supportsSharpness: filter.isSharpnessSupported)
+            supportsColorNR: filter.isColorNoiseReductionSupported, supportsSharpness: filter.isSharpnessSupported,
+            nativeSize: nativeSize, scaleFactor: filter.scaleFactor, isDraft: filter.isDraftModeEnabled)
         // CIRAWFilter already applies the file's orientation.
         return OpenedSource(domain: .rawEDR, image: image, hdr: image,
                             baseSpace: workingColorSpace, gain: nil, raw: development)

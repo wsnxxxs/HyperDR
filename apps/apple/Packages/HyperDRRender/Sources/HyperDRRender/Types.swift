@@ -156,18 +156,31 @@ public struct RAWDevelopment: Sendable {
     public let supportsLuminanceNR: Bool
     public let supportsColorNR: Bool
     public let supportsSharpness: Bool
+    /// Oriented native dimensions, independent of preview development scale.
+    public let nativeSize: PixelSize
+    public let scaleFactor: Float
+    public let isDraft: Bool
+}
+
+/// Preview develops only the pixels needed by the canvas, retaining Apple detail
+/// quality. Full development is the default for export; both modes keep G2 semantics.
+public enum RAWResolution: Hashable, Sendable {
+    case full
+    case preview(maximumSize: PixelSize)
 }
 
 public struct SourceOptions: Hashable, Sendable {
-    public static let parameters = AdjustmentIDs.raw.map { Adjustments.declaration($0)! }
+    public static let parameters = Adjustments.all.filter { $0.cost == .redevelop }
     public enum Kind: String, Sendable { case automatic, imageIO, raw }
     public var kind: Kind
     public var lensCorrection: Bool
     public var raw = RAWAdjustments()
-    public init(kind: Kind = .automatic, lensCorrection: Bool? = nil, raw: RAWAdjustments = RAWAdjustments()) {
+    public var rawResolution: RAWResolution
+    public init(kind: Kind = .automatic, lensCorrection: Bool? = nil, raw: RAWAdjustments = RAWAdjustments(), rawResolution: RAWResolution = .full) {
         self.kind = kind
         self.lensCorrection = lensCorrection ?? RenderParameter.defaultBool("develop.lensCorrection")
         self.raw = raw
+        self.rawResolution = rawResolution
     }
 }
 

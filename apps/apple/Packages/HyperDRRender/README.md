@@ -50,8 +50,17 @@ as-shot temperature/tint, and selectable lens correction. **Apple's original det
 and noise-reduction defaults are retained**. This intentionally replaces P7-0's neutral-detail
 measurement baseline. `SourceOptions.raw` supplies optional temperature/tint/NR/sharpness;
 nil means Apple's/file defaults. `rawSettings` records actual values and supported controls.
-Changing these options invalidates the development cache. Full-quality development is used;
-no draft-preview policy is introduced by this package.
+Changing these options invalidates the development cache. Export defaults to
+`RAWResolution.full` (scale 1). Preview uses
+`SourceOptions(recipe: recipe, rawResolution: .preview(maximumSize: canvasPixelSize))`;
+CIRAWFilter scales development to fit that oriented canvas without upscaling. Both paths keep
+Apple detail defaults and disable draft mode. Resolution is part of the source cache key, so
+preview and full development cannot alias; the cache still retains just one developed source.
+`rawSettings.nativeSize` preserves the oriented original size and `scaleFactor` records the
+actual request. Raster formats ignore this RAW option. Previews are lower-resolution source
+approximations; preview/export still use the same graph and fixed 768-edge analysis, with
+analysis cached separately for each developed source. Export must load `.full` before rendering
+at export size rather than enlarging a preview texture.
 
 Processing is RGBA32Float extended-linear Display P3, SDR white 1. Generated pairs have
 RGBA32Float SDR base and R32Float log2 gain, zero offsets: `HDR = base * exp2(gain)`.
@@ -161,6 +170,14 @@ cached-analysis frames take median 9.96 ms (8.98…11.35 ms), including allocati
 and GPU completion. First analysis takes 54.58 ms. Decode, source materialization, shader
 compilation and CPU readback are excluded. These are shared-host measurements, not a device
 performance guarantee; RAW decoding and iPhone inference should be profiled separately.
+
+P7-1c RAW check on the licensed fixture, same M6/background process, both outputs 2560×1707:
+full development is 2768×1848, decode/materialization 261.00 ms plus first graph 48.59 ms
+(309.59 ms total); preview development is 2557×1707, decode/materialization 193.24 ms plus
+first graph 47.95 ms (241.20 ms total). These are one sequential full-then-preview measurement,
+not cold-start comparisons. Graph times include first fixed-scale analysis and GPU completion;
+shader setup, fixture copying, encoding/writing and CPU readback are excluded. The fixture is
+only 5.1 MP, so its canvas-sized development reduction is modest.
 
 The JPEG decoder investigation remains in [Research/README.md](Research/README.md): the
 approximately 14-code difference occurs before GPU processing; ICC contributes <.036 of a

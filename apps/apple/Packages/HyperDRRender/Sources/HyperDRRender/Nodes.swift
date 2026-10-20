@@ -111,8 +111,7 @@ public enum AdjustmentOperation: UInt32, CaseIterable, Sendable {
 /// Pointwise light/color nodes. The full graph fuses this identical operator
 /// sequence; individual nodes remain available for scoped evaluation and tests.
 public struct AdjustmentNode: RenderNode {
-    public static let parameterIDs = AdjustmentIDs.tone + AdjustmentIDs.color
-    public static let parameters = parameterIDs.map { Adjustments.declaration($0)! }
+    public static let parameters = AdjustmentOperation.allCases.map { Adjustments.declaration($0.parameterID)! }
     public let operation: AdjustmentOperation
     public let value: Float
     public init(_ operation: AdjustmentOperation, value: Float) { self.operation = operation; self.value = value }

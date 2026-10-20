@@ -87,8 +87,11 @@ extension RenderEngine {
         var gainTexture: (any MTLTexture)?, gainRegion = CGRect(x:0,y:0,width:1,height:1)
         if let gain = opened.gain {
             let size = gain.image.extent.integral.size
-            let rect = CGRect(x:normalized.minX*size.width,y:normalized.minY*size.height,
-                width:normalized.width*size.width,height:normalized.height*size.height)
+            // Project independently: the base ROI already includes its own halo.
+            // Reusing it here would add the gain halo to the base halo.
+            let gx = size.width/Double(outputSize.width), gy = size.height/Double(outputSize.height)
+            let rect = CGRect(x:(region.minX+0.5)*gx-0.5,y:(region.minY+0.5)*gy-0.5,
+                width:(region.width-1)*gx+1,height:(region.height-1)*gy+1)
                 .insetBy(dx:-1,dy:-1).integral.intersection(CGRect(origin:.zero,size:size))
             gainRegion = CGRect(x:rect.minX/size.width,y:rect.minY/size.height,width:rect.width/size.width,height:rect.height/size.height)
             gainTexture = try rasterize(crop(gain.image,normalized:gainRegion),space:nil,

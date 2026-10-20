@@ -35,10 +35,8 @@ import Observation
         case unavailable(String)
     }
 
-    /// Long sides the preview is rendered at: the canvas's drawable size rounded
-    /// up to one of these, so resizing a window within a tier does not render
-    /// (or, for RAW, develop) again (p7-2b §8).
-    nonisolated static let previewTiers = [1280, 2048, 2560, 3840]
+    /// The canvas long side assumed before the host reports one.
+    nonisolated static let defaultCanvasSide = 2048
 
     // MARK: - State the views read
 
@@ -77,6 +75,9 @@ import Observation
         return [Recipe.hdrSourceID: Set(HDRSource.allCases.filter(\.usesModel).map(\.rawValue))]
     }
 
+    /// The shown frame lacks the AI gain its recipe asks for (computing, or until R1).
+    var isModelGainPending: Bool { frame?.modelGainPending ?? false }
+
     /// What `auto` resolves to in the shown frame.
     var automaticValues: [String: Double] { frame?.automaticValues ?? [:] }
 
@@ -89,7 +90,7 @@ import Observation
     // MARK: - Bookkeeping
 
     @ObservationIgnored private var drag: (id: String, start: Recipe)?
-    @ObservationIgnored private var previewTier: Int?
+    @ObservationIgnored private var largestCanvasSide: Int?
     @ObservationIgnored private var openGeneration = 0
     @ObservationIgnored private var opening: Task<EditorSource, any Error>?
 
@@ -137,10 +138,11 @@ import Observation
         let previous = opening
         previous?.cancel()
         let renderer = self.renderer
+        let hint = Self.previewSize(source: nil, canvasSide: previewFloor(canvasPixelSize))
         let task = Task {
             _ = await previous?.result
             try Task.checkCancellation()
-            return try await renderer.open(url)
+            return try await renderer.open(url, previewSize: hint)
         }
         opening = task
         let opened = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
@@ -152,7 +154,7 @@ import Observation
         cancelRenders()
         undo.clear()
         previewSize = nil
-        previewTier = nil
+        largestCanvasSide = nil
         source = opened
         recipe = Recipe(inputDomain: opened.domain)
         bypassedGroups = []
@@ -191,7 +193,7 @@ import Observation
         modelTask = nil
         modelKey = nil
         previewSize = nil
-        previewTier = nil
+        largestCanvasSide = nil
         if case .unavailable = aiStatus {} else { aiStatus = .idle }
         renderFailure = nil
         _ = await task.result
@@ -276,27 +278,31 @@ import Observation
 
     private func updatePreviewSize(force: Bool = false) {
         guard let source else { return }
-        let sized = Self.previewSize(source: source.pixelSize, canvas: canvasPixelSize, atLeast: previewTier)
-        previewTier = sized.tier
-        guard force || sized.size != previewSize else { return }
-        previewSize = sized.size
+        let side = previewFloor(canvasPixelSize)
+        largestCanvasSide = side
+        let size = Self.previewSize(source: source.pixelSize, canvasSide: side)
+        guard force || size != previewSize else { return }
+        previewSize = size
         scheduleRender()
     }
 
-    /// The preview size for a canvas: the canvas's long side rounded up to a
-    /// tier (never a lower tier than `atLeast`, so shrinking a window does not
-    /// render again), at most the source's own size, in the source's aspect.
-    nonisolated static func previewSize(source: HyperDRRender.PixelSize, canvas: HyperDRRender.PixelSize?,
-                                        atLeast floor: Int? = nil) -> (size: HyperDRRender.PixelSize, tier: Int) {
-        let wanted = canvas.map { max($0.width, $0.height) } ?? previewTiers[1]
-        var tier = previewTiers.first { $0 >= wanted } ?? previewTiers[previewTiers.count - 1]
-        if let floor { tier = max(tier, floor) }
-        let long = max(source.width, source.height)
-        guard long > tier else { return (source, tier) }
-        let scale = Double(tier) / Double(long)
-        let size = HyperDRRender.PixelSize(width: max(1, Int((Double(source.width) * scale).rounded())),
-                             height: max(1, Int((Double(source.height) * scale).rounded())))
-        return (size, tier)
+    /// The canvas long side to size previews for: the largest seen for this
+    /// photo, so shrinking a window does not render (or develop) again.
+    private func previewFloor(_ canvas: HyperDRRender.PixelSize?) -> Int {
+        max(canvas.map { max($0.width, $0.height) } ?? Self.defaultCanvasSide, largestCanvasSide ?? 0)
+    }
+
+    /// Render's preview tiers (`SourceResolution.preview(canvasSize:nativeSize:)`,
+    /// 1280 / 2048 / 2560 / 3840, never upscaled) for a canvas whose long side
+    /// is `canvasSide`. With no source yet, the tier's square: the bound for
+    /// the first decode.
+    nonisolated static func previewSize(source: HyperDRRender.PixelSize?, canvasSide: Int) -> HyperDRRender.PixelSize {
+        let side = max(1, canvasSide)
+        // An unknown source is a square far larger than any tier.
+        let native = source ?? HyperDRRender.PixelSize(width: 1 << 20, height: 1 << 20)
+        guard case .preview(let size)? = try? SourceResolution.preview(
+            canvasSize: HyperDRRender.PixelSize(width: side, height: side), nativeSize: native) else { return native }
+        return size
     }
 
     private func request(for recipe: Recipe, size: HyperDRRender.PixelSize, region: CGRect? = nil,
@@ -396,6 +402,13 @@ import Observation
             throw EditorRenderingError.noSource
         }
         return try await renderer.render(request)
+    }
+
+    /// An SDR thumbnail of the shown frame, or of `frame`.
+    func sdrThumbnail(of frame: EditorFrame? = nil,
+                      maximumSize: HyperDRRender.PixelSize = HyperDRRender.PixelSize(width: 512, height: 512)) async throws -> CGImage {
+        guard let frame = frame ?? self.frame else { throw EditorRenderingError.noSource }
+        return try await renderer.sdrThumbnail(frame, maximumSize: maximumSize)
     }
 
     // MARK: - AI

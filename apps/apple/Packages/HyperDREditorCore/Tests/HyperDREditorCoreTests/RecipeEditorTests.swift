@@ -228,16 +228,19 @@ private func setting(_ recipe: Recipe, _ id: String, _ value: Double) -> Recipe 
         #expect(h.editor.originalFrame?.request.recipe == setting(Recipe(inputDomain: .rawEDR), "develop.sharpness", 40))
     }
 
-    @Test func previewSizeFollowsTiersAndDoesNotShrink() {
+    @Test func previewSizeFollowsRenderTiersAndDoesNotShrink() async throws {
         let source = PixelSize(width: 6000, height: 4000)
-        let small = RecipeEditor.previewSize(source: source, canvas: PixelSize(width: 1100, height: 700))
-        #expect(small.tier == 1280 && small.size == PixelSize(width: 1280, height: 853))
-        let wider = RecipeEditor.previewSize(source: source, canvas: PixelSize(width: 2100, height: 1400), atLeast: small.tier)
-        #expect(wider.tier == 2560)
-        let narrower = RecipeEditor.previewSize(source: source, canvas: PixelSize(width: 900, height: 600), atLeast: wider.tier)
-        #expect(narrower.size == wider.size)
-        let tiny = RecipeEditor.previewSize(source: PixelSize(width: 800, height: 600), canvas: nil)
-        #expect(tiny.size == PixelSize(width: 800, height: 600))
+        #expect(RecipeEditor.previewSize(source: source, canvasSide: 1100) == PixelSize(width: 1280, height: 853))
+        #expect(RecipeEditor.previewSize(source: PixelSize(width: 800, height: 600), canvasSide: 4000)
+                == PixelSize(width: 800, height: 600))
+        #expect(RecipeEditor.previewSize(source: nil, canvasSide: 2100) == PixelSize(width: 2560, height: 2560))
+
+        let h = Harness()
+        try await h.open()
+        h.editor.canvasPixelSize = PixelSize(width: 2100, height: 1400)
+        #expect(h.editor.previewSize == PixelSize(width: 2560, height: 1707))
+        h.editor.canvasPixelSize = PixelSize(width: 900, height: 600)
+        #expect(h.editor.previewSize == PixelSize(width: 2560, height: 1707))
     }
 
     @Test func aNewerOpenSupersedesAnOlderOne() async throws {
@@ -272,10 +275,12 @@ private func setting(_ recipe: Recipe, _ id: String, _ value: Double) -> Recipe 
         h.editor.setRecipe(setting(h.editor.recipe, "tone.exposure", 0.5))
         while h.editor.frame?.request.recipe.value(for: "tone.exposure") == nil { await Task.yield() }
         #expect(h.editor.frame?.request.usesModelGain == false)
+        #expect(h.editor.isModelGainPending)
         await h.fake.releasePredictions()
         await h.editor.settle()
         #expect(h.editor.aiStatus == .ready)
         #expect(h.editor.frame?.request.usesModelGain == true)
+        #expect(!h.editor.isModelGainPending)
         #expect(await h.fake.predictions == ["research-cnn-v1"])
         // Back to expansion and to AI again: the prediction is kept.
         var recipe = h.editor.recipe

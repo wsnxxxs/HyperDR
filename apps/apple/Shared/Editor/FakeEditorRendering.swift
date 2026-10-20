@@ -79,7 +79,7 @@ actor FakeEditorRendering: EditorRendering {
 
     // MARK: - EditorRendering
 
-    func open(_ url: URL) async throws -> EditorSource {
+    func open(_ url: URL, previewSize: HyperDRRender.PixelSize?) async throws -> EditorSource {
         opened.append(url)
         let photo = photos[url] ?? defaultPhoto
         let source = EditorSource(id: UUID(), url: url, domain: photo.domain, pixelSize: photo.size,
@@ -108,9 +108,24 @@ actor FakeEditorRendering: EditorRendering {
         if let look = request.recipe.look, !installedLUTs.contains(look.contentHash) {
             throw EditorRenderingError.missingLUT(look.contentHash)
         }
-        let planes = try makePlanes()
+        let planes = try makePlanes(size: request.size)
         completed.append(request)
-        return EditorFrame(request: request, planes: planes)
+        let display = DisplayGainPair(base: planes.base, gain: planes.gain, alternateHeadroom: 0,
+                                      region: planes.region, outputSize: request.size)
+        // "AI pending": without a prediction the frame has no AI gain.
+        return EditorFrame(request: request, planes: planes, display: display,
+                           modelGainPending: request.recipe.hdrSource.usesModel && !request.usesModelGain)
+    }
+
+    func sdrThumbnail(_ frame: EditorFrame, maximumSize: HyperDRRender.PixelSize) async throws -> CGImage {
+        let space = CGColorSpace(name: CGColorSpace.displayP3)!
+        guard let context = CGContext(data: nil, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 0, space: space,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            throw RenderError.allocationFailed
+        }
+        context.setFillColor(gray: 0.46, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        return context.makeImage()!
     }
 
     func predictModelGain(modelID: String) async throws {
@@ -126,8 +141,8 @@ actor FakeEditorRendering: EditorRendering {
         }
     }
 
-    func installLUT(_ cube: Data, contentHash: String) async throws {
-        installedLUTs.insert(contentHash)
+    func installLUT(_ lut: ColorLUT) async {
+        installedLUTs.insert(lut.contentHash)
     }
 
     func close() async {
@@ -140,7 +155,7 @@ actor FakeEditorRendering: EditorRendering {
     }
 
     /// An 8 × 8 mid grey with zero gain: enough for the canvas and the scopes to draw.
-    private func makePlanes() throws -> RenderPlanes {
+    private func makePlanes(size: HyperDRRender.PixelSize) throws -> RenderPlanes {
         if textures == nil {
             guard let device = MTLCreateSystemDefaultDevice() else { throw RenderError.metalUnavailable }
             func texture(_ format: MTLPixelFormat, fill: [Float]) throws -> any MTLTexture {
@@ -160,7 +175,8 @@ actor FakeEditorRendering: EditorRendering {
         }
         let (base, gain) = textures!
         return RenderPlanes(base: base, gain: gain, baseColorSpace: RenderEngine.workingColorSpace,
-                            provenance: .identity, region: CGRect(x: 0, y: 0, width: 8, height: 8))
+                            provenance: .identity, region: CGRect(x: 0, y: 0, width: size.width, height: size.height),
+                            outputSize: size)
     }
 }
 #endif

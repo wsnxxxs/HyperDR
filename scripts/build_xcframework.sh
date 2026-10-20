@@ -215,8 +215,6 @@ subprocess.run(['xcrun', 'libtool', '-static', '-o', str(out / 'libHyperDREngine
 PY
 }
 
-# An earlier build staged dylibs here; the archive never needs them.
-rm -rf "$out/Runtime"
 libraries=()
 for slice in "${slices[@]}"; do
   work="$(slice_build_dir "$slice")"
@@ -231,6 +229,14 @@ for slice in "${slices[@]}"; do
   fi
   echo "== $slice: combining the static closure"
   combine_slice "$slice" "$work"
+  # R7-1602: no slice may carry libheif or libde265, and the check belongs to
+  # the step that produced the archive, so every build of it is gated whether
+  # it was asked for by this script, by `test.py apple` or by CI. The macOS
+  # build directory supplies the metadata the other mode reads; --archive-only
+  # inspects the archive alone.
+  echo "== $slice: checking the archive for retired (L)GPL symbols"
+  python3 "$repo/.github/scripts/check_licenses.py" "$repo/build-apple" \
+    --archive-only --engine-archive "$out/$slice/libHyperDREngineCore.a"
   libraries+=(-library "$out/$slice/libHyperDREngineCore.a" -headers "$out/headers")
 done
 
@@ -240,9 +246,8 @@ mkdir -p "$repo/apps/apple/Packages/HyperDREngine/Artifacts"
 ln -sfn ../../../../../build/xcframework/HyperDREngineCore.xcframework "$repo/apps/apple/Packages/HyperDREngine/Artifacts/HyperDREngineCore.xcframework"
 for slice in "${slices[@]}"; do
   if [[ "$slice" == macos ]]; then
-    # The macOS archive also stays at the top level: the license gate
-    # (R7-1602, check_licenses.py --engine-archive) reads that path, and it is
-    # the slice the macOS app links.
+    # The macOS archive also stays at the top level: existing callers reach the
+    # archive the macOS app links at this path.
     cp "$out/macos/libHyperDREngineCore.a" "$out/libHyperDREngineCore.a"
     "$repo/build-apple/HyperDR" schema > "$out/schema-cli.json"
   fi

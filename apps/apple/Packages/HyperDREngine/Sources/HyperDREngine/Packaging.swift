@@ -68,12 +68,23 @@ public struct PackageOptions: Sendable {
     public var gamut: String?
     public var verify: Bool
     public var overwrite: Bool
+    /// The planes already carry the presentation frame, because the render
+    /// graph composites the mat before packaging. E5 then applies here too: the
+    /// gain codebook keeps an exact zero-gain code at gamma 1, so the mat stays
+    /// SDR. A framed pair must also use equal base and alternate offsets.
+    public var presentationFrame: Bool
+    /// The photograph's rectangle inside the SDR base. Setting it asks for the
+    /// E5 readback as well: the mat outside it must carry no gain after the
+    /// file is decoded, which costs one extra decode. Needs `presentationFrame`
+    /// and a format that stores a gain map.
+    public var framePhoto: FrameLayout.Rect?
     /// Optional serialized Exif block from the source. The writer re-emits the
     /// safe portable subset with orientation 1, because the planes are upright.
     public var exif: Data?
 
     public init(format: String, quality: Int = 90, depth: Int = 8, hevcPreset: String = "slow",
                 gamut: String? = nil, verify: Bool = true, overwrite: Bool = false,
+                presentationFrame: Bool = false, framePhoto: FrameLayout.Rect? = nil,
                 exif: Data? = nil) {
         self.format = format
         self.quality = quality
@@ -82,6 +93,8 @@ public struct PackageOptions: Sendable {
         self.gamut = gamut
         self.verify = verify
         self.overwrite = overwrite
+        self.presentationFrame = presentationFrame
+        self.framePhoto = framePhoto
         self.exif = exif
     }
 
@@ -147,12 +160,18 @@ extension Engine {
             throw HyperDRError(code: "invalid_options",
                                message: "A gain plane and its ISO 21496-1 metadata travel together")
         }
+        if options.framePhoto != nil && !options.presentationFrame {
+            throw HyperDRError(code: "invalid_options",
+                               message: "A frame photograph rectangle needs presentationFrame")
+        }
         let parameters = try encodeJSON(options.parameters)
         let exif = options.exif ?? Data()
         return try await EngineExecutor.run { cancellation in
             try Self.packageNow(engine: self.pointer, sdr: sdr, gain: gain,
                                 gainMetadata: gainMetadata, output: output,
                                 format: options.format, parameters: parameters,
+                                presentationFrame: options.presentationFrame,
+                                framePhoto: options.framePhoto,
                                 exif: exif, cancellation: cancellation)
         }
     }
@@ -168,7 +187,9 @@ extension Engine {
 
     private static func packageNow(engine: OpaquePointer, sdr: PackagePlane, gain: PackagePlane?,
                                    gainMetadata: PackageGainMetadata?, output: URL,
-                                   format: String, parameters: String, exif: Data,
+                                   format: String, parameters: String,
+                                   presentationFrame: Bool, framePhoto: FrameLayout.Rect?,
+                                   exif: Data,
                                    cancellation: Cancellation) throws -> PackageReport {
         var base = hyperdr_package_plane()
         base.data = UnsafeRawPointer(sdr.samples.baseAddress)
@@ -202,7 +223,12 @@ extension Engine {
             format.withCString { format in
                 parameters.withCString { parameters in
                     gamut.withCString { gamut in
-                        exif.withUnsafeBytes { exifBytes in
+                        // The C struct points at this CString, so the name has to
+                        // be assigned while the buffer is alive: an unset field
+                        // makes the engine fall back to "display-p3" and accept a
+                        // grid it should have refused.
+                        gainSettings.working_gamut = gamut
+                        return exif.withUnsafeBytes { exifBytes in
                             withUnsafePointer(to: base) { basePointer in
                                 withUnsafePointer(to: gainSettings) { gainPointer in
                                     var request = hyperdr_package_request()
@@ -213,6 +239,14 @@ extension Engine {
                                     request.gain = gain == nil ? nil : gainPointer
                                     request.exif = exifBytes.baseAddress
                                     request.exif_size = exifBytes.count
+                                    request.presentation_frame = presentationFrame ? 1 : 0
+                                    if let framePhoto {
+                                        request.has_frame_photo = 1
+                                        request.frame_photo.x = UInt32(framePhoto.x)
+                                        request.frame_photo.y = UInt32(framePhoto.y)
+                                        request.frame_photo.width = UInt32(framePhoto.width)
+                                        request.frame_photo.height = UInt32(framePhoto.height)
+                                    }
                                     request.cancel = cancellation.pointer
                                     return hyperdr_package(engine, &request, &reportPointer, &error)
                                 }

@@ -14,6 +14,7 @@
 
 #include "hyperdr/codec/encoding.hpp"
 #include "hyperdr/image/color.hpp"
+#include "hyperdr/image/frame.hpp"
 
 #include <array>
 #include <cstddef>
@@ -75,14 +76,28 @@ struct PackageRequest {
   // subset, with orientation 1 because the planes are expected upright.
   const std::uint8_t* exif{};
   std::size_t exif_size{};
+  // The planes already carry the presentation frame, because the GPU graph
+  // composites the mat before packaging. E5 applies to this entry point too:
+  // the mat must stay SDR, so the codebook keeps an exact integer zero-gain
+  // code with gamma 1, the mat's own zero samples are snapped onto it, and the
+  // writer is told the map belongs to a framed canvas (a gain-map JPEG then
+  // uses its quality-100 table). It also requires equal base and alternate
+  // offsets: with an affine difference a zero code cannot reproduce the mat.
+  bool presentation_frame{};
+  // Optional photograph rectangle within `sdr`. Setting it asks for the E5
+  // readback as well: the written file is decoded and every mat pixel outside
+  // this rectangle must carry no gain. That costs one extra decode of the
+  // file, so it runs only when the rectangle is given, and it is independent of
+  // `verify`, which checks that the format opens at all.
+  std::optional<FrameRect> frame_photo;
 };
 
 // Packages one file and returns the report document (`hyperdr.package/v1`).
 //
 // Throws UnsupportedFormat for a format that cannot carry this pair (a
 // three-channel gain map in Adaptive HEIC, a gain plane for a format that has
-// no HDR rendition, a gain above the declared alternate headroom), and
-// invalid_argument for a malformed request.
+// no HDR rendition, a gain above the declared alternate headroom, a framed pair
+// whose offsets differ), and invalid_argument for a malformed request.
 [[nodiscard]] std::string package_image(const PackageRequest& request);
 
 }  // namespace hyperdr

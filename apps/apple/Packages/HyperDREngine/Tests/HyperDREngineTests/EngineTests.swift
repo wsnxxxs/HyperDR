@@ -17,7 +17,7 @@ import Testing
     let schema = try Engine.schema()
     #expect(schema.rawJSON == bytes)
     #expect(!schema.settings.isEmpty)
-    #expect(Engine.abiVersion == 3)
+    #expect(Engine.abiVersion == 4)
     #expect(!Engine.version.isEmpty)
 }
 

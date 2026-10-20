@@ -26,6 +26,16 @@
 static float base_samples[WIDTH * HEIGHT * 3];
 static float gain_samples[WIDTH * HEIGHT];
 static float rgb_gain_samples[WIDTH * HEIGHT * 3];
+static float framed_base[WIDTH * HEIGHT * 3];
+static float framed_gain[WIDTH * HEIGHT];
+
+/* The photograph sits at this rectangle; everything around it is mat. The mat
+ * is wider than one coding block, so the decoded readback has pixels of its own
+ * to check away from the photo's edge. */
+#define PHOTO_X 12
+#define PHOTO_Y 10
+#define PHOTO_W 24
+#define PHOTO_H 12
 
 /* A gradient rather than flat colour, with a bright corner so the gain map
  * carries a real range: 0 stops at the dark corner, 2 stops at the bright one. */
@@ -57,6 +67,32 @@ static hyperdr_package_plane plane(const void* data, uint32_t channels) {
   value.channels = channels;
   value.format = HYPERDR_PLANE_F32;
   return value;
+}
+
+/* A framed canvas: a flat mat with exactly zero gain, and a photograph inside
+ * it that reaches both above and below its own base, so the codebook has to
+ * align a zero code between two non-zero endpoints. */
+static void fill_framed(void) {
+  for (int y = 0; y < HEIGHT; ++y) {
+    for (int x = 0; x < WIDTH; ++x) {
+      const size_t pixel = (size_t)y * WIDTH + (size_t)x;
+      const int inside = x >= PHOTO_X && x < PHOTO_X + PHOTO_W &&
+                         y >= PHOTO_Y && y < PHOTO_Y + PHOTO_H;
+      if (!inside) {
+        framed_base[pixel * 3 + 0] = 0.18f;
+        framed_base[pixel * 3 + 1] = 0.18f;
+        framed_base[pixel * 3 + 2] = 0.18f;
+        framed_gain[pixel] = 0.0f;
+        continue;
+      }
+      const float u = (float)(x - PHOTO_X) / (PHOTO_W - 1);
+      const float v = (float)(y - PHOTO_Y) / (PHOTO_H - 1);
+      framed_base[pixel * 3 + 0] = 0.05f + 0.80f * u;
+      framed_base[pixel * 3 + 1] = 0.05f + 0.70f * v;
+      framed_base[pixel * 3 + 2] = 0.10f;
+      framed_gain[pixel] = -0.4f + 2.8f * u * v;
+    }
+  }
 }
 
 static hyperdr_package_gain mono_gain(void) {
@@ -249,6 +285,86 @@ int main(void) {
   hyperdr_error_free(error);
   error = NULL;
 
+  /* A framed canvas (P7): the mat must stay SDR, so the codebook keeps an
+   * exact zero-gain code at gamma 1 and the entry point reads its own file back
+   * to prove the mat outside the photograph carries no gain. */
+  fill_framed();
+  char framed_path[512], framed_bad_path[512];
+  snprintf(framed_path, sizeof(framed_path), "%s/framed.jpg", directory);
+  snprintf(framed_bad_path, sizeof(framed_bad_path), "%s/framed-bad.jpg", directory);
+  hyperdr_package_plane framed_base_plane = plane(framed_base, 3);
+  hyperdr_package_gain framed = mono_gain();
+  framed.plane = plane(framed_gain, 1);
+  framed.alternate_headroom = 2.8f;
+  hyperdr_package_request frame_write = {0};
+  frame_write.output_path = framed_path;
+  frame_write.format = "iso-gainmap-jpeg";
+  frame_write.parameters_json = "{\"quality\":88}";
+  frame_write.sdr = &framed_base_plane;
+  frame_write.gain = &framed;
+  frame_write.presentation_frame = 1;
+  frame_write.has_frame_photo = 1;
+  frame_write.frame_photo.x = PHOTO_X;
+  frame_write.frame_photo.y = PHOTO_Y;
+  frame_write.frame_photo.width = PHOTO_W;
+  frame_write.frame_photo.height = PHOTO_H;
+  REQUIRE(hyperdr_package(engine, &frame_write, &report, &error) == 0 && report != NULL);
+  REQUIRE(contains(report, "\"gamma\":1"));
+  REQUIRE(contains(report, "\"gainMin\":-0.4"));
+  hyperdr_string_free(report);
+  report = NULL;
+  REQUIRE(probed_as(engine, framed_path, "dual-rendition") == 0);
+
+  /* The same request with a photograph rectangle that leaves part of the
+   * photograph in the mat: the readback catches the gain and the half-written
+   * file does not stay behind. */
+  frame_write.output_path = framed_bad_path;
+  frame_write.frame_photo.x = PHOTO_X + 8;
+  frame_write.frame_photo.width = PHOTO_W - 16;
+  frame_write.frame_photo.y = PHOTO_Y + 4;
+  frame_write.frame_photo.height = PHOTO_H - 8;
+  REQUIRE(hyperdr_package(engine, &frame_write, &report, &error) != 0);
+  REQUIRE(report == NULL && error != NULL);
+  REQUIRE(contains(error->message, "carries gain"));
+  hyperdr_error_free(error);
+  error = NULL;
+  REQUIRE(access(framed_bad_path, F_OK) != 0);
+
+  /* A rectangle without the frame intention, or one outside the canvas, is a
+   * caller mistake rather than a format the writer refuses. */
+  hyperdr_package_request frame_mistake = frame_write;
+  frame_mistake.output_path = framed_bad_path;
+  frame_mistake.presentation_frame = 0;
+  REQUIRE(hyperdr_package(engine, &frame_mistake, &report, &error) != 0);
+  REQUIRE(report == NULL && error != NULL);
+  REQUIRE(strcmp(error->code, "invalid_options") == 0);
+  hyperdr_error_free(error);
+  error = NULL;
+  frame_mistake = frame_write;
+  frame_mistake.output_path = framed_bad_path;
+  frame_mistake.frame_photo.x = WIDTH - 4;
+  REQUIRE(hyperdr_package(engine, &frame_mistake, &report, &error) != 0);
+  REQUIRE(report == NULL && error != NULL);
+  REQUIRE(strcmp(error->code, "invalid_options") == 0);
+  REQUIRE(contains(error->message, "inside the canvas"));
+  hyperdr_error_free(error);
+  error = NULL;
+
+  /* A framed pair with differing offsets cannot reproduce its mat from the zero
+   * code, so it is refused by the format rule instead of painted. */
+  hyperdr_package_gain unequal = mono_gain();
+  unequal.alternate_offset[0] = 1.0f / 64.0f;
+  hyperdr_package_request unequal_offset = frame_write;
+  unequal_offset.output_path = framed_bad_path;
+  unequal_offset.gain = &unequal;
+  REQUIRE(hyperdr_package(engine, &unequal_offset, &report, &error) != 0);
+  REQUIRE(report == NULL && error != NULL);
+  REQUIRE(strcmp(error->code, "unsupported_format") == 0);
+  REQUIRE(contains(error->message, "same base and alternate offsets"));
+  hyperdr_error_free(error);
+  error = NULL;
+  REQUIRE(access(framed_bad_path, F_OK) != 0);
+
   /* Malformed requests are option errors, not format refusals. */
   hyperdr_package_request broken = write;
   broken.format = "no-such-format";
@@ -274,7 +390,8 @@ int main(void) {
   remove(rgb_path);
   remove(sdr_path);
   remove(refused_path);
+  remove(framed_path);
   rmdir(directory);
-  printf("package_test: gain-map, three-channel, SDR and refusal paths all held\n");
+  printf("package_test: gain-map, three-channel, framed, SDR and refusal paths all held\n");
   return 0;
 }

@@ -59,7 +59,7 @@ static const char* const kOperationNames[OP_COUNT] = {
     "convert(HEIC, Adaptive HEIC + write-time verification)",
     "probe(ISO JPEG)","preview(ISO JPEG)","convert(ISO JPEG)",
     "probe(XMP JPEG)","preview(XMP JPEG)","convert(XMP JPEG)",
-    "package(gain-map JPEG from synthetic planes)"};
+    "package(framed gain-map JPEG from synthetic planes)"};
 
 typedef struct {
   int status;
@@ -250,15 +250,25 @@ static float package_base[PACKAGE_WIDTH * PACKAGE_HEIGHT * 3];
 static float package_gain[PACKAGE_WIDTH * PACKAGE_HEIGHT];
 
 static int run_package(hyperdr_engine* engine, const char* root, Result* result) {
+  /* A framed canvas, so the entry point's own E5 readback (which decodes the
+   * file it just wrote) also runs on this thread's small stack. */
+  const int mat = 4;
   for (int y = 0; y < PACKAGE_HEIGHT; ++y) {
     for (int x = 0; x < PACKAGE_WIDTH; ++x) {
       const size_t pixel = (size_t)y * PACKAGE_WIDTH + (size_t)x;
-      const float u = (float)x / (PACKAGE_WIDTH - 1);
-      const float v = (float)y / (PACKAGE_HEIGHT - 1);
+      if (x < mat || y < mat || x >= PACKAGE_WIDTH - mat || y >= PACKAGE_HEIGHT - mat) {
+        package_base[pixel * 3 + 0] = 0.18f;
+        package_base[pixel * 3 + 1] = 0.18f;
+        package_base[pixel * 3 + 2] = 0.18f;
+        package_gain[pixel] = 0.0f;
+        continue;
+      }
+      const float u = (float)(x - mat) / (PACKAGE_WIDTH - 1 - 2 * mat);
+      const float v = (float)(y - mat) / (PACKAGE_HEIGHT - 1 - 2 * mat);
       package_base[pixel * 3 + 0] = 0.10f + 0.70f * u;
       package_base[pixel * 3 + 1] = 0.10f + 0.60f * v;
       package_base[pixel * 3 + 2] = 0.10f + 0.50f * (1.0f - u);
-      package_gain[pixel] = 1.5f * u * v;
+      package_gain[pixel] = -0.3f + 1.8f * u * v;
     }
   }
   hyperdr_package_plane base = {0}, gain = {0};
@@ -288,6 +298,12 @@ static int run_package(hyperdr_engine* engine, const char* root, Result* result)
   request.parameters_json = "{\"overwrite\":true}";
   request.sdr = &base;
   request.gain = &gain_map;
+  request.presentation_frame = 1;
+  request.has_frame_photo = 1;
+  request.frame_photo.x = (uint32_t)mat;
+  request.frame_photo.y = (uint32_t)mat;
+  request.frame_photo.width = (uint32_t)(PACKAGE_WIDTH - 2 * mat);
+  request.frame_photo.height = (uint32_t)(PACKAGE_HEIGHT - 2 * mat);
   char* report = NULL;
   hyperdr_error* error = NULL;
   const int status = hyperdr_package(engine, &request, &report, &error);

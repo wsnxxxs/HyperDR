@@ -19,9 +19,6 @@ if sys.version_info < MINIMUM_PYTHON:
         '  PATH="$(brew --prefix python@3.12)/libexec/bin:$PATH" python3 scripts/test.py apple\n'
         "  python3.12 scripts/test.py apple")
 
-# The xcframework slices scripts/build_xcframework.sh can produce, in build order.
-APPLE_SLICES = ("macos", "ios", "ios-simulator")
-
 APPLE_PACKAGES = {
     "HyperDREngine": "swift-engine",
     "HyperDRKit": "swift-kit",
@@ -77,18 +74,10 @@ def xcode_env() -> dict[str, str]:
 def apple() -> None:
     env = xcode_env()
     ensure_metal_toolchain(env)
+    # The build script gates every archive it produces with check_licenses.py
+    # --archive-only (R7-1602), so a slice can never be built, or skipped, without
+    # the libheif/libde265 check.
     run("bash", "scripts/build_xcframework.sh", env=env)
-    # Every archive the app can link must carry no libheif / libde265 (R7-1602).
-    # The macOS slice is the default build; `--platforms all` adds the iOS and
-    # simulator slices, so a slice that was not built is skipped rather than
-    # failing the suite.
-    for slice_name in APPLE_SLICES:
-        archive = ROOT / "build" / "xcframework" / slice_name / "libHyperDREngineCore.a"
-        if not archive.is_file():
-            print(f"Skipping the {slice_name} license gate: the slice was not built", flush=True)
-            continue
-        run(sys.executable, ".github/scripts/check_licenses.py", "build-apple", "--archive-only",
-            "--engine-archive", str(archive), env=env)
     for package, scratch in APPLE_PACKAGES.items():
         path = ROOT / "apps/apple/Packages" / package
         if not path.is_dir():

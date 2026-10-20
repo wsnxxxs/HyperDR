@@ -20,7 +20,7 @@
 extern "C" {
 #endif
 
-#define HYPERDR_ABI_VERSION 3
+#define HYPERDR_ABI_VERSION 4
 
 typedef struct hyperdr_error {
   const char* code;
@@ -229,6 +229,10 @@ typedef struct hyperdr_package_gain {
   const char* working_gamut;
 } hyperdr_package_gain;
 
+typedef struct hyperdr_package_rect {
+  uint32_t x, y, width, height; /* pixels inside the SDR base */
+} hyperdr_package_rect;
+
 typedef struct hyperdr_package_request {
   const char* output_path;    /* UTF-8; required */
   const char* format;         /* UTF-8 canonical name; required */
@@ -241,6 +245,18 @@ typedef struct hyperdr_package_request {
   const hyperdr_package_gain* gain; /* optional */
   const void* exif;                 /* optional serialized Exif block */
   size_t exif_size;
+  /* Non-zero when the planes already carry the presentation frame, because the
+   * GPU graph composites the mat before packaging. E5 then applies here too:
+   * the gain codebook keeps an exact zero-gain code at gamma 1, the mat's zero
+   * samples land on it, and the writer is told the map belongs to a framed
+   * canvas. It also requires equal base and alternate offsets. */
+  int presentation_frame;
+  /* Photograph rectangle, selected by has_frame_photo. Asks for the E5 readback
+   * as well: the written file is decoded and every mat pixel outside this
+   * rectangle must carry no gain. Costs one extra decode and needs a format
+   * that stores a gain map; the rectangle must lie inside the SDR base. */
+  int has_frame_photo;
+  hyperdr_package_rect frame_photo;
   hyperdr_cancel* cancel;           /* optional */
 } hyperdr_package_request;
 

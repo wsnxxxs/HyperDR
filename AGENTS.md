@@ -86,9 +86,12 @@ python3 scripts/test.py ios                      # iOS/iPadOS target: device and
 - `scripts/build_xcframework.sh` builds the macOS arm64 slice by default;
   `--platforms all` adds the iOS device and iOS simulator slices (deployment
   target 26.0, no ncnn). The iOS app target starts linking this package later, so
-  the three-slice artifact is the one to generate whenever iOS work needs it, and
-  each slice's archive is checked for retired (L)GPL symbols by
-  `check_licenses.py --archive-only`.
+  the three-slice artifact is the one to generate whenever iOS work needs it.
+  Each slice's archive is checked for retired (L)GPL symbols by
+  `check_licenses.py --archive-only` inside the build script, right after the
+  archive is combined, so no slice can be built without the check and no caller
+  has to remember it. The script rebuilds its output directory from scratch, so
+  `build/xcframework` never holds a slice this run did not produce.
 - Building the iOS slices needs `DEVELOPER_DIR` pointing at Xcode: vcpkg's
   `arm64-ios` and `arm64-ios-simulator` triplets read the iOS SDK through it, and
   with `xcode-select` on the Command Line Tools they fail with "iphoneos is not

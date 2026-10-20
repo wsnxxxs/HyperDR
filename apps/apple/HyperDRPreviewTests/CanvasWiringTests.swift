@@ -289,6 +289,19 @@ import HyperDRDesign
         XCTAssertGreaterThan(state.revision, start)
     }
 
+    /// Reading `canRedo` posts a checkpoint; bumping on it spun the menu forever.
+    func testMenuStateIgnoresUndoCheckpoints() {
+        let state = UndoMenuState()
+        let center = NotificationCenter()
+        state.install(center: center)
+        let start = state.revision
+        center.post(name: .NSUndoManagerCheckpoint, object: nil)
+        let expectation = expectation(description: "delivered")
+        DispatchQueue.main.async { expectation.fulfill() }
+        wait(for: [expectation], timeout: 2)
+        XCTAssertEqual(state.revision, start)
+    }
+
     // MARK: Badge
 
     func testCompareHasNoBadgeOfItsOwnAndTheLabelSharesTheHDRRule() {

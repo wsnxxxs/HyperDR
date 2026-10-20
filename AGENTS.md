@@ -140,7 +140,7 @@ draw anything into the frame that depends on the photo's HDR pixels.
   style switches to a wide variant above 2.5:1 and is unavailable beyond about
   45:1.
 
-## Status (2026-10-20, end of the seventh shift)
+## Status (2026-10-21)
 
 On this branch: the C ABI and its Swift wrapper; `EditorModel` on real
 `HyperDRKit` services with the App Sandbox, Finder opening and restoring the
@@ -174,13 +174,25 @@ and recipe v1), `HyperDRRender` (system sources, GPU graph, double-precision
 reference), the `HyperDRiOS` target with the EDR display pass shared through
 `apps/apple/Shared`, and `python3 scripts/test.py ios`.
 
-Open, roughly in order: the P7
-plan (GPU render graph, system decoding, iPhone and iPad), whose prototype is
-`wip/ae2-spike` = `4acec719` and which replaces AE-1 (RAW now follows
-`CIRAWFilter`'s own development, `docs/research/ae2-apple-raw-ci.md`); two
-experiments the plan waits on: a writer comparison (ImageIO versus our own
-writers) and writing an edited HDR HEIC back to the photo library; P3b-6 (five
-minutes of fuzzing per target, in the background, and acceptance); P3a-2
-(encoder quality, including the photo-area errors E5 froze as non-regression
-cases, and E-07; run locally, no self-hosted runner); the hands-on checks in
+P7-2b and P7-3b are in (2026-10-21, `9b42f106`): the Mac and iOS editors run
+on `RecipeEditor` and `DisplayCompositor`, and export on both platforms goes
+Recipe snapshot → HyperDRRender export rows → `hyperdr_package_rows` →
+bounded native verification → system verification → `SessionStore`, through
+Kit's `RecipeExportService` (memory stays roughly flat with image height for
+the incremental writers; AVIF and ImageIO writers still hold whole planes).
+The old Kit export path (JobRunner, EditOptions, Preview, HyperDRKitParity,
+`export_parity`) is deleted; "Limit to sRGB" is gone (the planner fixes P3 for
+gain maps and Rec.2020 for BT.2100). P3a-2 is in (`5a9562f9`): VideoToolbox
+quality calibrated against ImageIO with local gates in `tests/quality/`;
+E-07 (fast HEIC export) is dropped. `hevc_vt_decode_test` has a 200 ms timing
+assertion that can fail under `taskpolicy -b`; rerun it in the foreground.
+Run the test scripts with Python 3.10 or newer explicitly (`python3.12`):
+`/usr/bin/python3` is 3.9.
+
+Open, roughly in order: P7-3c (destination and custom-format pages, iOS
+sheet, HEIC8 selection follow-ups, iOS LUT library); the rest of P7-3d (61MP
+iPhone measurement on a device, background host); P7-3e (saving back to the
+photo library, after the user's Photos Lab run); P7-4 (delete the CLI, schema,
+`panel-v1`, ncnn and the old C++ processing path); P3b-6 (five minutes of
+fuzzing per target, in the background, and acceptance); the hands-on checks in
 `docs/design/user-acceptance.md`.

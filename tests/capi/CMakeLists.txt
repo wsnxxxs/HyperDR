@@ -63,3 +63,9 @@ if(Python3_FOUND)
       "DYLD_INSERT_LIBRARIES=$<TARGET_FILE:capi_test_clock>")
   endif()
 endif()
+
+if(Python3_FOUND AND HYPERDR_WITH_CODECS AND APPLE)
+  add_test(NAME capi_verify_memory_test COMMAND ${HYPERDR_CONTRACT_PYTHON}
+    ${CMAKE_CURRENT_SOURCE_DIR}/verify_memory_test.py $<TARGET_FILE:capi_package_rows_test>)
+  set_tests_properties(capi_verify_memory_test PROPERTIES TIMEOUT 240 RUN_SERIAL TRUE)
+endif()

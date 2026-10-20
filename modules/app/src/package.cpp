@@ -353,7 +353,6 @@ ColorGamut resolved_gamut(const PackageRequest& request) {
 // of the codec rather than of the codes, and E5's promise is about the gain the
 // writer stores (checked at the codebook before encoding). A mat narrower than
 // that margin has nothing left to read back.
-constexpr std::uint32_t kMatReadbackMargin = 8;
 
 // The same E5 rule at the codebook, before anything is encoded: every sample the
 // caller did not place inside the photograph is the zero code.
@@ -372,50 +371,9 @@ std::uint64_t mat_samples_carrying_gain(const QuantizedGain& gain, const FrameRe
 }
 
 void verify_framed_mat(const PackageRequest& request, const std::filesystem::path& staged) {
-  const auto& photo = *request.frame_photo;
-  const auto width = request.sdr->width, height = request.sdr->height;
-  const auto decoded = decode_image(staged);
-  if (!decoded.authored_sdr)
-    throw std::runtime_error("the framed package did not read back as a base plus gain map");
-  const auto& base = *decoded.authored_sdr;
-  const auto& alternate = decoded.linear_p3;
-  if (base.width != width || base.height != height || alternate.width != width ||
-      alternate.height != height)
-    throw std::runtime_error("the framed package read back at a different size than it was given");
-  std::uint64_t failures = 0, checked = 0;
-  float worst = 0.0F;
-  std::uint32_t worst_x = 0, worst_y = 0;
-  const auto check = [&](std::uint32_t x, std::uint32_t y) {
-    const auto pixel = (static_cast<std::size_t>(y) * width + x) * 3;
-    for (std::uint32_t c = 0; c < 3; ++c) {
-      const float sdr = base.pixels[pixel + c];
-      const float difference = std::abs(alternate.pixels[pixel + c] - sdr);
-      ++checked;
-      if (difference <= 1.0e-5F * (1.0F + std::abs(sdr))) continue;
-      ++failures;
-      if (difference > worst) { worst = difference; worst_x = x; worst_y = y; }
-    }
-  };
-  // One coding block of slack on every side of the photograph, clipped to the
-  // canvas so a photograph at the edge is handled the same way.
-  const auto near_left = photo.x > kMatReadbackMargin ? photo.x - kMatReadbackMargin : 0;
-  const auto near_top = photo.y > kMatReadbackMargin ? photo.y - kMatReadbackMargin : 0;
-  const auto near_right = std::min(width, photo.x + photo.width + kMatReadbackMargin);
-  const auto near_bottom = std::min(height, photo.y + photo.height + kMatReadbackMargin);
-  for (std::uint32_t y = 0; y < height; ++y) {
-    check_cancelled();
-    const bool in_photo_rows = y >= photo.y && y < photo.y + photo.height;
-    for (std::uint32_t x = 0; x < width; ++x) {
-      if (in_photo_rows && x >= photo.x && x < photo.x + photo.width) continue;
-      if (x < near_left || x >= near_right || y < near_top || y >= near_bottom) check(x, y);
-    }
-  }
-  if (checked == 0) return;
-  if (failures != 0)
-    throw std::runtime_error(
-        "the framed mat carries gain: " + std::to_string(failures) + " samples, worst at " +
-        std::to_string(worst_x) + "," + std::to_string(worst_y) + " (" +
-        json::number_text(worst) + " linear)");
+  const auto& photo=*request.frame_photo;
+  (void)verify_encoded_file(staged,request.encoding,VerificationFrame{request.sdr->width,request.sdr->height,
+      photo.x,photo.y,photo.width,photo.height});
 }
 
 // A framed export is checked before it is published: the bytes go to a staging
@@ -767,10 +725,10 @@ std::string package_image_rows(const PackageRequest& request,std::uint32_t rows,
       write_binary_file_atomic(staged.path,bytes,true);break;
     }
   }
-  // Release row planes before the existing (whole-image) verification phase.
+  // Release input row planes before native row/tile verification.
   base.clear();base.shrink_to_fit();grid.clear();grid.shrink_to_fit();
   check_cancelled();
-  if(request.verify) { const auto bytes=read_binary_file(staged.path);verify_encoded_output(bytes,request.encoding); }
+  if(request.verify && !request.frame_photo) (void)verify_encoded_file(staged.path,request.encoding);
   if(request.frame_photo)verify_framed_mat(request,staged.path);
   const auto size=std::filesystem::file_size(staged.path);
   const auto report=package_report(request,gain,size);

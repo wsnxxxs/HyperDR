@@ -27,7 +27,7 @@ bool contains(const Bytes& b, std::string_view s) {
   return std::search(b.begin(), b.end(), s.begin(), s.end()) != b.end();
 }
 struct Scan { std::vector<JpegAppSegment> apps; std::size_t end{}, insert{}, first_dqt{}; };
-Scan scan(const Bytes& b, std::size_t start) {
+Scan scan(std::span<const std::uint8_t> b, std::size_t start) {
   if (read(b, start, 2) != 0xffd8) invalid("missing JPEG SOI");
   Scan out; out.insert = start + 2;
   std::size_t p = start + 2;
@@ -173,7 +173,7 @@ void write_gain_map_jpeg(FILE* primary,FILE* gain,FILE* output,const GainMapMeta
   if(std::fflush(output))throw std::runtime_error("JPEG output flush failed");
 }
 
-static GainMapJpeg read_gain_map_jpeg(const Bytes& bytes, bool metadata, bool recover) {
+static GainMapJpeg read_gain_map_jpeg(std::span<const std::uint8_t> bytes, bool metadata, bool recover) {
   if (bytes.size() >= (std::uint64_t{1} << 32)) invalid("gain-map JPEG must be smaller than 4 GiB");
   GainMapJpeg out;
   auto primary = scan(bytes, 0);
@@ -315,7 +315,7 @@ bool has_gain_map_jpeg_signature(const Bytes& bytes) {
   }
   return mpf && gain;
 }
-GainMapJpeg parse_gain_map_jpeg(const Bytes& bytes) { return read_gain_map_jpeg(bytes, true, false); }
-GainMapJpeg parse_gain_map_jpeg_input(const Bytes& bytes) { return read_gain_map_jpeg(bytes, true, true); }
-GainMapJpeg inspect_gain_map_jpeg(const Bytes& bytes) { return read_gain_map_jpeg(bytes, false, true); }
+GainMapJpeg parse_gain_map_jpeg(std::span<const std::uint8_t> bytes) { return read_gain_map_jpeg(bytes, true, false); }
+GainMapJpeg parse_gain_map_jpeg_input(std::span<const std::uint8_t> bytes) { return read_gain_map_jpeg(bytes, true, true); }
+GainMapJpeg inspect_gain_map_jpeg(std::span<const std::uint8_t> bytes) { return read_gain_map_jpeg(bytes, false, true); }
 }  // namespace hyperdr

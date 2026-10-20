@@ -516,3 +516,79 @@ DecodedImage decode_heic_bytes(const std::vector<std::uint8_t>& bytes,
   return result;
 }
 }  // namespace hyperdr::codec
+
+#include "internal/verify_pixels.hpp"
+#include "hyperdr/codec/encoders.hpp"
+namespace hyperdr::codec {
+VerificationResult verify_heif_pixels(std::span<const std::uint8_t> bytes,HdrEncoding encoding,
+                                      std::optional<VerificationFrame> frame) {
+  // Keep the original semantic gates and SPS/decoded depth/chroma checks.
+  verify_heic_decodable(bytes,encoding);
+  const auto file=read_heif(bytes);
+  const auto plan=file.resolve_image(0,HeifCanvas::Tiled);
+  const auto gain=encoding==HdrEncoding::Adaptive?file.resolve_gain_map(HeifCanvas::Tiled):std::nullopt;
+  const Geometry geometry(plan);
+  if(gain && (gain->gain.width!=plan.width || gain->gain.height!=plan.height ||
+              gain->gain.tile_width!=plan.tile_width || gain->gain.tile_height!=plan.tile_height ||
+              gain->gain.columns!=plan.columns || gain->gain.tiles.size()!=plan.tiles.size()))
+    throw std::runtime_error("streaming export verification requires matching base/gain tile grids");
+  const unsigned channels=gain?gain_map_channel_count(*gain->metadata):0;
+  VerificationPixels check(geometry.width,geometry.height,frame,gain?gain->metadata:std::nullopt);
+  const FloatRgbRowTransform transform(color_for(plan,ColorGamut::kDisplayP3));
+  tiles(file,plan,[&](std::size_t index,hevc::DecodedPicture&& picture) {
+    FloatImage codes;
+    if(gain) {
+      const auto& gp=gain->gain;
+      hevc::DecodeParams options;options.max_in_flight=1;
+      std::vector<std::uint8_t> joined;
+      hevc::decode_item(gp.config,1,[&](std::size_t)->std::span<const std::uint8_t> {
+        const auto extents=gp.tiles[index].extents;
+        if(extents.size()==1)return file.bytes.subspan(extents[0].offset,extents[0].length);
+        joined=file.item_bytes(gp.tiles[index].id);return joined;
+      },[&](std::size_t,hevc::DecodedPicture&& p) {
+        if(p.width!=picture.width||p.height!=picture.height)throw std::runtime_error("decoded gain/base tiles differ");
+        codes=FloatImage(p.width,p.height,channels);
+        if(channels==1) {
+          const float maximum=(1u<<p.bit_depth)-1;
+          for(unsigned y=0;y<p.height;++y)for(unsigned x=0;x<p.width;++x)codes.at(x,y,0)=p.luma_at(x,y)/maximum;
+        } else {
+          const auto conversion=hevc::conversion_params(gp.config,gp.color?&*gp.color:nullptr);
+          hevc::yuv_to_rgb(p,conversion,[&](unsigned y,std::span<const float> row) {
+            // Match code_plane: reconstruction clamps YCbCr excursions to [0,1].
+            for(std::size_t i=0;i<row.size();++i)codes.pixels[std::size_t(y)*p.width*3+i]=std::clamp(row[i],0.f,1.f);
+          });
+        }
+      },options);
+    }
+    FloatImage base(picture.width,picture.height,3);
+    const auto conversion=hevc::conversion_params(plan.config,plan.color?&*plan.color:nullptr);
+    hevc::yuv_to_rgb(picture,conversion,[&](unsigned y,std::span<const float> row) {
+      transform.convert(row.data(),base.pixels.data()+std::size_t(y)*picture.width*3,picture.width);
+    });
+    const unsigned x0=unsigned(index%plan.columns)*plan.tile_width,y0=unsigned(index/plan.columns)*plan.tile_height;
+    // Writer output has no rotation/mirror. Geometry still maps clean-aperture
+    // crops, so the frame comparison uses final native canvas coordinates.
+    for(unsigned y=0;y<picture.height && y0+y<plan.height;++y) {
+      check_cancelled();
+      if(geometry.a==1&&geometry.b==0&&geometry.c==0&&geometry.d==1) {
+        const auto [mx,my]=geometry.map(x0,y0+y);
+        if(my<0||my>=geometry.height)continue;
+        const unsigned left=unsigned(std::max<std::int64_t>(0,-mx));
+        const unsigned right=unsigned(std::max<std::int64_t>(0,std::min({std::int64_t(picture.width),
+            std::int64_t(plan.width)-x0,std::int64_t(geometry.width)-mx})));
+        if(left>=right)continue;
+        check.row(unsigned(mx+left),unsigned(my),std::span<const float>(base.pixels).subspan((std::size_t(y)*picture.width+left)*3,(right-left)*3),
+            gain?std::span<const float>(codes.pixels).subspan((std::size_t(y)*picture.width+left)*channels,(right-left)*channels):std::span<const float>{});
+        continue;
+      }
+      for(unsigned x=0;x<picture.width && x0+x<plan.width;++x) {
+        const auto [mx,my]=geometry.map(x0+x,y0+y);
+        if(mx<0||my<0||mx>=geometry.width||my>=geometry.height)continue;
+        check.row(unsigned(mx),unsigned(my),std::span<const float>(base.pixels).subspan((std::size_t(y)*picture.width+x)*3,3),
+            gain?std::span<const float>(codes.pixels).subspan((std::size_t(y)*picture.width+x)*channels,channels):std::span<const float>{});
+      }
+    }
+  });
+  return check.result;
+}
+} // namespace hyperdr::codec

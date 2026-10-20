@@ -39,7 +39,7 @@ import UniformTypeIdentifiers
     var pendingPhotoSwitch: PhotoSwitchRequest?
     var suggestedFileName = ""
     @ObservationIgnored var cachedFrameKey: ExportFrameCacheKey?
-    @ObservationIgnored var cachedExportFrame: ExportFrame?
+    @ObservationIgnored var cachedExportFrame: FrameExportPlan?
     var exportSummaryThumbnail: ThumbnailState = .unavailable
     var versionThumbnails: [String: ThumbnailState] = [:]
     @ObservationIgnored var thumbnailTrackers: Set<UUID> = []
@@ -64,7 +64,12 @@ import UniformTypeIdentifiers
     @ObservationIgnored var exportMetadataTicket = 0
     @ObservationIgnored var exportHistory: [ExportHistoryItem] = []
     @ObservationIgnored var timingHistory: [ExportTimingSample] = []
-    @ObservationIgnored var currentExportKey: String?
+    /// What an export of the current edit would freeze, which the history's
+    /// versions are matched against; nil while it cannot be captured.
+    @ObservationIgnored var currentExportSnapshot: RecipeExportSnapshot?
+    /// The AI model identity of the version last restored, and its recipe: an
+    /// export of exactly that recipe renders it with the same model again.
+    @ObservationIgnored var restoredModel: (recipe: Recipe, identity: String)?
     @ObservationIgnored var exportCapabilities: EditorCapabilities?
     @ObservationIgnored var pendingSwitchStops = false
     @ObservationIgnored var lutLibraryReadSequence = 0

@@ -3,6 +3,7 @@ import AppKit
 import Foundation
 import HyperDREngine
 import HyperDRKit
+import HyperDRRender
 import ImageIO
 import UniformTypeIdentifiers
 import os
@@ -29,6 +30,8 @@ import os
 
     private struct Record {
         var session: PhotoSession
+        /// The file as it was when the photo was opened: what an export renders from.
+        var revision: RecipeSourceRevision?
         // The task is also the cached result, including an empty result. Store
         // it before the first suspension so concurrent callers share one read.
         var captureFacts: Task<CaptureFacts, Never>?
@@ -41,6 +44,11 @@ import os
     private let kitTask: Task<HyperDRKit, Error>
     private(set) var kit: HyperDRKit?
     private var records: [UUID: Record] = [:]
+    /// Kit's recipe export service, made with the first export.
+    private let makeRecipeExport: @Sendable (HyperDRKit) throws -> any RecipeExportServicing
+    private var recipeExport: (any RecipeExportServicing)?
+    /// Exports in progress, by job id, with the events the editor reads.
+    private var exportJobs: [String: (task: Task<Void, Never>, events: AsyncStream<EditorExportEvent>)] = [:]
     private var engineObservers: [UUID: AsyncStream<EngineStatus>.Continuation] = [:]
     private var displayObservers: [UUID: AsyncStream<DisplayState>.Continuation] = [:]
     private var started = false
@@ -51,7 +59,14 @@ import os
          readCaptureFacts: @escaping @Sendable (URL) -> CaptureFacts = { CaptureFacts.read($0) },
          makeKit: @escaping @Sendable (KitConfiguration) async throws -> HyperDRKit = {
              try await HyperDRKit(configuration: $0)
+         },
+         makeRecipeExport: @escaping @Sendable (HyperDRKit) throws -> any RecipeExportServicing = { kit in
+             // Export has its own RenderEngine, so its caches go with it.
+             let render = try RenderEngine()
+             return RecipeExportService(engine: kit.engine, renderEngine: render, renderer: render,
+                                        sessions: kit.sessions, target: kit.exportTarget)
          }) {
+        self.makeRecipeExport = makeRecipeExport
         // The schema is a pure, synchronous engine call: the open panel and
         // drag checks work before the engine itself has started.
         let formats = try? InputFormats(schema: Engine.schema())
@@ -180,7 +195,7 @@ import os
     private func adopt(_ session: PhotoSession, kit: HyperDRKit) async throws -> EditorPhoto {
         let photo = EditorPhoto(url: session.sourceURL, name: session.displayName,
                                 formatLabel: session.format.displayLabel, byteCount: session.byteCount)
-        records[photo.handle] = Record(session: session)
+        records[photo.handle] = Record(session: session, revision: try? RecipeSourceRevision(session: session))
         do {
             try Task.checkCancellation()
             return photo
@@ -233,14 +248,67 @@ extension LiveEditorServices {
         guard let record = records[photo.handle] else { throw UserFacingError(code: "session_expired") }
         return record.session.id
     }
-    func startExport(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?, destination: URL?, thumbnail: CGImage?) async throws -> EditorExportTicket {
-        let id = try exportSession(photo), kit = try await requireKit()
-        let payload = await Task.detached(priority: .utility) {
-            thumbnail.flatMap { try? ExportThumbnail(image: $0) }
-        }.value
+    func startExport(_ photo: EditorPhoto, job: RecipeExportJob, destination: URL?) async throws -> EditorExportTicket {
+        let id = try exportSession(photo)
+        guard exportJobs.isEmpty else { throw UserFacingError(code: "convert_in_progress") }
+        let kit = try await requireKit()
+        if recipeExport == nil { recipeExport = try makeRecipeExport(kit) }
+        guard let service = recipeExport else { throw UserFacingError(code: "engine_unavailable") }
+        // The service exports a look from the photo's own copy of its LUT
+        // (history outlives the library); the library's copy goes in first.
+        if let hash = job.snapshot.lutContentHash, (try? await kit.sessions.recipeLUT(hash, for: id)) == nil,
+           let lut = try? LUTID(rawValue: hash.hasPrefix("sha256:") ? String(hash.dropFirst(7)) : hash) {
+            _ = try? await kit.luts.apply(lut, to: id)
+        }
         try Task.checkCancellation()
-        let ticket = try await kit.jobs.start(session: id, options: options, frame: frame, destination: destination, thumbnail: payload)
-        return EditorExportTicket(job: ticket.job.rawValue, argv: ticket.argv)
+        guard exportJobs.isEmpty else { throw UserFacingError(code: "convert_in_progress") }
+        let jobID = UUID().uuidString
+        let (events, sink) = AsyncStream.makeStream(of: EditorExportEvent.self)
+        let task = Task { [weak self] in
+            do {
+                let result = try await service.export(session: id, snapshot: job.snapshot, request: job.request,
+                                                      lut: job.lut, destination: destination) { progress in
+                    if let event = Self.event(progress) { sink.yield(event) }
+                }
+                sink.yield(.finished(result: Self.exportResult(result), failure: result.deliveryError.map(UserFacingError.init)))
+            } catch {
+                sink.yield(.finished(result: nil, failure: UserFacingError.service(error)))
+            }
+            sink.finish()
+            self?.exportJobs[jobID] = nil
+        }
+        exportJobs[jobID] = (task, events)
+        return EditorExportTicket(job: jobID)
+    }
+    func sourceRevision(_ photo: EditorPhoto) async throws -> RecipeSourceRevision {
+        guard let revision = records[photo.handle]?.revision else { throw UserFacingError(code: "session_expired") }
+        return revision
+    }
+
+    /// Kit's stages as the progress view counts them: developing the photo
+    /// (and its AI prediction) is its decode, rendering its processing.
+    nonisolated private static func event(_ progress: RecipeExportProgress) -> EditorExportEvent? {
+        switch progress.stage {
+        case .preparing: nil
+        case .model, .developing: .progress(stage: "decode", fraction: 0, at: Date())
+        case .rendering:
+            .progress(stage: "process", fraction: progress.totalRows.map { total in
+                total > 0 ? Double(progress.completedRows ?? 0) / Double(total) : 0 } ?? 0, at: Date())
+        case .encoding: .progress(stage: "encode", fraction: 0, at: Date())
+        case .verifying: .progress(stage: "verify", fraction: 0, at: Date())
+        case .publishing: .finishing
+        case .delivering: .saving
+        }
+    }
+
+    /// The editor's result card from Kit's verified version.
+    nonisolated private static func exportResult(_ result: RecipeExportResult) -> ExportResult {
+        var value = ExportHistoryItem(result.record).version.result
+        value.pixelSize = PixelSize(width: result.resolved.width, height: result.resolved.height)
+        value.headroomStops = result.resolved.ceilingStops
+        value.selfVerified = true // the service throws when a reader disagrees
+        value.saved = result.saved.map(savedLocation)
+        return value
     }
     func exportThumbnail(_ photo: EditorPhoto, version: String) async -> CGImage? {
         guard let id = try? exportSession(photo), let kit = try? await requireKit(),
@@ -251,43 +319,15 @@ extension LiveEditorServices {
         }.value
     }
     func exportEvents(_ job: String) -> AsyncStream<EditorExportEvent> {
-        guard let kit else { return AsyncStream { $0.finish() } }
-        let events = kit.jobs.events(JobID(rawValue: job))
-        return AsyncStream { sink in
-            let task = Task {
-                for await event in events {
-                    guard !Task.isCancelled else { break }
-                    switch event {
-                    case .publishing: sink.yield(.finishing)
-                    case .saving: sink.yield(.saving)
-                    case .progress(let p): sink.yield(.progress(stage: p.phase, fraction: p.fraction, at: Date()))
-                    case .log(let text): sink.yield(.log(text))
-                    case .finished(let summary):
-                        var result = await Task.detached { summary.result.map { ExportHistoryItem($0).version.result } }.value
-                        if let saved = summary.saved {
-                            result?.saved = Self.savedLocation(saved)
-                        }
-                        sink.yield(.finished(result: result, failure: summary.failure.map(UserFacingError.init)))
-                    }
-                }
-                sink.finish()
-            }
-            sink.onTermination = { _ in task.cancel() }
-        }
+        exportJobs[job]?.events ?? AsyncStream { $0.finish() }
     }
-    func cancelAllExports() async { if let kit = try? await requireKit() { await kit.jobs.cancelAll() } }
-    func hasExportActivity() async -> Bool {
-        guard let kit = try? await requireKit() else { return false }
-        return await kit.jobs.activity != .idle
+    /// Cancelling an export's task cancels the whole operation (Kit's contract).
+    func cancelAllExports() async {
+        let tasks = exportJobs.values.map(\.task)
+        for task in tasks { task.cancel() }
+        for task in tasks { await task.value }
     }
-    func commandLine(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?) async throws -> [String] {
-        let id = try exportSession(photo), kit = try await requireKit()
-        return try await kit.jobs.commandLine(session: id, options: options, frame: frame)
-    }
-    func exportKey(_ photo: EditorPhoto, options: EditOptions, frame: ExportFrame?) async throws -> String {
-        let id = try exportSession(photo), kit = try await requireKit()
-        return try await kit.jobs.exportKey(session: id, options: options, frame: frame).rawValue
-    }
+    func hasExportActivity() async -> Bool { !exportJobs.isEmpty }
     func exports(for photo: EditorPhoto) async throws -> [ExportHistoryItem] {
         let id = try exportSession(photo), kit = try await requireKit()
         // exports(for:) returns [] for an expired session; check it first.
@@ -300,14 +340,15 @@ extension LiveEditorServices {
         let records = await kit.sessions.recentExports()
         return await Task.detached { records.compactMap { ExportHistoryItem($0).timing } }.value
     }
-    func suggestedFileName(_ photo: EditorPhoto, options: EditOptions) async throws -> String {
-        let id = try exportSession(photo), kit = try await requireKit()
-        return try await kit.jobs.suggestedFileName(session: id, options: options)
+    func suggestedFileName(_ photo: EditorPhoto, encoding: String) async throws -> String {
+        guard let record = records[photo.handle] else { throw UserFacingError(code: "session_expired") }
+        return record.session.sourceURL.deletingPathExtension().lastPathComponent + "-hyperdr."
+            + EditorModel.fileExtension(encoding)
     }
     func validateDestination(_ url: URL, expectedExtension: String) async throws {
         try await requireKit().exportTarget.validateDestination(url, expectedExtension: expectedExtension)
     }
-    private static func savedLocation(_ saved: SavedExport) -> SavedLocation {
+    nonisolated private static func savedLocation(_ saved: SavedExport) -> SavedLocation {
         SavedLocation(fileName: saved.name, folderLabel: SavedLocation.label(displayName: saved.folderDisplayName), reveal: { saved.reveal() })
     }
 
@@ -398,3 +439,4 @@ extension LiveEditorServices {
     }
     func removeLUT(_ id: String) async throws { try await requireKit().luts.remove(LUTID(rawValue: id)) }
 }
+

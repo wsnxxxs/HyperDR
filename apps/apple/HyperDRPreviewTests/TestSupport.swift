@@ -5,6 +5,7 @@ import Synchronization
 import XCTest
 import HyperDRRecipe
 import HyperDRRender
+import HyperDRKit
 @testable import HyperDR
 
 /// Waits for a main-actor condition with a hard deadline. Every asynchronous
@@ -274,4 +275,12 @@ extension EditorModel {
     }
 
     func recipeNumber(_ id: String) -> Double? { editor.recipe.value(for: id)?.numberValue }
+}
+
+extension FakeEditorServices {
+    /// What an export of the model's current edit freezes: a version made
+    /// from it matches the edit.
+    func exportKey(_ model: EditorModel) async throws -> RecipeExportSnapshot {
+        try model.captureExport().snapshot(revision: try await sourceRevision(try XCTUnwrap(model.photo)))
+    }
 }

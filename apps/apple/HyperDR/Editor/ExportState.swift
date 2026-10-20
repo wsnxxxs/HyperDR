@@ -1,5 +1,7 @@
 import Foundation
 import CoreGraphics
+import HyperDRKit
+import HyperDRRender
 import Observation
 
 /// Editor-facing values. Views do not depend on Kit's jobs or durable manifests.
@@ -65,11 +67,32 @@ nonisolated enum ExportSaveState: Equatable { case saving, saved(SavedLocation),
 
 nonisolated struct ExportHistoryItem: Sendable {
     var version: ExportVersion
-    var key: String
+    /// What the version was made from: Kit's frozen recipe, source and frame,
+    /// and the output it resolved to. Nil for versions written before recipe
+    /// exports, which match no edit and restore only their format.
+    var recipeSnapshot: RecipeExportSnapshot? = nil
+    var resolved: ResolvedExportSnapshot? = nil
+    /// The format the version was written in, as the panel shows it.
     var options: ExportChoices
-    var timing: ExportTimingSample?
+    var timing: ExportTimingSample? = nil
+
+    /// Whether exporting `snapshot` in `options` now would make this version
+    /// again: the same recipe of the same file, the same frame, the same format.
+    func matches(_ snapshot: RecipeExportSnapshot, options current: ExportChoices) -> Bool {
+        guard let made = recipeSnapshot else { return false }
+        return made.recipe == snapshot.recipe && made.source == snapshot.source && made.frame == snapshot.frame
+            && options.customFormat == current.customFormat
+    }
 }
-nonisolated struct EditorExportTicket: Sendable { var job: String; var argv: [String] }
+nonisolated struct EditorExportTicket: Sendable { var job: String }
+/// One recipe export as the editor freezes it (P7-3b): the snapshot (recipe,
+/// source revision, model, frame), Kit's plan request and the LUT the look
+/// takes effect with.
+nonisolated struct RecipeExportJob: Sendable {
+    let snapshot: RecipeExportSnapshot
+    let request: ExportPlanRequest
+    let lut: ColorLUT?
+}
 nonisolated enum EditorExportEvent: Sendable {
     case progress(stage: String, fraction: Double, at: Date)
     case log(String)

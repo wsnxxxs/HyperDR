@@ -57,7 +57,7 @@ import XCTest
         XCTAssertEqual(model.exportSummaryThumbnail, .unavailable)
     }
 
-    func testAdmissionFreezesTheSameImagePassedToTheServiceAndHistory() async throws {
+    func testAdmissionFreezesTheSameImageForTheProgressAndHistory() async throws {
         let a = try image(0.1), b = try image(0.8)
         let (model, services, rendering) = await ready()
         rendering.thumbnailHandler = { frame, _ in Self.exposure(frame) == nil ? a : b }
@@ -65,7 +65,6 @@ import XCTest
         defer { tracking.cancel() }
         await eventually(timeout: .seconds(10)) { model.exportSummaryThumbnail == .ready(a) }
         await start(model, services)
-        XCTAssertTrue(services.exportCalls[0].thumbnail === a)
         XCTAssertEqual(model.export.thumbnail, .ready(a))
         model.adjustRecipe("tone.exposure", to: 0.8)
         await eventually(timeout: .seconds(10)) { model.exportSummaryThumbnail == .ready(b) }
@@ -83,7 +82,6 @@ import XCTest
         rendering.thumbnailHandler = { _, _ in a }
         await start(model, services)
         XCTAssertEqual(rendering.thumbnailCalls, [256])
-        XCTAssertTrue(services.exportCalls[0].thumbnail === a)
         services.sendExport(.finished(result: result("direct"), failure: nil))
         await eventually(timeout: .seconds(10)) { model.export.phase == .succeeded }
         model.closeDocument()

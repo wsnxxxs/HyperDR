@@ -31,20 +31,23 @@ extension EditorModel {
         let missing = lut.library.filter { lutReferences[$0.id] == nil }
         guard !missing.isEmpty else { return }
         lutInstallTask?.cancel()
-        let renderer = editor.renderer
+        let editor = editor
         lutInstallTask = Task { [weak self, services] in
             for item in missing {
                 guard !Task.isCancelled else { return }
                 do {
                     let cube = try await services.lutCube(item.id)
                     let lut = try ColorLUT(cube: cube)
-                    await renderer.installLUT(lut)
+                    // The editor keeps it for exports too (`exportCapture`).
+                    await editor.installLUT(lut)
                     self?.setLUTReference(LUTReference(contentHash: lut.contentHash, name: item.name), for: item.id)
                 } catch {
                     guard !Task.isCancelled else { return }
                     self?.lut.failures = [UserFacingError(code: "lut_invalid", detail: item.name)]
                 }
             }
+            // A look waiting for its LUT can now be captured, and matched.
+            self?.refreshExportMetadata()
         }
     }
 
@@ -76,15 +79,6 @@ extension EditorModel {
             invalidateLUTLibraryReads()
             await refreshLUTLibrary()
         }
-    }
-    /// The old export's request (until P7-3b): the export's choices, with the
-    /// look's LUT found in the library by its contents.
-    func effectiveOptions() -> EditOptions {
-        let recipe = editor.recipe
-        let lut = recipe.look.map { look in
-            (id: lutReferences.first { $0.value.contentHash == look.contentHash }?.key ?? look.contentHash, name: look.name)
-        }
-        return exportChoices.exportRequest(recipe: recipe, lut: lut)
     }
     func updatePreferences(_ value: Preferences) {
         value.save(to: services.preferences)

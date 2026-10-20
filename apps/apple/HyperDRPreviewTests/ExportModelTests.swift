@@ -163,19 +163,22 @@ import HyperDRKit
     func testCurrentPhotoHistoryRestoreAndAutomaticResultAreLatestWins() async throws {
         let (m,s) = await ready()
         let initial=m.exportChoices
-        let key=try await s.exportKey(m.photo!,options:m.effectiveOptions(),frame:nil)
-        let item=ExportHistoryItem(version:ExportVersion(number:7,createdAt:Date(),encodingID:"adaptive",result:result()),key:key,options:initial)
+        let key=try await s.exportKey(m)
+        let item=ExportHistoryItem(version:ExportVersion(number:7,createdAt:Date(),encodingID:"adaptive",result:result()),recipeSnapshot: key,options:initial)
         s.historyByURL[source]=[item];m.refreshExportMetadata()
         await eventually(timeout:.seconds(10)) { m.exportVersions.first?.matchesCurrent == true }
         XCTAssertEqual(m.exportVersions.first?.number,7);XCTAssertEqual(m.documentStatus,.exportedNotSaved)
-        // Until P7-3b the export follows its own choices, not the recipe.
         m.setExportQuality(55)
         await eventually(timeout:.seconds(10)) { m.exportVersions.first?.matchesCurrent == false }
         XCTAssertTrue(m.export.isResultStale);XCTAssertEqual(m.documentStatus,.modifiedSinceExport)
         m.adjustRecipe("tone.exposure", to: 1.5)
+        await settle() // the model sees the edit before the restore
+        // Restoring brings back the version's recipe and format (P7-3b-U), as one undo step.
         m.restore("version")
+        XCTAssertEqual(m.exportChoices,initial);XCTAssertNotEqual(m.recipeNumber("tone.exposure"),1.5)
         await eventually(timeout:.seconds(10)) { m.exportVersions.first?.matchesCurrent == true }
-        XCTAssertEqual(m.exportChoices,initial);XCTAssertEqual(m.recipeNumber("tone.exposure"),1.5,"restoring a version leaves the recipe")
+        m.undo()
+        XCTAssertEqual(m.recipeNumber("tone.exposure"),1.5)
         m.open([second])
         await eventually(timeout:.seconds(10)) { m.photo?.url == self.second && !m.suggestedFileName.isEmpty }
         XCTAssertTrue(m.exportVersions.isEmpty);XCTAssertNil(m.export.result)
@@ -233,7 +236,7 @@ import HyperDRKit
         var frame=m.frame;frame.isEnabled=true;frame.showsCamera=false;frame.showsExposure=false;frame.showsDate=false
         m.frame=frame
         await running(m,s)
-        XCTAssertNotNil(s.exportCalls[0].frame)
+        XCTAssertNotNil(s.exportCalls[0].job.snapshot.frame)
         XCTAssertEqual(m.frame,frame)
         s.sendExport(.finished(result:nil,failure:UserFacingError(code:"export_memory_budget")))
         await eventually(timeout:.seconds(10)) { m.export.phase == .failed }
@@ -243,7 +246,7 @@ import HyperDRKit
         let (m,s)=await ready()
         m.setOutputGamut("p3");m.setClampSrgb(true);m.setExportQuality(72)
         XCTAssertEqual(m.export.outputGamut,"p3");XCTAssertTrue(m.export.clampSrgb)
-        XCTAssertEqual(m.effectiveOptions()["quality"],.number(72))
+        XCTAssertEqual(m.exportChoices.customFormat.quality,72)
         XCTAssertFalse(m.canUndo,"export choices are not edits")
         m.selectEncoding("sdr-tiff");XCTAssertNil(m.exportQuality)
         m.adjustRecipe("tone.exposure", to: 1.7)
@@ -273,7 +276,7 @@ import HyperDRKit
         let (m,s)=await ready()
         XCTAssertFalse(m.frame.isEnabled)
         await running(m,s)
-        XCTAssertNil(s.exportCalls.first?.frame)
+        XCTAssertNil(s.exportCalls.first?.job.snapshot.frame)
         s.sendExport(.finished(result:result(),failure:nil))
         await eventually(timeout:.seconds(10)) { !m.export.isInFlight }
     }
@@ -292,8 +295,8 @@ import HyperDRKit
 @MainActor extension ExportModelTests {
     func testFailedReplacementReloadsThePreviousPhotosHistory() async throws {
         let (m,s)=await ready()
-        let key=try await s.exportKey(m.photo!,options:m.effectiveOptions(),frame:nil)
-        s.historyByURL[source]=[ExportHistoryItem(version:ExportVersion(number:3,createdAt:Date(),encodingID:"adaptive",result:result()),key:key,options:m.exportChoices)]
+        let key=try await s.exportKey(m)
+        s.historyByURL[source]=[ExportHistoryItem(version:ExportVersion(number:3,createdAt:Date(),encodingID:"adaptive",result:result()),recipeSnapshot: key,options:m.exportChoices)]
         m.refreshExportMetadata()
         await eventually(timeout:.seconds(10)) { m.exportVersions.count == 1 }
         s.openFailures[second]=UserFacingError(code:"source_unreadable")
@@ -306,8 +309,8 @@ import HyperDRKit
 @MainActor extension ExportModelTests {
     func testExpiredHistorySaveClearsPhotoAndCancelsItsInFlightExport() async throws {
         let (m,s)=await ready()
-        let key=try await s.exportKey(m.photo!,options:m.effectiveOptions(),frame:nil)
-        s.historyByURL[source]=[ExportHistoryItem(version:ExportVersion(number:1,createdAt:Date(),encodingID:"adaptive",result:result()),key:key,options:m.exportChoices)]
+        let key=try await s.exportKey(m)
+        s.historyByURL[source]=[ExportHistoryItem(version:ExportVersion(number:1,createdAt:Date(),encodingID:"adaptive",result:result()),recipeSnapshot: key,options:m.exportChoices)]
         m.refreshExportMetadata();await eventually(timeout:.seconds(10)) { m.exportVersions.count == 1 }
         await running(m,s)
         s.exportSaveHandler={ _,_ in throw UserFacingError(code:"session_expired") }
@@ -323,8 +326,8 @@ import HyperDRKit
 @MainActor extension ExportModelTests {
     func testStandaloneHistorySaveAlsoWaitsBeforeTerminationReply() async throws {
         let (m,s)=await ready();let gate=ExportModelGate()
-        let key=try await s.exportKey(m.photo!,options:m.effectiveOptions(),frame:nil)
-        s.historyByURL[source]=[ExportHistoryItem(version:ExportVersion(number:1,createdAt:Date(),encodingID:"adaptive",result:result()),key:key,options:m.exportChoices)]
+        let key=try await s.exportKey(m)
+        s.historyByURL[source]=[ExportHistoryItem(version:ExportVersion(number:1,createdAt:Date(),encodingID:"adaptive",result:result()),recipeSnapshot: key,options:m.exportChoices)]
         m.refreshExportMetadata();await eventually(timeout:.seconds(10)) { m.exportVersions.count == 1 }
         s.exportSaveHandler={ _,_ in await gate.wait();try Task.checkCancellation();return SavedLocation(fileName:"result.heic",folderLabel:"out") }
         m.saveExport("version",destination:target)
@@ -341,48 +344,26 @@ import HyperDRKit
 }
 
 extension ExportModelTests {
-    func testDiagnosticCommandIsGeneratedOnlyOnCopyFromCurrentEdits() async {
-        let (m,s) = await ready()
-        XCTAssertEqual(s.diagnosticCalls, 0)
+    func testDiagnosticsDescribeTheExportPlanOfTheCurrentEdits() async {
+        let (m,_) = await ready()
         m.setExportQuality(70)
-        await m.exportMetadataTask?.value
-        XCTAssertEqual(s.diagnosticCalls, 0)
-        s.diagnosticHandler = { _,options,_ in
-            XCTAssertEqual(options["quality"], .number(70))
-            return ["HyperDR", "convert", "photo.jpg", "--output", "out", "--report", "out/report.json"]
-        }
         let text = await m.diagnosticText
-        XCTAssertEqual(s.diagnosticCalls, 1)
-        XCTAssertTrue(text.contains("\nHyperDR convert photo.jpg --output out --report out/report.json\nPlaceholders:"))
+        XCTAssertTrue(text.contains("\nExport plan: "), text)
+        XCTAssertTrue(text.contains("quality 70"), text)
         XCTAssertFalse(text.contains(self.source.path))
-        XCTAssertFalse(text.contains("look.cube"))
-        await running(m,s)
-        _ = await m.diagnosticText
-        XCTAssertEqual(s.diagnosticCalls, 2)
-        m.cancelExport()
-        await eventually(timeout: .seconds(3)) { !m.export.isInFlight }
     }
 
-    func testEmptyAndUnavailableDiagnosticCommandsNeverLeakErrorPaths() async {
-        let services = FakeEditorServices(openDelay: .zero)
-        let empty = EditorModel(services: services)
-        let text = await empty.diagnosticText
-        XCTAssertTrue(text.hasSuffix("Equivalent CLI command: no photo open"))
-        XCTAssertEqual(services.diagnosticCalls, 0)
-        let (m,s) = await ready()
-        s.diagnosticHandler = { _,_,_ in throw UserFacingError(code: "session_expired", detail: "/private/user/session") }
-        let failed = await m.diagnosticText
-        XCTAssertTrue(failed.hasSuffix("Equivalent CLI command: unavailable (session_expired)"))
-        XCTAssertFalse(failed.contains("/private/user"))
-        XCTAssertNil(m.alert)
+    func testDiagnosticsWithoutAPhotoSaySo() async {
+        let text = await EditorModel(services: FakeEditorServices(openDelay: .zero)).diagnosticText
+        XCTAssertTrue(text.hasSuffix("Export plan: no photo open"))
     }
 }
 
 @MainActor extension ExportModelTests {
     func testLateHistorySaveExpirationMustNotCloseNewPhoto() async throws {
         let (m,s)=await ready();let gate=ExportModelGate()
-        let key=try await s.exportKey(m.photo!,options:m.effectiveOptions(),frame:nil)
-        s.historyByURL[source]=[ExportHistoryItem(version:ExportVersion(number:1,createdAt:Date(),encodingID:"adaptive",result:result()),key:key,options:m.exportChoices)]
+        let key=try await s.exportKey(m)
+        s.historyByURL[source]=[ExportHistoryItem(version:ExportVersion(number:1,createdAt:Date(),encodingID:"adaptive",result:result()),recipeSnapshot: key,options:m.exportChoices)]
         m.refreshExportMetadata();await eventually(timeout:.seconds(10)) { m.exportVersions.count == 1 }
         s.exportSaveHandler={ _,_ in await gate.wait();throw UserFacingError(code:"session_expired") }
         m.saveExport("version",destination:target)
@@ -456,7 +437,7 @@ extension ExportModelTests {
         s.timings=[ExportTimingSample(kind:.init(isRAW:false,encoding:"adaptive",isAI:false,hasFrame:false,verifies:true),pixels:pixels,stages:[10,20,30,4])]
         m.refreshExportMetadata();await eventually(timeout:.seconds(10)) { !m.timingHistory.isEmpty }
         await running(m,s)
-        XCTAssertNil(s.exportCalls.first?.frame)
+        XCTAssertNil(s.exportCalls.first?.job.snapshot.frame)
         XCTAssertEqual(try XCTUnwrap(m.export.durations)[0],10,accuracy:0.0001,"Without a frame, ETA must use the exported photo's pixels")
         m.cancelExport();await eventually(timeout:.seconds(10)) { !m.export.isInFlight }
     }
@@ -470,7 +451,7 @@ extension ExportModelTests {
         var frame = m.frame; frame.isEnabled = true; m.frame = frame
         let layout = try XCTUnwrap(m.frameLayout)
         await running(m,s)
-        XCTAssertNotNil(s.exportCalls.first?.frame)
+        XCTAssertNotNil(s.exportCalls.first?.job.snapshot.frame)
         XCTAssertEqual(try XCTUnwrap(m.export.durations)[0], 10 * Double(layout.width) * Double(layout.height) / pixels, accuracy: 0.0001)
         m.cancelExport()
         await eventually(timeout: .seconds(3)) { !m.export.isInFlight }

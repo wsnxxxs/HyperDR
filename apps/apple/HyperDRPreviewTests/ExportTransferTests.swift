@@ -27,7 +27,7 @@ import HyperDRKit
 
     private func list(_ model: EditorModel, _ services: FakeEditorServices, _ versions: [ExportVersion]) async throws {
         // Made with other settings than the current ones, so Restore is on offer.
-        services.historyByURL[source] = versions.map { ExportHistoryItem(version: $0, key: "earlier-settings", options: model.exportChoices) }
+        services.historyByURL[source] = versions.map { ExportHistoryItem(version: $0, options: model.exportChoices) }
         model.refreshExportMetadata()
         await eventually(timeout: .seconds(10)) { model.exportVersions.count == versions.count }
     }

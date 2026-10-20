@@ -211,11 +211,11 @@ import XCTest
         await model.loadExportServices()
         model.open([a])
         await eventually(timeout: .seconds(10)) { model.document?.phase == .ready && !model.suggestedFileName.isEmpty }
-        let key = try await services.exportKey(model.photo!, options: model.effectiveOptions(), frame: nil)
+        let key = try await services.exportKey(model)
         services.historyByURL[a] = [ExportHistoryItem(
             version: ExportVersion(number: 1, createdAt: Date(), encodingID: "adaptive",
                                    result: ExportResult(export: "v1", fileName: "a.heic", byteCount: 1, pixelSize: PixelSize(width: 1, height: 1))),
-            key: key, options: model.exportChoices)]
+            recipeSnapshot: key, options: model.exportChoices)]
         model.refreshExportMetadata()
         await eventually(timeout: .seconds(10)) { model.exportVersions.first?.matchesCurrent == true }
         services.metadataHandler = { throw UserFacingError(code: "source_missing") }
@@ -233,11 +233,11 @@ import XCTest
         await model.loadExportServices()
         model.open([a])
         await eventually(timeout: .seconds(10)) { model.document?.phase == .ready && !model.suggestedFileName.isEmpty }
-        let key = try await services.exportKey(model.photo!, options: model.effectiveOptions(), frame: nil)
+        let key = try await services.exportKey(model)
         services.historyByURL[a] = [ExportHistoryItem(
             version: ExportVersion(number: 1, createdAt: Date(), encodingID: "adaptive",
                                    result: ExportResult(export: "v1", fileName: "a.heic", byteCount: 1, pixelSize: PixelSize(width: 1, height: 1))),
-            key: key, options: model.exportChoices)]
+            recipeSnapshot: key, options: model.exportChoices)]
         model.refreshExportMetadata()
         await eventually(timeout: .seconds(10)) { model.exportVersions.count == 1 }
         services.metadataHandler = { throw UserFacingError(code: "source_missing") }

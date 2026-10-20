@@ -1,0 +1,192 @@
+import Foundation
+
+/// Where the HDR gain comes from (p7-adjustments §2.3). One choice instead of a
+/// separate AI mode: the source decides where gain comes from, strength and range
+/// decide how it is used. Option ids are also the `hdr.source.<id>` localization keys.
+public enum HDRSource: String, Codable, CaseIterable, Sendable {
+    /// Analytic expansion computed on the edited SDR base (`sdr` input).
+    case expand
+    /// Model inference on the original photo (`sdr` input).
+    case ai
+    /// Separated real highlights (`rawEDR` input, always on).
+    case captured
+    /// Real highlights plus expansion, taking the larger gain per pixel.
+    case capturedExpand
+    /// Real highlights plus AI, taking the larger gain per pixel.
+    case capturedAI
+    /// The photo already has HDR; `hdr` and `dual` inputs. Read-only, not a control.
+    case builtIn
+
+    public var domains: Set<InputDomain> {
+        switch self {
+        case .expand, .ai: return [.sdr]
+        case .captured, .capturedExpand, .capturedAI: return [.rawEDR]
+        case .builtIn: return [.hdr, .dual]
+        }
+    }
+
+    public static func options(in domain: InputDomain) -> [HDRSource] {
+        allCases.filter { $0.domains.contains(domain) }
+    }
+
+    public static func defaultSource(for domain: InputDomain) -> HDRSource {
+        switch domain {
+        case .sdr: return .expand
+        case .rawEDR: return .captured
+        case .hdr, .dual: return .builtIn
+        }
+    }
+
+    /// Uses the analytic expansion (coverage applies).
+    public var expands: Bool { self == .expand || self == .capturedExpand }
+    /// Uses the AI model (model choice applies).
+    public var usesModel: Bool { self == .ai || self == .capturedAI }
+}
+
+/// The adjustment declarations. This table is the single source for the inspector,
+/// undo names, localization keys and the GPU nodes (product-vision principle 4,
+/// p7-adjustments §2.2–§2.7). 28 parameters: 6 of them RAW-only.
+public enum Adjustments {
+    /// C1: the automatic range never exceeds three stops, whatever the source headroom.
+    public static let automaticRangeCeiling = 3.0
+    /// C1: automatic expansion start for the analytic expansion, in the declared
+    /// percent unit. AI keeps the model's own start.
+    public static let automaticExpansionStart = 25.0
+
+    public static let all: [ParameterDeclaration] = hdr + light + color + look + detail
+
+    public static let byID: [String: ParameterDeclaration] =
+        Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+
+    public static func declaration(_ id: String) -> ParameterDeclaration? { byID[id] }
+
+    public static func parameters(in group: ParameterGroup) -> [ParameterDeclaration] {
+        all.filter { $0.group == group }
+    }
+
+    /// Applies `domains` only; the inspector also evaluates `visibleWhen` through
+    /// `visible(in:)`.
+    public static func visible(in domain: InputDomain) -> [ParameterDeclaration] {
+        all.filter { $0.allows(domain) }
+    }
+
+    public static func visible(in recipe: Recipe) -> [ParameterDeclaration] {
+        all.filter { isVisible($0, in: recipe) }
+    }
+
+    public static func isVisible(_ declaration: ParameterDeclaration, in recipe: Recipe) -> Bool {
+        declaration.isVisible(in: recipe.inputDomain, value: recipe.conditionValue)
+    }
+
+    // MARK: - HDR
+
+    private static let hdr: [ParameterDeclaration] = [
+        ParameterDeclaration(id: "hdr.enabled", group: .hdr, kind: .bool,
+            default: .constant(.bool(true)), scope: .hdrOnly),
+        ParameterDeclaration(id: "hdr.source", group: .hdr, kind: .choice,
+            default: .byDomain(InputDomain.allCases.map {
+                DomainDefault($0, .string(HDRSource.defaultSource(for: $0).rawValue))
+            }),
+            options: HDRSource.allCases.map { ParameterOption($0.rawValue, of: "hdr.source", domains: $0.domains) },
+            visibleWhen: .isOn("hdr.enabled"), scope: .hdrOnly, cost: .inference),
+        ParameterDeclaration(id: "hdr.model", group: .hdr, kind: .reference,
+            default: .constant(.string("research-cnn-v1")),
+            visibleWhen: .all([.isOn("hdr.enabled"), .isOneOf("hdr.source", ["ai", "capturedAI"])]),
+            capability: "HyperDR.aiModels >= 2", scope: .hdrOnly, cost: .inference),
+        ParameterDeclaration(id: "hdr.strength", group: .hdr, kind: .float, range: 0...200, step: 1,
+            default: .constant(.number(100)), format: .percent, origin: .zero,
+            visibleWhen: .isOn("hdr.enabled"), scope: .hdrOnly, mask: "gain"),
+        ParameterDeclaration(id: "hdr.range", group: .hdr, kind: .floatOrAuto, range: 0.5...4, step: 0.1,
+            default: .auto, format: .stops,
+            visibleWhen: .isOn("hdr.enabled"), scope: .hdrOnly, mask: "gainFull"),
+        ParameterDeclaration(id: "hdr.expansionStart", group: .hdr, kind: .floatOrAuto, range: 18...75, step: 1,
+            default: .auto, format: .percent,
+            visibleWhen: .all([.isOn("hdr.enabled"),
+                               .isOneOf("hdr.source", ["expand", "ai", "capturedExpand", "capturedAI"])]),
+            scope: .hdrOnly, mask: "participation"),
+        ParameterDeclaration(id: "hdr.coverage", group: .hdr, kind: .float, range: 0...100, step: 1,
+            default: .constant(.number(60)), format: .percent, origin: .zero,
+            visibleWhen: .all([.isOn("hdr.enabled"),
+                               .isOneOf("hdr.source", ["expand", "capturedExpand"])]),
+            scope: .hdrOnly, mask: "coverage"),
+        // The one SDR-only control: it changes the base and compensates the gain (H2).
+        ParameterDeclaration(id: "hdr.sdrRolloff", group: .hdr, kind: .float, range: 0...100, step: 1,
+            default: .constant(.number(0)), format: .percent, origin: .zero,
+            domains: [.rawEDR, .hdr], visibleWhen: .isOn("hdr.enabled"), scope: .sdrOnly),
+    ]
+
+    // MARK: - Light
+
+    private static let light: [ParameterDeclaration] = [
+        ParameterDeclaration(id: "tone.exposure", group: .light, kind: .float, range: -4...4, step: 0.01,
+            default: .constant(.number(0)), format: .ev, origin: .zero),
+        ParameterDeclaration(id: "tone.contrast", group: .light, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, origin: .zero),
+        ParameterDeclaration(id: "tone.highlights", group: .light, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, origin: .zero, mask: "highlights"),
+        ParameterDeclaration(id: "tone.shadows", group: .light, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, origin: .zero, mask: "shadows"),
+        ParameterDeclaration(id: "tone.blacks", group: .light, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, origin: .zero, mask: "blacks"),
+    ]
+
+    // MARK: - Color
+
+    private static let lookSpaces = ["srgb", "p3", "rec709", "hlg", "pq", "slog3-sgamut3cine"]
+
+    private static let color: [ParameterDeclaration] = [
+        // RAW white balance is a development parameter, not a matrix (p7-adjustments §2.5).
+        ParameterDeclaration(id: "develop.temperature", group: .color, kind: .float, range: 2000...50000, step: 50,
+            default: .fromSource, format: .kelvin, domains: [.rawEDR], cost: .redevelop),
+        ParameterDeclaration(id: "develop.tint", group: .color, kind: .float, range: -150...150, step: 1,
+            default: .fromSource, format: .signed, origin: .zero, domains: [.rawEDR], cost: .redevelop),
+        ParameterDeclaration(id: "color.warmth", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, origin: .zero, domains: [.sdr, .hdr, .dual]),
+        ParameterDeclaration(id: "color.tint", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, origin: .zero, domains: [.sdr, .hdr, .dual]),
+        ParameterDeclaration(id: "color.vibrance", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, origin: .zero),
+        ParameterDeclaration(id: "color.saturation", group: .color, kind: .float, range: -100...100, step: 1,
+            default: .constant(.number(0)), format: .signed, origin: .zero),
+    ]
+
+    // MARK: - Look
+
+    private static let look: [ParameterDeclaration] = [
+        ParameterDeclaration(id: "look.lut", group: .look, kind: .reference,
+            default: .constant(.none)),
+        ParameterDeclaration(id: "look.enabled", group: .look, kind: .bool,
+            default: .constant(.bool(true)), visibleWhen: .isSet("look.lut")),
+        ParameterDeclaration(id: "look.strength", group: .look, kind: .float, range: 0...100, step: 1,
+            default: .constant(.number(100)), format: .percent, origin: .zero,
+            visibleWhen: .isSet("look.lut")),
+        ParameterDeclaration(id: "look.input", group: .look, kind: .choice,
+            default: .constant(.string("srgb")),
+            options: lookSpaces.map {
+                ParameterOption($0, of: "look.input",
+                                domains: $0 == "slog3-sgamut3cine" ? [.rawEDR] : Set(InputDomain.allCases))
+            },
+            visibleWhen: .isSet("look.lut")),
+        ParameterDeclaration(id: "look.output", group: .look, kind: .choice,
+            default: .constant(.string("srgb")),
+            options: lookSpaces.map { ParameterOption($0, of: "look.output") },
+            visibleWhen: .isSet("look.lut")),
+    ]
+
+    // MARK: - Detail (RAW only)
+
+    private static let detail: [ParameterDeclaration] = [
+        ParameterDeclaration(id: "develop.luminanceNR", group: .detail, kind: .float, range: 0...100, step: 1,
+            default: .fromSource, format: .percent, domains: [.rawEDR],
+            capability: "CIRAWFilter.isLuminanceNoiseReductionSupported", cost: .redevelop),
+        ParameterDeclaration(id: "develop.colorNR", group: .detail, kind: .float, range: 0...100, step: 1,
+            default: .fromSource, format: .percent, domains: [.rawEDR],
+            capability: "CIRAWFilter.isColorNoiseReductionSupported", cost: .redevelop),
+        ParameterDeclaration(id: "develop.sharpness", group: .detail, kind: .float, range: 0...100, step: 1,
+            default: .fromSource, format: .percent, domains: [.rawEDR],
+            capability: "CIRAWFilter.isSharpnessSupported", cost: .redevelop),
+        ParameterDeclaration(id: "develop.lensCorrection", group: .detail, kind: .bool,
+            default: .constant(.bool(true)), domains: [.rawEDR],
+            capability: "CIRAWFilter.isLensCorrectionSupported", cost: .redevelop),
+    ]
+}

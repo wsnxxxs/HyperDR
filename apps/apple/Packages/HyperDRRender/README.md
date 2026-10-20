@@ -78,8 +78,9 @@ cannot enumerate a GPU reports `metalUnavailable` instead of skipping correctnes
 Seven Render tests cover identity/negative values, split vs CPU double and resized stripes,
 repeat rendering on the same/new contexts, TIFF orientation/cache, system-authored ISO
 passthrough/reconstruction/resplit, RAW G2 and cache, and three-channel offsets/cancellation.
-Recipe has a v1 serialization test and a parameter-declaration contract test. These are small contract checks, not an exhaustive format
-or parameter matrix. The expanded same/new-context/cross-process/load determinism gates for
+Recipe has four checks (declaration table, stable recipe JSON, unknown ids, domain and
+condition filtering). These are small contract checks, not an exhaustive format or
+parameter matrix. The expanded same/new-context/cross-process/load determinism gates for
 future nodes belong to P7-1; AE-3 already established those for the source split prototype.
 
 Both packages were built with `xcodebuild -scheme HyperDRRender` for
@@ -98,8 +99,9 @@ Parameter IDs and declaration fields follow `p7-adjustments.md` §2.2, including
 `group`, `kind`, `range`/`step`, constant/`fromSource`/`auto` defaults, `format`,
 `origin`, `domains`, `visibleWhen`, `capability`, `scope`, `mask`, `cost` and the
 three derived localization keys. Existing declarations use `develop.lensCorrection`
-and `hdr.range`. Conditions are carried as strings; no UI expression evaluator is
-introduced in P7-0.
+and `hdr.range`; both now also exist in `Adjustments`, which is the table the app and
+the nodes should read. Visibility conditions are typed (`ParameterCondition`) and
+evaluated in HyperDRRecipe.
 
 The source split's `headroom` is a resolved decomposition capacity (automatic 3,
 explicit up to 4), not yet the final HDR-only range operation. P7-1 must preserve

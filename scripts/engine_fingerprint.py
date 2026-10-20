@@ -16,6 +16,11 @@ def engine_fingerprint(root: Path = ROOT) -> str:
     )]
     for directory in ("modules", "cmake", "schema"):
         inputs.extend(path for path in (root / directory).rglob("*") if path.is_file())
+    # Match HyperDRBuildIdentity.cmake's embedded-model asset globs: ncnn
+    # param/bin/metadata and manifests, excluding CoreML/ONNX/training products.
+    models = root / "HyperDR_Model/models"
+    for pattern in ("*.ncnn.*", "*.manifest.json"):
+        inputs.extend(path for path in models.rglob(pattern) if path.is_file())
     digest = sha256()
     for path in sorted(inputs):
         digest.update(path.relative_to(root).as_posix().encode() + b"\0")

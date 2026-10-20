@@ -155,10 +155,11 @@ kernel void graphCells(texture2d<float,access::read> src [[texture(0)]],
     uint2 hi=(pos+1)*uint2(src.get_width(),src.get_height())/uint2(stats.get_width(),stats.get_height());
     float4 sum=0,peak=0;
     for(uint y=lo.y;y<hi.y;y++)for(uint x=lo.x;x<hi.x;x++) {
-        auto v=preparePair(src.read(uint2(x,y)),p,cube,table);
+        float4 original=src.read(uint2(x,y));
+        auto v=preparePair(original,p,cube,table);
         float l=lum(v.base), request=sm(p.hdr.x,1.f,l), z=clamp(log2(l+1e-6f),-8.f,8.f);
         sum+=float4(l,request,z,z*z);
-        peak=max(peak,float4(maximum(v.base)*exp2(v.gain),maximum(v.base),v.gain,0));
+        peak=max(peak,float4(maximum(v.base)*exp2(v.gain),maximum(v.base),v.gain,maximum(original.rgb)));
     }
     float4 mean=sum/float((hi.x-lo.x)*(hi.y-lo.y));stats.write(mean,pos);peaks.write(peak,pos);
     masks.write(float4(sm(.4f,1.f,mean.x),1-sm(0.f,.5f,mean.x),1-sm(0.f,.1f,mean.x),mean.y),pos);
@@ -194,11 +195,11 @@ kernel void graphFinalGain(texture2d<float,access::read> cells [[texture(0)]],te
 }
 kernel void graphPeak(texture2d<float,access::read> peaks [[texture(0)]],texture2d<float,access::read> gain [[texture(1)]],
                       constant uint& unused [[buffer(0)]],device float4* output [[buffer(1)]],uint pos [[thread_position_in_grid]]) {
-    if(pos)return;float4 value=0;
+    if(pos)return;float4 value=0;float analytic=0;
     for(uint y=0;y<peaks.get_height();y++)for(uint x=0;x<peaks.get_width();x++) {
-        value=max(value,peaks.read(uint2(x,y)));value.w=max(value.w,gain.read(uint2(x,y)).x);
+        value=max(value,peaks.read(uint2(x,y)));analytic=max(analytic,gain.read(uint2(x,y)).x);
     }
-    output[0]=value;
+    output[0]=float4(value.xyz,analytic);output[1]=float4(value.w,0,0,0);
 }
 kernel void graphOutput(texture2d<float,access::sample> src [[texture(0)]],texture2d<float,access::write> base [[texture(1)]],
                         texture2d<float,access::write> gain [[texture(2)]],texture3d<float,access::read> cube [[texture(3)]],

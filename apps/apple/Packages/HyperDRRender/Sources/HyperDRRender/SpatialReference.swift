@@ -6,6 +6,7 @@ public struct ReferenceSpatialAnalysis: Sendable {
     public let masks: [SIMD4<Double>]
     public let expansion: [Double]
     public let peaks: SIMD4<Double>
+    public let sourceHeadroom: Double
 }
 
 extension DoubleReference {
@@ -19,13 +20,16 @@ extension DoubleReference {
         let h = max(1,Int((Double(size.height)*scale).rounded()))
         var cells = [SIMD4<Double>](repeating:.zero,count:w*h)
         var peaks = SIMD4<Double>.zero
+        var originalPeak = 1.0
         let start = Double(settings.hdr.expansionStart ?? 0.25)
         for row in 0..<h { for column in 0..<w {
             let x0 = column*size.width/w, x1 = (column+1)*size.width/w
             let y0 = row*size.height/h, y1 = (row+1)*size.height/h
             var sum = SIMD4<Double>.zero
             for y in y0..<y1 { for x in x0..<x1 {
-                let pair = prepare(pixels[y*size.width+x],settings:settings,sdr:sdr)
+                let original = pixels[y*size.width+x]
+                originalPeak = max(originalPeak,original.x,original.y,original.z)
+                let pair = prepare(original,settings:settings,sdr:sdr)
                 let brightness = luma(pair.base), logValue = min(8,max(-8,log2(brightness+1e-6)))
                 sum += SIMD4(brightness,smoothStep(start,1,brightness),logValue,logValue*logValue)
                 let basePeak = max(pair.base.x,pair.base.y,pair.base.z)
@@ -71,7 +75,8 @@ extension DoubleReference {
         let expansion = cells.indices.map { i in min(weights[i].y,max(0,filtered[i].x*cells[i].x+filtered[i].y)) }
         peaks.w = expansion.max() ?? 0
         let masks = cells.map { c in SIMD4(smoothStep(0.4,1,c.x),1-smoothStep(0,0.5,c.x),1-smoothStep(0,0.1,c.x),c.y) }
-        return ReferenceSpatialAnalysis(size:PixelSize(width:w,height:h),cells:cells,masks:masks,expansion:expansion,peaks:peaks)
+        return ReferenceSpatialAnalysis(size:PixelSize(width:w,height:h),cells:cells,masks:masks,expansion:expansion,peaks:peaks,
+                                        sourceHeadroom:log2(originalPeak))
     }
 
     public static func sampleGrid(_ values: [Double], grid: PixelSize, output: PixelSize, x: Int, y: Int) -> Double {

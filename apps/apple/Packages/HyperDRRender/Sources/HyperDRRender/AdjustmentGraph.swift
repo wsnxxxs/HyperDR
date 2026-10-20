@@ -32,6 +32,8 @@ public struct SpatialAnalysis: @unchecked Sendable {
     public let expansion: any MTLTexture
     /// Actual HDR peak, SDR-base peak, captured gain peak, analytic gain peak.
     public let peaks: SIMD4<Float>
+    /// Original source capacity in stops, including authored headroom metadata.
+    public let sourceHeadroom: Float
 }
 
 extension RenderEngine {
@@ -123,11 +125,14 @@ extension RenderEngine {
         try context.dispatch("graphCoefficients", width: width, height: height, textures: [means, coefficients], value: &unused)
         try box(coefficients, smoothed, radius: radius)
         try context.dispatch("graphFinalGain", width: width, height: height, textures: [cells, smoothed, weights, expansion], value: &unused)
-        guard let summary = device.makeBuffer(length: 16, options: .storageModeShared) else { throw RenderError.allocationFailed }
+        guard let summary = device.makeBuffer(length: 32, options: .storageModeShared) else { throw RenderError.allocationFailed }
         try context.dispatch("graphPeak", width: 1, height: 1, textures: [peaks, expansion], buffers: [summary], value: &unused)
         try finish(command)
+        let originalPeak = summary.contents().advanced(by: 16).load(as: SIMD4<Float>.self).x
+        let taggedHeadroom = max(source.authoredGainMap?.baseHeadroom ?? 0, source.authoredGainMap?.alternateHeadroom ?? 0)
         let result = SpatialAnalysis(size: PixelSize(width: width, height: height), cells: cells, masks: masks,
-                                     expansion: expansion, peaks: summary.contents().load(as: SIMD4<Float>.self))
+            expansion: expansion, peaks: summary.contents().load(as: SIMD4<Float>.self),
+            sourceHeadroom: max(log2(max(1, originalPeak)), log2(max(1, source.hdrImage.contentHeadroom)), Float(taggedHeadroom)))
         analysisCache = (key, result)
         return result
     }
@@ -137,7 +142,9 @@ extension RenderEngine {
         if source.domain == .sdr && [.captured, .capturedExpand].contains(edit.hdr.source) { throw RenderError.invalidAdjustment }
         if source.domain != .sdr && edit.hdr.source == .expand { throw RenderError.invalidAdjustment }
         let expand = source.domain == .sdr || (source.domain == .rawEDR && edit.hdr.source == .capturedExpand)
-        let captured = min(3, max(0, log2(max(1, analysis.peaks.x))))
+        let imported = source.domain == .hdr || source.domain == .dual
+        let captured = min(imported ? 4 : 3,
+            max(imported ? analysis.sourceHeadroom : 0, log2(max(1, analysis.peaks.x))))
         let contentExpansion = 0.5 + 2.5 * DoubleReference.smoothStep(0.5, 1, Double(analysis.peaks.y))
         let automatic = expand ? max(captured, Float(contentExpansion)) : captured
         let range = edit.hdr.range ?? automatic
@@ -242,7 +249,7 @@ extension RenderEngine {
         let working = try authorWorking(source)
         // Analysis only resolves content headroom; it never replaces the author's base.
         let analysis = try self.analysis(source)
-        let natural = min(3, max(0, log2(max(1, analysis.peaks.x))))
+        let natural = min(4, max(analysis.sourceHeadroom, log2(max(1, analysis.peaks.x))))
         let range = edit.hdr.range ?? natural
         let channels = working.metadata.source.isoChannels
         func vector(_ key: KeyPath<ISOGainChannel, Double>, fallback: Float) -> SIMD4<Float> {

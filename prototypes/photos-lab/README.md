@@ -20,13 +20,19 @@
 4. 点运行（▶）。窗口里能看到“选照片”“测试步骤”“日志文件”“结果”几个区块。
 5. 系统会在你第一次点“选照片”时弹出照片选择窗口（这个窗口由系统提供，不需要授权）。真正需要授权的是第 1 步里访问图库的时候，见第三部分。
 
-## 二、在 iPhone / iPad 上运行
+## 二、在 iPhone / iPad 上运行（免费 Apple ID 就够）
 
-1. 用线连接 iPhone 或 iPad，设备上打开“设置 → 隐私与安全性 → 开发者模式”（第一次需要，开启后会重启）。
-2. 在 Xcode 里：项目 → 目标 PhotosLab → Signing & Capabilities，**Team 选你自己的开发者账号**（我没有填 Team，需要你自己选；如果提示 Bundle Identifier 被占用，把 `com.hyperdr.PhotosLab` 改成别的，例如 `com.你的名字.PhotosLab`）。
-3. 运行目标选你的 iPhone 17 Pro 或 iPad Pro，点运行（▶）。
-4. 第一次安装后，设备上会提示“不受信任的开发者”：到“设置 → 通用 → VPN 与设备管理”里点你的账号，选“信任”，再打开 App。
-5. iPhone、iPad 各装一次，各测一遍（结果可能不同）。**不要用 Xcode 自带的模拟器做这个测试**：模拟器的图库不是你的图库，而且模拟器里的 ImageIO 不能生成增益图。
+不需要付费开发者账号。iOS 上访问照片图库只靠 Info.plist 里的权限说明，这个 App 在 iOS 上没有申请任何 entitlement 或需要付费账号的 capability。
+
+1. 在 Xcode 里登录你的 Apple ID：Xcode → Settings → Accounts → 左下角“+”→ Apple ID。登录后会出现一个 **Personal Team**（个人团队）。
+2. 用线连接 iPhone 或 iPad，解锁并点“信任此电脑”。
+3. 在设备上打开开发者模式：设置 → 隐私与安全性 → 最下面的“开发者模式”→ 打开，按提示重启，重启后再确认一次。（第一次连上 Xcode 之前这一项可能不显示，连接并在 Xcode 里选中设备后就会出现。）
+4. 在 Xcode 里选工程 → 目标 PhotosLab → Signing & Capabilities：**Team 选你的 Personal Team**（我没有填 Team）。保持“Automatically manage signing”。
+5. 免费账号要求 Bundle Identifier 全局唯一。如果提示“Failed to register bundle identifier”，把 `com.hyperdr.PhotosLab` 改成 `com.你的名字.PhotosLab`。
+6. 运行目标选你的 iPhone 17 Pro 或 iPad Pro，点运行（▶）。
+7. 第一次安装后设备上会提示“不受信任的开发者”。到 设置 → 通用 → VPN 与设备管理 → 点你的 Apple ID → “信任”，再打开 App。
+8. **免费账号装的 App 7 天后过期**，到期后图标点开会闪退。重新在 Xcode 里点运行（▶）重装即可，App 里的日志文件会保留。另外免费账号同一台设备上最多同时装 3 个这类 App。
+9. iPhone、iPad 各装一次，各测一遍（结果可能不同）。**不要用模拟器做这个测试**：模拟器的图库不是你的图库，而且模拟器里的 ImageIO 不能生成增益图。
 
 ---
 

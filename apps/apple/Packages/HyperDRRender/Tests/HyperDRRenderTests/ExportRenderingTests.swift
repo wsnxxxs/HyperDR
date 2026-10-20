@@ -98,6 +98,7 @@ private func collect(_ engine: RenderEngine, _ source: RenderSource, recipe: Rec
         let (converted,split) = try await collect(engine,source,recipe:recipe,
             request:ExportRenderRequest(photoSize:base.size,capabilities:ExportPairCapabilities(supportsThreeChannelGain:false)))
         #expect(converted.resplitReasons == [.writerCarriesOneChannel])
+        #expect(converted.sourceProvenance == .authored && converted.provenance == .resplit)
         let reference = DoubleReference.exportSplit(SIMD3(Double(h.x),Double(h.y),Double(h.z)))
         closeExport(split.rgb,[Float(reference.base.x),Float(reference.base.y),Float(reference.base.z)])
         closeExport(split.gain,[Float(reference.gain)])

@@ -2,6 +2,9 @@
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/encoding.hpp"
+#include "hyperdr/container/gain_map_jpeg.hpp"
+#include "hyperdr/container/heif_reader.hpp"
+#include "hyperdr/container/exif.hpp"
 #include "hyperdr/foundation/file_io.hpp"
 #include <algorithm>
 #include <cmath>
@@ -137,6 +140,32 @@ int main(int argc,char** argv) try {
     // Original byte verifier and the new native-row/tile verifier agree on
     // valid files; a truncated codestream must fail both.
     hyperdr::verify_encoded_output(bbytes,encoding);
+    if(std::string(format)=="iso-gainmap-jpeg" || std::string(format)=="adaptive") {
+      // Change only the exported IFD0 orientation, keeping all pixel/container
+      // bytes intact. E5 must reject a nonidentity display direction.
+      std::vector<std::uint8_t> exif;
+      if(encoding==hyperdr::OutputEncoding::Adaptive)exif=hyperdr::read_heif(bbytes).exif();
+      else {
+        const auto jpeg=hyperdr::parse_gain_map_jpeg(bbytes);
+        for(const auto& app:jpeg.app_segments[0])
+          if(app.marker==0xe1&&app.payload.size()>6&&!std::memcmp(app.payload.data(),"Exif\0\0",6))
+            exif.assign(app.payload.begin()+6,app.payload.end());
+      }
+      REQUIRE(!exif.empty()&&hyperdr::read_exif_orientation(exif.data(),exif.size()).value_or(0)==1);
+      const std::vector<std::uint8_t> tag{0x12,0x01,3,0,1,0,0,0,1,0,0,0};
+      const auto entry=std::search(exif.begin(),exif.end(),tag.begin(),tag.end());
+      REQUIRE(entry!=exif.end());
+      const auto payload=std::search(bbytes.begin(),bbytes.end(),exif.begin(),exif.end());
+      REQUIRE(payload!=bbytes.end());
+      auto rotated=bbytes;
+      rotated[std::size_t(payload-bbytes.begin())+std::size_t(entry-exif.begin())+8]=6;
+      const auto broken=root/"rotated";hyperdr::write_binary_file_atomic(broken,rotated,false);
+      bool rejected=false;
+      try {(void)hyperdr::verify_encoded_file(broken,encoding,hyperdr::VerificationFrame{source.width,source.height,16,16,source.width-32,source.height-32});}
+      catch(const std::exception&){rejected=true;}
+      REQUIRE(rejected);std::filesystem::remove(broken);
+    }
+
     if(std::string(format)=="iso-gainmap-jpeg") {
       auto corrupt=bbytes;corrupt.resize(corrupt.size()-2);
       const auto broken=root/"truncated.jpg";hyperdr::write_binary_file_atomic(broken,corrupt,false);

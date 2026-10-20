@@ -527,6 +527,16 @@ VerificationResult verify_heif_pixels(std::span<const std::uint8_t> bytes,HdrEnc
   const auto file=read_heif(bytes);
   const auto plan=file.resolve_image(0,HeifCanvas::Tiled);
   const auto gain=encoding==HdrEncoding::Adaptive?file.resolve_gain_map(HeifCanvas::Tiled):std::nullopt;
+  const auto requireIdentityOrientation=[&](const HeifImagePlan& image) {
+    const auto exif=file.exif(image.item_id);
+    if(read_exif_orientation(exif.data(),exif.size()).value_or(1)!=1)
+      throw std::runtime_error("bounded export verification requires EXIF Orientation=1");
+    for(const auto& transform:image.transforms)
+      if(transform.type=="imir" || (transform.type=="irot" && transform.value!=0))
+        throw std::runtime_error("bounded export verification requires identity HEIF orientation");
+  };
+  requireIdentityOrientation(plan);
+  if(gain)requireIdentityOrientation(gain->gain);
   const Geometry geometry(plan);
   if(gain && (gain->gain.width!=plan.width || gain->gain.height!=plan.height ||
               gain->gain.tile_width!=plan.tile_width || gain->gain.tile_height!=plan.tile_height ||

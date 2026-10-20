@@ -65,7 +65,10 @@ one tile at a time, without chroma interpolation across tile boundaries (same as
 the normal reader). Progressive/arithmetic JPEG is refused by this bounded export
 verifier; HyperDR writes baseline Huffman JPEG. The legacy byte verifier retains
 its general JPEG acceptance. TIFF export validation requires the RGB16 layout the
-writer emits. AVIF **remains whole-YUV**: libavif's grid decoder assembles all cells
+writer emits. Export grids must be upright: EXIF orientation other than 1 and
+nonidentity HEIF irot/imir are rejected, including on the gain item. The current
+writers emit Orientation=1 and no irot/imir; clean-aperture crops remain supported.
+AVIF **remains whole-YUV**: libavif's grid decoder assembles all cells
 into one image. Its file verification reports `boundedMemory=false`, and the row
 writer capability remains false. System ImageIO verification belongs to Kit.
 

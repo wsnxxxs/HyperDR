@@ -31,6 +31,11 @@ void fail_without_codecs(const char* capability) {
 }
 
 #if !HYPERDR_WITH_CODECS
+void write_sdr_jpeg_rows(const EncodingRows&,const PhotoMetadata&,int,ColorGamut,const std::filesystem::path&){fail_without_codecs("streaming JPEG");}
+void write_sdr_tiff_rows(const EncodingRows&,const PhotoMetadata&,ColorGamut,const std::filesystem::path&){fail_without_codecs("streaming TIFF");}
+void write_gain_map_jpeg_rows(const EncodingRows&,const EncodingRows&,const GainMapMetadata&,const PhotoMetadata&,int,bool,const std::filesystem::path&){fail_without_codecs("streaming ISO JPEG");}
+std::vector<std::uint8_t> encode_heic_rows(const EncodingRows&,const EncodingRows&,const GainMapMetadata&,float,const PhotoMetadata&,OutputEncoding,int,int,HevcPreset){fail_without_codecs("streaming HEIC");return {};}
+
 EncoderCapabilities encoder_capabilities(const std::filesystem::path&) {
   return {false, false, "hevc_unavailable"};
 }
@@ -110,20 +115,20 @@ void set_jpeg_progress_observer(void (*)(bool)) {}
 std::vector<std::uint8_t> encode_sdr_jpeg(const FloatImage&, const PhotoMetadata&, int, ColorGamut) {
   fail_without_codecs("SDR JPEG encoding");
 }
-void verify_sdr_jpeg(const std::vector<std::uint8_t>&) { fail_without_codecs("SDR JPEG verification"); }
+void verify_sdr_jpeg(std::span<const std::uint8_t>) { fail_without_codecs("SDR JPEG verification"); }
 std::vector<std::uint8_t> encode_sdr_tiff(const FloatImage&, const PhotoMetadata&, ColorGamut) {
   fail_without_codecs("SDR TIFF encoding");
 }
-void verify_sdr_tiff(const std::vector<std::uint8_t>&) { fail_without_codecs("SDR TIFF verification"); }
+void verify_sdr_tiff(std::span<const std::uint8_t>) { fail_without_codecs("SDR TIFF verification"); }
 
-void verify_encoded_output(const std::vector<std::uint8_t>&, HdrEncoding) {
+void verify_encoded_output(std::span<const std::uint8_t>, HdrEncoding) {
   fail_without_codecs("output verification");
 }
-void verify_heic_decodable(const std::vector<std::uint8_t>&) {
+void verify_heic_decodable(std::span<const std::uint8_t>) {
   fail_without_codecs("HEIC decode verification");
 }
 
-void verify_heic_decodable(const std::vector<std::uint8_t>&, HdrEncoding) {
+void verify_heic_decodable(std::span<const std::uint8_t>, HdrEncoding) {
   fail_without_codecs("HEIC decode verification");
 }
 
@@ -131,7 +136,7 @@ void verify_heic_decodable(const std::filesystem::path&) {
   fail_without_codecs("HEIC decode verification");
 }
 
-void verify_gain_map_jpeg(const std::vector<std::uint8_t>&) {
+void verify_gain_map_jpeg(std::span<const std::uint8_t>) {
   fail_without_codecs("ISO gain-map JPEG verification");
 }
 
@@ -139,7 +144,7 @@ void verify_gain_map_jpeg(const std::filesystem::path&) {
   fail_without_codecs("ISO gain-map JPEG verification");
 }
 
-void verify_avif_decodable(const std::vector<std::uint8_t>&) {
+void verify_avif_decodable(std::span<const std::uint8_t>) {
   fail_without_codecs("AVIF decode verification");
 }
 
@@ -157,3 +162,10 @@ DisplayCurveResult compare_gain_map_heic_curve(
 #endif  // !HYPERDR_WITH_CODECS
 
 }  // namespace hyperdr
+#if !HYPERDR_WITH_CODECS
+namespace hyperdr {
+VerificationResult verify_encoded_file(const std::filesystem::path&,HdrEncoding,std::optional<VerificationFrame>) {
+  throw std::runtime_error("output verification needs codecs");
+}
+}
+#endif

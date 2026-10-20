@@ -166,6 +166,9 @@ public struct RenderSource: @unchecked Sendable {
     let texture: any MTLTexture
     let baseSpace: CGColorSpace
     let gainTexture: (any MTLTexture)?
+    /// Internal ROI assets retain global source coordinates while owning only a tile.
+    var samplingRegion = CGRect(x:0,y:0,width:1,height:1)
+    var gainSamplingRegion = CGRect(x:0,y:0,width:1,height:1)
 }
 
 public struct RAWDevelopment: Sendable {

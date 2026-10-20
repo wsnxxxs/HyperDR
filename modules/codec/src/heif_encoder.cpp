@@ -159,7 +159,80 @@ std::vector<std::uint8_t> encode_hdr_heic(const PhotoRenditions& images,
   return write_heif(image,nullptr,options);
 }
 
-void verify_heic_decodable(const std::vector<std::uint8_t>& bytes) {
+std::vector<std::uint8_t> encode_heic_rows(const EncodingRows& base,const EncodingRows& codes,
+    const GainMapMetadata& metadata,float headroom,const PhotoMetadata& photo,
+    OutputEncoding encoding,int quality,int depth,HevcPreset preset) {
+  using namespace codec::hevc;
+  const auto grid=tile_grid(base.width,base.height);
+  auto picture=[&](const EncodingRows& rows,const EncodeParams& parameters,bool luma,bool hdr) {
+    FloatImage slab(rows.width,std::min(kTileSize,rows.height),rows.channels);
+    unsigned first=rows.height;
+    return encode(grid.count(),[&](std::size_t index,YuvTile& tile) {
+      const auto block=unsigned(index/grid.columns)*kTileSize;
+      if(block!=first) {
+        first=block;const auto count=std::min(kTileSize,rows.height-first);
+        for(unsigned y=0;y<count;++y) {
+          check_cancelled();rows.read(first+y,std::span(slab.pixels).subspan(std::size_t(y)*rows.width*rows.channels,std::size_t(rows.width)*rows.channels));
+        }
+      }
+      if(luma) {
+        luma_tile(grid,index,[&](unsigned y,unsigned x,unsigned count,float* row) {
+          std::copy_n(slab.pixels.data()+(std::size_t(y-first)*rows.width+x),count,row);
+        },tile);
+      } else {
+        rgb_tile(grid,index,[&](unsigned y,unsigned x,unsigned count,float* row) {
+          for(unsigned i=0;i<count;++i) {
+            const auto offset=(std::size_t(y-first)*rows.width+x+i)*3;
+            std::array<float,3> rgb{slab.pixels[offset],slab.pixels[offset+1],slab.pixels[offset+2]};
+            if(hdr) {
+              rgb=p3_to_rec2020(rgb[0],rgb[1],rgb[2]);
+              for(auto& v:rgb)v=std::max(0.f,v);
+              rgb=encoding==OutputEncoding::Pq?std::array<float,3>{pq_oetf(rgb[0]),pq_oetf(rgb[1]),pq_oetf(rgb[2])}:hlg_encode(rgb);
+            } else for(auto& v:rgb)v=srgb_oetf(v);
+            std::copy(rgb.begin(),rgb.end(),row+i*3);
+          }
+        },hdr?9:1,true,tile);
+      }
+    },parameters);
+  };
+  const bool speed=preset==HevcPreset::Medium;
+  HeifWriteOptions options;options.exif=make_minimal_exif(photo);
+  if(encoding==OutputEncoding::Adaptive) {
+    validate_gain_map_metadata(metadata,GainMapWriterProfile::apple_strict);
+    auto b=picture(base,{quality,depth==10,speed,{12,13,1}},false,false);
+    auto g=picture(codes,{95,false,speed,{2,2,1}},true,false);
+    const auto icc=codec::display_p3_profile();
+    HeifEncodedImage primary{b,base.width,base.height,{},std::nullopt,icc};
+    HeifEncodedImage gain{g,base.width,base.height,{2,2,1,true},std::nullopt,{}};
+    options.gain_metadata=metadata;options.xmp=make_xmp(photo,headroom,true);
+    return write_heif(primary,&gain,options);
+  }
+  FloatImage b(base.width,1,3),g(base.width,1,codes.channels);
+  EncodingRows hdr{base.width,base.height,3,[&](unsigned y,std::span<float> out) {
+    base.read(y,b.pixels);codes.read(y,g.pixels);
+    const auto reconstructed=reconstruct_gain_map(b,g,metadata,headroom);
+    std::copy(reconstructed.pixels.begin(),reconstructed.pixels.end(),out.begin());
+  }};
+  std::vector<float> row(std::size_t(base.width)*3);
+  float peak=0;double sum=0;
+  for(unsigned y=0;y<base.height;++y) {
+    hdr.read(y,row);double row_sum=0;
+    for(unsigned x=0;x<base.width;++x) {
+      const auto rgb=p3_to_rec2020(row[x*3],row[x*3+1],row[x*3+2]);
+      const auto light=std::max({0.f,rgb[0],rgb[1],rgb[2]});peak=std::max(peak,light);row_sum+=light;
+    }
+    sum+=row_sum;
+  }
+  const auto clamp=[](double nits){return std::uint16_t(std::clamp(std::ceil(nits),0.,10000.));};
+  const HeifContentLight light{clamp(peak*kReferenceWhiteNits),clamp(sum*kReferenceWhiteNits/(double(base.width)*base.height))};
+  const int transfer=encoding==OutputEncoding::Pq?16:18;
+  auto coded=picture(hdr,{quality,true,speed,{9,transfer,9}},false,true);
+  HeifEncodedImage primary{coded,base.width,base.height,{9,static_cast<std::uint16_t>(transfer),9,true},light,{}};
+  options.xmp=make_xmp(photo,headroom,false);
+  return write_heif(primary,nullptr,options);
+}
+
+void verify_heic_decodable(std::span<const std::uint8_t> bytes) {
   // Every check below already passed on a file that macOS ImageIO refused to
   // recognise as carrying a gain map at all (gate T2, 2026-08-09,
   // HyperDR_Model/reports/macos-t2-container-finding.md). Structural
@@ -220,7 +293,7 @@ void verify_heic_decodable(const std::vector<std::uint8_t>& bytes) {
   codec::verify_heif_tiles(file, plan->gain);
 }
 
-void verify_heic_decodable(const std::vector<std::uint8_t>& bytes,
+void verify_heic_decodable(std::span<const std::uint8_t> bytes,
                            HdrEncoding encoding) {
   if (encoding == HdrEncoding::Adaptive) {
     verify_heic_decodable(bytes);

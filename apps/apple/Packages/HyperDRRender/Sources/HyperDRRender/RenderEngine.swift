@@ -9,6 +9,11 @@ import HyperDRRecipe
 /// Task cancellation is checked before/after decode and each GPU stripe; already
 /// submitted GPU work is allowed to finish, and its cancelled result is discarded.
 public actor RenderEngine {
+    // Explicit executor also permits a prepared export's synchronous entry to
+    // enter the same isolation domain without waiting for an async actor hop.
+    nonisolated let serialExecutor = ExportRowsExecutor()
+    public nonisolated var unownedExecutor: UnownedSerialExecutor { serialExecutor.asUnownedSerialExecutor() }
+
     public static let workingColorSpace = CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3)!
     public let device: any MTLDevice
     let queue: any MTLCommandQueue
@@ -24,7 +29,7 @@ public actor RenderEngine {
     var authorCache: (id: UUID, base: any MTLTexture, hdr: any MTLTexture, metadata: ISOLogGainMetadata)?
     private var sourceCache: [SourceKey: RenderSource] = [:]
     private var sourceFamily: (key: SourceKey, id: UUID)?
-    private var analysisSource: RenderSource?
+    var analysisSource: RenderSource?
     private var hdrCache: (id: UUID, texture: any MTLTexture)?
     private var outputCache: (key: OutputKey, planes: RenderPlanes)?
 
@@ -92,7 +97,7 @@ public actor RenderEngine {
         clearImageCaches()
     }
 
-    private func clearImageCaches() {
+    func clearImageCaches() {
         sourceCache.removeAll()
         analysisSource = nil
         modelFilterCache = nil
@@ -249,7 +254,6 @@ public actor RenderEngine {
         }
     }
 
-    private struct Sampling { var width, height, x, y: UInt32 }
 
     func renderRegion(_ source: RenderSource, size: PixelSize, region: CGRect,
                               nodes: [any RenderNode]) throws -> RenderPlanes {
@@ -271,19 +275,19 @@ public actor RenderEngine {
         guard let buffer = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
         let context = nodeContext(domain: source.domain, buffer: buffer)
         let wholeSource = size == source.size && inputRegion == bounds
-        func sample(_ texture: any MTLTexture, preserveNativeSize: Bool = false) throws -> any MTLTexture {
-            if wholeSource && ((preserveNativeSize && region == bounds) ||
+        func sample(_ texture: any MTLTexture, samplingRegion: CGRect, preserveNativeSize: Bool = false) throws -> any MTLTexture {
+            if samplingRegion == CGRect(x:0,y:0,width:1,height:1) && wholeSource && ((preserveNativeSize && region == bounds) ||
                                (texture.width == size.width && texture.height == size.height)) { return texture }
             let target = try context.texture(width: Int(inputRegion.width), height: Int(inputRegion.height), format: texture.pixelFormat)
-            var sampling = Sampling(width: UInt32(size.width), height: UInt32(size.height),
-                                    x: UInt32(inputRegion.minX), y: UInt32(inputRegion.minY))
+            var sampling = SourceSampling(width: UInt32(size.width), height: UInt32(size.height),
+                                    x: UInt32(inputRegion.minX), y: UInt32(inputRegion.minY), sourceRegion:sourceSampling(texture,samplingRegion))
             try context.dispatch("sampleSource", width: target.width, height: target.height,
                                  textures: [texture, target], value: &sampling)
             return target
         }
-        let base = try sample(texture)
+        let base = try sample(texture,samplingRegion:source.samplingRegion)
         let gain: any MTLTexture
-        if authored, let nativeGain = source.gainTexture { gain = try sample(nativeGain, preserveNativeSize: true) } else {
+        if authored, let nativeGain = source.gainTexture { gain = try sample(nativeGain,samplingRegion:source.gainSamplingRegion,preserveNativeSize:true) } else {
             gain = try context.texture(width: base.width, height: base.height, format: .r32Float)
             var unused: UInt32 = 0
             try context.dispatch("zeroGain", width: gain.width, height: gain.height, textures: [gain], value: &unused)

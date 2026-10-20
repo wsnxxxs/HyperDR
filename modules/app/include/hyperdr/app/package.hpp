@@ -20,6 +20,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
+#include <span>
 #include <optional>
 #include <string>
 
@@ -101,5 +103,16 @@ struct PackageRequest {
 // no HDR rendition, a gain above the declared alternate headroom, a framed pair
 // whose offsets differ), and invalid_argument for a malformed request.
 [[nodiscard]] std::string package_image(const PackageRequest& request);
+
+// Repeatable synchronous rows: fill tightly packed RGB base and (if present)
+// log2 gain. The callback may be replayed for statistics, base and gain encoding.
+class PackageCallbackFailed : public std::runtime_error {
+ public: PackageCallbackFailed():std::runtime_error("package row callback failed") {}
+};
+using PackageRows = std::function<void(std::uint32_t y, std::uint32_t count,
+                                      std::span<float> base, std::span<float> gain)>;
+[[nodiscard]] bool package_rows_supported(OutputEncoding encoding);
+[[nodiscard]] std::string package_image_rows(const PackageRequest&, std::uint32_t rows,
+                                             const PackageRows&);
 
 }  // namespace hyperdr

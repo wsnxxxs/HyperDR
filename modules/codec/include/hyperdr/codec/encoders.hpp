@@ -16,6 +16,10 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
+#include <optional>
+#include <limits>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -56,11 +60,11 @@ class ExportDimensionLimit : public std::runtime_error {
 [[nodiscard]] std::vector<std::uint8_t> encode_sdr_jpeg(
     const FloatImage& image, const PhotoMetadata& metadata, int quality,
     ColorGamut gamut = ColorGamut::kSrgb);
-void verify_sdr_jpeg(const std::vector<std::uint8_t>& bytes);
+void verify_sdr_jpeg(std::span<const std::uint8_t> bytes);
 [[nodiscard]] std::vector<std::uint8_t> encode_sdr_tiff(
     const FloatImage& image, const PhotoMetadata& metadata,
     ColorGamut gamut = ColorGamut::kDisplayP3);
-void verify_sdr_tiff(const std::vector<std::uint8_t>& bytes);
+void verify_sdr_tiff(std::span<const std::uint8_t> bytes);
 [[nodiscard]] std::vector<std::uint8_t> encode_hdr_heic(
     const PhotoRenditions& images, const PhotoMetadata& metadata, int quality, HdrEncoding encoding,
     HevcPreset preset = HevcPreset::Slow);
@@ -75,14 +79,30 @@ void verify_sdr_tiff(const std::vector<std::uint8_t>& bytes);
 // `verify_encoded_output` is the one dispatch from an encoding to the check
 // that proves the file it wrote opens; the converter and the packaging entry
 // point both use it so neither can publish an unverified file.
-void verify_encoded_output(const std::vector<std::uint8_t>& bytes, HdrEncoding encoding);
-void verify_heic_decodable(const std::vector<std::uint8_t>& bytes);
-void verify_heic_decodable(const std::vector<std::uint8_t>& bytes,
+void verify_encoded_output(std::span<const std::uint8_t> bytes, HdrEncoding encoding);
+void verify_heic_decodable(std::span<const std::uint8_t> bytes);
+void verify_heic_decodable(std::span<const std::uint8_t> bytes,
                            HdrEncoding encoding);
 void verify_heic_decodable(const std::filesystem::path& input);
-void verify_gain_map_jpeg(const std::vector<std::uint8_t>& bytes);
+void verify_gain_map_jpeg(std::span<const std::uint8_t> bytes);
 void verify_gain_map_jpeg(const std::filesystem::path& input);
-void verify_avif_decodable(const std::vector<std::uint8_t>& bytes);
+void verify_avif_decodable(std::span<const std::uint8_t> bytes);
+
+// Native-pixel file verification. Compressed files are borrowed through a
+// read-only mapping; JPEG/TIFF rows and HEIC tiles never form a whole raster.
+// AVIF currently retains its complete decoded YUV image (boundedMemory=false).
+struct VerificationFrame {
+  std::uint32_t width{},height{},x{},y{},photoWidth{},photoHeight{};
+};
+struct VerificationResult {
+  std::uint32_t width{},height{};
+  std::uint64_t pixels{};
+  float gainMinimum=std::numeric_limits<float>::infinity();
+  float gainMaximum=-std::numeric_limits<float>::infinity();
+  bool boundedMemory=true;
+};
+[[nodiscard]] VerificationResult verify_encoded_file(const std::filesystem::path&,HdrEncoding,
+                                                     std::optional<VerificationFrame> = {});
 
 // Reconstructs a gain-map HEIC into a 16-bit linear TIFF, so the HDR rendition
 // a display would show can be examined outside this tool.
@@ -120,6 +140,23 @@ struct DisplayCurveResult {
     const std::filesystem::path& reference,
     const std::filesystem::path& candidate,
     const std::vector<float>& display_headroom_stops);
+
+// Synchronous, repeatable native float rows. Calls are serialized on the
+// encoding thread; the reader must fill the complete span before returning.
+struct EncodingRows {
+  std::uint32_t width{}, height{}, channels{};
+  std::function<void(std::uint32_t y, std::span<float>)> read;
+};
+void write_sdr_jpeg_rows(const EncodingRows&, const PhotoMetadata&, int quality,
+                         ColorGamut, const std::filesystem::path&);
+void write_sdr_tiff_rows(const EncodingRows&, const PhotoMetadata&, ColorGamut,
+                         const std::filesystem::path&);
+void write_gain_map_jpeg_rows(const EncodingRows& base, const EncodingRows& codes,
+    const GainMapMetadata&, const PhotoMetadata&, int quality, bool frame,
+    const std::filesystem::path&);
+[[nodiscard]] std::vector<std::uint8_t> encode_heic_rows(const EncodingRows& base,
+    const EncodingRows& codes, const GainMapMetadata&, float headroom,
+    const PhotoMetadata&, OutputEncoding, int quality, int depth, HevcPreset);
 
 namespace testing {
 // Test seam for JPEG encoding: when set, every libjpeg progress callback calls

@@ -20,6 +20,8 @@ _hyperdr_frame_free
 _hyperdr_model_gain
 _hyperdr_convert
 _hyperdr_package
+_hyperdr_package_rows
+_hyperdr_package_rows_supported
 _hyperdr_cancel_create
 _hyperdr_cancel_request
 _hyperdr_cancel_destroy

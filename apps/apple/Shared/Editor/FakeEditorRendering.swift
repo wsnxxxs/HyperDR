@@ -1,0 +1,166 @@
+import CoreGraphics
+import Foundation
+import HyperDRRecipe
+import HyperDRRender
+import Metal
+
+#if DEBUG
+/// `EditorRendering` for tests and previews: no files are read, every frame
+/// is a small flat texture, and renders and predictions can be held until
+/// the test lets them go, to observe cancellation and coalescing. Debug
+/// builds only (tests and SwiftUI previews).
+actor FakeEditorRendering: EditorRendering {
+    struct Photo: Sendable {
+        var domain: HyperDRRecipe.InputDomain = .sdr
+        var size = HyperDRRender.PixelSize(width: 6000, height: 4000)
+        var sourceValues: [String: Double] = [:]
+        var capabilities: Set<String> = []
+    }
+
+    enum ModelBehavior: Sendable {
+        case succeed
+        case fail(String)
+        case unavailable(String)
+    }
+
+    /// What `open` reports, by URL; others open as `defaultPhoto`.
+    var photos: [URL: Photo] = [:]
+    var defaultPhoto = Photo()
+    var modelBehavior = ModelBehavior.succeed
+
+    private(set) var opened: [URL] = []
+    /// Every render request in arrival order, finished or not.
+    private(set) var requests: [EditorRenderRequest] = []
+    private(set) var completed: [EditorRenderRequest] = []
+    private(set) var cancelled: [EditorRenderRequest] = []
+    private(set) var predictions: [String] = []
+    private(set) var installedLUTs: Set<String> = []
+
+    private var current: EditorSource?
+    private var holdingRenders = false
+    private var holdingPredictions = false
+    private var heldRenders: [Int: CheckedContinuation<Void, Never>] = [:]
+    private var heldPredictions: [CheckedContinuation<Void, Never>] = []
+    private var nextHold = 0
+    private var textures: (base: any MTLTexture, gain: any MTLTexture)?
+
+    init() {}
+
+    func configure(_ change: @Sendable (isolated FakeEditorRendering) -> Void) { change(self) }
+
+    // MARK: - Holding
+
+    /// Renders started from now on wait until `releaseRenders`.
+    func holdRenders() { holdingRenders = true }
+
+    func releaseRenders() {
+        holdingRenders = false
+        let held = heldRenders
+        heldRenders = [:]
+        held.values.forEach { $0.resume() }
+    }
+
+    var heldRenderCount: Int { heldRenders.count }
+
+    func holdPredictions() { holdingPredictions = true }
+
+    func releasePredictions() {
+        holdingPredictions = false
+        let held = heldPredictions
+        heldPredictions = []
+        held.forEach { $0.resume() }
+    }
+
+    var heldPredictionCount: Int { heldPredictions.count }
+
+    private func release(_ id: Int) {
+        heldRenders.removeValue(forKey: id)?.resume()
+    }
+
+    // MARK: - EditorRendering
+
+    func open(_ url: URL) async throws -> EditorSource {
+        opened.append(url)
+        let photo = photos[url] ?? defaultPhoto
+        let source = EditorSource(id: UUID(), url: url, domain: photo.domain, pixelSize: photo.size,
+                                  sourceValues: photo.sourceValues, capabilities: photo.capabilities)
+        current = source
+        return source
+    }
+
+    func render(_ request: EditorRenderRequest) async throws -> EditorFrame {
+        requests.append(request)
+        if holdingRenders {
+            nextHold += 1
+            let id = nextHold
+            await withTaskCancellationHandler {
+                await withCheckedContinuation { heldRenders[id] = $0 }
+            } onCancel: {
+                Task { await self.release(id) }
+            }
+        }
+        guard !Task.isCancelled else {
+            cancelled.append(request)
+            throw CancellationError()
+        }
+        guard let current else { throw EditorRenderingError.noSource }
+        guard current.id == request.sourceID else { throw EditorRenderingError.staleSource }
+        if let look = request.recipe.look, !installedLUTs.contains(look.contentHash) {
+            throw EditorRenderingError.missingLUT(look.contentHash)
+        }
+        let planes = try makePlanes()
+        completed.append(request)
+        return EditorFrame(request: request, planes: planes)
+    }
+
+    func predictModelGain(modelID: String) async throws {
+        predictions.append(modelID)
+        if holdingPredictions {
+            await withCheckedContinuation { heldPredictions.append($0) }
+        }
+        try Task.checkCancellation()
+        switch modelBehavior {
+        case .succeed: return
+        case .fail(let reason): throw FakeFailure(reason: reason)
+        case .unavailable(let reason): throw EditorRenderingError.modelUnavailable(reason)
+        }
+    }
+
+    func installLUT(_ cube: Data, contentHash: String) async throws {
+        installedLUTs.insert(contentHash)
+    }
+
+    func close() async {
+        current = nil
+    }
+
+    struct FakeFailure: Error, CustomStringConvertible {
+        let reason: String
+        var description: String { reason }
+    }
+
+    /// An 8 × 8 mid grey with zero gain: enough for the canvas and the scopes to draw.
+    private func makePlanes() throws -> RenderPlanes {
+        if textures == nil {
+            guard let device = MTLCreateSystemDefaultDevice() else { throw RenderError.metalUnavailable }
+            func texture(_ format: MTLPixelFormat, fill: [Float]) throws -> any MTLTexture {
+                let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: format, width: 8, height: 8,
+                                                                          mipmapped: false)
+                descriptor.usage = [.shaderRead]
+                guard let texture = device.makeTexture(descriptor: descriptor) else { throw RenderError.allocationFailed }
+                let components = fill.count
+                let pixels = [Float]((0..<64).flatMap { _ in fill })
+                pixels.withUnsafeBytes {
+                    texture.replace(region: MTLRegionMake2D(0, 0, 8, 8), mipmapLevel: 0,
+                                    withBytes: $0.baseAddress!, bytesPerRow: 8 * components * 4)
+                }
+                return texture
+            }
+            textures = (try texture(.rgba32Float, fill: [0.18, 0.18, 0.18, 1]), try texture(.r32Float, fill: [0]))
+        }
+        let (base, gain) = textures!
+        return RenderPlanes(base: base, gain: gain, baseColorSpace: RenderEngine.workingColorSpace,
+                            provenance: .identity, region: CGRect(x: 0, y: 0, width: 8, height: 8))
+    }
+}
+#endif

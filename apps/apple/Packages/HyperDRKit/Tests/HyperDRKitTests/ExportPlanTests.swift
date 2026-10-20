@@ -638,6 +638,18 @@ struct ExportSummaryTests {
         #expect(summary.parts[3].arguments == [.stops(2.4)])
     }
 
+    @Test func limitsThatDoNotShrinkThePhotoStillNameTheOriginalSize() {
+        let size = ExportPixelSize(width: 96, height: 64)
+        let choices: [ExportChoice] = [.destination(.web), .destination(.social),
+            .custom(.init(encoding: .sdrJPEG, longEdge: 96)),
+            .custom(.init(encoding: .sdrJPEG, longEdge: 2560))]
+        for choice in choices {
+            let value = plan(request(choice, source: source(size: size)))
+            #expect(value.sourceSize == size)
+            #expect(value.summary.parts[2].key == "plan.size.original")
+        }
+    }
+
     @Test func aResizedDestinationNamesBothSides() {
         let summary = plan(request(.destination(.web))).summary
         #expect(summary.parts[2].key == "plan.size.pixels")

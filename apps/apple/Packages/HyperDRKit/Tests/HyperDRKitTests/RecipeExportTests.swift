@@ -147,6 +147,7 @@ struct RecipeExportEnvironment {
         recipe.setValue(.bool(false), for: "hdr.enabled")
         let sdr = try await service.export(session: env.session.id, snapshot: env.snapshot(recipe: recipe), request: env.request(.adaptive))
         let ordinary = try JSONDecoder().decode(RecipeExportReport.self, from: sdr.record.reportJSON)
+        #expect(sdr.verified)
         #expect(ordinary.packageJSON == nil && ordinary.firstReaderJSON != nil)
         #expect(!ordinary.system.auxiliaryGain && !ordinary.system.hdrReadable)
         #expect(await env.sessions.exports(for: env.session.id).count == 9)

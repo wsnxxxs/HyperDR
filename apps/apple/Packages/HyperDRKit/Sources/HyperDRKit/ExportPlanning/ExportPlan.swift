@@ -150,6 +150,8 @@ public struct ExportPlan: Sendable, Hashable {
     /// does not apply to it.
     public let gamutIsFixedByFormat: Bool
     public let quality: Int
+    /// Original oriented raster, before any export size limit or frame.
+    public let sourceSize: ExportPixelSize
     /// The photograph after the destination's long-edge limit: the size it is
     /// graded at, and the size a frame is laid out around.
     public let photoSize: ExportPixelSize
@@ -312,6 +314,7 @@ public enum ExportPlanner {
             gamut: gamut,
             gamutIsFixedByFormat: encoding.isBT2100,
             quality: quality,
+            sourceSize: request.source.pixelSize,
             photoSize: photoSize,
             size: size,
             longEdgeLimit: longEdge,

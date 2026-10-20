@@ -1,3 +1,4 @@
+import HyperDRRender
 import CoreGraphics
 import HyperDRDesign
 import Metal
@@ -161,6 +162,10 @@ nonisolated final class DisplayCompositor {
         descriptor.arrayLength = slices
         descriptor.storageMode = .private
         descriptor.usage = [.shaderRead, .shaderWrite]
+        let limit = RenderEngine.maximumTextureDimension(device:device)
+        guard descriptor.width > 0, descriptor.height > 0, descriptor.width <= limit, descriptor.height <= limit else {
+            throw PreviewError.unavailable("Composition dimensions exceed this device's texture limit")
+        }
         guard let texture = device.makeTexture(descriptor: descriptor) else {
             throw PreviewError.unavailable("Unable to allocate composition texture")
         }

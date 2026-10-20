@@ -50,8 +50,16 @@ extension RenderEngine {
         }
         let baseSpace = baseCG.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!
         let nativeLinear = CGColorSpaceCreateExtendedLinearized(baseSpace)
-        let base = CIImage(cgImage: baseCG, options: [.toneMapHDRtoSDR: false])
-            .oriented(forExifOrientation: orientation)
+        let base: CIImage
+        if deferred, max(nativeSize.width,nativeSize.height) > 4096, !auxiliary.contains(where:{ $0.1 != nil }),
+           let fileImage = CIImage(contentsOf:url,options:[.toneMapHDRtoSDR:false,.applyOrientationProperty:true]) {
+            // Large rasters keep Core Image's file/region provider. A CGImage
+            // wrapper can eagerly decode an entire TIFF for a small crop.
+            // Bounded (<=4096) rasters retain the cheaper reusable ImageIO provider.
+            base = fileImage
+        } else {
+            base = CIImage(cgImage:baseCG,options:[.toneMapHDRtoSDR:false]).oriented(forExifOrientation:orientation)
+        }
         var gain: AuthoredGainMap?
         for (standard, info) in auxiliary {
             guard let info else { continue }

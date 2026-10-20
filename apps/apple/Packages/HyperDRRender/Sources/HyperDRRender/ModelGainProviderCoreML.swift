@@ -144,6 +144,7 @@ public final class CoreMLModelGainProvider: ModelGainProvider, @unchecked Sendab
     }
 
     private func makeTexture(_ grid: ModelGainGrid) throws -> any MTLTexture {
+        try device.validateTexture(width:grid.size.width,height:grid.size.height)
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r32Float,
             width: grid.size.width, height: grid.size.height, mipmapped: false)
         descriptor.storageMode = .shared

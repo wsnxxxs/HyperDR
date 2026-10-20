@@ -174,6 +174,8 @@ import Observation
     @ObservationIgnored private var repredicted: ModelKey?
     @ObservationIgnored private var modelTask: Task<Void, Never>?
 
+    /// The LUTs installed in the renderer, by content hash: an export freezes the one its recipe uses.
+    @ObservationIgnored private var luts: [String: ColorLUT] = [:]
     @ObservationIgnored private var viewport: CanvasViewport?
     @ObservationIgnored private var detailTask: Task<Void, Never>?
     @ObservationIgnored private var detailGeneration = 0
@@ -565,6 +567,30 @@ import Observation
                       maximumSize: HyperDRRender.PixelSize = HyperDRRender.PixelSize(width: 512, height: 512)) async throws -> CGImage {
         guard let frame = frame ?? self.frame else { throw EditorRenderingError.noSource }
         return try await renderer.sdrThumbnail(frame, maximumSize: maximumSize)
+    }
+
+    // MARK: - LUTs and export
+
+    /// Makes a LUT available to the recipe's look, for previews and exports.
+    func installLUT(_ lut: ColorLUT) async {
+        luts[lut.contentHash] = lut
+        await renderer.installLUT(lut)
+    }
+
+    /// Freezes what an export renders (P7-3 §8): the recipe as it is now,
+    /// without the preview's bypassed groups; the model it uses; the LUT its
+    /// look takes effect with. Hosts end an open drag first (`commitDrag`)
+    /// when they start the export. Throws `noSource` without a photo and
+    /// `missingLUT` for a look never installed.
+    func exportCapture() throws -> EditorExportCapture {
+        guard let source else { throw EditorRenderingError.noSource }
+        let lut = try recipe.activeLook.map { look -> ColorLUT in
+            guard let lut = luts[look.contentHash] else { throw EditorRenderingError.missingLUT(look.contentHash) }
+            return lut
+        }
+        let automatic = frame.flatMap { $0.request.recipe == recipe && $0.request.region == nil ? $0.automaticValues : nil }
+        return EditorExportCapture(source: source, recipe: recipe, modelID: wantsModel(recipe) ? modelID(recipe) : nil,
+                                   lut: lut, automaticValues: automatic ?? [:])
     }
 
     // MARK: - Canvas layers

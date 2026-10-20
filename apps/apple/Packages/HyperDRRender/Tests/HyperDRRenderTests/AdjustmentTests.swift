@@ -337,7 +337,7 @@ private func cube(swap: Bool = false) -> String {
         }
         let original = AuthoredGainMap(standard:.iso,auxiliaryInfo:tags as NSDictionary,image:gainSource.hdrImage,
             channelCount:3,baseColorSpace:RenderEngine.workingColorSpace,alternateColorSpace:nil,auxiliaryColorSpace:nil,tags:tags)
-        let source = RenderSource(id:UUID(),domain:.dual,size:baseSource.size,nativeSize:baseSource.nativeSize,authoredGainMap:original,
+        let source = RenderSource(id:UUID(),renderID:UUID(),origin:nil,domain:.dual,size:baseSource.size,nativeSize:baseSource.nativeSize,authoredGainMap:original,
             hdrImage:bitmap([hdr],width:1,height:1),authoredBaseImage:baseSource.hdrImage,rawSettings:nil,
             texture:baseSource.texture,baseSpace:RenderEngine.workingColorSpace,gainTexture:gainSource.texture)
         var edit = RenderAdjustments()

@@ -67,7 +67,7 @@ private func reconstructDisplay(_ pair: DisplayGainPair, weight: Float) -> SIMD3
             let metadata = AuthoredGainMap(standard:standard,auxiliaryInfo:tags as NSDictionary,image:gainImage,
                 channelCount:3,baseColorSpace:CGColorSpace(name:CGColorSpace.sRGB)!,alternateColorSpace:nil,
                 auxiliaryColorSpace:nil,tags:standard == .iso ? tags : [:])
-            return RenderSource(id:UUID(),domain:.dual,size:PixelSize(width:2,height:1),nativeSize:PixelSize(width:2,height:1),
+            return RenderSource(id:UUID(),renderID:UUID(),origin:nil,domain:.dual,size:PixelSize(width:2,height:1),nativeSize:PixelSize(width:2,height:1),
                 authoredGainMap:metadata,hdrImage:hdrImage,authoredBaseImage:baseImage,rawSettings:nil,
                 texture:baseTexture.texture,baseSpace:space,gainTexture:gainSource.texture)
         }

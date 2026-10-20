@@ -1,0 +1,87 @@
+import Foundation
+import Metal
+import HyperDRRecipe
+
+/// Ephemeral comparison state; never persisted in Recipe or undo history.
+public struct RenderOptions: Hashable, Sendable {
+    public var bypassedGroups: Set<ParameterGroup>
+    public init(bypassedGroups: Set<ParameterGroup> = []) { self.bypassedGroups = bypassedGroups }
+}
+
+extension RenderEngine {
+    /// Automatic readouts in Recipe units. AI auto start is deliberately not a
+    /// numeric threshold, so no expansionStart entry is returned in AI mode.
+    public func resolvedAutomatic(_ source: RenderSource, recipe: Recipe, lut: ColorLUT? = nil,
+                                  modelGain: ModelGainPrediction? = nil,
+                                  options: RenderOptions = RenderOptions()) throws -> [String:Double] {
+        guard source.domain == recipe.inputDomain else { throw RenderError.invalidAdjustment }
+        var edit = try RenderAdjustments(recipe:recipe,lut:lut,options:options)
+        edit.hdr.modelGain = modelGain
+        let analysis = try self.analysis(source,adjustments:edit)
+        let model = try filteredModelGain(source,edit:edit)
+        var values: [String:Double] = [:]
+        if edit.hdr.range == nil {
+            values["hdr.range"] = Double(try graphConfiguration(source,edit,analysis:analysis,modelPeak:model?.peak ?? 0).range)
+        }
+        if edit.hdr.expansionStart == nil && (edit.hdr.source ?? .defaultSource(for:source.domain)).expands {
+            values["hdr.expansionStart"] = Adjustments.automaticExpansionStart
+        }
+        return values
+    }
+}
+
+public struct RenderMask: @unchecked Sendable {
+    public let texture: any MTLTexture
+    public let region: CGRect
+    public let outputSize: PixelSize
+    public init(texture: any MTLTexture, region: CGRect, outputSize: PixelSize) {
+        self.texture = texture; self.region = region; self.outputSize = outputSize
+    }
+}
+
+extension RenderEngine {
+    /// R32Float participation in [0,1], top-down in output/ROI coordinates.
+    /// Light masks use the luminance immediately before the corresponding node.
+    public func effectMask(_ source: RenderSource, recipe: Recipe, parameterID: String,
+                           lut: ColorLUT? = nil, modelGain: ModelGainPrediction? = nil,
+                           options: RenderOptions = RenderOptions(), size: PixelSize? = nil,
+                           region: CGRect? = nil) throws -> RenderMask {
+        guard recipe.inputDomain == source.domain, let declaration = Adjustments.declaration(parameterID),
+              declaration.allows(source.domain), let mask = declaration.mask,
+              let index = ["highlights","shadows","blacks","participation","coverage","gain","gainFull"].firstIndex(of:mask) else {
+            throw RenderError.invalidAdjustment
+        }
+        var edit = try RenderAdjustments(recipe:recipe,lut:lut,options:options)
+        edit.hdr.modelGain = modelGain
+        let size = size ?? source.size
+        try validate(size)
+        let region = try validatedRegion(region,size:size)
+        let usesModel = (edit.hdr.source ?? .defaultSource(for:source.domain)).usesModel
+        let input = try workingInput(source)
+        var guide = input, gain = input
+        if index == 3 || index == 4 {
+            guide = try self.analysis(source,adjustments:usesModel ? RenderAdjustments() : edit).cells
+        }
+        var gainChannels: UInt32 = 1
+        var range = edit.hdr.range ?? 3
+        if index >= 5 {
+            let planes = try render(source,adjustments:edit,size:size,region:region)
+            let pair = try displayPair(planes,source:source)
+            gain = pair.gain; gainChannels = UInt32(pair.gainChannelCount)
+            range = max(0.5,pair.alternateHeadroom)
+        }
+        guard let command = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
+        let node = nodeContext(domain:source.domain,buffer:command)
+        let output = try node.texture(width:Int(region.width),height:Int(region.height),format:.r32Float)
+        var p = graphUniform(source,edit,size:size,region:region,range:range)
+        let sourceKind = edit.hdr.source ?? .defaultSource(for:source.domain)
+        let inactive = options.bypassedGroups.contains(declaration.group) || (declaration.group == .hdr && !edit.hdr.enabled)
+            || (index == 3 && !sourceKind.expands && !usesModel) || (index == 4 && !sourceKind.expands)
+        p.mode = SIMD4(UInt32(index),gainChannels,inactive ? 1 : 0,
+            (edit.hdr.source ?? .defaultSource(for:source.domain)).usesModel ? (edit.hdr.expansionStart == nil ? 1 : 2) : 0)
+        try node.dispatch("effectMask",width:output.width,height:output.height,
+            textures:[input,output,gain,guide],value:&p)
+        try finish(command)
+        return RenderMask(texture:output,region:region,outputSize:size)
+    }
+}

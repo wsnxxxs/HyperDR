@@ -16,6 +16,7 @@ extension RenderEngine {
         guard source.domain == .sdr || source.domain == .rawEDR else { throw RenderError.invalidAdjustment }
         let key = ModelPredictionKey(source:source.id,model:provider.modelID)
         if let cache = modelPredictionCache, cache.key == key { return cache.value }
+        let source = try fixedAnalysisSource(source)
         let prediction: ModelGainPrediction
         if source.domain == .sdr { prediction = try await provider.predict(source:source) }
         else {

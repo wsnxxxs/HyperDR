@@ -127,10 +127,14 @@ public struct RenderPlanes: @unchecked Sendable {
     }
 }
 
-/// Immutable source assets. The renderer retains one decoded source at a time;
-/// clients may keep additional sources and must account for their texture memory.
+/// Immutable source assets. Full, latest-preview and fixed-analysis variants are
+/// retained for one asset/development family. Clients account for other retained sources.
 public struct RenderSource: @unchecked Sendable {
     public let id: UUID
+    /// A decoded variant has its own GPU cache identity; source/model identity is shared.
+    let renderID: UUID
+    /// Reopen at the fixed analysis scale, including when shared with another engine.
+    let origin: (url: URL, options: SourceOptions)?
     public let domain: InputDomain
     public let size: PixelSize
     public let nativeSize: PixelSize
@@ -166,6 +170,19 @@ public struct RAWDevelopment: Sendable {
     public let nativeSize: PixelSize
     public let scaleFactor: Float
     public let isDraft: Bool
+    /// Camera white balance / Apple detail defaults, in Recipe units (K, tint,
+    /// 0...100 percent). Captured before applying any RAW overrides.
+    public let sourceValues: [String:Double]
+    public var capabilities: Set<String> {
+        var values: Set<String> = []
+        for (supported,name) in [(supportsLuminanceNR,"CIRAWFilter.isLuminanceNoiseReductionSupported"),
+            (supportsColorNR,"CIRAWFilter.isColorNoiseReductionSupported"),
+            (supportsSharpness,"CIRAWFilter.isSharpnessSupported"),
+            (lensCorrectionSupported,"CIRAWFilter.isLensCorrectionSupported")] {
+            if supported { values.insert(name) }
+        }
+        return values
+    }
 }
 
 /// Preview develops only the pixels needed by the canvas, retaining Apple detail

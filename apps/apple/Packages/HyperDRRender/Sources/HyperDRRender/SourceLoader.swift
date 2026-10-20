@@ -125,6 +125,13 @@ extension RenderEngine {
         }
         if filter.isContrastSupported { filter.contrastAmount = 0 }
         if filter.isLocalToneMapSupported { filter.localToneMapAmount = 0 }
+        // Capture camera/Apple defaults before applying recipe overrides. UI values
+        // use recipe units; CIRAWFilter's applied scalar fields remain engine units.
+        let sourceValues: [String:Double] = [
+            "develop.temperature":Double(filter.neutralTemperature), "develop.tint":Double(filter.neutralTint),
+            "develop.luminanceNR":Double(filter.luminanceNoiseReductionAmount)*100,
+            "develop.colorNR":Double(filter.colorNoiseReductionAmount)*100,
+            "develop.sharpness":Double(filter.sharpnessAmount)*100]
         let raw = options.raw
         if let value = raw.temperature {
             try RenderParameter.check(value,id:"develop.temperature")
@@ -153,7 +160,7 @@ extension RenderEngine {
             luminanceNR: filter.luminanceNoiseReductionAmount, colorNR: filter.colorNoiseReductionAmount,
             sharpness: filter.sharpnessAmount, supportsLuminanceNR: filter.isLuminanceNoiseReductionSupported,
             supportsColorNR: filter.isColorNoiseReductionSupported, supportsSharpness: filter.isSharpnessSupported,
-            nativeSize: nativeSize, scaleFactor: filter.scaleFactor, isDraft: filter.isDraftModeEnabled)
+            nativeSize: nativeSize, scaleFactor: filter.scaleFactor, isDraft: filter.isDraftModeEnabled, sourceValues:sourceValues)
         // CIRAWFilter already applies the file's orientation.
         return OpenedSource(domain: .rawEDR, image: image, hdr: image,
                             baseSpace: workingColorSpace, gain: nil, raw: development)

@@ -25,15 +25,17 @@ public struct IdentityNode: RenderNode {
 
 public struct SourceHDRSplitNode: RenderNode {
     public static let parameters = [ParameterDeclaration(
-        id: "sourceHDR.headroom", range: 0...3, defaultValue: 3, unit: .stops,
-        domains: [.hdr, .rawEDR, .dual])]
+        id: "hdr.range", group: .hdr, kind: .floatOrAuto, range: 0.5...4, step: 0.1,
+        default: .auto, format: .stops, visibleWhen: "hdr.enabled", scope: .hdrOnly, mask: "gain")]
+    /// Resolved output capacity in stops; automatic resolution currently defaults to 3.
+    /// P7-1 separates the HDR-only range operation from this source decomposition.
     public let headroom: Float
     public var cacheKey: String { "sourceHDRSplit/v1/\(headroom.bitPattern)" }
     public let isIdentity = false
     public init(headroom: Float = 3) { self.headroom = headroom }
     public func inputRegion(for region: CGRect, imageSize: PixelSize) -> CGRect { region }
     public func encode(_ input: RenderPlanes, context: RenderNodeContext) throws -> RenderPlanes {
-        guard headroom.isFinite, (0...3).contains(headroom) else { throw RenderError.invalidSize }
+        guard headroom.isFinite, (0...4).contains(headroom) else { throw RenderError.invalidSize }
         // An unedited authored pair and SDR input are already separated.
         if input.provenance == .authored || context.domain == .sdr { return input }
         let base = try context.texture(width: input.base.width, height: input.base.height)

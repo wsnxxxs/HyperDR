@@ -78,7 +78,7 @@ cannot enumerate a GPU reports `metalUnavailable` instead of skipping correctnes
 Seven Render tests cover identity/negative values, split vs CPU double and resized stripes,
 repeat rendering on the same/new contexts, TIFF orientation/cache, system-authored ISO
 passthrough/reconstruction/resplit, RAW G2 and cache, and three-channel offsets/cancellation.
-Recipe has one v1 serialization test. These are small contract checks, not an exhaustive format
+Recipe has a v1 serialization test and a parameter-declaration contract test. These are small contract checks, not an exhaustive format
 or parameter matrix. The expanded same/new-context/cross-process/load determinism gates for
 future nodes belong to P7-1; AE-3 already established those for the source split prototype.
 
@@ -91,3 +91,22 @@ The JPEG decoder investigation and its numeric controls are in
 difference is reproduced before the GPU graph. ICC is below 0.036 10-bit code;
 IDCT differs by one 8-bit code per original Y/Cb/Cr plane, with additional
 interpolation/matrix and integer-rounding effects. No decoder correction is applied.
+
+## P7-1 adjustment design handoff
+
+Parameter IDs and declaration fields follow `p7-adjustments.md` §2.2, including
+`group`, `kind`, `range`/`step`, constant/`fromSource`/`auto` defaults, `format`,
+`origin`, `domains`, `visibleWhen`, `capability`, `scope`, `mask`, `cost` and the
+three derived localization keys. Existing declarations use `develop.lensCorrection`
+and `hdr.range`. Conditions are carried as strings; no UI expression evaluator is
+introduced in P7-0.
+
+The source split's `headroom` is a resolved decomposition capacity (automatic 3,
+explicit up to 4), not yet the final HDR-only range operation. P7-1 must preserve
+the chosen SDR base while applying HDR-group parameters (H1), and compensate gain
+when changing only SDR rolloff (H2). The current max-channel prototype still hard
+limits out-of-capacity highlights. H3's soft shoulder and T2's white-point slope
+continuity are explicitly deferred to P7-1; `DoubleReference.grade` retains AE-3's
+curve and documents its derivative discontinuity. Changing the CPU formula alone
+would invalidate the source/GPU reference correspondence. Update CPU and GPU
+together when those processing nodes land. No new adjustment node is implemented here.

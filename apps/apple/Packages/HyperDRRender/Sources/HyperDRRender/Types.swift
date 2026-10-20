@@ -140,8 +140,9 @@ public struct RAWDevelopment: Sendable {
 }
 
 public struct SourceOptions: Hashable, Sendable {
-    public static let parameters = [ParameterDeclaration(id: "raw.lensCorrection", kind: .boolean,
-        range: 0...1, defaultValue: 1, domains: [.rawEDR])]
+    public static let parameters = [ParameterDeclaration(id: "develop.lensCorrection", group: .detail,
+        kind: .bool, default: .constant(.bool(true)), domains: [.rawEDR],
+        capability: "CIRAWFilter.isLensCorrectionSupported", cost: .redevelop)]
     public enum Kind: String, Sendable { case automatic, imageIO, raw }
     public var kind: Kind
     public var lensCorrection: Bool

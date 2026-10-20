@@ -26,6 +26,23 @@ import UniformTypeIdentifiers
         return url
     }
 
+    @Test func panoramaDetailsNeverLoadAFullWidthTexture() async throws {
+        let session = try RenderSession()
+        let url = try Self.tinyPNG(width:20017,height:32)
+        defer { try? FileManager.default.removeItem(at:url.deletingLastPathComponent()) }
+        let source = try await session.open(url,previewSize:PixelSize(width:1024,height:1024))
+        for x in [8000,16000] {
+            let rect = CGRect(x:x,y:4,width:128,height:24)
+            let request = EditorRenderRequest(sourceID:source.id,recipe:Recipe(inputDomain:.sdr),size:source.pixelSize,region:rect)
+            let detail = try await session.render(request)
+            #expect(detail.planes.base.width == 128 && detail.planes.base.height == 24)
+            #expect(detail.display.region == rect)
+            let mask = try await session.effectMask(request,parameterID:"tone.highlights")
+            #expect(mask.texture.width == 128 && mask.region == rect)
+        }
+        await session.close()
+    }
+
     @Test func opensRendersARegionAndRefusesStaleRequests() async throws {
         let session = try RenderSession()
         let url = try Self.tinyPNG()
@@ -40,7 +57,7 @@ import UniformTypeIdentifiers
         #expect(preview.display.outputSize == PixelSize(width: 48, height: 32))
         #expect(preview.planes.base.width == 48)
 
-        // A region needs the full-size source and returns only the ROI.
+        // A region materializes only its ROI from the lazy full-quality graph.
         let detail = try await session.render(EditorRenderRequest(sourceID: source.id, recipe: recipe,
             size: source.pixelSize, region: CGRect(x: 16, y: 8, width: 32, height: 24)))
         #expect(detail.planes.base.width == 32 && detail.planes.base.height == 24)

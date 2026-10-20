@@ -6,6 +6,11 @@ import Foundation
 /// access for the reader's lifetime. Apple decoder caches may remain resident;
 /// Render allocates only the requested ROI, its sampling halo and analysis.
 public final class PreparedExportRows: Sendable {
+    /// HEIC's native slab height. Callers may replay smaller arbitrary ranges.
+    public static let maximumReadRows = 512
+    /// Includes the two-native-texel sampling halo on each side. A downscale
+    /// splits further rather than materializing a taller native-source crop.
+    public static let maximumSourceTileSize = PixelSize(width:4096,height:516)
     public let report: ExportRenderReport
     private let readRows: @Sendable (Int,Int) throws -> ExportStripe
 
@@ -15,10 +20,11 @@ public final class PreparedExportRows: Sendable {
     }
 
     /// Native output canvas coordinates, including frame rows. Requests can be
-    /// replayed in any order. Keep count bounded (256 recommended) to retain
-    /// stripe-sized memory. Task cancellation and source revision are checked.
+    /// replayed in any order. count must be at most maximumReadRows (512);
+    /// use 256 for a smaller CPU row buffer. Task cancellation and source revision are checked.
     public func read(y: Int, count: Int) throws -> ExportStripe {
         try Task.checkCancellation()
+        guard count > 0, count <= Self.maximumReadRows else { throw RenderError.invalidRegion }
         return try readRows(y,count)
     }
 }
@@ -31,11 +37,11 @@ final class ExportRowsExecutor: SerialExecutor, @unchecked Sendable {
     init() { queue.setSpecific(key:key,value:1) }
     func enqueue(_ job: consuming ExecutorJob) {
         let job = UnownedJob(job)
-        queue.async { job.runSynchronously(on:self.asUnownedSerialExecutor()) }
+        queue.async { autoreleasepool { job.runSynchronously(on:self.asUnownedSerialExecutor()) } }
     }
     func checkIsolated() { dispatchPrecondition(condition:.onQueue(queue)) }
     func sync<T>(_ body: () throws -> T) rethrows -> T {
         if DispatchQueue.getSpecific(key:key) != nil { return try body() }
-        return try queue.sync(execute:body)
+        return try queue.sync { try autoreleasepool(invoking:body) }
     }
 }

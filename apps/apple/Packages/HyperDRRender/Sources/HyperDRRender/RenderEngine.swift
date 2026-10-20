@@ -14,6 +14,9 @@ public actor RenderEngine {
     nonisolated let serialExecutor = ExportRowsExecutor()
     public nonisolated var unownedExecutor: UnownedSerialExecutor { serialExecutor.asUnownedSerialExecutor() }
 
+    /// Metal feature-table limit, including the Simulator software device.
+    public nonisolated static func maximumTextureDimension(device: any MTLDevice) -> Int { device.renderTextureLimit }
+
     public static let workingColorSpace = CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3)!
     public let device: any MTLDevice
     let queue: any MTLCommandQueue
@@ -69,7 +72,7 @@ public actor RenderEngine {
         self.queue = queue
         self.context = CIContext(mtlDevice: device, options: [
             .workingColorSpace: Self.workingColorSpace, .workingFormat: CIFormat.RGBAf.rawValue,
-            .cacheIntermediates: false
+            .cacheIntermediates: false, .memoryTarget: 256
         ])
         let url = Bundle.module.url(forResource: "Pipeline", withExtension: "metal", subdirectory: "Shaders")!
         let adjustmentURL = Bundle.module.url(forResource: "Adjustments", withExtension: "metal", subdirectory: "Shaders")!
@@ -112,23 +115,25 @@ public actor RenderEngine {
 
     /// The caller owns any security scope needed to read this URL. No UI-thread I/O.
     public func load(_ url: URL, options: SourceOptions = SourceOptions()) throws -> RenderSource {
-        try Task.checkCancellation()
-        let revision = try SourceRevision(url:url)
-        let key = SourceKey(url:url.standardizedFileURL,revision:revision,options:options)
-        if let cached = sourceCache[key] { return cached }
-        var familyKey = key
-        familyKey.options.resolution = .full
-        if sourceFamily?.key != familyKey {
-            clearImageCaches()
-            sourceFamily = (familyKey,familyKey.stableID)
+        return try autoreleasepool {
+            try Task.checkCancellation()
+            let revision = try SourceRevision(url:url)
+            let key = SourceKey(url:url.standardizedFileURL,revision:revision,options:options)
+            if let cached = sourceCache[key] { return cached }
+            var familyKey = key
+            familyKey.options.resolution = .full
+            if sourceFamily?.key != familyKey {
+                clearImageCaches()
+                sourceFamily = (familyKey,familyKey.stableID)
+            }
+            let opened = try Self.open(url, options: options)
+            let source = try materialize(opened,id:sourceFamily!.id,origin:(familyKey.url,familyKey.options,revision))
+            try revision.validate(url)
+            // Retain full and the latest preview together, while bounding variant residency.
+            sourceCache = sourceCache.filter { ($0.key.options.resolution == .full) != (options.resolution == .full) }
+            sourceCache[key] = source
+            return source
         }
-        let opened = try Self.open(url, options: options)
-        let source = try materialize(opened,id:sourceFamily!.id,origin:(familyKey.url,familyKey.options,revision))
-        try revision.validate(url)
-        // Retain full and the latest preview together, while bounding variant residency.
-        sourceCache = sourceCache.filter { ($0.key.options.resolution == .full) != (options.resolution == .full) }
-        sourceCache[key] = source
-        return source
     }
 
     /// Stable analysis development for this asset/settings family, independent of
@@ -161,10 +166,17 @@ public actor RenderEngine {
         // Retain the native encoded gain. Display decodes gamma before resampling.
         let gainTexture = try opened.gain.map { try rasterize($0.image, space: nil,
                                                     format: $0.channelCount == 1 ? .r32Float : .rgba32Float) }
+        // A materialized RAW preview must not retain the full decoder graph and
+        // its raw/development caches. Its pixels and headroom are already bound.
+        let hdr = opened.domain == .rawEDR
+            ? CIImage(mtlTexture:texture,options:[.colorSpace:Self.workingColorSpace])!
+                .transformed(by:CGAffineTransform(a:1,b:0,c:0,d:-1,tx:0,ty:CGFloat(texture.height)))
+                .settingContentHeadroom(opened.hdr.contentHeadroom)
+            : opened.hdr
         return RenderSource(id: id, renderID:UUID(), origin:origin, domain: opened.domain,
             size: PixelSize(width: texture.width, height: texture.height),
             nativeSize: opened.nativeSize ?? opened.raw?.nativeSize ?? PixelSize(width:texture.width,height:texture.height), authoredGainMap: opened.gain,
-            hdrImage: opened.hdr, authoredBaseImage: opened.gain == nil ? nil : opened.image,
+            hdrImage: hdr, authoredBaseImage: opened.gain == nil ? nil : opened.image,
             rawSettings: opened.raw, texture: texture, baseSpace: opened.baseSpace, gainTexture: gainTexture)
     }
 
@@ -173,10 +185,11 @@ public actor RenderEngine {
                           workingSpace: Self.workingColorSpace, library: library, pipelines: pipelines)
     }
 
-    func rasterize(_ image: CIImage, space: CGColorSpace?, format: MTLPixelFormat = .rgba32Float) throws -> any MTLTexture {
+    func rasterize(_ image: CIImage, space: CGColorSpace?, format: MTLPixelFormat = .rgba32Float,
+                   maximumRows: Int = .max) throws -> any MTLTexture {
         try Task.checkCancellation()
         let extent = image.extent.integral
-        guard extent.width.isFinite, extent.height.isFinite,
+        guard maximumRows > 0, extent.width.isFinite, extent.height.isFinite,
               extent.width > 0, extent.height > 0,
               extent.width <= Double(UInt32.max), extent.height <= Double(UInt32.max) else {
             throw RenderError.invalidSize
@@ -185,16 +198,38 @@ public actor RenderEngine {
         guard let buffer = queue.makeCommandBuffer() else { throw RenderError.allocationFailed }
         let texture = try nodeContext(domain: .sdr, buffer: buffer).texture(
             width: Int(extent.width), height: Int(extent.height), format: format)
+        if texture.height > maximumRows {
+            // Crop before constructing a render destination. A fromRect on a
+            // full-height destination can keep multiple RAW intermediates alive.
+            // Separate small destinations keep the decoder's ROI work bounded.
+            for y in stride(from:0,to:texture.height,by:maximumRows) {
+                try autoreleasepool {
+                    let height = min(maximumRows,texture.height-y)
+                    let rect = CGRect(x:extent.minX,y:extent.maxY-Double(y+height),width:extent.width,height:Double(height))
+                    let band = try rasterize(image.cropped(to:rect),space:space,format:format)
+                    guard let command = queue.makeCommandBuffer(), let blit = command.makeBlitCommandEncoder() else {
+                        throw RenderError.allocationFailed
+                    }
+                    blit.copy(from:band,sourceSlice:0,sourceLevel:0,sourceOrigin:MTLOrigin(x:0,y:0,z:0),
+                        sourceSize:MTLSize(width:band.width,height:band.height,depth:1),to:texture,destinationSlice:0,
+                        destinationLevel:0,destinationOrigin:MTLOrigin(x:0,y:y,z:0))
+                    blit.endEncoding()
+                    try finish(command)
+                }
+            }
+            return texture
+        }
         let normalized = image.transformed(by: CGAffineTransform(translationX: -extent.minX, y: -extent.minY))
         // Core Image's y=0 row is the bottom of an image. The public texture and
         // readback contract is top-down, so perform exactly one vertical flip.
         let topDown = normalized.transformed(by: CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: extent.height))
-        let destination = CIRenderDestination(mtlTexture: texture, commandBuffer: buffer)
+        let destination = CIRenderDestination(mtlTexture:texture,commandBuffer:buffer)
         destination.colorSpace = space
         destination.isFlipped = false
         destination.alphaMode = .unpremultiplied
-        _ = try context.startTask(toRender: topDown, to: destination)
+        let task = try context.startTask(toRender:topDown,to:destination)
         try finish(buffer)
+        _ = try task.waitUntilCompleted()
         return texture
     }
 
@@ -353,11 +388,10 @@ public actor RenderEngine {
 
     public nonisolated static func readTexture(_ texture: any MTLTexture) -> [Float] {
         let components = texture.pixelFormat == .r32Float ? 1 : 4
-        var result = [Float](repeating: 0, count: texture.width * texture.height * components)
-        result.withUnsafeMutableBytes { bytes in
-            texture.getBytes(bytes.baseAddress!, bytesPerRow: texture.width * components * 4,
-                             from: MTLRegionMake2D(0, 0, texture.width, texture.height), mipmapLevel: 0)
+        return [Float](unsafeUninitializedCapacity:texture.width*texture.height*components) { pixels, initialized in
+            texture.getBytes(pixels.baseAddress!,bytesPerRow:texture.width*components*4,
+                             from:MTLRegionMake2D(0,0,texture.width,texture.height),mipmapLevel:0)
+            initialized = pixels.count
         }
-        return result
     }
 }

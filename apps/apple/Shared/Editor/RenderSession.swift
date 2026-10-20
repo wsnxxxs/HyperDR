@@ -6,10 +6,9 @@ import HyperDRRender
 /// `EditorRendering` on HyperDRRender's `RenderEngine`: one open photo, the
 /// LUTs the recipe can reference, and the AI provider and its predictions.
 ///
-/// - Sources load at the preview size (`SourceResolution.preview`) or, for a
-///   region or a full-size render, at full size. Render keeps a full and the
-///   latest preview development (R4), so every render just asks `load` for
-///   the variant it needs. Bypassed groups are a `RenderOptions` given to the
+/// - Preview sources load at the canvas tier. Detail requests keep a lazy
+///   system graph and materialize only the requested ROI and sampling halo,
+///   on Mac, iPhone and iPad alike. Bypassed groups are a `RenderOptions` given to the
 ///   source options and the render alike, so a RAW bypass develops again.
 /// - AI (R1): the first prediction loads a `CoreMLModelGainProvider` off the
 ///   actor; `RenderEngine.predictModelGain` predicts for SDR and RAW, and
@@ -30,6 +29,8 @@ actor RenderSession: EditorRendering {
         /// The latest loaded variant; all share `id` (source and model identity).
         var source: RenderSource
         var options: SourceOptions
+        var detail: ExportSource?
+        var detailOptions: SourceOptions?
     }
     private var opened: Opened?
     /// Bumped by every open and close: a call that awaited across one of them
@@ -106,6 +107,27 @@ actor RenderSession: EditorRendering {
         let full = request.region != nil || request.size == opened.editor.pixelSize
         let sourceOptions = try SourceOptions(recipe: recipe, resolution: full ? .full : .preview(maximumSize: request.size),
                                               options: options)
+        if let region = request.region {
+            await beforeReload?()
+            guard try FileRevision(opened.editor.url) == opened.revision else { throw EditorRenderingError.sourceChanged }
+            try checkCurrent(generation)
+            if opened.detail == nil || opened.detailOptions != sourceOptions {
+                // Release the previous RAW development before opening another;
+                // retaining both native decoder graphs doubles the input cache.
+                opened.detail = nil
+                opened.detailOptions = nil
+                self.opened = opened
+                opened.detail = try await engine.openExportSource(opened.editor.url, options: sourceOptions)
+                opened.detailOptions = sourceOptions
+            }
+            let tile = try await engine.materializeExportRegion(opened.detail!, outputSize: request.size, region: region)
+            try Task.checkCancellation()
+            try checkCurrent(generation)
+            self.opened = opened
+            return Prepared(source: tile, lut: lut,
+                            modelGain: request.usesModelGain ? prediction(for: recipe, source: tile) : nil,
+                            options: options, generation: generation)
+        }
         if sourceOptions != opened.options {
             await beforeReload?()
             guard try FileRevision(opened.editor.url) == opened.revision else { throw EditorRenderingError.sourceChanged }

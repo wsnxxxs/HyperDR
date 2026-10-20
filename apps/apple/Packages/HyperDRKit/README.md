@@ -258,28 +258,30 @@ that interface arrives. These are intermediate tables, not completed iPhone
 |---|---:|---:|---:|---:|
 | Decode/resident | 961.5 | 961.5 | 961.5 | 961.5 |
 | Render / composite | 1147.7 | 1147.7 | 1147.7 | 1147.7 |
-| Packaging / encode | 2175.5 | 1912.2 | 1407.9 | 1407.9 |
+| Encoding | 2175.5 | 1703.7 | 1407.9 | 1407.9 |
+| HEIF assembly / packaging | 2175.5 | 1856.5 | 1407.9 | 1407.9 |
 | Native verification | 1165.7 | 1165.7 | 1156.9 | 1156.9 |
 | System verification | 3444.8 | 1168.2 | 3444.8 | 1159.4 |
-| Peak | 3444.8 | 1912.2 | 3444.8 | 1407.9 |
+| Peak | 3444.8 | 1856.5 | 3444.8 | 1407.9 |
 
 | 110MP, 256 rows | HEIC before | HEIC now | ISO JPEG before | ISO JPEG now |
 |---|---:|---:|---:|---:|
 | Decode/resident | 1722.4 | 1722.4 | 1722.4 | 1722.4 |
 | Render / composite | 1973.2 | 1973.2 | 1973.2 | 1973.2 |
-| Packaging / encode | 3631.0 | 3189.0 | 2323.6 | 2323.6 |
+| Encoding | 3631.0 | 2809.6 | 2323.6 | 2323.6 |
+| HEIF assembly / packaging | 3631.0 | 3114.0 | 2323.6 | 2323.6 |
 | Native verification | 1991.2 | 1991.2 | 1982.8 | 1982.8 |
 | System verification | 6172.4 | 1993.7 | 6172.4 | 1985.3 |
-| Peak | 6172.4 | 3189.0 | 6172.4 | 2323.6 |
+| Peak | 6172.4 | 3114.0 | 6172.4 | 2323.6 |
 
 | Size | Rows | Old peak, both | HEIC now | ISO JPEG now |
 |---|---:|---:|---:|---:|
-| 61MP | 256 | 3444.8 | 1912.2 | 1407.9 |
-| 61MP | 128 | 3352.0 | 1689.4 | 1185.1 |
-| 61MP | 64 | 3305.6 | 1578.1 | 1147.7 |
-| 110MP | 256 | 6172.4 | 3189.0 | 2323.6 |
-| 110MP | 128 | 6047.4 | 2889.0 | 2023.6 |
-| 110MP | 64 | 5984.9 | 2739.0 | 1973.2 |
+| 61MP | 256 | 3444.8 | 1856.5 | 1407.9 |
+| 61MP | 128 | 3352.0 | 1633.7 | 1185.1 |
+| 61MP | 64 | 3305.6 | 1522.4 | 1147.7 |
+| 110MP | 256 | 6172.4 | 3114.0 | 2323.6 |
+| 110MP | 128 | 6047.4 | 2814.0 | 2023.6 |
+| 110MP | 64 | 5984.9 | 2664.0 | 1973.2 |
 
 The old RAW decoder reserve is 16 B/native pixel (918.8 / 1679.7 MiB). It is
 currently the main Render-dependent area term. HEIC slab accounting is corrected
@@ -330,3 +332,22 @@ so paid membership is not a necessary assumption for this entitlement. It has no
 been signing-tested in this task. If tried later, verify the generated profile,
 signed entitlement and device budget; do not assume it bypasses process/GPU
 admission. No entitlement was added here.
+
+
+R40-001: HEIF items now borrow compressed samples from their caller-owned encoded
+sequences, for both grid tiles and a bare hvc1. Grid/tmap/Exif/XMP payloads remain
+owned small buffers. Item moves cannot invalidate the sample views; input
+sequences must outlive write_heif, as required by HeifSequenceView. This removes
+the deep-copied third set of compressed samples without changing container bytes
+or the C ABI. The final container is still assembled in memory: streaming it to
+the reserved staging file would require a sink/output API through the codec and
+atomic file writer, and is deferred rather than changing publication semantics
+in this ownership fix.
+
+The estimates above separate encoding (one compressed sequence set plus RGB
+slab/VT workspace) from HEIF assembly (sequences plus final output; no RGB slab,
+but the 32 MiB framework reserve remains). packaging reports the assembly peak;
+peak takes the maximum with encoding and the other phases. This prices the two
+remaining compressed copies at their actual overlap, instead of pretending the
+old three-copy engine fit a two-copy estimate. Full-plane/ImageIO estimates and
+RAW residency reserves are unchanged.

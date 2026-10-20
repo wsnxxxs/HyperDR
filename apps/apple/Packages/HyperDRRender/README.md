@@ -68,6 +68,8 @@ strength/range → SDR highlight rolloff. `AdjustmentNode` exposes each of the n
 operators separately; use these before decomposition. The fused render API handles pair
 semantics and spatial analysis. Point nodes require exactly their output region; the fixed
 analysis graph handles spatial neighborhoods independently of stripe boundaries.
+Low-level node graphs allow at most one `SourceHDRSplitNode`; both full-frame and stripe
+entry points reject duplicates with `RenderError.duplicateHDRSplit` before rendering.
 
 * Exposure is linear `2^EV`; positive SDR exposure uses an exponential shoulder above Y=.48.
 * Contrast maps signed control logarithmically to c=.6…1.6. Below .18 it uses AE-3's power.
@@ -128,7 +130,7 @@ Set `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` and a private TMP
 licensed RAW fixtures with `python3 scripts/fetch_test_fixtures.py`, then run `swift test
 --package-path apps/apple/Packages/HyperDRRender`. Host Metal/codec access is required.
 
-Thirteen focused tests cover the source contracts and each point operation, CPU-double LUT/
+Fourteen focused tests cover the source contracts and each point operation, CPU-double LUT/
 spatial analysis/offset references, tone anchors/white derivative, HDR-base invariance, rolloff
 compensation, soft shoulders, fixed analysis reuse, resized stripes, repeated/new-context
 renders and Apple-default RAW development/overrides. Comparisons use SDR/PQ 10-bit code

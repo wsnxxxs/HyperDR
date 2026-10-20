@@ -143,11 +143,16 @@ public actor RenderEngine {
               size.width <= Int(UInt32.max), size.height <= Int(UInt32.max) else { throw RenderError.invalidSize }
     }
 
+    private func validate(_ nodes: [any RenderNode]) throws {
+        guard nodes.filter({ $0 is SourceHDRSplitNode }).count <= 1 else { throw RenderError.duplicateHDRSplit }
+    }
+
     /// Preview and export share this graph. An unchanged dual source retains its
     /// authored pair; other HDR sources are automatically split at the output.
     public func render(_ source: RenderSource, size: PixelSize? = nil,
                        nodes: [any RenderNode] = []) throws -> RenderPlanes {
         try Task.checkCancellation()
+        try validate(nodes)
         let size = size ?? source.size
         try validate(size)
         let key = OutputKey(source: source.id, size: size, nodes: nodes.map(\.cacheKey))
@@ -166,6 +171,7 @@ public actor RenderEngine {
                               nodes: [any RenderNode] = [],
                               consume: @Sendable (RenderPlanes) throws -> Void) throws {
         try Task.checkCancellation()
+        try validate(nodes)
         let size = size ?? source.size
         try validate(size)
         guard rows > 0 else { throw RenderError.invalidSize }

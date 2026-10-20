@@ -8,7 +8,7 @@ public enum RenderError: Error, Sendable {
     case metalUnavailable, allocationFailed, invalidSize, invalidRegion
     case cannotOpenSource, cannotDecodeSource, missingGainMap, unsupportedGainColorSpace
     case gpu(String)
-    case invalidAdjustment, invalidLUT(String), aiNotAvailable
+    case invalidAdjustment, invalidLUT(String), aiNotAvailable, duplicateHDRSplit
 }
 
 /// All textures and readback arrays use top-to-bottom rows, after source orientation.

@@ -5,8 +5,10 @@ import argparse
 import json
 import os
 from pathlib import Path
+import plistlib
 import subprocess
 import sys
+from xml.parsers.expat import ExpatError
 
 ROOT = Path(__file__).resolve().parents[1]
 MINIMUM_PYTHON = (3, 10)
@@ -95,11 +97,54 @@ def apple() -> None:
     run(sys.executable, "tests/apple/export_parity.py", env=env)
 
 
+def has_apple_engine_slices() -> bool:
+    """Check the package's actual artifact, including both arm64 iOS variants.
+    A plist entry alone is insufficient after an interrupted or Mac-only build.
+    """
+    artifact = ROOT / "apps/apple/Packages/HyperDREngine/Artifacts/HyperDREngineCore.xcframework"
+    try:
+        with (artifact / "Info.plist").open("rb") as file:
+            metadata = plistlib.load(file)
+        if not isinstance(metadata, dict):
+            return False
+        libraries = metadata.get("AvailableLibraries", [])
+        if not isinstance(libraries, list):
+            return False
+        found = set()
+        for library in libraries:
+            if not isinstance(library, dict) or "arm64" not in library.get("SupportedArchitectures", []):
+                continue
+            identifier = library.get("LibraryIdentifier")
+            binary = library.get("LibraryPath")
+            headers = library.get("HeadersPath")
+            if not all(isinstance(value, str) and value for value in (identifier, binary, headers)):
+                continue
+            directory = artifact / identifier
+            archive = directory / binary
+            if not archive.is_file() or archive.stat().st_size == 0:
+                continue
+            if not all((directory / headers / name).is_file() for name in ("hyperdr.h", "module.modulemap")):
+                continue
+            found.add((library.get("SupportedPlatform"), library.get("SupportedPlatformVariant", "")))
+        return {("macos", ""), ("ios", ""), ("ios", "simulator")} <= found
+    except (OSError, ValueError, TypeError, plistlib.InvalidFileException, ExpatError):
+        return False
+
+
+def ensure_ios_engine(env: dict[str, str]) -> None:
+    if has_apple_engine_slices():
+        return
+    run("bash", "scripts/build_xcframework.sh", "--platforms", "all", env=env)
+    if not has_apple_engine_slices():
+        raise RuntimeError("Engine xcframework is missing usable macOS/iOS device/iOS simulator slices after rebuilding")
+
+
 def ios() -> None:
     """The iOS and iPadOS target: device and simulator builds, unsigned (no
     team needed). Needs Xcode's iOS platform; the Mac suite does not."""
     env = xcode_env()
     ensure_metal_toolchain(env)
+    ensure_ios_engine(env)
     for destination in ("generic/platform=iOS", "generic/platform=iOS Simulator"):
         run("xcodebuild", "-project", "apps/apple/HyperDR.xcodeproj", "-scheme", "HyperDRiOS",
             "-destination", destination, "-derivedDataPath", "build-apple/DerivedData-iOS",

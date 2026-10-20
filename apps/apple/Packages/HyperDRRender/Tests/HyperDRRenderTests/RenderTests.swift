@@ -73,6 +73,22 @@ private func close(_ a: [Float], _ b: [Float], tolerance: Float = 0.00001) {
         }
     }
 
+    @Test func duplicateSourceSplitIsRejectedBeforeRendering() async throws {
+        let engine = try RenderEngine()
+        let source = try await engine.source(image: image([SIMD4(4,2,1,1)],width:1,height:1),domain:.hdr)
+        let valid = RenderEngine.readPixels(try await engine.render(source,nodes:[SourceHDRSplitNode()]))
+        close(valid.baseRGBA,[1,0.5,0.25,1]); close(valid.gain,[2])
+        let duplicate: [any RenderNode] = [SourceHDRSplitNode(),IdentityNode(),SourceHDRSplitNode()]
+        do {
+            _ = try await engine.render(source,nodes:duplicate)
+            Issue.record("Duplicate split graph accepted")
+        } catch RenderError.duplicateHDRSplit {}
+        do {
+            try await engine.renderStripes(source,nodes:duplicate) { _ in Issue.record("Invalid stripe graph consumed") }
+            Issue.record("Duplicate stripe split graph accepted")
+        } catch RenderError.duplicateHDRSplit {}
+    }
+
     @Test func imageIOOrientationAndCache() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".tiff")
         defer { try? FileManager.default.removeItem(at: url) }

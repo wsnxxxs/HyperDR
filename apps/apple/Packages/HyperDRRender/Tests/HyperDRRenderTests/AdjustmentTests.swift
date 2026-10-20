@@ -62,6 +62,12 @@ private func cube(swap: Bool = false) -> String {
         #expect(contrast(0) == 0 && contrast(1) == 1 && contrast(2) == 2)
         let epsilon = 0.00001
         #expect(abs((contrast(1)-contrast(1-epsilon))/epsilon-1) < 0.0001)
+        for nativeContrast in [0.6,2.0] {
+            let left = DoubleReference.grade(SIMD3(repeating:1-epsilon),contrast:nativeContrast).x
+            let right = DoubleReference.grade(SIMD3(repeating:1+epsilon),contrast:nativeContrast).x
+            #expect(abs((1-left)/epsilon-1) < 0.0001)
+            #expect(abs((right-1)/epsilon-1) < 0.0001)
+        }
         for operation in [AdjustmentOperation.shadows,.blacks] {
             #expect(DoubleReference.point(SIMD3(repeating:0.5),operation:operation,value:100) == SIMD3(repeating:0.5))
         }

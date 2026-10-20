@@ -85,7 +85,7 @@ extension ExportNotice {
             .init(key: "export.rangeClamped %@ %@", arguments: [.key(encoding.labelKey), .stops(stops)])
         case .socialAspect: .init(key: "dest.social.aspect")
         case .sdrVersion: .init(key: "plan.sdrVersion")
-        case .alphaOnWhite: .init(key: "plan.alphaOnWhite")
+        case .alphaOnBlack: .init(key: "plan.alphaOnBlack")
         }
     }
     public var key: String { message.key }

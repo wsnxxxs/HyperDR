@@ -791,7 +791,9 @@ struct TypedExportFactsTests {
     @Test func transparencyAndCeilingsAreFacts() {
         let value = plan(ExportPlanRequest(choice: .destination(.web),
             source: .init(domain: .sdr, pixelSize: photo, hasAlpha: true), edit: .init(peakStops: 8)))
-        #expect(value.notices.contains(.alphaOnWhite))
+        #expect(value.notices.contains(.alphaOnBlack))
+        #expect(ExportNotice.alphaOnBlack.localized(locale: Locale(identifier: "zh-Hans")) == "透明区域会铺黑色。")
+        #expect(ExportNotice.alphaOnBlack.localized(locale: Locale(identifier: "en")) == "Transparent areas will be filled with SDR black.")
         #expect(value.notices.contains(.ceiling(stops: ExportDestination.web.profile.ceilingStops, scope: .destination(.web))))
     }
     @Test func encoderAdmissionMatchesCardAvailability() {

@@ -273,7 +273,7 @@ public enum ExportPlanner {
                                     encoding: encoding, writesGainMap: writesGainMap,
                                     baseBitDepth: baseBitDepth, budget: budget)
         var blockers = admission.blockers
-        if request.source.hasAlpha { notices.append(.alphaOnWhite) }
+        if request.source.hasAlpha { notices.append(.alphaOnBlack) }
         if let reason = availability(of: selectedEncoding, source: request.source, capabilities: request.capabilities, edit: request.edit) {
             blockers.append(reason)
         }

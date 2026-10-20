@@ -135,12 +135,18 @@ public actor RecipeExportService: RecipeExportServicing {
             guard let naturalRange = adjustments.hdr.range.map(Double.init) ?? automatic["hdr.range"],
                   naturalRange.isFinite, naturalRange >= 0 else { throw RecipeExportError.invalidSnapshot }
             actualRequest.edit.peakStops = naturalRange
-            plan = ExportPlanner.plan(actualRequest, budget: budget)
-            let resolvedBlockers = plan.blockers.filter { $0.code != "photos_permission_denied" }
-            guard resolvedBlockers.isEmpty else { throw RecipeExportError.planBlocked(resolvedBlockers.map(\.code)) }
-            let resident = retainedCPUBytes + (model.map { $0.gain.width * $0.gain.height * 4 } ?? 0)
+            // The host reports remaining memory after source/model/analysis
+            // allocation. Credit only resident allocations already charged in
+            // the estimate; prediction is not part of that estimate.
+            let resident = retainedCPUBytes
                 + request.source.pixelSize.pixels * (source.domain == .dual ? 48 : 16)
                 + (source.domain == .rawEDR ? (request.source.sensorSize ?? request.source.pixelSize).pixels * 16 : 0)
+            let remaining = budget.availableBytes() ?? 256 * 1024 * 1024
+            let totalBudget = remaining.addingReportingOverflow(resident)
+            plan = ExportPlanner.plan(actualRequest, budget: FixedExportMemoryBudget(
+                bytes: totalBudget.overflow ? Int.max : totalBudget.partialValue))
+            let resolvedBlockers = plan.blockers.filter { $0.code != "photos_permission_denied" }
+            guard resolvedBlockers.isEmpty else { throw RecipeExportError.planBlocked(resolvedBlockers.map(\.code)) }
             try await checkMemory(plan, residentBytes: resident, sourcePixels: request.source.pixelSize.pixels)
             let prepared = try await sessions.prepareRecipeExport(session, snapshot: snapshot)
             pending = prepared.id
@@ -188,7 +194,8 @@ public actor RecipeExportService: RecipeExportServicing {
             try validateRevision(refreshed, snapshot: snapshot)
             // The collected planes are now independent. Drop graph/analysis/LUT
             // GPU caches before package allocates its whole-plane copies. The
-            // local source and model stay accounted for in resident bytes.
+            // source stays charged in resident bytes; prediction consumes the
+            // host's measured remaining budget.
             await renderEngine.clearCaches()
             try Task.checkCancellation()
             try await checkMemory(plan, residentBytes: resident + plan.size.pixels * (12 + 4 * (report.gain?.channelCount ?? 0)),

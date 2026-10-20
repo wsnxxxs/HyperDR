@@ -10,6 +10,12 @@ import Synchronization
 import Testing
 @testable import HyperDRKit
 
+private final class ChangingExportMemoryBudget: ExportMemoryBudget {
+    let bytes: Mutex<Int>
+    init(_ initial: Int) { bytes = Mutex(initial) }
+    func availableBytes() -> Int? { bytes.withLock { $0 } }
+}
+
 private struct StripeFake: ExportStripeRendering {
     var metadata: ExportGainMetadata? = nil
     var gainScale: Float = 2
@@ -336,6 +342,33 @@ private struct RecipeExportEnvironment {
             _ = try await service.export(session: env.session.id, snapshot: env.snapshot(), request: env.request(.sdrJPEG))
         }
         #expect(await env.sessions.exports(for: env.session.id).isEmpty)
+    }
+
+    @Test func replanningCreditsTheSourceWhenRemainingMemoryDrops() async throws {
+        let env = try await RecipeExportEnvironment(); defer { env.remove() }
+        let request = env.request(.isoGainMapJPEG)
+        let initialPlan = ExportPlanner.plan(request, budget: FixedExportMemoryBudget(bytes: 1_000_000_000))
+        let peak = initialPlan.memory.estimate.peak
+        let sourceBytes = request.source.pixelSize.pixels * 16
+        let budget = ChangingExportMemoryBudget(peak + 1)
+        let service = RecipeExportService(engine: env.engine, renderEngine: env.render, renderer: env.render,
+            sessions: env.sessions, target: env.target, budget: budget)
+        let result = try await service.export(session: env.session.id, snapshot: env.snapshot(), request: request,
+            progress: { event in
+                if event.stage == .developing { budget.bytes.withLock { $0 -= sourceBytes } }
+            })
+        #expect(budget.availableBytes() == peak + 1 - sourceBytes)
+        #expect(result.record.resolvedSnapshot == result.resolved)
+        #expect(result.resolved.width == 96 && result.resolved.height == 64)
+        // A remaining budget below the genuinely incremental peak still refuses.
+        budget.bytes.withLock { $0 = peak + 1 }
+        await #expect(throws: RecipeExportError.planBlocked(["export_memory_exceeded"])) {
+            _ = try await service.export(session: env.session.id, snapshot: env.snapshot(), request: request,
+                progress: { event in
+                    if event.stage == .developing { budget.bytes.withLock { $0 = peak - sourceBytes - 1 } }
+                })
+        }
+        #expect(await env.sessions.exports(for: env.session.id).count == 1)
     }
 
     @Test func realAutoAIRangeIsResolvedAfterPrediction() async throws {

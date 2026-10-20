@@ -1,6 +1,7 @@
 import Foundation
 import HyperDREngine
 import HyperDRKit
+import HyperDRRender
 
 extension UserFacingError {
     /// A service-layer error keeps its §3.6 code; the message is the
@@ -42,6 +43,7 @@ extension UserFacingError {
         case let error as HyperDRError: UserFacingError(error)
         case let error as RecipeExportError: UserFacingError(error)
         case let error as EditorRenderingError: UserFacingError(error)
+        case let error as RenderError: UserFacingError(error)
         case is CancellationError: UserFacingError(code: "cancelled")
         default: UserFacingError(code: "internal_error", detail: String(describing: error))
         }
@@ -61,6 +63,24 @@ extension UserFacingError {
         case .planBlocked(let reasons): self.init(code: "export_failed", detail: "plan blocked: " + reasons.joined(separator: ", "))
         case .verificationFailed(let detail): self.init(code: "export_failed", detail: "verification failed: " + detail)
         case .invalidStripes: self.init(code: "export_failed", detail: "invalid stripes")
+        }
+    }
+
+    /// Render's failures, which the export service and its readers pass on
+    /// as they are (R36-003).
+    init(_ error: RenderError) {
+        switch error {
+        case .sourceChanged: self.init(code: "source_changed")
+        case .cannotOpenSource: self.init(code: "source_unreadable")
+        case .cannotDecodeSource, .missingGainMap, .unsupportedGainColorSpace:
+            self.init(code: "decode_failed", detail: String(describing: error))
+        case .allocationFailed: self.init(code: "out_of_memory")
+        case .metalUnavailable: self.init(code: "metal_unavailable")
+        case .gpu(let detail): self.init(code: "metal_unavailable", detail: detail)
+        case .aiNotAvailable: self.init(code: "model_not_ready")
+        case .invalidLUT(let detail): self.init(code: "lut_invalid", detail: detail)
+        case .invalidSize, .invalidRegion, .invalidAdjustment, .duplicateHDRSplit:
+            self.init(code: "internal_error", detail: String(describing: error))
         }
     }
 

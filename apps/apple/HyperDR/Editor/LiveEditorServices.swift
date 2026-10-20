@@ -438,5 +438,9 @@ extension LiveEditorServices {
         item(try await requireKit().luts.update(LUTID(rawValue: id), input: LUTSpace(rawValue: input.rawValue)!, output: LUTSpace(rawValue: output.rawValue)!))
     }
     func removeLUT(_ id: String) async throws { try await requireKit().luts.remove(LUTID(rawValue: id)) }
+    func recipeLUT(_ photo: EditorPhoto, contentHash: String) async throws -> ColorLUT {
+        let session = try exportSession(photo)
+        do { return try await requireKit().sessions.recipeLUT(contentHash, for: session) }
+        catch { throw UserFacingError.service(error) }
+    }
 }
-

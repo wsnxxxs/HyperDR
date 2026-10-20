@@ -1,6 +1,8 @@
 import AppKit
 import XCTest
 import HyperDRKit
+import HyperDRRecipe
+import HyperDRRender
 @testable import HyperDR
 
 @MainActor final class ExportModelTests: XCTestCase {
@@ -183,6 +185,45 @@ import HyperDRKit
         await eventually(timeout:.seconds(10)) { m.photo?.url == self.second && !m.suggestedFileName.isEmpty }
         XCTAssertTrue(m.exportVersions.isEmpty);XCTAssertNil(m.export.result)
     }
+    /// R36-001: a version's look whose LUT left the library comes back from
+    /// the photo's own copy, so the restored recipe previews and exports.
+    func testRestoringALookThatLeftTheLibraryInstallsThePhotosCopy() async throws {
+        let (m,s) = await ready()
+        let lut=try ColorLUT(cube:"LUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n")
+        s.sessionLUTs[lut.contentHash]=lut
+        let key=try await s.exportKey(m)
+        var recipe=key.recipe;recipe.look=LUTReference(contentHash:lut.contentHash,name:"Gone")
+        let made=RecipeExportSnapshot(recipe:recipe,source:key.source)
+        s.historyByURL[source]=[ExportHistoryItem(version:ExportVersion(number:3,createdAt:Date(),encodingID:"adaptive",result:result()),
+                                                  recipeSnapshot:made,options:m.exportChoices)]
+        m.refreshExportMetadata()
+        await eventually(timeout:.seconds(10)) { m.exportVersions.count == 1 }
+        m.restore("version")
+        await eventually(timeout:.seconds(10)) { m.editor.recipe.look == recipe.look }
+        XCTAssertNoThrow(try m.captureExport());XCTAssertTrue(m.lut.failures.isEmpty)
+        m.undo();XCTAssertNil(m.editor.recipe.look,"the restore is one undo step")
+    }
+    /// R36-002: the gamut the panel shows is the one the planner writes, and
+    /// a version made from the current choices matches them.
+    func testChoicesGamutIsThePlannersAndAVersionMatchesTheChoicesThatMadeIt() {
+        for encoding in ExportEncoding.allCases { for hdr in [true,false] { for gamut in ["auto","srgb","p3"] {
+            var c=ExportChoices();c.encoding=encoding.rawValue;c.outputGamut=gamut
+            let plan=ExportPlanner.plan(ExportPlanRequest(choice:.custom(c.customFormat),
+                source:.init(domain:.sdr,pixelSize:.init(width:96,height:64)),edit:.init(hdrEnabled:hdr,peakStops:hdr ? 2 : 0)))
+            XCTAssertEqual(plan.gamut,c.gamut,"\(encoding) hdr \(hdr) \(gamut)")
+            let resolved=ResolvedExportSnapshot(snapshot:RecipeExportSnapshot(recipe:Recipe(),
+                source:RecipeSourceRevision(sha256:"a",byteCount:1,modificationDate:Date())),plan:plan)
+            XCTAssertEqual(ExportChoices(resolved).customFormat,c.customFormat,"\(encoding) hdr \(hdr) \(gamut)")
+        }}}
+    }
+    /// R36-003: Render's errors read as the messages Kit's already had.
+    func testRenderErrorsMapToExistingMessages() {
+        XCTAssertEqual(UserFacingError.service(RenderError.sourceChanged).code,"source_changed")
+        XCTAssertEqual(UserFacingError.service(RenderError.cannotOpenSource).code,"source_unreadable")
+        XCTAssertEqual(UserFacingError.service(RenderError.cannotDecodeSource).code,"decode_failed")
+        XCTAssertEqual(UserFacingError.service(RenderError.allocationFailed).code,"out_of_memory")
+        XCTAssertEqual(UserFacingError.service(RenderError.aiNotAvailable).code,"model_not_ready")
+    }
     func testCapabilitiesUseSourceBitDepthAndKeepUnavailableSelection() async {
         let (m,s)=await ready()
         var c=try! await s.encodingCapabilities();c.main8=true;c.main10=false;c.encoderReason="hevc_main10_unavailable"
@@ -244,8 +285,8 @@ import HyperDRKit
     }
     func testOutputSettingsAndRememberedPreferencesNeverRestoreImageAdjustments() async {
         let (m,s)=await ready()
-        m.setOutputGamut("p3");m.setClampSrgb(true);m.setExportQuality(72)
-        XCTAssertEqual(m.export.outputGamut,"p3");XCTAssertTrue(m.export.clampSrgb)
+        m.selectEncoding("sdr-jpeg");m.setOutputGamut("p3");m.setExportQuality(72)
+        XCTAssertEqual(m.export.outputGamut,"p3");XCTAssertEqual(m.export.gamut,.p3)
         XCTAssertEqual(m.exportChoices.customFormat.quality,72)
         XCTAssertFalse(m.canUndo,"export choices are not edits")
         m.selectEncoding("sdr-tiff");XCTAssertNil(m.exportQuality)

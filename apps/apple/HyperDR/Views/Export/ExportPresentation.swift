@@ -1,5 +1,6 @@
 import Foundation
 import HyperDRDesign
+import HyperDRKit
 
 /// What the export views say for one state of the model, as plain values:
 /// which cards make up the format groups, which of the four HEVC reasons a
@@ -364,6 +365,7 @@ extension ExportPresentation {
         formatter.doesRelativeDateFormatting = true
         parts.append(formatter.string(from: version.createdAt))
         parts.append(AppStrings.string("enc.\(version.encodingID).label", locale: locale))
+        if let gamut = version.gamut { parts.append(AppStrings.string(gamut.labelKey, locale: locale)) }
         if let size = version.pixelSize { parts.append("\(size.width) × \(size.height)") }
         parts.append(version.byteCount.formatted(.byteCount(style: .file).locale(locale)))
         if let model = version.modelName { parts.append(AppStrings.format("history.ai %@", locale: locale, model)) }

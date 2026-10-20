@@ -16,21 +16,20 @@ nonisolated struct ExportChoices: Equatable, Sendable {
     var encoding = "adaptive"
     /// For an SDR format: `auto`, `srgb` or `p3`.
     var outputGamut = "auto"
-    /// For an HDR format: limit the colours to sRGB instead of keeping Display P3.
-    var clampSrgb = false
     var quality = EditControls.all.first { $0.key == "quality" }?.defaultValue ?? 90
 
     var workflow: Workflow { Workflow(encoding: encoding) }
 
-    /// The gamut written: an SDR format's choice (`auto` is P3 for TIFF and
-    /// sRGB otherwise), or Display P3 for an HDR one unless limited to sRGB.
-    /// BT.2100 formats define their own primaries, which the plan applies.
+    /// The gamut written, as `ExportPlanner` resolves it: an SDR format's
+    /// choice (`auto` is P3 for TIFF and sRGB otherwise); Display P3 for a
+    /// gain-map format; Rec. 2020 for a BT.2100 one, which defines its own
+    /// primaries. Only SDR formats offer a choice.
     var gamut: ExportColorGamut {
         if workflow == .colorOnly {
             if outputGamut == "auto" { return encoding == "sdr-tiff" ? .p3 : .srgb }
             return ExportColorGamut(rawValue: outputGamut) ?? .srgb
         }
-        return clampSrgb ? .srgb : .p3
+        return ExportEncoding(rawValue: encoding)?.isBT2100 == true ? .rec2020 : .p3
     }
 
     /// The panel's settings for a format Kit wrote (a version's, to restore).
@@ -38,7 +37,6 @@ nonisolated struct ExportChoices: Equatable, Sendable {
         encoding = format.encoding.rawValue
         quality = Double(format.quality)
         if workflow == .colorOnly { outputGamut = format.gamut == .p3 ? "p3" : "srgb" }
-        else { clampSrgb = format.gamut == .srgb }
     }
     init() {}
 

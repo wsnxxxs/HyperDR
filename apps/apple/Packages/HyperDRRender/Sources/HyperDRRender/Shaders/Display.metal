@@ -1,6 +1,6 @@
 // Gain values are decoded at their native resolution, before display sampling.
 struct DisplayISOUniform { float4 minimum,maximum,inverseGamma;uint4 channels; };
-struct DisplayLegacyUniform { float3x3 gainToP3;float4 baseOffset,alternateOffset,region,size; };
+struct DisplayLegacyUniform { float3x3 gainToP3;float4 baseOffset,alternateOffset,region,size,inputRegion; };
 void displayPeak(float3 g,device atomic_uint* peak,uint lane) {
     float value=simd_max(max(0.f,max(g.x,max(g.y,g.z))));
     if(lane==0)atomic_fetch_max_explicit(peak,as_type<uint>(value),memory_order_relaxed);
@@ -32,10 +32,8 @@ kernel void displayLegacyGain(texture2d<float,access::sample> base [[texture(0)]
                               constant DisplayLegacyUniform& p [[buffer(0)]],device atomic_uint* peak [[buffer(1)]],
                               uint2 pos [[thread_position_in_grid]],uint lane [[thread_index_in_simdgroup]]) {
     if(pos.x>=output.get_width() || pos.y>=output.get_height())return;
-    constexpr sampler s(coord::normalized,address::clamp_to_edge,filter::linear);
-    float2 uv=(float2(pos)+p.region.xy+.5f)/p.size.xy;
-    float3 h=hdr.sample(s,uv).rgb;
-    float3 g=isoLogRatio(h+p.alternateOffset.xyz,base.sample(s,uv).rgb+p.baseOffset.xyz);
+    float3 h=sourceSample(hdr,float2(pos)+p.region.xy+.5f,p.size.xy,p.inputRegion).rgb;
+    float3 g=isoLogRatio(h+p.alternateOffset.xyz,sourceSample(base,float2(pos)+p.region.xy+.5f,p.size.xy,p.inputRegion).rgb+p.baseOffset.xyz);
     output.write(float4(g,0),pos);
     // Legacy headroom describes HDR / SDR white, rather than HDR / local base.
     displayPeak(log2(max(float3(1),p.gainToP3*h)),peak,lane);

@@ -25,9 +25,11 @@ import Observation
     func install(center: NotificationCenter = .default) {
         guard !isInstalled else { return }
         isInstalled = true
+        // Not `NSUndoManagerCheckpoint`: `canUndo`, `canRedo` and the menu
+        // titles post it, so the menu reading them would bump itself forever.
         let names: [Notification.Name] = [
             NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification,
-            .NSUndoManagerCheckpoint, .NSUndoManagerDidUndoChange, .NSUndoManagerDidRedoChange,
+            .NSUndoManagerDidUndoChange, .NSUndoManagerDidRedoChange,
             .NSUndoManagerDidCloseUndoGroup,
         ]
         for name in names {

@@ -76,6 +76,7 @@ extension RenderEngine: ExportStripeRendering {
         try prepare(prepared.report)
         for y in stride(from:0,to:request.canvasSize.height,by:rows) {
             try consume(readExport(prepared,y:y,count:min(rows,request.canvasSize.height-y)))
+            try Task.checkCancellation()
         }
         return prepared.report
     }

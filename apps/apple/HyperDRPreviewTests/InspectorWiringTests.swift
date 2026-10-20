@@ -48,6 +48,32 @@ import HyperDRRecipe
         model.closeDocument()
     }
 
+    /// A → B → A while B is still being measured: the scopes end on A, not on
+    /// B's late result (R34-001).
+    func testReturningToAMeasuredPictureDropsTheMeasurementInBetween() async throws {
+        let services = FakeEditorServices(openDelay: .zero)
+        let fake = try XCTUnwrap(services.fakeRendering)
+        let model = EditorModel(services: services)
+        model.open([url])
+        await eventually(timeout: .seconds(3)) { model.document?.phase == .ready }
+        let a = model.editor.recipe
+        await eventually(timeout: .seconds(3)) { model.scopedRequest?.recipe == a && model.scopingRequest == nil }
+        var b = a
+        b.setValue(.number(1), for: "tone.exposure")
+        await fake.holdRenders()
+        model.editor.setRecipe(b)
+        model.startScopes()
+        XCTAssertEqual(model.scopingRequest?.recipe, b)
+        model.editor.setRecipe(a)
+        model.startScopes()
+        XCTAssertNil(model.scopingRequest, "B's measurement is dropped")
+        await fake.releaseRenders()
+        await model.scopeTask?.value
+        await settle(50)
+        XCTAssertEqual(model.scopedRequest?.recipe, a)
+        model.closeDocument()
+    }
+
     func testScopeContentFollowsTheMeasurementAndThePhase() async {
         let model = await opened()
         // The fake's frames are measured once; start again from nothing.

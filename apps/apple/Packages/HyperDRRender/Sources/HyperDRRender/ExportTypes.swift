@@ -92,6 +92,8 @@ public enum ExportResplitReason: String, Hashable, Sendable {
     case writerCannotRepresentSignedGain
     case writerHeadroomContract
     case frameRequiresNeutralPair
+    case flattenTransparency
+    case outputCeiling
 }
 
 /// Decoded log2 gain; offsets are linear SDR-white-relative values, headrooms stops.
@@ -139,8 +141,8 @@ public struct ExportRenderReport: Sendable {
     }
 }
 
-/// The single export operation used by Kit and its Fake. RenderEngine conformance
-/// follows in b-R's implementation commit. No file I/O/encoding belongs here.
+/// The single export operation used by Kit and its Fake. RenderEngine conforms
+/// directly. No output-file I/O/encoding belongs here.
 public protocol ExportStripeRendering: Sendable {
     /// One stripe in flight; synchronous consumption provides backpressure.
     /// prepare runs once before consume, so Kit can allocate plane owners or open

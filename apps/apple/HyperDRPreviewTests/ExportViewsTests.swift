@@ -3,6 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import XCTest
 import HyperDRDesign
+import HyperDRKit
 @testable import HyperDR
 
 /// The export views' decisions (M3-V): what the presentation says for each
@@ -127,18 +128,25 @@ import HyperDRDesign
     func testTheStatusLineNamesTheStageTheTimeAndTheEstimate() {
         func line(_ phase: ExportState.Phase, _ stage: String?, estimate: ExportEstimate?,
                   elapsed: Double = 21, locale: Locale) -> String {
-            ExportPresentation.statusLine(ExportPresentation.statusParts(phase: phase, stage: stage,
+            ExportPresentation.statusLine(ExportPresentation.statusParts(phase: phase,
+                stage: stage.map { RecipeExportProgress(stage: RecipeExportStage(rawValue: $0)!).stageMessage },
                 estimate: estimate), elapsed: elapsed, locale: locale)
         }
         let seconds = ExportEstimate(fraction: 0.5, remaining: .seconds(8), isOverdue: false)
-        XCTAssertEqual(line(.running, "rendering", estimate: seconds, locale: en), "Rendering edits · 0:21 elapsed · about 10 s left")
-        XCTAssertEqual(line(.running, "rendering", estimate: seconds, locale: zh), "渲染调整 · 已用 0:21 · 约 10 秒后完成")
-        // Each of Kit's stages has its own words (RecipeExportStage).
-        for (stage, text) in [("developing", "Reading photo"), ("model", "Running AI model"),
+        XCTAssertEqual(line(.running, "rendering", estimate: seconds, locale: en), "Rendering · 0:21 elapsed · about 10 s left")
+        XCTAssertEqual(line(.running, "rendering", estimate: seconds, locale: zh), "渲染中 · 已用 0:21 · 约 10 秒后完成")
+        // Each of Kit's stages has Kit's words (RecipeExportProgress.stageMessage).
+        for (stage, text) in [("developing", "Developing RAW"), ("model", "Predicting HDR"),
                               ("encoding", "Encoding"), ("verifying", "Verifying")] {
             XCTAssertTrue(line(.running, stage, estimate: seconds, locale: en).hasPrefix(text + " · "), stage)
         }
-        XCTAssertTrue(line(.finishing, "verifying", estimate: seconds, locale: en).hasPrefix("Adding to Export History · "))
+        // The row path renders while it encodes, and says so.
+        let rows = RecipeExportProgress(stage: .encoding, completedRows: 64, totalRows: 4000, includesRendering: true)
+        XCTAssertTrue(ExportPresentation.statusLine(ExportPresentation.statusParts(phase: .running, stage: rows.stageMessage,
+            estimate: seconds), elapsed: 21, locale: en).hasPrefix("Rendering and encoding · "))
+        XCTAssertTrue(ExportPresentation.statusLine(ExportPresentation.statusParts(phase: .running, stage: rows.stageMessage,
+            estimate: seconds), elapsed: 21, locale: zh).hasPrefix("渲染与编码 · "))
+        XCTAssertTrue(line(.finishing, "verifying", estimate: seconds, locale: en).hasPrefix("Saving export · "))
         XCTAssertEqual(line(.preparing, nil, estimate: nil, elapsed: 0, locale: en), "Preparing · 0:00 elapsed · first export, estimating the time")
         XCTAssertTrue(line(.running, "developing", estimate: ExportEstimate(fraction: 0.99, remaining: .zero, isOverdue: true), locale: en)
             .hasSuffix("almost done, a little longer than expected"))
@@ -153,10 +161,10 @@ import HyperDRDesign
 
     func testTheCanvasCapsuleReadsLikeTheStatusLine() {
         let estimate = ExportEstimate(fraction: 0.72, remaining: .seconds(8), isOverdue: false)
-        let parts = ExportPresentation.statusParts(phase: .running, stage: "encoding", estimate: estimate)
+        let parts = ExportPresentation.statusParts(phase: .running, stage: RecipeExportProgress(stage: .encoding).stageMessage, estimate: estimate)
         XCTAssertEqual(ExportPresentation.capsuleText(estimate: estimate, parts: parts, locale: en), "Exporting 72% · about 10 s left")
         XCTAssertEqual(ExportPresentation.capsuleText(estimate: estimate, parts: parts, locale: zh), "正在导出 72% · 约 10 秒后完成")
-        let none = ExportPresentation.statusParts(phase: .running, stage: "encoding", estimate: nil)
+        let none = ExportPresentation.statusParts(phase: .running, stage: RecipeExportProgress(stage: .encoding).stageMessage, estimate: nil)
         XCTAssertEqual(ExportPresentation.capsuleText(estimate: nil, parts: none, locale: en), "Exporting … · first export, estimating the time")
     }
 

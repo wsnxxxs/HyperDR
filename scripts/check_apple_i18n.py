@@ -128,7 +128,7 @@ HEIF_FEATURE_KEY = "err.server.unsupported_format.heif."
 ERROR_TEXT = APP / "Views" / "ErrorText.swift"
 # Keys read through a name built at run time (see the module docstring); never
 # reported as unused. Their completeness is the Swift coverage test's.
-DYNAMIC_PREFIXES = ("ctrl.", "choice.", "field.", "enc.", "export.stage.", "export.unavailable.")
+DYNAMIC_PREFIXES = ("ctrl.", "choice.", "field.", "enc.", "export.unavailable.")
 
 KEY_RE = re.compile(r"^([a-z][A-Za-z0-9]*)(?:\.[A-Za-z0-9_-]+)+(?: %@)*$")
 CJK_RE = re.compile(r"[　-〿㐀-鿿＀-￯]")

@@ -3,14 +3,12 @@ import HyperDRRecipe
 import HyperDRRender
 
 /// What an export freezes of the editor (`RecipeEditor.exportCapture`): the
-/// photo, its recipe, the model and the LUT. Hosts turn it into Kit's
+/// photo, its recipe (with its `hdr.model` selection) and the LUT. Hosts turn it into Kit's
 /// `RecipeExportSnapshot` with the source revision they captured when the
 /// photo was opened (`Shared/Export`).
 nonisolated struct EditorExportCapture: Sendable {
     let source: EditorSource
     let recipe: Recipe
-    /// `hdr.model` when the recipe uses AI; nil otherwise.
-    let modelID: String?
     /// The LUT the recipe's look takes effect with, if any.
     let lut: ColorLUT?
     /// What `auto` resolved to in the shown frame, when it shows this recipe.

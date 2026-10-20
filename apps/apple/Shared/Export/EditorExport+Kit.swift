@@ -4,9 +4,11 @@ import HyperDRRecipe
 
 /// The editor's export capture in Kit's terms, for the Mac and iOS hosts.
 extension EditorExportCapture {
-    /// The frozen snapshot, with the revision captured when the photo was opened.
+    /// The frozen snapshot, with the revision captured when the photo was
+    /// opened. The service reads the model selection from the recipe's
+    /// `hdr.model`; an expected model identity is only for re-rendering history.
     func snapshot(revision: RecipeSourceRevision) -> RecipeExportSnapshot {
-        RecipeExportSnapshot(recipe: recipe, source: revision, modelID: modelID)
+        RecipeExportSnapshot(recipe: recipe, source: revision)
     }
 
     /// What Kit plans the export from. No frame yet on iOS (P7-3b-U).

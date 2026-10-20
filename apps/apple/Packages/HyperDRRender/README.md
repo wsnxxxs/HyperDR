@@ -115,12 +115,16 @@ entry points reject duplicates with `RenderError.duplicateHDRSplit` before rende
 * `.cube` supports 1D/3D, red-fastest order, DOMAIN_MIN/MAX and INPUT_RANGE, sRGB/P3/Rec.709,
   HLG/PQ (203-nit SDR white), S-Log3/S-Gamut3.Cine for RAW. Strength mixes in linear light.
   Every declared input/output combination is supported, with S-Log3 input restricted to RAW.
-  Encode to the input space → clamp/sample the .cube domain → decode from output to linear P3
-  → split the transformed HDR. A conventional SDR-domain LUT can discard existing HDR at
-  strength 1; PQ/HLG/Log output can create HDR regardless of input space. This follows R13-003
-  and replaces the earlier base-only SDR-LUT/gain-retention rule. Strength still mixes original
-  and transformed RGB in linear light; zero bypasses conversions. 3D interpolation uses
-  explicit float trilinear reads.
+  Encode to the input space → clamp/sample the .cube domain → decode from output to linear P3.
+  SDR-input/SDR-output LUTs act on the separated base and retain its gain unchanged (L1).
+  SDR-input/HDR-or-Log-output LUTs also act on the base, then multiply by the original gain
+  and resplit; their output can create HDR. HDR/Log-input LUTs act on the whole HDR image
+  before separation. Strength mixes original and transformed RGB in linear light at the
+  corresponding stage; zero bypasses conversions. 3D interpolation uses explicit float
+  trilinear reads. L1 gain/ratio retention applies to our zero-offset split pairs.
+  Any active light/color/look edit on a dual source first crosses the authored-pair boundary:
+  reconstruct the author's HDR, split in linear P3, then apply the look to that new pair;
+  provenance is `resplit`. Only unedited and HDR-only dual edits retain authored gain/offsets.
 * Analytic expansion uses a fixed grid with longest edge 768, integrating every source pixel
   into cells once. Local log-luminance contrast identifies small speculars; coverage supplies a
   broad-region floor; local variance suppresses dark noise. Separable box statistics and a

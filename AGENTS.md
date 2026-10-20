@@ -141,11 +141,16 @@ at admission as `export_dimension_limit` (E8); external gain grids clipped per
 axis to the base when packaging (E9); the parity batch (drag out and share,
 missing-source notice and relinking, diagnostics, HEIF feature messages).
 
-Open, roughly in order: D1-b (one set of default values, approved as C1:
-contrast 1, vibrance 0, pop 0, exposure bias 0, gain strength 1, headroom auto
-up to 3, expansion start 0.25, area coverage 0.6; `source_defaults`,
-`unadjusted` and Kit `applySourceIdentity` are removed; engine, Kit and App
-are done on `wip/e5` = `5b1a3364`, unreviewed and not yet rebased); the P7
+D1-b is in (2026-10-21): one set of default values, C1 (contrast 1, vibrance
+0, pop 0, exposure bias 0, gain strength 1, headroom auto up to 3, expansion
+start 0.25, area coverage 0.6); `source_defaults`, `unadjusted` and Kit
+`applySourceIdentity` are gone; a fixed headroom without `headroom_max` raises
+the ceiling to match. P7-0 is in: `HyperDRRecipe` (28 adjustment declarations
+and recipe v1), `HyperDRRender` (system sources, GPU graph, double-precision
+reference), the `HyperDRiOS` target with the EDR display pass shared through
+`apps/apple/Shared`, and `python3 scripts/test.py ios`.
+
+Open, roughly in order: the P7
 plan (GPU render graph, system decoding, iPhone and iPad), whose prototype is
 `wip/ae2-spike` = `4acec719` and which replaces AE-1 (RAW now follows
 `CIRAWFilter`'s own development, `docs/research/ae2-apple-raw-ci.md`); two

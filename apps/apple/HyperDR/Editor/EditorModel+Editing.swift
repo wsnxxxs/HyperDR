@@ -149,8 +149,8 @@ extension EditorModel {
         setSplitRatioValue(0.5)
         setPeeking(false)
         notice = nil
-        scopedRecipe = nil
-        scopedOriginal = nil
+        scopedRequest = nil; scopingRequest = nil
+        scopedOriginal = nil; scopingOriginal = nil
         scopes.update(original: .some(nil), current: .some(nil), waveform: .some(nil))
         canvas.setImageSize(PixelSize(editorSource.pixelSize))
         bumpUndoRevision()
@@ -167,8 +167,8 @@ extension EditorModel {
         notice = nil
         scopeTask?.cancel()
         originalScopeTask?.cancel()
-        scopedRecipe = nil
-        scopedOriginal = nil
+        scopedRequest = nil; scopingRequest = nil
+        scopedOriginal = nil; scopingOriginal = nil
         scopes.update(original: .some(nil), current: .some(nil), waveform: .some(nil))
         clearUndo()
         syncControls()

@@ -215,7 +215,8 @@ extension EditorFlowTests {
         model.closeDocument()
     }
 
-    /// A rollback puts the previous photo back in the editor with its recipe.
+    /// A rollback puts the previous photo back in the editor with its recipe,
+    /// but not its undo steps once the new photo had opened.
     func testRollbackKeepsThePreviousRecipeAndRendersIt() async {
         let services = ScriptedEditorServices()
         let model = EditorModel(services: services)
@@ -228,7 +229,22 @@ extension EditorFlowTests {
         await eventually { model.editor.source?.url == self.a && model.editor.recipe.value(for: "tone.exposure") == .number(0.7) }
         await model.editor.settle()
         XCTAssertEqual(model.editor.frame?.request.recipe.value(for: "tone.exposure"), .number(0.7))
-        XCTAssertTrue(model.canUndo, "the previous photo's steps are kept")
+        // b did open before its first frame failed, so a's steps went (R27-001).
+        XCTAssertFalse(model.canUndo)
+        model.closeDocument()
+    }
+
+    /// A photo that cannot be opened leaves the open photo's undo steps.
+    func testAPhotoThatFailsToOpenKeepsTheUndoSteps() async {
+        let services = ScriptedEditorServices()
+        let model = EditorModel(services: services)
+        await opened(model, services, url: a)
+        exposure(0.7, model)
+        await model.editor.settle()
+        services.scripted.failOpen(b, with: UserFacingError(code: "decode_failed"))
+        model.open([b])
+        await eventually { model.alert != nil && model.document?.phase == .ready }
+        XCTAssertTrue(model.canUndo)
         model.undo()
         XCTAssertTrue(model.editor.recipe.isDefault("tone.exposure"))
         model.closeDocument()

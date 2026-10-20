@@ -198,22 +198,31 @@ private func setting(_ recipe: Recipe, _ id: String, _ value: Double) -> Recipe 
         #expect(h.editor.source?.domain == .rawEDR)
     }
 
-    @Test func aPhotoThatNeverShowsKeepsThePreviousPhotosUndo() async throws {
+    @Test func aPhotoThatFailsToOpenKeepsThePreviousPhotosUndo() async throws {
+        let h = Harness(undo: true)
+        try await h.open(.sdr)
+        h.step { h.editor.setRecipe(setting(h.editor.recipe, "tone.exposure", 1)) }
+        await h.fake.configure { $0.openError = .noSource }
+        await #expect(throws: EditorRenderingError.noSource) { try await h.open(.sdr, name: "b.jpg") }
+        #expect(h.undoManager.undoActionName == "undo.tone.exposure")
+        h.undoManager.undo()
+        #expect(h.editor.recipe.isDefault("tone.exposure"))
+    }
+
+    @Test func aPhotoThatOpensDropsThePreviousPhotosUndoAtOnce() async throws {
         let h = Harness(undo: true)
         try await h.open(.sdr)
         h.step { h.editor.setRecipe(setting(h.editor.recipe, "tone.exposure", 1)) }
         let edited = h.editor.recipe
-        // b opens but its first frame fails: the host puts a back.
-        await h.fake.configure { $0.renderError = .noSource }
-        try await h.open(.sdr, name: "b.jpg")
-        #expect(h.editor.renderFailure != nil)
-        await h.fake.configure { $0.renderError = nil }
+        // b opens; its first frame has not come yet.
+        await h.fake.configure { $0.holdRenders() }
+        try await h.editor.open(URL(fileURLWithPath: "/tmp/b.jpg"))
+        #expect(!h.undoManager.canUndo)
+        // Putting a back keeps nothing of b, and finds no step of a either.
         try await h.editor.open(URL(fileURLWithPath: "/tmp/a.jpg"), restoring: edited)
-        await h.editor.settle()
         #expect(h.editor.recipe == edited)
-        #expect(h.undoManager.undoActionName == "undo.tone.exposure")
-        h.undoManager.undo()
-        #expect(h.editor.recipe.isDefault("tone.exposure"))
+        #expect(!h.undoManager.canUndo)
+        await h.fake.configure { $0.releaseRenders() }
     }
 
     @Test func actionNamesComeFromTheHost() async throws {

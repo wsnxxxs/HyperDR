@@ -151,8 +151,12 @@ import UniformTypeIdentifiers
     @ObservationIgnored var scopeTask: Task<Void, Never>?
     @ObservationIgnored var originalScopeTask: Task<Void, Never>?
     /// The recipes the scopes on screen were computed for.
-    @ObservationIgnored var scopedRecipe: Recipe?
-    @ObservationIgnored var scopedOriginal: Recipe?
+    /// The renders the scopes last measured, and the ones being measured
+    /// (R27-002: a prediction or a bypass changes the picture, not the recipe).
+    @ObservationIgnored var scopedRequest: EditorRenderRequest?
+    @ObservationIgnored var scopedOriginal: EditorRenderRequest?
+    @ObservationIgnored var scopingRequest: EditorRenderRequest?
+    @ObservationIgnored var scopingOriginal: EditorRenderRequest?
 
     func setSplitRatioValue(_ value: Double) { if value != splitRatio { splitRatio = value } }
     func setPeeking(_ value: Bool) { if value != isPeekingOriginal { isPeekingOriginal = value } }

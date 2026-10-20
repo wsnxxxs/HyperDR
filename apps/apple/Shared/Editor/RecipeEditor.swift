@@ -144,13 +144,9 @@ import Observation
     @ObservationIgnored private var abandoned: (id: String, since: ContinuousClock.Instant)?
     @ObservationIgnored private var largestCanvasSide: Int?
     @ObservationIgnored private var openGeneration = 0
-    /// The photo the undo history belongs to. A newly opened photo takes the
-    /// history over (clearing it) with its first frame, so a photo whose
-    /// opening fails before then leaves the previous photo's steps in place.
+    /// The photo the undo history belongs to: a photo put back with
+    /// `restoring` keeps its own steps.
     @ObservationIgnored private var historyURL: URL?
-    /// Set from a successful `open` until the source's first frame: the
-    /// history still holds the previous photo's steps.
-    @ObservationIgnored private var historyIsStale = false
     @ObservationIgnored private var opening: Task<EditorSource, any Error>?
 
     private struct Flight {
@@ -206,14 +202,14 @@ import Observation
 
     /// Opens a photo the caller can read. The new photo starts from the
     /// defaults of its own input domain; bypassed groups and the prediction
-    /// state of the previous photo are dropped, and its undo steps once the
-    /// new photo's first frame is in (until then they can come back with
-    /// `restoring`). A newer `open` supersedes this one, which then throws
+    /// state of the previous photo are dropped, and so are its undo steps as
+    /// soon as the new photo is open (R27-001); an open that fails leaves
+    /// them. A newer `open` supersedes this one, which then throws
     /// `CancellationError`.
     ///
-    /// `restoring` puts back a photo whose opening of a successor failed:
-    /// it starts from that recipe, with no undo step, and keeps the undo
-    /// history when the history belongs to `url`.
+    /// `restoring` puts back a photo after a successor failed, or the same
+    /// photo found at another place: it starts from that recipe, with no undo
+    /// step, and keeps the undo history when the history belongs to `url`.
     func open(_ url: URL, restoring: Recipe? = nil) async throws {
         // A caller cancelled before it got here must not supersede a newer open.
         try Task.checkCancellation()
@@ -252,7 +248,8 @@ import Observation
         } else {
             recipe = Recipe(inputDomain: opened.domain)
         }
-        historyIsStale = restoring == nil || historyURL != url
+        if restoring == nil || historyURL != url { undo.clear() }
+        historyURL = url
         bypassedGroups = []
         modelTask?.cancel()
         modelTask = nil
@@ -286,7 +283,6 @@ import Observation
         clearLayers()
         undo.clear()
         historyURL = nil
-        historyIsStale = false
         source = nil
         sourceChanged = false
         frame = nil
@@ -416,8 +412,6 @@ import Observation
     /// being undone comes before it (hosts end drags before undoing, and a
     /// pointer or finger drag cannot overlap an undo in practice).
     private func restore(_ value: Recipe) {
-        // The previous photo's steps do not apply to the one being opened.
-        guard !historyIsStale else { return }
         drag = nil
         editingParameter = nil
         updateMask()
@@ -426,19 +420,7 @@ import Observation
         recipeDidChange(from: old)
     }
 
-    private func register(_ step: RecipeStep) {
-        adoptHistory()
-        undo.register(step)
-    }
-
-    /// The open photo takes the undo history over: its first frame is in, or
-    /// it is being edited.
-    private func adoptHistory() {
-        guard historyIsStale, let source else { return }
-        undo.clear()
-        historyURL = source.url
-        historyIsStale = false
-    }
+    private func register(_ step: RecipeStep) { undo.register(step) }
 
     private func recipeDidChange(from old: Recipe) {
         scheduleRender()
@@ -531,7 +513,6 @@ import Observation
             frame = rendered
             if source?.id == rendered.request.sourceID {
                 frameSource = source
-                adoptHistory()
             }
             renderFailure = nil
             if let detail = detailFrame, !detail.request.rendersSame(as: rendered.request) { detailFrame = nil }
@@ -587,15 +568,23 @@ import Observation
     /// `original` renders the defaults under the same development, as
     /// `originalFrame` does (the Mac's comparison detail).
     func render(size: HyperDRRender.PixelSize, region: CGRect? = nil, original: Bool = false) async throws -> EditorFrame {
-        guard var request = request(for: original ? recipe.original : recipe, size: size, region: region,
-                                    interactive: false) else {
+        guard let request = renderRequest(size: size, region: region, original: original) else {
             throw EditorRenderingError.noSource
         }
+        return try await renderer.render(request)
+    }
+
+    /// What `render(size:region:original:)` asks for now: the source, the
+    /// recipe, the bypassed groups and whether the prediction is used. Nil
+    /// without a photo.
+    func renderRequest(size: HyperDRRender.PixelSize, region: CGRect? = nil, original: Bool = false) -> EditorRenderRequest? {
+        guard var request = request(for: original ? recipe.original : recipe, size: size, region: region,
+                                    interactive: false) else { return nil }
         if original {
             request.bypassedGroups = []
             request.usesModelGain = false
         }
-        return try await renderer.render(request)
+        return request
     }
 
     /// Where `parameterID` acts in the current recipe (R6), at `size`.

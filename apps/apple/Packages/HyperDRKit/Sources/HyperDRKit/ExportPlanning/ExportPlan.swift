@@ -366,7 +366,8 @@ public enum ExportPlanner {
             blockers.append(.init(code: "hdrOff", message: .init(key: "plan.hdrOff")))
         }
         let maxLongEdge = suggestSize && !admission.estimate.fits(in: admission.availableBytes ?? 0)
-            ? maximumLongEdge(request, budget: admission.availableBytes ?? 0, upper: photoSize.longEdge) : nil
+            ? maximumLongEdge(request, budget: admission.availableBytes ?? 0, upper: photoSize.longEdge,
+                preferred: preferred, encoding: encoding, writesGainMap: writesGainMap, baseBitDepth: baseBitDepth) : nil
         if let pair = request.pair, ![1, 3].contains(pair.channels) {
             blockers.append(.init(code: "unsupported_format", message: .init(key: "err.server.unsupported_format")))
         }
@@ -500,13 +501,8 @@ public enum ExportPlanner {
                                     baseBitDepth: Int,
                                     budget: any ExportMemoryBudget) -> Admission {
         func estimate(writer: ExportWriter, rows: Int) -> ExportMemoryEstimate {
-            ExportMemoryEstimate.estimate(ExportMemoryEstimate.Input(
-                source: request.source, photoSize: photoSize, canvas: size,
-                encoding: encoding, writer: writer,
-                writesGainMap: writesGainMap, isFramed: request.frame.isFramed,
-                baseBitDepth: baseBitDepth, writeRows: rows, retainedBytes: request.resources.bytes,
-                allowsRowInput: request.allowsRowInput,
-                quality: request.choice.customFormat?.quality ?? request.choice.destination!.profile.quality))
+            memoryEstimate(request, photoSize: photoSize, size: size, encoding: encoding,
+                writer: writer, writesGainMap: writesGainMap, baseBitDepth: baseBitDepth, rows: rows)
         }
         let available = budget.availableBytes() ?? 256 * 1024 * 1024
         let canFallback = preferred.writer == .imageIO && encoding == .adaptive && writesGainMap && baseBitDepth == 8
@@ -534,28 +530,49 @@ public enum ExportPlanner {
                                              .text(ExportPlanText.bytes(available))]), pixelSize: size)])
     }
 
-    /// Search only memory admission, freezing the measured budget. Frame canvas is
-    /// kept as an upper bound: hosts must regenerate the actual smaller frame.
-    private static func maximumLongEdge(_ request: ExportPlanRequest, budget: Int, upper: Int) -> Int? {
+    /// Both admission and the size search use exactly the same allocation model.
+    private static func memoryEstimate(_ request: ExportPlanRequest, photoSize: ExportPixelSize,
+                                       size: ExportPixelSize, encoding: ExportEncoding,
+                                       writer: ExportWriter, writesGainMap: Bool,
+                                       baseBitDepth: Int, rows: Int) -> ExportMemoryEstimate {
+        ExportMemoryEstimate.estimate(.init(source: request.source, photoSize: photoSize, canvas: size,
+            encoding: encoding, writer: writer, writesGainMap: writesGainMap,
+            isFramed: request.frame.isFramed, baseBitDepth: baseBitDepth, writeRows: rows,
+            retainedBytes: request.resources.bytes, allowsRowInput: request.allowsRowInput,
+            quality: request.choice.customFormat?.quality ?? request.choice.destination!.profile.quality))
+    }
+
+    /// Search estimates only, freezing the measured budget and writer choices.
+    /// The tiled model is monotone in output size, including a fixed frame canvas.
+    /// Hosts must regenerate the actual smaller frame before applying the result.
+    private static func maximumLongEdge(_ request: ExportPlanRequest, budget: Int, upper: Int,
+                                        preferred: (writer: ExportWriter, reason: ExportWriterReason),
+                                        encoding: ExportEncoding, writesGainMap: Bool,
+                                        baseBitDepth: Int) -> Int? {
         guard upper > 1 else { return nil }
+        let canFallback = preferred.writer == .imageIO && encoding == .adaptive && writesGainMap && baseBitDepth == 8
+        let writers: [ExportWriter] = canFallback ? [preferred.writer, .inHouse] : [preferred.writer]
         func fits(_ edge: Int) -> Bool {
-            var candidate = request
-            var format = request.choice.customFormat ?? CustomExportFormat(
-                encoding: request.choice.destination!.profile.encoding,
-                gamut: request.choice.destination!.profile.gamut,
-                quality: request.choice.destination!.profile.quality)
-            format.longEdge = edge
-            candidate.choice = .custom(format)
-            return makePlan(candidate, budget: FixedExportMemoryBudget(bytes: budget),
-                            preferences: nil, suggestSize: false).memory.fits
+            let photo = request.source.pixelSize.fitted(longEdge: edge)
+            let size = request.frame.canvas ?? photo
+            for writer in writers {
+                // All row owners grow with row height; 64 is the last admission
+                // choice and therefore suffices to find any executable plan.
+                if memoryEstimate(request, photoSize: photo, size: size, encoding: encoding,
+                    writer: writer, writesGainMap: writesGainMap, baseBitDepth: baseBitDepth, rows: 64).fits(in: budget) {
+                    return true
+                }
+            }
+            return false
         }
-        // ROI cost can increase when heavily downsampling. Search from the
-        // requested edge down so a narrow admitted interval is never skipped.
-        // These are scalar estimates; no image or encoder work is performed.
-        for edge in stride(from: upper - 1, through: 1, by: -1) {
-            if fits(edge) { return edge }
+        var lower = 1, higher = upper - 1
+        var largest: Int?
+        while lower <= higher {
+            let middle = lower + (higher - lower) / 2
+            if fits(middle) { largest = middle; lower = middle + 1 }
+            else { higher = middle - 1 }
         }
-        return nil
+        return largest
     }
 
     // MARK: Summary

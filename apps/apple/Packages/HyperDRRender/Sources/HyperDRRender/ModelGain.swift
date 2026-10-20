@@ -20,6 +20,8 @@ public enum ModelGainError: Error, Sendable, Equatable {
     case invalidInputCount(expected: Int, actual: Int)
     case predictionFailed(String)
     case unexpectedGrid(expected: PixelSize, actual: PixelSize)
+    /// The source kind cannot carry a model gain (authored HDR or a dual pair).
+    case unsupportedSource(String)
 }
 
 public enum ModelGain {

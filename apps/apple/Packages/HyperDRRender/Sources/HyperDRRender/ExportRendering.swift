@@ -185,14 +185,15 @@ extension RenderEngine: ExportStripeRendering {
 
     // Cap the projected native crop as well as the output. An export downscale
     // must not recreate a full-width source texture just to sample a small band.
-    private func exportTileSize(_ source: ExportSource?, request: ExportRenderRequest) -> PixelSize {
+    func exportTileSize(_ source: ExportSource?, request: ExportRenderRequest) -> PixelSize {
         let limit = PreparedExportRows.maximumSourceTileSize
         guard let source else { return PixelSize(width:limit.width,height:PreparedExportRows.maximumReadRows) }
         let gain = source.opened.gain?.image.extent.size ?? .zero
         let width = max(Double(source.nativeSize.width),gain.width)
         let height = max(Double(source.nativeSize.height),gain.height)
-        return PixelSize(width:max(1,min(limit.width,Int(Double(limit.width-4)*Double(request.photoSize.width)/width))),
-                         height:max(1,min(PreparedExportRows.maximumReadRows,Int(Double(limit.height-4)*Double(request.photoSize.height)/height))))
+        // Four native texels of halo plus up to two from outward integral rounding.
+        return PixelSize(width:max(1,min(limit.width,Int(Double(limit.width-6)*Double(request.photoSize.width)/width))),
+                         height:max(1,min(PreparedExportRows.maximumReadRows,Int(Double(limit.height-6)*Double(request.photoSize.height)/height))))
     }
 
     private func readExport(_ state: ExportPreparation, y: Int, count: Int) throws -> ExportStripe {

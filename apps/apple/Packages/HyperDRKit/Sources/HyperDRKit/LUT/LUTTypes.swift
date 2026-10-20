@@ -35,6 +35,8 @@ public enum LUTSpace: String, Sendable, Hashable, Codable, CaseIterable {
 }
 public struct LUTEntry: Sendable, Hashable, Codable, Identifiable {
     public let id: LUTID
+    /// The Render/Recipe identity of the installed cube bytes; no re-parsing needed.
+    public var contentHash: String { "sha256:" + id.rawValue }
     public let name: String
     public var input: LUTSpace
     public var output: LUTSpace

@@ -79,6 +79,27 @@ that floor; below it, the planner correctly offers no long-edge fallback.
 Actual iPhone 17 Pro available memory and a real 110MP RAW remain required to
 establish the typical-device result. No constants are lowered to force admission.
 
+## Detached TIFF bitmap ownership
+
+The merged Render source loader (`f1cf2760`, with the R42/R47 tile/gain fixes)
+materializes large TIFFs without auxiliary gain once through ImageIO. Its
+CGDataProvider retains the decoded native bitmap; CI wraps that backing rather
+than introducing another native-size float Render texture. Orientation and
+content headroom are preserved. This backing belongs to the **one decoder
+allowance**, not an additional area-sized Render owner. Independent editor/export
+sources still have independent storage: the resident editor is excluded from
+remaining process memory and is never credited as shared export backing.
+
+Render's fresh-process recheck on a 12800×8600 big-endian RGBA half-float TIFF
+reports 1695.1 MiB process peak and 4.685 s open+scan+read, compared with the former
+CI file-provider path's 2030.1 MiB and 67.288 s. The TIFF's 8 B/native-pixel
+bitmap is about 839.8 MiB; even an RGBA float bitmap is 16 B/pixel. The measured
+whole-run peak is below this estimator's 3031.5 MiB decoder/work allowance at that
+size. The empirical 24 B/pixel + 512 MiB constants and RAW budget table therefore
+remain unchanged. This sample does not establish a universal TIFF/Apple decoder
+cap or an iPhone footprint guarantee; Render's full measurements are in its
+EXPORT_MEMORY.md.
+
 ## Timing
 
 Report `stageSeconds.rendering` measures preparation. `stageSeconds.read` sums

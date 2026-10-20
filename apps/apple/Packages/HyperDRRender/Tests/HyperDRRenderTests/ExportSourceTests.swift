@@ -30,6 +30,41 @@ private func licensedRAW() -> URL {
 }
 
 @Suite(.serialized) struct ExportSourceTests {
+    @Test(arguments:[false,true])
+    func downscaledSourceTilesIncludeIntegralRounding(hasGain: Bool) async throws {
+        let engine = try RenderEngine()
+        let native = PixelSize(width:9504,height:6336)
+        let output = PixelSize(width:9479,height:6306)
+        let image = CIImage(color:CIColor(red:0.2,green:0.4,blue:0.6))
+            .cropped(to:CGRect(x:0,y:0,width:native.width,height:native.height))
+        let analysis = try await engine.source(image:image.cropped(to:CGRect(x:0,y:0,width:1,height:1)),domain:.sdr)
+        // A constant CI graph exercises real ROI allocation without decoding a large fixture.
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("tile-bounds-\(UUID())")
+        try Data([0]).write(to:url)
+        defer { try? FileManager.default.removeItem(at:url) }
+        let gain = hasGain ? AuthoredGainMap(standard:.iso,auxiliaryInfo:NSDictionary(),image:image,
+            channelCount:1,baseColorSpace:RenderEngine.workingColorSpace,alternateColorSpace:nil,
+            auxiliaryColorSpace:nil,tags:[:]) : nil
+        let domain: InputDomain = hasGain ? .dual : .sdr
+        let opened = OpenedSource(domain:domain,image:image,hdr:image,baseSpace:RenderEngine.workingColorSpace,
+                                  gain:gain,raw:nil,nativeSize:native)
+        let lazy = ExportSource(id:analysis.id,domain:domain,nativeSize:native,rawSettings:nil,
+            analysisSource:analysis,opened:opened,url:url,revision:try SourceRevision(url:url))
+        let tile = await engine.exportTileSize(lazy,request:ExportRenderRequest(photoSize:output,capabilities:streamCaps))
+        let limit = PreparedExportRows.maximumSourceTileSize
+        for y in stride(from:0,to:output.height,by:tile.height) {
+            for x in stride(from:0,to:output.width,by:tile.width) {
+                let region = CGRect(x:x,y:y,width:min(tile.width,output.width-x),height:min(tile.height,output.height-y))
+                let source = try await engine.materializeExportRegion(lazy,outputSize:output,region:region)
+                #expect(source.texture.width <= limit.width && source.texture.height <= limit.height)
+                if hasGain {
+                    let gain = try #require(source.gainTexture)
+                    #expect(gain.width <= limit.width && gain.height <= limit.height)
+                }
+            }
+        }
+    }
+
     @Test func oversizedPanoramaRowsAndTextureLimit() async throws {
         let engine = try RenderEngine()
         let width = 20017, height = 19
@@ -198,5 +233,37 @@ private final class FootprintRecorder: @unchecked Sendable {
         guard result == KERN_SUCCESS else { return }
         lock.withLock { highest = max(highest,info.phys_footprint) }
         print("RAW_MEMORY stage=\(stage) footprint_bytes=\(info.phys_footprint) lifetime_peak_bytes=\(info.ledger_phys_footprint_peak)")
+    }
+}
+
+@Suite struct TIFFBitmapTests {
+    @Test(arguments:[CIFormat.RGBA8, .RGBAh])
+    func nativeBitmapPreservesOrientedPixels(format: CIFormat) async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("bitmap-\(UUID()).tiff")
+        defer { try? FileManager.default.removeItem(at:url) }
+        let space = CGColorSpace(name:CGColorSpace.extendedLinearDisplayP3)!
+        let image = CIFilter(name:"CILinearGradient",parameters:[
+            "inputPoint0":CIVector(x:0,y:0),"inputPoint1":CIVector(x:4113,y:13),
+            "inputColor0":CIColor(red:0.1,green:0.3,blue:0.7,alpha:0.6),
+            "inputColor1":CIColor(red:1.5,green:0.2,blue:0.1)])!.outputImage!
+            .cropped(to:CGRect(x:0,y:0,width:4113,height:13))
+        let bitmap = try #require(CIContext().createCGImage(image,from:image.extent,format:format,colorSpace:space))
+        let destination = try #require(CGImageDestinationCreateWithURL(url as CFURL,"public.tiff" as CFString,1,nil))
+        CGImageDestinationAddImage(destination,bitmap,[kCGImagePropertyOrientation:6] as CFDictionary)
+        #expect(CGImageDestinationFinalize(destination))
+        let engine = try RenderEngine()
+        let whole = try await engine.load(url)
+        let lazy = try await engine.openExportSource(url)
+        #expect(lazy.domain == whole.domain)
+        #expect(lazy.nativeSize == PixelSize(width:13,height:4113))
+        for y in [0,2047,4105] {
+            let region = CGRect(x:0,y:y,width:13,height:8)
+            let tile = try await engine.materializeExportRegion(lazy,outputSize:lazy.nativeSize,region:region)
+            let recipe = Recipe(inputDomain:whole.domain)
+            let a = RenderEngine.readPixels(try await engine.render(whole,recipe:recipe,size:whole.size,region:region))
+            let b = RenderEngine.readPixels(try await engine.render(tile,recipe:recipe,size:whole.size,region:region))
+            compareBands(a.baseRGBA,b.baseRGBA,label:"TIFF_bitmap")
+            compareBands(a.gain,b.gain,scale:0.25,label:"TIFF_bitmap_gain")
+        }
     }
 }

@@ -139,6 +139,11 @@ struct RecipeExportEnvironment {
                 #expect((evidence.stageSeconds["read"] ?? 0) > 0)
                 #expect((evidence.stageSeconds["encoding"] ?? -1) >= 0)
             }
+            #expect(result.size == ExportPixelSize(width: 96, height: 64))
+            #expect(result.byteCount == result.record.byteCount)
+            #expect(result.verified)
+            #expect(result.elapsed > .zero)
+            #expect((result.peakStops != nil) == !encoding.isSDR)
             #expect(result.resolved.snapshot.recipe == recipe)
             #expect(evidence.system.auxiliaryGain == encoding.writesGainMap)
             #expect(evidence.system.width == 96 && evidence.system.height == 64)
@@ -146,6 +151,7 @@ struct RecipeExportEnvironment {
         recipe.setValue(.bool(false), for: "hdr.enabled")
         let sdr = try await service.export(session: env.session.id, snapshot: env.snapshot(recipe: recipe), request: env.request(.adaptive))
         let ordinary = try JSONDecoder().decode(RecipeExportReport.self, from: sdr.record.reportJSON)
+        #expect(sdr.verified)
         #expect(ordinary.packageJSON == nil && ordinary.firstReaderJSON != nil)
         #expect(!ordinary.system.auxiliaryGain && !ordinary.system.hdrReadable)
         #expect(await env.sessions.exports(for: env.session.id).count == 9)
@@ -559,6 +565,38 @@ struct RecipeExportEnvironment {
         #expect(await env.sessions.exports(for: env.session.id).isEmpty)
     }
 
+    @Test func runtimeMemoryRefusalCarriesAReplannedLongEdge() async throws {
+        let env = try await RecipeExportEnvironment(); defer { env.remove() }
+        let request = env.request(.isoGainMapJPEG)
+        let initial = ExportPlanner.plan(request, budget: FixedExportMemoryBudget(bytes: 1_000_000_000))
+        var smaller = request
+        smaller.choice = .custom(.init(encoding: .isoGainMapJPEG, gamut: .p3, quality: 95, longEdge: 48))
+        let smallerPlan = ExportPlanner.plan(smaller, budget: FixedExportMemoryBudget(bytes: 1_000_000_000))
+        let resident = request.source.pixelSize.pixels * 16
+        let available = smallerPlan.memory.estimate.peak - resident
+        #expect(available > 0 && smallerPlan.memory.estimate.peak < initial.memory.estimate.peak)
+        let budget = ChangingExportMemoryBudget(1_000_000_000)
+        let service = RecipeExportService(engine: env.engine, renderEngine: env.render,
+            renderer: StripeFake(before: { budget.bytes.withLock { $0 = available } }),
+            sessions: env.sessions, target: env.target, budget: budget)
+        do {
+            _ = try await service.export(session: env.session.id, snapshot: env.snapshot(), request: request)
+            Issue.record("Expected runtime memory admission to fail")
+        } catch RecipeExportError.memoryExceeded(let reason) {
+            guard case .memory(let needed, let measured, let size, let suggestion) = reason else {
+                Issue.record("Expected a typed memory reason"); return
+            }
+            #expect(needed == initial.memory.estimate.peak - resident)
+            #expect(measured == available && size == initial.size)
+            let edge = try #require(suggestion)
+            #expect(edge < initial.photoSize.longEdge)
+            #expect(edge == ExportPlanner.maximumLongEdge(request, budget: available + resident, upper: initial.photoSize.longEdge))
+            smaller.choice = .custom(.init(encoding: .isoGainMapJPEG, gamut: .p3, quality: 95, longEdge: edge))
+            #expect(ExportPlanner.plan(smaller, budget: FixedExportMemoryBudget(bytes: available + resident)).memory.fits)
+        }
+        #expect(await env.sessions.exports(for: env.session.id).isEmpty)
+    }
+
     @Test(arguments: [false, true]) func replanningCreditsTheSourceWhenRemainingMemoryDrops(rows: Bool) async throws {
         let env = try await RecipeExportEnvironment(); defer { env.remove() }
         var request = env.request(.isoGainMapJPEG)
@@ -583,13 +621,21 @@ struct RecipeExportEnvironment {
         // A remaining budget below the genuinely incremental peak still refuses.
         budget.bytes.withLock { $0 = peak + 1 }
         preparations.withLock { $0 = 0 }
-        await #expect(throws: RecipeExportError.planBlocked(["export_memory_exceeded"])) {
+        do {
             _ = try await service.export(session: env.session.id, snapshot: env.snapshot(), request: request,
                 progress: { event in
                     if event.stage == .preparing && preparations.withLock({ $0 += 1; return $0 == 2 }) {
                         budget.bytes.withLock { $0 = peak - sourceBytes - 1 }
                     }
                 })
+            Issue.record("Runtime replan should refuse the smaller budget")
+        } catch RecipeExportError.memoryExceeded(let reason) {
+            guard case .memory(let needed, let available, let size, _) = reason else {
+                Issue.record("Expected a typed memory reason"); return
+            }
+            #expect(needed > available)
+            #expect(available == peak - sourceBytes - 1)
+            #expect(size == initialPlan.size)
         }
         #expect(await env.sessions.exports(for: env.session.id).count == 1)
     }

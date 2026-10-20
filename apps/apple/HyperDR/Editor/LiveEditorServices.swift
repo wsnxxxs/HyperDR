@@ -305,8 +305,9 @@ extension LiveEditorServices {
     nonisolated private static func exportResult(_ result: RecipeExportResult) -> ExportResult {
         var value = ExportHistoryItem(result.record).version.result
         value.pixelSize = PixelSize(width: result.resolved.width, height: result.resolved.height)
-        value.headroomStops = result.resolved.ceilingStops
-        value.selfVerified = true // the service throws when a reader disagrees
+        value.headroomStops = result.peakStops
+        value.selfVerified = result.verified
+        value.elapsed = result.elapsed
         value.saved = result.saved.map(savedLocation)
         return value
     }

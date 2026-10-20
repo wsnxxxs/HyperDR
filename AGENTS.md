@@ -138,11 +138,19 @@ is removed; HEVC uses the calibrated quality route (tests/quality).
 Photos saving still waits for the user's Photos Lab result. Local quality and
 fuzz gates remain outside CI; do not add a hosted runner.
 
-Open, roughly in order (2026-10-21): P7-3c (destination and custom-format
-pages, iOS sheet, iOS LUT library); the rest of P7-3d (61MP iPhone
-measurement on a device, background host); P7-3e (saving back to the photo
-library, after Photos Lab); P3b-6 (five minutes of fuzzing per target, in the
-background); `.github/workflows/ci.yml` still calls the deleted
-`tests/capi/smoke.py` and `contract_test.py` (it runs only for `main`; replace
-those steps with `capi_package_test` / `capi_package_rows_test` before merging
-to `main`); the hands-on checks in `docs/design/user-acceptance.md`.
+Open, roughly in order (2026-10-21, end of phase; details in
+`docs/architecture/handoff-2026-10-21.md` §10): review and merge
+`wip/render-detail-memory` (`b719b4a7`: ROI detail, device texture limits,
+faster export rows; contract in `Packages/HyperDRRender/EXPORT_MEMORY.md`),
+then replace Kit's area-based Render terms in the export estimate with that
+contract. The target is at least 110MP at full size on iPhone 17 Pro, for
+editing and export; a smaller long edge is only a fallback. Functionality
+comes first: the iOS/iPadOS UI will be redesigned, so iOS gets minimal
+screens only (the P7-3c panel design is paused). Then: an iOS long-edge
+choice (Kit K2/K3 are in), P7-3e (saving to the photo library, after the
+user's Photos Lab run on `wip/photos-lab`), the iOS background host, P3b-6
+fuzzing, and the hands-on checks in `docs/design/user-acceptance.md`.
+`.github/workflows/ci.yml` still calls the deleted `tests/capi/smoke.py` and
+`contract_test.py`; it runs only for `main`, so replace those steps with
+`capi_package_test` / `capi_package_rows_test` before merging to `main`, after
+asking the user. Run the test scripts with `python3.12`.

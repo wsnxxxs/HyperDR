@@ -71,3 +71,11 @@ PNG against linear-black compositing; and an authored RGB/nonzero-offset pair
 through preservation, writer resplit, a narrower destination and frame neutrality.
 Kit records the planner's output-ceiling constraint even when Render folds it
 into the edited authored pair before its capability scan needs a further resplit.
+
+`python3.12 scripts/test.py ios` checks the package artifact for macOS arm64,
+iOS arm64 and iOS simulator arm64 archives/headers. Missing or incomplete slices
+trigger `build_xcframework.sh --platforms all` before either app build.
+Source SHA-256 already runs off the caller in a detached task, with chunk-level
+cancellation; `SessionStore.open` waits for it to establish content identity and
+history/session reuse. A host may start that task alongside photo decoding and
+await the same task when preparing export, rather than serializing both opens.

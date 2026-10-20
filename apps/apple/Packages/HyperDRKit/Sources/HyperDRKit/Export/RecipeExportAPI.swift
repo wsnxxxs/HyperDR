@@ -37,11 +37,12 @@ public struct RecipeExportResult: Sendable {
 extension ExportRecord {
     /// Public construction for platform service Fakes; no legacy options needed.
     public init(id: ExportID, name: String, byteCount: Int64, createdAt: Date = Date(),
-                resolved: ResolvedExportSnapshot, reportJSON: Data = Data(), sequence: Int = 1) throws {
+                resolved: ResolvedExportSnapshot, reportJSON: Data = Data(), sequence: Int = 1,
+                saved: SavedMark? = nil, fileAvailable: Bool = true) throws {
         self.init(id: id, name: name, byteCount: byteCount, createdAt: createdAt,
                   sourceDigest: resolved.snapshot.source.sha256, options: [:], reportJSON: reportJSON,
                   sequence: sequence, key: try resolved.exportKey(), frame: nil,
-                  recipeSnapshot: resolved.snapshot, resolvedSnapshot: resolved)
+                  recipeSnapshot: resolved.snapshot, resolvedSnapshot: resolved, saved: saved, fileAvailable: fileAvailable)
     }
 }
 

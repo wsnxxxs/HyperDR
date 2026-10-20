@@ -361,7 +361,7 @@ struct ExportMemoryPlanTests {
         #expect(!result.isExecutable)
     }
 
-    @Test func incrementalRowsCanShrinkTheActiveGraphAndInputBand() {
+    @Test func incrementalRowsCanShrinkCPUBuffers() {
         let framed = request(.custom(.init(encoding: .isoGainMapJPEG, gamut: .p3, quality: 90)),
             frame: ExportFrameFacts(canvas: .init(width: 12000, height: 8000)))
         let preferred = plan(framed)
@@ -446,7 +446,7 @@ struct ExportMemoryPlanTests {
         let whole = plan(old)
         #expect(streamed.memory.usesRowInput && !whole.memory.usesRowInput)
         #expect(streamed.memory.estimate.encode < whole.memory.estimate.encode)
-        #expect(streamed.memory.estimate.systemVerify < photo.pixels * 16)
+        #expect(streamed.memory.estimate.systemVerify - streamed.memory.estimate.decode < 32 << 20)
         #expect(streamed.memory.estimate.nativeVerify < streamed.memory.estimate.systemVerify)
         #expect(streamed.memory.estimate.verify == streamed.memory.estimate.systemVerify)
         #expect(whole.memory.estimate.nativeVerify == whole.memory.estimate.systemVerify)
@@ -514,20 +514,48 @@ struct ExportMemoryPlanTests {
                     let before = estimate.nativeVerify - workspace + size.pixels*40
                     #expect(estimate.systemVerify < before)
                     if rows == 256 { #expect(estimate == planned.memory.estimate) }
+                    #expect(estimate.decode == size.pixels * 24 + (512 << 20))
+                    #expect(estimate.fits(in: 4 << 30))
                     if ProcessInfo.processInfo.environment["HYPERDR_MEMORY_ESTIMATES"] == "1" {
-                        let oldSlab = size.width * min(512, size.height) * 40
-                        let newSlab = size.width * min(512, size.height) * 12 + 32*1024*1024
-                        let cacheDelta = encoding == .adaptive
-                            ? size.pixels * 10 + 8*1024*1024 - ExportMemoryEstimate.compressedHEICCache(pixels: size.pixels, bitDepth: 10, quality: 95) : 0
-                        let oldEncode = estimate.encode + (encoding == .adaptive ? oldSlab - newSlab + ExportMemoryEstimate.compressedHEICCache(pixels: size.pixels, bitDepth: 10, quality: 95) / 2 : 0) + cacheDelta
-                        print("RAW_MEMORY", encoding.rawValue, "width", size.width, "height", size.height, "rows", rows, "beforeEncode", oldEncode,
-                            "decode", estimate.decode, "render", estimate.render, "composite", estimate.composite,
-                            "packaging", estimate.packaging, "encode", estimate.encode,
-                            "nativeVerify", estimate.nativeVerify, "beforeSystemVerify", before,
-                            "systemVerify", estimate.systemVerify, "peak", estimate.peak)
+                        print("RAW_MEMORY", encoding.rawValue, "width", size.width, "height", size.height, "rows", rows,
+                            "decode", estimate.decode, "render", estimate.render,
+                            "packaging", estimate.packaging, "encode", estimate.encode, "peak", estimate.peak)
                     }
                 }
             }
+        }
+    }
+
+    @Test func rowOwnersFollowRenderReadLimitAndGainChannels() {
+        let size = ExportPixelSize(width: 20017, height: 8600)
+        func estimate(rows: Int, channels: Int) -> ExportMemoryEstimate {
+            ExportMemoryEstimate.estimate(.init(source: source(.rawEDR, size: size),
+                photoSize: size, canvas: size, encoding: .isoGainMapJPEG, writer: .inHouse,
+                writesGainMap: true, isFramed: false, baseBitDepth: 8, writeRows: rows,
+                retainedBytes: 0, gainChannels: channels))
+        }
+        let mono = estimate(rows: 256, channels: 1), rgb = estimate(rows: 256, channels: 3)
+        // Two CPU row owners plus the contract's extra RGB tile packing scratch.
+        #expect(rgb.encode - mono.encode == 2 * 4 * 2 * size.width * 256 + (24 << 20))
+        #expect(estimate(rows: 4096, channels: 3) == estimate(rows: 512, channels: 3))
+        #expect(ExportMemoryEstimate.rowGPUBytes(maximumTextureDimension: 8192)
+            == ExportMemoryEstimate.rowGPUBytes(maximumTextureDimension: 16384))
+        #expect(ExportMemoryEstimate.rowGPUBytes(maximumTextureDimension: 16384) < 512 << 20)
+    }
+
+    @Test func fullSizeRAWAdmissionUsesRemainingBudgetAndRefusesDecoderShortfall() {
+        let size = ExportPixelSize(width: 12800, height: 8600)
+        for encoding in [ExportEncoding.adaptive, .isoGainMapJPEG] {
+            let input = request(.custom(.init(encoding: encoding, quality: 95)), source: source(.rawEDR, size: size))
+            // Scenario: a 5 GiB usable process ceiling with 1 GiB already held
+            // by the editor. Budget is remaining memory, not total device RAM.
+            let admitted = plan(input, available: (5 << 30) - (1 << 30))
+            #expect(admitted.isExecutable && admitted.photoSize == size)
+            #expect(admitted.memory.renderRows == 256)
+            let refused = plan(input, available: 2800 << 20)
+            #expect(!refused.isExecutable)
+            // Downscaling cannot remove native Apple decoder residency.
+            #expect(refused.memory.maxAdmissibleLongEdge == nil)
         }
     }
 

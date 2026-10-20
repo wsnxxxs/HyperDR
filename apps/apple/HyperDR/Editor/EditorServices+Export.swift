@@ -89,7 +89,7 @@ extension ExportHistoryItem {
         let report = try? JSONDecoder().decode(RecipeExportReport.self, from: record.reportJSON)
         let seconds = report?.stageSeconds ?? [:]
         func time(_ stages: RecipeExportStage...) -> Double { stages.reduce(0) { $0 + (seconds[$1.rawValue] ?? 0) } }
-        let stages = [time(.preparing, .model, .developing), time(.rendering), time(.encoding), time(.verifying)]
+        let stages = [time(.preparing, .model, .developing), time(.rendering) + (seconds["read"] ?? 0), time(.encoding), time(.verifying)]
         let size = PixelSize(width: resolved.width, height: resolved.height)
         let options = ExportChoices(resolved)
         let result = ExportResult(export: record.id.rawValue, fileName: record.name, byteCount: record.byteCount,

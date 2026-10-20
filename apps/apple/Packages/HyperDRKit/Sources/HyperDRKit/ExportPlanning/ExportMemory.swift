@@ -2,9 +2,10 @@
 import Darwin // os_proc_available_memory
 #endif
 import Foundation
+import HyperDRRender
 
 /// Peak footprint of each successive stage, not the sum of all stages
-/// (`modules/app/include/hyperdr/app/export_memory.hpp`, E6).
+/// Row rendering follows HyperDRRender/EXPORT_MEMORY.md.
 public struct ExportMemoryEstimate: Sendable, Hashable {
     public let decode: Int
     public let render: Int
@@ -162,11 +163,12 @@ extension ExportMemoryEstimate {
         let writesGainMap: Bool
         let isFramed: Bool
         let baseBitDepth: Int
-        /// GPU stripe rows. Does not change CPU owners or writer allocations.
+        /// Pull row height (clamped to Render's maximum); also sizes CPU row owners.
         let writeRows: Int
         let retainedBytes: Int
         var allowsRowInput: Bool = true
         var quality: Int = 90
+        var gainChannels: Int = 3
     }
 
     /// b-stage allocation model. Source, whole-plane owners, ABI copies and
@@ -215,27 +217,28 @@ extension ExportMemoryEstimate {
     /// Lazy Render plus pull writer. Decoder/CIRAWFilter residency remains a
     /// reserve, never an inferred guarantee from the absence of a full texture.
     private static func estimateRows(_ input: Input) -> ExportMemoryEstimate {
-        let size = input.source.pixelSize
-        let scale = min(1, 1024 / Double(max(size.width, size.height)))
-        let analysis = Int(ceil(Double(size.width) * scale)) * Int(ceil(Double(size.height) * scale))
-            * (input.source.domain == .dual ? 48 : 16)
-        let rawCache = input.source.domain == .rawEDR
-            ? (input.source.sensorSize ?? size).pixels * 16 : 0
-        let decoder = input.source.domain == .rawEDR ? rawCache : size.pixels * 4
-        let resident = analysis + decoder + input.retainedBytes + 32 * 1024 * 1024
+        // Empirical allowance, NOT an Apple decoder cap: one native decode at
+        // 24 B/pixel plus 512 MiB for bounded ROI graphs, packing scratch,
+        // analysis and framework/cache variation. Do not charge retired full
+        // Render source/output/composite textures, or scale tiles with canvas.
+        let nativePixels = max(input.source.pixelSize.pixels,
+            input.source.sensorSize?.pixels ?? 0)
+        let decoder = nativePixels * 24
+        // Until native auxiliary dimensions are available, reserve a full-size
+        // RGBAf gain resource for dual input; it is separate from base decode.
+        let auxiliary = input.source.domain == .dual ? input.source.pixelSize.pixels * 16 : 0
+        let resident = decoder + 512 * 1024 * 1024 + auxiliary + input.retainedBytes
         let gain = input.writesGainMap || input.encoding.isBT2100
-        let rows = min(input.writeRows, input.canvas.height)
-        // Preparation may scan 256 rows even when the pull writer uses fewer.
-        let scanRows = min(256, input.photoSize.height)
-        func sourceBand(_ count: Int) -> Int {
-            let nativeRows = min(size.height, Int(ceil(Double(min(count, input.photoSize.height) + 4)
-                * Double(size.height) / Double(input.photoSize.height))))
-            return size.width * nativeRows * (input.source.domain == .dual ? 48 : 16)
-        }
-        let scanGraph = input.photoSize.width * scanRows * 64
-        let graph = input.photoSize.width * min(rows, input.photoSize.height) * 64
-        let readback = input.canvas.width * rows * (gain ? 88 : 48)
-        let packageBand = input.canvas.width * rows * (gain ? 24 : 12)
+        let channels = gain ? input.gainChannels : 0
+        let rows = min(input.writeRows, PreparedExportRows.maximumReadRows, input.canvas.height)
+        // The returned Float arrays and native callback destination coexist.
+        // Bounded tile packing scratch is covered by the fixed ROI allowance.
+        let readback = 4 * (3 + channels) * input.canvas.width * rows
+        let packageBand = readback
+        // The empirical 512 MiB work allowance was measured for mono. RGB
+        // packing raises the tile high-water from 28 to 40 B/pixel (contract).
+        let rgbScratch = channels > 1 ? 12 * PreparedExportRows.maximumSourceTileSize.width
+            * PreparedExportRows.maximumReadRows : 0
         let heic = input.encoding == .adaptive || input.encoding.isBT2100
         // encode_heic_rows materializes one RGB Float slab (12 B/px), not
         // full-width YUV/float canvases. VT has at most four 512px pictures in
@@ -248,14 +251,14 @@ extension ExportMemoryEstimate {
         // Encoding retains one copy of the compressed sequences. During HEIF
         // assembly their payloads are borrowed by Items; only the final output
         // is additional. Slab/codec pictures have finished before assembly.
-        let rowResident = resident + sourceBand(rows) + graph + readback + packageBand
+        let rowResident = resident + rgbScratch + readback + packageBand
         let encode = rowResident + codec + (heic ? compressedCache / 2 : 0)
         let assembly = heic ? rowResident + 32 * 1024 * 1024 + compressedCache : encode
-        let render = resident + sourceBand(scanRows) + scanGraph
+        let render = resident + rgbScratch
         // Native verification releases input bands first and scans rows, or
         // decodes one 512×512 HEIC tile pair with bounded VT pictures. Keep the
         // reader's last ROI/graph priced while it remains alive in the caller.
-        let verifierResident = resident + sourceBand(rows) + graph
+        let verifierResident = resident
         let nativeWorkspace = (heic ? 512 * 512 * 40 : input.canvas.width * 128) + 8 * 1024 * 1024
         let nativeVerify = verifierResident + nativeWorkspace
         // No full auxiliary dictionary on native row output. JPEG/HEIC CI
@@ -265,6 +268,16 @@ extension ExportMemoryEstimate {
         return .init(decode: resident, render: render, composite: render,
                      packaging: assembly, encode: encode, verify: max(nativeVerify, systemVerify),
                      nativeVerify: nativeVerify, systemVerify: systemVerify)
+    }
+
+    /// GPU-only bound for a row export; decoder CPU caches are priced above.
+    /// Tile sizes and device limits belong to Render, never to Kit policy.
+    static func rowGPUBytes(maximumTextureDimension: Int) -> Int {
+        let source = PreparedExportRows.maximumSourceTileSize
+        let width = min(source.width, maximumTextureDimension)
+        let height = min(source.height, maximumTextureDimension)
+        let outputRows = min(PreparedExportRows.maximumReadRows, maximumTextureDimension)
+        return width * height * 48 + width * outputRows * 64 + 1024 * 1024 * 48
     }
 
     /// Upper envelope from 1MP random base + random gain native writer samples,

@@ -93,11 +93,21 @@ enum HDREditor {
         case .heicCarriedGainMap:
             try writeCarried(image, extent: extent, to: url, gainMapSource: gainMapSource)
         case .heicISOGainmap, .jpegISOGainmap, .heicISOHDR10:
-            guard let linearP3 = CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3),
-                  let cg = context.createCGImage(image, from: extent, format: .RGBAh, colorSpace: linearP3) else {
+            // writer-lab (docs/research/writer-lab.md): ImageIO only derives the gain map's
+            // end points from an explicit contentHeadroom (unlabelled images get 0 stops), and
+            // EncodeToISOHDR only keeps HDR when the pixels are already in a PQ colour space.
+            let pqOutput = variant == .heicISOHDR10
+            guard let space = CGColorSpace(name: pqOutput ? CGColorSpace.itur_2100_PQ : CGColorSpace.extendedLinearDisplayP3),
+                  let rendered = context.createCGImage(image, from: extent, format: pqOutput ? .RGBA16 : .RGBAh, colorSpace: space) else {
                 throw HDRError.cannotRender
             }
-            let request = variant == .heicISOHDR10 ? kCGImageDestinationEncodeToISOHDR : kCGImageDestinationEncodeToISOGainmap
+            var cg = rendered
+            if !pqOutput {
+                let headroom = Float(peak(of: image, extent: extent))
+                guard let labelled = CGImageCreateCopyWithContentHeadroom(headroom, rendered) else { throw HDRError.cannotRender }
+                cg = labelled
+            }
+            let request = pqOutput ? kCGImageDestinationEncodeToISOHDR : kCGImageDestinationEncodeToISOGainmap
             guard let destination = CGImageDestinationCreateWithURL(url as CFURL, variant.contentType.identifier as CFString, 1, nil) else {
                 throw HDRError.cannotCreateDestination
             }
@@ -108,6 +118,16 @@ enum HDREditor {
         }
         return WriteReport(variant: variant, seconds: Date().timeIntervalSince(start),
                            pixelSize: "\(Int(extent.width))×\(Int(extent.height))")
+    }
+
+    /// Brightest linear Display P3 channel value, at least 1 (SDR white).
+    private static func peak(of image: CIImage, extent: CGRect) -> Double {
+        guard let linearP3 = CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3) else { return 1 }
+        let maximum = image.applyingFilter("CIAreaMaximum", parameters: [kCIInputExtentKey: CIVector(cgRect: extent)])
+        var pixel = [Float](repeating: 0, count: 4)
+        context.render(maximum, toBitmap: &pixel, rowBytes: 16, bounds: maximum.extent,
+                       format: .RGBAf, colorSpace: linearP3)
+        return max(1, Double(max(pixel[0], pixel[1], pixel[2])))
     }
 
     private static func writeCarried(_ image: CIImage, extent: CGRect, to url: URL, gainMapSource: URL?) throws {

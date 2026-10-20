@@ -9,6 +9,7 @@
 #include "internal/metadata.hpp"
 
 #include <tiffio.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <array>
@@ -329,6 +330,13 @@ void write_sdr_tiff_rows(const EncodingRows& image, const PhotoMetadata& metadat
       if (TIFFWriteScanline(tiff.get(), row.data(), y) < 0)
         throw std::runtime_error("SDR TIFF scanline encoding failed");
     }
+    // TIFFClose cannot report failure. Commit the final strip and IFD while
+    // failures can still prevent publication, then close the owned fd explicitly.
+    if (!TIFFWriteDirectory(tiff.get()) || !TIFFFlush(tiff.get()))
+      throw std::runtime_error("SDR TIFF finalization failed");
+    const int fd = TIFFFileno(tiff.get());
+    TIFFCleanup(tiff.release());
+    if (::close(fd) != 0) throw std::runtime_error("SDR TIFF close failed");
   }
 }
 

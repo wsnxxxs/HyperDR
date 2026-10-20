@@ -249,6 +249,11 @@ std::vector<std::uint8_t> encode_sdr_jpeg(const FloatImage& image,
 namespace {
 struct FileCloser { void operator()(FILE* f) const { if(f) std::fclose(f); } };
 using FileHandle = std::unique_ptr<FILE,FileCloser>;
+void finish_file(FileHandle& file) {
+  if (std::fflush(file.get()) != 0) throw std::runtime_error("streaming JPEG flush failed");
+  if (std::fclose(file.release()) != 0) throw std::runtime_error("streaming JPEG close failed");
+}
+
 FileHandle output_file(const std::filesystem::path& path) {
   FileHandle f(std::fopen(path.c_str(),"wb"));
   if(!f) throw std::runtime_error("cannot open streaming JPEG output");
@@ -291,6 +296,7 @@ void base_rows_jpeg(const EncodingRows& source, const PhotoMetadata& photo, int 
 void write_sdr_jpeg_rows(const EncodingRows& source,const PhotoMetadata& photo,int quality,
                          ColorGamut gamut,const std::filesystem::path& path) {
   auto output=output_file(path);base_rows_jpeg(source,photo,quality,gamut,true,output.get());
+  finish_file(output);
 }
 void write_gain_map_jpeg_rows(const EncodingRows& base,const EncodingRows& gain,
     const GainMapMetadata& metadata,const PhotoMetadata& photo,int quality,bool frame,
@@ -307,6 +313,7 @@ void write_gain_map_jpeg_rows(const EncodingRows& base,const EncodingRows& gain,
       gain.channels==1?JCS_GRAYSCALE:JCS_RGB,frame?100:std::max(90,quality),nullptr,nullptr,true,row,auxiliary.get());
   auto output=output_file(path);
   write_gain_map_jpeg(primary.get(),auxiliary.get(),output.get(),metadata);
+  finish_file(primary);finish_file(auxiliary);finish_file(output);
 }
 
 namespace {

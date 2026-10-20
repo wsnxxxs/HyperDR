@@ -10,6 +10,8 @@
 #include <vector>
 #include <unistd.h>
 #include <mach/mach.h>
+#include <sys/resource.h>
+#include <signal.h>
 
 #define REQUIRE(x) do { if(!(x))throw std::runtime_error(#x); } while(0)
 struct Source {
@@ -76,6 +78,27 @@ int main(int argc,char** argv) try {
     footprint("after");if(std::string(argv[1])!="full")REQUIRE(source.largest<=rows);
     std::filesystem::remove_all(root);hyperdr_engine_destroy(engine);return 0;
   }
+  // The last strip/IFD can fail after all scanlines succeeded. No verification
+  // may be needed to detect this, and KEEP must survive every writer failure.
+  source.width=source.height=16;base.width=base.height=16;gain.plane.width=gain.plane.height=16;
+  for(const char* format:{"sdr-tiff","sdr-jpeg","iso-gainmap-jpeg","adaptive"}) {
+    hyperdr::write_text_file_atomic(stream,"KEEP",false);
+    request.format=format;request.output_path=stream_path.c_str();
+    request.parameters_json="{\"verify\":false,\"overwrite\":true}";
+    request.gain=std::string(format).starts_with("sdr-")?nullptr:&gain;
+    struct rlimit original{};REQUIRE(getrlimit(RLIMIT_FSIZE,&original)==0);
+    auto limited=original;limited.rlim_cur=128;
+    auto previous=signal(SIGXFSZ,SIG_IGN);
+    REQUIRE(setrlimit(RLIMIT_FSIZE,&limited)==0);
+    char* report=nullptr;error=nullptr;
+    const auto code=hyperdr_package_rows(engine,&request,13,Source::read,&source,&report,&error);
+    REQUIRE(setrlimit(RLIMIT_FSIZE,&original)==0);signal(SIGXFSZ,previous);
+    REQUIRE(code!=0);hyperdr_error_free(error);hyperdr_string_free(report);
+    REQUIRE(hyperdr::read_binary_file(stream)==std::vector<std::uint8_t>({'K','E','E','P'}));
+    std::filesystem::remove(stream);
+  }
+  source.width=base.width=gain.plane.width=65;source.height=base.height=gain.plane.height=533;
+  request.parameters_json="{\"quality\":93}";
   REQUIRE(!hyperdr_package_rows_supported("avif-pq"));
   for(const char* format:{"sdr-tiff","sdr-jpeg","iso-gainmap-jpeg","adaptive","pq","hlg"}) {
     REQUIRE(hyperdr_package_rows_supported(format));

@@ -777,8 +777,9 @@ std::string package_image_rows(const PackageRequest& request,std::uint32_t rows,
   check_cancelled();
   const int fd=::open(staged.path.c_str(),O_RDONLY|O_CLOEXEC);
   if(fd<0)throw std::runtime_error("cannot open staged package");
-  const int synced=::fsync(fd);::close(fd);
-  if(synced)throw std::runtime_error("cannot flush staged package");
+  const int synced=::fsync(fd);
+  const int closed=::close(fd);
+  if(synced || closed)throw std::runtime_error("cannot flush or close staged package");
   if(request.overwrite) {
     if(::rename(staged.path.c_str(),request.output.c_str()))throw std::system_error(errno,std::generic_category(),"cannot publish package");
   } else {

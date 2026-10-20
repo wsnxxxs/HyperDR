@@ -17,7 +17,7 @@ private final class ChangingExportMemoryBudget: ExportMemoryBudget {
     func availableBytes() -> Int? { bytes.withLock { $0 } }
 }
 
-private struct StripeFake: ExportStripeRendering, ExportRowRendering {
+struct StripeFake: ExportStripeRendering, ExportRowRendering {
     var metadata: ExportGainMetadata? = nil
     var gainScale: Float = 2
     var before: @Sendable () async throws -> Void = {}
@@ -78,7 +78,7 @@ private struct FakeRows: ExportRowSource {
     }
 }
 
-private struct RecipeExportEnvironment {
+struct RecipeExportEnvironment {
     let root: URL
     let configuration: KitConfiguration
     let engine: Engine

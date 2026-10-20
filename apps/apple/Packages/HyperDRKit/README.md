@@ -44,7 +44,8 @@ or cancellation returns `deliveryError` with the verified version retained; a
 render/encode/verification failure removes the unfinished version. Successful
 file delivery writes `SavedMark` before the result is returned.
 
-This is not a streaming writer. Admission includes full source textures, CPU
+Render preparation scans the photo and then renders the output a second time;
+this is not a streaming writer. Admission includes full source textures, CPU
 planes, package copies, codec workspace and serial verification. Render stripes
 may shrink from 256 to 128/64 rows; CPU/codec full-plane costs do not shrink.
 Unmeasurable budgets use an explicit conservative 256 MiB limit. iOS uses 80% of
@@ -62,3 +63,11 @@ incremental writers are later batches.
 The old JobRunner/preview/EditOptions files remain for the Mac caller's pending
 switch. Recipe history uses `recipeSnapshot` and `resolvedSnapshot`; the legacy
 options field is empty for new exports and is never used to restore a Recipe.
+
+The real RenderEngine conformance is integrated from `510e39cc`. Service tests
+exercise all eight encodings through the real Recipe graph and both readers,
+including a caption/shadow card through gain-map, SDR and PQ paths; a transparent
+PNG against linear-black compositing; and an authored RGB/nonzero-offset pair
+through preservation, writer resplit, a narrower destination and frame neutrality.
+Kit records the planner's output-ceiling constraint even when Render folds it
+into the edited authored pair before its capability scan needs a further resplit.

@@ -10,6 +10,16 @@ foreach(linkage shared static)
   endif()
   add_test(NAME capi_${linkage}_test COMMAND capi_${linkage}_test)
 endforeach()
+if(HYPERDR_WITH_CODECS)
+  # The packaging entry point writes real files, so it needs the encoder paths.
+  # Synthetic planes keep it independent of the RAW and HEIC fixtures.
+  add_executable(capi_package_test package_test.c)
+  set_target_properties(capi_package_test PROPERTIES
+    C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+  target_link_libraries(capi_package_test PRIVATE HyperDR::capi_static)
+  add_test(NAME capi_package_test COMMAND capi_package_test)
+endif()
 if(APPLE)
   add_library(capi_test_clock SHARED frozen_time.c)
   set_target_properties(capi_test_clock PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})

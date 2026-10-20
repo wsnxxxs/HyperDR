@@ -20,7 +20,7 @@
 extern "C" {
 #endif
 
-#define HYPERDR_ABI_VERSION 2
+#define HYPERDR_ABI_VERSION 3
 
 typedef struct hyperdr_error {
   const char* code;
@@ -150,6 +150,93 @@ HYPERDR_API hyperdr_cancel* hyperdr_cancel_create(void);
 HYPERDR_API void hyperdr_cancel_request(hyperdr_cancel*);
 HYPERDR_API void hyperdr_cancel_destroy(hyperdr_cancel*);
 HYPERDR_API void hyperdr_buffer_free(hyperdr_buffer*);
+
+/* --- packaging --------------------------------------------------------------
+ * The P7 GPU render graph renders in Swift, so the engine's export entry point
+ * is a writer rather than a converter: it takes the finished planes, quantizes
+ * and dithers the gain codes, writes the container with the same encoders
+ * `hyperdr_convert` uses, verifies the file by decoding it, and reports what it
+ * wrote. Format, quality and depth mean exactly what they mean in a convert
+ * request; nothing is graded, cropped or resized here.
+ *
+ * Input contract (docs/architecture/gpu-pipeline.md §3):
+ * - SDR base: linear extended Display P3, D65, SDR white = 1.0. Three
+ *   interleaved float32 channels. Values above 1 and below 0 are allowed; every
+ *   sample must be finite. Half precision is not accepted: the writers allocate
+ *   float images anyway, so a caller converting from half loses nothing.
+ * - Gain plane: log2 stops over the base's SDR white, one or three interleaved
+ *   float32 channels, at the same pixel grid as the base (this version stores
+ *   the codes 1:1). One channel means the same multiplier applies to RGB.
+ * - ISO 21496-1 parameters travel verbatim: per-channel base and alternate
+ *   offsets in SDR-white-relative units, base and alternate headroom in log2
+ *   stops, and the gain working gamut. Only "display-p3" (the base's own
+ *   space) is accepted, because no writer converts a grid between gamuts.
+ * - Gain is stored by "adaptive" (one channel) and "iso-gainmap-jpeg" (one or
+ *   three). The BT.2100 formats ("pq", "hlg", "avif-pq", "avif-hlg")
+ *   reconstruct an HDR rendition from the pair and store no gain map. The SDR
+ *   formats ("sdr-jpeg", "sdr-tiff") store none and ignore the gain plane.
+ *   A combination a writer cannot represent is refused with the
+ *   "unsupported_format" code rather than being approximated.
+ *   "adaptive" writes ISO 21496-1's Apple form, which declares alternate
+ *   headroom equal to the map's largest gain: a positive alternate_headroom is
+ *   used as that declared capacity, and a gain above it is refused. Zero or
+ *   negative means "declare the plane's own maximum".
+ * - Exif travels as a serialized block from the source file; the writer
+ *   re-emits the safe portable subset (as an export always has). Orientation is
+ *   written as 1, because the planes are expected upright. There is no ICC
+ *   input: the base space is fixed by this contract, so each writer stores the
+ *   profile for it.
+ * - Whole planes only. A banded, row-callback form for iPhone memory limits is
+ *   deliberately not invented yet: it arrives with P7-3's chunked export, and
+ *   this struct grows then. TODO(P7-3): chunked input.
+ *
+ * The report (hyperdr.package/v1) states the format, size, byte count, the
+ * verification performed, and the gain parameters actually written (not the
+ * ones requested); "gain": null means the format stored none, and
+ * "gain.stored": false means the gain only fed a BT.2100 rendition. Its
+ * metadata.exif says whether a source Exif block was carried; the writers
+ * always emit a minimal block of their own. Both planes are read once, during
+ * the call, so the caller may release them when it returns.
+ */
+typedef struct hyperdr_package_plane {
+  /* Tightly packed rows of `width * channels` float32 samples, or rows at
+   * `row_bytes` when that is non-zero. */
+  const void* data;
+  size_t row_bytes;
+  uint32_t width, height, channels;
+  uint32_t format; /* HYPERDR_PLANE_F32 */
+} hyperdr_package_plane;
+
+typedef struct hyperdr_package_gain {
+  hyperdr_package_plane plane;
+  /* Per channel; only [0] is used for a one-channel map. */
+  float base_offset[3];
+  float alternate_offset[3];
+  float base_headroom;      /* log2 stops */
+  float alternate_headroom; /* log2 stops */
+  /* UTF-8; NULL means "display-p3". */
+  const char* working_gamut;
+} hyperdr_package_gain;
+
+typedef struct hyperdr_package_request {
+  const char* output_path;    /* UTF-8; required */
+  const char* format;         /* UTF-8 canonical name; required */
+  /* Optional JSON object: quality (0..100), depth (8 or 10, Adaptive base),
+   * hevc_preset ("slow" or "medium"), gamut ("srgb" or "p3", SDR output
+   * only), verify (default true), overwrite (default false). Unknown keys are
+   * rejected as invalid_options. */
+  const char* parameters_json;
+  const hyperdr_package_plane* sdr; /* required */
+  const hyperdr_package_gain* gain; /* optional */
+  const void* exif;                 /* optional serialized Exif block */
+  size_t exif_size;
+  hyperdr_cancel* cancel;           /* optional */
+} hyperdr_package_request;
+
+/* Runs on the calling thread and honours the cancel token between stages. The
+ * report belongs to the library; free it with hyperdr_string_free. */
+HYPERDR_API int hyperdr_package(hyperdr_engine*, const hyperdr_package_request* request,
+                                char** out_report_json, hyperdr_error** err);
 
 #ifdef __cplusplus
 }

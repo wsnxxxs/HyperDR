@@ -71,6 +71,11 @@ void verify_sdr_tiff(const std::vector<std::uint8_t>& bytes);
     const AvifGridLayout* layout = nullptr);
 
 // Decode-verification. Each throws with a specific reason on failure.
+//
+// `verify_encoded_output` is the one dispatch from an encoding to the check
+// that proves the file it wrote opens; the converter and the packaging entry
+// point both use it so neither can publish an unverified file.
+void verify_encoded_output(const std::vector<std::uint8_t>& bytes, HdrEncoding encoding);
 void verify_heic_decodable(const std::vector<std::uint8_t>& bytes);
 void verify_heic_decodable(const std::vector<std::uint8_t>& bytes,
                            HdrEncoding encoding);

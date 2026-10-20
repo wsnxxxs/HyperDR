@@ -58,7 +58,9 @@ add_subdirectory(modules/capi)
 
 # --- install and package ----------------------------------------------------
 
-install(TARGETS HyperDR RUNTIME DESTINATION bin COMPONENT Runtime)
+if(TARGET HyperDR)
+  install(TARGETS HyperDR RUNTIME DESTINATION bin COMPONENT Runtime)
+endif()
 
 hyperdr_install_model_assets()
 # PyTorch checkpoints, optimizer state, virtual environments and private

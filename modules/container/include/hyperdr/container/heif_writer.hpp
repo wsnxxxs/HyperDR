@@ -4,6 +4,7 @@
 // No encoder, decoder or filesystem operations are part of this interface.
 #include "hyperdr/container/iso_gain_map.hpp"
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -66,5 +67,12 @@ struct HeifWriteOptions {
 [[nodiscard]] std::vector<std::uint8_t> write_heif(
     const HeifEncodedImage& base, const HeifEncodedImage* gain = nullptr,
     const HeifWriteOptions& options = {});
+
+// Synchronous append-only sink. Each borrowed span is valid only during the
+// callback; write it completely or throw. Exceptions/cancellation propagate.
+// Metadata offsets are calculated before the first byte; no seek is needed.
+using HeifByteSink = std::function<void(std::span<const std::uint8_t>)>;
+void write_heif_to(const HeifByteSink& sink, const HeifEncodedImage& base,
+    const HeifEncodedImage* gain = nullptr, const HeifWriteOptions& options = {});
 
 } // namespace hyperdr

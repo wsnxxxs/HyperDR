@@ -45,7 +45,31 @@ Core Image at the declared alternate headroom and an intermediate weight; no
 assumption about ImageIO's default viewing headroom is used. Original package
 JSON stays untouched inside `RecipeExportReport`; system evidence is separate.
 The ordinary SDR HEIC path uses ImageIO without auxiliary data and is checked by
-our HEIF decoder before system readback. Other encodings use `Engine.package`.
+our HEIF decoder before system readback. Gain-map HEIC8 uses an explicit nonlinear
+Display P3 RGBA8 CGImage and our gamma-1 quantized auxiliary gain plus complete ISO
+metadata; it never asks ImageIO to generate gain or an SDR base. Native probe
+finishes before ImageIO metadata/pixel checks. `RecipeExportReport.imageIO`
+records the written gain parameters, with no fabricated package report.
+HEIC10 and other encodings continue through `Engine.package`.
+
+HEIC8 normally selects ImageIO. If its separate CGImage/auxiliary handoff and
+encoder estimate does not fit, admission tries our writer without changing
+encoding, quality or dimensions (`memoryFallback`). Framed HEIC8 always uses our
+writer (`frameGainProtection`): the manual ImageIO compression experiment leaked
+up to five gain codes onto a non-block-aligned mat. Both reasons and the selected
+writer are frozen in the resolved snapshot and report. The memory policy reserves
+14 B/px for RGBA8/RGB-gain handoff copies plus 32 B/px codec workspace and 64 MiB
+framework allowance beside the owner and source; it is a conservative policy,
+not a measured iOS encoder limit.
+
+The opt-in `writerComparisonMeasurement` test takes
+`HYPERDR_HEIC8_BENCH_WRITER=imageIO|inHouse` and optional
+`HYPERDR_HEIC8_BENCH_QUALITY` (default 90). Run each writer in a separate process
+with `swift test --filter writerComparisonMeasurement`. It generates the same
+2048×1536 synthetic planes and writes per-writer JSON and HEIC to
+`/tmp/p7-heic8-lab`; metrics are SDR/sRGB 255 codes and HDR/PQ 1023 codes at 203-nit
+SDR white. `writePeakBytes` is process `ru_maxrss` sampled before verification and
+metrics, and includes the input owners and test runtime, not GPU total residency.
 
 A verified file, frozen snapshot, evidence and SDR thumbnail are atomically
 published as history before delivery. Nil destination returns that file for

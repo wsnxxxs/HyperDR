@@ -65,7 +65,7 @@ public enum ExportWriter: String, Sendable, Hashable, Codable {
     /// libavif, used only for AVIF.
     case libavif
 
-    /// ABI 4 capabilities for this exact output combination. b accumulates full
+    /// Package/ImageIO capabilities for this exact output combination. We accumulate full
     /// planes; none of these writers is a streaming plane consumer.
     public func capabilities(encoding: ExportEncoding, bitDepth: Int,
                              gainChannels: Int, workingGamut: String = "display-p3") -> ExportWriterCapabilities {
@@ -73,31 +73,34 @@ public enum ExportWriter: String, Sendable, Hashable, Codable {
             : encoding == .sdrTIFF ? bitDepth == 16
             : encoding.isBT2100 ? bitDepth == 10 : bitDepth == 8
         let writerMatches = self == .inHouse || (self == .libavif && encoding.isAVIF)
-            || (self == .imageIO && encoding == .adaptive && bitDepth == 8 && gainChannels == 0)
-        let rgb = encoding != .adaptive && self != .imageIO
+            || (self == .imageIO && encoding == .adaptive && bitDepth == 8)
+        let manualISO = self == .imageIO && encoding == .adaptive && bitDepth == 8
+        let rgb = manualISO || (encoding != .adaptive && self != .imageIO)
         let supported = depth && writerMatches && workingGamut == "display-p3"
             && [0, 1, 3].contains(gainChannels) && (gainChannels != 3 || rgb)
         return .init(supported: supported, supportsThreeChannelGain: rgb,
-                     supportsSignedGain: encoding != .adaptive,
-                     requiresGainMaximumHeadroom: encoding == .adaptive)
+                     supportsSignedGain: manualISO || encoding != .adaptive,
+                     requiresGainMaximumHeadroom: encoding == .adaptive && !manualISO)
     }
 
 }
 
 /// Why the plan chose that writer, in the words of gpu-pipeline §11.x.
 public enum ExportWriterReason: String, Sendable, Hashable, Codable {
-    /// writer-lab: higher PSNR at equal file size (ISO gain-map JPEG).
+    /// writer-lab: higher PSNR at equal file size (ISO JPEG and 8-bit HEIC).
     case qualityAtEqualSize
     /// writer-lab: ImageIO's quality edge is negligible or equal, and our peak
     /// is a fraction of it (10-bit HEIC pairs, PQ HEIC, HLG HEIC).
     case peakMemory
-    /// libavif is the only AVIF encoder we have; ImageIO writes 8-bit SDR only.
+    /// libavif is the only AVIF writer used by this export service.
     case onlyEncoder
     /// writer-lab did not compare this path (SDR JPEG / TIFF, and the 8-bit SDR
     /// HEIC that carries no gain map), so the writer that owns the format is used.
     case noComparison
     /// The preferred writer would not fit in memory; this one does.
     case memoryFallback
+    /// ImageIO has no verified E5 protection for the mat after lossy coding.
+    case frameGainProtection
 }
 
 /// The custom-format page: what the eight encoding cards plus the gamut and

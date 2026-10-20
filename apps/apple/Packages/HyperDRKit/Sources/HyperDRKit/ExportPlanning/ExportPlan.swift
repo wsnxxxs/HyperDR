@@ -313,8 +313,11 @@ public enum ExportPlanner {
             }
         }
 
-        let preferred = preferredWriter(encoding: encoding, writesGainMap: writesGainMap,
+        var preferred = preferredWriter(encoding: encoding, writesGainMap: writesGainMap,
                                         baseBitDepth: baseBitDepth)
+        if request.frame.isFramed && encoding == .adaptive && writesGainMap && baseBitDepth == 8 {
+            preferred = (.inHouse, .frameGainProtection)
+        }
         // Admission prices what is written, so the canvas is the size after the
         // destination's long-edge limit.
         let admission = admitMemory(request: request, preferred: preferred,
@@ -398,7 +401,7 @@ public enum ExportPlanner {
         case .sdrJPEG, .sdrTIFF:
             (.inHouse, .noComparison)
         case .adaptive:
-            writesGainMap ? (.inHouse, .peakMemory) : (.imageIO, .noComparison)
+            writesGainMap ? (baseBitDepth == 8 ? (.imageIO, .qualityAtEqualSize) : (.inHouse, .peakMemory)) : (.imageIO, .noComparison)
         }
     }
 
@@ -452,25 +455,31 @@ public enum ExportPlanner {
                                     encoding: ExportEncoding, writesGainMap: Bool,
                                     baseBitDepth: Int,
                                     budget: any ExportMemoryBudget) -> Admission {
-        func estimate(rows: Int) -> ExportMemoryEstimate {
+        func estimate(writer: ExportWriter, rows: Int) -> ExportMemoryEstimate {
             ExportMemoryEstimate.estimate(ExportMemoryEstimate.Input(
                 source: request.source, photoSize: photoSize, canvas: size,
-                encoding: encoding, writer: preferred.writer,
+                encoding: encoding, writer: writer,
                 writesGainMap: writesGainMap, isFramed: request.frame.isFramed,
                 baseBitDepth: baseBitDepth, writeRows: rows, retainedBytes: request.resources.bytes))
         }
         let available = budget.availableBytes() ?? 256 * 1024 * 1024
-        let gainMap = gainMapPlan(request: request, writer: preferred.writer, writesGainMap: writesGainMap)
+        let canFallback = preferred.writer == .imageIO && encoding == .adaptive && writesGainMap && baseBitDepth == 8
+        let writers: [ExportWriter] = canFallback ? [preferred.writer, .inHouse] : [preferred.writer]
         for rows in [256, 128, 64] {
-            let peak = estimate(rows: rows)
-            if peak.fits(in: available) {
-                return Admission(writer: preferred.writer, reason: preferred.reason, gainMap: gainMap,
-                                 estimate: peak, availableBytes: available,
-                                 degradation: rows == 256 ? nil : .renderRows(rowHeight: rows),
-                                 renderRows: rows, blockers: [])
+            for writer in writers {
+                let peak = estimate(writer: writer, rows: rows)
+                if peak.fits(in: available) {
+                    let fallback = writer != preferred.writer
+                    return Admission(writer: writer, reason: fallback ? .memoryFallback : preferred.reason,
+                        gainMap: gainMapPlan(request: request, writer: writer, writesGainMap: writesGainMap),
+                        estimate: peak, availableBytes: available,
+                        degradation: fallback ? .switchedWriter(writer) : rows == 256 ? nil : .renderRows(rowHeight: rows),
+                        renderRows: rows, blockers: [])
+                }
             }
         }
-        let shortfall = estimate(rows: 64)
+        let gainMap = gainMapPlan(request: request, writer: preferred.writer, writesGainMap: writesGainMap)
+        let shortfall = writers.map { estimate(writer: $0, rows: 64) }.min { $0.peak < $1.peak }!
         return Admission(writer: preferred.writer, reason: preferred.reason, gainMap: gainMap,
                          estimate: shortfall, availableBytes: available, degradation: .refused, renderRows: 64,
                          blockers: [ExportBlocker(code: "export_memory_exceeded",

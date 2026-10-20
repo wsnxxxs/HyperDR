@@ -102,6 +102,7 @@ public struct ResolvedExportSnapshot: Sendable, Codable, Equatable {
     public let renderContractVersion: Int
     public let encoding: ExportEncoding
     public let writer: ExportWriter
+    public let writerReason: ExportWriterReason?
     public let gamut: ExportColorGamut
     public let bitDepth, quality, width, height: Int
     public let ceilingStops: Double?
@@ -119,7 +120,7 @@ public struct ResolvedExportSnapshot: Sendable, Codable, Equatable {
                 report: ExportRenderReport? = nil) {
         self.modelIdentity = modelIdentity
         self.snapshot = snapshot; selection = plan.choice; profileVersion = plan.destination?.profile.version ?? 1; renderContractVersion = 1
-        encoding = plan.encoding; writer = plan.writer; gamut = plan.gamut; bitDepth = plan.baseBitDepth
+        encoding = plan.encoding; writer = plan.writer; writerReason = plan.writerReason; gamut = plan.gamut; bitDepth = plan.baseBitDepth
         quality = plan.quality; width = plan.size.width; height = plan.size.height; ceilingStops = plan.peakStops
         self.resolvedAutomatic = resolvedAutomatic; self.resplitReasons = resplitReasons.sorted()
         gain = report?.gain.map(ResolvedExportGain.init)

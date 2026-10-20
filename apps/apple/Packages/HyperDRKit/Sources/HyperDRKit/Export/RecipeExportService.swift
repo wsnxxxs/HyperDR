@@ -6,13 +6,16 @@ import HyperDRRender
 
 public struct RecipeExportReport: Sendable, Codable {
     public let schema: String
-    /// Unmodified hyperdr.package/v1 bytes, absent only for ordinary SDR HEIC.
+    /// Unmodified hyperdr.package/v1 bytes, absent for ImageIO HEIC writes.
     public let packageJSON: Data?
     public let firstReaderJSON: Data?
     public let system: SystemExportVerification
     public let stageSeconds: [String: Double]
     public let resplitReasons: [String]
     public let transparentBackground: String
+    public let writer: ExportWriter?
+    public let writerReason: ExportWriterReason?
+    public let imageIO: ImageIOGainWriteReport?
 }
 
 /// One operation at a time. Dedicated RenderEngine caches can be discarded
@@ -223,7 +226,20 @@ public actor RecipeExportService: RecipeExportServicing {
             emit(.encoding)
             var packageJSON: Data?
             var firstReaderJSON: Data?
-            if plan.encoding == .adaptive && !plan.gainMap.writesGainMap {
+            var imageIOReport: ImageIOGainWriteReport?
+            if plan.writer == .imageIO && plan.gainMap.writesGainMap {
+                guard let gain = owner.gainPlane, let metadata = report.gain else { throw RecipeExportError.invalidStripes }
+                imageIOReport = try ImageIOHEICWriter.write(base: owner.basePlane, gain: gain, metadata: metadata,
+                    to: file, quality: plan.quality)
+                emit(.verifying)
+                let probe = try await engine.probe(file)
+                guard probe.width == plan.size.width, probe.height == plan.size.height,
+                      probe.orientation == 1, probe.inputDomain == "dual-rendition",
+                      probe.headroom.isFinite, probe.headroom >= 1 else {
+                    throw RecipeExportError.verificationFailed("heif_gain_readback")
+                }
+                firstReaderJSON = probe.rawJSON
+            } else if plan.encoding == .adaptive && !plan.gainMap.writesGainMap {
                 try SDRHEICWriter.write(owner.basePlane, to: file, quality: plan.quality)
                 emit(.verifying)
                 let probe = try await engine.probe(file)
@@ -255,6 +271,7 @@ public actor RecipeExportService: RecipeExportServicing {
                 emit(.verifying)
             }
             // package's own verification has returned and released its decode.
+            if let imageIOReport { try ImageIOHEICWriter.verify(file, expected: imageIOReport) }
             let system = try ExportVerification.system(file, plan: plan, gainMetadata: report.gain)
             try Task.checkCancellation()
             try validateRevision(try await sessions.session(session), snapshot: snapshot)
@@ -268,7 +285,8 @@ public actor RecipeExportService: RecipeExportServicing {
             timings[stage.rawValue, default: 0] += Date().timeIntervalSince(stageStart)
             let evidence = RecipeExportReport(schema: "hyperdr.recipe-export/v1", packageJSON: packageJSON,
                 firstReaderJSON: firstReaderJSON, system: system, stageSeconds: timings,
-                resplitReasons: resolved.resplitReasons, transparentBackground: "black-sdr")
+                resplitReasons: resolved.resplitReasons, transparentBackground: "black-sdr",
+                writer: plan.writer, writerReason: plan.writerReason, imageIO: imageIOReport)
             emit(.publishing)
             var record = try await sessions.publishRecipeExport(session, export: prepared.id, name: file.lastPathComponent,
                 resolved: resolved, reportJSON: JSONEncoder().encode(evidence), thumbnail: thumbnail)

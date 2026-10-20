@@ -472,7 +472,8 @@ public enum ExportPlanner {
                 encoding: encoding, writer: writer,
                 writesGainMap: writesGainMap, isFramed: request.frame.isFramed,
                 baseBitDepth: baseBitDepth, writeRows: rows, retainedBytes: request.resources.bytes,
-                allowsRowInput: request.allowsRowInput))
+                allowsRowInput: request.allowsRowInput,
+                quality: request.choice.customFormat?.quality ?? request.choice.destination!.profile.quality))
         }
         let available = budget.availableBytes() ?? 256 * 1024 * 1024
         let canFallback = preferred.writer == .imageIO && encoding == .adaptive && writesGainMap && baseBitDepth == 8

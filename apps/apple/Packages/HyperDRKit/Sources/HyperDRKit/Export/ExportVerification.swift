@@ -120,15 +120,14 @@ enum ExportVerification {
         let hdr = plan.peakStops != nil
         let options: [CFString: Any] = [kCGImageSourceShouldCache: false,
             kCGImageSourceSubsampleFactor: 8, kCGImageSourceShouldAllowFloat: true,
+            kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 256,
             kCGImageSourceDecodeRequest: hdr ? kCGImageSourceDecodeToHDR : kCGImageSourceDecodeToSDR]
-        guard let decoded = CGImageSourceCreateImageAtIndex(source, 0, options as CFDictionary) else {
+        guard let decoded = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
             throw RecipeExportError.verificationFailed("imageio_readback")
         }
-        guard decoded.width <= (((plan.size.width + 7) / 8 + 1) & ~1),
-              decoded.height <= (((plan.size.height + 7) / 8 + 1) & ~1) else {
-            // JPEG subsampling rounds its output to even MCU dimensions.
-            // ImageIO can ignore unsupported subsampling. Never silently accept
-            // a full-size decoded image under the reduced readback budget.
+        guard decoded.width <= 256, decoded.height <= 256 else {
+            // Own only a fixed-size readback, even when the codec's subsampling
+            // factor is unsupported. Apple decoder workspace remains a reserve.
             throw RecipeExportError.verificationFailed("system_subsample_unsupported")
         }
         let headroom = decoded.contentHeadroom

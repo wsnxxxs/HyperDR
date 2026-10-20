@@ -466,7 +466,7 @@ struct ExportMemoryPlanTests {
             // Source/analysis cache belongs to decode; the verification workspace
             // remains one row set or tile pair at the same width.
             #expect(tall.nativeVerify - tall.decode == short.nativeVerify - short.decode)
-            #expect(tall.systemVerify - tall.decode > short.systemVerify - short.decode)
+            #expect(tall.systemVerify - tall.decode == short.systemVerify - short.decode)
             #expect(tall.verify == max(tall.nativeVerify, tall.systemVerify))
         }
         for encoding in [ExportEncoding.avifPq, .adaptive] {
@@ -488,28 +488,31 @@ struct ExportMemoryPlanTests {
     }
 
     @Test func fullSizeRAWMemoryEstimates() {
-        let size = ExportPixelSize(width: 9504, height: 6336)
-        for encoding in [ExportEncoding.adaptive, .isoGainMapJPEG] {
-            let planned = plan(request(.custom(.init(encoding: encoding, gamut: .p3, quality: 95)),
-                source: source(.rawEDR, size: size)))
-            #expect(planned.memory.usesRowInput && planned.writer == .inHouse)
-            for rows in [256, 128, 64] {
-                let estimate = ExportMemoryEstimate.estimate(.init(source: source(.rawEDR, size: size),
-                    photoSize: size, canvas: size, encoding: encoding, writer: .inHouse, writesGainMap: true,
-                    isFramed: false, baseBitDepth: encoding == .adaptive ? 10 : 8, writeRows: rows, retainedBytes: 0))
-                let workspace = (encoding == .adaptive ? 512*512*40 : size.width*128) + 8*1024*1024
-                let before = estimate.nativeVerify - workspace + size.pixels*40
-                #expect(estimate.systemVerify < before)
-                if rows == 256 { #expect(estimate == planned.memory.estimate) }
-                if ProcessInfo.processInfo.environment["HYPERDR_MEMORY_ESTIMATES"] == "1" {
-                    let oldSlab = size.width * min(512, size.height) * 40
-                    let newSlab = size.width * min(512, size.height) * 12 + 32*1024*1024
-                    let oldEncode = estimate.encode + (encoding == .adaptive ? oldSlab - newSlab : 0)
-                    print("RAW_MEMORY", encoding.rawValue, "rows", rows, "beforeEncode", oldEncode,
-                        "decode", estimate.decode, "render", estimate.render, "composite", estimate.composite,
-                        "packaging", estimate.packaging, "encode", estimate.encode,
-                        "nativeVerify", estimate.nativeVerify, "beforeSystemVerify", before,
-                        "systemVerify", estimate.systemVerify, "peak", estimate.peak)
+        for size in [ExportPixelSize(width: 9504, height: 6336), ExportPixelSize(width: 12800, height: 8600)] {
+            for encoding in [ExportEncoding.adaptive, .isoGainMapJPEG] {
+                let planned = plan(request(.custom(.init(encoding: encoding, gamut: .p3, quality: 95)),
+                    source: source(.rawEDR, size: size)))
+                #expect(planned.memory.usesRowInput && planned.writer == .inHouse)
+                for rows in [256, 128, 64] {
+                    let estimate = ExportMemoryEstimate.estimate(.init(source: source(.rawEDR, size: size),
+                        photoSize: size, canvas: size, encoding: encoding, writer: .inHouse, writesGainMap: true,
+                        isFramed: false, baseBitDepth: encoding == .adaptive ? 10 : 8, writeRows: rows, retainedBytes: 0, quality: 95))
+                    let workspace = (encoding == .adaptive ? 512*512*40 : size.width*128) + 8*1024*1024
+                    let before = estimate.nativeVerify - workspace + size.pixels*40
+                    #expect(estimate.systemVerify < before)
+                    if rows == 256 { #expect(estimate == planned.memory.estimate) }
+                    if ProcessInfo.processInfo.environment["HYPERDR_MEMORY_ESTIMATES"] == "1" {
+                        let oldSlab = size.width * min(512, size.height) * 40
+                        let newSlab = size.width * min(512, size.height) * 12 + 32*1024*1024
+                        let cacheDelta = encoding == .adaptive
+                            ? size.pixels * 10 + 8*1024*1024 - ExportMemoryEstimate.compressedHEICCache(pixels: size.pixels, bitDepth: 10, quality: 95) : 0
+                        let oldEncode = estimate.encode + (encoding == .adaptive ? oldSlab - newSlab : 0) + cacheDelta
+                        print("RAW_MEMORY", encoding.rawValue, "width", size.width, "height", size.height, "rows", rows, "beforeEncode", oldEncode,
+                            "decode", estimate.decode, "render", estimate.render, "composite", estimate.composite,
+                            "packaging", estimate.packaging, "encode", estimate.encode,
+                            "nativeVerify", estimate.nativeVerify, "beforeSystemVerify", before,
+                            "systemVerify", estimate.systemVerify, "peak", estimate.peak)
+                    }
                 }
             }
         }

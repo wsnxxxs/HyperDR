@@ -51,7 +51,7 @@ public struct SystemExportMemoryBudget: ExportMemoryBudget {
     /// iOS devices are asked directly, reserving 20% of reported available memory.
     /// A missing physical-device measurement never uses a fraction of RAM.
     /// Simulator memory belongs to the host Mac and does not predict device
-    /// capacity: 61MP export admission must be validated on a real device.
+    /// capacity: 110MP original-size export must be validated on a real device.
     public let physicalShare: Double
 
     public init(physicalShare: Double = 0.5) { self.physicalShare = physicalShare }
@@ -162,6 +162,7 @@ extension ExportMemoryEstimate {
         let writeRows: Int
         let retainedBytes: Int
         var allowsRowInput: Bool = true
+        var quality: Int = 90
     }
 
     /// b-stage allocation model. Source, whole-plane owners, ABI copies and
@@ -238,8 +239,8 @@ extension ExportMemoryEstimate {
         // Compressed tiles and the assembled container are accounted below.
         let codec = heic ? input.canvas.width * min(512, input.canvas.height) * 12 + 32 * 1024 * 1024
             : input.canvas.width * 32
-        let compressedBytesPerPixel = input.encoding == .adaptive && input.baseBitDepth == 10 ? 5 : 3
-        let compressedCache = heic ? input.canvas.pixels * compressedBytesPerPixel * 2 + 8 * 1024 * 1024 : 0
+        let compressedCache = heic ? compressedHEICCache(pixels: input.canvas.pixels,
+            bitDepth: input.baseBitDepth, quality: input.quality) : 0
         let encode = resident + sourceBand(rows) + graph + readback + packageBand + codec + compressedCache
         let render = resident + sourceBand(scanRows) + scanGraph
         // Native verification releases input bands first and scans rows, or
@@ -249,14 +250,26 @@ extension ExportMemoryEstimate {
         let nativeWorkspace = (heic ? 512 * 512 * 40 : input.canvas.width * 128) + 8 * 1024 * 1024
         let nativeVerify = verifierResident + nativeWorkspace
         // No full auxiliary dictionary on native row output. JPEG/HEIC CI
-        // readback requests decoder subsampling by 8 and checks its dimensions,
-        // with MCU rounding. Keep decoder
-        // row/tile workspace as well as the reduced base/gain/float buffers.
-        let reducedPixels = (((input.canvas.width + 7) / 8 + 1) & ~1) * (((input.canvas.height + 7) / 8 + 1) & ~1)
-        let systemVerify = verifierResident + nativeWorkspace + reducedPixels * (gain ? 40 : 16)
+        // readback requests decoder subsampling by 8 and a <=256px thumbnail.
+        // Keep decoder row/tile workspace beside fixed base/gain/float buffers.
+        let systemVerify = verifierResident + nativeWorkspace + 256 * 256 * (gain ? 40 : 16)
         return .init(decode: resident, render: render, composite: render,
                      packaging: encode, encode: encode, verify: max(nativeVerify, systemVerify),
                      nativeVerify: nativeVerify, systemVerify: systemVerify)
+    }
+
+    /// Upper envelope from 1MP random base + random gain native writer samples,
+    /// not a fixed RGB byte count. Includes 20% rate variation, container slack,
+    /// and both retained encoded tiles and the assembled container. Smooth RAW
+    /// gain maps normally encode far below this envelope; do not assume that.
+    static func compressedHEICCache(pixels: Int, bitDepth: Int, quality: Int) -> Int {
+        let rates = bitDepth == 10 ? [20.533, 23.966, 25.671] : [17.405, 19.035, 19.640] // bits/pixel
+        let q = min(100, max(90, quality))
+        let index = q <= 95 ? 0 : 1
+        let t = Double(q - (index == 0 ? 90 : 95)) / 5
+        let bits = rates[index] + (rates[index+1] - rates[index]) * t
+        let encoded = Int(ceil(Double(pixels) * bits * 1.2 / 8)) + 2 * 1024 * 1024
+        return encoded * 2
     }
 
     /// libaom refuses a source frame above its cap, so a large canvas is coded

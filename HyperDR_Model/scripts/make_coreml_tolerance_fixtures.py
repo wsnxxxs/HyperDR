@@ -107,7 +107,10 @@ def run(command: list[str], **kwargs) -> subprocess.CompletedProcess:
     return result
 
 
-def develop(hyperdr: Path, image: Path, long_side: int, workdir: Path) -> np.ndarray:
+def develop(hyperdr: Path, image: Path, long_side: int,
+            workdir: Path) -> tuple[np.ndarray, tuple[int, int]]:
+    """The engine's developed model tensor: what `model-input` produced, at the
+    stride-16 aligned analysis size its own resample chose."""
     tensor = workdir / "tensor.f32"
     report = workdir / "tensor.json"
     run([str(hyperdr), "model-input", str(image), "--output", str(tensor),
@@ -117,7 +120,7 @@ def develop(hyperdr: Path, image: Path, long_side: int, workdir: Path) -> np.nda
     values = read_tensor(tensor, width, height)
     if not np.isfinite(values).all():
         raise SystemExit("developed tensor contains non-finite samples")
-    return np.clip(values, 0.0, 1.0)
+    return np.clip(values, 0.0, 1.0), (width, height)
 
 
 def ncnn_gain(hyperdr: Path, image: Path, tensor: np.ndarray, workdir: Path) -> tuple[np.ndarray, dict]:
@@ -128,6 +131,25 @@ def ncnn_gain(hyperdr: Path, image: Path, tensor: np.ndarray, workdir: Path) -> 
                   "--input-tensor", str(path), "--tensor-width", str(width),
                   "--tensor-height", str(height)])
     return read_gain_packet(result.stdout)
+
+
+def fine_pattern(height: int, width: int) -> np.ndarray:
+    """Two-pixel stripes over a gradient: the case where an affine scale aliases.
+
+    An equal-area footprint averages these stripes towards the mean; point
+    sampling keeps whichever phase it happens to land on.
+    """
+    x = np.arange(width, dtype=np.float64)[None, :]
+    y = np.arange(height, dtype=np.float64)[:, None]
+    stripes = ((x.astype(int) % 2) == 0).astype(np.float64)
+    gradient = 0.15 + 0.6 * (y / max(1, height - 1))
+    channels = np.stack((gradient * (0.3 + 0.7 * stripes),
+                         gradient * (0.9 - 0.4 * stripes),
+                         gradient * 0.5 + 0.25 * stripes), axis=-1)
+    # A hard vertical edge and a dark band keep the check from being period-only.
+    channels[:, width // 3:, 0] = np.minimum(1.0, channels[:, width // 3:, 0] + 0.25)
+    channels[height // 2:, :, 2] *= 0.4
+    return np.clip(channels, 0.0, 1.0)
 
 
 def smooth_field(height: int, width: int, rng: np.random.Generator) -> np.ndarray:
@@ -196,7 +218,7 @@ def main(argv: list[str]) -> int:
             if not image.exists():
                 raise SystemExit(f"missing fixture {image}; run scripts/fetch_test_fixtures.py")
             case = {"name": name, "source": image.name, "kind": "raw-fixture"}
-            base = develop(args.hyperdr, image, args.long_side, workdir)
+            base, _ = develop(args.hyperdr, image, args.long_side, workdir)
             cases.append((case, base, image))
         # The synthetic bases only have to reach the extremes, not real
         # resolution, so they are stored small.
@@ -242,6 +264,32 @@ def main(argv: list[str]) -> int:
             summary.append(f"{case['name']}: {width}x{height} -> grid {gain.shape[1]}x{gain.shape[0]}, "
                            f"{gain.min():+.3f}..{gain.max():+.3f} stops")
 
+    # Analysis-scaling references: the developed base the engine's resampler
+    # produced for a synthetic source, so the model input path can be compared
+    # against `modules/image/src/resample.cpp` instead of against itself.
+    resample_cases: list[dict] = []
+    with tempfile.TemporaryDirectory() as temporary:
+        workdir = Path(temporary)
+        for name, pattern, long_side in (
+                ("resample-fractional", fine_pattern(120, 160), 96),
+                ("resample-staged", fine_pattern(160, 400), 128)):
+            height, width = pattern.shape[:2]
+            stored = store_png(args.output / f"{name}.png",
+                               np.round(srgb_encode(pattern) * 255.0).astype(np.uint8))
+            source = srgb_decode(stored.astype(np.float64) / 255.0).astype(np.float32)
+            source_path = args.output / f"{name}.png"
+            developed, (analysis_width, analysis_height) = develop(
+                args.hyperdr, source_path, long_side, workdir)
+            store_png(args.output / f"{name}.engine.png",
+                      np.round(srgb_encode(developed) * 255.0).astype(np.uint8))
+            resample_cases.append({
+                "name": name,
+                "source": [int(height), int(width)],
+                "analysis": [int(analysis_height), int(analysis_width)],
+            })
+            summary.append(f"{name}: {width}x{height} -> {analysis_width}x{analysis_height} "
+                           f"(engine resample)")
+
     document = {
         "schema": "hyperdr.model-gain-references/v1",
         "description": "ncnn references for the Core ML tolerance gate; see "
@@ -249,6 +297,10 @@ def main(argv: list[str]) -> int:
         "encoding": {"transfer": "sRGB", "bits": 8, "channels": "RGB",
                      "colorSpace": "linear Display P3 after decode"},
         "gainLayout": "row-major float32 little-endian, signed log2 stops, stride 16",
+        "resampleNotes": "<name>.png decodes to the model input source; "
+                         "<name>.engine.png is the same picture after the engine's "
+                         "resample_to, sRGB-encoded for storage",
+        "resampleCases": resample_cases,
         "cases": manifest,
     }
     (args.output / "cases.json").write_text(json.dumps(document, indent=2) + "\n")

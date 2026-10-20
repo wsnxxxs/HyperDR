@@ -45,6 +45,26 @@ private enum Fixture {
         return url
     }()
 
+    struct ResampleCase: Sendable {
+        let name: String
+        let source: PixelSize
+        let analysis: PixelSize
+    }
+
+    static func resampleCases() throws -> [ResampleCase] {
+        let data = try Data(contentsOf: directory.appendingPathComponent("cases.json"))
+        let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+        let entries = object["resampleCases"] as? [[String: Any]] ?? []
+        return entries.map { entry in
+            func size(_ key: String) -> PixelSize {
+                let values = (entry[key] as? [NSNumber])?.map(\.intValue) ?? [0, 0]
+                return PixelSize(width: values[1], height: values[0])
+            }
+            return ResampleCase(name: entry["name"] as? String ?? "?", source: size("source"),
+                                analysis: size("analysis"))
+        }
+    }
+
     static func cases() throws -> [ReferenceCase] {
         let data = try Data(contentsOf: directory.appendingPathComponent("cases.json"))
         let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
@@ -300,13 +320,223 @@ private struct Difference: CustomStringConvertible {
         commandBuffer.waitUntilCompleted()
         let size = PixelSize(width: 128, height: 96)
         let fromImage = try ModelGainInput.features(from: image, context: context, tensorSize: size)
-        let fromTexture = try ModelGainInput.features(from: texture, context: context, tensorSize: size)
+        let fromTexture = try ModelGainInput.features(from: texture, tensorSize: size)
         let difference = Difference(lhs: fromImage.planes, rhs: fromTexture.planes)
         #expect(difference.maximum < 0.0005, "texture and image features differ: \(difference)")
         // And the bright band really is at the top of both.
         let pixels = size.width * size.height
         let logLuminance = { (row: Int) in fromTexture.planes[pixels * 3 + row * size.width + size.width / 2] }
         #expect(logLuminance(4) > logLuminance(size.height - 4) + 0.15)
+    }
+
+    /// The analysis image must be the engine's equal-area reduction, not an affine
+    /// scale: `ncnnParity` feeds pre-scaled PNGs, so it cannot see this step.
+    @Test func analysisDownscaleMatchesTheEngine() throws {
+        let context = try #require(Self.context())
+        for reference in try Fixture.resampleCases() {
+            let (source, sourceSize) = try Fixture.linearBase(
+                Fixture.directory.appendingPathComponent("\(reference.name).png"))
+            #expect(sourceSize == reference.source)
+            let (engine, engineSize) = try Fixture.linearBase(
+                Fixture.directory.appendingPathComponent("\(reference.name).engine.png"))
+            #expect(engineSize == reference.analysis)
+
+            let cgImage = try #require(Self.cgImage(rgb8: Self.srgb8(source), width: sourceSize.width,
+                                                    height: sourceSize.height))
+            let features = try ModelGainInput.features(from: CIImage(cgImage: cgImage),
+                                                       context: context, tensorSize: engineSize)
+            let pixels = engineSize.width * engineSize.height
+            var mine = [Float](repeating: 0, count: pixels * 3)
+            for index in 0..<pixels {
+                for channel in 0..<3 {
+                    mine[index * 3 + channel] = features.planes[pixels * channel + index]
+                }
+            }
+            let difference = Difference(lhs: mine, rhs: engine)
+            // Both sides are stored as 8-bit sRGB, so a couple of codes of
+            // quantisation is expected; the affine scaling this replaced was off by
+            // 0.08 on the same kind of input.
+            #expect(difference.maximum < 0.02,
+                    "\(reference.name) analysis image differs from the engine: \(difference)")
+            print("analysis resample \(reference.name) \(reference.source.width)x\(reference.source.height)"
+                  + " -> \(engineSize.width)x\(engineSize.height): \(difference)")
+
+            // The provider's texture entry point has to scale identically.
+            let fromTexture = try Self.featuresFromTexture(CIImage(cgImage: cgImage),
+                                                           size: sourceSize, tensorSize: engineSize,
+                                                           context: context)
+            var textureRGB = [Float](repeating: 0, count: pixels * 3)
+            for index in 0..<pixels {
+                for channel in 0..<3 {
+                    textureRGB[index * 3 + channel] = fromTexture.planes[pixels * channel + index]
+                }
+            }
+            let textureDifference = Difference(lhs: textureRGB, rhs: engine)
+            #expect(textureDifference.maximum < 0.02,
+                    "\(reference.name) texture path differs from the engine: \(textureDifference)")
+        }
+    }
+
+    /// Renders `image` into a full-size texture the way RenderEngine does, then
+    /// takes the features from it.
+    private static func featuresFromTexture(_ image: CIImage, size: PixelSize,
+                                           tensorSize: PixelSize,
+                                           context: CIContext) throws -> ModelGainFeatures {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba32Float,
+            width: size.width, height: size.height, mipmapped: false)
+        descriptor.storageMode = .shared
+        descriptor.usage = [.shaderRead, .shaderWrite, .renderTarget]
+        let texture = try #require(device.makeTexture(descriptor: descriptor))
+        let queue = try #require(device.makeCommandQueue())
+        let buffer = try #require(queue.makeCommandBuffer())
+        let topDown = image.transformed(by: CGAffineTransform(a: 1, b: 0, c: 0, d: -1,
+                                                             tx: 0, ty: CGFloat(size.height)))
+        let destination = CIRenderDestination(mtlTexture: texture, commandBuffer: buffer)
+        destination.colorSpace = RenderEngine.workingColorSpace
+        destination.alphaMode = .unpremultiplied
+        _ = try context.startTask(toRender: topDown, to: destination)
+        buffer.commit()
+        buffer.waitUntilCompleted()
+        return try ModelGainInput.features(from: texture, tensorSize: tensorSize)
+    }
+
+    /// The reviewer's case: 1.5× or any non-integer reduction of an alternating
+    /// pattern must land on the area average (2/3, 1/3), not on 0.75, 0.25.
+    @Test func analysisDownscaleAveragesInsteadOfSampling() throws {
+        let context = try #require(Self.context())
+        let width = 1536, height = 1024
+        var bytes = [UInt8](repeating: 0, count: width * height * 3)
+        for y in 0..<height {
+            for x in 0..<width {
+                let value: UInt8 = x % 2 == 0 ? 255 : 0
+                let index = (y * width + x) * 3
+                bytes[index] = value
+                bytes[index + 1] = value
+                bytes[index + 2] = value
+            }
+        }
+        let cgImage = try #require(Self.cgImage(rgb8: bytes, width: width, height: height))
+        let analysis = ModelGain.tensorSize(for: PixelSize(width: width, height: height))
+        #expect(analysis == PixelSize(width: 1024, height: 688))
+        let features = try ModelGainInput.features(from: CIImage(cgImage: cgImage),
+                                                   context: context, tensorSize: analysis)
+        let pixels = analysis.width * analysis.height
+        var red = [Float](repeating: 0, count: analysis.width)
+        for x in 0..<analysis.width {
+            for y in 0..<(analysis.height / 4) {
+                red[x] += features.planes[y * analysis.width + x]
+            }
+            red[x] /= Float(analysis.height / 4)
+        }
+        let total = red.reduce(0, +) / Float(red.count)
+        #expect(abs(total - 0.5) < 0.01, "the stripes must average to their mean, got \(total)")
+        for value in red {
+            // 1/3 or 2/3; either way nowhere near a point sample's 0.25 or 0.75.
+            #expect(abs(value - 1.0 / 3) < 0.02 || abs(value - 2.0 / 3) < 0.02,
+                    "column average \(value) is not an area-weighted 1/3 or 2/3")
+        }
+    }
+
+    /// A source too tall for one band is rendered and reduced a band at a time.
+    /// Each band's tile counts rows from zero, so the tap table row it indexes has
+    /// to be the global one; getting that wrong reads the first band's taps with a
+    /// second offset and leaves everything below the first band at zero.
+    @Test func analysisScalingCrossesBandBoundaries() throws {
+        let context = try #require(Self.context())
+        let side = 2048
+        let analysis = PixelSize(width: 1024, height: 1024)
+        #expect(ModelGain.tensorSize(for: PixelSize(width: side, height: side)) == analysis)
+
+        // The budget the resampler actually uses, so the test fails loudly if a
+        // future change stops splitting this source into several bands.
+        let tables = ModelGainResampler.tables(source: PixelSize(width: side, height: side),
+                                               destination: analysis)
+        let bands = ModelGainResampler.bands(tables: tables.y, sourceHeight: side,
+                                            rowBudget: max(64, 32 * 1024 * 1024 / (side * 16)))
+        #expect(bands.count == 2)
+        #expect(bands[1].destinationRows.lowerBound > 0)
+
+        // Flat white: every sample is 1, whatever band it came from.
+        let white = CIImage(color: CIColor(red: 1, green: 1, blue: 1))
+            .cropped(to: CGRect(x: 0, y: 0, width: side, height: side))
+        let whiteFeatures = try ModelGainInput.features(from: white, context: context,
+                                                        tensorSize: analysis)
+        let pixels = analysis.width * analysis.height
+        for index in 0..<pixels {
+            for channel in 0..<3 {
+                let value = whiteFeatures.planes[pixels * channel + index]
+                #expect(abs(value - 1) < 1.0e-3,
+                        "row \(index / analysis.width) column \(index % analysis.width) is \(value)")
+            }
+        }
+
+        // A vertical ramp pins the row phase across the seam, which a flat field
+        // cannot: a band that read the wrong taps would repeat or skip rows.
+        var ramp = [UInt8](repeating: 0, count: side * side * 3)
+        var values = [UInt8](repeating: 0, count: side)
+        for y in 0..<side {
+            let value = UInt8((255.0 * Double(y) / Double(side - 1)).rounded())
+            values[y] = value
+            for x in 0..<side {
+                let index = (y * side + x) * 3
+                ramp[index] = value
+                ramp[index + 1] = value
+                ramp[index + 2] = value
+            }
+        }
+        let rampImage = try #require(Self.cgImage(rgb8: ramp, width: side, height: side))
+        let rampFeatures = try ModelGainInput.features(from: CIImage(cgImage: rampImage),
+                                                       context: context, tensorSize: analysis)
+        for y in 0..<analysis.height {
+            // A 2:1 reduction averages two neighbouring ramp rows in linear light.
+            let expected = (Self.srgbToLinear(Double(values[2 * y]) / 255)
+                            + Self.srgbToLinear(Double(values[2 * y + 1]) / 255)) / 2
+            for x in stride(from: 0, to: analysis.width, by: 97) {
+                let value = Double(rampFeatures.planes[y * analysis.width + x])
+                #expect(abs(value - expected) < 0.01,
+                        "row \(y) column \(x) is \(value), expected \(expected)")
+            }
+        }
+    }
+
+    /// sRGB-encoded 8-bit code value to linear light, the inverse of `srgb8`.
+    static nonisolated func srgbToLinear(_ encoded: Double) -> Double {
+        encoded <= 0.04045 ? encoded / 12.92 : pow((encoded + 0.055) / 1.055, 2.4)
+    }
+
+    /// Core ML requires one thread at a time per `MLModel`; the model serializes
+    /// predictions, so concurrent callers must all see the same answer.
+    @Test func concurrentPredictionsAgree() async throws {
+        let model = try ModelGainModel(computeUnits: .all)
+        let size = PixelSize(width: 256, height: 192)
+        let pixels = size.width * size.height
+        var rgb = [Float](repeating: 0.2, count: pixels * 3)
+        for index in stride(from: 0, to: rgb.count, by: 5) { rgb[index] = 0.8 }
+        let features = try ModelGainFeatures.make(linearP3RGB: rgb, size: size)
+        let expected = try model.gain(for: features).log2Stops
+        let results = try await withThrowingTaskGroup(of: [Float].self) { group in
+            for _ in 0..<4 {
+                group.addTask { try model.gain(for: features).log2Stops }
+            }
+            var collected: [[Float]] = []
+            for try await result in group { collected.append(result) }
+            return collected
+        }
+        #expect(results.count == 4)
+        for result in results {
+            #expect(Difference(lhs: result, rhs: expected).maximum < 1.0e-6)
+        }
+    }
+
+    /// 8-bit sRGB bytes from linear floats, for building test images.
+    private static func srgb8(_ linear: [Float]) -> [UInt8] {
+        linear.map { value in
+            let clamped = min(max(Double(value), 0), 1)
+            let encoded = clamped <= 0.0031308 ? clamped * 12.92
+                : 1.055 * pow(clamped, 1 / 2.4) - 0.055
+            return UInt8((encoded * 255).rounded())
+        }
     }
 
     private static func context() -> CIContext? {
@@ -410,19 +640,89 @@ private struct Difference: CustomStringConvertible {
         #expect(repeated.gain === prediction.gain)
     }
 
-    /// Only SDR and RAW sources choose an AI HDR source.
-    @Test func coreMLProviderRefusesAuthoredHDR() async throws {
+    /// The analysis scale changes the grid, so it belongs in the prediction's
+    /// identity: two providers configured differently must not share a cache entry.
+    @Test func providerIdentityIncludesTheAnalysisScale() async throws {
+        let engine = try RenderEngine()
+        let width = 64, height = 64
+        var bytes = [UInt8](repeating: 0, count: width * height * 3)
+        for index in 0..<(width * height) {
+            bytes[index * 3] = UInt8(40 + index % 160)
+            bytes[index * 3 + 1] = UInt8(90 + (index / width) % 100)
+            bytes[index * 3 + 2] = UInt8(180 - index % 120)
+        }
+        let cgImage = try #require(Self.cgImage(rgb8: bytes, width: width, height: height))
+        let source = try await engine.source(image: CIImage(cgImage: cgImage), domain: .sdr)
+
+        let coarse = try CoreMLModelGainProvider(analysisLongSide: 32)
+        let fine = try CoreMLModelGainProvider(analysisLongSide: 64)
+        let coarsePrediction = try await coarse.predict(source: source)
+        let finePrediction = try await fine.predict(source: source)
+
+        #expect(coarsePrediction.sourceID == finePrediction.sourceID)
+        #expect(coarsePrediction.modelID != finePrediction.modelID)
+        #expect(coarsePrediction.gain.width == 2)
+        #expect(coarsePrediction.gain.height == 2)
+        #expect(finePrediction.gain.width == 4)
+        #expect(finePrediction.gain.height == 4)
+    }
+
+    /// Only SDR and RAW sources choose an AI HDR source, and a RAW source has to
+    /// bring its SDR base: its extended-range development is not what the model
+    /// was trained on.
+    @Test func coreMLProviderRefusesUnsuitableSources() async throws {
         let engine = try RenderEngine()
         let cgImage = try #require(Self.cgImage(rgb8: [UInt8](repeating: 120, count: 64 * 64 * 3),
                                                 width: 64, height: 64))
-        let source = try await engine.source(image: CIImage(cgImage: cgImage), domain: .hdr)
         let provider = try CoreMLModelGainProvider()
-        do {
-            _ = try await provider.predict(source: source)
-            Issue.record("an authored HDR source must not get an AI gain")
-        } catch {
-            #expect(error is ModelGainError)
+        for domain in [InputDomain.hdr, .rawEDR] {
+            let source = try await engine.source(image: CIImage(cgImage: cgImage), domain: domain)
+            do {
+                _ = try await provider.predict(source: source)
+                Issue.record("\(domain.rawValue) must not be predicted from the source image alone")
+            } catch {
+                #expect(error is ModelGainError)
+            }
         }
+    }
+
+    /// An explicit SDR base — what a RAW source's split hands over — predicts the
+    /// same gain as the source path when the base is the same picture, and the
+    /// cache stays on the source identity it was given.
+    @Test func coreMLProviderAcceptsAnExplicitSDRBase() async throws {
+        let engine = try RenderEngine()
+        let width = 320, height = 240
+        var bytes = [UInt8](repeating: 0, count: width * height * 3)
+        for y in 0..<height {
+            for x in 0..<width {
+                let index = (y * width + x) * 3
+                bytes[index] = UInt8(20 + 200 * y / height)
+                bytes[index + 1] = UInt8(180 - 140 * x / width)
+                bytes[index + 2] = UInt8(90 + 60 * (x + y) / (width + height))
+            }
+        }
+        let cgImage = try #require(Self.cgImage(rgb8: bytes, width: width, height: height))
+        let image = CIImage(cgImage: cgImage)
+        let source = try await engine.source(image: image, domain: .sdr)
+        let provider = try CoreMLModelGainProvider()
+
+        // The SDR source image *is* the base, so both entry points must agree.
+        let fromSource = try await provider.predict(source: source)
+        let base = CIImage(cgImage: cgImage)
+        let otherID = UUID()
+        let fromBase = try await provider.prediction(forSDRBase: base, sourceID: otherID,
+                                                    size: source.size)
+        #expect(fromBase.sourceID == otherID)
+        #expect(fromBase.modelID == fromSource.modelID)
+        #expect(fromBase.gain.width == fromSource.gain.width)
+        let difference = Difference(lhs: RenderEngine.readTexture(fromBase.gain),
+                                    rhs: RenderEngine.readTexture(fromSource.gain))
+        #expect(difference.maximum < 0.0001, "base and source entry points disagree: \(difference)")
+
+        // Still one inference per (source, model): a repeat returns the same grid.
+        let repeated = try await provider.prediction(forSDRBase: base, sourceID: otherID,
+                                                    size: source.size)
+        #expect(repeated.gain === fromBase.gain)
     }
 
     private static func upsampled(_ rgb: [Float], width: Int, height: Int, factor: Int) -> [Float] {

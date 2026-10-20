@@ -8,6 +8,31 @@
     "colorSpace": "linear Display P3 after decode"
   },
   "gainLayout": "row-major float32 little-endian, signed log2 stops, stride 16",
+  "resampleNotes": "<name>.png decodes to the model input source; <name>.engine.png is the same picture after the engine's resample_to, sRGB-encoded for storage",
+  "resampleCases": [
+    {
+      "name": "resample-fractional",
+      "source": [
+        120,
+        160
+      ],
+      "analysis": [
+        80,
+        96
+      ]
+    },
+    {
+      "name": "resample-staged",
+      "source": [
+        160,
+        400
+      ],
+      "analysis": [
+        64,
+        128
+      ]
+    }
+  ],
   "cases": [
     {
       "name": "canon",

@@ -4,90 +4,83 @@ import Metal
 
 /// The whole AI gain step in one call: analysis size, feature planes, prediction.
 extension ModelGainModel {
-    /// `sourceSize` is the base's pixel size; the analysis grid is derived from it
-    /// the way the engine derives it (`ModelGain.tensorSize`).
+    /// `sourceSize` is the SDR base's pixel size; the analysis grid is derived from
+    /// it the way the engine derives it (`ModelGain.tensorSize`).
     public func gain(from image: CIImage, context: CIContext, sourceSize: PixelSize,
-                     longSide: Int = ModelGain.analysisLongSide) throws -> ModelGainGrid {
+                     longSide: Int = ModelGain.analysisLongSide,
+                     device: (any MTLDevice)? = nil) throws -> ModelGainGrid {
         let tensorSize = ModelGain.tensorSize(for: sourceSize, longSide: longSide)
         return try gain(for: ModelGainInput.features(from: image, context: context,
-                                                     tensorSize: tensorSize))
+                                                    tensorSize: tensorSize, device: device))
     }
 }
 
-/// Turns a linear Display-P3 base into the AI gain model's input tensor.
+/// Turns an SDR base into the AI gain model's input tensor.
 ///
-/// Inference happens once per photograph at a fixed analysis scale, not per
-/// frame, so this path favours being obviously correct over being clever: one GPU
-/// render to the analysis size, then the feature planes on the CPU. At the
-/// default scale (long side 1024) that is under a megapixel of work.
-///
-/// Textures in this package are top-down, and the planes are built and returned
-/// top-down, so the grid reaches the graph in the same row order as the base.
+/// Inference happens once per photograph at a fixed analysis scale, not per frame,
+/// so this path favours being obviously correct over being clever: one GPU pass
+/// reduces the base to the analysis size with the engine's equal-area filter
+/// (`ModelGainResampler`), then the feature planes are built on the CPU. Textures
+/// in this package are top-down, and the planes are built and returned top-down,
+/// so the grid reaches the graph in the same row order as the base.
 public enum ModelGainInput {
-    /// Rasterizes `image` at `tensorSize` and builds the five feature planes.
-    ///
-    /// `image` must already carry the source orientation and be in the working
-    /// space (linear extended Display P3), which is what `RenderSource` exposes.
-    public static func features(from image: CIImage, context: CIContext,
-                                tensorSize: PixelSize,
+    /// Feature planes for a base that is already a texture (top-down, RGBA,
+    /// linear Display P3). Nothing is read back at the base's own resolution: the
+    /// resampler writes the analysis image and only that is read.
+    public static func features(from texture: any MTLTexture, tensorSize: PixelSize,
+                                device: (any MTLDevice)? = nil,
                                 workingSpace: CGColorSpace = RenderEngine.workingColorSpace) throws -> ModelGainFeatures {
-        let rgb = try rasterize(image, context: context, size: tensorSize, workingSpace: workingSpace)
-        return try ModelGainFeatures.make(linearP3RGB: rgb, size: tensorSize)
+        let resampler = try resampler(for: device)
+        let scaled = try resampler.resize(texture, to: tensorSize)
+        return try features(fromRaster: scaled, size: tensorSize, workingSpace: workingSpace)
     }
 
-    /// Same, for a base plane that is already a texture.
-    ///
-    /// The texture is interpreted with this package's contract: RGBA, linear
-    /// Display P3, top-down rows. Only the first three channels are read. Core
-    /// Image reads a texture's first row as the bottom of the image, so the single
-    /// flip below is what puts the picture back the right way up.
-    public static func features(from texture: any MTLTexture, context: CIContext,
-                                tensorSize: PixelSize,
+    /// Feature planes for a Core Image base. The base is rendered and reduced a
+    /// band of rows at a time, so a 61-megapixel source is never materialized whole.
+    public static func features(from image: CIImage, context: CIContext, tensorSize: PixelSize,
+                                device: (any MTLDevice)? = nil,
                                 workingSpace: CGColorSpace = RenderEngine.workingColorSpace) throws -> ModelGainFeatures {
-        let height = CGFloat(texture.height)
-        guard var image = CIImage(mtlTexture: texture, options: [.colorSpace: workingSpace]) else {
-            throw ModelGainError.predictionFailed("the texture is not readable as an image")
-        }
-        image = image.transformed(by: CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: height))
-        return try features(from: image, context: context, tensorSize: tensorSize, workingSpace: workingSpace)
-    }
-
-    /// Renders `image` into `size` and returns interleaved RGB floats, top-down.
-    ///
-    /// A bitmap destination is used rather than a texture because its row order is
-    /// the one this package publishes (`CIContext.render(_:toBitmap:)` writes the
-    /// image's top row first), so no flip is needed and no device has to be
-    /// guessed. The scaling itself still happens on the GPU.
-    private static func rasterize(_ image: CIImage, context: CIContext, size: PixelSize,
-                                  workingSpace: CGColorSpace) throws -> [Float] {
-        guard size.width > 0, size.height > 0,
-              size.width % ModelGain.stride == 0, size.height % ModelGain.stride == 0 else {
-            throw ModelGainError.invalidTensorSize(size)
-        }
         let extent = image.extent
-        guard extent.width > 0, extent.height > 0, extent.isInfinite == false else {
+        guard extent.width > 0, extent.height > 0, !extent.isInfinite else {
             throw ModelGainError.predictionFailed("the base image has no finite extent")
         }
-        // One affine scale to the analysis size. The analysis size is derived from
-        // the source size with the same stride alignment, so this introduces no
-        // aspect change beyond the engine's own rounding.
-        let scaled = image
-            .transformed(by: CGAffineTransform(scaleX: CGFloat(size.width) / extent.width,
-                                               y: CGFloat(size.height) / extent.height))
-            .transformed(by: CGAffineTransform(translationX: -extent.minX * CGFloat(size.width) / extent.width,
-                                               y: -extent.minY * CGFloat(size.height) / extent.height))
-        let bounds = CGRect(x: 0, y: 0, width: size.width, height: size.height)
-        var rgba = [Float](repeating: 0, count: size.width * size.height * 4)
-        rgba.withUnsafeMutableBytes { bytes in
-            context.render(scaled, toBitmap: bytes.baseAddress!, rowBytes: size.width * 4 * 4,
-                           bounds: bounds, format: .RGBAf, colorSpace: workingSpace)
-        }
+        let sourceSize = PixelSize(width: Int(extent.width.rounded()), height: Int(extent.height.rounded()))
+        let resampler = try resampler(for: device)
+        let scaled = try resampler.resize(image, context: context, sourceSize: sourceSize,
+                                          to: tensorSize)
+        return try features(fromRaster: scaled, size: tensorSize, workingSpace: workingSpace)
+    }
+
+    /// Analysis-size RGBA floats to the five planes. The analysis texture is small
+    /// (about 11 MB at the default scale), so reading it back is cheap; the base is
+    /// never read.
+    private static func features(fromRaster texture: any MTLTexture, size: PixelSize,
+                                 workingSpace: CGColorSpace) throws -> ModelGainFeatures {
+        let rgba = RenderEngine.readTexture(texture)
         var rgb = [Float](repeating: 0, count: size.width * size.height * 3)
         for index in 0..<(size.width * size.height) {
             rgb[index * 3] = rgba[index * 4]
             rgb[index * 3 + 1] = rgba[index * 4 + 1]
             rgb[index * 3 + 2] = rgba[index * 4 + 2]
         }
-        return rgb
+        return try ModelGainFeatures.make(linearP3RGB: rgb, size: size)
     }
+
+    /// One resampler per device: compiling the Metal kernel and creating a command
+    /// queue per call would be wasteful, and the resampler keeps no state.
+    private static func resampler(for device: (any MTLDevice)?) throws -> ModelGainResampler {
+        guard let device = device ?? MTLCreateSystemDefaultDevice() else {
+            throw RenderError.metalUnavailable
+        }
+        let key = ObjectIdentifier(device)
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        if let cached = resamplers[key] { return cached }
+        let created = try ModelGainResampler(device: device)
+        resamplers[key] = created
+        return created
+    }
+
+    private static let cacheLock = NSLock()
+    nonisolated(unsafe) private static var resamplers: [ObjectIdentifier: ModelGainResampler] = [:]
 }

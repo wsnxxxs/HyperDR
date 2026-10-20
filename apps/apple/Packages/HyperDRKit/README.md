@@ -258,28 +258,30 @@ that interface arrives. These are intermediate tables, not completed iPhone
 |---|---:|---:|---:|---:|
 | Decode/resident | 961.5 | 961.5 | 961.5 | 961.5 |
 | Render / composite | 1147.7 | 1147.7 | 1147.7 | 1147.7 |
-| Packaging / encode | 2175.5 | 1912.2 | 1407.9 | 1407.9 |
+| Encoding | 2175.5 | 1703.7 | 1407.9 | 1407.9 |
+| HEIF assembly / packaging | 2175.5 | 1856.5 | 1407.9 | 1407.9 |
 | Native verification | 1165.7 | 1165.7 | 1156.9 | 1156.9 |
 | System verification | 3444.8 | 1168.2 | 3444.8 | 1159.4 |
-| Peak | 3444.8 | 1912.2 | 3444.8 | 1407.9 |
+| Peak | 3444.8 | 1856.5 | 3444.8 | 1407.9 |
 
 | 110MP, 256 rows | HEIC before | HEIC now | ISO JPEG before | ISO JPEG now |
 |---|---:|---:|---:|---:|
 | Decode/resident | 1722.4 | 1722.4 | 1722.4 | 1722.4 |
 | Render / composite | 1973.2 | 1973.2 | 1973.2 | 1973.2 |
-| Packaging / encode | 3631.0 | 3189.0 | 2323.6 | 2323.6 |
+| Encoding | 3631.0 | 2809.6 | 2323.6 | 2323.6 |
+| HEIF assembly / packaging | 3631.0 | 3114.0 | 2323.6 | 2323.6 |
 | Native verification | 1991.2 | 1991.2 | 1982.8 | 1982.8 |
 | System verification | 6172.4 | 1993.7 | 6172.4 | 1985.3 |
-| Peak | 6172.4 | 3189.0 | 6172.4 | 2323.6 |
+| Peak | 6172.4 | 3114.0 | 6172.4 | 2323.6 |
 
 | Size | Rows | Old peak, both | HEIC now | ISO JPEG now |
 |---|---:|---:|---:|---:|
-| 61MP | 256 | 3444.8 | 1912.2 | 1407.9 |
-| 61MP | 128 | 3352.0 | 1689.4 | 1185.1 |
-| 61MP | 64 | 3305.6 | 1578.1 | 1147.7 |
-| 110MP | 256 | 6172.4 | 3189.0 | 2323.6 |
-| 110MP | 128 | 6047.4 | 2889.0 | 2023.6 |
-| 110MP | 64 | 5984.9 | 2739.0 | 1973.2 |
+| 61MP | 256 | 3444.8 | 1856.5 | 1407.9 |
+| 61MP | 128 | 3352.0 | 1633.7 | 1185.1 |
+| 61MP | 64 | 3305.6 | 1522.4 | 1147.7 |
+| 110MP | 256 | 6172.4 | 3114.0 | 2323.6 |
+| 110MP | 128 | 6047.4 | 2814.0 | 2023.6 |
+| 110MP | 64 | 5984.9 | 2664.0 | 1973.2 |
 
 The old RAW decoder reserve is 16 B/native pixel (918.8 / 1679.7 MiB). It is
 currently the main Render-dependent area term. HEIC slab accounting is corrected
@@ -383,3 +385,63 @@ native verification; `verifying` follows for system readback. Existing
 stage times cannot predict remaining row passes. No new enum cases are required
 in Mac/iOS stage switches; `progress.stageMessage.localized()` supplies the
 combined or ordinary stage label from Kit’s catalogue.
+
+R40-001: HEIF items now borrow compressed samples from their caller-owned encoded
+sequences, for both grid tiles and a bare hvc1. Grid/tmap/Exif/XMP payloads remain
+owned small buffers. Item moves cannot invalidate the sample views; input
+sequences must outlive write_heif, as required by HeifSequenceView. This removes
+the deep-copied third set of compressed samples without changing container bytes
+or the C ABI. The final container is still assembled in memory: streaming it to
+the reserved staging file would require a sink/output API through the codec and
+atomic file writer, and is deferred rather than changing publication semantics
+in this ownership fix.
+
+The estimates above separate encoding (one compressed sequence set plus RGB
+slab/VT workspace) from HEIF assembly (sequences plus final output; no RGB slab,
+but the 32 MiB framework reserve remains). packaging reports the assembly peak;
+peak takes the maximum with encoding and the other phases. This prices the two
+remaining compressed copies at their actual overlap, instead of pretending the
+old three-copy engine fit a two-copy estimate. Full-plane/ImageIO estimates and
+RAW residency reserves are unchanged.
+
+
+## Handoff at stage close
+
+The original-size 110MP target is **not yet validated/admitted on iPhone**. Render's
+`wip/render-detail-memory` contract is still pending: fixed source residency
+(including RAW decoder caches), preparation scan bound, maximum read ROI width /
+height / halo, and texture-size limits. On receipt, update:
+
+- `ExportMemoryEstimate.estimateRows`: decoder/rawCache and resident, sourceBand,
+  preparation graph and read graph/readback bounds, shared by render, encoding,
+  assembly and both verification peaks. Keep fixed analysis and resource buffers.
+- `RecipeExportService` resident credits after opening/prediction and
+  `checkMemory` GPU accounting: use the actual retained CPU allocations and
+  tiled ROI limits for both preparation and read, including halo. Do not remove
+  RAW reserves simply because no full RGBA owner is materialized. Preserve the
+  R25 remaining-budget credit and the unknown-zero GPU rule.
+- Recompute the README's 61MP and 110MP tables for Adaptive HEIC / ISO gain JPEG,
+  original size, quality 95, 256/128/64 rows. Add representative admission tests
+  for a shrinking remaining budget, the preparation-vs-read maximum, source/halo
+  and texture limits; rerun a bounded end-to-end system-source + real Render +
+  package + native/system readback peak measurement. Device acceptance is still
+  required; simulator capacity does not establish iPhone capacity.
+
+The final HEIF output buffer remains an additional file-sized allocation. Future
+stream-to-file assembly needs a sink path through codec/container and the
+existing exclusive staging/atomic publication contract, byte-identical output,
+and cancellation/write-failure cleanup checks. No such sink was added here.
+
+Do not add `increased-memory-limit` automatically. After Render budget integration,
+ask the user to verify Xcode's capability on their free Personal Team, generated
+profile and signed entitlement, then record actual `os_proc_available_memory`
+before/after on iPhone 17 Pro. Public first-person evidence supports free-team
+use, but this project/account has not signing-tested it; unsupported models can
+ignore it. It does not replace process/GPU admission or bounded working sets.
+
+K4 (Photos availability), K6 (encoder availability), K7 (edit/export matching),
+K8 (typed result facts), K10 (alpha source facts), K11 (shared LUT installation),
+K12 (remove/rename plan text keys), K13 (last choice) remain unimplemented in this
+batch. K1's typed notice/blocker redesign was optional and is not implemented;
+semantic messages now have Kit-owned translations instead. No new tasks were
+started after the stage-close instruction.

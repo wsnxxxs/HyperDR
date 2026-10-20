@@ -2,6 +2,7 @@ import CoreGraphics
 import HyperDRDesign
 import Metal
 import os
+import simd
 
 /// Immutable state captured by the main actor; the compositor owns all GPU
 /// resources it derives from it. Detail pairs carry their `region`.
@@ -56,25 +57,21 @@ nonisolated struct CompositionParams {
 nonisolated struct DisplayLayerParams {
     var baseOffset: SIMD4<Float>
     var alternateOffset: SIMD4<Float>
-    var gainMin: Float = 0
-    var gainMax: Float = 0
-    var inverseGamma: Float = 1
+    var toGain: simd_float3x3
+    var toP3: simd_float3x3
     var weight: Float = 1
     var gainChannels: UInt32 = 1
-    var coding: UInt32 = 0 // 0 log2, 1 ISO code, 2 alternate rendition
+    var coding: UInt32 = 0 // 0 log2, 1 alternate rendition
     var firstSlice: UInt32 = 0
     var firstPlane: UInt32 = 0
+    var identity: UInt32 = 1
 
     init(_ pair: DisplayPair, weight: Float, slice: UInt32, weightedOnly: Bool) {
         baseOffset = SIMD4(pair.baseOffset, 0)
         alternateOffset = SIMD4(pair.alternateOffset, 0)
-        switch pair.coding {
-        case .log2: break
-        case .isoCode(let minimum, let maximum, let gamma):
-            coding = 1; gainMin = minimum; gainMax = maximum
-            inverseGamma = 1 / max(gamma, 0.0001)
-        case .alternate: coding = 2
-        }
+        toGain = pair.toGain; toP3 = pair.toP3
+        identity = pair.toGain == matrix_identity_float3x3 && pair.toP3 == matrix_identity_float3x3 ? 1 : 0
+        coding = pair.coding == .alternate ? 1 : 0
         self.weight = min(1, max(0, weight))
         gainChannels = UInt32(pair.gainChannels)
         firstSlice = slice
@@ -123,7 +120,7 @@ nonisolated final class DisplayCompositor {
         descriptor.fragmentFunction = library.makeFunction(name: "compositionFragment")
         descriptor.colorAttachments[0].pixelFormat = .rgba16Float
         display = try device.makeRenderPipelineState(descriptor: descriptor)
-        guard MemoryLayout<CompositionParams>.stride == 128, MemoryLayout<DisplayLayerParams>.stride == 64 else {
+        guard MemoryLayout<CompositionParams>.stride == 128, MemoryLayout<DisplayLayerParams>.stride == 160 else {
             throw PreviewError.unavailable("Composition parameter layout changed")
         }
     }

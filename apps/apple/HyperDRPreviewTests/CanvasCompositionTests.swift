@@ -6,6 +6,7 @@ import HyperDREngine
 import HyperDRDesign
 import HyperDRKit
 import Metal
+import simd
 import XCTest
 @testable import HyperDR
 
@@ -271,8 +272,8 @@ extension CanvasCompositionTests {
         let renderer = try makePreviewRenderer()
         let compositor = try DisplayCompositor(device:renderer.device,library:renderer.library)
         let command = try XCTUnwrap(renderer.queue.makeCommandBuffer())
-        let source = try makeDisplayPair(renderer.device,base:[0.1,0.1,0.1],width:1,height:1,gain:[0],
-            coding:.isoCode(minimum:-1,maximum:2,gamma:1),alternateOffset:0.08)
+        let source = try makeDisplayPair(renderer.device,base:[0.1,0.1,0.1],width:1,height:1,gain:[-1],
+            alternateOffset:0.08)
         let image = try compositor.makeTestTexture(source,weight:0.5,command:command)
         let out = try target(renderer.device,width:1,height:1)
         let pass = MTLRenderPassDescriptor(); pass.colorAttachments[0].texture=out
@@ -398,6 +399,8 @@ extension CanvasCompositionTests {
     /// Negative gain and offsets can clip the full rendition while intermediate
     /// weights remain distinct. Check both a scalar ISO reference and the
     /// independent legacy float output, with RGB bases and compact bilinear gain.
+    /// Render hands the gain over decoded, so it is resampled in stops; the
+    /// legacy path resamples codes, which agrees only at gamma 1.
     func testISOLogGainCacheMatchesReconstructionAcrossWeightsAndOffsets() throws {
         let renderer = try makePreviewRenderer()
         let compositor = try DisplayCompositor(device: renderer.device, library: renderer.library)
@@ -418,9 +421,9 @@ extension CanvasCompositionTests {
                     gainMin: minimum, gainMax: maximum, gainGamma: gamma, gainWeight: weight,
                     baseOffset: baseOffset, alternateOffset: alternateOffset)
             }
-            let pair = try makeDisplayPair(renderer.device, base: base, width: 4, height: 1, gain: gains,
-                gainWidth: 2, gainHeight: 1, coding: .isoCode(minimum: minimum, maximum: maximum, gamma: gamma),
-                baseOffset: baseOffset, alternateOffset: alternateOffset)
+            let stops = gains.map { minimum+(maximum-minimum)*pow($0,1/gamma) }
+            let pair = try makeDisplayPair(renderer.device, base: base, width: 4, height: 1, gain: stops,
+                gainWidth: 2, gainHeight: 1, baseOffset: baseOffset, alternateOffset: alternateOffset)
             for weight: Float in [0,0.25,0.5,0.65,1] {
                 let command = try XCTUnwrap(renderer.queue.makeCommandBuffer())
                 let texture = try compositor.makeTestTexture(pair, weight: weight, command: command)
@@ -434,14 +437,13 @@ extension CanvasCompositionTests {
                 let legacy = try renderer.reconstructFloat(planes: source(weight))
                 for x in 0..<4 {
                     let location = min(1,max(0,(Float(x)+0.5)*0.5-0.5))
-                    let code = gains[0]*(1-location)+gains[1]*location
-                    let logGain = minimum+(maximum-minimum)*pow(code,1/gamma)
+                    let logGain = stops[0]*(1-location)+stops[1]*location
                     for c in 0..<3 {
                         let expected = max(0,(base[x*3+c]+baseOffset)*exp2(logGain*weight)-alternateOffset)
                         let tolerance = 0.002*max(1,abs(expected))
                         XCTAssertEqual(actual[x*4+c],expected,accuracy:tolerance,
                             "weight=\(weight), offsets=\(baseOffset)/\(alternateOffset), x=\(x), c=\(c)")
-                        XCTAssertEqual(actual[x*4+c],legacy[x*4+c],accuracy:tolerance)
+                        if gamma == 1 { XCTAssertEqual(actual[x*4+c],legacy[x*4+c],accuracy:tolerance) }
                     }
                 }
             }
@@ -487,8 +489,7 @@ extension CanvasCompositionTests {
     func testReviewerMinifiedISOGainRemainsContinuousAtFullHeadroom() throws {
         let renderer=try makePreviewRenderer()
         let compositor=try DisplayCompositor(device:renderer.device,library:renderer.library)
-        let planes=try makeDisplayPair(renderer.device,base:[0.1,0.1,0.1, 0.1,0.1,0.1],width:2,height:1,gain:[0,1],
-            coding:.isoCode(minimum:0,maximum:4,gamma:1))
+        let planes=try makeDisplayPair(renderer.device,base:[0.1,0.1,0.1, 0.1,0.1,0.1],width:2,height:1,gain:[0,4])
         let setup=try XCTUnwrap(renderer.queue.makeCommandBuffer())
         let descriptor=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.rgba16Float,width:2,height:1,mipmapped:true)
         descriptor.textureType = .type2DArray;descriptor.arrayLength=3;descriptor.storageMode = .private
@@ -521,11 +522,10 @@ extension CanvasCompositionTests {
     func testLinearFilteringKeepsBothISOEndpointsContinuousWithOffsetsAndClipping() throws {
         let renderer = try makePreviewRenderer()
         let compositor = try DisplayCompositor(device:renderer.device,library:renderer.library)
-        let base: [Float] = [0.1,0.02,0.6, 0.1,0.3,0.02], gains: [Float] = [0,1]
+        let base: [Float] = [0.1,0.02,0.6, 0.1,0.3,0.02]
         let weights: [Float] = [0,0.001,0.5,0.999,1]
         for (minimum,maximum,baseOffset,alternateOffset): (Float,Float,Float,Float) in [(0,4,0,0),(-2,4,0,0.08),(-2,4,0.08,0.08),(-3,2,0.15,0.025)] {
-            let planes = try makeDisplayPair(renderer.device,base:base,width:2,height:1,gain:gains,
-                coding:.isoCode(minimum:minimum,maximum:maximum,gamma:1),
+            let planes = try makeDisplayPair(renderer.device,base:base,width:2,height:1,gain:[minimum,maximum],
                 baseOffset:baseOffset,alternateOffset:alternateOffset)
             // 1x1 uses production mipmaps. The centre of a 3x1 enlargement
             // linearly averages the same two texels without mip minification.
@@ -598,6 +598,32 @@ extension CanvasCompositionTests {
             content.headroom = exp2(base + span * weight)
             try draw()
             XCTAssertEqual(compositor.rebuilds, runs, "all four layers compare to last rendered weight")
+        }
+    }
+}
+
+extension CanvasCompositionTests {
+    /// A gain in another working space: base into it, gain and offsets there,
+    /// then back to P3, at every weight.
+    func testGainWorkingSpaceMatricesFollowTheISOFormula() throws {
+        let renderer = try makePreviewRenderer()
+        let compositor = try DisplayCompositor(device:renderer.device,library:renderer.library)
+        let toGain = simd_float3x3(rows: [SIMD3(0.75,0.25,0), SIMD3(0.05,0.9,0.05), SIMD3(0,0.1,0.9)])
+        var pair = try makeDisplayPair(renderer.device,base:[0.2,0.4,0.6],width:1,height:1,gain:[0.5,1,1.5],
+            gainChannels:3,baseOffset:0.01,alternateOffset:0.02)
+        pair.toGain = toGain; pair.toP3 = toGain.inverse
+        for weight: Float in [0,0.5,1] {
+            let command = try XCTUnwrap(renderer.queue.makeCommandBuffer())
+            let texture = try compositor.makeTestTexture(pair, weight: weight, command: command)
+            let out = try target(renderer.device,width:1,height:1)
+            let pass = MTLRenderPassDescriptor(); pass.colorAttachments[0].texture = out
+            pass.colorAttachments[0].loadAction = .clear; pass.colorAttachments[0].storeAction = .store
+            let encoder = try XCTUnwrap(command.makeRenderCommandEncoder(descriptor:pass))
+            compositor.draw(encoder,texture:texture,params:CompositionParams(rect:SIMD4(-1,-1,1,1))); encoder.endEncoding()
+            let actual = try read(out,after:command)
+            let scale = SIMD3<Float>(exp2(0.5*weight),exp2(weight),exp2(1.5*weight))
+            let expected = simd_max(SIMD3(repeating: 0), toGain.inverse * ((toGain * SIMD3(0.2,0.4,0.6) + 0.01) * scale - 0.02))
+            for c in 0..<3 { XCTAssertEqual(actual[c],expected[c],accuracy:0.002*max(1,expected[c]),"weight=\(weight)") }
         }
     }
 }

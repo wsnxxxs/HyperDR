@@ -72,8 +72,8 @@ kernel void reconstructFrame32(device const float* base [[buffer(0)]],
 // HyperDRRender (P7-2b step 4), this kernel hands it the engine's planes.
 
 // Copies a frame's native planes into a display pair: the base as rgba, a v2
-// gain as its ISO codes (the compositor decodes them after resampling), and
-// v1's full-size HDR image as the alternate rendition.
+// gain decoded to log2 stops at its own resolution (as Render hands it over),
+// and v1's full-size HDR image as the alternate rendition.
 kernel void uploadPreviewFrame(device const float* base [[buffer(0)]],
                                device const float* gain [[buffer(1)]],
                                constant ReconstructParams& p [[buffer(2)]],
@@ -90,6 +90,7 @@ kernel void uploadPreviewFrame(device const float* base [[buffer(0)]],
         }
     }
     if (p.gainChannels == 1 && xy.x < p.gainWidth && xy.y < p.gainHeight) {
-        gainOut.write(float4(gain[xy.y * (p.gainRowBytes / 4) + xy.x]), xy);
+        const float code = clamp(gain[xy.y * (p.gainRowBytes / 4) + xy.x], 0.0, 1.0);
+        gainOut.write(float4(p.gainMin + (p.gainMax - p.gainMin) * pow(code, p.inverseGamma)), xy);
     }
 }

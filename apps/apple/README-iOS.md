@@ -40,7 +40,7 @@ bash scripts/build_xcframework.sh --platforms all
 ## 第二步：打开工程并选择团队
 
 1. 在 Finder 里打开仓库中的 `apps/apple/HyperDR.xcodeproj`。
-2. 窗口顶部中间的方案（scheme）选择器里选 **HyperDRiOS**（不是 HyperDR，那是 Mac 版）。
+2. 窗口顶部中间的方案（scheme）选择器里选 **HyperDRiOS-Release**（日常使用和性能测试用的优化版本；不是 HyperDR，那是 Mac 版）。
 3. 左侧导航栏点最上面的蓝色工程图标 **HyperDR**，在 TARGETS 列表里选 **HyperDRiOS**。
 4. 打开 **Signing & Capabilities（签名与功能）** 标签：
    - 保持 **Automatically manage signing（自动管理签名）** 勾选；
@@ -68,6 +68,24 @@ bash scripts/build_xcframework.sh --platforms all
 2. 第一次装好后，App 可能打不开，设备上提示“不受信任的开发者”。这时：
    - **设置 → 通用 → VPN 与设备管理**，在“开发者 App”下点你的 Apple ID，再点 **信任“你的 Apple ID”**。
 3. 回到主屏幕打开 **HyperDR**（或在 Xcode 里再按一次 ⌘R）。
+
+## 性能测试要用 Release
+
+`HyperDRiOS-Release` 的运行配置为 Release，并且不附加调试器。编解码参数、
+浮点精度、内存保护和导出校验与 Debug 相同；Swift 的行回调、校验、缩略图等
+密集循环会经过优化编译。`HyperDRiOS` 仍保留 Debug 配置，供断点和界面调试。
+不要用 Debug 的导出秒数判断正式版本性能。
+
+原尺寸 RAW / HIF 的真机结果、质量对照和当前优化说明集中在
+[导出内存与性能记录](Packages/HyperDRRender/EXPORT_MEMORY.md)，历史 Mac 实验单独归档。
+
+命令行构建正式使用的真机包（沿用已设置的个人团队签名）：
+
+```sh
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
+  -project apps/apple/HyperDR.xcodeproj -scheme HyperDRiOS-Release \
+  -configuration Release -destination 'generic/platform=iOS' build
+```
 
 ## 七天后会失效
 

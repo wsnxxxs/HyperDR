@@ -249,7 +249,26 @@ void test_sequence(int depth) {
   params.quality = 90;
   params.main10 = depth > 8;
   params.color = depth > 8 ? hevc::ColorDescription{9, 16, 9} : hevc::ColorDescription{12, 13, 1};
-  const auto sequence = hevc::encode(tiles, params);
+  std::vector<std::vector<std::uint8_t>> completed(tiles.size());
+  auto sequence = hevc::encode_to(tiles.size(), [&](std::size_t i, hevc::YuvTile& tile) {
+    tile = tiles.at(i);
+  }, params, [&](std::size_t i, std::span<const std::uint8_t> bytes) {
+    require(completed.at(i).empty(), "stored sample returned twice");
+    completed[i].assign(bytes.begin(), bytes.end());
+  });
+  require(sequence.samples.empty(), "streaming encoder retained completed samples");
+  sequence.samples = std::move(completed);
+  if (depth == 8) {
+    try {
+      (void)hevc::encode_to(tiles.size(), [&](std::size_t i, hevc::YuvTile& tile) {
+        tile = tiles.at(i);
+      }, params, [](std::size_t, auto) { throw std::runtime_error("tile disk full"); });
+      throw std::logic_error("sample consumer failure swallowed");
+    } catch (const std::runtime_error& error) {
+      require(std::string(error.what()).find("tile disk full") != std::string::npos,
+              "sample storage failure did not reach encoding caller");
+    }
+  }
 
   require(sequence.samples.size() == 4, name + ": four samples");
   require(!sequence.vps.empty() && nal_type(sequence.vps) == 32, name + ": VPS");

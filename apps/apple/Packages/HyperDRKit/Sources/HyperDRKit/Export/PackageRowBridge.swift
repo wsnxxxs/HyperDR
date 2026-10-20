@@ -11,6 +11,7 @@ final class PackageRowBridge: @unchecked Sendable {
     private let progress: @Sendable (RecipeExportProgress) -> Void
     /// Accessed on the writer's serial callback queue, then after it completes.
     private(set) var readSeconds: Double = 0
+    private(set) var callbackSeconds: Double = 0
     private var progressEnd = 0
     private var progressPass = 1
     private var nextThumbnailRow = 0
@@ -30,6 +31,11 @@ final class PackageRowBridge: @unchecked Sendable {
 
     func read(y: Int, count: Int, base: UnsafeMutableBufferPointer<Float>,
               gain: UnsafeMutableBufferPointer<Float>?) throws {
+        let callbackStart = ContinuousClock.now
+        defer {
+            let elapsed = callbackStart.duration(to: .now).components
+            callbackSeconds += Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+        }
         try Task.checkCancellation()
         guard y >= 0, count > 0, y <= height - count else { throw RecipeExportError.invalidStripes }
         let start = ContinuousClock.now

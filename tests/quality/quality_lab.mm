@@ -16,6 +16,7 @@
 #import <ImageIO/ImageIO.h>
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <cmath>
 #include <iostream>
 using namespace hyperdr;
@@ -50,6 +51,70 @@ static void inspect(const std::filesystem::path &path) {
                    .end_object()
                    .take()
             << '\n';
+}
+
+// Compare every decoded Y/Cb/Cr code, including gain pictures, without a full
+// float HDR reconstruction. Intended for device-export before/after checks.
+static void compare_files(const std::filesystem::path& reference,
+                          const std::filesystem::path& candidate) {
+  const auto a = read_binary_file(reference), b = read_binary_file(candidate);
+  const auto left = read_heif(a), right = read_heif(b);
+  const auto lg = left.resolve_gain_map(HeifCanvas::Tiled);
+  const auto rg = right.resolve_gain_map(HeifCanvas::Tiled);
+  require(bool(lg) == bool(rg), "gain presence changed");
+  if (lg) {
+    require(lg->metadata && rg->metadata, "missing gain metadata");
+    require(serialize_tmap_payload(*lg->metadata) == serialize_tmap_payload(*rg->metadata),
+            "gain coding metadata changed");
+  }
+  std::uint64_t samples = 0, changed = 0;
+  unsigned maximum = 0;
+  long double squared = 0;
+  auto compare = [&](const HeifImagePlan& x, const HeifImagePlan& y) {
+    require(x.width == y.width && x.height == y.height && x.tiles.size() == y.tiles.size() &&
+            x.columns == y.columns && x.tile_width == y.tile_width && x.tile_height == y.tile_height &&
+            x.config.bit_depth == y.config.bit_depth && x.config.chroma_format == y.config.chroma_format,
+            "image geometry or precision changed");
+    require(bool(x.color) == bool(y.color), "color presence changed");
+    if (x.color) require(x.color->primaries == y.color->primaries && x.color->transfer == y.color->transfer &&
+        x.color->matrix == y.color->matrix && x.color->full_range == y.color->full_range, "color changed");
+    require(bool(x.light) == bool(y.light), "content-light metadata presence changed");
+    if (x.light) require(x.light->maximum == y.light->maximum && x.light->average == y.light->average,
+                         "content-light metadata changed");
+    std::vector<h::DecodedPicture> decoded(x.tiles.size());
+    std::vector<std::uint8_t> joined;
+    h::decode_item(x.config, x.tiles.size(), [&](std::size_t i) -> std::span<const std::uint8_t> {
+      joined = left.item_bytes(x.tiles[i].id); return joined;
+    }, [&](std::size_t i, h::DecodedPicture&& picture) { decoded.at(i) = std::move(picture); });
+    h::decode_item(y.config, y.tiles.size(), [&](std::size_t i) -> std::span<const std::uint8_t> {
+      joined = right.item_bytes(y.tiles[i].id); return joined;
+    }, [&](std::size_t i, h::DecodedPicture&& picture) {
+      const auto& before = decoded.at(i);
+      require(before.width == picture.width && before.height == picture.height &&
+              before.bit_depth == picture.bit_depth && before.chroma_format == picture.chroma_format,
+              "decoded precision changed");
+      auto plane = [&](const auto& old, const auto& now) {
+        require(old.size() == now.size(), "decoded plane size changed");
+        const auto stride = picture.sample_bytes();
+        for (std::size_t at = 0; at < old.size(); at += stride) {
+          const unsigned u = stride == 1 ? old[at] : (unsigned(old[at]) | unsigned(old[at+1]) << 8) >> 6;
+          const unsigned v = stride == 1 ? now[at] : (unsigned(now[at]) | unsigned(now[at+1]) << 8) >> 6;
+          const auto difference = u > v ? u-v : v-u;
+          maximum = std::max(maximum, difference); changed += difference != 0;
+          squared += double(difference)*difference; ++samples;
+        }
+      };
+      plane(before.luma, picture.luma); plane(before.chroma, picture.chroma);
+      decoded[i] = {};
+    });
+  };
+  compare(left.resolve_image(0, HeifCanvas::Tiled), right.resolve_image(0, HeifCanvas::Tiled));
+  if (lg) compare(lg->gain, rg->gain);
+  std::cout << json::Writer().begin_object().member("decoded_samples", samples)
+      .member("changed_samples", changed).member("maximum_code_difference", maximum)
+      .member("mean_squared_code_difference", double(squared / std::max<std::uint64_t>(1, samples)))
+      .member("within_one_code", maximum <= 1).end_object().take() << '\n';
+  require(maximum <= 1, "device exports differ by more than one decoded code");
 }
 
 #include "hyperdr/app/package.hpp"
@@ -392,7 +457,12 @@ static void run(int argc, char **argv) {
     r.presentation_frame = s.frame;
     if (s.frame)
       r.frame_photo = FrameRect{32, 32, s.base.width - 64, s.base.height - 64};
-    package_report = package_image(r);
+    if(std::getenv("HYPERDR_QUALITY_ROWS")&&package_rows_supported(r.encoding)) {
+      package_report=package_image_rows(r,256,[&](unsigned y,unsigned count,std::span<float> base,std::span<float> gain) {
+        std::copy_n(s.base.pixels.data()+std::size_t(y)*s.base.width*3,base.size(),base.data());
+        std::copy_n(s.gain.pixels.data()+std::size_t(y)*s.gain.width,gain.size(),gain.data());
+      });
+    } else package_report = package_image(r);
   } else
     write_binary_file_atomic(file,
                              native(s, format, depth, q,
@@ -542,6 +612,8 @@ int main(int argc, char **argv) {
     try {
       if (argc == 3 && std::string(argv[1]) == "inspect")
         inspect(argv[2]);
+      else if (argc == 4 && std::string(argv[1]) == "compare")
+        compare_files(argv[2], argv[3]);
       else
         run(argc, argv);
       return 0;

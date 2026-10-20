@@ -7,7 +7,9 @@
 #include <functional>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace hyperdr {
@@ -17,8 +19,28 @@ namespace hyperdr {
 struct HeifSequenceView {
   std::span<const std::uint8_t> vps, sps, pps;
   std::span<const std::vector<std::uint8_t>> samples;
-  template<class Sequence> HeifSequenceView(Sequence& sequence)
+  template<class Sequence> requires (!std::is_same_v<std::remove_cvref_t<Sequence>, HeifSequenceView>)
+  HeifSequenceView(Sequence& sequence)
       : vps(sequence.vps), sps(sequence.sps), pps(sequence.pps), samples(sequence.samples) {}
+  // File-backed samples: only their lengths remain resident. The reader must
+  // return exactly one sample and may throw; it is never called concurrently.
+  std::span<const std::size_t> stored_sizes;
+  std::function<std::vector<std::uint8_t>(std::size_t)> read_stored;
+  template<class Sequence> HeifSequenceView(Sequence& sequence,
+      std::span<const std::size_t> sizes,
+      std::function<std::vector<std::uint8_t>(std::size_t)> read)
+      : vps(sequence.vps), sps(sequence.sps), pps(sequence.pps),
+        stored_sizes(sizes), read_stored(std::move(read)) {}
+  std::size_t count() const { return read_stored ? stored_sizes.size() : samples.size(); }
+  std::size_t size(std::size_t index) const {
+    return read_stored ? stored_sizes[index] : samples[index].size();
+  }
+  void visit(std::size_t index, const std::function<void(std::span<const std::uint8_t>)>& use) const {
+    if (!read_stored) { use(samples[index]); return; }
+    const auto bytes = read_stored(index);
+    if (bytes.size() != stored_sizes[index]) throw std::runtime_error("HEIF stored sample length changed");
+    use(bytes);
+  }
 };
 
 struct HevcConfiguration {

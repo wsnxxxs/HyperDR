@@ -715,6 +715,7 @@ std::string package_image_rows(const PackageRequest& request,std::uint32_t rows,
     cached=first;
   };
   std::optional<QuantizedGain> gain;
+  bool all_zero_gain=false;
   if(needs_gain) {
     const std::uint64_t total=std::uint64_t(width)*height*channels;
     const auto count=std::min<std::uint64_t>(total,65536);
@@ -729,6 +730,9 @@ std::string package_image_rows(const PackageRequest& request,std::uint32_t rows,
         if(next<count&&position==sample_index(next)) { samples.push_back(v);++next; }
       }
     }
+    // The complete finite-sample scan proves this, rather than a sampled codebook.
+    // Replaying an identically zero plane must still use the normal quantizer.
+    all_zero_gain=low==0.f&&high==0.f;
     gain=stream_codebook(*request.gain,request.encoding==OutputEncoding::Adaptive,request.presentation_frame,low,high,samples,negative);
     validate_encoding_headroom(request.encoding,gain->alternate_headroom);
   }
@@ -736,11 +740,13 @@ std::string package_image_rows(const PackageRequest& request,std::uint32_t rows,
     fetch(y);std::copy_n(base.data()+std::size_t(y-cached)*stride,stride,out.data());
   }};
   EncodingRows codes{width,height,channels,[&](unsigned y,std::span<float> out) {
-    fetch(y);const auto offset=std::size_t(y-cached)*gstride;
+    if(!all_zero_gain)fetch(y);
+    const auto offset=all_zero_gain?0:std::size_t(y-cached)*gstride;
     const auto range=gain->gain_max-gain->gain_min;
     for(unsigned x=0;x<width;++x)for(unsigned c=0;c<channels;++c) {
       const auto i=std::size_t(x)*channels+c;
-      const auto v=request.encoding==OutputEncoding::Adaptive?std::max(0.f,grid[offset+i]):grid[offset+i];
+      const auto raw=all_zero_gain?0.f:grid[offset+i];
+      const auto v=request.encoding==OutputEncoding::Adaptive?std::max(0.f,raw):raw;
       const auto normalized=range>kEpsilon?clamp_finite((v-gain->gain_min)/range,0.f,1.f):0.f;
       const auto encoded=encode_gain_code(normalized,gain->gamma);
       const auto code=request.presentation_frame&&std::abs(v)<=kFrameZeroTolerance?gain->zero_code:

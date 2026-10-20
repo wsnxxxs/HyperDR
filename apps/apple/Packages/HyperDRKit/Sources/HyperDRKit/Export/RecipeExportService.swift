@@ -268,6 +268,9 @@ public actor RecipeExportService: RecipeExportServicing {
                 // Native packaging includes synchronous pull rendering. Separate
                 // it before emitting verification closes the encoding clock.
                 timings["read", default: 0] += bridge.readSeconds
+                if ProcessInfo.processInfo.environment["HYPERDR_HEVC_TIMINGS"] != nil {
+                    print("ROW_TIMING render=\(bridge.readSeconds) callback=\(bridge.callbackSeconds) overhead=\(bridge.callbackSeconds - bridge.readSeconds)")
+                }
                 stageStart = stageStart.addingTimeInterval(bridge.readSeconds)
                 packageJSON = packaged.rawJSON
                 thumbnail = try bridge.thumbnail()

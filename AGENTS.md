@@ -144,9 +144,16 @@ export tiles, native-tile RAW preview, the Kit export estimate on
 `Packages/HyperDRRender/EXPORT_MEMORY.md` and the HEIF streaming sink are in.
 The target is at least 110MP at full size on iPhone 17 Pro, for editing and
 export; a smaller long edge is only a fallback. The estimate admits 110MP with
-about 4 GiB of free process memory and not with 3 GiB, so the next step is the
-user's device measurement (available memory with the editor open, 61MP open,
-1:1, pan and full-size export). Functionality comes first: the iOS/iPadOS UI
+about 4 GiB of free process memory and not with 3 GiB.
+61MP RAW opening, 1:1/pan and full-size Adaptive export, and the 60MP Sony HIF's
+full-size HLG export have now succeeded on the physical iPhone 17 Pro. Use the
+optimized `HyperDRiOS-Release` scheme for timing. Current measurements and remaining
+110MP work are in `apps/apple/Packages/HyperDRRender/EXPORT_MEMORY.md`; real 110MP RAW
+support is still unverified. Optimization was stopped at the user's request;
+CPU remains default, the opt-in Metal experiment showed no HIF net benefit,
+and a later identical-recipe RAW comparison differed by up to 9 decoded codes.
+Its cause remains unresolved; do not claim universal pixel repeatability.
+No further optimization is scheduled. Functionality comes first: the iOS/iPadOS UI
 will be redesigned, so iOS gets minimal screens only (the P7-3c panel design
 is paused). Then: P7-3e (saving to the photo library, after the user's Photos
 Lab run on `wip/photos-lab`), the iOS background host and the hands-on checks

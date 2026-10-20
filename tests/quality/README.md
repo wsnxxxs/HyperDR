@@ -43,7 +43,7 @@ private photos as test fixtures or commit candidate images.
 For controlled public-VT property experiments, explicitly build
 `quality_vt_trace` and load its dylib with `DYLD_INSERT_LIBRARIES` **after**
 `taskpolicy`. Overrides: `HYPERDR_LAB_QUALITY`, `_GAIN_QUALITY`, `_HARDWARE`,
-`_SPEED`, `_FPS`, `_CBR`, `_REORDER` (all prefixed `HYPERDR_LAB`). `_TRACE=1`
+`_SPEED`, `_FPS`, `_DELAY`, `_CBR`, `_REORDER` (all prefixed `HYPERDR_LAB`). `_TRACE=1`
 logs actual readable properties and status codes. The interposer is never
 linked into product binaries. It does not observe ImageIO's private encoder;
 absence of intercepted public VT calls is not evidence about private settings.
@@ -58,3 +58,52 @@ an intermediate one-stop reconstruction of the two-stop Adaptive pair.
 The neutral ramp gate also checks adjacent code steps and the flat-sample
 fraction against the measured ImageIO result; it does not claim to replace a
 subjective gradient review. Threshold reference: Apple M6 / macOS 27.0.1.
+
+## Device-export comparisons
+
+`quality_lab compare BEFORE.heic AFTER.heic` checks matching native dimensions,
+bit depth, chroma layout, nclx, content-light levels, gain presence and ISO gain
+coding metadata, then compares every decoded native Y/Cb/Cr code (including
+coded tile padding and gain tiles). It prints sample counts, maximum code error
+and mean squared error, and fails above one code. This is a before/after export
+regression check, complementary to the absolute fidelity and E5 gates above;
+container byte equality is not used as the quality criterion. One image's
+native coded-picture buffers are retained, never full float RGB reconstructions.
+
+Set `HYPERDR_HEVC_TIMINGS=1` in an app's launch environment to record VT setup,
+input production, backpressure wait, submission, completion and selected hardware
+status. Kit also reports total callback time beside the Render-only read time.
+The latter distinction matters: Debug Swift callback validation/thumbnail work
+is charged to encoding in the normal stage report. Use the shared
+`HyperDRiOS-Release` scheme for on-device performance measurements.
+
+## Experimental direct Metal surfaces
+
+The row HEIC writer's opt-in `HYPERDR_METAL_HEVC=1` uses a bounded 512×512
+Metal converter to write VideoToolbox's IOSurface Y/chroma planes directly.
+Transfer functions and gain reconstruction remain on the CPU. Default exports
+retain the CPU route pending an end-to-end benefit. `HYPERDR_METAL_AUDIT=1`
+additionally computes the CPU YUV reference before each submission and rejects
+any source-code difference; use this for correctness, never for timing.
+
+`metal_yuv_test` checks exact YUV codes at 8/10 bits, matrices 709/2020,
+PQ/HLG/linear test values and partial edge tiles. Safe Metal math, precise
+functions and disabled contraction match the engine's `-ffp-contract=off`.
+The test skips only when no Metal device exists.
+
+To exercise the absolute quality lab's supported package cases through rows:
+
+```sh
+HYPERDR_QUALITY_ROWS=1 HYPERDR_METAL_HEVC=1 HYPERDR_METAL_AUDIT=1 \
+  python3.12 tests/quality/run.py --build-dir build --e5 --report /tmp/metal-quality.json
+```
+
+`HYPERDR_QUALITY_ROWS` affects only the lab's package cases whose format supports
+rows; the native-nearest SDR control and separate E5 binary keep their own paths.
+Native framed row checks also run in `capi_package_rows_test` with the Metal flag.
+Device before/after comparisons remain necessary. The 2026-10-21 RAW repeat
+comparison failed at up to nine decoded codes despite matching recipe/source;
+its cause remains unresolved. Optimization stopped at the user's request, and
+this route stays experimental. See Render's `EXPORT_MEMORY.md` for evidence. `HEVC_MEMORY` timing diagnostics
+include process footprint and lifetime peak at session boundaries; they are not
+an isolated allocator measurement or a universal codec-memory bound.

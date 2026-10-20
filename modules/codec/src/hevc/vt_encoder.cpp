@@ -6,7 +6,10 @@
 #include <VideoToolbox/VideoToolbox.h>
 
 #include <chrono>
+#include <mach/mach.h>
 #include <condition_variable>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <mutex>
@@ -45,6 +48,7 @@ struct OutputState {
   std::vector<std::vector<std::uint8_t>> samples;
   std::vector<bool> present;
   std::vector<std::vector<std::uint8_t>> with_unspecified;
+  SampleConsumer consume;
 };
 
 void fail(OutputState& state, std::string message) {
@@ -158,8 +162,10 @@ void record_frame(OutputState& state, std::size_t index, OSStatus status,
   std::vector<std::uint8_t> data(CMBlockBufferGetDataLength(block));
   check_status(CMBlockBufferCopyDataBytes(block, 0, data.size(), data.data()),
                "copy HEVC sample");
-  state.samples[index] = repack_sample(data, length_size, state.sets,
+  auto encoded = repack_sample(data, length_size, state.sets,
       state.with_unspecified.empty() ? nullptr : &state.with_unspecified[index]);
+  if (state.consume) state.consume(index, encoded);
+  else state.samples[index] = std::move(encoded);
   state.present[index] = true;
 }
 
@@ -248,7 +254,23 @@ void configure(VTCompressionSessionRef session, const EncodeParams& params) {
   }
 }
 
-EncodedSequence run(std::size_t count, const TileProducer& produce, const EncodeParams& params, EncodedSequence* audit = nullptr) {
+EncodedSequence run(std::size_t count, const TileProducer& produce, const EncodeParams& params,
+    EncodedSequence* audit = nullptr, const SampleConsumer& consume = {},
+    const PixelBufferProducer& surface_producer = {}) {
+  auto log_memory=[&](const char* phase) {
+    if(!std::getenv("HYPERDR_HEVC_TIMINGS"))return;
+    task_vm_info_data_t info{};mach_msg_type_number_t size=sizeof(info)/sizeof(integer_t);
+    if(task_info(mach_task_self(),TASK_VM_INFO,reinterpret_cast<task_info_t>(&info),&size)==KERN_SUCCESS)
+      std::fprintf(stderr,"HEVC_MEMORY phase=%s surface=%d footprint=%llu peak=%llu\n",phase,bool(surface_producer),
+          static_cast<unsigned long long>(info.phys_footprint),static_cast<unsigned long long>(info.ledger_phys_footprint_peak));
+  };
+  log_memory("begin");
+  const auto started = std::chrono::steady_clock::now();
+  const auto seconds = [](auto start) {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+  };
+  double producing = 0, waiting = 0, submitting = 0;
+  unsigned flushes = 0;
   if (count == 0) throw std::invalid_argument("HEVC sequence has no tiles");
   const int bit_depth = params.main10 ? 10 : 8;
   // Rejects unsupported colour code points before any session exists.
@@ -258,7 +280,8 @@ EncodedSequence run(std::size_t count, const TileProducer& produce, const Encode
 
   OutputState state;
   state.count = count;
-  state.samples.resize(count);
+  state.consume = consume;
+  if (!consume) state.samples.resize(count);
   if (audit) state.with_unspecified.resize(count);
   state.present.assign(count, false);
 
@@ -272,6 +295,7 @@ EncodedSequence run(std::size_t count, const TileProducer& produce, const Encode
   CFDictionarySetValue(attributes.get(), kCVPixelBufferHeightKey, size.get());
   CFDictionarySetValue(attributes.get(), kCVPixelBufferIOSurfacePropertiesKey, surface.get());
 
+  if(surface_producer)CFDictionarySetValue(attributes.get(),kCVPixelBufferMetalCompatibilityKey,kCFBooleanTrue);
   SessionGuard session;
   check_status(VTCompressionSessionCreate(kCFAllocatorDefault, static_cast<int32_t>(kTileSize),
                                           static_cast<int32_t>(kTileSize), kCMVideoCodecType_HEVC,
@@ -280,6 +304,11 @@ EncodedSequence run(std::size_t count, const TileProducer& produce, const Encode
                "create HEVC compression session");
   configure(session.get(), params);
   check_status(VTCompressionSessionPrepareToEncodeFrames(session.get()), "prepare HEVC session");
+  CfRef<CFTypeRef> hardware;
+  const auto hardware_status = VTSessionCopyProperty(session.get(),
+      kVTCompressionPropertyKey_UsingHardwareAcceleratedVideoEncoder, nullptr, hardware.out());
+  const bool accelerated = hardware_status == noErr && hardware.get() == kCFBooleanTrue;
+  const double setup = seconds(started);
   CVPixelBufferPoolRef pool = VTCompressionSessionGetPixelBufferPool(session.get());
   if (!pool) throw VtError("HEVC session has no pixel buffer pool");
 
@@ -292,9 +321,10 @@ EncodedSequence run(std::size_t count, const TileProducer& produce, const Encode
     if (!state.error.empty()) throw VtError(state.error);
   };
 
-  auto tile = make_tile(bit_depth);
+  auto tile = surface_producer?YuvTile{}:make_tile(bit_depth);
   for (std::size_t index = 0; index < count; ++index) {
     check_cancelled();
+    auto tick = std::chrono::steady_clock::now();
     // Back-pressure. VideoToolbox may hold pictures until it sees more input,
     // so a wait that makes no progress flushes what has been submitted.
     {
@@ -304,6 +334,7 @@ EncodedSequence run(std::size_t count, const TileProducer& produce, const Encode
               return !state.error.empty() || index - state.returned < kMaxInFlight;
             })) {
           lock.unlock();
+          ++flushes;
           check_status(VTCompressionSessionCompleteFrames(
                            session.get(), CMTimeMake(static_cast<int64_t>(index) - 1, 1)),
                        "flush HEVC pictures");
@@ -312,22 +343,24 @@ EncodedSequence run(std::size_t count, const TileProducer& produce, const Encode
       }
     }
     throw_if_failed();
-
-    produce(index, tile);
-    validate_tile(tile, bit_depth);
+    waiting += seconds(tick);
+    tick = std::chrono::steady_clock::now();
     CfRef<CVPixelBufferRef> buffer;
-    check_status(CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, buffer.out()),
-                 "create HEVC pixel buffer");
-    check_status(CVPixelBufferLockBaseAddress(buffer.get(), 0), "lock HEVC pixel buffer");
-    try {
-      copy_plane_to_buffer(buffer.get(), 0, tile.luma.data(), tile.luma_row_bytes(), kTileSize);
-      copy_plane_to_buffer(buffer.get(), 1, tile.chroma.data(), tile.chroma_row_bytes(),
-                           kTileSize / 2);
-    } catch (...) {
-      CVPixelBufferUnlockBaseAddress(buffer.get(), 0);
-      throw;
+    check_status(CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault,pool,buffer.out()),"create HEVC pixel buffer");
+    if(surface_producer) {
+      surface_producer(index,buffer.get());
+    } else {
+      produce(index,tile);validate_tile(tile,bit_depth);
     }
-    CVPixelBufferUnlockBaseAddress(buffer.get(), 0);
+    producing+=seconds(tick);tick=std::chrono::steady_clock::now();
+    if(!surface_producer) {
+      check_status(CVPixelBufferLockBaseAddress(buffer.get(),0),"lock HEVC pixel buffer");
+      try {
+        copy_plane_to_buffer(buffer.get(),0,tile.luma.data(),tile.luma_row_bytes(),kTileSize);
+        copy_plane_to_buffer(buffer.get(),1,tile.chroma.data(),tile.chroma_row_bytes(),kTileSize/2);
+      } catch(...) {CVPixelBufferUnlockBaseAddress(buffer.get(),0);throw;}
+      CVPixelBufferUnlockBaseAddress(buffer.get(),0);
+    }
     attach_color(buffer.get(), params.color);
 
     VTEncodeInfoFlags flags = 0;
@@ -337,7 +370,9 @@ EncodedSequence run(std::size_t count, const TileProducer& produce, const Encode
                      reinterpret_cast<void*>(static_cast<std::uintptr_t>(index)), &flags),
                  "submit HEVC picture");
     if (flags & kVTEncodeInfo_FrameDropped) throw VtError("VideoToolbox dropped an HEVC picture");
+    submitting += seconds(tick);
   }
+  const auto completing = std::chrono::steady_clock::now();
   check_status(VTCompressionSessionCompleteFrames(session.get(), kCMTimeInvalid),
                "complete HEVC pictures");
 
@@ -355,6 +390,12 @@ EncodedSequence run(std::size_t count, const TileProducer& produce, const Encode
     audit->vps=result.vps;audit->sps=result.sps;audit->pps=result.pps;
     audit->samples=std::move(state.with_unspecified);
   }
+  if (std::getenv("HYPERDR_HEVC_TIMINGS")) {
+    std::fprintf(stderr, "HEVC_TIMING tiles=%zu depth=%d hw=%d hw_status=%d setup=%.4f produce=%.4f wait=%.4f submit=%.4f complete=%.4f total=%.4f flushes=%u\n",
+        count, bit_depth, accelerated, int(hardware_status), setup, producing, waiting,
+        submitting, seconds(completing), seconds(started), flushes);
+  }
+  log_memory("end");
   return result;
 }
 
@@ -373,6 +414,19 @@ EncodedSequence encode_sequence(std::size_t count, const TileProducer& produce,
 EncodedSequence encode(std::size_t count, const TileProducer& produce,
                        const EncodeParams& params) {
   return encode_sequence(count, produce, params, true);
+}
+
+EncodedSequence encode_to(std::size_t count, const TileProducer& produce,
+    const EncodeParams& params, const SampleConsumer& consume) {
+  if (!consume) throw std::invalid_argument("HEVC requires a sample consumer");
+  // A storage failure is not evidence that the device encoder disappeared.
+  return run(count, produce, params, nullptr, consume);
+}
+
+EncodedSequence encode_surfaces_to(std::size_t count,const PixelBufferProducer& produce,
+    const EncodeParams& params,const SampleConsumer& consume) {
+  if(!produce||!consume)throw std::invalid_argument("HEVC surface route needs producer and consumer");
+  return run(count,{},params,nullptr,consume,produce);
 }
 
 EncodedSequence encode(std::span<const YuvTile> tiles, const EncodeParams& params) {

@@ -1,5 +1,76 @@
 # ROI editing and export memory contract
 
+## Status: optimization stopped at user request — 2026-10-21
+
+Keep the CPU route as the default. The Metal experiment is opt-in only and is
+not approved as a faster or fully validated replacement. No further optimization
+or device experiments are scheduled. Existing full-size exports succeeded, but
+**a later RAW repeatability comparison failed**; see the unresolved issue below.
+Do not treat earlier zero-difference comparisons as a universal quality guarantee.
+
+## Current device status — 2026-10-21
+
+Physical iPhone 17 Pro `Hydrogen`, Personal Team, optimized
+`HyperDRiOS-Release`, q90, original dimensions, resident editor, unchanged
+20% process reserve and export verification. Times sum persisted service stage
+clocks, excluding the user's Save to Files action. The HIF is about 60MP;
+there is no 12MP camera fixture or real 110MP RAW in this device run.
+
+| Input / output | Dimensions | First successful Debug | Release + CLLI fusion | Current follow-up |
+|---|---:|---:|---:|---:|
+| A7R V DSC01468.ARW / Adaptive HDR | 9504 × 6336 | 66.59 s | 19.78 s | **16.37 s** |
+| Sony DSC01422.HIF / HEIC HLG | 6336 × 9504 | 58.65 s | 7.55 s | **7.41 s** |
+
+Both full-size exports pass native verification and independent system readback.
+RAW was opened at 1:1 and panned without a crash. Its unchanged automatic recipe
+resolves to **zero gain** for this photo; it still stores a full-resolution mono
+gain image. HIF readback retains 2.2234 stops, 10-bit BT.2100 HLG.
+Before/after comparisons find **zero changed decoded codes** across 194,248,704
+RAW samples and 97,124,352 HIF samples, including padded Y/Cb/Cr tiles and gain.
+The comparator also checks dimensions, precision/chroma, nclx, CLLI and gain metadata.
+Results vary with device thermal state and recipe; this is not a universal speed guarantee.
+
+RAW's latest export is 17.2% shorter than the preceding Release measurement.
+Its Render read time falls from 8.70 to 5.70 s; the auxiliary VT producer drops
+from 3.33 to 0.24 s after removing source replay. HIF's 7.55→7.41 s difference
+is small and may include run variance; it is not claimed as a significant speedup.
+These are individual device runs, not a statistical benchmark.
+
+Evidence: ignored `build/device-qa/2026-10-21/` (memory change), `speed/`
+(Release/CLLI), and `speed-followup/` (zero-gain/matrix reuse). Each contains
+persisted reports, outputs, comparisons and timing traces.
+Before the compressed-sample spool change RAW preflight blocked at rounded
+2.3 GB needed / 2.3 GB available; HIF runtime admission reported 2226 MiB needed /
+2094 MiB available. No admission bypass or extra memory entitlement was used.
+
+## Current performance decisions
+
+- Use the Release scheme for performance measurements. C++ was already optimized;
+  Debug Swift callback validation, copies and thumbnail work inflated the original
+  times. Release alone changed the HIF from 58.37 s to 9.56 s.
+- PQ/HLG accumulate CLLI while feeding encoding rows, preserving native sample and
+  reduction order. This removes a complete render/reconstruction pass: two passes
+  remain (codebook + encoding). Adaptive normally requires three.
+- After a complete finite-sample scan proves exact zero gain, the row writer can
+  generate gain codes without replaying the source. It retains the same codebook,
+  quantizer, deterministic dither and frame checks. Nonzero gain still replays.
+  On this RAW it reduces source passes from three to two, without retaining a
+  whole image or adding a disk cache.
+- PQ/HLG also reuse the linear P3→Rec.2020 matrix result from CLLI
+  accumulation in the encoding slab. No extra buffer, precision change or
+  different luminance reduction is introduced.
+- `HYPERDR_HEVC_TIMINGS=1` reports VT hardware selection, producer, wait and submit
+  timing, plus full Swift callback and Render read time. The measured sessions
+  report `hw=1`; device backpressure/flush costs were negligible. The `encoding`
+  stage includes synchronous producer/callback work, not only hardware encoding.
+- Float32, original dimensions, calibrated q90 mapping, non-real-time VT mode,
+  four pictures in flight and both verification paths remain unchanged.
+
+[Historical Mac experiments and 110MP projections](EXPORT_MEMORY_HISTORY.md)
+explain the memory allowance, rejected precision/cache changes and earlier timings.
+
+## Editing and render bounds
+
 The editor uses a lazy `ExportSource` for details on every platform. A detail
 request develops only its native ROI plus sampling support. It never calls
 `load(.full)`. RAW preview pixels are detached from their development graph;
@@ -69,204 +140,113 @@ working-set allowance. Native auxiliary gain-map data, LUTs, caption PNG/decoded
 resources and the caller's resident editor state are additional real owners.
 There is no verified universal byte/pixel upper bound for every camera/codec.
 
-## Measurements and 110MP projection
+## File-backed HEVC output tiles (iPhone follow-up, 2026-10-21)
 
-Apple M6, 24 GiB, macOS/Xcode 27 SDK, debug Swift build; `task_vm_info.phys_footprint`
-and `ledger_phys_footprint_peak`. No taskpolicy throttling. RAW input is
-9504 x 6336 = 60,217,344 pixels; target is 12800 x 8600 = 110,080,000, ratio 1.828.
-Only numeric results are recorded. Temporary synthetic files/probes are removed.
+The row writer no longer retains all compressed HEVC samples until HEIF
+assembly. Each completed VT picture is written into an anonymous staging-directory
+file, with file caching disabled. Only per-tile offsets and lengths remain in
+memory. Validation and assembly read one tile at a time; the existing 256 KiB
+sink-write and cancellation bounds remain. File handles close on success and
+exceptions, including callback/storage failures. Files are unlinked immediately
+and cannot be orphaned by a terminated process.
 
-| Stage | 61MP RAW measured footprint / peak MiB | 110MP RAW: conservative whole-peak linear projection MiB |
-|---|---:|---:|
-| Old editor full load + four pans | 5715.5 peak | 10448.2 |
-| New preview + fixed analysis | 1531.4 peak | 2799.5 |
-| New lazy detail graph opened | 1207.3 resident (this run) | 2207.0 |
-| New first 2048-square detail + four pans | 1531.4 peak; 497.1 resident after last pan | 2799.5 peak |
-| Independent export source opened | 1162.2 resident/peak | 2124.6 |
-| Independent global preparation scan | 1555.4 peak; 669.5 resident after scan | 2843.3 peak |
-| Independent reads, 256 rows | no increase above 1555.4 peak; 749.1 resident after reads | <=2843.3 whole-run peak |
+Each encoded 512-pixel tile has an enforced 4 MiB storage bound. Kit reserves
+16 MiB for callback input/repacking, stored-sample reads and bounded indexing,
+instead of the former whole-canvas compressed-rate envelope. The empirical
+**24 B/native pixel + 512 MiB** decode/ROI allowance, process-memory safety
+margin, returned row owners, encoding slab, VT pictures and verification are
+unchanged. There is no new entitlement, precision change, or output downscale.
+The tradeoff is temporary disk space proportional to the compressed output.
+Legacy whole-plane/in-memory codec APIs keep their existing sequence ownership.
 
-A nearby 512-row internal-tile experiment reached 1689.1 MiB while editing; this
-is evidence that ARC/decoder resource timing affects the high-water mark. Treat
-roughly **1.7 GiB at 61MP / 3.1 GiB at 110MP** as the conservative editing
-measurement envelope, not a certified iPhone ceiling. The final 516-row run
-completed opening and four pans in 2.66 s (old 3.18 s); steady pans took
-approximately 0.06–0.20 s each. The first detail includes graph setup.
+Public API investigation:
 
-A less pessimistic source-area-plus-fixed-ROI projection uses measured 20 B/native
-pixel and keeps the remaining peak fixed: about **2483 MiB editing** and
-**2506 MiB export preparation** at 110MP. This is a projection for this RAW,
-not a guaranteed bound. A practical admission estimate may reserve **24 B/native
-pixel once, plus 512 MiB** for mono RAW export work, then add returned CPU row
-arrays, retained resources and the existing editor. This is an empirical safety
-allowance, not a replacement for checking available process memory. Do not credit
-native caches across independent engines without measuring their overlap.
+- [UsingHardwareAcceleratedVideoEncoder](https://developer.apple.com/documentation/videotoolbox/kvtcompressionpropertykey_usinghardwareacceleratedvideoencoder)
+  confirms actual session selection; the device reports hardware in all measured streams.
+- [MaxFrameDelayCount](https://developer.apple.com/documentation/videotoolbox/kvtcompressionpropertykey_maxframedelaycount)
+  bounds the encoder's compression window. The lab's attempted value 3 returned
+  -12900 on the Mac encoder; device traces showed no flush/wait bottleneck,
+  so no product setting was changed.
+- [ExpectedFrameRate](https://developer.apple.com/documentation/videotoolbox/kvtcompressionpropertykey_expectedframerate)
+  is an initialization hint. A 60-fps Mac lab experiment did not materially
+  change throughput or decoded quality and was not adopted.
+- [PrioritizeEncodingSpeedOverQuality](https://developer.apple.com/documentation/videotoolbox/kvtcompressionpropertykey_prioritizeencodingspeedoverquality)
+  explicitly permits sacrificing quality. It was not enabled. The calibrated
+  quality route, non-real-time mode and four-picture in-flight bound remain.
 
-### Native-tiled RAW preview follow-up
 
-The reduced `CIRAWFilter.scaleFactor` path was the controllable source of an
-extra high-water mark. Preview and fixed analysis now keep the filter at native
-scale, develop independent <=4096 x 516 ROIs and area-filter each into the bounded
-float32 preview/analysis texture. RAW settings and
-draft mode are unchanged. `RAWDevelopment.scaleFactor` reports the final source
-output scale, including this post-development resampling. Analysis remains
-1024-long-edge and the processing graph remains <=768-long-edge.
+## GPU-to-encoder tile experiment — 2026-10-21
 
-Fresh-process before/after, same 60,217,344-pixel RAW, 2048 preview, fixed analysis,
-four 2048-square details/pans, 256-row export reads, Mac Debug. The editor's preview,
-latest display output and lazy detail source remain alive during the combined
-export; independent export starts without them. Peaks are process MiB:
+Apple documents IOSurface-backed CVPixelBuffer pools with Metal views of each
+Y/chroma plane, so GPU output can feed HEVC without an extra frame copy:
+[Create image processing apps powered by Apple silicon, HEVC case study](https://developer.apple.com/videos/play/wwdc2021/10153/?time=1710).
 
-| Stage | Reduced filter preview | Initial native ROI point preview |
-|---|---:|---:|
-| Open + fixed analysis | 1530.7 | 1236.7 |
-| Open + first 1:1 detail + four pans | 1723.3 | 1254.2 |
-| Independent export open/scan/read | 1571.9 | 1337.8 |
-| Export open/scan/read with resident editor | 1958.9 | 1492.8 |
+Implemented as an **opt-in experiment**, `HYPERDR_METAL_HEVC=1`: the row writer
+reads transfer-encoded RGB into one reusable 3 MiB shared Metal buffer. A 512-pixel
+tile kernel writes Y/chroma directly into VT's own IOSurface planes; completion
+is awaited before submission. Four pictures remain the maximum in flight. Gain
+pictures, transfer functions and HDR reconstruction retain the CPU reference.
+The default remains CPU. This stage still includes GPU→CPU float readback and
+CPU→GPU input packing; it is not a complete zero-copy render pipeline.
 
-This reduces the measured peaks by 19.2%, 27.2%, 14.9% and 23.8%, respectively.
-Opening/analysis took 1.035 -> 1.722 s; through the pans 2.010 -> 2.879 s;
-the combined run 5.033 -> 5.734 s. Independent export took 3.671 -> 3.244 s.
-A repeat without changes peaked at 1801.6 MiB while panning; native ROI preview
-repeats peaked at 1245.9/1254.2 MiB. Apple resource release timing still varies.
-The earlier RAW tables/projections above describe the previous preview policy.
+Safe/precise Metal math and disabled contraction are necessary. The initial
+prototype differed at two pre-encode YUV samples, expanding to a two-code decoded
+error, and was rejected. After aligning arithmetic, native source-code tests and the initial
+full-size device comparisons had zero differences. A later RAW comparison
+failed as recorded below; RAW cross-run quality validation remains open. The audit flag computes the
+CPU YUV reference and rejects any difference before VT; it is disabled for timing.
 
-An isolated system graph was 25.7/26.0 MiB before any development. Rendering a
-1024 preview previously peaked at 1158.8 MiB, versus 1016.8 MiB now (917.3 MiB
-resident after the last tile). Subtracting graph residency and the 11,599,872-byte
-owned destination gives about **19.5 -> 17.1 peak B/native pixel**, or **15.3
-resident B/native pixel** after the new preview. This includes system development
-and its ROI work, not just a separately measurable decoder cache. A native
-2048-square ROI alone peaked at 338.8 MiB, including its 70,270,976-byte output:
-a detail ROI does not require an application-owned full-frame development.
+Same-build fresh-process iPhone HIF comparison, q90, original dimensions:
+CPU **7.19 s**, Metal **7.28 s**. VT wrapper totals are 2.8728 and 2.8580 s;
+submission falls from 0.2143 to 0.0566 s, but input production rises from 2.6498
+to 2.7927 s. Removing the final copy alone provides **no net device speedup**.
+Lifetime process peaks at the final VT boundary were 881.8 MiB CPU / 875.3 MiB
+Metal; these individual runs include earlier editor/decode work and their small
+difference is not evidence of a general memory saving. Both use the normal
+memory admission and both verification paths.
 
-`clearCaches` after development, extra autorelease pools and recreating the
-CIContext did not reliably reduce the complete-run peak. Preview draft mode did
-not reduce the opening peak. Reducing the CI memory target to 64 MB increased the
-peak to 2979.3 MiB; it is not a monotonic process-memory limit. A half-float working
-context lowered memory but changed sampled linear/normalized outputs by up to
-0.01448 (15 ticks on a 1023 scale), so it was rejected. Production keeps float32,
-`cacheIntermediates = false` and the 256 MB task target.
+RAW's initial Metal export took 15.97 s and matched the earlier 16.37 s CPU
+reference exactly. A later same-build CPU run took 14.67 s, but differed from
+both references by up to **9 decoded codes** (37,918,881 changed samples across
+194,248,704, mean squared code difference 0.4131698094). Source digest, recipe,
+resolved snapshot and options matched. Both files passed native structural and
+independent system readback. Those checks do not establish pixel repeatability.
+The cause is **undetermined**; neither RAW rendering variability nor the Metal
+conversion has been isolated. Do not use the 14.67 s run as a quality-qualified
+speedup, or infer that the GPU path alone caused the discrepancy.
 
-The original point-sampling preview test could not detect downsampling aliasing.
-It is replaced by an independent CPU area reference over one-pixel alternating
-stripes, in both axes: 9504 x 16 -> 1024 x 1 (and its transpose), plus 1 x 1
-outputs whose footprints cross native tile boundaries. Maximum absolute float32
-error is 8.94e-8. Each ROI covers the full destination footprints plus a one-texel
-rounding guard. Footprints exceeding the native envelope are integrated in
-bounded pieces; their partial area sums accumulate without truncation. Full/ROI
-rendering and replay checks remain in place. No native-size Render texture was added.
-The editor/exporter can hold separate lazy RAW graphs and Apple cache storage;
-neither retains an application-owned full-size float development. Their measured
-overlap is still charged as resident editor state, not credited as shared memory.
-Keep **24 B/native pixel once + 512 MiB**, plus rows/resources/resident editor,
-as the empirical admission allowance: this sample does not justify a lower
-universal bound or certify a 110MP RAW on an iPhone.
+A fresh RAW launch with the pre-encode audit enabled was prepared, but the user
+stopped optimization before another export ran. No further audit result exists.
+The phone was returned to the CPU route and audit disabled. Recorded lifetime
+VT-boundary peaks: RAW Metal 1121.1 MiB / CPU 1111.7 MiB; these include earlier
+editor/decode work and do not establish a universal memory bound.
 
-### Area-filter follow-up (R50)
+Evidence: `build/device-qa/2026-10-21/metal/`, including both RAW comparisons,
+all four outputs/reports, timing/memory traces and the unresolved-status summary.
 
-Same fresh-process probe, 60,217,344 native pixels, 2048 preview + automatic
-analysis + display, four 2048-square pans and a complete 256-row export read
-with the editor retained. Process peak MiB:
+If optimization is explicitly resumed later, first isolate RAW repeatability
+with an on-device pre-encode audit and repeated identical-source controls. A
+possible later performance experiment is a frozen Render graph ROI feeding
+float32 Metal textures and encoder surfaces without intermediate CPU float
+arrays. It would need a GPU handoff across Render/Kit/engine, preserving
+cancellation, revisions, codebook/CLLI statistics, frame zero gain and both
+verification paths. This work is deferred, not scheduled or in progress.
 
-| Stage | Reduced filter | Native point sampling | Native area filtering |
-|---|---:|---:|---:|
-| Open + fixed analysis + display | 1530.5 | 1237.0 | 1216.0 |
-| Through four 1:1 pans | 1799.7 | 1239.6 | 1408.4 |
-| Through export scan/read with resident editor | 1963.6 | 1492.5 | 1676.4 |
+## Deferred checks and handoff
 
-Area-filter repeat: 1196.3 / 1413.2 / 1684.7 MiB. Thus the opening reduction
-remains, and pan/export peaks remain below the reduced-filter path, but their
-previous point-sampling savings are partly lost. These are whole-process peaks,
-including system caches; the <=4096 x 516 source envelope and empirical 24 B/px
-allowance are unchanged. Complete area-filter probe: 6.20 s (repeat 6.19 s).
-
-For the licensed Sony fixture, resolved automatic `hdr.range` is 0.8117584
-with the reduced-filter path, 0.8825801 with native point sampling and 0.8563057
-with native area filtering. Area filtering differs from the original by +0.0445473
-and from point sampling by -0.0262744. Native versus reduced RAW development is
-still different; this change removes point-sampling aliasing, not that system
-pipeline difference. The 61MP probe resolves to 0 in all three paths.
-
-### Synthetic TIFF measurements
-
-| 110.08MP synthetic TIFF, final editor implementation | Measured MiB |
-|---|---:|
-| Preview + fixed analysis peak | 195.0 |
-| Lazy source opening peak | 776.3 |
-| Four 2048-square details/pans peak | 1560.5 |
-| Global export scan peak | 1660.5 |
-| Complete read pass peak | 1738.1 |
-
-The original TIFF scan/read run took 83.6 s (32 s scan, 44.7 s reads), excluding
-HEVC encoding. Profiling isolated repeated ImageIO TIFF strip decoding and
-16-bit byte swapping during CI ROI rasterization, rather than GPU processing or
-RGB packing. The recheck uses an uncompressed, big-endian RGBA half-float TIFF with
-one row per strip: decompression itself was not the cause. ImageIO/CI immediate
-cache hints alone did not stop the repeated decoding.
-
-A fresh-process before/after recheck on the same pre-generated 12800 x 8600 TIFF,
-Mac Debug, 256-row reads (file generation excluded):
-
-| Native TIFF provider | Open s | Global scan s | Complete read pass s | Total s | Process peak MiB |
-|---|---:|---:|---:|---:|---:|
-| Previous CI file provider | 8.142 | 55.905 | 3.241 | 67.288 | 2030.1 |
-| Detached native bitmap | 2.366 | 0.557 | 1.763 | 4.685 | 1695.1 |
-
-This recheck is 14.4x faster overall; decoder cache timing makes the previous
-scan/read split variable between runs. All existing Render tile/row limits stay
-unchanged; no native-size GPU source or float processing buffer was added.
-
-The final internal detail subdivision was separately rechecked (7.23 s for
-opening/four pans); it did not increase the whole-export peak envelope. A
-20017-wide synthetic image also covers both sides of the 16384 limit, exact
-replay, frame zero gain and an oversized caption.
-
-We cannot certify "all 110MP RAWs fit a 3 GiB process budget" from this sample.
-A real 110MP RAW and on-device QA are still required; under memory pressure,
-admission must refuse work before decode rather than assume Apple's caches are
-bounded. No iPhone footprint/timing result is claimed here.
-
-## 12MP HLG export timing
-
-4032 x 3024 synthetic HLG gradient, q90, native rows writer, bounded verification
-on. The old RGB pack loop was reinstated temporarily on the same source/writer
-to isolate its contribution; the probe was removed afterward.
-
-| Readback | Rows | Reads across all writer passes | Prepare s | Package+verify s | Synchronous read total s |
-|---|---:|---:|---:|---:|---:|
-| Old per-pixel ArraySlice append | 256 | 36 | 0.097 | 6.671 | 5.718 |
-| vImage RGB packing | 256 | 36 | 0.069 | 1.474 | 0.904 |
-| vImage RGB packing | 512 | 18 | 0.069 | 1.416 | 0.864 |
-
-There is no per-read CIContext, pipeline compilation or analysis scan. HEIC's
-512-row slab consumes two sequential 256-row callbacks (one with 512); the native
-writer caches its current input band, so pixel-row access does not render again.
-Three image passes are expected for metadata/statistics and encoding. Keep 256
-for lower memory; 512 saved little time here and requires twice the row storage.
-The service's `encoding` clock includes synchronous pull rendering; `rendering`
-is preparation only. These are Mac results, not an iPhone performance guarantee.
-
-## Interface changes and handoff
-
-- `RenderEngine.materializeExportRegion(_:outputSize:region:)` exposes native ROI
-  materialization to the shared editor, retaining source revision checks.
-- `RenderEngine.maximumTextureDimension(device:)` exposes the allocation limit
-  to the shared canvas. Existing render/load entry signatures are unchanged.
-- Prepared rows keep their synchronous read signature, with the public 512-row
-  maximum above; current Kit's 256-row reads remain valid. No C ABI changes.
-- Full `scripts/test.py apple` passed: Render 46 and EditorCore 36 tests, Mac app
-  477 tests (2 skipped), package tests, localization and timing self-test.
-  `scripts/test.py ios` passed device and simulator builds. All used Python 3.12,
-  Xcode and a private TMPDIR.
-
-Next owner should retest zoom/pan and HLG export on iPhone, measure a real 110MP
-RAW if available, and update Kit admission using the split decoder/tile/row
-ownership above. Signal 9 is consistent with the former footprint but is not a
-confirmed jetsam diagnosis without the device termination report. The decoder
-allowance is still empirical. Export stage timing attribution remains unchanged.
-The 110MP TIFF CPU decompression cost also remains; this change bounds Render's
-allocations rather than replacing Apple's codec. Draft RAW, subdividing preview
-renders, and optional RAW opener reordering were measured and discarded because
-they provided no benefit or increased peak memory. No unfinished experimental
-code or sample-derived files are retained.
+- Measure a **real 110MP RAW on the iPhone** before claiming support. The current
+  estimate admits roughly 4 GiB available process memory, not 3 GiB; retain
+  24 B/native pixel + 512 MiB plus rows, resources and resident editor.
+- Current RAW measurements use a zero-gain automatic recipe. Measure nonzero
+  HDR edits separately before generalizing its speedup to all RAW exports.
+- Keep 256-row admission as the default. The old Mac 512-row experiment saved
+  little and doubled row storage; a device experiment must justify changing it.
+- Render APIs retain revision checks and the public 512-row read limit. No C ABI
+  change. Oversized logical canvases use bounded tiles, never full-canvas GPU textures.
+- Latest follow-up validation: eight native targeted tests (including zero,
+  tiny nonzero and framed gain replay/equality checks), eight absolute quality
+  cases plus E5, unsigned iOS device/simulator builds, and both full-size device
+  initial exports with zero changed decoded codes. The later RAW repeatability
+  failure above remains unresolved. The final full Apple suite passed (481 Mac
+  app tests, two skipped); these test passes do not waive the RAW failure. Do not infer jetsam from signal 9
+  without a termination report.

@@ -315,13 +315,16 @@ ENGINE_IMPORT_RE = re.compile(
     r"HyperDREngine\b", re.MULTILINE)
 
 
-def code_only(source: str) -> str:
+def code_only(source: str, keep_interpolations: bool = False) -> str:
     """`source` with comments and string literals blanked to spaces, newlines
     kept, so a match's line number is still right. Handles nested block
     comments, multi-line and raw strings, and interpolations (code again,
-    with strings of their own)."""
+    with strings of their own). With `keep_interpolations`, an
+    interpolation's code stays (its own comments and strings blanked)."""
     out = list(source)
     n = len(source)
+    kept: list[tuple[int, int]] = []   # interpolation code
+    inner: list[tuple[int, int]] = []  # comments and strings inside it
 
     def blank(start: int, end: int) -> None:
         for k in range(start, end):
@@ -338,7 +341,9 @@ def code_only(source: str) -> str:
             if quote == '"' and source[j] == "\n":
                 return j  # unterminated: stop at the line's end
             if source.startswith(escape + "(", j):
-                j = code_end(j + len(escape) + 1)
+                start = j + len(escape) + 1
+                j = code_end(start)
+                kept.append((start, j - 1))
                 continue
             if source.startswith(escape, j):
                 j += len(escape) + 1
@@ -355,6 +360,7 @@ def code_only(source: str) -> str:
         while j < n and depth:
             end = token_end(j)
             if end is not None:
+                inner.append((j, end))
                 j = end
                 continue
             depth += {"(": 1, ")": -1}.get(source[j], 0)
@@ -379,6 +385,11 @@ def code_only(source: str) -> str:
             continue
         blank(i, end)
         i = end
+    if keep_interpolations:
+        for start, end in kept:
+            out[start:end] = source[start:end]
+        for start, end in inner:
+            blank(start, end)
     return "".join(out)
 
 
@@ -400,25 +411,35 @@ def engine_imports(files: list[tuple[str, bool, str]]) -> list[str]:
 # a save option's `unavailableReasonKey: "..."`, a `replaceReason = "..."`.
 KIT_MESSAGE_KEY_RE = re.compile(
     r'(?:ExportMessage\(key:|\.init\(key:|unavailableReasonKey:|replaceReason =)\s*"([^"\\]+)"')
-# Reading the plan's messages: their types, or the plan fields holding them.
+# Reading the plan's messages, token by token, whatever the line breaks or
+# local names: their types, the members that hold them (`notices`, the
+# summary's `parts`) and any mention of `blockers`, which carry messages as
+# well as codes.
 PLAN_TEXT_RE = re.compile(
-    r"\b(?:ExportMessage|ExportMessageArgument|WillWriteSummary|unavailableReasonKey)\b"
-    r"|\.(?:notices|summary\.parts)\b|\.blockers\b[^\n]*\.message\b")
+    r"\b(?:ExportMessage|ExportMessageArgument|WillWriteSummary|unavailableReasonKey|blockers)\b"
+    r"|\.\s*(?:notices|parts)\b")
+# Files that may mention these tokens because they read only blocker codes,
+# never the messages: path relative to the repository -> why.
+PLAN_TEXT_ALLOWED: dict[str, str] = {}
 
 
 def kit_message_keys(sources: list[str]) -> set[str]:
     return {key for source in sources for key in KIT_MESSAGE_KEY_RE.findall(source)}
 
 
-def plan_text(files: list[tuple[str, bool, str]], kit_keys: set[str], entries: dict) -> list[str]:
+def plan_text(files: list[tuple[str, bool, str]], kit_keys: set[str], entries: dict,
+              allowed: dict[str, str] = PLAN_TEXT_ALLOWED) -> list[str]:
     """Mac app or Shared code reading the planner's messages while some of
-    their keys are missing from the app's catalogue."""
+    their keys are missing from the app's catalogue. Code inside string
+    interpolations counts; comments and plain strings do not."""
     missing = sorted(key for key in kit_keys if key not in entries)
     if not missing:
         return []
     problems = []
     for relative, _, source in files:
-        code = code_only(source)
+        if relative in allowed:
+            continue
+        code = code_only(source, keep_interpolations=True)
         for match in PLAN_TEXT_RE.finditer(code):
             line = code.count("\n", 0, match.start()) + 1
             problems.append(f"{relative}:{line}: reads Kit's plan messages ({match.group(0).strip()}), whose keys "
@@ -439,6 +460,20 @@ def plan_text_self_test(files: list[tuple[str, bool, str]]) -> list[str]:
         failures.append("self-test: plan.notices reported though every key is in the catalogue")
     if plan_text([("x.swift", False, '// plan.notices\nlet s = "WillWriteSummary"\n')], keys, {}):
         failures.append("self-test: plan text in a comment or a string reported")
+    # A chain over two lines, a local alias, an interpolation (R39-001).
+    for source, line in [("let messages = plan.blockers\n    .map(\\.message)\n", 1),
+                         ("let all = plan\n    .notices\n", 2),
+                         ("let b = plan.blockers\nlet m = b.map(\\.message)\n", 1),
+                         ('let t = Text(verbatim: "\\(plan.summary.parts[0].key)")\n', 1),
+                         ('let t = "\\(f("x") + plan.summary.parts[0].key)"\n', 1),
+                         ("let summary = plan.summary\nlet first = summary\n    .parts[0]\n", 3)]:
+        found = plan_text([("apps/apple/HyperDR/Editor/SelfTest.swift", False, source)], keys, {})
+        if not any("SelfTest.swift:%d:" % line in p for p in found):
+            failures.append(f"self-test: plan text not reported on line {line}: {source!r}")
+    if plan_text([("x.swift", False, 'let s = "\\(name) plan.notices"\n')], keys, {}):
+        failures.append("self-test: plan text in the string around an interpolation reported")
+    if plan_text([("a.swift", False, "let codes = plan.blockers.map(\\.code)\n")], keys, {}, allowed={"a.swift": "codes only"}):
+        failures.append("self-test: an allowed file reported")
     return failures
 
 

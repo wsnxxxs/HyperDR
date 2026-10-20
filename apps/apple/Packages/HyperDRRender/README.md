@@ -374,3 +374,36 @@ resource-value caches cleared). Replacing the file cannot attach new analysis or
 AI input to an old source ID: a required reopen throws `RenderError.sourceChanged`.
 Already cached analysis and materialized pixels remain usable; after cache clear
 or transfer to another engine, the editor must reload a changed source.
+
+### Export handoff (P7-3b-R)
+
+`ExportTypes.swift` fixes the Kit/Fake boundary before the RenderEngine
+implementation lands. `ExportStripeRendering.renderExportStripes` receives a
+source, the frozen Recipe/LUT/model prediction, and `ExportRenderRequest`.
+It calls `prepare(ExportRenderReport)` once with the final metadata, then
+`consume(ExportStripe)` for each top-down band, and returns that same report.
+Both callbacks are synchronous and throwing; retain CPU arrays as needed, do not
+queue unbounded bands. A failed operation leaves partial bands to discard.
+The implementation will not write files or call a codec.
+
+`photoSize` is the destination-limited photograph, before adding a frame.
+`FrameSnapshot` carries the final canvas and integral photo rectangle, linear-P3
+paper colour, shadow sigma/offset in final pixels, and optional straight-alpha
+Display-P3 caption PNG with its final rectangle. Compute layout and text in the
+caller, convert the paper's UI colour to linear P3, and freeze PNG bytes before
+starting. No UI objects cross this boundary.
+
+`ExportPairCapabilities` describes the selected format/depth: RGB gain, nonzero
+offsets, signed gain and Apple-style maximum-gain headroom constraints. It is
+not an encoder selection enum. C ABI 4 only supports P3 gain working space;
+unsupported workspaces require exact reconstruction/resplit, reported in
+`resplitReasons`. Destination gamut is an output conversion declaration:
+CPU base planes always remain **linear P3 RGB float32**, gain planes decoded
+**log2 float32** on the same canvas grid, for the C ABI to consume.
+`includesGain=false` is for SDR-only output; PQ/HLG still need gain to reconstruct
+HDR even though their file does not store an auxiliary map. `rows` is explicit
+(256 recommended); it bounds Render bands, not b-stage whole-plane accumulation.
+
+Kit owns durable Recipe/source/LUT/frame fingerprints, model waiting, memory
+admission, file output and reporting. These Render inputs contain no paths,
+PhotoKit assets, platform views, export history or screen headroom adaptation.

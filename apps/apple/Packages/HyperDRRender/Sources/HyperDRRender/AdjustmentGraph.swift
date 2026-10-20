@@ -77,7 +77,8 @@ extension RenderEngine {
         return GraphUniform(tone0: SIMD4(t.exposure, t.contrast, t.highlights, t.shadows),
             tone1: SIMD4(t.blacks, c.warmth, c.tint, c.vibrance), color: SIMD4(c.saturation, lut == nil ? 0 : l.strength, range, h.strength),
             hdr: SIMD4(h.expansionStart ?? RenderParameter.expansionStart, h.coverage, h.sdrRolloff, shoulder ? 1 : 0),
-            flags: SIMD4(domain, 0, lut != nil ? 1 : 0, h.enabled ? 1 : 0),
+            flags: SIMD4(domain, lut != nil && l.input.isSDR ? 1 : 0,
+                         lut != nil && !l.input.isSDR ? 1 : 0, h.enabled ? 1 : 0),
             lutInfo: SIMD4(UInt32(lut?.size ?? 2), lut?.is3D == false ? 0 : 1, l.input.rawValue, l.output.rawValue),
             lutMin: SIMD4(lut?.domainMinimum ?? .zero, 0), lutMax: SIMD4(lut?.domainMaximum ?? SIMD3(repeating: 1), 0),
             region: SIMD4(UInt32(size.width), UInt32(size.height), UInt32(region.minX), UInt32(region.minY)), mode: .zero)

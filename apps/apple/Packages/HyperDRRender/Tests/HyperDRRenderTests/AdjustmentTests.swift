@@ -266,19 +266,41 @@ private func cube(swap: Bool = false) -> String {
         let engine = try RenderEngine()
         let values = [SIMD3<Double>(2.4,1.6,0.8),SIMD3<Double>(0.3,0.2,0.1)]
         let source = try await engine.source(image:bitmap(values,width:2,height:1),domain:.hdr)
+        let original = RenderEngine.readPixels(try await engine.render(source,adjustments:RenderAdjustments()))
         var edit = RenderAdjustments()
         edit.look.lut = try ColorLUT(cube:cube(swap:true)); edit.look.input = .displayP3; edit.look.output = .displayP3
         edit.look.strength = 0.7
         let result = RenderEngine.readPixels(try await engine.render(source,adjustments:edit))
         let reference = values.map { DoubleReference.prepare($0,settings:edit,sdr:false) }
         compare(result,reference)
-        #expect(Double(result.gain[0]) < DoubleReference.sourceHDRSplit(values[0]).gain)
+        // L1 properties use the GPU's unedited pair, independently of the CPU grade.
+        #expect(result.gain == original.gain)
+        #expect(result.baseRGBA[0] != original.baseRGBA[0])
+        for i in values.indices {
+            for c in 0..<3 {
+                let oldHDR = Double(original.baseRGBA[i*4+c])*exp2(Double(original.gain[i]))
+                let newHDR = Double(result.baseRGBA[i*4+c])*exp2(Double(result.gain[i]))
+                #expect(abs(newHDR/Double(result.baseRGBA[i*4+c])-oldHDR/Double(original.baseRGBA[i*4+c])) < 0.000001)
+            }
+        }
         edit.look.strength = 1
-        let clipped = RenderEngine.readPixels(try await engine.render(source,adjustments:edit))
-        #expect(clipped.gain.allSatisfy { abs($0)<0.00001 })
+        let fullStrength = RenderEngine.readPixels(try await engine.render(source,adjustments:edit))
+        #expect(fullStrength.gain == original.gain)
         edit.look.strength = 0
         let bypassed = RenderEngine.readPixels(try await engine.render(source,adjustments:edit))
         compare(bypassed,values.map { DoubleReference.sourceHDRSplit($0) })
+        edit.look.output = .pq; edit.look.strength = 0.05
+        let amplified = RenderEngine.readPixels(try await engine.render(source,adjustments:edit))
+        let amplifiedReference = values.map { value -> DoubleReference.Split in
+            let pair = DoubleReference.sourceHDRSplit(value)
+            let changedBase = DoubleReference.look(pair.base,settings:edit.look)
+            return DoubleReference.sourceHDRSplit(changedBase*exp2(pair.gain))
+        }
+        compare(amplified,amplifiedReference)
+        #expect(amplified.gain[0] > original.gain[0])
+        edit.look.strength = 0
+        let hdrOutputBypass = RenderEngine.readPixels(try await engine.render(source,adjustments:edit))
+        #expect(hdrOutputBypass.baseRGBA == original.baseRGBA && hdrOutputBypass.gain == original.gain)
         edit.look.lut = try ColorLUT(cube:cube()); edit.look.input = .pq; edit.look.output = .pq; edit.look.strength = 0.5
         let pq = RenderEngine.readPixels(try await engine.render(source,adjustments:edit))
         compare(pq,values.map { DoubleReference.prepare($0,settings:edit,sdr:false) })
@@ -323,6 +345,12 @@ private func cube(swap: Bool = false) -> String {
         for c in 0..<3 { #expect(abs(Double(actual.gain[c])-expected[c]) < 0.00001) }
         if case .isoLog2(let metadata) = changed.encoding { #expect(metadata.baseOffset == SIMD3(repeating:Float(1.0/64))) }
         else { Issue.record("Missing ISO edited-pair metadata") }
+        var lookOnly = RenderAdjustments()
+        lookOnly.look.lut = try ColorLUT(cube:cube(swap:true))
+        lookOnly.look.input = .displayP3; lookOnly.look.output = .displayP3
+        let looked = try await engine.render(source,adjustments:lookOnly)
+        #expect(looked.provenance == .resplit && looked.gainChannelCount == 1)
+        if case .log2 = looked.encoding {} else { Issue.record("SDR LUT retained authored ISO encoding") }
         edit.tone.exposure = 0.3
         let resplit = try await engine.render(source,adjustments:edit)
         #expect(resplit.provenance == .resplit && resplit.gainChannelCount == 1)

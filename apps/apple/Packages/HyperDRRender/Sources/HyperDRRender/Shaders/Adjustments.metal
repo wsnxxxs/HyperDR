@@ -124,7 +124,7 @@ float3 lutSample(float3 rgb,constant GraphUniform& p, texture3d<float,access::re
 float3 applyLUT(float3 rgb,constant GraphUniform& p,texture3d<float,access::read> cube,device const float4* table) {
     if(p.color.y==0) return rgb;
     float3 changed=lutDecode(lutSample(lutEncode(rgb,p.lutInfo.z),p,cube,table),p.lutInfo.w);
-    changed=fit(changed,max(1.f,maximum(changed)));
+    changed=fit(changed,p.flags.y && p.lutInfo.w<=2 ? 1.f : max(1.f,maximum(changed)));
     return mix(rgb,changed,p.color.y);
 }
 struct WorkingPair { float3 base; float gain; float alpha; };
@@ -138,6 +138,16 @@ WorkingPair preparePair(float4 pixel,constant GraphUniform& p,texture3d<float,ac
     if(p.flags.z) rgb=applyLUT(rgb,p,cube,table);
     float g=(p.flags.x!=0 || p.flags.z) ? log2(max(1.f,maximum(rgb))) : 0;
     float3 base=fit(rgb*exp2(-g),1.f);
+    if(p.flags.y) {
+        // L1: an SDR-input look changes the base, retaining the captured ratio.
+        base=applyLUT(base,p,cube,table);
+        if(p.lutInfo.w>2) {
+            // HDR/Log output amplifies the base before a fresh decomposition.
+            float3 hdr=base*exp2(g);
+            g=log2(max(1.f,maximum(hdr)));
+            base=fit(hdr*exp2(-g),1.f);
+        }
+    }
     return {base,g,pixel.a};
 }
 float softPeak(float peak,float limit,bool gate) {

@@ -152,7 +152,8 @@ extension DoubleReference {
     public static func look(_ rgb: RGB, settings: LookAdjustments) -> RGB {
         guard !settings.isIdentity, let lut = settings.lut else { return rgb }
         let mapped = decodeLUT(sampleLUT(encodeLUT(rgb,space:settings.input),lut:lut),space:settings.output)
-        let fitted = fitP3(mapped,upper:max(1,mapped.x,mapped.y,mapped.z))
+        let upper = settings.input.isSDR && settings.output.isSDR ? 1 : max(1,mapped.x,mapped.y,mapped.z)
+        let fitted = fitP3(mapped,upper:upper)
         return rgb+(fitted-rgb)*Double(settings.strength)
     }
 
@@ -165,9 +166,18 @@ extension DoubleReference {
             (.shadows,settings.tone.shadows),(.blacks,settings.tone.blacks),(.vibrance,settings.color.vibrance),(.saturation,settings.color.saturation)]
         for (op,value) in operations { x = point(x,operation:op,value:Double(value),sdr:sdr && op == .exposure) }
         x = fitP3(x,upper:max(1,x.x,x.y,x.z))
-        if !settings.look.isIdentity { x = look(x,settings:settings.look) }
-        let g = !sdr || !settings.look.isIdentity ? log2(max(1,x.x,x.y,x.z)) : 0
-        let base = fitP3(x*exp2(-g))
+        let active = !settings.look.isIdentity
+        if active && !settings.look.input.isSDR { x = look(x,settings:settings.look) }
+        var g = !sdr || (active && !settings.look.input.isSDR) ? log2(max(1,x.x,x.y,x.z)) : 0
+        var base = fitP3(x*exp2(-g))
+        if active && settings.look.input.isSDR {
+            base = look(base,settings:settings.look)
+            if !settings.look.output.isSDR {
+                let hdr = base*exp2(g)
+                g = log2(max(1,hdr.x,hdr.y,hdr.z))
+                base = fitP3(hdr*exp2(-g))
+            }
+        }
         return Split(base:base,gain:g)
     }
 

@@ -2,6 +2,7 @@
 
 #include "hyperdr/app/settings.hpp"
 #include "hyperdr/codec/avif_grid.hpp"
+#include "hyperdr/codec/availability.hpp"
 #include "hyperdr/codec/encoders.hpp"
 #include "hyperdr/codec/image_source.hpp"
 #include "hyperdr/container/exif.hpp"
@@ -135,11 +136,12 @@ void validate_offsets(const PackageGain& gain, std::uint32_t channels, bool pres
 }
 
 // Quantizes the caller's log2-stop plane into the 8-bit codes and metadata the
-// writers store. `apple_strict` is ISO 21496-1's Apple form: one channel, and
+// writers store, or float codes when BT.2100 only needs HDR reconstruction.
+// `apple_strict` is ISO 21496-1's Apple form: one channel, and
 // alternate headroom equal to the map's largest gain. `presentation_frame`
 // applies E5 to the codebook: the mat outside the photograph must decode to no
 // gain at all, which needs an exact integer zero-gain code at gamma 1.
-QuantizedGain quantize_gain(const PackageGain& gain, bool apple_strict, bool presentation_frame) {
+QuantizedGain quantize_gain(const PackageGain& gain, bool apple_strict, bool presentation_frame, bool store_codes) {
   QuantizedGain out;
   float low = 0.0F, high = 0.0F;
   FloatImage grid = copy_plane(gain.plane, "gain", &low, &high);
@@ -211,13 +213,100 @@ QuantizedGain quantize_gain(const PackageGain& gain, bool apple_strict, bool pre
       for (std::uint32_t c = 0; c < channels; ++c) {
         const auto index = pixel * channels + c;
         const float encoded = encode_gain_code(normalized[index], out.gamma);
-        out.codes.pixels[index] = !presentation_frame
-            ? quantize_gain_code_dithered(encoded, x, y)
-            : std::abs(grid.pixels[index]) <= kFrameZeroTolerance
-                  ? zero_code : std::round(encoded * 255.0F) / 255.0F;
+        out.codes.pixels[index] = presentation_frame && std::abs(grid.pixels[index]) <= kFrameZeroTolerance
+            ? zero_code : !store_codes ? encoded : !presentation_frame
+                  ? quantize_gain_code_dithered(encoded, x, y)
+                  : std::round(encoded * 255.0F) / 255.0F;
       }
     }
   });
+  if (presentation_frame && std::abs(out.gain_min + range * zero_code) > 1.0e-6F)
+    throw std::logic_error("the framed gain codebook did not keep an exact zero code");
+  out.zero_code = zero_code;
+
+  metadata.base_offset = offset_rational(gain.base_offset[0]);
+  metadata.alternate_offset = offset_rational(gain.alternate_offset[0]);
+  metadata.base_headroom = rational_from_float(gain.base_headroom);
+  // An ISO-generic pair with no declared capacity advertises the gain's own
+  // maximum, which is what the file can actually show.
+  if (!apple_strict && out.alternate_headroom <= 0.0F) out.alternate_headroom = high;
+  metadata.alternate_headroom = rational_from_float(apple_strict ? out.gain_max : out.alternate_headroom);
+  if (channels == 3) {
+    const auto channel = gain_map_channel(metadata, 0);
+    metadata.flags |= 0x80;
+    metadata.channels.assign(3, channel);
+    for (std::uint32_t c = 0; c < 3; ++c) {
+      metadata.channels[c].base_offset = offset_rational(gain.base_offset[c]);
+      metadata.channels[c].alternate_offset = offset_rational(gain.alternate_offset[c]);
+    }
+  }
+  out.alternate_headroom = rational_value(metadata.alternate_headroom);
+  validate_gain_map_metadata(metadata, apple_strict ? GainMapWriterProfile::apple_strict
+                                                    : GainMapWriterProfile::iso_generic);
+  return out;
+}
+
+
+QuantizedGain stream_codebook(const PackageGain& gain,bool apple_strict,bool presentation_frame,
+    float low,float high,std::span<const float> samples,std::uint64_t negative) {
+  QuantizedGain out;
+  const auto channels = gain.plane.channels;
+  validate_offsets(gain, channels, presentation_frame);
+  if (apple_strict && channels != 1)
+    throw UnsupportedFormat(
+        "the adaptive format writes ISO 21496-1's single-channel gain map; "
+        "a three-channel gain map needs iso-gainmap-jpeg or a BT.2100 format");
+  if (apple_strict && gain.base_headroom != 0.0F)
+    throw UnsupportedFormat("the adaptive format writes a base headroom of 0 stops");
+  if (!apple_strict && gain.alternate_headroom > 0.0F &&
+      gain.alternate_headroom < gain.base_headroom)
+    throw std::invalid_argument("alternate headroom is below base headroom");
+
+  if (apple_strict) {
+    out.clipped_samples = negative;
+    low = 0.0F;
+    // A positive declared alternate headroom is the capacity the file
+    // advertises, so the codes are laid out over it. The content's own maximum
+    // is the fallback, and it must fit: the adaptive form stores no gain above
+    // the headroom it declares.
+    const float capacity = gain.alternate_headroom > 0.0F ? gain.alternate_headroom : high;
+    if (high > capacity + 1.0e-3F)
+      throw UnsupportedFormat(
+          "gain reaches " + json::number_text(high) + " stops but the declared alternate headroom is " +
+          json::number_text(capacity) + " stops; the adaptive format stores no gain above its headroom");
+    high = capacity;
+  } else if (gain.alternate_headroom > 0.0F) {
+    out.alternate_headroom = gain.alternate_headroom;
+  }
+
+  auto& metadata = out.metadata;
+  metadata.gain_min = rational_from_float(low);
+  metadata.gain_max = rational_from_float(high);
+  // A framed canvas keeps zero on an integer code, so the mat's own code reads
+  // back as exactly no gain instead of the two codes that bracket it.
+  if (presentation_frame) align_zero_gain(metadata.gain_min, metadata.gain_max);
+  out.gain_min = rational_value(metadata.gain_min);
+  out.gain_max = rational_value(metadata.gain_max);
+  const float range = out.gain_max - out.gain_min;
+
+  // Gamma is chosen from the distribution, exactly as every writer does, then
+  // read back from its stored rational so the codes match the file's metadata.
+  // A framed map stays at gamma 1: aligning zero is only worth it if nothing
+  // else moves the code that represents it.
+  std::vector<float> normalized(samples.size());
+  for (std::size_t i = 0; i < samples.size(); ++i)
+    normalized[i] = range > kEpsilon
+                        ? clamp_finite(((apple_strict ? std::max(0.f,samples[i]) : samples[i]) - out.gain_min) / range, 0.0F, 1.0F) : 0.0F;
+  metadata.gamma = rational_from_float(
+      presentation_frame ? 1.0F : (range > kEpsilon ? choose_gain_gamma(normalized) : 1.0F));
+  out.gamma = rational_value(metadata.gamma);
+
+  // The reference point the frame needs: the code that carries zero stops, and
+  // the mat's samples snapped onto it. Dithering is what keeps a photograph's
+  // shadows from banding, and it is exactly what would move the mat's code.
+  const float zero_code = std::round(clamp_finite(
+      range > kEpsilon ? (0.0F - out.gain_min) / range : 0.0F, 0.0F, 1.0F) * 255.0F) / 255.0F;
+  out.codes.width=gain.plane.width; out.codes.height=gain.plane.height; out.codes.channels=channels;
   if (presentation_frame && std::abs(out.gain_min + range * zero_code) > 1.0e-6F)
     throw std::logic_error("the framed gain codebook did not keep an exact zero code");
   out.zero_code = zero_code;
@@ -265,7 +354,6 @@ ColorGamut resolved_gamut(const PackageRequest& request) {
 // of the codec rather than of the codes, and E5's promise is about the gain the
 // writer stores (checked at the codebook before encoding). A mat narrower than
 // that margin has nothing left to read back.
-constexpr std::uint32_t kMatReadbackMargin = 8;
 
 // The same E5 rule at the codebook, before anything is encoded: every sample the
 // caller did not place inside the photograph is the zero code.
@@ -284,50 +372,9 @@ std::uint64_t mat_samples_carrying_gain(const QuantizedGain& gain, const FrameRe
 }
 
 void verify_framed_mat(const PackageRequest& request, const std::filesystem::path& staged) {
-  const auto& photo = *request.frame_photo;
-  const auto width = request.sdr->width, height = request.sdr->height;
-  const auto decoded = decode_image(staged);
-  if (!decoded.authored_sdr)
-    throw std::runtime_error("the framed package did not read back as a base plus gain map");
-  const auto& base = *decoded.authored_sdr;
-  const auto& alternate = decoded.linear_p3;
-  if (base.width != width || base.height != height || alternate.width != width ||
-      alternate.height != height)
-    throw std::runtime_error("the framed package read back at a different size than it was given");
-  std::uint64_t failures = 0, checked = 0;
-  float worst = 0.0F;
-  std::uint32_t worst_x = 0, worst_y = 0;
-  const auto check = [&](std::uint32_t x, std::uint32_t y) {
-    const auto pixel = (static_cast<std::size_t>(y) * width + x) * 3;
-    for (std::uint32_t c = 0; c < 3; ++c) {
-      const float sdr = base.pixels[pixel + c];
-      const float difference = std::abs(alternate.pixels[pixel + c] - sdr);
-      ++checked;
-      if (difference <= 1.0e-5F * (1.0F + std::abs(sdr))) continue;
-      ++failures;
-      if (difference > worst) { worst = difference; worst_x = x; worst_y = y; }
-    }
-  };
-  // One coding block of slack on every side of the photograph, clipped to the
-  // canvas so a photograph at the edge is handled the same way.
-  const auto near_left = photo.x > kMatReadbackMargin ? photo.x - kMatReadbackMargin : 0;
-  const auto near_top = photo.y > kMatReadbackMargin ? photo.y - kMatReadbackMargin : 0;
-  const auto near_right = std::min(width, photo.x + photo.width + kMatReadbackMargin);
-  const auto near_bottom = std::min(height, photo.y + photo.height + kMatReadbackMargin);
-  for (std::uint32_t y = 0; y < height; ++y) {
-    check_cancelled();
-    const bool in_photo_rows = y >= photo.y && y < photo.y + photo.height;
-    for (std::uint32_t x = 0; x < width; ++x) {
-      if (in_photo_rows && x >= photo.x && x < photo.x + photo.width) continue;
-      if (x < near_left || x >= near_right || y < near_top || y >= near_bottom) check(x, y);
-    }
-  }
-  if (checked == 0) return;
-  if (failures != 0)
-    throw std::runtime_error(
-        "the framed mat carries gain: " + std::to_string(failures) + " samples, worst at " +
-        std::to_string(worst_x) + "," + std::to_string(worst_y) + " (" +
-        json::number_text(worst) + " linear)");
+  const auto& photo=*request.frame_photo;
+  (void)verify_encoded_file(staged,request.encoding,VerificationFrame{request.sdr->width,request.sdr->height,
+      photo.x,photo.y,photo.width,photo.height});
 }
 
 // A framed export is checked before it is published: the bytes go to a staging
@@ -381,6 +428,49 @@ std::string verification_name(OutputEncoding encoding) {
   if (encoding == OutputEncoding::IsoGainMapJpeg) return "iso-gainmap-jpeg";
   if (is_avif_encoding(encoding)) return "avif";
   return encoding == OutputEncoding::Adaptive ? "heic-gain-map" : "heic-bt2100";
+}
+
+std::string package_report(const PackageRequest& request,const std::optional<QuantizedGain>& gain,std::uint64_t byte_count) {
+  const auto encoding=request.encoding;
+  const bool bt2100_output=is_bt2100_encoding(encoding), gain_map_output=is_gain_map_encoding(encoding);
+  json::Writer writer;
+  writer.begin_object().member("schema", "hyperdr.package/v1")
+      .member("output", path_utf8(request.output))
+      .member("format", hdr_encoding_name(encoding))
+      .member("width", request.sdr->width)
+      .member("height", request.sdr->height)
+      .member("bytes", byte_count)
+      .member("verified", request.verify)
+      .member("verification", request.verify ? verification_name(encoding) : "skipped")
+      .begin_object("metadata")
+      .member("exif", request.exif != nullptr && request.exif_size != 0)
+      // The colour space the written samples are in: a BT.2100 rendition is
+      // Rec.2020 and carries no ICC profile of its own.
+      .member("icc", bt2100_output ? "rec2020"
+                         : is_sdr_encoding(encoding) && resolved_gamut(request) == ColorGamut::kSrgb
+                               ? "srgb" : "display-p3")
+      .end_object();
+  if (gain.has_value() && (gain_map_output || bt2100_output)) {
+    writer.begin_object("gain").member("stored", gain_map_output)
+        .member("channels", gain->codes.channels)
+        .member("width", gain->codes.width).member("height", gain->codes.height)
+        .member("gainMin", gain->gain_min).member("gainMax", gain->gain_max)
+        .member("gamma", gain->gamma)
+        .begin_array("baseOffsets");
+    for (std::uint32_t c = 0; c < gain->codes.channels; ++c)
+      writer.element(rational_value(gain_map_channel(gain->metadata, c).base_offset));
+    writer.end_array().begin_array("alternateOffsets");
+    for (std::uint32_t c = 0; c < gain->codes.channels; ++c)
+      writer.element(rational_value(gain_map_channel(gain->metadata, c).alternate_offset));
+    writer.end_array()
+        .member("baseHeadroom", rational_value(gain->metadata.base_headroom))
+        .member("alternateHeadroom", rational_value(gain->metadata.alternate_headroom))
+        .member("clippedSamples", gain->clipped_samples)
+        .end_object();
+  } else {
+    writer.null_member("gain");
+  }
+  return writer.end_object().take() + '\n';
 }
 
 }  // namespace
@@ -450,7 +540,7 @@ std::string package_image(const PackageRequest& request) {
   std::optional<QuantizedGain> gain;
   if (request.gain != nullptr && (gain_map_output || bt2100_output)) {
     gain = quantize_gain(*request.gain, encoding == OutputEncoding::Adaptive,
-                         request.presentation_frame);
+                         request.presentation_frame, gain_map_output || is_avif_encoding(encoding));
     // E5 at the codebook, before anything is encoded: whatever the caller left
     // outside the photograph must be the zero code.
     if (request.frame_photo) {
@@ -503,9 +593,8 @@ std::string package_image(const PackageRequest& request) {
     case OutputEncoding::Hlg:
     case OutputEncoding::AvifPq:
     case OutputEncoding::AvifHlg: {
-      // The pair reconstructs the HDR rendition this format stores, at the
-      // headroom it declares, so the HDR pixels are exactly what the same gain
-      // map would decode to.
+      // HEIC BT.2100 reconstructs from float codes: an unnecessary 8-bit
+      // gain round trip adds noise before HEVC. AVIF keeps its existing path.
       PhotoRenditions renditions;
       renditions.sdr = std::move(base);
       renditions.hdr = reconstruct_gain_map(renditions.sdr, gain->codes, gain->metadata,
@@ -537,44 +626,125 @@ std::string package_image(const PackageRequest& request) {
     write_binary_file_atomic(request.output, bytes, request.overwrite);
   }
 
-  json::Writer writer;
-  writer.begin_object().member("schema", "hyperdr.package/v1")
-      .member("output", path_utf8(request.output))
-      .member("format", hdr_encoding_name(encoding))
-      .member("width", request.sdr->width)
-      .member("height", request.sdr->height)
-      .member("bytes", bytes.size())
-      .member("verified", request.verify)
-      .member("verification", request.verify ? verification_name(encoding) : "skipped")
-      .begin_object("metadata")
-      .member("exif", request.exif != nullptr && request.exif_size != 0)
-      // The colour space the written samples are in: a BT.2100 rendition is
-      // Rec.2020 and carries no ICC profile of its own.
-      .member("icc", bt2100_output ? "rec2020"
-                         : is_sdr_encoding(encoding) && resolved_gamut(request) == ColorGamut::kSrgb
-                               ? "srgb" : "display-p3")
-      .end_object();
-  if (gain.has_value() && (gain_map_output || bt2100_output)) {
-    writer.begin_object("gain").member("stored", gain_map_output)
-        .member("channels", gain->codes.channels)
-        .member("width", gain->codes.width).member("height", gain->codes.height)
-        .member("gainMin", gain->gain_min).member("gainMax", gain->gain_max)
-        .member("gamma", gain->gamma)
-        .begin_array("baseOffsets");
-    for (std::uint32_t c = 0; c < gain->codes.channels; ++c)
-      writer.element(rational_value(gain_map_channel(gain->metadata, c).base_offset));
-    writer.end_array().begin_array("alternateOffsets");
-    for (std::uint32_t c = 0; c < gain->codes.channels; ++c)
-      writer.element(rational_value(gain_map_channel(gain->metadata, c).alternate_offset));
-    writer.end_array()
-        .member("baseHeadroom", rational_value(gain->metadata.base_headroom))
-        .member("alternateHeadroom", rational_value(gain->metadata.alternate_headroom))
-        .member("clippedSamples", gain->clipped_samples)
-        .end_object();
-  } else {
-    writer.null_member("gain");
+  return package_report(request,gain,bytes.size());
+}
+
+bool package_rows_supported(OutputEncoding encoding) {
+  // libavif's current grid API keeps every YUV cell alive through AddImageGrid.
+  return kCodecsAvailable && !is_avif_encoding(encoding);
+}
+
+std::string package_image_rows(const PackageRequest& request,std::uint32_t rows,const PackageRows& read) {
+  check_cancelled();
+  if(!package_rows_supported(request.encoding)) throw UnsupportedFormat("incremental writing is unavailable for this format/build; use whole-plane packaging");
+  if(!read || rows==0 || rows>4096 || !request.sdr || request.output.empty())
+    throw std::invalid_argument("streaming package needs dimensions, output, reader and 1..4096 rows");
+  const auto width=request.sdr->width,height=request.sdr->height;
+  const auto channels=request.gain?request.gain->plane.channels:0;
+  const bool needs_gain=is_gain_map_encoding(request.encoding)||is_bt2100_encoding(request.encoding);
+  if(!width||!height||request.sdr->channels!=3)throw std::invalid_argument("streaming base must be nonempty RGB");
+  if(request.quality<0||request.quality>100 || (request.encoding==OutputEncoding::Adaptive?
+      (request.depth!=8&&request.depth!=10):request.depth!=8))throw std::invalid_argument("invalid package quality or depth");
+  if(needs_gain&&!request.gain)throw UnsupportedFormat("HDR packaging needs a gain plane");
+  if(request.gain) {
+    if((channels!=1&&channels!=3)||request.gain->plane.width!=width||request.gain->plane.height!=height)
+      throw std::invalid_argument("streaming gain must match base dimensions, with 1 or 3 channels");
+    if(!request.gain->working_gamut.empty()&&request.gain->working_gamut!="display-p3")throw UnsupportedFormat("gain working gamut must be display-p3");
+    validate_offsets(*request.gain,channels,request.presentation_frame);
   }
-  return writer.end_object().take() + '\n';
+  if((request.encoding==OutputEncoding::SdrJpeg||request.encoding==OutputEncoding::IsoGainMapJpeg)&&(width>65500||height>65500))throw ExportDimensionLimit(width,height);
+  if(request.frame_photo) {
+    const auto& f=*request.frame_photo;
+    if(!request.presentation_frame||!is_gain_map_encoding(request.encoding)||!request.gain ||
+       !f.width||!f.height||f.x>width||f.y>height||f.width>width-f.x||f.height>height-f.y)
+      throw std::invalid_argument("frame photograph rectangle must lie inside a framed gain-map canvas");
+  }
+  const auto stride=std::size_t(width)*3,gstride=std::size_t(width)*channels;
+  if(stride>std::numeric_limits<std::size_t>::max()/std::min(rows,height)/sizeof(float))throw std::invalid_argument("streaming band dimensions overflow");
+  std::vector<float> base(stride*std::min(rows,height)),grid(gstride*std::min(rows,height));
+  unsigned cached=height;
+  auto fetch=[&](unsigned y) {
+    const auto first=(y/rows)*rows;
+    if(cached==first)return;
+    check_cancelled();const auto count=std::min(rows,height-first);
+    read(first,count,std::span(base).first(stride*count),std::span(grid).first(gstride*count));
+    check_cancelled();
+    for(const auto v:std::span(base).first(stride*count))if(!std::isfinite(v))throw std::invalid_argument("SDR base contains a non-finite sample");
+    for(const auto v:std::span(grid).first(gstride*count))if(!std::isfinite(v))throw std::invalid_argument("gain contains a non-finite sample");
+    cached=first;
+  };
+  std::optional<QuantizedGain> gain;
+  if(needs_gain) {
+    const std::uint64_t total=std::uint64_t(width)*height*channels;
+    const auto count=std::min<std::uint64_t>(total,65536);
+    std::vector<float> samples; samples.reserve(count);
+    std::uint64_t next=0,negative=0;float low=0,high=0;
+    auto sample_index=[&](std::uint64_t i) { return total==count?i:((i*2+1)*total)/(count*2); };
+    for(unsigned y=0;y<height;++y) {
+      fetch(y);const auto offset=std::size_t(y-cached)*gstride;
+      for(std::size_t i=0;i<gstride;++i) {
+        const auto v=grid[offset+i];low=std::min(low,v);high=std::max(high,v);negative+=v<0;
+        const auto position=std::uint64_t(y)*gstride+i;
+        if(next<count&&position==sample_index(next)) { samples.push_back(v);++next; }
+      }
+    }
+    gain=stream_codebook(*request.gain,request.encoding==OutputEncoding::Adaptive,request.presentation_frame,low,high,samples,negative);
+    validate_encoding_headroom(request.encoding,gain->alternate_headroom);
+  }
+  EncodingRows base_rows{width,height,3,[&](unsigned y,std::span<float> out) {
+    fetch(y);std::copy_n(base.data()+std::size_t(y-cached)*stride,stride,out.data());
+  }};
+  EncodingRows codes{width,height,channels,[&](unsigned y,std::span<float> out) {
+    fetch(y);const auto offset=std::size_t(y-cached)*gstride;
+    const auto range=gain->gain_max-gain->gain_min;
+    for(unsigned x=0;x<width;++x)for(unsigned c=0;c<channels;++c) {
+      const auto i=std::size_t(x)*channels+c;
+      const auto v=request.encoding==OutputEncoding::Adaptive?std::max(0.f,grid[offset+i]):grid[offset+i];
+      const auto normalized=range>kEpsilon?clamp_finite((v-gain->gain_min)/range,0.f,1.f):0.f;
+      const auto encoded=encode_gain_code(normalized,gain->gamma);
+      const auto code=request.presentation_frame&&std::abs(v)<=kFrameZeroTolerance?gain->zero_code:
+          !is_gain_map_encoding(request.encoding)?encoded:
+          !request.presentation_frame?quantize_gain_code_dithered(encoded,x,y):std::round(encoded*255)/255;
+      if(request.frame_photo) {
+        const auto& f=*request.frame_photo;
+        if((x<f.x||x>=f.x+f.width||y<f.y||y>=f.y+f.height)&&code!=gain->zero_code)
+          throw std::runtime_error("the framed mat carries gain outside the photograph rectangle");
+      }
+      out[i]=code;
+    }
+  }};
+  PhotoMetadata photo;
+  if(request.exif&&request.exif_size)photo=read_exif(request.exif,request.exif_size).metadata;
+  photo.orientation=1;
+  StagingFile staged(reserve_staging_beside(request.output));
+  switch(request.encoding) {
+    case OutputEncoding::SdrJpeg:write_sdr_jpeg_rows(base_rows,photo,request.quality,resolved_gamut(request),staged.path);break;
+    case OutputEncoding::SdrTiff:write_sdr_tiff_rows(base_rows,photo,resolved_gamut(request),staged.path);break;
+    case OutputEncoding::IsoGainMapJpeg:write_gain_map_jpeg_rows(base_rows,codes,gain->metadata,photo,request.quality,request.presentation_frame,staged.path);break;
+    default: {
+      const auto bytes=encode_heic_rows(base_rows,codes,gain->metadata,gain->alternate_headroom,photo,request.encoding,request.quality,request.depth,request.hevc_preset,request.presentation_frame);
+      write_binary_file_atomic(staged.path,bytes,true);break;
+    }
+  }
+  // Release input row planes before native row/tile verification.
+  base.clear();base.shrink_to_fit();grid.clear();grid.shrink_to_fit();
+  check_cancelled();
+  if(request.verify && !request.frame_photo) (void)verify_encoded_file(staged.path,request.encoding);
+  if(request.frame_photo)verify_framed_mat(request,staged.path);
+  const auto size=std::filesystem::file_size(staged.path);
+  const auto report=package_report(request,gain,size);
+  check_cancelled();
+  const int fd=::open(staged.path.c_str(),O_RDONLY|O_CLOEXEC);
+  if(fd<0)throw std::runtime_error("cannot open staged package");
+  const int synced=::fsync(fd);
+  const int closed=::close(fd);
+  if(synced || closed)throw std::runtime_error("cannot flush or close staged package");
+  if(request.overwrite) {
+    if(::rename(staged.path.c_str(),request.output.c_str()))throw std::system_error(errno,std::generic_category(),"cannot publish package");
+  } else {
+    if(::link(staged.path.c_str(),request.output.c_str()))throw std::system_error(errno,std::generic_category(),"cannot publish package");
+  }
+  return report;
 }
 
 }  // namespace hyperdr

@@ -56,7 +56,7 @@ def check_gain_frame(path, report, probe, reader, work, shadow):
     return result
 
 
-def check_frames(cli, reader, probe, directory, export, source):
+def check_frames(cli, reader, probe, directory, export, source, *, frozen_only=False):
     root = Path(__file__).resolve().parents[2]
     hdr_jpeg = root / "tests/fixtures/gain-map-jpeg/iso-mono.jpg"
     hdr_heic, _ = export(cli, hdr_jpeg, directory / "frame-hdr-source", "adaptive", 10)
@@ -95,6 +95,8 @@ def check_frames(cli, reader, probe, directory, export, source):
         selected = [("adaptive",8)] if kind=="v3-model" else [("adaptive",8),("adaptive",10)] if kind=="v3" else formats
         for encoding, depth in selected:
             name = f"frame-{color}-{kind}-{encoding}{depth}"
+            if frozen_only and name not in baseline["cases"]:
+                continue
             work = directory / name
             path, report = export(cli, input_path, work, encoding, depth, ["--frame", str(spec), *quality, *extra])
             frame = report["files"][0]["frame"]; photo = frame["photo"]

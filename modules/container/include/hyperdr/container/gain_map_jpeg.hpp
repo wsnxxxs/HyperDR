@@ -1,8 +1,10 @@
 #pragma once
 
+#include <span>
 #include "hyperdr/container/iso_gain_map.hpp"
 #include <array>
 #include <cstddef>
+#include <cstdio>
 #include <cstdint>
 #include <vector>
 
@@ -32,14 +34,16 @@ struct GainMapJpeg {
 [[nodiscard]] std::vector<std::uint8_t> assemble_gain_map_jpeg(
     const std::vector<std::uint8_t>& primary,
     const std::vector<std::uint8_t>& gain, const GainMapMetadata& metadata);
+// Combines two internally encoded JPEG streams without retaining their bytes.
+void write_gain_map_jpeg(FILE* primary, FILE* gain, FILE* output, const GainMapMetadata&);
 // Validates JPEG marker boundaries, MP Index ranges and ISO metadata before
 // exposing any offsets. Entropy-coded image data is checked by the codec layer.
-[[nodiscard]] GainMapJpeg parse_gain_map_jpeg(const std::vector<std::uint8_t>& bytes);
+[[nodiscard]] GainMapJpeg parse_gain_map_jpeg(std::span<const std::uint8_t> bytes);
 // Validates the MPF/JPEG layout, retaining segment counts without interpreting
 // ISO metadata. Used to route XMP-only inputs and diagnose duplicate metadata.
-[[nodiscard]] GainMapJpeg parse_gain_map_jpeg_input(const std::vector<std::uint8_t>& bytes);
+[[nodiscard]] GainMapJpeg parse_gain_map_jpeg_input(std::span<const std::uint8_t> bytes);
 [[nodiscard]] bool has_gain_map_jpeg_signature(const std::vector<std::uint8_t>& bytes);
-[[nodiscard]] GainMapJpeg inspect_gain_map_jpeg(const std::vector<std::uint8_t>& bytes);
+[[nodiscard]] GainMapJpeg inspect_gain_map_jpeg(std::span<const std::uint8_t> bytes);
 // Empty means the input already has the required layout; otherwise returns
 // a private copy with only MPF placement/relative offsets changed.
 [[nodiscard]] std::vector<std::uint8_t> normalize_gain_map_jpeg_mpf(

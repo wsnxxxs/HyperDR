@@ -1,6 +1,7 @@
 #include "hyperdr/container/gain_map_jpeg.hpp"
 #include "hyperdr/foundation/cancel.hpp"
 #include <algorithm>
+#include <cstdio>
 #include <limits>
 #include <span>
 #include <stdexcept>
@@ -26,7 +27,7 @@ bool contains(const Bytes& b, std::string_view s) {
   return std::search(b.begin(), b.end(), s.begin(), s.end()) != b.end();
 }
 struct Scan { std::vector<JpegAppSegment> apps; std::size_t end{}, insert{}, first_dqt{}; };
-Scan scan(const Bytes& b, std::size_t start) {
+Scan scan(std::span<const std::uint8_t> b, std::size_t start) {
   if (read(b, start, 2) != 0xffd8) invalid("missing JPEG SOI");
   Scan out; out.insert = start + 2;
   std::size_t p = start + 2;
@@ -130,7 +131,49 @@ Bytes assemble_gain_map_jpeg(const Bytes& primary, const Bytes& gain, const Gain
   check_cancelled(); return out;
 }
 
-static GainMapJpeg read_gain_map_jpeg(const Bytes& bytes, bool metadata, bool recover) {
+void write_gain_map_jpeg(FILE* primary,FILE* gain,FILE* output,const GainMapMetadata& metadata) {
+  auto size=[](FILE* file) {
+    if(std::fflush(file)||::fseeko(file,0,SEEK_END)) throw std::runtime_error("JPEG staging seek failed");
+    const auto n=::ftello(file);
+    if(n<0 || std::uint64_t(n)>=(std::uint64_t(1)<<32)) throw std::invalid_argument("gain-map JPEG must be smaller than 4 GiB");
+    return std::uint64_t(n);
+  };
+  const auto plen=size(primary),glen=size(gain);
+  // Our primary encoder puts ICC/Exif before its first non-APP marker.
+  // Read only those leading markers, never the entropy-coded body.
+  if(::fseeko(primary,0,SEEK_SET)) throw std::runtime_error("JPEG staging seek failed");
+  if(std::fgetc(primary)!=255||std::fgetc(primary)!=216) invalid("missing JPEG SOI");
+  std::uint64_t insert=2;
+  for(;;) {
+    if(std::fgetc(primary)!=255) invalid("invalid JPEG marker boundary");
+    const auto marker=std::fgetc(primary);
+    if(marker<0xe0||marker>0xef)break;
+    const auto hi=std::fgetc(primary),lo=std::fgetc(primary);
+    if(hi<0||lo<0||hi*256+lo<2)invalid("invalid JPEG APP length");
+    insert+=2+hi*256+lo;
+    if(insert>plen||::fseeko(primary,static_cast<off_t>(insert),SEEK_SET))invalid("truncated JPEG APP");
+  }
+  auto payload=serialize_tmap_payload(metadata);payload.erase(payload.begin());
+  const auto version=iso_segment({0,0,0,0}),gain_iso=iso_segment(payload);
+  const auto psize=plen+version.size()+mpf(0,0,0).size(),gsize=glen+gain_iso.size();
+  if(psize+gsize>=(std::uint64_t(1)<<32))invalid("gain-map JPEG must be smaller than 4 GiB");
+  const auto index=mpf(psize,gsize,psize-(insert+version.size()+8));
+  auto put=[&](const Bytes& b) { if(std::fwrite(b.data(),1,b.size(),output)!=b.size())throw std::runtime_error("JPEG output write failed"); };
+  std::vector<std::uint8_t> buffer(65536);
+  auto copy=[&](FILE* from,std::uint64_t offset,std::uint64_t count) {
+    if(::fseeko(from,static_cast<off_t>(offset),SEEK_SET))throw std::runtime_error("JPEG staging seek failed");
+    while(count) {
+      check_cancelled();const auto n=std::min<std::uint64_t>(count,buffer.size());
+      if(std::fread(buffer.data(),1,n,from)!=n||std::fwrite(buffer.data(),1,n,output)!=n)throw std::runtime_error("JPEG staging copy failed");
+      count-=n;
+    }
+  };
+  copy(primary,0,insert);put(version);put(index);copy(primary,insert,plen-insert);
+  copy(gain,0,2);put(gain_iso);copy(gain,2,glen-2);
+  if(std::fflush(output))throw std::runtime_error("JPEG output flush failed");
+}
+
+static GainMapJpeg read_gain_map_jpeg(std::span<const std::uint8_t> bytes, bool metadata, bool recover) {
   if (bytes.size() >= (std::uint64_t{1} << 32)) invalid("gain-map JPEG must be smaller than 4 GiB");
   GainMapJpeg out;
   auto primary = scan(bytes, 0);
@@ -272,7 +315,7 @@ bool has_gain_map_jpeg_signature(const Bytes& bytes) {
   }
   return mpf && gain;
 }
-GainMapJpeg parse_gain_map_jpeg(const Bytes& bytes) { return read_gain_map_jpeg(bytes, true, false); }
-GainMapJpeg parse_gain_map_jpeg_input(const Bytes& bytes) { return read_gain_map_jpeg(bytes, true, true); }
-GainMapJpeg inspect_gain_map_jpeg(const Bytes& bytes) { return read_gain_map_jpeg(bytes, false, true); }
+GainMapJpeg parse_gain_map_jpeg(std::span<const std::uint8_t> bytes) { return read_gain_map_jpeg(bytes, true, false); }
+GainMapJpeg parse_gain_map_jpeg_input(std::span<const std::uint8_t> bytes) { return read_gain_map_jpeg(bytes, true, true); }
+GainMapJpeg inspect_gain_map_jpeg(std::span<const std::uint8_t> bytes) { return read_gain_map_jpeg(bytes, false, true); }
 }  // namespace hyperdr

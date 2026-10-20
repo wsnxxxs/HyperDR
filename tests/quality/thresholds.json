@@ -1,0 +1,166 @@
+{
+  "schema": "hyperdr.quality/v1",
+  "note": "Local calibrated representative cards, not universal tolerances. E5 limits stay in tests/hevc/frame_photo_baseline.json. Sharp 4:2:0 color edges have a separate measured floor.",
+  "cases": [
+    {
+      "name": "p3-main8-gradient",
+      "writer": "package",
+      "format": "adaptive",
+      "depth": 8,
+      "quality": 90,
+      "scene": "analytic",
+      "width": 2048,
+      "height": 1536,
+      "min": {
+        "y_psnr_db": 56.7,
+        "system_y_psnr_db": 56.7,
+        "psnr_pq_db": 62.2,
+        "mid_psnr_pq_db": 62,
+        "gain_psnr_db": 58
+      },
+      "max": {
+        "bytes": 120000,
+        "itp_p99": 1.8,
+        "peak_relative_error": 0.02,
+        "mean_relative_error": 0.005
+      }
+    },
+    {
+      "name": "p3-main10-gradient",
+      "writer": "package",
+      "format": "adaptive",
+      "depth": 10,
+      "quality": 90,
+      "scene": "analytic",
+      "width": 2048,
+      "height": 1536,
+      "min": {
+        "y_psnr_db": 65.6,
+        "psnr_pq_db": 69.7,
+        "mid_psnr_pq_db": 68,
+        "gain_psnr_db": 58
+      },
+      "max": {
+        "bytes": 185000,
+        "itp_p99": 0.8,
+        "peak_relative_error": 0.02,
+        "mean_relative_error": 0.005
+      }
+    },
+    {
+      "name": "pq-main10-gradient",
+      "writer": "package",
+      "format": "pq",
+      "depth": 10,
+      "quality": 90,
+      "scene": "analytic",
+      "width": 2048,
+      "height": 1536,
+      "min": {
+        "psnr_pq_db": 63.5
+      },
+      "max": {
+        "bytes": 110000,
+        "itp_p99": 1.7,
+        "peak_relative_error": 0.02,
+        "mean_relative_error": 0.005
+      }
+    },
+    {
+      "name": "hlg-main10-gradient",
+      "writer": "package",
+      "format": "hlg",
+      "depth": 10,
+      "quality": 90,
+      "scene": "analytic",
+      "width": 2048,
+      "height": 1536,
+      "min": {
+        "psnr_pq_db": 67.2
+      },
+      "max": {
+        "bytes": 180000,
+        "itp_p99": 1.1,
+        "peak_relative_error": 0.02,
+        "mean_relative_error": 0.005
+      }
+    },
+    {
+      "name": "e5-zero-mat",
+      "writer": "package",
+      "format": "adaptive",
+      "depth": 8,
+      "quality": 95,
+      "scene": "frame",
+      "width": 512,
+      "height": 512,
+      "min": {
+        "y_psnr_db": 58,
+        "gain_psnr_db": 59
+      },
+      "max": {
+        "bytes": 20000,
+        "mat_max_stops": 0,
+        "peak_relative_error": 0.02
+      }
+    },
+    {
+      "name": "saturated-edges-skin",
+      "writer": "package",
+      "format": "adaptive",
+      "depth": 10,
+      "quality": 90,
+      "scene": "edges",
+      "width": 512,
+      "height": 512,
+      "min": {
+        "y_psnr_db": 70,
+        "psnr_pq_db": 46.7,
+        "gain_psnr_db": 58
+      },
+      "max": {
+        "bytes": 6000,
+        "itp_p99": 19,
+        "itp_p999": 89,
+        "peak_relative_error": 0.02
+      }
+    },
+    {
+      "name": "ordinary-heic8",
+      "writer": "native-nearest",
+      "format": "sdr",
+      "depth": 8,
+      "quality": 90,
+      "scene": "analytic",
+      "width": 2048,
+      "height": 1536,
+      "min": {
+        "y_psnr_db": 56.7,
+        "system_y_psnr_db": 56.7
+      },
+      "max": {
+        "bytes": 110000
+      }
+    },
+    {
+      "name": "neutral-ramp-quantization",
+      "writer": "package",
+      "format": "adaptive",
+      "depth": 8,
+      "quality": 90,
+      "scene": "ramp",
+      "width": 1024,
+      "height": 1024,
+      "min": {
+        "y_psnr_db": 58.8,
+        "psnr_pq_db": 66.3
+      },
+      "max": {
+        "ramp_max_code_step": 0.007844,
+        "ramp_flat_fraction": 0.79,
+        "bytes": 8000
+      }
+    }
+  ],
+  "reference_platform": "Apple M6 / macOS 27.0.1"
+}

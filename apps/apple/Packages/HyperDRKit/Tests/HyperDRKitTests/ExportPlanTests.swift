@@ -330,6 +330,17 @@ struct ExportMemoryPlanTests {
         #expect(plan.writer == .imageIO)
     }
 
+    @Test func nonSDRBaseHeadroomSelectsNativeWriter() {
+        let result = plan(request(.destination(.photos),
+            pair: ExportGainPair(provenance: .authored, baseHeadroom: 0.5)))
+        #expect(result.isExecutable)
+        #expect(result.writer == .inHouse)
+        #expect(result.writerReason == .unsupportedCapability)
+        #expect(result.gainMap.resplitReason == .writerHeadroomContract)
+        #expect(!ExportWriter.imageIO.capabilities(encoding: .adaptive, bitDepth: 8,
+            gainChannels: 1, baseHeadroom: 0.5).supported)
+    }
+
     @Test func framedHEICUsesTheWriterWithCompressionProtection() {
         let result = plan(request(.destination(.photos), frame: ExportFrameFacts(canvas: photo)))
         #expect(result.writer == .inHouse)

@@ -68,7 +68,8 @@ public enum ExportWriter: String, Sendable, Hashable, Codable {
     /// Package/ImageIO capabilities for this exact output combination. We accumulate full
     /// planes; none of these writers is a streaming plane consumer.
     public func capabilities(encoding: ExportEncoding, bitDepth: Int,
-                             gainChannels: Int, workingGamut: String = "display-p3") -> ExportWriterCapabilities {
+                             gainChannels: Int, workingGamut: String = "display-p3",
+                             baseHeadroom: Double = 0) -> ExportWriterCapabilities {
         let depth = encoding == .adaptive ? [8, 10].contains(bitDepth)
             : encoding == .sdrTIFF ? bitDepth == 16
             : encoding.isBT2100 ? bitDepth == 10 : bitDepth == 8
@@ -77,6 +78,7 @@ public enum ExportWriter: String, Sendable, Hashable, Codable {
         let manualISO = self == .imageIO && encoding == .adaptive && bitDepth == 8
         let rgb = manualISO || (encoding != .adaptive && self != .imageIO)
         let supported = depth && writerMatches && workingGamut == "display-p3"
+            && (gainChannels == 0 || encoding != .adaptive || baseHeadroom == 0)
             && [0, 1, 3].contains(gainChannels) && (gainChannels != 3 || rgb)
         return .init(supported: supported, supportsThreeChannelGain: rgb,
                      supportsSignedGain: manualISO || encoding != .adaptive,
@@ -99,6 +101,8 @@ public enum ExportWriterReason: String, Sendable, Hashable, Codable {
     case noComparison
     /// The preferred writer would not fit in memory; this one does.
     case memoryFallback
+    /// The preferred writer cannot represent the supplied gain pair.
+    case unsupportedCapability
     /// ImageIO has no verified E5 protection for the mat after lossy coding.
     case frameGainProtection
 }

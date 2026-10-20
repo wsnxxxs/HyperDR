@@ -198,7 +198,8 @@ public actor RecipeExportService: RecipeExportServicing {
             guard (report.gain != nil) == needsGain,
                   report.presentationFrame == (snapshot.frame != nil),
                   plan.writer.capabilities(encoding: plan.encoding, bitDepth: plan.baseBitDepth,
-                                           gainChannels: report.gain?.channelCount ?? 0).supported else {
+                                           gainChannels: report.gain?.channelCount ?? 0,
+                                           baseHeadroom: Double(report.gain?.baseHeadroom ?? 0)).supported else {
                 throw HyperDRError(code: "unsupported_format", message: "The rendered pair cannot be represented by this writer")
             }
             guard finalReport.canvasSize == report.canvasSize, finalReport.gain == report.gain,

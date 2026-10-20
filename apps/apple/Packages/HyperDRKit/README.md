@@ -151,9 +151,13 @@ and HEIC's independent 512-row float/YUV slab. HEIC also reserves compressed til
 plus assembly bytes (two copies, estimated at 3 B/pixel or 5 for adaptive10, plus
 8 MiB). These are reserve policies, not measured encoder limits. Preparation's
 256-row scan and the encoding reader are successive phases; 256/128/64 input
-choices reduce the latter, not the fixed scan or HEIC slab. Native/system
-verification still gets a separate full-image decode budget pending verify-stream;
-this does not claim constant memory for complete export or 61MP iPhone admission.
+choices reduce the latter, not the fixed scan or HEIC slab. Native verification
+of these row formats now uses scanlines or a matching HEIC 512×512 tile pair, with an 8 MiB codec reserve plus row/tile workspace. The
+estimate exposes `nativeVerify` and `systemVerify`; `verify` is their maximum,
+not their sum. The independent ImageIO reader keeps a full-image cache reservation
+because auxiliary dictionaries and Apple decoders are not guaranteed bounded.
+AVIF and ImageIO writing retain their whole-plane verification estimates. This
+does not claim constant memory for all formats or 61MP iPhone admission.
 
 Opt-in bridge/writer measurement: run `streamingHeightMemoryMeasurement` in fresh
 processes with `HYPERDR_STREAM_HEIGHT=1024`, then `4096`. At 2048 pixels wide and
@@ -168,8 +172,9 @@ coding, and confirms multi-band gain analysis/encoding replay.
 Real source/Render measurement (P7-3d-K): `realStreamingHeightMemoryMeasurement`
 uses a generated system JPEG source, the lazy analysis source, the real 256-row
 Render preparation scan, replayable 64-row ROI reads, the Kit bridge/thumbnail,
-and native incremental SDR TIFF. Generate each input in a separate process by
-setting `HYPERDR_STREAM_REAL_HEIGHT=1024` (then `4096`) and
+and native incremental SDR TIFF with `verify=true`, followed by the same
+`ExportVerification.system` check used by the service. Generate each input in a
+separate process by setting `HYPERDR_STREAM_REAL_HEIGHT=1024` (then `4096`) and
 `HYPERDR_STREAM_REAL_GENERATE_ONLY=1`; run the same filtered test in a new process
 without the generate-only variable. This excludes the generator's full-size
 CGContext from the export process high-water mark. Files are synthetic and removed
@@ -177,16 +182,25 @@ after measurement; JSON remains in `/tmp/p7-stream-real-memory/`.
 
 | Process high-water mark (`ru_maxrss`, bytes) | 2048×1024 | 2048×4096 |
 |---|---:|---:|
-| Before engine/source | 43,728,896 | 43,745,280 |
-| After system source/analysis | 91,078,656 | 90,963,968 |
-| After Render preparation | 92,962,816 | 92,815,360 |
-| After row writing and thumbnail | 103,923,712 | 103,874,560 |
-| After native full-image probe | 129,138,688 | 204,570,624 |
+| Before engine/source | 43,745,280 | 43,761,664 |
+| After system source/analysis | 90,980,352 | 90,931,200 |
+| After Render preparation | 92,848,128 | 92,749,824 |
+| After row writing, native bounded verification and thumbnail | 102,563,840 | 103,038,976 |
+| After independent ImageIO check | 103,022,592 | 103,399,424 |
 
-At fixed width, rendering plus writing stayed at 99.11/99.06 MiB across four times
-the height; full-image validation grew to 123.16/195.09 MiB. The measurement checks
-an arbitrary band twice for exact replay before packaging. It is a macOS synthetic
-SDR JPEG/TIFF sample, not an admission guarantee for RAW, dual inputs or iOS; the
-conservative decoder/HEIC reserves remain. The real service's six-format test also
-compares decoded pixels against whole-plane output, including a multi-band framed
-HEIC pair. Service tests retain Fake injection for deterministic failure paths.
+These numbers were remeasured after integrating `cfb84a56` and rebuilding all
+three engine slices. At fixed width, the complete source/Render/package/native
+verification/system readback path stayed at 98.25/98.61 MiB across four times the
+height. Native-verification completion was 97.81/98.27 MiB. Unlike the earlier
+measurement, this invokes package's bounded write-time verifier, not the general
+full-image `Engine.probe` API after an unverified write. ImageIO here checks a
+256-pixel SDR thumbnail and metadata; this sample shows no full-image growth.
+Its decoder and auxiliary data caches remain an explicit full-image admission
+reservation for other formats, particularly gain-map/BT.2100 readback.
+
+The measurement checks an arbitrary band twice for exact replay before packaging.
+It is a macOS synthetic SDR JPEG/TIFF sample, not an admission guarantee for RAW,
+dual inputs or iOS; the decoder/HEIC reserves remain. The real service's six-format
+test also compares decoded pixels against whole-plane output, including a
+multi-band framed HEIC pair. Service tests retain Fake injection for deterministic
+failure paths.

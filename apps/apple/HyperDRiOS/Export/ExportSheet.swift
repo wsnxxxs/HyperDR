@@ -181,8 +181,8 @@ struct ExportSheet: View {
     private func willWrite(_ plan: ExportPlan) -> some View {
         Section {
             summary(plan).font(.subheadline)
-            if let peak = plan.peakStops, model.clampsPeak(plan, editor) {
-                Label { Text("ios.export.ceiling \(ExportPlanText.stops(peak))") } icon: { Image(systemName: "info.circle") }
+            if let ceiling = IOSExportModel.ceiling(in: plan) {
+                Label { Text("ios.export.ceiling \(ExportPlanText.stops(ceiling))") } icon: { Image(systemName: "info.circle") }
                     .font(.footnote).foregroundStyle(.secondary)
             }
             if plan.notices.contains(where: { $0.key == "dest.social.aspect" }) {
@@ -241,6 +241,10 @@ struct ExportSheet: View {
             Text("ios.export.finished").font(.headline)
             Text(verbatim: "\(finished.result.record.name) · \(ExportPlanText.bytes(Int(finished.result.record.byteCount)))")
                 .font(.subheadline).foregroundStyle(.secondary)
+            if let ceiling = IOSExportModel.appliedCeiling(finished.result) {
+                Label { Text("ios.export.ceiling \(ExportPlanText.stops(ceiling))") } icon: { Image(systemName: "info.circle") }
+                    .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            }
             if finished.savedToFiles { Label("ios.export.saved", systemImage: "folder") .font(.subheadline) }
             if finished.deliveryFailed { Text("ios.export.deliveryFailed").font(.footnote).foregroundStyle(.orange) }
             Button { model.presentingFileExporter = true } label: {

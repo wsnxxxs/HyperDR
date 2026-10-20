@@ -85,10 +85,12 @@ struct PackageRequest {
   // offsets: with an affine difference a zero code cannot reproduce the mat.
   bool presentation_frame{};
   // Optional photograph rectangle within `sdr`. Setting it asks for the E5
-  // readback as well: the written file is decoded and every mat pixel outside
-  // this rectangle must carry no gain. That costs one extra decode of the
-  // file, so it runs only when the rectangle is given, and it is independent of
-  // `verify`, which checks that the format opens at all.
+  // readback as well: the file is decoded and every mat pixel outside this
+  // rectangle must carry no gain. The check runs on a staging copy beside the
+  // output, so a failing (or cancelled) check never disturbs a file the caller
+  // already had at that path. That costs one extra decode and one extra write of
+  // the encoded bytes, so it runs only when the rectangle is given, and it is
+  // independent of `verify`, which checks that the format opens at all.
   std::optional<FrameRect> frame_photo;
 };
 

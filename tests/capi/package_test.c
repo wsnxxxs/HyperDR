@@ -10,6 +10,7 @@
 
 #include "hyperdr/hyperdr.h"
 
+#include <dirent.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -119,6 +120,37 @@ static hyperdr_package_gain rgb_gain(void) {
 
 static int contains(const char* text, const char* needle) {
   return text != NULL && strstr(text, needle) != NULL;
+}
+
+/* The whole file, so a failed export can be checked against what was there. */
+static unsigned char* read_all(const char* path, size_t* size) {
+  FILE* file = fopen(path, "rb");
+  if (file == NULL) return NULL;
+  if (fseek(file, 0, SEEK_END) != 0) { fclose(file); return NULL; }
+  const long length = ftell(file);
+  if (length < 0) { fclose(file); return NULL; }
+  rewind(file);
+  unsigned char* bytes = (unsigned char*)malloc((size_t)length);
+  if (bytes != NULL && fread(bytes, 1, (size_t)length, file) != (size_t)length) {
+    free(bytes);
+    bytes = NULL;
+  }
+  fclose(file);
+  if (bytes != NULL) *size = (size_t)length;
+  return bytes;
+}
+
+/* Directory entries starting with `prefix`: a staged export cleans up after a
+ * failure, so a `*.reading.*` file left in the directory is a leak. */
+static int count_prefix(const char* directory, const char* prefix) {
+  DIR* dir = opendir(directory);
+  if (dir == NULL) return -1;
+  int count = 0;
+  const size_t length = strlen(prefix);
+  for (struct dirent* entry = readdir(dir); entry != NULL; entry = readdir(dir))
+    if (strncmp(entry->d_name, prefix, length) == 0) ++count;
+  closedir(dir);
+  return count;
 }
 
 /* Reads the file back through the engine's own decoder, which is what proves a
@@ -296,19 +328,19 @@ int main(void) {
   hyperdr_package_gain framed = mono_gain();
   framed.plane = plane(framed_gain, 1);
   framed.alternate_headroom = 2.8f;
-  hyperdr_package_request frame_write = {0};
-  frame_write.output_path = framed_path;
-  frame_write.format = "iso-gainmap-jpeg";
-  frame_write.parameters_json = "{\"quality\":88}";
-  frame_write.sdr = &framed_base_plane;
-  frame_write.gain = &framed;
-  frame_write.presentation_frame = 1;
-  frame_write.has_frame_photo = 1;
-  frame_write.frame_photo.x = PHOTO_X;
-  frame_write.frame_photo.y = PHOTO_Y;
-  frame_write.frame_photo.width = PHOTO_W;
-  frame_write.frame_photo.height = PHOTO_H;
-  REQUIRE(hyperdr_package(engine, &frame_write, &report, &error) == 0 && report != NULL);
+  hyperdr_package_request framed_ok = {0};
+  framed_ok.output_path = framed_path;
+  framed_ok.format = "iso-gainmap-jpeg";
+  framed_ok.parameters_json = "{\"quality\":88}";
+  framed_ok.sdr = &framed_base_plane;
+  framed_ok.gain = &framed;
+  framed_ok.presentation_frame = 1;
+  framed_ok.has_frame_photo = 1;
+  framed_ok.frame_photo.x = PHOTO_X;
+  framed_ok.frame_photo.y = PHOTO_Y;
+  framed_ok.frame_photo.width = PHOTO_W;
+  framed_ok.frame_photo.height = PHOTO_H;
+  REQUIRE(hyperdr_package(engine, &framed_ok, &report, &error) == 0 && report != NULL);
   REQUIRE(contains(report, "\"gamma\":1"));
   REQUIRE(contains(report, "\"gainMin\":-0.4"));
   hyperdr_string_free(report);
@@ -318,6 +350,7 @@ int main(void) {
   /* The same request with a photograph rectangle that leaves part of the
    * photograph in the mat: the readback catches the gain and the half-written
    * file does not stay behind. */
+  hyperdr_package_request frame_write = framed_ok;
   frame_write.output_path = framed_bad_path;
   frame_write.frame_photo.x = PHOTO_X + 8;
   frame_write.frame_photo.width = PHOTO_W - 16;
@@ -365,6 +398,62 @@ int main(void) {
   error = NULL;
   REQUIRE(access(framed_bad_path, F_OK) != 0);
 
+  /* A failed mat check must leave the file the caller already had at that path
+   * alone: the check runs on a staged copy, before anything is published. */
+  size_t original_size = 0;
+  unsigned char* original = read_all(framed_path, &original_size);
+  REQUIRE(original != NULL);
+  hyperdr_package_request overwrite_wrong = framed_ok;
+  overwrite_wrong.parameters_json = "{\"quality\":88,\"overwrite\":true}";
+  overwrite_wrong.frame_photo.x = PHOTO_X + 8;
+  overwrite_wrong.frame_photo.width = PHOTO_W - 16;
+  overwrite_wrong.frame_photo.y = PHOTO_Y + 4;
+  overwrite_wrong.frame_photo.height = PHOTO_H - 8;
+  REQUIRE(hyperdr_package(engine, &overwrite_wrong, &report, &error) != 0);
+  REQUIRE(report == NULL && error != NULL);
+  REQUIRE(contains(error->message, "carries gain"));
+  hyperdr_error_free(error);
+  error = NULL;
+  size_t kept_size = 0;
+  unsigned char* kept = read_all(framed_path, &kept_size);
+  REQUIRE(kept != NULL && kept_size == original_size && memcmp(kept, original, kept_size) == 0);
+  free(kept);
+
+  /* The staging file itself is the thing that gets checked, so a refusal at the
+   * publish step likewise leaves the destination alone and takes the copy with
+   * it. */
+  REQUIRE(hyperdr_package(engine, &framed_ok, &report, &error) != 0);
+  REQUIRE(report == NULL && error != NULL);
+  REQUIRE(contains(error->message, "output exists"));
+  hyperdr_error_free(error);
+  error = NULL;
+  kept_size = 0;
+  kept = read_all(framed_path, &kept_size);
+  REQUIRE(kept != NULL && kept_size == original_size && memcmp(kept, original, kept_size) == 0);
+  free(kept);
+  free(original);
+  REQUIRE(count_prefix(directory, "framed.jpg.reading") == 0);
+
+  /* Offsets that match but are negative still mean zero gain on the mat: the
+   * reconstruction is the base itself, so the readback must not invent a gain
+   * out of base + offset falling below zero. */
+  char framed_negative_path[512];
+  snprintf(framed_negative_path, sizeof(framed_negative_path), "%s/framed-negative.jpg", directory);
+  hyperdr_package_gain negative = framed;
+  for (unsigned c = 0; c < 3; ++c) {
+    negative.base_offset[c] = -0.5f;
+    negative.alternate_offset[c] = -0.5f;
+  }
+  hyperdr_package_request negative_write = framed_ok;
+  negative_write.output_path = framed_negative_path;
+  negative_write.gain = &negative;
+  REQUIRE(hyperdr_package(engine, &negative_write, &report, &error) == 0 && report != NULL);
+  REQUIRE(contains(report, "\"gamma\":1"));
+  hyperdr_string_free(report);
+  report = NULL;
+  REQUIRE(probed_as(engine, framed_negative_path, "dual-rendition") == 0);
+  REQUIRE(count_prefix(directory, "framed-negative.jpg.reading") == 0);
+
   /* Malformed requests are option errors, not format refusals. */
   hyperdr_package_request broken = write;
   broken.format = "no-such-format";
@@ -391,6 +480,7 @@ int main(void) {
   remove(sdr_path);
   remove(refused_path);
   remove(framed_path);
+  remove(framed_negative_path);
   rmdir(directory);
   printf("package_test: gain-map, three-channel, framed, SDR and refusal paths all held\n");
   return 0;

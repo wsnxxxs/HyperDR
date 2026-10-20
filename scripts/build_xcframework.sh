@@ -41,6 +41,13 @@ commands = subprocess.check_output(['ninja', '-C', str(work), '-t', 'commands', 
 line = next(line for line in commands.splitlines() if ' -o HyperDR ' in line)
 tokens = shlex.split(line)
 archives = [work / 'libhyperdr.a']
+# Only archives are collected, so a dependency that became a dylib would be
+# dropped from the xcframework silently and fail later, in the app's link.
+dylibs = [token for token in tokens
+          if '.dylib' in token and not token.startswith(('/usr/lib/', '/System/'))]
+if dylibs:
+    sys.exit('The CLI link line names non-system dynamic libraries, which the xcframework '
+             'cannot carry: ' + ', '.join(dylibs))
 for token in tokens:
     if token.endswith('.a'):
         path = pathlib.Path(token)

@@ -69,6 +69,9 @@ def apple() -> None:
     env = dict(os.environ, DEVELOPER_DIR=str(developer_dir))
     ensure_metal_toolchain(env)
     run("bash", "scripts/build_xcframework.sh", env=env)
+    # The archive the app links must carry no libheif / libde265 (R7-1602).
+    run(sys.executable, ".github/scripts/check_licenses.py", "build-apple", "--archive-only",
+        "--engine-archive", "build/xcframework/libHyperDREngineCore.a")
     for package, scratch in APPLE_PACKAGES.items():
         path = ROOT / "apps/apple/Packages" / package
         if not path.is_dir():

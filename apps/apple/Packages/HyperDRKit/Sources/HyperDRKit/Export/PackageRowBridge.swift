@@ -9,6 +9,8 @@ final class PackageRowBridge: @unchecked Sendable {
     private let frame: FrameSnapshot?
     private let width, height, thumbnailWidth, thumbnailHeight: Int
     private let progress: @Sendable (RecipeExportProgress) -> Void
+    /// Accessed on the writer's serial callback queue, then after it completes.
+    private(set) var readSeconds: Double = 0
     private var progressEnd = 0
     private var progressPass = 1
     private var nextThumbnailRow = 0
@@ -30,7 +32,15 @@ final class PackageRowBridge: @unchecked Sendable {
               gain: UnsafeMutableBufferPointer<Float>?) throws {
         try Task.checkCancellation()
         guard y >= 0, count > 0, y <= height - count else { throw RecipeExportError.invalidStripes }
-        let stripe = try source.read(y: y, count: count)
+        let start = ContinuousClock.now
+        let stripe: ExportStripe
+        do {
+            defer {
+                let elapsed = start.duration(to: .now).components
+                readSeconds += Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+            }
+            stripe = try source.read(y: y, count: count)
+        }
         let channels = source.report.gain?.channelCount ?? 0
         guard stripe.rect == ExportRect(x: 0, y: y, width: width, height: count),
               stripe.baseRGB.count == width * count * 3, base.count == stripe.baseRGB.count,

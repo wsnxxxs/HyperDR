@@ -10,6 +10,8 @@ public struct RecipeExportReport: Sendable, Codable {
     public let packageJSON: Data?
     public let firstReaderJSON: Data?
     public let system: SystemExportVerification
+    /// `rendering` is preparation. `read` is synchronous ROI rendering/readback;
+    /// `encoding` excludes `read` but includes native writer/verification work.
     public let stageSeconds: [String: Double]
     public let resplitReasons: [String]
     public let transparentBackground: String
@@ -256,6 +258,10 @@ public actor RecipeExportService: RecipeExportServicing {
                 guard packaged.verified, (packaged.gain?.clippedSamples ?? 0) == 0 else {
                     throw RecipeExportError.verificationFailed("package_rows_unverified")
                 }
+                // Native packaging includes synchronous pull rendering. Separate
+                // it before emitting verification closes the encoding clock.
+                timings["read", default: 0] += bridge.readSeconds
+                stageStart = stageStart.addingTimeInterval(bridge.readSeconds)
                 packageJSON = packaged.rawJSON
                 thumbnail = try bridge.thumbnail()
                 emit(.verifying)
@@ -418,15 +424,8 @@ public actor RecipeExportService: RecipeExportServicing {
         let sourcePixels = sourceSize.pixels
         let gpu: Int
         if plan.memory.usesRowInput {
-            func graph(_ rows: Int) -> Int {
-                let rows = min(rows, plan.photoSize.height)
-                let nativeRows = min(sourceSize.height, Int(ceil(Double(rows + 4)
-                    * Double(sourceSize.height) / Double(plan.photoSize.height))))
-                return sourceSize.width * nativeRows * 48 + plan.photoSize.width * rows * 64
-            }
-            gpu = min(sourcePixels, 1024 * 1024) * 48
-                + max(graph(256), graph(plan.memory.renderRows)
-                    + plan.size.width * min(plan.memory.renderRows, plan.size.height) * 32)
+            let limit = await RenderEngine.maximumTextureDimension(device: renderEngine.device)
+            gpu = ExportMemoryEstimate.rowGPUBytes(maximumTextureDimension: limit)
         } else {
             gpu = sourcePixels * 48 + plan.photoSize.pixels * 64
                 + plan.size.width * min(plan.memory.renderRows, plan.size.height) * 64

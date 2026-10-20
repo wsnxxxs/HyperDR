@@ -135,6 +135,10 @@ struct RecipeExportEnvironment {
                 let package = try JSONDecoder().decode(PackageReport.self, from: #require(evidence.packageJSON))
                 #expect(package.verified)
             }
+            if evidence.usesRowInput == true {
+                #expect((evidence.stageSeconds["read"] ?? 0) > 0)
+                #expect((evidence.stageSeconds["encoding"] ?? -1) >= 0)
+            }
             #expect(result.resolved.snapshot.recipe == recipe)
             #expect(evidence.system.auxiliaryGain == encoding.writesGainMap)
             #expect(evidence.system.width == 96 && evidence.system.height == 64)
@@ -410,22 +414,22 @@ struct RecipeExportEnvironment {
         #expect(reads.filter { $0.0 == 0 }.count > 6)
     }
 
-    @Test func heicMemoryFallbackKeepsEncodingQualityAndSize() async throws {
+    @Test func tinyHEICKeepsPreferredWriterBelowTiledDecoderAllowance() async throws {
         let env = try await RecipeExportEnvironment(); defer { env.remove() }
         let request = env.request(.adaptive)
         let initial = ExportPlanner.plan(request, budget: FixedExportMemoryBudget(bytes: 1_000_000_000))
         let native = ExportMemoryEstimate.estimate(.init(source: request.source, photoSize: initial.photoSize,
             canvas: initial.size, encoding: .adaptive, writer: .inHouse, writesGainMap: true,
             isFramed: false, baseBitDepth: 8, writeRows: 256, retainedBytes: 0, quality: initial.quality))
-        #expect(native.peak < initial.memory.estimate.peak)
-        let result = try await env.service(budget: native.peak + 1).export(session: env.session.id,
+        #expect(native.peak > initial.memory.estimate.peak) // 512 MiB empirical row-work allowance
+        let result = try await env.service(budget: initial.memory.estimate.peak + 1).export(session: env.session.id,
             snapshot: env.snapshot(), request: request)
-        #expect(result.resolved.writer == .inHouse && result.resolved.writerReason == .memoryFallback)
+        #expect(result.resolved.writer == initial.writer && result.resolved.writerReason == initial.writerReason)
         #expect(result.resolved.encoding == .adaptive && result.resolved.bitDepth == 8)
         #expect(result.resolved.quality == initial.quality && result.resolved.width == initial.size.width
                 && result.resolved.height == initial.size.height)
         let evidence = try JSONDecoder().decode(RecipeExportReport.self, from: result.record.reportJSON)
-        #expect(evidence.writerReason == .memoryFallback && evidence.packageJSON != nil)
+        #expect(evidence.writerReason == initial.writerReason && evidence.imageIO != nil)
     }
 
     @Test func sdrHEICContainsNoAuxiliaryAndRoundTripsTheSnapshot() async throws {

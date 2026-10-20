@@ -8,9 +8,9 @@ using namespace metal;
 
 struct DisplayLayerParams {
     float4 baseOffset, alternateOffset;
-    float3x3 toGain, toP3;
+    float3x3 p3ToGain, gainToP3;
     float weight;
-    uint gainChannels, coding, firstSlice, firstPlane, identity;
+    uint gainChannelCount, coding, firstSlice, firstPlane, identity;
 };
 
 // Bilinear in log2 stops (Render has already decoded min/max/gamma).
@@ -24,13 +24,13 @@ float3 sampleDisplayGain(uint2 xy, uint2 size, texture2d<float, access::read> ga
     const float2 w = fract(g);
     const float4 v = mix(mix(gain.read(lo), gain.read(uint2(hi.x, lo.y)), w.x),
                          mix(gain.read(uint2(lo.x, hi.y)), gain.read(hi), w.x), w.y);
-    return p.gainChannels == 1 ? float3(v.r) : v.rgb;
+    return p.gainChannelCount == 1 ? float3(v.r) : v.rgb;
 }
 
 // Three slices: base, full HDR (overlay statistics), and weighted HDR. A
 // headroom-only update writes plane 2 without touching base or full HDR.
 // ISO 21496-1 at any weight w, in the gain's working space:
-//   HDR_P3 = M_toP3 · ((M_toGain · base + o_base) · 2^(w·g) − o_alt)
+//   HDR_P3 = gainToP3 · ((p3ToGain · base + o_base) · 2^(w·g) − o_alt)
 // Identity matrices (our own separated pairs) skip both products. Weight zero
 // still applies both offsets; clipping is the final step.
 kernel void composeDisplayLayers(texture2d<float, access::read> base [[texture(0)]],
@@ -55,7 +55,7 @@ kernel void composeDisplayLayers(texture2d<float, access::read> base [[texture(0
     } else if (plane != 0) {
         const float3 scale = exp2(sampleDisplayGain(xy.xy, size, gain, p) * weight);
         value = p.identity != 0 ? (sdr + p.baseOffset.rgb) * scale - p.alternateOffset.rgb
-              : p.toP3 * ((p.toGain * sdr + p.baseOffset.rgb) * scale - p.alternateOffset.rgb);
+              : p.gainToP3 * ((p.p3ToGain * sdr + p.baseOffset.rgb) * scale - p.alternateOffset.rgb);
         value = max(float3(0), value);
     }
     out.write(float4(value, 1), xy.xy, p.firstSlice + plane);

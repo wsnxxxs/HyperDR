@@ -487,6 +487,19 @@ struct ExportMemoryPlanTests {
         #expect(failure?.summary.contains("shortfall=256.0 MiB") == true)
     }
 
+    @Test func heifAssemblyPricesBorrowedSamplesAndOutputSeparatelyFromEncoding() {
+        let size = ExportPixelSize(width: 12800, height: 8600)
+        let memory = ExportMemoryEstimate.estimate(.init(source: source(.rawEDR, size: size),
+            photoSize: size, canvas: size, encoding: .adaptive, writer: .inHouse,
+            writesGainMap: true, isFramed: false, baseBitDepth: 10, writeRows: 256,
+            retainedBytes: 0, quality: 95))
+        let oneCopy = ExportMemoryEstimate.compressedHEICCache(pixels: size.pixels, bitDepth: 10, quality: 95) / 2
+        let slab = size.width * 512 * 12
+        #expect(memory.packaging - memory.encode == oneCopy - slab)
+        #expect(memory.packaging > memory.encode)
+        #expect(memory.peak == memory.packaging)
+    }
+
     @Test func fullSizeRAWMemoryEstimates() {
         for size in [ExportPixelSize(width: 9504, height: 6336), ExportPixelSize(width: 12800, height: 8600)] {
             for encoding in [ExportEncoding.adaptive, .isoGainMapJPEG] {
@@ -506,7 +519,7 @@ struct ExportMemoryPlanTests {
                         let newSlab = size.width * min(512, size.height) * 12 + 32*1024*1024
                         let cacheDelta = encoding == .adaptive
                             ? size.pixels * 10 + 8*1024*1024 - ExportMemoryEstimate.compressedHEICCache(pixels: size.pixels, bitDepth: 10, quality: 95) : 0
-                        let oldEncode = estimate.encode + (encoding == .adaptive ? oldSlab - newSlab : 0) + cacheDelta
+                        let oldEncode = estimate.encode + (encoding == .adaptive ? oldSlab - newSlab + ExportMemoryEstimate.compressedHEICCache(pixels: size.pixels, bitDepth: 10, quality: 95) / 2 : 0) + cacheDelta
                         print("RAW_MEMORY", encoding.rawValue, "width", size.width, "height", size.height, "rows", rows, "beforeEncode", oldEncode,
                             "decode", estimate.decode, "render", estimate.render, "composite", estimate.composite,
                             "packaging", estimate.packaging, "encode", estimate.encode,

@@ -46,8 +46,11 @@ private func collect(_ engine: RenderEngine, _ source: RenderSource, recipe: Rec
         closeExport(plain.rgb,(0..<4).flatMap { Array(expected.baseRGBA[$0*4..<$0*4+3]) })
         closeExport(plain.gain,expected.gain)
         #expect(header.gain?.channelCount == 1 && header.resplitReasons.isEmpty)
-        let (_,limited) = try await collect(engine,source,recipe:recipe,
+        let (ceilingReport,limited) = try await collect(engine,source,recipe:recipe,
             request:ExportRenderRequest(photoSize:size,ceilingStops:1,capabilities:isoCapabilities))
+        #expect(!header.ceilingApplied && header.rangeBeforeCeiling == header.rangeAfterCeiling)
+        #expect(ceilingReport.ceilingApplied && ceilingReport.rangeBeforeCeiling > 1 && ceilingReport.rangeAfterCeiling == 1)
+        #expect(ceilingReport.resplitReasons.isEmpty && ceilingReport.sourceProvenance == ceilingReport.provenance)
         closeExport(limited.rgb,plain.rgb) // independent H1 property
         #expect(limited.gain[0] < 1 && limited.gain[0] > 0.9)
         let (_,sdr) = try await collect(engine,source,recipe:recipe,

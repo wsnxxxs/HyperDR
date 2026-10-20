@@ -439,3 +439,10 @@ are omitted. Returning to the same settings, clearing pixel caches, or loading i
 another engine yields the same ID; a different revision yields a different ID.
 Only one development family's full/preview/analysis pixels are resident internally;
 small AI predictions survive a family switch for the last four source/model keys.
+
+Export reports distinguish the rendered `sourceProvenance` from final
+`provenance`. `rangeBeforeCeiling` / `rangeAfterCeiling` are resolved stops;
+`ceilingApplied` says the output ceiling narrowed that range. This upstream H3
+adjustment does not require a resplit and is reported even when `resplitReasons`
+is empty. A later output-boundary conversion still records `.outputCeiling`
+among its actual resplit reasons.

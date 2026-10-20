@@ -95,7 +95,13 @@ analysis graph handles spatial neighborhoods independently of stripe boundaries.
 Low-level node graphs allow at most one `SourceHDRSplitNode`; both full-frame and stripe
 entry points reject duplicates with `RenderError.duplicateHDRSplit` before rendering.
 
-* Exposure is linear `2^EV`; positive SDR exposure uses an exponential shoulder above Y=.48.
+* HDR/RAW/dual exposure and negative SDR exposure are linear `2^EV`. Positive SDR exposure
+  uses a moving shoulder: K=2^EV, k=K^-2 in original luminance x; below k, f=Kx; above k,
+  `f=1-(1-1/K)*((1-x)/(1-k))^(K+1)`. White stays 1. The two branches join with derivative K;
+  the derivative at white is zero, matching the bounded white extension. The shoulder is
+  monotone, below 1 for x<1, and f≥x throughout SDR [0,1] (the upper branch minus x is concave
+  with nonnegative endpoints). As EV→0+, k→1 and f→identity; exactly zero bypasses unchanged.
+  This replaces the fixed .48 knee that could darken highlights for infinitesimal exposure.
 * Contrast receives Recipe's multiplier c=.625…1.6. Below .18 it uses AE-3's power.
   Above .18, t=(Y-.18)/.82 and `Y'=.18+.82*(t+(c-1)*t*(1-t)^2)`; black, gray and white are
   fixed, the derivative is c at gray and **1 at white**. Y≥1 is unchanged.
@@ -108,8 +114,13 @@ entry points reject duplicates with `RenderError.duplicateHDRSplit` before rende
   retaining HDR Y instead of fitting highlights into SDR.
 * `.cube` supports 1D/3D, red-fastest order, DOMAIN_MIN/MAX and INPUT_RANGE, sRGB/P3/Rec.709,
   HLG/PQ (203-nit SDR white), S-Log3/S-Gamut3.Cine for RAW. Strength mixes in linear light.
-  SDR LUT changes the base with gain retained; HDR/Log LUT changes HDR before decomposition.
-  Zero strength bypasses all conversions. 3D interpolation uses explicit float trilinear reads.
+  Every declared input/output combination is supported, with S-Log3 input restricted to RAW.
+  Encode to the input space → clamp/sample the .cube domain → decode from output to linear P3
+  → split the transformed HDR. A conventional SDR-domain LUT can discard existing HDR at
+  strength 1; PQ/HLG/Log output can create HDR regardless of input space. This follows R13-003
+  and replaces the earlier base-only SDR-LUT/gain-retention rule. Strength still mixes original
+  and transformed RGB in linear light; zero bypasses conversions. 3D interpolation uses
+  explicit float trilinear reads.
 * Analytic expansion uses a fixed grid with longest edge 768, integrating every source pixel
   into cells once. Local log-luminance contrast identifies small speculars; coverage supplies a
   broad-region floor; local variance suppresses dark noise. Separable box statistics and a
@@ -121,8 +132,8 @@ entry points reject duplicates with `RenderError.duplicateHDRSplit` before rende
   old engine's semantics, without requiring numeric parity.
 * Range overflow uses an exponential shoulder above `1+.75*(2^range-1)`, asymptotic to capacity,
   with derivative 1 at the knee. A global overflow gate leaves valid default HDR unchanged.
-  Modified-strength/expansion gating uses a conservative gain bound. The SDR LUT identity-HDR
-  case gates using actual reconstructed peak, retaining gain for pairs already within range.
+  Modified-strength/expansion gating uses a conservative gain bound. Captured strength 1
+  gates using the actual transformed HDR peak, leaving pairs already within range unchanged.
 * SDR rolloff begins at base max-channel .7, blends toward an exponential shoulder, and adds
   `log2(oldBasePeak/newBasePeak)` to gain. This changes SDR while preserving HDR exactly within
   float tolerance. Only HDR/RAW expose rolloff; authored dual bases remain unchanged.
@@ -154,10 +165,14 @@ Set `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` and a private TMP
 licensed RAW fixtures with `python3 scripts/fetch_test_fixtures.py`, then run `swift test
 --package-path apps/apple/Packages/HyperDRRender`. Host Metal/codec access is required.
 
-Fifteen focused tests cover the source contracts and each point operation, CPU-double LUT/
+Seventeen focused tests cover the source contracts and each point operation, CPU-double LUT/
 spatial analysis/offset references, tone anchors/white derivative, HDR-base invariance, rolloff
 compensation, soft shoulders, fixed analysis reuse, resized stripes, repeated/new-context
-renders, Apple-default RAW development/overrides and the Recipe/default/unit/LUT boundary. Comparisons use SDR/PQ 10-bit code
+renders, Apple-default RAW development/overrides and the Recipe/default/unit/LUT boundary.
+The exposure contract checks identity, EV continuity, no darkening, monotonicity, bounded white
+and its derivative independently of the GPU/double equality. One pixel/LUT/strength covers
+all declared LUT space pairs, using SDR except where S-Log3 input requires RAW (no additional
+domain or image matrix). Comparisons use SDR/PQ 10-bit code
 space (≤1 code) or tighter float checks for gain/metadata. Synthetic images and the licensed
 RAW fixture are used; no tests reference user photos.
 
@@ -171,10 +186,10 @@ and GPU completion. First analysis takes 54.58 ms. Decode, source materializatio
 compilation and CPU readback are excluded. These are shared-host measurements, not a device
 performance guarantee; RAW decoding and iPhone inference should be profiled separately.
 
-P7-1c RAW check on the licensed fixture, same M6/background process, both outputs 2560×1707:
-full development is 2768×1848, decode/materialization 261.00 ms plus first graph 48.59 ms
-(309.59 ms total); preview development is 2557×1707, decode/materialization 193.24 ms plus
-first graph 47.95 ms (241.20 ms total). These are one sequential full-then-preview measurement,
+RAW check after R13 on the licensed fixture, same M6/background process, both outputs 2560×1707:
+full development is 2768×1848, decode/materialization 418.37 ms plus first graph 47.47 ms
+(465.83 ms total); preview development is 2557×1707, decode/materialization 366.44 ms plus
+first graph 49.05 ms (415.49 ms total). These are one sequential full-then-preview measurement,
 not cold-start comparisons. Graph times include first fixed-scale analysis and GPU completion;
 shader setup, fixture copying, encoding/writing and CPU readback are excluded. The fixture is
 only 5.1 MP, so its canvas-sized development reduction is modest.

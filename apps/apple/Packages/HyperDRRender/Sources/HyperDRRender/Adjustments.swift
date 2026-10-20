@@ -75,9 +75,7 @@ public struct RenderAdjustments: Hashable, Sendable {
         if let range = hdr.range { try RenderParameter.check(range,id:"hdr.range") }
         if let start = hdr.expansionStart { try RenderParameter.check(start,id:"hdr.expansionStart") }
         if !look.isIdentity {
-            guard !(look.input.isSDR && !look.output.isSDR),
-                  look.output != .sLog3 || look.input == .sLog3,
-                  look.input != .sLog3 || domain == .rawEDR else { throw RenderError.invalidAdjustment }
+            guard look.input != .sLog3 || domain == .rawEDR else { throw RenderError.invalidAdjustment }
         }
         let source = hdr.source ?? .defaultSource(for:domain)
         guard source.domains.contains(domain) else { throw RenderError.invalidAdjustment }

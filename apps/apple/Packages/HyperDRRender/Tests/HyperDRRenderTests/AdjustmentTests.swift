@@ -39,6 +39,62 @@ private func cube(swap: Bool = false) -> String {
 }
 
 @Suite(.serialized) struct AdjustmentTests {
+    @Test func sdrExposureContractAndDefaultIdentity() async throws {
+        let engine = try RenderEngine(), epsilon = 0.0001
+        let xs = (0...32).map { Double($0)/32 } + [0.8,0.99,1-epsilon,1,1+epsilon]
+        let source = try await engine.source(image:bitmap(xs.map { SIMD3(repeating:$0) },width:xs.count,height:1),domain:.sdr)
+        let original = RenderEngine.readPixels(try await engine.render(source))
+        let zero = RenderEngine.readPixels(try await engine.render(source,nodes:[AdjustmentNode(.exposure,value:0)]))
+        #expect(zero.baseRGBA == original.baseRGBA)
+        #expect(xs.allSatisfy { DoubleReference.point(SIMD3(repeating:$0),operation:.exposure,value:0,sdr:true).x == $0 })
+        let defaults = RenderEngine.readPixels(try await engine.render(source,recipe:Recipe(inputDomain:.sdr)))
+        #expect(zip(defaults.baseRGBA.prefix(33*4),original.baseRGBA.prefix(33*4)).allSatisfy { abs($0-$1)<0.000001 })
+        for ev in [0.0001,0.5,1.0] {
+            let output = RenderEngine.readPixels(try await engine.render(source,nodes:[AdjustmentNode(.exposure,value:Float(ev))]))
+            let gpu = xs.indices.map { Double(output.baseRGBA[$0*4]) }
+            let cpu = xs.map { DoubleReference.point(SIMD3(repeating:$0),operation:.exposure,value:ev,sdr:true).x }
+            #expect(abs(code(gpu[33])-code(cpu[33])) <= 1)
+            for curve in [gpu,cpu] {
+                for i in xs.indices where xs[i] <= 1 {
+                    #expect(curve[i] >= xs[i]-0.000001 && curve[i] <= 1.000001)
+                }
+                #expect(zip(curve.prefix(32),curve.dropFirst().prefix(32)).allSatisfy { $0 <= $1+0.000001 })
+                #expect(abs(curve[36]-1)<0.000001 && curve[31]<1)
+                if ev == 0.0001 {
+                    #expect(abs(curve[33]-0.8)<0.0001)
+                    #expect(abs(curve[34]-0.99*exp2(ev))<0.000001)
+                } else {
+                    let left = (curve[36]-curve[35])/epsilon, right = (curve[37]-curve[36])/epsilon
+                    #expect(abs(left-right)<0.01 && abs(left)<0.01)
+                }
+            }
+        }
+        let negative = RenderEngine.readPixels(try await engine.render(source,nodes:[AdjustmentNode(.exposure,value:-1)]))
+        for i in xs.indices { #expect(abs(Double(negative.baseRGBA[i*4])-xs[i]/2)<0.000001) }
+        let hdr = SIMD3<Double>(2.4,1.6,0.8)
+        let hdrSource = try await engine.source(image:bitmap([hdr],width:1,height:1),domain:.hdr)
+        let hdrDefault = RenderEngine.readPixels(try await engine.render(hdrSource,recipe:Recipe(inputDomain:.hdr)))
+        for c in 0..<3 { #expect(abs(Double(hdrDefault.baseRGBA[c])*exp2(Double(hdrDefault.gain[0]))-hdr[c])<0.00001) }
+    }
+
+    @Test func allDeclaredLUTSpacePairsRender() async throws {
+        let engine = try RenderEngine(), lut = try ColorLUT(cube:cube())
+        let image = bitmap([SIMD3(repeating:0.8)],width:1,height:1)
+        let sdr = try await engine.source(image:image,domain:.sdr)
+        let raw = try await engine.source(image:image,domain:.rawEDR)
+        // One pixel/LUT/strength; use RAW only when S-Log3 input requires it.
+        for input in Adjustments.declaration("look.input")!.options {
+            let source = input.id == "slog3-sgamut3cine" ? raw : sdr
+            for output in Adjustments.declaration("look.output")!.options {
+                let recipe = Recipe(inputDomain:source.domain,look:LUTReference(contentHash:lut.contentHash,name:"Identity"),values:[
+                    "look.input":.string(input.id),"look.output":.string(output.id),"hdr.range":.number(4),"hdr.coverage":.number(0)])
+                let pixels = RenderEngine.readPixels(try await engine.render(source,recipe:recipe,lut:lut))
+                #expect(pixels.baseRGBA.allSatisfy(\.isFinite) && pixels.gain.allSatisfy(\.isFinite))
+                if input.id == "srgb" && output.id == "pq" { #expect(pixels.gain[0] > 0) }
+            }
+        }
+    }
+
     @Test func recipeUnitsDefaultsAndLUTReference() async throws {
         for domain in InputDomain.allCases {
             let resolved = try RenderAdjustments(recipe:Recipe(inputDomain:domain))
@@ -216,7 +272,10 @@ private func cube(swap: Bool = false) -> String {
         let result = RenderEngine.readPixels(try await engine.render(source,adjustments:edit))
         let reference = values.map { DoubleReference.prepare($0,settings:edit,sdr:false) }
         compare(result,reference)
-        for i in values.indices { #expect(abs(Double(result.gain[i])-DoubleReference.sourceHDRSplit(values[i]).gain)<0.00001) }
+        #expect(Double(result.gain[0]) < DoubleReference.sourceHDRSplit(values[0]).gain)
+        edit.look.strength = 1
+        let clipped = RenderEngine.readPixels(try await engine.render(source,adjustments:edit))
+        #expect(clipped.gain.allSatisfy { abs($0)<0.00001 })
         edit.look.strength = 0
         let bypassed = RenderEngine.readPixels(try await engine.render(source,adjustments:edit))
         compare(bypassed,values.map { DoubleReference.sourceHDRSplit($0) })

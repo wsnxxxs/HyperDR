@@ -216,6 +216,38 @@ import HyperDRRender
             XCTAssertEqual(ExportChoices(resolved).customFormat,c.customFormat,"\(encoding) hdr \(hdr) \(gamut)")
         }}}
     }
+    /// The custom format's long edge (p7-3c-export §1.3 B): the picker's
+    /// choices, what a typed number becomes, the format Kit plans from, and
+    /// the memory blocker's largest admitted long edge.
+    func testLongEdgeChoicesTheFormatAndTheMemoryAction() async throws {
+        XCTAssertEqual(ExportLongEdge.choices(photo: 3000, current: nil), [nil, 2560, 2160, 1080])
+        XCTAssertEqual(ExportLongEdge.choices(photo: 3000, current: 1234), [nil, 2560, 2160, 1234, 1080])
+        XCTAssertEqual(ExportLongEdge.choices(photo: nil, current: nil), [nil, 3840, 2560, 2160, 1080])
+        XCTAssertNil(ExportLongEdge.normalized(3000, photo: 3000))
+        XCTAssertNil(ExportLongEdge.normalized(0, photo: 3000))
+        XCTAssertNil(ExportLongEdge.normalized(nil, photo: 3000))
+        XCTAssertEqual(ExportLongEdge.normalized(2999, photo: 3000), 2999)
+
+        let (m,_) = await ready()
+        let photo = try XCTUnwrap(m.exportPhotoLongEdge)
+        m.setExportLongEdge(photo + 10)
+        XCTAssertNil(m.exportChoices.longEdge, "never larger than the photo")
+        m.setExportLongEdge(photo - 1)
+        XCTAssertEqual(m.export.longEdge, photo - 1)
+        XCTAssertEqual(m.exportChoices.customFormat.longEdge, photo - 1)
+        XCTAssertEqual(try m.captureExport().request.choice.customFormat?.longEdge, photo - 1)
+        XCTAssertEqual(ExportChoices(m.exportChoices.customFormat), m.exportChoices, "a version restores its size")
+
+        var request = ExportPlanRequest(choice: .custom(.init(encoding: .avifPq)),
+            source: .init(domain: .sdr, pixelSize: .init(width: 6000, height: 4000)), edit: .init(hdrEnabled: true, peakStops: 2))
+        let budget = FixedExportMemoryBudget(bytes: 900_000_000)
+        let refused = ExportPlanner.plan(request, budget: budget)
+        XCTAssertNotNil(ExportLongEdge.memoryBlocker(refused))
+        let edge = try XCTUnwrap(ExportLongEdge.admissible(refused))
+        request.choice = .custom(.init(encoding: .avifPq, longEdge: edge))
+        XCTAssertNil(ExportLongEdge.memoryBlocker(ExportPlanner.plan(request, budget: budget)))
+        XCTAssertNil(ExportLongEdge.admissible(ExportPlanner.plan(request, budget: FixedExportMemoryBudget(bytes: 8_000_000_000))))
+    }
     /// R36-003: Render's errors read as the messages Kit's already had.
     func testRenderErrorsMapToExistingMessages() {
         XCTAssertEqual(UserFacingError.service(RenderError.sourceChanged).code,"source_changed")

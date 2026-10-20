@@ -145,6 +145,8 @@ extension EditorModel {
         commit(source: editorSource)
         source = PhotoSource(domain: SourceSummary(editorSource).domain)
         exportChoices.encoding = encoding
+        // A long edge is the previous photo's choice.
+        exportChoices.longEdge = nil
         runEncoding = encoding
         setSplitRatioValue(0.5)
         setPeeking(false)

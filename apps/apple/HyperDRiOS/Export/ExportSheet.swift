@@ -193,7 +193,7 @@ struct ExportSheet: View {
     @ViewBuilder private var longEdge: some View {
         let photo = model.photoLongEdge(editor)
         Picker(selection: Binding(get: { model.custom.longEdge }, set: { model.setLongEdge($0, photo: photo) })) {
-            ForEach(IOSExportModel.longEdgeChoices(photo: photo, current: model.custom.longEdge), id: \.self) { edge in
+            ForEach(ExportLongEdge.choices(photo: photo, current: model.custom.longEdge), id: \.self) { edge in
                 if let edge {
                     Text("ios.export.longEdge.pixels \(String(edge))").tag(Int?.some(edge))
                 } else {
@@ -240,7 +240,7 @@ struct ExportSheet: View {
                 if let estimate = IOSExportModel.memoryEstimate(plan) {
                     Text(verbatim: estimate).font(.caption).foregroundStyle(.secondary)
                 }
-                if let edge = IOSExportModel.admissibleLongEdge(plan) {
+                if let edge = ExportLongEdge.admissible(plan) {
                     Button("ios.export.useLongEdge \(String(edge))") { model.useLongEdge(edge, from: plan) }
                 }
             }

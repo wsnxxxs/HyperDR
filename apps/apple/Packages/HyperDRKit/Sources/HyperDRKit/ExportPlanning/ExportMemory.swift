@@ -44,22 +44,26 @@ public protocol ExportMemoryBudget: Sendable {
 }
 
 /// The device's own answer: `os_proc_available_memory` on iOS/iPadOS, a
-/// conservative share of physical memory on the Mac.
+/// conservative share of host physical memory on the Mac and iOS Simulator.
 public struct SystemExportMemoryBudget: ExportMemoryBudget {
     /// macOS keeps no per-process limit we can read, and the app shares the
-    /// machine with everything else, so admission uses a share of RAM. iOS is
-    /// asked directly, reserving 20% of its reported available memory. A missing
-    /// iOS measurement never falls back to a fraction of physical RAM.
+    /// machine with everything else, so admission uses a share of RAM. Physical
+    /// iOS devices are asked directly, reserving 20% of reported available memory.
+    /// A missing physical-device measurement never uses a fraction of RAM.
+    /// Simulator memory belongs to the host Mac and does not predict device
+    /// capacity: 61MP export admission must be validated on a real device.
     public let physicalShare: Double
 
     public init(physicalShare: Double = 0.5) { self.physicalShare = physicalShare }
 
     public func availableBytes() -> Int? {
-        #if os(iOS)
+        #if os(iOS) && !targetEnvironment(simulator)
         let reported = Int(os_proc_available_memory())
         if reported > 0 { return Int(Double(reported) * 0.8) }
         return nil
         #else
+        // os_proc_available_memory() returns zero on Simulator. Use the same
+        // host policy as macOS; this budget says nothing about a real iPhone.
         let physical = Int(ProcessInfo.processInfo.physicalMemory)
         guard physical > 0, physicalShare > 0 else { return nil }
         return Int(Double(physical) * physicalShare)

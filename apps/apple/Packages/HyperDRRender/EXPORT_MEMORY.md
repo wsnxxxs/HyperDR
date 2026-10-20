@@ -56,10 +56,12 @@ In particular, our 61MP RAW's first reduced development used approximately
 output size. Filter construction/outputImage graph creation itself was only
 14–28 MB total process footprint. Draft mode and the CI memory target did not
 remove the native-size decode allocation. Cropped native developments and cache
-cleanup later released most of it. Replacing `CGImage` wrapping with CI's file
-provider for large rasters improved TIFF ROI reuse, but did not eliminate its
-native-size CPU decode/cache storage either. Bounded <=4096 rasters keep the
-cheaper reusable ImageIO CGImage provider.
+cleanup later released most of it. Large TIFFs without auxiliary gain now
+materialize ImageIO's native bitmap once and detach the TIFF provider, preserving
+bit depth, color space, alpha, decode values and headroom. This is native decoder
+storage, not a full-size RGBAf Render texture. It remains resident with the export
+source and is charged to the native-area allowance. Other large rasters keep CI's
+file provider; bounded <=4096 rasters keep the cheaper ImageIO CGImage provider.
 
 **Do not replace Apple's native-area item with a fixed constant.** Remove the
 retired full RGBAf *Render source/output/composite* items; retain one decoder
@@ -108,8 +110,25 @@ native caches across independent engines without measuring their overlap.
 | Global export scan peak | 1660.5 |
 | Complete read pass peak | 1738.1 |
 
-The complete TIFF scan/read run took 83.6 s (32 s scan, 44.7 s reads). These
-numbers include ImageIO's expensive TIFF decompression, not HEVC encoding.
+The original TIFF scan/read run took 83.6 s (32 s scan, 44.7 s reads), excluding
+HEVC encoding. Profiling isolated repeated ImageIO TIFF strip decoding and
+16-bit byte swapping during CI ROI rasterization, rather than GPU processing or
+RGB packing. The recheck uses an uncompressed, big-endian RGBA half-float TIFF with
+one row per strip: decompression itself was not the cause. ImageIO/CI immediate
+cache hints alone did not stop the repeated decoding.
+
+A fresh-process before/after recheck on the same pre-generated 12800 x 8600 TIFF,
+Mac Debug, 256-row reads (file generation excluded):
+
+| Native TIFF provider | Open s | Global scan s | Complete read pass s | Total s | Process peak MiB |
+|---|---:|---:|---:|---:|---:|
+| Previous CI file provider | 8.142 | 55.905 | 3.241 | 67.288 | 2030.1 |
+| Detached native bitmap | 2.366 | 0.557 | 1.763 | 4.685 | 1695.1 |
+
+This recheck is 14.4x faster overall; decoder cache timing makes the previous
+scan/read split variable between runs. All existing Render tile/row limits stay
+unchanged; no native-size GPU source or float processing buffer was added.
+
 The final internal detail subdivision was separately rechecked (7.23 s for
 opening/four pans); it did not increase the whole-export peak envelope. A
 20017-wide synthetic image also covers both sides of the 16384 limit, exact

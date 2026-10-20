@@ -200,3 +200,35 @@ private final class FootprintRecorder: @unchecked Sendable {
         print("RAW_MEMORY stage=\(stage) footprint_bytes=\(info.phys_footprint) lifetime_peak_bytes=\(info.ledger_phys_footprint_peak)")
     }
 }
+
+@Suite struct TIFFBitmapTests {
+    @Test(arguments:[CIFormat.RGBA8, .RGBAh])
+    func nativeBitmapPreservesOrientedPixels(format: CIFormat) async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("bitmap-\(UUID()).tiff")
+        defer { try? FileManager.default.removeItem(at:url) }
+        let space = CGColorSpace(name:CGColorSpace.extendedLinearDisplayP3)!
+        let image = CIFilter(name:"CILinearGradient",parameters:[
+            "inputPoint0":CIVector(x:0,y:0),"inputPoint1":CIVector(x:4113,y:13),
+            "inputColor0":CIColor(red:0.1,green:0.3,blue:0.7,alpha:0.6),
+            "inputColor1":CIColor(red:1.5,green:0.2,blue:0.1)])!.outputImage!
+            .cropped(to:CGRect(x:0,y:0,width:4113,height:13))
+        let bitmap = try #require(CIContext().createCGImage(image,from:image.extent,format:format,colorSpace:space))
+        let destination = try #require(CGImageDestinationCreateWithURL(url as CFURL,"public.tiff" as CFString,1,nil))
+        CGImageDestinationAddImage(destination,bitmap,[kCGImagePropertyOrientation:6] as CFDictionary)
+        #expect(CGImageDestinationFinalize(destination))
+        let engine = try RenderEngine()
+        let whole = try await engine.load(url)
+        let lazy = try await engine.openExportSource(url)
+        #expect(lazy.domain == whole.domain)
+        #expect(lazy.nativeSize == PixelSize(width:13,height:4113))
+        for y in [0,2047,4105] {
+            let region = CGRect(x:0,y:y,width:13,height:8)
+            let tile = try await engine.materializeExportRegion(lazy,outputSize:lazy.nativeSize,region:region)
+            let recipe = Recipe(inputDomain:whole.domain)
+            let a = RenderEngine.readPixels(try await engine.render(whole,recipe:recipe,size:whole.size,region:region))
+            let b = RenderEngine.readPixels(try await engine.render(tile,recipe:recipe,size:whole.size,region:region))
+            compareBands(a.baseRGBA,b.baseRGBA,label:"TIFF_bitmap")
+            compareBands(a.gain,b.gain,scale:0.25,label:"TIFF_bitmap_gain")
+        }
+    }
+}

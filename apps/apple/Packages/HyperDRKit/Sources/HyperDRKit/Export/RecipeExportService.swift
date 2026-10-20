@@ -57,6 +57,7 @@ public actor RecipeExportService: RecipeExportServicing {
         var published = false
         var timings: [String: Double] = [:]
         var stage = RecipeExportStage.preparing
+        let operationStart = ContinuousClock.now
         var stageStart = Date()
         func emit(_ next: RecipeExportStage) {
             timings[stage.rawValue, default: 0] += Date().timeIntervalSince(stageStart)
@@ -78,6 +79,7 @@ public actor RecipeExportService: RecipeExportServicing {
             defer { lease.stop() }
             try validateRevision(photo, snapshot: snapshot)
             var actualRequest = request
+            actualRequest.capabilities = ExportEncodingCapabilities(try await engine.capabilities())
             actualRequest.allowsRowInput = request.allowsRowInput && rowRenderer != nil
             // Recipe is authoritative for the SDR switch. The selection cannot
             // turn processing back on or turn the recipe into legacy options.
@@ -88,8 +90,8 @@ public actor RecipeExportService: RecipeExportServicing {
                 actualRequest.frame = ExportFrameFacts(canvas: .init(width: frame.width, height: frame.height))
             } else { actualRequest.frame = ExportFrameFacts() }
             var plan = ExportPlanner.plan(actualRequest, budget: budget)
-            // Photos authorization gates library delivery, never file generation.
-            let blockers = plan.blockers.filter { $0.code != "photos_permission_denied" }
+            // Destination availability and encoding share the same planning admission.
+            let blockers = plan.blockers
             guard blockers.isEmpty else {
                 recordPlanMemoryFailure(plan, residentBytes: 0)
                 throw RecipeExportError.planBlocked(blockers.map(\.code))
@@ -188,7 +190,7 @@ public actor RecipeExportService: RecipeExportServicing {
             let totalBudget = remaining.addingReportingOverflow(resident)
             plan = ExportPlanner.plan(actualRequest, budget: FixedExportMemoryBudget(
                 bytes: totalBudget.overflow ? Int.max : totalBudget.partialValue))
-            let resolvedBlockers = plan.blockers.filter { $0.code != "photos_permission_denied" }
+            let resolvedBlockers = plan.blockers
             guard resolvedBlockers.isEmpty else {
                 recordPlanMemoryFailure(plan, residentBytes: resident)
                 throw RecipeExportError.planBlocked(resolvedBlockers.map(\.code))
@@ -393,7 +395,8 @@ public actor RecipeExportService: RecipeExportServicing {
                 }
             }
             await renderEngine.clearCaches()
-            return RecipeExportResult(record: record, resolved: resolved, file: file, saved: saved, deliveryError: deliveryError)
+            return RecipeExportResult(record: record, resolved: resolved, file: file, saved: saved, deliveryError: deliveryError,
+                                      elapsed: operationStart.duration(to: .now))
         } catch {
             if let pending, !published { await sessions.discardExport(session, export: pending) }
             await renderEngine.clearCaches()

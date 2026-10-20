@@ -13,12 +13,14 @@ public struct ExportSource: Sendable, Hashable {
     public let pixelSize: ExportPixelSize
     /// The RAW sensor size, when it differs from the developed size.
     public let sensorSize: ExportPixelSize?
+    public let hasAlpha: Bool
 
     public init(domain: InputDomain, pixelSize: ExportPixelSize,
-                sensorSize: ExportPixelSize? = nil) {
+                sensorSize: ExportPixelSize? = nil, hasAlpha: Bool = false) {
         self.domain = domain
         self.pixelSize = pixelSize
         self.sensorSize = sensorSize
+        self.hasAlpha = hasAlpha
     }
 
     /// Anything but `sdr` carries real values above SDR white, so an adaptive
@@ -91,95 +93,6 @@ public struct ExportEditFacts: Sendable, Hashable {
     }
 }
 
-/// A sentence part a view composes. The planning layer never localizes; it
-/// names what is said and what fills the placeholders.
-public enum ExportMessageArgument: Sendable, Hashable {
-    /// Already-formatted text (a number, a byte count).
-    case text(String)
-    /// Another catalogue key, resolved before it is substituted.
-    case key(String)
-    /// A stop count, written by `ExportPlanText.stops` ("+2.4").
-    case stops(Double)
-    /// A pixel count, written by `ExportPlanText.pixels`.
-    case pixels(Int)
-}
-
-public struct ExportMessage: Sendable, Hashable {
-    public let key: String
-    public let arguments: [ExportMessageArgument]
-
-    /// Resolve from Kit's catalogue, independent of the host app's bundle.
-    public func localized(locale: Locale = .current) -> String {
-        let language = locale.identifier.hasPrefix("zh") ? "zh-Hans" : "en"
-        let bundle = Bundle.module.path(forResource: language, ofType: "lproj")
-            .flatMap(Bundle.init(path:)) ?? Bundle.module
-        func text(_ key: String) -> String { bundle.localizedString(forKey: key, value: nil, table: nil) }
-        let values: [String] = arguments.map {
-            switch $0 {
-            case .text(let value): value
-            case .key(let key): text(key)
-            case .stops(let value): ExportPlanText.stops(value)
-            case .pixels(let value): ExportPlanText.pixels(value)
-            }
-        }
-        return String(format: text(key), locale: locale, arguments: values)
-    }
-
-    public init(key: String, arguments: [ExportMessageArgument] = []) {
-        self.key = key
-        self.arguments = arguments
-    }
-}
-
-/// Something that stops the export; `code` is for logs and tests, `message` for
-/// the panel.
-public struct ExportBlocker: Sendable, Hashable {
-    public let code: String
-    public let message: ExportMessage
-    /// Requested output canvas, including the frozen frame.
-    public let pixelSize: ExportPixelSize?
-
-    public init(code: String, message: ExportMessage, pixelSize: ExportPixelSize? = nil) {
-        self.pixelSize = pixelSize
-        self.code = code
-        self.message = message
-    }
-}
-
-/// The read-only "Will write" row (p7-adjustments §4.1): encoding, gamut, size
-/// and peak, as keys with their arguments.
-public struct WillWriteSummary: Sendable, Hashable {
-    public let labelKey: String
-    public let parts: [ExportMessage]
-
-    public init(parts: [ExportMessage]) {
-        self.labelKey = "dest.willWrite"
-        self.parts = parts
-    }
-}
-
-/// How the plan's numbers are written. Locale-independent on purpose: the app
-/// formats the same values with the user's locale elsewhere, and this is the one
-/// place a plan's own sentences (a stop count, a byte count) are spelled out.
-public enum ExportPlanText {
-    /// "+2.4", "+3": a stop count with its sign, at most one decimal.
-    public static func stops(_ value: Double) -> String {
-        let rounded = (value * 10).rounded() / 10
-        let digits = rounded == rounded.rounded() ? 0 : 1
-        return String(format: "%+.\(digits)f", rounded)
-    }
-
-    public static func pixels(_ value: Int) -> String { "\(value)" }
-
-    /// "3.1 GB", "400 MB": decimal units, enough for a sentence.
-    public static func bytes(_ value: Int) -> String {
-        let gigabytes = Double(value) / 1_000_000_000
-        if gigabytes >= 1 { return String(format: "%.1f GB", gigabytes) }
-        if value < 1_000_000 { return "< 1 MB" }
-        return String(format: "%.0f MB", Double(value) / 1_000_000)
-    }
-}
-
 /// Everything the plan is computed from. No service, no engine, no AppKit:
 /// a value in, a value out.
 public struct ExportPlanRequest: Sendable, Hashable {
@@ -196,12 +109,14 @@ public struct ExportPlanRequest: Sendable, Hashable {
     public var library: ExportLibraryFacts
     public var resources: ExportRetainedResources
     /// Renderer/host capability; false also provides a whole-plane parity baseline.
+    public var capabilities: ExportEncodingCapabilities
     public var allowsRowInput: Bool
 
     public init(choice: ExportChoice, source: ExportSource, pair: ExportGainPair? = nil,
                 frame: ExportFrameFacts = ExportFrameFacts(),
                 edit: ExportEditFacts, library: ExportLibraryFacts = ExportLibraryFacts(),
-                resources: ExportRetainedResources = ExportRetainedResources(), allowsRowInput: Bool = true) {
+                resources: ExportRetainedResources = ExportRetainedResources(), allowsRowInput: Bool = true,
+                capabilities: ExportEncodingCapabilities = .init()) {
         self.choice = choice
         self.source = source
         self.pair = pair
@@ -210,6 +125,7 @@ public struct ExportPlanRequest: Sendable, Hashable {
         self.library = library
         self.resources = resources
         self.allowsRowInput = allowsRowInput
+        self.capabilities = capabilities
     }
 }
 
@@ -253,9 +169,8 @@ public struct ExportPlan: Sendable, Hashable {
     public let library: LibrarySavePlan?
     /// Sentences the panel shows beside the summary (a narrowed peak, a crop
     /// hint). Non-fatal.
-    public let notices: [ExportMessage]
-    public let blockers: [ExportBlocker]
-    public let summary: WillWriteSummary
+    public let notices: [ExportNotice]
+    public let blockers: [ExportBlockReason]
 
     public var isExecutable: Bool { blockers.isEmpty }
 
@@ -326,24 +241,20 @@ public enum ExportPlanner {
         // source can naturally resolve below that. This floor only limits the
         // requested ceiling and never raises the rendered source's gain.
         let peakStops = outputIsHDR ? max(0.5, min(request.edit.peakStops, ceiling)) : nil
-        var notices: [ExportMessage] = []
+        var notices: [ExportNotice] = []
         let selectedEncoding = request.choice.customFormat?.encoding ?? profile!.encoding
         if !request.edit.hdrEnabled && selectedEncoding.writesGainMap {
-            notices.append(.init(key: "plan.sdrVersion"))
+            notices.append(.sdrVersion)
         }
         if peakStops != nil, request.edit.peakStops > ceiling {
-            let stops = ExportMessageArgument.stops(ceiling)
-            notices.append(destination == nil
-                ? ExportMessage(key: "export.rangeClamped %@ %@",
-                                arguments: [.key(encoding.labelKey), stops])
-                : ExportMessage(key: "dest.ceiling %@", arguments: [stops]))
+            notices.append(.ceiling(stops: ceiling, scope: destination.map { .destination($0) } ?? .format(encoding)))
         }
         // Instagram crops outside 4:5 … 1.91:1. P7 has no crop tool, so the
         // summary says so and nothing is cut (p7-adjustments §4.2).
         if destination == .social {
             let aspect = Double(size.width) / Double(size.height)
             if aspect < 0.8 - 1e-9 || aspect > 1.91 + 1e-9 {
-                notices.append(ExportMessage(key: "dest.social.aspect"))
+                notices.append(.socialAspect)
             }
         }
 
@@ -362,13 +273,20 @@ public enum ExportPlanner {
                                     encoding: encoding, writesGainMap: writesGainMap,
                                     baseBitDepth: baseBitDepth, budget: budget)
         var blockers = admission.blockers
-        if !request.edit.hdrEnabled && selectedEncoding.isBT2100 {
-            blockers.append(.init(code: "hdrOff", message: .init(key: "plan.hdrOff")))
+        if request.source.hasAlpha { notices.append(.alphaOnWhite) }
+        if let reason = availability(of: selectedEncoding, source: request.source, capabilities: request.capabilities, edit: request.edit) {
+            blockers.append(reason)
         }
         let maxLongEdge = suggestSize && !admission.estimate.fits(in: admission.availableBytes ?? 0)
             ? maximumLongEdge(request, budget: admission.availableBytes ?? 0, upper: photoSize.longEdge) : nil
+        blockers = blockers.map { reason in
+            if case .memory(let needed, let available, let size, _) = reason {
+                return .memory(needed: needed, available: available, size: size, maxLongEdge: maxLongEdge)
+            }
+            return reason
+        }
         if let pair = request.pair, ![1, 3].contains(pair.channels) {
-            blockers.append(.init(code: "unsupported_format", message: .init(key: "err.server.unsupported_format")))
+            blockers.append(.unsupportedPair)
         }
 
         var library: LibrarySavePlan?
@@ -378,8 +296,7 @@ public enum ExportPlanner {
                 remembered: preferences?.lastLibrarySaveMode())
             library = savePlan
             if savePlan.selected == nil {
-                blockers.append(ExportBlocker(code: "photos_permission_denied",
-                    message: ExportMessage(key: "dest.photos.permission")))
+                blockers.append(.photosNotAvailable(savePlan.options.compactMap(\.unavailableReason).first ?? .notVerified))
             }
         }
 
@@ -408,9 +325,7 @@ public enum ExportPlanner {
                 maxAdmissibleLongEdge: maxLongEdge),
             library: library,
             notices: notices,
-            blockers: blockers,
-            summary: summary(encoding: encoding, gamut: gamut, size: size, photoSize: photoSize,
-                             sourceSize: request.source.pixelSize, peakStops: peakStops))
+            blockers: blockers)
     }
 
     /// The photograph's written size for a choice: a destination's long edge,
@@ -490,7 +405,7 @@ public enum ExportPlanner {
         let availableBytes: Int?
         let degradation: ExportDegradation?
         let renderRows: Int
-        let blockers: [ExportBlocker]
+        let blockers: [ExportBlockReason]
     }
 
     private static func admitMemory(request: ExportPlanRequest,
@@ -528,10 +443,7 @@ public enum ExportPlanner {
         let shortfall = writers.map { estimate(writer: $0, rows: 64) }.min { $0.peak < $1.peak }!
         return Admission(writer: preferred.writer, reason: preferred.reason, gainMap: gainMap,
                          estimate: shortfall, availableBytes: available, degradation: .refused, renderRows: 64,
-                         blockers: [ExportBlocker(code: "export_memory_exceeded",
-                             message: ExportMessage(key: "dest.memoryExceeded %@ %@",
-                                 arguments: [.text(ExportPlanText.bytes(shortfall.peak)),
-                                             .text(ExportPlanText.bytes(available))]), pixelSize: size)])
+                         blockers: [.memory(needed: shortfall.peak, available: available, size: size, maxLongEdge: nil)])
     }
 
     /// Search only memory admission, freezing the measured budget. Frame canvas is
@@ -558,22 +470,4 @@ public enum ExportPlanner {
         return nil
     }
 
-    // MARK: Summary
-
-    private static func summary(encoding: ExportEncoding, gamut: ExportColorGamut,
-                                size: ExportPixelSize, photoSize: ExportPixelSize,
-                                sourceSize: ExportPixelSize,
-                                peakStops: Double?) -> WillWriteSummary {
-        var parts = [ExportMessage(key: encoding.labelKey),
-                     ExportMessage(key: gamut.labelKey)]
-        // "Original size" only when the written picture is the photo as it came.
-        parts.append(size == sourceSize && photoSize == sourceSize
-            ? ExportMessage(key: "plan.size.original")
-            : ExportMessage(key: "plan.size.pixels",
-                            arguments: [.pixels(size.width), .pixels(size.height)]))
-        if let peakStops {
-            parts.append(ExportMessage(key: "plan.peak %@", arguments: [.stops(peakStops)]))
-        }
-        return WillWriteSummary(parts: parts)
-    }
 }

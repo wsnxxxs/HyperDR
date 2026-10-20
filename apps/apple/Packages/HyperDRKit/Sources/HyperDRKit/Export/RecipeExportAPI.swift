@@ -36,10 +36,30 @@ public struct RecipeExportResult: Sendable {
     public let saved: SavedExport?
     /// A delivery failure leaves record/file available for another save attempt.
     public let deliveryError: HyperDRError?
+    public var size: ExportPixelSize { .init(width: resolved.width, height: resolved.height) }
+    public var byteCount: Int64 { record.byteCount }
+    private var evidence: RecipeExportReport? { try? JSONDecoder().decode(RecipeExportReport.self, from: record.reportJSON) }
+    private var package: PackageReport? {
+        evidence?.packageJSON.flatMap { try? JSONDecoder().decode(PackageReport.self, from: $0) }
+    }
+    /// Written headroom, from the package metadata (system reader for ImageIO).
+    public var peakStops: Double? {
+        guard resolved.ceilingStops != nil else { return nil }
+        return package?.gain?.alternateHeadroom ?? evidence?.system.verifiedHeadroomStops.max()
+    }
+    public var verified: Bool { evidence != nil && (package?.verified ?? (evidence?.imageIO != nil)) }
+    private let operationElapsed: Duration?
+    /// Includes publication and delivery when returned by the live service.
+    public var elapsed: Duration { operationElapsed ?? .seconds(evidence?.stageSeconds.values.reduce(0, +) ?? 0) }
+    public var ceilingApplied: (edit: Double, written: Double)? {
+        guard let before = resolved.rangeBeforeCeiling, let after = resolved.rangeAfterCeiling,
+              before.isFinite, after.isFinite, before > after + 1e-4 else { return nil }
+        return (Double(before), Double(after))
+    }
     public init(record: ExportRecord, resolved: ResolvedExportSnapshot, file: URL,
-                saved: SavedExport? = nil, deliveryError: HyperDRError? = nil) {
+                saved: SavedExport? = nil, deliveryError: HyperDRError? = nil, elapsed: Duration? = nil) {
         self.record = record; self.resolved = resolved; self.file = file
-        self.saved = saved; self.deliveryError = deliveryError
+        self.saved = saved; self.deliveryError = deliveryError; self.operationElapsed = elapsed
     }
 }
 

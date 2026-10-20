@@ -608,6 +608,38 @@
           }
         }
       }
+    },
+    "plan.alphaOnWhite": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transparent areas will be filled with SDR white."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "透明区域将铺上 SDR 白色背景。"
+          }
+        }
+      }
+    },
+    "plan.photosNotVerified": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saving to Photos is not available yet."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "存到“照片”尚未开放。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

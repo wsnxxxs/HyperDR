@@ -356,18 +356,18 @@ replan after accepting a suggestion. This may conservatively return nil for a
 large fixed canvas. This is process admission, not a promise about later GPU or
 changed device budgets. Original-size 110MP remains the goal independently.
 
-With HDR off, gain-map choices carry the `plan.sdrVersion` notice: ISO gain JPEG
+With HDR off, gain-map choices carry the `.sdrVersion` notice: ISO gain JPEG
 becomes SDR JPEG, Adaptive stays HEIC with an 8-bit SDR base and no gain map.
 PQ, HLG and both AVIF variants carry blocker code `hdrOff`. The service enforces
 these blockers before writing. The planner does not change the frozen Recipe.
 
-Hosts can call `ExportMessage.localized(locale:)` for notices, blockers and
-summary parts; Kit owns the English and Simplified Chinese catalogue, including
+Existing hosts can call `ExportNotice.localized(locale:)` or
+`ExportBlockReason.message.localized(locale:)` for notices and blockers, and
+`ExportMessage.localized(locale:)` for compatibility summary parts; Kit owns the English and Simplified Chinese catalogue, including
 nested encoding/gamut labels and library-save reasons. Use this rather than
 looking up `message.key` in an app bundle that may not contain it. For labelKey
 or unavailableReasonKey values construct `ExportMessage(key:)` and call the same
-method. Planning itself remains locale-independent and returns semantic keys.
-No App catalogues or UI files are changed by this integration.
+method. Planning itself remains locale-independent and returns typed facts.
 
 `developing` is emitted only for RAW; non-RAW source opening belongs to
 `preparing`. Whole-plane exports retain rendering row progress then encoding.
@@ -445,3 +445,32 @@ K12 (remove/rename plan text keys), K13 (last choice) remain unimplemented in th
 batch. K1's typed notice/blocker redesign was optional and is not implemented;
 semantic messages now have Kit-owned translations instead. No new tasks were
 started after the stage-close instruction.
+
+### Typed export planning and results
+
+`ExportPlan.notices` contains `ExportNotice`; `blockers` contains
+`ExportBlockReason`. These enums carry numbers, encodings, scopes and memory
+size suggestions, without localized strings. `ExportPlanner.availability(of:
+source:capabilities:edit:)` returns the same encoder/HDR reason used by the plan.
+Pass probe facts with `ExportPlanRequest.capabilities`; the live export service
+refreshes them from the engine before admission. `ExportSource.hasAlpha` lets a
+host report source transparency. The compatibility presentation layer retains
+`message`, `key`, `arguments`, `code`, and `summary` for existing screens.
+
+`PhotoLibrarySaver.verifiedModes` is empty pending Photos Lab. Library facts
+therefore default to no verified save modes, a nil library selection, and a
+`.photosNotAvailable(.notVerified)` blocker. File/custom destinations continue
+to work. Supplying verified modes is the future saver/test seam.
+
+Use `ExportRecord.matchesEdit(_:)` for editing status, independently of export
+selection; use `matches(_:selection:profileVersion:)` for an already exported
+version of a specific choice. LUT display names do not affect identity.
+`RecipeExportResult` exposes `size`, `byteCount`, actual `peakStops`, `verified`,
+`elapsed`, and `ceilingApplied`. Headroom comes from the package report, or the
+independent system readback when the writer has no gain metadata. Live elapsed
+time includes publication and delivery; reconstructed fake results fall back
+to reported stage durations. Missing verification evidence never means verified.
+
+The LUT library already lives in Application Support on iOS and owns picker URL
+security scopes. `LUTEntry.contentHash` exposes the Render-compatible `sha256:`
+identity directly, so listing LUTs does not require parsing their cubes.

@@ -128,9 +128,25 @@ public actor RecipeExportService: RecipeExportServicing {
                 guard model?.sourceID == source.id, model?.modelID == modelID else { throw RecipeExportError.missingModel }
             }
             try Task.checkCancellation()
-            let resident = retainedCPUBytes + (model.map { $0.gain.width * $0.gain.height * 4 } ?? 0)
+            // UI readouts can precede prediction and are only estimates. Resolve
+            // the frozen Recipe with the actual model before imposing a ceiling.
+            let automatic = try await renderEngine.resolvedAutomatic(source, recipe: snapshot.recipe,
+                                                                      lut: frozenLUT, modelGain: model)
+            guard let naturalRange = adjustments.hdr.range.map(Double.init) ?? automatic["hdr.range"],
+                  naturalRange.isFinite, naturalRange >= 0 else { throw RecipeExportError.invalidSnapshot }
+            actualRequest.edit.peakStops = naturalRange
+            // The host reports remaining memory after source/model/analysis
+            // allocation. Credit only resident allocations already charged in
+            // the estimate; prediction is not part of that estimate.
+            let resident = retainedCPUBytes
                 + request.source.pixelSize.pixels * (source.domain == .dual ? 48 : 16)
                 + (source.domain == .rawEDR ? (request.source.sensorSize ?? request.source.pixelSize).pixels * 16 : 0)
+            let remaining = budget.availableBytes() ?? 256 * 1024 * 1024
+            let totalBudget = remaining.addingReportingOverflow(resident)
+            plan = ExportPlanner.plan(actualRequest, budget: FixedExportMemoryBudget(
+                bytes: totalBudget.overflow ? Int.max : totalBudget.partialValue))
+            let resolvedBlockers = plan.blockers.filter { $0.code != "photos_permission_denied" }
+            guard resolvedBlockers.isEmpty else { throw RecipeExportError.planBlocked(resolvedBlockers.map(\.code)) }
             try await checkMemory(plan, residentBytes: resident, sourcePixels: request.source.pixelSize.pixels)
             let prepared = try await sessions.prepareRecipeExport(session, snapshot: snapshot)
             pending = prepared.id
@@ -164,7 +180,10 @@ public actor RecipeExportService: RecipeExportServicing {
                 throw HyperDRError(code: "unsupported_format", message: "The rendered pair cannot be represented by this writer")
             }
             guard finalReport.canvasSize == report.canvasSize, finalReport.gain == report.gain,
+                  finalReport.sourceProvenance == report.sourceProvenance,
                   finalReport.provenance == report.provenance, finalReport.resplitReasons == report.resplitReasons,
+                  finalReport.rangeBeforeCeiling == report.rangeBeforeCeiling,
+                  finalReport.rangeAfterCeiling == report.rangeAfterCeiling,
                   finalReport.resolvedAutomatic == report.resolvedAutomatic,
                   finalReport.presentationFrame == report.presentationFrame, finalReport.framePhoto == report.framePhoto else {
                 throw RecipeExportError.invalidStripes
@@ -175,7 +194,8 @@ public actor RecipeExportService: RecipeExportServicing {
             try validateRevision(refreshed, snapshot: snapshot)
             // The collected planes are now independent. Drop graph/analysis/LUT
             // GPU caches before package allocates its whole-plane copies. The
-            // local source and model stay accounted for in resident bytes.
+            // source stays charged in resident bytes; prediction consumes the
+            // host's measured remaining budget.
             await renderEngine.clearCaches()
             try Task.checkCancellation()
             try await checkMemory(plan, residentBytes: resident + plan.size.pixels * (12 + 4 * (report.gain?.channelCount ?? 0)),
@@ -219,14 +239,10 @@ public actor RecipeExportService: RecipeExportServicing {
             let system = try ExportVerification.system(file, plan: plan, gainMetadata: report.gain)
             try Task.checkCancellation()
             try validateRevision(try await sessions.session(session), snapshot: snapshot)
-            // Render can apply the destination shoulder while building its
-            // edited authored pair, before its final capability scan. Record
-            // the planner's output constraint even when that scan needs no
-            // further resplit; do not change the actual Render provenance.
+            // Range controls can narrow the pair before its adaptation scan.
+            // Render reports that change separately from a boundary resplit.
             var conversionReasons = report.resplitReasons
-            if let ceiling = plan.peakStops, actualRequest.edit.peakStops > ceiling {
-                conversionReasons.insert(.outputCeiling)
-            }
+            if report.ceilingApplied { conversionReasons.insert(.outputCeiling) }
             let resolved = ResolvedExportSnapshot(snapshot: snapshot, plan: plan,
                 resolvedAutomatic: report.resolvedAutomatic, resplitReasons: conversionReasons.map(\.rawValue),
                 report: report)

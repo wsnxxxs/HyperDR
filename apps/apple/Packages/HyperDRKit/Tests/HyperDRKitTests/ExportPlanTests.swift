@@ -409,6 +409,10 @@ struct ExportMemoryPlanTests {
             source: source(), photoSize: photo, canvas: photo, encoding: .isoGainMapJPEG,
             writer: .inHouse, writesGainMap: true, isFramed: false, baseBitDepth: 8,
             writeRows: 64, retainedBytes: 0))
+        // Readback has both RGBA and packed RGB for base and gain (56 B/px),
+        // beside GPU RGBA outputs (32 B/px). Shrinking stripes only frees those.
+        let freedStripePixels = photo.width * (photo.height - 64)
+        #expect(whole.render - strips.render >= freedStripePixels * (56 + 32))
         #expect(strips.encode == whole.encode)
         #expect(strips.packaging == whole.packaging)
     }

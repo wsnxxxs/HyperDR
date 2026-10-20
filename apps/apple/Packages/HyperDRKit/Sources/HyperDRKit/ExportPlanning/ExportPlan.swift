@@ -292,7 +292,10 @@ public enum ExportPlanner {
         // off the content has no highlights left above SDR white, so it has no peak.
         let outputIsHDR = request.edit.hdrEnabled && (encoding.writesGainMap || encoding.isBT2100)
         let ceiling = profile?.ceilingStops ?? encoding.ceilingStops
-        let peakStops = outputIsHDR ? min(request.edit.peakStops, ceiling) : nil
+        // Render accepts range controls from 0.5 stops; an automatic flat
+        // source can naturally resolve below that. This floor only limits the
+        // requested ceiling and never raises the rendered source's gain.
+        let peakStops = outputIsHDR ? max(0.5, min(request.edit.peakStops, ceiling)) : nil
         var notices: [ExportMessage] = []
         if peakStops != nil, request.edit.peakStops > ceiling {
             let stops = ExportMessageArgument.stops(ceiling)

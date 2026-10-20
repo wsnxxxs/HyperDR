@@ -10,6 +10,12 @@ import Synchronization
 import Testing
 @testable import HyperDRKit
 
+private final class ChangingExportMemoryBudget: ExportMemoryBudget {
+    let bytes: Mutex<Int>
+    init(_ initial: Int) { bytes = Mutex(initial) }
+    func availableBytes() -> Int? { bytes.withLock { $0 } }
+}
+
 private struct StripeFake: ExportStripeRendering {
     var metadata: ExportGainMetadata? = nil
     var gainScale: Float = 2
@@ -25,7 +31,8 @@ private struct StripeFake: ExportStripeRendering {
         let size = request.canvasSize
         let report = ExportRenderReport(canvasSize: size,
             gain: channels == 0 ? nil : metadata ?? .init(channelCount: channels, alternateHeadroom: 2),
-            provenance: .split, resplitReasons: [], resolvedAutomatic: ["hdr.range": 2],
+            sourceProvenance: .split, provenance: .split, resplitReasons: [],
+            rangeBeforeCeiling: gainScale, rangeAfterCeiling: gainScale, resolvedAutomatic: ["hdr.range": 2],
             presentationFrame: request.frame != nil, framePhoto: request.frame?.photo)
         try prepare(report)
         for y in stride(from: 0, to: size.height, by: rows) {
@@ -70,9 +77,9 @@ private struct RecipeExportEnvironment {
         .init(engine: engine, renderEngine: render, renderer: fake, sessions: sessions,
               target: target, budget: FixedExportMemoryBudget(bytes: budget), prediction: prediction)
     }
-    func realService() -> RecipeExportService {
+    func realService(prediction: RecipeExportService.Prediction? = nil) -> RecipeExportService {
         .init(engine: engine, renderEngine: render, renderer: render, sessions: sessions,
-              target: target, budget: FixedExportMemoryBudget(bytes: 1_000_000_000))
+              target: target, budget: FixedExportMemoryBudget(bytes: 1_000_000_000), prediction: prediction)
     }
     func snapshot(recipe: Recipe = Recipe(), frame: FrameSnapshot? = nil, modelID: String? = nil) throws -> RecipeExportSnapshot {
         .init(recipe: recipe, source: try .init(session: session), modelID: modelID, frame: frame)
@@ -190,9 +197,17 @@ private struct RecipeExportEnvironment {
                                              request: request(.isoGainMapJPEG))
         #expect(kept.resolved.gain?.channels == 3)
         #expect(kept.resolved.resplitReasons.isEmpty)
+        #expect(kept.resolved.sourceProvenance == "authored")
         #expect(kept.resolved.provenance == "authored")
         let mono = try await service.export(session: photo.id, snapshot: .init(recipe: recipe, source: revision),
                                              request: request(.adaptive))
+        // Adaptive also narrows the range upstream before the mono resplit.
+        #expect(mono.resolved.sourceProvenance == "editedAuthored")
+        #expect(mono.resolved.provenance == "resplit")
+        let reopened = await env.sessions.exports(for: photo.id)
+        let persisted = try #require(reopened.first { $0.id == mono.record.id }?.resolvedSnapshot)
+        let decoded = try JSONDecoder().decode(ResolvedExportSnapshot.self, from: JSONEncoder().encode(persisted))
+        #expect(decoded.sourceProvenance == "editedAuthored" && decoded.provenance == "resplit")
         #expect(mono.resolved.gain?.channels == 1)
         #expect(mono.resolved.resplitReasons.contains("writerCarriesOneChannel"))
         let social = ExportPlanRequest(choice: .destination(.social),
@@ -208,6 +223,8 @@ private struct RecipeExportEnvironment {
                                                request: request(.isoGainMapJPEG))
         #expect(framed.resolved.gain?.baseOffset == .zero && framed.resolved.gain?.alternateOffset == .zero)
         #expect(framed.resolved.resplitReasons.contains("frameRequiresNeutralPair"))
+        #expect(framed.resolved.sourceProvenance == "authored")
+        #expect(framed.resolved.provenance == "resplit")
     }
 
     @Test func eightEncodingsArePackagedAndReadByBothReaders() async throws {
@@ -325,6 +342,79 @@ private struct RecipeExportEnvironment {
             _ = try await service.export(session: env.session.id, snapshot: env.snapshot(), request: env.request(.sdrJPEG))
         }
         #expect(await env.sessions.exports(for: env.session.id).isEmpty)
+    }
+
+    @Test func replanningCreditsTheSourceWhenRemainingMemoryDrops() async throws {
+        let env = try await RecipeExportEnvironment(); defer { env.remove() }
+        let request = env.request(.isoGainMapJPEG)
+        let initialPlan = ExportPlanner.plan(request, budget: FixedExportMemoryBudget(bytes: 1_000_000_000))
+        let peak = initialPlan.memory.estimate.peak
+        let sourceBytes = request.source.pixelSize.pixels * 16
+        let budget = ChangingExportMemoryBudget(peak + 1)
+        let service = RecipeExportService(engine: env.engine, renderEngine: env.render, renderer: env.render,
+            sessions: env.sessions, target: env.target, budget: budget)
+        let result = try await service.export(session: env.session.id, snapshot: env.snapshot(), request: request,
+            progress: { event in
+                if event.stage == .developing { budget.bytes.withLock { $0 -= sourceBytes } }
+            })
+        #expect(budget.availableBytes() == peak + 1 - sourceBytes)
+        #expect(result.record.resolvedSnapshot == result.resolved)
+        #expect(result.resolved.width == 96 && result.resolved.height == 64)
+        // A remaining budget below the genuinely incremental peak still refuses.
+        budget.bytes.withLock { $0 = peak + 1 }
+        await #expect(throws: RecipeExportError.planBlocked(["export_memory_exceeded"])) {
+            _ = try await service.export(session: env.session.id, snapshot: env.snapshot(), request: request,
+                progress: { event in
+                    if event.stage == .developing { budget.bytes.withLock { $0 = peak - sourceBytes - 1 } }
+                })
+        }
+        #expect(await env.sessions.exports(for: env.session.id).count == 1)
+    }
+
+    @Test func realAutoAIRangeIsResolvedAfterPrediction() async throws {
+        let env = try await RecipeExportEnvironment(); defer { env.remove() }
+        var recipe = Recipe(); recipe.setHDRSource(.ai)
+        let ready = Mutex(false)
+        let predictedStops = Mutex<Float>(2)
+        let service = env.realService(prediction: { source, model in
+            try await Task.sleep(for: .milliseconds(10))
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r32Float, width: 8, height: 8, mipmapped: false)
+            descriptor.storageMode = .shared
+            let device = try #require(MTLCreateSystemDefaultDevice())
+            let texture = try #require(device.makeTexture(descriptor: descriptor))
+            let values = [Float](repeating: predictedStops.withLock { $0 }, count: 64)
+            values.withUnsafeBytes { texture.replace(region: MTLRegionMake2D(0, 0, 8, 8), mipmapLevel: 0,
+                                                     withBytes: $0.baseAddress!, bytesPerRow: 8 * 4) }
+            ready.withLock { $0 = true }
+            return .init(sourceID: source.id, modelID: model, gain: texture)
+        })
+        // Both pre-inference readouts used to override the frozen auto Recipe.
+        for placeholder in [0.0, 0.5] {
+            var request = env.request(.isoGainMapJPEG)
+            request.edit.peakStops = placeholder
+            let result = try await service.export(session: env.session.id,
+                snapshot: env.snapshot(recipe: recipe, modelID: "test-v1"), request: request)
+            #expect(ready.withLock { $0 })
+            #expect(abs((result.resolved.ceilingStops ?? 0) - 2) < 0.01)
+            #expect(abs((result.resolved.rangeBeforeCeiling ?? 0) - 2) < 0.01)
+            #expect(result.resolved.rangeBeforeCeiling == result.resolved.rangeAfterCeiling)
+            #expect(abs((result.resolved.resolvedAutomatic["hdr.range"] ?? 0) - 2) < 0.01)
+            #expect((result.resolved.gain?.alternateHeadroom ?? 0) > 1.9)
+            #expect(!result.resolved.resplitReasons.contains("outputCeiling"))
+        }
+        predictedStops.withLock { $0 = 3 }
+        let social = ExportPlanRequest(choice: .destination(.social),
+            source: .init(domain: .sdr, pixelSize: .init(width: 96, height: 64)), edit: .init(peakStops: 0))
+        let limited = try await service.export(session: env.session.id,
+            snapshot: env.snapshot(recipe: recipe, modelID: "test-v1"), request: social)
+        #expect(limited.resolved.ceilingStops == 2)
+        #expect(abs((limited.resolved.rangeBeforeCeiling ?? 0) - 3) < 0.01)
+        #expect(limited.resolved.rangeAfterCeiling == 2)
+        #expect(limited.resolved.resplitReasons.contains("outputCeiling"))
+        recipe.setValue(.number(1), for: "hdr.range")
+        let manual = try await service.export(session: env.session.id,
+            snapshot: env.snapshot(recipe: recipe, modelID: "test-v1"), request: env.request(.isoGainMapJPEG))
+        #expect(manual.resolved.ceilingStops == 1)
     }
 
     @Test func aiIsAwaitedAndFailureDoesNotFallBack() async throws {

@@ -16,11 +16,18 @@ import HyperDRRender
 nonisolated protocol EditorRendering: AnyObject, Sendable {
     /// Opens the photo at a file URL the caller can read (a security scope, if
     /// any, is held by the caller for the duration of the call). The source's
-    /// domain decides the new recipe's input domain.
-    func open(_ url: URL) async throws -> EditorSource
+    /// domain decides the new recipe's input domain. `previewSize` bounds the
+    /// first decode or development (nil: full size); later renders decode
+    /// again only when they need more pixels or another development.
+    func open(_ url: URL, previewSize: HyperDRRender.PixelSize?) async throws -> EditorSource
 
-    /// Renders the open photo. The recipe's input domain must be the source's.
+    /// Renders the open photo, with the display pair the canvas draws. The
+    /// recipe's input domain must be the source's. A region renders from the
+    /// full-size source.
     func render(_ request: EditorRenderRequest) async throws -> EditorFrame
+
+    /// An SDR thumbnail (Display P3) of a frame's base: export summaries, frames.
+    func sdrThumbnail(_ frame: EditorFrame, maximumSize: HyperDRRender.PixelSize) async throws -> CGImage
 
     /// Computes the AI gain for the open photo with the model `modelID`, loading
     /// the model on first use (§9). Predictions are kept by model id: a render
@@ -30,8 +37,8 @@ nonisolated protocol EditorRendering: AnyObject, Sendable {
     /// this device at all; any other error is a failed prediction.
     func predictModelGain(modelID: String) async throws
 
-    /// Installs a LUT the recipe can then reference by `contentHash` (`.cube` text).
-    func installLUT(_ cube: Data, contentHash: String) async throws
+    /// Installs a LUT the recipe can then reference by its `contentHash`.
+    func installLUT(_ lut: ColorLUT) async
 
     /// Drops the open photo and its caches.
     func close() async
@@ -72,7 +79,8 @@ nonisolated struct EditorRenderRequest: Equatable, Sendable {
     var recipe: Recipe
     /// The whole image's output size.
     var size: HyperDRRender.PixelSize
-    /// A region of `size` (detail regions); nil renders the whole image.
+    /// A region of `size` in whole pixels, origin top left (detail regions);
+    /// nil renders the whole image.
     var region: CGRect?
     /// Groups temporarily switched off to see their effect (a render option,
     /// never in the recipe, never undone).
@@ -87,7 +95,13 @@ nonisolated struct EditorRenderRequest: Equatable, Sendable {
 /// A finished render.
 nonisolated struct EditorFrame: @unchecked Sendable {
     let request: EditorRenderRequest
+    /// The pair export and thumbnails read; never adapted to a display.
     let planes: RenderPlanes
+    /// The same render normalized for the canvas (R3): linear P3 base, log2 gain.
+    let display: DisplayGainPair
+    /// The recipe asks for AI gain but this frame has none yet: the
+    /// prediction is not ready, or (until R1) Render cannot apply it.
+    var modelGainPending = false
     /// What `auto` parameters resolved to, by id, in the declared units
     /// (`AdjustmentContext.automaticValues`). Empty until Render reports them (R7).
     var automaticValues: [String: Double] = [:]

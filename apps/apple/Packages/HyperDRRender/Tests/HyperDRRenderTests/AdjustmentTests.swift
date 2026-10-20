@@ -122,10 +122,20 @@ private func cube(swap: Bool = false) -> String {
         let baseline = RenderEngine.readPixels(try await engine.render(source,adjustments:edit))
         let reference = values.map { rgb in
             DoubleReference.hdrOutput(DoubleReference.prepare(rgb,settings:edit,sdr:false),settings:edit.hdr,
-                range:3,shoulder:true,allowRolloff:true)
+                range:4,shoulder:false,allowRolloff:true)
         }
         compare(baseline,reference)
-        #expect(Double(baseline.baseRGBA[8])*exp2(Double(baseline.gain[2])) < 8)
+        #expect(abs(Double(baseline.baseRGBA[8])*exp2(Double(baseline.gain[2]))-16) < 0.0001)
+        var dimmed = edit
+        dimmed.tone.exposure = -1
+        let dimmedAnalysis = try await engine.analysis(source,adjustments:dimmed)
+        #expect(try await engine.graphConfiguration(source,dimmed,analysis:dimmedAnalysis).range == 4)
+        let rawSource = try await engine.source(image:bitmap(values,width:4,height:1),domain:.rawEDR)
+        let generated = RenderEngine.readPixels(try await engine.render(rawSource,adjustments:edit))
+        #expect(Double(generated.baseRGBA[8])*exp2(Double(generated.gain[2])) < 8)
+        edit.hdr.range = 3
+        let limited = RenderEngine.readPixels(try await engine.render(source,adjustments:edit))
+        #expect(Double(limited.baseRGBA[8])*exp2(Double(limited.gain[2])) < 8)
         edit.hdr.strength = 0.6; edit.hdr.range = 1.5
         let changed = RenderEngine.readPixels(try await engine.render(source,adjustments:edit))
         #expect(changed.baseRGBA == baseline.baseRGBA)
@@ -174,14 +184,14 @@ private func cube(swap: Bool = false) -> String {
 
     @Test func editedAuthoredThreeChannelOffsetsAndWholeEditResplit() async throws {
         let engine = try RenderEngine()
-        let b = SIMD3<Double>(0.2,0.4,0.6), g = SIMD3<Double>(1,1.5,2), o = SIMD3<Double>(repeating:1/64)
+        let b = SIMD3<Double>(0.2,0.4,0.6), g = SIMD3<Double>(1,1.5,3.72), o = SIMD3<Double>(repeating:1/64)
         let hdr = DoubleReference.reconstruct(b,gain:g,baseOffset:o,alternateOffset:o)
         let baseSource = try await engine.source(image:bitmap([b],width:1,height:1),domain:.sdr)
-        let gainSource = try await engine.source(image:bitmap([g/3],width:1,height:1),domain:.sdr)
-        var tags = ["HDRToneMap:BaseColorIsWorkingColor":"True"]
+        let gainSource = try await engine.source(image:bitmap([g/3.72],width:1,height:1),domain:.sdr)
+        var tags = ["HDRToneMap:BaseColorIsWorkingColor":"True", "HDRToneMap:AlternateHeadroom":"3.72"]
         for c in 0..<3 {
             let prefix = "HDRToneMap:ChannelMetadata[\(c)]."
-            for (key,value) in [("GainMapMin","0"),("GainMapMax","3"),("Gamma","1"),("BaseOffset","0.015625"),("AlternateOffset","0.015625")] { tags[prefix+key] = value }
+            for (key,value) in [("GainMapMin","0"),("GainMapMax","3.72"),("Gamma","1"),("BaseOffset","0.015625"),("AlternateOffset","0.015625")] { tags[prefix+key] = value }
         }
         let original = AuthoredGainMap(standard:.iso,auxiliaryInfo:tags as NSDictionary,image:gainSource.hdrImage,
             channelCount:3,baseColorSpace:RenderEngine.workingColorSpace,alternateColorSpace:nil,auxiliaryColorSpace:nil,tags:tags)
@@ -191,6 +201,12 @@ private func cube(swap: Bool = false) -> String {
         var edit = RenderAdjustments()
         let untouched = try await engine.render(source,adjustments:edit)
         #expect(untouched.provenance == .authored)
+        edit.hdr.source = .captured
+        let automatic = RenderEngine.readPixels(try await engine.render(source,adjustments:edit))
+        for c in 0..<3 { #expect(abs(Double(automatic.gain[c])-g[c]) < 0.00001) }
+        let sourceAnalysis = try await engine.analysis(source)
+        #expect(abs(sourceAnalysis.sourceHeadroom-3.72) < 0.00001)
+        #expect(abs(try await engine.graphConfiguration(source,edit,analysis:sourceAnalysis).range-3.72) < 0.00001)
         edit.hdr.strength = 0.4; edit.hdr.range = 3
         let changed = try await engine.render(source,adjustments:edit)
         #expect(changed.base === untouched.base)

@@ -88,8 +88,10 @@ analysis graph handles spatial neighborhoods independently of stripe boundaries.
   into cells once. Local log-luminance contrast identifies small speculars; coverage supplies a
   broad-region floor; local variance suppresses dark noise. Separable box statistics and a
   guided filter produce an edge-aware stop map. RAW combines captured and expansion by max.
-  Auto expansion capacity is .5…3 stops from base peak; auto captured capacity is source peak
-  up to 3. Expansion start defaults to .25, coverage .6. These analytical choices follow the
+  Auto expansion capacity is .5…3 stops from base peak. SDR/RAW auto capacity is capped at 3;
+  imported HDR/dual auto retains at least original source headroom, capped at 4. The source
+  floor includes original pixel peak, system content headroom and ISO headroom tags, and
+  remains independent of edits. Expansion start defaults to .25, coverage .6. These choices follow the
   old engine's semantics, without requiring numeric parity.
 * Range overflow uses an exponential shoulder above `1+.75*(2^range-1)`, asymptotic to capacity,
   with derivative 1 at the knee. A global overflow gate leaves valid default HDR unchanged.
